@@ -60,16 +60,77 @@ db.exec(`
     position INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Biblioteca de temas de estilo, compartida entre todos los dispositivos.
+  -- "colors" guarda un JSON con las 8 variables personalizables, ej.
+  -- {"bg":"#0f1115","surface":"#171a21", ...}. Cada dispositivo elige por
+  -- su cuenta cual de estos temas mostrar (ver devices.active_theme_id y
+  -- app_settings mas abajo), asi que guardar uno no fuerza a nada mas.
+  CREATE TABLE IF NOT EXISTS themes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    colors TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Almacen generico clave/valor para ajustes del "ordenador anfitrion"
+  -- (el que corre el servidor y no pasa por el flujo de emparejamiento,
+  -- asi que no tiene una fila en devices). De momento solo guardamos que
+  -- tema tiene activo, pero sirve para cualquier ajuste futuro de ese tipo.
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
 `);
 
-// Migracion sencilla: group_id se anadio despues de crear la tabla events
-// en la primera version. SQLite no tiene "ADD COLUMN IF NOT EXISTS", asi
-// que miramos el esquema actual (pragma table_info) y solo la anadimos
-// si todavia no existe. Esto hace seguro re-arrancar el servidor tanto
-// en una base de datos nueva como en una ya existente de antes.
+// Migracion sencilla: group_id y active_theme_id se anadieron despues de
+// crear las tablas events/devices en versiones anteriores. SQLite no
+// tiene "ADD COLUMN IF NOT EXISTS", asi que miramos el esquema actual
+// (pragma table_info) y solo la anadimos si todavia no existe. Esto hace
+// seguro re-arrancar el servidor tanto en una base de datos nueva como
+// en una ya existente de antes.
 const eventColumns = db.prepare('PRAGMA table_info(events)').all().map((c) => c.name);
 if (!eventColumns.includes('group_id')) {
   db.exec('ALTER TABLE events ADD COLUMN group_id INTEGER REFERENCES groups(id)');
+}
+
+const deviceColumns = db.prepare('PRAGMA table_info(devices)').all().map((c) => c.name);
+if (!deviceColumns.includes('active_theme_id')) {
+  db.exec('ALTER TABLE devices ADD COLUMN active_theme_id INTEGER REFERENCES themes(id)');
+}
+
+// Semilla: si todavia no hay ningun tema guardado (primera vez que se
+// arranca la app), dejamos dos de partida para no empezar de una pantalla
+// vacia — uno oscuro (los colores que ya tenia la app) y uno claro.
+const { count: themeCount } = db.prepare('SELECT COUNT(*) as count FROM themes').get();
+if (themeCount === 0) {
+  const seedTheme = db.prepare('INSERT INTO themes (name, colors) VALUES (?, ?)');
+  seedTheme.run(
+    'Oscuro (por defecto)',
+    JSON.stringify({
+      bg: '#0f1115',
+      surface: '#171a21',
+      surface2: '#1f232c',
+      border: '#2a2f3a',
+      text: '#e8eaed',
+      textDim: '#9aa0ab',
+      accent: '#5b8cff',
+      danger: '#ff6b6b',
+    })
+  );
+  seedTheme.run(
+    'Claro',
+    JSON.stringify({
+      bg: '#f5f6f8',
+      surface: '#ffffff',
+      surface2: '#eef0f3',
+      border: '#dfe3e8',
+      text: '#1a1d23',
+      textDim: '#6b7280',
+      accent: '#5b8cff',
+      danger: '#e0455b',
+    })
+  );
 }
 
 module.exports = db;

@@ -9,6 +9,7 @@ const eventsRouter = require('./routes/events');
 const devicesRouter = require('./routes/devices');
 const remindersRouter = require('./routes/reminders');
 const groupsRouter = require('./routes/groups');
+const themesRouter = require('./routes/themes');
 const { startReminderChecker } = require('./reminderChecker');
 
 const PORT = process.env.PORT || 3000;
@@ -20,6 +21,7 @@ app.use(express.json());
 app.use('/api/events', requireDeviceOrTrusted, eventsRouter);
 app.use('/api/reminders', requireDeviceOrTrusted, remindersRouter);
 app.use('/api/groups', requireDeviceOrTrusted, groupsRouter);
+app.use('/api/themes', requireDeviceOrTrusted, themesRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);

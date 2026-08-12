@@ -283,7 +283,10 @@ document.getElementById('btn-delete-event').addEventListener('click', async () =
 });
 
 // ---------------------------------------------------------------------
-// Grupos: listas con color (tipo "Listas" de Recordatorios de iPhone)
+// Grupos: solo lo que necesita el formulario de evento. La gestion
+// (crear/editar/borrar grupos) vive en settings.js, dentro del panel de
+// Configuracion; esto se queda aqui porque el <select> de grupo esta en
+// el modal de evento, que es cosa de app.js.
 // ---------------------------------------------------------------------
 async function loadGroups() {
   state.groups = await api('/api/groups');
@@ -301,84 +304,6 @@ function populateEventGroupSelect() {
   });
   select.value = current;
 }
-
-function resetGroupForm() {
-  document.getElementById('group-id').value = '';
-  document.getElementById('group-name').value = '';
-  document.getElementById('group-color').value = DEFAULT_EVENT_COLOR;
-  document.getElementById('btn-cancel-group').classList.add('hidden');
-}
-
-function renderGroupsList() {
-  const list = document.getElementById('groups-list');
-  list.innerHTML = '';
-  if (state.groups.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavia no tienes grupos. Crea uno arriba.</p>';
-    return;
-  }
-  state.groups.forEach((g) => {
-    const row = document.createElement('div');
-    row.className = 'group-item';
-    row.innerHTML = `
-      <span class="color-dot" style="background-color: ${g.color}"></span>
-      <span class="group-item-name">${escapeHtml(g.name)}</span>
-      <div class="group-item-actions">
-        <button type="button" class="secondary-btn" data-action="edit">Editar</button>
-        <button type="button" class="danger-btn" data-action="delete">Eliminar</button>
-      </div>
-    `;
-    row.querySelector('[data-action="edit"]').addEventListener('click', () => {
-      document.getElementById('group-id').value = g.id;
-      document.getElementById('group-name').value = g.name;
-      document.getElementById('group-color').value = g.color;
-      document.getElementById('btn-cancel-group').classList.remove('hidden');
-      document.getElementById('group-name').focus();
-    });
-    row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
-      if (!confirm(`¿Eliminar el grupo "${g.name}"? Los eventos que lo usen se quedaran sin grupo.`)) return;
-      await api(`/api/groups/${g.id}`, { method: 'DELETE' });
-      await loadGroups();
-      renderGroupsList();
-      loadMonth();
-      loadReminders();
-    });
-    list.appendChild(row);
-  });
-}
-
-async function openGroupsModal() {
-  resetGroupForm();
-  document.getElementById('groups-modal').classList.remove('hidden');
-  await loadGroups();
-  renderGroupsList();
-}
-
-document.getElementById('btn-groups').addEventListener('click', openGroupsModal);
-document.getElementById('btn-close-groups').addEventListener('click', () => {
-  document.getElementById('groups-modal').classList.add('hidden');
-});
-document.getElementById('btn-cancel-group').addEventListener('click', resetGroupForm);
-
-document.getElementById('group-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const id = document.getElementById('group-id').value;
-  const payload = {
-    name: document.getElementById('group-name').value,
-    color: document.getElementById('group-color').value,
-  };
-
-  if (id) {
-    await api(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
-  } else {
-    await api('/api/groups', { method: 'POST', body: JSON.stringify(payload) });
-  }
-
-  resetGroupForm();
-  await loadGroups();
-  renderGroupsList();
-  loadMonth();
-  loadReminders();
-});
 
 // ---------------------------------------------------------------------
 // Recordatorios: panel + notificaciones del navegador
@@ -410,8 +335,12 @@ async function loadReminders() {
   // Notificaciones del navegador: solo funcionan mientras esta pestana
   // esta abierta. Es el aviso "en el movil"; el aviso de escritorio de
   // verdad (aunque no tengas el navegador abierto) lo dispara el propio
-  // servidor (ver server/reminderChecker.js).
-  if (window.Notification && Notification.permission === 'granted') {
+  // servidor (ver server/reminderChecker.js). Se activan desde la
+  // pestana "Este dispositivo" del panel de Configuracion (settings.js),
+  // no automaticamente: la mayoria de navegadores exigen que el permiso
+  // se pida como respuesta a un click, no solo al cargar la pagina.
+  const notificationsEnabled = localStorage.getItem('notificationsEnabled') !== 'false';
+  if (window.Notification && Notification.permission === 'granted' && notificationsEnabled) {
     upcoming.forEach((r) => {
       const due = new Date(r.remindAt) <= now;
       if (due && !r.reminderSent && !state.notifiedReminderIds.has(r.eventId)) {
@@ -421,108 +350,6 @@ async function loadReminders() {
     });
   }
 }
-
-if (window.Notification && Notification.permission === 'default') {
-  // Se pide el permiso una vez, al cargar; el usuario puede ignorarlo.
-  Notification.requestPermission();
-}
-
-// ---------------------------------------------------------------------
-// Dispositivos vinculados
-// ---------------------------------------------------------------------
-let pairingCountdownTimer = null;
-
-async function openDevicesModal() {
-  document.getElementById('devices-modal').classList.remove('hidden');
-  document.getElementById('pairing-code-display').classList.add('hidden');
-
-  try {
-    const devices = await api('/api/devices');
-    document.getElementById('devices-only-computer').classList.add('hidden');
-    document.getElementById('devices-management').classList.remove('hidden');
-    renderDevicesList(devices);
-  } catch (err) {
-    // 403: este dispositivo no es el ordenador de confianza.
-    document.getElementById('devices-only-computer').classList.remove('hidden');
-    document.getElementById('devices-management').classList.add('hidden');
-  }
-}
-
-function renderDevicesList(devices) {
-  const list = document.getElementById('devices-list');
-  list.innerHTML = '';
-  if (devices.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Ningun dispositivo vinculado todavia.</p>';
-    return;
-  }
-  devices.forEach((d) => {
-    const row = document.createElement('div');
-    row.className = 'device-item';
-    row.innerHTML = `
-      <span class="device-item-name">${escapeHtml(d.name)}</span>
-      <div class="device-item-actions">
-        <button type="button" data-action="rename" class="secondary-btn">Editar</button>
-        <button type="button" data-action="revoke" class="danger-btn">Revocar</button>
-      </div>
-    `;
-
-    row.querySelector('[data-action="revoke"]').addEventListener('click', async () => {
-      await api(`/api/devices/${d.id}`, { method: 'DELETE' });
-      openDevicesModal();
-    });
-
-    row.querySelector('[data-action="rename"]').addEventListener('click', () => {
-      // Sustituimos la fila por un input editable con el nombre actual;
-      // el emoji funciona igual que en cualquier campo de texto (teclado
-      // de emoji del movil, o Win+. en Windows).
-      row.innerHTML = `
-        <input type="text" class="device-rename-input" value="${escapeHtml(d.name)}" />
-        <div class="device-item-actions">
-          <button type="button" data-action="save" class="primary-btn">Guardar</button>
-          <button type="button" data-action="cancel" class="secondary-btn">Cancelar</button>
-        </div>
-      `;
-      const input = row.querySelector('input');
-      input.focus();
-      input.select();
-
-      row.querySelector('[data-action="cancel"]').addEventListener('click', () => renderDevicesList(devices));
-
-      const save = async () => {
-        const newName = input.value.trim();
-        if (!newName) return;
-        await api(`/api/devices/${d.id}`, { method: 'PATCH', body: JSON.stringify({ name: newName }) });
-        openDevicesModal();
-      };
-      row.querySelector('[data-action="save"]').addEventListener('click', save);
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
-    });
-
-    list.appendChild(row);
-  });
-}
-
-document.getElementById('btn-devices').addEventListener('click', openDevicesModal);
-document.getElementById('btn-close-devices').addEventListener('click', () => {
-  document.getElementById('devices-modal').classList.add('hidden');
-  clearInterval(pairingCountdownTimer);
-});
-
-document.getElementById('btn-generate-code').addEventListener('click', async () => {
-  const { code, expiresAt } = await api('/api/devices/pairing-code', { method: 'POST' });
-  document.getElementById('pairing-code-value').textContent = code;
-  document.getElementById('pairing-code-display').classList.remove('hidden');
-
-  clearInterval(pairingCountdownTimer);
-  const update = () => {
-    const secondsLeft = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
-    document.getElementById('pairing-code-countdown').textContent =
-      secondsLeft > 0 ? `Caduca en ${secondsLeft}s` : 'Codigo caducado, genera otro.';
-    if (secondsLeft <= 0) clearInterval(pairingCountdownTimer);
-  };
-  update();
-  pairingCountdownTimer = setInterval(update, 1000);
-});
 
 // ---------------------------------------------------------------------
 // Arranque

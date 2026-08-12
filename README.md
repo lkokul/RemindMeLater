@@ -31,18 +31,37 @@ disponible (tambien para que los recordatorios de escritorio funcionen).
 Por seguridad, ningun dispositivo puede leer ni escribir tus eventos hasta
 que lo autorizas explicitamente desde el ordenador:
 
-1. En el ordenador, abre la app y pulsa el icono ⚙ (Dispositivos) →
-   **Vincular nuevo dispositivo**. Aparece un codigo de 6 digitos, valido
-   5 minutos.
+1. En el ordenador, abre la app y pulsa ⚙ **Configuración** → pestaña
+   **Dispositivos** → **Vincular nuevo dispositivo**. Aparece un codigo de
+   6 digitos, valido 5 minutos.
 2. En el movil, abre `http://<tu-ip-local>:3000`. Como todavia no esta
    vinculado, vera una pantalla pidiendo ese codigo.
 3. Escribe el codigo y un nombre para el dispositivo (ej. "iPhone de
    Koku"). A partir de ahi, ese movil queda autorizado permanentemente
    (hasta que lo revoques).
 
-Puedes ver y revocar dispositivos vinculados en cualquier momento desde
-⚙ Dispositivos, en el ordenador (esa pantalla no funciona desde el movil,
-a proposito).
+Puedes ver, renombrar (emoji incluido) y revocar dispositivos vinculados
+en cualquier momento desde esa misma pestana, en el ordenador (no
+funciona desde el movil, a proposito).
+
+## Configuración
+
+El icono ⚙ abre un panel con varias pestanas:
+
+- **Estilo**: una biblioteca de temas de colores (fondo, tarjetas, texto,
+  acento...) compartida entre todos tus dispositivos. Cada dispositivo
+  elige por su cuenta cual tema mostrar — puedes tener uno oscuro en el
+  ordenador y otro claro en el movil, o copiar el de otro dispositivo
+  conectado con un click. Los colores se eligen con un selector nativo o
+  con paletas predefinidas (Pastel, Vivos, Claros, Oscuros). Los temas
+  tambien se pueden exportar/importar como archivo `.json`, para pasarlos
+  entre dispositivos que no pueden emparejarse directamente entre si (ej.
+  dos moviles).
+- **Grupos**: listas de recordatorios con color, al estilo de Recordatorios
+  de iPhone.
+- **Dispositivos**: emparejar, renombrar y revocar.
+- **Este dispositivo**: ajustes que no se comparten con nadie mas, como
+  activar las notificaciones del navegador.
 
 ## Que hace esta primera version
 

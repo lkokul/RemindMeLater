@@ -5,6 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>RemindMeLater</title>
 <link rel="stylesheet" href="styles.css" />
+<script>
+  // Aplica el tema que este dispositivo tuviera guardado ANTES de que se
+  // pinte nada, para no ver un parpadeo del tema oscuro por defecto y
+  // luego el tuyo. settings.js hace despues la comprobacion "de verdad"
+  // contra el servidor; esto es solo para que la primera pintura ya
+  // salga con tus colores.
+  (function () {
+    try {
+      var cached = localStorage.getItem('activeThemeColors');
+      if (!cached) return;
+      var colors = JSON.parse(cached);
+      var root = document.documentElement;
+      var map = {
+        bg: '--bg', surface: '--surface', surface2: '--surface-2', border: '--border',
+        text: '--text', textDim: '--text-dim', accent: '--accent', danger: '--danger',
+      };
+      Object.keys(map).forEach(function (key) {
+        if (colors[key]) root.style.setProperty(map[key], colors[key]);
+      });
+    } catch (e) {
+      // Si algo falla, nos quedamos con los colores por defecto del CSS.
+    }
+  })();
+</script>
 </head>
 <body>
 
@@ -15,7 +39,7 @@
     <div class="pairing-card">
       <h1>RemindMeLater</h1>
       <p>Este dispositivo todavia no esta vinculado a tu calendario.</p>
-      <p>En el ordenador, abre <strong>Dispositivos → Vincular nuevo dispositivo</strong> y escribe aqui el codigo de 6 digitos que aparezca.</p>
+      <p>En el ordenador, abre <strong>⚙ Configuración → Dispositivos → Vincular nuevo dispositivo</strong> y escribe aqui el codigo de 6 digitos que aparezca.</p>
       <form id="pairing-form">
         <label>
           Codigo
@@ -42,8 +66,7 @@
         <span id="current-month-label" class="month-label"></span>
         <button id="nav-next" class="icon-btn" aria-label="Mes siguiente">→</button>
         <button id="btn-new-event" class="primary-btn">+ Nuevo evento</button>
-        <button id="btn-groups" class="icon-btn" aria-label="Grupos">🎨</button>
-        <button id="btn-devices" class="icon-btn" aria-label="Dispositivos">⚙</button>
+        <button id="btn-settings" class="icon-btn" aria-label="Configuración">⚙</button>
       </nav>
     </header>
 
@@ -125,58 +148,103 @@
     </div>
   </div>
 
-  <!-- Modal de dispositivos vinculados (solo funcional desde el ordenador) -->
-  <div id="devices-modal" class="modal hidden">
-    <div class="modal-card">
-      <h2>Dispositivos</h2>
-      <div id="devices-only-computer" class="hidden">
-        <p class="hint">La gestion de dispositivos solo esta disponible desde el ordenador, por seguridad.</p>
+  <!-- Panel de Configuracion: un solo punto de entrada con pestanas, en
+       vez de un botón suelto por cada cosa. Ver settings.js. -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-card settings-card">
+      <h2>Configuración</h2>
+
+      <div class="settings-tabs" role="tablist">
+        <button type="button" class="settings-tab-btn" data-tab="style">🎨 Estilo</button>
+        <button type="button" class="settings-tab-btn" data-tab="groups">📁 Grupos</button>
+        <button type="button" class="settings-tab-btn" data-tab="devices">📶 Dispositivos</button>
+        <button type="button" class="settings-tab-btn" data-tab="mobile">📱 Este dispositivo</button>
       </div>
-      <div id="devices-management">
-        <button id="btn-generate-code" class="primary-btn">Vincular nuevo dispositivo</button>
-        <div id="pairing-code-display" class="pairing-code-display hidden">
-          <p>Introduce este codigo en el otro dispositivo:</p>
-          <div id="pairing-code-value" class="code-value"></div>
-          <p id="pairing-code-countdown" class="hint"></p>
+
+      <!-- --- Estilo --- -->
+      <div id="settings-tab-style" class="settings-tab-panel">
+        <p class="hint">Elige un tema guardado para este dispositivo, o crea el tuyo. Cada dispositivo puede llevar un tema distinto.</p>
+        <div id="theme-library" class="theme-library"></div>
+
+        <div class="settings-subactions">
+          <button type="button" id="btn-new-theme" class="secondary-btn">+ Crear tema</button>
+          <button type="button" id="btn-import-theme" class="secondary-btn">Importar…</button>
+          <input type="file" id="theme-import-input" accept="application/json,.json" class="hidden" />
         </div>
-        <h3>Vinculados</h3>
-        <div id="devices-list" class="devices-list"></div>
+
+        <form id="theme-form" class="theme-form hidden">
+          <input type="hidden" id="theme-id" />
+          <label>
+            Nombre del tema
+            <input type="text" id="theme-name" placeholder="Ej. Mi tema oscuro" required />
+          </label>
+          <div class="theme-color-grid" id="theme-color-grid"></div>
+          <div class="modal-actions">
+            <button type="button" id="btn-delete-theme" class="danger-btn hidden">Eliminar</button>
+            <div class="spacer"></div>
+            <button type="button" id="btn-cancel-theme" class="secondary-btn">Cancelar</button>
+            <button type="submit" class="primary-btn">Guardar tema</button>
+          </div>
+        </form>
+
+        <h3>Copiar estilo de otro dispositivo</h3>
+        <div id="theme-copy-list" class="theme-copy-list"></div>
       </div>
+
+      <!-- --- Grupos --- -->
+      <div id="settings-tab-groups" class="settings-tab-panel hidden">
+        <p class="hint">Asigna un color a cada grupo y usalo al crear un evento para diferenciarlos de un vistazo.</p>
+
+        <form id="group-form" class="group-form">
+          <input type="hidden" id="group-id" />
+          <div class="group-form-row">
+            <input type="text" id="group-name" placeholder="Nombre del grupo (ej. 🏋️ Gimnasio)" required />
+            <div id="group-color-field"></div>
+          </div>
+          <div class="group-form-actions">
+            <button type="button" id="btn-cancel-group" class="secondary-btn hidden">Cancelar</button>
+            <button type="submit" class="primary-btn">Guardar grupo</button>
+          </div>
+        </form>
+
+        <div id="groups-list" class="groups-list"></div>
+      </div>
+
+      <!-- --- Dispositivos --- -->
+      <div id="settings-tab-devices" class="settings-tab-panel hidden">
+        <div id="devices-only-computer" class="hidden">
+          <p class="hint">La gestion de dispositivos solo esta disponible desde el ordenador, por seguridad.</p>
+        </div>
+        <div id="devices-management">
+          <button id="btn-generate-code" class="primary-btn">Vincular nuevo dispositivo</button>
+          <div id="pairing-code-display" class="pairing-code-display hidden">
+            <p>Introduce este codigo en el otro dispositivo:</p>
+            <div id="pairing-code-value" class="code-value"></div>
+            <p id="pairing-code-countdown" class="hint"></p>
+          </div>
+          <h3>Vinculados</h3>
+          <div id="devices-list" class="devices-list"></div>
+        </div>
+      </div>
+
+      <!-- --- Este dispositivo (ajustes locales, no compartidos) --- -->
+      <div id="settings-tab-mobile" class="settings-tab-panel hidden">
+        <p class="hint">Estos ajustes son solo para el dispositivo en el que estas viendo esto ahora mismo.</p>
+        <label class="checkbox-row">
+          <input type="checkbox" id="setting-notifications" />
+          Notificaciones del navegador para recordatorios
+        </label>
+        <p id="notifications-status" class="hint"></p>
+      </div>
+
       <div class="modal-actions">
         <div class="spacer"></div>
-        <button type="button" id="btn-close-devices" class="secondary-btn">Cerrar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal de grupos: listas de recordatorios con color, al estilo
-       "Listas" de Recordatorios de iPhone -->
-  <div id="groups-modal" class="modal hidden">
-    <div class="modal-card">
-      <h2>Grupos</h2>
-      <p class="hint">Asigna un color a cada grupo y usalo al crear un evento para diferenciarlos de un vistazo.</p>
-
-      <form id="group-form" class="group-form">
-        <input type="hidden" id="group-id" />
-        <div class="group-form-row">
-          <input type="text" id="group-name" placeholder="Nombre del grupo (ej. 🏋️ Gimnasio)" required />
-          <input type="color" id="group-color" value="#5b8cff" title="Color del grupo" />
-        </div>
-        <div class="group-form-actions">
-          <button type="button" id="btn-cancel-group" class="secondary-btn hidden">Cancelar</button>
-          <button type="submit" class="primary-btn">Guardar grupo</button>
-        </div>
-      </form>
-
-      <div id="groups-list" class="groups-list"></div>
-
-      <div class="modal-actions">
-        <div class="spacer"></div>
-        <button type="button" id="btn-close-groups" class="secondary-btn">Cerrar</button>
+        <button type="button" id="btn-close-settings" class="secondary-btn">Cerrar</button>
       </div>
     </div>
   </div>
 
   <script src="app.js"></script>
+  <script src="settings.js"></script>
 </body>
 </html>

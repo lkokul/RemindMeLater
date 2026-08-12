@@ -188,6 +188,43 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 }
 .modal-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.8rem; }
 .spacer { flex: 1; }
+.settings-card { max-width: 560px; }
+
+/* --- Panel de Configuracion: pestanas --- */
+.settings-tabs {
+  display: flex; flex-wrap: wrap; gap: 0.4rem;
+  margin: 0.8rem 0 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.8rem;
+}
+.settings-tab-btn {
+  background: transparent; border-color: transparent; font-size: 0.85rem;
+}
+.settings-tab-btn.active { background: var(--surface-2); border-color: var(--border); }
+.settings-subactions { display: flex; gap: 0.5rem; margin: 0.8rem 0; }
+
+/* --- Biblioteca de temas --- */
+.theme-library { display: flex; flex-direction: column; gap: 0.5rem; }
+.theme-card {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+}
+.theme-card.active { border-color: var(--accent); }
+.theme-card-preview { display: flex; gap: 0.3rem; margin-bottom: 0.3rem; }
+.theme-card-preview .color-dot { width: 1.1rem; height: 1.1rem; }
+.theme-card-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem; }
+.theme-card-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.theme-card-actions button { padding: 0.35rem 0.6rem; font-size: 0.8rem; }
+
+.theme-form { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+.theme-color-grid { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.6rem 0 1rem; }
+.theme-color-item { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; font-size: 0.85rem; }
+
+.theme-copy-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
+.theme-copy-item {
+  display: flex; align-items: center; gap: 0.6rem;
+  background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+}
+.theme-copy-label { flex: 1; }
 .error { color: var(--danger); font-size: 0.85rem; }
 .hint { color: var(--text-dim); font-size: 0.85rem; }
 
@@ -234,6 +271,32 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 /* Selector "Grupo" del formulario de evento: cada <option> no puede
    pintarse de color con CSS de forma fiable entre navegadores, asi que
    el color se ve en los chips/filas del calendario, no en el <select>. */
+
+/* --- Selector de color con paletas (settings.js -> createColorField) --- */
+.color-field { position: relative; display: inline-block; }
+.color-swatch-btn {
+  width: 2.4rem; height: 2.4rem; padding: 0; border-radius: var(--radius);
+  border: 2px solid var(--border); cursor: pointer;
+}
+.color-popover {
+  /* fixed a proposito: se cuelga de <body> (ver settings.js) para que no
+     lo recorte el overflow-y del modal, y su posicion se calcula en JS
+     al abrirlo. */
+  position: fixed; z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.8rem; width: 248px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+.color-native-input { width: 100%; height: 2.2rem; padding: 0.15rem; cursor: pointer; margin-bottom: 0.6rem; }
+.palette-section { margin-bottom: 0.6rem; }
+.palette-section:last-child { margin-bottom: 0; }
+.palette-section-heading { font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
+.palette-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 0.3rem; }
+.palette-swatch {
+  width: 100%; aspect-ratio: 1; padding: 0; border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.15); cursor: pointer;
+}
+.palette-swatch:hover { transform: scale(1.15); }
 
 /* --- Escritorio: pantallas anchas --- */
 @media (min-width: 860px) {
