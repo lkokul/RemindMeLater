@@ -98,6 +98,16 @@ const deviceColumns = db.prepare('PRAGMA table_info(devices)').all().map((c) => 
 if (!deviceColumns.includes('active_theme_id')) {
   db.exec('ALTER TABLE devices ADD COLUMN active_theme_id INTEGER REFERENCES themes(id)');
 }
+if (!deviceColumns.includes('icon')) {
+  // Simbolo o emoji que se muestra JUNTO al nombre del dispositivo, no
+  // como parte del nombre (por eso es su propia columna).
+  db.exec('ALTER TABLE devices ADD COLUMN icon TEXT');
+}
+
+const groupColumns = db.prepare('PRAGMA table_info(groups)').all().map((c) => c.name);
+if (!groupColumns.includes('icon')) {
+  db.exec('ALTER TABLE groups ADD COLUMN icon TEXT');
+}
 
 // Semilla: si todavia no hay ningun tema guardado (primera vez que se
 // arranca la app), dejamos dos de partida para no empezar de una pantalla
@@ -116,6 +126,7 @@ if (themeCount === 0) {
       textDim: '#9aa0ab',
       accent: '#5b8cff',
       danger: '#ff6b6b',
+      settingsMenuBg: '#1f232c',
     })
   );
   seedTheme.run(
@@ -129,6 +140,7 @@ if (themeCount === 0) {
       textDim: '#6b7280',
       accent: '#5b8cff',
       danger: '#e0455b',
+      settingsMenuBg: '#eef0f3',
     })
   );
 }

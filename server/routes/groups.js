@@ -1,13 +1,23 @@
 // routes/groups.js — listas/grupos de recordatorios, al estilo "Listas" de
-// Recordatorios de iPhone: un nombre y un color que luego se refleja en
-// cada evento que pertenezca a ese grupo.
+// Recordatorios de iPhone: un nombre, un color y (opcional) un icono
+// (simbolo o emoji) que luego se refleja en cada evento de ese grupo.
 const express = require('express');
 const db = require('../db');
 
 const router = express.Router();
 
+function sanitizeIcon(icon) {
+  if (icon === undefined) return undefined; // "no lo toques"
+  if (icon === null || icon === '') return null; // "quitalo"
+  // Los emoji compuestos (con modificador de tono de piel, banderas,
+  // familias con ZWJ...) pueden ocupar varios "caracteres" de JS. Un
+  // limite generoso de 8 evita que alguien pegue un parrafo entero aqui
+  // sin bloquear emoji legitimos algo mas largos.
+  return String(icon).slice(0, 8);
+}
+
 function serialize(row) {
-  return { id: row.id, name: row.name, color: row.color, position: row.position };
+  return { id: row.id, name: row.name, color: row.color, icon: row.icon || null, position: row.position };
 }
 
 router.get('/', (req, res) => {
@@ -16,7 +26,7 @@ router.get('/', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { name, color } = req.body || {};
+  const { name, color, icon } = req.body || {};
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'invalid_request', message: 'El grupo necesita un nombre.' });
   }
@@ -24,8 +34,8 @@ router.post('/', (req, res) => {
 
   const { count } = db.prepare('SELECT COUNT(*) as count FROM groups').get();
   const info = db
-    .prepare('INSERT INTO groups (name, color, position) VALUES (?, ?, ?)')
-    .run(name.trim(), safeColor, count);
+    .prepare('INSERT INTO groups (name, color, icon, position) VALUES (?, ?, ?, ?)')
+    .run(name.trim(), safeColor, sanitizeIcon(icon) ?? null, count);
 
   const row = db.prepare('SELECT * FROM groups WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json(serialize(row));
@@ -35,12 +45,14 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { name, color } = req.body || {};
+  const { name, color, icon } = req.body || {};
   const safeColor = color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : existing.color;
+  const sanitizedIcon = sanitizeIcon(icon);
 
-  db.prepare('UPDATE groups SET name = ?, color = ? WHERE id = ?').run(
+  db.prepare('UPDATE groups SET name = ?, color = ?, icon = ? WHERE id = ?').run(
     name !== undefined && name.trim() ? name.trim() : existing.name,
     safeColor,
+    sanitizedIcon === undefined ? existing.icon : sanitizedIcon,
     req.params.id
   );
 

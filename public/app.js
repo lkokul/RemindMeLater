@@ -154,7 +154,8 @@ function renderCalendarGrid() {
       const chip = document.createElement('div');
       chip.className = 'calendar-event-chip';
       chip.style.backgroundColor = ev.groupColor || DEFAULT_EVENT_COLOR;
-      chip.textContent = ev.allDay ? ev.title : `${TIME_FORMATTER.format(new Date(ev.startAt))} ${ev.title}`;
+      const iconPrefix = ev.groupIcon ? `${ev.groupIcon} ` : '';
+      chip.textContent = ev.allDay ? `${iconPrefix}${ev.title}` : `${TIME_FORMATTER.format(new Date(ev.startAt))} ${iconPrefix}${ev.title}`;
       chip.addEventListener('click', () => openEventModal(ev));
       cell.appendChild(chip);
     });
@@ -184,6 +185,7 @@ function renderAgendaList() {
       lastDayKey = dayKey;
     }
 
+    const groupLabel = ev.groupName ? `${ev.groupIcon ? ev.groupIcon + ' ' : ''}${ev.groupName}` : null;
     const item = document.createElement('div');
     item.className = 'agenda-item';
     item.innerHTML = `
@@ -191,7 +193,7 @@ function renderAgendaList() {
       <div class="agenda-time">${ev.allDay ? 'Todo el dia' : TIME_FORMATTER.format(start)}</div>
       <div>
         <div class="agenda-title">${escapeHtml(ev.title)}</div>
-        ${ev.location || ev.groupName ? `<div class="agenda-meta">${[ev.groupName, ev.location].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
+        ${groupLabel || ev.location ? `<div class="agenda-meta">${[groupLabel, ev.location].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
       </div>
     `;
     item.addEventListener('click', () => openEventModal(ev));
@@ -324,8 +326,9 @@ async function loadReminders() {
       const isDue = remindAt <= now;
       const row = document.createElement('div');
       row.className = 'reminder-item';
+      const iconPrefix = r.groupIcon ? `${escapeHtml(r.groupIcon)} ` : '';
       row.innerHTML = `
-        <span><span class="color-dot" style="background-color: ${r.groupColor || DEFAULT_EVENT_COLOR}"></span> ${escapeHtml(r.title)}</span>
+        <span><span class="color-dot" style="background-color: ${r.groupColor || DEFAULT_EVENT_COLOR}"></span> ${iconPrefix}${escapeHtml(r.title)}</span>
         <span class="${isDue ? 'reminder-due' : ''}">${TIME_FORMATTER.format(new Date(r.startAt))}</span>
       `;
       list.appendChild(row);

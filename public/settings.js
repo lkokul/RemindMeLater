@@ -1,14 +1,47 @@
 // settings.js — todo lo relacionado con el panel de Configuracion:
 // temas de estilo, grupos y dispositivos (estos dos ultimos vivian antes
-// en app.js, se han movido aqui al juntarlos en un solo panel con
-// pestanas). Se carga como un <script> normal despues de app.js, y
-// comparte con el su mismo ambito global: usa cosas ya definidas alli
-// como `api()`, `escapeHtml()`, `state`, `loadMonth()`, `loadReminders()`,
-// `loadGroups()` y `populateEventGroupSelect()`.
+// en app.js, se han movido aqui al juntarlos en un solo panel). Se carga
+// como un <script> normal despues de app.js, y comparte con el su mismo
+// ambito global: usa cosas ya definidas alli como `api()`, `escapeHtml()`,
+// `state`, `loadMonth()`, `loadReminders()`, `loadGroups()` y
+// `populateEventGroupSelect()`.
 
 // ---------------------------------------------------------------------
-// Paletas de color predefinidas, agrupadas por estilo. Se usan tanto en
-// el editor de temas (8 campos) como en el color de un grupo (1 campo).
+// Posicionamiento compartido de popovers "flotantes": los usan tanto el
+// selector de color como el de icono. Van colgados de <body> con
+// position:fixed (no dentro de la tarjeta del modal) para que el
+// "overflow-y: auto" del modal no los recorte cuando estan cerca del
+// borde o hay que hacer scroll; su sitio se calcula aqui, en coordenadas
+// de ventana, a partir de donde este el boton que los abre.
+// ---------------------------------------------------------------------
+function positionFixedPopover(anchorBtn, popover, { width = 248, estimatedHeight = 320 } = {}) {
+  const rect = anchorBtn.getBoundingClientRect();
+  let left = rect.left;
+  if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+  popover.style.left = `${Math.max(8, left)}px`;
+
+  const top = rect.bottom + 6 + estimatedHeight > window.innerHeight
+    ? Math.max(8, rect.top - estimatedHeight - 6)
+    : rect.bottom + 6;
+  popover.style.top = `${top}px`;
+}
+
+function closeAllPopovers(except) {
+  document.querySelectorAll('.color-popover, .icon-popover').forEach((el) => {
+    if (el !== except) el.classList.add('hidden');
+  });
+}
+
+// Cierra cualquier popover abierto al hacer click fuera de el (uno solo
+// para color e icono, asi no hay que repetir esta logica en cada widget).
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.color-popover, .icon-popover, .color-swatch-btn, .icon-swatch-btn')) return;
+  closeAllPopovers();
+});
+
+// ---------------------------------------------------------------------
+// Selector de color: boton + popover con un color a medida ("Otros") y
+// paletas predefinidas en forma de tabla, agrupadas por estilo.
 // ---------------------------------------------------------------------
 const COLOR_PALETTES = {
   Pastel: ['#FFADAD', '#FFD6A5', '#FDFFB6', '#CAFFBF', '#9BF6FF', '#A0C4FF', '#BDB2FF', '#FFC6FF'],
@@ -17,11 +50,6 @@ const COLOR_PALETTES = {
   Oscuros: ['#0F1115', '#1A1D23', '#22262E', '#2B2F38', '#3A1F1F', '#1F2A3A', '#241F3A', '#101820'],
 };
 
-// Crea un selector de color "con extras": un boton que muestra el color
-// actual y que, al pulsarlo, abre un popover con un input nativo (para
-// cualquier color a medida) y las paletas de arriba organizadas por
-// secciones (para elegir rapido). Devuelve el elemento raiz junto con
-// getValue()/setValue() para leer o cambiar el color desde fuera.
 function createColorField({ initialValue, onChange }) {
   let value = initialValue || '#5b8cff';
 
@@ -33,11 +61,6 @@ function createColorField({ initialValue, onChange }) {
   swatchBtn.className = 'color-swatch-btn';
 
   const popover = document.createElement('div');
-  // position:fixed y colgado directamente de <body> (no de root): si
-  // viviera dentro de la tarjeta del modal, el "overflow-y: auto" del
-  // modal lo recortaria en cuanto el campo de color estuviera cerca del
-  // borde o hubiera que hacer scroll. Calculamos su posicion a mano al
-  // abrirlo (ver swatchBtn click mas abajo).
   popover.className = 'color-popover hidden';
   document.body.appendChild(popover);
 
@@ -54,7 +77,17 @@ function createColorField({ initialValue, onChange }) {
   }
 
   nativeInput.addEventListener('input', () => applyValue(nativeInput.value));
-  popover.appendChild(nativeInput);
+
+  // "Otros": el color a medida, con el mismo formato de seccion que las
+  // paletas predefinidas de abajo, para que se vea como una mas.
+  const customSection = document.createElement('div');
+  customSection.className = 'palette-section';
+  const customHeading = document.createElement('div');
+  customHeading.className = 'palette-section-heading';
+  customHeading.textContent = 'Otros';
+  customSection.appendChild(customHeading);
+  customSection.appendChild(nativeInput);
+  popover.appendChild(customSection);
 
   Object.entries(COLOR_PALETTES).forEach(([sectionName, colors]) => {
     const section = document.createElement('div');
@@ -81,29 +114,10 @@ function createColorField({ initialValue, onChange }) {
 
   swatchBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    // Cerramos cualquier otro popover de color abierto antes de abrir este.
-    document.querySelectorAll('.color-popover').forEach((el) => {
-      if (el !== popover) el.classList.add('hidden');
-    });
-
     const willOpen = popover.classList.contains('hidden');
+    closeAllPopovers(popover);
     popover.classList.toggle('hidden');
-    if (!willOpen) return;
-
-    // Lo colocamos justo debajo del boton, en coordenadas de ventana
-    // (position: fixed), y si no cabe a la derecha o por abajo, lo
-    // desplazamos para que quede siempre visible.
-    const rect = swatchBtn.getBoundingClientRect();
-    const popoverWidth = 248; // coincide con el ancho fijo del CSS
-    let left = rect.left;
-    if (left + popoverWidth > window.innerWidth - 8) left = window.innerWidth - popoverWidth - 8;
-    popover.style.left = `${Math.max(8, left)}px`;
-
-    const estimatedHeight = 320;
-    const top = rect.bottom + 6 + estimatedHeight > window.innerHeight
-      ? Math.max(8, rect.top - estimatedHeight - 6)
-      : rect.bottom + 6;
-    popover.style.top = `${top}px`;
+    if (willOpen) positionFixedPopover(swatchBtn, popover);
   });
 
   root.appendChild(swatchBtn);
@@ -116,39 +130,149 @@ function createColorField({ initialValue, onChange }) {
   };
 }
 
-// Un solo listener global cierra cualquier popover de color abierto al
-// hacer click fuera de el (evita tener que gestionarlo campo a campo).
-document.addEventListener('click', (e) => {
-  if (e.target.closest('.color-popover') || e.target.closest('.color-swatch-btn')) return;
-  document.querySelectorAll('.color-popover').forEach((el) => el.classList.add('hidden'));
-});
+// ---------------------------------------------------------------------
+// Selector de icono: simbolo o emoji para acompañar (NO sustituir) al
+// nombre de un grupo o de un dispositivo. Ofrece una tabla de simbolos,
+// otra de emoji, y un campo para escribir/pegar cualquier otro que no
+// este en la lista.
+// ---------------------------------------------------------------------
+const ICON_SYMBOLS = ['★', '☆', '●', '○', '◆', '▲', '▼', '■', '✦', '✓', '✗', '♥', '♦', '♣', '♠', '⚑', '☀', '☾', '❄', '⚡', '♫', '∞', '⚙', '✈'];
+const ICON_EMOJIS = ['😀', '😎', '🥳', '😴', '🏋️', '🏃', '🚗', '🏠', '💼', '📚', '🎮', '🎵', '🍕', '☕', '🌱', '🐶', '🐱', '✈️', '🎯', '💡', '🔔', '❤️', '🎉', '🛒'];
+
+function createIconField({ initialValue, onChange }) {
+  let value = initialValue || '';
+
+  const root = document.createElement('div');
+  root.className = 'icon-field';
+
+  const swatchBtn = document.createElement('button');
+  swatchBtn.type = 'button';
+  swatchBtn.className = 'icon-swatch-btn';
+  swatchBtn.title = 'Icono (opcional)';
+
+  const popover = document.createElement('div');
+  popover.className = 'icon-popover hidden';
+  document.body.appendChild(popover);
+
+  function applyValue(newValue, { close } = {}) {
+    value = newValue || '';
+    swatchBtn.textContent = value || '+';
+    if (close) popover.classList.add('hidden');
+    if (onChange) onChange(value);
+  }
+
+  function addIconSection(title, glyphs) {
+    const section = document.createElement('div');
+    section.className = 'palette-section';
+    const heading = document.createElement('div');
+    heading.className = 'palette-section-heading';
+    heading.textContent = title;
+    section.appendChild(heading);
+
+    const grid = document.createElement('div');
+    grid.className = 'icon-grid';
+    glyphs.forEach((glyph) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'icon-grid-btn';
+      btn.textContent = glyph;
+      btn.addEventListener('click', () => applyValue(glyph, { close: true }));
+      grid.appendChild(btn);
+    });
+    section.appendChild(grid);
+    popover.appendChild(section);
+  }
+
+  addIconSection('Símbolos', ICON_SYMBOLS);
+  addIconSection('Emoji', ICON_EMOJIS);
+
+  const customSection = document.createElement('div');
+  customSection.className = 'palette-section';
+  const customHeading = document.createElement('div');
+  customHeading.className = 'palette-section-heading';
+  customHeading.textContent = 'Otro';
+  customSection.appendChild(customHeading);
+
+  const customRow = document.createElement('div');
+  customRow.className = 'icon-custom-row';
+  const customInput = document.createElement('input');
+  customInput.type = 'text';
+  customInput.placeholder = 'Pega o escribe el tuyo';
+  customInput.maxLength = 8;
+  const customApplyBtn = document.createElement('button');
+  customApplyBtn.type = 'button';
+  customApplyBtn.className = 'secondary-btn';
+  customApplyBtn.textContent = 'Usar';
+  customApplyBtn.addEventListener('click', () => {
+    if (customInput.value.trim()) applyValue(customInput.value.trim(), { close: true });
+  });
+  customRow.appendChild(customInput);
+  customRow.appendChild(customApplyBtn);
+  customSection.appendChild(customRow);
+
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'secondary-btn';
+  clearBtn.textContent = 'Quitar icono';
+  clearBtn.style.marginTop = '0.5rem';
+  clearBtn.style.width = '100%';
+  clearBtn.addEventListener('click', () => applyValue('', { close: true }));
+  customSection.appendChild(clearBtn);
+
+  popover.appendChild(customSection);
+
+  swatchBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = popover.classList.contains('hidden');
+    closeAllPopovers(popover);
+    popover.classList.toggle('hidden');
+    if (willOpen) positionFixedPopover(swatchBtn, popover);
+  });
+
+  root.appendChild(swatchBtn);
+  applyValue(value);
+
+  return {
+    element: root,
+    getValue: () => value,
+    setValue: (v) => applyValue(v),
+  };
+}
 
 // ---------------------------------------------------------------------
-// Pestanas del panel de Configuracion
+// Panel de Configuracion: menu vertical (solo texto) que al pulsar una
+// entrada abre esa seccion a pantalla completa, con un "Volver" para
+// regresar al menu. Se recarga cada seccion al entrar en ella (no hace
+// falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
 const SETTINGS_TABS = ['style', 'groups', 'devices', 'mobile'];
 
-function showSettingsTab(tab) {
+function showSettingsScreen(tab) {
+  document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
   SETTINGS_TABS.forEach((t) => {
     document.getElementById(`settings-tab-${t}`).classList.toggle('hidden', t !== tab);
   });
-  document.querySelectorAll('.settings-tab-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.tab === tab);
-  });
 }
 
-document.querySelectorAll('.settings-tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => showSettingsTab(btn.dataset.tab));
+document.querySelectorAll('.settings-menu-item').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    showSettingsScreen(tab);
+    if (tab === 'style') refreshStyleTab();
+    else if (tab === 'groups') refreshGroupsTab();
+    else if (tab === 'devices') refreshDevicesTab();
+    else if (tab === 'mobile') refreshMobileTab();
+  });
 });
 
-async function openSettingsModal() {
+document.querySelectorAll('[data-back]').forEach((btn) => {
+  btn.addEventListener('click', () => showSettingsScreen(null));
+});
+
+function openSettingsModal() {
   document.getElementById('settings-modal').classList.remove('hidden');
-  showSettingsTab('style');
   closeThemeForm();
-  await refreshStyleTab();
-  await refreshDevicesTab();
-  await refreshGroupsTab();
-  refreshMobileTab();
+  showSettingsScreen(null);
 }
 
 document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
@@ -169,6 +293,7 @@ const THEME_COLOR_FIELDS_META = [
   { key: 'textDim', cssVar: '--text-dim', label: 'Texto secundario' },
   { key: 'accent', cssVar: '--accent', label: 'Acento (botones, hoy)' },
   { key: 'danger', cssVar: '--danger', label: 'Aviso (eliminar)' },
+  { key: 'settingsMenuBg', cssVar: '--settings-menu-bg', label: 'Fondo del menú de Configuración' },
 ];
 
 let themeLibrary = [];
@@ -239,8 +364,12 @@ function renderThemeLibrary() {
   }
 
   themeLibrary.forEach((theme) => {
+    const isActive = theme.id === activeId;
     const card = document.createElement('div');
-    card.className = 'theme-card' + (theme.id === activeId ? ' active' : '');
+    card.className = 'theme-card' + (isActive ? ' active' : '');
+    const useButtonHtml = isActive
+      ? '<button type="button" class="use-btn-disabled" disabled>En uso</button>'
+      : '<button type="button" data-action="use" class="primary-btn">Usar</button>';
     card.innerHTML = `
       <div class="theme-card-preview">
         <span class="color-dot" style="background-color:${theme.colors.bg}"></span>
@@ -250,12 +379,13 @@ function renderThemeLibrary() {
       </div>
       <div class="theme-card-name">${escapeHtml(theme.name)}</div>
       <div class="theme-card-actions">
-        <button type="button" data-action="use" class="primary-btn">Usar</button>
+        ${useButtonHtml}
         <button type="button" data-action="edit" class="secondary-btn">Editar</button>
         <button type="button" data-action="export" class="secondary-btn">Exportar</button>
       </div>
     `;
-    card.querySelector('[data-action="use"]').addEventListener('click', () => applyTheme(theme));
+    const useBtn = card.querySelector('[data-action="use"]');
+    if (useBtn) useBtn.addEventListener('click', () => applyTheme(theme));
     card.querySelector('[data-action="edit"]').addEventListener('click', () => openThemeForm(theme));
     card.querySelector('[data-action="export"]').addEventListener('click', () => exportTheme(theme));
     container.appendChild(card);
@@ -417,6 +547,9 @@ syncActiveTheme();
 // Grupos (gestion completa; el <select> del formulario de evento sigue
 // viviendo en app.js porque forma parte de ese modal)
 // ---------------------------------------------------------------------
+const groupIconField = createIconField({ initialValue: '' });
+document.getElementById('group-icon-field').appendChild(groupIconField.element);
+
 const groupColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
 document.getElementById('group-color-field').appendChild(groupColorField.element);
 
@@ -428,6 +561,7 @@ async function refreshGroupsTab() {
 function resetGroupForm() {
   document.getElementById('group-id').value = '';
   document.getElementById('group-name').value = '';
+  groupIconField.setValue('');
   groupColorField.setValue(DEFAULT_EVENT_COLOR);
   document.getElementById('btn-cancel-group').classList.add('hidden');
 }
@@ -444,7 +578,7 @@ function renderGroupsList() {
     row.className = 'group-item';
     row.innerHTML = `
       <span class="color-dot" style="background-color: ${g.color}"></span>
-      <span class="group-item-name">${escapeHtml(g.name)}</span>
+      <span class="group-item-name">${g.icon ? escapeHtml(g.icon) + ' ' : ''}${escapeHtml(g.name)}</span>
       <div class="group-item-actions">
         <button type="button" class="secondary-btn" data-action="edit">Editar</button>
         <button type="button" class="danger-btn" data-action="delete">Eliminar</button>
@@ -453,6 +587,7 @@ function renderGroupsList() {
     row.querySelector('[data-action="edit"]').addEventListener('click', () => {
       document.getElementById('group-id').value = g.id;
       document.getElementById('group-name').value = g.name;
+      groupIconField.setValue(g.icon || '');
       groupColorField.setValue(g.color);
       document.getElementById('btn-cancel-group').classList.remove('hidden');
       document.getElementById('group-name').focus();
@@ -476,6 +611,7 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
   const payload = {
     name: document.getElementById('group-name').value,
     color: groupColorField.getValue(),
+    icon: groupIconField.getValue() || null,
   };
 
   if (id) {
@@ -519,41 +655,64 @@ function renderDevicesList(devices) {
   devices.forEach((d) => {
     const row = document.createElement('div');
     row.className = 'device-item';
-    row.innerHTML = `
-      <span class="device-item-name">${escapeHtml(d.name)}</span>
-      <div class="device-item-actions">
-        <button type="button" data-action="rename" class="secondary-btn">Editar</button>
-        <button type="button" data-action="revoke" class="danger-btn">Revocar</button>
-      </div>
+
+    const iconField = createIconField({
+      initialValue: d.icon || '',
+      // Se guarda solo al elegir uno nuevo (sin boton "Guardar" aparte),
+      // igual que "Usar" en los temas.
+      onChange: async (newIcon) => {
+        await api(`/api/devices/${d.id}`, { method: 'PATCH', body: JSON.stringify({ icon: newIcon || null }) });
+      },
+    });
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'device-item-name';
+    nameSpan.textContent = d.name;
+
+    const actions = document.createElement('div');
+    actions.className = 'device-item-actions';
+    actions.innerHTML = `
+      <button type="button" data-action="rename" class="secondary-btn">Editar</button>
+      <button type="button" data-action="revoke" class="danger-btn">Revocar</button>
     `;
 
-    row.querySelector('[data-action="revoke"]').addEventListener('click', async () => {
+    row.appendChild(iconField.element);
+    row.appendChild(nameSpan);
+    row.appendChild(actions);
+
+    actions.querySelector('[data-action="revoke"]').addEventListener('click', async () => {
       await api(`/api/devices/${d.id}`, { method: 'DELETE' });
       refreshDevicesTab();
     });
 
-    row.querySelector('[data-action="rename"]').addEventListener('click', () => {
-      row.innerHTML = `
-        <input type="text" class="device-rename-input" value="${escapeHtml(d.name)}" />
-        <div class="device-item-actions">
+    actions.querySelector('[data-action="rename"]').addEventListener('click', () => {
+      nameSpan.replaceWith((() => {
+        const wrap = document.createElement('span');
+        wrap.style.display = 'flex';
+        wrap.style.flex = '1';
+        wrap.style.gap = '0.4rem';
+        wrap.innerHTML = `
+          <input type="text" class="device-rename-input" value="${escapeHtml(d.name)}" />
           <button type="button" data-action="save" class="primary-btn">Guardar</button>
           <button type="button" data-action="cancel" class="secondary-btn">Cancelar</button>
-        </div>
-      `;
-      const input = row.querySelector('input');
-      input.focus();
-      input.select();
+        `;
+        const input = wrap.querySelector('input');
+        setTimeout(() => { input.focus(); input.select(); }, 0);
 
-      row.querySelector('[data-action="cancel"]').addEventListener('click', () => renderDevicesList(devices));
+        wrap.querySelector('[data-action="cancel"]').addEventListener('click', () => renderDevicesList(devices));
 
-      const save = async () => {
-        const newName = input.value.trim();
-        if (!newName) return;
-        await api(`/api/devices/${d.id}`, { method: 'PATCH', body: JSON.stringify({ name: newName }) });
-        refreshDevicesTab();
-      };
-      row.querySelector('[data-action="save"]').addEventListener('click', save);
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+        const save = async () => {
+          const newName = input.value.trim();
+          if (!newName) return;
+          await api(`/api/devices/${d.id}`, { method: 'PATCH', body: JSON.stringify({ name: newName }) });
+          refreshDevicesTab();
+        };
+        wrap.querySelector('[data-action="save"]').addEventListener('click', save);
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+        return wrap;
+      })());
+      // Ocultamos los botones de accion mientras se edita el nombre.
+      actions.classList.add('hidden');
     });
 
     list.appendChild(row);

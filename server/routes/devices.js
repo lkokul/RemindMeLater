@@ -37,25 +37,38 @@ router.post('/pair', (req, res) => {
 // Ver y revocar dispositivos: solo desde el ordenador.
 router.get('/', requireTrusted, (req, res) => {
   const devices = db
-    .prepare('SELECT id, name, paired_at, last_seen_at FROM devices ORDER BY paired_at DESC')
+    .prepare('SELECT id, name, icon, paired_at, last_seen_at FROM devices ORDER BY paired_at DESC')
     .all();
-  res.json(devices);
+  res.json(devices.map((d) => ({ ...d, icon: d.icon || null })));
 });
 
-// Renombrar un dispositivo (el nombre acepta cualquier texto, incluidos
-// emoji: no hace falta nada especial, es un campo de texto normal).
+function sanitizeIcon(icon) {
+  if (icon === undefined) return undefined; // "no lo toques"
+  if (icon === null || icon === '') return null; // "quitalo"
+  return String(icon).slice(0, 8); // ver groups.js para el porque de este limite
+}
+
+// Renombrar y/o cambiar el icono de un dispositivo. El nombre sigue
+// siendo texto libre (por si alguien prefiere seguir metiendo el emoji
+// ahi), pero ahora tambien hay un icono APARTE, pensado para eso.
 router.patch('/:id', requireTrusted, (req, res) => {
   const existing = db.prepare('SELECT * FROM devices WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { name } = req.body || {};
-  if (!name || !name.trim()) {
+  const { name, icon } = req.body || {};
+  if (name !== undefined && !name.trim()) {
     return res.status(400).json({ error: 'invalid_request', message: 'El nombre no puede estar vacio.' });
   }
+  const sanitizedIcon = sanitizeIcon(icon);
 
-  db.prepare('UPDATE devices SET name = ? WHERE id = ?').run(name.trim(), req.params.id);
-  const row = db.prepare('SELECT id, name, paired_at, last_seen_at FROM devices WHERE id = ?').get(req.params.id);
-  res.json(row);
+  db.prepare('UPDATE devices SET name = ?, icon = ? WHERE id = ?').run(
+    name !== undefined ? name.trim() : existing.name,
+    sanitizedIcon === undefined ? existing.icon : sanitizedIcon,
+    req.params.id
+  );
+
+  const row = db.prepare('SELECT id, name, icon, paired_at, last_seen_at FROM devices WHERE id = ?').get(req.params.id);
+  res.json({ ...row, icon: row.icon || null });
 });
 
 router.delete('/:id', requireTrusted, (req, res) => {

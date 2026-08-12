@@ -11,7 +11,7 @@ router.get('/upcoming', (req, res) => {
   const rows = db
     .prepare(`
       SELECT e.id, e.title, e.start_at, e.reminder_minutes_before, e.reminder_sent,
-             g.name AS group_name, g.color AS group_color,
+             g.name AS group_name, g.color AS group_color, g.icon AS group_icon,
              datetime(e.start_at, '-' || e.reminder_minutes_before || ' minutes') AS remind_at
       FROM events e
       LEFT JOIN groups g ON g.id = e.group_id
@@ -29,6 +29,7 @@ router.get('/upcoming', (req, res) => {
       reminderSent: !!r.reminder_sent,
       groupName: r.group_name || null,
       groupColor: r.group_color || null,
+      groupIcon: r.group_icon || null,
     }))
   );
 });

@@ -4,10 +4,10 @@ const db = require('../db');
 
 const router = express.Router();
 
-// Traemos el nombre y color del grupo con un LEFT JOIN (LEFT para que
-// tambien salgan los eventos sin grupo, con group_name/group_color a NULL).
+// Traemos el nombre, color e icono del grupo con un LEFT JOIN (LEFT para
+// que tambien salgan los eventos sin grupo, con esos campos a NULL).
 const SELECT_WITH_GROUP = `
-  SELECT e.*, g.name AS group_name, g.color AS group_color
+  SELECT e.*, g.name AS group_name, g.color AS group_color, g.icon AS group_icon
   FROM events e
   LEFT JOIN groups g ON g.id = e.group_id
 `;
@@ -25,6 +25,7 @@ function serialize(row) {
     groupId: row.group_id,
     groupName: row.group_name || null,
     groupColor: row.group_color || null,
+    groupIcon: row.group_icon || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

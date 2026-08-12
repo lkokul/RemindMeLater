@@ -26,6 +26,7 @@ const DEFAULT_COLORS = {
   textDim: '#9aa0ab',
   accent: '#5b8cff',
   danger: '#ff6b6b',
+  settingsMenuBg: '#1f232c',
 };
 const COLOR_KEYS = Object.keys(DEFAULT_COLORS);
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;

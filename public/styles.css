@@ -13,6 +13,7 @@
   --text-dim: #9aa0ab;
   --accent: #5b8cff;
   --danger: #ff6b6b;
+  --settings-menu-bg: #1f232c;
   --radius: 10px;
 }
 
@@ -26,6 +27,38 @@ body {
 }
 
 .hidden { display: none !important; }
+
+/* Barra de scroll personalizada: donde el contenido se desborda (el
+   panel de Configuracion, la lista de recordatorios, el propio menu si
+   algun dia tiene mas secciones de las que caben) aparece esta barra
+   fina en vez de la del sistema, con el color de acento del tema activo
+   — asi que cambia sola si cambias de tema. */
+.modal-card, .reminders-list, .settings-menu, .icon-popover, .color-popover {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+.modal-card::-webkit-scrollbar,
+.reminders-list::-webkit-scrollbar,
+.settings-menu::-webkit-scrollbar,
+.icon-popover::-webkit-scrollbar,
+.color-popover::-webkit-scrollbar {
+  width: 8px;
+}
+.modal-card::-webkit-scrollbar-track,
+.reminders-list::-webkit-scrollbar-track,
+.settings-menu::-webkit-scrollbar-track,
+.icon-popover::-webkit-scrollbar-track,
+.color-popover::-webkit-scrollbar-track {
+  background: transparent;
+}
+.modal-card::-webkit-scrollbar-thumb,
+.reminders-list::-webkit-scrollbar-thumb,
+.settings-menu::-webkit-scrollbar-thumb,
+.icon-popover::-webkit-scrollbar-thumb,
+.color-popover::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 4px;
+}
 
 button {
   font: inherit;
@@ -56,6 +89,13 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .checkbox-row input { width: auto; }
 .form-row { display: flex; gap: 0.75rem; }
 .form-row label { flex: 1; }
+
+/* .app envuelve la topbar + el contenido. En movil es solo una columna
+   normal (la pagina crece con el contenido, como se espera al tocar y
+   hacer scroll con el dedo). En escritorio, el media query de abajo la
+   fija al alto de la ventana para que calendario + recordatorios quepan
+   a la vez sin que la pagina entera tenga que hacer scroll. */
+.app { display: flex; flex-direction: column; }
 
 /* --- Topbar --- */
 .topbar {
@@ -155,7 +195,11 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   border-radius: var(--radius);
   padding: 0.9rem;
 }
-.reminders-panel h2 { font-size: 0.9rem; margin: 0 0 0.6rem; }
+.reminders-panel h2 { font-size: 0.9rem; margin: 0 0 0.6rem; flex-shrink: 0; }
+/* En movil, altura acotada con scroll propio (ver tambien la version de
+   escritorio en el media query de abajo, que ocupa el alto que quede
+   libre en vez de un numero fijo de pixeles). */
+.reminders-list { max-height: 260px; overflow-y: auto; }
 .reminder-item {
   display: flex;
   justify-content: space-between;
@@ -188,17 +232,27 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 }
 .modal-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.8rem; }
 .spacer { flex: 1; }
-.settings-card { max-width: 560px; }
+.settings-card { max-width: 560px; position: relative; }
+.modal-close-x {
+  position: absolute; top: 0.8rem; right: 0.8rem;
+  width: 2rem; height: 2rem; padding: 0; border-radius: 50%;
+  background: transparent; border-color: transparent; font-size: 1rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-close-x:hover { background: var(--surface-2); }
 
-/* --- Panel de Configuracion: pestanas --- */
-.settings-tabs {
-  display: flex; flex-wrap: wrap; gap: 0.4rem;
-  margin: 0.8rem 0 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.8rem;
+/* --- Panel de Configuracion: menu vertical + pantalla por seccion --- */
+.settings-menu { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.8rem; }
+.settings-menu-item {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; text-align: left; font-size: 0.95rem;
+  background: var(--settings-menu-bg); border-color: var(--border);
+  padding: 0.85rem 1rem;
 }
-.settings-tab-btn {
-  background: transparent; border-color: transparent; font-size: 0.85rem;
-}
-.settings-tab-btn.active { background: var(--surface-2); border-color: var(--border); }
+.settings-menu-item-arrow { color: var(--text-dim); font-size: 1.1rem; }
+.settings-back-btn { background: transparent; border-color: transparent; padding: 0.3rem 0; margin-bottom: 0.3rem; color: var(--text-dim); }
+.settings-tab-panel h3 { margin: 0 0 0.6rem; font-size: 1rem; }
+.settings-tab-panel h4 { font-size: 0.85rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; margin: 1rem 0 0.4rem; }
 .settings-subactions { display: flex; gap: 0.5rem; margin: 0.8rem 0; }
 
 /* --- Biblioteca de temas --- */
@@ -207,12 +261,22 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 0.6rem 0.8rem;
 }
-.theme-card.active { border-color: var(--accent); }
+.theme-card.active {
+  border-color: var(--accent);
+  border-width: 2px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+}
 .theme-card-preview { display: flex; gap: 0.3rem; margin-bottom: 0.3rem; }
 .theme-card-preview .color-dot { width: 1.1rem; height: 1.1rem; }
 .theme-card-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem; }
-.theme-card-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.theme-card-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
 .theme-card-actions button { padding: 0.35rem 0.6rem; font-size: 0.8rem; }
+.use-btn-disabled {
+  padding: 0.35rem 0.6rem; font-size: 0.8rem;
+  background: transparent; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  cursor: default;
+}
 
 .theme-form { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 1rem; }
 .theme-color-grid { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.6rem 0 1rem; }
@@ -287,26 +351,81 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   padding: 0.8rem; width: 248px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.4);
 }
-.color-native-input { width: 100%; height: 2.2rem; padding: 0.15rem; cursor: pointer; margin-bottom: 0.6rem; }
-.palette-section { margin-bottom: 0.6rem; }
+.color-native-input { width: 100%; height: 2.2rem; padding: 0.15rem; cursor: pointer; }
+.palette-section { margin-bottom: 0.7rem; }
 .palette-section:last-child { margin-bottom: 0; }
 .palette-section-heading { font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
-.palette-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 0.3rem; }
+/* En tabla (4 columnas x 2 filas para las 8 de cada paleta) en vez de una
+   sola fila larga, como pidio Koku: se lee mejor de un vistazo. */
+.palette-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.35rem; }
 .palette-swatch {
   width: 100%; aspect-ratio: 1; padding: 0; border-radius: 6px;
   border: 1px solid rgba(255,255,255,0.15); cursor: pointer;
 }
-.palette-swatch:hover { transform: scale(1.15); }
+.palette-swatch:hover { transform: scale(1.1); }
+
+/* --- Selector de icono (simbolo/emoji) con paletas (createIconField) --- */
+.icon-field { position: relative; display: inline-block; }
+.icon-swatch-btn {
+  width: 2.4rem; height: 2.4rem; padding: 0; border-radius: var(--radius);
+  border: 2px solid var(--border); cursor: pointer; font-size: 1.2rem;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2);
+}
+.icon-popover {
+  position: fixed; z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.8rem; width: 248px; max-height: 70vh; overflow-y: auto;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+.icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.3rem; }
+.icon-grid-btn {
+  width: 100%; aspect-ratio: 1; padding: 0; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--border); cursor: pointer;
+  font-size: 1.1rem; display: flex; align-items: center; justify-content: center;
+}
+.icon-grid-btn:hover { border-color: var(--accent); }
+.icon-custom-row { display: flex; gap: 0.4rem; margin-top: 0.3rem; }
+.icon-custom-row input { flex: 1; }
 
 /* --- Escritorio: pantallas anchas --- */
 @media (min-width: 860px) {
   .desktop-only { display: block; }
   .mobile-only { display: none; }
 
+  /* Todo el shell (topbar + contenido) ocupa exactamente el alto de la
+     ventana del navegador, sin que la pagina en si tenga scroll: solo
+     hacen scroll por dentro el calendario y la lista de recordatorios,
+     cada uno en su hueco. Asi calendario y recordatorios se ven a la vez
+     sin desplazarte, aprovechando toda la ventana. */
+  html, body { height: 100%; }
+  #app.app { height: 100vh; }
+  .topbar { flex-shrink: 0; }
+
   .layout {
+    flex: 1;
+    min-height: 0;
     flex-direction: row;
-    align-items: flex-start;
+    align-items: stretch;
+    max-width: none;
+    width: 100%;
   }
-  .calendar-grid-wrap { flex: 1; }
-  .reminders-panel { width: 280px; flex-shrink: 0; }
+  .calendar-grid-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .reminders-panel {
+    width: 320px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .reminders-list {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+  }
 }
