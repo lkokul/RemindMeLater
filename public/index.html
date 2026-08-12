@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RemindMeLater</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Pantalla de emparejamiento: se muestra solo si este dispositivo
+       (normalmente el movil) todavia no tiene token guardado o el servidor
+       lo rechaza. Ver app.js -> showPairingScreen(). -->
+  <div id="pairing-screen" class="pairing-screen hidden">
+    <div class="pairing-card">
+      <h1>RemindMeLater</h1>
+      <p>Este dispositivo todavia no esta vinculado a tu calendario.</p>
+      <p>En el ordenador, abre <strong>Dispositivos → Vincular nuevo dispositivo</strong> y escribe aqui el codigo de 6 digitos que aparezca.</p>
+      <form id="pairing-form">
+        <label>
+          Codigo
+          <input type="text" id="pairing-code" inputmode="numeric" maxlength="6" placeholder="000000" required />
+        </label>
+        <label>
+          Nombre de este dispositivo
+          <input type="text" id="pairing-name" placeholder="Mi movil" required />
+        </label>
+        <button type="submit">Vincular</button>
+      </form>
+      <p id="pairing-error" class="error hidden"></p>
+    </div>
+  </div>
+
+  <!-- App principal -->
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1>RemindMeLater</h1>
+      </div>
+      <nav class="topbar-actions">
+        <button id="nav-prev" class="icon-btn" aria-label="Mes anterior">←</button>
+        <span id="current-month-label" class="month-label"></span>
+        <button id="nav-next" class="icon-btn" aria-label="Mes siguiente">→</button>
+        <button id="btn-new-event" class="primary-btn">+ Nuevo evento</button>
+        <button id="btn-groups" class="icon-btn" aria-label="Grupos">🎨</button>
+        <button id="btn-devices" class="icon-btn" aria-label="Dispositivos">⚙</button>
+      </nav>
+    </header>
+
+    <main class="layout">
+      <!-- Vista de escritorio: cuadricula del mes (CSS la oculta en movil) -->
+      <section class="calendar-grid-wrap desktop-only">
+        <div id="calendar-grid" class="calendar-grid"></div>
+      </section>
+
+      <!-- Vista de movil: agenda en lista, mas comoda para tocar -->
+      <section class="agenda-wrap mobile-only">
+        <div id="agenda-list" class="agenda-list"></div>
+      </section>
+
+      <!-- Panel de proximos recordatorios: visible en ambas vistas -->
+      <aside class="reminders-panel">
+        <h2>Proximos recordatorios</h2>
+        <div id="reminders-list" class="reminders-list"></div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Modal para crear / editar evento -->
+  <div id="event-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2 id="event-modal-title">Nuevo evento</h2>
+      <form id="event-form">
+        <input type="hidden" id="event-id" />
+        <label>
+          Titulo
+          <input type="text" id="event-title" required />
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="event-all-day" />
+          Todo el dia
+        </label>
+        <div class="form-row">
+          <label>
+            Inicio
+            <input type="datetime-local" id="event-start" required />
+          </label>
+          <label>
+            Fin (opcional)
+            <input type="datetime-local" id="event-end" />
+          </label>
+        </div>
+        <label>
+          Ubicacion (opcional)
+          <input type="text" id="event-location" />
+        </label>
+        <label>
+          Descripcion (opcional)
+          <textarea id="event-description" rows="3"></textarea>
+        </label>
+        <label>
+          Recordatorio
+          <select id="event-reminder">
+            <option value="">Sin recordatorio</option>
+            <option value="0">En el momento</option>
+            <option value="10">10 minutos antes</option>
+            <option value="30">30 minutos antes</option>
+            <option value="60">1 hora antes</option>
+            <option value="1440">1 dia antes</option>
+          </select>
+        </label>
+        <label>
+          Grupo (opcional)
+          <select id="event-group">
+            <option value="">Sin grupo</option>
+          </select>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-event" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-event" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal de dispositivos vinculados (solo funcional desde el ordenador) -->
+  <div id="devices-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Dispositivos</h2>
+      <div id="devices-only-computer" class="hidden">
+        <p class="hint">La gestion de dispositivos solo esta disponible desde el ordenador, por seguridad.</p>
+      </div>
+      <div id="devices-management">
+        <button id="btn-generate-code" class="primary-btn">Vincular nuevo dispositivo</button>
+        <div id="pairing-code-display" class="pairing-code-display hidden">
+          <p>Introduce este codigo en el otro dispositivo:</p>
+          <div id="pairing-code-value" class="code-value"></div>
+          <p id="pairing-code-countdown" class="hint"></p>
+        </div>
+        <h3>Vinculados</h3>
+        <div id="devices-list" class="devices-list"></div>
+      </div>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-devices" class="secondary-btn">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de grupos: listas de recordatorios con color, al estilo
+       "Listas" de Recordatorios de iPhone -->
+  <div id="groups-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Grupos</h2>
+      <p class="hint">Asigna un color a cada grupo y usalo al crear un evento para diferenciarlos de un vistazo.</p>
+
+      <form id="group-form" class="group-form">
+        <input type="hidden" id="group-id" />
+        <div class="group-form-row">
+          <input type="text" id="group-name" placeholder="Nombre del grupo (ej. 🏋️ Gimnasio)" required />
+          <input type="color" id="group-color" value="#5b8cff" title="Color del grupo" />
+        </div>
+        <div class="group-form-actions">
+          <button type="button" id="btn-cancel-group" class="secondary-btn hidden">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar grupo</button>
+        </div>
+      </form>
+
+      <div id="groups-list" class="groups-list"></div>
+
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-groups" class="secondary-btn">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+/* styles.css — mobile-first: las reglas base son para movil (columna
+   unica, listas grandes y tactiles). La media query de abajo re-organiza
+   todo para pantallas anchas (ordenador): cuadricula de mes + barra
+   lateral. Esto es lo que hace que la MISMA app sirva para las "2 vistas"
+   sin duplicar codigo. */
+
+:root {
+  --bg: #0f1115;
+  --surface: #171a21;
+  --surface-2: #1f232c;
+  --border: #2a2f3a;
+  --text: #e8eaed;
+  --text-dim: #9aa0ab;
+  --accent: #5b8cff;
+  --danger: #ff6b6b;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.hidden { display: none !important; }
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0.6rem 0.9rem;
+}
+.primary-btn { background: var(--accent); border-color: var(--accent); color: white; font-weight: 600; }
+.secondary-btn { background: transparent; }
+.danger-btn { background: transparent; color: var(--danger); border-color: var(--danger); }
+.icon-btn { padding: 0.5rem 0.7rem; }
+
+input, textarea, select {
+  font: inherit;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 0.6rem;
+  width: 100%;
+}
+label { display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.75rem; }
+label input, label textarea, label select { margin-top: 0.3rem; }
+.checkbox-row { display: flex; align-items: center; gap: 0.5rem; }
+.checkbox-row input { width: auto; }
+.form-row { display: flex; gap: 0.75rem; }
+.form-row label { flex: 1; }
+
+/* --- Topbar --- */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 5;
+}
+.topbar-title h1 { font-size: 1.1rem; margin: 0; }
+.topbar-actions { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.month-label { min-width: 8rem; text-align: center; font-weight: 600; }
+
+/* --- Layout general (movil por defecto) --- */
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.desktop-only { display: none; }
+.mobile-only { display: block; }
+
+/* --- Agenda (movil) --- */
+.agenda-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.agenda-day-heading {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 0.6rem;
+}
+.agenda-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.8rem;
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+}
+.agenda-item:active { background: var(--surface-2); }
+.agenda-time { font-weight: 600; min-width: 3.6rem; color: var(--accent); }
+.agenda-title { font-weight: 600; }
+.agenda-meta { font-size: 0.8rem; color: var(--text-dim); }
+
+/* --- Calendario mensual (escritorio) --- */
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.calendar-cell {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 110px;
+  padding: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.calendar-cell.other-month { opacity: 0.35; }
+.calendar-cell.today { border-color: var(--accent); }
+.calendar-cell-day { font-size: 0.8rem; color: var(--text-dim); }
+.calendar-event-chip {
+  background: var(--accent);
+  color: white;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.calendar-weekday-heading {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  padding-bottom: 0.3rem;
+}
+
+/* --- Recordatorios --- */
+.reminders-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.9rem;
+}
+.reminders-panel h2 { font-size: 0.9rem; margin: 0 0 0.6rem; }
+.reminder-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.reminder-item:last-child { border-bottom: none; }
+.reminder-due { color: var(--danger); font-weight: 600; }
+.empty-hint { color: var(--text-dim); font-size: 0.85rem; }
+
+/* --- Modales --- */
+.modal, .pairing-screen {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
+  z-index: 20;
+}
+.modal-card, .pairing-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.2rem;
+  width: 100%;
+  max-width: 420px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.8rem; }
+.spacer { flex: 1; }
+.error { color: var(--danger); font-size: 0.85rem; }
+.hint { color: var(--text-dim); font-size: 0.85rem; }
+
+.pairing-code-display { text-align: center; margin: 1rem 0; }
+.code-value { font-size: 2.2rem; font-weight: 700; letter-spacing: 0.25em; }
+
+.devices-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
+.device-item {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+  gap: 0.5rem;
+}
+.device-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-item-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+.device-item-actions button { padding: 0.35rem 0.6rem; font-size: 0.8rem; }
+.device-rename-input { flex: 1; }
+
+/* --- Grupos: nombre + color, tipo listas de Recordatorios --- */
+.group-form-row { display: flex; gap: 0.5rem; align-items: stretch; margin-bottom: 0.5rem; }
+.group-form-row input[type="text"] { flex: 1; }
+.group-form-row input[type="color"] {
+  width: 3rem; padding: 0.2rem; cursor: pointer;
+}
+.group-form-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+.groups-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
+.group-item {
+  display: flex; align-items: center; gap: 0.6rem;
+  background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+}
+.group-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-item-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+.group-item-actions button { padding: 0.35rem 0.6rem; font-size: 0.8rem; }
+
+.color-dot {
+  width: 0.8rem; height: 0.8rem; border-radius: 50%; flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 0.15rem;
+}
+
+/* Selector "Grupo" del formulario de evento: cada <option> no puede
+   pintarse de color con CSS de forma fiable entre navegadores, asi que
+   el color se ve en los chips/filas del calendario, no en el <select>. */
+
+/* --- Escritorio: pantallas anchas --- */
+@media (min-width: 860px) {
+  .desktop-only { display: block; }
+  .mobile-only { display: none; }
+
+  .layout {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .calendar-grid-wrap { flex: 1; }
+  .reminders-panel { width: 280px; flex-shrink: 0; }
+}
