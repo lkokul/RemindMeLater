@@ -35,6 +35,92 @@ if ('serviceWorker' in navigator) {
 const DEFAULT_EVENT_COLOR = '#5b8cff'; // el --accent de styles.css, para eventos sin grupo
 
 // ---------------------------------------------------------------------
+// Selector con estilo propio: sustituye un <select> nativo (que el
+// navegador pinta a su manera, sin seguir los colores del tema) por un
+// boton + lista desplegable a medida. Mismo patron que
+// createColorField/createIconField en settings.js (boton que abre un
+// popover colgado de <body>, posicionado en JS) — esta version vive aqui
+// porque la usan los modales de evento/tarea, que son cosa de este
+// archivo. closeAllPopovers/positionFixedPopover estan definidas en
+// settings.js (se carga despues de este archivo), pero solo se llaman
+// DENTRO de manejadores de click, que no se disparan hasta que la persona
+// interactua — para entonces los dos archivos ya estan cargados, igual
+// que el resto de referencias cruzadas entre app.js y settings.js.
+function createSelectField({ options = [], initialValue = '', placeholder = '', onChange } = {}) {
+  let value = initialValue;
+  let opts = options;
+
+  const root = document.createElement('div');
+  root.className = 'select-field';
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'select-field-trigger';
+
+  const popover = document.createElement('div');
+  popover.className = 'select-popover hidden';
+  document.body.appendChild(popover);
+
+  function findCurrent() {
+    return opts.find((o) => String(o.value) === String(value));
+  }
+
+  function optionRowHtml(opt) {
+    const dot = opt.color ? `<span class="color-dot" style="background-color:${opt.color}"></span>` : '';
+    const icon = opt.icon ? `${escapeHtml(opt.icon)} ` : '';
+    return `${dot}${icon}${escapeHtml(opt.label)}`;
+  }
+
+  function renderTrigger() {
+    const current = findCurrent();
+    trigger.innerHTML = current ? optionRowHtml(current) : escapeHtml(placeholder);
+    trigger.classList.toggle('select-field-placeholder', !current);
+  }
+
+  function renderOptions() {
+    popover.innerHTML = '';
+    opts.forEach((opt) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'select-option' + (String(opt.value) === String(value) ? ' active' : '');
+      item.innerHTML = optionRowHtml(opt);
+      item.addEventListener('click', () => {
+        value = opt.value;
+        renderTrigger();
+        renderOptions();
+        popover.classList.add('hidden');
+        if (onChange) onChange(value);
+      });
+      popover.appendChild(item);
+    });
+  }
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = popover.classList.contains('hidden');
+    closeAllPopovers(popover);
+    popover.classList.toggle('hidden');
+    if (willOpen) {
+      positionFixedPopover(trigger, popover, {
+        width: Math.max(200, trigger.getBoundingClientRect().width),
+        estimatedHeight: Math.min(280, opts.length * 40 + 16),
+      });
+    }
+  });
+
+  root.appendChild(trigger);
+  renderOptions();
+  renderTrigger();
+
+  return {
+    element: root,
+    getValue: () => value,
+    setValue: (v) => { value = v; renderTrigger(); renderOptions(); },
+    setOptions: (newOptions) => { opts = newOptions; renderOptions(); renderTrigger(); },
+  };
+}
+
+// ---------------------------------------------------------------------
 // Capa de red: envuelve fetch para añadir el token del dispositivo (si
 // existe) y para reaccionar automaticamente si el servidor dice 401
 // (dispositivo no vinculado) mostrando la pantalla de emparejamiento.
@@ -383,6 +469,20 @@ document.getElementById('nav-next').addEventListener('click', () => {
 // ---------------------------------------------------------------------
 // Modal de evento (crear / editar / borrar)
 // ---------------------------------------------------------------------
+const REMINDER_OPTIONS = [
+  { value: '', label: 'Sin recordatorio' },
+  { value: '0', label: 'En el momento' },
+  { value: '10', label: '10 minutos antes' },
+  { value: '30', label: '30 minutos antes' },
+  { value: '60', label: '1 hora antes' },
+  { value: '1440', label: '1 dia antes' },
+];
+const eventReminderField = createSelectField({ options: REMINDER_OPTIONS, initialValue: '' });
+document.getElementById('event-reminder-field').appendChild(eventReminderField.element);
+
+const eventGroupField = createSelectField({ options: [{ value: '', label: 'Sin grupo' }], initialValue: '' });
+document.getElementById('event-group-field').appendChild(eventGroupField.element);
+
 // presetDate (opcional): al crear un evento nuevo desde el panel de un
 // dia concreto, arranca ya con esa fecha puesta (a las 09:00 por
 // defecto) en vez de con la fecha/hora actual.
@@ -401,11 +501,11 @@ function openEventModal(event, presetDate) {
   document.getElementById('event-end').value = event && event.endAt ? toDatetimeLocalValue(new Date(event.endAt)) : '';
   document.getElementById('event-location').value = event && event.location ? event.location : '';
   document.getElementById('event-description').value = event && event.description ? event.description : '';
-  document.getElementById('event-reminder').value = event && event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
+  eventReminderField.setValue(event && event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
     ? String(event.reminderMinutesBefore)
-    : '';
+    : '');
   populateEventGroupSelect();
-  document.getElementById('event-group').value = event && event.groupId ? String(event.groupId) : '';
+  eventGroupField.setValue(event && event.groupId ? String(event.groupId) : '');
   document.getElementById('btn-delete-event').classList.toggle('hidden', !event);
 
   const createdByEl = document.getElementById('event-created-by');
@@ -430,9 +530,9 @@ document.getElementById('btn-close-event').addEventListener('click', closeEventM
 document.getElementById('event-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('event-id').value;
-  const reminderRaw = document.getElementById('event-reminder').value;
+  const reminderRaw = eventReminderField.getValue();
 
-  const groupRaw = document.getElementById('event-group').value;
+  const groupRaw = eventGroupField.getValue();
 
   const payload = {
     title: document.getElementById('event-title').value,
@@ -476,17 +576,17 @@ async function loadGroups() {
   state.groups = await api('/api/groups');
 }
 
+function groupSelectOptions() {
+  return [
+    { value: '', label: 'Sin grupo' },
+    ...state.groups.map((g) => ({ value: String(g.id), label: g.name, color: g.color, icon: g.icon })),
+  ];
+}
+
 function populateEventGroupSelect() {
-  const select = document.getElementById('event-group');
-  const current = select.value;
-  select.innerHTML = '<option value="">Sin grupo</option>';
-  state.groups.forEach((g) => {
-    const opt = document.createElement('option');
-    opt.value = g.id;
-    opt.textContent = g.name;
-    select.appendChild(opt);
-  });
-  select.value = current;
+  const current = eventGroupField.getValue();
+  eventGroupField.setOptions(groupSelectOptions());
+  eventGroupField.setValue(current);
 }
 
 // ---------------------------------------------------------------------
@@ -687,16 +787,9 @@ async function toggleTaskDone(task) {
 }
 
 function populateTaskGroupSelect() {
-  const select = document.getElementById('task-group');
-  const current = select.value;
-  select.innerHTML = '<option value="">Sin grupo</option>';
-  state.groups.forEach((g) => {
-    const opt = document.createElement('option');
-    opt.value = g.id;
-    opt.textContent = g.name;
-    select.appendChild(opt);
-  });
-  select.value = current;
+  const current = taskGroupField.getValue();
+  taskGroupField.setOptions(groupSelectOptions());
+  taskGroupField.setValue(current);
 }
 
 // El input type="date" quiere "YYYY-MM-DD" en LOCAL, no UTC (mismo motivo
@@ -706,6 +799,9 @@ function toDateInputValue(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+const taskGroupField = createSelectField({ options: [{ value: '', label: 'Sin grupo' }], initialValue: '' });
+document.getElementById('task-group-field').appendChild(taskGroupField.element);
+
 function openTaskModal(task) {
   const modal = document.getElementById('task-modal');
   document.getElementById('task-modal-title').textContent = task ? 'Editar tarea' : 'Nueva tarea';
@@ -713,7 +809,7 @@ function openTaskModal(task) {
   document.getElementById('task-title').value = task ? task.title : '';
   document.getElementById('task-date').value = task && task.startAt ? toDateInputValue(new Date(task.startAt)) : '';
   populateTaskGroupSelect();
-  document.getElementById('task-group').value = task && task.groupId ? String(task.groupId) : '';
+  taskGroupField.setValue(task && task.groupId ? String(task.groupId) : '');
   document.getElementById('btn-delete-task').classList.toggle('hidden', !task);
   modal.classList.remove('hidden');
 }
@@ -730,7 +826,7 @@ document.getElementById('task-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('task-id').value;
   const dateRaw = document.getElementById('task-date').value;
-  const groupRaw = document.getElementById('task-group').value;
+  const groupRaw = taskGroupField.getValue();
 
   const payload = {
     title: document.getElementById('task-title').value,

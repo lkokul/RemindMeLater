@@ -208,23 +208,14 @@
           Descripcion (opcional)
           <textarea id="event-description" rows="3"></textarea>
         </label>
-        <label>
-          Recordatorio
-          <select id="event-reminder">
-            <option value="">Sin recordatorio</option>
-            <option value="0">En el momento</option>
-            <option value="10">10 minutos antes</option>
-            <option value="30">30 minutos antes</option>
-            <option value="60">1 hora antes</option>
-            <option value="1440">1 dia antes</option>
-          </select>
-        </label>
-        <label>
-          Grupo (opcional)
-          <select id="event-group">
-            <option value="">Sin grupo</option>
-          </select>
-        </label>
+        <div class="field-label-block">
+          <span class="field-label">Recordatorio</span>
+          <div id="event-reminder-field"></div>
+        </div>
+        <div class="field-label-block">
+          <span class="field-label">Grupo (opcional)</span>
+          <div id="event-group-field"></div>
+        </div>
         <p id="event-created-by" class="hint hidden"></p>
         <div class="modal-actions">
           <button type="button" id="btn-delete-event" class="danger-btn hidden">Eliminar</button>
@@ -253,12 +244,10 @@
           Fecha limite (opcional)
           <input type="date" id="task-date" />
         </label>
-        <label>
-          Grupo (opcional)
-          <select id="task-group">
-            <option value="">Sin grupo</option>
-          </select>
-        </label>
+        <div class="field-label-block">
+          <span class="field-label">Grupo (opcional)</span>
+          <div id="task-group-field"></div>
+        </div>
         <div class="modal-actions">
           <button type="button" id="btn-delete-task" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>

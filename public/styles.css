@@ -42,7 +42,7 @@ body {
    algun dia tiene mas secciones de las que caben) aparece esta barra
    fina en vez de la del sistema, con el color de acento del tema activo
    — asi que cambia sola si cambias de tema. */
-.modal-card, .reminders-list, .settings-menu, .icon-popover, .color-popover {
+.modal-card, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover {
   scrollbar-width: thin;
   scrollbar-color: var(--accent) transparent;
 }
@@ -50,21 +50,24 @@ body {
 .reminders-list::-webkit-scrollbar,
 .settings-menu::-webkit-scrollbar,
 .icon-popover::-webkit-scrollbar,
-.color-popover::-webkit-scrollbar {
+.color-popover::-webkit-scrollbar,
+.select-popover::-webkit-scrollbar {
   width: 8px;
 }
 .modal-card::-webkit-scrollbar-track,
 .reminders-list::-webkit-scrollbar-track,
 .settings-menu::-webkit-scrollbar-track,
 .icon-popover::-webkit-scrollbar-track,
-.color-popover::-webkit-scrollbar-track {
+.color-popover::-webkit-scrollbar-track,
+.select-popover::-webkit-scrollbar-track {
   background: transparent;
 }
 .modal-card::-webkit-scrollbar-thumb,
 .reminders-list::-webkit-scrollbar-thumb,
 .settings-menu::-webkit-scrollbar-thumb,
 .icon-popover::-webkit-scrollbar-thumb,
-.color-popover::-webkit-scrollbar-thumb {
+.color-popover::-webkit-scrollbar-thumb,
+.select-popover::-webkit-scrollbar-thumb {
   background: var(--accent);
   border-radius: 4px;
 }
@@ -101,6 +104,12 @@ input, textarea, select {
    parecido al fondo. */
 label { display: block; font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); margin-bottom: 0.75rem; }
 label input, label textarea, label select { margin-top: 0.3rem; }
+
+/* Igual que <label> (mismo tamano/color/margen) pero para envolver un
+   selector con estilo propio (.select-field) en vez de un <input>/<select>
+   nativo — ver createSelectField en app.js. */
+.field-label-block { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); margin-bottom: 0.75rem; }
+.field-label { display: block; margin-bottom: 0.3rem; }
 /* Interruptor tipo "pastilla" en vez del checkbox cuadrado del sistema:
    se ilumina con el color de acento cuando esta activo. Sigue siendo un
    <input type="checkbox"> normal por debajo (mismo :checked, mismo
@@ -700,6 +709,35 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   border: 1px solid rgba(255,255,255,0.15); cursor: pointer;
 }
 .palette-swatch:hover { transform: scale(1.1); }
+
+/* --- Selector con estilo propio, sustituye un <select> nativo
+   (createSelectField en app.js) --- */
+.select-field { position: relative; width: 100%; }
+.select-field-trigger {
+  width: 100%; display: flex; align-items: center; gap: 0.4rem;
+  background: var(--surface-2); color: var(--surface-2-text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem; font-size: 0.9rem; text-align: left; cursor: pointer;
+}
+.select-field-trigger::after {
+  content: '▾'; margin-left: auto; flex-shrink: 0; opacity: 0.6; font-size: 0.75rem;
+}
+.select-field-trigger.select-field-placeholder { opacity: 0.65; }
+.select-popover {
+  position: fixed; z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.4rem; max-height: 280px; overflow-y: auto;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  display: flex; flex-direction: column; gap: 0.15rem;
+}
+.select-option {
+  display: flex; align-items: center; gap: 0.4rem;
+  background: transparent; border: none; border-radius: var(--radius-sm);
+  padding: 0.5rem 0.6rem; font-size: 0.88rem; text-align: left; cursor: pointer;
+  color: var(--surface-text);
+}
+.select-option:hover { background: var(--surface-2); }
+.select-option.active { background: color-mix(in srgb, var(--accent) 18%, var(--surface-2)); font-weight: 600; }
 
 /* --- Selector de icono (simbolo/emoji) con paletas (createIconField) --- */
 .icon-field { position: relative; display: inline-block; }
