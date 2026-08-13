@@ -101,6 +101,11 @@ input, textarea, select {
   padding: 0.6rem;
   width: 100%;
 }
+/* Solo se puede estirar hacia abajo, nunca hacia los lados — por defecto
+   un <textarea> deja arrastrar tambien el ancho, y como el modal recorta
+   lo que se sale por los lados (overflow-x: hidden), ensancharlo dejaba
+   la vista desplazada sin ninguna barra para volver atras. */
+textarea { resize: vertical; }
 /* "Tenue" no se hace con opacity (algunas etiquetas envuelven un <input>
    dentro, y eso tambien apagaria el campo) sino mezclando el color de
    contraste con su propio fondo — sigue siendo 100% opaco, solo mas
@@ -129,7 +134,12 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   border: 1px solid var(--border);
   position: relative;
   cursor: pointer;
-  margin: 0;
+  /* align-items:center en .checkbox-row centra las CAJAS, pero el texto
+     de al lado tiene mas "aire" reservado arriba (para acentos/mayusculas)
+     que abajo por como funcionan las fuentes — sin este empujoncito el
+     interruptor se ve un poco mas arriba que el texto, aunque las cajas
+     esten perfectamente centradas entre si. */
+  margin: 2px 0 0;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 .checkbox-row input[type="checkbox"]::before {
@@ -768,12 +778,15 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .date-field-text {
   flex: 1; min-width: 0; border: none; background: transparent;
   color: var(--surface-2-text); border-radius: 0;
-  padding: 0.55rem 0.7rem; font-size: 0.9rem;
+  padding: 0.55rem 0.5rem; font-size: 0.9rem;
+  /* Red de seguridad: si aun asi no cupiera entero, que se corte con
+     puntos suspensivos en vez de a medias sin avisar. */
+  text-overflow: ellipsis;
 }
 .date-field-text:focus { outline: none; }
 .date-field-icon-btn {
   flex-shrink: 0; border: none; background: transparent; color: var(--surface-2-text);
-  padding: 0 0.6rem; cursor: pointer; border-radius: 0; opacity: 0.75;
+  padding: 0 0.45rem; cursor: pointer; border-radius: 0; opacity: 0.75;
   display: flex; align-items: center; justify-content: center;
 }
 .date-field-icon-btn:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 15%, transparent); }
@@ -781,8 +794,12 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 /* La fecha necesita mas hueco que la hora ("14/08/2026" o "Sin fecha" es
    mas largo que "00:00") — sin este reparto, "Sin fecha" se partia en dos
    lineas. */
-.datetime-row .date-field { flex: 1.6; min-width: 0; }
-.datetime-row .time-field { flex: 1; min-width: 0; }
+/* La fecha ahora lleva tambien un botoncito de calendario dentro de su
+   caja (ver .date-field-icon-btn), asi que necesita bastante mas hueco
+   que antes para que "14/08/2026" no se corte — 2:1 en vez del 1.6:1 de
+   antes. */
+.datetime-row .date-field { flex: 2; min-width: 140px; }
+.datetime-row .time-field { flex: 1; min-width: 58px; }
 .time-field-input {
   width: 100%; text-align: center;
   background: var(--surface-2); color: var(--surface-2-text);

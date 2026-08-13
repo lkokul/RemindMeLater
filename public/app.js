@@ -808,7 +808,13 @@ function openEventModal(event, presetDate) {
     eventEndTimeField.setValue(toTimeInputValue(startDate));
   }
   document.getElementById('event-location').value = event && event.location ? event.location : '';
-  document.getElementById('event-description').value = event && event.description ? event.description : '';
+  const descriptionEl = document.getElementById('event-description');
+  descriptionEl.value = event && event.description ? event.description : '';
+  // Arrastrar el asa de la esquina deja un alto fijo puesto a mano (estilo
+  // inline) en el propio <textarea>, que se queda ahi para siempre porque
+  // es el MISMO elemento reutilizado en cada apertura del modal — sin
+  // esto, un evento nuevo heredaria el tamaño que dejaste en el anterior.
+  descriptionEl.style.height = '';
   eventReminderField.setValue(event && event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
     ? String(event.reminderMinutesBefore)
     : '');
