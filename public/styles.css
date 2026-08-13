@@ -755,11 +755,16 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   background: var(--surface-2); color: var(--surface-2-text);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: 0.55rem 0.7rem; font-size: 0.9rem; text-align: left; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .date-field-trigger.select-field-placeholder { opacity: 0.65; }
 .date-field-trigger-icon { flex-shrink: 0; opacity: 0.8; }
 .datetime-row { display: flex; gap: 0.4rem; align-items: stretch; margin-top: 0.3rem; }
-.datetime-row .date-field, .datetime-row .select-field { flex: 1; min-width: 0; }
+/* La fecha necesita mas hueco que la hora ("14/08/2026" o "Sin fecha" es
+   mas largo que "00:00") — sin este reparto, "Sin fecha" se partia en dos
+   lineas. */
+.datetime-row .date-field { flex: 1.6; min-width: 0; }
+.datetime-row .select-field { flex: 1; min-width: 0; }
 .date-popover {
   /* min() con el ancho de ventana para que nunca se salga ni se aplaste
      en ventanas pequenas (era un ancho fijo, "se peteaba" en pantallas
