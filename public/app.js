@@ -127,6 +127,17 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
 
 const DATE_FIELD_FORMATTER = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
+// Icono de calendario (trazo, no emoji) para el selector de fecha —
+// stroke="currentColor" para que siga el color de texto del boton (y por
+// tanto el tema) automaticamente, sin tener que definir un color aparte
+// por tema.
+const CALENDAR_ICON_SVG = `<svg class="date-field-trigger-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+  <line x1="16" y1="2" x2="16" y2="6"></line>
+  <line x1="8" y1="2" x2="8" y2="6"></line>
+  <line x1="3" y1="10" x2="21" y2="10"></line>
+</svg>`;
+
 // ---------------------------------------------------------------------
 // Selector de fecha con estilo propio: sustituye <input type="date"> (o
 // la parte de fecha de un datetime-local) por un boton que abre un
@@ -156,7 +167,7 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
 
   function renderTrigger() {
     const text = value ? DATE_FIELD_FORMATTER.format(value) : placeholder;
-    trigger.innerHTML = `<span class="date-field-trigger-icon">📅</span>${escapeHtml(text)}`;
+    trigger.innerHTML = `${CALENDAR_ICON_SVG}${escapeHtml(text)}`;
     trigger.classList.toggle('select-field-placeholder', !value);
   }
 

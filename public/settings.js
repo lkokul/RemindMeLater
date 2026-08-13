@@ -375,6 +375,7 @@ function openSettingsModal() {
   document.getElementById('settings-modal').classList.remove('hidden');
   closeThemeForm();
   showSettingsScreen(null);
+  refreshQuitMenuItem();
 }
 
 document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
@@ -1354,11 +1355,16 @@ function refreshMobileTab() {
     localStorage.getItem('updateCheckEnabled') !== 'false';
 
   refreshCompletedTasksDisplayOptions();
+}
 
-  // window.electronAPI solo existe si esto corre dentro de la app de
-  // escritorio (lo expone electron/preload.js) — en el navegador normal
-  // (o desde el movil) el boton se queda oculto, porque "salir" no
-  // significa nada ahi.
+// "Salir de la aplicacion": vive como accion directa en la lista principal
+// de Configuracion (no dentro de una sub-seccion), asi que se refresca al
+// abrir el panel entero (ver openSettingsModal), no al entrar en una
+// pestana concreta. window.electronAPI solo existe si esto corre dentro
+// de la app de escritorio (lo expone electron/preload.js) — en el
+// navegador normal (o desde el movil) el boton se queda oculto, porque
+// "salir" no significa nada ahi.
+function refreshQuitMenuItem() {
   document.getElementById('btn-quit-app').classList.toggle('hidden', !window.electronAPI);
 }
 

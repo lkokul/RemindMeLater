@@ -576,6 +576,10 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   padding: 0.85rem 1rem;
 }
 .settings-menu-item-arrow { color: color-mix(in srgb, var(--settings-menu-text) 65%, var(--settings-menu-bg)); font-size: 1.1rem; }
+/* Salir de la aplicacion: una accion directa, no una seccion a la que
+   entrar (por eso no lleva flecha ">"), en rojo/aviso para diferenciarla
+   del resto de la lista. */
+.settings-menu-item-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
 .settings-back-btn { background: transparent; border-color: transparent; padding: 0.3rem 0; margin-bottom: 0.3rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); }
 .settings-tab-panel h3 { margin: 0 0 0.6rem; font-size: 1rem; }
 .settings-tab-panel h4 { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); text-transform: uppercase; letter-spacing: 0.03em; margin: 1rem 0 0.4rem; }

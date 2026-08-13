@@ -295,6 +295,12 @@
         <button type="button" class="settings-menu-item" data-tab="shortcuts">
           <span>Atajos de teclado</span><span class="settings-menu-item-arrow">›</span>
         </button>
+        <!-- Accion directa (no navega a ningun sitio, por eso no lleva
+             flecha "›"), solo visible dentro de la app de escritorio —
+             ver refreshQuitMenuItem en settings.js. -->
+        <button type="button" id="btn-quit-app" class="settings-menu-item settings-menu-item-danger hidden">
+          <span>Salir de la aplicación</span>
+        </button>
       </div>
 
       <!-- --- Perfil --- -->
@@ -441,12 +447,6 @@
         <h4>Tareas completadas</h4>
         <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>
         <div id="completed-tasks-display-options" class="view-mode-options"></div>
-
-        <!-- Solo tiene sentido en la app de escritorio (Electron) — un
-             navegador normal no tiene concepto de "salir", solo cerrar la
-             pestana. Oculto por defecto, ver refreshMobileTab en
-             settings.js. -->
-        <button type="button" id="btn-quit-app" class="danger-btn hidden" style="margin-top: 1rem; width: 100%;">Salir de la aplicación</button>
       </div>
 
       <!-- --- Atajos de teclado (ajuste local, no compartido) --- -->
