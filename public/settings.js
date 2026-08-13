@@ -1360,7 +1360,17 @@ function refreshMobileTab() {
     localStorage.getItem('updateCheckEnabled') !== 'false';
 
   refreshCompletedTasksDisplayOptions();
+
+  // window.electronAPI solo existe si esto corre dentro de la app de
+  // escritorio (lo expone electron/preload.js) — en el navegador normal
+  // (o desde el movil) el boton se queda oculto, porque "salir" no
+  // significa nada ahi.
+  document.getElementById('btn-quit-app').classList.toggle('hidden', !window.electronAPI);
 }
+
+document.getElementById('btn-quit-app').addEventListener('click', () => {
+  if (window.electronAPI) window.electronAPI.quitApp();
+});
 
 // Tachar vs ocultar tareas completadas: preferencia de ESTE dispositivo
 // (como el modo de vista o el tema), no compartida — cada movil/ordenador

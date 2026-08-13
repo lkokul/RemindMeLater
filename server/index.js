@@ -45,7 +45,7 @@ app.use('/api/devices', devicesRouter);
 // La app web (HTML/CSS/JS) vive en /public y se sirve tal cual.
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`RemindMeLater escuchando en el puerto ${PORT}`);
   console.log(`  En este ordenador: http://localhost:${PORT}`);
 
@@ -67,4 +67,21 @@ app.listen(PORT, '0.0.0.0', () => {
   }
 
   startReminderChecker();
+});
+
+// Sin este manejador, que el puerto ya este ocupado (por ejemplo, si ya
+// tenias "npm run dev" abierto en otra terminal y ademas arrancas
+// "npm run electron") tira abajo el proceso entero con una excepcion sin
+// capturar — en Electron eso se ve como un dialogo de error nada mas
+// abrir. La app igualmente termina abriendose porque electron/main.js
+// espera a que ALGUN servidor responda en ese puerto (waitForServer), asi
+// que aqui basta con avisar por consola en vez de reventar el proceso.
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.warn(
+      `El puerto ${PORT} ya esta en uso (seguramente otra instancia de RemindMeLater ya esta corriendo) — sigo sin levantar un segundo servidor.`
+    );
+  } else {
+    throw err;
+  }
 });

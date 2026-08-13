@@ -425,6 +425,7 @@ function closeEventModal() {
 
 document.getElementById('btn-new-event').addEventListener('click', () => openEventModal(null));
 document.getElementById('btn-cancel-event').addEventListener('click', closeEventModal);
+document.getElementById('btn-close-event').addEventListener('click', closeEventModal);
 
 document.getElementById('event-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -613,12 +614,20 @@ function buildTaskRow(task) {
   checkbox.addEventListener('click', (e) => e.stopPropagation());
   checkbox.addEventListener('change', () => toggleTaskDone(task));
 
+  // Color del grupo: se veia en el chip del calendario pero faltaba aqui,
+  // en la fila de la lista (mismo bug que reporto Koku: en modo oscuro se
+  // nota mas porque sin el punto de color todo se confunde con el texto).
+  const colorDot = document.createElement('span');
+  colorDot.className = 'color-dot';
+  colorDot.style.backgroundColor = task.done ? taskCompletedColor(task) : taskPendingColor(task);
+
   const title = document.createElement('span');
   title.className = 'task-item-title';
   const iconPrefix = task.groupIcon ? `${escapeHtml(task.groupIcon)} ` : '';
   title.innerHTML = `${iconPrefix}${escapeHtml(task.title)}`;
 
   row.appendChild(checkbox);
+  row.appendChild(colorDot);
   row.appendChild(title);
 
   if (task.startAt) {
@@ -715,6 +724,7 @@ function closeTaskModal() {
 
 document.getElementById('btn-new-task').addEventListener('click', () => openTaskModal(null));
 document.getElementById('btn-cancel-task').addEventListener('click', closeTaskModal);
+document.getElementById('btn-close-task').addEventListener('click', closeTaskModal);
 
 document.getElementById('task-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -763,16 +773,29 @@ document.getElementById('btn-delete-task').addEventListener('click', async () =>
 // de verdad). Es una preferencia de ESTE dispositivo/navegador, por eso
 // vive en localStorage y no en el servidor.
 // ---------------------------------------------------------------------
+// Mueve el panel de recordatorios un dia adelante/atras: si ya estabas
+// viendo un dia concreto, se mueve desde ESE dia; si estabas en "Proximos",
+// arranca desde hoy. Reutiliza showDayInReminders, que ya cambia el panel
+// a modo "dia" y pide los eventos/tareas de esa fecha al servidor.
+function shiftRemindersDay(delta) {
+  const base = state.remindersMode === 'day' && state.remindersDayDate ? state.remindersDayDate : new Date();
+  const next = new Date(base);
+  next.setDate(next.getDate() + delta);
+  showDayInReminders(next);
+}
+
 const SHORTCUT_ACTIONS = [
   { id: 'new-event', label: 'Nuevo evento', run: () => document.getElementById('btn-new-event').click() },
   { id: 'open-settings', label: 'Abrir configuración', run: () => document.getElementById('btn-settings').click() },
   { id: 'prev-month', label: 'Mes anterior', run: () => document.getElementById('nav-prev').click() },
   { id: 'next-month', label: 'Mes siguiente', run: () => document.getElementById('nav-next').click() },
+  { id: 'prev-day', label: 'Día anterior', run: () => shiftRemindersDay(-1) },
+  { id: 'next-day', label: 'Día siguiente', run: () => shiftRemindersDay(1) },
 ];
 // Atajos de fabrica: el usuario puede cambiarlos o quitarlos por completo
 // desde Configuracion; un valor '' guardado explicitamente significa "sin
 // atajo", distinto de "todavia no tocado" (que usa este por defecto).
-const DEFAULT_SHORTCUTS = { 'new-event': 'n' };
+const DEFAULT_SHORTCUTS = { 'new-event': 'n', 'prev-day': 'arrowleft', 'next-day': 'arrowright' };
 
 function getShortcutMap() {
   let stored = {};
@@ -905,15 +928,36 @@ function openFloatingWindow() {
 // desde el aviso que sale al cargar la pagina si la vista guardada no es
 // la normal (ver applyViewModePrompt).
 function applyViewMode(mode) {
-  if (mode !== 'fullscreen' && document.fullscreenElement) document.exitFullscreen();
+  if (window.electronAPI) {
+    // Dentro de la app de escritorio, la pantalla completa la controla la
+    // ventana nativa (proceso principal) en vez de la API de pantalla
+    // completa del navegador — por eso puede activarse sola al arrancar,
+    // sin el aviso de "hace falta un clic" (ver applyViewModePrompt).
+    window.electronAPI.setNativeFullscreen(mode === 'fullscreen');
+  } else if (mode !== 'fullscreen' && document.fullscreenElement) {
+    document.exitFullscreen();
+  }
   if (mode !== 'floating') closeFloatingWindow();
 
-  if (mode === 'fullscreen' && document.documentElement.requestFullscreen) {
+  if (!window.electronAPI && mode === 'fullscreen' && document.documentElement.requestFullscreen) {
     document.documentElement.requestFullscreen().catch(() => {});
   } else if (mode === 'floating') {
     openFloatingWindow();
   }
   setViewMode(mode);
+}
+
+// Simetrico al 'fullscreenchange' del navegador (ver mas abajo), pero para
+// cuando Electron sale de pantalla completa nativa por su cuenta (Esc, el
+// propio control de la ventana...) — sin esto, Configuracion > Vista se
+// quedaria diciendo "Pantalla completa" aunque ya no lo estuviera.
+if (window.electronAPI && window.electronAPI.onNativeFullscreenChange) {
+  window.electronAPI.onNativeFullscreenChange((isFullscreen) => {
+    if (isClosingPage) return;
+    if (!isFullscreen && getViewMode() === 'fullscreen') {
+      setViewMode('normal');
+    }
+  });
 }
 
 // Si sales de pantalla completa con Esc o con el propio navegador (no con
@@ -943,6 +987,15 @@ document.addEventListener('fullscreenchange', () => {
 function applyViewModePrompt() {
   const mode = getViewMode();
   const banner = document.getElementById('default-view-banner');
+
+  if (window.electronAPI && mode === 'fullscreen') {
+    // En Electron SI podemos activarla solos (ver applyViewMode), asi que
+    // ni falta el aviso.
+    window.electronAPI.setNativeFullscreen(true);
+    banner.classList.add('hidden');
+    return;
+  }
+
   if (mode === 'normal' || (mode === 'fullscreen' && document.fullscreenElement)) {
     banner.classList.add('hidden');
     return;

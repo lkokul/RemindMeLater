@@ -154,7 +154,7 @@
         <div class="reminders-top-block">
           <div class="reminders-panel-header">
             <h2 id="reminders-panel-title">Proximos recordatorios</h2>
-            <button type="button" id="btn-reminders-back" class="secondary-btn hidden">← Próximos</button>
+            <button type="button" id="btn-reminders-back" class="secondary-btn hidden">Próximos →</button>
           </div>
           <div id="reminders-day-actions" class="reminders-day-actions hidden">
             <button type="button" id="btn-day-mark-holiday" class="secondary-btn day-mark-btn">Festivo</button>
@@ -178,6 +178,7 @@
   <!-- Modal para crear / editar evento -->
   <div id="event-modal" class="modal hidden">
     <div class="modal-card">
+      <button type="button" id="btn-close-event" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2 id="event-modal-title">Nuevo evento</h2>
       <form id="event-form">
         <input type="hidden" id="event-id" />
@@ -240,6 +241,7 @@
        "todo el dia") y la fecha es opcional (ver btn-new-task en app.js). -->
   <div id="task-modal" class="modal hidden">
     <div class="modal-card">
+      <button type="button" id="btn-close-task" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2 id="task-modal-title">Nueva tarea</h2>
       <form id="task-form">
         <input type="hidden" id="task-id" />
@@ -444,6 +446,12 @@
         <h4>Tareas completadas</h4>
         <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>
         <div id="completed-tasks-display-options" class="view-mode-options"></div>
+
+        <!-- Solo tiene sentido en la app de escritorio (Electron) — un
+             navegador normal no tiene concepto de "salir", solo cerrar la
+             pestana. Oculto por defecto, ver refreshMobileTab en
+             settings.js. -->
+        <button type="button" id="btn-quit-app" class="danger-btn hidden" style="margin-top: 1rem; width: 100%;">Salir de la aplicación</button>
       </div>
 
       <!-- --- Atajos de teclado (ajuste local, no compartido) --- -->

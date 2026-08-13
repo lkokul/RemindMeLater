@@ -4,7 +4,7 @@
 // igual que con "npm run dev" — asi que emparejar el movil sigue
 // funcionando exactamente igual, tanto si usas la app instalada como si
 // usas el navegador.
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const http = require('http');
 
@@ -50,15 +50,36 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
 
   mainWindow.loadURL(`http://localhost:${PORT}/`);
 
+  // Avisa a la pagina si sales de pantalla completa nativa por tu cuenta
+  // (Esc, el propio control de la ventana...) para que Configuracion > Vista
+  // no se quede diciendo "Pantalla completa" cuando ya no lo es. Simetrico
+  // al 'fullscreenchange' que ya escucha app.js para el navegador normal.
+  mainWindow.on('enter-full-screen', () => {
+    mainWindow.webContents.send('native-fullscreen-changed', true);
+  });
+  mainWindow.on('leave-full-screen', () => {
+    mainWindow.webContents.send('native-fullscreen-changed', false);
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
+
+// Boton "Salir de la aplicacion" en Configuracion > Este dispositivo (solo
+// visible cuando corre dentro de Electron, ver preload.js y
+// public/settings.js). Cierra la ventana de golpe, sin preguntar — igual
+// que cerrar la ventana con la X del sistema operativo.
+ipcMain.on('quit-app', () => app.quit());
+ipcMain.on('set-fullscreen', (event, value) => {
+  if (mainWindow) mainWindow.setFullScreen(!!value);
+});
 
 app.whenReady().then(() => {
   // Arranca el servidor Express de siempre, sin tocarle nada — es el
