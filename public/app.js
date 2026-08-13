@@ -889,6 +889,11 @@ function getViewMode() {
 
 function setViewMode(mode) {
   localStorage.setItem('viewMode', mode);
+  // En Electron, ademas de localStorage (que solo puede leer la propia
+  // pagina), se lo decimos tambien al proceso principal — asi puede saber
+  // que vista tocaba ANTES de crear la ventana la proxima vez, en vez de
+  // enterarse ya con la pagina cargada (ver electron/main.js).
+  if (window.electronAPI && window.electronAPI.saveViewMode) window.electronAPI.saveViewMode(mode);
   document.getElementById('default-view-banner').classList.add('hidden');
   if (typeof refreshViewTab === 'function') refreshViewTab();
 }
