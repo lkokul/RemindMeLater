@@ -573,6 +573,13 @@ function applyThemeColors(colors) {
   THEME_COLOR_FIELDS_META.forEach(({ key, cssVar }) => {
     if (colors[key]) root.style.setProperty(cssVar, colors[key]);
   });
+  // Le dice al navegador si este tema es claro u oscuro para que los
+  // controles nativos que quedan (el iconito del reloj de
+  // <input type="time">, por ejemplo) usen la version clara/oscura que
+  // corresponda en vez de quedarse siempre con una — sin esto, el reloj
+  // se ve casi invisible en la combinacion equivocada (p.ej. negro sobre
+  // un tema oscuro).
+  if (colors.bg) root.style.colorScheme = isLightColors(colors) ? 'light' : 'dark';
 }
 
 // Aplica un tema a ESTE dispositivo: lo pinta, lo recuerda en localStorage

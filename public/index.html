@@ -129,9 +129,9 @@
            recordatorios de al lado). -->
       <div class="calendar-column">
         <nav class="month-nav-bar">
-          <button id="nav-prev" class="icon-btn" aria-label="Mes anterior">←</button>
+          <button id="nav-prev" class="icon-btn" aria-label="Mes anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
           <span id="current-month-label" class="month-label"></span>
-          <button id="nav-next" class="icon-btn" aria-label="Mes siguiente">→</button>
+          <button id="nav-next" class="icon-btn" aria-label="Mes siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
         </nav>
 
         <!-- Vista de escritorio: cuadricula del mes (CSS la oculta en movil) -->
@@ -195,14 +195,14 @@
             <span class="field-label">Inicio</span>
             <div class="datetime-row">
               <div id="event-start-date-field"></div>
-              <div id="event-start-time-field"></div>
+              <input type="time" id="event-start-time" required />
             </div>
           </div>
           <div class="field-label-block">
             <span class="field-label">Fin (opcional)</span>
             <div class="datetime-row">
               <div id="event-end-date-field"></div>
-              <div id="event-end-time-field"></div>
+              <input type="time" id="event-end-time" />
             </div>
           </div>
         </div>

@@ -87,7 +87,7 @@ button {
 .primary-btn { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
 .secondary-btn { background: transparent; }
 .danger-btn { background: transparent; color: var(--danger); border-color: var(--danger); }
-.icon-btn { padding: 0.5rem 0.7rem; }
+.icon-btn { padding: 0.5rem 0.7rem; display: inline-flex; align-items: center; justify-content: center; }
 /* Ancho fijo: si no, el glifo ☀/☾ mide un pelin distinto y el boton
    cambia de tamano al alternar, empujando "+ Nuevo evento" al lado. */
 #btn-quick-color-mode { width: 2.6rem; text-align: center; flex-shrink: 0; }
@@ -135,10 +135,10 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .checkbox-row input[type="checkbox"]::before {
   content: '';
   position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 1.1rem;
-  height: 1.1rem;
+  top: 2.5px;
+  left: 2.5px;
+  width: 1rem;
+  height: 1rem;
   border-radius: 50%;
   background: var(--surface-2-text);
   transition: transform 0.15s ease, background-color 0.15s ease;
@@ -148,7 +148,7 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   border-color: var(--accent);
 }
 .checkbox-row input[type="checkbox"]:checked::before {
-  transform: translateX(1rem);
+  transform: translateX(1.08rem);
   background: white;
 }
 .checkbox-row input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -767,7 +767,10 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    mas largo que "00:00") — sin este reparto, "Sin fecha" se partia en dos
    lineas. */
 .datetime-row .date-field { flex: 1.6; min-width: 0; }
-.datetime-row .select-field { flex: 1; min-width: 0; }
+.datetime-row input[type="time"] {
+  flex: 1; min-width: 0;
+  border-radius: var(--radius-sm); /* el resto de campos del formulario usa --radius-sm, no el --radius mas grande por defecto */
+}
 .date-popover {
   /* min() con el ancho de ventana para que nunca se salga ni se aplaste
      en ventanas pequenas (era un ancho fijo, "se peteaba" en pantallas
@@ -782,7 +785,7 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   margin-bottom: 0.4rem; font-size: 0.8rem; font-weight: 600;
 }
 .date-popover-nav .icon-btn { width: 1.6rem; height: 1.6rem; font-size: 0.75rem; flex-shrink: 0; }
-.date-popover-month-label { text-transform: capitalize; text-align: center; flex: 1; }
+.date-popover-month-label { text-align: center; flex: 1; }
 .date-popover-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .date-popover-weekday {
   text-align: center; font-size: 0.65rem; padding-bottom: 0.2rem;

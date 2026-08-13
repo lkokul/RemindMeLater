@@ -138,6 +138,13 @@ const CALENDAR_ICON_SVG = `<svg class="date-field-trigger-icon" width="15" heigh
   <line x1="3" y1="10" x2="21" y2="10"></line>
 </svg>`;
 
+// Flechas de mes anterior/siguiente en SVG en vez de los caracteres
+// "←"/"→": esos glifos no quedan centrados de verdad dentro de su caja en
+// muchas fuentes (se ven "desplazados" aunque la caja este bien centrada
+// por CSS) — un SVG a medida sí se centra pixel a pixel.
+const CHEVRON_LEFT_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>';
+const CHEVRON_RIGHT_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+
 // ---------------------------------------------------------------------
 // Selector de fecha con estilo propio: sustituye <input type="date"> (o
 // la parte de fecha de un datetime-local) por un boton que abre un
@@ -145,7 +152,7 @@ const CALENDAR_ICON_SVG = `<svg class="date-field-trigger-icon" width="15" heigh
 // grande (mes con flechas + cuadricula de dias), en vez del selector
 // nativo del navegador/SO, que no sigue el tema para nada. Reutiliza los
 // mismos ayudantes de fecha que el calendario grande (startOfMonth,
-// sameDay, WEEKDAY_LABELS, MONTH_FORMATTER), definidos mas abajo en este
+// sameDay, WEEKDAY_LABELS, formatMonthYear), definidos mas abajo en este
 // archivo — funciona porque esto solo se EJECUTA cuando alguien interactua
 // (clic en el boton), momento en el que el archivo entero ya esta cargado.
 // allowClear: si la fecha es opcional (tareas), anade un boton "Quitar
@@ -190,7 +197,7 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
     const prevBtn = document.createElement('button');
     prevBtn.type = 'button';
     prevBtn.className = 'icon-btn';
-    prevBtn.textContent = '←';
+    prevBtn.innerHTML = CHEVRON_LEFT_SVG;
     prevBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1);
@@ -198,11 +205,11 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
     });
     const label = document.createElement('span');
     label.className = 'date-popover-month-label';
-    label.textContent = MONTH_FORMATTER.format(viewMonth);
+    label.textContent = formatMonthYear(viewMonth);
     const nextBtn = document.createElement('button');
     nextBtn.type = 'button';
     nextBtn.className = 'icon-btn';
-    nextBtn.textContent = '→';
+    nextBtn.innerHTML = CHEVRON_RIGHT_SVG;
     nextBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1);
@@ -351,9 +358,17 @@ document.getElementById('pairing-form').addEventListener('submit', async (e) => 
 // Utilidades de fecha
 // ---------------------------------------------------------------------
 const WEEKDAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-const MONTH_FORMATTER = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' });
+const MONTH_ONLY_FORMATTER = new Intl.DateTimeFormat('es-ES', { month: 'long' });
 const DAY_HEADING_FORMATTER = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
 const TIME_FORMATTER = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+// "Agosto 2026" en vez del "agosto de 2026" que da Intl por defecto en
+// español (con "de" en medio, y en minuscula) — quitamos el "de" y
+// ponemos la mes en mayuscula inicial a mano.
+function formatMonthYear(date) {
+  const month = MONTH_ONLY_FORMATTER.format(date);
+  return `${month.charAt(0).toUpperCase()}${month.slice(1)} ${date.getFullYear()}`;
+}
 
 function startOfMonth(date) { return new Date(date.getFullYear(), date.getMonth(), 1); }
 function endOfMonth(date) { return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59); }
@@ -376,7 +391,7 @@ async function loadMonth() {
   const from = toIsoDate(startOfMonth(state.viewDate));
   const to = toIsoDate(endOfMonth(state.viewDate));
   state.events = await api(`/api/events?from=${from}T00:00:00&to=${to}T23:59:59`);
-  document.getElementById('current-month-label').textContent = MONTH_FORMATTER.format(state.viewDate);
+  document.getElementById('current-month-label').textContent = formatMonthYear(state.viewDate);
   renderCalendarGrid();
   renderAgendaList();
 }
@@ -644,35 +659,17 @@ document.getElementById('event-start-date-field').appendChild(eventStartDateFiel
 const eventEndDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
 document.getElementById('event-end-date-field').appendChild(eventEndDateField.element);
 
-// Opciones de hora cada 15 minutos ("00:00".."23:45"), reutilizando el
-// mismo componente createSelectField que el resto de desplegables (en vez
-// de <input type="time">, que tampoco seguia el tema) — al abrirlo ya
-// hace scroll solo hasta la hora elegida (ver createSelectField).
-function buildTimeOptions() {
-  const options = [];
-  for (let h = 0; h < 24; h++) {
-    for (let m = 0; m < 60; m += 15) {
-      const value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-      options.push({ value, label: value });
-    }
-  }
-  return options;
-}
-const TIME_OPTIONS = buildTimeOptions();
-
+// Volvimos a <input type="time"> nativo (habia pasado a ser un
+// desplegable de opciones cada 15 min, como el resto de selectores, pero
+// Koku prefirio poder escribir la hora directamente en vez de desplazarse
+// por una lista) — se le da estilo por CSS para que combine con el resto
+// (ver "input, textarea, select" en styles.css), aunque el iconito del
+// reloj se queda con el color que le pone el navegador, eso no se puede
+// tocar con CSS.
 function toTimeInputValue(date) {
   const pad = (n) => String(n).padStart(2, '0');
-  // Redondea al cuarto de hora mas cercano por abajo, para que coincida
-  // con una de las opciones de TIME_OPTIONS.
-  const roundedMinutes = Math.floor(date.getMinutes() / 15) * 15;
-  return `${pad(date.getHours())}:${pad(roundedMinutes)}`;
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
-
-const eventStartTimeField = createSelectField({ options: TIME_OPTIONS, initialValue: toTimeInputValue(new Date()) });
-document.getElementById('event-start-time-field').appendChild(eventStartTimeField.element);
-
-const eventEndTimeField = createSelectField({ options: TIME_OPTIONS, initialValue: toTimeInputValue(new Date()) });
-document.getElementById('event-end-time-field').appendChild(eventEndTimeField.element);
 
 // Junta un Date (solo se usa su dia/mes/año) con un "HH:mm" en un unico
 // string "YYYY-MM-DDTHH:mm:ss" para mandar al servidor — el selector de
@@ -700,15 +697,15 @@ function openEventModal(event, presetDate) {
   }
   const startDate = event ? new Date(event.startAt) : defaultStart;
   eventStartDateField.setValue(startDate);
-  eventStartTimeField.setValue(toTimeInputValue(startDate));
+  document.getElementById('event-start-time').value = toTimeInputValue(startDate);
 
   if (event && event.endAt) {
     const endDate = new Date(event.endAt);
     eventEndDateField.setValue(endDate);
-    eventEndTimeField.setValue(toTimeInputValue(endDate));
+    document.getElementById('event-end-time').value = toTimeInputValue(endDate);
   } else {
     eventEndDateField.setValue(null);
-    eventEndTimeField.setValue(toTimeInputValue(startDate));
+    document.getElementById('event-end-time').value = toTimeInputValue(startDate);
   }
   document.getElementById('event-location').value = event && event.location ? event.location : '';
   document.getElementById('event-description').value = event && event.description ? event.description : '';
@@ -751,8 +748,8 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
   const payload = {
     title: document.getElementById('event-title').value,
     allDay: document.getElementById('event-all-day').checked,
-    startAt: combineDateAndTime(startDate, eventStartTimeField.getValue()),
-    endAt: endDate ? combineDateAndTime(endDate, eventEndTimeField.getValue()) : null,
+    startAt: combineDateAndTime(startDate, document.getElementById('event-start-time').value),
+    endAt: endDate ? combineDateAndTime(endDate, document.getElementById('event-end-time').value) : null,
     location: document.getElementById('event-location').value || null,
     description: document.getElementById('event-description').value || null,
     reminderMinutesBefore: reminderRaw === '' ? null : Number(reminderRaw),
