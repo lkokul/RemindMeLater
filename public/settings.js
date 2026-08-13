@@ -367,8 +367,14 @@ function refreshViewTab() {
   }
 }
 
+// Salir de la pestana Estilo (volver al menu, o cerrar Configuracion del
+// todo) sin haber guardado descarta el borrador que hubiera a medias —
+// closeThemeForm() no hace nada raro si no habia ningun tema en edicion.
 document.querySelectorAll('[data-back]').forEach((btn) => {
-  btn.addEventListener('click', () => showSettingsScreen(null));
+  btn.addEventListener('click', () => {
+    closeThemeForm();
+    showSettingsScreen(null);
+  });
 });
 
 function openSettingsModal() {
@@ -379,6 +385,7 @@ function openSettingsModal() {
 
 document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-close-settings').addEventListener('click', () => {
+  closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
   clearInterval(pairingCountdownTimer);
 });
@@ -386,17 +393,27 @@ document.getElementById('btn-close-settings').addEventListener('click', () => {
 // ---------------------------------------------------------------------
 // Estilo: biblioteca de temas compartida + cual tengo activo YO
 // ---------------------------------------------------------------------
+// Cada fondo real de la app lleva su propio color de contraste al lado
+// (marcado con contrastFor), en vez de un "texto principal/secundario"
+// unico para toda la interfaz — asi cada superficie garantiza su propia
+// legibilidad sin importar lo distinta que sea del resto del tema. El
+// editor de temas (buildThemeColorGrid) agrupa cada fondo con su contraste
+// justo debajo.
 const THEME_COLOR_FIELDS_META = [
   { key: 'bg', cssVar: '--bg', label: 'Fondo general' },
+  { key: 'bgText', cssVar: '--bg-text', label: 'Contraste sobre fondo general', contrastFor: 'bg' },
   { key: 'surface', cssVar: '--surface', label: 'Fondo de tarjetas' },
+  { key: 'surfaceText', cssVar: '--surface-text', label: 'Contraste sobre tarjetas', contrastFor: 'surface' },
   { key: 'surface2', cssVar: '--surface-2', label: 'Fondo de campos y botones' },
+  { key: 'surface2Text', cssVar: '--surface-2-text', label: 'Contraste sobre campos y botones', contrastFor: 'surface2' },
   { key: 'border', cssVar: '--border', label: 'Bordes' },
-  { key: 'text', cssVar: '--text', label: 'Texto principal' },
-  { key: 'textDim', cssVar: '--text-dim', label: 'Texto secundario' },
   { key: 'accent', cssVar: '--accent', label: 'Acento (botones)' },
+  { key: 'accentText', cssVar: '--accent-text', label: 'Contraste sobre el acento', contrastFor: 'accent' },
   { key: 'danger', cssVar: '--danger', label: 'Aviso (eliminar)' },
   { key: 'settingsMenuBg', cssVar: '--settings-menu-bg', label: 'Fondo del menú de Configuración' },
+  { key: 'settingsMenuText', cssVar: '--settings-menu-text', label: 'Contraste sobre el menú de Configuración', contrastFor: 'settingsMenuBg' },
   { key: 'dayToday', cssVar: '--day-today', label: 'Calendario: número del día de hoy' },
+  { key: 'dayTodayText', cssVar: '--day-today-text', label: 'Contraste sobre el día de hoy', contrastFor: 'dayToday' },
   { key: 'dayWeekend', cssVar: '--day-weekend', label: 'Calendario: fin de semana' },
   { key: 'dayHoliday', cssVar: '--day-holiday', label: 'Calendario: festivo (marcado a mano)' },
   { key: 'daySpecial', cssVar: '--day-special', label: 'Calendario: día especial (marcado a mano)' },
@@ -405,22 +422,39 @@ const THEME_COLOR_FIELDS_META = [
 let themeLibrary = [];
 const themeColorFields = {};
 
+// Estas dos tienen que existir YA (antes de buildThemeColorGrid(), que se
+// llama mas abajo nada mas cargar la pagina): crear cada campo de color
+// dispara su onChange una vez para pintar el cuadradito inicial, y ese
+// onChange llama a markThemeDraftDirty(), que las lee. Si se declararan
+// mas abajo (donde tocaria por tema), esa primera llamada explotaria por
+// "acceder antes de inicializar" y dejaria sin registrar TODO lo que
+// venga despues en este archivo (atajos, dispositivos, grupos...) — asi
+// se rompio "volver"/"cerrar" en Configuracion la vez anterior.
+let themeDraftDirty = false;
+let suppressDirtyTracking = false;
+
 function buildThemeColorGrid() {
   const grid = document.getElementById('theme-color-grid');
   grid.innerHTML = '';
-  THEME_COLOR_FIELDS_META.forEach(({ key, label }) => {
+  THEME_COLOR_FIELDS_META.forEach(({ key, label, contrastFor }) => {
     const item = document.createElement('div');
-    item.className = 'theme-color-item';
+    item.className = 'theme-color-item' + (contrastFor ? ' theme-color-item-contrast' : '');
     const labelEl = document.createElement('span');
     labelEl.textContent = label;
-    const field = createColorField({ initialValue: '#5b8cff' });
+    const field = createColorField({ initialValue: '#5b8cff', onChange: () => markThemeDraftDirty() });
     themeColorFields[key] = field;
     item.appendChild(labelEl);
     item.appendChild(field.element);
     grid.appendChild(item);
   });
 }
+// Crear cada campo pinta su cuadradito inicial, lo que dispara su
+// onChange una vez por campo — como eso pasa MIENTRAS SE VAN CREANDO
+// (los campos que todavia no existen no se pueden leer), tiene que
+// contar como inicializacion, no como que la persona ha tocado algo.
+suppressDirtyTracking = true;
 buildThemeColorGrid();
+suppressDirtyTracking = false;
 
 // ---------------------------------------------------------------------
 // Un poco de matematicas de color, para la variante inversa (claro/oscuro
@@ -512,10 +546,16 @@ function readColorFieldsValues() {
   return values;
 }
 
+// OJO: esto dispara el onChange de cada campo (para repintar el
+// cuadradito), pero es una restauracion programatica, no un cambio hecho
+// por la persona — por eso silencia el marcado de "borrador sucio"
+// mientras escribe los 17 valores de golpe (ver suppressDirtyTracking).
 function writeColorFieldsValues(values) {
+  suppressDirtyTracking = true;
   THEME_COLOR_FIELDS_META.forEach(({ key }) => {
     themeColorFields[key].setValue((values && values[key]) || '#5b8cff');
   });
+  suppressDirtyTracking = false;
 }
 
 // Aplica un juego de colores a la pagina cambiando las variables CSS del
@@ -538,6 +578,7 @@ async function applyTheme(theme, { persist = true } = {}) {
   localStorage.setItem('activeThemeId', String(theme.id));
   localStorage.setItem('activeThemeColors', JSON.stringify(colors));
   renderThemeLibrary();
+  refreshQuickColorModeButton();
 
   if (persist) {
     try {
@@ -574,6 +615,31 @@ function setColorModePreference(mode) {
   else renderThemeLibrary();
 }
 
+// Atajo en la topbar para alternar claro/oscuro sin entrar en
+// Configuracion (ademas de la forma "oficial" en Configuracion > Estilo).
+// Solo tiene sentido si el tema activo lleva variante emparejada — si no,
+// no hay a que alternar y el boton se esconde.
+function refreshQuickColorModeButton() {
+  const btn = document.getElementById('btn-quick-color-mode');
+  if (!btn) return;
+  const activeTheme = themeLibrary.find((t) => t.id === Number(localStorage.getItem('activeThemeId')));
+  if (!activeTheme || !activeTheme.inverseColors) {
+    btn.classList.add('hidden');
+    return;
+  }
+  btn.classList.remove('hidden');
+  const resolvedIsLight = isLightColors(resolveThemeVariant(activeTheme));
+  btn.textContent = resolvedIsLight ? '☀' : '☾';
+  btn.title = `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}`;
+}
+
+document.getElementById('btn-quick-color-mode').addEventListener('click', () => {
+  const activeTheme = themeLibrary.find((t) => t.id === Number(localStorage.getItem('activeThemeId')));
+  if (!activeTheme || !activeTheme.inverseColors) return;
+  const resolvedIsLight = isLightColors(resolveThemeVariant(activeTheme));
+  setColorModePreference(resolvedIsLight ? 'dark' : 'light');
+});
+
 function refreshColorModeOptions() {
   const container = document.getElementById('color-mode-options');
   if (!container) return;
@@ -607,6 +673,7 @@ async function refreshStyleTab() {
   themeLibrary = await api('/api/themes');
   refreshColorModeOptions();
   renderThemeLibrary();
+  refreshQuickColorModeButton();
   await refreshThemeCopyList();
 }
 
@@ -655,38 +722,58 @@ function renderThemeLibrary() {
     const card = document.createElement('div');
     card.className = 'theme-card' + (isActive ? ' active' : '');
     card.dataset.themeId = String(theme.id);
-    const useButtonHtml = isActive
-      ? '<button type="button" class="use-btn-disabled" disabled>En uso</button>'
-      : '<button type="button" data-action="use" class="primary-btn">Usar</button>';
+    const activeBadge = isActive ? '<span class="theme-active-badge">En uso</span>' : '';
     const resolved = resolveThemeVariant(theme);
-    // Si el tema tiene pareja, una etiqueta clicable con la variante que
-    // se ve ahora mismo (Oscuro/Claro); al pulsarla, pasa a la otra.
+    // Si el tema tiene pareja, una etiqueta con la variante que se ve
+    // ahora mismo (Oscuro/Claro). Solo se puede alternar si el tema ya
+    // esta en uso — si no, un clic en cualquier parte de la tarjeta
+    // (incluida esta etiqueta) lo activa primero, igual que el resto.
     const resolvedIsLight = isLightColors(resolved);
     const pairBadge = theme.inverseColors
-      ? `<button type="button" data-action="toggle-variant" class="theme-pair-badge" title="Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}">${resolvedIsLight ? '☀ Claro' : '☾ Oscuro'}</button>`
+      ? `<button type="button" data-action="toggle-variant" class="theme-pair-badge" title="${isActive ? `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}` : 'Fija este tema para poder cambiar de variante'}">${resolvedIsLight ? '☀ Claro' : '☾ Oscuro'}</button>`
       : '';
     card.innerHTML = `
-      <div class="theme-card-preview">
-        <span class="color-dot" style="background-color:${resolved.bg}"></span>
-        <span class="color-dot" style="background-color:${resolved.surface}"></span>
-        <span class="color-dot" style="background-color:${resolved.accent}"></span>
-        <span class="color-dot" style="background-color:${resolved.danger}"></span>
+      <div class="theme-card-top">
+        <div class="theme-card-preview">
+          <span class="color-dot" style="background-color:${resolved.bg}"></span>
+          <span class="color-dot" style="background-color:${resolved.surface}"></span>
+          <span class="color-dot" style="background-color:${resolved.accent}"></span>
+          <span class="color-dot" style="background-color:${resolved.danger}"></span>
+        </div>
+        ${activeBadge}
       </div>
       <div class="theme-card-name">${escapeHtml(theme.name)} ${pairBadge}</div>
       <div class="theme-card-actions">
-        ${useButtonHtml}
         <button type="button" data-action="edit" class="secondary-btn">Editar</button>
         <button type="button" data-action="export" class="secondary-btn">Exportar</button>
       </div>
     `;
-    const useBtn = card.querySelector('[data-action="use"]');
-    if (useBtn) useBtn.addEventListener('click', () => applyTheme(theme));
-    card.querySelector('[data-action="edit"]').addEventListener('click', () => openThemeForm(theme));
-    card.querySelector('[data-action="export"]').addEventListener('click', () => exportTheme(theme));
+    // Clicar la tarjeta (fuera de sus botones, que paran la propagacion)
+    // fija ese tema como el de este dispositivo — ya no hace falta un
+    // boton "Usar" aparte. Si ya esta en uso, no hay nada que hacer.
+    if (!isActive) {
+      card.addEventListener('click', () => applyTheme(theme));
+    }
+    card.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchThemeEdit(theme);
+    });
+    card.querySelector('[data-action="export"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      exportTheme(theme);
+    });
     const toggleBtn = card.querySelector('[data-action="toggle-variant"]');
     if (toggleBtn) {
       toggleBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (!isActive) {
+          // Aun no esta en uso: un clic aqui lo fija primero (con la
+          // variante que le tocaria ahora mismo), igual que clicar el
+          // resto de la tarjeta. Cambiar de variante sera el SIGUIENTE
+          // clic, una vez ya este activo.
+          applyTheme(theme);
+          return;
+        }
         setColorModePreference(resolvedIsLight ? 'dark' : 'light');
       });
     }
@@ -696,13 +783,20 @@ function renderThemeLibrary() {
   positionThemeForm();
 }
 
-// Mientras se edita un tema, los 9 campos del formulario se reutilizan
-// para las dos variantes (Principal/Inversa) — estas tres variables
-// guardan que lado se esta viendo ahora y los valores del que NO se esta
-// viendo, para no perderlos al saltar de uno a otro.
+// Mientras se edita un tema, los campos del formulario se reutilizan
+// para las dos variantes (Principal/Inversa) — estas dos variables
+// guardan los valores del lado que NO se esta viendo ahora, para no
+// perderlos al saltar de uno a otro.
 let editingMainColors = null;
 let editingInverseColors = null;
 let editingColorSide = 'main';
+
+// themeDraftDirty/suppressDirtyTracking se declaran mas arriba, justo
+// antes de buildThemeColorGrid() — mientras sea dirty=true, aparece el
+// boton "Guardar cambios del tema" y los colores en pantalla son la
+// VISTA PREVIA en vivo del borrador, no el tema activo de verdad. Se
+// guarda solo (no hace falta pulsar nada) al saltar a editar otro tema;
+// se descarta si se cierra sin guardar (Cancelar o salir de Configuracion).
 
 function updateThemeColorSideUI() {
   const switcher = document.getElementById('theme-color-side-switch');
@@ -710,6 +804,29 @@ function updateThemeColorSideUI() {
   switcher.querySelectorAll('.theme-side-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.side === editingColorSide);
   });
+}
+
+// Pinta AHORA MISMO, en toda la app (no solo en los cuadraditos del
+// formulario), el lado que se este editando — asi se juzga el contraste
+// de verdad, viendo el menu de Configuracion y el resto de la interfaz
+// con esos colores, en vez de fiarse solo de la vista previa pequena.
+function previewCurrentThemeEdit() {
+  applyThemeColors(readColorFieldsValues());
+}
+
+function markThemeDraftDirty() {
+  if (suppressDirtyTracking) return;
+  themeDraftDirty = true;
+  document.getElementById('btn-save-theme-changes').classList.remove('hidden');
+  previewCurrentThemeEdit();
+}
+
+// Deshace la vista previa en vivo: vuelve a pintar el tema que este
+// dispositivo tenga activo de verdad. Se llama al cancelar o cerrar sin
+// guardar, para no dejar la app con colores de un borrador descartado.
+function revertLiveThemePreview() {
+  const activeTheme = themeLibrary.find((t) => t.id === Number(localStorage.getItem('activeThemeId')));
+  if (activeTheme) applyThemeColors(resolveThemeVariant(activeTheme));
 }
 
 function switchColorSide(side) {
@@ -721,6 +838,7 @@ function switchColorSide(side) {
   editingColorSide = side;
   writeColorFieldsValues(side === 'main' ? editingMainColors : editingInverseColors);
   updateThemeColorSideUI();
+  previewCurrentThemeEdit();
 }
 
 document.querySelectorAll('#theme-color-side-switch .theme-side-btn').forEach((btn) => {
@@ -745,7 +863,10 @@ document.getElementById('theme-inverse-toggle').addEventListener('change', (e) =
     }
   }
   updateThemeColorSideUI();
+  markThemeDraftDirty();
 });
+
+document.getElementById('theme-name').addEventListener('input', markThemeDraftDirty);
 
 function openThemeForm(theme) {
   editingThemeId = theme ? theme.id : null;
@@ -771,22 +892,34 @@ function openThemeForm(theme) {
   document.getElementById('theme-inverse-toggle').checked = !!editingInverseColors;
   updateThemeColorSideUI();
 
+  // Un tema nuevo ya arranca "sucio": hace falta guardarlo al menos una
+  // vez para que exista de verdad. Uno existente arranca limpio.
+  themeDraftDirty = !theme;
+  document.getElementById('btn-save-theme-changes').classList.toggle('hidden', !themeDraftDirty);
+
   document.getElementById('btn-delete-theme').classList.toggle('hidden', !theme);
   document.getElementById('theme-form').classList.remove('hidden');
   document.getElementById('theme-name').focus();
+
+  previewCurrentThemeEdit();
 }
 
+// Cierra el formulario SIN guardar: descarta el borrador y devuelve la
+// app al tema activo de verdad.
 function closeThemeForm() {
   document.getElementById('theme-form').classList.add('hidden');
+  document.getElementById('btn-save-theme-changes').classList.add('hidden');
   editingThemeId = null;
+  themeDraftDirty = false;
+  revertLiveThemePreview();
   positionThemeForm();
 }
 
-document.getElementById('btn-new-theme').addEventListener('click', () => openThemeForm(null));
-document.getElementById('btn-cancel-theme').addEventListener('click', closeThemeForm);
-
-document.getElementById('theme-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
+// Guarda de verdad (POST/PUT al servidor) lo que haya ahora mismo en el
+// formulario. La usa tanto el boton "Guardar cambios del tema" como el
+// salto automatico a editar otro tema, para no perder nada al cambiar de
+// tarjeta sin haber guardado antes.
+async function saveCurrentThemeEdit() {
   const id = document.getElementById('theme-id').value;
 
   // Lo que se ve AHORA MISMO en los campos pertenece al lado que se
@@ -806,12 +939,41 @@ document.getElementById('theme-form').addEventListener('submit', async (e) => {
     ? await api(`/api/themes/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
     : await api('/api/themes', { method: 'POST', body: JSON.stringify(payload) });
 
-  closeThemeForm();
+  document.getElementById('theme-form').classList.add('hidden');
+  document.getElementById('btn-save-theme-changes').classList.add('hidden');
+  editingThemeId = null;
+  themeDraftDirty = false;
+  positionThemeForm();
   await refreshStyleTab();
 
   // Si el tema que acabamos de guardar es el que tenemos activo, refresca
   // los colores en pantalla al momento (por si edito el que esta usando).
   if (Number(localStorage.getItem('activeThemeId')) === saved.id) applyTheme(saved, { persist: false });
+  return saved;
+}
+
+// Punto de entrada para "Editar" en cualquier tarjeta y para "+ Crear
+// tema": si ya habia un borrador sin guardar DE OTRO tema, lo guarda
+// primero solo (sin preguntar) y despues abre el nuevo — asi cambiar de
+// tarjeta mientras editas no te bloquea ni te hace perder lo que llevabas.
+async function switchThemeEdit(theme) {
+  const targetId = theme ? theme.id : null;
+  // Ya esta abierto este mismo tema: no lo reabrimos (eso reiniciaria el
+  // borrador y perderias lo que llevabas sin guardar).
+  if (editingThemeId === targetId && !document.getElementById('theme-form').classList.contains('hidden')) return;
+  if (themeDraftDirty && editingThemeId !== targetId) {
+    await saveCurrentThemeEdit();
+  }
+  openThemeForm(theme);
+}
+
+document.getElementById('btn-new-theme').addEventListener('click', () => switchThemeEdit(null));
+document.getElementById('btn-cancel-theme').addEventListener('click', closeThemeForm);
+document.getElementById('btn-save-theme-changes').addEventListener('click', saveCurrentThemeEdit);
+
+document.getElementById('theme-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await saveCurrentThemeEdit();
 });
 
 document.getElementById('btn-delete-theme').addEventListener('click', async () => {
@@ -819,7 +981,11 @@ document.getElementById('btn-delete-theme').addEventListener('click', async () =
   if (!id) return;
   if (!confirm('¿Eliminar este tema? Los dispositivos que lo tuvieran activo se quedaran sin tema.')) return;
   await api(`/api/themes/${id}`, { method: 'DELETE' });
-  closeThemeForm();
+  document.getElementById('theme-form').classList.add('hidden');
+  document.getElementById('btn-save-theme-changes').classList.add('hidden');
+  editingThemeId = null;
+  themeDraftDirty = false;
+  positionThemeForm();
   await refreshStyleTab();
 });
 
@@ -917,6 +1083,7 @@ async function syncActiveTheme() {
       const theme = themeLibrary.find((t) => t.id === mine.themeId);
       if (theme) await applyTheme(theme, { persist: false });
     }
+    refreshQuickColorModeButton();
   } catch (err) {
     // Pantalla de emparejamiento, sin red, etc.: nos quedamos con lo que
     // hubiera en cache local. No hace falta avisar de nada aqui.
@@ -1262,9 +1429,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const dayModal = document.getElementById('day-modal');
-  if (dayModal && !dayModal.classList.contains('hidden')) {
-    closeDayModal();
+  if (typeof state !== 'undefined' && state.remindersMode === 'day') {
+    showUpcomingReminders();
     return;
   }
 

@@ -193,6 +193,46 @@ if (!yaFusionado) {
   }
 }
 
+// Migracion puntual: los temas se guardaban con un "texto principal" y un
+// "texto secundario" GLOBALES (claves text/textDim), compartidos por toda
+// la app sin importar sobre que fondo cayeran — eso es precisamente lo que
+// causaba el bug de contraste (un texto pensado para un fondo se aplicaba
+// tambien sobre otro fondo distinto del mismo tema). Ahora cada fondo real
+// (bg, surface, surface2, settingsMenuBg, accent, dayToday) lleva su propio
+// color de contraste. Aqui se migra cualquier tema guardado en el formato
+// viejo (tiene "text" pero no "bgText") copiando ese texto global a los
+// nuevos campos — es un punto de partida razonable, editable a mano
+// despues desde Configuracion. Idempotente: una vez migrado ya tiene
+// "bgText" y esta funcion lo deja tal cual.
+function migrateLegacyTextColors(colorsJson) {
+  if (!colorsJson) return colorsJson;
+  let colors;
+  try {
+    colors = JSON.parse(colorsJson);
+  } catch {
+    return colorsJson;
+  }
+  if (!colors || typeof colors !== 'object' || colors.bgText || !colors.text) return colorsJson;
+
+  colors.bgText = colors.text;
+  colors.surfaceText = colors.text;
+  colors.surface2Text = colors.text;
+  colors.settingsMenuText = colors.text;
+  colors.accentText = colors.accentText || '#ffffff';
+  colors.dayTodayText = colors.dayTodayText || '#ffffff';
+  return JSON.stringify(colors);
+}
+
+const themeRowsToMigrate = db.prepare('SELECT id, colors, inverse_colors FROM themes').all();
+const updateThemeColors = db.prepare('UPDATE themes SET colors = ?, inverse_colors = ? WHERE id = ?');
+for (const row of themeRowsToMigrate) {
+  const migratedColors = migrateLegacyTextColors(row.colors);
+  const migratedInverse = migrateLegacyTextColors(row.inverse_colors);
+  if (migratedColors !== row.colors || migratedInverse !== row.inverse_colors) {
+    updateThemeColors.run(migratedColors, migratedInverse, row.id);
+  }
+}
+
 // Semilla de temas de partida. Se comprueba UNO A UNO por nombre (no solo
 // "si la tabla esta vacia") para poder anadir temas nuevos en versiones
 // futuras — como Pastel y Neon aqui — sin duplicar los que ya tenga
@@ -203,30 +243,38 @@ const SEED_THEMES = [
     name: 'Predeterminado',
     colors: {
       bg: '#0f1115',
+      bgText: '#e8eaed',
       surface: '#171a21',
+      surfaceText: '#e8eaed',
       surface2: '#1f232c',
+      surface2Text: '#e8eaed',
       border: '#2a2f3a',
-      text: '#e8eaed',
-      textDim: '#9aa0ab',
       accent: '#5b8cff',
+      accentText: '#ffffff',
       danger: '#ff6b6b',
       settingsMenuBg: '#1f232c',
+      settingsMenuText: '#e8eaed',
       dayToday: '#5b8cff',
+      dayTodayText: '#ffffff',
       dayWeekend: '#1a1d27',
       dayHoliday: '#3a2020',
       daySpecial: '#2a1f3a',
     },
     inverseColors: {
       bg: '#f5f6f8',
+      bgText: '#1a1d23',
       surface: '#ffffff',
+      surfaceText: '#1a1d23',
       surface2: '#eef0f3',
+      surface2Text: '#1a1d23',
       border: '#dfe3e8',
-      text: '#1a1d23',
-      textDim: '#6b7280',
       accent: '#5b8cff',
+      accentText: '#ffffff',
       danger: '#e0455b',
       settingsMenuBg: '#eef0f3',
+      settingsMenuText: '#1a1d23',
       dayToday: '#5b8cff',
+      dayTodayText: '#ffffff',
       dayWeekend: '#e8edfb',
       dayHoliday: '#fbeaea',
       daySpecial: '#f1eafc',
@@ -236,15 +284,19 @@ const SEED_THEMES = [
     name: 'Pastel',
     colors: {
       bg: '#faf3f7',
+      bgText: '#4a3b46',
       surface: '#ffffff',
+      surfaceText: '#4a3b46',
       surface2: '#f3e6ef',
+      surface2Text: '#4a3b46',
       border: '#e6d3e0',
-      text: '#4a3b46',
-      textDim: '#8a7686',
       accent: '#f2a6c6',
+      accentText: '#4a3b46',
       danger: '#e8909a',
       settingsMenuBg: '#f3e6ef',
+      settingsMenuText: '#4a3b46',
       dayToday: '#f2a6c6',
+      dayTodayText: '#4a3b46',
       dayWeekend: '#f0e6f5',
       dayHoliday: '#fbdfe0',
       daySpecial: '#e4e0fb',
@@ -254,15 +306,19 @@ const SEED_THEMES = [
     name: 'Neón',
     colors: {
       bg: '#0a0a12',
+      bgText: '#e6e6ff',
       surface: '#12121e',
+      surfaceText: '#e6e6ff',
       surface2: '#1a1a2e',
+      surface2Text: '#e6e6ff',
       border: '#2d2d44',
-      text: '#e6e6ff',
-      textDim: '#8888aa',
       accent: '#00f0ff',
+      accentText: '#0a0a12',
       danger: '#ff2079',
       settingsMenuBg: '#1a1a2e',
+      settingsMenuText: '#e6e6ff',
       dayToday: '#00f0ff',
+      dayTodayText: '#0a0a12',
       dayWeekend: '#14142a',
       dayHoliday: '#2a1020',
       daySpecial: '#10202a',

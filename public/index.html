@@ -30,18 +30,30 @@
       var colors = JSON.parse(cached);
       var root = document.documentElement;
       var map = {
-        bg: '--bg', surface: '--surface', surface2: '--surface-2', border: '--border',
-        text: '--text', textDim: '--text-dim', accent: '--accent', danger: '--danger',
-        settingsMenuBg: '--settings-menu-bg',
-        dayToday: '--day-today', dayWeekend: '--day-weekend',
-        dayHoliday: '--day-holiday', daySpecial: '--day-special',
+        bg: '--bg', bgText: '--bg-text',
+        surface: '--surface', surfaceText: '--surface-text',
+        surface2: '--surface-2', surface2Text: '--surface-2-text',
+        border: '--border',
+        accent: '--accent', accentText: '--accent-text',
+        danger: '--danger',
+        settingsMenuBg: '--settings-menu-bg', settingsMenuText: '--settings-menu-text',
+        dayToday: '--day-today', dayTodayText: '--day-today-text',
+        dayWeekend: '--day-weekend', dayHoliday: '--day-holiday', daySpecial: '--day-special',
       };
-      // Si la cache es de antes de que existiera settingsMenuBg (o de una
-      // variante inversa a la que le falta ese dato), usamos su propio
-      // surface2 en vez de dejar el valor por defecto del CSS (que es el
-      // oscuro) — asi un tema claro incompleto no se queda con un fondo
-      // de menu oscuro y texto sin contraste.
+      // Si la cache es de antes de que cada fondo tuviera su propio color
+      // de contraste (formato viejo, con "text"/"textDim" globales), o de
+      // una variante inversa a la que le falta algun dato, rellenamos con
+      // el mismo patron de "heredar de la superficie mas parecida DE ESTE
+      // MISMO tema" que usa sanitizeColors() en el servidor — asi un tema
+      // incompleto no se queda con contraste del tema oscuro por defecto
+      // aunque el resto sea claro.
       if (!colors.settingsMenuBg) colors.settingsMenuBg = colors.surface2;
+      if (!colors.bgText) colors.bgText = colors.text;
+      if (!colors.surfaceText) colors.surfaceText = colors.surfaceText || colors.bgText || colors.text;
+      if (!colors.surface2Text) colors.surface2Text = colors.surface2Text || colors.surfaceText || colors.text;
+      if (!colors.settingsMenuText) colors.settingsMenuText = colors.settingsMenuText || colors.surface2Text || colors.text;
+      if (!colors.accentText) colors.accentText = colors.accentText || '#ffffff';
+      if (!colors.dayTodayText) colors.dayTodayText = colors.dayTodayText || colors.accentText || '#ffffff';
       Object.keys(map).forEach(function (key) {
         if (colors[key]) root.style.setProperty(map[key], colors[key]);
       });
@@ -100,31 +112,51 @@
       </div>
       <nav class="topbar-actions">
         <button id="btn-new-event" class="primary-btn">+ Nuevo evento</button>
+        <!-- Atajo rapido para alternar claro/oscuro sin entrar en
+             Configuracion — solo se ve si el tema activo tiene variante
+             emparejada (si no, no hay a que alternar). Ver
+             refreshQuickColorModeButton() en settings.js; la forma
+             "oficial" de cambiarlo sigue estando en Configuracion > Estilo. -->
+        <button id="btn-quick-color-mode" class="icon-btn hidden" aria-label="Cambiar entre claro y oscuro"></button>
         <button id="btn-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </nav>
     </header>
 
-    <!-- Mes con flechas: encima del calendario, no en el header. -->
-    <nav class="month-nav-bar">
-      <button id="nav-prev" class="icon-btn" aria-label="Mes anterior">←</button>
-      <span id="current-month-label" class="month-label"></span>
-      <button id="nav-next" class="icon-btn" aria-label="Mes siguiente">→</button>
-    </nav>
-
     <main class="layout">
-      <!-- Vista de escritorio: cuadricula del mes (CSS la oculta en movil) -->
-      <section class="calendar-grid-wrap desktop-only">
-        <div id="calendar-grid" class="calendar-grid"></div>
-      </section>
+      <!-- Columna del calendario: el mes con flechas va centrado AQUI
+           (no en todo el ancho de la app, ni contando el panel de
+           recordatorios de al lado). -->
+      <div class="calendar-column">
+        <nav class="month-nav-bar">
+          <button id="nav-prev" class="icon-btn" aria-label="Mes anterior">←</button>
+          <span id="current-month-label" class="month-label"></span>
+          <button id="nav-next" class="icon-btn" aria-label="Mes siguiente">→</button>
+        </nav>
 
-      <!-- Vista de movil: agenda en lista, mas comoda para tocar -->
-      <section class="agenda-wrap mobile-only">
-        <div id="agenda-list" class="agenda-list"></div>
-      </section>
+        <!-- Vista de escritorio: cuadricula del mes (CSS la oculta en movil) -->
+        <section class="calendar-grid-wrap desktop-only">
+          <div id="calendar-grid" class="calendar-grid"></div>
+        </section>
 
-      <!-- Panel de proximos recordatorios: visible en ambas vistas -->
+        <!-- Vista de movil: agenda en lista, mas comoda para tocar -->
+        <section class="agenda-wrap mobile-only">
+          <div id="agenda-list" class="agenda-list"></div>
+        </section>
+      </div>
+
+      <!-- Panel de recordatorios: por defecto los proximos, o los
+           eventos de un dia concreto si has clicado uno en el
+           calendario (ver showDayInReminders en app.js). -->
       <aside class="reminders-panel">
-        <h2>Proximos recordatorios</h2>
+        <div class="reminders-panel-header">
+          <h2 id="reminders-panel-title">Proximos recordatorios</h2>
+          <button type="button" id="btn-reminders-back" class="secondary-btn hidden">← Próximos</button>
+        </div>
+        <div id="reminders-day-actions" class="reminders-day-actions hidden">
+          <button type="button" id="btn-day-mark-holiday" class="secondary-btn day-mark-btn">Festivo</button>
+          <button type="button" id="btn-day-mark-special" class="secondary-btn day-mark-btn">Especial</button>
+          <button type="button" id="btn-day-add-event" class="secondary-btn">+ Añadir evento</button>
+        </div>
         <div id="reminders-list" class="reminders-list"></div>
       </aside>
     </main>
@@ -187,27 +219,6 @@
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
-    </div>
-  </div>
-
-  <!-- Panel de dia: todos los eventos de un dia al clicar su celda en el
-       calendario, y marcarlo como festivo o especial. Ver openDayModal
-       en app.js. -->
-  <div id="day-modal" class="modal hidden">
-    <div class="modal-card">
-      <h2 id="day-modal-title">Dia</h2>
-      <div id="day-modal-list" class="agenda-list"></div>
-
-      <div class="day-modal-mark-row">
-        <button type="button" id="btn-mark-holiday" class="secondary-btn day-mark-btn">Festivo</button>
-        <button type="button" id="btn-mark-special" class="secondary-btn day-mark-btn">Especial</button>
-      </div>
-
-      <div class="modal-actions">
-        <button type="button" id="btn-day-new-event" class="secondary-btn">+ Nuevo evento aqui</button>
-        <div class="spacer"></div>
-        <button type="button" id="btn-close-day" class="primary-btn">Cerrar</button>
-      </div>
     </div>
   </div>
 
@@ -277,10 +288,17 @@
       <div id="settings-tab-style" class="settings-tab-panel hidden">
         <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Estilo</h3>
-        <p class="hint">Elige un tema guardado para este dispositivo, o crea el tuyo. Cada dispositivo puede llevar un tema distinto.</p>
+        <p class="hint">Clica una tarjeta para usar ese tema en este dispositivo. Cada dispositivo puede llevar un tema distinto.</p>
 
         <p class="hint">Si un tema tiene variante clara/oscura emparejada (◐), elige aqui si seguir el modo del sistema o fijarlo tu.</p>
         <div id="color-mode-options" class="color-mode-options"></div>
+
+        <!-- Solo visible mientras se edita un tema y hay cambios sin
+             guardar: al editar, los colores se aplican en vivo a toda la
+             app para verlos de verdad (ver openThemeForm/marcar sucio en
+             settings.js). Cambiar a editar otro tema guarda este primero
+             solo; si cierras sin guardar, se descarta. -->
+        <button type="button" id="btn-save-theme-changes" class="primary-btn hidden">Guardar cambios del tema</button>
 
         <div id="theme-library" class="theme-library"></div>
 
@@ -310,7 +328,6 @@
             <button type="button" id="btn-delete-theme" class="danger-btn hidden">Eliminar</button>
             <div class="spacer"></div>
             <button type="button" id="btn-cancel-theme" class="secondary-btn">Cancelar</button>
-            <button type="submit" class="primary-btn">Guardar tema</button>
           </div>
         </form>
 

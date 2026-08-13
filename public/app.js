@@ -16,6 +16,9 @@ const state = {
   specialDays: {}, // 'YYYY-MM-DD' -> 'holiday' | 'special', marcados a mano
   pairingCodeExpiresAt: null,
   notifiedReminderIds: new Set(), // evita notificar el mismo recordatorio 2 veces
+  remindersMode: 'upcoming', // 'upcoming' | 'day' — que se muestra en el panel de recordatorios
+  remindersDayDate: null, // dia seleccionado cuando remindersMode === 'day'
+  upcomingReminders: [], // ultima lista de "proximos recordatorios" recibida del servidor
 };
 
 // Registra el service worker (ver sw.js): junto con manifest.json, es lo
@@ -203,24 +206,61 @@ function renderCalendarGrid() {
     });
 
     // Clicar en cualquier otro sitio de la celda (no un chip concreto)
-    // abre el panel con TODOS los eventos de ese dia — los chips se
-    // quedan pequenos y no siempre caben todos.
-    cell.addEventListener('click', () => openDayModal(cellDate));
+    // cambia el panel de recordatorios para mostrar TODOS los eventos de
+    // ese dia — los chips se quedan pequenos y no siempre caben todos.
+    cell.addEventListener('click', () => showDayInReminders(cellDate));
 
     grid.appendChild(cell);
   }
 }
 
 // ---------------------------------------------------------------------
-// Panel de dia: todos los eventos de un dia concreto, con opcion de
-// anadir uno nuevo ya con esa fecha puesta, y de marcarlo como festivo o
-// dia especial (se guarda en el servidor, compartido entre dispositivos).
+// Panel de recordatorios en modo "dia": clicar un dia del calendario NO
+// abre ninguna ventana — en su lugar, el panel de recordatorios (el de
+// al lado del calendario) cambia a mostrar los eventos de ese dia, con
+// opcion de anadir uno nuevo ya con esa fecha puesta y de marcarlo como
+// festivo o dia especial. "← Proximos" vuelve a la vista normal.
 // ---------------------------------------------------------------------
-function renderDayModalEvents(date) {
-  const list = document.getElementById('day-modal-list');
-  list.innerHTML = '';
+async function showDayInReminders(date) {
+  state.remindersMode = 'day';
+  state.remindersDayDate = date;
+  await renderRemindersPanel();
+}
 
-  const dayEvents = state.events.filter((ev) => sameDay(new Date(ev.startAt), date));
+function showUpcomingReminders() {
+  state.remindersMode = 'upcoming';
+  state.remindersDayDate = null;
+  renderRemindersPanel();
+}
+
+function updateDayMarkButtons(dateKey) {
+  const current = state.specialDays[dateKey];
+  document.getElementById('btn-day-mark-holiday').classList.toggle('active', current === 'holiday');
+  document.getElementById('btn-day-mark-special').classList.toggle('active', current === 'special');
+}
+
+async function setDayType(dateKey, type) {
+  const current = state.specialDays[dateKey];
+  const next = current === type ? null : type; // pulsar el mismo tipo otra vez lo quita
+  await api(`/api/special-days/${dateKey}`, { method: 'PUT', body: JSON.stringify({ type: next }) });
+  if (next) state.specialDays[dateKey] = next;
+  else delete state.specialDays[dateKey];
+  updateDayMarkButtons(dateKey);
+  renderCalendarGrid();
+}
+
+// Se piden los eventos de ESE dia directamente al servidor (en vez de
+// filtrar state.events, que solo tiene el mes que se esta viendo) para
+// que tambien funcione bien si clicas un dia "de otro mes" que asoma en
+// las esquinas de la cuadricula.
+async function renderDayReminders(date) {
+  const dateStr = toDateKey(date);
+  const list = document.getElementById('reminders-list');
+  list.innerHTML = '<p class="empty-hint">Cargando…</p>';
+
+  const dayEvents = await api(`/api/events?from=${dateStr}T00:00:00&to=${dateStr}T23:59:59`);
+
+  list.innerHTML = '';
   if (dayEvents.length === 0) {
     list.innerHTML = '<p class="empty-hint">No hay eventos este dia.</p>';
     return;
@@ -238,55 +278,39 @@ function renderDayModalEvents(date) {
         ${groupLabel || ev.location ? `<div class="agenda-meta">${[groupLabel, ev.location].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
       </div>
     `;
-    item.addEventListener('click', () => {
-      closeDayModal();
-      openEventModal(ev);
-    });
+    item.addEventListener('click', () => openEventModal(ev));
     list.appendChild(item);
   });
 }
 
-function updateDayMarkButtons(dateKey) {
-  const current = state.specialDays[dateKey];
-  document.getElementById('btn-mark-holiday').classList.toggle('active', current === 'holiday');
-  document.getElementById('btn-mark-special').classList.toggle('active', current === 'special');
+async function renderRemindersPanel() {
+  const title = document.getElementById('reminders-panel-title');
+  const backBtn = document.getElementById('btn-reminders-back');
+  const dayActions = document.getElementById('reminders-day-actions');
+
+  if (state.remindersMode === 'day' && state.remindersDayDate) {
+    title.textContent = DAY_HEADING_FORMATTER.format(state.remindersDayDate);
+    backBtn.classList.remove('hidden');
+    dayActions.classList.remove('hidden');
+    updateDayMarkButtons(toDateKey(state.remindersDayDate));
+    await renderDayReminders(state.remindersDayDate);
+  } else {
+    title.textContent = 'Proximos recordatorios';
+    backBtn.classList.add('hidden');
+    dayActions.classList.add('hidden');
+    renderUpcomingRemindersList(state.upcomingReminders || []);
+  }
 }
 
-function openDayModal(date) {
-  const dateKey = toDateKey(date);
-  document.getElementById('day-modal').dataset.dateKey = dateKey;
-  document.getElementById('day-modal-title').textContent = DAY_HEADING_FORMATTER.format(date);
-  renderDayModalEvents(date);
-  updateDayMarkButtons(dateKey);
-
-  document.getElementById('btn-day-new-event').onclick = () => {
-    closeDayModal();
-    openEventModal(null, date);
-  };
-
-  document.getElementById('day-modal').classList.remove('hidden');
-}
-
-function closeDayModal() {
-  document.getElementById('day-modal').classList.add('hidden');
-}
-
-async function setDayType(dateKey, type) {
-  const current = state.specialDays[dateKey];
-  const next = current === type ? null : type; // pulsar el mismo tipo otra vez lo quita
-  await api(`/api/special-days/${dateKey}`, { method: 'PUT', body: JSON.stringify({ type: next }) });
-  if (next) state.specialDays[dateKey] = next;
-  else delete state.specialDays[dateKey];
-  updateDayMarkButtons(dateKey);
-  renderCalendarGrid();
-}
-
-document.getElementById('btn-close-day').addEventListener('click', closeDayModal);
-document.getElementById('btn-mark-holiday').addEventListener('click', (e) => {
-  setDayType(document.getElementById('day-modal').dataset.dateKey, 'holiday');
+document.getElementById('btn-reminders-back').addEventListener('click', showUpcomingReminders);
+document.getElementById('btn-day-mark-holiday').addEventListener('click', () => {
+  if (state.remindersDayDate) setDayType(toDateKey(state.remindersDayDate), 'holiday');
 });
-document.getElementById('btn-mark-special').addEventListener('click', (e) => {
-  setDayType(document.getElementById('day-modal').dataset.dateKey, 'special');
+document.getElementById('btn-day-mark-special').addEventListener('click', () => {
+  if (state.remindersDayDate) setDayType(toDateKey(state.remindersDayDate), 'special');
+});
+document.getElementById('btn-day-add-event').addEventListener('click', () => {
+  openEventModal(null, state.remindersDayDate);
 });
 
 function renderAgendaList() {
@@ -452,8 +476,7 @@ function populateEventGroupSelect() {
 // ---------------------------------------------------------------------
 // Recordatorios: panel + notificaciones del navegador
 // ---------------------------------------------------------------------
-async function loadReminders() {
-  const upcoming = await api('/api/reminders/upcoming');
+function renderUpcomingRemindersList(upcoming) {
   const now = new Date();
   const list = document.getElementById('reminders-list');
   list.innerHTML = '';
@@ -475,6 +498,18 @@ async function loadReminders() {
       `;
       list.appendChild(row);
     });
+  }
+}
+
+async function loadReminders() {
+  const upcoming = await api('/api/reminders/upcoming');
+  const now = new Date();
+  state.upcomingReminders = upcoming;
+
+  // El DOM de #reminders-list solo se toca si el panel esta mostrando
+  // "proximos" — si el usuario esta viendo un dia concreto, no lo pisamos.
+  if (state.remindersMode !== 'day') {
+    renderUpcomingRemindersList(upcoming);
   }
 
   // Notificaciones del navegador: solo funcionan mientras esta pestana

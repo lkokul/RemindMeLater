@@ -16,26 +16,95 @@ const router = express.Router();
 // Las variables de color que se pueden personalizar. Cualquier otra clave
 // que llegue en el JSON se ignora, y si falta alguna se rellena con el
 // valor por defecto (asi un tema "viejo" o importado a medias no rompe
-// el render). Las 4 ultimas (dayX) son los colores del calendario: hoy,
-// fin de semana, festivo y dia especial — festivo/especial se marcan a
-// mano desde el panel de dia, ver server/routes/specialDays.js.
+// el render).
+//
+// Cada fondo real de la interfaz (bg, surface, surface2, settingsMenuBg,
+// accent, dayToday) lleva SU PROPIO color de contraste ("...Text") en vez
+// de un "texto principal/secundario" global compartido por toda la app.
+// Esto es a proposito: el bug de contraste que se vio en el menu de
+// Configuracion (texto oscuro sobre fondo oscuro en un tema claro) pasaba
+// precisamente porque un solo texto global se aplicaba sobre fondos que no
+// tenian por que compartir su tono. Con un color de contraste por fondo,
+// cada superficie garantiza su propia legibilidad.
+//
+// Las 4 ultimas (dayX) son los colores del calendario: hoy, fin de semana,
+// festivo y dia especial — festivo/especial se marcan a mano desde el
+// panel de dia, ver server/routes/specialDays.js.
 const DEFAULT_COLORS = {
   bg: '#0f1115',
+  bgText: '#e8eaed',
   surface: '#171a21',
+  surfaceText: '#e8eaed',
   surface2: '#1f232c',
+  surface2Text: '#e8eaed',
   border: '#2a2f3a',
-  text: '#e8eaed',
-  textDim: '#9aa0ab',
   accent: '#5b8cff',
+  accentText: '#ffffff',
   danger: '#ff6b6b',
   settingsMenuBg: '#1f232c',
+  settingsMenuText: '#e8eaed',
   dayToday: '#5b8cff',
+  dayTodayText: '#ffffff',
   dayWeekend: '#1a1d27',
   dayHoliday: '#3a2020',
   daySpecial: '#2a1f3a',
 };
 const COLOR_KEYS = Object.keys(DEFAULT_COLORS);
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+// Cadena de "a quien le copio el contraste si me falta": cada color de
+// contraste, si no viene puesto, hereda primero el de la superficie mas
+// parecida DENTRO DEL MISMO tema (para que una variante clara incompleta
+// siga pareciendo clara), y solo si tampoco hay nada ahi cae en el valor
+// por defecto global. settingsMenuBg (el fondo, no el texto) sigue el
+// mismo patron con surface2 por la misma razon de siempre.
+const CONTRAST_FALLBACK_CHAIN = [
+  ['surfaceText', 'bgText'],
+  ['surface2Text', 'surfaceText'],
+  ['settingsMenuText', 'surface2Text'],
+  ['dayTodayText', 'accentText'],
+];
+
+// Pares fondo/contraste que existen de verdad en la interfaz — se
+// comprueban al final de sanitizeColors() con el contraste real (formula
+// WCAG), no solo confiando en el color que se guardo. Esto es la ultima
+// red de seguridad: da igual si el dato viene de un tema viejo sin migrar,
+// de una inversion automatica con un tono raro, o de una cache del
+// navegador desactualizada — lo que devuelve la API siempre se puede leer.
+const CONTRAST_PAIRS = [
+  ['bg', 'bgText'],
+  ['surface', 'surfaceText'],
+  ['surface2', 'surface2Text'],
+  ['settingsMenuBg', 'settingsMenuText'],
+  ['accent', 'accentText'],
+  ['dayToday', 'dayTodayText'],
+];
+// 3:1 en vez del 4.5:1 "AA texto normal" de WCAG a proposito: el acento
+// (botones, chips) suele llevar texto blanco sobre un azul/color medio a
+// posta, que ronda 3:1 y se lee bien de sobra en texto corto y en negrita
+// aunque no pase el umbral mas estricto pensado para parrafos largos. Con
+// 4.5 se forzaria texto negro en botones que ya se ven bien. Lo que de
+// verdad hay que atrapar aqui son los pares casi identicos (bug real).
+const MIN_CONTRAST_RATIO = 3;
+
+function relativeLuminance(hex) {
+  const channel = (v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const r = channel(parseInt(hex.slice(1, 3), 16));
+  const g = channel(parseInt(hex.slice(3, 5), 16));
+  const b = channel(parseInt(hex.slice(5, 7), 16));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(hexA, hexB) {
+  const lA = relativeLuminance(hexA);
+  const lB = relativeLuminance(hexB);
+  const lighter = Math.max(lA, lB);
+  const darker = Math.min(lA, lB);
+  return (lighter + 0.05) / (darker + 0.05);
+}
 
 function sanitizeColors(input) {
   const colors = {};
@@ -44,20 +113,27 @@ function sanitizeColors(input) {
     colors[key] = typeof value === 'string' && HEX_RE.test(value) ? value : null;
   }
 
-  // Si falta settingsMenuBg concretamente (temas guardados antes de que
-  // existiera esa variable, o una variante inversa a la que no se le puso
-  // valor), el mejor "no se nota" es copiar el fondo de tarjetas (surface2)
-  // DE ESE MISMO tema — asi una variante clara incompleta hereda un fondo
-  // claro, y una oscura uno oscuro, en vez de caer siempre en el valor por
-  // defecto oscuro aunque el resto del tema sea claro (eso es justo lo que
-  // pasaba: texto oscuro de un tema claro sobre un fondo oscuro "de serie",
-  // casi sin contraste).
   if (colors.settingsMenuBg === null) {
-    colors.settingsMenuBg = colors.surface2 || DEFAULT_COLORS.settingsMenuBg;
+    colors.settingsMenuBg = colors.surface2;
+  }
+  for (const [key, fallbackFrom] of CONTRAST_FALLBACK_CHAIN) {
+    if (colors[key] === null) colors[key] = colors[fallbackFrom];
   }
 
   for (const key of COLOR_KEYS) {
     if (colors[key] === null) colors[key] = DEFAULT_COLORS[key];
+  }
+
+  // Ultima red de seguridad: si el color de contraste guardado (el que
+  // sea, venga de donde venga) no se lee bien de verdad sobre su fondo,
+  // se sustituye por negro o blanco puro — el que mas contraste de los
+  // dos. No toca el fondo, solo el texto, para no desmontar el tema.
+  for (const [bgKey, textKey] of CONTRAST_PAIRS) {
+    if (contrastRatio(colors[bgKey], colors[textKey]) < MIN_CONTRAST_RATIO) {
+      const blackRatio = contrastRatio(colors[bgKey], '#000000');
+      const whiteRatio = contrastRatio(colors[bgKey], '#ffffff');
+      colors[textKey] = blackRatio >= whiteRatio ? '#000000' : '#ffffff';
+    }
   }
 
   return colors;
