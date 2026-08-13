@@ -301,6 +301,33 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   text-overflow: ellipsis;
   cursor: pointer;
 }
+/* Tareas con fecha: mismo hueco que un evento, pero solo el borde relleno
+   (el evento normal lleva el fondo solido) para distinguirlas de un
+   vistazo, mas un icono de check delante que marca hecha/pendiente sin
+   abrir nada (ver renderCalendarGrid en app.js). */
+.calendar-task-chip {
+  background: transparent;
+  border: 1.5px solid var(--accent);
+  color: var(--surface-text);
+  font-size: 0.72rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.calendar-task-chip.done {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+.calendar-task-chip-check {
+  flex-shrink: 0;
+  cursor: pointer;
+}
 .calendar-weekday-heading {
   text-align: center;
   font-size: 0.75rem;
@@ -341,6 +368,51 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .reminder-item:last-child { border-bottom: none; }
 .reminder-due { color: var(--danger); font-weight: 600; }
 .empty-hint { color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); font-size: 0.85rem; }
+
+/* --- Tareas: bloque fijo debajo de "Proximos", siempre visible (ver
+   .reminders-top-block/.reminders-tasks-block mas abajo para el reparto
+   de alto en escritorio) --- */
+.reminders-tasks-block {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+.task-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.task-item:last-child { border-bottom: none; }
+.task-item-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  min-width: 1.1rem;
+  border-radius: 0.3rem;
+  border: 1.5px solid var(--border);
+  background: var(--surface-2);
+  cursor: pointer;
+  margin: 0;
+  position: relative;
+}
+.task-item-checkbox:checked { background: var(--accent); border-color: var(--accent); }
+.task-item-checkbox:checked::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: var(--accent-text);
+}
+.task-item-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-item.done .task-item-title { text-decoration: line-through; opacity: 0.6; }
+.task-item-date { font-size: 0.75rem; flex-shrink: 0; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); }
 
 /* --- Vista (Normal / Pantalla completa / Ventana flotante) --- */
 .view-mode-options { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
@@ -573,6 +645,8 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .group-form-row input[type="color"] {
   width: 3rem; padding: 0.2rem; cursor: pointer;
 }
+.group-form-row-completed { align-items: center; }
+.group-form-row-completed .hint { flex: 1; margin: 0; }
 .group-form-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
 
 .groups-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
@@ -710,5 +784,20 @@ label input, label textarea, label select { margin-top: 0.3rem; }
     flex: 1;
     min-height: 0;
     max-height: none;
+  }
+  /* Proximos/dia arriba y Tareas abajo se reparten el alto del panel a
+     mitades, cada uno con su propia lista scrolleando por dentro — asi
+     se ven los dos titulos siempre, sin que uno se coma el hueco del otro. */
+  .reminders-top-block,
+  .reminders-tasks-block {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .reminders-tasks-block {
+    margin-top: 0;
+    padding-top: 0.9rem;
   }
 }

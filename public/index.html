@@ -144,20 +144,33 @@
         </section>
       </div>
 
-      <!-- Panel de recordatorios: por defecto los proximos, o los
-           eventos de un dia concreto si has clicado uno en el
-           calendario (ver showDayInReminders en app.js). -->
+      <!-- Panel de recordatorios: arriba "Proximos" (o los eventos de un
+           dia concreto si has clicado uno en el calendario, ver
+           showDayInReminders en app.js), abajo un bloque fijo de "Tareas"
+           que se ve siempre a la vez, cada uno con su propio scroll
+           interno (ver .reminders-top-block/.reminders-tasks-block en
+           styles.css). -->
       <aside class="reminders-panel">
-        <div class="reminders-panel-header">
-          <h2 id="reminders-panel-title">Proximos recordatorios</h2>
-          <button type="button" id="btn-reminders-back" class="secondary-btn hidden">← Próximos</button>
+        <div class="reminders-top-block">
+          <div class="reminders-panel-header">
+            <h2 id="reminders-panel-title">Proximos recordatorios</h2>
+            <button type="button" id="btn-reminders-back" class="secondary-btn hidden">← Próximos</button>
+          </div>
+          <div id="reminders-day-actions" class="reminders-day-actions hidden">
+            <button type="button" id="btn-day-mark-holiday" class="secondary-btn day-mark-btn">Festivo</button>
+            <button type="button" id="btn-day-mark-special" class="secondary-btn day-mark-btn">Especial</button>
+            <button type="button" id="btn-day-add-event" class="secondary-btn">+ Añadir evento</button>
+          </div>
+          <div id="reminders-list" class="reminders-list"></div>
         </div>
-        <div id="reminders-day-actions" class="reminders-day-actions hidden">
-          <button type="button" id="btn-day-mark-holiday" class="secondary-btn day-mark-btn">Festivo</button>
-          <button type="button" id="btn-day-mark-special" class="secondary-btn day-mark-btn">Especial</button>
-          <button type="button" id="btn-day-add-event" class="secondary-btn">+ Añadir evento</button>
+
+        <div class="reminders-tasks-block">
+          <div class="reminders-panel-header">
+            <h2>Tareas</h2>
+            <button type="button" id="btn-new-task" class="secondary-btn">+ Nueva tarea</button>
+          </div>
+          <div id="tasks-list" class="reminders-list tasks-list"></div>
         </div>
-        <div id="reminders-list" class="reminders-list"></div>
       </aside>
     </main>
   </div>
@@ -216,6 +229,38 @@
           <button type="button" id="btn-delete-event" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
           <button type="button" id="btn-cancel-event" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar tarea: aparte del de evento porque una
+       tarea es mas simple (sin hora de fin, ubicacion, recordatorio ni
+       "todo el dia") y la fecha es opcional (ver btn-new-task en app.js). -->
+  <div id="task-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2 id="task-modal-title">Nueva tarea</h2>
+      <form id="task-form">
+        <input type="hidden" id="task-id" />
+        <label>
+          Titulo
+          <input type="text" id="task-title" required />
+        </label>
+        <label>
+          Fecha limite (opcional)
+          <input type="date" id="task-date" />
+        </label>
+        <label>
+          Grupo (opcional)
+          <select id="task-group">
+            <option value="">Sin grupo</option>
+          </select>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-task" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-task" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
@@ -348,6 +393,10 @@
             <input type="text" id="group-name" placeholder="Nombre del grupo (ej. Gimnasio)" required />
             <div id="group-color-field"></div>
           </div>
+          <div class="group-form-row group-form-row-completed">
+            <span class="hint">Color de las tareas de este grupo al completarse</span>
+            <div id="group-completed-color-field"></div>
+          </div>
           <div class="group-form-actions">
             <button type="button" id="btn-cancel-group" class="secondary-btn hidden">Cancelar</button>
             <button type="submit" class="primary-btn">Guardar grupo</button>
@@ -391,6 +440,10 @@
           <input type="checkbox" id="setting-update-check" />
           Avisarme cuando el servidor se actualice
         </label>
+
+        <h4>Tareas completadas</h4>
+        <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>
+        <div id="completed-tasks-display-options" class="view-mode-options"></div>
       </div>
 
       <!-- --- Atajos de teclado (ajuste local, no compartido) --- -->

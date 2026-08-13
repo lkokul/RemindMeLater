@@ -137,6 +137,14 @@ const groupColumns = db.prepare('PRAGMA table_info(groups)').all().map((c) => c.
 if (!groupColumns.includes('icon')) {
   db.exec('ALTER TABLE groups ADD COLUMN icon TEXT');
 }
+// completed_color: color opcional que usan las TAREAS de este grupo (ver
+// mas abajo) cuando se marcan como hechas, en vez del color normal del
+// grupo. Si se deja sin poner (NULL), la interfaz calcula un tono
+// atenuado del color normal del grupo como valor por defecto — esta
+// columna solo guarda un color EXPLICITO cuando lo has elegido tu.
+if (!groupColumns.includes('completed_color')) {
+  db.exec('ALTER TABLE groups ADD COLUMN completed_color TEXT');
+}
 
 // created_by_*: quien (que nickname/perfil) creo cada evento. Se rellena
 // solo al crear el evento (ver routes/events.js), con el perfil de
@@ -148,6 +156,54 @@ if (!eventColumns.includes('created_by_name')) {
 }
 if (!eventColumns.includes('created_by_id')) {
   db.exec('ALTER TABLE events ADD COLUMN created_by_id TEXT');
+}
+
+// is_task / done: una tarea es, por dentro, una fila de events con
+// is_task = 1. Comparte titulo, grupo, etc. con los eventos normales, pero
+// ademas puede marcarse como hecha (done) y, a diferencia de un evento,
+// puede no tener fecha (ver la migracion de start_at mas abajo).
+const eventColumnsForTasks = db.prepare('PRAGMA table_info(events)').all().map((c) => c.name);
+if (!eventColumnsForTasks.includes('is_task')) {
+  db.exec('ALTER TABLE events ADD COLUMN is_task INTEGER NOT NULL DEFAULT 0');
+}
+if (!eventColumnsForTasks.includes('done')) {
+  db.exec('ALTER TABLE events ADD COLUMN done INTEGER NOT NULL DEFAULT 0');
+}
+
+// Migracion puntual: start_at pasa de obligatorio a opcional, porque las
+// tareas sueltas (sin fecha limite) no tienen que llevar ninguna — solo
+// viven en la lista de Tareas, no en el calendario. SQLite no permite
+// quitar un NOT NULL con un simple ALTER TABLE, asi que reconstruimos la
+// tabla entera: la copia nueva con el esquema correcto, se copian las
+// filas, se borra la vieja y se renombra la nueva. Se detecta si hace
+// falta mirando el "notnull" que da PRAGMA table_info para start_at; una
+// vez hecha, table_info ya no lo marca como NOT NULL y esto no se repite.
+const startAtInfo = db.prepare('PRAGMA table_info(events)').all().find((c) => c.name === 'start_at');
+if (startAtInfo && startAtInfo.notnull) {
+  db.exec(`
+    CREATE TABLE events_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT,
+      location TEXT,
+      start_at TEXT,
+      end_at TEXT,
+      all_day INTEGER NOT NULL DEFAULT 0,
+      reminder_minutes_before INTEGER,
+      reminder_sent INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      group_id INTEGER REFERENCES groups(id),
+      created_by_name TEXT,
+      created_by_id TEXT,
+      is_task INTEGER NOT NULL DEFAULT 0,
+      done INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO events_new (id, title, description, location, start_at, end_at, all_day, reminder_minutes_before, reminder_sent, created_at, updated_at, group_id, created_by_name, created_by_id, is_task, done)
+      SELECT id, title, description, location, start_at, end_at, all_day, reminder_minutes_before, reminder_sent, created_at, updated_at, group_id, created_by_name, created_by_id, is_task, done FROM events;
+    DROP TABLE events;
+    ALTER TABLE events_new RENAME TO events;
+  `);
 }
 
 // inverse_colors: variante clara/oscura "pareja" de un tema, opcional. Ver

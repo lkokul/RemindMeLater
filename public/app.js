@@ -13,6 +13,7 @@ const state = {
   viewDate: new Date(), // mes que se esta mostrando
   events: [],
   groups: [],
+  tasks: [], // TODAS las tareas (con fecha o sin ella), ver loadTasks()
   specialDays: {}, // 'YYYY-MM-DD' -> 'holiday' | 'special', marcados a mano
   pairingCodeExpiresAt: null,
   notifiedReminderIds: new Set(), // evita notificar el mismo recordatorio 2 veces
@@ -191,8 +192,12 @@ function renderCalendarGrid() {
     dayLabel.textContent = cellDate.getDate();
     cell.appendChild(dayLabel);
 
-    const dayEvents = state.events.filter((ev) => sameDay(new Date(ev.startAt), cellDate));
+    const dayEvents = state.events.filter((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate));
     dayEvents.forEach((ev) => {
+      if (ev.isTask) {
+        cell.appendChild(buildCalendarTaskChip(ev));
+        return;
+      }
       const chip = document.createElement('div');
       chip.className = 'calendar-event-chip';
       chip.style.backgroundColor = ev.groupColor || DEFAULT_EVENT_COLOR;
@@ -267,6 +272,11 @@ async function renderDayReminders(date) {
   }
 
   dayEvents.forEach((ev) => {
+    if (ev.isTask) {
+      const row = buildTaskRow(ev);
+      if (row) list.appendChild(row);
+      return;
+    }
     const groupLabel = ev.groupName ? `${ev.groupIcon ? ev.groupIcon + ' ' : ''}${ev.groupName}` : null;
     const item = document.createElement('div');
     item.className = 'agenda-item';
@@ -334,6 +344,11 @@ function renderAgendaList() {
       lastDayKey = dayKey;
     }
 
+    if (ev.isTask) {
+      const row = buildTaskRow(ev);
+      if (row) container.appendChild(row);
+      return;
+    }
     const groupLabel = ev.groupName ? `${ev.groupIcon ? ev.groupIcon + ' ' : ''}${ev.groupName}` : null;
     const item = document.createElement('div');
     item.className = 'agenda-item';
@@ -532,6 +547,215 @@ async function loadReminders() {
 }
 
 // ---------------------------------------------------------------------
+// Tareas: un tipo especial de "evento" (is_task = 1 en la base de datos)
+// que puede no tener fecha, se marca hecha/pendiente, y vive en su propio
+// bloque fijo del panel de recordatorios (#tasks-list en index.html)
+// ademas de en el calendario si tiene fecha (ver buildCalendarTaskChip,
+// llamada desde renderCalendarGrid mas arriba).
+// mutedTaskColor/getCompletedTasksDisplayMode viven en settings.js (se
+// carga despues de este archivo) — solo se usan aqui dentro de funciones
+// que se EJECUTAN despues de que la pagina ha cargado del todo (nunca al
+// evaluar app.js en si), asi que para cuando se llaman de verdad ya
+// existen. Mismo patron que el resto de referencias cruzadas entre los
+// dos archivos.
+// ---------------------------------------------------------------------
+function taskPendingColor(task) {
+  return task.groupColor || DEFAULT_EVENT_COLOR;
+}
+
+function taskCompletedColor(task) {
+  return task.groupCompletedColor || mutedTaskColor(taskPendingColor(task));
+}
+
+function buildCalendarTaskChip(task) {
+  const chip = document.createElement('div');
+  chip.className = 'calendar-task-chip' + (task.done ? ' done' : '');
+  const color = task.done ? taskCompletedColor(task) : taskPendingColor(task);
+  chip.style.borderColor = color;
+  chip.style.color = color;
+
+  const check = document.createElement('span');
+  check.className = 'calendar-task-chip-check';
+  check.textContent = task.done ? '☑' : '☐';
+  check.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleTaskDone(task);
+  });
+
+  const label = document.createElement('span');
+  const iconPrefix = task.groupIcon ? `${task.groupIcon} ` : '';
+  label.textContent = `${iconPrefix}${task.title}`;
+
+  chip.appendChild(check);
+  chip.appendChild(label);
+  chip.addEventListener('click', (e) => {
+    e.stopPropagation(); // que no abra tambien el panel del dia entero
+    openTaskModal(task);
+  });
+  return chip;
+}
+
+async function loadTasks() {
+  state.tasks = await api('/api/events?isTask=1');
+}
+
+function buildTaskRow(task) {
+  const displayMode = typeof getCompletedTasksDisplayMode === 'function' ? getCompletedTasksDisplayMode() : 'strike';
+  if (task.done && displayMode === 'hide') return null;
+
+  const row = document.createElement('div');
+  row.className = 'task-item' + (task.done ? ' done' : '');
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'task-item-checkbox';
+  checkbox.checked = task.done;
+  checkbox.addEventListener('click', (e) => e.stopPropagation());
+  checkbox.addEventListener('change', () => toggleTaskDone(task));
+
+  const title = document.createElement('span');
+  title.className = 'task-item-title';
+  const iconPrefix = task.groupIcon ? `${escapeHtml(task.groupIcon)} ` : '';
+  title.innerHTML = `${iconPrefix}${escapeHtml(task.title)}`;
+
+  row.appendChild(checkbox);
+  row.appendChild(title);
+
+  if (task.startAt) {
+    const dateLabel = document.createElement('span');
+    dateLabel.className = 'task-item-date';
+    dateLabel.textContent = DAY_HEADING_FORMATTER.format(new Date(task.startAt));
+    row.appendChild(dateLabel);
+  }
+
+  row.addEventListener('click', () => openTaskModal(task));
+  return row;
+}
+
+function renderTasksList() {
+  const container = document.getElementById('tasks-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (state.tasks.length === 0) {
+    container.innerHTML = '<p class="empty-hint">No tienes tareas.</p>';
+    return;
+  }
+
+  // Pendientes primero (por fecha, las sin fecha al final), hechas
+  // despues (si se muestran, ver getCompletedTasksDisplayMode en
+  // settings.js — ajuste de Configuracion > Este dispositivo).
+  const byDate = (a, b) => {
+    if (!a.startAt && !b.startAt) return 0;
+    if (!a.startAt) return 1;
+    if (!b.startAt) return -1;
+    return new Date(a.startAt) - new Date(b.startAt);
+  };
+  const pending = state.tasks.filter((t) => !t.done).sort(byDate);
+  const done = state.tasks.filter((t) => t.done).sort(byDate);
+
+  let rendered = 0;
+  [...pending, ...done].forEach((task) => {
+    const row = buildTaskRow(task);
+    if (row) {
+      container.appendChild(row);
+      rendered++;
+    }
+  });
+
+  if (rendered === 0) {
+    container.innerHTML = '<p class="empty-hint">No tienes tareas.</p>';
+  }
+}
+
+async function toggleTaskDone(task) {
+  const updated = await api(`/api/events/${task.id}`, { method: 'PUT', body: JSON.stringify({ done: !task.done }) });
+  const idx = state.tasks.findIndex((t) => t.id === task.id);
+  if (idx !== -1) state.tasks[idx] = updated;
+  renderTasksList();
+  loadMonth(); // refleja el cambio en el calendario/agenda si la tarea tiene fecha
+  if (state.remindersMode === 'day') renderRemindersPanel();
+}
+
+function populateTaskGroupSelect() {
+  const select = document.getElementById('task-group');
+  const current = select.value;
+  select.innerHTML = '<option value="">Sin grupo</option>';
+  state.groups.forEach((g) => {
+    const opt = document.createElement('option');
+    opt.value = g.id;
+    opt.textContent = g.name;
+    select.appendChild(opt);
+  });
+  select.value = current;
+}
+
+// El input type="date" quiere "YYYY-MM-DD" en LOCAL, no UTC (mismo motivo
+// que toDatetimeLocalValue mas arriba).
+function toDateInputValue(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function openTaskModal(task) {
+  const modal = document.getElementById('task-modal');
+  document.getElementById('task-modal-title').textContent = task ? 'Editar tarea' : 'Nueva tarea';
+  document.getElementById('task-id').value = task ? task.id : '';
+  document.getElementById('task-title').value = task ? task.title : '';
+  document.getElementById('task-date').value = task && task.startAt ? toDateInputValue(new Date(task.startAt)) : '';
+  populateTaskGroupSelect();
+  document.getElementById('task-group').value = task && task.groupId ? String(task.groupId) : '';
+  document.getElementById('btn-delete-task').classList.toggle('hidden', !task);
+  modal.classList.remove('hidden');
+}
+
+function closeTaskModal() {
+  document.getElementById('task-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-new-task').addEventListener('click', () => openTaskModal(null));
+document.getElementById('btn-cancel-task').addEventListener('click', closeTaskModal);
+
+document.getElementById('task-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('task-id').value;
+  const dateRaw = document.getElementById('task-date').value;
+  const groupRaw = document.getElementById('task-group').value;
+
+  const payload = {
+    title: document.getElementById('task-title').value,
+    isTask: true,
+    // Todo el dia siempre: una tarea no lleva hora concreta, solo fecha
+    // limite (o ninguna).
+    startAt: dateRaw ? `${dateRaw}T00:00:00` : null,
+    allDay: true,
+    groupId: groupRaw === '' ? null : Number(groupRaw),
+  };
+
+  if (id) {
+    await api(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/events', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  closeTaskModal();
+  await loadTasks();
+  renderTasksList();
+  loadMonth();
+});
+
+document.getElementById('btn-delete-task').addEventListener('click', async () => {
+  const id = document.getElementById('task-id').value;
+  if (!id) return;
+  if (!confirm('¿Eliminar esta tarea?')) return;
+  await api(`/api/events/${id}`, { method: 'DELETE' });
+  closeTaskModal();
+  await loadTasks();
+  renderTasksList();
+  loadMonth();
+});
+
+// ---------------------------------------------------------------------
 // Atajos de teclado: lista fija de acciones que ofrece la app (no se
 // pueden inventar acciones nuevas), y para cada una el USUARIO decide que
 // tecla la dispara, desde Configuracion > Atajos de teclado (settings.js
@@ -694,8 +918,19 @@ function applyViewMode(mode) {
 
 // Si sales de pantalla completa con Esc o con el propio navegador (no con
 // nuestro control), el modo guardado tiene que volver a "normal" para que
-// no se quede desincronizado.
+// no se quede desincronizado. OJO: cerrar la pestana/ventana estando en
+// pantalla completa TAMBIEN dispara este mismo evento (el navegador sale
+// de pantalla completa como parte de cerrarse), y sin este aviso eso
+// borraria "pantalla completa" de la preferencia guardada justo al
+// cerrar la app — pareceria que nunca se guarda. isClosingPage se marca
+// en cuanto empieza a cerrarse/recargarse la pagina, para distinguir ese
+// caso del Esc de verdad y no tocar la preferencia guardada entonces.
+let isClosingPage = false;
+window.addEventListener('pagehide', () => { isClosingPage = true; });
+window.addEventListener('beforeunload', () => { isClosingPage = true; });
+
 document.addEventListener('fullscreenchange', () => {
+  if (isClosingPage) return;
   if (!document.fullscreenElement && getViewMode() === 'fullscreen') {
     setViewMode('normal');
   }
@@ -769,7 +1004,12 @@ async function init() {
     await loadSpecialDays();
     await loadMonth();
     await loadReminders();
+    await loadTasks();
+    renderTasksList();
     setInterval(loadReminders, 30 * 1000);
+    // Igual que los recordatorios: si otro dispositivo vinculado anade o
+    // completa una tarea, este se entera sin recargar la pagina.
+    setInterval(() => loadTasks().then(renderTasksList), 30 * 1000);
   } catch (err) {
     if (err.message !== 'device_not_paired') console.error(err);
   }

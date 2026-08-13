@@ -509,6 +509,18 @@ function invertLightness(hex) {
   return hslToHex(h, s, 1 - l);
 }
 
+// Color por defecto para una tarea COMPLETADA cuando su grupo no tiene uno
+// explicito puesto (o la tarea no tiene grupo): el mismo tono, pero mas
+// apagado — bajamos la saturacion y subimos la luminosidad hacia un gris
+// claro, para que se note de un vistazo que esta "tachada" sin perder de
+// que color era. Un grupo puede pisar esto poniendo su propio
+// completedColor (ver Configuracion > Grupos).
+function mutedTaskColor(hex) {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
+  const { h, s, l } = hexToHsl(hex);
+  return hslToHex(h, s * 0.3, Math.min(0.82, l + (1 - l) * 0.5));
+}
+
 function invertColorsObject(colors) {
   const result = {};
   THEME_COLOR_FIELDS_META.forEach(({ key }) => {
@@ -1098,12 +1110,47 @@ syncActiveTheme();
 const groupIconField = createIconField({ initialValue: '' });
 document.getElementById('group-icon-field').appendChild(groupIconField.element);
 
-const groupColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
+// OJO orden: groupCompletedColorField se crea ANTES que groupColorField
+// porque el onChange de groupColorField la referencia — crearla antes evita
+// el bug de "variable declarada mas abajo leida por un callback que se
+// dispara al construir" documentado en CLAUDE.md (createColorField llama a
+// su onChange una vez de inmediato, al pintar el cuadradito inicial).
+// suppressGroupCompletedTouch evita que esas llamadas de INICIALIZACION (la
+// propia y la que dispara groupColorField al crearse, que la actualiza en
+// cascada) cuenten como "la persona ha tocado el selector a mano".
+let suppressGroupCompletedTouch = true;
+let groupCompletedColorTouched = false;
+const groupCompletedColorField = createColorField({
+  initialValue: mutedTaskColor(DEFAULT_EVENT_COLOR),
+  onChange: () => { if (!suppressGroupCompletedTouch) groupCompletedColorTouched = true; },
+});
+document.getElementById('group-completed-color-field').appendChild(groupCompletedColorField.element);
+
+const groupColorField = createColorField({
+  initialValue: DEFAULT_EVENT_COLOR,
+  // Si el color normal del grupo cambia y todavia no se ha tocado a mano
+  // el de "completada", seguimos su tono atenuado como sugerencia — en
+  // cuanto se toque el propio selector de completada, deja de seguirle.
+  onChange: (newColor) => {
+    if (!groupCompletedColorTouched) groupCompletedColorField.setValue(mutedTaskColor(newColor));
+  },
+});
 document.getElementById('group-color-field').appendChild(groupColorField.element);
+suppressGroupCompletedTouch = false;
 
 async function refreshGroupsTab() {
   await loadGroups();
   renderGroupsList();
+}
+
+// Cambia el color de "completada" SIN que cuente como que la persona lo ha
+// tocado a mano (carga inicial, reset del formulario, o cargar el valor
+// guardado de un grupo existente al editarlo) — solo un click real en su
+// selector marca groupCompletedColorTouched.
+function setGroupCompletedColorProgrammatically(hex) {
+  suppressGroupCompletedTouch = true;
+  groupCompletedColorField.setValue(hex);
+  suppressGroupCompletedTouch = false;
 }
 
 function resetGroupForm() {
@@ -1111,6 +1158,8 @@ function resetGroupForm() {
   document.getElementById('group-name').value = '';
   groupIconField.setValue('');
   groupColorField.setValue(DEFAULT_EVENT_COLOR);
+  groupCompletedColorTouched = false;
+  setGroupCompletedColorProgrammatically(mutedTaskColor(DEFAULT_EVENT_COLOR));
   document.getElementById('btn-cancel-group').classList.add('hidden');
 }
 
@@ -1137,6 +1186,11 @@ function renderGroupsList() {
       document.getElementById('group-name').value = g.name;
       groupIconField.setValue(g.icon || '');
       groupColorField.setValue(g.color);
+      // Si el grupo ya tiene un color de completada EXPLICITO, lo tratamos
+      // como "tocado" para que cambiar el color normal no se lo pise; si
+      // no, sigue el color normal como hasta ahora.
+      groupCompletedColorTouched = !!g.completedColor;
+      setGroupCompletedColorProgrammatically(g.completedColor || mutedTaskColor(g.color));
       document.getElementById('btn-cancel-group').classList.remove('hidden');
       document.getElementById('group-name').focus();
     });
@@ -1146,6 +1200,7 @@ function renderGroupsList() {
       await refreshGroupsTab();
       loadMonth();
       loadReminders();
+      if (typeof loadTasks === 'function') loadTasks().then(renderTasksList);
     });
     list.appendChild(row);
   });
@@ -1160,6 +1215,7 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
     name: document.getElementById('group-name').value,
     color: groupColorField.getValue(),
     icon: groupIconField.getValue() || null,
+    completedColor: groupCompletedColorField.getValue(),
   };
 
   if (id) {
@@ -1172,6 +1228,7 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
   await refreshGroupsTab();
   loadMonth();
   loadReminders();
+  if (typeof loadTasks === 'function') loadTasks().then(renderTasksList);
 });
 
 // ---------------------------------------------------------------------
@@ -1301,6 +1358,45 @@ function refreshMobileTab() {
 
   document.getElementById('setting-update-check').checked =
     localStorage.getItem('updateCheckEnabled') !== 'false';
+
+  refreshCompletedTasksDisplayOptions();
+}
+
+// Tachar vs ocultar tareas completadas: preferencia de ESTE dispositivo
+// (como el modo de vista o el tema), no compartida — cada movil/ordenador
+// puede verlo a su manera. La lee renderTasksList() en app.js.
+const COMPLETED_TASKS_DISPLAY_MODES = [
+  { id: 'strike', label: 'Tachadas (siguen en la lista)' },
+  { id: 'hide', label: 'Ocultas' },
+];
+
+function getCompletedTasksDisplayMode() {
+  return localStorage.getItem('completedTasksDisplay') || 'strike';
+}
+
+function refreshCompletedTasksDisplayOptions() {
+  const container = document.getElementById('completed-tasks-display-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getCompletedTasksDisplayMode();
+
+  COMPLETED_TASKS_DISPLAY_MODES.forEach((mode) => {
+    const isActive = mode.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = isActive ? `${mode.label} (actual)` : mode.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('completedTasksDisplay', mode.id);
+        refreshCompletedTasksDisplayOptions();
+        if (typeof renderTasksList === 'function') renderTasksList();
+      });
+    }
+    container.appendChild(btn);
+  });
 }
 
 document.getElementById('setting-update-check').addEventListener('change', (e) => {
@@ -1426,6 +1522,12 @@ document.addEventListener('keydown', (e) => {
   const eventModal = document.getElementById('event-modal');
   if (eventModal && !eventModal.classList.contains('hidden')) {
     closeEventModal();
+    return;
+  }
+
+  const taskModal = document.getElementById('task-modal');
+  if (taskModal && !taskModal.classList.contains('hidden')) {
+    closeTaskModal();
     return;
   }
 
