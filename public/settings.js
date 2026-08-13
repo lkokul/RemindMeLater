@@ -328,15 +328,14 @@ document.getElementById('profile-form').addEventListener('submit', async (e) => 
 });
 
 // ---------------------------------------------------------------------
-// Vista: Normal / Pantalla completa / Ventana flotante. Un solo modo
-// activo a la vez (aplicado de verdad por applyViewMode, en app.js);
-// aqui solo se dibujan los botones y cual esta resaltado como actual,
-// igual que "En uso" en la biblioteca de temas.
+// Vista: Normal / Pantalla completa. Un solo modo activo a la vez
+// (aplicado de verdad por applyViewMode, en app.js); aqui solo se dibujan
+// los botones y cual esta resaltado como actual, igual que "En uso" en la
+// biblioteca de temas.
 // ---------------------------------------------------------------------
 const VIEW_MODES = [
   { id: 'normal', label: 'Normal' },
   { id: 'fullscreen', label: 'Pantalla completa' },
-  { id: 'floating', label: 'Ventana flotante' },
 ];
 
 function refreshViewTab() {
@@ -359,13 +358,7 @@ function refreshViewTab() {
   });
 
   const hint = document.getElementById('view-mode-hint');
-  if (current === 'fullscreen') {
-    hint.textContent = 'Pulsa Esc en cualquier momento para salir de pantalla completa.';
-  } else if (current === 'floating') {
-    hint.textContent = 'La ventana flotante se reutiliza: si ya esta abierta, se enfoca en vez de abrir otra.';
-  } else {
-    hint.textContent = '';
-  }
+  hint.textContent = current === 'fullscreen' ? 'Pulsa Esc en cualquier momento para salir de pantalla completa.' : '';
 }
 
 // Salir de la pestana Estilo (volver al menu, o cerrar Configuracion del

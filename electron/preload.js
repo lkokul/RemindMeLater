@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onNativeFullscreenChange: (callback) => {
     ipcRenderer.on('native-fullscreen-changed', (event, isFullscreen) => callback(isFullscreen));
   },
-  // Guarda cual es la vista guardada (normal/fullscreen/floating) en un
+  // Guarda cual es la vista guardada (normal/fullscreen) en un
   // archivo que main.js puede leer de forma SINCRONA al crear la ventana
   // la proxima vez — asi la ventana puede nacer YA en pantalla completa
   // desde el primer instante, en vez de crearse normal y pedirle luego (ya

@@ -24,7 +24,7 @@ process.env.PORT = String(PORT);
 
 let mainWindow = null;
 
-// Donde se guarda que vista tenias activa (normal/fullscreen/floating) la
+// Donde se guarda que vista tenias activa (normal/fullscreen) la
 // ULTIMA vez, para poder leerla de forma SINCRONA al crear la ventana la
 // proxima vez que arranques la app — asi la ventana puede nacer YA en
 // pantalla completa si esa era tu vista, en vez de crearse normal y

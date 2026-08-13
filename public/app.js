@@ -1168,16 +1168,16 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------------------------------------------------------------------
-// Vista: un UNICO modo activo a la vez — Normal, Pantalla completa o
-// Ventana flotante — que se cambia desde Configuracion > Vista (ver
-// refreshViewTab en settings.js). Cambiar de una a otra deshace la
-// anterior (sale de pantalla completa, o cierra la ventana flotante) en
-// vez de dejarlas acumularse; por eso openFloatingWindow reutiliza la
-// MISMA ventana flotante si ya esta abierta en vez de crear otra.
+// Vista: un UNICO modo activo a la vez — Normal o Pantalla completa —
+// que se cambia desde Configuracion > Vista (ver refreshViewTab en
+// settings.js). Cambiar de una a otra deshace la anterior (sale de
+// pantalla completa) en vez de dejarlas acumularse.
+// (Hubo tambien un modo "Ventana flotante", quitado: en el navegador
+// window.open() no es fiable — muchos navegadores abren otra PESTANA en
+// vez de una ventana pequeña — y en Electron habria hecho falta
+// configurar setWindowOpenHandler a mano para controlar el tamaño de la
+// ventana nueva. No compensaba el esfuerzo para lo poco que se usaba.)
 // ---------------------------------------------------------------------
-let floatingWindowRef = null;
-let floatingWindowWatcher = null;
-
 function getViewMode() {
   return localStorage.getItem('viewMode') || 'normal';
 }
@@ -1191,36 +1191,6 @@ function setViewMode(mode) {
   if (window.electronAPI && window.electronAPI.saveViewMode) window.electronAPI.saveViewMode(mode);
   document.getElementById('default-view-banner').classList.add('hidden');
   if (typeof refreshViewTab === 'function') refreshViewTab();
-}
-
-function closeFloatingWindow() {
-  clearInterval(floatingWindowWatcher);
-  if (floatingWindowRef && !floatingWindowRef.closed) floatingWindowRef.close();
-  floatingWindowRef = null;
-}
-
-function openFloatingWindow() {
-  if (floatingWindowRef && !floatingWindowRef.closed) {
-    floatingWindowRef.focus();
-    return;
-  }
-  floatingWindowRef = window.open(
-    location.origin + location.pathname,
-    'remindmelater-floating',
-    'width=420,height=680,menubar=no,toolbar=no,location=no,status=no,resizable=yes'
-  );
-  // Si cierran la ventana flotante a mano (la x de la ventana, no un
-  // boton nuestro), nos enteramos mirando cada segundo si sigue abierta,
-  // y volvemos el modo a "normal" para que Configuracion no diga que
-  // sigue activa cuando ya no lo esta.
-  clearInterval(floatingWindowWatcher);
-  floatingWindowWatcher = setInterval(() => {
-    if (!floatingWindowRef || floatingWindowRef.closed) {
-      clearInterval(floatingWindowWatcher);
-      floatingWindowRef = null;
-      if (getViewMode() === 'floating') setViewMode('normal');
-    }
-  }, 1000);
 }
 
 // Aplica de verdad el cambio de modo: deshace lo que hubiera activo y
@@ -1237,12 +1207,9 @@ function applyViewMode(mode) {
   } else if (mode !== 'fullscreen' && document.fullscreenElement) {
     document.exitFullscreen();
   }
-  if (mode !== 'floating') closeFloatingWindow();
 
   if (!window.electronAPI && mode === 'fullscreen' && document.documentElement.requestFullscreen) {
     document.documentElement.requestFullscreen().catch(() => {});
-  } else if (mode === 'floating') {
-    openFloatingWindow();
   }
   setViewMode(mode);
 }
