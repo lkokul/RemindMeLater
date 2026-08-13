@@ -1,18 +1,53 @@
 {
   "name": "remindmelater",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "Calendario y recordatorios que corre en tu ordenador, accesible tambien desde el movil por wifi local",
-  "main": "server/index.js",
+  "main": "electron/main.js",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node --watch server/index.js"
+    "dev": "node --watch server/index.js",
+    "electron": "electron .",
+    "dist": "electron-builder --win"
   },
   "engines": {
     "node": ">=22.5.0"
   },
   "dependencies": {
+    "bonjour-service": "^1.4.4",
     "express": "^4.19.2",
     "node-notifier": "^10.0.1"
+  },
+  "devDependencies": {
+    "electron": "^37.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  },
+  "build": {
+    "appId": "com.koku.remindmelater",
+    "productName": "RemindMeLater",
+    "files": [
+      "server/**/*",
+      "public/**/*",
+      "electron/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }

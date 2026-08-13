@@ -13,6 +13,7 @@ const themesRouter = require('./routes/themes');
 const profileRouter = require('./routes/profile');
 const specialDaysRouter = require('./routes/specialDays');
 const { startReminderChecker } = require('./reminderChecker');
+const { startMdns } = require('./mdns');
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -48,11 +49,19 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`RemindMeLater escuchando en el puerto ${PORT}`);
   console.log(`  En este ordenador: http://localhost:${PORT}`);
 
+  // El nombre por mDNS (remindmelater.local, ver mdns.js) es la forma
+  // recomendada de conectar desde el movil: un solo nombre fijo, sin
+  // importar cuantos adaptadores de red tenga este ordenador. Se deja
+  // tambien el listado de IPs por adaptador como respaldo, por si la red
+  // del movil no resuelve nombres .local (pasa en algunas redes wifi
+  // publicas o routers antiguos).
+  startMdns(PORT);
+
   const nets = os.networkInterfaces();
   for (const name of Object.keys(nets)) {
     for (const net of nets[name]) {
       if (net.family === 'IPv4' && !net.internal) {
-        console.log(`  Desde el movil (misma wifi): http://${net.address}:${PORT}`);
+        console.log(`  Desde el movil, por IP (respaldo si el mDNS no llega): http://${net.address}:${PORT}`);
       }
     }
   }

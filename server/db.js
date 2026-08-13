@@ -11,7 +11,14 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { DatabaseSync } = require('node:sqlite');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+// En desarrollo (npm run dev / node server/index.js) los datos viven en
+// data/ dentro del propio proyecto, como siempre. Empaquetado como app de
+// escritorio (ver electron/main.js), electron/main.js pone esta variable
+// de entorno ANTES de arrancar el servidor, apuntando a la carpeta de
+// datos del usuario (app.getPath('userData')) — asi la base de datos
+// sobrevive a reinstalar o actualizar la app, en vez de vivir dentro de
+// la carpeta de instalacion (que se borra/sustituye).
+const DATA_DIR = process.env.REMINDMELATER_DATA_DIR || path.join(__dirname, '..', 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const db = new DatabaseSync(path.join(DATA_DIR, 'remindmelater.db'));
