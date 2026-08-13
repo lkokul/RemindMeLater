@@ -120,6 +120,151 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
   };
 }
 
+const DATE_FIELD_FORMATTER = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+// ---------------------------------------------------------------------
+// Selector de fecha con estilo propio: sustituye <input type="date"> (o
+// la parte de fecha de un datetime-local) por un boton que abre un
+// mini-calendario a medida — mismo lenguaje visual que el calendario
+// grande (mes con flechas + cuadricula de dias), en vez del selector
+// nativo del navegador/SO, que no sigue el tema para nada. Reutiliza los
+// mismos ayudantes de fecha que el calendario grande (startOfMonth,
+// sameDay, WEEKDAY_LABELS, MONTH_FORMATTER), definidos mas abajo en este
+// archivo — funciona porque esto solo se EJECUTA cuando alguien interactua
+// (clic en el boton), momento en el que el archivo entero ya esta cargado.
+// allowClear: si la fecha es opcional (tareas), anade un boton "Quitar
+// fecha"; si no (inicio de un evento), no se ofrece esa opcion.
+function createDateField({ initialValue = null, onChange, allowClear = false, placeholder = 'Elegir fecha' } = {}) {
+  let value = initialValue; // Date o null
+  let viewMonth = value ? new Date(value.getFullYear(), value.getMonth(), 1) : startOfMonth(new Date());
+
+  const root = document.createElement('div');
+  root.className = 'date-field';
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'date-field-trigger';
+
+  const popover = document.createElement('div');
+  popover.className = 'date-popover hidden';
+  document.body.appendChild(popover);
+
+  function renderTrigger() {
+    trigger.textContent = value ? DATE_FIELD_FORMATTER.format(value) : placeholder;
+    trigger.classList.toggle('select-field-placeholder', !value);
+  }
+
+  function selectDay(cellDate) {
+    // Si ya habia una fecha (con hora, en el caso de un evento), se
+    // conserva esa hora — aqui solo se cambia el dia/mes/año.
+    const next = value ? new Date(value) : new Date();
+    next.setFullYear(cellDate.getFullYear(), cellDate.getMonth(), cellDate.getDate());
+    value = next;
+    renderTrigger();
+    popover.classList.add('hidden');
+    if (onChange) onChange(value);
+  }
+
+  function renderCalendar() {
+    popover.innerHTML = '';
+
+    const nav = document.createElement('div');
+    nav.className = 'date-popover-nav';
+    const prevBtn = document.createElement('button');
+    prevBtn.type = 'button';
+    prevBtn.className = 'icon-btn';
+    prevBtn.textContent = '←';
+    prevBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1);
+      renderCalendar();
+    });
+    const label = document.createElement('span');
+    label.className = 'date-popover-month-label';
+    label.textContent = MONTH_FORMATTER.format(viewMonth);
+    const nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.className = 'icon-btn';
+    nextBtn.textContent = '→';
+    nextBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1);
+      renderCalendar();
+    });
+    nav.appendChild(prevBtn);
+    nav.appendChild(label);
+    nav.appendChild(nextBtn);
+    popover.appendChild(nav);
+
+    const grid = document.createElement('div');
+    grid.className = 'date-popover-grid';
+    WEEKDAY_LABELS.forEach((l) => {
+      const h = document.createElement('div');
+      h.className = 'date-popover-weekday';
+      h.textContent = l;
+      grid.appendChild(h);
+    });
+
+    const first = startOfMonth(viewMonth);
+    const firstWeekday = (first.getDay() + 6) % 7;
+    const gridStart = new Date(first);
+    gridStart.setDate(gridStart.getDate() - firstWeekday);
+    const today = new Date();
+
+    for (let i = 0; i < 42; i++) {
+      const cellDate = new Date(gridStart);
+      cellDate.setDate(gridStart.getDate() + i);
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'date-popover-day';
+      if (cellDate.getMonth() !== viewMonth.getMonth()) cell.classList.add('other-month');
+      if (sameDay(cellDate, today)) cell.classList.add('today');
+      if (value && sameDay(cellDate, value)) cell.classList.add('selected');
+      cell.textContent = cellDate.getDate();
+      cell.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectDay(cellDate);
+      });
+      grid.appendChild(cell);
+    }
+    popover.appendChild(grid);
+
+    if (allowClear) {
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'secondary-btn date-popover-clear';
+      clearBtn.textContent = 'Quitar fecha';
+      clearBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        value = null;
+        renderTrigger();
+        popover.classList.add('hidden');
+        if (onChange) onChange(value);
+      });
+      popover.appendChild(clearBtn);
+    }
+  }
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = popover.classList.contains('hidden');
+    closeAllPopovers(popover);
+    viewMonth = value ? new Date(value.getFullYear(), value.getMonth(), 1) : startOfMonth(new Date());
+    if (willOpen) renderCalendar();
+    popover.classList.toggle('hidden');
+    if (willOpen) positionFixedPopover(trigger, popover, { width: 264, estimatedHeight: 320 });
+  });
+
+  root.appendChild(trigger);
+  renderTrigger();
+
+  return {
+    element: root,
+    getValue: () => value,
+    setValue: (v) => { value = v; renderTrigger(); },
+  };
+}
+
 // ---------------------------------------------------------------------
 // Capa de red: envuelve fetch para añadir el token del dispositivo (si
 // existe) y para reaccionar automaticamente si el servidor dice 401
@@ -205,13 +350,6 @@ function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMont
 function toDateKey(date) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-// El input datetime-local espera "YYYY-MM-DDTHH:mm" en hora LOCAL (no UTC),
-// asi que no podemos usar toISOString() directamente (esa da UTC).
-function toDatetimeLocalValue(date) {
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 // ---------------------------------------------------------------------
@@ -483,6 +621,28 @@ document.getElementById('event-reminder-field').appendChild(eventReminderField.e
 const eventGroupField = createSelectField({ options: [{ value: '', label: 'Sin grupo' }], initialValue: '' });
 document.getElementById('event-group-field').appendChild(eventGroupField.element);
 
+const eventStartDateField = createDateField({ initialValue: new Date() });
+document.getElementById('event-start-date-field').appendChild(eventStartDateField.element);
+
+const eventEndDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('event-end-date-field').appendChild(eventEndDateField.element);
+
+function toTimeInputValue(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+// Junta un Date (solo se usa su dia/mes/año) con el valor "HH:mm" de un
+// <input type="time"> en un unico string "YYYY-MM-DDTHH:mm:ss" para
+// mandar al servidor — el selector de fecha propio y el campo de hora
+// nativo viven separados en el formulario, pero la API sigue esperando
+// un solo valor combinado, como antes con el datetime-local.
+function combineDateAndTime(date, timeStr) {
+  const [h, m] = (timeStr || '00:00').split(':').map(Number);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${toDateKey(date)}T${pad(h)}:${pad(m)}:00`;
+}
+
 // presetDate (opcional): al crear un evento nuevo desde el panel de un
 // dia concreto, arranca ya con esa fecha puesta (a las 09:00 por
 // defecto) en vez de con la fecha/hora actual.
@@ -497,8 +657,18 @@ function openEventModal(event, presetDate) {
     defaultStart = new Date(presetDate);
     defaultStart.setHours(9, 0, 0, 0);
   }
-  document.getElementById('event-start').value = event ? toDatetimeLocalValue(new Date(event.startAt)) : toDatetimeLocalValue(defaultStart);
-  document.getElementById('event-end').value = event && event.endAt ? toDatetimeLocalValue(new Date(event.endAt)) : '';
+  const startDate = event ? new Date(event.startAt) : defaultStart;
+  eventStartDateField.setValue(startDate);
+  document.getElementById('event-start-time').value = toTimeInputValue(startDate);
+
+  if (event && event.endAt) {
+    const endDate = new Date(event.endAt);
+    eventEndDateField.setValue(endDate);
+    document.getElementById('event-end-time').value = toTimeInputValue(endDate);
+  } else {
+    eventEndDateField.setValue(null);
+    document.getElementById('event-end-time').value = '';
+  }
   document.getElementById('event-location').value = event && event.location ? event.location : '';
   document.getElementById('event-description').value = event && event.description ? event.description : '';
   eventReminderField.setValue(event && event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
@@ -534,11 +704,14 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
 
   const groupRaw = eventGroupField.getValue();
 
+  const startDate = eventStartDateField.getValue();
+  const endDate = eventEndDateField.getValue();
+
   const payload = {
     title: document.getElementById('event-title').value,
     allDay: document.getElementById('event-all-day').checked,
-    startAt: document.getElementById('event-start').value,
-    endAt: document.getElementById('event-end').value || null,
+    startAt: combineDateAndTime(startDate, document.getElementById('event-start-time').value),
+    endAt: endDate ? combineDateAndTime(endDate, document.getElementById('event-end-time').value) : null,
     location: document.getElementById('event-location').value || null,
     description: document.getElementById('event-description').value || null,
     reminderMinutesBefore: reminderRaw === '' ? null : Number(reminderRaw),
@@ -792,22 +965,18 @@ function populateTaskGroupSelect() {
   taskGroupField.setValue(current);
 }
 
-// El input type="date" quiere "YYYY-MM-DD" en LOCAL, no UTC (mismo motivo
-// que toDatetimeLocalValue mas arriba).
-function toDateInputValue(date) {
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
 const taskGroupField = createSelectField({ options: [{ value: '', label: 'Sin grupo' }], initialValue: '' });
 document.getElementById('task-group-field').appendChild(taskGroupField.element);
+
+const taskDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('task-date-field').appendChild(taskDateField.element);
 
 function openTaskModal(task) {
   const modal = document.getElementById('task-modal');
   document.getElementById('task-modal-title').textContent = task ? 'Editar tarea' : 'Nueva tarea';
   document.getElementById('task-id').value = task ? task.id : '';
   document.getElementById('task-title').value = task ? task.title : '';
-  document.getElementById('task-date').value = task && task.startAt ? toDateInputValue(new Date(task.startAt)) : '';
+  taskDateField.setValue(task && task.startAt ? new Date(task.startAt) : null);
   populateTaskGroupSelect();
   taskGroupField.setValue(task && task.groupId ? String(task.groupId) : '');
   document.getElementById('btn-delete-task').classList.toggle('hidden', !task);
@@ -825,7 +994,7 @@ document.getElementById('btn-close-task').addEventListener('click', closeTaskMod
 document.getElementById('task-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('task-id').value;
-  const dateRaw = document.getElementById('task-date').value;
+  const dateValue = taskDateField.getValue();
   const groupRaw = taskGroupField.getValue();
 
   const payload = {
@@ -833,7 +1002,7 @@ document.getElementById('task-form').addEventListener('submit', async (e) => {
     isTask: true,
     // Todo el dia siempre: una tarea no lleva hora concreta, solo fecha
     // limite (o ninguna).
-    startAt: dateRaw ? `${dateRaw}T00:00:00` : null,
+    startAt: dateValue ? `${toDateKey(dateValue)}T00:00:00` : null,
     allDay: true,
     groupId: groupRaw === '' ? null : Number(groupRaw),
   };

@@ -27,16 +27,16 @@ function positionFixedPopover(anchorBtn, popover, { width = 248, estimatedHeight
 }
 
 function closeAllPopovers(except) {
-  document.querySelectorAll('.color-popover, .icon-popover, .select-popover').forEach((el) => {
+  document.querySelectorAll('.color-popover, .icon-popover, .select-popover, .date-popover').forEach((el) => {
     if (el !== except) el.classList.add('hidden');
   });
 }
 
 // Cierra cualquier popover abierto al hacer click fuera de el (uno solo
-// para color, icono y selector, asi no hay que repetir esta logica en
-// cada widget).
+// para color, icono, selector y fecha, asi no hay que repetir esta logica
+// en cada widget).
 document.addEventListener('click', (e) => {
-  if (e.target.closest('.color-popover, .icon-popover, .select-popover, .color-swatch-btn, .icon-swatch-btn, .select-field-trigger')) return;
+  if (e.target.closest('.color-popover, .icon-popover, .select-popover, .date-popover, .color-swatch-btn, .icon-swatch-btn, .select-field-trigger, .date-field-trigger')) return;
   closeAllPopovers();
 });
 
@@ -1518,7 +1518,7 @@ function refreshShortcutsTab() {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
 
-  const openPopover = document.querySelector('.color-popover:not(.hidden), .icon-popover:not(.hidden), .select-popover:not(.hidden)');
+  const openPopover = document.querySelector('.color-popover:not(.hidden), .icon-popover:not(.hidden), .select-popover:not(.hidden), .date-popover:not(.hidden)');
   if (openPopover) {
     closeAllPopovers();
     return;

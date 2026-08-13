@@ -191,14 +191,20 @@
           Todo el dia
         </label>
         <div class="form-row">
-          <label>
-            Inicio
-            <input type="datetime-local" id="event-start" required />
-          </label>
-          <label>
-            Fin (opcional)
-            <input type="datetime-local" id="event-end" />
-          </label>
+          <div class="field-label-block">
+            <span class="field-label">Inicio</span>
+            <div class="datetime-row">
+              <div id="event-start-date-field"></div>
+              <input type="time" id="event-start-time" required />
+            </div>
+          </div>
+          <div class="field-label-block">
+            <span class="field-label">Fin (opcional)</span>
+            <div class="datetime-row">
+              <div id="event-end-date-field"></div>
+              <input type="time" id="event-end-time" />
+            </div>
+          </div>
         </div>
         <label>
           Ubicacion (opcional)
@@ -240,10 +246,10 @@
           Titulo
           <input type="text" id="task-title" required />
         </label>
-        <label>
-          Fecha limite (opcional)
-          <input type="date" id="task-date" />
-        </label>
+        <div class="field-label-block">
+          <span class="field-label">Fecha limite (opcional)</span>
+          <div id="task-date-field"></div>
+        </div>
         <div class="field-label-block">
           <span class="field-label">Grupo (opcional)</span>
           <div id="task-group-field"></div>

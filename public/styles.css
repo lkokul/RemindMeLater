@@ -42,7 +42,7 @@ body {
    algun dia tiene mas secciones de las que caben) aparece esta barra
    fina en vez de la del sistema, con el color de acento del tema activo
    — asi que cambia sola si cambias de tema. */
-.modal-card, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover {
+.modal-card, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover, .date-popover {
   scrollbar-width: thin;
   scrollbar-color: var(--accent) transparent;
 }
@@ -51,7 +51,8 @@ body {
 .settings-menu::-webkit-scrollbar,
 .icon-popover::-webkit-scrollbar,
 .color-popover::-webkit-scrollbar,
-.select-popover::-webkit-scrollbar {
+.select-popover::-webkit-scrollbar,
+.date-popover::-webkit-scrollbar {
   width: 8px;
 }
 .modal-card::-webkit-scrollbar-track,
@@ -59,7 +60,8 @@ body {
 .settings-menu::-webkit-scrollbar-track,
 .icon-popover::-webkit-scrollbar-track,
 .color-popover::-webkit-scrollbar-track,
-.select-popover::-webkit-scrollbar-track {
+.select-popover::-webkit-scrollbar-track,
+.date-popover::-webkit-scrollbar-track {
   background: transparent;
 }
 .modal-card::-webkit-scrollbar-thumb,
@@ -67,7 +69,8 @@ body {
 .settings-menu::-webkit-scrollbar-thumb,
 .icon-popover::-webkit-scrollbar-thumb,
 .color-popover::-webkit-scrollbar-thumb,
-.select-popover::-webkit-scrollbar-thumb {
+.select-popover::-webkit-scrollbar-thumb,
+.date-popover::-webkit-scrollbar-thumb {
   background: var(--accent);
   border-radius: 4px;
 }
@@ -738,6 +741,49 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 }
 .select-option:hover { background: var(--surface-2); }
 .select-option.active { background: color-mix(in srgb, var(--accent) 18%, var(--surface-2)); font-weight: 600; }
+
+/* --- Selector de fecha con estilo propio (createDateField en app.js) —
+   mismo lenguaje visual que el calendario grande (.calendar-grid,
+   .calendar-cell), a escala de popover. --- */
+.date-field { position: relative; width: 100%; }
+.date-field-trigger {
+  width: 100%; display: flex; align-items: center; gap: 0.4rem;
+  background: var(--surface-2); color: var(--surface-2-text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem; font-size: 0.9rem; text-align: left; cursor: pointer;
+}
+.date-field-trigger.select-field-placeholder { opacity: 0.65; }
+.datetime-row { display: flex; gap: 0.4rem; align-items: stretch; margin-top: 0.3rem; }
+.datetime-row .date-field { flex: 2; }
+.datetime-row input[type="time"] { flex: 1; min-width: 0; }
+.date-popover {
+  position: fixed; z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.7rem; width: 264px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+.date-popover-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 0.5rem; font-size: 0.85rem; font-weight: 600;
+}
+.date-popover-nav .icon-btn { width: 1.8rem; height: 1.8rem; font-size: 0.85rem; }
+.date-popover-month-label { text-transform: capitalize; }
+.date-popover-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.date-popover-weekday {
+  text-align: center; font-size: 0.7rem; padding-bottom: 0.25rem;
+  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
+}
+.date-popover-day {
+  aspect-ratio: 1; border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--surface-2-text);
+  border: 1px solid transparent; font-size: 0.8rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.date-popover-day:hover { border-color: var(--accent); }
+.date-popover-day.other-month { opacity: 0.35; }
+.date-popover-day.today { border-color: var(--accent); font-weight: 700; }
+.date-popover-day.selected { background: var(--accent); color: var(--accent-text); }
+.date-popover-clear { width: 100%; margin-top: 0.6rem; }
 
 /* --- Selector de icono (simbolo/emoji) con paletas (createIconField) --- */
 .icon-field { position: relative; display: inline-block; }
