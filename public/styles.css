@@ -135,8 +135,12 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .checkbox-row input[type="checkbox"]::before {
   content: '';
   position: absolute;
-  top: 2.5px;
-  left: 2.5px;
+  /* Numeros redondos a proposito (pista 2.4rem, circulo 1rem, hueco
+     0.2rem): asi el hueco a la izquierda cuando esta apagado y el hueco
+     a la derecha cuando esta encendido salen EXACTAMENTE iguales
+     (2.4 - 0.2 - 1 = 1.2, que es justo lo que se desplaza abajo). */
+  top: 0.2rem;
+  left: 0.2rem;
   width: 1rem;
   height: 1rem;
   border-radius: 50%;
@@ -148,7 +152,7 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   border-color: var(--accent);
 }
 .checkbox-row input[type="checkbox"]:checked::before {
-  transform: translateX(1.08rem);
+  transform: translateX(1rem);
   background: white;
 }
 .checkbox-row input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -753,23 +757,37 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    mismo lenguaje visual que el calendario grande (.calendar-grid,
    .calendar-cell), a escala de popover. --- */
 .date-field { position: relative; width: 100%; }
-.date-field-trigger {
-  width: 100%; display: flex; align-items: center; gap: 0.4rem;
-  background: var(--surface-2); color: var(--surface-2-text);
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 0.55rem 0.7rem; font-size: 0.9rem; text-align: left; cursor: pointer;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+/* El campo de fecha ahora es un input de texto (se puede escribir la
+   fecha a mano) + un botoncito de calendario que abre el mini-calendario
+   emergente — antes era un boton entero, solo clicable. */
+.date-field-input-wrap {
+  display: flex; align-items: stretch;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  overflow: hidden;
 }
-.date-field-trigger.select-field-placeholder { opacity: 0.65; }
-.date-field-trigger-icon { flex-shrink: 0; opacity: 0.8; }
+.date-field-text {
+  flex: 1; min-width: 0; border: none; background: transparent;
+  color: var(--surface-2-text); border-radius: 0;
+  padding: 0.55rem 0.7rem; font-size: 0.9rem;
+}
+.date-field-text:focus { outline: none; }
+.date-field-icon-btn {
+  flex-shrink: 0; border: none; background: transparent; color: var(--surface-2-text);
+  padding: 0 0.6rem; cursor: pointer; border-radius: 0; opacity: 0.75;
+  display: flex; align-items: center; justify-content: center;
+}
+.date-field-icon-btn:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 15%, transparent); }
 .datetime-row { display: flex; gap: 0.4rem; align-items: stretch; margin-top: 0.3rem; }
 /* La fecha necesita mas hueco que la hora ("14/08/2026" o "Sin fecha" es
    mas largo que "00:00") — sin este reparto, "Sin fecha" se partia en dos
    lineas. */
 .datetime-row .date-field { flex: 1.6; min-width: 0; }
-.datetime-row input[type="time"] {
-  flex: 1; min-width: 0;
-  border-radius: var(--radius-sm); /* el resto de campos del formulario usa --radius-sm, no el --radius mas grande por defecto */
+.datetime-row .time-field { flex: 1; min-width: 0; }
+.time-field-input {
+  width: 100%; text-align: center;
+  background: var(--surface-2); color: var(--surface-2-text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 0.55rem 0.5rem; font-size: 0.9rem;
 }
 .date-popover {
   /* min() con el ancho de ventana para que nunca se salga ni se aplaste
@@ -784,7 +802,12 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 0.4rem; font-size: 0.8rem; font-weight: 600;
 }
-.date-popover-nav .icon-btn { width: 1.6rem; height: 1.6rem; font-size: 0.75rem; flex-shrink: 0; }
+/* Antes tenia un ancho/alto fijo pensado para el caracter "←"/"→" a
+   0.75rem — al pasar a un SVG de 16px, ese hueco fijo (con el padding
+   heredado de .icon-btn) se quedaba mas pequeño que el propio icono, y
+   no se veia nada. Con padding en vez de tamaño fijo, el boton crece
+   para caber el SVG entero. */
+.date-popover-nav .icon-btn { padding: 0.3rem; flex-shrink: 0; }
 .date-popover-month-label { text-align: center; flex: 1; }
 .date-popover-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .date-popover-weekday {

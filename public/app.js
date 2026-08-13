@@ -164,19 +164,74 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
   const root = document.createElement('div');
   root.className = 'date-field';
 
-  const trigger = document.createElement('button');
-  trigger.type = 'button';
-  trigger.className = 'date-field-trigger';
+  // Aparte del calendario emergente, tambien se puede escribir la fecha a
+  // mano en este campo de texto — el icono de al lado es lo que abre el
+  // calendario, ya no hace falta clicar sobre el texto para eso.
+  const wrap = document.createElement('div');
+  wrap.className = 'date-field-input-wrap';
+
+  const textInput = document.createElement('input');
+  textInput.type = 'text';
+  textInput.className = 'date-field-text';
+  textInput.placeholder = placeholder;
+  textInput.inputMode = 'numeric';
+
+  const iconBtn = document.createElement('button');
+  iconBtn.type = 'button';
+  iconBtn.className = 'date-field-icon-btn';
+  iconBtn.innerHTML = CALENDAR_ICON_SVG;
+  iconBtn.setAttribute('aria-label', 'Abrir calendario');
+
+  wrap.appendChild(textInput);
+  wrap.appendChild(iconBtn);
 
   const popover = document.createElement('div');
   popover.className = 'date-popover hidden';
   document.body.appendChild(popover);
 
-  function renderTrigger() {
-    const text = value ? DATE_FIELD_FORMATTER.format(value) : placeholder;
-    trigger.innerHTML = `${CALENDAR_ICON_SVG}${escapeHtml(text)}`;
-    trigger.classList.toggle('select-field-placeholder', !value);
+  function syncTextInput() {
+    textInput.value = value ? DATE_FIELD_FORMATTER.format(value) : '';
   }
+
+  // Admite "14/8/2026" o "14/08/2026" escrito a mano. Devuelve null si no
+  // es una fecha real (incluye cosas como 31/02, que numericamente
+  // "parsean" pero no existen).
+  function parseTypedDate(text) {
+    const m = text.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!m) return null;
+    const day = Number(m[1]);
+    const month = Number(m[2]);
+    const year = Number(m[3]);
+    const d = new Date(year, month - 1, day);
+    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+    if (value) d.setHours(value.getHours(), value.getMinutes(), value.getSeconds(), 0);
+    return d;
+  }
+
+  // Al salir del campo (Tab, clic fuera...): si lo que hay escrito es una
+  // fecha valida, se aplica; si no (o esta vacio y se puede quitar la
+  // fecha), se actua en consecuencia; si no es valido y no se puede
+  // dejar vacio, vuelve a mostrar la ultima fecha buena en vez de dejar
+  // algo raro escrito.
+  textInput.addEventListener('change', () => {
+    const text = textInput.value.trim();
+    if (!text) {
+      if (allowClear) {
+        value = null;
+        if (onChange) onChange(value);
+      }
+      syncTextInput();
+      return;
+    }
+    const parsed = parseTypedDate(text);
+    if (parsed) {
+      value = parsed;
+      viewMonth = new Date(value.getFullYear(), value.getMonth(), 1);
+      if (onChange) onChange(value);
+    }
+    syncTextInput();
+  });
+  textInput.addEventListener('click', (e) => e.stopPropagation());
 
   function selectDay(cellDate) {
     // Si ya habia una fecha (con hora, en el caso de un evento), se
@@ -184,7 +239,7 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
     const next = value ? new Date(value) : new Date();
     next.setFullYear(cellDate.getFullYear(), cellDate.getMonth(), cellDate.getDate());
     value = next;
-    renderTrigger();
+    syncTextInput();
     popover.classList.add('hidden');
     if (onChange) onChange(value);
   }
@@ -261,7 +316,7 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
       clearBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         value = null;
-        renderTrigger();
+        syncTextInput();
         popover.classList.add('hidden');
         if (onChange) onChange(value);
       });
@@ -269,23 +324,23 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
     }
   }
 
-  trigger.addEventListener('click', (e) => {
+  iconBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const willOpen = popover.classList.contains('hidden');
     closeAllPopovers(popover);
     viewMonth = value ? new Date(value.getFullYear(), value.getMonth(), 1) : startOfMonth(new Date());
     if (willOpen) renderCalendar();
     popover.classList.toggle('hidden');
-    if (willOpen) positionFixedPopover(trigger, popover, { width: 264, estimatedHeight: 320 });
+    if (willOpen) positionFixedPopover(iconBtn, popover, { width: 264, estimatedHeight: 320 });
   });
 
-  root.appendChild(trigger);
-  renderTrigger();
+  root.appendChild(wrap);
+  syncTextInput();
 
   return {
     element: root,
     getValue: () => value,
-    setValue: (v) => { value = v; renderTrigger(); },
+    setValue: (v) => { value = v; syncTextInput(); },
   };
 }
 
@@ -659,16 +714,55 @@ document.getElementById('event-start-date-field').appendChild(eventStartDateFiel
 const eventEndDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
 document.getElementById('event-end-date-field').appendChild(eventEndDateField.element);
 
-// Volvimos a <input type="time"> nativo (habia pasado a ser un
-// desplegable de opciones cada 15 min, como el resto de selectores, pero
-// Koku prefirio poder escribir la hora directamente en vez de desplazarse
-// por una lista) — se le da estilo por CSS para que combine con el resto
-// (ver "input, textarea, select" en styles.css), aunque el iconito del
-// reloj se queda con el color que le pone el navegador, eso no se puede
-// tocar con CSS.
+// Campo de hora propio: un input de texto normal (se escribe directo,
+// sin desplegable) pero con el estilo del tema — <input type="time">
+// nativo siempre abre el selector propio del navegador al clicarlo (el
+// de la captura, con columnas de horas/minutos), que no hay forma de
+// quitar ni de estilizar con CSS.
 function toTimeInputValue(date) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function createTimeField({ initialValue = '09:00' } = {}) {
+  let value = initialValue;
+
+  const root = document.createElement('div');
+  root.className = 'time-field';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'time-field-input';
+  input.placeholder = 'HH:MM';
+  input.inputMode = 'numeric';
+  input.value = value;
+
+  // Admite "9:5", "09:05", "930"... siempre que las horas/minutos sean
+  // validos; si no, devuelve null y el campo vuelve al ultimo valor
+  // bueno en vez de dejar algo sin sentido escrito.
+  function normalize(text) {
+    const cleaned = text.trim().replace(/\s+/g, '');
+    const m = cleaned.match(/^(\d{1,2}):?(\d{2})$/);
+    if (!m) return null;
+    const h = Number(m[1]);
+    const mi = Number(m[2]);
+    if (h > 23 || mi > 59) return null;
+    return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+  }
+
+  input.addEventListener('change', () => {
+    const normalized = normalize(input.value);
+    if (normalized) value = normalized;
+    input.value = value;
+  });
+
+  root.appendChild(input);
+
+  return {
+    element: root,
+    getValue: () => value,
+    setValue: (v) => { value = v; input.value = v; },
+  };
 }
 
 // Junta un Date (solo se usa su dia/mes/año) con un "HH:mm" en un unico
@@ -680,6 +774,12 @@ function combineDateAndTime(date, timeStr) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${toDateKey(date)}T${pad(h)}:${pad(m)}:00`;
 }
+
+const eventStartTimeField = createTimeField({ initialValue: toTimeInputValue(new Date()) });
+document.getElementById('event-start-time-field').appendChild(eventStartTimeField.element);
+
+const eventEndTimeField = createTimeField({ initialValue: toTimeInputValue(new Date()) });
+document.getElementById('event-end-time-field').appendChild(eventEndTimeField.element);
 
 // presetDate (opcional): al crear un evento nuevo desde el panel de un
 // dia concreto, arranca ya con esa fecha puesta (a las 09:00 por
@@ -697,15 +797,15 @@ function openEventModal(event, presetDate) {
   }
   const startDate = event ? new Date(event.startAt) : defaultStart;
   eventStartDateField.setValue(startDate);
-  document.getElementById('event-start-time').value = toTimeInputValue(startDate);
+  eventStartTimeField.setValue(toTimeInputValue(startDate));
 
   if (event && event.endAt) {
     const endDate = new Date(event.endAt);
     eventEndDateField.setValue(endDate);
-    document.getElementById('event-end-time').value = toTimeInputValue(endDate);
+    eventEndTimeField.setValue(toTimeInputValue(endDate));
   } else {
     eventEndDateField.setValue(null);
-    document.getElementById('event-end-time').value = toTimeInputValue(startDate);
+    eventEndTimeField.setValue(toTimeInputValue(startDate));
   }
   document.getElementById('event-location').value = event && event.location ? event.location : '';
   document.getElementById('event-description').value = event && event.description ? event.description : '';
@@ -748,8 +848,8 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
   const payload = {
     title: document.getElementById('event-title').value,
     allDay: document.getElementById('event-all-day').checked,
-    startAt: combineDateAndTime(startDate, document.getElementById('event-start-time').value),
-    endAt: endDate ? combineDateAndTime(endDate, document.getElementById('event-end-time').value) : null,
+    startAt: combineDateAndTime(startDate, eventStartTimeField.getValue()),
+    endAt: endDate ? combineDateAndTime(endDate, eventEndTimeField.getValue()) : null,
     location: document.getElementById('event-location').value || null,
     description: document.getElementById('event-description').value || null,
     reminderMinutesBefore: reminderRaw === '' ? null : Number(reminderRaw),
