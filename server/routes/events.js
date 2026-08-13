@@ -26,6 +26,8 @@ function serialize(row) {
     groupName: row.group_name || null,
     groupColor: row.group_color || null,
     groupIcon: row.group_icon || null,
+    createdByName: row.created_by_name || null,
+    createdByPublicId: row.created_by_id || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -68,10 +70,15 @@ router.post('/', (req, res) => {
     return res.status(400).json({ error: 'invalid_request', message: 'Falta la fecha/hora de inicio.' });
   }
 
+  // "Creado por" se rellena con tu perfil en el momento de crear el
+  // evento (ver server/db.js): una foto fija de tu nombre de entonces, no
+  // un enlace en vivo a tu nickname actual.
+  const profile = db.prepare('SELECT * FROM user_profile WHERE id = 1').get();
+
   const info = db
     .prepare(`
-      INSERT INTO events (title, description, location, start_at, end_at, all_day, reminder_minutes_before, group_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (title, description, location, start_at, end_at, all_day, reminder_minutes_before, group_id, created_by_name, created_by_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       title.trim(),
@@ -81,7 +88,9 @@ router.post('/', (req, res) => {
       endAt || null,
       allDay ? 1 : 0,
       reminderMinutesBefore === undefined || reminderMinutesBefore === null ? null : Number(reminderMinutesBefore),
-      resolveGroupId(groupId)
+      resolveGroupId(groupId),
+      profile && profile.name ? profile.name : null,
+      profile ? profile.public_id : null
     );
 
   const row = db.prepare(`${SELECT_WITH_GROUP} WHERE e.id = ?`).get(info.lastInsertRowid);

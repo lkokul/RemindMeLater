@@ -10,18 +10,33 @@ const devicesRouter = require('./routes/devices');
 const remindersRouter = require('./routes/reminders');
 const groupsRouter = require('./routes/groups');
 const themesRouter = require('./routes/themes');
+const profileRouter = require('./routes/profile');
+const specialDaysRouter = require('./routes/specialDays');
 const { startReminderChecker } = require('./reminderChecker');
 
 const PORT = process.env.PORT || 3000;
 const app = express();
 
+// Momento en el que arranco este proceso. npm run dev reinicia el proceso
+// entero cada vez que cambia un archivo de server/, asi que este valor
+// cambia en cada reinicio: la pagina lo usa para darse cuenta de que hay
+// una version nueva del servidor y avisar para recargar (ver /api/version
+// y checkForUpdate() en app.js).
+const SERVER_STARTED_AT = Date.now();
+
 app.use(express.json());
+
+app.get('/api/version', (req, res) => {
+  res.json({ startedAt: SERVER_STARTED_AT });
+});
 
 // Rutas de datos: exigen ser el propio ordenador O un movil ya emparejado.
 app.use('/api/events', requireDeviceOrTrusted, eventsRouter);
 app.use('/api/reminders', requireDeviceOrTrusted, remindersRouter);
 app.use('/api/groups', requireDeviceOrTrusted, groupsRouter);
 app.use('/api/themes', requireDeviceOrTrusted, themesRouter);
+app.use('/api/profile', requireDeviceOrTrusted, profileRouter);
+app.use('/api/special-days', requireDeviceOrTrusted, specialDaysRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);

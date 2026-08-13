@@ -13,10 +13,12 @@ const db = require('../db');
 
 const router = express.Router();
 
-// Las 8 variables de color que se pueden personalizar. Cualquier otra
-// clave que llegue en el JSON se ignora, y si falta alguna se rellena
-// con el valor por defecto (asi un tema "viejo" o importado a medias no
-// rompe el render).
+// Las variables de color que se pueden personalizar. Cualquier otra clave
+// que llegue en el JSON se ignora, y si falta alguna se rellena con el
+// valor por defecto (asi un tema "viejo" o importado a medias no rompe
+// el render). Las 4 ultimas (dayX) son los colores del calendario: hoy,
+// fin de semana, festivo y dia especial — festivo/especial se marcan a
+// mano desde el panel de dia, ver server/routes/specialDays.js.
 const DEFAULT_COLORS = {
   bg: '#0f1115',
   surface: '#171a21',
@@ -27,6 +29,10 @@ const DEFAULT_COLORS = {
   accent: '#5b8cff',
   danger: '#ff6b6b',
   settingsMenuBg: '#1f232c',
+  dayToday: '#5b8cff',
+  dayWeekend: '#1a1d27',
+  dayHoliday: '#3a2020',
+  daySpecial: '#2a1f3a',
 };
 const COLOR_KEYS = Object.keys(DEFAULT_COLORS);
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
@@ -35,9 +41,34 @@ function sanitizeColors(input) {
   const colors = {};
   for (const key of COLOR_KEYS) {
     const value = input && input[key];
-    colors[key] = typeof value === 'string' && HEX_RE.test(value) ? value : DEFAULT_COLORS[key];
+    colors[key] = typeof value === 'string' && HEX_RE.test(value) ? value : null;
   }
+
+  // Si falta settingsMenuBg concretamente (temas guardados antes de que
+  // existiera esa variable, o una variante inversa a la que no se le puso
+  // valor), el mejor "no se nota" es copiar el fondo de tarjetas (surface2)
+  // DE ESE MISMO tema — asi una variante clara incompleta hereda un fondo
+  // claro, y una oscura uno oscuro, en vez de caer siempre en el valor por
+  // defecto oscuro aunque el resto del tema sea claro (eso es justo lo que
+  // pasaba: texto oscuro de un tema claro sobre un fondo oscuro "de serie",
+  // casi sin contraste).
+  if (colors.settingsMenuBg === null) {
+    colors.settingsMenuBg = colors.surface2 || DEFAULT_COLORS.settingsMenuBg;
+  }
+
+  for (const key of COLOR_KEYS) {
+    if (colors[key] === null) colors[key] = DEFAULT_COLORS[key];
+  }
+
   return colors;
+}
+
+// La variante inversa (claro/oscuro "pareja" del tema) es opcional: si no
+// se manda nada, el tema se queda como un tema normal de una sola
+// variante, igual que hasta ahora.
+function sanitizeInverseColors(input) {
+  if (input === null || input === undefined) return null;
+  return sanitizeColors(input);
 }
 
 function serialize(row) {
@@ -47,7 +78,15 @@ function serialize(row) {
   } catch {
     colors = {};
   }
-  return { id: row.id, name: row.name, colors: sanitizeColors(colors) };
+  let inverseColors = null;
+  if (row.inverse_colors) {
+    try {
+      inverseColors = sanitizeColors(JSON.parse(row.inverse_colors));
+    } catch {
+      inverseColors = null;
+    }
+  }
+  return { id: row.id, name: row.name, colors: sanitizeColors(colors), inverseColors };
 }
 
 router.get('/', (req, res) => {
@@ -56,13 +95,17 @@ router.get('/', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { name, colors } = req.body || {};
+  const { name, colors, inverseColors } = req.body || {};
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'invalid_request', message: 'El tema necesita un nombre.' });
   }
   const info = db
-    .prepare('INSERT INTO themes (name, colors) VALUES (?, ?)')
-    .run(name.trim(), JSON.stringify(sanitizeColors(colors)));
+    .prepare('INSERT INTO themes (name, colors, inverse_colors) VALUES (?, ?, ?)')
+    .run(
+      name.trim(),
+      JSON.stringify(sanitizeColors(colors)),
+      inverseColors ? JSON.stringify(sanitizeInverseColors(inverseColors)) : null
+    );
 
   const row = db.prepare('SELECT * FROM themes WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json(serialize(row));
@@ -72,12 +115,13 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM themes WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { name, colors } = req.body || {};
+  const { name, colors, inverseColors } = req.body || {};
   const existingColors = JSON.parse(existing.colors);
 
-  db.prepare('UPDATE themes SET name = ?, colors = ? WHERE id = ?').run(
+  db.prepare('UPDATE themes SET name = ?, colors = ?, inverse_colors = ? WHERE id = ?').run(
     name !== undefined && name.trim() ? name.trim() : existing.name,
     JSON.stringify(sanitizeColors(colors !== undefined ? colors : existingColors)),
+    inverseColors !== undefined ? (inverseColors ? JSON.stringify(sanitizeInverseColors(inverseColors)) : null) : existing.inverse_colors,
     req.params.id
   );
 

@@ -245,7 +245,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['style', 'groups', 'devices', 'mobile'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'devices', 'mobile', 'shortcuts'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -258,12 +258,114 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
   btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
     showSettingsScreen(tab);
-    if (tab === 'style') refreshStyleTab();
+    if (tab === 'profile') refreshProfileTab();
+    else if (tab === 'view') refreshViewTab();
+    else if (tab === 'style') refreshStyleTab();
     else if (tab === 'groups') refreshGroupsTab();
     else if (tab === 'devices') refreshDevicesTab();
     else if (tab === 'mobile') refreshMobileTab();
+    else if (tab === 'shortcuts') refreshShortcutsTab();
   });
 });
+
+// ---------------------------------------------------------------------
+// Perfil: tu nickname (compartido entre todos tus dispositivos, como un
+// tema o un grupo) y tu id unico. El id se genera una vez en el servidor
+// y no cambia nunca aunque cambies el nombre; se ensena oculto por
+// defecto porque no aporta nada verlo siempre, con un interruptor local
+// (por dispositivo) para revelarlo si hace falta.
+// ---------------------------------------------------------------------
+let currentProfile = null;
+
+async function refreshProfileTab() {
+  currentProfile = await api('/api/profile');
+  document.getElementById('profile-name').value = currentProfile.name || '';
+
+  const showId = localStorage.getItem('showUserId') === 'true';
+  document.getElementById('profile-show-id').checked = showId;
+  updateProfileIdDisplay();
+}
+
+function updateProfileIdDisplay() {
+  const showId = document.getElementById('profile-show-id').checked;
+  const idEl = document.getElementById('profile-id-value');
+  if (showId && currentProfile) {
+    idEl.textContent = `Tu id: ${currentProfile.id}`;
+    idEl.classList.remove('hidden');
+  } else {
+    idEl.classList.add('hidden');
+  }
+}
+
+document.getElementById('profile-show-id').addEventListener('change', () => {
+  localStorage.setItem('showUserId', document.getElementById('profile-show-id').checked ? 'true' : 'false');
+  updateProfileIdDisplay();
+});
+
+let profileSavedFeedbackTimer = null;
+
+document.getElementById('profile-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('profile-name').value;
+  const btn = document.getElementById('profile-form').querySelector('button[type="submit"]');
+  const originalLabel = btn.dataset.originalLabel || btn.textContent;
+  btn.dataset.originalLabel = originalLabel;
+
+  currentProfile = await api('/api/profile', { method: 'PUT', body: JSON.stringify({ name }) });
+  document.getElementById('profile-name').value = currentProfile.name || '';
+  updateProfileIdDisplay();
+
+  // Retroalimentacion breve: el boton cambia a "Guardado ✓" un momento y
+  // vuelve a su texto normal, sin necesidad de otro elemento en la pagina.
+  clearTimeout(profileSavedFeedbackTimer);
+  btn.textContent = 'Guardado ✓';
+  btn.classList.add('saved-feedback');
+  profileSavedFeedbackTimer = setTimeout(() => {
+    btn.textContent = originalLabel;
+    btn.classList.remove('saved-feedback');
+  }, 1600);
+});
+
+// ---------------------------------------------------------------------
+// Vista: Normal / Pantalla completa / Ventana flotante. Un solo modo
+// activo a la vez (aplicado de verdad por applyViewMode, en app.js);
+// aqui solo se dibujan los botones y cual esta resaltado como actual,
+// igual que "En uso" en la biblioteca de temas.
+// ---------------------------------------------------------------------
+const VIEW_MODES = [
+  { id: 'normal', label: 'Normal' },
+  { id: 'fullscreen', label: 'Pantalla completa' },
+  { id: 'floating', label: 'Ventana flotante' },
+];
+
+function refreshViewTab() {
+  const container = document.getElementById('view-mode-options');
+  container.innerHTML = '';
+  const current = getViewMode();
+
+  VIEW_MODES.forEach((vm) => {
+    const isActive = vm.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = isActive ? `${vm.label} (actual)` : vm.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => applyViewMode(vm.id));
+    }
+    container.appendChild(btn);
+  });
+
+  const hint = document.getElementById('view-mode-hint');
+  if (current === 'fullscreen') {
+    hint.textContent = 'Pulsa Esc en cualquier momento para salir de pantalla completa.';
+  } else if (current === 'floating') {
+    hint.textContent = 'La ventana flotante se reutiliza: si ya esta abierta, se enfoca en vez de abrir otra.';
+  } else {
+    hint.textContent = '';
+  }
+}
 
 document.querySelectorAll('[data-back]').forEach((btn) => {
   btn.addEventListener('click', () => showSettingsScreen(null));
@@ -291,9 +393,13 @@ const THEME_COLOR_FIELDS_META = [
   { key: 'border', cssVar: '--border', label: 'Bordes' },
   { key: 'text', cssVar: '--text', label: 'Texto principal' },
   { key: 'textDim', cssVar: '--text-dim', label: 'Texto secundario' },
-  { key: 'accent', cssVar: '--accent', label: 'Acento (botones, hoy)' },
+  { key: 'accent', cssVar: '--accent', label: 'Acento (botones)' },
   { key: 'danger', cssVar: '--danger', label: 'Aviso (eliminar)' },
   { key: 'settingsMenuBg', cssVar: '--settings-menu-bg', label: 'Fondo del menú de Configuración' },
+  { key: 'dayToday', cssVar: '--day-today', label: 'Calendario: número del día de hoy' },
+  { key: 'dayWeekend', cssVar: '--day-weekend', label: 'Calendario: fin de semana' },
+  { key: 'dayHoliday', cssVar: '--day-holiday', label: 'Calendario: festivo (marcado a mano)' },
+  { key: 'daySpecial', cssVar: '--day-special', label: 'Calendario: día especial (marcado a mano)' },
 ];
 
 let themeLibrary = [];
@@ -316,6 +422,102 @@ function buildThemeColorGrid() {
 }
 buildThemeColorGrid();
 
+// ---------------------------------------------------------------------
+// Un poco de matematicas de color, para la variante inversa (claro/oscuro
+// emparejados) de un tema: convertimos a HSL, invertimos solo el "brillo"
+// (L) manteniendo el tono y la saturacion, y volvemos a hex. Asi el
+// resultado se sigue pareciendo a la familia de color original (un azul
+// sigue siendo azul, solo mas oscuro o mas claro) en vez de dar un color
+// sin relacion. Es un punto de partida para retocar a mano, no un intento
+// de ser perfecto.
+// ---------------------------------------------------------------------
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  const d = max - min;
+  if (d !== 0) {
+    s = d / (1 - Math.abs(2 * l - 1));
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { h, s, l };
+}
+
+function hslToHex(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (h < 60) { r = c; g = x; b = 0; }
+  else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; }
+  else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+  const toHex = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function invertLightness(hex) {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
+  const { h, s, l } = hexToHsl(hex);
+  return hslToHex(h, s, 1 - l);
+}
+
+function invertColorsObject(colors) {
+  const result = {};
+  THEME_COLOR_FIELDS_META.forEach(({ key }) => {
+    result[key] = invertLightness(colors[key]);
+  });
+  return result;
+}
+
+// Segun el fondo general, decide si una paleta es "clara" u "oscura" —
+// sirve para saber cual de las dos variantes de un tema emparejado
+// ensenar cuando el modo de color pedido es "sistema", "claro" u "oscuro".
+function isLightColors(colors) {
+  return hexToHsl(colors.bg).l > 0.5;
+}
+
+function resolveThemeVariant(theme) {
+  if (!theme.inverseColors) return theme.colors;
+  const pref = localStorage.getItem('colorModePreference') || 'system';
+  const wantDark =
+    pref === 'dark' ||
+    (pref === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const mainIsLight = isLightColors(theme.colors);
+  if (wantDark) return mainIsLight ? theme.inverseColors : theme.colors;
+  return mainIsLight ? theme.colors : theme.inverseColors;
+}
+
+// Lee/escribe los 9 campos del formulario de tema de golpe — hace falta
+// para "aparcar" los valores de un lado (Principal/Inversa) al saltar al
+// otro, ya que los mismos campos del DOM se reutilizan para los dos.
+function readColorFieldsValues() {
+  const values = {};
+  THEME_COLOR_FIELDS_META.forEach(({ key }) => {
+    values[key] = themeColorFields[key].getValue();
+  });
+  return values;
+}
+
+function writeColorFieldsValues(values) {
+  THEME_COLOR_FIELDS_META.forEach(({ key }) => {
+    themeColorFields[key].setValue((values && values[key]) || '#5b8cff');
+  });
+}
+
 // Aplica un juego de colores a la pagina cambiando las variables CSS del
 // documento (ver :root en styles.css). No hace falta recargar nada: los
 // estilos que usan var(--bg), var(--accent)... se actualizan al momento.
@@ -331,9 +533,10 @@ function applyThemeColors(colors) {
 // el parpadeo) y, si procede, avisa al servidor de que este dispositivo
 // tiene ese tema activo (para que "copiar de otro dispositivo" funcione).
 async function applyTheme(theme, { persist = true } = {}) {
-  applyThemeColors(theme.colors);
+  const colors = resolveThemeVariant(theme);
+  applyThemeColors(colors);
   localStorage.setItem('activeThemeId', String(theme.id));
-  localStorage.setItem('activeThemeColors', JSON.stringify(theme.colors));
+  localStorage.setItem('activeThemeColors', JSON.stringify(colors));
   renderThemeLibrary();
 
   if (persist) {
@@ -347,19 +550,103 @@ async function applyTheme(theme, { persist = true } = {}) {
   }
 }
 
+// Modo de color: si un tema tiene variante inversa, decide cual de las
+// dos ensena resolveThemeVariant. "Sistema" sigue el modo claro/oscuro
+// del sistema operativo (y se reacciona en vivo si cambia mientras la
+// app esta abierta, ver el listener de matchMedia mas abajo); es un
+// ajuste de ESTE dispositivo, como el tema activo.
+const COLOR_MODES = [
+  { id: 'system', label: 'Sistema' },
+  { id: 'light', label: 'Claro' },
+  { id: 'dark', label: 'Oscuro' },
+];
+
+// Cambia el modo de color y refresca todo lo que depende de el: los
+// botones Sistema/Claro/Oscuro, el tema activo (si tiene variante
+// inversa, cambia de golpe) y la biblioteca (las tarjetas emparejadas
+// actualizan su etiqueta Oscuro/Claro). La usan tanto los botones de
+// arriba como la etiqueta clicable de cada tarjeta con pareja.
+function setColorModePreference(mode) {
+  localStorage.setItem('colorModePreference', mode);
+  refreshColorModeOptions();
+  const activeTheme = themeLibrary.find((t) => t.id === Number(localStorage.getItem('activeThemeId')));
+  if (activeTheme) applyTheme(activeTheme, { persist: false });
+  else renderThemeLibrary();
+}
+
+function refreshColorModeOptions() {
+  const container = document.getElementById('color-mode-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = localStorage.getItem('colorModePreference') || 'system';
+
+  COLOR_MODES.forEach((cm) => {
+    const isActive = cm.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'color-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = cm.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => setColorModePreference(cm.id));
+    }
+    container.appendChild(btn);
+  });
+}
+
+if (window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if ((localStorage.getItem('colorModePreference') || 'system') !== 'system') return;
+    const activeTheme = themeLibrary.find((t) => t.id === Number(localStorage.getItem('activeThemeId')));
+    if (activeTheme) applyTheme(activeTheme, { persist: false });
+  });
+}
+
 async function refreshStyleTab() {
   themeLibrary = await api('/api/themes');
+  refreshColorModeOptions();
   renderThemeLibrary();
   await refreshThemeCopyList();
 }
 
+// Guarda que tema se esta editando ahora mismo (null = ninguno, o se esta
+// creando uno nuevo). Sirve para saber donde reubicar el formulario:
+// justo debajo de esa tarjeta, en vez de siempre al final de la lista.
+let editingThemeId = null;
+
+function positionThemeForm() {
+  const form = document.getElementById('theme-form');
+  const anchor = document.getElementById('theme-form-anchor');
+  if (!form || !anchor) return;
+  if (editingThemeId) {
+    const card = document.querySelector(`.theme-card[data-theme-id="${editingThemeId}"]`);
+    if (card) {
+      card.insertAdjacentElement('afterend', form);
+      return;
+    }
+  }
+  anchor.insertAdjacentElement('afterend', form);
+}
+
 function renderThemeLibrary() {
   const container = document.getElementById('theme-library');
+  // El formulario puede haberse movido dentro de este contenedor (para
+  // aparecer justo debajo de la tarjeta que se esta editando). Si lo
+  // dejaramos ahi, el innerHTML = '' de abajo lo destruiria junto con las
+  // tarjetas, asi que lo sacamos primero a su sitio "de repuesto".
+  const themeFormEl = document.getElementById('theme-form');
+  const themeFormAnchor = document.getElementById('theme-form-anchor');
+  if (themeFormEl && themeFormAnchor && container.contains(themeFormEl)) {
+    themeFormAnchor.insertAdjacentElement('afterend', themeFormEl);
+  }
+
   container.innerHTML = '';
   const activeId = Number(localStorage.getItem('activeThemeId')) || null;
 
   if (themeLibrary.length === 0) {
     container.innerHTML = '<p class="empty-hint">Todavia no hay temas guardados.</p>';
+    positionThemeForm();
     return;
   }
 
@@ -367,17 +654,25 @@ function renderThemeLibrary() {
     const isActive = theme.id === activeId;
     const card = document.createElement('div');
     card.className = 'theme-card' + (isActive ? ' active' : '');
+    card.dataset.themeId = String(theme.id);
     const useButtonHtml = isActive
       ? '<button type="button" class="use-btn-disabled" disabled>En uso</button>'
       : '<button type="button" data-action="use" class="primary-btn">Usar</button>';
+    const resolved = resolveThemeVariant(theme);
+    // Si el tema tiene pareja, una etiqueta clicable con la variante que
+    // se ve ahora mismo (Oscuro/Claro); al pulsarla, pasa a la otra.
+    const resolvedIsLight = isLightColors(resolved);
+    const pairBadge = theme.inverseColors
+      ? `<button type="button" data-action="toggle-variant" class="theme-pair-badge" title="Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}">${resolvedIsLight ? '☀ Claro' : '☾ Oscuro'}</button>`
+      : '';
     card.innerHTML = `
       <div class="theme-card-preview">
-        <span class="color-dot" style="background-color:${theme.colors.bg}"></span>
-        <span class="color-dot" style="background-color:${theme.colors.surface}"></span>
-        <span class="color-dot" style="background-color:${theme.colors.accent}"></span>
-        <span class="color-dot" style="background-color:${theme.colors.danger}"></span>
+        <span class="color-dot" style="background-color:${resolved.bg}"></span>
+        <span class="color-dot" style="background-color:${resolved.surface}"></span>
+        <span class="color-dot" style="background-color:${resolved.accent}"></span>
+        <span class="color-dot" style="background-color:${resolved.danger}"></span>
       </div>
-      <div class="theme-card-name">${escapeHtml(theme.name)}</div>
+      <div class="theme-card-name">${escapeHtml(theme.name)} ${pairBadge}</div>
       <div class="theme-card-actions">
         ${useButtonHtml}
         <button type="button" data-action="edit" class="secondary-btn">Editar</button>
@@ -388,11 +683,74 @@ function renderThemeLibrary() {
     if (useBtn) useBtn.addEventListener('click', () => applyTheme(theme));
     card.querySelector('[data-action="edit"]').addEventListener('click', () => openThemeForm(theme));
     card.querySelector('[data-action="export"]').addEventListener('click', () => exportTheme(theme));
+    const toggleBtn = card.querySelector('[data-action="toggle-variant"]');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setColorModePreference(resolvedIsLight ? 'dark' : 'light');
+      });
+    }
     container.appendChild(card);
+  });
+
+  positionThemeForm();
+}
+
+// Mientras se edita un tema, los 9 campos del formulario se reutilizan
+// para las dos variantes (Principal/Inversa) — estas tres variables
+// guardan que lado se esta viendo ahora y los valores del que NO se esta
+// viendo, para no perderlos al saltar de uno a otro.
+let editingMainColors = null;
+let editingInverseColors = null;
+let editingColorSide = 'main';
+
+function updateThemeColorSideUI() {
+  const switcher = document.getElementById('theme-color-side-switch');
+  switcher.classList.toggle('hidden', !editingInverseColors);
+  switcher.querySelectorAll('.theme-side-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.side === editingColorSide);
   });
 }
 
+function switchColorSide(side) {
+  if (side === editingColorSide) return;
+  const snapshot = readColorFieldsValues();
+  if (editingColorSide === 'main') editingMainColors = snapshot;
+  else editingInverseColors = snapshot;
+
+  editingColorSide = side;
+  writeColorFieldsValues(side === 'main' ? editingMainColors : editingInverseColors);
+  updateThemeColorSideUI();
+}
+
+document.querySelectorAll('#theme-color-side-switch .theme-side-btn').forEach((btn) => {
+  btn.addEventListener('click', () => switchColorSide(btn.dataset.side));
+});
+
+document.getElementById('theme-inverse-toggle').addEventListener('change', (e) => {
+  if (e.target.checked) {
+    if (!editingInverseColors) {
+      const snapshot = readColorFieldsValues();
+      if (editingColorSide === 'main') editingMainColors = snapshot;
+      else editingInverseColors = snapshot;
+      // Generamos una inversa de partida a partir de la principal, la
+      // persona la puede retocar despues cambiando a la pestana "Inversa".
+      editingInverseColors = invertColorsObject(editingMainColors);
+    }
+  } else {
+    editingInverseColors = null;
+    if (editingColorSide === 'inverse') {
+      editingColorSide = 'main';
+      writeColorFieldsValues(editingMainColors);
+    }
+  }
+  updateThemeColorSideUI();
+});
+
 function openThemeForm(theme) {
+  editingThemeId = theme ? theme.id : null;
+  positionThemeForm();
+
   document.getElementById('theme-id').value = theme ? theme.id : '';
   document.getElementById('theme-name').value = theme ? theme.name : '';
 
@@ -400,10 +758,18 @@ function openThemeForm(theme) {
   // pantalla (el tema activo), asi es mas facil partir de algo y tocar
   // solo lo que se quiera cambiar, en vez de empezar en blanco.
   const computed = getComputedStyle(document.documentElement);
+  const startingColors = {};
   THEME_COLOR_FIELDS_META.forEach(({ key, cssVar }) => {
     const value = theme ? theme.colors[key] : computed.getPropertyValue(cssVar).trim();
-    themeColorFields[key].setValue(value || '#5b8cff');
+    startingColors[key] = value || '#5b8cff';
   });
+
+  editingMainColors = startingColors;
+  editingInverseColors = theme && theme.inverseColors ? { ...theme.inverseColors } : null;
+  editingColorSide = 'main';
+  writeColorFieldsValues(editingMainColors);
+  document.getElementById('theme-inverse-toggle').checked = !!editingInverseColors;
+  updateThemeColorSideUI();
 
   document.getElementById('btn-delete-theme').classList.toggle('hidden', !theme);
   document.getElementById('theme-form').classList.remove('hidden');
@@ -412,6 +778,8 @@ function openThemeForm(theme) {
 
 function closeThemeForm() {
   document.getElementById('theme-form').classList.add('hidden');
+  editingThemeId = null;
+  positionThemeForm();
 }
 
 document.getElementById('btn-new-theme').addEventListener('click', () => openThemeForm(null));
@@ -420,11 +788,19 @@ document.getElementById('btn-cancel-theme').addEventListener('click', closeTheme
 document.getElementById('theme-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('theme-id').value;
-  const colors = {};
-  THEME_COLOR_FIELDS_META.forEach(({ key }) => {
-    colors[key] = themeColorFields[key].getValue();
-  });
-  const payload = { name: document.getElementById('theme-name').value, colors };
+
+  // Lo que se ve AHORA MISMO en los campos pertenece al lado que se
+  // estaba editando; lo guardamos ahi antes de construir el payload.
+  const currentFieldValues = readColorFieldsValues();
+  if (editingColorSide === 'main') editingMainColors = currentFieldValues;
+  else editingInverseColors = currentFieldValues;
+
+  const inverseEnabled = document.getElementById('theme-inverse-toggle').checked;
+  const payload = {
+    name: document.getElementById('theme-name').value,
+    colors: editingMainColors,
+    inverseColors: inverseEnabled ? editingInverseColors : null,
+  };
 
   const saved = id
     ? await api(`/api/themes/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
@@ -485,9 +861,10 @@ async function refreshThemeCopyList() {
 // --- Importar / exportar temas (para compartir entre dispositivos que
 // no pueden conectarse directamente entre si, ej. dos moviles) ---
 function exportTheme(theme) {
-  const blob = new Blob([JSON.stringify({ name: theme.name, colors: theme.colors }, null, 2)], {
-    type: 'application/json',
-  });
+  const blob = new Blob(
+    [JSON.stringify({ name: theme.name, colors: theme.colors, inverseColors: theme.inverseColors || null }, null, 2)],
+    { type: 'application/json' }
+  );
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -516,7 +893,11 @@ document.getElementById('theme-import-input').addEventListener('change', async (
     }
     await api('/api/themes', {
       method: 'POST',
-      body: JSON.stringify({ name: parsed.name || 'Tema importado', colors: parsed.colors }),
+      body: JSON.stringify({
+        name: parsed.name || 'Tema importado',
+        colors: parsed.colors,
+        inverseColors: parsed.inverseColors || null,
+      }),
     });
     await refreshStyleTab();
   } catch (err) {
@@ -750,7 +1131,14 @@ function refreshMobileTab() {
   if (!supported) status.textContent = 'Este navegador no admite notificaciones.';
   else if (Notification.permission === 'denied') status.textContent = 'Estan bloqueadas en el navegador; cambialo en los ajustes del sitio para activarlas.';
   else status.textContent = '';
+
+  document.getElementById('setting-update-check').checked =
+    localStorage.getItem('updateCheckEnabled') !== 'false';
 }
+
+document.getElementById('setting-update-check').addEventListener('change', (e) => {
+  localStorage.setItem('updateCheckEnabled', e.target.checked ? 'true' : 'false');
+});
 
 document.getElementById('setting-notifications').addEventListener('change', async (e) => {
   if (e.target.checked) {
@@ -764,4 +1152,129 @@ document.getElementById('setting-notifications').addEventListener('change', asyn
     localStorage.setItem('notificationsEnabled', 'false');
   }
   refreshMobileTab();
+});
+
+// ---------------------------------------------------------------------
+// Atajos de teclado: la lista de acciones (SHORTCUT_ACTIONS) y el
+// guardado (getShortcutMap/setShortcut) viven en app.js, que se carga
+// antes que este archivo; aqui solo esta el dibujado de la lista y el
+// "modo grabacion" para capturar la siguiente tecla que pulses.
+// ---------------------------------------------------------------------
+function startRecordingShortcut(actionId, displayBtn) {
+  displayBtn.textContent = 'Pulsa una tecla…';
+  displayBtn.classList.add('recording');
+
+  const handler = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === 'Escape') {
+      // Esc siempre cancela la grabacion (no se puede asignar Esc solo:
+      // ya tiene su propio significado fijo de "salir").
+      document.removeEventListener('keydown', handler, true);
+      renderShortcutsList();
+      return;
+    }
+
+    const combo = comboFromEvent(e);
+    if (!combo) return; // solo se ha soltado una tecla modificadora, seguimos esperando
+
+    // Si ese atajo ya lo usa otra accion, se lo quitamos a la otra para
+    // que no queden dos acciones peleandose por la misma tecla.
+    const map = getShortcutMap();
+    SHORTCUT_ACTIONS.forEach((a) => {
+      if (a.id !== actionId && map[a.id] === combo) setShortcut(a.id, '');
+    });
+
+    setShortcut(actionId, combo);
+    document.removeEventListener('keydown', handler, true);
+    renderShortcutsList();
+  };
+
+  document.addEventListener('keydown', handler, true);
+}
+
+function renderShortcutsList() {
+  const container = document.getElementById('shortcuts-list');
+  container.innerHTML = '';
+  const map = getShortcutMap();
+
+  SHORTCUT_ACTIONS.forEach((action) => {
+    const row = document.createElement('div');
+    row.className = 'shortcut-row';
+
+    const label = document.createElement('span');
+    label.className = 'shortcut-label';
+    label.textContent = action.label;
+
+    const display = document.createElement('button');
+    display.type = 'button';
+    display.className = 'shortcut-input';
+    display.textContent = map[action.id] ? displayCombo(map[action.id]) : 'Sin atajo';
+    display.addEventListener('click', () => startRecordingShortcut(action.id, display));
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'secondary-btn shortcut-clear';
+    clearBtn.textContent = 'Quitar';
+    clearBtn.disabled = !map[action.id];
+    clearBtn.addEventListener('click', () => {
+      setShortcut(action.id, '');
+      renderShortcutsList();
+    });
+
+    row.appendChild(label);
+    row.appendChild(display);
+    row.appendChild(clearBtn);
+    container.appendChild(row);
+  });
+}
+
+function refreshShortcutsTab() {
+  renderShortcutsList();
+}
+
+// ---------------------------------------------------------------------
+// Esc: hace lo mismo que cerrar / clicar fuera, capa a capa — primero lo
+// que este mas "encima" (un popover), y solo al final el modal entero de
+// Configuracion. Si estas dentro de una seccion (Estilo, Grupos...), Esc
+// te lleva al menu, igual que el boton "Volver"; una segunda pulsada ya
+// cierra el panel.
+// ---------------------------------------------------------------------
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+
+  const openPopover = document.querySelector('.color-popover:not(.hidden), .icon-popover:not(.hidden)');
+  if (openPopover) {
+    closeAllPopovers();
+    return;
+  }
+
+  const themeForm = document.getElementById('theme-form');
+  if (themeForm && !themeForm.classList.contains('hidden')) {
+    closeThemeForm();
+    return;
+  }
+
+  const eventModal = document.getElementById('event-modal');
+  if (eventModal && !eventModal.classList.contains('hidden')) {
+    closeEventModal();
+    return;
+  }
+
+  const dayModal = document.getElementById('day-modal');
+  if (dayModal && !dayModal.classList.contains('hidden')) {
+    closeDayModal();
+    return;
+  }
+
+  const settingsModal = document.getElementById('settings-modal');
+  if (settingsModal && !settingsModal.classList.contains('hidden')) {
+    const settingsMenu = document.getElementById('settings-menu');
+    if (settingsMenu && settingsMenu.classList.contains('hidden')) {
+      showSettingsScreen(null);
+    } else {
+      document.getElementById('btn-close-settings').click();
+    }
+  }
 });

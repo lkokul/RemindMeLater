@@ -5,6 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>RemindMeLater</title>
 <link rel="stylesheet" href="styles.css" />
+
+<!-- Manifest PWA: permite "Instalar" (ordenador) o "Anadir a inicio"
+     (movil) para que RemindMeLater se abra como una app de verdad, en su
+     propia ventana/icono y sin la barra de direcciones del navegador —
+     sin necesidad de compilar nada aparte. -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#0f1115" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="RemindMeLater" />
 <script>
   // Aplica el tema que este dispositivo tuviera guardado ANTES de que se
   // pinte nada, para no ver un parpadeo del tema oscuro por defecto y
@@ -21,7 +33,15 @@
         bg: '--bg', surface: '--surface', surface2: '--surface-2', border: '--border',
         text: '--text', textDim: '--text-dim', accent: '--accent', danger: '--danger',
         settingsMenuBg: '--settings-menu-bg',
+        dayToday: '--day-today', dayWeekend: '--day-weekend',
+        dayHoliday: '--day-holiday', daySpecial: '--day-special',
       };
+      // Si la cache es de antes de que existiera settingsMenuBg (o de una
+      // variante inversa a la que le falta ese dato), usamos su propio
+      // surface2 en vez de dejar el valor por defecto del CSS (que es el
+      // oscuro) — asi un tema claro incompleto no se queda con un fondo
+      // de menu oscuro y texto sin contraste.
+      if (!colors.settingsMenuBg) colors.settingsMenuBg = colors.surface2;
       Object.keys(map).forEach(function (key) {
         if (colors[key]) root.style.setProperty(map[key], colors[key]);
       });
@@ -32,6 +52,22 @@
 </script>
 </head>
 <body>
+
+  <!-- Avisos discretos en la esquina, apilados (no un header grande):
+       nueva version del servidor, y "tu vista guardada no es la normal".
+       Ver checkForUpdate() y applyViewModePrompt() en app.js. -->
+  <div id="toast-stack" class="toast-stack">
+    <div id="update-banner" class="toast hidden">
+      <span>Nueva versión disponible.</span>
+      <button type="button" id="btn-reload-update">Recargar</button>
+    </div>
+
+    <div id="default-view-banner" class="toast hidden">
+      <span id="default-view-banner-text"></span>
+      <button type="button" id="btn-apply-default-view"></button>
+      <button type="button" id="btn-dismiss-default-view" class="toast-dismiss" aria-label="Ahora no">✕</button>
+    </div>
+  </div>
 
   <!-- Pantalla de emparejamiento: se muestra solo si este dispositivo
        (normalmente el movil) todavia no tiene token guardado o el servidor
@@ -63,13 +99,17 @@
         <h1>RemindMeLater</h1>
       </div>
       <nav class="topbar-actions">
-        <button id="nav-prev" class="icon-btn" aria-label="Mes anterior">←</button>
-        <span id="current-month-label" class="month-label"></span>
-        <button id="nav-next" class="icon-btn" aria-label="Mes siguiente">→</button>
         <button id="btn-new-event" class="primary-btn">+ Nuevo evento</button>
         <button id="btn-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </nav>
     </header>
+
+    <!-- Mes con flechas: encima del calendario, no en el header. -->
+    <nav class="month-nav-bar">
+      <button id="nav-prev" class="icon-btn" aria-label="Mes anterior">←</button>
+      <span id="current-month-label" class="month-label"></span>
+      <button id="nav-next" class="icon-btn" aria-label="Mes siguiente">→</button>
+    </nav>
 
     <main class="layout">
       <!-- Vista de escritorio: cuadricula del mes (CSS la oculta en movil) -->
@@ -139,6 +179,7 @@
             <option value="">Sin grupo</option>
           </select>
         </label>
+        <p id="event-created-by" class="hint hidden"></p>
         <div class="modal-actions">
           <button type="button" id="btn-delete-event" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
@@ -146,6 +187,27 @@
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Panel de dia: todos los eventos de un dia al clicar su celda en el
+       calendario, y marcarlo como festivo o especial. Ver openDayModal
+       en app.js. -->
+  <div id="day-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2 id="day-modal-title">Dia</h2>
+      <div id="day-modal-list" class="agenda-list"></div>
+
+      <div class="day-modal-mark-row">
+        <button type="button" id="btn-mark-holiday" class="secondary-btn day-mark-btn">Festivo</button>
+        <button type="button" id="btn-mark-special" class="secondary-btn day-mark-btn">Especial</button>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="btn-day-new-event" class="secondary-btn">+ Nuevo evento aqui</button>
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-day" class="primary-btn">Cerrar</button>
+      </div>
     </div>
   </div>
 
@@ -159,6 +221,12 @@
       <!-- Menu: lista vertical, solo texto. Al pulsar una entra a esa
            seccion a pantalla completa (ver showSettingsScreen en settings.js). -->
       <div id="settings-menu" class="settings-menu">
+        <button type="button" class="settings-menu-item" data-tab="profile">
+          <span>Perfil</span><span class="settings-menu-item-arrow">›</span>
+        </button>
+        <button type="button" class="settings-menu-item" data-tab="view">
+          <span>Vista</span><span class="settings-menu-item-arrow">›</span>
+        </button>
         <button type="button" class="settings-menu-item" data-tab="style">
           <span>Estilo</span><span class="settings-menu-item-arrow">›</span>
         </button>
@@ -171,6 +239,38 @@
         <button type="button" class="settings-menu-item" data-tab="mobile">
           <span>Este dispositivo</span><span class="settings-menu-item-arrow">›</span>
         </button>
+        <button type="button" class="settings-menu-item" data-tab="shortcuts">
+          <span>Atajos de teclado</span><span class="settings-menu-item-arrow">›</span>
+        </button>
+      </div>
+
+      <!-- --- Perfil --- -->
+      <div id="settings-tab-profile" class="settings-tab-panel hidden">
+        <button type="button" class="settings-back-btn" data-back>← Volver</button>
+        <h3>Perfil</h3>
+        <p class="hint">Tu nickname se ve igual en todos tus dispositivos, para que no haya lios de nombres si tienes varios enlazados. Aparece como "creado por" en las tareas que anadas.</p>
+        <form id="profile-form">
+          <label>
+            Nickname
+            <input type="text" id="profile-name" placeholder="Tu nombre" maxlength="60" />
+          </label>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </form>
+
+        <label class="checkbox-row" style="margin-top: 1rem;">
+          <input type="checkbox" id="profile-show-id" />
+          Mostrar mi id unico
+        </label>
+        <p id="profile-id-value" class="hint hidden"></p>
+      </div>
+
+      <!-- --- Vista --- -->
+      <div id="settings-tab-view" class="settings-tab-panel hidden">
+        <button type="button" class="settings-back-btn" data-back>← Volver</button>
+        <h3>Vista</h3>
+        <p class="hint">Cambia entre la ventana normal, pantalla completa (sin las barras del navegador) o una ventana flotante mas pequena. Se aplica al momento.</p>
+        <div id="view-mode-options" class="view-mode-options"></div>
+        <p id="view-mode-hint" class="hint"></p>
       </div>
 
       <!-- --- Estilo --- -->
@@ -178,6 +278,10 @@
         <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Estilo</h3>
         <p class="hint">Elige un tema guardado para este dispositivo, o crea el tuyo. Cada dispositivo puede llevar un tema distinto.</p>
+
+        <p class="hint">Si un tema tiene variante clara/oscura emparejada (◐), elige aqui si seguir el modo del sistema o fijarlo tu.</p>
+        <div id="color-mode-options" class="color-mode-options"></div>
+
         <div id="theme-library" class="theme-library"></div>
 
         <div class="settings-subactions">
@@ -186,12 +290,21 @@
           <input type="file" id="theme-import-input" accept="application/json,.json" class="hidden" />
         </div>
 
+        <div id="theme-form-anchor"></div>
         <form id="theme-form" class="theme-form hidden">
           <input type="hidden" id="theme-id" />
           <label>
             Nombre del tema
             <input type="text" id="theme-name" placeholder="Ej. Mi tema oscuro" required />
           </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="theme-inverse-toggle" />
+            Crear variante inversa (claro/oscuro emparejados)
+          </label>
+          <div id="theme-color-side-switch" class="theme-color-side-switch hidden">
+            <button type="button" data-side="main" class="theme-side-btn">Principal</button>
+            <button type="button" data-side="inverse" class="theme-side-btn">Inversa</button>
+          </div>
           <div class="theme-color-grid" id="theme-color-grid"></div>
           <div class="modal-actions">
             <button type="button" id="btn-delete-theme" class="danger-btn hidden">Eliminar</button>
@@ -256,6 +369,19 @@
           Notificaciones del navegador para recordatorios
         </label>
         <p id="notifications-status" class="hint"></p>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="setting-update-check" />
+          Avisarme cuando el servidor se actualice
+        </label>
+      </div>
+
+      <!-- --- Atajos de teclado (ajuste local, no compartido) --- -->
+      <div id="settings-tab-shortcuts" class="settings-tab-panel hidden">
+        <button type="button" class="settings-back-btn" data-back>← Volver</button>
+        <h3>Atajos de teclado</h3>
+        <p class="hint">Pulsa en el atajo de una accion y luego pulsa la tecla (o combinacion) que quieras usar. Si lo dejas sin atajo, esa accion no tendra ninguno.</p>
+        <div id="shortcuts-list" class="shortcuts-list"></div>
       </div>
 
     </div>
