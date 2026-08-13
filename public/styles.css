@@ -753,31 +753,39 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   padding: 0.55rem 0.7rem; font-size: 0.9rem; text-align: left; cursor: pointer;
 }
 .date-field-trigger.select-field-placeholder { opacity: 0.65; }
+.date-field-trigger-icon { flex-shrink: 0; opacity: 0.8; }
 .datetime-row { display: flex; gap: 0.4rem; align-items: stretch; margin-top: 0.3rem; }
-.datetime-row .date-field { flex: 2; }
-.datetime-row input[type="time"] { flex: 1; min-width: 0; }
+.datetime-row .date-field, .datetime-row .select-field { flex: 1; min-width: 0; }
 .date-popover {
+  /* min() con el ancho de ventana para que nunca se salga ni se aplaste
+     en ventanas pequenas (era un ancho fijo, "se peteaba" en pantallas
+     angostas). */
   position: fixed; z-index: 60;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 0.7rem; width: 264px;
+  padding: 0.6rem; width: min(232px, 88vw);
   box-shadow: 0 6px 20px rgba(0,0,0,0.4);
 }
 .date-popover-nav {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 0.5rem; font-size: 0.85rem; font-weight: 600;
+  margin-bottom: 0.4rem; font-size: 0.8rem; font-weight: 600;
 }
-.date-popover-nav .icon-btn { width: 1.8rem; height: 1.8rem; font-size: 0.85rem; }
-.date-popover-month-label { text-transform: capitalize; }
-.date-popover-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.date-popover-nav .icon-btn { width: 1.6rem; height: 1.6rem; font-size: 0.75rem; flex-shrink: 0; }
+.date-popover-month-label { text-transform: capitalize; text-align: center; flex: 1; }
+.date-popover-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .date-popover-weekday {
-  text-align: center; font-size: 0.7rem; padding-bottom: 0.25rem;
+  text-align: center; font-size: 0.65rem; padding-bottom: 0.2rem;
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
 }
+/* Alto FIJO en vez de aspect-ratio: dentro de un grid, aspect-ratio puede
+   renderizar mal en algunos motores (celdas deformadas/superpuestas) —
+   un alto fijo es mucho mas robusto y ademas hace el calendario mas
+   pequeno, como pidio Koku. */
 .date-popover-day {
-  aspect-ratio: 1; border-radius: var(--radius-sm);
+  height: 1.9rem; width: 100%; border-radius: var(--radius-sm);
   background: var(--surface-2); color: var(--surface-2-text);
-  border: 1px solid transparent; font-size: 0.8rem; cursor: pointer;
+  border: 1px solid transparent; font-size: 0.75rem; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
+  padding: 0;
 }
 .date-popover-day:hover { border-color: var(--accent); }
 .date-popover-day.other-month { opacity: 0.35; }

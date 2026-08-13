@@ -105,6 +105,11 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
         width: Math.max(200, trigger.getBoundingClientRect().width),
         estimatedHeight: Math.min(280, opts.length * 40 + 16),
       });
+      // Si hay muchas opciones (la hora, por ejemplo, con 96), abre ya
+      // desplazado a la que esta elegida en vez de siempre arriba del
+      // todo — asi no hay que buscarla a mano cada vez.
+      const activeItem = popover.querySelector('.select-option.active');
+      if (activeItem) activeItem.scrollIntoView({ block: 'center' });
     }
   });
 
@@ -150,7 +155,8 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
   document.body.appendChild(popover);
 
   function renderTrigger() {
-    trigger.textContent = value ? DATE_FIELD_FORMATTER.format(value) : placeholder;
+    const text = value ? DATE_FIELD_FORMATTER.format(value) : placeholder;
+    trigger.innerHTML = `<span class="date-field-trigger-icon">📅</span>${escapeHtml(text)}`;
     trigger.classList.toggle('select-field-placeholder', !value);
   }
 
@@ -627,16 +633,40 @@ document.getElementById('event-start-date-field').appendChild(eventStartDateFiel
 const eventEndDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
 document.getElementById('event-end-date-field').appendChild(eventEndDateField.element);
 
+// Opciones de hora cada 15 minutos ("00:00".."23:45"), reutilizando el
+// mismo componente createSelectField que el resto de desplegables (en vez
+// de <input type="time">, que tampoco seguia el tema) — al abrirlo ya
+// hace scroll solo hasta la hora elegida (ver createSelectField).
+function buildTimeOptions() {
+  const options = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      const value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      options.push({ value, label: value });
+    }
+  }
+  return options;
+}
+const TIME_OPTIONS = buildTimeOptions();
+
 function toTimeInputValue(date) {
   const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  // Redondea al cuarto de hora mas cercano por abajo, para que coincida
+  // con una de las opciones de TIME_OPTIONS.
+  const roundedMinutes = Math.floor(date.getMinutes() / 15) * 15;
+  return `${pad(date.getHours())}:${pad(roundedMinutes)}`;
 }
 
-// Junta un Date (solo se usa su dia/mes/año) con el valor "HH:mm" de un
-// <input type="time"> en un unico string "YYYY-MM-DDTHH:mm:ss" para
-// mandar al servidor — el selector de fecha propio y el campo de hora
-// nativo viven separados en el formulario, pero la API sigue esperando
-// un solo valor combinado, como antes con el datetime-local.
+const eventStartTimeField = createSelectField({ options: TIME_OPTIONS, initialValue: toTimeInputValue(new Date()) });
+document.getElementById('event-start-time-field').appendChild(eventStartTimeField.element);
+
+const eventEndTimeField = createSelectField({ options: TIME_OPTIONS, initialValue: toTimeInputValue(new Date()) });
+document.getElementById('event-end-time-field').appendChild(eventEndTimeField.element);
+
+// Junta un Date (solo se usa su dia/mes/año) con un "HH:mm" en un unico
+// string "YYYY-MM-DDTHH:mm:ss" para mandar al servidor — el selector de
+// fecha y el de hora viven separados en el formulario, pero la API sigue
+// esperando un solo valor combinado, como antes con el datetime-local.
 function combineDateAndTime(date, timeStr) {
   const [h, m] = (timeStr || '00:00').split(':').map(Number);
   const pad = (n) => String(n).padStart(2, '0');
@@ -659,15 +689,15 @@ function openEventModal(event, presetDate) {
   }
   const startDate = event ? new Date(event.startAt) : defaultStart;
   eventStartDateField.setValue(startDate);
-  document.getElementById('event-start-time').value = toTimeInputValue(startDate);
+  eventStartTimeField.setValue(toTimeInputValue(startDate));
 
   if (event && event.endAt) {
     const endDate = new Date(event.endAt);
     eventEndDateField.setValue(endDate);
-    document.getElementById('event-end-time').value = toTimeInputValue(endDate);
+    eventEndTimeField.setValue(toTimeInputValue(endDate));
   } else {
     eventEndDateField.setValue(null);
-    document.getElementById('event-end-time').value = '';
+    eventEndTimeField.setValue(toTimeInputValue(startDate));
   }
   document.getElementById('event-location').value = event && event.location ? event.location : '';
   document.getElementById('event-description').value = event && event.description ? event.description : '';
@@ -710,8 +740,8 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
   const payload = {
     title: document.getElementById('event-title').value,
     allDay: document.getElementById('event-all-day').checked,
-    startAt: combineDateAndTime(startDate, document.getElementById('event-start-time').value),
-    endAt: endDate ? combineDateAndTime(endDate, document.getElementById('event-end-time').value) : null,
+    startAt: combineDateAndTime(startDate, eventStartTimeField.getValue()),
+    endAt: endDate ? combineDateAndTime(endDate, eventEndTimeField.getValue()) : null,
     location: document.getElementById('event-location').value || null,
     description: document.getElementById('event-description').value || null,
     reminderMinutesBefore: reminderRaw === '' ? null : Number(reminderRaw),
