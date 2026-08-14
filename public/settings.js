@@ -1402,7 +1402,9 @@ function refreshCompletedTasksDisplayOptions() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
-    btn.textContent = isActive ? `${mode.label} (actual)` : mode.label;
+    // Aqui NO se anade "(actual)" al texto — el resaltado de color ya deja
+    // claro cual esta activa, y repetirlo con texto era redundante.
+    btn.textContent = mode.label;
     if (isActive) {
       btn.disabled = true;
     } else {
