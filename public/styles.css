@@ -354,6 +354,32 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   flex-shrink: 0;
   cursor: pointer;
 }
+
+/* --- Densidad de dias con mucho contenido (Configuracion > Vista) --- */
+/* Modo "+N mas": mismo hueco que un chip normal, pero de aviso en vez de
+   accion — clicarlo abre el dia entero, como el resto de la celda. */
+.calendar-more-chip {
+  background: var(--surface-2);
+  color: color-mix(in srgb, var(--surface-2-text) 75%, var(--surface-2));
+  font-size: 0.72rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius-sm);
+  text-align: center;
+  cursor: pointer;
+}
+.calendar-more-chip:hover { background: color-mix(in srgb, var(--accent) 15%, var(--surface-2)); }
+/* Modo "puntos": un puntito de color por evento/tarea, sin texto. */
+.calendar-day-dots { display: flex; flex-wrap: wrap; gap: 0.2rem; padding: 0.1rem 0; }
+.calendar-day-dot {
+  width: 0.5rem; height: 0.5rem; border-radius: 50%; flex-shrink: 0;
+  border: 1.5px solid transparent;
+}
+.calendar-day-dot.is-task { background: transparent; }
+/* Modo "solo marcar el dia": sin chips ni puntos, solo un aro de color
+   alrededor de la celda — un borde en vez de fondo para que no pelee con
+   el color de fin de semana/festivo/especial que ya pueda tener. */
+.calendar-cell.has-content { box-shadow: inset 0 0 0 2px var(--accent); }
+
 .calendar-weekday-heading {
   text-align: center;
   font-size: 0.75rem;

@@ -461,6 +461,34 @@ async function loadSpecialDays() {
   rows.forEach((r) => { state.specialDays[r.date] = r.type; });
 }
 
+// Como se ven, en el calendario del mes, los dias con varios
+// eventos/tareas a la vez — preferencia de ESTE dispositivo, se cambia
+// desde Configuracion > Vista (ver refreshCalendarDensityOptions en
+// settings.js).
+const CALENDAR_DENSITY_MODE_IDS = ['limit', 'dots', 'tint'];
+const CALENDAR_DENSITY_LIMIT = 3; // cuantos chips completos se ven en modo "limite" antes del "+N mas"
+
+function getCalendarDensityMode() {
+  const stored = localStorage.getItem('calendarDayDensity');
+  return CALENDAR_DENSITY_MODE_IDS.includes(stored) ? stored : 'limit';
+}
+
+// Construye el chip de un evento normal (no tarea) para una celda del
+// calendario — se saco aparte de renderCalendarGrid porque el modo
+// "limite" solo pinta ALGUNOS de los eventos del dia, no todos.
+function buildCalendarEventChip(ev) {
+  const chip = document.createElement('div');
+  chip.className = 'calendar-event-chip';
+  chip.style.backgroundColor = ev.groupColor || DEFAULT_EVENT_COLOR;
+  const iconPrefix = ev.groupIcon ? `${ev.groupIcon} ` : '';
+  chip.textContent = ev.allDay ? `${iconPrefix}${ev.title}` : `${TIME_FORMATTER.format(new Date(ev.startAt))} ${iconPrefix}${ev.title}`;
+  chip.addEventListener('click', (e) => {
+    e.stopPropagation(); // que no abra tambien el panel del dia entero
+    openEventModal(ev);
+  });
+  return chip;
+}
+
 function renderCalendarGrid() {
   const grid = document.getElementById('calendar-grid');
   grid.innerHTML = '';
@@ -504,22 +532,54 @@ function renderCalendarGrid() {
     cell.appendChild(dayLabel);
 
     const dayEvents = state.events.filter((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate));
-    dayEvents.forEach((ev) => {
-      if (ev.isTask) {
-        cell.appendChild(buildCalendarTaskChip(ev));
-        return;
+    const densityMode = getCalendarDensityMode();
+
+    if (densityMode === 'tint') {
+      // Sin chips ni puntos: solo se marca el dia como "tiene algo", el
+      // detalle de verdad se ve al abrirlo (clicando la celda).
+      if (dayEvents.length > 0) cell.classList.add('has-content');
+    } else if (densityMode === 'dots') {
+      // Un punto de color por evento/tarea, sin texto — las tareas con el
+      // mismo criterio de borde-en-vez-de-relleno que ya usan sus chips.
+      if (dayEvents.length > 0) {
+        const dotsRow = document.createElement('div');
+        dotsRow.className = 'calendar-day-dots';
+        dayEvents.forEach((ev) => {
+          const dot = document.createElement('span');
+          dot.className = 'calendar-day-dot';
+          const color = ev.isTask
+            ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev))
+            : (ev.groupColor || DEFAULT_EVENT_COLOR);
+          if (ev.isTask) {
+            dot.classList.add('is-task');
+            dot.style.borderColor = color;
+          } else {
+            dot.style.backgroundColor = color;
+          }
+          dotsRow.appendChild(dot);
+        });
+        cell.appendChild(dotsRow);
       }
-      const chip = document.createElement('div');
-      chip.className = 'calendar-event-chip';
-      chip.style.backgroundColor = ev.groupColor || DEFAULT_EVENT_COLOR;
-      const iconPrefix = ev.groupIcon ? `${ev.groupIcon} ` : '';
-      chip.textContent = ev.allDay ? `${iconPrefix}${ev.title}` : `${TIME_FORMATTER.format(new Date(ev.startAt))} ${iconPrefix}${ev.title}`;
-      chip.addEventListener('click', (e) => {
-        e.stopPropagation(); // que no abra tambien el panel del dia entero
-        openEventModal(ev);
+    } else {
+      // 'limit': como antes, pero con un tope de chips completos y un
+      // "+N mas" para el resto (en vez de que la celda se desborde con
+      // muchos eventos el mismo dia).
+      const visible = dayEvents.slice(0, CALENDAR_DENSITY_LIMIT);
+      const hiddenCount = dayEvents.length - visible.length;
+      visible.forEach((ev) => {
+        cell.appendChild(ev.isTask ? buildCalendarTaskChip(ev) : buildCalendarEventChip(ev));
       });
-      cell.appendChild(chip);
-    });
+      if (hiddenCount > 0) {
+        const more = document.createElement('div');
+        more.className = 'calendar-more-chip';
+        more.textContent = `+${hiddenCount} más`;
+        more.addEventListener('click', (e) => {
+          e.stopPropagation();
+          showDayInReminders(cellDate);
+        });
+        cell.appendChild(more);
+      }
+    }
 
     // Clicar en cualquier otro sitio de la celda (no un chip concreto)
     // cambia el panel de recordatorios para mostrar TODOS los eventos de

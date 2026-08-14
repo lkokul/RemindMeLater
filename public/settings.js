@@ -359,6 +359,42 @@ function refreshViewTab() {
 
   const hint = document.getElementById('view-mode-hint');
   hint.textContent = current === 'fullscreen' ? 'Pulsa Esc en cualquier momento para salir de pantalla completa.' : '';
+
+  refreshCalendarDensityOptions();
+}
+
+// Como se ven, en el calendario del mes, los dias que tienen varios
+// eventos/tareas a la vez — preferencia de ESTE dispositivo (localStorage),
+// leida por getCalendarDensityMode() en app.js al dibujar la cuadricula.
+const CALENDAR_DENSITY_MODES = [
+  { id: 'limit', label: 'Limite + "+N más"' },
+  { id: 'dots', label: 'Puntos de color' },
+  { id: 'tint', label: 'Solo marcar el día' },
+];
+
+function refreshCalendarDensityOptions() {
+  const container = document.getElementById('calendar-density-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getCalendarDensityMode();
+
+  CALENDAR_DENSITY_MODES.forEach((mode) => {
+    const isActive = mode.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = mode.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('calendarDayDensity', mode.id);
+        refreshCalendarDensityOptions();
+        if (typeof renderCalendarGrid === 'function') renderCalendarGrid();
+      });
+    }
+    container.appendChild(btn);
+  });
 }
 
 // Salir de la pestana Estilo (volver al menu, o cerrar Configuracion del
