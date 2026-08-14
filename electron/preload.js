@@ -27,4 +27,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // podia haber una carrera con que la ventana todavia se estuviera
   // asentando.
   saveViewMode: (mode) => ipcRenderer.send('save-view-mode', mode),
+  // Tras un "git pull" bueno (ver /api/update/pull en el servidor), la
+  // app tiene el codigo nuevo EN EL DISCO pero el proceso que esta
+  // corriendo ahora mismo sigue con el viejo cargado en memoria — hace
+  // falta cerrar y volver a abrir de verdad para que se note. app.relaunch()
+  // deja pedido un reinicio y app.exit() lo dispara.
+  relaunchApp: () => ipcRenderer.send('relaunch-app'),
+  // window.electronAPI.isElectron existe siempre que estamos aqui dentro
+  // (a diferencia de las demas funciones, no manda nada) — sirve para que
+  // el codigo de la pagina pueda preguntar "¿estoy en Electron?" sin tener
+  // que fijarse en una funcion concreta.
+  isElectron: true,
 });

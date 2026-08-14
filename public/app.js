@@ -1430,6 +1430,101 @@ async function checkForUpdate() {
 document.getElementById('btn-reload-update').addEventListener('click', () => location.reload());
 
 // ---------------------------------------------------------------------
+// Aviso de version nueva EN GITHUB (distinto del de arriba, que solo
+// detecta que el servidor que ya tenias abierto se reinicio por su
+// cuenta). Aqui se pregunta de verdad si hay algo mas nuevo que lo que
+// tienes instalado, aunque acabes de abrir la app. Solo el ordenador de
+// confianza puede usar esto (ver requireTrusted en
+// server/routes/update.js) — en un movil emparejado, /api/update/check
+// responde 403 y aqui simplemente no sale el aviso, sin error visible.
+// "No para esta version" se recuerda en localStorage (por dispositivo,
+// como el resto de preferencias de "Este dispositivo"): la siguiente
+// version SI que volvera a avisar.
+// ---------------------------------------------------------------------
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+let pendingReleaseVersion = null;
+
+async function checkForNewRelease() {
+  try {
+    const info = await api('/api/update/check');
+    if (!info || !info.remoteVersion) return;
+    if (compareVersions(info.remoteVersion, info.currentVersion) <= 0) return;
+    if (localStorage.getItem('skippedUpdateVersion') === info.remoteVersion) return;
+
+    pendingReleaseVersion = info.remoteVersion;
+    document.getElementById('new-release-banner-text').textContent = `Hay una versión nueva disponible (v${info.remoteVersion}).`;
+    document.getElementById('new-release-banner').classList.remove('hidden');
+  } catch (err) {
+    // Sin internet, git no configurado, o somos un movil emparejado (403):
+    // no pasa nada, se vuelve a intentar mas tarde sin molestar con un error.
+  }
+}
+
+document.getElementById('btn-skip-release').addEventListener('click', () => {
+  if (pendingReleaseVersion) localStorage.setItem('skippedUpdateVersion', pendingReleaseVersion);
+  document.getElementById('new-release-banner').classList.add('hidden');
+});
+document.getElementById('btn-dismiss-release').addEventListener('click', () => {
+  document.getElementById('new-release-banner').classList.add('hidden');
+});
+
+// Tras un "git pull" bueno, el codigo nuevo ya esta en el disco pero el
+// proceso que sigue corriendo (y la pagina que tienes abierta) todavia
+// tienen el viejo cargado en memoria — hay que reiniciar de verdad para
+// que se note. En Electron, la propia app se reinicia sola. En el
+// navegador (npm run dev), en cuanto "git pull" cambia archivos de
+// server/ el --watch reinicia el servidor solo — aqui solo hace falta
+// esperar a que vuelva a responder y recargar la pagina.
+function waitForServerRestartThenReload() {
+  const attempt = async () => {
+    try {
+      const res = await fetch('/api/version');
+      if (res.ok) {
+        location.reload();
+        return;
+      }
+    } catch (err) {
+      // sigue reiniciandose, se reintenta
+    }
+    setTimeout(attempt, 1000);
+  };
+  setTimeout(attempt, 2000);
+}
+
+document.getElementById('btn-install-release').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-install-release');
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  document.getElementById('btn-skip-release').disabled = true;
+  btn.textContent = 'Actualizando…';
+
+  try {
+    await api('/api/update/pull', { method: 'POST' });
+    if (window.electronAPI && window.electronAPI.relaunchApp) {
+      btn.textContent = 'Reiniciando la app…';
+      window.electronAPI.relaunchApp();
+    } else {
+      btn.textContent = 'Reiniciando el servidor…';
+      waitForServerRestartThenReload();
+    }
+  } catch (err) {
+    alert('No se pudo actualizar: ' + err.message);
+    btn.disabled = false;
+    document.getElementById('btn-skip-release').disabled = false;
+    btn.textContent = originalLabel;
+  }
+});
+
+// ---------------------------------------------------------------------
 // Arranque
 // ---------------------------------------------------------------------
 async function init() {
@@ -1456,4 +1551,9 @@ showApp();
 init();
 checkForUpdate();
 setInterval(checkForUpdate, 15 * 1000);
+checkForNewRelease();
+// Es una llamada a git fetch de verdad (no un simple ping), asi que se
+// repite mucho menos seguido que checkForUpdate — cada 6 horas basta para
+// enterarse el mismo dia sin martirizar la conexion.
+setInterval(checkForNewRelease, 6 * 60 * 60 * 1000);
 applyViewModePrompt();

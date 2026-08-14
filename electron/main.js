@@ -112,6 +112,17 @@ function createWindow() {
 // public/settings.js). Cierra la ventana de golpe, sin preguntar — igual
 // que cerrar la ventana con la X del sistema operativo.
 ipcMain.on('quit-app', () => app.quit());
+// Tras un "git pull" bueno pedido desde Configuracion (ver
+// /api/update/pull en el servidor y public/app.js), el codigo nuevo ya
+// esta en el disco pero este proceso sigue con el viejo cargado en
+// memoria — app.relaunch() dice "cuando cierres, vuelve a abrirte" y
+// app.exit() lo dispara ya mismo. Al volver a arrancar, el
+// require('../server/index.js') de mas abajo carga el server/index.js
+// NUEVO (require() no tiene cache entre procesos distintos).
+ipcMain.on('relaunch-app', () => {
+  app.relaunch();
+  app.exit();
+});
 ipcMain.on('set-fullscreen', (event, value) => {
   if (mainWindow) mainWindow.setFullScreen(!!value);
 });

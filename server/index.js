@@ -12,6 +12,7 @@ const groupsRouter = require('./routes/groups');
 const themesRouter = require('./routes/themes');
 const profileRouter = require('./routes/profile');
 const specialDaysRouter = require('./routes/specialDays');
+const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startMdns } = require('./mdns');
 
@@ -41,6 +42,9 @@ app.use('/api/special-days', requireDeviceOrTrusted, specialDaysRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);
+// Comprobar/instalar version nueva: solo el ordenador (cada ruta lo exige
+// por dentro, ver routes/update.js).
+app.use('/api/update', updateRouter);
 
 // La app web (HTML/CSS/JS) vive en /public y se sirve tal cual.
 app.use(express.static(path.join(__dirname, '..', 'public')));

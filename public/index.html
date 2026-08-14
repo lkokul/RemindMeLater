@@ -66,12 +66,26 @@
 <body>
 
   <!-- Avisos discretos en la esquina, apilados (no un header grande):
-       nueva version del servidor, y "tu vista guardada no es la normal".
-       Ver checkForUpdate() y applyViewModePrompt() en app.js. -->
+       nueva version del servidor, hay una version nueva en GitHub, y "tu
+       vista guardada no es la normal". Ver checkForUpdate(),
+       checkForNewRelease() y applyViewModePrompt() en app.js. -->
   <div id="toast-stack" class="toast-stack">
     <div id="update-banner" class="toast hidden">
       <span>Nueva versión disponible.</span>
       <button type="button" id="btn-reload-update">Recargar</button>
+    </div>
+
+    <!-- Distinto del de arriba: ese detecta que ESTE servidor ya
+         arrancado se ha reiniciado; este otro pregunta a GitHub si hay
+         una version mas nueva que la que tienes, aunque no hayas tocado
+         nada todavia. Solo aparece en el ordenador de confianza (ver
+         requireTrusted en server/routes/update.js) — un movil emparejado
+         no puede disparar un git pull. -->
+    <div id="new-release-banner" class="toast hidden">
+      <span id="new-release-banner-text"></span>
+      <button type="button" id="btn-skip-release" class="secondary-btn">No para esta</button>
+      <button type="button" id="btn-install-release" class="primary-btn">Actualizar ahora</button>
+      <button type="button" id="btn-dismiss-release" class="toast-dismiss" aria-label="Ahora no">✕</button>
     </div>
 
     <div id="default-view-banner" class="toast hidden">
