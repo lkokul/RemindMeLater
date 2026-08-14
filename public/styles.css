@@ -504,25 +504,67 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   color: var(--surface-2-text);
 }
 
-/* --- Atajos de teclado --- */
+/* --- Atajos de teclado ---
+   Cada accion puede tener varias combinaciones a la vez, asi que en vez
+   de un unico campo de texto hay una fila de "chips" (uno por
+   combinacion, con su x para quitarla) mas un boton "+ Anadir" que
+   entra en modo grabacion para capturar la siguiente combinacion. */
 .shortcuts-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
 .shortcut-row {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.6rem;
   background: var(--surface-2);
   border-radius: var(--radius);
   padding: 0.5rem 0.7rem;
 }
-.shortcut-label { flex: 1; font-size: 0.9rem; }
-.shortcut-input {
-  min-width: 8rem;
-  text-align: center;
-  font-size: 0.82rem;
-  background: var(--surface);
+.shortcut-label { flex: 1 1 auto; min-width: 8rem; font-size: 0.9rem; }
+.shortcut-combos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 auto;
+  justify-content: flex-end;
 }
-.shortcut-input.recording { border-color: var(--accent); color: var(--accent); }
-.shortcut-clear { font-size: 0.8rem; padding: 0.4rem 0.6rem; }
+.shortcut-empty-hint { font-size: 0.82rem; opacity: 0.6; }
+.shortcut-combo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.25rem 0.4rem 0.25rem 0.65rem;
+  font-size: 0.78rem;
+}
+.shortcut-combo-remove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.68rem;
+  line-height: 1;
+  padding: 0.2rem;
+  color: inherit;
+  opacity: 0.6;
+}
+.shortcut-combo-remove:hover { opacity: 1; }
+.shortcut-add-btn {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--surface-2-text);
+  cursor: pointer;
+}
+.shortcut-add-btn.recording {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.shortcut-add-btn:disabled { cursor: default; opacity: 0.85; }
 
 /* --- Avisos discretos (nueva version, vista guardada): notificaciones
    pequenas en la esquina superior, no un header a todo lo ancho. Fijas

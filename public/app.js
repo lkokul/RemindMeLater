@@ -1261,11 +1261,17 @@ const SHORTCUT_ACTIONS = [
   { id: 'prev-day', label: 'Día anterior', run: () => shiftRemindersDay(-1) },
   { id: 'next-day', label: 'Día siguiente', run: () => shiftRemindersDay(1) },
 ];
-// Atajos de fabrica: el usuario puede cambiarlos o quitarlos por completo
-// desde Configuracion; un valor '' guardado explicitamente significa "sin
-// atajo", distinto de "todavia no tocado" (que usa este por defecto).
-const DEFAULT_SHORTCUTS = { 'new-event': 'n', 'prev-day': 'arrowleft', 'next-day': 'arrowright' };
+// Atajos de fabrica: el usuario puede cambiarlos, quitarlos, o anadir mas
+// de una combinacion para la MISMA accion (ej. "n" Y "ctrl+shift+a" abren
+// las dos "Nuevo evento"). Un array vacio [] guardado explicitamente
+// significa "sin ningun atajo", distinto de "todavia no tocado" (que usa
+// estos por defecto).
+const DEFAULT_SHORTCUTS = { 'new-event': ['n'], 'prev-day': ['arrowleft'], 'next-day': ['arrowright'] };
 
+// Lee lo guardado y SIEMPRE devuelve arrays — si venia del formato viejo
+// (un string suelto por accion, de antes de que se pudiera tener mas de
+// una combinacion), lo envuelve en un array de un elemento sin perder lo
+// que ya tenias configurado.
 function getShortcutMap() {
   let stored = {};
   try {
@@ -1275,20 +1281,37 @@ function getShortcutMap() {
   }
   const map = {};
   SHORTCUT_ACTIONS.forEach((a) => {
-    map[a.id] = Object.prototype.hasOwnProperty.call(stored, a.id) ? stored[a.id] : (DEFAULT_SHORTCUTS[a.id] || '');
+    if (Object.prototype.hasOwnProperty.call(stored, a.id)) {
+      const value = stored[a.id];
+      map[a.id] = Array.isArray(value) ? value : (value ? [value] : []);
+    } else {
+      map[a.id] = DEFAULT_SHORTCUTS[a.id] ? [...DEFAULT_SHORTCUTS[a.id]] : [];
+    }
   });
   return map;
 }
 
-function setShortcut(actionId, combo) {
-  let stored = {};
-  try {
-    stored = JSON.parse(localStorage.getItem('keyboardShortcuts') || '{}');
-  } catch (e) {
-    stored = {};
-  }
-  stored[actionId] = combo;
-  localStorage.setItem('keyboardShortcuts', JSON.stringify(stored));
+function saveShortcutMap(map) {
+  localStorage.setItem('keyboardShortcuts', JSON.stringify(map));
+}
+
+// Anade una combinacion nueva a una accion (no reemplaza las que ya
+// tuviera) — si esa combinacion ya la usaba OTRA accion, se la quita de
+// ahi primero para que no queden dos acciones peleandose por la misma
+// tecla.
+function addShortcut(actionId, combo) {
+  const map = getShortcutMap();
+  SHORTCUT_ACTIONS.forEach((a) => {
+    map[a.id] = map[a.id].filter((c) => c !== combo);
+  });
+  map[actionId].push(combo);
+  saveShortcutMap(map);
+}
+
+function removeShortcut(actionId, combo) {
+  const map = getShortcutMap();
+  map[actionId] = map[actionId].filter((c) => c !== combo);
+  saveShortcutMap(map);
 }
 
 // Convierte un evento de teclado en un identificador estable, ej.
@@ -1334,7 +1357,7 @@ document.addEventListener('keydown', (e) => {
   if (!combo) return;
 
   const map = getShortcutMap();
-  const action = SHORTCUT_ACTIONS.find((a) => map[a.id] && map[a.id] === combo);
+  const action = SHORTCUT_ACTIONS.find((a) => map[a.id].includes(combo));
   if (action) {
     e.preventDefault();
     action.run();

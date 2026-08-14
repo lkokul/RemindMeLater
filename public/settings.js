@@ -1474,13 +1474,17 @@ document.getElementById('setting-notifications').addEventListener('change', asyn
 
 // ---------------------------------------------------------------------
 // Atajos de teclado: la lista de acciones (SHORTCUT_ACTIONS) y el
-// guardado (getShortcutMap/setShortcut) viven en app.js, que se carga
-// antes que este archivo; aqui solo esta el dibujado de la lista y el
-// "modo grabacion" para capturar la siguiente tecla que pulses.
+// guardado (getShortcutMap/addShortcut/removeShortcut) viven en app.js,
+// que se carga antes que este archivo; aqui solo esta el dibujado de la
+// lista y el "modo grabacion" para capturar la siguiente tecla que
+// pulses. Cada accion puede tener VARIAS combinaciones a la vez (se
+// muestran como chips con una x cada una), no solo una.
 // ---------------------------------------------------------------------
-function startRecordingShortcut(actionId, displayBtn) {
-  displayBtn.textContent = 'Pulsa una tecla…';
-  displayBtn.classList.add('recording');
+function startRecordingShortcut(actionId, addBtn) {
+  const originalText = addBtn.textContent;
+  addBtn.textContent = 'Pulsa una tecla…';
+  addBtn.classList.add('recording');
+  addBtn.disabled = true;
 
   const handler = (e) => {
     e.preventDefault();
@@ -1497,14 +1501,7 @@ function startRecordingShortcut(actionId, displayBtn) {
     const combo = comboFromEvent(e);
     if (!combo) return; // solo se ha soltado una tecla modificadora, seguimos esperando
 
-    // Si ese atajo ya lo usa otra accion, se lo quitamos a la otra para
-    // que no queden dos acciones peleandose por la misma tecla.
-    const map = getShortcutMap();
-    SHORTCUT_ACTIONS.forEach((a) => {
-      if (a.id !== actionId && map[a.id] === combo) setShortcut(a.id, '');
-    });
-
-    setShortcut(actionId, combo);
+    addShortcut(actionId, combo);
     document.removeEventListener('keydown', handler, true);
     renderShortcutsList();
   };
@@ -1525,25 +1522,48 @@ function renderShortcutsList() {
     label.className = 'shortcut-label';
     label.textContent = action.label;
 
-    const display = document.createElement('button');
-    display.type = 'button';
-    display.className = 'shortcut-input';
-    display.textContent = map[action.id] ? displayCombo(map[action.id]) : 'Sin atajo';
-    display.addEventListener('click', () => startRecordingShortcut(action.id, display));
+    const combos = document.createElement('div');
+    combos.className = 'shortcut-combos';
 
-    const clearBtn = document.createElement('button');
-    clearBtn.type = 'button';
-    clearBtn.className = 'secondary-btn shortcut-clear';
-    clearBtn.textContent = 'Quitar';
-    clearBtn.disabled = !map[action.id];
-    clearBtn.addEventListener('click', () => {
-      setShortcut(action.id, '');
-      renderShortcutsList();
-    });
+    const activeCombos = map[action.id] || [];
+    if (activeCombos.length === 0) {
+      const hint = document.createElement('span');
+      hint.className = 'shortcut-empty-hint';
+      hint.textContent = 'Sin atajo';
+      combos.appendChild(hint);
+    } else {
+      activeCombos.forEach((combo) => {
+        const chip = document.createElement('span');
+        chip.className = 'shortcut-combo-chip';
+
+        const chipLabel = document.createElement('span');
+        chipLabel.textContent = displayCombo(combo);
+        chip.appendChild(chipLabel);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'shortcut-combo-remove';
+        removeBtn.textContent = '✕';
+        removeBtn.setAttribute('aria-label', `Quitar atajo ${displayCombo(combo)}`);
+        removeBtn.addEventListener('click', () => {
+          removeShortcut(action.id, combo);
+          renderShortcutsList();
+        });
+        chip.appendChild(removeBtn);
+
+        combos.appendChild(chip);
+      });
+    }
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'shortcut-add-btn';
+    addBtn.textContent = '+ Añadir';
+    addBtn.addEventListener('click', () => startRecordingShortcut(action.id, addBtn));
+    combos.appendChild(addBtn);
 
     row.appendChild(label);
-    row.appendChild(display);
-    row.appendChild(clearBtn);
+    row.appendChild(combos);
     container.appendChild(row);
   });
 }
