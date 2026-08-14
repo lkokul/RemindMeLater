@@ -1480,6 +1480,103 @@ document.getElementById('btn-dismiss-default-view').addEventListener('click', ()
 });
 
 // ---------------------------------------------------------------------
+// "Mi espacio" (Fase 1): hub con 3 columnas (Proximos / Tareas / Notas,
+// esta ultima vacia por ahora) en vez de los bloques apilados de
+// siempre. Como se accede a el es una preferencia de ESTE dispositivo
+// (localStorage), elegida en Configuracion > Vista > Mi espacio (ver
+// refreshMiEspacioModeOptions en settings.js):
+//   - "panel": el hub vive SIEMPRE dentro de #reminders-panel, al lado
+//     del calendario (sustituye a los 2 bloques apilados de siempre).
+//   - "topbar": el panel lateral se queda exactamente como esta hoy
+//     (Proximos arriba, Tareas fijo abajo); un boton nuevo en la topbar
+//     abre el hub a pantalla completa cuando lo necesites.
+// En los dos casos, los bloques #reminders-top-block/#reminders-tasks-block
+// de SIEMPRE se MUEVEN de sitio (Node.appendChild) en vez de duplicarse,
+// asi que su renderizado (loadReminders, renderTasksList...) no cambia
+// nada, solo cambia DONDE viven en el DOM.
+// ---------------------------------------------------------------------
+const MY_SPACE_MODE_IDS = ['topbar', 'panel'];
+
+function getMiEspacioMode() {
+  const stored = localStorage.getItem('miEspacioMode');
+  return MY_SPACE_MODE_IDS.includes(stored) ? stored : 'topbar';
+}
+
+// Deja los 2 bloques de siempre en su sitio clasico, uno debajo del otro
+// dentro de #reminders-panel — como si "Mi espacio" no existiera.
+function restoreClassicRemindersPanel() {
+  const panel = document.getElementById('reminders-panel');
+  panel.appendChild(document.getElementById('reminders-top-block'));
+  panel.appendChild(document.getElementById('reminders-tasks-block'));
+}
+
+// Coloca los 2 bloques dentro de las columnas del hub, alli donde el hub
+// este montado ahora mismo (dentro del panel lateral o dentro de la
+// pantalla completa de #my-space-view).
+function moveRemindersIntoHub() {
+  document.getElementById('my-space-col-reminders').appendChild(document.getElementById('reminders-top-block'));
+  document.getElementById('my-space-col-tasks').appendChild(document.getElementById('reminders-tasks-block'));
+}
+
+function collapseMySpaceExpandedColumn() {
+  delete document.getElementById('my-space-hub').dataset.expanded;
+  document.getElementById('my-space-back-btn').classList.add('hidden');
+}
+
+function closeMySpaceView() {
+  document.getElementById('my-space-view').classList.add('hidden');
+  collapseMySpaceExpandedColumn();
+  restoreClassicRemindersPanel();
+}
+
+function openMySpaceView() {
+  moveRemindersIntoHub();
+  document.getElementById('my-space-view').classList.remove('hidden');
+}
+
+// Aplica el modo elegido: donde vive el hub, y si hace falta o no el
+// boton de la topbar. Se llama al arrancar y cada vez que cambias el
+// ajuste en Configuracion > Vista.
+function applyMiEspacioMode() {
+  const mode = getMiEspacioMode();
+  const panel = document.getElementById('reminders-panel');
+  const hub = document.getElementById('my-space-hub');
+
+  // Al cambiar de modo (o al arrancar) siempre se parte de cero: el hub
+  // cerrado y los bloques en su sitio clasico dentro del panel.
+  document.getElementById('my-space-view').classList.add('hidden');
+  collapseMySpaceExpandedColumn();
+  restoreClassicRemindersPanel();
+  panel.classList.remove('my-space-panel-mode');
+
+  if (mode === 'panel') {
+    panel.appendChild(hub);
+    panel.classList.add('my-space-panel-mode');
+    moveRemindersIntoHub();
+    document.getElementById('btn-my-space').classList.add('hidden');
+  } else {
+    document.getElementById('my-space-view').appendChild(hub);
+    document.getElementById('btn-my-space').classList.remove('hidden');
+  }
+}
+
+document.getElementById('btn-my-space').addEventListener('click', openMySpaceView);
+document.getElementById('btn-close-my-space').addEventListener('click', closeMySpaceView);
+
+// Un solo listener en el hub entero (delegacion) en vez de uno por
+// columna: mas simple, y sigue funcionando igual aunque los bloques que
+// hay dentro se muevan de sitio.
+document.getElementById('my-space-hub').addEventListener('click', (e) => {
+  const expandBtn = e.target.closest('.my-space-col-expand');
+  if (!expandBtn) return;
+  document.getElementById('my-space-hub').dataset.expanded = expandBtn.dataset.expand;
+  document.getElementById('my-space-back-btn').classList.remove('hidden');
+});
+document.getElementById('my-space-back-btn').addEventListener('click', collapseMySpaceExpandedColumn);
+
+applyMiEspacioMode();
+
+// ---------------------------------------------------------------------
 // Aviso de nueva version disponible: /api/version devuelve el momento en
 // que arranco el proceso del servidor. npm run dev reinicia ese proceso
 // cada vez que tocamos un archivo de server/, asi que si ese valor

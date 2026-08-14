@@ -361,6 +361,40 @@ function refreshViewTab() {
   hint.textContent = current === 'fullscreen' ? 'Pulsa Esc en cualquier momento para salir de pantalla completa.' : '';
 
   refreshCalendarDensityOptions();
+  refreshMiEspacioModeOptions();
+}
+
+// Como se accede a "Mi espacio" (Proximos + Tareas + Notas) — preferencia
+// de ESTE dispositivo (localStorage), leida por getMiEspacioMode() y
+// aplicada de verdad por applyMiEspacioMode() en app.js.
+const MY_SPACE_MODES = [
+  { id: 'topbar', label: 'Botón en la barra superior' },
+  { id: 'panel', label: 'Panel lateral' },
+];
+
+function refreshMiEspacioModeOptions() {
+  const container = document.getElementById('my-space-mode-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getMiEspacioMode();
+
+  MY_SPACE_MODES.forEach((mode) => {
+    const isActive = mode.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = mode.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('miEspacioMode', mode.id);
+        applyMiEspacioMode();
+        refreshMiEspacioModeOptions();
+      });
+    }
+    container.appendChild(btn);
+  });
 }
 
 // Como se ven, en el calendario del mes, los dias que tienen varios
@@ -1603,6 +1637,17 @@ document.addEventListener('keydown', (e) => {
   const taskModal = document.getElementById('task-modal');
   if (taskModal && !taskModal.classList.contains('hidden')) {
     closeTaskModal();
+    return;
+  }
+
+  const mySpaceView = document.getElementById('my-space-view');
+  if (mySpaceView && !mySpaceView.classList.contains('hidden')) {
+    const hub = document.getElementById('my-space-hub');
+    if (hub && hub.dataset.expanded) {
+      document.getElementById('my-space-back-btn').click();
+    } else {
+      document.getElementById('btn-close-my-space').click();
+    }
     return;
   }
 

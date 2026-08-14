@@ -81,11 +81,15 @@
          nada todavia. Solo aparece en el ordenador de confianza (ver
          requireTrusted en server/routes/update.js) — un movil emparejado
          no puede disparar un git pull. -->
-    <div id="new-release-banner" class="toast hidden">
-      <span id="new-release-banner-text"></span>
-      <button type="button" id="btn-skip-release" class="secondary-btn">No para esta</button>
-      <button type="button" id="btn-install-release" class="primary-btn">Actualizar ahora</button>
-      <button type="button" id="btn-dismiss-release" class="toast-dismiss" aria-label="Ahora no">✕</button>
+    <div id="new-release-banner" class="toast toast-release hidden">
+      <div class="toast-release-top">
+        <span id="new-release-banner-text"></span>
+        <button type="button" id="btn-dismiss-release" class="toast-dismiss" aria-label="Ahora no">✕</button>
+      </div>
+      <div class="toast-release-actions">
+        <button type="button" id="btn-skip-release" class="secondary-btn">No para esta</button>
+        <button type="button" id="btn-install-release" class="primary-btn">Actualizar ahora</button>
+      </div>
     </div>
 
     <div id="default-view-banner" class="toast hidden">
@@ -133,6 +137,13 @@
              refreshQuickColorModeButton() en settings.js; la forma
              "oficial" de cambiarlo sigue estando en Configuracion > Estilo. -->
         <button id="btn-quick-color-mode" class="icon-btn hidden" aria-label="Cambiar entre claro y oscuro"></button>
+        <!-- Solo se ve si Configuracion > Vista > Mi espacio esta en modo
+             "boton" (ver applyMiEspacioMode en app.js) — en modo "panel" no
+             hace falta, Mi espacio ya esta siempre visible al lado del
+             calendario. -->
+        <button id="btn-my-space" class="icon-btn hidden" aria-label="Mi espacio">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4.5" height="16" rx="1"></rect><rect x="9.75" y="4" width="4.5" height="16" rx="1"></rect><rect x="16.5" y="4" width="4.5" height="16" rx="1"></rect></svg>
+        </button>
         <button id="btn-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </nav>
     </header>
@@ -165,8 +176,8 @@
            que se ve siempre a la vez, cada uno con su propio scroll
            interno (ver .reminders-top-block/.reminders-tasks-block en
            styles.css). -->
-      <aside class="reminders-panel">
-        <div class="reminders-top-block">
+      <aside id="reminders-panel" class="reminders-panel">
+        <div id="reminders-top-block" class="reminders-top-block">
           <div class="reminders-panel-header">
             <h2 id="reminders-panel-title">Proximos recordatorios</h2>
             <button type="button" id="btn-reminders-back" class="secondary-btn hidden">Próximos →</button>
@@ -179,7 +190,7 @@
           <div id="reminders-list" class="reminders-list"></div>
         </div>
 
-        <div class="reminders-tasks-block">
+        <div id="reminders-tasks-block" class="reminders-tasks-block">
           <div class="reminders-panel-header">
             <h2>Tareas</h2>
           </div>
@@ -187,6 +198,58 @@
         </div>
       </aside>
     </main>
+
+    <!-- "Mi espacio" (Fase 1): hub de 3 columnas que reorganiza Proximos y
+         Tareas -- moviendo esos MISMOS bloques del panel lateral de
+         siempre (.reminders-top-block/.reminders-tasks-block), sin
+         duplicar su renderizado -- mas una columna de Notas (vacia por
+         ahora, la rellena la Fase 2). Segun el modo elegido en
+         Configuracion > Vista > Mi espacio, este hub vive DENTRO del
+         panel lateral (modo "panel", siempre visible junto al calendario)
+         o dentro de esta pantalla completa (modo "boton", se abre con
+         #btn-my-space). Ver applyMiEspacioMode() en app.js. -->
+    <div id="my-space-view" class="my-space-view hidden">
+      <div class="my-space-view-header">
+        <h2>Mi espacio</h2>
+        <button type="button" id="btn-close-my-space" class="modal-close-x" aria-label="Cerrar">✕</button>
+      </div>
+      <div id="my-space-hub" class="my-space-hub">
+        <!-- Comun a las 3 columnas: cuando una esta expandida (tapando a
+             las otras 2), este es el UNICO "Volver" que hace falta, fijo
+             arriba, igual que en Configuracion. -->
+        <button type="button" id="my-space-back-btn" class="my-space-back-btn hidden">← Volver</button>
+
+        <div class="my-space-col" data-col="reminders">
+          <div class="my-space-col-toolbar">
+            <button type="button" class="icon-btn my-space-col-expand" data-expand="reminders" aria-label="Expandir Próximos">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+            </button>
+          </div>
+          <div id="my-space-col-reminders" class="my-space-col-body"></div>
+        </div>
+
+        <div class="my-space-col" data-col="tasks">
+          <div class="my-space-col-toolbar">
+            <button type="button" class="icon-btn my-space-col-expand" data-expand="tasks" aria-label="Expandir Tareas">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+            </button>
+          </div>
+          <div id="my-space-col-tasks" class="my-space-col-body"></div>
+        </div>
+
+        <div class="my-space-col" data-col="notes">
+          <div class="my-space-col-toolbar">
+            <button type="button" class="icon-btn my-space-col-expand" data-expand="notes" aria-label="Expandir Notas">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+            </button>
+          </div>
+          <div class="my-space-col-body">
+            <div class="reminders-panel-header"><h2>Notas</h2></div>
+            <p class="empty-hint">Próximamente: notas libres, con carpetas y formato. Esta columna es solo el hueco reservado por ahora.</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Modal para crear / editar evento -->
@@ -282,8 +345,18 @@
        vez de un botón suelto por cada cosa. Ver settings.js. -->
   <div id="settings-modal" class="modal hidden">
     <div class="modal-card settings-card">
-      <button type="button" id="btn-close-settings" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2>Configuración</h2>
+      <!-- Cabecera FIJA (fuera de la zona con scroll): la x de cerrar
+           siempre visible aunque la seccion que estes mirando sea larga.
+           El "Volver" de cada seccion no vive aqui (es distinto por
+           pestana), va dentro de settings-card-body con position:sticky
+           para quedarse pegado arriba SOLO mientras haces scroll dentro
+           de esa seccion. -->
+      <div class="settings-card-header">
+        <button type="button" id="btn-close-settings" class="modal-close-x" aria-label="Cerrar">✕</button>
+        <h2>Configuración</h2>
+      </div>
+
+      <div class="settings-card-body">
 
       <!-- Menu: lista vertical, solo texto. Al pulsar una entra a esa
            seccion a pantalla completa (ver showSettingsScreen en settings.js). -->
@@ -348,6 +421,10 @@
         <h4>Días con muchas cosas</h4>
         <p class="hint">Cómo se ven, en el calendario del mes, los días que tienen varios eventos o tareas a la vez.</p>
         <div id="calendar-density-options" class="view-mode-options"></div>
+
+        <h4>Mi espacio</h4>
+        <p class="hint">Cómo acceder a "Mi espacio" (Próximos, Tareas y Notas juntos). En el panel lateral se ve siempre al lado del calendario; con el botón se abre a pantalla completa cuando lo necesites.</p>
+        <div id="my-space-mode-options" class="view-mode-options"></div>
       </div>
 
       <!-- --- Estilo --- -->
@@ -475,6 +552,7 @@
         <div id="shortcuts-list" class="shortcuts-list"></div>
       </div>
 
+      </div>
     </div>
   </div>
 
