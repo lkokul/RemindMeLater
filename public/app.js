@@ -516,6 +516,13 @@ function renderCalendarGrid() {
     cell.className = 'calendar-cell';
     if (cellDate.getMonth() !== state.viewDate.getMonth()) cell.classList.add('other-month');
     if (sameDay(cellDate, today)) cell.classList.add('today');
+    // Dia que se esta viendo ahora mismo en el panel de recordatorios
+    // (clicado en el calendario, o navegado con las flechas del teclado
+    // o de "Mi espacio") — mismo aspecto que el hover, pero fijo en vez
+    // de necesitar el raton encima.
+    if (state.remindersMode === 'day' && state.remindersDayDate && sameDay(cellDate, state.remindersDayDate)) {
+      cell.classList.add('selected-day');
+    }
 
     // Color de fondo de la celda: festivo/especial (marcados a mano) por
     // encima de fin de semana (automatico, sabado/domingo); "hoy" no
@@ -600,12 +607,14 @@ function renderCalendarGrid() {
 async function showDayInReminders(date) {
   state.remindersMode = 'day';
   state.remindersDayDate = date;
+  renderCalendarGrid();
   await renderRemindersPanel();
 }
 
 function showUpcomingReminders() {
   state.remindersMode = 'upcoming';
   state.remindersDayDate = null;
+  renderCalendarGrid();
   renderRemindersPanel();
 }
 
@@ -674,6 +683,7 @@ async function renderRemindersPanel() {
     backBtn.classList.remove('hidden');
     dayActions.classList.remove('hidden');
     updateDayMarkButtons(toDateKey(state.remindersDayDate));
+    remindersDayNavDateField.setValue(state.remindersDayDate);
     await renderDayReminders(state.remindersDayDate);
   } else {
     title.textContent = 'Proximos recordatorios';
@@ -682,6 +692,18 @@ async function renderRemindersPanel() {
     renderUpcomingRemindersList(state.upcomingReminders || []);
   }
 }
+
+// Navegacion de dia dentro de "Mi espacio" (ver #reminders-day-nav en
+// index.html, oculta fuera de ahi). El campo de fecha se crea UNA vez
+// aqui mismo (igual que los campos de fecha de los modales) y vive
+// siempre dentro de .reminders-top-block, se mueva este donde se mueva.
+const remindersDayNavDateField = createDateField({
+  initialValue: new Date(),
+  onChange: (d) => { if (d) showDayInReminders(d); },
+});
+document.getElementById('reminders-day-nav-date-field').appendChild(remindersDayNavDateField.element);
+document.getElementById('btn-reminders-day-prev').addEventListener('click', () => shiftRemindersDay(-1));
+document.getElementById('btn-reminders-day-next').addEventListener('click', () => shiftRemindersDay(1));
 
 document.getElementById('btn-reminders-back').addEventListener('click', showUpcomingReminders);
 document.getElementById('btn-day-mark-holiday').addEventListener('click', () => {
@@ -1503,19 +1525,30 @@ function getMiEspacioMode() {
 }
 
 // Deja los 2 bloques de siempre en su sitio clasico, uno debajo del otro
-// dentro de #reminders-panel — como si "Mi espacio" no existiera.
+// dentro de #reminders-panel — como si "Mi espacio" no existiera. Fuera
+// de Mi espacio no hace falta la navegacion de dia (ya estan el
+// calendario de al lado y los atajos de teclado) ni tiene sentido
+// arrancar siempre en el dia de hoy, asi que se vuelve al "Proximos" de
+// toda la vida.
 function restoreClassicRemindersPanel() {
   const panel = document.getElementById('reminders-panel');
   panel.appendChild(document.getElementById('reminders-top-block'));
   panel.appendChild(document.getElementById('reminders-tasks-block'));
+  document.getElementById('reminders-day-nav').classList.add('hidden');
+  showUpcomingReminders();
 }
 
 // Coloca los 2 bloques dentro de las columnas del hub, alli donde el hub
 // este montado ahora mismo (dentro del panel lateral o dentro de la
-// pantalla completa de #my-space-view).
+// pantalla completa de #my-space-view). Dentro de Mi espacio, Proximos
+// arranca siempre en el dia de hoy (en vez del listado general) con la
+// navegacion de dia visible arriba, porque en modo "boton" el calendario
+// de al lado no se ve mientras Mi espacio esta abierto.
 function moveRemindersIntoHub() {
   document.getElementById('my-space-col-reminders').appendChild(document.getElementById('reminders-top-block'));
   document.getElementById('my-space-col-tasks').appendChild(document.getElementById('reminders-tasks-block'));
+  document.getElementById('reminders-day-nav').classList.remove('hidden');
+  showDayInReminders(new Date());
 }
 
 function collapseMySpaceExpandedColumn() {
