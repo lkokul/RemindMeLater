@@ -1670,12 +1670,71 @@ document.getElementById('note-favorite-btn').addEventListener('click', () => {
   refreshNoteFavoriteBtn();
 });
 
+// ---------------------------------------------------------------------
+// Editor de notas con formato (Fase 4): negrita, cursiva, lista con
+// viñetas y lista numerada. "note-body" ya no es un <textarea>, es un
+// <div contenteditable> — los botones de la barra usan
+// document.execCommand(), que aunque esta marcado como "obsoleto" en la
+// documentacion sigue funcionando bien en Chrome/Edge/Firefox (los
+// navegadores que de verdad se usan aqui) y evita tener que escribir a
+// mano toda la logica de negrita/listas sobre el DOM, algo bastante mas
+// delicado de lo que parece.
+const NOTE_EDITOR_BODY = document.getElementById('note-body');
+
+function execNoteCommand(cmd) {
+  document.execCommand(cmd, false, null);
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorToolbar();
+}
+
+function refreshNoteEditorToolbar() {
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn').forEach((btn) => {
+    const active = document.queryCommandState(btn.dataset.cmd);
+    btn.classList.toggle('is-active', !!active);
+  });
+}
+
+// Al abrir el modal (nota nueva o para editar) el cursor todavia no esta
+// dentro del editor, asi que no hay "donde" calcular negrita/lista
+// activa todavia -- sin esto, los botones se quedaban pintados con el
+// estado de la ULTIMA nota que se habia editado, en vez de apagados.
+function resetNoteEditorToolbar() {
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn').forEach((btn) => btn.classList.remove('is-active'));
+}
+
+document.querySelectorAll('#note-body-toolbar .note-editor-btn').forEach((btn) => {
+  // mousedown (no click) + preventDefault: si no, el navegador quita la
+  // seleccion de texto del editor al pasar el foco al boton ANTES de que
+  // se dispare el click, y execCommand ya no tendria sobre que aplicar
+  // el formato.
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+  btn.addEventListener('click', () => execNoteCommand(btn.dataset.cmd));
+});
+// El estado encendido/apagado de cada boton depende de donde este el
+// cursor ahora mismo, asi que se recalcula en cualquier cambio de
+// seleccion o de tecla dentro del editor, no solo al pulsar un boton.
+NOTE_EDITOR_BODY.addEventListener('keyup', refreshNoteEditorToolbar);
+NOTE_EDITOR_BODY.addEventListener('mouseup', refreshNoteEditorToolbar);
+NOTE_EDITOR_BODY.addEventListener('focus', refreshNoteEditorToolbar);
+
+// Una nota de antes de la Fase 4 tiene bodyFormat "text": su contenido es
+// texto plano tal cual, nunca se penso para interpretarse como HTML. Para
+// ensenarla en el editor nuevo sin que "<", ">" o "&" se rompan (o, peor,
+// se interpreten como etiquetas), se escapa primero y los saltos de
+// linea se convierten a <br> a mano, ya que un <div> normal no respeta
+// saltos de linea de un texto plano como si fuera un <textarea>.
+function legacyNoteBodyToHtml(text) {
+  return escapeHtml(text).replace(/\n/g, '<br>');
+}
+
 function openNoteModal(note) {
   const modal = document.getElementById('note-modal');
   document.getElementById('note-modal-title').textContent = note ? 'Editar nota' : 'Nueva nota';
   document.getElementById('note-id').value = note ? note.id : '';
   document.getElementById('note-title').value = note ? note.title : '';
-  document.getElementById('note-body').value = note && note.body ? note.body : '';
+  const body = note && note.body ? note.body : '';
+  NOTE_EDITOR_BODY.innerHTML = note && note.bodyFormat === 'html' ? body : legacyNoteBodyToHtml(body);
+  resetNoteEditorToolbar();
   populateNoteFolderSelect();
   // Nota nueva: por defecto se guarda en la carpeta donde estas
   // navegando ahora mismo, igual que crear un archivo nuevo dentro de la
@@ -1690,6 +1749,7 @@ function openNoteModal(note) {
 
 function closeNoteModal() {
   document.getElementById('note-modal').classList.add('hidden');
+  NOTE_EDITOR_BODY.innerHTML = '';
 }
 
 document.getElementById('btn-new-note').addEventListener('click', () => openNoteModal(null));
@@ -1703,9 +1763,14 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('note-id').value;
   const folderRaw = noteFolderField.getValue();
+  // Si el editor quedo vacio de texto de verdad, se manda null en vez de
+  // basura tipo "<br>" que algunos navegadores dejan sueltas tras borrar
+  // todo el contenido.
+  const bodyHtml = NOTE_EDITOR_BODY.textContent.trim() === '' ? null : NOTE_EDITOR_BODY.innerHTML;
   const payload = {
     title: document.getElementById('note-title').value,
-    body: document.getElementById('note-body').value,
+    body: bodyHtml,
+    bodyFormat: 'html',
     folderId: folderRaw === '' ? null : Number(folderRaw),
     favorite: noteModalFavorite,
   };

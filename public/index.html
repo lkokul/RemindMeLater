@@ -412,8 +412,10 @@
     </div>
   </div>
 
-  <!-- Modal para crear / editar nota (Mi espacio > Notas -- solo titulo +
-       texto plano, sin formato todavia, eso es de Fase 4. Carpeta
+  <!-- Modal para crear / editar nota (Mi espacio > Notas -- titulo +
+       contenido con formato basico desde la Fase 4 (negrita, cursiva,
+       listas), editado con un <div contenteditable> en vez de un
+       <textarea> normal, con su propia barra de botones encima. Carpeta
        opcional desde la Fase 3). -->
   <div id="note-modal" class="modal hidden">
     <div class="modal-card">
@@ -428,10 +430,16 @@
             <button type="button" id="note-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
           </div>
         </label>
-        <label>
-          Contenido (opcional)
-          <textarea id="note-body" rows="8"></textarea>
-        </label>
+        <div class="field-label-block">
+          <span class="field-label">Contenido (opcional)</span>
+          <div id="note-body-toolbar" class="note-editor-toolbar">
+            <button type="button" data-cmd="bold" class="note-editor-btn" aria-label="Negrita" title="Negrita"><b>N</b></button>
+            <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
+            <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn" aria-label="Lista con viñetas" title="Lista con viñetas">&#8226; Lista</button>
+            <button type="button" data-cmd="insertOrderedList" class="note-editor-btn" aria-label="Lista numerada" title="Lista numerada">1. Lista</button>
+          </div>
+          <div id="note-body" class="note-editor-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido de la nota"></div>
+        </div>
         <div class="field-label-block">
           <span class="field-label">Carpeta (opcional)</span>
           <div id="note-folder-field"></div>

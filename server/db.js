@@ -111,10 +111,11 @@ db.exec(`
     type TEXT NOT NULL CHECK (type IN ('holiday', 'special'))
   );
 
-  -- Notas de "Mi espacio" (Fase 2): titulo + texto plano, compartidas
-  -- entre todos los dispositivos igual que eventos/tareas/grupos. Sin
-  -- formato todavia (eso es Fase 4) — de momento es deliberadamente lo
-  -- mas simple posible.
+  -- Notas de "Mi espacio" (Fase 2): titulo + contenido, compartidas
+  -- entre todos los dispositivos igual que eventos/tareas/grupos. Desde
+  -- la Fase 4 el contenido puede llevar formato basico (negrita, cursiva,
+  -- listas) como HTML saneado -- ver la migracion de body_format mas
+  -- abajo y routes/notes.js.
   CREATE TABLE IF NOT EXISTS notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -275,6 +276,19 @@ if (!noteColumns.includes('favorite')) {
 }
 if (!noteFolderColumns.includes('favorite')) {
   db.exec('ALTER TABLE note_folders ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0');
+}
+
+// body_format (Fase 4 -- editor de notas con formato): 'text' = nota de
+// antes de la Fase 4, "body" es texto plano tal cual. 'html' = nota
+// creada o editada con el editor nuevo, "body" es HTML ya saneado (ver
+// sanitizeNoteBody en routes/notes.js). Se guarda explicitamente en vez
+// de adivinarlo mirando el contenido para no confundir una nota vieja
+// que por casualidad tenga un "<" o un "&" con HTML de verdad -- ver
+// openNoteModal en app.js, que usa este campo para decidir si hace falta
+// convertir saltos de linea/caracteres especiales antes de mostrarla en
+// el editor con formato.
+if (!noteColumns.includes('body_format')) {
+  db.exec("ALTER TABLE notes ADD COLUMN body_format TEXT NOT NULL DEFAULT 'text'");
 }
 
 // El perfil siempre tiene que existir (para poder firmar "creado por" en

@@ -121,6 +121,38 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    nativo — ver createSelectField en app.js. */
 .field-label-block { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); margin-bottom: 0.75rem; }
 .field-label { display: block; margin-bottom: 0.3rem; }
+
+/* Editor de notas con formato (Fase 4): barra de botones + un
+   <div contenteditable> en vez de un <textarea>, pero con el mismo
+   aspecto que cualquier otro campo (borde/radio/fondo de input) para que
+   no se note la diferencia a simple vista. */
+.note-editor-toolbar { display: flex; gap: 0.35rem; margin-bottom: 0.4rem; }
+.note-editor-btn {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+/* Se enciende (mismo tratamiento que .primary-btn) mientras el cursor
+   esta dentro de texto ya puesto en negrita/cursiva/lista -- ver
+   refreshNoteEditorToolbar en app.js, que consulta
+   document.queryCommandState() en cada cambio de seleccion. */
+.note-editor-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.note-editor-body {
+  min-height: 8rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--surface-2-text);
+  border-radius: var(--radius);
+  padding: 0.6rem;
+}
+.note-editor-body:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+/* Las listas dentro del editor no tienen estilos globales de la app que
+   las afecten, asi que hace falta el marcador/sangria a mano igual que
+   en cualquier pagina sin CSS propio para <ul>/<ol>. */
+.note-editor-body ul, .note-editor-body ol { padding-left: 1.4rem; margin: 0.4rem 0; }
+.note-editor-body p, .note-editor-body div { margin: 0; }
 /* Interruptor tipo "pastilla" en vez del checkbox cuadrado del sistema:
    se ilumina con el color de acento cuando esta activo. Sigue siendo un
    <input type="checkbox"> normal por debajo (mismo :checked, mismo
