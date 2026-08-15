@@ -7,35 +7,52 @@
 // `populateEventGroupSelect()`.
 
 // ---------------------------------------------------------------------
-// Posicionamiento compartido de popovers "flotantes": los usan tanto el
-// selector de color como el de icono. Van colgados de <body> con
-// position:fixed (no dentro de la tarjeta del modal) para que el
-// "overflow-y: auto" del modal no los recorte cuando estan cerca del
-// borde o hay que hacer scroll; su sitio se calcula aqui, en coordenadas
-// de ventana, a partir de donde este el boton que los abre.
-// ---------------------------------------------------------------------
-function positionFixedPopover(anchorBtn, popover, { width = 248, estimatedHeight = 320 } = {}) {
+// Posicionamiento compartido de popovers "flotantes": los usan el
+// selector de color, el de icono, el de fecha y el select a medida. Van
+// colgados de <body> con position:fixed (no dentro de la tarjeta del
+// modal) para que el "overflow-y: auto" del modal no los recorte cuando
+// estan cerca del borde o hay que hacer scroll; su sitio se calcula
+// aqui, en coordenadas de ventana, a partir de donde este el boton que
+// los abre.
+//
+// La altura para decidir si cae por debajo o por encima del boton se
+// MIDE de verdad (popover.offsetHeight) en vez de adivinarse a mano: los
+// que llaman a esto quitan la clase "hidden" justo ANTES de llamarnos
+// (ver los click handlers de abajo), asi que el popover ya esta visible
+// y renderizado en el DOM en este punto — offsetHeight es su alto real,
+// ya recortado por su propio max-height/overflow-y si hiciera falta.
+// Antes se pasaba un "estimatedHeight" a mano por cada tipo de popover,
+// y si el contenido crecia (como el selector de icono, con las
+// secciones de simbolos Y emoji) se quedaba desincronizado: la altura
+// real ya no coincidia con la estimada, y el popover se colocaba mal,
+// pudiendo salirse por debajo de la pantalla sin forma de hacer scroll
+// hasta el (justo el bug que reporto Koku al anadir un icono a una
+// carpeta). Medir de verdad evita que esto se repita aunque el
+// contenido de un popover cambie en el futuro.
+function positionFixedPopover(anchorBtn, popover, { width = 248 } = {}) {
   const rect = anchorBtn.getBoundingClientRect();
   let left = rect.left;
   if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
   popover.style.left = `${Math.max(8, left)}px`;
 
-  const top = rect.bottom + 6 + estimatedHeight > window.innerHeight
-    ? Math.max(8, rect.top - estimatedHeight - 6)
+  const actualHeight = popover.offsetHeight;
+  const top = rect.bottom + 6 + actualHeight > window.innerHeight
+    ? Math.max(8, rect.top - actualHeight - 6)
     : rect.bottom + 6;
   popover.style.top = `${top}px`;
 }
 
 function closeAllPopovers(except) {
-  document.querySelectorAll('.color-popover, .icon-popover').forEach((el) => {
+  document.querySelectorAll('.color-popover, .icon-popover, .select-popover, .date-popover').forEach((el) => {
     if (el !== except) el.classList.add('hidden');
   });
 }
 
 // Cierra cualquier popover abierto al hacer click fuera de el (uno solo
-// para color e icono, asi no hay que repetir esta logica en cada widget).
+// para color, icono, selector y fecha, asi no hay que repetir esta logica
+// en cada widget).
 document.addEventListener('click', (e) => {
-  if (e.target.closest('.color-popover, .icon-popover, .color-swatch-btn, .icon-swatch-btn')) return;
+  if (e.target.closest('.color-popover, .icon-popover, .select-popover, .date-popover, .color-swatch-btn, .icon-swatch-btn, .select-field-trigger, .date-field-trigger')) return;
   closeAllPopovers();
 });
 
@@ -245,7 +262,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'devices', 'mobile', 'shortcuts'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'devices', 'mobile', 'shortcuts', 'notes'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -265,6 +282,7 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     else if (tab === 'devices') refreshDevicesTab();
     else if (tab === 'mobile') refreshMobileTab();
     else if (tab === 'shortcuts') refreshShortcutsTab();
+    else if (tab === 'notes') refreshNotesTab();
   });
 });
 
@@ -327,15 +345,14 @@ document.getElementById('profile-form').addEventListener('submit', async (e) => 
 });
 
 // ---------------------------------------------------------------------
-// Vista: Normal / Pantalla completa / Ventana flotante. Un solo modo
-// activo a la vez (aplicado de verdad por applyViewMode, en app.js);
-// aqui solo se dibujan los botones y cual esta resaltado como actual,
-// igual que "En uso" en la biblioteca de temas.
+// Vista: Normal / Pantalla completa. Un solo modo activo a la vez
+// (aplicado de verdad por applyViewMode, en app.js); aqui solo se dibujan
+// los botones y cual esta resaltado como actual, igual que "En uso" en la
+// biblioteca de temas.
 // ---------------------------------------------------------------------
 const VIEW_MODES = [
   { id: 'normal', label: 'Normal' },
   { id: 'fullscreen', label: 'Pantalla completa' },
-  { id: 'floating', label: 'Ventana flotante' },
 ];
 
 function refreshViewTab() {
@@ -358,13 +375,152 @@ function refreshViewTab() {
   });
 
   const hint = document.getElementById('view-mode-hint');
-  if (current === 'fullscreen') {
-    hint.textContent = 'Pulsa Esc en cualquier momento para salir de pantalla completa.';
-  } else if (current === 'floating') {
-    hint.textContent = 'La ventana flotante se reutiliza: si ya esta abierta, se enfoca en vez de abrir otra.';
-  } else {
-    hint.textContent = '';
+  hint.textContent = current === 'fullscreen' ? 'Pulsa Esc en cualquier momento para salir de pantalla completa.' : '';
+
+  refreshCalendarDensityOptions();
+  refreshMiEspacioModeOptions();
+  refreshRemindersPanelGroupedOptions();
+  refreshFavoritesDisplayOptions();
+}
+
+// Como se accede a "Mi espacio" (Proximos + Tareas + Notas) — preferencia
+// de ESTE dispositivo (localStorage), leida por getMiEspacioMode() y
+// aplicada de verdad por applyMiEspacioMode() en app.js.
+const MY_SPACE_MODES = [
+  { id: 'topbar', label: 'Botón en la barra superior' },
+  { id: 'panel', label: 'Panel lateral' },
+];
+
+function refreshMiEspacioModeOptions() {
+  const container = document.getElementById('my-space-mode-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getMiEspacioMode();
+
+  MY_SPACE_MODES.forEach((mode) => {
+    const isActive = mode.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = mode.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('miEspacioMode', mode.id);
+        applyMiEspacioMode();
+        refreshMiEspacioModeOptions();
+      });
+    }
+    container.appendChild(btn);
+  });
+}
+
+// Panel lateral clasico (solo aplica en modo "topbar" de Mi espacio, ver
+// arriba): una casilla por seccion (Recordatorios/Tareas/Notas, ver
+// REMINDERS_PANEL_PAGES en app.js) para elegir cuales van agrupadas
+// (juntas, alternando con flechas) -- las que no marques se quedan
+// sueltas, apiladas cada una por su lado. Ver
+// applyRemindersPanelLayout()/getRemindersGroupedSections() en app.js.
+function refreshRemindersPanelGroupedOptions() {
+  const container = document.getElementById('reminders-panel-grouped-options');
+  if (!container) return;
+  container.innerHTML = '';
+
+  let stored;
+  try {
+    stored = JSON.parse(localStorage.getItem('remindersPanelGrouped') || '[]');
+  } catch {
+    stored = [];
   }
+  if (!Array.isArray(stored)) stored = [];
+
+  REMINDERS_PANEL_PAGES.forEach((p) => {
+    const label = document.createElement('label');
+    label.className = 'checkbox-row';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = stored.includes(p.id);
+    checkbox.addEventListener('change', () => {
+      const next = checkbox.checked
+        ? [...stored.filter((id) => id !== p.id), p.id]
+        : stored.filter((id) => id !== p.id);
+      localStorage.setItem('remindersPanelGrouped', JSON.stringify(next));
+      applyRemindersPanelLayout();
+      refreshRemindersPanelGroupedOptions();
+    });
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode(p.label));
+    container.appendChild(label);
+  });
+}
+
+// Favoritos en Mi espacio (carpetas y notas): "merged" (por defecto)
+// ordena los favoritos primero sin cabeceras; "sections" separa con una
+// cabecera "Favoritos"/"Todo lo demas" (solo si hay algun favorito). Ver
+// getFavoritesDisplayMode()/appendFavoriteSortedGroup() en app.js.
+const FAVORITES_DISPLAY_OPTIONS = [
+  { id: 'merged', label: 'Una sola lista, favoritos primero' },
+  { id: 'sections', label: 'Secciones separadas' },
+];
+
+function refreshFavoritesDisplayOptions() {
+  const container = document.getElementById('favorites-display-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getFavoritesDisplayMode();
+
+  FAVORITES_DISPLAY_OPTIONS.forEach((opt) => {
+    const isActive = opt.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = opt.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('favoritesDisplayMode', opt.id);
+        renderNotesView();
+        refreshFavoritesDisplayOptions();
+      });
+    }
+    container.appendChild(btn);
+  });
+}
+
+// Como se ven, en el calendario del mes, los dias que tienen varios
+// eventos/tareas a la vez — preferencia de ESTE dispositivo (localStorage),
+// leida por getCalendarDensityMode() en app.js al dibujar la cuadricula.
+const CALENDAR_DENSITY_MODES = [
+  { id: 'limit', label: 'Limite + "+N más"' },
+  { id: 'dots', label: 'Puntos de color' },
+  { id: 'tint', label: 'Solo marcar el día' },
+];
+
+function refreshCalendarDensityOptions() {
+  const container = document.getElementById('calendar-density-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getCalendarDensityMode();
+
+  CALENDAR_DENSITY_MODES.forEach((mode) => {
+    const isActive = mode.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = mode.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('calendarDayDensity', mode.id);
+        refreshCalendarDensityOptions();
+        if (typeof renderCalendarGrid === 'function') renderCalendarGrid();
+      });
+    }
+    container.appendChild(btn);
+  });
 }
 
 // Salir de la pestana Estilo (volver al menu, o cerrar Configuracion del
@@ -381,9 +537,17 @@ function openSettingsModal() {
   document.getElementById('settings-modal').classList.remove('hidden');
   closeThemeForm();
   showSettingsScreen(null);
+  refreshQuitMenuItem();
+  refreshVersionInfo();
 }
 
 document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
+// Mismo panel, boton aparte: #my-space-view tapa la topbar (z-index por
+// encima), asi que el boton de Configuracion de siempre no se puede
+// clicar mientras Mi espacio esta abierto a pantalla completa. Este
+// boton vive dentro de la cabecera de Mi espacio para que Configuracion
+// se pueda abrir desde cualquier ventana.
+document.getElementById('btn-my-space-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-close-settings').addEventListener('click', () => {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
@@ -509,6 +673,18 @@ function invertLightness(hex) {
   return hslToHex(h, s, 1 - l);
 }
 
+// Color por defecto para una tarea COMPLETADA cuando su grupo no tiene uno
+// explicito puesto (o la tarea no tiene grupo): el mismo tono, pero mas
+// apagado — bajamos la saturacion y subimos la luminosidad hacia un gris
+// claro, para que se note de un vistazo que esta "tachada" sin perder de
+// que color era. Un grupo puede pisar esto poniendo su propio
+// completedColor (ver Configuracion > Grupos).
+function mutedTaskColor(hex) {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
+  const { h, s, l } = hexToHsl(hex);
+  return hslToHex(h, s * 0.3, Math.min(0.82, l + (1 - l) * 0.5));
+}
+
 function invertColorsObject(colors) {
   const result = {};
   THEME_COLOR_FIELDS_META.forEach(({ key }) => {
@@ -566,6 +742,13 @@ function applyThemeColors(colors) {
   THEME_COLOR_FIELDS_META.forEach(({ key, cssVar }) => {
     if (colors[key]) root.style.setProperty(cssVar, colors[key]);
   });
+  // Le dice al navegador si este tema es claro u oscuro para que los
+  // controles nativos que quedan (el iconito del reloj de
+  // <input type="time">, por ejemplo) usen la version clara/oscura que
+  // corresponda en vez de quedarse siempre con una — sin esto, el reloj
+  // se ve casi invisible en la combinacion equivocada (p.ej. negro sobre
+  // un tema oscuro).
+  if (colors.bg) root.style.colorScheme = isLightColors(colors) ? 'light' : 'dark';
 }
 
 // Aplica un tema a ESTE dispositivo: lo pinta, lo recuerda en localStorage
@@ -596,10 +779,14 @@ async function applyTheme(theme, { persist = true } = {}) {
 // del sistema operativo (y se reacciona en vivo si cambia mientras la
 // app esta abierta, ver el listener de matchMedia mas abajo); es un
 // ajuste de ESTE dispositivo, como el tema activo.
+// Solo hay boton para "Sistema" -- cambiar a claro/oscuro A MANO ya se
+// hace con el atajo ☀/☾ de la topbar (ver btn-quick-color-mode mas
+// abajo), que dispara setColorModePreference('light'/'dark') igual que
+// hacian los botones "Claro"/"Oscuro" que habia aqui antes. Este boton
+// sirve para volver a "seguir el sistema" despues de haber cambiado a
+// mano con el atajo.
 const COLOR_MODES = [
   { id: 'system', label: 'Sistema' },
-  { id: 'light', label: 'Claro' },
-  { id: 'dark', label: 'Oscuro' },
 ];
 
 // Cambia el modo de color y refresca todo lo que depende de el: los
@@ -1098,12 +1285,47 @@ syncActiveTheme();
 const groupIconField = createIconField({ initialValue: '' });
 document.getElementById('group-icon-field').appendChild(groupIconField.element);
 
-const groupColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
+// OJO orden: groupCompletedColorField se crea ANTES que groupColorField
+// porque el onChange de groupColorField la referencia — crearla antes evita
+// el bug de "variable declarada mas abajo leida por un callback que se
+// dispara al construir" documentado en CLAUDE.md (createColorField llama a
+// su onChange una vez de inmediato, al pintar el cuadradito inicial).
+// suppressGroupCompletedTouch evita que esas llamadas de INICIALIZACION (la
+// propia y la que dispara groupColorField al crearse, que la actualiza en
+// cascada) cuenten como "la persona ha tocado el selector a mano".
+let suppressGroupCompletedTouch = true;
+let groupCompletedColorTouched = false;
+const groupCompletedColorField = createColorField({
+  initialValue: mutedTaskColor(DEFAULT_EVENT_COLOR),
+  onChange: () => { if (!suppressGroupCompletedTouch) groupCompletedColorTouched = true; },
+});
+document.getElementById('group-completed-color-field').appendChild(groupCompletedColorField.element);
+
+const groupColorField = createColorField({
+  initialValue: DEFAULT_EVENT_COLOR,
+  // Si el color normal del grupo cambia y todavia no se ha tocado a mano
+  // el de "completada", seguimos su tono atenuado como sugerencia — en
+  // cuanto se toque el propio selector de completada, deja de seguirle.
+  onChange: (newColor) => {
+    if (!groupCompletedColorTouched) groupCompletedColorField.setValue(mutedTaskColor(newColor));
+  },
+});
 document.getElementById('group-color-field').appendChild(groupColorField.element);
+suppressGroupCompletedTouch = false;
 
 async function refreshGroupsTab() {
   await loadGroups();
   renderGroupsList();
+}
+
+// Cambia el color de "completada" SIN que cuente como que la persona lo ha
+// tocado a mano (carga inicial, reset del formulario, o cargar el valor
+// guardado de un grupo existente al editarlo) — solo un click real en su
+// selector marca groupCompletedColorTouched.
+function setGroupCompletedColorProgrammatically(hex) {
+  suppressGroupCompletedTouch = true;
+  groupCompletedColorField.setValue(hex);
+  suppressGroupCompletedTouch = false;
 }
 
 function resetGroupForm() {
@@ -1111,6 +1333,8 @@ function resetGroupForm() {
   document.getElementById('group-name').value = '';
   groupIconField.setValue('');
   groupColorField.setValue(DEFAULT_EVENT_COLOR);
+  groupCompletedColorTouched = false;
+  setGroupCompletedColorProgrammatically(mutedTaskColor(DEFAULT_EVENT_COLOR));
   document.getElementById('btn-cancel-group').classList.add('hidden');
 }
 
@@ -1137,6 +1361,11 @@ function renderGroupsList() {
       document.getElementById('group-name').value = g.name;
       groupIconField.setValue(g.icon || '');
       groupColorField.setValue(g.color);
+      // Si el grupo ya tiene un color de completada EXPLICITO, lo tratamos
+      // como "tocado" para que cambiar el color normal no se lo pise; si
+      // no, sigue el color normal como hasta ahora.
+      groupCompletedColorTouched = !!g.completedColor;
+      setGroupCompletedColorProgrammatically(g.completedColor || mutedTaskColor(g.color));
       document.getElementById('btn-cancel-group').classList.remove('hidden');
       document.getElementById('group-name').focus();
     });
@@ -1146,6 +1375,7 @@ function renderGroupsList() {
       await refreshGroupsTab();
       loadMonth();
       loadReminders();
+      if (typeof loadTasks === 'function') loadTasks().then(renderTasksList);
     });
     list.appendChild(row);
   });
@@ -1160,6 +1390,7 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
     name: document.getElementById('group-name').value,
     color: groupColorField.getValue(),
     icon: groupIconField.getValue() || null,
+    completedColor: groupCompletedColorField.getValue(),
   };
 
   if (id) {
@@ -1172,6 +1403,7 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
   await refreshGroupsTab();
   loadMonth();
   loadReminders();
+  if (typeof loadTasks === 'function') loadTasks().then(renderTasksList);
 });
 
 // ---------------------------------------------------------------------
@@ -1301,6 +1533,62 @@ function refreshMobileTab() {
 
   document.getElementById('setting-update-check').checked =
     localStorage.getItem('updateCheckEnabled') !== 'false';
+
+  refreshCompletedTasksDisplayOptions();
+}
+
+// "Salir de la aplicacion": vive como accion directa en la lista principal
+// de Configuracion (no dentro de una sub-seccion), asi que se refresca al
+// abrir el panel entero (ver openSettingsModal), no al entrar en una
+// pestana concreta. window.electronAPI solo existe si esto corre dentro
+// de la app de escritorio (lo expone electron/preload.js) — en el
+// navegador normal (o desde el movil) el boton se queda oculto, porque
+// "salir" no significa nada ahi.
+function refreshQuitMenuItem() {
+  document.getElementById('btn-quit-app').classList.toggle('hidden', !window.electronAPI);
+}
+
+document.getElementById('btn-quit-app').addEventListener('click', () => {
+  if (window.electronAPI) window.electronAPI.quitApp();
+});
+
+// Tachar vs ocultar tareas completadas: preferencia de ESTE dispositivo
+// (como el modo de vista o el tema), no compartida — cada movil/ordenador
+// puede verlo a su manera. La lee renderTasksList() en app.js.
+const COMPLETED_TASKS_DISPLAY_MODES = [
+  { id: 'strike', label: 'Tachadas (siguen en la lista)' },
+  { id: 'hide', label: 'Ocultas' },
+];
+
+function getCompletedTasksDisplayMode() {
+  return localStorage.getItem('completedTasksDisplay') || 'strike';
+}
+
+function refreshCompletedTasksDisplayOptions() {
+  const container = document.getElementById('completed-tasks-display-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getCompletedTasksDisplayMode();
+
+  COMPLETED_TASKS_DISPLAY_MODES.forEach((mode) => {
+    const isActive = mode.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    // Aqui NO se anade "(actual)" al texto — el resaltado de color ya deja
+    // claro cual esta activa, y repetirlo con texto era redundante.
+    btn.textContent = mode.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('completedTasksDisplay', mode.id);
+        refreshCompletedTasksDisplayOptions();
+        if (typeof renderTasksList === 'function') renderTasksList();
+      });
+    }
+    container.appendChild(btn);
+  });
 }
 
 document.getElementById('setting-update-check').addEventListener('change', (e) => {
@@ -1323,13 +1611,17 @@ document.getElementById('setting-notifications').addEventListener('change', asyn
 
 // ---------------------------------------------------------------------
 // Atajos de teclado: la lista de acciones (SHORTCUT_ACTIONS) y el
-// guardado (getShortcutMap/setShortcut) viven en app.js, que se carga
-// antes que este archivo; aqui solo esta el dibujado de la lista y el
-// "modo grabacion" para capturar la siguiente tecla que pulses.
+// guardado (getShortcutMap/addShortcut/removeShortcut) viven en app.js,
+// que se carga antes que este archivo; aqui solo esta el dibujado de la
+// lista y el "modo grabacion" para capturar la siguiente tecla que
+// pulses. Cada accion puede tener VARIAS combinaciones a la vez (se
+// muestran como chips con una x cada una), no solo una.
 // ---------------------------------------------------------------------
-function startRecordingShortcut(actionId, displayBtn) {
-  displayBtn.textContent = 'Pulsa una tecla…';
-  displayBtn.classList.add('recording');
+function startRecordingShortcut(actionId, addBtn) {
+  const originalText = addBtn.textContent;
+  addBtn.textContent = 'Pulsa una tecla…';
+  addBtn.classList.add('recording');
+  addBtn.disabled = true;
 
   const handler = (e) => {
     e.preventDefault();
@@ -1346,14 +1638,7 @@ function startRecordingShortcut(actionId, displayBtn) {
     const combo = comboFromEvent(e);
     if (!combo) return; // solo se ha soltado una tecla modificadora, seguimos esperando
 
-    // Si ese atajo ya lo usa otra accion, se lo quitamos a la otra para
-    // que no queden dos acciones peleandose por la misma tecla.
-    const map = getShortcutMap();
-    SHORTCUT_ACTIONS.forEach((a) => {
-      if (a.id !== actionId && map[a.id] === combo) setShortcut(a.id, '');
-    });
-
-    setShortcut(actionId, combo);
+    addShortcut(actionId, combo);
     document.removeEventListener('keydown', handler, true);
     renderShortcutsList();
   };
@@ -1374,25 +1659,48 @@ function renderShortcutsList() {
     label.className = 'shortcut-label';
     label.textContent = action.label;
 
-    const display = document.createElement('button');
-    display.type = 'button';
-    display.className = 'shortcut-input';
-    display.textContent = map[action.id] ? displayCombo(map[action.id]) : 'Sin atajo';
-    display.addEventListener('click', () => startRecordingShortcut(action.id, display));
+    const combos = document.createElement('div');
+    combos.className = 'shortcut-combos';
 
-    const clearBtn = document.createElement('button');
-    clearBtn.type = 'button';
-    clearBtn.className = 'secondary-btn shortcut-clear';
-    clearBtn.textContent = 'Quitar';
-    clearBtn.disabled = !map[action.id];
-    clearBtn.addEventListener('click', () => {
-      setShortcut(action.id, '');
-      renderShortcutsList();
-    });
+    const activeCombos = map[action.id] || [];
+    if (activeCombos.length === 0) {
+      const hint = document.createElement('span');
+      hint.className = 'shortcut-empty-hint';
+      hint.textContent = 'Sin atajo';
+      combos.appendChild(hint);
+    } else {
+      activeCombos.forEach((combo) => {
+        const chip = document.createElement('span');
+        chip.className = 'shortcut-combo-chip';
+
+        const chipLabel = document.createElement('span');
+        chipLabel.textContent = displayCombo(combo);
+        chip.appendChild(chipLabel);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'shortcut-combo-remove';
+        removeBtn.textContent = '✕';
+        removeBtn.setAttribute('aria-label', `Quitar atajo ${displayCombo(combo)}`);
+        removeBtn.addEventListener('click', () => {
+          removeShortcut(action.id, combo);
+          renderShortcutsList();
+        });
+        chip.appendChild(removeBtn);
+
+        combos.appendChild(chip);
+      });
+    }
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'shortcut-add-btn';
+    addBtn.textContent = '+ Añadir';
+    addBtn.addEventListener('click', () => startRecordingShortcut(action.id, addBtn));
+    combos.appendChild(addBtn);
 
     row.appendChild(label);
-    row.appendChild(display);
-    row.appendChild(clearBtn);
+    row.appendChild(combos);
     container.appendChild(row);
   });
 }
@@ -1400,6 +1708,59 @@ function renderShortcutsList() {
 function refreshShortcutsTab() {
   renderShortcutsList();
 }
+
+// ---------------------------------------------------------------------
+// Notas: ocultar con contraseña -- ajuste COMPARTIDO (no por
+// dispositivo). notesSecurityState y refreshNotesSecurityState() viven
+// en app.js (junto al resto de la logica de ocultar/destapar notas),
+// aqui solo se dibuja la pestaña.
+// ---------------------------------------------------------------------
+async function refreshNotesTab() {
+  await refreshNotesSecurityState();
+  document.getElementById('setting-notes-password-enabled').checked = notesSecurityState.passwordEnabled;
+  document.getElementById('notes-password-form-wrap').classList.toggle('hidden', !notesSecurityState.passwordEnabled);
+  document.getElementById('notes-password-form-heading').textContent = notesSecurityState.hasPassword ? 'Cambiar contraseña' : 'Elige una contraseña';
+  document.getElementById('notes-current-password-label').classList.toggle('hidden', !notesSecurityState.hasPassword);
+  document.getElementById('notes-password-form').reset();
+  document.getElementById('notes-password-form-error').classList.add('hidden');
+}
+
+document.getElementById('setting-notes-password-enabled').addEventListener('change', async (e) => {
+  await api('/api/notes-security', { method: 'PUT', body: JSON.stringify({ enabled: e.target.checked }) });
+  await refreshNotesTab();
+});
+
+document.getElementById('notes-password-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('notes-password-form-error');
+  errorEl.classList.add('hidden');
+
+  const currentPassword = document.getElementById('notes-current-password').value;
+  const newPassword = document.getElementById('notes-new-password').value;
+  const confirmPassword = document.getElementById('notes-confirm-password').value;
+
+  if (!newPassword) {
+    errorEl.textContent = 'Escribe una contraseña.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    errorEl.textContent = 'Las dos contraseñas no coinciden.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    await api('/api/notes-security/password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    await refreshNotesTab();
+  } catch (err) {
+    errorEl.textContent = err.message || 'No se pudo guardar la contraseña.';
+    errorEl.classList.remove('hidden');
+  }
+});
 
 // ---------------------------------------------------------------------
 // Esc: hace lo mismo que cerrar / clicar fuera, capa a capa — primero lo
@@ -1411,7 +1772,7 @@ function refreshShortcutsTab() {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
 
-  const openPopover = document.querySelector('.color-popover:not(.hidden), .icon-popover:not(.hidden)');
+  const openPopover = document.querySelector('.color-popover:not(.hidden), .icon-popover:not(.hidden), .select-popover:not(.hidden), .date-popover:not(.hidden)');
   if (openPopover) {
     closeAllPopovers();
     return;
@@ -1426,6 +1787,47 @@ document.addEventListener('keydown', (e) => {
   const eventModal = document.getElementById('event-modal');
   if (eventModal && !eventModal.classList.contains('hidden')) {
     closeEventModal();
+    return;
+  }
+
+  const taskModal = document.getElementById('task-modal');
+  if (taskModal && !taskModal.classList.contains('hidden')) {
+    closeTaskModal();
+    return;
+  }
+
+  const noteModal = document.getElementById('note-modal');
+  if (noteModal && !noteModal.classList.contains('hidden')) {
+    closeNoteModal();
+    return;
+  }
+
+  const noteFolderModal = document.getElementById('note-folder-modal');
+  if (noteFolderModal && !noteFolderModal.classList.contains('hidden')) {
+    closeNoteFolderModal();
+    return;
+  }
+
+  const notesVerifyModal = document.getElementById('notes-verify-modal');
+  if (notesVerifyModal && !notesVerifyModal.classList.contains('hidden')) {
+    closeNotesVerifyModal();
+    return;
+  }
+
+  const notesSetupPasswordModal = document.getElementById('notes-setup-password-modal');
+  if (notesSetupPasswordModal && !notesSetupPasswordModal.classList.contains('hidden')) {
+    closeNotesSetupPasswordModal();
+    return;
+  }
+
+  const mySpaceView = document.getElementById('my-space-view');
+  if (mySpaceView && !mySpaceView.classList.contains('hidden')) {
+    const hub = document.getElementById('my-space-hub');
+    if (hub && hub.dataset.expanded) {
+      document.getElementById('my-space-back-btn').click();
+    } else {
+      document.getElementById('btn-close-my-space').click();
+    }
     return;
   }
 

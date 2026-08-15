@@ -66,12 +66,30 @@
 <body>
 
   <!-- Avisos discretos en la esquina, apilados (no un header grande):
-       nueva version del servidor, y "tu vista guardada no es la normal".
-       Ver checkForUpdate() y applyViewModePrompt() en app.js. -->
+       nueva version del servidor, hay una version nueva en GitHub, y "tu
+       vista guardada no es la normal". Ver checkForUpdate(),
+       checkForNewRelease() y applyViewModePrompt() en app.js. -->
   <div id="toast-stack" class="toast-stack">
     <div id="update-banner" class="toast hidden">
       <span>Nueva versión disponible.</span>
       <button type="button" id="btn-reload-update">Recargar</button>
+    </div>
+
+    <!-- Distinto del de arriba: ese detecta que ESTE servidor ya
+         arrancado se ha reiniciado; este otro pregunta a GitHub si hay
+         una version mas nueva que la que tienes, aunque no hayas tocado
+         nada todavia. Solo aparece en el ordenador de confianza (ver
+         requireTrusted en server/routes/update.js) — un movil emparejado
+         no puede disparar un git pull. -->
+    <div id="new-release-banner" class="toast toast-release hidden">
+      <div class="toast-release-top">
+        <span id="new-release-banner-text"></span>
+        <button type="button" id="btn-dismiss-release" class="toast-dismiss" aria-label="Ahora no">✕</button>
+      </div>
+      <div class="toast-release-actions">
+        <button type="button" id="btn-skip-release" class="secondary-btn">No para esta</button>
+        <button type="button" id="btn-install-release" class="primary-btn">Actualizar ahora</button>
+      </div>
     </div>
 
     <div id="default-view-banner" class="toast hidden">
@@ -112,12 +130,22 @@
       </div>
       <nav class="topbar-actions">
         <button id="btn-new-event" class="primary-btn">+ Nuevo evento</button>
+        <button id="btn-new-task" class="primary-btn">+ Nueva tarea</button>
+        <button id="btn-new-note-topbar" class="primary-btn">+ Nota</button>
         <!-- Atajo rapido para alternar claro/oscuro sin entrar en
              Configuracion — solo se ve si el tema activo tiene variante
              emparejada (si no, no hay a que alternar). Ver
              refreshQuickColorModeButton() en settings.js; la forma
              "oficial" de cambiarlo sigue estando en Configuracion > Estilo. -->
         <button id="btn-quick-color-mode" class="icon-btn hidden" aria-label="Cambiar entre claro y oscuro"></button>
+        <!-- Solo se ve si Configuracion > Vista > Mi espacio esta en modo
+             "boton" (ver applyMiEspacioMode en app.js) — en modo "panel" no
+             hace falta, Mi espacio ya esta siempre visible al lado del
+             calendario. -->
+        <button id="btn-my-space" class="secondary-btn my-space-topbar-btn hidden" aria-label="Mi espacio">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4.5" height="16" rx="1"></rect><rect x="9.75" y="4" width="4.5" height="16" rx="1"></rect><rect x="16.5" y="4" width="4.5" height="16" rx="1"></rect></svg>
+          <span>Mi espacio</span>
+        </button>
         <button id="btn-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </nav>
     </header>
@@ -128,9 +156,9 @@
            recordatorios de al lado). -->
       <div class="calendar-column">
         <nav class="month-nav-bar">
-          <button id="nav-prev" class="icon-btn" aria-label="Mes anterior">←</button>
+          <button id="nav-prev" class="icon-btn" aria-label="Mes anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
           <span id="current-month-label" class="month-label"></span>
-          <button id="nav-next" class="icon-btn" aria-label="Mes siguiente">→</button>
+          <button id="nav-next" class="icon-btn" aria-label="Mes siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
         </nav>
 
         <!-- Vista de escritorio: cuadricula del mes (CSS la oculta en movil) -->
@@ -144,27 +172,161 @@
         </section>
       </div>
 
-      <!-- Panel de recordatorios: por defecto los proximos, o los
-           eventos de un dia concreto si has clicado uno en el
-           calendario (ver showDayInReminders en app.js). -->
-      <aside class="reminders-panel">
-        <div class="reminders-panel-header">
-          <h2 id="reminders-panel-title">Proximos recordatorios</h2>
-          <button type="button" id="btn-reminders-back" class="secondary-btn hidden">← Próximos</button>
+      <!-- Panel de recordatorios: arriba "Proximos" (o los eventos de un
+           dia concreto si has clicado uno en el calendario, ver
+           showDayInReminders en app.js), abajo un bloque fijo de "Tareas"
+           que se ve siempre a la vez, cada uno con su propio scroll
+           interno (ver .reminders-top-block/.reminders-tasks-block en
+           styles.css). -->
+      <aside id="reminders-panel" class="reminders-panel">
+        <!-- Solo se usa en modo "boton" de Mi espacio (panel lateral
+             clasico): las secciones que marques en Configuracion > Vista
+             > "Agrupar con flechas" se meten AQUI DENTRO (una visible
+             cada vez, con flechas arriba para alternar entre ELLAS);
+             las que no marques se quedan sueltas, apiladas en su sitio
+             de siempre. Si marcas 0 o 1, este slot se queda vacio/oculto
+             (agrupar una sola cosa no cambia nada). Ver
+             applyRemindersPanelLayout() en app.js, que es quien mueve
+             los bloques (reminders-top-block etc.) dentro o fuera de
+             aqui segun el ajuste. -->
+        <div id="reminders-panel-grouped-slot" class="reminders-panel-grouped-slot reminders-panel-page hidden">
+          <div id="reminders-panel-switcher" class="reminders-panel-switcher hidden">
+            <button type="button" id="btn-panel-switch-prev" class="icon-btn" aria-label="Sección anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+            <span id="reminders-panel-switch-label" class="reminders-panel-switch-label"></span>
+            <button type="button" id="btn-panel-switch-next" class="icon-btn" aria-label="Sección siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+          </div>
         </div>
-        <div id="reminders-day-actions" class="reminders-day-actions hidden">
-          <button type="button" id="btn-day-mark-holiday" class="secondary-btn day-mark-btn">Festivo</button>
-          <button type="button" id="btn-day-mark-special" class="secondary-btn day-mark-btn">Especial</button>
-          <button type="button" id="btn-day-add-event" class="secondary-btn">+ Añadir evento</button>
+        <div id="reminders-top-block" class="reminders-top-block reminders-panel-page">
+          <div class="reminders-panel-header">
+            <h2 id="reminders-panel-title" class="my-space-col-expand-trigger">Proximos recordatorios</h2>
+            <button type="button" id="btn-reminders-back" class="secondary-btn hidden">Próximos →</button>
+          </div>
+          <!-- Solo visible dentro de "Mi espacio" (ver applyMiEspacioMode
+               en app.js): fuera de ahi, para cambiar de dia ya estan el
+               calendario de al lado y los atajos de teclado, pero dentro
+               de Mi espacio (sobre todo en modo "boton", a pantalla
+               completa) el calendario no se ve, asi que hace falta un
+               control aqui mismo. -->
+          <div id="reminders-day-nav" class="reminders-day-nav hidden">
+            <button type="button" id="btn-reminders-day-prev" class="icon-btn" aria-label="Día anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+            <div id="reminders-day-nav-date-field"></div>
+            <button type="button" id="btn-reminders-day-next" class="icon-btn" aria-label="Día siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+          </div>
+          <div id="reminders-day-actions" class="reminders-day-actions hidden">
+            <button type="button" id="btn-day-mark-holiday" class="secondary-btn day-mark-btn">Festivo</button>
+            <button type="button" id="btn-day-mark-special" class="secondary-btn day-mark-btn">Especial</button>
+            <button type="button" id="btn-day-add-event" class="secondary-btn">+ Añadir evento</button>
+          </div>
+          <div id="reminders-list" class="reminders-list"></div>
         </div>
-        <div id="reminders-list" class="reminders-list"></div>
+
+        <div id="reminders-tasks-block" class="reminders-tasks-block reminders-panel-page">
+          <div class="reminders-panel-header">
+            <h2 class="my-space-col-expand-trigger">Tareas</h2>
+          </div>
+          <div id="tasks-list" class="reminders-list tasks-list"></div>
+        </div>
       </aside>
     </main>
+
+    <!-- "Mi espacio" (Fase 1): hub de 3 columnas que reorganiza Proximos y
+         Tareas -- moviendo esos MISMOS bloques del panel lateral de
+         siempre (.reminders-top-block/.reminders-tasks-block), sin
+         duplicar su renderizado -- mas una columna de Notas (vacia por
+         ahora, la rellena la Fase 2). Segun el modo elegido en
+         Configuracion > Vista > Mi espacio, este hub vive DENTRO del
+         panel lateral (modo "panel", siempre visible junto al calendario)
+         o dentro de esta pantalla completa (modo "boton", se abre con
+         #btn-my-space). Ver applyMiEspacioMode() en app.js. -->
+    <div id="my-space-view" class="my-space-view hidden">
+      <div class="my-space-view-header">
+        <h2>Mi espacio</h2>
+        <div class="my-space-view-header-actions">
+          <button type="button" id="btn-close-my-space" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
+          <!-- Configuracion tiene que poder abrirse desde CUALQUIER
+               ventana, y esta pantalla (fija, z-index por encima de la
+               topbar) tapa el boton de Configuracion de siempre -- por
+               eso hace falta uno propio aqui. Abre el mismo panel (ver
+               btn-my-space-settings en app.js/settings.js). Va el
+               ULTIMO (mas a la derecha) a proposito -- Configuracion
+               siempre a la derecha del todo, igual que en la topbar. -->
+          <button type="button" id="btn-my-space-settings" class="icon-btn" aria-label="Configuración">☰</button>
+        </div>
+      </div>
+      <div id="my-space-hub" class="my-space-hub">
+        <!-- Comun a las 3 columnas: cuando una esta expandida (tapando a
+             las otras 2), este es el UNICO "Volver" que hace falta, fijo
+             arriba, igual que en Configuracion. -->
+        <button type="button" id="my-space-back-btn" class="my-space-back-btn hidden">← Volver</button>
+
+        <!-- Envoltorio SOLO para las 3 columnas (el Volver se queda
+             fuera, en su propia fila) -- en escritorio esto es una fila
+             flex con transicion en flex-grow/flex-basis, para que
+             expandir/colapsar una columna se vea como una animacion en
+             vez de un salto instantaneo. Ver la regla #my-space-hub[data-expanded]
+             en styles.css. -->
+        <!-- Las 3 columnas ya NO tienen un boton dedicado para expandir
+             (ocupaba espacio vertical solo para eso, ver CLAUDE.md/ronda
+             de pulido): clicar el TITULO (h2) de cada columna la expande,
+             la clase my-space-col-expand-trigger en cada h2 es lo que
+             delega ese clic (ver el listener en #my-space-hub, app.js). -->
+        <div class="my-space-cols-row">
+          <div class="my-space-col" data-col="reminders">
+            <div id="my-space-col-reminders" class="my-space-col-body"></div>
+          </div>
+
+          <div class="my-space-col" data-col="tasks">
+            <div id="my-space-col-tasks" class="my-space-col-body"></div>
+          </div>
+
+          <div class="my-space-col" data-col="notes">
+            <div id="my-space-col-notes" class="my-space-col-body">
+              <!-- Envuelto en un bloque movible (igual que
+                   reminders-top-block/reminders-tasks-block) para que
+                   tambien pueda vivir dentro del panel lateral clasico
+                   (modo "topbar" de Mi espacio) como 3er bloque, ver
+                   moveRemindersIntoHub/restoreClassicRemindersPanel en
+                   app.js. -->
+              <div id="reminders-notes-block" class="reminders-notes-block reminders-panel-page">
+                <div class="reminders-panel-header">
+                  <h2 class="my-space-col-expand-trigger">Notas</h2>
+                </div>
+                <!-- Carpetas (Fase 3): navegacion tipo explorador de
+                     archivos -- estas en un "sitio" (la raiz, o dentro de
+                     una carpeta), #notes-list ensena las SUBcarpetas de
+                     ese sitio arriba y las notas de ese sitio debajo, todo
+                     en una sola lista. "Volver" solo se ve si no estas en
+                     la raiz. Solo organizacion, sin PIN (eso ya se
+                     resolvio por nota individual con "ocultar"). Ver
+                     renderNotesView en app.js. -->
+                <div id="note-folder-toolbar" class="note-folder-toolbar">
+                  <button type="button" id="btn-note-folder-back" class="secondary-btn hidden">← Volver</button>
+                  <div class="spacer"></div>
+                  <button type="button" id="btn-new-note-folder" class="note-folder-chip note-folder-chip-add" aria-label="Nueva carpeta">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
+                    <span>Carpeta</span>
+                  </button>
+                </div>
+                <!-- "+ Nota" debajo de Volver/+ Carpeta a proposito: es la
+                     accion menos frecuente de las dos (normalmente entras
+                     a leer/organizar, no a crear), asi que va debajo. -->
+                <button type="button" id="btn-new-note" class="secondary-btn note-add-btn">+ Nota</button>
+                <div class="note-search-row">
+                  <input type="text" id="note-search-input" placeholder="Buscar por nombre..." autocomplete="off" />
+                </div>
+                <div id="notes-list" class="reminders-list notes-list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Modal para crear / editar evento -->
   <div id="event-modal" class="modal hidden">
     <div class="modal-card">
+      <button type="button" id="btn-close-event" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2 id="event-modal-title">Nuevo evento</h2>
       <form id="event-form">
         <input type="hidden" id="event-id" />
@@ -177,14 +339,20 @@
           Todo el dia
         </label>
         <div class="form-row">
-          <label>
-            Inicio
-            <input type="datetime-local" id="event-start" required />
-          </label>
-          <label>
-            Fin (opcional)
-            <input type="datetime-local" id="event-end" />
-          </label>
+          <div class="field-label-block">
+            <span class="field-label">Inicio</span>
+            <div class="datetime-row">
+              <div id="event-start-date-field"></div>
+              <div id="event-start-time-field"></div>
+            </div>
+          </div>
+          <div class="field-label-block">
+            <span class="field-label">Fin (opcional)</span>
+            <div class="datetime-row">
+              <div id="event-end-date-field"></div>
+              <div id="event-end-time-field"></div>
+            </div>
+          </div>
         </div>
         <label>
           Ubicacion (opcional)
@@ -194,23 +362,14 @@
           Descripcion (opcional)
           <textarea id="event-description" rows="3"></textarea>
         </label>
-        <label>
-          Recordatorio
-          <select id="event-reminder">
-            <option value="">Sin recordatorio</option>
-            <option value="0">En el momento</option>
-            <option value="10">10 minutos antes</option>
-            <option value="30">30 minutos antes</option>
-            <option value="60">1 hora antes</option>
-            <option value="1440">1 dia antes</option>
-          </select>
-        </label>
-        <label>
-          Grupo (opcional)
-          <select id="event-group">
-            <option value="">Sin grupo</option>
-          </select>
-        </label>
+        <div class="field-label-block">
+          <span class="field-label">Recordatorio</span>
+          <div id="event-reminder-field"></div>
+        </div>
+        <div class="field-label-block">
+          <span class="field-label">Grupo (opcional)</span>
+          <div id="event-group-field"></div>
+        </div>
         <p id="event-created-by" class="hint hidden"></p>
         <div class="modal-actions">
           <button type="button" id="btn-delete-event" class="danger-btn hidden">Eliminar</button>
@@ -222,12 +381,165 @@
     </div>
   </div>
 
+  <!-- Modal para crear / editar tarea: aparte del de evento porque una
+       tarea es mas simple (sin hora de fin, ubicacion, recordatorio ni
+       "todo el dia") y la fecha es opcional (ver btn-new-task en app.js). -->
+  <div id="task-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-task" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="task-modal-title">Nueva tarea</h2>
+      <form id="task-form">
+        <input type="hidden" id="task-id" />
+        <label>
+          Titulo
+          <input type="text" id="task-title" required />
+        </label>
+        <div class="field-label-block">
+          <span class="field-label">Fecha limite (opcional)</span>
+          <div id="task-date-field"></div>
+        </div>
+        <div class="field-label-block">
+          <span class="field-label">Grupo (opcional)</span>
+          <div id="task-group-field"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-task" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-task" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar nota (Mi espacio > Notas -- solo titulo +
+       texto plano, sin formato todavia, eso es de Fase 4. Carpeta
+       opcional desde la Fase 3). -->
+  <div id="note-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-note" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="note-modal-title">Nueva nota</h2>
+      <form id="note-form">
+        <input type="hidden" id="note-id" />
+        <label>
+          Titulo
+          <div class="title-with-favorite">
+            <input type="text" id="note-title" required />
+            <button type="button" id="note-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
+          </div>
+        </label>
+        <label>
+          Contenido (opcional)
+          <textarea id="note-body" rows="8"></textarea>
+        </label>
+        <div class="field-label-block">
+          <span class="field-label">Carpeta (opcional)</span>
+          <div id="note-folder-field"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-note" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-note" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar carpeta de notas (Fase 3): nombre +
+       icono + color, sistema propio separado de los Grupos del
+       calendario. Solo organizacion, sin PIN (eso se resolvio por nota
+       individual con "ocultar", ver mas abajo). -->
+  <div id="note-folder-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-note-folder" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="note-folder-modal-title">Nueva carpeta</h2>
+      <form id="note-folder-form">
+        <input type="hidden" id="note-folder-id" />
+        <div class="group-form-row">
+          <input type="text" id="note-folder-name" placeholder="Nombre de la carpeta" required />
+          <div id="note-folder-color-field"></div>
+          <!-- Estrella de favorito: rellena si es favorita, solo borde si
+               no -- se puede marcar desde la creacion (aqui) o con el
+               mismo icono en el listado (ver buildFolderRow en app.js). -->
+          <button type="button" id="note-folder-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-note-folder" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-note-folder" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Ocultar notas: NO es un bloqueo de verdad (no cifra nada), solo
+       evita que se lea a primera vista -- ver CLAUDE.md / server/routes/notesSecurity.js.
+       Estos dos modales son para cuando la contraseña opcional esta
+       activada (Configuracion > Notas): uno para pedirla al destapar una
+       nota ya oculta, otro para pedirte que la crees la primera vez que
+       ocultas algo sin tener ninguna puesta todavia. -->
+  <div id="notes-verify-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-notes-verify" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Destapar nota</h2>
+      <p class="hint">Introduce la contraseña para ver esta nota.</p>
+      <form id="notes-verify-form">
+        <label>
+          Contraseña
+          <input type="password" id="notes-verify-password" required autocomplete="off" />
+        </label>
+        <p id="notes-verify-error" class="hint hidden" style="color: var(--danger);">Contraseña incorrecta.</p>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-notes-verify" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Destapar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="notes-setup-password-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-notes-setup-password" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Elige una contraseña</h2>
+      <p class="hint">Tienes activado "ocultar con contraseña" pero todavia no has puesto ninguna. Elige una para poder ocultar esta nota.</p>
+      <form id="notes-setup-password-form">
+        <label>
+          Contraseña nueva
+          <input type="password" id="notes-setup-new-password" required autocomplete="off" />
+        </label>
+        <label>
+          Repite la contraseña
+          <input type="password" id="notes-setup-confirm-password" required autocomplete="off" />
+        </label>
+        <p id="notes-setup-error" class="hint hidden" style="color: var(--danger);">Las contraseñas no coinciden.</p>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-notes-setup-password" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar y ocultar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Panel de Configuracion: un solo punto de entrada con pestanas, en
        vez de un botón suelto por cada cosa. Ver settings.js. -->
   <div id="settings-modal" class="modal hidden">
     <div class="modal-card settings-card">
-      <button type="button" id="btn-close-settings" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2>Configuración</h2>
+      <!-- Cabecera FIJA (fuera de la zona con scroll): la x de cerrar
+           siempre visible aunque la seccion que estes mirando sea larga.
+           El "Volver" de cada seccion no vive aqui (es distinto por
+           pestana), va dentro de settings-card-body con position:sticky
+           para quedarse pegado arriba SOLO mientras haces scroll dentro
+           de esa seccion. -->
+      <div class="settings-card-header">
+        <button type="button" id="btn-close-settings" class="modal-close-x" aria-label="Cerrar">✕</button>
+        <h2>Configuración</h2>
+      </div>
+
+      <div class="settings-card-body">
 
       <!-- Menu: lista vertical, solo texto. Al pulsar una entra a esa
            seccion a pantalla completa (ver showSettingsScreen en settings.js). -->
@@ -253,6 +565,25 @@
         <button type="button" class="settings-menu-item" data-tab="shortcuts">
           <span>Atajos de teclado</span><span class="settings-menu-item-arrow">›</span>
         </button>
+        <button type="button" class="settings-menu-item" data-tab="notes">
+          <span>Notas</span><span class="settings-menu-item-arrow">›</span>
+        </button>
+        <!-- Accion directa (no navega a ningun sitio, por eso no lleva
+             flecha "›"), solo visible dentro de la app de escritorio —
+             ver refreshQuitMenuItem en settings.js. -->
+        <button type="button" id="btn-quit-app" class="settings-menu-item settings-menu-item-danger hidden">
+          <span>Salir de la aplicación</span>
+        </button>
+
+        <!-- Info de version/commit -- solo lectura, no navega a ningun
+             sitio. DENTRO de settings-menu para que se oculte junto con
+             el resto de la lista al entrar en una seccion (ver
+             showSettingsScreen). Solo se ve en el ordenador de confianza
+             (mismo criterio que el aviso de nueva version, ver
+             requireTrusted en server/routes/update.js) -- un movil
+             emparejado no puede leer el git de este ordenador. Ver
+             refreshVersionInfo en app.js. -->
+        <div id="settings-version-info" class="settings-version-info hidden"></div>
       </div>
 
       <!-- --- Perfil --- -->
@@ -279,9 +610,25 @@
       <div id="settings-tab-view" class="settings-tab-panel hidden">
         <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Vista</h3>
-        <p class="hint">Cambia entre la ventana normal, pantalla completa (sin las barras del navegador) o una ventana flotante mas pequena. Se aplica al momento.</p>
+        <p class="hint">Cambia entre la ventana normal y pantalla completa (sin las barras del navegador). Se aplica al momento.</p>
         <div id="view-mode-options" class="view-mode-options"></div>
         <p id="view-mode-hint" class="hint"></p>
+
+        <h4>Días con muchas cosas</h4>
+        <p class="hint">Cómo se ven, en el calendario del mes, los días que tienen varios eventos o tareas a la vez.</p>
+        <div id="calendar-density-options" class="view-mode-options"></div>
+
+        <h4>Mi espacio</h4>
+        <p class="hint">Cómo acceder a "Mi espacio" (Próximos, Tareas y Notas juntos). En el panel lateral se ve siempre al lado del calendario; con el botón se abre a pantalla completa cuando lo necesites.</p>
+        <div id="my-space-mode-options" class="view-mode-options"></div>
+
+        <h4>Panel lateral clásico</h4>
+        <p class="hint">Solo aplica cuando "Mi espacio" está en modo botón (arriba): cómo se reparten Recordatorios, Tareas y Notas en el panel de siempre, al lado del calendario. Marca las que quieras ver juntas, alternando con flechas (útil si la pantalla es pequeña); las que no marques se quedan cada una sola, siempre visible. Si no marcas ninguna (o solo una), las 3 se ven apiladas como siempre.</p>
+        <div id="reminders-panel-grouped-options" class="reminders-panel-grouped-options"></div>
+
+        <h4>Favoritos en Mi espacio</h4>
+        <p class="hint">Cómo se ordenan las carpetas y notas favoritas (la estrella del listado) dentro de cada carpeta.</p>
+        <div id="favorites-display-options" class="view-mode-options"></div>
       </div>
 
       <!-- --- Estilo --- -->
@@ -290,7 +637,7 @@
         <h3>Estilo</h3>
         <p class="hint">Clica una tarjeta para usar ese tema en este dispositivo. Cada dispositivo puede llevar un tema distinto.</p>
 
-        <p class="hint">Si un tema tiene variante clara/oscura emparejada (◐), elige aqui si seguir el modo del sistema o fijarlo tu.</p>
+        <p class="hint">Si un tema tiene variante clara/oscura emparejada (◐), esto hace que siga el modo de tu ordenador automáticamente. Para cambiarlo a mano, usa el icono ☀/☾ de la barra superior.</p>
         <div id="color-mode-options" class="color-mode-options"></div>
 
         <!-- Solo visible mientras se edita un tema y hay cambios sin
@@ -348,6 +695,10 @@
             <input type="text" id="group-name" placeholder="Nombre del grupo (ej. Gimnasio)" required />
             <div id="group-color-field"></div>
           </div>
+          <div class="group-form-row group-form-row-completed">
+            <span class="hint">Color de las tareas de este grupo al completarse</span>
+            <div id="group-completed-color-field"></div>
+          </div>
           <div class="group-form-actions">
             <button type="button" id="btn-cancel-group" class="secondary-btn hidden">Cancelar</button>
             <button type="submit" class="primary-btn">Guardar grupo</button>
@@ -391,16 +742,56 @@
           <input type="checkbox" id="setting-update-check" />
           Avisarme cuando el servidor se actualice
         </label>
+
+        <h4>Tareas completadas</h4>
+        <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>
+        <div id="completed-tasks-display-options" class="view-mode-options"></div>
       </div>
 
       <!-- --- Atajos de teclado (ajuste local, no compartido) --- -->
       <div id="settings-tab-shortcuts" class="settings-tab-panel hidden">
         <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Atajos de teclado</h3>
-        <p class="hint">Pulsa en el atajo de una accion y luego pulsa la tecla (o combinacion) que quieras usar. Si lo dejas sin atajo, esa accion no tendra ninguno.</p>
+        <p class="hint">Pulsa "+ Añadir" y luego pulsa la tecla (o combinacion) que quieras usar. Puedes tener varias combinaciones para la misma accion; quita las que no quieras con la x.</p>
         <div id="shortcuts-list" class="shortcuts-list"></div>
       </div>
 
+      <!-- --- Notas: ocultar con contraseña -- ajuste COMPARTIDO entre
+           todos tus dispositivos (no es un ajuste de "Este dispositivo"),
+           porque una nota oculta lo esta para todos por igual. Ver
+           server/routes/notesSecurity.js -- no es un bloqueo de verdad,
+           solo evita que una nota se lea a primera vista. --- -->
+      <div id="settings-tab-notes" class="settings-tab-panel hidden">
+        <button type="button" class="settings-back-btn" data-back>← Volver</button>
+        <h3>Notas</h3>
+        <p class="hint">"Ocultar" una nota la deja borrosa en la lista hasta que la destapas — no es un bloqueo de verdad, solo evita que se lea a primera vista. Esta contraseña opcional se comparte entre todos tus dispositivos.</p>
+        <label class="checkbox-row">
+          <input type="checkbox" id="setting-notes-password-enabled" />
+          Pedir contraseña para destapar notas ocultas
+        </label>
+
+        <div id="notes-password-form-wrap" class="hidden">
+          <h4 id="notes-password-form-heading">Contraseña</h4>
+          <form id="notes-password-form">
+            <label id="notes-current-password-label" class="hidden">
+              Contraseña actual
+              <input type="password" id="notes-current-password" autocomplete="off" />
+            </label>
+            <label>
+              Contraseña nueva
+              <input type="password" id="notes-new-password" autocomplete="off" />
+            </label>
+            <label>
+              Repite la contraseña
+              <input type="password" id="notes-confirm-password" autocomplete="off" />
+            </label>
+            <p id="notes-password-form-error" class="hint hidden" style="color: var(--danger);"></p>
+            <button type="submit" class="primary-btn">Guardar contraseña</button>
+          </form>
+        </div>
+      </div>
+
+      </div>
     </div>
   </div>
 

@@ -17,7 +17,14 @@ function sanitizeIcon(icon) {
 }
 
 function serialize(row) {
-  return { id: row.id, name: row.name, color: row.color, icon: row.icon || null, position: row.position };
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    icon: row.icon || null,
+    position: row.position,
+    completedColor: row.completed_color || null,
+  };
 }
 
 router.get('/', (req, res) => {
@@ -26,16 +33,17 @@ router.get('/', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { name, color, icon } = req.body || {};
+  const { name, color, icon, completedColor } = req.body || {};
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'invalid_request', message: 'El grupo necesita un nombre.' });
   }
   const safeColor = /^#[0-9a-fA-F]{6}$/.test(color || '') ? color : '#5b8cff';
+  const safeCompletedColor = /^#[0-9a-fA-F]{6}$/.test(completedColor || '') ? completedColor : null;
 
   const { count } = db.prepare('SELECT COUNT(*) as count FROM groups').get();
   const info = db
-    .prepare('INSERT INTO groups (name, color, icon, position) VALUES (?, ?, ?, ?)')
-    .run(name.trim(), safeColor, sanitizeIcon(icon) ?? null, count);
+    .prepare('INSERT INTO groups (name, color, icon, position, completed_color) VALUES (?, ?, ?, ?, ?)')
+    .run(name.trim(), safeColor, sanitizeIcon(icon) ?? null, count, safeCompletedColor);
 
   const row = db.prepare('SELECT * FROM groups WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json(serialize(row));
@@ -45,14 +53,23 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { name, color, icon } = req.body || {};
+  const { name, color, icon, completedColor } = req.body || {};
   const safeColor = color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : existing.color;
   const sanitizedIcon = sanitizeIcon(icon);
+  // completedColor: undefined = "no lo toques", null/'' = "quitalo", si no
+  // es un hex valido se ignora y se conserva el que hubiera.
+  const safeCompletedColor =
+    completedColor === undefined
+      ? existing.completed_color
+      : (completedColor === null || completedColor === '')
+        ? null
+        : (/^#[0-9a-fA-F]{6}$/.test(completedColor) ? completedColor : existing.completed_color);
 
-  db.prepare('UPDATE groups SET name = ?, color = ?, icon = ? WHERE id = ?').run(
+  db.prepare('UPDATE groups SET name = ?, color = ?, icon = ?, completed_color = ? WHERE id = ?').run(
     name !== undefined && name.trim() ? name.trim() : existing.name,
     safeColor,
     sanitizedIcon === undefined ? existing.icon : sanitizedIcon,
+    safeCompletedColor,
     req.params.id
   );
 

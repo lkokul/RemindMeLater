@@ -12,6 +12,10 @@ const groupsRouter = require('./routes/groups');
 const themesRouter = require('./routes/themes');
 const profileRouter = require('./routes/profile');
 const specialDaysRouter = require('./routes/specialDays');
+const notesRouter = require('./routes/notes');
+const notesSecurityRouter = require('./routes/notesSecurity');
+const noteFoldersRouter = require('./routes/noteFolders');
+const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startMdns } = require('./mdns');
 
@@ -38,14 +42,20 @@ app.use('/api/groups', requireDeviceOrTrusted, groupsRouter);
 app.use('/api/themes', requireDeviceOrTrusted, themesRouter);
 app.use('/api/profile', requireDeviceOrTrusted, profileRouter);
 app.use('/api/special-days', requireDeviceOrTrusted, specialDaysRouter);
+app.use('/api/notes', requireDeviceOrTrusted, notesRouter);
+app.use('/api/notes-security', requireDeviceOrTrusted, notesSecurityRouter);
+app.use('/api/note-folders', requireDeviceOrTrusted, noteFoldersRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);
+// Comprobar/instalar version nueva: solo el ordenador (cada ruta lo exige
+// por dentro, ver routes/update.js).
+app.use('/api/update', updateRouter);
 
 // La app web (HTML/CSS/JS) vive en /public y se sirve tal cual.
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`RemindMeLater escuchando en el puerto ${PORT}`);
   console.log(`  En este ordenador: http://localhost:${PORT}`);
 
@@ -67,4 +77,21 @@ app.listen(PORT, '0.0.0.0', () => {
   }
 
   startReminderChecker();
+});
+
+// Sin este manejador, que el puerto ya este ocupado (por ejemplo, si ya
+// tenias "npm run dev" abierto en otra terminal y ademas arrancas
+// "npm run electron") tira abajo el proceso entero con una excepcion sin
+// capturar — en Electron eso se ve como un dialogo de error nada mas
+// abrir. La app igualmente termina abriendose porque electron/main.js
+// espera a que ALGUN servidor responda en ese puerto (waitForServer), asi
+// que aqui basta con avisar por consola en vez de reventar el proceso.
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.warn(
+      `El puerto ${PORT} ya esta en uso (seguramente otra instancia de RemindMeLater ya esta corriendo) — sigo sin levantar un segundo servidor.`
+    );
+  } else {
+    throw err;
+  }
 });

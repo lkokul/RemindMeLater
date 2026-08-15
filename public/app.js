@@ -13,6 +13,10 @@ const state = {
   viewDate: new Date(), // mes que se esta mostrando
   events: [],
   groups: [],
+  tasks: [], // TODAS las tareas (con fecha o sin ella), ver loadTasks()
+  notes: [], // Notas de "Mi espacio" (Fase 2), ver loadNotes()
+  noteFolders: [], // Carpetas de notas (Fase 3), ver loadNoteFolders()
+  currentNoteFolderId: null, // null = raiz -- "donde estas" navegando en Notas, no se guarda entre sesiones
   specialDays: {}, // 'YYYY-MM-DD' -> 'holiday' | 'special', marcados a mano
   pairingCodeExpiresAt: null,
   notifiedReminderIds: new Set(), // evita notificar el mismo recordatorio 2 veces
@@ -32,6 +36,350 @@ if ('serviceWorker' in navigator) {
 }
 
 const DEFAULT_EVENT_COLOR = '#5b8cff'; // el --accent de styles.css, para eventos sin grupo
+
+// ---------------------------------------------------------------------
+// Selector con estilo propio: sustituye un <select> nativo (que el
+// navegador pinta a su manera, sin seguir los colores del tema) por un
+// boton + lista desplegable a medida. Mismo patron que
+// createColorField/createIconField en settings.js (boton que abre un
+// popover colgado de <body>, posicionado en JS) — esta version vive aqui
+// porque la usan los modales de evento/tarea, que son cosa de este
+// archivo. closeAllPopovers/positionFixedPopover estan definidas en
+// settings.js (se carga despues de este archivo), pero solo se llaman
+// DENTRO de manejadores de click, que no se disparan hasta que la persona
+// interactua — para entonces los dos archivos ya estan cargados, igual
+// que el resto de referencias cruzadas entre app.js y settings.js.
+function createSelectField({ options = [], initialValue = '', placeholder = '', onChange } = {}) {
+  let value = initialValue;
+  let opts = options;
+
+  const root = document.createElement('div');
+  root.className = 'select-field';
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'select-field-trigger';
+
+  const popover = document.createElement('div');
+  popover.className = 'select-popover hidden';
+  document.body.appendChild(popover);
+
+  function findCurrent() {
+    return opts.find((o) => String(o.value) === String(value));
+  }
+
+  function optionRowHtml(opt) {
+    const dot = opt.color ? `<span class="color-dot" style="background-color:${opt.color}"></span>` : '';
+    const icon = opt.icon ? `${escapeHtml(opt.icon)} ` : '';
+    return `${dot}${icon}${escapeHtml(opt.label)}`;
+  }
+
+  function renderTrigger() {
+    const current = findCurrent();
+    trigger.innerHTML = current ? optionRowHtml(current) : escapeHtml(placeholder);
+    trigger.classList.toggle('select-field-placeholder', !current);
+  }
+
+  function renderOptions() {
+    popover.innerHTML = '';
+    opts.forEach((opt) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'select-option' + (String(opt.value) === String(value) ? ' active' : '');
+      item.innerHTML = optionRowHtml(opt);
+      item.addEventListener('click', () => {
+        value = opt.value;
+        renderTrigger();
+        renderOptions();
+        popover.classList.add('hidden');
+        if (onChange) onChange(value);
+      });
+      popover.appendChild(item);
+    });
+  }
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = popover.classList.contains('hidden');
+    closeAllPopovers(popover);
+    popover.classList.toggle('hidden');
+    if (willOpen) {
+      positionFixedPopover(trigger, popover, {
+        width: Math.max(200, trigger.getBoundingClientRect().width),
+      });
+      // Si hay muchas opciones (la hora, por ejemplo, con 96), abre ya
+      // desplazado a la que esta elegida en vez de siempre arriba del
+      // todo — asi no hay que buscarla a mano cada vez.
+      const activeItem = popover.querySelector('.select-option.active');
+      if (activeItem) activeItem.scrollIntoView({ block: 'center' });
+    }
+  });
+
+  root.appendChild(trigger);
+  renderOptions();
+  renderTrigger();
+
+  return {
+    element: root,
+    getValue: () => value,
+    setValue: (v) => { value = v; renderTrigger(); renderOptions(); },
+    setOptions: (newOptions) => { opts = newOptions; renderOptions(); renderTrigger(); },
+  };
+}
+
+const DATE_FIELD_FORMATTER = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+// Icono de calendario (trazo, no emoji) para el selector de fecha —
+// stroke="currentColor" para que siga el color de texto del boton (y por
+// tanto el tema) automaticamente, sin tener que definir un color aparte
+// por tema.
+const CALENDAR_ICON_SVG = `<svg class="date-field-trigger-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+  <line x1="16" y1="2" x2="16" y2="6"></line>
+  <line x1="8" y1="2" x2="8" y2="6"></line>
+  <line x1="3" y1="10" x2="21" y2="10"></line>
+</svg>`;
+
+// Flechas de mes anterior/siguiente en SVG en vez de los caracteres
+// "←"/"→": esos glifos no quedan centrados de verdad dentro de su caja en
+// muchas fuentes (se ven "desplazados" aunque la caja este bien centrada
+// por CSS) — un SVG a medida sí se centra pixel a pixel.
+const CHEVRON_LEFT_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>';
+const CHEVRON_RIGHT_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+// Ojo abierto/cerrado para ocultar/destapar notas (ver mas abajo,
+// seccion "Notas de Mi espacio").
+const EYE_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+const EYE_OFF_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+// Carpeta con un "+": para el boton de crear carpeta nueva, mas claro
+// que un "+" suelto (facil de confundir con "nueva nota").
+const FOLDER_PLUS_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>';
+// Carpeta simple (sin el "+"), para las filas de subcarpeta en la lista
+// de Notas cuando no se les ha puesto un icono/emoji propio.
+const FOLDER_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+
+// Estrella de favorito (notas/carpetas): rellena si es favorito, solo
+// borde si no -- el mismo boton en el listado y en los modales de
+// creacion/edicion (ver buildNoteRow/buildFolderRow/openNoteModal...).
+const STAR_FILLED_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><polygon points="12 2.5 15.09 8.76 22 9.77 17 14.64 18.18 21.52 12 18.27 5.82 21.52 7 14.64 2 9.77 8.91 8.76"></polygon></svg>';
+const STAR_OUTLINE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><polygon points="12 2.5 15.09 8.76 22 9.77 17 14.64 18.18 21.52 12 18.27 5.82 21.52 7 14.64 2 9.77 8.91 8.76"></polygon></svg>';
+
+// Ctrl+Intro (o Cmd+Intro en Mac) guarda directamente, sin tener que ir
+// a buscar el boton "Guardar" con el raton -- util sobre todo en el
+// textarea de las notas, donde Intro normal solo hace un salto de linea.
+// requestSubmit() (no submit()) para que se dispare el evento "submit" y
+// pase por el listener normal del formulario, con su validacion de
+// required incluida.
+function enableCtrlEnterSubmit(formId) {
+  const form = document.getElementById(formId);
+  form.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+}
+enableCtrlEnterSubmit('event-form');
+enableCtrlEnterSubmit('task-form');
+enableCtrlEnterSubmit('note-form');
+
+// ---------------------------------------------------------------------
+// Selector de fecha con estilo propio: sustituye <input type="date"> (o
+// la parte de fecha de un datetime-local) por un boton que abre un
+// mini-calendario a medida — mismo lenguaje visual que el calendario
+// grande (mes con flechas + cuadricula de dias), en vez del selector
+// nativo del navegador/SO, que no sigue el tema para nada. Reutiliza los
+// mismos ayudantes de fecha que el calendario grande (startOfMonth,
+// sameDay, WEEKDAY_LABELS, formatMonthYear), definidos mas abajo en este
+// archivo — funciona porque esto solo se EJECUTA cuando alguien interactua
+// (clic en el boton), momento en el que el archivo entero ya esta cargado.
+// allowClear: si la fecha es opcional (tareas), anade un boton "Quitar
+// fecha"; si no (inicio de un evento), no se ofrece esa opcion.
+function createDateField({ initialValue = null, onChange, allowClear = false, placeholder = 'Elegir fecha' } = {}) {
+  let value = initialValue; // Date o null
+  let viewMonth = value ? new Date(value.getFullYear(), value.getMonth(), 1) : startOfMonth(new Date());
+
+  const root = document.createElement('div');
+  root.className = 'date-field';
+
+  // Aparte del calendario emergente, tambien se puede escribir la fecha a
+  // mano en este campo de texto — el icono de al lado es lo que abre el
+  // calendario, ya no hace falta clicar sobre el texto para eso.
+  const wrap = document.createElement('div');
+  wrap.className = 'date-field-input-wrap';
+
+  const textInput = document.createElement('input');
+  textInput.type = 'text';
+  textInput.className = 'date-field-text';
+  textInput.placeholder = placeholder;
+  textInput.inputMode = 'numeric';
+
+  const iconBtn = document.createElement('button');
+  iconBtn.type = 'button';
+  iconBtn.className = 'date-field-icon-btn';
+  iconBtn.innerHTML = CALENDAR_ICON_SVG;
+  iconBtn.setAttribute('aria-label', 'Abrir calendario');
+
+  wrap.appendChild(textInput);
+  wrap.appendChild(iconBtn);
+
+  const popover = document.createElement('div');
+  popover.className = 'date-popover hidden';
+  document.body.appendChild(popover);
+
+  function syncTextInput() {
+    textInput.value = value ? DATE_FIELD_FORMATTER.format(value) : '';
+  }
+
+  // Admite "14/8/2026" o "14/08/2026" escrito a mano. Devuelve null si no
+  // es una fecha real (incluye cosas como 31/02, que numericamente
+  // "parsean" pero no existen).
+  function parseTypedDate(text) {
+    const m = text.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!m) return null;
+    const day = Number(m[1]);
+    const month = Number(m[2]);
+    const year = Number(m[3]);
+    const d = new Date(year, month - 1, day);
+    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+    if (value) d.setHours(value.getHours(), value.getMinutes(), value.getSeconds(), 0);
+    return d;
+  }
+
+  // Al salir del campo (Tab, clic fuera...): si lo que hay escrito es una
+  // fecha valida, se aplica; si no (o esta vacio y se puede quitar la
+  // fecha), se actua en consecuencia; si no es valido y no se puede
+  // dejar vacio, vuelve a mostrar la ultima fecha buena en vez de dejar
+  // algo raro escrito.
+  textInput.addEventListener('change', () => {
+    const text = textInput.value.trim();
+    if (!text) {
+      if (allowClear) {
+        value = null;
+        if (onChange) onChange(value);
+      }
+      syncTextInput();
+      return;
+    }
+    const parsed = parseTypedDate(text);
+    if (parsed) {
+      value = parsed;
+      viewMonth = new Date(value.getFullYear(), value.getMonth(), 1);
+      if (onChange) onChange(value);
+    }
+    syncTextInput();
+  });
+  textInput.addEventListener('click', (e) => e.stopPropagation());
+
+  function selectDay(cellDate) {
+    // Si ya habia una fecha (con hora, en el caso de un evento), se
+    // conserva esa hora — aqui solo se cambia el dia/mes/año.
+    const next = value ? new Date(value) : new Date();
+    next.setFullYear(cellDate.getFullYear(), cellDate.getMonth(), cellDate.getDate());
+    value = next;
+    syncTextInput();
+    popover.classList.add('hidden');
+    if (onChange) onChange(value);
+  }
+
+  function renderCalendar() {
+    popover.innerHTML = '';
+
+    const nav = document.createElement('div');
+    nav.className = 'date-popover-nav';
+    const prevBtn = document.createElement('button');
+    prevBtn.type = 'button';
+    prevBtn.className = 'icon-btn';
+    prevBtn.innerHTML = CHEVRON_LEFT_SVG;
+    prevBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1);
+      renderCalendar();
+    });
+    const label = document.createElement('span');
+    label.className = 'date-popover-month-label';
+    label.textContent = formatMonthYear(viewMonth);
+    const nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.className = 'icon-btn';
+    nextBtn.innerHTML = CHEVRON_RIGHT_SVG;
+    nextBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1);
+      renderCalendar();
+    });
+    nav.appendChild(prevBtn);
+    nav.appendChild(label);
+    nav.appendChild(nextBtn);
+    popover.appendChild(nav);
+
+    const grid = document.createElement('div');
+    grid.className = 'date-popover-grid';
+    WEEKDAY_LABELS.forEach((l) => {
+      const h = document.createElement('div');
+      h.className = 'date-popover-weekday';
+      h.textContent = l;
+      grid.appendChild(h);
+    });
+
+    const first = startOfMonth(viewMonth);
+    const firstWeekday = (first.getDay() + 6) % 7;
+    const gridStart = new Date(first);
+    gridStart.setDate(gridStart.getDate() - firstWeekday);
+    const today = new Date();
+
+    for (let i = 0; i < 42; i++) {
+      const cellDate = new Date(gridStart);
+      cellDate.setDate(gridStart.getDate() + i);
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'date-popover-day';
+      if (cellDate.getMonth() !== viewMonth.getMonth()) cell.classList.add('other-month');
+      if (sameDay(cellDate, today)) cell.classList.add('today');
+      if (value && sameDay(cellDate, value)) cell.classList.add('selected');
+      cell.textContent = cellDate.getDate();
+      cell.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectDay(cellDate);
+      });
+      grid.appendChild(cell);
+    }
+    popover.appendChild(grid);
+
+    if (allowClear) {
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'secondary-btn date-popover-clear';
+      clearBtn.textContent = 'Quitar fecha';
+      clearBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        value = null;
+        syncTextInput();
+        popover.classList.add('hidden');
+        if (onChange) onChange(value);
+      });
+      popover.appendChild(clearBtn);
+    }
+  }
+
+  iconBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = popover.classList.contains('hidden');
+    closeAllPopovers(popover);
+    viewMonth = value ? new Date(value.getFullYear(), value.getMonth(), 1) : startOfMonth(new Date());
+    if (willOpen) renderCalendar();
+    popover.classList.toggle('hidden');
+    if (willOpen) positionFixedPopover(iconBtn, popover, { width: 264 });
+  });
+
+  root.appendChild(wrap);
+  syncTextInput();
+
+  return {
+    element: root,
+    getValue: () => value,
+    setValue: (v) => { value = v; syncTextInput(); },
+  };
+}
 
 // ---------------------------------------------------------------------
 // Capa de red: envuelve fetch para añadir el token del dispositivo (si
@@ -102,9 +450,17 @@ document.getElementById('pairing-form').addEventListener('submit', async (e) => 
 // Utilidades de fecha
 // ---------------------------------------------------------------------
 const WEEKDAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-const MONTH_FORMATTER = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' });
+const MONTH_ONLY_FORMATTER = new Intl.DateTimeFormat('es-ES', { month: 'long' });
 const DAY_HEADING_FORMATTER = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
 const TIME_FORMATTER = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+// "Agosto 2026" en vez del "agosto de 2026" que da Intl por defecto en
+// español (con "de" en medio, y en minuscula) — quitamos el "de" y
+// ponemos la mes en mayuscula inicial a mano.
+function formatMonthYear(date) {
+  const month = MONTH_ONLY_FORMATTER.format(date);
+  return `${month.charAt(0).toUpperCase()}${month.slice(1)} ${date.getFullYear()}`;
+}
 
 function startOfMonth(date) { return new Date(date.getFullYear(), date.getMonth(), 1); }
 function endOfMonth(date) { return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59); }
@@ -120,13 +476,6 @@ function toDateKey(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-// El input datetime-local espera "YYYY-MM-DDTHH:mm" en hora LOCAL (no UTC),
-// asi que no podemos usar toISOString() directamente (esa da UTC).
-function toDatetimeLocalValue(date) {
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 // ---------------------------------------------------------------------
 // Carga y render del mes
 // ---------------------------------------------------------------------
@@ -134,7 +483,7 @@ async function loadMonth() {
   const from = toIsoDate(startOfMonth(state.viewDate));
   const to = toIsoDate(endOfMonth(state.viewDate));
   state.events = await api(`/api/events?from=${from}T00:00:00&to=${to}T23:59:59`);
-  document.getElementById('current-month-label').textContent = MONTH_FORMATTER.format(state.viewDate);
+  document.getElementById('current-month-label').textContent = formatMonthYear(state.viewDate);
   renderCalendarGrid();
   renderAgendaList();
 }
@@ -147,6 +496,34 @@ async function loadSpecialDays() {
   const rows = await api('/api/special-days');
   state.specialDays = {};
   rows.forEach((r) => { state.specialDays[r.date] = r.type; });
+}
+
+// Como se ven, en el calendario del mes, los dias con varios
+// eventos/tareas a la vez — preferencia de ESTE dispositivo, se cambia
+// desde Configuracion > Vista (ver refreshCalendarDensityOptions en
+// settings.js).
+const CALENDAR_DENSITY_MODE_IDS = ['limit', 'dots', 'tint'];
+const CALENDAR_DENSITY_LIMIT = 3; // cuantos chips completos se ven en modo "limite" antes del "+N mas"
+
+function getCalendarDensityMode() {
+  const stored = localStorage.getItem('calendarDayDensity');
+  return CALENDAR_DENSITY_MODE_IDS.includes(stored) ? stored : 'limit';
+}
+
+// Construye el chip de un evento normal (no tarea) para una celda del
+// calendario — se saco aparte de renderCalendarGrid porque el modo
+// "limite" solo pinta ALGUNOS de los eventos del dia, no todos.
+function buildCalendarEventChip(ev) {
+  const chip = document.createElement('div');
+  chip.className = 'calendar-event-chip';
+  chip.style.backgroundColor = ev.groupColor || DEFAULT_EVENT_COLOR;
+  const iconPrefix = ev.groupIcon ? `${ev.groupIcon} ` : '';
+  chip.textContent = ev.allDay ? `${iconPrefix}${ev.title}` : `${TIME_FORMATTER.format(new Date(ev.startAt))} ${iconPrefix}${ev.title}`;
+  chip.addEventListener('click', (e) => {
+    e.stopPropagation(); // que no abra tambien el panel del dia entero
+    openEventModal(ev);
+  });
+  return chip;
 }
 
 function renderCalendarGrid() {
@@ -176,6 +553,13 @@ function renderCalendarGrid() {
     cell.className = 'calendar-cell';
     if (cellDate.getMonth() !== state.viewDate.getMonth()) cell.classList.add('other-month');
     if (sameDay(cellDate, today)) cell.classList.add('today');
+    // Dia que se esta viendo ahora mismo en el panel de recordatorios
+    // (clicado en el calendario, o navegado con las flechas del teclado
+    // o de "Mi espacio") — mismo aspecto que el hover, pero fijo en vez
+    // de necesitar el raton encima.
+    if (state.remindersMode === 'day' && state.remindersDayDate && sameDay(cellDate, state.remindersDayDate)) {
+      cell.classList.add('selected-day');
+    }
 
     // Color de fondo de la celda: festivo/especial (marcados a mano) por
     // encima de fin de semana (automatico, sabado/domingo); "hoy" no
@@ -191,19 +575,55 @@ function renderCalendarGrid() {
     dayLabel.textContent = cellDate.getDate();
     cell.appendChild(dayLabel);
 
-    const dayEvents = state.events.filter((ev) => sameDay(new Date(ev.startAt), cellDate));
-    dayEvents.forEach((ev) => {
-      const chip = document.createElement('div');
-      chip.className = 'calendar-event-chip';
-      chip.style.backgroundColor = ev.groupColor || DEFAULT_EVENT_COLOR;
-      const iconPrefix = ev.groupIcon ? `${ev.groupIcon} ` : '';
-      chip.textContent = ev.allDay ? `${iconPrefix}${ev.title}` : `${TIME_FORMATTER.format(new Date(ev.startAt))} ${iconPrefix}${ev.title}`;
-      chip.addEventListener('click', (e) => {
-        e.stopPropagation(); // que no abra tambien el panel del dia entero
-        openEventModal(ev);
+    const dayEvents = state.events.filter((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate));
+    const densityMode = getCalendarDensityMode();
+
+    if (densityMode === 'tint') {
+      // Sin chips ni puntos: solo se marca el dia como "tiene algo", el
+      // detalle de verdad se ve al abrirlo (clicando la celda).
+      if (dayEvents.length > 0) cell.classList.add('has-content');
+    } else if (densityMode === 'dots') {
+      // Un punto de color por evento/tarea, sin texto — las tareas con el
+      // mismo criterio de borde-en-vez-de-relleno que ya usan sus chips.
+      if (dayEvents.length > 0) {
+        const dotsRow = document.createElement('div');
+        dotsRow.className = 'calendar-day-dots';
+        dayEvents.forEach((ev) => {
+          const dot = document.createElement('span');
+          dot.className = 'calendar-day-dot';
+          const color = ev.isTask
+            ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev))
+            : (ev.groupColor || DEFAULT_EVENT_COLOR);
+          if (ev.isTask) {
+            dot.classList.add('is-task');
+            dot.style.borderColor = color;
+          } else {
+            dot.style.backgroundColor = color;
+          }
+          dotsRow.appendChild(dot);
+        });
+        cell.appendChild(dotsRow);
+      }
+    } else {
+      // 'limit': como antes, pero con un tope de chips completos y un
+      // "+N mas" para el resto (en vez de que la celda se desborde con
+      // muchos eventos el mismo dia).
+      const visible = dayEvents.slice(0, CALENDAR_DENSITY_LIMIT);
+      const hiddenCount = dayEvents.length - visible.length;
+      visible.forEach((ev) => {
+        cell.appendChild(ev.isTask ? buildCalendarTaskChip(ev) : buildCalendarEventChip(ev));
       });
-      cell.appendChild(chip);
-    });
+      if (hiddenCount > 0) {
+        const more = document.createElement('div');
+        more.className = 'calendar-more-chip';
+        more.textContent = `+${hiddenCount} más`;
+        more.addEventListener('click', (e) => {
+          e.stopPropagation();
+          showDayInReminders(cellDate);
+        });
+        cell.appendChild(more);
+      }
+    }
 
     // Clicar en cualquier otro sitio de la celda (no un chip concreto)
     // cambia el panel de recordatorios para mostrar TODOS los eventos de
@@ -224,12 +644,14 @@ function renderCalendarGrid() {
 async function showDayInReminders(date) {
   state.remindersMode = 'day';
   state.remindersDayDate = date;
+  renderCalendarGrid();
   await renderRemindersPanel();
 }
 
 function showUpcomingReminders() {
   state.remindersMode = 'upcoming';
   state.remindersDayDate = null;
+  renderCalendarGrid();
   renderRemindersPanel();
 }
 
@@ -267,6 +689,11 @@ async function renderDayReminders(date) {
   }
 
   dayEvents.forEach((ev) => {
+    if (ev.isTask) {
+      const row = buildTaskRow(ev);
+      if (row) list.appendChild(row);
+      return;
+    }
     const groupLabel = ev.groupName ? `${ev.groupIcon ? ev.groupIcon + ' ' : ''}${ev.groupName}` : null;
     const item = document.createElement('div');
     item.className = 'agenda-item';
@@ -293,6 +720,7 @@ async function renderRemindersPanel() {
     backBtn.classList.remove('hidden');
     dayActions.classList.remove('hidden');
     updateDayMarkButtons(toDateKey(state.remindersDayDate));
+    remindersDayNavDateField.setValue(state.remindersDayDate);
     await renderDayReminders(state.remindersDayDate);
   } else {
     title.textContent = 'Proximos recordatorios';
@@ -301,6 +729,18 @@ async function renderRemindersPanel() {
     renderUpcomingRemindersList(state.upcomingReminders || []);
   }
 }
+
+// Navegacion de dia dentro de "Mi espacio" (ver #reminders-day-nav en
+// index.html, oculta fuera de ahi). El campo de fecha se crea UNA vez
+// aqui mismo (igual que los campos de fecha de los modales) y vive
+// siempre dentro de .reminders-top-block, se mueva este donde se mueva.
+const remindersDayNavDateField = createDateField({
+  initialValue: new Date(),
+  onChange: (d) => { if (d) showDayInReminders(d); },
+});
+document.getElementById('reminders-day-nav-date-field').appendChild(remindersDayNavDateField.element);
+document.getElementById('btn-reminders-day-prev').addEventListener('click', () => shiftRemindersDay(-1));
+document.getElementById('btn-reminders-day-next').addEventListener('click', () => shiftRemindersDay(1));
 
 document.getElementById('btn-reminders-back').addEventListener('click', showUpcomingReminders);
 document.getElementById('btn-day-mark-holiday').addEventListener('click', () => {
@@ -334,6 +774,11 @@ function renderAgendaList() {
       lastDayKey = dayKey;
     }
 
+    if (ev.isTask) {
+      const row = buildTaskRow(ev);
+      if (row) container.appendChild(row);
+      return;
+    }
     const groupLabel = ev.groupName ? `${ev.groupIcon ? ev.groupIcon + ' ' : ''}${ev.groupName}` : null;
     const item = document.createElement('div');
     item.className = 'agenda-item';
@@ -368,6 +813,93 @@ document.getElementById('nav-next').addEventListener('click', () => {
 // ---------------------------------------------------------------------
 // Modal de evento (crear / editar / borrar)
 // ---------------------------------------------------------------------
+const REMINDER_OPTIONS = [
+  { value: '', label: 'Sin recordatorio' },
+  { value: '0', label: 'En el momento' },
+  { value: '10', label: '10 minutos antes' },
+  { value: '30', label: '30 minutos antes' },
+  { value: '60', label: '1 hora antes' },
+  { value: '1440', label: '1 dia antes' },
+];
+const eventReminderField = createSelectField({ options: REMINDER_OPTIONS, initialValue: '' });
+document.getElementById('event-reminder-field').appendChild(eventReminderField.element);
+
+const eventGroupField = createSelectField({ options: [{ value: '', label: 'Sin grupo' }], initialValue: '' });
+document.getElementById('event-group-field').appendChild(eventGroupField.element);
+
+const eventStartDateField = createDateField({ initialValue: new Date() });
+document.getElementById('event-start-date-field').appendChild(eventStartDateField.element);
+
+const eventEndDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('event-end-date-field').appendChild(eventEndDateField.element);
+
+// Campo de hora propio: un input de texto normal (se escribe directo,
+// sin desplegable) pero con el estilo del tema — <input type="time">
+// nativo siempre abre el selector propio del navegador al clicarlo (el
+// de la captura, con columnas de horas/minutos), que no hay forma de
+// quitar ni de estilizar con CSS.
+function toTimeInputValue(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function createTimeField({ initialValue = '09:00' } = {}) {
+  let value = initialValue;
+
+  const root = document.createElement('div');
+  root.className = 'time-field';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'time-field-input';
+  input.placeholder = 'HH:MM';
+  input.inputMode = 'numeric';
+  input.value = value;
+
+  // Admite "9:5", "09:05", "930"... siempre que las horas/minutos sean
+  // validos; si no, devuelve null y el campo vuelve al ultimo valor
+  // bueno en vez de dejar algo sin sentido escrito.
+  function normalize(text) {
+    const cleaned = text.trim().replace(/\s+/g, '');
+    const m = cleaned.match(/^(\d{1,2}):?(\d{2})$/);
+    if (!m) return null;
+    const h = Number(m[1]);
+    const mi = Number(m[2]);
+    if (h > 23 || mi > 59) return null;
+    return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+  }
+
+  input.addEventListener('change', () => {
+    const normalized = normalize(input.value);
+    if (normalized) value = normalized;
+    input.value = value;
+  });
+
+  root.appendChild(input);
+
+  return {
+    element: root,
+    getValue: () => value,
+    setValue: (v) => { value = v; input.value = v; },
+  };
+}
+
+// Junta un Date (solo se usa su dia/mes/año) con un "HH:mm" en un unico
+// string "YYYY-MM-DDTHH:mm:ss" para mandar al servidor — el selector de
+// fecha y el de hora viven separados en el formulario, pero la API sigue
+// esperando un solo valor combinado, como antes con el datetime-local.
+function combineDateAndTime(date, timeStr) {
+  const [h, m] = (timeStr || '00:00').split(':').map(Number);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${toDateKey(date)}T${pad(h)}:${pad(m)}:00`;
+}
+
+const eventStartTimeField = createTimeField({ initialValue: toTimeInputValue(new Date()) });
+document.getElementById('event-start-time-field').appendChild(eventStartTimeField.element);
+
+const eventEndTimeField = createTimeField({ initialValue: toTimeInputValue(new Date()) });
+document.getElementById('event-end-time-field').appendChild(eventEndTimeField.element);
+
 // presetDate (opcional): al crear un evento nuevo desde el panel de un
 // dia concreto, arranca ya con esa fecha puesta (a las 09:00 por
 // defecto) en vez de con la fecha/hora actual.
@@ -382,15 +914,31 @@ function openEventModal(event, presetDate) {
     defaultStart = new Date(presetDate);
     defaultStart.setHours(9, 0, 0, 0);
   }
-  document.getElementById('event-start').value = event ? toDatetimeLocalValue(new Date(event.startAt)) : toDatetimeLocalValue(defaultStart);
-  document.getElementById('event-end').value = event && event.endAt ? toDatetimeLocalValue(new Date(event.endAt)) : '';
+  const startDate = event ? new Date(event.startAt) : defaultStart;
+  eventStartDateField.setValue(startDate);
+  eventStartTimeField.setValue(toTimeInputValue(startDate));
+
+  if (event && event.endAt) {
+    const endDate = new Date(event.endAt);
+    eventEndDateField.setValue(endDate);
+    eventEndTimeField.setValue(toTimeInputValue(endDate));
+  } else {
+    eventEndDateField.setValue(null);
+    eventEndTimeField.setValue(toTimeInputValue(startDate));
+  }
   document.getElementById('event-location').value = event && event.location ? event.location : '';
-  document.getElementById('event-description').value = event && event.description ? event.description : '';
-  document.getElementById('event-reminder').value = event && event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
+  const descriptionEl = document.getElementById('event-description');
+  descriptionEl.value = event && event.description ? event.description : '';
+  // Arrastrar el asa de la esquina deja un alto fijo puesto a mano (estilo
+  // inline) en el propio <textarea>, que se queda ahi para siempre porque
+  // es el MISMO elemento reutilizado en cada apertura del modal — sin
+  // esto, un evento nuevo heredaria el tamaño que dejaste en el anterior.
+  descriptionEl.style.height = '';
+  eventReminderField.setValue(event && event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
     ? String(event.reminderMinutesBefore)
-    : '';
+    : '');
   populateEventGroupSelect();
-  document.getElementById('event-group').value = event && event.groupId ? String(event.groupId) : '';
+  eventGroupField.setValue(event && event.groupId ? String(event.groupId) : '');
   document.getElementById('btn-delete-event').classList.toggle('hidden', !event);
 
   const createdByEl = document.getElementById('event-created-by');
@@ -410,19 +958,23 @@ function closeEventModal() {
 
 document.getElementById('btn-new-event').addEventListener('click', () => openEventModal(null));
 document.getElementById('btn-cancel-event').addEventListener('click', closeEventModal);
+document.getElementById('btn-close-event').addEventListener('click', closeEventModal);
 
 document.getElementById('event-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('event-id').value;
-  const reminderRaw = document.getElementById('event-reminder').value;
+  const reminderRaw = eventReminderField.getValue();
 
-  const groupRaw = document.getElementById('event-group').value;
+  const groupRaw = eventGroupField.getValue();
+
+  const startDate = eventStartDateField.getValue();
+  const endDate = eventEndDateField.getValue();
 
   const payload = {
     title: document.getElementById('event-title').value,
     allDay: document.getElementById('event-all-day').checked,
-    startAt: document.getElementById('event-start').value,
-    endAt: document.getElementById('event-end').value || null,
+    startAt: combineDateAndTime(startDate, eventStartTimeField.getValue()),
+    endAt: endDate ? combineDateAndTime(endDate, eventEndTimeField.getValue()) : null,
     location: document.getElementById('event-location').value || null,
     description: document.getElementById('event-description').value || null,
     reminderMinutesBefore: reminderRaw === '' ? null : Number(reminderRaw),
@@ -460,17 +1012,17 @@ async function loadGroups() {
   state.groups = await api('/api/groups');
 }
 
+function groupSelectOptions() {
+  return [
+    { value: '', label: 'Sin grupo' },
+    ...state.groups.map((g) => ({ value: String(g.id), label: g.name, color: g.color, icon: g.icon })),
+  ];
+}
+
 function populateEventGroupSelect() {
-  const select = document.getElementById('event-group');
-  const current = select.value;
-  select.innerHTML = '<option value="">Sin grupo</option>';
-  state.groups.forEach((g) => {
-    const opt = document.createElement('option');
-    opt.value = g.id;
-    opt.textContent = g.name;
-    select.appendChild(opt);
-  });
-  select.value = current;
+  const current = eventGroupField.getValue();
+  eventGroupField.setOptions(groupSelectOptions());
+  eventGroupField.setValue(current);
 }
 
 // ---------------------------------------------------------------------
@@ -532,6 +1084,755 @@ async function loadReminders() {
 }
 
 // ---------------------------------------------------------------------
+// Tareas: un tipo especial de "evento" (is_task = 1 en la base de datos)
+// que puede no tener fecha, se marca hecha/pendiente, y vive en su propio
+// bloque fijo del panel de recordatorios (#tasks-list en index.html)
+// ademas de en el calendario si tiene fecha (ver buildCalendarTaskChip,
+// llamada desde renderCalendarGrid mas arriba).
+// mutedTaskColor/getCompletedTasksDisplayMode viven en settings.js (se
+// carga despues de este archivo) — solo se usan aqui dentro de funciones
+// que se EJECUTAN despues de que la pagina ha cargado del todo (nunca al
+// evaluar app.js en si), asi que para cuando se llaman de verdad ya
+// existen. Mismo patron que el resto de referencias cruzadas entre los
+// dos archivos.
+// ---------------------------------------------------------------------
+function taskPendingColor(task) {
+  return task.groupColor || DEFAULT_EVENT_COLOR;
+}
+
+function taskCompletedColor(task) {
+  return task.groupCompletedColor || mutedTaskColor(taskPendingColor(task));
+}
+
+function buildCalendarTaskChip(task) {
+  const chip = document.createElement('div');
+  chip.className = 'calendar-task-chip' + (task.done ? ' done' : '');
+  const color = task.done ? taskCompletedColor(task) : taskPendingColor(task);
+  chip.style.borderColor = color;
+  chip.style.color = color;
+
+  const check = document.createElement('span');
+  check.className = 'calendar-task-chip-check';
+  check.textContent = task.done ? '☑' : '☐';
+  check.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleTaskDone(task);
+  });
+
+  const label = document.createElement('span');
+  const iconPrefix = task.groupIcon ? `${task.groupIcon} ` : '';
+  label.textContent = `${iconPrefix}${task.title}`;
+
+  chip.appendChild(check);
+  chip.appendChild(label);
+  chip.addEventListener('click', (e) => {
+    e.stopPropagation(); // que no abra tambien el panel del dia entero
+    openTaskModal(task);
+  });
+  return chip;
+}
+
+async function loadTasks() {
+  state.tasks = await api('/api/events?isTask=1');
+}
+
+function buildTaskRow(task) {
+  const displayMode = typeof getCompletedTasksDisplayMode === 'function' ? getCompletedTasksDisplayMode() : 'strike';
+  if (task.done && displayMode === 'hide') return null;
+
+  const row = document.createElement('div');
+  row.className = 'task-item' + (task.done ? ' done' : '');
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'task-item-checkbox';
+  checkbox.checked = task.done;
+  checkbox.addEventListener('click', (e) => e.stopPropagation());
+  checkbox.addEventListener('change', () => toggleTaskDone(task));
+
+  // Color del grupo: se veia en el chip del calendario pero faltaba aqui,
+  // en la fila de la lista (mismo bug que reporto Koku: en modo oscuro se
+  // nota mas porque sin el punto de color todo se confunde con el texto).
+  const colorDot = document.createElement('span');
+  colorDot.className = 'color-dot';
+  colorDot.style.backgroundColor = task.done ? taskCompletedColor(task) : taskPendingColor(task);
+
+  const title = document.createElement('span');
+  title.className = 'task-item-title';
+  const iconPrefix = task.groupIcon ? `${escapeHtml(task.groupIcon)} ` : '';
+  title.innerHTML = `${iconPrefix}${escapeHtml(task.title)}`;
+
+  row.appendChild(checkbox);
+  row.appendChild(colorDot);
+  row.appendChild(title);
+
+  if (task.startAt) {
+    const dateLabel = document.createElement('span');
+    dateLabel.className = 'task-item-date';
+    dateLabel.textContent = DAY_HEADING_FORMATTER.format(new Date(task.startAt));
+    row.appendChild(dateLabel);
+  }
+
+  row.addEventListener('click', () => openTaskModal(task));
+  return row;
+}
+
+function renderTasksList() {
+  const container = document.getElementById('tasks-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (state.tasks.length === 0) {
+    container.innerHTML = '<p class="empty-hint">No tienes tareas.</p>';
+    return;
+  }
+
+  // Pendientes primero (por fecha, las sin fecha al final), hechas
+  // despues (si se muestran, ver getCompletedTasksDisplayMode en
+  // settings.js — ajuste de Configuracion > Este dispositivo).
+  const byDate = (a, b) => {
+    if (!a.startAt && !b.startAt) return 0;
+    if (!a.startAt) return 1;
+    if (!b.startAt) return -1;
+    return new Date(a.startAt) - new Date(b.startAt);
+  };
+  const pending = state.tasks.filter((t) => !t.done).sort(byDate);
+  const done = state.tasks.filter((t) => t.done).sort(byDate);
+
+  let rendered = 0;
+  [...pending, ...done].forEach((task) => {
+    const row = buildTaskRow(task);
+    if (row) {
+      container.appendChild(row);
+      rendered++;
+    }
+  });
+
+  if (rendered === 0) {
+    container.innerHTML = '<p class="empty-hint">No tienes tareas.</p>';
+  }
+}
+
+async function toggleTaskDone(task) {
+  const updated = await api(`/api/events/${task.id}`, { method: 'PUT', body: JSON.stringify({ done: !task.done }) });
+  const idx = state.tasks.findIndex((t) => t.id === task.id);
+  if (idx !== -1) state.tasks[idx] = updated;
+  renderTasksList();
+  loadMonth(); // refleja el cambio en el calendario/agenda si la tarea tiene fecha
+  if (state.remindersMode === 'day') renderRemindersPanel();
+}
+
+function populateTaskGroupSelect() {
+  const current = taskGroupField.getValue();
+  taskGroupField.setOptions(groupSelectOptions());
+  taskGroupField.setValue(current);
+}
+
+const taskGroupField = createSelectField({ options: [{ value: '', label: 'Sin grupo' }], initialValue: '' });
+document.getElementById('task-group-field').appendChild(taskGroupField.element);
+
+const taskDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('task-date-field').appendChild(taskDateField.element);
+
+function openTaskModal(task) {
+  const modal = document.getElementById('task-modal');
+  document.getElementById('task-modal-title').textContent = task ? 'Editar tarea' : 'Nueva tarea';
+  document.getElementById('task-id').value = task ? task.id : '';
+  document.getElementById('task-title').value = task ? task.title : '';
+  taskDateField.setValue(task && task.startAt ? new Date(task.startAt) : null);
+  populateTaskGroupSelect();
+  taskGroupField.setValue(task && task.groupId ? String(task.groupId) : '');
+  document.getElementById('btn-delete-task').classList.toggle('hidden', !task);
+  modal.classList.remove('hidden');
+}
+
+function closeTaskModal() {
+  document.getElementById('task-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-new-task').addEventListener('click', () => openTaskModal(null));
+document.getElementById('btn-cancel-task').addEventListener('click', closeTaskModal);
+document.getElementById('btn-close-task').addEventListener('click', closeTaskModal);
+
+document.getElementById('task-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('task-id').value;
+  const dateValue = taskDateField.getValue();
+  const groupRaw = taskGroupField.getValue();
+
+  const payload = {
+    title: document.getElementById('task-title').value,
+    isTask: true,
+    // Todo el dia siempre: una tarea no lleva hora concreta, solo fecha
+    // limite (o ninguna).
+    startAt: dateValue ? `${toDateKey(dateValue)}T00:00:00` : null,
+    allDay: true,
+    groupId: groupRaw === '' ? null : Number(groupRaw),
+  };
+
+  if (id) {
+    await api(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/events', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  closeTaskModal();
+  await loadTasks();
+  renderTasksList();
+  loadMonth();
+});
+
+document.getElementById('btn-delete-task').addEventListener('click', async () => {
+  const id = document.getElementById('task-id').value;
+  if (!id) return;
+  if (!confirm('¿Eliminar esta tarea?')) return;
+  await api(`/api/events/${id}`, { method: 'DELETE' });
+  closeTaskModal();
+  await loadTasks();
+  renderTasksList();
+  loadMonth();
+});
+
+// ---------------------------------------------------------------------
+// Notas de "Mi espacio" (Fase 2): titulo + texto plano, compartidas entre
+// dispositivos igual que eventos/tareas — nada de carpetas ni formato
+// todavia (eso es Fase 3 y Fase 4). Mismo patron que el modal de tareas
+// de arriba.
+// ---------------------------------------------------------------------
+async function loadNotes() {
+  state.notes = await api('/api/notes');
+}
+
+// ---------------------------------------------------------------------
+// Ocultar notas: NO es un bloqueo de verdad (no cifra nada, cualquiera
+// con acceso a la base de datos veria el contenido igual) — solo evita
+// que se lea a primera vista en la pantalla. Una nota oculta se ve
+// borrosa en la lista con un boton "Destapar" encima; el icono de ojo de
+// cada fila hace lo mismo (ocultar/destapar), son dos formas de llegar a
+// la misma accion. La contraseña es opcional y se activa en
+// Configuracion > Notas (ver refreshNotesTab en settings.js) — sin ella,
+// destapar es instantaneo; con ella activada, hace falta acertarla.
+// ---------------------------------------------------------------------
+let notesSecurityState = { passwordEnabled: false, hasPassword: false };
+
+async function refreshNotesSecurityState() {
+  notesSecurityState = await api('/api/notes-security');
+  return notesSecurityState;
+}
+
+async function setNoteHidden(note, hidden) {
+  await api(`/api/notes/${note.id}`, { method: 'PUT', body: JSON.stringify({ hidden }) });
+  await loadNotes();
+  renderNotesView();
+}
+
+// Punto de entrada comun del icono de ojo y del boton "Destapar": decide
+// que pedir (nada, la contraseña, o crear una nueva) segun el estado
+// actual de la nota y del ajuste de Configuracion > Notas.
+async function toggleNoteHidden(note) {
+  await refreshNotesSecurityState();
+
+  if (!note.hidden) {
+    // Vas a OCULTARLA. Si tienes activado "pedir contraseña" pero
+    // todavia no has puesto ninguna, hace falta crearla primero — no
+    // tendria sentido ocultar algo detras de una contraseña que no existe.
+    if (notesSecurityState.passwordEnabled && !notesSecurityState.hasPassword) {
+      openNotesSetupPasswordModal(note);
+    } else {
+      await setNoteHidden(note, true);
+    }
+    return;
+  }
+
+  // Vas a DESTAPARLA. Solo hace falta la contraseña si esta activada.
+  if (notesSecurityState.passwordEnabled) {
+    openNotesVerifyModal(note);
+  } else {
+    await setNoteHidden(note, false);
+  }
+}
+
+let pendingVerifyNote = null;
+
+function openNotesVerifyModal(note) {
+  pendingVerifyNote = note;
+  document.getElementById('notes-verify-password').value = '';
+  document.getElementById('notes-verify-error').classList.add('hidden');
+  document.getElementById('notes-verify-modal').classList.remove('hidden');
+}
+
+function closeNotesVerifyModal() {
+  document.getElementById('notes-verify-modal').classList.add('hidden');
+  pendingVerifyNote = null;
+}
+
+document.getElementById('btn-cancel-notes-verify').addEventListener('click', closeNotesVerifyModal);
+document.getElementById('btn-close-notes-verify').addEventListener('click', closeNotesVerifyModal);
+
+document.getElementById('notes-verify-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const password = document.getElementById('notes-verify-password').value;
+  const result = await api('/api/notes-security/verify', { method: 'POST', body: JSON.stringify({ password }) });
+  if (!result.ok) {
+    document.getElementById('notes-verify-error').classList.remove('hidden');
+    return;
+  }
+  const note = pendingVerifyNote;
+  closeNotesVerifyModal();
+  await setNoteHidden(note, false);
+});
+
+let pendingSetupNote = null;
+
+function openNotesSetupPasswordModal(note) {
+  pendingSetupNote = note;
+  document.getElementById('notes-setup-new-password').value = '';
+  document.getElementById('notes-setup-confirm-password').value = '';
+  document.getElementById('notes-setup-error').classList.add('hidden');
+  document.getElementById('notes-setup-password-modal').classList.remove('hidden');
+}
+
+function closeNotesSetupPasswordModal() {
+  document.getElementById('notes-setup-password-modal').classList.add('hidden');
+  pendingSetupNote = null;
+}
+
+document.getElementById('btn-cancel-notes-setup-password').addEventListener('click', closeNotesSetupPasswordModal);
+document.getElementById('btn-close-notes-setup-password').addEventListener('click', closeNotesSetupPasswordModal);
+
+document.getElementById('notes-setup-password-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('notes-setup-error');
+  const newPassword = document.getElementById('notes-setup-new-password').value;
+  const confirmPassword = document.getElementById('notes-setup-confirm-password').value;
+  if (newPassword !== confirmPassword) {
+    errorEl.textContent = 'Las dos contraseñas no coinciden.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  await api('/api/notes-security/password', { method: 'POST', body: JSON.stringify({ newPassword }) });
+  await refreshNotesSecurityState();
+  const note = pendingSetupNote;
+  closeNotesSetupPasswordModal();
+  await setNoteHidden(note, true);
+});
+
+function buildNoteRow(note) {
+  const row = document.createElement('div');
+  row.className = 'note-item' + (note.hidden ? ' is-hidden' : '');
+
+  const eyeBtn = document.createElement('button');
+  eyeBtn.type = 'button';
+  eyeBtn.className = 'note-item-eye-btn';
+  eyeBtn.innerHTML = note.hidden ? EYE_OFF_SVG : EYE_SVG;
+  eyeBtn.setAttribute('aria-label', note.hidden ? 'Destapar nota' : 'Ocultar nota');
+  eyeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleNoteHidden(note);
+  });
+  row.appendChild(eyeBtn);
+
+  const contentWrap = document.createElement('div');
+  contentWrap.className = 'note-item-content-wrap';
+
+  const content = document.createElement('div');
+  content.className = 'note-item-content';
+
+  // Solo el titulo -- el avance del contenido se quito para que el
+  // listado ocupe menos alto por nota (ver CLAUDE.md / ronda de pulido).
+  const title = document.createElement('span');
+  title.className = 'note-item-title';
+  title.textContent = note.title;
+  content.appendChild(title);
+  contentWrap.appendChild(content);
+  row.appendChild(contentWrap);
+
+  row.appendChild(buildFavoriteStarBtn(note.favorite, (e) => {
+    e.stopPropagation();
+    toggleNoteFavorite(note);
+  }));
+
+  // Una nota oculta no se abre con un simple clic en la fila — solo el
+  // icono de ojo la destapa (sin ningun texto/boton de aviso encima del
+  // blur, para no recargar la fila).
+  row.addEventListener('click', () => {
+    if (note.hidden) return;
+    openNoteModal(note);
+  });
+  return row;
+}
+
+// Carpeta con icono de ojo (Fase 3, navegacion tipo explorador de
+// archivos): la fila entera abre esa carpeta al clicarla; el lapiz
+// (aparte, con su propio stopPropagation) la edita sin entrar.
+function buildFolderRow(folder) {
+  const row = document.createElement('div');
+  row.className = 'note-item note-folder-row';
+
+  // Siempre el icono generico de carpeta, sin icono/emoji personalizado
+  // -- Koku prefirio quitar esa eleccion porque el icono de carpeta ya
+  // ayuda bastante a diferenciarla de una nota de un vistazo, y elegir
+  // uno propio por carpeta no aportaba tanto.
+  const iconWrap = document.createElement('span');
+  iconWrap.className = 'note-folder-row-icon';
+  iconWrap.style.color = folder.color;
+  iconWrap.innerHTML = FOLDER_SVG;
+  row.appendChild(iconWrap);
+
+  const contentWrap = document.createElement('div');
+  contentWrap.className = 'note-item-content-wrap';
+  const title = document.createElement('span');
+  title.className = 'note-item-title';
+  title.textContent = folder.name;
+  contentWrap.appendChild(title);
+  row.appendChild(contentWrap);
+
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'note-folder-chip-edit';
+  editBtn.textContent = '✎';
+  editBtn.setAttribute('aria-label', `Editar carpeta ${folder.name}`);
+  editBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openNoteFolderModal(folder);
+  });
+  row.appendChild(editBtn);
+
+  row.appendChild(buildFavoriteStarBtn(folder.favorite, (e) => {
+    e.stopPropagation();
+    toggleFolderFavorite(folder);
+  }));
+
+  row.addEventListener('click', () => {
+    state.currentNoteFolderId = folder.id;
+    clearNoteSearch();
+    renderNotesView();
+  });
+  return row;
+}
+
+// Boton de estrella compartido por filas de nota y de carpeta, y por los
+// dos modales de creacion/edicion (ahi se usa suelto, sin toggle
+// inmediato -- ver openNoteModal/openNoteFolderModal).
+function buildFavoriteStarBtn(isFavorite, onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'favorite-star-btn' + (isFavorite ? ' is-favorite' : '');
+  btn.innerHTML = isFavorite ? STAR_FILLED_SVG : STAR_OUTLINE_SVG;
+  btn.setAttribute('aria-label', isFavorite ? 'Quitar de favoritos' : 'Marcar como favorito');
+  btn.setAttribute('aria-pressed', isFavorite ? 'true' : 'false');
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+async function toggleNoteFavorite(note) {
+  await api(`/api/notes/${note.id}`, { method: 'PUT', body: JSON.stringify({ favorite: !note.favorite }) });
+  await loadNotes();
+  renderNotesView();
+}
+
+async function toggleFolderFavorite(folder) {
+  await api(`/api/note-folders/${folder.id}`, { method: 'PUT', body: JSON.stringify({ favorite: !folder.favorite }) });
+  await loadNoteFolders();
+  renderNotesView();
+}
+
+// Favoritos: preferencia de ESTE dispositivo (localStorage), leida por
+// appendFavoriteSortedGroup. "sections" separa con una cabecera
+// "Favoritos" / "Todo lo demas" (solo si hay al menos un favorito, para
+// no ensenar una cabecera vacia); "merged" (por defecto) simplemente
+// ordena los favoritos primero, sin cabeceras, en la misma lista.
+function getFavoritesDisplayMode() {
+  return localStorage.getItem('favoritesDisplayMode') === 'sections' ? 'sections' : 'merged';
+}
+
+// Anade una tanda de filas (subcarpetas O notas, nunca mezcladas entre
+// si -- cada tipo mantiene su propio orden de favoritos por separado)
+// al contenedor, ya sea con cabeceras o mezcladas segun el ajuste.
+function appendFavoriteSortedGroup(container, items, buildRowFn) {
+  if (items.length === 0) return;
+  const favorites = items.filter((i) => i.favorite);
+  const rest = items.filter((i) => !i.favorite);
+
+  if (getFavoritesDisplayMode() === 'sections' && favorites.length > 0) {
+    const favHeading = document.createElement('div');
+    favHeading.className = 'note-list-section-heading';
+    favHeading.textContent = 'Favoritos';
+    container.appendChild(favHeading);
+    favorites.forEach((i) => container.appendChild(buildRowFn(i)));
+
+    if (rest.length > 0) {
+      const restHeading = document.createElement('div');
+      restHeading.className = 'note-list-section-heading';
+      restHeading.textContent = 'Todo lo demas';
+      container.appendChild(restHeading);
+      rest.forEach((i) => container.appendChild(buildRowFn(i)));
+    }
+  } else {
+    favorites.concat(rest).forEach((i) => container.appendChild(buildRowFn(i)));
+  }
+}
+
+// Dibuja "donde estas" en Notas: las subcarpetas de aqui arriba, las
+// notas de aqui debajo, todo en una sola lista — como el explorador de
+// archivos en vista de lista. "Volver" solo se ve si no estas en la
+// raiz (currentNoteFolderId === null). La busqueda (state.noteSearchQuery)
+// filtra por nombre SOLO dentro de la carpeta actual, no en toda la app.
+function renderNotesView() {
+  const container = document.getElementById('notes-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  document.getElementById('btn-note-folder-back').classList.toggle('hidden', state.currentNoteFolderId === null);
+
+  let subfolders = state.noteFolders.filter((f) => f.parentId === state.currentNoteFolderId);
+  let notesHere = (state.notes || []).filter((n) => n.folderId === state.currentNoteFolderId);
+
+  const query = (state.noteSearchQuery || '').trim().toLowerCase();
+  if (query) {
+    subfolders = subfolders.filter((f) => f.name.toLowerCase().includes(query));
+    notesHere = notesHere.filter((n) => n.title.toLowerCase().includes(query));
+  }
+
+  if (subfolders.length === 0 && notesHere.length === 0) {
+    container.innerHTML = `<p class="empty-hint">${query ? 'Nada coincide con esa busqueda.' : 'No hay nada aqui todavia.'}</p>`;
+    return;
+  }
+
+  appendFavoriteSortedGroup(container, subfolders, buildFolderRow);
+  appendFavoriteSortedGroup(container, notesHere, buildNoteRow);
+}
+
+function clearNoteSearch() {
+  state.noteSearchQuery = '';
+  const input = document.getElementById('note-search-input');
+  if (input) input.value = '';
+}
+
+document.getElementById('note-search-input').addEventListener('input', (e) => {
+  state.noteSearchQuery = e.target.value;
+  renderNotesView();
+});
+
+document.getElementById('btn-note-folder-back').addEventListener('click', () => {
+  const current = state.noteFolders.find((f) => f.id === state.currentNoteFolderId);
+  state.currentNoteFolderId = current ? current.parentId : null;
+  clearNoteSearch();
+  renderNotesView();
+});
+
+// Selector de carpeta (opcional) dentro del modal de nota — mismo patron
+// que el selector de grupo de las tareas (populateTaskGroupSelect), pero
+// con sangria segun la profundidad para que se note el anidado (un
+// espacio ancho de verdad, U+3000, que no se colapsa como los espacios
+// normales en HTML).
+const noteFolderField = createSelectField({ options: [{ value: '', label: 'Sin carpeta' }], initialValue: '' });
+document.getElementById('note-folder-field').appendChild(noteFolderField.element);
+
+function buildFolderSelectOptions(parentId, depth) {
+  const children = state.noteFolders
+    .filter((f) => f.parentId === parentId)
+    .sort((a, b) => a.position - b.position);
+  let options = [];
+  children.forEach((f) => {
+    const indent = '　'.repeat(depth);
+    const prefix = depth > 0 ? '↳ ' : '';
+    options.push({ value: String(f.id), label: indent + prefix + f.name });
+    options = options.concat(buildFolderSelectOptions(f.id, depth + 1));
+  });
+  return options;
+}
+
+function populateNoteFolderSelect() {
+  const current = noteFolderField.getValue();
+  noteFolderField.setOptions([
+    { value: '', label: 'Sin carpeta' },
+    ...buildFolderSelectOptions(null, 0),
+  ]);
+  noteFolderField.setValue(current);
+}
+
+// El estado del favorito dentro del modal (nota nueva o existente) vive
+// en esta variable simple mientras el modal esta abierto -- se lee al
+// guardar (note-form submit) y se actualiza al pulsar la estrella,
+// igual que cualquier otro campo del formulario.
+let noteModalFavorite = false;
+
+function refreshNoteFavoriteBtn() {
+  const btn = document.getElementById('note-favorite-btn');
+  btn.innerHTML = noteModalFavorite ? STAR_FILLED_SVG : STAR_OUTLINE_SVG;
+  btn.classList.toggle('is-favorite', noteModalFavorite);
+  btn.setAttribute('aria-pressed', noteModalFavorite ? 'true' : 'false');
+}
+
+document.getElementById('note-favorite-btn').addEventListener('click', () => {
+  noteModalFavorite = !noteModalFavorite;
+  refreshNoteFavoriteBtn();
+});
+
+function openNoteModal(note) {
+  const modal = document.getElementById('note-modal');
+  document.getElementById('note-modal-title').textContent = note ? 'Editar nota' : 'Nueva nota';
+  document.getElementById('note-id').value = note ? note.id : '';
+  document.getElementById('note-title').value = note ? note.title : '';
+  document.getElementById('note-body').value = note && note.body ? note.body : '';
+  populateNoteFolderSelect();
+  // Nota nueva: por defecto se guarda en la carpeta donde estas
+  // navegando ahora mismo, igual que crear un archivo nuevo dentro de la
+  // carpeta que tienes abierta en un explorador de archivos.
+  const defaultFolderId = note ? note.folderId : state.currentNoteFolderId;
+  noteFolderField.setValue(defaultFolderId ? String(defaultFolderId) : '');
+  document.getElementById('btn-delete-note').classList.toggle('hidden', !note);
+  noteModalFavorite = note ? !!note.favorite : false;
+  refreshNoteFavoriteBtn();
+  modal.classList.remove('hidden');
+}
+
+function closeNoteModal() {
+  document.getElementById('note-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-new-note').addEventListener('click', () => openNoteModal(null));
+// Atajo rapido en la topbar, junto a "+ Nuevo evento"/"+ Nueva tarea" --
+// abre directamente el modal, sin tener que entrar antes en Mi espacio.
+document.getElementById('btn-new-note-topbar').addEventListener('click', () => openNoteModal(null));
+document.getElementById('btn-cancel-note').addEventListener('click', closeNoteModal);
+document.getElementById('btn-close-note').addEventListener('click', closeNoteModal);
+
+document.getElementById('note-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('note-id').value;
+  const folderRaw = noteFolderField.getValue();
+  const payload = {
+    title: document.getElementById('note-title').value,
+    body: document.getElementById('note-body').value,
+    folderId: folderRaw === '' ? null : Number(folderRaw),
+    favorite: noteModalFavorite,
+  };
+
+  if (id) {
+    await api(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/notes', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  closeNoteModal();
+  await loadNotes();
+  renderNotesView();
+});
+
+document.getElementById('btn-delete-note').addEventListener('click', async () => {
+  const id = document.getElementById('note-id').value;
+  if (!id) return;
+  if (!confirm('¿Eliminar esta nota?')) return;
+  await api(`/api/notes/${id}`, { method: 'DELETE' });
+  closeNoteModal();
+  await loadNotes();
+  renderNotesView();
+});
+
+// ---------------------------------------------------------------------
+// Carpetas de notas (Fase 3): solo organizacion (nombre/icono/color),
+// sistema propio SEPARADO de los Grupos del calendario. Pueden contener
+// otras carpetas -- navegacion tipo explorador de archivos (ver
+// renderNotesView arriba). Sin PIN ni bloqueo — eso ya se resolvio por
+// nota individual con "ocultar".
+// ---------------------------------------------------------------------
+async function loadNoteFolders() {
+  state.noteFolders = await api('/api/note-folders');
+}
+
+// createColorField vive en settings.js (widget generico, tambien lo usa
+// el formulario de Grupos) — se crea aqui LA PRIMERA VEZ que hace falta
+// (al abrir el modal), nunca al cargar la pagina, porque settings.js se
+// carga DESPUES de app.js y todavia no existiria esa funcion si se
+// llamara nada mas cargar. Ya no hay selector de icono para carpetas
+// (se quito: el icono generico de FOLDER_SVG ya diferencia bien una
+// carpeta de una nota, no hacia falta elegir uno propio por carpeta).
+let noteFolderColorField = null;
+let noteFolderModalFavorite = false;
+
+function ensureNoteFolderFields() {
+  if (noteFolderColorField) return;
+  noteFolderColorField = createColorField({ initialValue: '#5b8cff' });
+  document.getElementById('note-folder-color-field').appendChild(noteFolderColorField.element);
+}
+
+function refreshNoteFolderFavoriteBtn() {
+  const btn = document.getElementById('note-folder-favorite-btn');
+  btn.innerHTML = noteFolderModalFavorite ? STAR_FILLED_SVG : STAR_OUTLINE_SVG;
+  btn.classList.toggle('is-favorite', noteFolderModalFavorite);
+  btn.setAttribute('aria-pressed', noteFolderModalFavorite ? 'true' : 'false');
+}
+
+document.getElementById('note-folder-favorite-btn').addEventListener('click', () => {
+  noteFolderModalFavorite = !noteFolderModalFavorite;
+  refreshNoteFolderFavoriteBtn();
+});
+
+// Carpeta nueva: el padre por defecto es "donde estas" navegando ahora
+// mismo (currentNoteFolderId) -- si estas dentro de "Trabajo" y creas
+// una carpeta, se crea DENTRO de "Trabajo", sin tener que elegirlo a
+// mano. Al editar una carpeta ya existente, su padre no se toca aqui
+// (no hay forma de "mover" una carpeta desde este modal todavia).
+function openNoteFolderModal(folder) {
+  ensureNoteFolderFields();
+  document.getElementById('note-folder-modal-title').textContent = folder ? 'Editar carpeta' : 'Nueva carpeta';
+  document.getElementById('note-folder-id').value = folder ? folder.id : '';
+  document.getElementById('note-folder-name').value = folder ? folder.name : '';
+  noteFolderColorField.setValue(folder ? folder.color : '#5b8cff');
+  document.getElementById('btn-delete-note-folder').classList.toggle('hidden', !folder);
+  noteFolderModalFavorite = folder ? !!folder.favorite : false;
+  refreshNoteFolderFavoriteBtn();
+  document.getElementById('note-folder-modal').classList.remove('hidden');
+}
+
+function closeNoteFolderModal() {
+  document.getElementById('note-folder-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-new-note-folder').addEventListener('click', () => openNoteFolderModal(null));
+document.getElementById('btn-cancel-note-folder').addEventListener('click', closeNoteFolderModal);
+document.getElementById('btn-close-note-folder').addEventListener('click', closeNoteFolderModal);
+
+document.getElementById('note-folder-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('note-folder-id').value;
+  const payload = {
+    name: document.getElementById('note-folder-name').value,
+    color: noteFolderColorField.getValue(),
+    favorite: noteFolderModalFavorite,
+  };
+  // Solo se manda parentId al CREAR (hereda donde estas navegando); al
+  // editar, el padre se deja tal cual estaba (undefined = "no lo toques"
+  // en la API).
+  if (!id) payload.parentId = state.currentNoteFolderId;
+
+  if (id) {
+    await api(`/api/note-folders/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/note-folders', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  closeNoteFolderModal();
+  await loadNoteFolders();
+  renderNotesView();
+  populateNoteFolderSelect();
+});
+
+document.getElementById('btn-delete-note-folder').addEventListener('click', async () => {
+  const id = document.getElementById('note-folder-id').value;
+  if (!id) return;
+  if (!confirm('¿Eliminar esta carpeta? Las notas y subcarpetas que tenga no se borran: suben un nivel.')) return;
+  await api(`/api/note-folders/${id}`, { method: 'DELETE' });
+  closeNoteFolderModal();
+  await loadNoteFolders();
+  await loadNotes();
+  renderNotesView();
+  populateNoteFolderSelect();
+});
+
+// ---------------------------------------------------------------------
 // Atajos de teclado: lista fija de acciones que ofrece la app (no se
 // pueden inventar acciones nuevas), y para cada una el USUARIO decide que
 // tecla la dispara, desde Configuracion > Atajos de teclado (settings.js
@@ -539,17 +1840,36 @@ async function loadReminders() {
 // de verdad). Es una preferencia de ESTE dispositivo/navegador, por eso
 // vive en localStorage y no en el servidor.
 // ---------------------------------------------------------------------
+// Mueve el panel de recordatorios un dia adelante/atras: si ya estabas
+// viendo un dia concreto, se mueve desde ESE dia; si estabas en "Proximos",
+// arranca desde hoy. Reutiliza showDayInReminders, que ya cambia el panel
+// a modo "dia" y pide los eventos/tareas de esa fecha al servidor.
+function shiftRemindersDay(delta) {
+  const base = state.remindersMode === 'day' && state.remindersDayDate ? state.remindersDayDate : new Date();
+  const next = new Date(base);
+  next.setDate(next.getDate() + delta);
+  showDayInReminders(next);
+}
+
 const SHORTCUT_ACTIONS = [
   { id: 'new-event', label: 'Nuevo evento', run: () => document.getElementById('btn-new-event').click() },
   { id: 'open-settings', label: 'Abrir configuración', run: () => document.getElementById('btn-settings').click() },
   { id: 'prev-month', label: 'Mes anterior', run: () => document.getElementById('nav-prev').click() },
   { id: 'next-month', label: 'Mes siguiente', run: () => document.getElementById('nav-next').click() },
+  { id: 'prev-day', label: 'Día anterior', run: () => shiftRemindersDay(-1) },
+  { id: 'next-day', label: 'Día siguiente', run: () => shiftRemindersDay(1) },
 ];
-// Atajos de fabrica: el usuario puede cambiarlos o quitarlos por completo
-// desde Configuracion; un valor '' guardado explicitamente significa "sin
-// atajo", distinto de "todavia no tocado" (que usa este por defecto).
-const DEFAULT_SHORTCUTS = { 'new-event': 'n' };
+// Atajos de fabrica: el usuario puede cambiarlos, quitarlos, o anadir mas
+// de una combinacion para la MISMA accion (ej. "n" Y "ctrl+shift+a" abren
+// las dos "Nuevo evento"). Un array vacio [] guardado explicitamente
+// significa "sin ningun atajo", distinto de "todavia no tocado" (que usa
+// estos por defecto).
+const DEFAULT_SHORTCUTS = { 'new-event': ['n'], 'prev-day': ['arrowleft'], 'next-day': ['arrowright'] };
 
+// Lee lo guardado y SIEMPRE devuelve arrays — si venia del formato viejo
+// (un string suelto por accion, de antes de que se pudiera tener mas de
+// una combinacion), lo envuelve en un array de un elemento sin perder lo
+// que ya tenias configurado.
 function getShortcutMap() {
   let stored = {};
   try {
@@ -559,20 +1879,37 @@ function getShortcutMap() {
   }
   const map = {};
   SHORTCUT_ACTIONS.forEach((a) => {
-    map[a.id] = Object.prototype.hasOwnProperty.call(stored, a.id) ? stored[a.id] : (DEFAULT_SHORTCUTS[a.id] || '');
+    if (Object.prototype.hasOwnProperty.call(stored, a.id)) {
+      const value = stored[a.id];
+      map[a.id] = Array.isArray(value) ? value : (value ? [value] : []);
+    } else {
+      map[a.id] = DEFAULT_SHORTCUTS[a.id] ? [...DEFAULT_SHORTCUTS[a.id]] : [];
+    }
   });
   return map;
 }
 
-function setShortcut(actionId, combo) {
-  let stored = {};
-  try {
-    stored = JSON.parse(localStorage.getItem('keyboardShortcuts') || '{}');
-  } catch (e) {
-    stored = {};
-  }
-  stored[actionId] = combo;
-  localStorage.setItem('keyboardShortcuts', JSON.stringify(stored));
+function saveShortcutMap(map) {
+  localStorage.setItem('keyboardShortcuts', JSON.stringify(map));
+}
+
+// Anade una combinacion nueva a una accion (no reemplaza las que ya
+// tuviera) — si esa combinacion ya la usaba OTRA accion, se la quita de
+// ahi primero para que no queden dos acciones peleandose por la misma
+// tecla.
+function addShortcut(actionId, combo) {
+  const map = getShortcutMap();
+  SHORTCUT_ACTIONS.forEach((a) => {
+    map[a.id] = map[a.id].filter((c) => c !== combo);
+  });
+  map[actionId].push(combo);
+  saveShortcutMap(map);
+}
+
+function removeShortcut(actionId, combo) {
+  const map = getShortcutMap();
+  map[actionId] = map[actionId].filter((c) => c !== combo);
+  saveShortcutMap(map);
 }
 
 // Convierte un evento de teclado en un identificador estable, ej.
@@ -618,7 +1955,7 @@ document.addEventListener('keydown', (e) => {
   if (!combo) return;
 
   const map = getShortcutMap();
-  const action = SHORTCUT_ACTIONS.find((a) => map[a.id] && map[a.id] === combo);
+  const action = SHORTCUT_ACTIONS.find((a) => map[a.id].includes(combo));
   if (action) {
     e.preventDefault();
     action.run();
@@ -626,54 +1963,29 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------------------------------------------------------------------
-// Vista: un UNICO modo activo a la vez — Normal, Pantalla completa o
-// Ventana flotante — que se cambia desde Configuracion > Vista (ver
-// refreshViewTab en settings.js). Cambiar de una a otra deshace la
-// anterior (sale de pantalla completa, o cierra la ventana flotante) en
-// vez de dejarlas acumularse; por eso openFloatingWindow reutiliza la
-// MISMA ventana flotante si ya esta abierta en vez de crear otra.
+// Vista: un UNICO modo activo a la vez — Normal o Pantalla completa —
+// que se cambia desde Configuracion > Vista (ver refreshViewTab en
+// settings.js). Cambiar de una a otra deshace la anterior (sale de
+// pantalla completa) en vez de dejarlas acumularse.
+// (Hubo tambien un modo "Ventana flotante", quitado: en el navegador
+// window.open() no es fiable — muchos navegadores abren otra PESTANA en
+// vez de una ventana pequeña — y en Electron habria hecho falta
+// configurar setWindowOpenHandler a mano para controlar el tamaño de la
+// ventana nueva. No compensaba el esfuerzo para lo poco que se usaba.)
 // ---------------------------------------------------------------------
-let floatingWindowRef = null;
-let floatingWindowWatcher = null;
-
 function getViewMode() {
   return localStorage.getItem('viewMode') || 'normal';
 }
 
 function setViewMode(mode) {
   localStorage.setItem('viewMode', mode);
+  // En Electron, ademas de localStorage (que solo puede leer la propia
+  // pagina), se lo decimos tambien al proceso principal — asi puede saber
+  // que vista tocaba ANTES de crear la ventana la proxima vez, en vez de
+  // enterarse ya con la pagina cargada (ver electron/main.js).
+  if (window.electronAPI && window.electronAPI.saveViewMode) window.electronAPI.saveViewMode(mode);
   document.getElementById('default-view-banner').classList.add('hidden');
   if (typeof refreshViewTab === 'function') refreshViewTab();
-}
-
-function closeFloatingWindow() {
-  clearInterval(floatingWindowWatcher);
-  if (floatingWindowRef && !floatingWindowRef.closed) floatingWindowRef.close();
-  floatingWindowRef = null;
-}
-
-function openFloatingWindow() {
-  if (floatingWindowRef && !floatingWindowRef.closed) {
-    floatingWindowRef.focus();
-    return;
-  }
-  floatingWindowRef = window.open(
-    location.origin + location.pathname,
-    'remindmelater-floating',
-    'width=420,height=680,menubar=no,toolbar=no,location=no,status=no,resizable=yes'
-  );
-  // Si cierran la ventana flotante a mano (la x de la ventana, no un
-  // boton nuestro), nos enteramos mirando cada segundo si sigue abierta,
-  // y volvemos el modo a "normal" para que Configuracion no diga que
-  // sigue activa cuando ya no lo esta.
-  clearInterval(floatingWindowWatcher);
-  floatingWindowWatcher = setInterval(() => {
-    if (!floatingWindowRef || floatingWindowRef.closed) {
-      clearInterval(floatingWindowWatcher);
-      floatingWindowRef = null;
-      if (getViewMode() === 'floating') setViewMode('normal');
-    }
-  }, 1000);
 }
 
 // Aplica de verdad el cambio de modo: deshace lo que hubiera activo y
@@ -681,21 +1993,50 @@ function openFloatingWindow() {
 // desde el aviso que sale al cargar la pagina si la vista guardada no es
 // la normal (ver applyViewModePrompt).
 function applyViewMode(mode) {
-  if (mode !== 'fullscreen' && document.fullscreenElement) document.exitFullscreen();
-  if (mode !== 'floating') closeFloatingWindow();
+  if (window.electronAPI) {
+    // Dentro de la app de escritorio, la pantalla completa la controla la
+    // ventana nativa (proceso principal) en vez de la API de pantalla
+    // completa del navegador — por eso puede activarse sola al arrancar,
+    // sin el aviso de "hace falta un clic" (ver applyViewModePrompt).
+    window.electronAPI.setNativeFullscreen(mode === 'fullscreen');
+  } else if (mode !== 'fullscreen' && document.fullscreenElement) {
+    document.exitFullscreen();
+  }
 
-  if (mode === 'fullscreen' && document.documentElement.requestFullscreen) {
+  if (!window.electronAPI && mode === 'fullscreen' && document.documentElement.requestFullscreen) {
     document.documentElement.requestFullscreen().catch(() => {});
-  } else if (mode === 'floating') {
-    openFloatingWindow();
   }
   setViewMode(mode);
 }
 
+// Simetrico al 'fullscreenchange' del navegador (ver mas abajo), pero para
+// cuando Electron sale de pantalla completa nativa por su cuenta (Esc, el
+// propio control de la ventana...) — sin esto, Configuracion > Vista se
+// quedaria diciendo "Pantalla completa" aunque ya no lo estuviera.
+if (window.electronAPI && window.electronAPI.onNativeFullscreenChange) {
+  window.electronAPI.onNativeFullscreenChange((isFullscreen) => {
+    if (isClosingPage) return;
+    if (!isFullscreen && getViewMode() === 'fullscreen') {
+      setViewMode('normal');
+    }
+  });
+}
+
 // Si sales de pantalla completa con Esc o con el propio navegador (no con
 // nuestro control), el modo guardado tiene que volver a "normal" para que
-// no se quede desincronizado.
+// no se quede desincronizado. OJO: cerrar la pestana/ventana estando en
+// pantalla completa TAMBIEN dispara este mismo evento (el navegador sale
+// de pantalla completa como parte de cerrarse), y sin este aviso eso
+// borraria "pantalla completa" de la preferencia guardada justo al
+// cerrar la app — pareceria que nunca se guarda. isClosingPage se marca
+// en cuanto empieza a cerrarse/recargarse la pagina, para distinguir ese
+// caso del Esc de verdad y no tocar la preferencia guardada entonces.
+let isClosingPage = false;
+window.addEventListener('pagehide', () => { isClosingPage = true; });
+window.addEventListener('beforeunload', () => { isClosingPage = true; });
+
 document.addEventListener('fullscreenchange', () => {
+  if (isClosingPage) return;
   if (!document.fullscreenElement && getViewMode() === 'fullscreen') {
     setViewMode('normal');
   }
@@ -708,6 +2049,15 @@ document.addEventListener('fullscreenchange', () => {
 function applyViewModePrompt() {
   const mode = getViewMode();
   const banner = document.getElementById('default-view-banner');
+
+  if (window.electronAPI && mode === 'fullscreen') {
+    // En Electron SI podemos activarla solos (ver applyViewMode), asi que
+    // ni falta el aviso.
+    window.electronAPI.setNativeFullscreen(true);
+    banner.classList.add('hidden');
+    return;
+  }
+
   if (mode === 'normal' || (mode === 'fullscreen' && document.fullscreenElement)) {
     banner.classList.add('hidden');
     return;
@@ -726,6 +2076,241 @@ document.getElementById('btn-apply-default-view').addEventListener('click', () =
 document.getElementById('btn-dismiss-default-view').addEventListener('click', () => {
   document.getElementById('default-view-banner').classList.add('hidden');
 });
+
+// ---------------------------------------------------------------------
+// "Mi espacio" (Fase 1): hub con 3 columnas (Proximos / Tareas / Notas,
+// esta ultima vacia por ahora) en vez de los bloques apilados de
+// siempre. Como se accede a el es una preferencia de ESTE dispositivo
+// (localStorage), elegida en Configuracion > Vista > Mi espacio (ver
+// refreshMiEspacioModeOptions en settings.js):
+//   - "panel": el hub vive SIEMPRE dentro de #reminders-panel, al lado
+//     del calendario (sustituye a los 2 bloques apilados de siempre).
+//   - "topbar": el panel lateral se queda exactamente como esta hoy
+//     (Proximos arriba, Tareas fijo abajo); un boton nuevo en la topbar
+//     abre el hub a pantalla completa cuando lo necesites.
+// En los dos casos, los bloques #reminders-top-block/#reminders-tasks-block
+// de SIEMPRE se MUEVEN de sitio (Node.appendChild) en vez de duplicarse,
+// asi que su renderizado (loadReminders, renderTasksList...) no cambia
+// nada, solo cambia DONDE viven en el DOM.
+// ---------------------------------------------------------------------
+const MY_SPACE_MODE_IDS = ['topbar', 'panel'];
+
+function getMiEspacioMode() {
+  const stored = localStorage.getItem('miEspacioMode');
+  return MY_SPACE_MODE_IDS.includes(stored) ? stored : 'topbar';
+}
+
+// Deja los 2 bloques de siempre en su sitio clasico, uno debajo del otro
+// dentro de #reminders-panel — como si "Mi espacio" no existiera. Fuera
+// de Mi espacio no hace falta la navegacion de dia (ya estan el
+// calendario de al lado y los atajos de teclado) ni tiene sentido
+// arrancar siempre en el dia de hoy, asi que se vuelve al "Proximos" de
+// toda la vida.
+function restoreClassicRemindersPanel() {
+  // La colocacion de verdad de los 3 bloques (sueltos o dentro del slot
+  // agrupado) la hace applyRemindersPanelLayout() -- aqui solo se deja
+  // todo lo demas del panel clasico como siempre.
+  document.getElementById('reminders-day-nav').classList.add('hidden');
+  showUpcomingReminders();
+  applyRemindersPanelLayout();
+}
+
+// Coloca los 3 bloques dentro de las columnas del hub, alli donde el hub
+// este montado ahora mismo (dentro del panel lateral o dentro de la
+// pantalla completa de #my-space-view). Dentro de Mi espacio, Proximos
+// arranca siempre en el dia de hoy (en vez del listado general) con la
+// navegacion de dia visible arriba, porque en modo "boton" el calendario
+// de al lado no se ve mientras Mi espacio esta abierto.
+function moveRemindersIntoHub() {
+  document.getElementById('my-space-col-reminders').appendChild(document.getElementById('reminders-top-block'));
+  document.getElementById('my-space-col-tasks').appendChild(document.getElementById('reminders-tasks-block'));
+  document.getElementById('my-space-col-notes').appendChild(document.getElementById('reminders-notes-block'));
+  document.getElementById('reminders-day-nav').classList.remove('hidden');
+  showDayInReminders(new Date());
+  // Dentro del hub (3 columnas propias, cada una con su sitio) el ajuste
+  // de "agrupar con flechas" no pinta nada -- cada seccion vive siempre
+  // en su propia columna, visible entera.
+  document.getElementById('reminders-panel-switcher').classList.add('hidden');
+  document.getElementById('reminders-panel-grouped-slot').classList.add('hidden');
+  REMINDERS_PANEL_PAGES.forEach((p) => document.getElementById(p.blockId).classList.remove('hidden'));
+}
+
+// Panel lateral clasico (modo "topbar" de Mi espacio, ver mas abajo):
+// que secciones de Recordatorios/Tareas/Notas van AGRUPADAS (juntas,
+// alternando con flechas, una visible cada vez dentro de
+// #reminders-panel-grouped-slot) y cuales se quedan SUELTAS (apiladas,
+// cada una siempre visible con su propio scroll, en su posicion natural
+// -- ver REMINDERS_PANEL_PAGES mas abajo para el orden). Preferencia de
+// ESTE dispositivo (localStorage, un array de ids), elegida con
+// casillas en Configuracion > Vista > "Panel lateral clasico" (ver
+// refreshRemindersPanelGroupedOptions en settings.js). Agrupar 0 o 1
+// seccion no hace nada especial -- con una sola marcada no hay nada que
+// alternar, asi que se trata igual que "ninguna marcada" (todas
+// sueltas). En modo "panel" de Mi espacio (hub de 3 columnas) este
+// ajuste no pinta nada: cada columna ya vive en su propio sitio fijo
+// (ver moveRemindersIntoHub).
+//
+// REMINDERS_PANEL_PAGES esta pensado para poder crecer el dia que haya
+// una 4a seccion: toda la logica de abajo itera sobre el array entero,
+// sin ningun "3" fijo en el codigo.
+const REMINDERS_PANEL_PAGES = [
+  { id: 'reminders', label: 'Recordatorios', blockId: 'reminders-top-block' },
+  { id: 'tasks', label: 'Tareas', blockId: 'reminders-tasks-block' },
+  { id: 'notes', label: 'Notas', blockId: 'reminders-notes-block' },
+];
+let remindersPanelActivePage = 'reminders';
+
+function getRemindersGroupedSections() {
+  let stored;
+  try {
+    stored = JSON.parse(localStorage.getItem('remindersPanelGrouped') || '[]');
+  } catch {
+    stored = [];
+  }
+  if (!Array.isArray(stored)) return [];
+  const valid = stored.filter((id) => REMINDERS_PANEL_PAGES.some((p) => p.id === id));
+  return valid.length >= 2 ? valid : [];
+}
+
+// Recoloca cada bloque en su sitio (agrupado o suelto) y decide que se
+// ve. Se llama al arrancar, al cambiar el ajuste, y cada vez que se
+// alterna dentro del grupo (stepRemindersPanelPage).
+function applyRemindersPanelLayout() {
+  if (getMiEspacioMode() === 'panel') return; // este ajuste no aplica ahi, ver moveRemindersIntoHub
+
+  const panel = document.getElementById('reminders-panel');
+  const groupedSlot = document.getElementById('reminders-panel-grouped-slot');
+  const switcher = document.getElementById('reminders-panel-switcher');
+  const grouped = getRemindersGroupedSections();
+
+  // Coloca cada bloque: las agrupadas dentro del slot compartido (que se
+  // inserta en el panel en la posicion de la PRIMERA seccion agrupada,
+  // segun el orden natural), las sueltas directamente en el panel.
+  let groupedSlotPlaced = false;
+  REMINDERS_PANEL_PAGES.forEach((p) => {
+    const block = document.getElementById(p.blockId);
+    if (grouped.includes(p.id)) {
+      groupedSlot.appendChild(block);
+      if (!groupedSlotPlaced) {
+        panel.appendChild(groupedSlot);
+        groupedSlotPlaced = true;
+      }
+    } else {
+      panel.appendChild(block);
+      block.classList.remove('hidden');
+    }
+  });
+
+  if (grouped.length === 0) {
+    groupedSlot.classList.add('hidden');
+    switcher.classList.add('hidden');
+    return;
+  }
+
+  groupedSlot.classList.remove('hidden');
+  switcher.classList.remove('hidden');
+  if (!grouped.includes(remindersPanelActivePage)) remindersPanelActivePage = grouped[0];
+  grouped.forEach((id) => {
+    const p = REMINDERS_PANEL_PAGES.find((page) => page.id === id);
+    document.getElementById(p.blockId).classList.toggle('hidden', id !== remindersPanelActivePage);
+  });
+  document.getElementById('reminders-panel-switch-label').textContent =
+    REMINDERS_PANEL_PAGES.find((p) => p.id === remindersPanelActivePage).label;
+}
+
+function stepRemindersPanelPage(delta) {
+  const grouped = getRemindersGroupedSections();
+  if (grouped.length === 0) return;
+  const idx = grouped.indexOf(remindersPanelActivePage);
+  const nextIdx = (idx + delta + grouped.length) % grouped.length;
+  remindersPanelActivePage = grouped[nextIdx];
+  applyRemindersPanelLayout();
+}
+
+document.getElementById('btn-panel-switch-prev').addEventListener('click', () => stepRemindersPanelPage(-1));
+document.getElementById('btn-panel-switch-next').addEventListener('click', () => stepRemindersPanelPage(1));
+
+function collapseMySpaceExpandedColumn() {
+  delete document.getElementById('my-space-hub').dataset.expanded;
+  document.getElementById('my-space-back-btn').classList.add('hidden');
+}
+
+function closeMySpaceView() {
+  document.getElementById('my-space-view').classList.add('hidden');
+  collapseMySpaceExpandedColumn();
+  restoreClassicRemindersPanel();
+}
+
+function openMySpaceView() {
+  moveRemindersIntoHub();
+  document.getElementById('my-space-view').classList.remove('hidden');
+}
+
+// Aplica el modo elegido: donde vive el hub, y si hace falta o no el
+// boton de la topbar. Se llama al arrancar y cada vez que cambias el
+// ajuste en Configuracion > Vista.
+function applyMiEspacioMode() {
+  const mode = getMiEspacioMode();
+  const panel = document.getElementById('reminders-panel');
+  const hub = document.getElementById('my-space-hub');
+
+  // Al cambiar de modo (o al arrancar) siempre se parte de cero: el hub
+  // cerrado y los bloques en su sitio clasico dentro del panel.
+  document.getElementById('my-space-view').classList.add('hidden');
+  collapseMySpaceExpandedColumn();
+  restoreClassicRemindersPanel();
+  panel.classList.remove('my-space-panel-mode');
+
+  if (mode === 'panel') {
+    panel.appendChild(hub);
+    panel.classList.add('my-space-panel-mode');
+    moveRemindersIntoHub();
+    document.getElementById('btn-my-space').classList.add('hidden');
+  } else {
+    document.getElementById('my-space-view').appendChild(hub);
+    document.getElementById('btn-my-space').classList.remove('hidden');
+  }
+}
+
+document.getElementById('btn-my-space').addEventListener('click', openMySpaceView);
+document.getElementById('btn-close-my-space').addEventListener('click', closeMySpaceView);
+
+// Mientras una columna cambia de ancho (expandir o volver a las 3), el
+// contenido de dentro se oculta (ver .is-animating en styles.css) para
+// que no se vea el texto reajustandose a media animacion — 340ms es la
+// duracion de la transicion CSS (320ms) con un pelin de margen para que
+// de tiempo a que termine de verdad antes de destaparlo.
+const MY_SPACE_COLUMN_ANIMATION_MS = 340;
+let mySpaceAnimationTimer = null;
+
+function playMySpaceColumnAnimation() {
+  const hub = document.getElementById('my-space-hub');
+  hub.classList.add('is-animating');
+  clearTimeout(mySpaceAnimationTimer);
+  mySpaceAnimationTimer = setTimeout(() => hub.classList.remove('is-animating'), MY_SPACE_COLUMN_ANIMATION_MS);
+}
+
+// Un solo listener en el hub entero (delegacion) en vez de uno por
+// columna: mas simple, y sigue funcionando igual aunque los bloques que
+// hay dentro se muevan de sitio. Ya no hay un boton dedicado para
+// expandir (ocupaba espacio vertical solo para eso) -- clicar el TITULO
+// de la columna (h2, con la clase my-space-col-expand-trigger) la
+// expande directamente.
+document.getElementById('my-space-hub').addEventListener('click', (e) => {
+  const trigger = e.target.closest('.my-space-col-expand-trigger');
+  if (!trigger) return;
+  const col = trigger.closest('.my-space-col');
+  if (!col) return;
+  playMySpaceColumnAnimation();
+  document.getElementById('my-space-hub').dataset.expanded = col.dataset.col;
+  document.getElementById('my-space-back-btn').classList.remove('hidden');
+});
+document.getElementById('my-space-back-btn').addEventListener('click', () => {
+  playMySpaceColumnAnimation();
+  collapseMySpaceExpandedColumn();
+});
+
+applyMiEspacioMode();
 
 // ---------------------------------------------------------------------
 // Aviso de nueva version disponible: /api/version devuelve el momento en
@@ -761,6 +2346,131 @@ async function checkForUpdate() {
 document.getElementById('btn-reload-update').addEventListener('click', () => location.reload());
 
 // ---------------------------------------------------------------------
+// Aviso de version nueva EN GITHUB (distinto del de arriba, que solo
+// detecta que el servidor que ya tenias abierto se reinicio por su
+// cuenta). Aqui se pregunta de verdad si hay algo mas nuevo que lo que
+// tienes instalado, aunque acabes de abrir la app. Solo el ordenador de
+// confianza puede usar esto (ver requireTrusted en
+// server/routes/update.js) — en un movil emparejado, /api/update/check
+// responde 403 y aqui simplemente no sale el aviso, sin error visible.
+// "No para esta version" se recuerda en localStorage (por dispositivo,
+// como el resto de preferencias de "Este dispositivo"): la siguiente
+// version SI que volvera a avisar.
+// ---------------------------------------------------------------------
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+// Info de version/commit en el menu principal de Configuracion (para "no
+// ir perdido" con que version corre este ordenador) -- ver
+// GET /api/update/info en server/routes/update.js. Es solo lectura,
+// no habla con GitHub (a diferencia de checkForNewRelease), asi que
+// funciona sin internet. En un movil emparejado (que no puede leer el
+// git de este ordenador) el 403 se ignora en silencio, igual que el
+// aviso de nueva version.
+const VERSION_INFO_DATE_FORMATTER = new Intl.DateTimeFormat('es-ES', {
+  day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+});
+
+async function refreshVersionInfo() {
+  const box = document.getElementById('settings-version-info');
+  try {
+    const info = await api('/api/update/info');
+    const commitDate = info.commitDate ? VERSION_INFO_DATE_FORMATTER.format(new Date(info.commitDate)) : '';
+    box.innerHTML = `
+      <div>Versión ${escapeHtml(info.version)} · rama <code>${escapeHtml(info.branch)}</code></div>
+      <div>Último commit: <code>${escapeHtml(info.commitHash)}</code> — ${escapeHtml(info.commitMessage)}</div>
+      ${commitDate ? `<div>${escapeHtml(commitDate)}</div>` : ''}
+    `;
+    box.classList.remove('hidden');
+  } catch (err) {
+    // Sin internet no importa (esto no hace fetch a GitHub), pero si
+    // fallase por cualquier otro motivo (git no disponible, movil
+    // emparejado sin permiso...) mejor no mostrar nada raro a medias.
+    box.classList.add('hidden');
+  }
+}
+
+let pendingReleaseVersion = null;
+
+async function checkForNewRelease() {
+  try {
+    const info = await api('/api/update/check');
+    if (!info || !info.remoteVersion) return;
+    if (compareVersions(info.remoteVersion, info.currentVersion) <= 0) return;
+    if (localStorage.getItem('skippedUpdateVersion') === info.remoteVersion) return;
+
+    pendingReleaseVersion = info.remoteVersion;
+    document.getElementById('new-release-banner-text').textContent = `Hay una versión nueva disponible (v${info.remoteVersion}).`;
+    document.getElementById('new-release-banner').classList.remove('hidden');
+  } catch (err) {
+    // Sin internet, git no configurado, o somos un movil emparejado (403):
+    // no pasa nada, se vuelve a intentar mas tarde sin molestar con un error.
+  }
+}
+
+document.getElementById('btn-skip-release').addEventListener('click', () => {
+  if (pendingReleaseVersion) localStorage.setItem('skippedUpdateVersion', pendingReleaseVersion);
+  document.getElementById('new-release-banner').classList.add('hidden');
+});
+document.getElementById('btn-dismiss-release').addEventListener('click', () => {
+  document.getElementById('new-release-banner').classList.add('hidden');
+});
+
+// Tras un "git pull" bueno, el codigo nuevo ya esta en el disco pero el
+// proceso que sigue corriendo (y la pagina que tienes abierta) todavia
+// tienen el viejo cargado en memoria — hay que reiniciar de verdad para
+// que se note. En Electron, la propia app se reinicia sola. En el
+// navegador (npm run dev), en cuanto "git pull" cambia archivos de
+// server/ el --watch reinicia el servidor solo — aqui solo hace falta
+// esperar a que vuelva a responder y recargar la pagina.
+function waitForServerRestartThenReload() {
+  const attempt = async () => {
+    try {
+      const res = await fetch('/api/version');
+      if (res.ok) {
+        location.reload();
+        return;
+      }
+    } catch (err) {
+      // sigue reiniciandose, se reintenta
+    }
+    setTimeout(attempt, 1000);
+  };
+  setTimeout(attempt, 2000);
+}
+
+document.getElementById('btn-install-release').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-install-release');
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  document.getElementById('btn-skip-release').disabled = true;
+  btn.textContent = 'Actualizando…';
+
+  try {
+    await api('/api/update/pull', { method: 'POST' });
+    if (window.electronAPI && window.electronAPI.relaunchApp) {
+      btn.textContent = 'Reiniciando la app…';
+      window.electronAPI.relaunchApp();
+    } else {
+      btn.textContent = 'Reiniciando el servidor…';
+      waitForServerRestartThenReload();
+    }
+  } catch (err) {
+    alert('No se pudo actualizar: ' + err.message);
+    btn.disabled = false;
+    document.getElementById('btn-skip-release').disabled = false;
+    btn.textContent = originalLabel;
+  }
+});
+
+// ---------------------------------------------------------------------
 // Arranque
 // ---------------------------------------------------------------------
 async function init() {
@@ -769,7 +2479,22 @@ async function init() {
     await loadSpecialDays();
     await loadMonth();
     await loadReminders();
+    await loadTasks();
+    renderTasksList();
+    await loadNoteFolders();
+    populateNoteFolderSelect();
+    await loadNotes();
+    renderNotesView();
     setInterval(loadReminders, 30 * 1000);
+    // Igual que los recordatorios: si otro dispositivo vinculado anade o
+    // completa una tarea, este se entera sin recargar la pagina.
+    setInterval(() => loadTasks().then(renderTasksList), 30 * 1000);
+    // Carpetas Y notas juntas (no cada una por su lado) para no repintar
+    // la vista dos veces seguidas si las dos han cambiado a la vez.
+    setInterval(() => Promise.all([loadNoteFolders(), loadNotes()]).then(() => {
+      populateNoteFolderSelect();
+      renderNotesView();
+    }), 30 * 1000);
   } catch (err) {
     if (err.message !== 'device_not_paired') console.error(err);
   }
@@ -782,4 +2507,9 @@ showApp();
 init();
 checkForUpdate();
 setInterval(checkForUpdate, 15 * 1000);
+checkForNewRelease();
+// Es una llamada a git fetch de verdad (no un simple ping), asi que se
+// repite mucho menos seguido que checkForUpdate — cada 6 horas basta para
+// enterarse el mismo dia sin martirizar la conexion.
+setInterval(checkForNewRelease, 6 * 60 * 60 * 1000);
 applyViewModePrompt();

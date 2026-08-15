@@ -4,10 +4,11 @@ const db = require('../db');
 
 const router = express.Router();
 
-// Traemos el nombre, color e icono del grupo con un LEFT JOIN (LEFT para
-// que tambien salgan los eventos sin grupo, con esos campos a NULL).
+// Traemos el nombre, color, icono y color-de-completada del grupo con un
+// LEFT JOIN (LEFT para que tambien salgan los eventos sin grupo, con esos
+// campos a NULL).
 const SELECT_WITH_GROUP = `
-  SELECT e.*, g.name AS group_name, g.color AS group_color, g.icon AS group_icon
+  SELECT e.*, g.name AS group_name, g.color AS group_color, g.icon AS group_icon, g.completed_color AS group_completed_color
   FROM events e
   LEFT JOIN groups g ON g.id = e.group_id
 `;
@@ -26,6 +27,9 @@ function serialize(row) {
     groupName: row.group_name || null,
     groupColor: row.group_color || null,
     groupIcon: row.group_icon || null,
+    groupCompletedColor: row.group_completed_color || null,
+    isTask: !!row.is_task,
+    done: !!row.done,
     createdByName: row.created_by_name || null,
     createdByPublicId: row.created_by_id || null,
     createdAt: row.created_at,
@@ -33,18 +37,27 @@ function serialize(row) {
   };
 }
 
-// GET /api/events?from=2026-08-01&to=2026-08-31
-// from/to son opcionales; si no se pasan, devuelve todos los eventos.
+// GET /api/events?from=2026-08-01&to=2026-08-31&isTask=1
+// from/to e isTask son opcionales y combinables: from/to filtra por rango
+// de fecha (los eventos/tareas sin start_at nunca caen en un rango, asi
+// que quedan fuera si se pide un rango); isTask=1 solo tareas, isTask=0
+// solo eventos normales. Sin ningun filtro, devuelve todo.
 router.get('/', (req, res) => {
-  const { from, to } = req.query;
-  let rows;
+  const { from, to, isTask } = req.query;
+  const conditions = [];
+  const params = [];
   if (from && to) {
-    rows = db
-      .prepare(`${SELECT_WITH_GROUP} WHERE e.start_at >= ? AND e.start_at <= ? ORDER BY e.start_at ASC`)
-      .all(from, to);
-  } else {
-    rows = db.prepare(`${SELECT_WITH_GROUP} ORDER BY e.start_at ASC`).all();
+    conditions.push('e.start_at >= ? AND e.start_at <= ?');
+    params.push(from, to);
   }
+  if (isTask !== undefined) {
+    conditions.push('e.is_task = ?');
+    params.push(isTask === '1' || isTask === 'true' ? 1 : 0);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = db
+    .prepare(`${SELECT_WITH_GROUP} ${where} ORDER BY e.start_at ASC`)
+    .all(...params);
   res.json(rows.map(serialize));
 });
 
@@ -61,12 +74,14 @@ function resolveGroupId(groupId) {
 }
 
 router.post('/', (req, res) => {
-  const { title, description, location, startAt, endAt, allDay, reminderMinutesBefore, groupId } = req.body || {};
+  const { title, description, location, startAt, endAt, allDay, reminderMinutesBefore, groupId, isTask } = req.body || {};
 
   if (!title || !title.trim()) {
     return res.status(400).json({ error: 'invalid_request', message: 'El evento necesita un titulo.' });
   }
-  if (!startAt) {
+  // Las tareas pueden no tener fecha (viven solo en la lista de Tareas);
+  // los eventos normales si la necesitan, como siempre.
+  if (!isTask && !startAt) {
     return res.status(400).json({ error: 'invalid_request', message: 'Falta la fecha/hora de inicio.' });
   }
 
@@ -77,20 +92,21 @@ router.post('/', (req, res) => {
 
   const info = db
     .prepare(`
-      INSERT INTO events (title, description, location, start_at, end_at, all_day, reminder_minutes_before, group_id, created_by_name, created_by_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (title, description, location, start_at, end_at, all_day, reminder_minutes_before, group_id, created_by_name, created_by_id, is_task)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       title.trim(),
       description || null,
       location || null,
-      startAt,
+      startAt || null,
       endAt || null,
       allDay ? 1 : 0,
       reminderMinutesBefore === undefined || reminderMinutesBefore === null ? null : Number(reminderMinutesBefore),
       resolveGroupId(groupId),
       profile && profile.name ? profile.name : null,
-      profile ? profile.public_id : null
+      profile ? profile.public_id : null,
+      isTask ? 1 : 0
     );
 
   const row = db.prepare(`${SELECT_WITH_GROUP} WHERE e.id = ?`).get(info.lastInsertRowid);
@@ -101,7 +117,7 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { title, description, location, startAt, endAt, allDay, reminderMinutesBefore, groupId } = req.body || {};
+  const { title, description, location, startAt, endAt, allDay, reminderMinutesBefore, groupId, isTask, done } = req.body || {};
 
   // Si cambia el recordatorio o el inicio, lo volvemos a "armar"
   // (reminder_sent = 0) para que pueda dispararse otra vez.
@@ -120,13 +136,15 @@ router.put('/:id', (req, res) => {
       reminder_minutes_before = ?,
       reminder_sent = ?,
       group_id = ?,
+      is_task = ?,
+      done = ?,
       updated_at = datetime('now')
     WHERE id = ?
   `).run(
     title !== undefined ? title.trim() : existing.title,
     description !== undefined ? description : existing.description,
     location !== undefined ? location : existing.location,
-    startAt !== undefined ? startAt : existing.start_at,
+    startAt !== undefined ? (startAt || null) : existing.start_at,
     endAt !== undefined ? endAt : existing.end_at,
     allDay !== undefined ? (allDay ? 1 : 0) : existing.all_day,
     reminderMinutesBefore !== undefined
@@ -134,6 +152,8 @@ router.put('/:id', (req, res) => {
       : existing.reminder_minutes_before,
     reminderChanged || startChanged ? 0 : existing.reminder_sent,
     groupId !== undefined ? resolveGroupId(groupId) : existing.group_id,
+    isTask !== undefined ? (isTask ? 1 : 0) : existing.is_task,
+    done !== undefined ? (done ? 1 : 0) : existing.done,
     req.params.id
   );
 
