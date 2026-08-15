@@ -2107,14 +2107,9 @@ function getMiEspacioMode() {
 // arrancar siempre en el dia de hoy, asi que se vuelve al "Proximos" de
 // toda la vida.
 function restoreClassicRemindersPanel() {
-  const panel = document.getElementById('reminders-panel');
-  // El bloque de notas se inserta ANTES de moverse (appendChild lo mueve
-  // de sitio, nunca lo duplica) para que el panel clasico tenga las 3
-  // secciones (Proximos/Tareas/Notas), no solo las 2 de siempre.
-  panel.insertBefore(document.getElementById('reminders-panel-switcher'), panel.firstChild);
-  panel.appendChild(document.getElementById('reminders-top-block'));
-  panel.appendChild(document.getElementById('reminders-tasks-block'));
-  panel.appendChild(document.getElementById('reminders-notes-block'));
+  // La colocacion de verdad de los 3 bloques (sueltos o dentro del slot
+  // agrupado) la hace applyRemindersPanelLayout() -- aqui solo se deja
+  // todo lo demas del panel clasico como siempre.
   document.getElementById('reminders-day-nav').classList.add('hidden');
   showUpcomingReminders();
   applyRemindersPanelLayout();
@@ -2133,25 +2128,31 @@ function moveRemindersIntoHub() {
   document.getElementById('reminders-day-nav').classList.remove('hidden');
   showDayInReminders(new Date());
   // Dentro del hub (3 columnas propias, cada una con su sitio) el ajuste
-  // de "panel lateral clasico" no pinta nada -- todas las secciones se
-  // ven siempre, apiladas o una al lado de otra segun el ancho.
+  // de "agrupar con flechas" no pinta nada -- cada seccion vive siempre
+  // en su propia columna, visible entera.
   document.getElementById('reminders-panel-switcher').classList.add('hidden');
-  document.querySelectorAll('.reminders-panel-page').forEach((el) => el.classList.remove('hidden'));
+  document.getElementById('reminders-panel-grouped-slot').classList.add('hidden');
+  REMINDERS_PANEL_PAGES.forEach((p) => document.getElementById(p.blockId).classList.remove('hidden'));
 }
 
 // Panel lateral clasico (modo "topbar" de Mi espacio, ver mas abajo):
-// como se reparten Recordatorios/Tareas/Notas dentro de #reminders-panel.
-// Preferencia de ESTE dispositivo (localStorage), elegida en
-// Configuracion > Vista > "Panel lateral clasico":
-//   - "stacked" (por defecto): las 3 secciones apiladas, visibles a la
-//     vez, cada una con su propio scroll -- como estaba Proximos+Tareas
-//     de siempre, con Notas anadida igual.
-//   - "alternate": solo una seccion grande visible cada vez, con flechas
-//     (#reminders-panel-switcher) para pasar a la siguiente -- pensado
-//     para pantallas donde 3 secciones apiladas se quedan muy apretadas.
-// En modo "panel" de Mi espacio (hub de 3 columnas) este ajuste no pinta
-// nada: cada columna ya vive en su propio sitio fijo.
-const REMINDERS_PANEL_LAYOUT_IDS = ['stacked', 'alternate'];
+// que secciones de Recordatorios/Tareas/Notas van AGRUPADAS (juntas,
+// alternando con flechas, una visible cada vez dentro de
+// #reminders-panel-grouped-slot) y cuales se quedan SUELTAS (apiladas,
+// cada una siempre visible con su propio scroll, en su posicion natural
+// -- ver REMINDERS_PANEL_PAGES mas abajo para el orden). Preferencia de
+// ESTE dispositivo (localStorage, un array de ids), elegida con
+// casillas en Configuracion > Vista > "Panel lateral clasico" (ver
+// refreshRemindersPanelGroupedOptions en settings.js). Agrupar 0 o 1
+// seccion no hace nada especial -- con una sola marcada no hay nada que
+// alternar, asi que se trata igual que "ninguna marcada" (todas
+// sueltas). En modo "panel" de Mi espacio (hub de 3 columnas) este
+// ajuste no pinta nada: cada columna ya vive en su propio sitio fijo
+// (ver moveRemindersIntoHub).
+//
+// REMINDERS_PANEL_PAGES esta pensado para poder crecer el dia que haya
+// una 4a seccion: toda la logica de abajo itera sobre el array entero,
+// sin ningun "3" fijo en el codigo.
 const REMINDERS_PANEL_PAGES = [
   { id: 'reminders', label: 'Recordatorios', blockId: 'reminders-top-block' },
   { id: 'tasks', label: 'Tareas', blockId: 'reminders-tasks-block' },
@@ -2159,32 +2160,70 @@ const REMINDERS_PANEL_PAGES = [
 ];
 let remindersPanelActivePage = 'reminders';
 
-function getRemindersPanelLayout() {
-  const stored = localStorage.getItem('remindersPanelLayout');
-  return REMINDERS_PANEL_LAYOUT_IDS.includes(stored) ? stored : 'stacked';
+function getRemindersGroupedSections() {
+  let stored;
+  try {
+    stored = JSON.parse(localStorage.getItem('remindersPanelGrouped') || '[]');
+  } catch {
+    stored = [];
+  }
+  if (!Array.isArray(stored)) return [];
+  const valid = stored.filter((id) => REMINDERS_PANEL_PAGES.some((p) => p.id === id));
+  return valid.length >= 2 ? valid : [];
 }
 
+// Recoloca cada bloque en su sitio (agrupado o suelto) y decide que se
+// ve. Se llama al arrancar, al cambiar el ajuste, y cada vez que se
+// alterna dentro del grupo (stepRemindersPanelPage).
 function applyRemindersPanelLayout() {
-  const switcher = document.getElementById('reminders-panel-switcher');
+  if (getMiEspacioMode() === 'panel') return; // este ajuste no aplica ahi, ver moveRemindersIntoHub
 
-  if (getMiEspacioMode() === 'panel' || getRemindersPanelLayout() !== 'alternate') {
+  const panel = document.getElementById('reminders-panel');
+  const groupedSlot = document.getElementById('reminders-panel-grouped-slot');
+  const switcher = document.getElementById('reminders-panel-switcher');
+  const grouped = getRemindersGroupedSections();
+
+  // Coloca cada bloque: las agrupadas dentro del slot compartido (que se
+  // inserta en el panel en la posicion de la PRIMERA seccion agrupada,
+  // segun el orden natural), las sueltas directamente en el panel.
+  let groupedSlotPlaced = false;
+  REMINDERS_PANEL_PAGES.forEach((p) => {
+    const block = document.getElementById(p.blockId);
+    if (grouped.includes(p.id)) {
+      groupedSlot.appendChild(block);
+      if (!groupedSlotPlaced) {
+        panel.appendChild(groupedSlot);
+        groupedSlotPlaced = true;
+      }
+    } else {
+      panel.appendChild(block);
+      block.classList.remove('hidden');
+    }
+  });
+
+  if (grouped.length === 0) {
+    groupedSlot.classList.add('hidden');
     switcher.classList.add('hidden');
-    REMINDERS_PANEL_PAGES.forEach((p) => document.getElementById(p.blockId).classList.remove('hidden'));
     return;
   }
 
+  groupedSlot.classList.remove('hidden');
   switcher.classList.remove('hidden');
-  const current = REMINDERS_PANEL_PAGES.find((p) => p.id === remindersPanelActivePage) || REMINDERS_PANEL_PAGES[0];
-  REMINDERS_PANEL_PAGES.forEach((p) => {
-    document.getElementById(p.blockId).classList.toggle('hidden', p.id !== current.id);
+  if (!grouped.includes(remindersPanelActivePage)) remindersPanelActivePage = grouped[0];
+  grouped.forEach((id) => {
+    const p = REMINDERS_PANEL_PAGES.find((page) => page.id === id);
+    document.getElementById(p.blockId).classList.toggle('hidden', id !== remindersPanelActivePage);
   });
-  document.getElementById('reminders-panel-switch-label').textContent = current.label;
+  document.getElementById('reminders-panel-switch-label').textContent =
+    REMINDERS_PANEL_PAGES.find((p) => p.id === remindersPanelActivePage).label;
 }
 
 function stepRemindersPanelPage(delta) {
-  const idx = REMINDERS_PANEL_PAGES.findIndex((p) => p.id === remindersPanelActivePage);
-  const nextIdx = (idx + delta + REMINDERS_PANEL_PAGES.length) % REMINDERS_PANEL_PAGES.length;
-  remindersPanelActivePage = REMINDERS_PANEL_PAGES[nextIdx].id;
+  const grouped = getRemindersGroupedSections();
+  if (grouped.length === 0) return;
+  const idx = grouped.indexOf(remindersPanelActivePage);
+  const nextIdx = (idx + delta + grouped.length) % grouped.length;
+  remindersPanelActivePage = grouped[nextIdx];
   applyRemindersPanelLayout();
 }
 

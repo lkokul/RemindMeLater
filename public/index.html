@@ -179,16 +179,22 @@
            interno (ver .reminders-top-block/.reminders-tasks-block en
            styles.css). -->
       <aside id="reminders-panel" class="reminders-panel">
-        <!-- Solo se ve en modo "boton" de Mi espacio (panel lateral
-             clasico) cuando el ajuste "Panel lateral clasico" (Configuracion
-             > Vista) esta en "Alternar" -- flechas para pasar de
-             Recordatorios a Tareas a Notas, mostrando solo una seccion
-             grande cada vez en vez de las 3 apiladas. Ver
-             applyRemindersPanelLayout() en app.js. -->
-        <div id="reminders-panel-switcher" class="reminders-panel-switcher hidden">
-          <button type="button" id="btn-panel-switch-prev" class="icon-btn" aria-label="Sección anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
-          <span id="reminders-panel-switch-label" class="reminders-panel-switch-label"></span>
-          <button type="button" id="btn-panel-switch-next" class="icon-btn" aria-label="Sección siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+        <!-- Solo se usa en modo "boton" de Mi espacio (panel lateral
+             clasico): las secciones que marques en Configuracion > Vista
+             > "Agrupar con flechas" se meten AQUI DENTRO (una visible
+             cada vez, con flechas arriba para alternar entre ELLAS);
+             las que no marques se quedan sueltas, apiladas en su sitio
+             de siempre. Si marcas 0 o 1, este slot se queda vacio/oculto
+             (agrupar una sola cosa no cambia nada). Ver
+             applyRemindersPanelLayout() en app.js, que es quien mueve
+             los bloques (reminders-top-block etc.) dentro o fuera de
+             aqui segun el ajuste. -->
+        <div id="reminders-panel-grouped-slot" class="reminders-panel-grouped-slot reminders-panel-page hidden">
+          <div id="reminders-panel-switcher" class="reminders-panel-switcher hidden">
+            <button type="button" id="btn-panel-switch-prev" class="icon-btn" aria-label="Sección anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+            <span id="reminders-panel-switch-label" class="reminders-panel-switch-label"></span>
+            <button type="button" id="btn-panel-switch-next" class="icon-btn" aria-label="Sección siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+          </div>
         </div>
         <div id="reminders-top-block" class="reminders-top-block reminders-panel-page">
           <div class="reminders-panel-header">
@@ -236,13 +242,15 @@
       <div class="my-space-view-header">
         <h2>Mi espacio</h2>
         <div class="my-space-view-header-actions">
+          <button type="button" id="btn-close-my-space" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
           <!-- Configuracion tiene que poder abrirse desde CUALQUIER
                ventana, y esta pantalla (fija, z-index por encima de la
                topbar) tapa el boton de Configuracion de siempre -- por
                eso hace falta uno propio aqui. Abre el mismo panel (ver
-               btn-my-space-settings en app.js/settings.js). -->
+               btn-my-space-settings en app.js/settings.js). Va el
+               ULTIMO (mas a la derecha) a proposito -- Configuracion
+               siempre a la derecha del todo, igual que en la topbar. -->
           <button type="button" id="btn-my-space-settings" class="icon-btn" aria-label="Configuración">☰</button>
-          <button type="button" id="btn-close-my-space" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
         </div>
       </div>
       <div id="my-space-hub" class="my-space-hub">
@@ -615,8 +623,8 @@
         <div id="my-space-mode-options" class="view-mode-options"></div>
 
         <h4>Panel lateral clásico</h4>
-        <p class="hint">Solo aplica cuando "Mi espacio" está en modo botón (arriba): cómo se muestran Recordatorios, Tareas y Notas en el panel de siempre, al lado del calendario. Apilado deja las 3 secciones visibles a la vez, cada una con su scroll; Alternar muestra una sección grande cada vez, con flechas para pasar a la siguiente — útil si la pantalla es más pequeña.</p>
-        <div id="reminders-panel-layout-options" class="view-mode-options"></div>
+        <p class="hint">Solo aplica cuando "Mi espacio" está en modo botón (arriba): cómo se reparten Recordatorios, Tareas y Notas en el panel de siempre, al lado del calendario. Marca las que quieras ver juntas, alternando con flechas (útil si la pantalla es pequeña); las que no marques se quedan cada una sola, siempre visible. Si no marcas ninguna (o solo una), las 3 se ven apiladas como siempre.</p>
+        <div id="reminders-panel-grouped-options" class="reminders-panel-grouped-options"></div>
 
         <h4>Favoritos en Mi espacio</h4>
         <p class="hint">Cómo se ordenan las carpetas y notas favoritas (la estrella del listado) dentro de cada carpeta.</p>

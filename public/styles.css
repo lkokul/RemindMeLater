@@ -449,18 +449,30 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 /* --- Tareas: bloque fijo debajo de "Proximos", siempre visible (ver
    .reminders-top-block/.reminders-tasks-block mas abajo para el reparto
    de alto en escritorio) --- */
-.reminders-tasks-block {
+.reminders-tasks-block,
+.reminders-notes-block,
+.reminders-panel-grouped-slot {
   margin-top: 0.9rem;
   padding-top: 0.9rem;
   border-top: 1px solid var(--border);
 }
-/* Notas como 3er bloque del panel lateral clasico: mismo separador que
-   Tareas (ver arriba), porque ocupa el mismo sitio "el siguiente bloque
-   apilado" cuando el ajuste "Panel lateral clasico" esta en Apilado. */
-.reminders-notes-block {
-  margin-top: 0.9rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--border);
+/* El primer bloque visible del panel clasico (sea Recordatorios, Tareas,
+   Notas o el slot agrupado -- segun lo que hayas marcado en
+   Configuracion > Vista, ver applyRemindersPanelLayout en app.js) no
+   necesita el separador de arriba, sea cual sea. */
+#reminders-panel > .reminders-panel-page:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+/* Dentro del slot agrupado, el bloque visible (Tareas o Notas, lo que
+   toque) tampoco necesita su propio separador -- ya lo separa el
+   switcher de flechas de encima. */
+.reminders-panel-grouped-slot .reminders-tasks-block,
+.reminders-panel-grouped-slot .reminders-notes-block {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 .note-add-btn { width: 100%; margin-bottom: 0.5rem; }
 .note-search-row { margin-bottom: 0.5rem; }
@@ -755,6 +767,7 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 
 /* --- Vista (Normal / Pantalla completa / Ventana flotante) --- */
 .view-mode-options { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
+.reminders-panel-grouped-options { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
 .view-mode-btn { text-align: left; }
 .view-mode-btn.active {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
@@ -1388,7 +1401,8 @@ label input, label textarea, label select { margin-top: 0.3rem; }
      alto entero el solo. */
   .reminders-top-block,
   .reminders-tasks-block,
-  .reminders-notes-block {
+  .reminders-notes-block,
+  .reminders-panel-grouped-slot {
     flex: 1;
     min-height: 0;
     display: flex;

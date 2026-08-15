@@ -379,7 +379,7 @@ function refreshViewTab() {
 
   refreshCalendarDensityOptions();
   refreshMiEspacioModeOptions();
-  refreshRemindersPanelLayoutOptions();
+  refreshRemindersPanelGroupedOptions();
   refreshFavoritesDisplayOptions();
 }
 
@@ -417,35 +417,41 @@ function refreshMiEspacioModeOptions() {
 }
 
 // Panel lateral clasico (solo aplica en modo "topbar" de Mi espacio, ver
-// arriba): apilado (3 secciones siempre visibles) o alternar con flechas
-// (una seccion grande cada vez). Ver applyRemindersPanelLayout() en app.js.
-const REMINDERS_PANEL_LAYOUT_OPTIONS = [
-  { id: 'stacked', label: 'Apilado' },
-  { id: 'alternate', label: 'Alternar con flechas' },
-];
-
-function refreshRemindersPanelLayoutOptions() {
-  const container = document.getElementById('reminders-panel-layout-options');
+// arriba): una casilla por seccion (Recordatorios/Tareas/Notas, ver
+// REMINDERS_PANEL_PAGES en app.js) para elegir cuales van agrupadas
+// (juntas, alternando con flechas) -- las que no marques se quedan
+// sueltas, apiladas cada una por su lado. Ver
+// applyRemindersPanelLayout()/getRemindersGroupedSections() en app.js.
+function refreshRemindersPanelGroupedOptions() {
+  const container = document.getElementById('reminders-panel-grouped-options');
   if (!container) return;
   container.innerHTML = '';
-  const current = getRemindersPanelLayout();
 
-  REMINDERS_PANEL_LAYOUT_OPTIONS.forEach((opt) => {
-    const isActive = opt.id === current;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
-    btn.textContent = opt.label;
-    if (isActive) {
-      btn.disabled = true;
-    } else {
-      btn.addEventListener('click', () => {
-        localStorage.setItem('remindersPanelLayout', opt.id);
-        applyRemindersPanelLayout();
-        refreshRemindersPanelLayoutOptions();
-      });
-    }
-    container.appendChild(btn);
+  let stored;
+  try {
+    stored = JSON.parse(localStorage.getItem('remindersPanelGrouped') || '[]');
+  } catch {
+    stored = [];
+  }
+  if (!Array.isArray(stored)) stored = [];
+
+  REMINDERS_PANEL_PAGES.forEach((p) => {
+    const label = document.createElement('label');
+    label.className = 'checkbox-row';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = stored.includes(p.id);
+    checkbox.addEventListener('change', () => {
+      const next = checkbox.checked
+        ? [...stored.filter((id) => id !== p.id), p.id]
+        : stored.filter((id) => id !== p.id);
+      localStorage.setItem('remindersPanelGrouped', JSON.stringify(next));
+      applyRemindersPanelLayout();
+      refreshRemindersPanelGroupedOptions();
+    });
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode(p.label));
+    container.appendChild(label);
   });
 }
 
