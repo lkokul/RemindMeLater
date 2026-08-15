@@ -263,8 +263,11 @@
               </button>
             </div>
             <div class="my-space-col-body">
-              <div class="reminders-panel-header"><h2>Notas</h2></div>
-              <p class="empty-hint">Próximamente: notas libres, con carpetas y formato. Esta columna es solo el hueco reservado por ahora.</p>
+              <div class="reminders-panel-header">
+                <h2>Notas</h2>
+                <button type="button" id="btn-new-note" class="secondary-btn">+ Nota</button>
+              </div>
+              <div id="notes-list" class="reminders-list notes-list"></div>
             </div>
           </div>
         </div>
@@ -361,6 +364,83 @@
     </div>
   </div>
 
+  <!-- Modal para crear / editar nota (Mi espacio > Notas -- Fase 2: solo
+       titulo + texto plano, sin carpetas ni formato todavia, eso es de
+       Fase 3 y Fase 4). -->
+  <div id="note-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-note" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="note-modal-title">Nueva nota</h2>
+      <form id="note-form">
+        <input type="hidden" id="note-id" />
+        <label>
+          Titulo
+          <input type="text" id="note-title" required />
+        </label>
+        <label>
+          Contenido (opcional)
+          <textarea id="note-body" rows="8"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-note" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-note" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Ocultar notas: NO es un bloqueo de verdad (no cifra nada), solo
+       evita que se lea a primera vista -- ver CLAUDE.md / server/routes/notesSecurity.js.
+       Estos dos modales son para cuando la contraseña opcional esta
+       activada (Configuracion > Notas): uno para pedirla al destapar una
+       nota ya oculta, otro para pedirte que la crees la primera vez que
+       ocultas algo sin tener ninguna puesta todavia. -->
+  <div id="notes-verify-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-notes-verify" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Destapar nota</h2>
+      <p class="hint">Introduce la contraseña para ver esta nota.</p>
+      <form id="notes-verify-form">
+        <label>
+          Contraseña
+          <input type="password" id="notes-verify-password" required autocomplete="off" />
+        </label>
+        <p id="notes-verify-error" class="hint hidden" style="color: var(--danger);">Contraseña incorrecta.</p>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-notes-verify" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Destapar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="notes-setup-password-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-notes-setup-password" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Elige una contraseña</h2>
+      <p class="hint">Tienes activado "ocultar con contraseña" pero todavia no has puesto ninguna. Elige una para poder ocultar esta nota.</p>
+      <form id="notes-setup-password-form">
+        <label>
+          Contraseña nueva
+          <input type="password" id="notes-setup-new-password" required autocomplete="off" />
+        </label>
+        <label>
+          Repite la contraseña
+          <input type="password" id="notes-setup-confirm-password" required autocomplete="off" />
+        </label>
+        <p id="notes-setup-error" class="hint hidden" style="color: var(--danger);">Las contraseñas no coinciden.</p>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-notes-setup-password" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar y ocultar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Panel de Configuracion: un solo punto de entrada con pestanas, en
        vez de un botón suelto por cada cosa. Ver settings.js. -->
   <div id="settings-modal" class="modal hidden">
@@ -402,12 +482,25 @@
         <button type="button" class="settings-menu-item" data-tab="shortcuts">
           <span>Atajos de teclado</span><span class="settings-menu-item-arrow">›</span>
         </button>
+        <button type="button" class="settings-menu-item" data-tab="notes">
+          <span>Notas</span><span class="settings-menu-item-arrow">›</span>
+        </button>
         <!-- Accion directa (no navega a ningun sitio, por eso no lleva
              flecha "›"), solo visible dentro de la app de escritorio —
              ver refreshQuitMenuItem en settings.js. -->
         <button type="button" id="btn-quit-app" class="settings-menu-item settings-menu-item-danger hidden">
           <span>Salir de la aplicación</span>
         </button>
+
+        <!-- Info de version/commit -- solo lectura, no navega a ningun
+             sitio. DENTRO de settings-menu para que se oculte junto con
+             el resto de la lista al entrar en una seccion (ver
+             showSettingsScreen). Solo se ve en el ordenador de confianza
+             (mismo criterio que el aviso de nueva version, ver
+             requireTrusted en server/routes/update.js) -- un movil
+             emparejado no puede leer el git de este ordenador. Ver
+             refreshVersionInfo en app.js. -->
+        <div id="settings-version-info" class="settings-version-info hidden"></div>
       </div>
 
       <!-- --- Perfil --- -->
@@ -570,6 +663,41 @@
         <h3>Atajos de teclado</h3>
         <p class="hint">Pulsa "+ Añadir" y luego pulsa la tecla (o combinacion) que quieras usar. Puedes tener varias combinaciones para la misma accion; quita las que no quieras con la x.</p>
         <div id="shortcuts-list" class="shortcuts-list"></div>
+      </div>
+
+      <!-- --- Notas: ocultar con contraseña -- ajuste COMPARTIDO entre
+           todos tus dispositivos (no es un ajuste de "Este dispositivo"),
+           porque una nota oculta lo esta para todos por igual. Ver
+           server/routes/notesSecurity.js -- no es un bloqueo de verdad,
+           solo evita que una nota se lea a primera vista. --- -->
+      <div id="settings-tab-notes" class="settings-tab-panel hidden">
+        <button type="button" class="settings-back-btn" data-back>← Volver</button>
+        <h3>Notas</h3>
+        <p class="hint">"Ocultar" una nota la deja borrosa en la lista hasta que la destapas — no es un bloqueo de verdad, solo evita que se lea a primera vista. Esta contraseña opcional se comparte entre todos tus dispositivos.</p>
+        <label class="checkbox-row">
+          <input type="checkbox" id="setting-notes-password-enabled" />
+          Pedir contraseña para destapar notas ocultas
+        </label>
+
+        <div id="notes-password-form-wrap" class="hidden">
+          <h4 id="notes-password-form-heading">Contraseña</h4>
+          <form id="notes-password-form">
+            <label id="notes-current-password-label" class="hidden">
+              Contraseña actual
+              <input type="password" id="notes-current-password" autocomplete="off" />
+            </label>
+            <label>
+              Contraseña nueva
+              <input type="password" id="notes-new-password" autocomplete="off" />
+            </label>
+            <label>
+              Repite la contraseña
+              <input type="password" id="notes-confirm-password" autocomplete="off" />
+            </label>
+            <p id="notes-password-form-error" class="hint hidden" style="color: var(--danger);"></p>
+            <button type="submit" class="primary-btn">Guardar contraseña</button>
+          </form>
+        </div>
       </div>
 
       </div>

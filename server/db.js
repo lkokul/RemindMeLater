@@ -110,6 +110,20 @@ db.exec(`
     date TEXT PRIMARY KEY,
     type TEXT NOT NULL CHECK (type IN ('holiday', 'special'))
   );
+
+  -- Notas de "Mi espacio" (Fase 2): titulo + texto plano, compartidas
+  -- entre todos los dispositivos igual que eventos/tareas/grupos. Sin
+  -- carpetas ni formato todavia (eso son Fase 3 y Fase 4) — de momento es
+  -- deliberadamente lo mas simple posible.
+  CREATE TABLE IF NOT EXISTS notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    body TEXT,
+    created_by_name TEXT,
+    created_by_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Migracion sencilla: group_id y active_theme_id se anadieron despues de
@@ -212,6 +226,16 @@ if (startAtInfo && startAtInfo.notnull) {
 const themeColumns = db.prepare('PRAGMA table_info(themes)').all().map((c) => c.name);
 if (!themeColumns.includes('inverse_colors')) {
   db.exec('ALTER TABLE themes ADD COLUMN inverse_colors TEXT');
+}
+
+// hidden: nota marcada como "ocultar" (se ve borrosa en la lista hasta
+// que se "destapa" — ver routes/notes.js y routes/notesSecurity.js). No
+// es un bloqueo de verdad, solo evita que se lea a primera vista; la
+// contraseña opcional para destaparla vive en app_settings (clave/valor
+// generico que ya existe), no aqui.
+const noteColumns = db.prepare('PRAGMA table_info(notes)').all().map((c) => c.name);
+if (!noteColumns.includes('hidden')) {
+  db.exec('ALTER TABLE notes ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
 }
 
 // El perfil siempre tiene que existir (para poder firmar "creado por" en

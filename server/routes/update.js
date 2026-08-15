@@ -39,6 +39,30 @@ async function currentBranch() {
   return run('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
 }
 
+// Info local para no ir perdido en Configuracion (version, rama, ultimo
+// commit): a diferencia de /check, esto NO hace ningun git fetch (no
+// habla con GitHub), solo lee lo que ya hay en el checkout de este
+// ordenador — rapido y funciona sin internet. "commitDate" es la fecha
+// del COMMIT (git no guarda cuando se hizo el push, eso no se puede
+// saber sin preguntarle a GitHub).
+router.get('/info', requireTrusted, async (req, res) => {
+  try {
+    const branch = await currentBranch();
+    const commitHash = await run('git', ['rev-parse', '--short', 'HEAD']);
+    const commitLog = await run('git', ['log', '-1', '--format=%s%n%ci']);
+    const [commitMessage, commitDate] = commitLog.split('\n');
+    res.json({
+      version: readLocalVersion(),
+      branch,
+      commitHash,
+      commitMessage,
+      commitDate,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'info_failed', message: err.message });
+  }
+});
+
 router.get('/check', requireTrusted, async (req, res) => {
   try {
     const branch = await currentBranch();

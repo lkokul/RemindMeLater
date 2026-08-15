@@ -14,6 +14,7 @@ const state = {
   events: [],
   groups: [],
   tasks: [], // TODAS las tareas (con fecha o sin ella), ver loadTasks()
+  notes: [], // Notas de "Mi espacio" (Fase 2), ver loadNotes()
   specialDays: {}, // 'YYYY-MM-DD' -> 'holiday' | 'special', marcados a mano
   pairingCodeExpiresAt: null,
   notifiedReminderIds: new Set(), // evita notificar el mismo recordatorio 2 veces
@@ -144,6 +145,10 @@ const CALENDAR_ICON_SVG = `<svg class="date-field-trigger-icon" width="15" heigh
 // por CSS) — un SVG a medida sí se centra pixel a pixel.
 const CHEVRON_LEFT_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>';
 const CHEVRON_RIGHT_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+// Ojo abierto/cerrado para ocultar/destapar notas (ver mas abajo,
+// seccion "Notas de Mi espacio").
+const EYE_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+const EYE_OFF_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
 
 // ---------------------------------------------------------------------
 // Selector de fecha con estilo propio: sustituye <input type="date"> (o
@@ -1257,6 +1262,247 @@ document.getElementById('btn-delete-task').addEventListener('click', async () =>
 });
 
 // ---------------------------------------------------------------------
+// Notas de "Mi espacio" (Fase 2): titulo + texto plano, compartidas entre
+// dispositivos igual que eventos/tareas — nada de carpetas ni formato
+// todavia (eso es Fase 3 y Fase 4). Mismo patron que el modal de tareas
+// de arriba.
+// ---------------------------------------------------------------------
+async function loadNotes() {
+  state.notes = await api('/api/notes');
+}
+
+// ---------------------------------------------------------------------
+// Ocultar notas: NO es un bloqueo de verdad (no cifra nada, cualquiera
+// con acceso a la base de datos veria el contenido igual) — solo evita
+// que se lea a primera vista en la pantalla. Una nota oculta se ve
+// borrosa en la lista con un boton "Destapar" encima; el icono de ojo de
+// cada fila hace lo mismo (ocultar/destapar), son dos formas de llegar a
+// la misma accion. La contraseña es opcional y se activa en
+// Configuracion > Notas (ver refreshNotesTab en settings.js) — sin ella,
+// destapar es instantaneo; con ella activada, hace falta acertarla.
+// ---------------------------------------------------------------------
+let notesSecurityState = { passwordEnabled: false, hasPassword: false };
+
+async function refreshNotesSecurityState() {
+  notesSecurityState = await api('/api/notes-security');
+  return notesSecurityState;
+}
+
+async function setNoteHidden(note, hidden) {
+  await api(`/api/notes/${note.id}`, { method: 'PUT', body: JSON.stringify({ hidden }) });
+  await loadNotes();
+  renderNotesList();
+}
+
+// Punto de entrada comun del icono de ojo y del boton "Destapar": decide
+// que pedir (nada, la contraseña, o crear una nueva) segun el estado
+// actual de la nota y del ajuste de Configuracion > Notas.
+async function toggleNoteHidden(note) {
+  await refreshNotesSecurityState();
+
+  if (!note.hidden) {
+    // Vas a OCULTARLA. Si tienes activado "pedir contraseña" pero
+    // todavia no has puesto ninguna, hace falta crearla primero — no
+    // tendria sentido ocultar algo detras de una contraseña que no existe.
+    if (notesSecurityState.passwordEnabled && !notesSecurityState.hasPassword) {
+      openNotesSetupPasswordModal(note);
+    } else {
+      await setNoteHidden(note, true);
+    }
+    return;
+  }
+
+  // Vas a DESTAPARLA. Solo hace falta la contraseña si esta activada.
+  if (notesSecurityState.passwordEnabled) {
+    openNotesVerifyModal(note);
+  } else {
+    await setNoteHidden(note, false);
+  }
+}
+
+let pendingVerifyNote = null;
+
+function openNotesVerifyModal(note) {
+  pendingVerifyNote = note;
+  document.getElementById('notes-verify-password').value = '';
+  document.getElementById('notes-verify-error').classList.add('hidden');
+  document.getElementById('notes-verify-modal').classList.remove('hidden');
+}
+
+function closeNotesVerifyModal() {
+  document.getElementById('notes-verify-modal').classList.add('hidden');
+  pendingVerifyNote = null;
+}
+
+document.getElementById('btn-cancel-notes-verify').addEventListener('click', closeNotesVerifyModal);
+document.getElementById('btn-close-notes-verify').addEventListener('click', closeNotesVerifyModal);
+
+document.getElementById('notes-verify-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const password = document.getElementById('notes-verify-password').value;
+  const result = await api('/api/notes-security/verify', { method: 'POST', body: JSON.stringify({ password }) });
+  if (!result.ok) {
+    document.getElementById('notes-verify-error').classList.remove('hidden');
+    return;
+  }
+  const note = pendingVerifyNote;
+  closeNotesVerifyModal();
+  await setNoteHidden(note, false);
+});
+
+let pendingSetupNote = null;
+
+function openNotesSetupPasswordModal(note) {
+  pendingSetupNote = note;
+  document.getElementById('notes-setup-new-password').value = '';
+  document.getElementById('notes-setup-confirm-password').value = '';
+  document.getElementById('notes-setup-error').classList.add('hidden');
+  document.getElementById('notes-setup-password-modal').classList.remove('hidden');
+}
+
+function closeNotesSetupPasswordModal() {
+  document.getElementById('notes-setup-password-modal').classList.add('hidden');
+  pendingSetupNote = null;
+}
+
+document.getElementById('btn-cancel-notes-setup-password').addEventListener('click', closeNotesSetupPasswordModal);
+document.getElementById('btn-close-notes-setup-password').addEventListener('click', closeNotesSetupPasswordModal);
+
+document.getElementById('notes-setup-password-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('notes-setup-error');
+  const newPassword = document.getElementById('notes-setup-new-password').value;
+  const confirmPassword = document.getElementById('notes-setup-confirm-password').value;
+  if (newPassword !== confirmPassword) {
+    errorEl.textContent = 'Las dos contraseñas no coinciden.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  await api('/api/notes-security/password', { method: 'POST', body: JSON.stringify({ newPassword }) });
+  await refreshNotesSecurityState();
+  const note = pendingSetupNote;
+  closeNotesSetupPasswordModal();
+  await setNoteHidden(note, true);
+});
+
+function buildNoteRow(note) {
+  const row = document.createElement('div');
+  row.className = 'note-item' + (note.hidden ? ' is-hidden' : '');
+
+  const eyeBtn = document.createElement('button');
+  eyeBtn.type = 'button';
+  eyeBtn.className = 'note-item-eye-btn';
+  eyeBtn.innerHTML = note.hidden ? EYE_OFF_SVG : EYE_SVG;
+  eyeBtn.setAttribute('aria-label', note.hidden ? 'Destapar nota' : 'Ocultar nota');
+  eyeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleNoteHidden(note);
+  });
+  row.appendChild(eyeBtn);
+
+  const contentWrap = document.createElement('div');
+  contentWrap.className = 'note-item-content-wrap';
+
+  const content = document.createElement('div');
+  content.className = 'note-item-content';
+
+  const title = document.createElement('span');
+  title.className = 'note-item-title';
+  title.textContent = note.title;
+  content.appendChild(title);
+
+  // Primera linea del contenido como avance, para reconocer la nota sin
+  // tener que abrirla — igual que un asunto de email con su primera linea.
+  if (note.body && note.body.trim()) {
+    const preview = document.createElement('span');
+    preview.className = 'note-item-preview';
+    preview.textContent = note.body.trim().split('\n')[0];
+    content.appendChild(preview);
+  }
+  contentWrap.appendChild(content);
+
+  if (note.hidden) {
+    const overlay = document.createElement('div');
+    overlay.className = 'note-item-reveal-overlay';
+    overlay.textContent = 'Destapar';
+    overlay.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleNoteHidden(note);
+    });
+    contentWrap.appendChild(overlay);
+  }
+  row.appendChild(contentWrap);
+
+  // Una nota oculta no se abre con un simple clic en la fila — hay que
+  // destaparla primero (icono de ojo o el boton de encima del blur).
+  row.addEventListener('click', () => {
+    if (note.hidden) return;
+    openNoteModal(note);
+  });
+  return row;
+}
+
+function renderNotesList() {
+  const container = document.getElementById('notes-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!state.notes || state.notes.length === 0) {
+    container.innerHTML = '<p class="empty-hint">No tienes notas.</p>';
+    return;
+  }
+
+  state.notes.forEach((note) => container.appendChild(buildNoteRow(note)));
+}
+
+function openNoteModal(note) {
+  const modal = document.getElementById('note-modal');
+  document.getElementById('note-modal-title').textContent = note ? 'Editar nota' : 'Nueva nota';
+  document.getElementById('note-id').value = note ? note.id : '';
+  document.getElementById('note-title').value = note ? note.title : '';
+  document.getElementById('note-body').value = note && note.body ? note.body : '';
+  document.getElementById('btn-delete-note').classList.toggle('hidden', !note);
+  modal.classList.remove('hidden');
+}
+
+function closeNoteModal() {
+  document.getElementById('note-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-new-note').addEventListener('click', () => openNoteModal(null));
+document.getElementById('btn-cancel-note').addEventListener('click', closeNoteModal);
+document.getElementById('btn-close-note').addEventListener('click', closeNoteModal);
+
+document.getElementById('note-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('note-id').value;
+  const payload = {
+    title: document.getElementById('note-title').value,
+    body: document.getElementById('note-body').value,
+  };
+
+  if (id) {
+    await api(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/notes', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  closeNoteModal();
+  await loadNotes();
+  renderNotesList();
+});
+
+document.getElementById('btn-delete-note').addEventListener('click', async () => {
+  const id = document.getElementById('note-id').value;
+  if (!id) return;
+  if (!confirm('¿Eliminar esta nota?')) return;
+  await api(`/api/notes/${id}`, { method: 'DELETE' });
+  closeNoteModal();
+  await loadNotes();
+  renderNotesList();
+});
+
+// ---------------------------------------------------------------------
 // Atajos de teclado: lista fija de acciones que ofrece la app (no se
 // pueden inventar acciones nuevas), y para cada una el USUARIO decide que
 // tecla la dispara, desde Configuracion > Atajos de teclado (settings.js
@@ -1596,16 +1842,35 @@ function applyMiEspacioMode() {
 document.getElementById('btn-my-space').addEventListener('click', openMySpaceView);
 document.getElementById('btn-close-my-space').addEventListener('click', closeMySpaceView);
 
+// Mientras una columna cambia de ancho (expandir o volver a las 3), el
+// contenido de dentro se oculta (ver .is-animating en styles.css) para
+// que no se vea el texto reajustandose a media animacion — 340ms es la
+// duracion de la transicion CSS (320ms) con un pelin de margen para que
+// de tiempo a que termine de verdad antes de destaparlo.
+const MY_SPACE_COLUMN_ANIMATION_MS = 340;
+let mySpaceAnimationTimer = null;
+
+function playMySpaceColumnAnimation() {
+  const hub = document.getElementById('my-space-hub');
+  hub.classList.add('is-animating');
+  clearTimeout(mySpaceAnimationTimer);
+  mySpaceAnimationTimer = setTimeout(() => hub.classList.remove('is-animating'), MY_SPACE_COLUMN_ANIMATION_MS);
+}
+
 // Un solo listener en el hub entero (delegacion) en vez de uno por
 // columna: mas simple, y sigue funcionando igual aunque los bloques que
 // hay dentro se muevan de sitio.
 document.getElementById('my-space-hub').addEventListener('click', (e) => {
   const expandBtn = e.target.closest('.my-space-col-expand');
   if (!expandBtn) return;
+  playMySpaceColumnAnimation();
   document.getElementById('my-space-hub').dataset.expanded = expandBtn.dataset.expand;
   document.getElementById('my-space-back-btn').classList.remove('hidden');
 });
-document.getElementById('my-space-back-btn').addEventListener('click', collapseMySpaceExpandedColumn);
+document.getElementById('my-space-back-btn').addEventListener('click', () => {
+  playMySpaceColumnAnimation();
+  collapseMySpaceExpandedColumn();
+});
 
 applyMiEspacioMode();
 
@@ -1662,6 +1927,36 @@ function compareVersions(a, b) {
     if (diff !== 0) return diff;
   }
   return 0;
+}
+
+// Info de version/commit en el menu principal de Configuracion (para "no
+// ir perdido" con que version corre este ordenador) -- ver
+// GET /api/update/info en server/routes/update.js. Es solo lectura,
+// no habla con GitHub (a diferencia de checkForNewRelease), asi que
+// funciona sin internet. En un movil emparejado (que no puede leer el
+// git de este ordenador) el 403 se ignora en silencio, igual que el
+// aviso de nueva version.
+const VERSION_INFO_DATE_FORMATTER = new Intl.DateTimeFormat('es-ES', {
+  day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+});
+
+async function refreshVersionInfo() {
+  const box = document.getElementById('settings-version-info');
+  try {
+    const info = await api('/api/update/info');
+    const commitDate = info.commitDate ? VERSION_INFO_DATE_FORMATTER.format(new Date(info.commitDate)) : '';
+    box.innerHTML = `
+      <div>Versión ${escapeHtml(info.version)} · rama <code>${escapeHtml(info.branch)}</code></div>
+      <div>Último commit: <code>${escapeHtml(info.commitHash)}</code> — ${escapeHtml(info.commitMessage)}</div>
+      ${commitDate ? `<div>${escapeHtml(commitDate)}</div>` : ''}
+    `;
+    box.classList.remove('hidden');
+  } catch (err) {
+    // Sin internet no importa (esto no hace fetch a GitHub), pero si
+    // fallase por cualquier otro motivo (git no disponible, movil
+    // emparejado sin permiso...) mejor no mostrar nada raro a medias.
+    box.classList.add('hidden');
+  }
 }
 
 let pendingReleaseVersion = null;
@@ -1748,10 +2043,13 @@ async function init() {
     await loadReminders();
     await loadTasks();
     renderTasksList();
+    await loadNotes();
+    renderNotesList();
     setInterval(loadReminders, 30 * 1000);
     // Igual que los recordatorios: si otro dispositivo vinculado anade o
     // completa una tarea, este se entera sin recargar la pagina.
     setInterval(() => loadTasks().then(renderTasksList), 30 * 1000);
+    setInterval(() => loadNotes().then(renderNotesList), 30 * 1000);
   } catch (err) {
     if (err.message !== 'device_not_paired') console.error(err);
   }
