@@ -682,10 +682,14 @@ async function applyTheme(theme, { persist = true } = {}) {
 // del sistema operativo (y se reacciona en vivo si cambia mientras la
 // app esta abierta, ver el listener de matchMedia mas abajo); es un
 // ajuste de ESTE dispositivo, como el tema activo.
+// Solo hay boton para "Sistema" -- cambiar a claro/oscuro A MANO ya se
+// hace con el atajo ☀/☾ de la topbar (ver btn-quick-color-mode mas
+// abajo), que dispara setColorModePreference('light'/'dark') igual que
+// hacian los botones "Claro"/"Oscuro" que habia aqui antes. Este boton
+// sirve para volver a "seguir el sistema" despues de haber cambiado a
+// mano con el atajo.
 const COLOR_MODES = [
   { id: 'system', label: 'Sistema' },
-  { id: 'light', label: 'Claro' },
-  { id: 'dark', label: 'Oscuro' },
 ];
 
 // Cambia el modo de color y refresca todo lo que depende de el: los

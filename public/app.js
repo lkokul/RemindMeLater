@@ -1420,21 +1420,11 @@ function buildNoteRow(note) {
     content.appendChild(preview);
   }
   contentWrap.appendChild(content);
-
-  if (note.hidden) {
-    const overlay = document.createElement('div');
-    overlay.className = 'note-item-reveal-overlay';
-    overlay.textContent = 'Destapar';
-    overlay.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleNoteHidden(note);
-    });
-    contentWrap.appendChild(overlay);
-  }
   row.appendChild(contentWrap);
 
-  // Una nota oculta no se abre con un simple clic en la fila — hay que
-  // destaparla primero (icono de ojo o el boton de encima del blur).
+  // Una nota oculta no se abre con un simple clic en la fila — solo el
+  // icono de ojo la destapa (sin ningun texto/boton de aviso encima del
+  // blur, para no recargar la fila).
   row.addEventListener('click', () => {
     if (note.hidden) return;
     openNoteModal(note);

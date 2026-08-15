@@ -628,8 +628,8 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 
 /* Ocultar una nota (ver toggleNoteHidden en app.js): NO es un bloqueo de
    verdad, solo desenfoca el titulo/avance en la lista para que no se lea
-   de un vistazo. El icono de ojo de cada fila y el boton "Destapar"
-   (que aparece encima del texto borroso) hacen la misma accion. */
+   de un vistazo. El icono de ojo de cada fila es el UNICO control para
+   ocultar/destapar, sin ningun texto extra encima del blur. */
 .note-item-eye-btn {
   flex-shrink: 0;
   padding: 0.25rem;
@@ -648,18 +648,6 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   filter: blur(5px);
   user-select: none;
 }
-.note-item-reveal-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: var(--accent);
-  text-shadow: 0 0 6px var(--surface-2);
-}
-.note-item-reveal-overlay:hover { text-decoration: underline; }
 
 /* --- Vista (Normal / Pantalla completa / Ventana flotante) --- */
 .view-mode-options { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
