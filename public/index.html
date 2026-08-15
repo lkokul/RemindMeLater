@@ -267,6 +267,12 @@
                 <h2>Notas</h2>
                 <button type="button" id="btn-new-note" class="secondary-btn">+ Nota</button>
               </div>
+              <!-- Carpetas (Fase 3): "Todas" + una chip por carpeta +
+                   "+" para crear una nueva -- filtra la lista de abajo,
+                   ver renderNoteFolderChips en app.js. Solo organizacion,
+                   sin PIN (eso ya se resolvio por nota individual con
+                   "ocultar"). -->
+              <div id="note-folder-chips" class="note-folder-chips"></div>
               <div id="notes-list" class="reminders-list notes-list"></div>
             </div>
           </div>
@@ -364,9 +370,9 @@
     </div>
   </div>
 
-  <!-- Modal para crear / editar nota (Mi espacio > Notas -- Fase 2: solo
-       titulo + texto plano, sin carpetas ni formato todavia, eso es de
-       Fase 3 y Fase 4). -->
+  <!-- Modal para crear / editar nota (Mi espacio > Notas -- solo titulo +
+       texto plano, sin formato todavia, eso es de Fase 4. Carpeta
+       opcional desde la Fase 3). -->
   <div id="note-modal" class="modal hidden">
     <div class="modal-card">
       <button type="button" id="btn-close-note" class="modal-close-x" aria-label="Cerrar">✕</button>
@@ -381,10 +387,39 @@
           Contenido (opcional)
           <textarea id="note-body" rows="8"></textarea>
         </label>
+        <div class="field-label-block">
+          <span class="field-label">Carpeta (opcional)</span>
+          <div id="note-folder-field"></div>
+        </div>
         <div class="modal-actions">
           <button type="button" id="btn-delete-note" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
           <button type="button" id="btn-cancel-note" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar carpeta de notas (Fase 3): nombre +
+       icono + color, sistema propio separado de los Grupos del
+       calendario. Solo organizacion, sin PIN (eso se resolvio por nota
+       individual con "ocultar", ver mas abajo). -->
+  <div id="note-folder-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-note-folder" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="note-folder-modal-title">Nueva carpeta</h2>
+      <form id="note-folder-form">
+        <input type="hidden" id="note-folder-id" />
+        <div class="group-form-row">
+          <div id="note-folder-icon-field"></div>
+          <input type="text" id="note-folder-name" placeholder="Nombre de la carpeta" required />
+          <div id="note-folder-color-field"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-note-folder" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-note-folder" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>

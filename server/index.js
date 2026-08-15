@@ -14,6 +14,7 @@ const profileRouter = require('./routes/profile');
 const specialDaysRouter = require('./routes/specialDays');
 const notesRouter = require('./routes/notes');
 const notesSecurityRouter = require('./routes/notesSecurity');
+const noteFoldersRouter = require('./routes/noteFolders');
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startMdns } = require('./mdns');
@@ -43,6 +44,7 @@ app.use('/api/profile', requireDeviceOrTrusted, profileRouter);
 app.use('/api/special-days', requireDeviceOrTrusted, specialDaysRouter);
 app.use('/api/notes', requireDeviceOrTrusted, notesRouter);
 app.use('/api/notes-security', requireDeviceOrTrusted, notesSecurityRouter);
+app.use('/api/note-folders', requireDeviceOrTrusted, noteFoldersRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);

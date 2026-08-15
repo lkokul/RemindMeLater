@@ -1705,6 +1705,12 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  const noteFolderModal = document.getElementById('note-folder-modal');
+  if (noteFolderModal && !noteFolderModal.classList.contains('hidden')) {
+    closeNoteFolderModal();
+    return;
+  }
+
   const notesVerifyModal = document.getElementById('notes-verify-modal');
   if (notesVerifyModal && !notesVerifyModal.classList.contains('hidden')) {
     closeNotesVerifyModal();

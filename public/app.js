@@ -15,6 +15,8 @@ const state = {
   groups: [],
   tasks: [], // TODAS las tareas (con fecha o sin ella), ver loadTasks()
   notes: [], // Notas de "Mi espacio" (Fase 2), ver loadNotes()
+  noteFolders: [], // Carpetas de notas (Fase 3), ver loadNoteFolders()
+  selectedNoteFolderId: null, // null = "Todas" -- filtro de notas, no se guarda entre sesiones
   specialDays: {}, // 'YYYY-MM-DD' -> 'holiday' | 'special', marcados a mano
   pairingCodeExpiresAt: null,
   notifiedReminderIds: new Set(), // evita notificar el mismo recordatorio 2 veces
@@ -1406,10 +1408,22 @@ function buildNoteRow(note) {
   const content = document.createElement('div');
   content.className = 'note-item-content';
 
+  const titleRow = document.createElement('div');
+  titleRow.className = 'note-item-title-row';
+  // Punto de color de la carpeta (si tiene), igual que las tareas
+  // muestran el color de su grupo — asi se reconoce de un vistazo aunque
+  // estes viendo "Todas" sin filtrar.
+  if (note.folderColor) {
+    const dot = document.createElement('span');
+    dot.className = 'color-dot';
+    dot.style.backgroundColor = note.folderColor;
+    titleRow.appendChild(dot);
+  }
   const title = document.createElement('span');
   title.className = 'note-item-title';
   title.textContent = note.title;
-  content.appendChild(title);
+  titleRow.appendChild(title);
+  content.appendChild(titleRow);
 
   // Primera linea del contenido como avance, para reconocer la nota sin
   // tener que abrirla — igual que un asunto de email con su primera linea.
@@ -1437,12 +1451,31 @@ function renderNotesList() {
   if (!container) return;
   container.innerHTML = '';
 
-  if (!state.notes || state.notes.length === 0) {
-    container.innerHTML = '<p class="empty-hint">No tienes notas.</p>';
+  const notes = state.notes || [];
+  const filtered = state.selectedNoteFolderId === null
+    ? notes
+    : notes.filter((n) => n.folderId === state.selectedNoteFolderId);
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<p class="empty-hint">${notes.length === 0 ? 'No tienes notas.' : 'No hay notas en esta carpeta.'}</p>`;
     return;
   }
 
-  state.notes.forEach((note) => container.appendChild(buildNoteRow(note)));
+  filtered.forEach((note) => container.appendChild(buildNoteRow(note)));
+}
+
+// Selector de carpeta (opcional) dentro del modal de nota — mismo patron
+// que el selector de grupo de las tareas (populateTaskGroupSelect).
+const noteFolderField = createSelectField({ options: [{ value: '', label: 'Sin carpeta' }], initialValue: '' });
+document.getElementById('note-folder-field').appendChild(noteFolderField.element);
+
+function populateNoteFolderSelect() {
+  const current = noteFolderField.getValue();
+  noteFolderField.setOptions([
+    { value: '', label: 'Sin carpeta' },
+    ...state.noteFolders.map((f) => ({ value: String(f.id), label: (f.icon ? f.icon + ' ' : '') + f.name })),
+  ]);
+  noteFolderField.setValue(current);
 }
 
 function openNoteModal(note) {
@@ -1451,6 +1484,8 @@ function openNoteModal(note) {
   document.getElementById('note-id').value = note ? note.id : '';
   document.getElementById('note-title').value = note ? note.title : '';
   document.getElementById('note-body').value = note && note.body ? note.body : '';
+  populateNoteFolderSelect();
+  noteFolderField.setValue(note && note.folderId ? String(note.folderId) : '');
   document.getElementById('btn-delete-note').classList.toggle('hidden', !note);
   modal.classList.remove('hidden');
 }
@@ -1466,9 +1501,11 @@ document.getElementById('btn-close-note').addEventListener('click', closeNoteMod
 document.getElementById('note-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('note-id').value;
+  const folderRaw = noteFolderField.getValue();
   const payload = {
     title: document.getElementById('note-title').value,
     body: document.getElementById('note-body').value,
+    folderId: folderRaw === '' ? null : Number(folderRaw),
   };
 
   if (id) {
@@ -1490,6 +1527,146 @@ document.getElementById('btn-delete-note').addEventListener('click', async () =>
   closeNoteModal();
   await loadNotes();
   renderNotesList();
+});
+
+// ---------------------------------------------------------------------
+// Carpetas de notas (Fase 3): solo organizacion (nombre/icono/color),
+// sistema propio SEPARADO de los Grupos del calendario. Sin PIN ni
+// bloqueo — eso ya se resolvio por nota individual con "ocultar" (ver
+// mas arriba). Se gestionan desde aqui mismo, dentro de Mi espacio (no
+// en Configuracion), con chips: "Todas" + una por carpeta + "+".
+// ---------------------------------------------------------------------
+async function loadNoteFolders() {
+  state.noteFolders = await api('/api/note-folders');
+}
+
+function renderNoteFolderChips() {
+  const container = document.getElementById('note-folder-chips');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const allChip = document.createElement('button');
+  allChip.type = 'button';
+  allChip.className = 'note-folder-chip' + (state.selectedNoteFolderId === null ? ' active' : '');
+  allChip.textContent = 'Todas';
+  allChip.addEventListener('click', () => {
+    state.selectedNoteFolderId = null;
+    renderNoteFolderChips();
+    renderNotesList();
+  });
+  container.appendChild(allChip);
+
+  state.noteFolders.forEach((folder) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'note-folder-chip-wrap';
+
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'note-folder-chip' + (state.selectedNoteFolderId === folder.id ? ' active' : '');
+    chip.style.setProperty('--folder-color', folder.color);
+    const dot = document.createElement('span');
+    dot.className = 'note-folder-chip-dot';
+    chip.appendChild(dot);
+    chip.appendChild(document.createTextNode((folder.icon ? folder.icon + ' ' : '') + folder.name));
+    chip.addEventListener('click', () => {
+      state.selectedNoteFolderId = folder.id;
+      renderNoteFolderChips();
+      renderNotesList();
+    });
+    wrap.appendChild(chip);
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'note-folder-chip-edit';
+    editBtn.textContent = '✎';
+    editBtn.setAttribute('aria-label', `Editar carpeta ${folder.name}`);
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openNoteFolderModal(folder);
+    });
+    wrap.appendChild(editBtn);
+
+    container.appendChild(wrap);
+  });
+
+  const addChip = document.createElement('button');
+  addChip.type = 'button';
+  addChip.className = 'note-folder-chip note-folder-chip-add';
+  addChip.textContent = '+';
+  addChip.setAttribute('aria-label', 'Nueva carpeta');
+  addChip.addEventListener('click', () => openNoteFolderModal(null));
+  container.appendChild(addChip);
+}
+
+// createIconField/createColorField viven en settings.js (widgets
+// genericos, tambien los usa el formulario de Grupos) — se crean aqui
+// LA PRIMERA VEZ que hace falta (al abrir el modal), nunca al cargar la
+// pagina, porque settings.js se carga DESPUES de app.js y todavia no
+// existirian esas funciones si se llamaran nada mas cargar.
+let noteFolderIconField = null;
+let noteFolderColorField = null;
+
+function ensureNoteFolderFields() {
+  if (noteFolderIconField) return;
+  noteFolderIconField = createIconField({ initialValue: '' });
+  document.getElementById('note-folder-icon-field').appendChild(noteFolderIconField.element);
+  noteFolderColorField = createColorField({ initialValue: '#5b8cff' });
+  document.getElementById('note-folder-color-field').appendChild(noteFolderColorField.element);
+}
+
+function openNoteFolderModal(folder) {
+  ensureNoteFolderFields();
+  document.getElementById('note-folder-modal-title').textContent = folder ? 'Editar carpeta' : 'Nueva carpeta';
+  document.getElementById('note-folder-id').value = folder ? folder.id : '';
+  document.getElementById('note-folder-name').value = folder ? folder.name : '';
+  noteFolderIconField.setValue(folder && folder.icon ? folder.icon : '');
+  noteFolderColorField.setValue(folder ? folder.color : '#5b8cff');
+  document.getElementById('btn-delete-note-folder').classList.toggle('hidden', !folder);
+  document.getElementById('note-folder-modal').classList.remove('hidden');
+}
+
+function closeNoteFolderModal() {
+  document.getElementById('note-folder-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-cancel-note-folder').addEventListener('click', closeNoteFolderModal);
+document.getElementById('btn-close-note-folder').addEventListener('click', closeNoteFolderModal);
+
+document.getElementById('note-folder-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('note-folder-id').value;
+  const payload = {
+    name: document.getElementById('note-folder-name').value,
+    icon: noteFolderIconField.getValue() || null,
+    color: noteFolderColorField.getValue(),
+  };
+
+  if (id) {
+    await api(`/api/note-folders/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/note-folders', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  closeNoteFolderModal();
+  await loadNoteFolders();
+  renderNoteFolderChips();
+  populateNoteFolderSelect();
+});
+
+document.getElementById('btn-delete-note-folder').addEventListener('click', async () => {
+  const id = document.getElementById('note-folder-id').value;
+  if (!id) return;
+  if (!confirm('¿Eliminar esta carpeta? Las notas que tenga se quedaran sin carpeta.')) return;
+  await api(`/api/note-folders/${id}`, { method: 'DELETE' });
+  closeNoteFolderModal();
+  // Si estabas filtrando justo por la carpeta que se acaba de borrar,
+  // vuelve a "Todas" para no quedarte viendo un filtro que ya no existe.
+  if (state.selectedNoteFolderId === Number(id)) state.selectedNoteFolderId = null;
+  await loadNoteFolders();
+  renderNoteFolderChips();
+  await loadNotes();
+  renderNotesList();
+  populateNoteFolderSelect();
 });
 
 // ---------------------------------------------------------------------
@@ -2033,6 +2210,9 @@ async function init() {
     await loadReminders();
     await loadTasks();
     renderTasksList();
+    await loadNoteFolders();
+    renderNoteFolderChips();
+    populateNoteFolderSelect();
     await loadNotes();
     renderNotesList();
     setInterval(loadReminders, 30 * 1000);

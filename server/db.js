@@ -113,8 +113,8 @@ db.exec(`
 
   -- Notas de "Mi espacio" (Fase 2): titulo + texto plano, compartidas
   -- entre todos los dispositivos igual que eventos/tareas/grupos. Sin
-  -- carpetas ni formato todavia (eso son Fase 3 y Fase 4) — de momento es
-  -- deliberadamente lo mas simple posible.
+  -- formato todavia (eso es Fase 4) — de momento es deliberadamente lo
+  -- mas simple posible.
   CREATE TABLE IF NOT EXISTS notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -123,6 +123,20 @@ db.exec(`
     created_by_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Carpetas de notas (Fase 3): nombre + icono + color, sistema propio
+  -- SEPARADO de los Grupos del calendario (esos son para eventos/tareas,
+  -- estas son solo para organizar notas dentro de Mi espacio). Solo
+  -- organizacion, sin PIN ni bloqueo -- eso ya se resolvio por nota
+  -- individual con "ocultar" (ver notes.hidden y notesSecurity.js).
+  CREATE TABLE IF NOT EXISTS note_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    icon TEXT,
+    color TEXT NOT NULL DEFAULT '#5b8cff',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
 
@@ -236,6 +250,11 @@ if (!themeColumns.includes('inverse_colors')) {
 const noteColumns = db.prepare('PRAGMA table_info(notes)').all().map((c) => c.name);
 if (!noteColumns.includes('hidden')) {
   db.exec('ALTER TABLE notes ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
+}
+// folder_id: carpeta de la nota (Fase 3), opcional -- NULL = sin
+// carpeta ("Todas"). Ver note_folders arriba.
+if (!noteColumns.includes('folder_id')) {
+  db.exec('ALTER TABLE notes ADD COLUMN folder_id INTEGER REFERENCES note_folders(id)');
 }
 
 // El perfil siempre tiene que existir (para poder firmar "creado por" en

@@ -612,6 +612,7 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   cursor: pointer;
 }
 .note-item:last-child { border-bottom: none; }
+.note-item-title-row { display: flex; align-items: center; min-width: 0; }
 .note-item-title {
   font-weight: 600;
   overflow: hidden;
@@ -647,6 +648,54 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .note-item.is-hidden .note-item-content {
   filter: blur(5px);
   user-select: none;
+}
+
+/* --- Carpetas de notas (Fase 3): chips "Todas" + una por carpeta + "+".
+   Solo organizacion (filtran la lista de abajo), sin PIN -- eso ya se
+   resuelve por nota individual con "ocultar". --- */
+.note-folder-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+}
+.note-folder-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.76rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: color-mix(in srgb, var(--surface-2-text) 75%, var(--surface-2));
+}
+.note-folder-chip.active {
+  border-color: var(--folder-color, var(--accent));
+  color: var(--surface-2-text);
+  background: color-mix(in srgb, var(--folder-color, var(--accent)) 18%, var(--surface));
+}
+.note-folder-chip-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--folder-color, var(--accent));
+}
+.note-folder-chip-wrap { display: inline-flex; align-items: center; gap: 0.15rem; }
+.note-folder-chip-edit {
+  padding: 0.2rem 0.35rem;
+  font-size: 0.7rem;
+  background: transparent;
+  border-color: transparent;
+  color: color-mix(in srgb, var(--surface-2-text) 50%, var(--surface-2));
+}
+.note-folder-chip-edit:hover { color: var(--surface-2-text); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.note-folder-chip-add {
+  padding: 0.25rem 0.55rem;
+  font-weight: 700;
+  border-style: dashed;
 }
 
 /* --- Vista (Normal / Pantalla completa / Ventana flotante) --- */
