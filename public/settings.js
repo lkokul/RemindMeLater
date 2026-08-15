@@ -379,6 +379,8 @@ function refreshViewTab() {
 
   refreshCalendarDensityOptions();
   refreshMiEspacioModeOptions();
+  refreshRemindersPanelLayoutOptions();
+  refreshFavoritesDisplayOptions();
 }
 
 // Como se accede a "Mi espacio" (Proximos + Tareas + Notas) — preferencia
@@ -408,6 +410,73 @@ function refreshMiEspacioModeOptions() {
         localStorage.setItem('miEspacioMode', mode.id);
         applyMiEspacioMode();
         refreshMiEspacioModeOptions();
+      });
+    }
+    container.appendChild(btn);
+  });
+}
+
+// Panel lateral clasico (solo aplica en modo "topbar" de Mi espacio, ver
+// arriba): apilado (3 secciones siempre visibles) o alternar con flechas
+// (una seccion grande cada vez). Ver applyRemindersPanelLayout() en app.js.
+const REMINDERS_PANEL_LAYOUT_OPTIONS = [
+  { id: 'stacked', label: 'Apilado' },
+  { id: 'alternate', label: 'Alternar con flechas' },
+];
+
+function refreshRemindersPanelLayoutOptions() {
+  const container = document.getElementById('reminders-panel-layout-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getRemindersPanelLayout();
+
+  REMINDERS_PANEL_LAYOUT_OPTIONS.forEach((opt) => {
+    const isActive = opt.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = opt.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('remindersPanelLayout', opt.id);
+        applyRemindersPanelLayout();
+        refreshRemindersPanelLayoutOptions();
+      });
+    }
+    container.appendChild(btn);
+  });
+}
+
+// Favoritos en Mi espacio (carpetas y notas): "merged" (por defecto)
+// ordena los favoritos primero sin cabeceras; "sections" separa con una
+// cabecera "Favoritos"/"Todo lo demas" (solo si hay algun favorito). Ver
+// getFavoritesDisplayMode()/appendFavoriteSortedGroup() en app.js.
+const FAVORITES_DISPLAY_OPTIONS = [
+  { id: 'merged', label: 'Una sola lista, favoritos primero' },
+  { id: 'sections', label: 'Secciones separadas' },
+];
+
+function refreshFavoritesDisplayOptions() {
+  const container = document.getElementById('favorites-display-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getFavoritesDisplayMode();
+
+  FAVORITES_DISPLAY_OPTIONS.forEach((opt) => {
+    const isActive = opt.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = opt.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('favoritesDisplayMode', opt.id);
+        renderNotesView();
+        refreshFavoritesDisplayOptions();
       });
     }
     container.appendChild(btn);
@@ -467,6 +536,12 @@ function openSettingsModal() {
 }
 
 document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
+// Mismo panel, boton aparte: #my-space-view tapa la topbar (z-index por
+// encima), asi que el boton de Configuracion de siempre no se puede
+// clicar mientras Mi espacio esta abierto a pantalla completa. Este
+// boton vive dentro de la cabecera de Mi espacio para que Configuracion
+// se pueda abrir desde cualquier ventana.
+document.getElementById('btn-my-space-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-close-settings').addEventListener('click', () => {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');

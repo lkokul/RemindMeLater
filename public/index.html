@@ -131,6 +131,7 @@
       <nav class="topbar-actions">
         <button id="btn-new-event" class="primary-btn">+ Nuevo evento</button>
         <button id="btn-new-task" class="primary-btn">+ Nueva tarea</button>
+        <button id="btn-new-note-topbar" class="primary-btn">+ Nota</button>
         <!-- Atajo rapido para alternar claro/oscuro sin entrar en
              Configuracion — solo se ve si el tema activo tiene variante
              emparejada (si no, no hay a que alternar). Ver
@@ -178,9 +179,20 @@
            interno (ver .reminders-top-block/.reminders-tasks-block en
            styles.css). -->
       <aside id="reminders-panel" class="reminders-panel">
-        <div id="reminders-top-block" class="reminders-top-block">
+        <!-- Solo se ve en modo "boton" de Mi espacio (panel lateral
+             clasico) cuando el ajuste "Panel lateral clasico" (Configuracion
+             > Vista) esta en "Alternar" -- flechas para pasar de
+             Recordatorios a Tareas a Notas, mostrando solo una seccion
+             grande cada vez en vez de las 3 apiladas. Ver
+             applyRemindersPanelLayout() en app.js. -->
+        <div id="reminders-panel-switcher" class="reminders-panel-switcher hidden">
+          <button type="button" id="btn-panel-switch-prev" class="icon-btn" aria-label="Sección anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+          <span id="reminders-panel-switch-label" class="reminders-panel-switch-label"></span>
+          <button type="button" id="btn-panel-switch-next" class="icon-btn" aria-label="Sección siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+        </div>
+        <div id="reminders-top-block" class="reminders-top-block reminders-panel-page">
           <div class="reminders-panel-header">
-            <h2 id="reminders-panel-title">Proximos recordatorios</h2>
+            <h2 id="reminders-panel-title" class="my-space-col-expand-trigger">Proximos recordatorios</h2>
             <button type="button" id="btn-reminders-back" class="secondary-btn hidden">Próximos →</button>
           </div>
           <!-- Solo visible dentro de "Mi espacio" (ver applyMiEspacioMode
@@ -202,9 +214,9 @@
           <div id="reminders-list" class="reminders-list"></div>
         </div>
 
-        <div id="reminders-tasks-block" class="reminders-tasks-block">
+        <div id="reminders-tasks-block" class="reminders-tasks-block reminders-panel-page">
           <div class="reminders-panel-header">
-            <h2>Tareas</h2>
+            <h2 class="my-space-col-expand-trigger">Tareas</h2>
           </div>
           <div id="tasks-list" class="reminders-list tasks-list"></div>
         </div>
@@ -223,7 +235,15 @@
     <div id="my-space-view" class="my-space-view hidden">
       <div class="my-space-view-header">
         <h2>Mi espacio</h2>
-        <button type="button" id="btn-close-my-space" class="modal-close-x" aria-label="Cerrar">✕</button>
+        <div class="my-space-view-header-actions">
+          <!-- Configuracion tiene que poder abrirse desde CUALQUIER
+               ventana, y esta pantalla (fija, z-index por encima de la
+               topbar) tapa el boton de Configuracion de siempre -- por
+               eso hace falta uno propio aqui. Abre el mismo panel (ver
+               btn-my-space-settings en app.js/settings.js). -->
+          <button type="button" id="btn-my-space-settings" class="icon-btn" aria-label="Configuración">☰</button>
+          <button type="button" id="btn-close-my-space" class="secondary-btn my-space-close-btn" aria-label="Volver al calendario">← Calendario</button>
+        </div>
       </div>
       <div id="my-space-hub" class="my-space-hub">
         <!-- Comun a las 3 columnas: cuando una esta expandida (tapando a
@@ -237,53 +257,57 @@
              expandir/colapsar una columna se vea como una animacion en
              vez de un salto instantaneo. Ver la regla #my-space-hub[data-expanded]
              en styles.css. -->
+        <!-- Las 3 columnas ya NO tienen un boton dedicado para expandir
+             (ocupaba espacio vertical solo para eso, ver CLAUDE.md/ronda
+             de pulido): clicar el TITULO (h2) de cada columna la expande,
+             la clase my-space-col-expand-trigger en cada h2 es lo que
+             delega ese clic (ver el listener en #my-space-hub, app.js). -->
         <div class="my-space-cols-row">
           <div class="my-space-col" data-col="reminders">
-            <div class="my-space-col-toolbar">
-              <button type="button" class="icon-btn my-space-col-expand" data-expand="reminders" aria-label="Expandir Próximos">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
-              </button>
-            </div>
             <div id="my-space-col-reminders" class="my-space-col-body"></div>
           </div>
 
           <div class="my-space-col" data-col="tasks">
-            <div class="my-space-col-toolbar">
-              <button type="button" class="icon-btn my-space-col-expand" data-expand="tasks" aria-label="Expandir Tareas">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
-              </button>
-            </div>
             <div id="my-space-col-tasks" class="my-space-col-body"></div>
           </div>
 
           <div class="my-space-col" data-col="notes">
-            <div class="my-space-col-toolbar">
-              <button type="button" class="icon-btn my-space-col-expand" data-expand="notes" aria-label="Expandir Notas">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
-              </button>
-            </div>
-            <div class="my-space-col-body">
-              <div class="reminders-panel-header">
-                <h2>Notas</h2>
-                <button type="button" id="btn-new-note" class="secondary-btn">+ Nota</button>
+            <div id="my-space-col-notes" class="my-space-col-body">
+              <!-- Envuelto en un bloque movible (igual que
+                   reminders-top-block/reminders-tasks-block) para que
+                   tambien pueda vivir dentro del panel lateral clasico
+                   (modo "topbar" de Mi espacio) como 3er bloque, ver
+                   moveRemindersIntoHub/restoreClassicRemindersPanel en
+                   app.js. -->
+              <div id="reminders-notes-block" class="reminders-notes-block reminders-panel-page">
+                <div class="reminders-panel-header">
+                  <h2 class="my-space-col-expand-trigger">Notas</h2>
+                </div>
+                <!-- Carpetas (Fase 3): navegacion tipo explorador de
+                     archivos -- estas en un "sitio" (la raiz, o dentro de
+                     una carpeta), #notes-list ensena las SUBcarpetas de
+                     ese sitio arriba y las notas de ese sitio debajo, todo
+                     en una sola lista. "Volver" solo se ve si no estas en
+                     la raiz. Solo organizacion, sin PIN (eso ya se
+                     resolvio por nota individual con "ocultar"). Ver
+                     renderNotesView en app.js. -->
+                <div id="note-folder-toolbar" class="note-folder-toolbar">
+                  <button type="button" id="btn-note-folder-back" class="secondary-btn hidden">← Volver</button>
+                  <div class="spacer"></div>
+                  <button type="button" id="btn-new-note-folder" class="note-folder-chip note-folder-chip-add" aria-label="Nueva carpeta">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
+                    <span>Carpeta</span>
+                  </button>
+                </div>
+                <!-- "+ Nota" debajo de Volver/+ Carpeta a proposito: es la
+                     accion menos frecuente de las dos (normalmente entras
+                     a leer/organizar, no a crear), asi que va debajo. -->
+                <button type="button" id="btn-new-note" class="secondary-btn note-add-btn">+ Nota</button>
+                <div class="note-search-row">
+                  <input type="text" id="note-search-input" placeholder="Buscar por nombre..." autocomplete="off" />
+                </div>
+                <div id="notes-list" class="reminders-list notes-list"></div>
               </div>
-              <!-- Carpetas (Fase 3): navegacion tipo explorador de
-                   archivos -- estas en un "sitio" (la raiz, o dentro de
-                   una carpeta), #notes-list ensena las SUBcarpetas de
-                   ese sitio arriba y las notas de ese sitio debajo, todo
-                   en una sola lista. "Volver" solo se ve si no estas en
-                   la raiz. Solo organizacion, sin PIN (eso ya se
-                   resolvio por nota individual con "ocultar"). Ver
-                   renderNotesView en app.js. -->
-              <div id="note-folder-toolbar" class="note-folder-toolbar">
-                <button type="button" id="btn-note-folder-back" class="secondary-btn hidden">← Volver</button>
-                <div class="spacer"></div>
-                <button type="button" id="btn-new-note-folder" class="note-folder-chip note-folder-chip-add" aria-label="Nueva carpeta">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
-                  <span>Carpeta</span>
-                </button>
-              </div>
-              <div id="notes-list" class="reminders-list notes-list"></div>
             </div>
           </div>
         </div>
@@ -391,7 +415,10 @@
         <input type="hidden" id="note-id" />
         <label>
           Titulo
-          <input type="text" id="note-title" required />
+          <div class="title-with-favorite">
+            <input type="text" id="note-title" required />
+            <button type="button" id="note-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
+          </div>
         </label>
         <label>
           Contenido (opcional)
@@ -422,9 +449,12 @@
       <form id="note-folder-form">
         <input type="hidden" id="note-folder-id" />
         <div class="group-form-row">
-          <div id="note-folder-icon-field"></div>
           <input type="text" id="note-folder-name" placeholder="Nombre de la carpeta" required />
           <div id="note-folder-color-field"></div>
+          <!-- Estrella de favorito: rellena si es favorita, solo borde si
+               no -- se puede marcar desde la creacion (aqui) o con el
+               mismo icono en el listado (ver buildFolderRow en app.js). -->
+          <button type="button" id="note-folder-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
         </div>
         <div class="modal-actions">
           <button type="button" id="btn-delete-note-folder" class="danger-btn hidden">Eliminar</button>
@@ -583,6 +613,14 @@
         <h4>Mi espacio</h4>
         <p class="hint">Cómo acceder a "Mi espacio" (Próximos, Tareas y Notas juntos). En el panel lateral se ve siempre al lado del calendario; con el botón se abre a pantalla completa cuando lo necesites.</p>
         <div id="my-space-mode-options" class="view-mode-options"></div>
+
+        <h4>Panel lateral clásico</h4>
+        <p class="hint">Solo aplica cuando "Mi espacio" está en modo botón (arriba): cómo se muestran Recordatorios, Tareas y Notas en el panel de siempre, al lado del calendario. Apilado deja las 3 secciones visibles a la vez, cada una con su scroll; Alternar muestra una sección grande cada vez, con flechas para pasar a la siguiente — útil si la pantalla es más pequeña.</p>
+        <div id="reminders-panel-layout-options" class="view-mode-options"></div>
+
+        <h4>Favoritos en Mi espacio</h4>
+        <p class="hint">Cómo se ordenan las carpetas y notas favoritas (la estrella del listado) dentro de cada carpeta.</p>
+        <div id="favorites-display-options" class="view-mode-options"></div>
       </div>
 
       <!-- --- Estilo --- -->

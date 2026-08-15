@@ -267,6 +267,16 @@ if (!noteFolderColumns.includes('parent_id')) {
   db.exec('ALTER TABLE note_folders ADD COLUMN parent_id INTEGER REFERENCES note_folders(id)');
 }
 
+// favorite: nota o carpeta marcada como favorita, para que aparezca
+// primero en su listado (ver renderNotesView en app.js). Igual que
+// "hidden", es un simple 0/1 por fila, sin tabla aparte.
+if (!noteColumns.includes('favorite')) {
+  db.exec('ALTER TABLE notes ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0');
+}
+if (!noteFolderColumns.includes('favorite')) {
+  db.exec('ALTER TABLE note_folders ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0');
+}
+
 // El perfil siempre tiene que existir (para poder firmar "creado por" en
 // los eventos desde el primer arranque). El public_id se genera una sola
 // vez aqui y ya no se vuelve a tocar.

@@ -18,6 +18,7 @@ function serialize(row) {
     title: row.title,
     body: row.body,
     hidden: !!row.hidden,
+    favorite: !!row.favorite,
     folderId: row.folder_id,
     folderName: row.folder_name || null,
     folderColor: row.folder_color || null,
@@ -47,7 +48,7 @@ router.get('/:id', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { title, body, folderId } = req.body || {};
+  const { title, body, folderId, favorite } = req.body || {};
 
   if (!title || !title.trim()) {
     return res.status(400).json({ error: 'invalid_request', message: 'La nota necesita un titulo.' });
@@ -59,11 +60,12 @@ router.post('/', (req, res) => {
   const profile = db.prepare('SELECT * FROM user_profile WHERE id = 1').get();
 
   const info = db
-    .prepare('INSERT INTO notes (title, body, folder_id, created_by_name, created_by_id) VALUES (?, ?, ?, ?, ?)')
+    .prepare('INSERT INTO notes (title, body, folder_id, favorite, created_by_name, created_by_id) VALUES (?, ?, ?, ?, ?, ?)')
     .run(
       title.trim(),
       body || null,
       resolveFolderId(folderId),
+      favorite ? 1 : 0,
       profile && profile.name ? profile.name : null,
       profile ? profile.public_id : null
     );
@@ -76,7 +78,7 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM notes WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { title, body, hidden, folderId } = req.body || {};
+  const { title, body, hidden, folderId, favorite } = req.body || {};
   if (title !== undefined && !title.trim()) {
     return res.status(400).json({ error: 'invalid_request', message: 'La nota necesita un titulo.' });
   }
@@ -87,6 +89,7 @@ router.put('/:id', (req, res) => {
       body = ?,
       hidden = ?,
       folder_id = ?,
+      favorite = ?,
       updated_at = datetime('now')
     WHERE id = ?
   `).run(
@@ -94,6 +97,7 @@ router.put('/:id', (req, res) => {
     body !== undefined ? body : existing.body,
     hidden !== undefined ? (hidden ? 1 : 0) : existing.hidden,
     folderId !== undefined ? resolveFolderId(folderId) : existing.folder_id,
+    favorite !== undefined ? (favorite ? 1 : 0) : existing.favorite,
     req.params.id
   );
 

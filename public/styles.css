@@ -454,6 +454,38 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   padding-top: 0.9rem;
   border-top: 1px solid var(--border);
 }
+/* Notas como 3er bloque del panel lateral clasico: mismo separador que
+   Tareas (ver arriba), porque ocupa el mismo sitio "el siguiente bloque
+   apilado" cuando el ajuste "Panel lateral clasico" esta en Apilado. */
+.reminders-notes-block {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+.note-add-btn { width: 100%; margin-bottom: 0.5rem; }
+.note-search-row { margin-bottom: 0.5rem; }
+#note-search-input { width: 100%; font-size: 0.85rem; padding: 0.4rem 0.6rem; }
+.note-list-section-heading {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--surface-2-text) 60%, var(--surface-2));
+  margin: 0.6rem 0 0.2rem;
+}
+.note-list-section-heading:first-child { margin-top: 0; }
+
+/* Flechas para alternar Recordatorios/Tareas/Notas (panel lateral
+   clasico en "Alternar", ver applyRemindersPanelLayout en app.js). */
+.reminders-panel-switcher {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+  flex-shrink: 0;
+}
+.reminders-panel-switch-label { font-weight: 600; font-size: 0.85rem; text-align: center; flex: 1; }
 .task-item {
   display: flex;
   align-items: center;
@@ -513,11 +545,16 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 }
 .my-space-view-header {
   flex-shrink: 0;
-  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   padding: 1.2rem 1.2rem 0.6rem;
   border-bottom: 1px solid var(--border);
 }
 .my-space-view-header h2 { margin: 0; }
+.my-space-view-header-actions { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; }
+.my-space-close-btn { font-size: 0.85rem; padding: 0.45rem 0.7rem; }
 
 .my-space-hub {
   flex: 1;
@@ -556,8 +593,11 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   border-radius: var(--radius);
   padding: 0.7rem;
 }
-.my-space-col-toolbar { display: flex; justify-content: flex-end; flex-shrink: 0; margin-bottom: 0.2rem; }
-.my-space-col-expand { padding: 0.3rem; }
+/* El titulo de cada columna (h2, dentro de .reminders-panel-header) es
+   lo que expande esa columna -- ya no hay un boton dedicado aparte, para
+   no gastar una fila entera de alto solo para eso. */
+.my-space-col-expand-trigger { cursor: pointer; }
+.my-space-col-expand-trigger:hover { color: var(--accent); }
 
 /* Volver comun a las 3 columnas: solo aparece mientras una esta
    expandida, fijo arriba igual que en Configuracion. */
@@ -587,12 +627,12 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 #my-space-hub[data-expanded="notes"] .my-space-col[data-col="notes"] {
   display: flex;
 }
-#my-space-hub[data-expanded] .my-space-col-toolbar { display: none; }
-
-/* .reminders-tasks-block trae su propio borde/hueco superior porque
-   normalmente va PEGADO debajo de "Proximos" dentro del mismo bloque —
-   aqui vive solo, en su propia columna, asi que ese borde sobra. */
-.my-space-col-body .reminders-tasks-block {
+/* .reminders-tasks-block/.reminders-notes-block traen su propio
+   borde/hueco superior porque normalmente van PEGADOS debajo del bloque
+   anterior en el panel lateral clasico apilado -- aqui cada una vive
+   sola, en su propia columna, asi que ese borde sobra. */
+.my-space-col-body .reminders-tasks-block,
+.my-space-col-body .reminders-notes-block {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
@@ -649,6 +689,30 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   filter: blur(5px);
   user-select: none;
 }
+
+/* Estrella de favorito: mismo boton en las filas del listado (relleno)
+   y en los modales de creacion/edicion. Gris/borde cuando no es
+   favorito, color de acento y relleno cuando si lo es. */
+.favorite-star-btn {
+  flex-shrink: 0;
+  padding: 0.25rem;
+  background: transparent;
+  border-color: transparent;
+  color: color-mix(in srgb, var(--surface-2-text) 45%, var(--surface-2));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.favorite-star-btn:hover { color: var(--surface-2-text); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.favorite-star-btn.is-favorite { color: var(--accent); }
+/* Dentro de los modales (fondo surface, no surface-2) el contraste por
+   defecto usa surface-text en vez de surface-2-text. */
+.modal-card .favorite-star-btn { color: color-mix(in srgb, var(--surface-text) 45%, var(--surface)); }
+.modal-card .favorite-star-btn:hover { color: var(--surface-text); }
+.modal-card .favorite-star-btn.is-favorite { color: var(--accent); }
+
+.title-with-favorite { display: flex; align-items: center; gap: 0.4rem; }
+.title-with-favorite input { flex: 1; min-width: 0; }
 
 /* --- Carpetas de notas (Fase 3): navegacion tipo explorador de
    archivos -- ver renderNotesView en app.js. Solo organizacion, sin PIN
@@ -1316,11 +1380,15 @@ label input, label textarea, label select { margin-top: 0.3rem; }
     min-height: 0;
     max-height: none;
   }
-  /* Proximos/dia arriba y Tareas abajo se reparten el alto del panel a
-     mitades, cada uno con su propia lista scrolleando por dentro — asi
-     se ven los dos titulos siempre, sin que uno se coma el hueco del otro. */
+  /* Recordatorios/Tareas/Notas se reparten el alto del panel a partes
+     iguales (apilado), cada uno con su propia lista scrolleando por
+     dentro — asi se ven los titulos siempre, sin que uno se coma el
+     hueco del otro. En modo "Alternar" (ver applyRemindersPanelLayout en
+     app.js) solo uno de los 3 esta visible a la vez, asi que ocupa el
+     alto entero el solo. */
   .reminders-top-block,
-  .reminders-tasks-block {
+  .reminders-tasks-block,
+  .reminders-notes-block {
     flex: 1;
     min-height: 0;
     display: flex;
@@ -1408,16 +1476,15 @@ label input, label textarea, label select { margin-top: 0.3rem; }
      fundido, la caja ya se esta moviendo de por si -- para que no se vea
      el texto reajustandose linea a linea a media animacion. Al terminar
      se quita la clase y el contenido reaparece con un fundido corto. */
-  .my-space-col-toolbar,
   .my-space-col-body {
     transition: opacity 0.15s ease;
   }
-  #my-space-hub.is-animating .my-space-col-toolbar,
   #my-space-hub.is-animating .my-space-col-body {
     opacity: 0;
     transition: none;
   }
-  .reminders-tasks-block {
+  .reminders-tasks-block,
+  .reminders-notes-block {
     margin-top: 0;
     padding-top: 0.9rem;
   }

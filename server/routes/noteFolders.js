@@ -22,6 +22,7 @@ function serialize(row) {
     icon: row.icon || null,
     position: row.position,
     parentId: row.parent_id,
+    favorite: !!row.favorite,
   };
 }
 
@@ -58,7 +59,7 @@ router.get('/', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { name, color, icon, parentId } = req.body || {};
+  const { name, color, icon, parentId, favorite } = req.body || {};
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'invalid_request', message: 'La carpeta necesita un nombre.' });
   }
@@ -69,8 +70,8 @@ router.post('/', (req, res) => {
 
   const { count } = db.prepare('SELECT COUNT(*) as count FROM note_folders').get();
   const info = db
-    .prepare('INSERT INTO note_folders (name, color, icon, position, parent_id) VALUES (?, ?, ?, ?, ?)')
-    .run(name.trim(), safeColor, sanitizeIcon(icon) ?? null, count, safeParentId ?? null);
+    .prepare('INSERT INTO note_folders (name, color, icon, position, parent_id, favorite) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(name.trim(), safeColor, sanitizeIcon(icon) ?? null, count, safeParentId ?? null, favorite ? 1 : 0);
 
   const row = db.prepare('SELECT * FROM note_folders WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json(serialize(row));
@@ -80,7 +81,7 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM note_folders WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { name, color, icon, parentId } = req.body || {};
+  const { name, color, icon, parentId, favorite } = req.body || {};
   const safeColor = color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : existing.color;
   const sanitizedIcon = sanitizeIcon(icon);
 
@@ -93,11 +94,12 @@ router.put('/:id', (req, res) => {
     nextParentId = resolved;
   }
 
-  db.prepare('UPDATE note_folders SET name = ?, color = ?, icon = ?, parent_id = ? WHERE id = ?').run(
+  db.prepare('UPDATE note_folders SET name = ?, color = ?, icon = ?, parent_id = ?, favorite = ? WHERE id = ?').run(
     name !== undefined && name.trim() ? name.trim() : existing.name,
     safeColor,
     sanitizedIcon === undefined ? existing.icon : sanitizedIcon,
     nextParentId,
+    favorite !== undefined ? (favorite ? 1 : 0) : existing.favorite,
     req.params.id
   );
 

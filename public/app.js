@@ -157,6 +157,31 @@ const FOLDER_PLUS_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="n
 // de Notas cuando no se les ha puesto un icono/emoji propio.
 const FOLDER_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
 
+// Estrella de favorito (notas/carpetas): rellena si es favorito, solo
+// borde si no -- el mismo boton en el listado y en los modales de
+// creacion/edicion (ver buildNoteRow/buildFolderRow/openNoteModal...).
+const STAR_FILLED_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><polygon points="12 2.5 15.09 8.76 22 9.77 17 14.64 18.18 21.52 12 18.27 5.82 21.52 7 14.64 2 9.77 8.91 8.76"></polygon></svg>';
+const STAR_OUTLINE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><polygon points="12 2.5 15.09 8.76 22 9.77 17 14.64 18.18 21.52 12 18.27 5.82 21.52 7 14.64 2 9.77 8.91 8.76"></polygon></svg>';
+
+// Ctrl+Intro (o Cmd+Intro en Mac) guarda directamente, sin tener que ir
+// a buscar el boton "Guardar" con el raton -- util sobre todo en el
+// textarea de las notas, donde Intro normal solo hace un salto de linea.
+// requestSubmit() (no submit()) para que se dispare el evento "submit" y
+// pase por el listener normal del formulario, con su validacion de
+// required incluida.
+function enableCtrlEnterSubmit(formId) {
+  const form = document.getElementById(formId);
+  form.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+}
+enableCtrlEnterSubmit('event-form');
+enableCtrlEnterSubmit('task-form');
+enableCtrlEnterSubmit('note-form');
+
 // ---------------------------------------------------------------------
 // Selector de fecha con estilo propio: sustituye <input type="date"> (o
 // la parte de fecha de un datetime-local) por un boton que abre un
@@ -1413,21 +1438,19 @@ function buildNoteRow(note) {
   const content = document.createElement('div');
   content.className = 'note-item-content';
 
+  // Solo el titulo -- el avance del contenido se quito para que el
+  // listado ocupe menos alto por nota (ver CLAUDE.md / ronda de pulido).
   const title = document.createElement('span');
   title.className = 'note-item-title';
   title.textContent = note.title;
   content.appendChild(title);
-
-  // Primera linea del contenido como avance, para reconocer la nota sin
-  // tener que abrirla — igual que un asunto de email con su primera linea.
-  if (note.body && note.body.trim()) {
-    const preview = document.createElement('span');
-    preview.className = 'note-item-preview';
-    preview.textContent = note.body.trim().split('\n')[0];
-    content.appendChild(preview);
-  }
   contentWrap.appendChild(content);
   row.appendChild(contentWrap);
+
+  row.appendChild(buildFavoriteStarBtn(note.favorite, (e) => {
+    e.stopPropagation();
+    toggleNoteFavorite(note);
+  }));
 
   // Una nota oculta no se abre con un simple clic en la fila — solo el
   // icono de ojo la destapa (sin ningun texto/boton de aviso encima del
@@ -1446,10 +1469,14 @@ function buildFolderRow(folder) {
   const row = document.createElement('div');
   row.className = 'note-item note-folder-row';
 
+  // Siempre el icono generico de carpeta, sin icono/emoji personalizado
+  // -- Koku prefirio quitar esa eleccion porque el icono de carpeta ya
+  // ayuda bastante a diferenciarla de una nota de un vistazo, y elegir
+  // uno propio por carpeta no aportaba tanto.
   const iconWrap = document.createElement('span');
   iconWrap.className = 'note-folder-row-icon';
   iconWrap.style.color = folder.color;
-  iconWrap.innerHTML = folder.icon ? escapeHtml(folder.icon) : FOLDER_SVG;
+  iconWrap.innerHTML = FOLDER_SVG;
   row.appendChild(iconWrap);
 
   const contentWrap = document.createElement('div');
@@ -1471,17 +1498,86 @@ function buildFolderRow(folder) {
   });
   row.appendChild(editBtn);
 
+  row.appendChild(buildFavoriteStarBtn(folder.favorite, (e) => {
+    e.stopPropagation();
+    toggleFolderFavorite(folder);
+  }));
+
   row.addEventListener('click', () => {
     state.currentNoteFolderId = folder.id;
+    clearNoteSearch();
     renderNotesView();
   });
   return row;
 }
 
+// Boton de estrella compartido por filas de nota y de carpeta, y por los
+// dos modales de creacion/edicion (ahi se usa suelto, sin toggle
+// inmediato -- ver openNoteModal/openNoteFolderModal).
+function buildFavoriteStarBtn(isFavorite, onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'favorite-star-btn' + (isFavorite ? ' is-favorite' : '');
+  btn.innerHTML = isFavorite ? STAR_FILLED_SVG : STAR_OUTLINE_SVG;
+  btn.setAttribute('aria-label', isFavorite ? 'Quitar de favoritos' : 'Marcar como favorito');
+  btn.setAttribute('aria-pressed', isFavorite ? 'true' : 'false');
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+async function toggleNoteFavorite(note) {
+  await api(`/api/notes/${note.id}`, { method: 'PUT', body: JSON.stringify({ favorite: !note.favorite }) });
+  await loadNotes();
+  renderNotesView();
+}
+
+async function toggleFolderFavorite(folder) {
+  await api(`/api/note-folders/${folder.id}`, { method: 'PUT', body: JSON.stringify({ favorite: !folder.favorite }) });
+  await loadNoteFolders();
+  renderNotesView();
+}
+
+// Favoritos: preferencia de ESTE dispositivo (localStorage), leida por
+// appendFavoriteSortedGroup. "sections" separa con una cabecera
+// "Favoritos" / "Todo lo demas" (solo si hay al menos un favorito, para
+// no ensenar una cabecera vacia); "merged" (por defecto) simplemente
+// ordena los favoritos primero, sin cabeceras, en la misma lista.
+function getFavoritesDisplayMode() {
+  return localStorage.getItem('favoritesDisplayMode') === 'sections' ? 'sections' : 'merged';
+}
+
+// Anade una tanda de filas (subcarpetas O notas, nunca mezcladas entre
+// si -- cada tipo mantiene su propio orden de favoritos por separado)
+// al contenedor, ya sea con cabeceras o mezcladas segun el ajuste.
+function appendFavoriteSortedGroup(container, items, buildRowFn) {
+  if (items.length === 0) return;
+  const favorites = items.filter((i) => i.favorite);
+  const rest = items.filter((i) => !i.favorite);
+
+  if (getFavoritesDisplayMode() === 'sections' && favorites.length > 0) {
+    const favHeading = document.createElement('div');
+    favHeading.className = 'note-list-section-heading';
+    favHeading.textContent = 'Favoritos';
+    container.appendChild(favHeading);
+    favorites.forEach((i) => container.appendChild(buildRowFn(i)));
+
+    if (rest.length > 0) {
+      const restHeading = document.createElement('div');
+      restHeading.className = 'note-list-section-heading';
+      restHeading.textContent = 'Todo lo demas';
+      container.appendChild(restHeading);
+      rest.forEach((i) => container.appendChild(buildRowFn(i)));
+    }
+  } else {
+    favorites.concat(rest).forEach((i) => container.appendChild(buildRowFn(i)));
+  }
+}
+
 // Dibuja "donde estas" en Notas: las subcarpetas de aqui arriba, las
 // notas de aqui debajo, todo en una sola lista — como el explorador de
 // archivos en vista de lista. "Volver" solo se ve si no estas en la
-// raiz (currentNoteFolderId === null).
+// raiz (currentNoteFolderId === null). La busqueda (state.noteSearchQuery)
+// filtra por nombre SOLO dentro de la carpeta actual, no en toda la app.
 function renderNotesView() {
   const container = document.getElementById('notes-list');
   if (!container) return;
@@ -1489,21 +1585,39 @@ function renderNotesView() {
 
   document.getElementById('btn-note-folder-back').classList.toggle('hidden', state.currentNoteFolderId === null);
 
-  const subfolders = state.noteFolders.filter((f) => f.parentId === state.currentNoteFolderId);
-  const notesHere = (state.notes || []).filter((n) => n.folderId === state.currentNoteFolderId);
+  let subfolders = state.noteFolders.filter((f) => f.parentId === state.currentNoteFolderId);
+  let notesHere = (state.notes || []).filter((n) => n.folderId === state.currentNoteFolderId);
+
+  const query = (state.noteSearchQuery || '').trim().toLowerCase();
+  if (query) {
+    subfolders = subfolders.filter((f) => f.name.toLowerCase().includes(query));
+    notesHere = notesHere.filter((n) => n.title.toLowerCase().includes(query));
+  }
 
   if (subfolders.length === 0 && notesHere.length === 0) {
-    container.innerHTML = '<p class="empty-hint">No hay nada aqui todavia.</p>';
+    container.innerHTML = `<p class="empty-hint">${query ? 'Nada coincide con esa busqueda.' : 'No hay nada aqui todavia.'}</p>`;
     return;
   }
 
-  subfolders.forEach((folder) => container.appendChild(buildFolderRow(folder)));
-  notesHere.forEach((note) => container.appendChild(buildNoteRow(note)));
+  appendFavoriteSortedGroup(container, subfolders, buildFolderRow);
+  appendFavoriteSortedGroup(container, notesHere, buildNoteRow);
 }
+
+function clearNoteSearch() {
+  state.noteSearchQuery = '';
+  const input = document.getElementById('note-search-input');
+  if (input) input.value = '';
+}
+
+document.getElementById('note-search-input').addEventListener('input', (e) => {
+  state.noteSearchQuery = e.target.value;
+  renderNotesView();
+});
 
 document.getElementById('btn-note-folder-back').addEventListener('click', () => {
   const current = state.noteFolders.find((f) => f.id === state.currentNoteFolderId);
   state.currentNoteFolderId = current ? current.parentId : null;
+  clearNoteSearch();
   renderNotesView();
 });
 
@@ -1522,8 +1636,8 @@ function buildFolderSelectOptions(parentId, depth) {
   let options = [];
   children.forEach((f) => {
     const indent = '　'.repeat(depth);
-    const prefix = depth > 0 ? '└ ' : '';
-    options.push({ value: String(f.id), label: indent + prefix + (f.icon ? f.icon + ' ' : '') + f.name });
+    const prefix = depth > 0 ? '↳ ' : '';
+    options.push({ value: String(f.id), label: indent + prefix + f.name });
     options = options.concat(buildFolderSelectOptions(f.id, depth + 1));
   });
   return options;
@@ -1538,6 +1652,24 @@ function populateNoteFolderSelect() {
   noteFolderField.setValue(current);
 }
 
+// El estado del favorito dentro del modal (nota nueva o existente) vive
+// en esta variable simple mientras el modal esta abierto -- se lee al
+// guardar (note-form submit) y se actualiza al pulsar la estrella,
+// igual que cualquier otro campo del formulario.
+let noteModalFavorite = false;
+
+function refreshNoteFavoriteBtn() {
+  const btn = document.getElementById('note-favorite-btn');
+  btn.innerHTML = noteModalFavorite ? STAR_FILLED_SVG : STAR_OUTLINE_SVG;
+  btn.classList.toggle('is-favorite', noteModalFavorite);
+  btn.setAttribute('aria-pressed', noteModalFavorite ? 'true' : 'false');
+}
+
+document.getElementById('note-favorite-btn').addEventListener('click', () => {
+  noteModalFavorite = !noteModalFavorite;
+  refreshNoteFavoriteBtn();
+});
+
 function openNoteModal(note) {
   const modal = document.getElementById('note-modal');
   document.getElementById('note-modal-title').textContent = note ? 'Editar nota' : 'Nueva nota';
@@ -1551,6 +1683,8 @@ function openNoteModal(note) {
   const defaultFolderId = note ? note.folderId : state.currentNoteFolderId;
   noteFolderField.setValue(defaultFolderId ? String(defaultFolderId) : '');
   document.getElementById('btn-delete-note').classList.toggle('hidden', !note);
+  noteModalFavorite = note ? !!note.favorite : false;
+  refreshNoteFavoriteBtn();
   modal.classList.remove('hidden');
 }
 
@@ -1559,6 +1693,9 @@ function closeNoteModal() {
 }
 
 document.getElementById('btn-new-note').addEventListener('click', () => openNoteModal(null));
+// Atajo rapido en la topbar, junto a "+ Nuevo evento"/"+ Nueva tarea" --
+// abre directamente el modal, sin tener que entrar antes en Mi espacio.
+document.getElementById('btn-new-note-topbar').addEventListener('click', () => openNoteModal(null));
 document.getElementById('btn-cancel-note').addEventListener('click', closeNoteModal);
 document.getElementById('btn-close-note').addEventListener('click', closeNoteModal);
 
@@ -1570,6 +1707,7 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
     title: document.getElementById('note-title').value,
     body: document.getElementById('note-body').value,
     folderId: folderRaw === '' ? null : Number(folderRaw),
+    favorite: noteModalFavorite,
   };
 
   if (id) {
@@ -1604,21 +1742,33 @@ async function loadNoteFolders() {
   state.noteFolders = await api('/api/note-folders');
 }
 
-// createIconField/createColorField viven en settings.js (widgets
-// genericos, tambien los usa el formulario de Grupos) — se crean aqui
-// LA PRIMERA VEZ que hace falta (al abrir el modal), nunca al cargar la
-// pagina, porque settings.js se carga DESPUES de app.js y todavia no
-// existirian esas funciones si se llamaran nada mas cargar.
-let noteFolderIconField = null;
+// createColorField vive en settings.js (widget generico, tambien lo usa
+// el formulario de Grupos) — se crea aqui LA PRIMERA VEZ que hace falta
+// (al abrir el modal), nunca al cargar la pagina, porque settings.js se
+// carga DESPUES de app.js y todavia no existiria esa funcion si se
+// llamara nada mas cargar. Ya no hay selector de icono para carpetas
+// (se quito: el icono generico de FOLDER_SVG ya diferencia bien una
+// carpeta de una nota, no hacia falta elegir uno propio por carpeta).
 let noteFolderColorField = null;
+let noteFolderModalFavorite = false;
 
 function ensureNoteFolderFields() {
-  if (noteFolderIconField) return;
-  noteFolderIconField = createIconField({ initialValue: '' });
-  document.getElementById('note-folder-icon-field').appendChild(noteFolderIconField.element);
+  if (noteFolderColorField) return;
   noteFolderColorField = createColorField({ initialValue: '#5b8cff' });
   document.getElementById('note-folder-color-field').appendChild(noteFolderColorField.element);
 }
+
+function refreshNoteFolderFavoriteBtn() {
+  const btn = document.getElementById('note-folder-favorite-btn');
+  btn.innerHTML = noteFolderModalFavorite ? STAR_FILLED_SVG : STAR_OUTLINE_SVG;
+  btn.classList.toggle('is-favorite', noteFolderModalFavorite);
+  btn.setAttribute('aria-pressed', noteFolderModalFavorite ? 'true' : 'false');
+}
+
+document.getElementById('note-folder-favorite-btn').addEventListener('click', () => {
+  noteFolderModalFavorite = !noteFolderModalFavorite;
+  refreshNoteFolderFavoriteBtn();
+});
 
 // Carpeta nueva: el padre por defecto es "donde estas" navegando ahora
 // mismo (currentNoteFolderId) -- si estas dentro de "Trabajo" y creas
@@ -1630,9 +1780,10 @@ function openNoteFolderModal(folder) {
   document.getElementById('note-folder-modal-title').textContent = folder ? 'Editar carpeta' : 'Nueva carpeta';
   document.getElementById('note-folder-id').value = folder ? folder.id : '';
   document.getElementById('note-folder-name').value = folder ? folder.name : '';
-  noteFolderIconField.setValue(folder && folder.icon ? folder.icon : '');
   noteFolderColorField.setValue(folder ? folder.color : '#5b8cff');
   document.getElementById('btn-delete-note-folder').classList.toggle('hidden', !folder);
+  noteFolderModalFavorite = folder ? !!folder.favorite : false;
+  refreshNoteFolderFavoriteBtn();
   document.getElementById('note-folder-modal').classList.remove('hidden');
 }
 
@@ -1649,8 +1800,8 @@ document.getElementById('note-folder-form').addEventListener('submit', async (e)
   const id = document.getElementById('note-folder-id').value;
   const payload = {
     name: document.getElementById('note-folder-name').value,
-    icon: noteFolderIconField.getValue() || null,
     color: noteFolderColorField.getValue(),
+    favorite: noteFolderModalFavorite,
   };
   // Solo se manda parentId al CREAR (hereda donde estas navegando); al
   // editar, el padre se deja tal cual estaba (undefined = "no lo toques"
@@ -1957,13 +2108,19 @@ function getMiEspacioMode() {
 // toda la vida.
 function restoreClassicRemindersPanel() {
   const panel = document.getElementById('reminders-panel');
+  // El bloque de notas se inserta ANTES de moverse (appendChild lo mueve
+  // de sitio, nunca lo duplica) para que el panel clasico tenga las 3
+  // secciones (Proximos/Tareas/Notas), no solo las 2 de siempre.
+  panel.insertBefore(document.getElementById('reminders-panel-switcher'), panel.firstChild);
   panel.appendChild(document.getElementById('reminders-top-block'));
   panel.appendChild(document.getElementById('reminders-tasks-block'));
+  panel.appendChild(document.getElementById('reminders-notes-block'));
   document.getElementById('reminders-day-nav').classList.add('hidden');
   showUpcomingReminders();
+  applyRemindersPanelLayout();
 }
 
-// Coloca los 2 bloques dentro de las columnas del hub, alli donde el hub
+// Coloca los 3 bloques dentro de las columnas del hub, alli donde el hub
 // este montado ahora mismo (dentro del panel lateral o dentro de la
 // pantalla completa de #my-space-view). Dentro de Mi espacio, Proximos
 // arranca siempre en el dia de hoy (en vez del listado general) con la
@@ -1972,9 +2129,67 @@ function restoreClassicRemindersPanel() {
 function moveRemindersIntoHub() {
   document.getElementById('my-space-col-reminders').appendChild(document.getElementById('reminders-top-block'));
   document.getElementById('my-space-col-tasks').appendChild(document.getElementById('reminders-tasks-block'));
+  document.getElementById('my-space-col-notes').appendChild(document.getElementById('reminders-notes-block'));
   document.getElementById('reminders-day-nav').classList.remove('hidden');
   showDayInReminders(new Date());
+  // Dentro del hub (3 columnas propias, cada una con su sitio) el ajuste
+  // de "panel lateral clasico" no pinta nada -- todas las secciones se
+  // ven siempre, apiladas o una al lado de otra segun el ancho.
+  document.getElementById('reminders-panel-switcher').classList.add('hidden');
+  document.querySelectorAll('.reminders-panel-page').forEach((el) => el.classList.remove('hidden'));
 }
+
+// Panel lateral clasico (modo "topbar" de Mi espacio, ver mas abajo):
+// como se reparten Recordatorios/Tareas/Notas dentro de #reminders-panel.
+// Preferencia de ESTE dispositivo (localStorage), elegida en
+// Configuracion > Vista > "Panel lateral clasico":
+//   - "stacked" (por defecto): las 3 secciones apiladas, visibles a la
+//     vez, cada una con su propio scroll -- como estaba Proximos+Tareas
+//     de siempre, con Notas anadida igual.
+//   - "alternate": solo una seccion grande visible cada vez, con flechas
+//     (#reminders-panel-switcher) para pasar a la siguiente -- pensado
+//     para pantallas donde 3 secciones apiladas se quedan muy apretadas.
+// En modo "panel" de Mi espacio (hub de 3 columnas) este ajuste no pinta
+// nada: cada columna ya vive en su propio sitio fijo.
+const REMINDERS_PANEL_LAYOUT_IDS = ['stacked', 'alternate'];
+const REMINDERS_PANEL_PAGES = [
+  { id: 'reminders', label: 'Recordatorios', blockId: 'reminders-top-block' },
+  { id: 'tasks', label: 'Tareas', blockId: 'reminders-tasks-block' },
+  { id: 'notes', label: 'Notas', blockId: 'reminders-notes-block' },
+];
+let remindersPanelActivePage = 'reminders';
+
+function getRemindersPanelLayout() {
+  const stored = localStorage.getItem('remindersPanelLayout');
+  return REMINDERS_PANEL_LAYOUT_IDS.includes(stored) ? stored : 'stacked';
+}
+
+function applyRemindersPanelLayout() {
+  const switcher = document.getElementById('reminders-panel-switcher');
+
+  if (getMiEspacioMode() === 'panel' || getRemindersPanelLayout() !== 'alternate') {
+    switcher.classList.add('hidden');
+    REMINDERS_PANEL_PAGES.forEach((p) => document.getElementById(p.blockId).classList.remove('hidden'));
+    return;
+  }
+
+  switcher.classList.remove('hidden');
+  const current = REMINDERS_PANEL_PAGES.find((p) => p.id === remindersPanelActivePage) || REMINDERS_PANEL_PAGES[0];
+  REMINDERS_PANEL_PAGES.forEach((p) => {
+    document.getElementById(p.blockId).classList.toggle('hidden', p.id !== current.id);
+  });
+  document.getElementById('reminders-panel-switch-label').textContent = current.label;
+}
+
+function stepRemindersPanelPage(delta) {
+  const idx = REMINDERS_PANEL_PAGES.findIndex((p) => p.id === remindersPanelActivePage);
+  const nextIdx = (idx + delta + REMINDERS_PANEL_PAGES.length) % REMINDERS_PANEL_PAGES.length;
+  remindersPanelActivePage = REMINDERS_PANEL_PAGES[nextIdx].id;
+  applyRemindersPanelLayout();
+}
+
+document.getElementById('btn-panel-switch-prev').addEventListener('click', () => stepRemindersPanelPage(-1));
+document.getElementById('btn-panel-switch-next').addEventListener('click', () => stepRemindersPanelPage(1));
 
 function collapseMySpaceExpandedColumn() {
   delete document.getElementById('my-space-hub').dataset.expanded;
@@ -2038,12 +2253,17 @@ function playMySpaceColumnAnimation() {
 
 // Un solo listener en el hub entero (delegacion) en vez de uno por
 // columna: mas simple, y sigue funcionando igual aunque los bloques que
-// hay dentro se muevan de sitio.
+// hay dentro se muevan de sitio. Ya no hay un boton dedicado para
+// expandir (ocupaba espacio vertical solo para eso) -- clicar el TITULO
+// de la columna (h2, con la clase my-space-col-expand-trigger) la
+// expande directamente.
 document.getElementById('my-space-hub').addEventListener('click', (e) => {
-  const expandBtn = e.target.closest('.my-space-col-expand');
-  if (!expandBtn) return;
+  const trigger = e.target.closest('.my-space-col-expand-trigger');
+  if (!trigger) return;
+  const col = trigger.closest('.my-space-col');
+  if (!col) return;
   playMySpaceColumnAnimation();
-  document.getElementById('my-space-hub').dataset.expanded = expandBtn.dataset.expand;
+  document.getElementById('my-space-hub').dataset.expanded = col.dataset.col;
   document.getElementById('my-space-back-btn').classList.remove('hidden');
 });
 document.getElementById('my-space-back-btn').addEventListener('click', () => {
