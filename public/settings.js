@@ -7,21 +7,37 @@
 // `populateEventGroupSelect()`.
 
 // ---------------------------------------------------------------------
-// Posicionamiento compartido de popovers "flotantes": los usan tanto el
-// selector de color como el de icono. Van colgados de <body> con
-// position:fixed (no dentro de la tarjeta del modal) para que el
-// "overflow-y: auto" del modal no los recorte cuando estan cerca del
-// borde o hay que hacer scroll; su sitio se calcula aqui, en coordenadas
-// de ventana, a partir de donde este el boton que los abre.
-// ---------------------------------------------------------------------
-function positionFixedPopover(anchorBtn, popover, { width = 248, estimatedHeight = 320 } = {}) {
+// Posicionamiento compartido de popovers "flotantes": los usan el
+// selector de color, el de icono, el de fecha y el select a medida. Van
+// colgados de <body> con position:fixed (no dentro de la tarjeta del
+// modal) para que el "overflow-y: auto" del modal no los recorte cuando
+// estan cerca del borde o hay que hacer scroll; su sitio se calcula
+// aqui, en coordenadas de ventana, a partir de donde este el boton que
+// los abre.
+//
+// La altura para decidir si cae por debajo o por encima del boton se
+// MIDE de verdad (popover.offsetHeight) en vez de adivinarse a mano: los
+// que llaman a esto quitan la clase "hidden" justo ANTES de llamarnos
+// (ver los click handlers de abajo), asi que el popover ya esta visible
+// y renderizado en el DOM en este punto — offsetHeight es su alto real,
+// ya recortado por su propio max-height/overflow-y si hiciera falta.
+// Antes se pasaba un "estimatedHeight" a mano por cada tipo de popover,
+// y si el contenido crecia (como el selector de icono, con las
+// secciones de simbolos Y emoji) se quedaba desincronizado: la altura
+// real ya no coincidia con la estimada, y el popover se colocaba mal,
+// pudiendo salirse por debajo de la pantalla sin forma de hacer scroll
+// hasta el (justo el bug que reporto Koku al anadir un icono a una
+// carpeta). Medir de verdad evita que esto se repita aunque el
+// contenido de un popover cambie en el futuro.
+function positionFixedPopover(anchorBtn, popover, { width = 248 } = {}) {
   const rect = anchorBtn.getBoundingClientRect();
   let left = rect.left;
   if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
   popover.style.left = `${Math.max(8, left)}px`;
 
-  const top = rect.bottom + 6 + estimatedHeight > window.innerHeight
-    ? Math.max(8, rect.top - estimatedHeight - 6)
+  const actualHeight = popover.offsetHeight;
+  const top = rect.bottom + 6 + actualHeight > window.innerHeight
+    ? Math.max(8, rect.top - actualHeight - 6)
     : rect.bottom + 6;
   popover.style.top = `${top}px`;
 }

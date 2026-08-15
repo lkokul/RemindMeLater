@@ -267,12 +267,22 @@
                 <h2>Notas</h2>
                 <button type="button" id="btn-new-note" class="secondary-btn">+ Nota</button>
               </div>
-              <!-- Carpetas (Fase 3): "Todas" + una chip por carpeta +
-                   "+" para crear una nueva -- filtra la lista de abajo,
-                   ver renderNoteFolderChips en app.js. Solo organizacion,
-                   sin PIN (eso ya se resolvio por nota individual con
-                   "ocultar"). -->
-              <div id="note-folder-chips" class="note-folder-chips"></div>
+              <!-- Carpetas (Fase 3): navegacion tipo explorador de
+                   archivos -- estas en un "sitio" (la raiz, o dentro de
+                   una carpeta), #notes-list ensena las SUBcarpetas de
+                   ese sitio arriba y las notas de ese sitio debajo, todo
+                   en una sola lista. "Volver" solo se ve si no estas en
+                   la raiz. Solo organizacion, sin PIN (eso ya se
+                   resolvio por nota individual con "ocultar"). Ver
+                   renderNotesView en app.js. -->
+              <div id="note-folder-toolbar" class="note-folder-toolbar">
+                <button type="button" id="btn-note-folder-back" class="secondary-btn hidden">← Volver</button>
+                <div class="spacer"></div>
+                <button type="button" id="btn-new-note-folder" class="note-folder-chip note-folder-chip-add" aria-label="Nueva carpeta">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
+                  <span>Carpeta</span>
+                </button>
+              </div>
               <div id="notes-list" class="reminders-list notes-list"></div>
             </div>
           </div>

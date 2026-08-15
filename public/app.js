@@ -16,7 +16,7 @@ const state = {
   tasks: [], // TODAS las tareas (con fecha o sin ella), ver loadTasks()
   notes: [], // Notas de "Mi espacio" (Fase 2), ver loadNotes()
   noteFolders: [], // Carpetas de notas (Fase 3), ver loadNoteFolders()
-  selectedNoteFolderId: null, // null = "Todas" -- filtro de notas, no se guarda entre sesiones
+  currentNoteFolderId: null, // null = raiz -- "donde estas" navegando en Notas, no se guarda entre sesiones
   specialDays: {}, // 'YYYY-MM-DD' -> 'holiday' | 'special', marcados a mano
   pairingCodeExpiresAt: null,
   notifiedReminderIds: new Set(), // evita notificar el mismo recordatorio 2 veces
@@ -106,7 +106,6 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
     if (willOpen) {
       positionFixedPopover(trigger, popover, {
         width: Math.max(200, trigger.getBoundingClientRect().width),
-        estimatedHeight: Math.min(280, opts.length * 40 + 16),
       });
       // Si hay muchas opciones (la hora, por ejemplo, con 96), abre ya
       // desplazado a la que esta elegida en vez de siempre arriba del
@@ -151,6 +150,12 @@ const CHEVRON_RIGHT_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill=
 // seccion "Notas de Mi espacio").
 const EYE_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
 const EYE_OFF_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+// Carpeta con un "+": para el boton de crear carpeta nueva, mas claro
+// que un "+" suelto (facil de confundir con "nueva nota").
+const FOLDER_PLUS_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>';
+// Carpeta simple (sin el "+"), para las filas de subcarpeta en la lista
+// de Notas cuando no se les ha puesto un icono/emoji propio.
+const FOLDER_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
 
 // ---------------------------------------------------------------------
 // Selector de fecha con estilo propio: sustituye <input type="date"> (o
@@ -338,7 +343,7 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
     viewMonth = value ? new Date(value.getFullYear(), value.getMonth(), 1) : startOfMonth(new Date());
     if (willOpen) renderCalendar();
     popover.classList.toggle('hidden');
-    if (willOpen) positionFixedPopover(iconBtn, popover, { width: 264, estimatedHeight: 320 });
+    if (willOpen) positionFixedPopover(iconBtn, popover, { width: 264 });
   });
 
   root.appendChild(wrap);
@@ -1293,7 +1298,7 @@ async function refreshNotesSecurityState() {
 async function setNoteHidden(note, hidden) {
   await api(`/api/notes/${note.id}`, { method: 'PUT', body: JSON.stringify({ hidden }) });
   await loadNotes();
-  renderNotesList();
+  renderNotesView();
 }
 
 // Punto de entrada comun del icono de ojo y del boton "Destapar": decide
@@ -1408,22 +1413,10 @@ function buildNoteRow(note) {
   const content = document.createElement('div');
   content.className = 'note-item-content';
 
-  const titleRow = document.createElement('div');
-  titleRow.className = 'note-item-title-row';
-  // Punto de color de la carpeta (si tiene), igual que las tareas
-  // muestran el color de su grupo — asi se reconoce de un vistazo aunque
-  // estes viendo "Todas" sin filtrar.
-  if (note.folderColor) {
-    const dot = document.createElement('span');
-    dot.className = 'color-dot';
-    dot.style.backgroundColor = note.folderColor;
-    titleRow.appendChild(dot);
-  }
   const title = document.createElement('span');
   title.className = 'note-item-title';
   title.textContent = note.title;
-  titleRow.appendChild(title);
-  content.appendChild(titleRow);
+  content.appendChild(title);
 
   // Primera linea del contenido como avance, para reconocer la nota sin
   // tener que abrirla — igual que un asunto de email con su primera linea.
@@ -1446,34 +1439,101 @@ function buildNoteRow(note) {
   return row;
 }
 
-function renderNotesList() {
+// Carpeta con icono de ojo (Fase 3, navegacion tipo explorador de
+// archivos): la fila entera abre esa carpeta al clicarla; el lapiz
+// (aparte, con su propio stopPropagation) la edita sin entrar.
+function buildFolderRow(folder) {
+  const row = document.createElement('div');
+  row.className = 'note-item note-folder-row';
+
+  const iconWrap = document.createElement('span');
+  iconWrap.className = 'note-folder-row-icon';
+  iconWrap.style.color = folder.color;
+  iconWrap.innerHTML = folder.icon ? escapeHtml(folder.icon) : FOLDER_SVG;
+  row.appendChild(iconWrap);
+
+  const contentWrap = document.createElement('div');
+  contentWrap.className = 'note-item-content-wrap';
+  const title = document.createElement('span');
+  title.className = 'note-item-title';
+  title.textContent = folder.name;
+  contentWrap.appendChild(title);
+  row.appendChild(contentWrap);
+
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'note-folder-chip-edit';
+  editBtn.textContent = '✎';
+  editBtn.setAttribute('aria-label', `Editar carpeta ${folder.name}`);
+  editBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openNoteFolderModal(folder);
+  });
+  row.appendChild(editBtn);
+
+  row.addEventListener('click', () => {
+    state.currentNoteFolderId = folder.id;
+    renderNotesView();
+  });
+  return row;
+}
+
+// Dibuja "donde estas" en Notas: las subcarpetas de aqui arriba, las
+// notas de aqui debajo, todo en una sola lista — como el explorador de
+// archivos en vista de lista. "Volver" solo se ve si no estas en la
+// raiz (currentNoteFolderId === null).
+function renderNotesView() {
   const container = document.getElementById('notes-list');
   if (!container) return;
   container.innerHTML = '';
 
-  const notes = state.notes || [];
-  const filtered = state.selectedNoteFolderId === null
-    ? notes
-    : notes.filter((n) => n.folderId === state.selectedNoteFolderId);
+  document.getElementById('btn-note-folder-back').classList.toggle('hidden', state.currentNoteFolderId === null);
 
-  if (filtered.length === 0) {
-    container.innerHTML = `<p class="empty-hint">${notes.length === 0 ? 'No tienes notas.' : 'No hay notas en esta carpeta.'}</p>`;
+  const subfolders = state.noteFolders.filter((f) => f.parentId === state.currentNoteFolderId);
+  const notesHere = (state.notes || []).filter((n) => n.folderId === state.currentNoteFolderId);
+
+  if (subfolders.length === 0 && notesHere.length === 0) {
+    container.innerHTML = '<p class="empty-hint">No hay nada aqui todavia.</p>';
     return;
   }
 
-  filtered.forEach((note) => container.appendChild(buildNoteRow(note)));
+  subfolders.forEach((folder) => container.appendChild(buildFolderRow(folder)));
+  notesHere.forEach((note) => container.appendChild(buildNoteRow(note)));
 }
 
+document.getElementById('btn-note-folder-back').addEventListener('click', () => {
+  const current = state.noteFolders.find((f) => f.id === state.currentNoteFolderId);
+  state.currentNoteFolderId = current ? current.parentId : null;
+  renderNotesView();
+});
+
 // Selector de carpeta (opcional) dentro del modal de nota — mismo patron
-// que el selector de grupo de las tareas (populateTaskGroupSelect).
+// que el selector de grupo de las tareas (populateTaskGroupSelect), pero
+// con sangria segun la profundidad para que se note el anidado (un
+// espacio ancho de verdad, U+3000, que no se colapsa como los espacios
+// normales en HTML).
 const noteFolderField = createSelectField({ options: [{ value: '', label: 'Sin carpeta' }], initialValue: '' });
 document.getElementById('note-folder-field').appendChild(noteFolderField.element);
+
+function buildFolderSelectOptions(parentId, depth) {
+  const children = state.noteFolders
+    .filter((f) => f.parentId === parentId)
+    .sort((a, b) => a.position - b.position);
+  let options = [];
+  children.forEach((f) => {
+    const indent = '　'.repeat(depth);
+    const prefix = depth > 0 ? '└ ' : '';
+    options.push({ value: String(f.id), label: indent + prefix + (f.icon ? f.icon + ' ' : '') + f.name });
+    options = options.concat(buildFolderSelectOptions(f.id, depth + 1));
+  });
+  return options;
+}
 
 function populateNoteFolderSelect() {
   const current = noteFolderField.getValue();
   noteFolderField.setOptions([
     { value: '', label: 'Sin carpeta' },
-    ...state.noteFolders.map((f) => ({ value: String(f.id), label: (f.icon ? f.icon + ' ' : '') + f.name })),
+    ...buildFolderSelectOptions(null, 0),
   ]);
   noteFolderField.setValue(current);
 }
@@ -1485,7 +1545,11 @@ function openNoteModal(note) {
   document.getElementById('note-title').value = note ? note.title : '';
   document.getElementById('note-body').value = note && note.body ? note.body : '';
   populateNoteFolderSelect();
-  noteFolderField.setValue(note && note.folderId ? String(note.folderId) : '');
+  // Nota nueva: por defecto se guarda en la carpeta donde estas
+  // navegando ahora mismo, igual que crear un archivo nuevo dentro de la
+  // carpeta que tienes abierta en un explorador de archivos.
+  const defaultFolderId = note ? note.folderId : state.currentNoteFolderId;
+  noteFolderField.setValue(defaultFolderId ? String(defaultFolderId) : '');
   document.getElementById('btn-delete-note').classList.toggle('hidden', !note);
   modal.classList.remove('hidden');
 }
@@ -1516,7 +1580,7 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
 
   closeNoteModal();
   await loadNotes();
-  renderNotesList();
+  renderNotesView();
 });
 
 document.getElementById('btn-delete-note').addEventListener('click', async () => {
@@ -1526,76 +1590,18 @@ document.getElementById('btn-delete-note').addEventListener('click', async () =>
   await api(`/api/notes/${id}`, { method: 'DELETE' });
   closeNoteModal();
   await loadNotes();
-  renderNotesList();
+  renderNotesView();
 });
 
 // ---------------------------------------------------------------------
 // Carpetas de notas (Fase 3): solo organizacion (nombre/icono/color),
-// sistema propio SEPARADO de los Grupos del calendario. Sin PIN ni
-// bloqueo — eso ya se resolvio por nota individual con "ocultar" (ver
-// mas arriba). Se gestionan desde aqui mismo, dentro de Mi espacio (no
-// en Configuracion), con chips: "Todas" + una por carpeta + "+".
+// sistema propio SEPARADO de los Grupos del calendario. Pueden contener
+// otras carpetas -- navegacion tipo explorador de archivos (ver
+// renderNotesView arriba). Sin PIN ni bloqueo — eso ya se resolvio por
+// nota individual con "ocultar".
 // ---------------------------------------------------------------------
 async function loadNoteFolders() {
   state.noteFolders = await api('/api/note-folders');
-}
-
-function renderNoteFolderChips() {
-  const container = document.getElementById('note-folder-chips');
-  if (!container) return;
-  container.innerHTML = '';
-
-  const allChip = document.createElement('button');
-  allChip.type = 'button';
-  allChip.className = 'note-folder-chip' + (state.selectedNoteFolderId === null ? ' active' : '');
-  allChip.textContent = 'Todas';
-  allChip.addEventListener('click', () => {
-    state.selectedNoteFolderId = null;
-    renderNoteFolderChips();
-    renderNotesList();
-  });
-  container.appendChild(allChip);
-
-  state.noteFolders.forEach((folder) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'note-folder-chip-wrap';
-
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'note-folder-chip' + (state.selectedNoteFolderId === folder.id ? ' active' : '');
-    chip.style.setProperty('--folder-color', folder.color);
-    const dot = document.createElement('span');
-    dot.className = 'note-folder-chip-dot';
-    chip.appendChild(dot);
-    chip.appendChild(document.createTextNode((folder.icon ? folder.icon + ' ' : '') + folder.name));
-    chip.addEventListener('click', () => {
-      state.selectedNoteFolderId = folder.id;
-      renderNoteFolderChips();
-      renderNotesList();
-    });
-    wrap.appendChild(chip);
-
-    const editBtn = document.createElement('button');
-    editBtn.type = 'button';
-    editBtn.className = 'note-folder-chip-edit';
-    editBtn.textContent = '✎';
-    editBtn.setAttribute('aria-label', `Editar carpeta ${folder.name}`);
-    editBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openNoteFolderModal(folder);
-    });
-    wrap.appendChild(editBtn);
-
-    container.appendChild(wrap);
-  });
-
-  const addChip = document.createElement('button');
-  addChip.type = 'button';
-  addChip.className = 'note-folder-chip note-folder-chip-add';
-  addChip.textContent = '+';
-  addChip.setAttribute('aria-label', 'Nueva carpeta');
-  addChip.addEventListener('click', () => openNoteFolderModal(null));
-  container.appendChild(addChip);
 }
 
 // createIconField/createColorField viven en settings.js (widgets
@@ -1614,6 +1620,11 @@ function ensureNoteFolderFields() {
   document.getElementById('note-folder-color-field').appendChild(noteFolderColorField.element);
 }
 
+// Carpeta nueva: el padre por defecto es "donde estas" navegando ahora
+// mismo (currentNoteFolderId) -- si estas dentro de "Trabajo" y creas
+// una carpeta, se crea DENTRO de "Trabajo", sin tener que elegirlo a
+// mano. Al editar una carpeta ya existente, su padre no se toca aqui
+// (no hay forma de "mover" una carpeta desde este modal todavia).
 function openNoteFolderModal(folder) {
   ensureNoteFolderFields();
   document.getElementById('note-folder-modal-title').textContent = folder ? 'Editar carpeta' : 'Nueva carpeta';
@@ -1629,6 +1640,7 @@ function closeNoteFolderModal() {
   document.getElementById('note-folder-modal').classList.add('hidden');
 }
 
+document.getElementById('btn-new-note-folder').addEventListener('click', () => openNoteFolderModal(null));
 document.getElementById('btn-cancel-note-folder').addEventListener('click', closeNoteFolderModal);
 document.getElementById('btn-close-note-folder').addEventListener('click', closeNoteFolderModal);
 
@@ -1640,6 +1652,10 @@ document.getElementById('note-folder-form').addEventListener('submit', async (e)
     icon: noteFolderIconField.getValue() || null,
     color: noteFolderColorField.getValue(),
   };
+  // Solo se manda parentId al CREAR (hereda donde estas navegando); al
+  // editar, el padre se deja tal cual estaba (undefined = "no lo toques"
+  // en la API).
+  if (!id) payload.parentId = state.currentNoteFolderId;
 
   if (id) {
     await api(`/api/note-folders/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -1649,23 +1665,19 @@ document.getElementById('note-folder-form').addEventListener('submit', async (e)
 
   closeNoteFolderModal();
   await loadNoteFolders();
-  renderNoteFolderChips();
+  renderNotesView();
   populateNoteFolderSelect();
 });
 
 document.getElementById('btn-delete-note-folder').addEventListener('click', async () => {
   const id = document.getElementById('note-folder-id').value;
   if (!id) return;
-  if (!confirm('¿Eliminar esta carpeta? Las notas que tenga se quedaran sin carpeta.')) return;
+  if (!confirm('¿Eliminar esta carpeta? Las notas y subcarpetas que tenga no se borran: suben un nivel.')) return;
   await api(`/api/note-folders/${id}`, { method: 'DELETE' });
   closeNoteFolderModal();
-  // Si estabas filtrando justo por la carpeta que se acaba de borrar,
-  // vuelve a "Todas" para no quedarte viendo un filtro que ya no existe.
-  if (state.selectedNoteFolderId === Number(id)) state.selectedNoteFolderId = null;
   await loadNoteFolders();
-  renderNoteFolderChips();
   await loadNotes();
-  renderNotesList();
+  renderNotesView();
   populateNoteFolderSelect();
 });
 
@@ -2211,15 +2223,19 @@ async function init() {
     await loadTasks();
     renderTasksList();
     await loadNoteFolders();
-    renderNoteFolderChips();
     populateNoteFolderSelect();
     await loadNotes();
-    renderNotesList();
+    renderNotesView();
     setInterval(loadReminders, 30 * 1000);
     // Igual que los recordatorios: si otro dispositivo vinculado anade o
     // completa una tarea, este se entera sin recargar la pagina.
     setInterval(() => loadTasks().then(renderTasksList), 30 * 1000);
-    setInterval(() => loadNotes().then(renderNotesList), 30 * 1000);
+    // Carpetas Y notas juntas (no cada una por su lado) para no repintar
+    // la vista dos veces seguidas si las dos han cambiado a la vez.
+    setInterval(() => Promise.all([loadNoteFolders(), loadNotes()]).then(() => {
+      populateNoteFolderSelect();
+      renderNotesView();
+    }), 30 * 1000);
   } catch (err) {
     if (err.message !== 'device_not_paired') console.error(err);
   }

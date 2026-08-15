@@ -650,16 +650,12 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   user-select: none;
 }
 
-/* --- Carpetas de notas (Fase 3): chips "Todas" + una por carpeta + "+".
-   Solo organizacion (filtran la lista de abajo), sin PIN -- eso ya se
-   resuelve por nota individual con "ocultar". --- */
-.note-folder-chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem;
-  margin-bottom: 0.6rem;
-}
+/* --- Carpetas de notas (Fase 3): navegacion tipo explorador de
+   archivos -- ver renderNotesView en app.js. Solo organizacion, sin PIN
+   (eso ya se resuelve por nota individual con "ocultar"). --- */
+.note-folder-toolbar { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem; }
+/* Pastilla reutilizada por el boton "+ Carpeta" de la barra de arriba Y
+   por el lapiz de editar de cada fila de carpeta en la lista. */
 .note-folder-chip {
   display: inline-flex;
   align-items: center;
@@ -671,32 +667,27 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   border: 1px solid var(--border);
   color: color-mix(in srgb, var(--surface-2-text) 75%, var(--surface-2));
 }
-.note-folder-chip.active {
-  border-color: var(--folder-color, var(--accent));
-  color: var(--surface-2-text);
-  background: color-mix(in srgb, var(--folder-color, var(--accent)) 18%, var(--surface));
-}
-.note-folder-chip-dot {
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: var(--folder-color, var(--accent));
-}
-.note-folder-chip-wrap { display: inline-flex; align-items: center; gap: 0.15rem; }
 .note-folder-chip-edit {
   padding: 0.2rem 0.35rem;
   font-size: 0.7rem;
   background: transparent;
   border-color: transparent;
   color: color-mix(in srgb, var(--surface-2-text) 50%, var(--surface-2));
+  flex-shrink: 0;
 }
 .note-folder-chip-edit:hover { color: var(--surface-2-text); background: color-mix(in srgb, var(--accent) 15%, transparent); }
 .note-folder-chip-add {
-  padding: 0.25rem 0.55rem;
-  font-weight: 700;
+  padding: 0.25rem 0.6rem;
   border-style: dashed;
+  flex-shrink: 0;
 }
+.note-folder-chip-add svg { flex-shrink: 0; }
+
+/* Fila de subcarpeta dentro de la lista de Notas: icono/color + nombre,
+   igual de alta que una fila de nota para que la lista se vea uniforme
+   (carpetas arriba, notas debajo). */
+.note-folder-row { align-items: center; }
+.note-folder-row-icon { flex-shrink: 0; display: flex; align-items: center; font-size: 1rem; }
 
 /* --- Vista (Normal / Pantalla completa / Ventana flotante) --- */
 .view-mode-options { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }

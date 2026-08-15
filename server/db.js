@@ -252,9 +252,19 @@ if (!noteColumns.includes('hidden')) {
   db.exec('ALTER TABLE notes ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
 }
 // folder_id: carpeta de la nota (Fase 3), opcional -- NULL = sin
-// carpeta ("Todas"). Ver note_folders arriba.
+// carpeta (nivel raiz). Ver note_folders arriba.
 if (!noteColumns.includes('folder_id')) {
   db.exec('ALTER TABLE notes ADD COLUMN folder_id INTEGER REFERENCES note_folders(id)');
+}
+
+// parent_id: las carpetas pueden contener otras carpetas (navegacion
+// tipo explorador de archivos, ver routes/noteFolders.js) -- NULL =
+// carpeta de nivel raiz. La comprobacion de que no se formen ciclos (una
+// carpeta como su propio antepasado) se hace en routes/noteFolders.js,
+// no aqui: SQLite no tiene forma sencilla de expresarlo en el esquema.
+const noteFolderColumns = db.prepare('PRAGMA table_info(note_folders)').all().map((c) => c.name);
+if (!noteFolderColumns.includes('parent_id')) {
+  db.exec('ALTER TABLE note_folders ADD COLUMN parent_id INTEGER REFERENCES note_folders(id)');
 }
 
 // El perfil siempre tiene que existir (para poder firmar "creado por" en
