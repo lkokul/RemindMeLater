@@ -153,6 +153,34 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    en cualquier pagina sin CSS propio para <ul>/<ol>. */
 .note-editor-body ul, .note-editor-body ol { padding-left: 1.4rem; margin: 0.4rem 0; }
 .note-editor-body p, .note-editor-body div { margin: 0; }
+
+/* Tablas dentro de una nota (sub-ronda de tablas de la Fase 4): sin
+   clase propia a proposito -- el saneado del servidor (sanitizeNoteBody
+   en routes/notes.js) quita cualquier atributo, asi que una clase en el
+   <table> se perderia al guardar y la nota se veria distinta antes y
+   despues de reabrirla. Con un selector generico da igual, toda tabla
+   dentro del editor de notas se ve igual siempre. */
+.note-editor-body table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+.note-editor-body td, .note-editor-body th { border: 1px solid var(--border); padding: 0.4rem; min-width: 2.5rem; vertical-align: top; }
+/* Grupo de botones +Fila/-Fila/+Col/-Col: solo aparece con el cursor
+   dentro de una tabla (ver refreshTableContextToolbar en app.js), con un
+   separador a la izquierda para no confundirse con los botones de
+   formato normales. */
+.note-table-context-toolbar { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: 0.35rem; padding-left: 0.5rem; border-left: 1px solid var(--border); }
+
+/* Popover de "Insertar tabla": mismo patron visual que
+   .color-popover/.select-popover/.date-popover (position:fixed colgado
+   de <body>, posicionado en JS con positionFixedPopover), pero con un
+   formulario de dos numeros en vez de una paleta o un calendario. */
+.table-insert-popover {
+  position: fixed; z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.8rem; width: 200px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+.table-insert-popover label { margin-bottom: 0.5rem; }
+.table-insert-popover label:last-of-type { margin-bottom: 0.7rem; }
+.table-insert-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
 /* Interruptor tipo "pastilla" en vez del checkbox cuadrado del sistema:
    se ilumina con el color de acento cuando esta activo. Sigue siendo un
    <input type="checkbox"> normal por debajo (mismo :checked, mismo

@@ -1684,11 +1684,14 @@ const NOTE_EDITOR_BODY = document.getElementById('note-body');
 function execNoteCommand(cmd) {
   document.execCommand(cmd, false, null);
   NOTE_EDITOR_BODY.focus();
-  refreshNoteEditorToolbar();
+  refreshNoteEditorState();
 }
 
+// Solo los botones con data-cmd son de negrita/cursiva/lista (los de
+// tabla -- ver mas abajo -- comparten la clase .note-editor-btn por el
+// aspecto visual, pero no tienen data-cmd ni pasan por execCommand).
 function refreshNoteEditorToolbar() {
-  document.querySelectorAll('#note-body-toolbar .note-editor-btn').forEach((btn) => {
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => {
     const active = document.queryCommandState(btn.dataset.cmd);
     btn.classList.toggle('is-active', !!active);
   });
@@ -1698,11 +1701,13 @@ function refreshNoteEditorToolbar() {
 // dentro del editor, asi que no hay "donde" calcular negrita/lista
 // activa todavia -- sin esto, los botones se quedaban pintados con el
 // estado de la ULTIMA nota que se habia editado, en vez de apagados.
+// Tambien oculta el grupo +Fila/-Fila/+Col/-Col por la misma razon.
 function resetNoteEditorToolbar() {
-  document.querySelectorAll('#note-body-toolbar .note-editor-btn').forEach((btn) => btn.classList.remove('is-active'));
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
+  document.getElementById('note-table-context-toolbar').classList.add('hidden');
 }
 
-document.querySelectorAll('#note-body-toolbar .note-editor-btn').forEach((btn) => {
+document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => {
   // mousedown (no click) + preventDefault: si no, el navegador quita la
   // seleccion de texto del editor al pasar el foco al boton ANTES de que
   // se dispare el click, y execCommand ya no tendria sobre que aplicar
@@ -1710,12 +1715,226 @@ document.querySelectorAll('#note-body-toolbar .note-editor-btn').forEach((btn) =
   btn.addEventListener('mousedown', (e) => e.preventDefault());
   btn.addEventListener('click', () => execNoteCommand(btn.dataset.cmd));
 });
-// El estado encendido/apagado de cada boton depende de donde este el
-// cursor ahora mismo, asi que se recalcula en cualquier cambio de
-// seleccion o de tecla dentro del editor, no solo al pulsar un boton.
-NOTE_EDITOR_BODY.addEventListener('keyup', refreshNoteEditorToolbar);
-NOTE_EDITOR_BODY.addEventListener('mouseup', refreshNoteEditorToolbar);
-NOTE_EDITOR_BODY.addEventListener('focus', refreshNoteEditorToolbar);
+
+// ---------------------------------------------------------------------
+// Tablas dentro de una nota (Fase 4, sub-ronda de tablas): boton
+// "Tabla" que abre un popover para pedir filas/columnas antes de
+// insertarla (mismo patron que color/icono/fecha en settings.js:
+// positionFixedPopover/closeAllPopovers), y 4 botones contextuales
+// (+Fila/-Fila/+Col/-Col) que solo aparecen con el cursor dentro de una
+// celda, y actuan sobre la fila/columna donde este ese cursor.
+// ---------------------------------------------------------------------
+
+// Averigua la celda (td/th) de la tabla del editor donde esta el cursor
+// ahora mismo, o null si el cursor no esta dentro de ninguna. Solo se fía
+// de window.getSelection() -- no hay ningun otro sitio donde guardar
+// "en que celda estoy" salvo la seleccion real del navegador.
+function getCurrentTableCell() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  let node = range.startContainer;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  let cell = node ? node.closest('td, th') : null;
+  // Al hacer click en una celda VACIA (solo tiene un <br> dentro), el
+  // navegador a veces deja el cursor "colgado" de un antepasado
+  // (tr/tbody/table) con un offset, en vez de dentro de la celda en si
+  // -- pasa sobre todo justo despues de borrar una fila o columna. Se
+  // mira el hijo exacto que senala ese offset para intentar resolverlo
+  // igual, en vez de dar la celda por no encontrada.
+  if (!cell && node && node.nodeType === Node.ELEMENT_NODE) {
+    const child = node.childNodes[range.startOffset] || node.childNodes[range.startOffset - 1];
+    if (child) {
+      cell = child.closest ? child.closest('td, th') : null;
+      if (!cell && child.querySelector) cell = child.querySelector('td, th');
+    }
+  }
+  return cell && NOTE_EDITOR_BODY.contains(cell) ? cell : null;
+}
+
+function refreshTableContextToolbar() {
+  document.getElementById('note-table-context-toolbar').classList.toggle('hidden', !getCurrentTableCell());
+}
+
+// Junta el refresco de negrita/cursiva/lista y el de la barra contextual
+// de tabla en una sola llamada -- se disparan siempre juntos, con el
+// mismo cambio de seleccion o tecla dentro del editor.
+function refreshNoteEditorState() {
+  refreshNoteEditorToolbar();
+  refreshTableContextToolbar();
+}
+
+// El editor guarda aqui la seleccion de justo antes de abrir el popover
+// de "Insertar tabla": al hacer click DENTRO del popover (los campos de
+// numero necesitan quedarse con el foco para poder escribir en ellos, asi
+// que a diferencia de los botones de formato no se puede evitar que el
+// editor pierda el foco) se perderia de vista donde estaba el cursor.
+// Guardando el Range a mano se puede "devolver" el cursor a su sitio justo
+// antes de insertar la tabla, aunque hayan pasado varios clics por medio.
+let savedNoteEditorRange = null;
+
+function saveNoteEditorSelection() {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0 && NOTE_EDITOR_BODY.contains(sel.anchorNode)) {
+    savedNoteEditorRange = sel.getRangeAt(0).cloneRange();
+    return;
+  }
+  // Si el editor nunca ha tenido el foco (nota recien abierta, por
+  // ejemplo), no hay seleccion de la que partir -- se inserta al final
+  // del contenido, como sitio por defecto razonable.
+  const range = document.createRange();
+  range.selectNodeContents(NOTE_EDITOR_BODY);
+  range.collapse(false);
+  savedNoteEditorRange = range;
+}
+
+function restoreNoteEditorSelection() {
+  NOTE_EDITOR_BODY.focus();
+  if (!savedNoteEditorRange) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(savedNoteEditorRange);
+}
+
+function clampTableSize(value) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return 3;
+  return Math.min(10, Math.max(1, n));
+}
+
+function buildTableHtml(rows, cols) {
+  let rowsHtml = '';
+  for (let r = 0; r < rows; r++) {
+    rowsHtml += `<tr>${'<td><br></td>'.repeat(cols)}</tr>`;
+  }
+  // El <div><br></div> de despues da un sitio donde dejar el cursor tras
+  // insertar la tabla -- sin el, si la tabla queda como ultimo elemento
+  // del editor no habria forma de escribir nada debajo de ella.
+  return `<table><tbody>${rowsHtml}</tbody></table><div><br></div>`;
+}
+
+const tableInsertBtn = document.getElementById('note-table-insert-btn');
+const tableInsertPopover = document.createElement('div');
+tableInsertPopover.className = 'table-insert-popover hidden';
+tableInsertPopover.innerHTML = `
+  <label>Filas
+    <input type="number" id="table-insert-rows" min="1" max="10" value="3" />
+  </label>
+  <label>Columnas
+    <input type="number" id="table-insert-cols" min="1" max="10" value="3" />
+  </label>
+  <div class="table-insert-actions">
+    <button type="button" class="secondary-btn" id="table-insert-cancel">Cancelar</button>
+    <button type="button" class="primary-btn" id="table-insert-confirm">Insertar</button>
+  </div>
+`;
+document.body.appendChild(tableInsertPopover);
+
+tableInsertBtn.addEventListener('mousedown', (e) => e.preventDefault());
+tableInsertBtn.addEventListener('click', () => {
+  const willOpen = tableInsertPopover.classList.contains('hidden');
+  if (willOpen) saveNoteEditorSelection();
+  closeAllPopovers(tableInsertPopover);
+  tableInsertPopover.classList.toggle('hidden');
+  if (willOpen) positionFixedPopover(tableInsertBtn, tableInsertPopover, { width: 200 });
+});
+
+document.getElementById('table-insert-cancel').addEventListener('click', () => {
+  tableInsertPopover.classList.add('hidden');
+});
+
+document.getElementById('table-insert-confirm').addEventListener('click', () => {
+  const rows = clampTableSize(document.getElementById('table-insert-rows').value);
+  const cols = clampTableSize(document.getElementById('table-insert-cols').value);
+  tableInsertPopover.classList.add('hidden');
+  restoreNoteEditorSelection();
+  document.execCommand('insertHTML', false, buildTableHtml(rows, cols));
+  refreshNoteEditorState();
+});
+
+function addTableRow() {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const newRow = document.createElement('tr');
+  Array.from(row.children).forEach((existingCell) => {
+    const newCell = document.createElement(existingCell.tagName);
+    newCell.innerHTML = '<br>';
+    newRow.appendChild(newCell);
+  });
+  row.after(newRow);
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+function removeTableRow() {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const tbody = row.parentElement;
+  const table = row.closest('table');
+  // Si es la unica fila que queda, se quita la tabla entera en vez de
+  // dejar una tabla sin filas (que no tendria mucho sentido).
+  if (tbody.children.length <= 1) table.remove();
+  else row.remove();
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+function addTableColumn() {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const colIndex = Array.from(row.children).indexOf(cell);
+  const table = row.closest('table');
+  table.querySelectorAll('tr').forEach((tr) => {
+    const referenceCell = tr.children[colIndex];
+    if (!referenceCell) return;
+    const newCell = document.createElement(referenceCell.tagName);
+    newCell.innerHTML = '<br>';
+    referenceCell.after(newCell);
+  });
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+function removeTableColumn() {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const colIndex = Array.from(row.children).indexOf(cell);
+  const table = row.closest('table');
+  // Igual que con la fila: si es la unica columna, se quita la tabla
+  // entera en vez de dejarla sin columnas.
+  if (row.children.length <= 1) {
+    table.remove();
+  } else {
+    table.querySelectorAll('tr').forEach((tr) => {
+      if (tr.children[colIndex]) tr.children[colIndex].remove();
+    });
+  }
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+[
+  ['note-table-add-row', addTableRow],
+  ['note-table-remove-row', removeTableRow],
+  ['note-table-add-col', addTableColumn],
+  ['note-table-remove-col', removeTableColumn],
+].forEach(([id, handler]) => {
+  const btn = document.getElementById(id);
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+  btn.addEventListener('click', handler);
+});
+
+// El estado encendido/apagado de cada boton (y si toca ensenar la barra
+// contextual de tabla) depende de donde este el cursor ahora mismo, asi
+// que se recalcula en cualquier cambio de seleccion o de tecla dentro del
+// editor, no solo al pulsar un boton.
+NOTE_EDITOR_BODY.addEventListener('keyup', refreshNoteEditorState);
+NOTE_EDITOR_BODY.addEventListener('mouseup', refreshNoteEditorState);
+NOTE_EDITOR_BODY.addEventListener('focus', refreshNoteEditorState);
 
 // Una nota de antes de la Fase 4 tiene bodyFormat "text": su contenido es
 // texto plano tal cual, nunca se penso para interpretarse como HTML. Para

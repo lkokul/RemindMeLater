@@ -7,13 +7,14 @@ const db = require('../db');
 const router = express.Router();
 
 // Lista blanca de etiquetas que puede producir el editor de notas (Fase 4:
-// negrita, cursiva, listas). Cualquier otra etiqueta se quita al guardar
-// (dejando el texto de dentro, no se pierde contenido) y las permitidas se
-// dejan SIN atributos -- asi no hay forma de que se cuele un "onclick=" o
-// un "style=" con algo raro, aunque el HTML venga de un movil emparejado
-// que no sea de fiar del todo. No hace falta una libreria de terceros
-// para esto, el editor nunca deberia producir nada fuera de esta lista.
-const ALLOWED_NOTE_TAGS = new Set(['b', 'strong', 'i', 'em', 'ul', 'ol', 'li', 'br', 'div', 'p']);
+// negrita, cursiva, listas, tablas). Cualquier otra etiqueta se quita al
+// guardar (dejando el texto de dentro, no se pierde contenido) y las
+// permitidas se dejan SIN atributos -- asi no hay forma de que se cuele
+// un "onclick=" o un "style=" con algo raro, aunque el HTML venga de un
+// movil emparejado que no sea de fiar del todo. No hace falta una
+// libreria de terceros para esto, el editor nunca deberia producir nada
+// fuera de esta lista.
+const ALLOWED_NOTE_TAGS = new Set(['b', 'strong', 'i', 'em', 'ul', 'ol', 'li', 'br', 'div', 'p', 'table', 'tbody', 'tr', 'td', 'th']);
 
 function sanitizeNoteBody(html) {
   if (!html) return html;

@@ -43,16 +43,16 @@ function positionFixedPopover(anchorBtn, popover, { width = 248 } = {}) {
 }
 
 function closeAllPopovers(except) {
-  document.querySelectorAll('.color-popover, .icon-popover, .select-popover, .date-popover').forEach((el) => {
+  document.querySelectorAll('.color-popover, .icon-popover, .select-popover, .date-popover, .table-insert-popover').forEach((el) => {
     if (el !== except) el.classList.add('hidden');
   });
 }
 
 // Cierra cualquier popover abierto al hacer click fuera de el (uno solo
-// para color, icono, selector y fecha, asi no hay que repetir esta logica
-// en cada widget).
+// para color, icono, selector, fecha e insertar-tabla, asi no hay que
+// repetir esta logica en cada widget).
 document.addEventListener('click', (e) => {
-  if (e.target.closest('.color-popover, .icon-popover, .select-popover, .date-popover, .color-swatch-btn, .icon-swatch-btn, .select-field-trigger, .date-field-trigger')) return;
+  if (e.target.closest('.color-popover, .icon-popover, .select-popover, .date-popover, .table-insert-popover, .color-swatch-btn, .icon-swatch-btn, .select-field-trigger, .date-field-trigger, #note-table-insert-btn')) return;
   closeAllPopovers();
 });
 

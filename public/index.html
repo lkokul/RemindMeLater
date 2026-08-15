@@ -437,6 +437,16 @@
             <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
             <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn" aria-label="Lista con viñetas" title="Lista con viñetas">&#8226; Lista</button>
             <button type="button" data-cmd="insertOrderedList" class="note-editor-btn" aria-label="Lista numerada" title="Lista numerada">1. Lista</button>
+            <button type="button" id="note-table-insert-btn" class="note-editor-btn" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
+            <!-- Solo visible con el cursor dentro de una tabla (ver
+                 refreshTableContextToolbar en app.js) -- actua siempre
+                 sobre la fila/columna donde este el cursor en ese momento. -->
+            <span id="note-table-context-toolbar" class="note-table-context-toolbar hidden">
+              <button type="button" id="note-table-add-row" class="note-editor-btn" aria-label="Añadir fila" title="Añadir fila">+Fila</button>
+              <button type="button" id="note-table-remove-row" class="note-editor-btn" aria-label="Eliminar fila" title="Eliminar fila">-Fila</button>
+              <button type="button" id="note-table-add-col" class="note-editor-btn" aria-label="Añadir columna" title="Añadir columna">+Col</button>
+              <button type="button" id="note-table-remove-col" class="note-editor-btn" aria-label="Eliminar columna" title="Eliminar columna">-Col</button>
+            </span>
           </div>
           <div id="note-body" class="note-editor-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido de la nota"></div>
         </div>
