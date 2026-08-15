@@ -438,6 +438,11 @@
             <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn" aria-label="Lista con viñetas" title="Lista con viñetas">&#8226; Lista</button>
             <button type="button" data-cmd="insertOrderedList" class="note-editor-btn" aria-label="Lista numerada" title="Lista numerada">1. Lista</button>
             <button type="button" id="note-table-insert-btn" class="note-editor-btn" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
+            <button type="button" id="note-image-insert-btn" class="note-editor-btn" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
+            <!-- Selector de archivo nativo, oculto -- lo abre el boton de
+                 arriba con .click(). Tambien sirve para el Ctrl+V (ver
+                 app.js), que reutiliza la misma subida. -->
+            <input type="file" id="note-image-file-input" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" />
             <!-- Solo visible con el cursor dentro de una tabla (ver
                  refreshTableContextToolbar en app.js) -- actua siempre
                  sobre la fila/columna donde este el cursor en ese momento. -->

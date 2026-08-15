@@ -162,6 +162,10 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    dentro del editor de notas se ve igual siempre. */
 .note-editor-body table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
 .note-editor-body td, .note-editor-body th { border: 1px solid var(--border); padding: 0.4rem; min-width: 2.5rem; vertical-align: top; }
+/* max-width 100% para que una foto grande no se salga del editor (ni del
+   modal) -- se ve a su tamano real hasta ese limite, sin recorte ni
+   mangos para redimensionar (eso queda fuera de esta sub-ronda). */
+.note-editor-body img { max-width: 100%; height: auto; display: block; margin: 0.4rem 0; border-radius: var(--radius-sm); }
 /* Grupo de botones +Fila/-Fila/+Col/-Col: solo aparece con el cursor
    dentro de una tabla (ver refreshTableContextToolbar en app.js), con un
    separador a la izquierda para no confundirse con los botones de

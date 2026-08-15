@@ -3,18 +3,26 @@
 // routes/noteFolders.js).
 const express = require('express');
 const db = require('../db');
+const { deleteImagesInBody } = require('./noteImages');
 
 const router = express.Router();
 
 // Lista blanca de etiquetas que puede producir el editor de notas (Fase 4:
-// negrita, cursiva, listas, tablas). Cualquier otra etiqueta se quita al
-// guardar (dejando el texto de dentro, no se pierde contenido) y las
-// permitidas se dejan SIN atributos -- asi no hay forma de que se cuele
-// un "onclick=" o un "style=" con algo raro, aunque el HTML venga de un
-// movil emparejado que no sea de fiar del todo. No hace falta una
+// negrita, cursiva, listas, tablas, imagenes). Cualquier otra etiqueta se
+// quita al guardar (dejando el texto de dentro, no se pierde contenido) y
+// las permitidas se dejan SIN atributos -- asi no hay forma de que se
+// cuele un "onclick=" o un "style=" con algo raro, aunque el HTML venga
+// de un movil emparejado que no sea de fiar del todo. No hace falta una
 // libreria de terceros para esto, el editor nunca deberia producir nada
 // fuera de esta lista.
-const ALLOWED_NOTE_TAGS = new Set(['b', 'strong', 'i', 'em', 'ul', 'ol', 'li', 'br', 'div', 'p', 'table', 'tbody', 'tr', 'td', 'th']);
+//
+// "img" es la unica excepcion que SI necesita quedarse con un atributo
+// (src) para servir de algo -- se trata aparte mas abajo, comprobando que
+// apunte a una imagen ya subida a esta misma app (routes/noteImages.js) y
+// no, por ejemplo, a un "data:" (la opcion base64 que se descarto a
+// proposito) o a un servidor externo.
+const ALLOWED_NOTE_TAGS = new Set(['b', 'strong', 'i', 'em', 'ul', 'ol', 'li', 'br', 'div', 'p', 'table', 'tbody', 'tr', 'td', 'th', 'img']);
+const NOTE_IMAGE_SRC = /^\/api\/notes\/images\/[a-zA-Z0-9._-]+$/;
 
 function sanitizeNoteBody(html) {
   if (!html) return html;
@@ -23,11 +31,18 @@ function sanitizeNoteBody(html) {
   let clean = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '');
   // Etiqueta a etiqueta: si no esta en la lista blanca se quita la
   // etiqueta pero se deja lo de dentro; las permitidas se dejan sin
-  // atributos.
-  clean = clean.replace(/<(\/?)([a-zA-Z0-9]+)[^>]*>/g, (match, closing, tag) => {
+  // atributos (salvo "img", ver arriba).
+  clean = clean.replace(/<(\/?)([a-zA-Z0-9]+)([^>]*)>/g, (match, closing, tag, attrs) => {
     const lower = tag.toLowerCase();
     if (!ALLOWED_NOTE_TAGS.has(lower)) return '';
-    return closing ? `</${lower}>` : `<${lower}>`;
+    if (closing) return `</${lower}>`;
+    if (lower === 'img') {
+      const srcMatch = attrs.match(/\ssrc\s*=\s*"([^"]*)"/i);
+      const src = srcMatch ? srcMatch[1] : '';
+      if (!NOTE_IMAGE_SRC.test(src)) return '';
+      return `<img src="${src}">`;
+    }
+    return `<${lower}>`;
   });
   return clean;
 }
@@ -151,8 +166,13 @@ router.put('/:id', (req, res) => {
 });
 
 router.delete('/:id', (req, res) => {
+  // Se lee el body ANTES de borrar la fila para poder limpiar del disco
+  // las imagenes que tuviera -- si no, se quedarian huerfanas para
+  // siempre (ver deleteImagesInBody en routes/noteImages.js).
+  const existing = db.prepare('SELECT body FROM notes WHERE id = ?').get(req.params.id);
   const info = db.prepare('DELETE FROM notes WHERE id = ?').run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
+  if (existing) deleteImagesInBody(existing.body);
   res.status(204).end();
 });
 

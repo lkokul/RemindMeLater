@@ -1928,6 +1928,76 @@ function removeTableColumn() {
   btn.addEventListener('click', handler);
 });
 
+// ---------------------------------------------------------------------
+// Imagenes dentro de una nota (Fase 4, ultima sub-ronda): boton "Imagen"
+// que abre el selector de archivo nativo, y Ctrl+V para pegar una imagen
+// copiada (de una captura de pantalla, de otra web...) directamente
+// dentro del editor. Las dos vias acaban subiendo el archivo al servidor
+// (routes/noteImages.js) y solo metiendo en el HTML de la nota el enlace
+// corto que devuelve -- la imagen entera NO se guarda como texto (base64)
+// dentro de la nota, eso se descarto a proposito hablandolo con Koku
+// porque hincha la base de datos y hace mas lenta cualquier carga de la
+// lista de notas, aunque no estes mirando esa imagen en concreto.
+// ---------------------------------------------------------------------
+const noteImageBtn = document.getElementById('note-image-insert-btn');
+const noteImageFileInput = document.getElementById('note-image-file-input');
+
+async function uploadNoteImage(file) {
+  const result = await api('/api/notes/images', {
+    method: 'POST',
+    headers: { 'Content-Type': file.type },
+    body: file,
+  });
+  return result.url;
+}
+
+async function insertNoteImageFile(file) {
+  const originalLabel = noteImageBtn.textContent;
+  noteImageBtn.disabled = true;
+  noteImageBtn.textContent = 'Subiendo…';
+  try {
+    const url = await uploadNoteImage(file);
+    restoreNoteEditorSelection();
+    document.execCommand('insertHTML', false, `<img src="${url}">`);
+    refreshNoteEditorState();
+  } catch (err) {
+    alert('No se pudo subir la imagen: ' + err.message);
+  } finally {
+    noteImageBtn.disabled = false;
+    noteImageBtn.textContent = originalLabel;
+  }
+}
+
+noteImageBtn.addEventListener('mousedown', (e) => e.preventDefault());
+noteImageBtn.addEventListener('click', () => {
+  saveNoteEditorSelection();
+  // Vacio antes de abrir el selector: si no, elegir el MISMO archivo dos
+  // veces seguidas no dispararia el evento "change" la segunda vez (el
+  // navegador solo avisa cuando el valor cambia de verdad).
+  noteImageFileInput.value = '';
+  noteImageFileInput.click();
+});
+
+noteImageFileInput.addEventListener('change', () => {
+  const file = noteImageFileInput.files[0];
+  if (file) insertNoteImageFile(file);
+});
+
+// Solo intercepta el pegado cuando hay de verdad una imagen en el
+// portapapeles -- pegar texto normal sigue su camino de siempre (el
+// propio navegador ya le quita estilos raros al venir de fuera, el mismo
+// comportamiento por defecto de cualquier contenteditable).
+NOTE_EDITOR_BODY.addEventListener('paste', (e) => {
+  const items = Array.from(e.clipboardData ? e.clipboardData.items : []);
+  const imageItem = items.find((item) => item.type.startsWith('image/'));
+  if (!imageItem) return;
+  e.preventDefault();
+  const file = imageItem.getAsFile();
+  if (!file) return;
+  saveNoteEditorSelection();
+  insertNoteImageFile(file);
+});
+
 // El estado encendido/apagado de cada boton (y si toca ensenar la barra
 // contextual de tabla) depende de donde este el cursor ahora mismo, asi
 // que se recalcula en cualquier cambio de seleccion o de tecla dentro del
@@ -1982,10 +2052,14 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('note-id').value;
   const folderRaw = noteFolderField.getValue();
-  // Si el editor quedo vacio de texto de verdad, se manda null en vez de
-  // basura tipo "<br>" que algunos navegadores dejan sueltas tras borrar
-  // todo el contenido.
-  const bodyHtml = NOTE_EDITOR_BODY.textContent.trim() === '' ? null : NOTE_EDITOR_BODY.innerHTML;
+  // Si el editor quedo vacio de verdad, se manda null en vez de basura
+  // tipo "<br>" que algunos navegadores dejan suelta tras borrar todo el
+  // contenido. "Vacio de verdad" no es lo mismo que "sin texto": una nota
+  // con solo una imagen o una tabla vacia no tiene texto pero SI tiene
+  // contenido que guardar, asi que ademas del texto se comprueba si queda
+  // algun <img> o <table> sueltos.
+  const hasNoteContent = NOTE_EDITOR_BODY.textContent.trim() !== '' || NOTE_EDITOR_BODY.querySelector('img, table');
+  const bodyHtml = hasNoteContent ? NOTE_EDITOR_BODY.innerHTML : null;
   const payload = {
     title: document.getElementById('note-title').value,
     body: bodyHtml,
