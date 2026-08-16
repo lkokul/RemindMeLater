@@ -50,19 +50,24 @@ mDNS (`remindmelater.local`). Detalle completo de features en
   entreguen hecho. Con peticiones grandes/con varios puntos a la vez, mejor
   agrupar las preguntas ambiguas en una sola ronda de preguntas al principio
   en vez de ir parando a cada rato.
-- **Los tags de git no se pueden pushear desde esta sesión** (da 403,
-  confirmado que NO es un problema de permisos de Koku en GitHub ni de la
-  red — es la credencial concreta de esta integración, que es más
-  limitada que la cuenta completa de Koku). El branch normal sí se puede
-  pushear sin problema. Workaround ya establecido: Koku lo hace a mano
-  desde su propio ordenador después de cada push:
+- **Los tags de git SÍ se pueden crear y pushear desde una sesión LOCAL**
+  (confirmado en la ronda de v0.23.1: `git tag vX.Y.Z <hash>` +
+  `git push origin vX.Y.Z` funciona igual que el branch normal, con solo
+  un aviso inofensivo de "unable to get credential storage lock" que no
+  impide el push). La limitación de 403 al pushear tags es especifica de
+  la integración de **control remoto** (Cowork y similares), cuya
+  credencial es más limitada que la cuenta completa de Koku — en ese tipo
+  de sesión, el workaround sigue siendo que Koku lo haga a mano desde su
+  propio ordenador después de cada push:
   ```
   git fetch origin main-wmqm2f
   git tag vX.Y.Z <hash-del-commit>
   git push origin vX.Y.Z
   ```
-  (añadir `--force` al tag si hubo que corregir uno mal puesto). No hace
-  falta seguir intentándolo ni investigarlo más, ya está confirmado.
+  (añadir `--force` al tag si hubo que corregir uno mal puesto). Si estás
+  en una sesión de Claude Code local (terminal en el propio ordenador de
+  Koku), prueba a pushear el tag tú mismo primero — solo hace falta el
+  workaround manual si de verdad da 403 en ESTA sesión en concreto.
 
 ## Arquitectura y convenciones establecidas
 
@@ -275,13 +280,12 @@ mDNS (`remindmelater.local`). Detalle completo de features en
 
 ## Estado actual
 
-Último commit en `origin/main-wmqm2f` (recién pusheado): `v0.23.1` —
-docs (`README.md` y este archivo) puestos al día tras cerrar la Fase 4.
-El commit de código de la Fase 4 en sí es `v0.23.0` (`27ce26a`) —
-"imágenes en el editor de notas". Los tags `v0.21.0`/`v0.22.0`/`v0.23.0`/
-`v0.23.1` están pendientes de que Koku los cree a mano (ver más arriba;
-confirmar con él si quiere tag por cada versión intermedia o solo el
-final).
+Último commit en `origin/main-wmqm2f` (pusheado): `v0.23.1` — docs
+(`README.md` y este archivo) puestos al día tras cerrar la Fase 4. El
+commit de código de la Fase 4 en sí es `v0.23.0` (`27ce26a`) — "imágenes
+en el editor de notas". Los tags `v0.21.0`/`v0.22.0`/`v0.23.0`/`v0.23.1`
+YA están creados y pusheados a `origin` (esta era una sesión local, ver
+nota corregida más arriba sobre tags).
 
 Fases de "Mi espacio" completas: 1 (hub), 2 (notas + ocultar/contraseña),
 3 (carpetas anidadas tipo explorador), una ronda extra de pulido
