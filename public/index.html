@@ -323,6 +323,12 @@
                 <button type="button" id="btn-new-note" class="secondary-btn note-add-btn">+ Nota</button>
                 <div class="note-search-row">
                   <input type="text" id="note-search-input" placeholder="Buscar por nombre..." autocomplete="off" />
+                  <!-- Por defecto la busqueda mira TODA la app (con la
+                       ruta de carpeta debajo de cada resultado); este
+                       boton la restringe a la carpeta donde estas ahora
+                       mismo, sin ruta debajo porque ya sabes donde estas.
+                       Ver renderNotesView en app.js. -->
+                  <button type="button" id="note-search-scope-btn" class="note-search-scope-btn" aria-pressed="false" title="Restringir la busqueda a esta carpeta">Solo esta carpeta</button>
                 </div>
                 <div id="notes-list" class="reminders-list notes-list"></div>
               </div>
@@ -502,8 +508,20 @@
           <button type="button" id="note-table-remove-row" class="note-editor-btn" aria-label="Eliminar fila" title="Eliminar fila">-Fila</button>
           <button type="button" id="note-table-add-col" class="note-editor-btn" aria-label="Añadir columna" title="Añadir columna">+Col</button>
           <button type="button" id="note-table-remove-col" class="note-editor-btn" aria-label="Eliminar columna" title="Eliminar columna">-Col</button>
+          <!-- Grosor fino/grueso, por tabla (atributo data-border en el
+               <table>, ver toggleTableBorderThickness en app.js) -- se
+               enciende igual que los botones de negrita/cursiva cuando
+               la tabla actual ya esta en grueso. -->
+          <button type="button" id="note-table-border-toggle" class="note-editor-btn" aria-label="Alternar grosor de borde" title="Alternar borde fino/grueso">Borde</button>
         </span>
         <span class="note-editor-toolbar-spacer"></span>
+        <!-- Modo "vim" (opt-in, ajuste por dispositivo en localStorage,
+             ver isVimModeEnabled en app.js): Esc entra en modo Normal
+             (movimiento con h/j/k/l, w/b, x, dd, u -- sin escribir),
+             i/a/o vuelven a Insertar. El indicativo solo se ve si el
+             ajuste esta activado. -->
+        <span id="note-editor-vim-indicator" class="note-editor-vim-indicator hidden">INSERTAR</span>
+        <button type="button" id="note-editor-vim-toggle-btn" class="note-editor-btn" aria-pressed="false" title="Atajos de movimiento estilo vim (Esc = modo Normal, i/a/o = Insertar)">Vim</button>
         <!-- Alterna entre editar (por defecto, como antes) y solo lectura,
              por si solo quieres consultar la nota sin arriesgarte a
              tocarla sin querer -- ver applyNoteEditorReadMode en app.js.
@@ -519,8 +537,8 @@
              uno de los dos paneles se ve a la vez (ver setActiveNoteEditorPanel
              en app.js), volver a clicar el que esta activo lo cierra. -->
         <div class="note-editor-rail">
-          <button type="button" id="note-editor-toggle-tree" class="icon-btn note-editor-rail-btn" aria-label="Arbol de notas" title="Arbol de carpetas y notas">🌳</button>
-          <button type="button" id="note-editor-toggle-sections" class="icon-btn note-editor-rail-btn" aria-label="Secciones" title="Secciones (notas abiertas)">📑</button>
+          <button type="button" id="note-editor-toggle-tree" class="note-editor-rail-btn" aria-label="Arbol de notas" title="Arbol de carpetas y notas">Árbol</button>
+          <button type="button" id="note-editor-toggle-sections" class="note-editor-rail-btn" aria-label="Secciones" title="Secciones (notas abiertas)">Notas</button>
         </div>
         <!-- Arbol de carpetas/notas: navegacion tipo arbol (plegable por
              carpeta), reutiliza state.noteFolders/state.notes (ya cargados

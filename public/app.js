@@ -17,6 +17,7 @@ const state = {
   notes: [], // Notas de "Mi espacio" (Fase 2), ver loadNotes()
   noteFolders: [], // Carpetas de notas (Fase 3), ver loadNoteFolders()
   currentNoteFolderId: null, // null = raiz -- "donde estas" navegando en Notas, no se guarda entre sesiones
+  noteSearchCurrentFolderOnly: false, // false = la busqueda mira TODA la app, ver renderNotesView()
   // Notas abiertas a la vez en el editor a pantalla completa (como
   // pestañas, pero sin barra de pestañas visible -- ver el panel
   // "Secciones" y openNoteInEditor/switchActiveOpenNote en app.js). Cada
@@ -1425,7 +1426,23 @@ document.getElementById('notes-setup-password-form').addEventListener('submit', 
   await setNoteHidden(note, true);
 });
 
-function buildNoteRow(note) {
+// Ruta de carpetas de una nota/carpeta, de raiz a padre directo (sin
+// incluir su propio nombre) -- solo hace falta cuando la busqueda es de
+// TODA la app (ver renderNotesView), para saber donde vive cada
+// resultado ya que no estan agrupados por la carpeta donde navegas.
+function buildNoteFolderPathLabel(folderId) {
+  const parts = [];
+  let current = folderId;
+  while (current != null) {
+    const folder = state.noteFolders.find((f) => f.id === current);
+    if (!folder) break;
+    parts.unshift(folder.name);
+    current = folder.parentId;
+  }
+  return parts.length ? parts.join(' / ') : 'Raiz';
+}
+
+function buildNoteRow(note, { showPath = false } = {}) {
   const row = document.createElement('div');
   row.className = 'note-item' + (note.hidden ? ' is-hidden' : '');
 
@@ -1452,6 +1469,12 @@ function buildNoteRow(note) {
   title.className = 'note-item-title';
   title.textContent = note.title;
   content.appendChild(title);
+  if (showPath) {
+    const path = document.createElement('span');
+    path.className = 'note-item-path';
+    path.textContent = buildNoteFolderPathLabel(note.folderId);
+    content.appendChild(path);
+  }
   contentWrap.appendChild(content);
   row.appendChild(contentWrap);
 
@@ -1473,7 +1496,7 @@ function buildNoteRow(note) {
 // Carpeta con icono de ojo (Fase 3, navegacion tipo explorador de
 // archivos): la fila entera abre esa carpeta al clicarla; el lapiz
 // (aparte, con su propio stopPropagation) la edita sin entrar.
-function buildFolderRow(folder) {
+function buildFolderRow(folder, { showPath = false } = {}) {
   const row = document.createElement('div');
   row.className = 'note-item note-folder-row';
 
@@ -1493,6 +1516,12 @@ function buildFolderRow(folder) {
   title.className = 'note-item-title';
   title.textContent = folder.name;
   contentWrap.appendChild(title);
+  if (showPath) {
+    const path = document.createElement('span');
+    path.className = 'note-item-path';
+    path.textContent = buildNoteFolderPathLabel(folder.parentId);
+    contentWrap.appendChild(path);
+  }
   row.appendChild(contentWrap);
 
   const editBtn = document.createElement('button');
@@ -1584,19 +1613,40 @@ function appendFavoriteSortedGroup(container, items, buildRowFn) {
 // Dibuja "donde estas" en Notas: las subcarpetas de aqui arriba, las
 // notas de aqui debajo, todo en una sola lista — como el explorador de
 // archivos en vista de lista. "Volver" solo se ve si no estas en la
-// raiz (currentNoteFolderId === null). La busqueda (state.noteSearchQuery)
-// filtra por nombre SOLO dentro de la carpeta actual, no en toda la app.
+// raiz (currentNoteFolderId === null).
+//
+// Busqueda (state.noteSearchQuery): por defecto busca en TODA la app
+// (todas las notas/carpetas, no solo las de donde estas navegando), y
+// cada resultado ensena su ruta de carpeta debajo del nombre (ver
+// buildNoteFolderPathLabel) para saber donde vive. El boton "Solo esta
+// carpeta" (state.noteSearchCurrentFolderOnly, persistente mientras
+// dure la sesion) la restringe a la carpeta actual, como funcionaba
+// antes -- sin ruta debajo, porque ya sabes donde estas.
 function renderNotesView() {
   const container = document.getElementById('notes-list');
   if (!container) return;
   container.innerHTML = '';
 
-  document.getElementById('btn-note-folder-back').classList.toggle('hidden', state.currentNoteFolderId === null);
+  const query = (state.noteSearchQuery || '').trim().toLowerCase();
+  const searchWholeApp = !!query && !state.noteSearchCurrentFolderOnly;
+
+  document.getElementById('btn-note-folder-back').classList.toggle('hidden', state.currentNoteFolderId === null || searchWholeApp);
+
+  if (searchWholeApp) {
+    const matchFolders = state.noteFolders.filter((f) => f.name.toLowerCase().includes(query));
+    const matchNotes = (state.notes || []).filter((n) => n.title.toLowerCase().includes(query));
+    if (matchFolders.length === 0 && matchNotes.length === 0) {
+      container.innerHTML = '<p class="empty-hint">Nada coincide con esa busqueda.</p>';
+      return;
+    }
+    appendFavoriteSortedGroup(container, matchFolders, (f) => buildFolderRow(f, { showPath: true }));
+    appendFavoriteSortedGroup(container, matchNotes, (n) => buildNoteRow(n, { showPath: true }));
+    return;
+  }
 
   let subfolders = state.noteFolders.filter((f) => f.parentId === state.currentNoteFolderId);
   let notesHere = (state.notes || []).filter((n) => n.folderId === state.currentNoteFolderId);
 
-  const query = (state.noteSearchQuery || '').trim().toLowerCase();
   if (query) {
     subfolders = subfolders.filter((f) => f.name.toLowerCase().includes(query));
     notesHere = notesHere.filter((n) => n.title.toLowerCase().includes(query));
@@ -1619,6 +1669,13 @@ function clearNoteSearch() {
 
 document.getElementById('note-search-input').addEventListener('input', (e) => {
   state.noteSearchQuery = e.target.value;
+  renderNotesView();
+});
+
+document.getElementById('note-search-scope-btn').addEventListener('click', () => {
+  state.noteSearchCurrentFolderOnly = !state.noteSearchCurrentFolderOnly;
+  document.getElementById('note-search-scope-btn').classList.toggle('is-active', state.noteSearchCurrentFolderOnly);
+  document.getElementById('note-search-scope-btn').setAttribute('aria-pressed', state.noteSearchCurrentFolderOnly ? 'true' : 'false');
   renderNotesView();
 });
 
@@ -1770,7 +1827,17 @@ function getCurrentTableCell() {
 }
 
 function refreshTableContextToolbar() {
-  document.getElementById('note-table-context-toolbar').classList.toggle('hidden', !getCurrentTableCell());
+  const cell = getCurrentTableCell();
+  document.getElementById('note-table-context-toolbar').classList.toggle('hidden', !cell);
+  // El boton de grosor de borde refleja el estado de la tabla donde esta
+  // el cursor AHORA MISMO -- cada tabla lleva su propio grosor (atributo
+  // data-border en el <table>, ver toggleTableBorderThickness), no es un
+  // ajuste global del editor.
+  const borderBtn = document.getElementById('note-table-border-toggle');
+  if (borderBtn) {
+    const isThick = cell && cell.closest('table').getAttribute('data-border') === 'thick';
+    borderBtn.classList.toggle('is-active', !!isThick);
+  }
 }
 
 // Junta el refresco de negrita/cursiva/lista y el de la barra contextual
@@ -1819,15 +1886,30 @@ function clampTableSize(value) {
   return Math.min(10, Math.max(1, n));
 }
 
+// Ancho/alto por defecto de una tabla nueva, en px -- antes la tabla se
+// autoajustaba sola (width:100% + table-layout automatico) al escribir,
+// ahora es "constante" desde que se inserta (table-layout:fixed, ver
+// styles.css) y se queda en estos valores hasta que se arrastre un borde
+// a mano (ver el bloque de redimensionado mas abajo).
+const DEFAULT_TABLE_COL_WIDTH = 120;
+const DEFAULT_TABLE_ROW_HEIGHT = 36;
+
 function buildTableHtml(rows, cols) {
+  // <colgroup> con un <col> por columna: es lo que de verdad manda el
+  // ancho de cada columna con table-layout:fixed (los <td> por si solos
+  // no bastarian). El saneado del servidor (sanitizeNoteBody en
+  // routes/notes.js) valida el "style" de cada <col>/<tr> con una lista
+  // blanca MUY estricta (solo "width:Npx"/"height:Npx"), no cualquier CSS.
+  const colHtml = `<col style="width:${DEFAULT_TABLE_COL_WIDTH}px">`;
+  const colgroupHtml = `<colgroup>${colHtml.repeat(cols)}</colgroup>`;
   let rowsHtml = '';
   for (let r = 0; r < rows; r++) {
-    rowsHtml += `<tr>${'<td><br></td>'.repeat(cols)}</tr>`;
+    rowsHtml += `<tr style="height:${DEFAULT_TABLE_ROW_HEIGHT}px">${'<td><br></td>'.repeat(cols)}</tr>`;
   }
   // El <div><br></div> de despues da un sitio donde dejar el cursor tras
   // insertar la tabla -- sin el, si la tabla queda como ultimo elemento
   // del editor no habria forma de escribir nada debajo de ella.
-  return `<table><tbody>${rowsHtml}</tbody></table><div><br></div>`;
+  return `<table>${colgroupHtml}<tbody>${rowsHtml}</tbody></table><div><br></div>`;
 }
 
 const tableInsertBtn = document.getElementById('note-table-insert-btn');
@@ -1874,6 +1956,10 @@ function addTableRow() {
   if (!cell) return;
   const row = cell.parentElement;
   const newRow = document.createElement('tr');
+  // Misma altura por defecto que una fila nueva desde "Insertar tabla" --
+  // luego se puede arrastrar igual que cualquier otra (ver el
+  // redimensionado mas abajo).
+  newRow.style.height = `${DEFAULT_TABLE_ROW_HEIGHT}px`;
   Array.from(row.children).forEach((existingCell) => {
     const newCell = document.createElement(existingCell.tagName);
     newCell.innerHTML = '<br>';
@@ -1898,6 +1984,26 @@ function removeTableRow() {
   refreshNoteEditorState();
 }
 
+// El <colgroup> tiene que tener SIEMPRE un <col> por columna, en el
+// mismo orden -- si no, con table-layout:fixed el ancho de cada columna
+// dejaria de corresponder a la columna que toca en cuanto se anada o
+// quite una. Si por lo que sea la tabla no tiene colgroup (notas de
+// antes de esta ronda, guardadas sin el), se crea uno de cero con el
+// ancho por defecto para todas las columnas ya existentes.
+function ensureTableColgroup(table, colCount) {
+  let colgroup = table.querySelector('colgroup');
+  if (!colgroup) {
+    colgroup = document.createElement('colgroup');
+    table.insertBefore(colgroup, table.firstChild);
+    for (let i = 0; i < colCount; i++) {
+      const col = document.createElement('col');
+      col.style.width = `${DEFAULT_TABLE_COL_WIDTH}px`;
+      colgroup.appendChild(col);
+    }
+  }
+  return colgroup;
+}
+
 function addTableColumn() {
   const cell = getCurrentTableCell();
   if (!cell) return;
@@ -1911,6 +2017,12 @@ function addTableColumn() {
     newCell.innerHTML = '<br>';
     referenceCell.after(newCell);
   });
+  const colgroup = ensureTableColgroup(table, row.children.length);
+  const newCol = document.createElement('col');
+  newCol.style.width = `${DEFAULT_TABLE_COL_WIDTH}px`;
+  const referenceCol = colgroup.children[colIndex];
+  if (referenceCol) referenceCol.after(newCol);
+  else colgroup.appendChild(newCol);
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -1929,7 +2041,23 @@ function removeTableColumn() {
     table.querySelectorAll('tr').forEach((tr) => {
       if (tr.children[colIndex]) tr.children[colIndex].remove();
     });
+    const colgroup = table.querySelector('colgroup');
+    if (colgroup && colgroup.children[colIndex]) colgroup.children[colIndex].remove();
   }
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+// Grosor de borde fino/grueso, por tabla -- atributo data-border="thick"
+// en el <table> (ausente = fino, el de siempre). El saneado del servidor
+// (sanitizeNoteBody en routes/notes.js) solo deja pasar ese atributo con
+// el valor EXACTO "thick", cualquier otra cosa se descarta.
+function toggleTableBorderThickness() {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const table = cell.closest('table');
+  if (table.getAttribute('data-border') === 'thick') table.removeAttribute('data-border');
+  else table.setAttribute('data-border', 'thick');
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -1939,10 +2067,184 @@ function removeTableColumn() {
   ['note-table-remove-row', removeTableRow],
   ['note-table-add-col', addTableColumn],
   ['note-table-remove-col', removeTableColumn],
+  ['note-table-border-toggle', toggleTableBorderThickness],
 ].forEach(([id, handler]) => {
   const btn = document.getElementById(id);
   btn.addEventListener('mousedown', (e) => e.preventDefault());
   btn.addEventListener('click', handler);
+});
+
+// ---------------------------------------------------------------------
+// Redimensionar tablas a mano (estilo Excel): arrastrar el borde derecho
+// de una celda cambia el ancho de esa COLUMNA entera (el <col> del
+// colgroup); arrastrar el borde inferior cambia el alto de esa FILA
+// entera (el <tr>). Doble clic en un borde ajusta esa columna/fila al
+// contenido que tenga en ese momento. Nada de esto anade elementos
+// nuevos al HTML de la nota -- son listeners en NOTE_EDITOR_BODY que
+// detectan la cercania al borde de una celda por posicion del raton, sin
+// "tiradores" propios que el saneado del servidor tendria que aprender a
+// permitir.
+// ---------------------------------------------------------------------
+const TABLE_RESIZE_EDGE_PX = 5;
+const TABLE_MIN_COL_WIDTH = 40;
+const TABLE_MIN_ROW_HEIGHT = 24;
+
+// { type: 'col'|'row', table, col|row, startX/startY, startWidth/startHeight }
+// mientras se esta arrastrando un borde; null el resto del tiempo.
+let tableResizeDrag = null;
+
+// Averigua si (clientX, clientY) esta cerca del borde derecho o inferior
+// de una celda de tabla dentro del editor, y de que tipo. null si no.
+function findTableResizeTarget(clientX, clientY) {
+  const el = document.elementFromPoint(clientX, clientY);
+  const cell = el ? el.closest('td, th') : null;
+  if (!cell || !NOTE_EDITOR_BODY.contains(cell)) return null;
+  const rect = cell.getBoundingClientRect();
+
+  // El borde de 1px entre dos celdas es "de las dos a la vez" -- segun
+  // redondeo, elementFromPoint a veces devuelve la celda de la izquierda/
+  // arriba y a veces la de la derecha/abajo para el MISMO pixel. Se
+  // comprueban los dos lados de la celda que haya devuelto, no solo el
+  // derecho/inferior, para no depender de cual haya tocado.
+  if (Math.abs(clientX - rect.left) <= TABLE_RESIZE_EDGE_PX && cell.previousElementSibling) {
+    return { type: 'col', cell: cell.previousElementSibling };
+  }
+  if (Math.abs(clientX - rect.right) <= TABLE_RESIZE_EDGE_PX) {
+    return { type: 'col', cell };
+  }
+  if (Math.abs(clientY - rect.top) <= TABLE_RESIZE_EDGE_PX) {
+    const row = cell.parentElement;
+    const prevRow = row.previousElementSibling;
+    if (prevRow) {
+      const colIndex = Array.from(row.children).indexOf(cell);
+      const prevCell = prevRow.children[colIndex] || prevRow.children[0];
+      if (prevCell) return { type: 'row', cell: prevCell };
+    }
+  }
+  if (Math.abs(clientY - rect.bottom) <= TABLE_RESIZE_EDGE_PX) {
+    return { type: 'row', cell };
+  }
+  return null;
+}
+
+function tableColIndex(cell) {
+  return Array.from(cell.parentElement.children).indexOf(cell);
+}
+
+function tableColElement(table, colIndex) {
+  const colgroup = ensureTableColgroup(table, table.rows[0] ? table.rows[0].children.length : 0);
+  return colgroup.children[colIndex] || null;
+}
+
+// Cursor col-resize/row-resize solo cerca de un borde redimensionable --
+// se recalcula en cada movimiento del raton (sin arrastrar todavia).
+NOTE_EDITOR_BODY.addEventListener('mousemove', (e) => {
+  if (tableResizeDrag) return;
+  const target = findTableResizeTarget(e.clientX, e.clientY);
+  NOTE_EDITOR_BODY.style.cursor = target ? (target.type === 'col' ? 'col-resize' : 'row-resize') : '';
+});
+NOTE_EDITOR_BODY.addEventListener('mouseleave', () => {
+  if (!tableResizeDrag) NOTE_EDITOR_BODY.style.cursor = '';
+});
+
+NOTE_EDITOR_BODY.addEventListener('mousedown', (e) => {
+  const target = findTableResizeTarget(e.clientX, e.clientY);
+  if (!target) return;
+  // Evita que el navegador coloque el cursor de texto o empiece una
+  // seleccion al arrastrar un borde -- es un gesto de redimensionar, no
+  // de editar contenido.
+  e.preventDefault();
+  const table = target.cell.closest('table');
+  if (target.type === 'col') {
+    const col = tableColElement(table, tableColIndex(target.cell));
+    if (!col) return;
+    tableResizeDrag = { type: 'col', col, startX: e.clientX, startWidth: col.getBoundingClientRect().width };
+  } else {
+    const row = target.cell.parentElement;
+    tableResizeDrag = { type: 'row', row, startY: e.clientY, startHeight: row.getBoundingClientRect().height };
+  }
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!tableResizeDrag) return;
+  if (tableResizeDrag.type === 'col') {
+    const delta = e.clientX - tableResizeDrag.startX;
+    const newWidth = Math.max(TABLE_MIN_COL_WIDTH, Math.round(tableResizeDrag.startWidth + delta));
+    tableResizeDrag.col.style.width = `${newWidth}px`;
+  } else {
+    const delta = e.clientY - tableResizeDrag.startY;
+    const newHeight = Math.max(TABLE_MIN_ROW_HEIGHT, Math.round(tableResizeDrag.startHeight + delta));
+    tableResizeDrag.row.style.height = `${newHeight}px`;
+  }
+});
+
+document.addEventListener('mouseup', () => {
+  if (!tableResizeDrag) return;
+  tableResizeDrag = null;
+  NOTE_EDITOR_BODY.style.cursor = '';
+});
+
+// Doble clic en un borde = ajustar esa columna/fila al contenido que
+// tenga en ese momento -- scrollWidth/scrollHeight reflejan el tamano
+// natural del contenido aunque table-layout:fixed este recortando la
+// celda visualmente en pantalla.
+// scrollWidth/scrollHeight de la celda tal cual NO sirven para medir su
+// tamano "natural": con la celda ya fija a un tamano grande (o igual a
+// las demas de su fila/columna), el contenido no desborda nada que
+// scrollWidth/scrollHeight puedan detectar -- simplemente devuelven el
+// tamano actual, no el minimo que necesitaria el contenido. Se mide con
+// un CLON fuera de pantalla, con "width"/"height" en auto (o el ancho
+// actual, para la altura) para que el navegador calcule el tamano de
+// verdad, y se descarta el clon despues.
+function measureTableCellNaturalWidth(cell) {
+  const clone = cell.cloneNode(true);
+  clone.style.position = 'absolute';
+  clone.style.visibility = 'hidden';
+  clone.style.left = '-9999px';
+  clone.style.top = '0';
+  clone.style.width = 'auto';
+  clone.style.whiteSpace = 'nowrap';
+  NOTE_EDITOR_BODY.appendChild(clone);
+  const width = clone.offsetWidth;
+  clone.remove();
+  return width;
+}
+
+function measureTableCellNaturalHeight(cell, width) {
+  const clone = cell.cloneNode(true);
+  clone.style.position = 'absolute';
+  clone.style.visibility = 'hidden';
+  clone.style.left = '-9999px';
+  clone.style.top = '0';
+  clone.style.width = `${width}px`;
+  clone.style.height = 'auto';
+  NOTE_EDITOR_BODY.appendChild(clone);
+  const height = clone.offsetHeight;
+  clone.remove();
+  return height;
+}
+
+NOTE_EDITOR_BODY.addEventListener('dblclick', (e) => {
+  const target = findTableResizeTarget(e.clientX, e.clientY);
+  if (!target) return;
+  e.preventDefault();
+  const table = target.cell.closest('table');
+  if (target.type === 'col') {
+    const colIndex = tableColIndex(target.cell);
+    const col = tableColElement(table, colIndex);
+    if (!col) return;
+    const cellsInCol = Array.from(table.querySelectorAll('tr')).map((tr) => tr.children[colIndex]).filter(Boolean);
+    const natural = Math.max(TABLE_MIN_COL_WIDTH, ...cellsInCol.map((c) => measureTableCellNaturalWidth(c)));
+    col.style.width = `${natural}px`;
+  } else {
+    const row = target.cell.parentElement;
+    const cells = Array.from(row.children);
+    // La altura natural depende del ancho ACTUAL de cada celda (el texto
+    // hace mas o menos saltos de linea segun cuanto sitio tenga) -- se
+    // mide con el ancho que ya tiene ahora mismo, no en auto.
+    const natural = Math.max(TABLE_MIN_ROW_HEIGHT, ...cells.map((c) => measureTableCellNaturalHeight(c, c.getBoundingClientRect().width)));
+    row.style.height = `${natural}px`;
+  }
 });
 
 // ---------------------------------------------------------------------
@@ -2022,6 +2324,256 @@ NOTE_EDITOR_BODY.addEventListener('paste', (e) => {
 NOTE_EDITOR_BODY.addEventListener('keyup', refreshNoteEditorState);
 NOTE_EDITOR_BODY.addEventListener('mouseup', refreshNoteEditorState);
 NOTE_EDITOR_BODY.addEventListener('focus', refreshNoteEditorState);
+
+// ---------------------------------------------------------------------
+// Listas automaticas al estilo Notion: escribir "- "/"* " o "1. " al
+// principio de una linea la convierte en lista; Tab/Mayus+Tab anidan y
+// desanidan un item dentro de una lista (siguiendo el tipo del nivel de
+// arriba). Reutiliza execCommand tal cual, igual que los botones de la
+// barra de estado -- no hay logica de listas escrita a mano.
+// ---------------------------------------------------------------------
+
+// Si lo que hay justo antes del cursor (y NADA mas en esa linea, ver el
+// chequeo de previousSibling) es "-"/"*" o "1.", lo borra y convierte la
+// linea en un item de lista de verdad en vez de dejar el texto literal.
+function maybeAutoStartNoteList(e) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE || !NOTE_EDITOR_BODY.contains(node)) return;
+  // previousSibling === null: no hay nada mas antes en esta linea, para
+  // no disparar en medio de una palabra ya escrita (ej. "1.5. " a mitad
+  // de una frase).
+  if (node.previousSibling) return;
+  const textBefore = node.textContent.slice(0, range.startOffset);
+  const isBullet = /^[-*]$/.test(textBefore);
+  const isNumbered = /^\d+\.$/.test(textBefore);
+  if (!isBullet && !isNumbered) return;
+
+  e.preventDefault();
+  // Se convierte a lista ANTES de borrar el "-"/"1." (no al reves): si
+  // la linea se queda vacia justo debajo de una lista ya existente, el
+  // propio navegador a veces "fusiona" ese hueco vacio con la lista
+  // vecina en vez de crear una lista nueva separada (se ha visto en
+  // pruebas: "- primero" + Intro + Intro + "1. " fusionaba "primero" con
+  // el texto nuevo en un unico item). Convirtiendo con el texto todavia
+  // dentro de la linea se evita ese caso -- el nodo de texto sigue
+  // siendo el mismo despues de convertir (execCommand solo lo reubica
+  // dentro del nuevo <li> -- PERO a veces (visto en pruebas) execCommand
+  // reconstruye el nodo de texto en vez de reubicar el mismo, dejando
+  // `node` apuntando a un nodo ya desconectado del documento. En vez de
+  // fiarse de esa referencia vieja, se vuelve a leer la seleccion actual
+  // (el cursor sigue en la misma posicion logica tras convertir) y se
+  // borra desde ahi, comprobando que el texto siga empezando por lo que
+  // se espera antes de tocar nada.
+  document.execCommand(isBullet ? 'insertUnorderedList' : 'insertOrderedList', false, null);
+  const selAfter = window.getSelection();
+  if (selAfter && selAfter.rangeCount > 0) {
+    const newNode = selAfter.getRangeAt(0).startContainer;
+    if (newNode.nodeType === Node.TEXT_NODE && newNode.textContent.slice(0, textBefore.length) === textBefore) {
+      const eraseRange = document.createRange();
+      eraseRange.setStart(newNode, 0);
+      eraseRange.setEnd(newNode, textBefore.length);
+      eraseRange.deleteContents();
+    }
+  }
+  refreshNoteEditorState();
+}
+
+// Tab/Mayus+Tab SOLO dentro de una lista -- fuera de una lista se deja
+// el Tab normal del navegador (mover el foco), no se intercepta.
+function maybeIndentNoteListItem(e) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  let node = sel.getRangeAt(0).startContainer;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  const li = node ? node.closest('li') : null;
+  if (!li || !NOTE_EDITOR_BODY.contains(li)) return;
+  e.preventDefault();
+  document.execCommand(e.shiftKey ? 'outdent' : 'indent', false, null);
+  refreshNoteEditorState();
+}
+
+// Atajos de teclado de formato tipo Notion -- funcionan SIEMPRE, activado
+// o no el modo vim de aqui abajo (Koku los pidio como algo aparte, no
+// depende de ese ajuste). "code" (posicion fisica de la tecla) en vez de
+// "key" para Ctrl+Shift+7/8: con Shift puesto, "key" da el caracter ya
+// desplazado (distinto segun el idioma del teclado, en un teclado
+// espanol Mayus+7/8 no da "7"/"8"), pero "code" (Digit7/Digit8) es
+// siempre la misma tecla fisica pulsada, sea cual sea el teclado.
+function maybeHandleNoteFormatShortcut(e) {
+  if (!e.ctrlKey && !e.metaKey) return false;
+  const key = e.key.toLowerCase();
+  if (key === 'b') { e.preventDefault(); execNoteCommand('bold'); return true; }
+  if (key === 'i') { e.preventDefault(); execNoteCommand('italic'); return true; }
+  if (e.shiftKey && e.code === 'Digit8') { e.preventDefault(); execNoteCommand('insertUnorderedList'); return true; }
+  if (e.shiftKey && e.code === 'Digit7') { e.preventDefault(); execNoteCommand('insertOrderedList'); return true; }
+  return false;
+}
+
+// ---------------------------------------------------------------------
+// Modo "vim" (opt-in, ajuste por dispositivo): subconjunto pequeno a
+// proposito -- NO es una replica de vim de verdad (sin registros con
+// nombre, macros, comandos ":", repetir con numeros...), es un punto de
+// partida para moverse y editar rapido sin soltar el teclado, ampliable
+// mas adelante segun lo que haga falta de verdad. A diferencia del vim
+// real, los botones de formato/tabla/imagen de la barra de estado siguen
+// funcionando en cualquiera de los dos modos (Koku lo pidio asi
+// explicitamente).
+// ---------------------------------------------------------------------
+function isVimModeEnabled() {
+  return localStorage.getItem('vimModeEnabled') === 'true';
+}
+
+// 'insert' | 'normal' -- SOLO importa si isVimModeEnabled(). Empieza
+// siempre en 'insert' al abrir o cambiar de nota activa (ver
+// loadOpenNoteIntoDom), nunca se hereda de la nota anterior.
+let noteEditorVimSubMode = 'insert';
+
+function refreshVimIndicator() {
+  const indicator = document.getElementById('note-editor-vim-indicator');
+  const show = isVimModeEnabled() && NOTE_EDITOR_BODY.contentEditable !== 'false';
+  indicator.classList.toggle('hidden', !show);
+  if (!show) return;
+  indicator.textContent = noteEditorVimSubMode === 'normal' ? 'NORMAL' : 'INSERTAR';
+  indicator.classList.toggle('is-normal', noteEditorVimSubMode === 'normal');
+}
+
+function setVimSubMode(mode) {
+  noteEditorVimSubMode = mode;
+  refreshVimIndicator();
+}
+
+// Refleja el ajuste guardado (localStorage) en el aspecto del boton
+// desde que carga la pagina, no solo despues de tocarlo por primera vez.
+document.getElementById('note-editor-vim-toggle-btn').classList.toggle('is-active', isVimModeEnabled());
+
+document.getElementById('note-editor-vim-toggle-btn').addEventListener('click', () => {
+  const enabled = !isVimModeEnabled();
+  localStorage.setItem('vimModeEnabled', enabled ? 'true' : 'false');
+  document.getElementById('note-editor-vim-toggle-btn').classList.toggle('is-active', enabled);
+  setVimSubMode('insert');
+});
+
+function vimMoveCaret(direction, granularity) {
+  const sel = window.getSelection();
+  if (sel) sel.modify('move', direction, granularity);
+}
+
+// Borra el bloque de texto (div/p/li) donde este el cursor -- SOLO fuera
+// de una tabla, para no borrar una celda entera (y liarla) sin querer.
+function vimDeleteCurrentLine() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const node = sel.getRangeAt(0).startContainer;
+  const containerEl = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  if (containerEl && containerEl.closest('td, th')) return;
+  // Selecciona la linea VISUAL entera (de "lineboundary" a
+  // "lineboundary") y la borra -- mas fiable que buscar un <div>/<p>/
+  // <li> en el DOM: la PRIMERA linea de una nota nueva es texto suelto
+  // colgando directamente de NOTE_EDITOR_BODY, sin ningun bloque que lo
+  // envuelva (eso solo aparece a partir del primer Intro que se pulsa
+  // en esa nota), asi que buscar closest('div, p, li') fallaba ahi.
+  sel.modify('move', 'left', 'lineboundary');
+  sel.modify('extend', 'right', 'lineboundary');
+  // Se lleva tambien el salto de linea de despues (si lo hay), para que
+  // las lineas de abajo suban un puesto en vez de dejar una linea vacia.
+  sel.modify('extend', 'right', 'character');
+  document.execCommand('delete', false, null);
+  refreshNoteEditorState();
+}
+
+const VIM_DD_TIMEOUT_MS = 600;
+let vimPendingD = false;
+let vimPendingDTimer = null;
+
+// Se llama SOLO cuando isVimModeEnabled() y estamos en modo Normal.
+// Por defecto CUALQUIER tecla se bloquea (preventDefault, no escribe
+// nada) salvo que este en la lista de comandos de abajo -- asi nunca se
+// escribe sin querer estando en Normal. Las combinaciones con Ctrl/Cmd/
+// Alt (copiar, pegar, deshacer del sistema...) se dejan pasar tal cual,
+// no forman parte de estos comandos.
+function handleVimNormalKeydown(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  if (e.key === 'Escape') {
+    // Ya estamos en Normal -- no hace falta cambiar nada, pero SI hay
+    // que cortar la propagacion (ver el otro Escape mas arriba): si no,
+    // llega igual al atajo global de Escape de settings.js y cierra el
+    // editor entero.
+    e.preventDefault();
+    e.stopPropagation();
+    vimPendingD = false;
+    return;
+  }
+  const passthroughKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Tab'];
+  if (passthroughKeys.includes(e.key)) {
+    vimPendingD = false;
+    return;
+  }
+
+  e.preventDefault();
+  const key = e.key;
+  if (key !== 'd') vimPendingD = false;
+
+  switch (key) {
+    case 'h': vimMoveCaret('backward', 'character'); break;
+    case 'l': vimMoveCaret('forward', 'character'); break;
+    case 'j': vimMoveCaret('forward', 'line'); break;
+    case 'k': vimMoveCaret('backward', 'line'); break;
+    case 'w': vimMoveCaret('forward', 'word'); break;
+    case 'b': vimMoveCaret('backward', 'word'); break;
+    case '0': vimMoveCaret('left', 'lineboundary'); break;
+    case '$': vimMoveCaret('right', 'lineboundary'); break;
+    case 'i': setVimSubMode('insert'); break;
+    case 'a': vimMoveCaret('forward', 'character'); setVimSubMode('insert'); break;
+    case 'o':
+      vimMoveCaret('right', 'lineboundary');
+      document.execCommand('insertParagraph', false, null);
+      setVimSubMode('insert');
+      break;
+    case 'x': document.execCommand('forwardDelete', false, null); break;
+    case 'u': document.execCommand('undo', false, null); break;
+    case 'd':
+      if (vimPendingD) {
+        vimDeleteCurrentLine();
+        vimPendingD = false;
+      } else {
+        vimPendingD = true;
+        clearTimeout(vimPendingDTimer);
+        vimPendingDTimer = setTimeout(() => { vimPendingD = false; }, VIM_DD_TIMEOUT_MS);
+      }
+      break;
+    default:
+      break;
+  }
+  refreshNoteEditorState();
+}
+
+NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
+  if (isVimModeEnabled()) {
+    if (noteEditorVimSubMode === 'normal') {
+      handleVimNormalKeydown(e);
+      return;
+    }
+    if (e.key === 'Escape') {
+      // stopPropagation es imprescindible: settings.js tiene un atajo
+      // GLOBAL de Escape (document, no solo aqui) que cierra el editor
+      // de notas entero -- sin cortar la propagacion, el Esc para entrar
+      // en modo Normal tambien burbujeaba hasta ese atajo y cerraba la
+      // nota (con el aviso de cambios sin guardar si tocaba), visto en
+      // pruebas.
+      e.preventDefault();
+      e.stopPropagation();
+      setVimSubMode('normal');
+      return;
+    }
+  }
+  if (maybeHandleNoteFormatShortcut(e)) return;
+  if (e.key === ' ') maybeAutoStartNoteList(e);
+  else if (e.key === 'Tab') maybeIndentNoteListItem(e);
+});
 
 // Una nota de antes de la Fase 4 tiene bodyFormat "text": su contenido es
 // texto plano tal cual, nunca se penso para interpretarse como HTML. Para
@@ -2129,6 +2681,11 @@ function applyNoteEditorReadMode(readOnly) {
     document.getElementById('btn-delete-note').classList.add('hidden');
   }
   document.querySelector('#note-form button[type="submit"]').classList.toggle('hidden', readOnly);
+  // El indicativo de modo vim (si esta activado) no tiene sentido en
+  // solo lectura -- refreshVimIndicator ya lo oculta solo mirando
+  // contentEditable, pero hay que llamarlo aqui para que se actualice en
+  // cuanto cambia el modo lectura, no solo al tocar algo del vim.
+  refreshVimIndicator();
 }
 
 document.getElementById('note-editor-read-mode-btn').addEventListener('click', () => {
@@ -2154,6 +2711,7 @@ function loadOpenNoteIntoDom(entry) {
   noteModalFavorite = entry.favorite;
   refreshNoteFavoriteBtn();
   applyNoteEditorReadMode(entry.readMode);
+  setVimSubMode('insert');
 }
 
 function switchActiveOpenNote(key) {

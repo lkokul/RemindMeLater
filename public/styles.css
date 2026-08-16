@@ -175,9 +175,22 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    document.queryCommandState() en cada cambio de seleccion. */
 .note-editor-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .note-editor-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-/* Empuja el boton de "Modo lectura" al extremo derecho de la barra de
-   estado, separado del resto de botones de formato. */
+/* Empuja los botones de la derecha (Vim, Modo lectura) al extremo de la
+   barra de estado, separados del resto de botones de formato. */
 .note-editor-toolbar-spacer { flex: 1; }
+/* Indicativo de modo Normal/Insertar del modo vim (opt-in) -- Normal se
+   marca con el color de acento para que sea imposible no darse cuenta
+   de que las teclas no van a escribir nada en ese momento. */
+.note-editor-vim-indicator {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+}
+.note-editor-vim-indicator.is-normal { background: var(--accent); color: var(--accent-text); }
 /* Modo lectura (por nota abierta, ver applyNoteEditorReadMode en app.js):
    el cuerpo deja de parecer un campo editable y el titulo se atenua un
    poco, para que se note a simple vista que no se puede tocar nada. */
@@ -197,20 +210,30 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 }
 .note-editor-body:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
-/* Rail izquierdo con los botones de "Secciones"/"Arbol" (Arbol llega en
-   una sub-ronda posterior) -- mismo patron que un rail de iconos de
-   cualquier editor tipo IDE, siempre visible pegado al borde izquierdo
-   del contenido. */
+/* Rail izquierdo con los botones "Arbol"/"Secciones" -- mismo patron que
+   un rail de iconos de cualquier editor tipo IDE, siempre visible pegado
+   al borde izquierdo del contenido. Texto en vez de emoji (🌳/📑): con
+   tan pocos botones un emoji no aporta nada que el propio texto no diga
+   ya, y evita que se vean distinto entre sistemas operativos. */
 .note-editor-rail {
   flex-shrink: 0;
-  width: 2.8rem;
+  width: 4.6rem;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 0.4rem;
-  padding: 0.7rem 0;
+  padding: 0.7rem 0.5rem;
   border-right: 1px solid var(--border);
 }
+.note-editor-rail-btn {
+  padding: 0.45rem 0.3rem;
+  font-size: 0.78rem;
+  text-align: center;
+  background: transparent;
+  border-color: transparent;
+  color: inherit;
+}
+.note-editor-rail-btn:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .note-editor-rail-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 
 /* Panel lateral deslizante (Secciones/Arbol): ancho fijo, con su propio
@@ -313,14 +336,32 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .note-editor-body ul, .note-editor-body ol { padding-left: 1.4rem; margin: 0.4rem 0; }
 .note-editor-body p, .note-editor-body div { margin: 0; }
 
-/* Tablas dentro de una nota (sub-ronda de tablas de la Fase 4): sin
-   clase propia a proposito -- el saneado del servidor (sanitizeNoteBody
-   en routes/notes.js) quita cualquier atributo, asi que una clase en el
-   <table> se perderia al guardar y la nota se veria distinta antes y
-   despues de reabrirla. Con un selector generico da igual, toda tabla
-   dentro del editor de notas se ve igual siempre. */
-.note-editor-body table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
-.note-editor-body td, .note-editor-body th { border: 1px solid var(--border); padding: 0.4rem; min-width: 2.5rem; vertical-align: top; }
+/* Tablas dentro de una nota: sin clase propia a proposito -- el saneado
+   del servidor (sanitizeNoteBody en routes/notes.js) quita cualquier
+   atributo salvo los "style" muy concretos de <col>/<tr> y el
+   "data-border" del <table> (ver mas abajo), asi que una clase se
+   perderia al guardar. Con un selector generico da igual, toda tabla
+   del editor se ve igual siempre salvo por esos dos ajustes concretos.
+   table-layout:fixed + width:auto (en vez del 100% de antes) es lo que
+   hace que el tamano sea CONSTANTE desde que se inserta -- ya no se
+   autoajusta al escribir, y el ancho real de la tabla es la suma de lo
+   que diga cada <col> (ver buildTableHtml en app.js), no un porcentaje
+   del contenedor. */
+.note-editor-body table { border-collapse: collapse; table-layout: fixed; width: auto; max-width: 100%; margin: 0.5rem 0; }
+.note-editor-body td, .note-editor-body th {
+  border: 1px solid var(--border);
+  padding: 0.4rem;
+  min-width: 2.5rem;
+  vertical-align: top;
+  overflow: hidden;
+}
+/* Grosor de borde grueso (por tabla, atributo data-border="thick" -- ver
+   toggleTableBorderThickness en app.js). Sin este atributo (por defecto)
+   se queda en el borde fino de siempre. */
+.note-editor-body table[data-border="thick"] td,
+.note-editor-body table[data-border="thick"] th {
+  border-width: 2px;
+}
 /* max-width 100% para que una foto grande no se salga del editor (ni del
    modal) -- se ve a su tamano real hasta ese limite, sin recorte ni
    mangos para redimensionar (eso queda fuera de esta sub-ronda). */
@@ -698,8 +739,20 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   border-top: none;
 }
 .note-add-btn { width: 100%; margin-bottom: 0.5rem; }
-.note-search-row { margin-bottom: 0.5rem; }
+.note-search-row { margin-bottom: 0.5rem; display: flex; flex-direction: column; gap: 0.35rem; }
 #note-search-input { width: 100%; font-size: 0.85rem; padding: 0.4rem 0.6rem; }
+/* Por defecto la busqueda mira toda la app -- este boton la restringe a
+   la carpeta actual (ver renderNotesView). Pastilla pequena, alineada a
+   la derecha, para no competir visualmente con el campo de texto. */
+.note-search-scope-btn {
+  align-self: flex-end;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: transparent;
+  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
+}
+.note-search-scope-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .note-list-section-heading {
   font-size: 0.72rem;
   font-weight: 700;
@@ -951,6 +1004,17 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .note-item.is-hidden .note-item-eye-btn { color: var(--accent); }
 .note-item-content-wrap { position: relative; flex: 1; min-width: 0; }
 .note-item-content { display: flex; flex-direction: column; gap: 0.15rem; }
+/* Ruta de carpeta debajo del nombre -- solo aparece cuando la busqueda
+   mira toda la app (showPath en buildNoteRow/buildFolderRow), para saber
+   donde vive cada resultado ya que no estan agrupados por carpeta. */
+.note-item-path {
+  display: block;
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--surface-text) 55%, var(--surface));
+}
 .note-item.is-hidden .note-item-content {
   filter: blur(5px);
   user-select: none;

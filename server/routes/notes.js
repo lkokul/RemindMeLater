@@ -21,8 +21,24 @@ const router = express.Router();
 // apunte a una imagen ya subida a esta misma app (routes/noteImages.js) y
 // no, por ejemplo, a un "data:" (la opcion base64 que se descarto a
 // proposito) o a un servidor externo.
-const ALLOWED_NOTE_TAGS = new Set(['b', 'strong', 'i', 'em', 'ul', 'ol', 'li', 'br', 'div', 'p', 'table', 'tbody', 'tr', 'td', 'th', 'img']);
+const ALLOWED_NOTE_TAGS = new Set(['b', 'strong', 'i', 'em', 'ul', 'ol', 'li', 'br', 'div', 'p', 'table', 'colgroup', 'col', 'tbody', 'tr', 'td', 'th', 'img']);
 const NOTE_IMAGE_SRC = /^\/api\/notes\/images\/[a-zA-Z0-9._-]+$/;
+// Redimensionar tablas a mano (columnas/filas, ver el bloque de
+// resize en app.js) guarda el ancho/alto como "style" en <col>/<tr> --
+// la unica forma de que sobreviva al saneado es una lista blanca MUY
+// estricta: un solo valor en px, nada mas (ninguna otra propiedad CSS,
+// ni url()/expression()/unidades raras). Hasta 4 digitos (9999px) de
+// sobra para cualquier tamano razonable. El "\s*" y el ";" opcional son
+// necesarios porque el navegador no siempre serializa el atributo style
+// igual: el HTML insertado tal cual (buildTableHtml) queda compacto
+// ("width:120px"), pero en cuanto se toca la propiedad por JS
+// (element.style.width = ..., al arrastrar o hacer doble clic) el
+// navegador lo reescribe con espacio y punto y coma ("width: 270px;") --
+// ambos formatos son validos, se captura el numero y se reconstruye
+// siempre en el mismo formato compacto (ver mas abajo) para que el HTML
+// guardado no varie segun de donde venga.
+const NOTE_COL_WIDTH_STYLE = /^width:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
+const NOTE_ROW_HEIGHT_STYLE = /^height:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
 
 function sanitizeNoteBody(html) {
   if (!html) return html;
@@ -31,7 +47,8 @@ function sanitizeNoteBody(html) {
   let clean = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '');
   // Etiqueta a etiqueta: si no esta en la lista blanca se quita la
   // etiqueta pero se deja lo de dentro; las permitidas se dejan sin
-  // atributos (salvo "img", ver arriba).
+  // atributos, salvo tres excepciones muy concretas y validadas a mano
+  // (img/src, col+tr/style, table/data-border -- ver mas abajo).
   clean = clean.replace(/<(\/?)([a-zA-Z0-9]+)([^>]*)>/g, (match, closing, tag, attrs) => {
     const lower = tag.toLowerCase();
     if (!ALLOWED_NOTE_TAGS.has(lower)) return '';
@@ -41,6 +58,24 @@ function sanitizeNoteBody(html) {
       const src = srcMatch ? srcMatch[1] : '';
       if (!NOTE_IMAGE_SRC.test(src)) return '';
       return `<img src="${src}">`;
+    }
+    if (lower === 'col') {
+      const styleMatch = attrs.match(/\sstyle\s*=\s*"([^"]*)"/i);
+      const style = styleMatch ? styleMatch[1].trim() : '';
+      const widthMatch = style.match(NOTE_COL_WIDTH_STYLE);
+      return widthMatch ? `<col style="width:${widthMatch[1]}px">` : '<col>';
+    }
+    if (lower === 'tr') {
+      const styleMatch = attrs.match(/\sstyle\s*=\s*"([^"]*)"/i);
+      const style = styleMatch ? styleMatch[1].trim() : '';
+      const heightMatch = style.match(NOTE_ROW_HEIGHT_STYLE);
+      return heightMatch ? `<tr style="height:${heightMatch[1]}px">` : '<tr>';
+    }
+    if (lower === 'table') {
+      // Solo el valor EXACTO "thick" -- cualquier otra cosa se descarta
+      // (whitelist de un unico literal, no una expresion regular suelta).
+      const borderMatch = attrs.match(/\sdata-border\s*=\s*"([^"]*)"/i);
+      return borderMatch && borderMatch[1] === 'thick' ? '<table data-border="thick">' : '<table>';
     }
     return `<${lower}>`;
   });
