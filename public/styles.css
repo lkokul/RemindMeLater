@@ -174,7 +174,17 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    refreshNoteEditorToolbar en app.js, que consulta
    document.queryCommandState() en cada cambio de seleccion. */
 .note-editor-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-.note-editor-main { flex: 1; min-height: 0; padding: 1rem 1.2rem; display: flex; }
+.note-editor-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Empuja el boton de "Modo lectura" al extremo derecho de la barra de
+   estado, separado del resto de botones de formato. */
+.note-editor-toolbar-spacer { flex: 1; }
+/* Modo lectura (por nota abierta, ver applyNoteEditorReadMode en app.js):
+   el cuerpo deja de parecer un campo editable y el titulo se atenua un
+   poco, para que se note a simple vista que no se puede tocar nada. */
+.note-editor-body[contenteditable="false"] { cursor: default; }
+.note-editor-title-input:read-only { opacity: 0.75; cursor: default; }
+.note-editor-main { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.note-editor-content-col { flex: 1; min-width: 0; padding: 1rem 1.2rem; display: flex; }
 .note-editor-body {
   flex: 1;
   min-height: 0;
@@ -186,6 +196,117 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   padding: 0.8rem 1rem;
 }
 .note-editor-body:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+/* Rail izquierdo con los botones de "Secciones"/"Arbol" (Arbol llega en
+   una sub-ronda posterior) -- mismo patron que un rail de iconos de
+   cualquier editor tipo IDE, siempre visible pegado al borde izquierdo
+   del contenido. */
+.note-editor-rail {
+  flex-shrink: 0;
+  width: 2.8rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.7rem 0;
+  border-right: 1px solid var(--border);
+}
+.note-editor-rail-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+
+/* Panel lateral deslizante (Secciones/Arbol): ancho fijo, con su propio
+   scroll, se muestra/oculta con .hidden en vez de un ancho a 0 -- mas
+   sencillo que animar, coherente con el resto de paneles de la app
+   (popovers, Mi espacio...) que tampoco animan su aparicion. */
+.note-editor-side-panel {
+  flex-shrink: 0;
+  width: 260px;
+  overflow-y: auto;
+  padding: 0.8rem;
+  border-right: 1px solid var(--border);
+}
+.note-editor-side-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: color-mix(in srgb, var(--bg-text) 60%, var(--bg));
+  margin-bottom: 0.6rem;
+}
+/* El "+" de nueva nota del panel Arbol no necesita mayusculas/espaciado
+   de titulo -- solo hereda el hueco de la cabecera. */
+.note-editor-side-panel-header .icon-btn { text-transform: none; letter-spacing: normal; }
+
+/* Arbol de carpetas/notas: filas planas con sangria por profundidad
+   (mismo patron que buildFolderSelectOptions, pero como filas clicables
+   de verdad en vez de opciones de un <select>). */
+.note-tree-list { display: flex; flex-direction: column; }
+.note-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.4rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.note-tree-row:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.note-tree-note-row.is-active { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.note-tree-toggle { flex-shrink: 0; width: 0.9rem; text-align: center; font-size: 0.7rem; }
+.note-tree-folder-icon, .note-tree-note-icon { flex-shrink: 0; }
+.note-tree-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-sections-list { display: flex; flex-direction: column; gap: 0.2rem; }
+.note-open-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: var(--radius-sm);
+}
+.note-open-item:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.note-open-item.is-active { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.note-open-item-expand-btn, .note-open-item-close-btn {
+  flex-shrink: 0;
+  padding: 0.2rem;
+  background: transparent;
+  border-color: transparent;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+.note-open-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  padding: 0.4rem 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+/* Puntito de "sin guardar" -- se apaga en cuanto la nota vuelve a
+   coincidir con lo que hay en el servidor (ver isOpenNoteDirty en
+   app.js), no es un flag manual. */
+.note-open-item-dirty-dot {
+  flex-shrink: 0;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+/* Placeholder de "secciones de dentro" al desplegar una nota abierta --
+   el editor todavia no tiene ningun concepto de titulos/encabezados
+   dentro del cuerpo, asi que aqui no hay nada real que listar todavia. */
+.note-open-item-sections-placeholder {
+  padding: 0.2rem 0.5rem 0.5rem 1.8rem;
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--bg-text) 55%, var(--bg));
+}
 /* Las listas dentro del editor no tienen estilos globales de la app que
    las afecten, asi que hace falta el marcador/sangria a mano igual que
    en cualquier pagina sin CSS propio para <ul>/<ol>. */

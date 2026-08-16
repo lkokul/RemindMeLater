@@ -17,6 +17,14 @@ const state = {
   notes: [], // Notas de "Mi espacio" (Fase 2), ver loadNotes()
   noteFolders: [], // Carpetas de notas (Fase 3), ver loadNoteFolders()
   currentNoteFolderId: null, // null = raiz -- "donde estas" navegando en Notas, no se guarda entre sesiones
+  // Notas abiertas a la vez en el editor a pantalla completa (como
+  // pestañas, pero sin barra de pestañas visible -- ver el panel
+  // "Secciones" y openNoteInEditor/switchActiveOpenNote en app.js). Cada
+  // entrada tiene una "key" estable (generada al abrirla) que no cambia
+  // aunque la nota pase de "nueva sin guardar" a tener un id real tras
+  // el primer Guardar.
+  openNotes: [],
+  activeOpenNoteKey: null,
   specialDays: {}, // 'YYYY-MM-DD' -> 'holiday' | 'special', marcados a mano
   pairingCodeExpiresAt: null,
   notifiedReminderIds: new Set(), // evita notificar el mismo recordatorio 2 veces
@@ -1626,7 +1634,14 @@ document.getElementById('btn-note-folder-back').addEventListener('click', () => 
 // con sangria segun la profundidad para que se note el anidado (un
 // espacio ancho de verdad, U+3000, que no se colapsa como los espacios
 // normales en HTML).
-const noteFolderField = createSelectField({ options: [{ value: '', label: 'Sin carpeta' }], initialValue: '' });
+const noteFolderField = createSelectField({
+  options: [{ value: '', label: 'Sin carpeta' }],
+  initialValue: '',
+  onChange: () => {
+    captureActiveOpenNoteFromDom();
+    renderNoteSectionsPanel();
+  },
+});
 document.getElementById('note-folder-field').appendChild(noteFolderField.element);
 
 function buildFolderSelectOptions(parentId, depth) {
@@ -1668,6 +1683,8 @@ function refreshNoteFavoriteBtn() {
 document.getElementById('note-favorite-btn').addEventListener('click', () => {
   noteModalFavorite = !noteModalFavorite;
   refreshNoteFavoriteBtn();
+  captureActiveOpenNoteFromDom();
+  renderNoteSectionsPanel();
 });
 
 // ---------------------------------------------------------------------
@@ -2016,34 +2033,379 @@ function legacyNoteBodyToHtml(text) {
   return escapeHtml(text).replace(/\n/g, '<br>');
 }
 
-// "openNoteInEditor" porque en una sub-ronda posterior puede recibir una
-// nota que YA esta abierta a la vez que otras (multi-nota, ver plan) --
-// de momento se comporta igual que el openNoteModal de antes, una nota
-// activa cada vez, solo que a pantalla completa en vez de en un modal.
-function openNoteInEditor(note) {
-  const view = document.getElementById('note-editor-view');
-  document.getElementById('note-id').value = note ? note.id : '';
-  document.getElementById('note-title').value = note ? note.title : '';
+// ---------------------------------------------------------------------
+// Notas abiertas a la vez (multi-nota): solo hay UN <div contenteditable>
+// en el DOM (NOTE_EDITOR_BODY, el de siempre) -- al cambiar de nota
+// activa se vuelca su contenido al objeto de la nota que se abandona y
+// se carga el de la nueva nota activa. Esto reutiliza TAL CUAL toda la
+// logica de arriba (execCommand, tablas, imagenes) sin cambiar nada de
+// su comportamiento, solo pasa a operar sobre "la nota activa" en vez de
+// "la unica nota del modal". Cada entrada usa una "key" estable (ver
+// makeOpenNoteKey, no el id) para poder identificarla incluso antes de
+// que exista un id real en el servidor (nota nueva sin guardar aun).
+// ---------------------------------------------------------------------
+
+// crypto.randomUUID() solo funciona en "contextos seguros" (https o
+// localhost) -- el movil se conecta por wifi local con http normal (ver
+// CLAUDE.md), asi que ahi seria undefined y romperia crear notas nuevas.
+// No hace falta que sea un UUID de verdad, solo unico dentro de esta
+// pestana: timestamp + numero aleatorio de sobra.
+function makeOpenNoteKey() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function findOpenNote(key) {
+  return state.openNotes.find((n) => n.key === key);
+}
+
+// "Sucia" (cambios sin guardar): una nota nueva sin id todavia SIEMPRE
+// cuenta como sucia (no hay ninguna version en el servidor con la que
+// comparar). Una nota ya guardada se compara contra su ultima version
+// persistida (saved*), actualizada cada vez que se guarda con exito.
+function isOpenNoteDirty(entry) {
+  return !entry.id
+    || entry.title !== entry.savedTitle
+    || entry.bodyHtml !== entry.savedBodyHtml
+    || entry.folderId !== entry.savedFolderId
+    || entry.favorite !== entry.savedFavorite;
+}
+
+function noteEntrySnapshot(note) {
   const body = note && note.body ? note.body : '';
-  NOTE_EDITOR_BODY.innerHTML = note && note.bodyFormat === 'html' ? body : legacyNoteBodyToHtml(body);
+  const bodyHtml = note && note.bodyFormat === 'html' ? body : legacyNoteBodyToHtml(body);
+  const folderId = note ? note.folderId : state.currentNoteFolderId;
+  const entry = {
+    key: makeOpenNoteKey(),
+    id: note ? note.id : null,
+    title: note ? note.title : '',
+    bodyHtml,
+    folderId,
+    favorite: note ? !!note.favorite : false,
+    expanded: false,
+    // Modo lectura/edicion: por nota abierta, no global del editor (ver
+    // applyNoteEditorReadMode) -- por defecto edicion, como pidio Koku.
+    readMode: false,
+  };
+  // Para una nota ya existente, lo que acabamos de cargar ES lo que hay
+  // en el servidor -- de ahi parte la comparacion de "sucia" de arriba.
+  entry.savedTitle = entry.title;
+  entry.savedBodyHtml = entry.bodyHtml;
+  entry.savedFolderId = entry.folderId;
+  entry.savedFavorite = entry.favorite;
+  return entry;
+}
+
+// Vuelca lo que hay AHORA MISMO en el DOM (titulo/contenido/carpeta/
+// favorito) al objeto de la nota activa -- se llama justo antes de
+// cambiar de nota, cerrar una nota, o guardar, para que el objeto en
+// state.openNotes nunca se quede desactualizado respecto a lo que se ve
+// en pantalla.
+function captureActiveOpenNoteFromDom() {
+  const entry = findOpenNote(state.activeOpenNoteKey);
+  if (!entry) return;
+  entry.title = document.getElementById('note-title').value;
+  entry.bodyHtml = NOTE_EDITOR_BODY.innerHTML;
+  const folderRaw = noteFolderField.getValue();
+  entry.folderId = folderRaw === '' ? null : Number(folderRaw);
+  entry.favorite = noteModalFavorite;
+}
+
+// Alterna entre editar (por defecto) y solo lectura para la nota activa
+// -- es un ajuste POR NOTA ABIERTA (entry.readMode), asi que cada una
+// mantiene su propio modo mientras siga abierta, no se comparte entre
+// ellas ni se guarda en el servidor (es puramente de esta sesion del
+// editor). En modo lectura no solo se desactiva el cuerpo: tambien el
+// titulo y los botones de guardar/eliminar/formato, para que "no tocar
+// nada" cubra la nota entera, no solo el texto.
+function applyNoteEditorReadMode(readOnly) {
+  NOTE_EDITOR_BODY.contentEditable = readOnly ? 'false' : 'true';
+  document.getElementById('note-title').readOnly = readOnly;
+  const modeBtn = document.getElementById('note-editor-read-mode-btn');
+  modeBtn.textContent = readOnly ? 'Editar' : 'Modo lectura';
+  modeBtn.setAttribute('aria-pressed', readOnly ? 'true' : 'false');
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
+  if (readOnly) {
+    document.getElementById('note-table-context-toolbar').classList.add('hidden');
+    document.getElementById('btn-delete-note').classList.add('hidden');
+  }
+  document.querySelector('#note-form button[type="submit"]').classList.toggle('hidden', readOnly);
+}
+
+document.getElementById('note-editor-read-mode-btn').addEventListener('click', () => {
+  const entry = findOpenNote(state.activeOpenNoteKey);
+  if (!entry) return;
+  entry.readMode = !entry.readMode;
+  // Antes de aplicar el modo lectura hay que dejar "Eliminar" en el
+  // estado que le toca segun si la nota tiene id (igual que hace
+  // loadOpenNoteIntoDom) -- applyNoteEditorReadMode solo AÑADE el
+  // ocultado cuando toca, nunca lo deshace por su cuenta.
+  document.getElementById('btn-delete-note').classList.toggle('hidden', !entry.id);
+  applyNoteEditorReadMode(entry.readMode);
+});
+
+function loadOpenNoteIntoDom(entry) {
+  document.getElementById('note-id').value = entry.id || '';
+  document.getElementById('note-title').value = entry.title;
+  NOTE_EDITOR_BODY.innerHTML = entry.bodyHtml;
   resetNoteEditorToolbar();
   populateNoteFolderSelect();
-  // Nota nueva: por defecto se guarda en la carpeta donde estas
-  // navegando ahora mismo, igual que crear un archivo nuevo dentro de la
-  // carpeta que tienes abierta en un explorador de archivos.
-  const defaultFolderId = note ? note.folderId : state.currentNoteFolderId;
-  noteFolderField.setValue(defaultFolderId ? String(defaultFolderId) : '');
-  document.getElementById('btn-delete-note').classList.toggle('hidden', !note);
-  noteModalFavorite = note ? !!note.favorite : false;
+  noteFolderField.setValue(entry.folderId ? String(entry.folderId) : '');
+  document.getElementById('btn-delete-note').classList.toggle('hidden', !entry.id);
+  noteModalFavorite = entry.favorite;
   refreshNoteFavoriteBtn();
-  view.classList.remove('hidden');
+  applyNoteEditorReadMode(entry.readMode);
+}
+
+function switchActiveOpenNote(key) {
+  if (key === state.activeOpenNoteKey) return;
+  captureActiveOpenNoteFromDom();
+  const entry = findOpenNote(key);
+  if (!entry) return;
+  state.activeOpenNoteKey = key;
+  loadOpenNoteIntoDom(entry);
+  renderNoteSectionsPanel();
+}
+
+// Quita una nota de la lista de abiertas SIN preguntar nada (el aviso de
+// cambios sin guardar, si hace falta, ya se resolvio antes de llamar
+// aqui) y, si era la activa, pasa a otra abierta o cierra la vista
+// entera si no queda ninguna.
+function removeOpenNoteAndAdvance(key) {
+  state.openNotes = state.openNotes.filter((n) => n.key !== key);
+  if (state.activeOpenNoteKey !== key) return;
+  const next = state.openNotes[0];
+  if (next) {
+    state.activeOpenNoteKey = next.key;
+    loadOpenNoteIntoDom(next);
+  } else {
+    state.activeOpenNoteKey = null;
+    document.getElementById('note-editor-view').classList.add('hidden');
+    NOTE_EDITOR_BODY.innerHTML = '';
+  }
+}
+
+// Cierra una nota abierta -- si tiene cambios sin guardar, pregunta
+// confirmacion antes (Koku lo pidio explicitamente: nada de autoguardado
+// silencioso al cerrar). Si es la nota activa, primero se vuelca el DOM
+// al objeto para que la comprobacion de "sucia" sea sobre lo que se ve
+// de verdad en pantalla, no sobre una foto vieja.
+function closeOpenNote(key) {
+  const entry = findOpenNote(key);
+  if (!entry) return;
+  if (key === state.activeOpenNoteKey) captureActiveOpenNoteFromDom();
+  if (isOpenNoteDirty(entry)) {
+    const label = entry.title || 'Nota sin titulo';
+    if (!confirm(`"${label}" tiene cambios sin guardar. ¿Cerrar sin guardar?`)) return;
+  }
+  removeOpenNoteAndAdvance(key);
+  renderNoteSectionsPanel();
+}
+
+// "openNoteInEditor": si la nota (con id real) ya esta abierta, solo se
+// activa -- no se duplica en la lista de notas abiertas. Si no, se anade
+// como una entrada nueva y se activa.
+function openNoteInEditor(note) {
+  const existing = note ? state.openNotes.find((n) => n.id === note.id) : null;
+  if (existing) {
+    switchActiveOpenNote(existing.key);
+  } else {
+    if (state.activeOpenNoteKey) captureActiveOpenNoteFromDom();
+    const entry = noteEntrySnapshot(note);
+    state.openNotes.push(entry);
+    state.activeOpenNoteKey = entry.key;
+    loadOpenNoteIntoDom(entry);
+  }
+  renderNoteSectionsPanel();
+  document.getElementById('note-editor-view').classList.remove('hidden');
   document.getElementById('note-title').focus();
 }
 
+// "Volver": cierra cada nota abierta una a una (mismo aviso de cambios
+// sin guardar que cerrar una sola desde el panel de Secciones). Si el
+// usuario cancela el cierre de alguna, la vista se queda abierta con las
+// que falten -- Volver no se salta el aviso de ninguna.
 function closeNoteEditorView() {
-  document.getElementById('note-editor-view').classList.add('hidden');
-  NOTE_EDITOR_BODY.innerHTML = '';
+  const keys = state.openNotes.map((n) => n.key);
+  for (const key of keys) {
+    closeOpenNote(key);
+    if (findOpenNote(key)) return;
+  }
 }
+
+// ---------------------------------------------------------------------
+// Panel "Secciones": lista de notas abiertas a la vez. Cada fila tiene
+// un desplegable ("ver secciones de dentro" -- placeholder por ahora,
+// el editor no tiene todavia ningun concepto de titulos/encabezados
+// dentro del cuerpo de la nota, eso queda para una ronda futura), el
+// nombre (clic = activarla), un punto si tiene cambios sin guardar, y un
+// boton para cerrarla.
+// ---------------------------------------------------------------------
+
+function renderNoteSectionsPanel() {
+  const list = document.getElementById('note-sections-list');
+  if (!list) return;
+  list.innerHTML = '';
+  state.openNotes.forEach((entry) => {
+    const row = document.createElement('div');
+    row.className = 'note-open-item' + (entry.key === state.activeOpenNoteKey ? ' is-active' : '');
+
+    const expandBtn = document.createElement('button');
+    expandBtn.type = 'button';
+    expandBtn.className = 'note-open-item-expand-btn';
+    expandBtn.setAttribute('aria-label', entry.expanded ? 'Ocultar secciones' : 'Ver secciones');
+    expandBtn.textContent = entry.expanded ? '▾' : '▸';
+    expandBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      entry.expanded = !entry.expanded;
+      renderNoteSectionsPanel();
+    });
+    row.appendChild(expandBtn);
+
+    const nameBtn = document.createElement('button');
+    nameBtn.type = 'button';
+    nameBtn.className = 'note-open-item-name';
+    nameBtn.textContent = entry.title || 'Nota sin titulo';
+    nameBtn.addEventListener('click', () => switchActiveOpenNote(entry.key));
+    row.appendChild(nameBtn);
+
+    if (isOpenNoteDirty(entry)) {
+      const dot = document.createElement('span');
+      dot.className = 'note-open-item-dirty-dot';
+      dot.setAttribute('aria-label', 'Cambios sin guardar');
+      row.appendChild(dot);
+    }
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'note-open-item-close-btn';
+    closeBtn.setAttribute('aria-label', 'Cerrar nota');
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeOpenNote(entry.key);
+    });
+    row.appendChild(closeBtn);
+
+    list.appendChild(row);
+
+    if (entry.expanded) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'note-open-item-sections-placeholder';
+      placeholder.textContent = 'Sin secciones todavia.';
+      list.appendChild(placeholder);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------
+// Panel "Arbol": navegacion tipo arbol (plegable por carpeta) de TODAS
+// las carpetas/notas -- reutiliza state.noteFolders/state.notes, ya
+// cargados enteros de antes (loadNoteFolders/loadNotes), sin ninguna
+// llamada nueva a la API. El plegado de cada carpeta se guarda aparte
+// (noteTreeExpandedFolderIds, por id) para que sobreviva a que
+// state.noteFolders se recargue con objetos nuevos.
+// ---------------------------------------------------------------------
+const noteTreeExpandedFolderIds = new Set();
+
+function renderNoteTreeLevel(container, parentId, depth) {
+  const activeEntry = findOpenNote(state.activeOpenNoteKey);
+  const folders = state.noteFolders
+    .filter((f) => f.parentId === parentId)
+    .sort((a, b) => a.position - b.position);
+  const notes = (state.notes || [])
+    .filter((n) => n.folderId === parentId)
+    .slice()
+    .sort((a, b) => a.title.localeCompare(b.title));
+
+  folders.forEach((folder) => {
+    const expanded = noteTreeExpandedFolderIds.has(folder.id);
+    const row = document.createElement('div');
+    row.className = 'note-tree-row note-tree-folder-row';
+    row.style.paddingLeft = `${0.4 + depth}rem`;
+
+    const toggle = document.createElement('span');
+    toggle.className = 'note-tree-toggle';
+    toggle.textContent = expanded ? '▾' : '▸';
+    row.appendChild(toggle);
+
+    const icon = document.createElement('span');
+    icon.className = 'note-tree-folder-icon';
+    icon.textContent = folder.icon || '📁';
+    row.appendChild(icon);
+
+    const name = document.createElement('span');
+    name.className = 'note-tree-item-name';
+    name.textContent = folder.name;
+    row.appendChild(name);
+
+    row.addEventListener('click', () => {
+      if (expanded) noteTreeExpandedFolderIds.delete(folder.id);
+      else noteTreeExpandedFolderIds.add(folder.id);
+      renderNoteTreePanel();
+    });
+    container.appendChild(row);
+    if (expanded) renderNoteTreeLevel(container, folder.id, depth + 1);
+  });
+
+  notes.forEach((note) => {
+    const row = document.createElement('div');
+    row.className = 'note-tree-row note-tree-note-row' + (activeEntry && activeEntry.id === note.id ? ' is-active' : '');
+    row.style.paddingLeft = `${0.4 + depth + 1}rem`;
+
+    const icon = document.createElement('span');
+    icon.className = 'note-tree-note-icon';
+    icon.textContent = '📝';
+    row.appendChild(icon);
+
+    const name = document.createElement('span');
+    name.className = 'note-tree-item-name';
+    name.textContent = note.title;
+    row.appendChild(name);
+
+    row.addEventListener('click', () => openNoteInEditor(note));
+    container.appendChild(row);
+  });
+}
+
+function renderNoteTreePanel() {
+  const container = document.getElementById('note-tree-list');
+  if (!container) return;
+  container.innerHTML = '';
+  if (state.noteFolders.length === 0 && (state.notes || []).length === 0) {
+    container.innerHTML = '<p class="empty-hint">No hay notas todavia.</p>';
+    return;
+  }
+  renderNoteTreeLevel(container, null, 0);
+}
+
+document.getElementById('note-tree-new-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  openNoteInEditor(null);
+});
+
+// Solo uno de los dos paneles laterales (Arbol/Secciones) se ve a la vez
+// -- volver a clicar el que ya esta activo lo cierra sin abrir el otro.
+function setActiveNoteEditorPanel(panel) {
+  const treePanel = document.getElementById('note-tree-panel');
+  const sectionsPanel = document.getElementById('note-sections-panel');
+  const treeBtn = document.getElementById('note-editor-toggle-tree');
+  const sectionsBtn = document.getElementById('note-editor-toggle-sections');
+  treePanel.classList.toggle('hidden', panel !== 'tree');
+  sectionsPanel.classList.toggle('hidden', panel !== 'sections');
+  treeBtn.classList.toggle('is-active', panel === 'tree');
+  sectionsBtn.classList.toggle('is-active', panel === 'sections');
+  if (panel === 'tree') renderNoteTreePanel();
+}
+
+document.getElementById('note-editor-toggle-tree').addEventListener('click', () => {
+  const isOpen = !document.getElementById('note-tree-panel').classList.contains('hidden');
+  setActiveNoteEditorPanel(isOpen ? null : 'tree');
+});
+
+document.getElementById('note-editor-toggle-sections').addEventListener('click', () => {
+  const isOpen = !document.getElementById('note-sections-panel').classList.contains('hidden');
+  setActiveNoteEditorPanel(isOpen ? null : 'sections');
+});
 
 document.getElementById('btn-new-note').addEventListener('click', () => openNoteInEditor(null));
 // Atajo rapido en la topbar, junto a "+ Nuevo evento"/"+ Nueva tarea" --
@@ -2051,43 +2413,75 @@ document.getElementById('btn-new-note').addEventListener('click', () => openNote
 document.getElementById('btn-new-note-topbar').addEventListener('click', () => openNoteInEditor(null));
 document.getElementById('btn-close-note-editor').addEventListener('click', closeNoteEditorView);
 
+// El dot de "sin guardar" del panel de Secciones debe reflejar lo que se
+// escribe AHORA, no solo lo que habia la ultima vez que se cambio de
+// nota -- de ahi capturar del DOM tambien en cada input del titulo/
+// contenido, no solo al cambiar de nota o guardar.
+document.getElementById('note-title').addEventListener('input', () => {
+  captureActiveOpenNoteFromDom();
+  renderNoteSectionsPanel();
+});
+NOTE_EDITOR_BODY.addEventListener('input', () => {
+  captureActiveOpenNoteFromDom();
+  renderNoteSectionsPanel();
+});
+
 document.getElementById('note-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const id = document.getElementById('note-id').value;
-  const folderRaw = noteFolderField.getValue();
+  captureActiveOpenNoteFromDom();
+  const entry = findOpenNote(state.activeOpenNoteKey);
+  // El boton "Guardar" ya se oculta en modo lectura, pero Ctrl+Intro
+  // (enableCtrlEnterSubmit) llama a requestSubmit() directamente sin
+  // pasar por ningun boton -- sin esta comprobacion, se podria guardar
+  // igual estando en modo lectura.
+  if (!entry || entry.readMode) return;
   // Si el editor quedo vacio de verdad, se manda null en vez de basura
   // tipo "<br>" que algunos navegadores dejan suelta tras borrar todo el
   // contenido. "Vacio de verdad" no es lo mismo que "sin texto": una nota
   // con solo una imagen o una tabla vacia no tiene texto pero SI tiene
   // contenido que guardar, asi que ademas del texto se comprueba si queda
-  // algun <img> o <table> sueltos.
+  // algun <img> o <table> sueltos. El formulario solo se puede enviar con
+  // la nota activa (es el unico <div contenteditable> que existe), asi
+  // que NOTE_EDITOR_BODY en este momento es justo el contenido de "entry".
   const hasNoteContent = NOTE_EDITOR_BODY.textContent.trim() !== '' || NOTE_EDITOR_BODY.querySelector('img, table');
-  const bodyHtml = hasNoteContent ? NOTE_EDITOR_BODY.innerHTML : null;
   const payload = {
-    title: document.getElementById('note-title').value,
-    body: bodyHtml,
+    title: entry.title,
+    body: hasNoteContent ? entry.bodyHtml : null,
     bodyFormat: 'html',
-    folderId: folderRaw === '' ? null : Number(folderRaw),
-    favorite: noteModalFavorite,
+    folderId: entry.folderId,
+    favorite: entry.favorite,
   };
 
-  if (id) {
-    await api(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  let saved;
+  if (entry.id) {
+    saved = await api(`/api/notes/${entry.id}`, { method: 'PUT', body: JSON.stringify(payload) });
   } else {
-    await api('/api/notes', { method: 'POST', body: JSON.stringify(payload) });
+    saved = await api('/api/notes', { method: 'POST', body: JSON.stringify(payload) });
   }
 
-  closeNoteEditorView();
+  // Tras guardar, "saved*" pasa a ser lo que ahora hay en el servidor --
+  // la nota deja de estar "sucia" hasta el siguiente cambio. A
+  // diferencia del modal de antes, Guardar YA NO cierra el editor: puede
+  // haber otras notas abiertas a la vez que se seguirian editando.
+  entry.id = saved.id;
+  entry.savedTitle = entry.title;
+  entry.savedBodyHtml = entry.bodyHtml;
+  entry.savedFolderId = entry.folderId;
+  entry.savedFavorite = entry.favorite;
+  document.getElementById('note-id').value = entry.id;
+  document.getElementById('btn-delete-note').classList.remove('hidden');
+  renderNoteSectionsPanel();
   await loadNotes();
   renderNotesView();
 });
 
 document.getElementById('btn-delete-note').addEventListener('click', async () => {
-  const id = document.getElementById('note-id').value;
-  if (!id) return;
+  const entry = findOpenNote(state.activeOpenNoteKey);
+  if (!entry || !entry.id) return;
   if (!confirm('¿Eliminar esta nota?')) return;
-  await api(`/api/notes/${id}`, { method: 'DELETE' });
-  closeNoteEditorView();
+  await api(`/api/notes/${entry.id}`, { method: 'DELETE' });
+  removeOpenNoteAndAdvance(entry.key);
+  renderNoteSectionsPanel();
   await loadNotes();
   renderNotesView();
 });

@@ -503,9 +503,51 @@
           <button type="button" id="note-table-add-col" class="note-editor-btn" aria-label="Añadir columna" title="Añadir columna">+Col</button>
           <button type="button" id="note-table-remove-col" class="note-editor-btn" aria-label="Eliminar columna" title="Eliminar columna">-Col</button>
         </span>
+        <span class="note-editor-toolbar-spacer"></span>
+        <!-- Alterna entre editar (por defecto, como antes) y solo lectura,
+             por si solo quieres consultar la nota sin arriesgarte a
+             tocarla sin querer -- ver applyNoteEditorReadMode en app.js.
+             Es un ajuste POR NOTA ABIERTA (entry.readMode), no global del
+             editor: cada nota recuerda su propio modo mientras este
+             abierta. -->
+        <button type="button" id="note-editor-read-mode-btn" class="note-editor-btn" aria-pressed="false">Modo lectura</button>
       </div>
       <div class="note-editor-main">
-        <div id="note-body" class="note-editor-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido de la nota"></div>
+        <!-- Rail izquierdo: dos botones independientes -- "Arbol" (navegar
+             carpetas/notas sin salir del editor) y "Secciones" (gestor de
+             notas abiertas a la vez, ver state.openNotes en app.js). Solo
+             uno de los dos paneles se ve a la vez (ver setActiveNoteEditorPanel
+             en app.js), volver a clicar el que esta activo lo cierra. -->
+        <div class="note-editor-rail">
+          <button type="button" id="note-editor-toggle-tree" class="icon-btn note-editor-rail-btn" aria-label="Arbol de notas" title="Arbol de carpetas y notas">🌳</button>
+          <button type="button" id="note-editor-toggle-sections" class="icon-btn note-editor-rail-btn" aria-label="Secciones" title="Secciones (notas abiertas)">📑</button>
+        </div>
+        <!-- Arbol de carpetas/notas: navegacion tipo arbol (plegable por
+             carpeta), reutiliza state.noteFolders/state.notes (ya cargados
+             enteros, sin llamada nueva a la API). Clicar una nota la abre
+             en el editor (se anade a las notas abiertas si no lo estaba
+             ya, ver openNoteInEditor). -->
+        <div id="note-tree-panel" class="note-editor-side-panel hidden">
+          <div class="note-editor-side-panel-header">
+            <span>Árbol de notas</span>
+            <button type="button" id="note-tree-new-btn" class="icon-btn" aria-label="Nueva nota" title="Nueva nota">+</button>
+          </div>
+          <div id="note-tree-list" class="note-tree-list"></div>
+        </div>
+        <!-- Lista de notas abiertas a la vez (como pestañas, pero sin
+             barra de pestañas visible -- se cambia de una a otra desde
+             aqui, ver switchActiveOpenNote en app.js). Cada nota tiene
+             un desplegable para "ver secciones de dentro": por ahora es
+             un simple placeholder, el editor todavia no tiene ningun
+             concepto de titulos/encabezados dentro del cuerpo de la
+             nota (queda para una ronda futura). -->
+        <div id="note-sections-panel" class="note-editor-side-panel hidden">
+          <div class="note-editor-side-panel-header">Notas abiertas</div>
+          <div id="note-sections-list" class="note-sections-list"></div>
+        </div>
+        <div class="note-editor-content-col">
+          <div id="note-body" class="note-editor-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido de la nota"></div>
+        </div>
       </div>
     </form>
   </div>
