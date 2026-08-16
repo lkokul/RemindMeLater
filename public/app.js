@@ -158,8 +158,8 @@ const FOLDER_PLUS_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="n
 const FOLDER_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
 
 // Estrella de favorito (notas/carpetas): rellena si es favorito, solo
-// borde si no -- el mismo boton en el listado y en los modales de
-// creacion/edicion (ver buildNoteRow/buildFolderRow/openNoteModal...).
+// borde si no -- el mismo boton en el listado y en el editor/modal de
+// creacion/edicion (ver buildNoteRow/buildFolderRow/openNoteInEditor...).
 const STAR_FILLED_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><polygon points="12 2.5 15.09 8.76 22 9.77 17 14.64 18.18 21.52 12 18.27 5.82 21.52 7 14.64 2 9.77 8.91 8.76"></polygon></svg>';
 const STAR_OUTLINE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><polygon points="12 2.5 15.09 8.76 22 9.77 17 14.64 18.18 21.52 12 18.27 5.82 21.52 7 14.64 2 9.77 8.91 8.76"></polygon></svg>';
 
@@ -1457,7 +1457,7 @@ function buildNoteRow(note) {
   // blur, para no recargar la fila).
   row.addEventListener('click', () => {
     if (note.hidden) return;
-    openNoteModal(note);
+    openNoteInEditor(note);
   });
   return row;
 }
@@ -1511,9 +1511,9 @@ function buildFolderRow(folder) {
   return row;
 }
 
-// Boton de estrella compartido por filas de nota y de carpeta, y por los
-// dos modales de creacion/edicion (ahi se usa suelto, sin toggle
-// inmediato -- ver openNoteModal/openNoteFolderModal).
+// Boton de estrella compartido por filas de nota y de carpeta, y por el
+// editor de notas a pantalla completa y el modal de carpeta (ahi se usa
+// suelto, sin toggle inmediato -- ver openNoteInEditor/openNoteFolderModal).
 function buildFavoriteStarBtn(isFavorite, onClick) {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -2016,9 +2016,12 @@ function legacyNoteBodyToHtml(text) {
   return escapeHtml(text).replace(/\n/g, '<br>');
 }
 
-function openNoteModal(note) {
-  const modal = document.getElementById('note-modal');
-  document.getElementById('note-modal-title').textContent = note ? 'Editar nota' : 'Nueva nota';
+// "openNoteInEditor" porque en una sub-ronda posterior puede recibir una
+// nota que YA esta abierta a la vez que otras (multi-nota, ver plan) --
+// de momento se comporta igual que el openNoteModal de antes, una nota
+// activa cada vez, solo que a pantalla completa en vez de en un modal.
+function openNoteInEditor(note) {
+  const view = document.getElementById('note-editor-view');
   document.getElementById('note-id').value = note ? note.id : '';
   document.getElementById('note-title').value = note ? note.title : '';
   const body = note && note.body ? note.body : '';
@@ -2033,20 +2036,20 @@ function openNoteModal(note) {
   document.getElementById('btn-delete-note').classList.toggle('hidden', !note);
   noteModalFavorite = note ? !!note.favorite : false;
   refreshNoteFavoriteBtn();
-  modal.classList.remove('hidden');
+  view.classList.remove('hidden');
+  document.getElementById('note-title').focus();
 }
 
-function closeNoteModal() {
-  document.getElementById('note-modal').classList.add('hidden');
+function closeNoteEditorView() {
+  document.getElementById('note-editor-view').classList.add('hidden');
   NOTE_EDITOR_BODY.innerHTML = '';
 }
 
-document.getElementById('btn-new-note').addEventListener('click', () => openNoteModal(null));
+document.getElementById('btn-new-note').addEventListener('click', () => openNoteInEditor(null));
 // Atajo rapido en la topbar, junto a "+ Nuevo evento"/"+ Nueva tarea" --
-// abre directamente el modal, sin tener que entrar antes en Mi espacio.
-document.getElementById('btn-new-note-topbar').addEventListener('click', () => openNoteModal(null));
-document.getElementById('btn-cancel-note').addEventListener('click', closeNoteModal);
-document.getElementById('btn-close-note').addEventListener('click', closeNoteModal);
+// abre directamente el editor, sin tener que entrar antes en Mi espacio.
+document.getElementById('btn-new-note-topbar').addEventListener('click', () => openNoteInEditor(null));
+document.getElementById('btn-close-note-editor').addEventListener('click', closeNoteEditorView);
 
 document.getElementById('note-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -2074,7 +2077,7 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
     await api('/api/notes', { method: 'POST', body: JSON.stringify(payload) });
   }
 
-  closeNoteModal();
+  closeNoteEditorView();
   await loadNotes();
   renderNotesView();
 });
@@ -2084,7 +2087,7 @@ document.getElementById('btn-delete-note').addEventListener('click', async () =>
   if (!id) return;
   if (!confirm('¿Eliminar esta nota?')) return;
   await api(`/api/notes/${id}`, { method: 'DELETE' });
-  closeNoteModal();
+  closeNoteEditorView();
   await loadNotes();
   renderNotesView();
 });
@@ -2632,6 +2635,21 @@ function applyMiEspacioMode() {
 
 document.getElementById('btn-my-space').addEventListener('click', openMySpaceView);
 document.getElementById('btn-close-my-space').addEventListener('click', closeMySpaceView);
+
+// ---------------------------------------------------------------------
+// Extensiones (placeholder): mismo patron de pantalla completa que "Mi
+// espacio" (.my-space-view), pero sin modo panel/boton -- este boton no
+// se oculta nunca. Sin logica real todavia, solo abre/cierra la pantalla
+// "Proximamente" (ver #extensions-view en index.html).
+// ---------------------------------------------------------------------
+function openExtensionsView() {
+  document.getElementById('extensions-view').classList.remove('hidden');
+}
+function closeExtensionsView() {
+  document.getElementById('extensions-view').classList.add('hidden');
+}
+document.getElementById('btn-extensions').addEventListener('click', openExtensionsView);
+document.getElementById('btn-close-extensions').addEventListener('click', closeExtensionsView);
 
 // Mientras una columna cambia de ancho (expandir o volver a las 3), el
 // contenido de dentro se oculta (ver .is-animating en styles.css) para

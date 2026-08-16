@@ -146,6 +146,16 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4.5" height="16" rx="1"></rect><rect x="9.75" y="4" width="4.5" height="16" rx="1"></rect><rect x="16.5" y="4" width="4.5" height="16" rx="1"></rect></svg>
           <span>Mi espacio</span>
         </button>
+        <!-- Extensiones (placeholder): futuras secciones aparte del
+             calendario (gimnasio, finanzas, lecturas...). Por ahora solo
+             abre una pantalla "Proximamente" -- la logica real de cada
+             extension llegara en otra ronda, despues del movil. A
+             diferencia de Mi espacio no tiene modo "panel", siempre es
+             pantalla completa, asi que este boton nunca se oculta. -->
+        <button id="btn-extensions" class="secondary-btn my-space-topbar-btn" aria-label="Extensiones">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+          <span>Extensiones</span>
+        </button>
         <button id="btn-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </nav>
     </header>
@@ -323,6 +333,42 @@
     </div>
   </div>
 
+  <!-- "Extensiones" (placeholder): futuras secciones aparte del calendario
+       (gimnasio, finanzas, lecturas leidos...). Por ahora solo el boton y
+       esta pantalla "Proximamente" -- sin logica real todavia, eso llega
+       en otra ronda, despues del movil. Mismo patron de pantalla completa
+       que "Mi espacio" (.my-space-view), pero sin modo panel: siempre se
+       abre a pantalla completa con #btn-extensions. Ver
+       openExtensionsView/closeExtensionsView en app.js. -->
+  <div id="extensions-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2>Extensiones</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-extensions" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
+      </div>
+    </div>
+    <div class="extensions-hub">
+      <p class="extensions-intro">Ideas para futuras secciones — todavia no hacen nada, llegaran en otra ronda.</p>
+      <div class="extensions-grid">
+        <div class="extensions-card" aria-disabled="true">
+          <span class="extensions-card-icon">🏋️</span>
+          <span class="extensions-card-title">Gimnasio</span>
+          <span class="extensions-card-badge">Próximamente</span>
+        </div>
+        <div class="extensions-card" aria-disabled="true">
+          <span class="extensions-card-icon">💶</span>
+          <span class="extensions-card-title">Finanzas</span>
+          <span class="extensions-card-badge">Próximamente</span>
+        </div>
+        <div class="extensions-card" aria-disabled="true">
+          <span class="extensions-card-icon">📚</span>
+          <span class="extensions-card-title">Lecturas</span>
+          <span class="extensions-card-badge">Próximamente</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal para crear / editar evento -->
   <div id="event-modal" class="modal hidden">
     <div class="modal-card">
@@ -412,61 +458,56 @@
     </div>
   </div>
 
-  <!-- Modal para crear / editar nota (Mi espacio > Notas -- titulo +
-       contenido con formato basico desde la Fase 4 (negrita, cursiva,
-       listas), editado con un <div contenteditable> en vez de un
-       <textarea> normal, con su propia barra de botones encima. Carpeta
-       opcional desde la Fase 3). -->
-  <div id="note-modal" class="modal hidden">
-    <div class="modal-card">
-      <button type="button" id="btn-close-note" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2 id="note-modal-title">Nueva nota</h2>
-      <form id="note-form">
-        <input type="hidden" id="note-id" />
-        <label>
-          Titulo
-          <div class="title-with-favorite">
-            <input type="text" id="note-title" required />
-            <button type="button" id="note-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
-          </div>
-        </label>
-        <div class="field-label-block">
-          <span class="field-label">Contenido (opcional)</span>
-          <div id="note-body-toolbar" class="note-editor-toolbar">
-            <button type="button" data-cmd="bold" class="note-editor-btn" aria-label="Negrita" title="Negrita"><b>N</b></button>
-            <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
-            <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn" aria-label="Lista con viñetas" title="Lista con viñetas">&#8226; Lista</button>
-            <button type="button" data-cmd="insertOrderedList" class="note-editor-btn" aria-label="Lista numerada" title="Lista numerada">1. Lista</button>
-            <button type="button" id="note-table-insert-btn" class="note-editor-btn" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
-            <button type="button" id="note-image-insert-btn" class="note-editor-btn" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
-            <!-- Selector de archivo nativo, oculto -- lo abre el boton de
-                 arriba con .click(). Tambien sirve para el Ctrl+V (ver
-                 app.js), que reutiliza la misma subida. -->
-            <input type="file" id="note-image-file-input" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" />
-            <!-- Solo visible con el cursor dentro de una tabla (ver
-                 refreshTableContextToolbar en app.js) -- actua siempre
-                 sobre la fila/columna donde este el cursor en ese momento. -->
-            <span id="note-table-context-toolbar" class="note-table-context-toolbar hidden">
-              <button type="button" id="note-table-add-row" class="note-editor-btn" aria-label="Añadir fila" title="Añadir fila">+Fila</button>
-              <button type="button" id="note-table-remove-row" class="note-editor-btn" aria-label="Eliminar fila" title="Eliminar fila">-Fila</button>
-              <button type="button" id="note-table-add-col" class="note-editor-btn" aria-label="Añadir columna" title="Añadir columna">+Col</button>
-              <button type="button" id="note-table-remove-col" class="note-editor-btn" aria-label="Eliminar columna" title="Eliminar columna">-Col</button>
-            </span>
-          </div>
-          <div id="note-body" class="note-editor-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido de la nota"></div>
+  <!-- Editor de notas a pantalla completa (sustituye al modal pequeño de
+       antes de esta ronda -- ver CLAUDE.md). Mismo patron de overlay que
+       "Mi espacio"/"Extensiones" (.my-space-view), con la barra de
+       formato (negrita/cursiva/listas/tabla/imagen, Fase 4) ahora arriba
+       del todo como una barra de estado, en vez de ir pegada al campo de
+       contenido dentro de un modal pequeno. El arbol de carpetas y el
+       panel de notas abiertas a la vez (multi-nota) se anaden en una
+       sub-ronda posterior -- de momento sigue siendo una nota a la vez,
+       solo cambia de modal a pantalla completa. Ver
+       openNoteInEditor/closeNoteEditorView en app.js. -->
+  <div id="note-editor-view" class="my-space-view note-editor-view hidden">
+    <form id="note-form" class="note-editor-form">
+      <input type="hidden" id="note-id" />
+      <div class="my-space-view-header note-editor-top-row">
+        <button type="button" id="btn-close-note-editor" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
+        <div class="note-editor-title-row">
+          <input type="text" id="note-title" class="note-editor-title-input" placeholder="Titulo de la nota" required />
+          <button type="button" id="note-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
         </div>
-        <div class="field-label-block">
-          <span class="field-label">Carpeta (opcional)</span>
+        <div class="note-editor-header-actions">
           <div id="note-folder-field"></div>
-        </div>
-        <div class="modal-actions">
           <button type="button" id="btn-delete-note" class="danger-btn hidden">Eliminar</button>
-          <div class="spacer"></div>
-          <button type="button" id="btn-cancel-note" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
-      </form>
-    </div>
+      </div>
+      <div id="note-body-toolbar" class="note-editor-toolbar">
+        <button type="button" data-cmd="bold" class="note-editor-btn" aria-label="Negrita" title="Negrita"><b>N</b></button>
+        <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
+        <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn" aria-label="Lista con viñetas" title="Lista con viñetas">&#8226; Lista</button>
+        <button type="button" data-cmd="insertOrderedList" class="note-editor-btn" aria-label="Lista numerada" title="Lista numerada">1. Lista</button>
+        <button type="button" id="note-table-insert-btn" class="note-editor-btn" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
+        <button type="button" id="note-image-insert-btn" class="note-editor-btn" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
+        <!-- Selector de archivo nativo, oculto -- lo abre el boton de
+             arriba con .click(). Tambien sirve para el Ctrl+V (ver
+             app.js), que reutiliza la misma subida. -->
+        <input type="file" id="note-image-file-input" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" />
+        <!-- Solo visible con el cursor dentro de una tabla (ver
+             refreshTableContextToolbar en app.js) -- actua siempre sobre
+             la fila/columna donde este el cursor en ese momento. -->
+        <span id="note-table-context-toolbar" class="note-table-context-toolbar hidden">
+          <button type="button" id="note-table-add-row" class="note-editor-btn" aria-label="Añadir fila" title="Añadir fila">+Fila</button>
+          <button type="button" id="note-table-remove-row" class="note-editor-btn" aria-label="Eliminar fila" title="Eliminar fila">-Fila</button>
+          <button type="button" id="note-table-add-col" class="note-editor-btn" aria-label="Añadir columna" title="Añadir columna">+Col</button>
+          <button type="button" id="note-table-remove-col" class="note-editor-btn" aria-label="Eliminar columna" title="Eliminar columna">-Col</button>
+        </span>
+      </div>
+      <div class="note-editor-main">
+        <div id="note-body" class="note-editor-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido de la nota"></div>
+      </div>
+    </form>
   </div>
 
   <!-- Modal para crear / editar carpeta de notas (Fase 3): nombre +

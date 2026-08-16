@@ -1796,9 +1796,9 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const noteModal = document.getElementById('note-modal');
-  if (noteModal && !noteModal.classList.contains('hidden')) {
-    closeNoteModal();
+  const noteEditorView = document.getElementById('note-editor-view');
+  if (noteEditorView && !noteEditorView.classList.contains('hidden')) {
+    closeNoteEditorView();
     return;
   }
 

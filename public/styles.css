@@ -122,11 +122,48 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .field-label-block { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); margin-bottom: 0.75rem; }
 .field-label { display: block; margin-bottom: 0.3rem; }
 
-/* Editor de notas con formato (Fase 4): barra de botones + un
-   <div contenteditable> en vez de un <textarea>, pero con el mismo
-   aspecto que cualquier otro campo (borde/radio/fondo de input) para que
-   no se note la diferencia a simple vista. */
-.note-editor-toolbar { display: flex; gap: 0.35rem; margin-bottom: 0.4rem; }
+/* Editor de notas a pantalla completa (sustituye al modal pequeno de
+   antes de esta ronda -- ver CLAUDE.md). Reutiliza el overlay de
+   .my-space-view; aqui solo van los anadidos propios: la fila de
+   cabecera (Volver/titulo/favorito/carpeta/guardar) y la barra de
+   formato, que ahora funciona como una barra de estado fija arriba del
+   contenido en vez de ir pegada al campo dentro de un modal pequeno. */
+.note-editor-form { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.note-editor-top-row { flex-wrap: wrap; row-gap: 0.6rem; }
+.note-editor-title-row { display: flex; align-items: center; gap: 0.4rem; flex: 1; min-width: 200px; }
+.note-editor-title-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0.3rem 0.4rem;
+  border-radius: var(--radius-sm);
+}
+.note-editor-title-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* La cabecera vive sobre el fondo de .my-space-view (bg/bg-text), no
+   sobre surface/surface-2 -- la estrella necesita su propio contraste
+   aqui, igual que ya existe uno para dentro de .modal-card. */
+.note-editor-view .favorite-star-btn { color: color-mix(in srgb, var(--bg-text) 45%, var(--bg)); }
+.note-editor-view .favorite-star-btn:hover { color: var(--bg-text); }
+.note-editor-view .favorite-star-btn.is-favorite { color: var(--accent); }
+.note-editor-header-actions { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+
+/* Barra de formato (Fase 4: negrita, cursiva, lista con vinetas y lista
+   numerada, mas tabla e imagen), ahora arriba a modo de barra de estado
+   fija, separada del contenido por un borde en vez de ir pegada al
+   campo. */
+.note-editor-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+}
 .note-editor-btn {
   padding: 0.3rem 0.6rem;
   font-size: 0.85rem;
@@ -137,15 +174,16 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    refreshNoteEditorToolbar en app.js, que consulta
    document.queryCommandState() en cada cambio de seleccion. */
 .note-editor-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.note-editor-main { flex: 1; min-height: 0; padding: 1rem 1.2rem; display: flex; }
 .note-editor-body {
-  min-height: 8rem;
-  max-height: 16rem;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--surface-2-text);
   border-radius: var(--radius);
-  padding: 0.6rem;
+  padding: 0.8rem 1rem;
 }
 .note-editor-body:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 /* Las listas dentro del editor no tienen estilos globales de la app que
@@ -652,6 +690,37 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   overflow: visible;
 }
 
+/* Extensiones (placeholder): reutiliza .my-space-view/.my-space-view-header
+   para el overlay y la cabecera -- solo hace falta la rejilla de tarjetas
+   "Proximamente" de aqui abajo. No existia ningun patron de "tarjeta
+   deshabilitada" en el proyecto, se crea aqui desde cero (misma opacidad
+   0.6 que ya se usa para "inactivo" en .task-item.done). */
+.extensions-hub { flex: 1; min-height: 0; padding: 1.2rem; overflow-y: auto; }
+.extensions-intro { margin: 0 0 1rem; color: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
+.extensions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1rem; }
+.extensions-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1.4rem 1rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--surface-text);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.extensions-card-icon { font-size: 1.8rem; }
+.extensions-card-title { font-weight: 600; }
+.extensions-card-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+}
+
 /* Envoltorio SOLO de las 3 columnas (el Volver, fuera, en su propia
    fila) -- en movil se quedan apiladas igual que antes. */
 .my-space-cols-row { display: flex; flex-direction: column; gap: 1rem; min-height: 0; }
@@ -786,9 +855,6 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .modal-card .favorite-star-btn { color: color-mix(in srgb, var(--surface-text) 45%, var(--surface)); }
 .modal-card .favorite-star-btn:hover { color: var(--surface-text); }
 .modal-card .favorite-star-btn.is-favorite { color: var(--accent); }
-
-.title-with-favorite { display: flex; align-items: center; gap: 0.4rem; }
-.title-with-favorite input { flex: 1; min-width: 0; }
 
 /* --- Carpetas de notas (Fase 3): navegacion tipo explorador de
    archivos -- ver renderNotesView en app.js. Solo organizacion, sin PIN
