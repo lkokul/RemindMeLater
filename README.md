@@ -113,23 +113,40 @@ texto y tareas:
   tambien en el calendario, con el borde en vez de relleno y un icono
   ☐/☑ que puedes pulsar directamente para marcarlas como hechas sin abrir
   el evento.
-- **Notas**: texto simple (todavia sin formato — negrita, listas, tablas
-  etc. esta planeado pero no implementado). Una nota se puede ocultar
+- **Notas**: con formato basico — negrita, cursiva, listas (con vinetas o
+  numeradas), tablas (con botones para anadir/quitar filas y columnas) e
+  imagenes (desde archivo o pegando con Ctrl+V una captura/imagen
+  copiada). Cada imagen se sube al servidor y se guarda como archivo
+  aparte (no como texto dentro de la nota), asi que cargar la lista de
+  notas sigue siendo rapido aunque tengan fotos. Una nota se puede ocultar
   (icono de ojo) y, opcionalmente, proteger con una contraseña compartida
   para todas las notas ocultas de la app (no es cifrado real, es una
   proteccion sencilla para que no se vea el contenido de un vistazo).
-- **Carpetas**: para organizar las notas, con nombre, icono y color
-  propios. Las carpetas pueden contener otras carpetas — la navegacion es
-  como un explorador de archivos (Windows/Finder): ves el contenido de la
-  carpeta donde estas (subcarpetas y notas mezcladas, subcarpetas
-  primero) y un boton "Volver" que sube un nivel cada vez. Crear una nota
-  o carpeta nueva estando dentro de otra carpeta la coloca ahi por
-  defecto. Borrar una carpeta no borra lo que hay dentro: sus notas y
-  subcarpetas suben un nivel en vez de desaparecer.
+  Tambien se puede marcar como favorita (estrella).
+- **Carpetas**: para organizar las notas, con nombre y color propios. Las
+  carpetas pueden contener otras carpetas — la navegacion es como un
+  explorador de archivos (Windows/Finder): ves el contenido de la carpeta
+  donde estas (subcarpetas y notas mezcladas, subcarpetas primero) y un
+  boton "Volver" que sube un nivel cada vez. Crear una nota o carpeta
+  nueva estando dentro de otra carpeta la coloca ahi por defecto. Borrar
+  una carpeta no borra lo que hay dentro: sus notas y subcarpetas suben un
+  nivel en vez de desaparecer. Tambien se pueden marcar como favoritas.
+- **Favoritos**: tanto notas como carpetas se pueden marcar con una
+  estrella para que aparezcan destacadas en su listado. Por dispositivo
+  puedes elegir si se mezclan con el resto (favoritos primero, sin
+  cabecera) o se separan en dos secciones ("Favoritos" / "Todo lo demas").
+- **Buscar**: una barra de texto encima del listado de notas filtra por
+  nombre dentro de la carpeta donde estes (no busca en toda la app de
+  golpe).
+- **Ctrl+Intro** guarda directamente desde los modales de nota, evento y
+  tarea, sin tener que ir a buscar el boton "Guardar" con el raton.
 
-Se puede abrir como un panel fijo al lado del calendario o como una
-pantalla propia a pantalla completa, segun prefieras (Configuración →
-Este dispositivo).
+Se puede abrir como un panel fijo al lado del calendario, o como una
+pantalla propia a pantalla completa con un boton "← Home" para volver
+(Configuración → Este dispositivo). En el modo panel fijo, ademas puedes
+elegir que secciones (Recordatorios/Tareas/Notas) se agrupan juntas en un
+solo hueco con flechas para alternar entre ellas, y cuales se quedan
+sueltas y siempre visibles.
 
 ## App de escritorio (Electron)
 
@@ -170,8 +187,12 @@ Cada evento o tarea con fecha puede tener un recordatorio (en el momento,
 - Recordatorios "push" en el movil con la app cerrada tampoco estan
   todavia: requieren un servicio de notificaciones push real (fuera del
   alcance de un servidor casero).
-- Las notas todavia son texto simple: el editor con formato (negrita,
-  listas, tablas, imagenes) esta planeado pero no empezado.
+- El formato de las notas es basico (negrita, cursiva, listas, tablas,
+  imagenes) — sin tablas con celdas combinadas, sin cambiar el tamano de
+  una imagen ya insertada, sin encabezados/titulos.
+- Si quitas una imagen de una nota editandola (sin borrar la nota
+  entera), el archivo se queda huerfano en el disco — solo se limpia al
+  borrar la nota completa.
 - No hay forma de mover una carpeta de notas ya creada a otra carpeta
   distinta (si se puede mover una nota entre carpetas desde su propio
   editor).

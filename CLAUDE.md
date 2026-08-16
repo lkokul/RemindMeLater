@@ -1,8 +1,9 @@
 # RemindMeLater — notas para retomar el proyecto en otra conversación
 
-Esto no es documentación de usuario (eso es `README.md` — a diferencia de
-como estaba antes, ahora SÍ está al día, se reescribió por completo en la
-ronda de v0.19.0). Esto es un resumen para que una conversación nueva
+Esto no es documentación de usuario (eso es `README.md`, que se
+reescribió por completo en la ronda de v0.19.0 y se ha ido manteniendo al
+día en rondas posteriores — última vez en la ronda de v0.23.0). Esto es
+un resumen para que una conversación nueva
 (Cowork, Claude Code local o una sesión de control remoto) pueda seguir
 donde lo dejamos sin que Koku tenga que repetir todo el contexto.
 
@@ -86,9 +87,12 @@ mDNS (`remindmelater.local`). Detalle completo de features en
 - **Dispositivo de confianza**: el propio ordenador se identifica por IP de
   loopback (`isTrustedRequest()`); los móviles emparejados usan un header
   `X-Device-Token`. Ver `server/auth.js`.
-- **Carpeta de datos configurable**: `server/db.js` lee
+- **Carpeta de datos configurable**: `server/dataDir.js` lee
   `REMINDMELATER_DATA_DIR` si existe (la pone Electron, apuntando a la
-  carpeta de datos del usuario), si no usa `data/` del proyecto.
+  carpeta de datos del usuario), si no usa `data/` del proyecto. Se sacó
+  de `db.js` a su propio archivo en la ronda de imágenes de notas (Fase
+  4) para que `routes/noteImages.js` pudiera usar el mismo cálculo sin
+  duplicarlo.
 - **Mobile-first**: CSS base es para móvil, `min-width: 860px` cambia a
   layout de escritorio (calendario en grid + panel de recordatorios al
   lado, todo dentro de `100vh` sin scroll de página).
@@ -103,11 +107,13 @@ mDNS (`remindmelater.local`). Detalle completo de features en
   completadas es un ajuste por dispositivo, no compartido.
 - **"Mi espacio"** (Próximos + Tareas + Notas juntos) — construido por
   fases a lo largo de varias rondas, ya completo:
-  - **Notas**: título + texto plano (sin formato todavía — eso es la
-    Fase 4, sin empezar). Se pueden ocultar (icono de ojo, difuminadas en
-    la lista) con una contraseña OPCIONAL y COMPARTIDA para toda la app
-    (no por nota individual) — no es cifrado real, solo evita que se lea
-    a primera vista (`server/routes/notesSecurity.js`).
+  - **Notas**: título + contenido con formato básico (Fase 4, completa:
+    negrita/cursiva/listas en v0.21.0, tablas en v0.22.0, imágenes en
+    v0.23.0 — ver bloque aparte más abajo). Se pueden ocultar (icono de
+    ojo, difuminadas en la lista) con una contraseña OPCIONAL y
+    COMPARTIDA para toda la app (no por nota individual) — no es cifrado
+    real, solo evita que se lea a primera vista
+    (`server/routes/notesSecurity.js`).
   - **Carpetas de notas**: sistema propio, separado de los Grupos del
     calendario — nombre + color (YA NO tienen icono propio, se quitó esa
     opción a propósito: el icono genérico de carpeta ya diferencia bien
@@ -155,6 +161,56 @@ mDNS (`remindmelater.local`). Detalle completo de features en
     columna ya vive fija en su sitio, no pinta nada ahí.
   - **Ctrl+Intro** guarda directamente en los modales de nota, evento y
     tarea (`enableCtrlEnterSubmit()` en `app.js`).
+  - **Editor de notas con formato (Fase 4, completa)**: `#note-body` ya
+    no es un `<textarea>`, es un `<div contenteditable>` con una barra de
+    botones encima (`app.js`, sección "Editor de notas con formato").
+    - **Negrita/cursiva/listas** (v0.21.0): botones con `data-cmd` que
+      llaman a `document.execCommand()` — obsoleto según MDN pero sigue
+      funcionando bien en Chrome/Edge/Firefox, y evita escribir a mano la
+      lógica de negrita/listas sobre el DOM. `refreshNoteEditorToolbar()`
+      enciende/apaga cada botón según `document.queryCommandState()` en
+      cada cambio de selección dentro del editor.
+    - **Tablas** (v0.22.0): botón "Tabla" abre un popover (mismo patrón
+      que color/icono/fecha: `positionFixedPopover`/`closeAllPopovers`
+      de `settings.js`) pidiendo filas/columnas antes de insertar. Con el
+      cursor dentro de una celda aparecen 4 botones contextuales
+      (+Fila/-Fila/+Col/-Col) — `getCurrentTableCell()` resuelve en qué
+      celda está el cursor a partir de `window.getSelection()`, con un
+      fallback para cuando el navegador deja el cursor "colgado" de un
+      antepasado (tr/tbody/table) en vez de dentro de la celda (pasa
+      sobre todo justo después de borrar una fila/columna con una celda
+      vacía). Borrar la última fila o columna quita la tabla entera.
+    - **Imágenes** (v0.23.0): botón "Imagen" (selector de archivo
+      nativo) y Ctrl+V (evento `paste` en el editor, solo si hay una
+      imagen de verdad en el portapapeles) suben el archivo a
+      `POST /api/notes/images` y solo meten en el HTML el enlace corto
+      que devuelve (`/api/notes/images/<uuid>.<ext>`) — NO se guarda la
+      imagen como base64 dentro de la nota (decisión hablada con Koku:
+      hincharía la base de datos y ralentizaría cargar la lista de
+      notas). Los archivos viven en `DATA_DIR/note-images/`
+      (`server/routes/noteImages.js`), un nivel por debajo de
+      `server/dataDir.js`. **Servir una imagen NO pasa por
+      `requireDeviceOrTrusted`** a propósito: un `<img src="...">` lo
+      pide el navegador sin poder llevar el header `X-Device-Token`, así
+      que la única protección es que el nombre de archivo es un
+      `crypto.randomUUID()` imposible de adivinar — SUBIR una imagen sí
+      exige estar vinculado. Al borrar una nota (`DELETE /api/notes/:id`)
+      se limpian del disco las imágenes que tuviera
+      (`deleteImagesInBody()`); editar una nota y quitar una imagen de en
+      medio SIN borrar la nota entera NO libera ese archivo (limitación
+      conocida y aceptada, evita tener que diferenciar el HTML
+      antes/después en cada guardado).
+    - **Saneado server-side** (`sanitizeNoteBody()` en
+      `server/routes/notes.js`): lista blanca de etiquetas
+      (`b/strong/i/em/ul/ol/li/br/div/p/table/tbody/tr/td/th/img`), todas
+      sin atributos EXCEPTO `img`, que conserva `src` solo si apunta a
+      `/api/notes/images/...` (nada de `data:` ni servidores externos).
+      Se aplica en POST/PUT siempre que `bodyFormat` venga como `'html'`
+      (lo manda siempre el editor nuevo); las notas de antes de la Fase 4
+      tienen `body_format = 'text'` en la columna nueva de `notes`
+      (migración en `db.js`) y se convierten a HTML escapado solo al
+      abrirlas en el editor (`legacyNoteBodyToHtml()` en `app.js`), sin
+      tocar lo que hay guardado hasta que se editen y guarden de nuevo.
 - **Vista (pantalla completa)**: solo dos modos, Normal y Pantalla
   completa (se quitó la idea de "ventana flotante" que había al
   principio, `window.open()` no era fiable entre navegadores). Por
@@ -199,38 +255,58 @@ mDNS (`remindmelater.local`). Detalle completo de features en
   `visibility:hidden` o similar) y por tanto es medible de verdad. Si se
   añade un popover nuevo, no hace falta tocar nada de esto, ya funciona
   solo con la altura real.
+- **"¿Está vacío el editor de notas?" no es lo mismo que "¿tiene
+  texto?"**: el submit de `note-form` decidía si mandar `body: null`
+  mirando solo `NOTE_EDITOR_BODY.textContent.trim() === ''` — una nota
+  con SOLO una imagen o SOLO una tabla vacía no tiene texto, así que se
+  guardaba como si estuviera completamente vacía (perdiendo la imagen o
+  la tabla). Arreglado comprobando también
+  `NOTE_EDITOR_BODY.querySelector('img, table')`. Si se añade otro tipo
+  de contenido "sin texto" al editor en el futuro (Fase 5+), hay que
+  acordarse de meterlo también en ese `querySelector`.
+- **Selección del cursor dentro de una tabla contenteditable**: al hacer
+  click en una celda VACÍA (`<td><br></td>`), el navegador a veces deja
+  el cursor "colgado" de un antepasado (tr/tbody/table) con un offset, en
+  vez de dentro de la celda en sí — pasa sobre todo justo después de
+  borrar una fila/columna. `getCurrentTableCell()` en `app.js` tiene un
+  fallback que mira el hijo exacto que señala ese offset; si se toca esa
+  función, cuidado con quitar ese fallback pensando que es código muerto,
+  se reproduce con facilidad en el flujo normal de usar +Fila/-Fila.
 
 ## Estado actual
 
-Último commit en `origin/main-wmqm2f`: `v0.19.1` (`27ab24b`). El tag
-`v0.19.1` está pendiente de que Koku lo cree a mano (ver más arriba).
-
-Pendiente de commitear en este momento (probado con curl + Playwright,
-sin errores de consola, pero aún no lo ha visto Koku en su propio
-navegador):
-- Botón de Configuración siempre a la derecha en la cabecera de "Mi
-  espacio" a pantalla completa.
-- Sistema de "agrupar con flechas" del panel lateral clásico (descrito
-  arriba en detalle), que sustituye al ajuste binario Apilado/Alternar
-  de la ronda anterior.
+Último commit en `origin/main-wmqm2f` (recién pusheado): `v0.23.1` —
+docs (`README.md` y este archivo) puestos al día tras cerrar la Fase 4.
+El commit de código de la Fase 4 en sí es `v0.23.0` (`27ce26a`) —
+"imágenes en el editor de notas". Los tags `v0.21.0`/`v0.22.0`/`v0.23.0`/
+`v0.23.1` están pendientes de que Koku los cree a mano (ver más arriba;
+confirmar con él si quiere tag por cada versión intermedia o solo el
+final).
 
 Fases de "Mi espacio" completas: 1 (hub), 2 (notas + ocultar/contraseña),
-3 (carpetas anidadas tipo explorador), y una ronda extra de pulido
-(favoritos, búsqueda, iconos, atajos, Ctrl+Intro, agrupar secciones).
+3 (carpetas anidadas tipo explorador), una ronda extra de pulido
+(favoritos, búsqueda, iconos, atajos, Ctrl+Intro, agrupar secciones), y
+la **Fase 4 (formato de notas) — completa** en tres sub-rondas:
+negrita/cursiva/listas (v0.21.0), tablas (v0.22.0), imágenes (v0.23.0).
+Detalle técnico completo en el bloque "Editor de notas con formato" más
+arriba. `README.md` se puso al día en esta misma ronda para reflejar
+todo esto (formato de notas, favoritos, búsqueda, Ctrl+Intro, agrupar
+secciones — antes solo cubría hasta v0.19.0 de verdad, aunque la nota
+anterior decía que estaba al día del todo).
 
 ## Pendiente / próximos pasos declarados
 
-- **Fase 4 de "Mi espacio"**: editor de notas con formato tipo Notion —
-  básico primero (negrita, listas...), luego tablas, luego imágenes, cada
-  cosa en su propia sub-ronda. No empezada.
 - **Idiomas**: Koku quiere en algún momento un selector español/inglés
   ("por tener la opción y ver cómo se desarrolla"), pero pidió
   explícitamente dejarlo para más adelante — no es prioridad ahora mismo,
   no empezar sin que lo pida.
-- **Móvil**: fase pendiente de arrancar, declarada como "la siguiente".
-  Koku planteó trabajarla en una conversación aparte; quedamos en hacerlo
-  en una rama de git separada (`git checkout -b movil`) en vez de tocar
-  `main-wmqm2f` a la vez desde dos sitios, para que un posible solape sea
-  un merge normal y no un pisotón silencioso de archivos.
-- **README.md**: YA NO está pendiente, se puso al día en la ronda de
-  v0.19.0 (temas, vista, atajos, PWA, Electron, mDNS, Mi espacio...).
+- **Móvil**: Koku lo está llevando en otra conversación aparte (confirmó
+  explícitamente dejarlo fuera de esta sesión). Se había quedado en
+  hacerlo en una rama de git separada (`git checkout -b movil`) en vez de
+  tocar `main-wmqm2f` a la vez desde dos sitios, para que un posible
+  solape sea un merge normal y no un pisotón silencioso de archivos — no
+  se sabe desde esta sesión en qué punto va esa rama.
+- **README.md**: al día (ver "Estado actual" arriba).
+- Sin nada más declarado en el momento de escribir esto — Koku mencionó
+  "tengo algunas cosas en mente" sin concretar, para retomar en una
+  conversación futura.
