@@ -165,6 +165,10 @@ const FOLDER_PLUS_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="n
 // Carpeta simple (sin el "+"), para las filas de subcarpeta en la lista
 // de Notas cuando no se les ha puesto un icono/emoji propio.
 const FOLDER_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+// Nota (hoja con lineas de texto) -- para el arbol de notas del editor a
+// pantalla completa (ver renderNoteTreeLevel), en vez del emoji 📝 de
+// antes. Mismo trazo/estilo que el resto de iconos de la app.
+const NOTE_FILE_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>';
 
 // Estrella de favorito (notas/carpetas): rellena si es favorito, solo
 // borde si no -- el mismo boton en el listado y en el editor/modal de
@@ -1586,10 +1590,27 @@ function getFavoritesDisplayMode() {
 // Anade una tanda de filas (subcarpetas O notas, nunca mezcladas entre
 // si -- cada tipo mantiene su propio orden de favoritos por separado)
 // al contenedor, ya sea con cabeceras o mezcladas segun el ajuste.
+// Nombre para ordenar alfabeticamente -- carpetas usan "name", notas
+// "title", ambos comparten esta funcion en vez de repetir el ?? en cada
+// sitio que ordena una lista mixta de las dos cosas.
+function getNoteListItemName(item) {
+  return item.name || item.title || '';
+}
+
+// Favoritos primero, alfabetico dentro de cada grupo -- usado tanto para
+// ordenar carpetas entre si como notas entre si (nunca mezcladas, ver
+// renderNotesView/renderNoteTreeLevel: las carpetas SIEMPRE van antes
+// que las notas como grupo aparte, esto solo ordena dentro de cada uno).
+function compareNoteListItems(a, b) {
+  if (!!a.favorite !== !!b.favorite) return a.favorite ? -1 : 1;
+  return getNoteListItemName(a).localeCompare(getNoteListItemName(b));
+}
+
 function appendFavoriteSortedGroup(container, items, buildRowFn) {
   if (items.length === 0) return;
-  const favorites = items.filter((i) => i.favorite);
-  const rest = items.filter((i) => !i.favorite);
+  const byName = (a, b) => getNoteListItemName(a).localeCompare(getNoteListItemName(b));
+  const favorites = items.filter((i) => i.favorite).sort(byName);
+  const rest = items.filter((i) => !i.favorite).sort(byName);
 
   if (getFavoritesDisplayMode() === 'sections' && favorites.length > 0) {
     const favHeading = document.createElement('div');
@@ -2317,6 +2338,150 @@ NOTE_EDITOR_BODY.addEventListener('paste', (e) => {
   insertNoteImageFile(file);
 });
 
+// ---------------------------------------------------------------------
+// Bloques de codigo: fuente monoespaciada, SIN colorear por lenguaje --
+// eso necesitaria una libreria externa (highlight.js o similar) y de
+// momento el frontend entero no tiene ninguna, se dejo fuera a
+// proposito. El nombre del lenguaje (si se pone) se guarda igualmente en
+// data-lang, solo como etiqueta visual (ver CSS) -- por si se anade
+// coloreado de verdad en una ronda futura, ya estaria ahi.
+// ---------------------------------------------------------------------
+
+function isCursorInCodeBlock() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return false;
+  let node = sel.getRangeAt(0).startContainer;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  return !!(node && node.closest('pre, code'));
+}
+
+// Inserta el bloque de codigo con DOM real (createElement + Range),
+// NO con execCommand('insertHTML', ...) como el resto del editor -- con
+// un HTML de varios elementos de golpe (pre+code+br, y el div de
+// despues), insertHTML deja el cursor al final de TODO lo insertado,
+// no dentro de <code> como haria falta para poder escribir el codigo
+// ahi mismo (visto en pruebas: el texto escrito se iba al div de
+// despues, el bloque se quedaba vacio). Insertando los nodos a mano se
+// controla exactamente donde queda el cursor al terminar.
+function insertCodeBlockAtSelection(lang) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+
+  const pre = document.createElement('pre');
+  if (lang) pre.setAttribute('data-lang', lang);
+  const code = document.createElement('code');
+  code.appendChild(document.createElement('br'));
+  pre.appendChild(code);
+
+  // Sitio donde seguir escribiendo FUERA del bloque -- dentro de
+  // <code>, Intro nunca sale solo (ver maybeHandleCodeBlockEnter), asi
+  // que sin esto no habria forma de escribir nada despues de un bloque
+  // que quede al final de la nota.
+  const afterDiv = document.createElement('div');
+  afterDiv.appendChild(document.createElement('br'));
+
+  const fragment = document.createDocumentFragment();
+  fragment.appendChild(pre);
+  fragment.appendChild(afterDiv);
+  range.insertNode(fragment);
+
+  // Cursor DENTRO de <code>, justo antes del <br> -- ahi es donde tiene
+  // que empezar a escribir el codigo.
+  const newRange = document.createRange();
+  newRange.setStart(code, 0);
+  newRange.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(newRange);
+}
+
+// "```" o "```lenguaje" al principio de una linea vacia + Intro
+// convierte esa linea en un bloque de codigo -- estilo Markdown/GitHub.
+// Igual que maybeAutoStartNoteList: solo dispara si es TODO lo que hay
+// en la linea (node.previousSibling === null), no en medio de una frase.
+function maybeAutoStartCodeBlock(e) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  const range = sel.getRangeAt(0);
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE || !NOTE_EDITOR_BODY.contains(node)) return false;
+  if (node.previousSibling) return false;
+  const textBefore = node.textContent.slice(0, range.startOffset);
+  const match = /^```([a-zA-Z0-9+#.-]{0,20})$/.exec(textBefore);
+  if (!match) return false;
+
+  e.preventDefault();
+  const eraseRange = document.createRange();
+  eraseRange.setStart(node, 0);
+  eraseRange.setEnd(node, textBefore.length);
+  eraseRange.deleteContents();
+  // Tras deleteContents() el propio eraseRange queda colapsado justo en
+  // el punto del borrado -- se aplica como la seleccion real del
+  // documento para que insertCodeBlockAtSelection() inserte el bloque
+  // exactamente ahi (borrar con un Range aparte no mueve solo la
+  // seleccion activa).
+  sel.removeAllRanges();
+  sel.addRange(eraseRange);
+  insertCodeBlockAtSelection(match[1]);
+  refreshNoteEditorState();
+  return true;
+}
+
+// Intro DENTRO de un bloque de codigo inserta un salto de linea LITERAL
+// (<br>) sin salir del bloque -- el comportamiento normal de Intro
+// (nuevo <div>/parrafo) rompería la estructura del <pre><code>. Para
+// salir del bloque: clicar debajo (el <div><br></div> que deja
+// buildCodeBlockHtml) o la flecha ↓ al final de la ultima linea, como en
+// cualquier caja de codigo empotrada en una pagina -- no hace falta un
+// atajo especial de "salir".
+function maybeHandleCodeBlockEnter(e) {
+  if (!isCursorInCodeBlock()) return false;
+  e.preventDefault();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return true;
+  const range = sel.getRangeAt(0);
+  if (!range.collapsed) range.deleteContents();
+  // NADA de <br> ni de execCommand('insertHTML', ...) aqui -- probados
+  // los dos en pruebas y ambos dejaban el cursor "entre elementos"
+  // (justo despues del <br>, sin nada de por medio), y ese limite
+  // resulto ser ambiguo: al escribir el texto siguiente, el navegador a
+  // veces lo colaba ANTES del <br> en vez de despues (la segunda linea
+  // se fusionaba con la primera). En vez de eso, se inserta el "\n"
+  // como CARACTER DENTRO de un nodo de texto de verdad (insertData),
+  // nunca como nodo/elemento aparte -- sin limite entre elementos que
+  // pueda confundir al navegador. .note-editor-body pre code ya tiene
+  // white-space:pre-wrap, que respeta los "\n" igual que un <br>.
+  let node = range.startContainer;
+  let offset = range.startOffset;
+  if (node.nodeType !== Node.TEXT_NODE) {
+    // El cursor esta "entre elementos" (recien creado el bloque, o justo
+    // despues de un salto de linea anterior) -- se crea un nodo de texto
+    // ahi mismo para tener donde hacer insertData.
+    const textNode = document.createTextNode('');
+    range.insertNode(textNode);
+    node = textNode;
+    offset = 0;
+  }
+  node.insertData(offset, '\n');
+  const newRange = document.createRange();
+  newRange.setStart(node, offset + 1);
+  newRange.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(newRange);
+  return true;
+}
+
+document.getElementById('note-code-insert-btn').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('note-code-insert-btn').addEventListener('click', () => {
+  // Mismo patron que el boton de Tabla: si el editor nunca tuvo el foco
+  // (nota recien abierta), cae al final del contenido en vez de fallar.
+  saveNoteEditorSelection();
+  restoreNoteEditorSelection();
+  insertCodeBlockAtSelection('');
+  refreshNoteEditorState();
+});
+
 // El estado encendido/apagado de cada boton (y si toca ensenar la barra
 // contextual de tabla) depende de donde este el cursor ahora mismo, asi
 // que se recalcula en cualquier cambio de seleccion o de tecla dentro del
@@ -2337,6 +2502,7 @@ NOTE_EDITOR_BODY.addEventListener('focus', refreshNoteEditorState);
 // chequeo de previousSibling) es "-"/"*" o "1.", lo borra y convierte la
 // linea en un item de lista de verdad en vez de dejar el texto literal.
 function maybeAutoStartNoteList(e) {
+  if (isCursorInCodeBlock()) return; // "- "/"1. " dentro de codigo es texto normal, no una lista
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
   const range = sel.getRangeAt(0);
@@ -2404,6 +2570,10 @@ function maybeIndentNoteListItem(e) {
 // siempre la misma tecla fisica pulsada, sea cual sea el teclado.
 function maybeHandleNoteFormatShortcut(e) {
   if (!e.ctrlKey && !e.metaKey) return false;
+  // Negrita/cursiva/listas no tienen sentido dentro de un bloque de
+  // codigo (que se guarda como texto plano) -- se deja pasar el atajo
+  // tal cual (el navegador no hace nada especial con Ctrl+B ahi).
+  if (isCursorInCodeBlock()) return false;
   const key = e.key.toLowerCase();
   if (key === 'b') { e.preventDefault(); execNoteCommand('bold'); return true; }
   if (key === 'i') { e.preventDefault(); execNoteCommand('italic'); return true; }
@@ -2426,21 +2596,31 @@ function isVimModeEnabled() {
   return localStorage.getItem('vimModeEnabled') === 'true';
 }
 
-// 'insert' | 'normal' -- SOLO importa si isVimModeEnabled(). Empieza
-// siempre en 'insert' al abrir o cambiar de nota activa (ver
+// 'insert' | 'normal' | 'visual' -- SOLO importa si isVimModeEnabled().
+// Empieza siempre en 'insert' al abrir o cambiar de nota activa (ver
 // loadOpenNoteIntoDom), nunca se hereda de la nota anterior.
 let noteEditorVimSubMode = 'insert';
+
+const VIM_MODE_LABELS = { insert: 'INSERTAR', normal: 'NORMAL', visual: 'VISUAL' };
+// Orden en el que va rotando el indicativo al clicarlo (ver mas abajo).
+const VIM_MODE_CYCLE = ['insert', 'normal', 'visual'];
 
 function refreshVimIndicator() {
   const indicator = document.getElementById('note-editor-vim-indicator');
   const show = isVimModeEnabled() && NOTE_EDITOR_BODY.contentEditable !== 'false';
   indicator.classList.toggle('hidden', !show);
   if (!show) return;
-  indicator.textContent = noteEditorVimSubMode === 'normal' ? 'NORMAL' : 'INSERTAR';
-  indicator.classList.toggle('is-normal', noteEditorVimSubMode === 'normal');
+  indicator.textContent = VIM_MODE_LABELS[noteEditorVimSubMode] || VIM_MODE_LABELS.insert;
 }
 
 function setVimSubMode(mode) {
+  // Al SALIR de visual (a cualquier otro modo) se colapsa la seleccion
+  // en vez de dejarla como estaba -- entrar en Normal o Insertar con
+  // media pantalla todavia seleccionada seria confuso.
+  if (noteEditorVimSubMode === 'visual' && mode !== 'visual') {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) sel.collapseToEnd();
+  }
   noteEditorVimSubMode = mode;
   refreshVimIndicator();
 }
@@ -2456,9 +2636,33 @@ document.getElementById('note-editor-vim-toggle-btn').addEventListener('click', 
   setVimSubMode('insert');
 });
 
-function vimMoveCaret(direction, granularity) {
+// El indicativo (INSERTAR/NORMAL/VISUAL) es tambien un boton: clicarlo va
+// rotando entre los 3 modos, como alternativa al teclado (Esc/i/v) para
+// quien prefiera el raton. mousedown con preventDefault, igual que el
+// resto de botones de la barra de estado, para que clicarlo no le quite
+// el foco/seleccion al editor antes de que el click llegue a disparar.
+document.getElementById('note-editor-vim-indicator').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('note-editor-vim-indicator').addEventListener('click', () => {
+  if (!isVimModeEnabled()) return;
+  const next = VIM_MODE_CYCLE[(VIM_MODE_CYCLE.indexOf(noteEditorVimSubMode) + 1) % VIM_MODE_CYCLE.length];
+  if (next === 'visual') vimEnterVisualMode();
+  else setVimSubMode(next);
+  NOTE_EDITOR_BODY.focus();
+});
+
+// action: 'move' (mueve el cursor sin seleccionar, modo Normal) o
+// 'extend' (agranda la seleccion desde donde empezo, modo Visual).
+function vimMoveCaret(direction, granularity, action) {
   const sel = window.getSelection();
-  if (sel) sel.modify('move', direction, granularity);
+  if (sel) sel.modify(action || 'move', direction, granularity);
+}
+
+// Entrar en Visual: si el cursor esta colapsado (sin nada seleccionado
+// todavia), el primer 'extend' de Selection.modify() fija el ancla justo
+// ahi y empieza a agrandar desde ese punto -- no hace falta preparar nada
+// mas a mano.
+function vimEnterVisualMode() {
+  setVimSubMode('visual');
 }
 
 // Borra el bloque de texto (div/p/li) donde este el cursor -- SOLO fuera
@@ -2535,6 +2739,7 @@ function handleVimNormalKeydown(e) {
       break;
     case 'x': document.execCommand('forwardDelete', false, null); break;
     case 'u': document.execCommand('undo', false, null); break;
+    case 'v': vimEnterVisualMode(); break;
     case 'd':
       if (vimPendingD) {
         vimDeleteCurrentLine();
@@ -2551,10 +2756,56 @@ function handleVimNormalKeydown(e) {
   refreshNoteEditorState();
 }
 
+// Se llama SOLO en modo Visual. Las mismas teclas de movimiento que en
+// Normal, pero AGRANDANDO la seleccion en vez de solo mover el cursor
+// (action 'extend' en vez de 'move', ver vimMoveCaret). y/d actuan sobre
+// lo seleccionado y vuelven a Normal solas -- no hace falta pulsar nada
+// mas para salir. Subconjunto minimo a proposito: sin V (seleccion por
+// lineas) ni Ctrl+V (bloque rectangular), que aportan poco en una nota
+// normal frente a lo mucho mas grandes que son de construir bien.
+function handleVimVisualKeydown(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    setVimSubMode('normal'); // esto ya colapsa la seleccion (ver setVimSubMode)
+    return;
+  }
+  if (e.key === 'Tab') return;
+
+  e.preventDefault();
+  switch (e.key) {
+    case 'h': vimMoveCaret('backward', 'character', 'extend'); break;
+    case 'l': vimMoveCaret('forward', 'character', 'extend'); break;
+    case 'j': vimMoveCaret('forward', 'line', 'extend'); break;
+    case 'k': vimMoveCaret('backward', 'line', 'extend'); break;
+    case 'w': vimMoveCaret('forward', 'word', 'extend'); break;
+    case 'b': vimMoveCaret('backward', 'word', 'extend'); break;
+    case '0': vimMoveCaret('left', 'lineboundary', 'extend'); break;
+    case '$': vimMoveCaret('right', 'lineboundary', 'extend'); break;
+    case 'y':
+      document.execCommand('copy');
+      setVimSubMode('normal');
+      break;
+    case 'd':
+      document.execCommand('delete', false, null);
+      setVimSubMode('normal');
+      break;
+    default:
+      break;
+  }
+  refreshNoteEditorState();
+}
+
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
   if (isVimModeEnabled()) {
     if (noteEditorVimSubMode === 'normal') {
       handleVimNormalKeydown(e);
+      return;
+    }
+    if (noteEditorVimSubMode === 'visual') {
+      handleVimVisualKeydown(e);
       return;
     }
     if (e.key === 'Escape') {
@@ -2573,6 +2824,10 @@ NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
   if (maybeHandleNoteFormatShortcut(e)) return;
   if (e.key === ' ') maybeAutoStartNoteList(e);
   else if (e.key === 'Tab') maybeIndentNoteListItem(e);
+  else if (e.key === 'Enter') {
+    if (maybeHandleCodeBlockEnter(e)) return;
+    maybeAutoStartCodeBlock(e);
+  }
 });
 
 // Una nota de antes de la Fase 4 tiene bodyFormat "text": su contenido es
@@ -2869,11 +3124,12 @@ function renderNoteTreeLevel(container, parentId, depth) {
   const activeEntry = findOpenNote(state.activeOpenNoteKey);
   const folders = state.noteFolders
     .filter((f) => f.parentId === parentId)
-    .sort((a, b) => a.position - b.position);
+    .slice()
+    .sort(compareNoteListItems);
   const notes = (state.notes || [])
     .filter((n) => n.folderId === parentId)
     .slice()
-    .sort((a, b) => a.title.localeCompare(b.title));
+    .sort(compareNoteListItems);
 
   folders.forEach((folder) => {
     const expanded = noteTreeExpandedFolderIds.has(folder.id);
@@ -2888,7 +3144,7 @@ function renderNoteTreeLevel(container, parentId, depth) {
 
     const icon = document.createElement('span');
     icon.className = 'note-tree-folder-icon';
-    icon.textContent = folder.icon || '📁';
+    icon.innerHTML = FOLDER_SVG;
     row.appendChild(icon);
 
     const name = document.createElement('span');
@@ -2912,7 +3168,7 @@ function renderNoteTreeLevel(container, parentId, depth) {
 
     const icon = document.createElement('span');
     icon.className = 'note-tree-note-icon';
-    icon.textContent = '📝';
+    icon.innerHTML = NOTE_FILE_SVG;
     row.appendChild(icon);
 
     const name = document.createElement('span');

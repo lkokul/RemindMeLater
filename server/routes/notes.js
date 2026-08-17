@@ -21,8 +21,13 @@ const router = express.Router();
 // apunte a una imagen ya subida a esta misma app (routes/noteImages.js) y
 // no, por ejemplo, a un "data:" (la opcion base64 que se descarto a
 // proposito) o a un servidor externo.
-const ALLOWED_NOTE_TAGS = new Set(['b', 'strong', 'i', 'em', 'ul', 'ol', 'li', 'br', 'div', 'p', 'table', 'colgroup', 'col', 'tbody', 'tr', 'td', 'th', 'img']);
+const ALLOWED_NOTE_TAGS = new Set(['b', 'strong', 'i', 'em', 'ul', 'ol', 'li', 'br', 'div', 'p', 'table', 'colgroup', 'col', 'tbody', 'tr', 'td', 'th', 'img', 'pre', 'code']);
 const NOTE_IMAGE_SRC = /^\/api\/notes\/images\/[a-zA-Z0-9._-]+$/;
+// Bloques de codigo (```lenguaje + Intro, o el boton "Codigo"): el
+// "lenguaje" es solo una etiqueta visual (no hay coloreado de verdad
+// todavia, ver app.js), pero igualmente se valida con una lista blanca
+// de caracteres -- nada de comillas, "<", espacios ni simbolos raros.
+const NOTE_CODE_LANG = /^[a-zA-Z0-9+#.-]{0,20}$/;
 // Redimensionar tablas a mano (columnas/filas, ver el bloque de
 // resize en app.js) guarda el ancho/alto como "style" en <col>/<tr> --
 // la unica forma de que sobreviva al saneado es una lista blanca MUY
@@ -47,8 +52,9 @@ function sanitizeNoteBody(html) {
   let clean = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '');
   // Etiqueta a etiqueta: si no esta en la lista blanca se quita la
   // etiqueta pero se deja lo de dentro; las permitidas se dejan sin
-  // atributos, salvo tres excepciones muy concretas y validadas a mano
-  // (img/src, col+tr/style, table/data-border -- ver mas abajo).
+  // atributos, salvo unas pocas excepciones muy concretas y validadas a
+  // mano (img/src, col+tr/style, table/data-border, pre/data-lang --
+  // ver mas abajo).
   clean = clean.replace(/<(\/?)([a-zA-Z0-9]+)([^>]*)>/g, (match, closing, tag, attrs) => {
     const lower = tag.toLowerCase();
     if (!ALLOWED_NOTE_TAGS.has(lower)) return '';
@@ -76,6 +82,11 @@ function sanitizeNoteBody(html) {
       // (whitelist de un unico literal, no una expresion regular suelta).
       const borderMatch = attrs.match(/\sdata-border\s*=\s*"([^"]*)"/i);
       return borderMatch && borderMatch[1] === 'thick' ? '<table data-border="thick">' : '<table>';
+    }
+    if (lower === 'pre') {
+      const langMatch = attrs.match(/\sdata-lang\s*=\s*"([^"]*)"/i);
+      const lang = langMatch ? langMatch[1] : '';
+      return lang && NOTE_CODE_LANG.test(lang) ? `<pre data-lang="${lang}">` : '<pre>';
     }
     return `<${lower}>`;
   });

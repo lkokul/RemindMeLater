@@ -496,6 +496,13 @@
         <button type="button" data-cmd="insertOrderedList" class="note-editor-btn" aria-label="Lista numerada" title="Lista numerada">1. Lista</button>
         <button type="button" id="note-table-insert-btn" class="note-editor-btn" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
         <button type="button" id="note-image-insert-btn" class="note-editor-btn" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
+        <!-- Bloque de codigo: fuente monoespaciada, SIN colorear por
+             lenguaje (para eso haria falta meter una libreria externa,
+             y de momento el frontend entero no tiene ninguna). Tambien
+             se puede escribir "```lenguaje" + Intro en una linea vacia,
+             estilo GitHub/Markdown -- ver maybeAutoStartCodeBlock en
+             app.js. Este boton inserta uno sin lenguaje asignado. -->
+        <button type="button" id="note-code-insert-btn" class="note-editor-btn" aria-label="Insertar bloque de codigo" title="Insertar bloque de codigo (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
         <!-- Selector de archivo nativo, oculto -- lo abre el boton de
              arriba con .click(). Tambien sirve para el Ctrl+V (ver
              app.js), que reutiliza la misma subida. -->
@@ -517,10 +524,13 @@
         <span class="note-editor-toolbar-spacer"></span>
         <!-- Modo "vim" (opt-in, ajuste por dispositivo en localStorage,
              ver isVimModeEnabled en app.js): Esc entra en modo Normal
-             (movimiento con h/j/k/l, w/b, x, dd, u -- sin escribir),
-             i/a/o vuelven a Insertar. El indicativo solo se ve si el
-             ajuste esta activado. -->
-        <span id="note-editor-vim-indicator" class="note-editor-vim-indicator hidden">INSERTAR</span>
+             (movimiento con h/j/k/l, w/b, x, dd, u -- sin escribir), v
+             entra en Visual (seleccionar con movimiento, y copia, d
+             borra), i/a/o vuelven a Insertar. El indicativo TAMBIEN es
+             un boton: clicarlo va rotando Insertar->Normal->Visual, para
+             quien prefiera el raton al teclado (Esc/i/v). Solo se ve si
+             el ajuste esta activado. -->
+        <button type="button" id="note-editor-vim-indicator" class="note-editor-vim-indicator hidden">INSERTAR</button>
         <button type="button" id="note-editor-vim-toggle-btn" class="note-editor-btn" aria-pressed="false" title="Atajos de movimiento estilo vim (Esc = modo Normal, i/a/o = Insertar)">Vim</button>
         <!-- Alterna entre editar (por defecto, como antes) y solo lectura,
              por si solo quieres consultar la nota sin arriesgarte a

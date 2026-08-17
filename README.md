@@ -113,16 +113,18 @@ texto y tareas:
   tambien en el calendario, con el borde en vez de relleno y un icono
   ☐/☑ que puedes pulsar directamente para marcarlas como hechas sin abrir
   el evento.
-- **Notas**: con formato basico — negrita, cursiva, listas (con vinetas o
-  numeradas), tablas (con botones para anadir/quitar filas y columnas) e
-  imagenes (desde archivo o pegando con Ctrl+V una captura/imagen
-  copiada). Cada imagen se sube al servidor y se guarda como archivo
-  aparte (no como texto dentro de la nota), asi que cargar la lista de
-  notas sigue siendo rapido aunque tengan fotos. Una nota se puede ocultar
-  (icono de ojo) y, opcionalmente, proteger con una contraseña compartida
-  para todas las notas ocultas de la app (no es cifrado real, es una
-  proteccion sencilla para que no se vea el contenido de un vistazo).
-  Tambien se puede marcar como favorita (estrella).
+- **Notas**: editor de texto con formato, a pantalla completa (ver
+  "Editor de notas" mas abajo) — negrita, cursiva, listas (con vinetas o
+  numeradas, con auto-inicio al escribir y anidado con Tab), tablas de
+  tamano fijo redimensionables, bloques de codigo e imagenes (desde
+  archivo o pegando con Ctrl+V una captura/imagen copiada). Cada imagen
+  se sube al servidor y se guarda como archivo aparte (no como texto
+  dentro de la nota), asi que cargar la lista de notas sigue siendo
+  rapido aunque tengan fotos. Una nota se puede ocultar (icono de ojo) y,
+  opcionalmente, proteger con una contraseña compartida para todas las
+  notas ocultas de la app (no es cifrado real, es una proteccion sencilla
+  para que no se vea el contenido de un vistazo). Tambien se puede marcar
+  como favorita (estrella).
 - **Carpetas**: para organizar las notas, con nombre y color propios. Las
   carpetas pueden contener otras carpetas — la navegacion es como un
   explorador de archivos (Windows/Finder): ves el contenido de la carpeta
@@ -131,13 +133,17 @@ texto y tareas:
   nueva estando dentro de otra carpeta la coloca ahi por defecto. Borrar
   una carpeta no borra lo que hay dentro: sus notas y subcarpetas suben un
   nivel en vez de desaparecer. Tambien se pueden marcar como favoritas.
+  Tanto en el listado clasico como en el arbol del editor, el orden es
+  siempre carpetas primero, favoritos primero dentro de cada grupo, y
+  alfabetico dentro de cada uno.
 - **Favoritos**: tanto notas como carpetas se pueden marcar con una
   estrella para que aparezcan destacadas en su listado. Por dispositivo
   puedes elegir si se mezclan con el resto (favoritos primero, sin
   cabecera) o se separan en dos secciones ("Favoritos" / "Todo lo demas").
-- **Buscar**: una barra de texto encima del listado de notas filtra por
-  nombre dentro de la carpeta donde estes (no busca en toda la app de
-  golpe).
+- **Buscar**: una barra de texto encima del listado de notas busca por
+  nombre en TODA la app por defecto (mostrando la ruta de carpeta de cada
+  resultado); un boton "Solo esta carpeta" la limita a la carpeta donde
+  estes, como antes.
 - **Ctrl+Intro** guarda directamente desde los modales de nota, evento y
   tarea, sin tener que ir a buscar el boton "Guardar" con el raton.
 
@@ -147,6 +153,43 @@ pantalla propia a pantalla completa con un boton "← Home" para volver
 elegir que secciones (Recordatorios/Tareas/Notas) se agrupan juntas en un
 solo hueco con flechas para alternar entre ellas, y cuales se quedan
 sueltas y siempre visibles.
+
+### Editor de notas
+
+Al abrir una nota, ocupa toda la pantalla (no un cuadro pequeño como
+antes):
+
+- **Varias notas abiertas a la vez**: el panel "Notas" (rail lateral)
+  lista las notas que tienes abiertas, con un punto si tienen cambios sin
+  guardar, y las puedes cerrar una a una. Cambiar entre ellas no pierde lo
+  que estabas escribiendo en las demas.
+- **Árbol**: el otro panel del rail muestra todas tus carpetas y notas
+  para saltar directamente a cualquiera sin volver a "Mi espacio".
+- **Modo lectura**: alterna entre editar y solo consultar la nota (el
+  texto deja de parecer un campo editable).
+- **Formato**: negrita, cursiva y listas por botones o por atajo
+  (Ctrl+B, Ctrl+I, Ctrl+Mayus+7/8). Escribir `"- "` o `"1. "` al
+  principio de una linea vacia la convierte en lista automaticamente;
+  Tab/Mayus+Tab anida o desanida un nivel.
+- **Tablas**: tamaño fijo desde que se insertan (no se autoajustan al
+  escribir). Se redimensionan arrastrando el borde de una fila o columna;
+  doble clic en un borde ajusta esa fila/columna al contenido. Un boton
+  "Borde" alterna entre borde fino y grueso para toda la tabla. Con el
+  cursor dentro aparecen botones para anadir/quitar filas y columnas.
+- **Bloques de codigo**: boton "Código", o escribir ` ```lenguaje ` +
+  Intro en una linea vacia (estilo GitHub/Markdown). Fuente monoespaciada
+  sin coloreado por sintaxis (el frontend no usa ninguna libreria
+  externa); el nombre del lenguaje se muestra como etiqueta.
+- **Modo "vim"** (opt-in, boton "Vim" en la barra del editor): activa
+  atajos de movimiento estilo vim ademas de los de formato de siempre.
+  `Esc` entra en modo Normal (`h/j/k/l` mover, `w`/`b` palabra, `0`/`$`
+  inicio/fin de linea, `x` borrar caracter, `dd` borrar linea, `u`
+  deshacer, `i`/`a`/`o` vuelven a Insertar). `v` entra en modo Visual
+  (mover para seleccionar, `y` copia, `d` borra). Un indicativo en la
+  barra ("INSERTAR"/"NORMAL"/"VISUAL") muestra siempre en que modo estas
+  — tambien es un boton, clicarlo rota entre los tres modos si prefieres
+  el raton al teclado. Los botones de formato/tabla/imagen funcionan
+  igual en cualquier modo (a diferencia del vim real).
 
 ## App de escritorio (Electron)
 
@@ -197,6 +240,13 @@ Cada evento o tarea con fecha puede tener un recordatorio (en el momento,
   distinta (si se puede mover una nota entre carpetas desde su propio
   editor).
 - La app de escritorio (Electron) solo genera instalador para Windows.
-- Las extensiones de gimnasio y finanzas de las que hablamos no estan
-  incluidas aqui; se pueden anadir despues como secciones nuevas sin tocar
-  el calendario.
+- Hay un boton "Extensiones" (topbar) que de momento solo abre una
+  pantalla "Próximamente" con tarjetas deshabilitadas — las extensiones
+  de gimnasio y finanzas de las que hablamos no estan incluidas aqui
+  todavia; se pueden anadir despues como secciones nuevas sin tocar el
+  calendario.
+- Redimensionar tablas de notas es solo con raton (arrastrar bordes) —
+  no hay equivalente tactil todavia, queda para la rama de movil.
+- El modo "vim" del editor de notas es un subconjunto pequeño a
+  proposito (sin registros con nombre, macros, `:` comandos, `yy`/`p`,
+  repetir con numeros) — se puede ampliar mas adelante segun haga falta.

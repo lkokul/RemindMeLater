@@ -178,19 +178,24 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 /* Empuja los botones de la derecha (Vim, Modo lectura) al extremo de la
    barra de estado, separados del resto de botones de formato. */
 .note-editor-toolbar-spacer { flex: 1; }
-/* Indicativo de modo Normal/Insertar del modo vim (opt-in) -- Normal se
-   marca con el color de acento para que sea imposible no darse cuenta
-   de que las teclas no van a escribir nada en ese momento. */
+/* Indicativo de modo Insertar/Normal/Visual del modo vim (opt-in) --
+   mismo color siempre, solo cambia el texto (INSERTAR/NORMAL/VISUAL):
+   asi el ojo no tiene que aprender un segundo codigo de colores aparte
+   del texto, que ya dice el modo sin ambiguedad. */
+/* Es un <button> (para poder clicarlo y rotar de modo) -- border:none
+   quita el borde que el reset global de <button> (styles.css:81-89) le
+   pondria por defecto, para que se siga viendo como la pastilla de
+   siempre. */
 .note-editor-vim-indicator {
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   padding: 0.2rem 0.5rem;
+  border: none;
   border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--surface-2-text);
+  background: var(--accent);
+  color: var(--accent-text);
 }
-.note-editor-vim-indicator.is-normal { background: var(--accent); color: var(--accent-text); }
 /* Modo lectura (por nota abierta, ver applyNoteEditorReadMode en app.js):
    el cuerpo deja de parecer un campo editable y el titulo se atenua un
    poco, para que se note a simple vista que no se puede tocar nada. */
@@ -279,7 +284,7 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .note-tree-row:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .note-tree-note-row.is-active { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 .note-tree-toggle { flex-shrink: 0; width: 0.9rem; text-align: center; font-size: 0.7rem; }
-.note-tree-folder-icon, .note-tree-note-icon { flex-shrink: 0; }
+.note-tree-folder-icon, .note-tree-note-icon { flex-shrink: 0; display: flex; align-items: center; color: color-mix(in srgb, var(--bg-text) 55%, var(--bg)); }
 .note-tree-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .note-sections-list { display: flex; flex-direction: column; gap: 0.2rem; }
 .note-open-item {
@@ -335,6 +340,38 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    en cualquier pagina sin CSS propio para <ul>/<ol>. */
 .note-editor-body ul, .note-editor-body ol { padding-left: 1.4rem; margin: 0.4rem 0; }
 .note-editor-body p, .note-editor-body div { margin: 0; }
+
+/* Bloques de codigo: fuente monoespaciada, SIN colorear por lenguaje
+   (ver la nota de app.js/notes.js sobre por que). "data-lang" (si se
+   puso, ej. escribiendo "```js" + Intro) se ensena como una etiqueta
+   pequena en la esquina, con pure CSS (attr()) -- no hace falta ningun
+   elemento extra en el HTML de la nota para eso. */
+.note-editor-body pre {
+  position: relative;
+  margin: 0.5rem 0;
+  padding: 0.7rem 0.8rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.note-editor-body pre code {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.85rem;
+  color: var(--surface-2-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.note-editor-body pre[data-lang]::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 0.3rem;
+  right: 0.6rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--surface-2-text) 55%, var(--surface-2));
+}
 
 /* Tablas dentro de una nota: sin clase propia a proposito -- el saneado
    del servidor (sanitizeNoteBody en routes/notes.js) quita cualquier
