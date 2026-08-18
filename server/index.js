@@ -15,6 +15,7 @@ const specialDaysRouter = require('./routes/specialDays');
 const notesRouter = require('./routes/notes');
 const notesSecurityRouter = require('./routes/notesSecurity');
 const noteFoldersRouter = require('./routes/noteFolders');
+const syncRouter = require('./routes/sync');
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startMdns } = require('./mdns');
@@ -45,6 +46,9 @@ app.use('/api/special-days', requireDeviceOrTrusted, specialDaysRouter);
 app.use('/api/notes', requireDeviceOrTrusted, notesRouter);
 app.use('/api/notes-security', requireDeviceOrTrusted, notesSecurityRouter);
 app.use('/api/note-folders', requireDeviceOrTrusted, noteFoldersRouter);
+// Sincronizacion movil (fase "movil"): mismo nivel de acceso que el
+// resto de rutas de datos, sin mecanismo de autenticacion nuevo.
+app.use('/api/sync', requireDeviceOrTrusted, syncRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);

@@ -1535,6 +1535,7 @@ function refreshMobileTab() {
     localStorage.getItem('updateCheckEnabled') !== 'false';
 
   refreshCompletedTasksDisplayOptions();
+  refreshSyncStatusUI();
 }
 
 // "Salir de la aplicacion": vive como accion directa en la lista principal

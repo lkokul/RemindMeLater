@@ -138,6 +138,26 @@ db.exec(`
     position INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Registro de cambios para la sincronizacion movil-ordenador (fase
+  -- "movil"): cada vez que se crea/edita/borra algo en events, notes,
+  -- groups, note_folders o special_days, se anade UNA fila aqui (ver
+  -- recordSyncChange() mas abajo). El propio "id" de esta tabla hace de
+  -- cursor -- un dispositivo recuerda "el ultimo id que ya vi" y pide
+  -- "todo lo que tenga id mayor que ese" (routes/sync.js). "payload" es
+  -- el mismo JSON que ya devuelve la ruta REST normal para esa fila (o
+  -- NULL si op='delete': un borrado no tiene contenido, solo hace falta
+  -- saber que paso). Es una tabla que solo CRECE (nunca se edita una
+  -- fila ya escrita), asi que sirve tanto de historial como de cursor.
+  CREATE TABLE IF NOT EXISTS sync_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name TEXT NOT NULL,
+    row_id TEXT NOT NULL,
+    op TEXT NOT NULL CHECK (op IN ('upsert', 'delete')),
+    payload TEXT,
+    device_origin TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Migracion sencilla: group_id y active_theme_id se anadieron despues de
@@ -275,6 +295,42 @@ if (!noteColumns.includes('favorite')) {
 }
 if (!noteFolderColumns.includes('favorite')) {
   db.exec('ALTER TABLE note_folders ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0');
+}
+
+// updated_at para sincronizacion (fase "movil"): groups y note_folders
+// solo tenian created_at hasta ahora. SQLite no deja poner
+// datetime('now') como DEFAULT al anadir una columna con ALTER TABLE
+// (solo admite constantes), asi que se anade SIN default y se rellena
+// aparte con un UPDATE -- a partir de aqui, cada PUT de estas rutas
+// tiene que poner updated_at = datetime('now') a mano, igual que ya
+// hacen events/notes (ver routes/groups.js y routes/noteFolders.js).
+if (!groupColumns.includes('updated_at')) {
+  db.exec('ALTER TABLE groups ADD COLUMN updated_at TEXT');
+  db.exec("UPDATE groups SET updated_at = created_at WHERE updated_at IS NULL");
+}
+if (!noteFolderColumns.includes('updated_at')) {
+  db.exec('ALTER TABLE note_folders ADD COLUMN updated_at TEXT');
+  db.exec("UPDATE note_folders SET updated_at = created_at WHERE updated_at IS NULL");
+}
+
+// special_days no tenia ningun timestamp (su clave es la propia fecha
+// marcada, no un id). Para poder sincronizar hacen falta los dos, igual
+// que en el resto de tablas.
+const specialDayColumns = db.prepare('PRAGMA table_info(special_days)').all().map((c) => c.name);
+if (!specialDayColumns.includes('created_at')) {
+  db.exec('ALTER TABLE special_days ADD COLUMN created_at TEXT');
+  db.exec("UPDATE special_days SET created_at = datetime('now') WHERE created_at IS NULL");
+}
+if (!specialDayColumns.includes('updated_at')) {
+  db.exec('ALTER TABLE special_days ADD COLUMN updated_at TEXT');
+  db.exec("UPDATE special_days SET updated_at = datetime('now') WHERE updated_at IS NULL");
+}
+
+// last_sync_seq: hasta que fila de sync_log ha traido ya este
+// dispositivo emparejado (ver routes/sync.js) -- 0 significa "todavia
+// no ha sincronizado nada, mandale el historial completo".
+if (!deviceColumns.includes('last_sync_seq')) {
+  db.exec('ALTER TABLE devices ADD COLUMN last_sync_seq INTEGER NOT NULL DEFAULT 0');
 }
 
 // El perfil siempre tiene que existir (para poder firmar "creado por" en
@@ -459,5 +515,31 @@ for (const theme of SEED_THEMES) {
     seedTheme.run(theme.name, JSON.stringify(theme.colors), theme.inverseColors ? JSON.stringify(theme.inverseColors) : null);
   }
 }
+
+// ---------------------------------------------------------------------
+// Sincronizacion movil (fase "movil"): cada ruta que crea/edita/borra
+// una fila de una tabla sincronizable llama a esto UNA vez al final,
+// justo despues de la operacion en la base de datos -- ver
+// routes/sync.js para como se leen estas filas, y routes/events.js,
+// notes.js, groups.js, noteFolders.js, specialDays.js para donde se
+// llama. "payload" es el mismo objeto ya serializado (camelCase) que
+// esa ruta le devuelve al que hizo la peticion, para no tener que
+// convertir el formato dos veces. "originDeviceId" es null/undefined si
+// el cambio lo hizo el propio ordenador (dispositivo de confianza), o
+// el id numerico del dispositivo movil si lo hizo el movil -- asi un
+// dispositivo puede reconocer y no re-aplicarse sus propios cambios al
+// leer el historial.
+const recordSyncChangeStmt = db.prepare(
+  'INSERT INTO sync_log (table_name, row_id, op, payload, device_origin) VALUES (?, ?, ?, ?, ?)'
+);
+db.recordSyncChange = function recordSyncChange(tableName, rowId, op, payload, originDeviceId) {
+  recordSyncChangeStmt.run(
+    tableName,
+    String(rowId),
+    op,
+    payload ? JSON.stringify(payload) : null,
+    originDeviceId ? String(originDeviceId) : null
+  );
+};
 
 module.exports = db;

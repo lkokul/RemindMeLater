@@ -24,8 +24,11 @@ router.put('/:date', (req, res) => {
 
   const { type } = req.body || {};
 
+  const originId = req.device ? req.device.id : null;
+
   if (type === null || type === undefined) {
     db.prepare('DELETE FROM special_days WHERE date = ?').run(date);
+    db.recordSyncChange('special_days', date, 'delete', null, originId);
     return res.json({ date, type: null });
   }
 
@@ -34,8 +37,9 @@ router.put('/:date', (req, res) => {
   }
 
   db.prepare(
-    'INSERT INTO special_days (date, type) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET type = excluded.type'
+    "INSERT INTO special_days (date, type, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now')) ON CONFLICT(date) DO UPDATE SET type = excluded.type, updated_at = datetime('now')"
   ).run(date, type);
+  db.recordSyncChange('special_days', date, 'upsert', { date, type }, originId);
   res.json({ date, type });
 });
 

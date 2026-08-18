@@ -746,6 +746,16 @@
         <h4>Tareas completadas</h4>
         <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>
         <div id="completed-tasks-display-options" class="view-mode-options"></div>
+
+        <!-- Fase "movil": este dispositivo guarda su propia copia de los
+             datos y se sincroniza con el ordenador cuando coincidis en la
+             misma wifi -- ver "Sincronizacion" en app.js. Este boton deja
+             comprobar con tus propios ojos que funciono, ya que es un
+             mecanismo nuevo. -->
+        <h4>Sincronización</h4>
+        <p class="hint">Este dispositivo guarda su propia copia de los datos y se pone al día con el ordenador cuando coincidís en la misma wifi.</p>
+        <p id="sync-status" class="hint"></p>
+        <button type="button" id="btn-sync-now" class="secondary-btn">Sincronizar ahora</button>
       </div>
 
       <!-- --- Atajos de teclado (ajuste local, no compartido) --- -->
@@ -795,6 +805,7 @@
     </div>
   </div>
 
+  <script src="db-local.js"></script>
   <script src="app.js"></script>
   <script src="settings.js"></script>
 </body>
