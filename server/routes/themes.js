@@ -162,7 +162,7 @@ function serialize(row) {
       inverseColors = null;
     }
   }
-  return { id: row.id, name: row.name, colors: sanitizeColors(colors), inverseColors };
+  return { id: row.id, name: row.name, colors: sanitizeColors(colors), inverseColors, updatedAt: row.updated_at };
 }
 
 router.get('/', (req, res) => {
@@ -176,7 +176,7 @@ router.post('/', (req, res) => {
     return res.status(400).json({ error: 'invalid_request', message: 'El tema necesita un nombre.' });
   }
   const info = db
-    .prepare('INSERT INTO themes (name, colors, inverse_colors) VALUES (?, ?, ?)')
+    .prepare("INSERT INTO themes (name, colors, inverse_colors, updated_at) VALUES (?, ?, ?, datetime('now'))")
     .run(
       name.trim(),
       JSON.stringify(sanitizeColors(colors)),
@@ -184,7 +184,9 @@ router.post('/', (req, res) => {
     );
 
   const row = db.prepare('SELECT * FROM themes WHERE id = ?').get(info.lastInsertRowid);
-  res.status(201).json(serialize(row));
+  const serialized = serialize(row);
+  db.recordSyncChange('themes', row.id, 'upsert', serialized, req.device ? req.device.id : null);
+  res.status(201).json(serialized);
 });
 
 router.put('/:id', (req, res) => {
@@ -194,7 +196,7 @@ router.put('/:id', (req, res) => {
   const { name, colors, inverseColors } = req.body || {};
   const existingColors = JSON.parse(existing.colors);
 
-  db.prepare('UPDATE themes SET name = ?, colors = ?, inverse_colors = ? WHERE id = ?').run(
+  db.prepare("UPDATE themes SET name = ?, colors = ?, inverse_colors = ?, updated_at = datetime('now') WHERE id = ?").run(
     name !== undefined && name.trim() ? name.trim() : existing.name,
     JSON.stringify(sanitizeColors(colors !== undefined ? colors : existingColors)),
     inverseColors !== undefined ? (inverseColors ? JSON.stringify(sanitizeInverseColors(inverseColors)) : null) : existing.inverse_colors,
@@ -202,7 +204,9 @@ router.put('/:id', (req, res) => {
   );
 
   const row = db.prepare('SELECT * FROM themes WHERE id = ?').get(req.params.id);
-  res.json(serialize(row));
+  const serialized = serialize(row);
+  db.recordSyncChange('themes', row.id, 'upsert', serialized, req.device ? req.device.id : null);
+  res.json(serialized);
 });
 
 router.delete('/:id', (req, res) => {
@@ -214,6 +218,7 @@ router.delete('/:id', (req, res) => {
 
   const info = db.prepare('DELETE FROM themes WHERE id = ?').run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
+  db.recordSyncChange('themes', req.params.id, 'delete', null, req.device ? req.device.id : null);
   res.status(204).end();
 });
 
@@ -276,3 +281,12 @@ router.put('/selection/mine', (req, res) => {
 });
 
 module.exports = router;
+// Se exportan tambien estas funciones (ademas del router) para que
+// routes/sync.js pueda reutilizar EXACTAMENTE el mismo saneado de
+// colores (incluida la red de seguridad de contraste WCAG) al aplicar un
+// tema que llega sincronizado desde el movil -- duplicar esta logica a
+// mano en otro archivo seria arriesgado, es justo el tipo de bug de
+// contraste que ya se dio una vez (ver CLAUDE.md).
+module.exports.sanitizeColors = sanitizeColors;
+module.exports.sanitizeInverseColors = sanitizeInverseColors;
+module.exports.serializeTheme = serialize;

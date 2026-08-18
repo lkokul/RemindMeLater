@@ -95,6 +95,31 @@ button {
    cambia de tamano al alternar, empujando "+ Nuevo evento" al lado. */
 #btn-quick-color-mode { width: 2.6rem; text-align: center; flex-shrink: 0; }
 
+/* Punto de sincronizacion (fase "movil"): pequeno de proposito, es un
+   vistazo rapido, no un panel -- el detalle de verdad (fecha, cambios
+   pendientes, mensaje de error) esta en Configuracion > Este
+   dispositivo. Colores con significado fijo, no siguen el tema. */
+.sync-indicator {
+  padding: 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border-color: transparent;
+  flex-shrink: 0;
+}
+.sync-indicator-dot {
+  display: block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: #9aa0a6; /* gris por defecto, antes de la primera sincronizacion */
+}
+.sync-indicator[data-status="synced"] .sync-indicator-dot { background: #2ecc71; }
+.sync-indicator[data-status="pending"] .sync-indicator-dot { background: #f5b400; }
+.sync-indicator[data-status="offline"] .sync-indicator-dot { background: #9aa0a6; }
+.sync-indicator[data-status="error"] .sync-indicator-dot { background: #e5484d; }
+
 input, textarea, select {
   font: inherit;
   background: var(--surface-2);

@@ -262,7 +262,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'devices', 'mobile', 'shortcuts', 'notes'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'devices', 'mobile', 'shortcuts'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -282,7 +282,6 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     else if (tab === 'devices') refreshDevicesTab();
     else if (tab === 'mobile') refreshMobileTab();
     else if (tab === 'shortcuts') refreshShortcutsTab();
-    else if (tab === 'notes') refreshNotesTab();
   });
 });
 
@@ -1710,58 +1709,6 @@ function refreshShortcutsTab() {
   renderShortcutsList();
 }
 
-// ---------------------------------------------------------------------
-// Notas: ocultar con contraseña -- ajuste COMPARTIDO (no por
-// dispositivo). notesSecurityState y refreshNotesSecurityState() viven
-// en app.js (junto al resto de la logica de ocultar/destapar notas),
-// aqui solo se dibuja la pestaña.
-// ---------------------------------------------------------------------
-async function refreshNotesTab() {
-  await refreshNotesSecurityState();
-  document.getElementById('setting-notes-password-enabled').checked = notesSecurityState.passwordEnabled;
-  document.getElementById('notes-password-form-wrap').classList.toggle('hidden', !notesSecurityState.passwordEnabled);
-  document.getElementById('notes-password-form-heading').textContent = notesSecurityState.hasPassword ? 'Cambiar contraseña' : 'Elige una contraseña';
-  document.getElementById('notes-current-password-label').classList.toggle('hidden', !notesSecurityState.hasPassword);
-  document.getElementById('notes-password-form').reset();
-  document.getElementById('notes-password-form-error').classList.add('hidden');
-}
-
-document.getElementById('setting-notes-password-enabled').addEventListener('change', async (e) => {
-  await api('/api/notes-security', { method: 'PUT', body: JSON.stringify({ enabled: e.target.checked }) });
-  await refreshNotesTab();
-});
-
-document.getElementById('notes-password-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const errorEl = document.getElementById('notes-password-form-error');
-  errorEl.classList.add('hidden');
-
-  const currentPassword = document.getElementById('notes-current-password').value;
-  const newPassword = document.getElementById('notes-new-password').value;
-  const confirmPassword = document.getElementById('notes-confirm-password').value;
-
-  if (!newPassword) {
-    errorEl.textContent = 'Escribe una contraseña.';
-    errorEl.classList.remove('hidden');
-    return;
-  }
-  if (newPassword !== confirmPassword) {
-    errorEl.textContent = 'Las dos contraseñas no coinciden.';
-    errorEl.classList.remove('hidden');
-    return;
-  }
-
-  try {
-    await api('/api/notes-security/password', {
-      method: 'POST',
-      body: JSON.stringify({ currentPassword, newPassword }),
-    });
-    await refreshNotesTab();
-  } catch (err) {
-    errorEl.textContent = err.message || 'No se pudo guardar la contraseña.';
-    errorEl.classList.remove('hidden');
-  }
-});
 
 // ---------------------------------------------------------------------
 // Esc: hace lo mismo que cerrar / clicar fuera, capa a capa — primero lo
@@ -1806,18 +1753,6 @@ document.addEventListener('keydown', (e) => {
   const noteFolderModal = document.getElementById('note-folder-modal');
   if (noteFolderModal && !noteFolderModal.classList.contains('hidden')) {
     closeNoteFolderModal();
-    return;
-  }
-
-  const notesVerifyModal = document.getElementById('notes-verify-modal');
-  if (notesVerifyModal && !notesVerifyModal.classList.contains('hidden')) {
-    closeNotesVerifyModal();
-    return;
-  }
-
-  const notesSetupPasswordModal = document.getElementById('notes-setup-password-modal');
-  if (notesSetupPasswordModal && !notesSetupPasswordModal.classList.contains('hidden')) {
-    closeNotesSetupPasswordModal();
     return;
   }
 

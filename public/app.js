@@ -456,6 +456,11 @@ const SYNC_TABLE_ROUTES = [
   { table: 'groups', store: 'groups', collectionRe: /^\/api\/groups$/, itemRe: /^\/api\/groups\/(\d+)$/ },
   { table: 'note_folders', store: 'noteFolders', collectionRe: /^\/api\/note-folders$/, itemRe: /^\/api\/note-folders\/(\d+)$/ },
   { table: 'special_days', store: 'specialDays', collectionRe: /^\/api\/special-days$/, itemRe: /^\/api\/special-days\/([^/]+)$/ },
+  // Solo la BIBLIOTECA (/api/themes, /api/themes/:id) -- /api/themes/selection
+  // y /api/themes/selection/mine (que tema usa CADA dispositivo) no
+  // encajan en ninguno de los dos patrones de abajo a proposito, asi que
+  // se quedan fuera de la copia local (eso sigue siendo por dispositivo).
+  { table: 'themes', store: 'themes', collectionRe: /^\/api\/themes$/, itemRe: /^\/api\/themes\/(\d+)$/ },
 ];
 
 function matchSyncRoute(pathname) {
@@ -512,6 +517,8 @@ async function offlineRead(route, url) {
     rows.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
   } else if (route.store === 'groups' || route.store === 'noteFolders') {
     rows.sort((a, b) => (a.position || 0) - (b.position || 0));
+  } else if (route.store === 'themes') {
+    rows.sort((a, b) => (a.id || 0) - (b.id || 0));
   }
   return rows;
 }
@@ -592,6 +599,15 @@ async function buildOptimisticRecord(route, id, fields) {
       updatedAt: now,
     };
   }
+  if (route.store === 'themes') {
+    return {
+      id,
+      name: fields.name || '',
+      colors: fields.colors || {},
+      inverseColors: fields.inverseColors ?? null,
+      updatedAt: now,
+    };
+  }
   // specialDays
   return { date: id, type: fields.type };
 }
@@ -659,7 +675,7 @@ function buildAuthHeaders() {
   return headers;
 }
 
-const SYNC_STORE_BY_TABLE = { events: 'events', notes: 'notes', groups: 'groups', note_folders: 'noteFolders', special_days: 'specialDays' };
+const SYNC_STORE_BY_TABLE = { events: 'events', notes: 'notes', groups: 'groups', note_folders: 'noteFolders', special_days: 'specialDays', themes: 'themes' };
 
 async function applyRemoteChange(change) {
   const store = SYNC_STORE_BY_TABLE[change.tableName];
@@ -673,9 +689,12 @@ async function applyRemoteChange(change) {
 
 // Trae del servidor todo lo que haya cambiado desde el ultimo cursor
 // que recordamos (metaGet('syncCursor')), pagina a pagina, y lo aplica a
-// la copia local. Si el ordenador no esta alcanzable, simplemente no
-// pasa nada (se reintenta la proxima vez) -- por eso no hace falta
-// comprobar antes si hay conexion.
+// la copia local. Devuelve como fue: { ok:true } si todo bien, o
+// { ok:false, offline:true } si no se pudo ni conectar (lo normal y
+// esperado si el ordenador no esta cerca), o { ok:false, message } si
+// el ordenador SI respondio pero con un error de verdad -- eso ultimo
+// es lo que refreshSyncIndicator() ensena en rojo, para no dejarlo
+// pasar en silencio.
 async function pullChanges() {
   let cursor = (await metaGet('syncCursor')) || 0;
   let hasMore = true;
@@ -684,9 +703,12 @@ async function pullChanges() {
     try {
       res = await fetch(`/api/sync/pull?since=${cursor}&limit=500`, { headers: buildAuthHeaders() });
     } catch {
-      return;
+      return { ok: false, offline: true };
     }
-    if (!res.ok) return;
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { ok: false, message: body.message || `Error del servidor al traer cambios (código ${res.status}).` };
+    }
     const data = await res.json();
     for (const change of data.changes) {
       await applyRemoteChange(change);
@@ -696,6 +718,7 @@ async function pullChanges() {
   }
   await metaSet('syncCursor', cursor);
   await metaSet('lastSyncedAt', new Date().toISOString());
+  return { ok: true };
 }
 
 // Manda los cambios pendientes de este dispositivo (cola _outbox), UNO A
@@ -710,10 +733,11 @@ async function pullChanges() {
 // idas y vueltas en vez de una sola no se nota.
 async function pushOutbox() {
   const pending = await outboxAll();
-  if (!pending.length) return;
+  if (!pending.length) return { ok: true };
 
   const tmpIdMap = new Map();
   const remapId = (id) => (typeof id === 'number' && id < 0 && tmpIdMap.has(id) ? tmpIdMap.get(id) : id);
+  let rejectedCount = 0;
 
   for (const entry of pending) {
     const payload = entry.payload ? Object.assign({}, entry.payload) : entry.payload;
@@ -739,9 +763,12 @@ async function pushOutbox() {
         body: JSON.stringify({ changes: [change] }),
       });
     } catch {
-      return; // se corto la conexion a media cola -- lo que queda se reintenta entero la proxima vez
+      return { ok: false, offline: true }; // se corto la conexion a media cola -- lo que queda se reintenta entero la proxima vez
     }
-    if (!res.ok) return;
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { ok: false, message: body.message || `Error del servidor al mandar cambios (código ${res.status}).` };
+    }
     const { results } = await res.json();
     const result = results[0];
     const store = SYNC_STORE_BY_TABLE[entry.table];
@@ -756,28 +783,71 @@ async function pushOutbox() {
       } else if (entry.op === 'delete') {
         await localDelete(store, remapId(entry.rowId));
       }
+    } else if (result.status === 'rejected') {
+      // No hay forma automatica de arreglar un dato invalido desde aqui,
+      // y no se quiere atascar la cola entera por un cambio malo -- se
+      // descarta, pero se cuenta para poder avisar de que algo se perdio
+      // (en vez de quedarse callado, ver computeSyncOutcome).
+      rejectedCount += 1;
     }
-    // 'rejected': se descarta sin mas -- no hay forma automatica de
-    // arreglar un dato invalido desde aqui, y no se quiere atascar la
-    // cola entera por un cambio malo.
     await outboxRemove(entry.localOpId);
   }
+
+  return rejectedCount > 0
+    ? { ok: true, message: `${rejectedCount} cambio${rejectedCount === 1 ? '' : 's'} sin conseguir mandar (datos no válidos) y se descartó.` }
+    : { ok: true };
+}
+
+// Resultado de la ULTIMA vez que se intento sincronizar -- lo lee el
+// punto de la topbar (refreshSyncIndicator) y el texto de Configuracion
+// (refreshSyncStatusUI). No se guarda entre sesiones a proposito (si
+// recargas la pagina, se vuelve a calcular en el primer runSync() de
+// init() en vez de ensenar un estado quiza ya viejo).
+let lastSyncOutcome = { status: 'unknown', message: '' };
+
+// Decide el estado final combinando lo que paso en pushOutbox()/
+// pullChanges() (ver sus comentarios: cada uno devuelve si fue bien,
+// si fue por falta de conexion, o si hubo un error de verdad) con si
+// queda algo pendiente en la cola.
+async function computeSyncOutcome(pushResult, pullResult) {
+  if (pushResult.offline || pullResult.offline) {
+    lastSyncOutcome = { status: 'offline', message: 'Sin conexión con el ordenador ahora mismo.' };
+    return;
+  }
+  if (!pushResult.ok || !pullResult.ok) {
+    lastSyncOutcome = { status: 'error', message: (!pushResult.ok && pushResult.message) || (!pullResult.ok && pullResult.message) || 'Error al sincronizar.' };
+    return;
+  }
+  if (pushResult.message) {
+    // Se pudo conectar y sincronizar, pero algun cambio se rechazo por
+    // datos invalidos -- no es un fallo de conexion, pero tampoco es
+    // "todo perfecto", asi que se ensena igual que un error de verdad.
+    lastSyncOutcome = { status: 'error', message: pushResult.message };
+    return;
+  }
+  const pending = await outboxAll();
+  lastSyncOutcome = pending.length
+    ? { status: 'pending', message: `${pending.length} cambio${pending.length === 1 ? '' : 's'} pendiente${pending.length === 1 ? '' : 's'} de mandar.` }
+    : { status: 'synced', message: '' };
 }
 
 async function runSync() {
   if (syncInProgress) return;
   syncInProgress = true;
   try {
-    await pushOutbox();
-    await pullChanges();
-    refreshSyncStatusUI();
-  } catch {
-    // Silencioso a proposito: runSync se llama "a lo tonto" al arrancar,
-    // cada 30s y al volver la conexion -- no tiene sentido molestar con
-    // un error cada vez que el ordenador no esta alcanzable, es la
-    // situacion normal y esperada de esta fase.
+    const pushResult = await pushOutbox();
+    const pullResult = await pullChanges();
+    await computeSyncOutcome(pushResult, pullResult);
+  } catch (err) {
+    // Esto SI es inesperado de verdad (un error de programacion, no de
+    // conexion) -- pushOutbox/pullChanges ya capturan los fallos de red
+    // y de servidor por su cuenta, asi que si algo llega hasta aqui
+    // merece ensenarse, no quedarse callado.
+    lastSyncOutcome = { status: 'error', message: err.message || 'Error inesperado al sincronizar.' };
   } finally {
     syncInProgress = false;
+    refreshSyncStatusUI();
+    refreshSyncIndicator();
   }
 }
 
@@ -785,11 +855,29 @@ async function refreshSyncStatusUI() {
   const statusEl = document.getElementById('sync-status');
   if (!statusEl) return;
   const lastSyncedAt = await metaGet('lastSyncedAt');
-  const pending = await outboxAll();
-  const pendingText = pending.length ? ` · ${pending.length} cambio${pending.length === 1 ? '' : 's'} pendiente${pending.length === 1 ? '' : 's'} de mandar` : '';
-  statusEl.textContent = lastSyncedAt
-    ? `Última sincronización: ${new Date(lastSyncedAt).toLocaleString()}${pendingText}`
-    : `Todavía no se ha sincronizado en este dispositivo${pendingText}`;
+  const baseText = lastSyncedAt
+    ? `Última sincronización: ${new Date(lastSyncedAt).toLocaleString()}`
+    : 'Todavía no se ha sincronizado en este dispositivo';
+  statusEl.textContent = lastSyncOutcome.message ? `${baseText} · ${lastSyncOutcome.message}` : baseText;
+}
+
+const SYNC_INDICATOR_LABELS = {
+  unknown: 'Sincronización: todavía sin comprobar',
+  synced: 'Sincronización: todo al día',
+  pending: 'Sincronización: hay cambios pendientes de mandar',
+  offline: 'Sincronización: sin conexión con el ordenador ahora mismo',
+  error: 'Sincronización: hubo un error',
+};
+
+function refreshSyncIndicator() {
+  const btn = document.getElementById('sync-indicator');
+  if (!btn) return;
+  btn.dataset.status = lastSyncOutcome.status;
+  const label = lastSyncOutcome.message
+    ? `${SYNC_INDICATOR_LABELS[lastSyncOutcome.status]} (${lastSyncOutcome.message})`
+    : SYNC_INDICATOR_LABELS[lastSyncOutcome.status];
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
 }
 
 document.getElementById('btn-sync-now').addEventListener('click', async () => {
@@ -797,6 +885,15 @@ document.getElementById('btn-sync-now').addEventListener('click', async () => {
   btn.disabled = true;
   await runSync();
   btn.disabled = false;
+});
+
+// El punto de la topbar lleva directo a Configuracion > Este dispositivo
+// (donde esta el detalle y el boton de "Sincronizar ahora"), no hace
+// nada por si solo mas alla de eso.
+document.getElementById('sync-indicator').addEventListener('click', () => {
+  openSettingsModal();
+  showSettingsScreen('mobile');
+  refreshMobileTab();
 });
 
 window.addEventListener('online', runSync);
@@ -1700,115 +1797,21 @@ async function loadNotes() {
 // Ocultar notas: NO es un bloqueo de verdad (no cifra nada, cualquiera
 // con acceso a la base de datos veria el contenido igual) — solo evita
 // que se lea a primera vista en la pantalla. Una nota oculta se ve
-// borrosa en la lista con un boton "Destapar" encima; el icono de ojo de
-// cada fila hace lo mismo (ocultar/destapar), son dos formas de llegar a
-// la misma accion. La contraseña es opcional y se activa en
-// Configuracion > Notas (ver refreshNotesTab en settings.js) — sin ella,
-// destapar es instantaneo; con ella activada, hace falta acertarla.
+// borrosa en la lista; el icono de ojo de cada fila la oculta/destapa al
+// momento. Hubo una version con contraseña compartida opcional para
+// destapar, pero se quito a proposito (era la unica pieza de "seguridad"
+// de la app y Koku prefirio quedarse solo con el toggle simple, en
+// ordenador y movil por igual).
 // ---------------------------------------------------------------------
-let notesSecurityState = { passwordEnabled: false, hasPassword: false };
-
-async function refreshNotesSecurityState() {
-  notesSecurityState = await api('/api/notes-security');
-  return notesSecurityState;
-}
-
 async function setNoteHidden(note, hidden) {
   await api(`/api/notes/${note.id}`, { method: 'PUT', body: JSON.stringify({ hidden }) });
   await loadNotes();
   renderNotesView();
 }
 
-// Punto de entrada comun del icono de ojo y del boton "Destapar": decide
-// que pedir (nada, la contraseña, o crear una nueva) segun el estado
-// actual de la nota y del ajuste de Configuracion > Notas.
 async function toggleNoteHidden(note) {
-  await refreshNotesSecurityState();
-
-  if (!note.hidden) {
-    // Vas a OCULTARLA. Si tienes activado "pedir contraseña" pero
-    // todavia no has puesto ninguna, hace falta crearla primero — no
-    // tendria sentido ocultar algo detras de una contraseña que no existe.
-    if (notesSecurityState.passwordEnabled && !notesSecurityState.hasPassword) {
-      openNotesSetupPasswordModal(note);
-    } else {
-      await setNoteHidden(note, true);
-    }
-    return;
-  }
-
-  // Vas a DESTAPARLA. Solo hace falta la contraseña si esta activada.
-  if (notesSecurityState.passwordEnabled) {
-    openNotesVerifyModal(note);
-  } else {
-    await setNoteHidden(note, false);
-  }
+  await setNoteHidden(note, !note.hidden);
 }
-
-let pendingVerifyNote = null;
-
-function openNotesVerifyModal(note) {
-  pendingVerifyNote = note;
-  document.getElementById('notes-verify-password').value = '';
-  document.getElementById('notes-verify-error').classList.add('hidden');
-  document.getElementById('notes-verify-modal').classList.remove('hidden');
-}
-
-function closeNotesVerifyModal() {
-  document.getElementById('notes-verify-modal').classList.add('hidden');
-  pendingVerifyNote = null;
-}
-
-document.getElementById('btn-cancel-notes-verify').addEventListener('click', closeNotesVerifyModal);
-document.getElementById('btn-close-notes-verify').addEventListener('click', closeNotesVerifyModal);
-
-document.getElementById('notes-verify-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const password = document.getElementById('notes-verify-password').value;
-  const result = await api('/api/notes-security/verify', { method: 'POST', body: JSON.stringify({ password }) });
-  if (!result.ok) {
-    document.getElementById('notes-verify-error').classList.remove('hidden');
-    return;
-  }
-  const note = pendingVerifyNote;
-  closeNotesVerifyModal();
-  await setNoteHidden(note, false);
-});
-
-let pendingSetupNote = null;
-
-function openNotesSetupPasswordModal(note) {
-  pendingSetupNote = note;
-  document.getElementById('notes-setup-new-password').value = '';
-  document.getElementById('notes-setup-confirm-password').value = '';
-  document.getElementById('notes-setup-error').classList.add('hidden');
-  document.getElementById('notes-setup-password-modal').classList.remove('hidden');
-}
-
-function closeNotesSetupPasswordModal() {
-  document.getElementById('notes-setup-password-modal').classList.add('hidden');
-  pendingSetupNote = null;
-}
-
-document.getElementById('btn-cancel-notes-setup-password').addEventListener('click', closeNotesSetupPasswordModal);
-document.getElementById('btn-close-notes-setup-password').addEventListener('click', closeNotesSetupPasswordModal);
-
-document.getElementById('notes-setup-password-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const errorEl = document.getElementById('notes-setup-error');
-  const newPassword = document.getElementById('notes-setup-new-password').value;
-  const confirmPassword = document.getElementById('notes-setup-confirm-password').value;
-  if (newPassword !== confirmPassword) {
-    errorEl.textContent = 'Las dos contraseñas no coinciden.';
-    errorEl.classList.remove('hidden');
-    return;
-  }
-  await api('/api/notes-security/password', { method: 'POST', body: JSON.stringify({ newPassword }) });
-  await refreshNotesSecurityState();
-  const note = pendingSetupNote;
-  closeNotesSetupPasswordModal();
-  await setNoteHidden(note, true);
-});
 
 function buildNoteRow(note) {
   const row = document.createElement('div');

@@ -114,10 +114,9 @@ texto y tareas:
   ☐/☑ que puedes pulsar directamente para marcarlas como hechas sin abrir
   el evento.
 - **Notas**: texto simple (todavia sin formato — negrita, listas, tablas
-  etc. esta planeado pero no implementado). Una nota se puede ocultar
-  (icono de ojo) y, opcionalmente, proteger con una contraseña compartida
-  para todas las notas ocultas de la app (no es cifrado real, es una
-  proteccion sencilla para que no se vea el contenido de un vistazo).
+  etc. esta planeado pero no implementado). Una nota se puede ocultar con
+  el icono de ojo, que la deja borrosa en la lista hasta que la vuelves a
+  destapar con el mismo icono.
 - **Carpetas**: para organizar las notas, con nombre, icono y color
   propios. Las carpetas pueden contener otras carpetas — la navegacion es
   como un explorador de archivos (Windows/Finder): ves el contenido de la

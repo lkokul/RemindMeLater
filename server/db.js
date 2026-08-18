@@ -128,8 +128,8 @@ db.exec(`
   -- Carpetas de notas (Fase 3): nombre + icono + color, sistema propio
   -- SEPARADO de los Grupos del calendario (esos son para eventos/tareas,
   -- estas son solo para organizar notas dentro de Mi espacio). Solo
-  -- organizacion, sin PIN ni bloqueo -- eso ya se resolvio por nota
-  -- individual con "ocultar" (ver notes.hidden y notesSecurity.js).
+  -- organizacion, sin PIN ni bloqueo -- eso es "ocultar" por nota
+  -- individual (ver notes.hidden), un toggle simple sin contraseña.
   CREATE TABLE IF NOT EXISTS note_folders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -261,12 +261,21 @@ const themeColumns = db.prepare('PRAGMA table_info(themes)').all().map((c) => c.
 if (!themeColumns.includes('inverse_colors')) {
   db.exec('ALTER TABLE themes ADD COLUMN inverse_colors TEXT');
 }
+// updated_at: para sincronizar la biblioteca de temas al movil (fase
+// "movil") -- no existia hasta ahora. Mismo patron que groups/note_folders
+// mas arriba: se anade sin default (ALTER TABLE no admite datetime('now')
+// como default) y se rellena con un UPDATE aparte.
+if (!themeColumns.includes('updated_at')) {
+  db.exec('ALTER TABLE themes ADD COLUMN updated_at TEXT');
+  db.exec("UPDATE themes SET updated_at = created_at WHERE updated_at IS NULL");
+}
 
 // hidden: nota marcada como "ocultar" (se ve borrosa en la lista hasta
-// que se "destapa" — ver routes/notes.js y routes/notesSecurity.js). No
-// es un bloqueo de verdad, solo evita que se lea a primera vista; la
-// contraseña opcional para destaparla vive en app_settings (clave/valor
-// generico que ya existe), no aqui.
+// que se "destapa" con un clic — ver routes/notes.js). No es un bloqueo
+// de verdad, solo evita que se lea a primera vista. Hubo una version con
+// contraseña compartida opcional para destapar (app_settings
+// notes_hide_password_*), pero se quito -- ver la limpieza de esas
+// claves mas abajo.
 const noteColumns = db.prepare('PRAGMA table_info(notes)').all().map((c) => c.name);
 if (!noteColumns.includes('hidden')) {
   db.exec('ALTER TABLE notes ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
@@ -332,6 +341,12 @@ if (!specialDayColumns.includes('updated_at')) {
 if (!deviceColumns.includes('last_sync_seq')) {
   db.exec('ALTER TABLE devices ADD COLUMN last_sync_seq INTEGER NOT NULL DEFAULT 0');
 }
+
+// Limpieza: se quito la opcion de contraseña compartida para destapar
+// notas ocultas (routes/notesSecurity.js ya no existe) -- si quedaban
+// estas claves de una instalacion anterior, se borran para no dejar
+// datos huerfanos sin usar.
+db.prepare("DELETE FROM app_settings WHERE key IN ('notes_hide_password_enabled', 'notes_hide_password_hash')").run();
 
 // El perfil siempre tiene que existir (para poder firmar "creado por" en
 // los eventos desde el primer arranque). El public_id se genera una sola

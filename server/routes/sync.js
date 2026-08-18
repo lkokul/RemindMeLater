@@ -6,6 +6,7 @@
 // local, nunca por internet.
 const express = require('express');
 const db = require('../db');
+const { sanitizeColors, sanitizeInverseColors, serializeTheme } = require('./themes');
 
 const router = express.Router();
 
@@ -18,6 +19,7 @@ const TABLES = {
   groups: { idColumn: 'id' },
   note_folders: { idColumn: 'id' },
   special_days: { idColumn: 'date' },
+  themes: { idColumn: 'id' },
 };
 
 // Comprueba que un id apunta a una fila que existe de verdad en esa
@@ -357,12 +359,61 @@ function applySpecialDayChange(rowId, op, payload, originId) {
   return { status: 'applied', serverRowId: date, serverPayload: { date, type } };
 }
 
+// La biblioteca de temas (no "que tema uso YO", eso sigue siendo por
+// dispositivo y no se sincroniza -- ver routes/themes.js). Reutiliza
+// sanitizeColors/sanitizeInverseColors/serializeTheme de ese mismo
+// archivo (ver el require de arriba) para no duplicar la red de
+// seguridad de contraste WCAG.
+function applyThemeChange(rowId, op, payload, originId) {
+  if (op === 'delete') {
+    db.prepare('UPDATE devices SET active_theme_id = NULL WHERE active_theme_id = ?').run(rowId);
+    db.prepare("DELETE FROM app_settings WHERE key = 'host_active_theme_id' AND value = ?").run(String(rowId));
+    db.prepare('DELETE FROM themes WHERE id = ?').run(rowId);
+    db.recordSyncChange('themes', rowId, 'delete', null, originId);
+    return { status: 'applied' };
+  }
+
+  const { name, colors, inverseColors } = payload || {};
+  if (!name || !String(name).trim()) {
+    return { status: 'rejected', message: 'El tema necesita un nombre.' };
+  }
+
+  if (!rowId) {
+    const info = db
+      .prepare("INSERT INTO themes (name, colors, inverse_colors, updated_at) VALUES (?, ?, ?, datetime('now'))")
+      .run(
+        String(name).trim(),
+        JSON.stringify(sanitizeColors(colors)),
+        inverseColors ? JSON.stringify(sanitizeInverseColors(inverseColors)) : null
+      );
+    const row = db.prepare('SELECT * FROM themes WHERE id = ?').get(info.lastInsertRowid);
+    const serialized = serializeTheme(row);
+    db.recordSyncChange('themes', row.id, 'upsert', serialized, originId);
+    return { status: 'applied', serverRowId: row.id, serverPayload: serialized };
+  }
+
+  const existing = db.prepare('SELECT * FROM themes WHERE id = ?').get(rowId);
+  if (!existing) return { status: 'applied' };
+  const existingColors = JSON.parse(existing.colors);
+  db.prepare("UPDATE themes SET name = ?, colors = ?, inverse_colors = ?, updated_at = datetime('now') WHERE id = ?").run(
+    String(name).trim(),
+    JSON.stringify(sanitizeColors(colors !== undefined ? colors : existingColors)),
+    inverseColors !== undefined ? (inverseColors ? JSON.stringify(sanitizeInverseColors(inverseColors)) : null) : existing.inverse_colors,
+    rowId
+  );
+  const row = db.prepare('SELECT * FROM themes WHERE id = ?').get(rowId);
+  const serialized = serializeTheme(row);
+  db.recordSyncChange('themes', row.id, 'upsert', serialized, originId);
+  return { status: 'applied', serverRowId: row.id, serverPayload: serialized };
+}
+
 const APPLIERS = {
   events: applyEventChange,
   notes: applyNoteChange,
   groups: applyGroupChange,
   note_folders: applyNoteFolderChange,
   special_days: applySpecialDayChange,
+  themes: applyThemeChange,
 };
 
 // Los timestamps de SQLite (datetime('now')) vienen como
@@ -407,13 +458,55 @@ router.get('/pull', (req, res) => {
     createdAt: r.created_at,
   }));
 
+  const nextCursor = page.length ? page[page.length - 1].id : since;
+
+  // Solo se actualiza para moviles emparejados (req.device), no para el
+  // propio ordenador (que no tiene fila en "devices" -- es "trusted" por
+  // IP, ver auth.js). Esto es lo que luego usa la limpieza de sync_log
+  // (pruneSyncLog mas abajo) para saber hasta donde ha llegado cada
+  // movil y no borrar nunca nada que alguno no haya visto todavia.
+  if (req.device) {
+    db.prepare('UPDATE devices SET last_sync_seq = ? WHERE id = ?').run(nextCursor, req.device.id);
+  }
+
   res.json({
     changes,
-    nextCursor: page.length ? page[page.length - 1].id : since,
+    nextCursor,
     hasMore,
     serverTime: new Date().toISOString(),
   });
 });
+
+// Cuanto tiempo se guarda un cambio en sync_log como red de seguridad
+// EXTRA, incluso cuando ya no hace falta segun "last_sync_seq" (ver
+// pruneSyncLog). De sobra para el uso de una sola persona.
+const SYNC_LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 dias
+
+// Borra de sync_log solo lo que YA no hace falta para nadie: cambios
+// anteriores al punto hasta el que TODOS los dispositivos emparejados
+// han sincronizado (nunca se borra algo que un movil emparejado no haya
+// visto todavia), Y con al menos 30 dias de antiguedad (por si
+// last_sync_seq estuviera desactualizado por algun motivo raro -- doble
+// candado). Si no hay ningun dispositivo emparejado, o si alguno nunca
+// ha sincronizado nada (last_sync_seq = 0, no sabemos por donde va), no
+// se borra nada: mejor un sync_log un poco mas grande que perder un
+// cambio que un movil todavia necesita.
+function pruneSyncLog() {
+  const devices = db.prepare('SELECT last_sync_seq FROM devices').all();
+  if (devices.length === 0) return { pruned: 0, reason: 'no_paired_devices' };
+  if (devices.some((d) => !d.last_sync_seq || d.last_sync_seq <= 0)) {
+    return { pruned: 0, reason: 'device_never_synced' };
+  }
+
+  const floor = Math.min(...devices.map((d) => d.last_sync_seq));
+  // Mismo formato "YYYY-MM-DD HH:MM:SS" que usa SQLite en created_at
+  // (ver toEpochMs mas arriba, mismo motivo: comparar como texto solo
+  // funciona si los dos lados tienen el mismo formato).
+  const cutoff = new Date(Date.now() - SYNC_LOG_RETENTION_MS).toISOString().slice(0, 19).replace('T', ' ');
+
+  const info = db.prepare('DELETE FROM sync_log WHERE id <= ? AND created_at < ?').run(floor, cutoff);
+  return { pruned: info.changes, reason: 'ok', floor };
+}
 
 router.post('/push', (req, res) => {
   const { changes } = req.body || {};
@@ -444,7 +537,7 @@ router.post('/push', (req, res) => {
         const idCol = TABLES[table].idColumn;
         const currentRow = db.prepare(`SELECT * FROM ${table} WHERE ${idCol} = ?`).get(table === 'special_days' ? rowId : Number(rowId));
         if (currentRow) {
-          const serializeFn = { events: serializeEvent, notes: serializeNote, groups: serializeGroup, note_folders: serializeNoteFolder, special_days: (r) => ({ date: r.date, type: r.type }) }[table];
+          const serializeFn = { events: serializeEvent, notes: serializeNote, groups: serializeGroup, note_folders: serializeNoteFolder, special_days: (r) => ({ date: r.date, type: r.type }), themes: serializeTheme }[table];
           return { clientOpId, status: 'superseded', serverPayload: serializeFn(currentRow) };
         }
       }
@@ -461,4 +554,19 @@ router.post('/push', (req, res) => {
   res.json({ results });
 });
 
+// Una vez al dia es de sobra -- sync_log de una sola persona no crece
+// tan rapido como para necesitar limpiarlo mas a menudo. Mismo patron
+// que startReminderChecker() en reminderChecker.js: se llama una vez al
+// arrancar el servidor y luego con setInterval (ver server/index.js).
+const SYNC_LOG_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function startSyncLogCleanup() {
+  pruneSyncLog();
+  const timer = setInterval(pruneSyncLog, SYNC_LOG_CLEANUP_INTERVAL_MS);
+  timer.unref(); // no impide que el proceso termine si hace falta
+  return timer;
+}
+
 module.exports = router;
+module.exports.pruneSyncLog = pruneSyncLog;
+module.exports.startSyncLogCleanup = startSyncLogCleanup;

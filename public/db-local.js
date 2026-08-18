@@ -10,13 +10,20 @@
 // servidor" y "vino de la copia local". special_days usa la propia
 // fecha como clave (igual que en el servidor); el resto usa "id".
 const LOCAL_DB_NAME = 'remindmelater-local';
-const LOCAL_DB_VERSION = 1;
+// Subir este numero cada vez que se anade un almacen nuevo a
+// LOCAL_STORES -- onupgradeneeded (mas abajo) SOLO se dispara si la
+// version sube, si no un movil que ya tuviera la base de datos creada
+// con la version anterior se quedaria sin el almacen nuevo para
+// siempre. (v2: se anadio "themes", para sincronizar la biblioteca de
+// temas -- ver la ronda que quito la contraseña de notas ocultas.)
+const LOCAL_DB_VERSION = 2;
 const LOCAL_STORES = {
   events: 'id',
   notes: 'id',
   groups: 'id',
   noteFolders: 'id',
   specialDays: 'date',
+  themes: 'id',
 };
 
 let localDbPromise = null;
