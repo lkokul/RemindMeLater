@@ -16,6 +16,9 @@ const notesRouter = require('./routes/notes');
 const notesSecurityRouter = require('./routes/notesSecurity');
 const noteFoldersRouter = require('./routes/noteFolders');
 const noteImagesRouter = require('./routes/noteImages');
+const gymExercisesRouter = require('./routes/gymExercises');
+const gymRoutinesRouter = require('./routes/gymRoutines');
+const gymSessionsRouter = require('./routes/gymSessions');
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startMdns } = require('./mdns');
@@ -51,6 +54,11 @@ app.use('/api/note-folders', requireDeviceOrTrusted, noteFoldersRouter);
 // un <img src="..."> lo pide el navegador directamente, sin poder llevar
 // el token del movil emparejado.
 app.use('/api/notes/images', noteImagesRouter);
+// Extension "Gimnasio" (ver #extensions-view en index.html): registro de
+// entrenamientos, rutinas reutilizables y progreso.
+app.use('/api/gym-exercises', requireDeviceOrTrusted, gymExercisesRouter);
+app.use('/api/gym-routines', requireDeviceOrTrusted, gymRoutinesRouter);
+app.use('/api/gym-sessions', requireDeviceOrTrusted, gymSessionsRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);

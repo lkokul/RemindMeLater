@@ -931,6 +931,70 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   background: var(--surface-2);
   color: var(--surface-2-text);
 }
+/* Tarjeta YA activa (Gimnasio): es un <button> de verdad, no un <div>
+   deshabilitado como las de "Proximamente" -- reset basico de boton +
+   opacidad normal + un resalte al pasar el raton para que se note que
+   se puede clicar. */
+.extensions-card-active {
+  font: inherit;
+  opacity: 1;
+  cursor: pointer;
+}
+.extensions-card-active:hover { border-color: var(--accent); }
+
+/* Extension "Gimnasio": pestañas simples (Sesiones/Rutinas/Progreso),
+   reutilizando .view-mode-btn para el estilo activo/inactivo en vez de
+   inventar uno nuevo. */
+.gym-tabs { display: flex; gap: 0.4rem; padding: 0.8rem 1.2rem 0; flex-shrink: 0; }
+.gym-tab-btn {
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--surface-text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.gym-tab-btn.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.gym-tab-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem; }
+.gym-tab-panel { display: flex; flex-direction: column; gap: 0.6rem; }
+.gym-tab-action { align-self: flex-start; }
+.gym-subheading { margin: 1.2rem 0 0; font-size: 0.95rem; }
+
+.gym-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.gym-list-item {
+  display: flex; align-items: center; gap: 0.6rem;
+  background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+}
+.gym-list-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gym-list-item-muted { color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); font-weight: normal; }
+.gym-list-item-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+.gym-session-item { flex-direction: column; align-items: flex-start; gap: 0.2rem; cursor: pointer; }
+.gym-session-item-date { font-weight: 600; }
+.gym-session-item-routine { display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; }
+
+/* Filas de ejercicio dentro del modal de rutina (select + series/reps +
+   quitar) y dentro del modal de sesion (select + quitar, las series
+   propias van en .gym-session-sets-list debajo). */
+.gym-routine-exercises-field { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.5rem; }
+.gym-routine-exercise-row { display: flex; align-items: center; gap: 0.4rem; }
+.gym-routine-exercise-row select { flex: 1; min-width: 0; }
+.gym-routine-exercise-row input { width: 4.5rem; }
+.gym-session-exercise-block {
+  background: var(--surface-2); border-radius: var(--radius); padding: 0.6rem;
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.gym-session-sets-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.gym-session-set-row { display: flex; align-items: center; gap: 0.4rem; }
+.gym-session-set-number { font-size: 0.78rem; flex-shrink: 0; width: 4rem; }
+.gym-session-set-row input { width: 5.5rem; }
+.gym-add-set-btn { align-self: flex-start; font-size: 0.8rem; padding: 0.35rem 0.6rem; }
+
+.gym-progress-metric-toggle { display: flex; gap: 0.4rem; }
+.gym-progress-chart { margin-top: 0.5rem; }
+.gym-chart-svg { width: 100%; height: auto; }
+.gym-chart-label { font-size: 9px; fill: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
 
 /* Envoltorio SOLO de las 3 columnas (el Volver, fuera, en su propia
    fila) -- en movil se quedan apiladas igual que antes. */

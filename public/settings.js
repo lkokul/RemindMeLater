@@ -1535,6 +1535,7 @@ function refreshMobileTab() {
     localStorage.getItem('updateCheckEnabled') !== 'false';
 
   refreshCompletedTasksDisplayOptions();
+  refreshGymWeightUnitOptions();
 }
 
 // "Salir de la aplicacion": vive como accion directa en la lista principal
@@ -1585,6 +1586,39 @@ function refreshCompletedTasksDisplayOptions() {
         localStorage.setItem('completedTasksDisplay', mode.id);
         refreshCompletedTasksDisplayOptions();
         if (typeof renderTasksList === 'function') renderTasksList();
+      });
+    }
+    container.appendChild(btn);
+  });
+}
+
+// Unidad de peso de Gimnasio: preferencia de ESTE dispositivo, mismo
+// patron que arriba. getGymWeightUnit() (definida en app.js, que se
+// carga antes que este archivo) es quien de verdad lee/usa el valor al
+// mostrar/guardar pesos -- aqui solo esta el interruptor visual.
+const GYM_WEIGHT_UNIT_MODES = [
+  { id: 'kg', label: 'Kilogramos (kg)' },
+  { id: 'lb', label: 'Libras (lb)' },
+];
+
+function refreshGymWeightUnitOptions() {
+  const container = document.getElementById('gym-weight-unit-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getGymWeightUnit();
+
+  GYM_WEIGHT_UNIT_MODES.forEach((mode) => {
+    const isActive = mode.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = mode.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('gymWeightUnit', mode.id);
+        refreshGymWeightUnitOptions();
       });
     }
     container.appendChild(btn);
