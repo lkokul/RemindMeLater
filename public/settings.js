@@ -297,6 +297,7 @@ let currentProfile = null;
 async function refreshProfileTab() {
   currentProfile = await api('/api/profile');
   document.getElementById('profile-name').value = currentProfile.name || '';
+  document.getElementById('profile-email').value = currentProfile.email || '';
 
   const showId = localStorage.getItem('showUserId') === 'true';
   document.getElementById('profile-show-id').checked = showId;
@@ -324,12 +325,14 @@ let profileSavedFeedbackTimer = null;
 document.getElementById('profile-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = document.getElementById('profile-name').value;
+  const email = document.getElementById('profile-email').value;
   const btn = document.getElementById('profile-form').querySelector('button[type="submit"]');
   const originalLabel = btn.dataset.originalLabel || btn.textContent;
   btn.dataset.originalLabel = originalLabel;
 
-  currentProfile = await api('/api/profile', { method: 'PUT', body: JSON.stringify({ name }) });
+  currentProfile = await api('/api/profile', { method: 'PUT', body: JSON.stringify({ name, email }) });
   document.getElementById('profile-name').value = currentProfile.name || '';
+  document.getElementById('profile-email').value = currentProfile.email || '';
   updateProfileIdDisplay();
 
   // Retroalimentacion breve: el boton cambia a "Guardado ✓" un momento y
@@ -1595,18 +1598,74 @@ document.getElementById('setting-update-check').addEventListener('change', (e) =
   localStorage.setItem('updateCheckEnabled', e.target.checked ? 'true' : 'false');
 });
 
+// Convierte la clave publica VAPID (texto base64url que da el servidor)
+// al formato Uint8Array que pide pushManager.subscribe() -- conversion
+// estandar del protocolo Web Push, no hay atajo mas corto.
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+// Suscribe ESTE dispositivo a notificaciones push de verdad (avisan con
+// la app cerrada del todo, ver public/sw.js y server/reminderChecker.js)
+// y manda la suscripcion resultante al servidor. Lanza si algo falla
+// (falta el correo de contacto en el perfil, el navegador no admite
+// push...) con un mensaje ya pensado para ensenarse tal cual.
+async function subscribeToPush() {
+  const registration = await navigator.serviceWorker.ready;
+  const { publicKey } = await api('/api/devices/push-public-key');
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(publicKey),
+  });
+  await api('/api/devices/push-subscription', { method: 'POST', body: JSON.stringify({ subscription }) });
+}
+
+async function unsubscribeFromPush() {
+  if (!('serviceWorker' in navigator)) return;
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (subscription) await subscription.unsubscribe();
+  await api('/api/devices/push-subscription', { method: 'DELETE' }).catch(() => {});
+}
+
 document.getElementById('setting-notifications').addEventListener('change', async (e) => {
+  let pushErrorMessage = '';
+
   if (e.target.checked) {
     const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      localStorage.setItem('notificationsEnabled', 'true');
-    } else {
+    if (permission !== 'granted') {
       e.target.checked = false;
+      refreshMobileTab();
+      return;
+    }
+    localStorage.setItem('notificationsEnabled', 'true');
+
+    // El aviso push de verdad (con la app cerrada) solo tiene sentido en
+    // un movil emparejado -- el ordenador ya recibe su aviso directamente
+    // del propio servidor (node-notifier), sin pasar por Google/Apple.
+    const isPairedDevice = !!localStorage.getItem('deviceToken');
+    if (isPairedDevice && 'serviceWorker' in navigator && 'PushManager' in window) {
+      try {
+        await subscribeToPush();
+      } catch (err) {
+        pushErrorMessage = err.message || 'No se pudo activar el aviso push en este dispositivo.';
+      }
     }
   } else {
     localStorage.setItem('notificationsEnabled', 'false');
+    if (localStorage.getItem('deviceToken')) await unsubscribeFromPush();
   }
+
+  // refreshMobileTab() pisa el texto de estado con el mensaje generico de
+  // siempre -- si hubo un fallo especifico del push, se ensena DESPUES,
+  // para que no se pierda.
   refreshMobileTab();
+  if (pushErrorMessage) document.getElementById('notifications-status').textContent = pushErrorMessage;
 });
 
 // ---------------------------------------------------------------------

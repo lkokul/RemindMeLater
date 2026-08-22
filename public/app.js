@@ -181,6 +181,7 @@ function enableCtrlEnterSubmit(formId) {
 enableCtrlEnterSubmit('event-form');
 enableCtrlEnterSubmit('task-form');
 enableCtrlEnterSubmit('note-form');
+enableCtrlEnterSubmit('onboarding-form');
 
 // ---------------------------------------------------------------------
 // Selector de fecha con estilo propio: sustituye <input type="date"> (o
@@ -2867,6 +2868,46 @@ document.getElementById('btn-install-release').addEventListener('click', async (
 });
 
 // ---------------------------------------------------------------------
+// Pantalla de bienvenida (primer arranque): ver el modal en index.html.
+// Se muestra una sola vez, en el dispositivo que abra la app primero
+// (el perfil es compartido por TODA la instalacion, no por dispositivo
+// -- ver user_profile en server/db.js), tanto al guardar como al pulsar
+// "Ahora no" se marca como vista para siempre (los dos llaman a PUT
+// /api/profile, que marca onboardingCompleted=true como efecto
+// secundario -- ver server/routes/profile.js).
+// ---------------------------------------------------------------------
+async function maybeShowOnboarding() {
+  const profile = await api('/api/profile');
+  if (profile.onboardingCompleted) return;
+  document.getElementById('onboarding-name').value = profile.name || '';
+  document.getElementById('onboarding-email').value = profile.email || '';
+  document.getElementById('onboarding-modal').classList.remove('hidden');
+}
+
+function closeOnboardingModal() {
+  document.getElementById('onboarding-modal').classList.add('hidden');
+}
+
+document.getElementById('onboarding-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await api('/api/profile', {
+    method: 'PUT',
+    body: JSON.stringify({
+      name: document.getElementById('onboarding-name').value,
+      email: document.getElementById('onboarding-email').value,
+    }),
+  });
+  closeOnboardingModal();
+});
+
+document.getElementById('btn-onboarding-skip').addEventListener('click', async () => {
+  // Body vacio a proposito: no cambia nombre ni correo, solo marca la
+  // pantalla como vista (ver el comentario de PUT /api/profile).
+  await api('/api/profile', { method: 'PUT', body: JSON.stringify({}) });
+  closeOnboardingModal();
+});
+
+// ---------------------------------------------------------------------
 // Arranque
 // ---------------------------------------------------------------------
 // Ejecuta un paso de arranque sin dejar que un fallo suyo aborte los
@@ -2885,6 +2926,7 @@ async function initStep(fn) {
 }
 
 async function init() {
+  await initStep(maybeShowOnboarding);
   await initStep(loadGroups);
   await initStep(loadSpecialDays);
   await initStep(loadMonth);

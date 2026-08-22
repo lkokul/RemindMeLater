@@ -348,6 +348,26 @@ if (!deviceColumns.includes('last_sync_seq')) {
 // datos huerfanos sin usar.
 db.prepare("DELETE FROM app_settings WHERE key IN ('notes_hide_password_enabled', 'notes_hide_password_hash')").run();
 
+// push_subscription: el objeto que da el navegador al suscribirse a
+// notificaciones push (endpoint + claves p256dh/auth), como JSON. NULL
+// si ese dispositivo nunca se ha suscrito o desactivo el ajuste. Ver
+// routes/devices.js (guardarlo) y server/push.js + reminderChecker.js
+// (usarlo para mandar el aviso).
+if (!deviceColumns.includes('push_subscription')) {
+  db.exec('ALTER TABLE devices ADD COLUMN push_subscription TEXT');
+}
+
+// email: para el "primer arranque" (pantalla de bienvenida) y, sobre
+// todo, como contacto tecnico obligatorio del protocolo Web Push
+// (VAPID) al mandar notificaciones push -- ver server/push.js. Nunca se
+// muestra en la interfaz ni se manda a nadie salvo a Google/Apple para
+// ese uso puntual. Opcional a proposito: sin el, simplemente no se
+// pueden activar las notificaciones push (ver routes/devices.js).
+const profileColumns = db.prepare('PRAGMA table_info(user_profile)').all().map((c) => c.name);
+if (!profileColumns.includes('email')) {
+  db.exec('ALTER TABLE user_profile ADD COLUMN email TEXT');
+}
+
 // El perfil siempre tiene que existir (para poder firmar "creado por" en
 // los eventos desde el primer arranque). El public_id se genera una sola
 // vez aqui y ya no se vuelve a tocar.
@@ -558,3 +578,8 @@ db.recordSyncChange = function recordSyncChange(tableName, rowId, op, payload, o
 };
 
 module.exports = db;
+// DATA_DIR: mismo sitio donde vive la base de datos -- server/push.js lo
+// reutiliza para guardar las claves VAPID (vapid-keys.json) junto al
+// resto de datos de usuario, en vez de duplicar la logica de "donde
+// vive la carpeta de datos" (ver el comentario de DATA_DIR mas arriba).
+module.exports.DATA_DIR = DATA_DIR;

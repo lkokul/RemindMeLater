@@ -1,10 +1,13 @@
 # RemindMeLater
 
-Calendario, recordatorios, tareas y notas que corren en tu ordenador. Los
-datos viven solo ahi (SQLite, en `data/remindmelater.db`, ignorado por
-git — o en la carpeta de datos de la app si usas la version de escritorio).
-Desde el movil puedes usar la misma app conectandote por wifi, sin
-instalar nada (o instalandola como si fuera una app, ver mas abajo).
+Calendario, recordatorios, tareas y notas local-first: los datos viven en
+tus propios dispositivos, nunca en una nube de terceros. El ordenador
+guarda todo en SQLite (`data/remindmelater.db`, ignorado por git — o en
+la carpeta de datos de la app si usas la version de escritorio); el
+movil, una vez vinculado, guarda tambien su propia copia y sincroniza los
+cambios en los dos sentidos cuando coincide con el ordenador en la misma
+wifi, sin depender de ningun servidor intermedio en internet (ver
+"Instalar como app" mas abajo).
 
 ## Arrancar
 
@@ -146,9 +149,18 @@ debe abrirse en pantalla completa.
 Tanto en el navegador del ordenador como en el del movil, la app se puede
 "instalar" (Añadir a pantalla de inicio / Instalar app) para que se abra
 como una app independiente, con su propio icono, en vez de una pestaña
-del navegador. Sigue necesitando conexion al servidor para leer o guardar
-datos (los datos no se guardan en el movil), pero la pantalla de carga
-inicial funciona aunque el movil se quede sin wifi un instante.
+del navegador.
+
+Un movil ya vinculado guarda ademas su propia copia de los datos
+(eventos, tareas, notas con sus carpetas...) en el propio navegador:
+puedes seguir viendo, creando y editando cosas sin conexion al ordenador,
+y en cuanto volveis a coincidir en la misma wifi, los cambios se
+sincronizan solos en los dos sentidos (si hay un conflicto de verdad,
+gana el cambio mas reciente). Un punto de color en la barra superior del
+movil indica el estado: verde = todo sincronizado, amarillo = hay
+cambios pendientes de mandar, gris = sin conexion con el ordenador ahora
+mismo, rojo = hubo un error de verdad. No hay ningun servidor intermedio
+en internet — la sincronizacion solo pasa por tu propia wifi local.
 
 ## Recordatorios
 
@@ -156,24 +168,59 @@ Cada evento o tarea con fecha puede tener un recordatorio (en el momento,
 10 min, 30 min, 1 hora o 1 dia antes). Cuando toca, dispara:
 
 - una notificacion del navegador si tienes la pestana abierta (movil u
-  ordenador, si las activaste en Configuración → Este dispositivo), y
+  ordenador, si las activaste en Configuración → Este dispositivo),
 - una notificacion del sistema operativo en el ordenador donde corre el
   servidor (funciona aunque no tengas el navegador abierto, mientras el
-  servidor este encendido).
+  servidor este encendido), y
+- en el movil, ademas, un **aviso push de verdad** si activaste las
+  notificaciones (Configuración → Este dispositivo): llega aunque tengas
+  la app completamente cerrada. Hace falta rellenar un correo de
+  contacto en Configuración → Perfil la primera vez (ver "Datos
+  personales" mas abajo) — es un requisito tecnico del protocolo usado
+  (Web Push/VAPID), nunca se muestra ni se usa para nada mas. En iPhone,
+  ademas, la app tiene que estar "Añadida a pantalla de inicio" (no vale
+  con Safari normal, sin instalar), por una restriccion de Apple.
+
+## Datos personales
+
+La primera vez que se abre la app (desde cualquier dispositivo) aparece
+una pantalla de bienvenida pidiendo dos datos, los dos **opcionales**:
+
+- **Nickname**: se ve igual en todos tus dispositivos vinculados, y
+  aparece como "creado por" en los eventos y notas que añadas — solo
+  sirve para diferenciar quien creo que si usas varios dispositivos.
+- **Correo**: no se usa para nada dentro de la app ni se muestra en
+  ningun sitio. Su unico proposito es servir de contacto tecnico
+  obligatorio del protocolo Web Push (VAPID) al mandar notificaciones
+  push al movil — lo exige el propio estandar, pensado para que
+  Google/Apple puedan avisar al operador del servidor si hay demasiados
+  fallos de entrega. Sin correo, sencillamente no se pueden activar las
+  notificaciones push (el resto de la app funciona igual). Se puede
+  rellenar, cambiar o dejar vacio en cualquier momento desde
+  Configuración → Perfil.
+
+Ningun dato sale de tus propios dispositivos, salvo — si activas las
+notificaciones push — el aviso en si (cifrado de extremo a extremo por
+el propio protocolo) y el correo de contacto de arriba, que tienen que
+pasar obligatoriamente por los servidores de Google (Android/Chrome) o
+Apple (iPhone/Safari): es la unica forma en que el sistema operativo del
+movil puede despertar la app estando cerrada del todo, no hay manera de
+evitarlo. Ni Google ni Apple pueden leer el contenido del aviso (titulo
+del recordatorio incluido), solo mueven bytes cifrados. La
+sincronizacion normal entre tus dispositivos (eventos, notas, tareas...)
+nunca pasa por ahi: es directa, por tu propia wifi local.
 
 ## Lo que queda fuera, de momento
 
-- El movil no guarda copia local de los datos: necesita la misma wifi
-  que el ordenador para funcionar (salvo la pantalla de carga inicial de
-  la app instalada, ver PWA arriba).
-- Recordatorios "push" en el movil con la app cerrada tampoco estan
-  todavia: requieren un servicio de notificaciones push real (fuera del
-  alcance de un servidor casero).
 - Las notas todavia son texto simple: el editor con formato (negrita,
   listas, tablas, imagenes) esta planeado pero no empezado.
 - No hay forma de mover una carpeta de notas ya creada a otra carpeta
   distinta (si se puede mover una nota entre carpetas desde su propio
   editor).
+- Widgets de pantalla de inicio o accesos en el Centro de Control
+  (iPhone) no son viables como app web: harian falta frameworks nativos
+  (WidgetKit/ControlKit) o un envoltorio tipo Capacitor — queda anotado
+  como posible proyecto aparte, no en desarrollo.
 - La app de escritorio (Electron) solo genera instalador para Windows.
 - Las extensiones de gimnasio y finanzas de las que hablamos no estan
   incluidas aqui; se pueden anadir despues como secciones nuevas sin tocar

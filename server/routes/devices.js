@@ -2,8 +2,9 @@
 const express = require('express');
 const crypto = require('crypto');
 const db = require('../db');
-const { requireTrusted } = require('../auth');
+const { requireTrusted, requireDeviceOrTrusted } = require('../auth');
 const { generateCode, consumeCode } = require('../pairing');
+const { getVapidPublicKey } = require('../push');
 
 const router = express.Router();
 
@@ -40,6 +41,48 @@ router.get('/', requireTrusted, (req, res) => {
     .prepare('SELECT id, name, icon, paired_at, last_seen_at FROM devices ORDER BY paired_at DESC')
     .all();
   res.json(devices.map((d) => ({ ...d, icon: d.icon || null })));
+});
+
+// --- Notificaciones push (avisan con la app cerrada, ver server/push.js) ---
+// IMPORTANTE: estas rutas van ANTES de "/:id" mas abajo -- Express
+// compara las rutas en el orden en que se registran, y "/:id" haria
+// match con "/push-subscription" (tratando ese texto como si fuera un
+// id) si estuviera declarada primero, robandole la peticion a esta.
+//
+// Dato publico por diseño del protocolo Web Push (no identifica a
+// nadie, solo a este servidor) -- igual se deja detras de
+// requireDeviceOrTrusted por coherencia con el resto de la API, ya que
+// solo hace falta cuando el movil ya esta emparejado y va a suscribirse.
+router.get('/push-public-key', requireDeviceOrTrusted, (req, res) => {
+  res.json({ publicKey: getVapidPublicKey() });
+});
+
+// Guarda la suscripcion de ESTE movil (req.device, del token). El
+// ordenador (req.isTrusted, sin req.device) no tiene sentido que llame
+// aqui -- ya usa node-notifier directamente, sin pasar por Google/Apple.
+router.post('/push-subscription', requireDeviceOrTrusted, (req, res) => {
+  if (!req.device) {
+    return res.status(400).json({ error: 'not_a_device', message: 'Las notificaciones push son solo para moviles emparejados.' });
+  }
+  const { subscription } = req.body || {};
+  if (!subscription || !subscription.endpoint) {
+    return res.status(400).json({ error: 'invalid_request', message: 'Falta la suscripcion.' });
+  }
+  const profile = db.prepare('SELECT email FROM user_profile WHERE id = 1').get();
+  if (!profile || !profile.email) {
+    return res.status(400).json({
+      error: 'missing_email',
+      message: 'Antes de activar los avisos push hace falta un correo de contacto en Configuracion > Perfil (lo exige el protocolo Web Push).',
+    });
+  }
+  db.prepare('UPDATE devices SET push_subscription = ? WHERE id = ?').run(JSON.stringify(subscription), req.device.id);
+  res.status(204).end();
+});
+
+router.delete('/push-subscription', requireDeviceOrTrusted, (req, res) => {
+  if (!req.device) return res.status(400).json({ error: 'not_a_device' });
+  db.prepare('UPDATE devices SET push_subscription = NULL WHERE id = ?').run(req.device.id);
+  res.status(204).end();
 });
 
 function sanitizeIcon(icon) {

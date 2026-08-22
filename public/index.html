@@ -333,6 +333,38 @@
     </div>
   </div>
 
+  <!-- Pantalla de bienvenida: aparece UNA sola vez, la primera vez que se
+       abre la app en cualquier dispositivo (el perfil es compartido por
+       toda la instalacion, no por dispositivo -- ver user_profile en
+       server/db.js). Pide el nickname y, opcionalmente, un correo (solo
+       para el contacto tecnico obligatorio de las notificaciones push,
+       ver el hint de dentro). "Ahora no" tambien cierra el modal para
+       siempre (ver app.js maybeShowOnboarding) sin obligar a rellenar
+       nada. -->
+  <div id="onboarding-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Bienvenido a RemindMeLater</h2>
+      <p class="hint">Un par de datos rapidos antes de empezar (puedes cambiarlos luego en Configuracion > Perfil).</p>
+      <form id="onboarding-form">
+        <label>
+          Nickname (opcional)
+          <input type="text" id="onboarding-name" placeholder="Tu nombre" maxlength="60" />
+        </label>
+        <p class="hint">Se ve igual en todos tus dispositivos, para saber quien creo cada evento o nota si usas el ordenador y el movil a la vez.</p>
+        <label>
+          Correo (opcional)
+          <input type="email" id="onboarding-email" placeholder="tucorreo@ejemplo.com" maxlength="200" />
+        </label>
+        <p class="hint">Solo se usaria como contacto tecnico obligatorio si mas adelante activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie mas.</p>
+        <div class="modal-actions">
+          <button type="button" id="btn-onboarding-skip" class="secondary-btn">Ahora no</button>
+          <div class="spacer"></div>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Modal para crear / editar evento -->
   <div id="event-modal" class="modal hidden">
     <div class="modal-card">
@@ -553,6 +585,11 @@
             Nickname
             <input type="text" id="profile-name" placeholder="Tu nombre" maxlength="60" />
           </label>
+          <label>
+            Correo (opcional)
+            <input type="email" id="profile-email" placeholder="tucorreo@ejemplo.com" maxlength="200" />
+          </label>
+          <p class="hint">Solo se usaria como contacto tecnico obligatorio si activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie mas, salvo con Google/Apple para ese uso puntual y solo si activas esos avisos.</p>
           <button type="submit" class="primary-btn">Guardar</button>
         </form>
 
