@@ -32,6 +32,12 @@ const state = {
   remindersMode: 'upcoming', // 'upcoming' | 'day' — que se muestra en el panel de recordatorios
   remindersDayDate: null, // dia seleccionado cuando remindersMode === 'day'
   upcomingReminders: [], // ultima lista de "proximos recordatorios" recibida del servidor
+  // Extension "Lecturas" (ver #lecturas-view en index.html): sagas y,
+  // cuando entras en una, los items de ESA saga. Se cargan al abrir la
+  // vista/entrar en una saga, no al arrancar la app.
+  lecturasSagas: [],
+  lecturasItems: [],
+  lecturasCurrentSagaId: null,
 };
 
 // Registra el service worker (ver sw.js): junto con manifest.json, es lo
@@ -3858,6 +3864,320 @@ function closeExtensionsView() {
 }
 document.getElementById('btn-extensions').addEventListener('click', openExtensionsView);
 document.getElementById('btn-close-extensions').addEventListener('click', closeExtensionsView);
+
+// ---------------------------------------------------------------------
+// Extension "Lecturas": historial de entretenimiento en general (manga,
+// comic, libro, serie, anime, pelicula), agrupado en SAGAS obligatorias
+// (hasta algo suelto es una saga de un solo item). Jerarquia de 2
+// tablas: sagas primero, items de la saga elegida despues -- mas
+// parecido a como Notas navega carpetas que a las pestañas de Gimnasio.
+// ---------------------------------------------------------------------
+const LECTURAS_TYPE_LABELS = { manga: 'Manga', comic: 'Cómic', libro: 'Libro', serie: 'Serie', anime: 'Anime', pelicula: 'Película' };
+const LECTURAS_STATUS_LABELS = { wishlist: 'Deseado', in_progress: 'En progreso', completed: 'Completado', dropped: 'Abandonado' };
+const LECTURAS_STATUS_COLORS = { wishlist: '#9aa0a6', in_progress: '#f5b400', completed: '#2ecc71', dropped: '#e5484d' };
+
+async function refreshLecturasSagasView() {
+  document.getElementById('lecturas-sagas-panel').classList.remove('hidden');
+  document.getElementById('lecturas-saga-detail-panel').classList.add('hidden');
+  state.lecturasCurrentSagaId = null;
+  await loadLecturasSagas();
+  renderLecturasSagasTable();
+}
+
+function openLecturasView() {
+  closeExtensionsView();
+  document.getElementById('lecturas-view').classList.remove('hidden');
+  refreshLecturasSagasView();
+}
+function closeLecturasView() {
+  document.getElementById('lecturas-view').classList.add('hidden');
+  openExtensionsView();
+}
+document.getElementById('btn-open-lecturas').addEventListener('click', openLecturasView);
+document.getElementById('btn-close-lecturas').addEventListener('click', closeLecturasView);
+document.getElementById('btn-back-lecturas-sagas').addEventListener('click', refreshLecturasSagasView);
+
+async function loadLecturasSagas() {
+  state.lecturasSagas = await api('/api/lecturas-sagas');
+}
+async function loadLecturasItems(sagaId) {
+  state.lecturasItems = await api(`/api/lecturas-items?sagaId=${sagaId}`);
+}
+
+function renderLecturasSagasTable() {
+  const tbody = document.getElementById('lecturas-sagas-tbody');
+  const empty = document.getElementById('lecturas-sagas-empty');
+  tbody.innerHTML = '';
+  empty.classList.toggle('hidden', state.lecturasSagas.length > 0);
+  state.lecturasSagas.forEach((saga) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(saga.name)}</td>
+      <td>${saga.types.map((t) => LECTURAS_TYPE_LABELS[t] || t).join(', ') || '—'}</td>
+      <td>${saga.itemCount}</td>
+    `;
+    tr.addEventListener('click', () => openLecturasSagaDetail(saga));
+    tbody.appendChild(tr);
+  });
+}
+
+async function openLecturasSagaDetail(saga) {
+  state.lecturasCurrentSagaId = saga.id;
+  document.getElementById('lecturas-sagas-panel').classList.add('hidden');
+  document.getElementById('lecturas-saga-detail-panel').classList.remove('hidden');
+  document.getElementById('lecturas-saga-detail-name').textContent = saga.name;
+  document.getElementById('lecturas-saga-detail-description').textContent = saga.description || '';
+  document.getElementById('lecturas-saga-detail-description').classList.toggle('hidden', !saga.description);
+  // Los filtros arrancan limpios en cada saga -- si no, entrar en una
+  // saga distinta con un filtro puesto podia parecer "esta vacia" sin
+  // motivo aparente.
+  lecturasItemFilters = { type: '', status: '', genre: '', minRating: '' };
+  await loadLecturasItems(saga.id);
+  renderLecturasItemFilters();
+  renderLecturasItemsTable();
+}
+
+// --- Modal de saga ------------------------------------------------------
+function openLecturasSagaModal(saga) {
+  document.getElementById('lecturas-saga-modal-title').textContent = saga ? 'Editar saga' : 'Nueva saga';
+  document.getElementById('lecturas-saga-id').value = saga ? saga.id : '';
+  document.getElementById('lecturas-saga-name').value = saga ? saga.name : '';
+  document.getElementById('lecturas-saga-description').value = saga ? saga.description || '' : '';
+  document.getElementById('lecturas-saga-modal').classList.remove('hidden');
+}
+function closeLecturasSagaModal() {
+  document.getElementById('lecturas-saga-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-lecturas-saga').addEventListener('click', () => openLecturasSagaModal(null));
+document.getElementById('btn-cancel-lecturas-saga').addEventListener('click', closeLecturasSagaModal);
+document.getElementById('btn-close-lecturas-saga').addEventListener('click', closeLecturasSagaModal);
+document.getElementById('btn-edit-lecturas-saga').addEventListener('click', () => {
+  openLecturasSagaModal(state.lecturasSagas.find((s) => s.id === state.lecturasCurrentSagaId));
+});
+
+document.getElementById('lecturas-saga-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('lecturas-saga-id').value;
+  const payload = {
+    name: document.getElementById('lecturas-saga-name').value,
+    description: document.getElementById('lecturas-saga-description').value,
+  };
+  const wasEditingCurrent = id && Number(id) === state.lecturasCurrentSagaId;
+  if (id) {
+    await api(`/api/lecturas-sagas/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/lecturas-sagas', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeLecturasSagaModal();
+  await loadLecturasSagas();
+  if (wasEditingCurrent) {
+    const updated = state.lecturasSagas.find((s) => s.id === state.lecturasCurrentSagaId);
+    document.getElementById('lecturas-saga-detail-name').textContent = updated.name;
+    document.getElementById('lecturas-saga-detail-description').textContent = updated.description || '';
+    document.getElementById('lecturas-saga-detail-description').classList.toggle('hidden', !updated.description);
+  } else {
+    renderLecturasSagasTable();
+  }
+});
+
+document.getElementById('btn-delete-lecturas-saga').addEventListener('click', async () => {
+  if (!state.lecturasCurrentSagaId) return;
+  if (!confirm('¿Eliminar esta saga y TODO su contenido? No se puede deshacer.')) return;
+  await api(`/api/lecturas-sagas/${state.lecturasCurrentSagaId}`, { method: 'DELETE' });
+  await refreshLecturasSagasView();
+});
+
+// --- Filtros de la tabla de items ---------------------------------------
+let lecturasItemFilters = { type: '', status: '', genre: '', minRating: '' };
+
+function renderLecturasItemFilters() {
+  const container = document.getElementById('lecturas-item-filters');
+  const allGenres = [...new Set(state.lecturasItems.flatMap((it) => it.genres))].sort();
+
+  container.innerHTML = `
+    <select id="lecturas-filter-type">
+      <option value="">Todos los tipos</option>
+      ${Object.entries(LECTURAS_TYPE_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+    </select>
+    <select id="lecturas-filter-status">
+      <option value="">Todos los estados</option>
+      ${Object.entries(LECTURAS_STATUS_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+    </select>
+    <select id="lecturas-filter-genre">
+      <option value="">Todos los géneros</option>
+      ${allGenres.map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('')}
+    </select>
+    <input type="number" id="lecturas-filter-min-rating" placeholder="Rating mín." min="0" max="10" step="0.5" style="width: 6.5rem;" />
+    <button type="button" id="btn-clear-lecturas-filters" class="secondary-btn">Quitar filtros</button>
+  `;
+  document.getElementById('lecturas-filter-type').value = lecturasItemFilters.type;
+  document.getElementById('lecturas-filter-status').value = lecturasItemFilters.status;
+  document.getElementById('lecturas-filter-genre').value = lecturasItemFilters.genre;
+  document.getElementById('lecturas-filter-min-rating').value = lecturasItemFilters.minRating;
+
+  document.getElementById('lecturas-filter-type').addEventListener('change', (e) => { lecturasItemFilters.type = e.target.value; renderLecturasItemsTable(); });
+  document.getElementById('lecturas-filter-status').addEventListener('change', (e) => { lecturasItemFilters.status = e.target.value; renderLecturasItemsTable(); });
+  document.getElementById('lecturas-filter-genre').addEventListener('change', (e) => { lecturasItemFilters.genre = e.target.value; renderLecturasItemsTable(); });
+  document.getElementById('lecturas-filter-min-rating').addEventListener('input', (e) => { lecturasItemFilters.minRating = e.target.value; renderLecturasItemsTable(); });
+  document.getElementById('btn-clear-lecturas-filters').addEventListener('click', () => {
+    lecturasItemFilters = { type: '', status: '', genre: '', minRating: '' };
+    renderLecturasItemFilters();
+    renderLecturasItemsTable();
+  });
+}
+
+function lecturasItemMatchesFilters(item) {
+  if (lecturasItemFilters.type && item.type !== lecturasItemFilters.type) return false;
+  if (lecturasItemFilters.status && item.status !== lecturasItemFilters.status) return false;
+  if (lecturasItemFilters.genre && !item.genres.includes(lecturasItemFilters.genre)) return false;
+  if (lecturasItemFilters.minRating !== '' && (item.rating === null || item.rating < Number(lecturasItemFilters.minRating))) return false;
+  return true;
+}
+
+function renderLecturasItemsTable() {
+  const tbody = document.getElementById('lecturas-items-tbody');
+  const empty = document.getElementById('lecturas-items-empty');
+  tbody.innerHTML = '';
+  const filtered = state.lecturasItems.filter(lecturasItemMatchesFilters);
+  empty.classList.toggle('hidden', filtered.length > 0);
+
+  filtered.forEach((item) => {
+    const progress = item.progressTotal ? `${item.progressCurrent ?? 0}/${item.progressTotal}${item.progressUnit ? ' ' + escapeHtml(item.progressUnit) : ''}` : '—';
+    const owned = item.ownedTotal ? `${item.ownedCount ?? 0} de ${item.ownedTotal}` : '—';
+    const statusColor = LECTURAS_STATUS_COLORS[item.status];
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(item.title)}</td>
+      <td>${LECTURAS_TYPE_LABELS[item.type] || item.type}</td>
+      <td><span class="lecturas-status-badge" style="background-color:${statusColor}33; color:${statusColor};">${LECTURAS_STATUS_LABELS[item.status]}</span></td>
+      <td>${item.rating !== null ? item.rating + '/10' : '—'}</td>
+      <td>${item.genres.map(escapeHtml).join(', ') || '—'}</td>
+      <td>${progress}</td>
+      <td>${owned}</td>
+    `;
+    tr.addEventListener('click', () => openLecturasItemModal(item));
+    tbody.appendChild(tr);
+  });
+}
+
+// --- Modal de item (con chips de generos) -------------------------------
+let lecturasItemGenres = [];
+
+function renderLecturasGenreChipsList() {
+  const list = document.getElementById('lecturas-genre-chips-list');
+  list.innerHTML = lecturasItemGenres
+    .map((g, i) => `<span class="lecturas-genre-chip">${escapeHtml(g)}<button type="button" data-remove-genre="${i}" aria-label="Quitar género">✕</button></span>`)
+    .join('');
+  list.querySelectorAll('[data-remove-genre]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      lecturasItemGenres.splice(Number(btn.dataset.removeGenre), 1);
+      renderLecturasGenreChipsList();
+    });
+  });
+}
+
+function renderLecturasItemGenreChips() {
+  const container = document.getElementById('lecturas-item-genres-field');
+  // Sugerencias de generos ya usados antes (en esta saga) -- sin CRUD
+  // propio de "generos", ver el comentario de lecturas_items en
+  // server/db.js.
+  const allGenres = [...new Set(state.lecturasItems.flatMap((it) => it.genres))];
+  container.innerHTML = `
+    <div class="lecturas-genre-chips" id="lecturas-genre-chips-list"></div>
+    <div class="lecturas-genre-input-row">
+      <input type="text" id="lecturas-genre-input" placeholder="Escribe un género y pulsa Intro" list="lecturas-genre-suggestions" />
+      <datalist id="lecturas-genre-suggestions">${allGenres.map((g) => `<option value="${escapeHtml(g)}"></option>`).join('')}</datalist>
+      <button type="button" id="btn-add-lecturas-genre" class="secondary-btn">+</button>
+    </div>
+  `;
+  renderLecturasGenreChipsList();
+
+  const input = document.getElementById('lecturas-genre-input');
+  function addFromInput() {
+    const value = input.value.trim();
+    if (!value) return;
+    if (!lecturasItemGenres.some((g) => g.toLowerCase() === value.toLowerCase())) {
+      lecturasItemGenres.push(value);
+      renderLecturasGenreChipsList();
+    }
+    input.value = '';
+  }
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addFromInput();
+    }
+  });
+  document.getElementById('btn-add-lecturas-genre').addEventListener('click', addFromInput);
+}
+
+function openLecturasItemModal(item) {
+  document.getElementById('lecturas-item-modal-title').textContent = item ? 'Editar item' : 'Nuevo item';
+  document.getElementById('lecturas-item-id').value = item ? item.id : '';
+  document.getElementById('lecturas-item-title').value = item ? item.title : '';
+  document.getElementById('lecturas-item-type').value = item ? item.type : 'manga';
+  document.getElementById('lecturas-item-status').value = item ? item.status : 'wishlist';
+  document.getElementById('lecturas-item-description').value = item ? item.description || '' : '';
+  document.getElementById('lecturas-item-rating').value = item && item.rating !== null ? item.rating : '';
+  document.getElementById('lecturas-item-progress-current').value = item && item.progressCurrent !== null ? item.progressCurrent : '';
+  document.getElementById('lecturas-item-progress-total').value = item && item.progressTotal !== null ? item.progressTotal : '';
+  document.getElementById('lecturas-item-progress-unit').value = item ? item.progressUnit || '' : '';
+  document.getElementById('lecturas-item-owned-count').value = item && item.ownedCount !== null ? item.ownedCount : '';
+  document.getElementById('lecturas-item-owned-total').value = item && item.ownedTotal !== null ? item.ownedTotal : '';
+  lecturasItemGenres = item ? [...item.genres] : [];
+  renderLecturasItemGenreChips();
+  document.getElementById('btn-delete-lecturas-item').classList.toggle('hidden', !item);
+  document.getElementById('lecturas-item-modal').classList.remove('hidden');
+}
+function closeLecturasItemModal() {
+  document.getElementById('lecturas-item-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-lecturas-item').addEventListener('click', () => openLecturasItemModal(null));
+document.getElementById('btn-cancel-lecturas-item').addEventListener('click', closeLecturasItemModal);
+document.getElementById('btn-close-lecturas-item').addEventListener('click', closeLecturasItemModal);
+
+async function refreshLecturasAfterItemChange() {
+  await loadLecturasItems(state.lecturasCurrentSagaId);
+  renderLecturasItemFilters();
+  renderLecturasItemsTable();
+  // El resumen de tipos/cantidad de la saga (tabla de sagas) puede haber
+  // cambiado -- se refresca en segundo plano, no bloquea la pantalla.
+  loadLecturasSagas();
+}
+
+document.getElementById('lecturas-item-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('lecturas-item-id').value;
+  const payload = {
+    sagaId: state.lecturasCurrentSagaId,
+    title: document.getElementById('lecturas-item-title').value,
+    type: document.getElementById('lecturas-item-type').value,
+    status: document.getElementById('lecturas-item-status').value,
+    description: document.getElementById('lecturas-item-description').value,
+    rating: document.getElementById('lecturas-item-rating').value,
+    genres: lecturasItemGenres,
+    progressCurrent: document.getElementById('lecturas-item-progress-current').value,
+    progressTotal: document.getElementById('lecturas-item-progress-total').value,
+    progressUnit: document.getElementById('lecturas-item-progress-unit').value,
+    ownedCount: document.getElementById('lecturas-item-owned-count').value,
+    ownedTotal: document.getElementById('lecturas-item-owned-total').value,
+  };
+  if (id) {
+    await api(`/api/lecturas-items/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/lecturas-items', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeLecturasItemModal();
+  await refreshLecturasAfterItemChange();
+});
+
+document.getElementById('btn-delete-lecturas-item').addEventListener('click', async () => {
+  const id = document.getElementById('lecturas-item-id').value;
+  if (!confirm('¿Eliminar este item?')) return;
+  await api(`/api/lecturas-items/${id}`, { method: 'DELETE' });
+  closeLecturasItemModal();
+  await refreshLecturasAfterItemChange();
+});
 
 // Mientras una columna cambia de ancho (expandir o volver a las 3), el
 // contenido de dentro se oculta (ver .is-animating en styles.css) para

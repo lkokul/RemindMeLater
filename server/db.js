@@ -129,6 +129,47 @@ db.exec(`
     position INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Extension "Lecturas" (tercera tarjeta de #extensions-view): historial
+  -- de entretenimiento en general, no solo libros -- manga, comic, libro,
+  -- serie, anime, pelicula. Una "saga" es el contenedor OBLIGATORIO de
+  -- todo (hasta algo suelto es una saga de un solo item), para poder
+  -- agrupar bajo un mismo nombre cosas de tipos distintos (ej. el manga Y
+  -- el anime de la misma obra) en vez de repetir el nombre en cada fila.
+  CREATE TABLE IF NOT EXISTS lecturas_sagas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Cada cosa concreta dentro de una saga (una temporada, un tomo, una
+  -- pelicula suelta...). "genres" es un array JSON de texto libre (ej.
+  -- ["Accion","Fantasia"]) en vez de una tabla de generos aparte -- mismo
+  -- criterio que ya usa el proyecto para themes.colors, no hace falta
+  -- normalizarlo para el volumen de una coleccion personal. "status"
+  -- cubre tambien la lista de deseos (wishlist = todavia no lo tienes/no
+  -- has empezado), sin una seccion aparte. "owned_count/owned_total" es
+  -- una cantidad simple ("tengo 5 de 10"), sin marcar cuales exactamente.
+  CREATE TABLE IF NOT EXISTS lecturas_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    saga_id INTEGER NOT NULL REFERENCES lecturas_sagas(id),
+    title TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('manga','comic','libro','serie','anime','pelicula')),
+    description TEXT,
+    rating REAL,
+    status TEXT NOT NULL DEFAULT 'wishlist' CHECK (status IN ('wishlist','in_progress','completed','dropped')),
+    genres TEXT,
+    progress_current INTEGER,
+    progress_total INTEGER,
+    progress_unit TEXT,
+    owned_count INTEGER,
+    owned_total INTEGER,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Migracion sencilla: group_id y active_theme_id se anadieron despues de
