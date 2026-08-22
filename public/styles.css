@@ -931,6 +931,109 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   background: var(--surface-2);
   color: var(--surface-2-text);
 }
+/* Tarjeta activa (una extension ya construida, ver btn-open-finanzas en
+   index.html): mismo bloque visual que .extensions-card pero clicable de
+   verdad -- opacidad completa y un resalte de borde al pasar el raton. */
+.extensions-card-active {
+  font: inherit;
+  opacity: 1;
+  cursor: pointer;
+}
+.extensions-card-active:hover { border-color: var(--accent); }
+
+/* ---------------------------------------------------------------------
+   Extension "Finanzas": pestañas simples (Resumen/Movimientos/
+   Inversiones) dentro de #finanzas-view, gestion de cuentas/categorias
+   (mismo patron inline formulario+lista que Grupos), tablas con scroll
+   horizontal propio, y una barra de progreso para el limite mensual.
+   --------------------------------------------------------------------- */
+.finanzas-tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.6rem 1.2rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.finanzas-tab-btn {
+  font: inherit;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0.5rem 0.3rem;
+  color: color-mix(in srgb, var(--bg-text) 65%, var(--bg));
+  cursor: pointer;
+}
+.finanzas-tab-btn.active { color: var(--bg-text); border-bottom-color: var(--accent); font-weight: 600; }
+.finanzas-tab-panel { flex: 1; min-height: 0; padding: 1rem 1.2rem; overflow-y: auto; }
+
+.finanzas-accounts-summary { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-bottom: 1rem; }
+.finanzas-account-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--surface-text);
+  min-width: 160px;
+}
+.finanzas-account-card-name { font-weight: 600; }
+.finanzas-account-card-balance { font-size: 1.1rem; }
+.finanzas-account-card-balance.negative { color: #e63946; }
+/* Etiqueta "tipo de cuenta" (Corriente/Ahorro/Inversion/...): puramente
+   informativa, no filtra nada -- ver finanzas-account-type en app.js. */
+.finanzas-account-type-badge {
+  font-size: 0.7rem;
+  font-weight: 400;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+}
+
+.finanzas-budget-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
+.finanzas-budget-row input { max-width: 180px; }
+.finanzas-budget-progress-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin-bottom: 0.3rem;
+}
+.finanzas-budget-progress-fill { height: 100%; background: var(--accent); }
+.finanzas-budget-progress-fill.over-budget { background: #e63946; }
+.finanzas-budget-progress-text { font-size: 0.85rem; color: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
+
+.finanzas-category-breakdown-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.finanzas-category-breakdown-row { display: flex; align-items: center; gap: 0.5rem; }
+.finanzas-category-breakdown-row .color-dot { flex-shrink: 0; }
+.finanzas-category-breakdown-row-amount { margin-left: auto; font-weight: 600; }
+
+.finanzas-manage-block { margin-bottom: 1rem; }
+.finanzas-manage-block summary { cursor: pointer; font-weight: 600; padding: 0.4rem 0; }
+.finanzas-inline-form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+.finanzas-inline-form input[type="text"],
+.finanzas-inline-form input[type="number"] { flex: 1; min-width: 120px; }
+.finanzas-manage-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.6rem; }
+
+.finanzas-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.8rem 0; }
+.finanzas-table-wrap { overflow-x: auto; margin: 0.8rem 0; }
+.finanzas-table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+.finanzas-table th, .finanzas-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+.finanzas-table td.finanzas-amount-expense { color: #e63946; }
+.finanzas-table td.finanzas-amount-income { color: #43aa8b; }
+#finanzas-investment-qty-price-row { display: flex; gap: 0.6rem; }
+#finanzas-investment-qty-price-row label { flex: 1; }
+
+/* Grafica de "Evolucion mensual" (SVG a mano, sin libreria -- ver
+   renderFinanzasMonthlyTrendChart en app.js). */
+.finanzas-trend-chart-wrap { margin-top: 0.4rem; }
+.finanzas-trend-chart-svg { width: 100%; max-width: 480px; height: auto; display: block; }
+.finanzas-trend-chart-axis { stroke: var(--border); stroke-width: 1; }
+.finanzas-trend-chart-label { font-size: 8px; fill: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
+.finanzas-trend-chart-legend { display: flex; gap: 1rem; margin-top: 0.4rem; font-size: 0.85rem; color: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
+.finanzas-trend-legend-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 999px; margin-right: 0.3rem; }
 
 /* Envoltorio SOLO de las 3 columnas (el Volver, fuera, en su propia
    fila) -- en movil se quedan apiladas igual que antes. */

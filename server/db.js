@@ -129,6 +129,83 @@ db.exec(`
     position INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Extension "Finanzas" (tercera tarjeta de #extensions-view): gastos,
+  -- ingresos e inversiones. "initial_balance" es el saldo de partida al
+  -- empezar a trackear esta cuenta -- el saldo de verdad NUNCA se guarda,
+  -- se calcula sumando/restando finanzas_transactions y
+  -- finanzas_investment_transactions de esa cuenta (ver
+  -- routes/finanzasAccounts.js).
+  CREATE TABLE IF NOT EXISTS finanzas_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    icon TEXT,
+    color TEXT NOT NULL DEFAULT '#5b8cff',
+    initial_balance REAL NOT NULL DEFAULT 0,
+    -- Puramente informativa (ej. "Corriente", "Inversion") -- sin CHECK
+    -- que la limite a una lista cerrada, para poder anadir un tipo nuevo
+    -- el dia de mañana solo tocando el select en app.js, sin migracion.
+    -- NO restringe en que movimiento se puede usar la cuenta.
+    type TEXT,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Categorias de GASTO (no de ingreso), mismo patron icono+color que
+  -- groups/note_folders -- las crea Koku, no hay lista fija.
+  CREATE TABLE IF NOT EXISTS finanzas_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    icon TEXT,
+    color TEXT NOT NULL DEFAULT '#5b8cff',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Gastos e ingresos normales de una cuenta. "amount" siempre positivo,
+  -- el signo lo da "type". "counts_toward_budget" es el flag que pidio
+  -- Koku ("si aplica o no sobre este gasto maximo") -- solo tiene
+  -- sentido cuando type='expense', se ignora en ingresos.
+  CREATE TABLE IF NOT EXISTS finanzas_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES finanzas_accounts(id),
+    type TEXT NOT NULL CHECK (type IN ('expense', 'income')),
+    amount REAL NOT NULL,
+    date TEXT NOT NULL,
+    description TEXT,
+    category_id INTEGER REFERENCES finanzas_categories(id),
+    counts_toward_budget INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Compra/venta de un activo y dividendos recibidos. Solo registro
+  -- MANUAL a proposito -- sin conectar a ninguna API externa de
+  -- cotizaciones en vivo (confirmado con Koku, coherente con que el
+  -- resto de la app es local-first). "asset_name" es texto libre (no
+  -- una tabla de activos aparte, ej. "Apple (AAPL)"). quantity/
+  -- price_per_unit son NULL en dividendos -- "amount" siempre lleva el
+  -- total (quantity*price_per_unit en compra/venta, lo recibido en
+  -- dividendo), para no tener que recalcularlo cada vez que se lee.
+  CREATE TABLE IF NOT EXISTS finanzas_investment_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES finanzas_accounts(id),
+    asset_name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('buy', 'sell', 'dividend')),
+    quantity REAL,
+    price_per_unit REAL,
+    amount REAL NOT NULL,
+    date TEXT NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Limite de gasto mensual: una sola fila (igual que user_profile), sin
+  -- historizar limites anteriores -- si lo cambias, aplica desde ese
+  -- momento para cualquier calculo de "mes actual".
+  CREATE TABLE IF NOT EXISTS finanzas_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    monthly_budget_limit REAL
+  );
 `);
 
 // Migracion sencilla: group_id y active_theme_id se anadieron despues de
@@ -290,6 +367,14 @@ if (!hasProfile) {
     '',
     crypto.randomUUID()
   );
+}
+
+// Igual que el perfil: el limite mensual de Finanzas es una sola fila
+// que siempre tiene que existir, para no tener que comprobar "y si no
+// existe todavia" en cada ruta que lo lee.
+const hasFinanzasSettings = db.prepare('SELECT 1 FROM finanzas_settings WHERE id = 1').get();
+if (!hasFinanzasSettings) {
+  db.prepare('INSERT INTO finanzas_settings (id, monthly_budget_limit) VALUES (1, NULL)').run();
 }
 
 // Migracion puntual: en versiones anteriores el tema oscuro y el claro de

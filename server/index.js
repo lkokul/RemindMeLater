@@ -16,6 +16,11 @@ const notesRouter = require('./routes/notes');
 const notesSecurityRouter = require('./routes/notesSecurity');
 const noteFoldersRouter = require('./routes/noteFolders');
 const noteImagesRouter = require('./routes/noteImages');
+const finanzasAccountsRouter = require('./routes/finanzasAccounts');
+const finanzasCategoriesRouter = require('./routes/finanzasCategories');
+const finanzasTransactionsRouter = require('./routes/finanzasTransactions');
+const finanzasInvestmentsRouter = require('./routes/finanzasInvestments');
+const finanzasSettingsRouter = require('./routes/finanzasSettings');
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startMdns } = require('./mdns');
@@ -51,6 +56,13 @@ app.use('/api/note-folders', requireDeviceOrTrusted, noteFoldersRouter);
 // un <img src="..."> lo pide el navegador directamente, sin poder llevar
 // el token del movil emparejado.
 app.use('/api/notes/images', noteImagesRouter);
+// Extension "Finanzas" (ver #extensions-view en index.html): gastos,
+// ingresos e inversiones (solo registro manual, sin API de cotizaciones).
+app.use('/api/finanzas-accounts', requireDeviceOrTrusted, finanzasAccountsRouter);
+app.use('/api/finanzas-categories', requireDeviceOrTrusted, finanzasCategoriesRouter);
+app.use('/api/finanzas-transactions', requireDeviceOrTrusted, finanzasTransactionsRouter);
+app.use('/api/finanzas-investments', requireDeviceOrTrusted, finanzasInvestmentsRouter);
+app.use('/api/finanzas-settings', requireDeviceOrTrusted, finanzasSettingsRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);

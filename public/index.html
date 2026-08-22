@@ -361,17 +361,241 @@
           <span class="extensions-card-title">Gimnasio</span>
           <span class="extensions-card-badge">Próximamente</span>
         </div>
-        <div class="extensions-card" aria-disabled="true">
+        <button type="button" id="btn-open-finanzas" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon">💶</span>
           <span class="extensions-card-title">Finanzas</span>
-          <span class="extensions-card-badge">Próximamente</span>
-        </div>
+        </button>
         <div class="extensions-card" aria-disabled="true">
           <span class="extensions-card-icon">📚</span>
           <span class="extensions-card-title">Lecturas</span>
           <span class="extensions-card-badge">Próximamente</span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Extension "Finanzas": gastos, ingresos e inversiones (solo registro
+       manual, sin conexion a ninguna API de cotizaciones en vivo -- ver
+       CLAUDE.md). Mismo patron de pantalla completa que Extensiones/Mi
+       espacio (.my-space-view), con 3 pestañas dentro (Resumen/Movimientos/
+       Inversiones, ver finanzas-tabs en styles.css y el codigo de pestañas
+       en app.js). -->
+  <div id="finanzas-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2>💶 Finanzas</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-finanzas" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+      </div>
+    </div>
+    <div class="finanzas-tabs">
+      <button type="button" class="finanzas-tab-btn active" data-finanzas-tab="resumen">Resumen</button>
+      <button type="button" class="finanzas-tab-btn" data-finanzas-tab="movimientos">Movimientos</button>
+      <button type="button" class="finanzas-tab-btn" data-finanzas-tab="inversiones">Inversiones</button>
+    </div>
+
+    <!-- Pestaña Resumen: saldo de cada cuenta, progreso del limite mensual
+         de gasto, y desglose del gasto de este mes por categoria. -->
+    <div class="finanzas-tab-panel" data-finanzas-panel="resumen">
+      <h3>Saldo por cuenta</h3>
+      <div id="finanzas-accounts-summary" class="finanzas-accounts-summary"></div>
+
+      <h3>Límite mensual de gasto</h3>
+      <div class="finanzas-budget-row">
+        <input type="number" id="finanzas-budget-input" step="0.01" min="0" placeholder="Sin límite" />
+        <button type="button" id="btn-save-finanzas-budget" class="secondary-btn">Guardar</button>
+      </div>
+      <div id="finanzas-budget-progress" class="finanzas-budget-progress"></div>
+
+      <h3>Gasto de este mes por categoría</h3>
+      <div id="finanzas-category-breakdown-list" class="finanzas-category-breakdown-list"></div>
+
+      <h3>Evolución mensual (últimos 6 meses)</h3>
+      <div id="finanzas-monthly-trend-chart" class="finanzas-trend-chart-wrap"></div>
+    </div>
+
+    <!-- Pestaña Movimientos: gestion de cuentas y categorias (mismo patron
+         que Grupos: formulario + lista, sin modal aparte), filtros, y la
+         tabla de gastos/ingresos. -->
+    <div class="finanzas-tab-panel hidden" data-finanzas-panel="movimientos">
+      <details class="finanzas-manage-block">
+        <summary>Cuentas</summary>
+        <form id="finanzas-account-form" class="finanzas-inline-form">
+          <input type="hidden" id="finanzas-account-id" />
+          <input type="text" id="finanzas-account-name" placeholder="Nombre de la cuenta" required />
+          <div id="finanzas-account-icon-field"></div>
+          <div id="finanzas-account-color-field"></div>
+          <input type="number" id="finanzas-account-initial-balance" step="0.01" placeholder="Saldo inicial" />
+          <select id="finanzas-account-type">
+            <option value="">Sin tipo</option>
+            <option value="Corriente">Corriente</option>
+            <option value="Ahorro">Ahorro</option>
+            <option value="Inversión">Inversión</option>
+            <option value="Efectivo">Efectivo</option>
+            <option value="Otro">Otro</option>
+          </select>
+          <button type="submit" class="primary-btn">Guardar</button>
+          <button type="button" id="btn-cancel-finanzas-account" class="secondary-btn hidden">Cancelar</button>
+        </form>
+        <div id="finanzas-accounts-list" class="finanzas-manage-list"></div>
+      </details>
+      <details class="finanzas-manage-block">
+        <summary>Categorías</summary>
+        <form id="finanzas-category-form" class="finanzas-inline-form">
+          <input type="hidden" id="finanzas-category-id" />
+          <input type="text" id="finanzas-category-name" placeholder="Nombre de la categoría" required />
+          <div id="finanzas-category-icon-field"></div>
+          <div id="finanzas-category-color-field"></div>
+          <button type="submit" class="primary-btn">Guardar</button>
+          <button type="button" id="btn-cancel-finanzas-category" class="secondary-btn hidden">Cancelar</button>
+        </form>
+        <div id="finanzas-categories-list" class="finanzas-manage-list"></div>
+      </details>
+
+      <div class="finanzas-filters">
+        <select id="finanzas-filter-account"><option value="">Todas las cuentas</option></select>
+        <select id="finanzas-filter-category"><option value="">Todas las categorías</option></select>
+        <select id="finanzas-filter-type">
+          <option value="">Gastos e ingresos</option>
+          <option value="expense">Solo gastos</option>
+          <option value="income">Solo ingresos</option>
+        </select>
+        <input type="date" id="finanzas-filter-from" title="Desde" />
+        <input type="date" id="finanzas-filter-to" title="Hasta" />
+        <button type="button" id="btn-clear-finanzas-filters" class="secondary-btn">Quitar filtros</button>
+      </div>
+      <button type="button" id="btn-new-finanzas-transaction" class="primary-btn">+ Movimiento</button>
+      <div class="finanzas-table-wrap">
+        <table class="finanzas-table">
+          <thead>
+            <tr>
+              <th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Categoría</th><th>Descripción</th><th>Importe</th><th>¿Cuenta límite?</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="finanzas-transactions-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Pestaña Inversiones: registro manual de compra/venta/dividendos +
+         resumen de ganancia/perdida REALIZADA por activo (ver nota en
+         CLAUDE.md: nada de cotizaciones en vivo). -->
+    <div class="finanzas-tab-panel hidden" data-finanzas-panel="inversiones">
+      <button type="button" id="btn-new-finanzas-investment" class="primary-btn">+ Inversión</button>
+      <div class="finanzas-table-wrap">
+        <table class="finanzas-table">
+          <thead>
+            <tr><th>Fecha</th><th>Cuenta</th><th>Activo</th><th>Tipo</th><th>Cantidad</th><th>Precio/u</th><th>Importe</th><th></th></tr>
+          </thead>
+          <tbody id="finanzas-investments-tbody"></tbody>
+        </table>
+      </div>
+
+      <h3>Resumen por activo (ganancia/pérdida realizada)</h3>
+      <div class="finanzas-table-wrap">
+        <table class="finanzas-table">
+          <thead>
+            <tr><th>Activo</th><th>Comprado</th><th>Vendido</th><th>Dividendos</th><th>Cantidad restante</th><th>Ganancia/pérdida</th></tr>
+          </thead>
+          <tbody id="finanzas-asset-summary-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar un movimiento (gasto o ingreso) de Finanzas -->
+  <div id="finanzas-transaction-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-finanzas-transaction" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="finanzas-transaction-modal-title">Nuevo movimiento</h2>
+      <form id="finanzas-transaction-form">
+        <input type="hidden" id="finanzas-transaction-id" />
+        <label>
+          Tipo
+          <select id="finanzas-transaction-type" required>
+            <option value="expense">Gasto</option>
+            <option value="income">Ingreso</option>
+          </select>
+        </label>
+        <label>
+          Cuenta
+          <select id="finanzas-transaction-account" required></select>
+        </label>
+        <label id="finanzas-transaction-category-label">
+          Categoría
+          <select id="finanzas-transaction-category"><option value="">Sin categoría</option></select>
+        </label>
+        <label>
+          Importe
+          <input type="number" id="finanzas-transaction-amount" step="0.01" min="0.01" required />
+        </label>
+        <label>
+          Fecha
+          <input type="date" id="finanzas-transaction-date" required />
+        </label>
+        <label>
+          Descripción (opcional)
+          <input type="text" id="finanzas-transaction-description" />
+        </label>
+        <label class="checkbox-row" id="finanzas-transaction-counts-row">
+          <input type="checkbox" id="finanzas-transaction-counts" checked />
+          Cuenta para el límite mensual
+        </label>
+        <div class="modal-actions">
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar una operacion de inversion de Finanzas -->
+  <div id="finanzas-investment-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-finanzas-investment" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="finanzas-investment-modal-title">Nueva inversión</h2>
+      <form id="finanzas-investment-form">
+        <input type="hidden" id="finanzas-investment-id" />
+        <label>
+          Cuenta
+          <select id="finanzas-investment-account" required></select>
+        </label>
+        <label>
+          Activo
+          <input type="text" id="finanzas-investment-asset" placeholder="Ej. Apple (AAPL)" required />
+        </label>
+        <label>
+          Tipo
+          <select id="finanzas-investment-type" required>
+            <option value="buy">Compra</option>
+            <option value="sell">Venta</option>
+            <option value="dividend">Dividendo</option>
+          </select>
+        </label>
+        <div id="finanzas-investment-qty-price-row">
+          <label>
+            Cantidad
+            <input type="number" id="finanzas-investment-quantity" step="0.0001" min="0.0001" />
+          </label>
+          <label>
+            Precio por unidad
+            <input type="number" id="finanzas-investment-price" step="0.01" min="0.01" />
+          </label>
+        </div>
+        <label id="finanzas-investment-amount-label">
+          Importe del dividendo
+          <input type="number" id="finanzas-investment-amount" step="0.01" min="0.01" />
+        </label>
+        <label>
+          Fecha
+          <input type="date" id="finanzas-investment-date" required />
+        </label>
+        <label>
+          Notas (opcional)
+          <input type="text" id="finanzas-investment-notes" />
+        </label>
+        <div class="modal-actions">
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
     </div>
   </div>
 
