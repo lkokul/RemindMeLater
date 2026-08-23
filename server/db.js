@@ -369,6 +369,26 @@ if (!hasProfile) {
   );
 }
 
+// is_salary/is_fixed (objetivo de ahorro): marcar un ingreso como
+// "salario" o un gasto como "fijo" es lo que usa el aviso de si el
+// objetivo de ahorro es realista (ver routes/finanzasSettings.js) --
+// solo tiene sentido el que aplica segun "type", el otro se queda
+// siempre en 0.
+const finanzasTransactionColumns = db.prepare('PRAGMA table_info(finanzas_transactions)').all().map((c) => c.name);
+if (!finanzasTransactionColumns.includes('is_salary')) {
+  db.exec('ALTER TABLE finanzas_transactions ADD COLUMN is_salary INTEGER NOT NULL DEFAULT 0');
+}
+if (!finanzasTransactionColumns.includes('is_fixed')) {
+  db.exec('ALTER TABLE finanzas_transactions ADD COLUMN is_fixed INTEGER NOT NULL DEFAULT 0');
+}
+
+// savings_goal_min: objetivo MINIMO de ahorro mensual (sin maximo --
+// Koku dijo explicitamente que ahorrar de mas nunca es un problema).
+const finanzasSettingsColumns = db.prepare('PRAGMA table_info(finanzas_settings)').all().map((c) => c.name);
+if (!finanzasSettingsColumns.includes('savings_goal_min')) {
+  db.exec('ALTER TABLE finanzas_settings ADD COLUMN savings_goal_min REAL');
+}
+
 // Igual que el perfil: el limite mensual de Finanzas es una sola fila
 // que siempre tiene que existir, para no tener que comprobar "y si no
 // existe todavia" en cada ruta que lo lee.

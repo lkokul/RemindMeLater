@@ -406,6 +406,14 @@
       </div>
       <div id="finanzas-budget-progress" class="finanzas-budget-progress"></div>
 
+      <h3>Ahorro</h3>
+      <div class="finanzas-budget-row">
+        <input type="number" id="finanzas-savings-goal-input" step="0.01" min="0" placeholder="Sin objetivo" />
+        <button type="button" id="btn-save-finanzas-savings-goal" class="secondary-btn">Guardar objetivo</button>
+      </div>
+      <div id="finanzas-savings-warning" class="finanzas-savings-warning hidden"></div>
+      <div id="finanzas-savings-status" class="finanzas-savings-status"></div>
+
       <h3>Gasto de este mes por categoría</h3>
       <div id="finanzas-category-breakdown-list" class="finanzas-category-breakdown-list"></div>
 
@@ -539,6 +547,14 @@
         <label class="checkbox-row" id="finanzas-transaction-counts-row">
           <input type="checkbox" id="finanzas-transaction-counts" checked />
           Cuenta para el límite mensual
+        </label>
+        <label class="checkbox-row" id="finanzas-transaction-fixed-row">
+          <input type="checkbox" id="finanzas-transaction-fixed" />
+          Gasto fijo
+        </label>
+        <label class="checkbox-row" id="finanzas-transaction-salary-row">
+          <input type="checkbox" id="finanzas-transaction-salary" />
+          Es tu salario
         </label>
         <div class="modal-actions">
           <button type="submit" class="primary-btn">Guardar</button>

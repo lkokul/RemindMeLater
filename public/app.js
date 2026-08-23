@@ -4189,6 +4189,24 @@ async function renderFinanzasResumenTab() {
     progressWrap.innerHTML = `<div class="finanzas-budget-progress-text">Sin límite configurado. Gastado este mes: ${formatFinanzasAmount(summary.totalExpense)}. Ingresado: ${formatFinanzasAmount(summary.totalIncome)}.</div>`;
   }
 
+  document.getElementById('finanzas-savings-goal-input').value = summary.savingsGoalMin ?? '';
+  // El aviso de "objetivo poco realista" solo tiene sentido justo tras
+  // guardar (ver el listener de btn-save-finanzas-savings-goal, que lo
+  // rellena de nuevo si la respuesta lo trae) -- en cualquier otro
+  // refresco de la pestaña se oculta, para no dejar un aviso viejo.
+  document.getElementById('finanzas-savings-warning').classList.add('hidden');
+  const savingsStatusWrap = document.getElementById('finanzas-savings-status');
+  if (summary.savingsGoalMin) {
+    const met = summary.savings >= summary.savingsGoalMin;
+    savingsStatusWrap.innerHTML = `
+      <div class="finanzas-savings-status-text${met ? ' met' : ' not-met'}">
+        Este mes has ahorrado ${formatFinanzasAmount(summary.savings)} — objetivo ${formatFinanzasAmount(summary.savingsGoalMin)}${met ? ' ✓ cumplido' : ` (te faltan ${formatFinanzasAmount(summary.savingsGoalMin - summary.savings)})`}
+      </div>
+    `;
+  } else {
+    savingsStatusWrap.innerHTML = `<div class="finanzas-savings-status-text">Este mes has ahorrado ${formatFinanzasAmount(summary.savings)}. Sin objetivo configurado todavía.</div>`;
+  }
+
   const breakdownList = document.getElementById('finanzas-category-breakdown-list');
   breakdownList.innerHTML = '';
   if (summary.byCategory.length === 0 && summary.uncategorizedExpense === 0) {
@@ -4221,6 +4239,20 @@ document.getElementById('btn-save-finanzas-budget').addEventListener('click', as
   const value = document.getElementById('finanzas-budget-input').value;
   await api('/api/finanzas-settings', { method: 'PUT', body: JSON.stringify({ monthlyBudgetLimit: value || null }) });
   renderFinanzasResumenTab();
+});
+
+document.getElementById('btn-save-finanzas-savings-goal').addEventListener('click', async () => {
+  const value = document.getElementById('finanzas-savings-goal-input').value;
+  const result = await api('/api/finanzas-settings', { method: 'PUT', body: JSON.stringify({ savingsGoalMin: value || null }) });
+  // renderFinanzasResumenTab() oculta este aviso al principio (para no
+  // dejar uno viejo en refrescos normales) -- por eso se rellena DESPUES
+  // de que termine, no antes.
+  await renderFinanzasResumenTab();
+  if (result.warning) {
+    const warningWrap = document.getElementById('finanzas-savings-warning');
+    warningWrap.textContent = result.warning;
+    warningWrap.classList.remove('hidden');
+  }
 });
 
 // -- Pestaña Movimientos: filtros + tabla de gastos/ingresos. --
@@ -4299,6 +4331,8 @@ function openFinanzasTransactionModal(t) {
   document.getElementById('finanzas-transaction-date').value = t ? t.date : todayIsoDate();
   document.getElementById('finanzas-transaction-description').value = t ? (t.description || '') : '';
   document.getElementById('finanzas-transaction-counts').checked = t ? t.countsTowardBudget : true;
+  document.getElementById('finanzas-transaction-fixed').checked = t ? t.isFixed : false;
+  document.getElementById('finanzas-transaction-salary').checked = t ? t.isSalary : false;
   refreshFinanzasTransactionTypeFields();
   document.getElementById('finanzas-transaction-modal').classList.remove('hidden');
 }
@@ -4309,6 +4343,8 @@ function refreshFinanzasTransactionTypeFields() {
   const isExpense = document.getElementById('finanzas-transaction-type').value === 'expense';
   document.getElementById('finanzas-transaction-category-label').classList.toggle('hidden', !isExpense);
   document.getElementById('finanzas-transaction-counts-row').classList.toggle('hidden', !isExpense);
+  document.getElementById('finanzas-transaction-fixed-row').classList.toggle('hidden', !isExpense);
+  document.getElementById('finanzas-transaction-salary-row').classList.toggle('hidden', isExpense);
 }
 document.getElementById('finanzas-transaction-type').addEventListener('change', refreshFinanzasTransactionTypeFields);
 document.getElementById('btn-new-finanzas-transaction').addEventListener('click', () => openFinanzasTransactionModal(null));
@@ -4328,6 +4364,8 @@ document.getElementById('finanzas-transaction-form').addEventListener('submit', 
       ? Number(document.getElementById('finanzas-transaction-category').value)
       : null,
     countsTowardBudget: type === 'expense' ? document.getElementById('finanzas-transaction-counts').checked : false,
+    isFixed: type === 'expense' ? document.getElementById('finanzas-transaction-fixed').checked : false,
+    isSalary: type === 'income' ? document.getElementById('finanzas-transaction-salary').checked : false,
   };
   if (id) {
     await api(`/api/finanzas-transactions/${id}`, { method: 'PUT', body: JSON.stringify(payload) });

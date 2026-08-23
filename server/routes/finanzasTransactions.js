@@ -16,6 +16,8 @@ function serialize(row) {
     description: row.description || null,
     categoryId: row.category_id || null,
     countsTowardBudget: !!row.counts_toward_budget,
+    isSalary: !!row.is_salary,
+    isFixed: !!row.is_fixed,
   };
 }
 
@@ -53,7 +55,24 @@ function validateBody(body, existing) {
       ? existing.counts_toward_budget
       : 1;
 
-  return { accountId, type, amount: safeAmount, date, description: body.description, categoryId, countsTowardBudget };
+  // isSalary/isFixed: solo tienen sentido para su propio "type" (ver
+  // objetivo de ahorro en finanzasSettings.js) -- el otro se fuerza a 0
+  // para que nunca queden datos contradictorios (un gasto marcado como
+  // salario, por ejemplo).
+  const isSalary = type === 'income' && (body.isSalary !== undefined ? !!body.isSalary : !!(existing && existing.is_salary));
+  const isFixed = type === 'expense' && (body.isFixed !== undefined ? !!body.isFixed : !!(existing && existing.is_fixed));
+
+  return {
+    accountId,
+    type,
+    amount: safeAmount,
+    date,
+    description: body.description,
+    categoryId,
+    countsTowardBudget,
+    isSalary: isSalary ? 1 : 0,
+    isFixed: isFixed ? 1 : 0,
+  };
 }
 
 router.get('/', (req, res) => {
@@ -81,9 +100,9 @@ router.post('/', (req, res) => {
 
   const info = db
     .prepare(
-      'INSERT INTO finanzas_transactions (account_id, type, amount, date, description, category_id, counts_toward_budget) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO finanzas_transactions (account_id, type, amount, date, description, category_id, counts_toward_budget, is_salary, is_fixed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(result.accountId, result.type, result.amount, result.date, description, result.categoryId, result.countsTowardBudget);
+    .run(result.accountId, result.type, result.amount, result.date, description, result.categoryId, result.countsTowardBudget, result.isSalary, result.isFixed);
 
   const row = db.prepare('SELECT * FROM finanzas_transactions WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json(serialize(row));
@@ -104,7 +123,7 @@ router.put('/:id', (req, res) => {
       : existing.description;
 
   db.prepare(
-    'UPDATE finanzas_transactions SET account_id = ?, type = ?, amount = ?, date = ?, description = ?, category_id = ?, counts_toward_budget = ? WHERE id = ?'
+    'UPDATE finanzas_transactions SET account_id = ?, type = ?, amount = ?, date = ?, description = ?, category_id = ?, counts_toward_budget = ?, is_salary = ?, is_fixed = ? WHERE id = ?'
   ).run(
     result.accountId,
     result.type,
@@ -113,6 +132,8 @@ router.put('/:id', (req, res) => {
     description,
     result.categoryId,
     result.countsTowardBudget,
+    result.isSalary,
+    result.isFixed,
     req.params.id
   );
 
@@ -140,6 +161,12 @@ router.get('/summary/month', (req, res) => {
   const { total: totalIncome } = db
     .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'income' AND date LIKE ?")
     .get(`${prefix}%`);
+  // A diferencia de totalExpense (solo lo que cuenta para el limite),
+  // esto es TODO lo gastado el mes -- el ahorro real (savings, mas abajo)
+  // tiene que salir de dinero de verdad, no del subconjunto del limite.
+  const { total: totalExpenseAll } = db
+    .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'expense' AND date LIKE ?")
+    .get(`${prefix}%`);
 
   const byCategory = db
     .prepare(
@@ -164,8 +191,11 @@ router.get('/summary/month', (req, res) => {
   res.json({
     month,
     totalExpense,
+    totalExpenseAll,
     totalIncome,
+    savings: totalIncome - totalExpenseAll,
     monthlyBudgetLimit: settings.monthly_budget_limit,
+    savingsGoalMin: settings.savings_goal_min,
     byCategory,
     uncategorizedExpense: uncategorized,
   });
