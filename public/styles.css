@@ -86,11 +86,65 @@ button {
   background: var(--surface-2);
   color: var(--surface-2-text);
   padding: 0.6rem 0.9rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
 }
 .primary-btn { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
 .secondary-btn { background: transparent; }
 .danger-btn { background: transparent; color: var(--danger); border-color: var(--danger); }
 .icon-btn { padding: 0.5rem 0.7rem; display: inline-flex; align-items: center; justify-content: center; }
+@media (prefers-reduced-motion: reduce) {
+  button { transition: none; }
+}
+
+/* ---------------------------------------------------------------------
+   Estilo de interaccion (Configuracion > Estilo > Estilo de interaccion):
+   ajuste por dispositivo, INDEPENDIENTE del tema de color -- usa los
+   mismos var(--accent)/var(--danger) del tema activo, solo cambia como
+   reaccionan los botones al pasar el raton y como se marca un
+   interruptor encendido. Se aplica como atributo en <html>
+   (document.documentElement.dataset.uiStyle, ver applyUiStyle en app.js)
+   ANTES de pintar nada, asi que siempre hay uno puesto -- "directo" es
+   el que sale si nunca has entrado a elegir otro.
+   --------------------------------------------------------------------- */
+:root[data-ui-style="directo"] button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+:root[data-ui-style="directo"] .primary-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, white 12%, var(--accent));
+}
+:root[data-ui-style="directo"] .danger-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface-2));
+}
+:root[data-ui-style="directo"] button:active:not(:disabled) { transform: scale(0.97); }
+
+:root[data-ui-style="neon"] button:hover:not(:disabled) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+:root[data-ui-style="neon"] .danger-btn:hover:not(:disabled) {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger), 0 0 12px color-mix(in srgb, var(--danger) 55%, transparent);
+}
+:root[data-ui-style="neon"] .primary-btn {
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+:root[data-ui-style="neon"] .checkbox-row input[type="checkbox"]:checked {
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+:root[data-ui-style="cristal"] button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-2-text) 12%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--surface-2-text) 30%, var(--border));
+}
+:root[data-ui-style="cristal"] .primary-btn {
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #8c6eff));
+  border-color: transparent;
+}
+:root[data-ui-style="cristal"] .primary-btn:hover:not(:disabled) { filter: brightness(1.12); }
+:root[data-ui-style="cristal"] .checkbox-row input[type="checkbox"]:checked {
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #8c6eff));
+}
 /* Ancho fijo: si no, el glifo ☀/☾ mide un pelin distinto y el boton
    cambia de tamano al alternar, empujando "+ Nuevo evento" al lado. */
 #btn-quick-color-mode { width: 2.6rem; text-align: center; flex-shrink: 0; }

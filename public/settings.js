@@ -791,6 +791,46 @@ const COLOR_MODES = [
   { id: 'system', label: 'Sistema' },
 ];
 
+// ---------------------------------------------------------------------
+// Estilo de interaccion (Neon/Directo/Cristal): mismo patron de tarjetas
+// "elige una" que COLOR_MODES/refreshColorModeOptions de arriba, pero
+// independiente del tema de color -- getUiStylePreference/applyUiStyle
+// viven en app.js porque tambien hace falta aplicarlas nada mas arrancar,
+// antes de que este archivo se cargue.
+// ---------------------------------------------------------------------
+const UI_STYLES = [
+  { id: 'directo', label: 'Directo' },
+  { id: 'neon', label: 'Neón' },
+  { id: 'cristal', label: 'Cristal' },
+];
+
+function setUiStylePreference(style) {
+  localStorage.setItem('uiStylePreference', style);
+  applyUiStyle();
+  refreshUiStyleOptions();
+}
+
+function refreshUiStyleOptions() {
+  const container = document.getElementById('ui-style-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getUiStylePreference();
+
+  UI_STYLES.forEach((s) => {
+    const isActive = s.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = s.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => setUiStylePreference(s.id));
+    }
+    container.appendChild(btn);
+  });
+}
+
 // Cambia el modo de color y refresca todo lo que depende de el: los
 // botones Sistema/Claro/Oscuro, el tema activo (si tiene variante
 // inversa, cambia de golpe) y la biblioteca (las tarjetas emparejadas
@@ -860,6 +900,7 @@ if (window.matchMedia) {
 
 async function refreshStyleTab() {
   themeLibrary = await api('/api/themes');
+  refreshUiStyleOptions();
   refreshColorModeOptions();
   renderThemeLibrary();
   refreshQuickColorModeButton();

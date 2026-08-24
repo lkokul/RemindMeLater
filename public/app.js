@@ -4073,6 +4073,26 @@ document.getElementById('btn-dismiss-default-view').addEventListener('click', ()
 // asi que su renderizado (loadReminders, renderTasksList...) no cambia
 // nada, solo cambia DONDE viven en el DOM.
 // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// Estilo de interaccion (Neon/Directo/Cristal, ver Configuracion > Estilo):
+// ajuste por dispositivo, independiente del tema de color -- solo cambia
+// como reaccionan los botones al pasar el raton y los interruptores al
+// encenderse (ver el bloque [data-ui-style=...] en styles.css). Se
+// aplica ANTES de pintar nada desde el script inline de index.html; esta
+// funcion es la que usa el selector de Configuracion para cambiarlo en
+// caliente sin recargar la pagina.
+// ---------------------------------------------------------------------
+const UI_STYLE_IDS = ['directo', 'neon', 'cristal'];
+
+function getUiStylePreference() {
+  const stored = localStorage.getItem('uiStylePreference');
+  return UI_STYLE_IDS.includes(stored) ? stored : 'directo';
+}
+
+function applyUiStyle() {
+  document.documentElement.dataset.uiStyle = getUiStylePreference();
+}
+
 const MY_SPACE_MODE_IDS = ['topbar', 'panel'];
 
 function getMiEspacioMode() {
@@ -5911,6 +5931,7 @@ document.getElementById('my-space-back-btn').addEventListener('click', () => {
 });
 
 applyMiEspacioMode();
+applyUiStyle();
 
 // ---------------------------------------------------------------------
 // Aviso de nueva version disponible: /api/version devuelve el momento en

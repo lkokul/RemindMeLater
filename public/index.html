@@ -60,6 +60,16 @@
     } catch (e) {
       // Si algo falla, nos quedamos con los colores por defecto del CSS.
     }
+
+    // Estilo de interaccion (Neon/Directo/Cristal, ver Configuracion >
+    // Estilo): igual que el tema de color, se aplica antes de pintar para
+    // que no haya un parpadeo. "directo" es el valor por defecto si
+    // todavia no has elegido ninguno.
+    try {
+      document.documentElement.dataset.uiStyle = localStorage.getItem('uiStylePreference') || 'directo';
+    } catch (e) {
+      document.documentElement.dataset.uiStyle = 'directo';
+    }
   })();
 </script>
 </head>
@@ -1292,6 +1302,12 @@
       <div id="settings-tab-style" class="settings-tab-panel hidden">
         <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Estilo</h3>
+
+        <h4>Estilo de interacción</h4>
+        <p class="hint">Cómo reaccionan los botones al pasar el ratón y los interruptores al encenderse. Ajuste por dispositivo, independiente del tema de color de abajo.</p>
+        <div id="ui-style-options" class="view-mode-options"></div>
+
+        <h4>Colores</h4>
         <p class="hint">Clica una tarjeta para usar ese tema en este dispositivo. Cada dispositivo puede llevar un tema distinto.</p>
 
         <p class="hint">Si un tema tiene variante clara/oscura emparejada (◐), esto hace que siga el modo de tu ordenador automáticamente. Para cambiarlo a mano, usa el icono ☀/☾ de la barra superior.</p>
