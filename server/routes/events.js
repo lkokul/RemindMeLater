@@ -110,7 +110,9 @@ router.post('/', (req, res) => {
     );
 
   const row = db.prepare(`${SELECT_WITH_GROUP} WHERE e.id = ?`).get(info.lastInsertRowid);
-  res.status(201).json(serialize(row));
+  const serialized = serialize(row);
+  db.recordSyncChange('events', row.id, 'upsert', serialized, req.device ? req.device.id : null);
+  res.status(201).json(serialized);
 });
 
 router.put('/:id', (req, res) => {
@@ -158,12 +160,15 @@ router.put('/:id', (req, res) => {
   );
 
   const row = db.prepare(`${SELECT_WITH_GROUP} WHERE e.id = ?`).get(req.params.id);
-  res.json(serialize(row));
+  const serialized = serialize(row);
+  db.recordSyncChange('events', row.id, 'upsert', serialized, req.device ? req.device.id : null);
+  res.json(serialized);
 });
 
 router.delete('/:id', (req, res) => {
   const info = db.prepare('DELETE FROM events WHERE id = ?').run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
+  db.recordSyncChange('events', req.params.id, 'delete', null, req.device ? req.device.id : null);
   res.status(204).end();
 });
 

@@ -194,6 +194,7 @@ function enableCtrlEnterSubmit(formId) {
 enableCtrlEnterSubmit('event-form');
 enableCtrlEnterSubmit('task-form');
 enableCtrlEnterSubmit('note-form');
+enableCtrlEnterSubmit('onboarding-form');
 
 // ---------------------------------------------------------------------
 // Selector de fecha con estilo propio: sustituye <input type="date"> (o
@@ -398,13 +399,32 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
 // Capa de red: envuelve fetch para añadir el token del dispositivo (si
 // existe) y para reaccionar automaticamente si el servidor dice 401
 // (dispositivo no vinculado) mostrando la pantalla de emparejamiento.
+//
+// Fase "movil": si el fetch falla por RED de verdad (no hay quien
+// responda -- no confundir con un error normal del servidor, ESO sigue
+// lanzando el mismo error que siempre), y la ruta es una de las 5
+// tablas que se sincronizan (ver matchSyncRoute mas abajo), se sigue
+// funcionando con la copia local en IndexedDB (public/db-local.js) en
+// vez de romper la pantalla. Las demas rutas (temas, perfil,
+// dispositivos...) no tienen copia local todavia -- si fallan sin
+// conexion, se comportan igual que siempre (lanzan error).
 // ---------------------------------------------------------------------
 async function api(path, options = {}) {
   const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
   const token = localStorage.getItem('deviceToken');
   if (token) headers['X-Device-Token'] = token;
 
-  const res = await fetch(path, Object.assign({}, options, { headers }));
+  const url = new URL(path, window.location.origin);
+  const method = (options.method || 'GET').toUpperCase();
+  const route = matchSyncRoute(url.pathname);
+
+  let res;
+  try {
+    res = await fetch(path, Object.assign({}, options, { headers }));
+  } catch (networkErr) {
+    if (!route) throw networkErr;
+    return handleOfflineRequest(route, method, url, options);
+  }
 
   if (res.status === 401) {
     localStorage.removeItem('deviceToken');
@@ -417,9 +437,480 @@ async function api(path, options = {}) {
     throw new Error(body.message || `Error ${res.status}`);
   }
 
-  if (res.status === 204) return null;
-  return res.json();
+  const data = res.status === 204 ? null : await res.json();
+
+  // Con exito de verdad, se guarda una copia en la copia local -- "cache
+  // de escritura": la proxima vez que falle la red, esto es lo que se
+  // vera. No se espera a que termine (no hace falta su resultado para
+  // nada mas), pero si falla por lo que sea no debe romper la llamada
+  // real, que ya tuvo exito.
+  if (route) cacheServerResponse(route, method, data).catch(() => {});
+
+  return data;
 }
+
+// ---------------------------------------------------------------------
+// Copia local + sincronizacion (fase "movil"). Ver
+// /root/.claude/plans/warm-sparking-beaver.md (o CLAUDE.md) para el
+// diseño completo -- resumen: cada dispositivo guarda su propia copia
+// de events/notes/groups/note_folders/special_days en IndexedDB
+// (public/db-local.js); cuando hay conexion con el ordenador, se traen
+// los cambios del servidor (pullChanges) y se mandan los pendientes de
+// aqui (pushOutbox). "El mas reciente gana" sin avisos ni fusiones —a
+// proposito, es una app de una sola persona.
+// ---------------------------------------------------------------------
+
+// A que almacen local corresponde cada ruta de la API, y como extraer
+// el id de la URL. matchSyncRoute() se llama en CADA peticion de api(),
+// asi que tiene que poder ejecutarse antes de que el resto de la app
+// (state, load*...) exista todavia -- por eso no depende de nada mas.
+const SYNC_TABLE_ROUTES = [
+  { table: 'events', store: 'events', collectionRe: /^\/api\/events$/, itemRe: /^\/api\/events\/(\d+)$/ },
+  { table: 'notes', store: 'notes', collectionRe: /^\/api\/notes$/, itemRe: /^\/api\/notes\/(\d+)$/ },
+  { table: 'groups', store: 'groups', collectionRe: /^\/api\/groups$/, itemRe: /^\/api\/groups\/(\d+)$/ },
+  { table: 'note_folders', store: 'noteFolders', collectionRe: /^\/api\/note-folders$/, itemRe: /^\/api\/note-folders\/(\d+)$/ },
+  { table: 'special_days', store: 'specialDays', collectionRe: /^\/api\/special-days$/, itemRe: /^\/api\/special-days\/([^/]+)$/ },
+  // Solo la BIBLIOTECA (/api/themes, /api/themes/:id) -- /api/themes/selection
+  // y /api/themes/selection/mine (que tema usa CADA dispositivo) no
+  // encajan en ninguno de los dos patrones de abajo a proposito, asi que
+  // se quedan fuera de la copia local (eso sigue siendo por dispositivo).
+  { table: 'themes', store: 'themes', collectionRe: /^\/api\/themes$/, itemRe: /^\/api\/themes\/(\d+)$/ },
+];
+
+function matchSyncRoute(pathname) {
+  for (const r of SYNC_TABLE_ROUTES) {
+    if (r.collectionRe.test(pathname)) return { table: r.table, store: r.store, kind: 'collection' };
+    const m = pathname.match(r.itemRe);
+    if (m) return { table: r.table, store: r.store, kind: 'item', itemId: r.store === 'specialDays' ? m[1] : Number(m[1]) };
+  }
+  return null;
+}
+
+async function cacheServerResponse(route, method, data) {
+  if (route.kind === 'collection' && method === 'GET') {
+    await localReplaceAll(route.store, Array.isArray(data) ? data : []);
+    return;
+  }
+  if (method === 'DELETE') {
+    await localDelete(route.store, route.itemId);
+    return;
+  }
+  // special_days "borra por PUT" (type: null) en vez de un DELETE real.
+  if (route.store === 'specialDays' && data && data.type === null) {
+    await localDelete(route.store, data.date);
+    return;
+  }
+  if (data && typeof data === 'object') {
+    await localPut(route.store, data);
+  }
+}
+
+async function handleOfflineRequest(route, method, url, options) {
+  if (method === 'GET') return offlineRead(route, url);
+  return offlineWrite(route, method, url, options);
+}
+
+async function offlineRead(route, url) {
+  if (route.kind === 'item') {
+    const row = await localGet(route.store, route.itemId);
+    if (!row) throw new Error('No se pudo leer sin conexión (todavía no hay copia local de esto).');
+    return row;
+  }
+  let rows = await localGetAll(route.store);
+  if (route.store === 'events') {
+    const isTask = url.searchParams.get('isTask');
+    if (isTask !== null) {
+      const want = isTask === '1' || isTask === 'true';
+      rows = rows.filter((r) => !!r.isTask === want);
+    }
+    const from = url.searchParams.get('from');
+    const to = url.searchParams.get('to');
+    if (from && to) rows = rows.filter((r) => r.startAt && r.startAt >= from && r.startAt <= to);
+    rows.sort((a, b) => (a.startAt || '').localeCompare(b.startAt || ''));
+  } else if (route.store === 'notes') {
+    rows.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  } else if (route.store === 'groups' || route.store === 'noteFolders') {
+    rows.sort((a, b) => (a.position || 0) - (b.position || 0));
+  } else if (route.store === 'themes') {
+    rows.sort((a, b) => (a.id || 0) - (b.id || 0));
+  }
+  return rows;
+}
+
+// Construye la fila "optimista" que se guarda en la copia local nada
+// mas escribir sin conexion, con la misma forma (camelCase) que
+// devolveria el servidor -- para que la pantalla se pinte igual que si
+// hubiera respondido de verdad. Cuando el campo referencia otra tabla
+// (groupId, folderId) y esa fila YA esta en la copia local, se rellenan
+// tambien nombre/color/icono para que se vea bien de inmediato; si no
+// se puede (por ejemplo, apunta a algo tambien creado sin conexion en
+// este mismo momento), se deja en blanco y se corrige solo al
+// sincronizar.
+async function buildOptimisticRecord(route, id, fields) {
+  const now = new Date().toISOString();
+  if (route.store === 'events') {
+    const group = fields.groupId != null ? await localGet('groups', fields.groupId) : null;
+    return {
+      id,
+      title: fields.title || '',
+      description: fields.description ?? null,
+      location: fields.location ?? null,
+      startAt: fields.startAt ?? null,
+      endAt: fields.endAt ?? null,
+      allDay: !!fields.allDay,
+      reminderMinutesBefore: fields.reminderMinutesBefore ?? null,
+      groupId: fields.groupId ?? null,
+      groupName: group ? group.name : null,
+      groupColor: group ? group.color : null,
+      groupIcon: group ? group.icon : null,
+      groupCompletedColor: group ? group.completedColor : null,
+      isTask: !!fields.isTask,
+      done: !!fields.done,
+      createdByName: null,
+      createdByPublicId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+  if (route.store === 'notes') {
+    const folder = fields.folderId != null ? await localGet('noteFolders', fields.folderId) : null;
+    return {
+      id,
+      title: fields.title || '',
+      body: fields.body ?? null,
+      hidden: !!fields.hidden,
+      favorite: !!fields.favorite,
+      folderId: fields.folderId ?? null,
+      folderName: folder ? folder.name : null,
+      folderColor: folder ? folder.color : null,
+      folderIcon: folder ? folder.icon : null,
+      createdByName: null,
+      createdByPublicId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+  if (route.store === 'groups') {
+    return {
+      id,
+      name: fields.name || '',
+      color: fields.color || '#5b8cff',
+      icon: fields.icon ?? null,
+      position: fields.position ?? 0,
+      completedColor: fields.completedColor ?? null,
+      updatedAt: now,
+    };
+  }
+  if (route.store === 'noteFolders') {
+    return {
+      id,
+      name: fields.name || '',
+      color: fields.color || '#5b8cff',
+      icon: fields.icon ?? null,
+      position: fields.position ?? 0,
+      parentId: fields.parentId ?? null,
+      favorite: !!fields.favorite,
+      updatedAt: now,
+    };
+  }
+  if (route.store === 'themes') {
+    return {
+      id,
+      name: fields.name || '',
+      colors: fields.colors || {},
+      inverseColors: fields.inverseColors ?? null,
+      updatedAt: now,
+    };
+  }
+  // specialDays
+  return { date: id, type: fields.type };
+}
+
+async function offlineWrite(route, method, url, options) {
+  const body = options.body ? JSON.parse(options.body) : {};
+  const localOpId = crypto.randomUUID();
+  const nowIso = new Date().toISOString();
+
+  if (route.store === 'specialDays') {
+    // No hay DELETE real para dias especiales: un PUT con type=null
+    // borra. rowId sale de la URL (la fecha), nunca es "nuevo".
+    const date = route.itemId;
+    if (body.type === null || body.type === undefined) {
+      await localDelete('specialDays', date);
+      await outboxAdd({ localOpId, table: 'special_days', rowId: date, tempId: null, op: 'delete', payload: null, clientUpdatedAt: nowIso });
+      return { date, type: null };
+    }
+    const record = { date, type: body.type };
+    await localPut('specialDays', record);
+    await outboxAdd({ localOpId, table: 'special_days', rowId: date, tempId: null, op: 'upsert', payload: { type: body.type }, clientUpdatedAt: nowIso });
+    return record;
+  }
+
+  if (method === 'POST') {
+    // Crear sin conexion: id temporal NEGATIVO (los ids reales que
+    // asigna el servidor siempre son positivos, asi que nunca puede
+    // haber choque), sustituido por el real en cuanto se sincronice de
+    // verdad (ver pushOutbox).
+    const tempId = -Date.now();
+    const record = await buildOptimisticRecord(route, tempId, body);
+    await localPut(route.store, record);
+    await outboxAdd({ localOpId, table: route.table, rowId: null, tempId, op: 'upsert', payload: body, clientUpdatedAt: nowIso });
+    return record;
+  }
+
+  if (method === 'PUT') {
+    const rowId = route.itemId;
+    const existing = (await localGet(route.store, rowId)) || {};
+    const merged = Object.assign({}, existing, body);
+    const record = await buildOptimisticRecord(route, rowId, merged);
+    await localPut(route.store, record);
+    await outboxAdd({ localOpId, table: route.table, rowId, tempId: null, op: 'upsert', payload: body, clientUpdatedAt: nowIso });
+    return record;
+  }
+
+  if (method === 'DELETE') {
+    const rowId = route.itemId;
+    await localDelete(route.store, rowId);
+    await outboxAdd({ localOpId, table: route.table, rowId, tempId: null, op: 'delete', payload: null, clientUpdatedAt: nowIso });
+    return null;
+  }
+
+  throw new Error('No se pudo hacer eso sin conexión.');
+}
+
+// --- Motor de sincronizacion --------------------------------------
+
+let syncInProgress = false;
+
+function buildAuthHeaders() {
+  const headers = {};
+  const token = localStorage.getItem('deviceToken');
+  if (token) headers['X-Device-Token'] = token;
+  return headers;
+}
+
+const SYNC_STORE_BY_TABLE = { events: 'events', notes: 'notes', groups: 'groups', note_folders: 'noteFolders', special_days: 'specialDays', themes: 'themes' };
+
+async function applyRemoteChange(change) {
+  const store = SYNC_STORE_BY_TABLE[change.tableName];
+  if (!store) return;
+  if (change.op === 'delete') {
+    await localDelete(store, change.rowId);
+  } else if (change.payload) {
+    await localPut(store, change.payload);
+  }
+}
+
+// Trae del servidor todo lo que haya cambiado desde el ultimo cursor
+// que recordamos (metaGet('syncCursor')), pagina a pagina, y lo aplica a
+// la copia local. Devuelve como fue: { ok:true } si todo bien, o
+// { ok:false, offline:true } si no se pudo ni conectar (lo normal y
+// esperado si el ordenador no esta cerca), o { ok:false, message } si
+// el ordenador SI respondio pero con un error de verdad -- eso ultimo
+// es lo que refreshSyncIndicator() ensena en rojo, para no dejarlo
+// pasar en silencio.
+async function pullChanges() {
+  let cursor = (await metaGet('syncCursor')) || 0;
+  let hasMore = true;
+  while (hasMore) {
+    let res;
+    try {
+      res = await fetch(`/api/sync/pull?since=${cursor}&limit=500`, { headers: buildAuthHeaders() });
+    } catch {
+      return { ok: false, offline: true };
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { ok: false, message: body.message || `Error del servidor al traer cambios (código ${res.status}).` };
+    }
+    const data = await res.json();
+    for (const change of data.changes) {
+      await applyRemoteChange(change);
+    }
+    cursor = data.nextCursor;
+    hasMore = data.hasMore;
+  }
+  await metaSet('syncCursor', cursor);
+  await metaSet('lastSyncedAt', new Date().toISOString());
+  return { ok: true };
+}
+
+// Manda los cambios pendientes de este dispositivo (cola _outbox), UNO A
+// UNO y en orden (ver outboxAll/seq en db-local.js) -- no en un solo
+// lote. Hace falta que sea uno a uno: el id REAL de algo creado sin
+// conexion (una carpeta, por ejemplo) solo se sabe cuando el servidor
+// responde a ESE cambio, asi que para poder corregir la referencia de
+// un cambio siguiente que apunte a ese id temporal (una nota creada
+// dentro de esa misma carpeta, sin conexion, en la misma sesion) hace
+// falta esperar esa respuesta antes de mandar el siguiente. Con pocos
+// cambios pendientes (lo normal para una persona) el coste de varias
+// idas y vueltas en vez de una sola no se nota.
+async function pushOutbox() {
+  const pending = await outboxAll();
+  if (!pending.length) return { ok: true };
+
+  const tmpIdMap = new Map();
+  const remapId = (id) => (typeof id === 'number' && id < 0 && tmpIdMap.has(id) ? tmpIdMap.get(id) : id);
+  let rejectedCount = 0;
+
+  for (const entry of pending) {
+    const payload = entry.payload ? Object.assign({}, entry.payload) : entry.payload;
+    if (payload) {
+      if ('groupId' in payload) payload.groupId = remapId(payload.groupId);
+      if ('folderId' in payload) payload.folderId = remapId(payload.folderId);
+      if ('parentId' in payload) payload.parentId = remapId(payload.parentId);
+    }
+    const change = {
+      clientOpId: entry.localOpId,
+      table: entry.table,
+      rowId: entry.rowId != null ? remapId(entry.rowId) : null,
+      op: entry.op,
+      payload,
+      clientUpdatedAt: entry.clientUpdatedAt,
+    };
+
+    let res;
+    try {
+      res = await fetch('/api/sync/push', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, buildAuthHeaders()),
+        body: JSON.stringify({ changes: [change] }),
+      });
+    } catch {
+      return { ok: false, offline: true }; // se corto la conexion a media cola -- lo que queda se reintenta entero la proxima vez
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { ok: false, message: body.message || `Error del servidor al mandar cambios (código ${res.status}).` };
+    }
+    const { results } = await res.json();
+    const result = results[0];
+    const store = SYNC_STORE_BY_TABLE[entry.table];
+
+    if (result.status === 'applied' || result.status === 'superseded') {
+      if (entry.tempId != null && result.serverRowId != null) {
+        tmpIdMap.set(entry.tempId, result.serverRowId);
+        await localDelete(store, entry.tempId);
+      }
+      if (result.serverPayload) {
+        await localPut(store, result.serverPayload);
+      } else if (entry.op === 'delete') {
+        await localDelete(store, remapId(entry.rowId));
+      }
+    } else if (result.status === 'rejected') {
+      // No hay forma automatica de arreglar un dato invalido desde aqui,
+      // y no se quiere atascar la cola entera por un cambio malo -- se
+      // descarta, pero se cuenta para poder avisar de que algo se perdio
+      // (en vez de quedarse callado, ver computeSyncOutcome).
+      rejectedCount += 1;
+    }
+    await outboxRemove(entry.localOpId);
+  }
+
+  return rejectedCount > 0
+    ? { ok: true, message: `${rejectedCount} cambio${rejectedCount === 1 ? '' : 's'} sin conseguir mandar (datos no válidos) y se descartó.` }
+    : { ok: true };
+}
+
+// Resultado de la ULTIMA vez que se intento sincronizar -- lo lee el
+// punto de la topbar (refreshSyncIndicator) y el texto de Configuracion
+// (refreshSyncStatusUI). No se guarda entre sesiones a proposito (si
+// recargas la pagina, se vuelve a calcular en el primer runSync() de
+// init() en vez de ensenar un estado quiza ya viejo).
+let lastSyncOutcome = { status: 'unknown', message: '' };
+
+// Decide el estado final combinando lo que paso en pushOutbox()/
+// pullChanges() (ver sus comentarios: cada uno devuelve si fue bien,
+// si fue por falta de conexion, o si hubo un error de verdad) con si
+// queda algo pendiente en la cola.
+async function computeSyncOutcome(pushResult, pullResult) {
+  if (pushResult.offline || pullResult.offline) {
+    lastSyncOutcome = { status: 'offline', message: 'Sin conexión con el ordenador ahora mismo.' };
+    return;
+  }
+  if (!pushResult.ok || !pullResult.ok) {
+    lastSyncOutcome = { status: 'error', message: (!pushResult.ok && pushResult.message) || (!pullResult.ok && pullResult.message) || 'Error al sincronizar.' };
+    return;
+  }
+  if (pushResult.message) {
+    // Se pudo conectar y sincronizar, pero algun cambio se rechazo por
+    // datos invalidos -- no es un fallo de conexion, pero tampoco es
+    // "todo perfecto", asi que se ensena igual que un error de verdad.
+    lastSyncOutcome = { status: 'error', message: pushResult.message };
+    return;
+  }
+  const pending = await outboxAll();
+  lastSyncOutcome = pending.length
+    ? { status: 'pending', message: `${pending.length} cambio${pending.length === 1 ? '' : 's'} pendiente${pending.length === 1 ? '' : 's'} de mandar.` }
+    : { status: 'synced', message: '' };
+}
+
+async function runSync() {
+  if (syncInProgress) return;
+  syncInProgress = true;
+  try {
+    const pushResult = await pushOutbox();
+    const pullResult = await pullChanges();
+    await computeSyncOutcome(pushResult, pullResult);
+  } catch (err) {
+    // Esto SI es inesperado de verdad (un error de programacion, no de
+    // conexion) -- pushOutbox/pullChanges ya capturan los fallos de red
+    // y de servidor por su cuenta, asi que si algo llega hasta aqui
+    // merece ensenarse, no quedarse callado.
+    lastSyncOutcome = { status: 'error', message: err.message || 'Error inesperado al sincronizar.' };
+  } finally {
+    syncInProgress = false;
+    refreshSyncStatusUI();
+    refreshSyncIndicator();
+  }
+}
+
+async function refreshSyncStatusUI() {
+  const statusEl = document.getElementById('sync-status');
+  if (!statusEl) return;
+  const lastSyncedAt = await metaGet('lastSyncedAt');
+  const baseText = lastSyncedAt
+    ? `Última sincronización: ${new Date(lastSyncedAt).toLocaleString()}`
+    : 'Todavía no se ha sincronizado en este dispositivo';
+  statusEl.textContent = lastSyncOutcome.message ? `${baseText} · ${lastSyncOutcome.message}` : baseText;
+}
+
+const SYNC_INDICATOR_LABELS = {
+  unknown: 'Sincronización: todavía sin comprobar',
+  synced: 'Sincronización: todo al día',
+  pending: 'Sincronización: hay cambios pendientes de mandar',
+  offline: 'Sincronización: sin conexión con el ordenador ahora mismo',
+  error: 'Sincronización: hubo un error',
+};
+
+function refreshSyncIndicator() {
+  const btn = document.getElementById('sync-indicator');
+  if (!btn) return;
+  btn.dataset.status = lastSyncOutcome.status;
+  const label = lastSyncOutcome.message
+    ? `${SYNC_INDICATOR_LABELS[lastSyncOutcome.status]} (${lastSyncOutcome.message})`
+    : SYNC_INDICATOR_LABELS[lastSyncOutcome.status];
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
+}
+
+document.getElementById('btn-sync-now').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-sync-now');
+  btn.disabled = true;
+  await runSync();
+  btn.disabled = false;
+});
+
+// El punto de la topbar lleva directo a Configuracion > Este dispositivo
+// (donde esta el detalle y el boton de "Sincronizar ahora"), no hace
+// nada por si solo mas alla de eso.
+document.getElementById('sync-indicator').addEventListener('click', () => {
+  openSettingsModal();
+  showSettingsScreen('mobile');
+  refreshMobileTab();
+});
+
+window.addEventListener('online', runSync);
 
 // ---------------------------------------------------------------------
 // Emparejamiento
@@ -1320,115 +1811,21 @@ async function loadNotes() {
 // Ocultar notas: NO es un bloqueo de verdad (no cifra nada, cualquiera
 // con acceso a la base de datos veria el contenido igual) — solo evita
 // que se lea a primera vista en la pantalla. Una nota oculta se ve
-// borrosa en la lista con un boton "Destapar" encima; el icono de ojo de
-// cada fila hace lo mismo (ocultar/destapar), son dos formas de llegar a
-// la misma accion. La contraseña es opcional y se activa en
-// Configuracion > Notas (ver refreshNotesTab en settings.js) — sin ella,
-// destapar es instantaneo; con ella activada, hace falta acertarla.
+// borrosa en la lista; el icono de ojo de cada fila la oculta/destapa al
+// momento. Hubo una version con contraseña compartida opcional para
+// destapar, pero se quito a proposito (era la unica pieza de "seguridad"
+// de la app y Koku prefirio quedarse solo con el toggle simple, en
+// ordenador y movil por igual).
 // ---------------------------------------------------------------------
-let notesSecurityState = { passwordEnabled: false, hasPassword: false };
-
-async function refreshNotesSecurityState() {
-  notesSecurityState = await api('/api/notes-security');
-  return notesSecurityState;
-}
-
 async function setNoteHidden(note, hidden) {
   await api(`/api/notes/${note.id}`, { method: 'PUT', body: JSON.stringify({ hidden }) });
   await loadNotes();
   renderNotesView();
 }
 
-// Punto de entrada comun del icono de ojo y del boton "Destapar": decide
-// que pedir (nada, la contraseña, o crear una nueva) segun el estado
-// actual de la nota y del ajuste de Configuracion > Notas.
 async function toggleNoteHidden(note) {
-  await refreshNotesSecurityState();
-
-  if (!note.hidden) {
-    // Vas a OCULTARLA. Si tienes activado "pedir contraseña" pero
-    // todavia no has puesto ninguna, hace falta crearla primero — no
-    // tendria sentido ocultar algo detras de una contraseña que no existe.
-    if (notesSecurityState.passwordEnabled && !notesSecurityState.hasPassword) {
-      openNotesSetupPasswordModal(note);
-    } else {
-      await setNoteHidden(note, true);
-    }
-    return;
-  }
-
-  // Vas a DESTAPARLA. Solo hace falta la contraseña si esta activada.
-  if (notesSecurityState.passwordEnabled) {
-    openNotesVerifyModal(note);
-  } else {
-    await setNoteHidden(note, false);
-  }
+  await setNoteHidden(note, !note.hidden);
 }
-
-let pendingVerifyNote = null;
-
-function openNotesVerifyModal(note) {
-  pendingVerifyNote = note;
-  document.getElementById('notes-verify-password').value = '';
-  document.getElementById('notes-verify-error').classList.add('hidden');
-  document.getElementById('notes-verify-modal').classList.remove('hidden');
-}
-
-function closeNotesVerifyModal() {
-  document.getElementById('notes-verify-modal').classList.add('hidden');
-  pendingVerifyNote = null;
-}
-
-document.getElementById('btn-cancel-notes-verify').addEventListener('click', closeNotesVerifyModal);
-document.getElementById('btn-close-notes-verify').addEventListener('click', closeNotesVerifyModal);
-
-document.getElementById('notes-verify-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const password = document.getElementById('notes-verify-password').value;
-  const result = await api('/api/notes-security/verify', { method: 'POST', body: JSON.stringify({ password }) });
-  if (!result.ok) {
-    document.getElementById('notes-verify-error').classList.remove('hidden');
-    return;
-  }
-  const note = pendingVerifyNote;
-  closeNotesVerifyModal();
-  await setNoteHidden(note, false);
-});
-
-let pendingSetupNote = null;
-
-function openNotesSetupPasswordModal(note) {
-  pendingSetupNote = note;
-  document.getElementById('notes-setup-new-password').value = '';
-  document.getElementById('notes-setup-confirm-password').value = '';
-  document.getElementById('notes-setup-error').classList.add('hidden');
-  document.getElementById('notes-setup-password-modal').classList.remove('hidden');
-}
-
-function closeNotesSetupPasswordModal() {
-  document.getElementById('notes-setup-password-modal').classList.add('hidden');
-  pendingSetupNote = null;
-}
-
-document.getElementById('btn-cancel-notes-setup-password').addEventListener('click', closeNotesSetupPasswordModal);
-document.getElementById('btn-close-notes-setup-password').addEventListener('click', closeNotesSetupPasswordModal);
-
-document.getElementById('notes-setup-password-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const errorEl = document.getElementById('notes-setup-error');
-  const newPassword = document.getElementById('notes-setup-new-password').value;
-  const confirmPassword = document.getElementById('notes-setup-confirm-password').value;
-  if (newPassword !== confirmPassword) {
-    errorEl.textContent = 'Las dos contraseñas no coinciden.';
-    errorEl.classList.remove('hidden');
-    return;
-  }
-  await api('/api/notes-security/password', { method: 'POST', body: JSON.stringify({ newPassword }) });
-  await refreshNotesSecurityState();
-  const note = pendingSetupNote;
-  closeNotesSetupPasswordModal();
-  await setNoteHidden(note, true);
-});
 
 // Ruta de carpetas de una nota/carpeta, de raiz a padre directo (sin
 // incluir su propio nombre) -- solo hace falta cuando la busqueda es de
@@ -4055,33 +4452,96 @@ document.getElementById('btn-install-release').addEventListener('click', async (
 });
 
 // ---------------------------------------------------------------------
+// Pantalla de bienvenida (primer arranque): ver el modal en index.html.
+// Se muestra una sola vez, en el dispositivo que abra la app primero
+// (el perfil es compartido por TODA la instalacion, no por dispositivo
+// -- ver user_profile en server/db.js), tanto al guardar como al pulsar
+// "Ahora no" se marca como vista para siempre (los dos llaman a PUT
+// /api/profile, que marca onboardingCompleted=true como efecto
+// secundario -- ver server/routes/profile.js).
+// ---------------------------------------------------------------------
+async function maybeShowOnboarding() {
+  const profile = await api('/api/profile');
+  if (profile.onboardingCompleted) return;
+  document.getElementById('onboarding-name').value = profile.name || '';
+  document.getElementById('onboarding-email').value = profile.email || '';
+  document.getElementById('onboarding-modal').classList.remove('hidden');
+}
+
+function closeOnboardingModal() {
+  document.getElementById('onboarding-modal').classList.add('hidden');
+}
+
+document.getElementById('onboarding-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await api('/api/profile', {
+    method: 'PUT',
+    body: JSON.stringify({
+      name: document.getElementById('onboarding-name').value,
+      email: document.getElementById('onboarding-email').value,
+    }),
+  });
+  closeOnboardingModal();
+});
+
+document.getElementById('btn-onboarding-skip').addEventListener('click', async () => {
+  // Body vacio a proposito: no cambia nombre ni correo, solo marca la
+  // pantalla como vista (ver el comentario de PUT /api/profile).
+  await api('/api/profile', { method: 'PUT', body: JSON.stringify({}) });
+  closeOnboardingModal();
+});
+
+// ---------------------------------------------------------------------
 // Arranque
 // ---------------------------------------------------------------------
-async function init() {
+// Ejecuta un paso de arranque sin dejar que un fallo suyo aborte los
+// pasos siguientes -- antes de la fase "movil", init() encadenaba todos
+// estos await seguidos dentro de un unico try/catch, asi que el PRIMERO
+// que fallara (por ejemplo, sin conexion al ordenador) impedia que se
+// cargara nada mas, dejando la pantalla a medias. Con la copia local
+// (ver api()/db-local.js) la mayoria de estos ya no fallan sin conexion,
+// pero esto es una red de seguridad ademas, no en vez de eso.
+async function initStep(fn) {
   try {
-    await loadGroups();
-    await loadSpecialDays();
-    await loadMonth();
-    await loadReminders();
-    await loadTasks();
-    renderTasksList();
-    await loadNoteFolders();
-    populateNoteFolderSelect();
-    await loadNotes();
-    renderNotesView();
-    setInterval(loadReminders, 30 * 1000);
-    // Igual que los recordatorios: si otro dispositivo vinculado anade o
-    // completa una tarea, este se entera sin recargar la pagina.
-    setInterval(() => loadTasks().then(renderTasksList), 30 * 1000);
-    // Carpetas Y notas juntas (no cada una por su lado) para no repintar
-    // la vista dos veces seguidas si las dos han cambiado a la vez.
-    setInterval(() => Promise.all([loadNoteFolders(), loadNotes()]).then(() => {
-      populateNoteFolderSelect();
-      renderNotesView();
-    }), 30 * 1000);
+    await fn();
   } catch (err) {
     if (err.message !== 'device_not_paired') console.error(err);
   }
+}
+
+async function init() {
+  await initStep(maybeShowOnboarding);
+  await initStep(loadGroups);
+  await initStep(loadSpecialDays);
+  await initStep(loadMonth);
+  // Sincronizar aqui, tras tener ya algo pintado con la copia local (si
+  // la hay) pero antes de las cargas que siguen -- si el ordenador SI
+  // esta alcanzable, esto pone la copia local al dia antes de que
+  // Tareas/Notas la lean.
+  await runSync();
+  await initStep(loadReminders);
+  await initStep(loadTasks);
+  renderTasksList();
+  await initStep(loadNoteFolders);
+  populateNoteFolderSelect();
+  await initStep(loadNotes);
+  renderNotesView();
+  refreshSyncStatusUI();
+
+  setInterval(loadReminders, 30 * 1000);
+  // Igual que los recordatorios: si otro dispositivo vinculado anade o
+  // completa una tarea, este se entera sin recargar la pagina.
+  setInterval(() => loadTasks().then(renderTasksList), 30 * 1000);
+  // Carpetas Y notas juntas (no cada una por su lado) para no repintar
+  // la vista dos veces seguidas si las dos han cambiado a la vez.
+  setInterval(() => Promise.all([loadNoteFolders(), loadNotes()]).then(() => {
+    populateNoteFolderSelect();
+    renderNotesView();
+  }), 30 * 1000);
+  // Sincronizar cada 30s tambien, junto con el resto del refresco
+  // periodico -- si el ordenador no esta alcanzable, runSync() no hace
+  // nada (ver su comentario), asi que llamarla "a lo tonto" es seguro.
+  setInterval(runSync, 30 * 1000);
 }
 
 // Si ya tenemos un token guardado (o somos el ordenador, que ni lo

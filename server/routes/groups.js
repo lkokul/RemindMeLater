@@ -24,6 +24,7 @@ function serialize(row) {
     icon: row.icon || null,
     position: row.position,
     completedColor: row.completed_color || null,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -42,11 +43,13 @@ router.post('/', (req, res) => {
 
   const { count } = db.prepare('SELECT COUNT(*) as count FROM groups').get();
   const info = db
-    .prepare('INSERT INTO groups (name, color, icon, position, completed_color) VALUES (?, ?, ?, ?, ?)')
+    .prepare("INSERT INTO groups (name, color, icon, position, completed_color, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))")
     .run(name.trim(), safeColor, sanitizeIcon(icon) ?? null, count, safeCompletedColor);
 
   const row = db.prepare('SELECT * FROM groups WHERE id = ?').get(info.lastInsertRowid);
-  res.status(201).json(serialize(row));
+  const serialized = serialize(row);
+  db.recordSyncChange('groups', row.id, 'upsert', serialized, req.device ? req.device.id : null);
+  res.status(201).json(serialized);
 });
 
 router.put('/:id', (req, res) => {
@@ -65,7 +68,7 @@ router.put('/:id', (req, res) => {
         ? null
         : (/^#[0-9a-fA-F]{6}$/.test(completedColor) ? completedColor : existing.completed_color);
 
-  db.prepare('UPDATE groups SET name = ?, color = ?, icon = ?, completed_color = ? WHERE id = ?').run(
+  db.prepare("UPDATE groups SET name = ?, color = ?, icon = ?, completed_color = ?, updated_at = datetime('now') WHERE id = ?").run(
     name !== undefined && name.trim() ? name.trim() : existing.name,
     safeColor,
     sanitizedIcon === undefined ? existing.icon : sanitizedIcon,
@@ -74,16 +77,49 @@ router.put('/:id', (req, res) => {
   );
 
   const row = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
-  res.json(serialize(row));
+  const serialized = serialize(row);
+  db.recordSyncChange('groups', row.id, 'upsert', serialized, req.device ? req.device.id : null);
+  res.json(serialized);
 });
 
 router.delete('/:id', (req, res) => {
   // Los eventos de este grupo no se borran: simplemente se quedan sin
   // grupo (group_id a NULL), igual que al borrar una lista en Recordatorios
-  // no se borran los recordatorios que contenia sin mas.
+  // no se borran los recordatorios que contenia sin mas. Para sincronizar,
+  // esos eventos TAMBIEN cambiaron (perdieron el group_id) -- si no se
+  // avisa de eso, un movil que sincronice mas tarde se quedaria con el
+  // group_id viejo, apuntando a un grupo que ya no existe.
+  const originId = req.device ? req.device.id : null;
+  const affectedEventIds = db.prepare('SELECT id FROM events WHERE group_id = ?').all(req.params.id).map((r) => r.id);
   db.prepare('UPDATE events SET group_id = NULL WHERE group_id = ?').run(req.params.id);
   const info = db.prepare('DELETE FROM groups WHERE id = ?').run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
+  db.recordSyncChange('groups', req.params.id, 'delete', null, originId);
+  affectedEventIds.forEach((id) => {
+    const row = db.prepare('SELECT * FROM events WHERE id = ?').get(id);
+    if (!row) return; // por si tambien se borro en el mismo instante
+    db.recordSyncChange('events', row.id, 'upsert', {
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      location: row.location,
+      startAt: row.start_at,
+      endAt: row.end_at,
+      allDay: !!row.all_day,
+      reminderMinutesBefore: row.reminder_minutes_before,
+      groupId: row.group_id,
+      groupName: null,
+      groupColor: null,
+      groupIcon: null,
+      groupCompletedColor: null,
+      isTask: !!row.is_task,
+      done: !!row.done,
+      createdByName: row.created_by_name || null,
+      createdByPublicId: row.created_by_id || null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }, originId);
+  });
   res.status(204).end();
 });
 

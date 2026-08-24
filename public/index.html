@@ -146,15 +146,23 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4.5" height="16" rx="1"></rect><rect x="9.75" y="4" width="4.5" height="16" rx="1"></rect><rect x="16.5" y="4" width="4.5" height="16" rx="1"></rect></svg>
           <span>Mi espacio</span>
         </button>
-        <!-- Extensiones (placeholder): futuras secciones aparte del
-             calendario (gimnasio, finanzas, lecturas...). Por ahora solo
-             abre una pantalla "Proximamente" -- la logica real de cada
-             extension llegara en otra ronda, despues del movil. A
-             diferencia de Mi espacio no tiene modo "panel", siempre es
-             pantalla completa, asi que este boton nunca se oculta. -->
+        <!-- Extensiones: futuras secciones aparte del calendario
+             (gimnasio, finanzas, lecturas...). A diferencia de Mi
+             espacio no tiene modo "panel", siempre es pantalla
+             completa, asi que este boton nunca se oculta. -->
         <button id="btn-extensions" class="secondary-btn my-space-topbar-btn" aria-label="Extensiones">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
           <span>Extensiones</span>
+        </button>
+        <!-- Fase "movil": punto de color para ver de un vistazo si este
+             dispositivo esta sincronizado, sin tener que entrar en
+             Configuracion -- verde = todo al dia, amarillo = hay cambios
+             pendientes de mandar, gris = sin conexion con el ordenador
+             ahora mismo, rojo = fallo de verdad (no solo "sin conexion").
+             Clicarlo lleva directo a la seccion de sincronizacion. Ver
+             refreshSyncIndicator() en app.js. -->
+        <button type="button" id="sync-indicator" class="sync-indicator" aria-label="Estado de sincronización">
+          <span id="sync-indicator-dot" class="sync-indicator-dot"></span>
         </button>
         <button id="btn-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </nav>
@@ -342,9 +350,9 @@
   <!-- "Extensiones" (placeholder): futuras secciones aparte del calendario
        (gimnasio, finanzas, lecturas leidos...). Por ahora solo el boton y
        esta pantalla "Proximamente" -- sin logica real todavia, eso llega
-       en otra ronda, despues del movil. Mismo patron de pantalla completa
-       que "Mi espacio" (.my-space-view), pero sin modo panel: siempre se
-       abre a pantalla completa con #btn-extensions. Ver
+       en otra ronda. Mismo patron de pantalla completa que "Mi espacio"
+       (.my-space-view), pero sin modo panel: siempre se abre a pantalla
+       completa con #btn-extensions. Ver
        openExtensionsView/closeExtensionsView en app.js. -->
   <div id="extensions-view" class="my-space-view hidden">
     <div class="my-space-view-header">
@@ -372,6 +380,38 @@
           <span class="extensions-card-badge">Próximamente</span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Pantalla de bienvenida: aparece UNA sola vez, la primera vez que se
+       abre la app en cualquier dispositivo (el perfil es compartido por
+       toda la instalacion, no por dispositivo -- ver user_profile en
+       server/db.js). Pide el nickname y, opcionalmente, un correo (solo
+       para el contacto tecnico obligatorio de las notificaciones push,
+       ver el hint de dentro). "Ahora no" tambien cierra el modal para
+       siempre (ver app.js maybeShowOnboarding) sin obligar a rellenar
+       nada. -->
+  <div id="onboarding-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Bienvenido a RemindMeLater</h2>
+      <p class="hint">Un par de datos rapidos antes de empezar (puedes cambiarlos luego en Configuracion > Perfil).</p>
+      <form id="onboarding-form">
+        <label>
+          Nickname (opcional)
+          <input type="text" id="onboarding-name" placeholder="Tu nombre" maxlength="60" />
+        </label>
+        <p class="hint">Se ve igual en todos tus dispositivos, para saber quien creo cada evento o nota si usas el ordenador y el movil a la vez.</p>
+        <label>
+          Correo (opcional)
+          <input type="email" id="onboarding-email" placeholder="tucorreo@ejemplo.com" maxlength="200" />
+        </label>
+        <p class="hint">Solo se usaria como contacto tecnico obligatorio si mas adelante activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie mas.</p>
+        <div class="modal-actions">
+          <button type="button" id="btn-onboarding-skip" class="secondary-btn">Ahora no</button>
+          <div class="spacer"></div>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -608,56 +648,6 @@
     </div>
   </div>
 
-  <!-- Ocultar notas: NO es un bloqueo de verdad (no cifra nada), solo
-       evita que se lea a primera vista -- ver CLAUDE.md / server/routes/notesSecurity.js.
-       Estos dos modales son para cuando la contraseña opcional esta
-       activada (Configuracion > Notas): uno para pedirla al destapar una
-       nota ya oculta, otro para pedirte que la crees la primera vez que
-       ocultas algo sin tener ninguna puesta todavia. -->
-  <div id="notes-verify-modal" class="modal hidden">
-    <div class="modal-card">
-      <button type="button" id="btn-close-notes-verify" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2>Destapar nota</h2>
-      <p class="hint">Introduce la contraseña para ver esta nota.</p>
-      <form id="notes-verify-form">
-        <label>
-          Contraseña
-          <input type="password" id="notes-verify-password" required autocomplete="off" />
-        </label>
-        <p id="notes-verify-error" class="hint hidden" style="color: var(--danger);">Contraseña incorrecta.</p>
-        <div class="modal-actions">
-          <div class="spacer"></div>
-          <button type="button" id="btn-cancel-notes-verify" class="secondary-btn">Cancelar</button>
-          <button type="submit" class="primary-btn">Destapar</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <div id="notes-setup-password-modal" class="modal hidden">
-    <div class="modal-card">
-      <button type="button" id="btn-close-notes-setup-password" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2>Elige una contraseña</h2>
-      <p class="hint">Tienes activado "ocultar con contraseña" pero todavia no has puesto ninguna. Elige una para poder ocultar esta nota.</p>
-      <form id="notes-setup-password-form">
-        <label>
-          Contraseña nueva
-          <input type="password" id="notes-setup-new-password" required autocomplete="off" />
-        </label>
-        <label>
-          Repite la contraseña
-          <input type="password" id="notes-setup-confirm-password" required autocomplete="off" />
-        </label>
-        <p id="notes-setup-error" class="hint hidden" style="color: var(--danger);">Las contraseñas no coinciden.</p>
-        <div class="modal-actions">
-          <div class="spacer"></div>
-          <button type="button" id="btn-cancel-notes-setup-password" class="secondary-btn">Cancelar</button>
-          <button type="submit" class="primary-btn">Guardar y ocultar</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
   <!-- Panel de Configuracion: un solo punto de entrada con pestanas, en
        vez de un botón suelto por cada cosa. Ver settings.js. -->
   <div id="settings-modal" class="modal hidden">
@@ -699,9 +689,6 @@
         <button type="button" class="settings-menu-item" data-tab="shortcuts">
           <span>Atajos de teclado</span><span class="settings-menu-item-arrow">›</span>
         </button>
-        <button type="button" class="settings-menu-item" data-tab="notes">
-          <span>Notas</span><span class="settings-menu-item-arrow">›</span>
-        </button>
         <!-- Accion directa (no navega a ningun sitio, por eso no lleva
              flecha "›"), solo visible dentro de la app de escritorio —
              ver refreshQuitMenuItem en settings.js. -->
@@ -730,6 +717,11 @@
             Nickname
             <input type="text" id="profile-name" placeholder="Tu nombre" maxlength="60" />
           </label>
+          <label>
+            Correo (opcional)
+            <input type="email" id="profile-email" placeholder="tucorreo@ejemplo.com" maxlength="200" />
+          </label>
+          <p class="hint">Solo se usaria como contacto tecnico obligatorio si activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie mas, salvo con Google/Apple para ese uso puntual y solo si activas esos avisos.</p>
           <button type="submit" class="primary-btn">Guardar</button>
         </form>
 
@@ -880,6 +872,16 @@
         <h4>Tareas completadas</h4>
         <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>
         <div id="completed-tasks-display-options" class="view-mode-options"></div>
+
+        <!-- Fase "movil": este dispositivo guarda su propia copia de los
+             datos y se sincroniza con el ordenador cuando coincidis en la
+             misma wifi -- ver "Sincronizacion" en app.js. Este boton deja
+             comprobar con tus propios ojos que funciono, ya que es un
+             mecanismo nuevo. -->
+        <h4>Sincronización</h4>
+        <p class="hint">Este dispositivo guarda su propia copia de los datos y se pone al día con el ordenador cuando coincidís en la misma wifi.</p>
+        <p id="sync-status" class="hint"></p>
+        <button type="button" id="btn-sync-now" class="secondary-btn">Sincronizar ahora</button>
       </div>
 
       <!-- --- Atajos de teclado (ajuste local, no compartido) --- -->
@@ -890,45 +892,11 @@
         <div id="shortcuts-list" class="shortcuts-list"></div>
       </div>
 
-      <!-- --- Notas: ocultar con contraseña -- ajuste COMPARTIDO entre
-           todos tus dispositivos (no es un ajuste de "Este dispositivo"),
-           porque una nota oculta lo esta para todos por igual. Ver
-           server/routes/notesSecurity.js -- no es un bloqueo de verdad,
-           solo evita que una nota se lea a primera vista. --- -->
-      <div id="settings-tab-notes" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
-        <h3>Notas</h3>
-        <p class="hint">"Ocultar" una nota la deja borrosa en la lista hasta que la destapas — no es un bloqueo de verdad, solo evita que se lea a primera vista. Esta contraseña opcional se comparte entre todos tus dispositivos.</p>
-        <label class="checkbox-row">
-          <input type="checkbox" id="setting-notes-password-enabled" />
-          Pedir contraseña para destapar notas ocultas
-        </label>
-
-        <div id="notes-password-form-wrap" class="hidden">
-          <h4 id="notes-password-form-heading">Contraseña</h4>
-          <form id="notes-password-form">
-            <label id="notes-current-password-label" class="hidden">
-              Contraseña actual
-              <input type="password" id="notes-current-password" autocomplete="off" />
-            </label>
-            <label>
-              Contraseña nueva
-              <input type="password" id="notes-new-password" autocomplete="off" />
-            </label>
-            <label>
-              Repite la contraseña
-              <input type="password" id="notes-confirm-password" autocomplete="off" />
-            </label>
-            <p id="notes-password-form-error" class="hint hidden" style="color: var(--danger);"></p>
-            <button type="submit" class="primary-btn">Guardar contraseña</button>
-          </form>
-        </div>
-      </div>
-
       </div>
     </div>
   </div>
 
+  <script src="db-local.js"></script>
   <script src="app.js"></script>
   <script src="settings.js"></script>
 </body>

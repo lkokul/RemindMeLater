@@ -42,3 +42,39 @@ self.addEventListener('fetch', (event) => {
       .catch(() => caches.match(event.request))
   );
 });
+
+// Notificaciones push de verdad (con la app CERRADA del todo, no solo
+// mientras esta abierta -- ver public/settings.js para donde se pide la
+// suscripcion, y server/reminderChecker.js para quien manda el aviso).
+// El payload viene del servidor tal cual se definio alli:
+// { title, body, eventId }.
+self.addEventListener('push', (event) => {
+  let data = { title: 'RemindMeLater', body: '' };
+  try {
+    if (event.data) data = event.data.json();
+  } catch (err) {
+    // Payload raro/vacio: se muestra un aviso generico en vez de que no
+    // salga nada.
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'RemindMeLater', {
+      body: data.body || '',
+      icon: '/icons/icon-192.png',
+      data: { eventId: data.eventId },
+    })
+  );
+});
+
+// Al tocar el aviso: si ya hay una pestana/ventana de la app abierta, la
+// enfoca en vez de abrir una nueva; si no, abre una.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientsList) => {
+      for (const client of clientsList) {
+        if ('focus' in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow('/');
+    })
+  );
+});

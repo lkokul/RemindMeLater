@@ -13,9 +13,10 @@ const themesRouter = require('./routes/themes');
 const profileRouter = require('./routes/profile');
 const specialDaysRouter = require('./routes/specialDays');
 const notesRouter = require('./routes/notes');
-const notesSecurityRouter = require('./routes/notesSecurity');
 const noteFoldersRouter = require('./routes/noteFolders');
 const noteImagesRouter = require('./routes/noteImages');
+const syncRouter = require('./routes/sync');
+const { startSyncLogCleanup } = syncRouter;
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startMdns } = require('./mdns');
@@ -44,13 +45,15 @@ app.use('/api/themes', requireDeviceOrTrusted, themesRouter);
 app.use('/api/profile', requireDeviceOrTrusted, profileRouter);
 app.use('/api/special-days', requireDeviceOrTrusted, specialDaysRouter);
 app.use('/api/notes', requireDeviceOrTrusted, notesRouter);
-app.use('/api/notes-security', requireDeviceOrTrusted, notesSecurityRouter);
 app.use('/api/note-folders', requireDeviceOrTrusted, noteFoldersRouter);
 // Sin requireDeviceOrTrusted aqui: subir una imagen si lo exige (lo hace
 // el propio router, ver routes/noteImages.js), pero SERVIRLA no puede --
 // un <img src="..."> lo pide el navegador directamente, sin poder llevar
 // el token del movil emparejado.
 app.use('/api/notes/images', noteImagesRouter);
+// Sincronizacion movil (fase "movil"): mismo nivel de acceso que el
+// resto de rutas de datos, sin mecanismo de autenticacion nuevo.
+app.use('/api/sync', requireDeviceOrTrusted, syncRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);
@@ -83,6 +86,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   }
 
   startReminderChecker();
+  // Limpieza periodica de sync_log (ver pruneSyncLog en routes/sync.js):
+  // borra solo los cambios que todos los moviles emparejados ya han
+  // recibido y con al menos 30 dias de antiguedad -- nunca lo que un
+  // movil todavia no haya sincronizado.
+  startSyncLogCleanup();
 });
 
 // Sin este manejador, que el puerto ya este ocupado (por ejemplo, si ya
