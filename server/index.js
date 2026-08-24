@@ -17,6 +17,9 @@ const noteFoldersRouter = require('./routes/noteFolders');
 const noteImagesRouter = require('./routes/noteImages');
 const syncRouter = require('./routes/sync');
 const { startSyncLogCleanup } = syncRouter;
+const gymExercisesRouter = require('./routes/gymExercises');
+const gymRoutinesRouter = require('./routes/gymRoutines');
+const gymSessionsRouter = require('./routes/gymSessions');
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startMdns } = require('./mdns');
@@ -54,6 +57,11 @@ app.use('/api/notes/images', noteImagesRouter);
 // Sincronizacion movil (fase "movil"): mismo nivel de acceso que el
 // resto de rutas de datos, sin mecanismo de autenticacion nuevo.
 app.use('/api/sync', requireDeviceOrTrusted, syncRouter);
+// Extension "Gimnasio" (ver #extensions-view en index.html): registro de
+// entrenamientos, rutinas reutilizables y progreso.
+app.use('/api/gym-exercises', requireDeviceOrTrusted, gymExercisesRouter);
+app.use('/api/gym-routines', requireDeviceOrTrusted, gymRoutinesRouter);
+app.use('/api/gym-sessions', requireDeviceOrTrusted, gymSessionsRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);

@@ -347,12 +347,11 @@
     </div>
   </div>
 
-  <!-- "Extensiones" (placeholder): futuras secciones aparte del calendario
-       (gimnasio, finanzas, lecturas leidos...). Por ahora solo el boton y
-       esta pantalla "Proximamente" -- sin logica real todavia, eso llega
-       en otra ronda. Mismo patron de pantalla completa que "Mi espacio"
-       (.my-space-view), pero sin modo panel: siempre se abre a pantalla
-       completa con #btn-extensions. Ver
+  <!-- "Extensiones": futuras secciones aparte del calendario. Gimnasio ya
+       es real (ver #gym-view mas abajo); Finanzas y Lecturas siguen de
+       momento como placeholder "Proximamente". Mismo patron de pantalla
+       completa que "Mi espacio" (.my-space-view), pero sin modo panel:
+       siempre se abre a pantalla completa con #btn-extensions. Ver
        openExtensionsView/closeExtensionsView en app.js. -->
   <div id="extensions-view" class="my-space-view hidden">
     <div class="my-space-view-header">
@@ -362,13 +361,12 @@
       </div>
     </div>
     <div class="extensions-hub">
-      <p class="extensions-intro">Ideas para futuras secciones — todavia no hacen nada, llegaran en otra ronda.</p>
+      <p class="extensions-intro">Secciones nuevas aparte del calendario.</p>
       <div class="extensions-grid">
-        <div class="extensions-card" aria-disabled="true">
+        <button type="button" id="btn-open-gym" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon">🏋️</span>
           <span class="extensions-card-title">Gimnasio</span>
-          <span class="extensions-card-badge">Próximamente</span>
-        </div>
+        </button>
         <div class="extensions-card" aria-disabled="true">
           <span class="extensions-card-icon">💶</span>
           <span class="extensions-card-title">Finanzas</span>
@@ -409,6 +407,148 @@
         <div class="modal-actions">
           <button type="button" id="btn-onboarding-skip" class="secondary-btn">Ahora no</button>
           <div class="spacer"></div>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Extension "Gimnasio": registro de entrenamientos de verdad, con 3
+       secciones alternables con pestanas (Sesiones/Rutinas/Progreso, ver
+       .gym-tabs en styles.css y el interruptor en app.js) -- NO es el
+       patron de columnas de "Mi espacio" (aqui solo una seccion a la vez
+       tiene sentido) ni el de "Configuracion" con submenu (son solo 3,
+       sin necesitar un menu previo). Se abre desde la tarjeta de
+       Extensiones y vuelve ahi (no a Home) al cerrarse -- ver
+       openGymView/closeGymView en app.js. -->
+  <div id="gym-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2>Gimnasio</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-gym" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+      </div>
+    </div>
+    <div class="gym-tabs">
+      <button type="button" class="gym-tab-btn active" data-gym-tab="sessions">Sesiones</button>
+      <button type="button" class="gym-tab-btn" data-gym-tab="routines">Rutinas</button>
+      <button type="button" class="gym-tab-btn" data-gym-tab="progress">Progreso</button>
+    </div>
+    <div class="gym-tab-content">
+      <!-- Sesiones: historial + boton de nueva sesion. -->
+      <div id="gym-tab-sessions" class="gym-tab-panel">
+        <button type="button" id="btn-new-gym-session" class="primary-btn gym-tab-action">+ Nueva sesion</button>
+        <div id="gym-sessions-list" class="gym-list"></div>
+      </div>
+
+      <!-- Rutinas: CRUD tipo grupos/carpetas, cada una con su lista de
+           ejercicios (con series/repeticiones orientativas). -->
+      <div id="gym-tab-routines" class="gym-tab-panel hidden">
+        <button type="button" id="btn-new-gym-routine" class="primary-btn gym-tab-action">+ Nueva rutina</button>
+        <div id="gym-routines-list" class="gym-list"></div>
+        <h3 class="gym-subheading">Ejercicios</h3>
+        <button type="button" id="btn-new-gym-exercise" class="secondary-btn gym-tab-action">+ Nuevo ejercicio</button>
+        <div id="gym-exercises-list" class="gym-list"></div>
+      </div>
+
+      <!-- Progreso: selector de ejercicio + grafica SVG a mano (peso
+           maximo/volumen por sesion), ver renderGymProgressChart en app.js. -->
+      <div id="gym-tab-progress" class="gym-tab-panel hidden">
+        <div class="field-label-block">
+          <span class="field-label">Ejercicio</span>
+          <div id="gym-progress-exercise-field"></div>
+        </div>
+        <div class="gym-progress-metric-toggle">
+          <button type="button" class="view-mode-btn active" data-gym-metric="max">Peso maximo</button>
+          <button type="button" class="view-mode-btn" data-gym-metric="volume">Volumen total</button>
+        </div>
+        <div id="gym-progress-chart" class="gym-progress-chart"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar un ejercicio de Gimnasio -->
+  <div id="gym-exercise-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-gym-exercise" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-exercise-modal-title">Nuevo ejercicio</h2>
+      <form id="gym-exercise-form">
+        <input type="hidden" id="gym-exercise-id" />
+        <label>
+          Nombre
+          <input type="text" id="gym-exercise-name" required />
+        </label>
+        <label>
+          Grupo muscular (opcional)
+          <input type="text" id="gym-exercise-muscle-group" placeholder="Ej. Pierna" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-gym-exercise" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-gym-exercise" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar una rutina de Gimnasio (nombre+icono+
+       color, mas su lista ORDENADA de ejercicios con series/repeticiones
+       orientativas -- ver #gym-routine-exercises-field, poblado desde
+       app.js con los mismos ejercicios de gym-exercises-list). -->
+  <div id="gym-routine-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-gym-routine" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-routine-modal-title">Nueva rutina</h2>
+      <form id="gym-routine-form">
+        <input type="hidden" id="gym-routine-id" />
+        <div class="group-form-row">
+          <div id="gym-routine-icon-field"></div>
+          <input type="text" id="gym-routine-name" placeholder="Nombre de la rutina (ej. Dia de pierna)" required />
+          <div id="gym-routine-color-field"></div>
+        </div>
+        <div class="field-label-block">
+          <span class="field-label">Ejercicios</span>
+          <div id="gym-routine-exercises-field" class="gym-routine-exercises-field"></div>
+          <button type="button" id="btn-add-gym-routine-exercise" class="secondary-btn">+ Anadir ejercicio</button>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-gym-routine" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-gym-routine" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para registrar/editar una sesion de Gimnasio: fecha, rutina
+       opcional (auto-rellena los ejercicios esperados, ver
+       applyGymRoutineToSession en app.js) o sesion libre, y las series
+       hechas por ejercicio. -->
+  <div id="gym-session-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-gym-session" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-session-modal-title">Nueva sesion</h2>
+      <form id="gym-session-form">
+        <input type="hidden" id="gym-session-id" />
+        <div class="field-label-block">
+          <span class="field-label">Fecha</span>
+          <div id="gym-session-date-field"></div>
+        </div>
+        <div class="field-label-block">
+          <span class="field-label">Rutina (opcional)</span>
+          <div id="gym-session-routine-field"></div>
+        </div>
+        <div id="gym-session-exercises-field" class="gym-routine-exercises-field"></div>
+        <button type="button" id="btn-add-gym-session-exercise" class="secondary-btn">+ Anadir ejercicio</button>
+        <label>
+          Notas (opcional)
+          <textarea id="gym-session-notes" rows="2"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-gym-session" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-gym-session" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
@@ -882,6 +1022,10 @@
         <p class="hint">Este dispositivo guarda su propia copia de los datos y se pone al día con el ordenador cuando coincidís en la misma wifi.</p>
         <p id="sync-status" class="hint"></p>
         <button type="button" id="btn-sync-now" class="secondary-btn">Sincronizar ahora</button>
+
+        <h4>Gimnasio: unidad de peso</h4>
+        <p class="hint">Solo cambia como se escriben/leen los pesos en este dispositivo -- por dentro siempre se guardan en kilogramos.</p>
+        <div id="gym-weight-unit-options" class="view-mode-options"></div>
       </div>
 
       <!-- --- Atajos de teclado (ajuste local, no compartido) --- -->

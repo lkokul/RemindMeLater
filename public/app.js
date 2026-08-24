@@ -32,6 +32,14 @@ const state = {
   remindersMode: 'upcoming', // 'upcoming' | 'day' — que se muestra en el panel de recordatorios
   remindersDayDate: null, // dia seleccionado cuando remindersMode === 'day'
   upcomingReminders: [], // ultima lista de "proximos recordatorios" recibida del servidor
+  // Extension "Gimnasio" (ver #gym-view en index.html): ejercicios,
+  // rutinas y sesiones registradas. Se cargan al abrir la vista, no al
+  // arrancar la app (a diferencia de groups/events), ya que es una
+  // seccion aparte que la mayoria de aperturas de la app ni siquiera
+  // visita.
+  gymExercises: [],
+  gymRoutines: [],
+  gymSessions: [],
 };
 
 // Registra el service worker (ver sw.js): junto con manifest.json, es lo
@@ -4255,6 +4263,603 @@ function closeExtensionsView() {
 }
 document.getElementById('btn-extensions').addEventListener('click', openExtensionsView);
 document.getElementById('btn-close-extensions').addEventListener('click', closeExtensionsView);
+
+// ---------------------------------------------------------------------
+// Extension "Gimnasio": registro de entrenamientos de verdad (ejercicios,
+// rutinas reutilizables, sesiones con series/repeticiones/peso, y
+// progreso con graficas). Se abre desde la tarjeta de Extensiones y
+// vuelve ahi (no a Home) al cerrarse. Las 3 secciones (Sesiones/Rutinas/
+// Progreso) son pestañas simples (switchGymTab), no el patron de
+// columnas de "Mi espacio" -- aqui solo tiene sentido ver una a la vez.
+// ---------------------------------------------------------------------
+async function openGymView() {
+  closeExtensionsView();
+  document.getElementById('gym-view').classList.remove('hidden');
+  await Promise.all([loadGymExercises(), loadGymRoutines(), loadGymSessions()]);
+  renderGymExercisesList();
+  renderGymRoutinesList();
+  renderGymSessionsList();
+  populateGymProgressExerciseSelect();
+}
+function closeGymView() {
+  document.getElementById('gym-view').classList.add('hidden');
+  openExtensionsView();
+}
+document.getElementById('btn-open-gym').addEventListener('click', openGymView);
+document.getElementById('btn-close-gym').addEventListener('click', closeGymView);
+
+function switchGymTab(tabName) {
+  document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.gymTab === tabName);
+  });
+  document.querySelectorAll('.gym-tab-panel').forEach((panel) => {
+    panel.classList.toggle('hidden', panel.id !== `gym-tab-${tabName}`);
+  });
+}
+document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => switchGymTab(btn.dataset.gymTab));
+});
+
+async function loadGymExercises() {
+  state.gymExercises = await api('/api/gym-exercises');
+}
+async function loadGymRoutines() {
+  state.gymRoutines = await api('/api/gym-routines');
+}
+async function loadGymSessions() {
+  state.gymSessions = await api('/api/gym-sessions');
+}
+
+// 'YYYY-MM-DD' -> "15 ago 2026", para el historial de sesiones. No hay
+// ningun helper de formateo de fechas ya hecho en el proyecto que
+// encaje aqui (toDateKey hace lo contrario: Date -> 'YYYY-MM-DD').
+const GYM_DATE_FORMATTER = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+function formatGymDate(dateStr) {
+  return GYM_DATE_FORMATTER.format(new Date(`${dateStr}T00:00:00`));
+}
+
+// Unidad de peso para Gimnasio (kg o libras): ajuste por dispositivo, no
+// compartido -- el dato en la base de datos SIEMPRE es weight_kg (ver
+// server/db.js), esto solo decide como se escribe/lee en pantalla. El
+// toggle de verdad vive en Configuracion > Este dispositivo (ver
+// refreshGymWeightUnitOptions en settings.js); aqui solo la lectura y
+// las conversiones, que hacen falta ya en el modal de sesion mas abajo.
+const KG_TO_LB = 2.20462;
+function getGymWeightUnit() {
+  return localStorage.getItem('gymWeightUnit') === 'lb' ? 'lb' : 'kg';
+}
+function getGymWeightUnitLabel() {
+  return getGymWeightUnit();
+}
+function gymWeightKgToDisplay(weightKg) {
+  if (weightKg === null || weightKg === undefined) return '';
+  const value = getGymWeightUnit() === 'lb' ? weightKg * KG_TO_LB : weightKg;
+  return Math.round(value * 100) / 100;
+}
+function gymWeightDisplayToKg(displayValue) {
+  if (displayValue === '' || displayValue === null || displayValue === undefined) return null;
+  const num = Number(displayValue);
+  if (Number.isNaN(num)) return null;
+  return getGymWeightUnit() === 'lb' ? num / KG_TO_LB : num;
+}
+
+function renderGymExercisesList() {
+  const list = document.getElementById('gym-exercises-list');
+  list.innerHTML = '';
+  if (state.gymExercises.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavia no tienes ejercicios. Se crean desde aqui o al añadirlos a una rutina/sesion.</p>';
+    return;
+  }
+  state.gymExercises.forEach((ex) => {
+    const row = document.createElement('div');
+    row.className = 'gym-list-item';
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(ex.name)}${ex.muscleGroup ? ` <span class="gym-list-item-muted">(${escapeHtml(ex.muscleGroup)})</span>` : ''}</span>
+      <div class="gym-list-item-actions">
+        <button type="button" class="icon-btn" data-edit-gym-exercise="${ex.id}" aria-label="Editar ejercicio">✎</button>
+      </div>
+    `;
+    list.appendChild(row);
+  });
+  list.querySelectorAll('[data-edit-gym-exercise]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openGymExerciseModal(state.gymExercises.find((e) => e.id === Number(btn.dataset.editGymExercise)));
+    });
+  });
+}
+
+function renderGymRoutinesList() {
+  const list = document.getElementById('gym-routines-list');
+  list.innerHTML = '';
+  if (state.gymRoutines.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavia no tienes rutinas. Crea una arriba.</p>';
+    return;
+  }
+  state.gymRoutines.forEach((r) => {
+    const row = document.createElement('div');
+    row.className = 'gym-list-item';
+    row.innerHTML = `
+      <span class="color-dot" style="background-color: ${r.color}"></span>
+      <span class="gym-list-item-name">${r.icon ? escapeHtml(r.icon) + ' ' : ''}${escapeHtml(r.name)} <span class="gym-list-item-muted">(${r.exercises.length} ejercicio${r.exercises.length === 1 ? '' : 's'})</span></span>
+      <div class="gym-list-item-actions">
+        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar rutina">✎</button>
+      </div>
+    `;
+    list.appendChild(row);
+  });
+  list.querySelectorAll('[data-edit-gym-routine]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openGymRoutineModal(state.gymRoutines.find((r) => r.id === Number(btn.dataset.editGymRoutine)));
+    });
+  });
+}
+
+function renderGymSessionsList() {
+  const list = document.getElementById('gym-sessions-list');
+  list.innerHTML = '';
+  if (state.gymSessions.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavia no has registrado ninguna sesion.</p>';
+    return;
+  }
+  state.gymSessions.forEach((s) => {
+    const exerciseNames = [...new Set(s.sets.map((set) => set.exerciseName))];
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-session-item';
+    row.dataset.editGymSession = s.id;
+    row.innerHTML = `
+      <span class="gym-session-item-date">${formatGymDate(s.date)}</span>
+      ${
+        s.routineName
+          ? `<span class="gym-session-item-routine"><span class="color-dot" style="background-color: ${s.routineColor}"></span>${s.routineIcon ? escapeHtml(s.routineIcon) + ' ' : ''}${escapeHtml(s.routineName)}</span>`
+          : '<span class="gym-session-item-routine gym-list-item-muted">Sesion libre</span>'
+      }
+      <span class="gym-list-item-muted">${exerciseNames.length ? exerciseNames.map(escapeHtml).join(', ') : 'Sin ejercicios'}</span>
+    `;
+    row.addEventListener('click', () => openGymSessionModal(s));
+    list.appendChild(row);
+  });
+}
+
+// --- Modal de ejercicio -------------------------------------------------
+function openGymExerciseModal(exercise) {
+  document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
+  document.getElementById('gym-exercise-id').value = exercise ? exercise.id : '';
+  document.getElementById('gym-exercise-name').value = exercise ? exercise.name : '';
+  document.getElementById('gym-exercise-muscle-group').value = exercise ? exercise.muscleGroup || '' : '';
+  document.getElementById('btn-delete-gym-exercise').classList.toggle('hidden', !exercise);
+  document.getElementById('gym-exercise-modal').classList.remove('hidden');
+}
+function closeGymExerciseModal() {
+  document.getElementById('gym-exercise-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-gym-exercise').addEventListener('click', () => openGymExerciseModal(null));
+document.getElementById('btn-cancel-gym-exercise').addEventListener('click', closeGymExerciseModal);
+document.getElementById('btn-close-gym-exercise').addEventListener('click', closeGymExerciseModal);
+
+document.getElementById('gym-exercise-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('gym-exercise-id').value;
+  const payload = {
+    name: document.getElementById('gym-exercise-name').value,
+    muscleGroup: document.getElementById('gym-exercise-muscle-group').value,
+  };
+  if (id) {
+    await api(`/api/gym-exercises/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/gym-exercises', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeGymExerciseModal();
+  await loadGymExercises();
+  renderGymExercisesList();
+});
+
+document.getElementById('btn-delete-gym-exercise').addEventListener('click', async () => {
+  const id = document.getElementById('gym-exercise-id').value;
+  try {
+    await api(`/api/gym-exercises/${id}`, { method: 'DELETE' });
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  closeGymExerciseModal();
+  await loadGymExercises();
+  renderGymExercisesList();
+});
+
+// --- Modal de rutina ------------------------------------------------------
+// El color/icono usan createColorField/createIconField (definidas en
+// settings.js, que se carga DESPUES de app.js) -- construirlas aqui
+// arriba, al analizar el archivo, fallaria (esas funciones todavia no
+// existirian). Por eso se crean la PRIMERA VEZ que se abre el modal
+// (dentro de un handler, para entonces settings.js ya esta cargado del
+// todo), no al arrancar la app -- mismo aviso que ya deja CLAUDE.md
+// sobre el orden de declaracion entre los dos archivos.
+let gymRoutineColorField = null;
+let gymRoutineIconField = null;
+// Ejercicios de la rutina que se esta editando ahora mismo en el modal
+// -- se reconstruye el DOM entero cada vez que cambia (anadir/quitar
+// una fila), mas simple que ir tocando filas sueltas.
+let gymRoutineModalExercises = [];
+
+function ensureGymRoutineFieldsReady() {
+  if (gymRoutineColorField) return;
+  gymRoutineColorField = createColorField({ initialValue: '#5b8cff' });
+  document.getElementById('gym-routine-color-field').appendChild(gymRoutineColorField.element);
+  gymRoutineIconField = createIconField({ initialValue: '' });
+  document.getElementById('gym-routine-icon-field').appendChild(gymRoutineIconField.element);
+}
+
+// Construye las opciones <option> de un <select> nativo con la
+// biblioteca de ejercicios -- se usa tanto en filas de rutina como de
+// sesion. Nativo a proposito (no el select-field a medida): estas filas
+// se repiten un numero variable de veces, y un <select> normal no
+// necesita gestionar su propio popover por cada copia.
+function gymExerciseOptionsHtml(selectedId) {
+  return state.gymExercises
+    .map((ex) => `<option value="${ex.id}" ${Number(selectedId) === ex.id ? 'selected' : ''}>${escapeHtml(ex.name)}</option>`)
+    .join('');
+}
+
+function renderGymRoutineExercisesField() {
+  const container = document.getElementById('gym-routine-exercises-field');
+  container.innerHTML = '';
+  if (gymRoutineModalExercises.length === 0) {
+    container.innerHTML = '<p class="empty-hint">Todavia no has añadido ningun ejercicio.</p>';
+    return;
+  }
+  gymRoutineModalExercises.forEach((row, index) => {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'gym-routine-exercise-row';
+    rowEl.innerHTML = `
+      <select data-field="exerciseId">${gymExerciseOptionsHtml(row.exerciseId)}</select>
+      <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
+      <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
+      <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
+    `;
+    rowEl.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
+      gymRoutineModalExercises[index].exerciseId = Number(e.target.value);
+    });
+    rowEl.querySelector('[data-field="targetSets"]').addEventListener('input', (e) => {
+      gymRoutineModalExercises[index].targetSets = e.target.value;
+    });
+    rowEl.querySelector('[data-field="targetReps"]').addEventListener('input', (e) => {
+      gymRoutineModalExercises[index].targetReps = e.target.value;
+    });
+    rowEl.querySelector('button').addEventListener('click', () => {
+      gymRoutineModalExercises.splice(index, 1);
+      renderGymRoutineExercisesField();
+    });
+    container.appendChild(rowEl);
+  });
+}
+
+document.getElementById('btn-add-gym-routine-exercise').addEventListener('click', () => {
+  if (state.gymExercises.length === 0) {
+    alert('Primero crea al menos un ejercicio en la lista de abajo.');
+    return;
+  }
+  gymRoutineModalExercises.push({ exerciseId: state.gymExercises[0].id, targetSets: '', targetReps: '' });
+  renderGymRoutineExercisesField();
+});
+
+function openGymRoutineModal(routine) {
+  ensureGymRoutineFieldsReady();
+  document.getElementById('gym-routine-modal-title').textContent = routine ? 'Editar rutina' : 'Nueva rutina';
+  document.getElementById('gym-routine-id').value = routine ? routine.id : '';
+  document.getElementById('gym-routine-name').value = routine ? routine.name : '';
+  gymRoutineColorField.setValue(routine ? routine.color : '#5b8cff');
+  gymRoutineIconField.setValue(routine ? routine.icon || '' : '');
+  gymRoutineModalExercises = routine
+    ? routine.exercises.map((ex) => ({ exerciseId: ex.exerciseId, targetSets: ex.targetSets ?? '', targetReps: ex.targetReps ?? '' }))
+    : [];
+  renderGymRoutineExercisesField();
+  document.getElementById('btn-delete-gym-routine').classList.toggle('hidden', !routine);
+  document.getElementById('gym-routine-modal').classList.remove('hidden');
+}
+function closeGymRoutineModal() {
+  document.getElementById('gym-routine-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-gym-routine').addEventListener('click', () => openGymRoutineModal(null));
+document.getElementById('btn-cancel-gym-routine').addEventListener('click', closeGymRoutineModal);
+document.getElementById('btn-close-gym-routine').addEventListener('click', closeGymRoutineModal);
+
+document.getElementById('gym-routine-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('gym-routine-id').value;
+  const payload = {
+    name: document.getElementById('gym-routine-name').value,
+    color: gymRoutineColorField.getValue(),
+    icon: gymRoutineIconField.getValue(),
+    exercises: gymRoutineModalExercises,
+  };
+  if (id) {
+    await api(`/api/gym-routines/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/gym-routines', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeGymRoutineModal();
+  await loadGymRoutines();
+  renderGymRoutinesList();
+});
+
+document.getElementById('btn-delete-gym-routine').addEventListener('click', async () => {
+  const id = document.getElementById('gym-routine-id').value;
+  await api(`/api/gym-routines/${id}`, { method: 'DELETE' });
+  closeGymRoutineModal();
+  await Promise.all([loadGymRoutines(), loadGymSessions()]);
+  renderGymRoutinesList();
+  renderGymSessionsList();
+});
+
+// --- Modal de sesion --------------------------------------------------
+// Fecha con el mismo campo que eventos/tareas (createDateField, definida
+// en este mismo archivo mas arriba, sin problema de orden). La rutina
+// usa createSelectField (tambien de este archivo) -- a diferencia del
+// color/icono de arriba, esta si se puede construir ya, al analizar el
+// archivo.
+const gymSessionDateField = createDateField({ initialValue: new Date() });
+document.getElementById('gym-session-date-field').appendChild(gymSessionDateField.element);
+
+const gymSessionRoutineField = createSelectField({
+  options: [{ value: '', label: 'Sesion libre (sin rutina)' }],
+  initialValue: '',
+  onChange: (routineId) => {
+    if (!routineId) return;
+    const routine = state.gymRoutines.find((r) => r.id === Number(routineId));
+    // Auto-rellena los ejercicios esperados de la rutina elegida -- SOLO
+    // si la lista de ejercicios de la sesion todavia esta vacia, para no
+    // pisar series que ya se hubieran anadido a mano.
+    if (routine && gymSessionModalExercises.length === 0) {
+      gymSessionModalExercises = routine.exercises.map((ex) => ({ exerciseId: ex.exerciseId, sets: [] }));
+      renderGymSessionExercisesField();
+    }
+  },
+});
+document.getElementById('gym-session-routine-field').appendChild(gymSessionRoutineField.element);
+
+// Ejercicios de la sesion que se esta editando, cada uno con SU PROPIA
+// lista de series ya hechas (reps+peso). A diferencia de una rutina
+// (solo sugiere series/reps), aqui se registran las series de verdad,
+// una a una.
+let gymSessionModalExercises = [];
+
+function renderGymSessionExercisesField() {
+  const container = document.getElementById('gym-session-exercises-field');
+  container.innerHTML = '';
+  if (gymSessionModalExercises.length === 0) {
+    container.innerHTML = '<p class="empty-hint">Todavia no has añadido ningun ejercicio a esta sesion.</p>';
+    return;
+  }
+  gymSessionModalExercises.forEach((exRow, exIndex) => {
+    const block = document.createElement('div');
+    block.className = 'gym-session-exercise-block';
+
+    const header = document.createElement('div');
+    header.className = 'gym-routine-exercise-row';
+    header.innerHTML = `
+      <select data-field="exerciseId">${gymExerciseOptionsHtml(exRow.exerciseId)}</select>
+      <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
+    `;
+    header.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
+      gymSessionModalExercises[exIndex].exerciseId = Number(e.target.value);
+    });
+    header.querySelector('button').addEventListener('click', () => {
+      gymSessionModalExercises.splice(exIndex, 1);
+      renderGymSessionExercisesField();
+    });
+    block.appendChild(header);
+
+    const setsList = document.createElement('div');
+    setsList.className = 'gym-session-sets-list';
+    exRow.sets.forEach((set, setIndex) => {
+      const setRow = document.createElement('div');
+      setRow.className = 'gym-session-set-row';
+      setRow.innerHTML = `
+        <span class="gym-session-set-number">Serie ${setIndex + 1}</span>
+        <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
+        <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
+        <button type="button" class="icon-btn" aria-label="Quitar serie">✕</button>
+      `;
+      setRow.querySelector('[data-field="reps"]').addEventListener('input', (e) => {
+        set.reps = e.target.value;
+      });
+      setRow.querySelector('[data-field="weight"]').addEventListener('input', (e) => {
+        set.weightDisplay = e.target.value;
+      });
+      setRow.querySelector('button').addEventListener('click', () => {
+        exRow.sets.splice(setIndex, 1);
+        renderGymSessionExercisesField();
+      });
+      setsList.appendChild(setRow);
+    });
+    block.appendChild(setsList);
+
+    const addSetBtn = document.createElement('button');
+    addSetBtn.type = 'button';
+    addSetBtn.className = 'secondary-btn gym-add-set-btn';
+    addSetBtn.textContent = '+ Serie';
+    addSetBtn.addEventListener('click', () => {
+      exRow.sets.push({ reps: '', weightDisplay: '' });
+      renderGymSessionExercisesField();
+    });
+    block.appendChild(addSetBtn);
+
+    container.appendChild(block);
+  });
+}
+
+document.getElementById('btn-add-gym-session-exercise').addEventListener('click', () => {
+  if (state.gymExercises.length === 0) {
+    alert('Primero crea al menos un ejercicio desde la pestaña Rutinas.');
+    return;
+  }
+  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, sets: [{ reps: '', weightDisplay: '' }] });
+  renderGymSessionExercisesField();
+});
+
+function openGymSessionModal(session) {
+  document.getElementById('gym-session-modal-title').textContent = session ? 'Editar sesion' : 'Nueva sesion';
+  document.getElementById('gym-session-id').value = session ? session.id : '';
+  gymSessionDateField.setValue(session ? new Date(`${session.date}T00:00:00`) : new Date());
+  document.getElementById('gym-session-notes').value = session ? session.notes || '' : '';
+
+  gymSessionRoutineField.setOptions([
+    { value: '', label: 'Sesion libre (sin rutina)' },
+    ...state.gymRoutines.map((r) => ({ value: String(r.id), label: r.name, color: r.color, icon: r.icon })),
+  ]);
+  gymSessionRoutineField.setValue(session && session.routineId ? String(session.routineId) : '');
+
+  if (session) {
+    // Reagrupa las series planas que devuelve el servidor (una fila por
+    // serie) en un bloque por ejercicio, tal y como lo edita el modal.
+    const byExercise = new Map();
+    session.sets.forEach((set) => {
+      if (!byExercise.has(set.exerciseId)) byExercise.set(set.exerciseId, []);
+      byExercise.get(set.exerciseId).push({ reps: set.reps ?? '', weightDisplay: gymWeightKgToDisplay(set.weightKg) });
+    });
+    gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets }));
+  } else {
+    gymSessionModalExercises = [];
+  }
+  renderGymSessionExercisesField();
+
+  document.getElementById('btn-delete-gym-session').classList.toggle('hidden', !session);
+  document.getElementById('gym-session-modal').classList.remove('hidden');
+}
+function closeGymSessionModal() {
+  document.getElementById('gym-session-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-gym-session').addEventListener('click', () => openGymSessionModal(null));
+document.getElementById('btn-cancel-gym-session').addEventListener('click', closeGymSessionModal);
+document.getElementById('btn-close-gym-session').addEventListener('click', closeGymSessionModal);
+
+document.getElementById('gym-session-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('gym-session-id').value;
+  const dateValue = gymSessionDateField.getValue();
+  // Aplana los bloques por ejercicio en la lista de series sueltas que
+  // espera el servidor -- el orden dentro de cada exerciseId es lo que
+  // decide el numero de serie (ver replaceSessionSets en
+  // routes/gymSessions.js), asi que se manda tal cual esta en pantalla.
+  const sets = [];
+  gymSessionModalExercises.forEach((exRow) => {
+    exRow.sets.forEach((set) => {
+      sets.push({
+        exerciseId: exRow.exerciseId,
+        reps: set.reps,
+        weightKg: gymWeightDisplayToKg(set.weightDisplay),
+      });
+    });
+  });
+  const payload = {
+    date: toDateKey(dateValue),
+    routineId: gymSessionRoutineField.getValue() || null,
+    notes: document.getElementById('gym-session-notes').value,
+    sets,
+  };
+  if (id) {
+    await api(`/api/gym-sessions/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/gym-sessions', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeGymSessionModal();
+  await loadGymSessions();
+  renderGymSessionsList();
+  populateGymProgressExerciseSelect();
+});
+
+document.getElementById('btn-delete-gym-session').addEventListener('click', async () => {
+  const id = document.getElementById('gym-session-id').value;
+  await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
+  closeGymSessionModal();
+  await loadGymSessions();
+  renderGymSessionsList();
+  populateGymProgressExerciseSelect();
+});
+
+// --- Progreso: grafica SVG a mano ---------------------------------------
+// No hay ninguna libreria de graficas en el proyecto (a proposito, ver
+// CLAUDE.md/plan de Gimnasio: "sin build ni framework") -- un SVG
+// generado a mano es de sobra para una linea sencilla con pocos puntos.
+const gymProgressExerciseField = createSelectField({
+  options: [],
+  initialValue: '',
+  placeholder: 'Elige un ejercicio',
+  onChange: (id) => renderGymProgressChart(id ? Number(id) : null),
+});
+document.getElementById('gym-progress-exercise-field').appendChild(gymProgressExerciseField.element);
+
+let gymProgressMetric = 'max'; // 'max' = peso maximo por sesion, 'volume' = suma reps*peso
+document.querySelectorAll('[data-gym-metric]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymProgressMetric = btn.dataset.gymMetric;
+    document.querySelectorAll('[data-gym-metric]').forEach((b) => b.classList.toggle('active', b === btn));
+    const exerciseId = gymProgressExerciseField.getValue();
+    renderGymProgressChart(exerciseId ? Number(exerciseId) : null);
+  });
+});
+
+function populateGymProgressExerciseSelect() {
+  gymProgressExerciseField.setOptions(state.gymExercises.map((ex) => ({ value: String(ex.id), label: ex.name })));
+  const current = gymProgressExerciseField.getValue();
+  const stillExists = state.gymExercises.some((ex) => String(ex.id) === current);
+  const nextValue = stillExists ? current : (state.gymExercises[0] ? String(state.gymExercises[0].id) : '');
+  gymProgressExerciseField.setValue(nextValue);
+  renderGymProgressChart(nextValue ? Number(nextValue) : null);
+}
+
+async function renderGymProgressChart(exerciseId) {
+  const container = document.getElementById('gym-progress-chart');
+  if (!exerciseId) {
+    container.innerHTML = '<p class="empty-hint">Crea un ejercicio y registra alguna sesion para ver su progreso.</p>';
+    return;
+  }
+  const points = await api(`/api/gym-sessions/progress/${exerciseId}`);
+  if (points.length === 0) {
+    container.innerHTML = '<p class="empty-hint">Todavia no hay sesiones registradas para este ejercicio.</p>';
+    return;
+  }
+
+  const unit = getGymWeightUnitLabel();
+  const isVolume = gymProgressMetric === 'volume';
+  const values = points.map((p) => {
+    const raw = isVolume ? p.volumeKg : p.maxWeightKg;
+    return gymWeightKgToDisplay(raw) || 0;
+  });
+  const maxValue = Math.max(...values, 1);
+
+  const width = 600;
+  const height = 220;
+  const padding = 32;
+  const stepX = points.length > 1 ? (width - padding * 2) / (points.length - 1) : 0;
+
+  const coords = values.map((v, i) => ({
+    x: points.length > 1 ? padding + i * stepX : width / 2,
+    y: height - padding - (v / maxValue) * (height - padding * 2),
+  }));
+
+  const pathD = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ');
+  const dots = coords
+    .map((c, i) => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="var(--accent)"><title>${formatGymDate(points[i].date)}: ${values[i]} ${unit}</title></circle>`)
+    .join('');
+  // Solo se etiquetan la primera, la ultima, y todas si hay pocos puntos
+  // -- con muchas sesiones, poner una fecha bajo cada punto se solapa.
+  const labels = points
+    .map((p, i) => {
+      if (points.length > 6 && i !== 0 && i !== points.length - 1) return '';
+      return `<text x="${coords[i].x.toFixed(1)}" y="${height - 8}" text-anchor="middle" class="gym-chart-label">${formatGymDate(p.date)}</text>`;
+    })
+    .join('');
+
+  container.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" class="gym-chart-svg" role="img" aria-label="Progreso de ${isVolume ? 'volumen' : 'peso maximo'}">
+      <path d="${pathD}" fill="none" stroke="var(--accent)" stroke-width="2" />
+      ${dots}
+      ${labels}
+    </svg>
+    <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso maximo'} por sesion, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Pasa el raton por un punto para ver la fecha exacta.</p>
+  `;
+}
 
 // Mientras una columna cambia de ancho (expandir o volver a las 3), el
 // contenido de dentro se oculta (ver .is-animating en styles.css) para

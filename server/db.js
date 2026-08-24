@@ -149,6 +149,65 @@ db.exec(`
     device_origin TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Extension "Gimnasio" (primera de las 3 anunciadas en la pantalla de
+  -- Extensiones -- ver #extensions-view en index.html): registro de
+  -- entrenamientos, con prefijo "gym_" para no chocar con nada de lo de
+  -- arriba. Borrado en cascada A MANO en routes/, no con ON DELETE
+  -- CASCADE de SQL -- mismo patron que groups/note_folders.
+  CREATE TABLE IF NOT EXISTS gym_exercises (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    muscle_group TEXT,          -- opcional, texto libre (ej. "Pierna")
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Rutinas reutilizables (ej. "Dia de pierna"), mismo patron
+  -- icono+color+posicion que groups/note_folders.
+  CREATE TABLE IF NOT EXISTS gym_routines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    icon TEXT,
+    color TEXT NOT NULL DEFAULT '#5b8cff',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Que ejercicios lleva cada rutina, en que orden, con series/repeticiones
+  -- ORIENTATIVAS (target_sets/target_reps, opcionales -- solo una sugerencia,
+  -- lo que de verdad se hizo se registra en gym_sets al completar la sesion).
+  CREATE TABLE IF NOT EXISTS gym_routine_exercises (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    routine_id INTEGER NOT NULL REFERENCES gym_routines(id),
+    exercise_id INTEGER NOT NULL REFERENCES gym_exercises(id),
+    position INTEGER NOT NULL DEFAULT 0,
+    target_sets INTEGER,
+    target_reps INTEGER
+  );
+
+  -- Una sesion real en una fecha. routine_id es opcional: NULL = sesion
+  -- libre (ejercicios sueltos elegidos sobre la marcha, sin plantilla).
+  CREATE TABLE IF NOT EXISTS gym_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,                             -- YYYY-MM-DD
+    routine_id INTEGER REFERENCES gym_routines(id),
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Cada serie registrada de verdad dentro de una sesion. weight_kg
+  -- SIEMPRE se guarda en kilogramos -- la libra (ajuste por dispositivo,
+  -- ver settings.js) es solo de entrada/presentacion en el cliente, para
+  -- que las graficas de progreso comparen siempre la misma unidad.
+  CREATE TABLE IF NOT EXISTS gym_sets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES gym_sessions(id),
+    exercise_id INTEGER NOT NULL REFERENCES gym_exercises(id),
+    set_number INTEGER NOT NULL,
+    reps INTEGER,
+    weight_kg REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Migracion sencilla: group_id y active_theme_id se anadieron despues de
