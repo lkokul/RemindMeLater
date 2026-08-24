@@ -1860,6 +1860,39 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Extensiones: cada una es pantalla completa igual que "Mi espacio", asi
+  // que Esc capa a capa igual -- primero la sub-navegacion de dentro (solo
+  // Lecturas la tiene: saga -> detalle de esa saga), luego la extension
+  // entera vuelve a la rejilla de Extensiones, y la rejilla vuelve a Home.
+  const gymView = document.getElementById('gym-view');
+  if (gymView && !gymView.classList.contains('hidden')) {
+    document.getElementById('btn-close-gym').click();
+    return;
+  }
+
+  const finanzasView = document.getElementById('finanzas-view');
+  if (finanzasView && !finanzasView.classList.contains('hidden')) {
+    document.getElementById('btn-close-finanzas').click();
+    return;
+  }
+
+  const lecturasView = document.getElementById('lecturas-view');
+  if (lecturasView && !lecturasView.classList.contains('hidden')) {
+    const sagaDetailPanel = document.getElementById('lecturas-saga-detail-panel');
+    if (sagaDetailPanel && !sagaDetailPanel.classList.contains('hidden')) {
+      document.getElementById('btn-back-lecturas-sagas').click();
+    } else {
+      document.getElementById('btn-close-lecturas').click();
+    }
+    return;
+  }
+
+  const extensionsView = document.getElementById('extensions-view');
+  if (extensionsView && !extensionsView.classList.contains('hidden')) {
+    document.getElementById('btn-close-extensions').click();
+    return;
+  }
+
   if (typeof state !== 'undefined' && state.remindersMode === 'day') {
     showUpcomingReminders();
     return;
