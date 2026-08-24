@@ -947,7 +947,8 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   opacity: 0.6;
   cursor: not-allowed;
 }
-.extensions-card-icon { font-size: 1.8rem; }
+.extensions-card-icon { display: flex; }
+.extensions-card-icon svg { width: 1.8rem; height: 1.8rem; }
 .extensions-card-title { font-weight: 600; }
 .extensions-card-badge {
   font-size: 0.7rem;
