@@ -371,11 +371,10 @@
           <span class="extensions-card-icon">💶</span>
           <span class="extensions-card-title">Finanzas</span>
         </button>
-        <div class="extensions-card" aria-disabled="true">
+        <button type="button" id="btn-open-lecturas" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon">📚</span>
           <span class="extensions-card-title">Lecturas</span>
-          <span class="extensions-card-badge">Próximamente</span>
-        </div>
+        </button>
       </div>
     </div>
   </div>
@@ -789,6 +788,158 @@
           <input type="text" id="finanzas-investment-notes" />
         </label>
         <div class="modal-actions">
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Extension "Lecturas": historial de entretenimiento (manga, comic,
+       libro, serie, anime, pelicula), agrupado en SAGAS obligatorias --
+       hasta algo suelto es una saga de un solo item, para poder juntar
+       bajo un mismo nombre cosas de tipos distintos (ej. el manga Y el
+       anime de la misma obra). Jerarquia de 2 tablas: sagas primero
+       (#lecturas-sagas-panel), y al entrar en una, sus items
+       (#lecturas-saga-detail-panel) -- mas parecido a como Notas navega
+       carpetas que a las pestañas de Gimnasio, ver
+       openLecturasSagaDetail/backToLecturasSagas en app.js. -->
+  <div id="lecturas-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2>Lecturas</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-lecturas" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+      </div>
+    </div>
+
+    <div id="lecturas-sagas-panel" class="lecturas-panel">
+      <button type="button" id="btn-new-lecturas-saga" class="primary-btn gym-tab-action">+ Nueva saga</button>
+      <div class="lecturas-table-wrap">
+        <table class="lecturas-table">
+          <thead>
+            <tr><th>Nombre</th><th>Tipos</th><th>Items</th></tr>
+          </thead>
+          <tbody id="lecturas-sagas-tbody"></tbody>
+        </table>
+      </div>
+      <p id="lecturas-sagas-empty" class="empty-hint hidden">Todavia no tienes ninguna saga. Crea una arriba (hasta algo suelto, como una novela, es una saga de un solo item).</p>
+    </div>
+
+    <div id="lecturas-saga-detail-panel" class="lecturas-panel hidden">
+      <button type="button" id="btn-back-lecturas-sagas" class="secondary-btn">← Sagas</button>
+      <div class="lecturas-saga-detail-header">
+        <h3 id="lecturas-saga-detail-name"></h3>
+        <button type="button" id="btn-edit-lecturas-saga" class="icon-btn" aria-label="Editar saga">✎</button>
+        <div class="spacer"></div>
+        <button type="button" id="btn-delete-lecturas-saga" class="danger-btn">Eliminar saga</button>
+      </div>
+      <p id="lecturas-saga-detail-description" class="hint"></p>
+
+      <div id="lecturas-item-filters" class="lecturas-filters"></div>
+
+      <button type="button" id="btn-new-lecturas-item" class="primary-btn gym-tab-action">+ Nuevo item</button>
+      <div class="lecturas-table-wrap">
+        <table class="lecturas-table">
+          <thead>
+            <tr>
+              <th>Título</th><th>Tipo</th><th>Estado</th><th>Rating</th>
+              <th>Género</th><th>Progreso</th><th>Tomos</th>
+            </tr>
+          </thead>
+          <tbody id="lecturas-items-tbody"></tbody>
+        </table>
+      </div>
+      <p id="lecturas-items-empty" class="empty-hint hidden">Todavia no tienes ningun item en esta saga (o ninguno coincide con los filtros).</p>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar una saga de Lecturas -->
+  <div id="lecturas-saga-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-lecturas-saga" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="lecturas-saga-modal-title">Nueva saga</h2>
+      <form id="lecturas-saga-form">
+        <input type="hidden" id="lecturas-saga-id" />
+        <label>
+          Nombre
+          <input type="text" id="lecturas-saga-name" placeholder="Ej. Kimetsu no Yaiba, o el titulo suelto si es solo uno" required />
+        </label>
+        <label>
+          Descripción (opcional)
+          <textarea id="lecturas-saga-description" rows="2"></textarea>
+        </label>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-lecturas-saga" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar un item de Lecturas -->
+  <div id="lecturas-item-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-lecturas-item" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="lecturas-item-modal-title">Nuevo item</h2>
+      <form id="lecturas-item-form">
+        <input type="hidden" id="lecturas-item-id" />
+        <label>
+          Título
+          <input type="text" id="lecturas-item-title" placeholder="Ej. Temporada 1, Tomo 1-10..." required />
+        </label>
+        <div class="form-row">
+          <label>
+            Tipo
+            <select id="lecturas-item-type">
+              <option value="manga">Manga</option>
+              <option value="comic">Cómic</option>
+              <option value="libro">Libro</option>
+              <option value="serie">Serie</option>
+              <option value="anime">Anime</option>
+              <option value="pelicula">Película</option>
+            </select>
+          </label>
+          <label>
+            Estado
+            <select id="lecturas-item-status">
+              <option value="wishlist">Deseado</option>
+              <option value="in_progress">En progreso</option>
+              <option value="completed">Completado</option>
+              <option value="dropped">Abandonado</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Descripción (opcional)
+          <textarea id="lecturas-item-description" rows="2"></textarea>
+        </label>
+        <label>
+          Rating (0-10, opcional)
+          <input type="number" id="lecturas-item-rating" min="0" max="10" step="0.5" />
+        </label>
+        <div class="field-label-block">
+          <span class="field-label">Géneros</span>
+          <div id="lecturas-item-genres-field"></div>
+        </div>
+        <div class="field-label-block">
+          <span class="field-label">Progreso (opcional)</span>
+          <div class="form-row">
+            <input type="number" id="lecturas-item-progress-current" placeholder="Actual" min="0" />
+            <input type="number" id="lecturas-item-progress-total" placeholder="Total" min="0" />
+            <input type="text" id="lecturas-item-progress-unit" placeholder="capitulos, episodios, tomos..." />
+          </div>
+        </div>
+        <div class="field-label-block">
+          <span class="field-label">Tomos comprados (opcional)</span>
+          <div class="form-row">
+            <input type="number" id="lecturas-item-owned-count" placeholder="Tienes" min="0" />
+            <input type="number" id="lecturas-item-owned-total" placeholder="De un total de" min="0" />
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-lecturas-item" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-lecturas-item" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>

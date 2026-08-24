@@ -25,6 +25,8 @@ const finanzasCategoriesRouter = require('./routes/finanzasCategories');
 const finanzasTransactionsRouter = require('./routes/finanzasTransactions');
 const finanzasInvestmentsRouter = require('./routes/finanzasInvestments');
 const finanzasSettingsRouter = require('./routes/finanzasSettings');
+const lecturasSagasRouter = require('./routes/lecturasSagas');
+const lecturasItemsRouter = require('./routes/lecturasItems');
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startMdns } = require('./mdns');
@@ -74,6 +76,11 @@ app.use('/api/finanzas-categories', requireDeviceOrTrusted, finanzasCategoriesRo
 app.use('/api/finanzas-transactions', requireDeviceOrTrusted, finanzasTransactionsRouter);
 app.use('/api/finanzas-investments', requireDeviceOrTrusted, finanzasInvestmentsRouter);
 app.use('/api/finanzas-settings', requireDeviceOrTrusted, finanzasSettingsRouter);
+// Extension "Lecturas" (ver #extensions-view en index.html): historial
+// de entretenimiento (manga/comic/libro/serie/anime/pelicula) agrupado
+// en sagas obligatorias.
+app.use('/api/lecturas-sagas', requireDeviceOrTrusted, lecturasSagasRouter);
+app.use('/api/lecturas-items', requireDeviceOrTrusted, lecturasItemsRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);
