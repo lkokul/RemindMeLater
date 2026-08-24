@@ -4420,6 +4420,156 @@ function renderGymSessionsList() {
   });
 }
 
+// ---------------------------------------------------------------------
+// Extension "Finanzas": gastos, ingresos e inversiones. Las inversiones
+// son SOLO registro manual -- sin conectar a ninguna API externa de
+// cotizaciones en vivo, para mantener la app local-first (ver
+// CLAUDE.md). Vive en su propia pantalla completa (#finanzas-view,
+// mismo patron .my-space-view que Extensiones) con 3 pestañas.
+//
+// createIconField()/createColorField() viven en settings.js, que se
+// carga DESPUES de app.js -- por eso los campos de icono/color no se
+// crean aqui arriba (a nivel de modulo, se ejecutaria antes de que
+// settings.js exista), sino de forma perezosa en
+// setupFinanzasIconColorFields(), llamada la primera vez que se abre
+// la vista (un click, que solo puede pasar despues de que los dos
+// scripts ya hayan terminado de cargar).
+// ---------------------------------------------------------------------
+let finanzasAccounts = [];
+let finanzasCategories = [];
+let finanzasIconColorFieldsReady = false;
+let finanzasAccountIconField = null;
+let finanzasAccountColorField = null;
+let finanzasCategoryIconField = null;
+let finanzasCategoryColorField = null;
+
+const finanzasFilters = { accountId: '', categoryId: '', type: '', from: '', to: '' };
+
+function formatFinanzasAmount(n) {
+  const num = Number(n) || 0;
+  return `${num.toFixed(2)} €`;
+}
+
+function setupFinanzasIconColorFields() {
+  if (finanzasIconColorFieldsReady) return;
+  finanzasIconColorFieldsReady = true;
+
+  finanzasAccountIconField = createIconField({ initialValue: '' });
+  document.getElementById('finanzas-account-icon-field').appendChild(finanzasAccountIconField.element);
+  finanzasAccountColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
+  document.getElementById('finanzas-account-color-field').appendChild(finanzasAccountColorField.element);
+
+  finanzasCategoryIconField = createIconField({ initialValue: '' });
+  document.getElementById('finanzas-category-icon-field').appendChild(finanzasCategoryIconField.element);
+  finanzasCategoryColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
+  document.getElementById('finanzas-category-color-field').appendChild(finanzasCategoryColorField.element);
+}
+
+async function loadFinanzasAccounts() {
+  finanzasAccounts = await api('/api/finanzas-accounts');
+}
+async function loadFinanzasCategories() {
+  finanzasCategories = await api('/api/finanzas-categories');
+}
+
+function populateFinanzasSelects() {
+  const accountSelects = [
+    document.getElementById('finanzas-filter-account'),
+    document.getElementById('finanzas-transaction-account'),
+    document.getElementById('finanzas-investment-account'),
+  ];
+  accountSelects.forEach((sel) => {
+    const isFilter = sel.id === 'finanzas-filter-account';
+    const current = sel.value;
+    sel.innerHTML = isFilter ? '<option value="">Todas las cuentas</option>' : '';
+    finanzasAccounts.forEach((a) => {
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = `${a.icon ? a.icon + ' ' : ''}${a.name}`;
+      sel.appendChild(opt);
+    });
+    if (current) sel.value = current;
+  });
+
+  const filterCategorySel = document.getElementById('finanzas-filter-category');
+  const txCategorySel = document.getElementById('finanzas-transaction-category');
+  const currentFilterCat = filterCategorySel.value;
+  const currentTxCat = txCategorySel.value;
+  filterCategorySel.innerHTML = '<option value="">Todas las categorías</option>';
+  txCategorySel.innerHTML = '<option value="">Sin categoría</option>';
+  finanzasCategories.forEach((c) => {
+    const label = `${c.icon ? c.icon + ' ' : ''}${c.name}`;
+    const opt1 = document.createElement('option');
+    opt1.value = c.id;
+    opt1.textContent = label;
+    filterCategorySel.appendChild(opt1);
+    const opt2 = document.createElement('option');
+    opt2.value = c.id;
+    opt2.textContent = label;
+    txCategorySel.appendChild(opt2);
+  });
+  if (currentFilterCat) filterCategorySel.value = currentFilterCat;
+  if (currentTxCat) txCategorySel.value = currentTxCat;
+}
+
+function resetFinanzasAccountForm() {
+  document.getElementById('finanzas-account-id').value = '';
+  document.getElementById('finanzas-account-name').value = '';
+  document.getElementById('finanzas-account-initial-balance').value = '';
+  document.getElementById('finanzas-account-type').value = '';
+  finanzasAccountIconField.setValue('');
+  finanzasAccountColorField.setValue(DEFAULT_EVENT_COLOR);
+  document.getElementById('btn-cancel-finanzas-account').classList.add('hidden');
+}
+function resetFinanzasCategoryForm() {
+  document.getElementById('finanzas-category-id').value = '';
+  document.getElementById('finanzas-category-name').value = '';
+  finanzasCategoryIconField.setValue('');
+  finanzasCategoryColorField.setValue(DEFAULT_EVENT_COLOR);
+  document.getElementById('btn-cancel-finanzas-category').classList.add('hidden');
+}
+
+function renderFinanzasAccountsList() {
+  const list = document.getElementById('finanzas-accounts-list');
+  list.innerHTML = '';
+  if (finanzasAccounts.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavia no tienes cuentas. Crea una arriba.</p>';
+    return;
+  }
+  finanzasAccounts.forEach((a) => {
+    const row = document.createElement('div');
+    row.className = 'group-item';
+    row.innerHTML = `
+      <span class="color-dot" style="background-color: ${a.color}"></span>
+      <span class="group-item-name">${a.icon ? escapeHtml(a.icon) + ' ' : ''}${escapeHtml(a.name)}${a.type ? ` <span class="finanzas-account-type-badge">${escapeHtml(a.type)}</span>` : ''} — ${formatFinanzasAmount(a.balance)}</span>
+      <div class="group-item-actions">
+        <button type="button" class="secondary-btn" data-action="edit">Editar</button>
+        <button type="button" class="danger-btn" data-action="delete">Eliminar</button>
+      </div>
+    `;
+    row.querySelector('[data-action="edit"]').addEventListener('click', () => {
+      document.getElementById('finanzas-account-id').value = a.id;
+      document.getElementById('finanzas-account-name').value = a.name;
+      document.getElementById('finanzas-account-initial-balance').value = a.initialBalance;
+      document.getElementById('finanzas-account-type').value = a.type || '';
+      finanzasAccountIconField.setValue(a.icon || '');
+      finanzasAccountColorField.setValue(a.color);
+      document.getElementById('btn-cancel-finanzas-account').classList.remove('hidden');
+    });
+    row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+      if (!confirm(`¿Eliminar la cuenta "${a.name}"?`)) return;
+      try {
+        await api(`/api/finanzas-accounts/${a.id}`, { method: 'DELETE' });
+        await refreshFinanzasAccountsAndCategories();
+        renderFinanzasResumenTab();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+    list.appendChild(row);
+  });
+}
+
 // --- Modal de ejercicio -------------------------------------------------
 function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
@@ -4860,6 +5010,550 @@ async function renderGymProgressChart(exerciseId) {
     <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso maximo'} por sesion, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Pasa el raton por un punto para ver la fecha exacta.</p>
   `;
 }
+
+function renderFinanzasCategoriesList() {
+  const list = document.getElementById('finanzas-categories-list');
+  list.innerHTML = '';
+  if (finanzasCategories.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavia no tienes categorías. Crea una arriba.</p>';
+    return;
+  }
+  finanzasCategories.forEach((c) => {
+    const row = document.createElement('div');
+    row.className = 'group-item';
+    row.innerHTML = `
+      <span class="color-dot" style="background-color: ${c.color}"></span>
+      <span class="group-item-name">${c.icon ? escapeHtml(c.icon) + ' ' : ''}${escapeHtml(c.name)}</span>
+      <div class="group-item-actions">
+        <button type="button" class="secondary-btn" data-action="edit">Editar</button>
+        <button type="button" class="danger-btn" data-action="delete">Eliminar</button>
+      </div>
+    `;
+    row.querySelector('[data-action="edit"]').addEventListener('click', () => {
+      document.getElementById('finanzas-category-id').value = c.id;
+      document.getElementById('finanzas-category-name').value = c.name;
+      finanzasCategoryIconField.setValue(c.icon || '');
+      finanzasCategoryColorField.setValue(c.color);
+      document.getElementById('btn-cancel-finanzas-category').classList.remove('hidden');
+    });
+    row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+      if (!confirm(`¿Eliminar la categoría "${c.name}"? Los movimientos que la usen se quedaran sin categoría.`)) return;
+      await api(`/api/finanzas-categories/${c.id}`, { method: 'DELETE' });
+      await refreshFinanzasAccountsAndCategories();
+      await refreshFinanzasTransactionsTab();
+    });
+    list.appendChild(row);
+  });
+}
+
+async function refreshFinanzasAccountsAndCategories() {
+  await Promise.all([loadFinanzasAccounts(), loadFinanzasCategories()]);
+  populateFinanzasSelects();
+  renderFinanzasAccountsList();
+  renderFinanzasCategoriesList();
+}
+
+document.getElementById('btn-cancel-finanzas-account').addEventListener('click', resetFinanzasAccountForm);
+document.getElementById('btn-cancel-finanzas-category').addEventListener('click', resetFinanzasCategoryForm);
+
+document.getElementById('finanzas-account-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('finanzas-account-id').value;
+  const payload = {
+    name: document.getElementById('finanzas-account-name').value,
+    icon: finanzasAccountIconField.getValue() || null,
+    color: finanzasAccountColorField.getValue(),
+    initialBalance: document.getElementById('finanzas-account-initial-balance').value || 0,
+    type: document.getElementById('finanzas-account-type').value || null,
+  };
+  if (id) {
+    await api(`/api/finanzas-accounts/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/finanzas-accounts', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  resetFinanzasAccountForm();
+  await refreshFinanzasAccountsAndCategories();
+  renderFinanzasResumenTab();
+});
+
+document.getElementById('finanzas-category-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('finanzas-category-id').value;
+  const payload = {
+    name: document.getElementById('finanzas-category-name').value,
+    icon: finanzasCategoryIconField.getValue() || null,
+    color: finanzasCategoryColorField.getValue(),
+  };
+  if (id) {
+    await api(`/api/finanzas-categories/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/finanzas-categories', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  resetFinanzasCategoryForm();
+  await refreshFinanzasAccountsAndCategories();
+});
+
+// -- Pestaña Resumen: saldo por cuenta, progreso del limite mensual, y
+//    desglose del gasto de este mes por categoria. --
+function renderFinanzasAccountsSummary() {
+  const wrap = document.getElementById('finanzas-accounts-summary');
+  wrap.innerHTML = '';
+  if (finanzasAccounts.length === 0) {
+    wrap.innerHTML = '<p class="empty-hint">Todavia no tienes cuentas. Crealas en la pestaña Movimientos.</p>';
+    return;
+  }
+  finanzasAccounts.forEach((a) => {
+    const card = document.createElement('div');
+    card.className = 'finanzas-account-card';
+    card.innerHTML = `
+      <span class="finanzas-account-card-name">${a.icon ? escapeHtml(a.icon) + ' ' : ''}${escapeHtml(a.name)}${a.type ? ` <span class="finanzas-account-type-badge">${escapeHtml(a.type)}</span>` : ''}</span>
+      <span class="finanzas-account-card-balance${a.balance < 0 ? ' negative' : ''}">${formatFinanzasAmount(a.balance)}</span>
+    `;
+    wrap.appendChild(card);
+  });
+}
+
+// Grafica de "Evolucion mensual" (ingresos vs gastos, ultimos N meses):
+// SVG construido a mano, sin ninguna libreria (mismo criterio que ya usa
+// el proyecto para graficas, ver renderGymProgressChart en la rama
+// gimnasio). Cuenta TODOS los gastos del mes, no solo los que tienen
+// countsTowardBudget=1 -- es una vista de flujo de caja real, distinta
+// del progreso contra el limite mensual de arriba.
+const FINANZAS_MONTH_ABBR = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+function renderFinanzasMonthlyTrendChart(data) {
+  const wrap = document.getElementById('finanzas-monthly-trend-chart');
+  if (!data || data.length === 0) {
+    wrap.innerHTML = '<p class="empty-hint">Sin datos todavia.</p>';
+    return;
+  }
+
+  const maxValue = Math.max(1, ...data.flatMap((d) => [d.totalIncome, d.totalExpense]));
+  const chartHeight = 160;
+  const barWidth = 14;
+  const barGap = 4;
+  const groupWidth = barWidth * 2 + barGap;
+  const groupGap = 14;
+  const svgWidth = data.length * (groupWidth + groupGap) + groupGap;
+  const svgHeight = chartHeight + 30;
+
+  let bars = '';
+  data.forEach((d, i) => {
+    const groupX = groupGap + i * (groupWidth + groupGap);
+    const incomeH = (d.totalIncome / maxValue) * chartHeight;
+    const expenseH = (d.totalExpense / maxValue) * chartHeight;
+    const [year, monthNum] = d.month.split('-');
+    const label = FINANZAS_MONTH_ABBR[Number(monthNum) - 1];
+    bars += `
+      <rect x="${groupX}" y="${chartHeight - incomeH}" width="${barWidth}" height="${incomeH}" fill="#43aa8b">
+        <title>${label} ${year}: ingresos ${formatFinanzasAmount(d.totalIncome)}</title>
+      </rect>
+      <rect x="${groupX + barWidth + barGap}" y="${chartHeight - expenseH}" width="${barWidth}" height="${expenseH}" fill="#e63946">
+        <title>${label} ${year}: gastos ${formatFinanzasAmount(d.totalExpense)}</title>
+      </rect>
+      <text x="${groupX + barWidth + barGap / 2}" y="${chartHeight + 18}" text-anchor="middle" class="finanzas-trend-chart-label">${label}</text>
+    `;
+  });
+
+  wrap.innerHTML = `
+    <svg viewBox="0 0 ${svgWidth} ${svgHeight}" class="finanzas-trend-chart-svg" role="img" aria-label="Evolucion mensual de ingresos y gastos">
+      <line x1="0" y1="${chartHeight}" x2="${svgWidth}" y2="${chartHeight}" class="finanzas-trend-chart-axis" />
+      ${bars}
+    </svg>
+    <div class="finanzas-trend-chart-legend">
+      <span><span class="finanzas-trend-legend-dot" style="background:#43aa8b"></span> Ingresos</span>
+      <span><span class="finanzas-trend-legend-dot" style="background:#e63946"></span> Gastos</span>
+    </div>
+  `;
+}
+
+async function renderFinanzasResumenTab() {
+  renderFinanzasAccountsSummary();
+  const [summary, trend] = await Promise.all([
+    api('/api/finanzas-transactions/summary/month'),
+    api('/api/finanzas-transactions/summary/monthly-trend'),
+  ]);
+  renderFinanzasMonthlyTrendChart(trend);
+
+  document.getElementById('finanzas-budget-input').value = summary.monthlyBudgetLimit ?? '';
+
+  const progressWrap = document.getElementById('finanzas-budget-progress');
+  if (summary.monthlyBudgetLimit) {
+    const pct = Math.min(100, (summary.totalExpense / summary.monthlyBudgetLimit) * 100);
+    const over = summary.totalExpense > summary.monthlyBudgetLimit;
+    progressWrap.innerHTML = `
+      <div class="finanzas-budget-progress-bar">
+        <div class="finanzas-budget-progress-fill${over ? ' over-budget' : ''}" style="width: ${pct}%"></div>
+      </div>
+      <div class="finanzas-budget-progress-text">${formatFinanzasAmount(summary.totalExpense)} de ${formatFinanzasAmount(summary.monthlyBudgetLimit)}${over ? ' — ¡límite superado!' : ''}</div>
+    `;
+  } else {
+    progressWrap.innerHTML = `<div class="finanzas-budget-progress-text">Sin límite configurado. Gastado este mes: ${formatFinanzasAmount(summary.totalExpense)}. Ingresado: ${formatFinanzasAmount(summary.totalIncome)}.</div>`;
+  }
+
+  document.getElementById('finanzas-savings-goal-input').value = summary.savingsGoalMin ?? '';
+  // El aviso de "objetivo poco realista" solo tiene sentido justo tras
+  // guardar (ver el listener de btn-save-finanzas-savings-goal, que lo
+  // rellena de nuevo si la respuesta lo trae) -- en cualquier otro
+  // refresco de la pestaña se oculta, para no dejar un aviso viejo.
+  document.getElementById('finanzas-savings-warning').classList.add('hidden');
+  const savingsStatusWrap = document.getElementById('finanzas-savings-status');
+  if (summary.savingsGoalMin) {
+    const met = summary.savings >= summary.savingsGoalMin;
+    savingsStatusWrap.innerHTML = `
+      <div class="finanzas-savings-status-text${met ? ' met' : ' not-met'}">
+        Este mes has ahorrado ${formatFinanzasAmount(summary.savings)} — objetivo ${formatFinanzasAmount(summary.savingsGoalMin)}${met ? ' ✓ cumplido' : ` (te faltan ${formatFinanzasAmount(summary.savingsGoalMin - summary.savings)})`}
+      </div>
+    `;
+  } else {
+    savingsStatusWrap.innerHTML = `<div class="finanzas-savings-status-text">Este mes has ahorrado ${formatFinanzasAmount(summary.savings)}. Sin objetivo configurado todavía.</div>`;
+  }
+
+  const breakdownList = document.getElementById('finanzas-category-breakdown-list');
+  breakdownList.innerHTML = '';
+  if (summary.byCategory.length === 0 && summary.uncategorizedExpense === 0) {
+    breakdownList.innerHTML = '<p class="empty-hint">Sin gastos este mes todavia.</p>';
+  } else {
+    summary.byCategory.forEach((c) => {
+      const row = document.createElement('div');
+      row.className = 'finanzas-category-breakdown-row';
+      row.innerHTML = `
+        <span class="color-dot" style="background-color: ${c.categoryColor}"></span>
+        <span>${c.categoryIcon ? escapeHtml(c.categoryIcon) + ' ' : ''}${escapeHtml(c.categoryName)}</span>
+        <span class="finanzas-category-breakdown-row-amount">${formatFinanzasAmount(c.total)}</span>
+      `;
+      breakdownList.appendChild(row);
+    });
+    if (summary.uncategorizedExpense > 0) {
+      const row = document.createElement('div');
+      row.className = 'finanzas-category-breakdown-row';
+      row.innerHTML = `
+        <span class="color-dot" style="background-color: #999"></span>
+        <span>Sin categoría</span>
+        <span class="finanzas-category-breakdown-row-amount">${formatFinanzasAmount(summary.uncategorizedExpense)}</span>
+      `;
+      breakdownList.appendChild(row);
+    }
+  }
+}
+
+document.getElementById('btn-save-finanzas-budget').addEventListener('click', async () => {
+  const value = document.getElementById('finanzas-budget-input').value;
+  await api('/api/finanzas-settings', { method: 'PUT', body: JSON.stringify({ monthlyBudgetLimit: value || null }) });
+  renderFinanzasResumenTab();
+});
+
+document.getElementById('btn-save-finanzas-savings-goal').addEventListener('click', async () => {
+  const value = document.getElementById('finanzas-savings-goal-input').value;
+  const result = await api('/api/finanzas-settings', { method: 'PUT', body: JSON.stringify({ savingsGoalMin: value || null }) });
+  // renderFinanzasResumenTab() oculta este aviso al principio (para no
+  // dejar uno viejo en refrescos normales) -- por eso se rellena DESPUES
+  // de que termine, no antes.
+  await renderFinanzasResumenTab();
+  if (result.warning) {
+    const warningWrap = document.getElementById('finanzas-savings-warning');
+    warningWrap.textContent = result.warning;
+    warningWrap.classList.remove('hidden');
+  }
+});
+
+// -- Pestaña Movimientos: filtros + tabla de gastos/ingresos. --
+function finanzasAccountName(id) {
+  const a = finanzasAccounts.find((x) => x.id === Number(id));
+  return a ? `${a.icon ? a.icon + ' ' : ''}${a.name}` : '—';
+}
+function finanzasCategoryName(id) {
+  if (!id) return '—';
+  const c = finanzasCategories.find((x) => x.id === Number(id));
+  return c ? `${c.icon ? c.icon + ' ' : ''}${c.name}` : '—';
+}
+
+async function refreshFinanzasTransactionsTab() {
+  const params = new URLSearchParams();
+  if (finanzasFilters.accountId) params.set('accountId', finanzasFilters.accountId);
+  if (finanzasFilters.categoryId) params.set('categoryId', finanzasFilters.categoryId);
+  if (finanzasFilters.type) params.set('type', finanzasFilters.type);
+  if (finanzasFilters.from) params.set('from', finanzasFilters.from);
+  if (finanzasFilters.to) params.set('to', finanzasFilters.to);
+  const qs = params.toString();
+  const transactions = await api(`/api/finanzas-transactions${qs ? '?' + qs : ''}`);
+
+  const tbody = document.getElementById('finanzas-transactions-tbody');
+  tbody.innerHTML = '';
+  if (transactions.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-hint">Sin movimientos con estos filtros.</td></tr>';
+    return;
+  }
+  transactions.forEach((t) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${t.date}</td>
+      <td>${escapeHtml(finanzasAccountName(t.accountId))}</td>
+      <td>${t.type === 'expense' ? 'Gasto' : 'Ingreso'}</td>
+      <td>${escapeHtml(finanzasCategoryName(t.categoryId))}</td>
+      <td>${escapeHtml(t.description || '')}</td>
+      <td class="finanzas-amount-${t.type}">${t.type === 'expense' ? '-' : '+'}${formatFinanzasAmount(t.amount)}</td>
+      <td>${t.type === 'expense' ? (t.countsTowardBudget ? 'Sí' : 'No') : '—'}</td>
+      <td></td>
+    `;
+    const actionsTd = tr.lastElementChild;
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'secondary-btn';
+    editBtn.textContent = 'Editar';
+    editBtn.addEventListener('click', () => openFinanzasTransactionModal(t));
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'danger-btn';
+    deleteBtn.textContent = 'Eliminar';
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este movimiento?')) return;
+      await api(`/api/finanzas-transactions/${t.id}`, { method: 'DELETE' });
+      await refreshFinanzasTransactionsTab();
+      await refreshFinanzasAccountsAndCategories();
+      renderFinanzasResumenTab();
+    });
+    actionsTd.appendChild(editBtn);
+    actionsTd.appendChild(deleteBtn);
+    tbody.appendChild(tr);
+  });
+}
+
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function openFinanzasTransactionModal(t) {
+  document.getElementById('finanzas-transaction-modal-title').textContent = t ? 'Editar movimiento' : 'Nuevo movimiento';
+  document.getElementById('finanzas-transaction-id').value = t ? t.id : '';
+  document.getElementById('finanzas-transaction-type').value = t ? t.type : 'expense';
+  document.getElementById('finanzas-transaction-account').value = t ? t.accountId : (finanzasAccounts[0] ? finanzasAccounts[0].id : '');
+  document.getElementById('finanzas-transaction-category').value = t && t.categoryId ? t.categoryId : '';
+  document.getElementById('finanzas-transaction-amount').value = t ? t.amount : '';
+  document.getElementById('finanzas-transaction-date').value = t ? t.date : todayIsoDate();
+  document.getElementById('finanzas-transaction-description').value = t ? (t.description || '') : '';
+  document.getElementById('finanzas-transaction-counts').checked = t ? t.countsTowardBudget : true;
+  document.getElementById('finanzas-transaction-fixed').checked = t ? t.isFixed : false;
+  document.getElementById('finanzas-transaction-salary').checked = t ? t.isSalary : false;
+  refreshFinanzasTransactionTypeFields();
+  document.getElementById('finanzas-transaction-modal').classList.remove('hidden');
+}
+function closeFinanzasTransactionModal() {
+  document.getElementById('finanzas-transaction-modal').classList.add('hidden');
+}
+function refreshFinanzasTransactionTypeFields() {
+  const isExpense = document.getElementById('finanzas-transaction-type').value === 'expense';
+  document.getElementById('finanzas-transaction-category-label').classList.toggle('hidden', !isExpense);
+  document.getElementById('finanzas-transaction-counts-row').classList.toggle('hidden', !isExpense);
+  document.getElementById('finanzas-transaction-fixed-row').classList.toggle('hidden', !isExpense);
+  document.getElementById('finanzas-transaction-salary-row').classList.toggle('hidden', isExpense);
+}
+document.getElementById('finanzas-transaction-type').addEventListener('change', refreshFinanzasTransactionTypeFields);
+document.getElementById('btn-new-finanzas-transaction').addEventListener('click', () => openFinanzasTransactionModal(null));
+document.getElementById('btn-close-finanzas-transaction').addEventListener('click', closeFinanzasTransactionModal);
+
+document.getElementById('finanzas-transaction-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('finanzas-transaction-id').value;
+  const type = document.getElementById('finanzas-transaction-type').value;
+  const payload = {
+    accountId: Number(document.getElementById('finanzas-transaction-account').value),
+    type,
+    amount: document.getElementById('finanzas-transaction-amount').value,
+    date: document.getElementById('finanzas-transaction-date').value,
+    description: document.getElementById('finanzas-transaction-description').value || null,
+    categoryId: type === 'expense' && document.getElementById('finanzas-transaction-category').value
+      ? Number(document.getElementById('finanzas-transaction-category').value)
+      : null,
+    countsTowardBudget: type === 'expense' ? document.getElementById('finanzas-transaction-counts').checked : false,
+    isFixed: type === 'expense' ? document.getElementById('finanzas-transaction-fixed').checked : false,
+    isSalary: type === 'income' ? document.getElementById('finanzas-transaction-salary').checked : false,
+  };
+  if (id) {
+    await api(`/api/finanzas-transactions/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/finanzas-transactions', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeFinanzasTransactionModal();
+  await refreshFinanzasTransactionsTab();
+  await refreshFinanzasAccountsAndCategories();
+  renderFinanzasResumenTab();
+});
+
+['finanzas-filter-account', 'finanzas-filter-category', 'finanzas-filter-type', 'finanzas-filter-from', 'finanzas-filter-to'].forEach((id) => {
+  document.getElementById(id).addEventListener('change', () => {
+    finanzasFilters.accountId = document.getElementById('finanzas-filter-account').value;
+    finanzasFilters.categoryId = document.getElementById('finanzas-filter-category').value;
+    finanzasFilters.type = document.getElementById('finanzas-filter-type').value;
+    finanzasFilters.from = document.getElementById('finanzas-filter-from').value;
+    finanzasFilters.to = document.getElementById('finanzas-filter-to').value;
+    refreshFinanzasTransactionsTab();
+  });
+});
+document.getElementById('btn-clear-finanzas-filters').addEventListener('click', () => {
+  finanzasFilters.accountId = finanzasFilters.categoryId = finanzasFilters.type = finanzasFilters.from = finanzasFilters.to = '';
+  document.getElementById('finanzas-filter-account').value = '';
+  document.getElementById('finanzas-filter-category').value = '';
+  document.getElementById('finanzas-filter-type').value = '';
+  document.getElementById('finanzas-filter-from').value = '';
+  document.getElementById('finanzas-filter-to').value = '';
+  refreshFinanzasTransactionsTab();
+});
+
+// -- Pestaña Inversiones: tabla de compra/venta/dividendos + resumen por
+//    activo (ganancia/perdida REALIZADA, nunca valor de mercado). --
+async function refreshFinanzasInvestmentsTab() {
+  const investments = await api('/api/finanzas-investments');
+  const tbody = document.getElementById('finanzas-investments-tbody');
+  tbody.innerHTML = '';
+  if (investments.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-hint">Sin inversiones registradas todavia.</td></tr>';
+  } else {
+    const typeLabels = { buy: 'Compra', sell: 'Venta', dividend: 'Dividendo' };
+    investments.forEach((inv) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${inv.date}</td>
+        <td>${escapeHtml(finanzasAccountName(inv.accountId))}</td>
+        <td>${escapeHtml(inv.assetName)}</td>
+        <td>${typeLabels[inv.type]}</td>
+        <td>${inv.quantity ?? '—'}</td>
+        <td>${inv.pricePerUnit ? formatFinanzasAmount(inv.pricePerUnit) : '—'}</td>
+        <td>${formatFinanzasAmount(inv.amount)}</td>
+        <td></td>
+      `;
+      const actionsTd = tr.lastElementChild;
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'secondary-btn';
+      editBtn.textContent = 'Editar';
+      editBtn.addEventListener('click', () => openFinanzasInvestmentModal(inv));
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'danger-btn';
+      deleteBtn.textContent = 'Eliminar';
+      deleteBtn.addEventListener('click', async () => {
+        if (!confirm('¿Eliminar esta operación?')) return;
+        await api(`/api/finanzas-investments/${inv.id}`, { method: 'DELETE' });
+        await refreshFinanzasInvestmentsTab();
+        await refreshFinanzasAccountsAndCategories();
+        renderFinanzasResumenTab();
+      });
+      actionsTd.appendChild(editBtn);
+      actionsTd.appendChild(deleteBtn);
+      tbody.appendChild(tr);
+    });
+  }
+
+  const summary = await api('/api/finanzas-investments/summary/by-asset');
+  const summaryTbody = document.getElementById('finanzas-asset-summary-tbody');
+  summaryTbody.innerHTML = '';
+  if (summary.length === 0) {
+    summaryTbody.innerHTML = '<tr><td colspan="6" class="empty-hint">Sin datos todavia.</td></tr>';
+  } else {
+    summary.forEach((s) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${escapeHtml(s.assetName)}</td>
+        <td>${formatFinanzasAmount(s.totalBought)}</td>
+        <td>${formatFinanzasAmount(s.totalSold)}</td>
+        <td>${formatFinanzasAmount(s.totalDividends)}</td>
+        <td>${s.quantityRemaining}</td>
+        <td class="${s.realizedGain >= 0 ? 'finanzas-amount-income' : 'finanzas-amount-expense'}">${formatFinanzasAmount(s.realizedGain)}</td>
+      `;
+      summaryTbody.appendChild(tr);
+    });
+  }
+}
+
+function refreshFinanzasInvestmentTypeFields() {
+  const type = document.getElementById('finanzas-investment-type').value;
+  const isDividend = type === 'dividend';
+  document.getElementById('finanzas-investment-qty-price-row').classList.toggle('hidden', isDividend);
+  document.getElementById('finanzas-investment-amount-label').classList.toggle('hidden', !isDividend);
+  document.getElementById('finanzas-investment-quantity').required = !isDividend;
+  document.getElementById('finanzas-investment-price').required = !isDividend;
+  document.getElementById('finanzas-investment-amount').required = isDividend;
+}
+document.getElementById('finanzas-investment-type').addEventListener('change', refreshFinanzasInvestmentTypeFields);
+
+function openFinanzasInvestmentModal(inv) {
+  document.getElementById('finanzas-investment-modal-title').textContent = inv ? 'Editar operación' : 'Nueva inversión';
+  document.getElementById('finanzas-investment-id').value = inv ? inv.id : '';
+  document.getElementById('finanzas-investment-account').value = inv ? inv.accountId : (finanzasAccounts[0] ? finanzasAccounts[0].id : '');
+  document.getElementById('finanzas-investment-asset').value = inv ? inv.assetName : '';
+  document.getElementById('finanzas-investment-type').value = inv ? inv.type : 'buy';
+  document.getElementById('finanzas-investment-quantity').value = inv && inv.quantity !== null ? inv.quantity : '';
+  document.getElementById('finanzas-investment-price').value = inv && inv.pricePerUnit !== null ? inv.pricePerUnit : '';
+  document.getElementById('finanzas-investment-amount').value = inv && inv.type === 'dividend' ? inv.amount : '';
+  document.getElementById('finanzas-investment-date').value = inv ? inv.date : todayIsoDate();
+  document.getElementById('finanzas-investment-notes').value = inv ? (inv.notes || '') : '';
+  refreshFinanzasInvestmentTypeFields();
+  document.getElementById('finanzas-investment-modal').classList.remove('hidden');
+}
+function closeFinanzasInvestmentModal() {
+  document.getElementById('finanzas-investment-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-finanzas-investment').addEventListener('click', () => openFinanzasInvestmentModal(null));
+document.getElementById('btn-close-finanzas-investment').addEventListener('click', closeFinanzasInvestmentModal);
+
+document.getElementById('finanzas-investment-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('finanzas-investment-id').value;
+  const type = document.getElementById('finanzas-investment-type').value;
+  const payload = {
+    accountId: Number(document.getElementById('finanzas-investment-account').value),
+    assetName: document.getElementById('finanzas-investment-asset').value,
+    type,
+    date: document.getElementById('finanzas-investment-date').value,
+    notes: document.getElementById('finanzas-investment-notes').value || null,
+  };
+  if (type === 'dividend') {
+    payload.amount = document.getElementById('finanzas-investment-amount').value;
+    payload.quantity = null;
+    payload.pricePerUnit = null;
+  } else {
+    payload.quantity = document.getElementById('finanzas-investment-quantity').value;
+    payload.pricePerUnit = document.getElementById('finanzas-investment-price').value;
+  }
+  if (id) {
+    await api(`/api/finanzas-investments/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/finanzas-investments', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeFinanzasInvestmentModal();
+  await refreshFinanzasInvestmentsTab();
+  await refreshFinanzasAccountsAndCategories();
+  renderFinanzasResumenTab();
+});
+
+// -- Pestañas + apertura/cierre de toda la vista --
+function switchFinanzasTab(tabName) {
+  document.querySelectorAll('.finanzas-tab-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.finanzasTab === tabName);
+  });
+  document.querySelectorAll('.finanzas-tab-panel').forEach((panel) => {
+    panel.classList.toggle('hidden', panel.dataset.finanzasPanel !== tabName);
+  });
+}
+document.querySelectorAll('.finanzas-tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => switchFinanzasTab(btn.dataset.finanzasTab));
+});
+
+async function openFinanzasView() {
+  setupFinanzasIconColorFields();
+  closeExtensionsView();
+  document.getElementById('finanzas-view').classList.remove('hidden');
+  switchFinanzasTab('resumen');
+  await refreshFinanzasAccountsAndCategories();
+  await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasInvestmentsTab()]);
+}
+function closeFinanzasView() {
+  document.getElementById('finanzas-view').classList.add('hidden');
+  document.getElementById('extensions-view').classList.remove('hidden');
+}
+document.getElementById('btn-open-finanzas').addEventListener('click', openFinanzasView);
+document.getElementById('btn-close-finanzas').addEventListener('click', closeFinanzasView);
 
 // Mientras una columna cambia de ancho (expandir o volver a las 3), el
 // contenido de dentro se oculta (ver .is-animating en styles.css) para

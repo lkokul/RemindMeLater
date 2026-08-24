@@ -20,6 +20,11 @@ const { startSyncLogCleanup } = syncRouter;
 const gymExercisesRouter = require('./routes/gymExercises');
 const gymRoutinesRouter = require('./routes/gymRoutines');
 const gymSessionsRouter = require('./routes/gymSessions');
+const finanzasAccountsRouter = require('./routes/finanzasAccounts');
+const finanzasCategoriesRouter = require('./routes/finanzasCategories');
+const finanzasTransactionsRouter = require('./routes/finanzasTransactions');
+const finanzasInvestmentsRouter = require('./routes/finanzasInvestments');
+const finanzasSettingsRouter = require('./routes/finanzasSettings');
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startMdns } = require('./mdns');
@@ -62,6 +67,13 @@ app.use('/api/sync', requireDeviceOrTrusted, syncRouter);
 app.use('/api/gym-exercises', requireDeviceOrTrusted, gymExercisesRouter);
 app.use('/api/gym-routines', requireDeviceOrTrusted, gymRoutinesRouter);
 app.use('/api/gym-sessions', requireDeviceOrTrusted, gymSessionsRouter);
+// Extension "Finanzas" (ver #extensions-view en index.html): gastos,
+// ingresos e inversiones (solo registro manual, sin API de cotizaciones).
+app.use('/api/finanzas-accounts', requireDeviceOrTrusted, finanzasAccountsRouter);
+app.use('/api/finanzas-categories', requireDeviceOrTrusted, finanzasCategoriesRouter);
+app.use('/api/finanzas-transactions', requireDeviceOrTrusted, finanzasTransactionsRouter);
+app.use('/api/finanzas-investments', requireDeviceOrTrusted, finanzasInvestmentsRouter);
+app.use('/api/finanzas-settings', requireDeviceOrTrusted, finanzasSettingsRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);
