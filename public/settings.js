@@ -844,29 +844,35 @@ function setColorModePreference(mode) {
   else renderThemeLibrary();
 }
 
-// Atajo en la topbar para alternar claro/oscuro sin entrar en
-// Configuracion (ademas de la forma "oficial" en Configuracion > Estilo).
-// Solo tiene sentido si el tema activo lleva variante emparejada — si no,
-// no hay a que alternar y el boton se esconde.
+// Atajo para alternar claro/oscuro sin pasar por "Sistema" (ademas de la
+// forma "oficial" en Configuracion > Estilo). Solo tiene sentido si el
+// tema activo lleva variante emparejada — si no, no hay a que alternar y
+// el boton se esconde. Hay 2 copias del mismo boton (ver
+// .quick-color-mode-btn): una en la topbar de escritorio
+// (#btn-quick-color-mode) y otra dentro de Configuracion > Estilo
+// (#settings-quick-color-mode, para movil, que ya no tiene topbar) --
+// ambas se refrescan y comportan igual.
 function refreshQuickColorModeButton() {
-  const btn = document.getElementById('btn-quick-color-mode');
-  if (!btn) return;
+  const buttons = document.querySelectorAll('.quick-color-mode-btn');
+  if (!buttons.length) return;
   const activeTheme = themeLibrary.find((t) => t.id === Number(localStorage.getItem('activeThemeId')));
-  if (!activeTheme || !activeTheme.inverseColors) {
-    btn.classList.add('hidden');
-    return;
-  }
-  btn.classList.remove('hidden');
-  const resolvedIsLight = isLightColors(resolveThemeVariant(activeTheme));
-  btn.textContent = resolvedIsLight ? '☀' : '☾';
-  btn.title = `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}`;
+  const hasInverse = !!(activeTheme && activeTheme.inverseColors);
+  const resolvedIsLight = hasInverse && isLightColors(resolveThemeVariant(activeTheme));
+  buttons.forEach((btn) => {
+    btn.classList.toggle('hidden', !hasInverse);
+    if (!hasInverse) return;
+    btn.textContent = resolvedIsLight ? '☀' : '☾';
+    btn.title = `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}`;
+  });
 }
 
-document.getElementById('btn-quick-color-mode').addEventListener('click', () => {
-  const activeTheme = themeLibrary.find((t) => t.id === Number(localStorage.getItem('activeThemeId')));
-  if (!activeTheme || !activeTheme.inverseColors) return;
-  const resolvedIsLight = isLightColors(resolveThemeVariant(activeTheme));
-  setColorModePreference(resolvedIsLight ? 'dark' : 'light');
+document.querySelectorAll('.quick-color-mode-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const activeTheme = themeLibrary.find((t) => t.id === Number(localStorage.getItem('activeThemeId')));
+    if (!activeTheme || !activeTheme.inverseColors) return;
+    const resolvedIsLight = isLightColors(resolveThemeVariant(activeTheme));
+    setColorModePreference(resolvedIsLight ? 'dark' : 'light');
+  });
 });
 
 function refreshColorModeOptions() {
@@ -1853,6 +1859,12 @@ function refreshShortcutsTab() {
 // ---------------------------------------------------------------------
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+
+  const mobileFabMenu = document.getElementById('mobile-fab-menu');
+  if (mobileFabMenu && !mobileFabMenu.classList.contains('hidden')) {
+    toggleMobileFabMenu(false);
+    return;
+  }
 
   const openPopover = document.querySelector('.color-popover:not(.hidden), .icon-popover:not(.hidden), .select-popover:not(.hidden), .date-popover:not(.hidden)');
   if (openPopover) {

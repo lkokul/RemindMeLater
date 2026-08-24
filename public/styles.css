@@ -558,11 +558,21 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    hacer scroll con el dedo). En escritorio, el media query de abajo la
    fija al alto de la ventana para que calendario + recordatorios quepan
    a la vez sin que la pagina entera tenga que hacer scroll. */
-.app { display: flex; flex-direction: column; }
+.app {
+  display: flex;
+  flex-direction: column;
+  /* Sitio para que el contenido no quede tapado por .mobile-nav (fija
+     abajo del todo) -- se quita en escritorio, que no lleva esa barra. */
+  padding-bottom: calc(4.4rem + env(safe-area-inset-bottom, 0px));
+}
 
 /* --- Topbar --- */
+/* En movil no se ve (ver .mobile-nav/.mobile-fab-wrap mas abajo, que
+   ocupan su sitio): la barra de navegacion de abajo + el boton flotante
+   de crear sustituyen a todos estos botones. Vuelve en el media query de
+   escritorio de mas abajo. */
 .topbar {
-  display: flex;
+  display: none;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
@@ -579,6 +589,85 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 /* Solo icono no se entendia bien -- lleva texto al lado, como un
    secondary-btn normal pero con el icono de los 3 rectangulos delante. */
 .my-space-topbar-btn { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+/* ---------------------------------------------------------------------
+   Navegacion movil: sustituye a la topbar de escritorio (titulo +
+   botones de crear/Mi espacio/Extensiones/sync/Configuracion) por una
+   barra fija abajo con las 4 secciones, mas un boton flotante "+" para
+   crear evento/tarea/nota. El punto de sync y el atajo claro/oscuro se
+   quitan de la vista principal en movil -- se quedan solo dentro de
+   Configuracion (ver refreshMobileTab en settings.js). Oculta en
+   escritorio (ver el media query de abajo). Ver goToMobileSection() y
+   el manejador de #btn-mobile-fab en app.js.
+   --------------------------------------------------------------------- */
+.mobile-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 70;
+  display: flex;
+  background: var(--surface);
+  color: var(--surface-text);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.mobile-nav-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.5rem 0.2rem calc(0.4rem);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
+  font-size: 0.68rem;
+}
+.mobile-nav-btn svg { width: 20px; height: 20px; }
+.mobile-nav-btn.active { color: var(--accent); }
+
+.mobile-fab-wrap {
+  position: fixed;
+  right: 1rem;
+  /* Encima de la barra de navegacion: su alto (le sobra sitio con
+     4.4rem) mas el hueco seguro del movil. */
+  bottom: calc(4.4rem + env(safe-area-inset-bottom, 0px));
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+.mobile-fab {
+  width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.mobile-fab svg { width: 22px; height: 22px; }
+.mobile-fab-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+.mobile-fab-menu-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--surface-text);
+  white-space: nowrap;
+  text-align: right;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
 
 /* Barra del mes: su propia fila centrada, encima del calendario (no en
    el header, que se queda solo con el titulo y los botones). */
@@ -1411,7 +1500,8 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 }
 
 /* --- Modo de color (Sistema / Claro / Oscuro) y variante inversa de un tema --- */
-.color-mode-options { display: flex; gap: 0.4rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
+.color-mode-options { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.color-mode-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
 .color-mode-btn { font-size: 0.85rem; padding: 0.4rem 0.7rem; }
 .color-mode-btn.active {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
@@ -1974,8 +2064,9 @@ label input, label textarea, label select { margin-top: 0.3rem; }
      cada uno en su hueco. Asi calendario y recordatorios se ven a la vez
      sin desplazarte, aprovechando toda la ventana. */
   html, body { height: 100%; }
-  #app.app { height: 100vh; }
-  .topbar { flex-shrink: 0; }
+  #app.app { height: 100vh; padding-bottom: 0; }
+  .topbar { display: flex; flex-shrink: 0; }
+  .mobile-nav, .mobile-fab-wrap { display: none; }
   .month-nav-bar { flex-shrink: 0; }
 
   .layout {

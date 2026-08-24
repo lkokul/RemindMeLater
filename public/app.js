@@ -4276,6 +4276,75 @@ document.getElementById('btn-my-space').addEventListener('click', openMySpaceVie
 document.getElementById('btn-close-my-space').addEventListener('click', closeMySpaceView);
 
 // ---------------------------------------------------------------------
+// Navegacion movil (.mobile-nav + boton flotante "+", ver styles.css):
+// sustituye a la topbar en pantallas estrechas. No duplica logica de
+// abrir/cerrar -- cada seccion dispara el CLICK del boton real que ya
+// existia (btn-my-space/btn-extensions/btn-settings), y antes de eso
+// cierra todo lo que estuviera abierto reutilizando la misma cascada de
+// Esc capa a capa de settings.js (dispararla varias veces seguidas la
+// deja en el fondo del todo, sea cual sea la profundidad en la que
+// estuvieras -- Esc ya sabe deshacer una capa por pulsacion).
+// ---------------------------------------------------------------------
+function closeAllMobileOverlays() {
+  for (let i = 0; i < 6; i++) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  }
+}
+
+function refreshMobileNavActive(section) {
+  document.querySelectorAll('.mobile-nav-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mobileNav === section);
+  });
+}
+
+function goToMobileSection(section) {
+  closeAllMobileOverlays();
+  if (section === 'my-space') document.getElementById('btn-my-space').click();
+  else if (section === 'extensions') document.getElementById('btn-extensions').click();
+  else if (section === 'settings') document.getElementById('btn-settings').click();
+  refreshMobileNavActive(section);
+}
+
+document.querySelectorAll('.mobile-nav-btn').forEach((btn) => {
+  btn.addEventListener('click', () => goToMobileSection(btn.dataset.mobileNav));
+});
+
+// Boton flotante de crear: un solo boton que despliega los 3 accesos
+// directos de siempre (+ Nuevo evento/+ Nueva tarea/+ Nota), en vez de
+// tener los 3 sueltos ocupando sitio permanentemente como en escritorio.
+function toggleMobileFabMenu(forceOpen) {
+  const menu = document.getElementById('mobile-fab-menu');
+  const fab = document.getElementById('btn-mobile-fab');
+  const willBeOpen = forceOpen !== undefined ? forceOpen : menu.classList.contains('hidden');
+  menu.classList.toggle('hidden', !willBeOpen);
+  fab.setAttribute('aria-expanded', willBeOpen ? 'true' : 'false');
+}
+
+document.getElementById('btn-mobile-fab').addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleMobileFabMenu();
+});
+document.getElementById('btn-new-event-mobile').addEventListener('click', () => {
+  toggleMobileFabMenu(false);
+  openEventModal(null);
+});
+document.getElementById('btn-new-task-mobile').addEventListener('click', () => {
+  toggleMobileFabMenu(false);
+  openTaskModal(null);
+});
+document.getElementById('btn-new-note-mobile').addEventListener('click', () => {
+  toggleMobileFabMenu(false);
+  openNoteInEditor(null);
+});
+// Tocar fuera del boton/menu tambien lo cierra -- patron normal de menu
+// flotante (ver closeAllPopovers en settings.js para el mismo patron con
+// los popovers de color/icono/fecha).
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('mobile-fab-wrap');
+  if (wrap && !wrap.contains(e.target)) toggleMobileFabMenu(false);
+});
+
+// ---------------------------------------------------------------------
 // Extensiones (placeholder): mismo patron de pantalla completa que "Mi
 // espacio" (.my-space-view), pero sin modo panel/boton -- este boton no
 // se oculta nunca. Sin logica real todavia, solo abre/cierra la pantalla

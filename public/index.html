@@ -147,7 +147,7 @@
              emparejada (si no, no hay a que alternar). Ver
              refreshQuickColorModeButton() en settings.js; la forma
              "oficial" de cambiarlo sigue estando en Configuracion > Estilo. -->
-        <button id="btn-quick-color-mode" class="icon-btn hidden" aria-label="Cambiar entre claro y oscuro"></button>
+        <button id="btn-quick-color-mode" class="icon-btn quick-color-mode-btn hidden" aria-label="Cambiar entre claro y oscuro"></button>
         <!-- Solo se ve si Configuracion > Vista > Mi espacio esta en modo
              "boton" (ver applyMiEspacioMode en app.js) — en modo "panel" no
              hace falta, Mi espacio ya esta siempre visible al lado del
@@ -177,6 +177,47 @@
         <button id="btn-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </nav>
     </header>
+
+    <!-- Navegacion movil: sustituye a la topbar en pantallas estrechas
+         (ver .topbar/.mobile-nav en styles.css). Cada boton primero
+         cierra cualquier vista/modal abierto (closeAllMobileOverlays en
+         app.js, reutilizando la misma cascada de Esc capa a capa) y
+         luego abre su seccion clicando el boton real correspondiente
+         -- asi toda la logica de abrir/cerrar sigue viviendo en un solo
+         sitio, esto solo la dispara desde otro botón. -->
+    <nav class="mobile-nav" aria-label="Navegación principal">
+      <button type="button" class="mobile-nav-btn active" data-mobile-nav="calendar" aria-label="Calendario">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+        <span>Calendario</span>
+      </button>
+      <button type="button" class="mobile-nav-btn" data-mobile-nav="my-space" aria-label="Mi espacio">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4.5" height="16" rx="1"></rect><rect x="9.75" y="4" width="4.5" height="16" rx="1"></rect><rect x="16.5" y="4" width="4.5" height="16" rx="1"></rect></svg>
+        <span>Mi espacio</span>
+      </button>
+      <button type="button" class="mobile-nav-btn" data-mobile-nav="extensions" aria-label="Extensiones">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+        <span>Extensiones</span>
+      </button>
+      <button type="button" class="mobile-nav-btn" data-mobile-nav="settings" aria-label="Configuración">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
+        <span>Configuración</span>
+      </button>
+    </nav>
+
+    <!-- Boton flotante de crear (solo movil): sustituye a los 3 botones
+         "+ Nuevo evento/+ Nueva tarea/+ Nota" de la topbar de escritorio.
+         Los 3 items de abajo disparan las MISMAS funciones que esos
+         botones (ver app.js), no duplican logica, solo el disparador. -->
+    <div class="mobile-fab-wrap" id="mobile-fab-wrap">
+      <div id="mobile-fab-menu" class="mobile-fab-menu hidden">
+        <button type="button" id="btn-new-note-mobile" class="mobile-fab-menu-item">Nota</button>
+        <button type="button" id="btn-new-task-mobile" class="mobile-fab-menu-item">Nueva tarea</button>
+        <button type="button" id="btn-new-event-mobile" class="mobile-fab-menu-item">Nuevo evento</button>
+      </div>
+      <button type="button" id="btn-mobile-fab" class="mobile-fab" aria-label="Crear" aria-expanded="false" aria-haspopup="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+      </button>
+    </div>
 
     <main class="layout">
       <!-- Columna del calendario: el mes con flechas va centrado AQUI
@@ -1310,8 +1351,11 @@
         <h4>Colores</h4>
         <p class="hint">Clica una tarjeta para usar ese tema en este dispositivo. Cada dispositivo puede llevar un tema distinto.</p>
 
-        <p class="hint">Si un tema tiene variante clara/oscura emparejada (◐), esto hace que siga el modo de tu ordenador automáticamente. Para cambiarlo a mano, usa el icono ☀/☾ de la barra superior.</p>
-        <div id="color-mode-options" class="color-mode-options"></div>
+        <p class="hint">Si un tema tiene variante clara/oscura emparejada (◐), esto hace que siga el modo de tu ordenador automáticamente. Para cambiarlo a mano, usa el botón de al lado (en escritorio hay además un atajo igual en la barra superior).</p>
+        <div class="color-mode-row">
+          <div id="color-mode-options" class="color-mode-options"></div>
+          <button type="button" id="settings-quick-color-mode" class="icon-btn quick-color-mode-btn hidden" aria-label="Cambiar entre claro y oscuro"></button>
+        </div>
 
         <!-- Solo visible mientras se edita un tema y hay cambios sin
              guardar: al editar, los colores se aplican en vivo a toda la
