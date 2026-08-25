@@ -132,6 +132,20 @@
     </div>
   </div>
 
+  <!-- "Escanear ordenador": lee con la camara el QR de Configuración →
+       Dispositivos (en el ordenador) para saber a que IP mandar los datos
+       en la wifi de ahora, sin volver a vincular el dispositivo. Ver
+       openScanServerModal() en settings.js. -->
+  <div id="scan-server-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-scan-server" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Escanear ordenador</h2>
+      <p class="hint">Apunta la cámara al QR que aparece en el ordenador (Configuración → Dispositivos).</p>
+      <video id="scan-server-video" class="scan-server-video" autoplay playsinline muted></video>
+      <p id="scan-server-modal-status" class="hint"></p>
+    </div>
+  </div>
+
   <!-- App principal -->
   <div id="app" class="app hidden">
     <header class="topbar">
@@ -1441,6 +1455,14 @@
           </div>
           <h4>Vinculados</h4>
           <div id="devices-list" class="devices-list"></div>
+
+          <!-- Fase "multi-red": un movil ya vinculado no necesita volver a
+               emparejarse al cambiar de wifi, solo saber la IP nueva de
+               este ordenador -- ver getServerBaseUrl() en app.js. -->
+          <h4>Este ordenador en esta red</h4>
+          <p class="hint">Desde un movil ya vinculado, entra en Configuración → Este dispositivo → "Escanear ordenador" y apunta a este código para que sepa a qué dirección mandar los datos en la wifi de ahora.</p>
+          <img id="network-qr-image" class="network-qr-image hidden" alt="Código QR con la dirección de este ordenador en la red actual" />
+          <p id="network-qr-url" class="hint"></p>
         </div>
       </div>
 
@@ -1474,6 +1496,15 @@
         <p id="sync-status" class="hint"></p>
         <button type="button" id="btn-sync-now" class="secondary-btn">Sincronizar ahora</button>
 
+        <!-- Fase "multi-red": si cambias de wifi (o de ordenador), la IP de
+             antes deja de servir -- escanear el QR nuevo actualiza a dónde
+             se manda la sincronización sin perder lo ya guardado aquí ni
+             tener que volver a vincular este dispositivo. -->
+        <h4>Conectar con el ordenador en esta red</h4>
+        <p class="hint">Si cambias de wifi (o de ordenador), escanea el QR que aparece en el ordenador en Configuración → Dispositivos.</p>
+        <button type="button" id="btn-scan-server" class="secondary-btn">Escanear ordenador</button>
+        <p id="scan-server-status" class="hint"></p>
+
         <h4>Gimnasio: unidad de peso</h4>
         <p class="hint">Solo cambia como se escriben/leen los pesos en este dispositivo -- por dentro siempre se guardan en kilogramos.</p>
         <div id="gym-weight-unit-options" class="view-mode-options"></div>
@@ -1492,6 +1523,7 @@
   </div>
 
   <script src="db-local.js"></script>
+  <script src="vendor/jsQR.js"></script>
   <script src="app.js"></script>
   <script src="settings.js"></script>
 </body>

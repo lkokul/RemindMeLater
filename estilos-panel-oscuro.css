@@ -1,0 +1,227 @@
+/* ============================================================
+   HOJA DE ESTILOS — panel oscuro / técnico
+   Extraída de "seguimiento_puertas.html"
+   Cópiala y enlázala en cualquier proyecto nuevo:
+   <link rel="stylesheet" href="estilos-panel-oscuro.css">
+   ============================================================ */
+
+/* ---------- 1. VARIABLES (colores, fuentes) ---------- */
+:root{
+  --bg:#12181f;            /* fondo general de la página */
+  --panel:#1a222b;         /* fondo de tarjetas/paneles */
+  --panel-2:#20303a;       /* fondo de inputs y elementos "hundidos" */
+  --line:#2c3947;          /* bordes por defecto */
+  --grid:#233240;          /* líneas de la cuadrícula de fondo */
+
+  --accent:#ff8a3d;        /* color principal de acción (naranja) */
+  --accent-dim:#7a4623;    /* versión atenuada del acento, para hovers suaves */
+
+  --ok:#4fd1a5;            /* verde de éxito/confirmación */
+  --warn:#f2c14e;          /* amarillo de aviso */
+  --danger:#e24b4a;        /* rojo de error/eliminar */
+  --info:#7fb2ff;          /* azul informativo */
+
+  --text:#e7edf2;          /* texto principal */
+  --text-mute:#8fa1ac;     /* texto secundario / etiquetas */
+
+  --mono: 'Roboto Mono','Courier New',monospace;   /* datos, IDs, tablas */
+  --sans: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; /* texto general */
+}
+
+/* ---------- 2. BASE ---------- */
+*{ box-sizing:border-box; }
+
+body{
+  margin:0;
+  padding:24px;
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  /* cuadrícula de fondo tipo "plano técnico" — quita este bloque si no la quieres */
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size:24px 24px;
+}
+
+h1{ font-size:19px; font-weight:600; margin:0 0 2px; }
+h2{ font-size:15px; font-weight:600; margin:0 0 8px; }
+
+.sub{
+  color:var(--text-mute);
+  font-size:13px;
+  margin:0 0 20px;
+  font-family:var(--mono);
+}
+
+.label{
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--text-mute);
+  margin:0 0 6px;
+  font-family:var(--mono);
+}
+
+.hint{
+  font-size:11px;
+  color:var(--text-mute);
+  margin-top:-6px;
+  margin-bottom:12px;
+}
+
+/* ---------- 3. TARJETAS / PANELES ---------- */
+.card{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:16px;
+}
+
+/* ---------- 4. CAMPOS DE FORMULARIO ---------- */
+input, textarea, select{
+  width:100%;
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:4px;
+  padding:8px 10px;
+  font-family:var(--mono);
+  font-size:13px;
+  margin-bottom:12px;
+}
+
+textarea{ resize:vertical; min-height:56px; }
+
+input:focus, textarea:focus, select:focus{
+  outline:none;
+  border-color:var(--accent);
+}
+
+input::placeholder, textarea::placeholder{ color:var(--text-mute); }
+
+/* ---------- 5. BOTONES (con retroalimentación) ---------- */
+button{
+  font-family:var(--sans);
+  font-size:13px;
+  font-weight:600;
+  cursor:pointer;
+  border-radius:4px;
+  border:1px solid var(--line);
+  padding:9px 14px;
+  color:var(--text);
+  background:var(--panel-2);
+  transition: background .12s, border-color .12s, transform .05s;
+}
+button:hover{ border-color:var(--accent); }
+button:active{ transform:scale(0.97); }
+button:disabled{ opacity:.45; cursor:not-allowed; }
+
+/* botón principal / de acción destacada */
+.btn-primary{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#1a0f05;
+  width:100%;
+  padding:10px;
+}
+.btn-primary:hover{ background:#ff9a56; }
+
+/* botón de peligro (eliminar, descartar) */
+.btn-danger{
+  background:var(--panel-2);
+  border-color:var(--danger);
+  color:var(--danger);
+}
+.btn-danger:hover{ background:var(--danger); color:#fff; }
+
+/* botón "fantasma" solo icono/texto, sin fondo */
+.btn-ghost{
+  background:none;
+  border:none;
+  color:var(--text-mute);
+}
+.btn-ghost:hover{ color:var(--danger); }
+
+/* ---------- 6. ETIQUETAS / TAGS (categorías con color) ---------- */
+.tag{
+  display:inline-block;
+  padding:2px 7px;
+  border-radius:3px;
+  font-size:10.5px;
+  font-family:var(--mono);
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  white-space:nowrap;
+}
+.tag-accent{ color:var(--accent);  border-color:var(--accent-dim); }
+.tag-ok    { color:var(--ok);      border-color:#1e5c48; }
+.tag-info  { color:var(--info);    border-color:#294a73; }
+.tag-warn  { color:var(--warn);    border-color:#7a5f16; }
+.tag-danger{ color:var(--danger);  border-color:#7a2323; }
+
+/* ---------- 7. CHIPS / FILTROS SELECCIONABLES ---------- */
+.chip{
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  border-radius:20px;
+  padding:5px 12px;
+  font-size:12px;
+  cursor:pointer;
+  color:var(--text-mute);
+  transition: background .12s, color .12s;
+}
+.chip:hover{ border-color:var(--accent); }
+.chip.active{
+  background:var(--accent);
+  color:#1a0f05;
+  border-color:var(--accent);
+  font-weight:600;
+}
+
+/* ---------- 8. TABLAS ---------- */
+table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+
+th{
+  text-align:left;
+  font-family:var(--mono);
+  font-weight:600;
+  color:var(--text-mute);
+  text-transform:uppercase;
+  font-size:10.5px;
+  letter-spacing:.04em;
+  border-bottom:1px solid var(--line);
+  padding:6px 8px;
+}
+
+td{
+  border-bottom:1px solid var(--grid);
+  padding:7px 8px;
+  vertical-align:top;
+  font-family:var(--mono);
+}
+
+td.text{ font-family:var(--sans); color:var(--text-mute); } /* celdas de texto libre */
+
+tr:hover td{ background:var(--panel-2); }
+
+/* ---------- 9. UTILIDADES DE LAYOUT ---------- */
+.toolbar{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-bottom:12px;
+  flex-wrap:wrap;
+}
+.spacer{ flex:1; }
+.count{ font-family:var(--mono); font-size:12px; color:var(--text-mute); }
+
+.empty{
+  color:var(--text-mute);
+  font-size:13px;
+  padding:20px 0;
+  text-align:center;
+}
+
+.grid-2{ display:grid; grid-template-columns: 300px 1fr; gap:20px; }
+@media (max-width:760px){ .grid-2{ grid-template-columns:1fr; } }

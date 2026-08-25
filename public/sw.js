@@ -5,7 +5,7 @@
 // vivo al servidor, nunca servidos desde cache, o veriamos eventos
 // desactualizados.
 const CACHE_NAME = 'remindmelater-shell-v1';
-const SHELL_FILES = ['/', '/styles.css', '/app.js', '/settings.js'];
+const SHELL_FILES = ['/', '/styles.css', '/app.js', '/settings.js', '/vendor/jsQR.js'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

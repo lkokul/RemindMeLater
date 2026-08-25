@@ -1,12 +1,36 @@
 // routes/devices.js — emparejar moviles y gestionarlos desde el ordenador.
 const express = require('express');
 const crypto = require('crypto');
+const os = require('os');
+const QRCode = require('qrcode');
 const db = require('../db');
 const { requireTrusted, requireDeviceOrTrusted } = require('../auth');
 const { generateCode, consumeCode } = require('../pairing');
 const { getVapidPublicKey } = require('../push');
+const { useRealNetworkInterfacesOnly } = require('../mdns');
 
 const router = express.Router();
+
+// IP LAN "de verdad" de este ordenador ahora mismo, para el QR de "conectar
+// en esta red" (ver /network-info y /network-qr.svg mas abajo). Reutiliza
+// el mismo filtro de adaptadores virtuales/VPN que ya usa el mDNS (ver
+// mdns.js) para no ofrecer una IP de VMware/WSL/etc que el movil no podria
+// alcanzar nunca. Se llama a useRealNetworkInterfacesOnly() aqui tambien
+// (aunque startMdns() ya lo hace al arrancar) porque es idempotente y asi
+// esta ruta no depende de que el mDNS haya arrancado bien.
+function getLanUrl() {
+  useRealNetworkInterfacesOnly();
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        const port = process.env.PORT || 3000;
+        return `http://${net.address}:${port}`;
+      }
+    }
+  }
+  return null;
+}
 
 // Solo el ordenador puede pedir un codigo nuevo (evita que un desconocido
 // en tu wifi genere codigos para si mismo).
@@ -33,6 +57,28 @@ router.post('/pair', (req, res) => {
     .run(name.trim(), token);
 
   res.status(201).json({ deviceId: info.lastInsertRowid, token, name: name.trim() });
+});
+
+// Direccion de este ordenador en la red actual, en texto -- para mostrarla
+// debajo del QR (por si alguien prefiere teclearla a mano) y para que el
+// navegador sepa si hay alguna red activa antes de intentar pintar el QR.
+router.get('/network-info', requireTrusted, (req, res) => {
+  const url = getLanUrl();
+  if (!url) {
+    return res.status(404).json({ error: 'no_network', message: 'No se ha detectado ninguna red activa.' });
+  }
+  res.json({ url });
+});
+
+// Lo mismo, pero como imagen QR (SVG) lista para meter en un <img src="...">
+// -- el movil ya emparejado la escanea desde "Este dispositivo" > "Conectar
+// en esta red" para saber a que IP mandar los datos en la wifi de ahora,
+// sin tener que volver a vincularse (ver getServerBaseUrl() en app.js).
+router.get('/network-qr.svg', requireTrusted, async (req, res) => {
+  const url = getLanUrl();
+  if (!url) return res.status(404).send('');
+  const svg = await QRCode.toString(url, { type: 'svg', margin: 1 });
+  res.type('image/svg+xml').send(svg);
 });
 
 // Ver y revocar dispositivos: solo desde el ordenador.

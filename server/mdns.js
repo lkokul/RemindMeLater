@@ -76,4 +76,4 @@ function startMdns(port) {
   }
 }
 
-module.exports = { startMdns, HOSTNAME };
+module.exports = { startMdns, HOSTNAME, useRealNetworkInterfacesOnly };

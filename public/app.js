@@ -410,6 +410,21 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
 }
 
 // ---------------------------------------------------------------------
+// Fase "multi-red": el ORIGEN de la app (de donde salen localStorage e
+// IndexedDB) queda fijo desde la primera vez que se instala/abre en cada
+// dispositivo -- no se puede ni se debe cambiar, o se "pierden" los datos
+// guardados (son de otro origen para el navegador). Pero el ORDENADOR al
+// que hay que mandar las peticiones sí puede cambiar (otra wifi, otro
+// ordenador) -- eso se guarda aparte, en 'serverBaseUrl', y se actualiza
+// escaneando el QR de Configuración → Dispositivos (ver
+// openScanServerModal() en settings.js). Sin ese ajuste, se usa el propio
+// origen de la pagina, que es lo que pasaba siempre antes de esto.
+// ---------------------------------------------------------------------
+function getServerBaseUrl() {
+  return localStorage.getItem('serverBaseUrl') || window.location.origin;
+}
+
+// ---------------------------------------------------------------------
 // Capa de red: envuelve fetch para añadir el token del dispositivo (si
 // existe) y para reaccionar automaticamente si el servidor dice 401
 // (dispositivo no vinculado) mostrando la pantalla de emparejamiento.
@@ -428,13 +443,13 @@ async function api(path, options = {}) {
   const token = localStorage.getItem('deviceToken');
   if (token) headers['X-Device-Token'] = token;
 
-  const url = new URL(path, window.location.origin);
+  const url = new URL(path, getServerBaseUrl());
   const method = (options.method || 'GET').toUpperCase();
   const route = matchSyncRoute(url.pathname);
 
   let res;
   try {
-    res = await fetch(path, Object.assign({}, options, { headers }));
+    res = await fetch(url.toString(), Object.assign({}, options, { headers }));
   } catch (networkErr) {
     if (!route) throw networkErr;
     return handleOfflineRequest(route, method, url, options);
@@ -729,7 +744,7 @@ async function pullChanges() {
   while (hasMore) {
     let res;
     try {
-      res = await fetch(`/api/sync/pull?since=${cursor}&limit=500`, { headers: buildAuthHeaders() });
+      res = await fetch(new URL(`/api/sync/pull?since=${cursor}&limit=500`, getServerBaseUrl()), { headers: buildAuthHeaders() });
     } catch {
       return { ok: false, offline: true };
     }
@@ -785,7 +800,7 @@ async function pushOutbox() {
 
     let res;
     try {
-      res = await fetch('/api/sync/push', {
+      res = await fetch(new URL('/api/sync/push', getServerBaseUrl()), {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, buildAuthHeaders()),
         body: JSON.stringify({ changes: [change] }),

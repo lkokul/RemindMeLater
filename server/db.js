@@ -750,6 +750,38 @@ const SEED_THEMES = [
       daySpecial: '#10202a',
     },
   },
+  // "EINES": panel tecnico oscuro con acento naranja, sacado de una guia de
+  // diseño (sistema-de-estilos.md/estilos-panel-oscuro.css) que Koku trajo
+  // de otra herramienta ya construida. Mapeo: --bg->bg, --panel->surface,
+  // --panel-2->surface2/settingsMenuBg (fondo "hundido" de inputs), --line
+  // ->border, --accent->accent (con accentText oscuro, tal cual pide el
+  // .btn-primary del original: fondo solido + texto oscuro, no blanco).
+  // dayWeekend usa el tono --grid de la cuadricula de fondo; dayHoliday y
+  // daySpecial son --danger/--info del original mezclados oscuros con bg,
+  // ya que ese sistema no define esos dos casos (son propios de este
+  // calendario, no de la guia original).
+  {
+    name: 'EINES',
+    colors: {
+      bg: '#12181f',
+      bgText: '#e7edf2',
+      surface: '#1a222b',
+      surfaceText: '#e7edf2',
+      surface2: '#20303a',
+      surface2Text: '#e7edf2',
+      border: '#2c3947',
+      accent: '#ff8a3d',
+      accentText: '#1a0f05',
+      danger: '#e24b4a',
+      settingsMenuBg: '#20303a',
+      settingsMenuText: '#e7edf2',
+      dayToday: '#ff8a3d',
+      dayTodayText: '#1a0f05',
+      dayWeekend: '#233240',
+      dayHoliday: '#2e1a1a',
+      daySpecial: '#16232e',
+    },
+  },
 ];
 
 const existingThemeNames = new Set(db.prepare('SELECT name FROM themes').all().map((t) => t.name));

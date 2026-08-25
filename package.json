@@ -1,6 +1,6 @@
 {
   "name": "remindmelater",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "private": true,
   "description": "Calendario y recordatorios que corre en tu ordenador, accesible tambien desde el movil por wifi local",
   "main": "electron/main.js",
@@ -17,6 +17,7 @@
     "bonjour-service": "^1.4.4",
     "express": "^4.19.2",
     "node-notifier": "^10.0.1",
+    "qrcode": "^1.5.4",
     "web-push": "^3.6.7"
   },
   "devDependencies": {

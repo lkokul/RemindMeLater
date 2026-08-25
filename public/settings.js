@@ -1467,10 +1467,29 @@ async function refreshDevicesTab() {
     document.getElementById('devices-only-computer').classList.add('hidden');
     document.getElementById('devices-management').classList.remove('hidden');
     renderDevicesList(devices);
+    refreshNetworkQr();
   } catch (err) {
     // 403: este dispositivo no es el ordenador de confianza.
     document.getElementById('devices-only-computer').classList.remove('hidden');
     document.getElementById('devices-management').classList.add('hidden');
+  }
+}
+
+// QR con la IP de este ordenador en la red actual (ver getLanUrl() en
+// server/routes/devices.js) -- lo escanea un movil ya vinculado para saber
+// donde mandar los datos sin volver a emparejarse (ver
+// openScanServerModal() mas abajo).
+async function refreshNetworkQr() {
+  const img = document.getElementById('network-qr-image');
+  const urlText = document.getElementById('network-qr-url');
+  try {
+    const info = await api('/api/devices/network-info');
+    img.src = `/api/devices/network-qr.svg?_=${Date.now()}`;
+    img.classList.remove('hidden');
+    urlText.textContent = info.url;
+  } catch (err) {
+    img.classList.add('hidden');
+    urlText.textContent = 'No se ha detectado ninguna red activa.';
   }
 }
 
@@ -1586,7 +1605,106 @@ function refreshMobileTab() {
   refreshCompletedTasksDisplayOptions();
   refreshSyncStatusUI();
   refreshGymWeightUnitOptions();
+  refreshScanServerStatus();
 }
+
+// ---------------------------------------------------------------------
+// "Escanear ordenador" (fase "multi-red"): un movil ya vinculado escanea
+// el QR que el ordenador muestra en Configuración → Dispositivos para
+// guardar su IP actual (localStorage.serverBaseUrl, ver getServerBaseUrl()
+// en app.js) sin tocar el origen de la propia app -- eso es lo que deja
+// los datos guardados intactos aunque cambie de wifi o de ordenador.
+// ---------------------------------------------------------------------
+let scanServerStream = null;
+let scanServerRafId = null;
+
+function refreshScanServerStatus() {
+  const el = document.getElementById('scan-server-status');
+  if (!el) return;
+  const override = localStorage.getItem('serverBaseUrl');
+  el.textContent = override
+    ? `Sincronizando con: ${override}`
+    : 'Usando la dirección con la que se abrió esta app.';
+}
+
+async function openScanServerModal() {
+  const modal = document.getElementById('scan-server-modal');
+  const video = document.getElementById('scan-server-video');
+  const modalStatus = document.getElementById('scan-server-modal-status');
+  modalStatus.textContent = '';
+  modal.classList.remove('hidden');
+
+  if (!window.jsQR) {
+    modalStatus.textContent = 'No se pudo cargar el lector de QR.';
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    modalStatus.textContent = 'Este navegador no permite usar la cámara aquí.';
+    return;
+  }
+
+  try {
+    scanServerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  } catch (err) {
+    modalStatus.textContent = 'No se pudo acceder a la cámara: ' + err.message;
+    return;
+  }
+  video.srcObject = scanServerStream;
+  await video.play();
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  const tick = () => {
+    if (!scanServerStream) return; // el modal se cerro entre un frame y el siguiente
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = window.jsQR(imageData.data, imageData.width, imageData.height);
+      if (code && code.data) {
+        handleScannedServerUrl(code.data);
+        return;
+      }
+    }
+    scanServerRafId = requestAnimationFrame(tick);
+  };
+  scanServerRafId = requestAnimationFrame(tick);
+}
+
+function closeScanServerModal() {
+  document.getElementById('scan-server-modal').classList.add('hidden');
+  if (scanServerRafId) cancelAnimationFrame(scanServerRafId);
+  scanServerRafId = null;
+  if (scanServerStream) {
+    scanServerStream.getTracks().forEach((t) => t.stop());
+    scanServerStream = null;
+  }
+}
+
+function handleScannedServerUrl(text) {
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch (err) {
+    document.getElementById('scan-server-modal-status').textContent = 'Ese código no tiene una dirección válida.';
+    return;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    document.getElementById('scan-server-modal-status').textContent = 'Ese código no tiene una dirección válida.';
+    return;
+  }
+
+  localStorage.setItem('serverBaseUrl', parsed.origin);
+  closeScanServerModal();
+  refreshScanServerStatus();
+  document.getElementById('scan-server-status').textContent = `Conectando con ${parsed.origin}...`;
+  runSync().finally(refreshScanServerStatus);
+}
+
+document.getElementById('btn-scan-server').addEventListener('click', openScanServerModal);
+document.getElementById('btn-close-scan-server').addEventListener('click', closeScanServerModal);
 
 // "Salir de la aplicacion": vive como accion directa en la lista principal
 // de Configuracion (no dentro de una sub-seccion), asi que se refresca al
@@ -1863,6 +1981,12 @@ document.addEventListener('keydown', (e) => {
   const mobileFabMenu = document.getElementById('mobile-fab-menu');
   if (mobileFabMenu && !mobileFabMenu.classList.contains('hidden')) {
     toggleMobileFabMenu(false);
+    return;
+  }
+
+  const scanServerModal = document.getElementById('scan-server-modal');
+  if (scanServerModal && !scanServerModal.classList.contains('hidden')) {
+    closeScanServerModal();
     return;
   }
 

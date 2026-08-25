@@ -43,6 +43,26 @@ const SERVER_STARTED_AT = Date.now();
 
 app.use(express.json());
 
+// CORS: hace falta desde que el movil puede guardar la app con un origen
+// (el que tenia la primera vez que se instalo) y luego, en otra red, mandar
+// las peticiones a la IP NUEVA del ordenador (ver getServerBaseUrl() en
+// app.js, tras escanear el QR de Configuracion > Dispositivos). Eso hace la
+// llamada "cruzada" (origen distinto al del servidor), que sin esto el
+// navegador bloquea por CORS. No es un agujero de seguridad nuevo: todo lo
+// que hay detras sigue exigiendo el token del dispositivo o ser el propio
+// ordenador (ver auth.js) -- esto solo deja que un navegador LEA la
+// respuesta, no evita nada que un cliente sin navegador no pudiera ya hacer.
+app.use((req, res, next) => {
+  const origin = req.header('Origin');
+  if (origin) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Headers', 'Content-Type, X-Device-Token');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 app.get('/api/version', (req, res) => {
   res.json({ startedAt: SERVER_STARTED_AT });
 });
