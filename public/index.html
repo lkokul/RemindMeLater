@@ -6,6 +6,16 @@
 <title>RemindMeLater</title>
 <link rel="stylesheet" href="styles.css" />
 
+<!-- Roboto Mono: SOLO la usa el estilo de interaccion "Registro" (ver
+     --font-mono dentro de :root[data-ui-style="registro"] en styles.css),
+     para las cabeceras de tabla y etiquetas mono/mayusculas que pide esa
+     guia. Cargarla aqui no afecta a los otros 3 estilos -- y si algun dia
+     no hay internet en el primer arranque, la propia pila de --font-mono
+     ya cae en 'Courier New'/monospace del sistema sin romper nada. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
 <!-- Manifest PWA: permite "Instalar" (ordenador) o "Anadir a inicio"
      (movil) para que RemindMeLater se abra como una app de verdad, en su
      propia ventana/icono y sin la barra de direcciones del navegador —

@@ -4097,7 +4097,7 @@ document.getElementById('btn-dismiss-default-view').addEventListener('click', ()
 // funcion es la que usa el selector de Configuracion para cambiarlo en
 // caliente sin recargar la pagina.
 // ---------------------------------------------------------------------
-const UI_STYLE_IDS = ['directo', 'neon', 'cristal'];
+const UI_STYLE_IDS = ['directo', 'neon', 'cristal', 'registro'];
 
 function getUiStylePreference() {
   const stored = localStorage.getItem('uiStylePreference');

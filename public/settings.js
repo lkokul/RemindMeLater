@@ -802,6 +802,7 @@ const UI_STYLES = [
   { id: 'directo', label: 'Directo' },
   { id: 'neon', label: 'Neón' },
   { id: 'cristal', label: 'Cristal' },
+  { id: 'registro', label: 'Registro' },
 ];
 
 function setUiStylePreference(style) {

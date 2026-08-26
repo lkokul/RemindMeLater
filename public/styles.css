@@ -145,6 +145,50 @@ button {
 :root[data-ui-style="cristal"] .checkbox-row input[type="checkbox"]:checked {
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #8c6eff));
 }
+
+/* "Registro": sacado de la guia de diseño del Report Generator de Koku
+   (mismo origen que el tema de color "Registro" de server/db.js, pero
+   esto es la mitad de "estilo de interaccion" -- las dos piezas son
+   independientes, como ya pasa con EINES/Directo). A diferencia de los
+   otros 3, aqui la reaccion es solo de BORDE en hover (sin tintar el
+   fondo) y sin brillo/degradado ninguno -- la propia guia lo deja como
+   principio ("sin gradientes ni sombras decorativas", solo tonos y
+   bordes finos). "--font-mono" SOLO existe dentro de este bloque a
+   proposito, para no afectar a los otros 3 estilos.
+   NOTA sobre el interruptor .checkbox-row: no hace falta ningun override
+   aqui -- el relleno solido de --accent que ya trae por defecto (ver mas
+   arriba en este archivo) ya es exactamente lo que pide la guia, sin
+   brillo ni degradado encima. */
+:root[data-ui-style="registro"] {
+  --font-mono: 'Roboto Mono', 'Courier New', monospace;
+}
+:root[data-ui-style="registro"] button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+:root[data-ui-style="registro"] .primary-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+:root[data-ui-style="registro"] .danger-btn:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+:root[data-ui-style="registro"] button:active:not(:disabled) { transform: scale(0.97); }
+
+:root[data-ui-style="registro"] .finanzas-table th,
+:root[data-ui-style="registro"] .lecturas-table th {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+:root[data-ui-style="registro"] .finanzas-account-type-badge,
+:root[data-ui-style="registro"] .lecturas-status-badge,
+:root[data-ui-style="registro"] .lecturas-genre-chip,
+:root[data-ui-style="registro"] .extensions-card-badge,
+:root[data-ui-style="registro"] .shortcut-combo-chip {
+  font-family: var(--font-mono);
+}
+
 /* Ancho fijo: si no, el glifo ☀/☾ mide un pelin distinto y el boton
    cambia de tamano al alternar, empujando "+ Nuevo evento" al lado. */
 #btn-quick-color-mode { width: 2.6rem; text-align: center; flex-shrink: 0; }
