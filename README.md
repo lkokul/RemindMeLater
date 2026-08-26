@@ -55,35 +55,54 @@ funciona desde el movil, a proposito). El propio ordenador donde corre el
 servidor esta autorizado siempre, sin codigo (se reconoce por ser
 `localhost`).
 
+**Navegación en el móvil**: en pantallas estrechas, la barra superior de
+escritorio (título + botones sueltos) se sustituye por una barra fija
+abajo con 4 accesos directos (Calendario, Mi espacio, Extensiones,
+Configuración) y un botón flotante "+" que despliega los accesos de
+crear evento, tarea o nota. En escritorio no cambia nada.
+
 ## Configuración
 
 El icono ⚙ abre un panel con varias pestanas:
 
-- **Estilo**: una biblioteca de temas de colores compartida entre todos
-  tus dispositivos. Cada dispositivo elige por su cuenta cual tema
-  mostrar. Cada tema define un color por cada superficie real de la
-  interfaz (fondo, tarjetas, menu de Configuración, dia de hoy, color de
-  acento...) **con su propio color de texto emparejado**, para que cada
-  superficie garantice su propia legibilidad — hay una red de seguridad
-  que fuerza texto blanco o negro si el contraste guardado es demasiado
-  bajo. Un tema puede tener ademas una variante clara/oscura emparejada
-  (`inverseColors`): si la tiene, aparece un boton de sol/luna rapido en
-  la barra superior para alternar sin entrar en Configuración; y si
-  eliges "Sistema" como modo de color (por dispositivo), la app cambia
-  sola entre ambas en cuanto el sistema operativo cambia de claro a
-  oscuro (o al reves), sin recargar la pagina. Los colores se eligen con
-  un selector nativo o con paletas predefinidas (Pastel, Vivos, Claros,
-  Oscuros). Los temas se pueden exportar/importar como archivo `.json`,
-  para pasarlos entre dispositivos que no pueden emparejarse
-  directamente entre si (ej. dos moviles). Al editar un tema los cambios
-  se ven en vivo en toda la app; no hay boton de guardar por tema, es un
-  flujo continuo (cambiar a editar otro tema guarda el anterior solo,
-  cerrar sin guardar descarta los cambios).
+- **Estilo**: dividido en dos partes independientes entre sí:
+  - **Estilo de interacción** (por dispositivo): cómo reaccionan los
+    botones al pasar el ratón y cómo se marca un interruptor encendido.
+    Tres opciones — "Directo" (por defecto: tinte suave del color de
+    acento + hundimiento al hacer clic), "Neon" (brillo alrededor en vez
+    de tinte) y "Cristal" (degradado de dos tonos derivados del acento).
+    No cambia ningún color del tema, solo el comportamiento.
+  - **Colores**: una biblioteca de temas compartida entre todos tus
+    dispositivos. Cada dispositivo elige por su cuenta cual tema
+    mostrar. Cada tema define un color por cada superficie real de la
+    interfaz (fondo, tarjetas, menu de Configuración, dia de hoy, color de
+    acento...) **con su propio color de texto emparejado**, para que cada
+    superficie garantice su propia legibilidad — hay una red de seguridad
+    que fuerza texto blanco o negro si el contraste guardado es demasiado
+    bajo. Un tema puede tener ademas una variante clara/oscura emparejada
+    (`inverseColors`): si la tiene, aparece un boton de sol/luna rapido en
+    la barra superior para alternar sin entrar en Configuración; y si
+    eliges "Sistema" como modo de color (por dispositivo), la app cambia
+    sola entre ambas en cuanto el sistema operativo cambia de claro a
+    oscuro (o al reves), sin recargar la pagina. Los colores se eligen con
+    un selector nativo o con paletas predefinidas (Pastel, Vivos, Claros,
+    Oscuros). Los temas se pueden exportar/importar como archivo `.json`,
+    para pasarlos entre dispositivos que no pueden emparejarse
+    directamente entre si (ej. dos moviles). Al editar un tema los cambios
+    se ven en vivo en toda la app; no hay boton de guardar por tema, es un
+    flujo continuo (cambiar a editar otro tema guarda el anterior solo,
+    cerrar sin guardar descarta los cambios).
+- **Perfil**: tu nickname (se ve igual en todos tus dispositivos
+  vinculados) y tu correo (opcional, solo se usa como contacto tecnico
+  para las notificaciones push del movil — ver "Datos personales" mas
+  abajo). Tambien es donde se pide la primera vez que se abre la app.
 - **Grupos**: listas de recordatorios y tareas con color, al estilo de
   Recordatorios de iPhone. Cada grupo puede tener tambien un icono y un
   color especial para cuando una tarea de ese grupo se marca como hecha
   (si no lo pones, se calcula automaticamente atenuando el color normal).
-- **Dispositivos**: emparejar, renombrar y revocar.
+- **Dispositivos**: emparejar, renombrar y revocar. Tambien muestra el QR
+  para reconectar un movil ya vinculado en otra red (ver "Instalar como
+  app" mas abajo).
 - **Atajos**: cada accion (nuevo evento, abrir Configuración, mes/dia
   anterior o siguiente...) se puede asignar a la combinacion de teclas
   que quieras, por dispositivo. Por defecto: `N` nuevo evento, `←`/`→`
@@ -193,6 +212,48 @@ antes):
   el raton al teclado. Los botones de formato/tabla/imagen funcionan
   igual en cualquier modo (a diferencia del vim real).
 
+## Extensiones
+
+Desde el botón "Extensiones" de la barra superior (o la sección
+"Extensiones" de la navegación móvil) se accede a secciones aparte del
+calendario, cada una a pantalla completa y sin afectar a nada de lo de
+arriba:
+
+- **Gimnasio**: registro de entrenamientos. Una biblioteca de
+  ejercicios y de rutinas reutilizables (con icono y color propios); una
+  sesión puede partir de una rutina guardada (auto-rellena los
+  ejercicios esperados) o ser completamente libre. Cada serie de un
+  ejercicio se apunta con repeticiones y peso — elegible en kg o libras,
+  por dispositivo (el dato se guarda siempre en kg, la conversión es
+  solo de presentación). Una pestaña de progreso muestra una gráfica
+  (peso máximo o volumen levantado) por ejercicio a lo largo del tiempo.
+- **Lecturas**: historial de entretenimiento — mangas, cómics, libros,
+  series, animes y películas juntos — agrupado en sagas (obligatorias:
+  incluso algo suelto es una saga de un único elemento, y una misma saga
+  puede mezclar tipos distintos, ej. las temporadas de una serie y los
+  tomos del manga en el que se basa). Cada elemento lleva título,
+  descripción opcional, valoración de 0 a 10, géneros, tipo, progreso
+  (capítulo/episodio/tomo actual de un total) y cuántos tomos tienes
+  comprados. Un estado (Deseado/En progreso/Completado/Abandonado) hace
+  también de lista de deseos, sin sección aparte. Tabla de sagas
+  primero; dentro de cada una, tabla de sus elementos filtrable por
+  tipo, género, estado y valoración.
+- **Finanzas**: gastos, ingresos e inversiones. Varias cuentas propias
+  (con icono, color y un tipo opcional puramente informativo como
+  "Corriente" o "Inversión"), cada una con su saldo calculado en
+  automático a partir de un saldo inicial y todo lo registrado en ella —
+  nunca guardado a mano, así que no puede desincronizarse. Los gastos
+  pueden llevar categoría propia y marcarse como fijos; un límite de
+  gasto mensual configurable avisa si te pasas, con desglose por
+  categoría. Las inversiones (compra, venta, dividendos) son de registro
+  **manual** — sin conectar a ninguna cotización en vivo, coherente con
+  que el resto de la app es local-first — con un resumen de la ganancia
+  o pérdida ya realizada por activo. Puedes fijarte un objetivo mínimo
+  de ahorro mensual marcando un ingreso como tu salario y un gasto como
+  fijo: la app avisa (sin bloquear el objetivo) si no parece alcanzable
+  según tu salario y gastos fijos medios de los últimos meses. Una
+  gráfica compara ingresos y gastos mes a mes de los últimos 6 meses.
+
 ## App de escritorio (Electron)
 
 Ademas de correr como servidor web, la app se puede empaquetar como
@@ -221,6 +282,14 @@ movil indica el estado: verde = todo sincronizado, amarillo = hay
 cambios pendientes de mandar, gris = sin conexion con el ordenador ahora
 mismo, rojo = hubo un error de verdad. No hay ningun servidor intermedio
 en internet — la sincronizacion solo pasa por tu propia wifi local.
+
+Si el movil cambia de wifi, o el ordenador cambia de direccion en la
+misma red, un movil YA vinculado no pierde sus datos ni tiene que volver
+a emparejarse: en el ordenador, Configuración → Dispositivos muestra un
+codigo QR con la direccion actual; en el movil, Configuración → Este
+dispositivo → "Escanear ordenador" lo lee con la camara y actualiza a
+donde mandar los datos. Solo cambia adonde se conecta, nunca de donde
+lee su copia local guardada — por eso no hace falta volver a vincularlo.
 
 ## Recordatorios
 
@@ -286,13 +355,8 @@ nunca pasa por ahi: es directa, por tu propia wifi local.
   (WidgetKit/ControlKit) o un envoltorio tipo Capacitor — queda anotado
   como posible proyecto aparte, no en desarrollo.
 - La app de escritorio (Electron) solo genera instalador para Windows.
-- Hay un boton "Extensiones" (topbar) que de momento solo abre una
-  pantalla "Próximamente" con tarjetas deshabilitadas — las extensiones
-  de gimnasio y finanzas de las que hablamos no estan incluidas aqui
-  todavia; se pueden anadir despues como secciones nuevas sin tocar el
-  calendario.
 - Redimensionar tablas de notas es solo con raton (arrastrar bordes) —
-  no hay equivalente tactil todavia, queda para la rama de movil.
+  no hay equivalente tactil todavia en movil.
 - El modo "vim" del editor de notas es un subconjunto pequeño a
   proposito (sin registros con nombre, macros, `:` comandos, `yy`/`p`,
   repetir con numeros) — se puede ampliar mas adelante segun haga falta.
