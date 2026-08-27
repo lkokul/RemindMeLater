@@ -902,7 +902,13 @@
     <button type="button" id="btn-sync-now" class="secondary-btn">Sincronizar ahora</button>
 
     <h3>Nueva versión</h3>
-    <p id="archivos-update-status" class="hint">Comprobando…</p>
+    <!-- Info de version/commit -- mismo bloque que en Configuracion >
+         menu principal (ver #settings-version-info), solo visible en el
+         ordenador de confianza (GET /api/update/info sigue siendo
+         requireTrusted). El estado de la comprobacion (Comprobando/al
+         dia/error) ya no es un mensaje aparte -- vive en el propio texto
+         del boton, ver checkForNewRelease() en app.js. -->
+    <div id="archivos-version-info" class="settings-version-info hidden"></div>
     <button type="button" id="btn-archivos-check-update" class="secondary-btn">Comprobar ahora</button>
 
     <h3>Carpeta de destino</h3>

@@ -5901,20 +5901,15 @@ document.getElementById('btn-archivos-browser-use').addEventListener('click', as
   }
 });
 
-document.getElementById('btn-archivos-check-update').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-archivos-check-update');
-  const statusEl = document.getElementById('archivos-update-status');
-  btn.disabled = true;
-  statusEl.textContent = 'Comprobando…';
-  await checkForNewRelease();
-  btn.disabled = false;
+document.getElementById('btn-archivos-check-update').addEventListener('click', () => {
+  checkForNewRelease();
 });
 
 async function openArchivosView() {
   closeExtensionsView();
   document.getElementById('archivos-view').classList.remove('hidden');
   document.getElementById('archivos-folder-browser').classList.add('hidden');
-  await Promise.all([refreshSyncStatusUI(), refreshArchivosFolderUI(), refreshArchivosList()]);
+  await Promise.all([refreshSyncStatusUI(), refreshArchivosFolderUI(), refreshArchivosList(), refreshVersionInfo()]);
 }
 function closeArchivosView() {
   document.getElementById('archivos-view').classList.add('hidden');
@@ -6285,47 +6280,67 @@ const VERSION_INFO_DATE_FORMATTER = new Intl.DateTimeFormat('es-ES', {
   day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
 });
 
+// Ademas del menu principal de Configuracion, este mismo bloque se
+// repite en Extensiones > Archivos (#archivos-version-info) -- Koku pidio
+// ver ahi tambien la version/commit, no solo en Configuracion.
 async function refreshVersionInfo() {
-  const box = document.getElementById('settings-version-info');
+  const boxes = [document.getElementById('settings-version-info'), document.getElementById('archivos-version-info')].filter(Boolean);
+  if (!boxes.length) return;
   try {
     const info = await api('/api/update/info');
     const commitDate = info.commitDate ? VERSION_INFO_DATE_FORMATTER.format(new Date(info.commitDate)) : '';
-    box.innerHTML = `
+    const html = `
       <div>Versión ${escapeHtml(info.version)} · rama <code>${escapeHtml(info.branch)}</code></div>
       <div>Último commit: <code>${escapeHtml(info.commitHash)}</code> — ${escapeHtml(info.commitMessage)}</div>
       ${commitDate ? `<div>${escapeHtml(commitDate)}</div>` : ''}
     `;
-    box.classList.remove('hidden');
+    boxes.forEach((box) => {
+      box.innerHTML = html;
+      box.classList.remove('hidden');
+    });
   } catch (err) {
     // Sin internet no importa (esto no hace fetch a GitHub), pero si
     // fallase por cualquier otro motivo (git no disponible, movil
     // emparejado sin permiso...) mejor no mostrar nada raro a medias.
-    box.classList.add('hidden');
+    boxes.forEach((box) => box.classList.add('hidden'));
   }
 }
 
 let pendingReleaseVersion = null;
 
-// Ademas del banner de siempre, actualiza el texto de Extensiones >
-// Archivos (#archivos-update-status) si esa vista existe en la pagina --
-// asi el boton "Comprobar ahora" de ahi (y esta misma llamada automatica)
-// dan feedback visible aunque no haya version nueva. GET /api/update/check
-// ya es requireDeviceOrTrusted (ver server/routes/update.js), asi que esto
-// tambien funciona en un movil emparejado -- lo unico que sigue siendo
-// solo del ordenador es instalarla de verdad (POST /pull).
+// El estado de la comprobacion (comprobando/al dia/nueva version/error)
+// se ve integrado en el propio texto del boton "Comprobar ahora" de
+// Extensiones > Archivos, en vez de un mensaje aparte encima -- Koku lo
+// pidio explicitamente ("que no sea solo un mensaje"). data-check-status
+// controla el color (ver .archivos-check-btn en styles.css: rojo en error).
+function setArchivosCheckButtonState(status, text) {
+  const btn = document.getElementById('btn-archivos-check-update');
+  if (!btn) return;
+  btn.textContent = text;
+  btn.dataset.checkStatus = status;
+  btn.disabled = status === 'checking';
+}
+
+// Ademas del banner de siempre, esto tambien conduce el estado del boton
+// de Extensiones > Archivos (#btn-archivos-check-update) -- asi la
+// comprobacion automatica de aqui abajo y el boton manual de ahi dan el
+// mismo feedback. GET /api/update/check ya es requireDeviceOrTrusted (ver
+// server/routes/update.js), asi que esto tambien funciona en un movil
+// emparejado -- lo unico que sigue siendo solo del ordenador es
+// instalarla de verdad (POST /pull).
 async function checkForNewRelease() {
-  const archivosStatusEl = document.getElementById('archivos-update-status');
+  setArchivosCheckButtonState('checking', 'Comprobando…');
   try {
     const info = await api('/api/update/check');
     if (!info || !info.remoteVersion) {
-      if (archivosStatusEl) archivosStatusEl.textContent = 'No se pudo comprobar la versión.';
+      setArchivosCheckButtonState('error', 'No se pudo comprobar la versión.');
       return;
     }
     if (compareVersions(info.remoteVersion, info.currentVersion) <= 0) {
-      if (archivosStatusEl) archivosStatusEl.textContent = `Tienes la última versión (v${info.currentVersion}).`;
+      setArchivosCheckButtonState('ok', `Tienes la última versión (v${info.currentVersion}).`);
       return;
     }
-    if (archivosStatusEl) archivosStatusEl.textContent = `Hay una versión nueva disponible (v${info.remoteVersion}).`;
+    setArchivosCheckButtonState('ok', `Hay una versión nueva disponible (v${info.remoteVersion}).`);
     if (localStorage.getItem('skippedUpdateVersion') === info.remoteVersion) return;
 
     pendingReleaseVersion = info.remoteVersion;
@@ -6339,7 +6354,7 @@ async function checkForNewRelease() {
   } catch (err) {
     // Sin internet o git no configurado: no pasa nada, se vuelve a
     // intentar mas tarde sin molestar con un error.
-    if (archivosStatusEl) archivosStatusEl.textContent = 'No se pudo comprobar (sin conexión con el ordenador o con GitHub).';
+    setArchivosCheckButtonState('error', 'No se pudo comprobar (sin conexión con el ordenador o con GitHub).');
   }
 }
 
