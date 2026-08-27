@@ -1302,6 +1302,13 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .finanzas-manage-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.6rem; }
 
 .finanzas-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.8rem 0; }
+/* Cuenta/Categoria/Tipo/Desde/Hasta (createSelectField/createDateField,
+   ver app.js) con un ancho base consistente -- mismo criterio que
+   .lecturas-filter-field, para que quepan en una fila en vez de
+   apilarse por anchos desiguales. */
+.finanzas-filter-field { flex: 1 1 160px; min-width: 140px; }
+.finanzas-filter-field .select-field,
+.finanzas-filter-field .date-field { width: 100%; }
 .finanzas-table-wrap { overflow-x: auto; margin: 0.8rem 0; }
 .finanzas-table { width: 100%; border-collapse: collapse; white-space: nowrap; }
 .finanzas-table th, .finanzas-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
@@ -1318,6 +1325,55 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .finanzas-trend-chart-label { font-size: 8px; fill: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
 .finanzas-trend-chart-legend { display: flex; gap: 1rem; margin-top: 0.4rem; font-size: 0.85rem; color: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
 .finanzas-trend-legend-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 999px; margin-right: 0.3rem; }
+
+/* Tooltip real (sigue al raton) para las graficas de Finanzas -- ver
+   getFinanzasChartTooltip()/attachFinanzasChartTooltips() en app.js.
+   Un unico div compartido por TODAS las graficas de la pestaña, no uno
+   por barra -- se reposiciona con clientX/clientY en cada mousemove. */
+.finanzas-chart-tooltip {
+  position: fixed;
+  z-index: 500;
+  pointer-events: none;
+  background: var(--settings-menu-bg);
+  color: var(--settings-menu-text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.finanzas-chart-tooltip.hidden { display: none; }
+
+.finanzas-investment-trend-asset-field { max-width: 260px; margin-bottom: 0.4rem; }
+
+/* Bloque "Ahorro" -- toggle Mensual/Histórico + selector de mes/año +
+   rango historico (ver renderFinanzasSavingsMonthly() y el listener de
+   btn-finanzas-savings-range-view en app.js). */
+.finanzas-savings-view-toggle { display: flex; gap: 0.6rem; margin: 0.6rem 0 0.4rem; border-bottom: 1px solid var(--border); }
+/* Clase propia (NO .finanzas-tab-btn): esos botones tienen un listener
+   delegado que llama a switchFinanzasTab(btn.dataset.finanzasTab) para
+   TODOS los .finanzas-tab-btn de la pagina -- si este toggle
+   reutilizara esa clase, un clic aqui dispararia switchFinanzasTab(undefined)
+   y ocultaria la pestaña Resumen entera (bug real, detectado con
+   Playwright al probar esta ronda). Mismo aspecto visual, clase
+   distinta. */
+.finanzas-savings-toggle-btn {
+  font: inherit;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0.5rem 0.3rem;
+  color: color-mix(in srgb, var(--bg-text) 65%, var(--bg));
+  cursor: pointer;
+}
+.finanzas-savings-toggle-btn.active { color: var(--bg-text); border-bottom-color: var(--accent); font-weight: 600; }
+.finanzas-savings-month-nav { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem; }
+.finanzas-savings-month-field { flex: 1 1 140px; max-width: 160px; }
+.finanzas-savings-month-field .select-field { width: 100%; }
+.finanzas-savings-year-input { width: 5rem; }
+.finanzas-savings-status { font-size: 0.9rem; }
+.finanzas-savings-range-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
 
 
 /* Extension "Lecturas": jerarquia de 2 tablas (sagas -> items de una
@@ -1417,7 +1473,8 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   background: none; color: inherit; cursor: pointer;
 }
 .archivos-browser-item:hover { background: var(--surface); }
-.archivos-upload-row { margin: 0.5rem 0; }
+.archivos-manage-block { margin-bottom: 1rem; }
+.archivos-manage-block summary { cursor: pointer; font-weight: 600; padding: 0.4rem 0; }
 .archivos-table-wrap { overflow-x: auto; margin: 0.8rem 0; }
 .archivos-table { width: 100%; border-collapse: collapse; }
 .archivos-table th, .archivos-table td {
@@ -1425,6 +1482,42 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   white-space: nowrap;
 }
 .archivos-table td:last-child { display: flex; gap: 0.4rem; }
+
+/* Transferencia estilo TightVNC/TeamViewer (ver comentario en
+   index.html): dos paneles + flechas en medio. En movil, apilados
+   (panel local arriba, flechas en fila horizontal, panel remoto
+   abajo) -- en escritorio, en fila con las flechas en el centro,
+   mismo punto de corte que el resto de la app (860px). */
+.archivos-transfer-grid {
+  display: flex; flex-direction: column; gap: 0.8rem; margin: 0.6rem 0;
+}
+.archivos-transfer-panel {
+  flex: 1; min-width: 0; padding: 0.7rem 0.8rem; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--surface); color: var(--surface-text);
+}
+.archivos-transfer-panel h4 { margin: 0 0 0.5rem; }
+.archivos-transfer-arrows {
+  display: flex; flex-direction: row; gap: 0.6rem; align-self: center;
+}
+.archivos-transfer-arrows button {
+  font-size: 1.2rem; line-height: 1; padding: 0.5rem 0.9rem;
+}
+.archivos-staged-list { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.5rem 0; }
+.archivos-staged-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  background: var(--surface-2); color: var(--surface-2-text);
+  border-radius: 6px; padding: 0.3rem 0.5rem; font-size: 0.85rem;
+}
+.archivos-staged-remove {
+  border: none; background: none; color: inherit; cursor: pointer;
+  font-size: 0.85rem; padding: 0 0.2rem; line-height: 1;
+}
+.archivos-table th:first-child, .archivos-table td:first-child { width: 1.6rem; }
+
+@media (min-width: 860px) {
+  .archivos-transfer-grid { flex-direction: row; align-items: stretch; }
+  .archivos-transfer-arrows { flex-direction: column; justify-content: center; }
+}
 
 /* Envoltorio SOLO de las 3 columnas (el Volver, fuera, en su propia
    fila) -- en movil se quedan apiladas igual que antes. */

@@ -672,8 +672,46 @@
         <input type="number" id="finanzas-savings-goal-input" step="0.01" min="0" placeholder="Sin objetivo" />
         <button type="button" id="btn-save-finanzas-savings-goal" class="secondary-btn">Guardar objetivo</button>
       </div>
+      <p class="hint">El objetivo es un único ajuste global (no cambia según el mes que mires abajo).</p>
       <div id="finanzas-savings-warning" class="finanzas-savings-warning hidden"></div>
-      <div id="finanzas-savings-status" class="finanzas-savings-status"></div>
+
+      <!-- Vista mensual (por defecto el mes actual, con flechas para
+           moverse de uno en uno) frente a vista historica (un rango de
+           meses/años, ej. julio 2020 - septiembre 2023) -- ver
+           renderFinanzasSavingsMonthly/renderFinanzasSavingsHistoric en
+           app.js. -->
+      <div class="finanzas-savings-view-toggle">
+        <button type="button" id="btn-finanzas-savings-view-monthly" class="finanzas-savings-toggle-btn active">Mensual</button>
+        <button type="button" id="btn-finanzas-savings-view-historic" class="finanzas-savings-toggle-btn">Histórico</button>
+      </div>
+
+      <div id="finanzas-savings-monthly-view">
+        <div class="finanzas-savings-month-nav">
+          <button type="button" id="btn-finanzas-savings-month-prev" class="icon-btn" aria-label="Mes anterior">‹</button>
+          <div id="finanzas-savings-month-field" class="finanzas-savings-month-field"></div>
+          <input type="number" id="finanzas-savings-year-input" class="finanzas-savings-year-input" />
+          <button type="button" id="btn-finanzas-savings-month-next" class="icon-btn" aria-label="Mes siguiente">›</button>
+        </div>
+        <div id="finanzas-savings-status" class="finanzas-savings-status"></div>
+      </div>
+
+      <div id="finanzas-savings-historic-view" class="hidden">
+        <div class="finanzas-savings-range-row">
+          <span class="hint">Desde</span>
+          <div id="finanzas-savings-range-from-month-field" class="finanzas-savings-month-field"></div>
+          <input type="number" id="finanzas-savings-range-from-year" class="finanzas-savings-year-input" />
+          <span class="hint">Hasta</span>
+          <div id="finanzas-savings-range-to-month-field" class="finanzas-savings-month-field"></div>
+          <input type="number" id="finanzas-savings-range-to-year" class="finanzas-savings-year-input" />
+          <button type="button" id="btn-finanzas-savings-range-view" class="secondary-btn">Ver</button>
+        </div>
+        <div class="finanzas-table-wrap">
+          <table class="finanzas-table">
+            <thead><tr><th>Mes</th><th>Ahorro</th><th>Objetivo</th><th>¿Cumplido?</th></tr></thead>
+            <tbody id="finanzas-savings-history-tbody"></tbody>
+          </table>
+        </div>
+      </div>
 
       <h3>Gasto de este mes por categoría</h3>
       <div id="finanzas-category-breakdown-list" class="finanzas-category-breakdown-list"></div>
@@ -682,29 +720,16 @@
       <div id="finanzas-monthly-trend-chart" class="finanzas-trend-chart-wrap"></div>
     </div>
 
-    <!-- Pestaña Movimientos: gestion de cuentas y categorias (mismo patron
-         que Grupos: formulario + lista, sin modal aparte), filtros, y la
-         tabla de gastos/ingresos. -->
+    <!-- Pestaña Movimientos: gestion de categorias (mismo patron que
+         Grupos: formulario + lista, sin modal aparte), filtros, y la
+         tabla de gastos/ingresos. Las CUENTAS pasaron a modal propio
+         (#finanzas-account-modal, mas abajo) -- Koku pidio que "Editar"
+         abriera algo tipo el modal de "+ Movimiento" en vez de reusar
+         el mismo formulario de "añadir" con un boton Cancelar. -->
     <div class="finanzas-tab-panel hidden" data-finanzas-panel="movimientos">
-      <details class="finanzas-manage-block">
+      <details class="finanzas-manage-block" open>
         <summary>Cuentas</summary>
-        <form id="finanzas-account-form" class="finanzas-inline-form">
-          <input type="hidden" id="finanzas-account-id" />
-          <input type="text" id="finanzas-account-name" placeholder="Nombre de la cuenta" required />
-          <div id="finanzas-account-icon-field"></div>
-          <div id="finanzas-account-color-field"></div>
-          <input type="number" id="finanzas-account-initial-balance" step="0.01" placeholder="Saldo inicial" />
-          <select id="finanzas-account-type">
-            <option value="">Sin tipo</option>
-            <option value="Corriente">Corriente</option>
-            <option value="Ahorro">Ahorro</option>
-            <option value="Inversión">Inversión</option>
-            <option value="Efectivo">Efectivo</option>
-            <option value="Otro">Otro</option>
-          </select>
-          <button type="submit" class="primary-btn">Guardar</button>
-          <button type="button" id="btn-cancel-finanzas-account" class="secondary-btn hidden">Cancelar</button>
-        </form>
+        <button type="button" id="btn-new-finanzas-account" class="primary-btn gym-tab-action">+ Cuenta</button>
         <div id="finanzas-accounts-list" class="finanzas-manage-list"></div>
       </details>
       <details class="finanzas-manage-block">
@@ -721,15 +746,11 @@
       </details>
 
       <div class="finanzas-filters">
-        <select id="finanzas-filter-account"><option value="">Todas las cuentas</option></select>
-        <select id="finanzas-filter-category"><option value="">Todas las categorías</option></select>
-        <select id="finanzas-filter-type">
-          <option value="">Gastos e ingresos</option>
-          <option value="expense">Solo gastos</option>
-          <option value="income">Solo ingresos</option>
-        </select>
-        <input type="date" id="finanzas-filter-from" title="Desde" />
-        <input type="date" id="finanzas-filter-to" title="Hasta" />
+        <div id="finanzas-filter-account-field" class="finanzas-filter-field"></div>
+        <div id="finanzas-filter-category-field" class="finanzas-filter-field"></div>
+        <div id="finanzas-filter-type-field" class="finanzas-filter-field"></div>
+        <div id="finanzas-filter-from-field" class="finanzas-filter-field"></div>
+        <div id="finanzas-filter-to-field" class="finanzas-filter-field"></div>
         <button type="button" id="btn-clear-finanzas-filters" class="secondary-btn">Quitar filtros</button>
       </div>
       <button type="button" id="btn-new-finanzas-transaction" class="primary-btn">+ Movimiento</button>
@@ -768,6 +789,10 @@
           <tbody id="finanzas-asset-summary-tbody"></tbody>
         </table>
       </div>
+
+      <h3>Evolución mensual (últimos 6 meses)</h3>
+      <div id="finanzas-investment-trend-asset-field" class="finanzas-investment-trend-asset-field"></div>
+      <div id="finanzas-investment-trend-chart" class="finanzas-trend-chart-wrap"></div>
     </div>
   </div>
 
@@ -780,18 +805,15 @@
         <input type="hidden" id="finanzas-transaction-id" />
         <label>
           Tipo
-          <select id="finanzas-transaction-type" required>
-            <option value="expense">Gasto</option>
-            <option value="income">Ingreso</option>
-          </select>
+          <div id="finanzas-transaction-type-field"></div>
         </label>
         <label>
           Cuenta
-          <select id="finanzas-transaction-account" required></select>
+          <div id="finanzas-transaction-account-field"></div>
         </label>
         <label id="finanzas-transaction-category-label">
           Categoría
-          <select id="finanzas-transaction-category"><option value="">Sin categoría</option></select>
+          <div id="finanzas-transaction-category-field"></div>
         </label>
         <label>
           Importe
@@ -799,7 +821,7 @@
         </label>
         <label>
           Fecha
-          <input type="date" id="finanzas-transaction-date" required />
+          <div id="finanzas-transaction-date-field"></div>
         </label>
         <label>
           Descripción (opcional)
@@ -833,7 +855,7 @@
         <input type="hidden" id="finanzas-investment-id" />
         <label>
           Cuenta
-          <select id="finanzas-investment-account" required></select>
+          <div id="finanzas-investment-account-field"></div>
         </label>
         <label>
           Activo
@@ -841,11 +863,7 @@
         </label>
         <label>
           Tipo
-          <select id="finanzas-investment-type" required>
-            <option value="buy">Compra</option>
-            <option value="sell">Venta</option>
-            <option value="dividend">Dividendo</option>
-          </select>
+          <div id="finanzas-investment-type-field"></div>
         </label>
         <div id="finanzas-investment-qty-price-row">
           <label>
@@ -863,13 +881,59 @@
         </label>
         <label>
           Fecha
-          <input type="date" id="finanzas-investment-date" required />
+          <div id="finanzas-investment-date-field"></div>
         </label>
         <label>
           Notas (opcional)
           <input type="text" id="finanzas-investment-notes" />
         </label>
+        <!-- Solo tiene sentido para una Compra -- una venta o un dividendo
+             traen dinero DENTRO, no lo gastan (ver refreshFinanzasInvestmentTypeFields
+             en app.js). Empieza desmarcada a proposito: a diferencia de un
+             gasto normal (que cuenta por defecto), invertir no se trataba
+             como "gasto" en el resto de la app hasta ahora. -->
+        <label class="checkbox-row" id="finanzas-investment-counts-row">
+          <input type="checkbox" id="finanzas-investment-counts" />
+          Cuenta para el límite mensual
+        </label>
         <div class="modal-actions">
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar una cuenta de Finanzas -->
+  <div id="finanzas-account-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-finanzas-account" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="finanzas-account-modal-title">Nueva cuenta</h2>
+      <form id="finanzas-account-form">
+        <input type="hidden" id="finanzas-account-id" />
+        <label>
+          Nombre
+          <input type="text" id="finanzas-account-name" placeholder="Nombre de la cuenta" required />
+        </label>
+        <div class="form-row">
+          <label>
+            Icono
+            <div id="finanzas-account-icon-field"></div>
+          </label>
+          <label>
+            Color
+            <div id="finanzas-account-color-field"></div>
+          </label>
+        </div>
+        <label>
+          Saldo inicial
+          <input type="number" id="finanzas-account-initial-balance" step="0.01" placeholder="0" />
+        </label>
+        <label>
+          Tipo
+          <div id="finanzas-account-type-field"></div>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-finanzas-account" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
@@ -911,37 +975,60 @@
     <div id="archivos-version-info" class="settings-version-info hidden"></div>
     <button type="button" id="btn-archivos-check-update" class="secondary-btn">Comprobar ahora</button>
 
-    <h3>Carpeta de destino</h3>
-    <p id="archivos-folder-readonly-hint" class="hint hidden"></p>
-    <div id="archivos-folder-row" class="archivos-folder-row hidden">
-      <input type="text" id="archivos-folder-path" readonly />
-      <button type="button" id="btn-archivos-browse" class="secondary-btn">Explorar…</button>
-    </div>
-    <div id="archivos-folder-browser" class="archivos-folder-browser hidden">
-      <p id="archivos-browser-current-path" class="hint"></p>
-      <div id="archivos-browser-list" class="archivos-browser-list"></div>
-      <div class="modal-actions">
-        <button type="button" id="btn-archivos-browser-up" class="secondary-btn">Subir un nivel</button>
-        <div class="spacer"></div>
-        <button type="button" id="btn-archivos-browser-cancel" class="secondary-btn">Cancelar</button>
-        <button type="button" id="btn-archivos-browser-use" class="primary-btn">Usar esta carpeta</button>
+    <details class="archivos-manage-block">
+      <summary>Carpeta de destino</summary>
+      <p id="archivos-folder-readonly-hint" class="hint hidden"></p>
+      <div id="archivos-folder-row" class="archivos-folder-row hidden">
+        <input type="text" id="archivos-folder-path" readonly />
+        <button type="button" id="btn-archivos-browse" class="secondary-btn">Explorar…</button>
+      </div>
+      <div id="archivos-folder-browser" class="archivos-folder-browser hidden">
+        <p id="archivos-browser-current-path" class="hint"></p>
+        <div id="archivos-browser-list" class="archivos-browser-list"></div>
+        <div class="modal-actions">
+          <button type="button" id="btn-archivos-browser-up" class="secondary-btn">Subir un nivel</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-archivos-browser-cancel" class="secondary-btn">Cancelar</button>
+          <button type="button" id="btn-archivos-browser-use" class="primary-btn">Usar esta carpeta</button>
+        </div>
+      </div>
+    </details>
+
+    <h3>Transferir archivos</h3>
+    <!-- Diseño de dos paneles estilo TightVNC/TeamViewer, a peticion de
+         Koku -- ver renderArchivosStagedList()/refreshArchivosList() en
+         app.js. El panel izquierdo ("Este dispositivo") NO puede listar
+         de verdad el almacenamiento del movil (los navegadores no lo
+         permiten, es un limite de seguridad, no una eleccion de diseño):
+         solo se puede elegir archivos uno a uno con el selector nativo y
+         mandarlos -- por eso es una "lista de preparados para enviar",
+         no un explorador real. El panel derecho SI es real: la carpeta
+         compartida configurada arriba, igual en ordenador y movil. -->
+    <div class="archivos-transfer-grid">
+      <div class="archivos-transfer-panel">
+        <h4>Este dispositivo</h4>
+        <input type="file" id="archivos-file-input" multiple hidden />
+        <button type="button" id="btn-archivos-choose" class="secondary-btn">Elegir archivo(s)…</button>
+        <div id="archivos-staged-list" class="archivos-staged-list"></div>
+        <p id="archivos-staged-empty-hint" class="hint">Elige uno o varios archivos para mandarlos al ordenador.</p>
+      </div>
+      <div class="archivos-transfer-arrows">
+        <button type="button" id="btn-archivos-send" class="primary-btn" disabled title="Enviar al ordenador">→</button>
+        <button type="button" id="btn-archivos-receive" class="secondary-btn" disabled title="Descargar a este dispositivo">←</button>
+      </div>
+      <div class="archivos-transfer-panel">
+        <h4>Carpeta compartida en el ordenador</h4>
+        <div class="archivos-table-wrap">
+          <table class="archivos-table" id="archivos-table">
+            <thead>
+              <tr><th></th><th>Nombre</th><th>Tamaño</th><th>Fecha</th><th></th></tr>
+            </thead>
+            <tbody id="archivos-table-body"></tbody>
+          </table>
+        </div>
+        <p id="archivos-empty-hint" class="hint hidden">No hay archivos todavía.</p>
       </div>
     </div>
-
-    <h3>Archivos</h3>
-    <div class="archivos-upload-row">
-      <input type="file" id="archivos-file-input" multiple hidden />
-      <button type="button" id="btn-archivos-upload" class="primary-btn">Subir archivo</button>
-    </div>
-    <div class="archivos-table-wrap">
-      <table class="archivos-table" id="archivos-table">
-        <thead>
-          <tr><th>Nombre</th><th>Tamaño</th><th>Fecha</th><th></th></tr>
-        </thead>
-        <tbody id="archivos-table-body"></tbody>
-      </table>
-    </div>
-    <p id="archivos-empty-hint" class="hint hidden">No hay archivos todavía.</p>
     </div>
   </div>
 

@@ -580,6 +580,15 @@ if (!finanzasSettingsColumns.includes('savings_goal_min')) {
   db.exec('ALTER TABLE finanzas_settings ADD COLUMN savings_goal_min REAL');
 }
 
+// counts_toward_budget en inversiones: igual que en gastos normales,
+// pero aqui empieza DESACTIVADA por defecto (0) -- invertir no se
+// trataba como "gasto" en el resto de la app hasta esta ronda, y solo
+// tiene sentido marcarlo en una Compra (ver routes/finanzasInvestments.js).
+const finanzasInvestmentColumns = db.prepare('PRAGMA table_info(finanzas_investment_transactions)').all().map((c) => c.name);
+if (!finanzasInvestmentColumns.includes('counts_toward_budget')) {
+  db.exec('ALTER TABLE finanzas_investment_transactions ADD COLUMN counts_toward_budget INTEGER NOT NULL DEFAULT 0');
+}
+
 // Igual que el perfil: el limite mensual de Finanzas es una sola fila
 // que siempre tiene que existir, para no tener que comprobar "y si no
 // existe todavia" en cada ruta que lo lee.

@@ -4568,6 +4568,139 @@ let finanzasCategoryColorField = null;
 
 const finanzasFilters = { accountId: '', categoryId: '', type: '', from: '', to: '' };
 
+const FINANZAS_MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const FINANZAS_MONTH_OPTIONS = FINANZAS_MONTH_NAMES.map((label, i) => ({ value: String(i + 1).padStart(2, '0'), label }));
+
+// Selectores/fechas con estilo propio para Finanzas (createSelectField/
+// createDateField, definidos mas arriba en este archivo) -- antes eran
+// <select>/<input type="date"> nativos, desentonaban con el resto del
+// tema (mismo motivo que la ronda de Lecturas). Los que dependen de
+// datos (cuenta/categoria/activo) se crean con opciones vacias y se
+// rellenan via .setOptions() (ver populateFinanzasSelects() e
+// refreshFinanzasInvestmentTrendChart() mas abajo). createSelectField()
+// no depende de settings.js hasta que se hace clic en el desplegable,
+// asi que es seguro crearlos ya a nivel de modulo -- a diferencia de
+// finanzasAccountIconField/-ColorField (mas arriba), que SI hace falta
+// crear de forma perezosa (ver setupFinanzasIconColorFields).
+const finanzasAccountTypeField = createSelectField({
+  options: [
+    { value: '', label: 'Sin tipo' },
+    { value: 'Corriente', label: 'Corriente' },
+    { value: 'Ahorro', label: 'Ahorro' },
+    { value: 'Inversión', label: 'Inversión' },
+    { value: 'Efectivo', label: 'Efectivo' },
+    { value: 'Otro', label: 'Otro' },
+  ],
+  initialValue: '',
+});
+document.getElementById('finanzas-account-type-field').appendChild(finanzasAccountTypeField.element);
+
+const finanzasFilterAccountField = createSelectField({
+  options: [{ value: '', label: 'Todas las cuentas' }],
+  initialValue: '',
+  onChange: (value) => { finanzasFilters.accountId = value; refreshFinanzasTransactionsTab(); },
+});
+document.getElementById('finanzas-filter-account-field').appendChild(finanzasFilterAccountField.element);
+
+const finanzasFilterCategoryField = createSelectField({
+  options: [{ value: '', label: 'Todas las categorías' }],
+  initialValue: '',
+  onChange: (value) => { finanzasFilters.categoryId = value; refreshFinanzasTransactionsTab(); },
+});
+document.getElementById('finanzas-filter-category-field').appendChild(finanzasFilterCategoryField.element);
+
+const finanzasFilterTypeField = createSelectField({
+  options: [
+    { value: '', label: 'Gastos e ingresos' },
+    { value: 'expense', label: 'Solo gastos' },
+    { value: 'income', label: 'Solo ingresos' },
+  ],
+  initialValue: '',
+  onChange: (value) => { finanzasFilters.type = value; refreshFinanzasTransactionsTab(); },
+});
+document.getElementById('finanzas-filter-type-field').appendChild(finanzasFilterTypeField.element);
+
+const finanzasFilterFromField = createDateField({
+  initialValue: null,
+  allowClear: true,
+  placeholder: 'Desde',
+  onChange: (date) => { finanzasFilters.from = date ? toDateKey(date) : ''; refreshFinanzasTransactionsTab(); },
+});
+document.getElementById('finanzas-filter-from-field').appendChild(finanzasFilterFromField.element);
+
+const finanzasFilterToField = createDateField({
+  initialValue: null,
+  allowClear: true,
+  placeholder: 'Hasta',
+  onChange: (date) => { finanzasFilters.to = date ? toDateKey(date) : ''; refreshFinanzasTransactionsTab(); },
+});
+document.getElementById('finanzas-filter-to-field').appendChild(finanzasFilterToField.element);
+
+const finanzasTransactionTypeField = createSelectField({
+  options: [{ value: 'expense', label: 'Gasto' }, { value: 'income', label: 'Ingreso' }],
+  initialValue: 'expense',
+  onChange: () => refreshFinanzasTransactionTypeFields(),
+});
+document.getElementById('finanzas-transaction-type-field').appendChild(finanzasTransactionTypeField.element);
+
+const finanzasTransactionAccountField = createSelectField({ options: [], initialValue: '' });
+document.getElementById('finanzas-transaction-account-field').appendChild(finanzasTransactionAccountField.element);
+
+const finanzasTransactionCategoryField = createSelectField({
+  options: [{ value: '', label: 'Sin categoría' }],
+  initialValue: '',
+});
+document.getElementById('finanzas-transaction-category-field').appendChild(finanzasTransactionCategoryField.element);
+
+const finanzasTransactionDateField = createDateField({ initialValue: new Date() });
+document.getElementById('finanzas-transaction-date-field').appendChild(finanzasTransactionDateField.element);
+
+const finanzasInvestmentAccountField = createSelectField({ options: [], initialValue: '' });
+document.getElementById('finanzas-investment-account-field').appendChild(finanzasInvestmentAccountField.element);
+
+const finanzasInvestmentTypeField = createSelectField({
+  options: [{ value: 'buy', label: 'Compra' }, { value: 'sell', label: 'Venta' }, { value: 'dividend', label: 'Dividendo' }],
+  initialValue: 'buy',
+  onChange: () => refreshFinanzasInvestmentTypeFields(),
+});
+document.getElementById('finanzas-investment-type-field').appendChild(finanzasInvestmentTypeField.element);
+
+const finanzasInvestmentDateField = createDateField({ initialValue: new Date() });
+document.getElementById('finanzas-investment-date-field').appendChild(finanzasInvestmentDateField.element);
+
+// Filtro de activo de la grafica de Inversiones -- "Todos los activos" +
+// los que haya usados, ver refreshFinanzasInvestmentTrendChart() mas abajo.
+const finanzasInvestmentTrendAssetField = createSelectField({
+  options: [{ value: '', label: 'Todos los activos' }],
+  initialValue: '',
+  onChange: () => refreshFinanzasInvestmentTrendChart(),
+});
+document.getElementById('finanzas-investment-trend-asset-field').appendChild(finanzasInvestmentTrendAssetField.element);
+
+// Selector de mes (vista mensual del Ahorro) + rango (vista historica) --
+// ver renderFinanzasSavingsMonthly()/renderFinanzasSavingsHistoric() mas
+// abajo.
+const finanzasSavingsMonthField = createSelectField({
+  options: FINANZAS_MONTH_OPTIONS,
+  initialValue: String(new Date().getMonth() + 1).padStart(2, '0'),
+  onChange: () => renderFinanzasSavingsMonthly(),
+});
+document.getElementById('finanzas-savings-month-field').appendChild(finanzasSavingsMonthField.element);
+
+const finanzasSavingsRangeFromMonthField = createSelectField({ options: FINANZAS_MONTH_OPTIONS, initialValue: '01' });
+document.getElementById('finanzas-savings-range-from-month-field').appendChild(finanzasSavingsRangeFromMonthField.element);
+
+const finanzasSavingsRangeToMonthField = createSelectField({
+  options: FINANZAS_MONTH_OPTIONS,
+  initialValue: String(new Date().getMonth() + 1).padStart(2, '0'),
+});
+document.getElementById('finanzas-savings-range-to-month-field').appendChild(finanzasSavingsRangeToMonthField.element);
+
+const finanzasCurrentYear = new Date().getFullYear();
+document.getElementById('finanzas-savings-year-input').value = finanzasCurrentYear;
+document.getElementById('finanzas-savings-range-from-year').value = finanzasCurrentYear;
+document.getElementById('finanzas-savings-range-to-year').value = finanzasCurrentYear;
+
 function formatFinanzasAmount(n) {
   const num = Number(n) || 0;
   return `${num.toFixed(2)} €`;
@@ -4596,54 +4729,37 @@ async function loadFinanzasCategories() {
 }
 
 function populateFinanzasSelects() {
-  const accountSelects = [
-    document.getElementById('finanzas-filter-account'),
-    document.getElementById('finanzas-transaction-account'),
-    document.getElementById('finanzas-investment-account'),
-  ];
-  accountSelects.forEach((sel) => {
-    const isFilter = sel.id === 'finanzas-filter-account';
-    const current = sel.value;
-    sel.innerHTML = isFilter ? '<option value="">Todas las cuentas</option>' : '';
-    finanzasAccounts.forEach((a) => {
-      const opt = document.createElement('option');
-      opt.value = a.id;
-      opt.textContent = `${a.icon ? a.icon + ' ' : ''}${a.name}`;
-      sel.appendChild(opt);
-    });
-    if (current) sel.value = current;
-  });
+  const accountOptions = finanzasAccounts.map((a) => ({ value: a.id, label: `${a.icon ? a.icon + ' ' : ''}${a.name}` }));
+  finanzasFilterAccountField.setOptions([{ value: '', label: 'Todas las cuentas' }, ...accountOptions]);
+  finanzasTransactionAccountField.setOptions(accountOptions);
+  finanzasInvestmentAccountField.setOptions(accountOptions);
 
-  const filterCategorySel = document.getElementById('finanzas-filter-category');
-  const txCategorySel = document.getElementById('finanzas-transaction-category');
-  const currentFilterCat = filterCategorySel.value;
-  const currentTxCat = txCategorySel.value;
-  filterCategorySel.innerHTML = '<option value="">Todas las categorías</option>';
-  txCategorySel.innerHTML = '<option value="">Sin categoría</option>';
-  finanzasCategories.forEach((c) => {
-    const label = `${c.icon ? c.icon + ' ' : ''}${c.name}`;
-    const opt1 = document.createElement('option');
-    opt1.value = c.id;
-    opt1.textContent = label;
-    filterCategorySel.appendChild(opt1);
-    const opt2 = document.createElement('option');
-    opt2.value = c.id;
-    opt2.textContent = label;
-    txCategorySel.appendChild(opt2);
-  });
-  if (currentFilterCat) filterCategorySel.value = currentFilterCat;
-  if (currentTxCat) txCategorySel.value = currentTxCat;
+  const categoryOptions = finanzasCategories.map((c) => ({ value: c.id, label: `${c.icon ? c.icon + ' ' : ''}${c.name}` }));
+  finanzasFilterCategoryField.setOptions([{ value: '', label: 'Todas las categorías' }, ...categoryOptions]);
+  finanzasTransactionCategoryField.setOptions([{ value: '', label: 'Sin categoría' }, ...categoryOptions]);
 }
 
-function resetFinanzasAccountForm() {
-  document.getElementById('finanzas-account-id').value = '';
-  document.getElementById('finanzas-account-name').value = '';
-  document.getElementById('finanzas-account-initial-balance').value = '';
-  document.getElementById('finanzas-account-type').value = '';
-  finanzasAccountIconField.setValue('');
-  finanzasAccountColorField.setValue(DEFAULT_EVENT_COLOR);
-  document.getElementById('btn-cancel-finanzas-account').classList.add('hidden');
+// Cuentas: modal propio (Nueva/Editar), igual que Movimientos/Inversiones
+// -- antes reutilizaba el mismo formulario de "añadir" con un boton
+// Cancelar, Koku pidio que "Editar" abriera algo como el modal de
+// "+ Movimiento" en vez de eso.
+function openFinanzasAccountModal(a) {
+  document.getElementById('finanzas-account-modal-title').textContent = a ? 'Editar cuenta' : 'Nueva cuenta';
+  document.getElementById('finanzas-account-id').value = a ? a.id : '';
+  document.getElementById('finanzas-account-name').value = a ? a.name : '';
+  document.getElementById('finanzas-account-initial-balance').value = a ? a.initialBalance : '';
+  finanzasAccountTypeField.setValue(a ? (a.type || '') : '');
+  finanzasAccountIconField.setValue(a ? (a.icon || '') : '');
+  finanzasAccountColorField.setValue(a ? a.color : DEFAULT_EVENT_COLOR);
+  document.getElementById('finanzas-account-modal').classList.remove('hidden');
 }
+function closeFinanzasAccountModal() {
+  document.getElementById('finanzas-account-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-finanzas-account').addEventListener('click', () => openFinanzasAccountModal(null));
+document.getElementById('btn-cancel-finanzas-account').addEventListener('click', closeFinanzasAccountModal);
+document.getElementById('btn-close-finanzas-account').addEventListener('click', closeFinanzasAccountModal);
+
 function resetFinanzasCategoryForm() {
   document.getElementById('finanzas-category-id').value = '';
   document.getElementById('finanzas-category-name').value = '';
@@ -4670,15 +4786,7 @@ function renderFinanzasAccountsList() {
         <button type="button" class="danger-btn" data-action="delete">Eliminar</button>
       </div>
     `;
-    row.querySelector('[data-action="edit"]').addEventListener('click', () => {
-      document.getElementById('finanzas-account-id').value = a.id;
-      document.getElementById('finanzas-account-name').value = a.name;
-      document.getElementById('finanzas-account-initial-balance').value = a.initialBalance;
-      document.getElementById('finanzas-account-type').value = a.type || '';
-      finanzasAccountIconField.setValue(a.icon || '');
-      finanzasAccountColorField.setValue(a.color);
-      document.getElementById('btn-cancel-finanzas-account').classList.remove('hidden');
-    });
+    row.querySelector('[data-action="edit"]').addEventListener('click', () => openFinanzasAccountModal(a));
     row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
       if (!confirm(`¿Eliminar la cuenta "${a.name}"?`)) return;
       try {
@@ -5176,7 +5284,6 @@ async function refreshFinanzasAccountsAndCategories() {
   renderFinanzasCategoriesList();
 }
 
-document.getElementById('btn-cancel-finanzas-account').addEventListener('click', resetFinanzasAccountForm);
 document.getElementById('btn-cancel-finanzas-category').addEventListener('click', resetFinanzasCategoryForm);
 
 document.getElementById('finanzas-account-form').addEventListener('submit', async (e) => {
@@ -5187,14 +5294,14 @@ document.getElementById('finanzas-account-form').addEventListener('submit', asyn
     icon: finanzasAccountIconField.getValue() || null,
     color: finanzasAccountColorField.getValue(),
     initialBalance: document.getElementById('finanzas-account-initial-balance').value || 0,
-    type: document.getElementById('finanzas-account-type').value || null,
+    type: finanzasAccountTypeField.getValue() || null,
   };
   if (id) {
     await api(`/api/finanzas-accounts/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   } else {
     await api('/api/finanzas-accounts', { method: 'POST', body: JSON.stringify(payload) });
   }
-  resetFinanzasAccountForm();
+  closeFinanzasAccountModal();
   await refreshFinanzasAccountsAndCategories();
   renderFinanzasResumenTab();
 });
@@ -5244,6 +5351,46 @@ function renderFinanzasAccountsSummary() {
 // del progreso contra el limite mensual de arriba.
 const FINANZAS_MONTH_ABBR = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
+// Tooltip generico para las graficas SVG de Finanzas (barras) -- un UNICO
+// div compartido (no uno por grafica ni por barra), reposicionado
+// siguiendo al raton via clientX/clientY (asi no hace falta convertir
+// coordenadas del viewBox del SVG a pixeles reales). Sustituye a los
+// <title> nativos que tenia la grafica de evolucion mensual (con el
+// retraso tipico del navegador, y sin nada en movil/tactil) -- Koku dijo
+// que "no era nada orientativo". Reutilizado tambien por la grafica
+// nueva de Inversiones.
+let finanzasChartTooltipEl = null;
+function getFinanzasChartTooltip() {
+  if (!finanzasChartTooltipEl) {
+    finanzasChartTooltipEl = document.createElement('div');
+    finanzasChartTooltipEl.className = 'finanzas-chart-tooltip hidden';
+    document.body.appendChild(finanzasChartTooltipEl);
+  }
+  return finanzasChartTooltipEl;
+}
+// Se llama tras pintar cada grafica -- busca cualquier elemento con
+// data-tooltip dentro del SVG y le engancha los listeners. Los rects de
+// barras ya renderizados no se reutilizan entre repintados (wrap.innerHTML
+// se reescribe entero cada vez), asi que no hace falta quitar listeners
+// viejos.
+function attachFinanzasChartTooltips(svgEl) {
+  if (!svgEl) return;
+  const tooltip = getFinanzasChartTooltip();
+  svgEl.querySelectorAll('[data-tooltip]').forEach((el) => {
+    el.addEventListener('mouseenter', () => {
+      tooltip.textContent = el.dataset.tooltip;
+      tooltip.classList.remove('hidden');
+    });
+    el.addEventListener('mousemove', (e) => {
+      tooltip.style.left = `${e.clientX + 14}px`;
+      tooltip.style.top = `${e.clientY + 14}px`;
+    });
+    el.addEventListener('mouseleave', () => {
+      tooltip.classList.add('hidden');
+    });
+  });
+}
+
 function renderFinanzasMonthlyTrendChart(data) {
   const wrap = document.getElementById('finanzas-monthly-trend-chart');
   if (!data || data.length === 0) {
@@ -5268,12 +5415,8 @@ function renderFinanzasMonthlyTrendChart(data) {
     const [year, monthNum] = d.month.split('-');
     const label = FINANZAS_MONTH_ABBR[Number(monthNum) - 1];
     bars += `
-      <rect x="${groupX}" y="${chartHeight - incomeH}" width="${barWidth}" height="${incomeH}" fill="#43aa8b">
-        <title>${label} ${year}: ingresos ${formatFinanzasAmount(d.totalIncome)}</title>
-      </rect>
-      <rect x="${groupX + barWidth + barGap}" y="${chartHeight - expenseH}" width="${barWidth}" height="${expenseH}" fill="#e63946">
-        <title>${label} ${year}: gastos ${formatFinanzasAmount(d.totalExpense)}</title>
-      </rect>
+      <rect x="${groupX}" y="${chartHeight - incomeH}" width="${barWidth}" height="${incomeH}" fill="#43aa8b" data-tooltip="${escapeHtml(`${label} ${year}: ingresos ${formatFinanzasAmount(d.totalIncome)}`)}"></rect>
+      <rect x="${groupX + barWidth + barGap}" y="${chartHeight - expenseH}" width="${barWidth}" height="${expenseH}" fill="#e63946" data-tooltip="${escapeHtml(`${label} ${year}: gastos ${formatFinanzasAmount(d.totalExpense)}`)}"></rect>
       <text x="${groupX + barWidth + barGap / 2}" y="${chartHeight + 18}" text-anchor="middle" class="finanzas-trend-chart-label">${label}</text>
     `;
   });
@@ -5288,7 +5431,80 @@ function renderFinanzasMonthlyTrendChart(data) {
       <span><span class="finanzas-trend-legend-dot" style="background:#e63946"></span> Gastos</span>
     </div>
   `;
+  attachFinanzasChartTooltips(wrap.querySelector('svg'));
 }
+
+// Vista mensual del bloque "Ahorro": a diferencia del resto de la
+// pestaña Resumen (siempre "este mes"), aqui se puede elegir cualquier
+// mes/año con el selector + flechas de arriba. El objetivo minimo
+// sigue siendo un unico ajuste global (no cambia segun el mes que se
+// mire aqui) -- por eso se compara con summary.savingsGoalMin, que ya
+// viene igual sea cual sea el mes pedido.
+async function renderFinanzasSavingsMonthly() {
+  const month = finanzasSavingsMonthField.getValue();
+  const year = document.getElementById('finanzas-savings-year-input').value || finanzasCurrentYear;
+  const summary = await api(`/api/finanzas-transactions/summary/month?month=${year}-${month}`);
+  const statusWrap = document.getElementById('finanzas-savings-status');
+  const goal = summary.savingsGoalMin;
+  let statusHtml = `<span class="finanzas-savings-status-text">Ese mes ahorraste ${formatFinanzasAmount(summary.savings)}.</span>`;
+  if (goal) {
+    const met = summary.savings >= goal;
+    statusHtml += ` <span class="finanzas-savings-status-text ${met ? 'met' : 'not-met'}">${met ? `✓ Cumples el objetivo (${formatFinanzasAmount(goal)})` : `✕ Por debajo del objetivo (${formatFinanzasAmount(goal)}), faltan ${formatFinanzasAmount(goal - summary.savings)}`}</span>`;
+  }
+  statusWrap.innerHTML = statusHtml;
+}
+
+function shiftFinanzasSavingsMonth(delta) {
+  const month = Number(finanzasSavingsMonthField.getValue());
+  const yearInput = document.getElementById('finanzas-savings-year-input');
+  let year = Number(yearInput.value) || finanzasCurrentYear;
+  let newMonth = month + delta;
+  if (newMonth < 1) { newMonth = 12; year -= 1; }
+  else if (newMonth > 12) { newMonth = 1; year += 1; }
+  finanzasSavingsMonthField.setValue(String(newMonth).padStart(2, '0'));
+  yearInput.value = year;
+  renderFinanzasSavingsMonthly();
+}
+document.getElementById('btn-finanzas-savings-month-prev').addEventListener('click', () => shiftFinanzasSavingsMonth(-1));
+document.getElementById('btn-finanzas-savings-month-next').addEventListener('click', () => shiftFinanzasSavingsMonth(1));
+document.getElementById('finanzas-savings-year-input').addEventListener('change', () => renderFinanzasSavingsMonthly());
+
+function setFinanzasSavingsView(view) {
+  document.getElementById('btn-finanzas-savings-view-monthly').classList.toggle('active', view === 'monthly');
+  document.getElementById('btn-finanzas-savings-view-historic').classList.toggle('active', view === 'historic');
+  document.getElementById('finanzas-savings-monthly-view').classList.toggle('hidden', view !== 'monthly');
+  document.getElementById('finanzas-savings-historic-view').classList.toggle('hidden', view !== 'historic');
+}
+document.getElementById('btn-finanzas-savings-view-monthly').addEventListener('click', () => setFinanzasSavingsView('monthly'));
+document.getElementById('btn-finanzas-savings-view-historic').addEventListener('click', () => setFinanzasSavingsView('historic'));
+
+document.getElementById('btn-finanzas-savings-range-view').addEventListener('click', async () => {
+  const fromMonth = finanzasSavingsRangeFromMonthField.getValue();
+  const fromYear = document.getElementById('finanzas-savings-range-from-year').value || finanzasCurrentYear;
+  const toMonth = finanzasSavingsRangeToMonthField.getValue();
+  const toYear = document.getElementById('finanzas-savings-range-to-year').value || finanzasCurrentYear;
+  const tbody = document.getElementById('finanzas-savings-history-tbody');
+  let rows;
+  try {
+    rows = await api(`/api/finanzas-transactions/summary/range?from=${fromYear}-${fromMonth}&to=${toYear}-${toMonth}`);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  tbody.innerHTML = '';
+  rows.forEach((r) => {
+    const [y, m] = r.month.split('-');
+    const met = r.savingsGoalMin ? r.savings >= r.savingsGoalMin : null;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${FINANZAS_MONTH_NAMES[Number(m) - 1]} ${y}</td>
+      <td>${formatFinanzasAmount(r.savings)}</td>
+      <td>${r.savingsGoalMin ? formatFinanzasAmount(r.savingsGoalMin) : '—'}</td>
+      <td>${met === null ? '—' : met ? '✓' : '✕'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+});
 
 async function renderFinanzasResumenTab() {
   renderFinanzasAccountsSummary();
@@ -5318,19 +5534,12 @@ async function renderFinanzasResumenTab() {
   // El aviso de "objetivo poco realista" solo tiene sentido justo tras
   // guardar (ver el listener de btn-save-finanzas-savings-goal, que lo
   // rellena de nuevo si la respuesta lo trae) -- en cualquier otro
-  // refresco de la pestaña se oculta, para no dejar un aviso viejo.
+  // refresco de la pestaña se oculta, para no dejar un aviso viejo. El
+  // texto de "cuanto se ha ahorrado" vive ahora en
+  // renderFinanzasSavingsMonthly() (vista mensual, con su propio
+  // selector de mes -- ver mas abajo), no aqui.
   document.getElementById('finanzas-savings-warning').classList.add('hidden');
-  const savingsStatusWrap = document.getElementById('finanzas-savings-status');
-  if (summary.savingsGoalMin) {
-    const met = summary.savings >= summary.savingsGoalMin;
-    savingsStatusWrap.innerHTML = `
-      <div class="finanzas-savings-status-text${met ? ' met' : ' not-met'}">
-        Este mes has ahorrado ${formatFinanzasAmount(summary.savings)} — objetivo ${formatFinanzasAmount(summary.savingsGoalMin)}${met ? ' ✓ cumplido' : ` (te faltan ${formatFinanzasAmount(summary.savingsGoalMin - summary.savings)})`}
-      </div>
-    `;
-  } else {
-    savingsStatusWrap.innerHTML = `<div class="finanzas-savings-status-text">Este mes has ahorrado ${formatFinanzasAmount(summary.savings)}. Sin objetivo configurado todavía.</div>`;
-  }
+  await renderFinanzasSavingsMonthly();
 
   const breakdownList = document.getElementById('finanzas-category-breakdown-list');
   breakdownList.innerHTML = '';
@@ -5546,18 +5755,14 @@ function renderLecturasSagasTable() {
   });
 }
 
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function openFinanzasTransactionModal(t) {
   document.getElementById('finanzas-transaction-modal-title').textContent = t ? 'Editar movimiento' : 'Nuevo movimiento';
   document.getElementById('finanzas-transaction-id').value = t ? t.id : '';
-  document.getElementById('finanzas-transaction-type').value = t ? t.type : 'expense';
-  document.getElementById('finanzas-transaction-account').value = t ? t.accountId : (finanzasAccounts[0] ? finanzasAccounts[0].id : '');
-  document.getElementById('finanzas-transaction-category').value = t && t.categoryId ? t.categoryId : '';
+  finanzasTransactionTypeField.setValue(t ? t.type : 'expense');
+  finanzasTransactionAccountField.setValue(t ? t.accountId : (finanzasAccounts[0] ? finanzasAccounts[0].id : ''));
+  finanzasTransactionCategoryField.setValue(t && t.categoryId ? t.categoryId : '');
   document.getElementById('finanzas-transaction-amount').value = t ? t.amount : '';
-  document.getElementById('finanzas-transaction-date').value = t ? t.date : todayIsoDate();
+  finanzasTransactionDateField.setValue(t ? new Date(`${t.date}T00:00:00`) : new Date());
   document.getElementById('finanzas-transaction-description').value = t ? (t.description || '') : '';
   document.getElementById('finanzas-transaction-counts').checked = t ? t.countsTowardBudget : true;
   document.getElementById('finanzas-transaction-fixed').checked = t ? t.isFixed : false;
@@ -5569,28 +5774,27 @@ function closeFinanzasTransactionModal() {
   document.getElementById('finanzas-transaction-modal').classList.add('hidden');
 }
 function refreshFinanzasTransactionTypeFields() {
-  const isExpense = document.getElementById('finanzas-transaction-type').value === 'expense';
+  const isExpense = finanzasTransactionTypeField.getValue() === 'expense';
   document.getElementById('finanzas-transaction-category-label').classList.toggle('hidden', !isExpense);
   document.getElementById('finanzas-transaction-counts-row').classList.toggle('hidden', !isExpense);
   document.getElementById('finanzas-transaction-fixed-row').classList.toggle('hidden', !isExpense);
   document.getElementById('finanzas-transaction-salary-row').classList.toggle('hidden', isExpense);
 }
-document.getElementById('finanzas-transaction-type').addEventListener('change', refreshFinanzasTransactionTypeFields);
 document.getElementById('btn-new-finanzas-transaction').addEventListener('click', () => openFinanzasTransactionModal(null));
 document.getElementById('btn-close-finanzas-transaction').addEventListener('click', closeFinanzasTransactionModal);
 
 document.getElementById('finanzas-transaction-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('finanzas-transaction-id').value;
-  const type = document.getElementById('finanzas-transaction-type').value;
+  const type = finanzasTransactionTypeField.getValue();
   const payload = {
-    accountId: Number(document.getElementById('finanzas-transaction-account').value),
+    accountId: Number(finanzasTransactionAccountField.getValue()),
     type,
     amount: document.getElementById('finanzas-transaction-amount').value,
-    date: document.getElementById('finanzas-transaction-date').value,
+    date: toDateKey(finanzasTransactionDateField.getValue()),
     description: document.getElementById('finanzas-transaction-description').value || null,
-    categoryId: type === 'expense' && document.getElementById('finanzas-transaction-category').value
-      ? Number(document.getElementById('finanzas-transaction-category').value)
+    categoryId: type === 'expense' && finanzasTransactionCategoryField.getValue()
+      ? Number(finanzasTransactionCategoryField.getValue())
       : null,
     countsTowardBudget: type === 'expense' ? document.getElementById('finanzas-transaction-counts').checked : false,
     isFixed: type === 'expense' ? document.getElementById('finanzas-transaction-fixed').checked : false,
@@ -5607,23 +5811,13 @@ document.getElementById('finanzas-transaction-form').addEventListener('submit', 
   renderFinanzasResumenTab();
 });
 
-['finanzas-filter-account', 'finanzas-filter-category', 'finanzas-filter-type', 'finanzas-filter-from', 'finanzas-filter-to'].forEach((id) => {
-  document.getElementById(id).addEventListener('change', () => {
-    finanzasFilters.accountId = document.getElementById('finanzas-filter-account').value;
-    finanzasFilters.categoryId = document.getElementById('finanzas-filter-category').value;
-    finanzasFilters.type = document.getElementById('finanzas-filter-type').value;
-    finanzasFilters.from = document.getElementById('finanzas-filter-from').value;
-    finanzasFilters.to = document.getElementById('finanzas-filter-to').value;
-    refreshFinanzasTransactionsTab();
-  });
-});
 document.getElementById('btn-clear-finanzas-filters').addEventListener('click', () => {
   finanzasFilters.accountId = finanzasFilters.categoryId = finanzasFilters.type = finanzasFilters.from = finanzasFilters.to = '';
-  document.getElementById('finanzas-filter-account').value = '';
-  document.getElementById('finanzas-filter-category').value = '';
-  document.getElementById('finanzas-filter-type').value = '';
-  document.getElementById('finanzas-filter-from').value = '';
-  document.getElementById('finanzas-filter-to').value = '';
+  finanzasFilterAccountField.setValue('');
+  finanzasFilterCategoryField.setValue('');
+  finanzasFilterTypeField.setValue('');
+  finanzasFilterFromField.setValue(null);
+  finanzasFilterToField.setValue(null);
   refreshFinanzasTransactionsTab();
 });
 
@@ -5691,30 +5885,95 @@ async function refreshFinanzasInvestmentsTab() {
       summaryTbody.appendChild(tr);
     });
   }
+
+  const assetNames = [...new Set(investments.map((i) => i.assetName))].sort((a, b) => a.localeCompare(b, 'es'));
+  finanzasInvestmentTrendAssetField.setOptions([{ value: '', label: 'Todos los activos' }, ...assetNames.map((a) => ({ value: a, label: a }))]);
+  await refreshFinanzasInvestmentTrendChart();
+}
+
+// Evolucion mensual de compras/ventas/dividendos -- mismo estilo de
+// barras que renderFinanzasMonthlyTrendChart(), pero con 3 series y con
+// filtro de activo (finanzasInvestmentTrendAssetField, "Todos los
+// activos" por defecto) para poder ver la evolucion general o la de una
+// accion en concreto, como pidio Koku.
+async function refreshFinanzasInvestmentTrendChart() {
+  const assetName = finanzasInvestmentTrendAssetField.getValue();
+  const qs = assetName ? `?assetName=${encodeURIComponent(assetName)}` : '';
+  const data = await api(`/api/finanzas-investments/summary/monthly-trend${qs}`);
+  renderFinanzasInvestmentTrendChart(data);
+}
+
+function renderFinanzasInvestmentTrendChart(data) {
+  const wrap = document.getElementById('finanzas-investment-trend-chart');
+  if (!data || data.length === 0) {
+    wrap.innerHTML = '<p class="empty-hint">Sin datos todavia.</p>';
+    return;
+  }
+
+  const maxValue = Math.max(1, ...data.flatMap((d) => [d.totalBought, d.totalSold, d.totalDividends]));
+  const chartHeight = 160;
+  const barWidth = 10;
+  const barGap = 3;
+  const groupWidth = barWidth * 3 + barGap * 2;
+  const groupGap = 14;
+  const svgWidth = data.length * (groupWidth + groupGap) + groupGap;
+  const svgHeight = chartHeight + 30;
+
+  let bars = '';
+  data.forEach((d, i) => {
+    const groupX = groupGap + i * (groupWidth + groupGap);
+    const boughtH = (d.totalBought / maxValue) * chartHeight;
+    const soldH = (d.totalSold / maxValue) * chartHeight;
+    const divH = (d.totalDividends / maxValue) * chartHeight;
+    const [year, monthNum] = d.month.split('-');
+    const label = FINANZAS_MONTH_ABBR[Number(monthNum) - 1];
+    bars += `
+      <rect x="${groupX}" y="${chartHeight - boughtH}" width="${barWidth}" height="${boughtH}" fill="#e63946" data-tooltip="${escapeHtml(`${label} ${year}: comprado ${formatFinanzasAmount(d.totalBought)}`)}"></rect>
+      <rect x="${groupX + barWidth + barGap}" y="${chartHeight - soldH}" width="${barWidth}" height="${soldH}" fill="#43aa8b" data-tooltip="${escapeHtml(`${label} ${year}: vendido ${formatFinanzasAmount(d.totalSold)}`)}"></rect>
+      <rect x="${groupX + (barWidth + barGap) * 2}" y="${chartHeight - divH}" width="${barWidth}" height="${divH}" fill="#f5b400" data-tooltip="${escapeHtml(`${label} ${year}: dividendos ${formatFinanzasAmount(d.totalDividends)}`)}"></rect>
+      <text x="${groupX + groupWidth / 2}" y="${chartHeight + 18}" text-anchor="middle" class="finanzas-trend-chart-label">${label}</text>
+    `;
+  });
+
+  wrap.innerHTML = `
+    <svg viewBox="0 0 ${svgWidth} ${svgHeight}" class="finanzas-trend-chart-svg" role="img" aria-label="Evolucion mensual de compras, ventas y dividendos">
+      <line x1="0" y1="${chartHeight}" x2="${svgWidth}" y2="${chartHeight}" class="finanzas-trend-chart-axis" />
+      ${bars}
+    </svg>
+    <div class="finanzas-trend-chart-legend">
+      <span><span class="finanzas-trend-legend-dot" style="background:#e63946"></span> Comprado</span>
+      <span><span class="finanzas-trend-legend-dot" style="background:#43aa8b"></span> Vendido</span>
+      <span><span class="finanzas-trend-legend-dot" style="background:#f5b400"></span> Dividendos</span>
+    </div>
+  `;
+  attachFinanzasChartTooltips(wrap.querySelector('svg'));
 }
 
 function refreshFinanzasInvestmentTypeFields() {
-  const type = document.getElementById('finanzas-investment-type').value;
+  const type = finanzasInvestmentTypeField.getValue();
   const isDividend = type === 'dividend';
   document.getElementById('finanzas-investment-qty-price-row').classList.toggle('hidden', isDividend);
   document.getElementById('finanzas-investment-amount-label').classList.toggle('hidden', !isDividend);
   document.getElementById('finanzas-investment-quantity').required = !isDividend;
   document.getElementById('finanzas-investment-price').required = !isDividend;
   document.getElementById('finanzas-investment-amount').required = isDividend;
+  // "Cuenta para el limite mensual" solo tiene sentido en una Compra --
+  // una venta o un dividendo traen dinero DENTRO, no lo gastan.
+  document.getElementById('finanzas-investment-counts-row').classList.toggle('hidden', type !== 'buy');
 }
-document.getElementById('finanzas-investment-type').addEventListener('change', refreshFinanzasInvestmentTypeFields);
 
 function openFinanzasInvestmentModal(inv) {
   document.getElementById('finanzas-investment-modal-title').textContent = inv ? 'Editar operación' : 'Nueva inversión';
   document.getElementById('finanzas-investment-id').value = inv ? inv.id : '';
-  document.getElementById('finanzas-investment-account').value = inv ? inv.accountId : (finanzasAccounts[0] ? finanzasAccounts[0].id : '');
+  finanzasInvestmentAccountField.setValue(inv ? inv.accountId : (finanzasAccounts[0] ? finanzasAccounts[0].id : ''));
   document.getElementById('finanzas-investment-asset').value = inv ? inv.assetName : '';
-  document.getElementById('finanzas-investment-type').value = inv ? inv.type : 'buy';
+  finanzasInvestmentTypeField.setValue(inv ? inv.type : 'buy');
   document.getElementById('finanzas-investment-quantity').value = inv && inv.quantity !== null ? inv.quantity : '';
   document.getElementById('finanzas-investment-price').value = inv && inv.pricePerUnit !== null ? inv.pricePerUnit : '';
   document.getElementById('finanzas-investment-amount').value = inv && inv.type === 'dividend' ? inv.amount : '';
-  document.getElementById('finanzas-investment-date').value = inv ? inv.date : todayIsoDate();
+  finanzasInvestmentDateField.setValue(inv ? new Date(`${inv.date}T00:00:00`) : new Date());
   document.getElementById('finanzas-investment-notes').value = inv ? (inv.notes || '') : '';
+  document.getElementById('finanzas-investment-counts').checked = inv ? !!inv.countsTowardBudget : false;
   refreshFinanzasInvestmentTypeFields();
   document.getElementById('finanzas-investment-modal').classList.remove('hidden');
 }
@@ -5727,13 +5986,14 @@ document.getElementById('btn-close-finanzas-investment').addEventListener('click
 document.getElementById('finanzas-investment-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('finanzas-investment-id').value;
-  const type = document.getElementById('finanzas-investment-type').value;
+  const type = finanzasInvestmentTypeField.getValue();
   const payload = {
-    accountId: Number(document.getElementById('finanzas-investment-account').value),
+    accountId: Number(finanzasInvestmentAccountField.getValue()),
     assetName: document.getElementById('finanzas-investment-asset').value,
     type,
-    date: document.getElementById('finanzas-investment-date').value,
+    date: toDateKey(finanzasInvestmentDateField.getValue()),
     notes: document.getElementById('finanzas-investment-notes').value || null,
+    countsTowardBudget: type === 'buy' ? document.getElementById('finanzas-investment-counts').checked : false,
   };
   if (type === 'dividend') {
     payload.amount = document.getElementById('finanzas-investment-amount').value;
@@ -5826,17 +6086,43 @@ async function downloadArchivo(name) {
 async function deleteArchivo(name) {
   if (!confirm(`¿Borrar "${name}"?`)) return;
   await api(`/api/archivos/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  archivosSelectedRemote.delete(name);
   await refreshArchivosList();
+}
+
+// Diseño de dos paneles (ver comentario en index.html): el panel
+// derecho es la carpeta compartida de siempre, ahora con checkbox por
+// fila para elegir que archivo(s) traer con la flecha "<-" del medio
+// -- el boton "Borrar" se queda aparte (no es un movimiento entre
+// paneles, no tiene sentido colgarlo de la flecha).
+const archivosSelectedRemote = new Set();
+
+function updateArchivosReceiveButtonState() {
+  document.getElementById('btn-archivos-receive').disabled = archivosSelectedRemote.size === 0;
 }
 
 async function refreshArchivosList() {
   const tbody = document.getElementById('archivos-table-body');
   const emptyHint = document.getElementById('archivos-empty-hint');
   const files = await api('/api/archivos');
+  const validNames = new Set(files.map((f) => f.name));
+  for (const name of archivosSelectedRemote) {
+    if (!validNames.has(name)) archivosSelectedRemote.delete(name);
+  }
   tbody.innerHTML = '';
   emptyHint.classList.toggle('hidden', files.length > 0);
   for (const file of files) {
     const tr = document.createElement('tr');
+    const checkTd = document.createElement('td');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = archivosSelectedRemote.has(file.name);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) archivosSelectedRemote.add(file.name);
+      else archivosSelectedRemote.delete(file.name);
+      updateArchivosReceiveButtonState();
+    });
+    checkTd.appendChild(checkbox);
     const nameTd = document.createElement('td');
     nameTd.textContent = file.name;
     const sizeTd = document.createElement('td');
@@ -5844,30 +6130,63 @@ async function refreshArchivosList() {
     const dateTd = document.createElement('td');
     dateTd.textContent = new Date(file.modifiedAt).toLocaleString();
     const actionsTd = document.createElement('td');
-    const downloadBtn = document.createElement('button');
-    downloadBtn.type = 'button';
-    downloadBtn.className = 'secondary-btn';
-    downloadBtn.textContent = 'Descargar';
-    downloadBtn.addEventListener('click', () => downloadArchivo(file.name));
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.className = 'danger-btn';
     deleteBtn.textContent = 'Borrar';
     deleteBtn.addEventListener('click', () => deleteArchivo(file.name));
-    actionsTd.appendChild(downloadBtn);
     actionsTd.appendChild(deleteBtn);
-    tr.append(nameTd, sizeTd, dateTd, actionsTd);
+    tr.append(checkTd, nameTd, sizeTd, dateTd, actionsTd);
     tbody.appendChild(tr);
   }
+  updateArchivosReceiveButtonState();
 }
 
-document.getElementById('btn-archivos-upload').addEventListener('click', () => {
+// Panel izquierdo ("Este dispositivo"): NO es un explorador real (los
+// navegadores no dejan listar el almacenamiento del propio dispositivo,
+// ver comentario en index.html) -- es solo una lista de archivos ya
+// elegidos con el selector nativo, pendientes de mandar con "->".
+let archivosStagedFiles = [];
+
+function renderArchivosStagedList() {
+  const list = document.getElementById('archivos-staged-list');
+  const emptyHint = document.getElementById('archivos-staged-empty-hint');
+  list.innerHTML = '';
+  emptyHint.classList.toggle('hidden', archivosStagedFiles.length > 0);
+  archivosStagedFiles.forEach((file, index) => {
+    const row = document.createElement('div');
+    row.className = 'archivos-staged-item';
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = `${file.name} (${formatArchivoSize(file.size)})`;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'archivos-staged-remove';
+    removeBtn.setAttribute('aria-label', 'Quitar de la lista');
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', () => {
+      archivosStagedFiles.splice(index, 1);
+      renderArchivosStagedList();
+    });
+    row.append(nameSpan, removeBtn);
+    list.appendChild(row);
+  });
+  document.getElementById('btn-archivos-send').disabled = archivosStagedFiles.length === 0;
+}
+
+document.getElementById('btn-archivos-choose').addEventListener('click', () => {
   document.getElementById('archivos-file-input').click();
 });
-document.getElementById('archivos-file-input').addEventListener('change', async (e) => {
-  const files = Array.from(e.target.files || []);
+document.getElementById('archivos-file-input').addEventListener('change', (e) => {
+  archivosStagedFiles.push(...Array.from(e.target.files || []));
   e.target.value = '';
-  for (const file of files) {
+  renderArchivosStagedList();
+});
+
+document.getElementById('btn-archivos-send').addEventListener('click', async () => {
+  const filesToSend = archivosStagedFiles;
+  archivosStagedFiles = [];
+  renderArchivosStagedList();
+  for (const file of filesToSend) {
     try {
       await api('/api/archivos', {
         method: 'POST',
@@ -5879,6 +6198,13 @@ document.getElementById('archivos-file-input').addEventListener('change', async 
     }
   }
   await refreshArchivosList();
+});
+
+document.getElementById('btn-archivos-receive').addEventListener('click', async () => {
+  const names = Array.from(archivosSelectedRemote);
+  for (const name of names) {
+    await downloadArchivo(name);
+  }
 });
 
 // Bloque "Carpeta de destino": solo editable/explorable desde el
@@ -5957,6 +6283,9 @@ async function openArchivosView() {
   closeExtensionsView();
   document.getElementById('archivos-view').classList.remove('hidden');
   document.getElementById('archivos-folder-browser').classList.add('hidden');
+  archivosStagedFiles = [];
+  renderArchivosStagedList();
+  archivosSelectedRemote.clear();
   await Promise.all([refreshSyncStatusUI(), refreshArchivosFolderUI(), refreshArchivosList(), refreshVersionInfo()]);
 }
 function closeArchivosView() {

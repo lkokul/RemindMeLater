@@ -19,6 +19,7 @@ function serialize(row) {
     amount: row.amount,
     date: row.date,
     notes: row.notes || null,
+    countsTowardBudget: !!row.counts_toward_budget,
   };
 }
 
@@ -65,7 +66,14 @@ function validateBody(body, existing) {
     amount = quantity * pricePerUnit;
   }
 
-  return { accountId, assetName, type, quantity, pricePerUnit, amount, date, notes: body.notes };
+  // Solo tiene sentido en una Compra -- una venta o un dividendo traen
+  // dinero DENTRO, no lo gastan (ver el checkbox equivalente en
+  // finanzasTransactions.js, mismo criterio: el "type" que no aplica
+  // siempre se fuerza a false).
+  const countsTowardBudget =
+    type === 'buy' && (body.countsTowardBudget !== undefined ? !!body.countsTowardBudget : !!(existing && existing.counts_toward_budget));
+
+  return { accountId, assetName, type, quantity, pricePerUnit, amount, date, notes: body.notes, countsTowardBudget };
 }
 
 router.get('/', (req, res) => {
@@ -90,9 +98,19 @@ router.post('/', (req, res) => {
 
   const info = db
     .prepare(
-      'INSERT INTO finanzas_investment_transactions (account_id, asset_name, type, quantity, price_per_unit, amount, date, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO finanzas_investment_transactions (account_id, asset_name, type, quantity, price_per_unit, amount, date, notes, counts_toward_budget) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(result.accountId, result.assetName, result.type, result.quantity, result.pricePerUnit, result.amount, result.date, notes);
+    .run(
+      result.accountId,
+      result.assetName,
+      result.type,
+      result.quantity,
+      result.pricePerUnit,
+      result.amount,
+      result.date,
+      notes,
+      result.countsTowardBudget ? 1 : 0
+    );
 
   const row = db.prepare('SELECT * FROM finanzas_investment_transactions WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json(serialize(row));
@@ -113,7 +131,7 @@ router.put('/:id', (req, res) => {
       : existing.notes;
 
   db.prepare(
-    'UPDATE finanzas_investment_transactions SET account_id = ?, asset_name = ?, type = ?, quantity = ?, price_per_unit = ?, amount = ?, date = ?, notes = ? WHERE id = ?'
+    'UPDATE finanzas_investment_transactions SET account_id = ?, asset_name = ?, type = ?, quantity = ?, price_per_unit = ?, amount = ?, date = ?, notes = ?, counts_toward_budget = ? WHERE id = ?'
   ).run(
     result.accountId,
     result.assetName,
@@ -123,6 +141,7 @@ router.put('/:id', (req, res) => {
     result.amount,
     result.date,
     notes,
+    result.countsTowardBudget ? 1 : 0,
     req.params.id
   );
 
@@ -174,6 +193,44 @@ router.get('/summary/by-asset', (req, res) => {
   }));
 
   res.json(summary);
+});
+
+// Evolucion mensual de compras/ventas/dividendos, ultimos N meses
+// (mismo criterio que GET /summary/monthly-trend de finanzasTransactions.js).
+// assetName opcional: sin el, agrega TODOS los activos; con el, solo ese
+// -- es lo que pidio Koku para poder ver "la evolucion general o la de
+// una accion en concreto" en la grafica nueva de Inversiones.
+router.get('/summary/monthly-trend', (req, res) => {
+  const months = Math.min(24, Math.max(1, Number(req.query.months) || 6));
+  const assetName = req.query.assetName ? String(req.query.assetName) : null;
+
+  const cursor = new Date();
+  cursor.setDate(1);
+  const monthKeys = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(cursor.getFullYear(), cursor.getMonth() - i, 1);
+    monthKeys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+
+  let sql = 'SELECT * FROM finanzas_investment_transactions WHERE date >= ?';
+  const params = [`${monthKeys[0]}-01`];
+  if (assetName) {
+    sql += ' AND asset_name = ?';
+    params.push(assetName);
+  }
+  const rows = db.prepare(sql).all(...params);
+
+  const byMonth = new Map(monthKeys.map((m) => [m, { month: m, totalBought: 0, totalSold: 0, totalDividends: 0 }]));
+  for (const row of rows) {
+    const monthKey = row.date.slice(0, 7);
+    const agg = byMonth.get(monthKey);
+    if (!agg) continue; // fuera del rango pedido (no deberia pasar, pero por si acaso)
+    if (row.type === 'buy') agg.totalBought += row.amount;
+    else if (row.type === 'sell') agg.totalSold += row.amount;
+    else if (row.type === 'dividend') agg.totalDividends += row.amount;
+  }
+
+  res.json(monthKeys.map((m) => byMonth.get(m)));
 });
 
 module.exports = router;

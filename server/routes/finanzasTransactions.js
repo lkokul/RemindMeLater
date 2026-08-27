@@ -155,9 +155,18 @@ router.get('/summary/month', (req, res) => {
   const month = req.query.month && /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : new Date().toISOString().slice(0, 7);
   const prefix = `${month}-`;
 
-  const { total: totalExpense } = db
+  const { total: expenseTotal } = db
     .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'expense' AND counts_toward_budget = 1 AND date LIKE ?")
     .get(`${prefix}%`);
+  // Compras de inversion marcadas "cuenta para el limite mensual" (ver
+  // finanzas_investment_transactions.counts_toward_budget) tambien suman
+  // aqui -- a proposito SOLO al total que se compara contra el limite,
+  // no a totalExpenseAll/savings mas abajo (Koku no pidio cambiar el
+  // calculo del ahorro real, solo el del limite mensual).
+  const { total: investmentBudgetTotal } = db
+    .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_investment_transactions WHERE type = 'buy' AND counts_toward_budget = 1 AND date LIKE ?")
+    .get(`${prefix}%`);
+  const totalExpense = expenseTotal + investmentBudgetTotal;
   const { total: totalIncome } = db
     .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'income' AND date LIKE ?")
     .get(`${prefix}%`);
@@ -199,6 +208,75 @@ router.get('/summary/month', (req, res) => {
     byCategory,
     uncategorizedExpense: uncategorized,
   });
+});
+
+// Ahorro historico: ahorro real (mismo calculo que "savings" de arriba)
+// mes a mes en un rango arbitrario (?from=YYYY-MM&to=YYYY-MM), para la
+// vista "Historico" del bloque Ahorro -- a diferencia de
+// /summary/monthly-trend (siempre los ultimos N meses desde hoy), aqui
+// el rango lo elige quien lo pide, puede ser de hace años. Tope de 60
+// meses para no dejar pedir un rango descontrolado.
+router.get('/summary/range', (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !/^\d{4}-\d{2}$/.test(from) || !to || !/^\d{4}-\d{2}$/.test(to)) {
+    return res.status(400).json({ error: 'invalid_request', message: 'Faltan los meses "from"/"to" (formato YYYY-MM).' });
+  }
+  const [fromYear, fromMonth] = from.split('-').map(Number);
+  const [toYear, toMonth] = to.split('-').map(Number);
+  const fromIndex = fromYear * 12 + (fromMonth - 1);
+  const toIndex = toYear * 12 + (toMonth - 1);
+  if (toIndex < fromIndex) {
+    return res.status(400).json({ error: 'invalid_request', message: 'El mes "hasta" no puede ser anterior al mes "desde".' });
+  }
+  const totalMonths = toIndex - fromIndex + 1;
+  if (totalMonths > 60) {
+    return res.status(400).json({ error: 'invalid_request', message: 'El rango no puede superar los 60 meses.' });
+  }
+
+  const monthKeys = [];
+  for (let i = 0; i < totalMonths; i++) {
+    const idx = fromIndex + i;
+    const y = Math.floor(idx / 12);
+    const m = (idx % 12) + 1;
+    monthKeys.push(`${y}-${String(m).padStart(2, '0')}`);
+  }
+
+  // Comparacion de texto sobre YYYY-MM-DD: "-32" nunca es un dia real,
+  // pero como string cualquier dia 01-31 del ultimo mes es menor que
+  // eso, asi que basta para incluir el mes entero sin calcular su
+  // ultimo dia real (mismo truco que ya usa el resto de este archivo
+  // con LIKE sobre el prefijo del mes).
+  const rows = db
+    .prepare(
+      `SELECT substr(date, 1, 7) as month, type, SUM(amount) as total
+       FROM finanzas_transactions
+       WHERE date >= ? AND date < ?
+       GROUP BY substr(date, 1, 7), type`
+    )
+    .all(`${monthKeys[0]}-01`, `${monthKeys[monthKeys.length - 1]}-32`);
+
+  const byMonth = new Map(monthKeys.map((m) => [m, { totalIncome: 0, totalExpenseAll: 0 }]));
+  for (const row of rows) {
+    const agg = byMonth.get(row.month);
+    if (!agg) continue;
+    if (row.type === 'income') agg.totalIncome = row.total;
+    else if (row.type === 'expense') agg.totalExpenseAll = row.total;
+  }
+
+  const settings = db.prepare('SELECT * FROM finanzas_settings WHERE id = 1').get();
+
+  res.json(
+    monthKeys.map((month) => {
+      const agg = byMonth.get(month);
+      return {
+        month,
+        totalIncome: agg.totalIncome,
+        totalExpenseAll: agg.totalExpenseAll,
+        savings: agg.totalIncome - agg.totalExpenseAll,
+        savingsGoalMin: settings.savings_goal_min,
+      };
+    })
+  );
 });
 
 // Tendencia de los ultimos N meses (por defecto 6, incluido el actual):
