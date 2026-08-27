@@ -5452,6 +5452,54 @@ async function refreshFinanzasTransactionsTab() {
 const LECTURAS_TYPE_LABELS = { manga: 'Manga', comic: 'Cómic', libro: 'Libro', serie: 'Serie', anime: 'Anime', pelicula: 'Película' };
 const LECTURAS_STATUS_LABELS = { wishlist: 'Deseado', in_progress: 'En progreso', completed: 'Completado', dropped: 'Abandonado' };
 const LECTURAS_STATUS_COLORS = { wishlist: '#9aa0a6', in_progress: '#f5b400', completed: '#2ecc71', dropped: '#e5484d' };
+// Punto de partida de generos sugeridos -- se une con los que ya se
+// hayan usado en CUALQUIER item de Lecturas (no solo la saga abierta,
+// ver renderLecturasItemGenreChips) para formar la lista de sugerencias.
+// Ajustable con el tiempo, no es una lista cerrada: escribir uno nuevo a
+// mano en el input sigue funcionando igual que siempre.
+const LECTURAS_PREDEFINED_GENRES = [
+  'Acción', 'Aventura', 'Comedia', 'Drama', 'Fantasía', 'Terror', 'Misterio',
+  'Romance', 'Ciencia ficción', 'Slice of life', 'Thriller', 'Deportes',
+  'Histórico', 'Musical', 'Documental', 'Infantil',
+];
+
+// Selectores con estilo propio para Tipo/Estado del modal de item (antes
+// eran <select> nativos, ver CLAUDE.md/plan -- desentonaban con el resto
+// del modal, que ya usa los colores del tema). Mismo patron que
+// eventGroupField/taskGroupField: se crean UNA vez al cargar el script,
+// openLecturasItemModal() solo llama a .setValue().
+const lecturasItemTypeField = createSelectField({
+  options: Object.entries(LECTURAS_TYPE_LABELS).map(([value, label]) => ({ value, label })),
+  initialValue: 'manga',
+});
+document.getElementById('lecturas-item-type-field').appendChild(lecturasItemTypeField.element);
+
+const lecturasItemStatusField = createSelectField({
+  options: Object.entries(LECTURAS_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+  initialValue: 'wishlist',
+});
+document.getElementById('lecturas-item-status-field').appendChild(lecturasItemStatusField.element);
+
+// Rating: slider + numero sincronizados -- cualquiera de los dos vale
+// para poner la nota; solo el numero puede dejarse vacio del todo (el
+// slider no tiene un estado "sin valor"), asi que sigue siendo la unica
+// forma de marcar "sin valorar todavia". Los listeners se ponen una sola
+// vez (los elementos del modal no se recrean nunca, siempre son los
+// mismos de index.html).
+function clampLecturasRatingInput(el) {
+  if (el.value === '') return;
+  const clamped = Math.max(0, Math.min(10, Number(el.value)));
+  if (String(clamped) !== el.value) el.value = clamped;
+}
+const lecturasItemRatingRange = document.getElementById('lecturas-item-rating-range');
+const lecturasItemRatingNumber = document.getElementById('lecturas-item-rating');
+lecturasItemRatingRange.addEventListener('input', () => {
+  lecturasItemRatingNumber.value = lecturasItemRatingRange.value;
+});
+lecturasItemRatingNumber.addEventListener('input', () => {
+  clampLecturasRatingInput(lecturasItemRatingNumber);
+  lecturasItemRatingRange.value = lecturasItemRatingNumber.value === '' ? 0 : lecturasItemRatingNumber.value;
+});
 
 async function refreshLecturasSagasView() {
   document.getElementById('lecturas-sagas-panel').classList.remove('hidden');
@@ -5987,40 +6035,85 @@ document.getElementById('btn-delete-lecturas-saga').addEventListener('click', as
 // --- Filtros de la tabla de items ---------------------------------------
 let lecturasItemFilters = { type: '', status: '', genre: '', minRating: '' };
 
+// Selectores con estilo propio para los filtros de tipo/estado/genero
+// (antes <select> nativos, mismo motivo que en el modal de item). A
+// diferencia de los del modal, estos SI necesitan poder cambiar sus
+// opciones despues de creados (el genero depende de lo que haya en cada
+// saga) -- por eso se crean UNA sola vez aqui (createSelectField cuelga
+// su popover de <body> y no lo quita solo: crear una instancia nueva en
+// CADA repintado de renderLecturasItemFilters() iria acumulando popovers
+// huerfanos) y renderLecturasItemFilters() solo llama a
+// .setOptions()/.setValue() en las siguientes veces que se ejecuta.
+const lecturasFilterTypeField = createSelectField({
+  options: [{ value: '', label: 'Todos los tipos' }, ...Object.entries(LECTURAS_TYPE_LABELS).map(([value, label]) => ({ value, label }))],
+  initialValue: '',
+  onChange: (value) => { lecturasItemFilters.type = value; renderLecturasItemsTable(); },
+});
+const lecturasFilterStatusField = createSelectField({
+  options: [{ value: '', label: 'Todos los estados' }, ...Object.entries(LECTURAS_STATUS_LABELS).map(([value, label]) => ({ value, label }))],
+  initialValue: '',
+  onChange: (value) => { lecturasItemFilters.status = value; renderLecturasItemsTable(); },
+});
+const lecturasFilterGenreField = createSelectField({
+  options: [{ value: '', label: 'Todos los géneros' }],
+  initialValue: '',
+  onChange: (value) => { lecturasItemFilters.genre = value; renderLecturasItemsTable(); },
+});
+
 function renderLecturasItemFilters() {
   const container = document.getElementById('lecturas-item-filters');
+  if (!container.dataset.built) {
+    container.dataset.built = '1';
+    const typeWrap = document.createElement('div');
+    typeWrap.className = 'lecturas-filter-field';
+    typeWrap.appendChild(lecturasFilterTypeField.element);
+    const statusWrap = document.createElement('div');
+    statusWrap.className = 'lecturas-filter-field';
+    statusWrap.appendChild(lecturasFilterStatusField.element);
+    const genreWrap = document.createElement('div');
+    genreWrap.className = 'lecturas-filter-field';
+    genreWrap.appendChild(lecturasFilterGenreField.element);
+
+    const ratingInput = document.createElement('input');
+    ratingInput.type = 'number';
+    ratingInput.id = 'lecturas-filter-min-rating';
+    ratingInput.placeholder = 'Rating mín.';
+    ratingInput.min = '0';
+    ratingInput.max = '10';
+    ratingInput.step = '0.5';
+    ratingInput.addEventListener('input', () => {
+      clampLecturasRatingInput(ratingInput);
+      lecturasItemFilters.minRating = ratingInput.value;
+      renderLecturasItemsTable();
+    });
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.id = 'btn-clear-lecturas-filters';
+    clearBtn.className = 'secondary-btn';
+    clearBtn.textContent = 'Quitar filtros';
+    clearBtn.addEventListener('click', () => {
+      lecturasItemFilters = { type: '', status: '', genre: '', minRating: '' };
+      lecturasFilterTypeField.setValue('');
+      lecturasFilterStatusField.setValue('');
+      lecturasFilterGenreField.setValue('');
+      ratingInput.value = '';
+      renderLecturasItemsTable();
+    });
+
+    container.append(typeWrap, statusWrap, genreWrap, ratingInput, clearBtn);
+  }
+
+  // Lo unico que cambia entre repintados es el listado de generos
+  // disponibles (depende de la saga) y los valores actuales -- los
+  // filtros se resetean al cambiar de saga (ver openLecturasSagaDetail),
+  // asi que reflejar lecturasItemFilters aqui basta.
   const allGenres = [...new Set(state.lecturasItems.flatMap((it) => it.genres))].sort();
-
-  container.innerHTML = `
-    <select id="lecturas-filter-type">
-      <option value="">Todos los tipos</option>
-      ${Object.entries(LECTURAS_TYPE_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
-    </select>
-    <select id="lecturas-filter-status">
-      <option value="">Todos los estados</option>
-      ${Object.entries(LECTURAS_STATUS_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
-    </select>
-    <select id="lecturas-filter-genre">
-      <option value="">Todos los géneros</option>
-      ${allGenres.map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('')}
-    </select>
-    <input type="number" id="lecturas-filter-min-rating" placeholder="Rating mín." min="0" max="10" step="0.5" style="width: 6.5rem;" />
-    <button type="button" id="btn-clear-lecturas-filters" class="secondary-btn">Quitar filtros</button>
-  `;
-  document.getElementById('lecturas-filter-type').value = lecturasItemFilters.type;
-  document.getElementById('lecturas-filter-status').value = lecturasItemFilters.status;
-  document.getElementById('lecturas-filter-genre').value = lecturasItemFilters.genre;
+  lecturasFilterGenreField.setOptions([{ value: '', label: 'Todos los géneros' }, ...allGenres.map((g) => ({ value: g, label: g }))]);
+  lecturasFilterTypeField.setValue(lecturasItemFilters.type);
+  lecturasFilterStatusField.setValue(lecturasItemFilters.status);
+  lecturasFilterGenreField.setValue(lecturasItemFilters.genre);
   document.getElementById('lecturas-filter-min-rating').value = lecturasItemFilters.minRating;
-
-  document.getElementById('lecturas-filter-type').addEventListener('change', (e) => { lecturasItemFilters.type = e.target.value; renderLecturasItemsTable(); });
-  document.getElementById('lecturas-filter-status').addEventListener('change', (e) => { lecturasItemFilters.status = e.target.value; renderLecturasItemsTable(); });
-  document.getElementById('lecturas-filter-genre').addEventListener('change', (e) => { lecturasItemFilters.genre = e.target.value; renderLecturasItemsTable(); });
-  document.getElementById('lecturas-filter-min-rating').addEventListener('input', (e) => { lecturasItemFilters.minRating = e.target.value; renderLecturasItemsTable(); });
-  document.getElementById('btn-clear-lecturas-filters').addEventListener('click', () => {
-    lecturasItemFilters = { type: '', status: '', genre: '', minRating: '' };
-    renderLecturasItemFilters();
-    renderLecturasItemsTable();
-  });
 }
 
 function lecturasItemMatchesFilters(item) {
@@ -6060,6 +6153,27 @@ function renderLecturasItemsTable() {
 // --- Modal de item (con chips de generos) -------------------------------
 let lecturasItemGenres = [];
 
+// Generos ya usados en CUALQUIER saga (no solo la abierta ahora mismo)
+// -- se traen con GET /api/lecturas-items sin sagaId, que ya devuelve
+// todos los items de todas las sagas (ver server/routes/lecturasItems.js).
+// Sin tabla ni endpoint nuevo: "la opcion de seleccion general" que
+// pidio Koku sale sola de los items ya guardados, combinada con
+// LECTURAS_PREDEFINED_GENRES para tener algo que elegir incluso antes de
+// haber usado ningun genero todavia.
+let lecturasGlobalGenres = [];
+async function refreshLecturasGlobalGenres() {
+  try {
+    const allItems = await api('/api/lecturas-items');
+    lecturasGlobalGenres = [...new Set(allItems.flatMap((it) => it.genres))];
+  } catch (err) {
+    lecturasGlobalGenres = [];
+  }
+}
+function lecturasGenreSuggestions() {
+  const combined = [...new Set([...LECTURAS_PREDEFINED_GENRES, ...lecturasGlobalGenres])];
+  return combined.sort((a, b) => a.localeCompare(b, 'es'));
+}
+
 function renderLecturasGenreChipsList() {
   const list = document.getElementById('lecturas-genre-chips-list');
   list.innerHTML = lecturasItemGenres
@@ -6069,25 +6183,54 @@ function renderLecturasGenreChipsList() {
     btn.addEventListener('click', () => {
       lecturasItemGenres.splice(Number(btn.dataset.removeGenre), 1);
       renderLecturasGenreChipsList();
+      renderLecturasGenreSuggestionsRow();
+    });
+  });
+}
+
+// Fila de sugerencias clicables (predefinidas + ya usadas en cualquier
+// saga), sin repetir las que el item ya tiene añadidas -- clicar una
+// las añade igual que escribirla + Intro. El <datalist> del input de
+// texto libre se refresca con el mismo conjunto, para quien prefiera
+// escribir y autocompletar en vez de clicar.
+function renderLecturasGenreSuggestionsRow() {
+  const row = document.getElementById('lecturas-genre-suggestions-row');
+  const datalist = document.getElementById('lecturas-genre-suggestions');
+  if (!row || !datalist) return;
+  const already = new Set(lecturasItemGenres.map((g) => g.toLowerCase()));
+  const suggestions = lecturasGenreSuggestions();
+  datalist.innerHTML = suggestions.map((g) => `<option value="${escapeHtml(g)}"></option>`).join('');
+  row.innerHTML = suggestions
+    .filter((g) => !already.has(g.toLowerCase()))
+    .map((g) => `<button type="button" class="lecturas-genre-suggestion-chip" data-add-genre="${escapeHtml(g)}">+ ${escapeHtml(g)}</button>`)
+    .join('');
+  row.querySelectorAll('[data-add-genre]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      lecturasItemGenres.push(btn.dataset.addGenre);
+      renderLecturasGenreChipsList();
+      renderLecturasGenreSuggestionsRow();
     });
   });
 }
 
 function renderLecturasItemGenreChips() {
   const container = document.getElementById('lecturas-item-genres-field');
-  // Sugerencias de generos ya usados antes (en esta saga) -- sin CRUD
-  // propio de "generos", ver el comentario de lecturas_items en
-  // server/db.js.
-  const allGenres = [...new Set(state.lecturasItems.flatMap((it) => it.genres))];
   container.innerHTML = `
     <div class="lecturas-genre-chips" id="lecturas-genre-chips-list"></div>
     <div class="lecturas-genre-input-row">
       <input type="text" id="lecturas-genre-input" placeholder="Escribe un género y pulsa Intro" list="lecturas-genre-suggestions" />
-      <datalist id="lecturas-genre-suggestions">${allGenres.map((g) => `<option value="${escapeHtml(g)}"></option>`).join('')}</datalist>
+      <datalist id="lecturas-genre-suggestions"></datalist>
       <button type="button" id="btn-add-lecturas-genre" class="secondary-btn">+</button>
     </div>
+    <div class="lecturas-genre-suggestions-row" id="lecturas-genre-suggestions-row"></div>
   `;
   renderLecturasGenreChipsList();
+  // Se pinta ya con los predefinidos + lo que se supiera de una
+  // apertura anterior del modal, sin esperar a la red -- en cuanto
+  // responde GET /api/lecturas-items se repinta con el conjunto
+  // completo y actualizado.
+  renderLecturasGenreSuggestionsRow();
+  refreshLecturasGlobalGenres().then(renderLecturasGenreSuggestionsRow);
 
   const input = document.getElementById('lecturas-genre-input');
   function addFromInput() {
@@ -6096,6 +6239,7 @@ function renderLecturasItemGenreChips() {
     if (!lecturasItemGenres.some((g) => g.toLowerCase() === value.toLowerCase())) {
       lecturasItemGenres.push(value);
       renderLecturasGenreChipsList();
+      renderLecturasGenreSuggestionsRow();
     }
     input.value = '';
   }
@@ -6112,10 +6256,12 @@ function openLecturasItemModal(item) {
   document.getElementById('lecturas-item-modal-title').textContent = item ? 'Editar item' : 'Nuevo item';
   document.getElementById('lecturas-item-id').value = item ? item.id : '';
   document.getElementById('lecturas-item-title').value = item ? item.title : '';
-  document.getElementById('lecturas-item-type').value = item ? item.type : 'manga';
-  document.getElementById('lecturas-item-status').value = item ? item.status : 'wishlist';
+  lecturasItemTypeField.setValue(item ? item.type : 'manga');
+  lecturasItemStatusField.setValue(item ? item.status : 'wishlist');
   document.getElementById('lecturas-item-description').value = item ? item.description || '' : '';
-  document.getElementById('lecturas-item-rating').value = item && item.rating !== null ? item.rating : '';
+  const ratingValue = item && item.rating !== null ? item.rating : '';
+  document.getElementById('lecturas-item-rating').value = ratingValue;
+  document.getElementById('lecturas-item-rating-range').value = ratingValue === '' ? 0 : ratingValue;
   document.getElementById('lecturas-item-progress-current').value = item && item.progressCurrent !== null ? item.progressCurrent : '';
   document.getElementById('lecturas-item-progress-total').value = item && item.progressTotal !== null ? item.progressTotal : '';
   document.getElementById('lecturas-item-progress-unit').value = item ? item.progressUnit || '' : '';
@@ -6148,8 +6294,8 @@ document.getElementById('lecturas-item-form').addEventListener('submit', async (
   const payload = {
     sagaId: state.lecturasCurrentSagaId,
     title: document.getElementById('lecturas-item-title').value,
-    type: document.getElementById('lecturas-item-type').value,
-    status: document.getElementById('lecturas-item-status').value,
+    type: lecturasItemTypeField.getValue(),
+    status: lecturasItemStatusField.getValue(),
     description: document.getElementById('lecturas-item-description').value,
     rating: document.getElementById('lecturas-item-rating').value,
     genres: lecturasItemGenres,
