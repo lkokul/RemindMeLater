@@ -1356,7 +1356,11 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .lecturas-genre-input-row input { flex: 1; }
 .form-row > input { flex: 1; min-width: 0; }
 
-/* Extension "Archivos": ver #archivos-view en index.html. */
+/* Extension "Archivos": ver #archivos-view en index.html. Mismo patron
+   que .finanzas-tab-panel: .my-space-view ya es flex-column, este bloque
+   ocupa el resto del alto (la cabecera es flex-shrink:0) y hace scroll
+   propio con su propio padding lateral. */
+.archivos-body { flex: 1; min-height: 0; padding: 1rem 1.2rem; overflow-y: auto; }
 .archivos-folder-row { display: flex; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
 .archivos-folder-row input[type="text"] { flex: 1; min-width: 0; }
 .archivos-folder-browser {
