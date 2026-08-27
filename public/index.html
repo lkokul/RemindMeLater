@@ -98,9 +98,11 @@
     <!-- Distinto del de arriba: ese detecta que ESTE servidor ya
          arrancado se ha reiniciado; este otro pregunta a GitHub si hay
          una version mas nueva que la que tienes, aunque no hayas tocado
-         nada todavia. Solo aparece en el ordenador de confianza (ver
-         requireTrusted en server/routes/update.js) — un movil emparejado
-         no puede disparar un git pull. -->
+         nada todavia. Se ve en cualquier dispositivo (GET /api/update/check
+         es requireDeviceOrTrusted, ver server/routes/update.js), pero
+         instalarla de verdad (git pull) solo puede hacerlo el ordenador --
+         en el movil el boton "Actualizar ahora" se sustituye por un texto
+         informativo (ver checkForNewRelease() en app.js). -->
     <div id="new-release-banner" class="toast toast-release hidden">
       <div class="toast-release-top">
         <span id="new-release-banner-text"></span>
@@ -109,6 +111,7 @@
       <div class="toast-release-actions">
         <button type="button" id="btn-skip-release" class="secondary-btn">No para esta</button>
         <button type="button" id="btn-install-release" class="primary-btn">Actualizar ahora</button>
+        <span id="new-release-mobile-hint" class="hint hidden">Actualízala desde el ordenador.</span>
       </div>
     </div>
 
@@ -449,6 +452,10 @@
         <button type="button" id="btn-open-lecturas" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg></span>
           <span class="extensions-card-title">Lecturas</span>
+        </button>
+        <button type="button" id="btn-open-archivos" class="extensions-card extensions-card-active">
+          <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M12 18v-6M9 15l3-3 3 3"></path></svg></span>
+          <span class="extensions-card-title">Archivos</span>
         </button>
       </div>
     </div>
@@ -867,6 +874,67 @@
         </div>
       </form>
     </div>
+  </div>
+
+  <!-- Extension "Archivos": mandar archivos sueltos (fotos, PDFs,
+       documentos -- no ligados a una nota) entre el movil y el ordenador,
+       y el control MANUAL de la sincronizacion de datos (recordatorios,
+       notas, eventos, grupos, temas -- ver runSync() en app.js). Desde
+       la ronda "Archivos" ya no hay sincronizacion automatica de fondo:
+       el boton "Sincronizar ahora" que antes vivia en Configuracion >
+       Este dispositivo se ha movido aqui. El bloque de "Carpeta de
+       destino" solo se ve completo (editable + explorador) en el
+       ordenador -- en el movil solo se lee la ruta (GET /folder es
+       requireDeviceOrTrusted), pero cambiarla/explorar el disco sigue
+       siendo requireTrusted (ver server/routes/archivos.js). -->
+  <div id="archivos-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2>Archivos</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-archivos" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+      </div>
+    </div>
+
+    <h3>Sincronización</h3>
+    <p class="hint">Recordatorios, tareas, notas, eventos y temas ya no se sincronizan solos de fondo -- pulsa este botón cuando quieras poner al día este dispositivo y el ordenador.</p>
+    <p id="sync-status" class="hint"></p>
+    <button type="button" id="btn-sync-now" class="secondary-btn">Sincronizar ahora</button>
+
+    <h3>Nueva versión</h3>
+    <p id="archivos-update-status" class="hint">Comprobando…</p>
+    <button type="button" id="btn-archivos-check-update" class="secondary-btn">Comprobar ahora</button>
+
+    <h3>Carpeta de destino</h3>
+    <p id="archivos-folder-readonly-hint" class="hint hidden"></p>
+    <div id="archivos-folder-row" class="archivos-folder-row hidden">
+      <input type="text" id="archivos-folder-path" readonly />
+      <button type="button" id="btn-archivos-browse" class="secondary-btn">Explorar…</button>
+    </div>
+    <div id="archivos-folder-browser" class="archivos-folder-browser hidden">
+      <p id="archivos-browser-current-path" class="hint"></p>
+      <div id="archivos-browser-list" class="archivos-browser-list"></div>
+      <div class="modal-actions">
+        <button type="button" id="btn-archivos-browser-up" class="secondary-btn">Subir un nivel</button>
+        <div class="spacer"></div>
+        <button type="button" id="btn-archivos-browser-cancel" class="secondary-btn">Cancelar</button>
+        <button type="button" id="btn-archivos-browser-use" class="primary-btn">Usar esta carpeta</button>
+      </div>
+    </div>
+
+    <h3>Archivos</h3>
+    <div class="archivos-upload-row">
+      <input type="file" id="archivos-file-input" multiple hidden />
+      <button type="button" id="btn-archivos-upload" class="primary-btn">Subir archivo</button>
+    </div>
+    <div class="archivos-table-wrap">
+      <table class="archivos-table" id="archivos-table">
+        <thead>
+          <tr><th>Nombre</th><th>Tamaño</th><th>Fecha</th><th></th></tr>
+        </thead>
+        <tbody id="archivos-table-body"></tbody>
+      </table>
+    </div>
+    <p id="archivos-empty-hint" class="hint hidden">No hay archivos todavía.</p>
   </div>
 
   <!-- Extension "Lecturas": historial de entretenimiento (manga, comic,
@@ -1496,15 +1564,10 @@
         <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>
         <div id="completed-tasks-display-options" class="view-mode-options"></div>
 
-        <!-- Fase "movil": este dispositivo guarda su propia copia de los
-             datos y se sincroniza con el ordenador cuando coincidis en la
-             misma wifi -- ver "Sincronizacion" en app.js. Este boton deja
-             comprobar con tus propios ojos que funciono, ya que es un
-             mecanismo nuevo. -->
-        <h4>Sincronización</h4>
-        <p class="hint">Este dispositivo guarda su propia copia de los datos y se pone al día con el ordenador cuando coincidís en la misma wifi.</p>
-        <p id="sync-status" class="hint"></p>
-        <button type="button" id="btn-sync-now" class="secondary-btn">Sincronizar ahora</button>
+        <!-- Fase "Archivos": el boton "Sincronizar ahora" vivia aqui, pero
+             se ha movido al apartado Extensiones > Archivos (junto con el
+             resto de acciones manuales de esa pantalla) -- ver
+             "Sincronizacion" en app.js. -->
 
         <!-- Fase "multi-red": si cambias de wifi (o de ordenador), la IP de
              antes deja de servir -- escanear el QR nuevo actualiza a dónde

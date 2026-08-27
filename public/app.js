@@ -424,6 +424,17 @@ function getServerBaseUrl() {
   return localStorage.getItem('serverBaseUrl') || window.location.origin;
 }
 
+// Fase "Archivos": el propio ordenador nunca guarda un token de
+// dispositivo (ver requireDeviceOrTrusted en server/auth.js -- llega por
+// loopback, no necesita emparejarse), asi que su ausencia es una forma
+// fiable de saber, en el propio cliente, si "somos el ordenador" o "somos
+// un movil emparejado". Se usa para mostrar/ocultar controles que el
+// servidor solo permite al ordenador (carpeta de Archivos, boton de
+// instalar una version nueva).
+function isTrustedDevice() {
+  return !localStorage.getItem('deviceToken');
+}
+
 // ---------------------------------------------------------------------
 // Capa de red: envuelve fetch para añadir el token del dispositivo (si
 // existe) y para reaccionar automaticamente si el servidor dice 401
@@ -930,16 +941,18 @@ document.getElementById('btn-sync-now').addEventListener('click', async () => {
   btn.disabled = false;
 });
 
-// El punto de la topbar lleva directo a Configuracion > Este dispositivo
-// (donde esta el detalle y el boton de "Sincronizar ahora"), no hace
-// nada por si solo mas alla de eso.
+// El punto de la topbar lleva directo a Extensiones > Archivos (donde
+// esta el detalle y el boton de "Sincronizar ahora" -- ver mas abajo),
+// no hace nada por si solo mas alla de eso.
 document.getElementById('sync-indicator').addEventListener('click', () => {
-  openSettingsModal();
-  showSettingsScreen('mobile');
-  refreshMobileTab();
+  openArchivosView();
 });
 
-window.addEventListener('online', runSync);
+// Fase "Archivos": ya NO se sincroniza sola al volver la conexion --
+// solo cuando se pide a mano desde Extensiones > Archivos (ver
+// openArchivosView() y btn-sync-now mas abajo). Decision explicita de
+// Koku, confirmada dos veces: si no se abre ese apartado, los cambios de
+// este dispositivo no llegan al otro hasta que se dispare a mano.
 
 // ---------------------------------------------------------------------
 // Emparejamiento
@@ -5721,6 +5734,195 @@ function closeFinanzasView() {
 document.getElementById('btn-open-finanzas').addEventListener('click', openFinanzasView);
 document.getElementById('btn-close-finanzas').addEventListener('click', closeFinanzasView);
 
+// ---------------------------------------------------------------------
+// Extension "Archivos": mandar archivos sueltos (fotos, PDFs, documentos
+// -- no ligados a una nota) entre movil y ordenador. La "base de datos"
+// es la propia carpeta del sistema de ficheros (ver server/routes/archivos.js),
+// asi que no hay tabla ni copia local -- se lee la lista real cada vez
+// que se abre esta vista. Esta vista tambien reune ahora el control
+// MANUAL de la sincronizacion de datos (boton "Sincronizar ahora", que
+// antes vivia en Configuracion > Este dispositivo) y la comprobacion de
+// version nueva.
+// ---------------------------------------------------------------------
+function formatArchivoSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function downloadArchivo(name) {
+  const token = localStorage.getItem('deviceToken');
+  const headers = {};
+  if (token) headers['X-Device-Token'] = token;
+  const url = new URL(`/api/archivos/${encodeURIComponent(name)}`, getServerBaseUrl());
+  try {
+    const res = await fetch(url.toString(), { headers });
+    if (!res.ok) throw new Error(`Error ${res.status}`);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    // "Descarga normal" del navegador (no Web Share API) -- confirmado
+    // con Koku: un <a download> con un blob es lo mas sencillo y
+    // funciona igual en ordenador y movil.
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    alert('No se pudo descargar el archivo: ' + err.message);
+  }
+}
+
+async function deleteArchivo(name) {
+  if (!confirm(`¿Borrar "${name}"?`)) return;
+  await api(`/api/archivos/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  await refreshArchivosList();
+}
+
+async function refreshArchivosList() {
+  const tbody = document.getElementById('archivos-table-body');
+  const emptyHint = document.getElementById('archivos-empty-hint');
+  const files = await api('/api/archivos');
+  tbody.innerHTML = '';
+  emptyHint.classList.toggle('hidden', files.length > 0);
+  for (const file of files) {
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.textContent = file.name;
+    const sizeTd = document.createElement('td');
+    sizeTd.textContent = formatArchivoSize(file.size);
+    const dateTd = document.createElement('td');
+    dateTd.textContent = new Date(file.modifiedAt).toLocaleString();
+    const actionsTd = document.createElement('td');
+    const downloadBtn = document.createElement('button');
+    downloadBtn.type = 'button';
+    downloadBtn.className = 'secondary-btn';
+    downloadBtn.textContent = 'Descargar';
+    downloadBtn.addEventListener('click', () => downloadArchivo(file.name));
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'danger-btn';
+    deleteBtn.textContent = 'Borrar';
+    deleteBtn.addEventListener('click', () => deleteArchivo(file.name));
+    actionsTd.appendChild(downloadBtn);
+    actionsTd.appendChild(deleteBtn);
+    tr.append(nameTd, sizeTd, dateTd, actionsTd);
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById('btn-archivos-upload').addEventListener('click', () => {
+  document.getElementById('archivos-file-input').click();
+});
+document.getElementById('archivos-file-input').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  for (const file of files) {
+    try {
+      await api('/api/archivos', {
+        method: 'POST',
+        headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
+        body: file,
+      });
+    } catch (err) {
+      alert(`No se pudo subir "${file.name}": ${err.message}`);
+    }
+  }
+  await refreshArchivosList();
+});
+
+// Bloque "Carpeta de destino": solo editable/explorable desde el
+// ordenador (ver isTrustedDevice()) -- el servidor tambien lo protege por
+// su cuenta (PUT /folder y GET /browse son requireTrusted), esto solo
+// evita ensenar controles que en el movil fallarian igualmente.
+async function refreshArchivosFolderUI() {
+  const readonlyHint = document.getElementById('archivos-folder-readonly-hint');
+  const editableRow = document.getElementById('archivos-folder-row');
+  try {
+    const { folder } = await api('/api/archivos/folder');
+    if (isTrustedDevice()) {
+      editableRow.classList.remove('hidden');
+      readonlyHint.classList.add('hidden');
+      document.getElementById('archivos-folder-path').value = folder;
+    } else {
+      editableRow.classList.add('hidden');
+      readonlyHint.classList.remove('hidden');
+      readonlyHint.textContent = `Carpeta configurada en el ordenador: ${folder}`;
+    }
+  } catch (err) {
+    editableRow.classList.add('hidden');
+    readonlyHint.classList.add('hidden');
+  }
+}
+
+let archivosBrowsePath = null;
+
+async function loadArchivosBrowserPath(path) {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+  const data = await api(`/api/archivos/browse${qs}`);
+  archivosBrowsePath = data.path;
+  document.getElementById('archivos-browser-current-path').textContent = data.path;
+  const list = document.getElementById('archivos-browser-list');
+  list.innerHTML = '';
+  const upBtn = document.getElementById('btn-archivos-browser-up');
+  upBtn.disabled = !data.parent;
+  upBtn.dataset.parent = data.parent || '';
+  for (const folder of data.folders) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'archivos-browser-item';
+    btn.textContent = folder.name;
+    btn.addEventListener('click', () => loadArchivosBrowserPath(folder.path));
+    list.appendChild(btn);
+  }
+}
+
+document.getElementById('btn-archivos-browse').addEventListener('click', async () => {
+  await loadArchivosBrowserPath(document.getElementById('archivos-folder-path').value || null);
+  document.getElementById('archivos-folder-browser').classList.remove('hidden');
+});
+document.getElementById('btn-archivos-browser-up').addEventListener('click', () => {
+  const parent = document.getElementById('btn-archivos-browser-up').dataset.parent;
+  if (parent) loadArchivosBrowserPath(parent);
+});
+document.getElementById('btn-archivos-browser-cancel').addEventListener('click', () => {
+  document.getElementById('archivos-folder-browser').classList.add('hidden');
+});
+document.getElementById('btn-archivos-browser-use').addEventListener('click', async () => {
+  try {
+    await api('/api/archivos/folder', { method: 'PUT', body: JSON.stringify({ folder: archivosBrowsePath }) });
+    document.getElementById('archivos-folder-path').value = archivosBrowsePath;
+    document.getElementById('archivos-folder-browser').classList.add('hidden');
+    await refreshArchivosList();
+  } catch (err) {
+    alert('No se pudo cambiar la carpeta: ' + err.message);
+  }
+});
+
+document.getElementById('btn-archivos-check-update').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-archivos-check-update');
+  const statusEl = document.getElementById('archivos-update-status');
+  btn.disabled = true;
+  statusEl.textContent = 'Comprobando…';
+  await checkForNewRelease();
+  btn.disabled = false;
+});
+
+async function openArchivosView() {
+  closeExtensionsView();
+  document.getElementById('archivos-view').classList.remove('hidden');
+  document.getElementById('archivos-folder-browser').classList.add('hidden');
+  await Promise.all([refreshSyncStatusUI(), refreshArchivosFolderUI(), refreshArchivosList()]);
+}
+function closeArchivosView() {
+  document.getElementById('archivos-view').classList.add('hidden');
+  document.getElementById('extensions-view').classList.remove('hidden');
+}
+document.getElementById('btn-open-archivos').addEventListener('click', openArchivosView);
+document.getElementById('btn-close-archivos').addEventListener('click', closeArchivosView);
+
 async function openLecturasSagaDetail(saga) {
   state.lecturasCurrentSagaId = saga.id;
   document.getElementById('lecturas-sagas-panel').classList.add('hidden');
@@ -6104,19 +6306,40 @@ async function refreshVersionInfo() {
 
 let pendingReleaseVersion = null;
 
+// Ademas del banner de siempre, actualiza el texto de Extensiones >
+// Archivos (#archivos-update-status) si esa vista existe en la pagina --
+// asi el boton "Comprobar ahora" de ahi (y esta misma llamada automatica)
+// dan feedback visible aunque no haya version nueva. GET /api/update/check
+// ya es requireDeviceOrTrusted (ver server/routes/update.js), asi que esto
+// tambien funciona en un movil emparejado -- lo unico que sigue siendo
+// solo del ordenador es instalarla de verdad (POST /pull).
 async function checkForNewRelease() {
+  const archivosStatusEl = document.getElementById('archivos-update-status');
   try {
     const info = await api('/api/update/check');
-    if (!info || !info.remoteVersion) return;
-    if (compareVersions(info.remoteVersion, info.currentVersion) <= 0) return;
+    if (!info || !info.remoteVersion) {
+      if (archivosStatusEl) archivosStatusEl.textContent = 'No se pudo comprobar la versión.';
+      return;
+    }
+    if (compareVersions(info.remoteVersion, info.currentVersion) <= 0) {
+      if (archivosStatusEl) archivosStatusEl.textContent = `Tienes la última versión (v${info.currentVersion}).`;
+      return;
+    }
+    if (archivosStatusEl) archivosStatusEl.textContent = `Hay una versión nueva disponible (v${info.remoteVersion}).`;
     if (localStorage.getItem('skippedUpdateVersion') === info.remoteVersion) return;
 
     pendingReleaseVersion = info.remoteVersion;
     document.getElementById('new-release-banner-text').textContent = `Hay una versión nueva disponible (v${info.remoteVersion}).`;
+    // Instalar de verdad (git pull) solo puede hacerlo el ordenador -- en
+    // el movil se sustituye el boton de instalar por un texto informativo.
+    const trusted = isTrustedDevice();
+    document.getElementById('btn-install-release').classList.toggle('hidden', !trusted);
+    document.getElementById('new-release-mobile-hint').classList.toggle('hidden', trusted);
     document.getElementById('new-release-banner').classList.remove('hidden');
   } catch (err) {
-    // Sin internet, git no configurado, o somos un movil emparejado (403):
-    // no pasa nada, se vuelve a intentar mas tarde sin molestar con un error.
+    // Sin internet o git no configurado: no pasa nada, se vuelve a
+    // intentar mas tarde sin molestar con un error.
+    if (archivosStatusEl) archivosStatusEl.textContent = 'No se pudo comprobar (sin conexión con el ordenador o con GitHub).';
   }
 }
 
@@ -6238,11 +6461,6 @@ async function init() {
   await initStep(loadGroups);
   await initStep(loadSpecialDays);
   await initStep(loadMonth);
-  // Sincronizar aqui, tras tener ya algo pintado con la copia local (si
-  // la hay) pero antes de las cargas que siguen -- si el ordenador SI
-  // esta alcanzable, esto pone la copia local al dia antes de que
-  // Tareas/Notas la lean.
-  await runSync();
   await initStep(loadReminders);
   await initStep(loadTasks);
   renderTasksList();
@@ -6251,6 +6469,11 @@ async function init() {
   await initStep(loadNotes);
   renderNotesView();
   refreshSyncStatusUI();
+  // Ya no hay ningun runSync() automatico que la ponga al dia sola (ver
+  // btn-sync-now en Extensiones > Archivos) -- sin esto, el punto de la
+  // topbar se quedaria sin titulo/aria-label hasta la primera vez que se
+  // sincronice a mano.
+  refreshSyncIndicator();
 
   setInterval(loadReminders, 30 * 1000);
   // Igual que los recordatorios: si otro dispositivo vinculado anade o
@@ -6262,10 +6485,6 @@ async function init() {
     populateNoteFolderSelect();
     renderNotesView();
   }), 30 * 1000);
-  // Sincronizar cada 30s tambien, junto con el resto del refresco
-  // periodico -- si el ordenador no esta alcanzable, runSync() no hace
-  // nada (ver su comentario), asi que llamarla "a lo tonto" es seguro.
-  setInterval(runSync, 30 * 1000);
 }
 
 // Si ya tenemos un token guardado (o somos el ordenador, que ni lo

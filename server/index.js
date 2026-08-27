@@ -27,6 +27,7 @@ const finanzasInvestmentsRouter = require('./routes/finanzasInvestments');
 const finanzasSettingsRouter = require('./routes/finanzasSettings');
 const lecturasSagasRouter = require('./routes/lecturasSagas');
 const lecturasItemsRouter = require('./routes/lecturasItems');
+const archivosRouter = require('./routes/archivos');
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startMdns } = require('./mdns');
@@ -101,6 +102,11 @@ app.use('/api/finanzas-settings', requireDeviceOrTrusted, finanzasSettingsRouter
 // en sagas obligatorias.
 app.use('/api/lecturas-sagas', requireDeviceOrTrusted, lecturasSagasRouter);
 app.use('/api/lecturas-items', requireDeviceOrTrusted, lecturasItemsRouter);
+// Extension "Archivos" (ver #extensions-view en index.html): mandar
+// archivos sueltos entre movil y ordenador. Cada ruta decide su propio
+// nivel de acceso por dentro (ver routes/archivos.js): /folder y /browse
+// son solo-ordenador, el resto exige movil emparejado u ordenador.
+app.use('/api/archivos', archivosRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);

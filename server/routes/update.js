@@ -6,14 +6,18 @@
 // repositorio es publico o privado: si "git pull" a mano te funciona,
 // esto tambien.
 //
-// Solo el ordenador de confianza puede usar esto (ver requireTrusted en
-// auth.js) — es una accion que toca el disco de verdad, un movil
-// emparejado no deberia poder disparar un git pull en tu ordenador.
+// Instalar de verdad (POST /pull, que hace git pull) sigue exigiendo ser
+// el ordenador de confianza (requireTrusted) — es una accion que toca el
+// disco, un movil emparejado no deberia poder disparar un git pull en tu
+// ordenador. GET /check es de solo lectura (numeros de version, nada que
+// se ejecute), asi que un movil emparejado tambien puede pedirlo — se
+// usa desde el apartado "Archivos" para avisar de una version nueva sin
+// poder instalarla desde ahi.
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
-const { requireTrusted } = require('../auth');
+const { requireTrusted, requireDeviceOrTrusted } = require('../auth');
 
 const router = express.Router();
 const REPO_DIR = path.join(__dirname, '..', '..');
@@ -63,7 +67,7 @@ router.get('/info', requireTrusted, async (req, res) => {
   }
 });
 
-router.get('/check', requireTrusted, async (req, res) => {
+router.get('/check', requireDeviceOrTrusted, async (req, res) => {
   try {
     const branch = await currentBranch();
     await run('git', ['fetch', 'origin', branch]);
