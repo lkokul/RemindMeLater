@@ -1161,6 +1161,7 @@
          mandarlos -- por eso es una "lista de preparados para enviar",
          no un explorador real. El panel derecho SI es real: la carpeta
          compartida configurada arriba, igual en ordenador y movil. -->
+    <p class="hint-warning">Si vas a mandar o traer archivos fuera de tu wifi de siempre (una red pública, la del curro, un hotel...), mejor usa los datos móviles del teléfono en vez de esa wifi -- es mucho más difícil que alguien más los intercepte por el camino.</p>
     <div class="archivos-transfer-grid">
       <div class="archivos-transfer-panel">
         <h4>Este dispositivo</h4>
@@ -1199,6 +1200,10 @@
         <p id="archivos-empty-hint" class="hint hidden">No hay archivos todavía.</p>
       </div>
     </div>
+    <!-- Estado de "esperando confirmacion del otro dispositivo" -- solo
+         lo usa un movil (ver requestArchivosTransfer() en app.js), el
+         ordenador nunca pasa por aqui. -->
+    <p id="archivos-transfer-status" class="hint hidden"></p>
     </div>
   </div>
 

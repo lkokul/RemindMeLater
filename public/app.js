@@ -6738,6 +6738,17 @@ function updateArchivosReceiveButtonState() {
   document.getElementById('btn-archivos-receive').disabled = archivosSelectedRemote.size === 0;
 }
 
+// Doble confirmacion de transferencias (ver server/archivosTransfers.js
+// para el porque completo): cada cuanto se pregunta por el estado de una
+// solicitud propia, o por solicitudes entrantes -- mas seguido que
+// checkForUpdate (15s) porque aqui hay alguien mirando la pantalla
+// esperando una respuesta en vivo, pero solo mientras la vista Archivos
+// esta abierta (no es un timer global de fondo).
+const ARCHIVOS_TRANSFER_POLL_MS = 3000;
+let archivosOutgoingRequestId = null; // solicitud propia pendiente de que la confirmen (solo movil)
+let archivosIncomingPollTimer = null; // vigilancia de solicitudes entrantes (solo ordenador)
+const archivosHandledIncomingIds = new Set(); // evita repetir el aviso de la misma solicitud entrante
+
 // Pinta la tabla de archivos -- compartida por el movil (siempre la
 // carpeta configurada, ver refreshArchivosList) y el ordenador (la
 // carpeta que se este navegando ahora mismo, ver loadArchivosNavPath).
@@ -6891,11 +6902,11 @@ document.getElementById('archivos-file-input').addEventListener('change', (e) =>
   renderArchivosStagedList();
 });
 
-document.getElementById('btn-archivos-send').addEventListener('click', async () => {
-  const filesToSend = archivosStagedFiles;
-  archivosStagedFiles = [];
-  renderArchivosStagedList();
-  for (const file of filesToSend) {
+// Bucle de subida real (POST por archivo) -- separado del listener para
+// poder llamarlo tanto al instante (ordenador) como tras la confirmacion
+// del otro lado (movil, ver requestArchivosTransfer() mas abajo).
+async function sendArchivosFilesNow(files) {
+  for (const file of files) {
     try {
       await api(`/api/archivos${archivosPathQueryParam()}`, {
         method: 'POST',
@@ -6907,14 +6918,146 @@ document.getElementById('btn-archivos-send').addEventListener('click', async () 
     }
   }
   await refreshArchivosCurrentView();
+}
+
+document.getElementById('btn-archivos-send').addEventListener('click', async () => {
+  if (archivosStagedFiles.length === 0) return;
+  const files = archivosStagedFiles;
+  // El ordenador copiando un archivo local a su propia carpeta
+  // compartida no tiene "otro dispositivo" al que pedirle permiso (ver
+  // server/archivosTransfers.js) -- sigue actuando al instante, sin
+  // fricción nueva. Solo un movil pasa por la confirmacion del otro lado.
+  if (isTrustedDevice()) {
+    archivosStagedFiles = [];
+    renderArchivosStagedList();
+    await sendArchivosFilesNow(files);
+    return;
+  }
+  const accepted = await requestArchivosTransfer('upload', files.map((f) => ({ name: f.name, size: f.size })));
+  if (accepted) {
+    archivosStagedFiles = [];
+    renderArchivosStagedList();
+    await sendArchivosFilesNow(files);
+  }
 });
 
 document.getElementById('btn-archivos-receive').addEventListener('click', async () => {
   const names = Array.from(archivosSelectedRemote);
-  for (const name of names) {
-    await downloadArchivo(name);
+  if (names.length === 0) return;
+  if (isTrustedDevice()) {
+    for (const name of names) await downloadArchivo(name);
+    return;
+  }
+  const accepted = await requestArchivosTransfer('download', names.map((name) => ({ name, size: 0 })));
+  if (accepted) {
+    for (const name of names) await downloadArchivo(name);
   }
 });
+
+// Crea la solicitud, espera a que el ordenador conteste (polling cada
+// ARCHIVOS_TRANSFER_POLL_MS) y devuelve true/false segun si se acepto.
+// Solo la llaman los dos listeners de arriba cuando NO somos el
+// ordenador -- este nunca pasa por aqui.
+async function requestArchivosTransfer(direction, files) {
+  const btn = document.getElementById(direction === 'upload' ? 'btn-archivos-send' : 'btn-archivos-receive');
+  const statusEl = document.getElementById('archivos-transfer-status');
+  btn.disabled = true;
+  statusEl.textContent = 'Solicitud enviada al ordenador. Esperando que la confirmen allí...';
+  statusEl.classList.remove('hidden');
+  try {
+    const record = await api('/api/archivos/transfer-requests', {
+      method: 'POST',
+      body: JSON.stringify({ direction, files }),
+    });
+    archivosOutgoingRequestId = record.id;
+    const finalStatus = await waitForArchivosTransferResolution(record.id);
+    if (finalStatus === 'accepted') {
+      statusEl.textContent = 'Confirmado. Transfiriendo...';
+      return true;
+    }
+    if (finalStatus === 'rejected') {
+      alert('El ordenador rechazó la transferencia.');
+    } else {
+      alert('Nadie confirmó la transferencia a tiempo. Inténtalo de nuevo.');
+    }
+    return false;
+  } catch (err) {
+    alert('No se pudo solicitar la transferencia: ' + err.message);
+    return false;
+  } finally {
+    archivosOutgoingRequestId = null;
+    statusEl.classList.add('hidden');
+    updateArchivosReceiveButtonState();
+    document.getElementById('btn-archivos-send').disabled = archivosStagedFiles.length === 0;
+  }
+}
+
+function waitForArchivosTransferResolution(id) {
+  return new Promise((resolve) => {
+    const timer = setInterval(async () => {
+      try {
+        const record = await api(`/api/archivos/transfer-requests/${id}`);
+        if (record.status !== 'pending') {
+          clearInterval(timer);
+          resolve(record.status); // 'accepted' | 'rejected' | 'expired'
+        }
+      } catch (err) {
+        // 404 = ya se limpio (caducada hace rato): se trata como expirada.
+        clearInterval(timer);
+        resolve('expired');
+      }
+    }, ARCHIVOS_TRANSFER_POLL_MS);
+  });
+}
+
+// Vigilancia de solicitudes entrantes -- solo tiene sentido en el
+// ordenador (es el unico que puede aceptar/rechazar, ver requireTrusted
+// en routes/archivos.js), y solo mientras la vista Archivos esta abierta
+// (arranca/para en openArchivosView()/closeArchivosView()).
+function startArchivosIncomingWatcher() {
+  if (!isTrustedDevice() || archivosIncomingPollTimer) return;
+  archivosIncomingPollTimer = setInterval(checkArchivosIncomingRequests, ARCHIVOS_TRANSFER_POLL_MS);
+}
+function stopArchivosIncomingWatcher() {
+  if (archivosIncomingPollTimer) clearInterval(archivosIncomingPollTimer);
+  archivosIncomingPollTimer = null;
+}
+
+async function checkArchivosIncomingRequests() {
+  let pending;
+  try {
+    pending = await api('/api/archivos/transfer-requests');
+  } catch (err) {
+    return; // red caida un instante: se reintenta en el siguiente ciclo
+  }
+  for (const record of pending) {
+    if (archivosHandledIncomingIds.has(record.id)) continue;
+    archivosHandledIncomingIds.add(record.id);
+    await promptArchivosIncomingRequest(record);
+  }
+}
+
+async function promptArchivosIncomingRequest(record) {
+  const verb = record.direction === 'upload' ? 'mandarte' : 'descargar de tu carpeta compartida';
+  const list = record.files.map((f) => f.name).join(', ');
+  const accept = confirm(`El móvil quiere ${verb} ${record.files.length} archivo(s): ${list}\n\n¿Aceptar?`);
+  try {
+    await api(`/api/archivos/transfer-requests/${record.id}/${accept ? 'accept' : 'reject'}`, { method: 'POST' });
+  } catch (err) {
+    // Ya caduco o se resolvio de otra forma mientras se decidia: no pasa nada.
+  }
+  if (accept) {
+    // Si era una subida, el propio movil hace el POST real al ver
+    // 'accepted' en su propio polling (hasta ARCHIVOS_TRANSFER_POLL_MS
+    // de retraso) y LUEGO sube el archivo -- asi que un solo refresco
+    // rapido aqui podria llegar antes de que el archivo exista de
+    // verdad. Dos intentos escalonados (uno pronto, otro con margen de
+    // sobra sobre el peor caso del polling del movil) sin necesidad de
+    // inventar un tercer estado "completado" solo para esto.
+    setTimeout(() => refreshArchivosCurrentView().catch(() => {}), 2000);
+    setTimeout(() => refreshArchivosCurrentView().catch(() => {}), ARCHIVOS_TRANSFER_POLL_MS + 2000);
+  }
+}
 
 // Bloque "Carpeta de destino": solo editable/explorable desde el
 // ordenador (ver isTrustedDevice()) -- el servidor tambien lo protege por
@@ -6999,10 +7142,22 @@ async function openArchivosView() {
   renderArchivosStagedList();
   archivosSelectedRemote.clear();
   archivosCurrentPath = null;
+  archivosHandledIncomingIds.clear();
   await Promise.all([refreshSyncStatusUI(), refreshArchivosFolderUI(), refreshVersionInfo()]);
   await refreshArchivosBrowsePanel();
+  startArchivosIncomingWatcher();
 }
 function closeArchivosView() {
+  stopArchivosIncomingWatcher();
+  if (archivosOutgoingRequestId) {
+    const id = archivosOutgoingRequestId;
+    archivosOutgoingRequestId = null;
+    // Best-effort: si una aceptacion llegara tarde sobre una solicitud
+    // ya cancelada, el movil ya no la esta esperando (ver
+    // requestArchivosTransfer) -- evita un estado confuso si se vuelve
+    // a abrir Archivos mas tarde.
+    api(`/api/archivos/transfer-requests/${id}`, { method: 'DELETE' }).catch(() => {});
+  }
   document.getElementById('archivos-view').classList.add('hidden');
   document.getElementById('extensions-view').classList.remove('hidden');
 }

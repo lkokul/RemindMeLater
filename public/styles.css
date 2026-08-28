@@ -1551,6 +1551,18 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    de destino" de arriba. */
 .archivos-nav-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
 .archivos-nav-path { flex: 1; min-width: 0; overflow-wrap: break-word; font-size: 0.85rem; margin: 0; }
+/* Aviso de seguridad en Archivos (ver index.html) -- mismo padding y
+   radio que .hint, pero con un fondo tenue en tono ambar para que se
+   note como un aviso, no como una nota informativa cualquiera. No es un
+   error (por eso no usa --danger), es solo una recomendacion. */
+.hint-warning {
+  font-size: 0.85rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, #e9a23b 18%, var(--surface));
+  color: var(--surface-text);
+  margin: 0.4rem 0;
+}
 .archivos-manage-block { margin-bottom: 1rem; }
 .archivos-manage-block summary { cursor: pointer; font-weight: 600; padding: 0.4rem 0; }
 .archivos-table-wrap { overflow-x: auto; margin: 0.8rem 0; }

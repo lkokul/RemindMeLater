@@ -5,7 +5,7 @@ const os = require('os');
 const QRCode = require('qrcode');
 const db = require('../db');
 const { requireTrusted, requireDeviceOrTrusted } = require('../auth');
-const { generateCode, consumeCode } = require('../pairing');
+const { generateCode, consumeCode, isPairingLocked, recordFailedPairing, recordSuccessfulPairing } = require('../pairing');
 const { getVapidPublicKey } = require('../push');
 const { useRealNetworkInterfacesOnly } = require('../mdns');
 
@@ -41,15 +41,29 @@ router.post('/pairing-code', requireTrusted, (req, res) => {
 
 // Cualquiera en la red puede LLAMAR a este endpoint, pero solo funciona si
 // trae un codigo valido y no caducado generado en el paso anterior. Es el
-// unico momento en que un dispositivo "de fuera" puede entrar.
+// unico momento en que un dispositivo "de fuera" puede entrar -- por eso
+// es tambien el unico sitio de toda la API con limite de intentos
+// fallidos por IP (ver pairing.js): sin ese limite, alguien en la misma
+// wifi podria intentar adivinar el codigo de 6 digitos probando muchas
+// veces seguidas.
 router.post('/pair', (req, res) => {
+  const ip = req.socket.remoteAddress || '';
+  if (isPairingLocked(ip)) {
+    return res.status(429).json({
+      error: 'too_many_attempts',
+      message: 'Demasiados intentos fallidos desde este dispositivo. Espera unos minutos y pide un codigo nuevo en el ordenador.',
+    });
+  }
+
   const { code, name } = req.body || {};
   if (!code || !name || !name.trim()) {
     return res.status(400).json({ error: 'invalid_request', message: 'Falta el codigo o el nombre del dispositivo.' });
   }
   if (!consumeCode(String(code).trim())) {
+    recordFailedPairing(ip);
     return res.status(400).json({ error: 'invalid_code', message: 'Codigo incorrecto o caducado. Genera uno nuevo en el ordenador.' });
   }
+  recordSuccessfulPairing(ip);
 
   const token = crypto.randomBytes(24).toString('hex');
   const info = db

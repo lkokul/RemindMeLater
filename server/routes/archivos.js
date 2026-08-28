@@ -13,6 +13,7 @@ const os = require('os');
 const DATA_DIR = require('../dataDir');
 const db = require('../db');
 const { requireDeviceOrTrusted, requireTrusted, isTrustedRequest } = require('../auth');
+const { createRequest, listPending, getRequest, resolveRequest, cancelRequest } = require('../archivosTransfers');
 
 const router = express.Router();
 
@@ -183,6 +184,65 @@ router.post(
     res.status(201).json({ name: finalName, size: stat.size, modifiedAt: stat.mtime.toISOString() });
   }
 );
+
+// --- Doble confirmacion de transferencias -----------------------------
+// Ver archivosTransfers.js para el porque completo. En corto: un movil
+// emparejado ya tiene acceso completo por diseno (no es una barrera de
+// seguridad nueva, ver auth.js -- esta app no aisla datos por usuario)
+// -- esto es una salvaguarda de UX/accidentes, para que nadie mande o
+// traiga archivos sin que la otra persona (la que esta delante del
+// ordenador) se entere y lo confirme a proposito. Van ANTES de
+// GET/DELETE /:filename (igual que se explica en routes/devices.js con
+// otras rutas de un solo segmento): si se registraran despues,
+// "transfer-requests" se leeria como si fuera un nombre de archivo.
+router.post('/transfer-requests', requireDeviceOrTrusted, (req, res) => {
+  const { direction, files } = req.body || {};
+  if (direction !== 'upload' && direction !== 'download') {
+    return res.status(400).json({ error: 'invalid_request', message: 'Falta la direccion de la transferencia.' });
+  }
+  if (!Array.isArray(files) || files.length === 0) {
+    return res.status(400).json({ error: 'invalid_request', message: 'Falta la lista de archivos.' });
+  }
+  const safeFiles = files.slice(0, 100).map((f) => ({
+    name: String((f && f.name) || '').slice(0, 200),
+    size: Number(f && f.size) || 0,
+  }));
+  res.status(201).json(createRequest({ direction, files: safeFiles }));
+});
+
+// Solo el ordenador necesita ver "todo lo pendiente" -- es quien
+// confirma (el ordenador nunca crea solicitudes, ver comentario de
+// arriba, asi que nunca veria las suyas propias en esta lista).
+router.get('/transfer-requests', requireTrusted, (req, res) => {
+  res.json(listPending());
+});
+
+// Consulta puntual de una solicitud -- la usa quien la creo (el movil),
+// para su propio polling de "¿ya han contestado?".
+router.get('/transfer-requests/:id', requireDeviceOrTrusted, (req, res) => {
+  const record = getRequest(req.params.id);
+  if (!record) return res.status(404).json({ error: 'not_found' });
+  res.json(record);
+});
+
+router.post('/transfer-requests/:id/accept', requireTrusted, (req, res) => {
+  const record = resolveRequest(req.params.id, 'accepted');
+  if (!record) return res.status(404).json({ error: 'not_found' });
+  res.json(record);
+});
+
+router.post('/transfer-requests/:id/reject', requireTrusted, (req, res) => {
+  const record = resolveRequest(req.params.id, 'rejected');
+  if (!record) return res.status(404).json({ error: 'not_found' });
+  res.json(record);
+});
+
+// Cancelar la propia solicitud (p.ej. si se cierra la vista Archivos
+// mientras se espera confirmacion, ver closeArchivosView() en app.js).
+router.delete('/transfer-requests/:id', requireDeviceOrTrusted, (req, res) => {
+  cancelRequest(req.params.id);
+  res.status(204).end();
+});
 
 // Descargar: a diferencia de las imagenes de nota, el nombre de archivo
 // aqui es real y adivinable (no un UUID al azar), asi que SI hace falta
