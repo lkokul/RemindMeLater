@@ -550,6 +550,15 @@ document.getElementById('btn-settings').addEventListener('click', openSettingsMo
 // boton vive dentro de la cabecera de Mi espacio para que Configuracion
 // se pueda abrir desde cualquier ventana.
 document.getElementById('btn-my-space-settings').addEventListener('click', openSettingsModal);
+// Mismo motivo que btn-my-space-settings: Extensiones y cada extension
+// (Gimnasio/Lecturas/Finanzas/Archivos) son tambien .my-space-view a
+// pantalla completa que tapan la topbar -- cada una necesita su propio
+// boton de Configuracion.
+document.getElementById('btn-extensions-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-gym-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-lecturas-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-archivos-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-close-settings').addEventListener('click', () => {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');

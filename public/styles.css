@@ -1345,7 +1345,21 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 }
 .finanzas-chart-tooltip.hidden { display: none; }
 
-.finanzas-investment-trend-asset-field { max-width: 260px; margin-bottom: 0.4rem; }
+/* Arbol de checkboxes (carteras/subcarteras/activos) junto a la grafica
+   de evolucion mensual de Inversiones -- ver renderFinanzasAssetTree()
+   en app.js. Columna en movil, fila en escritorio (mismo corte 860px
+   que el resto de Finanzas). */
+.finanzas-investment-trend-layout { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 0.4rem; }
+.finanzas-investment-asset-tree {
+  flex: 1 1 240px; min-width: 200px; max-height: 320px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem;
+}
+.finanzas-investment-trend-layout .finanzas-trend-chart-wrap { flex: 2 1 420px; min-width: 280px; }
+.finanzas-asset-tree-row {
+  display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0;
+  cursor: pointer; font-size: 0.9rem;
+}
+.finanzas-asset-tree-portfolio { font-weight: 600; }
 
 /* Bloque "Ahorro" -- toggle Mensual/Histórico + selector de mes/año +
    rango historico (ver renderFinanzasSavingsMonthly() y el listener de
@@ -1473,6 +1487,12 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   background: none; color: inherit; cursor: pointer;
 }
 .archivos-browser-item:hover { background: var(--surface); }
+/* Navegacion real del panel "Carpeta compartida en el ordenador" (ver
+   loadArchivosNavPath en app.js) -- reutiliza .archivos-browser-list/
+   -item para las carpetas, mismo aspecto que el explorador de "Carpeta
+   de destino" de arriba. */
+.archivos-nav-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
+.archivos-nav-path { flex: 1; min-width: 0; overflow-wrap: break-word; font-size: 0.85rem; margin: 0; }
 .archivos-manage-block { margin-bottom: 1rem; }
 .archivos-manage-block summary { cursor: pointer; font-weight: 600; padding: 0.4rem 0; }
 .archivos-table-wrap { overflow-x: auto; margin: 0.8rem 0; }
@@ -1977,14 +1997,13 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   position: sticky;
   top: 0;
   z-index: 2;
-  display: block;
-  width: calc(100% + 2.4rem);
-  margin: 0 -1.2rem 0.3rem;
-  padding: 0.5rem 1.2rem;
+  display: inline-block;
+  width: auto;
+  margin: 0 0 0.3rem;
+  padding: 0.5rem 1.1rem;
   background: var(--surface);
   border-color: transparent;
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
-  text-align: left;
 }
 .settings-tab-panel h3 { margin: 0 0 0.6rem; font-size: 1rem; }
 .settings-tab-panel h4 { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); text-transform: uppercase; letter-spacing: 0.03em; margin: 1rem 0 0.4rem; }

@@ -4560,11 +4560,19 @@ function renderGymSessionsList() {
 // ---------------------------------------------------------------------
 let finanzasAccounts = [];
 let finanzasCategories = [];
+let finanzasPortfolios = [];
+let finanzasAssets = [];
+// Set de assetId marcados en el arbol de seleccion de Inversiones (ver
+// renderFinanzasAssetTree) -- fuente de verdad unica; el estado de
+// checkbox de cada CARTERA se deriva de sus activos descendientes en
+// cada render, nunca se guarda un estado propio de cartera.
+let finanzasAssetTreeSelectedIds = new Set();
 let finanzasIconColorFieldsReady = false;
 let finanzasAccountIconField = null;
 let finanzasAccountColorField = null;
 let finanzasCategoryIconField = null;
 let finanzasCategoryColorField = null;
+let finanzasPortfolioColorField = null;
 
 const finanzasFilters = { accountId: '', categoryId: '', type: '', from: '', to: '' };
 
@@ -4668,14 +4676,27 @@ document.getElementById('finanzas-investment-type-field').appendChild(finanzasIn
 const finanzasInvestmentDateField = createDateField({ initialValue: new Date() });
 document.getElementById('finanzas-investment-date-field').appendChild(finanzasInvestmentDateField.element);
 
-// Filtro de activo de la grafica de Inversiones -- "Todos los activos" +
-// los que haya usados, ver refreshFinanzasInvestmentTrendChart() mas abajo.
-const finanzasInvestmentTrendAssetField = createSelectField({
-  options: [{ value: '', label: 'Todos los activos' }],
-  initialValue: '',
-  onChange: () => refreshFinanzasInvestmentTrendChart(),
-});
-document.getElementById('finanzas-investment-trend-asset-field').appendChild(finanzasInvestmentTrendAssetField.element);
+// Activo de la transaccion -- antes era texto libre, ahora los activos
+// son una entidad real (ver routes/finanzasAssets.js): se eligen de los
+// ya creados en "Gestionar carteras y activos", sin creacion inline
+// (mismo criterio que cuenta/categoria).
+const finanzasInvestmentAssetField = createSelectField({ options: [], initialValue: '' });
+document.getElementById('finanzas-investment-asset-field').appendChild(finanzasInvestmentAssetField.element);
+
+// Cartera padre al crear/editar una cartera (arbol con indentacion, ver
+// buildPortfolioSelectOptions mas abajo) y cartera de un activo -- las
+// opciones se rellenan via .setOptions() en cuanto se cargan
+// finanzasPortfolios (populateFinanzasPortfolioSelects).
+const finanzasPortfolioParentField = createSelectField({ options: [{ value: '', label: 'Ninguna (nivel raiz)' }], initialValue: '' });
+document.getElementById('finanzas-portfolio-parent-field').appendChild(finanzasPortfolioParentField.element);
+
+const finanzasAssetPortfolioField = createSelectField({ options: [{ value: '', label: 'Sin cartera' }], initialValue: '' });
+document.getElementById('finanzas-asset-portfolio-field').appendChild(finanzasAssetPortfolioField.element);
+
+// Fecha de una actualizacion manual de precio (ver "Ver evolución" en
+// Gestionar activos, renderFinanzasAssetValuationChart mas abajo).
+const finanzasAssetValuationDateField = createDateField({ initialValue: new Date() });
+document.getElementById('finanzas-asset-valuation-date-field').appendChild(finanzasAssetValuationDateField.element);
 
 // Selector de mes (vista mensual del Ahorro) + rango (vista historica) --
 // ver renderFinanzasSavingsMonthly()/renderFinanzasSavingsHistoric() mas
@@ -4719,6 +4740,9 @@ function setupFinanzasIconColorFields() {
   document.getElementById('finanzas-category-icon-field').appendChild(finanzasCategoryIconField.element);
   finanzasCategoryColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
   document.getElementById('finanzas-category-color-field').appendChild(finanzasCategoryColorField.element);
+
+  finanzasPortfolioColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
+  document.getElementById('finanzas-portfolio-color-field').appendChild(finanzasPortfolioColorField.element);
 }
 
 async function loadFinanzasAccounts() {
@@ -4726,6 +4750,12 @@ async function loadFinanzasAccounts() {
 }
 async function loadFinanzasCategories() {
   finanzasCategories = await api('/api/finanzas-categories');
+}
+async function loadFinanzasPortfolios() {
+  finanzasPortfolios = await api('/api/finanzas-portfolios');
+}
+async function loadFinanzasAssets() {
+  finanzasAssets = await api('/api/finanzas-assets');
 }
 
 function populateFinanzasSelects() {
@@ -4737,6 +4767,40 @@ function populateFinanzasSelects() {
   const categoryOptions = finanzasCategories.map((c) => ({ value: c.id, label: `${c.icon ? c.icon + ' ' : ''}${c.name}` }));
   finanzasFilterCategoryField.setOptions([{ value: '', label: 'Todas las categorías' }, ...categoryOptions]);
   finanzasTransactionCategoryField.setOptions([{ value: '', label: 'Sin categoría' }, ...categoryOptions]);
+}
+
+// Recorre finanzasPortfolios (parentId auto-referenciado) con
+// indentacion segun profundidad -- mismo patron que
+// buildFolderSelectOptions() para las carpetas de notas (espacio
+// ideografico U+3000 repetido por nivel + prefijo "↳"). excludePortfolioId
+// evita ofrecer una cartera (o cualquiera de sus descendientes) como su
+// propio padre al editarla -- el backend igualmente rechazaria el ciclo,
+// esto solo mejora la UX no mostrando la opcion invalida.
+function buildPortfolioSelectOptions(parentId, depth, excludePortfolioId) {
+  const children = finanzasPortfolios
+    .filter((p) => p.parentId === parentId && p.id !== excludePortfolioId)
+    .sort((a, b) => a.position - b.position);
+  let options = [];
+  children.forEach((p) => {
+    const indent = '　'.repeat(depth);
+    const prefix = depth > 0 ? '↳ ' : '';
+    options.push({ value: String(p.id), label: indent + prefix + p.name, color: p.color });
+    options = options.concat(buildPortfolioSelectOptions(p.id, depth + 1, excludePortfolioId));
+  });
+  return options;
+}
+
+function populateFinanzasPortfolioSelects(excludePortfolioId) {
+  finanzasPortfolioParentField.setOptions([
+    { value: '', label: 'Ninguna (nivel raiz)' },
+    ...buildPortfolioSelectOptions(null, 0, excludePortfolioId),
+  ]);
+  finanzasAssetPortfolioField.setOptions([
+    { value: '', label: 'Sin cartera' },
+    ...buildPortfolioSelectOptions(null, 0),
+  ]);
+  const assetOptions = [...finanzasAssets].sort((a, b) => a.name.localeCompare(b.name, 'es')).map((a) => ({ value: a.id, label: a.name }));
+  finanzasInvestmentAssetField.setOptions(assetOptions);
 }
 
 // Cuentas: modal propio (Nueva/Editar), igual que Movimientos/Inversiones
@@ -4799,6 +4863,289 @@ function renderFinanzasAccountsList() {
     });
     list.appendChild(row);
   });
+}
+
+// Carteras: modal propio (Nueva/Editar) igual que Cuentas -- nombre +
+// color + cartera padre (arbol con indentacion, ver
+// buildPortfolioSelectOptions). excludePortfolioId al editar evita
+// ofrecerse a si misma (o a sus descendientes) como su propio padre.
+function openFinanzasPortfolioModal(p) {
+  document.getElementById('finanzas-portfolio-modal-title').textContent = p ? 'Editar cartera' : 'Nueva cartera';
+  document.getElementById('finanzas-portfolio-id').value = p ? p.id : '';
+  document.getElementById('finanzas-portfolio-name').value = p ? p.name : '';
+  finanzasPortfolioColorField.setValue(p ? p.color : DEFAULT_EVENT_COLOR);
+  populateFinanzasPortfolioSelects(p ? p.id : null);
+  finanzasPortfolioParentField.setValue(p ? (p.parentId ? String(p.parentId) : '') : '');
+  document.getElementById('finanzas-portfolio-modal').classList.remove('hidden');
+}
+function closeFinanzasPortfolioModal() {
+  document.getElementById('finanzas-portfolio-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-finanzas-portfolio').addEventListener('click', () => openFinanzasPortfolioModal(null));
+document.getElementById('btn-cancel-finanzas-portfolio').addEventListener('click', closeFinanzasPortfolioModal);
+document.getElementById('btn-close-finanzas-portfolio').addEventListener('click', closeFinanzasPortfolioModal);
+
+function buildFinanzasPortfolioPathLabel(portfolioId) {
+  const parts = [];
+  let current = portfolioId;
+  while (current != null) {
+    const p = finanzasPortfolios.find((x) => x.id === current);
+    if (!p) break;
+    parts.unshift(p.name);
+    current = p.parentId;
+  }
+  return parts.join(' / ');
+}
+
+function renderFinanzasPortfoliosList() {
+  const list = document.getElementById('finanzas-portfolios-list');
+  list.innerHTML = '';
+  if (finanzasPortfolios.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavia no tienes carteras. Crea una arriba.</p>';
+    return;
+  }
+  finanzasPortfolios.forEach((p) => {
+    const row = document.createElement('div');
+    row.className = 'group-item';
+    row.innerHTML = `
+      <span class="color-dot" style="background-color: ${p.color}"></span>
+      <span class="group-item-name">${escapeHtml(buildFinanzasPortfolioPathLabel(p.id))}</span>
+      <div class="group-item-actions">
+        <button type="button" class="secondary-btn" data-action="edit">Editar</button>
+        <button type="button" class="danger-btn" data-action="delete">Eliminar</button>
+      </div>
+    `;
+    row.querySelector('[data-action="edit"]').addEventListener('click', () => openFinanzasPortfolioModal(p));
+    row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+      if (!confirm(`¿Eliminar la cartera "${p.name}"? Sus activos y subcarteras se quedan sin ella, no se borran.`)) return;
+      await api(`/api/finanzas-portfolios/${p.id}`, { method: 'DELETE' });
+      await refreshFinanzasPortfoliosAndAssets();
+    });
+    list.appendChild(row);
+  });
+}
+
+// Activos: modal propio (Nueva/Editar) -- nombre + cartera. Sin creacion
+// inline desde el modal de transaccion (mismo criterio que cuentas/
+// categorias): un activo nuevo se crea aqui y luego ya aparece en el
+// selector "Activo" de "+ Inversión".
+function openFinanzasAssetModal(a) {
+  document.getElementById('finanzas-asset-modal-title').textContent = a ? 'Editar activo' : 'Nuevo activo';
+  document.getElementById('finanzas-asset-id').value = a ? a.id : '';
+  document.getElementById('finanzas-asset-name').value = a ? a.name : '';
+  populateFinanzasPortfolioSelects(null);
+  finanzasAssetPortfolioField.setValue(a && a.portfolioId ? String(a.portfolioId) : '');
+  document.getElementById('finanzas-asset-modal').classList.remove('hidden');
+}
+function closeFinanzasAssetModal() {
+  document.getElementById('finanzas-asset-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-finanzas-asset').addEventListener('click', () => openFinanzasAssetModal(null));
+document.getElementById('btn-cancel-finanzas-asset').addEventListener('click', closeFinanzasAssetModal);
+document.getElementById('btn-close-finanzas-asset').addEventListener('click', closeFinanzasAssetModal);
+
+function renderFinanzasAssetsList() {
+  const list = document.getElementById('finanzas-assets-list');
+  list.innerHTML = '';
+  if (finanzasAssets.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavia no tienes activos. Crea uno arriba.</p>';
+    return;
+  }
+  finanzasAssets.forEach((a) => {
+    const row = document.createElement('div');
+    row.className = 'group-item';
+    const portfolioLabel = a.portfolioId ? buildFinanzasPortfolioPathLabel(a.portfolioId) : 'Sin cartera';
+    row.innerHTML = `
+      <span class="group-item-name">${escapeHtml(a.name)} <span class="finanzas-account-type-badge">${escapeHtml(portfolioLabel)}</span></span>
+      <div class="group-item-actions">
+        <button type="button" class="secondary-btn" data-action="history">Ver evolución</button>
+        <button type="button" class="secondary-btn" data-action="edit">Editar</button>
+        <button type="button" class="danger-btn" data-action="delete">Eliminar</button>
+      </div>
+    `;
+    row.querySelector('[data-action="history"]').addEventListener('click', () => openFinanzasAssetHistoryModal(a));
+    row.querySelector('[data-action="edit"]').addEventListener('click', () => openFinanzasAssetModal(a));
+    row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+      if (!confirm(`¿Eliminar el activo "${a.name}"?`)) return;
+      try {
+        await api(`/api/finanzas-assets/${a.id}`, { method: 'DELETE' });
+        await refreshFinanzasPortfoliosAndAssets();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+    list.appendChild(row);
+  });
+}
+
+async function refreshFinanzasPortfoliosAndAssets() {
+  const previousIds = new Set(finanzasAssets.map((a) => a.id));
+  await Promise.all([loadFinanzasPortfolios(), loadFinanzasAssets()]);
+  // Un activo recien creado se marca en el arbol por defecto (mismo
+  // criterio que "todos marcados" al abrir la pestaña por primera vez)
+  // -- si no, aparecerian nuevos activos invisibles en la grafica hasta
+  // que alguien se acordara de marcarlos a mano.
+  finanzasAssets.forEach((a) => {
+    if (!previousIds.has(a.id)) finanzasAssetTreeSelectedIds.add(a.id);
+  });
+  populateFinanzasPortfolioSelects(null);
+  renderFinanzasPortfoliosList();
+  renderFinanzasAssetsList();
+  renderFinanzasAssetTree();
+  await refreshFinanzasInvestmentTrendChart();
+}
+
+document.getElementById('finanzas-portfolio-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('finanzas-portfolio-id').value;
+  const payload = {
+    name: document.getElementById('finanzas-portfolio-name').value,
+    color: finanzasPortfolioColorField.getValue(),
+    parentId: finanzasPortfolioParentField.getValue() || null,
+  };
+  if (id) {
+    await api(`/api/finanzas-portfolios/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/finanzas-portfolios', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeFinanzasPortfolioModal();
+  await refreshFinanzasPortfoliosAndAssets();
+});
+
+document.getElementById('finanzas-asset-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('finanzas-asset-id').value;
+  const payload = {
+    name: document.getElementById('finanzas-asset-name').value,
+    portfolioId: finanzasAssetPortfolioField.getValue() || null,
+  };
+  if (id) {
+    await api(`/api/finanzas-assets/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/finanzas-assets', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeFinanzasAssetModal();
+  await refreshFinanzasPortfoliosAndAssets();
+});
+
+// Historial de un activo: actualizaciones MANUALES de precio/unidad
+// ("para ir registrando su evolucion", con su margen de error asumido a
+// proposito -- sin conectar a ninguna cotizacion en vivo, mismo
+// criterio que el resto de Inversiones) + grafica de lineas nueva.
+let currentFinanzasAssetHistoryId = null;
+
+function openFinanzasAssetHistoryModal(asset) {
+  currentFinanzasAssetHistoryId = asset.id;
+  document.getElementById('finanzas-asset-history-title').textContent = `Evolución de precio — ${asset.name}`;
+  document.getElementById('finanzas-asset-valuation-form').reset();
+  finanzasAssetValuationDateField.setValue(new Date());
+  document.getElementById('finanzas-asset-history-modal').classList.remove('hidden');
+  refreshFinanzasAssetValuations();
+}
+function closeFinanzasAssetHistoryModal() {
+  document.getElementById('finanzas-asset-history-modal').classList.add('hidden');
+  currentFinanzasAssetHistoryId = null;
+}
+document.getElementById('btn-close-finanzas-asset-history').addEventListener('click', closeFinanzasAssetHistoryModal);
+
+async function refreshFinanzasAssetValuations() {
+  const valuations = await api(`/api/finanzas-assets/${currentFinanzasAssetHistoryId}/valuations`);
+  const tbody = document.getElementById('finanzas-asset-valuations-tbody');
+  tbody.innerHTML = '';
+  if (valuations.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-hint">Sin actualizaciones de precio todavia.</td></tr>';
+  } else {
+    valuations.forEach((v) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${v.date}</td>
+        <td>${formatFinanzasAmount(v.pricePerUnit)}</td>
+        <td>${v.notes ? escapeHtml(v.notes) : '—'}</td>
+        <td></td>
+      `;
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'danger-btn';
+      deleteBtn.textContent = 'Borrar';
+      deleteBtn.addEventListener('click', async () => {
+        await api(`/api/finanzas-assets/valuations/${v.id}`, { method: 'DELETE' });
+        await refreshFinanzasAssetValuations();
+      });
+      tr.lastElementChild.appendChild(deleteBtn);
+      tbody.appendChild(tr);
+    });
+  }
+  renderFinanzasAssetValuationChart(valuations);
+}
+
+document.getElementById('finanzas-asset-valuation-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = {
+    date: toDateKey(finanzasAssetValuationDateField.getValue()),
+    pricePerUnit: document.getElementById('finanzas-asset-valuation-price').value,
+    notes: document.getElementById('finanzas-asset-valuation-notes').value || null,
+  };
+  await api(`/api/finanzas-assets/${currentFinanzasAssetHistoryId}/valuations`, { method: 'POST', body: JSON.stringify(payload) });
+  document.getElementById('finanzas-asset-valuation-form').reset();
+  finanzasAssetValuationDateField.setValue(new Date());
+  await refreshFinanzasAssetValuations();
+});
+
+// Grafica de lineas -- primera de este tipo en el proyecto (las demas
+// graficas de Finanzas/Gimnasio son de barras). SVG a mano, sin
+// libreria, reutilizando el tooltip compartido de las demas graficas de
+// Finanzas (attachFinanzasChartTooltips). Se degrada con gracia: 0
+// actualizaciones = mensaje vacio sin SVG, 1 sola = un punto suelto sin
+// linea (no hay nada que conectar todavia), precios todos iguales = se
+// fuerza un rango minimo para no dividir por cero.
+function renderFinanzasAssetValuationChart(valuations) {
+  const wrap = document.getElementById('finanzas-asset-history-chart');
+  if (!valuations || valuations.length === 0) {
+    wrap.innerHTML = '<p class="empty-hint">Sin actualizaciones de precio todavia.</p>';
+    return;
+  }
+
+  // La tabla se muestra mas reciente primero, pero la grafica necesita
+  // ir de mas antiguo a mas reciente de izquierda a derecha.
+  const sorted = [...valuations].sort((a, b) => a.date.localeCompare(b.date));
+  const width = 480;
+  const height = 160;
+  const padding = 24;
+
+  if (sorted.length === 1) {
+    wrap.innerHTML = `
+      <svg viewBox="0 0 ${width} ${height}" class="finanzas-trend-chart-svg" role="img" aria-label="Evolucion de precio">
+        <circle cx="${width / 2}" cy="${height / 2}" r="4" fill="var(--accent)" data-tooltip="${escapeHtml(`${sorted[0].date}: ${formatFinanzasAmount(sorted[0].pricePerUnit)}`)}"></circle>
+      </svg>
+      <p class="hint">Todavia solo hay una actualizacion registrada -- la grafica de linea aparecera con la segunda.</p>`;
+    attachFinanzasChartTooltips(wrap.querySelector('svg'));
+    return;
+  }
+
+  const prices = sorted.map((v) => v.pricePerUnit);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const range = maxPrice - minPrice || 1; // todos iguales -- evita dividir por cero
+  const usableWidth = width - padding * 2;
+  const usableHeight = height - padding * 2;
+
+  const coords = sorted.map((v, i) => ({
+    x: padding + (i / (sorted.length - 1)) * usableWidth,
+    y: padding + usableHeight - ((v.pricePerUnit - minPrice) / range) * usableHeight,
+    v,
+  }));
+
+  const pathD = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ');
+  const dots = coords
+    .map((c) => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="3.5" fill="var(--accent)" data-tooltip="${escapeHtml(`${c.v.date}: ${formatFinanzasAmount(c.v.pricePerUnit)}`)}"></circle>`)
+    .join('');
+
+  wrap.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" class="finanzas-trend-chart-svg" role="img" aria-label="Evolucion de precio">
+      <path d="${pathD}" fill="none" stroke="var(--accent)" stroke-width="2"></path>
+      ${dots}
+    </svg>`;
+  attachFinanzasChartTooltips(wrap.querySelector('svg'));
 }
 
 // --- Modal de ejercicio -------------------------------------------------
@@ -5886,19 +6233,102 @@ async function refreshFinanzasInvestmentsTab() {
     });
   }
 
-  const assetNames = [...new Set(investments.map((i) => i.assetName))].sort((a, b) => a.localeCompare(b, 'es'));
-  finanzasInvestmentTrendAssetField.setOptions([{ value: '', label: 'Todos los activos' }, ...assetNames.map((a) => ({ value: a, label: a }))]);
   await refreshFinanzasInvestmentTrendChart();
 }
 
+// Arbol de checkboxes (carteras/subcarteras/activos) junto a la grafica
+// de evolucion mensual -- sustituye al selector unico de antes. Siempre
+// expandido del todo (sin precedente de expand/colapsar en el proyecto,
+// y el volumen de carteras personales no lo justifica). Recorre
+// finanzasPortfolios/finanzasAssets con la misma logica de
+// buildPortfolioSelectOptions, pero pintando checkboxes en vez de
+// opciones de un select.
+function collectDescendantAssetIds(portfolioId) {
+  const ownAssetIds = finanzasAssets.filter((a) => a.portfolioId === portfolioId).map((a) => a.id);
+  const childPortfolioIds = finanzasPortfolios.filter((p) => p.parentId === portfolioId).map((p) => p.id);
+  return ownAssetIds.concat(...childPortfolioIds.map((id) => collectDescendantAssetIds(id)));
+}
+
+function renderFinanzasAssetTreeLevel(parentPortfolioId, depth) {
+  const container = document.createElement('div');
+  const childPortfolios = finanzasPortfolios.filter((p) => p.parentId === parentPortfolioId).sort((a, b) => a.position - b.position);
+  const childAssets = finanzasAssets.filter((a) => a.portfolioId === parentPortfolioId).sort((a, b) => a.position - b.position);
+
+  childPortfolios.forEach((p) => {
+    const descendantAssetIds = collectDescendantAssetIds(p.id);
+    const checkedCount = descendantAssetIds.filter((id) => finanzasAssetTreeSelectedIds.has(id)).length;
+    const row = document.createElement('label');
+    row.className = 'finanzas-asset-tree-row finanzas-asset-tree-portfolio';
+    row.style.paddingLeft = `${depth * 18}px`;
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = descendantAssetIds.length > 0 && checkedCount === descendantAssetIds.length;
+    checkbox.indeterminate = checkedCount > 0 && checkedCount < descendantAssetIds.length;
+    checkbox.addEventListener('change', () => {
+      descendantAssetIds.forEach((id) => {
+        if (checkbox.checked) finanzasAssetTreeSelectedIds.add(id);
+        else finanzasAssetTreeSelectedIds.delete(id);
+      });
+      renderFinanzasAssetTree();
+      refreshFinanzasInvestmentTrendChart();
+    });
+    const nameSpan = document.createElement('span');
+    nameSpan.style.color = p.color;
+    nameSpan.textContent = p.name;
+    row.append(checkbox, nameSpan);
+    container.appendChild(row);
+    container.appendChild(renderFinanzasAssetTreeLevel(p.id, depth + 1));
+  });
+
+  childAssets.forEach((asset) => {
+    const row = document.createElement('label');
+    row.className = 'finanzas-asset-tree-row finanzas-asset-tree-leaf';
+    row.style.paddingLeft = `${depth * 18}px`;
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = finanzasAssetTreeSelectedIds.has(asset.id);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) finanzasAssetTreeSelectedIds.add(asset.id);
+      else finanzasAssetTreeSelectedIds.delete(asset.id);
+      renderFinanzasAssetTree(); // repinta para recalcular el indeterminate de los ancestros
+      refreshFinanzasInvestmentTrendChart();
+    });
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = asset.name;
+    row.append(checkbox, nameSpan);
+    container.appendChild(row);
+  });
+
+  return container;
+}
+
+function renderFinanzasAssetTree() {
+  const wrap = document.getElementById('finanzas-investment-asset-tree');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (finanzasPortfolios.length === 0 && finanzasAssets.length === 0) {
+    wrap.innerHTML = '<p class="empty-hint">Todavia no tienes activos. Créalos en "Gestionar carteras y activos".</p>';
+    return;
+  }
+  wrap.appendChild(renderFinanzasAssetTreeLevel(null, 0));
+}
+
 // Evolucion mensual de compras/ventas/dividendos -- mismo estilo de
-// barras que renderFinanzasMonthlyTrendChart(), pero con 3 series y con
-// filtro de activo (finanzasInvestmentTrendAssetField, "Todos los
-// activos" por defecto) para poder ver la evolucion general o la de una
-// accion en concreto, como pidio Koku.
+// barras que renderFinanzasMonthlyTrendChart(), pero con 3 series y
+// filtrado por el CONJUNTO de activos marcado en el arbol de carteras
+// (finanzasAssetTreeSelectedIds, ver renderFinanzasAssetTree) en vez de
+// un unico selector -- asi se puede ver la evolucion general, la de una
+// cartera entera, o la de un activo individual, como pidio Koku.
 async function refreshFinanzasInvestmentTrendChart() {
-  const assetName = finanzasInvestmentTrendAssetField.getValue();
-  const qs = assetName ? `?assetName=${encodeURIComponent(assetName)}` : '';
+  const selected = [...finanzasAssetTreeSelectedIds];
+  if (selected.length === 0) {
+    // Todo desmarcado a mano -- "ningun activo", no "todos" (evitar
+    // pedir de mas al servidor con un filtro vacio que se interpretaria
+    // como "sin filtro").
+    renderFinanzasInvestmentTrendChart([]);
+    return;
+  }
+  const qs = selected.length < finanzasAssets.length ? `?assetIds=${selected.join(',')}` : '';
   const data = await api(`/api/finanzas-investments/summary/monthly-trend${qs}`);
   renderFinanzasInvestmentTrendChart(data);
 }
@@ -5966,7 +6396,7 @@ function openFinanzasInvestmentModal(inv) {
   document.getElementById('finanzas-investment-modal-title').textContent = inv ? 'Editar operación' : 'Nueva inversión';
   document.getElementById('finanzas-investment-id').value = inv ? inv.id : '';
   finanzasInvestmentAccountField.setValue(inv ? inv.accountId : (finanzasAccounts[0] ? finanzasAccounts[0].id : ''));
-  document.getElementById('finanzas-investment-asset').value = inv ? inv.assetName : '';
+  finanzasInvestmentAssetField.setValue(inv ? inv.assetId : (finanzasAssets[0] ? finanzasAssets[0].id : ''));
   finanzasInvestmentTypeField.setValue(inv ? inv.type : 'buy');
   document.getElementById('finanzas-investment-quantity').value = inv && inv.quantity !== null ? inv.quantity : '';
   document.getElementById('finanzas-investment-price').value = inv && inv.pricePerUnit !== null ? inv.pricePerUnit : '';
@@ -5989,7 +6419,7 @@ document.getElementById('finanzas-investment-form').addEventListener('submit', a
   const type = finanzasInvestmentTypeField.getValue();
   const payload = {
     accountId: Number(finanzasInvestmentAccountField.getValue()),
-    assetName: document.getElementById('finanzas-investment-asset').value,
+    assetId: Number(finanzasInvestmentAssetField.getValue()),
     type,
     date: toDateKey(finanzasInvestmentDateField.getValue()),
     notes: document.getElementById('finanzas-investment-notes').value || null,
@@ -6033,6 +6463,16 @@ async function openFinanzasView() {
   document.getElementById('finanzas-view').classList.remove('hidden');
   switchFinanzasTab('resumen');
   await refreshFinanzasAccountsAndCategories();
+  await loadFinanzasPortfolios();
+  await loadFinanzasAssets();
+  populateFinanzasPortfolioSelects(null);
+  renderFinanzasPortfoliosList();
+  renderFinanzasAssetsList();
+  // Por defecto, todos los activos marcados en el arbol (ver
+  // renderFinanzasAssetTree) -- se reinicia cada vez que se abre la
+  // vista para no arrastrar una seleccion vieja de la sesion anterior.
+  finanzasAssetTreeSelectedIds = new Set(finanzasAssets.map((a) => a.id));
+  renderFinanzasAssetTree();
   await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasInvestmentsTab()]);
 }
 function closeFinanzasView() {
@@ -6058,11 +6498,23 @@ function formatArchivoSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// archivosCurrentPath: ruta que esta viendo AHORA el panel derecho
+// cuando es el ordenador (ver isTrustedDevice() mas abajo) -- null =
+// todavia no se ha navegado (o el dispositivo no puede navegar, ver
+// abajo), en cuyo caso las peticiones usan la carpeta configurada de
+// siempre. Distinta de archivosBrowsePath (esa es solo del widget de
+// "elegir carpeta por defecto" del <details> de arriba).
+let archivosCurrentPath = null;
+
+function archivosPathQueryParam() {
+  return archivosCurrentPath ? `?path=${encodeURIComponent(archivosCurrentPath)}` : '';
+}
+
 async function downloadArchivo(name) {
   const token = localStorage.getItem('deviceToken');
   const headers = {};
   if (token) headers['X-Device-Token'] = token;
-  const url = new URL(`/api/archivos/${encodeURIComponent(name)}`, getServerBaseUrl());
+  const url = new URL(`/api/archivos/${encodeURIComponent(name)}${archivosPathQueryParam()}`, getServerBaseUrl());
   try {
     const res = await fetch(url.toString(), { headers });
     if (!res.ok) throw new Error(`Error ${res.status}`);
@@ -6085,9 +6537,9 @@ async function downloadArchivo(name) {
 
 async function deleteArchivo(name) {
   if (!confirm(`¿Borrar "${name}"?`)) return;
-  await api(`/api/archivos/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  await api(`/api/archivos/${encodeURIComponent(name)}${archivosPathQueryParam()}`, { method: 'DELETE' });
   archivosSelectedRemote.delete(name);
-  await refreshArchivosList();
+  await refreshArchivosCurrentView();
 }
 
 // Diseño de dos paneles (ver comentario en index.html): el panel
@@ -6101,10 +6553,12 @@ function updateArchivosReceiveButtonState() {
   document.getElementById('btn-archivos-receive').disabled = archivosSelectedRemote.size === 0;
 }
 
-async function refreshArchivosList() {
+// Pinta la tabla de archivos -- compartida por el movil (siempre la
+// carpeta configurada, ver refreshArchivosList) y el ordenador (la
+// carpeta que se este navegando ahora mismo, ver loadArchivosNavPath).
+function renderArchivosFileTable(files) {
   const tbody = document.getElementById('archivos-table-body');
   const emptyHint = document.getElementById('archivos-empty-hint');
-  const files = await api('/api/archivos');
   const validNames = new Set(files.map((f) => f.name));
   for (const name of archivosSelectedRemote) {
     if (!validNames.has(name)) archivosSelectedRemote.delete(name);
@@ -6141,6 +6595,75 @@ async function refreshArchivosList() {
   }
   updateArchivosReceiveButtonState();
 }
+
+// Movil (o cualquier dispositivo no de confianza): solo ve la carpeta
+// configurada, sin navegacion real -- comportamiento identico al de
+// siempre, los navegadores no dejan listar el almacenamiento propio del
+// dispositivo (ver comentario en index.html).
+async function refreshArchivosList() {
+  const files = await api('/api/archivos');
+  renderArchivosFileTable(files);
+}
+
+// Ordenador: navega de verdad por el disco entero (GET /browse, que ya
+// devuelve carpetas Y archivos) -- la carpeta configurada en "Carpeta de
+// destino" pasa a ser solo el punto de partida / atajo rapido
+// (btn-archivos-nav-default), no un limite.
+async function loadArchivosNavPath(targetPath) {
+  const qs = targetPath ? `?path=${encodeURIComponent(targetPath)}` : '';
+  const data = await api(`/api/archivos/browse${qs}`);
+  archivosCurrentPath = data.path;
+  document.getElementById('archivos-nav-path').textContent = data.path;
+  const upBtn = document.getElementById('btn-archivos-nav-up');
+  upBtn.disabled = !data.parent;
+  upBtn.dataset.parent = data.parent || '';
+  const foldersList = document.getElementById('archivos-nav-folders');
+  foldersList.innerHTML = '';
+  data.folders.forEach((folder) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'archivos-browser-item';
+    btn.textContent = folder.name;
+    btn.addEventListener('click', () => loadArchivosNavPath(folder.path));
+    foldersList.appendChild(btn);
+  });
+  renderArchivosFileTable(data.files);
+}
+
+// Punto de entrada unico tras abrir la vista o tras cualquier mutacion
+// (subir/borrar/etc.) -- decide si tocan la navegacion real (ordenador)
+// o la lista simple de siempre (movil).
+async function refreshArchivosBrowsePanel() {
+  const navRow = document.getElementById('archivos-nav-row');
+  const navFolders = document.getElementById('archivos-nav-folders');
+  if (isTrustedDevice()) {
+    navRow.classList.remove('hidden');
+    navFolders.classList.remove('hidden');
+    const startPath = archivosCurrentPath || document.getElementById('archivos-folder-path').value || null;
+    await loadArchivosNavPath(startPath);
+  } else {
+    navRow.classList.add('hidden');
+    navFolders.classList.add('hidden');
+    await refreshArchivosList();
+  }
+}
+
+async function refreshArchivosCurrentView() {
+  if (isTrustedDevice() && archivosCurrentPath) {
+    await loadArchivosNavPath(archivosCurrentPath);
+  } else {
+    await refreshArchivosList();
+  }
+}
+
+document.getElementById('btn-archivos-nav-up').addEventListener('click', () => {
+  const parent = document.getElementById('btn-archivos-nav-up').dataset.parent;
+  if (parent) loadArchivosNavPath(parent);
+});
+document.getElementById('btn-archivos-nav-default').addEventListener('click', async () => {
+  const { folder } = await api('/api/archivos/folder');
+  await loadArchivosNavPath(folder);
+});
 
 // Panel izquierdo ("Este dispositivo"): NO es un explorador real (los
 // navegadores no dejan listar el almacenamiento del propio dispositivo,
@@ -6188,7 +6711,7 @@ document.getElementById('btn-archivos-send').addEventListener('click', async () 
   renderArchivosStagedList();
   for (const file of filesToSend) {
     try {
-      await api('/api/archivos', {
+      await api(`/api/archivos${archivosPathQueryParam()}`, {
         method: 'POST',
         headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
         body: file,
@@ -6197,7 +6720,7 @@ document.getElementById('btn-archivos-send').addEventListener('click', async () 
       alert(`No se pudo subir "${file.name}": ${err.message}`);
     }
   }
-  await refreshArchivosList();
+  await refreshArchivosCurrentView();
 });
 
 document.getElementById('btn-archivos-receive').addEventListener('click', async () => {
@@ -6269,7 +6792,10 @@ document.getElementById('btn-archivos-browser-use').addEventListener('click', as
     await api('/api/archivos/folder', { method: 'PUT', body: JSON.stringify({ folder: archivosBrowsePath }) });
     document.getElementById('archivos-folder-path').value = archivosBrowsePath;
     document.getElementById('archivos-folder-browser').classList.add('hidden');
-    await refreshArchivosList();
+    // Saltar el panel principal a la carpeta que se acaba de fijar como
+    // nueva por defecto -- coherente con que "Carpeta por defecto" haga
+    // lo mismo.
+    await loadArchivosNavPath(archivosBrowsePath);
   } catch (err) {
     alert('No se pudo cambiar la carpeta: ' + err.message);
   }
@@ -6286,7 +6812,9 @@ async function openArchivosView() {
   archivosStagedFiles = [];
   renderArchivosStagedList();
   archivosSelectedRemote.clear();
-  await Promise.all([refreshSyncStatusUI(), refreshArchivosFolderUI(), refreshArchivosList(), refreshVersionInfo()]);
+  archivosCurrentPath = null;
+  await Promise.all([refreshSyncStatusUI(), refreshArchivosFolderUI(), refreshVersionInfo()]);
+  await refreshArchivosBrowsePanel();
 }
 function closeArchivosView() {
   document.getElementById('archivos-view').classList.add('hidden');

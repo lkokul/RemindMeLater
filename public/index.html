@@ -436,6 +436,11 @@
       <h2>Extensiones</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-extensions" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
+        <!-- Configuracion tiene que poder abrirse desde CUALQUIER
+             ventana -- esta pantalla (fija, z-index por encima de la
+             topbar) tapa el boton de Configuracion de siempre, ver
+             btn-my-space-settings. Mismo patron, va el ULTIMO. -->
+        <button type="button" id="btn-extensions-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
     <div class="extensions-hub">
@@ -506,6 +511,7 @@
       <h2>Gimnasio</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-gym" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+        <button type="button" id="btn-gym-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
     <div class="gym-tabs">
@@ -646,6 +652,7 @@
       <h2>Finanzas</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-finanzas" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+        <button type="button" id="btn-finanzas-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
     <div class="finanzas-tabs">
@@ -790,9 +797,90 @@
         </table>
       </div>
 
+      <!-- Carteras anidadas + activos como entidad real (antes de esta
+           ronda, "Activo" era solo texto libre por transaccion) -- ver
+           routes/finanzasPortfolios.js/finanzasAssets.js. Los activos
+           creados aqui son los que ofrece el selector "Activo" del
+           modal de "+ Inversión" y los nodos hoja del arbol de
+           seleccion de abajo. -->
+      <details class="finanzas-manage-block">
+        <summary>Gestionar carteras y activos</summary>
+        <h4>Carteras</h4>
+        <button type="button" id="btn-new-finanzas-portfolio" class="primary-btn gym-tab-action">+ Cartera</button>
+        <div id="finanzas-portfolios-list" class="finanzas-manage-list"></div>
+        <h4>Activos</h4>
+        <button type="button" id="btn-new-finanzas-asset" class="primary-btn gym-tab-action">+ Activo</button>
+        <div id="finanzas-assets-list" class="finanzas-manage-list"></div>
+      </details>
+
       <h3>Evolución mensual (últimos 6 meses)</h3>
-      <div id="finanzas-investment-trend-asset-field" class="finanzas-investment-trend-asset-field"></div>
-      <div id="finanzas-investment-trend-chart" class="finanzas-trend-chart-wrap"></div>
+      <!-- Arbol de checkboxes (carteras/subcarteras/activos) al lado de
+           la grafica, sustituye al selector unico de antes -- ver
+           renderFinanzasAssetTree() en app.js. Fila en escritorio,
+           apilado en movil (mismo corte 860px que el resto de la app). -->
+      <div class="finanzas-investment-trend-layout">
+        <div id="finanzas-investment-asset-tree" class="finanzas-investment-asset-tree"></div>
+        <div id="finanzas-investment-trend-chart" class="finanzas-trend-chart-wrap"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modales de "Gestionar carteras y activos" (Inversiones) -->
+  <div id="finanzas-portfolio-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-finanzas-portfolio" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="finanzas-portfolio-modal-title">Nueva cartera</h2>
+      <form id="finanzas-portfolio-form">
+        <input type="hidden" id="finanzas-portfolio-id" />
+        <label>Nombre<input type="text" id="finanzas-portfolio-name" placeholder="Nombre de la cartera" required /></label>
+        <div class="form-row">
+          <label>Color<div id="finanzas-portfolio-color-field"></div></label>
+          <label>Cartera padre<div id="finanzas-portfolio-parent-field"></div></label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-finanzas-portfolio" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="finanzas-asset-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-finanzas-asset" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="finanzas-asset-modal-title">Nuevo activo</h2>
+      <form id="finanzas-asset-form">
+        <input type="hidden" id="finanzas-asset-id" />
+        <label>Nombre<input type="text" id="finanzas-asset-name" placeholder="Ej. Apple (AAPL)" required /></label>
+        <label>Cartera<div id="finanzas-asset-portfolio-field"></div></label>
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-finanzas-asset" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Historial de precio de un activo (ver "Ver evolución" en la lista
+       de Gestionar activos): actualizaciones MANUALES de precio/unidad
+       + grafica de lineas nueva (primera de este tipo en el proyecto). -->
+  <div id="finanzas-asset-history-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-finanzas-asset-history" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="finanzas-asset-history-title">Evolución de precio</h2>
+      <div id="finanzas-asset-history-chart" class="finanzas-trend-chart-wrap"></div>
+      <form id="finanzas-asset-valuation-form" class="finanzas-inline-form">
+        <div id="finanzas-asset-valuation-date-field"></div>
+        <input type="number" id="finanzas-asset-valuation-price" step="0.01" min="0.01" placeholder="Precio/unidad" required />
+        <input type="text" id="finanzas-asset-valuation-notes" placeholder="Notas (opcional)" />
+        <button type="submit" class="primary-btn">Añadir</button>
+      </form>
+      <div class="finanzas-table-wrap">
+        <table class="finanzas-table">
+          <thead><tr><th>Fecha</th><th>Precio/u</th><th>Notas</th><th></th></tr></thead>
+          <tbody id="finanzas-asset-valuations-tbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -859,7 +947,7 @@
         </label>
         <label>
           Activo
-          <input type="text" id="finanzas-investment-asset" placeholder="Ej. Apple (AAPL)" required />
+          <div id="finanzas-investment-asset-field"></div>
         </label>
         <label>
           Tipo
@@ -956,6 +1044,7 @@
       <h2>Archivos</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-archivos" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+        <button type="button" id="btn-archivos-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
 
@@ -1013,11 +1102,24 @@
         <p id="archivos-staged-empty-hint" class="hint">Elige uno o varios archivos para mandarlos al ordenador.</p>
       </div>
       <div class="archivos-transfer-arrows">
-        <button type="button" id="btn-archivos-send" class="primary-btn" disabled title="Enviar al ordenador">→</button>
+        <button type="button" id="btn-archivos-send" class="secondary-btn" disabled title="Enviar al ordenador">→</button>
         <button type="button" id="btn-archivos-receive" class="secondary-btn" disabled title="Descargar a este dispositivo">←</button>
       </div>
       <div class="archivos-transfer-panel">
         <h4>Carpeta compartida en el ordenador</h4>
+        <!-- Navegacion real del disco (solo ordenador, ver
+             isTrustedDevice() en app.js) -- la carpeta configurada
+             arriba en "Carpeta de destino" ahora es solo un atajo
+             rapido (btn-archivos-browser-default), no un limite: desde
+             aqui se puede navegar a cualquier carpeta del ordenador. En
+             movil este bloque se queda oculto y la tabla de abajo
+             sigue mostrando solo la carpeta configurada, sin cambios. -->
+        <div id="archivos-nav-row" class="archivos-nav-row hidden">
+          <button type="button" id="btn-archivos-nav-up" class="icon-btn" aria-label="Subir un nivel">↑</button>
+          <p id="archivos-nav-path" class="archivos-nav-path"></p>
+          <button type="button" id="btn-archivos-nav-default" class="secondary-btn">Carpeta por defecto</button>
+        </div>
+        <div id="archivos-nav-folders" class="archivos-browser-list hidden"></div>
         <div class="archivos-table-wrap">
           <table class="archivos-table" id="archivos-table">
             <thead>
@@ -1046,6 +1148,7 @@
       <h2>Lecturas</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-lecturas" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+        <button type="button" id="btn-lecturas-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
 

@@ -286,6 +286,49 @@ db.exec(`
     monthly_budget_limit REAL
   );
 
+  -- Carteras de inversion, anidadas -- calco de note_folders (mismo
+  -- parent_id auto-referenciado, mismas comprobaciones de ciclo en
+  -- routes/finanzasPortfolios.js) pero SIN icono, mismo criterio que ya
+  -- se aplico a note_folders (el icono generico de carpeta ya diferencia
+  -- bien, no hacia falta elegir uno por carpeta). parent_id NULL =
+  -- cartera de nivel raiz.
+  CREATE TABLE IF NOT EXISTS finanzas_portfolios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#5b8cff',
+    position INTEGER NOT NULL DEFAULT 0,
+    parent_id INTEGER REFERENCES finanzas_portfolios(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Activos como entidad real (antes de esta ronda, finanzas_investment_transactions.asset_name
+  -- era solo texto libre sin identidad propia -- ver migracion mas abajo
+  -- que crea una fila aqui por cada asset_name distinto ya usado).
+  -- portfolio_id NULL = activo sin cartera asignada (nivel raiz del
+  -- arbol de seleccion de la grafica de Inversiones).
+  CREATE TABLE IF NOT EXISTS finanzas_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    portfolio_id INTEGER REFERENCES finanzas_portfolios(id),
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Actualizaciones MANUALES de precio de un activo, para llevar su
+  -- evolucion en el tiempo -- sin conectar a ninguna cotizacion en vivo
+  -- (mismo criterio que finanzas_investment_transactions: registro
+  -- manual a proposito, "tendra su error pero es para mi"). Solo
+  -- precio/unidad + fecha -- la cantidad NO se guarda aqui, ya se puede
+  -- calcular de las transacciones de compra/venta si hiciera falta.
+  CREATE TABLE IF NOT EXISTS finanzas_asset_valuations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id INTEGER NOT NULL REFERENCES finanzas_assets(id),
+    date TEXT NOT NULL,
+    price_per_unit REAL NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Extension "Lecturas" (tercera tarjeta de #extensions-view): historial
   -- de entretenimiento en general, no solo libros -- manga, comic, libro,
   -- serie, anime, pelicula. Una "saga" es el contenedor OBLIGATORIO de
@@ -587,6 +630,29 @@ if (!finanzasSettingsColumns.includes('savings_goal_min')) {
 const finanzasInvestmentColumns = db.prepare('PRAGMA table_info(finanzas_investment_transactions)').all().map((c) => c.name);
 if (!finanzasInvestmentColumns.includes('counts_toward_budget')) {
   db.exec('ALTER TABLE finanzas_investment_transactions ADD COLUMN counts_toward_budget INTEGER NOT NULL DEFAULT 0');
+}
+
+// asset_id: referencia a la entidad real finanzas_assets (Ronda
+// "Carteras de inversion"). asset_name se CONSERVA -- este proyecto
+// nunca hace DROP COLUMN -- pero pasa de ser la fuente de verdad a ser
+// una cache desnormalizada que se sigue escribiendo en cada
+// INSERT/UPDATE con el nombre ACTUAL del activo (ver
+// routes/finanzasInvestments.js), por si asset_id quedara huerfano
+// algun dia. Backfill: cada asset_name distinto ya usado se convierte en
+// una fila de finanzas_assets (sin cartera, portfolio_id NULL), y las
+// transacciones que coincidan por nombre se enlazan por asset_id.
+if (!finanzasInvestmentColumns.includes('asset_id')) {
+  db.exec('ALTER TABLE finanzas_investment_transactions ADD COLUMN asset_id INTEGER REFERENCES finanzas_assets(id)');
+
+  const distinctNames = db
+    .prepare('SELECT DISTINCT asset_name FROM finanzas_investment_transactions WHERE asset_name IS NOT NULL')
+    .all();
+  const insertAsset = db.prepare('INSERT INTO finanzas_assets (name, portfolio_id, position) VALUES (?, NULL, 0)');
+  const linkTransactions = db.prepare('UPDATE finanzas_investment_transactions SET asset_id = ? WHERE asset_name = ?');
+  distinctNames.forEach(({ asset_name }) => {
+    const info = insertAsset.run(asset_name);
+    linkTransactions.run(info.lastInsertRowid, asset_name);
+  });
 }
 
 // Igual que el perfil: el limite mensual de Finanzas es una sola fila

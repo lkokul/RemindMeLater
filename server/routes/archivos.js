@@ -12,7 +12,7 @@ const path = require('path');
 const os = require('os');
 const DATA_DIR = require('../dataDir');
 const db = require('../db');
-const { requireDeviceOrTrusted, requireTrusted } = require('../auth');
+const { requireDeviceOrTrusted, requireTrusted, isTrustedRequest } = require('../auth');
 
 const router = express.Router();
 
@@ -60,11 +60,17 @@ router.put('/folder', requireTrusted, (req, res) => {
   res.json({ folder: getFolder() });
 });
 
-// Lista las subcarpetas de una ruta, para el explorador visual del
-// ordenador (botón "Explorar..." en Archivos). Sin ruta -- se parte de
-// la carpeta personal del usuario, un punto de partida razonable en
-// cualquier sistema operativo. "parent" es null cuando ya no se puede
-// subir mas (raiz del disco).
+// Lista subcarpetas Y archivos de una ruta -- se usa para dos cosas:
+// (1) el explorador de "elegir carpeta por defecto" (solo mira
+// `folders`), y (2) la navegacion real del panel "Carpeta compartida en
+// el ordenador" en la vista de Archivos (mira los dos), que reemplazo a
+// GET / para el ordenador -- asi Koku puede moverse por todo el disco en
+// vez de quedarse limitado a la carpeta configurada, que ahora es solo
+// un atajo rapido (ver btn-archivos-browser-default en el cliente). Sin
+// ruta -- se parte de la carpeta personal del usuario. "parent" es null
+// cuando ya no se puede subir mas (raiz del disco). Solo el ordenador
+// puede navegar el disco entero (requireTrusted): el movil sigue viendo
+// solo la carpeta configurada via GET /, sin cambios.
 router.get('/browse', requireTrusted, (req, res) => {
   const target = req.query.path && typeof req.query.path === 'string' ? req.query.path : os.homedir();
   let entries;
@@ -77,9 +83,43 @@ router.get('/browse', requireTrusted, (req, res) => {
     .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
     .map((e) => ({ name: e.name, path: path.join(target, e.name) }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  const files = entries
+    .filter((e) => e.isFile() && !e.name.startsWith('.'))
+    .map((e) => {
+      const stat = fs.statSync(path.join(target, e.name));
+      return { name: e.name, size: stat.size, modifiedAt: stat.mtime.toISOString() };
+    })
+    .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
   const parent = path.dirname(target);
-  res.json({ path: target, parent: parent === target ? null : parent, folders });
+  res.json({ path: target, parent: parent === target ? null : parent, folders, files });
 });
+
+// Resuelve sobre que carpeta actua una peticion de subir/descargar/
+// borrar: sin `path` en la query, sigue siendo la carpeta configurada de
+// siempre (mismo comportamiento para el movil, que nunca manda `path`).
+// Con `path` (solo lo manda el cliente cuando esta navegando el disco
+// via GET /browse), exige que la peticion sea de confianza -- "navegar
+// y tocar cualquier carpeta del ordenador" solo tiene sentido, y solo es
+// seguro, desde el propio ordenador (mismo criterio que GET /browse).
+function resolveTargetFolder(req) {
+  const requestedPath = req.query.path;
+  if (!requestedPath || typeof requestedPath !== 'string') {
+    return { folder: getFolder() };
+  }
+  if (!isTrustedRequest(req)) {
+    return { error: { status: 403, body: { error: 'trusted_only', message: 'Esta accion solo se puede hacer desde el ordenador.' } } };
+  }
+  let stat;
+  try {
+    stat = fs.statSync(requestedPath);
+  } catch (err) {
+    return { error: { status: 400, body: { error: 'invalid_path', message: 'Esa ruta no existe.' } } };
+  }
+  if (!stat.isDirectory()) {
+    return { error: { status: 400, body: { error: 'invalid_path', message: 'Esa ruta no es una carpeta.' } } };
+  }
+  return { folder: requestedPath };
+}
 
 // Lista los archivos que hay AHORA MISMO en la carpeta configurada --
 // leyendo el directorio real cada vez, sin tabla ni cache, para que
@@ -114,6 +154,8 @@ router.post(
   requireDeviceOrTrusted,
   express.raw({ type: '*/*', limit: '100mb' }),
   (req, res) => {
+    const resolved = resolveTargetFolder(req);
+    if (resolved.error) return res.status(resolved.error.status).json(resolved.error.body);
     const rawName = req.header('X-File-Name');
     if (!rawName || !Buffer.isBuffer(req.body) || req.body.length === 0) {
       return res.status(400).json({ error: 'invalid_file', message: 'Falta el archivo o su nombre.' });
@@ -123,7 +165,7 @@ router.post(
     let name = path.basename(decodeURIComponent(rawName)).replace(/[/\\:*?"<>|]/g, '_').slice(0, 200);
     if (!name) name = 'archivo';
 
-    const folder = getFolder();
+    const folder = resolved.folder;
     const ext = path.extname(name);
     const base = name.slice(0, name.length - ext.length);
     let finalName = name;
@@ -147,15 +189,19 @@ router.post(
 // exigir el token del dispositivo -- sin eso, cualquiera en la wifi
 // podria descargar archivos con nombres comunes a base de probar.
 router.get('/:filename', requireDeviceOrTrusted, (req, res) => {
+  const resolved = resolveTargetFolder(req);
+  if (resolved.error) return res.status(resolved.error.status).json(resolved.error.body);
   const filename = path.basename(req.params.filename);
-  const filePath = path.join(getFolder(), filename);
+  const filePath = path.join(resolved.folder, filename);
   if (!fs.existsSync(filePath)) return res.status(404).end();
   res.download(filePath, filename);
 });
 
 router.delete('/:filename', requireDeviceOrTrusted, (req, res) => {
+  const resolved = resolveTargetFolder(req);
+  if (resolved.error) return res.status(resolved.error.status).json(resolved.error.body);
   const filename = path.basename(req.params.filename);
-  const filePath = path.join(getFolder(), filename);
+  const filePath = path.join(resolved.folder, filename);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'not_found' });
   fs.unlinkSync(filePath);
   res.status(204).end();

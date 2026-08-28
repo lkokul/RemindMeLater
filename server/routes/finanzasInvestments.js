@@ -12,6 +12,10 @@ function serialize(row) {
   return {
     id: row.id,
     accountId: row.account_id,
+    assetId: row.asset_id,
+    // asset_name es una cache desnormalizada (ver migracion en db.js) --
+    // se usa como fallback por si asset_id quedara huerfano algun dia,
+    // pero en el flujo normal el activo referenciado siempre existe.
     assetName: row.asset_name,
     type: row.type,
     quantity: row.quantity,
@@ -25,16 +29,16 @@ function serialize(row) {
 
 function validateBody(body, existing) {
   const accountId = body.accountId !== undefined ? body.accountId : existing && existing.account_id;
-  const assetName =
-    body.assetName !== undefined ? String(body.assetName).trim() : existing && existing.asset_name;
+  const assetId = body.assetId !== undefined ? body.assetId : existing && existing.asset_id;
   const type = body.type !== undefined ? body.type : existing && existing.type;
   const date = body.date !== undefined ? body.date : existing && existing.date;
 
   if (!accountId || !db.prepare('SELECT 1 FROM finanzas_accounts WHERE id = ?').get(accountId)) {
     return { error: 'La cuenta indicada no existe.' };
   }
-  if (!assetName) {
-    return { error: 'El activo necesita un nombre.' };
+  const asset = assetId ? db.prepare('SELECT * FROM finanzas_assets WHERE id = ?').get(assetId) : null;
+  if (!asset) {
+    return { error: 'El activo indicado no existe.' };
   }
   if (type !== 'buy' && type !== 'sell' && type !== 'dividend') {
     return { error: 'El tipo tiene que ser "buy", "sell" o "dividend".' };
@@ -73,15 +77,15 @@ function validateBody(body, existing) {
   const countsTowardBudget =
     type === 'buy' && (body.countsTowardBudget !== undefined ? !!body.countsTowardBudget : !!(existing && existing.counts_toward_budget));
 
-  return { accountId, assetName, type, quantity, pricePerUnit, amount, date, notes: body.notes, countsTowardBudget };
+  return { accountId, assetId: asset.id, assetName: asset.name, type, quantity, pricePerUnit, amount, date, notes: body.notes, countsTowardBudget };
 }
 
 router.get('/', (req, res) => {
-  const { accountId, assetName, type } = req.query;
+  const { accountId, assetId, type } = req.query;
   let sql = 'SELECT * FROM finanzas_investment_transactions WHERE 1=1';
   const params = [];
   if (accountId) { sql += ' AND account_id = ?'; params.push(accountId); }
-  if (assetName) { sql += ' AND asset_name = ?'; params.push(assetName); }
+  if (assetId) { sql += ' AND asset_id = ?'; params.push(assetId); }
   if (type) { sql += ' AND type = ?'; params.push(type); }
   sql += ' ORDER BY date DESC, id DESC';
   const rows = db.prepare(sql).all(...params);
@@ -98,10 +102,11 @@ router.post('/', (req, res) => {
 
   const info = db
     .prepare(
-      'INSERT INTO finanzas_investment_transactions (account_id, asset_name, type, quantity, price_per_unit, amount, date, notes, counts_toward_budget) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO finanzas_investment_transactions (account_id, asset_id, asset_name, type, quantity, price_per_unit, amount, date, notes, counts_toward_budget) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
     .run(
       result.accountId,
+      result.assetId,
       result.assetName,
       result.type,
       result.quantity,
@@ -131,9 +136,10 @@ router.put('/:id', (req, res) => {
       : existing.notes;
 
   db.prepare(
-    'UPDATE finanzas_investment_transactions SET account_id = ?, asset_name = ?, type = ?, quantity = ?, price_per_unit = ?, amount = ?, date = ?, notes = ?, counts_toward_budget = ? WHERE id = ?'
+    'UPDATE finanzas_investment_transactions SET account_id = ?, asset_id = ?, asset_name = ?, type = ?, quantity = ?, price_per_unit = ?, amount = ?, date = ?, notes = ?, counts_toward_budget = ? WHERE id = ?'
   ).run(
     result.accountId,
+    result.assetId,
     result.assetName,
     result.type,
     result.quantity,
@@ -158,14 +164,17 @@ router.delete('/:id', (req, res) => {
 // Resumen por activo: ganancia/perdida REALIZADA (ventas + dividendos -
 // compras) y cuanto queda "invertido a coste" (compras - ventas, a precio
 // de compra -- nunca un valor de mercado actual, porque no hay conexion a
-// ninguna cotizacion en vivo).
+// ninguna cotizacion en vivo). Agrupado por asset_id (antes era por
+// asset_name de texto libre) para que un renombrado de activo no rompa
+// el agrupado.
 router.get('/summary/by-asset', (req, res) => {
   const rows = db.prepare('SELECT * FROM finanzas_investment_transactions').all();
   const byAsset = new Map();
 
   for (const row of rows) {
-    if (!byAsset.has(row.asset_name)) {
-      byAsset.set(row.asset_name, {
+    if (!byAsset.has(row.asset_id)) {
+      byAsset.set(row.asset_id, {
+        assetId: row.asset_id,
         assetName: row.asset_name,
         totalBought: 0,
         totalSold: 0,
@@ -174,7 +183,7 @@ router.get('/summary/by-asset', (req, res) => {
         quantitySold: 0,
       });
     }
-    const agg = byAsset.get(row.asset_name);
+    const agg = byAsset.get(row.asset_id);
     if (row.type === 'buy') {
       agg.totalBought += row.amount;
       agg.quantityBought += row.quantity || 0;
@@ -197,12 +206,15 @@ router.get('/summary/by-asset', (req, res) => {
 
 // Evolucion mensual de compras/ventas/dividendos, ultimos N meses
 // (mismo criterio que GET /summary/monthly-trend de finanzasTransactions.js).
-// assetName opcional: sin el, agrega TODOS los activos; con el, solo ese
-// -- es lo que pidio Koku para poder ver "la evolucion general o la de
-// una accion en concreto" en la grafica nueva de Inversiones.
+// assetIds opcional (CSV de ids, ej. "1,2,3"): sin el, agrega TODOS los
+// activos; con el, solo esos -- alimentado por el arbol de seleccion de
+// carteras/activos en app.js (sustituye al selector unico de antes, que
+// filtraba por un unico assetName de texto libre).
 router.get('/summary/monthly-trend', (req, res) => {
   const months = Math.min(24, Math.max(1, Number(req.query.months) || 6));
-  const assetName = req.query.assetName ? String(req.query.assetName) : null;
+  const assetIds = req.query.assetIds
+    ? String(req.query.assetIds).split(',').map(Number).filter(Number.isFinite)
+    : null;
 
   const cursor = new Date();
   cursor.setDate(1);
@@ -214,9 +226,9 @@ router.get('/summary/monthly-trend', (req, res) => {
 
   let sql = 'SELECT * FROM finanzas_investment_transactions WHERE date >= ?';
   const params = [`${monthKeys[0]}-01`];
-  if (assetName) {
-    sql += ' AND asset_name = ?';
-    params.push(assetName);
+  if (assetIds && assetIds.length) {
+    sql += ` AND asset_id IN (${assetIds.map(() => '?').join(',')})`;
+    params.push(...assetIds);
   }
   const rows = db.prepare(sql).all(...params);
 
