@@ -5,9 +5,11 @@ tus propios dispositivos, nunca en una nube de terceros. El ordenador
 guarda todo en SQLite (`data/remindmelater.db`, ignorado por git — o en
 la carpeta de datos de la app si usas la version de escritorio); el
 movil, una vez vinculado, guarda tambien su propia copia y sincroniza los
-cambios en los dos sentidos cuando coincide con el ordenador en la misma
-wifi, sin depender de ningun servidor intermedio en internet (ver
-"Instalar como app" mas abajo).
+cambios en los dos sentidos con el ordenador cuando pulsas "Sincronizar
+ahora" (manual, sin ningun disparador automatico de fondo), sin depender
+de ningun servidor intermedio en internet (ver "Instalar como app" mas
+abajo). Ademas del calendario, la app tiene un hub de "Extensiones"
+(Gimnasio, Lecturas, Finanzas y Archivos — ver mas abajo).
 
 ## Arrancar
 
@@ -42,7 +44,9 @@ que lo autorizas explicitamente desde el ordenador:
 
 1. En el ordenador, abre la app y pulsa ⚙ **Configuración** → pestaña
    **Dispositivos** → **Vincular nuevo dispositivo**. Aparece un codigo de
-   6 digitos, valido 5 minutos, de un solo uso.
+   6 digitos, valido 30 segundos, de un solo uso (y bloqueado unos minutos
+   tras varios intentos fallidos seguidos, para que sea impracticable
+   intentar adivinarlo).
 2. En el movil, abre la direccion de arriba. Como todavia no esta
    vinculado, vera una pantalla pidiendo ese codigo.
 3. Escribe el codigo y un nombre para el dispositivo (ej. "iPhone de
@@ -63,15 +67,19 @@ crear evento, tarea o nota. En escritorio no cambia nada.
 
 ## Configuración
 
-El icono ⚙ abre un panel con varias pestanas:
+El icono ⚙, disponible en cualquier pantalla de la app (incluidas las
+extensiones a pantalla completa, no solo en el calendario), abre un panel
+con varias pestanas:
 
 - **Estilo**: dividido en dos partes independientes entre sí:
   - **Estilo de interacción** (por dispositivo): cómo reaccionan los
     botones al pasar el ratón y cómo se marca un interruptor encendido.
-    Tres opciones — "Directo" (por defecto: tinte suave del color de
+    Cuatro opciones — "Directo" (por defecto: tinte suave del color de
     acento + hundimiento al hacer clic), "Neon" (brillo alrededor en vez
-    de tinte) y "Cristal" (degradado de dos tonos derivados del acento).
-    No cambia ningún color del tema, solo el comportamiento.
+    de tinte), "Cristal" (degradado de dos tonos derivados del acento) y
+    "Registro" (estética de panel técnico: tipografía monoespaciada en
+    tablas y etiquetas, sin gradientes ni sombras). No cambia ningún
+    color del tema, solo el comportamiento.
   - **Colores**: una biblioteca de temas compartida entre todos tus
     dispositivos. Cada dispositivo elige por su cuenta cual tema
     mostrar. Cada tema define un color por cada superficie real de la
@@ -245,14 +253,44 @@ arriba:
   nunca guardado a mano, así que no puede desincronizarse. Los gastos
   pueden llevar categoría propia y marcarse como fijos; un límite de
   gasto mensual configurable avisa si te pasas, con desglose por
-  categoría. Las inversiones (compra, venta, dividendos) son de registro
-  **manual** — sin conectar a ninguna cotización en vivo, coherente con
-  que el resto de la app es local-first — con un resumen de la ganancia
-  o pérdida ya realizada por activo. Puedes fijarte un objetivo mínimo
-  de ahorro mensual marcando un ingreso como tu salario y un gasto como
-  fijo: la app avisa (sin bloquear el objetivo) si no parece alcanzable
-  según tu salario y gastos fijos medios de los últimos meses. Una
-  gráfica compara ingresos y gastos mes a mes de los últimos 6 meses.
+  categoría. Los **gastos fijos recurrentes** (alquiler, suscripciones...)
+  tienen su propio apartado aparte de Movimientos: una plantilla mensual
+  (con día elegible) o anual genera sola su movimiento real cuando toca,
+  sin tener que crearlo a mano cada vez — si el precio cambia (ej. sube
+  Netflix), editas la plantilla y solo afecta a lo que se genere de ahí
+  en adelante, nunca a lo ya generado; se puede pausar/reanudar o ponerle
+  una fecha de fin ("último mes de pago"). Las inversiones (compra,
+  venta, dividendos) son de registro **manual** — sin conectar a ninguna
+  cotización en vivo, coherente con que el resto de la app es
+  local-first — organizadas por activos que puedes agrupar en carteras
+  anidadas (ej. distintos brokers), con un árbol de checkboxes para
+  elegir qué activos o carteras enteras ver en la gráfica de evolución
+  mensual, y un resumen de la ganancia o pérdida ya realizada por activo.
+  Cada activo admite además actualizaciones manuales de precio por
+  unidad, con su propia gráfica de líneas para ver la evolución en el
+  tiempo. Puedes fijarte un objetivo mínimo de ahorro mensual marcando un
+  ingreso como tu salario y un gasto como fijo: la app avisa (sin
+  bloquear el objetivo) si no parece alcanzable según tu salario y gastos
+  fijos medios de los últimos meses, con una vista para mirar un mes
+  concreto (no solo el actual) y otra con el histórico de ahorro en un
+  rango de fechas. Una gráfica compara ingresos y gastos mes a mes de los
+  últimos 6 meses.
+- **Archivos**: mandar archivos sueltos (fotos, PDFs, documentos — sin
+  ligarlos a ninguna nota) entre el móvil y el ordenador, con dos paneles
+  uno junto al otro (como un cliente de escritorio remoto): el tuyo
+  (elige uno o varios con el selector de siempre — un navegador no puede
+  listar el almacenamiento propio del dispositivo, así que no hay
+  explorador real de ese lado) y la carpeta compartida del ordenador, con
+  flechas para mandar/traer. Desde el ordenador puedes además navegar
+  cualquier carpeta del disco (no solo la configurada por defecto, que
+  queda como un atajo rápido). Cuando quien inicia un envío o una
+  descarga es el móvil, la persona delante del ordenador tiene que
+  confirmarlo antes de que se mueva nada de verdad — el ordenador
+  copiando algo suyo a su propia carpeta compartida sigue siendo
+  instantáneo, sin este paso. Este apartado es también donde vive ahora
+  el botón para sincronizar el resto de datos manualmente (ver "Instalar
+  como app" más abajo) y el de comprobar si hay una versión nueva de la
+  app (instalarla de verdad sigue siendo solo desde el ordenador).
 
 ## App de escritorio (Electron)
 
@@ -274,14 +312,17 @@ del navegador.
 
 Un movil ya vinculado guarda ademas su propia copia de los datos
 (eventos, tareas, notas con sus carpetas...) en el propio navegador:
-puedes seguir viendo, creando y editando cosas sin conexion al ordenador,
-y en cuanto volveis a coincidir en la misma wifi, los cambios se
-sincronizan solos en los dos sentidos (si hay un conflicto de verdad,
-gana el cambio mas reciente). Un punto de color en la barra superior del
-movil indica el estado: verde = todo sincronizado, amarillo = hay
-cambios pendientes de mandar, gris = sin conexion con el ordenador ahora
-mismo, rojo = hubo un error de verdad. No hay ningun servidor intermedio
-en internet — la sincronizacion solo pasa por tu propia wifi local.
+puedes seguir viendo, creando y editando cosas sin conexion al ordenador.
+La sincronizacion entre movil y ordenador es **manual**: entra en
+Extensiones → Archivos y pulsa "Sincronizar ahora" cuando quieras poner
+al dia los dos lados (si hay un conflicto de verdad, gana el cambio mas
+reciente) — a proposito no hay ningun disparador automatico de fondo. Un
+punto de color en la barra superior indica el estado del ULTIMO intento:
+verde = todo sincronizado, amarillo = hay cambios pendientes de mandar,
+gris = sin conexion con el ordenador la ultima vez que se intento, rojo
+= hubo un error de verdad — y clicarlo te lleva directo a Archivos. No
+hay ningun servidor intermedio en internet — la sincronizacion solo pasa
+por tu propia wifi local.
 
 Si el movil cambia de wifi, o el ordenador cambia de direccion en la
 misma red, un movil YA vinculado no pierde sus datos ni tiene que volver

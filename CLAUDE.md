@@ -2,8 +2,9 @@
 
 Esto no es documentación de usuario (eso es `README.md`, que se
 reescribió por completo en la ronda de v0.19.0 y se ha ido manteniendo al
-día en rondas posteriores — última vez en la ronda de v0.23.0). Esto es
-un resumen para que una conversación nueva
+día en rondas posteriores — última vez actualizado por completo en esta
+misma ronda, ver "Estado actual" más abajo). Esto es un resumen para que
+una conversación nueva
 (Cowork, Claude Code local o una sesión de control remoto) pueda seguir
 donde lo dejamos sin que Koku tenga que repetir todo el contexto.
 
@@ -28,9 +29,18 @@ detrás, HTML/CSS/JS sin build ni framework por delante (`app.js` y
 `settings.js` se cargan como `<script>` normales y comparten variables
 globales — `settings.js` va después de `app.js`, cuidado con el orden si
 tocas ambos). Corre en el ordenador de Koku; el móvil se conecta a la
-misma app por wifi local, emparejado con un código de 6 dígitos. También
-se puede empaquetar como app de escritorio (Electron) y se anuncia por
-mDNS (`remindmelater.local`). Detalle completo de features en
+misma app por wifi local, emparejado con un código de 6 dígitos (30s de
+validez, con límite de intentos fallidos — ver "Emparejamiento" más
+abajo), y guarda su propia copia local (IndexedDB) que sincroniza con el
+ordenador de forma MANUAL (sin ningún disparador automático de fondo,
+ver "Sincronización móvil" más abajo). También se puede empaquetar como
+app de escritorio (Electron) y se anuncia por mDNS
+(`remindmelater.local`). Además del calendario, hay un hub de
+"Extensiones" a pantalla completa con 4 secciones independientes:
+Gimnasio, Lecturas, Finanzas y Archivos (ver "Extensiones" más abajo).
+Vive en la rama `main` de GitHub (no `main-wmqm2f`, que era el nombre de
+rama de una ronda anterior de esta sesión — el repo se fusionó
+limpiamente a `main` hace varias rondas). Detalle completo de features en
 `README.md`, que ahora sí está actualizado.
 
 ## Reglas de trabajo que Koku ha pedido explícitamente
@@ -60,7 +70,7 @@ mDNS (`remindmelater.local`). Detalle completo de features en
   de sesión, el workaround sigue siendo que Koku lo haga a mano desde su
   propio ordenador después de cada push:
   ```
-  git fetch origin main-wmqm2f
+  git fetch origin main
   git tag vX.Y.Z <hash-del-commit>
   git push origin vX.Y.Z
   ```
@@ -68,6 +78,20 @@ mDNS (`remindmelater.local`). Detalle completo de features en
   en una sesión de Claude Code local (terminal en el propio ordenador de
   Koku), prueba a pushear el tag tú mismo primero — solo hace falta el
   workaround manual si de verdad da 403 en ESTA sesión en concreto.
+- **Nunca usar controles nativos del navegador para checkbox, `<select>`,
+  fecha, ni nada similar (ronda de retoques de Carteras/Archivos, tras
+  ver capturas de checkboxes cuadrados grises sin estilo)** — siempre el
+  componente propio de la app que siga el tema activo:
+  `createSelectField()`/`createDateField()` (`app.js`) para
+  desplegables/fechas (ya son el patrón establecido, usados en
+  Lecturas/Gimnasio/Finanzas), y para checkboxes de selección (listas,
+  árboles) la clase `.styled-checkbox` (`styles.css`, cuadrado con
+  esquinas redondeadas + check de acento, soporta `:indeterminate`) — NO
+  la clase `.checkbox-row` (esa es el interruptor tipo pastilla para
+  ajustes on/off, un componente visual distinto, no vale para "elige uno
+  o varios de una lista"). Si algún día aparece un `<select>`/
+  `<input type="date">`/checkbox nativo sin estilo en algo nuevo, es un
+  descuido a corregir, no una excepción aceptable.
 
 ## Arquitectura y convenciones establecidas
 
@@ -227,6 +251,79 @@ mDNS (`remindmelater.local`). Detalle completo de features en
 - **PWA**: `public/manifest.json` + `public/sw.js` (service worker
   mínimo, solo cachea el shell — HTML/CSS/JS —, nunca `/api/*`, para que
   los datos siempre sean en vivo). Instalable como app en móvil/escritorio.
+- **Sincronización móvil (manual)**: el móvil guarda su copia local en
+  IndexedDB (`public/db-local.js`) y sincroniza en los DOS sentidos con
+  el ordenador — pero, desde la ronda de la extensión Archivos, SOLO de
+  forma MANUAL: se quitaron a propósito los 3 disparadores automáticos
+  que había antes (`init()`, un `setInterval` de 30s, el evento
+  `online`), decisión explícita de Koku aunque significa que si no abre
+  Archivos los cambios no llegan solos. El botón "Sincronizar ahora"
+  vive en Extensiones → Archivos (ya no en Configuración → Este
+  dispositivo, se movió). El punto de color de la topbar sigue
+  reflejando el estado del ÚLTIMO intento manual (verde/amarillo/gris/
+  rojo), y clicarlo abre Archivos directamente en vez de Configuración.
+- **Emparejamiento con límite de intentos**: `server/pairing.js` — el
+  código de 6 dígitos dura 30s (antes 5 minutos) y de un solo uso; además
+  un `Map` en memoria por IP cuenta intentos fallidos de
+  `POST /api/devices/pair`, bloqueando esa IP 10 minutos tras 5 fallos
+  seguidos (`isPairingLocked`/`recordFailedPairing`/
+  `recordSuccessfulPairing`, aplicados en `routes/devices.js`). Un
+  `400 invalid_request` (faltan campos) no cuenta como intento fallido,
+  solo un código con formato correcto pero incorrecto/caducado.
+- **Checkers en segundo plano (patrón repetido)**: para trabajo periódico
+  del lado del servidor, la forma establecida es
+  `function start...() { doWorkOnce(); const timer = setInterval(doWorkOnce, MS); timer.unref(); return timer; }`,
+  llamado UNA vez desde el callback de `app.listen()` en
+  `server/index.js`. Ejemplos: `reminderChecker.js` (30s),
+  `finanzasRecurringChecker.js` (24h, genera la transacción real de cada
+  plantilla de gasto fijo cuando toca), `pruneSyncLog` en
+  `routes/sync.js` (24h). Cuando el estado es efímero y nunca hay nada
+  pendiente justo después de reiniciar (no hace falta "arrancar" nada al
+  boot), el mismo `setInterval(...).unref()` vive a nivel de módulo sin
+  necesidad de exportar un `start...()` ni tocar `index.js` — así son
+  `pairing.js` (códigos de emparejamiento) y `archivosTransfers.js`
+  (solicitudes de doble confirmación de Archivos, ver más abajo).
+- **Extensiones** (hub a pantalla completa, botón "Extensiones" en la
+  topbar): cuatro secciones independientes del calendario, todas
+  siguiendo el mismo patrón de esquema (`CREATE TABLE IF NOT EXISTS` +
+  migraciones condicionales en `db.js`, `PRAGMA table_info` +
+  `ALTER TABLE`) y borrado en cascada A MANO en las rutas (nunca
+  `ON DELETE CASCADE` de SQL). Detalle de usuario completo en
+  `README.md`; resumen técnico rápido aquí:
+  - **Gimnasio**: `gym_exercises`/`gym_routines`/`gym_routine_exercises`/
+    `gym_sessions`/`gym_sets`. Progreso con gráfica SVG a mano (peso
+    máximo/volumen), primera gráfica del proyecto sin ninguna librería.
+  - **Lecturas**: `lecturas_sagas`/`lecturas_items` (sagas obligatorias,
+    un item puede ser de cualquier tipo — manga/cómic/libro/serie/anime/
+    película — dentro de la misma saga). Géneros como columna JSON de
+    texto libre (no tabla N:M), con sugerencias globales calculadas de
+    `GET /api/lecturas-items` sin `sagaId`.
+  - **Finanzas**: `finanzas_accounts`/`finanzas_categories`/
+    `finanzas_transactions`/`finanzas_investment_transactions`/
+    `finanzas_settings` (fila única, límite mensual + objetivo de
+    ahorro) + `finanzas_portfolios`/`finanzas_assets`/
+    `finanzas_asset_valuations` (carteras anidadas tipo `note_folders`,
+    activos con valoración manual de precio) +
+    `finanzas_recurring_expenses` (plantillas de gasto fijo, generador
+    en `finanzasRecurringChecker.js`, ver arriba). Saldo de cuenta
+    SIEMPRE calculado, nunca guardado. Borrar una cuenta con historial
+    se rechaza (`has_history`); borrar una categoría/cartera no destruye
+    lo que la usaba (queda sin categoría/cartera, o reparentado).
+  - **Archivos**: sin tabla SQL — la "base de datos" es la propia
+    carpeta del sistema de archivos (`server/routes/archivos.js`, ruta
+    guardada en `app_settings.archivosFolder`). Transferencia con doble
+    panel (estilo TightVNC), navegación real de cualquier carpeta del
+    disco desde el ordenador (`GET /browse`, `requireTrusted`), y desde
+    la última ronda **doble confirmación** cuando quien inicia un envío/
+    descarga es un móvil emparejado — nunca cuando lo inicia el
+    ordenador, que puede copiar un archivo local a su propia carpeta sin
+    "otro dispositivo" al que pedirle permiso (ver
+    `server/archivosTransfers.js`: `Map` en memoria, TTL 2 minutos,
+    mismo patrón que `pairing.js`). No es una barrera de seguridad
+    (un móvil emparejado ya tiene acceso completo, ver
+    "Dispositivo de confianza" arriba) — es una salvaguarda de UX contra
+    accidentes, documentado explícitamente así en el mensaje del commit
+    a petición de Koku.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
@@ -280,23 +377,37 @@ mDNS (`remindmelater.local`). Detalle completo de features en
 
 ## Estado actual
 
-Último commit en `origin/main-wmqm2f` (pusheado): `v0.23.1` — docs
-(`README.md` y este archivo) puestos al día tras cerrar la Fase 4. El
-commit de código de la Fase 4 en sí es `v0.23.0` (`27ce26a`) — "imágenes
-en el editor de notas". Los tags `v0.21.0`/`v0.22.0`/`v0.23.0`/`v0.23.1`
-YA están creados y pusheados a `origin` (esta era una sesión local, ver
-nota corregida más arriba sobre tags).
+Último commit en `origin/main` (pusheado): `v0.32.0` (`d0f9051`) —
+límite de intentos de emparejamiento (5 fallos por IP, bloqueo 10 min) +
+código de 6 dígitos de 5min→30s, y doble confirmación al transferir
+archivos en la extensión Archivos (solo cuando la inicia un móvil).
+`README.md` y este archivo se pusieron al día por completo en esta misma
+ronda (llevaban desactualizados desde antes de que existiera la
+extensión Archivos y varias rondas grandes de Finanzas). El tag
+`v0.32.0` da 403 al pushear desde esta sesión de control remoto
+(limitación conocida, ver regla de tags arriba) — pendiente de que Koku
+lo cree a mano desde su ordenador.
 
-Fases de "Mi espacio" completas: 1 (hub), 2 (notas + ocultar/contraseña),
-3 (carpetas anidadas tipo explorador), una ronda extra de pulido
-(favoritos, búsqueda, iconos, atajos, Ctrl+Intro, agrupar secciones), y
-la **Fase 4 (formato de notas) — completa** en tres sub-rondas:
-negrita/cursiva/listas (v0.21.0), tablas (v0.22.0), imágenes (v0.23.0).
-Detalle técnico completo en el bloque "Editor de notas con formato" más
-arriba. `README.md` se puso al día en esta misma ronda para reflejar
-todo esto (formato de notas, favoritos, búsqueda, Ctrl+Intro, agrupar
-secciones — antes solo cubría hasta v0.19.0 de verdad, aunque la nota
-anterior decía que estaba al día del todo).
+Desde la última vez que esto se puso al día de verdad (v0.23.1, cuando
+el proyecto aún vivía en la rama `main-wmqm2f` y solo tenía calendario +
+Mi espacio) ha pasado mucho, resumido:
+- **Móvil independiente**: copia local (IndexedDB) + sincronización LAN
+  (ahora manual, ver arriba) + notificaciones push reales (Web Push/
+  VAPID) + pantalla de bienvenida pidiendo nombre/correo la primera vez.
+- **Las 4 extensiones completas**: Gimnasio, Lecturas, Finanzas y
+  Archivos (ver bloque "Extensiones" más arriba para el detalle técnico
+  de cada una).
+- Varias rondas grandes solo en **Finanzas**: selects/fechas propios,
+  tooltip real en gráficas, editar cuenta como modal, objetivo de ahorro
+  con vista mensual + histórica, carteras/activos con valoración manual
+  y gráfica de líneas, y gasto fijo recurrente auto-generado.
+- Varias rondas en **Archivos**: transferencia de dos paneles, navegar
+  cualquier carpeta del disco desde el ordenador, y esta última ronda de
+  doble confirmación + límite de intentos de emparejamiento.
+- Tema de color nuevo "Registro" + su estilo de interacción a juego (4º,
+  junto a Directo/Neón/Cristal).
+- El repo se fusionó de las ramas de trabajo por pieza (`gimnasio`,
+  `lecturas`, `finanzas`, `movil`...) a la rama `main`, que es la real.
 
 ## Pendiente / próximos pasos declarados
 
@@ -304,13 +415,5 @@ anterior decía que estaba al día del todo).
   ("por tener la opción y ver cómo se desarrolla"), pero pidió
   explícitamente dejarlo para más adelante — no es prioridad ahora mismo,
   no empezar sin que lo pida.
-- **Móvil**: Koku lo está llevando en otra conversación aparte (confirmó
-  explícitamente dejarlo fuera de esta sesión). Se había quedado en
-  hacerlo en una rama de git separada (`git checkout -b movil`) en vez de
-  tocar `main-wmqm2f` a la vez desde dos sitios, para que un posible
-  solape sea un merge normal y no un pisotón silencioso de archivos — no
-  se sabe desde esta sesión en qué punto va esa rama.
-- **README.md**: al día (ver "Estado actual" arriba).
-- Sin nada más declarado en el momento de escribir esto — Koku mencionó
-  "tengo algunas cosas en mente" sin concretar, para retomar en una
-  conversación futura.
+- **README.md** / **este archivo**: al día (ver "Estado actual" arriba).
+- Sin nada más declarado explícitamente en el momento de escribir esto.
