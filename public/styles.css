@@ -594,6 +594,56 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 }
 .checkbox-row input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
 .checkbox-row input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Checkbox "de seleccion" (listas, arboles con checkbox por fila) --
+   distinto del interruptor .checkbox-row de arriba (ese es para ajustes
+   on/off tipo pastilla). Mismo patron que .task-item-checkbox (que ya
+   tenia este look para las tareas del calendario), generalizado aqui
+   para reutilizarlo en cualquier sitio nuevo -- arbol de activos de
+   Finanzas y checkboxes de la tabla de Archivos, de momento. Nunca
+   dejar un <input type="checkbox"> con el estilo gris por defecto del
+   navegador, usar siempre esta clase. */
+.styled-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  min-width: 1.15rem;
+  border-radius: 0.3rem;
+  border: 1.5px solid var(--border);
+  background: var(--surface-2);
+  cursor: pointer;
+  margin: 0;
+  position: relative;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.styled-checkbox:checked,
+.styled-checkbox:indeterminate {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.styled-checkbox:checked::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  color: var(--accent-text);
+}
+.styled-checkbox:indeterminate::after {
+  content: '';
+  position: absolute;
+  top: 45%;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: var(--accent-text);
+}
+.styled-checkbox:disabled { opacity: 0.5; cursor: not-allowed; }
+.styled-checkbox:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .form-row { display: flex; gap: 0.75rem; }
 .form-row label { flex: 1; }
 
@@ -1252,9 +1302,9 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 /* Etiqueta "tipo de cuenta" (Corriente/Ahorro/Inversion/...): puramente
    informativa, no filtra nada -- ver finanzas-account-type en app.js. */
 .finanzas-account-type-badge {
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   font-weight: 400;
-  padding: 0.1rem 0.4rem;
+  padding: 0.15rem 0.5rem;
   border-radius: 999px;
   background: var(--surface-2);
   color: var(--surface-2-text);
@@ -1299,6 +1349,9 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .finanzas-inline-form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
 .finanzas-inline-form input[type="text"],
 .finanzas-inline-form input[type="number"] { flex: 1; min-width: 120px; }
+/* Separacion entre el boton "+ Cartera"/"+ Activo" y la lista de debajo
+   -- sin esto el primer elemento de la lista quedaba pegado al boton. */
+.finanzas-manage-block .gym-tab-action { margin-bottom: 0.6rem; }
 .finanzas-manage-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.6rem; }
 
 .finanzas-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.8rem 0; }
@@ -1350,11 +1403,16 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    en app.js. Columna en movil, fila en escritorio (mismo corte 860px
    que el resto de Finanzas). */
 .finanzas-investment-trend-layout { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 0.4rem; }
+/* Grafica a la izquierda ocupando el espacio sobrante, arbol pegado al
+   lateral derecho con un ancho fijo estrecho (no crece con flex-grow:0)
+   -- antes el arbol iba primero y con flex-grow ocupaba demasiado
+   espacio en pantallas anchas. */
+.finanzas-investment-trend-layout .finanzas-trend-chart-wrap { flex: 1 1 320px; min-width: 260px; }
 .finanzas-investment-asset-tree {
-  flex: 1 1 240px; min-width: 200px; max-height: 320px; overflow-y: auto;
+  flex: 0 0 200px; width: 200px; max-height: 320px; overflow-y: auto;
   border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem;
+  margin-left: auto;
 }
-.finanzas-investment-trend-layout .finanzas-trend-chart-wrap { flex: 2 1 420px; min-width: 280px; }
 .finanzas-asset-tree-row {
   display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0;
   cursor: pointer; font-size: 0.9rem;

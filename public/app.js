@@ -4698,6 +4698,32 @@ document.getElementById('finanzas-asset-portfolio-field').appendChild(finanzasAs
 const finanzasAssetValuationDateField = createDateField({ initialValue: new Date() });
 document.getElementById('finanzas-asset-valuation-date-field').appendChild(finanzasAssetValuationDateField.element);
 
+// Plantilla de gasto fijo (pestaña "Gastos fijos") -- cuenta/categoria
+// reutilizan las mismas opciones que Movimientos (pobladas en
+// populateFinanzasSelects). El mes del año solo se ve si la frecuencia
+// es anual, ver refreshFinanzasRecurringFrequencyFields().
+const finanzasRecurringAccountField = createSelectField({ options: [], initialValue: '' });
+document.getElementById('finanzas-recurring-account-field').appendChild(finanzasRecurringAccountField.element);
+
+const finanzasRecurringCategoryField = createSelectField({ options: [{ value: '', label: 'Sin categoría' }], initialValue: '' });
+document.getElementById('finanzas-recurring-category-field').appendChild(finanzasRecurringCategoryField.element);
+
+const finanzasRecurringFrequencyField = createSelectField({
+  options: [{ value: 'monthly', label: 'Mensual' }, { value: 'annual', label: 'Anual' }],
+  initialValue: 'monthly',
+  onChange: () => refreshFinanzasRecurringFrequencyFields(),
+});
+document.getElementById('finanzas-recurring-frequency-field').appendChild(finanzasRecurringFrequencyField.element);
+
+const finanzasRecurringMonthField = createSelectField({ options: FINANZAS_MONTH_OPTIONS, initialValue: '01' });
+document.getElementById('finanzas-recurring-month-field').appendChild(finanzasRecurringMonthField.element);
+
+const finanzasRecurringStartField = createDateField({ initialValue: new Date() });
+document.getElementById('finanzas-recurring-start-field').appendChild(finanzasRecurringStartField.element);
+
+const finanzasRecurringEndField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha de fin' });
+document.getElementById('finanzas-recurring-end-field').appendChild(finanzasRecurringEndField.element);
+
 // Selector de mes (vista mensual del Ahorro) + rango (vista historica) --
 // ver renderFinanzasSavingsMonthly()/renderFinanzasSavingsHistoric() mas
 // abajo.
@@ -4763,10 +4789,12 @@ function populateFinanzasSelects() {
   finanzasFilterAccountField.setOptions([{ value: '', label: 'Todas las cuentas' }, ...accountOptions]);
   finanzasTransactionAccountField.setOptions(accountOptions);
   finanzasInvestmentAccountField.setOptions(accountOptions);
+  finanzasRecurringAccountField.setOptions(accountOptions);
 
   const categoryOptions = finanzasCategories.map((c) => ({ value: c.id, label: `${c.icon ? c.icon + ' ' : ''}${c.name}` }));
   finanzasFilterCategoryField.setOptions([{ value: '', label: 'Todas las categorías' }, ...categoryOptions]);
   finanzasTransactionCategoryField.setOptions([{ value: '', label: 'Sin categoría' }, ...categoryOptions]);
+  finanzasRecurringCategoryField.setOptions([{ value: '', label: 'Sin categoría' }, ...categoryOptions]);
 }
 
 // Recorre finanzasPortfolios (parentId auto-referenciado) con
@@ -6168,6 +6196,161 @@ document.getElementById('btn-clear-finanzas-filters').addEventListener('click', 
   refreshFinanzasTransactionsTab();
 });
 
+// -- Pestaña "Gastos fijos": plantillas de gasto recurrente, generan
+//    solas su propia transaccion real cuando toca (ver
+//    server/finanzasRecurringChecker.js) -- separada de Movimientos a
+//    peticion explicita de Koku.
+let finanzasRecurringExpenses = [];
+
+async function loadFinanzasRecurring() {
+  finanzasRecurringExpenses = await api('/api/finanzas-recurring-expenses');
+}
+
+const FINANZAS_RECURRING_FREQUENCY_LABELS = { monthly: 'Mensual', annual: 'Anual' };
+
+function finanzasRecurringFrequencyLabel(r) {
+  if (r.frequency === 'monthly') return `Mensual (día ${r.dayOfMonth})`;
+  return `Anual (${FINANZAS_MONTH_NAMES[r.monthOfYear - 1]} ${r.dayOfMonth})`;
+}
+
+function renderFinanzasRecurringList() {
+  const tbody = document.getElementById('finanzas-recurring-tbody');
+  tbody.innerHTML = '';
+  if (finanzasRecurringExpenses.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-hint">Todavia no tienes gastos fijos. Crea uno arriba.</td></tr>';
+    return;
+  }
+  finanzasRecurringExpenses.forEach((r) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(r.description || '—')}</td>
+      <td>${escapeHtml(finanzasAccountName(r.accountId))}</td>
+      <td>${escapeHtml(finanzasCategoryName(r.categoryId))}</td>
+      <td>${formatFinanzasAmount(r.amount)}</td>
+      <td>${finanzasRecurringFrequencyLabel(r)}</td>
+      <td>${r.active ? 'Activo' : 'Pausado'}${r.endDate ? ` (hasta ${r.endDate})` : ''}</td>
+      <td></td>
+    `;
+    const actionsTd = tr.lastElementChild;
+    const historyBtn = document.createElement('button');
+    historyBtn.type = 'button';
+    historyBtn.className = 'secondary-btn';
+    historyBtn.textContent = 'Ver generados';
+    historyBtn.addEventListener('click', () => openFinanzasRecurringTransactionsModal(r));
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'secondary-btn';
+    toggleBtn.textContent = r.active ? 'Pausar' : 'Reanudar';
+    toggleBtn.addEventListener('click', async () => {
+      await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'PUT', body: JSON.stringify({ active: !r.active }) });
+      await refreshFinanzasRecurringTab();
+    });
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'secondary-btn';
+    editBtn.textContent = 'Editar';
+    editBtn.addEventListener('click', () => openFinanzasRecurringModal(r));
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'danger-btn';
+    deleteBtn.textContent = 'Eliminar';
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm(`¿Eliminar el gasto fijo "${r.description || 'sin nombre'}"? Los movimientos ya generados se quedan, solo se deja de generar más.`)) return;
+      await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'DELETE' });
+      await refreshFinanzasRecurringTab();
+    });
+    actionsTd.append(historyBtn, toggleBtn, editBtn, deleteBtn);
+    tbody.appendChild(tr);
+  });
+}
+
+async function refreshFinanzasRecurringTab() {
+  await loadFinanzasRecurring();
+  renderFinanzasRecurringList();
+}
+
+function refreshFinanzasRecurringFrequencyFields() {
+  const isAnnual = finanzasRecurringFrequencyField.getValue() === 'annual';
+  document.getElementById('finanzas-recurring-month-label').classList.toggle('hidden', !isAnnual);
+}
+
+function openFinanzasRecurringModal(r) {
+  document.getElementById('finanzas-recurring-modal-title').textContent = r ? 'Editar gasto fijo' : 'Nuevo gasto fijo';
+  document.getElementById('finanzas-recurring-id').value = r ? r.id : '';
+  document.getElementById('finanzas-recurring-description').value = r ? (r.description || '') : '';
+  finanzasRecurringAccountField.setValue(r ? r.accountId : (finanzasAccounts[0] ? finanzasAccounts[0].id : ''));
+  finanzasRecurringCategoryField.setValue(r && r.categoryId ? r.categoryId : '');
+  document.getElementById('finanzas-recurring-amount').value = r ? r.amount : '';
+  finanzasRecurringFrequencyField.setValue(r ? r.frequency : 'monthly');
+  document.getElementById('finanzas-recurring-day').value = r ? r.dayOfMonth : '';
+  finanzasRecurringMonthField.setValue(r && r.monthOfYear ? String(r.monthOfYear).padStart(2, '0') : '01');
+  finanzasRecurringStartField.setValue(r ? new Date(`${r.startDate}T00:00:00`) : new Date());
+  finanzasRecurringEndField.setValue(r && r.endDate ? new Date(`${r.endDate}T00:00:00`) : null);
+  document.getElementById('finanzas-recurring-counts').checked = r ? r.countsTowardBudget : true;
+  refreshFinanzasRecurringFrequencyFields();
+  document.getElementById('finanzas-recurring-modal').classList.remove('hidden');
+}
+function closeFinanzasRecurringModal() {
+  document.getElementById('finanzas-recurring-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-finanzas-recurring').addEventListener('click', () => openFinanzasRecurringModal(null));
+document.getElementById('btn-cancel-finanzas-recurring').addEventListener('click', closeFinanzasRecurringModal);
+document.getElementById('btn-close-finanzas-recurring').addEventListener('click', closeFinanzasRecurringModal);
+
+document.getElementById('finanzas-recurring-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('finanzas-recurring-id').value;
+  const frequency = finanzasRecurringFrequencyField.getValue();
+  const endDate = finanzasRecurringEndField.getValue();
+  const payload = {
+    accountId: Number(finanzasRecurringAccountField.getValue()),
+    categoryId: finanzasRecurringCategoryField.getValue() || null,
+    description: document.getElementById('finanzas-recurring-description').value || null,
+    amount: document.getElementById('finanzas-recurring-amount').value,
+    frequency,
+    dayOfMonth: Number(document.getElementById('finanzas-recurring-day').value),
+    monthOfYear: frequency === 'annual' ? Number(finanzasRecurringMonthField.getValue()) : null,
+    startDate: toDateKey(finanzasRecurringStartField.getValue()),
+    endDate: endDate ? toDateKey(endDate) : null,
+    countsTowardBudget: document.getElementById('finanzas-recurring-counts').checked,
+  };
+  try {
+    if (id) {
+      await api(`/api/finanzas-recurring-expenses/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    } else {
+      await api('/api/finanzas-recurring-expenses', { method: 'POST', body: JSON.stringify(payload) });
+    }
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  closeFinanzasRecurringModal();
+  await refreshFinanzasRecurringTab();
+});
+
+// Movimientos ya generados por una plantilla concreta -- reutiliza el
+// filtro recurringExpenseId ya soportado por GET /api/finanzas-transactions.
+async function openFinanzasRecurringTransactionsModal(r) {
+  document.getElementById('finanzas-recurring-transactions-title').textContent = `Movimientos generados — ${r.description || 'gasto fijo'}`;
+  const tbody = document.getElementById('finanzas-recurring-transactions-tbody');
+  tbody.innerHTML = '<tr><td colspan="2" class="empty-hint">Cargando…</td></tr>';
+  document.getElementById('finanzas-recurring-transactions-modal').classList.remove('hidden');
+  const transactions = await api(`/api/finanzas-transactions?recurringExpenseId=${r.id}`);
+  tbody.innerHTML = '';
+  if (transactions.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="2" class="empty-hint">Todavia no se ha generado ninguno.</td></tr>';
+    return;
+  }
+  transactions.forEach((t) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${t.date}</td><td>${formatFinanzasAmount(t.amount)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+document.getElementById('btn-close-finanzas-recurring-transactions').addEventListener('click', () => {
+  document.getElementById('finanzas-recurring-transactions-modal').classList.add('hidden');
+});
+
 // -- Pestaña Inversiones: tabla de compra/venta/dividendos + resumen por
 //    activo (ganancia/perdida REALIZADA, nunca valor de mercado). --
 async function refreshFinanzasInvestmentsTab() {
@@ -6262,6 +6445,7 @@ function renderFinanzasAssetTreeLevel(parentPortfolioId, depth) {
     row.style.paddingLeft = `${depth * 18}px`;
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox';
     checkbox.checked = descendantAssetIds.length > 0 && checkedCount === descendantAssetIds.length;
     checkbox.indeterminate = checkedCount > 0 && checkedCount < descendantAssetIds.length;
     checkbox.addEventListener('change', () => {
@@ -6286,6 +6470,7 @@ function renderFinanzasAssetTreeLevel(parentPortfolioId, depth) {
     row.style.paddingLeft = `${depth * 18}px`;
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox';
     checkbox.checked = finanzasAssetTreeSelectedIds.has(asset.id);
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) finanzasAssetTreeSelectedIds.add(asset.id);
@@ -6473,7 +6658,7 @@ async function openFinanzasView() {
   // vista para no arrastrar una seleccion vieja de la sesion anterior.
   finanzasAssetTreeSelectedIds = new Set(finanzasAssets.map((a) => a.id));
   renderFinanzasAssetTree();
-  await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasInvestmentsTab()]);
+  await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasRecurringTab(), refreshFinanzasInvestmentsTab()]);
 }
 function closeFinanzasView() {
   document.getElementById('finanzas-view').classList.add('hidden');
@@ -6570,6 +6755,7 @@ function renderArchivosFileTable(files) {
     const checkTd = document.createElement('td');
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox';
     checkbox.checked = archivosSelectedRemote.has(file.name);
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) archivosSelectedRemote.add(file.name);

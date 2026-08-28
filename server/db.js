@@ -257,6 +257,34 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Plantillas de gasto fijo recurrente: a diferencia del checkbox
+  -- "Gasto fijo" (finanzas_transactions.is_fixed, marcado a mano en un
+  -- movimiento suelto), esto SI genera la transaccion real sola, cada
+  -- vez que toca (ver server/finanzasRecurringChecker.js). "day_of_month"
+  -- se usa siempre (1-31, clampado al ultimo dia real de cada mes si
+  -- hace falta -- ej. dia 31 en febrero); "month_of_year" (1-12) solo
+  -- aplica si frequency='annual'. "end_date" es el "ultimo mes de pago"
+  -- que pidio Koku -- NULL significa que sigue indefinidamente.
+  -- "last_generated_period" guarda el periodo YA generado ('YYYY-MM' en
+  -- mensual, 'YYYY' en anual) para no duplicar y para no rellenar hacia
+  -- atras si el servidor estuvo apagado varios periodos.
+  CREATE TABLE IF NOT EXISTS finanzas_recurring_expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES finanzas_accounts(id),
+    category_id INTEGER REFERENCES finanzas_categories(id),
+    amount REAL NOT NULL,
+    description TEXT,
+    frequency TEXT NOT NULL CHECK (frequency IN ('monthly', 'annual')),
+    day_of_month INTEGER NOT NULL,
+    month_of_year INTEGER,
+    start_date TEXT NOT NULL,
+    end_date TEXT,
+    counts_toward_budget INTEGER NOT NULL DEFAULT 1,
+    active INTEGER NOT NULL DEFAULT 1,
+    last_generated_period TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Compra/venta de un activo y dividendos recibidos. Solo registro
   -- MANUAL a proposito -- sin conectar a ninguna API externa de
   -- cotizaciones en vivo (confirmado con Koku, coherente con que el
@@ -614,6 +642,17 @@ if (!finanzasTransactionColumns.includes('is_salary')) {
 }
 if (!finanzasTransactionColumns.includes('is_fixed')) {
   db.exec('ALTER TABLE finanzas_transactions ADD COLUMN is_fixed INTEGER NOT NULL DEFAULT 0');
+}
+
+// recurring_expense_id: enlaza una transaccion generada AUTOMATICAMENTE
+// con la plantilla que la creo (ver finanzas_recurring_expenses mas
+// arriba y server/finanzasRecurringChecker.js) -- nullable, ya que la
+// inmensa mayoria de transacciones se siguen creando a mano. La
+// transaccion generada es independiente de verdad: editarla o borrarla
+// no toca la plantilla ni afecta a las proximas generaciones (pedido
+// explicito de Koku con el ejemplo de "sube el precio de Netflix").
+if (!finanzasTransactionColumns.includes('recurring_expense_id')) {
+  db.exec('ALTER TABLE finanzas_transactions ADD COLUMN recurring_expense_id INTEGER REFERENCES finanzas_recurring_expenses(id)');
 }
 
 // savings_goal_min: objetivo MINIMO de ahorro mensual (sin maximo --

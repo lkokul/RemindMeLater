@@ -658,6 +658,7 @@
     <div class="finanzas-tabs">
       <button type="button" class="finanzas-tab-btn active" data-finanzas-tab="resumen">Resumen</button>
       <button type="button" class="finanzas-tab-btn" data-finanzas-tab="movimientos">Movimientos</button>
+      <button type="button" class="finanzas-tab-btn" data-finanzas-tab="gastos-fijos">Gastos fijos</button>
       <button type="button" class="finanzas-tab-btn" data-finanzas-tab="inversiones">Inversiones</button>
     </div>
 
@@ -773,6 +774,24 @@
       </div>
     </div>
 
+    <!-- Pestaña Gastos fijos: plantillas de gasto recurrente, SEPARADAS
+         de Movimientos (pedido explicito de Koku) -- se generan solas
+         cada vez que toca (ver server/finanzasRecurringChecker.js) y se
+         pueden editar sin afectar a lo ya generado (ej. subir el precio
+         de Netflix sin borrar y volver a crear el gasto). -->
+    <div class="finanzas-tab-panel hidden" data-finanzas-panel="gastos-fijos">
+      <p class="hint">Cada plantilla genera su propio movimiento real solo cuando toca (mensual o anual) -- edítala aquí si cambia el importe, sin tener que borrar y crear una nueva.</p>
+      <button type="button" id="btn-new-finanzas-recurring" class="primary-btn">+ Gasto fijo</button>
+      <div class="finanzas-table-wrap">
+        <table class="finanzas-table">
+          <thead>
+            <tr><th>Descripción</th><th>Cuenta</th><th>Categoría</th><th>Importe</th><th>Frecuencia</th><th>Estado</th><th></th></tr>
+          </thead>
+          <tbody id="finanzas-recurring-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Pestaña Inversiones: registro manual de compra/venta/dividendos +
          resumen de ganancia/perdida REALIZADA por activo (ver nota en
          CLAUDE.md: nada de cotizaciones en vivo). -->
@@ -806,6 +825,7 @@
       <details class="finanzas-manage-block">
         <summary>Gestionar carteras y activos</summary>
         <h4>Carteras</h4>
+        <p class="hint">Agrupa tus activos como quieras -- por ejemplo "Broker A" y "Broker B", o "Renta variable" y "Renta fija" -- y anida carteras dentro de otras si te ayuda a organizarte. Es opcional: un activo también puede quedarse "Sin cartera".</p>
         <button type="button" id="btn-new-finanzas-portfolio" class="primary-btn gym-tab-action">+ Cartera</button>
         <div id="finanzas-portfolios-list" class="finanzas-manage-list"></div>
         <h4>Activos</h4>
@@ -819,8 +839,8 @@
            renderFinanzasAssetTree() en app.js. Fila en escritorio,
            apilado en movil (mismo corte 860px que el resto de la app). -->
       <div class="finanzas-investment-trend-layout">
-        <div id="finanzas-investment-asset-tree" class="finanzas-investment-asset-tree"></div>
         <div id="finanzas-investment-trend-chart" class="finanzas-trend-chart-wrap"></div>
+        <div id="finanzas-investment-asset-tree" class="finanzas-investment-asset-tree"></div>
       </div>
     </div>
   </div>
@@ -931,6 +951,54 @@
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Modal de plantilla de gasto fijo (pestaña "Gastos fijos") -->
+  <div id="finanzas-recurring-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-finanzas-recurring" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="finanzas-recurring-modal-title">Nuevo gasto fijo</h2>
+      <form id="finanzas-recurring-form">
+        <input type="hidden" id="finanzas-recurring-id" />
+        <label>Descripción<input type="text" id="finanzas-recurring-description" placeholder="Ej. Netflix" /></label>
+        <div class="form-row">
+          <label>Cuenta<div id="finanzas-recurring-account-field"></div></label>
+          <label>Categoría<div id="finanzas-recurring-category-field"></div></label>
+        </div>
+        <label>Importe<input type="number" id="finanzas-recurring-amount" step="0.01" min="0.01" required /></label>
+        <div class="form-row">
+          <label>Frecuencia<div id="finanzas-recurring-frequency-field"></div></label>
+          <label>Día del mes<input type="number" id="finanzas-recurring-day" min="1" max="31" required /></label>
+        </div>
+        <label id="finanzas-recurring-month-label">Mes del año<div id="finanzas-recurring-month-field"></div></label>
+        <div class="form-row">
+          <label>Empieza el<div id="finanzas-recurring-start-field"></div></label>
+          <label>Último mes de pago (opcional)<div id="finanzas-recurring-end-field"></div></label>
+        </div>
+        <label class="checkbox-row">
+          <input type="checkbox" id="finanzas-recurring-counts" checked />
+          Cuenta para el límite mensual
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-finanzas-recurring" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Movimientos ya generados por una plantilla de gasto fijo -->
+  <div id="finanzas-recurring-transactions-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-finanzas-recurring-transactions" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="finanzas-recurring-transactions-title">Movimientos generados</h2>
+      <div class="finanzas-table-wrap">
+        <table class="finanzas-table">
+          <thead><tr><th>Fecha</th><th>Importe</th></tr></thead>
+          <tbody id="finanzas-recurring-transactions-tbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 

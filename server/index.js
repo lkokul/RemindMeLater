@@ -27,11 +27,13 @@ const finanzasInvestmentsRouter = require('./routes/finanzasInvestments');
 const finanzasSettingsRouter = require('./routes/finanzasSettings');
 const finanzasPortfoliosRouter = require('./routes/finanzasPortfolios');
 const finanzasAssetsRouter = require('./routes/finanzasAssets');
+const finanzasRecurringExpensesRouter = require('./routes/finanzasRecurringExpenses');
 const lecturasSagasRouter = require('./routes/lecturasSagas');
 const lecturasItemsRouter = require('./routes/lecturasItems');
 const archivosRouter = require('./routes/archivos');
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
+const { startFinanzasRecurringChecker } = require('./finanzasRecurringChecker');
 const { startMdns } = require('./mdns');
 
 const PORT = process.env.PORT || 3000;
@@ -101,6 +103,7 @@ app.use('/api/finanzas-investments', requireDeviceOrTrusted, finanzasInvestments
 app.use('/api/finanzas-settings', requireDeviceOrTrusted, finanzasSettingsRouter);
 app.use('/api/finanzas-portfolios', requireDeviceOrTrusted, finanzasPortfoliosRouter);
 app.use('/api/finanzas-assets', requireDeviceOrTrusted, finanzasAssetsRouter);
+app.use('/api/finanzas-recurring-expenses', requireDeviceOrTrusted, finanzasRecurringExpensesRouter);
 // Extension "Lecturas" (ver #extensions-view en index.html): historial
 // de entretenimiento (manga/comic/libro/serie/anime/pelicula) agrupado
 // en sagas obligatorias.
@@ -148,6 +151,10 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   // recibido y con al menos 30 dias de antiguedad -- nunca lo que un
   // movil todavia no haya sincronizado.
   startSyncLogCleanup();
+  // Genera la transaccion real de cada plantilla de gasto fijo cuando
+  // toca (ver finanzasRecurringChecker.js) -- al arrancar y luego una
+  // vez al dia.
+  startFinanzasRecurringChecker();
 });
 
 // Sin este manejador, que el puerto ya este ocupado (por ejemplo, si ya

@@ -18,6 +18,7 @@ function serialize(row) {
     countsTowardBudget: !!row.counts_toward_budget,
     isSalary: !!row.is_salary,
     isFixed: !!row.is_fixed,
+    recurringExpenseId: row.recurring_expense_id || null,
   };
 }
 
@@ -76,7 +77,7 @@ function validateBody(body, existing) {
 }
 
 router.get('/', (req, res) => {
-  const { accountId, categoryId, type, from, to } = req.query;
+  const { accountId, categoryId, type, from, to, recurringExpenseId } = req.query;
   let sql = 'SELECT * FROM finanzas_transactions WHERE 1=1';
   const params = [];
   if (accountId) { sql += ' AND account_id = ?'; params.push(accountId); }
@@ -84,6 +85,9 @@ router.get('/', (req, res) => {
   if (type) { sql += ' AND type = ?'; params.push(type); }
   if (from) { sql += ' AND date >= ?'; params.push(from); }
   if (to) { sql += ' AND date <= ?'; params.push(to); }
+  // Movimientos generados por una plantilla concreta de gasto fijo --
+  // ver "Ver movimientos generados" en la pestaña Gastos fijos.
+  if (recurringExpenseId) { sql += ' AND recurring_expense_id = ?'; params.push(recurringExpenseId); }
   sql += ' ORDER BY date DESC, id DESC';
   const rows = db.prepare(sql).all(...params);
   res.json(rows.map(serialize));
