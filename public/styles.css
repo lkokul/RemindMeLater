@@ -868,16 +868,22 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .calendar-year-tile-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
+  /* Antes las filas se dimensionaban solo por su contenido (numeros muy
+     pequeños) y se centraban con align-content -- con menos de 6 semanas
+     en el mes eso dejaba un hueco enorme sin usar y los dias apretados
+     en una esquina, "raro" (Koku). grid-auto-rows: 1fr reparte TODO el
+     alto disponible del hueco entre las filas que hagan falta (4 a 6),
+     igual que ya hace el mes grande de siempre. */
+  grid-auto-rows: 1fr;
   gap: 1px;
   flex: 1;
   min-height: 0;
-  align-content: center;
 }
 .calendar-year-day {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   line-height: 1;
   color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
   border-radius: 3px;
@@ -1480,7 +1486,18 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 
 /* Grafica de "Evolucion mensual" (SVG a mano, sin libreria -- ver
    renderFinanzasMonthlyTrendChart en app.js). */
-.finanzas-trend-chart-wrap { margin-top: 0.4rem; }
+/* Antes esto era solo el SVG/texto "Sin datos todavia" suelto, sin
+   ningun marco -- al lado del arbol de activos (que si tiene borde+
+   padding, ver .finanzas-investment-asset-tree) se veia "pegado" al
+   borde del panel, sin encajar con el resto de la app (Koku). Mismo
+   tratamiento de tarjeta que ya usa el arbol de al lado. */
+.finanzas-trend-chart-wrap {
+  margin-top: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem;
+  background: var(--surface);
+}
 .finanzas-trend-chart-svg { width: 100%; max-width: 480px; height: auto; display: block; }
 .finanzas-trend-chart-axis { stroke: var(--border); stroke-width: 1; }
 .finanzas-trend-chart-label { font-size: 8px; fill: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
@@ -1668,26 +1685,25 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .archivos-nav-path { flex: 1; min-width: 0; overflow-wrap: break-word; font-size: 0.85rem; margin: 0; }
 /* Desplegable de subcarpetas (ver comentario en index.html): antes la
    lista estaba siempre visible debajo de la ruta -- ahora solo se abre
-   al pasar el raton por encima del boton/lista o al pulsar el boton
-   (.open, con JS de respaldo para tactil/teclado). Tono propio
-   (tinte del acento) para diferenciarlo del resto del panel, que usa
-   fondos neutros (var(--surface)/var(--surface-2)). */
+   al pasar el raton por encima o al pulsar el boton (ver
+   openArchivosFoldersDropdown en app.js). Mismo "molde" que el resto de
+   popovers de la app (.select-popover/.color-popover/etc. en este mismo
+   archivo: fondo var(--surface), borde neutro, sombra, position:fixed +
+   positionFixedPopover() para que nunca quede cortado por el scroll del
+   panel) -- pedido explicito de Koku tras ver que el tinte de acento que
+   tenia antes no encajaba con el resto. El toque "diferente" que
+   tambien pidio es solo el borde izquierdo, no todo el fondo. */
 .archivos-nav-folders-wrap { position: relative; margin: 0.3rem 0; display: inline-block; }
 .archivos-nav-folders-toggle { font-size: 0.85rem; }
 .archivos-nav-folders-dropdown.archivos-browser-list {
-  display: none;
-  position: absolute; top: 100%; left: 0; z-index: 5; width: max-content; min-width: 12rem;
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
-  padding: 0.3rem; margin-top: 0.25rem;
-}
-.archivos-nav-folders-wrap:hover .archivos-nav-folders-dropdown.archivos-browser-list,
-.archivos-nav-folders-wrap.open .archivos-nav-folders-dropdown.archivos-browser-list {
-  display: flex;
+  position: fixed; z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  padding: 0.3rem; min-width: 180px; max-height: 280px; overflow-y: auto;
 }
 .archivos-nav-folders-dropdown .archivos-browser-item:hover {
-  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  background: var(--surface-2); color: var(--surface-2-text);
 }
 /* Aviso de seguridad en Archivos (ver index.html) -- mismo padding y
    radio que .hint, pero con un fondo tenue en tono ambar para que se

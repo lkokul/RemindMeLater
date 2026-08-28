@@ -5630,15 +5630,16 @@ const gymSessionRoutineField = createSelectField({
       // Auto-rellena tambien las series de cada ejercicio, no solo el
       // ejercicio en si (pedido explicito de Koku) -- una fila en blanco
       // por cada target_sets de la rutina (o 1 si la rutina no fijo
-      // series), con las repeticiones y el descanso de la rutina como
-      // punto de partida editable; el peso se deja siempre en blanco, la
-      // rutina no guarda ningun peso orientativo.
+      // series). Solo el DESCANSO se precarga desde la rutina -- Koku
+      // pidio explicitamente que las repeticiones se dejen en blanco
+      // ("con eso iremos mas tarde"), y el peso tampoco tiene de donde
+      // salir (la rutina no guarda ningun peso orientativo).
       gymSessionModalExercises = routine.exercises.map((ex) => {
         const setsCount = ex.targetSets && ex.targetSets > 0 ? ex.targetSets : 1;
         return {
           exerciseId: ex.exerciseId,
           sets: Array.from({ length: setsCount }, () => ({
-            reps: ex.targetReps ?? '',
+            reps: '',
             weightDisplay: '',
             restSeconds: ex.targetRestSeconds ?? '',
           })),
@@ -7252,7 +7253,6 @@ async function loadArchivosNavPath(targetPath) {
   upBtn.dataset.parent = data.parent || '';
   const foldersList = document.getElementById('archivos-nav-folders');
   const foldersToggle = document.getElementById('btn-archivos-nav-folders-toggle');
-  const foldersWrap = document.getElementById('archivos-nav-folders-wrap');
   foldersList.innerHTML = '';
   data.folders.forEach((folder) => {
     const btn = document.createElement('button');
@@ -7260,7 +7260,7 @@ async function loadArchivosNavPath(targetPath) {
     btn.className = 'archivos-browser-item';
     btn.textContent = folder.name;
     btn.addEventListener('click', () => {
-      foldersWrap.classList.remove('open'); // al navegar, se cierra el desplegable
+      closeArchivosFoldersDropdown(); // al navegar, se cierra el desplegable
       loadArchivosNavPath(folder.path);
     });
     foldersList.appendChild(btn);
@@ -7268,19 +7268,47 @@ async function loadArchivosNavPath(targetPath) {
   // Sin subcarpetas aqui, no tiene sentido mostrar un boton de
   // desplegable vacio.
   foldersToggle.classList.toggle('hidden', data.folders.length === 0);
-  foldersWrap.classList.remove('open');
+  closeArchivosFoldersDropdown();
   renderArchivosFileTable(data.files);
 }
+
+// Desplegable de subcarpetas: mismo "molde" que los demas popovers de la
+// app (position:fixed + positionFixedPopover(), definida en settings.js
+// -- se llama desde aqui dentro de un handler, no al cargar la pagina,
+// asi que el orden de carga app.js/settings.js no da problemas, ver
+// CLAUDE.md). Se abre con hover O con el boton; un temporizador corto
+// evita que se cierre solo al pasar el raton del boton al desplegable
+// (hay un hueco de unos pixeles entre los dos).
+let archivosFoldersCloseTimer = null;
+function openArchivosFoldersDropdown() {
+  clearTimeout(archivosFoldersCloseTimer);
+  const dropdown = document.getElementById('archivos-nav-folders');
+  if (dropdown.children.length === 0) return; // sin subcarpetas, nada que mostrar
+  if (!dropdown.classList.contains('hidden')) return; // ya abierto
+  dropdown.classList.remove('hidden');
+  positionFixedPopover(document.getElementById('btn-archivos-nav-folders-toggle'), dropdown, { width: 240 });
+}
+function closeArchivosFoldersDropdown() {
+  clearTimeout(archivosFoldersCloseTimer);
+  document.getElementById('archivos-nav-folders').classList.add('hidden');
+}
+function scheduleCloseArchivosFoldersDropdown() {
+  clearTimeout(archivosFoldersCloseTimer);
+  archivosFoldersCloseTimer = setTimeout(closeArchivosFoldersDropdown, 150);
+}
+document.getElementById('archivos-nav-folders-wrap').addEventListener('mouseenter', openArchivosFoldersDropdown);
+document.getElementById('archivos-nav-folders-wrap').addEventListener('mouseleave', scheduleCloseArchivosFoldersDropdown);
+document.getElementById('archivos-nav-folders').addEventListener('mouseenter', () => clearTimeout(archivosFoldersCloseTimer));
+document.getElementById('archivos-nav-folders').addEventListener('mouseleave', scheduleCloseArchivosFoldersDropdown);
 document.getElementById('btn-archivos-nav-folders-toggle').addEventListener('click', () => {
-  document.getElementById('archivos-nav-folders-wrap').classList.toggle('open');
+  if (document.getElementById('archivos-nav-folders').classList.contains('hidden')) openArchivosFoldersDropdown();
+  else closeArchivosFoldersDropdown();
 });
 // Clicar fuera cierra el desplegable si se habia abierto con el boton
-// (el hover ya se cierra solo al quitar el raton de encima, via CSS).
+// (el hover ya se cierra solo al quitar el raton de encima).
 document.addEventListener('click', (e) => {
   const wrap = document.getElementById('archivos-nav-folders-wrap');
-  if (wrap && wrap.classList.contains('open') && !wrap.contains(e.target)) {
-    wrap.classList.remove('open');
-  }
+  if (wrap && !wrap.contains(e.target)) closeArchivosFoldersDropdown();
 });
 
 // Punto de entrada unico tras abrir la vista o tras cualquier mutacion

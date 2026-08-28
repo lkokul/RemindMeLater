@@ -88,8 +88,13 @@ function syncDebtTransaction(debt) {
     db.prepare('UPDATE finanzas_debts SET transaction_id = ? WHERE id = ?').run(info.lastInsertRowid, debt.id);
     debt.transaction_id = info.lastInsertRowid;
   } else if (!debt.paid && debt.transaction_id) {
-    db.prepare('DELETE FROM finanzas_transactions WHERE id = ?').run(debt.transaction_id);
+    // OJO con el orden: finanzas_debts.transaction_id es una FOREIGN KEY
+    // a finanzas_transactions(id) -- hay que quitar la referencia
+    // (UPDATE a NULL) ANTES de borrar la fila referenciada, si no salta
+    // "FOREIGN KEY constraint failed" (bug real, visto en produccion).
+    const oldTransactionId = debt.transaction_id;
     db.prepare('UPDATE finanzas_debts SET transaction_id = NULL WHERE id = ?').run(debt.id);
+    db.prepare('DELETE FROM finanzas_transactions WHERE id = ?').run(oldTransactionId);
     debt.transaction_id = null;
   }
 }
@@ -158,8 +163,11 @@ router.put('/:id', (req, res) => {
   // movimiento, sin mas.
   let row = db.prepare('SELECT * FROM finanzas_debts WHERE id = ?').get(req.params.id);
   if (row.paid && row.transaction_id) {
-    db.prepare('DELETE FROM finanzas_transactions WHERE id = ?').run(row.transaction_id);
+    // Mismo orden que en syncDebtTransaction: quitar la referencia antes
+    // de borrar la fila referenciada (FOREIGN KEY).
+    const oldTransactionId = row.transaction_id;
     db.prepare('UPDATE finanzas_debts SET transaction_id = NULL WHERE id = ?').run(row.id);
+    db.prepare('DELETE FROM finanzas_transactions WHERE id = ?').run(oldTransactionId);
     row = db.prepare('SELECT * FROM finanzas_debts WHERE id = ?').get(req.params.id);
     syncDebtTransaction(row);
   }
@@ -192,11 +200,12 @@ router.delete('/:id', (req, res) => {
   if (!existing) return res.status(404).json({ error: 'not_found' });
   // Borrar la deuda borra tambien el movimiento que hubiera generado al
   // saldarse -- si no, quedaria un gasto/ingreso fantasma sin ninguna
-  // deuda que lo explique.
+  // deuda que lo explique. Orden importante: primero la deuda (quita la
+  // FOREIGN KEY hacia el movimiento), luego el movimiento.
+  db.prepare('DELETE FROM finanzas_debts WHERE id = ?').run(req.params.id);
   if (existing.transaction_id) {
     db.prepare('DELETE FROM finanzas_transactions WHERE id = ?').run(existing.transaction_id);
   }
-  db.prepare('DELETE FROM finanzas_debts WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
 
