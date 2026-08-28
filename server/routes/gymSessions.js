@@ -13,7 +13,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 function serializeSets(sessionId) {
   return db
     .prepare(`
-      SELECT gs.id, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, ge.name
+      SELECT gs.id, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, ge.name
       FROM gym_sets gs
       JOIN gym_exercises ge ON ge.id = gs.exercise_id
       WHERE gs.session_id = ?
@@ -26,6 +26,7 @@ function serializeSets(sessionId) {
       setNumber: r.set_number,
       reps: r.reps,
       weightKg: r.weight_kg,
+      restSeconds: r.rest_seconds,
     }));
 }
 
@@ -54,7 +55,7 @@ function replaceSessionSets(sessionId, sets) {
   if (!Array.isArray(sets)) return;
 
   const insert = db.prepare(
-    'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds) VALUES (?, ?, ?, ?, ?, ?)'
   );
   const countByExercise = new Map();
   sets.forEach((s) => {
@@ -67,7 +68,8 @@ function replaceSessionSets(sessionId, sets) {
       exerciseId,
       setNumber,
       s.reps !== undefined && s.reps !== null && s.reps !== '' ? Number(s.reps) : null,
-      s.weightKg !== undefined && s.weightKg !== null && s.weightKg !== '' ? Number(s.weightKg) : null
+      s.weightKg !== undefined && s.weightKg !== null && s.weightKg !== '' ? Number(s.weightKg) : null,
+      s.restSeconds !== undefined && s.restSeconds !== null && s.restSeconds !== '' ? Number(s.restSeconds) : null
     );
   });
 }

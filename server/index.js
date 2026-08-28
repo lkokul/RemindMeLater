@@ -28,6 +28,7 @@ const finanzasSettingsRouter = require('./routes/finanzasSettings');
 const finanzasPortfoliosRouter = require('./routes/finanzasPortfolios');
 const finanzasAssetsRouter = require('./routes/finanzasAssets');
 const finanzasRecurringExpensesRouter = require('./routes/finanzasRecurringExpenses');
+const finanzasDebtsRouter = require('./routes/finanzasDebts');
 const lecturasSagasRouter = require('./routes/lecturasSagas');
 const lecturasItemsRouter = require('./routes/lecturasItems');
 const archivosRouter = require('./routes/archivos');
@@ -104,6 +105,7 @@ app.use('/api/finanzas-settings', requireDeviceOrTrusted, finanzasSettingsRouter
 app.use('/api/finanzas-portfolios', requireDeviceOrTrusted, finanzasPortfoliosRouter);
 app.use('/api/finanzas-assets', requireDeviceOrTrusted, finanzasAssetsRouter);
 app.use('/api/finanzas-recurring-expenses', requireDeviceOrTrusted, finanzasRecurringExpensesRouter);
+app.use('/api/finanzas-debts', requireDeviceOrTrusted, finanzasDebtsRouter);
 // Extension "Lecturas" (ver #extensions-view en index.html): historial
 // de entretenimiento (manga/comic/libro/serie/anime/pelicula) agrupado
 // en sagas obligatorias.

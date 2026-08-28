@@ -255,11 +255,21 @@
           <button id="nav-prev" class="icon-btn" aria-label="Mes anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
           <span id="current-month-label" class="month-label"></span>
           <button id="nav-next" class="icon-btn" aria-label="Mes siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+          <!-- Vista anual (solo escritorio): alterna con la vista de mes.
+               Ademas de este boton de apoyo, tambien se puede con la
+               rueda del raton (hacia abajo sobre el mes = vista anual,
+               hacia arriba sobre un mes en la vista anual = entrar en
+               ese mes) -- ver el "wheel" en app.js. -->
+          <button type="button" id="btn-calendar-year-toggle" class="icon-btn desktop-only" aria-label="Vista anual" title="Vista anual (o rueda del ratón hacia abajo sobre el mes)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+          </button>
         </nav>
 
-        <!-- Vista de escritorio: cuadricula del mes (CSS la oculta en movil) -->
-        <section class="calendar-grid-wrap desktop-only">
+        <!-- Vista de escritorio: cuadricula del mes, o las 12 en miniatura
+             si se activo la vista anual (CSS oculta las dos en movil). -->
+        <section id="calendar-grid-wrap" class="calendar-grid-wrap desktop-only">
           <div id="calendar-grid" class="calendar-grid"></div>
+          <div id="calendar-year-grid" class="calendar-year-grid hidden"></div>
         </section>
 
         <!-- Vista de movil: agenda en lista, mas comoda para tocar -->
@@ -267,6 +277,13 @@
           <div id="agenda-list" class="agenda-list"></div>
         </section>
       </div>
+
+      <!-- Arrastre para hacer mas ancho/fino el panel de recordatorios de
+           al lado (a costa del calendario) -- solo en escritorio, ver
+           .panel-resize-handle en styles.css y la logica de arrastre en
+           app.js. Oculto en modo "panel" de Mi espacio (ese ancho es
+           fijo, ver applyMiEspacioMode). -->
+      <div id="panel-resize-handle" class="panel-resize-handle desktop-only" role="separator" aria-orientation="vertical" aria-label="Redimensionar panel de recordatorios"></div>
 
       <!-- Panel de recordatorios: arriba "Proximos" (o los eventos de un
            dia concreto si has clicado uno en el calendario, ver
@@ -293,8 +310,8 @@
           </div>
         </div>
         <div id="reminders-top-block" class="reminders-top-block reminders-panel-page">
-          <div class="reminders-panel-header">
-            <h2 id="reminders-panel-title" class="my-space-col-expand-trigger">Proximos recordatorios</h2>
+          <div class="reminders-panel-header my-space-col-expand-trigger">
+            <h2 id="reminders-panel-title">Proximos recordatorios</h2>
             <button type="button" id="btn-reminders-back" class="secondary-btn hidden">Próximos →</button>
           </div>
           <!-- Solo visible dentro de "Mi espacio" (ver applyMiEspacioMode
@@ -317,8 +334,8 @@
         </div>
 
         <div id="reminders-tasks-block" class="reminders-tasks-block reminders-panel-page">
-          <div class="reminders-panel-header">
-            <h2 class="my-space-col-expand-trigger">Tareas</h2>
+          <div class="reminders-panel-header my-space-col-expand-trigger">
+            <h2>Tareas</h2>
           </div>
           <div id="tasks-list" class="reminders-list tasks-list"></div>
         </div>
@@ -384,8 +401,8 @@
                    moveRemindersIntoHub/restoreClassicRemindersPanel en
                    app.js. -->
               <div id="reminders-notes-block" class="reminders-notes-block reminders-panel-page">
-                <div class="reminders-panel-header">
-                  <h2 class="my-space-col-expand-trigger">Notas</h2>
+                <div class="reminders-panel-header my-space-col-expand-trigger">
+                  <h2>Notas</h2>
                 </div>
                 <!-- Carpetas (Fase 3): navegacion tipo explorador de
                      archivos -- estas en un "sitio" (la raiz, o dentro de
@@ -660,6 +677,7 @@
       <button type="button" class="finanzas-tab-btn" data-finanzas-tab="movimientos">Movimientos</button>
       <button type="button" class="finanzas-tab-btn" data-finanzas-tab="gastos-fijos">Gastos fijos</button>
       <button type="button" class="finanzas-tab-btn" data-finanzas-tab="inversiones">Inversiones</button>
+      <button type="button" class="finanzas-tab-btn" data-finanzas-tab="deudas">Deudas</button>
     </div>
 
     <!-- Pestaña Resumen: saldo de cada cuenta, progreso del limite mensual
@@ -843,6 +861,32 @@
         <div id="finanzas-investment-asset-tree" class="finanzas-investment-asset-tree"></div>
       </div>
     </div>
+
+    <!-- Pestaña Deudas: lo que Koku debe a alguien y lo que alguien le
+         debe a el, en una sola tabla con dos bloques (ver
+         renderFinanzasDebtsList en app.js). Ligar una deuda a una
+         cuenta es opcional -- si se liga, marcarla como pagada genera
+         un movimiento real en esa cuenta (ver routes/finanzasDebts.js). -->
+    <div class="finanzas-tab-panel hidden" data-finanzas-panel="deudas">
+      <p class="hint">Ligar una deuda a una cuenta es opcional: si lo haces, marcarla como pagada genera un gasto o ingreso real en esa cuenta. Sin cuenta, es solo una lista de seguimiento.</p>
+      <button type="button" id="btn-new-finanzas-debt" class="primary-btn">+ Deuda</button>
+
+      <h3>Debo yo</h3>
+      <div class="finanzas-table-wrap">
+        <table class="finanzas-table">
+          <thead><tr><th>Persona</th><th>Importe</th><th>Fecha</th><th>Cuenta</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="finanzas-debts-owed-by-me-tbody"></tbody>
+        </table>
+      </div>
+
+      <h3>Me deben</h3>
+      <div class="finanzas-table-wrap">
+        <table class="finanzas-table">
+          <thead><tr><th>Persona</th><th>Importe</th><th>Fecha</th><th>Cuenta</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="finanzas-debts-owed-to-me-tbody"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <!-- Modales de "Gestionar carteras y activos" (Inversiones) -->
@@ -999,6 +1043,45 @@
           <tbody id="finanzas-recurring-transactions-tbody"></tbody>
         </table>
       </div>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar una deuda (pestaña "Deudas") -->
+  <div id="finanzas-debt-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-finanzas-debt" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="finanzas-debt-modal-title">Nueva deuda</h2>
+      <form id="finanzas-debt-form">
+        <input type="hidden" id="finanzas-debt-id" />
+        <label>
+          Dirección
+          <div id="finanzas-debt-direction-field"></div>
+        </label>
+        <label>
+          Persona
+          <input type="text" id="finanzas-debt-person" placeholder="¿A quién le debes o quién te debe?" required />
+        </label>
+        <label>
+          Importe
+          <input type="number" id="finanzas-debt-amount" step="0.01" min="0.01" required />
+        </label>
+        <label>
+          Fecha (opcional)
+          <div id="finanzas-debt-date-field"></div>
+        </label>
+        <label>
+          Cuenta ligada (opcional)
+          <div id="finanzas-debt-account-field"></div>
+        </label>
+        <label>
+          Descripción (opcional)
+          <input type="text" id="finanzas-debt-description" placeholder="Ej. Cena del sábado" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-finanzas-debt" class="danger-btn hidden">Eliminar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -1188,7 +1271,16 @@
           <p id="archivos-nav-path" class="archivos-nav-path"></p>
           <button type="button" id="btn-archivos-nav-default" class="secondary-btn">Carpeta por defecto</button>
         </div>
-        <div id="archivos-nav-folders" class="archivos-browser-list hidden"></div>
+        <!-- Subcarpetas de la ruta actual: antes se veian SIEMPRE
+             desplegadas debajo de la ruta (ocupaban espacio aunque no
+             las estuvieras mirando) -- ahora es un desplegable que solo
+             se abre pasando el raton por encima o pulsando el boton,
+             con un tono propio para distinguirlo del resto del panel
+             (ver .archivos-nav-folders-dropdown en styles.css). -->
+        <div id="archivos-nav-folders-wrap" class="archivos-nav-folders-wrap hidden">
+          <button type="button" id="btn-archivos-nav-folders-toggle" class="secondary-btn archivos-nav-folders-toggle">Subcarpetas ▾</button>
+          <div id="archivos-nav-folders" class="archivos-browser-list archivos-nav-folders-dropdown"></div>
+        </div>
         <div class="archivos-table-wrap">
           <table class="archivos-table" id="archivos-table">
             <thead>
@@ -1348,6 +1440,22 @@
           <div class="form-row">
             <input type="number" id="lecturas-item-owned-count" placeholder="Tienes" min="0" />
             <input type="number" id="lecturas-item-owned-total" placeholder="De un total de" min="0" />
+          </div>
+        </div>
+        <div class="field-label-block">
+          <label class="checkbox-row">
+            <input type="checkbox" id="lecturas-item-loaned" />
+            Prestado
+          </label>
+          <div id="lecturas-item-loaned-details" class="form-row hidden">
+            <label>
+              <span class="field-label">A quién</span>
+              <input type="text" id="lecturas-item-loaned-to" placeholder="Nombre" />
+            </label>
+            <label>
+              <span class="field-label">Desde cuándo (opcional)</span>
+              <div id="lecturas-item-loaned-at-field"></div>
+            </label>
           </div>
         </div>
         <div class="modal-actions">

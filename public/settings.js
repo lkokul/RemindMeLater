@@ -420,9 +420,10 @@ function refreshMiEspacioModeOptions() {
 
 // Panel lateral clasico (solo aplica en modo "topbar" de Mi espacio, ver
 // arriba): una casilla por seccion (Recordatorios/Tareas/Notas, ver
-// REMINDERS_PANEL_PAGES en app.js) para elegir cuales van agrupadas
-// (juntas, alternando con flechas) -- las que no marques se quedan
-// sueltas, apiladas cada una por su lado. Ver
+// REMINDERS_PANEL_PAGES en app.js). Con alguna marcada y alguna sin
+// marcar, las marcadas se ven juntas en un hueco compartido y la flecha
+// cambia TODO el hueco a las no marcadas (tambien juntas) -- marcar
+// todas o ninguna deja las 3 sueltas, como si esto no existiera. Ver
 // applyRemindersPanelLayout()/getRemindersGroupedSections() en app.js.
 function refreshRemindersPanelGroupedOptions() {
   const container = document.getElementById('reminders-panel-grouped-options');
@@ -448,6 +449,10 @@ function refreshRemindersPanelGroupedOptions() {
         ? [...stored.filter((id) => id !== p.id), p.id]
         : stored.filter((id) => id !== p.id);
       localStorage.setItem('remindersPanelGrouped', JSON.stringify(next));
+      // Vuelve a mostrar las marcadas (no las de antes de tocar el
+      // ajuste) -- si no, podrias quedarte viendo "las otras" con un
+      // significado distinto al que tenian antes del cambio.
+      remindersPanelShowingChecked = true;
       applyRemindersPanelLayout();
       refreshRemindersPanelGroupedOptions();
     });
@@ -2048,21 +2053,68 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Extensiones: cada una es pantalla completa igual que "Mi espacio", asi
-  // que Esc capa a capa igual -- primero la sub-navegacion de dentro (solo
-  // Lecturas la tiene: saga -> detalle de esa saga), luego la extension
-  // entera vuelve a la rejilla de Extensiones, y la rejilla vuelve a Home.
+  // que Esc capa a capa igual -- PRIMERO cualquier modal de "añadir/editar"
+  // abierto ENCIMA de la extension (se cierra sin guardar, te deja en la
+  // misma vista), luego la sub-navegacion de dentro (solo Lecturas la
+  // tiene: saga -> detalle de esa saga), luego la extension entera vuelve
+  // a la rejilla de Extensiones, y la rejilla vuelve a Home. Antes estos
+  // modales no estaban aqui: el primer Esc se saltaba directamente a
+  // cerrar la extension entera en vez de solo el modal (pedido explicito
+  // de Koku: "el primer esc me saque de la ventana de añadir... luego ya
+  // con el siguiente que me lleve a la ventana anterior").
+  const gymModalIds = [
+    ['gym-exercise-modal', closeGymExerciseModal],
+    ['gym-routine-modal', closeGymRoutineModal],
+    ['gym-session-modal', closeGymSessionModal],
+  ];
+  for (const [id, close] of gymModalIds) {
+    const modal = document.getElementById(id);
+    if (modal && !modal.classList.contains('hidden')) {
+      close();
+      return;
+    }
+  }
   const gymView = document.getElementById('gym-view');
   if (gymView && !gymView.classList.contains('hidden')) {
     document.getElementById('btn-close-gym').click();
     return;
   }
 
+  const finanzasModalIds = [
+    ['finanzas-portfolio-modal', closeFinanzasPortfolioModal],
+    ['finanzas-asset-modal', closeFinanzasAssetModal],
+    ['finanzas-asset-history-modal', closeFinanzasAssetHistoryModal],
+    ['finanzas-transaction-modal', closeFinanzasTransactionModal],
+    ['finanzas-recurring-modal', closeFinanzasRecurringModal],
+    ['finanzas-recurring-transactions-modal', () => document.getElementById('finanzas-recurring-transactions-modal').classList.add('hidden')],
+    ['finanzas-debt-modal', closeFinanzasDebtModal],
+    ['finanzas-investment-modal', closeFinanzasInvestmentModal],
+    ['finanzas-account-modal', closeFinanzasAccountModal],
+  ];
+  for (const [id, close] of finanzasModalIds) {
+    const modal = document.getElementById(id);
+    if (modal && !modal.classList.contains('hidden')) {
+      close();
+      return;
+    }
+  }
   const finanzasView = document.getElementById('finanzas-view');
   if (finanzasView && !finanzasView.classList.contains('hidden')) {
     document.getElementById('btn-close-finanzas').click();
     return;
   }
 
+  const lecturasModalIds = [
+    ['lecturas-saga-modal', closeLecturasSagaModal],
+    ['lecturas-item-modal', closeLecturasItemModal],
+  ];
+  for (const [id, close] of lecturasModalIds) {
+    const modal = document.getElementById(id);
+    if (modal && !modal.classList.contains('hidden')) {
+      close();
+      return;
+    }
+  }
   const lecturasView = document.getElementById('lecturas-view');
   if (lecturasView && !lecturasView.classList.contains('hidden')) {
     const sagaDetailPanel = document.getElementById('lecturas-saga-detail-panel');

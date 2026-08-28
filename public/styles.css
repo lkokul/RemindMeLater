@@ -773,6 +773,11 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   padding: 0.6rem 1rem 0;
 }
 .month-label { min-width: 8rem; text-align: center; font-weight: 600; }
+#btn-calendar-year-toggle.active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+  border-color: var(--accent);
+  color: var(--surface-2-text);
+}
 
 /* --- Layout general (movil por defecto) --- */
 .layout {
@@ -795,6 +800,10 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 
 .desktop-only { display: none; }
 .mobile-only { display: block; }
+/* Mientras se arrastra el divisor calendario/panel (ver panel-resize-handle
+   y app.js): cursor consistente y sin seleccionar texto por accidente en
+   toda la pagina, no solo sobre la franja de 6px. */
+body.is-resizing-panel { cursor: col-resize; user-select: none; }
 
 /* --- Agenda (movil) --- */
 .agenda-list { display: flex; flex-direction: column; gap: 0.6rem; }
@@ -826,6 +835,84 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   grid-template-columns: repeat(7, 1fr);
   gap: 6px;
 }
+
+/* --- Vista anual (escritorio, ver renderCalendarYearGrid en app.js) ---
+   Los 12 meses en miniatura a la vez: cada .calendar-year-tile es un
+   mes propio con su cabecera y una cuadricula pequeña de dias (solo
+   numero + un punto si ese dia tiene algo, sin chips, no cabrian). */
+.calendar-year-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 0.6rem;
+}
+.calendar-year-tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  cursor: pointer;
+}
+.calendar-year-tile:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.calendar-year-tile-heading {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--surface-text);
+  margin-bottom: 0.3rem;
+  flex-shrink: 0;
+}
+.calendar-year-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+  flex: 1;
+  min-height: 0;
+  align-content: center;
+}
+.calendar-year-day {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  line-height: 1;
+  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
+  border-radius: 3px;
+  position: relative;
+}
+.calendar-year-day.other-month { opacity: 0.3; }
+.calendar-year-day.weekend-day { background: var(--day-weekend); }
+.calendar-year-day.holiday-day { background: var(--day-holiday); }
+.calendar-year-day.special-day { background: var(--day-special); }
+.calendar-year-day.today { background: var(--day-today); color: var(--day-today-text); font-weight: 700; }
+/* Punto diminuto pegado a la esquina del numero -- "tiene algo ese dia",
+   mismo espiritu que el modo "puntos" del mes pero sin desglosar por
+   evento (aqui no cabria). */
+.calendar-year-day.has-content::after {
+  content: '';
+  position: absolute; bottom: 1px; right: 1px;
+  width: 3px; height: 3px; border-radius: 50%;
+  background: var(--accent);
+}
+.calendar-year-day.today.has-content::after { background: var(--day-today-text); }
+
+/* Animaciones al alternar mes/año (ver setCalendarViewMode en app.js):
+   "zoom-in" para entrar en un mes (se agranda desde un poco mas pequeño,
+   como si te acercaras), "zoom-out" para volver al año (se encoge desde
+   un poco mas grande, como si te alejaras) -- pedido explicito de Koku. */
+@keyframes calendar-view-zoom-in {
+  from { transform: scale(0.85); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes calendar-view-zoom-out {
+  from { transform: scale(1.12); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+#calendar-grid.calendar-view-entering { animation: calendar-view-zoom-in 0.32s ease; }
+#calendar-year-grid.calendar-view-entering { animation: calendar-view-zoom-out 0.32s ease; }
 .calendar-cell {
   background: var(--surface);
   color: var(--surface-text);
@@ -957,6 +1044,14 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   border: 1.5px solid transparent;
 }
 .calendar-day-dot.is-task { background: transparent; }
+/* Los puntos de EVENTO (no tarea) piden mas viveza (Koku: "que el punto
+   fuera algo mas colorido") -- las tareas se quedan tal cual (borde sin
+   relleno, a proposito, para distinguirlas de los eventos, ver
+   CLAUDE.md). El borde transparente de la regla de arriba le quitaba
+   area de color al circulo entero en un tamaño ya pequeño; quitarselo a
+   los de evento + un empujon de saturacion hace que se vean mas
+   solidos/vivos sin cambiar el color guardado del grupo. */
+.calendar-day-dot:not(.is-task) { border: none; filter: saturate(1.35); }
 /* Modo "solo marcar el dia": sin chips ni puntos, solo un aro de color
    alrededor de la celda — un borde en vez de fondo para que no pelee con
    el color de fin de semana/festivo/especial que ya pueda tener. */
@@ -1028,14 +1123,23 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   padding-top: 0;
   border-top: none;
 }
-/* Dentro del slot agrupado, el bloque visible (Tareas o Notas, lo que
-   toque) tampoco necesita su propio separador -- ya lo separa el
-   switcher de flechas de encima. */
-.reminders-panel-grouped-slot .reminders-tasks-block,
-.reminders-panel-grouped-slot .reminders-notes-block {
+/* Dentro del slot agrupado, el PRIMER bloque visible no necesita su
+   propio separador -- ya lo separa el switcher de flechas de encima.
+   Pero ahora el hueco puede mostrar 2 secciones a la vez (las marcadas o
+   las no marcadas, cuando son 2 de las 3 -- ver applyRemindersPanelLayout
+   en app.js), asi que la SEGUNDA visible si necesita separador entre
+   ambas -- el selector de sibling general (~) solo engancha cuando hay
+   un ":not(.hidden)" ANTES en el DOM, asi que con una sola visible no
+   pinta nada. */
+.reminders-panel-grouped-slot > .reminders-panel-page {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
+}
+.reminders-panel-grouped-slot > .reminders-panel-page:not(.hidden) ~ .reminders-panel-page:not(.hidden) {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
 }
 .note-add-btn { width: 100%; margin-bottom: 0.5rem; }
 .note-search-row { margin-bottom: 0.5rem; display: flex; flex-direction: column; gap: 0.35rem; }
@@ -1367,6 +1471,10 @@ label input, label textarea, label select { margin-top: 0.3rem; }
 .finanzas-table th, .finanzas-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
 .finanzas-table td.finanzas-amount-expense { color: #e63946; }
 .finanzas-table td.finanzas-amount-income { color: #43aa8b; }
+/* Deuda ya pagada/cobrada (pestaña Deudas) -- mismo criterio de opacidad
+   que una tarea completada (.task-item.done), para no inventar un
+   patron nuevo de "esto ya esta resuelto". */
+.finanzas-debt-row-paid { opacity: 0.6; }
 #finanzas-investment-qty-price-row { display: flex; gap: 0.6rem; }
 #finanzas-investment-qty-price-row label { flex: 1; }
 
@@ -1481,6 +1589,13 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 999px;
   background: var(--surface-2); color: var(--surface-2-text); white-space: nowrap;
 }
+/* Insignia "Prestado" junto al titulo, en la tabla de items (ver
+   renderLecturasItemsTable en app.js) -- tono ambar para que llame la
+   atencion sin ser tan fuerte como un error. */
+.lecturas-loaned-badge {
+  font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 999px;
+  background: #f5b40033; color: #a97600; white-space: nowrap;
+}
 .lecturas-genre-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .lecturas-genre-chip {
   display: inline-flex; align-items: center; gap: 0.3rem;
@@ -1551,6 +1666,29 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    de destino" de arriba. */
 .archivos-nav-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
 .archivos-nav-path { flex: 1; min-width: 0; overflow-wrap: break-word; font-size: 0.85rem; margin: 0; }
+/* Desplegable de subcarpetas (ver comentario en index.html): antes la
+   lista estaba siempre visible debajo de la ruta -- ahora solo se abre
+   al pasar el raton por encima del boton/lista o al pulsar el boton
+   (.open, con JS de respaldo para tactil/teclado). Tono propio
+   (tinte del acento) para diferenciarlo del resto del panel, que usa
+   fondos neutros (var(--surface)/var(--surface-2)). */
+.archivos-nav-folders-wrap { position: relative; margin: 0.3rem 0; display: inline-block; }
+.archivos-nav-folders-toggle { font-size: 0.85rem; }
+.archivos-nav-folders-dropdown.archivos-browser-list {
+  display: none;
+  position: absolute; top: 100%; left: 0; z-index: 5; width: max-content; min-width: 12rem;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  padding: 0.3rem; margin-top: 0.25rem;
+}
+.archivos-nav-folders-wrap:hover .archivos-nav-folders-dropdown.archivos-browser-list,
+.archivos-nav-folders-wrap.open .archivos-nav-folders-dropdown.archivos-browser-list {
+  display: flex;
+}
+.archivos-nav-folders-dropdown .archivos-browser-item:hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+}
 /* Aviso de seguridad en Archivos (ver index.html) -- mismo padding y
    radio que .hint, pero con un fondo tenue en tono ambar para que se
    note como un aviso, no como una nota informativa cualquiera. No es un
@@ -1626,9 +1764,10 @@ label input, label textarea, label select { margin-top: 0.3rem; }
   border-radius: var(--radius);
   padding: 0.7rem;
 }
-/* El titulo de cada columna (h2, dentro de .reminders-panel-header) es
-   lo que expande esa columna -- ya no hay un boton dedicado aparte, para
-   no gastar una fila entera de alto solo para eso. */
+/* La fila de cabecera entera de cada columna (.reminders-panel-header) es
+   lo que expande esa columna -- no solo el titulo (h2), pedido explicito
+   de Koku. Ya no hay un boton dedicado aparte, para no gastar una fila
+   entera de alto solo para eso. */
 .my-space-col-expand-trigger { cursor: pointer; }
 .my-space-col-expand-trigger:hover { color: var(--accent); }
 
@@ -2410,12 +2549,43 @@ label input, label textarea, label select { margin-top: 0.3rem; }
     min-height: 0;
     grid-template-rows: auto repeat(6, minmax(0, 1fr));
   }
+  .calendar-year-grid {
+    flex: 1;
+    min-height: 0;
+  }
   .calendar-cell {
     min-height: 0;
     overflow-y: auto;
   }
+  .panel-resize-handle {
+    width: 6px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    position: relative;
+    background: transparent;
+  }
+  /* Franja fina centrada en el propio ancho de 6px -- mas facil de
+     acertar con el raton que una linea de 1px, pero visualmente discreta
+     hasta que se pasa el raton por encima o se esta arrastrando. */
+  .panel-resize-handle::after {
+    content: '';
+    position: absolute; top: 0; bottom: 0; left: 2px; width: 2px;
+    border-radius: 2px;
+    background: var(--border);
+  }
+  .panel-resize-handle:hover::after,
+  .panel-resize-handle.is-dragging::after {
+    background: var(--accent);
+  }
+
+  /* Arrastre entre calendario y panel (ver panel-resize-handle mas abajo
+     y la logica en app.js): el panel lee su ancho de una variable CSS
+     que JS actualiza al arrastrar y guarda por dispositivo -- clamp()
+     como red de seguridad ademas del clamp que ya hace JS, por si algo
+     dejara la variable fuera de rango (ej. una ventana mas estrecha
+     despues de guardar un ancho grande en un monitor mayor). */
   .reminders-panel {
-    width: 320px;
+    width: clamp(240px, var(--reminders-panel-width, 320px), 640px);
     flex-shrink: 0;
     display: flex;
     flex-direction: column;

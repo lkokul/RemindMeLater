@@ -22,7 +22,7 @@ function sanitizeIcon(icon) {
 function serializeExerciseList(routineId) {
   return db
     .prepare(`
-      SELECT gre.id, gre.exercise_id, gre.position, gre.target_sets, gre.target_reps, ge.name, ge.muscle_group
+      SELECT gre.id, gre.exercise_id, gre.position, gre.target_sets, gre.target_reps, gre.target_rest_seconds, ge.name, ge.muscle_group
       FROM gym_routine_exercises gre
       JOIN gym_exercises ge ON ge.id = gre.exercise_id
       WHERE gre.routine_id = ?
@@ -36,6 +36,7 @@ function serializeExerciseList(routineId) {
       position: r.position,
       targetSets: r.target_sets,
       targetReps: r.target_reps,
+      targetRestSeconds: r.target_rest_seconds,
     }));
 }
 
@@ -59,7 +60,7 @@ function replaceRoutineExercises(routineId, exercises) {
   if (!Array.isArray(exercises)) return;
 
   const insert = db.prepare(
-    'INSERT INTO gym_routine_exercises (routine_id, exercise_id, position, target_sets, target_reps) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO gym_routine_exercises (routine_id, exercise_id, position, target_sets, target_reps, target_rest_seconds) VALUES (?, ?, ?, ?, ?, ?)'
   );
   exercises.forEach((ex, index) => {
     const exerciseId = Number(ex && ex.exerciseId);
@@ -69,7 +70,8 @@ function replaceRoutineExercises(routineId, exercises) {
       exerciseId,
       index,
       ex.targetSets !== undefined && ex.targetSets !== null && ex.targetSets !== '' ? Number(ex.targetSets) : null,
-      ex.targetReps !== undefined && ex.targetReps !== null && ex.targetReps !== '' ? Number(ex.targetReps) : null
+      ex.targetReps !== undefined && ex.targetReps !== null && ex.targetReps !== '' ? Number(ex.targetReps) : null,
+      ex.targetRestSeconds !== undefined && ex.targetRestSeconds !== null && ex.targetRestSeconds !== '' ? Number(ex.targetRestSeconds) : null
     );
   });
 }

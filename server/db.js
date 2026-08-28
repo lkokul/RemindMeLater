@@ -182,7 +182,12 @@ db.exec(`
     exercise_id INTEGER NOT NULL REFERENCES gym_exercises(id),
     position INTEGER NOT NULL DEFAULT 0,
     target_sets INTEGER,
-    target_reps INTEGER
+    target_reps INTEGER,
+    -- Descanso por defecto (segundos) entre series de ESTE ejercicio
+    -- dentro de la rutina -- solo una sugerencia, igual que target_sets/
+    -- target_reps; se copia como punto de partida a cada serie al crear
+    -- una sesion desde esta rutina, y se puede cambiar libremente ahi.
+    target_rest_seconds INTEGER
   );
 
   -- Una sesion real en una fecha. routine_id es opcional: NULL = sesion
@@ -206,6 +211,10 @@ db.exec(`
     set_number INTEGER NOT NULL,
     reps INTEGER,
     weight_kg REAL,
+    -- Descanso de verdad tras esta serie (segundos), opcional -- nace del
+    -- target_rest_seconds de la rutina al auto-rellenar la sesion (ver
+    -- app.js), pero se guarda por serie porque se puede editar suelto.
+    rest_seconds INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -357,6 +366,31 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Deudas de Finanzas: lo que Koku debe a alguien y lo que alguien le
+  -- debe a el, en una unica tabla con "direction" para distinguirlas
+  -- (mismo criterio que finanzas_transactions con "type"). account_id es
+  -- OPCIONAL (confirmado con Koku): si se liga una deuda a una cuenta,
+  -- marcarla como pagada genera un movimiento real en
+  -- finanzas_transactions (gasto si direction='owed_by_me', ingreso si
+  -- 'owed_to_me') -- transaction_id guarda cual, para poder borrarlo si
+  -- se desmarca como pagada o se borra la deuda entera. Sin cuenta
+  -- ligada, marcar como pagada solo cambia el booleano, es pura lista de
+  -- seguimiento. "date" (cuando se genero la deuda) es opcional, tal
+  -- como pidio Koku.
+  CREATE TABLE IF NOT EXISTS finanzas_debts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    direction TEXT NOT NULL CHECK (direction IN ('owed_by_me', 'owed_to_me')),
+    person TEXT NOT NULL,
+    amount REAL NOT NULL,
+    description TEXT,
+    date TEXT,
+    account_id INTEGER REFERENCES finanzas_accounts(id),
+    paid INTEGER NOT NULL DEFAULT 0,
+    paid_at TEXT,
+    transaction_id INTEGER REFERENCES finanzas_transactions(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Extension "Lecturas" (tercera tarjeta de #extensions-view): historial
   -- de entretenimiento en general, no solo libros -- manga, comic, libro,
   -- serie, anime, pelicula. Una "saga" es el contenedor OBLIGATORIO de
@@ -394,6 +428,12 @@ db.exec(`
     owned_count INTEGER,
     owned_total INTEGER,
     position INTEGER NOT NULL DEFAULT 0,
+    -- Prestado a alguien: "loaned" es el interruptor (desmarcarlo = ya no
+    -- esta prestado / te lo devolvieron, sin guardar una fecha de
+    -- devolucion aparte -- Koku solo pidio saber a quien y desde cuando).
+    loaned INTEGER NOT NULL DEFAULT 0,
+    loaned_to TEXT,
+    loaned_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -957,6 +997,29 @@ for (const theme of SEED_THEMES) {
   if (!existingThemeNames.has(theme.name)) {
     seedTheme.run(theme.name, JSON.stringify(theme.colors), theme.inverseColors ? JSON.stringify(theme.inverseColors) : null);
   }
+}
+
+// Migraciones puntuales de la ronda "Deudas + descanso en Gimnasio +
+// prestamos en Lecturas": las tablas de arriba (CREATE TABLE IF NOT
+// EXISTS) ya llevan las columnas nuevas para una instalacion desde cero,
+// pero una base de datos YA EXISTENTE necesita el ALTER TABLE de rigor.
+const gymRoutineExerciseColumns = db.prepare('PRAGMA table_info(gym_routine_exercises)').all().map((c) => c.name);
+if (!gymRoutineExerciseColumns.includes('target_rest_seconds')) {
+  db.exec('ALTER TABLE gym_routine_exercises ADD COLUMN target_rest_seconds INTEGER');
+}
+const gymSetColumns = db.prepare('PRAGMA table_info(gym_sets)').all().map((c) => c.name);
+if (!gymSetColumns.includes('rest_seconds')) {
+  db.exec('ALTER TABLE gym_sets ADD COLUMN rest_seconds INTEGER');
+}
+const lecturasItemColumns = db.prepare('PRAGMA table_info(lecturas_items)').all().map((c) => c.name);
+if (!lecturasItemColumns.includes('loaned')) {
+  db.exec('ALTER TABLE lecturas_items ADD COLUMN loaned INTEGER NOT NULL DEFAULT 0');
+}
+if (!lecturasItemColumns.includes('loaned_to')) {
+  db.exec('ALTER TABLE lecturas_items ADD COLUMN loaned_to TEXT');
+}
+if (!lecturasItemColumns.includes('loaned_at')) {
+  db.exec('ALTER TABLE lecturas_items ADD COLUMN loaned_at TEXT');
 }
 
 // ---------------------------------------------------------------------

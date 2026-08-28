@@ -1347,14 +1347,189 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// Las flechas del mes navegan por AÑO en vez de por mes mientras estas
+// en la vista anual (ver calendarViewMode mas abajo) -- mismo boton,
+// distinto salto, coherente con lo que se esta mirando.
 document.getElementById('nav-prev').addEventListener('click', () => {
+  if (calendarViewMode === 'year') {
+    state.viewDate = new Date(state.viewDate.getFullYear() - 1, state.viewDate.getMonth(), 1);
+    refreshCalendarYearGrid();
+    return;
+  }
   state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() - 1, 1);
   loadMonth();
 });
 document.getElementById('nav-next').addEventListener('click', () => {
+  if (calendarViewMode === 'year') {
+    state.viewDate = new Date(state.viewDate.getFullYear() + 1, state.viewDate.getMonth(), 1);
+    refreshCalendarYearGrid();
+    return;
+  }
   state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() + 1, 1);
   loadMonth();
 });
+
+// ---------------------------------------------------------------------
+// Vista anual (solo escritorio): las 12 miniaturas del año a la vez, en
+// vez del mes a mes de siempre -- pedido explicito de Koku, "ya que hay
+// mas espacio [en el ordenador] creo que seria visible". Se alterna con
+// gestos de la rueda del raton (hacia abajo sobre el mes = vista anual;
+// hacia arriba sobre un mes de la vista anual = entrar en ese mes) o con
+// el boton de apoyo #btn-calendar-year-toggle -- nunca con un gesto si
+// hay un modal u otra pantalla completa delante (isGestureBlockedByModal),
+// para no cambiar de vista sin querer mientras, por ejemplo, escribes la
+// descripcion de un evento y esa caja de texto hace scroll.
+// ---------------------------------------------------------------------
+let calendarViewMode = 'month'; // 'month' | 'year'
+let yearViewEventsYear = null;
+let yearViewEvents = [];
+
+async function loadYearViewEvents(year) {
+  if (yearViewEventsYear === year) return;
+  yearViewEvents = await api(`/api/events?from=${year}-01-01T00:00:00&to=${year}-12-31T23:59:59`);
+  yearViewEventsYear = year;
+}
+
+function isGestureBlockedByModal() {
+  if (document.querySelector('.modal:not(.hidden)')) return true;
+  const fullscreenIds = [
+    'my-space-view', 'extensions-view', 'gym-view', 'finanzas-view',
+    'lecturas-view', 'archivos-view', 'note-editor-view',
+  ];
+  return fullscreenIds.some((id) => {
+    const el = document.getElementById(id);
+    return el && !el.classList.contains('hidden');
+  });
+}
+
+function enterMonthFromYear(month) {
+  state.viewDate = new Date(state.viewDate.getFullYear(), month, 1);
+  setCalendarViewMode('month');
+}
+
+function renderCalendarYearGrid() {
+  const container = document.getElementById('calendar-year-grid');
+  container.innerHTML = '';
+  const year = state.viewDate.getFullYear();
+  const today = new Date();
+
+  for (let month = 0; month < 12; month++) {
+    const monthDate = new Date(year, month, 1);
+    const tile = document.createElement('div');
+    tile.className = 'calendar-year-tile';
+
+    const heading = document.createElement('div');
+    heading.className = 'calendar-year-tile-heading';
+    const label = MONTH_ONLY_FORMATTER.format(monthDate);
+    heading.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+    tile.appendChild(heading);
+
+    const grid = document.createElement('div');
+    grid.className = 'calendar-year-tile-grid';
+
+    // Igual que el mes grande: la semana empieza en lunes, y solo se
+    // pintan las semanas que hacen falta para ese mes (4 a 6 segun como
+    // caiga), sin filas de sobra vacias.
+    const first = startOfMonth(monthDate);
+    const last = endOfMonth(monthDate);
+    const firstWeekday = (first.getDay() + 6) % 7;
+    const lastWeekday = (last.getDay() + 6) % 7;
+    const gridStart = new Date(first);
+    gridStart.setDate(gridStart.getDate() - firstWeekday);
+    const totalDays = firstWeekday + last.getDate() + (6 - lastWeekday);
+
+    for (let i = 0; i < totalDays; i++) {
+      const cellDate = new Date(gridStart);
+      cellDate.setDate(gridStart.getDate() + i);
+
+      const cell = document.createElement('span');
+      cell.className = 'calendar-year-day';
+      cell.textContent = cellDate.getDate();
+      if (cellDate.getMonth() !== month) cell.classList.add('other-month');
+      if (sameDay(cellDate, today)) cell.classList.add('today');
+
+      const dayType = state.specialDays[toDateKey(cellDate)];
+      if (dayType === 'holiday') cell.classList.add('holiday-day');
+      else if (dayType === 'special') cell.classList.add('special-day');
+      else if (cellDate.getDay() === 0 || cellDate.getDay() === 6) cell.classList.add('weekend-day');
+
+      if (yearViewEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate))) {
+        cell.classList.add('has-content');
+      }
+
+      grid.appendChild(cell);
+    }
+    tile.appendChild(grid);
+
+    tile.addEventListener('click', () => enterMonthFromYear(month));
+    tile.addEventListener('wheel', (e) => {
+      if (isGestureBlockedByModal()) return;
+      if (e.deltaY >= 0) return; // solo hacia arriba = "entrar" en el mes
+      e.preventDefault();
+      enterMonthFromYear(month);
+    }, { passive: false });
+
+    container.appendChild(tile);
+  }
+}
+
+async function refreshCalendarYearGrid() {
+  const year = state.viewDate.getFullYear();
+  document.getElementById('current-month-label').textContent = String(year);
+  await loadYearViewEvents(year);
+  renderCalendarYearGrid();
+}
+
+const CALENDAR_VIEW_ANIMATION_MS = 320;
+
+function playCalendarViewAnimation(el) {
+  el.classList.remove('calendar-view-entering');
+  // Forzar reflow para que la animacion se pueda relanzar si el modo se
+  // cambia varias veces seguidas muy rapido (si no, quitar y volver a
+  // poner la misma clase en el mismo "tick" no reinicia la animacion).
+  void el.offsetWidth;
+  el.classList.add('calendar-view-entering');
+  setTimeout(() => el.classList.remove('calendar-view-entering'), CALENDAR_VIEW_ANIMATION_MS);
+}
+
+async function setCalendarViewMode(mode) {
+  if (mode === calendarViewMode) return;
+  calendarViewMode = mode;
+  const monthEl = document.getElementById('calendar-grid');
+  const yearEl = document.getElementById('calendar-year-grid');
+  document.getElementById('btn-calendar-year-toggle').classList.toggle('active', mode === 'year');
+
+  if (mode === 'year') {
+    await refreshCalendarYearGrid();
+    monthEl.classList.add('hidden');
+    yearEl.classList.remove('hidden');
+    playCalendarViewAnimation(yearEl);
+  } else {
+    await loadMonth();
+    yearEl.classList.add('hidden');
+    monthEl.classList.remove('hidden');
+    playCalendarViewAnimation(monthEl);
+  }
+}
+
+document.getElementById('btn-calendar-year-toggle').addEventListener('click', () => {
+  setCalendarViewMode(calendarViewMode === 'year' ? 'month' : 'year');
+});
+
+// Rueda del raton hacia abajo sobre el mes = vista anual. Si el punto
+// donde estaba el raton es una celda que YA scrollea por su cuenta (un
+// dia con muchos eventos, ver .calendar-cell en styles.css), se deja
+// pasar el scroll normal de esa celda en vez de interceptarlo -- si no,
+// seria imposible leer un dia lleno sin cambiar de vista sin querer.
+document.getElementById('calendar-grid-wrap').addEventListener('wheel', (e) => {
+  if (calendarViewMode !== 'month') return;
+  if (e.deltaY <= 0) return;
+  if (isGestureBlockedByModal()) return;
+  const cell = e.target.closest('.calendar-cell');
+  if (cell && cell.scrollHeight > cell.clientHeight) return;
+  e.preventDefault();
+  setCalendarViewMode('year');
+}, { passive: false });
 
 // ---------------------------------------------------------------------
 // Modal de evento (crear / editar / borrar)
@@ -4164,19 +4339,22 @@ function moveRemindersIntoHub() {
 }
 
 // Panel lateral clasico (modo "topbar" de Mi espacio, ver mas abajo):
-// que secciones de Recordatorios/Tareas/Notas van AGRUPADAS (juntas,
-// alternando con flechas, una visible cada vez dentro de
-// #reminders-panel-grouped-slot) y cuales se quedan SUELTAS (apiladas,
-// cada una siempre visible con su propio scroll, en su posicion natural
-// -- ver REMINDERS_PANEL_PAGES mas abajo para el orden). Preferencia de
-// ESTE dispositivo (localStorage, un array de ids), elegida con
-// casillas en Configuracion > Vista > "Panel lateral clasico" (ver
-// refreshRemindersPanelGroupedOptions en settings.js). Agrupar 0 o 1
-// seccion no hace nada especial -- con una sola marcada no hay nada que
-// alternar, asi que se trata igual que "ninguna marcada" (todas
-// sueltas). En modo "panel" de Mi espacio (hub de 3 columnas) este
-// ajuste no pinta nada: cada columna ya vive en su propio sitio fijo
-// (ver moveRemindersIntoHub).
+// que secciones de Recordatorios/Tareas/Notas van MARCADAS. Si hay
+// alguna marcada Y alguna sin marcar, las dos "mitades" comparten un
+// unico hueco (#reminders-panel-grouped-slot): las MARCADAS se ven
+// juntas, apiladas, cada una con su scroll; la flecha cambia TODO el
+// hueco a las NO marcadas (tambien juntas) en vez de mostrar una sola
+// cada vez -- pedido explicito de Koku ("las seleccionadas aparecen
+// juntas... si le doy a la flecha toda la columna que se me cambie a la
+// que no esta seleccionada"). Preferencia de ESTE dispositivo
+// (localStorage, un array de ids de las marcadas), elegida con casillas
+// en Configuracion > Vista > "Panel lateral clasico" (ver
+// refreshRemindersPanelGroupedOptions en settings.js). Marcar TODAS o
+// NINGUNA no activa nada especial -- no habria "las otras" a las que
+// cambiar, asi que se trata como si no hubiera agrupacion (las 3
+// sueltas, siempre visibles, como si esto no existiera). En modo
+// "panel" de Mi espacio (hub de 3 columnas) este ajuste no pinta nada:
+// cada columna ya vive en su propio sitio fijo (ver moveRemindersIntoHub).
 //
 // REMINDERS_PANEL_PAGES esta pensado para poder crecer el dia que haya
 // una 4a seccion: toda la logica de abajo itera sobre el array entero,
@@ -4186,7 +4364,12 @@ const REMINDERS_PANEL_PAGES = [
   { id: 'tasks', label: 'Tareas', blockId: 'reminders-tasks-block' },
   { id: 'notes', label: 'Notas', blockId: 'reminders-notes-block' },
 ];
-let remindersPanelActivePage = 'reminders';
+// true = el hueco compartido muestra las MARCADAS ahora mismo; false =
+// muestra las NO marcadas. Se reinicia a true cada vez que cambia que
+// secciones estan marcadas (ver refreshRemindersPanelGroupedOptions en
+// settings.js), para no dejarte "atascado" viendo las otras tras tocar
+// el ajuste.
+let remindersPanelShowingChecked = true;
 
 function getRemindersGroupedSections() {
   let stored;
@@ -4197,66 +4380,62 @@ function getRemindersGroupedSections() {
   }
   if (!Array.isArray(stored)) return [];
   const valid = stored.filter((id) => REMINDERS_PANEL_PAGES.some((p) => p.id === id));
-  return valid.length >= 2 ? valid : [];
+  return valid.length >= 1 && valid.length < REMINDERS_PANEL_PAGES.length ? valid : [];
 }
 
-// Recoloca cada bloque en su sitio (agrupado o suelto) y decide que se
-// ve. Se llama al arrancar, al cambiar el ajuste, y cada vez que se
-// alterna dentro del grupo (stepRemindersPanelPage).
+// Recoloca cada bloque en su sitio (dentro del hueco compartido, o suelto
+// en el panel si no hay agrupacion activa) y decide que se ve. Se llama
+// al arrancar, al cambiar el ajuste, y cada vez que se le da a la
+// flecha (stepRemindersPanelPage).
 function applyRemindersPanelLayout() {
   if (getMiEspacioMode() === 'panel') return; // este ajuste no aplica ahi, ver moveRemindersIntoHub
 
   const panel = document.getElementById('reminders-panel');
   const groupedSlot = document.getElementById('reminders-panel-grouped-slot');
   const switcher = document.getElementById('reminders-panel-switcher');
-  const grouped = getRemindersGroupedSections();
+  const checked = getRemindersGroupedSections();
 
-  // Coloca cada bloque: las agrupadas dentro del slot compartido (que se
-  // inserta en el panel en la posicion de la PRIMERA seccion agrupada,
-  // segun el orden natural), las sueltas directamente en el panel.
-  let groupedSlotPlaced = false;
-  REMINDERS_PANEL_PAGES.forEach((p) => {
-    const block = document.getElementById(p.blockId);
-    if (grouped.includes(p.id)) {
-      groupedSlot.appendChild(block);
-      if (!groupedSlotPlaced) {
-        panel.appendChild(groupedSlot);
-        groupedSlotPlaced = true;
-      }
-    } else {
+  if (checked.length === 0) {
+    // Sin agrupacion activa: las 3 sueltas, apiladas, siempre visibles.
+    REMINDERS_PANEL_PAGES.forEach((p) => {
+      const block = document.getElementById(p.blockId);
       panel.appendChild(block);
       block.classList.remove('hidden');
-    }
-  });
-
-  if (grouped.length === 0) {
+    });
     groupedSlot.classList.add('hidden');
     switcher.classList.add('hidden');
     return;
   }
 
+  // Con agrupacion activa, las 3 secciones (marcadas Y no marcadas) viven
+  // dentro del hueco compartido -- cual de las dos "mitades" se ve la
+  // decide remindersPanelShowingChecked.
+  panel.appendChild(groupedSlot);
+  REMINDERS_PANEL_PAGES.forEach((p) => groupedSlot.appendChild(document.getElementById(p.blockId)));
+
   groupedSlot.classList.remove('hidden');
   switcher.classList.remove('hidden');
-  if (!grouped.includes(remindersPanelActivePage)) remindersPanelActivePage = grouped[0];
-  grouped.forEach((id) => {
-    const p = REMINDERS_PANEL_PAGES.find((page) => page.id === id);
-    document.getElementById(p.blockId).classList.toggle('hidden', id !== remindersPanelActivePage);
+  const unchecked = REMINDERS_PANEL_PAGES.map((p) => p.id).filter((id) => !checked.includes(id));
+  const showing = remindersPanelShowingChecked ? checked : unchecked;
+  REMINDERS_PANEL_PAGES.forEach((p) => {
+    document.getElementById(p.blockId).classList.toggle('hidden', !showing.includes(p.id));
   });
-  document.getElementById('reminders-panel-switch-label').textContent =
-    REMINDERS_PANEL_PAGES.find((p) => p.id === remindersPanelActivePage).label;
+  document.getElementById('reminders-panel-switch-label').textContent = showing
+    .map((id) => REMINDERS_PANEL_PAGES.find((p) => p.id === id).label)
+    .join(' + ');
 }
 
-function stepRemindersPanelPage(delta) {
-  const grouped = getRemindersGroupedSections();
-  if (grouped.length === 0) return;
-  const idx = grouped.indexOf(remindersPanelActivePage);
-  const nextIdx = (idx + delta + grouped.length) % grouped.length;
-  remindersPanelActivePage = grouped[nextIdx];
+function stepRemindersPanelPage() {
+  if (getRemindersGroupedSections().length === 0) return;
+  // Solo hay dos "mitades" -- prev/next hacen lo mismo, dan la vuelta a
+  // cual se ve, se mantienen los dos botones por simetria visual con el
+  // resto de la app.
+  remindersPanelShowingChecked = !remindersPanelShowingChecked;
   applyRemindersPanelLayout();
 }
 
-document.getElementById('btn-panel-switch-prev').addEventListener('click', () => stepRemindersPanelPage(-1));
-document.getElementById('btn-panel-switch-next').addEventListener('click', () => stepRemindersPanelPage(1));
+document.getElementById('btn-panel-switch-prev').addEventListener('click', () => stepRemindersPanelPage());
+document.getElementById('btn-panel-switch-next').addEventListener('click', () => stepRemindersPanelPage());
 
 function collapseMySpaceExpandedColumn() {
   delete document.getElementById('my-space-hub').dataset.expanded;
@@ -4289,16 +4468,73 @@ function applyMiEspacioMode() {
   restoreClassicRemindersPanel();
   panel.classList.remove('my-space-panel-mode');
 
+  // En modo "panel" el ancho del aside es fijo (640px, ver .my-space-panel-mode
+  // en styles.css) -- el arrastre no tendria ningun efecto ahi, asi que
+  // se oculta para no dejar un control muerto en pantalla.
+  const resizeHandle = document.getElementById('panel-resize-handle');
   if (mode === 'panel') {
     panel.appendChild(hub);
     panel.classList.add('my-space-panel-mode');
     moveRemindersIntoHub();
     document.getElementById('btn-my-space').classList.add('hidden');
+    if (resizeHandle) resizeHandle.classList.add('hidden');
   } else {
     document.getElementById('my-space-view').appendChild(hub);
     document.getElementById('btn-my-space').classList.remove('hidden');
+    if (resizeHandle) resizeHandle.classList.remove('hidden');
   }
 }
+
+// Arrastre del divisor entre el calendario y el panel de recordatorios
+// (pedido explicito de Koku: "en este ordenador me gustaria hacer algo
+// mas ancho el espacio que ocupa la columna de recordatorios"). El ancho
+// se guarda en localStorage POR DISPOSITIVO (cada ordenador puede querer
+// uno distinto) y se aplica como variable CSS que .reminders-panel ya
+// lee (ver styles.css) -- clamp() en JS y en el propio CSS por partida
+// doble, para que nunca se pueda arrastrar a algo inservible.
+const PANEL_WIDTH_MIN = 240;
+const PANEL_WIDTH_MAX = 640;
+
+function applyStoredRemindersPanelWidth() {
+  const stored = Number(localStorage.getItem('remindersPanelWidth'));
+  if (stored && stored >= PANEL_WIDTH_MIN && stored <= PANEL_WIDTH_MAX) {
+    document.documentElement.style.setProperty('--reminders-panel-width', `${stored}px`);
+  }
+}
+applyStoredRemindersPanelWidth();
+
+(function setupPanelResizeHandle() {
+  const handle = document.getElementById('panel-resize-handle');
+  const panel = document.getElementById('reminders-panel');
+  if (!handle || !panel) return;
+
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = panel.getBoundingClientRect().width;
+    handle.classList.add('is-dragging');
+    document.body.classList.add('is-resizing-panel');
+
+    function onMouseMove(ev) {
+      // El panel esta a la DERECHA del divisor: arrastrar hacia la
+      // izquierda (deltaX negativo) lo agranda, hacia la derecha lo
+      // encoge -- de ahi el signo invertido.
+      const deltaX = ev.clientX - startX;
+      const newWidth = Math.max(PANEL_WIDTH_MIN, Math.min(PANEL_WIDTH_MAX, startWidth - deltaX));
+      document.documentElement.style.setProperty('--reminders-panel-width', `${newWidth}px`);
+    }
+    function onMouseUp() {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      handle.classList.remove('is-dragging');
+      document.body.classList.remove('is-resizing-panel');
+      const finalWidth = panel.getBoundingClientRect().width;
+      localStorage.setItem('remindersPanelWidth', String(Math.round(finalWidth)));
+    }
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+})();
 
 document.getElementById('btn-my-space').addEventListener('click', openMySpaceView);
 document.getElementById('btn-close-my-space').addEventListener('click', closeMySpaceView);
@@ -4724,6 +4960,21 @@ document.getElementById('finanzas-recurring-start-field').appendChild(finanzasRe
 const finanzasRecurringEndField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha de fin' });
 document.getElementById('finanzas-recurring-end-field').appendChild(finanzasRecurringEndField.element);
 
+// Deudas (pestaña "Deudas") -- la fecha es opcional (allowClear) porque
+// Koku pidio explicitamente poder dejarla en blanco; la cuenta tambien
+// (ver "Sin cuenta ligada" mas abajo en populateFinanzasSelects).
+const finanzasDebtDirectionField = createSelectField({
+  options: [{ value: 'owed_by_me', label: 'Debo yo' }, { value: 'owed_to_me', label: 'Me deben' }],
+  initialValue: 'owed_by_me',
+});
+document.getElementById('finanzas-debt-direction-field').appendChild(finanzasDebtDirectionField.element);
+
+const finanzasDebtDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('finanzas-debt-date-field').appendChild(finanzasDebtDateField.element);
+
+const finanzasDebtAccountField = createSelectField({ options: [{ value: '', label: 'Sin cuenta ligada' }], initialValue: '' });
+document.getElementById('finanzas-debt-account-field').appendChild(finanzasDebtAccountField.element);
+
 // Selector de mes (vista mensual del Ahorro) + rango (vista historica) --
 // ver renderFinanzasSavingsMonthly()/renderFinanzasSavingsHistoric() mas
 // abajo.
@@ -4790,6 +5041,7 @@ function populateFinanzasSelects() {
   finanzasTransactionAccountField.setOptions(accountOptions);
   finanzasInvestmentAccountField.setOptions(accountOptions);
   finanzasRecurringAccountField.setOptions(accountOptions);
+  finanzasDebtAccountField.setOptions([{ value: '', label: 'Sin cuenta ligada' }, ...accountOptions]);
 
   const categoryOptions = finanzasCategories.map((c) => ({ value: c.id, label: `${c.icon ? c.icon + ' ' : ''}${c.name}` }));
   finanzasFilterCategoryField.setOptions([{ value: '', label: 'Todas las categorías' }, ...categoryOptions]);
@@ -5270,6 +5522,7 @@ function renderGymRoutineExercisesField() {
       <select data-field="exerciseId">${gymExerciseOptionsHtml(row.exerciseId)}</select>
       <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
       <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
+      <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" value="${row.targetRestSeconds ?? ''}" />
       <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
     `;
     rowEl.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
@@ -5280,6 +5533,9 @@ function renderGymRoutineExercisesField() {
     });
     rowEl.querySelector('[data-field="targetReps"]').addEventListener('input', (e) => {
       gymRoutineModalExercises[index].targetReps = e.target.value;
+    });
+    rowEl.querySelector('[data-field="targetRestSeconds"]').addEventListener('input', (e) => {
+      gymRoutineModalExercises[index].targetRestSeconds = e.target.value;
     });
     rowEl.querySelector('button').addEventListener('click', () => {
       gymRoutineModalExercises.splice(index, 1);
@@ -5294,7 +5550,7 @@ document.getElementById('btn-add-gym-routine-exercise').addEventListener('click'
     alert('Primero crea al menos un ejercicio en la lista de abajo.');
     return;
   }
-  gymRoutineModalExercises.push({ exerciseId: state.gymExercises[0].id, targetSets: '', targetReps: '' });
+  gymRoutineModalExercises.push({ exerciseId: state.gymExercises[0].id, targetSets: '', targetReps: '', targetRestSeconds: '' });
   renderGymRoutineExercisesField();
 });
 
@@ -5306,7 +5562,12 @@ function openGymRoutineModal(routine) {
   gymRoutineColorField.setValue(routine ? routine.color : '#5b8cff');
   gymRoutineIconField.setValue(routine ? routine.icon || '' : '');
   gymRoutineModalExercises = routine
-    ? routine.exercises.map((ex) => ({ exerciseId: ex.exerciseId, targetSets: ex.targetSets ?? '', targetReps: ex.targetReps ?? '' }))
+    ? routine.exercises.map((ex) => ({
+        exerciseId: ex.exerciseId,
+        targetSets: ex.targetSets ?? '',
+        targetReps: ex.targetReps ?? '',
+        targetRestSeconds: ex.targetRestSeconds ?? '',
+      }))
     : [];
   renderGymRoutineExercisesField();
   document.getElementById('btn-delete-gym-routine').classList.toggle('hidden', !routine);
@@ -5366,7 +5627,23 @@ const gymSessionRoutineField = createSelectField({
     // si la lista de ejercicios de la sesion todavia esta vacia, para no
     // pisar series que ya se hubieran anadido a mano.
     if (routine && gymSessionModalExercises.length === 0) {
-      gymSessionModalExercises = routine.exercises.map((ex) => ({ exerciseId: ex.exerciseId, sets: [] }));
+      // Auto-rellena tambien las series de cada ejercicio, no solo el
+      // ejercicio en si (pedido explicito de Koku) -- una fila en blanco
+      // por cada target_sets de la rutina (o 1 si la rutina no fijo
+      // series), con las repeticiones y el descanso de la rutina como
+      // punto de partida editable; el peso se deja siempre en blanco, la
+      // rutina no guarda ningun peso orientativo.
+      gymSessionModalExercises = routine.exercises.map((ex) => {
+        const setsCount = ex.targetSets && ex.targetSets > 0 ? ex.targetSets : 1;
+        return {
+          exerciseId: ex.exerciseId,
+          sets: Array.from({ length: setsCount }, () => ({
+            reps: ex.targetReps ?? '',
+            weightDisplay: '',
+            restSeconds: ex.targetRestSeconds ?? '',
+          })),
+        };
+      });
       renderGymSessionExercisesField();
     }
   },
@@ -5414,6 +5691,7 @@ function renderGymSessionExercisesField() {
         <span class="gym-session-set-number">Serie ${setIndex + 1}</span>
         <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
         <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
+        <input type="number" data-field="restSeconds" placeholder="Descanso (s)" min="0" value="${set.restSeconds ?? ''}" />
         <button type="button" class="icon-btn" aria-label="Quitar serie">✕</button>
       `;
       setRow.querySelector('[data-field="reps"]').addEventListener('input', (e) => {
@@ -5421,6 +5699,9 @@ function renderGymSessionExercisesField() {
       });
       setRow.querySelector('[data-field="weight"]').addEventListener('input', (e) => {
         set.weightDisplay = e.target.value;
+      });
+      setRow.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => {
+        set.restSeconds = e.target.value;
       });
       setRow.querySelector('button').addEventListener('click', () => {
         exRow.sets.splice(setIndex, 1);
@@ -5435,7 +5716,11 @@ function renderGymSessionExercisesField() {
     addSetBtn.className = 'secondary-btn gym-add-set-btn';
     addSetBtn.textContent = '+ Serie';
     addSetBtn.addEventListener('click', () => {
-      exRow.sets.push({ reps: '', weightDisplay: '' });
+      // El descanso se hereda de la ultima serie de este mismo ejercicio
+      // (suele ser el mismo entre series seguidas) -- reps/peso se dejan
+      // en blanco, varian serie a serie.
+      const lastSet = exRow.sets[exRow.sets.length - 1];
+      exRow.sets.push({ reps: '', weightDisplay: '', restSeconds: lastSet ? lastSet.restSeconds : '' });
       renderGymSessionExercisesField();
     });
     block.appendChild(addSetBtn);
@@ -5449,7 +5734,7 @@ document.getElementById('btn-add-gym-session-exercise').addEventListener('click'
     alert('Primero crea al menos un ejercicio desde la pestaña Rutinas.');
     return;
   }
-  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, sets: [{ reps: '', weightDisplay: '' }] });
+  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, sets: [{ reps: '', weightDisplay: '', restSeconds: '' }] });
   renderGymSessionExercisesField();
 });
 
@@ -5471,7 +5756,11 @@ function openGymSessionModal(session) {
     const byExercise = new Map();
     session.sets.forEach((set) => {
       if (!byExercise.has(set.exerciseId)) byExercise.set(set.exerciseId, []);
-      byExercise.get(set.exerciseId).push({ reps: set.reps ?? '', weightDisplay: gymWeightKgToDisplay(set.weightKg) });
+      byExercise.get(set.exerciseId).push({
+        reps: set.reps ?? '',
+        weightDisplay: gymWeightKgToDisplay(set.weightKg),
+        restSeconds: set.restSeconds ?? '',
+      });
     });
     gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets }));
   } else {
@@ -5504,6 +5793,7 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         exerciseId: exRow.exerciseId,
         reps: set.reps,
         weightKg: gymWeightDisplayToKg(set.weightDisplay),
+        restSeconds: set.restSeconds,
       });
     });
   });
@@ -5595,8 +5885,13 @@ async function renderGymProgressChart(exerciseId) {
   }));
 
   const pathD = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ');
+  // data-tooltip + attachFinanzasChartTooltips() en vez de un <title> SVG
+  // nativo -- el <title> nativo tarda lo tipico del navegador en salir y
+  // Koku no queria "la fecha por defecto" (mismo motivo por el que ya se
+  // quito de la grafica de Evolucion mensual de Finanzas, ver el
+  // comentario junto a attachFinanzasChartTooltips mas abajo).
   const dots = coords
-    .map((c, i) => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="var(--accent)"><title>${formatGymDate(points[i].date)}: ${values[i]} ${unit}</title></circle>`)
+    .map((c, i) => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="var(--accent)" data-tooltip="${escapeHtml(`${formatGymDate(points[i].date)}: ${values[i]} ${unit}`)}"></circle>`)
     .join('');
   // Solo se etiquetan la primera, la ultima, y todas si hay pocos puntos
   // -- con muchas sesiones, poner una fecha bajo cada punto se solapa.
@@ -5615,6 +5910,7 @@ async function renderGymProgressChart(exerciseId) {
     </svg>
     <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso maximo'} por sesion, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Pasa el raton por un punto para ver la fecha exacta.</p>
   `;
+  attachFinanzasChartTooltips(container.querySelector('svg'));
 }
 
 function renderFinanzasCategoriesList() {
@@ -6064,6 +6360,15 @@ const lecturasItemStatusField = createSelectField({
 });
 document.getElementById('lecturas-item-status-field').appendChild(lecturasItemStatusField.element);
 
+// "Prestado a alguien" (ver comentario junto a lecturas_items en
+// db.js): el bloque de detalles (a quien + desde cuando) solo se ve con
+// la casilla marcada.
+const lecturasItemLoanedAtField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('lecturas-item-loaned-at-field').appendChild(lecturasItemLoanedAtField.element);
+document.getElementById('lecturas-item-loaned').addEventListener('change', (e) => {
+  document.getElementById('lecturas-item-loaned-details').classList.toggle('hidden', !e.target.checked);
+});
+
 // Rating: slider + numero sincronizados -- cualquiera de los dos vale
 // para poner la nota; solo el numero puede dejarse vacio del todo (el
 // slider no tiene un estado "sin valor"), asi que sigue siendo la unica
@@ -6326,6 +6631,137 @@ document.getElementById('finanzas-recurring-form').addEventListener('submit', as
   }
   closeFinanzasRecurringModal();
   await refreshFinanzasRecurringTab();
+});
+
+// -- Pestaña "Deudas": lo que Koku debe a alguien y lo que alguien le
+//    debe a el (ver comentario junto a finanzas_debts en server/db.js).
+//    Ligar una deuda a una cuenta es opcional -- si se liga, marcarla
+//    como pagada genera un movimiento real (ver routes/finanzasDebts.js).
+let finanzasDebts = [];
+
+async function loadFinanzasDebts() {
+  finanzasDebts = await api('/api/finanzas-debts');
+}
+
+function finanzasDebtStatusLabel(d) {
+  if (!d.paid) return 'Pendiente';
+  return `Pagada${d.paidAt ? ` (${d.paidAt})` : ''}`;
+}
+
+function renderFinanzasDebtsList() {
+  const owedByMeTbody = document.getElementById('finanzas-debts-owed-by-me-tbody');
+  const owedToMeTbody = document.getElementById('finanzas-debts-owed-to-me-tbody');
+  owedByMeTbody.innerHTML = '';
+  owedToMeTbody.innerHTML = '';
+
+  const owedByMe = finanzasDebts.filter((d) => d.direction === 'owed_by_me');
+  const owedToMe = finanzasDebts.filter((d) => d.direction === 'owed_to_me');
+
+  if (owedByMe.length === 0) owedByMeTbody.innerHTML = '<tr><td colspan="6" class="empty-hint">No debes nada apuntado aquí.</td></tr>';
+  if (owedToMe.length === 0) owedToMeTbody.innerHTML = '<tr><td colspan="6" class="empty-hint">Nadie te debe nada apuntado aquí.</td></tr>';
+
+  [{ list: owedByMe, tbody: owedByMeTbody }, { list: owedToMe, tbody: owedToMeTbody }].forEach(({ list, tbody }) => {
+    list.forEach((d) => {
+      const tr = document.createElement('tr');
+      if (d.paid) tr.classList.add('finanzas-debt-row-paid');
+      tr.innerHTML = `
+        <td>${escapeHtml(d.person)}${d.description ? `<br><span class="hint">${escapeHtml(d.description)}</span>` : ''}</td>
+        <td>${formatFinanzasAmount(d.amount)}</td>
+        <td>${d.date || '—'}</td>
+        <td>${escapeHtml(finanzasAccountName(d.accountId))}</td>
+        <td>${finanzasDebtStatusLabel(d)}</td>
+        <td></td>
+      `;
+      const actionsTd = tr.lastElementChild;
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'secondary-btn';
+      toggleBtn.textContent = d.paid ? 'Marcar pendiente' : 'Marcar pagada';
+      toggleBtn.addEventListener('click', async () => {
+        await api(`/api/finanzas-debts/${d.id}/paid`, { method: 'PUT', body: JSON.stringify({ paid: !d.paid }) });
+        await refreshFinanzasDebtsTab();
+        await refreshFinanzasAccountsAndCategories();
+        renderFinanzasResumenTab();
+      });
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'secondary-btn';
+      editBtn.textContent = 'Editar';
+      editBtn.addEventListener('click', () => openFinanzasDebtModal(d));
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'danger-btn';
+      deleteBtn.textContent = 'Eliminar';
+      deleteBtn.addEventListener('click', async () => {
+        if (!confirm(`¿Eliminar la deuda con "${d.person}"?${d.transactionId ? ' Esto también borra el movimiento que generó al saldarse.' : ''}`)) return;
+        await api(`/api/finanzas-debts/${d.id}`, { method: 'DELETE' });
+        await refreshFinanzasDebtsTab();
+        await refreshFinanzasAccountsAndCategories();
+        renderFinanzasResumenTab();
+      });
+      actionsTd.append(toggleBtn, editBtn, deleteBtn);
+      tbody.appendChild(tr);
+    });
+  });
+}
+
+async function refreshFinanzasDebtsTab() {
+  await loadFinanzasDebts();
+  renderFinanzasDebtsList();
+}
+
+function openFinanzasDebtModal(d) {
+  document.getElementById('finanzas-debt-modal-title').textContent = d ? 'Editar deuda' : 'Nueva deuda';
+  document.getElementById('finanzas-debt-id').value = d ? d.id : '';
+  finanzasDebtDirectionField.setValue(d ? d.direction : 'owed_by_me');
+  document.getElementById('finanzas-debt-person').value = d ? d.person : '';
+  document.getElementById('finanzas-debt-amount').value = d ? d.amount : '';
+  finanzasDebtDateField.setValue(d && d.date ? new Date(`${d.date}T00:00:00`) : null);
+  finanzasDebtAccountField.setValue(d && d.accountId ? d.accountId : '');
+  document.getElementById('finanzas-debt-description').value = d ? d.description || '' : '';
+  document.getElementById('btn-delete-finanzas-debt').classList.toggle('hidden', !d);
+  document.getElementById('finanzas-debt-modal').classList.remove('hidden');
+}
+function closeFinanzasDebtModal() {
+  document.getElementById('finanzas-debt-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-finanzas-debt').addEventListener('click', () => openFinanzasDebtModal(null));
+document.getElementById('btn-close-finanzas-debt').addEventListener('click', closeFinanzasDebtModal);
+
+document.getElementById('finanzas-debt-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('finanzas-debt-id').value;
+  const dateValue = finanzasDebtDateField.getValue();
+  const payload = {
+    direction: finanzasDebtDirectionField.getValue(),
+    person: document.getElementById('finanzas-debt-person').value,
+    amount: document.getElementById('finanzas-debt-amount').value,
+    date: dateValue ? toDateKey(dateValue) : null,
+    accountId: finanzasDebtAccountField.getValue() || null,
+    description: document.getElementById('finanzas-debt-description').value || null,
+  };
+  try {
+    if (id) {
+      await api(`/api/finanzas-debts/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    } else {
+      await api('/api/finanzas-debts', { method: 'POST', body: JSON.stringify(payload) });
+    }
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  closeFinanzasDebtModal();
+  await refreshFinanzasDebtsTab();
+});
+document.getElementById('btn-delete-finanzas-debt').addEventListener('click', async () => {
+  const id = document.getElementById('finanzas-debt-id').value;
+  const debt = finanzasDebts.find((x) => String(x.id) === String(id));
+  if (!confirm(`¿Eliminar la deuda con "${debt ? debt.person : ''}"?${debt && debt.transactionId ? ' Esto también borra el movimiento que generó al saldarse.' : ''}`)) return;
+  await api(`/api/finanzas-debts/${id}`, { method: 'DELETE' });
+  closeFinanzasDebtModal();
+  await refreshFinanzasDebtsTab();
+  await refreshFinanzasAccountsAndCategories();
+  renderFinanzasResumenTab();
 });
 
 // Movimientos ya generados por una plantilla concreta -- reutiliza el
@@ -6658,7 +7094,7 @@ async function openFinanzasView() {
   // vista para no arrastrar una seleccion vieja de la sesion anterior.
   finanzasAssetTreeSelectedIds = new Set(finanzasAssets.map((a) => a.id));
   renderFinanzasAssetTree();
-  await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasRecurringTab(), refreshFinanzasInvestmentsTab()]);
+  await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasRecurringTab(), refreshFinanzasInvestmentsTab(), refreshFinanzasDebtsTab()]);
 }
 function closeFinanzasView() {
   document.getElementById('finanzas-view').classList.add('hidden');
@@ -6815,32 +7251,52 @@ async function loadArchivosNavPath(targetPath) {
   upBtn.disabled = !data.parent;
   upBtn.dataset.parent = data.parent || '';
   const foldersList = document.getElementById('archivos-nav-folders');
+  const foldersToggle = document.getElementById('btn-archivos-nav-folders-toggle');
+  const foldersWrap = document.getElementById('archivos-nav-folders-wrap');
   foldersList.innerHTML = '';
   data.folders.forEach((folder) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'archivos-browser-item';
     btn.textContent = folder.name;
-    btn.addEventListener('click', () => loadArchivosNavPath(folder.path));
+    btn.addEventListener('click', () => {
+      foldersWrap.classList.remove('open'); // al navegar, se cierra el desplegable
+      loadArchivosNavPath(folder.path);
+    });
     foldersList.appendChild(btn);
   });
+  // Sin subcarpetas aqui, no tiene sentido mostrar un boton de
+  // desplegable vacio.
+  foldersToggle.classList.toggle('hidden', data.folders.length === 0);
+  foldersWrap.classList.remove('open');
   renderArchivosFileTable(data.files);
 }
+document.getElementById('btn-archivos-nav-folders-toggle').addEventListener('click', () => {
+  document.getElementById('archivos-nav-folders-wrap').classList.toggle('open');
+});
+// Clicar fuera cierra el desplegable si se habia abierto con el boton
+// (el hover ya se cierra solo al quitar el raton de encima, via CSS).
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('archivos-nav-folders-wrap');
+  if (wrap && wrap.classList.contains('open') && !wrap.contains(e.target)) {
+    wrap.classList.remove('open');
+  }
+});
 
 // Punto de entrada unico tras abrir la vista o tras cualquier mutacion
 // (subir/borrar/etc.) -- decide si tocan la navegacion real (ordenador)
 // o la lista simple de siempre (movil).
 async function refreshArchivosBrowsePanel() {
   const navRow = document.getElementById('archivos-nav-row');
-  const navFolders = document.getElementById('archivos-nav-folders');
+  const navFoldersWrap = document.getElementById('archivos-nav-folders-wrap');
   if (isTrustedDevice()) {
     navRow.classList.remove('hidden');
-    navFolders.classList.remove('hidden');
+    navFoldersWrap.classList.remove('hidden');
     const startPath = archivosCurrentPath || document.getElementById('archivos-folder-path').value || null;
     await loadArchivosNavPath(startPath);
   } else {
     navRow.classList.add('hidden');
-    navFolders.classList.add('hidden');
+    navFoldersWrap.classList.add('hidden');
     await refreshArchivosList();
   }
 }
@@ -7334,8 +7790,12 @@ function renderLecturasItemsTable() {
     const owned = item.ownedTotal ? `${item.ownedCount ?? 0} de ${item.ownedTotal}` : '—';
     const statusColor = LECTURAS_STATUS_COLORS[item.status];
     const tr = document.createElement('tr');
+    // "Prestado" se muestra como una insignia junto al titulo (en vez de
+    // una columna aparte) para no reestructurar toda la tabla solo por
+    // esto -- con quien y desde cuando como tooltip, si se sabe.
+    const loanedBadge = item.loaned ? `<span class="lecturas-loaned-badge" title="Prestado${item.loanedTo ? ` a ${escapeHtml(item.loanedTo)}` : ''}${item.loanedAt ? ` desde ${item.loanedAt}` : ''}">Prestado</span>` : '';
     tr.innerHTML = `
-      <td>${escapeHtml(item.title)}</td>
+      <td>${escapeHtml(item.title)} ${loanedBadge}</td>
       <td>${LECTURAS_TYPE_LABELS[item.type] || item.type}</td>
       <td><span class="lecturas-status-badge" style="background-color:${statusColor}33; color:${statusColor};">${LECTURAS_STATUS_LABELS[item.status]}</span></td>
       <td>${item.rating !== null ? item.rating + '/10' : '—'}</td>
@@ -7467,6 +7927,11 @@ function openLecturasItemModal(item) {
   document.getElementById('lecturas-item-owned-total').value = item && item.ownedTotal !== null ? item.ownedTotal : '';
   lecturasItemGenres = item ? [...item.genres] : [];
   renderLecturasItemGenreChips();
+  const loanedChecked = !!(item && item.loaned);
+  document.getElementById('lecturas-item-loaned').checked = loanedChecked;
+  document.getElementById('lecturas-item-loaned-to').value = item ? item.loanedTo || '' : '';
+  lecturasItemLoanedAtField.setValue(item && item.loanedAt ? new Date(`${item.loanedAt}T00:00:00`) : null);
+  document.getElementById('lecturas-item-loaned-details').classList.toggle('hidden', !loanedChecked);
   document.getElementById('btn-delete-lecturas-item').classList.toggle('hidden', !item);
   document.getElementById('lecturas-item-modal').classList.remove('hidden');
 }
@@ -7502,6 +7967,9 @@ document.getElementById('lecturas-item-form').addEventListener('submit', async (
     progressUnit: document.getElementById('lecturas-item-progress-unit').value,
     ownedCount: document.getElementById('lecturas-item-owned-count').value,
     ownedTotal: document.getElementById('lecturas-item-owned-total').value,
+    loaned: document.getElementById('lecturas-item-loaned').checked,
+    loanedTo: document.getElementById('lecturas-item-loaned-to').value,
+    loanedAt: lecturasItemLoanedAtField.getValue() ? toDateKey(lecturasItemLoanedAtField.getValue()) : null,
   };
   if (id) {
     await api(`/api/lecturas-items/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -7538,12 +8006,17 @@ function playMySpaceColumnAnimation() {
 // Un solo listener en el hub entero (delegacion) en vez de uno por
 // columna: mas simple, y sigue funcionando igual aunque los bloques que
 // hay dentro se muevan de sitio. Ya no hay un boton dedicado para
-// expandir (ocupaba espacio vertical solo para eso) -- clicar el TITULO
-// de la columna (h2, con la clase my-space-col-expand-trigger) la
-// expande directamente.
+// expandir (ocupaba espacio vertical solo para eso) -- clicar la FILA
+// entera de cabecera (.reminders-panel-header, con la clase
+// my-space-col-expand-trigger -- antes solo el h2) la expande
+// directamente, pedido explicito de Koku.
 document.getElementById('my-space-hub').addEventListener('click', (e) => {
   const trigger = e.target.closest('.my-space-col-expand-trigger');
   if (!trigger) return;
+  // Si el clic fue sobre un boton propio dentro de la fila (ej.
+  // "Proximos →" en Recordatorios), ese boton ya tiene su propia accion
+  // -- no expandir tambien la columna a la vez.
+  if (e.target.closest('button')) return;
   const col = trigger.closest('.my-space-col');
   if (!col) return;
   playMySpaceColumnAnimation();
