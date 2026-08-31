@@ -237,7 +237,11 @@ textarea { resize: vertical; }
    contraste con su propio fondo — sigue siendo 100% opaco, solo mas
    parecido al fondo. */
 label { display: block; font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); margin-bottom: 0.75rem; }
-label input, label textarea, label select { margin-top: 0.3rem; }
+/* El "div" cubre los componentes propios (fecha/color/icono/select/
+   selector de pais) -- todos crean un <div> como raiz dentro del
+   <label>, y sin esto se quedaban pegados al texto de la etiqueta
+   mientras que input/textarea/select si tenian aire debajo. */
+label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 
 /* Igual que <label> (mismo tamano/color/margen) pero para envolver un
    selector con estilo propio (.select-field) en vez de un <input>/<select>
@@ -2564,8 +2568,17 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    Los paises sin ningun viaje se quedan en --surface-2 (mismo tono
    neutro que el resto de la app); los que si tienen alguno se resaltan
    con --accent (ver refreshViajesMapHighlights()). */
-.viajes-map-container { width: 100%; overflow-x: auto; }
-.viajes-map-container svg { width: 100%; height: auto; max-height: 70vh; }
+/* position:relative ancla el cluster de botones de zoom; touch-action:none
+   evita que el navegador intente hacer scroll/pellizco nativo por su
+   cuenta mientras arrastramos/pellizcamos el mapa a mano (ver
+   initViajesMapZoomPan en app.js). cursor:grab/.viajes-map-dragging
+   avisan de que se puede arrastrar. */
+.viajes-map-container { width: 100%; position: relative; touch-action: none; cursor: grab; }
+.viajes-map-container.viajes-map-dragging { cursor: grabbing; }
+.viajes-map-svg-wrap { width: 100%; }
+.viajes-map-container svg { width: 100%; height: auto; max-height: 70vh; display: block; }
+.viajes-map-zoom-controls { position: absolute; top: 0.6rem; right: 0.6rem; display: flex; flex-direction: column; gap: 0.3rem; z-index: 2; }
+.viajes-map-zoom-controls .icon-btn { line-height: 1; font-size: 1rem; }
 .viajes-map-country {
   fill: var(--surface-2); stroke: var(--border); stroke-width: 0.5;
   cursor: pointer; transition: fill 0.15s ease;
@@ -2578,6 +2591,10 @@ label input, label textarea, label select { margin-top: 0.3rem; }
    el modal de "viajes en este pais" (ver renderViajesTripCards). El
    color del viaje se ve como una franja lateral, via variable CSS
    puesta inline por JS (--viajes-trip-color). */
+/* Mismo criterio que .finanzas-manage-block .gym-tab-action: separar
+   el boton de la lista de debajo, sin tocar .gym-tab-action/.primary-btn
+   en general (compartidos con otros botones/modales). */
+#viajes-country-modal #btn-new-viaje-en-pais { margin-bottom: 0.6rem; }
 .viajes-trip-cards { display: flex; flex-direction: column; gap: 0.5rem; }
 .viajes-trip-card {
   display: flex; flex-direction: column; gap: 0.15rem; text-align: left;

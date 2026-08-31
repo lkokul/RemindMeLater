@@ -1233,8 +1233,15 @@
       </div>
 
       <div class="viajes-tab-panel" data-viajes-panel="mapa">
-        <p class="hint">Los países con algún viaje se ven resaltados -- haz clic en cualquiera para ver tus viajes ahí, o para crear uno nuevo con ese país ya elegido.</p>
-        <div id="viajes-map-container" class="viajes-map-container"></div>
+        <p class="hint">Los países con algún viaje se ven resaltados -- haz clic en cualquiera para ver tus viajes ahí, o para crear uno nuevo con ese país ya elegido. Rueda del ratón o pellizco con dos dedos para hacer zoom, arrastra para moverte por el mapa.</p>
+        <div id="viajes-map-container" class="viajes-map-container">
+          <div id="viajes-map-svg-wrap" class="viajes-map-svg-wrap"></div>
+          <div class="viajes-map-zoom-controls">
+            <button type="button" id="btn-viajes-map-zoom-in" class="icon-btn" aria-label="Acercar">+</button>
+            <button type="button" id="btn-viajes-map-zoom-out" class="icon-btn" aria-label="Alejar">−</button>
+            <button type="button" id="btn-viajes-map-zoom-reset" class="icon-btn" aria-label="Restablecer zoom">⤢</button>
+          </div>
+        </div>
       </div>
 
       <div class="viajes-tab-panel hidden" data-viajes-panel="viajes">

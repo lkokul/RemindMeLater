@@ -7769,14 +7769,16 @@ async function loadViajesMap() {
   if (viajesMapLoaded) return;
   viajesMapLoaded = true;
   const container = document.getElementById('viajes-map-container');
+  const svgWrap = document.getElementById('viajes-map-svg-wrap');
   const res = await fetch('/viajes-world-map.svg');
-  container.innerHTML = await res.text();
-  const svg = container.querySelector('svg');
+  svgWrap.innerHTML = await res.text();
+  const svg = svgWrap.querySelector('svg');
   svg.querySelectorAll('path[id], g[id]').forEach((el) => {
     if (el.id === 'world-map') return;
     el.classList.add('viajes-map-country');
     el.addEventListener('click', () => openViajesCountryModal(el.id));
   });
+  initViajesMapZoomPan(svg, container);
 }
 
 function refreshViajesMapHighlights() {
@@ -7786,6 +7788,175 @@ function refreshViajesMapHighlights() {
   const visited = new Set(viajesTrips.flatMap((t) => t.countries));
   svg.querySelectorAll('.viajes-map-country').forEach((el) => {
     el.classList.toggle('viajes-map-country-visited', visited.has(el.id));
+  });
+}
+
+// Zoom + paneo del mapa mutando el "viewBox" del SVG (no hay ninguna
+// libreria de zoom en el proyecto, y el SVG ya usa viewBox + se escala
+// solo por CSS -- mutar el viewBox es lo mas natural, sin necesidad de
+// un wrapper con transform ni tocar el tamano del propio SVG).
+let viajesMapBaseViewBox = null; // {x,y,w,h} original, al 100% de zoom
+let viajesMapView = null; // {x,y,w,h} de la sub-region visible ahora mismo
+const VIAJES_MAP_MIN_ZOOM = 1;
+const VIAJES_MAP_MAX_ZOOM = 8;
+
+function parseViajesMapViewBox(svg) {
+  const raw = (svg.getAttribute('viewBox') || '').trim().split(/\s+/).map(Number);
+  if (raw.length !== 4 || raw.some((n) => Number.isNaN(n))) {
+    return { x: 0, y: 0, w: svg.clientWidth || 100, h: svg.clientHeight || 100 };
+  }
+  return { x: raw[0], y: raw[1], w: raw[2], h: raw[3] };
+}
+
+function viajesMapCurrentZoom() {
+  return viajesMapBaseViewBox.w / viajesMapView.w;
+}
+
+function clampViajesMapView() {
+  const base = viajesMapBaseViewBox;
+  viajesMapView.w = Math.min(viajesMapView.w, base.w);
+  viajesMapView.h = Math.min(viajesMapView.h, base.h);
+  viajesMapView.x = Math.min(Math.max(viajesMapView.x, base.x), base.x + base.w - viajesMapView.w);
+  viajesMapView.y = Math.min(Math.max(viajesMapView.y, base.y), base.y + base.h - viajesMapView.h);
+}
+
+function applyViajesMapView(svg) {
+  clampViajesMapView();
+  svg.setAttribute('viewBox', `${viajesMapView.x} ${viajesMapView.y} ${viajesMapView.w} ${viajesMapView.h}`);
+}
+
+// Zoomea manteniendo fijo el punto (fracX, fracY) -- fraccion 0..1
+// dentro de la caja visible ACTUAL, no del mapa entero -- que es donde
+// esta el cursor o el punto medio del pellizco.
+function setViajesMapZoomAt(newZoom, fracX, fracY, svg) {
+  const base = viajesMapBaseViewBox;
+  const clampedZoom = Math.min(Math.max(newZoom, VIAJES_MAP_MIN_ZOOM), VIAJES_MAP_MAX_ZOOM);
+  const cur = viajesMapView;
+  const px = cur.x + fracX * cur.w;
+  const py = cur.y + fracY * cur.h;
+  const w = base.w / clampedZoom;
+  const h = base.h / clampedZoom;
+  viajesMapView = { x: px - fracX * w, y: py - fracY * h, w, h };
+  applyViajesMapView(svg);
+}
+
+function initViajesMapZoomPan(svg, container) {
+  viajesMapBaseViewBox = parseViajesMapViewBox(svg);
+  viajesMapView = Object.assign({}, viajesMapBaseViewBox);
+
+  // pointerId -> {x,y} en coordenadas de pantalla (clientX/clientY).
+  const activePointers = new Map();
+  let dragStart = null; // {x,y,viewX,viewY} para paneo con 1 puntero
+  let dragMoved = 0; // distancia recorrida -- por debajo del umbral, un toque sigue siendo un clic normal sobre el pais
+  let pinchStart = null; // {dist, zoom} para pellizco con 2 punteros
+  // Si el arrastre empieza y termina sobre el MISMO pais (p.ej. panear
+  // dentro de un pais grande sin cruzar su borde), el navegador sigue
+  // disparando un "click" normal en ese pais -- se traga ese click de
+  // mas con esta bandera + un listener en fase de captura (mas abajo),
+  // sin tocar el listener de cada pais.
+  let justDragged = false;
+  container.addEventListener(
+    'click',
+    (e) => {
+      if (justDragged) {
+        justDragged = false;
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    },
+    true
+  );
+
+  function containerFrac(clientX, clientY) {
+    const rect = container.getBoundingClientRect();
+    return {
+      x: Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1),
+      y: Math.min(Math.max((clientY - rect.top) / rect.height, 0), 1),
+    };
+  }
+
+  function pointerDistance() {
+    const pts = Array.from(activePointers.values());
+    return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  }
+
+  container.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      const frac = containerFrac(e.clientX, e.clientY);
+      const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+      setViajesMapZoomAt(viajesMapCurrentZoom() * factor, frac.x, frac.y, svg);
+    },
+    { passive: false }
+  );
+
+  container.addEventListener('pointerdown', (e) => {
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size === 1) {
+      dragStart = { x: e.clientX, y: e.clientY, viewX: viajesMapView.x, viewY: viajesMapView.y };
+      dragMoved = 0;
+    } else if (activePointers.size === 2) {
+      pinchStart = { dist: pointerDistance(), zoom: viajesMapCurrentZoom() };
+    }
+  });
+
+  // pointermove/up/cancel se escuchan en window (no en el contenedor) para
+  // seguir el arrastre aunque el puntero salga de los limites del mapa --
+  // sin usar setPointerCapture, que redirigiria los eventos y podria
+  // interferir con el "click" nativo ya puesto en cada pais.
+  window.addEventListener('pointermove', (e) => {
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointers.size === 2 && pinchStart) {
+      const dist = pointerDistance();
+      const pts = Array.from(activePointers.values());
+      const frac = containerFrac((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2);
+      setViajesMapZoomAt(pinchStart.zoom * (dist / pinchStart.dist), frac.x, frac.y, svg);
+      return;
+    }
+
+    if (activePointers.size === 1 && dragStart) {
+      const dxClient = e.clientX - dragStart.x;
+      const dyClient = e.clientY - dragStart.y;
+      dragMoved = Math.hypot(dxClient, dyClient);
+      if (dragMoved < 4) return;
+      const rect = container.getBoundingClientRect();
+      viajesMapView.x = dragStart.viewX - (dxClient / rect.width) * viajesMapView.w;
+      viajesMapView.y = dragStart.viewY - (dyClient / rect.height) * viajesMapView.h;
+      container.classList.add('viajes-map-dragging');
+      applyViajesMapView(svg);
+    }
+  });
+
+  function endPointer(e) {
+    activePointers.delete(e.pointerId);
+    pinchStart = null;
+    if (activePointers.size === 1) {
+      // Queda un dedo (se soltó uno de los dos del pellizco) -- seguir
+      // paneando desde donde esta AHORA, sin saltar de golpe.
+      const [remaining] = activePointers.values();
+      dragStart = { x: remaining.x, y: remaining.y, viewX: viajesMapView.x, viewY: viajesMapView.y };
+      dragMoved = 0;
+    } else if (activePointers.size === 0) {
+      if (dragMoved >= 4) justDragged = true;
+      dragStart = null;
+      container.classList.remove('viajes-map-dragging');
+    }
+  }
+  window.addEventListener('pointerup', endPointer);
+  window.addEventListener('pointercancel', endPointer);
+
+  document.getElementById('btn-viajes-map-zoom-in').addEventListener('click', () => {
+    setViajesMapZoomAt(viajesMapCurrentZoom() * 1.4, 0.5, 0.5, svg);
+  });
+  document.getElementById('btn-viajes-map-zoom-out').addEventListener('click', () => {
+    setViajesMapZoomAt(viajesMapCurrentZoom() / 1.4, 0.5, 0.5, svg);
+  });
+  document.getElementById('btn-viajes-map-zoom-reset').addEventListener('click', () => {
+    viajesMapView = Object.assign({}, viajesMapBaseViewBox);
+    applyViajesMapView(svg);
   });
 }
 
