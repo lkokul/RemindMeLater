@@ -262,7 +262,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'devices', 'mobile', 'shortcuts'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'viajes-settings', 'devices', 'mobile', 'shortcuts'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -279,6 +279,7 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();
     else if (tab === 'groups') refreshGroupsTab();
+    else if (tab === 'viajes-settings') refreshViajesSettingsTab();
     else if (tab === 'devices') refreshDevicesTab();
     else if (tab === 'mobile') refreshMobileTab();
     else if (tab === 'shortcuts') refreshShortcutsTab();
@@ -559,6 +560,7 @@ document.getElementById('btn-gym-settings').addEventListener('click', openSettin
 document.getElementById('btn-lecturas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-archivos-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-close-settings').addEventListener('click', () => {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
@@ -1376,6 +1378,18 @@ async function refreshGroupsTab() {
   await loadGroups();
   renderGroupsList();
 }
+
+// Ajuste GLOBAL (no por dispositivo, ver routes/viajesSettings.js) --
+// a diferencia del resto de esta pestaña "Este dispositivo", este
+// checkbox no lee/escribe localStorage, hace una llamada real al
+// servidor cada vez.
+async function refreshViajesSettingsTab() {
+  const { finanzasLinked } = await api('/api/viajes-settings');
+  document.getElementById('setting-viajes-finanzas-linked').checked = finanzasLinked;
+}
+document.getElementById('setting-viajes-finanzas-linked').addEventListener('change', async (e) => {
+  await api('/api/viajes-settings', { method: 'PUT', body: JSON.stringify({ finanzasLinked: e.target.checked }) });
+});
 
 // Cambia el color de "completada" SIN que cuente como que la persona lo ha
 // tocado a mano (carga inicial, reset del formulario, o cargar el valor

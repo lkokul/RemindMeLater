@@ -397,6 +397,67 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Extension "Viajes" (avion en #extensions-view): un viaje puede tocar
+  -- VARIOS paises (ej. un interrail), de ahi la tabla de union
+  -- viajes_trip_countries en vez de una columna "country" directa en
+  -- viajes_trips. country_code es el codigo ISO 3166-1 alfa-2 en
+  -- minusculas (mismo formato que los "id" del mapa SVG en
+  -- public/viajes-world-map.svg, con la excepcion "_somaliland", el unico
+  -- territorio sin codigo ISO propio que trae ese mapa). Sin CHECK contra
+  -- una lista cerrada de paises a proposito: el selector del cliente ya
+  -- limita a los paises reales del mapa, y ser permisivo aqui evita tener
+  -- que tocar el servidor si el mapa cambia de fuente el dia de mañana.
+  CREATE TABLE IF NOT EXISTS viajes_trips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#5b8cff',
+    start_date TEXT,
+    end_date TEXT,
+    description TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS viajes_trip_countries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trip_id INTEGER NOT NULL REFERENCES viajes_trips(id),
+    country_code TEXT NOT NULL,
+    UNIQUE(trip_id, country_code)
+  );
+
+  -- Una entrada de "bitacora" = un dia (o momento) concreto dentro de un
+  -- viaje. Contenido en texto plano simple (sin el editor de bloques/
+  -- formato de Notas -- eso es otra pieza aparte del proyecto), de sobra
+  -- para "que se ha hecho ese dia".
+  CREATE TABLE IF NOT EXISTS viajes_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trip_id INTEGER NOT NULL REFERENCES viajes_trips(id),
+    date TEXT NOT NULL,
+    content TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Fotos dentro de una entrada -- mismo patron que note_images (nombre
+  -- de archivo UUID en disco, ver routes/viajesEntries.js), guardadas en
+  -- DATA_DIR/viajes-photos/. "amount" es opcional: si se rellena, este
+  -- adjunto es un ticket/recibo (no una foto de recuerdo cualquiera), y
+  -- puede enlazarse a un movimiento real de Finanzas
+  -- (finanzas_transaction_id) SOLO si el ajuste global
+  -- app_settings.viajesFinanzasLinked esta activado. Borrar el adjunto
+  -- borra tambien el movimiento de Finanzas enlazado si lo tenia -- es
+  -- "ese ticket concreto", no una plantilla que genera cosas por su
+  -- cuenta (a diferencia de finanzas_recurring_expenses, que SI deja
+  -- huerfanas sus transacciones generadas al borrarse la plantilla).
+  CREATE TABLE IF NOT EXISTS viajes_entry_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id INTEGER NOT NULL REFERENCES viajes_entries(id),
+    filename TEXT NOT NULL,
+    amount REAL,
+    finanzas_transaction_id INTEGER REFERENCES finanzas_transactions(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Migracion sencilla: group_id y active_theme_id se anadieron despues de

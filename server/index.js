@@ -30,6 +30,9 @@ const finanzasAssetsRouter = require('./routes/finanzasAssets');
 const finanzasRecurringExpensesRouter = require('./routes/finanzasRecurringExpenses');
 const lecturasSagasRouter = require('./routes/lecturasSagas');
 const lecturasItemsRouter = require('./routes/lecturasItems');
+const viajesTripsRouter = require('./routes/viajesTrips');
+const viajesEntriesRouter = require('./routes/viajesEntries');
+const viajesSettingsRouter = require('./routes/viajesSettings');
 const archivosRouter = require('./routes/archivos');
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
@@ -109,6 +112,17 @@ app.use('/api/finanzas-recurring-expenses', requireDeviceOrTrusted, finanzasRecu
 // en sagas obligatorias.
 app.use('/api/lecturas-sagas', requireDeviceOrTrusted, lecturasSagasRouter);
 app.use('/api/lecturas-items', requireDeviceOrTrusted, lecturasItemsRouter);
+// Extension "Viajes" (ver #extensions-view en index.html): viajes por
+// pais(es) con bitacora + fotos, mapa interactivo, y tickets enlazables
+// a Finanzas si el ajuste global lo permite (ver routes/viajesSettings.js).
+// viajesEntriesRouter NO se monta con requireDeviceOrTrusted a nivel de
+// app.use (igual que archivosRouter/noteImagesRouter): sirve fotos por
+// GET /attachments/:filename sin token, porque un <img src> no puede
+// llevar uno -- cada ruta que sí necesita autenticacion la exige por su
+// cuenta dentro del propio archivo.
+app.use('/api/viajes-trips', requireDeviceOrTrusted, viajesTripsRouter);
+app.use('/api/viajes-entries', viajesEntriesRouter);
+app.use('/api/viajes-settings', requireDeviceOrTrusted, viajesSettingsRouter);
 // Extension "Archivos" (ver #extensions-view en index.html): mandar
 // archivos sueltos entre movil y ordenador. Cada ruta decide su propio
 // nivel de acceso por dentro (ver routes/archivos.js): /folder y /browse

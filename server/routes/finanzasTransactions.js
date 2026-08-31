@@ -146,6 +146,12 @@ router.put('/:id', (req, res) => {
 });
 
 router.delete('/:id', (req, res) => {
+  // Si este movimiento vino de un ticket de Viajes (ver
+  // routes/viajesEntries.js), borrarlo aqui directamente no debe dejar el
+  // adjunto apuntando a un id que ya no existe -- se desenlaza, la foto y
+  // el importe se quedan intactos, solo deja de estar "convertido" en un
+  // movimiento real.
+  db.prepare('UPDATE viajes_entry_attachments SET finanzas_transaction_id = NULL WHERE finanzas_transaction_id = ?').run(req.params.id);
   const info = db.prepare('DELETE FROM finanzas_transactions WHERE id = ?').run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
   res.status(204).end();

@@ -7,12 +7,26 @@
 const express = require('express');
 const db = require('../db');
 const { sanitizeColors, sanitizeInverseColors, serializeTheme } = require('./themes');
+// Viajes reutiliza las funciones YA existentes de sus propias rutas
+// REST (validacion, insercion, serializacion, borrado en cascada) en
+// vez de duplicarlas aqui como hacen las demas tablas -- ver el
+// comentario de applyViajesTripChange/applyViajesEntryChange mas
+// abajo para el porque.
+const { validateBody: validateViajesTripBody, setTripCountries: setViajesTripCountries, serializeTrip: serializeViajesTrip, deleteTripCascade: deleteViajesTripCascade } = require('./viajesTrips');
+const { serializeEntry: serializeViajesEntry, deleteEntryCascade: deleteViajesEntryCascade } = require('./viajesEntries');
 
 const router = express.Router();
 
 // Tablas que participan en la sincronizacion, y como localizar/guardar
 // cada una. "idColumn" es 'id' para todas menos special_days, cuya
 // clave es la propia fecha (no tiene una columna "id" separada).
+//
+// viajes_entry_attachments NO tiene entrada propia aqui: una foto no
+// se puede "crear" via push (exige subir el archivo real, y el movil
+// no guarda las fotos en su copia local) -- sus cambios viajan
+// EMBEBIDOS dentro del "upsert" de la entrada a la que pertenece
+// (igual que viajes_trip_countries viaja embebido dentro del viaje),
+// ver touchEntryForAttachmentChange() en viajesEntries.js.
 const TABLES = {
   events: { idColumn: 'id' },
   notes: { idColumn: 'id' },
@@ -20,6 +34,8 @@ const TABLES = {
   note_folders: { idColumn: 'id' },
   special_days: { idColumn: 'date' },
   themes: { idColumn: 'id' },
+  viajes_trips: { idColumn: 'id' },
+  viajes_entries: { idColumn: 'id' },
 };
 
 // Comprueba que un id apunta a una fila que existe de verdad en esa
@@ -407,6 +423,87 @@ function applyThemeChange(rowId, op, payload, originId) {
   return { status: 'applied', serverRowId: row.id, serverPayload: serialized };
 }
 
+// A diferencia de los aplicadores de arriba (que duplican su propia
+// validacion/insercion, historico de este archivo), Viajes reutiliza
+// las funciones YA existentes de viajesTrips.js/viajesEntries.js --
+// son mas complejas (paises embebidos, adjuntos embebidos, borrado en
+// cascada real) y ya estaban bien factorizadas alli, asi que duplicar
+// esa logica aqui solo arriesgaria que un dia se lleve un fix a un
+// sitio y no al otro.
+function applyViajesTripChange(rowId, op, payload, originId) {
+  if (op === 'delete') {
+    const existing = rowId ? db.prepare('SELECT id FROM viajes_trips WHERE id = ?').get(rowId) : null;
+    if (!existing) return { status: 'applied' };
+    deleteViajesTripCascade(rowId, originId);
+    return { status: 'applied' };
+  }
+
+  const existing = rowId ? db.prepare('SELECT * FROM viajes_trips WHERE id = ?').get(rowId) : null;
+  if (rowId && !existing) return { status: 'applied' };
+
+  const result = validateViajesTripBody(payload || {}, existing);
+  if (result.error) return { status: 'rejected', message: result.error };
+
+  if (!rowId) {
+    const info = db
+      .prepare('INSERT INTO viajes_trips (name, color, start_date, end_date, description) VALUES (?, ?, ?, ?, ?)')
+      .run(result.name, result.color, result.startDate, result.endDate, result.description);
+    setViajesTripCountries(info.lastInsertRowid, result.countries);
+    const row = db.prepare('SELECT * FROM viajes_trips WHERE id = ?').get(info.lastInsertRowid);
+    const serialized = serializeViajesTrip(row);
+    db.recordSyncChange('viajes_trips', row.id, 'upsert', serialized, originId);
+    return { status: 'applied', serverRowId: row.id, serverPayload: serialized };
+  }
+
+  db.prepare(
+    "UPDATE viajes_trips SET name = ?, color = ?, start_date = ?, end_date = ?, description = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(result.name, result.color, result.startDate, result.endDate, result.description, rowId);
+  if (result.countries) setViajesTripCountries(rowId, result.countries);
+  const row = db.prepare('SELECT * FROM viajes_trips WHERE id = ?').get(rowId);
+  const serialized = serializeViajesTrip(row);
+  db.recordSyncChange('viajes_trips', row.id, 'upsert', serialized, originId);
+  return { status: 'applied', serverRowId: row.id, serverPayload: serialized };
+}
+
+function applyViajesEntryChange(rowId, op, payload, originId) {
+  if (op === 'delete') {
+    const existing = rowId ? db.prepare('SELECT id FROM viajes_entries WHERE id = ?').get(rowId) : null;
+    if (!existing) return { status: 'applied' };
+    deleteViajesEntryCascade(rowId, originId);
+    return { status: 'applied' };
+  }
+
+  const { tripId, date, content } = payload || {};
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return { status: 'rejected', message: 'La fecha tiene que tener el formato YYYY-MM-DD.' };
+  }
+
+  if (!rowId) {
+    if (!tripId || !db.prepare('SELECT 1 FROM viajes_trips WHERE id = ?').get(tripId)) {
+      return { status: 'rejected', message: 'El viaje indicado no existe.' };
+    }
+    const info = db
+      .prepare('INSERT INTO viajes_entries (trip_id, date, content) VALUES (?, ?, ?)')
+      .run(tripId, date, content ? String(content) : null);
+    const row = db.prepare('SELECT * FROM viajes_entries WHERE id = ?').get(info.lastInsertRowid);
+    const serialized = serializeViajesEntry(row);
+    db.recordSyncChange('viajes_entries', row.id, 'upsert', serialized, originId);
+    return { status: 'applied', serverRowId: row.id, serverPayload: serialized };
+  }
+
+  const existing = db.prepare('SELECT * FROM viajes_entries WHERE id = ?').get(rowId);
+  if (!existing) return { status: 'applied' };
+  db.prepare("UPDATE viajes_entries SET date = ?, content = ?, updated_at = datetime('now') WHERE id = ?").run(
+    date,
+    content ? String(content) : null,
+    rowId
+  );
+  const row = db.prepare('SELECT * FROM viajes_entries WHERE id = ?').get(rowId);
+  const serialized = serializeViajesEntry(row);
+  db.recordSyncChange('viajes_entries', row.id, 'upsert', serialized, originId);
+  return { status: 'applied', serverRowId: row.id, serverPayload: serialized };
+}
+
 const APPLIERS = {
   events: applyEventChange,
   notes: applyNoteChange,
@@ -414,6 +511,8 @@ const APPLIERS = {
   note_folders: applyNoteFolderChange,
   special_days: applySpecialDayChange,
   themes: applyThemeChange,
+  viajes_trips: applyViajesTripChange,
+  viajes_entries: applyViajesEntryChange,
 };
 
 // Los timestamps de SQLite (datetime('now')) vienen como
@@ -537,7 +636,7 @@ router.post('/push', (req, res) => {
         const idCol = TABLES[table].idColumn;
         const currentRow = db.prepare(`SELECT * FROM ${table} WHERE ${idCol} = ?`).get(table === 'special_days' ? rowId : Number(rowId));
         if (currentRow) {
-          const serializeFn = { events: serializeEvent, notes: serializeNote, groups: serializeGroup, note_folders: serializeNoteFolder, special_days: (r) => ({ date: r.date, type: r.type }), themes: serializeTheme }[table];
+          const serializeFn = { events: serializeEvent, notes: serializeNote, groups: serializeGroup, note_folders: serializeNoteFolder, special_days: (r) => ({ date: r.date, type: r.type }), themes: serializeTheme, viajes_trips: serializeViajesTrip, viajes_entries: serializeViajesEntry }[table];
           return { clientOpId, status: 'superseded', serverPayload: serializeFn(currentRow) };
         }
       }

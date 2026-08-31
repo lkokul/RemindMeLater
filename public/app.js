@@ -442,8 +442,8 @@ function isTrustedDevice() {
 //
 // Fase "movil": si el fetch falla por RED de verdad (no hay quien
 // responda -- no confundir con un error normal del servidor, ESO sigue
-// lanzando el mismo error que siempre), y la ruta es una de las 5
-// tablas que se sincronizan (ver matchSyncRoute mas abajo), se sigue
+// lanzando el mismo error que siempre), y la ruta es una de las tablas
+// que se sincronizan (ver SYNC_TABLE_ROUTES/matchSyncRoute mas abajo), se sigue
 // funcionando con la copia local en IndexedDB (public/db-local.js) en
 // vez de romper la pantalla. Las demas rutas (temas, perfil,
 // dispositivos...) no tienen copia local todavia -- si fallan sin
@@ -515,6 +515,17 @@ const SYNC_TABLE_ROUTES = [
   // encajan en ninguno de los dos patrones de abajo a proposito, asi que
   // se quedan fuera de la copia local (eso sigue siendo por dispositivo).
   { table: 'themes', store: 'themes', collectionRe: /^\/api\/themes$/, itemRe: /^\/api\/themes\/(\d+)$/ },
+  // /api/viajes-trips/by-country/:code (usada por el mapa) no encaja en
+  // ninguno de los dos patrones a proposito, se queda fuera (siempre en
+  // vivo, no tiene sentido cachearla aparte de la lista general).
+  { table: 'viajes_trips', store: 'viajesTrips', collectionRe: /^\/api\/viajes-trips$/, itemRe: /^\/api\/viajes-trips\/(\d+)$/ },
+  // Los adjuntos (fotos/tickets) NO tienen ruta propia aqui -- viajan
+  // embebidos dentro de cada entrada (ver serializeEntry en el
+  // servidor), asi que /api/viajes-entries/:id/attachments (subir una
+  // foto) y /api/viajes-entries/attachments/... (servir/borrar/vincular
+  // una foto) quedan fuera a proposito: exigen conexion siempre, igual
+  // que subir una imagen a una nota.
+  { table: 'viajes_entries', store: 'viajesEntries', collectionRe: /^\/api\/viajes-entries$/, itemRe: /^\/api\/viajes-entries\/(\d+)$/ },
 ];
 
 function matchSyncRoute(pathname) {
@@ -573,6 +584,14 @@ async function offlineRead(route, url) {
     rows.sort((a, b) => (a.position || 0) - (b.position || 0));
   } else if (route.store === 'themes') {
     rows.sort((a, b) => (a.id || 0) - (b.id || 0));
+  } else if (route.store === 'viajesTrips') {
+    rows.sort((a, b) => (b.startDate || b.createdAt || '').localeCompare(a.startDate || a.createdAt || '') || (b.id || 0) - (a.id || 0));
+  } else if (route.store === 'viajesEntries') {
+    // GET /api/viajes-entries siempre exige ?tripId= (ver la ruta REST) --
+    // aqui se aplica el mismo filtro sobre la copia local.
+    const tripId = url.searchParams.get('tripId');
+    if (tripId) rows = rows.filter((r) => String(r.tripId) === String(tripId));
+    rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id || 0) - (a.id || 0));
   }
   return rows;
 }
@@ -662,6 +681,41 @@ async function buildOptimisticRecord(route, id, fields) {
       updatedAt: now,
     };
   }
+  if (route.store === 'viajesTrips') {
+    // Al EDITAR (PUT) sin conexion, "fields" es la fila ya existente en
+    // la copia local fusionada con lo nuevo (ver offlineWrite) -- asi
+    // que entryCount ya viene relleno con el valor real; al CREAR
+    // (POST) no hay fila previa, empieza en 0.
+    return {
+      id,
+      name: fields.name || '',
+      color: fields.color || '#5b8cff',
+      countries: Array.isArray(fields.countries) ? fields.countries : [],
+      startDate: fields.startDate ?? null,
+      endDate: fields.endDate ?? null,
+      description: fields.description ?? null,
+      entryCount: fields.entryCount ?? 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+  if (route.store === 'viajesEntries') {
+    // Subir una foto exige conexion siempre (ver el comentario de
+    // SYNC_TABLE_ROUTES mas arriba), asi que "attachments" nunca se
+    // rellena aqui de cero -- pero al EDITAR (PUT) el texto de una
+    // entrada sin conexion, "fields" ya trae las fotos que tuviera de
+    // antes (fusionadas desde la copia local, ver offlineWrite), y hay
+    // que conservarlas en vez de vaciarlas.
+    return {
+      id,
+      tripId: fields.tripId ?? null,
+      date: fields.date || now.slice(0, 10),
+      content: fields.content ?? null,
+      attachments: Array.isArray(fields.attachments) ? fields.attachments : [],
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
   // specialDays
   return { date: id, type: fields.type };
 }
@@ -729,7 +783,16 @@ function buildAuthHeaders() {
   return headers;
 }
 
-const SYNC_STORE_BY_TABLE = { events: 'events', notes: 'notes', groups: 'groups', note_folders: 'noteFolders', special_days: 'specialDays', themes: 'themes' };
+const SYNC_STORE_BY_TABLE = {
+  events: 'events',
+  notes: 'notes',
+  groups: 'groups',
+  note_folders: 'noteFolders',
+  special_days: 'specialDays',
+  themes: 'themes',
+  viajes_trips: 'viajesTrips',
+  viajes_entries: 'viajesEntries',
+};
 
 async function applyRemoteChange(change) {
   const store = SYNC_STORE_BY_TABLE[change.tableName];
@@ -799,6 +862,7 @@ async function pushOutbox() {
       if ('groupId' in payload) payload.groupId = remapId(payload.groupId);
       if ('folderId' in payload) payload.folderId = remapId(payload.folderId);
       if ('parentId' in payload) payload.parentId = remapId(payload.parentId);
+      if ('tripId' in payload) payload.tripId = remapId(payload.tripId);
     }
     const change = {
       clientOpId: entry.localOpId,
@@ -7163,6 +7227,615 @@ function closeArchivosView() {
 }
 document.getElementById('btn-open-archivos').addEventListener('click', openArchivosView);
 document.getElementById('btn-close-archivos').addEventListener('click', closeArchivosView);
+
+// ---------------------------------------------------------------------
+// Extension "Viajes": mapa interactivo por paises (public/viajes-world-map.svg,
+// CC BY-SA 3.0 -- ver el <desc> del propio SVG -- con id="xx" en formato
+// ISO 3166-1 alfa-2; nombres en español en viajesCountries.js, cargado
+// ANTES que este archivo) + bitacora de cada viaje, que puede tocar
+// VARIOS paises (ej. un interrail) -- por eso "countries" es siempre un
+// array, nunca un pais suelto.
+// ---------------------------------------------------------------------
+let viajesTrips = [];
+let viajesCurrentTrip = null; // viaje abierto en el detalle/bitacora ahora mismo
+let viajesCurrentEntries = [];
+let viajesMapLoaded = false;
+let viajesFinanzasLinkedCache = false; // se refresca cada vez que se abre la vista
+let viajesLazyFieldsReady = false;
+let viajesTripColorField = null;
+let viajesPendingAttachmentEntryId = null;
+let viajesPendingAttachmentFile = null;
+let viajesLinkFinanzasAttachmentId = null;
+
+// createColorField vive en settings.js, que carga DESPUES de app.js --
+// igual que ya pasa con Finanzas/Gimnasio (ver setupFinanzasIconColorFields),
+// este campo se crea de forma perezosa la primera vez que se abre la
+// vista, no aqui arriba a nivel de modulo.
+function setupViajesLazyFields() {
+  if (viajesLazyFieldsReady) return;
+  viajesLazyFieldsReady = true;
+  viajesTripColorField = createColorField({ initialValue: '#5b8cff' });
+  document.getElementById('viajes-trip-color-field').appendChild(viajesTripColorField.element);
+}
+
+// Selector de VARIOS paises a la vez: buscador + chips removibles,
+// reutilizando el mismo popover (positionFixedPopover/closeAllPopovers,
+// las dos en settings.js) que ya usa createSelectField -- se llaman solo
+// dentro de manejadores de eventos (clic, foco), nunca al cargar la
+// pagina, asi que el orden de carga app.js->settings.js no es problema
+// (mismo criterio ya documentado para createColorField/createIconField
+// mas arriba). A diferencia de createSelectField, esta funcion SI se
+// puede llamar a nivel de modulo porque no toca settings.js hasta que
+// alguien de verdad hace clic.
+function createCountryPickerField({ initialValues = [] } = {}) {
+  let selected = [...initialValues];
+  const root = document.createElement('div');
+  root.className = 'country-picker-field';
+
+  const chipsRow = document.createElement('div');
+  chipsRow.className = 'country-picker-chips';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'country-picker-input';
+  input.placeholder = 'Buscar país...';
+
+  const popover = document.createElement('div');
+  popover.className = 'select-popover hidden';
+  document.body.appendChild(popover);
+
+  function renderChips() {
+    chipsRow.innerHTML = '';
+    selected.forEach((code) => {
+      const chip = document.createElement('span');
+      chip.className = 'country-picker-chip';
+      chip.textContent = VIAJES_COUNTRY_NAMES[code] || code;
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.setAttribute('aria-label', 'Quitar');
+      removeBtn.textContent = '✕';
+      removeBtn.addEventListener('click', () => {
+        selected = selected.filter((c) => c !== code);
+        renderChips();
+      });
+      chip.appendChild(removeBtn);
+      chipsRow.appendChild(chip);
+    });
+  }
+
+  function renderOptions(filterText) {
+    popover.innerHTML = '';
+    const filter = (filterText || '').trim().toLowerCase();
+    const entries = Object.entries(VIAJES_COUNTRY_NAMES)
+      .filter(([code, name]) => !selected.includes(code) && (!filter || name.toLowerCase().includes(filter)))
+      .sort((a, b) => a[1].localeCompare(b[1], 'es'));
+    if (entries.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'select-option-empty';
+      empty.textContent = 'Sin resultados';
+      popover.appendChild(empty);
+      return;
+    }
+    entries.slice(0, 40).forEach(([code, name]) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'select-option';
+      item.textContent = name;
+      item.addEventListener('click', () => {
+        selected.push(code);
+        input.value = '';
+        renderChips();
+        renderOptions('');
+        popover.classList.add('hidden');
+        input.focus();
+      });
+      popover.appendChild(item);
+    });
+  }
+
+  input.addEventListener('focus', () => {
+    closeAllPopovers(popover);
+    renderOptions(input.value);
+    popover.classList.remove('hidden');
+    positionFixedPopover(input, popover, { width: Math.max(220, input.getBoundingClientRect().width) });
+  });
+  input.addEventListener('input', () => {
+    renderOptions(input.value);
+    popover.classList.remove('hidden');
+  });
+
+  root.append(chipsRow, input);
+  renderChips();
+
+  return {
+    element: root,
+    getValue: () => selected,
+    setValue: (codes) => {
+      selected = [...(codes || [])];
+      renderChips();
+    },
+  };
+}
+
+const viajesTripCountriesField = createCountryPickerField({ initialValues: [] });
+document.getElementById('viajes-trip-countries-field').appendChild(viajesTripCountriesField.element);
+
+const viajesTripStartField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('viajes-trip-start-field').appendChild(viajesTripStartField.element);
+const viajesTripEndField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('viajes-trip-end-field').appendChild(viajesTripEndField.element);
+const viajesEntryDateField = createDateField({ initialValue: new Date() });
+document.getElementById('viajes-entry-date-field').appendChild(viajesEntryDateField.element);
+
+const viajesLinkFinanzasAccountField = createSelectField({ options: [], initialValue: '' });
+document.getElementById('viajes-link-finanzas-account-field').appendChild(viajesLinkFinanzasAccountField.element);
+const viajesLinkFinanzasCategoryField = createSelectField({ options: [{ value: '', label: 'Sin categoría' }], initialValue: '' });
+document.getElementById('viajes-link-finanzas-category-field').appendChild(viajesLinkFinanzasCategoryField.element);
+
+// Input de archivo compartido por todas las entradas (no hay uno fijo en
+// el HTML porque las entradas se pintan dinamicamente) -- se crea una
+// sola vez, y viajesPendingAttachmentEntryId dice a que entrada
+// pertenece la proxima foto que se elija.
+const viajesSharedFileInput = document.createElement('input');
+viajesSharedFileInput.type = 'file';
+viajesSharedFileInput.accept = 'image/*';
+viajesSharedFileInput.hidden = true;
+document.body.appendChild(viajesSharedFileInput);
+viajesSharedFileInput.addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  openViajesAttachmentModal(file);
+});
+
+function viajesCountryLabel(code) {
+  return VIAJES_COUNTRY_NAMES[code] || code;
+}
+function viajesTripCountriesLabel(trip) {
+  return trip.countries.map(viajesCountryLabel).join(', ');
+}
+function viajesTripDatesLabel(trip) {
+  if (!trip.startDate) return '';
+  return trip.endDate && trip.endDate !== trip.startDate ? `${trip.startDate} – ${trip.endDate}` : trip.startDate;
+}
+
+async function loadViajesTrips() {
+  viajesTrips = await api('/api/viajes-trips');
+}
+
+function renderViajesTripCards(container, trips, onClick) {
+  container.innerHTML = '';
+  trips.forEach((trip) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'viajes-trip-card';
+    card.style.setProperty('--viajes-trip-color', trip.color);
+    const dates = viajesTripDatesLabel(trip);
+    card.innerHTML = `
+      <span class="viajes-trip-card-name">${escapeHtml(trip.name)}</span>
+      <span class="viajes-trip-card-countries">${escapeHtml(viajesTripCountriesLabel(trip))}</span>
+      ${dates ? `<span class="hint">${escapeHtml(dates)}</span>` : ''}
+      <span class="hint">${trip.entryCount} entrada${trip.entryCount === 1 ? '' : 's'}</span>
+    `;
+    card.addEventListener('click', () => onClick(trip));
+    container.appendChild(card);
+  });
+}
+
+function renderViajesTripsList() {
+  const list = document.getElementById('viajes-trips-list');
+  document.getElementById('viajes-trips-empty').classList.toggle('hidden', viajesTrips.length > 0);
+  renderViajesTripCards(list, viajesTrips, openViajesTripDetail);
+}
+
+// --- Modal crear/editar viaje -------------------------------------------
+function openViajesTripModal(trip, prefillCountry) {
+  setupViajesLazyFields();
+  document.getElementById('viajes-trip-modal-title').textContent = trip ? 'Editar viaje' : 'Nuevo viaje';
+  document.getElementById('viajes-trip-id').value = trip ? trip.id : '';
+  document.getElementById('viajes-trip-name').value = trip ? trip.name : '';
+  document.getElementById('viajes-trip-description').value = (trip && trip.description) || '';
+  viajesTripCountriesField.setValue(trip ? trip.countries : prefillCountry ? [prefillCountry] : []);
+  viajesTripStartField.setValue(trip && trip.startDate ? new Date(`${trip.startDate}T00:00:00`) : null);
+  viajesTripEndField.setValue(trip && trip.endDate ? new Date(`${trip.endDate}T00:00:00`) : null);
+  viajesTripColorField.setValue(trip ? trip.color : '#5b8cff');
+  document.getElementById('btn-delete-viajes-trip-modal').classList.toggle('hidden', !trip);
+  document.getElementById('viajes-trip-modal').classList.remove('hidden');
+}
+function closeViajesTripModal() {
+  document.getElementById('viajes-trip-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-viaje').addEventListener('click', () => openViajesTripModal(null));
+document.getElementById('btn-close-viajes-trip').addEventListener('click', closeViajesTripModal);
+document.getElementById('btn-cancel-viajes-trip').addEventListener('click', closeViajesTripModal);
+
+document.getElementById('viajes-trip-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('viajes-trip-id').value;
+  const payload = {
+    name: document.getElementById('viajes-trip-name').value.trim(),
+    countries: viajesTripCountriesField.getValue(),
+    startDate: viajesTripStartField.getValue() ? toDateKey(viajesTripStartField.getValue()) : null,
+    endDate: viajesTripEndField.getValue() ? toDateKey(viajesTripEndField.getValue()) : null,
+    color: viajesTripColorField.getValue(),
+    description: document.getElementById('viajes-trip-description').value.trim() || null,
+  };
+  try {
+    const saved = id
+      ? await api(`/api/viajes-trips/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+      : await api('/api/viajes-trips', { method: 'POST', body: JSON.stringify(payload) });
+    closeViajesTripModal();
+    await loadViajesTrips();
+    renderViajesTripsList();
+    refreshViajesMapHighlights();
+    if (viajesCurrentTrip && String(viajesCurrentTrip.id) === String(saved.id)) {
+      viajesCurrentTrip = saved;
+      renderViajesTripDetailHeader();
+    }
+  } catch (err) {
+    alert('No se pudo guardar el viaje: ' + err.message);
+  }
+});
+
+document.getElementById('btn-delete-viajes-trip-modal').addEventListener('click', async () => {
+  const id = document.getElementById('viajes-trip-id').value;
+  if (!id || !confirm('¿Eliminar este viaje entero, con toda su bitácora y fotos?')) return;
+  await api(`/api/viajes-trips/${id}`, { method: 'DELETE' });
+  closeViajesTripModal();
+  await loadViajesTrips();
+  renderViajesTripsList();
+  refreshViajesMapHighlights();
+  backToViajesTrips();
+});
+
+document.getElementById('btn-edit-viajes-trip').addEventListener('click', () => {
+  if (viajesCurrentTrip) openViajesTripModal(viajesCurrentTrip);
+});
+document.getElementById('btn-delete-viajes-trip').addEventListener('click', async () => {
+  if (!viajesCurrentTrip || !confirm('¿Eliminar este viaje entero, con toda su bitácora y fotos?')) return;
+  await api(`/api/viajes-trips/${viajesCurrentTrip.id}`, { method: 'DELETE' });
+  await loadViajesTrips();
+  renderViajesTripsList();
+  refreshViajesMapHighlights();
+  backToViajesTrips();
+});
+
+// --- Detalle de viaje (bitacora) -----------------------------------------
+function renderViajesTripDetailHeader() {
+  const trip = viajesCurrentTrip;
+  document.getElementById('viajes-trip-detail-name').textContent = trip.name;
+  document.getElementById('viajes-trip-detail-countries').textContent = viajesTripCountriesLabel(trip);
+  document.getElementById('viajes-trip-detail-dates').textContent = viajesTripDatesLabel(trip);
+  document.getElementById('viajes-trip-detail-dates').classList.toggle('hidden', !viajesTripDatesLabel(trip));
+  document.getElementById('viajes-trip-detail-description').textContent = trip.description || '';
+  document.getElementById('viajes-trip-detail-description').classList.toggle('hidden', !trip.description);
+}
+
+async function openViajesTripDetail(trip) {
+  viajesCurrentTrip = trip;
+  document.getElementById('viajes-trips-list-panel').classList.add('hidden');
+  document.getElementById('viajes-trip-detail-panel').classList.remove('hidden');
+  renderViajesTripDetailHeader();
+  await refreshViajesEntries();
+}
+function backToViajesTrips() {
+  viajesCurrentTrip = null;
+  document.getElementById('viajes-trip-detail-panel').classList.add('hidden');
+  document.getElementById('viajes-trips-list-panel').classList.remove('hidden');
+}
+document.getElementById('btn-back-viajes-trips').addEventListener('click', backToViajesTrips);
+
+async function refreshViajesEntries() {
+  viajesCurrentEntries = await api(`/api/viajes-entries?tripId=${viajesCurrentTrip.id}`);
+  try {
+    const settings = await api('/api/viajes-settings');
+    viajesFinanzasLinkedCache = settings.finanzasLinked;
+  } catch (err) {
+    // viajes-settings es un ajuste global sin copia local propia (solo
+    // decide si se muestra el boton "Vincular a Finanzas") -- sin
+    // conexion, se mantiene el ultimo valor conocido en vez de romper
+    // toda la vista de entradas (que si tiene copia local y debe
+    // seguir funcionando).
+  }
+  renderViajesEntriesList();
+}
+
+function renderViajesAttachment(att) {
+  const wrap = document.createElement('div');
+  wrap.className = 'viajes-attachment';
+  const img = document.createElement('img');
+  img.src = att.url;
+  img.alt = '';
+  img.className = 'viajes-attachment-photo';
+  wrap.appendChild(img);
+
+  const actions = document.createElement('div');
+  actions.className = 'viajes-attachment-actions';
+
+  if (att.amount !== null) {
+    const amountBadge = document.createElement('span');
+    amountBadge.className = 'viajes-attachment-amount';
+    amountBadge.textContent = `${att.amount.toFixed(2)} €`;
+    actions.appendChild(amountBadge);
+
+    if (att.finanzasTransactionId) {
+      const linkedBadge = document.createElement('span');
+      linkedBadge.className = 'viajes-attachment-linked';
+      linkedBadge.textContent = '✓ En Finanzas';
+      actions.appendChild(linkedBadge);
+      const unlinkBtn = document.createElement('button');
+      unlinkBtn.type = 'button';
+      unlinkBtn.className = 'secondary-btn';
+      unlinkBtn.textContent = 'Desvincular';
+      unlinkBtn.addEventListener('click', async () => {
+        await api(`/api/viajes-entries/attachments/${att.id}/link-finanzas`, { method: 'DELETE' });
+        await refreshViajesEntries();
+      });
+      actions.appendChild(unlinkBtn);
+    } else if (viajesFinanzasLinkedCache) {
+      const linkBtn = document.createElement('button');
+      linkBtn.type = 'button';
+      linkBtn.className = 'secondary-btn';
+      linkBtn.textContent = 'Vincular a Finanzas';
+      linkBtn.addEventListener('click', () => openViajesLinkFinanzasModal(att));
+      actions.appendChild(linkBtn);
+    }
+  }
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'danger-btn';
+  deleteBtn.textContent = 'Borrar';
+  deleteBtn.addEventListener('click', async () => {
+    if (!confirm('¿Borrar esta foto?' + (att.finanzasTransactionId ? ' También se borrará el movimiento de Finanzas enlazado.' : ''))) return;
+    await api(`/api/viajes-entries/attachments/${att.id}`, { method: 'DELETE' });
+    await refreshViajesEntries();
+  });
+  actions.appendChild(deleteBtn);
+
+  wrap.appendChild(actions);
+  return wrap;
+}
+
+function renderViajesEntriesList() {
+  const list = document.getElementById('viajes-entries-list');
+  list.innerHTML = '';
+  document.getElementById('viajes-entries-empty').classList.toggle('hidden', viajesCurrentEntries.length > 0);
+  viajesCurrentEntries.forEach((entry) => {
+    const card = document.createElement('div');
+    card.className = 'viajes-entry-card';
+
+    const header = document.createElement('div');
+    header.className = 'viajes-entry-card-header';
+    const dateEl = document.createElement('strong');
+    dateEl.textContent = entry.date;
+    header.appendChild(dateEl);
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'icon-btn';
+    editBtn.setAttribute('aria-label', 'Editar entrada');
+    editBtn.textContent = '✎';
+    editBtn.addEventListener('click', () => openViajesEntryModal(entry));
+    header.appendChild(editBtn);
+    const spacer = document.createElement('div');
+    spacer.className = 'spacer';
+    header.appendChild(spacer);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'danger-btn';
+    deleteBtn.textContent = 'Eliminar';
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta entrada, con sus fotos?')) return;
+      await api(`/api/viajes-entries/${entry.id}`, { method: 'DELETE' });
+      await refreshViajesEntries();
+      await loadViajesTrips(); // el contador de entradas del viaje cambia
+    });
+    header.appendChild(deleteBtn);
+    card.appendChild(header);
+
+    if (entry.content) {
+      const content = document.createElement('p');
+      content.className = 'viajes-entry-card-content';
+      content.textContent = entry.content;
+      card.appendChild(content);
+    }
+
+    const attachmentsRow = document.createElement('div');
+    attachmentsRow.className = 'viajes-entry-attachments';
+    entry.attachments.forEach((att) => attachmentsRow.appendChild(renderViajesAttachment(att)));
+    card.appendChild(attachmentsRow);
+
+    const addPhotoBtn = document.createElement('button');
+    addPhotoBtn.type = 'button';
+    addPhotoBtn.className = 'secondary-btn';
+    addPhotoBtn.textContent = '+ Foto';
+    addPhotoBtn.addEventListener('click', () => {
+      viajesPendingAttachmentEntryId = entry.id;
+      viajesSharedFileInput.click();
+    });
+    card.appendChild(addPhotoBtn);
+
+    list.appendChild(card);
+  });
+}
+
+// --- Modal crear/editar entrada -------------------------------------------
+function openViajesEntryModal(entry) {
+  document.getElementById('viajes-entry-modal-title').textContent = entry ? 'Editar entrada' : 'Nueva entrada';
+  document.getElementById('viajes-entry-id').value = entry ? entry.id : '';
+  document.getElementById('viajes-entry-content').value = (entry && entry.content) || '';
+  viajesEntryDateField.setValue(entry ? new Date(`${entry.date}T00:00:00`) : new Date());
+  document.getElementById('viajes-entry-modal').classList.remove('hidden');
+}
+function closeViajesEntryModal() {
+  document.getElementById('viajes-entry-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-viajes-entry').addEventListener('click', () => openViajesEntryModal(null));
+document.getElementById('btn-close-viajes-entry').addEventListener('click', closeViajesEntryModal);
+document.getElementById('btn-cancel-viajes-entry').addEventListener('click', closeViajesEntryModal);
+
+document.getElementById('viajes-entry-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('viajes-entry-id').value;
+  const payload = {
+    tripId: viajesCurrentTrip.id,
+    date: toDateKey(viajesEntryDateField.getValue()),
+    content: document.getElementById('viajes-entry-content').value.trim() || null,
+  };
+  try {
+    if (id) await api(`/api/viajes-entries/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    else await api('/api/viajes-entries', { method: 'POST', body: JSON.stringify(payload) });
+    closeViajesEntryModal();
+    await refreshViajesEntries();
+    await loadViajesTrips();
+  } catch (err) {
+    alert('No se pudo guardar la entrada: ' + err.message);
+  }
+});
+
+// --- Subir foto/ticket ------------------------------------------------
+function openViajesAttachmentModal(file) {
+  viajesPendingAttachmentFile = file;
+  document.getElementById('viajes-attachment-filename').textContent = file.name;
+  document.getElementById('viajes-attachment-amount').value = '';
+  document.getElementById('viajes-attachment-modal').classList.remove('hidden');
+}
+function closeViajesAttachmentModal() {
+  viajesPendingAttachmentFile = null;
+  viajesPendingAttachmentEntryId = null;
+  document.getElementById('viajes-attachment-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-viajes-attachment').addEventListener('click', closeViajesAttachmentModal);
+document.getElementById('btn-cancel-viajes-attachment').addEventListener('click', closeViajesAttachmentModal);
+document.getElementById('btn-confirm-viajes-attachment').addEventListener('click', async () => {
+  const file = viajesPendingAttachmentFile;
+  const entryId = viajesPendingAttachmentEntryId;
+  const amountRaw = document.getElementById('viajes-attachment-amount').value;
+  const qs = amountRaw ? `?amount=${encodeURIComponent(amountRaw)}` : '';
+  const btn = document.getElementById('btn-confirm-viajes-attachment');
+  btn.disabled = true;
+  try {
+    await api(`/api/viajes-entries/${entryId}/attachments${qs}`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type },
+      body: file,
+    });
+    closeViajesAttachmentModal();
+    await refreshViajesEntries();
+  } catch (err) {
+    alert('No se pudo subir la foto: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// --- Vincular un ticket a un movimiento real de Finanzas -----------------
+async function openViajesLinkFinanzasModal(attachment) {
+  viajesLinkFinanzasAttachmentId = attachment.id;
+  document.getElementById('viajes-link-finanzas-amount').textContent = `Importe: ${attachment.amount.toFixed(2)} €`;
+  const [accounts, categories] = await Promise.all([api('/api/finanzas-accounts'), api('/api/finanzas-categories')]);
+  viajesLinkFinanzasAccountField.setOptions(accounts.map((a) => ({ value: a.id, label: a.name })));
+  viajesLinkFinanzasCategoryField.setOptions([{ value: '', label: 'Sin categoría' }, ...categories.map((c) => ({ value: c.id, label: c.name }))]);
+  document.getElementById('viajes-link-finanzas-description').value = '';
+  document.getElementById('viajes-link-finanzas-modal').classList.remove('hidden');
+}
+function closeViajesLinkFinanzasModal() {
+  viajesLinkFinanzasAttachmentId = null;
+  document.getElementById('viajes-link-finanzas-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-viajes-link-finanzas').addEventListener('click', closeViajesLinkFinanzasModal);
+document.getElementById('btn-cancel-viajes-link-finanzas').addEventListener('click', closeViajesLinkFinanzasModal);
+document.getElementById('btn-confirm-viajes-link-finanzas').addEventListener('click', async () => {
+  const accountId = viajesLinkFinanzasAccountField.getValue();
+  if (!accountId) { alert('Elige una cuenta.'); return; }
+  try {
+    await api(`/api/viajes-entries/attachments/${viajesLinkFinanzasAttachmentId}/link-finanzas`, {
+      method: 'POST',
+      body: JSON.stringify({
+        accountId,
+        categoryId: viajesLinkFinanzasCategoryField.getValue() || null,
+        description: document.getElementById('viajes-link-finanzas-description').value.trim() || null,
+      }),
+    });
+    closeViajesLinkFinanzasModal();
+    await refreshViajesEntries();
+  } catch (err) {
+    alert('No se pudo vincular: ' + err.message);
+  }
+});
+
+// --- Mapa interactivo ---------------------------------------------------
+async function loadViajesMap() {
+  if (viajesMapLoaded) return;
+  viajesMapLoaded = true;
+  const container = document.getElementById('viajes-map-container');
+  const res = await fetch('/viajes-world-map.svg');
+  container.innerHTML = await res.text();
+  const svg = container.querySelector('svg');
+  svg.querySelectorAll('path[id], g[id]').forEach((el) => {
+    if (el.id === 'world-map') return;
+    el.classList.add('viajes-map-country');
+    el.addEventListener('click', () => openViajesCountryModal(el.id));
+  });
+}
+
+function refreshViajesMapHighlights() {
+  const container = document.getElementById('viajes-map-container');
+  const svg = container.querySelector('svg');
+  if (!svg) return;
+  const visited = new Set(viajesTrips.flatMap((t) => t.countries));
+  svg.querySelectorAll('.viajes-map-country').forEach((el) => {
+    el.classList.toggle('viajes-map-country-visited', visited.has(el.id));
+  });
+}
+
+async function openViajesCountryModal(code) {
+  document.getElementById('viajes-country-modal-title').textContent = viajesCountryLabel(code);
+  const trips = await api(`/api/viajes-trips/by-country/${code}`);
+  const list = document.getElementById('viajes-country-trips-list');
+  document.getElementById('viajes-country-trips-empty').classList.toggle('hidden', trips.length > 0);
+  renderViajesTripCards(list, trips, (trip) => {
+    closeViajesCountryModal();
+    setViajesTab('viajes');
+    openViajesTripDetail(trip);
+  });
+  document.getElementById('btn-new-viaje-en-pais').onclick = () => {
+    closeViajesCountryModal();
+    openViajesTripModal(null, code);
+  };
+  document.getElementById('viajes-country-modal').classList.remove('hidden');
+}
+function closeViajesCountryModal() {
+  document.getElementById('viajes-country-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-viajes-country').addEventListener('click', closeViajesCountryModal);
+
+// --- Pestañas Mapa / Mis viajes ------------------------------------------
+function setViajesTab(tab) {
+  document.querySelectorAll('.viajes-tab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.viajesTab === tab));
+  document.querySelectorAll('.viajes-tab-panel').forEach((panel) => panel.classList.toggle('hidden', panel.dataset.viajesPanel !== tab));
+}
+document.querySelectorAll('.viajes-tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => setViajesTab(btn.dataset.viajesTab));
+});
+
+async function openViajesView() {
+  closeExtensionsView();
+  document.getElementById('viajes-view').classList.remove('hidden');
+  setViajesTab('mapa');
+  document.getElementById('viajes-trips-list-panel').classList.remove('hidden');
+  document.getElementById('viajes-trip-detail-panel').classList.add('hidden');
+  await loadViajesMap();
+  await loadViajesTrips();
+  renderViajesTripsList();
+  refreshViajesMapHighlights();
+}
+function closeViajesView() {
+  document.getElementById('viajes-view').classList.add('hidden');
+  document.getElementById('extensions-view').classList.remove('hidden');
+}
+document.getElementById('btn-open-viajes').addEventListener('click', openViajesView);
+document.getElementById('btn-close-viajes').addEventListener('click', closeViajesView);
 
 async function openLecturasSagaDetail(saga) {
   state.lecturasCurrentSagaId = saga.id;

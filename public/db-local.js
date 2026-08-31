@@ -15,8 +15,12 @@ const LOCAL_DB_NAME = 'remindmelater-local';
 // version sube, si no un movil que ya tuviera la base de datos creada
 // con la version anterior se quedaria sin el almacen nuevo para
 // siempre. (v2: se anadio "themes", para sincronizar la biblioteca de
-// temas -- ver la ronda que quito la contraseña de notas ocultas.)
-const LOCAL_DB_VERSION = 2;
+// temas -- ver la ronda que quito la contraseña de notas ocultas. v3:
+// se anadieron "viajesTrips"/"viajesEntries", extension Viajes -- los
+// adjuntos/fotos de las entradas NO tienen almacen propio, viajan
+// embebidos dentro de cada entrada, igual que ya hacen los paises
+// dentro de cada viaje.)
+const LOCAL_DB_VERSION = 3;
 const LOCAL_STORES = {
   events: 'id',
   notes: 'id',
@@ -24,6 +28,8 @@ const LOCAL_STORES = {
   noteFolders: 'id',
   specialDays: 'date',
   themes: 'id',
+  viajesTrips: 'id',
+  viajesEntries: 'id',
 };
 
 let localDbPromise = null;
