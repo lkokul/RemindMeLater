@@ -7240,12 +7240,10 @@ let viajesTrips = [];
 let viajesCurrentTrip = null; // viaje abierto en el detalle/bitacora ahora mismo
 let viajesCurrentEntries = [];
 let viajesMapLoaded = false;
-let viajesFinanzasLinkedCache = false; // se refresca cada vez que se abre la vista
 let viajesLazyFieldsReady = false;
 let viajesTripColorField = null;
 let viajesPendingAttachmentEntryId = null;
 let viajesPendingAttachmentFile = null;
-let viajesLinkFinanzasAttachmentId = null;
 
 // createColorField vive en settings.js, que carga DESPUES de app.js --
 // igual que ya pasa con Finanzas/Gimnasio (ver setupFinanzasIconColorFields),
@@ -7422,10 +7420,133 @@ function renderViajesTripCards(container, trips, onClick) {
   });
 }
 
+// --- Filtros de "Mis viajes" (año/mes/país) -----------------------------
+// Mismo patron "build once" que Lecturas (renderLecturasItemFilters) --
+// los campos con componente propio se crean UNA vez a nivel de modulo,
+// las llamadas siguientes solo actualizan .setOptions()/.setValue() para
+// no acumular popovers huerfanos.
+let viajesFilters = { year: '', month: '', country: '', multiCountryOk: true };
+
+const viajesFilterMonthField = createSelectField({
+  options: [{ value: '', label: 'Cualquier mes' }, ...FINANZAS_MONTH_OPTIONS],
+  initialValue: '',
+  onChange: (v) => {
+    viajesFilters.month = v;
+    renderViajesTripsList();
+  },
+});
+
+const viajesFilterCountryField = createSelectField({
+  options: [{ value: '', label: 'Todos los países' }],
+  initialValue: '',
+  onChange: (v) => {
+    viajesFilters.country = v;
+    renderViajesTripsList();
+  },
+});
+
+function renderViajesFilters() {
+  const container = document.getElementById('viajes-trips-filters');
+  if (!container.dataset.built) {
+    container.dataset.built = '1';
+
+    const yearInput = document.createElement('input');
+    yearInput.type = 'number';
+    yearInput.id = 'viajes-filter-year';
+    yearInput.placeholder = 'Año';
+    yearInput.addEventListener('input', () => {
+      viajesFilters.year = yearInput.value;
+      renderViajesTripsList();
+    });
+
+    const monthWrap = document.createElement('div');
+    monthWrap.className = 'viajes-filter-field';
+    monthWrap.appendChild(viajesFilterMonthField.element);
+
+    const countryWrap = document.createElement('div');
+    countryWrap.className = 'viajes-filter-field';
+    countryWrap.appendChild(viajesFilterCountryField.element);
+
+    // Mismo criterio que "Cuenta para el límite mensual"/"Gasto fijo" en
+    // Finanzas: un interruptor de un solo ajuste on/off, no una
+    // seleccion de varios de una lista -- por eso es .checkbox-row, no
+    // .styled-checkbox (esa es para listas/arboles de seleccion).
+    const multiLabel = document.createElement('label');
+    multiLabel.className = 'checkbox-row viajes-filter-multi-country';
+    const multiCheckbox = document.createElement('input');
+    multiCheckbox.type = 'checkbox';
+    multiCheckbox.id = 'viajes-filter-multi-country';
+    multiCheckbox.checked = true;
+    multiCheckbox.addEventListener('change', () => {
+      viajesFilters.multiCountryOk = multiCheckbox.checked;
+      renderViajesTripsList();
+    });
+    multiLabel.append(multiCheckbox, document.createTextNode(' Incluir viajes con más países'));
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.id = 'btn-clear-viajes-filters';
+    clearBtn.className = 'secondary-btn';
+    clearBtn.textContent = 'Quitar filtros';
+    clearBtn.addEventListener('click', () => {
+      viajesFilters = { year: '', month: '', country: '', multiCountryOk: true };
+      yearInput.value = '';
+      viajesFilterMonthField.setValue('');
+      viajesFilterCountryField.setValue('');
+      multiCheckbox.checked = true;
+      renderViajesTripsList();
+    });
+
+    container.append(yearInput, monthWrap, countryWrap, multiLabel, clearBtn);
+  }
+
+  // Los paises del desplegable son los que ya se usan en algun viaje --
+  // se recalcula cada vez porque cambia al crear/editar/borrar viajes.
+  const usedCountries = [...new Set(viajesTrips.flatMap((t) => t.countries))].sort((a, b) =>
+    viajesCountryLabel(a).localeCompare(viajesCountryLabel(b))
+  );
+  viajesFilterCountryField.setOptions([{ value: '', label: 'Todos los países' }, ...usedCountries.map((c) => ({ value: c, label: viajesCountryLabel(c) }))]);
+  document.getElementById('viajes-filter-year').value = viajesFilters.year;
+  viajesFilterMonthField.setValue(viajesFilters.month);
+  viajesFilterCountryField.setValue(viajesFilters.country);
+  document.getElementById('viajes-filter-multi-country').checked = viajesFilters.multiCountryOk;
+}
+
+// Año/mes comparan contra el startDate del viaje -- un viaje sin fecha
+// no aparece si se filtra por fecha (igual que ya no aparece "ordenado"
+// por fecha en ningun sitio de Viajes). Con un pais elegido: si
+// multiCountryOk esta marcado, cualquier viaje que TOQUE ese pais
+// cuenta (aunque tenga mas paises); desmarcado, solo cuentan los viajes
+// cuyo UNICO pais sea ese -- distincion pedida explicitamente por Koku
+// (ej. "España" solo vs "España y Francia" tambien).
+function viajesTripMatchesFilters(trip) {
+  if (viajesFilters.year) {
+    const y = trip.startDate ? trip.startDate.slice(0, 4) : null;
+    if (y !== viajesFilters.year) return false;
+  }
+  if (viajesFilters.month) {
+    const m = trip.startDate ? trip.startDate.slice(5, 7) : null;
+    if (m !== viajesFilters.month) return false;
+  }
+  if (viajesFilters.country) {
+    if (!trip.countries.includes(viajesFilters.country)) return false;
+    if (!viajesFilters.multiCountryOk && trip.countries.length > 1) return false;
+  }
+  return true;
+}
+
 function renderViajesTripsList() {
+  renderViajesFilters();
+  const filtered = viajesTrips.filter(viajesTripMatchesFilters);
   const list = document.getElementById('viajes-trips-list');
-  document.getElementById('viajes-trips-empty').classList.toggle('hidden', viajesTrips.length > 0);
-  renderViajesTripCards(list, viajesTrips, openViajesTripDetail);
+  const empty = document.getElementById('viajes-trips-empty');
+  const filtersActive = !!(viajesFilters.year || viajesFilters.month || viajesFilters.country);
+  empty.textContent =
+    filtersActive && viajesTrips.length > 0
+      ? 'Ningún viaje coincide con estos filtros.'
+      : 'Todavía no tienes ningún viaje. Crea uno arriba.';
+  empty.classList.toggle('hidden', filtered.length > 0);
+  renderViajesTripCards(list, filtered, openViajesTripDetail);
 }
 
 // --- Modal crear/editar viaje -------------------------------------------
@@ -7439,6 +7560,7 @@ function openViajesTripModal(trip, prefillCountry) {
   viajesTripStartField.setValue(trip && trip.startDate ? new Date(`${trip.startDate}T00:00:00`) : null);
   viajesTripEndField.setValue(trip && trip.endDate ? new Date(`${trip.endDate}T00:00:00`) : null);
   viajesTripColorField.setValue(trip ? trip.color : '#5b8cff');
+  document.getElementById('viajes-trip-finanzas-linked').checked = trip ? !!trip.finanzasLinked : false;
   document.getElementById('btn-delete-viajes-trip-modal').classList.toggle('hidden', !trip);
   document.getElementById('viajes-trip-modal').classList.remove('hidden');
 }
@@ -7459,6 +7581,7 @@ document.getElementById('viajes-trip-form').addEventListener('submit', async (e)
     endDate: viajesTripEndField.getValue() ? toDateKey(viajesTripEndField.getValue()) : null,
     color: viajesTripColorField.getValue(),
     description: document.getElementById('viajes-trip-description').value.trim() || null,
+    finanzasLinked: document.getElementById('viajes-trip-finanzas-linked').checked,
   };
   try {
     const saved = id
@@ -7471,6 +7594,22 @@ document.getElementById('viajes-trip-form').addEventListener('submit', async (e)
     if (viajesCurrentTrip && String(viajesCurrentTrip.id) === String(saved.id)) {
       viajesCurrentTrip = saved;
       renderViajesTripDetailHeader();
+    }
+    // Se acaba de ACTIVAR el enlace y el viaje ya tenia gastos/ingresos
+    // sin enlazar -- se pregunta si tambien esos, en vez de enlazarlos a
+    // ciegas (ver POST /:id/link-existing-movements en viajesTrips.js).
+    if (saved.hasUnlinkedMovements) {
+      const wantsBulkLink = confirm(
+        `Este viaje ya tenía ${saved.unlinkedCount} gasto${saved.unlinkedCount === 1 ? '' : 's'}/ingreso${saved.unlinkedCount === 1 ? '' : 's'} antes de activar el enlace. ¿También quieres enlazarlos con la cuenta por defecto (Configuración → Viajes)?`
+      );
+      if (wantsBulkLink) {
+        try {
+          await api(`/api/viajes-trips/${saved.id}/link-existing-movements`, { method: 'POST' });
+          if (viajesCurrentTrip && String(viajesCurrentTrip.id) === String(saved.id)) await refreshViajesEntries();
+        } catch (err) {
+          alert('No se pudieron enlazar los movimientos anteriores: ' + err.message);
+        }
+      }
     }
   } catch (err) {
     alert('No se pudo guardar el viaje: ' + err.message);
@@ -7525,21 +7664,16 @@ function backToViajesTrips() {
 }
 document.getElementById('btn-back-viajes-trips').addEventListener('click', backToViajesTrips);
 
+// El boton "Vincular a Finanzas" ya no depende de un ajuste global
+// aparte (ver viajesCurrentTrip.finanzasLinked, cargado con el propio
+// viaje) -- no hace falta ninguna peticion extra aqui.
 async function refreshViajesEntries() {
   viajesCurrentEntries = await api(`/api/viajes-entries?tripId=${viajesCurrentTrip.id}`);
-  try {
-    const settings = await api('/api/viajes-settings');
-    viajesFinanzasLinkedCache = settings.finanzasLinked;
-  } catch (err) {
-    // viajes-settings es un ajuste global sin copia local propia (solo
-    // decide si se muestra el boton "Vincular a Finanzas") -- sin
-    // conexion, se mantiene el ultimo valor conocido en vez de romper
-    // toda la vista de entradas (que si tiene copia local y debe
-    // seguir funcionando).
-  }
   renderViajesEntriesList();
 }
 
+// Una foto suelta -- SIN importe nunca (eso es un movimiento, ver
+// renderViajesMovement mas abajo). Solo se puede borrar.
 function renderViajesAttachment(att) {
   const wrap = document.createElement('div');
   wrap.className = 'viajes-attachment';
@@ -7551,44 +7685,88 @@ function renderViajesAttachment(att) {
 
   const actions = document.createElement('div');
   actions.className = 'viajes-attachment-actions';
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'danger-btn';
+  deleteBtn.textContent = 'Borrar';
+  deleteBtn.addEventListener('click', async () => {
+    if (!confirm('¿Borrar esta foto?')) return;
+    await api(`/api/viajes-entries/attachments/${att.id}`, { method: 'DELETE' });
+    await refreshViajesEntries();
+  });
+  actions.appendChild(deleteBtn);
+  wrap.appendChild(actions);
+  return wrap;
+}
 
-  if (att.amount !== null) {
-    const amountBadge = document.createElement('span');
-    amountBadge.className = 'viajes-attachment-amount';
-    amountBadge.textContent = `${att.amount.toFixed(2)} €`;
-    actions.appendChild(amountBadge);
-
-    if (att.finanzasTransactionId) {
-      const linkedBadge = document.createElement('span');
-      linkedBadge.className = 'viajes-attachment-linked';
-      linkedBadge.textContent = '✓ En Finanzas';
-      actions.appendChild(linkedBadge);
-      const unlinkBtn = document.createElement('button');
-      unlinkBtn.type = 'button';
-      unlinkBtn.className = 'secondary-btn';
-      unlinkBtn.textContent = 'Desvincular';
-      unlinkBtn.addEventListener('click', async () => {
-        await api(`/api/viajes-entries/attachments/${att.id}/link-finanzas`, { method: 'DELETE' });
-        await refreshViajesEntries();
-      });
-      actions.appendChild(unlinkBtn);
-    } else if (viajesFinanzasLinkedCache) {
-      const linkBtn = document.createElement('button');
-      linkBtn.type = 'button';
-      linkBtn.className = 'secondary-btn';
-      linkBtn.textContent = 'Vincular a Finanzas';
-      linkBtn.addEventListener('click', () => openViajesLinkFinanzasModal(att));
-      actions.appendChild(linkBtn);
-    }
+// Un movimiento (gasto o ingreso), con foto de ticket opcional --
+// "Vincular a Finanzas" esta SIEMPRE disponible si todavia no esta
+// enlazado (no exige que el viaje tenga finanzas_linked activado, sirve
+// para enlazar uno suelto sin activar el ajuste de todo el viaje).
+function renderViajesMovement(mv) {
+  const wrap = document.createElement('div');
+  wrap.className = 'viajes-attachment';
+  if (mv.attachmentUrl) {
+    const img = document.createElement('img');
+    img.src = mv.attachmentUrl;
+    img.alt = '';
+    img.className = 'viajes-attachment-photo';
+    wrap.appendChild(img);
   }
+
+  const actions = document.createElement('div');
+  actions.className = 'viajes-attachment-actions';
+
+  const amountBadge = document.createElement('span');
+  amountBadge.className = `viajes-movement-amount viajes-movement-amount-${mv.type}`;
+  amountBadge.textContent = `${mv.type === 'income' ? '+' : '−'}${mv.amount.toFixed(2)} €`;
+  actions.appendChild(amountBadge);
+
+  if (mv.description) {
+    const desc = document.createElement('span');
+    desc.className = 'hint';
+    desc.textContent = mv.description;
+    actions.appendChild(desc);
+  }
+
+  if (mv.finanzasTransactionId) {
+    const linkedBadge = document.createElement('span');
+    linkedBadge.className = 'viajes-attachment-linked';
+    linkedBadge.textContent = '✓ En Finanzas';
+    actions.appendChild(linkedBadge);
+    const unlinkBtn = document.createElement('button');
+    unlinkBtn.type = 'button';
+    unlinkBtn.className = 'secondary-btn';
+    unlinkBtn.textContent = 'Desvincular';
+    unlinkBtn.addEventListener('click', async () => {
+      await api(`/api/viajes-entries/movements/${mv.id}/link-finanzas`, { method: 'DELETE' });
+      await refreshViajesEntries();
+    });
+    actions.appendChild(unlinkBtn);
+  } else {
+    const linkBtn = document.createElement('button');
+    linkBtn.type = 'button';
+    linkBtn.className = 'secondary-btn';
+    linkBtn.textContent = 'Vincular a Finanzas';
+    linkBtn.addEventListener('click', () => openViajesLinkFinanzasModal(mv));
+    actions.appendChild(linkBtn);
+  }
+
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'icon-btn';
+  editBtn.setAttribute('aria-label', 'Editar movimiento');
+  editBtn.textContent = '✎';
+  editBtn.addEventListener('click', () => openViajesGastoModal(mv));
+  actions.appendChild(editBtn);
 
   const deleteBtn = document.createElement('button');
   deleteBtn.type = 'button';
   deleteBtn.className = 'danger-btn';
   deleteBtn.textContent = 'Borrar';
   deleteBtn.addEventListener('click', async () => {
-    if (!confirm('¿Borrar esta foto?' + (att.finanzasTransactionId ? ' También se borrará el movimiento de Finanzas enlazado.' : ''))) return;
-    await api(`/api/viajes-entries/attachments/${att.id}`, { method: 'DELETE' });
+    if (!confirm('¿Borrar este movimiento?' + (mv.finanzasTransactionId ? ' También se borrará el movimiento de Finanzas enlazado.' : ''))) return;
+    await api(`/api/viajes-entries/movements/${mv.id}`, { method: 'DELETE' });
     await refreshViajesEntries();
   });
   actions.appendChild(deleteBtn);
@@ -7643,8 +7821,11 @@ function renderViajesEntriesList() {
     const attachmentsRow = document.createElement('div');
     attachmentsRow.className = 'viajes-entry-attachments';
     entry.attachments.forEach((att) => attachmentsRow.appendChild(renderViajesAttachment(att)));
+    entry.movements.forEach((mv) => attachmentsRow.appendChild(renderViajesMovement(mv)));
     card.appendChild(attachmentsRow);
 
+    const addActionsRow = document.createElement('div');
+    addActionsRow.className = 'viajes-entry-add-actions';
     const addPhotoBtn = document.createElement('button');
     addPhotoBtn.type = 'button';
     addPhotoBtn.className = 'secondary-btn';
@@ -7653,7 +7834,15 @@ function renderViajesEntriesList() {
       viajesPendingAttachmentEntryId = entry.id;
       viajesSharedFileInput.click();
     });
-    card.appendChild(addPhotoBtn);
+    addActionsRow.appendChild(addPhotoBtn);
+
+    const addGastoBtn = document.createElement('button');
+    addGastoBtn.type = 'button';
+    addGastoBtn.className = 'secondary-btn';
+    addGastoBtn.textContent = '+ Gasto';
+    addGastoBtn.addEventListener('click', () => openViajesGastoModal(null, entry));
+    addActionsRow.appendChild(addGastoBtn);
+    card.appendChild(addActionsRow);
 
     list.appendChild(card);
   });
@@ -7693,11 +7882,10 @@ document.getElementById('viajes-entry-form').addEventListener('submit', async (e
   }
 });
 
-// --- Subir foto/ticket ------------------------------------------------
+// --- Subir foto (SIEMPRE sin importe -- eso es "+ Gasto") --------------
 function openViajesAttachmentModal(file) {
   viajesPendingAttachmentFile = file;
   document.getElementById('viajes-attachment-filename').textContent = file.name;
-  document.getElementById('viajes-attachment-amount').value = '';
   document.getElementById('viajes-attachment-modal').classList.remove('hidden');
 }
 function closeViajesAttachmentModal() {
@@ -7710,12 +7898,10 @@ document.getElementById('btn-cancel-viajes-attachment').addEventListener('click'
 document.getElementById('btn-confirm-viajes-attachment').addEventListener('click', async () => {
   const file = viajesPendingAttachmentFile;
   const entryId = viajesPendingAttachmentEntryId;
-  const amountRaw = document.getElementById('viajes-attachment-amount').value;
-  const qs = amountRaw ? `?amount=${encodeURIComponent(amountRaw)}` : '';
   const btn = document.getElementById('btn-confirm-viajes-attachment');
   btn.disabled = true;
   try {
-    await api(`/api/viajes-entries/${entryId}/attachments${qs}`, {
+    await api(`/api/viajes-entries/${entryId}/attachments`, {
       method: 'POST',
       headers: { 'Content-Type': file.type },
       body: file,
@@ -7729,18 +7915,162 @@ document.getElementById('btn-confirm-viajes-attachment').addEventListener('click
   }
 });
 
-// --- Vincular un ticket a un movimiento real de Finanzas -----------------
-async function openViajesLinkFinanzasModal(attachment) {
-  viajesLinkFinanzasAttachmentId = attachment.id;
-  document.getElementById('viajes-link-finanzas-amount').textContent = `Importe: ${attachment.amount.toFixed(2)} €`;
+// --- Crear/editar un movimiento (gasto o ingreso) -----------------------
+// Cuenta/Categoria (createSelectField, sin dependencia de settings.js al
+// crearse -- solo dentro de sus popovers, ver el mismo criterio ya usado
+// para viajesLinkFinanzasAccountField/CategoryField) creadas a nivel de
+// modulo; sus opciones se rellenan solo si el viaje tiene el enlace con
+// Finanzas activado (ver refreshViajesGastoModalFields).
+const viajesGastoTypeField = createSelectField({
+  options: [
+    { value: 'expense', label: 'Gasto' },
+    { value: 'income', label: 'Ingreso' },
+  ],
+  initialValue: 'expense',
+  onChange: () => refreshViajesGastoModalFields(),
+});
+document.getElementById('viajes-gasto-type-field').appendChild(viajesGastoTypeField.element);
+
+const viajesGastoAccountField = createSelectField({ options: [], initialValue: '' });
+document.getElementById('viajes-gasto-account-field').appendChild(viajesGastoAccountField.element);
+
+const viajesGastoCategoryField = createSelectField({ options: [{ value: '', label: 'Sin categoría' }], initialValue: '' });
+document.getElementById('viajes-gasto-category-field').appendChild(viajesGastoCategoryField.element);
+
+// Cuenta/Categoria/"Cuenta para el limite mensual" SOLO se ven si el
+// VIAJE tiene el enlace con Finanzas activado -- si no, es un simple
+// apunte local sin nada de Finanzas de por medio (mismo patron de
+// mostrar/ocultar por tipo que refreshFinanzasTransactionTypeFields).
+function refreshViajesGastoModalFields() {
+  const isExpense = viajesGastoTypeField.getValue() === 'expense';
+  const linked = !!(viajesCurrentTrip && viajesCurrentTrip.finanzasLinked);
+  document.getElementById('viajes-gasto-account-label').classList.toggle('hidden', !linked);
+  document.getElementById('viajes-gasto-category-label').classList.toggle('hidden', !linked || !isExpense);
+  document.getElementById('viajes-gasto-counts-row').classList.toggle('hidden', !linked || !isExpense);
+}
+
+let viajesGastoEditingId = null;
+let viajesGastoEntryId = null;
+let viajesGastoPendingPhotoFile = null;
+
+// La foto de ticket solo se puede elegir al CREAR (movement === null) --
+// editar un movimiento ya creado no permite cambiar/quitar su foto
+// (limitacion aceptada a proposito, evita complicar el modal por algo no
+// pedido). "entry" solo hace falta al crear, para saber a que entrada
+// pertenece -- al editar ya se saca de movement.entryId.
+async function openViajesGastoModal(movement, entry) {
+  viajesGastoEditingId = movement ? movement.id : null;
+  viajesGastoEntryId = movement ? movement.entryId : entry.id;
+  viajesGastoPendingPhotoFile = null;
+  document.getElementById('viajes-gasto-modal-title').textContent = movement ? 'Editar movimiento' : 'Nuevo gasto/ingreso';
+  document.getElementById('viajes-gasto-id').value = movement ? movement.id : '';
+  viajesGastoTypeField.setValue(movement ? movement.type : 'expense');
+  document.getElementById('viajes-gasto-amount').value = movement ? movement.amount : '';
+  document.getElementById('viajes-gasto-description').value = (movement && movement.description) || '';
+  document.getElementById('viajes-gasto-counts').checked = movement ? movement.countsTowardBudget : true;
+
+  const linked = !!(viajesCurrentTrip && viajesCurrentTrip.finanzasLinked);
+  if (linked) {
+    const [accounts, categories] = await Promise.all([api('/api/finanzas-accounts'), api('/api/finanzas-categories')]);
+    viajesGastoAccountField.setOptions(accounts.map((a) => ({ value: a.id, label: a.name })));
+    viajesGastoCategoryField.setOptions([{ value: '', label: 'Sin categoría' }, ...categories.map((c) => ({ value: c.id, label: c.name }))]);
+    let defaultAccountId = accounts[0] ? accounts[0].id : '';
+    if (!movement) {
+      // Cuenta por defecto para gastos de viaje (Configuración → Viajes),
+      // solo al CREAR -- editar respeta la cuenta que ya tenia.
+      const settings = await api('/api/viajes-settings');
+      if (settings.defaultAccountId && accounts.some((a) => a.id === settings.defaultAccountId)) {
+        defaultAccountId = settings.defaultAccountId;
+      }
+    }
+    viajesGastoAccountField.setValue(defaultAccountId);
+    viajesGastoCategoryField.setValue('');
+  }
+
+  document.getElementById('viajes-gasto-photo-label').classList.toggle('hidden', !!movement);
+  document.getElementById('viajes-gasto-photo-input').value = '';
+  document.getElementById('viajes-gasto-photo-filename').classList.add('hidden');
+  document.getElementById('btn-delete-viajes-gasto').classList.toggle('hidden', !movement);
+  refreshViajesGastoModalFields();
+  document.getElementById('viajes-gasto-modal').classList.remove('hidden');
+}
+function closeViajesGastoModal() {
+  viajesGastoEditingId = null;
+  viajesGastoEntryId = null;
+  viajesGastoPendingPhotoFile = null;
+  document.getElementById('viajes-gasto-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-viajes-gasto').addEventListener('click', closeViajesGastoModal);
+document.getElementById('btn-cancel-viajes-gasto').addEventListener('click', closeViajesGastoModal);
+document.getElementById('viajes-gasto-photo-input').addEventListener('change', (e) => {
+  const file = e.target.files[0] || null;
+  viajesGastoPendingPhotoFile = file;
+  document.getElementById('viajes-gasto-photo-filename').textContent = file ? file.name : '';
+  document.getElementById('viajes-gasto-photo-filename').classList.toggle('hidden', !file);
+});
+document.getElementById('btn-delete-viajes-gasto').addEventListener('click', async () => {
+  if (!viajesGastoEditingId) return;
+  if (!confirm('¿Borrar este movimiento?')) return;
+  await api(`/api/viajes-entries/movements/${viajesGastoEditingId}`, { method: 'DELETE' });
+  closeViajesGastoModal();
+  await refreshViajesEntries();
+});
+
+document.getElementById('viajes-gasto-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const type = viajesGastoTypeField.getValue();
+  const amount = document.getElementById('viajes-gasto-amount').value;
+  const description = document.getElementById('viajes-gasto-description').value.trim() || null;
+  const countsTowardBudget = document.getElementById('viajes-gasto-counts').checked;
+  const linked = !!(viajesCurrentTrip && viajesCurrentTrip.finanzasLinked);
+  const accountId = linked ? viajesGastoAccountField.getValue() || null : null;
+  const categoryId = linked ? viajesGastoCategoryField.getValue() || null : null;
+
+  try {
+    if (viajesGastoEditingId) {
+      await api(`/api/viajes-entries/movements/${viajesGastoEditingId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ type, amount, description, countsTowardBudget, accountId, categoryId }),
+      });
+    } else {
+      let attachmentId = null;
+      if (viajesGastoPendingPhotoFile) {
+        const uploaded = await api(`/api/viajes-entries/${viajesGastoEntryId}/attachments`, {
+          method: 'POST',
+          headers: { 'Content-Type': viajesGastoPendingPhotoFile.type },
+          body: viajesGastoPendingPhotoFile,
+        });
+        attachmentId = uploaded.id;
+      }
+      await api(`/api/viajes-entries/${viajesGastoEntryId}/movements`, {
+        method: 'POST',
+        body: JSON.stringify({ type, amount, description, countsTowardBudget, accountId, categoryId, attachmentId }),
+      });
+    }
+    closeViajesGastoModal();
+    await refreshViajesEntries();
+  } catch (err) {
+    alert('No se pudo guardar el movimiento: ' + err.message);
+  }
+});
+
+// --- Vincular un movimiento a un movimiento real de Finanzas ------------
+// Disponible SIEMPRE (no exige que el viaje tenga finanzas_linked
+// activado), para poder enlazar un movimiento suelto sin activar el
+// ajuste de todo el viaje. "viajesLinkFinanzasAttachmentId" guarda ahora
+// el id de un MOVIMIENTO (renombrado abajo para que quede claro).
+let viajesLinkFinanzasMovementId = null;
+async function openViajesLinkFinanzasModal(movement) {
+  viajesLinkFinanzasMovementId = movement.id;
+  document.getElementById('viajes-link-finanzas-amount').textContent = `Importe: ${movement.amount.toFixed(2)} €`;
   const [accounts, categories] = await Promise.all([api('/api/finanzas-accounts'), api('/api/finanzas-categories')]);
   viajesLinkFinanzasAccountField.setOptions(accounts.map((a) => ({ value: a.id, label: a.name })));
   viajesLinkFinanzasCategoryField.setOptions([{ value: '', label: 'Sin categoría' }, ...categories.map((c) => ({ value: c.id, label: c.name }))]);
-  document.getElementById('viajes-link-finanzas-description').value = '';
+  document.getElementById('viajes-link-finanzas-description').value = movement.description || '';
   document.getElementById('viajes-link-finanzas-modal').classList.remove('hidden');
 }
 function closeViajesLinkFinanzasModal() {
-  viajesLinkFinanzasAttachmentId = null;
+  viajesLinkFinanzasMovementId = null;
   document.getElementById('viajes-link-finanzas-modal').classList.add('hidden');
 }
 document.getElementById('btn-close-viajes-link-finanzas').addEventListener('click', closeViajesLinkFinanzasModal);
@@ -7749,7 +8079,7 @@ document.getElementById('btn-confirm-viajes-link-finanzas').addEventListener('cl
   const accountId = viajesLinkFinanzasAccountField.getValue();
   if (!accountId) { alert('Elige una cuenta.'); return; }
   try {
-    await api(`/api/viajes-entries/attachments/${viajesLinkFinanzasAttachmentId}/link-finanzas`, {
+    await api(`/api/viajes-entries/movements/${viajesLinkFinanzasMovementId}/link-finanzas`, {
       method: 'POST',
       body: JSON.stringify({
         accountId,
@@ -7763,6 +8093,35 @@ document.getElementById('btn-confirm-viajes-link-finanzas').addEventListener('cl
     alert('No se pudo vincular: ' + err.message);
   }
 });
+
+// Micro-estados que no existen como contorno en el SVG (demasiado
+// pequeños para el nivel de detalle de este dataset -- ver
+// VIAJES_COUNTRY_NAMES en viajesCountries.js) -- se dibuja un marcador/
+// pin en su ubicacion aproximada en vez de un contorno real. Coordenadas
+// estimadas a partir de las cajas delimitadoras REALES (getBBox(), no a
+// ojo del SVG entero) de los paises vecinos ya dibujados en este mismo
+// mapa -- ajustables a mano aqui si algun dia se ven descuadradas.
+const VIAJES_MICRO_STATE_MARKERS = [
+  { id: 'ad', x: 397, y: 414 }, // Andorra -- Pirineos, frontera fr/es
+  { id: 'mc', x: 420, y: 411 }, // Monaco -- costa, junto a la esquina noroeste de Italia
+  { id: 'va', x: 431, y: 418 }, // Vaticano -- enclave en Roma (centro-oeste de Italia)
+  { id: 'sm', x: 440, y: 413 }, // San Marino -- cerca de Rimini (costa adriatica, norte de Italia)
+  { id: 'li', x: 429.8, y: 404 }, // Liechtenstein -- entre Suiza y Austria, en los Alpes
+];
+
+function addViajesMapMicroStateMarkers(svg) {
+  const svgNS = 'http://www.w3.org/2000/svg';
+  VIAJES_MICRO_STATE_MARKERS.forEach(({ id, x, y }) => {
+    const circle = document.createElementNS(svgNS, 'circle');
+    circle.setAttribute('id', id);
+    circle.setAttribute('cx', x);
+    circle.setAttribute('cy', y);
+    circle.setAttribute('r', '1.8');
+    circle.classList.add('viajes-map-country', 'viajes-map-micro-state');
+    circle.addEventListener('click', () => openViajesCountryModal(id));
+    svg.appendChild(circle);
+  });
+}
 
 // --- Mapa interactivo ---------------------------------------------------
 async function loadViajesMap() {
@@ -7778,6 +8137,15 @@ async function loadViajesMap() {
     el.classList.add('viajes-map-country');
     el.addEventListener('click', () => openViajesCountryModal(el.id));
   });
+  addViajesMapMicroStateMarkers(svg);
+  // Hover -> nombre del pais al instante, reutilizando el mismo tooltip
+  // ya construido para las graficas de Finanzas (un unico div flotante
+  // que sigue al raton, ver attachFinanzasChartTooltips) -- generico de
+  // verdad, no hace falta tocar su implementacion para reutilizarlo aqui.
+  svg.querySelectorAll('.viajes-map-country').forEach((el) => {
+    el.dataset.tooltip = viajesCountryLabel(el.id);
+  });
+  attachFinanzasChartTooltips(svg);
   initViajesMapZoomPan(svg, container);
 }
 

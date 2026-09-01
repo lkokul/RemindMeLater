@@ -2586,6 +2586,20 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .viajes-map-country:hover { fill: color-mix(in srgb, var(--accent) 45%, var(--surface-2)); }
 .viajes-map-country-visited { fill: var(--accent); }
 .viajes-map-country-visited:hover { fill: color-mix(in srgb, var(--accent) 80%, black); }
+/* Micro-estados (Andorra, Vaticano...) sin contorno real en el SVG --
+   ver addViajesMapMicroStateMarkers() en app.js. Borde algo mas grueso
+   que un pais normal para que el punto no desaparezca a zoom 1x. */
+.viajes-map-micro-state { stroke-width: 0.4; }
+
+/* Filtros de "Mis viajes" -- mismo criterio que .lecturas-filters (ancho
+   base consistente para que quepan en una fila en escritorio, apilables
+   en movil via flex-wrap). */
+.viajes-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.6rem 0; }
+.viajes-filters input[type="number"] { font-size: 0.82rem; padding: 0.35rem 0.5rem; width: 6.5rem; flex: 0 1 auto; }
+.viajes-filter-field { flex: 1 1 160px; min-width: 140px; }
+.viajes-filter-field .select-field { width: 100%; }
+.viajes-filter-field .select-field-trigger { font-size: 0.82rem; padding: 0.4rem 0.6rem; }
+.viajes-filter-multi-country { flex: 0 0 auto; }
 
 /* Tarjetas de viaje -- reutilizadas tanto en la lista principal como en
    el modal de "viajes en este pais" (ver renderViajesTripCards). El
@@ -2625,11 +2639,16 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   border: 1px solid var(--border);
 }
 .viajes-attachment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; font-size: 0.78rem; }
-.viajes-attachment-amount {
-  font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 999px;
-  background: var(--surface-2); color: var(--surface-2-text);
-}
 .viajes-attachment-linked { color: var(--accent); }
+/* Mismos tonos que .finanzas-amount-expense/-income, para que un
+   movimiento de Viajes se lea igual que en Finanzas. */
+.viajes-movement-amount {
+  font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 999px;
+  background: var(--surface-2);
+}
+.viajes-movement-amount-expense { color: #e63946; }
+.viajes-movement-amount-income { color: #43aa8b; }
+.viajes-entry-add-actions { display: flex; gap: 0.5rem; margin-top: 0.4rem; }
 
 /* Selector de varios paises (chips + buscador) -- ver
    createCountryPickerField en app.js, mismo mecanismo de popover que

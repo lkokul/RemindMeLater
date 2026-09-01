@@ -8,6 +8,15 @@
 // paises del formulario de viaje se crea a nivel de modulo en app.js, y
 // necesita esta constante ya definida en ese momento.
 const VIAJES_COUNTRY_NAMES = {
+  // Estos 5 no existen como contorno en el SVG del mapa (demasiado
+  // pequeños para el nivel de detalle de este dataset) -- se muestran
+  // con un marcador/pin en vez de un contorno real, ver
+  // addViajesMapMicroStateMarkers() en app.js.
+  ad: 'Andorra',
+  va: 'Vaticano',
+  sm: 'San Marino',
+  mc: 'Mónaco',
+  li: 'Liechtenstein',
   ae: 'Emiratos Árabes Unidos',
   af: 'Afganistán',
   al: 'Albania',

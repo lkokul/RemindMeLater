@@ -1381,15 +1381,24 @@ async function refreshGroupsTab() {
 
 // Ajuste GLOBAL (no por dispositivo, ver routes/viajesSettings.js) --
 // a diferencia del resto de esta pestaña "Este dispositivo", este
-// checkbox no lee/escribe localStorage, hace una llamada real al
-// servidor cada vez.
-async function refreshViajesSettingsTab() {
-  const { finanzasLinked } = await api('/api/viajes-settings');
-  document.getElementById('setting-viajes-finanzas-linked').checked = finanzasLinked;
-}
-document.getElementById('setting-viajes-finanzas-linked').addEventListener('change', async (e) => {
-  await api('/api/viajes-settings', { method: 'PUT', body: JSON.stringify({ finanzasLinked: e.target.checked }) });
+// selector no lee/escribe localStorage, hace una llamada real al
+// servidor cada vez. El interruptor de "enlazar con Finanzas" que vivia
+// aqui antes ahora es POR VIAJE (checkbox dentro de #viajes-trip-modal,
+// ver app.js) -- aqui solo queda la cuenta por defecto.
+const viajesDefaultAccountField = createSelectField({
+  options: [{ value: '', label: 'Sin cuenta por defecto' }],
+  initialValue: '',
+  onChange: async (value) => {
+    await api('/api/viajes-settings', { method: 'PUT', body: JSON.stringify({ defaultAccountId: value || null }) });
+  },
 });
+document.getElementById('setting-viajes-default-account-field').appendChild(viajesDefaultAccountField.element);
+
+async function refreshViajesSettingsTab() {
+  const [{ defaultAccountId }, accounts] = await Promise.all([api('/api/viajes-settings'), api('/api/finanzas-accounts')]);
+  viajesDefaultAccountField.setOptions([{ value: '', label: 'Sin cuenta por defecto' }, ...accounts.map((a) => ({ value: a.id, label: a.name }))]);
+  viajesDefaultAccountField.setValue(defaultAccountId || '');
+}
 
 // Cambia el color de "completada" SIN que cuente como que la persona lo ha
 // tocado a mano (carga inicial, reset del formulario, o cargar el valor
@@ -2050,6 +2059,41 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Los 6 modales de Viajes (trip/entrada/foto/gasto/vincular Finanzas/
+  // pais) -- igual que el resto de modales de arriba, se cierran antes
+  // que cualquier capa de vista de debajo (ver la rama "viajes-view" mas
+  // abajo para lo que pasa cuando NINGUNO de estos esta abierto).
+  const viajesTripModal = document.getElementById('viajes-trip-modal');
+  if (viajesTripModal && !viajesTripModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-trip').click();
+    return;
+  }
+  const viajesEntryModal = document.getElementById('viajes-entry-modal');
+  if (viajesEntryModal && !viajesEntryModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-entry').click();
+    return;
+  }
+  const viajesAttachmentModal = document.getElementById('viajes-attachment-modal');
+  if (viajesAttachmentModal && !viajesAttachmentModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-attachment').click();
+    return;
+  }
+  const viajesGastoModal = document.getElementById('viajes-gasto-modal');
+  if (viajesGastoModal && !viajesGastoModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-gasto').click();
+    return;
+  }
+  const viajesLinkFinanzasModal = document.getElementById('viajes-link-finanzas-modal');
+  if (viajesLinkFinanzasModal && !viajesLinkFinanzasModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-link-finanzas').click();
+    return;
+  }
+  const viajesCountryModal = document.getElementById('viajes-country-modal');
+  if (viajesCountryModal && !viajesCountryModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-country').click();
+    return;
+  }
+
   const mySpaceView = document.getElementById('my-space-view');
   if (mySpaceView && !mySpaceView.classList.contains('hidden')) {
     const hub = document.getElementById('my-space-hub');
@@ -2084,6 +2128,25 @@ document.addEventListener('keydown', (e) => {
       document.getElementById('btn-back-lecturas-sagas').click();
     } else {
       document.getElementById('btn-close-lecturas').click();
+    }
+    return;
+  }
+
+  // Viajes tiene DOS capas de sub-navegacion, no una: el detalle de un
+  // viaje dentro de la pestaña "Mis viajes", y las propias pestañas
+  // Mapa/Mis viajes -- Esc SIEMPRE pasa por la pestaña Mapa antes de
+  // cerrar del todo a Extensiones (pedido explicito de Koku), en vez de
+  // cerrar directamente desde "Mis viajes".
+  const viajesView = document.getElementById('viajes-view');
+  if (viajesView && !viajesView.classList.contains('hidden')) {
+    const tripDetailPanel = document.getElementById('viajes-trip-detail-panel');
+    const activeTabBtn = document.querySelector('.viajes-tab-btn.active');
+    if (tripDetailPanel && !tripDetailPanel.classList.contains('hidden')) {
+      document.getElementById('btn-back-viajes-trips').click();
+    } else if (activeTabBtn && activeTabBtn.dataset.viajesTab === 'viajes') {
+      setViajesTab('mapa');
+    } else {
+      document.getElementById('btn-close-viajes').click();
     }
     return;
   }

@@ -1247,6 +1247,7 @@
       <div class="viajes-tab-panel hidden" data-viajes-panel="viajes">
         <div id="viajes-trips-list-panel" class="viajes-panel">
           <button type="button" id="btn-new-viaje" class="primary-btn gym-tab-action">+ Viaje</button>
+          <div id="viajes-trips-filters" class="viajes-filters"></div>
           <div id="viajes-trips-list" class="viajes-trip-cards"></div>
           <p id="viajes-trips-empty" class="empty-hint hidden">Todavía no tienes ningún viaje. Crea uno arriba.</p>
         </div>
@@ -1286,6 +1287,10 @@
         </div>
         <label>Color<div id="viajes-trip-color-field"></div></label>
         <label>Descripción (opcional)<textarea id="viajes-trip-description" rows="2"></textarea></label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="viajes-trip-finanzas-linked" />
+          Enlazar con Finanzas (los gastos/ingresos de este viaje se apuntan también ahí)
+        </label>
         <div class="modal-actions">
           <button type="button" id="btn-delete-viajes-trip-modal" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
@@ -1331,7 +1336,6 @@
       <button type="button" id="btn-close-viajes-attachment" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2>Añadir foto</h2>
       <p id="viajes-attachment-filename" class="hint"></p>
-      <label>Importe (opcional -- solo si es un ticket)<input type="number" id="viajes-attachment-amount" step="0.01" min="0.01" placeholder="Ej. 45.90" /></label>
       <div class="modal-actions">
         <button type="button" id="btn-cancel-viajes-attachment" class="secondary-btn">Cancelar</button>
         <button type="button" id="btn-confirm-viajes-attachment" class="primary-btn">Subir</button>
@@ -1339,7 +1343,44 @@
     </div>
   </div>
 
-  <!-- Enlazar un ticket ya subido a un movimiento real de Finanzas -->
+  <!-- Crear/editar un movimiento (gasto o ingreso) de una entrada de
+       bitacora -- separado de "Añadir foto" (esa nunca lleva importe).
+       Cuenta/Categoría/"Cuenta para el límite mensual" solo se ven si el
+       VIAJE tiene el enlace con Finanzas activado (ver
+       refreshViajesGastoModalFields en app.js); la foto de ticket solo
+       se puede elegir al CREAR, no al editar (ver openViajesGastoModal). -->
+  <div id="viajes-gasto-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-viajes-gasto" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="viajes-gasto-modal-title">Nuevo gasto/ingreso</h2>
+      <form id="viajes-gasto-form">
+        <input type="hidden" id="viajes-gasto-id" />
+        <label>Tipo<div id="viajes-gasto-type-field"></div></label>
+        <label id="viajes-gasto-account-label">Cuenta<div id="viajes-gasto-account-field"></div></label>
+        <label id="viajes-gasto-category-label">Categoría (opcional)<div id="viajes-gasto-category-field"></div></label>
+        <label>Importe<input type="number" id="viajes-gasto-amount" step="0.01" min="0.01" required /></label>
+        <label>Descripción (opcional)<input type="text" id="viajes-gasto-description" /></label>
+        <label class="checkbox-row" id="viajes-gasto-counts-row">
+          <input type="checkbox" id="viajes-gasto-counts" checked />
+          Cuenta para el límite mensual
+        </label>
+        <label id="viajes-gasto-photo-label">Foto del ticket (opcional)
+          <input type="file" id="viajes-gasto-photo-input" accept="image/*" />
+        </label>
+        <p id="viajes-gasto-photo-filename" class="hint hidden"></p>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-viajes-gasto" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-viajes-gasto" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Enlazar un movimiento ya creado a un movimiento real de Finanzas --
+       disponible siempre, aunque el viaje no tenga el enlace activado
+       (sirve para enlazar uno suelto sin activar el ajuste del viaje). -->
   <div id="viajes-link-finanzas-modal" class="modal hidden">
     <div class="modal-card">
       <button type="button" id="btn-close-viajes-link-finanzas" class="modal-close-x" aria-label="Cerrar">✕</button>
@@ -1943,11 +1984,8 @@
       <div id="settings-tab-viajes-settings" class="settings-tab-panel hidden">
         <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Viajes</h3>
-        <p class="hint">Este ajuste es global (afecta a todos tus dispositivos, no solo a este) -- controla si, al añadir un ticket o pago en la bitácora de un viaje, puedes convertirlo en un movimiento real de Finanzas.</p>
-        <label class="checkbox-row">
-          <input type="checkbox" id="setting-viajes-finanzas-linked" />
-          Enlazar Viajes con Finanzas
-        </label>
+        <p class="hint">Este ajuste es global (afecta a todos tus dispositivos, no solo a este). El enlace con Finanzas ahora se activa por VIAJE (dentro de cada viaje, al crearlo o editarlo) -- aquí solo se elige la cuenta que se usa por defecto al crear un gasto/ingreso nuevo, ya que normalmente siempre es la misma. Se puede cambiar por movimiento igualmente.</p>
+        <label>Cuenta por defecto para gastos de viaje<div id="setting-viajes-default-account-field"></div></label>
       </div>
 
       <!-- --- Dispositivos --- -->

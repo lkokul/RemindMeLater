@@ -8,7 +8,8 @@
 // paises.
 const express = require('express');
 const db = require('../db');
-const { deleteEntryCascade } = require('./viajesEntries');
+const { deleteEntryCascade, touchEntryForAttachmentChange } = require('./viajesEntries');
+const { getDefaultAccountId } = require('./viajesSettings');
 
 const router = express.Router();
 
@@ -27,9 +28,26 @@ function serializeTrip(row) {
     endDate: row.end_date || null,
     description: row.description || null,
     entryCount,
+    finanzasLinked: !!row.finanzas_linked,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+// Cuantos movimientos de este viaje (de cualquiera de sus entradas)
+// siguen sin enlazar a un movimiento real de Finanzas -- lo usa el PUT
+// para avisar al cliente cuando se activa finanzas_linked con gastos ya
+// existentes, y POST /:id/link-existing-movements para saber cuales
+// enlazar en bloque.
+function countUnlinkedMovements(tripId) {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) as c FROM viajes_entry_movements m
+       JOIN viajes_entries e ON e.id = m.entry_id
+       WHERE e.trip_id = ? AND m.finanzas_transaction_id IS NULL`
+    )
+    .get(tripId);
+  return row.c;
 }
 
 function validateBody(body, existing) {
@@ -60,6 +78,8 @@ function validateBody(body, existing) {
     return { error: 'La fecha de fin no puede ser anterior a la de inicio.' };
   }
   const color = body.color !== undefined ? body.color : existing ? existing.color : '#5b8cff';
+  const finanzasLinked =
+    body.finanzasLinked !== undefined ? !!body.finanzasLinked : existing ? !!existing.finanzas_linked : false;
 
   return {
     name: String(name).trim(),
@@ -68,6 +88,7 @@ function validateBody(body, existing) {
     endDate: endDate || null,
     description: body.description !== undefined ? (String(body.description || '').trim() || null) : existing ? existing.description : null,
     color: color || '#5b8cff',
+    finanzasLinked,
   };
 }
 
@@ -127,8 +148,8 @@ router.post('/', (req, res) => {
   if (result.error) return res.status(400).json({ error: 'invalid_request', message: result.error });
 
   const info = db
-    .prepare('INSERT INTO viajes_trips (name, color, start_date, end_date, description) VALUES (?, ?, ?, ?, ?)')
-    .run(result.name, result.color, result.startDate, result.endDate, result.description);
+    .prepare('INSERT INTO viajes_trips (name, color, start_date, end_date, description, finanzas_linked) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(result.name, result.color, result.startDate, result.endDate, result.description, result.finanzasLinked ? 1 : 0);
   setTripCountries(info.lastInsertRowid, result.countries);
 
   const row = db.prepare('SELECT * FROM viajes_trips WHERE id = ?').get(info.lastInsertRowid);
@@ -146,14 +167,21 @@ router.put('/:id', (req, res) => {
   if (result.error) return res.status(400).json({ error: 'invalid_request', message: result.error });
 
   db.prepare(
-    "UPDATE viajes_trips SET name = ?, color = ?, start_date = ?, end_date = ?, description = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(result.name, result.color, result.startDate, result.endDate, result.description, req.params.id);
+    "UPDATE viajes_trips SET name = ?, color = ?, start_date = ?, end_date = ?, description = ?, finanzas_linked = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(result.name, result.color, result.startDate, result.endDate, result.description, result.finanzasLinked ? 1 : 0, req.params.id);
   if (result.countries) setTripCountries(req.params.id, result.countries);
 
   const row = db.prepare('SELECT * FROM viajes_trips WHERE id = ?').get(req.params.id);
   const serialized = serializeTrip(row);
   db.recordSyncChange('viajes_trips', row.id, 'upsert', serialized, req.device ? req.device.id : null);
-  res.json(serialized);
+
+  // Si se acaba de ACTIVAR el enlace (antes desactivado) y el viaje ya
+  // tenia gastos/ingresos sin enlazar, se avisa en la respuesta -- el
+  // cliente pregunta si tambien quiere enlazar esos anteriores
+  // (POST /:id/link-existing-movements) en vez de hacerlo aqui a ciegas.
+  const turningOn = !existing.finanzas_linked && result.finanzasLinked;
+  const unlinkedCount = turningOn ? countUnlinkedMovements(req.params.id) : 0;
+  res.json(Object.assign({}, serialized, turningOn && unlinkedCount > 0 ? { hasUnlinkedMovements: true, unlinkedCount } : {}));
 });
 
 router.delete('/:id', (req, res) => {
@@ -161,6 +189,46 @@ router.delete('/:id', (req, res) => {
   if (!existing) return res.status(404).json({ error: 'not_found' });
   deleteTripCascade(req.params.id, req.device ? req.device.id : null);
   res.status(204).end();
+});
+
+// Enlaza en bloque TODOS los movimientos sin enlazar de este viaje --
+// usa la cuenta indicada en el body, o si no viene, la cuenta por
+// defecto global (Configuracion -> Viajes, ver viajesSettings.js).
+router.post('/:id/link-existing-movements', (req, res) => {
+  const trip = db.prepare('SELECT * FROM viajes_trips WHERE id = ?').get(req.params.id);
+  if (!trip) return res.status(404).json({ error: 'not_found' });
+
+  const accountId = (req.body && req.body.accountId) || getDefaultAccountId();
+  if (!accountId || !db.prepare('SELECT 1 FROM finanzas_accounts WHERE id = ?').get(accountId)) {
+    return res.status(400).json({
+      error: 'invalid_request',
+      message: 'No hay ninguna cuenta por defecto configurada (Configuración → Viajes) ni se indicó una cuenta válida.',
+    });
+  }
+
+  const unlinked = db
+    .prepare(
+      `SELECT m.* FROM viajes_entry_movements m
+       JOIN viajes_entries e ON e.id = m.entry_id
+       WHERE e.trip_id = ? AND m.finanzas_transaction_id IS NULL`
+    )
+    .all(req.params.id);
+
+  const originId = req.device ? req.device.id : null;
+  let linkedCount = 0;
+  for (const mv of unlinked) {
+    const entry = db.prepare('SELECT * FROM viajes_entries WHERE id = ?').get(mv.entry_id);
+    const txInfo = db
+      .prepare(
+        'INSERT INTO finanzas_transactions (account_id, type, amount, date, description, category_id, counts_toward_budget, is_salary, is_fixed) VALUES (?, ?, ?, ?, ?, NULL, ?, 0, 0)'
+      )
+      .run(accountId, mv.type, mv.amount, entry.date, mv.description, mv.counts_toward_budget);
+    db.prepare('UPDATE viajes_entry_movements SET finanzas_transaction_id = ? WHERE id = ?').run(txInfo.lastInsertRowid, mv.id);
+    touchEntryForAttachmentChange(mv.entry_id, originId);
+    linkedCount += 1;
+  }
+
+  res.json({ linkedCount });
 });
 
 module.exports = router;
