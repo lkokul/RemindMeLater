@@ -72,7 +72,7 @@ const DEFAULT_EVENT_COLOR = '#5b8cff'; // el --accent de styles.css, para evento
 // DENTRO de manejadores de click, que no se disparan hasta que la persona
 // interactua — para entonces los dos archivos ya estan cargados, igual
 // que el resto de referencias cruzadas entre app.js y settings.js.
-function createSelectField({ options = [], initialValue = '', placeholder = '', onChange } = {}) {
+function createSelectField({ options = [], initialValue = '', placeholder = '', onChange, scrollToValue } = {}) {
   let value = initialValue;
   let opts = options;
 
@@ -109,6 +109,7 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'select-option' + (String(opt.value) === String(value) ? ' active' : '');
+      item.dataset.value = opt.value;
       item.innerHTML = optionRowHtml(opt);
       item.addEventListener('click', () => {
         value = opt.value;
@@ -133,8 +134,21 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
       // Si hay muchas opciones (la hora, por ejemplo, con 96), abre ya
       // desplazado a la que esta elegida en vez de siempre arriba del
       // todo — asi no hay que buscarla a mano cada vez.
-      const activeItem = popover.querySelector('.select-option.active');
-      if (activeItem) activeItem.scrollIntoView({ block: 'center' });
+      // value === '' cuenta como "nada elegido de verdad" aunque exista
+      // una opcion placeholder con value '' (p.ej. "Cualquier año") que
+      // por tanto tambien lleva la clase .active — en ese caso, si hay
+      // un scrollToValue, tiene prioridad sobre ese placeholder.
+      if (value !== '' || scrollToValue == null) {
+        const activeItem = popover.querySelector('.select-option.active');
+        if (activeItem) activeItem.scrollIntoView({ block: 'center' });
+      } else {
+        // Sin nada elegido todavia (p.ej. un filtro de año vacio): centrar
+        // en un valor de respaldo (el año actual) solo para orientar,
+        // SIN seleccionarlo — a diferencia de "active", esto no marca
+        // ningun filtro como aplicado.
+        const fallbackItem = popover.querySelector(`[data-value="${scrollToValue}"]`);
+        if (fallbackItem) fallbackItem.scrollIntoView({ block: 'center' });
+      }
     }
   });
 
@@ -147,6 +161,158 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
     getValue: () => value,
     setValue: (v) => { value = v; renderTrigger(); renderOptions(); },
     setOptions: (newOptions) => { opts = newOptions; renderOptions(); renderTrigger(); },
+  };
+}
+
+// Version "elegir varios" de createSelectField() -- mismo boton+popover,
+// pero clicar una opcion la marca/desmarca SIN cerrar el popover (para
+// poder marcar varias seguidas), y lo elegido se ve ademas como una fila
+// de chips debajo del boton, cada uno con su "x" para quitarlo suelto
+// (mismo patron visual que los chips de createCountryPickerField, mas
+// abajo en este archivo). Usado por los filtros de "Mis viajes"
+// (año/mes/país, varios a la vez).
+function createMultiSelectField({ options = [], initialValues = [], placeholder = '', onChange, scrollToValue } = {}) {
+  let selected = [...initialValues];
+  let opts = options;
+
+  const root = document.createElement('div');
+  root.className = 'multi-select-field';
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'select-field-trigger';
+
+  const chipsRow = document.createElement('div');
+  chipsRow.className = 'multi-select-chips hidden';
+
+  const popover = document.createElement('div');
+  popover.className = 'select-popover hidden';
+  document.body.appendChild(popover);
+
+  function findLabel(value) {
+    const opt = opts.find((o) => String(o.value) === String(value));
+    return opt ? opt.label : value;
+  }
+
+  function renderTrigger() {
+    trigger.textContent = selected.length
+      ? `${selected.length} seleccionado${selected.length === 1 ? '' : 's'}`
+      : (placeholder || 'Elegir...');
+    trigger.classList.toggle('select-field-placeholder', selected.length === 0);
+  }
+
+  function emitChange() {
+    if (onChange) onChange([...selected]);
+  }
+
+  function renderChips() {
+    chipsRow.innerHTML = '';
+    selected.forEach((value) => {
+      const chip = document.createElement('span');
+      chip.className = 'multi-select-chip';
+      chip.textContent = findLabel(value);
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.setAttribute('aria-label', 'Quitar');
+      removeBtn.textContent = '✕';
+      removeBtn.addEventListener('click', () => toggleValue(value));
+      chip.appendChild(removeBtn);
+      chipsRow.appendChild(chip);
+    });
+    chipsRow.classList.toggle('hidden', selected.length === 0);
+  }
+
+  // Refleja "selected" en los botones YA existentes del popover (clase
+  // .active + el check ✓) SIN volver a crearlos -- a diferencia de un
+  // select normal, aqui el popover se queda abierto entre un click y
+  // otro, y reconstruir el HTML (popover.innerHTML = '') en mitad del
+  // manejador de click DESENGANCHA el boton recien pulsado del DOM antes
+  // de que el evento termine de burbujear hasta el listener global de
+  // "cerrar popovers al hacer click fuera" (settings.js) -- ese listener
+  // comprueba con closest('.select-popover') si el click vino de dentro,
+  // y en un nodo ya desenganchado eso da null, así que cerraba el
+  // popover el mismo despues de CADA opcion marcada. Actualizar en el
+  // sitio evita el problema de raiz.
+  function syncOptionStates() {
+    popover.querySelectorAll('.select-option').forEach((item) => {
+      const isSelected = selected.some((v) => String(v) === String(item.dataset.value));
+      item.classList.toggle('active', isSelected);
+      const check = item.querySelector('.multi-select-check');
+      if (check) check.textContent = isSelected ? '✓' : '';
+    });
+  }
+
+  function toggleValue(value) {
+    const isSelected = selected.some((v) => String(v) === String(value));
+    selected = isSelected ? selected.filter((v) => String(v) !== String(value)) : [...selected, value];
+    renderTrigger();
+    renderChips();
+    syncOptionStates();
+    emitChange();
+  }
+
+  // Reconstruye los BOTONES del popover -- solo hace falta cuando cambia
+  // la lista de opciones en si (setOptions) o al crear el campo, nunca
+  // en un click normal (ver syncOptionStates arriba).
+  function renderOptions() {
+    popover.innerHTML = '';
+    opts.forEach((opt) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'select-option multi-select-option';
+      item.dataset.value = opt.value;
+      item.innerHTML = `<span class="multi-select-check"></span>${escapeHtml(opt.label)}`;
+      item.addEventListener('click', () => toggleValue(opt.value));
+      popover.appendChild(item);
+    });
+    syncOptionStates();
+  }
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = popover.classList.contains('hidden');
+    closeAllPopovers(popover);
+    popover.classList.toggle('hidden');
+    if (willOpen) {
+      positionFixedPopover(trigger, popover, {
+        width: Math.max(200, trigger.getBoundingClientRect().width),
+      });
+      const activeItem = popover.querySelector('.select-option.active');
+      if (activeItem) {
+        activeItem.scrollIntoView({ block: 'center' });
+      } else if (scrollToValue != null) {
+        const fallbackItem = popover.querySelector(`[data-value="${scrollToValue}"]`);
+        if (fallbackItem) fallbackItem.scrollIntoView({ block: 'center' });
+      }
+    }
+  });
+
+  root.append(trigger, chipsRow);
+  renderOptions();
+  renderTrigger();
+  renderChips();
+
+  return {
+    element: root,
+    getValue: () => [...selected],
+    setValue: (values) => { selected = [...(values || [])]; renderTrigger(); renderChips(); syncOptionStates(); },
+    // Igual que en el toggle de una opcion (ver syncOptionStates arriba):
+    // esto puede llamarse en mitad del propio click de una opcion --
+    // renderViajesFilters() recalcula "paises usados" y llama a
+    // setOptions() en CADA cambio de filtro, incluidos los que vienen de
+    // este mismo campo. Si la lista de valores no ha cambiado de
+    // verdad, no hace falta reconstruir los botones (que desengancharia
+    // el que se acaba de pulsar del DOM justo antes de que el click
+    // termine de burbujear, cerrando el popover de golpe) -- solo si de
+    // verdad cambian las opciones disponibles.
+    setOptions: (newOptions) => {
+      const changed = newOptions.length !== opts.length || newOptions.some((o, i) => String(o.value) !== String(opts[i] && opts[i].value));
+      opts = newOptions;
+      renderTrigger();
+      renderChips();
+      if (changed) renderOptions();
+      else syncOptionStates();
+    },
   };
 }
 
@@ -189,6 +355,44 @@ const NOTE_FILE_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="non
 // creacion/edicion (ver buildNoteRow/buildFolderRow/openNoteInEditor...).
 const STAR_FILLED_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><polygon points="12 2.5 15.09 8.76 22 9.77 17 14.64 18.18 21.52 12 18.27 5.82 21.52 7 14.64 2 9.77 8.91 8.76"></polygon></svg>';
 const STAR_OUTLINE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><polygon points="12 2.5 15.09 8.76 22 9.77 17 14.64 18.18 21.52 12 18.27 5.82 21.52 7 14.64 2 9.77 8.91 8.76"></polygon></svg>';
+
+// ---------------------------------------------------------------------
+// Confirmacion/aviso con el estilo de la app, para sustituir a
+// confirm()/alert() nativos del navegador en flujos donde Koku ha pedido
+// explicitamente que se note mas (p. ej. el enlace retroactivo de
+// Viajes con Finanzas) -- un unico modal generico y reutilizable
+// (#app-confirm-modal en index.html), no uno nuevo por caso de uso. El
+// resto de confirm()/alert() nativos del proyecto (borrar una nota, un
+// evento...) se quedan como estan, no es un reemplazo global.
+// showAppConfirm() devuelve una Promise<boolean> (true = Aceptar, false =
+// Cancelar/Esc); showAppAlert() es un atajo sin boton Cancelar, siempre
+// resuelve true al pulsar Aceptar.
+// ---------------------------------------------------------------------
+let appConfirmResolve = null;
+function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', danger = false, alertOnly = false } = {}) {
+  return new Promise((resolve) => {
+    appConfirmResolve = resolve;
+    document.getElementById('app-confirm-modal-message').textContent = message;
+    const okBtn = document.getElementById('btn-app-confirm-ok');
+    okBtn.textContent = okText;
+    okBtn.className = danger ? 'danger-btn' : 'primary-btn';
+    document.getElementById('btn-app-confirm-cancel').classList.toggle('hidden', alertOnly);
+    document.getElementById('app-confirm-modal').classList.remove('hidden');
+  });
+}
+function showAppAlert(message, { okText = 'Aceptar' } = {}) {
+  return showAppConfirm(message, { okText, alertOnly: true });
+}
+function closeAppConfirm(result) {
+  document.getElementById('app-confirm-modal').classList.add('hidden');
+  if (appConfirmResolve) {
+    const resolve = appConfirmResolve;
+    appConfirmResolve = null;
+    resolve(result);
+  }
+}
+document.getElementById('btn-app-confirm-ok').addEventListener('click', () => closeAppConfirm(true));
+document.getElementById('btn-app-confirm-cancel').addEventListener('click', () => closeAppConfirm(false));
 
 // Ctrl+Intro (o Cmd+Intro en Mac) guarda directamente, sin tener que ir
 // a buscar el boton "Guardar" con el raton -- util sobre todo en el
@@ -442,8 +646,8 @@ function isTrustedDevice() {
 //
 // Fase "movil": si el fetch falla por RED de verdad (no hay quien
 // responda -- no confundir con un error normal del servidor, ESO sigue
-// lanzando el mismo error que siempre), y la ruta es una de las 5
-// tablas que se sincronizan (ver matchSyncRoute mas abajo), se sigue
+// lanzando el mismo error que siempre), y la ruta es una de las tablas
+// que se sincronizan (ver SYNC_TABLE_ROUTES/matchSyncRoute mas abajo), se sigue
 // funcionando con la copia local en IndexedDB (public/db-local.js) en
 // vez de romper la pantalla. Las demas rutas (temas, perfil,
 // dispositivos...) no tienen copia local todavia -- si fallan sin
@@ -515,6 +719,17 @@ const SYNC_TABLE_ROUTES = [
   // encajan en ninguno de los dos patrones de abajo a proposito, asi que
   // se quedan fuera de la copia local (eso sigue siendo por dispositivo).
   { table: 'themes', store: 'themes', collectionRe: /^\/api\/themes$/, itemRe: /^\/api\/themes\/(\d+)$/ },
+  // /api/viajes-trips/by-country/:code (usada por el mapa) no encaja en
+  // ninguno de los dos patrones a proposito, se queda fuera (siempre en
+  // vivo, no tiene sentido cachearla aparte de la lista general).
+  { table: 'viajes_trips', store: 'viajesTrips', collectionRe: /^\/api\/viajes-trips$/, itemRe: /^\/api\/viajes-trips\/(\d+)$/ },
+  // Los adjuntos (fotos/tickets) NO tienen ruta propia aqui -- viajan
+  // embebidos dentro de cada entrada (ver serializeEntry en el
+  // servidor), asi que /api/viajes-entries/:id/attachments (subir una
+  // foto) y /api/viajes-entries/attachments/... (servir/borrar/vincular
+  // una foto) quedan fuera a proposito: exigen conexion siempre, igual
+  // que subir una imagen a una nota.
+  { table: 'viajes_entries', store: 'viajesEntries', collectionRe: /^\/api\/viajes-entries$/, itemRe: /^\/api\/viajes-entries\/(\d+)$/ },
 ];
 
 function matchSyncRoute(pathname) {
@@ -573,6 +788,14 @@ async function offlineRead(route, url) {
     rows.sort((a, b) => (a.position || 0) - (b.position || 0));
   } else if (route.store === 'themes') {
     rows.sort((a, b) => (a.id || 0) - (b.id || 0));
+  } else if (route.store === 'viajesTrips') {
+    rows.sort((a, b) => (b.startDate || b.createdAt || '').localeCompare(a.startDate || a.createdAt || '') || (b.id || 0) - (a.id || 0));
+  } else if (route.store === 'viajesEntries') {
+    // GET /api/viajes-entries siempre exige ?tripId= (ver la ruta REST) --
+    // aqui se aplica el mismo filtro sobre la copia local.
+    const tripId = url.searchParams.get('tripId');
+    if (tripId) rows = rows.filter((r) => String(r.tripId) === String(tripId));
+    rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id || 0) - (a.id || 0));
   }
   return rows;
 }
@@ -662,6 +885,41 @@ async function buildOptimisticRecord(route, id, fields) {
       updatedAt: now,
     };
   }
+  if (route.store === 'viajesTrips') {
+    // Al EDITAR (PUT) sin conexion, "fields" es la fila ya existente en
+    // la copia local fusionada con lo nuevo (ver offlineWrite) -- asi
+    // que entryCount ya viene relleno con el valor real; al CREAR
+    // (POST) no hay fila previa, empieza en 0.
+    return {
+      id,
+      name: fields.name || '',
+      color: fields.color || '#5b8cff',
+      countries: Array.isArray(fields.countries) ? fields.countries : [],
+      startDate: fields.startDate ?? null,
+      endDate: fields.endDate ?? null,
+      description: fields.description ?? null,
+      entryCount: fields.entryCount ?? 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+  if (route.store === 'viajesEntries') {
+    // Subir una foto exige conexion siempre (ver el comentario de
+    // SYNC_TABLE_ROUTES mas arriba), asi que "attachments" nunca se
+    // rellena aqui de cero -- pero al EDITAR (PUT) el texto de una
+    // entrada sin conexion, "fields" ya trae las fotos que tuviera de
+    // antes (fusionadas desde la copia local, ver offlineWrite), y hay
+    // que conservarlas en vez de vaciarlas.
+    return {
+      id,
+      tripId: fields.tripId ?? null,
+      date: fields.date || now.slice(0, 10),
+      content: fields.content ?? null,
+      attachments: Array.isArray(fields.attachments) ? fields.attachments : [],
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
   // specialDays
   return { date: id, type: fields.type };
 }
@@ -729,7 +987,16 @@ function buildAuthHeaders() {
   return headers;
 }
 
-const SYNC_STORE_BY_TABLE = { events: 'events', notes: 'notes', groups: 'groups', note_folders: 'noteFolders', special_days: 'specialDays', themes: 'themes' };
+const SYNC_STORE_BY_TABLE = {
+  events: 'events',
+  notes: 'notes',
+  groups: 'groups',
+  note_folders: 'noteFolders',
+  special_days: 'specialDays',
+  themes: 'themes',
+  viajes_trips: 'viajesTrips',
+  viajes_entries: 'viajesEntries',
+};
 
 async function applyRemoteChange(change) {
   const store = SYNC_STORE_BY_TABLE[change.tableName];
@@ -799,6 +1066,7 @@ async function pushOutbox() {
       if ('groupId' in payload) payload.groupId = remapId(payload.groupId);
       if ('folderId' in payload) payload.folderId = remapId(payload.folderId);
       if ('parentId' in payload) payload.parentId = remapId(payload.parentId);
+      if ('tripId' in payload) payload.tripId = remapId(payload.tripId);
     }
     const change = {
       clientOpId: entry.localOpId,
@@ -4446,11 +4714,13 @@ function closeMySpaceView() {
   document.getElementById('my-space-view').classList.add('hidden');
   collapseMySpaceExpandedColumn();
   restoreClassicRemindersPanel();
+  setCurrentScreen('home');
 }
 
 function openMySpaceView() {
   moveRemindersIntoHub();
   document.getElementById('my-space-view').classList.remove('hidden');
+  setCurrentScreen('my-space');
 }
 
 // Aplica el modo elegido: donde vive el hub, y si hace falta o no el
@@ -4616,9 +4886,11 @@ document.addEventListener('click', (e) => {
 // ---------------------------------------------------------------------
 function openExtensionsView() {
   document.getElementById('extensions-view').classList.remove('hidden');
+  setCurrentScreen('extensions');
 }
 function closeExtensionsView() {
   document.getElementById('extensions-view').classList.add('hidden');
+  setCurrentScreen('home');
 }
 document.getElementById('btn-extensions').addEventListener('click', openExtensionsView);
 document.getElementById('btn-close-extensions').addEventListener('click', closeExtensionsView);
@@ -4634,6 +4906,7 @@ document.getElementById('btn-close-extensions').addEventListener('click', closeE
 async function openGymView() {
   closeExtensionsView();
   document.getElementById('gym-view').classList.remove('hidden');
+  setCurrentScreen('gym');
   await Promise.all([loadGymExercises(), loadGymRoutines(), loadGymSessions()]);
   renderGymExercisesList();
   renderGymRoutinesList();
@@ -6402,6 +6675,7 @@ async function refreshLecturasSagasView() {
 function openLecturasView() {
   closeExtensionsView();
   document.getElementById('lecturas-view').classList.remove('hidden');
+  setCurrentScreen('lecturas');
   refreshLecturasSagasView();
 }
 function closeLecturasView() {
@@ -7083,6 +7357,7 @@ async function openFinanzasView() {
   setupFinanzasIconColorFields();
   closeExtensionsView();
   document.getElementById('finanzas-view').classList.remove('hidden');
+  setCurrentScreen('finanzas');
   switchFinanzasTab('resumen');
   await refreshFinanzasAccountsAndCategories();
   await loadFinanzasPortfolios();
@@ -7099,7 +7374,7 @@ async function openFinanzasView() {
 }
 function closeFinanzasView() {
   document.getElementById('finanzas-view').classList.add('hidden');
-  document.getElementById('extensions-view').classList.remove('hidden');
+  openExtensionsView();
 }
 document.getElementById('btn-open-finanzas').addEventListener('click', openFinanzasView);
 document.getElementById('btn-close-finanzas').addEventListener('click', closeFinanzasView);
@@ -7621,6 +7896,7 @@ document.getElementById('btn-archivos-check-update').addEventListener('click', (
 async function openArchivosView() {
   closeExtensionsView();
   document.getElementById('archivos-view').classList.remove('hidden');
+  setCurrentScreen('archivos');
   document.getElementById('archivos-folder-browser').classList.add('hidden');
   archivosStagedFiles = [];
   renderArchivosStagedList();
@@ -7643,10 +7919,1230 @@ function closeArchivosView() {
     api(`/api/archivos/transfer-requests/${id}`, { method: 'DELETE' }).catch(() => {});
   }
   document.getElementById('archivos-view').classList.add('hidden');
-  document.getElementById('extensions-view').classList.remove('hidden');
+  openExtensionsView();
 }
 document.getElementById('btn-open-archivos').addEventListener('click', openArchivosView);
 document.getElementById('btn-close-archivos').addEventListener('click', closeArchivosView);
+
+// ---------------------------------------------------------------------
+// Extension "Viajes": mapa interactivo por paises (public/viajes-world-map.svg
+// -- fuente: raphaellepuschitz/SVG-World-Map en GitHub, licencia MIT; los
+// contornos de cada pais en si no son obra del autor de esa libreria,
+// ver el README de ese repo. Cambiado desde el mapa anterior
+// (flekschas/simple-world-map, CC BY-SA 3.0) porque este SÍ trae
+// contorno real para Andorra/Vaticano/San Marino/Monaco/Liechtenstein
+// -- ya no hace falta el marcador/pin para esos 5, ver
+// VIAJES_MICRO_STATE_MARKERS mas abajo, reducido ahora a un unico caso
+// (Taiwan) que sigue sin contorno propio en ESTE mapa. Cada pais es un
+// <g id="XX"> (XX = ISO 3166-1 alfa-2 EN MAYUSCULAS en este archivo
+// concreto) con uno o mas <path>/<circle> hijos que YA traen su propio
+// fill/stroke fijo -- normalizado a minusculas via dataset.countryCode
+// al cargar (ver loadViajesMap), sin tocar el atributo id real del SVG.
+// Nombres en español en viajesCountries.js, cargado ANTES que este
+// archivo) + bitacora de cada viaje, que puede tocar VARIOS paises (ej.
+// un interrail) -- por eso "countries" es siempre un array, nunca un
+// pais suelto.
+// ---------------------------------------------------------------------
+let viajesTrips = [];
+let viajesCurrentTrip = null; // viaje abierto en el detalle/bitacora ahora mismo
+let viajesCurrentEntries = [];
+let viajesMapLoaded = false;
+let viajesLazyFieldsReady = false;
+let viajesTripColorField = null;
+let viajesPendingAttachmentEntryId = null;
+let viajesPendingAttachmentFile = null;
+
+// createColorField vive en settings.js, que carga DESPUES de app.js --
+// igual que ya pasa con Finanzas/Gimnasio (ver setupFinanzasIconColorFields),
+// este campo se crea de forma perezosa la primera vez que se abre la
+// vista, no aqui arriba a nivel de modulo.
+function setupViajesLazyFields() {
+  if (viajesLazyFieldsReady) return;
+  viajesLazyFieldsReady = true;
+  viajesTripColorField = createColorField({ initialValue: '#5b8cff' });
+  document.getElementById('viajes-trip-color-field').appendChild(viajesTripColorField.element);
+}
+
+// Selector de VARIOS paises a la vez: buscador + chips removibles,
+// reutilizando el mismo popover (positionFixedPopover/closeAllPopovers,
+// las dos en settings.js) que ya usa createSelectField -- se llaman solo
+// dentro de manejadores de eventos (clic, foco), nunca al cargar la
+// pagina, asi que el orden de carga app.js->settings.js no es problema
+// (mismo criterio ya documentado para createColorField/createIconField
+// mas arriba). A diferencia de createSelectField, esta funcion SI se
+// puede llamar a nivel de modulo porque no toca settings.js hasta que
+// alguien de verdad hace clic.
+function createCountryPickerField({ initialValues = [] } = {}) {
+  let selected = [...initialValues];
+  const root = document.createElement('div');
+  root.className = 'country-picker-field';
+
+  const chipsRow = document.createElement('div');
+  chipsRow.className = 'country-picker-chips';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'country-picker-input';
+  input.placeholder = 'Buscar país...';
+
+  const popover = document.createElement('div');
+  popover.className = 'select-popover hidden';
+  document.body.appendChild(popover);
+
+  function renderChips() {
+    chipsRow.innerHTML = '';
+    selected.forEach((code) => {
+      const chip = document.createElement('span');
+      chip.className = 'country-picker-chip';
+      chip.textContent = VIAJES_COUNTRY_NAMES[code] || code;
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.setAttribute('aria-label', 'Quitar');
+      removeBtn.textContent = '✕';
+      removeBtn.addEventListener('click', () => {
+        selected = selected.filter((c) => c !== code);
+        renderChips();
+      });
+      chip.appendChild(removeBtn);
+      chipsRow.appendChild(chip);
+    });
+  }
+
+  function renderOptions(filterText) {
+    popover.innerHTML = '';
+    const filter = (filterText || '').trim().toLowerCase();
+    const entries = Object.entries(VIAJES_COUNTRY_NAMES)
+      .filter(([code, name]) => !selected.includes(code) && (!filter || name.toLowerCase().includes(filter)))
+      .sort((a, b) => a[1].localeCompare(b[1], 'es'));
+    if (entries.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'select-option-empty';
+      empty.textContent = 'Sin resultados';
+      popover.appendChild(empty);
+      return;
+    }
+    entries.slice(0, 40).forEach(([code, name]) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'select-option';
+      item.textContent = name;
+      item.addEventListener('click', () => {
+        selected.push(code);
+        input.value = '';
+        renderChips();
+        renderOptions('');
+        popover.classList.add('hidden');
+        input.focus();
+      });
+      popover.appendChild(item);
+    });
+  }
+
+  input.addEventListener('focus', () => {
+    closeAllPopovers(popover);
+    renderOptions(input.value);
+    popover.classList.remove('hidden');
+    positionFixedPopover(input, popover, { width: Math.max(220, input.getBoundingClientRect().width) });
+  });
+  input.addEventListener('input', () => {
+    renderOptions(input.value);
+    popover.classList.remove('hidden');
+  });
+
+  root.append(chipsRow, input);
+  renderChips();
+
+  return {
+    element: root,
+    getValue: () => selected,
+    setValue: (codes) => {
+      selected = [...(codes || [])];
+      renderChips();
+    },
+  };
+}
+
+const viajesTripCountriesField = createCountryPickerField({ initialValues: [] });
+document.getElementById('viajes-trip-countries-field').appendChild(viajesTripCountriesField.element);
+
+// Cuenta por defecto DE ESTE VIAJE (ya no es un ajuste global de
+// Configuración -- Koku prefiere elegirla viaje a viaje). Solo tiene
+// sentido con el enlace con Finanzas activado, asi que el <label> que la
+// envuelve se oculta/muestra con el checkbox (ver el listener de
+// viajes-trip-finanzas-linked mas abajo), mismo criterio que
+// refreshViajesGastoModalFields.
+const viajesTripDefaultAccountField = createSelectField({ options: [{ value: '', label: 'Sin cuenta por defecto' }], initialValue: '' });
+document.getElementById('viajes-trip-default-account-field').appendChild(viajesTripDefaultAccountField.element);
+
+const viajesTripStartField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('viajes-trip-start-field').appendChild(viajesTripStartField.element);
+const viajesTripEndField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('viajes-trip-end-field').appendChild(viajesTripEndField.element);
+const viajesEntryDateField = createDateField({ initialValue: new Date() });
+document.getElementById('viajes-entry-date-field').appendChild(viajesEntryDateField.element);
+
+const viajesLinkFinanzasAccountField = createSelectField({ options: [], initialValue: '' });
+document.getElementById('viajes-link-finanzas-account-field').appendChild(viajesLinkFinanzasAccountField.element);
+const viajesLinkFinanzasCategoryField = createSelectField({ options: [{ value: '', label: 'Sin categoría' }], initialValue: '' });
+document.getElementById('viajes-link-finanzas-category-field').appendChild(viajesLinkFinanzasCategoryField.element);
+
+// Input de archivo compartido por todas las entradas (no hay uno fijo en
+// el HTML porque las entradas se pintan dinamicamente) -- se crea una
+// sola vez, y viajesPendingAttachmentEntryId dice a que entrada
+// pertenece la proxima foto que se elija.
+const viajesSharedFileInput = document.createElement('input');
+viajesSharedFileInput.type = 'file';
+viajesSharedFileInput.accept = 'image/*';
+viajesSharedFileInput.hidden = true;
+document.body.appendChild(viajesSharedFileInput);
+viajesSharedFileInput.addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  openViajesAttachmentModal(file);
+});
+
+function viajesCountryLabel(code) {
+  return VIAJES_COUNTRY_NAMES[code] || code;
+}
+function viajesTripCountriesLabel(trip) {
+  return trip.countries.map(viajesCountryLabel).join(', ');
+}
+function viajesTripDatesLabel(trip) {
+  if (!trip.startDate) return '';
+  return trip.endDate && trip.endDate !== trip.startDate ? `${trip.startDate} – ${trip.endDate}` : trip.startDate;
+}
+
+async function loadViajesTrips() {
+  viajesTrips = await api('/api/viajes-trips');
+}
+
+function renderViajesTripCards(container, trips, onClick) {
+  container.innerHTML = '';
+  trips.forEach((trip) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'viajes-trip-card';
+    card.style.setProperty('--viajes-trip-color', trip.color);
+    const dates = viajesTripDatesLabel(trip);
+    card.innerHTML = `
+      <span class="viajes-trip-card-name">${escapeHtml(trip.name)}</span>
+      <span class="viajes-trip-card-countries">${escapeHtml(viajesTripCountriesLabel(trip))}</span>
+      ${dates ? `<span class="hint">${escapeHtml(dates)}</span>` : ''}
+      <span class="hint">${trip.entryCount} entrada${trip.entryCount === 1 ? '' : 's'}</span>
+    `;
+    card.addEventListener('click', () => onClick(trip));
+    container.appendChild(card);
+  });
+}
+
+// --- Filtros de "Mis viajes" (año/mes/país, varios a la vez) ------------
+// Mismo patron "build once" que Lecturas (renderLecturasItemFilters) --
+// los campos con componente propio se crean UNA vez a nivel de modulo,
+// las llamadas siguientes solo actualizan .setOptions()/.setValue() para
+// no acumular popovers huerfanos. Los 3 son ahora multi-seleccion
+// (createMultiSelectField): se puede filtrar por varios años, varios
+// meses y varios países a la vez, cada uno listado como chip removible
+// debajo de su desplegable.
+let viajesFilters = { years: [], months: [], countries: [], multiCountryOk: true };
+
+// 1900-2100 de sobra para cualquier viaje real -- mismo criterio de rango
+// fijo ya usado en otros selectores de año de la app (Ahorro de Finanzas).
+// Orden DESCENDENTE (2100 arriba, 1900 abajo) -- mas intuitivo para elegir
+// un año reciente, que es lo mas habitual, sin tener que bajar del todo.
+const VIAJES_YEAR_OPTIONS = [];
+for (let y = 2100; y >= 1900; y--) VIAJES_YEAR_OPTIONS.push({ value: String(y), label: String(y) });
+
+const viajesFilterYearField = createMultiSelectField({
+  options: VIAJES_YEAR_OPTIONS,
+  initialValues: [],
+  placeholder: 'Año',
+  // Sin ningun año elegido, abrir el desplegable centrado en el actual en
+  // vez de arriba del todo -- solo orienta, no aplica ningun filtro.
+  scrollToValue: String(new Date().getFullYear()),
+  onChange: (values) => {
+    viajesFilters.years = values;
+    renderViajesTripsList();
+  },
+});
+
+const viajesFilterMonthField = createMultiSelectField({
+  options: FINANZAS_MONTH_OPTIONS,
+  initialValues: [],
+  placeholder: 'Mes',
+  onChange: (values) => {
+    viajesFilters.months = values;
+    renderViajesTripsList();
+  },
+});
+
+const viajesFilterCountryField = createMultiSelectField({
+  options: [],
+  initialValues: [],
+  placeholder: 'País',
+  onChange: (values) => {
+    viajesFilters.countries = values;
+    renderViajesTripsList();
+  },
+});
+
+function renderViajesFilters() {
+  const container = document.getElementById('viajes-trips-filters');
+  if (!container.dataset.built) {
+    container.dataset.built = '1';
+
+    const yearWrap = document.createElement('div');
+    yearWrap.className = 'viajes-filter-field';
+    yearWrap.appendChild(viajesFilterYearField.element);
+
+    const monthWrap = document.createElement('div');
+    monthWrap.className = 'viajes-filter-field';
+    monthWrap.appendChild(viajesFilterMonthField.element);
+
+    const countryWrap = document.createElement('div');
+    countryWrap.className = 'viajes-filter-field';
+    countryWrap.appendChild(viajesFilterCountryField.element);
+
+    // Mismo criterio que "Cuenta para el límite mensual"/"Gasto fijo" en
+    // Finanzas: un interruptor de un solo ajuste on/off, no una
+    // seleccion de varios de una lista -- por eso es .checkbox-row, no
+    // .styled-checkbox (esa es para listas/arboles de seleccion).
+    const multiLabel = document.createElement('label');
+    multiLabel.className = 'checkbox-row viajes-filter-multi-country';
+    const multiCheckbox = document.createElement('input');
+    multiCheckbox.type = 'checkbox';
+    multiCheckbox.id = 'viajes-filter-multi-country';
+    multiCheckbox.checked = true;
+    multiCheckbox.addEventListener('change', () => {
+      viajesFilters.multiCountryOk = multiCheckbox.checked;
+      renderViajesTripsList();
+    });
+    multiLabel.append(multiCheckbox, document.createTextNode(' Incluir viajes con más países'));
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.id = 'btn-clear-viajes-filters';
+    clearBtn.className = 'secondary-btn';
+    clearBtn.textContent = 'Quitar filtros';
+    clearBtn.addEventListener('click', () => {
+      viajesFilters = { years: [], months: [], countries: [], multiCountryOk: true };
+      viajesFilterYearField.setValue([]);
+      viajesFilterMonthField.setValue([]);
+      viajesFilterCountryField.setValue([]);
+      multiCheckbox.checked = true;
+      renderViajesTripsList();
+    });
+
+    container.append(yearWrap, monthWrap, countryWrap, multiLabel, clearBtn);
+  }
+
+  // Los paises del desplegable son los que ya se usan en algun viaje --
+  // se recalcula cada vez porque cambia al crear/editar/borrar viajes.
+  const usedCountries = [...new Set(viajesTrips.flatMap((t) => t.countries))].sort((a, b) =>
+    viajesCountryLabel(a).localeCompare(viajesCountryLabel(b))
+  );
+  viajesFilterCountryField.setOptions(usedCountries.map((c) => ({ value: c, label: viajesCountryLabel(c) })));
+  viajesFilterYearField.setValue(viajesFilters.years);
+  viajesFilterMonthField.setValue(viajesFilters.months);
+  viajesFilterCountryField.setValue(viajesFilters.countries);
+  document.getElementById('viajes-filter-multi-country').checked = viajesFilters.multiCountryOk;
+}
+
+// Año/mes comparan contra el startDate del viaje -- un viaje sin fecha no
+// aparece si se filtra por fecha (igual que ya no aparece "ordenado" por
+// fecha en ningun sitio de Viajes); con varios años/meses elegidos, basta
+// con que coincida con UNO de ellos. Con uno o varios países elegidos: si
+// multiCountryOk esta marcado, cualquier viaje que TOQUE alguno de esos
+// países cuenta (aunque tenga otros paises mas); desmarcado, solo cuentan
+// los viajes cuyos países esten TODOS dentro de los elegidos (para un
+// solo país elegido esto equivale a "su UNICO país sea ese", que es la
+// distincion que pidio Koku originalmente -- con varios países elegidos
+// generaliza a "España y Francia" cuando ambos estan en el filtro, pero
+// no un viaje que ademas toque Italia).
+function viajesTripMatchesFilters(trip) {
+  if (viajesFilters.years.length) {
+    const y = trip.startDate ? trip.startDate.slice(0, 4) : null;
+    if (!y || !viajesFilters.years.includes(y)) return false;
+  }
+  if (viajesFilters.months.length) {
+    const m = trip.startDate ? trip.startDate.slice(5, 7) : null;
+    if (!m || !viajesFilters.months.includes(m)) return false;
+  }
+  if (viajesFilters.countries.length) {
+    const touchesAny = trip.countries.some((c) => viajesFilters.countries.includes(c));
+    if (!touchesAny) return false;
+    if (!viajesFilters.multiCountryOk) {
+      const onlySelected = trip.countries.every((c) => viajesFilters.countries.includes(c));
+      if (!onlySelected) return false;
+    }
+  }
+  return true;
+}
+
+function renderViajesTripsList() {
+  renderViajesFilters();
+  const filtered = viajesTrips.filter(viajesTripMatchesFilters);
+  const list = document.getElementById('viajes-trips-list');
+  const empty = document.getElementById('viajes-trips-empty');
+  const filtersActive = !!(viajesFilters.years.length || viajesFilters.months.length || viajesFilters.countries.length);
+  empty.textContent =
+    filtersActive && viajesTrips.length > 0
+      ? 'Ningún viaje coincide con estos filtros.'
+      : 'Todavía no tienes ningún viaje. Crea uno arriba.';
+  empty.classList.toggle('hidden', filtered.length > 0);
+  renderViajesTripCards(list, filtered, openViajesTripDetail);
+}
+
+// --- Modal crear/editar viaje -------------------------------------------
+function refreshViajesTripDefaultAccountVisibility() {
+  const linked = document.getElementById('viajes-trip-finanzas-linked').checked;
+  document.getElementById('viajes-trip-default-account-label').classList.toggle('hidden', !linked);
+}
+document.getElementById('viajes-trip-finanzas-linked').addEventListener('change', refreshViajesTripDefaultAccountVisibility);
+
+async function openViajesTripModal(trip, prefillCountry) {
+  setupViajesLazyFields();
+  document.getElementById('viajes-trip-modal-title').textContent = trip ? 'Editar viaje' : 'Nuevo viaje';
+  document.getElementById('viajes-trip-id').value = trip ? trip.id : '';
+  document.getElementById('viajes-trip-name').value = trip ? trip.name : '';
+  document.getElementById('viajes-trip-description').value = (trip && trip.description) || '';
+  viajesTripCountriesField.setValue(trip ? trip.countries : prefillCountry ? [prefillCountry] : []);
+  viajesTripStartField.setValue(trip && trip.startDate ? new Date(`${trip.startDate}T00:00:00`) : null);
+  viajesTripEndField.setValue(trip && trip.endDate ? new Date(`${trip.endDate}T00:00:00`) : null);
+  viajesTripColorField.setValue(trip ? trip.color : '#5b8cff');
+  document.getElementById('viajes-trip-finanzas-linked').checked = trip ? !!trip.finanzasLinked : false;
+  const accounts = await api('/api/finanzas-accounts');
+  viajesTripDefaultAccountField.setOptions([{ value: '', label: 'Sin cuenta por defecto' }, ...accounts.map((a) => ({ value: a.id, label: a.name }))]);
+  viajesTripDefaultAccountField.setValue(trip && trip.defaultAccountId ? trip.defaultAccountId : '');
+  refreshViajesTripDefaultAccountVisibility();
+  document.getElementById('btn-delete-viajes-trip-modal').classList.toggle('hidden', !trip);
+  document.getElementById('viajes-trip-modal').classList.remove('hidden');
+}
+function closeViajesTripModal() {
+  document.getElementById('viajes-trip-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-viaje').addEventListener('click', () => openViajesTripModal(null));
+document.getElementById('btn-close-viajes-trip').addEventListener('click', closeViajesTripModal);
+document.getElementById('btn-cancel-viajes-trip').addEventListener('click', closeViajesTripModal);
+
+document.getElementById('viajes-trip-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('viajes-trip-id').value;
+  const payload = {
+    name: document.getElementById('viajes-trip-name').value.trim(),
+    countries: viajesTripCountriesField.getValue(),
+    startDate: viajesTripStartField.getValue() ? toDateKey(viajesTripStartField.getValue()) : null,
+    endDate: viajesTripEndField.getValue() ? toDateKey(viajesTripEndField.getValue()) : null,
+    color: viajesTripColorField.getValue(),
+    description: document.getElementById('viajes-trip-description').value.trim() || null,
+    finanzasLinked: document.getElementById('viajes-trip-finanzas-linked').checked,
+    defaultAccountId: viajesTripDefaultAccountField.getValue() || null,
+  };
+  try {
+    const saved = id
+      ? await api(`/api/viajes-trips/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+      : await api('/api/viajes-trips', { method: 'POST', body: JSON.stringify(payload) });
+    closeViajesTripModal();
+    await loadViajesTrips();
+    renderViajesTripsList();
+    refreshViajesMapHighlights();
+    if (viajesCurrentTrip && String(viajesCurrentTrip.id) === String(saved.id)) {
+      viajesCurrentTrip = saved;
+      renderViajesTripDetailHeader();
+    }
+    // Se acaba de ACTIVAR el enlace y el viaje ya tenia gastos/ingresos
+    // sin enlazar -- se pregunta si tambien esos, en vez de enlazarlos a
+    // ciegas (ver POST /:id/link-existing-movements en viajesTrips.js).
+    // El propio modal se acaba de cerrar (closeViajesTripModal(), arriba)
+    // antes de mostrar este aviso, asi que no hay solape de modales.
+    if (saved.hasUnlinkedMovements) {
+      const wantsBulkLink = await showAppConfirm(
+        `Este viaje ya tenía ${saved.unlinkedCount} gasto${saved.unlinkedCount === 1 ? '' : 's'}/ingreso${saved.unlinkedCount === 1 ? '' : 's'} antes de activar el enlace. ¿También quieres enlazarlos con la cuenta por defecto de este viaje?`
+      );
+      if (wantsBulkLink) {
+        try {
+          await api(`/api/viajes-trips/${saved.id}/link-existing-movements`, { method: 'POST' });
+          if (viajesCurrentTrip && String(viajesCurrentTrip.id) === String(saved.id)) await refreshViajesEntries();
+        } catch (err) {
+          await showAppAlert('No se pudieron enlazar los movimientos anteriores: ' + err.message);
+        }
+      }
+    }
+  } catch (err) {
+    await showAppAlert('No se pudo guardar el viaje: ' + err.message);
+  }
+});
+
+document.getElementById('btn-delete-viajes-trip-modal').addEventListener('click', async () => {
+  const id = document.getElementById('viajes-trip-id').value;
+  if (!id || !confirm('¿Eliminar este viaje entero, con toda su bitácora y fotos?')) return;
+  await api(`/api/viajes-trips/${id}`, { method: 'DELETE' });
+  closeViajesTripModal();
+  await loadViajesTrips();
+  renderViajesTripsList();
+  refreshViajesMapHighlights();
+  backToViajesTrips();
+});
+
+document.getElementById('btn-edit-viajes-trip').addEventListener('click', () => {
+  if (viajesCurrentTrip) openViajesTripModal(viajesCurrentTrip);
+});
+document.getElementById('btn-delete-viajes-trip').addEventListener('click', async () => {
+  if (!viajesCurrentTrip || !confirm('¿Eliminar este viaje entero, con toda su bitácora y fotos?')) return;
+  await api(`/api/viajes-trips/${viajesCurrentTrip.id}`, { method: 'DELETE' });
+  await loadViajesTrips();
+  renderViajesTripsList();
+  refreshViajesMapHighlights();
+  backToViajesTrips();
+});
+
+// --- Detalle de viaje (bitacora) -----------------------------------------
+function renderViajesTripDetailHeader() {
+  const trip = viajesCurrentTrip;
+  document.getElementById('viajes-trip-detail-name').textContent = trip.name;
+  document.getElementById('viajes-trip-detail-countries').textContent = viajesTripCountriesLabel(trip);
+  document.getElementById('viajes-trip-detail-dates').textContent = viajesTripDatesLabel(trip);
+  document.getElementById('viajes-trip-detail-dates').classList.toggle('hidden', !viajesTripDatesLabel(trip));
+  document.getElementById('viajes-trip-detail-description').textContent = trip.description || '';
+  document.getElementById('viajes-trip-detail-description').classList.toggle('hidden', !trip.description);
+}
+
+async function openViajesTripDetail(trip) {
+  viajesCurrentTrip = trip;
+  document.getElementById('viajes-trips-list-panel').classList.add('hidden');
+  document.getElementById('viajes-trip-detail-panel').classList.remove('hidden');
+  renderViajesTripDetailHeader();
+  await refreshViajesEntries();
+}
+function backToViajesTrips() {
+  viajesCurrentTrip = null;
+  document.getElementById('viajes-trip-detail-panel').classList.add('hidden');
+  document.getElementById('viajes-trips-list-panel').classList.remove('hidden');
+}
+document.getElementById('btn-back-viajes-trips').addEventListener('click', backToViajesTrips);
+
+// El boton "Vincular a Finanzas" ya no depende de un ajuste global
+// aparte (ver viajesCurrentTrip.finanzasLinked, cargado con el propio
+// viaje) -- no hace falta ninguna peticion extra aqui.
+async function refreshViajesEntries() {
+  viajesCurrentEntries = await api(`/api/viajes-entries?tripId=${viajesCurrentTrip.id}`);
+  renderViajesEntriesList();
+}
+
+// Una foto suelta -- SIN importe nunca (eso es un movimiento, ver
+// renderViajesMovement mas abajo). Solo se puede borrar.
+function renderViajesAttachment(att) {
+  const wrap = document.createElement('div');
+  wrap.className = 'viajes-attachment';
+  const img = document.createElement('img');
+  img.src = att.url;
+  img.alt = '';
+  img.className = 'viajes-attachment-photo';
+  wrap.appendChild(img);
+
+  const actions = document.createElement('div');
+  actions.className = 'viajes-attachment-actions';
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'danger-btn';
+  deleteBtn.textContent = 'Borrar';
+  deleteBtn.addEventListener('click', async () => {
+    if (!confirm('¿Borrar esta foto?')) return;
+    await api(`/api/viajes-entries/attachments/${att.id}`, { method: 'DELETE' });
+    await refreshViajesEntries();
+  });
+  actions.appendChild(deleteBtn);
+  wrap.appendChild(actions);
+  return wrap;
+}
+
+// Un movimiento (gasto o ingreso), con foto de ticket opcional --
+// "Vincular a Finanzas" esta SIEMPRE disponible si todavia no esta
+// enlazado (no exige que el viaje tenga finanzas_linked activado, sirve
+// para enlazar uno suelto sin activar el ajuste de todo el viaje).
+function renderViajesMovement(mv) {
+  const wrap = document.createElement('div');
+  wrap.className = 'viajes-attachment';
+  if (mv.attachmentUrl) {
+    const img = document.createElement('img');
+    img.src = mv.attachmentUrl;
+    img.alt = '';
+    img.className = 'viajes-attachment-photo';
+    wrap.appendChild(img);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'viajes-attachment-actions';
+
+  const amountBadge = document.createElement('span');
+  amountBadge.className = `viajes-movement-amount viajes-movement-amount-${mv.type}`;
+  amountBadge.textContent = `${mv.type === 'income' ? '+' : '−'}${mv.amount.toFixed(2)} €`;
+  actions.appendChild(amountBadge);
+
+  if (mv.description) {
+    const desc = document.createElement('span');
+    desc.className = 'hint';
+    desc.textContent = mv.description;
+    actions.appendChild(desc);
+  }
+
+  if (mv.finanzasTransactionId) {
+    const linkedBadge = document.createElement('span');
+    linkedBadge.className = 'viajes-attachment-linked';
+    linkedBadge.textContent = '✓ En Finanzas';
+    actions.appendChild(linkedBadge);
+    const unlinkBtn = document.createElement('button');
+    unlinkBtn.type = 'button';
+    unlinkBtn.className = 'secondary-btn';
+    unlinkBtn.textContent = 'Desvincular';
+    unlinkBtn.addEventListener('click', async () => {
+      await api(`/api/viajes-entries/movements/${mv.id}/link-finanzas`, { method: 'DELETE' });
+      await refreshViajesEntries();
+    });
+    actions.appendChild(unlinkBtn);
+  } else {
+    const linkBtn = document.createElement('button');
+    linkBtn.type = 'button';
+    linkBtn.className = 'secondary-btn';
+    linkBtn.textContent = 'Vincular a Finanzas';
+    linkBtn.addEventListener('click', () => openViajesLinkFinanzasModal(mv));
+    actions.appendChild(linkBtn);
+  }
+
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'icon-btn';
+  editBtn.setAttribute('aria-label', 'Editar movimiento');
+  editBtn.textContent = '✎';
+  editBtn.addEventListener('click', () => openViajesGastoModal(mv));
+  actions.appendChild(editBtn);
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'danger-btn';
+  deleteBtn.textContent = 'Borrar';
+  deleteBtn.addEventListener('click', async () => {
+    if (!confirm('¿Borrar este movimiento?' + (mv.finanzasTransactionId ? ' También se borrará el movimiento de Finanzas enlazado.' : ''))) return;
+    await api(`/api/viajes-entries/movements/${mv.id}`, { method: 'DELETE' });
+    await refreshViajesEntries();
+  });
+  actions.appendChild(deleteBtn);
+
+  wrap.appendChild(actions);
+  return wrap;
+}
+
+function renderViajesEntriesList() {
+  const list = document.getElementById('viajes-entries-list');
+  list.innerHTML = '';
+  document.getElementById('viajes-entries-empty').classList.toggle('hidden', viajesCurrentEntries.length > 0);
+  viajesCurrentEntries.forEach((entry) => {
+    const card = document.createElement('div');
+    card.className = 'viajes-entry-card';
+
+    const header = document.createElement('div');
+    header.className = 'viajes-entry-card-header';
+    const dateEl = document.createElement('strong');
+    dateEl.textContent = entry.date;
+    header.appendChild(dateEl);
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'icon-btn';
+    editBtn.setAttribute('aria-label', 'Editar entrada');
+    editBtn.textContent = '✎';
+    editBtn.addEventListener('click', () => openViajesEntryModal(entry));
+    header.appendChild(editBtn);
+    const spacer = document.createElement('div');
+    spacer.className = 'spacer';
+    header.appendChild(spacer);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'danger-btn';
+    deleteBtn.textContent = 'Eliminar';
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta entrada, con sus fotos?')) return;
+      await api(`/api/viajes-entries/${entry.id}`, { method: 'DELETE' });
+      await refreshViajesEntries();
+      await loadViajesTrips(); // el contador de entradas del viaje cambia
+    });
+    header.appendChild(deleteBtn);
+    card.appendChild(header);
+
+    if (entry.content) {
+      const content = document.createElement('p');
+      content.className = 'viajes-entry-card-content';
+      content.textContent = entry.content;
+      card.appendChild(content);
+    }
+
+    const attachmentsRow = document.createElement('div');
+    attachmentsRow.className = 'viajes-entry-attachments';
+    entry.attachments.forEach((att) => attachmentsRow.appendChild(renderViajesAttachment(att)));
+    entry.movements.forEach((mv) => attachmentsRow.appendChild(renderViajesMovement(mv)));
+    card.appendChild(attachmentsRow);
+
+    const addActionsRow = document.createElement('div');
+    addActionsRow.className = 'viajes-entry-add-actions';
+    const addPhotoBtn = document.createElement('button');
+    addPhotoBtn.type = 'button';
+    addPhotoBtn.className = 'secondary-btn';
+    addPhotoBtn.textContent = '+ Foto';
+    addPhotoBtn.addEventListener('click', () => {
+      viajesPendingAttachmentEntryId = entry.id;
+      viajesSharedFileInput.click();
+    });
+    addActionsRow.appendChild(addPhotoBtn);
+
+    const addGastoBtn = document.createElement('button');
+    addGastoBtn.type = 'button';
+    addGastoBtn.className = 'secondary-btn';
+    addGastoBtn.textContent = '+ Gasto';
+    addGastoBtn.addEventListener('click', () => openViajesGastoModal(null, entry));
+    addActionsRow.appendChild(addGastoBtn);
+    card.appendChild(addActionsRow);
+
+    list.appendChild(card);
+  });
+}
+
+// --- Modal crear/editar entrada -------------------------------------------
+function openViajesEntryModal(entry) {
+  document.getElementById('viajes-entry-modal-title').textContent = entry ? 'Editar entrada' : 'Nueva entrada';
+  document.getElementById('viajes-entry-id').value = entry ? entry.id : '';
+  document.getElementById('viajes-entry-content').value = (entry && entry.content) || '';
+  viajesEntryDateField.setValue(entry ? new Date(`${entry.date}T00:00:00`) : new Date());
+  document.getElementById('viajes-entry-modal').classList.remove('hidden');
+}
+function closeViajesEntryModal() {
+  document.getElementById('viajes-entry-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-viajes-entry').addEventListener('click', () => openViajesEntryModal(null));
+document.getElementById('btn-close-viajes-entry').addEventListener('click', closeViajesEntryModal);
+document.getElementById('btn-cancel-viajes-entry').addEventListener('click', closeViajesEntryModal);
+
+document.getElementById('viajes-entry-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('viajes-entry-id').value;
+  const payload = {
+    tripId: viajesCurrentTrip.id,
+    date: toDateKey(viajesEntryDateField.getValue()),
+    content: document.getElementById('viajes-entry-content').value.trim() || null,
+  };
+  try {
+    if (id) await api(`/api/viajes-entries/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    else await api('/api/viajes-entries', { method: 'POST', body: JSON.stringify(payload) });
+    closeViajesEntryModal();
+    await refreshViajesEntries();
+    await loadViajesTrips();
+  } catch (err) {
+    alert('No se pudo guardar la entrada: ' + err.message);
+  }
+});
+
+// --- Subir foto (SIEMPRE sin importe -- eso es "+ Gasto") --------------
+function openViajesAttachmentModal(file) {
+  viajesPendingAttachmentFile = file;
+  document.getElementById('viajes-attachment-filename').textContent = file.name;
+  document.getElementById('viajes-attachment-modal').classList.remove('hidden');
+}
+function closeViajesAttachmentModal() {
+  viajesPendingAttachmentFile = null;
+  viajesPendingAttachmentEntryId = null;
+  document.getElementById('viajes-attachment-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-viajes-attachment').addEventListener('click', closeViajesAttachmentModal);
+document.getElementById('btn-cancel-viajes-attachment').addEventListener('click', closeViajesAttachmentModal);
+document.getElementById('btn-confirm-viajes-attachment').addEventListener('click', async () => {
+  const file = viajesPendingAttachmentFile;
+  const entryId = viajesPendingAttachmentEntryId;
+  const btn = document.getElementById('btn-confirm-viajes-attachment');
+  btn.disabled = true;
+  try {
+    await api(`/api/viajes-entries/${entryId}/attachments`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type },
+      body: file,
+    });
+    closeViajesAttachmentModal();
+    await refreshViajesEntries();
+  } catch (err) {
+    alert('No se pudo subir la foto: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// --- Crear/editar un movimiento (gasto o ingreso) -----------------------
+// Cuenta/Categoria (createSelectField, sin dependencia de settings.js al
+// crearse -- solo dentro de sus popovers, ver el mismo criterio ya usado
+// para viajesLinkFinanzasAccountField/CategoryField) creadas a nivel de
+// modulo; sus opciones se rellenan solo si el viaje tiene el enlace con
+// Finanzas activado (ver refreshViajesGastoModalFields).
+const viajesGastoTypeField = createSelectField({
+  options: [
+    { value: 'expense', label: 'Gasto' },
+    { value: 'income', label: 'Ingreso' },
+  ],
+  initialValue: 'expense',
+  onChange: () => refreshViajesGastoModalFields(),
+});
+document.getElementById('viajes-gasto-type-field').appendChild(viajesGastoTypeField.element);
+
+const viajesGastoAccountField = createSelectField({ options: [], initialValue: '' });
+document.getElementById('viajes-gasto-account-field').appendChild(viajesGastoAccountField.element);
+
+const viajesGastoCategoryField = createSelectField({ options: [{ value: '', label: 'Sin categoría' }], initialValue: '' });
+document.getElementById('viajes-gasto-category-field').appendChild(viajesGastoCategoryField.element);
+
+// Cuenta/Categoria/"Cuenta para el limite mensual" SOLO se ven si el
+// VIAJE tiene el enlace con Finanzas activado -- si no, es un simple
+// apunte local sin nada de Finanzas de por medio (mismo patron de
+// mostrar/ocultar por tipo que refreshFinanzasTransactionTypeFields).
+function refreshViajesGastoModalFields() {
+  const isExpense = viajesGastoTypeField.getValue() === 'expense';
+  const linked = !!(viajesCurrentTrip && viajesCurrentTrip.finanzasLinked);
+  document.getElementById('viajes-gasto-account-label').classList.toggle('hidden', !linked);
+  document.getElementById('viajes-gasto-category-label').classList.toggle('hidden', !linked || !isExpense);
+  document.getElementById('viajes-gasto-counts-row').classList.toggle('hidden', !linked || !isExpense);
+}
+
+let viajesGastoEditingId = null;
+let viajesGastoEntryId = null;
+let viajesGastoPendingPhotoFile = null;
+
+// La foto de ticket solo se puede elegir al CREAR (movement === null) --
+// editar un movimiento ya creado no permite cambiar/quitar su foto
+// (limitacion aceptada a proposito, evita complicar el modal por algo no
+// pedido). "entry" solo hace falta al crear, para saber a que entrada
+// pertenece -- al editar ya se saca de movement.entryId.
+async function openViajesGastoModal(movement, entry) {
+  viajesGastoEditingId = movement ? movement.id : null;
+  viajesGastoEntryId = movement ? movement.entryId : entry.id;
+  viajesGastoPendingPhotoFile = null;
+  document.getElementById('viajes-gasto-modal-title').textContent = movement ? 'Editar movimiento' : 'Nuevo gasto/ingreso';
+  document.getElementById('viajes-gasto-id').value = movement ? movement.id : '';
+  viajesGastoTypeField.setValue(movement ? movement.type : 'expense');
+  document.getElementById('viajes-gasto-amount').value = movement ? movement.amount : '';
+  document.getElementById('viajes-gasto-description').value = (movement && movement.description) || '';
+  document.getElementById('viajes-gasto-counts').checked = movement ? movement.countsTowardBudget : true;
+
+  const linked = !!(viajesCurrentTrip && viajesCurrentTrip.finanzasLinked);
+  if (linked) {
+    const [accounts, categories] = await Promise.all([api('/api/finanzas-accounts'), api('/api/finanzas-categories')]);
+    viajesGastoAccountField.setOptions(accounts.map((a) => ({ value: a.id, label: a.name })));
+    viajesGastoCategoryField.setOptions([{ value: '', label: 'Sin categoría' }, ...categories.map((c) => ({ value: c.id, label: c.name }))]);
+    let defaultAccountId = accounts[0] ? accounts[0].id : '';
+    if (!movement) {
+      // Cuenta por defecto DE ESTE VIAJE (viajesCurrentTrip.defaultAccountId,
+      // ya cargada con el viaje -- ya no es un ajuste global de
+      // Configuración), solo al CREAR -- editar respeta la cuenta que ya
+      // tenia.
+      if (viajesCurrentTrip.defaultAccountId && accounts.some((a) => a.id === viajesCurrentTrip.defaultAccountId)) {
+        defaultAccountId = viajesCurrentTrip.defaultAccountId;
+      }
+    }
+    viajesGastoAccountField.setValue(defaultAccountId);
+    viajesGastoCategoryField.setValue('');
+  }
+
+  document.getElementById('viajes-gasto-photo-label').classList.toggle('hidden', !!movement);
+  document.getElementById('viajes-gasto-photo-input').value = '';
+  document.getElementById('viajes-gasto-photo-filename').classList.add('hidden');
+  document.getElementById('btn-delete-viajes-gasto').classList.toggle('hidden', !movement);
+  refreshViajesGastoModalFields();
+  document.getElementById('viajes-gasto-modal').classList.remove('hidden');
+}
+function closeViajesGastoModal() {
+  viajesGastoEditingId = null;
+  viajesGastoEntryId = null;
+  viajesGastoPendingPhotoFile = null;
+  document.getElementById('viajes-gasto-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-viajes-gasto').addEventListener('click', closeViajesGastoModal);
+document.getElementById('btn-cancel-viajes-gasto').addEventListener('click', closeViajesGastoModal);
+document.getElementById('viajes-gasto-photo-input').addEventListener('change', (e) => {
+  const file = e.target.files[0] || null;
+  viajesGastoPendingPhotoFile = file;
+  document.getElementById('viajes-gasto-photo-filename').textContent = file ? file.name : '';
+  document.getElementById('viajes-gasto-photo-filename').classList.toggle('hidden', !file);
+});
+document.getElementById('btn-delete-viajes-gasto').addEventListener('click', async () => {
+  if (!viajesGastoEditingId) return;
+  if (!confirm('¿Borrar este movimiento?')) return;
+  await api(`/api/viajes-entries/movements/${viajesGastoEditingId}`, { method: 'DELETE' });
+  closeViajesGastoModal();
+  await refreshViajesEntries();
+});
+
+document.getElementById('viajes-gasto-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const type = viajesGastoTypeField.getValue();
+  const amount = document.getElementById('viajes-gasto-amount').value;
+  const description = document.getElementById('viajes-gasto-description').value.trim() || null;
+  const countsTowardBudget = document.getElementById('viajes-gasto-counts').checked;
+  const linked = !!(viajesCurrentTrip && viajesCurrentTrip.finanzasLinked);
+  const accountId = linked ? viajesGastoAccountField.getValue() || null : null;
+  const categoryId = linked ? viajesGastoCategoryField.getValue() || null : null;
+
+  try {
+    if (viajesGastoEditingId) {
+      await api(`/api/viajes-entries/movements/${viajesGastoEditingId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ type, amount, description, countsTowardBudget, accountId, categoryId }),
+      });
+    } else {
+      let attachmentId = null;
+      if (viajesGastoPendingPhotoFile) {
+        const uploaded = await api(`/api/viajes-entries/${viajesGastoEntryId}/attachments`, {
+          method: 'POST',
+          headers: { 'Content-Type': viajesGastoPendingPhotoFile.type },
+          body: viajesGastoPendingPhotoFile,
+        });
+        attachmentId = uploaded.id;
+      }
+      await api(`/api/viajes-entries/${viajesGastoEntryId}/movements`, {
+        method: 'POST',
+        body: JSON.stringify({ type, amount, description, countsTowardBudget, accountId, categoryId, attachmentId }),
+      });
+    }
+    closeViajesGastoModal();
+    await refreshViajesEntries();
+  } catch (err) {
+    alert('No se pudo guardar el movimiento: ' + err.message);
+  }
+});
+
+// --- Vincular un movimiento a un movimiento real de Finanzas ------------
+// Disponible SIEMPRE (no exige que el viaje tenga finanzas_linked
+// activado), para poder enlazar un movimiento suelto sin activar el
+// ajuste de todo el viaje. "viajesLinkFinanzasAttachmentId" guarda ahora
+// el id de un MOVIMIENTO (renombrado abajo para que quede claro).
+let viajesLinkFinanzasMovementId = null;
+async function openViajesLinkFinanzasModal(movement) {
+  viajesLinkFinanzasMovementId = movement.id;
+  document.getElementById('viajes-link-finanzas-amount').textContent = `Importe: ${movement.amount.toFixed(2)} €`;
+  const [accounts, categories] = await Promise.all([api('/api/finanzas-accounts'), api('/api/finanzas-categories')]);
+  viajesLinkFinanzasAccountField.setOptions(accounts.map((a) => ({ value: a.id, label: a.name })));
+  viajesLinkFinanzasCategoryField.setOptions([{ value: '', label: 'Sin categoría' }, ...categories.map((c) => ({ value: c.id, label: c.name }))]);
+  document.getElementById('viajes-link-finanzas-description').value = movement.description || '';
+  document.getElementById('viajes-link-finanzas-modal').classList.remove('hidden');
+}
+function closeViajesLinkFinanzasModal() {
+  viajesLinkFinanzasMovementId = null;
+  document.getElementById('viajes-link-finanzas-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-viajes-link-finanzas').addEventListener('click', closeViajesLinkFinanzasModal);
+document.getElementById('btn-cancel-viajes-link-finanzas').addEventListener('click', closeViajesLinkFinanzasModal);
+document.getElementById('btn-confirm-viajes-link-finanzas').addEventListener('click', async () => {
+  const accountId = viajesLinkFinanzasAccountField.getValue();
+  if (!accountId) { alert('Elige una cuenta.'); return; }
+  try {
+    await api(`/api/viajes-entries/movements/${viajesLinkFinanzasMovementId}/link-finanzas`, {
+      method: 'POST',
+      body: JSON.stringify({
+        accountId,
+        categoryId: viajesLinkFinanzasCategoryField.getValue() || null,
+        description: document.getElementById('viajes-link-finanzas-description').value.trim() || null,
+      }),
+    });
+    closeViajesLinkFinanzasModal();
+    await refreshViajesEntries();
+  } catch (err) {
+    alert('No se pudo vincular: ' + err.message);
+  }
+});
+
+// Taiwán es el UNICO pais que no existe como contorno propio en este
+// mapa (aparece dibujado como parte del grupo "cn" de China, ver
+// comentario mas arriba) -- se dibuja un marcador/pin en su ubicacion
+// aproximada en vez de un contorno real. Coordenadas tomadas
+// directamente de la etiqueta de texto "TW-label" que trae el propio
+// SVG (mismo sistema de coordenadas que el resto del mapa, ya
+// calibrada por quien hizo el dataset) -- ajustables a mano aqui si
+// algun dia se ven descuadradas.
+const VIAJES_MICRO_STATE_MARKERS = [
+  { id: 'tw', x: 791, y: 178 }, // Taiwan
+];
+
+function addViajesMapMicroStateMarkers(svg) {
+  const svgNS = 'http://www.w3.org/2000/svg';
+  VIAJES_MICRO_STATE_MARKERS.forEach(({ id, x, y }) => {
+    const circle = document.createElementNS(svgNS, 'circle');
+    circle.setAttribute('id', id);
+    circle.setAttribute('cx', x);
+    circle.setAttribute('cy', y);
+    circle.setAttribute('r', '1.8');
+    circle.classList.add('viajes-map-country', 'viajes-map-micro-state');
+    circle.dataset.countryCode = id;
+    circle.addEventListener('click', () => openViajesCountryModal(id));
+    svg.appendChild(circle);
+  });
+}
+
+// --- Mapa interactivo ---------------------------------------------------
+async function loadViajesMap() {
+  if (viajesMapLoaded) return;
+  viajesMapLoaded = true;
+  const container = document.getElementById('viajes-map-container');
+  const svgWrap = document.getElementById('viajes-map-svg-wrap');
+  const res = await fetch('/viajes-world-map.svg');
+  svgWrap.innerHTML = await res.text();
+  const svg = svgWrap.querySelector('svg');
+  // Solo los <g id="XX"> de nivel superior (paises de verdad) -- el SVG
+  // tambien trae, al mismo nivel, un rect#World y un path#Ocean (fondo,
+  // no clicables) y un <g id="labels" display="none"> con el nombre en
+  // ingles de cada pais (no lo usamos, ya tenemos viajesCountryLabel());
+  // ":scope > g[id]" no baja a los <path>/<circle> internos de cada
+  // pais, que tienen sus propios ids sin sentido (ej. "path5998").
+  // dataset.countryCode (minuscula) en vez de tocar el atributo "id" real
+  // del SVG (que aqui viene en MAYUSCULAS) -- evita mutar el documento
+  // de origen y deja un unico sitio (este dataset) del que leer el
+  // codigo en minuscula en el resto de la funcion.
+  svg.querySelectorAll(':scope > g[id]').forEach((el) => {
+    if (el.id === 'labels') return;
+    el.classList.add('viajes-map-country');
+    el.dataset.countryCode = el.id.toLowerCase();
+    el.addEventListener('click', () => openViajesCountryModal(el.dataset.countryCode));
+  });
+  addViajesMapMicroStateMarkers(svg);
+  // Hover -> nombre del pais al instante, reutilizando el mismo tooltip
+  // ya construido para las graficas de Finanzas (un unico div flotante
+  // que sigue al raton, ver attachFinanzasChartTooltips) -- generico de
+  // verdad, no hace falta tocar su implementacion para reutilizarlo aqui.
+  svg.querySelectorAll('.viajes-map-country').forEach((el) => {
+    el.dataset.tooltip = viajesCountryLabel(el.dataset.countryCode);
+  });
+  attachFinanzasChartTooltips(svg);
+  initViajesMapZoomPan(svg, container);
+}
+
+function refreshViajesMapHighlights() {
+  const container = document.getElementById('viajes-map-container');
+  const svg = container.querySelector('svg');
+  if (!svg) return;
+  const visited = new Set(viajesTrips.flatMap((t) => t.countries));
+  svg.querySelectorAll('.viajes-map-country').forEach((el) => {
+    el.classList.toggle('viajes-map-country-visited', visited.has(el.dataset.countryCode));
+  });
+}
+
+// Zoom + paneo del mapa mutando el "viewBox" del SVG (no hay ninguna
+// libreria de zoom en el proyecto, y el SVG ya usa viewBox + se escala
+// solo por CSS -- mutar el viewBox es lo mas natural, sin necesidad de
+// un wrapper con transform ni tocar el tamano del propio SVG).
+let viajesMapBaseViewBox = null; // {x,y,w,h} original, al 100% de zoom
+let viajesMapView = null; // {x,y,w,h} de la sub-region visible ahora mismo
+const VIAJES_MAP_MIN_ZOOM = 1;
+const VIAJES_MAP_MAX_ZOOM = 8;
+
+function parseViajesMapViewBox(svg) {
+  const raw = (svg.getAttribute('viewBox') || '').trim().split(/\s+/).map(Number);
+  if (raw.length !== 4 || raw.some((n) => Number.isNaN(n))) {
+    return { x: 0, y: 0, w: svg.clientWidth || 100, h: svg.clientHeight || 100 };
+  }
+  return { x: raw[0], y: raw[1], w: raw[2], h: raw[3] };
+}
+
+function viajesMapCurrentZoom() {
+  return viajesMapBaseViewBox.w / viajesMapView.w;
+}
+
+function clampViajesMapView() {
+  const base = viajesMapBaseViewBox;
+  viajesMapView.w = Math.min(viajesMapView.w, base.w);
+  viajesMapView.h = Math.min(viajesMapView.h, base.h);
+  viajesMapView.x = Math.min(Math.max(viajesMapView.x, base.x), base.x + base.w - viajesMapView.w);
+  viajesMapView.y = Math.min(Math.max(viajesMapView.y, base.y), base.y + base.h - viajesMapView.h);
+}
+
+function applyViajesMapView(svg) {
+  clampViajesMapView();
+  svg.setAttribute('viewBox', `${viajesMapView.x} ${viajesMapView.y} ${viajesMapView.w} ${viajesMapView.h}`);
+}
+
+// Zoomea manteniendo fijo el punto (fracX, fracY) -- fraccion 0..1
+// dentro de la caja visible ACTUAL, no del mapa entero -- que es donde
+// esta el cursor o el punto medio del pellizco.
+function setViajesMapZoomAt(newZoom, fracX, fracY, svg) {
+  const base = viajesMapBaseViewBox;
+  const clampedZoom = Math.min(Math.max(newZoom, VIAJES_MAP_MIN_ZOOM), VIAJES_MAP_MAX_ZOOM);
+  const cur = viajesMapView;
+  const px = cur.x + fracX * cur.w;
+  const py = cur.y + fracY * cur.h;
+  const w = base.w / clampedZoom;
+  const h = base.h / clampedZoom;
+  viajesMapView = { x: px - fracX * w, y: py - fracY * h, w, h };
+  applyViajesMapView(svg);
+}
+
+function initViajesMapZoomPan(svg, container) {
+  viajesMapBaseViewBox = parseViajesMapViewBox(svg);
+  viajesMapView = Object.assign({}, viajesMapBaseViewBox);
+
+  // pointerId -> {x,y} en coordenadas de pantalla (clientX/clientY).
+  const activePointers = new Map();
+  let dragStart = null; // {x,y,viewX,viewY} para paneo con 1 puntero
+  let dragMoved = 0; // distancia recorrida -- por debajo del umbral, un toque sigue siendo un clic normal sobre el pais
+  let pinchStart = null; // {dist, zoom} para pellizco con 2 punteros
+  // Si el arrastre empieza y termina sobre el MISMO pais (p.ej. panear
+  // dentro de un pais grande sin cruzar su borde), el navegador sigue
+  // disparando un "click" normal en ese pais -- se traga ese click de
+  // mas con esta bandera + un listener en fase de captura (mas abajo),
+  // sin tocar el listener de cada pais.
+  let justDragged = false;
+  container.addEventListener(
+    'click',
+    (e) => {
+      if (justDragged) {
+        justDragged = false;
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    },
+    true
+  );
+
+  function containerFrac(clientX, clientY) {
+    const rect = container.getBoundingClientRect();
+    return {
+      x: Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1),
+      y: Math.min(Math.max((clientY - rect.top) / rect.height, 0), 1),
+    };
+  }
+
+  function pointerDistance() {
+    const pts = Array.from(activePointers.values());
+    return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  }
+
+  container.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      const frac = containerFrac(e.clientX, e.clientY);
+      const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+      setViajesMapZoomAt(viajesMapCurrentZoom() * factor, frac.x, frac.y, svg);
+    },
+    { passive: false }
+  );
+
+  container.addEventListener('pointerdown', (e) => {
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size === 1) {
+      dragStart = { x: e.clientX, y: e.clientY, viewX: viajesMapView.x, viewY: viajesMapView.y };
+      dragMoved = 0;
+    } else if (activePointers.size === 2) {
+      pinchStart = { dist: pointerDistance(), zoom: viajesMapCurrentZoom() };
+    }
+  });
+
+  // pointermove/up/cancel se escuchan en window (no en el contenedor) para
+  // seguir el arrastre aunque el puntero salga de los limites del mapa --
+  // sin usar setPointerCapture, que redirigiria los eventos y podria
+  // interferir con el "click" nativo ya puesto en cada pais.
+  window.addEventListener('pointermove', (e) => {
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointers.size === 2 && pinchStart) {
+      const dist = pointerDistance();
+      const pts = Array.from(activePointers.values());
+      const frac = containerFrac((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2);
+      setViajesMapZoomAt(pinchStart.zoom * (dist / pinchStart.dist), frac.x, frac.y, svg);
+      return;
+    }
+
+    if (activePointers.size === 1 && dragStart) {
+      const dxClient = e.clientX - dragStart.x;
+      const dyClient = e.clientY - dragStart.y;
+      dragMoved = Math.hypot(dxClient, dyClient);
+      if (dragMoved < 4) return;
+      const rect = container.getBoundingClientRect();
+      viajesMapView.x = dragStart.viewX - (dxClient / rect.width) * viajesMapView.w;
+      viajesMapView.y = dragStart.viewY - (dyClient / rect.height) * viajesMapView.h;
+      container.classList.add('viajes-map-dragging');
+      applyViajesMapView(svg);
+    }
+  });
+
+  function endPointer(e) {
+    activePointers.delete(e.pointerId);
+    pinchStart = null;
+    if (activePointers.size === 1) {
+      // Queda un dedo (se soltó uno de los dos del pellizco) -- seguir
+      // paneando desde donde esta AHORA, sin saltar de golpe.
+      const [remaining] = activePointers.values();
+      dragStart = { x: remaining.x, y: remaining.y, viewX: viajesMapView.x, viewY: viajesMapView.y };
+      dragMoved = 0;
+    } else if (activePointers.size === 0) {
+      if (dragMoved >= 4) justDragged = true;
+      dragStart = null;
+      container.classList.remove('viajes-map-dragging');
+    }
+  }
+  window.addEventListener('pointerup', endPointer);
+  window.addEventListener('pointercancel', endPointer);
+
+  document.getElementById('btn-viajes-map-zoom-in').addEventListener('click', () => {
+    setViajesMapZoomAt(viajesMapCurrentZoom() * 1.4, 0.5, 0.5, svg);
+  });
+  document.getElementById('btn-viajes-map-zoom-out').addEventListener('click', () => {
+    setViajesMapZoomAt(viajesMapCurrentZoom() / 1.4, 0.5, 0.5, svg);
+  });
+  document.getElementById('btn-viajes-map-zoom-reset').addEventListener('click', () => {
+    viajesMapView = Object.assign({}, viajesMapBaseViewBox);
+    applyViajesMapView(svg);
+  });
+}
+
+async function openViajesCountryModal(code) {
+  document.getElementById('viajes-country-modal-title').textContent = viajesCountryLabel(code);
+  const trips = await api(`/api/viajes-trips/by-country/${code}`);
+  const list = document.getElementById('viajes-country-trips-list');
+  document.getElementById('viajes-country-trips-empty').classList.toggle('hidden', trips.length > 0);
+  renderViajesTripCards(list, trips, (trip) => {
+    closeViajesCountryModal();
+    setViajesTab('viajes');
+    openViajesTripDetail(trip);
+  });
+  document.getElementById('btn-new-viaje-en-pais').onclick = () => {
+    closeViajesCountryModal();
+    openViajesTripModal(null, code);
+  };
+  document.getElementById('viajes-country-modal').classList.remove('hidden');
+}
+function closeViajesCountryModal() {
+  document.getElementById('viajes-country-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-viajes-country').addEventListener('click', closeViajesCountryModal);
+
+// --- Pestañas Mapa / Mis viajes ------------------------------------------
+function setViajesTab(tab) {
+  document.querySelectorAll('.viajes-tab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.viajesTab === tab));
+  document.querySelectorAll('.viajes-tab-panel').forEach((panel) => panel.classList.toggle('hidden', panel.dataset.viajesPanel !== tab));
+}
+document.querySelectorAll('.viajes-tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => setViajesTab(btn.dataset.viajesTab));
+});
+
+async function openViajesView() {
+  closeExtensionsView();
+  document.getElementById('viajes-view').classList.remove('hidden');
+  setCurrentScreen('viajes');
+  setViajesTab('mapa');
+  document.getElementById('viajes-trips-list-panel').classList.remove('hidden');
+  document.getElementById('viajes-trip-detail-panel').classList.add('hidden');
+  await loadViajesMap();
+  await loadViajesTrips();
+  renderViajesTripsList();
+  refreshViajesMapHighlights();
+}
+function closeViajesView() {
+  document.getElementById('viajes-view').classList.add('hidden');
+  openExtensionsView();
+}
+document.getElementById('btn-open-viajes').addEventListener('click', openViajesView);
+document.getElementById('btn-close-viajes').addEventListener('click', closeViajesView);
 
 async function openLecturasSagaDetail(saga) {
   state.lecturasCurrentSagaId = saga.id;
@@ -8308,6 +9804,42 @@ document.getElementById('btn-onboarding-skip').addEventListener('click', async (
 // cargara nada mas, dejando la pantalla a medias. Con la copia local
 // (ver api()/db-local.js) la mayoria de estos ya no fallan sin conexion,
 // pero esto es una red de seguridad ademas, no en vez de eso.
+// ---------------------------------------------------------------------
+// Recordar la "ventana" (vista a pantalla completa) en la que estabas al
+// recargar la pagina -- Koku pidio explicitamente que un F5 no te mande
+// siempre al calendario. Ambito deliberadamente limitado a las vistas de
+// NIVEL SUPERIOR (Mi espacio, Extensiones, y cada extension) -- NO
+// restaura pestañas/detalles concretos dentro de cada una (que pestaña
+// de Finanzas, que viaje abierto en Viajes, que saga de Lecturas...), ni
+// el editor de notas (junta varias notas abiertas a la vez, con mas
+// estado del que compensa persistir aqui) -- se quedan en su pantalla
+// de entrada normal, no es una regresion respecto a hoy. Los
+// formularios/modales NUNCA se restauran (ya no lo hacian antes de este
+// cambio): se quedan cerrados tras recargar, tal y como pidio Koku
+// ("que se cancele, pero mantenme en la ventana"). Por dispositivo
+// (localStorage), no sincronizado entre movil/ordenador.
+// ---------------------------------------------------------------------
+function setCurrentScreen(screen) {
+  localStorage.setItem('currentScreen', screen);
+}
+
+async function restoreCurrentScreen() {
+  const screen = localStorage.getItem('currentScreen');
+  if (!screen || screen === 'home') return;
+  if (screen === 'my-space') {
+    // En modo "panel" no existe una pantalla de Mi espacio aparte que
+    // restaurar -- el hub ya vive siempre junto al calendario.
+    if (getMiEspacioMode() === 'topbar') openMySpaceView();
+    return;
+  }
+  if (screen === 'extensions') { openExtensionsView(); return; }
+  if (screen === 'gym') { await openGymView(); return; }
+  if (screen === 'lecturas') { openLecturasView(); return; }
+  if (screen === 'finanzas') { await openFinanzasView(); return; }
+  if (screen === 'archivos') { await openArchivosView(); return; }
+  if (screen === 'viajes') { await openViajesView(); return; }
+}
+
 async function initStep(fn) {
   try {
     await fn();
@@ -8317,6 +9849,37 @@ async function initStep(fn) {
 }
 
 async function init() {
+  // Lo PRIMERO de todo (antes incluso de cargar datos del calendario):
+  // si veniamos de una recarga dentro de una vista a pantalla completa,
+  // cubrir el calendario con esa vista cuanto antes -- showApp() ya dejo
+  // el calendario visible, así que cuanto mas tarde se llame a esto, mas
+  // se nota el "flashazo" del calendario antes de taparlo. Moverlo aqui
+  // (en vez de al final de init(), donde estaba antes) no depende de
+  // nada de lo que carga init() despues -- cada open*View() ya carga sus
+  // propios datos por su cuenta.
+  //
+  // OJO -- bug real encontrado al mover esto tan pronto: algunas vistas
+  // (Finanzas, via setupFinanzasIconColorFields) llaman en su apertura a
+  // funciones que viven en settings.js (createIconField/createColorField),
+  // que carga DESPUES de app.js (ver la nota de "Orden de declaracion"
+  // en CLAUDE.md) -- normalmente esto no es problema porque esas
+  // llamadas solo ocurren dentro de manejadores de eventos, que se
+  // disparan mucho despues de que TODOS los <script> ya han terminado
+  // de cargar. Pero al llamar a restoreCurrentScreen() de forma
+  // SINCRONA nada mas arrancar init() (que a su vez se invoca de forma
+  // sincrona al final de app.js), app.js seguia "en mitad de su propio
+  // <script>" cuando esto se ejecutaba -- settings.js ni siquiera habia
+  // empezado a cargar todavia, y createIconField no existia aun
+  // (ReferenceError). Un simple `await Promise.resolve()` NO basta para
+  // arreglarlo (los microtasks se vacian ENTRE cada <script> del
+  // documento, antes de pasar al siguiente) -- hace falta un macrotask
+  // de verdad (setTimeout) para que el navegador termine de
+  // parsear/ejecutar el resto de los <script> del documento (incluido
+  // settings.js entero) antes de continuar aqui. Sigue siendo
+  // practicamente instantaneo para quien lo ve, muy lejos de las 7
+  // llamadas de red secuenciales que había antes.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await initStep(restoreCurrentScreen);
   await initStep(maybeShowOnboarding);
   await initStep(loadGroups);
   await initStep(loadSpecialDays);

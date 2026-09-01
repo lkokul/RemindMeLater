@@ -564,6 +564,7 @@ document.getElementById('btn-gym-settings').addEventListener('click', openSettin
 document.getElementById('btn-lecturas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-archivos-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-close-settings').addEventListener('click', () => {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
@@ -1993,6 +1994,15 @@ function refreshShortcutsTab() {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
 
+  // El modal de confirmacion/aviso propio (showAppConfirm/showAppAlert,
+  // ver app.js) siempre es lo mas "encima" cuando esta abierto -- se
+  // comprueba antes que cualquier otra cosa, igual que un popover.
+  const appConfirmModal = document.getElementById('app-confirm-modal');
+  if (appConfirmModal && !appConfirmModal.classList.contains('hidden')) {
+    closeAppConfirm(false);
+    return;
+  }
+
   const mobileFabMenu = document.getElementById('mobile-fab-menu');
   if (mobileFabMenu && !mobileFabMenu.classList.contains('hidden')) {
     toggleMobileFabMenu(false);
@@ -2038,6 +2048,41 @@ document.addEventListener('keydown', (e) => {
   const noteFolderModal = document.getElementById('note-folder-modal');
   if (noteFolderModal && !noteFolderModal.classList.contains('hidden')) {
     closeNoteFolderModal();
+    return;
+  }
+
+  // Los 6 modales de Viajes (trip/entrada/foto/gasto/vincular Finanzas/
+  // pais) -- igual que el resto de modales de arriba, se cierran antes
+  // que cualquier capa de vista de debajo (ver la rama "viajes-view" mas
+  // abajo para lo que pasa cuando NINGUNO de estos esta abierto).
+  const viajesTripModal = document.getElementById('viajes-trip-modal');
+  if (viajesTripModal && !viajesTripModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-trip').click();
+    return;
+  }
+  const viajesEntryModal = document.getElementById('viajes-entry-modal');
+  if (viajesEntryModal && !viajesEntryModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-entry').click();
+    return;
+  }
+  const viajesAttachmentModal = document.getElementById('viajes-attachment-modal');
+  if (viajesAttachmentModal && !viajesAttachmentModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-attachment').click();
+    return;
+  }
+  const viajesGastoModal = document.getElementById('viajes-gasto-modal');
+  if (viajesGastoModal && !viajesGastoModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-gasto').click();
+    return;
+  }
+  const viajesLinkFinanzasModal = document.getElementById('viajes-link-finanzas-modal');
+  if (viajesLinkFinanzasModal && !viajesLinkFinanzasModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-link-finanzas').click();
+    return;
+  }
+  const viajesCountryModal = document.getElementById('viajes-country-modal');
+  if (viajesCountryModal && !viajesCountryModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-viajes-country').click();
     return;
   }
 
@@ -2122,6 +2167,25 @@ document.addEventListener('keydown', (e) => {
       document.getElementById('btn-back-lecturas-sagas').click();
     } else {
       document.getElementById('btn-close-lecturas').click();
+    }
+    return;
+  }
+
+  // Viajes tiene DOS capas de sub-navegacion, no una: el detalle de un
+  // viaje dentro de la pestaña "Mis viajes", y las propias pestañas
+  // Mapa/Mis viajes -- Esc SIEMPRE pasa por la pestaña Mapa antes de
+  // cerrar del todo a Extensiones (pedido explicito de Koku), en vez de
+  // cerrar directamente desde "Mis viajes".
+  const viajesView = document.getElementById('viajes-view');
+  if (viajesView && !viajesView.classList.contains('hidden')) {
+    const tripDetailPanel = document.getElementById('viajes-trip-detail-panel');
+    const activeTabBtn = document.querySelector('.viajes-tab-btn.active');
+    if (tripDetailPanel && !tripDetailPanel.classList.contains('hidden')) {
+      document.getElementById('btn-back-viajes-trips').click();
+    } else if (activeTabBtn && activeTabBtn.dataset.viajesTab === 'viajes') {
+      setViajesTab('mapa');
+    } else {
+      document.getElementById('btn-close-viajes').click();
     }
     return;
   }

@@ -437,6 +437,89 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Extension "Viajes" (avion en #extensions-view): un viaje puede tocar
+  -- VARIOS paises (ej. un interrail), de ahi la tabla de union
+  -- viajes_trip_countries en vez de una columna "country" directa en
+  -- viajes_trips. country_code es el codigo ISO 3166-1 alfa-2 en
+  -- minusculas (mismo formato que los "id" del mapa SVG en
+  -- public/viajes-world-map.svg, normalizados a minuscula en el cliente
+  -- -- el SVG en si los trae en mayusculas). Sin CHECK contra una lista
+  -- cerrada de paises a proposito: el selector del cliente ya limita a
+  -- los paises reales del mapa, y ser permisivo aqui evita tener que
+  -- tocar el servidor si el mapa cambia de fuente el dia de mañana (como
+  -- ya ha pasado una vez).
+  CREATE TABLE IF NOT EXISTS viajes_trips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#5b8cff',
+    start_date TEXT,
+    end_date TEXT,
+    description TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS viajes_trip_countries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trip_id INTEGER NOT NULL REFERENCES viajes_trips(id),
+    country_code TEXT NOT NULL,
+    UNIQUE(trip_id, country_code)
+  );
+
+  -- Una entrada de "bitacora" = un dia (o momento) concreto dentro de un
+  -- viaje. Contenido en texto plano simple (sin el editor de bloques/
+  -- formato de Notas -- eso es otra pieza aparte del proyecto), de sobra
+  -- para "que se ha hecho ese dia".
+  CREATE TABLE IF NOT EXISTS viajes_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trip_id INTEGER NOT NULL REFERENCES viajes_trips(id),
+    date TEXT NOT NULL,
+    content TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Fotos dentro de una entrada -- mismo patron que note_images (nombre
+  -- de archivo UUID en disco, ver routes/viajesEntries.js), guardadas en
+  -- DATA_DIR/viajes-photos/. "amount" es opcional: si se rellena, este
+  -- adjunto es un ticket/recibo (no una foto de recuerdo cualquiera), y
+  -- puede enlazarse a un movimiento real de Finanzas
+  -- (finanzas_transaction_id) SOLO si el ajuste global
+  -- app_settings.viajesFinanzasLinked esta activado. Borrar el adjunto
+  -- borra tambien el movimiento de Finanzas enlazado si lo tenia -- es
+  -- "ese ticket concreto", no una plantilla que genera cosas por su
+  -- cuenta (a diferencia de finanzas_recurring_expenses, que SI deja
+  -- huerfanas sus transacciones generadas al borrarse la plantilla).
+  CREATE TABLE IF NOT EXISTS viajes_entry_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id INTEGER NOT NULL REFERENCES viajes_entries(id),
+    filename TEXT NOT NULL,
+    amount REAL,
+    finanzas_transaction_id INTEGER REFERENCES finanzas_transactions(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Un movimiento (gasto o ingreso) dentro de una entrada de bitacora --
+  -- tabla APARTE de viajes_entry_attachments a proposito: una foto y un
+  -- movimiento son cosas distintas (no toda foto es un ticket, no todo
+  -- gasto lleva foto), y en SQLite habria hecho falta reconstruir la
+  -- tabla entera para volver "filename" opcional. "amount"/
+  -- "finanzas_transaction_id" de viajes_entry_attachments quedan sin
+  -- usar a partir de aqui (nunca se borran columnas en este proyecto) --
+  -- ver la migracion de backfill mas abajo en este archivo, que traslada
+  -- los tickets ya existentes a esta tabla nueva.
+  CREATE TABLE IF NOT EXISTS viajes_entry_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id INTEGER NOT NULL REFERENCES viajes_entries(id),
+    type TEXT NOT NULL CHECK (type IN ('expense', 'income')),
+    amount REAL NOT NULL,
+    description TEXT,
+    counts_toward_budget INTEGER NOT NULL DEFAULT 1,
+    attachment_id INTEGER REFERENCES viajes_entry_attachments(id),
+    finanzas_transaction_id INTEGER REFERENCES finanzas_transactions(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Migracion sencilla: group_id y active_theme_id se anadieron despues de
@@ -990,6 +1073,42 @@ const SEED_THEMES = [
     },
   },
 ];
+
+// ---------------------------------------------------------------------
+// Viajes: finanzas_linked POR VIAJE (sustituye al ajuste GLOBAL que
+// habia antes en app_settings, ver routes/viajesSettings.js) + backfill
+// de los tickets ya creados en viajes_entry_attachments hacia la tabla
+// nueva viajes_entry_movements (ver su CREATE TABLE mas arriba en este
+// archivo). El backfill es idempotente sin necesitar una bandera aparte:
+// cada fila migrada se limpia (amount/finanzas_transaction_id a NULL) en
+// el mismo paso, asi que una segunda ejecucion no encuentra nada que
+// migrar de nuevo.
+// ---------------------------------------------------------------------
+const viajesTripColumns = db.prepare('PRAGMA table_info(viajes_trips)').all().map((c) => c.name);
+if (!viajesTripColumns.includes('finanzas_linked')) {
+  db.exec('ALTER TABLE viajes_trips ADD COLUMN finanzas_linked INTEGER NOT NULL DEFAULT 0');
+}
+// Cuenta por defecto para los gastos/ingresos de ESTE viaje -- sustituye
+// al ajuste GLOBAL que habia antes en app_settings (ver
+// routes/viajesSettings.js, ahora eliminado): Koku prefiere elegirla
+// viaje a viaje, igual que ya pasa con finanzas_linked.
+if (!viajesTripColumns.includes('default_account_id')) {
+  db.exec('ALTER TABLE viajes_trips ADD COLUMN default_account_id INTEGER REFERENCES finanzas_accounts(id)');
+}
+
+const legacyViajesTickets = db.prepare('SELECT * FROM viajes_entry_attachments WHERE amount IS NOT NULL').all();
+if (legacyViajesTickets.length) {
+  const insertViajesMovement = db.prepare(
+    "INSERT INTO viajes_entry_movements (entry_id, type, amount, attachment_id, finanzas_transaction_id) VALUES (?, 'expense', ?, ?, ?)"
+  );
+  const clearLegacyViajesAttachment = db.prepare(
+    'UPDATE viajes_entry_attachments SET amount = NULL, finanzas_transaction_id = NULL WHERE id = ?'
+  );
+  for (const att of legacyViajesTickets) {
+    insertViajesMovement.run(att.entry_id, att.amount, att.id, att.finanzas_transaction_id);
+    clearLegacyViajesAttachment.run(att.id);
+  }
+}
 
 const existingThemeNames = new Set(db.prepare('SELECT name FROM themes').all().map((t) => t.name));
 const seedTheme = db.prepare('INSERT INTO themes (name, colors, inverse_colors) VALUES (?, ?, ?)');

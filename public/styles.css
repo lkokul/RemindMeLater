@@ -237,7 +237,11 @@ textarea { resize: vertical; }
    contraste con su propio fondo — sigue siendo 100% opaco, solo mas
    parecido al fondo. */
 label { display: block; font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); margin-bottom: 0.75rem; }
-label input, label textarea, label select { margin-top: 0.3rem; }
+/* El "div" cubre los componentes propios (fecha/color/icono/select/
+   selector de pais) -- todos crean un <div> como raiz dentro del
+   <label>, y sin esto se quedaban pegados al texto de la etiqueta
+   mientras que input/textarea/select si tenian aire debajo. */
+label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 
 /* Igual que <label> (mismo tamano/color/margen) pero para envolver un
    selector con estilo propio (.select-field) en vez de un <input>/<select>
@@ -2134,6 +2138,12 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 .modal-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.8rem; }
 
+/* Confirmacion/aviso propio (showAppConfirm/showAppAlert en app.js) --
+   mas estrecho que un modal-card normal, ya que solo lleva un mensaje +
+   botones, sin formulario. */
+.app-confirm-card { max-width: 380px; }
+#app-confirm-modal-message { margin: 0; line-height: 1.4; }
+
 .reminders-day-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.7rem; }
 .day-mark-btn.active {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
@@ -2408,6 +2418,31 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 .select-option:hover { background: var(--surface-2); }
 .select-option.active { background: color-mix(in srgb, var(--accent) 18%, var(--surface-2)); font-weight: 600; }
+/* Mensaje "sin resultados" dentro de un popover de busqueda (ver
+   createCountryPickerField en app.js) -- mismo padding que .select-option
+   pero sin hover/cursor, no es clicable. */
+.select-option-empty { padding: 0.5rem 0.6rem; font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); }
+
+/* Version "elegir varios" de .select-field (createMultiSelectField en
+   app.js): mismo boton+popover, pero con una fila de chips removibles
+   debajo -- mismo look que los chips de .country-picker-chip, unificado
+   aqui porque ahora hay mas de un sitio que los usa (Viajes: filtros de
+   año/mes/país). */
+.multi-select-field { display: flex; flex-direction: column; gap: 0.35rem; width: 100%; }
+.multi-select-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.multi-select-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.15rem 0.5rem; border-radius: 999px;
+  background: var(--accent); color: var(--accent-text); font-size: 0.78rem;
+}
+.multi-select-chip button {
+  border: none; background: none; color: inherit; cursor: pointer;
+  font-size: 0.85rem; padding: 0; line-height: 1;
+}
+/* Marca de "elegido" dentro del popover -- espacio reservado siempre
+   (aunque este vacio) para que el texto de todas las opciones quede
+   alineado, elegidas o no. */
+.multi-select-check { display: inline-block; width: 1rem; text-align: center; color: var(--accent); font-weight: 700; }
 
 /* --- Selector de fecha con estilo propio (createDateField en app.js) —
    mismo lenguaje visual que el calendario grande (.calendar-grid,
@@ -2723,3 +2758,174 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
     padding-top: 0.9rem;
   }
 }
+
+/* Extension "Viajes" -- ver #viajes-view en index.html. Mismo patron que
+   .archivos-body/.finanzas-tab-panel: .my-space-view ya es flex-column,
+   este bloque ocupa el resto del alto y hace scroll propio. */
+.viajes-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.viajes-tabs {
+  flex-shrink: 0; display: flex; gap: 0.4rem; padding: 0.6rem 1.2rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.viajes-tab-btn {
+  font: inherit; background: none; border: none; border-bottom: 2px solid transparent;
+  padding: 0.5rem 0.3rem; color: color-mix(in srgb, var(--bg-text) 65%, var(--bg));
+  cursor: pointer;
+}
+.viajes-tab-btn.active { color: var(--bg-text); border-bottom-color: var(--accent); font-weight: 600; }
+.viajes-tab-panel { flex: 1; min-height: 0; padding: 1rem 1.2rem; overflow-y: auto; }
+.viajes-panel { display: flex; flex-direction: column; gap: 0.6rem; }
+
+/* Mapa: el SVG (public/viajes-world-map.svg, CC BY-SA 3.0) se inyecta
+   entero dentro de este contenedor -- ver loadViajesMap() en app.js.
+   Los paises sin ningun viaje se quedan en --surface-2 (mismo tono
+   neutro que el resto de la app); los que si tienen alguno se resaltan
+   con --accent (ver refreshViajesMapHighlights()). */
+/* position:relative ancla el cluster de botones de zoom; touch-action:none
+   evita que el navegador intente hacer scroll/pellizco nativo por su
+   cuenta mientras arrastramos/pellizcamos el mapa a mano (ver
+   initViajesMapZoomPan en app.js). cursor:grab/.viajes-map-dragging
+   avisan de que se puede arrastrar. */
+.viajes-map-container { width: 100%; position: relative; touch-action: none; cursor: grab; }
+.viajes-map-container.viajes-map-dragging { cursor: grabbing; }
+.viajes-map-svg-wrap { width: 100%; }
+.viajes-map-container svg { width: 100%; height: auto; max-height: 70vh; display: block; }
+.viajes-map-zoom-controls { position: absolute; top: 0.6rem; right: 0.6rem; display: flex; flex-direction: column; gap: 0.3rem; z-index: 2; }
+.viajes-map-zoom-controls .icon-btn { line-height: 1; font-size: 1rem; }
+/* El oceano/fondo del SVG trae blanco fijo (fill="#FFFFFF") -- se
+   sustituye por el fondo de la propia app para que no desentone con
+   temas oscuros. */
+.viajes-map-container #World,
+.viajes-map-container #Ocean { fill: var(--surface); }
+/* Cada pais es un <g class="viajes-map-country"> (ver loadViajesMap en
+   app.js), pero sus <path>/<circle> internos YA traen su propio
+   fill/stroke fijo en el SVG de origen -- un atributo de presentacion
+   en el hijo se antepone a lo heredado del padre, así que hace falta
+   repetir la regla apuntando tambien a los hijos (cualquier regla CSS,
+   aunque sea poco especifica, ya gana a un atributo de presentacion,
+   pero SOLO si apunta al elemento que de verdad lo tiene). */
+.viajes-map-country,
+.viajes-map-country path,
+.viajes-map-country circle,
+.viajes-map-country polygon {
+  fill: var(--surface-2); stroke: var(--border); stroke-width: 0.5;
+  cursor: pointer; transition: fill 0.15s ease;
+}
+.viajes-map-country:hover,
+.viajes-map-country:hover path,
+.viajes-map-country:hover circle,
+.viajes-map-country:hover polygon { fill: color-mix(in srgb, var(--accent) 45%, var(--surface-2)); }
+.viajes-map-country-visited,
+.viajes-map-country-visited path,
+.viajes-map-country-visited circle,
+.viajes-map-country-visited polygon { fill: var(--accent); }
+.viajes-map-country-visited:hover,
+.viajes-map-country-visited:hover path,
+.viajes-map-country-visited:hover circle,
+.viajes-map-country-visited:hover polygon { fill: color-mix(in srgb, var(--accent) 80%, black); }
+/* Taiwán (unico pais sin contorno real en este mapa, ver
+   addViajesMapMicroStateMarkers() en app.js) -- borde algo mas grueso
+   que un pais normal para que el punto no desaparezca a zoom 1x. */
+.viajes-map-micro-state { stroke-width: 0.4; }
+
+/* Filtros de "Mis viajes" -- mismo criterio que .lecturas-filters (ancho
+   base consistente para que quepan en una fila en escritorio, apilables
+   en movil via flex-wrap). align-items:flex-start (no "center"): año/mes/
+   país son ahora multi-seleccion, cada uno con su propia fila de chips
+   debajo que puede tener una altura distinta -- con "center" el boton de
+   cada campo se desplazaria verticalmente segun cuantos chips tenga el
+   VECINO, en vez de quedarse fijo arriba. */
+.viajes-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; margin: 0.6rem 0; }
+.viajes-filter-field { flex: 0 1 190px; min-width: 140px; }
+.viajes-filter-field .select-field,
+.viajes-filter-field .multi-select-field { width: 100%; }
+.viajes-filter-field .select-field-trigger { font-size: 0.82rem; padding: 0.4rem 0.6rem; }
+.viajes-filter-multi-country {
+  flex: 0 0 auto;
+  font-size: 0.82rem;
+  /* La regla global "label { margin-bottom: 0.75rem }" (pensada para
+     apilar campos verticalmente en formularios) se cuela aqui tambien,
+     ya que este checkbox tambien es un <label> -- dentro de esta fila
+     HORIZONTAL, ese margen inferior hacia que align-items:center lo
+     centrara mal (empujado hacia arriba, ya que flexbox centra la CAJA
+     CON MARGEN, no solo el contenido visible). Quitado a proposito solo
+     aqui, sin tocar el resto de usos de .checkbox-row en la app. */
+  margin-bottom: 0;
+}
+/* Mismo tamaño que el resto de la barra (input de año antes, ahora
+   select-field) -- sin esto se veia "descuadrado" en altura, mas grande
+   que sus vecinos. */
+.viajes-filters .secondary-btn { font-size: 0.82rem; padding: 0.4rem 0.7rem; }
+
+/* Tarjetas de viaje -- reutilizadas tanto en la lista principal como en
+   el modal de "viajes en este pais" (ver renderViajesTripCards). El
+   color del viaje se ve como una franja lateral, via variable CSS
+   puesta inline por JS (--viajes-trip-color). */
+/* Mismo criterio que .finanzas-manage-block .gym-tab-action: separar
+   el boton de la lista de debajo, sin tocar .gym-tab-action/.primary-btn
+   en general (compartidos con otros botones/modales). */
+#viajes-country-modal #btn-new-viaje-en-pais { margin-bottom: 0.6rem; }
+.viajes-trip-cards { display: flex; flex-direction: column; gap: 0.5rem; }
+.viajes-trip-card {
+  display: flex; flex-direction: column; gap: 0.15rem; text-align: left;
+  padding: 0.6rem 0.8rem; border: 1px solid var(--border); border-left: 4px solid var(--viajes-trip-color, var(--accent));
+  border-radius: var(--radius); background: var(--surface); color: var(--surface-text);
+  cursor: pointer; font: inherit;
+}
+.viajes-trip-card:hover { background: var(--surface-2); }
+.viajes-trip-card-name { font-weight: 600; }
+.viajes-trip-card-countries { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 70%, var(--surface)); }
+
+.viajes-trip-detail-header { display: flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0; }
+.viajes-trip-detail-header h3 { margin: 0; flex-shrink: 0; }
+.viajes-trip-detail-countries { font-weight: 600; margin: 0.2rem 0; }
+
+.viajes-entries-list { display: flex; flex-direction: column; gap: 0.7rem; }
+.viajes-entry-card {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  padding: 0.7rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--surface-text);
+}
+.viajes-entry-card-header { display: flex; align-items: center; gap: 0.4rem; }
+.viajes-entry-card-content { white-space: pre-wrap; margin: 0; }
+.viajes-entry-attachments { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.viajes-attachment { display: flex; flex-direction: column; gap: 0.3rem; width: 140px; }
+.viajes-attachment-photo {
+  width: 140px; height: 100px; object-fit: cover; border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.viajes-attachment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; font-size: 0.78rem; }
+.viajes-attachment-linked { color: var(--accent); }
+/* Mismos tonos que .finanzas-amount-expense/-income, para que un
+   movimiento de Viajes se lea igual que en Finanzas. */
+.viajes-movement-amount {
+  font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 999px;
+  background: var(--surface-2);
+}
+.viajes-movement-amount-expense { color: #e63946; }
+.viajes-movement-amount-income { color: #43aa8b; }
+.viajes-entry-add-actions { display: flex; gap: 0.5rem; margin-top: 0.4rem; }
+
+/* Selector de varios paises (chips + buscador) -- ver
+   createCountryPickerField en app.js, mismo mecanismo de popover que
+   .select-field pero soportando VARIAS selecciones a la vez. */
+.country-picker-field {
+  display: flex; flex-direction: column; gap: 0.4rem;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.4rem; background: var(--surface-2);
+}
+.country-picker-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.country-picker-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.15rem 0.5rem; border-radius: 999px;
+  background: var(--accent); color: var(--accent-text); font-size: 0.82rem;
+}
+.country-picker-chip button {
+  border: none; background: none; color: inherit; cursor: pointer;
+  font-size: 0.85rem; padding: 0; line-height: 1;
+}
+.country-picker-input {
+  border: none; background: transparent; color: var(--surface-2-text);
+  font: inherit; padding: 0.2rem; width: 100%;
+}
+.country-picker-input:focus { outline: none; }

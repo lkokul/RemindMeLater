@@ -159,6 +159,21 @@
     </div>
   </div>
 
+  <!-- Confirmacion/aviso propio con el estilo de la app, para sustituir a
+       confirm()/alert() nativos del navegador en flujos donde hace falta
+       que se note mas -- ver showAppConfirm()/showAppAlert() en app.js.
+       Un unico modal generico y reutilizable, no uno por caso de uso. -->
+  <div id="app-confirm-modal" class="modal hidden">
+    <div class="modal-card app-confirm-card">
+      <p id="app-confirm-modal-message"></p>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-app-confirm-cancel" class="secondary-btn">Cancelar</button>
+        <button type="button" id="btn-app-confirm-ok" class="primary-btn">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- App principal -->
   <div id="app" class="app hidden">
     <header class="topbar">
@@ -478,6 +493,10 @@
         <button type="button" id="btn-open-archivos" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M12 18v-6M9 15l3-3 3 3"></path></svg></span>
           <span class="extensions-card-title">Archivos</span>
+        </button>
+        <button type="button" id="btn-open-viajes" class="extensions-card extensions-card-active">
+          <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></span>
+          <span class="extensions-card-title">Viajes</span>
         </button>
       </div>
     </div>
@@ -1299,6 +1318,193 @@
     </div>
   </div>
 
+  <!-- Extension "Viajes": mapa interactivo por paises (SVG en
+       public/viajes-world-map.svg -- fuente: raphaellepuschitz/SVG-World-Map
+       en GitHub, licencia MIT -- con <g id="XX"> en formato ISO 3166-1
+       alfa-2 en MAYUSCULAS, normalizado a minuscula en loadViajesMap();
+       nombres en español en viajesCountries.js) + bitacora de cada
+       viaje, que puede tocar VARIOS paises a la vez (ej. un interrail).
+       Ver openViajesView()/renderViajesMap() en app.js. -->
+  <div id="viajes-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2>Viajes</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-viajes" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+        <button type="button" id="btn-viajes-settings" class="icon-btn" aria-label="Configuración">☰</button>
+      </div>
+    </div>
+
+    <div class="viajes-body">
+      <div class="viajes-tabs">
+        <button type="button" class="viajes-tab-btn" data-viajes-tab="mapa">Mapa</button>
+        <button type="button" class="viajes-tab-btn" data-viajes-tab="viajes">Mis viajes</button>
+      </div>
+
+      <div class="viajes-tab-panel" data-viajes-panel="mapa">
+        <p class="hint">Los países con algún viaje se ven resaltados -- haz clic en cualquiera para ver tus viajes ahí, o para crear uno nuevo con ese país ya elegido. Rueda del ratón o pellizco con dos dedos para hacer zoom, arrastra para moverte por el mapa.</p>
+        <div id="viajes-map-container" class="viajes-map-container">
+          <div id="viajes-map-svg-wrap" class="viajes-map-svg-wrap"></div>
+          <div class="viajes-map-zoom-controls">
+            <button type="button" id="btn-viajes-map-zoom-in" class="icon-btn" aria-label="Acercar">+</button>
+            <button type="button" id="btn-viajes-map-zoom-out" class="icon-btn" aria-label="Alejar">−</button>
+            <button type="button" id="btn-viajes-map-zoom-reset" class="icon-btn" aria-label="Restablecer zoom">⤢</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="viajes-tab-panel hidden" data-viajes-panel="viajes">
+        <div id="viajes-trips-list-panel" class="viajes-panel">
+          <button type="button" id="btn-new-viaje" class="primary-btn gym-tab-action">+ Viaje</button>
+          <div id="viajes-trips-filters" class="viajes-filters"></div>
+          <div id="viajes-trips-list" class="viajes-trip-cards"></div>
+          <p id="viajes-trips-empty" class="empty-hint hidden">Todavía no tienes ningún viaje. Crea uno arriba.</p>
+        </div>
+
+        <div id="viajes-trip-detail-panel" class="viajes-panel hidden">
+          <button type="button" id="btn-back-viajes-trips" class="secondary-btn">← Viajes</button>
+          <div class="viajes-trip-detail-header">
+            <h3 id="viajes-trip-detail-name"></h3>
+            <button type="button" id="btn-edit-viajes-trip" class="icon-btn" aria-label="Editar viaje">✎</button>
+            <div class="spacer"></div>
+            <button type="button" id="btn-delete-viajes-trip" class="danger-btn">Eliminar viaje</button>
+          </div>
+          <p id="viajes-trip-detail-countries" class="viajes-trip-detail-countries"></p>
+          <p id="viajes-trip-detail-dates" class="hint"></p>
+          <p id="viajes-trip-detail-description" class="hint"></p>
+
+          <button type="button" id="btn-new-viajes-entry" class="primary-btn gym-tab-action">+ Entrada</button>
+          <div id="viajes-entries-list" class="viajes-entries-list"></div>
+          <p id="viajes-entries-empty" class="empty-hint hidden">Todavía no hay entradas en este viaje. Añade la primera arriba.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Crear/editar un viaje -->
+  <div id="viajes-trip-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-viajes-trip" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="viajes-trip-modal-title">Nuevo viaje</h2>
+      <form id="viajes-trip-form">
+        <input type="hidden" id="viajes-trip-id" />
+        <label>Nombre<input type="text" id="viajes-trip-name" placeholder="Ej. Interrail verano 2026" required /></label>
+        <label>País(es)<div id="viajes-trip-countries-field"></div></label>
+        <div class="form-row">
+          <label>Empieza el (opcional)<div id="viajes-trip-start-field"></div></label>
+          <label>Termina el (opcional)<div id="viajes-trip-end-field"></div></label>
+        </div>
+        <label>Color<div id="viajes-trip-color-field"></div></label>
+        <label>Descripción (opcional)<textarea id="viajes-trip-description" rows="2"></textarea></label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="viajes-trip-finanzas-linked" />
+          Enlazar con Finanzas (los gastos/ingresos de este viaje se apuntan también ahí)
+        </label>
+        <label id="viajes-trip-default-account-label" class="hidden">Cuenta por defecto para los gastos de este viaje (opcional)<div id="viajes-trip-default-account-field"></div></label>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-viajes-trip-modal" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-viajes-trip" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Al clicar un pais en el mapa: sus viajes + atajo para crear uno nuevo -->
+  <div id="viajes-country-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-viajes-country" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="viajes-country-modal-title">País</h2>
+      <button type="button" id="btn-new-viaje-en-pais" class="primary-btn gym-tab-action">+ Crear viaje aquí</button>
+      <div id="viajes-country-trips-list" class="viajes-trip-cards"></div>
+      <p id="viajes-country-trips-empty" class="empty-hint hidden">Todavía no tienes ningún viaje registrado en este país.</p>
+    </div>
+  </div>
+
+  <!-- Crear/editar una entrada de bitacora -->
+  <div id="viajes-entry-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-viajes-entry" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="viajes-entry-modal-title">Nueva entrada</h2>
+      <form id="viajes-entry-form">
+        <input type="hidden" id="viajes-entry-id" />
+        <label>Fecha<div id="viajes-entry-date-field"></div></label>
+        <label>Qué hicisteis ese día<textarea id="viajes-entry-content" rows="5" placeholder="Un poco de lo que se os ocurra..."></textarea></label>
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-viajes-entry" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Subir una foto/ticket a una entrada -- el importe es opcional, solo
+       lo lleva si es un ticket/recibo (ver amount en db.js). -->
+  <div id="viajes-attachment-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-viajes-attachment" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Añadir foto</h2>
+      <p id="viajes-attachment-filename" class="hint"></p>
+      <div class="modal-actions">
+        <button type="button" id="btn-cancel-viajes-attachment" class="secondary-btn">Cancelar</button>
+        <button type="button" id="btn-confirm-viajes-attachment" class="primary-btn">Subir</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Crear/editar un movimiento (gasto o ingreso) de una entrada de
+       bitacora -- separado de "Añadir foto" (esa nunca lleva importe).
+       Cuenta/Categoría/"Cuenta para el límite mensual" solo se ven si el
+       VIAJE tiene el enlace con Finanzas activado (ver
+       refreshViajesGastoModalFields en app.js); la foto de ticket solo
+       se puede elegir al CREAR, no al editar (ver openViajesGastoModal). -->
+  <div id="viajes-gasto-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-viajes-gasto" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="viajes-gasto-modal-title">Nuevo gasto/ingreso</h2>
+      <form id="viajes-gasto-form">
+        <input type="hidden" id="viajes-gasto-id" />
+        <label>Tipo<div id="viajes-gasto-type-field"></div></label>
+        <label id="viajes-gasto-account-label">Cuenta<div id="viajes-gasto-account-field"></div></label>
+        <label id="viajes-gasto-category-label">Categoría (opcional)<div id="viajes-gasto-category-field"></div></label>
+        <label>Importe<input type="number" id="viajes-gasto-amount" step="0.01" min="0.01" required /></label>
+        <label>Descripción (opcional)<input type="text" id="viajes-gasto-description" /></label>
+        <label class="checkbox-row" id="viajes-gasto-counts-row">
+          <input type="checkbox" id="viajes-gasto-counts" checked />
+          Cuenta para el límite mensual
+        </label>
+        <label id="viajes-gasto-photo-label">Foto del ticket (opcional)
+          <input type="file" id="viajes-gasto-photo-input" accept="image/*" />
+        </label>
+        <p id="viajes-gasto-photo-filename" class="hint hidden"></p>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-viajes-gasto" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-viajes-gasto" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Enlazar un movimiento ya creado a un movimiento real de Finanzas --
+       disponible siempre, aunque el viaje no tenga el enlace activado
+       (sirve para enlazar uno suelto sin activar el ajuste del viaje). -->
+  <div id="viajes-link-finanzas-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-viajes-link-finanzas" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Vincular a Finanzas</h2>
+      <p id="viajes-link-finanzas-amount" class="hint"></p>
+      <label>Cuenta<div id="viajes-link-finanzas-account-field"></div></label>
+      <label>Categoría (opcional)<div id="viajes-link-finanzas-category-field"></div></label>
+      <label>Descripción (opcional)<input type="text" id="viajes-link-finanzas-description" /></label>
+      <div class="modal-actions">
+        <button type="button" id="btn-cancel-viajes-link-finanzas" class="secondary-btn">Cancelar</button>
+        <button type="button" id="btn-confirm-viajes-link-finanzas" class="primary-btn">Vincular</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Extension "Lecturas": historial de entretenimiento (manga, comic,
        libro, serie, anime, pelicula), agrupado en SAGAS obligatorias --
        hasta algo suelto es una saga de un solo item, para poder juntar
@@ -1976,6 +2182,7 @@
 
   <script src="db-local.js"></script>
   <script src="vendor/jsQR.js"></script>
+  <script src="viajesCountries.js"></script>
   <script src="app.js"></script>
   <script src="settings.js"></script>
 </body>
