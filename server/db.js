@@ -403,11 +403,12 @@ db.exec(`
   -- viajes_trip_countries en vez de una columna "country" directa en
   -- viajes_trips. country_code es el codigo ISO 3166-1 alfa-2 en
   -- minusculas (mismo formato que los "id" del mapa SVG en
-  -- public/viajes-world-map.svg, con la excepcion "_somaliland", el unico
-  -- territorio sin codigo ISO propio que trae ese mapa). Sin CHECK contra
-  -- una lista cerrada de paises a proposito: el selector del cliente ya
-  -- limita a los paises reales del mapa, y ser permisivo aqui evita tener
-  -- que tocar el servidor si el mapa cambia de fuente el dia de mañana.
+  -- public/viajes-world-map.svg, normalizados a minuscula en el cliente
+  -- -- el SVG en si los trae en mayusculas). Sin CHECK contra una lista
+  -- cerrada de paises a proposito: el selector del cliente ya limita a
+  -- los paises reales del mapa, y ser permisivo aqui evita tener que
+  -- tocar el servidor si el mapa cambia de fuente el dia de mañana (como
+  -- ya ha pasado una vez).
   CREATE TABLE IF NOT EXISTS viajes_trips (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,

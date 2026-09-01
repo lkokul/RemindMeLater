@@ -2268,6 +2268,27 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    pero sin hover/cursor, no es clicable. */
 .select-option-empty { padding: 0.5rem 0.6rem; font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); }
 
+/* Version "elegir varios" de .select-field (createMultiSelectField en
+   app.js): mismo boton+popover, pero con una fila de chips removibles
+   debajo -- mismo look que los chips de .country-picker-chip, unificado
+   aqui porque ahora hay mas de un sitio que los usa (Viajes: filtros de
+   año/mes/país). */
+.multi-select-field { display: flex; flex-direction: column; gap: 0.35rem; width: 100%; }
+.multi-select-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.multi-select-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.15rem 0.5rem; border-radius: 999px;
+  background: var(--accent); color: var(--accent-text); font-size: 0.78rem;
+}
+.multi-select-chip button {
+  border: none; background: none; color: inherit; cursor: pointer;
+  font-size: 0.85rem; padding: 0; line-height: 1;
+}
+/* Marca de "elegido" dentro del popover -- espacio reservado siempre
+   (aunque este vacio) para que el texto de todas las opciones quede
+   alineado, elegidas o no. */
+.multi-select-check { display: inline-block; width: 1rem; text-align: center; color: var(--accent); font-weight: 700; }
+
 /* --- Selector de fecha con estilo propio (createDateField en app.js) —
    mismo lenguaje visual que el calendario grande (.calendar-grid,
    .calendar-cell), a escala de popover. --- */
@@ -2585,26 +2606,66 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .viajes-map-container svg { width: 100%; height: auto; max-height: 70vh; display: block; }
 .viajes-map-zoom-controls { position: absolute; top: 0.6rem; right: 0.6rem; display: flex; flex-direction: column; gap: 0.3rem; z-index: 2; }
 .viajes-map-zoom-controls .icon-btn { line-height: 1; font-size: 1rem; }
-.viajes-map-country {
+/* El oceano/fondo del SVG trae blanco fijo (fill="#FFFFFF") -- se
+   sustituye por el fondo de la propia app para que no desentone con
+   temas oscuros. */
+.viajes-map-container #World,
+.viajes-map-container #Ocean { fill: var(--surface); }
+/* Cada pais es un <g class="viajes-map-country"> (ver loadViajesMap en
+   app.js), pero sus <path>/<circle> internos YA traen su propio
+   fill/stroke fijo en el SVG de origen -- un atributo de presentacion
+   en el hijo se antepone a lo heredado del padre, así que hace falta
+   repetir la regla apuntando tambien a los hijos (cualquier regla CSS,
+   aunque sea poco especifica, ya gana a un atributo de presentacion,
+   pero SOLO si apunta al elemento que de verdad lo tiene). */
+.viajes-map-country,
+.viajes-map-country path,
+.viajes-map-country circle,
+.viajes-map-country polygon {
   fill: var(--surface-2); stroke: var(--border); stroke-width: 0.5;
   cursor: pointer; transition: fill 0.15s ease;
 }
-.viajes-map-country:hover { fill: color-mix(in srgb, var(--accent) 45%, var(--surface-2)); }
-.viajes-map-country-visited { fill: var(--accent); }
-.viajes-map-country-visited:hover { fill: color-mix(in srgb, var(--accent) 80%, black); }
-/* Micro-estados (Andorra, Vaticano...) sin contorno real en el SVG --
-   ver addViajesMapMicroStateMarkers() en app.js. Borde algo mas grueso
+.viajes-map-country:hover,
+.viajes-map-country:hover path,
+.viajes-map-country:hover circle,
+.viajes-map-country:hover polygon { fill: color-mix(in srgb, var(--accent) 45%, var(--surface-2)); }
+.viajes-map-country-visited,
+.viajes-map-country-visited path,
+.viajes-map-country-visited circle,
+.viajes-map-country-visited polygon { fill: var(--accent); }
+.viajes-map-country-visited:hover,
+.viajes-map-country-visited:hover path,
+.viajes-map-country-visited:hover circle,
+.viajes-map-country-visited:hover polygon { fill: color-mix(in srgb, var(--accent) 80%, black); }
+/* Taiwán (unico pais sin contorno real en este mapa, ver
+   addViajesMapMicroStateMarkers() en app.js) -- borde algo mas grueso
    que un pais normal para que el punto no desaparezca a zoom 1x. */
 .viajes-map-micro-state { stroke-width: 0.4; }
 
 /* Filtros de "Mis viajes" -- mismo criterio que .lecturas-filters (ancho
    base consistente para que quepan en una fila en escritorio, apilables
-   en movil via flex-wrap). */
-.viajes-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.6rem 0; }
+   en movil via flex-wrap). align-items:flex-start (no "center"): año/mes/
+   país son ahora multi-seleccion, cada uno con su propia fila de chips
+   debajo que puede tener una altura distinta -- con "center" el boton de
+   cada campo se desplazaria verticalmente segun cuantos chips tenga el
+   VECINO, en vez de quedarse fijo arriba. */
+.viajes-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; margin: 0.6rem 0; }
 .viajes-filter-field { flex: 0 1 190px; min-width: 140px; }
-.viajes-filter-field .select-field { width: 100%; }
+.viajes-filter-field .select-field,
+.viajes-filter-field .multi-select-field { width: 100%; }
 .viajes-filter-field .select-field-trigger { font-size: 0.82rem; padding: 0.4rem 0.6rem; }
-.viajes-filter-multi-country { flex: 0 0 auto; font-size: 0.82rem; }
+.viajes-filter-multi-country {
+  flex: 0 0 auto;
+  font-size: 0.82rem;
+  /* La regla global "label { margin-bottom: 0.75rem }" (pensada para
+     apilar campos verticalmente en formularios) se cuela aqui tambien,
+     ya que este checkbox tambien es un <label> -- dentro de esta fila
+     HORIZONTAL, ese margen inferior hacia que align-items:center lo
+     centrara mal (empujado hacia arriba, ya que flexbox centra la CAJA
+     CON MARGEN, no solo el contenido visible). Quitado a proposito solo
+     aqui, sin tocar el resto de usos de .checkbox-row en la app. */
+  margin-bottom: 0;
+}
 /* Mismo tamaño que el resto de la barra (input de año antes, ahora
    select-field) -- sin esto se veia "descuadrado" en altura, mas grande
    que sus vecinos. */

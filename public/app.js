@@ -164,6 +164,158 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
   };
 }
 
+// Version "elegir varios" de createSelectField() -- mismo boton+popover,
+// pero clicar una opcion la marca/desmarca SIN cerrar el popover (para
+// poder marcar varias seguidas), y lo elegido se ve ademas como una fila
+// de chips debajo del boton, cada uno con su "x" para quitarlo suelto
+// (mismo patron visual que los chips de createCountryPickerField, mas
+// abajo en este archivo). Usado por los filtros de "Mis viajes"
+// (año/mes/país, varios a la vez).
+function createMultiSelectField({ options = [], initialValues = [], placeholder = '', onChange, scrollToValue } = {}) {
+  let selected = [...initialValues];
+  let opts = options;
+
+  const root = document.createElement('div');
+  root.className = 'multi-select-field';
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'select-field-trigger';
+
+  const chipsRow = document.createElement('div');
+  chipsRow.className = 'multi-select-chips hidden';
+
+  const popover = document.createElement('div');
+  popover.className = 'select-popover hidden';
+  document.body.appendChild(popover);
+
+  function findLabel(value) {
+    const opt = opts.find((o) => String(o.value) === String(value));
+    return opt ? opt.label : value;
+  }
+
+  function renderTrigger() {
+    trigger.textContent = selected.length
+      ? `${selected.length} seleccionado${selected.length === 1 ? '' : 's'}`
+      : (placeholder || 'Elegir...');
+    trigger.classList.toggle('select-field-placeholder', selected.length === 0);
+  }
+
+  function emitChange() {
+    if (onChange) onChange([...selected]);
+  }
+
+  function renderChips() {
+    chipsRow.innerHTML = '';
+    selected.forEach((value) => {
+      const chip = document.createElement('span');
+      chip.className = 'multi-select-chip';
+      chip.textContent = findLabel(value);
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.setAttribute('aria-label', 'Quitar');
+      removeBtn.textContent = '✕';
+      removeBtn.addEventListener('click', () => toggleValue(value));
+      chip.appendChild(removeBtn);
+      chipsRow.appendChild(chip);
+    });
+    chipsRow.classList.toggle('hidden', selected.length === 0);
+  }
+
+  // Refleja "selected" en los botones YA existentes del popover (clase
+  // .active + el check ✓) SIN volver a crearlos -- a diferencia de un
+  // select normal, aqui el popover se queda abierto entre un click y
+  // otro, y reconstruir el HTML (popover.innerHTML = '') en mitad del
+  // manejador de click DESENGANCHA el boton recien pulsado del DOM antes
+  // de que el evento termine de burbujear hasta el listener global de
+  // "cerrar popovers al hacer click fuera" (settings.js) -- ese listener
+  // comprueba con closest('.select-popover') si el click vino de dentro,
+  // y en un nodo ya desenganchado eso da null, así que cerraba el
+  // popover el mismo despues de CADA opcion marcada. Actualizar en el
+  // sitio evita el problema de raiz.
+  function syncOptionStates() {
+    popover.querySelectorAll('.select-option').forEach((item) => {
+      const isSelected = selected.some((v) => String(v) === String(item.dataset.value));
+      item.classList.toggle('active', isSelected);
+      const check = item.querySelector('.multi-select-check');
+      if (check) check.textContent = isSelected ? '✓' : '';
+    });
+  }
+
+  function toggleValue(value) {
+    const isSelected = selected.some((v) => String(v) === String(value));
+    selected = isSelected ? selected.filter((v) => String(v) !== String(value)) : [...selected, value];
+    renderTrigger();
+    renderChips();
+    syncOptionStates();
+    emitChange();
+  }
+
+  // Reconstruye los BOTONES del popover -- solo hace falta cuando cambia
+  // la lista de opciones en si (setOptions) o al crear el campo, nunca
+  // en un click normal (ver syncOptionStates arriba).
+  function renderOptions() {
+    popover.innerHTML = '';
+    opts.forEach((opt) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'select-option multi-select-option';
+      item.dataset.value = opt.value;
+      item.innerHTML = `<span class="multi-select-check"></span>${escapeHtml(opt.label)}`;
+      item.addEventListener('click', () => toggleValue(opt.value));
+      popover.appendChild(item);
+    });
+    syncOptionStates();
+  }
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = popover.classList.contains('hidden');
+    closeAllPopovers(popover);
+    popover.classList.toggle('hidden');
+    if (willOpen) {
+      positionFixedPopover(trigger, popover, {
+        width: Math.max(200, trigger.getBoundingClientRect().width),
+      });
+      const activeItem = popover.querySelector('.select-option.active');
+      if (activeItem) {
+        activeItem.scrollIntoView({ block: 'center' });
+      } else if (scrollToValue != null) {
+        const fallbackItem = popover.querySelector(`[data-value="${scrollToValue}"]`);
+        if (fallbackItem) fallbackItem.scrollIntoView({ block: 'center' });
+      }
+    }
+  });
+
+  root.append(trigger, chipsRow);
+  renderOptions();
+  renderTrigger();
+  renderChips();
+
+  return {
+    element: root,
+    getValue: () => [...selected],
+    setValue: (values) => { selected = [...(values || [])]; renderTrigger(); renderChips(); syncOptionStates(); },
+    // Igual que en el toggle de una opcion (ver syncOptionStates arriba):
+    // esto puede llamarse en mitad del propio click de una opcion --
+    // renderViajesFilters() recalcula "paises usados" y llama a
+    // setOptions() en CADA cambio de filtro, incluidos los que vienen de
+    // este mismo campo. Si la lista de valores no ha cambiado de
+    // verdad, no hace falta reconstruir los botones (que desengancharia
+    // el que se acaba de pulsar del DOM justo antes de que el click
+    // termine de burbujear, cerrando el popover de golpe) -- solo si de
+    // verdad cambian las opciones disponibles.
+    setOptions: (newOptions) => {
+      const changed = newOptions.length !== opts.length || newOptions.some((o, i) => String(o.value) !== String(opts[i] && opts[i].value));
+      opts = newOptions;
+      renderTrigger();
+      renderChips();
+      if (changed) renderOptions();
+      else syncOptionStates();
+    },
+  };
+}
+
 const DATE_FIELD_FORMATTER = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
 // Icono de calendario (trazo, no emoji) para el selector de fecha —
@@ -7289,12 +7441,23 @@ document.getElementById('btn-open-archivos').addEventListener('click', openArchi
 document.getElementById('btn-close-archivos').addEventListener('click', closeArchivosView);
 
 // ---------------------------------------------------------------------
-// Extension "Viajes": mapa interactivo por paises (public/viajes-world-map.svg,
-// CC BY-SA 3.0 -- ver el <desc> del propio SVG -- con id="xx" en formato
-// ISO 3166-1 alfa-2; nombres en español en viajesCountries.js, cargado
-// ANTES que este archivo) + bitacora de cada viaje, que puede tocar
-// VARIOS paises (ej. un interrail) -- por eso "countries" es siempre un
-// array, nunca un pais suelto.
+// Extension "Viajes": mapa interactivo por paises (public/viajes-world-map.svg
+// -- fuente: raphaellepuschitz/SVG-World-Map en GitHub, licencia MIT; los
+// contornos de cada pais en si no son obra del autor de esa libreria,
+// ver el README de ese repo. Cambiado desde el mapa anterior
+// (flekschas/simple-world-map, CC BY-SA 3.0) porque este SÍ trae
+// contorno real para Andorra/Vaticano/San Marino/Monaco/Liechtenstein
+// -- ya no hace falta el marcador/pin para esos 5, ver
+// VIAJES_MICRO_STATE_MARKERS mas abajo, reducido ahora a un unico caso
+// (Taiwan) que sigue sin contorno propio en ESTE mapa. Cada pais es un
+// <g id="XX"> (XX = ISO 3166-1 alfa-2 EN MAYUSCULAS en este archivo
+// concreto) con uno o mas <path>/<circle> hijos que YA traen su propio
+// fill/stroke fijo -- normalizado a minusculas via dataset.countryCode
+// al cargar (ver loadViajesMap), sin tocar el atributo id real del SVG.
+// Nombres en español en viajesCountries.js, cargado ANTES que este
+// archivo) + bitacora de cada viaje, que puede tocar VARIOS paises (ej.
+// un interrail) -- por eso "countries" es siempre un array, nunca un
+// pais suelto.
 // ---------------------------------------------------------------------
 let viajesTrips = [];
 let viajesCurrentTrip = null; // viaje abierto en el detalle/bitacora ahora mismo
@@ -7489,45 +7652,52 @@ function renderViajesTripCards(container, trips, onClick) {
   });
 }
 
-// --- Filtros de "Mis viajes" (año/mes/país) -----------------------------
+// --- Filtros de "Mis viajes" (año/mes/país, varios a la vez) ------------
 // Mismo patron "build once" que Lecturas (renderLecturasItemFilters) --
 // los campos con componente propio se crean UNA vez a nivel de modulo,
 // las llamadas siguientes solo actualizan .setOptions()/.setValue() para
-// no acumular popovers huerfanos.
-let viajesFilters = { year: '', month: '', country: '', multiCountryOk: true };
+// no acumular popovers huerfanos. Los 3 son ahora multi-seleccion
+// (createMultiSelectField): se puede filtrar por varios años, varios
+// meses y varios países a la vez, cada uno listado como chip removible
+// debajo de su desplegable.
+let viajesFilters = { years: [], months: [], countries: [], multiCountryOk: true };
 
 // 1900-2100 de sobra para cualquier viaje real -- mismo criterio de rango
 // fijo ya usado en otros selectores de año de la app (Ahorro de Finanzas).
-const VIAJES_YEAR_OPTIONS = [{ value: '', label: 'Cualquier año' }];
-for (let y = 1900; y <= 2100; y++) VIAJES_YEAR_OPTIONS.push({ value: String(y), label: String(y) });
+// Orden DESCENDENTE (2100 arriba, 1900 abajo) -- mas intuitivo para elegir
+// un año reciente, que es lo mas habitual, sin tener que bajar del todo.
+const VIAJES_YEAR_OPTIONS = [];
+for (let y = 2100; y >= 1900; y--) VIAJES_YEAR_OPTIONS.push({ value: String(y), label: String(y) });
 
-const viajesFilterYearField = createSelectField({
+const viajesFilterYearField = createMultiSelectField({
   options: VIAJES_YEAR_OPTIONS,
-  initialValue: '',
+  initialValues: [],
   placeholder: 'Año',
   // Sin ningun año elegido, abrir el desplegable centrado en el actual en
   // vez de arriba del todo -- solo orienta, no aplica ningun filtro.
   scrollToValue: String(new Date().getFullYear()),
-  onChange: (v) => {
-    viajesFilters.year = v;
+  onChange: (values) => {
+    viajesFilters.years = values;
     renderViajesTripsList();
   },
 });
 
-const viajesFilterMonthField = createSelectField({
-  options: [{ value: '', label: 'Cualquier mes' }, ...FINANZAS_MONTH_OPTIONS],
-  initialValue: '',
-  onChange: (v) => {
-    viajesFilters.month = v;
+const viajesFilterMonthField = createMultiSelectField({
+  options: FINANZAS_MONTH_OPTIONS,
+  initialValues: [],
+  placeholder: 'Mes',
+  onChange: (values) => {
+    viajesFilters.months = values;
     renderViajesTripsList();
   },
 });
 
-const viajesFilterCountryField = createSelectField({
-  options: [{ value: '', label: 'Todos los países' }],
-  initialValue: '',
-  onChange: (v) => {
-    viajesFilters.country = v;
+const viajesFilterCountryField = createMultiSelectField({
+  options: [],
+  initialValues: [],
+  placeholder: 'País',
+  onChange: (values) => {
+    viajesFilters.countries = values;
     renderViajesTripsList();
   },
 });
@@ -7571,10 +7741,10 @@ function renderViajesFilters() {
     clearBtn.className = 'secondary-btn';
     clearBtn.textContent = 'Quitar filtros';
     clearBtn.addEventListener('click', () => {
-      viajesFilters = { year: '', month: '', country: '', multiCountryOk: true };
-      viajesFilterYearField.setValue('');
-      viajesFilterMonthField.setValue('');
-      viajesFilterCountryField.setValue('');
+      viajesFilters = { years: [], months: [], countries: [], multiCountryOk: true };
+      viajesFilterYearField.setValue([]);
+      viajesFilterMonthField.setValue([]);
+      viajesFilterCountryField.setValue([]);
       multiCheckbox.checked = true;
       renderViajesTripsList();
     });
@@ -7587,32 +7757,40 @@ function renderViajesFilters() {
   const usedCountries = [...new Set(viajesTrips.flatMap((t) => t.countries))].sort((a, b) =>
     viajesCountryLabel(a).localeCompare(viajesCountryLabel(b))
   );
-  viajesFilterCountryField.setOptions([{ value: '', label: 'Todos los países' }, ...usedCountries.map((c) => ({ value: c, label: viajesCountryLabel(c) }))]);
-  viajesFilterYearField.setValue(viajesFilters.year);
-  viajesFilterMonthField.setValue(viajesFilters.month);
-  viajesFilterCountryField.setValue(viajesFilters.country);
+  viajesFilterCountryField.setOptions(usedCountries.map((c) => ({ value: c, label: viajesCountryLabel(c) })));
+  viajesFilterYearField.setValue(viajesFilters.years);
+  viajesFilterMonthField.setValue(viajesFilters.months);
+  viajesFilterCountryField.setValue(viajesFilters.countries);
   document.getElementById('viajes-filter-multi-country').checked = viajesFilters.multiCountryOk;
 }
 
-// Año/mes comparan contra el startDate del viaje -- un viaje sin fecha
-// no aparece si se filtra por fecha (igual que ya no aparece "ordenado"
-// por fecha en ningun sitio de Viajes). Con un pais elegido: si
-// multiCountryOk esta marcado, cualquier viaje que TOQUE ese pais
-// cuenta (aunque tenga mas paises); desmarcado, solo cuentan los viajes
-// cuyo UNICO pais sea ese -- distincion pedida explicitamente por Koku
-// (ej. "España" solo vs "España y Francia" tambien).
+// Año/mes comparan contra el startDate del viaje -- un viaje sin fecha no
+// aparece si se filtra por fecha (igual que ya no aparece "ordenado" por
+// fecha en ningun sitio de Viajes); con varios años/meses elegidos, basta
+// con que coincida con UNO de ellos. Con uno o varios países elegidos: si
+// multiCountryOk esta marcado, cualquier viaje que TOQUE alguno de esos
+// países cuenta (aunque tenga otros paises mas); desmarcado, solo cuentan
+// los viajes cuyos países esten TODOS dentro de los elegidos (para un
+// solo país elegido esto equivale a "su UNICO país sea ese", que es la
+// distincion que pidio Koku originalmente -- con varios países elegidos
+// generaliza a "España y Francia" cuando ambos estan en el filtro, pero
+// no un viaje que ademas toque Italia).
 function viajesTripMatchesFilters(trip) {
-  if (viajesFilters.year) {
+  if (viajesFilters.years.length) {
     const y = trip.startDate ? trip.startDate.slice(0, 4) : null;
-    if (y !== viajesFilters.year) return false;
+    if (!y || !viajesFilters.years.includes(y)) return false;
   }
-  if (viajesFilters.month) {
+  if (viajesFilters.months.length) {
     const m = trip.startDate ? trip.startDate.slice(5, 7) : null;
-    if (m !== viajesFilters.month) return false;
+    if (!m || !viajesFilters.months.includes(m)) return false;
   }
-  if (viajesFilters.country) {
-    if (!trip.countries.includes(viajesFilters.country)) return false;
-    if (!viajesFilters.multiCountryOk && trip.countries.length > 1) return false;
+  if (viajesFilters.countries.length) {
+    const touchesAny = trip.countries.some((c) => viajesFilters.countries.includes(c));
+    if (!touchesAny) return false;
+    if (!viajesFilters.multiCountryOk) {
+      const onlySelected = trip.countries.every((c) => viajesFilters.countries.includes(c));
+      if (!onlySelected) return false;
+    }
   }
   return true;
 }
@@ -7622,7 +7800,7 @@ function renderViajesTripsList() {
   const filtered = viajesTrips.filter(viajesTripMatchesFilters);
   const list = document.getElementById('viajes-trips-list');
   const empty = document.getElementById('viajes-trips-empty');
-  const filtersActive = !!(viajesFilters.year || viajesFilters.month || viajesFilters.country);
+  const filtersActive = !!(viajesFilters.years.length || viajesFilters.months.length || viajesFilters.countries.length);
   empty.textContent =
     filtersActive && viajesTrips.length > 0
       ? 'Ningún viaje coincide con estos filtros.'
@@ -8190,19 +8368,16 @@ document.getElementById('btn-confirm-viajes-link-finanzas').addEventListener('cl
   }
 });
 
-// Micro-estados que no existen como contorno en el SVG (demasiado
-// pequeños para el nivel de detalle de este dataset -- ver
-// VIAJES_COUNTRY_NAMES en viajesCountries.js) -- se dibuja un marcador/
-// pin en su ubicacion aproximada en vez de un contorno real. Coordenadas
-// estimadas a partir de las cajas delimitadoras REALES (getBBox(), no a
-// ojo del SVG entero) de los paises vecinos ya dibujados en este mismo
-// mapa -- ajustables a mano aqui si algun dia se ven descuadradas.
+// Taiwán es el UNICO pais que no existe como contorno propio en este
+// mapa (aparece dibujado como parte del grupo "cn" de China, ver
+// comentario mas arriba) -- se dibuja un marcador/pin en su ubicacion
+// aproximada en vez de un contorno real. Coordenadas tomadas
+// directamente de la etiqueta de texto "TW-label" que trae el propio
+// SVG (mismo sistema de coordenadas que el resto del mapa, ya
+// calibrada por quien hizo el dataset) -- ajustables a mano aqui si
+// algun dia se ven descuadradas.
 const VIAJES_MICRO_STATE_MARKERS = [
-  { id: 'ad', x: 397, y: 414 }, // Andorra -- Pirineos, frontera fr/es
-  { id: 'mc', x: 420, y: 411 }, // Monaco -- costa, junto a la esquina noroeste de Italia
-  { id: 'va', x: 431, y: 418 }, // Vaticano -- enclave en Roma (centro-oeste de Italia)
-  { id: 'sm', x: 440, y: 413 }, // San Marino -- cerca de Rimini (costa adriatica, norte de Italia)
-  { id: 'li', x: 429.8, y: 404 }, // Liechtenstein -- entre Suiza y Austria, en los Alpes
+  { id: 'tw', x: 791, y: 178 }, // Taiwan
 ];
 
 function addViajesMapMicroStateMarkers(svg) {
@@ -8214,6 +8389,7 @@ function addViajesMapMicroStateMarkers(svg) {
     circle.setAttribute('cy', y);
     circle.setAttribute('r', '1.8');
     circle.classList.add('viajes-map-country', 'viajes-map-micro-state');
+    circle.dataset.countryCode = id;
     circle.addEventListener('click', () => openViajesCountryModal(id));
     svg.appendChild(circle);
   });
@@ -8228,10 +8404,21 @@ async function loadViajesMap() {
   const res = await fetch('/viajes-world-map.svg');
   svgWrap.innerHTML = await res.text();
   const svg = svgWrap.querySelector('svg');
-  svg.querySelectorAll('path[id], g[id]').forEach((el) => {
-    if (el.id === 'world-map') return;
+  // Solo los <g id="XX"> de nivel superior (paises de verdad) -- el SVG
+  // tambien trae, al mismo nivel, un rect#World y un path#Ocean (fondo,
+  // no clicables) y un <g id="labels" display="none"> con el nombre en
+  // ingles de cada pais (no lo usamos, ya tenemos viajesCountryLabel());
+  // ":scope > g[id]" no baja a los <path>/<circle> internos de cada
+  // pais, que tienen sus propios ids sin sentido (ej. "path5998").
+  // dataset.countryCode (minuscula) en vez de tocar el atributo "id" real
+  // del SVG (que aqui viene en MAYUSCULAS) -- evita mutar el documento
+  // de origen y deja un unico sitio (este dataset) del que leer el
+  // codigo en minuscula en el resto de la funcion.
+  svg.querySelectorAll(':scope > g[id]').forEach((el) => {
+    if (el.id === 'labels') return;
     el.classList.add('viajes-map-country');
-    el.addEventListener('click', () => openViajesCountryModal(el.id));
+    el.dataset.countryCode = el.id.toLowerCase();
+    el.addEventListener('click', () => openViajesCountryModal(el.dataset.countryCode));
   });
   addViajesMapMicroStateMarkers(svg);
   // Hover -> nombre del pais al instante, reutilizando el mismo tooltip
@@ -8239,7 +8426,7 @@ async function loadViajesMap() {
   // que sigue al raton, ver attachFinanzasChartTooltips) -- generico de
   // verdad, no hace falta tocar su implementacion para reutilizarlo aqui.
   svg.querySelectorAll('.viajes-map-country').forEach((el) => {
-    el.dataset.tooltip = viajesCountryLabel(el.id);
+    el.dataset.tooltip = viajesCountryLabel(el.dataset.countryCode);
   });
   attachFinanzasChartTooltips(svg);
   initViajesMapZoomPan(svg, container);
@@ -8251,7 +8438,7 @@ function refreshViajesMapHighlights() {
   if (!svg) return;
   const visited = new Set(viajesTrips.flatMap((t) => t.countries));
   svg.querySelectorAll('.viajes-map-country').forEach((el) => {
-    el.classList.toggle('viajes-map-country-visited', visited.has(el.id));
+    el.classList.toggle('viajes-map-country-visited', visited.has(el.dataset.countryCode));
   });
 }
 
@@ -9161,6 +9348,37 @@ async function initStep(fn) {
 }
 
 async function init() {
+  // Lo PRIMERO de todo (antes incluso de cargar datos del calendario):
+  // si veniamos de una recarga dentro de una vista a pantalla completa,
+  // cubrir el calendario con esa vista cuanto antes -- showApp() ya dejo
+  // el calendario visible, así que cuanto mas tarde se llame a esto, mas
+  // se nota el "flashazo" del calendario antes de taparlo. Moverlo aqui
+  // (en vez de al final de init(), donde estaba antes) no depende de
+  // nada de lo que carga init() despues -- cada open*View() ya carga sus
+  // propios datos por su cuenta.
+  //
+  // OJO -- bug real encontrado al mover esto tan pronto: algunas vistas
+  // (Finanzas, via setupFinanzasIconColorFields) llaman en su apertura a
+  // funciones que viven en settings.js (createIconField/createColorField),
+  // que carga DESPUES de app.js (ver la nota de "Orden de declaracion"
+  // en CLAUDE.md) -- normalmente esto no es problema porque esas
+  // llamadas solo ocurren dentro de manejadores de eventos, que se
+  // disparan mucho despues de que TODOS los <script> ya han terminado
+  // de cargar. Pero al llamar a restoreCurrentScreen() de forma
+  // SINCRONA nada mas arrancar init() (que a su vez se invoca de forma
+  // sincrona al final de app.js), app.js seguia "en mitad de su propio
+  // <script>" cuando esto se ejecutaba -- settings.js ni siquiera habia
+  // empezado a cargar todavia, y createIconField no existia aun
+  // (ReferenceError). Un simple `await Promise.resolve()` NO basta para
+  // arreglarlo (los microtasks se vacian ENTRE cada <script> del
+  // documento, antes de pasar al siguiente) -- hace falta un macrotask
+  // de verdad (setTimeout) para que el navegador termine de
+  // parsear/ejecutar el resto de los <script> del documento (incluido
+  // settings.js entero) antes de continuar aqui. Sigue siendo
+  // practicamente instantaneo para quien lo ve, muy lejos de las 7
+  // llamadas de red secuenciales que había antes.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await initStep(restoreCurrentScreen);
   await initStep(maybeShowOnboarding);
   await initStep(loadGroups);
   await initStep(loadSpecialDays);
@@ -9189,11 +9407,6 @@ async function init() {
     populateNoteFolderSelect();
     renderNotesView();
   }), 30 * 1000);
-
-  // Al final de todo: si veniamos de una recarga (F5) dentro de una vista
-  // a pantalla completa (Extensiones, Gimnasio, Viajes...), volver a
-  // ella en vez de dejar a Koku siempre en el calendario.
-  await initStep(restoreCurrentScreen);
 }
 
 // Si ya tenemos un token guardado (o somos el ordenador, que ni lo

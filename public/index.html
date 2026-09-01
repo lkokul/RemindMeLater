@@ -1227,11 +1227,12 @@
   </div>
 
   <!-- Extension "Viajes": mapa interactivo por paises (SVG en
-       public/viajes-world-map.svg, CC BY-SA 3.0 -- ver el <desc> del
-       propio archivo -- con id="xx" en formato ISO 3166-1 alfa-2, nombres
-       en español en viajesCountries.js) + bitacora de cada viaje, que
-       puede tocar VARIOS paises a la vez (ej. un interrail). Ver
-       openViajesView()/renderViajesMap() en app.js. -->
+       public/viajes-world-map.svg -- fuente: raphaellepuschitz/SVG-World-Map
+       en GitHub, licencia MIT -- con <g id="XX"> en formato ISO 3166-1
+       alfa-2 en MAYUSCULAS, normalizado a minuscula en loadViajesMap();
+       nombres en español en viajesCountries.js) + bitacora de cada
+       viaje, que puede tocar VARIOS paises a la vez (ej. un interrail).
+       Ver openViajesView()/renderViajesMap() en app.js. -->
   <div id="viajes-view" class="my-space-view hidden">
     <div class="my-space-view-header">
       <h2>Viajes</h2>
