@@ -35,6 +35,25 @@ html, body {
      viewport ya lo desactive -- pedido para el rediseño movil, la app
      ya se ajusta sola al ancho de la ventana sin hacer falta zoom. */
   touch-action: manipulation;
+  /* WebKit/Chrome movil pintan un rectangulo de resaltado nativo al
+     tocar CUALQUIER elemento tocable, sin respetar el border-radius
+     propio del boton -- se veia como un rectangulo mal ajustado
+     alrededor de botones redondeados (p. ej. el "+" del calendario
+     movil). Los botones ya tienen su propio :active por estilo de
+     interaccion (Directo/Neon/Cristal/Registro), asi que quitar este
+     resaltado nativo no deja el toque sin respuesta visual. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Bloqueo de scroll de fondo con un modal abierto (ver
+   refreshModalScrollLock() en app.js) -- position:fixed con el scroll
+   guardado y restaurado al soltar, no un simple overflow:hidden (que en
+   algun navegador movil no evita el "rebote" del fondo). */
+body.modal-open-lock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  overflow: hidden;
 }
 
 body {
@@ -847,6 +866,18 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 .mobile-calendar-toolbar-actions { display: flex; align-items: center; gap: 0.2rem; }
 .mobile-calendar-add-wrap { position: relative; }
+/* Desplegable Horas/Listado de la vista diaria (createSelectField) --
+   por defecto .select-field ocupa el 100% de su contenedor, aqui hace
+   falta compacto (mismo footprint aprox. que los icon-btn de al lado)
+   para que quepa junto al buscador y el "+" en la barra. */
+.mobile-day-view-mode-field { width: auto; flex-shrink: 0; }
+.mobile-day-view-mode-field .select-field { width: auto; }
+.mobile-day-view-mode-field .select-field-trigger {
+  width: auto;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
 .mobile-add-menu {
   position: absolute;
   top: calc(100% + 0.4rem);
@@ -893,7 +924,13 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   flex: 1;
   min-height: 0;
   gap: 2px;
-  touch-action: pan-y;
+  /* none (no pan-y): con pan-y el navegador se cree con derecho a
+     gestionar el gesto vertical el mismo (scroll nativo), compitiendo
+     con el swipe propio (attachSwipe/Pointer Events) que quiere leer
+     ese mismo gesto -- en tactil de verdad el navegador gana esa
+     carrera y el swipe no completa. Mismo criterio que ya usa el mapa
+     de Viajes para su propio pan/zoom (.viajes-map-container). */
+  touch-action: none;
 }
 /* En modo "Listado" el mini-mes ocupa la mitad de arriba, y la lista de
    abajo (.mobile-calendar-month-list) la otra mitad -- pedido explicito
@@ -1017,7 +1054,14 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   align-content: space-evenly;
   overflow-y: auto;
   padding-bottom: 0.5rem;
-  touch-action: pan-y;
+  /* none (no pan-y): mismo motivo que el grid del mes -- con pan-y el
+     navegador se cree con derecho al gesto vertical (scroll nativo) y
+     gana la carrera contra el swipe propio en tactil de verdad, aunque
+     en Playwright (raton) pareciera funcionar. Se acepta como
+     contrapartida que si algun dia este grid SI desbordase de verdad en
+     un movil muy pequeño, no habria scroll nativo dentro -- el cambio
+     de año por swipe es la interaccion principal de esta zona. */
+  touch-action: none;
 }
 .mobile-calendar-year-tile {
   background: var(--surface);
@@ -1051,7 +1095,9 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   aspect-ratio: 1;
   position: relative;
 }
-.mobile-calendar-year-day.other-month { opacity: 0.25; }
+/* .other-month se queda sin numero (ver renderMobileCalendarYearGrid en
+   app.js) -- no necesita estilo propio, la celda vacia ya "desaparece"
+   sola. */
 .mobile-calendar-year-day.today { background: var(--day-today); color: var(--day-today-text); font-weight: 700; }
 .mobile-calendar-year-day.has-content::after {
   content: '';
@@ -1070,10 +1116,14 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    (mismo lenguaje visual que la del mes, solo con otros botones).
    --------------------------------------------------------------------- */
 .mobile-calendar-day-view {
-  padding: 0 1rem 0.6rem;
+  /* Menos hueco lateral/entre bloques que la ronda anterior -- pedido
+     explicito de Koku de aprovechar mas pantalla a lo ancho y en
+     vertical (sin tocar --hour-row-height, que es "1px = 1 minuto" a
+     proposito). */
+  padding: 0 0.6rem 0.6rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
   min-height: 0;
   flex: 1;
 }
@@ -1090,9 +1140,14 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   z-index: 15;
   background: var(--bg);
   padding-bottom: 0.3rem;
-  margin: 0 -1rem;
-  padding-left: 1rem;
-  padding-right: 1rem;
+  /* Sangra hasta el borde real de la pantalla (cancela el padding
+     lateral de .mobile-calendar-day-view, que ahora es 0.6rem) y vuelve
+     a meter ese mismo hueco como padding propio, para que su fondo
+     solido cubra el ancho entero mientras el contenido de dentro sigue
+     alineado con el resto de la vista. */
+  margin: 0 -0.6rem;
+  padding-left: 0.6rem;
+  padding-right: 0.6rem;
   border-bottom: 1px solid var(--border);
 }
 /* El toolbar comparte clase con el de mes (.mobile-calendar-toolbar),
@@ -1100,7 +1155,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    padding lateral -- aqui ya lo pone .mobile-day-sticky-header, asi que
    se anula para no duplicar el hueco. */
 .mobile-day-sticky-header .mobile-calendar-toolbar { padding-left: 0; padding-right: 0; }
-.mobile-calendar-day-heading { font-weight: 700; font-size: 1.1rem; margin: 0.2rem 0 0; }
+.mobile-calendar-day-heading { font-weight: 700; font-size: 1.1rem; margin: 0.2rem 0 0; text-align: center; }
 
 /* --- Tira de dias de la semana --- */
 .mobile-week-strip { padding-top: 0.2rem; }
@@ -1108,7 +1163,10 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 4px;
-  touch-action: pan-x;
+  /* none (no pan-x): mismo motivo que el swipe de mes/año -- con pan-x
+     el navegador se cree con derecho al gesto horizontal (paneo nativo)
+     y compite con attachSwipe() por el mismo eje en tactil de verdad. */
+  touch-action: none;
 }
 .week-strip-day {
   display: flex;
@@ -1226,7 +1284,9 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   font-weight: 700;
   color: color-mix(in srgb, var(--bg-text) 75%, var(--bg));
   text-transform: capitalize;
+  text-align: center;
 }
+.mobile-day-listado-block > .empty-hint { text-align: center; }
 .mobile-day-listado-sentinel { height: 1px; }
 
 /* --- Filas de "agenda" (panel de recordatorios en modo dia, escritorio) --
@@ -2565,6 +2625,14 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    mas estrecho que un modal-card normal, ya que solo lleva un mensaje +
    botones, sin formulario. */
 .app-confirm-card { max-width: 380px; }
+/* Este modal puede abrirse ENCIMA de otro modal ya abierto (p. ej. el
+   aviso de "hora invalida" del modal de evento) -- con el mismo
+   z-index:20 que el resto de .modal, quien gana no depende de cual se
+   abrio despues sino del orden en el DOM, y #app-confirm-modal vive
+   ANTES que #event-modal en index.html, asi que quedaba tapado y sus
+   botones no se podian pulsar. z-index propio mas alto para que siempre
+   quede encima, sea cual sea el modal que tenga debajo. */
+#app-confirm-modal { z-index: 30; }
 #app-confirm-modal-message { margin: 0; line-height: 1.4; }
 
 .reminders-day-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.7rem; }
@@ -2910,6 +2978,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: 0.55rem 0.5rem; font-size: 0.9rem;
 }
+.time-field-input.is-invalid { border-color: var(--danger); }
 .date-popover {
   /* min() con el ancho de ventana para que nunca se salga ni se aplaste
      en ventanas pequenas (era un ancho fijo, "se peteaba" en pantallas

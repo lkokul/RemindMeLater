@@ -2009,6 +2009,12 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  const mobileDayAddMenu = document.getElementById('mobile-day-add-menu');
+  if (mobileDayAddMenu && !mobileDayAddMenu.classList.contains('hidden')) {
+    toggleMobileCalendarAddMenu(false, 'mobile-day-add-menu', 'btn-mobile-day-add');
+    return;
+  }
+
   // Vista diaria del calendario movil (Fase 2/3 del rediseño movil): que
   // cambiar de pestaña en la barra inferior (via closeAllMobileOverlays)
   // tambien la cierre, igual que cualquier otra pantalla superpuesta.

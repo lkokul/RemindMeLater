@@ -419,6 +419,33 @@ enableCtrlEnterSubmit('task-form');
 enableCtrlEnterSubmit('note-form');
 enableCtrlEnterSubmit('onboarding-form');
 
+// Bloqueo de scroll de fondo mientras haya un modal abierto -- todos los
+// ~27 modales de la app comparten la clase .modal (confirmado con
+// grep), asi que un UNICO MutationObserver vigilando esa clase basta
+// para los 27, sin tener que tocar cada open*Modal()/close*Modal() por
+// separado. Antes casi no se notaba (la pagina movil apenas se movia),
+// pero desde que el calendario movil scrollea de verdad (Fase 3) se ve
+// claramente el fondo desplazandose mientras rellenas un formulario.
+// Se usa el truco clasico de position:fixed con el scroll guardado (no
+// un simple overflow:hidden, que en algun navegador movil no evita el
+// "rebote" del fondo).
+let modalScrollLockY = 0;
+function refreshModalScrollLock() {
+  const anyOpen = document.querySelector('.modal:not(.hidden)') !== null;
+  const isLocked = document.body.classList.contains('modal-open-lock');
+  if (anyOpen && !isLocked) {
+    modalScrollLockY = window.scrollY;
+    document.body.style.top = `-${modalScrollLockY}px`;
+    document.body.classList.add('modal-open-lock');
+  } else if (!anyOpen && isLocked) {
+    document.body.classList.remove('modal-open-lock');
+    document.body.style.top = '';
+    window.scrollTo(0, modalScrollLockY);
+  }
+}
+const modalScrollLockObserver = new MutationObserver(refreshModalScrollLock);
+document.querySelectorAll('.modal').forEach((el) => modalScrollLockObserver.observe(el, { attributes: true, attributeFilter: ['class'] }));
+
 // ---------------------------------------------------------------------
 // Selector de fecha con estilo propio: sustituye <input type="date"> (o
 // la parte de fecha de un datetime-local) por un boton que abre un
@@ -2073,8 +2100,17 @@ function renderMobileCalendarYearGrid() {
     buildYearTileCellDates(monthDate).forEach((cellDate) => {
       const cell = document.createElement('span');
       cell.className = 'mobile-calendar-year-day';
+      if (cellDate.getMonth() !== month) {
+        // Celda de relleno de otro mes -- Koku pidio que se queden en
+        // blanco (sin numero) en vez de mostrar el dia atenuado; se
+        // deja el hueco vacio para no descuadrar la cuadricula de 7
+        // columnas, pero sin comprobar "hoy"/"tiene contenido" (no
+        // tiene sentido para un dia que no es de este mes).
+        cell.classList.add('other-month');
+        grid.appendChild(cell);
+        return;
+      }
       cell.textContent = cellDate.getDate();
-      if (cellDate.getMonth() !== month) cell.classList.add('other-month');
       if (sameDay(cellDate, today)) cell.classList.add('today');
       if (yearViewEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate))) {
         cell.classList.add('has-content');
@@ -2449,25 +2485,33 @@ async function loadAndRenderMobileDayListado() {
   const content = document.getElementById('mobile-day-listado-content');
   content.innerHTML = '';
   let cursor = new Date(range.from);
+  let anyRendered = false;
   while (cursor <= range.to) {
     const key = toDateKey(cursor);
-    const block = document.createElement('div');
-    block.className = 'mobile-day-listado-block';
-    const heading = document.createElement('div');
-    heading.className = 'mobile-day-listado-block-heading';
-    heading.textContent = formatMobileListadoBlockHeading(cursor);
-    block.appendChild(heading);
     const dayEvents = (byDay.get(key) || []).sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
-    if (dayEvents.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'empty-hint';
-      empty.textContent = 'Nada este día.';
-      block.appendChild(empty);
-    } else {
+    // Un dia sin nada no pinta ningun bloque -- Koku no quiere ver
+    // "Nada este dia." repetido en cada fecha del rango. Los centinelas
+    // de scroll infinito no dependen de esto, siguen ahi igual.
+    if (dayEvents.length > 0) {
+      const block = document.createElement('div');
+      block.className = 'mobile-day-listado-block';
+      const heading = document.createElement('div');
+      heading.className = 'mobile-day-listado-block-heading';
+      heading.textContent = formatMobileListadoBlockHeading(cursor);
+      block.appendChild(heading);
       dayEvents.forEach((ev) => block.appendChild(buildMobileListadoRow(ev)));
+      content.appendChild(block);
+      anyRendered = true;
     }
-    content.appendChild(block);
     cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
+  }
+  if (!anyRendered) {
+    // Si TODO el rango cargado esta vacio, un unico aviso (no uno por
+    // dia) para que la vista no se quede en blanco sin explicacion.
+    const empty = document.createElement('p');
+    empty.className = 'empty-hint';
+    empty.textContent = 'No hay nada en estos días.';
+    content.appendChild(empty);
   }
 }
 
@@ -2562,11 +2606,19 @@ async function renderMobileDayActiveSubView({ scrollToNow = false } = {}) {
   }
 }
 
-document.getElementById('btn-mobile-day-view-toggle').addEventListener('click', () => {
-  const next = getMobileDayViewMode() === 'hours' ? 'listado' : 'hours';
-  localStorage.setItem('mobileDayViewMode', next);
-  renderMobileDayActiveSubView({ scrollToNow: true });
+// Desplegable en vez de icono ciclico -- Koku pidio poder clicar
+// directamente la sub-vista que quiere, en vez de darle al icono hasta
+// que salga la que buscaba (confuso sin eventos de por medio para saber
+// en cual estabas).
+const mobileDayViewModeField = createSelectField({
+  options: [{ value: 'hours', label: 'Horas' }, { value: 'listado', label: 'Listado' }],
+  initialValue: getMobileDayViewMode(),
+  onChange: (v) => {
+    localStorage.setItem('mobileDayViewMode', v);
+    renderMobileDayActiveSubView({ scrollToNow: true });
+  },
 });
+document.getElementById('mobile-day-view-mode-field').appendChild(mobileDayViewModeField.element);
 // El buscador global de verdad llega en la Fase 5, ver el mismo aviso
 // junto al buscador del mes.
 document.getElementById('btn-mobile-calendar-day-search').addEventListener('click', () => {
@@ -2659,8 +2711,30 @@ function toTimeInputValue(date) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+// Analiza los digitos escritos hasta ahora: con 3-4 digitos, los 2
+// ultimos son los minutos y el resto la hora (igual que un campo de
+// vencimiento de tarjeta) -- "2056" -> "20:56", "630" -> "6:30". Con
+// menos de 3 digitos todavia no hay suficiente informacion para saber
+// si es valido (se sigue escribiendo la hora), asi que no se marca
+// error todavia.
+function parseTimeFieldDigits(digits) {
+  if (digits.length === 0) return { formatted: '', complete: false, valid: false, value: null };
+  const formatted = digits.length > 2 ? `${digits.slice(0, digits.length - 2)}:${digits.slice(-2)}` : digits;
+  if (digits.length < 3) return { formatted, complete: false, valid: false, value: null };
+  const h = Number(digits.slice(0, digits.length - 2));
+  const mi = Number(digits.slice(-2));
+  const ok = h <= 23 && mi <= 59;
+  return {
+    formatted,
+    complete: true,
+    valid: ok,
+    value: ok ? `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}` : null,
+  };
+}
+
 function createTimeField({ initialValue = '09:00' } = {}) {
-  let value = initialValue;
+  let value = initialValue; // ultimo valor VALIDO conocido
+  let valid = true;
 
   const root = document.createElement('div');
   root.className = 'time-field';
@@ -2672,31 +2746,59 @@ function createTimeField({ initialValue = '09:00' } = {}) {
   input.inputMode = 'numeric';
   input.value = value;
 
-  // Admite "9:5", "09:05", "930"... siempre que las horas/minutos sean
-  // validos; si no, devuelve null y el campo vuelve al ultimo valor
-  // bueno en vez de dejar algo sin sentido escrito.
-  function normalize(text) {
-    const cleaned = text.trim().replace(/\s+/g, '');
-    const m = cleaned.match(/^(\d{1,2}):?(\d{2})$/);
-    if (!m) return null;
-    const h = Number(m[1]);
-    const mi = Number(m[2]);
-    if (h > 23 || mi > 59) return null;
-    return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
-  }
+  // Autocompleta el ":" MIENTRAS SE ESCRIBE (no solo al perder el foco)
+  // y valida en tiempo real -- antes solo se normalizaba en "change"
+  // (al perder el foco), asi que si se guardaba con Ctrl+Intro con el
+  // foco todavia en este campo, form.requestSubmit() no dispara "change"
+  // por si solo y lo escrito se perdia en silencio, mandandose el valor
+  // VIEJO sin ningun aviso.
+  input.addEventListener('input', () => {
+    const digits = input.value.replace(/\D/g, '').slice(0, 4);
+    const result = parseTimeFieldDigits(digits);
+    input.value = result.formatted;
+    input.setSelectionRange(input.value.length, input.value.length);
+    if (result.complete && result.valid) {
+      value = result.value;
+      valid = true;
+    } else {
+      // Incompleto (1-2 digitos, todavia escribiendo la hora) o fuera
+      // de rango -- en los dos casos getValue() no debe devolver nada
+      // hasta que se complete/corrija, para no guardar algo a medias.
+      valid = false;
+    }
+    // Solo se pinta en rojo cuando ya hay info de sobra para saber que
+    // esta MAL (3-4 digitos fuera de rango) -- con 0-2 digitos se sigue
+    // escribiendo, no es un error todavia.
+    input.classList.toggle('is-invalid', result.complete && !result.valid);
+  });
 
-  input.addEventListener('change', () => {
-    const normalized = normalize(input.value);
-    if (normalized) value = normalized;
-    input.value = value;
+  input.addEventListener('blur', () => {
+    const digits = input.value.replace(/\D/g, '').slice(0, 4);
+    const result = parseTimeFieldDigits(digits);
+    if (!result.complete || !result.valid) {
+      // Al perder el foco con algo a medias o invalido, se marca en
+      // rojo de verdad (mientras se escribe 1-2 digitos no se marca,
+      // pero si te vas de ahi sin terminar, ya cuenta como error).
+      valid = false;
+      input.classList.add('is-invalid');
+    }
   });
 
   root.appendChild(input);
 
   return {
     element: root,
-    getValue: () => value,
-    setValue: (v) => { value = v; input.value = v; },
+    // Devuelve el ultimo valor VALIDO conocido, o null si el campo esta
+    // ahora mismo en un estado invalido/incompleto -- nunca un valor
+    // inventado o desactualizado.
+    getValue: () => (valid ? value : null),
+    isValid: () => valid,
+    setValue: (v) => {
+      value = v;
+      valid = true;
+      input.value = v;
+      input.classList.remove('is-invalid');
+    },
   };
 }
 
@@ -2708,6 +2810,21 @@ function combineDateAndTime(date, timeStr) {
   const [h, m] = (timeStr || '00:00').split(':').map(Number);
   const pad = (n) => String(n).padStart(2, '0');
   return `${toDateKey(date)}T${pad(h)}:${pad(m)}:00`;
+}
+
+// Redondea a la media hora mas cercana -- 6:40 -> 6:30 (mas cerca de
+// :30 que de :00 de la hora siguiente), 6:50 -> 7:00, 6:00 se queda en
+// 6:00. Se usa para sugerir la hora de inicio de un evento nuevo en vez
+// de dejar "las 6:37" tal cual.
+function roundToNearestHalfHour(date) {
+  const rounded = new Date(date);
+  rounded.setSeconds(0, 0);
+  const minutes = rounded.getMinutes();
+  const remainder = minutes % 30;
+  if (remainder !== 0) {
+    rounded.setMinutes(remainder < 15 ? minutes - remainder : minutes + (30 - remainder));
+  }
+  return rounded;
 }
 
 const eventStartTimeField = createTimeField({ initialValue: toTimeInputValue(new Date()) });
@@ -2729,6 +2846,8 @@ function openEventModal(event, presetDate) {
   if (presetDate) {
     defaultStart = new Date(presetDate);
     defaultStart.setHours(9, 0, 0, 0);
+  } else {
+    defaultStart = roundToNearestHalfHour(defaultStart);
   }
   const startDate = event ? new Date(event.startAt) : defaultStart;
   eventStartDateField.setValue(startDate);
@@ -2740,7 +2859,12 @@ function openEventModal(event, presetDate) {
     eventEndTimeField.setValue(toTimeInputValue(endDate));
   } else {
     eventEndDateField.setValue(null);
-    eventEndTimeField.setValue(toTimeInputValue(startDate));
+    // 1 hora despues del inicio por defecto -- antes se ponia la MISMA
+    // hora que el inicio ("empieza y acaba en el mismo momento"), pedido
+    // explicito de Koku de cambiarlo.
+    const defaultEnd = new Date(startDate);
+    defaultEnd.setHours(defaultEnd.getHours() + 1);
+    eventEndTimeField.setValue(toTimeInputValue(defaultEnd));
   }
   document.getElementById('event-location').value = event && event.location ? event.location : '';
   const descriptionEl = document.getElementById('event-description');
@@ -2778,6 +2902,14 @@ document.getElementById('btn-close-event').addEventListener('click', closeEventM
 
 document.getElementById('event-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const isAllDay = document.getElementById('event-all-day').checked;
+  // Si la hora no es valida (o esta a medio escribir), no se guarda una
+  // hora inventada en silencio -- se avisa y el formulario se queda
+  // abierto. No aplica a "Todo el dia", donde la hora ni se usa.
+  if (!isAllDay && (!eventStartTimeField.isValid() || !eventEndTimeField.isValid())) {
+    await showAppAlert('La hora no es válida. Usa el formato HH:MM.');
+    return;
+  }
   const id = document.getElementById('event-id').value;
   const reminderRaw = eventReminderField.getValue();
 
@@ -3050,12 +3182,15 @@ document.getElementById('task-group-field').appendChild(taskGroupField.element);
 const taskDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
 document.getElementById('task-date-field').appendChild(taskDateField.element);
 
-function openTaskModal(task) {
+// presetDate (opcional): al crear una tarea nueva desde un dia concreto
+// (p. ej. el boton "+" de la vista diaria movil), arranca ya con esa
+// fecha puesta -- mismo parametro que ya admite openEventModal().
+function openTaskModal(task, presetDate) {
   const modal = document.getElementById('task-modal');
   document.getElementById('task-modal-title').textContent = task ? 'Editar tarea' : 'Nueva tarea';
   document.getElementById('task-id').value = task ? task.id : '';
   document.getElementById('task-title').value = task ? task.title : '';
-  taskDateField.setValue(task && task.startAt ? new Date(task.startAt) : null);
+  taskDateField.setValue(task && task.startAt ? new Date(task.startAt) : (presetDate ? new Date(presetDate) : null));
   populateTaskGroupSelect();
   taskGroupField.setValue(task && task.groupId ? String(task.groupId) : '');
   document.getElementById('btn-delete-task').classList.toggle('hidden', !task);
@@ -5683,9 +5818,12 @@ document.querySelectorAll('.mobile-nav-btn').forEach((btn) => {
 // Fase 2 del rediseño movil vive dentro de la barra del calendario
 // movil (antes era un boton flotante aparte, .mobile-fab-wrap, ver
 // CLAUDE.md) -- misma logica, solo cambio donde vive en el DOM.
-function toggleMobileCalendarAddMenu(forceOpen) {
-  const menu = document.getElementById('mobile-calendar-add-menu');
-  const btn = document.getElementById('btn-mobile-calendar-add');
+// menuId/btnId con los valores del mes como default -- la vista diaria
+// (Fase 3) tenia el mismo boton pero se le olvido meter, y ahora
+// reutiliza esta misma funcion con sus propios ids en vez de duplicarla.
+function toggleMobileCalendarAddMenu(forceOpen, menuId = 'mobile-calendar-add-menu', btnId = 'btn-mobile-calendar-add') {
+  const menu = document.getElementById(menuId);
+  const btn = document.getElementById(btnId);
   const willBeOpen = forceOpen !== undefined ? forceOpen : menu.classList.contains('hidden');
   menu.classList.toggle('hidden', !willBeOpen);
   btn.setAttribute('aria-expanded', willBeOpen ? 'true' : 'false');
@@ -5703,12 +5841,31 @@ document.getElementById('btn-new-task-mobile').addEventListener('click', () => {
   toggleMobileCalendarAddMenu(false);
   openTaskModal(null);
 });
+
+// Mismo menu "+", pero en la barra de la vista diaria (id
+// mobile-day-add-wrap/-menu, btn-mobile-day-add) -- crear desde aqui
+// usa como fecha por defecto el DIA que se esta viendo, no "ahora".
+document.getElementById('btn-mobile-day-add').addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleMobileCalendarAddMenu(undefined, 'mobile-day-add-menu', 'btn-mobile-day-add');
+});
+document.getElementById('btn-new-event-mobile-day').addEventListener('click', () => {
+  toggleMobileCalendarAddMenu(false, 'mobile-day-add-menu', 'btn-mobile-day-add');
+  openEventModal(null, state.mobileCalendarDayDate);
+});
+document.getElementById('btn-new-task-mobile-day').addEventListener('click', () => {
+  toggleMobileCalendarAddMenu(false, 'mobile-day-add-menu', 'btn-mobile-day-add');
+  openTaskModal(null, state.mobileCalendarDayDate);
+});
+
 // Tocar fuera del boton/menu tambien lo cierra -- patron normal de menu
 // flotante (ver closeAllPopovers en settings.js para el mismo patron con
-// los popovers de color/icono/fecha).
+// los popovers de color/icono/fecha). Comprueba los 2 wraps (mes y dia).
 document.addEventListener('click', (e) => {
-  const wrap = document.getElementById('mobile-calendar-add-wrap');
-  if (wrap && !wrap.contains(e.target)) toggleMobileCalendarAddMenu(false);
+  const monthWrap = document.getElementById('mobile-calendar-add-wrap');
+  if (monthWrap && !monthWrap.contains(e.target)) toggleMobileCalendarAddMenu(false);
+  const dayWrap = document.getElementById('mobile-day-add-wrap');
+  if (dayWrap && !dayWrap.contains(e.target)) toggleMobileCalendarAddMenu(false, 'mobile-day-add-menu', 'btn-mobile-day-add');
 });
 
 // ---------------------------------------------------------------------
