@@ -46,6 +46,11 @@ const state = {
   lecturasSagas: [],
   lecturasItems: [],
   lecturasCurrentSagaId: null,
+  // Calendario movil (Fase 2 del rediseño movil, ver CLAUDE.md): que dia
+  // esta seleccionado en el modo Listado del mes, y que dia se esta
+  // viendo en la vista diaria (ver enterMobileDayView() en app.js).
+  mobileCalendarListDate: null,
+  mobileCalendarDayDate: null,
 };
 
 // Registra el service worker (ver sw.js): junto con manifest.json, es lo
@@ -1299,7 +1304,7 @@ async function loadMonth() {
   state.events = await api(`/api/events?from=${from}T00:00:00&to=${to}T23:59:59`);
   document.getElementById('current-month-label').textContent = formatMonthYear(state.viewDate);
   renderCalendarGrid();
-  renderAgendaList();
+  renderMobileCalendarMonthGrid();
 }
 
 // Los dias marcados como festivo/especial no son muchos (los pones tu a
@@ -1567,47 +1572,10 @@ document.getElementById('btn-day-add-event').addEventListener('click', () => {
   openEventModal(null, state.remindersDayDate);
 });
 
-function renderAgendaList() {
-  const container = document.getElementById('agenda-list');
-  container.innerHTML = '';
-
-  if (state.events.length === 0) {
-    container.innerHTML = '<p class="empty-hint">No hay eventos este mes.</p>';
-    return;
-  }
-
-  let lastDayKey = null;
-  state.events.forEach((ev) => {
-    const start = new Date(ev.startAt);
-    const dayKey = toIsoDate(start);
-    if (dayKey !== lastDayKey) {
-      const heading = document.createElement('div');
-      heading.className = 'agenda-day-heading';
-      heading.textContent = DAY_HEADING_FORMATTER.format(start);
-      container.appendChild(heading);
-      lastDayKey = dayKey;
-    }
-
-    if (ev.isTask) {
-      const row = buildTaskRow(ev);
-      if (row) container.appendChild(row);
-      return;
-    }
-    const groupLabel = ev.groupName ? `${ev.groupIcon ? ev.groupIcon + ' ' : ''}${ev.groupName}` : null;
-    const item = document.createElement('div');
-    item.className = 'agenda-item';
-    item.innerHTML = `
-      <span class="color-dot" style="background-color: ${ev.groupColor || DEFAULT_EVENT_COLOR}"></span>
-      <div class="agenda-time">${ev.allDay ? 'Todo el dia' : TIME_FORMATTER.format(start)}</div>
-      <div>
-        <div class="agenda-title">${escapeHtml(ev.title)}</div>
-        ${groupLabel || ev.location ? `<div class="agenda-meta">${[groupLabel, ev.location].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
-      </div>
-    `;
-    item.addEventListener('click', () => openEventModal(ev));
-    container.appendChild(item);
-  });
-}
+// renderAgendaList() (la lista plana antigua de movil) se quito por
+// completo en la Fase 2 del rediseño movil -- sustituida por las vistas
+// de mes/año propias mas abajo (renderMobileCalendarMonthGrid() y
+// alrededores).
 
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -1778,6 +1746,16 @@ async function setCalendarViewMode(mode) {
     monthEl.classList.remove('hidden');
     playCalendarViewAnimation(monthEl);
   }
+  // Movil (Fase 2 del rediseño movil): mismo `calendarViewMode` como
+  // fuente unica de verdad, para que si alguien redimensiona la ventana
+  // a media sesion la vista se mantenga coherente entre escritorio y
+  // movil. loadMonth() (llamado arriba en la rama "month") ya repinta
+  // #mobile-calendar-month-grid via renderMobileCalendarMonthGrid().
+  if (mode === 'year') {
+    await refreshMobileCalendarYearGrid();
+  }
+  refreshMobileCalendarModeVisibility();
+  refreshMobileCalendarNavLabel();
 }
 
 document.getElementById('btn-calendar-year-toggle').addEventListener('click', () => {
@@ -1798,6 +1776,420 @@ document.getElementById('calendar-grid-wrap').addEventListener('wheel', (e) => {
   e.preventDefault();
   setCalendarViewMode('year');
 }, { passive: false });
+
+// ---------------------------------------------------------------------
+// Calendario MOVIL (Fase 2 del rediseño movil, ver CLAUDE.md): vistas de
+// mes/año propias, en contenedores separados de escritorio (nunca
+// comparten nodo con calendar-grid-wrap.desktop-only -- se investigo a
+// fondo antes de construir esto: la vista anual de escritorio vivia
+// ANIDADA dentro de ese contenedor, asi que reutilizar el mismo DOM no
+// era viable sin romper el corte movil/escritorio). Comparten con
+// escritorio la LOGICA de datos (loadYearViewEvents, state.events) pero
+// el pintado es propio -- el calculo de fechas del mes SI se duplica a
+// proposito (buildMonthCellDates de aqui abajo, y el de
+// renderCalendarGrid mas arriba): son solo 6 lineas de aritmetica ya
+// verificadas, y evita tocar la funcion de escritorio que Koku ya usa a
+// diario.
+// ---------------------------------------------------------------------
+
+// Gesto generico de swipe (Pointer Events -- funciona con dedo, raton o
+// lapiz con un unico mecanismo, sin depender de eventos "touch"
+// especificos). Solo detecta la DIRECCION al soltar, sin arrastre en
+// vivo -- suficiente para cambiar de mes/año/dia, no hace falta mas.
+function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40 } = {}) {
+  let startX = null;
+  let startY = null;
+  el.addEventListener('pointerdown', (e) => {
+    if (isGestureBlockedByModal()) return;
+    startX = e.clientX;
+    startY = e.clientY;
+    // Sin esto, si el dedo se sale del contenedor durante el arrastre (muy
+    // facil cerca de un borde, en una cuadricula no muy alta), el
+    // "pointerup" llega al elemento que haya debajo del dedo en ESE
+    // momento, no a este -- y el gesto se queda "colgado" sin completarse.
+    // setPointerCapture fuerza a que TODO el gesto (incluido el pointerup)
+    // siga llegando aqui pase lo que pase.
+    el.setPointerCapture(e.pointerId);
+  });
+  el.addEventListener('pointerup', (e) => {
+    if (startX === null) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    startX = null;
+    startY = null;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      if (Math.abs(dx) < threshold) return;
+      if (dx < 0 && onLeft) onLeft();
+      else if (dx > 0 && onRight) onRight();
+    } else {
+      if (Math.abs(dy) < threshold) return;
+      if (dy < 0 && onUp) onUp();
+      else if (dy > 0 && onDown) onDown();
+    }
+  });
+  el.addEventListener('pointercancel', () => { startX = null; startY = null; });
+}
+
+// Mismo calculo de fechas que renderCalendarGrid() (42 celdas, semana
+// empieza en lunes) pero como funcion aparte reutilizable -- ver nota de
+// arriba sobre por que NO se toca renderCalendarGrid() para compartirla.
+function buildMonthCellDates(viewDate) {
+  const first = startOfMonth(viewDate);
+  const firstWeekday = (first.getDay() + 6) % 7;
+  const gridStart = new Date(first);
+  gridStart.setDate(gridStart.getDate() - firstWeekday);
+  const dates = [];
+  for (let i = 0; i < 42; i++) {
+    const cellDate = new Date(gridStart);
+    cellDate.setDate(gridStart.getDate() + i);
+    dates.push(cellDate);
+  }
+  return dates;
+}
+
+// Igual que arriba pero con solo las semanas que hace falta para ESE mes
+// (4 a 6, sin fila de sobra) -- mismo criterio que ya usa
+// renderCalendarYearGrid() de escritorio para sus miniaturas, reutilizado
+// aqui para los 12 meses en miniatura de la vista anual movil.
+function buildYearTileCellDates(monthDate) {
+  const first = startOfMonth(monthDate);
+  const last = endOfMonth(monthDate);
+  const firstWeekday = (first.getDay() + 6) % 7;
+  const lastWeekday = (last.getDay() + 6) % 7;
+  const gridStart = new Date(first);
+  gridStart.setDate(gridStart.getDate() - firstWeekday);
+  const totalDays = firstWeekday + last.getDate() + (6 - lastWeekday);
+  const dates = [];
+  for (let i = 0; i < totalDays; i++) {
+    const cellDate = new Date(gridStart);
+    cellDate.setDate(gridStart.getDate() + i);
+    dates.push(cellDate);
+  }
+  return dates;
+}
+
+// Que grupos DISTINTOS estan representados un dia concreto -- no es que
+// un evento pertenezca a varios grupos (un evento/tarea siempre es de UN
+// grupo, ver events.group_id en server/db.js), es agregar varios
+// eventos/tareas de ESE dia que pueden ser de grupos distintos entre si.
+// Orden pedido por Koku: los de "todo el dia" primero, luego por hora de
+// inicio; un grupo que ya aparecio no se repite aunque tenga mas de un
+// evento ese dia.
+function getDistinctGroupsForDay(dayEvents) {
+  const sorted = [...dayEvents].sort((a, b) => {
+    if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
+    return new Date(a.startAt) - new Date(b.startAt);
+  });
+  const seen = new Set();
+  const groups = [];
+  sorted.forEach((ev) => {
+    const key = ev.groupId != null ? `g${ev.groupId}` : `c${ev.groupColor || DEFAULT_EVENT_COLOR}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    groups.push({ color: ev.groupColor || DEFAULT_EVENT_COLOR });
+  });
+  return groups;
+}
+
+function buildMobileDayGroupPill(groups) {
+  const pill = document.createElement('div');
+  pill.className = 'mobile-day-group-pill';
+  groups.forEach((g) => {
+    const span = document.createElement('span');
+    span.style.backgroundColor = g.color;
+    pill.appendChild(span);
+  });
+  return pill;
+}
+
+// Ajuste por dispositivo (localStorage, NO sincronizado -- mismo patron
+// que calendarDayDensity de escritorio, ver getCalendarDensityMode() mas
+// arriba): que tan "denso" se ve un dia con eventos en el mes movil.
+const MOBILE_CALENDAR_MONTH_MODE_IDS = ['compact', 'stacked', 'listed'];
+function getMobileCalendarMonthMode() {
+  const stored = localStorage.getItem('mobileCalendarMonthMode');
+  return MOBILE_CALENDAR_MONTH_MODE_IDS.includes(stored) ? stored : 'compact';
+}
+function cycleMobileCalendarMonthMode() {
+  const idx = MOBILE_CALENDAR_MONTH_MODE_IDS.indexOf(getMobileCalendarMonthMode());
+  const next = MOBILE_CALENDAR_MONTH_MODE_IDS[(idx + 1) % MOBILE_CALENDAR_MONTH_MODE_IDS.length];
+  localStorage.setItem('mobileCalendarMonthMode', next);
+  renderMobileCalendarMonthGrid();
+  refreshMobileCalendarModeVisibility();
+}
+
+// "De que hora a que hora" para el modo Listado (mes) -- no existia un
+// formateador de RANGO en el proyecto, el resto de sitios solo muestran
+// la hora de inicio.
+function formatMobileEventTimeRange(ev) {
+  if (ev.allDay) return 'Todo el día';
+  const start = TIME_FORMATTER.format(new Date(ev.startAt));
+  if (!ev.endAt) return start;
+  const end = TIME_FORMATTER.format(new Date(ev.endAt));
+  return end === start ? start : `${start}–${end}`;
+}
+
+function renderMobileCalendarMonthGrid() {
+  const grid = document.getElementById('mobile-calendar-month-grid');
+  grid.innerHTML = '';
+  const mode = getMobileCalendarMonthMode();
+  const today = new Date();
+
+  WEEKDAY_LABELS.forEach((label) => {
+    const el = document.createElement('div');
+    el.className = 'mobile-calendar-weekday-heading';
+    el.textContent = label;
+    grid.appendChild(el);
+  });
+
+  buildMonthCellDates(state.viewDate).forEach((cellDate) => {
+    const cell = document.createElement('div');
+    cell.className = 'mobile-calendar-day-cell';
+    if (cellDate.getMonth() !== state.viewDate.getMonth()) cell.classList.add('other-month');
+    if (sameDay(cellDate, today)) cell.classList.add('today');
+    const dayType = state.specialDays[toDateKey(cellDate)];
+    if (dayType === 'holiday') cell.classList.add('holiday-day');
+    else if (dayType === 'special') cell.classList.add('special-day');
+    else if (cellDate.getDay() === 0 || cellDate.getDay() === 6) cell.classList.add('weekend-day');
+
+    const circle = document.createElement('div');
+    circle.className = 'mobile-calendar-day-circle';
+    circle.textContent = cellDate.getDate();
+    cell.appendChild(circle);
+
+    const dayEvents = state.events.filter((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate));
+    const groups = getDistinctGroupsForDay(dayEvents);
+
+    if (groups.length > 0) {
+      if (mode === 'stacked') {
+        const bars = document.createElement('div');
+        bars.className = 'mobile-calendar-day-cell-bars';
+        groups.slice(0, 2).forEach((g) => {
+          const bar = document.createElement('div');
+          bar.className = 'mobile-day-group-bar';
+          bar.style.backgroundColor = g.color;
+          bars.appendChild(bar);
+        });
+        if (groups.length > 2) {
+          const more = document.createElement('div');
+          more.className = 'mobile-day-group-more';
+          more.textContent = `+${groups.length - 2}`;
+          bars.appendChild(more);
+        }
+        cell.appendChild(bars);
+      } else {
+        // 'compact' y el mini-mes de 'listed' usan el mismo formato.
+        cell.appendChild(buildMobileDayGroupPill(groups));
+      }
+    }
+
+    cell.addEventListener('click', () => {
+      if (getMobileCalendarMonthMode() === 'listed') {
+        state.mobileCalendarListDate = cellDate;
+        renderMobileCalendarMonthList(cellDate);
+      } else {
+        enterMobileDayView(cellDate);
+      }
+    });
+
+    grid.appendChild(cell);
+  });
+
+  if (mode === 'listed') {
+    renderMobileCalendarMonthList(ensureMobileCalendarListDate());
+  }
+}
+
+// Que dia muestra la lista del modo Listado por defecto: hoy, si el mes
+// que se esta viendo es el mes real; si no, el dia 1 del mes que se esta
+// viendo. Se recalcula solo cuando el dia guardado ya no pertenece al mes
+// actual (cambiar de mes) -- cambiar solo de modo de densidad conserva el
+// dia que ya tenias elegido.
+function ensureMobileCalendarListDate() {
+  const stored = state.mobileCalendarListDate;
+  if (stored && stored.getFullYear() === state.viewDate.getFullYear() && stored.getMonth() === state.viewDate.getMonth()) {
+    return stored;
+  }
+  const today = new Date();
+  const fallback = (today.getFullYear() === state.viewDate.getFullYear() && today.getMonth() === state.viewDate.getMonth())
+    ? today
+    : startOfMonth(state.viewDate);
+  state.mobileCalendarListDate = fallback;
+  return fallback;
+}
+
+async function renderMobileCalendarMonthList(date) {
+  const container = document.getElementById('mobile-calendar-month-list');
+  const dateStr = toDateKey(date);
+  const dayEvents = await api(`/api/events?from=${dateStr}T00:00:00&to=${dateStr}T23:59:59`);
+  // Si mientras se esperaba la respuesta el usuario ya toco otro dia, o
+  // cambio de modo de densidad, esta respuesta esta obsoleta -- no pisar
+  // lo que se ve ahora.
+  if (!state.mobileCalendarListDate || toDateKey(state.mobileCalendarListDate) !== dateStr) return;
+  if (getMobileCalendarMonthMode() !== 'listed') return;
+
+  container.innerHTML = '';
+  if (dayEvents.length === 0) {
+    container.innerHTML = '<p class="empty-hint">No hay nada este día.</p>';
+    return;
+  }
+  dayEvents.forEach((ev) => {
+    const row = document.createElement('div');
+    row.className = 'mobile-calendar-month-list-row';
+    const bar = document.createElement('div');
+    bar.className = 'mobile-calendar-month-list-bar';
+    bar.style.backgroundColor = ev.isTask ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev)) : (ev.groupColor || DEFAULT_EVENT_COLOR);
+    const title = document.createElement('div');
+    title.className = 'mobile-calendar-month-list-title';
+    title.textContent = ev.title;
+    const time = document.createElement('div');
+    time.className = 'mobile-calendar-month-list-time';
+    time.textContent = formatMobileEventTimeRange(ev);
+    row.append(bar, title, time);
+    row.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
+    container.appendChild(row);
+  });
+}
+
+function renderMobileCalendarYearGrid() {
+  const container = document.getElementById('mobile-calendar-year-grid');
+  container.innerHTML = '';
+  const year = state.viewDate.getFullYear();
+  const today = new Date();
+
+  for (let month = 0; month < 12; month++) {
+    const monthDate = new Date(year, month, 1);
+    const tile = document.createElement('div');
+    tile.className = 'mobile-calendar-year-tile';
+
+    const heading = document.createElement('div');
+    heading.className = 'mobile-calendar-year-tile-heading';
+    const label = MONTH_ONLY_FORMATTER.format(monthDate);
+    heading.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+    tile.appendChild(heading);
+
+    const grid = document.createElement('div');
+    grid.className = 'mobile-calendar-year-tile-grid';
+    buildYearTileCellDates(monthDate).forEach((cellDate) => {
+      const cell = document.createElement('span');
+      cell.className = 'mobile-calendar-year-day';
+      cell.textContent = cellDate.getDate();
+      if (cellDate.getMonth() !== month) cell.classList.add('other-month');
+      if (sameDay(cellDate, today)) cell.classList.add('today');
+      if (yearViewEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate))) {
+        cell.classList.add('has-content');
+      }
+      grid.appendChild(cell);
+    });
+    tile.appendChild(grid);
+
+    tile.addEventListener('click', () => enterMonthFromYear(month));
+    container.appendChild(tile);
+  }
+}
+
+async function refreshMobileCalendarYearGrid() {
+  await loadYearViewEvents(state.viewDate.getFullYear());
+  renderMobileCalendarYearGrid();
+}
+
+function refreshMobileCalendarModeVisibility() {
+  const view = document.querySelector('.mobile-calendar-view');
+  const monthGrid = document.getElementById('mobile-calendar-month-grid');
+  const monthList = document.getElementById('mobile-calendar-month-list');
+  const yearGrid = document.getElementById('mobile-calendar-year-grid');
+  const isListed = calendarViewMode === 'month' && getMobileCalendarMonthMode() === 'listed';
+  view.classList.toggle('is-listed', isListed);
+  if (calendarViewMode === 'year') {
+    monthGrid.classList.add('hidden');
+    monthList.classList.add('hidden');
+    yearGrid.classList.remove('hidden');
+  } else {
+    yearGrid.classList.add('hidden');
+    monthGrid.classList.remove('hidden');
+    monthList.classList.toggle('hidden', !isListed);
+  }
+}
+
+function refreshMobileCalendarNavLabel() {
+  const label = document.getElementById('btn-mobile-calendar-nav-label');
+  label.textContent = calendarViewMode === 'year' ? String(state.viewDate.getFullYear()) : `▲ ${state.viewDate.getFullYear()}`;
+}
+
+document.getElementById('btn-mobile-calendar-nav-label').addEventListener('click', () => {
+  if (calendarViewMode === 'year') enterMonthFromYear(state.viewDate.getMonth());
+  else setCalendarViewMode('year');
+});
+document.getElementById('btn-mobile-calendar-density').addEventListener('click', () => {
+  cycleMobileCalendarMonthMode();
+});
+// El buscador global de verdad (eventos+tareas+notas por texto) llega en
+// la Fase 5 del rediseño movil -- de momento solo avisa, para que el
+// boton ya este en su sitio definitivo sin sentirse roto.
+document.getElementById('btn-mobile-calendar-search').addEventListener('click', () => {
+  showAppAlert('El buscador llega en la próxima ronda.');
+});
+
+// Swipe vertical del MES: arriba = mes siguiente, abajo = mes anterior
+// (direccion normal). Swipe vertical del AÑO: arriba = año ANTERIOR,
+// abajo = año siguiente -- direccion EXPLICITAMENTE invertida, pedido
+// asi por Koku.
+attachSwipe(document.getElementById('mobile-calendar-month-grid'), {
+  onUp: () => {
+    state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() + 1, 1);
+    loadMonth();
+  },
+  onDown: () => {
+    state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() - 1, 1);
+    loadMonth();
+  },
+});
+attachSwipe(document.getElementById('mobile-calendar-year-grid'), {
+  onUp: () => {
+    state.viewDate = new Date(state.viewDate.getFullYear() - 1, state.viewDate.getMonth(), 1);
+    refreshMobileCalendarYearGrid();
+    refreshMobileCalendarNavLabel();
+  },
+  onDown: () => {
+    state.viewDate = new Date(state.viewDate.getFullYear() + 1, state.viewDate.getMonth(), 1);
+    refreshMobileCalendarYearGrid();
+    refreshMobileCalendarNavLabel();
+  },
+});
+
+// ---------------------------------------------------------------------
+// Vista diaria movil -- version MINIMA de la Fase 2 (fecha + volver al
+// mes), la Fase 3 la completa con la tira semanal y las 2 sub-vistas
+// (Vista por horas / Listado). Se construye ya el punto de entrada
+// (boton "Hoy", tap en un dia del mes/año) para no tener que recablearlo
+// luego -- ver "Hoy" mas abajo.
+// ---------------------------------------------------------------------
+function enterMobileDayView(date) {
+  state.mobileCalendarDayDate = date;
+  document.querySelector('.mobile-calendar-toolbar').classList.add('hidden');
+  document.querySelector('.mobile-calendar-view').classList.add('hidden');
+  document.getElementById('btn-mobile-calendar-today').classList.add('hidden');
+  document.getElementById('mobile-calendar-day-heading').textContent = DAY_HEADING_FORMATTER.format(date);
+  document.getElementById('mobile-calendar-day-view').classList.remove('hidden');
+}
+
+function exitMobileDayView() {
+  document.getElementById('mobile-calendar-day-view').classList.add('hidden');
+  document.querySelector('.mobile-calendar-toolbar').classList.remove('hidden');
+  document.querySelector('.mobile-calendar-view').classList.remove('hidden');
+  document.getElementById('btn-mobile-calendar-today').classList.remove('hidden');
+}
+
+document.getElementById('btn-mobile-calendar-day-back').addEventListener('click', exitMobileDayView);
+document.getElementById('btn-mobile-calendar-today').addEventListener('click', () => enterMobileDayView(new Date()));
+
+// Primer pintado: los contenedores existen desde que carga la pagina,
+// pero hasta que loadMonth()/setCalendarViewMode() corren por primera
+// vez (dentro de init()) conviene que la barra ya tenga el texto/estado
+// correcto -- refreshMobileCalendarNavLabel()/refreshMobileCalendarModeVisibility()
+// no dependen de datos de red, se pueden llamar ya.
+refreshMobileCalendarNavLabel();
+refreshMobileCalendarModeVisibility();
 
 // ---------------------------------------------------------------------
 // Modal de evento (crear / editar / borrar)
@@ -4852,38 +5244,40 @@ document.querySelectorAll('.mobile-nav-btn').forEach((btn) => {
 });
 
 // Boton flotante de crear: un solo boton que despliega los 3 accesos
-// directos de siempre (+ Nuevo evento/+ Nueva tarea/+ Nota), en vez de
-// tener los 3 sueltos ocupando sitio permanentemente como en escritorio.
-function toggleMobileFabMenu(forceOpen) {
-  const menu = document.getElementById('mobile-fab-menu');
-  const fab = document.getElementById('btn-mobile-fab');
+// directos de siempre (+ Nuevo evento/+ Nueva tarea/+ Nota). Desde la
+// Fase 2 del rediseño movil vive dentro de la barra del calendario
+// movil (antes era un boton flotante aparte, .mobile-fab-wrap, ver
+// CLAUDE.md) -- misma logica, solo cambio donde vive en el DOM.
+function toggleMobileCalendarAddMenu(forceOpen) {
+  const menu = document.getElementById('mobile-calendar-add-menu');
+  const btn = document.getElementById('btn-mobile-calendar-add');
   const willBeOpen = forceOpen !== undefined ? forceOpen : menu.classList.contains('hidden');
   menu.classList.toggle('hidden', !willBeOpen);
-  fab.setAttribute('aria-expanded', willBeOpen ? 'true' : 'false');
+  btn.setAttribute('aria-expanded', willBeOpen ? 'true' : 'false');
 }
 
-document.getElementById('btn-mobile-fab').addEventListener('click', (e) => {
+document.getElementById('btn-mobile-calendar-add').addEventListener('click', (e) => {
   e.stopPropagation();
-  toggleMobileFabMenu();
+  toggleMobileCalendarAddMenu();
 });
 document.getElementById('btn-new-event-mobile').addEventListener('click', () => {
-  toggleMobileFabMenu(false);
+  toggleMobileCalendarAddMenu(false);
   openEventModal(null);
 });
 document.getElementById('btn-new-task-mobile').addEventListener('click', () => {
-  toggleMobileFabMenu(false);
+  toggleMobileCalendarAddMenu(false);
   openTaskModal(null);
 });
 document.getElementById('btn-new-note-mobile').addEventListener('click', () => {
-  toggleMobileFabMenu(false);
+  toggleMobileCalendarAddMenu(false);
   openNoteInEditor(null);
 });
 // Tocar fuera del boton/menu tambien lo cierra -- patron normal de menu
 // flotante (ver closeAllPopovers en settings.js para el mismo patron con
 // los popovers de color/icono/fecha).
 document.addEventListener('click', (e) => {
-  const wrap = document.getElementById('mobile-fab-wrap');
-  if (wrap && !wrap.contains(e.target)) toggleMobileFabMenu(false);
+  const wrap = document.getElementById('mobile-calendar-add-wrap');
+  if (wrap && !wrap.contains(e.target)) toggleMobileCalendarAddMenu(false);
 });
 
 // ---------------------------------------------------------------------

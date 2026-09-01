@@ -2003,9 +2003,18 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const mobileFabMenu = document.getElementById('mobile-fab-menu');
-  if (mobileFabMenu && !mobileFabMenu.classList.contains('hidden')) {
-    toggleMobileFabMenu(false);
+  const mobileCalendarAddMenu = document.getElementById('mobile-calendar-add-menu');
+  if (mobileCalendarAddMenu && !mobileCalendarAddMenu.classList.contains('hidden')) {
+    toggleMobileCalendarAddMenu(false);
+    return;
+  }
+
+  // Vista diaria del calendario movil (Fase 2/3 del rediseño movil): que
+  // cambiar de pestaña en la barra inferior (via closeAllMobileOverlays)
+  // tambien la cierre, igual que cualquier otra pantalla superpuesta.
+  const mobileCalendarDayView = document.getElementById('mobile-calendar-day-view');
+  if (mobileCalendarDayView && !mobileCalendarDayView.classList.contains('hidden')) {
+    exitMobileDayView();
     return;
   }
 

@@ -254,27 +254,17 @@
       </button>
     </nav>
 
-    <!-- Boton flotante de crear (solo movil): sustituye a los 3 botones
-         "+ Nuevo evento/+ Nueva tarea/+ Nota" de la topbar de escritorio.
-         Los 3 items de abajo disparan las MISMAS funciones que esos
-         botones (ver app.js), no duplican logica, solo el disparador. -->
-    <div class="mobile-fab-wrap" id="mobile-fab-wrap">
-      <div id="mobile-fab-menu" class="mobile-fab-menu hidden">
-        <button type="button" id="btn-new-note-mobile" class="mobile-fab-menu-item">Nota</button>
-        <button type="button" id="btn-new-task-mobile" class="mobile-fab-menu-item">Nueva tarea</button>
-        <button type="button" id="btn-new-event-mobile" class="mobile-fab-menu-item">Nuevo evento</button>
-      </div>
-      <button type="button" id="btn-mobile-fab" class="mobile-fab" aria-label="Crear" aria-expanded="false" aria-haspopup="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-      </button>
-    </div>
-
     <main class="layout">
       <!-- Columna del calendario: el mes con flechas va centrado AQUI
            (no en todo el ancho de la app, ni contando el panel de
            recordatorios de al lado). -->
       <div class="calendar-column">
-        <nav class="month-nav-bar">
+        <!-- Barra del mes de ESCRITORIO (flechas prev/next + vista anual con
+             boton/rueda del raton). En movil no se usa -- la navegacion de
+             mes/año es por gesto (swipe) y tiene su propia barra propia
+             mas abajo (.mobile-calendar-toolbar), ver Fase 2 del rediseño
+             movil en CLAUDE.md. -->
+        <nav class="month-nav-bar desktop-only">
           <button id="nav-prev" class="icon-btn" aria-label="Mes anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
           <span id="current-month-label" class="month-label"></span>
           <button id="nav-next" class="icon-btn" aria-label="Mes siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
@@ -283,7 +273,7 @@
                rueda del raton (hacia abajo sobre el mes = vista anual,
                hacia arriba sobre un mes en la vista anual = entrar en
                ese mes) -- ver el "wheel" en app.js. -->
-          <button type="button" id="btn-calendar-year-toggle" class="icon-btn desktop-only" aria-label="Vista anual" title="Vista anual (o rueda del ratón hacia abajo sobre el mes)">
+          <button type="button" id="btn-calendar-year-toggle" class="icon-btn" aria-label="Vista anual" title="Vista anual (o rueda del ratón hacia abajo sobre el mes)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
           </button>
         </nav>
@@ -295,9 +285,62 @@
           <div id="calendar-year-grid" class="calendar-year-grid hidden"></div>
         </section>
 
-        <!-- Vista de movil: agenda en lista, mas comoda para tocar -->
-        <section class="agenda-wrap mobile-only">
-          <div id="agenda-list" class="agenda-list"></div>
+        <!-- Calendario MOVIL (Fase 2 del rediseño movil): contenedor propio,
+             NUNCA comparte nodo con calendar-grid-wrap.desktop-only de
+             arriba (ver nota en CLAUDE.md sobre el hallazgo de que la vista
+             anual de escritorio vivia anidada ahi y no se podia reutilizar
+             sin mas). Barra superior sin flechas prev/next a proposito --
+             en movil el cambio de mes/año es por swipe vertical (ver
+             attachSwipe/setCalendarViewMode en app.js), pedido explicito
+             de Koku. -->
+        <div class="mobile-calendar-toolbar mobile-only">
+          <button type="button" id="btn-mobile-calendar-nav-label" class="mobile-calendar-nav-label"></button>
+          <div class="mobile-calendar-toolbar-actions">
+            <button type="button" id="btn-mobile-calendar-density" class="icon-btn" aria-label="Cambiar densidad del mes" title="Cambiar densidad del mes">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="19" cy="12" r="1.6"></circle></svg>
+            </button>
+            <!-- El buscador global de verdad (eventos+tareas+notas) llega en
+                 la Fase 5 -- de momento el boton existe pero no hace nada,
+                 para que la barra ya tenga su forma definitiva. -->
+            <button type="button" id="btn-mobile-calendar-search" class="icon-btn" aria-label="Buscar" title="Buscar (proximamente)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            </button>
+            <div class="mobile-calendar-add-wrap" id="mobile-calendar-add-wrap">
+              <button type="button" id="btn-mobile-calendar-add" class="icon-btn" aria-label="Añadir" aria-expanded="false" aria-haspopup="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+              <div id="mobile-calendar-add-menu" class="mobile-add-menu hidden">
+                <button type="button" id="btn-new-note-mobile" class="mobile-add-menu-item">Nota</button>
+                <button type="button" id="btn-new-task-mobile" class="mobile-add-menu-item">Tarea</button>
+                <button type="button" id="btn-new-event-mobile" class="mobile-add-menu-item">Evento</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <section class="mobile-calendar-view mobile-only">
+          <div id="mobile-calendar-month-grid" class="mobile-calendar-month-grid"></div>
+          <div id="mobile-calendar-month-list" class="mobile-calendar-month-list hidden"></div>
+          <div id="mobile-calendar-year-grid" class="mobile-calendar-year-grid hidden"></div>
+        </section>
+
+        <!-- Lleva a la vista diaria de HOY -- solo tiene sentido en mes/año
+             (oculto en vista diaria, ver enterMobileDayView()/exitMobileDayView()
+             en app.js, que ocultan/muestran este boton junto con la barra
+             y la vista de mes/año). La vista diaria completa (tira semanal
+             + Vista por horas/Listado) es la Fase 3 -- de momento este
+             boton entra en una version minima de esa vista (solo fecha +
+             volver), que la Fase 3 completara sin tener que recablear
+             este boton. -->
+        <button type="button" id="btn-mobile-calendar-today" class="secondary-btn mobile-calendar-today-btn mobile-only">Hoy</button>
+
+        <!-- Vista diaria movil -- version minima de la Fase 2 (solo fecha +
+             volver al mes), la Fase 3 la completa con la tira semanal y las
+             2 sub-vistas (Vista por horas / Listado). -->
+        <section id="mobile-calendar-day-view" class="mobile-calendar-day-view mobile-only hidden">
+          <button type="button" id="btn-mobile-calendar-day-back" class="secondary-btn mobile-calendar-day-back-btn">← Volver al mes</button>
+          <p id="mobile-calendar-day-heading" class="mobile-calendar-day-heading"></p>
+          <p class="hint">La vista diaria completa (por horas / listado) llega en la próxima ronda.</p>
         </section>
       </div>
 
@@ -314,7 +357,12 @@
            que se ve siempre a la vez, cada uno con su propio scroll
            interno (ver .reminders-top-block/.reminders-tasks-block en
            styles.css). -->
-      <aside id="reminders-panel" class="reminders-panel">
+      <!-- En movil este panel clasico ya NO se ve -- desde la Fase 2 del
+           rediseño movil, tareas/recordatorios se ven integrados en el
+           propio calendario movil (circulos/pildoras de grupo), y Notas
+           tiene su vista propia (Fase 4). Sigue intacto en escritorio,
+           donde es el panel de siempre al lado del calendario. -->
+      <aside id="reminders-panel" class="reminders-panel desktop-only">
         <!-- Solo se usa en modo "boton" de Mi espacio (panel lateral
              clasico): las secciones que marques en Configuracion > Vista
              > "Agrupar con flechas" se meten AQUI DENTRO (una visible
