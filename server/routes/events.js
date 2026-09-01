@@ -38,15 +38,23 @@ function serialize(row) {
 }
 
 // GET /api/events?from=2026-08-01&to=2026-08-31&isTask=1
+// GET /api/events?q=reunion
 // from/to e isTask son opcionales y combinables: from/to filtra por rango
 // de fecha (los eventos/tareas sin start_at nunca caen en un rango, asi
 // que quedan fuera si se pide un rango); isTask=1 solo tareas, isTask=0
 // solo eventos normales. Sin ningun filtro, devuelve todo.
+// "q" es para el buscador global del movil (Fase 5 del rediseño movil):
+// busca por titulo en TODOS los eventos/tareas, IGNORANDO from/to a
+// proposito -- Koku pidio "todos los eventos con ese texto", no solo los
+// del mes/rango que se este viendo en ese momento.
 router.get('/', (req, res) => {
-  const { from, to, isTask } = req.query;
+  const { from, to, isTask, q } = req.query;
   const conditions = [];
   const params = [];
-  if (from && to) {
+  if (q && q.trim()) {
+    conditions.push('e.title LIKE ?');
+    params.push(`%${q.trim()}%`);
+  } else if (from && to) {
     conditions.push('e.start_at >= ? AND e.start_at <= ?');
     params.push(from, to);
   }

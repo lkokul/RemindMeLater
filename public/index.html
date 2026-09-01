@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>RemindMeLater</title>
 <link rel="stylesheet" href="styles.css" />
 
@@ -198,13 +198,13 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4.5" height="16" rx="1"></rect><rect x="9.75" y="4" width="4.5" height="16" rx="1"></rect><rect x="16.5" y="4" width="4.5" height="16" rx="1"></rect></svg>
           <span>Mi espacio</span>
         </button>
-        <!-- Extensiones: futuras secciones aparte del calendario
+        <!-- Apps: futuras secciones aparte del calendario
              (gimnasio, finanzas, lecturas...). A diferencia de Mi
              espacio no tiene modo "panel", siempre es pantalla
              completa, asi que este boton nunca se oculta. -->
-        <button id="btn-extensions" class="secondary-btn my-space-topbar-btn" aria-label="Extensiones">
+        <button id="btn-extensions" class="secondary-btn my-space-topbar-btn" aria-label="Apps">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-          <span>Extensiones</span>
+          <span>Apps</span>
         </button>
         <!-- Fase "movil": punto de color para ver de un vistazo si este
              dispositivo esta sincronizado, sin tener que entrar en
@@ -232,13 +232,21 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
         <span>Calendario</span>
       </button>
-      <button type="button" class="mobile-nav-btn" data-mobile-nav="my-space" aria-label="Mi espacio">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4.5" height="16" rx="1"></rect><rect x="9.75" y="4" width="4.5" height="16" rx="1"></rect><rect x="16.5" y="4" width="4.5" height="16" rx="1"></rect></svg>
-        <span>Mi espacio</span>
+      <!-- Antes "Mi espacio" (data-mobile-nav="my-space") -- en el movil
+           nuevo, tareas/recordatorios se integran en el propio
+           calendario (sin pantalla aparte), asi que este hueco pasa a
+           ser "Notas" por defecto. Es tambien el UNICO hueco que
+           Configuracion -> Este dispositivo puede sustituir por otra
+           App (ver mobileNavNotesSlot en app.js/settings.js, Fase 5) --
+           por eso mantiene id/clase estables aunque cambie de icono y
+           label en tiempo de ejecucion. -->
+      <button type="button" class="mobile-nav-btn" id="mobile-nav-notes-btn" data-mobile-nav="notes" aria-label="Notas">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v5h5"></path><line x1="8" y1="12" x2="16" y2="12"></line><line x1="8" y1="16" x2="13" y2="16"></line></svg>
+        <span>Notas</span>
       </button>
-      <button type="button" class="mobile-nav-btn" data-mobile-nav="extensions" aria-label="Extensiones">
+      <button type="button" class="mobile-nav-btn" data-mobile-nav="extensions" aria-label="Apps">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-        <span>Extensiones</span>
+        <span>Apps</span>
       </button>
       <button type="button" class="mobile-nav-btn" data-mobile-nav="settings" aria-label="Configuración">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
@@ -457,7 +465,7 @@
     </div>
   </div>
 
-  <!-- "Extensiones": futuras secciones aparte del calendario. Gimnasio ya
+  <!-- "Apps": futuras secciones aparte del calendario. Gimnasio ya
        es real (ver #gym-view mas abajo); Finanzas y Lecturas siguen de
        momento como placeholder "Proximamente". Mismo patron de pantalla
        completa que "Mi espacio" (.my-space-view), pero sin modo panel:
@@ -465,7 +473,7 @@
        openExtensionsView/closeExtensionsView en app.js. -->
   <div id="extensions-view" class="my-space-view hidden">
     <div class="my-space-view-header">
-      <h2>Extensiones</h2>
+      <h2>Apps</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-extensions" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
         <!-- Configuracion tiene que poder abrirse desde CUALQUIER
@@ -540,13 +548,13 @@
        patron de columnas de "Mi espacio" (aqui solo una seccion a la vez
        tiene sentido) ni el de "Configuracion" con submenu (son solo 3,
        sin necesitar un menu previo). Se abre desde la tarjeta de
-       Extensiones y vuelve ahi (no a Home) al cerrarse -- ver
+       Apps y vuelve ahi (no a Home) al cerrarse -- ver
        openGymView/closeGymView en app.js. -->
   <div id="gym-view" class="my-space-view hidden">
     <div class="my-space-view-header">
       <h2>Gimnasio</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-gym" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+        <button type="button" id="btn-close-gym" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
         <button type="button" id="btn-gym-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -679,7 +687,7 @@
 
   <!-- Extension "Finanzas": gastos, ingresos e inversiones (solo registro
        manual, sin conexion a ninguna API de cotizaciones en vivo -- ver
-       CLAUDE.md). Mismo patron de pantalla completa que Extensiones/Mi
+       CLAUDE.md). Mismo patron de pantalla completa que Apps/Mi
        espacio (.my-space-view), con 3 pestañas dentro (Resumen/Movimientos/
        Inversiones, ver finanzas-tabs en styles.css y el codigo de pestañas
        en app.js). -->
@@ -687,7 +695,7 @@
     <div class="my-space-view-header">
       <h2>Finanzas</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-finanzas" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+        <button type="button" id="btn-close-finanzas" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
         <button type="button" id="btn-finanzas-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1213,7 +1221,7 @@
     <div class="my-space-view-header">
       <h2>Archivos</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-archivos" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+        <button type="button" id="btn-close-archivos" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
         <button type="button" id="btn-archivos-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1329,7 +1337,7 @@
     <div class="my-space-view-header">
       <h2>Viajes</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-viajes" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+        <button type="button" id="btn-close-viajes" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
         <button type="button" id="btn-viajes-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1518,7 +1526,7 @@
     <div class="my-space-view-header">
       <h2>Lecturas</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-lecturas" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+        <button type="button" id="btn-close-lecturas" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
         <button type="button" id="btn-lecturas-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1765,7 +1773,7 @@
 
   <!-- Editor de notas a pantalla completa (sustituye al modal pequeño de
        antes de esta ronda -- ver CLAUDE.md). Mismo patron de overlay que
-       "Mi espacio"/"Extensiones" (.my-space-view), con la barra de
+       "Mi espacio"/"Apps" (.my-space-view), con la barra de
        formato (negrita/cursiva/listas/tabla/imagen, Fase 4) ahora arriba
        del todo como una barra de estado, en vez de ir pegada al campo de
        contenido dentro de un modal pequeno. El arbol de carpetas y el
@@ -2150,7 +2158,7 @@
         <div id="completed-tasks-display-options" class="view-mode-options"></div>
 
         <!-- Fase "Archivos": el boton "Sincronizar ahora" vivia aqui, pero
-             se ha movido al apartado Extensiones > Archivos (junto con el
+             se ha movido al apartado Apps > Archivos (junto con el
              resto de acciones manuales de esa pantalla) -- ver
              "Sincronizacion" en app.js. -->
 

@@ -555,7 +555,7 @@ document.getElementById('btn-settings').addEventListener('click', openSettingsMo
 // boton vive dentro de la cabecera de Mi espacio para que Configuracion
 // se pueda abrir desde cualquier ventana.
 document.getElementById('btn-my-space-settings').addEventListener('click', openSettingsModal);
-// Mismo motivo que btn-my-space-settings: Extensiones y cada extension
+// Mismo motivo que btn-my-space-settings: Apps y cada extension
 // (Gimnasio/Lecturas/Finanzas/Archivos) son tambien .my-space-view a
 // pantalla completa que tapan la topbar -- cada una necesita su propio
 // boton de Configuracion.
@@ -2097,12 +2097,12 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Extensiones: cada una es pantalla completa igual que "Mi espacio", asi
+  // Apps: cada una es pantalla completa igual que "Mi espacio", asi
   // que Esc capa a capa igual -- PRIMERO cualquier modal de "añadir/editar"
   // abierto ENCIMA de la extension (se cierra sin guardar, te deja en la
   // misma vista), luego la sub-navegacion de dentro (solo Lecturas la
   // tiene: saga -> detalle de esa saga), luego la extension entera vuelve
-  // a la rejilla de Extensiones, y la rejilla vuelve a Home. Antes estos
+  // a la rejilla de Apps, y la rejilla vuelve a Home. Antes estos
   // modales no estaban aqui: el primer Esc se saltaba directamente a
   // cerrar la extension entera en vez de solo el modal (pedido explicito
   // de Koku: "el primer esc me saque de la ventana de añadir... luego ya
@@ -2174,7 +2174,7 @@ document.addEventListener('keydown', (e) => {
   // Viajes tiene DOS capas de sub-navegacion, no una: el detalle de un
   // viaje dentro de la pestaña "Mis viajes", y las propias pestañas
   // Mapa/Mis viajes -- Esc SIEMPRE pasa por la pestaña Mapa antes de
-  // cerrar del todo a Extensiones (pedido explicito de Koku), en vez de
+  // cerrar del todo a Apps (pedido explicito de Koku), en vez de
   // cerrar directamente desde "Mis viajes".
   const viajesView = document.getElementById('viajes-view');
   if (viajesView && !viajesView.classList.contains('hidden')) {

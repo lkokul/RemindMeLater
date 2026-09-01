@@ -1209,7 +1209,7 @@ document.getElementById('btn-sync-now').addEventListener('click', async () => {
   btn.disabled = false;
 });
 
-// El punto de la topbar lleva directo a Extensiones > Archivos (donde
+// El punto de la topbar lleva directo a Apps > Archivos (donde
 // esta el detalle y el boton de "Sincronizar ahora" -- ver mas abajo),
 // no hace nada por si solo mas alla de eso.
 document.getElementById('sync-indicator').addEventListener('click', () => {
@@ -1217,7 +1217,7 @@ document.getElementById('sync-indicator').addEventListener('click', () => {
 });
 
 // Fase "Archivos": ya NO se sincroniza sola al volver la conexion --
-// solo cuando se pide a mano desde Extensiones > Archivos (ver
+// solo cuando se pide a mano desde Apps > Archivos (ver
 // openArchivosView() y btn-sync-now mas abajo). Decision explicita de
 // Koku, confirmada dos veces: si no se abre ese apartado, los cambios de
 // este dispositivo no llegan al otro hasta que se dispare a mano.
@@ -4833,7 +4833,15 @@ function refreshMobileNavActive(section) {
 
 function goToMobileSection(section) {
   closeAllMobileOverlays();
-  if (section === 'my-space') document.getElementById('btn-my-space').click();
+  // "notes" es el hueco antes llamado "my-space" -- de momento sigue
+  // abriendo la pantalla vieja de Mi espacio como puente, hasta que la
+  // Fase 4 del rediseño movil construya #mobile-notes-view (notas
+  // propias, sin tareas/recordatorios, que ahora viven dentro del
+  // propio calendario). Puede tambien abrir otra App si Koku eligio
+  // otra en Configuracion -> Este dispositivo (ver
+  // applyMobileNavCustomization(), Fase 5) -- mientras eso no exista,
+  // "notes" es el unico valor real que puede llegar aqui.
+  if (section === 'notes') document.getElementById('btn-my-space').click();
   else if (section === 'extensions') document.getElementById('btn-extensions').click();
   else if (section === 'settings') document.getElementById('btn-settings').click();
   refreshMobileNavActive(section);
@@ -4879,7 +4887,7 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------------------------------------------------------------------
-// Extensiones (placeholder): mismo patron de pantalla completa que "Mi
+// Apps (placeholder): mismo patron de pantalla completa que "Mi
 // espacio" (.my-space-view), pero sin modo panel/boton -- este boton no
 // se oculta nunca. Sin logica real todavia, solo abre/cierra la pantalla
 // "Proximamente" (ver #extensions-view en index.html).
@@ -4898,7 +4906,7 @@ document.getElementById('btn-close-extensions').addEventListener('click', closeE
 // ---------------------------------------------------------------------
 // Extension "Gimnasio": registro de entrenamientos de verdad (ejercicios,
 // rutinas reutilizables, sesiones con series/repeticiones/peso, y
-// progreso con graficas). Se abre desde la tarjeta de Extensiones y
+// progreso con graficas). Se abre desde la tarjeta de Apps y
 // vuelve ahi (no a Home) al cerrarse. Las 3 secciones (Sesiones/Rutinas/
 // Progreso) son pestañas simples (switchGymTab), no el patron de
 // columnas de "Mi espacio" -- aqui solo tiene sentido ver una a la vez.
@@ -5057,7 +5065,7 @@ function renderGymSessionsList() {
 // son SOLO registro manual -- sin conectar a ninguna API externa de
 // cotizaciones en vivo, para mantener la app local-first (ver
 // CLAUDE.md). Vive en su propia pantalla completa (#finanzas-view,
-// mismo patron .my-space-view que Extensiones) con 3 pestañas.
+// mismo patron .my-space-view que Apps) con 3 pestañas.
 //
 // createIconField()/createColorField() viven en settings.js, que se
 // carga DESPUES de app.js -- por eso los campos de icono/color no se
@@ -9622,7 +9630,7 @@ const VERSION_INFO_DATE_FORMATTER = new Intl.DateTimeFormat('es-ES', {
 });
 
 // Ademas del menu principal de Configuracion, este mismo bloque se
-// repite en Extensiones > Archivos (#archivos-version-info) -- Koku pidio
+// repite en Apps > Archivos (#archivos-version-info) -- Koku pidio
 // ver ahi tambien la version/commit, no solo en Configuracion.
 async function refreshVersionInfo() {
   const boxes = [document.getElementById('settings-version-info'), document.getElementById('archivos-version-info')].filter(Boolean);
@@ -9651,7 +9659,7 @@ let pendingReleaseVersion = null;
 
 // El estado de la comprobacion (comprobando/al dia/nueva version/error)
 // se ve integrado en el propio texto del boton "Comprobar ahora" de
-// Extensiones > Archivos, en vez de un mensaje aparte encima -- Koku lo
+// Apps > Archivos, en vez de un mensaje aparte encima -- Koku lo
 // pidio explicitamente ("que no sea solo un mensaje"). data-check-status
 // controla el color (ver .archivos-check-btn en styles.css: rojo en error).
 function setArchivosCheckButtonState(status, text) {
@@ -9663,7 +9671,7 @@ function setArchivosCheckButtonState(status, text) {
 }
 
 // Ademas del banner de siempre, esto tambien conduce el estado del boton
-// de Extensiones > Archivos (#btn-archivos-check-update) -- asi la
+// de Apps > Archivos (#btn-archivos-check-update) -- asi la
 // comprobacion automatica de aqui abajo y el boton manual de ahi dan el
 // mismo feedback. GET /api/update/check ya es requireDeviceOrTrusted (ver
 // server/routes/update.js), asi que esto tambien funciona en un movil
@@ -9808,7 +9816,7 @@ document.getElementById('btn-onboarding-skip').addEventListener('click', async (
 // Recordar la "ventana" (vista a pantalla completa) en la que estabas al
 // recargar la pagina -- Koku pidio explicitamente que un F5 no te mande
 // siempre al calendario. Ambito deliberadamente limitado a las vistas de
-// NIVEL SUPERIOR (Mi espacio, Extensiones, y cada extension) -- NO
+// NIVEL SUPERIOR (Mi espacio, Apps, y cada extension) -- NO
 // restaura pestañas/detalles concretos dentro de cada una (que pestaña
 // de Finanzas, que viaje abierto en Viajes, que saga de Lecturas...), ni
 // el editor de notas (junta varias notas abiertas a la vez, con mas
@@ -9893,7 +9901,7 @@ async function init() {
   renderNotesView();
   refreshSyncStatusUI();
   // Ya no hay ningun runSync() automatico que la ponga al dia sola (ver
-  // btn-sync-now en Extensiones > Archivos) -- sin esto, el punto de la
+  // btn-sync-now en Apps > Archivos) -- sin esto, el punto de la
   // topbar se quedaria sin titulo/aria-label hasta la primera vez que se
   // sincronice a mano.
   refreshSyncIndicator();

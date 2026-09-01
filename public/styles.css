@@ -28,6 +28,15 @@
 
 * { box-sizing: border-box; }
 
+html, body {
+  /* Bloquea el pellizco-zoom del navegador en tactil (junto con
+     maximum-scale=1.0/user-scalable=no del <meta viewport>) y quita el
+     retraso de doble-tap-zoom que algunos navegadores aplican aunque el
+     viewport ya lo desactive -- pedido para el rediseño movil, la app
+     ya se ajusta sola al ancho de la ventana sin hacer falta zoom. */
+  touch-action: manipulation;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
