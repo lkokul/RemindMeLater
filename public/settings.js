@@ -262,7 +262,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'viajes-settings', 'devices', 'mobile', 'shortcuts'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'devices', 'mobile', 'shortcuts'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -279,7 +279,6 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();
     else if (tab === 'groups') refreshGroupsTab();
-    else if (tab === 'viajes-settings') refreshViajesSettingsTab();
     else if (tab === 'devices') refreshDevicesTab();
     else if (tab === 'mobile') refreshMobileTab();
     else if (tab === 'shortcuts') refreshShortcutsTab();
@@ -1379,27 +1378,6 @@ async function refreshGroupsTab() {
   renderGroupsList();
 }
 
-// Ajuste GLOBAL (no por dispositivo, ver routes/viajesSettings.js) --
-// a diferencia del resto de esta pestaña "Este dispositivo", este
-// selector no lee/escribe localStorage, hace una llamada real al
-// servidor cada vez. El interruptor de "enlazar con Finanzas" que vivia
-// aqui antes ahora es POR VIAJE (checkbox dentro de #viajes-trip-modal,
-// ver app.js) -- aqui solo queda la cuenta por defecto.
-const viajesDefaultAccountField = createSelectField({
-  options: [{ value: '', label: 'Sin cuenta por defecto' }],
-  initialValue: '',
-  onChange: async (value) => {
-    await api('/api/viajes-settings', { method: 'PUT', body: JSON.stringify({ defaultAccountId: value || null }) });
-  },
-});
-document.getElementById('setting-viajes-default-account-field').appendChild(viajesDefaultAccountField.element);
-
-async function refreshViajesSettingsTab() {
-  const [{ defaultAccountId }, accounts] = await Promise.all([api('/api/viajes-settings'), api('/api/finanzas-accounts')]);
-  viajesDefaultAccountField.setOptions([{ value: '', label: 'Sin cuenta por defecto' }, ...accounts.map((a) => ({ value: a.id, label: a.name }))]);
-  viajesDefaultAccountField.setValue(defaultAccountId || '');
-}
-
 // Cambia el color de "completada" SIN que cuente como que la persona lo ha
 // tocado a mano (carga inicial, reset del formulario, o cargar el valor
 // guardado de un grupo existente al editarlo) — solo un click real en su
@@ -2010,6 +1988,15 @@ function refreshShortcutsTab() {
 // ---------------------------------------------------------------------
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+
+  // El modal de confirmacion/aviso propio (showAppConfirm/showAppAlert,
+  // ver app.js) siempre es lo mas "encima" cuando esta abierto -- se
+  // comprueba antes que cualquier otra cosa, igual que un popover.
+  const appConfirmModal = document.getElementById('app-confirm-modal');
+  if (appConfirmModal && !appConfirmModal.classList.contains('hidden')) {
+    closeAppConfirm(false);
+    return;
+  }
 
   const mobileFabMenu = document.getElementById('mobile-fab-menu');
   if (mobileFabMenu && !mobileFabMenu.classList.contains('hidden')) {

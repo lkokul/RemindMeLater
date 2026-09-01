@@ -204,6 +204,44 @@ const NOTE_FILE_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="non
 const STAR_FILLED_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><polygon points="12 2.5 15.09 8.76 22 9.77 17 14.64 18.18 21.52 12 18.27 5.82 21.52 7 14.64 2 9.77 8.91 8.76"></polygon></svg>';
 const STAR_OUTLINE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><polygon points="12 2.5 15.09 8.76 22 9.77 17 14.64 18.18 21.52 12 18.27 5.82 21.52 7 14.64 2 9.77 8.91 8.76"></polygon></svg>';
 
+// ---------------------------------------------------------------------
+// Confirmacion/aviso con el estilo de la app, para sustituir a
+// confirm()/alert() nativos del navegador en flujos donde Koku ha pedido
+// explicitamente que se note mas (p. ej. el enlace retroactivo de
+// Viajes con Finanzas) -- un unico modal generico y reutilizable
+// (#app-confirm-modal en index.html), no uno nuevo por caso de uso. El
+// resto de confirm()/alert() nativos del proyecto (borrar una nota, un
+// evento...) se quedan como estan, no es un reemplazo global.
+// showAppConfirm() devuelve una Promise<boolean> (true = Aceptar, false =
+// Cancelar/Esc); showAppAlert() es un atajo sin boton Cancelar, siempre
+// resuelve true al pulsar Aceptar.
+// ---------------------------------------------------------------------
+let appConfirmResolve = null;
+function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', danger = false, alertOnly = false } = {}) {
+  return new Promise((resolve) => {
+    appConfirmResolve = resolve;
+    document.getElementById('app-confirm-modal-message').textContent = message;
+    const okBtn = document.getElementById('btn-app-confirm-ok');
+    okBtn.textContent = okText;
+    okBtn.className = danger ? 'danger-btn' : 'primary-btn';
+    document.getElementById('btn-app-confirm-cancel').classList.toggle('hidden', alertOnly);
+    document.getElementById('app-confirm-modal').classList.remove('hidden');
+  });
+}
+function showAppAlert(message, { okText = 'Aceptar' } = {}) {
+  return showAppConfirm(message, { okText, alertOnly: true });
+}
+function closeAppConfirm(result) {
+  document.getElementById('app-confirm-modal').classList.add('hidden');
+  if (appConfirmResolve) {
+    const resolve = appConfirmResolve;
+    appConfirmResolve = null;
+    resolve(result);
+  }
+}
+document.getElementById('btn-app-confirm-ok').addEventListener('click', () => closeAppConfirm(true));
+document.getElementById('btn-app-confirm-cancel').addEventListener('click', () => closeAppConfirm(false));
+
 // Ctrl+Intro (o Cmd+Intro en Mac) guarda directamente, sin tener que ir
 // a buscar el boton "Guardar" con el raton -- util sobre todo en el
 // textarea de las notas, donde Intro normal solo hace un salto de linea.
@@ -4345,11 +4383,13 @@ function closeMySpaceView() {
   document.getElementById('my-space-view').classList.add('hidden');
   collapseMySpaceExpandedColumn();
   restoreClassicRemindersPanel();
+  setCurrentScreen('home');
 }
 
 function openMySpaceView() {
   moveRemindersIntoHub();
   document.getElementById('my-space-view').classList.remove('hidden');
+  setCurrentScreen('my-space');
 }
 
 // Aplica el modo elegido: donde vive el hub, y si hace falta o no el
@@ -4458,9 +4498,11 @@ document.addEventListener('click', (e) => {
 // ---------------------------------------------------------------------
 function openExtensionsView() {
   document.getElementById('extensions-view').classList.remove('hidden');
+  setCurrentScreen('extensions');
 }
 function closeExtensionsView() {
   document.getElementById('extensions-view').classList.add('hidden');
+  setCurrentScreen('home');
 }
 document.getElementById('btn-extensions').addEventListener('click', openExtensionsView);
 document.getElementById('btn-close-extensions').addEventListener('click', closeExtensionsView);
@@ -4476,6 +4518,7 @@ document.getElementById('btn-close-extensions').addEventListener('click', closeE
 async function openGymView() {
   closeExtensionsView();
   document.getElementById('gym-view').classList.remove('hidden');
+  setCurrentScreen('gym');
   await Promise.all([loadGymExercises(), loadGymRoutines(), loadGymSessions()]);
   renderGymExercisesList();
   renderGymRoutinesList();
@@ -6174,6 +6217,7 @@ async function refreshLecturasSagasView() {
 function openLecturasView() {
   closeExtensionsView();
   document.getElementById('lecturas-view').classList.remove('hidden');
+  setCurrentScreen('lecturas');
   refreshLecturasSagasView();
 }
 function closeLecturasView() {
@@ -6724,6 +6768,7 @@ async function openFinanzasView() {
   setupFinanzasIconColorFields();
   closeExtensionsView();
   document.getElementById('finanzas-view').classList.remove('hidden');
+  setCurrentScreen('finanzas');
   switchFinanzasTab('resumen');
   await refreshFinanzasAccountsAndCategories();
   await loadFinanzasPortfolios();
@@ -6740,7 +6785,7 @@ async function openFinanzasView() {
 }
 function closeFinanzasView() {
   document.getElementById('finanzas-view').classList.add('hidden');
-  document.getElementById('extensions-view').classList.remove('hidden');
+  openExtensionsView();
 }
 document.getElementById('btn-open-finanzas').addEventListener('click', openFinanzasView);
 document.getElementById('btn-close-finanzas').addEventListener('click', closeFinanzasView);
@@ -7215,6 +7260,7 @@ document.getElementById('btn-archivos-check-update').addEventListener('click', (
 async function openArchivosView() {
   closeExtensionsView();
   document.getElementById('archivos-view').classList.remove('hidden');
+  setCurrentScreen('archivos');
   document.getElementById('archivos-folder-browser').classList.add('hidden');
   archivosStagedFiles = [];
   renderArchivosStagedList();
@@ -7237,7 +7283,7 @@ function closeArchivosView() {
     api(`/api/archivos/transfer-requests/${id}`, { method: 'DELETE' }).catch(() => {});
   }
   document.getElementById('archivos-view').classList.add('hidden');
-  document.getElementById('extensions-view').classList.remove('hidden');
+  openExtensionsView();
 }
 document.getElementById('btn-open-archivos').addEventListener('click', openArchivosView);
 document.getElementById('btn-close-archivos').addEventListener('click', closeArchivosView);
@@ -7371,6 +7417,15 @@ function createCountryPickerField({ initialValues = [] } = {}) {
 
 const viajesTripCountriesField = createCountryPickerField({ initialValues: [] });
 document.getElementById('viajes-trip-countries-field').appendChild(viajesTripCountriesField.element);
+
+// Cuenta por defecto DE ESTE VIAJE (ya no es un ajuste global de
+// Configuración -- Koku prefiere elegirla viaje a viaje). Solo tiene
+// sentido con el enlace con Finanzas activado, asi que el <label> que la
+// envuelve se oculta/muestra con el checkbox (ver el listener de
+// viajes-trip-finanzas-linked mas abajo), mismo criterio que
+// refreshViajesGastoModalFields.
+const viajesTripDefaultAccountField = createSelectField({ options: [{ value: '', label: 'Sin cuenta por defecto' }], initialValue: '' });
+document.getElementById('viajes-trip-default-account-field').appendChild(viajesTripDefaultAccountField.element);
 
 const viajesTripStartField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
 document.getElementById('viajes-trip-start-field').appendChild(viajesTripStartField.element);
@@ -7577,7 +7632,13 @@ function renderViajesTripsList() {
 }
 
 // --- Modal crear/editar viaje -------------------------------------------
-function openViajesTripModal(trip, prefillCountry) {
+function refreshViajesTripDefaultAccountVisibility() {
+  const linked = document.getElementById('viajes-trip-finanzas-linked').checked;
+  document.getElementById('viajes-trip-default-account-label').classList.toggle('hidden', !linked);
+}
+document.getElementById('viajes-trip-finanzas-linked').addEventListener('change', refreshViajesTripDefaultAccountVisibility);
+
+async function openViajesTripModal(trip, prefillCountry) {
   setupViajesLazyFields();
   document.getElementById('viajes-trip-modal-title').textContent = trip ? 'Editar viaje' : 'Nuevo viaje';
   document.getElementById('viajes-trip-id').value = trip ? trip.id : '';
@@ -7588,6 +7649,10 @@ function openViajesTripModal(trip, prefillCountry) {
   viajesTripEndField.setValue(trip && trip.endDate ? new Date(`${trip.endDate}T00:00:00`) : null);
   viajesTripColorField.setValue(trip ? trip.color : '#5b8cff');
   document.getElementById('viajes-trip-finanzas-linked').checked = trip ? !!trip.finanzasLinked : false;
+  const accounts = await api('/api/finanzas-accounts');
+  viajesTripDefaultAccountField.setOptions([{ value: '', label: 'Sin cuenta por defecto' }, ...accounts.map((a) => ({ value: a.id, label: a.name }))]);
+  viajesTripDefaultAccountField.setValue(trip && trip.defaultAccountId ? trip.defaultAccountId : '');
+  refreshViajesTripDefaultAccountVisibility();
   document.getElementById('btn-delete-viajes-trip-modal').classList.toggle('hidden', !trip);
   document.getElementById('viajes-trip-modal').classList.remove('hidden');
 }
@@ -7609,6 +7674,7 @@ document.getElementById('viajes-trip-form').addEventListener('submit', async (e)
     color: viajesTripColorField.getValue(),
     description: document.getElementById('viajes-trip-description').value.trim() || null,
     finanzasLinked: document.getElementById('viajes-trip-finanzas-linked').checked,
+    defaultAccountId: viajesTripDefaultAccountField.getValue() || null,
   };
   try {
     const saved = id
@@ -7625,21 +7691,23 @@ document.getElementById('viajes-trip-form').addEventListener('submit', async (e)
     // Se acaba de ACTIVAR el enlace y el viaje ya tenia gastos/ingresos
     // sin enlazar -- se pregunta si tambien esos, en vez de enlazarlos a
     // ciegas (ver POST /:id/link-existing-movements en viajesTrips.js).
+    // El propio modal se acaba de cerrar (closeViajesTripModal(), arriba)
+    // antes de mostrar este aviso, asi que no hay solape de modales.
     if (saved.hasUnlinkedMovements) {
-      const wantsBulkLink = confirm(
-        `Este viaje ya tenía ${saved.unlinkedCount} gasto${saved.unlinkedCount === 1 ? '' : 's'}/ingreso${saved.unlinkedCount === 1 ? '' : 's'} antes de activar el enlace. ¿También quieres enlazarlos con la cuenta por defecto (Configuración → Viajes)?`
+      const wantsBulkLink = await showAppConfirm(
+        `Este viaje ya tenía ${saved.unlinkedCount} gasto${saved.unlinkedCount === 1 ? '' : 's'}/ingreso${saved.unlinkedCount === 1 ? '' : 's'} antes de activar el enlace. ¿También quieres enlazarlos con la cuenta por defecto de este viaje?`
       );
       if (wantsBulkLink) {
         try {
           await api(`/api/viajes-trips/${saved.id}/link-existing-movements`, { method: 'POST' });
           if (viajesCurrentTrip && String(viajesCurrentTrip.id) === String(saved.id)) await refreshViajesEntries();
         } catch (err) {
-          alert('No se pudieron enlazar los movimientos anteriores: ' + err.message);
+          await showAppAlert('No se pudieron enlazar los movimientos anteriores: ' + err.message);
         }
       }
     }
   } catch (err) {
-    alert('No se pudo guardar el viaje: ' + err.message);
+    await showAppAlert('No se pudo guardar el viaje: ' + err.message);
   }
 });
 
@@ -8003,11 +8071,12 @@ async function openViajesGastoModal(movement, entry) {
     viajesGastoCategoryField.setOptions([{ value: '', label: 'Sin categoría' }, ...categories.map((c) => ({ value: c.id, label: c.name }))]);
     let defaultAccountId = accounts[0] ? accounts[0].id : '';
     if (!movement) {
-      // Cuenta por defecto para gastos de viaje (Configuración → Viajes),
-      // solo al CREAR -- editar respeta la cuenta que ya tenia.
-      const settings = await api('/api/viajes-settings');
-      if (settings.defaultAccountId && accounts.some((a) => a.id === settings.defaultAccountId)) {
-        defaultAccountId = settings.defaultAccountId;
+      // Cuenta por defecto DE ESTE VIAJE (viajesCurrentTrip.defaultAccountId,
+      // ya cargada con el viaje -- ya no es un ajuste global de
+      // Configuración), solo al CREAR -- editar respeta la cuenta que ya
+      // tenia.
+      if (viajesCurrentTrip.defaultAccountId && accounts.some((a) => a.id === viajesCurrentTrip.defaultAccountId)) {
+        defaultAccountId = viajesCurrentTrip.defaultAccountId;
       }
     }
     viajesGastoAccountField.setValue(defaultAccountId);
@@ -8388,6 +8457,7 @@ document.querySelectorAll('.viajes-tab-btn').forEach((btn) => {
 async function openViajesView() {
   closeExtensionsView();
   document.getElementById('viajes-view').classList.remove('hidden');
+  setCurrentScreen('viajes');
   setViajesTab('mapa');
   document.getElementById('viajes-trips-list-panel').classList.remove('hidden');
   document.getElementById('viajes-trip-detail-panel').classList.add('hidden');
@@ -8398,7 +8468,7 @@ async function openViajesView() {
 }
 function closeViajesView() {
   document.getElementById('viajes-view').classList.add('hidden');
-  document.getElementById('extensions-view').classList.remove('hidden');
+  openExtensionsView();
 }
 document.getElementById('btn-open-viajes').addEventListener('click', openViajesView);
 document.getElementById('btn-close-viajes').addEventListener('click', closeViajesView);
@@ -9046,6 +9116,42 @@ document.getElementById('btn-onboarding-skip').addEventListener('click', async (
 // cargara nada mas, dejando la pantalla a medias. Con la copia local
 // (ver api()/db-local.js) la mayoria de estos ya no fallan sin conexion,
 // pero esto es una red de seguridad ademas, no en vez de eso.
+// ---------------------------------------------------------------------
+// Recordar la "ventana" (vista a pantalla completa) en la que estabas al
+// recargar la pagina -- Koku pidio explicitamente que un F5 no te mande
+// siempre al calendario. Ambito deliberadamente limitado a las vistas de
+// NIVEL SUPERIOR (Mi espacio, Extensiones, y cada extension) -- NO
+// restaura pestañas/detalles concretos dentro de cada una (que pestaña
+// de Finanzas, que viaje abierto en Viajes, que saga de Lecturas...), ni
+// el editor de notas (junta varias notas abiertas a la vez, con mas
+// estado del que compensa persistir aqui) -- se quedan en su pantalla
+// de entrada normal, no es una regresion respecto a hoy. Los
+// formularios/modales NUNCA se restauran (ya no lo hacian antes de este
+// cambio): se quedan cerrados tras recargar, tal y como pidio Koku
+// ("que se cancele, pero mantenme en la ventana"). Por dispositivo
+// (localStorage), no sincronizado entre movil/ordenador.
+// ---------------------------------------------------------------------
+function setCurrentScreen(screen) {
+  localStorage.setItem('currentScreen', screen);
+}
+
+async function restoreCurrentScreen() {
+  const screen = localStorage.getItem('currentScreen');
+  if (!screen || screen === 'home') return;
+  if (screen === 'my-space') {
+    // En modo "panel" no existe una pantalla de Mi espacio aparte que
+    // restaurar -- el hub ya vive siempre junto al calendario.
+    if (getMiEspacioMode() === 'topbar') openMySpaceView();
+    return;
+  }
+  if (screen === 'extensions') { openExtensionsView(); return; }
+  if (screen === 'gym') { await openGymView(); return; }
+  if (screen === 'lecturas') { openLecturasView(); return; }
+  if (screen === 'finanzas') { await openFinanzasView(); return; }
+  if (screen === 'archivos') { await openArchivosView(); return; }
+  if (screen === 'viajes') { await openViajesView(); return; }
+}
+
 async function initStep(fn) {
   try {
     await fn();
@@ -9083,6 +9189,11 @@ async function init() {
     populateNoteFolderSelect();
     renderNotesView();
   }), 30 * 1000);
+
+  // Al final de todo: si veniamos de una recarga (F5) dentro de una vista
+  // a pantalla completa (Extensiones, Gimnasio, Viajes...), volver a
+  // ella en vez de dejar a Koku siempre en el calendario.
+  await initStep(restoreCurrentScreen);
 }
 
 // Si ya tenemos un token guardado (o somos el ordenador, que ni lo

@@ -159,6 +159,21 @@
     </div>
   </div>
 
+  <!-- Confirmacion/aviso propio con el estilo de la app, para sustituir a
+       confirm()/alert() nativos del navegador en flujos donde hace falta
+       que se note mas -- ver showAppConfirm()/showAppAlert() en app.js.
+       Un unico modal generico y reutilizable, no uno por caso de uso. -->
+  <div id="app-confirm-modal" class="modal hidden">
+    <div class="modal-card app-confirm-card">
+      <p id="app-confirm-modal-message"></p>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-app-confirm-cancel" class="secondary-btn">Cancelar</button>
+        <button type="button" id="btn-app-confirm-ok" class="primary-btn">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- App principal -->
   <div id="app" class="app hidden">
     <header class="topbar">
@@ -1291,6 +1306,7 @@
           <input type="checkbox" id="viajes-trip-finanzas-linked" />
           Enlazar con Finanzas (los gastos/ingresos de este viaje se apuntan también ahí)
         </label>
+        <label id="viajes-trip-default-account-label" class="hidden">Cuenta por defecto para los gastos de este viaje (opcional)<div id="viajes-trip-default-account-field"></div></label>
         <div class="modal-actions">
           <button type="button" id="btn-delete-viajes-trip-modal" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
@@ -1814,9 +1830,6 @@
         <button type="button" class="settings-menu-item" data-tab="groups">
           <span>Grupos</span><span class="settings-menu-item-arrow">›</span>
         </button>
-        <button type="button" class="settings-menu-item" data-tab="viajes-settings">
-          <span>Viajes</span><span class="settings-menu-item-arrow">›</span>
-        </button>
         <button type="button" class="settings-menu-item" data-tab="devices">
           <span>Dispositivos</span><span class="settings-menu-item-arrow">›</span>
         </button>
@@ -1978,14 +1991,6 @@
         </form>
 
         <div id="groups-list" class="groups-list"></div>
-      </div>
-
-      <!-- --- Viajes --- -->
-      <div id="settings-tab-viajes-settings" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
-        <h3>Viajes</h3>
-        <p class="hint">Este ajuste es global (afecta a todos tus dispositivos, no solo a este). El enlace con Finanzas ahora se activa por VIAJE (dentro de cada viaje, al crearlo o editarlo) -- aquí solo se elige la cuenta que se usa por defecto al crear un gasto/ingreso nuevo, ya que normalmente siempre es la misma. Se puede cambiar por movimiento igualmente.</p>
-        <label>Cuenta por defecto para gastos de viaje<div id="setting-viajes-default-account-field"></div></label>
       </div>
 
       <!-- --- Dispositivos --- -->

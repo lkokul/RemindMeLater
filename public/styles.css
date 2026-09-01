@@ -1983,6 +1983,12 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 }
 .modal-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.8rem; }
 
+/* Confirmacion/aviso propio (showAppConfirm/showAppAlert en app.js) --
+   mas estrecho que un modal-card normal, ya que solo lleva un mensaje +
+   botones, sin formulario. */
+.app-confirm-card { max-width: 380px; }
+#app-confirm-modal-message { margin: 0; line-height: 1.4; }
+
 .reminders-day-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.7rem; }
 .day-mark-btn.active {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));

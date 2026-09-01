@@ -9,7 +9,6 @@
 const express = require('express');
 const db = require('../db');
 const { deleteEntryCascade, touchEntryForAttachmentChange } = require('./viajesEntries');
-const { getDefaultAccountId } = require('./viajesSettings');
 
 const router = express.Router();
 
@@ -29,6 +28,7 @@ function serializeTrip(row) {
     description: row.description || null,
     entryCount,
     finanzasLinked: !!row.finanzas_linked,
+    defaultAccountId: row.default_account_id || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -80,6 +80,14 @@ function validateBody(body, existing) {
   const color = body.color !== undefined ? body.color : existing ? existing.color : '#5b8cff';
   const finanzasLinked =
     body.finanzasLinked !== undefined ? !!body.finanzasLinked : existing ? !!existing.finanzas_linked : false;
+  // Igual que accountId en movimientos (viajesEntries.js): sin
+  // validacion estricta que rechace el guardado -- si viene un id que no
+  // existe de verdad en finanzas_accounts, simplemente se guarda como
+  // "sin cuenta por defecto" en vez de dar un error.
+  let defaultAccountId = body.defaultAccountId !== undefined ? body.defaultAccountId || null : existing ? existing.default_account_id : null;
+  if (defaultAccountId && !db.prepare('SELECT 1 FROM finanzas_accounts WHERE id = ?').get(defaultAccountId)) {
+    defaultAccountId = null;
+  }
 
   return {
     name: String(name).trim(),
@@ -89,6 +97,7 @@ function validateBody(body, existing) {
     description: body.description !== undefined ? (String(body.description || '').trim() || null) : existing ? existing.description : null,
     color: color || '#5b8cff',
     finanzasLinked,
+    defaultAccountId,
   };
 }
 
@@ -148,8 +157,8 @@ router.post('/', (req, res) => {
   if (result.error) return res.status(400).json({ error: 'invalid_request', message: result.error });
 
   const info = db
-    .prepare('INSERT INTO viajes_trips (name, color, start_date, end_date, description, finanzas_linked) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(result.name, result.color, result.startDate, result.endDate, result.description, result.finanzasLinked ? 1 : 0);
+    .prepare('INSERT INTO viajes_trips (name, color, start_date, end_date, description, finanzas_linked, default_account_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(result.name, result.color, result.startDate, result.endDate, result.description, result.finanzasLinked ? 1 : 0, result.defaultAccountId);
   setTripCountries(info.lastInsertRowid, result.countries);
 
   const row = db.prepare('SELECT * FROM viajes_trips WHERE id = ?').get(info.lastInsertRowid);
@@ -167,8 +176,8 @@ router.put('/:id', (req, res) => {
   if (result.error) return res.status(400).json({ error: 'invalid_request', message: result.error });
 
   db.prepare(
-    "UPDATE viajes_trips SET name = ?, color = ?, start_date = ?, end_date = ?, description = ?, finanzas_linked = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(result.name, result.color, result.startDate, result.endDate, result.description, result.finanzasLinked ? 1 : 0, req.params.id);
+    "UPDATE viajes_trips SET name = ?, color = ?, start_date = ?, end_date = ?, description = ?, finanzas_linked = ?, default_account_id = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(result.name, result.color, result.startDate, result.endDate, result.description, result.finanzasLinked ? 1 : 0, result.defaultAccountId, req.params.id);
   if (result.countries) setTripCountries(req.params.id, result.countries);
 
   const row = db.prepare('SELECT * FROM viajes_trips WHERE id = ?').get(req.params.id);
@@ -193,16 +202,16 @@ router.delete('/:id', (req, res) => {
 
 // Enlaza en bloque TODOS los movimientos sin enlazar de este viaje --
 // usa la cuenta indicada en el body, o si no viene, la cuenta por
-// defecto global (Configuracion -> Viajes, ver viajesSettings.js).
+// defecto de ESTE viaje (viajes_trips.default_account_id).
 router.post('/:id/link-existing-movements', (req, res) => {
   const trip = db.prepare('SELECT * FROM viajes_trips WHERE id = ?').get(req.params.id);
   if (!trip) return res.status(404).json({ error: 'not_found' });
 
-  const accountId = (req.body && req.body.accountId) || getDefaultAccountId();
+  const accountId = (req.body && req.body.accountId) || trip.default_account_id;
   if (!accountId || !db.prepare('SELECT 1 FROM finanzas_accounts WHERE id = ?').get(accountId)) {
     return res.status(400).json({
       error: 'invalid_request',
-      message: 'No hay ninguna cuenta por defecto configurada (Configuración → Viajes) ni se indicó una cuenta válida.',
+      message: 'Este viaje no tiene ninguna cuenta por defecto configurada ni se indicó una cuenta válida.',
     });
   }
 

@@ -1047,6 +1047,13 @@ const viajesTripColumns = db.prepare('PRAGMA table_info(viajes_trips)').all().ma
 if (!viajesTripColumns.includes('finanzas_linked')) {
   db.exec('ALTER TABLE viajes_trips ADD COLUMN finanzas_linked INTEGER NOT NULL DEFAULT 0');
 }
+// Cuenta por defecto para los gastos/ingresos de ESTE viaje -- sustituye
+// al ajuste GLOBAL que habia antes en app_settings (ver
+// routes/viajesSettings.js, ahora eliminado): Koku prefiere elegirla
+// viaje a viaje, igual que ya pasa con finanzas_linked.
+if (!viajesTripColumns.includes('default_account_id')) {
+  db.exec('ALTER TABLE viajes_trips ADD COLUMN default_account_id INTEGER REFERENCES finanzas_accounts(id)');
+}
 
 const legacyViajesTickets = db.prepare('SELECT * FROM viajes_entry_attachments WHERE amount IS NOT NULL').all();
 if (legacyViajesTickets.length) {
