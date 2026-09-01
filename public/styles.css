@@ -2595,11 +2595,14 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    base consistente para que quepan en una fila en escritorio, apilables
    en movil via flex-wrap). */
 .viajes-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.6rem 0; }
-.viajes-filters input[type="number"] { font-size: 0.82rem; padding: 0.35rem 0.5rem; width: 6.5rem; flex: 0 1 auto; }
-.viajes-filter-field { flex: 1 1 160px; min-width: 140px; }
+.viajes-filter-field { flex: 0 1 190px; min-width: 140px; }
 .viajes-filter-field .select-field { width: 100%; }
 .viajes-filter-field .select-field-trigger { font-size: 0.82rem; padding: 0.4rem 0.6rem; }
-.viajes-filter-multi-country { flex: 0 0 auto; }
+.viajes-filter-multi-country { flex: 0 0 auto; font-size: 0.82rem; }
+/* Mismo tamaño que el resto de la barra (input de año antes, ahora
+   select-field) -- sin esto se veia "descuadrado" en altura, mas grande
+   que sus vecinos. */
+.viajes-filters .secondary-btn { font-size: 0.82rem; padding: 0.4rem 0.7rem; }
 
 /* Tarjetas de viaje -- reutilizadas tanto en la lista principal como en
    el modal de "viajes en este pais" (ver renderViajesTripCards). El

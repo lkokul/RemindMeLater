@@ -72,7 +72,7 @@ const DEFAULT_EVENT_COLOR = '#5b8cff'; // el --accent de styles.css, para evento
 // DENTRO de manejadores de click, que no se disparan hasta que la persona
 // interactua — para entonces los dos archivos ya estan cargados, igual
 // que el resto de referencias cruzadas entre app.js y settings.js.
-function createSelectField({ options = [], initialValue = '', placeholder = '', onChange } = {}) {
+function createSelectField({ options = [], initialValue = '', placeholder = '', onChange, scrollToValue } = {}) {
   let value = initialValue;
   let opts = options;
 
@@ -109,6 +109,7 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'select-option' + (String(opt.value) === String(value) ? ' active' : '');
+      item.dataset.value = opt.value;
       item.innerHTML = optionRowHtml(opt);
       item.addEventListener('click', () => {
         value = opt.value;
@@ -133,8 +134,21 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
       // Si hay muchas opciones (la hora, por ejemplo, con 96), abre ya
       // desplazado a la que esta elegida en vez de siempre arriba del
       // todo — asi no hay que buscarla a mano cada vez.
-      const activeItem = popover.querySelector('.select-option.active');
-      if (activeItem) activeItem.scrollIntoView({ block: 'center' });
+      // value === '' cuenta como "nada elegido de verdad" aunque exista
+      // una opcion placeholder con value '' (p.ej. "Cualquier año") que
+      // por tanto tambien lleva la clase .active — en ese caso, si hay
+      // un scrollToValue, tiene prioridad sobre ese placeholder.
+      if (value !== '' || scrollToValue == null) {
+        const activeItem = popover.querySelector('.select-option.active');
+        if (activeItem) activeItem.scrollIntoView({ block: 'center' });
+      } else {
+        // Sin nada elegido todavia (p.ej. un filtro de año vacio): centrar
+        // en un valor de respaldo (el año actual) solo para orientar,
+        // SIN seleccionarlo — a diferencia de "active", esto no marca
+        // ningun filtro como aplicado.
+        const fallbackItem = popover.querySelector(`[data-value="${scrollToValue}"]`);
+        if (fallbackItem) fallbackItem.scrollIntoView({ block: 'center' });
+      }
     }
   });
 
@@ -7427,6 +7441,24 @@ function renderViajesTripCards(container, trips, onClick) {
 // no acumular popovers huerfanos.
 let viajesFilters = { year: '', month: '', country: '', multiCountryOk: true };
 
+// 1900-2100 de sobra para cualquier viaje real -- mismo criterio de rango
+// fijo ya usado en otros selectores de año de la app (Ahorro de Finanzas).
+const VIAJES_YEAR_OPTIONS = [{ value: '', label: 'Cualquier año' }];
+for (let y = 1900; y <= 2100; y++) VIAJES_YEAR_OPTIONS.push({ value: String(y), label: String(y) });
+
+const viajesFilterYearField = createSelectField({
+  options: VIAJES_YEAR_OPTIONS,
+  initialValue: '',
+  placeholder: 'Año',
+  // Sin ningun año elegido, abrir el desplegable centrado en el actual en
+  // vez de arriba del todo -- solo orienta, no aplica ningun filtro.
+  scrollToValue: String(new Date().getFullYear()),
+  onChange: (v) => {
+    viajesFilters.year = v;
+    renderViajesTripsList();
+  },
+});
+
 const viajesFilterMonthField = createSelectField({
   options: [{ value: '', label: 'Cualquier mes' }, ...FINANZAS_MONTH_OPTIONS],
   initialValue: '',
@@ -7450,14 +7482,9 @@ function renderViajesFilters() {
   if (!container.dataset.built) {
     container.dataset.built = '1';
 
-    const yearInput = document.createElement('input');
-    yearInput.type = 'number';
-    yearInput.id = 'viajes-filter-year';
-    yearInput.placeholder = 'Año';
-    yearInput.addEventListener('input', () => {
-      viajesFilters.year = yearInput.value;
-      renderViajesTripsList();
-    });
+    const yearWrap = document.createElement('div');
+    yearWrap.className = 'viajes-filter-field';
+    yearWrap.appendChild(viajesFilterYearField.element);
 
     const monthWrap = document.createElement('div');
     monthWrap.className = 'viajes-filter-field';
@@ -7490,14 +7517,14 @@ function renderViajesFilters() {
     clearBtn.textContent = 'Quitar filtros';
     clearBtn.addEventListener('click', () => {
       viajesFilters = { year: '', month: '', country: '', multiCountryOk: true };
-      yearInput.value = '';
+      viajesFilterYearField.setValue('');
       viajesFilterMonthField.setValue('');
       viajesFilterCountryField.setValue('');
       multiCheckbox.checked = true;
       renderViajesTripsList();
     });
 
-    container.append(yearInput, monthWrap, countryWrap, multiLabel, clearBtn);
+    container.append(yearWrap, monthWrap, countryWrap, multiLabel, clearBtn);
   }
 
   // Los paises del desplegable son los que ya se usan en algun viaje --
@@ -7506,7 +7533,7 @@ function renderViajesFilters() {
     viajesCountryLabel(a).localeCompare(viajesCountryLabel(b))
   );
   viajesFilterCountryField.setOptions([{ value: '', label: 'Todos los países' }, ...usedCountries.map((c) => ({ value: c, label: viajesCountryLabel(c) }))]);
-  document.getElementById('viajes-filter-year').value = viajesFilters.year;
+  viajesFilterYearField.setValue(viajesFilters.year);
   viajesFilterMonthField.setValue(viajesFilters.month);
   viajesFilterCountryField.setValue(viajesFilters.country);
   document.getElementById('viajes-filter-multi-country').checked = viajesFilters.multiCountryOk;
