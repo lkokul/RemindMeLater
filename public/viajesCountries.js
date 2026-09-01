@@ -115,7 +115,6 @@ const VIAJES_COUNTRY_NAMES = {
   hu: 'Hungría',
   id: 'Indonesia',
   ie: 'Irlanda',
-  il: 'Israel',
   im: 'Isla de Man',
   in: 'India',
   io: 'Territorio Británico del Océano Índico',
@@ -193,6 +192,10 @@ const VIAJES_COUNTRY_NAMES = {
   pm: 'San Pedro y Miquelón',
   pn: 'Islas Pitcairn',
   pr: 'Puerto Rico',
+  // El territorio que en el SVG era "il" (Israel) se fusiono a mano dentro
+  // del grupo "PS" (ver viajes-world-map.svg) a peticion de Koku -- ya no
+  // hay una entrada "il" aparte en esta lista, todo ese area se ve/clica
+  // como un unico pais "Palestina".
   ps: 'Palestina',
   pt: 'Portugal',
   pw: 'Palaos',
