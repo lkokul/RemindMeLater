@@ -45,6 +45,57 @@ const NOTE_CODE_LANG = /^[a-zA-Z0-9+#.-]{0,20}$/;
 const NOTE_COL_WIDTH_STYLE = /^width:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
 const NOTE_ROW_HEIGHT_STYLE = /^height:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
 
+// En un <div contenteditable> real, la PRIMERA linea normalmente NO
+// queda envuelta en su propia etiqueta -- se queda como texto suelto al
+// principio, y solo la SEGUNDA linea en adelante se envuelve en un <div>
+// nuevo al pulsar Intro (comprobado de verdad: escribir "A" + Intro +
+// "B" deja el HTML como "A<div>B</div>", NO "<div>A</div><div>B</div>").
+// Por eso la señal real de "aqui acaba la primera linea" es la APERTURA
+// de ese div siguiente, no su cierre -- buscar solo el cierre (como
+// hacia la primera version de esta funcion) se comia la segunda linea
+// entera en ese caso, un bug real encontrado verificando con Playwright.
+// Si en cambio el cuerpo YA viene envuelto desde el principio (una nota
+// cargada del servidor, contenido pegado con formato), se usa el cierre
+// de ESE bloque concreto -- de ahi que se descarte una apertura que
+// coincide justo en la posicion 0 y se seguisga buscando.
+function findFirstLineBreakIndex(html) {
+  const pattern = /<br\s*\/?>|<\/(?:div|p|li)>|<(?:div|p|li)(?:\s[^>]*)?>/gi;
+  let match;
+  while ((match = pattern.exec(html))) {
+    const isOpeningBlockAtStart = match.index === 0 && match[0][1] !== '/' && !/^<br/i.test(match[0]);
+    if (isOpeningBlockAtStart) continue;
+    return match.index;
+  }
+  return html.length;
+}
+
+// Fase 4 del rediseño movil: ya no hay un campo de titulo aparte en el
+// editor (ni movil ni escritorio, es el mismo formulario) -- el titulo se
+// deriva SIEMPRE de la primera linea del cuerpo. En texto plano es el
+// trozo antes del primer "\n"; en HTML es el trozo antes del primer salto
+// de bloque real (ver findFirstLineBreakIndex arriba), con las etiquetas
+// quitadas y las entidades mas comunes decodificadas. Recortado a 200
+// caracteres, igual que cualquier otro texto corto de la app.
+function deriveTitleFromBody(body, bodyFormat) {
+  if (!body) return '';
+  const format = bodyFormat === 'html' ? 'html' : 'text';
+  let firstLine;
+  if (format === 'html') {
+    firstLine = body.slice(0, findFirstLineBreakIndex(body));
+    firstLine = firstLine
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'");
+  } else {
+    firstLine = body.split('\n')[0];
+  }
+  return firstLine.trim().slice(0, 200);
+}
+
 function sanitizeNoteBody(html) {
   if (!html) return html;
   // Fuera scripts/estilos JUNTO con su contenido -- nunca deberian
@@ -136,11 +187,7 @@ router.get('/:id', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { title, body, folderId, favorite, bodyFormat } = req.body || {};
-
-  if (!title || !title.trim()) {
-    return res.status(400).json({ error: 'invalid_request', message: 'La nota necesita un titulo.' });
-  }
+  const { body, folderId, favorite, bodyFormat } = req.body || {};
 
   // "Creado por" se rellena con tu perfil en el momento de crear la nota,
   // igual que en los eventos (ver server/db.js): una foto fija del nombre
@@ -152,11 +199,14 @@ router.post('/', (req, res) => {
   // como texto plano tal cual, sin tocarlo (ver sanitizeNoteBody arriba).
   const format = bodyFormat === 'html' ? 'html' : 'text';
   const cleanBody = format === 'html' ? sanitizeNoteBody(body) : (body || null);
+  // Fase 4: ya no se pide titulo aparte, se deriva de la primera linea
+  // del cuerpo (ver deriveTitleFromBody arriba).
+  const title = deriveTitleFromBody(cleanBody, format);
 
   const info = db
     .prepare('INSERT INTO notes (title, body, body_format, folder_id, favorite, created_by_name, created_by_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(
-      title.trim(),
+      title,
       cleanBody,
       format,
       resolveFolderId(folderId),
@@ -175,10 +225,7 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM notes WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { title, body, hidden, folderId, favorite, bodyFormat } = req.body || {};
-  if (title !== undefined && !title.trim()) {
-    return res.status(400).json({ error: 'invalid_request', message: 'La nota necesita un titulo.' });
-  }
+  const { body, hidden, folderId, favorite, bodyFormat } = req.body || {};
 
   // Igual que en el POST: solo saneamos como HTML si el body que llega
   // viene marcado explicitamente como 'html' (el editor con formato lo
@@ -188,6 +235,10 @@ router.put('/:id', (req, res) => {
   const cleanBody = body !== undefined
     ? (format === 'html' ? sanitizeNoteBody(body) : body)
     : existing.body;
+  // Fase 4: el titulo se re-deriva solo si el PUT trae un body nuevo; si
+  // no se toca el body (p. ej. un PUT que solo cambia folderId/favorite),
+  // se conserva el titulo ya guardado tal cual.
+  const title = body !== undefined ? deriveTitleFromBody(cleanBody, format) : existing.title;
 
   db.prepare(`
     UPDATE notes SET
@@ -200,7 +251,7 @@ router.put('/:id', (req, res) => {
       updated_at = datetime('now')
     WHERE id = ?
   `).run(
-    title !== undefined ? title.trim() : existing.title,
+    title,
     cleanBody,
     format,
     hidden !== undefined ? (hidden ? 1 : 0) : existing.hidden,
@@ -228,3 +279,10 @@ router.delete('/:id', (req, res) => {
 });
 
 module.exports = router;
+// Exportada aparte para que server/routes/sync.js (el aplicador de
+// POST /api/sync/push para un movil) pueda derivar el titulo con la
+// MISMA logica que esta ruta REST, en vez de duplicarla -- a diferencia
+// del cliente (app.js), que si necesita su propia copia porque no hay
+// forma de compartir codigo con el navegador en este proyecto sin build.
+module.exports.deriveTitleFromBody = deriveTitleFromBody;
+module.exports.sanitizeNoteBody = sanitizeNoteBody;

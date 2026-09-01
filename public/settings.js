@@ -565,6 +565,9 @@ document.getElementById('btn-lecturas-settings').addEventListener('click', openS
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-archivos-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
+// #mobile-notes-view (Fase 4) es tambien .my-space-view a pantalla
+// completa, mismo motivo que las de arriba.
+document.getElementById('btn-mobile-notes-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-close-settings').addEventListener('click', () => {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
@@ -2066,6 +2069,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Modal de "Eliminar" del modo Seleccionar de Notas movil (Fase 4).
+  const mobileNotesDeleteModal = document.getElementById('mobile-notes-delete-modal');
+  if (mobileNotesDeleteModal && !mobileNotesDeleteModal.classList.contains('hidden')) {
+    document.getElementById('btn-mobile-notes-delete-cancel').click();
+    return;
+  }
+
   // Los 6 modales de Viajes (trip/entrada/foto/gasto/vincular Finanzas/
   // pais) -- igual que el resto de modales de arriba, se cierran antes
   // que cualquier capa de vista de debajo (ver la rama "viajes-view" mas
@@ -2098,6 +2108,26 @@ document.addEventListener('keydown', (e) => {
   const viajesCountryModal = document.getElementById('viajes-country-modal');
   if (viajesCountryModal && !viajesCountryModal.classList.contains('hidden')) {
     document.getElementById('btn-close-viajes-country').click();
+    return;
+  }
+
+  // Notas movil (#mobile-notes-view, Fase 4): capa a capa -- primero
+  // sale del modo Seleccionar/Mover/Editar carpetas si estaba activo
+  // (sin perder la posicion en la carpeta), luego sube un nivel si
+  // estas dentro de una subcarpeta, y solo al final cierra la vista
+  // entera. mobileNotesMode/setMobileNotesMode viven en app.js.
+  const mobileNotesView = document.getElementById('mobile-notes-view');
+  if (mobileNotesView && !mobileNotesView.classList.contains('hidden')) {
+    if (typeof mobileNotesMode !== 'undefined' && mobileNotesMode !== 'browse') {
+      setMobileNotesMode('browse');
+      return;
+    }
+    const backBtn = document.getElementById('btn-mobile-notes-back');
+    if (backBtn && !backBtn.classList.contains('hidden')) {
+      backBtn.click();
+    } else {
+      document.getElementById('btn-close-mobile-notes').click();
+    }
     return;
   }
 

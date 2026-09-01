@@ -166,6 +166,14 @@
   <div id="app-confirm-modal" class="modal hidden">
     <div class="modal-card app-confirm-card">
       <p id="app-confirm-modal-message"></p>
+      <!-- Checkbox opcional (Fase 4 del rediseño movil: usado por el
+           aviso de borrar una carpeta con contenido en modo Seleccionar
+           de Notas -- "No volver a mostrar este aviso"). Oculto salvo
+           que showAppConfirm() reciba opts.checkbox -- ver app.js. -->
+      <label id="app-confirm-checkbox-row" class="app-confirm-checkbox-row hidden">
+        <input type="checkbox" id="app-confirm-checkbox" class="styled-checkbox" />
+        <span id="app-confirm-checkbox-label"></span>
+      </label>
       <div class="modal-actions">
         <div class="spacer"></div>
         <button type="button" id="btn-app-confirm-cancel" class="secondary-btn">Cancelar</button>
@@ -568,6 +576,81 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notas (Fase 4 del rediseño movil): reemplaza al puente temporal
+       que abria "Mi espacio" desde la barra inferior -- "Mi espacio"
+       (recordatorios+tareas+notas juntos) no tiene sentido en movil, ver
+       CLAUDE.md/decision 3 de esa ronda: tareas y recordatorios ya viven
+       dentro del propio calendario movil, aqui solo quedan las notas.
+       Mismo patron de pantalla completa (.my-space-view) que el resto,
+       pero SIEMPRE .mobile-only -- en escritorio las notas se siguen
+       viendo dentro de "Mi espacio"/el panel clasico, sin cambios. Ver
+       openMobileNotesView/closeMobileNotesView en app.js. -->
+  <div id="mobile-notes-view" class="my-space-view mobile-only hidden">
+    <div class="my-space-view-header">
+      <h2>Notas</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-mobile-notes" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
+        <!-- Esta pantalla tapa la topbar (mismo motivo que
+             btn-my-space-settings) -- boton de Configuracion propio,
+             siempre el ultimo (mas a la derecha). -->
+        <button type="button" id="btn-mobile-notes-settings" class="icon-btn" aria-label="Configuración">☰</button>
+      </div>
+    </div>
+
+    <div class="mobile-notes-search-row">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mobile-notes-search-icon"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      <input type="text" id="mobile-notes-search-input" placeholder="Buscar..." autocomplete="off" />
+    </div>
+
+    <div class="mobile-notes-toolbar">
+      <button type="button" id="btn-mobile-notes-back" class="secondary-btn hidden">← Volver</button>
+      <div class="spacer"></div>
+      <button type="button" id="btn-mobile-notes-new-folder" class="icon-btn" aria-label="Nueva carpeta" title="Nueva carpeta">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
+      </button>
+      <button type="button" id="btn-mobile-notes-new" class="icon-btn" aria-label="Nueva nota" title="Nueva nota">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+      </button>
+      <div class="mobile-notes-menu-wrap" id="mobile-notes-menu-wrap">
+        <button type="button" id="btn-mobile-notes-menu" class="icon-btn" aria-label="Más opciones" aria-expanded="false" aria-haspopup="true">⋮</button>
+        <!-- Contenido del menu (Editar carpetas/Seleccionar/Vista/Ordenar)
+             se rellena en una ronda siguiente de esta misma Fase 4 --
+             de momento el boton existe pero el popover esta vacio. -->
+        <div id="mobile-notes-menu-popover" class="select-popover mobile-notes-menu-popover hidden"></div>
+      </div>
+    </div>
+
+    <div id="mobile-notes-list" class="reminders-list notes-list"></div>
+
+    <!-- Barra inferior de acciones (Fase 4): 2 botones reutilizados para
+         Eliminar/Mover (modo Seleccionar) y Cancelar/"Mover aquí" (modo
+         Mover) -- texto/color/handler se rellenan en JS segun el modo
+         activo, ver refreshMobileNotesActionBar en app.js. -->
+    <div id="mobile-notes-action-bar" class="mobile-notes-action-bar hidden">
+      <button type="button" id="btn-mobile-notes-action-left" class="danger-btn"></button>
+      <button type="button" id="btn-mobile-notes-action-right" class="secondary-btn"></button>
+    </div>
+  </div>
+
+  <!-- Modal de "Eliminar" del modo Seleccionar (Fase 4): lista los
+       elementos marcados, tap en uno lo excluye de la eliminacion
+       (segundo tap lo restaura). Orden de botones EXPLICITAMENTE
+       invertido respecto al resto de la app (Aceptar izquierda/Cancelar
+       derecha) -- pedido concreto de Koku, solo para este modal. -->
+  <div id="mobile-notes-delete-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-mobile-notes-delete" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Eliminar</h2>
+      <p class="hint">Toca un elemento para excluirlo de la eliminación.</p>
+      <div id="mobile-notes-delete-list" class="mobile-notes-delete-list"></div>
+      <div class="modal-actions">
+        <button type="button" id="btn-mobile-notes-delete-confirm" class="danger-btn">Aceptar</button>
+        <div class="spacer"></div>
+        <button type="button" id="btn-mobile-notes-delete-cancel" class="secondary-btn">Cancelar</button>
       </div>
     </div>
   </div>
@@ -1894,7 +1977,15 @@
       <div class="my-space-view-header note-editor-top-row">
         <button type="button" id="btn-close-note-editor" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
         <div class="note-editor-title-row">
-          <input type="text" id="note-title" class="note-editor-title-input" placeholder="Titulo de la nota" required />
+          <!-- Fase 4 del rediseño movil: ya no hay un campo de titulo
+               editable -- el titulo se deriva SIEMPRE de la primera
+               linea del cuerpo (ver deriveTitleFromBody en
+               server/routes/notes.js). Esto es solo una etiqueta de
+               solo lectura que se recalcula en vivo mientras se
+               escribe (ver refreshNoteTitlePreview en app.js), para
+               que se vea que titulo va a quedar sin tener que guardar
+               primero. -->
+          <div id="note-title-preview" class="note-editor-title-preview" aria-live="polite"></div>
           <button type="button" id="note-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
         </div>
         <div class="note-editor-header-actions">

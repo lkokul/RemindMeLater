@@ -14,6 +14,7 @@ const { sanitizeColors, sanitizeInverseColors, serializeTheme } = require('./the
 // abajo para el porque.
 const { validateBody: validateViajesTripBody, setTripCountries: setViajesTripCountries, serializeTrip: serializeViajesTrip, deleteTripCascade: deleteViajesTripCascade } = require('./viajesTrips');
 const { serializeEntry: serializeViajesEntry, deleteEntryCascade: deleteViajesEntryCascade } = require('./viajesEntries');
+const { deriveTitleFromBody, sanitizeNoteBody } = require('./notes');
 
 const router = express.Router();
 
@@ -97,6 +98,7 @@ function serializeNote(row) {
     id: row.id,
     title: row.title,
     body: row.body,
+    bodyFormat: row.body_format,
     hidden: !!row.hidden,
     favorite: !!row.favorite,
     folderId: row.folder_id,
@@ -220,19 +222,31 @@ function applyNoteChange(rowId, op, payload, originId) {
     return { status: 'applied' };
   }
 
-  const { title, body, folderId, favorite, hidden } = payload || {};
-  if (!title || !String(title).trim()) {
-    return { status: 'rejected', message: 'La nota necesita un titulo.' };
-  }
+  // Fase 4 del rediseño movil: ya no se manda titulo (se deriva del
+  // cuerpo, misma logica que la ruta REST -- ver deriveTitleFromBody en
+  // routes/notes.js, importada arriba). El body tambien se sanea si viene
+  // marcado como 'html' (mismo criterio que el POST/PUT REST -- antes
+  // esta funcion guardaba el body de un movil sin pasar por el saneado
+  // de etiquetas, un hueco real que se corrige de paso al tocar este
+  // mismo bloque). Payload aqui es el body CRUDO de la peticion original
+  // del movil (parcial en un PUT, ver pushOutbox en app.js) -- igual que
+  // el PUT REST, solo se re-deriva title/body/format si el payload trae
+  // "body" de verdad, si no se conserva lo que ya hubiera en la fila.
+  const { body, folderId, favorite, hidden } = payload || {};
+  const bodyProvided = payload && Object.prototype.hasOwnProperty.call(payload, 'body');
 
   const profile = db.prepare('SELECT * FROM user_profile WHERE id = 1').get();
 
   if (!rowId) {
+    const format = payload && payload.bodyFormat === 'html' ? 'html' : 'text';
+    const cleanBody = format === 'html' ? sanitizeNoteBody(body) : (body || null);
+    const title = deriveTitleFromBody(cleanBody, format);
     const info = db
-      .prepare('INSERT INTO notes (title, body, folder_id, favorite, hidden, created_by_name, created_by_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO notes (title, body, body_format, folder_id, favorite, hidden, created_by_name, created_by_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
-        String(title).trim(),
-        body || null,
+        title,
+        cleanBody,
+        format,
         resolveRef('note_folders', folderId),
         favorite ? 1 : 0,
         hidden ? 1 : 0,
@@ -247,15 +261,25 @@ function applyNoteChange(rowId, op, payload, originId) {
 
   const existing = db.prepare('SELECT * FROM notes WHERE id = ?').get(rowId);
   if (!existing) return { status: 'applied' };
+
+  const format = payload && payload.bodyFormat !== undefined
+    ? (payload.bodyFormat === 'html' ? 'html' : 'text')
+    : existing.body_format;
+  const cleanBody = bodyProvided
+    ? (format === 'html' ? sanitizeNoteBody(body) : body)
+    : existing.body;
+  const title = bodyProvided ? deriveTitleFromBody(cleanBody, format) : existing.title;
+
   db.prepare(`
-    UPDATE notes SET title = ?, body = ?, folder_id = ?, favorite = ?, hidden = ?, updated_at = datetime('now')
+    UPDATE notes SET title = ?, body = ?, body_format = ?, folder_id = ?, favorite = ?, hidden = ?, updated_at = datetime('now')
     WHERE id = ?
   `).run(
-    String(title).trim(),
-    body || null,
-    resolveRef('note_folders', folderId),
-    favorite ? 1 : 0,
-    hidden ? 1 : 0,
+    title,
+    cleanBody,
+    format,
+    folderId !== undefined ? resolveRef('note_folders', folderId) : existing.folder_id,
+    favorite !== undefined ? (favorite ? 1 : 0) : existing.favorite,
+    hidden !== undefined ? (hidden ? 1 : 0) : existing.hidden,
     rowId
   );
   const row = db.prepare('SELECT * FROM notes WHERE id = ?').get(rowId);

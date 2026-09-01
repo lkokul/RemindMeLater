@@ -374,14 +374,31 @@ const STAR_OUTLINE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="
 // resuelve true al pulsar Aceptar.
 // ---------------------------------------------------------------------
 let appConfirmResolve = null;
-function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', danger = false, alertOnly = false } = {}) {
+let appConfirmCheckboxStorageKey = null;
+// opts.checkbox = { label, storageKey } (Fase 4 del rediseño movil,
+// usado por el aviso de borrar una carpeta con contenido en modo
+// Seleccionar de Notas): añade una fila con .styled-checkbox debajo del
+// mensaje -- si esta marcada al pulsar Aceptar, se guarda
+// localStorage[storageKey] = '1' (por dispositivo, mismo patron que el
+// resto de ajustes de este tipo en la app) ANTES de resolver la
+// promesa. Aditivo: no cambia nada para los usos existentes que no
+// pasan "checkbox".
+function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', danger = false, alertOnly = false, checkbox = null } = {}) {
   return new Promise((resolve) => {
     appConfirmResolve = resolve;
+    appConfirmCheckboxStorageKey = checkbox ? checkbox.storageKey : null;
     document.getElementById('app-confirm-modal-message').textContent = message;
     const okBtn = document.getElementById('btn-app-confirm-ok');
     okBtn.textContent = okText;
     okBtn.className = danger ? 'danger-btn' : 'primary-btn';
     document.getElementById('btn-app-confirm-cancel').classList.toggle('hidden', alertOnly);
+    const checkboxRow = document.getElementById('app-confirm-checkbox-row');
+    const checkboxInput = document.getElementById('app-confirm-checkbox');
+    checkboxRow.classList.toggle('hidden', !checkbox);
+    if (checkbox) {
+      document.getElementById('app-confirm-checkbox-label').textContent = checkbox.label;
+      checkboxInput.checked = false;
+    }
     document.getElementById('app-confirm-modal').classList.remove('hidden');
   });
 }
@@ -390,6 +407,10 @@ function showAppAlert(message, { okText = 'Aceptar' } = {}) {
 }
 function closeAppConfirm(result) {
   document.getElementById('app-confirm-modal').classList.add('hidden');
+  if (result && appConfirmCheckboxStorageKey && document.getElementById('app-confirm-checkbox').checked) {
+    localStorage.setItem(appConfirmCheckboxStorageKey, '1');
+  }
+  appConfirmCheckboxStorageKey = null;
   if (appConfirmResolve) {
     const resolve = appConfirmResolve;
     appConfirmResolve = null;
@@ -869,10 +890,18 @@ async function buildOptimisticRecord(route, id, fields) {
   }
   if (route.store === 'notes') {
     const folder = fields.folderId != null ? await localGet('noteFolders', fields.folderId) : null;
+    // Fase 4: ya no se manda "title" desde el cliente (se deriva del
+    // cuerpo, ver deriveTitleFromBodyClient) -- la copia optimista local
+    // tiene que derivarlo de la misma forma, para que la nota se vea con
+    // un titulo correcto en el listado ANTES de que llegue la respuesta
+    // real del servidor. bodyFormat no se guardaba antes en el registro
+    // optimista (solo llegaba via cacheServerResponse tras un exito
+    // online) -- se añade aqui porque hace falta para derivar bien.
     return {
       id,
-      title: fields.title || '',
+      title: deriveTitleFromBodyClient(fields.body, fields.bodyFormat),
       body: fields.body ?? null,
+      bodyFormat: fields.bodyFormat || 'text',
       hidden: !!fields.hidden,
       favorite: !!fields.favorite,
       folderId: fields.folderId ?? null,
@@ -3290,9 +3319,25 @@ function buildNoteFolderPathLabel(folderId) {
   return parts.length ? parts.join(' / ') : 'Raiz';
 }
 
-function buildNoteRow(note, { showPath = false } = {}) {
+// "mode" (Fase 4, solo tiene efecto viniendo de la vista movil -- ver
+// renderNotesViewInto): 'browse' (normal, como siempre funcionaba
+// desktop), 'select' (checkbox delante, la fila entera marca/desmarca
+// en vez de abrir/navegar) o 'editFolders' (solo afecta a
+// buildFolderRow: tap en la fila edita la carpeta en vez de entrar).
+function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
   const row = document.createElement('div');
   row.className = 'note-item' + (note.hidden ? ' is-hidden' : '');
+
+  const itemKey = mobileNotesItemKey('note', note.id);
+  if (mode === 'select') {
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox';
+    checkbox.checked = mobileNotesSelectedKeys.has(itemKey);
+    checkbox.addEventListener('click', (e) => e.stopPropagation());
+    checkbox.addEventListener('change', () => toggleMobileNotesSelection(itemKey));
+    row.appendChild(checkbox);
+  }
 
   const eyeBtn = document.createElement('button');
   eyeBtn.type = 'button';
@@ -3331,10 +3376,11 @@ function buildNoteRow(note, { showPath = false } = {}) {
     toggleNoteFavorite(note);
   }));
 
-  // Una nota oculta no se abre con un simple clic en la fila — solo el
-  // icono de ojo la destapa (sin ningun texto/boton de aviso encima del
-  // blur, para no recargar la fila).
   row.addEventListener('click', () => {
+    if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
+    // Una nota oculta no se abre con un simple clic en la fila — solo el
+    // icono de ojo la destapa (sin ningun texto/boton de aviso encima del
+    // blur, para no recargar la fila).
     if (note.hidden) return;
     openNoteInEditor(note);
   });
@@ -3343,10 +3389,23 @@ function buildNoteRow(note, { showPath = false } = {}) {
 
 // Carpeta con icono de ojo (Fase 3, navegacion tipo explorador de
 // archivos): la fila entera abre esa carpeta al clicarla; el lapiz
-// (aparte, con su propio stopPropagation) la edita sin entrar.
-function buildFolderRow(folder, { showPath = false } = {}) {
+// (aparte, con su propio stopPropagation) la edita sin entrar. Ver
+// comentario de "mode" en buildNoteRow arriba -- se comparte el mismo
+// concepto para las dos.
+function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
   const row = document.createElement('div');
   row.className = 'note-item note-folder-row';
+
+  const itemKey = mobileNotesItemKey('folder', folder.id);
+  if (mode === 'select') {
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox';
+    checkbox.checked = mobileNotesSelectedKeys.has(itemKey);
+    checkbox.addEventListener('click', (e) => e.stopPropagation());
+    checkbox.addEventListener('change', () => toggleMobileNotesSelection(itemKey));
+    row.appendChild(checkbox);
+  }
 
   // Siempre el icono generico de carpeta, sin icono/emoji personalizado
   // -- Koku prefirio quitar esa eleccion porque el icono de carpeta ya
@@ -3389,6 +3448,8 @@ function buildFolderRow(folder, { showPath = false } = {}) {
   }));
 
   row.addEventListener('click', () => {
+    if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
+    if (mode === 'editFolders') { openNoteFolderModal(folder); return; }
     state.currentNoteFolderId = folder.id;
     clearNoteSearch();
     renderNotesView();
@@ -3450,11 +3511,16 @@ function compareNoteListItems(a, b) {
   return getNoteListItemName(a).localeCompare(getNoteListItemName(b));
 }
 
-function appendFavoriteSortedGroup(container, items, buildRowFn) {
+// "compareFn" opcional (Fase 4, ordenar notas en la vista movil, ver
+// #btn-mobile-notes-menu): favoritos SIEMPRE van primero y se ordenan
+// por nombre entre si (sin cambios) -- el criterio elegido solo
+// reordena "el resto" (decision confirmada con Koku), por eso solo se
+// aplica a "rest", nunca a "favorites".
+function appendFavoriteSortedGroup(container, items, buildRowFn, { compareFn } = {}) {
   if (items.length === 0) return;
   const byName = (a, b) => getNoteListItemName(a).localeCompare(getNoteListItemName(b));
   const favorites = items.filter((i) => i.favorite).sort(byName);
-  const rest = items.filter((i) => !i.favorite).sort(byName);
+  const rest = items.filter((i) => !i.favorite).sort(compareFn || byName);
 
   if (getFavoritesDisplayMode() === 'sections' && favorites.length > 0) {
     const favHeading = document.createElement('div');
@@ -3487,30 +3553,79 @@ function appendFavoriteSortedGroup(container, items, buildRowFn) {
 // carpeta" (state.noteSearchCurrentFolderOnly, persistente mientras
 // dure la sesion) la restringe a la carpeta actual, como funcionaba
 // antes -- sin ruta debajo, porque ya sabes donde estas.
-function renderNotesView() {
-  const container = document.getElementById('notes-list');
+// Fase 4 del rediseño movil: la vista de Notas ya no es solo de
+// escritorio -- el mismo "donde estas" (carpeta actual/busqueda/
+// favoritos) se pinta ahora en DOS contenedores posibles
+// (#notes-list en escritorio, #mobile-notes-list en la vista movil
+// nueva), cada uno con su propio boton "Volver". Como solo uno de los
+// dos es visible a la vez (corte 100% CSS por ancho de pantalla, nunca
+// los dos en el mismo dispositivo), lo mas simple es matener SIEMPRE
+// los dos en sincronia con el mismo estado global
+// (state.currentNoteFolderId/noteSearchQuery/...) en vez de duplicar
+// ese estado por plataforma -- por eso renderNotesView() SIN argumento
+// pinta los dos contenedores que existan (uno de los dos no existira
+// del todo o no estara en el DOM segun la version de index.html que se
+// esté usando, de ahi el "if (!container) return" dentro de cada uno).
+const NOTES_VIEW_TARGETS = {
+  desktop: { containerId: 'notes-list', backBtnId: 'btn-note-folder-back' },
+  mobile: { containerId: 'mobile-notes-list', backBtnId: 'btn-mobile-notes-back' },
+};
+
+function renderNotesView(target) {
+  const targets = target ? [target] : Object.keys(NOTES_VIEW_TARGETS);
+  targets.forEach(renderNotesViewInto);
+}
+
+function renderNotesViewInto(target) {
+  const cfg = NOTES_VIEW_TARGETS[target];
+  const container = cfg && document.getElementById(cfg.containerId);
   if (!container) return;
   container.innerHTML = '';
 
   const query = (state.noteSearchQuery || '').trim().toLowerCase();
   const searchWholeApp = !!query && !state.noteSearchCurrentFolderOnly;
 
-  document.getElementById('btn-note-folder-back').classList.toggle('hidden', state.currentNoteFolderId === null || searchWholeApp);
+  const backBtn = document.getElementById(cfg.backBtnId);
+  if (backBtn) backBtn.classList.toggle('hidden', state.currentNoteFolderId === null || searchWholeApp);
 
+  // "mode"/orden/galeria son ajustes GLOBALES por dispositivo -- solo se
+  // activan pintando la vista movil, nunca la de escritorio (que sigue
+  // funcionando exactamente igual que siempre, sin estos 3 conceptos).
+  const mode = target === 'mobile' ? mobileNotesMode : 'browse';
+  const sortOpts = target === 'mobile' ? { compareFn: compareMobileNotesItems } : {};
+  const useGallery = target === 'mobile' && getMobileNotesViewMode() === 'gallery';
+  const buildNote = useGallery
+    ? (n, opts) => buildNoteGalleryCard(n, opts)
+    : (n, opts) => buildNoteRow(n, opts);
+
+  function appendNoteGroup(items, showPath) {
+    if (!useGallery) {
+      appendFavoriteSortedGroup(container, items, (n) => buildNote(n, { showPath, mode }), sortOpts);
+      return;
+    }
+    const grid = document.createElement('div');
+    grid.className = 'mobile-notes-gallery-grid';
+    appendFavoriteSortedGroup(grid, items, (n) => buildNote(n, { showPath, mode }), sortOpts);
+    if (grid.children.length > 0) container.appendChild(grid);
+  }
+
+  // En modo Mover solo tiene sentido navegar entre CARPETAS (elegir el
+  // destino) -- las notas no pueden contener nada, se ocultan del todo
+  // para no confundir con "¿tambien puedo moverlo aqui dentro?".
   if (searchWholeApp) {
     const matchFolders = state.noteFolders.filter((f) => f.name.toLowerCase().includes(query));
-    const matchNotes = (state.notes || []).filter((n) => n.title.toLowerCase().includes(query));
+    const matchNotes = mode === 'move' ? [] : (state.notes || []).filter((n) => n.title.toLowerCase().includes(query));
     if (matchFolders.length === 0 && matchNotes.length === 0) {
       container.innerHTML = '<p class="empty-hint">Nada coincide con esa busqueda.</p>';
       return;
     }
-    appendFavoriteSortedGroup(container, matchFolders, (f) => buildFolderRow(f, { showPath: true }));
-    appendFavoriteSortedGroup(container, matchNotes, (n) => buildNoteRow(n, { showPath: true }));
+    appendFavoriteSortedGroup(container, matchFolders, (f) => buildFolderRow(f, { showPath: true, mode }));
+    appendNoteGroup(matchNotes, true);
     return;
   }
 
   let subfolders = state.noteFolders.filter((f) => f.parentId === state.currentNoteFolderId);
-  let notesHere = (state.notes || []).filter((n) => n.folderId === state.currentNoteFolderId);
+  let notesHere = mode === 'move' ? [] : (state.notes || []).filter((n) => n.folderId === state.currentNoteFolderId);
 
   if (query) {
     subfolders = subfolders.filter((f) => f.name.toLowerCase().includes(query));
@@ -3518,18 +3633,134 @@ function renderNotesView() {
   }
 
   if (subfolders.length === 0 && notesHere.length === 0) {
-    container.innerHTML = `<p class="empty-hint">${query ? 'Nada coincide con esa busqueda.' : 'No hay nada aqui todavia.'}</p>`;
+    container.innerHTML = `<p class="empty-hint">${query ? 'Nada coincide con esa busqueda.' : (mode === 'move' ? 'No hay subcarpetas aqui.' : 'No hay nada aqui todavia.')}</p>`;
     return;
   }
 
-  appendFavoriteSortedGroup(container, subfolders, buildFolderRow);
-  appendFavoriteSortedGroup(container, notesHere, buildNoteRow);
+  appendFavoriteSortedGroup(container, subfolders, (f) => buildFolderRow(f, { mode }));
+  appendNoteGroup(notesHere, false);
 }
 
+// Criterio de orden de las notas normales en la vista movil (favoritos
+// siguen yendo primero siempre, ver appendFavoriteSortedGroup) --
+// ajustes GLOBALES por dispositivo (localStorage, nunca por carpeta,
+// confirmado con Koku). Fecha de creacion/edicion comparan el string
+// ISO tal cual (orden lexicografico = orden cronologico para este
+// formato de fecha, mismo truco que ya usa el resto de la app).
+function getMobileNotesSortBy() {
+  const v = localStorage.getItem('notesMobileSortBy');
+  return v === 'createdAt' || v === 'title' ? v : 'updatedAt';
+}
+function getMobileNotesSortDir() {
+  return localStorage.getItem('notesMobileSortDir') === 'asc' ? 'asc' : 'desc';
+}
+function compareMobileNotesItems(a, b) {
+  const sortBy = getMobileNotesSortBy();
+  const dir = getMobileNotesSortDir() === 'asc' ? 1 : -1;
+  if (sortBy === 'title') return getNoteListItemName(a).localeCompare(getNoteListItemName(b)) * dir;
+  const av = a[sortBy] || '';
+  const bv = b[sortBy] || '';
+  if (av === bv) return 0;
+  return (av < bv ? -1 : 1) * dir;
+}
+
+// Vista galeria/listado de la vista movil -- ajuste GLOBAL por
+// dispositivo (nunca por carpeta, ver decision 4 confirmada con Koku).
+function getMobileNotesViewMode() {
+  return localStorage.getItem('notesMobileViewMode') === 'gallery' ? 'gallery' : 'list';
+}
+
+// Extrae la primera <img src="..."> del cuerpo HTML de una nota, si
+// tiene alguna -- solo tiene sentido si bodyFormat es 'html' (las notas
+// de antes de la Fase 4/editor con formato son texto plano, nunca
+// pueden tener una imagen incrustada).
+function extractNoteThumbnailSrc(note) {
+  if (note.bodyFormat !== 'html' || !note.body) return null;
+  const m = note.body.match(/<img[^>]+src="([^"]+)"/i);
+  return m ? m[1] : null;
+}
+
+// Vista previa de texto (sin imagen) para la tarjeta de galeria -- quita
+// las etiquetas de verdad usando el propio DOM (mas fiable que un
+// regex para decodificar entidades correctamente), recortado a un
+// tamano razonable para una tarjeta pequeña.
+function extractNoteTextPreview(note) {
+  if (!note.body) return '';
+  const div = document.createElement('div');
+  div.innerHTML = note.bodyFormat === 'html' ? note.body : legacyNoteBodyToHtml(note.body);
+  return (div.textContent || '').trim().slice(0, 140);
+}
+
+function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
+  const card = document.createElement('div');
+  card.className = 'mobile-note-gallery-card' + (note.hidden ? ' is-hidden' : '');
+  const itemKey = mobileNotesItemKey('note', note.id);
+
+  if (mode === 'select') {
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox mobile-note-gallery-checkbox';
+    checkbox.checked = mobileNotesSelectedKeys.has(itemKey);
+    checkbox.addEventListener('click', (e) => e.stopPropagation());
+    checkbox.addEventListener('change', () => toggleMobileNotesSelection(itemKey));
+    card.appendChild(checkbox);
+  }
+
+  const eyeBtn = document.createElement('button');
+  eyeBtn.type = 'button';
+  eyeBtn.className = 'mobile-note-gallery-eye-btn';
+  eyeBtn.innerHTML = note.hidden ? EYE_OFF_SVG : EYE_SVG;
+  eyeBtn.setAttribute('aria-label', note.hidden ? 'Destapar nota' : 'Ocultar nota');
+  eyeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleNoteHidden(note);
+  });
+  card.appendChild(eyeBtn);
+
+  const thumbSrc = extractNoteThumbnailSrc(note);
+  const media = document.createElement('div');
+  media.className = 'mobile-note-gallery-media';
+  if (thumbSrc) {
+    const img = document.createElement('img');
+    img.src = thumbSrc;
+    img.alt = '';
+    media.appendChild(img);
+  } else {
+    media.style.background = note.folderColor || 'var(--surface-2)';
+    const preview = document.createElement('span');
+    preview.className = 'mobile-note-gallery-preview-text';
+    preview.textContent = extractNoteTextPreview(note);
+    media.appendChild(preview);
+  }
+  card.appendChild(media);
+
+  const title = document.createElement('span');
+  title.className = 'mobile-note-gallery-title';
+  title.textContent = note.title || 'Nota sin título';
+  card.appendChild(title);
+
+  card.appendChild(buildFavoriteStarBtn(note.favorite, (e) => {
+    e.stopPropagation();
+    toggleNoteFavorite(note);
+  }));
+
+  card.addEventListener('click', () => {
+    if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
+    if (note.hidden) return;
+    openNoteInEditor(note);
+  });
+  return card;
+}
+
+// Estado compartido (state.noteSearchQuery/...) entre las dos vistas
+// posibles -- limpiar el texto tiene que hacerlo en CUALQUIER input de
+// busqueda que exista en el DOM, no solo el de escritorio.
 function clearNoteSearch() {
   state.noteSearchQuery = '';
-  const input = document.getElementById('note-search-input');
-  if (input) input.value = '';
+  ['note-search-input', 'mobile-notes-search-input'].forEach((id) => {
+    const input = document.getElementById(id);
+    if (input) input.value = '';
+  });
 }
 
 document.getElementById('note-search-input').addEventListener('input', (e) => {
@@ -3550,6 +3781,275 @@ document.getElementById('btn-note-folder-back').addEventListener('click', () => 
   clearNoteSearch();
   renderNotesView();
 });
+
+// Equivalentes de la vista movil (#mobile-notes-view, Fase 4) -- misma
+// logica exacta que los de escritorio de arriba, apuntando a los ids
+// propios de esa vista. La busqueda movil siempre mira toda la app (sin
+// el boton de "solo esta carpeta" -- no hay sitio en la barra estrecha
+// para ese matiz, y buscar en toda la app es el comportamiento por
+// defecto de todas formas).
+const mobileNoteSearchInput = document.getElementById('mobile-notes-search-input');
+if (mobileNoteSearchInput) {
+  mobileNoteSearchInput.addEventListener('input', (e) => {
+    state.noteSearchQuery = e.target.value;
+    renderNotesView();
+  });
+}
+const btnMobileNotesBack = document.getElementById('btn-mobile-notes-back');
+if (btnMobileNotesBack) {
+  btnMobileNotesBack.addEventListener('click', () => {
+    const current = state.noteFolders.find((f) => f.id === state.currentNoteFolderId);
+    state.currentNoteFolderId = current ? current.parentId : null;
+    clearNoteSearch();
+    renderNotesView();
+  });
+}
+
+// ---------------------------------------------------------------------
+// Notas movil -- menu de 3 puntos y sus 4 modos (Fase 4 del rediseño
+// movil): Editar carpetas / Seleccionar (con Eliminar/Mover) / Vista
+// (galeria-listado) / Ordenar. "mode" es el mismo concepto ya usado en
+// buildNoteRow/buildFolderRow/buildNoteGalleryCard mas arriba.
+// ---------------------------------------------------------------------
+let mobileNotesMode = 'browse'; // 'browse' | 'editFolders' | 'select' | 'move'
+const mobileNotesSelectedKeys = new Set(); // 'folder:<id>' / 'note:<id>'
+
+function mobileNotesItemKey(kind, id) {
+  return `${kind}:${id}`;
+}
+
+function toggleMobileNotesSelection(itemKey) {
+  if (mobileNotesSelectedKeys.has(itemKey)) mobileNotesSelectedKeys.delete(itemKey);
+  else mobileNotesSelectedKeys.add(itemKey);
+  refreshMobileNotesActionBar();
+  renderNotesView('mobile');
+}
+
+function setMobileNotesMode(mode) {
+  mobileNotesMode = mode;
+  if (mode !== 'select' && mode !== 'move') mobileNotesSelectedKeys.clear();
+  refreshMobileNotesActionBar();
+  renderNotesView('mobile');
+}
+
+// Barra inferior fija: sin selección propia (Eliminar/Mover deshabilitados
+// con nada marcado), o con el par Cancelar/"Mover aquí" durante el modo
+// Mover -- un unico par de botones reutilizado para los dos casos en vez
+// de 2 barras distintas.
+function refreshMobileNotesActionBar() {
+  const bar = document.getElementById('mobile-notes-action-bar');
+  if (!bar) return;
+  const leftBtn = document.getElementById('btn-mobile-notes-action-left');
+  const rightBtn = document.getElementById('btn-mobile-notes-action-right');
+
+  if (mobileNotesMode === 'select') {
+    bar.classList.remove('hidden');
+    leftBtn.textContent = 'Eliminar';
+    leftBtn.className = 'danger-btn';
+    leftBtn.disabled = mobileNotesSelectedKeys.size === 0;
+    leftBtn.onclick = openMobileNotesDeleteModal;
+    rightBtn.textContent = 'Mover';
+    rightBtn.className = 'secondary-btn';
+    rightBtn.disabled = mobileNotesSelectedKeys.size === 0;
+    rightBtn.onclick = () => setMobileNotesMode('move');
+  } else if (mobileNotesMode === 'move') {
+    bar.classList.remove('hidden');
+    leftBtn.textContent = 'Cancelar';
+    leftBtn.className = 'secondary-btn';
+    leftBtn.disabled = false;
+    leftBtn.onclick = () => setMobileNotesMode('select');
+    rightBtn.textContent = 'Mover aquí';
+    rightBtn.className = 'primary-btn';
+    rightBtn.disabled = false;
+    rightBtn.onclick = confirmMobileNotesMove;
+  } else {
+    bar.classList.add('hidden');
+  }
+}
+
+function resolveMobileNotesItem(key) {
+  const [kind, idStr] = key.split(':');
+  const id = Number(idStr);
+  if (kind === 'note') return { kind, id, item: (state.notes || []).find((n) => n.id === id) };
+  return { kind, id, item: state.noteFolders.find((f) => f.id === id) };
+}
+
+// El aviso de "esto tiene contenido dentro" solo hace falta si la
+// seleccion final (ya descontando lo excluido en el modal) incluye una
+// CARPETA con notas o subcarpetas -- se calcula con lo que ya hay en
+// memoria (state.noteFolders/state.notes), sin pedir nada al servidor.
+function mobileNotesDeletionIncludesFolderWithContent(keys) {
+  return keys.some((key) => {
+    const { kind, id } = resolveMobileNotesItem(key);
+    if (kind !== 'folder') return false;
+    return state.noteFolders.some((f) => f.parentId === id) || (state.notes || []).some((n) => n.folderId === id);
+  });
+}
+
+let mobileNotesDeleteExcluded = new Set();
+
+function renderMobileNotesDeleteList() {
+  const list = document.getElementById('mobile-notes-delete-list');
+  list.innerHTML = '';
+  mobileNotesSelectedKeys.forEach((key) => {
+    const { kind, item } = resolveMobileNotesItem(key);
+    if (!item) return;
+    const row = document.createElement('div');
+    row.className = 'mobile-notes-delete-item' + (mobileNotesDeleteExcluded.has(key) ? ' is-excluded' : '');
+    if (kind === 'folder') {
+      const icon = document.createElement('span');
+      icon.className = 'mobile-notes-delete-item-icon';
+      icon.innerHTML = FOLDER_SVG;
+      row.appendChild(icon);
+    }
+    const label = document.createElement('span');
+    label.textContent = kind === 'folder' ? item.name : (item.title || 'Nota sin título');
+    row.appendChild(label);
+    row.addEventListener('click', () => {
+      if (mobileNotesDeleteExcluded.has(key)) mobileNotesDeleteExcluded.delete(key);
+      else mobileNotesDeleteExcluded.add(key);
+      renderMobileNotesDeleteList();
+    });
+    list.appendChild(row);
+  });
+}
+
+function openMobileNotesDeleteModal() {
+  mobileNotesDeleteExcluded = new Set();
+  renderMobileNotesDeleteList();
+  document.getElementById('mobile-notes-delete-modal').classList.remove('hidden');
+}
+function closeMobileNotesDeleteModal() {
+  document.getElementById('mobile-notes-delete-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-mobile-notes-delete').addEventListener('click', closeMobileNotesDeleteModal);
+document.getElementById('btn-mobile-notes-delete-cancel').addEventListener('click', closeMobileNotesDeleteModal);
+
+document.getElementById('btn-mobile-notes-delete-confirm').addEventListener('click', async () => {
+  const finalKeys = [...mobileNotesSelectedKeys].filter((k) => !mobileNotesDeleteExcluded.has(k));
+  if (finalKeys.length === 0) { closeMobileNotesDeleteModal(); return; }
+
+  if (
+    mobileNotesDeletionIncludesFolderWithContent(finalKeys)
+    && localStorage.getItem('notesMobileHideFolderDeleteWarning') !== '1'
+  ) {
+    const proceed = await showAppConfirm(
+      'Las notas y subcarpetas que contenga cualquier carpeta seleccionada subirán de nivel, no se borrarán.',
+      { checkbox: { label: 'No volver a mostrar este aviso', storageKey: 'notesMobileHideFolderDeleteWarning' } }
+    );
+    if (!proceed) return;
+  }
+
+  closeMobileNotesDeleteModal();
+  for (const key of finalKeys) {
+    const { kind, id } = resolveMobileNotesItem(key);
+    if (kind === 'note') await api(`/api/notes/${id}`, { method: 'DELETE' });
+    else await api(`/api/note-folders/${id}`, { method: 'DELETE' });
+  }
+  await Promise.all([loadNotes(), loadNoteFolders()]);
+  setMobileNotesMode('browse');
+});
+
+// Modo Mover: usa la navegacion de carpetas de siempre (el usuario entra
+// en la carpeta destino como si estuviera navegando normal, ver el
+// filtrado de "mode === 'move'" en renderNotesViewInto) -- "Mover aqui"
+// aplica state.currentNoteFolderId como destino de todo lo seleccionado.
+async function confirmMobileNotesMove() {
+  const destinationFolderId = state.currentNoteFolderId;
+  const keys = [...mobileNotesSelectedKeys];
+  try {
+    for (const key of keys) {
+      const { kind, id } = resolveMobileNotesItem(key);
+      if (kind === 'note') {
+        await api(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify({ folderId: destinationFolderId }) });
+      } else {
+        await api(`/api/note-folders/${id}`, { method: 'PUT', body: JSON.stringify({ parentId: destinationFolderId }) });
+      }
+    }
+  } catch (err) {
+    await showAppAlert(err.message || 'No se pudo mover.');
+    return;
+  }
+  await Promise.all([loadNotes(), loadNoteFolders()]);
+  setMobileNotesMode('browse');
+}
+
+// ---------------------------------------------------------------------
+// Menu de 3 puntos (Fase 4): popover con Editar carpetas/Seleccionar/
+// Vista/Ordenar, mismo patron positionFixedPopover/closeAllPopovers de
+// settings.js que ya usan el resto de popovers de la app -- el div ya
+// lleva la clase .select-popover en index.html, asi que ya esta
+// incluido en esas dos funciones sin tocarlas.
+// ---------------------------------------------------------------------
+function buildMobileNotesMenuPopover() {
+  const popover = document.getElementById('mobile-notes-menu-popover');
+  popover.innerHTML = '';
+
+  function addOption(label, onClick, active) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'select-option' + (active ? ' active' : '');
+    btn.textContent = label;
+    btn.addEventListener('click', onClick);
+    popover.appendChild(btn);
+  }
+
+  const editingFolders = mobileNotesMode === 'editFolders';
+  addOption(editingFolders ? 'Listo' : 'Editar carpetas', () => {
+    closeAllPopovers();
+    setMobileNotesMode(editingFolders ? 'browse' : 'editFolders');
+  }, editingFolders);
+
+  const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
+  addOption(selecting ? 'Listo' : 'Seleccionar', () => {
+    closeAllPopovers();
+    setMobileNotesMode(selecting ? 'browse' : 'select');
+  }, selecting);
+
+  const galleryActive = getMobileNotesViewMode() === 'gallery';
+  addOption(galleryActive ? 'Ver como listado' : 'Ver como galería', () => {
+    localStorage.setItem('notesMobileViewMode', galleryActive ? 'list' : 'gallery');
+    closeAllPopovers();
+    renderNotesView('mobile');
+  });
+
+  const sortBy = getMobileNotesSortBy();
+  const sortDir = getMobileNotesSortDir();
+  const sortOptions = [
+    ['updatedAt', 'Fecha de edición'],
+    ['createdAt', 'Fecha de creación'],
+    ['title', 'Nombre'],
+  ];
+  sortOptions.forEach(([key, label]) => {
+    const active = sortBy === key;
+    const arrow = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    addOption(label + arrow, () => {
+      if (sortBy === key) {
+        localStorage.setItem('notesMobileSortDir', sortDir === 'asc' ? 'desc' : 'asc');
+      } else {
+        localStorage.setItem('notesMobileSortBy', key);
+        localStorage.setItem('notesMobileSortDir', 'desc');
+      }
+      closeAllPopovers();
+      renderNotesView('mobile');
+    }, active);
+  });
+}
+
+const btnMobileNotesMenu = document.getElementById('btn-mobile-notes-menu');
+if (btnMobileNotesMenu) {
+  btnMobileNotesMenu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const popover = document.getElementById('mobile-notes-menu-popover');
+    const willOpen = popover.classList.contains('hidden');
+    closeAllPopovers();
+    if (willOpen) {
+      buildMobileNotesMenuPopover();
+      popover.classList.remove('hidden');
+      positionFixedPopover(btnMobileNotesMenu, popover, { width: 220 });
+    }
+  });
+}
 
 // Selector de carpeta (opcional) dentro del modal de nota — mismo patron
 // que el selector de grupo de las tareas (populateTaskGroupSelect), pero
@@ -4684,6 +5184,59 @@ function legacyNoteBodyToHtml(text) {
   return escapeHtml(text).replace(/\n/g, '<br>');
 }
 
+// Fase 4 del rediseño movil: el titulo de una nota ya no se escribe a
+// mano (se quito el campo #note-title, ver el editor mas abajo), se
+// deriva SIEMPRE de la primera linea del cuerpo -- misma logica EXACTA
+// que deriveTitleFromBody en server/routes/notes.js, duplicada aqui a
+// proposito porque este proyecto no tiene ningun mecanismo para
+// compartir codigo entre servidor y navegador sin meter un build nuevo.
+// Se usa tanto para la etiqueta de solo lectura del editor (en vivo,
+// sin esperar a guardar) como para la vista previa en las listas/
+// galeria de notas.
+//
+// findFirstLineBreakIndexClient(): en un <div contenteditable> real, la
+// PRIMERA linea normalmente NO queda envuelta en su propia etiqueta --
+// se queda como texto suelto al principio, y solo la SEGUNDA linea en
+// adelante se envuelve en un <div> nuevo al pulsar Intro (comprobado de
+// verdad con Playwright: escribir "A" + Intro + "B" deja el HTML como
+// "A<div>B</div>", NO "<div>A</div><div>B</div>"). Por eso la señal real
+// de "aqui acaba la primera linea" es la APERTURA de ese div siguiente,
+// no su cierre -- buscar solo el cierre se comia la segunda linea
+// entera en ese caso, un bug real encontrado verificando este editor. Si
+// el cuerpo YA viene envuelto desde el principio (nota cargada del
+// servidor, contenido pegado con formato), se usa el cierre de ESE
+// bloque -- de ahi que se descarte una apertura que coincide justo en
+// la posicion 0 y se siga buscando.
+function findFirstLineBreakIndexClient(html) {
+  const pattern = /<br\s*\/?>|<\/(?:div|p|li)>|<(?:div|p|li)(?:\s[^>]*)?>/gi;
+  let match;
+  while ((match = pattern.exec(html))) {
+    const isOpeningBlockAtStart = match.index === 0 && match[0][1] !== '/' && !/^<br/i.test(match[0]);
+    if (isOpeningBlockAtStart) continue;
+    return match.index;
+  }
+  return html.length;
+}
+function deriveTitleFromBodyClient(body, bodyFormat) {
+  if (!body) return '';
+  const format = bodyFormat === 'html' ? 'html' : 'text';
+  let firstLine;
+  if (format === 'html') {
+    firstLine = body.slice(0, findFirstLineBreakIndexClient(body));
+    firstLine = firstLine
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'");
+  } else {
+    firstLine = body.split('\n')[0];
+  }
+  return firstLine.trim().slice(0, 200);
+}
+
 // ---------------------------------------------------------------------
 // Notas abiertas a la vez (multi-nota): solo hay UN <div contenteditable>
 // en el DOM (NOTE_EDITOR_BODY, el de siempre) -- al cambiar de nota
@@ -4713,9 +5266,14 @@ function findOpenNote(key) {
 // cuenta como sucia (no hay ninguna version en el servidor con la que
 // comparar). Una nota ya guardada se compara contra su ultima version
 // persistida (saved*), actualizada cada vez que se guarda con exito.
+// Fase 4: "title" ya NO se compara aqui -- es un valor derivado de
+// "bodyHtml" (ver deriveTitleFromBodyClient), asi que cualquier cambio
+// que cambiaria el titulo ya cambia bodyHtml tambien; comparar los dos
+// era redundante y ademas daba un falso "sucio" al abrir una nota
+// antigua cuyo titulo guardado no coincide con la primera linea de su
+// cuerpo (notas de antes de esta fase, que no se migran retroactivamente).
 function isOpenNoteDirty(entry) {
   return !entry.id
-    || entry.title !== entry.savedTitle
     || entry.bodyHtml !== entry.savedBodyHtml
     || entry.folderId !== entry.savedFolderId
     || entry.favorite !== entry.savedFavorite;
@@ -4728,7 +5286,9 @@ function noteEntrySnapshot(note) {
   const entry = {
     key: makeOpenNoteKey(),
     id: note ? note.id : null,
-    title: note ? note.title : '',
+    // Fase 4: titulo derivado de "bodyHtml", nunca leido de note.title
+    // directamente -- ver el comentario de isOpenNoteDirty arriba.
+    title: deriveTitleFromBodyClient(bodyHtml, 'html'),
     bodyHtml,
     folderId,
     favorite: note ? !!note.favorite : false,
@@ -4754,23 +5314,32 @@ function noteEntrySnapshot(note) {
 function captureActiveOpenNoteFromDom() {
   const entry = findOpenNote(state.activeOpenNoteKey);
   if (!entry) return;
-  entry.title = document.getElementById('note-title').value;
   entry.bodyHtml = NOTE_EDITOR_BODY.innerHTML;
+  entry.title = deriveTitleFromBodyClient(entry.bodyHtml, 'html');
   const folderRaw = noteFolderField.getValue();
   entry.folderId = folderRaw === '' ? null : Number(folderRaw);
   entry.favorite = noteModalFavorite;
+  refreshNoteTitlePreview(entry.title);
+}
+
+// Actualiza la etiqueta de solo lectura del titulo (ver
+// #note-title-preview en index.html) -- separado de
+// captureActiveOpenNoteFromDom para poder llamarlo tambien desde
+// loadOpenNoteIntoDom sin duplicar la logica del texto por defecto.
+function refreshNoteTitlePreview(title) {
+  document.getElementById('note-title-preview').textContent = title || '';
 }
 
 // Alterna entre editar (por defecto) y solo lectura para la nota activa
 // -- es un ajuste POR NOTA ABIERTA (entry.readMode), asi que cada una
 // mantiene su propio modo mientras siga abierta, no se comparte entre
 // ellas ni se guarda en el servidor (es puramente de esta sesion del
-// editor). En modo lectura no solo se desactiva el cuerpo: tambien el
-// titulo y los botones de guardar/eliminar/formato, para que "no tocar
-// nada" cubra la nota entera, no solo el texto.
+// editor). En modo lectura no solo se desactiva el cuerpo: tambien los
+// botones de guardar/eliminar/formato, para que "no tocar nada" cubra
+// la nota entera, no solo el texto (el titulo, desde la Fase 4, ya es
+// una etiqueta de solo lectura siempre, no hace falta desactivarla).
 function applyNoteEditorReadMode(readOnly) {
   NOTE_EDITOR_BODY.contentEditable = readOnly ? 'false' : 'true';
-  document.getElementById('note-title').readOnly = readOnly;
   const modeBtn = document.getElementById('note-editor-read-mode-btn');
   modeBtn.textContent = readOnly ? 'Editar' : 'Modo lectura';
   modeBtn.setAttribute('aria-pressed', readOnly ? 'true' : 'false');
@@ -4801,7 +5370,7 @@ document.getElementById('note-editor-read-mode-btn').addEventListener('click', (
 
 function loadOpenNoteIntoDom(entry) {
   document.getElementById('note-id').value = entry.id || '';
-  document.getElementById('note-title').value = entry.title;
+  refreshNoteTitlePreview(entry.title);
   NOTE_EDITOR_BODY.innerHTML = entry.bodyHtml;
   resetNoteEditorToolbar();
   populateNoteFolderSelect();
@@ -4874,7 +5443,9 @@ function openNoteInEditor(note) {
   }
   renderNoteSectionsPanel();
   document.getElementById('note-editor-view').classList.remove('hidden');
-  document.getElementById('note-title').focus();
+  // Ya no hay campo de titulo al que llevar el foco (Fase 4) -- el
+  // cuerpo es el unico sitio donde se escribe de verdad.
+  NOTE_EDITOR_BODY.focus();
 }
 
 // "Volver": cierra cada nota abierta una a una (mismo aviso de cambios
@@ -5073,12 +5644,10 @@ document.getElementById('btn-close-note-editor').addEventListener('click', close
 
 // El dot de "sin guardar" del panel de Secciones debe reflejar lo que se
 // escribe AHORA, no solo lo que habia la ultima vez que se cambio de
-// nota -- de ahi capturar del DOM tambien en cada input del titulo/
-// contenido, no solo al cambiar de nota o guardar.
-document.getElementById('note-title').addEventListener('input', () => {
-  captureActiveOpenNoteFromDom();
-  renderNoteSectionsPanel();
-});
+// nota -- de ahi capturar del DOM tambien en cada input del contenido
+// (el titulo, desde la Fase 4, ya no es un campo aparte: se deriva del
+// propio cuerpo dentro de captureActiveOpenNoteFromDom), no solo al
+// cambiar de nota o guardar.
 NOTE_EDITOR_BODY.addEventListener('input', () => {
   captureActiveOpenNoteFromDom();
   renderNoteSectionsPanel();
@@ -5103,7 +5672,8 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
   // que NOTE_EDITOR_BODY en este momento es justo el contenido de "entry".
   const hasNoteContent = NOTE_EDITOR_BODY.textContent.trim() !== '' || NOTE_EDITOR_BODY.querySelector('img, table');
   const payload = {
-    title: entry.title,
+    // Fase 4: ya no se manda titulo, el servidor lo deriva del body
+    // (ver deriveTitleFromBody en server/routes/notes.js).
     body: hasNoteContent ? entry.bodyHtml : null,
     bodyFormat: 'html',
     folderId: entry.folderId,
@@ -5685,6 +6255,32 @@ function openMySpaceView() {
   setCurrentScreen('my-space');
 }
 
+// Vista de Notas movil (Fase 4 del rediseño movil) -- sustituye al
+// puente temporal que abria "Mi espacio" desde la barra inferior (ver
+// goToMobileSection). Se abre siempre en la raiz, sin busqueda activa,
+// para no arrastrar el "donde estabas" de la ultima vez que se uso el
+// panel clasico de escritorio (que comparte el mismo state.currentNoteFolderId).
+function openMobileNotesView() {
+  state.currentNoteFolderId = null;
+  clearNoteSearch();
+  document.getElementById('mobile-notes-view').classList.remove('hidden');
+  setCurrentScreen('mobile-notes');
+  renderNotesView('mobile');
+}
+
+function closeMobileNotesView() {
+  document.getElementById('mobile-notes-view').classList.add('hidden');
+  setCurrentScreen('home');
+  // No dejar el modo Seleccionar/Mover/Editar carpetas "colgado" para la
+  // proxima vez que se abra esta vista.
+  mobileNotesMode = 'browse';
+  mobileNotesSelectedKeys.clear();
+  refreshMobileNotesActionBar();
+}
+document.getElementById('btn-close-mobile-notes').addEventListener('click', closeMobileNotesView);
+document.getElementById('btn-mobile-notes-new-folder').addEventListener('click', () => openNoteFolderModal(null));
+document.getElementById('btn-mobile-notes-new').addEventListener('click', () => openNoteInEditor(null));
+
 // Aplica el modo elegido: donde vive el hub, y si hace falta o no el
 // boton de la topbar. Se llama al arrancar y cada vez que cambias el
 // ajuste en Configuracion > Vista.
@@ -5795,15 +6391,14 @@ function refreshMobileNavActive(section) {
 
 function goToMobileSection(section) {
   closeAllMobileOverlays();
-  // "notes" es el hueco antes llamado "my-space" -- de momento sigue
-  // abriendo la pantalla vieja de Mi espacio como puente, hasta que la
-  // Fase 4 del rediseño movil construya #mobile-notes-view (notas
-  // propias, sin tareas/recordatorios, que ahora viven dentro del
-  // propio calendario). Puede tambien abrir otra App si Koku eligio
-  // otra en Configuracion -> Este dispositivo (ver
+  // "notes" es el hueco de la barra inferior -- abre la vista de Notas
+  // propia del movil (Fase 4), no "Mi espacio" (que ya no tiene sentido
+  // en movil, ver CLAUDE.md/decision 3: tareas y recordatorios viven
+  // dentro del propio calendario). Puede tambien abrir otra App si Koku
+  // eligio otra en Configuracion -> Este dispositivo (ver
   // applyMobileNavCustomization(), Fase 5) -- mientras eso no exista,
   // "notes" es el unico valor real que puede llegar aqui.
-  if (section === 'notes') document.getElementById('btn-my-space').click();
+  if (section === 'notes') openMobileNotesView();
   else if (section === 'extensions') document.getElementById('btn-extensions').click();
   else if (section === 'settings') document.getElementById('btn-settings').click();
   refreshMobileNavActive(section);
@@ -10822,6 +11417,7 @@ async function restoreCurrentScreen() {
     if (getMiEspacioMode() === 'topbar') openMySpaceView();
     return;
   }
+  if (screen === 'mobile-notes') { openMobileNotesView(); return; }
   if (screen === 'extensions') { openExtensionsView(); return; }
   if (screen === 'gym') { await openGymView(); return; }
   if (screen === 'lecturas') { openLecturasView(); return; }
