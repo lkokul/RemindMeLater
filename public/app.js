@@ -2109,11 +2109,24 @@ function refreshMobileCalendarModeVisibility() {
     monthGrid.classList.remove('hidden');
     monthList.classList.toggle('hidden', !isListed);
   }
+  // La densidad (compacto/stakeado/listado) solo tiene sentido dentro del
+  // MES (y, cuando exista, de la vista diaria -- que ya trae su propio
+  // interruptor "Vista por horas"/"Listado" aparte) -- en año no hace
+  // nada visible, Koku confirmo que lo probo y no pasaba nada al pulsarlo.
+  document.getElementById('btn-mobile-calendar-density').classList.toggle('hidden', calendarViewMode === 'year');
 }
 
 function refreshMobileCalendarNavLabel() {
   const label = document.getElementById('btn-mobile-calendar-nav-label');
-  label.textContent = calendarViewMode === 'year' ? String(state.viewDate.getFullYear()) : `▲ ${state.viewDate.getFullYear()}`;
+  const year = state.viewDate.getFullYear();
+  if (calendarViewMode === 'year') {
+    label.innerHTML = `<span>${year}</span>`;
+  } else {
+    // Icono de flecha real (svg), no solo el caracter "▲" -- Koku
+    // pregunto si ese triangulo hacia algo, señal de que como texto
+    // plano no se leia como el boton que es.
+    label.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg><span>${year}</span>`;
+  }
 }
 
 document.getElementById('btn-mobile-calendar-nav-label').addEventListener('click', () => {
@@ -2158,30 +2171,452 @@ attachSwipe(document.getElementById('mobile-calendar-year-grid'), {
 });
 
 // ---------------------------------------------------------------------
-// Vista diaria movil -- version MINIMA de la Fase 2 (fecha + volver al
-// mes), la Fase 3 la completa con la tira semanal y las 2 sub-vistas
-// (Vista por horas / Listado). Se construye ya el punto de entrada
-// (boton "Hoy", tap en un dia del mes/año) para no tener que recablearlo
-// luego -- ver "Hoy" mas abajo.
+// Vista diaria movil completa (Fase 3 del rediseño movil, ver
+// CLAUDE.md): tira semanal + 2 sub-vistas ("Vista por horas"/"Listado").
 // ---------------------------------------------------------------------
-function enterMobileDayView(date) {
+
+// Formateador propio para la cabecera del dia ("Miercoles - 3 Sep 2026")
+// y los bloques de Listado ("Lunes - 2 Sep") -- se escribe a mano en vez
+// de con Intl.DateTimeFormat porque el mes abreviado en es-ES a veces
+// viene con un punto ("sept.") segun el motor, y aqui se queria un
+// formato corto fijo sin sorpresas.
+const MOBILE_DAY_MONTH_ABBR = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const MOBILE_DAY_WEEKDAY_FORMATTER = new Intl.DateTimeFormat('es-ES', { weekday: 'long' });
+function capitalizeFirst(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
+function formatMobileDayHeading(date) {
+  const weekday = capitalizeFirst(MOBILE_DAY_WEEKDAY_FORMATTER.format(date));
+  return `${weekday} - ${date.getDate()} ${MOBILE_DAY_MONTH_ABBR[date.getMonth()]} ${date.getFullYear()}`;
+}
+function formatMobileListadoBlockHeading(date) {
+  const weekday = capitalizeFirst(MOBILE_DAY_WEEKDAY_FORMATTER.format(date));
+  return `${weekday} - ${date.getDate()} ${MOBILE_DAY_MONTH_ABBR[date.getMonth()]}`;
+}
+
+// Ajuste por dispositivo (localStorage, NO sincronizado -- mismo patron
+// que mobileCalendarMonthMode de arriba): que sub-vista del dia se ve.
+function getMobileDayViewMode() {
+  return localStorage.getItem('mobileDayViewMode') === 'listado' ? 'listado' : 'hours';
+}
+
+// Los 7 dias (lunes a domingo) de la semana que contiene `date`.
+function getWeekDatesFor(date) {
+  const dow = (date.getDay() + 6) % 7; // 0 = lunes
+  const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate() - dow);
+  const days = [];
+  for (let i = 0; i < 7; i++) days.push(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i));
+  return days;
+}
+
+async function renderMobileWeekStrip(viewingDate) {
+  const days = getWeekDatesFor(viewingDate);
+  const from = toDateKey(days[0]);
+  const to = toDateKey(days[6]);
+  const weekEvents = await api(`/api/events?from=${from}T00:00:00&to=${to}T23:59:59`);
+  // Si mientras se esperaba la respuesta el usuario ya cambio de dia (p.
+  // ej. deslizando varias veces seguidas), esta respuesta esta obsoleta.
+  if (!state.mobileCalendarDayDate || toDateKey(state.mobileCalendarDayDate) !== toDateKey(viewingDate)) return;
+
+  const today = new Date();
+  const container = document.getElementById('mobile-week-strip-days');
+  container.innerHTML = '';
+  days.forEach((d) => {
+    const cell = document.createElement('div');
+    cell.className = 'week-strip-day';
+    if (sameDay(d, today)) cell.classList.add('is-today');
+    if (sameDay(d, viewingDate)) cell.classList.add('is-viewing');
+
+    const label = document.createElement('div');
+    label.className = 'week-strip-day-label';
+    label.textContent = WEEKDAY_LABELS[(d.getDay() + 6) % 7];
+
+    const num = document.createElement('div');
+    num.className = 'week-strip-day-num';
+    num.textContent = d.getDate();
+
+    const dot = document.createElement('div');
+    dot.className = 'week-strip-day-dot';
+    if (!weekEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), d))) dot.classList.add('is-empty');
+
+    cell.append(label, num, dot);
+    cell.addEventListener('click', () => showMobileDay(d, { scrollToNow: true }));
+    container.appendChild(cell);
+  });
+}
+
+// --- "Vista por horas": eventos posicionados por minuto exacto -------
+// (--hour-row-height:60px en styles.css hace que 1px = 1 minuto, asi
+// que "top" es directamente minutosDesdeMedianoche y "height" la
+// duracion en minutos -- sin conversion aparte).
+let mobileCurrentTimeLineTimer = null;
+function stopMobileCurrentTimeLineTimer() {
+  if (mobileCurrentTimeLineTimer) { clearInterval(mobileCurrentTimeLineTimer); mobileCurrentTimeLineTimer = null; }
+}
+
+function refreshMobileCurrentTimeLine(date) {
+  const grid = document.getElementById('mobile-hours-grid');
+  if (!grid) return;
+  const existing = grid.querySelector('.mobile-current-time-line');
+  if (existing) existing.remove();
+  if (!date || !sameDay(date, new Date())) return;
+  const now = new Date();
+  const line = document.createElement('div');
+  line.className = 'mobile-current-time-line';
+  line.style.top = `${now.getHours() * 60 + now.getMinutes()}px`;
+  const label = document.createElement('div');
+  label.className = 'mobile-current-time-label';
+  label.textContent = TIME_FORMATTER.format(now);
+  line.appendChild(label);
+  grid.appendChild(line);
+}
+
+function scrollMobileHoursToTime(date) {
+  // .mobile-hours-scroll tiene overflow-y:auto, pero en movil ".app"
+  // usa min-height (no height) a proposito, para que la pagina crezca
+  // con el contenido y se pueda hacer scroll normal con el dedo (ver el
+  // comentario junto a ".app" en styles.css) -- eso significa que este
+  // contenedor NUNCA llega a desbordar de verdad (su scrollHeight ==
+  // clientHeight siempre), asi que fijar su propio scrollTop no mueve
+  // nada. El que de verdad se desplaza es la PAGINA entera, asi que hay
+  // que calcular la posicion absoluta en la pagina y usar
+  // window.scrollTo() en su lugar.
+  const grid = document.getElementById('mobile-hours-grid');
+  if (!grid) return;
+  const now = new Date();
+  const targetMinutes = sameDay(date, now) ? (now.getHours() * 60 + now.getMinutes()) : 8 * 60;
+  const gridTop = grid.getBoundingClientRect().top + window.scrollY;
+  // Deja un par de horas de margen ANTES del objetivo, para que no quede
+  // pegado justo al borde superior de la pantalla.
+  window.scrollTo(0, Math.max(0, gridTop + targetMinutes - 120));
+}
+
+// Reparto de "carriles" simple y voraz para eventos con hora que se
+// solapan ese dia -- un solo contador de carriles para TODO el dia (no
+// por cada grupo de solapes por separado), mas sencillo de razonar y
+// suficiente para el volumen de una agenda personal.
+function assignMobileHourLanes(items) {
+  const laneEnds = [];
+  items.forEach((item) => {
+    let lane = laneEnds.findIndex((endMin) => endMin <= item.startMin);
+    if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
+    laneEnds[lane] = item.endMin;
+    item.lane = lane;
+  });
+  return Math.max(1, laneEnds.length);
+}
+
+async function renderMobileHoursView(date) {
+  const dateStr = toDateKey(date);
+  const dayEvents = await api(`/api/events?from=${dateStr}T00:00:00&to=${dateStr}T23:59:59`);
+  if (!state.mobileCalendarDayDate || toDateKey(state.mobileCalendarDayDate) !== dateStr) return;
+  if (getMobileDayViewMode() !== 'hours') return;
+
+  const allDayRow = document.getElementById('mobile-day-allday-row');
+  const grid = document.getElementById('mobile-hours-grid');
+  allDayRow.innerHTML = '';
+  grid.innerHTML = '';
+
+  const allDayEvents = dayEvents.filter((ev) => ev.allDay);
+  allDayRow.classList.toggle('hidden', allDayEvents.length === 0);
+  allDayEvents.forEach((ev) => {
+    const chip = document.createElement('div');
+    chip.className = 'mobile-day-allday-chip';
+    chip.style.backgroundColor = ev.isTask ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev)) : (ev.groupColor || DEFAULT_EVENT_COLOR);
+    chip.textContent = ev.title;
+    chip.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
+    allDayRow.appendChild(chip);
+  });
+
+  for (let h = 0; h < 24; h++) {
+    const row = document.createElement('div');
+    row.className = 'mobile-hour-row';
+    row.style.top = `${h * 60}px`;
+    const label = document.createElement('div');
+    label.className = 'mobile-hour-label';
+    label.textContent = `${String(h).padStart(2, '0')}:00`;
+    row.appendChild(label);
+    grid.appendChild(row);
+  }
+
+  const timed = dayEvents
+    .filter((ev) => !ev.allDay && ev.startAt)
+    .map((ev) => {
+      const start = new Date(ev.startAt);
+      const startMin = start.getHours() * 60 + start.getMinutes();
+      let endMin;
+      if (ev.endAt) {
+        const end = new Date(ev.endAt);
+        endMin = sameDay(end, date) ? (end.getHours() * 60 + end.getMinutes()) : 24 * 60;
+      } else {
+        endMin = startMin + 30;
+      }
+      if (endMin <= startMin) endMin = startMin + 15;
+      return { ev, startMin, endMin };
+    })
+    .sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+  const laneCount = assignMobileHourLanes(timed);
+
+  timed.forEach(({ ev, startMin, endMin, lane }) => {
+    const block = document.createElement('div');
+    block.className = `mobile-hour-event ${ev.isTask ? 'is-task' : 'is-event'}`;
+    block.style.top = `${startMin}px`;
+    block.style.height = `${Math.max(endMin - startMin, 15)}px`;
+    if (laneCount > 1) {
+      // Cuando hay solapes, cada carril ocupa una fraccion del ancho
+      // disponible (a la derecha de la columna de horas) -- se calcula
+      // en JS en vez de tocar el left/right fijos de la clase base,
+      // que asumen un solo evento por franja.
+      block.style.right = 'auto';
+      block.style.left = `calc(3rem + (100% - 3rem - 0.3rem) * ${lane} / ${laneCount})`;
+      block.style.width = `calc((100% - 3rem - 0.3rem) / ${laneCount} - 3px)`;
+    }
+    block.textContent = ev.title;
+    if (ev.isTask) {
+      const color = ev.done ? taskCompletedColor(ev) : taskPendingColor(ev);
+      block.style.borderColor = color;
+      block.style.color = color;
+    } else {
+      block.style.backgroundColor = ev.groupColor || DEFAULT_EVENT_COLOR;
+    }
+    block.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
+    grid.appendChild(block);
+  });
+
+  refreshMobileCurrentTimeLine(date);
+}
+
+// --- "Listado" (dia): scroll bidireccional -- ventana inicial de ±3
+// dias, un IntersectionObserver en los centinelas de arriba/abajo la
+// amplia sola al acercarse a un extremo (sin libreria, mismo patron
+// "centinela" que se explico en el plan). -----------------------------
+let mobileDayListadoRange = null; // { from: Date, to: Date }
+let mobileDayListadoObserver = null;
+let mobileDayListadoBusy = false;
+// Si llega una peticion de expandir mientras ya hay otra en curso (pasa
+// de verdad: en una pantalla corta con pocos dias con contenido, los DOS
+// centinelas pueden estar visibles a la vez nada mas entrar, y el
+// IntersectionObserver los notifica juntos en la misma tanda -- sin
+// esto, la segunda se perdia en silencio para siempre, ya que el
+// observer solo vuelve a avisar en un cambio de visible/no-visible, no
+// mientras se queda "visible" sin mas), se apunta aqui para procesarla
+// en cuanto la actual termine, en vez de descartarla.
+let mobileDayListadoPending = new Set();
+const MOBILE_DAY_LISTADO_STEP_DAYS = 4;
+const MOBILE_DAY_LISTADO_MAX_SPAN_DAYS = 180; // red de seguridad, evita crecimiento sin limite
+
+function disconnectMobileDayListadoObserver() {
+  if (mobileDayListadoObserver) { mobileDayListadoObserver.disconnect(); mobileDayListadoObserver = null; }
+  mobileDayListadoPending.clear();
+}
+
+function buildMobileListadoRow(ev) {
+  const row = document.createElement('div');
+  row.className = 'mobile-calendar-month-list-row';
+  const bar = document.createElement('div');
+  bar.className = 'mobile-calendar-month-list-bar';
+  bar.style.backgroundColor = ev.isTask ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev)) : (ev.groupColor || DEFAULT_EVENT_COLOR);
+  const title = document.createElement('div');
+  title.className = 'mobile-calendar-month-list-title';
+  title.textContent = ev.title;
+  const time = document.createElement('div');
+  time.className = 'mobile-calendar-month-list-time';
+  time.textContent = formatMobileEventTimeRange(ev);
+  row.append(bar, title, time);
+  row.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
+  return row;
+}
+
+async function loadAndRenderMobileDayListado() {
+  const range = mobileDayListadoRange;
+  if (!range) return;
+  const fromStr = toDateKey(range.from);
+  const toStr = toDateKey(range.to);
+  const events = await api(`/api/events?from=${fromStr}T00:00:00&to=${toStr}T23:59:59`);
+  // Obsoleto si mientras se esperaba la respuesta se cambio de sub-vista,
+  // se salio de la vista diaria, o el rango volvio a cambiar (peticiones
+  // solapadas de dos expansiones seguidas).
+  if (getMobileDayViewMode() !== 'listado') return;
+  if (document.getElementById('mobile-calendar-day-view').classList.contains('hidden')) return;
+  if (mobileDayListadoRange !== range) return;
+
+  const byDay = new Map();
+  events.forEach((ev) => {
+    if (!ev.startAt) return; // sin fecha no aparece aqui, igual que en el resto del calendario
+    const key = toDateKey(new Date(ev.startAt));
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(ev);
+  });
+
+  const content = document.getElementById('mobile-day-listado-content');
+  content.innerHTML = '';
+  let cursor = new Date(range.from);
+  while (cursor <= range.to) {
+    const key = toDateKey(cursor);
+    const block = document.createElement('div');
+    block.className = 'mobile-day-listado-block';
+    const heading = document.createElement('div');
+    heading.className = 'mobile-day-listado-block-heading';
+    heading.textContent = formatMobileListadoBlockHeading(cursor);
+    block.appendChild(heading);
+    const dayEvents = (byDay.get(key) || []).sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
+    if (dayEvents.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-hint';
+      empty.textContent = 'Nada este día.';
+      block.appendChild(empty);
+    } else {
+      dayEvents.forEach((ev) => block.appendChild(buildMobileListadoRow(ev)));
+    }
+    content.appendChild(block);
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
+  }
+}
+
+async function expandMobileDayListado(direction) {
+  if (!mobileDayListadoRange) return;
+  if (mobileDayListadoBusy) { mobileDayListadoPending.add(direction); return; }
+  mobileDayListadoBusy = true;
+  try {
+    // Bucle en vez de una sola pasada: al terminar, si mientras tanto se
+    // pidio expandir en otro sentido (ver mobileDayListadoPending
+    // arriba), se procesa tambien antes de soltar el candado -- así
+    // nunca se pierde un aviso del observer por haber llegado a la vez
+    // que otro ya en curso.
+    while (true) {
+      const totalSpanDays = Math.round((mobileDayListadoRange.to - mobileDayListadoRange.from) / 86400000);
+      if (totalSpanDays >= MOBILE_DAY_LISTADO_MAX_SPAN_DAYS) { mobileDayListadoPending.clear(); break; }
+      // El scroll real ocurre en la PAGINA, no dentro de
+      // #mobile-day-listado-view (ver comentario de
+      // scrollMobileHoursToTime() sobre por que ".app" nunca llega a
+      // acotar la altura de sus hijos en movil) -- se mide con
+      // document.documentElement/window en vez del propio contenedor.
+      const prevDocHeight = document.documentElement.scrollHeight;
+      const prevScrollY = window.scrollY;
+      if (direction === 'back') {
+        mobileDayListadoRange.from = new Date(mobileDayListadoRange.from.getFullYear(), mobileDayListadoRange.from.getMonth(), mobileDayListadoRange.from.getDate() - MOBILE_DAY_LISTADO_STEP_DAYS);
+      } else {
+        mobileDayListadoRange.to = new Date(mobileDayListadoRange.to.getFullYear(), mobileDayListadoRange.to.getMonth(), mobileDayListadoRange.to.getDate() + MOBILE_DAY_LISTADO_STEP_DAYS);
+      }
+      await loadAndRenderMobileDayListado();
+      if (direction === 'back') {
+        // Compensa el scroll para que anteponer dias arriba no de un
+        // salto visual (el contenido nuevo empuja hacia abajo lo que ya
+        // se veia).
+        window.scrollTo(0, prevScrollY + (document.documentElement.scrollHeight - prevDocHeight));
+      }
+      if (mobileDayListadoPending.size === 0) break;
+      direction = mobileDayListadoPending.values().next().value;
+      mobileDayListadoPending.delete(direction);
+    }
+  } finally {
+    mobileDayListadoBusy = false;
+  }
+}
+
+function setupMobileDayListadoObserver() {
+  disconnectMobileDayListadoObserver();
+  const topSentinel = document.getElementById('mobile-day-listado-top-sentinel');
+  const bottomSentinel = document.getElementById('mobile-day-listado-bottom-sentinel');
+  // root:null (en vez del div) -- observa contra el VIEWPORT real del
+  // navegador, que es lo que de verdad se desplaza en movil (ver el
+  // mismo comentario de scrollMobileHoursToTime()).
+  mobileDayListadoObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      if (entry.target === topSentinel) expandMobileDayListado('back');
+      else if (entry.target === bottomSentinel) expandMobileDayListado('forward');
+    });
+  }, { root: null, threshold: 0 });
+  mobileDayListadoObserver.observe(topSentinel);
+  mobileDayListadoObserver.observe(bottomSentinel);
+}
+
+async function renderMobileDayListado(centerDate) {
+  mobileDayListadoRange = {
+    from: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() - 3),
+    to: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() + 3),
+  };
+  // El scroll real es el de la PAGINA (ver scrollMobileHoursToTime()),
+  // asi que "empezar arriba del todo" es scrollear la ventana, no el div.
+  window.scrollTo(0, 0);
+  await loadAndRenderMobileDayListado();
+  // El primer observe() de IntersectionObserver avisa de inmediato con
+  // el estado actual -- si la ventana inicial (±3 dias) no llega a
+  // desbordar la pantalla real, esa primera notificacion ya se encarga
+  // de ampliarla sola (ver expandMobileDayListado), sin necesitar aqui
+  // ningun bucle de relleno a mano.
+  setupMobileDayListadoObserver();
+}
+
+async function renderMobileDayActiveSubView({ scrollToNow = false } = {}) {
+  const mode = getMobileDayViewMode();
+  document.getElementById('mobile-day-hours-view').classList.toggle('hidden', mode !== 'hours');
+  document.getElementById('mobile-day-listado-view').classList.toggle('hidden', mode !== 'listado');
+  stopMobileCurrentTimeLineTimer();
+  if (mode === 'hours') {
+    disconnectMobileDayListadoObserver();
+    await renderMobileHoursView(state.mobileCalendarDayDate);
+    if (scrollToNow) scrollMobileHoursToTime(state.mobileCalendarDayDate);
+    mobileCurrentTimeLineTimer = setInterval(() => refreshMobileCurrentTimeLine(state.mobileCalendarDayDate), 60 * 1000);
+  } else {
+    await renderMobileDayListado(state.mobileCalendarDayDate);
+  }
+}
+
+document.getElementById('btn-mobile-day-view-toggle').addEventListener('click', () => {
+  const next = getMobileDayViewMode() === 'hours' ? 'listado' : 'hours';
+  localStorage.setItem('mobileDayViewMode', next);
+  renderMobileDayActiveSubView({ scrollToNow: true });
+});
+// El buscador global de verdad llega en la Fase 5, ver el mismo aviso
+// junto al buscador del mes.
+document.getElementById('btn-mobile-calendar-day-search').addEventListener('click', () => {
+  showAppAlert('El buscador llega en la próxima ronda.');
+});
+
+async function showMobileDay(date, { scrollToNow = false } = {}) {
   state.mobileCalendarDayDate = date;
-  document.querySelector('.mobile-calendar-toolbar').classList.add('hidden');
+  document.getElementById('mobile-calendar-day-heading').textContent = formatMobileDayHeading(date);
+  const monthLabel = capitalizeFirst(MONTH_ONLY_FORMATTER.format(date));
+  document.getElementById('btn-mobile-day-back-label').innerHTML =
+    `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg><span>${monthLabel}</span>`;
+  await Promise.all([renderMobileWeekStrip(date), renderMobileDayActiveSubView({ scrollToNow })]);
+}
+
+function enterMobileDayView(date) {
+  document.getElementById('mobile-calendar-month-toolbar').classList.add('hidden');
   document.querySelector('.mobile-calendar-view').classList.add('hidden');
   document.getElementById('btn-mobile-calendar-today').classList.add('hidden');
-  document.getElementById('mobile-calendar-day-heading').textContent = DAY_HEADING_FORMATTER.format(date);
   document.getElementById('mobile-calendar-day-view').classList.remove('hidden');
+  showMobileDay(date, { scrollToNow: true });
 }
 
 function exitMobileDayView() {
+  stopMobileCurrentTimeLineTimer();
+  disconnectMobileDayListadoObserver();
   document.getElementById('mobile-calendar-day-view').classList.add('hidden');
-  document.querySelector('.mobile-calendar-toolbar').classList.remove('hidden');
+  document.getElementById('mobile-calendar-month-toolbar').classList.remove('hidden');
   document.querySelector('.mobile-calendar-view').classList.remove('hidden');
   document.getElementById('btn-mobile-calendar-today').classList.remove('hidden');
 }
 
-document.getElementById('btn-mobile-calendar-day-back').addEventListener('click', exitMobileDayView);
+document.getElementById('btn-mobile-day-back-label').addEventListener('click', exitMobileDayView);
 document.getElementById('btn-mobile-calendar-today').addEventListener('click', () => enterMobileDayView(new Date()));
+
+// Swipe horizontal en la tira semanal (unico area sin scroll vertical
+// propio dentro de la vista diaria -- ya lleva touch-action:pan-x en
+// styles.css, pensado justo para esto): izquierda = dia siguiente,
+// derecha = dia anterior. Si el nuevo dia cae en otra semana, la tira
+// se recalcula sola (showMobileDay -> renderMobileWeekStrip).
+attachSwipe(document.getElementById('mobile-week-strip-days'), {
+  onLeft: () => {
+    const d = state.mobileCalendarDayDate;
+    showMobileDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1), { scrollToNow: true });
+  },
+  onRight: () => {
+    const d = state.mobileCalendarDayDate;
+    showMobileDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1), { scrollToNow: true });
+  },
+});
 
 // Primer pintado: los contenedores existen desde que carga la pagina,
 // pero hasta que loadMonth()/setCalendarViewMode() corren por primera
@@ -5267,10 +5702,6 @@ document.getElementById('btn-new-event-mobile').addEventListener('click', () => 
 document.getElementById('btn-new-task-mobile').addEventListener('click', () => {
   toggleMobileCalendarAddMenu(false);
   openTaskModal(null);
-});
-document.getElementById('btn-new-note-mobile').addEventListener('click', () => {
-  toggleMobileCalendarAddMenu(false);
-  openNoteInEditor(null);
 });
 // Tocar fuera del boton/menu tambien lo cierra -- patron normal de menu
 // flotante (ver closeAllPopovers en settings.js para el mismo patron con
