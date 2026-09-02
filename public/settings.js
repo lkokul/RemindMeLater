@@ -2006,6 +2006,18 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Buscador global (#mobile-global-search, Fase 5): overlay que se
+  // abre ENCIMA de cualquier vista del calendario (mes/año/dia) sin
+  // ocultarla -- tiene que comprobarse antes que esas vistas, si no un
+  // Esc con el buscador abierto se cuela hasta el check de
+  // mobile-calendar-day-view de mas abajo y cierra la vista diaria en
+  // vez del buscador.
+  const mobileGlobalSearch = document.getElementById('mobile-global-search');
+  if (mobileGlobalSearch && !mobileGlobalSearch.classList.contains('hidden')) {
+    document.getElementById('btn-close-mobile-global-search').click();
+    return;
+  }
+
   const mobileCalendarAddMenu = document.getElementById('mobile-calendar-add-menu');
   if (mobileCalendarAddMenu && !mobileCalendarAddMenu.classList.contains('hidden')) {
     toggleMobileCalendarAddMenu(false);

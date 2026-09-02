@@ -2201,12 +2201,9 @@ document.getElementById('btn-mobile-calendar-nav-label').addEventListener('click
 document.getElementById('btn-mobile-calendar-density').addEventListener('click', () => {
   cycleMobileCalendarMonthMode();
 });
-// El buscador global de verdad (eventos+tareas+notas por texto) llega en
-// la Fase 5 del rediseño movil -- de momento solo avisa, para que el
-// boton ya este en su sitio definitivo sin sentirse roto.
-document.getElementById('btn-mobile-calendar-search').addEventListener('click', () => {
-  showAppAlert('El buscador llega en la próxima ronda.');
-});
+// El listener real de btn-mobile-calendar-search (abre el buscador
+// global de la Fase 5) se registra mas abajo, junto al resto del
+// buscador (runMobileGlobalSearch/openMobileGlobalSearch).
 
 // Swipe vertical del MES: arriba = mes siguiente, abajo = mes anterior
 // (direccion normal). Swipe vertical del AÑO: arriba = año ANTERIOR,
@@ -2648,11 +2645,116 @@ const mobileDayViewModeField = createSelectField({
   },
 });
 document.getElementById('mobile-day-view-mode-field').appendChild(mobileDayViewModeField.element);
-// El buscador global de verdad llega en la Fase 5, ver el mismo aviso
-// junto al buscador del mes.
-document.getElementById('btn-mobile-calendar-day-search').addEventListener('click', () => {
-  showAppAlert('El buscador llega en la próxima ronda.');
+
+// ---------------------------------------------------------------------
+// Buscador global (Fase 5): eventos+tareas via GET /api/events?q= (ya
+// construido en la Fase 1, ignora from/to a proposito) + notas filtradas
+// en cliente sobre state.notes (ya cargadas de antemano al iniciar la
+// app, sin peticion aparte). Un solo overlay reutilizado desde los dos
+// botones de busqueda (mes y dia).
+// ---------------------------------------------------------------------
+let mobileGlobalSearchDebounceTimer = null;
+
+function openMobileGlobalSearch() {
+  document.getElementById('mobile-global-search-input').value = '';
+  document.getElementById('mobile-global-search-results').innerHTML = '';
+  document.getElementById('mobile-global-search').classList.remove('hidden');
+  document.getElementById('mobile-global-search-input').focus();
+}
+
+function closeMobileGlobalSearch() {
+  document.getElementById('mobile-global-search').classList.add('hidden');
+}
+
+function formatMobileSearchResultDate(date, allDay) {
+  const datePart = `${date.getDate()} ${MOBILE_DAY_MONTH_ABBR[date.getMonth()]}`;
+  return allDay ? datePart : `${datePart}, ${toTimeInputValue(date)}`;
+}
+
+function buildMobileSearchResultRow({ typeClass, typeLabel, title, meta, onClick }) {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'reminder-item mobile-search-result-item';
+  row.innerHTML = `
+    <span class="mobile-search-result-main">
+      <span class="mobile-search-type-dot ${typeClass}" aria-hidden="true" title="${typeLabel}"></span>
+      <span class="mobile-search-result-title"></span>
+    </span>
+    <span class="mobile-search-result-meta"></span>
+  `;
+  row.querySelector('.mobile-search-result-title').textContent = title;
+  row.querySelector('.mobile-search-result-meta').textContent = meta || '';
+  row.addEventListener('click', onClick);
+  return row;
+}
+
+async function runMobileGlobalSearch(query) {
+  const results = document.getElementById('mobile-global-search-results');
+  const trimmed = query.trim();
+  if (!trimmed) {
+    results.innerHTML = '';
+    return;
+  }
+  let items;
+  try {
+    items = await api(`/api/events?q=${encodeURIComponent(trimmed)}`);
+  } catch (err) {
+    items = [];
+  }
+  const lowerQuery = trimmed.toLowerCase();
+  const matchingNotes = (state.notes || []).filter(
+    (n) => n.title && n.title.toLowerCase().includes(lowerQuery)
+  );
+
+  results.innerHTML = '';
+  if (!items.length && !matchingNotes.length) {
+    const hint = document.createElement('p');
+    hint.className = 'empty-hint';
+    hint.textContent = 'Sin resultados.';
+    results.appendChild(hint);
+    return;
+  }
+
+  for (const item of items) {
+    const hasDate = !!item.startAt;
+    const date = hasDate ? new Date(item.startAt) : null;
+    const row = buildMobileSearchResultRow({
+      typeClass: item.isTask ? 'is-task' : 'is-event',
+      typeLabel: item.isTask ? 'Tarea' : 'Evento',
+      title: item.title,
+      meta: hasDate ? formatMobileSearchResultDate(date, item.allDay) : 'Sin fecha',
+      onClick: () => {
+        closeMobileGlobalSearch();
+        if (item.isTask && !hasDate) openTaskModal(item);
+        else enterMobileDayView(date || new Date());
+      },
+    });
+    results.appendChild(row);
+  }
+  for (const note of matchingNotes) {
+    const row = buildMobileSearchResultRow({
+      typeClass: 'is-note',
+      typeLabel: 'Nota',
+      title: note.title || '(sin título)',
+      meta: '',
+      onClick: () => {
+        closeMobileGlobalSearch();
+        openMobileNotesView();
+        openNoteInEditor(note);
+      },
+    });
+    results.appendChild(row);
+  }
+}
+
+document.getElementById('mobile-global-search-input').addEventListener('input', (e) => {
+  clearTimeout(mobileGlobalSearchDebounceTimer);
+  const value = e.target.value;
+  mobileGlobalSearchDebounceTimer = setTimeout(() => runMobileGlobalSearch(value), 250);
 });
+document.getElementById('btn-close-mobile-global-search').addEventListener('click', closeMobileGlobalSearch);
+document.getElementById('btn-mobile-calendar-search').addEventListener('click', openMobileGlobalSearch);
+document.getElementById('btn-mobile-calendar-day-search').addEventListener('click', openMobileGlobalSearch);
 
 async function showMobileDay(date, { scrollToNow = false } = {}) {
   state.mobileCalendarDayDate = date;
@@ -6389,16 +6491,78 @@ function refreshMobileNavActive(section) {
   });
 }
 
+// Fase 5: el 2o hueco de la barra inferior (id/clase estables,
+// data-mobile-nav="notes" siempre) puede sustituirse por otra App --
+// Notas sigue siendo el valor por defecto. Cada entrada usa el mismo
+// SVG que su tarjeta en Extensiones (btn-open-*), para que el icono
+// sea reconocible en los dos sitios.
+const MOBILE_NAV_SLOT_APPS = {
+  notes: {
+    label: 'Notas',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v5h5"></path><line x1="8" y1="12" x2="16" y2="12"></line><line x1="8" y1="16" x2="13" y2="16"></line></svg>',
+    open: () => openMobileNotesView(),
+  },
+  gym: {
+    label: 'Gimnasio',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="3" height="6" rx="1"></rect><rect x="19" y="9" width="3" height="6" rx="1"></rect><line x1="5" y1="12" x2="19" y2="12"></line><rect x="6.5" y="7" width="2" height="10" rx="1"></rect><rect x="15.5" y="7" width="2" height="10" rx="1"></rect></svg>',
+    open: () => openGymView(),
+  },
+  finanzas: {
+    label: 'Finanzas',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v10M9.5 9.5c0-1.5 1.2-2 2.5-2s2.5.6 2.5 2c0 1.2-1 1.6-2.5 2.2S9.5 13 9.5 14.3c0 1.4 1.1 2.2 2.5 2.2s2.5-.6 2.5-2"></path></svg>',
+    open: () => openFinanzasView(),
+  },
+  lecturas: {
+    label: 'Lecturas',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg>',
+    open: () => openLecturasView(),
+  },
+  archivos: {
+    label: 'Archivos',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M12 18v-6M9 15l3-3 3 3"></path></svg>',
+    open: () => openArchivosView(),
+  },
+  viajes: {
+    label: 'Viajes',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>',
+    open: () => openViajesView(),
+  },
+};
+
+function getMobileNavNotesSlot() {
+  const stored = localStorage.getItem('mobileNavNotesSlot');
+  return MOBILE_NAV_SLOT_APPS[stored] ? stored : 'notes';
+}
+
+function applyMobileNavCustomization() {
+  const slot = getMobileNavNotesSlot();
+  const app = MOBILE_NAV_SLOT_APPS[slot];
+  const btn = document.getElementById('mobile-nav-notes-btn');
+  if (!btn) return;
+  btn.setAttribute('aria-label', app.label);
+  btn.innerHTML = `${app.icon}<span>${app.label}</span>`;
+}
+applyMobileNavCustomization();
+
+// Selector en Configuracion > Este dispositivo (ajuste por dispositivo,
+// localStorage, mismo criterio que miEspacioMode/completedTasksDisplay).
+const mobileNavSlotField = createSelectField({
+  options: Object.entries(MOBILE_NAV_SLOT_APPS).map(([value, app]) => ({ value, label: app.label })),
+  initialValue: getMobileNavNotesSlot(),
+  onChange: (v) => {
+    localStorage.setItem('mobileNavNotesSlot', v);
+    applyMobileNavCustomization();
+  },
+});
+document.getElementById('mobile-nav-slot-field').appendChild(mobileNavSlotField.element);
+
 function goToMobileSection(section) {
   closeAllMobileOverlays();
-  // "notes" es el hueco de la barra inferior -- abre la vista de Notas
-  // propia del movil (Fase 4), no "Mi espacio" (que ya no tiene sentido
-  // en movil, ver CLAUDE.md/decision 3: tareas y recordatorios viven
-  // dentro del propio calendario). Puede tambien abrir otra App si Koku
-  // eligio otra en Configuracion -> Este dispositivo (ver
-  // applyMobileNavCustomization(), Fase 5) -- mientras eso no exista,
-  // "notes" es el unico valor real que puede llegar aqui.
-  if (section === 'notes') openMobileNotesView();
+  // "notes" es el hueco de la barra inferior -- por defecto abre la
+  // vista de Notas propia del movil (Fase 4), pero puede abrir otra
+  // App si Koku eligio otra en Configuracion -> Este dispositivo (ver
+  // applyMobileNavCustomization() arriba).
+  if (section === 'notes') MOBILE_NAV_SLOT_APPS[getMobileNavNotesSlot()].open();
   else if (section === 'extensions') document.getElementById('btn-extensions').click();
   else if (section === 'settings') document.getElementById('btn-settings').click();
   refreshMobileNavActive(section);

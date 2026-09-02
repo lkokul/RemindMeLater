@@ -55,6 +55,17 @@ body.modal-open-lock {
   right: 0;
   overflow: hidden;
 }
+/* .mobile-nav es fija con z-index alto (70, por encima de .modal:20)
+   para quedar SIEMPRE por encima de las pantallas completas normales
+   (.my-space-view:15) -- pero un modal de verdad (p. ej. Configuracion
+   a pantalla completa, Fase 5) puede llegar hasta el borde inferior, y
+   entonces la barra queda encima tapando/interceptando sus botones.
+   Reutiliza el mismo modal-open-lock que ya marca "hay un modal
+   abierto" para ocultarla mientras tanto -- solo en movil, en
+   escritorio .mobile-nav ya esta oculta siempre. */
+@media (max-width: 859px) {
+  body.modal-open-lock .mobile-nav { display: none; }
+}
 
 body {
   margin: 0;
@@ -1692,6 +1703,55 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .mobile-notes-menu-wrap { position: relative; }
 #mobile-notes-list { padding: 0 1rem; }
 
+/* Buscador global (Fase 5): mismo look que el buscador de Notas
+   (.mobile-notes-search-row/-icon, reutilizadas tal cual) -- solo el
+   input y los resultados son propios de este overlay. */
+#mobile-global-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.9rem;
+  padding: 0.15rem 0;
+}
+.mobile-global-search-results { padding: 0 1rem; max-height: none; }
+.mobile-search-result-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mobile-search-result-item:last-child { border-bottom: none; }
+.mobile-search-result-main { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.mobile-search-result-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mobile-search-result-meta {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
+  font-size: 0.78rem;
+}
+/* Mismo lenguaje visual que los chips del calendario: relleno solido
+   para un evento, solo borde para una tarea (calendar-event-chip/
+   calendar-task-chip) -- aqui como un punto pequeño en vez de una
+   pastilla, ya que el nombre entero va al lado en texto normal. */
+.mobile-search-type-dot {
+  flex-shrink: 0;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+}
+.mobile-search-type-dot.is-event { background: var(--accent); }
+.mobile-search-type-dot.is-task { background: transparent; border: 1.5px solid var(--accent); }
+.mobile-search-type-dot.is-note { background: color-mix(in srgb, var(--accent) 55%, var(--surface-2)); }
+
 /* Vista galeria de Notas movil (Fase 4) -- tarjetas con miniatura (si la
    nota tiene una imagen) o el color de su carpeta + un avance de texto
    si no. */
@@ -2838,6 +2898,27 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   overflow-y: auto;
   flex: 1 1 auto;
   padding: 0 1.2rem 1.2rem;
+}
+/* Configuracion a pantalla completa en movil (CSS-only, sin tocar
+   openSettingsModal()/la logica de pestañas): el backdrop pierde su
+   padding y la tarjeta ocupa toda la pantalla, sin bordes ni radio --
+   a partir de 860px sigue siendo la tarjeta centrada de siempre (la
+   regla base de .modal/.settings-card no se toca). */
+@media (max-width: 859px) {
+  #settings-modal { padding: 0; }
+  #settings-modal .settings-card {
+    max-width: none;
+    max-height: none;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    border: none;
+  }
+  /* En movil, Configuracion ya tiene su propio punto de entrada fijo
+     en la barra inferior (.mobile-nav, siempre visible por encima de
+     #extensions-view) -- este boton solo hacia falta en escritorio,
+     donde esa pantalla tapa la topbar. */
+  #btn-extensions-settings { display: none; }
 }
 .modal-close-x {
   position: absolute; top: 0.8rem; right: 0.8rem;
