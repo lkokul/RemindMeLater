@@ -193,6 +193,19 @@ button {
 :root[data-ui-style="neon"] .checkbox-row input[type="checkbox"]:checked {
   box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent);
 }
+/* .mobile-nav-btn necesita su propio anillo Neon (en vez de heredar el
+   de "button:hover" de arriba, que sale HACIA FUERA del boton): en
+   movil el :hover se queda "pegado" tras tocar hasta el siguiente
+   toque, y como .mobile-nav-btn ocupa toda la altura interior de
+   .mobile-nav (que tiene overflow:hidden para recortar las esquinas a
+   su radio), la parte de arriba/abajo del anillo saliente se recortaba
+   ahi, dejando visibles solo los lados -- justo lo que reporto Koku.
+   Un box-shadow INSET nunca sale de los limites del propio boton, asi
+   que no hay nada que recortar. */
+:root[data-ui-style="neon"] .mobile-nav-btn.active,
+:root[data-ui-style="neon"] .mobile-nav-btn:active {
+  box-shadow: inset 0 0 0 1px var(--accent), inset 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
+}
 
 :root[data-ui-style="cristal"] button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--surface-2-text) 12%, var(--surface-2));
@@ -408,6 +421,16 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   padding: 0.8rem 1rem;
 }
 .note-editor-body:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+/* En movil, .note-editor-body ya tiene su propio borde/radio (arriba)
+   -- pero sin este hueco reservado, su borde inferior queda tapado bajo
+   .mobile-nav (que flota encima, z-index 70 vs 15 de esta vista) sin
+   ningun margen que lo separe. Mismo valor ya usado para el mismo fin
+   en .app/Configuracion/el FAB. */
+@media (max-width: 859px) {
+  .note-editor-content-col {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
 
 /* Rail izquierdo con los botones "Arbol"/"Secciones" -- mismo patron que
    un rail de iconos de cualquier editor tipo IDE, siempre visible pegado
@@ -1001,6 +1024,12 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   padding: 0.6rem 1rem 0;
   min-height: 0;
 }
+.mobile-calendar-month-name {
+  text-align: center;
+  font-weight: 700;
+  font-size: 1rem;
+  margin: 0;
+}
 
 /* --- Vista mensual movil: dias como circulos --- */
 .mobile-calendar-month-grid {
@@ -1234,6 +1263,31 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   min-height: 0;
   flex: 1;
 }
+/* Animacion de entrada al cambiar de mes/año/dia por swipe (deslizar+
+   fundido corto) -- pedido explicito de Koku para "hacerlo mas
+   visual". Las clases se añaden/quitan solas via JS
+   (playMobileSwipeTransition en app.js), nunca se dejan puestas de
+   forma permanente. */
+@keyframes mobile-swipe-in-up {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes mobile-swipe-in-down {
+  from { transform: translateY(-16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes mobile-swipe-in-left {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes mobile-swipe-in-right {
+  from { transform: translateX(-16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.mobile-swipe-anim-up { animation: mobile-swipe-in-up 220ms ease-out; }
+.mobile-swipe-anim-down { animation: mobile-swipe-in-down 220ms ease-out; }
+.mobile-swipe-anim-left { animation: mobile-swipe-in-left 220ms ease-out; }
+.mobile-swipe-anim-right { animation: mobile-swipe-in-right 220ms ease-out; }
 /* Cabecera fija (Volver + tira semanal + fecha) -- ver el comentario del
    propio HTML: en "Vista por horas" la pagina se desplaza sola hasta la
    hora actual (scrollMobileHoursToTime() en app.js), y sin fijar esto

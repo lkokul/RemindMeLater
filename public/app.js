@@ -1861,7 +1861,7 @@ document.getElementById('calendar-grid-wrap').addEventListener('wheel', (e) => {
 // lapiz con un unico mecanismo, sin depender de eventos "touch"
 // especificos). Solo detecta la DIRECCION al soltar, sin arrastre en
 // vivo -- suficiente para cambiar de mes/año/dia, no hace falta mas.
-function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40 } = {}) {
+function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preserveVerticalScroll = false } = {}) {
   let startX = null;
   let startY = null;
   el.addEventListener('pointerdown', (e) => {
@@ -1911,7 +1911,17 @@ function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40 } = {})
     if (!touch) return;
     const dx = touch.clientX - startX;
     const dy = touch.clientY - startY;
-    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) e.preventDefault();
+    // preserveVerticalScroll: solo para contenedores que SI necesitan
+    // scroll vertical nativo de verdad (la vista diaria, a diferencia de
+    // mes/año/tira semanal, que no lo necesitan) -- ahi solo se bloquea
+    // el gesto nativo cuando el arrastre pinta claramente horizontal
+    // (mas ancho que alto), dejando pasar cualquier arrastre vertical
+    // para que el scroll de la pagina siga funcionando con normalidad.
+    if (preserveVerticalScroll) {
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) e.preventDefault();
+    } else if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+      e.preventDefault();
+    }
   }, { passive: false });
 }
 
@@ -2214,6 +2224,16 @@ function refreshMobileCalendarNavLabel() {
     // plano no se leia como el boton que es.
     label.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg><span>${year}</span>`;
   }
+  // Nombre del mes, centrado debajo de la barra -- solo visible en modo
+  // mes (la vista anual ya no tiene "un mes concreto" que nombrar).
+  // Se actualiza aqui mismo, en el mismo sitio que ya se llama cada vez
+  // que cambia el mes/año/vista, en vez de buscar cada punto de cambio
+  // por separado.
+  const monthNameEl = document.getElementById('mobile-calendar-month-name');
+  if (monthNameEl) {
+    monthNameEl.classList.toggle('hidden', calendarViewMode === 'year');
+    monthNameEl.textContent = capitalizeFirst(MONTH_ONLY_FORMATTER.format(state.viewDate));
+  }
 }
 
 document.getElementById('btn-mobile-calendar-nav-label').addEventListener('click', () => {
@@ -2246,14 +2266,38 @@ document.getElementById('mobile-calendar-density-field').appendChild(mobileCalen
 // (direccion normal). Swipe vertical del AÑO: arriba = año ANTERIOR,
 // abajo = año siguiente -- direccion EXPLICITAMENTE invertida, pedido
 // asi por Koku.
+
+// Pequeña animacion de entrada (deslizar+fundido) al cambiar de mes/
+// año/dia por swipe -- Koku la pidio para "hacerlo mas visual". Un
+// helper generico: añade la clase, fuerza un reflow (para que se pueda
+// repetir aunque sea la MISMA clase que la ultima vez -- si no, el
+// navegador no vuelve a disparar los @keyframes) y la quita sola al
+// terminar (con un respaldo por si "animationend" no llega, p.ej. si el
+// contenido se vuelve a pintar a medio camino). No espera a que
+// termine de cargar el contenido nuevo (loadMonth()/showMobileDay() son
+// async y no se esperan aqui tampoco) -- es puramente cosmetico, sin
+// bloquear nada.
+function playMobileSwipeTransition(el, direction) {
+  if (!el) return;
+  const cls = `mobile-swipe-anim-${direction}`;
+  el.classList.remove('mobile-swipe-anim-up', 'mobile-swipe-anim-down', 'mobile-swipe-anim-left', 'mobile-swipe-anim-right');
+  void el.offsetWidth;
+  el.classList.add(cls);
+  const cleanup = () => el.classList.remove(cls);
+  el.addEventListener('animationend', cleanup, { once: true });
+  setTimeout(cleanup, 300);
+}
+
 attachSwipe(document.getElementById('mobile-calendar-month-grid'), {
   onUp: () => {
     state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() + 1, 1);
     loadMonth();
+    playMobileSwipeTransition(document.getElementById('mobile-calendar-month-grid'), 'up');
   },
   onDown: () => {
     state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() - 1, 1);
     loadMonth();
+    playMobileSwipeTransition(document.getElementById('mobile-calendar-month-grid'), 'down');
   },
 });
 attachSwipe(document.getElementById('mobile-calendar-year-grid'), {
@@ -2261,11 +2305,13 @@ attachSwipe(document.getElementById('mobile-calendar-year-grid'), {
     state.viewDate = new Date(state.viewDate.getFullYear() - 1, state.viewDate.getMonth(), 1);
     refreshMobileCalendarYearGrid();
     refreshMobileCalendarNavLabel();
+    playMobileSwipeTransition(document.getElementById('mobile-calendar-year-grid'), 'up');
   },
   onDown: () => {
     state.viewDate = new Date(state.viewDate.getFullYear() + 1, state.viewDate.getMonth(), 1);
     refreshMobileCalendarYearGrid();
     refreshMobileCalendarNavLabel();
+    playMobileSwipeTransition(document.getElementById('mobile-calendar-year-grid'), 'down');
   },
 });
 
@@ -2368,7 +2414,7 @@ function refreshMobileCurrentTimeLine(date) {
   grid.appendChild(line);
 }
 
-function scrollMobileHoursToTime(date) {
+function scrollMobileHoursToTime(date, targetMinutes) {
   // .mobile-hours-scroll tiene overflow-y:auto, pero en movil ".app"
   // usa min-height (no height) a proposito, para que la pagina crezca
   // con el contenido y se pueda hacer scroll normal con el dedo (ver el
@@ -2380,8 +2426,13 @@ function scrollMobileHoursToTime(date) {
   // window.scrollTo() en su lugar.
   const grid = document.getElementById('mobile-hours-grid');
   if (!grid) return;
-  const now = new Date();
-  const targetMinutes = sameDay(date, now) ? (now.getHours() * 60 + now.getMinutes()) : 8 * 60;
+  // targetMinutes explicito (p. ej. la hora real de un evento clicado
+  // desde el buscador global) tiene prioridad; si no se pasa, se sigue
+  // el comportamiento de siempre ("ahora" si es hoy, 8:00 si no).
+  if (targetMinutes === undefined) {
+    const now = new Date();
+    targetMinutes = sameDay(date, now) ? (now.getHours() * 60 + now.getMinutes()) : 8 * 60;
+  }
   const gridTop = grid.getBoundingClientRect().top + window.scrollY;
   // Deja un par de horas de margen ANTES del objetivo, para que no quede
   // pegado justo al borde superior de la pantalla.
@@ -2654,7 +2705,7 @@ async function renderMobileDayListado(centerDate) {
   setupMobileDayListadoObserver();
 }
 
-async function renderMobileDayActiveSubView({ scrollToNow = false } = {}) {
+async function renderMobileDayActiveSubView({ scrollToNow = false, targetMinutes } = {}) {
   const mode = getMobileDayViewMode();
   document.getElementById('mobile-day-hours-view').classList.toggle('hidden', mode !== 'hours');
   document.getElementById('mobile-day-listado-view').classList.toggle('hidden', mode !== 'listado');
@@ -2662,11 +2713,25 @@ async function renderMobileDayActiveSubView({ scrollToNow = false } = {}) {
   if (mode === 'hours') {
     disconnectMobileDayListadoObserver();
     await renderMobileHoursView(state.mobileCalendarDayDate);
-    if (scrollToNow) scrollMobileHoursToTime(state.mobileCalendarDayDate);
+    if (targetMinutes !== undefined) scrollMobileHoursToTime(state.mobileCalendarDayDate, targetMinutes);
+    else if (scrollToNow) scrollMobileHoursToTime(state.mobileCalendarDayDate);
     mobileCurrentTimeLineTimer = setInterval(() => refreshMobileCurrentTimeLine(state.mobileCalendarDayDate), 60 * 1000);
   } else {
     await renderMobileDayListado(state.mobileCalendarDayDate);
   }
+}
+
+// Si la vista diaria movil esta abierta Y mostrando este mismo dia,
+// la vuelve a pintar -- para que guardar/borrar un evento o tarea (p.
+// ej. cambiar "Todo el dia" <-> hora fija) se refleje al instante sin
+// tener que salir y volver a entrar. Sin scrollToNow (no se quiere
+// saltar la posicion de lectura actual solo por haber guardado).
+function refreshOpenMobileDayViewIfShowing(date) {
+  if (!date) return;
+  const dayView = document.getElementById('mobile-calendar-day-view');
+  if (!dayView || dayView.classList.contains('hidden')) return;
+  if (!state.mobileCalendarDayDate || toDateKey(state.mobileCalendarDayDate) !== toDateKey(date)) return;
+  renderMobileDayActiveSubView({ scrollToNow: false });
 }
 
 // Desplegable en vez de icono ciclico -- Koku pidio poder clicar
@@ -2762,8 +2827,14 @@ async function runMobileGlobalSearch(query) {
       meta: hasDate ? formatMobileSearchResultDate(date, item.allDay) : 'Sin fecha',
       onClick: () => {
         closeMobileGlobalSearch();
-        if (item.isTask && !hasDate) openTaskModal(item);
-        else enterMobileDayView(date || new Date());
+        if (item.isTask && !hasDate) { openTaskModal(item); return; }
+        // "Todo el dia": sin objetivo de scroll (que se vea la fila de
+        // arriba, no desplazarse dentro de la rejilla); si no, la hora
+        // real del evento clicado -- antes esto siempre desplazaba a
+        // "ahora", llevando al dia correcto pero a la hora equivocada.
+        const targetDate = date || new Date();
+        const targetMinutes = item.allDay ? null : (targetDate.getHours() * 60 + targetDate.getMinutes());
+        enterMobileDayView(targetDate, { targetMinutes });
       },
     });
     results.appendChild(row);
@@ -2793,20 +2864,28 @@ document.getElementById('btn-close-mobile-global-search').addEventListener('clic
 document.getElementById('btn-mobile-calendar-search').addEventListener('click', openMobileGlobalSearch);
 document.getElementById('btn-mobile-calendar-day-search').addEventListener('click', openMobileGlobalSearch);
 
-async function showMobileDay(date, { scrollToNow = false } = {}) {
+async function showMobileDay(date, { scrollToNow = false, targetMinutes } = {}) {
   state.mobileCalendarDayDate = date;
   document.getElementById('mobile-calendar-day-heading').textContent = formatMobileDayHeading(date);
   const monthLabel = capitalizeFirst(MONTH_ONLY_FORMATTER.format(date));
   document.getElementById('btn-mobile-day-back-label').innerHTML =
     `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg><span>${monthLabel}</span>`;
-  await Promise.all([renderMobileWeekStrip(date), renderMobileDayActiveSubView({ scrollToNow })]);
+  await Promise.all([renderMobileWeekStrip(date), renderMobileDayActiveSubView({ scrollToNow, targetMinutes })]);
 }
 
-function enterMobileDayView(date) {
+// targetMinutes opcional: si se pasa (p. ej. un resultado del buscador
+// global con hora real), se desplaza ahi en vez de a "ahora". Pasar
+// null explicitamente (evento "todo el dia") evita desplazarse dentro
+// de la rejilla en absoluto, para que se vea la fila de arriba.
+function enterMobileDayView(date, { targetMinutes } = {}) {
   document.getElementById('mobile-calendar-month-toolbar').classList.add('hidden');
   document.querySelector('.mobile-calendar-view').classList.add('hidden');
   document.getElementById('mobile-calendar-day-view').classList.remove('hidden');
-  showMobileDay(date, { scrollToNow: true });
+  if (targetMinutes === null) {
+    showMobileDay(date, { scrollToNow: false });
+  } else {
+    showMobileDay(date, { scrollToNow: true, targetMinutes });
+  }
 }
 
 function exitMobileDayView() {
@@ -2824,14 +2903,33 @@ document.getElementById('btn-mobile-day-back-label').addEventListener('click', e
 // styles.css, pensado justo para esto): izquierda = dia siguiente,
 // derecha = dia anterior. Si el nuevo dia cae en otra semana, la tira
 // se recalcula sola (showMobileDay -> renderMobileWeekStrip).
-attachSwipe(document.getElementById('mobile-week-strip-days'), {
+// Enganchado a TODA la vista diaria (cabecera + contenido), no solo a
+// la tira semanal -- antes solo funcionaba deslizando sobre esa fila
+// estrecha, que es justo lo que reporto Koku ("en la vista diaria no
+// funciona el SWIPE"). preserveVerticalScroll:true porque, a diferencia
+// de mes/año/tira semanal (que no necesitan scroll vertical propio), el
+// contenido de la vista diaria (rejilla de horas/listado) SI necesita
+// que el scroll vertical normal de la pagina siga funcionando -- solo
+// se bloquea el gesto nativo cuando el arrastre es claramente
+// horizontal. Un solo listener (no uno aparte para la tira semanal) para
+// no disparar el cambio de dia DOS veces por el mismo gesto (los
+// eventos de puntero suben por burbujeo desde la tira, que vive dentro
+// de esta misma seccion).
+function playMobileDaySwipeAnimation(direction) {
+  playMobileSwipeTransition(document.getElementById('mobile-day-hours-view'), direction);
+  playMobileSwipeTransition(document.getElementById('mobile-day-listado-view'), direction);
+}
+attachSwipe(document.getElementById('mobile-calendar-day-view'), {
+  preserveVerticalScroll: true,
   onLeft: () => {
     const d = state.mobileCalendarDayDate;
     showMobileDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1), { scrollToNow: true });
+    playMobileDaySwipeAnimation('left');
   },
   onRight: () => {
     const d = state.mobileCalendarDayDate;
     showMobileDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1), { scrollToNow: true });
+    playMobileDaySwipeAnimation('right');
   },
 });
 
@@ -3103,16 +3201,19 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
   closeEventModal();
   loadMonth();
   loadReminders();
+  refreshOpenMobileDayViewIfShowing(startDate);
 });
 
 document.getElementById('btn-delete-event').addEventListener('click', async () => {
   const id = document.getElementById('event-id').value;
   if (!id) return;
   if (!confirm('¿Eliminar este evento?')) return;
+  const deletedDate = eventStartDateField.getValue();
   await api(`/api/events/${id}`, { method: 'DELETE' });
   closeEventModal();
   loadMonth();
   loadReminders();
+  refreshOpenMobileDayViewIfShowing(deletedDate);
 });
 
 // ---------------------------------------------------------------------
@@ -3396,17 +3497,20 @@ document.getElementById('task-form').addEventListener('submit', async (e) => {
   await loadTasks();
   renderTasksList();
   loadMonth();
+  refreshOpenMobileDayViewIfShowing(dateValue);
 });
 
 document.getElementById('btn-delete-task').addEventListener('click', async () => {
   const id = document.getElementById('task-id').value;
   if (!id) return;
   if (!confirm('¿Eliminar esta tarea?')) return;
+  const deletedDate = taskDateField.getValue();
   await api(`/api/events/${id}`, { method: 'DELETE' });
   closeTaskModal();
   await loadTasks();
   renderTasksList();
   loadMonth();
+  refreshOpenMobileDayViewIfShowing(deletedDate);
 });
 
 // ---------------------------------------------------------------------
@@ -5787,7 +5891,26 @@ document.getElementById('btn-close-note-editor').addEventListener('click', close
 NOTE_EDITOR_BODY.addEventListener('input', () => {
   captureActiveOpenNoteFromDom();
   renderNoteSectionsPanel();
+  scheduleMobileNoteAutosave();
 });
+
+// Autoguardado -- SOLO en movil, pedido explicito de Koku (en
+// escritorio se queda el flujo manual/Ctrl+Intro de siempre, que ya le
+// gustaba). Debounce corto tras cada input; reutiliza el mismo submit
+// de siempre via requestSubmit() en vez de duplicar la logica de
+// guardado -- el dialogo de "cambios sin guardar" de closeOpenNote()
+// se queda como red de seguridad para el hueco de tiempo entre el
+// ultimo tecleo y que el debounce dispare.
+let mobileNoteAutosaveTimer = null;
+function scheduleMobileNoteAutosave() {
+  if (!window.matchMedia('(max-width: 859px)').matches) return;
+  clearTimeout(mobileNoteAutosaveTimer);
+  mobileNoteAutosaveTimer = setTimeout(() => {
+    const entry = findOpenNote(state.activeOpenNoteKey);
+    if (!entry || entry.readMode) return;
+    document.getElementById('note-form').requestSubmit();
+  }, 1500);
+}
 
 document.getElementById('note-form').addEventListener('submit', async (e) => {
   e.preventDefault();

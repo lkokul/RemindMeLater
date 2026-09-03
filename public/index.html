@@ -327,6 +327,12 @@
         </div>
 
         <section class="mobile-calendar-view mobile-only">
+          <!-- Nombre del mes, centrado, debajo de la barra de arriba
+               (año/densidad/buscar/+) -- pedido explicito de Koku, antes
+               no se mostraba en ningun sitio en la vista mensual (solo
+               el año). Oculto en vista anual, ver refreshMobileCalendarNavLabel()
+               en app.js. -->
+          <p id="mobile-calendar-month-name" class="mobile-calendar-month-name"></p>
           <div id="mobile-calendar-month-grid" class="mobile-calendar-month-grid"></div>
           <div id="mobile-calendar-month-list" class="mobile-calendar-month-list hidden"></div>
           <div id="mobile-calendar-year-grid" class="mobile-calendar-year-grid hidden"></div>
