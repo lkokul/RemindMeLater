@@ -65,6 +65,16 @@ body.modal-open-lock {
    escritorio .mobile-nav ya esta oculta siempre. */
 @media (max-width: 859px) {
   body.modal-open-lock .mobile-nav { display: none; }
+  /* Excepcion: Configuracion (Fase 5) ya tiene su propio punto de
+     entrada FIJO en la barra inferior -- a diferencia del resto de
+     modales (que son ventanas puntuales sobre otra pantalla), aqui la
+     barra debe seguir visible para poder navegar a otra seccion sin
+     cerrar Configuracion antes. refreshModalScrollLock() marca esta
+     clase aparte, ademas de modal-open-lock (que se sigue aplicando
+     igual, bloqueando el scroll del fondo -- no hace daño aunque
+     Configuracion ya cubra toda la pantalla). Misma especificidad que
+     la regla de arriba, gana por ir despues en la hoja. */
+  body.settings-modal-open .mobile-nav { display: flex; }
 }
 
 body {
@@ -830,6 +840,22 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   max-width: 1100px;
   margin: 0 auto;
 }
+/* Mes y dia se veian estrechos en movil por 2 motivos apilados:
+   1) el padding lateral de .layout se sumaba al que ya pone cada vista
+      propia (.mobile-calendar-view/.mobile-calendar-day-view),
+      doblando el margen real -- se recorta aqui (solo horizontal, solo
+      movil, escritorio sigue con su padding de siempre).
+   2) el `margin: 0 auto` de arriba (pensado para centrar .layout
+      cuando SI llega a su max-width:1100px, en pantallas anchas) hace
+      que en un flex column (.app) el navegador deje de estirar
+      .layout al ancho completo del contenedor -- en vez de eso lo
+      encoge a su contenido y lo centra con esos margenes automaticos,
+      aunque max-width nunca llegue a limitar nada por debajo de esa
+      anchura. Sin este `margin:0` el hueco perdido era mucho mayor que
+      el del padding (~57px por lado, no solo unos pocos px). */
+@media (max-width: 859px) {
+  .layout { padding-left: 0.6rem; padding-right: 0.6rem; margin: 0; }
+}
 
 /* Agrupa la barra del mes + el calendario en su propia columna, separada
    del panel de recordatorios — asi "Agosto 2026 ◀ ▶" se puede centrar
@@ -917,6 +943,30 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   text-align: right;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
 }
+
+/* Boton flotante "+" (Notas) -- a diferencia de .mobile-calendar-add-wrap
+   (relativo a una barra de arriba), este vive pegado al borde de la
+   pantalla, por encima de .mobile-nav (z-index 70), igual que el hueco
+   que ya reserva .app/Configuracion para esa barra. */
+.mobile-fab-wrap { position: fixed; right: 1rem; bottom: calc(4.4rem + 1rem + env(safe-area-inset-bottom, 0px)); z-index: 30; }
+.mobile-fab {
+  width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 50%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+/* El menu de .mobile-fab-wrap cuelga hacia ARRIBA del boton (a
+   diferencia de .mobile-add-menu en una barra superior, que cuelga
+   hacia abajo) -- el boton vive pegado al borde inferior, no hay hueco
+   debajo para desplegarlo ahi. */
+.mobile-fab-wrap .mobile-add-menu { top: auto; bottom: calc(100% + 0.4rem); }
 
 .mobile-calendar-view {
   display: flex;
@@ -1171,7 +1221,9 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   top: 0;
   z-index: 15;
   background: var(--bg);
-  padding-bottom: 0.3rem;
+  /* Antes 0.3rem -- quedaba muy pegado a la fila de "00:00" (que
+     ademas se desplaza -0.6em hacia arriba, ver .mobile-hour-label). */
+  padding-bottom: 0.7rem;
   /* Sangra hasta el borde real de la pantalla (cancela el padding
      lateral de .mobile-calendar-day-view, que ahora es 0.6rem) y vuelve
      a meter ese mismo hueco como padding propio, para que su fondo
@@ -2939,6 +2991,13 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
     border-radius: 0;
     border: none;
   }
+  /* La barra inferior ahora se queda visible con Configuracion abierta
+     (ver body.settings-modal-open mas arriba) -- reserva el mismo hueco
+     que ya reserva .app para que el contenido no quede tapado al final
+     de una pestaña larga. */
+  #settings-modal .settings-card-body {
+    padding-bottom: calc(4.4rem + env(safe-area-inset-bottom, 0px));
+  }
   /* En movil, Configuracion ya tiene su propio punto de entrada fijo
      en la barra inferior (.mobile-nav) y "volver" ya lo resuelve esa
      misma barra (Calendario/Notas/Apps) -- los botones de "← Home"/
@@ -2961,6 +3020,20 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
      "Editar carpetas" que cubre lo mismo. En escritorio se queda (ahi
      sigue siendo el unico acceso directo sin pasar por ningun menu). */
   .note-folder-chip-edit { display: none; }
+  /* Cabecera con titulo redundante: la barra inferior ya deja claro en
+     que seccion estas, no hace falta repetirlo con un "Notas"/"Apps"
+     arriba (ademas, con los botones ya ocultos arriba, esa cabecera
+     hoy solo tiene el h2). Solo en las 3 pantallas alcanzables DIRECTO
+     desde la barra inferior -- las 5 de extension (Gimnasio/Finanzas/
+     Archivos/Viajes/Lecturas) SI la mantienen, confirmado que ahi es
+     el UNICO sitio donde aparece el nombre de la seccion (sus pestañas
+     internas nunca lo repiten). #mobile-global-search tampoco entra
+     aqui, su cabecera solo tiene el boton de cerrar, necesario. */
+  #mobile-notes-view .my-space-view-header,
+  #extensions-view .my-space-view-header,
+  #my-space-view .my-space-view-header {
+    display: none;
+  }
 }
 .modal-close-x {
   position: absolute; top: 0.8rem; right: 0.8rem;

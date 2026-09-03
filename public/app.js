@@ -463,6 +463,15 @@ function refreshModalScrollLock() {
     document.body.style.top = '';
     window.scrollTo(0, modalScrollLockY);
   }
+  // Configuracion ya tiene su propio punto de entrada fijo en la barra
+  // inferior (a diferencia del resto de modales, que son ventanas
+  // puntuales) -- marca aparte para que la regla CSS
+  // (body.settings-modal-open .mobile-nav) devuelva la barra mientras
+  // Configuracion esta abierta, sin tocar el comportamiento de los
+  // demas ~26 modales (que siguen ocultandola).
+  const settingsModal = document.getElementById('settings-modal');
+  const settingsOpen = settingsModal ? !settingsModal.classList.contains('hidden') : false;
+  document.body.classList.toggle('settings-modal-open', settingsOpen);
 }
 const modalScrollLockObserver = new MutationObserver(refreshModalScrollLock);
 document.querySelectorAll('.modal').forEach((el) => modalScrollLockObserver.observe(el, { attributes: true, attributeFilter: ['class'] }));
@@ -6377,8 +6386,6 @@ function closeMobileNotesView() {
   refreshMobileNotesActionBar();
 }
 document.getElementById('btn-close-mobile-notes').addEventListener('click', closeMobileNotesView);
-document.getElementById('btn-mobile-notes-new-folder').addEventListener('click', () => openNoteFolderModal(null));
-document.getElementById('btn-mobile-notes-new').addEventListener('click', () => openNoteInEditor(null));
 
 // Aplica el modo elegido: donde vive el hub, y si hace falta o no el
 // boton de la topbar. Se llama al arrancar y cada vez que cambias el
@@ -6614,14 +6621,35 @@ document.getElementById('btn-new-task-mobile-day').addEventListener('click', () 
   openTaskModal(null, state.mobileCalendarDayDate);
 });
 
+// Mismo menu "+", ahora como boton flotante en Notas (id
+// mobile-notes-add-wrap/-menu, btn-mobile-notes-add) -- sustituye a los
+// antiguos botones de +carpeta/+nota de la barra superior, para dejarle
+// mas hueco al buscador. Mismas 2 acciones que ya llamaban esos botones
+// (openNoteFolderModal(null)/openNoteInEditor(null)), solo movidas aqui.
+document.getElementById('btn-mobile-notes-add').addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleMobileCalendarAddMenu(undefined, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
+});
+document.getElementById('btn-mobile-notes-add-folder').addEventListener('click', () => {
+  toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
+  openNoteFolderModal(null);
+});
+document.getElementById('btn-mobile-notes-add-note').addEventListener('click', () => {
+  toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
+  openNoteInEditor(null);
+});
+
 // Tocar fuera del boton/menu tambien lo cierra -- patron normal de menu
 // flotante (ver closeAllPopovers en settings.js para el mismo patron con
-// los popovers de color/icono/fecha). Comprueba los 2 wraps (mes y dia).
+// los popovers de color/icono/fecha). Comprueba los 3 wraps (mes, dia,
+// Notas).
 document.addEventListener('click', (e) => {
   const monthWrap = document.getElementById('mobile-calendar-add-wrap');
   if (monthWrap && !monthWrap.contains(e.target)) toggleMobileCalendarAddMenu(false);
   const dayWrap = document.getElementById('mobile-day-add-wrap');
   if (dayWrap && !dayWrap.contains(e.target)) toggleMobileCalendarAddMenu(false, 'mobile-day-add-menu', 'btn-mobile-day-add');
+  const notesWrap = document.getElementById('mobile-notes-add-wrap');
+  if (notesWrap && !notesWrap.contains(e.target)) toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
 });
 
 // ---------------------------------------------------------------------
