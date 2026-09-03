@@ -9556,6 +9556,302 @@ applyMiEspacioMode();
 applyUiStyle();
 
 // ---------------------------------------------------------------------
+// Extension "Descargas": bajar un archivo de cualquier URL, video/audio
+// de sitios tipo YouTube (yt-dlp), y convertir formato de un archivo ya
+// bajado (ffmpeg). Cada trabajo se ejecuta en el servidor
+// (child_process, ver server/descargasRunner.js) -- el cliente solo crea
+// el trabajo y hace polling de su progreso mientras la vista esta
+// abierta (mismo ciclo de vida que el vigilante de solicitudes
+// entrantes de Archivos, arranca al abrir/para al cerrar).
+// ---------------------------------------------------------------------
+const DESCARGAS_POLL_MS = 1500;
+let descargasPollTimer = null;
+let descargasLastFileNames = null; // evita reconstruir el popover de "Origen" si la lista no cambio (ver el bug de popovers de Viajes en CLAUDE.md)
+
+const DESCARGAS_KIND_LABELS = {
+  download_generic: 'Descarga',
+  download_media: 'Vídeo/audio',
+  convert: 'Conversión',
+};
+const DESCARGAS_STATUS_LABELS = {
+  queued: 'En cola',
+  running: 'En curso…',
+  done: 'Completado',
+  error: 'Error',
+  cancelled: 'Cancelado',
+};
+
+const descargasTypeField = createSelectField({
+  options: [
+    { value: 'download_generic', label: 'Archivo genérico' },
+    { value: 'download_media', label: 'Vídeo o audio' },
+  ],
+  initialValue: 'download_generic',
+  onChange: (v) => {
+    document.getElementById('descargas-media-format-row').classList.toggle('hidden', v !== 'download_media');
+  },
+});
+document.getElementById('descargas-type-field').appendChild(descargasTypeField.element);
+
+const descargasMediaFormatField = createSelectField({
+  options: [
+    { value: 'video', label: 'Vídeo' },
+    { value: 'audio', label: 'Solo audio (MP3)' },
+  ],
+  initialValue: 'video',
+});
+document.getElementById('descargas-media-format-field').appendChild(descargasMediaFormatField.element);
+
+const descargasConvertSourceField = createSelectField({ options: [], initialValue: '' });
+document.getElementById('descargas-convert-source-field').appendChild(descargasConvertSourceField.element);
+
+const descargasConvertTargetField = createSelectField({
+  options: [
+    { value: 'mp4', label: 'MP4' },
+    { value: 'mkv', label: 'MKV' },
+    { value: 'webm', label: 'WebM' },
+    { value: 'mp3', label: 'MP3' },
+    { value: 'wav', label: 'WAV' },
+    { value: 'ogg', label: 'OGG' },
+    { value: 'm4a', label: 'M4A' },
+    { value: 'gif', label: 'GIF' },
+    { value: 'avi', label: 'AVI' },
+  ],
+  initialValue: 'mp4',
+});
+document.getElementById('descargas-convert-target-field').appendChild(descargasConvertTargetField.element);
+
+function formatDescargasBytes(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function descargasJobDescription(job) {
+  if (job.kind === 'convert') return `${job.sourceFilename} → ${job.targetFormat}`;
+  return job.sourceUrl || '';
+}
+
+async function refreshDescargasTools() {
+  const warning = document.getElementById('descargas-tools-warning');
+  try {
+    const tools = await api('/api/descargas/tools');
+    const missing = [];
+    if (!tools.ytDlp.available) missing.push('yt-dlp (para vídeo/audio)');
+    if (!tools.ffmpeg.available) missing.push('ffmpeg (para convertir)');
+    if (missing.length) {
+      warning.textContent = `Falta instalar: ${missing.join(' y ')} -- ver README.md para instalarlos.`;
+      warning.classList.remove('hidden');
+    } else {
+      warning.classList.add('hidden');
+    }
+  } catch (err) {
+    warning.classList.add('hidden');
+  }
+}
+
+async function refreshDescargasJobs() {
+  const jobs = await api('/api/descargas/jobs');
+  const tbody = document.getElementById('descargas-jobs-table-body');
+  const emptyHint = document.getElementById('descargas-jobs-empty-hint');
+  tbody.innerHTML = '';
+  emptyHint.classList.toggle('hidden', jobs.length > 0);
+  for (const job of jobs) {
+    const tr = document.createElement('tr');
+
+    const descTd = document.createElement('td');
+    descTd.textContent = descargasJobDescription(job);
+    tr.appendChild(descTd);
+
+    const kindTd = document.createElement('td');
+    kindTd.textContent = DESCARGAS_KIND_LABELS[job.kind] || job.kind;
+    tr.appendChild(kindTd);
+
+    const progressTd = document.createElement('td');
+    const bar = document.createElement('div');
+    bar.className = 'descargas-progress-bar';
+    const fill = document.createElement('div');
+    fill.className = 'descargas-progress-fill' + (job.status === 'error' ? ' is-error' : '');
+    fill.style.width = `${job.status === 'done' ? 100 : job.progressPercent || 0}%`;
+    bar.appendChild(fill);
+    progressTd.appendChild(bar);
+    tr.appendChild(progressTd);
+
+    const statusTd = document.createElement('td');
+    statusTd.className = 'descargas-job-status' + (job.status === 'error' ? ' is-error' : '');
+    statusTd.textContent = DESCARGAS_STATUS_LABELS[job.status] || job.status;
+    if (job.status === 'error' && job.errorMessage) statusTd.title = job.errorMessage;
+    tr.appendChild(statusTd);
+
+    const actionsTd = document.createElement('td');
+    if (job.status === 'queued' || job.status === 'running') {
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'secondary-btn';
+      cancelBtn.textContent = 'Cancelar';
+      cancelBtn.addEventListener('click', async () => {
+        await api(`/api/descargas/jobs/${job.id}/cancel`, { method: 'POST' });
+        refreshDescargasJobs();
+      });
+      actionsTd.appendChild(cancelBtn);
+    } else {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'danger-btn';
+      deleteBtn.textContent = 'Eliminar';
+      deleteBtn.addEventListener('click', async () => {
+        await api(`/api/descargas/jobs/${job.id}`, { method: 'DELETE' });
+        refreshDescargasJobs();
+      });
+      actionsTd.appendChild(deleteBtn);
+    }
+    tr.appendChild(actionsTd);
+
+    tbody.appendChild(tr);
+  }
+}
+
+// Mismo patron que downloadArchivo(): <a download> con un blob, funciona
+// igual en ordenador y movil.
+async function downloadDescargasFile(name) {
+  const token = localStorage.getItem('deviceToken');
+  const headers = {};
+  if (token) headers['X-Device-Token'] = token;
+  const url = new URL(`/api/descargas/files/${encodeURIComponent(name)}`, getServerBaseUrl());
+  try {
+    const res = await fetch(url.toString(), { headers });
+    if (!res.ok) throw new Error(`Error ${res.status}`);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    showAppAlert('No se pudo descargar el archivo: ' + err.message);
+  }
+}
+
+async function refreshDescargasFiles() {
+  const files = await api('/api/descargas/files');
+  const tbody = document.getElementById('descargas-files-table-body');
+  const emptyHint = document.getElementById('descargas-files-empty-hint');
+  tbody.innerHTML = '';
+  emptyHint.classList.toggle('hidden', files.length > 0);
+  for (const file of files) {
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.textContent = file.name;
+    tr.appendChild(nameTd);
+    const sizeTd = document.createElement('td');
+    sizeTd.textContent = formatDescargasBytes(file.size);
+    tr.appendChild(sizeTd);
+    const dateTd = document.createElement('td');
+    dateTd.textContent = new Date(file.modifiedAt).toLocaleString();
+    tr.appendChild(dateTd);
+    const actionsTd = document.createElement('td');
+    const downloadBtn = document.createElement('button');
+    downloadBtn.type = 'button';
+    downloadBtn.className = 'secondary-btn';
+    downloadBtn.textContent = 'Descargar';
+    downloadBtn.addEventListener('click', () => downloadDescargasFile(file.name));
+    actionsTd.appendChild(downloadBtn);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'danger-btn';
+    deleteBtn.textContent = 'Eliminar';
+    deleteBtn.addEventListener('click', async () => {
+      await api(`/api/descargas/files/${encodeURIComponent(file.name)}`, { method: 'DELETE' });
+      await Promise.all([refreshDescargasFiles(), refreshDescargasJobs()]);
+    });
+    actionsTd.appendChild(deleteBtn);
+    tr.appendChild(actionsTd);
+    tbody.appendChild(tr);
+  }
+
+  const names = files.map((f) => f.name);
+  if (JSON.stringify(names) !== JSON.stringify(descargasLastFileNames)) {
+    descargasLastFileNames = names;
+    descargasConvertSourceField.setOptions(files.map((f) => ({ value: f.name, label: f.name })));
+  }
+}
+
+function startDescargasPolling() {
+  stopDescargasPolling();
+  descargasPollTimer = setInterval(() => {
+    refreshDescargasJobs();
+    refreshDescargasFiles();
+  }, DESCARGAS_POLL_MS);
+}
+function stopDescargasPolling() {
+  if (descargasPollTimer) {
+    clearInterval(descargasPollTimer);
+    descargasPollTimer = null;
+  }
+}
+
+async function openDescargasView() {
+  closeExtensionsView();
+  document.getElementById('descargas-view').classList.remove('hidden');
+  setCurrentScreen('descargas');
+  descargasLastFileNames = null;
+  await Promise.all([refreshDescargasTools(), refreshDescargasFiles(), refreshDescargasJobs()]);
+  startDescargasPolling();
+}
+function closeDescargasView() {
+  stopDescargasPolling();
+  document.getElementById('descargas-view').classList.add('hidden');
+  openExtensionsView();
+}
+document.getElementById('btn-open-descargas').addEventListener('click', openDescargasView);
+document.getElementById('btn-close-descargas').addEventListener('click', closeDescargasView);
+
+document.getElementById('descargas-download-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const urlInput = document.getElementById('descargas-download-url');
+  const url = urlInput.value.trim();
+  if (!url) return;
+  const kind = descargasTypeField.getValue();
+  const payload = { kind, url };
+  if (kind === 'download_media') payload.mediaFormat = descargasMediaFormatField.getValue();
+  try {
+    await api('/api/descargas/jobs', { method: 'POST', body: JSON.stringify(payload) });
+    urlInput.value = '';
+    refreshDescargasJobs();
+  } catch (err) {
+    showAppAlert('No se pudo iniciar la descarga: ' + err.message);
+  }
+});
+
+document.getElementById('descargas-convert-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const sourceFilename = descargasConvertSourceField.getValue();
+  const targetFormat = descargasConvertTargetField.getValue();
+  if (!sourceFilename) {
+    showAppAlert('Elige un archivo de origen.');
+    return;
+  }
+  try {
+    await api('/api/descargas/jobs', {
+      method: 'POST',
+      body: JSON.stringify({ kind: 'convert', sourceFilename, targetFormat }),
+    });
+    refreshDescargasJobs();
+  } catch (err) {
+    showAppAlert('No se pudo iniciar la conversión: ' + err.message);
+  }
+});
+
+// ---------------------------------------------------------------------
 // Aviso de nueva version disponible: /api/version devuelve el momento en
 // que arranco el proceso del servidor. npm run dev reinicia ese proceso
 // cada vez que tocamos un archivo de server/, asi que si ese valor
@@ -9838,6 +10134,7 @@ async function restoreCurrentScreen() {
   if (screen === 'finanzas') { await openFinanzasView(); return; }
   if (screen === 'archivos') { await openArchivosView(); return; }
   if (screen === 'viajes') { await openViajesView(); return; }
+  if (screen === 'descargas') { await openDescargasView(); return; }
 }
 
 async function initStep(fn) {

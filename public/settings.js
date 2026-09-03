@@ -565,6 +565,7 @@ document.getElementById('btn-lecturas-settings').addEventListener('click', openS
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-archivos-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-descargas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-close-settings').addEventListener('click', () => {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
@@ -2187,6 +2188,14 @@ document.addEventListener('keydown', (e) => {
     } else {
       document.getElementById('btn-close-viajes').click();
     }
+    return;
+  }
+
+  // Descargas: sin sub-navegacion ni modales propios (los formularios
+  // son inline, no modales) -- un solo nivel, cierra sin mas.
+  const descargasView = document.getElementById('descargas-view');
+  if (descargasView && !descargasView.classList.contains('hidden')) {
+    document.getElementById('btn-close-descargas').click();
     return;
   }
 

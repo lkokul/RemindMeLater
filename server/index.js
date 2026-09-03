@@ -34,6 +34,7 @@ const lecturasItemsRouter = require('./routes/lecturasItems');
 const viajesTripsRouter = require('./routes/viajesTrips');
 const viajesEntriesRouter = require('./routes/viajesEntries');
 const archivosRouter = require('./routes/archivos');
+const descargasRouter = require('./routes/descargas');
 const updateRouter = require('./routes/update');
 const { startReminderChecker } = require('./reminderChecker');
 const { startFinanzasRecurringChecker } = require('./finanzasRecurringChecker');
@@ -130,6 +131,12 @@ app.use('/api/viajes-entries', viajesEntriesRouter);
 // nivel de acceso por dentro (ver routes/archivos.js): /folder y /browse
 // son solo-ordenador, el resto exige movil emparejado u ordenador.
 app.use('/api/archivos', archivosRouter);
+// Extension "Descargas" (ver #extensions-view en index.html): bajar un
+// archivo de cualquier URL, video/audio de sitios tipo YouTube (yt-dlp),
+// y convertir formato (ffmpeg). A diferencia de Archivos, aqui SI vale
+// el middleware global -- todas sus rutas comparten el mismo nivel de
+// confianza (ver comentario al principio de routes/descargas.js).
+app.use('/api/descargas', requireDeviceOrTrusted, descargasRouter);
 // Rutas de dispositivos: cada endpoint decide su propio nivel de acceso
 // internamente (pair es publico-con-codigo, el resto es solo-ordenador).
 app.use('/api/devices', devicesRouter);

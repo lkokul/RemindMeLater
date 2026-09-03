@@ -520,6 +520,31 @@ db.exec(`
     finanzas_transaction_id INTEGER REFERENCES finanzas_transactions(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Extension "Descargas": descargar un archivo/video de una URL (con
+  -- yt-dlp para sitios de video, o directo por http/https para
+  -- cualquier otra cosa) y convertir formatos con ffmpeg. Una sola
+  -- tabla con "kind" como discriminador en vez de 2-3 tablas casi
+  -- identicas (mismo criterio ya usado en events.is_task o
+  -- viajes_entry_movements.type): las 3 clases de trabajo comparten
+  -- la forma dominante (algo que el servidor ejecuta una vez, con
+  -- estado/progreso/error), solo cambian unas pocas columnas
+  -- especificas de cada kind, que se quedan NULL para los otros.
+  CREATE TABLE IF NOT EXISTS descargas_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK (kind IN ('download_generic', 'download_media', 'convert')),
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'done', 'error', 'cancelled')),
+    source_url TEXT,             -- download_generic / download_media
+    media_format TEXT,           -- download_media: 'video' | 'audio'
+    source_filename TEXT,        -- convert: archivo ya existente en DATA_DIR/downloads
+    target_format TEXT,          -- convert: 'mp4'|'mp3'|'wav'|...
+    output_filename TEXT,        -- relleno al terminar con exito
+    progress_percent REAL NOT NULL DEFAULT 0,
+    error_message TEXT,          -- cola de stderr truncada, si falla
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    finished_at TEXT
+  );
 `);
 
 // Migracion sencilla: group_id y active_theme_id se anadieron despues de

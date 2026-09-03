@@ -1731,6 +1731,28 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 .archivos-table td:last-child { display: flex; gap: 0.4rem; }
 
+/* Extension "Descargas" -- mismo criterio que .archivos-body/.archivos-table
+   (tabla+padding scoped a esta extension, aunque el look sea el mismo). */
+.descargas-body { flex: 1; min-height: 0; padding: 1rem 1.2rem; overflow-y: auto; }
+.descargas-body form { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.6rem 0 1rem; max-width: 420px; }
+.descargas-table-wrap { overflow-x: auto; margin: 0.8rem 0; }
+.descargas-table { width: 100%; border-collapse: collapse; }
+.descargas-table th, .descargas-table td {
+  text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border);
+}
+.descargas-table td:last-child { display: flex; gap: 0.4rem; white-space: nowrap; }
+.descargas-progress-bar {
+  height: 10px;
+  min-width: 100px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.descargas-progress-fill { height: 100%; background: var(--accent); }
+.descargas-progress-fill.is-error { background: var(--danger); }
+.descargas-job-status { font-size: 0.8rem; }
+.descargas-job-status.is-error { color: var(--danger); }
+
 /* Transferencia estilo TightVNC/TeamViewer (ver comentario en
    index.html): dos paneles + flechas en medio. En movil, apilados
    (panel local arriba, flechas en fila horizontal, panel remoto

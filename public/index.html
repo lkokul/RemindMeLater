@@ -498,6 +498,10 @@
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></span>
           <span class="extensions-card-title">Viajes</span>
         </button>
+        <button type="button" id="btn-open-descargas" class="extensions-card extensions-card-active">
+          <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></span>
+          <span class="extensions-card-title">Descargas</span>
+        </button>
       </div>
     </div>
   </div>
@@ -1502,6 +1506,64 @@
         <button type="button" id="btn-cancel-viajes-link-finanzas" class="secondary-btn">Cancelar</button>
         <button type="button" id="btn-confirm-viajes-link-finanzas" class="primary-btn">Vincular</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Extension "Descargas": bajar un archivo de cualquier URL, video/
+       audio de sitios tipo YouTube (yt-dlp), y convertir formato de un
+       archivo ya bajado (ffmpeg). A diferencia de Archivos, no hay
+       carpeta configurable ni navegador de disco -- su carpeta es fija,
+       de uso interno. Ver openDescargasView() en app.js. -->
+  <div id="descargas-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2>Descargas</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-descargas" class="secondary-btn my-space-close-btn" aria-label="Volver a Extensiones">← Extensiones</button>
+        <button type="button" id="btn-descargas-settings" class="icon-btn" aria-label="Configuración">☰</button>
+      </div>
+    </div>
+
+    <div class="descargas-body">
+      <p id="descargas-tools-warning" class="hint-warning hidden"></p>
+
+      <h3>Descargar</h3>
+      <p class="hint">Pega una URL: un archivo cualquiera (PDF, ZIP...) se descarga tal cual; una URL de vídeo (YouTube y sitios similares) se puede bajar en vídeo o solo el audio.</p>
+      <form id="descargas-download-form">
+        <label>URL<input type="text" id="descargas-download-url" placeholder="https://..." required /></label>
+        <label>Tipo<div id="descargas-type-field"></div></label>
+        <label id="descargas-media-format-row" class="hidden">Formato<div id="descargas-media-format-field"></div></label>
+        <button type="submit" class="primary-btn">Descargar</button>
+      </form>
+
+      <h3>Convertir</h3>
+      <p class="hint">Convierte un archivo ya descargado a otro formato.</p>
+      <form id="descargas-convert-form">
+        <label>Origen<div id="descargas-convert-source-field"></div></label>
+        <label>Formato destino<div id="descargas-convert-target-field"></div></label>
+        <button type="submit" class="primary-btn">Convertir</button>
+      </form>
+
+      <h3>Trabajos</h3>
+      <div class="descargas-table-wrap">
+        <table class="descargas-table" id="descargas-jobs-table">
+          <thead>
+            <tr><th>Descripción</th><th>Tipo</th><th>Progreso</th><th>Estado</th><th></th></tr>
+          </thead>
+          <tbody id="descargas-jobs-table-body"></tbody>
+        </table>
+      </div>
+      <p id="descargas-jobs-empty-hint" class="hint hidden">No hay trabajos todavía.</p>
+
+      <h3>Archivos</h3>
+      <div class="descargas-table-wrap">
+        <table class="descargas-table" id="descargas-files-table">
+          <thead>
+            <tr><th>Nombre</th><th>Tamaño</th><th>Fecha</th><th></th></tr>
+          </thead>
+          <tbody id="descargas-files-table-body"></tbody>
+        </table>
+      </div>
+      <p id="descargas-files-empty-hint" class="hint hidden">No hay archivos todavía.</p>
     </div>
   </div>
 

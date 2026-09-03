@@ -291,6 +291,24 @@ arriba:
   el botón para sincronizar el resto de datos manualmente (ver "Instalar
   como app" más abajo) y el de comprobar si hay una versión nueva de la
   app (instalarla de verdad sigue siendo solo desde el ordenador).
+- **Descargas**: pega una URL y se descarga tal cual (un PDF, un ZIP,
+  lo que sea) en una carpeta propia del ordenador; si es una URL de
+  vídeo (YouTube y sitios similares) se puede bajar en vídeo o solo el
+  audio. Un apartado aparte convierte un archivo ya descargado a otro
+  formato (MP4, MKV, WebM, MP3, WAV, OGG, M4A, GIF, AVI). Los trabajos
+  se ejecutan uno detrás de otro con una barra de progreso, y se pueden
+  cancelar mientras están en curso. A diferencia del resto de la app
+  (local-first, funciona sin conexión), este apartado sí necesita
+  internet para descargar de una URL/vídeo — convertir formato no. Hace
+  falta tener instalados `yt-dlp` (para vídeo/audio) y `ffmpeg` (para
+  convertir) en el ordenador; sin ellos, esa parte concreta avisa
+  claramente en vez de fallar en silencio:
+  - macOS: `brew install yt-dlp ffmpeg`
+  - Windows: `winget install yt-dlp.yt-dlp` y `winget install Gyan.FFmpeg`
+    (o con Chocolatey: `choco install yt-dlp ffmpeg`)
+  - Linux (Debian/Ubuntu): `sudo apt install ffmpeg` y
+    `pipx install yt-dlp` (o `sudo apt install yt-dlp` si el repositorio
+    del sistema lo trae razonablemente actualizado)
 
 ## App de escritorio (Electron)
 
