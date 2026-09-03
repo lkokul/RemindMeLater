@@ -179,7 +179,7 @@ button {
 }
 :root[data-ui-style="directo"] button:active:not(:disabled) { transform: scale(0.97); }
 
-:root[data-ui-style="neon"] button:hover:not(:disabled) {
+:root[data-ui-style="neon"] button:hover:not(:disabled):not(.mobile-nav-btn) {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent);
 }
@@ -201,11 +201,35 @@ button {
    su radio), la parte de arriba/abajo del anillo saliente se recortaba
    ahi, dejando visibles solo los lados -- justo lo que reporto Koku.
    Un box-shadow INSET nunca sale de los limites del propio boton, asi
-   que no hay nada que recortar. */
+   que no hay nada que recortar.
+   BUG REAL encontrado despues (Koku seguia viendo solo el lateral tras
+   la primera pasada de este fix): la regla generica de arriba
+   ("button:hover:not(:disabled)") TAMBIEN alcanzaba a .mobile-nav-btn
+   por ser un <button> normal, y con especificidad mayor
+   ((0,4,1) vs (0,4,0) de las reglas de aqui abajo) -- mientras el
+   :hover "pegado" seguia activo A LA VEZ que .active/:active, la
+   cascada resolvia el box-shadow a favor de la regla generica (NO
+   inset), que overflow:hidden SI recorta. En cuanto se tocaba otro
+   boton (el :hover pegado se soltaba), dejaba de haber conflicto y el
+   inset se veia entero -- de ahi "cualquier accion hace que salga el
+   resto". Arreglado excluyendo .mobile-nav-btn de esa regla generica
+   (":not(.mobile-nav-btn)" arriba), no solo añadiendo esta de aqui. */
 :root[data-ui-style="neon"] .mobile-nav-btn.active,
 :root[data-ui-style="neon"] .mobile-nav-btn:active {
   box-shadow: inset 0 0 0 1px var(--accent), inset 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
 }
+/* .mobile-nav-btn tiene esquinas rectas (border-radius:0), pero el
+   primero/ultimo boton de la fila queda pegado a una esquina REDONDEADA
+   del contenedor (.mobile-nav, 18px) -- sin esto, el anillo inset de
+   arriba se veia recto justo donde el contenedor ya curva, "sin
+   acoplarse" al borde. Un box-shadow inset sigue el border-radius del
+   propio elemento, asi que basta con dar a esos 2 botones un radio a
+   juego en sus esquinas EXTERIORES (18px del contenedor menos 1px de
+   su borde). Generica (no scoped a Neon) porque sin box-shadow encima
+   (Directo/Cristal/Registro) no se nota nada -- el boton no tiene
+   fondo ni borde propio visibles. */
+.mobile-nav-btn:first-child { border-top-left-radius: 17px; border-bottom-left-radius: 17px; }
+.mobile-nav-btn:last-child { border-top-right-radius: 17px; border-bottom-right-radius: 17px; }
 
 :root[data-ui-style="cristal"] button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--surface-2-text) 12%, var(--surface-2));
@@ -558,6 +582,34 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .note-editor-body ul, .note-editor-body ol { padding-left: 1.4rem; margin: 0.4rem 0; }
 .note-editor-body p, .note-editor-body div { margin: 0; }
 
+/* Estilos de parrafo (Titulo/Encabezado/Subencabezado/Monoespaciado),
+   estilo Notas de iPhone -- ver applyNoteParagraphStyle en app.js. */
+.note-editor-body h1 { font-size: 1.6rem; font-weight: 700; margin: 0.3rem 0; }
+.note-editor-body h2 { font-size: 1.3rem; font-weight: 700; margin: 0.25rem 0; }
+.note-editor-body h3 { font-size: 1.1rem; font-weight: 600; margin: 0.2rem 0; }
+/* Pila de fuentes PROPIA, autocontenida -- a proposito NO usa
+   var(--font-mono), que solo existe dentro del estilo de interaccion
+   "Registro" (ver el comentario junto a esa variable un poco mas
+   arriba en este archivo); usarla aqui la dejaria sin definir en
+   Directo/Neon/Cristal. */
+.note-editor-body [data-style="mono"] {
+  font-family: ui-monospace, 'SF Mono', 'Courier New', monospace;
+}
+/* Bloque de cita ("|" que describio Koku): franja vertical a la
+   izquierda de todo el parrafo -- ver toggleNoteQuoteBlock en app.js. */
+.note-editor-body [data-quote="1"] {
+  border-left: 3px solid var(--accent);
+  padding-left: 0.7rem;
+  margin-left: 0.1rem;
+}
+/* Sangria por parrafo (independiente de la sangria propia de listas) --
+   ver applyNoteIndentDelta en app.js. Mismo paso de 1.4rem que ya usan
+   ul/ol arriba. */
+.note-editor-body [data-indent="1"] { margin-left: 1.4rem; }
+.note-editor-body [data-indent="2"] { margin-left: 2.8rem; }
+.note-editor-body [data-indent="3"] { margin-left: 4.2rem; }
+.note-editor-body [data-indent="4"] { margin-left: 5.6rem; }
+
 /* Bloques de codigo: fuente monoespaciada, SIN colorear por lenguaje
    (ver la nota de app.js/notes.js sobre por que). "data-lang" (si se
    puso, ej. escribiendo "```js" + Intro) se ensena como una etiqueta
@@ -639,6 +691,48 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .table-insert-popover label { margin-bottom: 0.5rem; }
 .table-insert-popover label:last-of-type { margin-bottom: 0.7rem; }
 .table-insert-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+/* Popover de estilo de parrafo (boton "Aa") -- mismo look que
+   .table-insert-popover, pero solo una columna de botones, cada uno
+   previsualizado con su propia tipografia. */
+.paragraph-style-popover {
+  position: fixed; z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.4rem; width: 200px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  display: flex; flex-direction: column; gap: 0.15rem;
+}
+.paragraph-style-option {
+  display: block; width: 100%; text-align: left;
+  background: transparent; border: none; border-radius: calc(var(--radius) - 4px);
+  padding: 0.45rem 0.6rem; color: var(--surface-text); cursor: pointer;
+}
+.paragraph-style-option:hover { background: var(--surface-2); }
+.paragraph-style-option[data-style="title"] { font-size: 1.3rem; font-weight: 700; }
+.paragraph-style-option[data-style="heading"] { font-size: 1.1rem; font-weight: 700; }
+.paragraph-style-option[data-style="subheading"] { font-size: 1rem; font-weight: 600; }
+.paragraph-style-option[data-style="mono"] { font-family: ui-monospace, 'SF Mono', 'Courier New', monospace; }
+
+/* Popover de color de resaltado (boton cuadrado junto a subrayado/
+   tachado) -- fila de pastillas de color en vez de una columna. */
+.highlight-color-popover {
+  position: fixed; z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.6rem; width: 190px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+}
+.highlight-swatch {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 1px solid var(--border); cursor: pointer; padding: 0;
+}
+.highlight-swatch-clear {
+  width: auto; height: auto; border-radius: var(--radius);
+  padding: 0.3rem 0.5rem; font-size: 0.75rem;
+  background: var(--surface-2); color: var(--surface-2-text);
+}
+
+.note-editor-toolbar-divider { width: 1px; height: 1.2rem; background: var(--border); margin: 0 0.15rem; flex-shrink: 0; }
 /* Interruptor tipo "pastilla" en vez del checkbox cuadrado del sistema:
    se ilumina con el color de acento cuando esta activo. Sigue siendo un
    <input type="checkbox"> normal por debajo (mismo :checked, mismo
@@ -1027,7 +1121,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .mobile-calendar-month-name {
   text-align: center;
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 1.3rem;
   margin: 0;
 }
 

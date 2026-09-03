@@ -21,7 +21,12 @@ const router = express.Router();
 // apunte a una imagen ya subida a esta misma app (routes/noteImages.js) y
 // no, por ejemplo, a un "data:" (la opcion base64 que se descarto a
 // proposito) o a un servidor externo.
-const ALLOWED_NOTE_TAGS = new Set(['b', 'strong', 'i', 'em', 'ul', 'ol', 'li', 'br', 'div', 'p', 'table', 'colgroup', 'col', 'tbody', 'tr', 'td', 'th', 'img', 'pre', 'code']);
+const ALLOWED_NOTE_TAGS = new Set([
+  'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'span',
+  'ul', 'ol', 'li', 'br', 'div', 'p', 'h1', 'h2', 'h3',
+  'table', 'colgroup', 'col', 'tbody', 'tr', 'td', 'th',
+  'img', 'pre', 'code',
+]);
 const NOTE_IMAGE_SRC = /^\/api\/notes\/images\/[a-zA-Z0-9._-]+$/;
 // Bloques de codigo (```lenguaje + Intro, o el boton "Codigo"): el
 // "lenguaje" es solo una etiqueta visual (no hay coloreado de verdad
@@ -44,6 +49,17 @@ const NOTE_CODE_LANG = /^[a-zA-Z0-9+#.-]{0,20}$/;
 // guardado no varie segun de donde venga.
 const NOTE_COL_WIDTH_STYLE = /^width:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
 const NOTE_ROW_HEIGHT_STYLE = /^height:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
+// Sangria por parrafo (data-indent, ver applyNoteIndentDelta en app.js):
+// un solo digito 0-4 -- el propio cliente nunca deja el atributo puesto
+// a "0" (lo quita del todo), pero se admite igualmente por si acaso.
+const NOTE_INDENT_LEVEL = /^[0-4]$/;
+// Color de resaltado (fondo, NO subrayado -- confirmado con Koku, ver
+// execNoteHighlight en app.js): hiliteColor con styleWithCSS activo deja
+// un <span style="background-color:...">, pero el navegador puede
+// serializar el color como rgb(...) o como hex segun el motor -- se
+// admite cualquiera de las dos formas, mas "transparent" (boton
+// "Ninguno" del popover, para quitar el resaltado).
+const NOTE_HILITE_COLOR = /^(rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)|#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|transparent)$/i;
 
 // En un <div contenteditable> real, la PRIMERA linea normalmente NO
 // queda envuelta en su propia etiqueta -- se queda como texto suelto al
@@ -59,7 +75,7 @@ const NOTE_ROW_HEIGHT_STYLE = /^height:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
 // de ESE bloque concreto -- de ahi que se descarte una apertura que
 // coincide justo en la posicion 0 y se seguisga buscando.
 function findFirstLineBreakIndex(html) {
-  const pattern = /<br\s*\/?>|<\/(?:div|p|li)>|<(?:div|p|li)(?:\s[^>]*)?>/gi;
+  const pattern = /<br\s*\/?>|<\/(?:div|p|li|h1|h2|h3)>|<(?:div|p|li|h1|h2|h3)(?:\s[^>]*)?>/gi;
   let match;
   while ((match = pattern.exec(html))) {
     const isOpeningBlockAtStart = match.index === 0 && match[0][1] !== '/' && !/^<br/i.test(match[0]);
@@ -138,6 +154,40 @@ function sanitizeNoteBody(html) {
       const langMatch = attrs.match(/\sdata-lang\s*=\s*"([^"]*)"/i);
       const lang = langMatch ? langMatch[1] : '';
       return lang && NOTE_CODE_LANG.test(lang) ? `<pre data-lang="${lang}">` : '<pre>';
+    }
+    // El resaltado de color (hiliteColor, ver execNoteHighlight en app.js)
+    // normalmente envuelve en un <span> nuevo -- pero si el texto
+    // seleccionado ya estaba ENTERO dentro de otra etiqueta en linea
+    // (negrita/cursiva/subrayado/tachado), el navegador reaprovecha esa
+    // misma etiqueta poniendole el "background-color" directamente en vez
+    // de anidar un span dentro (combinacion real y esperada, p. ej.
+    // resaltar un trozo ya en negrita) -- asi que las 7 etiquetas en
+    // linea admiten el mismo "style" restringido, no solo "span".
+    if (lower === 'span' || lower === 'b' || lower === 'strong' || lower === 'i' || lower === 'em' || lower === 'u' || lower === 's' || lower === 'strike') {
+      const styleMatch = attrs.match(/\sstyle\s*=\s*"([^"]*)"/i);
+      const style = styleMatch ? styleMatch[1].trim() : '';
+      const bgMatch = style.match(/^background-color:\s*([^;]+?);?$/i);
+      const color = bgMatch ? bgMatch[1].trim() : '';
+      return NOTE_HILITE_COLOR.test(color) ? `<${lower} style="background-color:${color}">` : `<${lower}>`;
+    }
+    if (lower === 'p' || lower === 'div' || lower === 'h1' || lower === 'h2' || lower === 'h3') {
+      // Estilo de parrafo/sangria/cita (data-style/data-indent/data-quote,
+      // ver applyNoteParagraphStyle/applyNoteIndentDelta/toggleNoteQuoteBlock
+      // en app.js) -- los 3 son independientes y combinables. "li" se
+      // EXCLUYE a proposito de esta rama (cae en el "return" generico de
+      // abajo, sin atributos): cualquier data-indent/data-quote/data-style
+      // en un <li> se descarta solo, reforzando en el servidor la misma
+      // regla del cliente de que estas 3 funciones no aplican en listas.
+      const styleAttrMatch = attrs.match(/\sdata-style\s*=\s*"([^"]*)"/i);
+      const indentMatch = attrs.match(/\sdata-indent\s*=\s*"([^"]*)"/i);
+      const quoteMatch = attrs.match(/\sdata-quote\s*=\s*"([^"]*)"/i);
+      let out = `<${lower}`;
+      // Enum de un solo valor literal por ahora -- mismo criterio que
+      // table/data-border mas arriba, no una expresion suelta.
+      if (styleAttrMatch && styleAttrMatch[1] === 'mono') out += ' data-style="mono"';
+      if (indentMatch && NOTE_INDENT_LEVEL.test(indentMatch[1])) out += ` data-indent="${indentMatch[1]}"`;
+      if (quoteMatch && quoteMatch[1] === '1') out += ' data-quote="1"';
+      return `${out}>`;
     }
     return `<${lower}>`;
   });

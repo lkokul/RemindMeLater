@@ -2017,10 +2017,31 @@
         </div>
       </div>
       <div id="note-body-toolbar" class="note-editor-toolbar">
+        <!-- Estilo de parrafo (Titulo/Encabezado/Subencabezado/Cuerpo/
+             Monoespaciado, estilo Notas de iPhone) -- abre un popover
+             con las 5 opciones, ver applyNoteParagraphStyle en app.js.
+             Se aplica al PARRAFO ENTERO donde este el cursor, no a una
+             seleccion de texto. -->
+        <button type="button" id="note-paragraph-style-btn" class="note-editor-btn" aria-label="Estilo de párrafo" title="Estilo de párrafo">Aa</button>
         <button type="button" data-cmd="bold" class="note-editor-btn" aria-label="Negrita" title="Negrita"><b>N</b></button>
         <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
-        <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn" aria-label="Lista con viñetas" title="Lista con viñetas">&#8226; Lista</button>
-        <button type="button" data-cmd="insertOrderedList" class="note-editor-btn" aria-label="Lista numerada" title="Lista numerada">1. Lista</button>
+        <button type="button" data-cmd="underline" class="note-editor-btn" aria-label="Subrayado" title="Subrayado"><u>S</u></button>
+        <button type="button" data-cmd="strikeThrough" class="note-editor-btn" aria-label="Tachado" title="Tachado"><s>T</s></button>
+        <!-- Color de resaltado (fondo, tipo rotulador) -- ver
+             execNoteHighlight en app.js. Formato EN LINEA, se aplica a
+             la seleccion (a diferencia de los botones de abajo). -->
+        <button type="button" id="note-highlight-btn" class="note-editor-btn" aria-label="Resaltar con color" title="Resaltar con color">&#9635;</button>
+        <span class="note-editor-toolbar-divider"></span>
+        <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn" aria-label="Lista con viñetas" title="Lista con viñetas">&#8226;</button>
+        <button type="button" data-cmd="insertOrderedList" class="note-editor-btn" aria-label="Lista numerada" title="Lista numerada">1.</button>
+        <!-- Sangria/quitar sangria y bloque de cita -- se aplican al
+             PARRAFO ENTERO, con un atributo propio (data-indent/
+             data-quote) en vez de execCommand('indent')/<blockquote>
+             nativos, para no chocar entre si -- ver applyNoteIndentDelta/
+             toggleNoteQuoteBlock en app.js. -->
+        <button type="button" id="note-outdent-btn" class="note-editor-btn" aria-label="Quitar sangría" title="Quitar sangría">&#8676;</button>
+        <button type="button" id="note-indent-btn" class="note-editor-btn" aria-label="Añadir sangría" title="Añadir sangría">&#8677;</button>
+        <button type="button" id="note-quote-toggle-btn" class="note-editor-btn" aria-label="Cita" title="Cita">&#10077;</button>
         <button type="button" id="note-table-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
         <button type="button" id="note-image-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
         <!-- Bloque de codigo: fuente monoespaciada, SIN colorear por

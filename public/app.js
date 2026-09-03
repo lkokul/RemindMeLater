@@ -1370,6 +1370,7 @@ async function loadMonth() {
   document.getElementById('current-month-label').textContent = formatMonthYear(state.viewDate);
   renderCalendarGrid();
   renderMobileCalendarMonthGrid();
+  refreshMobileCalendarNavLabel();
 }
 
 // Los dias marcados como festivo/especial no son muchos (los pones tu a
@@ -3099,12 +3100,20 @@ document.getElementById('event-end-time-field').appendChild(eventEndTimeField.el
 // presetDate (opcional): al crear un evento nuevo desde el panel de un
 // dia concreto, arranca ya con esa fecha puesta (a las 09:00 por
 // defecto) en vez de con la fecha/hora actual.
+function refreshEventAllDayFields() {
+  const isAllDay = document.getElementById('event-all-day').checked;
+  document.getElementById('event-start-time-field').classList.toggle('hidden', isAllDay);
+  document.getElementById('event-end-time-field').classList.toggle('hidden', isAllDay);
+}
+document.getElementById('event-all-day').addEventListener('change', refreshEventAllDayFields);
+
 function openEventModal(event, presetDate) {
   const modal = document.getElementById('event-modal');
   document.getElementById('event-modal-title').textContent = event ? 'Editar evento' : 'Nuevo evento';
   document.getElementById('event-id').value = event ? event.id : '';
   document.getElementById('event-title').value = event ? event.title : '';
   document.getElementById('event-all-day').checked = event ? event.allDay : false;
+  refreshEventAllDayFields();
   let defaultStart = new Date();
   if (presetDate) {
     defaultStart = new Date(presetDate);
@@ -4384,6 +4393,12 @@ function refreshNoteEditorToolbar() {
 function resetNoteEditorToolbar() {
   document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
   document.getElementById('note-table-context-toolbar').classList.add('hidden');
+  document.getElementById('note-paragraph-style-btn').disabled = false;
+  document.getElementById('note-quote-toggle-btn').disabled = false;
+  document.getElementById('note-quote-toggle-btn').classList.remove('is-active');
+  document.getElementById('note-indent-btn').disabled = false;
+  document.getElementById('note-outdent-btn').disabled = false;
+  document.getElementById('note-highlight-btn').disabled = false;
 }
 
 document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => {
@@ -4451,6 +4466,7 @@ function refreshTableContextToolbar() {
 function refreshNoteEditorState() {
   refreshNoteEditorToolbar();
   refreshTableContextToolbar();
+  refreshNoteBlockButtons();
 }
 
 // El editor guarda aqui la seleccion de justo antes de abrir el popover
@@ -4484,6 +4500,213 @@ function restoreNoteEditorSelection() {
   sel.removeAllRanges();
   sel.addRange(savedNoteEditorRange);
 }
+
+// ---------------------------------------------------------------------
+// Formato estilo Notas de iPhone: estilos de parrafo (Titulo/
+// Encabezado/Subencabezado/Cuerpo/Monoespaciado), sangria/quitar
+// sangria, bloque de cita, y resaltado de color. Los 3 primeros son
+// "de bloque" (se aplican al parrafo ENTERO donde este el cursor, no a
+// una seleccion) -- el resaltado es "en linea" (se aplica a la
+// seleccion, como negrita/cursiva/subrayado/tachado, que ya iban por
+// execCommand generico mas arriba).
+// ---------------------------------------------------------------------
+
+// Sube desde el nodo dado hasta encontrar un hijo DIRECTO de
+// NOTE_EDITOR_BODY -- el "bloque" en el que esta el cursor (p/div/
+// h1/h2/h3, o <li> si esta dentro de una lista). null si no hay
+// seleccion, si el nodo no esta dentro del editor, o si el cursor esta
+// en la "primera linea sin envolver" (texto suelto pegado directamente
+// a NOTE_EDITOR_BODY, ver el comentario de findFirstLineBreakIndexClient
+// mas abajo) -- en ese caso no hay ningun ELEMENTO del que colgar un
+// atributo todavia, para eso esta ensureNoteBlockWrapped().
+function getNoteBlockAncestor(node) {
+  if (!node || !NOTE_EDITOR_BODY.contains(node)) return null;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  while (node && node !== NOTE_EDITOR_BODY) {
+    if (node.parentElement === NOTE_EDITOR_BODY) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+// Fuerza que la linea actual quede envuelta en un elemento real antes
+// de tocarle atributos a mano (data-quote/data-indent) -- necesario
+// para la "primera linea sin envolver". formatBlock('<div>') es un
+// no-op visual si la linea ya estaba envuelta (el navegador no la
+// vuelve a envolver dos veces), asi que es seguro llamarlo siempre.
+function ensureNoteBlockWrapped() {
+  if (getNoteBlockAncestor(window.getSelection().anchorNode)) return;
+  document.execCommand('formatBlock', false, '<div>');
+}
+
+function isSelectionInsideNoteListItem() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return false;
+  let node = sel.getRangeAt(0).startContainer;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  return !!(node && NOTE_EDITOR_BODY.contains(node) && node.closest('li'));
+}
+
+// Estilo de parrafo/cita/sangria se desactivan (no solo "no hacen
+// nada") con el cursor dentro de una lista: Notas de iPhone tampoco
+// ofrece Titulo/cita sobre una linea con vineta, y las listas ya
+// tienen su propio mecanismo de sangria (Tab/Shift+Tab dentro de un
+// <li>, ver maybeIndentNoteListItem mas abajo, con execCommand nativo)
+// -- reutilizar los mismos botones para dos mecanismos distintos segun
+// el contexto seria confuso. El resaltado de color SI tiene sentido
+// dentro de una lista (es un formato en linea) -- solo se desactiva
+// dentro de un bloque de codigo, igual que negrita/cursiva/listas.
+function refreshNoteBlockButtons() {
+  const disabled = isSelectionInsideNoteListItem() || isCursorInCodeBlock();
+  const block = disabled ? null : getNoteBlockAncestor(window.getSelection().anchorNode);
+  const indent = block ? Math.max(0, Math.min(NOTE_MAX_INDENT, parseInt(block.dataset.indent || '0', 10) || 0)) : 0;
+  document.getElementById('note-paragraph-style-btn').disabled = disabled;
+  document.getElementById('note-quote-toggle-btn').disabled = disabled;
+  document.getElementById('note-quote-toggle-btn').classList.toggle('is-active', !!block && block.getAttribute('data-quote') === '1');
+  document.getElementById('note-indent-btn').disabled = disabled || indent >= NOTE_MAX_INDENT;
+  document.getElementById('note-outdent-btn').disabled = disabled || indent <= 0;
+  document.getElementById('note-highlight-btn').disabled = isCursorInCodeBlock();
+}
+
+function applyNoteParagraphStyle(styleName) {
+  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return;
+  restoreNoteEditorSelection();
+  // "Cuerpo" usa <div> (no <p>) a proposito: es exactamente lo que ya
+  // produce una linea normal sin tocar hoy, asi que elegir "Cuerpo" no
+  // introduce ninguna etiqueta nueva. El nombre de etiqueta se pasa
+  // siempre explicito (con "<>") en vez de fiarse del bloque por
+  // defecto del navegador, que varia entre motores.
+  const tagMap = { title: '<h1>', heading: '<h2>', subheading: '<h3>', body: '<div>', mono: '<div>' };
+  document.execCommand('formatBlock', false, tagMap[styleName]);
+  const block = getNoteBlockAncestor(window.getSelection().anchorNode);
+  if (block) {
+    if (styleName === 'mono') block.setAttribute('data-style', 'mono');
+    else block.removeAttribute('data-style');
+  }
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+// A proposito NO usa execCommand('indent') ni <blockquote> nativo --
+// execCommand('indent') sobre un parrafo normal envuelve en
+// <blockquote> por defecto en la mayoria de motores, lo que chocaria
+// con esta misma pieza si se usara la etiqueta nativa para las dos
+// cosas. Atributo manual data-quote="1", independiente del todo.
+function toggleNoteQuoteBlock() {
+  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return;
+  ensureNoteBlockWrapped();
+  const block = getNoteBlockAncestor(window.getSelection().anchorNode);
+  if (!block) return;
+  if (block.getAttribute('data-quote') === '1') block.removeAttribute('data-quote');
+  else block.setAttribute('data-quote', '1');
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+// Misma razon que la cita para no usar execCommand('indent'/'outdent')
+// aqui -- ese mecanismo nativo se deja intacto SOLO para el Tab/
+// Shift+Tab ya existente dentro de un <li> (maybeIndentNoteListItem,
+// mas abajo). Para parrafos normales, atributo numerico manual
+// data-indent="0".."4" (0 = sin atributo, para no ensuciar los
+// bloques nunca tocados).
+const NOTE_MAX_INDENT = 4;
+function applyNoteIndentDelta(delta) {
+  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return;
+  ensureNoteBlockWrapped();
+  const block = getNoteBlockAncestor(window.getSelection().anchorNode);
+  if (!block) return;
+  const current = Math.max(0, Math.min(NOTE_MAX_INDENT, parseInt(block.dataset.indent || '0', 10) || 0));
+  const next = Math.max(0, Math.min(NOTE_MAX_INDENT, current + delta));
+  if (next === 0) block.removeAttribute('data-indent');
+  else block.setAttribute('data-indent', String(next));
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+// hiliteColor confirmado con Koku: resaltado de FONDO (rotulador), no
+// subrayado de color. "styleWithCSS" se activa SOLO alrededor de esta
+// llamada concreta (no de forma permanente al cargar el editor) --
+// dejarlo activo para siempre tambien cambiaria la salida de otros
+// comandos en algunos motores (p. ej. "bold" pasaria de <b> a
+// <span style="font-weight:bold">" en Firefox, que no esta en la lista
+// blanca del servidor y rompería negritas ya guardadas en silencio).
+function execNoteHighlight(color) {
+  restoreNoteEditorSelection();
+  document.execCommand('styleWithCSS', false, true);
+  document.execCommand('hiliteColor', false, color);
+  document.execCommand('styleWithCSS', false, false);
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+const paragraphStylePopover = document.createElement('div');
+paragraphStylePopover.className = 'paragraph-style-popover hidden';
+paragraphStylePopover.innerHTML = `
+  <button type="button" class="paragraph-style-option" data-style="title">Título</button>
+  <button type="button" class="paragraph-style-option" data-style="heading">Encabezado</button>
+  <button type="button" class="paragraph-style-option" data-style="subheading">Subencabezado</button>
+  <button type="button" class="paragraph-style-option" data-style="body">Cuerpo</button>
+  <button type="button" class="paragraph-style-option" data-style="mono">Monoespaciado</button>
+`;
+document.body.appendChild(paragraphStylePopover);
+
+const paragraphStyleBtn = document.getElementById('note-paragraph-style-btn');
+paragraphStyleBtn.addEventListener('mousedown', (e) => e.preventDefault());
+paragraphStyleBtn.addEventListener('click', () => {
+  if (paragraphStyleBtn.disabled) return;
+  const willOpen = paragraphStylePopover.classList.contains('hidden');
+  if (willOpen) saveNoteEditorSelection();
+  closeAllPopovers(paragraphStylePopover);
+  paragraphStylePopover.classList.toggle('hidden');
+  if (willOpen) positionFixedPopover(paragraphStyleBtn, paragraphStylePopover, { width: 200 });
+});
+paragraphStylePopover.querySelectorAll('.paragraph-style-option').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    paragraphStylePopover.classList.add('hidden');
+    applyNoteParagraphStyle(btn.dataset.style);
+  });
+});
+
+const NOTE_HIGHLIGHT_SWATCHES = [
+  { color: '#fff59d', label: 'Amarillo' },
+  { color: '#a5d6a7', label: 'Verde' },
+  { color: '#90caf9', label: 'Azul' },
+  { color: '#f48fb1', label: 'Rosa' },
+  { color: '#ffcc80', label: 'Naranja' },
+];
+const highlightColorPopover = document.createElement('div');
+highlightColorPopover.className = 'highlight-color-popover hidden';
+highlightColorPopover.innerHTML = `
+  ${NOTE_HIGHLIGHT_SWATCHES.map((s) => `<button type="button" class="highlight-swatch" data-color="${s.color}" style="background:${s.color}" aria-label="${s.label}" title="${s.label}"></button>`).join('')}
+  <button type="button" class="highlight-swatch highlight-swatch-clear" data-color="transparent">Ninguno</button>
+`;
+document.body.appendChild(highlightColorPopover);
+
+const highlightBtn = document.getElementById('note-highlight-btn');
+highlightBtn.addEventListener('mousedown', (e) => e.preventDefault());
+highlightBtn.addEventListener('click', () => {
+  if (highlightBtn.disabled) return;
+  const willOpen = highlightColorPopover.classList.contains('hidden');
+  if (willOpen) saveNoteEditorSelection();
+  closeAllPopovers(highlightColorPopover);
+  highlightColorPopover.classList.toggle('hidden');
+  if (willOpen) positionFixedPopover(highlightBtn, highlightColorPopover, { width: 190 });
+});
+highlightColorPopover.querySelectorAll('.highlight-swatch').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    highlightColorPopover.classList.add('hidden');
+    execNoteHighlight(btn.dataset.color);
+  });
+});
+
+const quoteToggleBtn = document.getElementById('note-quote-toggle-btn');
+quoteToggleBtn.addEventListener('mousedown', (e) => e.preventDefault());
+quoteToggleBtn.addEventListener('click', toggleNoteQuoteBlock);
+
+document.getElementById('note-indent-btn').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('note-indent-btn').addEventListener('click', () => applyNoteIndentDelta(1));
+document.getElementById('note-outdent-btn').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('note-outdent-btn').addEventListener('click', () => applyNoteIndentDelta(-1));
 
 function clampTableSize(value) {
   const n = Math.round(Number(value));
@@ -5448,7 +5671,7 @@ function legacyNoteBodyToHtml(text) {
 // bloque -- de ahi que se descarte una apertura que coincide justo en
 // la posicion 0 y se siga buscando.
 function findFirstLineBreakIndexClient(html) {
-  const pattern = /<br\s*\/?>|<\/(?:div|p|li)>|<(?:div|p|li)(?:\s[^>]*)?>/gi;
+  const pattern = /<br\s*\/?>|<\/(?:div|p|li|h1|h2|h3)>|<(?:div|p|li|h1|h2|h3)(?:\s[^>]*)?>/gi;
   let match;
   while ((match = pattern.exec(html))) {
     const isOpeningBlockAtStart = match.index === 0 && match[0][1] !== '/' && !/^<br/i.test(match[0]);
