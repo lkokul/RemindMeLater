@@ -334,16 +334,6 @@
           <div id="mobile-calendar-year-grid" class="mobile-calendar-year-grid hidden"></div>
         </section>
 
-        <!-- Lleva a la vista diaria de HOY -- solo tiene sentido en mes/año
-             (oculto en vista diaria, ver enterMobileDayView()/exitMobileDayView()
-             en app.js, que ocultan/muestran este boton junto con la barra
-             y la vista de mes/año). La vista diaria completa (tira semanal
-             + Vista por horas/Listado) es la Fase 3 -- de momento este
-             boton entra en una version minima de esa vista (solo fecha +
-             volver), que la Fase 3 completara sin tener que recablear
-             este boton. -->
-        <button type="button" id="btn-mobile-calendar-today" class="secondary-btn mobile-calendar-today-btn mobile-only">Hoy</button>
-
         <!-- Vista diaria movil completa (Fase 3 del rediseño movil): tira
              semanal + 2 sub-vistas ("Vista por horas"/"Listado"). Misma
              barra superior que el mes (.mobile-calendar-toolbar), con su
@@ -600,14 +590,17 @@
       </div>
     </div>
 
-    <div class="mobile-notes-search-row">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mobile-notes-search-icon"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-      <input type="text" id="mobile-notes-search-input" placeholder="Buscar..." autocomplete="off" />
-    </div>
-
-    <div class="mobile-notes-toolbar">
+    <!-- Buscador + acciones en UNA sola fila (antes 2 filas apiladas,
+         Koku pidio que "+carpeta"/"+nota"/los 3 puntos suban a la misma
+         altura que la barra de busqueda) -- la pildora de busqueda crece
+         (flex:1) para ocupar el hueco sobrante, los botones se quedan
+         a su ancho de icono normal a la derecha. -->
+    <div class="mobile-notes-header-row">
+      <div class="mobile-notes-search-row">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mobile-notes-search-icon"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="text" id="mobile-notes-search-input" placeholder="Buscar..." autocomplete="off" />
+      </div>
       <button type="button" id="btn-mobile-notes-back" class="secondary-btn hidden">← Volver</button>
-      <div class="spacer"></div>
       <button type="button" id="btn-mobile-notes-new-folder" class="icon-btn" aria-label="Nueva carpeta" title="Nueva carpeta">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
       </button>
@@ -616,9 +609,6 @@
       </button>
       <div class="mobile-notes-menu-wrap" id="mobile-notes-menu-wrap">
         <button type="button" id="btn-mobile-notes-menu" class="icon-btn" aria-label="Más opciones" aria-expanded="false" aria-haspopup="true">⋮</button>
-        <!-- Contenido del menu (Editar carpetas/Seleccionar/Vista/Ordenar)
-             se rellena en una ronda siguiente de esta misma Fase 4 --
-             de momento el boton existe pero el popover esta vacio. -->
         <div id="mobile-notes-menu-popover" class="select-popover mobile-notes-menu-popover hidden"></div>
       </div>
     </div>
@@ -2018,15 +2008,15 @@
         <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
         <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn" aria-label="Lista con viñetas" title="Lista con viñetas">&#8226; Lista</button>
         <button type="button" data-cmd="insertOrderedList" class="note-editor-btn" aria-label="Lista numerada" title="Lista numerada">1. Lista</button>
-        <button type="button" id="note-table-insert-btn" class="note-editor-btn" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
-        <button type="button" id="note-image-insert-btn" class="note-editor-btn" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
+        <button type="button" id="note-table-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
+        <button type="button" id="note-image-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
         <!-- Bloque de codigo: fuente monoespaciada, SIN colorear por
              lenguaje (para eso haria falta meter una libreria externa,
              y de momento el frontend entero no tiene ninguna). Tambien
              se puede escribir "```lenguaje" + Intro en una linea vacia,
              estilo GitHub/Markdown -- ver maybeAutoStartCodeBlock en
              app.js. Este boton inserta uno sin lenguaje asignado. -->
-        <button type="button" id="note-code-insert-btn" class="note-editor-btn" aria-label="Insertar bloque de codigo" title="Insertar bloque de codigo (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
+        <button type="button" id="note-code-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar bloque de codigo" title="Insertar bloque de codigo (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
         <!-- Selector de archivo nativo, oculto -- lo abre el boton de
              arriba con .click(). Tambien sirve para el Ctrl+V (ver
              app.js), que reutiliza la misma subida. -->
@@ -2054,8 +2044,8 @@
              un boton: clicarlo va rotando Insertar->Normal->Visual, para
              quien prefiera el raton al teclado (Esc/i/v). Solo se ve si
              el ajuste esta activado. -->
-        <button type="button" id="note-editor-vim-indicator" class="note-editor-vim-indicator hidden">INSERTAR</button>
-        <button type="button" id="note-editor-vim-toggle-btn" class="note-editor-btn" aria-pressed="false" title="Atajos de movimiento estilo vim (Esc = modo Normal, i/a/o = Insertar)">Vim</button>
+        <button type="button" id="note-editor-vim-indicator" class="note-editor-vim-indicator hidden desktop-only">INSERTAR</button>
+        <button type="button" id="note-editor-vim-toggle-btn" class="note-editor-btn desktop-only" aria-pressed="false" title="Atajos de movimiento estilo vim (Esc = modo Normal, i/a/o = Insertar)">Vim</button>
         <!-- Alterna entre editar (por defecto, como antes) y solo lectura,
              por si solo quieres consultar la nota sin arriesgarte a
              tocarla sin querer -- ver applyNoteEditorReadMode en app.js.
@@ -2070,7 +2060,7 @@
              notas abiertas a la vez, ver state.openNotes en app.js). Solo
              uno de los dos paneles se ve a la vez (ver setActiveNoteEditorPanel
              en app.js), volver a clicar el que esta activo lo cierra. -->
-        <div class="note-editor-rail">
+        <div class="note-editor-rail desktop-only">
           <button type="button" id="note-editor-toggle-tree" class="note-editor-rail-btn" aria-label="Arbol de notas" title="Arbol de carpetas y notas">Árbol</button>
           <button type="button" id="note-editor-toggle-sections" class="note-editor-rail-btn" aria-label="Secciones" title="Secciones (notas abiertas)">Notas</button>
         </div>
@@ -2079,7 +2069,7 @@
              enteros, sin llamada nueva a la API). Clicar una nota la abre
              en el editor (se anade a las notas abiertas si no lo estaba
              ya, ver openNoteInEditor). -->
-        <div id="note-tree-panel" class="note-editor-side-panel hidden">
+        <div id="note-tree-panel" class="note-editor-side-panel hidden desktop-only">
           <div class="note-editor-side-panel-header">
             <span>Árbol de notas</span>
             <button type="button" id="note-tree-new-btn" class="icon-btn" aria-label="Nueva nota" title="Nueva nota">+</button>
@@ -2093,7 +2083,7 @@
              un simple placeholder, el editor todavia no tiene ningun
              concepto de titulos/encabezados dentro del cuerpo de la
              nota (queda para una ronda futura). -->
-        <div id="note-sections-panel" class="note-editor-side-panel hidden">
+        <div id="note-sections-panel" class="note-editor-side-panel hidden desktop-only">
           <div class="note-editor-side-panel-header">Notas abiertas</div>
           <div id="note-sections-list" class="note-sections-list"></div>
         </div>

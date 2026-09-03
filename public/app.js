@@ -2768,7 +2768,6 @@ async function showMobileDay(date, { scrollToNow = false } = {}) {
 function enterMobileDayView(date) {
   document.getElementById('mobile-calendar-month-toolbar').classList.add('hidden');
   document.querySelector('.mobile-calendar-view').classList.add('hidden');
-  document.getElementById('btn-mobile-calendar-today').classList.add('hidden');
   document.getElementById('mobile-calendar-day-view').classList.remove('hidden');
   showMobileDay(date, { scrollToNow: true });
 }
@@ -2779,11 +2778,9 @@ function exitMobileDayView() {
   document.getElementById('mobile-calendar-day-view').classList.add('hidden');
   document.getElementById('mobile-calendar-month-toolbar').classList.remove('hidden');
   document.querySelector('.mobile-calendar-view').classList.remove('hidden');
-  document.getElementById('btn-mobile-calendar-today').classList.remove('hidden');
 }
 
 document.getElementById('btn-mobile-day-back-label').addEventListener('click', exitMobileDayView);
-document.getElementById('btn-mobile-calendar-today').addEventListener('click', () => enterMobileDayView(new Date()));
 
 // Swipe horizontal en la tira semanal (unico area sin scroll vertical
 // propio dentro de la vista diaria -- ya lleva touch-action:pan-x en
