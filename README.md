@@ -291,6 +291,22 @@ arriba:
   el botón para sincronizar el resto de datos manualmente (ver "Instalar
   como app" más abajo) y el de comprobar si hay una versión nueva de la
   app (instalarla de verdad sigue siendo solo desde el ordenador).
+- **Viajes**: mapamundi interactivo por países (SVG de
+  `raphaellepuschitz/SVG-World-Map`, licencia MIT) que resalta los países
+  ya visitados según los viajes registrados, con zoom y paneo a mano
+  (arrastre, rueda, pellizco táctil) mutando el `viewBox` del SVG, sin
+  ninguna librería. Un viaje puede tocar varios países a la vez (ej. un
+  interrail) en vez de tener uno solo fijo. Cada viaje lleva su propia
+  bitácora: entradas de texto por día o momento del viaje, cada una con
+  sus propias fotos y/o sus propios movimientos de gasto o ingreso (no
+  toda foto es un ticket ni todo gasto lleva foto). Los movimientos se
+  pueden vincular a Finanzas: cada viaje tiene su propio ajuste de
+  vínculo y una cuenta por defecto propia, así que activarlo genera de
+  verdad la transacción en Finanzas por cada movimiento nuevo (y se puede
+  vincular en bloque lo que ya hubiera suelto al activarlo después). "Mis
+  viajes" se filtra con chips de selección múltiple por año, mes y país a
+  la vez, con un checkbox aparte para no ocultar un viaje multi-país al
+  filtrar por uno solo de sus países.
 
 ## App de escritorio (Electron)
 
