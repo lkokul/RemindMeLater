@@ -967,7 +967,7 @@ function renderThemeLibrary() {
   const activeId = Number(localStorage.getItem('activeThemeId')) || null;
 
   if (themeLibrary.length === 0) {
-    container.innerHTML = '<p class="empty-hint">Todavia no hay temas guardados.</p>';
+    container.innerHTML = '<p class="empty-hint">Todavía no hay temas guardados.</p>';
     positionThemeForm();
     return;
   }
@@ -1259,7 +1259,7 @@ async function refreshThemeCopyList() {
 
   const others = selection.filter((s) => !s.isSelf);
   if (others.length === 0) {
-    container.innerHTML = '<p class="empty-hint">Todavia no hay otros dispositivos vinculados.</p>';
+    container.innerHTML = '<p class="empty-hint">Todavía no hay otros dispositivos vinculados.</p>';
     return;
   }
 
@@ -1410,7 +1410,7 @@ function renderGroupsList() {
   const list = document.getElementById('groups-list');
   list.innerHTML = '';
   if (state.groups.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavia no tienes grupos. Crea uno arriba.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes grupos. Crea uno arriba.</p>';
     return;
   }
   state.groups.forEach((g) => {
@@ -1516,7 +1516,7 @@ function renderDevicesList(devices) {
   const list = document.getElementById('devices-list');
   list.innerHTML = '';
   if (devices.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Ningun dispositivo vinculado todavia.</p>';
+    list.innerHTML = '<p class="empty-hint">Ningun dispositivo vinculado todavía.</p>';
     return;
   }
   devices.forEach((d) => {
@@ -2225,6 +2225,12 @@ document.addEventListener('keydown', (e) => {
     } else {
       document.getElementById('btn-close-lecturas').click();
     }
+    return;
+  }
+
+  const archivosView = document.getElementById('archivos-view');
+  if (archivosView && !archivosView.classList.contains('hidden')) {
+    document.getElementById('btn-close-archivos').click();
     return;
   }
 

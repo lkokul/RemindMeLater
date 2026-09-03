@@ -743,8 +743,10 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   min-height: 100vh;
   min-height: 100dvh;
   /* Sitio para que el contenido no quede tapado por .mobile-nav (fija
-     abajo del todo) -- se quita en escritorio, que no lleva esa barra. */
-  padding-bottom: calc(4.4rem + env(safe-area-inset-bottom, 0px));
+     abajo del todo, ahora flotando con 0.6rem de margen -- ver
+     .mobile-nav mas arriba) -- se quita en escritorio, que no lleva
+     esa barra. */
+  padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* --- Topbar --- */
@@ -785,15 +787,26 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    --------------------------------------------------------------------- */
 .mobile-nav {
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  /* Flota con un margen alrededor (en vez de pegada a los 3 bordes) --
+     Koku la vio "demasiado pegada abajo, no se llega a ver bien" y
+     pidio bordes menos cuadriculados. El offset inferior ya incluye
+     el safe-area-inset (notch/home indicator), asi que no hace falta
+     padding-bottom interno aparte -- ver .app mas abajo, que reserva
+     el mismo hueco (0.6rem extra sobre lo de antes) para que el
+     contenido no quede tapado. */
+  left: 0.6rem;
+  right: 0.6rem;
+  bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px));
   z-index: 70;
   display: flex;
   background: var(--surface);
   color: var(--surface-text);
-  border-top: 1px solid var(--border);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  /* Recorta los botones de las esquinas para que sigan el radio del
+     contenedor -- si no, sus esquinas cuadradas asoman por fuera. */
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 .mobile-nav-btn {
   flex: 1;
@@ -921,6 +934,18 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   font-size: 0.82rem;
   white-space: nowrap;
 }
+/* Selector de densidad del mes (compacto/apilado/listado) -- mismo
+   ajuste compacto que .mobile-day-view-mode-field de arriba, Koku
+   pidio poder ver las 3 opciones y elegir directamente en vez de un
+   icono que alterna al tocarlo. */
+.mobile-calendar-density-field { width: auto; flex-shrink: 0; }
+.mobile-calendar-density-field .select-field { width: auto; }
+.mobile-calendar-density-field .select-field-trigger {
+  width: auto;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
 .mobile-add-menu {
   position: absolute;
   top: calc(100% + 0.4rem);
@@ -948,7 +973,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    (relativo a una barra de arriba), este vive pegado al borde de la
    pantalla, por encima de .mobile-nav (z-index 70), igual que el hueco
    que ya reserva .app/Configuracion para esa barra. */
-.mobile-fab-wrap { position: fixed; right: 1rem; bottom: calc(4.4rem + 1rem + env(safe-area-inset-bottom, 0px)); z-index: 30; }
+.mobile-fab-wrap { position: fixed; right: 1rem; bottom: calc(5rem + 1rem + env(safe-area-inset-bottom, 0px)); z-index: 30; }
 .mobile-fab {
   width: 3.2rem;
   height: 3.2rem;
@@ -1759,7 +1784,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   background: transparent;
   color: inherit;
   font-size: 0.9rem;
-  padding: 0.15rem 0;
+  padding: 0.15rem 0 0.15rem 0.3rem;
 }
 /* Fila combinada de busqueda+acciones en #mobile-notes-view -- la
    pildora de busqueda pasa a vivir DENTRO de esta fila (por eso
@@ -1770,7 +1795,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin: 0 1rem 0.5rem;
+  margin: 1rem 1rem 0.5rem;
 }
 .mobile-notes-header-row .mobile-notes-search-row {
   flex: 1;
@@ -1790,7 +1815,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   background: transparent;
   color: inherit;
   font-size: 0.9rem;
-  padding: 0.15rem 0;
+  padding: 0.15rem 0 0.15rem 0.3rem;
 }
 .mobile-global-search-results { padding: 0 1rem; max-height: none; }
 .mobile-search-result-item {
@@ -2996,7 +3021,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
      que ya reserva .app para que el contenido no quede tapado al final
      de una pestaña larga. */
   #settings-modal .settings-card-body {
-    padding-bottom: calc(4.4rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
   }
   /* En movil, Configuracion ya tiene su propio punto de entrada fijo
      en la barra inferior (.mobile-nav) y "volver" ya lo resuelve esa
@@ -3088,9 +3113,15 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   width: auto;
   margin: 0 0 0.3rem;
   padding: 0.5rem 1.1rem;
-  background: var(--surface);
-  border-color: transparent;
-  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
+  /* surface-2 (en vez de surface, igual que --surface- del contenedor
+     del panel) para que se note como un boton de verdad -- antes era
+     el MISMO color que el fondo detras, sin ningun contraste, Koku lo
+     vio "casi invisible". Sigue siendo opaco de sobra para cumplir su
+     otro trabajo (taparse encima del contenido al quedar pegado arriba
+     durante el scroll). */
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--surface-2-text);
 }
 .settings-tab-panel h3 { margin: 0 0 0.6rem; font-size: 1rem; }
 .settings-tab-panel h4 { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); text-transform: uppercase; letter-spacing: 0.03em; margin: 1rem 0 0.4rem; }

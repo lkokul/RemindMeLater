@@ -1893,6 +1893,26 @@ function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40 } = {})
     }
   });
   el.addEventListener('pointercancel', () => { startX = null; startY = null; });
+  // Refuerzo para toque real, aparte de Pointer Events/touch-action (ver
+  // styles.css): touch-action:none es la forma "de manual" segun el
+  // estandar, pero tiene fama de fallar en algunos motores tactiles
+  // concretos (algunas versiones de Safari iOS, o cuando un gesto del
+  // propio navegador/SO -- tirar para refrescar, deslizar desde el borde
+  // para volver atras -- le gana la carrera). Este listener 'touchmove'
+  // NATIVO (no Pointer Events), registrado sin passive para poder
+  // cancelarlo, es el mecanismo mas robusto: en cuanto el dedo supera una
+  // zona muerta pequeña mientras hay un pointerdown activo, se bloquea el
+  // gesto nativo de raiz. Un toque normal (tap, sin arrastre real) nunca
+  // supera la zona muerta, asi que no interfiere con los clics de
+  // dias/meses/años.
+  el.addEventListener('touchmove', (e) => {
+    if (startX === null) return;
+    const touch = e.touches[0];
+    if (!touch) return;
+    const dx = touch.clientX - startX;
+    const dy = touch.clientY - startY;
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) e.preventDefault();
+  }, { passive: false });
 }
 
 // Mismo calculo de fechas que renderCalendarGrid() (42 celdas, semana
@@ -1974,13 +1994,6 @@ const MOBILE_CALENDAR_MONTH_MODE_IDS = ['compact', 'stacked', 'listed'];
 function getMobileCalendarMonthMode() {
   const stored = localStorage.getItem('mobileCalendarMonthMode');
   return MOBILE_CALENDAR_MONTH_MODE_IDS.includes(stored) ? stored : 'compact';
-}
-function cycleMobileCalendarMonthMode() {
-  const idx = MOBILE_CALENDAR_MONTH_MODE_IDS.indexOf(getMobileCalendarMonthMode());
-  const next = MOBILE_CALENDAR_MONTH_MODE_IDS[(idx + 1) % MOBILE_CALENDAR_MONTH_MODE_IDS.length];
-  localStorage.setItem('mobileCalendarMonthMode', next);
-  renderMobileCalendarMonthGrid();
-  refreshMobileCalendarModeVisibility();
 }
 
 // "De que hora a que hora" para el modo Listado (mes) -- no existia un
@@ -2187,7 +2200,7 @@ function refreshMobileCalendarModeVisibility() {
   // MES (y, cuando exista, de la vista diaria -- que ya trae su propio
   // interruptor "Vista por horas"/"Listado" aparte) -- en año no hace
   // nada visible, Koku confirmo que lo probo y no pasaba nada al pulsarlo.
-  document.getElementById('btn-mobile-calendar-density').classList.toggle('hidden', calendarViewMode === 'year');
+  document.getElementById('mobile-calendar-density-field').classList.toggle('hidden', calendarViewMode === 'year');
 }
 
 function refreshMobileCalendarNavLabel() {
@@ -2207,9 +2220,24 @@ document.getElementById('btn-mobile-calendar-nav-label').addEventListener('click
   if (calendarViewMode === 'year') enterMonthFromYear(state.viewDate.getMonth());
   else setCalendarViewMode('year');
 });
-document.getElementById('btn-mobile-calendar-density').addEventListener('click', () => {
-  cycleMobileCalendarMonthMode();
+// Desplegable en vez de icono ciclico -- mismo motivo/patron que
+// mobileDayViewModeField mas abajo: Koku pidio ver las 3 opciones y
+// elegir directamente, en vez de tener que darle al icono hasta que
+// saliera la que buscaba.
+const mobileCalendarDensityField = createSelectField({
+  options: [
+    { value: 'compact', label: 'Compacto' },
+    { value: 'stacked', label: 'Apilado' },
+    { value: 'listed', label: 'Listado' },
+  ],
+  initialValue: getMobileCalendarMonthMode(),
+  onChange: (v) => {
+    localStorage.setItem('mobileCalendarMonthMode', v);
+    renderMobileCalendarMonthGrid();
+    refreshMobileCalendarModeVisibility();
+  },
 });
+document.getElementById('mobile-calendar-density-field').appendChild(mobileCalendarDensityField.element);
 // El listener real de btn-mobile-calendar-search (abre el buscador
 // global de la Fase 5) se registra mas abajo, junto al resto del
 // buscador (runMobileGlobalSearch/openMobileGlobalSearch).
@@ -3724,7 +3752,7 @@ function renderNotesViewInto(target) {
     const matchFolders = state.noteFolders.filter((f) => f.name.toLowerCase().includes(query));
     const matchNotes = mode === 'move' ? [] : (state.notes || []).filter((n) => n.title.toLowerCase().includes(query));
     if (matchFolders.length === 0 && matchNotes.length === 0) {
-      container.innerHTML = '<p class="empty-hint">Nada coincide con esa busqueda.</p>';
+      container.innerHTML = '<p class="empty-hint">Nada coincide con esa búsqueda.</p>';
       return;
     }
     appendFavoriteSortedGroup(container, matchFolders, (f) => buildFolderRow(f, { showPath: true, mode }));
@@ -3741,7 +3769,7 @@ function renderNotesViewInto(target) {
   }
 
   if (subfolders.length === 0 && notesHere.length === 0) {
-    container.innerHTML = `<p class="empty-hint">${query ? 'Nada coincide con esa busqueda.' : (mode === 'move' ? 'No hay subcarpetas aqui.' : 'No hay nada aqui todavia.')}</p>`;
+    container.innerHTML = `<p class="empty-hint">${query ? 'Nada coincide con esa búsqueda.' : (mode === 'move' ? 'No hay subcarpetas aquí.' : 'No hay nada aquí todavía.')}</p>`;
     return;
   }
 
@@ -5528,7 +5556,7 @@ function closeOpenNote(key) {
   if (!entry) return;
   if (key === state.activeOpenNoteKey) captureActiveOpenNoteFromDom();
   if (isOpenNoteDirty(entry)) {
-    const label = entry.title || 'Nota sin titulo';
+    const label = entry.title || 'Nota sin título';
     if (!confirm(`"${label}" tiene cambios sin guardar. ¿Cerrar sin guardar?`)) return;
   }
   removeOpenNoteAndAdvance(key);
@@ -5600,7 +5628,7 @@ function renderNoteSectionsPanel() {
     const nameBtn = document.createElement('button');
     nameBtn.type = 'button';
     nameBtn.className = 'note-open-item-name';
-    nameBtn.textContent = entry.title || 'Nota sin titulo';
+    nameBtn.textContent = entry.title || 'Nota sin título';
     nameBtn.addEventListener('click', () => switchActiveOpenNote(entry.key));
     row.appendChild(nameBtn);
 
@@ -5627,7 +5655,7 @@ function renderNoteSectionsPanel() {
     if (entry.expanded) {
       const placeholder = document.createElement('div');
       placeholder.className = 'note-open-item-sections-placeholder';
-      placeholder.textContent = 'Sin secciones todavia.';
+      placeholder.textContent = 'Sin secciones todavía.';
       list.appendChild(placeholder);
     }
   });
@@ -5709,7 +5737,7 @@ function renderNoteTreePanel() {
   if (!container) return;
   container.innerHTML = '';
   if (state.noteFolders.length === 0 && (state.notes || []).length === 0) {
-    container.innerHTML = '<p class="empty-hint">No hay notas todavia.</p>';
+    container.innerHTML = '<p class="empty-hint">No hay notas todavía.</p>';
     return;
   }
   renderNoteTreeLevel(container, null, 0);
@@ -6753,7 +6781,7 @@ function renderGymExercisesList() {
   const list = document.getElementById('gym-exercises-list');
   list.innerHTML = '';
   if (state.gymExercises.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavia no tienes ejercicios. Se crean desde aqui o al añadirlos a una rutina/sesion.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes ejercicios. Se crean desde aquí o al añadirlos a una rutina/sesión.</p>';
     return;
   }
   state.gymExercises.forEach((ex) => {
@@ -6778,7 +6806,7 @@ function renderGymRoutinesList() {
   const list = document.getElementById('gym-routines-list');
   list.innerHTML = '';
   if (state.gymRoutines.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavia no tienes rutinas. Crea una arriba.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes rutinas. Crea una arriba.</p>';
     return;
   }
   state.gymRoutines.forEach((r) => {
@@ -6804,7 +6832,7 @@ function renderGymSessionsList() {
   const list = document.getElementById('gym-sessions-list');
   list.innerHTML = '';
   if (state.gymSessions.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavia no has registrado ninguna sesion.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no has registrado ninguna sesión.</p>';
     return;
   }
   state.gymSessions.forEach((s) => {
@@ -7163,7 +7191,7 @@ function renderFinanzasAccountsList() {
   const list = document.getElementById('finanzas-accounts-list');
   list.innerHTML = '';
   if (finanzasAccounts.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavia no tienes cuentas. Crea una arriba.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes cuentas. Crea una arriba.</p>';
     return;
   }
   finanzasAccounts.forEach((a) => {
@@ -7228,7 +7256,7 @@ function renderFinanzasPortfoliosList() {
   const list = document.getElementById('finanzas-portfolios-list');
   list.innerHTML = '';
   if (finanzasPortfolios.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavia no tienes carteras. Crea una arriba.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes carteras. Crea una arriba.</p>';
     return;
   }
   finanzasPortfolios.forEach((p) => {
@@ -7275,7 +7303,7 @@ function renderFinanzasAssetsList() {
   const list = document.getElementById('finanzas-assets-list');
   list.innerHTML = '';
   if (finanzasAssets.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavia no tienes activos. Crea uno arriba.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes activos. Crea uno arriba.</p>';
     return;
   }
   finanzasAssets.forEach((a) => {
@@ -7380,7 +7408,7 @@ async function refreshFinanzasAssetValuations() {
   const tbody = document.getElementById('finanzas-asset-valuations-tbody');
   tbody.innerHTML = '';
   if (valuations.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty-hint">Sin actualizaciones de precio todavia.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-hint">Sin actualizaciones de precio todavía.</td></tr>';
   } else {
     valuations.forEach((v) => {
       const tr = document.createElement('tr');
@@ -7428,7 +7456,7 @@ document.getElementById('finanzas-asset-valuation-form').addEventListener('submi
 function renderFinanzasAssetValuationChart(valuations) {
   const wrap = document.getElementById('finanzas-asset-history-chart');
   if (!valuations || valuations.length === 0) {
-    wrap.innerHTML = '<p class="empty-hint">Sin actualizaciones de precio todavia.</p>';
+    wrap.innerHTML = '<p class="empty-hint">Sin actualizaciones de precio todavía.</p>';
     return;
   }
 
@@ -7444,7 +7472,7 @@ function renderFinanzasAssetValuationChart(valuations) {
       <svg viewBox="0 0 ${width} ${height}" class="finanzas-trend-chart-svg" role="img" aria-label="Evolucion de precio">
         <circle cx="${width / 2}" cy="${height / 2}" r="4" fill="var(--accent)" data-tooltip="${escapeHtml(`${sorted[0].date}: ${formatFinanzasAmount(sorted[0].pricePerUnit)}`)}"></circle>
       </svg>
-      <p class="hint">Todavia solo hay una actualizacion registrada -- la grafica de linea aparecera con la segunda.</p>`;
+      <p class="hint">Todavía solo hay una actualización registrada -- la gráfica de línea aparecera con la segunda.</p>`;
     attachFinanzasChartTooltips(wrap.querySelector('svg'));
     return;
   }
@@ -7559,7 +7587,7 @@ function renderGymRoutineExercisesField() {
   const container = document.getElementById('gym-routine-exercises-field');
   container.innerHTML = '';
   if (gymRoutineModalExercises.length === 0) {
-    container.innerHTML = '<p class="empty-hint">Todavia no has añadido ningun ejercicio.</p>';
+    container.innerHTML = '<p class="empty-hint">Todavía no has añadido ningun ejercicio.</p>';
     return;
   }
   gymRoutineModalExercises.forEach((row, index) => {
@@ -7708,7 +7736,7 @@ function renderGymSessionExercisesField() {
   const container = document.getElementById('gym-session-exercises-field');
   container.innerHTML = '';
   if (gymSessionModalExercises.length === 0) {
-    container.innerHTML = '<p class="empty-hint">Todavia no has añadido ningun ejercicio a esta sesion.</p>';
+    container.innerHTML = '<p class="empty-hint">Todavía no has añadido ningun ejercicio a esta sesión.</p>';
     return;
   }
   gymSessionModalExercises.forEach((exRow, exIndex) => {
@@ -7910,7 +7938,7 @@ async function renderGymProgressChart(exerciseId) {
   }
   const points = await api(`/api/gym-sessions/progress/${exerciseId}`);
   if (points.length === 0) {
-    container.innerHTML = '<p class="empty-hint">Todavia no hay sesiones registradas para este ejercicio.</p>';
+    container.innerHTML = '<p class="empty-hint">Todavía no hay sesiones registradas para este ejercicio.</p>';
     return;
   }
 
@@ -7951,12 +7979,12 @@ async function renderGymProgressChart(exerciseId) {
     .join('');
 
   container.innerHTML = `
-    <svg viewBox="0 0 ${width} ${height}" class="gym-chart-svg" role="img" aria-label="Progreso de ${isVolume ? 'volumen' : 'peso maximo'}">
+    <svg viewBox="0 0 ${width} ${height}" class="gym-chart-svg" role="img" aria-label="Progreso de ${isVolume ? 'volumen' : 'peso máximo'}">
       <path d="${pathD}" fill="none" stroke="var(--accent)" stroke-width="2" />
       ${dots}
       ${labels}
     </svg>
-    <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso maximo'} por sesion, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Pasa el raton por un punto para ver la fecha exacta.</p>
+    <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso máximo'} por sesión, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Pasa el ratón por un punto para ver la fecha exacta.</p>
   `;
   attachFinanzasChartTooltips(container.querySelector('svg'));
 }
@@ -7965,7 +7993,7 @@ function renderFinanzasCategoriesList() {
   const list = document.getElementById('finanzas-categories-list');
   list.innerHTML = '';
   if (finanzasCategories.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavia no tienes categorías. Crea una arriba.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes categorías. Crea una arriba.</p>';
     return;
   }
   finanzasCategories.forEach((c) => {
@@ -8048,7 +8076,7 @@ function renderFinanzasAccountsSummary() {
   const wrap = document.getElementById('finanzas-accounts-summary');
   wrap.innerHTML = '';
   if (finanzasAccounts.length === 0) {
-    wrap.innerHTML = '<p class="empty-hint">Todavia no tienes cuentas. Crealas en la pestaña Movimientos.</p>';
+    wrap.innerHTML = '<p class="empty-hint">Todavía no tienes cuentas. Crealas en la pestaña Movimientos.</p>';
     return;
   }
   finanzasAccounts.forEach((a) => {
@@ -8113,7 +8141,7 @@ function attachFinanzasChartTooltips(svgEl) {
 function renderFinanzasMonthlyTrendChart(data) {
   const wrap = document.getElementById('finanzas-monthly-trend-chart');
   if (!data || data.length === 0) {
-    wrap.innerHTML = '<p class="empty-hint">Sin datos todavia.</p>';
+    wrap.innerHTML = '<p class="empty-hint">Sin datos todavía.</p>';
     return;
   }
 
@@ -8263,7 +8291,7 @@ async function renderFinanzasResumenTab() {
   const breakdownList = document.getElementById('finanzas-category-breakdown-list');
   breakdownList.innerHTML = '';
   if (summary.byCategory.length === 0 && summary.uncategorizedExpense === 0) {
-    breakdownList.innerHTML = '<p class="empty-hint">Sin gastos este mes todavia.</p>';
+    breakdownList.innerHTML = '<p class="empty-hint">Sin gastos este mes todavía.</p>';
   } else {
     summary.byCategory.forEach((c) => {
       const row = document.createElement('div');
@@ -8571,7 +8599,7 @@ function renderFinanzasRecurringList() {
   const tbody = document.getElementById('finanzas-recurring-tbody');
   tbody.innerHTML = '';
   if (finanzasRecurringExpenses.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-hint">Todavia no tienes gastos fijos. Crea uno arriba.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-hint">Todavía no tienes gastos fijos. Crea uno arriba.</td></tr>';
     return;
   }
   finanzasRecurringExpenses.forEach((r) => {
@@ -8823,7 +8851,7 @@ async function openFinanzasRecurringTransactionsModal(r) {
   const transactions = await api(`/api/finanzas-transactions?recurringExpenseId=${r.id}`);
   tbody.innerHTML = '';
   if (transactions.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="2" class="empty-hint">Todavia no se ha generado ninguno.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="2" class="empty-hint">Todavía no se ha generado ninguno.</td></tr>';
     return;
   }
   transactions.forEach((t) => {
@@ -8843,7 +8871,7 @@ async function refreshFinanzasInvestmentsTab() {
   const tbody = document.getElementById('finanzas-investments-tbody');
   tbody.innerHTML = '';
   if (investments.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-hint">Sin inversiones registradas todavia.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-hint">Sin inversiones registradas todavía.</td></tr>';
   } else {
     const typeLabels = { buy: 'Compra', sell: 'Venta', dividend: 'Dividendo' };
     investments.forEach((inv) => {
@@ -8885,7 +8913,7 @@ async function refreshFinanzasInvestmentsTab() {
   const summaryTbody = document.getElementById('finanzas-asset-summary-tbody');
   summaryTbody.innerHTML = '';
   if (summary.length === 0) {
-    summaryTbody.innerHTML = '<tr><td colspan="6" class="empty-hint">Sin datos todavia.</td></tr>';
+    summaryTbody.innerHTML = '<tr><td colspan="6" class="empty-hint">Sin datos todavía.</td></tr>';
   } else {
     summary.forEach((s) => {
       const tr = document.createElement('tr');
@@ -8977,7 +9005,7 @@ function renderFinanzasAssetTree() {
   if (!wrap) return;
   wrap.innerHTML = '';
   if (finanzasPortfolios.length === 0 && finanzasAssets.length === 0) {
-    wrap.innerHTML = '<p class="empty-hint">Todavia no tienes activos. Créalos en "Gestionar carteras y activos".</p>';
+    wrap.innerHTML = '<p class="empty-hint">Todavía no tienes activos. Créalos en "Gestionar carteras y activos".</p>';
     return;
   }
   wrap.appendChild(renderFinanzasAssetTreeLevel(null, 0));
@@ -9006,7 +9034,7 @@ async function refreshFinanzasInvestmentTrendChart() {
 function renderFinanzasInvestmentTrendChart(data) {
   const wrap = document.getElementById('finanzas-investment-trend-chart');
   if (!data || data.length === 0) {
-    wrap.innerHTML = '<p class="empty-hint">Sin datos todavia.</p>';
+    wrap.innerHTML = '<p class="empty-hint">Sin datos todavía.</p>';
     return;
   }
 

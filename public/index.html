@@ -128,8 +128,8 @@
   <div id="pairing-screen" class="pairing-screen hidden">
     <div class="pairing-card">
       <h1>RemindMeLater</h1>
-      <p>Este dispositivo todavia no esta vinculado a tu calendario.</p>
-      <p>En el ordenador, abre <strong>☰ Configuración → Dispositivos → Vincular nuevo dispositivo</strong> y escribe aqui el codigo de 6 digitos que aparezca.</p>
+      <p>Este dispositivo todavía no esta vinculado a tu calendario.</p>
+      <p>En el ordenador, abre <strong>☰ Configuración → Dispositivos → Vincular nuevo dispositivo</strong> y escribe aquí el código de 6 dígitos que aparezca.</p>
       <form id="pairing-form">
         <label>
           Codigo
@@ -304,9 +304,7 @@
         <div id="mobile-calendar-month-toolbar" class="mobile-calendar-toolbar mobile-only">
           <button type="button" id="btn-mobile-calendar-nav-label" class="mobile-calendar-nav-label"></button>
           <div class="mobile-calendar-toolbar-actions">
-            <button type="button" id="btn-mobile-calendar-density" class="icon-btn" aria-label="Cambiar densidad del mes" title="Cambiar densidad del mes">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="19" cy="12" r="1.6"></circle></svg>
-            </button>
+            <div id="mobile-calendar-density-field" class="mobile-calendar-density-field"></div>
             <!-- Buscador global (Fase 5): eventos+tareas+notas por texto,
                  ver #mobile-global-search mas abajo en este archivo. -->
             <button type="button" id="btn-mobile-calendar-search" class="icon-btn" aria-label="Buscar" title="Buscar">
@@ -740,7 +738,7 @@
           Correo (opcional)
           <input type="email" id="onboarding-email" placeholder="tucorreo@ejemplo.com" maxlength="200" />
         </label>
-        <p class="hint">Solo se usaria como contacto tecnico obligatorio si mas adelante activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie mas.</p>
+        <p class="hint">Solo se usaria como contacto tecnico obligatorio si más adelante activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie más.</p>
         <div class="modal-actions">
           <button type="button" id="btn-onboarding-skip" class="secondary-btn">Ahora no</button>
           <div class="spacer"></div>
@@ -1749,7 +1747,7 @@
           <tbody id="lecturas-sagas-tbody"></tbody>
         </table>
       </div>
-      <p id="lecturas-sagas-empty" class="empty-hint hidden">Todavia no tienes ninguna saga. Crea una arriba (hasta algo suelto, como una novela, es una saga de un solo item).</p>
+      <p id="lecturas-sagas-empty" class="empty-hint hidden">Todavía no tienes ninguna saga. Crea una arriba (hasta algo suelto, como una novela, es una saga de un solo item).</p>
     </div>
 
     <div id="lecturas-saga-detail-panel" class="lecturas-panel hidden">
@@ -1776,7 +1774,7 @@
           <tbody id="lecturas-items-tbody"></tbody>
         </table>
       </div>
-      <p id="lecturas-items-empty" class="empty-hint hidden">Todavia no tienes ningun item en esta saga (o ninguno coincide con los filtros).</p>
+      <p id="lecturas-items-empty" class="empty-hint hidden">Todavía no tienes ningun item en esta saga (o ninguno coincide con los filtros).</p>
     </div>
   </div>
 
@@ -1789,7 +1787,7 @@
         <input type="hidden" id="lecturas-saga-id" />
         <label>
           Nombre
-          <input type="text" id="lecturas-saga-name" placeholder="Ej. Kimetsu no Yaiba, o el titulo suelto si es solo uno" required />
+          <input type="text" id="lecturas-saga-name" placeholder="Ej. Kimetsu no Yaiba, o el título suelto si es solo uno" required />
         </label>
         <label>
           Descripción (opcional)
@@ -2025,7 +2023,7 @@
              se puede escribir "```lenguaje" + Intro en una linea vacia,
              estilo GitHub/Markdown -- ver maybeAutoStartCodeBlock en
              app.js. Este boton inserta uno sin lenguaje asignado. -->
-        <button type="button" id="note-code-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar bloque de codigo" title="Insertar bloque de codigo (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
+        <button type="button" id="note-code-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar bloque de código" title="Insertar bloque de código (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
         <!-- Selector de archivo nativo, oculto -- lo abre el boton de
              arriba con .click(). Tambien sirve para el Ctrl+V (ver
              app.js), que reutiliza la misma subida. -->
@@ -2204,7 +2202,7 @@
             Correo (opcional)
             <input type="email" id="profile-email" placeholder="tucorreo@ejemplo.com" maxlength="200" />
           </label>
-          <p class="hint">Solo se usaria como contacto tecnico obligatorio si activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie mas, salvo con Google/Apple para ese uso puntual y solo si activas esos avisos.</p>
+          <p class="hint">Solo se usaria como contacto tecnico obligatorio si activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie más, salvo con Google/Apple para ese uso puntual y solo si activas esos avisos.</p>
           <button type="submit" class="primary-btn">Guardar</button>
         </form>
 
@@ -2336,7 +2334,7 @@
         <div id="devices-management">
           <button id="btn-generate-code" class="primary-btn">Vincular nuevo dispositivo</button>
           <div id="pairing-code-display" class="pairing-code-display hidden">
-            <p>Introduce este codigo en el otro dispositivo:</p>
+            <p>Introduce este código en el otro dispositivo:</p>
             <div id="pairing-code-value" class="code-value"></div>
             <p id="pairing-code-countdown" class="hint"></p>
           </div>
