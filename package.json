@@ -8,7 +8,10 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "electron": "electron .",
-    "dist": "electron-builder --win"
+    "dist": "electron-builder --win",
+    "cap:sync": "cap sync",
+    "cap:android": "cap open android",
+    "cap:ios": "cap open ios"
   },
   "engines": {
     "node": ">=22.5.0"
@@ -21,6 +24,10 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/cli": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
+    "@capacitor/ios": "^8.5.1",
     "electron": "^37.0.0",
     "electron-builder": "^25.1.8"
   },

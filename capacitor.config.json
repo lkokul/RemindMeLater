@@ -1,0 +1,9 @@
+{
+  "appId": "com.koku.remindmelater",
+  "appName": "RemindMeLater",
+  "webDir": "public",
+  "server": {
+    "url": "http://REEMPLAZA-ESTO-por-tu-IP-o-remindmelater.local:3000",
+    "cleartext": true
+  }
+}
