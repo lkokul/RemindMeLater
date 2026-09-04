@@ -3025,6 +3025,28 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 
 /* --- Modales --- */
+.modal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
+  z-index: 20;
+}
+.modal-card {
+  background: var(--surface);
+  color: var(--surface-text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.2rem;
+  width: 100%;
+  /* 420px se quedaba corto para las dos columnas de fecha/hora (Inicio
+     y Fin lado a lado) y forzaba una barra de scroll lateral. */
+  max-width: 480px;
+  max-height: 95vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative; /* para que .modal-close-x se posicione respecto a la tarjeta, no a toda la pantalla */
+}
 .modal-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.8rem; }
 
 /* Confirmacion/aviso propio (showAppConfirm/showAppAlert en app.js) --
