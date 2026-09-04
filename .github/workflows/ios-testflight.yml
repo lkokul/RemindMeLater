@@ -41,16 +41,28 @@ jobs:
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # CODE_SIGN_IDENTITY="Apple Distribution" es imprescindible: la
+          # plantilla de Capacitor deja "iPhone Developer" fijado a nivel
+          # de proyecto (ver project.pbxproj), asi que sin este override
+          # Xcode pide un perfil de DESARROLLO al archivar -- y Apple se
+          # niega a crear uno si el equipo no tiene ningun dispositivo
+          # registrado ("Your team has no devices..."), que es justo el
+          # caso de un pipeline sin Mac ni iPhone conectado. Con la
+          # identidad de distribucion pide un perfil de App Store, que si
+          # se crea sin dispositivos.
           xcodebuild archive \
             -project ios/App/App.xcodeproj \
             -scheme App \
             -configuration Release \
+            -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/App.xcarchive" \
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8 \
             -authenticationKeyID "$APPSTORE_KEY_ID" \
             -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
 
       - name: Generar ExportOptions.plist
