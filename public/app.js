@@ -3837,10 +3837,14 @@ function renderNotesViewInto(target) {
   const backBtn = document.getElementById(cfg.backBtnId);
   if (backBtn) backBtn.classList.toggle('hidden', state.currentNoteFolderId === null || searchWholeApp);
 
-  // "mode"/orden/galeria son ajustes GLOBALES por dispositivo -- solo se
-  // activan pintando la vista movil, nunca la de escritorio (que sigue
-  // funcionando exactamente igual que siempre, sin estos 3 conceptos).
-  const mode = target === 'mobile' ? mobileNotesMode : 'browse';
+  // "mode" (Seleccionar/Mover/editFolders) se comparte entre las dos
+  // plataformas -- un unico mecanismo para mover notas, ver
+  // btn-note-folder-select (escritorio) y el menu de 3 puntos (movil),
+  // ambos llaman a setMobileNotesMode(). Orden/galeria SI siguen siendo
+  // ajustes GLOBALES por dispositivo, solo con efecto en movil (no
+  // tienen equivalente en escritorio, que sigue funcionando igual que
+  // siempre en eso).
+  const mode = mobileNotesMode;
   const sortOpts = target === 'mobile' ? { compareFn: compareMobileNotesItems } : {};
   const useGallery = target === 'mobile' && getMobileNotesViewMode() === 'gallery';
   const buildNote = useGallery
@@ -4031,6 +4035,14 @@ document.getElementById('btn-note-folder-back').addEventListener('click', () => 
   renderNotesView();
 });
 
+// "Seleccionar" de escritorio -- mismo mecanismo Seleccionar/Mover que
+// ya existia solo en movil (mobileNotesMode compartido, ver
+// setMobileNotesMode mas abajo).
+document.getElementById('btn-note-folder-select').addEventListener('click', () => {
+  const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
+  setMobileNotesMode(selecting ? 'browse' : 'select');
+});
+
 // Equivalentes de la vista movil (#mobile-notes-view, Fase 4) -- misma
 // logica exacta que los de escritorio de arriba, apuntando a los ids
 // propios de esa vista. La busqueda movil siempre mira toda la app (sin
@@ -4071,48 +4083,71 @@ function toggleMobileNotesSelection(itemKey) {
   if (mobileNotesSelectedKeys.has(itemKey)) mobileNotesSelectedKeys.delete(itemKey);
   else mobileNotesSelectedKeys.add(itemKey);
   refreshMobileNotesActionBar();
-  renderNotesView('mobile');
+  renderNotesView();
 }
 
 function setMobileNotesMode(mode) {
   mobileNotesMode = mode;
   if (mode !== 'select' && mode !== 'move') mobileNotesSelectedKeys.clear();
   refreshMobileNotesActionBar();
-  renderNotesView('mobile');
+  renderNotesView();
 }
 
-// Barra inferior fija: sin selección propia (Eliminar/Mover deshabilitados
-// con nada marcado), o con el par Cancelar/"Mover aquí" durante el modo
-// Mover -- un unico par de botones reutilizado para los dos casos en vez
-// de 2 barras distintas.
-function refreshMobileNotesActionBar() {
-  const bar = document.getElementById('mobile-notes-action-bar');
-  if (!bar) return;
-  const leftBtn = document.getElementById('btn-mobile-notes-action-left');
-  const rightBtn = document.getElementById('btn-mobile-notes-action-right');
+// Barra de accion: compartida por escritorio y movil (una sola forma de
+// mover notas, ver regla de simplicidad en CLAUDE.md) -- cada plataforma
+// tiene su propio par de botones en el DOM (mismo patron que
+// NOTES_VIEW_TARGETS), rellenados con el mismo texto/handler segun el
+// modo activo.
+const NOTES_ACTION_BAR_TARGETS = {
+  mobile: { barId: 'mobile-notes-action-bar', leftId: 'btn-mobile-notes-action-left', rightId: 'btn-mobile-notes-action-right' },
+  desktop: { barId: 'note-folder-action-bar', leftId: 'btn-note-folder-action-left', rightId: 'btn-note-folder-action-right' },
+};
 
-  if (mobileNotesMode === 'select') {
-    bar.classList.remove('hidden');
-    leftBtn.textContent = 'Eliminar';
-    leftBtn.className = 'danger-btn';
-    leftBtn.disabled = mobileNotesSelectedKeys.size === 0;
-    leftBtn.onclick = openMobileNotesDeleteModal;
-    rightBtn.textContent = 'Mover';
-    rightBtn.className = 'secondary-btn';
-    rightBtn.disabled = mobileNotesSelectedKeys.size === 0;
-    rightBtn.onclick = () => setMobileNotesMode('move');
-  } else if (mobileNotesMode === 'move') {
-    bar.classList.remove('hidden');
-    leftBtn.textContent = 'Cancelar';
-    leftBtn.className = 'secondary-btn';
-    leftBtn.disabled = false;
-    leftBtn.onclick = () => setMobileNotesMode('select');
-    rightBtn.textContent = 'Mover aquí';
-    rightBtn.className = 'primary-btn';
-    rightBtn.disabled = false;
-    rightBtn.onclick = confirmMobileNotesMove;
-  } else {
-    bar.classList.add('hidden');
+// Sin seleccion propia (Eliminar/Mover deshabilitados con nada marcado),
+// o con el par Cancelar/"Mover aquí" durante el modo Mover -- un unico
+// par de botones reutilizado para los dos casos en vez de 2 barras
+// distintas, replicado en las dos plataformas.
+function refreshMobileNotesActionBar() {
+  Object.values(NOTES_ACTION_BAR_TARGETS).forEach(({ barId, leftId, rightId }) => {
+    const bar = document.getElementById(barId);
+    if (!bar) return;
+    const leftBtn = document.getElementById(leftId);
+    const rightBtn = document.getElementById(rightId);
+
+    if (mobileNotesMode === 'select') {
+      bar.classList.remove('hidden');
+      leftBtn.textContent = 'Eliminar';
+      leftBtn.className = 'danger-btn';
+      leftBtn.disabled = mobileNotesSelectedKeys.size === 0;
+      leftBtn.onclick = openMobileNotesDeleteModal;
+      rightBtn.textContent = 'Mover';
+      rightBtn.className = 'secondary-btn';
+      rightBtn.disabled = mobileNotesSelectedKeys.size === 0;
+      rightBtn.onclick = () => setMobileNotesMode('move');
+    } else if (mobileNotesMode === 'move') {
+      bar.classList.remove('hidden');
+      leftBtn.textContent = 'Cancelar';
+      leftBtn.className = 'secondary-btn';
+      leftBtn.disabled = false;
+      leftBtn.onclick = () => setMobileNotesMode('select');
+      rightBtn.textContent = 'Mover aquí';
+      rightBtn.className = 'primary-btn';
+      rightBtn.disabled = false;
+      rightBtn.onclick = confirmMobileNotesMove;
+    } else {
+      bar.classList.add('hidden');
+    }
+  });
+
+  // Boton "Seleccionar" de escritorio: refleja si estamos en
+  // seleccion/mover (equivalente al item de menu "Seleccionar"/"Listo"
+  // que ya existe en movil).
+  const selectBtn = document.getElementById('btn-note-folder-select');
+  if (selectBtn) {
+    const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
+    selectBtn.textContent = selecting ? 'Listo' : 'Seleccionar';
+    selectBtn.classList.toggle('is-active', selecting);
+    selectBtn.setAttribute('aria-pressed', selecting ? 'true' : 'false');
   }
 }
 
@@ -4298,44 +4333,6 @@ if (btnMobileNotesMenu) {
       positionFixedPopover(btnMobileNotesMenu, popover, { width: 220 });
     }
   });
-}
-
-// Selector de carpeta (opcional) dentro del modal de nota — mismo patron
-// que el selector de grupo de las tareas (populateTaskGroupSelect), pero
-// con sangria segun la profundidad para que se note el anidado (un
-// espacio ancho de verdad, U+3000, que no se colapsa como los espacios
-// normales en HTML).
-const noteFolderField = createSelectField({
-  options: [{ value: '', label: 'Sin carpeta' }],
-  initialValue: '',
-  onChange: () => {
-    captureActiveOpenNoteFromDom();
-    renderNoteSectionsPanel();
-  },
-});
-document.getElementById('note-folder-field').appendChild(noteFolderField.element);
-
-function buildFolderSelectOptions(parentId, depth) {
-  const children = state.noteFolders
-    .filter((f) => f.parentId === parentId)
-    .sort((a, b) => a.position - b.position);
-  let options = [];
-  children.forEach((f) => {
-    const indent = '　'.repeat(depth);
-    const prefix = depth > 0 ? '↳ ' : '';
-    options.push({ value: String(f.id), label: indent + prefix + f.name });
-    options = options.concat(buildFolderSelectOptions(f.id, depth + 1));
-  });
-  return options;
-}
-
-function populateNoteFolderSelect() {
-  const current = noteFolderField.getValue();
-  noteFolderField.setOptions([
-    { value: '', label: 'Sin carpeta' },
-    ...buildFolderSelectOptions(null, 0),
-  ]);
-  noteFolderField.setValue(current);
 }
 
 // El estado del favorito dentro del modal (nota nueva o existente) vive
@@ -4623,18 +4620,47 @@ function applyNoteIndentDelta(delta) {
   refreshNoteEditorState();
 }
 
-// hiliteColor confirmado con Koku: resaltado de FONDO (rotulador), no
-// subrayado de color. "styleWithCSS" se activa SOLO alrededor de esta
-// llamada concreta (no de forma permanente al cargar el editor) --
-// dejarlo activo para siempre tambien cambiaria la salida de otros
-// comandos en algunos motores (p. ej. "bold" pasaria de <b> a
-// <span style="font-weight:bold">" en Firefox, que no esta en la lista
-// blanca del servidor y rompería negritas ya guardadas en silencio).
-function execNoteHighlight(color) {
+// Resaltado de color (fondo, tipo rotulador -- confirmado con Koku, no
+// subrayado de color): manipulacion manual del DOM en vez de
+// execCommand('hiliteColor', ...), que solo sabe tocar background-color
+// y es poco fiable para LIMPIAR (era la causa real de que el boton
+// "Ninguno" no funcionara). Atributo cerrado data-highlight (5 valores
+// fijos, ver NOTE_HIGHLIGHT_SWATCHES) -- los colores concretos (fondo Y
+// texto, para contraste real) se definen una sola vez en CSS, nunca con
+// un style en linea puesto por el usuario.
+function applyNoteHighlight(key) {
   restoreNoteEditorSelection();
-  document.execCommand('styleWithCSS', false, true);
-  document.execCommand('hiliteColor', false, color);
-  document.execCommand('styleWithCSS', false, false);
+  const sel = window.getSelection();
+  // Exige una seleccion de verdad, igual que antes -- resaltar "donde
+  // este el cursor" sin nada seleccionado no tiene sentido para un
+  // formato de fondo.
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  const span = document.createElement('span');
+  span.setAttribute('data-highlight', key);
+  span.appendChild(range.extractContents());
+  range.insertNode(span);
+  sel.removeAllRanges();
+  const newRange = document.createRange();
+  newRange.selectNodeContents(span);
+  sel.addRange(newRange);
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+// "Ninguno": si la seleccion toca un resaltado ya existente, se quita
+// del bloque ENTERO (aunque la seleccion solo cubra parte de el) --
+// simplificacion deliberada, en linea con la nueva regla de simplicidad:
+// partir un <span> en dos trozos para ese caso raro no compensa la
+// complejidad extra.
+function clearNoteHighlight() {
+  restoreNoteEditorSelection();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  NOTE_EDITOR_BODY.querySelectorAll('[data-highlight]').forEach((el) => {
+    if (range.intersectsNode(el)) el.removeAttribute('data-highlight');
+  });
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4668,17 +4694,17 @@ paragraphStylePopover.querySelectorAll('.paragraph-style-option').forEach((btn) 
 });
 
 const NOTE_HIGHLIGHT_SWATCHES = [
-  { color: '#fff59d', label: 'Amarillo' },
-  { color: '#a5d6a7', label: 'Verde' },
-  { color: '#90caf9', label: 'Azul' },
-  { color: '#f48fb1', label: 'Rosa' },
-  { color: '#ffcc80', label: 'Naranja' },
+  { key: 'yellow', label: 'Amarillo' },
+  { key: 'green', label: 'Verde' },
+  { key: 'blue', label: 'Azul' },
+  { key: 'pink', label: 'Rosa' },
+  { key: 'orange', label: 'Naranja' },
 ];
 const highlightColorPopover = document.createElement('div');
 highlightColorPopover.className = 'highlight-color-popover hidden';
 highlightColorPopover.innerHTML = `
-  ${NOTE_HIGHLIGHT_SWATCHES.map((s) => `<button type="button" class="highlight-swatch" data-color="${s.color}" style="background:${s.color}" aria-label="${s.label}" title="${s.label}"></button>`).join('')}
-  <button type="button" class="highlight-swatch highlight-swatch-clear" data-color="transparent">Ninguno</button>
+  ${NOTE_HIGHLIGHT_SWATCHES.map((s) => `<button type="button" class="highlight-swatch" data-highlight="${s.key}" aria-label="${s.label}" title="${s.label}"></button>`).join('')}
+  <button type="button" class="highlight-swatch highlight-swatch-clear">Ninguno</button>
 `;
 document.body.appendChild(highlightColorPopover);
 
@@ -4692,11 +4718,15 @@ highlightBtn.addEventListener('click', () => {
   highlightColorPopover.classList.toggle('hidden');
   if (willOpen) positionFixedPopover(highlightBtn, highlightColorPopover, { width: 190 });
 });
-highlightColorPopover.querySelectorAll('.highlight-swatch').forEach((btn) => {
+highlightColorPopover.querySelectorAll('.highlight-swatch:not(.highlight-swatch-clear)').forEach((btn) => {
   btn.addEventListener('click', () => {
     highlightColorPopover.classList.add('hidden');
-    execNoteHighlight(btn.dataset.color);
+    applyNoteHighlight(btn.dataset.highlight);
   });
+});
+highlightColorPopover.querySelector('.highlight-swatch-clear').addEventListener('click', () => {
+  highlightColorPopover.classList.add('hidden');
+  clearNoteHighlight();
 });
 
 const quoteToggleBtn = document.getElementById('note-quote-toggle-btn');
@@ -5779,8 +5809,10 @@ function captureActiveOpenNoteFromDom() {
   if (!entry) return;
   entry.bodyHtml = NOTE_EDITOR_BODY.innerHTML;
   entry.title = deriveTitleFromBodyClient(entry.bodyHtml, 'html');
-  const folderRaw = noteFolderField.getValue();
-  entry.folderId = folderRaw === '' ? null : Number(folderRaw);
+  // entry.folderId ya no se toca aqui -- el editor no tiene desplegable
+  // de carpeta (quitado en esta ronda, ver CLAUDE.md/regla de
+  // simplicidad); mover una nota se hace desde "Seleccionar -> Mover"
+  // en el listado, nunca editando la nota.
   entry.favorite = noteModalFavorite;
   refreshNoteTitlePreview(entry.title);
 }
@@ -5836,8 +5868,6 @@ function loadOpenNoteIntoDom(entry) {
   refreshNoteTitlePreview(entry.title);
   NOTE_EDITOR_BODY.innerHTML = entry.bodyHtml;
   resetNoteEditorToolbar();
-  populateNoteFolderSelect();
-  noteFolderField.setValue(entry.folderId ? String(entry.folderId) : '');
   document.getElementById('btn-delete-note').classList.toggle('hidden', !entry.id);
   noteModalFavorite = entry.favorite;
   refreshNoteFavoriteBtn();
@@ -6282,7 +6312,6 @@ document.getElementById('note-folder-form').addEventListener('submit', async (e)
   closeNoteFolderModal();
   await loadNoteFolders();
   renderNotesView();
-  populateNoteFolderSelect();
 });
 
 document.getElementById('btn-delete-note-folder').addEventListener('click', async () => {
@@ -6294,7 +6323,6 @@ document.getElementById('btn-delete-note-folder').addEventListener('click', asyn
   await loadNoteFolders();
   await loadNotes();
   renderNotesView();
-  populateNoteFolderSelect();
 });
 
 // ---------------------------------------------------------------------
@@ -7471,9 +7499,8 @@ function populateFinanzasSelects() {
 }
 
 // Recorre finanzasPortfolios (parentId auto-referenciado) con
-// indentacion segun profundidad -- mismo patron que
-// buildFolderSelectOptions() para las carpetas de notas (espacio
-// ideografico U+3000 repetido por nivel + prefijo "↳"). excludePortfolioId
+// indentacion segun profundidad (espacio ideografico U+3000 repetido por
+// nivel + prefijo "↳"). excludePortfolioId
 // evita ofrecer una cartera (o cualquiera de sus descendientes) como su
 // propio padre al editarla -- el backend igualmente rechazaria el ciclo,
 // esto solo mejora la UX no mostrando la opcion invalida.
@@ -12037,7 +12064,6 @@ async function init() {
   await initStep(loadTasks);
   renderTasksList();
   await initStep(loadNoteFolders);
-  populateNoteFolderSelect();
   await initStep(loadNotes);
   renderNotesView();
   refreshSyncStatusUI();
@@ -12054,7 +12080,6 @@ async function init() {
   // Carpetas Y notas juntas (no cada una por su lado) para no repintar
   // la vista dos veces seguidas si las dos han cambiado a la vez.
   setInterval(() => Promise.all([loadNoteFolders(), loadNotes()]).then(() => {
-    populateNoteFolderSelect();
     renderNotesView();
   }), 30 * 1000);
 }

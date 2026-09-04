@@ -54,12 +54,12 @@ const NOTE_ROW_HEIGHT_STYLE = /^height:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
 // a "0" (lo quita del todo), pero se admite igualmente por si acaso.
 const NOTE_INDENT_LEVEL = /^[0-4]$/;
 // Color de resaltado (fondo, NO subrayado -- confirmado con Koku, ver
-// execNoteHighlight en app.js): hiliteColor con styleWithCSS activo deja
-// un <span style="background-color:...">, pero el navegador puede
-// serializar el color como rgb(...) o como hex segun el motor -- se
-// admite cualquiera de las dos formas, mas "transparent" (boton
-// "Ninguno" del popover, para quitar el resaltado).
-const NOTE_HILITE_COLOR = /^(rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)|#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|transparent)$/i;
+// applyNoteHighlight en app.js): un Set cerrado de 5 claves fijas
+// (data-highlight), no un color libre -- el cliente ya no manda ningun
+// "style" en linea para esto, los colores concretos (fondo+texto) los
+// define solo el CSS del servidor de la app. Mas simple Y mas estricto
+// que la regex abierta que aceptaba cualquier rgb()/hex de antes.
+const NOTE_HIGHLIGHT_KEYS = new Set(['yellow', 'green', 'blue', 'pink', 'orange']);
 
 // En un <div contenteditable> real, la PRIMERA linea normalmente NO
 // queda envuelta en su propia etiqueta -- se queda como texto suelto al
@@ -155,20 +155,17 @@ function sanitizeNoteBody(html) {
       const lang = langMatch ? langMatch[1] : '';
       return lang && NOTE_CODE_LANG.test(lang) ? `<pre data-lang="${lang}">` : '<pre>';
     }
-    // El resaltado de color (hiliteColor, ver execNoteHighlight en app.js)
-    // normalmente envuelve en un <span> nuevo -- pero si el texto
-    // seleccionado ya estaba ENTERO dentro de otra etiqueta en linea
-    // (negrita/cursiva/subrayado/tachado), el navegador reaprovecha esa
-    // misma etiqueta poniendole el "background-color" directamente en vez
-    // de anidar un span dentro (combinacion real y esperada, p. ej.
-    // resaltar un trozo ya en negrita) -- asi que las 7 etiquetas en
-    // linea admiten el mismo "style" restringido, no solo "span".
+    // El resaltado de color (applyNoteHighlight en app.js) envuelve la
+    // seleccion en un <span data-highlight="..."> nuevo -- pero si esa
+    // seleccion ya estaba ENTERA dentro de otra etiqueta en linea
+    // (negrita/cursiva/subrayado/tachado), Chrome reaprovecha esa misma
+    // etiqueta poniendole el atributo directamente en vez de anidar un
+    // span dentro (combinacion real y esperada, p. ej. resaltar un trozo
+    // ya en negrita) -- asi que las 7 etiquetas en linea admiten el mismo
+    // data-highlight restringido, no solo "span".
     if (lower === 'span' || lower === 'b' || lower === 'strong' || lower === 'i' || lower === 'em' || lower === 'u' || lower === 's' || lower === 'strike') {
-      const styleMatch = attrs.match(/\sstyle\s*=\s*"([^"]*)"/i);
-      const style = styleMatch ? styleMatch[1].trim() : '';
-      const bgMatch = style.match(/^background-color:\s*([^;]+?);?$/i);
-      const color = bgMatch ? bgMatch[1].trim() : '';
-      return NOTE_HILITE_COLOR.test(color) ? `<${lower} style="background-color:${color}">` : `<${lower}>`;
+      const hlMatch = attrs.match(/\sdata-highlight\s*=\s*"([^"]*)"/i);
+      return hlMatch && NOTE_HIGHLIGHT_KEYS.has(hlMatch[1]) ? `<${lower} data-highlight="${hlMatch[1]}">` : `<${lower}>`;
     }
     if (lower === 'p' || lower === 'div' || lower === 'h1' || lower === 'h2' || lower === 'h3') {
       // Estilo de parrafo/sangria/cita (data-style/data-indent/data-quote,

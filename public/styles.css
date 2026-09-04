@@ -387,14 +387,23 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    numerada, mas tabla e imagen), ahora arriba a modo de barra de estado
    fija, separada del contenido por un borde en vez de ir pegada al
    campo. */
+/* Reestructurada en 3 filas explicitas (ronda de retoques): formato en
+   linea / estructura de parrafo / el resto -- antes era una unica fila
+   con todos los botones seguidos y flex-wrap decidiendo el corte, que
+   se veia "raro" al no seguir ningun agrupamiento real. */
 .note-editor-toolbar {
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.note-editor-toolbar-row {
   display: flex;
   align-items: center;
   gap: 0.35rem;
   flex-wrap: wrap;
-  padding: 0.5rem 1.2rem;
-  border-bottom: 1px solid var(--border);
 }
 .note-editor-btn {
   padding: 0.3rem 0.6rem;
@@ -610,6 +619,26 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .note-editor-body [data-indent="3"] { margin-left: 4.2rem; }
 .note-editor-body [data-indent="4"] { margin-left: 5.6rem; }
 
+/* Resaltado de color (fondo, tipo rotulador) -- ver applyNoteHighlight/
+   clearNoteHighlight en app.js. Paleta curada a proposito (pastel de
+   fondo + texto de la MISMA familia de color pero bastante mas oscuro,
+   para contraste real -- el texto del editor por defecto es casi
+   blanco, --surface-2-text, que se leia mal sobre un fondo saturado).
+   box-decoration-break (+ prefijo -webkit-) hace que el fondo/radio se
+   repita de forma continua si el resaltado cruza varias lineas, en vez
+   de verse como fragmentos sueltos por renglon. */
+.note-editor-body [data-highlight] {
+  border-radius: 0.3em;
+  padding: 0.05em 0.25em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.note-editor-body [data-highlight="yellow"] { background: #fdf3c7; color: #7a5c00; }
+.note-editor-body [data-highlight="green"]  { background: #d9f2df; color: #1f6b3a; }
+.note-editor-body [data-highlight="blue"]   { background: #dbe9fb; color: #1a4f8a; }
+.note-editor-body [data-highlight="pink"]   { background: #fbdfe8; color: #8a1f4f; }
+.note-editor-body [data-highlight="orange"] { background: #fce3cc; color: #8a4a10; }
+
 /* Bloques de codigo: fuente monoespaciada, SIN colorear por lenguaje
    (ver la nota de app.js/notes.js sobre por que). "data-lang" (si se
    puso, ej. escribiendo "```js" + Intro) se ensena como una etiqueta
@@ -726,13 +755,19 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   width: 28px; height: 28px; border-radius: 50%;
   border: 1px solid var(--border); cursor: pointer; padding: 0;
 }
+/* Mismos 5 colores de fondo que la paleta real del editor (ver
+   [data-highlight] mas arriba) -- para que la pastilla del popover se
+   vea igual que el resultado real al aplicarla. */
+.highlight-swatch[data-highlight="yellow"] { background: #fdf3c7; }
+.highlight-swatch[data-highlight="green"]  { background: #d9f2df; }
+.highlight-swatch[data-highlight="blue"]   { background: #dbe9fb; }
+.highlight-swatch[data-highlight="pink"]   { background: #fbdfe8; }
+.highlight-swatch[data-highlight="orange"] { background: #fce3cc; }
 .highlight-swatch-clear {
   width: auto; height: auto; border-radius: var(--radius);
   padding: 0.3rem 0.5rem; font-size: 0.75rem;
   background: var(--surface-2); color: var(--surface-2-text);
 }
-
-.note-editor-toolbar-divider { width: 1px; height: 1.2rem; background: var(--border); margin: 0 0.15rem; flex-shrink: 0; }
 /* Interruptor tipo "pastilla" en vez del checkbox cuadrado del sistema:
    se ilumina con el color de acento cuando esta activo. Sigue siendo un
    <input type="checkbox"> normal por debajo (mismo :checked, mismo
@@ -2858,6 +2893,9 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    archivos -- ver renderNotesView en app.js. Solo organizacion, sin PIN
    (eso ya se resuelve por nota individual con "ocultar"). --- */
 .note-folder-toolbar { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem; }
+/* Boton "Seleccionar" de escritorio -- mismo tratamiento "encendido" que
+   ya usa note-search-scope-btn.is-active mientras esta activo. */
+#btn-note-folder-select.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 /* Pastilla reutilizada por el boton "+ Carpeta" de la barra de arriba Y
    por el lapiz de editar de cada fila de carpeta en la lista. */
 .note-folder-chip {
