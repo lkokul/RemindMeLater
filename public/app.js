@@ -1296,6 +1296,18 @@ document.getElementById('sync-indicator').addEventListener('click', () => {
 // Emparejamiento
 // ---------------------------------------------------------------------
 function showPairingScreen() {
+  // El campo de direccion se rellena con lo mejor que tengamos: lo ya
+  // guardado antes, o el origen por el que se abrio la pagina. En un
+  // navegador normal eso ya es la direccion buena y no hay que tocarlo;
+  // en la app empaquetada (Capacitor) el origen es interno del propio
+  // movil (capacitor://localhost), asi que se deja vacio para que se vea
+  // el placeholder y quede claro que hay que escribirla.
+  const field = document.getElementById('pairing-server-url');
+  const saved = localStorage.getItem('serverBaseUrl');
+  const origin = window.location.origin;
+  const originIsUsable = origin.startsWith('http://') || origin.startsWith('https://');
+  field.value = saved || (originIsUsable ? origin : '');
+
   document.getElementById('pairing-screen').classList.remove('hidden');
   document.getElementById('app').classList.add('hidden');
 }
@@ -1307,13 +1319,30 @@ function showApp() {
 
 document.getElementById('pairing-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const serverUrl = document.getElementById('pairing-server-url').value.trim();
   const code = document.getElementById('pairing-code').value.trim();
   const name = document.getElementById('pairing-name').value.trim();
   const errorEl = document.getElementById('pairing-error');
   errorEl.classList.add('hidden');
 
+  // La direccion se guarda ANTES de intentar emparejar, para que la
+  // peticion de abajo (y todo lo que venga despues) ya salga hacia el
+  // ordenador y no hacia el origen interno de la app empaquetada. Si el
+  // emparejamiento falla, se queda guardada igualmente -- no estorba, y
+  // asi no hay que reescribirla en cada reintento.
+  let parsedServer;
   try {
-    const res = await fetch('/api/devices/pair', {
+    parsedServer = new URL(serverUrl);
+    if (parsedServer.protocol !== 'http:' && parsedServer.protocol !== 'https:') throw new Error();
+  } catch (err) {
+    errorEl.textContent = 'La dirección del ordenador no es válida. Debe ser algo como http://192.168.1.37:3000';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  localStorage.setItem('serverBaseUrl', parsedServer.origin);
+
+  try {
+    const res = await fetch(new URL('/api/devices/pair', getServerBaseUrl()).toString(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, name }),
@@ -12826,9 +12855,24 @@ async function init() {
 // Si ya tenemos un token guardado (o somos el ordenador, que ni lo
 // necesita) intentamos cargar la app directamente; api() se encargara
 // de mostrar la pantalla de emparejamiento si el servidor nos rechaza.
-showApp();
-init();
-checkForUpdate();
+//
+// Excepcion: la app EMPAQUETADA (Capacitor) carga su propio codigo desde
+// el movil, asi que su origen (capacitor://localhost) no es ningun
+// servidor -- una peticion ahi no da un 401 que dispare la pantalla de
+// emparejamiento, da un error de red, que api() interpreta como "sin
+// conexion" y responde con la copia local (vacia la primera vez). Sin
+// esta comprobacion, el primer arranque se quedaria en una app vacia sin
+// ninguna forma de decirle donde esta el ordenador. Al ordenador de
+// siempre no le afecta: su origen SI es http, asi que nunca entra aqui.
+const bootOriginIsUsable = window.location.origin.startsWith('http://')
+  || window.location.origin.startsWith('https://');
+if (!bootOriginIsUsable && !localStorage.getItem('serverBaseUrl')) {
+  showPairingScreen();
+} else {
+  showApp();
+  init();
+  checkForUpdate();
+}
 setInterval(checkForUpdate, 15 * 1000);
 checkForNewRelease();
 // Es una llamada a git fetch de verdad (no un simple ping), asi que se

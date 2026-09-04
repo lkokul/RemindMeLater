@@ -53,6 +53,14 @@ que lo autorizas explicitamente desde el ordenador:
    Koku"). A partir de ahi, ese movil queda autorizado permanentemente
    (hasta que lo revoques).
 
+Esa pantalla pide tambien la **direccion del ordenador**. Si abriste la
+app desde el navegador, viene ya rellenada con la direccion por la que
+entraste y no hay que tocarla; en la app nativa (ver mas abajo) hay que
+escribirla la primera vez, porque ahi la app carga su propio codigo desde
+el movil y no "sabe" de donde vienen los datos. Se puede cambiar despues
+en cualquier momento desde Configuración → Este dispositivo → "Escanear
+ordenador".
+
 Puedes ver, renombrar (con icono/emoji) y revocar dispositivos vinculados
 en cualquier momento desde esa misma pestana, en el ordenador (no
 funciona desde el movil, a proposito). El propio ordenador donde corre el
@@ -302,6 +310,36 @@ mismo mDNS) metida en una ventana nativa, con extras propios de
 escritorio: comprobar actualizaciones y actualizar desde dentro de la
 app (con `git pull` y reinicio automatico), y recordar si la ventana
 debe abrirse en pantalla completa.
+
+## App nativa de movil (iOS y Android)
+
+Ademas de abrirse en el navegador del movil, la app se puede empaquetar
+como app nativa de verdad con [Capacitor](https://capacitorjs.com/) — la
+misma interfaz web de siempre, sin reescribir nada, metida en una
+carcasa nativa con su propio icono en la pantalla de inicio.
+
+A diferencia del navegador, la app nativa **lleva su propio codigo
+dentro del movil**: abre siempre, aunque el ordenador este apagado o
+haya cambiado de direccion, y funciona con la copia local de los datos
+(ver el apartado siguiente). Solo necesita saber la direccion del
+ordenador **para sincronizar**, y eso se le dice la primera vez en la
+pantalla de vinculacion (o se cambia despues escaneando el QR).
+
+- Los proyectos nativos viven en `android/` e `ios/`, generados por
+  Capacitor y comiteados al repo. `npm run cap:sync` copia la version
+  actual de `public/` a los dos; `npm run cap:android` y
+  `npm run cap:ios` los abren en Android Studio / Xcode.
+- Para compilar y firmar la app de iOS **sin tener un Mac**, hay un
+  workflow de GitHub Actions listo (`.github/workflows/ios-testflight.yml`,
+  disparo manual desde la pestaña Actions) que compila en un runner de
+  macOS, firma con una clave de API de App Store Connect y sube el
+  resultado a TestFlight. Los pasos de configuracion (cuenta de
+  desarrollador, secretos, como instalarla en el iPhone) estan en
+  [`IOS-TESTFLIGHT.md`](IOS-TESTFLIGHT.md).
+- Los avisos push con la app **cerrada del todo** siguen siendo la pieza
+  pendiente en la app nativa: hoy funcionan por Web Push (navegador), que
+  dentro de una app empaquetada no es fiable — haria falta cambiar al
+  plugin nativo con APNs/FCM.
 
 ## Instalar como app (PWA)
 

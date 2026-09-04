@@ -25,6 +25,18 @@ solo pulsar un botón.
 
 ## 1. Preparar tu cuenta de Apple Developer (una vez, todo desde la web)
 
+**Antes de nada -- inscríbete en el Apple Developer Program** (si aún
+no lo has hecho): en <https://developer.apple.com/programs/enroll/>,
+elige "Enroll as an Individual", acepta el acuerdo, verifica tu
+identidad (Apple suele pedirlo desde la app "Apple Developer" en un
+iPhone/iPad) y paga los 99 USD/año. Durante ese formulario te pedirá
+una **"Address"** -- es tu dirección postal (calle, ciudad, código
+postal), no tu correo electrónico (el email ya lo tiene aparte, es el
+de tu Apple ID). Sin esta inscripción aprobada, ni "Certificates, IDs &
+Profiles" ni App Store Connect están disponibles todavía -- espera a
+que Apple la apruebe (de minutos a 48h) antes de seguir con los pasos
+de abajo.
+
 1. Entra en <https://developer.apple.com/account> → **Certificates,
    IDs & Profiles** → **Identifiers** → registra un nuevo identificador
    de tipo App, con el Bundle ID `com.koku.remindmelater` (el mismo que

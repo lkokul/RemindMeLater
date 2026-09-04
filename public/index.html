@@ -131,6 +131,21 @@
       <p>Este dispositivo todavía no esta vinculado a tu calendario.</p>
       <p>En el ordenador, abre <strong>☰ Configuración → Dispositivos → Vincular nuevo dispositivo</strong> y escribe aquí el código de 6 dígitos que aparezca.</p>
       <form id="pairing-form">
+        <!-- Direccion del servidor: hace falta porque la app empaquetada
+             (Capacitor) carga su propio codigo desde el propio movil, no
+             desde el ordenador -- asi que su "origen" no es ninguna
+             direccion util y hay que preguntarla. En el navegador normal
+             viene ya rellenada con la direccion por la que se abrio la
+             pagina, y no hay que tocarla. Ver getServerBaseUrl() en
+             app.js. -->
+        <label>
+          Dirección del ordenador
+          <!-- type="text" (no "url") y sin "required" a proposito: asi la
+               validacion la hace el propio submit con el aviso de la app,
+               en vez del globo nativo del navegador, que ni sigue el tema
+               ni se ve igual dentro de la app empaquetada. -->
+          <input type="text" id="pairing-server-url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="http://192.168.1.37:3000" />
+        </label>
         <label>
           Codigo
           <input type="text" id="pairing-code" inputmode="numeric" maxlength="6" placeholder="000000" required />
