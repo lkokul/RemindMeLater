@@ -2084,7 +2084,11 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .mobile-note-gallery-preview-text {
   font-size: 0.72rem;
   line-height: 1.3;
-  color: rgba(0, 0, 0, 0.65);
+  /* Antes rgba(0,0,0,0.65) fijo -- pensado para un fondo claro, casi
+     invisible sobre --surface-2 en el tema oscuro por defecto (negro
+     semitransparente sobre un fondo ya oscuro). Mismo patron ya usado
+     en el resto de la app para texto atenuado sobre esta superficie. */
+  color: color-mix(in srgb, var(--surface-2-text) 70%, var(--surface-2));
   -webkit-line-clamp: 6;
   display: -webkit-box;
   -webkit-box-orient: vertical;

@@ -4598,12 +4598,23 @@ function isSelectionInsideNoteListItem() {
 function refreshNoteBlockButtons() {
   const disabled = isSelectionInsideNoteListItem() || isCursorInCodeBlock();
   const block = disabled ? null : getNoteBlockAncestor(window.getSelection().anchorNode);
-  const indent = block ? Math.max(0, Math.min(NOTE_MAX_INDENT, parseInt(block.dataset.indent || '0', 10) || 0)) : 0;
   document.getElementById('note-paragraph-style-btn').disabled = disabled;
   document.getElementById('note-quote-toggle-btn').disabled = disabled;
   document.getElementById('note-quote-toggle-btn').classList.toggle('is-active', !!block && block.getAttribute('data-quote') === '1');
-  document.getElementById('note-indent-btn').disabled = disabled || indent >= NOTE_MAX_INDENT;
-  document.getElementById('note-outdent-btn').disabled = disabled || indent <= 0;
+
+  // Sangria: si hay varias lineas seleccionadas, el boton se activa/
+  // desactiva mirando el conjunto (al menos una linea puede moverse en
+  // ese sentido), no solo la linea del cursor -- ver
+  // getNoteIndentSelectionBlocks() mas abajo.
+  const indentBlocks = disabled ? [] : getNoteIndentSelectionBlocks();
+  const indents = indentBlocks.length
+    ? indentBlocks.map((b) => Math.max(0, Math.min(NOTE_MAX_INDENT, parseInt(b.dataset.indent || '0', 10) || 0)))
+    : [0];
+  const canOutdent = indents.some((i) => i > 0);
+  const canIndent = indents.some((i) => i < NOTE_MAX_INDENT);
+  document.getElementById('note-indent-btn').disabled = disabled || !canIndent;
+  document.getElementById('note-outdent-btn').disabled = disabled || !canOutdent;
+
   document.getElementById('note-highlight-btn').disabled = isCursorInCodeBlock();
 }
 
@@ -4649,15 +4660,55 @@ function toggleNoteQuoteBlock() {
 // data-indent="0".."4" (0 = sin atributo, para no ensuciar los
 // bloques nunca tocados).
 const NOTE_MAX_INDENT = 4;
-function applyNoteIndentDelta(delta) {
-  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return;
-  ensureNoteBlockWrapped();
-  const block = getNoteBlockAncestor(window.getSelection().anchorNode);
-  if (!block) return;
+
+function applyNoteIndentDeltaToBlock(block, delta) {
   const current = Math.max(0, Math.min(NOTE_MAX_INDENT, parseInt(block.dataset.indent || '0', 10) || 0));
   const next = Math.max(0, Math.min(NOTE_MAX_INDENT, current + delta));
   if (next === 0) block.removeAttribute('data-indent');
   else block.setAttribute('data-indent', String(next));
+}
+
+// Bloques (hijos directos de NOTE_EDITOR_BODY) que toca la seleccion
+// actual -- un solo elemento con el cursor sin seleccionar nada, o
+// todos los que la seleccion cruza si hay varias lineas marcadas.
+function getNoteIndentSelectionBlocks() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return [];
+  const range = sel.getRangeAt(0);
+  if (sel.isCollapsed) {
+    const block = getNoteBlockAncestor(sel.anchorNode);
+    return block ? [block] : [];
+  }
+  return Array.from(NOTE_EDITOR_BODY.children).filter((el) => range.intersectsNode(el));
+}
+
+function applyNoteIndentDelta(delta) {
+  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  if (sel.isCollapsed) {
+    ensureNoteBlockWrapped();
+    const block = getNoteBlockAncestor(window.getSelection().anchorNode);
+    if (block) applyNoteIndentDeltaToBlock(block, delta);
+  } else {
+    // Mismo cuidado que wrapNoteHighlightRange: capturar el limite ANTES
+    // de envolver la primera linea suelta si la seleccion la incluye --
+    // el Range en curso no sigue al nodo que se mueve cuando su
+    // CONTENEDOR es justo ese nodo (ver el comentario de
+    // ensureNoteFirstLineWrapped).
+    const liveRange = sel.getRangeAt(0);
+    const startContainer = liveRange.startContainer;
+    const startOffset = liveRange.startOffset;
+    const endContainer = liveRange.endContainer;
+    const endOffset = liveRange.endOffset;
+    ensureNoteFirstLineWrapped();
+    const range = document.createRange();
+    range.setStart(startContainer, startOffset);
+    range.setEnd(endContainer, endOffset);
+    Array.from(NOTE_EDITOR_BODY.children)
+      .filter((el) => range.intersectsNode(el))
+      .forEach((block) => applyNoteIndentDeltaToBlock(block, delta));
+  }
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4753,6 +4804,64 @@ function ensureNoteFirstLineWrapped() {
   }
 }
 
+// Quita cualquier resaltado YA EXISTENTE dentro de un contenido recien
+// extraido (Range.extractContents()), antes de meterlo en el span del
+// color nuevo -- sin esto, re-resaltar una seleccion que ENGLOBA por
+// completo un resaltado anterior (de otro color, o del mismo tras una
+// edicion) anidaria un <span data-highlight> dentro de otro en vez de
+// quedar en uno solo. "Desenvuelve" cada resaltado encontrado (se queda
+// con su contenido, incluido cualquier OTRO formato como negrita, solo
+// se quita el resaltado en si).
+function stripNoteHighlightWrappers(fragment) {
+  fragment.querySelectorAll('[data-highlight]').forEach((el) => {
+    const parent = el.parentNode;
+    while (el.firstChild) parent.insertBefore(el.firstChild, el);
+    parent.removeChild(el);
+  });
+}
+
+// Inserta "node" en la posicion actual de "range" (ya colapsado, tras
+// un extractContents() si venia de una seleccion) -- pero si esa
+// posicion cae DENTRO de un resaltado ya existente ([data-highlight],
+// caso de una seleccion que solo tocaba PARTE de un resaltado anterior,
+// dejando un remanente antes/despues), en vez de anidar "node" dentro
+// de ese remanente (lo que haria un range.insertNode "a pelo", ya que
+// el limite cae dentro de su nodo de texto) lo saca como hermano justo
+// despues, partiendo el remanente en dos mitades si hacia falta para no
+// perder su contenido de "despues". Complementa a
+// stripNoteHighlightWrappers (esa cubre el contenido YA EXTRAIDO, esta
+// cubre el PUNTO DE INSERCION) -- entre las dos, ningun resaltado nuevo
+// puede quedar anidado dentro de otro. Usado tanto por el resaltado
+// "antes de escribir" (span semilla) como por wrapNoteHighlightRange.
+function insertNodeOutsideNoteHighlight(range, node) {
+  range.insertNode(node);
+  const parent = node.parentElement;
+  const enclosing = parent ? parent.closest('[data-highlight]') : null;
+  if (!enclosing || !NOTE_EDITOR_BODY.contains(enclosing)) return;
+  const afterFragment = document.createDocumentFragment();
+  let sibling = node.nextSibling;
+  while (sibling) {
+    const next = sibling.nextSibling;
+    afterFragment.appendChild(sibling);
+    sibling = next;
+  }
+  enclosing.parentNode.insertBefore(node, enclosing.nextSibling);
+  // Insertar justo en el limite final de un nodo de texto (caso normal
+  // al escribir y cambiar de color) deja como "resto" un nodo de texto
+  // VACIO (artefacto del split de Range.insertNode, no contenido real)
+  // -- sin filtrarlo, se creaba un span vacio de mas por cada cambio de
+  // color. Solo se reconstruye el "despues" si de verdad queda algo.
+  const hasRealAfterContent = Array.from(afterFragment.childNodes).some(
+    (n) => n.nodeType !== Node.TEXT_NODE || n.textContent !== ''
+  );
+  if (hasRealAfterContent) {
+    const afterSpan = enclosing.cloneNode(false);
+    afterSpan.appendChild(afterFragment);
+    node.parentNode.insertBefore(afterSpan, node.nextSibling);
+  }
+  if (!enclosing.textContent) enclosing.remove();
+}
+
 // Envuelve el contenido de "range" en uno o varios <span data-highlight>
 // -- si la seleccion cae ENTERA dentro de una sola linea, un solo span
 // (igual que antes de este arreglo). Si CRUZA varias lineas, un span
@@ -4772,8 +4881,10 @@ function wrapNoteHighlightRange(range, key) {
   if (!startLine || !endLine || startLine === endLine) {
     const span = document.createElement('span');
     span.setAttribute('data-highlight', key);
-    span.appendChild(range.extractContents());
-    range.insertNode(span);
+    const fragment = range.extractContents();
+    stripNoteHighlightWrappers(fragment);
+    span.appendChild(fragment);
+    insertNodeOutsideNoteHighlight(range, span);
     return [span];
   }
 
@@ -4787,8 +4898,10 @@ function wrapNoteHighlightRange(range, key) {
   startRange.setEndAfter(startLine.lastChild || startLine);
   const startSpan = document.createElement('span');
   startSpan.setAttribute('data-highlight', key);
-  startSpan.appendChild(startRange.extractContents());
-  startRange.insertNode(startSpan);
+  const startFragment = startRange.extractContents();
+  stripNoteHighlightWrappers(startFragment);
+  startSpan.appendChild(startFragment);
+  insertNodeOutsideNoteHighlight(startRange, startSpan);
   spans.push(startSpan);
 
   for (let i = startIdx + 1; i < endIdx; i++) {
@@ -4797,8 +4910,10 @@ function wrapNoteHighlightRange(range, key) {
     lineRange.selectNodeContents(line);
     const span = document.createElement('span');
     span.setAttribute('data-highlight', key);
-    span.appendChild(lineRange.extractContents());
-    lineRange.insertNode(span);
+    const lineFragment = lineRange.extractContents();
+    stripNoteHighlightWrappers(lineFragment);
+    span.appendChild(lineFragment);
+    insertNodeOutsideNoteHighlight(lineRange, span);
     spans.push(span);
   }
 
@@ -4807,8 +4922,10 @@ function wrapNoteHighlightRange(range, key) {
   endRange.setEnd(range.endContainer, range.endOffset);
   const endSpan = document.createElement('span');
   endSpan.setAttribute('data-highlight', key);
-  endSpan.appendChild(endRange.extractContents());
-  endRange.insertNode(endSpan);
+  const endFragment = endRange.extractContents();
+  stripNoteHighlightWrappers(endFragment);
+  endSpan.appendChild(endFragment);
+  insertNodeOutsideNoteHighlight(endRange, endSpan);
   spans.push(endSpan);
 
   return spans;
@@ -4850,7 +4967,14 @@ function beginPendingNoteHighlight(key) {
   const span = document.createElement('span');
   span.setAttribute('data-highlight', key);
   span.appendChild(document.createTextNode('​'));
-  range.insertNode(span);
+  // Nunca anidado dentro de un resaltado en curso -- si el cursor esta
+  // ya dentro de un [data-highlight] (de otro color, o del mismo texto
+  // ya escrito con un resaltado pendiente anterior), un
+  // range.insertNode "a pelo" meteria el span nuevo COMO HIJO de ese
+  // resaltado (el limite cae dentro de su nodo de texto), produciendo
+  // resaltados anidados uno dentro de otro cada vez que se cambia de
+  // color sin dejar de escribir -- justo el bug real reportado.
+  insertNodeOutsideNoteHighlight(range, span);
   const newRange = document.createRange();
   newRange.setStart(span.firstChild, 1);
   newRange.collapse(true);
