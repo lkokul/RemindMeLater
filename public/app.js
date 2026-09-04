@@ -715,44 +715,52 @@ function isTrustedDevice() {
 // dispositivos...) no tienen copia local todavia -- si fallan sin
 // conexion, se comportan igual que siempre (lanzan error).
 // ---------------------------------------------------------------------
+// Convierte el `body` de una llamada a api() en lo que espera el
+// manejador local. Casi siempre es JSON (una cadena ya serializada por
+// quien llama), pero las subidas de imagen/foto mandan el File tal
+// cual -- en el servidor eso llegaba como un Buffer via express.raw(),
+// aqui llega como los bytes en un Uint8Array.
+async function toLocalRequestBody(body) {
+  if (body === undefined || body === null) return undefined;
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body);
+    } catch {
+      return body;
+    }
+  }
+  if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer());
+  return body;
+}
+
+// El "servidor" ya no existe: api() despacha contra el router local
+// (public/local-api.js), que ejecuta las MISMAS rutas del backend de
+// siempre, portadas a public/routes-local/. Se mantiene async y con la
+// misma firma a proposito, para no tocar ninguno de los ~50 sitios que
+// la llaman ni las funciones load*() de la app.
 async function api(path, options = {}) {
-  const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
-  const token = localStorage.getItem('deviceToken');
-  if (token) headers['X-Device-Token'] = token;
+  await initLocalDatabase();
 
-  const url = new URL(path, getServerBaseUrl());
+  // La base de una URL relativa da igual (nada sale del dispositivo);
+  // se usa solo para separar la ruta de los parametros de consulta.
+  const url = new URL(path, 'http://local');
   const method = (options.method || 'GET').toUpperCase();
-  const route = matchSyncRoute(url.pathname);
+  const body = await toLocalRequestBody(options.body);
+  const { status, body: data } = await dispatchLocalRequest(
+    method,
+    url.pathname,
+    url.searchParams,
+    body,
+    options.headers || {},
+  );
 
-  let res;
-  try {
-    res = await fetch(url.toString(), Object.assign({}, options, { headers }));
-  } catch (networkErr) {
-    if (!route) throw networkErr;
-    return handleOfflineRequest(route, method, url, options);
+  if (status >= 400) {
+    // Misma forma de error que antes (un Error con el mensaje que
+    // devuelve la ruta), para que los try/catch de siempre no cambien.
+    throw new Error((data && data.message) || `Error ${status}`);
   }
 
-  if (res.status === 401) {
-    localStorage.removeItem('deviceToken');
-    showPairingScreen();
-    throw new Error('device_not_paired');
-  }
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.message || `Error ${res.status}`);
-  }
-
-  const data = res.status === 204 ? null : await res.json();
-
-  // Con exito de verdad, se guarda una copia en la copia local -- "cache
-  // de escritura": la proxima vez que falle la red, esto es lo que se
-  // vera. No se espera a que termine (no hace falta su resultado para
-  // nada mas), pero si falla por lo que sea no debe romper la llamada
-  // real, que ya tuvo exito.
-  if (route) cacheServerResponse(route, method, data).catch(() => {});
-
-  return data;
+  return status === 204 ? null : data;
 }
 
 // ---------------------------------------------------------------------

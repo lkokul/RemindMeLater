@@ -2498,6 +2498,41 @@
   </div>
 
   <script src="db-local.js"></script>
+  <!-- El "servidor" vive ahora dentro de la propia app: SQLite compilado
+       a WebAssembly (vendor/sql-wasm.*), el esquema de siempre
+       (local-schema.js), un router minimo que imita a Express
+       (local-api.js) y las rutas del backend portadas tal cual
+       (routes-local/*.js). El orden importa: cada uno usa lo que
+       declara el anterior, y viajesTrips.js consume una global que
+       publica viajesEntries.js. -->
+  <script src="vendor/sql-wasm.js"></script>
+  <script src="local-schema.js"></script>
+  <script src="local-db.js"></script>
+  <script src="local-api.js"></script>
+  <script src="routes-local/events.js"></script>
+  <script src="routes-local/finanzasAccounts.js"></script>
+  <script src="routes-local/finanzasAssets.js"></script>
+  <script src="routes-local/finanzasCategories.js"></script>
+  <script src="routes-local/finanzasDebts.js"></script>
+  <script src="routes-local/finanzasInvestments.js"></script>
+  <script src="routes-local/finanzasPortfolios.js"></script>
+  <script src="routes-local/finanzasRecurringExpenses.js"></script>
+  <script src="routes-local/finanzasSettings.js"></script>
+  <script src="routes-local/finanzasTransactions.js"></script>
+  <script src="routes-local/groups.js"></script>
+  <script src="routes-local/gymExercises.js"></script>
+  <script src="routes-local/gymRoutines.js"></script>
+  <script src="routes-local/gymSessions.js"></script>
+  <script src="routes-local/lecturasItems.js"></script>
+  <script src="routes-local/lecturasSagas.js"></script>
+  <script src="routes-local/noteFolders.js"></script>
+  <script src="routes-local/notes.js"></script>
+  <script src="routes-local/profile.js"></script>
+  <script src="routes-local/reminders.js"></script>
+  <script src="routes-local/specialDays.js"></script>
+  <script src="routes-local/themes.js"></script>
+  <script src="routes-local/viajesEntries.js"></script>
+  <script src="routes-local/viajesTrips.js"></script>
   <script src="vendor/jsQR.js"></script>
   <script src="viajesCountries.js"></script>
   <script src="app.js"></script>

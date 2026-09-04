@@ -1,0 +1,45 @@
+// reminders — portado de server/routes/reminders.js.
+//
+// Copia mecanica del archivo del servidor: la logica y el SQL son los
+// mismos, solo cambia la fontaneria (sin require/module.exports de
+// Node, y envuelto en un IIFE para que los nombres repetidos entre
+// rutas no choquen al cargarse todas como <script> en el mismo ambito).
+(function () {
+  const db = localDb;
+  // routes/reminders.js — que recordatorios estan pendientes o a punto de saltar.
+
+  const router = createLocalRouter();
+
+  // Calcula, en SQL, el instante en que debe saltar cada recordatorio:
+  // start_at menos reminder_minutes_before. Solo devolvemos los que
+  // tienen recordatorio configurado, ordenados por cuando toca avisar.
+  router.get('/upcoming', (req, res) => {
+    const rows = db
+      .prepare(`
+        SELECT e.id, e.title, e.start_at, e.reminder_minutes_before, e.reminder_sent,
+               g.name AS group_name, g.color AS group_color, g.icon AS group_icon,
+               datetime(e.start_at, '-' || e.reminder_minutes_before || ' minutes') AS remind_at
+        FROM events e
+        LEFT JOIN groups g ON g.id = e.group_id
+        WHERE e.reminder_minutes_before IS NOT NULL
+        ORDER BY remind_at ASC
+      `)
+      .all();
+
+    res.json(
+      rows.map((r) => ({
+        eventId: r.id,
+        title: r.title,
+        startAt: r.start_at,
+        remindAt: r.remind_at,
+        reminderSent: !!r.reminder_sent,
+        groupName: r.group_name || null,
+        groupColor: r.group_color || null,
+        groupIcon: r.group_icon || null,
+      }))
+    );
+  });
+
+  mountLocalRouter('/api/reminders', router);
+
+})();

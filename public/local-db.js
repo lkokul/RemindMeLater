@@ -155,7 +155,29 @@ const localDb = {
       },
     };
   },
+
+  // Sin servidor no hay nada con lo que sincronizar, asi que el
+  // historial de cambios (sync_log) ya no sirve para nada. Las rutas
+  // portadas siguen llamando a esto en ~30 sitios; se deja como un
+  // no-op declarado para que el porte pueda ser literal (menos riesgo
+  // de erratas al traer 3.500 lineas de logica). Las llamadas se
+  // quitaran en la fase de limpieza, cuando todo lo demas este
+  // verificado y se pueda distinguir un fallo del porte de uno de la
+  // limpieza.
+  recordSyncChange() {},
 };
+
+// Red de seguridad para el volcado agrupado de arriba: si la app se
+// cierra (o pasa a segundo plano en el movil, que en iOS suele acabar
+// en lo mismo) justo despues de escribir algo, el temporizador de
+// 250ms nunca llegaria a dispararse y ese ultimo cambio se perderia.
+// Detectado de verdad al probar: recargar la pagina justo tras guardar
+// dejaba fuera la ultima escritura. Con esto, cualquier salida pasa
+// primero por un volcado inmediato.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushLocalDb();
+});
+window.addEventListener('pagehide', () => { flushLocalDb(); });
 
 // Arranque: carga sql.js, recupera la base guardada (o crea una nueva)
 // y aplica el esquema. Idempotente -- llamarlo dos veces no rehace nada.
