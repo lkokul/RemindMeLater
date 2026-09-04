@@ -5347,7 +5347,7 @@ highlightBtn.addEventListener('click', () => {
   if (willOpen) saveNoteEditorSelection();
   closeAllPopovers(highlightColorPopover);
   highlightColorPopover.classList.toggle('hidden');
-  if (willOpen) positionFixedPopover(highlightBtn, highlightColorPopover, { width: 190 });
+  if (willOpen) positionFixedPopover(highlightBtn, highlightColorPopover, { width: 232 });
 });
 highlightColorPopover.querySelectorAll('.highlight-swatch:not(.highlight-swatch-clear)').forEach((btn) => {
   btn.addEventListener('click', () => {

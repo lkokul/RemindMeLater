@@ -772,9 +772,9 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .highlight-color-popover {
   position: fixed; z-index: 60;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 0.6rem; width: 190px;
+  padding: 0.6rem; width: 232px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.4);
-  display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+  display: flex; flex-wrap: nowrap; gap: 0.4rem; align-items: center;
 }
 .highlight-swatch {
   width: 28px; height: 28px; border-radius: 50%;
