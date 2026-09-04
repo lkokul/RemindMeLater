@@ -4885,17 +4885,44 @@ function insertNodeOutsideNoteHighlight(range, node) {
 // creados. Limitacion aceptada: una seleccion que cruce el borde de una
 // celda de tabla puede volver a producir el mismo problema (las celdas
 // no son "lineas" en este esquema) -- caso muy inhabitual, no cubierto.
+// Si el limite de un Range cae al nivel del PADRE de la linea (indice
+// entre hijos que engloba la linea entera, en vez de apuntar DENTRO de
+// su contenido -- pasa con un Ctrl+A real o un selectNodeContents()
+// sobre el editor cuando ese es el UNICO hijo), extractContents()
+// extraeria el propio elemento de linea (<div>/<p>/etc.) entero, no
+// solo su texto -- <span data-highlight> acabaria envolviendo ese
+// bloque en vez de sentarse junto a su contenido (mismo problema de
+// fondo que ya resolvia el troceo por linea multi-parrafo: un bloque
+// dentro de un elemento en linea no pinta bien su fondo/radio, y un
+// Intro posterior dentro de ese resaltado partia el bloque mal anidado
+// -- el resaltado "desaparecia" visualmente, bug real reportado).
+// Normaliza el limite a DENTRO de la propia linea si hace falta.
+function normalizeNoteBoundaryIntoLine(container, offset, line, isEndBoundary) {
+  if (container === line || container.nodeType === Node.TEXT_NODE) return { container, offset };
+  return isEndBoundary
+    ? { container: line, offset: line.childNodes.length }
+    : { container: line, offset: 0 };
+}
+
 function wrapNoteHighlightRange(range, key) {
   const startLine = resolveNoteLineAtBoundary(range.startContainer, range.startOffset, false);
   const endLine = resolveNoteLineAtBoundary(range.endContainer, range.endOffset, true);
 
   if (!startLine || !endLine || startLine === endLine) {
+    let innerRange = range;
+    if (startLine) {
+      const normStart = normalizeNoteBoundaryIntoLine(range.startContainer, range.startOffset, startLine, false);
+      const normEnd = normalizeNoteBoundaryIntoLine(range.endContainer, range.endOffset, startLine, true);
+      innerRange = document.createRange();
+      innerRange.setStart(normStart.container, normStart.offset);
+      innerRange.setEnd(normEnd.container, normEnd.offset);
+    }
     const span = document.createElement('span');
     span.setAttribute('data-highlight', key);
-    const fragment = range.extractContents();
+    const fragment = innerRange.extractContents();
     stripNoteHighlightWrappers(fragment);
     span.appendChild(fragment);
-    insertNodeOutsideNoteHighlight(range, span);
+    insertNodeOutsideNoteHighlight(innerRange, span);
     return [span];
   }
 
