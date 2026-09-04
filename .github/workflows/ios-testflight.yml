@@ -95,10 +95,20 @@ jobs:
             -authenticationKeyID "$APPSTORE_KEY_ID" \
             -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID"
 
+      # Subida con xcrun altool directamente, sin accion de terceros: usa
+      # el MISMO mecanismo de autenticacion (clave de API en
+      # ~/private_keys/AuthKey_<KEYID>.p8, donde altool la busca sola) que
+      # ya funciona en los pasos de archivar y exportar de arriba. La
+      # accion apple-actions/upload-testflight-build@v1 fallaba con un 401
+      # porque su parametro de issuer se llama "issuer-id", no
+      # "api-issuer-id" -- se le estaba pasando vacio.
       - name: Subir a TestFlight
-        uses: apple-actions/upload-testflight-build@v1
-        with:
-          app-path: ${{ runner.temp }}/export/App.ipa
-          api-key-id: ${{ secrets.APPSTORE_KEY_ID }}
-          api-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
-          api-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          xcrun altool --upload-app \
+            -f "$RUNNER_TEMP/export/App.ipa" \
+            -t ios \
+            --apiKey "$APPSTORE_KEY_ID" \
+            --apiIssuer "$APPSTORE_ISSUER_ID"
