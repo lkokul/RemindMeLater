@@ -5575,6 +5575,10 @@ noteImageFileInput.addEventListener('change', () => {
 // propio navegador ya le quita estilos raros al venir de fuera, el mismo
 // comportamiento por defecto de cualquier contenteditable).
 NOTE_EDITOR_BODY.addEventListener('paste', (e) => {
+  // Pegar tambien cuenta como "escribir" -- mismo criterio que el
+  // keydown de arriba, el panel de Formato no debe quedarse tapando el
+  // contenido que se acaba de pegar.
+  if (!noteFormatPopover.classList.contains('hidden')) closeNoteFormatPopover();
   const items = Array.from(e.clipboardData ? e.clipboardData.items : []);
   const imageItem = items.find((item) => item.type.startsWith('image/'));
   if (!imageItem) return;
@@ -6046,6 +6050,19 @@ function handleVimVisualKeydown(e) {
 }
 
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
+  // El panel "Formato" (Aa/negrita/listas/etc.) se queda abierto a
+  // proposito mientras se selecciona texto dentro de #note-body (ver el
+  // comentario junto a noteFormatPopover mas arriba) -- pero si el
+  // usuario empieza a escribir de verdad, el panel puede quedar tapando
+  // justo la linea donde esta escribiendo. Se cierra solo con cualquier
+  // tecla que produzca/borre contenido (letra, Intro, Backspace/Supr,
+  // Tab) sin modificador -- los atajos con Ctrl/Cmd (negrita, listas...)
+  // no cuentan como "escribir", el panel se queda abierto para ellos
+  // igual que al clicar el boton correspondiente.
+  if (!noteFormatPopover.classList.contains('hidden') && !e.ctrlKey && !e.metaKey && !e.altKey
+    && (e.key.length === 1 || e.key === 'Enter' || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Tab')) {
+    closeNoteFormatPopover();
+  }
   if (isVimModeEnabled()) {
     if (noteEditorVimSubMode === 'normal') {
       handleVimNormalKeydown(e);
