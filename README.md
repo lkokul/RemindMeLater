@@ -1,15 +1,12 @@
 # RemindMeLater
 
-Calendario, recordatorios, tareas y notas local-first: los datos viven en
-tus propios dispositivos, nunca en una nube de terceros. El ordenador
-guarda todo en SQLite (`data/remindmelater.db`, ignorado por git — o en
-la carpeta de datos de la app si usas la version de escritorio); el
-movil, una vez vinculado, guarda tambien su propia copia y sincroniza los
-cambios en los dos sentidos con el ordenador cuando pulsas "Sincronizar
-ahora" (manual, sin ningun disparador automatico de fondo), sin depender
-de ningun servidor intermedio en internet (ver "Instalar como app" mas
-abajo). Ademas del calendario, la app tiene un hub de "Extensiones"
-(Gimnasio, Lecturas, Finanzas y Archivos — ver mas abajo).
+Calendario, recordatorios, tareas y notas local-first: **app de
+escritorio** (Electron + SQLite) para Windows. Los datos viven en tu
+propio ordenador, nunca en una nube de terceros, y la app no tiene
+servidor ni abre ningun puerto: la ventana y la base de datos son el
+mismo programa y hablan entre ellas por dentro. Ademas del calendario,
+hay un hub de "Apps" (Gimnasio, Lecturas, Finanzas y Viajes — ver mas
+abajo).
 
 ## Arrancar
 
@@ -18,52 +15,22 @@ npm install
 npm start
 ```
 
-**Si estoy haciendo cambios en el codigo del servidor (`server/`)** usa
-`npm run dev` en su lugar: reinicia solo cada vez que se guarda un cambio,
-sin que tengas que pararlo y arrancarlo a mano. Los cambios en `public/`
-(la interfaz) no necesitan ni eso — con recargar la pagina en el
-navegador ya se ven.
+Eso abre la app. Para generar un instalador `.exe` de Windows:
 
-La terminal muestra dos (o tres) direcciones:
+```bash
+npm run dist
+```
 
-- `http://localhost:3000` — para abrir en el navegador del propio ordenador.
-- `http://<tu-ip-local>:3000` — para abrir desde el movil, **estando en la
-  misma red wifi que el ordenador**.
-- `http://remindmelater.local:3000` — mismo destino que la anterior, pero
-  con un nombre en vez de una IP (mDNS/Bonjour). En Safari (iPhone) hace
-  falta escribir el `http://` delante a mano, si no lo trata como una
-  busqueda en vez de una direccion.
+Los datos se guardan en `%APPDATA%\RemindMeLater\data` (la carpeta de
+datos del usuario, fuera de la carpeta de instalacion — asi no se pierden
+al instalar una version nueva encima). Si arrancas desde el codigo con
+`npm start` sin haber instalado la app, van a `data/` dentro del propio
+proyecto, ignorado por git.
 
-Deja el servidor corriendo mientras quieras que el calendario este
-disponible (tambien para que los recordatorios de escritorio funcionen).
-
-## Vincular el movil
-
-Por seguridad, ningun dispositivo puede leer ni escribir tus datos hasta
-que lo autorizas explicitamente desde el ordenador:
-
-1. En el ordenador, abre la app y pulsa ⚙ **Configuración** → pestaña
-   **Dispositivos** → **Vincular nuevo dispositivo**. Aparece un codigo de
-   6 digitos, valido 30 segundos, de un solo uso (y bloqueado unos minutos
-   tras varios intentos fallidos seguidos, para que sea impracticable
-   intentar adivinarlo).
-2. En el movil, abre la direccion de arriba. Como todavia no esta
-   vinculado, vera una pantalla pidiendo ese codigo.
-3. Escribe el codigo y un nombre para el dispositivo (ej. "iPhone de
-   Koku"). A partir de ahi, ese movil queda autorizado permanentemente
-   (hasta que lo revoques).
-
-Puedes ver, renombrar (con icono/emoji) y revocar dispositivos vinculados
-en cualquier momento desde esa misma pestana, en el ordenador (no
-funciona desde el movil, a proposito). El propio ordenador donde corre el
-servidor esta autorizado siempre, sin codigo (se reconoce por ser
-`localhost`).
-
-**Navegación en el móvil**: en pantallas estrechas, la barra superior de
-escritorio (título + botones sueltos) se sustituye por una barra fija
-abajo con 4 accesos directos (Calendario, Mi espacio, Extensiones,
-Configuración) y un botón flotante "+" que despliega los accesos de
-crear evento, tarea o nota. En escritorio no cambia nada.
+**Si estas tocando el codigo**: los cambios en `public/` (la interfaz) se
+ven recargando la ventana con Ctrl+R, sin cerrar la app. Los cambios en
+`core/` (los datos) si necesitan cerrarla y volver a abrirla, porque ese
+codigo se carga una sola vez al arrancar.
 
 ## Configuración
 
@@ -95,25 +62,20 @@ con varias pestanas:
     oscuro (o al reves), sin recargar la pagina. Los colores se eligen con
     un selector nativo o con paletas predefinidas (Pastel, Vivos, Claros,
     Oscuros). Los temas se pueden exportar/importar como archivo `.json`,
-    para pasarlos entre dispositivos que no pueden emparejarse
-    directamente entre si (ej. dos moviles). Al editar un tema los cambios
+    para guardarlos fuera de la app o pasarlos a otra instalacion. Al editar un tema los cambios
     se ven en vivo en toda la app; no hay boton de guardar por tema, es un
     flujo continuo (cambiar a editar otro tema guarda el anterior solo,
     cerrar sin guardar descarta los cambios).
-- **Perfil**: tu nickname (se ve igual en todos tus dispositivos
-  vinculados) y tu correo (opcional, solo se usa como contacto tecnico
-  para las notificaciones push del movil — ver "Datos personales" mas
-  abajo). Tambien es donde se pide la primera vez que se abre la app.
+- **Perfil**: tu nickname (aparece como "creado por" en lo que añadas) y
+  tu correo, opcional y sin uso real (ver "Datos personales" mas abajo).
+  Tambien es donde se pide la primera vez que se abre la app.
 - **Grupos**: listas de recordatorios y tareas con color, al estilo de
   Recordatorios de iPhone. Cada grupo puede tener tambien un icono y un
   color especial para cuando una tarea de ese grupo se marca como hecha
   (si no lo pones, se calcula automaticamente atenuando el color normal).
-- **Dispositivos**: emparejar, renombrar y revocar. Tambien muestra el QR
-  para reconectar un movil ya vinculado en otra red (ver "Instalar como
-  app" mas abajo).
 - **Atajos**: cada accion (nuevo evento, abrir Configuración, mes/dia
   anterior o siguiente...) se puede asignar a la combinacion de teclas
-  que quieras, por dispositivo. Por defecto: `N` nuevo evento, `←`/`→`
+  que quieras. Por defecto: `N` nuevo evento, `←`/`→`
   dia anterior/siguiente.
 - **Este dispositivo**: ajustes que no se comparten con nadie mas, como
   las notificaciones del navegador, el modo de vista (ver abajo), como se
@@ -148,7 +110,7 @@ texto y tareas:
   numeradas, con auto-inicio al escribir y anidado con Tab), tablas de
   tamano fijo redimensionables, bloques de codigo e imagenes (desde
   archivo o pegando con Ctrl+V una captura/imagen copiada). Cada imagen
-  se sube al servidor y se guarda como archivo aparte (no como texto
+  se guarda como archivo aparte en la carpeta de datos (no como texto
   dentro de la nota), asi que cargar la lista de notas sigue siendo
   rapido aunque tengan fotos. Una nota se puede ocultar con el icono de
   ojo — no es cifrado real, solo evita que se lea a primera vista, sin
@@ -222,9 +184,8 @@ antes):
 
 ## Extensiones
 
-Desde el botón "Extensiones" de la barra superior (o la sección
-"Extensiones" de la navegación móvil) se accede a secciones aparte del
-calendario, cada una a pantalla completa y sin afectar a nada de lo de
+Desde el botón "Apps" de la barra superior se accede a secciones aparte
+del calendario, cada una a pantalla completa y sin afectar a nada de lo de
 arriba:
 
 - **Gimnasio**: registro de entrenamientos. Una biblioteca de
@@ -275,110 +236,49 @@ arriba:
   concreto (no solo el actual) y otra con el histórico de ahorro en un
   rango de fechas. Una gráfica compara ingresos y gastos mes a mes de los
   últimos 6 meses.
-- **Archivos**: mandar archivos sueltos (fotos, PDFs, documentos — sin
-  ligarlos a ninguna nota) entre el móvil y el ordenador, con dos paneles
-  uno junto al otro (como un cliente de escritorio remoto): el tuyo
-  (elige uno o varios con el selector de siempre — un navegador no puede
-  listar el almacenamiento propio del dispositivo, así que no hay
-  explorador real de ese lado) y la carpeta compartida del ordenador, con
-  flechas para mandar/traer. Desde el ordenador puedes además navegar
-  cualquier carpeta del disco (no solo la configurada por defecto, que
-  queda como un atajo rápido). Cuando quien inicia un envío o una
-  descarga es el móvil, la persona delante del ordenador tiene que
-  confirmarlo antes de que se mueva nada de verdad — el ordenador
-  copiando algo suyo a su propia carpeta compartida sigue siendo
-  instantáneo, sin este paso. Este apartado es también donde vive ahora
-  el botón para sincronizar el resto de datos manualmente (ver "Instalar
-  como app" más abajo) y el de comprobar si hay una versión nueva de la
-  app (instalarla de verdad sigue siendo solo desde el ordenador).
+## Como esta montada por dentro
 
-## App de escritorio (Electron)
+No hay servidor, ni puerto, ni HTTP. La app son tres piezas:
 
-Ademas de correr como servidor web, la app se puede empaquetar como
-programa de escritorio para Windows (`npm run electron` para probarla sin
-empaquetar, `npm run dist` para generar un instalador `.exe`). Es la
-misma app por dentro (mismo servidor, mismo emparejamiento de moviles,
-mismo mDNS) metida en una ventana nativa, con extras propios de
-escritorio: comprobar actualizaciones y actualizar desde dentro de la
-app (con `git pull` y reinicio automatico), y recordar si la ventana
-debe abrirse en pantalla completa.
+- `public/` — la interfaz: HTML, CSS y JavaScript sin compilar ni
+  frameworks. Es lo que se ve en la ventana.
+- `core/` — los datos: SQLite (via `node:sqlite`, integrado en Node, sin
+  compilar nada nativo) y las rutas que leen y escriben en el. `core/api.js`
+  dice que archivo atiende cada ruta y `core/router.js` es un enrutador
+  propio de unas 100 lineas, el que sustituyo a Express.
+- `electron/` — el pegamento: crea la ventana, sirve `public/` con un
+  esquema propio `app://`, y pasa las peticiones de la interfaz a `core/`
+  por IPC (el canal interno de Electron).
 
-## Instalar como app (PWA)
-
-Tanto en el navegador del ordenador como en el del movil, la app se puede
-"instalar" (Añadir a pantalla de inicio / Instalar app) para que se abra
-como una app independiente, con su propio icono, en vez de una pestaña
-del navegador.
-
-Un movil ya vinculado guarda ademas su propia copia de los datos
-(eventos, tareas, notas con sus carpetas...) en el propio navegador:
-puedes seguir viendo, creando y editando cosas sin conexion al ordenador.
-La sincronizacion entre movil y ordenador es **manual**: entra en
-Extensiones → Archivos y pulsa "Sincronizar ahora" cuando quieras poner
-al dia los dos lados (si hay un conflicto de verdad, gana el cambio mas
-reciente) — a proposito no hay ningun disparador automatico de fondo. Un
-punto de color en la barra superior indica el estado del ULTIMO intento:
-verde = todo sincronizado, amarillo = hay cambios pendientes de mandar,
-gris = sin conexion con el ordenador la ultima vez que se intento, rojo
-= hubo un error de verdad — y clicarlo te lleva directo a Archivos. No
-hay ningun servidor intermedio en internet — la sincronizacion solo pasa
-por tu propia wifi local.
-
-Si el movil cambia de wifi, o el ordenador cambia de direccion en la
-misma red, un movil YA vinculado no pierde sus datos ni tiene que volver
-a emparejarse: en el ordenador, Configuración → Dispositivos muestra un
-codigo QR con la direccion actual; en el movil, Configuración → Este
-dispositivo → "Escanear ordenador" lo lee con la camara y actualiza a
-donde mandar los datos. Solo cambia adonde se conecta, nunca de donde
-lee su copia local guardada — por eso no hace falta volver a vincularlo.
+Cuando la interfaz pide `/api/events`, esa peticion no sale a ninguna
+red: viaja por IPC hasta `core/api.js`, que consulta SQLite y devuelve la
+respuesta. Las rutas se siguen llamando igual que cuando esto era un
+servidor web, pero solo como forma de nombrar cada cosa.
 
 ## Recordatorios
 
 Cada evento o tarea con fecha puede tener un recordatorio (en el momento,
 10 min, 30 min, 1 hora o 1 dia antes). Cuando toca, dispara:
 
-- una notificacion del navegador si tienes la pestana abierta (movil u
-  ordenador, si las activaste en Configuración → Este dispositivo),
-- una notificacion del sistema operativo en el ordenador donde corre el
-  servidor (funciona aunque no tengas el navegador abierto, mientras el
-  servidor este encendido), y
-- en el movil, ademas, un **aviso push de verdad** si activaste las
-  notificaciones (Configuración → Este dispositivo): llega aunque tengas
-  la app completamente cerrada. Hace falta rellenar un correo de
-  contacto en Configuración → Perfil la primera vez (ver "Datos
-  personales" mas abajo) — es un requisito tecnico del protocolo usado
-  (Web Push/VAPID), nunca se muestra ni se usa para nada mas. En iPhone,
-  ademas, la app tiene que estar "Añadida a pantalla de inicio" (no vale
-  con Safari normal, sin instalar), por una restriccion de Apple.
+- un aviso en pantalla si tienes la ventana abierta (activable en
+  Configuración → Este dispositivo), y
+- una notificacion del sistema operativo, que sale aunque tengas la
+  ventana minimizada, mientras la app este abierta.
 
 ## Datos personales
 
-La primera vez que se abre la app (desde cualquier dispositivo) aparece
-una pantalla de bienvenida pidiendo dos datos, los dos **opcionales**:
+La primera vez que se abre la app aparece una pantalla de bienvenida
+pidiendo dos datos, los dos **opcionales**:
 
-- **Nickname**: se ve igual en todos tus dispositivos vinculados, y
-  aparece como "creado por" en los eventos y notas que añadas — solo
-  sirve para diferenciar quien creo que si usas varios dispositivos.
-- **Correo**: no se usa para nada dentro de la app ni se muestra en
-  ningun sitio. Su unico proposito es servir de contacto tecnico
-  obligatorio del protocolo Web Push (VAPID) al mandar notificaciones
-  push al movil — lo exige el propio estandar, pensado para que
-  Google/Apple puedan avisar al operador del servidor si hay demasiados
-  fallos de entrega. Sin correo, sencillamente no se pueden activar las
-  notificaciones push (el resto de la app funciona igual). Se puede
-  rellenar, cambiar o dejar vacio en cualquier momento desde
-  Configuración → Perfil.
+- **Nickname**: aparece como "creado por" en los eventos y notas que
+  añadas.
+- **Correo**: no se usa para nada. Es un resto de cuando existia la
+  version movil con avisos push, donde el protocolo exigia un correo de
+  contacto. Se puede dejar vacio.
 
-Ningun dato sale de tus propios dispositivos, salvo — si activas las
-notificaciones push — el aviso en si (cifrado de extremo a extremo por
-el propio protocolo) y el correo de contacto de arriba, que tienen que
-pasar obligatoriamente por los servidores de Google (Android/Chrome) o
-Apple (iPhone/Safari): es la unica forma en que el sistema operativo del
-movil puede despertar la app estando cerrada del todo, no hay manera de
-evitarlo. Ni Google ni Apple pueden leer el contenido del aviso (titulo
-del recordatorio incluido), solo mueven bytes cifrados. La
-sincronizacion normal entre tus dispositivos (eventos, notas, tareas...)
-nunca pasa por ahi: es directa, por tu propia wifi local.
+Ningun dato sale de tu ordenador. La unica conexion a internet que hace
+la app es comprobar si hay una version nueva del codigo en GitHub, y solo
+si se lo pides.
 
 ## Lo que queda fuera, de momento
 
@@ -391,13 +291,13 @@ nunca pasa por ahi: es directa, por tu propia wifi local.
 - No hay forma de mover una carpeta de notas ya creada a otra carpeta
   distinta (si se puede mover una nota entre carpetas desde su propio
   editor).
-- Widgets de pantalla de inicio o accesos en el Centro de Control
-  (iPhone) no son viables como app web: harian falta frameworks nativos
-  (WidgetKit/ControlKit) o un envoltorio tipo Capacitor — queda anotado
-  como posible proyecto aparte, no en desarrollo.
-- La app de escritorio (Electron) solo genera instalador para Windows.
-- Redimensionar tablas de notas es solo con raton (arrastrar bordes) —
-  no hay equivalente tactil todavia en movil.
+- Solo se genera instalador para Windows.
+- No hay app movil ni sincronizacion entre dispositivos. La hubo hasta la
+  v0.33.1 (emparejamiento por codigo, copia local en el movil,
+  sincronizacion por wifi local, avisos push y una extension "Archivos"
+  para pasarse archivos entre movil y ordenador); se quito entera al
+  pasar la app a escritorio puro. Sigue disponible en la rama `main` del
+  repositorio si algun dia hace falta recuperarla.
 - El modo "vim" del editor de notas es un subconjunto pequeño a
   proposito (sin registros con nombre, macros, `:` comandos, `yy`/`p`,
   repetir con numeros) — se puede ampliar mas adelante segun haga falta.

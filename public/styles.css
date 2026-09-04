@@ -295,26 +295,6 @@ button {
    vistazo rapido, no un panel -- el detalle de verdad (fecha, cambios
    pendientes, mensaje de error) esta en Configuracion > Este
    dispositivo. Colores con significado fijo, no siguen el tema. */
-.sync-indicator {
-  padding: 0.4rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border-color: transparent;
-  flex-shrink: 0;
-}
-.sync-indicator-dot {
-  display: block;
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 50%;
-  background: #9aa0a6; /* gris por defecto, antes de la primera sincronizacion */
-}
-.sync-indicator[data-status="synced"] .sync-indicator-dot { background: #2ecc71; }
-.sync-indicator[data-status="pending"] .sync-indicator-dot { background: #f5b400; }
-.sync-indicator[data-status="offline"] .sync-indicator-dot { background: #9aa0a6; }
-.sync-indicator[data-status="error"] .sync-indicator-dot { background: #e5484d; }
 
 input, textarea, select {
   font: inherit;
@@ -2595,7 +2575,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .finanzas-savings-status { font-size: 0.9rem; }
 .finanzas-savings-range-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
 
-
 /* Extension "Lecturas": jerarquia de 2 tablas (sagas -> items de una
    saga). ".gym-tab-action" se reutiliza tal cual para el boton "+
    Nueva/o" (mismo estilo que ya se penso para Gimnasio: alineado a la
@@ -2663,49 +2642,9 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .lecturas-rating-field input[type="number"] { width: 4.5rem; flex-shrink: 0; }
 .form-row > input { flex: 1; min-width: 0; }
 
-/* Extension "Archivos": ver #archivos-view en index.html. Mismo patron
-   que .finanzas-tab-panel: .my-space-view ya es flex-column, este bloque
-   ocupa el resto del alto (la cabecera es flex-shrink:0) y hace scroll
-   propio con su propio padding lateral. */
-.archivos-body { flex: 1; min-height: 0; padding: 1rem 1.2rem; overflow-y: auto; }
-/* "Sincronizar ahora" y "Comprobar ahora" ocupan el ancho del bloque
-   (dentro del padding lateral de .archivos-body, no del todo pegados al
-   borde de la pantalla) -- antes de envolver el contenido en
-   .archivos-body eran hijos directos de #archivos-view (flex-column con
-   align-items:stretch por defecto), que los estiraba solos; al pasar a
-   estar dentro de .archivos-body (que no es un contenedor flex) volvieron
-   a su ancho de contenido, asi que hace falta ponerlo explicito aqui. */
-#btn-sync-now, #btn-archivos-check-update { display: block; width: 100%; }
 /* Estado de "Comprobar ahora" (ver setArchivosCheckButtonState en
    app.js) integrado en el propio boton -- checking se ve atenuado,
    error en rojo, ok en el color normal del boton. */
-#btn-archivos-check-update { white-space: normal; text-align: center; line-height: 1.3; }
-#btn-archivos-check-update[data-check-status="checking"] { opacity: 0.7; }
-#btn-archivos-check-update[data-check-status="error"] { color: var(--danger); border-color: var(--danger); }
-#btn-archivos-check-update[data-check-status="error"]:hover:not(:disabled) {
-  background: var(--danger); color: #fff;
-}
-.archivos-folder-row { display: flex; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
-.archivos-folder-row input[type="text"] { flex: 1; min-width: 0; }
-.archivos-folder-browser {
-  margin: 0.5rem 0; padding: 0.7rem; border: 1px solid var(--border);
-  border-radius: 8px; background: var(--surface-2);
-}
-.archivos-browser-list {
-  display: flex; flex-direction: column; gap: 0.2rem; max-height: 220px;
-  overflow-y: auto; margin: 0.5rem 0;
-}
-.archivos-browser-item {
-  text-align: left; padding: 0.4rem 0.6rem; border: none; border-radius: 6px;
-  background: none; color: inherit; cursor: pointer;
-}
-.archivos-browser-item:hover { background: var(--surface); }
-/* Navegacion real del panel "Carpeta compartida en el ordenador" (ver
-   loadArchivosNavPath en app.js) -- reutiliza .archivos-browser-list/
-   -item para las carpetas, mismo aspecto que el explorador de "Carpeta
-   de destino" de arriba. */
-.archivos-nav-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
-.archivos-nav-path { flex: 1; min-width: 0; overflow-wrap: break-word; font-size: 0.85rem; margin: 0; }
 /* Desplegable de subcarpetas (ver comentario en index.html): antes la
    lista estaba siempre visible debajo de la ruta -- ahora solo se abre
    al pasar el raton por encima o al pulsar el boton (ver
@@ -2716,18 +2655,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    panel) -- pedido explicito de Koku tras ver que el tinte de acento que
    tenia antes no encajaba con el resto. El toque "diferente" que
    tambien pidio es solo el borde izquierdo, no todo el fondo. */
-.archivos-nav-folders-wrap { position: relative; margin: 0.3rem 0; display: inline-block; }
-.archivos-nav-folders-toggle { font-size: 0.85rem; }
-.archivos-nav-folders-dropdown.archivos-browser-list {
-  position: fixed; z-index: 60;
-  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-  padding: 0.3rem; min-width: 180px; max-height: 280px; overflow-y: auto;
-}
-.archivos-nav-folders-dropdown .archivos-browser-item:hover {
-  background: var(--surface-2); color: var(--surface-2-text);
-}
 /* Aviso de seguridad en Archivos (ver index.html) -- mismo padding y
    radio que .hint, pero con un fondo tenue en tono ambar para que se
    note como un aviso, no como una nota informativa cualquiera. No es un
@@ -2740,50 +2667,14 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   color: var(--surface-text);
   margin: 0.4rem 0;
 }
-.archivos-manage-block { margin-bottom: 1rem; }
-.archivos-manage-block summary { cursor: pointer; font-weight: 600; padding: 0.4rem 0; }
-.archivos-table-wrap { overflow-x: auto; margin: 0.8rem 0; }
-.archivos-table { width: 100%; border-collapse: collapse; }
-.archivos-table th, .archivos-table td {
-  text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.archivos-table td:last-child { display: flex; gap: 0.4rem; }
 
 /* Transferencia estilo TightVNC/TeamViewer (ver comentario en
    index.html): dos paneles + flechas en medio. En movil, apilados
    (panel local arriba, flechas en fila horizontal, panel remoto
    abajo) -- en escritorio, en fila con las flechas en el centro,
    mismo punto de corte que el resto de la app (860px). */
-.archivos-transfer-grid {
-  display: flex; flex-direction: column; gap: 0.8rem; margin: 0.6rem 0;
-}
-.archivos-transfer-panel {
-  flex: 1; min-width: 0; padding: 0.7rem 0.8rem; border: 1px solid var(--border);
-  border-radius: var(--radius); background: var(--surface); color: var(--surface-text);
-}
-.archivos-transfer-panel h4 { margin: 0 0 0.5rem; }
-.archivos-transfer-arrows {
-  display: flex; flex-direction: row; gap: 0.6rem; align-self: center;
-}
-.archivos-transfer-arrows button {
-  font-size: 1.2rem; line-height: 1; padding: 0.5rem 0.9rem;
-}
-.archivos-staged-list { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.5rem 0; }
-.archivos-staged-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
-  background: var(--surface-2); color: var(--surface-2-text);
-  border-radius: 6px; padding: 0.3rem 0.5rem; font-size: 0.85rem;
-}
-.archivos-staged-remove {
-  border: none; background: none; color: inherit; cursor: pointer;
-  font-size: 0.85rem; padding: 0 0.2rem; line-height: 1;
-}
-.archivos-table th:first-child, .archivos-table td:first-child { width: 1.6rem; }
 
 @media (min-width: 860px) {
-  .archivos-transfer-grid { flex-direction: row; align-items: stretch; }
-  .archivos-transfer-arrows { flex-direction: column; justify-content: center; }
 }
 
 /* Envoltorio SOLO de las 3 columnas (el Volver, fuera, en su propia
@@ -3101,8 +2992,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .toast-dismiss { padding: 0.2rem 0.45rem; background: transparent; border-color: transparent; }
 .toast-dismiss:hover { background: var(--surface-2); }
 
-#update-banner.toast { border-color: var(--accent); }
-
 /* Aviso de version nueva: a diferencia de los demas toasts (un mensaje +
    un boton), este lleva DOS botones de accion ademas de la x, asi que en
    una sola fila de 300px quedaba todo apretado y el texto partido a
@@ -3136,28 +3025,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 
 /* --- Modales --- */
-.modal, .pairing-screen {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.6);
-  display: flex; align-items: center; justify-content: center;
-  padding: 1rem;
-  z-index: 20;
-}
-.modal-card, .pairing-card {
-  background: var(--surface);
-  color: var(--surface-text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.2rem;
-  width: 100%;
-  /* 420px se quedaba corto para las dos columnas de fecha/hora (Inicio
-     y Fin lado a lado) y forzaba una barra de scroll lateral. */
-  max-width: 480px;
-  max-height: 95vh;
-  overflow-y: auto;
-  overflow-x: hidden;
-  position: relative; /* para que .modal-close-x se posicione respecto a la tarjeta, no a toda la pantalla */
-}
 .modal-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.8rem; }
 
 /* Confirmacion/aviso propio (showAppConfirm/showAppAlert en app.js) --
@@ -3255,7 +3122,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   #btn-close-extensions, #btn-extensions-settings,
   #btn-close-gym, #btn-gym-settings,
   #btn-close-finanzas, #btn-finanzas-settings,
-  #btn-close-archivos, #btn-archivos-settings,
   #btn-close-viajes, #btn-viajes-settings,
   #btn-close-lecturas, #btn-lecturas-settings {
     display: none;
@@ -3395,43 +3261,9 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   opacity: 0.85;
 }
 
-.theme-copy-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
-.theme-copy-item {
-  display: flex; align-items: center; gap: 0.6rem;
-  background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
-  font-size: 0.85rem;
-}
-.theme-copy-label { flex: 1; }
 .error { color: var(--danger); font-size: 0.85rem; }
 .hint { color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); font-size: 0.85rem; }
 
-.pairing-code-display { text-align: center; margin: 1rem 0; }
-.code-value { font-size: 2.2rem; font-weight: 700; letter-spacing: 0.25em; }
-
-/* El QR lo genera el servidor en blanco/negro fijo (ver
-   server/routes/devices.js), asi que se lee bien pase lo que pase con el
-   tema de color activo -- el marco blanco solo da un margen limpio
-   alrededor cuando el fondo de la app es oscuro. */
-.network-qr-image {
-  display: block; width: 180px; height: 180px; margin: 0.8rem 0;
-  background: #fff; border-radius: var(--radius); padding: 0.6rem;
-}
-
-.scan-server-video {
-  display: block; width: 100%; max-width: 360px; border-radius: var(--radius);
-  margin: 0.8rem 0; background: #000;
-}
-
-.devices-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
-.device-item {
-  display: flex; justify-content: space-between; align-items: center;
-  background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
-  font-size: 0.85rem;
-  gap: 0.5rem;
-}
-.device-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.device-item-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
-.device-item-actions button { padding: 0.35rem 0.6rem; font-size: 0.8rem; }
 .device-rename-input { flex: 1; }
 
 /* --- Grupos: nombre + color, tipo listas de Recordatorios --- */
@@ -3864,8 +3696,8 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 
 /* Extension "Viajes" -- ver #viajes-view en index.html. Mismo patron que
-   .archivos-body/.finanzas-tab-panel: .my-space-view ya es flex-column,
-   este bloque ocupa el resto del alto y hace scroll propio. */
+   .finanzas-tab-panel: .my-space-view ya es flex-column, este bloque
+   ocupa el resto del alto y hace scroll propio. */
 .viajes-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .viajes-tabs {
   flex-shrink: 0; display: flex; gap: 0.4rem; padding: 0.6rem 1.2rem 0;

@@ -1,26 +1,32 @@
-// electron/main.js — envuelve la app web de siempre en una ventana nativa
-// de escritorio. NO reimplementa nada: arranca el mismo server/index.js
-// de toda la vida (Express + SQLite), que sigue escuchando en la red local
-// igual que con "npm run dev" — asi que emparejar el movil sigue
-// funcionando exactamente igual, tanto si usas la app instalada como si
-// usas el navegador.
+// electron/main.js — el arranque de la app de escritorio.
+//
+// Hasta la version 0.33 esto envolvia la app WEB: levantaba el servidor
+// Express de siempre y abria una ventana apuntando a
+// http://localhost:3000. Ya no. Ahora no hay servidor, ni puerto, ni
+// HTTP: la ventana y la base de datos viven en el mismo programa y
+// hablan entre ellas por IPC (ver electron/ipc.js). Lo que se ve en
+// pantalla es exactamente el mismo public/ de siempre, servido por un
+// esquema propio app:// (ver electron/protocol.js).
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const http = require('http');
 const fs = require('fs');
 
-const PORT = process.env.PORT || 3000;
+const { registerScheme, registerHandler, ORIGIN } = require('./protocol');
 
-// IMPORTANTE: esto tiene que ponerse ANTES de requerir el servidor, porque
-// server/db.js lee esta variable de entorno la primera vez que se carga
-// (una sola vez, no se puede cambiar despues). Los datos van a la carpeta
-// de datos del usuario (en Windows, algo tipo
+// IMPORTANTE: esto tiene que ponerse ANTES de requerir nada de core/,
+// porque core/db.js lee esta variable de entorno la primera vez que se
+// carga (una sola vez, no se puede cambiar despues). Los datos van a la
+// carpeta de datos del usuario (en Windows, algo tipo
 // C:\Users\tú\AppData\Roaming\RemindMeLater\data) en vez de dentro de la
 // propia carpeta de instalacion — esa carpeta se borra y se sustituye
-// entera cada vez que se instala una version nueva, así que guardar ahí
-// los datos de verdad los perdería en cada actualización.
+// entera cada vez que se instala una version nueva, asi que guardar ahi
+// los datos de verdad los perderia en cada actualizacion.
 process.env.REMINDMELATER_DATA_DIR = path.join(app.getPath('userData'), 'data');
-process.env.PORT = String(PORT);
+
+// El registro del esquema app:// tiene que ocurrir antes de que Electron
+// termine de arrancar (whenReady), no despues — por eso se llama aqui
+// arriba del todo y no dentro del whenReady() de mas abajo.
+registerScheme();
 
 let mainWindow = null;
 
@@ -33,8 +39,8 @@ let mainWindow = null;
 // "asentandose" justo despues de crearse). No es lo mismo que
 // localStorage: eso vive dentro de la pagina web (el proceso "renderer"),
 // que este proceso principal no puede leer de forma sincrona antes de
-// crear la ventana — por eso se guarda tambien aqui, en un archivo aparte,
-// cada vez que cambia (ver saveViewMode en preload.js).
+// crear la ventana — por eso se guarda tambien aqui, en un archivo
+// aparte, cada vez que cambia (ver saveViewMode en preload.js).
 const VIEW_MODE_FILE = path.join(app.getPath('userData'), 'view-mode.json');
 
 function readSavedViewMode() {
@@ -52,22 +58,6 @@ function writeSavedViewMode(mode) {
   } catch (err) {
     console.warn('No se pudo guardar la vista para la proxima vez que arranques:', err.message);
   }
-}
-
-// El servidor tarda un poco (crear tablas, migraciones...) en estar listo
-// para responder. En vez de un setTimeout a ciegas, se reintenta una
-// peticion real hasta que conteste — así la ventana se abre en cuanto el
-// servidor puede atenderla de verdad, ni antes ni con una espera de mas.
-function waitForServer(url, callback) {
-  const attempt = () => {
-    http
-      .get(url, (res) => {
-        res.resume();
-        callback();
-      })
-      .on('error', () => setTimeout(attempt, 150));
-  };
-  attempt();
 }
 
 function createWindow() {
@@ -89,12 +79,15 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadURL(`http://localhost:${PORT}/`);
+  // Ya no hace falta esperar a que ningun servidor conteste: los
+  // archivos se sirven desde el disco (protocol.js) y los datos salen de
+  // SQLite en este mismo proceso, asi que la ventana puede cargar de
+  // inmediato.
+  mainWindow.loadURL(`${ORIGIN}/index.html`);
 
   // Avisa a la pagina si sales de pantalla completa nativa por tu cuenta
   // (Esc, el propio control de la ventana...) para que Configuracion > Vista
-  // no se quede diciendo "Pantalla completa" cuando ya no lo es. Simetrico
-  // al 'fullscreenchange' que ya escucha app.js para el navegador normal.
+  // no se quede diciendo "Pantalla completa" cuando ya no lo es.
   mainWindow.on('enter-full-screen', () => {
     mainWindow.webContents.send('native-fullscreen-changed', true);
   });
@@ -112,13 +105,11 @@ function createWindow() {
 // public/settings.js). Cierra la ventana de golpe, sin preguntar — igual
 // que cerrar la ventana con la X del sistema operativo.
 ipcMain.on('quit-app', () => app.quit());
+
 // Tras un "git pull" bueno pedido desde Configuracion (ver
-// /api/update/pull en el servidor y public/app.js), el codigo nuevo ya
-// esta en el disco pero este proceso sigue con el viejo cargado en
-// memoria — app.relaunch() dice "cuando cierres, vuelve a abrirte" y
-// app.exit() lo dispara ya mismo. Al volver a arrancar, el
-// require('../server/index.js') de mas abajo carga el server/index.js
-// NUEVO (require() no tiene cache entre procesos distintos).
+// core/routes/update.js), el codigo nuevo ya esta en el disco pero este
+// proceso sigue con el viejo cargado en memoria — app.relaunch() dice
+// "cuando cierres, vuelve a abrirte" y app.exit() lo dispara ya mismo.
 ipcMain.on('relaunch-app', () => {
   app.relaunch();
   app.exit();
@@ -131,21 +122,37 @@ ipcMain.on('save-view-mode', (event, mode) => {
 });
 
 app.whenReady().then(() => {
-  // Arranca el servidor Express de siempre, sin tocarle nada — es el
-  // mismo archivo que usa "npm run dev".
-  require('../server/index.js');
+  // Estos tres require() van AQUI DENTRO y no arriba del archivo a
+  // proposito: los tres acaban abriendo la base de datos, y para eso
+  // hace falta que REMINDMELATER_DATA_DIR ya este puesta y que Electron
+  // haya arrancado (app.getPath('userData') no es fiable antes).
+  const { registerIpc } = require('./ipc');
+  const { startReminderChecker } = require('../core/reminderChecker');
+  const { startFinanzasRecurringChecker } = require('../core/finanzasRecurringChecker');
 
-  waitForServer(`http://localhost:${PORT}/`, createWindow);
+  registerHandler(); // el app:// que sirve public/ y las imagenes
+  registerIpc(); // el canal por el que la ventana pide datos
+
+  createWindow();
+
+  // Trabajo de fondo, el mismo de siempre. Antes lo arrancaba
+  // server/index.js al ponerse a escuchar; ahora que no hay servidor,
+  // lo arranca esto.
+  //   - reminderChecker: cada 30s mira si toca avisar de algun
+  //     recordatorio y saca el aviso del sistema.
+  //   - finanzasRecurringChecker: una vez al dia, genera la transaccion
+  //     real de cada plantilla de gasto fijo que toque.
+  startReminderChecker();
+  startFinanzasRecurringChecker();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
-// En Windows/Linux, cerrar la ultima ventana cierra la app entera (y con
-// ella el servidor, que vive en el mismo proceso). En Mac la convencion es
-// dejar la app corriendo hasta Cmd+Q, pero de momento esto se usa en
-// Windows.
+// En Windows/Linux, cerrar la ultima ventana cierra la app entera. En Mac
+// la convencion es dejar la app corriendo hasta Cmd+Q, pero de momento
+// esto se usa en Windows.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });

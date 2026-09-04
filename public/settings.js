@@ -263,7 +263,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'devices', 'mobile', 'shortcuts'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'mobile', 'shortcuts'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -280,7 +280,6 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();
     else if (tab === 'groups') refreshGroupsTab();
-    else if (tab === 'devices') refreshDevicesTab();
     else if (tab === 'mobile') refreshMobileTab();
     else if (tab === 'shortcuts') refreshShortcutsTab();
   });
@@ -545,7 +544,6 @@ function openSettingsModal() {
   document.getElementById('settings-modal').classList.remove('hidden');
   closeThemeForm();
   showSettingsScreen(null);
-  refreshQuitMenuItem();
   refreshVersionInfo();
 }
 
@@ -564,7 +562,6 @@ document.getElementById('btn-extensions-settings').addEventListener('click', ope
 document.getElementById('btn-gym-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-lecturas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
-document.getElementById('btn-archivos-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
 // #mobile-notes-view (Fase 4) es tambien .my-space-view a pantalla
 // completa, mismo motivo que las de arriba.
@@ -572,7 +569,6 @@ document.getElementById('btn-mobile-notes-settings').addEventListener('click', o
 document.getElementById('btn-close-settings').addEventListener('click', () => {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
-  clearInterval(pairingCountdownTimer);
 });
 
 // ---------------------------------------------------------------------
@@ -930,7 +926,6 @@ async function refreshStyleTab() {
   refreshColorModeOptions();
   renderThemeLibrary();
   refreshQuickColorModeButton();
-  await refreshThemeCopyList();
 }
 
 // Guarda que tema se esta editando ahora mismo (null = ninguno, o se esta
@@ -1245,43 +1240,8 @@ document.getElementById('btn-delete-theme').addEventListener('click', async () =
   await refreshStyleTab();
 });
 
-// --- Copiar estilo de otro dispositivo conectado ---
-async function refreshThemeCopyList() {
-  const container = document.getElementById('theme-copy-list');
-  container.innerHTML = '';
-
-  let selection;
-  try {
-    selection = await api('/api/themes/selection');
-  } catch (err) {
-    container.innerHTML = '<p class="empty-hint">No se pudo consultar los demas dispositivos.</p>';
-    return;
-  }
-
-  const others = selection.filter((s) => !s.isSelf);
-  if (others.length === 0) {
-    container.innerHTML = '<p class="empty-hint">Todavía no hay otros dispositivos vinculados.</p>';
-    return;
-  }
-
-  others.forEach((entry) => {
-    const row = document.createElement('div');
-    row.className = 'theme-copy-item';
-    row.innerHTML = `
-      <span class="theme-copy-label">${escapeHtml(entry.label)}</span>
-      <span class="hint">${entry.themeName ? escapeHtml(entry.themeName) : 'sin tema elegido'}</span>
-      <button type="button" class="secondary-btn" ${entry.themeId ? '' : 'disabled'}>Usar este</button>
-    `;
-    row.querySelector('button').addEventListener('click', async () => {
-      const theme = themeLibrary.find((t) => t.id === entry.themeId);
-      if (theme) await applyTheme(theme);
-    });
-    container.appendChild(row);
-  });
-}
-
-// --- Importar / exportar temas (para compartir entre dispositivos que
-// no pueden conectarse directamente entre si, ej. dos moviles) ---
+// --- Importar / exportar temas (a un archivo .json, para guardarlos
+// fuera de la app o pasarlos a otra instalacion) ---
 function exportTheme(theme) {
   const blob = new Blob(
     [JSON.stringify({ name: theme.name, colors: theme.colors, inverseColors: theme.inverseColors || null }, null, 2)],
@@ -1327,22 +1287,21 @@ document.getElementById('theme-import-input').addEventListener('change', async (
   }
 });
 
-// Al cargar la app: averigua que tema tenemos activo segun el servidor
-// (que es la fuente de verdad) y lo aplica. Mientras tanto, el script del
-// <head> ya habra pintado lo que hubiera en cache para evitar parpadeos.
+// Al cargar la app: averigua que tema tenemos activo segun la base de
+// datos (que es la fuente de verdad) y lo aplica. Mientras tanto, el
+// script del <head> ya habra pintado lo que hubiera en cache para evitar
+// el parpadeo de arrancar con los colores por defecto.
 async function syncActiveTheme() {
   try {
-    const [themes, selection] = await Promise.all([api('/api/themes'), api('/api/themes/selection')]);
+    const [themes, mine] = await Promise.all([api('/api/themes'), api('/api/themes/selection/mine')]);
     themeLibrary = themes;
-    const mine = selection.find((s) => s.isSelf);
     if (mine && mine.themeId) {
       const theme = themeLibrary.find((t) => t.id === mine.themeId);
       if (theme) await applyTheme(theme, { persist: false });
     }
     refreshQuickColorModeButton();
   } catch (err) {
-    // Pantalla de emparejamiento, sin red, etc.: nos quedamos con lo que
-    // hubiera en cache local. No hace falta avisar de nada aqui.
+    // Si algo falla, nos quedamos con lo que hubiera en cache local.
   }
 }
 syncActiveTheme();
@@ -1476,134 +1435,6 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
 });
 
 // ---------------------------------------------------------------------
-// Dispositivos vinculados (gestion completa, movida aqui desde app.js)
-// ---------------------------------------------------------------------
-let pairingCountdownTimer = null;
-
-async function refreshDevicesTab() {
-  document.getElementById('pairing-code-display').classList.add('hidden');
-  try {
-    const devices = await api('/api/devices');
-    document.getElementById('devices-only-computer').classList.add('hidden');
-    document.getElementById('devices-management').classList.remove('hidden');
-    renderDevicesList(devices);
-    refreshNetworkQr();
-  } catch (err) {
-    // 403: este dispositivo no es el ordenador de confianza.
-    document.getElementById('devices-only-computer').classList.remove('hidden');
-    document.getElementById('devices-management').classList.add('hidden');
-  }
-}
-
-// QR con la IP de este ordenador en la red actual (ver getLanUrl() en
-// server/routes/devices.js) -- lo escanea un movil ya vinculado para saber
-// donde mandar los datos sin volver a emparejarse (ver
-// openScanServerModal() mas abajo).
-async function refreshNetworkQr() {
-  const img = document.getElementById('network-qr-image');
-  const urlText = document.getElementById('network-qr-url');
-  try {
-    const info = await api('/api/devices/network-info');
-    img.src = `/api/devices/network-qr.svg?_=${Date.now()}`;
-    img.classList.remove('hidden');
-    urlText.textContent = info.url;
-  } catch (err) {
-    img.classList.add('hidden');
-    urlText.textContent = 'No se ha detectado ninguna red activa.';
-  }
-}
-
-function renderDevicesList(devices) {
-  const list = document.getElementById('devices-list');
-  list.innerHTML = '';
-  if (devices.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Ningun dispositivo vinculado todavía.</p>';
-    return;
-  }
-  devices.forEach((d) => {
-    const row = document.createElement('div');
-    row.className = 'device-item';
-
-    const iconField = createIconField({
-      initialValue: d.icon || '',
-      // Se guarda solo al elegir uno nuevo (sin boton "Guardar" aparte),
-      // igual que "Usar" en los temas.
-      onChange: async (newIcon) => {
-        await api(`/api/devices/${d.id}`, { method: 'PATCH', body: JSON.stringify({ icon: newIcon || null }) });
-      },
-    });
-
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'device-item-name';
-    nameSpan.textContent = d.name;
-
-    const actions = document.createElement('div');
-    actions.className = 'device-item-actions';
-    actions.innerHTML = `
-      <button type="button" data-action="rename" class="secondary-btn">Editar</button>
-      <button type="button" data-action="revoke" class="danger-btn">Revocar</button>
-    `;
-
-    row.appendChild(iconField.element);
-    row.appendChild(nameSpan);
-    row.appendChild(actions);
-
-    actions.querySelector('[data-action="revoke"]').addEventListener('click', async () => {
-      await api(`/api/devices/${d.id}`, { method: 'DELETE' });
-      refreshDevicesTab();
-    });
-
-    actions.querySelector('[data-action="rename"]').addEventListener('click', () => {
-      nameSpan.replaceWith((() => {
-        const wrap = document.createElement('span');
-        wrap.style.display = 'flex';
-        wrap.style.flex = '1';
-        wrap.style.gap = '0.4rem';
-        wrap.innerHTML = `
-          <input type="text" class="device-rename-input" value="${escapeHtml(d.name)}" />
-          <button type="button" data-action="save" class="primary-btn">Guardar</button>
-          <button type="button" data-action="cancel" class="secondary-btn">Cancelar</button>
-        `;
-        const input = wrap.querySelector('input');
-        setTimeout(() => { input.focus(); input.select(); }, 0);
-
-        wrap.querySelector('[data-action="cancel"]').addEventListener('click', () => renderDevicesList(devices));
-
-        const save = async () => {
-          const newName = input.value.trim();
-          if (!newName) return;
-          await api(`/api/devices/${d.id}`, { method: 'PATCH', body: JSON.stringify({ name: newName }) });
-          refreshDevicesTab();
-        };
-        wrap.querySelector('[data-action="save"]').addEventListener('click', save);
-        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
-        return wrap;
-      })());
-      // Ocultamos los botones de accion mientras se edita el nombre.
-      actions.classList.add('hidden');
-    });
-
-    list.appendChild(row);
-  });
-}
-
-document.getElementById('btn-generate-code').addEventListener('click', async () => {
-  const { code, expiresAt } = await api('/api/devices/pairing-code', { method: 'POST' });
-  document.getElementById('pairing-code-value').textContent = code;
-  document.getElementById('pairing-code-display').classList.remove('hidden');
-
-  clearInterval(pairingCountdownTimer);
-  const update = () => {
-    const secondsLeft = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
-    document.getElementById('pairing-code-countdown').textContent =
-      secondsLeft > 0 ? `Caduca en ${secondsLeft}s` : 'Codigo caducado, genera otro.';
-    if (secondsLeft <= 0) clearInterval(pairingCountdownTimer);
-  };
-  update();
-  pairingCountdownTimer = setInterval(update, 1000);
-});
-
-// ---------------------------------------------------------------------
 // "Este dispositivo": ajustes locales, no compartidos con nadie mas
 // ---------------------------------------------------------------------
 function refreshMobileTab() {
@@ -1619,126 +1450,12 @@ function refreshMobileTab() {
   else if (Notification.permission === 'denied') status.textContent = 'Estan bloqueadas en el navegador; cambialo en los ajustes del sitio para activarlas.';
   else status.textContent = '';
 
-  document.getElementById('setting-update-check').checked =
-    localStorage.getItem('updateCheckEnabled') !== 'false';
-
   refreshCompletedTasksDisplayOptions();
-  refreshSyncStatusUI();
   refreshGymWeightUnitOptions();
-  refreshScanServerStatus();
-}
-
-// ---------------------------------------------------------------------
-// "Escanear ordenador" (fase "multi-red"): un movil ya vinculado escanea
-// el QR que el ordenador muestra en Configuración → Dispositivos para
-// guardar su IP actual (localStorage.serverBaseUrl, ver getServerBaseUrl()
-// en app.js) sin tocar el origen de la propia app -- eso es lo que deja
-// los datos guardados intactos aunque cambie de wifi o de ordenador.
-// ---------------------------------------------------------------------
-let scanServerStream = null;
-let scanServerRafId = null;
-
-function refreshScanServerStatus() {
-  const el = document.getElementById('scan-server-status');
-  if (!el) return;
-  const override = localStorage.getItem('serverBaseUrl');
-  el.textContent = override
-    ? `Sincronizando con: ${override}`
-    : 'Usando la dirección con la que se abrió esta app.';
-}
-
-async function openScanServerModal() {
-  const modal = document.getElementById('scan-server-modal');
-  const video = document.getElementById('scan-server-video');
-  const modalStatus = document.getElementById('scan-server-modal-status');
-  modalStatus.textContent = '';
-  modal.classList.remove('hidden');
-
-  if (!window.jsQR) {
-    modalStatus.textContent = 'No se pudo cargar el lector de QR.';
-    return;
-  }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    modalStatus.textContent = 'Este navegador no permite usar la cámara aquí.';
-    return;
-  }
-
-  try {
-    scanServerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-  } catch (err) {
-    modalStatus.textContent = 'No se pudo acceder a la cámara: ' + err.message;
-    return;
-  }
-  video.srcObject = scanServerStream;
-  await video.play();
-
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-  const tick = () => {
-    if (!scanServerStream) return; // el modal se cerro entre un frame y el siguiente
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = window.jsQR(imageData.data, imageData.width, imageData.height);
-      if (code && code.data) {
-        handleScannedServerUrl(code.data);
-        return;
-      }
-    }
-    scanServerRafId = requestAnimationFrame(tick);
-  };
-  scanServerRafId = requestAnimationFrame(tick);
-}
-
-function closeScanServerModal() {
-  document.getElementById('scan-server-modal').classList.add('hidden');
-  if (scanServerRafId) cancelAnimationFrame(scanServerRafId);
-  scanServerRafId = null;
-  if (scanServerStream) {
-    scanServerStream.getTracks().forEach((t) => t.stop());
-    scanServerStream = null;
-  }
-}
-
-function handleScannedServerUrl(text) {
-  let parsed;
-  try {
-    parsed = new URL(text);
-  } catch (err) {
-    document.getElementById('scan-server-modal-status').textContent = 'Ese código no tiene una dirección válida.';
-    return;
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    document.getElementById('scan-server-modal-status').textContent = 'Ese código no tiene una dirección válida.';
-    return;
-  }
-
-  localStorage.setItem('serverBaseUrl', parsed.origin);
-  closeScanServerModal();
-  refreshScanServerStatus();
-  document.getElementById('scan-server-status').textContent = `Conectando con ${parsed.origin}...`;
-  runSync().finally(refreshScanServerStatus);
-}
-
-document.getElementById('btn-scan-server').addEventListener('click', openScanServerModal);
-document.getElementById('btn-close-scan-server').addEventListener('click', closeScanServerModal);
-
-// "Salir de la aplicacion": vive como accion directa en la lista principal
-// de Configuracion (no dentro de una sub-seccion), asi que se refresca al
-// abrir el panel entero (ver openSettingsModal), no al entrar en una
-// pestana concreta. window.electronAPI solo existe si esto corre dentro
-// de la app de escritorio (lo expone electron/preload.js) — en el
-// navegador normal (o desde el movil) el boton se queda oculto, porque
-// "salir" no significa nada ahi.
-function refreshQuitMenuItem() {
-  document.getElementById('btn-quit-app').classList.toggle('hidden', !window.electronAPI);
 }
 
 document.getElementById('btn-quit-app').addEventListener('click', () => {
-  if (window.electronAPI) window.electronAPI.quitApp();
+  window.electronAPI.quitApp();
 });
 
 // Tachar vs ocultar tareas completadas: preferencia de ESTE dispositivo
@@ -1813,48 +1530,11 @@ function refreshGymWeightUnitOptions() {
   });
 }
 
-document.getElementById('setting-update-check').addEventListener('change', (e) => {
-  localStorage.setItem('updateCheckEnabled', e.target.checked ? 'true' : 'false');
-});
-
-// Convierte la clave publica VAPID (texto base64url que da el servidor)
-// al formato Uint8Array que pide pushManager.subscribe() -- conversion
-// estandar del protocolo Web Push, no hay atajo mas corto.
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
-  return outputArray;
-}
-
-// Suscribe ESTE dispositivo a notificaciones push de verdad (avisan con
-// la app cerrada del todo, ver public/sw.js y server/reminderChecker.js)
-// y manda la suscripcion resultante al servidor. Lanza si algo falla
-// (falta el correo de contacto en el perfil, el navegador no admite
-// push...) con un mensaje ya pensado para ensenarse tal cual.
-async function subscribeToPush() {
-  const registration = await navigator.serviceWorker.ready;
-  const { publicKey } = await api('/api/devices/push-public-key');
-  const subscription = await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(publicKey),
-  });
-  await api('/api/devices/push-subscription', { method: 'POST', body: JSON.stringify({ subscription }) });
-}
-
-async function unsubscribeFromPush() {
-  if (!('serviceWorker' in navigator)) return;
-  const registration = await navigator.serviceWorker.ready;
-  const subscription = await registration.pushManager.getSubscription();
-  if (subscription) await subscription.unsubscribe();
-  await api('/api/devices/push-subscription', { method: 'DELETE' }).catch(() => {});
-}
-
+// Este ajuste controla el aviso que saca la propia ventana mientras la
+// app esta abierta. El aviso "de verdad" del sistema, que salta aunque
+// tengas la ventana minimizada, lo dispara core/reminderChecker.js desde
+// el proceso principal y no depende de este permiso.
 document.getElementById('setting-notifications').addEventListener('change', async (e) => {
-  let pushErrorMessage = '';
-
   if (e.target.checked) {
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
@@ -1863,28 +1543,10 @@ document.getElementById('setting-notifications').addEventListener('change', asyn
       return;
     }
     localStorage.setItem('notificationsEnabled', 'true');
-
-    // El aviso push de verdad (con la app cerrada) solo tiene sentido en
-    // un movil emparejado -- el ordenador ya recibe su aviso directamente
-    // del propio servidor (node-notifier), sin pasar por Google/Apple.
-    const isPairedDevice = !!localStorage.getItem('deviceToken');
-    if (isPairedDevice && 'serviceWorker' in navigator && 'PushManager' in window) {
-      try {
-        await subscribeToPush();
-      } catch (err) {
-        pushErrorMessage = err.message || 'No se pudo activar el aviso push en este dispositivo.';
-      }
-    }
   } else {
     localStorage.setItem('notificationsEnabled', 'false');
-    if (localStorage.getItem('deviceToken')) await unsubscribeFromPush();
   }
-
-  // refreshMobileTab() pisa el texto de estado con el mensaje generico de
-  // siempre -- si hubo un fallo especifico del push, se ensena DESPUES,
-  // para que no se pierda.
   refreshMobileTab();
-  if (pushErrorMessage) document.getElementById('notifications-status').textContent = pushErrorMessage;
 });
 
 // ---------------------------------------------------------------------
@@ -2037,12 +1699,6 @@ document.addEventListener('keydown', (e) => {
   const mobileCalendarDayView = document.getElementById('mobile-calendar-day-view');
   if (mobileCalendarDayView && !mobileCalendarDayView.classList.contains('hidden')) {
     exitMobileDayView();
-    return;
-  }
-
-  const scanServerModal = document.getElementById('scan-server-modal');
-  if (scanServerModal && !scanServerModal.classList.contains('hidden')) {
-    closeScanServerModal();
     return;
   }
 
@@ -2239,12 +1895,6 @@ document.addEventListener('keydown', (e) => {
     } else {
       document.getElementById('btn-close-lecturas').click();
     }
-    return;
-  }
-
-  const archivosView = document.getElementById('archivos-view');
-  if (archivosView && !archivosView.classList.contains('hidden')) {
-    document.getElementById('btn-close-archivos').click();
     return;
   }
 
