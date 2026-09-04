@@ -789,9 +789,14 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .highlight-swatch[data-highlight="pink"]   { background: #eea8c9; }
 .highlight-swatch[data-highlight="orange"] { background: #eeae74; }
 .highlight-swatch-clear {
-  width: auto; height: auto; border-radius: var(--radius);
-  padding: 0.3rem 0.5rem; font-size: 0.75rem;
-  background: var(--surface-2); color: var(--surface-2-text);
+  background: transparent;
+}
+/* Aro de acento que marca cual de las 6 opciones (5 colores + Ninguno)
+   esta en uso ahora mismo en el cursor/seleccion -- hueco de --surface
+   entre el borde del swatch y el aro para que se lea bien sin tocar
+   directamente el color de la pastilla. */
+.highlight-swatch.is-active {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
 }
 /* Interruptor tipo "pastilla" en vez del checkbox cuadrado del sistema:
    se ilumina con el color de acento cuando esta activo. Sigue siendo un

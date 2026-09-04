@@ -4615,6 +4615,7 @@ function refreshNoteEditorState() {
   refreshTableContextToolbar();
   refreshNoteBlockButtons();
   refreshPendingNoteHighlightState();
+  refreshNoteHighlightSwatchActiveState();
 }
 
 // El editor guarda aqui la seleccion de justo antes de abrir el popover
@@ -5248,6 +5249,53 @@ function clearNoteHighlight() {
   refreshNoteEditorState();
 }
 
+// Que color de resaltado esta "en uso" ahora mismo, para marcarlo en el
+// popover con el aro de acento -- null significa "Ninguno" (sin
+// resaltar), undefined significa "no marcar nada" (seleccion mixta,
+// igual que hace document.queryCommandState('bold') con una seleccion
+// que mezcla negrita y no-negrita).
+function getActiveNoteHighlightKey() {
+  if (pendingNoteHighlightKey) return pendingNoteHighlightKey;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !NOTE_EDITOR_BODY.contains(sel.anchorNode)) return undefined;
+  const range = sel.getRangeAt(0);
+
+  function highlightKeyAt(node) {
+    let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    const span = el && NOTE_EDITOR_BODY.contains(el) ? el.closest('[data-highlight]') : null;
+    return span ? span.getAttribute('data-highlight') : null;
+  }
+
+  if (sel.isCollapsed) return highlightKeyAt(range.startContainer);
+
+  const walker = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_TEXT);
+  let commonKey;
+  let found = false;
+  let node;
+  while ((node = walker.nextNode())) {
+    if (!range.intersectsNode(node) || !node.textContent) continue;
+    const key = highlightKeyAt(node);
+    if (!found) {
+      commonKey = key;
+      found = true;
+    } else if (commonKey !== key) {
+      return undefined;
+    }
+  }
+  return found ? commonKey : undefined;
+}
+
+// Enciende el aro de acento (.is-active) sobre el swatch que corresponda
+// -- llamada desde refreshNoteEditorState, que ya se dispara en cada
+// cambio de seleccion dentro del editor.
+function refreshNoteHighlightSwatchActiveState() {
+  const activeKey = getActiveNoteHighlightKey();
+  highlightColorPopover.querySelectorAll('.highlight-swatch:not(.highlight-swatch-clear)').forEach((btn) => {
+    btn.classList.toggle('is-active', activeKey !== undefined && btn.dataset.highlight === activeKey);
+  });
+  highlightColorPopover.querySelector('.highlight-swatch-clear').classList.toggle('is-active', activeKey === null);
+}
+
 const paragraphStylePopover = document.createElement('div');
 paragraphStylePopover.className = 'paragraph-style-popover hidden';
 paragraphStylePopover.innerHTML = `
@@ -5287,7 +5335,7 @@ const highlightColorPopover = document.createElement('div');
 highlightColorPopover.className = 'highlight-color-popover hidden';
 highlightColorPopover.innerHTML = `
   ${NOTE_HIGHLIGHT_SWATCHES.map((s) => `<button type="button" class="highlight-swatch" data-highlight="${s.key}" aria-label="${s.label}" title="${s.label}"></button>`).join('')}
-  <button type="button" class="highlight-swatch highlight-swatch-clear">Ninguno</button>
+  <button type="button" class="highlight-swatch highlight-swatch-clear" aria-label="Ninguno" title="Ninguno"></button>
 `;
 document.body.appendChild(highlightColorPopover);
 
