@@ -104,13 +104,27 @@ servidor real -- así que antes de compilar, edita
 misma que ves impresa al arrancar `npm run dev`), y vuelve a lanzar el
 workflow para que el cambio llegue al build.
 
-## Aviso honesto
+## Estado: probado y funcionando
 
-Este workflow está escrito siguiendo el método moderno que recomienda
-Apple para CI (clave de API + `-allowProvisioningUpdates`), pero este
-entorno de desarrollo no tiene ni un Mac ni una cuenta de Apple
-Developer real para probarlo de antemano -- así que tu primera
-ejecución real, con tus credenciales, es literalmente la primera vez
-que se prueba de verdad. Si algo falla, el registro (log) de esa
-ejecución en la pestaña Actions dice exactamente en qué paso falló --
-puedes copiar el mensaje de error y traerlo aquí para depurarlo juntos.
+El workflow se probó de verdad y sube a TestFlight correctamente (run
+#4, rama `movil-ui`). Hicieron falta cuatro intentos, y las dos
+peculiaridades que costaron más vale la pena dejarlas escritas, porque
+no son obvias:
+
+1. **La firma automática de Xcode, al ARCHIVAR, siempre quiere un
+   perfil de desarrollo**, y Apple no crea uno si tu equipo no tiene
+   ningún dispositivo registrado -- justo el caso de un pipeline sin
+   Mac ni iPhone conectado. Imponerle la identidad de distribución
+   tampoco vale (la rechaza por "conflicting provisioning settings").
+   La solución es archivar **sin firmar** (`CODE_SIGNING_ALLOWED=NO`) y
+   dejar toda la firma para `-exportArchive`, que pide un perfil de App
+   Store -- y ese sí se crea sin dispositivos.
+2. **La subida se hace con `xcrun altool`**, no con la acción
+   `apple-actions/upload-testflight-build`, cuyo parámetro de issuer se
+   llama `issuer-id` (no `api-issuer-id`) y fallaba con un 401 al
+   llegarle vacío. `altool` encuentra la clave solo en
+   `~/private_keys/AuthKey_<KEYID>.p8`, el mismo fichero que ya usan
+   los pasos anteriores.
+
+Si algún día falla, el registro (log) de la ejecución en la pestaña
+Actions dice exactamente en qué paso -- copia el error y lo miramos.
