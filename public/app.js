@@ -4479,12 +4479,24 @@ function getNoteCaretViewportTop() {
 // porque no depende de anticiparla, solo de comparar "donde estaba" vs
 // "donde esta" el cursor. Se reafirma una vez mas en el siguiente frame
 // por si el navegador revierte el valor al pintar de forma asincrona.
+// El listener de 'scroll' de mas abajo (cierra el panel si el usuario
+// desliza el contenido) tiene que distinguir un scroll REAL del propio
+// usuario de este ajuste PROGRAMATICO de scrollTop -- si no, abrir el
+// panel dispara su propia compensacion, que dispara un evento 'scroll',
+// que el listener interpretaria como "el usuario ha deslizado" y
+// cerraria el panel al instante, justo despues de abrirlo. El evento
+// 'scroll' del navegador no es sincrono con la asignacion de
+// scrollTop (puede tardar hasta el siguiente frame), asi que una
+// bandera sincrona no basta -- se usa una ventana de tiempo corta.
+let noteFormatScrollSuppressUntil = 0;
+
 function restoreNoteScrollAfter(fn) {
   const caretTopBefore = getNoteCaretViewportTop();
   const noteScrollBefore = NOTE_EDITOR_BODY.scrollTop; // respaldo si no hay caret valido
   fn();
   function reapply() {
     const caretTopAfter = getNoteCaretViewportTop();
+    noteFormatScrollSuppressUntil = performance.now() + 150;
     if (caretTopBefore != null && caretTopAfter != null) {
       NOTE_EDITOR_BODY.scrollTop += (caretTopAfter - caretTopBefore);
     } else {
@@ -4521,6 +4533,17 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('.note-format-popover, #note-format-btn, #note-body, .paragraph-style-popover, .highlight-color-popover, .table-insert-popover')) return;
   closeNoteFormatPopover();
 });
+
+// Un gesto de scroll/swipe (arrastrar para desplazar el contenido de la
+// nota) nunca dispara un 'click' -- el listener de arriba no lo detecta,
+// asi que el panel se quedaba abierto aunque el usuario ya se hubiera
+// ido a leer/escribir mas abajo. Se cierra tambien con el primer scroll
+// real dentro de #note-body (una vez cerrado, el resto del mismo gesto
+// no hace nada mas, ya que closeNoteFormatPopover() es idempotente).
+NOTE_EDITOR_BODY.addEventListener('scroll', () => {
+  if (performance.now() < noteFormatScrollSuppressUntil) return; // scroll propio de abrir/cerrar el panel, no del usuario
+  if (!noteFormatPopover.classList.contains('hidden')) closeNoteFormatPopover();
+}, { passive: true });
 
 // ---------------------------------------------------------------------
 // Tablas dentro de una nota (Fase 4, sub-ronda de tablas): boton
