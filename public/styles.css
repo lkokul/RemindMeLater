@@ -410,19 +410,27 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   gap: 0.35rem;
   flex-wrap: wrap;
 }
-/* Panel de formato (boton "Formato"): mismo lenguaje visual que
-   .table-insert-popover -- position:fixed colgado de <body>,
-   posicionado con positionFixedPopover (ver app.js). A proposito NO
-   esta en la lista generica de closeAllPopovers()/"click fuera cierra"
-   de settings.js: tiene que seguir abierto mientras se selecciona
-   texto dentro de #note-body (que tambien cuenta como "fuera" de este
-   popover para ese mecanismo generico) -- tiene su propio listener de
-   cierre dedicado en app.js. */
+/* Panel de formato (boton "Formato"): era un popover flotante
+   (position:fixed) en una ronda anterior, pero Koku reporto que
+   "sigue tapando el texto" -- flotando encima de #note-body no habia
+   forma de que NUNCA lo tapara mientras estuviera abierto. Ahora vive
+   dentro del flujo normal de .note-editor-form (flex-column, ver
+   app.js): una fila mas entre la barra principal y .note-editor-main,
+   que se encoge solo (flex:1; min-height:0) para dejarle sitio en vez
+   de quedar debajo. max-height + overflow-y de seguridad por si en una
+   pantalla muy baja las 3 filas de botones no caben enteras. A
+   proposito NO esta en la lista generica de closeAllPopovers()/"click
+   fuera cierra" de settings.js: tiene que seguir abierto mientras se
+   selecciona texto dentro de #note-body (que tambien cuenta como
+   "fuera" de este popover para ese mecanismo generico) -- tiene su
+   propio listener de cierre dedicado en app.js. */
 .note-format-popover {
-  position: fixed; z-index: 60;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 0.5rem; width: 320px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  flex-shrink: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 1.2rem;
+  max-height: 45vh;
+  overflow-y: auto;
   display: flex; flex-direction: column; gap: 0.35rem;
 }
 .note-editor-btn {

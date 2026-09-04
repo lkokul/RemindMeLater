@@ -4413,13 +4413,25 @@ document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').for
 // ---------------------------------------------------------------------
 // Panel de formato (boton "Formato" de la barra principal, ver
 // index.html): abre/cierra #note-format-popover, que contiene las 3
-// filas de controles de siempre. A proposito NO pasa por
-// closeAllPopovers()/el listener generico de "click fuera cierra" de
-// settings.js (ese mecanismo cerraria el panel en cuanto se clica
-// DENTRO de #note-body para seleccionar texto, justo lo contrario de lo
-// que hace falta) -- tiene su propio listener dedicado, que solo cierra
-// si el click cae fuera del propio panel, del boton, del editor, o de
-// cualquiera de sus popovers anidados (Aa/resaltado/insertar tabla).
+// filas de controles de siempre. Deliberadamente NO es un popover
+// flotante (position:fixed) -- lo fue en una ronda anterior, pero
+// Koku reporto que "sigue tapando el texto" incluso tras cerrarlo solo
+// al escribir (ronda previa): con el editor pudiendo tener poca altura
+// (sobre todo en movil), un panel flotante encima del texto siempre lo
+// tapaba mientras estuviera abierto, sin importar si se estaba
+// escribiendo o no. Ahora vive DENTRO del flujo normal del documento,
+// como una fila mas de .note-editor-form (flex-column) justo entre la
+// barra principal y .note-editor-main -- al abrirse, .note-editor-main/
+// #note-body (flex:1; min-height:0) simplemente se encogen para dejarle
+// sitio, nunca se les superpone nada.
+//
+// A proposito NO pasa por closeAllPopovers()/el listener generico de
+// "click fuera cierra" de settings.js (ese mecanismo cerraria el panel
+// en cuanto se clica DENTRO de #note-body para seleccionar texto, justo
+// lo contrario de lo que hace falta) -- tiene su propio listener
+// dedicado, que solo cierra si el click cae fuera del propio panel, del
+// boton, del editor, o de cualquiera de sus popovers anidados (Aa/
+// resaltado/insertar tabla).
 // ---------------------------------------------------------------------
 const noteFormatPopover = document.getElementById('note-format-popover');
 const noteFormatBtn = document.getElementById('note-format-btn');
@@ -4432,7 +4444,6 @@ function closeNoteFormatPopover() {
 function openNoteFormatPopover() {
   noteFormatPopover.classList.remove('hidden');
   noteFormatBtn.setAttribute('aria-expanded', 'true');
-  positionFixedPopover(noteFormatBtn, noteFormatPopover, { width: 320 });
 }
 
 noteFormatBtn.addEventListener('mousedown', (e) => e.preventDefault());
@@ -5042,33 +5053,61 @@ function applyNoteHighlight(key) {
   refreshNoteEditorState();
 }
 
-// "Ninguno": si la seleccion toca un resaltado ya existente, se quita
-// del bloque ENTERO (aunque la seleccion solo cubra parte de el) --
-// simplificacion deliberada, en linea con la nueva regla de simplicidad:
-// partir un <span> en dos trozos para ese caso raro no compensa la
-// complejidad extra. Con el cursor sin seleccion y un resaltado
-// pendiente activo, "Ninguno" apaga ese modo (igual que negrita).
+// "Ninguno" con el cursor SIN seleccion, dentro de un resaltado ya
+// escrito: parte el span justo en el cursor -- lo de ANTES se queda
+// resaltado (Koku solo quiere apagarlo "a partir de aqui", quitarlo
+// entero tambien borraba lo ya escrito con el color puesto, que no es
+// lo que pedia), lo de DESPUES sale fuera del span como texto plano
+// (sin resaltar, sin necesitar ningun wrapper nuevo). Mismo espiritu
+// que beginPendingNoteHighlight, pero al reves: alli se activa el
+// resaltado "de aqui en adelante", aqui se desactiva "de aqui en
+// adelante". Si el span solo tiene el caracter semilla (nunca se llego
+// a escribir nada real), se sigue quitando entero como hasta ahora --
+// no hay "antes" que conservar.
 function clearNoteHighlight() {
   restoreNoteEditorSelection();
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return;
   if (sel.isCollapsed) {
-    // Con el cursor dentro de un resaltado ya escrito (texto real
-    // tecleado con el modo pendiente activo, o solo el caracter semilla
-    // si todavia no se ha escrito nada) hay que quitarlo del span
-    // entero -- cancelPendingNoteHighlight() por si sola NO bastaba
-    // aqui: solo borra el span si esta vacio, nunca quita data-highlight
-    // de texto ya escrito, asi que "Ninguno" no hacia nada visible
-    // despues de escribir con un color activo (bug real reportado).
-    let node = sel.getRangeAt(0).startContainer;
-    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-    const span = node && NOTE_EDITOR_BODY.contains(node) ? node.closest('[data-highlight]') : null;
+    const liveRange = sel.getRangeAt(0);
+    const boundaryContainer = liveRange.startContainer;
+    const boundaryOffset = liveRange.startOffset;
+    let el = boundaryContainer.nodeType === Node.TEXT_NODE ? boundaryContainer.parentElement : boundaryContainer;
+    const span = el && NOTE_EDITOR_BODY.contains(el) ? el.closest('[data-highlight]') : null;
     if (span) {
-      if (span.textContent === '​') span.remove();
-      else span.removeAttribute('data-highlight');
+      if (span.textContent === '​') {
+        span.remove();
+      } else {
+        const splitRange = document.createRange();
+        splitRange.setStart(boundaryContainer, boundaryOffset);
+        splitRange.setEnd(span, span.childNodes.length);
+        const afterFragment = splitRange.extractContents();
+        // Caracter de ancho cero delante del texto sin resaltar, con el
+        // cursor colocado JUSTO DESPUES de el (mismo truco que ya usa
+        // beginPendingNoteHighlight, pero para "apagar" en vez de
+        // "encender"). Hace falta de verdad: poner el cursor con
+        // Range.setStart directamente al principio del texto plano de
+        // despues (offset 0 de un nodo de texto real, sin ningun
+        // caracter de por medio) sigue sin bastar -- confirmado con
+        // Playwright que Chrome, al escribir justo ahi, seguia metiendo
+        // el texto nuevo DENTRO del span vecino (herencia de estilo del
+        // propio motor, "afinidad" del cursor con el elemento anterior,
+        // no depende de que el Range apunte bien). Con un caracter YA
+        // plano justo antes del cursor, esa ambiguedad desaparece.
+        const buffer = document.createTextNode('​');
+        afterFragment.insertBefore(buffer, afterFragment.firstChild);
+        span.parentNode.insertBefore(afterFragment, span.nextSibling);
+        if (!span.textContent) span.remove();
+        const newRange = document.createRange();
+        newRange.setStart(buffer, 1);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      }
     }
     pendingNoteHighlightKey = null;
     pendingNoteHighlightSpan = null;
+    NOTE_EDITOR_BODY.focus();
     refreshNoteEditorState();
     return;
   }
