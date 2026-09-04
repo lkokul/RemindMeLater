@@ -20,7 +20,7 @@ const LOCAL_DB_NAME = 'remindmelater-local';
 // adjuntos/fotos de las entradas NO tienen almacen propio, viajan
 // embebidos dentro de cada entrada, igual que ya hacen los paises
 // dentro de cada viaje.)
-const LOCAL_DB_VERSION = 3;
+const LOCAL_DB_VERSION = 4;
 const LOCAL_STORES = {
   events: 'id',
   notes: 'id',
@@ -30,6 +30,12 @@ const LOCAL_STORES = {
   themes: 'id',
   viajesTrips: 'id',
   viajesEntries: 'id',
+  // Los BYTES de las imagenes de nota y de las fotos de viaje. Antes
+  // eran archivos sueltos en una carpeta del ordenador (note-images/,
+  // viajes-photos/); sin servidor viven aqui. A proposito FUERA de la
+  // base de datos SQLite: meterlos dentro la hincharia y haria lento
+  // cada volcado, aunque no estes mirando ninguna imagen.
+  noteAssets: 'name',
 };
 
 let localDbPromise = null;
@@ -109,6 +115,23 @@ async function localReplaceAll(storeName, values) {
     tx.oncomplete = () => resolve(values);
     tx.onerror = () => reject(tx.error);
   });
+}
+
+// --- Bytes de imagenes/fotos ------------------------------------------
+// El "nombre" es el mismo <uuid>.<ext> que ya generaba el servidor, asi
+// que el HTML guardado en una nota no cambia en absoluto: sigue diciendo
+// /api/notes/images/<uuid>.<ext>. Lo unico que cambia es de donde salen
+// los bytes al mostrarla (ver resolveAssetUrl() en app.js).
+async function assetPut(name, bytes, type) {
+  return localPut('noteAssets', { name, bytes, type });
+}
+
+async function assetGet(name) {
+  return localGet('noteAssets', name);
+}
+
+async function assetDelete(name) {
+  return localDelete('noteAssets', name);
 }
 
 async function metaGet(key) {

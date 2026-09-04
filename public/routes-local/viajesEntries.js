@@ -26,13 +26,18 @@
 
   // Los BYTES de cada foto ya no viven en una carpeta del disco del
   // ordenador (DATA_DIR/viajes-photos) -- sin servidor no hay tal
-  // carpeta. Pasan a su propio almacen de IndexedDB en la Fase 3, junto
-  // con las imagenes de notas, y se muestran con una URL blob:. Hasta
-  // entonces estas dos funciones son no-op declarados, para que el porte
-  // de la LOGICA (que es lo que importa aqui) se quede literal: la fila
-  // de la foto en la base de datos si se crea/borra igual que siempre.
-  function saveViajesPhoto(/* filename, bytes */) {}
-  function deleteViajesPhoto(/* filename */) {}
+  // carpeta. Van al mismo almacen de IndexedDB que las imagenes de nota
+  // ("noteAssets", ver db-local.js), con el mismo nombre <uuid>.<ext>
+  // de siempre, asi que la fila de la foto en la base de datos no
+  // cambia nada.
+  function saveViajesPhoto(filename, bytes, type) {
+    return assetPut(filename, bytes, type);
+  }
+
+  function deleteViajesPhoto(filename) {
+    // Best-effort y sin esperar, igual que el fs.unlink de antes.
+    assetDelete(filename).catch(() => {});
+  }
 
   // Mismos tipos que note-images -- fotos/capturas normales, nada de SVG
   // (podria llevar <script>).
@@ -224,7 +229,7 @@
   // con /:id porque ni "attachments" ni "movements" son un id numerico,
   // pero se mantiene el mismo orden defensivo que el resto del proyecto.
 
-  router.post('/:id/attachments', (req, res) => {
+  router.post('/:id/attachments', async (req, res) => {
     const entry = db.prepare('SELECT * FROM viajes_entries WHERE id = ?').get(req.params.id);
     if (!entry) return res.status(404).json({ error: 'not_found' });
     const ext = ALLOWED_TYPES[req.headers['content-type']];
@@ -235,7 +240,7 @@
     }
 
     const filename = `${crypto.randomUUID()}.${ext}`;
-    saveViajesPhoto(filename, req.body);
+    await saveViajesPhoto(filename, req.body, req.headers['content-type']);
     const info = db.prepare('INSERT INTO viajes_entry_attachments (entry_id, filename) VALUES (?, ?)').run(req.params.id, filename);
     const row = db.prepare('SELECT * FROM viajes_entry_attachments WHERE id = ?').get(info.lastInsertRowid);
     touchEntryForAttachmentChange(req.params.id, req.device ? req.device.id : null);

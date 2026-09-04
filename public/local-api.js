@@ -131,9 +131,14 @@ async function dispatchLocalRequest(method, pathname, searchParams, body, header
     const query = {};
     if (searchParams) searchParams.forEach((value, key) => { query[key] = value; });
 
-    // `headers` casi nunca hace falta: solo la subida de una foto de
-    // Viajes mira el content-type para saber la extension del archivo.
-    const req = { params, query, body: body || {}, headers: headers || {} };
+    // `headers` casi nunca hace falta: solo las subidas de imagen/foto
+    // miran el content-type para saber la extension del archivo. Las
+    // claves se bajan a minusculas igual que hace Express, porque las
+    // rutas las leen asi (req.headers['content-type']) -- sin esto, un
+    // 'Content-Type' de quien llama no lo encontraba nadie.
+    const lowerHeaders = {};
+    Object.entries(headers || {}).forEach(([k, v]) => { lowerHeaders[k.toLowerCase()] = v; });
+    const req = { params, query, body: body || {}, headers: lowerHeaders };
     const { res, result } = createLocalResponse();
     try {
       await route.handler(req, res);

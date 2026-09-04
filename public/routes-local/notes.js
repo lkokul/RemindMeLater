@@ -9,15 +9,19 @@
   // routes/notes.js — CRUD de notas de "Mi espacio" (titulo + contenido con
   // formato basico desde la Fase 4; carpeta opcional desde la Fase 3, ver
   // routes/noteFolders.js).
-  // En el servidor esto borraba del disco las imagenes de una nota al
-  // borrarla (server/routes/noteImages.js). En el movil las imagenes
-  // pasan a vivir en su propio almacen de IndexedDB (Fase 3), asi que
-  // aqui se deja como un no-op declarado: el porte se queda literal, y
-  // se rellena cuando exista ese almacen. Mientras tanto, borrar una
-  // nota con imagenes deja esos bytes huerfanos -- exactamente la misma
-  // limitacion que ya tenia el servidor al EDITAR una nota quitando una
-  // imagen (ver CLAUDE.md), no una regresion nueva.
-  function deleteImagesInBody() {}
+  // Borra los bytes de las imagenes que tuviera una nota que se acaba
+  // de eliminar. En el servidor eran archivos de una carpeta del disco;
+  // ahora viven en el almacen "noteAssets" de IndexedDB. Sigue siendo
+  // best-effort y sin esperar (no hace falta su resultado para
+  // responder), igual que el fs.unlink de antes. Se mantiene la misma
+  // limitacion conocida: quitar una imagen de en medio EDITANDO la nota
+  // no libera esos bytes, solo borrar la nota entera.
+  function deleteImagesInBody(body) {
+    if (!body) return;
+    for (const match of body.matchAll(/\/api\/notes\/images\/([a-zA-Z0-9._-]+)/g)) {
+      assetDelete(match[1]).catch(() => {});
+    }
+  }
 
   const router = createLocalRouter();
 

@@ -27,7 +27,6 @@ const state = {
   openNotes: [],
   activeOpenNoteKey: null,
   specialDays: {}, // 'YYYY-MM-DD' -> 'holiday' | 'special', marcados a mano
-  pairingCodeExpiresAt: null,
   notifiedReminderIds: new Set(), // evita notificar el mismo recordatorio 2 veces
   remindersMode: 'upcoming', // 'upcoming' | 'day' — que se muestra en el panel de recordatorios
   remindersDayDate: null, // dia seleccionado cuando remindersMode === 'day'
@@ -676,45 +675,86 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
 }
 
 // ---------------------------------------------------------------------
-// Fase "multi-red": el ORIGEN de la app (de donde salen localStorage e
-// IndexedDB) queda fijo desde la primera vez que se instala/abre en cada
-// dispositivo -- no se puede ni se debe cambiar, o se "pierden" los datos
-// guardados (son de otro origen para el navegador). Pero el ORDENADOR al
-// que hay que mandar las peticiones sí puede cambiar (otra wifi, otro
-// ordenador) -- eso se guarda aparte, en 'serverBaseUrl', y se actualiza
-// escaneando el QR de Configuración → Dispositivos (ver
-// openScanServerModal() en settings.js). Sin ese ajuste, se usa el propio
-// origen de la pagina, que es lo que pasaba siempre antes de esto.
+// Imagenes y fotos: de una ruta del servidor a una URL blob:
 // ---------------------------------------------------------------------
-function getServerBaseUrl() {
-  return localStorage.getItem('serverBaseUrl') || window.location.origin;
+// El HTML de una nota sigue guardando exactamente lo mismo que antes
+// ("/api/notes/images/<uuid>.jpg"), y una foto de viaje sigue teniendo
+// la misma url en su fila. Lo que cambia es que ya no hay servidor que
+// responda a eso: los bytes estan en IndexedDB, asi que al MOSTRAR una
+// imagen se cambia su src por una URL blob: creada al vuelo. Se guarda
+// la ruta original en data-asset-src para poder devolverla tal cual al
+// guardar la nota -- si se guardara la URL blob:, el saneador la
+// rechazaria (solo acepta /api/notes/images/...) y ademas no valdria
+// nada en la proxima sesion.
+const ASSET_URL_PREFIXES = ['/api/notes/images/', '/api/viajes-entries/attachments/'];
+const assetBlobUrls = new Map();
+
+function isAssetPath(src) {
+  return typeof src === 'string' && ASSET_URL_PREFIXES.some((p) => src.startsWith(p));
 }
 
-// Fase "Archivos": el propio ordenador nunca guarda un token de
-// dispositivo (ver requireDeviceOrTrusted en server/auth.js -- llega por
-// loopback, no necesita emparejarse), asi que su ausencia es una forma
-// fiable de saber, en el propio cliente, si "somos el ordenador" o "somos
-// un movil emparejado". Se usa para mostrar/ocultar controles que el
-// servidor solo permite al ordenador (carpeta de Archivos, boton de
-// instalar una version nueva).
-function isTrustedDevice() {
-  return !localStorage.getItem('deviceToken');
+// Devuelve una URL blob: utilizable en un <img src>, o null si esos
+// bytes ya no estan (imagen de una nota antigua cuyo archivo se
+// perdio). Se cachean por ruta: crear una URL blob: nueva en cada
+// render iria dejando memoria sin liberar.
+async function resolveAssetUrl(path) {
+  if (!isAssetPath(path)) return path;
+  if (assetBlobUrls.has(path)) return assetBlobUrls.get(path);
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  try {
+    const row = await assetGet(name);
+    if (!row || !row.bytes) return null;
+    const url = URL.createObjectURL(new Blob([row.bytes], { type: row.type || 'application/octet-stream' }));
+    assetBlobUrls.set(path, url);
+    return url;
+  } catch {
+    return null;
+  }
 }
 
-// ---------------------------------------------------------------------
-// Capa de red: envuelve fetch para añadir el token del dispositivo (si
-// existe) y para reaccionar automaticamente si el servidor dice 401
-// (dispositivo no vinculado) mostrando la pantalla de emparejamiento.
-//
-// Fase "movil": si el fetch falla por RED de verdad (no hay quien
-// responda -- no confundir con un error normal del servidor, ESO sigue
-// lanzando el mismo error que siempre), y la ruta es una de las tablas
-// que se sincronizan (ver SYNC_TABLE_ROUTES/matchSyncRoute mas abajo), se sigue
-// funcionando con la copia local en IndexedDB (public/db-local.js) en
-// vez de romper la pantalla. Las demas rutas (temas, perfil,
-// dispositivos...) no tienen copia local todavia -- si fallan sin
-// conexion, se comportan igual que siempre (lanzan error).
-// ---------------------------------------------------------------------
+// Pone la URL blob: en un <img> concreto en cuanto este lista, sin
+// bloquear el render (estas listas se pintan de forma sincrona).
+function setAssetImageSrc(img, path) {
+  if (!isAssetPath(path)) { img.src = path; return; }
+  img.dataset.assetSrc = path;
+  resolveAssetUrl(path).then((url) => { if (url) img.src = url; });
+}
+
+// Prepara el HTML de una nota ANTES de meterlo en el DOM: cambia
+// src="/api/..." por data-asset-src="/api/...". Sin esto, el navegador
+// pide esa ruta en cuanto aparece el <img> (y falla, porque no hay
+// servidor) antes de que hydrateAssetImages llegue a poner la URL
+// blob:. El saneador del backend garantiza que un <img> solo puede
+// llevar src y que empieza por /api/notes/images/, asi que este
+// reemplazo no puede tocar nada mas.
+function prepareAssetHtmlForDom(html) {
+  if (!html) return html;
+  return html.replace(/<img\s+src="(\/api\/notes\/images\/[^"]+)"/gi, '<img data-asset-src="$1"');
+}
+
+// Cambia el src de todas las imagenes de un trozo de HTML ya insertado
+// en el DOM (el cuerpo de una nota).
+function hydrateAssetImages(root) {
+  root.querySelectorAll('img').forEach((img) => {
+    const path = img.dataset.assetSrc || img.getAttribute('src');
+    if (isAssetPath(path)) setAssetImageSrc(img, path);
+  });
+}
+
+// Lo contrario: devuelve el HTML con las rutas originales, para
+// guardarlo. Se trabaja sobre el TEXTO, no clonando el DOM: poner el
+// src original en un <img> clonado -- aunque este suelto, sin insertar
+// -- hace que el navegador pida esa ruta igualmente (fallo real visto
+// al probar: una peticion 404 por cada guardado). El saneador del
+// backend solo deja "src" en un <img>, asi que quedarse solo con eso es
+// exactamente lo que se guardaria de todas formas.
+function serializeAssetImages(root) {
+  return root.innerHTML.replace(
+    /<img\b[^>]*\bdata-asset-src="([^"]+)"[^>]*>/gi,
+    (match, path) => `<img src="${path}">`,
+  );
+}
+
 // Convierte el `body` de una llamada a api() en lo que espera el
 // manejador local. Casi siempre es JSON (una cadena ya serializada por
 // quien llama), pero las subidas de imagen/foto mandan el File tal
@@ -762,610 +802,6 @@ async function api(path, options = {}) {
 
   return status === 204 ? null : data;
 }
-
-// ---------------------------------------------------------------------
-// Copia local + sincronizacion (fase "movil"). Ver
-// /root/.claude/plans/warm-sparking-beaver.md (o CLAUDE.md) para el
-// diseño completo -- resumen: cada dispositivo guarda su propia copia
-// de events/notes/groups/note_folders/special_days en IndexedDB
-// (public/db-local.js); cuando hay conexion con el ordenador, se traen
-// los cambios del servidor (pullChanges) y se mandan los pendientes de
-// aqui (pushOutbox). "El mas reciente gana" sin avisos ni fusiones —a
-// proposito, es una app de una sola persona.
-// ---------------------------------------------------------------------
-
-// A que almacen local corresponde cada ruta de la API, y como extraer
-// el id de la URL. matchSyncRoute() se llama en CADA peticion de api(),
-// asi que tiene que poder ejecutarse antes de que el resto de la app
-// (state, load*...) exista todavia -- por eso no depende de nada mas.
-const SYNC_TABLE_ROUTES = [
-  { table: 'events', store: 'events', collectionRe: /^\/api\/events$/, itemRe: /^\/api\/events\/(\d+)$/ },
-  { table: 'notes', store: 'notes', collectionRe: /^\/api\/notes$/, itemRe: /^\/api\/notes\/(\d+)$/ },
-  { table: 'groups', store: 'groups', collectionRe: /^\/api\/groups$/, itemRe: /^\/api\/groups\/(\d+)$/ },
-  { table: 'note_folders', store: 'noteFolders', collectionRe: /^\/api\/note-folders$/, itemRe: /^\/api\/note-folders\/(\d+)$/ },
-  { table: 'special_days', store: 'specialDays', collectionRe: /^\/api\/special-days$/, itemRe: /^\/api\/special-days\/([^/]+)$/ },
-  // Solo la BIBLIOTECA (/api/themes, /api/themes/:id) -- /api/themes/selection
-  // y /api/themes/selection/mine (que tema usa CADA dispositivo) no
-  // encajan en ninguno de los dos patrones de abajo a proposito, asi que
-  // se quedan fuera de la copia local (eso sigue siendo por dispositivo).
-  { table: 'themes', store: 'themes', collectionRe: /^\/api\/themes$/, itemRe: /^\/api\/themes\/(\d+)$/ },
-  // /api/viajes-trips/by-country/:code (usada por el mapa) no encaja en
-  // ninguno de los dos patrones a proposito, se queda fuera (siempre en
-  // vivo, no tiene sentido cachearla aparte de la lista general).
-  { table: 'viajes_trips', store: 'viajesTrips', collectionRe: /^\/api\/viajes-trips$/, itemRe: /^\/api\/viajes-trips\/(\d+)$/ },
-  // Los adjuntos (fotos/tickets) NO tienen ruta propia aqui -- viajan
-  // embebidos dentro de cada entrada (ver serializeEntry en el
-  // servidor), asi que /api/viajes-entries/:id/attachments (subir una
-  // foto) y /api/viajes-entries/attachments/... (servir/borrar/vincular
-  // una foto) quedan fuera a proposito: exigen conexion siempre, igual
-  // que subir una imagen a una nota.
-  { table: 'viajes_entries', store: 'viajesEntries', collectionRe: /^\/api\/viajes-entries$/, itemRe: /^\/api\/viajes-entries\/(\d+)$/ },
-];
-
-function matchSyncRoute(pathname) {
-  for (const r of SYNC_TABLE_ROUTES) {
-    if (r.collectionRe.test(pathname)) return { table: r.table, store: r.store, kind: 'collection' };
-    const m = pathname.match(r.itemRe);
-    if (m) return { table: r.table, store: r.store, kind: 'item', itemId: r.store === 'specialDays' ? m[1] : Number(m[1]) };
-  }
-  return null;
-}
-
-async function cacheServerResponse(route, method, data) {
-  if (route.kind === 'collection' && method === 'GET') {
-    await localReplaceAll(route.store, Array.isArray(data) ? data : []);
-    return;
-  }
-  if (method === 'DELETE') {
-    await localDelete(route.store, route.itemId);
-    return;
-  }
-  // special_days "borra por PUT" (type: null) en vez de un DELETE real.
-  if (route.store === 'specialDays' && data && data.type === null) {
-    await localDelete(route.store, data.date);
-    return;
-  }
-  if (data && typeof data === 'object') {
-    await localPut(route.store, data);
-  }
-}
-
-async function handleOfflineRequest(route, method, url, options) {
-  if (method === 'GET') return offlineRead(route, url);
-  return offlineWrite(route, method, url, options);
-}
-
-async function offlineRead(route, url) {
-  if (route.kind === 'item') {
-    const row = await localGet(route.store, route.itemId);
-    if (!row) throw new Error('No se pudo leer sin conexión (todavía no hay copia local de esto).');
-    return row;
-  }
-  let rows = await localGetAll(route.store);
-  if (route.store === 'events') {
-    const isTask = url.searchParams.get('isTask');
-    if (isTask !== null) {
-      const want = isTask === '1' || isTask === 'true';
-      rows = rows.filter((r) => !!r.isTask === want);
-    }
-    const from = url.searchParams.get('from');
-    const to = url.searchParams.get('to');
-    if (from && to) rows = rows.filter((r) => r.startAt && r.startAt >= from && r.startAt <= to);
-    rows.sort((a, b) => (a.startAt || '').localeCompare(b.startAt || ''));
-  } else if (route.store === 'notes') {
-    rows.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-  } else if (route.store === 'groups' || route.store === 'noteFolders') {
-    rows.sort((a, b) => (a.position || 0) - (b.position || 0));
-  } else if (route.store === 'themes') {
-    rows.sort((a, b) => (a.id || 0) - (b.id || 0));
-  } else if (route.store === 'viajesTrips') {
-    rows.sort((a, b) => (b.startDate || b.createdAt || '').localeCompare(a.startDate || a.createdAt || '') || (b.id || 0) - (a.id || 0));
-  } else if (route.store === 'viajesEntries') {
-    // GET /api/viajes-entries siempre exige ?tripId= (ver la ruta REST) --
-    // aqui se aplica el mismo filtro sobre la copia local.
-    const tripId = url.searchParams.get('tripId');
-    if (tripId) rows = rows.filter((r) => String(r.tripId) === String(tripId));
-    rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id || 0) - (a.id || 0));
-  }
-  return rows;
-}
-
-// Construye la fila "optimista" que se guarda en la copia local nada
-// mas escribir sin conexion, con la misma forma (camelCase) que
-// devolveria el servidor -- para que la pantalla se pinte igual que si
-// hubiera respondido de verdad. Cuando el campo referencia otra tabla
-// (groupId, folderId) y esa fila YA esta en la copia local, se rellenan
-// tambien nombre/color/icono para que se vea bien de inmediato; si no
-// se puede (por ejemplo, apunta a algo tambien creado sin conexion en
-// este mismo momento), se deja en blanco y se corrige solo al
-// sincronizar.
-async function buildOptimisticRecord(route, id, fields) {
-  const now = new Date().toISOString();
-  if (route.store === 'events') {
-    const group = fields.groupId != null ? await localGet('groups', fields.groupId) : null;
-    return {
-      id,
-      title: fields.title || '',
-      description: fields.description ?? null,
-      location: fields.location ?? null,
-      startAt: fields.startAt ?? null,
-      endAt: fields.endAt ?? null,
-      allDay: !!fields.allDay,
-      reminderMinutesBefore: fields.reminderMinutesBefore ?? null,
-      groupId: fields.groupId ?? null,
-      groupName: group ? group.name : null,
-      groupColor: group ? group.color : null,
-      groupIcon: group ? group.icon : null,
-      groupCompletedColor: group ? group.completedColor : null,
-      isTask: !!fields.isTask,
-      done: !!fields.done,
-      createdByName: null,
-      createdByPublicId: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'notes') {
-    const folder = fields.folderId != null ? await localGet('noteFolders', fields.folderId) : null;
-    // Fase 4: ya no se manda "title" desde el cliente (se deriva del
-    // cuerpo, ver deriveTitleFromBodyClient) -- la copia optimista local
-    // tiene que derivarlo de la misma forma, para que la nota se vea con
-    // un titulo correcto en el listado ANTES de que llegue la respuesta
-    // real del servidor. bodyFormat no se guardaba antes en el registro
-    // optimista (solo llegaba via cacheServerResponse tras un exito
-    // online) -- se añade aqui porque hace falta para derivar bien.
-    return {
-      id,
-      title: deriveTitleFromBodyClient(fields.body, fields.bodyFormat),
-      body: fields.body ?? null,
-      bodyFormat: fields.bodyFormat || 'text',
-      hidden: !!fields.hidden,
-      favorite: !!fields.favorite,
-      folderId: fields.folderId ?? null,
-      folderName: folder ? folder.name : null,
-      folderColor: folder ? folder.color : null,
-      folderIcon: folder ? folder.icon : null,
-      createdByName: null,
-      createdByPublicId: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'groups') {
-    return {
-      id,
-      name: fields.name || '',
-      color: fields.color || '#5b8cff',
-      icon: fields.icon ?? null,
-      position: fields.position ?? 0,
-      completedColor: fields.completedColor ?? null,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'noteFolders') {
-    return {
-      id,
-      name: fields.name || '',
-      color: fields.color || '#5b8cff',
-      icon: fields.icon ?? null,
-      position: fields.position ?? 0,
-      parentId: fields.parentId ?? null,
-      favorite: !!fields.favorite,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'themes') {
-    return {
-      id,
-      name: fields.name || '',
-      colors: fields.colors || {},
-      inverseColors: fields.inverseColors ?? null,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'viajesTrips') {
-    // Al EDITAR (PUT) sin conexion, "fields" es la fila ya existente en
-    // la copia local fusionada con lo nuevo (ver offlineWrite) -- asi
-    // que entryCount ya viene relleno con el valor real; al CREAR
-    // (POST) no hay fila previa, empieza en 0.
-    return {
-      id,
-      name: fields.name || '',
-      color: fields.color || '#5b8cff',
-      countries: Array.isArray(fields.countries) ? fields.countries : [],
-      startDate: fields.startDate ?? null,
-      endDate: fields.endDate ?? null,
-      description: fields.description ?? null,
-      entryCount: fields.entryCount ?? 0,
-      createdAt: now,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'viajesEntries') {
-    // Subir una foto exige conexion siempre (ver el comentario de
-    // SYNC_TABLE_ROUTES mas arriba), asi que "attachments" nunca se
-    // rellena aqui de cero -- pero al EDITAR (PUT) el texto de una
-    // entrada sin conexion, "fields" ya trae las fotos que tuviera de
-    // antes (fusionadas desde la copia local, ver offlineWrite), y hay
-    // que conservarlas en vez de vaciarlas.
-    return {
-      id,
-      tripId: fields.tripId ?? null,
-      date: fields.date || now.slice(0, 10),
-      content: fields.content ?? null,
-      attachments: Array.isArray(fields.attachments) ? fields.attachments : [],
-      createdAt: now,
-      updatedAt: now,
-    };
-  }
-  // specialDays
-  return { date: id, type: fields.type };
-}
-
-async function offlineWrite(route, method, url, options) {
-  const body = options.body ? JSON.parse(options.body) : {};
-  const localOpId = crypto.randomUUID();
-  const nowIso = new Date().toISOString();
-
-  if (route.store === 'specialDays') {
-    // No hay DELETE real para dias especiales: un PUT con type=null
-    // borra. rowId sale de la URL (la fecha), nunca es "nuevo".
-    const date = route.itemId;
-    if (body.type === null || body.type === undefined) {
-      await localDelete('specialDays', date);
-      await outboxAdd({ localOpId, table: 'special_days', rowId: date, tempId: null, op: 'delete', payload: null, clientUpdatedAt: nowIso });
-      return { date, type: null };
-    }
-    const record = { date, type: body.type };
-    await localPut('specialDays', record);
-    await outboxAdd({ localOpId, table: 'special_days', rowId: date, tempId: null, op: 'upsert', payload: { type: body.type }, clientUpdatedAt: nowIso });
-    return record;
-  }
-
-  if (method === 'POST') {
-    // Crear sin conexion: id temporal NEGATIVO (los ids reales que
-    // asigna el servidor siempre son positivos, asi que nunca puede
-    // haber choque), sustituido por el real en cuanto se sincronice de
-    // verdad (ver pushOutbox).
-    const tempId = -Date.now();
-    const record = await buildOptimisticRecord(route, tempId, body);
-    await localPut(route.store, record);
-    await outboxAdd({ localOpId, table: route.table, rowId: null, tempId, op: 'upsert', payload: body, clientUpdatedAt: nowIso });
-    return record;
-  }
-
-  if (method === 'PUT') {
-    const rowId = route.itemId;
-    const existing = (await localGet(route.store, rowId)) || {};
-    const merged = Object.assign({}, existing, body);
-    const record = await buildOptimisticRecord(route, rowId, merged);
-    await localPut(route.store, record);
-    await outboxAdd({ localOpId, table: route.table, rowId, tempId: null, op: 'upsert', payload: body, clientUpdatedAt: nowIso });
-    return record;
-  }
-
-  if (method === 'DELETE') {
-    const rowId = route.itemId;
-    await localDelete(route.store, rowId);
-    await outboxAdd({ localOpId, table: route.table, rowId, tempId: null, op: 'delete', payload: null, clientUpdatedAt: nowIso });
-    return null;
-  }
-
-  throw new Error('No se pudo hacer eso sin conexión.');
-}
-
-// --- Motor de sincronizacion --------------------------------------
-
-let syncInProgress = false;
-
-function buildAuthHeaders() {
-  const headers = {};
-  const token = localStorage.getItem('deviceToken');
-  if (token) headers['X-Device-Token'] = token;
-  return headers;
-}
-
-const SYNC_STORE_BY_TABLE = {
-  events: 'events',
-  notes: 'notes',
-  groups: 'groups',
-  note_folders: 'noteFolders',
-  special_days: 'specialDays',
-  themes: 'themes',
-  viajes_trips: 'viajesTrips',
-  viajes_entries: 'viajesEntries',
-};
-
-async function applyRemoteChange(change) {
-  const store = SYNC_STORE_BY_TABLE[change.tableName];
-  if (!store) return;
-  if (change.op === 'delete') {
-    await localDelete(store, change.rowId);
-  } else if (change.payload) {
-    await localPut(store, change.payload);
-  }
-}
-
-// Trae del servidor todo lo que haya cambiado desde el ultimo cursor
-// que recordamos (metaGet('syncCursor')), pagina a pagina, y lo aplica a
-// la copia local. Devuelve como fue: { ok:true } si todo bien, o
-// { ok:false, offline:true } si no se pudo ni conectar (lo normal y
-// esperado si el ordenador no esta cerca), o { ok:false, message } si
-// el ordenador SI respondio pero con un error de verdad -- eso ultimo
-// es lo que refreshSyncIndicator() ensena en rojo, para no dejarlo
-// pasar en silencio.
-async function pullChanges() {
-  let cursor = (await metaGet('syncCursor')) || 0;
-  let hasMore = true;
-  while (hasMore) {
-    let res;
-    try {
-      res = await fetch(new URL(`/api/sync/pull?since=${cursor}&limit=500`, getServerBaseUrl()), { headers: buildAuthHeaders() });
-    } catch {
-      return { ok: false, offline: true };
-    }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, message: body.message || `Error del servidor al traer cambios (código ${res.status}).` };
-    }
-    const data = await res.json();
-    for (const change of data.changes) {
-      await applyRemoteChange(change);
-    }
-    cursor = data.nextCursor;
-    hasMore = data.hasMore;
-  }
-  await metaSet('syncCursor', cursor);
-  await metaSet('lastSyncedAt', new Date().toISOString());
-  return { ok: true };
-}
-
-// Manda los cambios pendientes de este dispositivo (cola _outbox), UNO A
-// UNO y en orden (ver outboxAll/seq en db-local.js) -- no en un solo
-// lote. Hace falta que sea uno a uno: el id REAL de algo creado sin
-// conexion (una carpeta, por ejemplo) solo se sabe cuando el servidor
-// responde a ESE cambio, asi que para poder corregir la referencia de
-// un cambio siguiente que apunte a ese id temporal (una nota creada
-// dentro de esa misma carpeta, sin conexion, en la misma sesion) hace
-// falta esperar esa respuesta antes de mandar el siguiente. Con pocos
-// cambios pendientes (lo normal para una persona) el coste de varias
-// idas y vueltas en vez de una sola no se nota.
-async function pushOutbox() {
-  const pending = await outboxAll();
-  if (!pending.length) return { ok: true };
-
-  const tmpIdMap = new Map();
-  const remapId = (id) => (typeof id === 'number' && id < 0 && tmpIdMap.has(id) ? tmpIdMap.get(id) : id);
-  let rejectedCount = 0;
-
-  for (const entry of pending) {
-    const payload = entry.payload ? Object.assign({}, entry.payload) : entry.payload;
-    if (payload) {
-      if ('groupId' in payload) payload.groupId = remapId(payload.groupId);
-      if ('folderId' in payload) payload.folderId = remapId(payload.folderId);
-      if ('parentId' in payload) payload.parentId = remapId(payload.parentId);
-      if ('tripId' in payload) payload.tripId = remapId(payload.tripId);
-    }
-    const change = {
-      clientOpId: entry.localOpId,
-      table: entry.table,
-      rowId: entry.rowId != null ? remapId(entry.rowId) : null,
-      op: entry.op,
-      payload,
-      clientUpdatedAt: entry.clientUpdatedAt,
-    };
-
-    let res;
-    try {
-      res = await fetch(new URL('/api/sync/push', getServerBaseUrl()), {
-        method: 'POST',
-        headers: Object.assign({ 'Content-Type': 'application/json' }, buildAuthHeaders()),
-        body: JSON.stringify({ changes: [change] }),
-      });
-    } catch {
-      return { ok: false, offline: true }; // se corto la conexion a media cola -- lo que queda se reintenta entero la proxima vez
-    }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, message: body.message || `Error del servidor al mandar cambios (código ${res.status}).` };
-    }
-    const { results } = await res.json();
-    const result = results[0];
-    const store = SYNC_STORE_BY_TABLE[entry.table];
-
-    if (result.status === 'applied' || result.status === 'superseded') {
-      if (entry.tempId != null && result.serverRowId != null) {
-        tmpIdMap.set(entry.tempId, result.serverRowId);
-        await localDelete(store, entry.tempId);
-      }
-      if (result.serverPayload) {
-        await localPut(store, result.serverPayload);
-      } else if (entry.op === 'delete') {
-        await localDelete(store, remapId(entry.rowId));
-      }
-    } else if (result.status === 'rejected') {
-      // No hay forma automatica de arreglar un dato invalido desde aqui,
-      // y no se quiere atascar la cola entera por un cambio malo -- se
-      // descarta, pero se cuenta para poder avisar de que algo se perdio
-      // (en vez de quedarse callado, ver computeSyncOutcome).
-      rejectedCount += 1;
-    }
-    await outboxRemove(entry.localOpId);
-  }
-
-  return rejectedCount > 0
-    ? { ok: true, message: `${rejectedCount} cambio${rejectedCount === 1 ? '' : 's'} sin conseguir mandar (datos no válidos) y se descartó.` }
-    : { ok: true };
-}
-
-// Resultado de la ULTIMA vez que se intento sincronizar -- lo lee el
-// punto de la topbar (refreshSyncIndicator) y el texto de Configuracion
-// (refreshSyncStatusUI). No se guarda entre sesiones a proposito (si
-// recargas la pagina, se vuelve a calcular en el primer runSync() de
-// init() en vez de ensenar un estado quiza ya viejo).
-let lastSyncOutcome = { status: 'unknown', message: '' };
-
-// Decide el estado final combinando lo que paso en pushOutbox()/
-// pullChanges() (ver sus comentarios: cada uno devuelve si fue bien,
-// si fue por falta de conexion, o si hubo un error de verdad) con si
-// queda algo pendiente en la cola.
-async function computeSyncOutcome(pushResult, pullResult) {
-  if (pushResult.offline || pullResult.offline) {
-    lastSyncOutcome = { status: 'offline', message: 'Sin conexión con el ordenador ahora mismo.' };
-    return;
-  }
-  if (!pushResult.ok || !pullResult.ok) {
-    lastSyncOutcome = { status: 'error', message: (!pushResult.ok && pushResult.message) || (!pullResult.ok && pullResult.message) || 'Error al sincronizar.' };
-    return;
-  }
-  if (pushResult.message) {
-    // Se pudo conectar y sincronizar, pero algun cambio se rechazo por
-    // datos invalidos -- no es un fallo de conexion, pero tampoco es
-    // "todo perfecto", asi que se ensena igual que un error de verdad.
-    lastSyncOutcome = { status: 'error', message: pushResult.message };
-    return;
-  }
-  const pending = await outboxAll();
-  lastSyncOutcome = pending.length
-    ? { status: 'pending', message: `${pending.length} cambio${pending.length === 1 ? '' : 's'} pendiente${pending.length === 1 ? '' : 's'} de mandar.` }
-    : { status: 'synced', message: '' };
-}
-
-async function runSync() {
-  if (syncInProgress) return;
-  syncInProgress = true;
-  try {
-    const pushResult = await pushOutbox();
-    const pullResult = await pullChanges();
-    await computeSyncOutcome(pushResult, pullResult);
-  } catch (err) {
-    // Esto SI es inesperado de verdad (un error de programacion, no de
-    // conexion) -- pushOutbox/pullChanges ya capturan los fallos de red
-    // y de servidor por su cuenta, asi que si algo llega hasta aqui
-    // merece ensenarse, no quedarse callado.
-    lastSyncOutcome = { status: 'error', message: err.message || 'Error inesperado al sincronizar.' };
-  } finally {
-    syncInProgress = false;
-    refreshSyncStatusUI();
-    refreshSyncIndicator();
-  }
-}
-
-async function refreshSyncStatusUI() {
-  const statusEl = document.getElementById('sync-status');
-  if (!statusEl) return;
-  const lastSyncedAt = await metaGet('lastSyncedAt');
-  const baseText = lastSyncedAt
-    ? `Última sincronización: ${new Date(lastSyncedAt).toLocaleString()}`
-    : 'Todavía no se ha sincronizado en este dispositivo';
-  statusEl.textContent = lastSyncOutcome.message ? `${baseText} · ${lastSyncOutcome.message}` : baseText;
-}
-
-const SYNC_INDICATOR_LABELS = {
-  unknown: 'Sincronización: todavía sin comprobar',
-  synced: 'Sincronización: todo al día',
-  pending: 'Sincronización: hay cambios pendientes de mandar',
-  offline: 'Sincronización: sin conexión con el ordenador ahora mismo',
-  error: 'Sincronización: hubo un error',
-};
-
-function refreshSyncIndicator() {
-  const btn = document.getElementById('sync-indicator');
-  if (!btn) return;
-  btn.dataset.status = lastSyncOutcome.status;
-  const label = lastSyncOutcome.message
-    ? `${SYNC_INDICATOR_LABELS[lastSyncOutcome.status]} (${lastSyncOutcome.message})`
-    : SYNC_INDICATOR_LABELS[lastSyncOutcome.status];
-  btn.setAttribute('aria-label', label);
-  btn.title = label;
-}
-
-document.getElementById('btn-sync-now').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-sync-now');
-  btn.disabled = true;
-  await runSync();
-  btn.disabled = false;
-});
-
-// El punto de la topbar lleva directo a Apps > Archivos (donde
-// esta el detalle y el boton de "Sincronizar ahora" -- ver mas abajo),
-// no hace nada por si solo mas alla de eso.
-document.getElementById('sync-indicator').addEventListener('click', () => {
-  openArchivosView();
-});
-
-// Fase "Archivos": ya NO se sincroniza sola al volver la conexion --
-// solo cuando se pide a mano desde Apps > Archivos (ver
-// openArchivosView() y btn-sync-now mas abajo). Decision explicita de
-// Koku, confirmada dos veces: si no se abre ese apartado, los cambios de
-// este dispositivo no llegan al otro hasta que se dispare a mano.
-
-// ---------------------------------------------------------------------
-// Emparejamiento
-// ---------------------------------------------------------------------
-function showPairingScreen() {
-  // El campo de direccion se rellena con lo mejor que tengamos: lo ya
-  // guardado antes, o el origen por el que se abrio la pagina. En un
-  // navegador normal eso ya es la direccion buena y no hay que tocarlo;
-  // en la app empaquetada (Capacitor) el origen es interno del propio
-  // movil (capacitor://localhost), asi que se deja vacio para que se vea
-  // el placeholder y quede claro que hay que escribirla.
-  const field = document.getElementById('pairing-server-url');
-  const saved = localStorage.getItem('serverBaseUrl');
-  const origin = window.location.origin;
-  const originIsUsable = origin.startsWith('http://') || origin.startsWith('https://');
-  field.value = saved || (originIsUsable ? origin : '');
-
-  document.getElementById('pairing-screen').classList.remove('hidden');
-  document.getElementById('app').classList.add('hidden');
-}
-
-function showApp() {
-  document.getElementById('pairing-screen').classList.add('hidden');
-  document.getElementById('app').classList.remove('hidden');
-}
-
-document.getElementById('pairing-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const serverUrl = document.getElementById('pairing-server-url').value.trim();
-  const code = document.getElementById('pairing-code').value.trim();
-  const name = document.getElementById('pairing-name').value.trim();
-  const errorEl = document.getElementById('pairing-error');
-  errorEl.classList.add('hidden');
-
-  // La direccion se guarda ANTES de intentar emparejar, para que la
-  // peticion de abajo (y todo lo que venga despues) ya salga hacia el
-  // ordenador y no hacia el origen interno de la app empaquetada. Si el
-  // emparejamiento falla, se queda guardada igualmente -- no estorba, y
-  // asi no hay que reescribirla en cada reintento.
-  let parsedServer;
-  try {
-    parsedServer = new URL(serverUrl);
-    if (parsedServer.protocol !== 'http:' && parsedServer.protocol !== 'https:') throw new Error();
-  } catch (err) {
-    errorEl.textContent = 'La dirección del ordenador no es válida. Debe ser algo como http://192.168.1.37:3000';
-    errorEl.classList.remove('hidden');
-    return;
-  }
-  localStorage.setItem('serverBaseUrl', parsedServer.origin);
-
-  try {
-    const res = await fetch(new URL('/api/devices/pair', getServerBaseUrl()).toString(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, name }),
-    });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.message || 'No se pudo vincular.');
-
-    localStorage.setItem('deviceToken', body.token);
-    showApp();
-    init();
-  } catch (err) {
-    errorEl.textContent = err.message;
-    errorEl.classList.remove('hidden');
-  }
-});
 
 // ---------------------------------------------------------------------
 // Utilidades de fecha
@@ -1733,7 +1169,7 @@ function isGestureBlockedByModal() {
   if (document.querySelector('.modal:not(.hidden)')) return true;
   const fullscreenIds = [
     'my-space-view', 'extensions-view', 'gym-view', 'finanzas-view',
-    'lecturas-view', 'archivos-view', 'note-editor-view',
+    'lecturas-view', 'note-editor-view',
   ];
   return fullscreenIds.some((id) => {
     const el = document.getElementById(id);
@@ -3318,19 +2754,24 @@ async function loadReminders() {
   const now = new Date();
   state.upcomingReminders = upcoming;
 
+  // Cualquier cambio en eventos pasa por aqui, asi que es el sitio
+  // natural para reprogramar los avisos del sistema (los que suenan con
+  // la app cerrada) sin tener que acordarse en cada crear/editar/borrar.
+  syncScheduledReminders();
+
   // El DOM de #reminders-list solo se toca si el panel esta mostrando
   // "proximos" — si el usuario esta viendo un dia concreto, no lo pisamos.
   if (state.remindersMode !== 'day') {
     renderUpcomingRemindersList(upcoming);
   }
 
-  // Notificaciones del navegador: solo funcionan mientras esta pestana
-  // esta abierta. Es el aviso "en el movil"; el aviso de escritorio de
-  // verdad (aunque no tengas el navegador abierto) lo dispara el propio
-  // servidor (ver server/reminderChecker.js). Se activan desde la
-  // pestana "Este dispositivo" del panel de Configuracion (settings.js),
-  // no automaticamente: la mayoria de navegadores exigen que el permiso
-  // se pida como respuesta a un click, no solo al cargar la pagina.
+  // Aviso "en caliente", mientras la app esta ABIERTA. El aviso de
+  // verdad con la app cerrada lo programa el sistema operativo (ver
+  // syncScheduledReminders arriba) -- esto solo cubre el rato en que
+  // estas mirando la pantalla, donde un aviso programado no llegaria a
+  // verse. Se activan desde la pestana "Este dispositivo" del panel de
+  // Configuracion (settings.js), no automaticamente: los navegadores y
+  // el sistema exigen que el permiso se pida a raiz de un click.
   const notificationsEnabled = localStorage.getItem('notificationsEnabled') !== 'false';
   if (window.Notification && Notification.permission === 'granted' && notificationsEnabled) {
     upcoming.forEach((r) => {
@@ -3977,7 +3418,7 @@ function extractNoteThumbnailSrc(note) {
 function extractNoteTextPreview(note) {
   if (!note.body) return '';
   const div = document.createElement('div');
-  div.innerHTML = note.bodyFormat === 'html' ? note.body : legacyNoteBodyToHtml(note.body);
+  div.innerHTML = prepareAssetHtmlForDom(note.bodyFormat === 'html' ? note.body : legacyNoteBodyToHtml(note.body));
   return (div.textContent || '').trim().slice(0, 140);
 }
 
@@ -4012,7 +3453,7 @@ function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
   media.className = 'mobile-note-gallery-media';
   if (thumbSrc) {
     const img = document.createElement('img');
-    img.src = thumbSrc;
+    setAssetImageSrc(img, thumbSrc);
     img.alt = '';
     media.appendChild(img);
   } else {
@@ -6581,7 +6022,7 @@ function noteEntrySnapshot(note) {
 function captureActiveOpenNoteFromDom() {
   const entry = findOpenNote(state.activeOpenNoteKey);
   if (!entry) return;
-  entry.bodyHtml = NOTE_EDITOR_BODY.innerHTML;
+  entry.bodyHtml = serializeAssetImages(NOTE_EDITOR_BODY);
   entry.title = deriveTitleFromBodyClient(entry.bodyHtml, 'html');
   // entry.folderId ya no se toca aqui -- el editor no tiene desplegable
   // de carpeta (quitado en esta ronda, ver CLAUDE.md/regla de
@@ -6642,7 +6083,8 @@ document.getElementById('note-editor-read-mode-btn').addEventListener('click', (
 function loadOpenNoteIntoDom(entry) {
   document.getElementById('note-id').value = entry.id || '';
   refreshNoteTitlePreview(entry.title);
-  NOTE_EDITOR_BODY.innerHTML = entry.bodyHtml;
+  NOTE_EDITOR_BODY.innerHTML = prepareAssetHtmlForDom(entry.bodyHtml);
+  hydrateAssetImages(NOTE_EDITOR_BODY);
   resetNoteEditorToolbar();
   document.getElementById('btn-delete-note').classList.toggle('hidden', !entry.id);
   noteModalFavorite = entry.favorite;
@@ -7698,11 +7140,6 @@ const MOBILE_NAV_SLOT_APPS = {
     label: 'Lecturas',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg>',
     open: () => openLecturasView(),
-  },
-  archivos: {
-    label: 'Archivos',
-    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M12 18v-6M9 15l3-3 3 3"></path></svg>',
-    open: () => openArchivosView(),
   },
   viajes: {
     label: 'Viajes',
@@ -10331,551 +9768,6 @@ document.getElementById('btn-open-finanzas').addEventListener('click', openFinan
 document.getElementById('btn-close-finanzas').addEventListener('click', closeFinanzasView);
 
 // ---------------------------------------------------------------------
-// Extension "Archivos": mandar archivos sueltos (fotos, PDFs, documentos
-// -- no ligados a una nota) entre movil y ordenador. La "base de datos"
-// es la propia carpeta del sistema de ficheros (ver server/routes/archivos.js),
-// asi que no hay tabla ni copia local -- se lee la lista real cada vez
-// que se abre esta vista. Esta vista tambien reune ahora el control
-// MANUAL de la sincronizacion de datos (boton "Sincronizar ahora", que
-// antes vivia en Configuracion > Este dispositivo) y la comprobacion de
-// version nueva.
-// ---------------------------------------------------------------------
-function formatArchivoSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-// archivosCurrentPath: ruta que esta viendo AHORA el panel derecho
-// cuando es el ordenador (ver isTrustedDevice() mas abajo) -- null =
-// todavia no se ha navegado (o el dispositivo no puede navegar, ver
-// abajo), en cuyo caso las peticiones usan la carpeta configurada de
-// siempre. Distinta de archivosBrowsePath (esa es solo del widget de
-// "elegir carpeta por defecto" del <details> de arriba).
-let archivosCurrentPath = null;
-
-function archivosPathQueryParam() {
-  return archivosCurrentPath ? `?path=${encodeURIComponent(archivosCurrentPath)}` : '';
-}
-
-async function downloadArchivo(name) {
-  const token = localStorage.getItem('deviceToken');
-  const headers = {};
-  if (token) headers['X-Device-Token'] = token;
-  const url = new URL(`/api/archivos/${encodeURIComponent(name)}${archivosPathQueryParam()}`, getServerBaseUrl());
-  try {
-    const res = await fetch(url.toString(), { headers });
-    if (!res.ok) throw new Error(`Error ${res.status}`);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    // "Descarga normal" del navegador (no Web Share API) -- confirmado
-    // con Koku: un <a download> con un blob es lo mas sencillo y
-    // funciona igual en ordenador y movil.
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(blobUrl);
-  } catch (err) {
-    alert('No se pudo descargar el archivo: ' + err.message);
-  }
-}
-
-async function deleteArchivo(name) {
-  if (!confirm(`¿Borrar "${name}"?`)) return;
-  await api(`/api/archivos/${encodeURIComponent(name)}${archivosPathQueryParam()}`, { method: 'DELETE' });
-  archivosSelectedRemote.delete(name);
-  await refreshArchivosCurrentView();
-}
-
-// Diseño de dos paneles (ver comentario en index.html): el panel
-// derecho es la carpeta compartida de siempre, ahora con checkbox por
-// fila para elegir que archivo(s) traer con la flecha "<-" del medio
-// -- el boton "Borrar" se queda aparte (no es un movimiento entre
-// paneles, no tiene sentido colgarlo de la flecha).
-const archivosSelectedRemote = new Set();
-
-function updateArchivosReceiveButtonState() {
-  document.getElementById('btn-archivos-receive').disabled = archivosSelectedRemote.size === 0;
-}
-
-// Doble confirmacion de transferencias (ver server/archivosTransfers.js
-// para el porque completo): cada cuanto se pregunta por el estado de una
-// solicitud propia, o por solicitudes entrantes -- mas seguido que
-// checkForUpdate (15s) porque aqui hay alguien mirando la pantalla
-// esperando una respuesta en vivo, pero solo mientras la vista Archivos
-// esta abierta (no es un timer global de fondo).
-const ARCHIVOS_TRANSFER_POLL_MS = 3000;
-let archivosOutgoingRequestId = null; // solicitud propia pendiente de que la confirmen (solo movil)
-let archivosIncomingPollTimer = null; // vigilancia de solicitudes entrantes (solo ordenador)
-const archivosHandledIncomingIds = new Set(); // evita repetir el aviso de la misma solicitud entrante
-
-// Pinta la tabla de archivos -- compartida por el movil (siempre la
-// carpeta configurada, ver refreshArchivosList) y el ordenador (la
-// carpeta que se este navegando ahora mismo, ver loadArchivosNavPath).
-function renderArchivosFileTable(files) {
-  const tbody = document.getElementById('archivos-table-body');
-  const emptyHint = document.getElementById('archivos-empty-hint');
-  const validNames = new Set(files.map((f) => f.name));
-  for (const name of archivosSelectedRemote) {
-    if (!validNames.has(name)) archivosSelectedRemote.delete(name);
-  }
-  tbody.innerHTML = '';
-  emptyHint.classList.toggle('hidden', files.length > 0);
-  for (const file of files) {
-    const tr = document.createElement('tr');
-    const checkTd = document.createElement('td');
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'styled-checkbox';
-    checkbox.checked = archivosSelectedRemote.has(file.name);
-    checkbox.addEventListener('change', () => {
-      if (checkbox.checked) archivosSelectedRemote.add(file.name);
-      else archivosSelectedRemote.delete(file.name);
-      updateArchivosReceiveButtonState();
-    });
-    checkTd.appendChild(checkbox);
-    const nameTd = document.createElement('td');
-    nameTd.textContent = file.name;
-    const sizeTd = document.createElement('td');
-    sizeTd.textContent = formatArchivoSize(file.size);
-    const dateTd = document.createElement('td');
-    dateTd.textContent = new Date(file.modifiedAt).toLocaleString();
-    const actionsTd = document.createElement('td');
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'danger-btn';
-    deleteBtn.textContent = 'Borrar';
-    deleteBtn.addEventListener('click', () => deleteArchivo(file.name));
-    actionsTd.appendChild(deleteBtn);
-    tr.append(checkTd, nameTd, sizeTd, dateTd, actionsTd);
-    tbody.appendChild(tr);
-  }
-  updateArchivosReceiveButtonState();
-}
-
-// Movil (o cualquier dispositivo no de confianza): solo ve la carpeta
-// configurada, sin navegacion real -- comportamiento identico al de
-// siempre, los navegadores no dejan listar el almacenamiento propio del
-// dispositivo (ver comentario en index.html).
-async function refreshArchivosList() {
-  const files = await api('/api/archivos');
-  renderArchivosFileTable(files);
-}
-
-// Ordenador: navega de verdad por el disco entero (GET /browse, que ya
-// devuelve carpetas Y archivos) -- la carpeta configurada en "Carpeta de
-// destino" pasa a ser solo el punto de partida / atajo rapido
-// (btn-archivos-nav-default), no un limite.
-async function loadArchivosNavPath(targetPath) {
-  const qs = targetPath ? `?path=${encodeURIComponent(targetPath)}` : '';
-  const data = await api(`/api/archivos/browse${qs}`);
-  archivosCurrentPath = data.path;
-  document.getElementById('archivos-nav-path').textContent = data.path;
-  const upBtn = document.getElementById('btn-archivos-nav-up');
-  upBtn.disabled = !data.parent;
-  upBtn.dataset.parent = data.parent || '';
-  const foldersList = document.getElementById('archivos-nav-folders');
-  const foldersToggle = document.getElementById('btn-archivos-nav-folders-toggle');
-  foldersList.innerHTML = '';
-  data.folders.forEach((folder) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'archivos-browser-item';
-    btn.textContent = folder.name;
-    btn.addEventListener('click', () => {
-      closeArchivosFoldersDropdown(); // al navegar, se cierra el desplegable
-      loadArchivosNavPath(folder.path);
-    });
-    foldersList.appendChild(btn);
-  });
-  // Sin subcarpetas aqui, no tiene sentido mostrar un boton de
-  // desplegable vacio.
-  foldersToggle.classList.toggle('hidden', data.folders.length === 0);
-  closeArchivosFoldersDropdown();
-  renderArchivosFileTable(data.files);
-}
-
-// Desplegable de subcarpetas: mismo "molde" que los demas popovers de la
-// app (position:fixed + positionFixedPopover(), definida en settings.js
-// -- se llama desde aqui dentro de un handler, no al cargar la pagina,
-// asi que el orden de carga app.js/settings.js no da problemas, ver
-// CLAUDE.md). Se abre con hover O con el boton; un temporizador corto
-// evita que se cierre solo al pasar el raton del boton al desplegable
-// (hay un hueco de unos pixeles entre los dos).
-let archivosFoldersCloseTimer = null;
-function openArchivosFoldersDropdown() {
-  clearTimeout(archivosFoldersCloseTimer);
-  const dropdown = document.getElementById('archivos-nav-folders');
-  if (dropdown.children.length === 0) return; // sin subcarpetas, nada que mostrar
-  if (!dropdown.classList.contains('hidden')) return; // ya abierto
-  dropdown.classList.remove('hidden');
-  positionFixedPopover(document.getElementById('btn-archivos-nav-folders-toggle'), dropdown, { width: 240 });
-}
-function closeArchivosFoldersDropdown() {
-  clearTimeout(archivosFoldersCloseTimer);
-  document.getElementById('archivos-nav-folders').classList.add('hidden');
-}
-function scheduleCloseArchivosFoldersDropdown() {
-  clearTimeout(archivosFoldersCloseTimer);
-  archivosFoldersCloseTimer = setTimeout(closeArchivosFoldersDropdown, 150);
-}
-document.getElementById('archivos-nav-folders-wrap').addEventListener('mouseenter', openArchivosFoldersDropdown);
-document.getElementById('archivos-nav-folders-wrap').addEventListener('mouseleave', scheduleCloseArchivosFoldersDropdown);
-document.getElementById('archivos-nav-folders').addEventListener('mouseenter', () => clearTimeout(archivosFoldersCloseTimer));
-document.getElementById('archivos-nav-folders').addEventListener('mouseleave', scheduleCloseArchivosFoldersDropdown);
-document.getElementById('btn-archivos-nav-folders-toggle').addEventListener('click', () => {
-  if (document.getElementById('archivos-nav-folders').classList.contains('hidden')) openArchivosFoldersDropdown();
-  else closeArchivosFoldersDropdown();
-});
-// Clicar fuera cierra el desplegable si se habia abierto con el boton
-// (el hover ya se cierra solo al quitar el raton de encima).
-document.addEventListener('click', (e) => {
-  const wrap = document.getElementById('archivos-nav-folders-wrap');
-  if (wrap && !wrap.contains(e.target)) closeArchivosFoldersDropdown();
-});
-
-// Punto de entrada unico tras abrir la vista o tras cualquier mutacion
-// (subir/borrar/etc.) -- decide si tocan la navegacion real (ordenador)
-// o la lista simple de siempre (movil).
-async function refreshArchivosBrowsePanel() {
-  const navRow = document.getElementById('archivos-nav-row');
-  const navFoldersWrap = document.getElementById('archivos-nav-folders-wrap');
-  if (isTrustedDevice()) {
-    navRow.classList.remove('hidden');
-    navFoldersWrap.classList.remove('hidden');
-    const startPath = archivosCurrentPath || document.getElementById('archivos-folder-path').value || null;
-    await loadArchivosNavPath(startPath);
-  } else {
-    navRow.classList.add('hidden');
-    navFoldersWrap.classList.add('hidden');
-    await refreshArchivosList();
-  }
-}
-
-async function refreshArchivosCurrentView() {
-  if (isTrustedDevice() && archivosCurrentPath) {
-    await loadArchivosNavPath(archivosCurrentPath);
-  } else {
-    await refreshArchivosList();
-  }
-}
-
-document.getElementById('btn-archivos-nav-up').addEventListener('click', () => {
-  const parent = document.getElementById('btn-archivos-nav-up').dataset.parent;
-  if (parent) loadArchivosNavPath(parent);
-});
-document.getElementById('btn-archivos-nav-default').addEventListener('click', async () => {
-  const { folder } = await api('/api/archivos/folder');
-  await loadArchivosNavPath(folder);
-});
-
-// Panel izquierdo ("Este dispositivo"): NO es un explorador real (los
-// navegadores no dejan listar el almacenamiento del propio dispositivo,
-// ver comentario en index.html) -- es solo una lista de archivos ya
-// elegidos con el selector nativo, pendientes de mandar con "->".
-let archivosStagedFiles = [];
-
-function renderArchivosStagedList() {
-  const list = document.getElementById('archivos-staged-list');
-  const emptyHint = document.getElementById('archivos-staged-empty-hint');
-  list.innerHTML = '';
-  emptyHint.classList.toggle('hidden', archivosStagedFiles.length > 0);
-  archivosStagedFiles.forEach((file, index) => {
-    const row = document.createElement('div');
-    row.className = 'archivos-staged-item';
-    const nameSpan = document.createElement('span');
-    nameSpan.textContent = `${file.name} (${formatArchivoSize(file.size)})`;
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.className = 'archivos-staged-remove';
-    removeBtn.setAttribute('aria-label', 'Quitar de la lista');
-    removeBtn.textContent = '✕';
-    removeBtn.addEventListener('click', () => {
-      archivosStagedFiles.splice(index, 1);
-      renderArchivosStagedList();
-    });
-    row.append(nameSpan, removeBtn);
-    list.appendChild(row);
-  });
-  document.getElementById('btn-archivos-send').disabled = archivosStagedFiles.length === 0;
-}
-
-document.getElementById('btn-archivos-choose').addEventListener('click', () => {
-  document.getElementById('archivos-file-input').click();
-});
-document.getElementById('archivos-file-input').addEventListener('change', (e) => {
-  archivosStagedFiles.push(...Array.from(e.target.files || []));
-  e.target.value = '';
-  renderArchivosStagedList();
-});
-
-// Bucle de subida real (POST por archivo) -- separado del listener para
-// poder llamarlo tanto al instante (ordenador) como tras la confirmacion
-// del otro lado (movil, ver requestArchivosTransfer() mas abajo).
-async function sendArchivosFilesNow(files) {
-  for (const file of files) {
-    try {
-      await api(`/api/archivos${archivosPathQueryParam()}`, {
-        method: 'POST',
-        headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
-        body: file,
-      });
-    } catch (err) {
-      alert(`No se pudo subir "${file.name}": ${err.message}`);
-    }
-  }
-  await refreshArchivosCurrentView();
-}
-
-document.getElementById('btn-archivos-send').addEventListener('click', async () => {
-  if (archivosStagedFiles.length === 0) return;
-  const files = archivosStagedFiles;
-  // El ordenador copiando un archivo local a su propia carpeta
-  // compartida no tiene "otro dispositivo" al que pedirle permiso (ver
-  // server/archivosTransfers.js) -- sigue actuando al instante, sin
-  // fricción nueva. Solo un movil pasa por la confirmacion del otro lado.
-  if (isTrustedDevice()) {
-    archivosStagedFiles = [];
-    renderArchivosStagedList();
-    await sendArchivosFilesNow(files);
-    return;
-  }
-  const accepted = await requestArchivosTransfer('upload', files.map((f) => ({ name: f.name, size: f.size })));
-  if (accepted) {
-    archivosStagedFiles = [];
-    renderArchivosStagedList();
-    await sendArchivosFilesNow(files);
-  }
-});
-
-document.getElementById('btn-archivos-receive').addEventListener('click', async () => {
-  const names = Array.from(archivosSelectedRemote);
-  if (names.length === 0) return;
-  if (isTrustedDevice()) {
-    for (const name of names) await downloadArchivo(name);
-    return;
-  }
-  const accepted = await requestArchivosTransfer('download', names.map((name) => ({ name, size: 0 })));
-  if (accepted) {
-    for (const name of names) await downloadArchivo(name);
-  }
-});
-
-// Crea la solicitud, espera a que el ordenador conteste (polling cada
-// ARCHIVOS_TRANSFER_POLL_MS) y devuelve true/false segun si se acepto.
-// Solo la llaman los dos listeners de arriba cuando NO somos el
-// ordenador -- este nunca pasa por aqui.
-async function requestArchivosTransfer(direction, files) {
-  const btn = document.getElementById(direction === 'upload' ? 'btn-archivos-send' : 'btn-archivos-receive');
-  const statusEl = document.getElementById('archivos-transfer-status');
-  btn.disabled = true;
-  statusEl.textContent = 'Solicitud enviada al ordenador. Esperando que la confirmen allí...';
-  statusEl.classList.remove('hidden');
-  try {
-    const record = await api('/api/archivos/transfer-requests', {
-      method: 'POST',
-      body: JSON.stringify({ direction, files }),
-    });
-    archivosOutgoingRequestId = record.id;
-    const finalStatus = await waitForArchivosTransferResolution(record.id);
-    if (finalStatus === 'accepted') {
-      statusEl.textContent = 'Confirmado. Transfiriendo...';
-      return true;
-    }
-    if (finalStatus === 'rejected') {
-      alert('El ordenador rechazó la transferencia.');
-    } else {
-      alert('Nadie confirmó la transferencia a tiempo. Inténtalo de nuevo.');
-    }
-    return false;
-  } catch (err) {
-    alert('No se pudo solicitar la transferencia: ' + err.message);
-    return false;
-  } finally {
-    archivosOutgoingRequestId = null;
-    statusEl.classList.add('hidden');
-    updateArchivosReceiveButtonState();
-    document.getElementById('btn-archivos-send').disabled = archivosStagedFiles.length === 0;
-  }
-}
-
-function waitForArchivosTransferResolution(id) {
-  return new Promise((resolve) => {
-    const timer = setInterval(async () => {
-      try {
-        const record = await api(`/api/archivos/transfer-requests/${id}`);
-        if (record.status !== 'pending') {
-          clearInterval(timer);
-          resolve(record.status); // 'accepted' | 'rejected' | 'expired'
-        }
-      } catch (err) {
-        // 404 = ya se limpio (caducada hace rato): se trata como expirada.
-        clearInterval(timer);
-        resolve('expired');
-      }
-    }, ARCHIVOS_TRANSFER_POLL_MS);
-  });
-}
-
-// Vigilancia de solicitudes entrantes -- solo tiene sentido en el
-// ordenador (es el unico que puede aceptar/rechazar, ver requireTrusted
-// en routes/archivos.js), y solo mientras la vista Archivos esta abierta
-// (arranca/para en openArchivosView()/closeArchivosView()).
-function startArchivosIncomingWatcher() {
-  if (!isTrustedDevice() || archivosIncomingPollTimer) return;
-  archivosIncomingPollTimer = setInterval(checkArchivosIncomingRequests, ARCHIVOS_TRANSFER_POLL_MS);
-}
-function stopArchivosIncomingWatcher() {
-  if (archivosIncomingPollTimer) clearInterval(archivosIncomingPollTimer);
-  archivosIncomingPollTimer = null;
-}
-
-async function checkArchivosIncomingRequests() {
-  let pending;
-  try {
-    pending = await api('/api/archivos/transfer-requests');
-  } catch (err) {
-    return; // red caida un instante: se reintenta en el siguiente ciclo
-  }
-  for (const record of pending) {
-    if (archivosHandledIncomingIds.has(record.id)) continue;
-    archivosHandledIncomingIds.add(record.id);
-    await promptArchivosIncomingRequest(record);
-  }
-}
-
-async function promptArchivosIncomingRequest(record) {
-  const verb = record.direction === 'upload' ? 'mandarte' : 'descargar de tu carpeta compartida';
-  const list = record.files.map((f) => f.name).join(', ');
-  const accept = confirm(`El móvil quiere ${verb} ${record.files.length} archivo(s): ${list}\n\n¿Aceptar?`);
-  try {
-    await api(`/api/archivos/transfer-requests/${record.id}/${accept ? 'accept' : 'reject'}`, { method: 'POST' });
-  } catch (err) {
-    // Ya caduco o se resolvio de otra forma mientras se decidia: no pasa nada.
-  }
-  if (accept) {
-    // Si era una subida, el propio movil hace el POST real al ver
-    // 'accepted' en su propio polling (hasta ARCHIVOS_TRANSFER_POLL_MS
-    // de retraso) y LUEGO sube el archivo -- asi que un solo refresco
-    // rapido aqui podria llegar antes de que el archivo exista de
-    // verdad. Dos intentos escalonados (uno pronto, otro con margen de
-    // sobra sobre el peor caso del polling del movil) sin necesidad de
-    // inventar un tercer estado "completado" solo para esto.
-    setTimeout(() => refreshArchivosCurrentView().catch(() => {}), 2000);
-    setTimeout(() => refreshArchivosCurrentView().catch(() => {}), ARCHIVOS_TRANSFER_POLL_MS + 2000);
-  }
-}
-
-// Bloque "Carpeta de destino": solo editable/explorable desde el
-// ordenador (ver isTrustedDevice()) -- el servidor tambien lo protege por
-// su cuenta (PUT /folder y GET /browse son requireTrusted), esto solo
-// evita ensenar controles que en el movil fallarian igualmente.
-async function refreshArchivosFolderUI() {
-  const readonlyHint = document.getElementById('archivos-folder-readonly-hint');
-  const editableRow = document.getElementById('archivos-folder-row');
-  try {
-    const { folder } = await api('/api/archivos/folder');
-    if (isTrustedDevice()) {
-      editableRow.classList.remove('hidden');
-      readonlyHint.classList.add('hidden');
-      document.getElementById('archivos-folder-path').value = folder;
-    } else {
-      editableRow.classList.add('hidden');
-      readonlyHint.classList.remove('hidden');
-      readonlyHint.textContent = `Carpeta configurada en el ordenador: ${folder}`;
-    }
-  } catch (err) {
-    editableRow.classList.add('hidden');
-    readonlyHint.classList.add('hidden');
-  }
-}
-
-let archivosBrowsePath = null;
-
-async function loadArchivosBrowserPath(path) {
-  const qs = path ? `?path=${encodeURIComponent(path)}` : '';
-  const data = await api(`/api/archivos/browse${qs}`);
-  archivosBrowsePath = data.path;
-  document.getElementById('archivos-browser-current-path').textContent = data.path;
-  const list = document.getElementById('archivos-browser-list');
-  list.innerHTML = '';
-  const upBtn = document.getElementById('btn-archivos-browser-up');
-  upBtn.disabled = !data.parent;
-  upBtn.dataset.parent = data.parent || '';
-  for (const folder of data.folders) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'archivos-browser-item';
-    btn.textContent = folder.name;
-    btn.addEventListener('click', () => loadArchivosBrowserPath(folder.path));
-    list.appendChild(btn);
-  }
-}
-
-document.getElementById('btn-archivos-browse').addEventListener('click', async () => {
-  await loadArchivosBrowserPath(document.getElementById('archivos-folder-path').value || null);
-  document.getElementById('archivos-folder-browser').classList.remove('hidden');
-});
-document.getElementById('btn-archivos-browser-up').addEventListener('click', () => {
-  const parent = document.getElementById('btn-archivos-browser-up').dataset.parent;
-  if (parent) loadArchivosBrowserPath(parent);
-});
-document.getElementById('btn-archivos-browser-cancel').addEventListener('click', () => {
-  document.getElementById('archivos-folder-browser').classList.add('hidden');
-});
-document.getElementById('btn-archivos-browser-use').addEventListener('click', async () => {
-  try {
-    await api('/api/archivos/folder', { method: 'PUT', body: JSON.stringify({ folder: archivosBrowsePath }) });
-    document.getElementById('archivos-folder-path').value = archivosBrowsePath;
-    document.getElementById('archivos-folder-browser').classList.add('hidden');
-    // Saltar el panel principal a la carpeta que se acaba de fijar como
-    // nueva por defecto -- coherente con que "Carpeta por defecto" haga
-    // lo mismo.
-    await loadArchivosNavPath(archivosBrowsePath);
-  } catch (err) {
-    alert('No se pudo cambiar la carpeta: ' + err.message);
-  }
-});
-
-document.getElementById('btn-archivos-check-update').addEventListener('click', () => {
-  checkForNewRelease();
-});
-
-async function openArchivosView() {
-  closeExtensionsView();
-  document.getElementById('archivos-view').classList.remove('hidden');
-  setCurrentScreen('archivos');
-  document.getElementById('archivos-folder-browser').classList.add('hidden');
-  archivosStagedFiles = [];
-  renderArchivosStagedList();
-  archivosSelectedRemote.clear();
-  archivosCurrentPath = null;
-  archivosHandledIncomingIds.clear();
-  await Promise.all([refreshSyncStatusUI(), refreshArchivosFolderUI(), refreshVersionInfo()]);
-  await refreshArchivosBrowsePanel();
-  startArchivosIncomingWatcher();
-}
-function closeArchivosView() {
-  stopArchivosIncomingWatcher();
-  if (archivosOutgoingRequestId) {
-    const id = archivosOutgoingRequestId;
-    archivosOutgoingRequestId = null;
-    // Best-effort: si una aceptacion llegara tarde sobre una solicitud
-    // ya cancelada, el movil ya no la esta esperando (ver
-    // requestArchivosTransfer) -- evita un estado confuso si se vuelve
-    // a abrir Archivos mas tarde.
-    api(`/api/archivos/transfer-requests/${id}`, { method: 'DELETE' }).catch(() => {});
-  }
-  document.getElementById('archivos-view').classList.add('hidden');
-  openExtensionsView();
-}
-document.getElementById('btn-open-archivos').addEventListener('click', openArchivosView);
-document.getElementById('btn-close-archivos').addEventListener('click', closeArchivosView);
-
-// ---------------------------------------------------------------------
 // Extension "Viajes": mapa interactivo por paises (public/viajes-world-map.svg
 // -- fuente: raphaellepuschitz/SVG-World-Map en GitHub, licencia MIT; los
 // contornos de cada pais en si no son obra del autor de esa libreria,
@@ -11386,7 +10278,7 @@ function renderViajesAttachment(att) {
   const wrap = document.createElement('div');
   wrap.className = 'viajes-attachment';
   const img = document.createElement('img');
-  img.src = att.url;
+  setAssetImageSrc(img, att.url);
   img.alt = '';
   img.className = 'viajes-attachment-photo';
   wrap.appendChild(img);
@@ -11416,7 +10308,7 @@ function renderViajesMovement(mv) {
   wrap.className = 'viajes-attachment';
   if (mv.attachmentUrl) {
     const img = document.createElement('img');
-    img.src = mv.attachmentUrl;
+    setAssetImageSrc(img, mv.attachmentUrl);
     img.alt = '';
     img.className = 'viajes-attachment-photo';
     wrap.appendChild(img);
@@ -12507,205 +11399,6 @@ applyMiEspacioMode();
 applyUiStyle();
 
 // ---------------------------------------------------------------------
-// Aviso de nueva version disponible: /api/version devuelve el momento en
-// que arranco el proceso del servidor. npm run dev reinicia ese proceso
-// cada vez que tocamos un archivo de server/, asi que si ese valor
-// cambia respecto al que teniamos guardado, el servidor se ha
-// actualizado y avisamos para recargar en vez de dejar la pagina con
-// JS/HTML desincronizados con lo nuevo. Se puede desactivar desde
-// Configuracion > Este dispositivo (localStorage.updateCheckEnabled).
-// ---------------------------------------------------------------------
-let knownServerStartedAt = null;
-
-async function checkForUpdate() {
-  if (localStorage.getItem('updateCheckEnabled') === 'false') return;
-  try {
-    const res = await fetch('/api/version');
-    if (!res.ok) return;
-    const { startedAt } = await res.json();
-    if (knownServerStartedAt === null) {
-      knownServerStartedAt = startedAt;
-      return;
-    }
-    if (startedAt !== knownServerStartedAt) {
-      document.getElementById('update-banner').classList.remove('hidden');
-    }
-  } catch (err) {
-    // Sin conexion justo ahora (por ejemplo, el servidor esta a mitad de
-    // reiniciarse): no pasa nada, lo volvemos a intentar en el siguiente
-    // ciclo en vez de mostrar un error.
-  }
-}
-
-document.getElementById('btn-reload-update').addEventListener('click', () => location.reload());
-
-// ---------------------------------------------------------------------
-// Aviso de version nueva EN GITHUB (distinto del de arriba, que solo
-// detecta que el servidor que ya tenias abierto se reinicio por su
-// cuenta). Aqui se pregunta de verdad si hay algo mas nuevo que lo que
-// tienes instalado, aunque acabes de abrir la app. Solo el ordenador de
-// confianza puede usar esto (ver requireTrusted en
-// server/routes/update.js) — en un movil emparejado, /api/update/check
-// responde 403 y aqui simplemente no sale el aviso, sin error visible.
-// "No para esta version" se recuerda en localStorage (por dispositivo,
-// como el resto de preferencias de "Este dispositivo"): la siguiente
-// version SI que volvera a avisar.
-// ---------------------------------------------------------------------
-function compareVersions(a, b) {
-  const pa = String(a).split('.').map(Number);
-  const pb = String(b).split('.').map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const diff = (pa[i] || 0) - (pb[i] || 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
-
-// Info de version/commit en el menu principal de Configuracion (para "no
-// ir perdido" con que version corre este ordenador) -- ver
-// GET /api/update/info en server/routes/update.js. Es solo lectura,
-// no habla con GitHub (a diferencia de checkForNewRelease), asi que
-// funciona sin internet. En un movil emparejado (que no puede leer el
-// git de este ordenador) el 403 se ignora en silencio, igual que el
-// aviso de nueva version.
-const VERSION_INFO_DATE_FORMATTER = new Intl.DateTimeFormat('es-ES', {
-  day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
-});
-
-// Ademas del menu principal de Configuracion, este mismo bloque se
-// repite en Apps > Archivos (#archivos-version-info) -- Koku pidio
-// ver ahi tambien la version/commit, no solo en Configuracion.
-async function refreshVersionInfo() {
-  const boxes = [document.getElementById('settings-version-info'), document.getElementById('archivos-version-info')].filter(Boolean);
-  if (!boxes.length) return;
-  try {
-    const info = await api('/api/update/info');
-    const commitDate = info.commitDate ? VERSION_INFO_DATE_FORMATTER.format(new Date(info.commitDate)) : '';
-    const html = `
-      <div>Versión ${escapeHtml(info.version)} · rama <code>${escapeHtml(info.branch)}</code></div>
-      <div>Último commit: <code>${escapeHtml(info.commitHash)}</code> — ${escapeHtml(info.commitMessage)}</div>
-      ${commitDate ? `<div>${escapeHtml(commitDate)}</div>` : ''}
-    `;
-    boxes.forEach((box) => {
-      box.innerHTML = html;
-      box.classList.remove('hidden');
-    });
-  } catch (err) {
-    // Sin internet no importa (esto no hace fetch a GitHub), pero si
-    // fallase por cualquier otro motivo (git no disponible, movil
-    // emparejado sin permiso...) mejor no mostrar nada raro a medias.
-    boxes.forEach((box) => box.classList.add('hidden'));
-  }
-}
-
-let pendingReleaseVersion = null;
-
-// El estado de la comprobacion (comprobando/al dia/nueva version/error)
-// se ve integrado en el propio texto del boton "Comprobar ahora" de
-// Apps > Archivos, en vez de un mensaje aparte encima -- Koku lo
-// pidio explicitamente ("que no sea solo un mensaje"). data-check-status
-// controla el color (ver .archivos-check-btn en styles.css: rojo en error).
-function setArchivosCheckButtonState(status, text) {
-  const btn = document.getElementById('btn-archivos-check-update');
-  if (!btn) return;
-  btn.textContent = text;
-  btn.dataset.checkStatus = status;
-  btn.disabled = status === 'checking';
-}
-
-// Ademas del banner de siempre, esto tambien conduce el estado del boton
-// de Apps > Archivos (#btn-archivos-check-update) -- asi la
-// comprobacion automatica de aqui abajo y el boton manual de ahi dan el
-// mismo feedback. GET /api/update/check ya es requireDeviceOrTrusted (ver
-// server/routes/update.js), asi que esto tambien funciona en un movil
-// emparejado -- lo unico que sigue siendo solo del ordenador es
-// instalarla de verdad (POST /pull).
-async function checkForNewRelease() {
-  setArchivosCheckButtonState('checking', 'Comprobando…');
-  try {
-    const info = await api('/api/update/check');
-    if (!info || !info.remoteVersion) {
-      setArchivosCheckButtonState('error', 'No se pudo comprobar la versión.');
-      return;
-    }
-    if (compareVersions(info.remoteVersion, info.currentVersion) <= 0) {
-      setArchivosCheckButtonState('ok', `Tienes la última versión (v${info.currentVersion}).`);
-      return;
-    }
-    setArchivosCheckButtonState('ok', `Hay una versión nueva disponible (v${info.remoteVersion}).`);
-    if (localStorage.getItem('skippedUpdateVersion') === info.remoteVersion) return;
-
-    pendingReleaseVersion = info.remoteVersion;
-    document.getElementById('new-release-banner-text').textContent = `Hay una versión nueva disponible (v${info.remoteVersion}).`;
-    // Instalar de verdad (git pull) solo puede hacerlo el ordenador -- en
-    // el movil se sustituye el boton de instalar por un texto informativo.
-    const trusted = isTrustedDevice();
-    document.getElementById('btn-install-release').classList.toggle('hidden', !trusted);
-    document.getElementById('new-release-mobile-hint').classList.toggle('hidden', trusted);
-    document.getElementById('new-release-banner').classList.remove('hidden');
-  } catch (err) {
-    // Sin internet o git no configurado: no pasa nada, se vuelve a
-    // intentar mas tarde sin molestar con un error.
-    setArchivosCheckButtonState('error', 'No se pudo comprobar (sin conexión con el ordenador o con GitHub).');
-  }
-}
-
-document.getElementById('btn-skip-release').addEventListener('click', () => {
-  if (pendingReleaseVersion) localStorage.setItem('skippedUpdateVersion', pendingReleaseVersion);
-  document.getElementById('new-release-banner').classList.add('hidden');
-});
-document.getElementById('btn-dismiss-release').addEventListener('click', () => {
-  document.getElementById('new-release-banner').classList.add('hidden');
-});
-
-// Tras un "git pull" bueno, el codigo nuevo ya esta en el disco pero el
-// proceso que sigue corriendo (y la pagina que tienes abierta) todavia
-// tienen el viejo cargado en memoria — hay que reiniciar de verdad para
-// que se note. En Electron, la propia app se reinicia sola. En el
-// navegador (npm run dev), en cuanto "git pull" cambia archivos de
-// server/ el --watch reinicia el servidor solo — aqui solo hace falta
-// esperar a que vuelva a responder y recargar la pagina.
-function waitForServerRestartThenReload() {
-  const attempt = async () => {
-    try {
-      const res = await fetch('/api/version');
-      if (res.ok) {
-        location.reload();
-        return;
-      }
-    } catch (err) {
-      // sigue reiniciandose, se reintenta
-    }
-    setTimeout(attempt, 1000);
-  };
-  setTimeout(attempt, 2000);
-}
-
-document.getElementById('btn-install-release').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-install-release');
-  const originalLabel = btn.textContent;
-  btn.disabled = true;
-  document.getElementById('btn-skip-release').disabled = true;
-  btn.textContent = 'Actualizando…';
-
-  try {
-    await api('/api/update/pull', { method: 'POST' });
-    if (window.electronAPI && window.electronAPI.relaunchApp) {
-      btn.textContent = 'Reiniciando la app…';
-      window.electronAPI.relaunchApp();
-    } else {
-      btn.textContent = 'Reiniciando el servidor…';
-      waitForServerRestartThenReload();
-    }
-  } catch (err) {
-    alert('No se pudo actualizar: ' + err.message);
-    btn.disabled = false;
-    document.getElementById('btn-skip-release').disabled = false;
-    btn.textContent = originalLabel;
-  }
-});
-
-// ---------------------------------------------------------------------
 // Pantalla de bienvenida (primer arranque): ver el modal en index.html.
 // Se muestra una sola vez, en el dispositivo que abra la app primero
 // (el perfil es compartido por TODA la instalacion, no por dispositivo
@@ -12788,7 +11481,6 @@ async function restoreCurrentScreen() {
   if (screen === 'gym') { await openGymView(); return; }
   if (screen === 'lecturas') { openLecturasView(); return; }
   if (screen === 'finanzas') { await openFinanzasView(); return; }
-  if (screen === 'archivos') { await openArchivosView(); return; }
   if (screen === 'viajes') { await openViajesView(); return; }
 }
 
@@ -12796,16 +11488,16 @@ async function initStep(fn) {
   try {
     await fn();
   } catch (err) {
-    if (err.message !== 'device_not_paired') console.error(err);
+    console.error(err);
   }
 }
 
 async function init() {
   // Lo PRIMERO de todo (antes incluso de cargar datos del calendario):
   // si veniamos de una recarga dentro de una vista a pantalla completa,
-  // cubrir el calendario con esa vista cuanto antes -- showApp() ya dejo
-  // el calendario visible, así que cuanto mas tarde se llame a esto, mas
-  // se nota el "flashazo" del calendario antes de taparlo. Moverlo aqui
+  // cubrir el calendario con esa vista cuanto antes -- el calendario ya
+  // esta visible desde el primer momento, así que cuanto mas tarde se
+  // llame a esto, mas se nota el "flashazo" antes de taparlo. Moverlo aqui
   // (en vez de al final de init(), donde estaba antes) no depende de
   // nada de lo que carga init() despues -- cada open*View() ya carga sus
   // propios datos por su cuenta.
@@ -12842,12 +11534,16 @@ async function init() {
   await initStep(loadNoteFolders);
   await initStep(loadNotes);
   renderNotesView();
-  refreshSyncStatusUI();
-  // Ya no hay ningun runSync() automatico que la ponga al dia sola (ver
-  // btn-sync-now en Apps > Archivos) -- sin esto, el punto de la
-  // topbar se quedaria sin titulo/aria-label hasta la primera vez que se
-  // sincronice a mano.
-  refreshSyncIndicator();
+
+  // Los gastos fijos ya no los genera un proceso encendido las 24h en el
+  // ordenador: se comprueba al abrir la app si toca generar el de este
+  // periodo (ver public/finanzas-recurring.js).
+  await initStep(generateDueRecurringExpenses);
+
+  // Y los avisos de los recordatorios se (re)programan en el propio
+  // dispositivo, para que suenen aunque la app este cerrada (ver
+  // public/local-notifications.js).
+  await initStep(syncScheduledReminders);
 
   setInterval(loadReminders, 30 * 1000);
   // Igual que los recordatorios: si otro dispositivo vinculado anade o
@@ -12860,31 +11556,8 @@ async function init() {
   }), 30 * 1000);
 }
 
-// Si ya tenemos un token guardado (o somos el ordenador, que ni lo
-// necesita) intentamos cargar la app directamente; api() se encargara
-// de mostrar la pantalla de emparejamiento si el servidor nos rechaza.
-//
-// Excepcion: la app EMPAQUETADA (Capacitor) carga su propio codigo desde
-// el movil, asi que su origen (capacitor://localhost) no es ningun
-// servidor -- una peticion ahi no da un 401 que dispare la pantalla de
-// emparejamiento, da un error de red, que api() interpreta como "sin
-// conexion" y responde con la copia local (vacia la primera vez). Sin
-// esta comprobacion, el primer arranque se quedaria en una app vacia sin
-// ninguna forma de decirle donde esta el ordenador. Al ordenador de
-// siempre no le afecta: su origen SI es http, asi que nunca entra aqui.
-const bootOriginIsUsable = window.location.origin.startsWith('http://')
-  || window.location.origin.startsWith('https://');
-if (!bootOriginIsUsable && !localStorage.getItem('serverBaseUrl')) {
-  showPairingScreen();
-} else {
-  showApp();
-  init();
-  checkForUpdate();
-}
-setInterval(checkForUpdate, 15 * 1000);
-checkForNewRelease();
-// Es una llamada a git fetch de verdad (no un simple ping), asi que se
-// repite mucho menos seguido que checkForUpdate — cada 6 horas basta para
-// enterarse el mismo dia sin martirizar la conexion.
-setInterval(checkForNewRelease, 6 * 60 * 60 * 1000);
+// Sin servidor no hay nada que vincular ni a quien preguntarle si esta
+// version es la ultima: la app arranca directamente en el calendario,
+// con su propia base de datos dentro del dispositivo.
+init();
 applyViewModePrompt();

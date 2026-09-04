@@ -90,31 +90,6 @@
        vista guardada no es la normal". Ver checkForUpdate(),
        checkForNewRelease() y applyViewModePrompt() en app.js. -->
   <div id="toast-stack" class="toast-stack">
-    <div id="update-banner" class="toast hidden">
-      <span>Nueva versión disponible.</span>
-      <button type="button" id="btn-reload-update">Recargar</button>
-    </div>
-
-    <!-- Distinto del de arriba: ese detecta que ESTE servidor ya
-         arrancado se ha reiniciado; este otro pregunta a GitHub si hay
-         una version mas nueva que la que tienes, aunque no hayas tocado
-         nada todavia. Se ve en cualquier dispositivo (GET /api/update/check
-         es requireDeviceOrTrusted, ver server/routes/update.js), pero
-         instalarla de verdad (git pull) solo puede hacerlo el ordenador --
-         en el movil el boton "Actualizar ahora" se sustituye por un texto
-         informativo (ver checkForNewRelease() en app.js). -->
-    <div id="new-release-banner" class="toast toast-release hidden">
-      <div class="toast-release-top">
-        <span id="new-release-banner-text"></span>
-        <button type="button" id="btn-dismiss-release" class="toast-dismiss" aria-label="Ahora no">✕</button>
-      </div>
-      <div class="toast-release-actions">
-        <button type="button" id="btn-skip-release" class="secondary-btn">No para esta</button>
-        <button type="button" id="btn-install-release" class="primary-btn">Actualizar ahora</button>
-        <span id="new-release-mobile-hint" class="hint hidden">Actualízala desde el ordenador.</span>
-      </div>
-    </div>
-
     <div id="default-view-banner" class="toast hidden">
       <span id="default-view-banner-text"></span>
       <button type="button" id="btn-apply-default-view"></button>
@@ -125,55 +100,6 @@
   <!-- Pantalla de emparejamiento: se muestra solo si este dispositivo
        (normalmente el movil) todavia no tiene token guardado o el servidor
        lo rechaza. Ver app.js -> showPairingScreen(). -->
-  <div id="pairing-screen" class="pairing-screen hidden">
-    <div class="pairing-card">
-      <h1>RemindMeLater</h1>
-      <p>Este dispositivo todavía no esta vinculado a tu calendario.</p>
-      <p>En el ordenador, abre <strong>☰ Configuración → Dispositivos → Vincular nuevo dispositivo</strong> y escribe aquí el código de 6 dígitos que aparezca.</p>
-      <form id="pairing-form">
-        <!-- Direccion del servidor: hace falta porque la app empaquetada
-             (Capacitor) carga su propio codigo desde el propio movil, no
-             desde el ordenador -- asi que su "origen" no es ninguna
-             direccion util y hay que preguntarla. En el navegador normal
-             viene ya rellenada con la direccion por la que se abrio la
-             pagina, y no hay que tocarla. Ver getServerBaseUrl() en
-             app.js. -->
-        <label>
-          Dirección del ordenador
-          <!-- type="text" (no "url") y sin "required" a proposito: asi la
-               validacion la hace el propio submit con el aviso de la app,
-               en vez del globo nativo del navegador, que ni sigue el tema
-               ni se ve igual dentro de la app empaquetada. -->
-          <input type="text" id="pairing-server-url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="http://192.168.1.37:3000" />
-        </label>
-        <label>
-          Codigo
-          <input type="text" id="pairing-code" inputmode="numeric" maxlength="6" placeholder="000000" required />
-        </label>
-        <label>
-          Nombre de este dispositivo
-          <input type="text" id="pairing-name" placeholder="Mi movil" required />
-        </label>
-        <button type="submit">Vincular</button>
-      </form>
-      <p id="pairing-error" class="error hidden"></p>
-    </div>
-  </div>
-
-  <!-- "Escanear ordenador": lee con la camara el QR de Configuración →
-       Dispositivos (en el ordenador) para saber a que IP mandar los datos
-       en la wifi de ahora, sin volver a vincular el dispositivo. Ver
-       openScanServerModal() en settings.js. -->
-  <div id="scan-server-modal" class="modal hidden">
-    <div class="modal-card">
-      <button type="button" id="btn-close-scan-server" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2>Escanear ordenador</h2>
-      <p class="hint">Apunta la cámara al QR que aparece en el ordenador (Configuración → Dispositivos).</p>
-      <video id="scan-server-video" class="scan-server-video" autoplay playsinline muted></video>
-      <p id="scan-server-modal-status" class="hint"></p>
-    </div>
-  </div>
-
   <!-- Confirmacion/aviso propio con el estilo de la app, para sustituir a
        confirm()/alert() nativos del navegador en flujos donde hace falta
        que se note mas -- ver showAppConfirm()/showAppAlert() en app.js.
@@ -198,7 +124,7 @@
   </div>
 
   <!-- App principal -->
-  <div id="app" class="app hidden">
+  <div id="app" class="app">
     <header class="topbar">
       <div class="topbar-title">
         <h1>RemindMeLater</h1>
@@ -228,16 +154,6 @@
         <button id="btn-extensions" class="secondary-btn my-space-topbar-btn" aria-label="Apps">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
           <span>Apps</span>
-        </button>
-        <!-- Fase "movil": punto de color para ver de un vistazo si este
-             dispositivo esta sincronizado, sin tener que entrar en
-             Configuracion -- verde = todo al dia, amarillo = hay cambios
-             pendientes de mandar, gris = sin conexion con el ordenador
-             ahora mismo, rojo = fallo de verdad (no solo "sin conexion").
-             Clicarlo lleva directo a la seccion de sincronizacion. Ver
-             refreshSyncIndicator() en app.js. -->
-        <button type="button" id="sync-indicator" class="sync-indicator" aria-label="Estado de sincronización">
-          <span id="sync-indicator-dot" class="sync-indicator-dot"></span>
         </button>
         <button id="btn-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </nav>
@@ -737,10 +653,6 @@
         <button type="button" id="btn-open-lecturas" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg></span>
           <span class="extensions-card-title">Lecturas</span>
-        </button>
-        <button type="button" id="btn-open-archivos" class="extensions-card extensions-card-active">
-          <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M12 18v-6M9 15l3-3 3 3"></path></svg></span>
-          <span class="extensions-card-title">Archivos</span>
         </button>
         <button type="button" id="btn-open-viajes" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></span>
@@ -1446,133 +1358,6 @@
     </div>
   </div>
 
-  <!-- Extension "Archivos": mandar archivos sueltos (fotos, PDFs,
-       documentos -- no ligados a una nota) entre el movil y el ordenador,
-       y el control MANUAL de la sincronizacion de datos (recordatorios,
-       notas, eventos, grupos, temas -- ver runSync() en app.js). Desde
-       la ronda "Archivos" ya no hay sincronizacion automatica de fondo:
-       el boton "Sincronizar ahora" que antes vivia en Configuracion >
-       Este dispositivo se ha movido aqui. El bloque de "Carpeta de
-       destino" solo se ve completo (editable + explorador) en el
-       ordenador -- en el movil solo se lee la ruta (GET /folder es
-       requireDeviceOrTrusted), pero cambiarla/explorar el disco sigue
-       siendo requireTrusted (ver server/routes/archivos.js). -->
-  <div id="archivos-view" class="my-space-view hidden">
-    <div class="my-space-view-header">
-      <h2>Archivos</h2>
-      <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-archivos" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
-        <button type="button" id="btn-archivos-settings" class="icon-btn" aria-label="Configuración">☰</button>
-      </div>
-    </div>
-
-    <div class="archivos-body">
-    <h3>Sincronización</h3>
-    <p class="hint">Recordatorios, tareas, notas, eventos y temas ya no se sincronizan solos de fondo -- pulsa este botón cuando quieras poner al día este dispositivo y el ordenador.</p>
-    <p id="sync-status" class="hint"></p>
-    <button type="button" id="btn-sync-now" class="secondary-btn">Sincronizar ahora</button>
-
-    <h3>Nueva versión</h3>
-    <!-- Info de version/commit -- mismo bloque que en Configuracion >
-         menu principal (ver #settings-version-info), solo visible en el
-         ordenador de confianza (GET /api/update/info sigue siendo
-         requireTrusted). El estado de la comprobacion (Comprobando/al
-         dia/error) ya no es un mensaje aparte -- vive en el propio texto
-         del boton, ver checkForNewRelease() en app.js. -->
-    <div id="archivos-version-info" class="settings-version-info hidden"></div>
-    <button type="button" id="btn-archivos-check-update" class="secondary-btn">Comprobar ahora</button>
-
-    <details class="archivos-manage-block">
-      <summary>Carpeta de destino</summary>
-      <p id="archivos-folder-readonly-hint" class="hint hidden"></p>
-      <div id="archivos-folder-row" class="archivos-folder-row hidden">
-        <input type="text" id="archivos-folder-path" readonly />
-        <button type="button" id="btn-archivos-browse" class="secondary-btn">Explorar…</button>
-      </div>
-      <div id="archivos-folder-browser" class="archivos-folder-browser hidden">
-        <p id="archivos-browser-current-path" class="hint"></p>
-        <div id="archivos-browser-list" class="archivos-browser-list"></div>
-        <div class="modal-actions">
-          <button type="button" id="btn-archivos-browser-up" class="secondary-btn">Subir un nivel</button>
-          <div class="spacer"></div>
-          <button type="button" id="btn-archivos-browser-cancel" class="secondary-btn">Cancelar</button>
-          <button type="button" id="btn-archivos-browser-use" class="primary-btn">Usar esta carpeta</button>
-        </div>
-      </div>
-    </details>
-
-    <h3>Transferir archivos</h3>
-    <!-- Diseño de dos paneles estilo TightVNC/TeamViewer, a peticion de
-         Koku -- ver renderArchivosStagedList()/refreshArchivosList() en
-         app.js. El panel izquierdo ("Este dispositivo") NO puede listar
-         de verdad el almacenamiento del movil (los navegadores no lo
-         permiten, es un limite de seguridad, no una eleccion de diseño):
-         solo se puede elegir archivos uno a uno con el selector nativo y
-         mandarlos -- por eso es una "lista de preparados para enviar",
-         no un explorador real. El panel derecho SI es real: la carpeta
-         compartida configurada arriba, igual en ordenador y movil. -->
-    <p class="hint-warning">Si vas a mandar o traer archivos fuera de tu wifi de siempre (una red pública, la del curro, un hotel...), mejor usa los datos móviles del teléfono en vez de esa wifi -- es mucho más difícil que alguien más los intercepte por el camino.</p>
-    <div class="archivos-transfer-grid">
-      <div class="archivos-transfer-panel">
-        <h4>Este dispositivo</h4>
-        <input type="file" id="archivos-file-input" multiple hidden />
-        <button type="button" id="btn-archivos-choose" class="secondary-btn">Elegir archivo(s)…</button>
-        <div id="archivos-staged-list" class="archivos-staged-list"></div>
-        <p id="archivos-staged-empty-hint" class="hint">Elige uno o varios archivos para mandarlos al ordenador.</p>
-      </div>
-      <div class="archivos-transfer-arrows">
-        <button type="button" id="btn-archivos-send" class="secondary-btn" disabled title="Enviar al ordenador">→</button>
-        <button type="button" id="btn-archivos-receive" class="secondary-btn" disabled title="Descargar a este dispositivo">←</button>
-      </div>
-      <div class="archivos-transfer-panel">
-        <h4>Carpeta compartida en el ordenador</h4>
-        <!-- Navegacion real del disco (solo ordenador, ver
-             isTrustedDevice() en app.js) -- la carpeta configurada
-             arriba en "Carpeta de destino" ahora es solo un atajo
-             rapido (btn-archivos-browser-default), no un limite: desde
-             aqui se puede navegar a cualquier carpeta del ordenador. En
-             movil este bloque se queda oculto y la tabla de abajo
-             sigue mostrando solo la carpeta configurada, sin cambios. -->
-        <div id="archivos-nav-row" class="archivos-nav-row hidden">
-          <button type="button" id="btn-archivos-nav-up" class="icon-btn" aria-label="Subir un nivel">↑</button>
-          <p id="archivos-nav-path" class="archivos-nav-path"></p>
-          <button type="button" id="btn-archivos-nav-default" class="secondary-btn">Carpeta por defecto</button>
-        </div>
-        <!-- Subcarpetas de la ruta actual: antes se veian SIEMPRE
-             desplegadas debajo de la ruta (ocupaban espacio aunque no
-             las estuvieras mirando) -- ahora es un desplegable que solo
-             se abre pasando el raton por encima o pulsando el boton,
-             con el mismo estilo que el resto de popovers de la app (ver
-             .archivos-nav-folders-dropdown en styles.css). -->
-        <div id="archivos-nav-folders-wrap" class="archivos-nav-folders-wrap hidden">
-          <button type="button" id="btn-archivos-nav-folders-toggle" class="secondary-btn archivos-nav-folders-toggle">Subcarpetas ▾</button>
-          <div id="archivos-nav-folders" class="archivos-browser-list archivos-nav-folders-dropdown hidden"></div>
-        </div>
-        <div class="archivos-table-wrap">
-          <table class="archivos-table" id="archivos-table">
-            <thead>
-              <tr><th></th><th>Nombre</th><th>Tamaño</th><th>Fecha</th><th></th></tr>
-            </thead>
-            <tbody id="archivos-table-body"></tbody>
-          </table>
-        </div>
-        <p id="archivos-empty-hint" class="hint hidden">No hay archivos todavía.</p>
-      </div>
-    </div>
-    <!-- Estado de "esperando confirmacion del otro dispositivo" -- solo
-         lo usa un movil (ver requestArchivosTransfer() en app.js), el
-         ordenador nunca pasa por aqui. -->
-    <p id="archivos-transfer-status" class="hint hidden"></p>
-    </div>
-  </div>
-
-  <!-- Extension "Viajes": mapa interactivo por paises (SVG en
-       public/viajes-world-map.svg -- fuente: raphaellepuschitz/SVG-World-Map
-       en GitHub, licencia MIT -- con <g id="XX"> en formato ISO 3166-1
-       alfa-2 en MAYUSCULAS, normalizado a minuscula en loadViajesMap();
-       nombres en español en viajesCountries.js) + bitacora de cada
-       viaje, que puede tocar VARIOS paises a la vez (ej. un interrail).
-       Ver openViajesView()/renderViajesMap() en app.js. -->
   <div id="viajes-view" class="my-space-view hidden">
     <div class="my-space-view-header">
       <h2>Viajes</h2>
@@ -2252,9 +2037,6 @@
         <button type="button" class="settings-menu-item" data-tab="groups">
           <span>Grupos</span><span class="settings-menu-item-arrow">›</span>
         </button>
-        <button type="button" class="settings-menu-item" data-tab="devices">
-          <span>Dispositivos</span><span class="settings-menu-item-arrow">›</span>
-        </button>
         <button type="button" class="settings-menu-item" data-tab="mobile">
           <span>Este dispositivo</span><span class="settings-menu-item-arrow">›</span>
         </button>
@@ -2268,15 +2050,6 @@
           <span>Salir de la aplicación</span>
         </button>
 
-        <!-- Info de version/commit -- solo lectura, no navega a ningun
-             sitio. DENTRO de settings-menu para que se oculte junto con
-             el resto de la lista al entrar en una seccion (ver
-             showSettingsScreen). Solo se ve en el ordenador de confianza
-             (mismo criterio que el aviso de nueva version, ver
-             requireTrusted en server/routes/update.js) -- un movil
-             emparejado no puede leer el git de este ordenador. Ver
-             refreshVersionInfo en app.js. -->
-        <div id="settings-version-info" class="settings-version-info hidden"></div>
       </div>
 
       <!-- --- Perfil --- -->
@@ -2415,33 +2188,6 @@
         <div id="groups-list" class="groups-list"></div>
       </div>
 
-      <!-- --- Dispositivos --- -->
-      <div id="settings-tab-devices" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
-        <h3>Dispositivos</h3>
-        <div id="devices-only-computer" class="hidden">
-          <p class="hint">La gestion de dispositivos solo esta disponible desde el ordenador, por seguridad.</p>
-        </div>
-        <div id="devices-management">
-          <button id="btn-generate-code" class="primary-btn">Vincular nuevo dispositivo</button>
-          <div id="pairing-code-display" class="pairing-code-display hidden">
-            <p>Introduce este código en el otro dispositivo:</p>
-            <div id="pairing-code-value" class="code-value"></div>
-            <p id="pairing-code-countdown" class="hint"></p>
-          </div>
-          <h4>Vinculados</h4>
-          <div id="devices-list" class="devices-list"></div>
-
-          <!-- Fase "multi-red": un movil ya vinculado no necesita volver a
-               emparejarse al cambiar de wifi, solo saber la IP nueva de
-               este ordenador -- ver getServerBaseUrl() en app.js. -->
-          <h4>Este ordenador en esta red</h4>
-          <p class="hint">Desde un movil ya vinculado, entra en Configuración → Este dispositivo → "Escanear ordenador" y apunta a este código para que sepa a qué dirección mandar los datos en la wifi de ahora.</p>
-          <img id="network-qr-image" class="network-qr-image hidden" alt="Código QR con la dirección de este ordenador en la red actual" />
-          <p id="network-qr-url" class="hint"></p>
-        </div>
-      </div>
-
       <!-- --- Este dispositivo (ajustes locales, no compartidos) --- -->
       <div id="settings-tab-mobile" class="settings-tab-panel hidden">
         <button type="button" class="settings-back-btn" data-back>← Volver</button>
@@ -2453,28 +2199,9 @@
         </label>
         <p id="notifications-status" class="hint"></p>
 
-        <label class="checkbox-row">
-          <input type="checkbox" id="setting-update-check" />
-          Avisarme cuando el servidor se actualice
-        </label>
-
         <h4>Tareas completadas</h4>
         <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>
         <div id="completed-tasks-display-options" class="view-mode-options"></div>
-
-        <!-- Fase "Archivos": el boton "Sincronizar ahora" vivia aqui, pero
-             se ha movido al apartado Apps > Archivos (junto con el
-             resto de acciones manuales de esa pantalla) -- ver
-             "Sincronizacion" en app.js. -->
-
-        <!-- Fase "multi-red": si cambias de wifi (o de ordenador), la IP de
-             antes deja de servir -- escanear el QR nuevo actualiza a dónde
-             se manda la sincronización sin perder lo ya guardado aquí ni
-             tener que volver a vincular este dispositivo. -->
-        <h4>Conectar con el ordenador en esta red</h4>
-        <p class="hint">Si cambias de wifi (o de ordenador), escanea el QR que aparece en el ordenador en Configuración → Dispositivos.</p>
-        <button type="button" id="btn-scan-server" class="secondary-btn">Escanear ordenador</button>
-        <p id="scan-server-status" class="hint"></p>
 
         <h4>Gimnasio: unidad de peso</h4>
         <p class="hint">Solo cambia como se escriben/leen los pesos en este dispositivo -- por dentro siempre se guardan en kilogramos.</p>
@@ -2526,6 +2253,7 @@
   <script src="routes-local/lecturasItems.js"></script>
   <script src="routes-local/lecturasSagas.js"></script>
   <script src="routes-local/noteFolders.js"></script>
+  <script src="routes-local/noteImages.js"></script>
   <script src="routes-local/notes.js"></script>
   <script src="routes-local/profile.js"></script>
   <script src="routes-local/reminders.js"></script>
@@ -2533,7 +2261,8 @@
   <script src="routes-local/themes.js"></script>
   <script src="routes-local/viajesEntries.js"></script>
   <script src="routes-local/viajesTrips.js"></script>
-  <script src="vendor/jsQR.js"></script>
+  <script src="finanzas-recurring.js"></script>
+  <script src="local-notifications.js"></script>
   <script src="viajesCountries.js"></script>
   <script src="app.js"></script>
   <script src="settings.js"></script>
