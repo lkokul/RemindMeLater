@@ -2034,11 +2034,36 @@
         </div>
       </div>
       <div id="note-body-toolbar" class="note-editor-toolbar">
-        <!-- Reestructurada en 3 filas (ronda de retoques): fila 1 =
-             formato en linea (aplica a la seleccion), fila 2 = estructura
-             de parrafo (aplica al parrafo entero donde este el cursor),
-             fila 3 = el resto (tabla/imagen/codigo/vim/modo lectura),
-             tal cual estaba antes de esta ronda. -->
+        <!-- Barra principal reducida a 2 botones (ronda "barra colapsada
+             en Formato"): todo el resto de controles de formato vive
+             ahora en el popover #note-format-popover (mas abajo, fuera de
+             .note-editor-main, mismo criterio que los demas popovers
+             creados por JS -- position:fixed colgado de <body>). Barra
+             deslizable (overflow-x, sin flex-wrap) por si algun dia hay
+             mas botones aqui, aunque con 2 no hace falta scroll. -->
+        <button type="button" id="note-format-btn" class="note-editor-btn" aria-haspopup="true" aria-expanded="false">Formato</button>
+        <!-- Alterna entre editar (por defecto, como antes) y solo lectura,
+             por si solo quieres consultar la nota sin arriesgarte a
+             tocarla sin querer -- ver applyNoteEditorReadMode en app.js.
+             Es un ajuste POR NOTA ABIERTA (entry.readMode), no global del
+             editor: cada nota recuerda su propio modo mientras este
+             abierta. -->
+        <button type="button" id="note-editor-read-mode-btn" class="note-editor-btn" aria-pressed="false">Modo lectura</button>
+      </div>
+      <!-- Panel de formato (boton "Formato" de arriba): las mismas 3 filas
+           de siempre (formato en linea / estructura de parrafo / tabla-
+           imagen-codigo-vim), movidas AQUI tal cual -- mismos ids, mismo
+           wiring en app.js, solo cambia donde viven en el arbol. Vive
+           fuera de .note-editor-main a proposito (hermano de nivel
+           superior, igual que los demas popovers creados por JS) para que
+           su position:fixed no dependa de ningun contexto de apilamiento
+           de por medio. Deliberadamente NO esta en la lista generica de
+           closeAllPopovers()/"click fuera cierra" de settings.js -- tiene
+           que seguir abierto mientras se selecciona texto DENTRO de
+           #note-body, que tambien cuenta como "fuera" del popover para
+           ese mecanismo generico. Ver el wiring de #note-format-btn en
+           app.js para su propio cierre dedicado. -->
+      <div id="note-format-popover" class="note-format-popover hidden">
         <div class="note-editor-toolbar-row">
           <!-- Estilo de parrafo (Titulo/Encabezado/Subencabezado/Cuerpo/
                Monoespaciado, estilo Notas de iPhone) -- abre un popover
@@ -2054,7 +2079,10 @@
           <button type="button" data-cmd="strikeThrough" class="note-editor-btn" aria-label="Tachado" title="Tachado"><s>T</s></button>
           <!-- Color de resaltado (fondo, tipo rotulador) -- ver
                applyNoteHighlight/clearNoteHighlight en app.js. Formato EN
-               LINEA, se aplica a la seleccion. -->
+               LINEA con una seleccion real; con el cursor sin seleccionar
+               nada activa el modo "resaltar lo que se escriba a partir de
+               ahora" (ver beginPendingNoteHighlight), reflejado con
+               .is-active en este mismo boton mientras esta pendiente. -->
           <button type="button" id="note-highlight-btn" class="note-editor-btn" aria-label="Resaltar con color" title="Resaltar con color">&#9635;</button>
         </div>
         <div class="note-editor-toolbar-row">
@@ -2097,7 +2125,6 @@
                  la tabla actual ya esta en grueso. -->
             <button type="button" id="note-table-border-toggle" class="note-editor-btn" aria-label="Alternar grosor de borde" title="Alternar borde fino/grueso">Borde</button>
           </span>
-          <span class="note-editor-toolbar-spacer"></span>
           <!-- Modo "vim" (opt-in, ajuste por dispositivo en localStorage,
                ver isVimModeEnabled en app.js): Esc entra en modo Normal
                (movimiento con h/j/k/l, w/b, x, dd, u -- sin escribir), v
@@ -2108,13 +2135,6 @@
                el ajuste esta activado. -->
           <button type="button" id="note-editor-vim-indicator" class="note-editor-vim-indicator hidden desktop-only">INSERTAR</button>
           <button type="button" id="note-editor-vim-toggle-btn" class="note-editor-btn desktop-only" aria-pressed="false" title="Atajos de movimiento estilo vim (Esc = modo Normal, i/a/o = Insertar)">Vim</button>
-          <!-- Alterna entre editar (por defecto, como antes) y solo lectura,
-               por si solo quieres consultar la nota sin arriesgarte a
-               tocarla sin querer -- ver applyNoteEditorReadMode en app.js.
-               Es un ajuste POR NOTA ABIERTA (entry.readMode), no global del
-               editor: cada nota recuerda su propio modo mientras este
-               abierta. -->
-          <button type="button" id="note-editor-read-mode-btn" class="note-editor-btn" aria-pressed="false">Modo lectura</button>
         </div>
       </div>
       <div class="note-editor-main">

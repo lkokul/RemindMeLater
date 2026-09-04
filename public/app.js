@@ -4376,7 +4376,7 @@ function execNoteCommand(cmd) {
 // tabla -- ver mas abajo -- comparten la clase .note-editor-btn por el
 // aspecto visual, pero no tienen data-cmd ni pasan por execCommand).
 function refreshNoteEditorToolbar() {
-  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => {
+  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => {
     const active = document.queryCommandState(btn.dataset.cmd);
     btn.classList.toggle('is-active', !!active);
   });
@@ -4388,7 +4388,7 @@ function refreshNoteEditorToolbar() {
 // estado de la ULTIMA nota que se habia editado, en vez de apagados.
 // Tambien oculta el grupo +Fila/-Fila/+Col/-Col por la misma razon.
 function resetNoteEditorToolbar() {
-  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
+  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
   document.getElementById('note-table-context-toolbar').classList.add('hidden');
   document.getElementById('note-paragraph-style-btn').disabled = false;
   document.getElementById('note-quote-toggle-btn').disabled = false;
@@ -4396,15 +4396,56 @@ function resetNoteEditorToolbar() {
   document.getElementById('note-indent-btn').disabled = false;
   document.getElementById('note-outdent-btn').disabled = false;
   document.getElementById('note-highlight-btn').disabled = false;
+  document.getElementById('note-highlight-btn').classList.remove('is-active');
+  cancelPendingNoteHighlight();
+  closeNoteFormatPopover();
 }
 
-document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => {
+document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => {
   // mousedown (no click) + preventDefault: si no, el navegador quita la
   // seleccion de texto del editor al pasar el foco al boton ANTES de que
   // se dispare el click, y execCommand ya no tendria sobre que aplicar
   // el formato.
   btn.addEventListener('mousedown', (e) => e.preventDefault());
   btn.addEventListener('click', () => execNoteCommand(btn.dataset.cmd));
+});
+
+// ---------------------------------------------------------------------
+// Panel de formato (boton "Formato" de la barra principal, ver
+// index.html): abre/cierra #note-format-popover, que contiene las 3
+// filas de controles de siempre. A proposito NO pasa por
+// closeAllPopovers()/el listener generico de "click fuera cierra" de
+// settings.js (ese mecanismo cerraria el panel en cuanto se clica
+// DENTRO de #note-body para seleccionar texto, justo lo contrario de lo
+// que hace falta) -- tiene su propio listener dedicado, que solo cierra
+// si el click cae fuera del propio panel, del boton, del editor, o de
+// cualquiera de sus popovers anidados (Aa/resaltado/insertar tabla).
+// ---------------------------------------------------------------------
+const noteFormatPopover = document.getElementById('note-format-popover');
+const noteFormatBtn = document.getElementById('note-format-btn');
+
+function closeNoteFormatPopover() {
+  noteFormatPopover.classList.add('hidden');
+  noteFormatBtn.setAttribute('aria-expanded', 'false');
+}
+
+function openNoteFormatPopover() {
+  noteFormatPopover.classList.remove('hidden');
+  noteFormatBtn.setAttribute('aria-expanded', 'true');
+  positionFixedPopover(noteFormatBtn, noteFormatPopover, { width: 320 });
+}
+
+noteFormatBtn.addEventListener('mousedown', (e) => e.preventDefault());
+noteFormatBtn.addEventListener('click', () => {
+  if (noteFormatBtn.disabled) return;
+  if (noteFormatPopover.classList.contains('hidden')) openNoteFormatPopover();
+  else closeNoteFormatPopover();
+});
+
+document.addEventListener('click', (e) => {
+  if (noteFormatPopover.classList.contains('hidden')) return;
+  if (e.target.closest('.note-format-popover, #note-format-btn, #note-body, .paragraph-style-popover, .highlight-color-popover, .table-insert-popover')) return;
+  closeNoteFormatPopover();
 });
 
 // ---------------------------------------------------------------------
@@ -4464,6 +4505,7 @@ function refreshNoteEditorState() {
   refreshNoteEditorToolbar();
   refreshTableContextToolbar();
   refreshNoteBlockButtons();
+  refreshPendingNoteHighlightState();
 }
 
 // El editor guarda aqui la seleccion de justo antes de abrir el popover
@@ -4628,22 +4670,245 @@ function applyNoteIndentDelta(delta) {
 // fijos, ver NOTE_HIGHLIGHT_SWATCHES) -- los colores concretos (fondo Y
 // texto, para contraste real) se definen una sola vez en CSS, nunca con
 // un style en linea puesto por el usuario.
-function applyNoteHighlight(key) {
-  restoreNoteEditorSelection();
+
+// Elementos de "linea" (un renglon logico del editor, separado por
+// Intro) -- SI incluye <li> a diferencia de getNoteBlockAncestor (el
+// resaltado tiene sentido dentro de listas, a diferencia de estilo de
+// parrafo/cita/sangria).
+const NOTE_LINE_TAGS = new Set(['DIV', 'P', 'H1', 'H2', 'H3', 'LI']);
+
+function getNoteLineElement(node) {
+  if (!node || !NOTE_EDITOR_BODY.contains(node)) return null;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  while (node && node !== NOTE_EDITOR_BODY) {
+    if (NOTE_LINE_TAGS.has(node.tagName)) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+// Resuelve la "linea" de un extremo de Range a partir de (container,
+// offset) -- no basta con mirar solo "container" (lo que hacia la
+// primera version de esto): un "Ctrl+A" real en Chrome dice el rango
+// como (NOTE_EDITOR_BODY, 0) a (NOTE_EDITOR_BODY, numHijos), es decir,
+// el propio contenedor del editor con un offset, nunca desciende hasta
+// el nodo de texto de la primera/ultima linea -- getNoteLineElement(container)
+// devolveria null en ese caso (NOTE_EDITOR_BODY no es el mismo objeto
+// que si mismo tras la comprobacion "!== NOTE_EDITOR_BODY"). Si el
+// container ya es un nodo de texto, el offset no aporta nada nuevo
+// (delega en getNoteLineElement de siempre); si es un elemento, el
+// offset senala un indice dentro de sus childNodes -- se resuelve el
+// hijo real al que apunta ese limite (el siguiente hijo para un limite
+// de inicio, el anterior para uno de fin) y se sigue desde ahi.
+function resolveNoteLineAtBoundary(container, offset, isEndBoundary) {
+  if (container.nodeType === Node.TEXT_NODE) return getNoteLineElement(container);
+  if (container.nodeType !== Node.ELEMENT_NODE) return null;
+  const idx = isEndBoundary ? Math.max(0, offset - 1) : offset;
+  const child = container.childNodes[idx] || container.childNodes[container.childNodes.length - 1];
+  if (!child) return null;
+  if (child.nodeType === Node.ELEMENT_NODE && NOTE_LINE_TAGS.has(child.tagName)) return child;
+  return getNoteLineElement(child);
+}
+
+// Lista plana, en orden de documento, de todas las "lineas" del editor
+// -- para saber que lineas quedan ENTRE la de inicio y la de fin de una
+// seleccion que cruza varios parrafos/items.
+function collectNoteLineElements() {
+  const lines = [];
+  const walker = document.createTreeWalker(NOTE_EDITOR_BODY, NodeFilter.SHOW_ELEMENT, {
+    acceptNode: (el) => (NOTE_LINE_TAGS.has(el.tagName) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+  });
+  let n;
+  while ((n = walker.nextNode())) lines.push(n);
+  return lines;
+}
+
+// La primera linea de una nota puede seguir siendo texto suelto (sin
+// <div> propio) hasta que algo la envuelva -- ver el comentario de
+// findFirstLineBreakIndexClient sobre esto. Si se selecciona desde ahi
+// hacia la linea siguiente (caso muy comun: seleccionar toda la nota
+// desde el principio), hace falta que esa primera linea tambien sea un
+// elemento real para poder trocear por linea -- mueve los nodos sueltos
+// del principio a un <div> nuevo. OJO: a diferencia de lo que parece a
+// primera vista, un Range en curso NO sigue automaticamente a un nodo
+// que se mueve cuando el CONTENEDOR del limite es justo ese nodo (aqui,
+// el nodo de texto suelto) -- el limite "escapa" al padre ANTIGUO en la
+// posicion donde estaba el nodo (comportamiento real de la mutacion de
+// Range al eliminar, confirmado depurando el bug real que esto producia:
+// la seleccion se quedaba apuntando de mas, resolviendo una linea
+// equivocada). Por eso quien llama a esto SIEMPRE tiene que volver a fijar
+// el rango a mano despues, con los mismos nodos de origen (que siguen
+// siendo los mismos objetos, solo reparentados) -- nunca fiarse de que
+// el Range ya activo se haya reajustado solo.
+function ensureNoteFirstLineWrapped() {
+  const first = NOTE_EDITOR_BODY.firstChild;
+  if (!first || (first.nodeType === Node.ELEMENT_NODE && NOTE_LINE_TAGS.has(first.tagName))) return;
+  const div = document.createElement('div');
+  NOTE_EDITOR_BODY.insertBefore(div, first);
+  let node = div.nextSibling;
+  while (node && !(node.nodeType === Node.ELEMENT_NODE && NOTE_LINE_TAGS.has(node.tagName))) {
+    const next = node.nextSibling;
+    div.appendChild(node);
+    node = next;
+  }
+}
+
+// Envuelve el contenido de "range" en uno o varios <span data-highlight>
+// -- si la seleccion cae ENTERA dentro de una sola linea, un solo span
+// (igual que antes de este arreglo). Si CRUZA varias lineas, un span
+// por tramo (el trozo de la primera linea, cada linea intermedia
+// entera, el trozo de la ultima) -- asi ningun span queda nunca a
+// caballo entre bloques, que era la causa real del bug reportado
+// (background/border-radius no se pintan bien con hijos de bloque
+// dentro de un elemento en linea, aunque "color" si se ve por herencia
+// -- de ahi que solo cambiara la letra). Devuelve el array de spans
+// creados. Limitacion aceptada: una seleccion que cruce el borde de una
+// celda de tabla puede volver a producir el mismo problema (las celdas
+// no son "lineas" en este esquema) -- caso muy inhabitual, no cubierto.
+function wrapNoteHighlightRange(range, key) {
+  const startLine = resolveNoteLineAtBoundary(range.startContainer, range.startOffset, false);
+  const endLine = resolveNoteLineAtBoundary(range.endContainer, range.endOffset, true);
+
+  if (!startLine || !endLine || startLine === endLine) {
+    const span = document.createElement('span');
+    span.setAttribute('data-highlight', key);
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+    return [span];
+  }
+
+  const allLines = collectNoteLineElements();
+  const startIdx = allLines.indexOf(startLine);
+  const endIdx = allLines.indexOf(endLine);
+  const spans = [];
+
+  const startRange = document.createRange();
+  startRange.setStart(range.startContainer, range.startOffset);
+  startRange.setEndAfter(startLine.lastChild || startLine);
+  const startSpan = document.createElement('span');
+  startSpan.setAttribute('data-highlight', key);
+  startSpan.appendChild(startRange.extractContents());
+  startRange.insertNode(startSpan);
+  spans.push(startSpan);
+
+  for (let i = startIdx + 1; i < endIdx; i++) {
+    const line = allLines[i];
+    const lineRange = document.createRange();
+    lineRange.selectNodeContents(line);
+    const span = document.createElement('span');
+    span.setAttribute('data-highlight', key);
+    span.appendChild(lineRange.extractContents());
+    lineRange.insertNode(span);
+    spans.push(span);
+  }
+
+  const endRange = document.createRange();
+  endRange.setStartBefore(endLine.firstChild || endLine);
+  endRange.setEnd(range.endContainer, range.endOffset);
+  const endSpan = document.createElement('span');
+  endSpan.setAttribute('data-highlight', key);
+  endSpan.appendChild(endRange.extractContents());
+  endRange.insertNode(endSpan);
+  spans.push(endSpan);
+
+  return spans;
+}
+
+// Resaltar "antes de escribir" (como negrita/cursiva): el resaltado NO
+// pasa por execCommand (a proposito, ver arriba), asi que "seguir
+// escribiendo con este color" hay que construirlo a mano -- tecnica
+// estandar de "span semilla" con un caracter de ancho cero: se inserta
+// el span ya con data-highlight y un unico caracter invisible dentro, y
+// se deja el cursor justo despues de ese caracter -- lo que se escriba
+// a partir de ahi cae dentro del mismo nodo de texto (mismo padre, el
+// span), igual que hace el navegador de forma nativa con <b> al activar
+// negrita sin seleccion.
+let pendingNoteHighlightKey = null;
+let pendingNoteHighlightSpan = null;
+
+function cancelPendingNoteHighlight() {
+  // Si nunca se llego a escribir nada real (el span solo tiene el
+  // caracter semilla), se quita del todo -- no dejar un span vacio.
+  if (pendingNoteHighlightSpan && pendingNoteHighlightSpan.textContent === '​') {
+    pendingNoteHighlightSpan.remove();
+  }
+  pendingNoteHighlightKey = null;
+  pendingNoteHighlightSpan = null;
+}
+
+function beginPendingNoteHighlight(key) {
+  // Clicar el MISMO color que ya esta pendiente lo cancela (toggle).
+  if (pendingNoteHighlightKey === key) {
+    cancelPendingNoteHighlight();
+    refreshNoteEditorState();
+    return;
+  }
+  cancelPendingNoteHighlight(); // si habia OTRO color pendiente sin usar, se descarta
   const sel = window.getSelection();
-  // Exige una seleccion de verdad, igual que antes -- resaltar "donde
-  // este el cursor" sin nada seleccionado no tiene sentido para un
-  // formato de fondo.
-  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  if (!sel || sel.rangeCount === 0) return;
   const range = sel.getRangeAt(0);
   const span = document.createElement('span');
   span.setAttribute('data-highlight', key);
-  span.appendChild(range.extractContents());
+  span.appendChild(document.createTextNode('​'));
   range.insertNode(span);
-  sel.removeAllRanges();
   const newRange = document.createRange();
-  newRange.selectNodeContents(span);
+  newRange.setStart(span.firstChild, 1);
+  newRange.collapse(true);
+  sel.removeAllRanges();
   sel.addRange(newRange);
+  pendingNoteHighlightKey = key;
+  pendingNoteHighlightSpan = span;
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+// Refleja el estado de "resaltado pendiente" (punto anterior) en el
+// boton, y lo cancela solo si el cursor se ha ido de dentro del span
+// semilla -- llamada desde refreshNoteEditorState, que ya se dispara en
+// cada keyup/mouseup/focus del editor y tras cada accion de formato.
+function refreshPendingNoteHighlightState() {
+  if (pendingNoteHighlightSpan) {
+    const sel = window.getSelection();
+    const inside = sel && sel.rangeCount > 0 && pendingNoteHighlightSpan.contains(sel.getRangeAt(0).startContainer);
+    if (!inside) cancelPendingNoteHighlight();
+  }
+  document.getElementById('note-highlight-btn').classList.toggle('is-active', !!pendingNoteHighlightKey);
+}
+
+function applyNoteHighlight(key) {
+  restoreNoteEditorSelection();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  // Sin seleccion real: activa el modo "resaltar lo que se escriba a
+  // partir de ahora", igual que negrita/cursiva sin seleccionar nada.
+  if (sel.isCollapsed) {
+    beginPendingNoteHighlight(key);
+    return;
+  }
+  // Capturar el limite ANTES de envolver la primera linea suelta -- ver
+  // el comentario de ensureNoteFirstLineWrapped() sobre por que no basta
+  // con fiarse de que el Range ya activo en la seleccion se reajuste
+  // solo (no lo hace cuando el contenedor del limite es justo el nodo
+  // que se mueve). Los nodos en si son los mismos objetos aunque se
+  // reparenten, asi que reconstruir el rango a mano con ellos despues
+  // de envolver es siempre valido.
+  const liveRange = sel.getRangeAt(0);
+  const startContainer = liveRange.startContainer;
+  const startOffset = liveRange.startOffset;
+  const endContainer = liveRange.endContainer;
+  const endOffset = liveRange.endOffset;
+  ensureNoteFirstLineWrapped();
+  const range = document.createRange();
+  range.setStart(startContainer, startOffset);
+  range.setEnd(endContainer, endOffset);
+  const spans = wrapNoteHighlightRange(range, key);
+  sel.removeAllRanges();
+  if (spans.length) {
+    const newRange = document.createRange();
+    newRange.setStartBefore(spans[0]);
+    newRange.setEndAfter(spans[spans.length - 1]);
+    sel.addRange(newRange);
+  }
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4652,11 +4917,19 @@ function applyNoteHighlight(key) {
 // del bloque ENTERO (aunque la seleccion solo cubra parte de el) --
 // simplificacion deliberada, en linea con la nueva regla de simplicidad:
 // partir un <span> en dos trozos para ese caso raro no compensa la
-// complejidad extra.
+// complejidad extra. Con el cursor sin seleccion y un resaltado
+// pendiente activo, "Ninguno" apaga ese modo (igual que negrita).
 function clearNoteHighlight() {
   restoreNoteEditorSelection();
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  if (!sel || sel.rangeCount === 0) return;
+  if (sel.isCollapsed) {
+    if (pendingNoteHighlightKey) {
+      cancelPendingNoteHighlight();
+      refreshNoteEditorState();
+    }
+    return;
+  }
   const range = sel.getRangeAt(0);
   NOTE_EDITOR_BODY.querySelectorAll('[data-highlight]').forEach((el) => {
     if (range.intersectsNode(el)) el.removeAttribute('data-highlight');
@@ -5838,10 +6111,12 @@ function applyNoteEditorReadMode(readOnly) {
   const modeBtn = document.getElementById('note-editor-read-mode-btn');
   modeBtn.textContent = readOnly ? 'Editar' : 'Modo lectura';
   modeBtn.setAttribute('aria-pressed', readOnly ? 'true' : 'false');
-  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
+  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
+  document.getElementById('note-format-btn').disabled = readOnly;
   if (readOnly) {
     document.getElementById('note-table-context-toolbar').classList.add('hidden');
     document.getElementById('btn-delete-note').classList.add('hidden');
+    closeNoteFormatPopover();
   }
   document.querySelector('#note-form button[type="submit"]').classList.toggle('hidden', readOnly);
   // El indicativo de modo vim (si esta activado) no tiene sentido en

@@ -387,23 +387,43 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    numerada, mas tabla e imagen), ahora arriba a modo de barra de estado
    fija, separada del contenido por un borde en vez de ir pegada al
    campo. */
-/* Reestructurada en 3 filas explicitas (ronda de retoques): formato en
-   linea / estructura de parrafo / el resto -- antes era una unica fila
-   con todos los botones seguidos y flex-wrap decidiendo el corte, que
-   se veia "raro" al no seguir ningun agrupamiento real. */
+/* Barra principal reducida a "Formato" + "Modo lectura" (ronda "barra
+   colapsada en boton Formato") -- una unica fila deslizable
+   (overflow-x, sin flex-wrap) en vez de crecer sin limite, "maximo 1-2
+   lineas" segun lo pedido. El resto de controles (antes 3 filas aqui
+   mismo) vive ahora en #note-format-popover, ver mas abajo. */
 .note-editor-toolbar {
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 0.35rem;
   padding: 0.5rem 1.2rem;
   border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
 }
+.note-editor-toolbar::-webkit-scrollbar { display: none; }
 .note-editor-toolbar-row {
   display: flex;
   align-items: center;
   gap: 0.35rem;
   flex-wrap: wrap;
+}
+/* Panel de formato (boton "Formato"): mismo lenguaje visual que
+   .table-insert-popover -- position:fixed colgado de <body>,
+   posicionado con positionFixedPopover (ver app.js). A proposito NO
+   esta en la lista generica de closeAllPopovers()/"click fuera cierra"
+   de settings.js: tiene que seguir abierto mientras se selecciona
+   texto dentro de #note-body (que tambien cuenta como "fuera" de este
+   popover para ese mecanismo generico) -- tiene su propio listener de
+   cierre dedicado en app.js. */
+.note-format-popover {
+  position: fixed; z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.5rem; width: 320px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  display: flex; flex-direction: column; gap: 0.35rem;
 }
 .note-editor-btn {
   padding: 0.3rem 0.6rem;
@@ -416,9 +436,6 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    document.queryCommandState() en cada cambio de seleccion. */
 .note-editor-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .note-editor-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-/* Empuja los botones de la derecha (Vim, Modo lectura) al extremo de la
-   barra de estado, separados del resto de botones de formato. */
-.note-editor-toolbar-spacer { flex: 1; }
 /* Indicativo de modo Insertar/Normal/Visual del modo vim (opt-in) --
    mismo color siempre, solo cambia el texto (INSERTAR/NORMAL/VISUAL):
    asi el ojo no tiene que aprender un segundo codigo de colores aparte
@@ -633,11 +650,11 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
-.note-editor-body [data-highlight="yellow"] { background: #fdf3c7; color: #7a5c00; }
-.note-editor-body [data-highlight="green"]  { background: #d9f2df; color: #1f6b3a; }
-.note-editor-body [data-highlight="blue"]   { background: #dbe9fb; color: #1a4f8a; }
-.note-editor-body [data-highlight="pink"]   { background: #fbdfe8; color: #8a1f4f; }
-.note-editor-body [data-highlight="orange"] { background: #fce3cc; color: #8a4a10; }
+.note-editor-body [data-highlight="yellow"] { background: #f0d375; color: #5c4300; }
+.note-editor-body [data-highlight="green"]  { background: #98d9a8; color: #14512a; }
+.note-editor-body [data-highlight="blue"]   { background: #9ec8ef; color: #123e70; }
+.note-editor-body [data-highlight="pink"]   { background: #eea8c9; color: #6b1240; }
+.note-editor-body [data-highlight="orange"] { background: #eeae74; color: #6b3400; }
 
 /* Bloques de codigo: fuente monoespaciada, SIN colorear por lenguaje
    (ver la nota de app.js/notes.js sobre por que). "data-lang" (si se
@@ -758,11 +775,11 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 /* Mismos 5 colores de fondo que la paleta real del editor (ver
    [data-highlight] mas arriba) -- para que la pastilla del popover se
    vea igual que el resultado real al aplicarla. */
-.highlight-swatch[data-highlight="yellow"] { background: #fdf3c7; }
-.highlight-swatch[data-highlight="green"]  { background: #d9f2df; }
-.highlight-swatch[data-highlight="blue"]   { background: #dbe9fb; }
-.highlight-swatch[data-highlight="pink"]   { background: #fbdfe8; }
-.highlight-swatch[data-highlight="orange"] { background: #fce3cc; }
+.highlight-swatch[data-highlight="yellow"] { background: #f0d375; }
+.highlight-swatch[data-highlight="green"]  { background: #98d9a8; }
+.highlight-swatch[data-highlight="blue"]   { background: #9ec8ef; }
+.highlight-swatch[data-highlight="pink"]   { background: #eea8c9; }
+.highlight-swatch[data-highlight="orange"] { background: #eeae74; }
 .highlight-swatch-clear {
   width: auto; height: auto; border-radius: var(--radius);
   padding: 0.3rem 0.5rem; font-size: 0.75rem;

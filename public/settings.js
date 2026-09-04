@@ -2070,6 +2070,19 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Panel de formato del editor de notas (#note-format-popover, boton
+  // "Formato") -- no esta en la lista generica de popovers de mas
+  // arriba (openPopover) a proposito, ver el comentario de
+  // #note-format-btn en app.js. Se comprueba antes que la vista del
+  // editor entero, para que Esc cierre primero el panel y solo en un
+  // segundo Esc cierre la nota. Reutiliza el propio click del boton
+  // (que ya sabe abrir/cerrar) en vez de duplicar esa logica aqui.
+  const noteFormatPopoverEl = document.getElementById('note-format-popover');
+  if (noteFormatPopoverEl && !noteFormatPopoverEl.classList.contains('hidden')) {
+    document.getElementById('note-format-btn').click();
+    return;
+  }
+
   const noteEditorView = document.getElementById('note-editor-view');
   if (noteEditorView && !noteEditorView.classList.contains('hidden')) {
     closeNoteEditorView();
