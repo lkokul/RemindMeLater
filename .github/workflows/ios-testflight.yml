@@ -41,28 +41,25 @@ jobs:
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # CODE_SIGN_IDENTITY="Apple Distribution" es imprescindible: la
-          # plantilla de Capacitor deja "iPhone Developer" fijado a nivel
-          # de proyecto (ver project.pbxproj), asi que sin este override
-          # Xcode pide un perfil de DESARROLLO al archivar -- y Apple se
-          # niega a crear uno si el equipo no tiene ningun dispositivo
+          # Se archiva SIN FIRMAR a proposito, y la firma se hace entera
+          # en el paso de exportar. Motivo: la firma automatica de Xcode,
+          # al archivar, siempre pide un perfil de DESARROLLO -- y Apple
+          # se niega a crear uno si el equipo no tiene ningun dispositivo
           # registrado ("Your team has no devices..."), que es justo el
-          # caso de un pipeline sin Mac ni iPhone conectado. Con la
-          # identidad de distribucion pide un perfil de App Store, que si
-          # se crea sin dispositivos.
+          # caso de un pipeline sin Mac ni iPhone conectado. Imponerle la
+          # identidad de distribucion tampoco vale: con estilo automatico
+          # Xcode la rechaza ("conflicting provisioning settings"). En
+          # cambio el perfil de App Store que pide -exportArchive SI se
+          # crea sin dispositivos, asi que ahi es donde se firma.
           xcodebuild archive \
             -project ios/App/App.xcodeproj \
             -scheme App \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/App.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8 \
-            -authenticationKeyID "$APPSTORE_KEY_ID" \
-            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
 
       - name: Generar ExportOptions.plist
