@@ -4436,14 +4436,77 @@ document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').for
 const noteFormatPopover = document.getElementById('note-format-popover');
 const noteFormatBtn = document.getElementById('note-format-btn');
 
+// Posicion vertical (viewport) del cursor real dentro de #note-body --
+// null si no hay seleccion util (fuera del editor, o un rango colapsado
+// sin rects propios, p. ej. una linea vacia) para poder caer a un
+// respaldo mas simple en ese caso.
+function getNoteCaretViewportTop() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const liveRange = sel.getRangeAt(0);
+  if (!NOTE_EDITOR_BODY.contains(liveRange.startContainer)) return null;
+  const range = liveRange.cloneRange();
+  range.collapse(true);
+  let rect = range.getClientRects()[0];
+  if (!rect || (rect.top === 0 && rect.bottom === 0)) {
+    rect = range.getBoundingClientRect();
+  }
+  if (!rect || (rect.top === 0 && rect.bottom === 0 && rect.height === 0)) {
+    // Rango colapsado sin rects propios (linea vacia, justo antes de un
+    // <br> suelto...) -- usar el propio elemento de la linea como
+    // referencia de respaldo.
+    let node = liveRange.startContainer;
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    const line = node ? getNoteLineElement(node) : null;
+    rect = line ? line.getBoundingClientRect() : null;
+  }
+  return rect && !(rect.top === 0 && rect.bottom === 0) ? rect.top : null;
+}
+
+// Cambiar entre .hidden encoge/agranda #note-body al instante (flex
+// column, ver arriba) -- con el editor todavia enfocado justo cuando su
+// caja cambia de tamano, el navegador "revela" el elemento enfocado por
+// su cuenta, y ademas la caja en si pasa a tener otra altura, asi que
+// mantener el mismo scrollTop numerico de antes (primer intento, ya
+// descartado) NO garantiza que el cursor se quede en el mismo sitio en
+// pantalla -- reportado por Koku como "acorta la vista y baja el
+// principio, mueve todo hacia abajo". En vez de eso, se mide DONDE esta
+// el cursor en la pantalla antes de tocar nada, y despues del cambio de
+// layout (la propia lectura del rect ya fuerza un reflow real) se
+// calcula cuanto se desplazo y se compensa ese delta exacto sobre
+// #note-body.scrollTop -- funciona sin importar la causa exacta del
+// desplazamiento (encogido de la caja, "revelar enfocado" nativo...),
+// porque no depende de anticiparla, solo de comparar "donde estaba" vs
+// "donde esta" el cursor. Se reafirma una vez mas en el siguiente frame
+// por si el navegador revierte el valor al pintar de forma asincrona.
+function restoreNoteScrollAfter(fn) {
+  const caretTopBefore = getNoteCaretViewportTop();
+  const noteScrollBefore = NOTE_EDITOR_BODY.scrollTop; // respaldo si no hay caret valido
+  fn();
+  function reapply() {
+    const caretTopAfter = getNoteCaretViewportTop();
+    if (caretTopBefore != null && caretTopAfter != null) {
+      NOTE_EDITOR_BODY.scrollTop += (caretTopAfter - caretTopBefore);
+    } else {
+      NOTE_EDITOR_BODY.scrollTop = noteScrollBefore;
+    }
+  }
+  reapply();
+  requestAnimationFrame(reapply);
+}
+
 function closeNoteFormatPopover() {
-  noteFormatPopover.classList.add('hidden');
-  noteFormatBtn.setAttribute('aria-expanded', 'false');
+  restoreNoteScrollAfter(() => {
+    noteFormatPopover.classList.add('hidden');
+    noteFormatBtn.setAttribute('aria-expanded', 'false');
+  });
 }
 
 function openNoteFormatPopover() {
-  noteFormatPopover.classList.remove('hidden');
-  noteFormatBtn.setAttribute('aria-expanded', 'true');
+  restoreNoteScrollAfter(() => {
+    noteFormatPopover.classList.remove('hidden');
+    noteFormatBtn.setAttribute('aria-expanded', 'true');
+  });
 }
 
 noteFormatBtn.addEventListener('mousedown', (e) => e.preventDefault());
@@ -4931,8 +4994,16 @@ function wrapNoteHighlightRange(range, key) {
   const endIdx = allLines.indexOf(endLine);
   const spans = [];
 
+  // Mismo caso que la rama de una sola linea de arriba (Ctrl+A real
+  // sobre una nota de 2+ parrafos da limites a nivel del PADRE, no
+  // dentro del contenido de la primera/ultima linea) -- sin normalizar
+  // aqui tambien, extractContents() podia extraer el <div> de la
+  // primera o ultima linea ENTERO en vez de solo su texto, con el mismo
+  // bug real de fondo (resaltado que "desaparece" con un Intro
+  // posterior dentro de el).
+  const normStart = normalizeNoteBoundaryIntoLine(range.startContainer, range.startOffset, startLine, false);
   const startRange = document.createRange();
-  startRange.setStart(range.startContainer, range.startOffset);
+  startRange.setStart(normStart.container, normStart.offset);
   startRange.setEndAfter(startLine.lastChild || startLine);
   const startSpan = document.createElement('span');
   startSpan.setAttribute('data-highlight', key);
@@ -4955,9 +5026,10 @@ function wrapNoteHighlightRange(range, key) {
     spans.push(span);
   }
 
+  const normEnd = normalizeNoteBoundaryIntoLine(range.endContainer, range.endOffset, endLine, true);
   const endRange = document.createRange();
   endRange.setStartBefore(endLine.firstChild || endLine);
-  endRange.setEnd(range.endContainer, range.endOffset);
+  endRange.setEnd(normEnd.container, normEnd.offset);
   const endSpan = document.createElement('span');
   endSpan.setAttribute('data-highlight', key);
   const endFragment = endRange.extractContents();
@@ -4980,11 +5052,6 @@ function wrapNoteHighlightRange(range, key) {
 // negrita sin seleccion.
 let pendingNoteHighlightKey = null;
 let pendingNoteHighlightSpan = null;
-// Ver el keydown de Intro mas abajo: cuando NO es null, el proximo
-// evento 'input' (disparado de forma sincrona por el propio Intro al
-// crear el parrafo) debe quitar data-highlight="<esta clave>" del span
-// donde haya quedado el cursor -- limpiado a null en cuanto se usa.
-let pendingHighlightSplitKey = null;
 
 function cancelPendingNoteHighlight() {
   // Si nunca se llego a escribir nada real (el span solo tiene el
@@ -6120,6 +6187,89 @@ function handleVimVisualKeydown(e) {
   refreshNoteEditorState();
 }
 
+// Partir el parrafo actual "a mano" (Range API, sin execCommand) cuando
+// la linea donde esta el cursor contiene algun resaltado -- sustituye
+// por completo al Intro NATIVO solo en ese caso. Motivo: el
+// insertParagraph nativo del navegador no garantiza conservar de forma
+// fiable un <span data-highlight> arbitrario al partir un bloque en dos
+// (mismo tipo de comportamiento poco fiable en limites de elementos en
+// linea ya documentado y evitado en el resaltado -- ver
+// insertNodeOutsideNoteHighlight/wrapNoteHighlightRange, que tampoco
+// usan execCommand por el mismo motivo) -- tras varias rondas
+// intentando parchear el caso mas comun (seleccionar una palabra suelta
+// y resaltarla, sin Ctrl+A) seguia perdiendo el color al pulsar Intro.
+// Devuelve true si ha actuado (y ya ha modificado el DOM+seleccion), en
+// cuyo caso quien llama debe hacer preventDefault() y no dejar pasar
+// nada mas; false si no aplica aqui (linea sin ningun resaltado, dentro
+// de una lista/bloque de codigo/tabla, o selección no colapsada) y el
+// Intro debe seguir su camino normal, sin ningun cambio de
+// comportamiento en esos casos.
+function handleNoteHighlightAwareEnter() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return false;
+
+  const liveRange = sel.getRangeAt(0);
+  if (!NOTE_EDITOR_BODY.contains(liveRange.startContainer)) return false;
+
+  // El resaltado "en vivo" (pendiente, ver beginPendingNoteHighlight) no
+  // debe continuar en el parrafo nuevo -- igual que antes, solo que
+  // ahora el propio cancelPendingNoteHighlight() ya deja el DOM listo
+  // (quita el span semilla vacio si no se llego a escribir nada real)
+  // antes de calcular donde partir.
+  if (pendingNoteHighlightKey) cancelPendingNoteHighlight();
+
+  // Releer la seleccion YA DESPUES de cancelar el resaltado pendiente
+  // (que puede haber quitado un nodo del DOM) -- nunca fiarse de un
+  // Range capturado antes de una mutacion.
+  const sel2 = window.getSelection();
+  if (!sel2 || sel2.rangeCount === 0) return false;
+  const range2 = sel2.getRangeAt(0);
+  const caretContainer = range2.startContainer;
+  const caretOffset = range2.startOffset;
+  if (!NOTE_EDITOR_BODY.contains(caretContainer)) return false;
+
+  ensureNoteFirstLineWrapped();
+  const line = getNoteLineElement(caretContainer);
+  if (!line || !NOTE_LINE_TAGS.has(line.tagName) || line.tagName === 'LI') return false;
+  if (!line.querySelector('[data-highlight]')) return false;
+
+  const tailRange = document.createRange();
+  tailRange.setStart(caretContainer, caretOffset);
+  tailRange.setEndAfter(line.lastChild || line);
+  const tailFragment = tailRange.extractContents();
+
+  const newLine = line.cloneNode(false); // mismo tag + mismos data-indent/data-quote/data-style que la linea original
+  newLine.appendChild(tailFragment);
+
+  // extractContents() clona (vacio) cualquier [data-highlight] cuyo
+  // limite del Range cae justo en su borde (cursor exactamente al
+  // principio o al final de lo resaltado) -- ese clon vacio se queda
+  // sin texto pero SI con el padding/radius del CSS de resaltado,
+  // pintandose como una cajita de color de la nada. Se quita en los dos
+  // lados, mismo criterio ya usado en insertNodeOutsideNoteHighlight
+  // para el mismo tipo de residuo.
+  [line, newLine].forEach((el) => {
+    el.querySelectorAll('[data-highlight]').forEach((span) => {
+      if (!span.textContent) span.remove();
+    });
+  });
+
+  if (!newLine.hasChildNodes() || !newLine.textContent) newLine.appendChild(document.createElement('br'));
+  if (!line.hasChildNodes() || !line.textContent) line.appendChild(document.createElement('br'));
+
+  line.parentNode.insertBefore(newLine, line.nextSibling);
+
+  const newRange = document.createRange();
+  newRange.setStart(newLine, 0);
+  newRange.collapse(true);
+  sel2.removeAllRanges();
+  sel2.addRange(newRange);
+
+  NOTE_EDITOR_BODY.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+}
+
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
   // El panel "Formato" (Aa/negrita/listas/etc.) se queda abierto a
   // proposito mientras se selecciona texto dentro de #note-body (ver el
@@ -6133,27 +6283,6 @@ NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
   if (!noteFormatPopover.classList.contains('hidden') && !e.ctrlKey && !e.metaKey && !e.altKey
     && (e.key.length === 1 || e.key === 'Enter' || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Tab')) {
     closeNoteFormatPopover();
-  }
-  // Con el resaltado "en vivo" activo (modo pendiente, ver
-  // beginPendingNoteHighlight), pulsar Intro deja que el navegador cree
-  // el parrafo nuevo como siempre -- pero por defecto arrastra consigo
-  // el <span data-highlight> que se estaba escribiendo, resaltando sin
-  // querer TODO el parrafo nuevo entero (bug real reportado: "se me
-  // llena todo el parrafo"). Se deja pasar el Intro normal y se marca
-  // pendingHighlightSplitKey para que el listener de 'input' (mas abajo,
-  // que el propio Intro dispara de forma SINCRONA como parte de su
-  // propia mutacion del DOM) quite el resaltado que se colo en el
-  // parrafo nuevo -- el parrafo de ANTES del Intro conserva su
-  // resaltado intacto, solo el nuevo empieza limpio, igual que Koku
-  // pidio ("solo a partir de cuando le doy, no todo el parrafo"). Se usa
-  // el evento 'input' en vez de un setTimeout(0): un timer es una carrera
-  // de verdad contra la siguiente pulsacion si se escribe muy rapido
-  // (confirmado con Playwright escribiendo sin pausas -- se quedaba a
-  // veces sin dar tiempo), mientras que 'input' esta garantizado a
-  // disparar antes de que el navegador pueda procesar ninguna tecla mas.
-  if (e.key === 'Enter' && !e.shiftKey && pendingNoteHighlightKey) {
-    pendingHighlightSplitKey = pendingNoteHighlightKey;
-    cancelPendingNoteHighlight();
   }
   if (isVimModeEnabled()) {
     if (noteEditorVimSubMode === 'normal') {
@@ -6174,6 +6303,12 @@ NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
       e.preventDefault();
       e.stopPropagation();
       setVimSubMode('normal');
+      return;
+    }
+  }
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    if (handleNoteHighlightAwareEnter()) {
+      e.preventDefault();
       return;
     }
   }
@@ -6663,23 +6798,6 @@ document.getElementById('btn-close-note-editor').addEventListener('click', close
 // propio cuerpo dentro de captureActiveOpenNoteFromDom), no solo al
 // cambiar de nota o guardar.
 NOTE_EDITOR_BODY.addEventListener('input', () => {
-  // Ver el keydown de Intro mas arriba: si el navegador acaba de crear
-  // un parrafo nuevo arrastrando un resaltado "en vivo" (bug real
-  // reportado por Koku, "se me llena todo el parrafo"), este es el
-  // primer punto en el que el DOM ya tiene ese parrafo nuevo creado --
-  // se quita el resaltado que se colo ahi antes de seguir con el resto
-  // del listener de siempre.
-  if (pendingHighlightSplitKey) {
-    const key = pendingHighlightSplitKey;
-    pendingHighlightSplitKey = null;
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-      let node = sel.getRangeAt(0).startContainer;
-      if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-      const span = node && NOTE_EDITOR_BODY.contains(node) ? node.closest(`[data-highlight="${key}"]`) : null;
-      if (span) span.removeAttribute('data-highlight');
-    }
-  }
   captureActiveOpenNoteFromDom();
   renderNoteSectionsPanel();
   scheduleMobileNoteAutosave();
