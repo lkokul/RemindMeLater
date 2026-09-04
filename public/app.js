@@ -4530,7 +4530,19 @@ noteFormatBtn.addEventListener('click', () => {
 
 document.addEventListener('click', (e) => {
   if (noteFormatPopover.classList.contains('hidden')) return;
-  if (e.target.closest('.note-format-popover, #note-format-btn, #note-body, .paragraph-style-popover, .highlight-color-popover, .table-insert-popover')) return;
+  if (e.target.closest('.note-format-popover, #note-format-btn, .paragraph-style-popover, .highlight-color-popover, .table-insert-popover')) return;
+  // Dentro de #note-body distinguimos: si el clic ha dejado una
+  // seleccion de texto real (arrastrar para elegir que resaltar), el
+  // panel se queda abierto para poder aplicarle un formato. Un simple
+  // toque para colocar el cursor (seleccion colapsada, sin arrastre) ya
+  // no cuenta como "dentro" -- cierra el panel igual que cualquier otro
+  // sitio, para poder seguir escribiendo (bug real reportado: tocar la
+  // pantalla para escribir no cerraba nada, solo pulsar una tecla si lo
+  // hacia).
+  if (e.target.closest('#note-body')) {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+  }
   closeNoteFormatPopover();
 });
 
