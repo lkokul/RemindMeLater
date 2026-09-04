@@ -4942,6 +4942,11 @@ function wrapNoteHighlightRange(range, key) {
 // negrita sin seleccion.
 let pendingNoteHighlightKey = null;
 let pendingNoteHighlightSpan = null;
+// Ver el keydown de Intro mas abajo: cuando NO es null, el proximo
+// evento 'input' (disparado de forma sincrona por el propio Intro al
+// crear el parrafo) debe quitar data-highlight="<esta clave>" del span
+// donde haya quedado el cursor -- limpiado a null en cuanto se usa.
+let pendingHighlightSplitKey = null;
 
 function cancelPendingNoteHighlight() {
   // Si nunca se llego a escribir nada real (el span solo tiene el
@@ -6063,6 +6068,27 @@ NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
     && (e.key.length === 1 || e.key === 'Enter' || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Tab')) {
     closeNoteFormatPopover();
   }
+  // Con el resaltado "en vivo" activo (modo pendiente, ver
+  // beginPendingNoteHighlight), pulsar Intro deja que el navegador cree
+  // el parrafo nuevo como siempre -- pero por defecto arrastra consigo
+  // el <span data-highlight> que se estaba escribiendo, resaltando sin
+  // querer TODO el parrafo nuevo entero (bug real reportado: "se me
+  // llena todo el parrafo"). Se deja pasar el Intro normal y se marca
+  // pendingHighlightSplitKey para que el listener de 'input' (mas abajo,
+  // que el propio Intro dispara de forma SINCRONA como parte de su
+  // propia mutacion del DOM) quite el resaltado que se colo en el
+  // parrafo nuevo -- el parrafo de ANTES del Intro conserva su
+  // resaltado intacto, solo el nuevo empieza limpio, igual que Koku
+  // pidio ("solo a partir de cuando le doy, no todo el parrafo"). Se usa
+  // el evento 'input' en vez de un setTimeout(0): un timer es una carrera
+  // de verdad contra la siguiente pulsacion si se escribe muy rapido
+  // (confirmado con Playwright escribiendo sin pausas -- se quedaba a
+  // veces sin dar tiempo), mientras que 'input' esta garantizado a
+  // disparar antes de que el navegador pueda procesar ninguna tecla mas.
+  if (e.key === 'Enter' && !e.shiftKey && pendingNoteHighlightKey) {
+    pendingHighlightSplitKey = pendingNoteHighlightKey;
+    cancelPendingNoteHighlight();
+  }
   if (isVimModeEnabled()) {
     if (noteEditorVimSubMode === 'normal') {
       handleVimNormalKeydown(e);
@@ -6571,6 +6597,23 @@ document.getElementById('btn-close-note-editor').addEventListener('click', close
 // propio cuerpo dentro de captureActiveOpenNoteFromDom), no solo al
 // cambiar de nota o guardar.
 NOTE_EDITOR_BODY.addEventListener('input', () => {
+  // Ver el keydown de Intro mas arriba: si el navegador acaba de crear
+  // un parrafo nuevo arrastrando un resaltado "en vivo" (bug real
+  // reportado por Koku, "se me llena todo el parrafo"), este es el
+  // primer punto en el que el DOM ya tiene ese parrafo nuevo creado --
+  // se quita el resaltado que se colo ahi antes de seguir con el resto
+  // del listener de siempre.
+  if (pendingHighlightSplitKey) {
+    const key = pendingHighlightSplitKey;
+    pendingHighlightSplitKey = null;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      let node = sel.getRangeAt(0).startContainer;
+      if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+      const span = node && NOTE_EDITOR_BODY.contains(node) ? node.closest(`[data-highlight="${key}"]`) : null;
+      if (span) span.removeAttribute('data-highlight');
+    }
+  }
   captureActiveOpenNoteFromDom();
   renderNoteSectionsPanel();
   scheduleMobileNoteAutosave();
