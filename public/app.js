@@ -5048,10 +5048,23 @@ function clearNoteHighlight() {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return;
   if (sel.isCollapsed) {
-    if (pendingNoteHighlightKey) {
-      cancelPendingNoteHighlight();
-      refreshNoteEditorState();
+    // Con el cursor dentro de un resaltado ya escrito (texto real
+    // tecleado con el modo pendiente activo, o solo el caracter semilla
+    // si todavia no se ha escrito nada) hay que quitarlo del span
+    // entero -- cancelPendingNoteHighlight() por si sola NO bastaba
+    // aqui: solo borra el span si esta vacio, nunca quita data-highlight
+    // de texto ya escrito, asi que "Ninguno" no hacia nada visible
+    // despues de escribir con un color activo (bug real reportado).
+    let node = sel.getRangeAt(0).startContainer;
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    const span = node && NOTE_EDITOR_BODY.contains(node) ? node.closest('[data-highlight]') : null;
+    if (span) {
+      if (span.textContent === '​') span.remove();
+      else span.removeAttribute('data-highlight');
     }
+    pendingNoteHighlightKey = null;
+    pendingNoteHighlightSpan = null;
+    refreshNoteEditorState();
     return;
   }
   const range = sel.getRangeAt(0);
