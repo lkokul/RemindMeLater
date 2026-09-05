@@ -701,6 +701,7 @@
       <button type="button" class="gym-tab-btn active" data-gym-tab="sessions">Entrenar</button>
       <button type="button" class="gym-tab-btn" data-gym-tab="plan">Plan</button>
       <button type="button" class="gym-tab-btn" data-gym-tab="progress">Progreso</button>
+      <button type="button" class="gym-tab-btn" data-gym-tab="achievements">Logros</button>
     </div>
     <div class="gym-tab-content">
       <!-- Entrenar (Fase 3 del rediseno): el boton grande arranca un
@@ -789,6 +790,15 @@
           <button type="button" class="view-mode-btn" data-gym-metric="volume">Volumen total</button>
         </div>
         <div id="gym-progress-chart" class="gym-progress-chart"></div>
+      </div>
+
+      <!-- Logros (Fase 7): gamificacion calculada AL VUELO desde el
+           historial (nada guardado en la base de datos -- editar o
+           borrar sesiones recalcula los logros de forma coherente).
+           Solo se persiste, por dispositivo, que celebraciones ya se
+           ensenaron (localStorage.gymAchievementsSeen). -->
+      <div id="gym-tab-achievements" class="gym-tab-panel hidden">
+        <div id="gym-achievements-list" class="gym-achievements-list"></div>
       </div>
     </div>
   </div>
@@ -902,6 +912,19 @@
       <span>⏱ Descanso: <b id="gym-live-rest-remaining">0:00</b></span>
       <button type="button" id="btn-gym-live-rest-plus" class="secondary-btn">+30s</button>
       <button type="button" id="btn-gym-live-rest-close" class="icon-btn" aria-label="Saltar descanso">✕</button>
+    </div>
+  </div>
+
+  <!-- Celebracion de logros nuevos (Fase 7): se abre tras guardar una
+       sesion/actividad si algun logro ha subido de nivel. -->
+  <div id="gym-achievement-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-live-summary-card">
+      <h2>🏆 ¡Logro conseguido!</h2>
+      <div id="gym-achievement-modal-list" class="gym-achievements-list"></div>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-achievement" class="primary-btn">¡Genial!</button>
+      </div>
     </div>
   </div>
 

@@ -1901,7 +1901,13 @@ document.addEventListener('keydown', (e) => {
       return;
     }
   }
-  // El resumen de fin de entreno se cierra con Esc como cualquier modal.
+  // El resumen de fin de entreno y la celebracion de logros se cierran
+  // con Esc como cualquier modal (la celebracion primero: se abre encima).
+  const gymAchievement = document.getElementById('gym-achievement-modal');
+  if (gymAchievement && !gymAchievement.classList.contains('hidden')) {
+    gymAchievement.classList.add('hidden');
+    return;
+  }
   const gymSummary = document.getElementById('gym-live-summary-modal');
   if (gymSummary && !gymSummary.classList.contains('hidden')) {
     gymSummary.classList.add('hidden');

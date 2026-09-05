@@ -7319,11 +7319,12 @@ function switchGymTab(tabName) {
   document.querySelectorAll('.gym-tab-panel').forEach((panel) => {
     panel.classList.toggle('hidden', panel.id !== `gym-tab-${tabName}`);
   });
-  // Las secciones de Progreso (heatmap/PRs/volumen) se calculan al
-  // entrar en la pestana, no en cada apertura del Gimnasio -- es una
-  // funcion declarada mas abajo, sin problema de orden porque esto solo
-  // corre dentro de un handler de click (ver la nota de TDZ en CLAUDE.md).
+  // Las secciones de Progreso/Logros se calculan al entrar en su
+  // pestana, no en cada apertura del Gimnasio -- son funciones
+  // declaradas mas abajo, sin problema de orden porque esto solo corre
+  // dentro de un handler de click (ver la nota de TDZ en CLAUDE.md).
   if (tabName === 'progress') renderGymProgressSections();
+  if (tabName === 'achievements') renderGymAchievements();
 }
 document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchGymTab(btn.dataset.gymTab));
@@ -8560,6 +8561,7 @@ document.getElementById('gym-activity-form').addEventListener('submit', async (e
   closeGymActivityModal();
   await loadGymSessions();
   renderGymSessionsList();
+  checkGymAchievements();
 });
 
 document.getElementById('btn-delete-gym-activity').addEventListener('click', async () => {
@@ -8938,6 +8940,9 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
   await loadGymSessions();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+  // La celebracion de logros (si algo subio de nivel) queda ABIERTA
+  // detras del resumen: al cerrar el resumen aparece ella.
+  checkGymAchievements();
 });
 document.getElementById('btn-close-gym-summary').addEventListener('click', () => {
   document.getElementById('gym-live-summary-modal').classList.add('hidden');
@@ -9363,6 +9368,7 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
   await loadGymSessions();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+  checkGymAchievements();
 });
 
 document.getElementById('btn-delete-gym-session').addEventListener('click', async () => {
@@ -9420,6 +9426,22 @@ async function renderGymProgressSections() {
   renderGymWeeklyVolume();
 }
 
+// La racha cuenta semanas SEGUIDAS cumpliendo el objetivo, empezando
+// por la semana pasada hacia atras; la semana en curso suma solo si ya
+// ha llegado al objetivo (que aun no lo haya hecho no rompe la racha).
+// Compartida entre la tarjeta de Consistencia y los logros.
+function gymComputeWeeklyStreak(sessionsByWeek, goal) {
+  const now = new Date();
+  let streak = (sessionsByWeek.get(gymWeekStartKey(now)) || 0) >= goal ? 1 : 0;
+  const probe = new Date(now);
+  probe.setDate(probe.getDate() - 7);
+  while ((sessionsByWeek.get(gymWeekStartKey(probe)) || 0) >= goal) {
+    streak += 1;
+    probe.setDate(probe.getDate() - 7);
+  }
+  return streak;
+}
+
 // Heatmap de consistencia: 26 semanas x 7 dias, intensidad = sesiones de
 // ese dia. UN solo tono (el morado del gym) de claro a oscuro -- un mapa
 // de magnitud siempre es un unico matiz escalonado, nunca varios colores.
@@ -9440,16 +9462,7 @@ function renderGymConsistency(summary) {
   const now = new Date();
   const thisWeekKey = gymWeekStartKey(now);
   const thisWeekCount = sessionsByWeek.get(thisWeekKey) || 0;
-  // La racha cuenta semanas SEGUIDAS cumpliendo el objetivo, empezando
-  // por la semana pasada hacia atras; la semana en curso suma solo si ya
-  // ha llegado al objetivo (que aun no lo haya hecho no rompe la racha).
-  let streak = thisWeekCount >= goal ? 1 : 0;
-  const probe = new Date(now);
-  probe.setDate(probe.getDate() - 7);
-  while ((sessionsByWeek.get(gymWeekStartKey(probe)) || 0) >= goal) {
-    streak += 1;
-    probe.setDate(probe.getDate() - 7);
-  }
+  const streak = gymComputeWeeklyStreak(sessionsByWeek, goal);
   const monthPrefix = toDateKey(now).slice(0, 7);
   const monthCount = summary.filter((s) => s.date.startsWith(monthPrefix)).length;
 
@@ -9767,6 +9780,117 @@ function renderGymWeeklyVolume() {
   `;
   attachFinanzasChartTooltips(container);
 }
+
+// --- Logros (Fase 7 del rediseno) -------------------------------------
+// Gamificacion sin estado en la base de datos: cada logro tiene NIVELES
+// (umbral creciente) y se evalua al vuelo contra el historial real, asi
+// que editar/borrar sesiones recalcula todo de forma coherente. Lo unico
+// que se guarda (por dispositivo) es hasta que nivel se ha CELEBRADO ya
+// cada logro, para no repetir la fiesta (localStorage.gymAchievementsSeen).
+const GYM_ACHIEVEMENTS = [
+  { id: 'sessions', icon: '🏋️', name: 'Constancia', desc: 'Entrenamientos de pesas totales', levels: [1, 10, 25, 50, 100, 250], value: (s) => s.gymCount },
+  { id: 'streak', icon: '🔥', name: 'Racha', desc: 'Semanas seguidas cumpliendo tu objetivo', levels: [1, 4, 8, 16, 26, 52], value: (s) => s.streak },
+  { id: 'volume', icon: '🏆', name: 'Toneladas', desc: 'Volumen total acumulado (kg)', levels: [10000, 50000, 100000, 250000, 500000, 1000000], value: (s) => s.totalVolumeKg },
+  { id: 'activities', icon: '⚡', name: 'Todoterreno', desc: 'Actividades fuera de las pesas', levels: [1, 10, 25, 50, 100], value: (s) => s.activityCount },
+  { id: 'exercises', icon: '📚', name: 'Repertorio', desc: 'Ejercicios distintos con series registradas', levels: [3, 10, 20, 40, 80], value: (s) => s.distinctExercises },
+  { id: 'months', icon: '📅', name: 'Meses activos', desc: 'Meses con al menos una sesión', levels: [1, 3, 6, 12, 24], value: (s) => s.activeMonths },
+];
+
+// Junta en un objeto todas las cifras que consumen los logros.
+function gymComputeAchievementStats(summary) {
+  const goal = getGymWeeklyGoal();
+  const sessionsByWeek = new Map();
+  const months = new Set();
+  let gymCount = 0, activityCount = 0, totalVolumeKg = 0;
+  for (const s of summary) {
+    const week = gymWeekStartKey(new Date(`${s.date}T00:00:00`));
+    sessionsByWeek.set(week, (sessionsByWeek.get(week) || 0) + 1);
+    months.add(s.date.slice(0, 7));
+    if (s.type === 'activity') activityCount += 1; else gymCount += 1;
+    totalVolumeKg += s.volumeKg || 0;
+  }
+  const distinct = new Set();
+  for (const session of state.gymSessions) {
+    for (const set of session.sets) distinct.add(set.exerciseId);
+  }
+  return {
+    gymCount,
+    activityCount,
+    totalVolumeKg,
+    streak: gymComputeWeeklyStreak(sessionsByWeek, goal),
+    distinctExercises: distinct.size,
+    activeMonths: months.size,
+  };
+}
+
+// Nivel alcanzado (0 = ninguno) y HTML de la tarjeta de un logro.
+function gymAchievementLevel(achievement, value) {
+  let level = 0;
+  for (const threshold of achievement.levels) {
+    if (value >= threshold) level += 1; else break;
+  }
+  return level;
+}
+function gymAchievementCardHtml(achievement, value) {
+  const level = gymAchievementLevel(achievement, value);
+  const maxed = level >= achievement.levels.length;
+  const nextThreshold = maxed ? achievement.levels[achievement.levels.length - 1] : achievement.levels[level];
+  const prevThreshold = level > 0 ? achievement.levels[level - 1] : 0;
+  const progress = maxed ? 1 : Math.min(1, (value - prevThreshold) / (nextThreshold - prevThreshold));
+  const shownValue = Math.round(value * 10) / 10;
+  return `
+    <div class="gym-achievement-card ${level > 0 ? 'unlocked' : ''}">
+      <div class="gym-achievement-head">
+        <span class="gym-achievement-icon">${achievement.icon}</span>
+        <span class="gym-list-item-name">${escapeHtml(achievement.name)}
+          ${level > 0 ? `<span class="gym-block-active-badge">Nivel ${level}${maxed ? ' · MAX' : ''}</span>` : ''}
+        </span>
+      </div>
+      <span class="gym-list-item-muted">${escapeHtml(achievement.desc)}</span>
+      <div class="gym-achievement-bar"><div class="gym-achievement-bar-fill" style="width: ${Math.round(progress * 100)}%"></div></div>
+      <span class="gym-list-item-muted">${shownValue} / ${nextThreshold}${maxed ? ' (máximo alcanzado)' : ''}</span>
+    </div>
+  `;
+}
+
+async function renderGymAchievements() {
+  const summary = await api('/api/gym-sessions/summary');
+  const stats = gymComputeAchievementStats(summary);
+  document.getElementById('gym-achievements-list').innerHTML =
+    GYM_ACHIEVEMENTS.map((a) => gymAchievementCardHtml(a, a.value(stats))).join('');
+}
+
+// Tras guardar una sesion/actividad: si algun logro ha SUBIDO de nivel
+// respecto a lo ya celebrado, se ensena la celebracion una unica vez.
+function gymReadAchievementsSeen() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('gymAchievementsSeen'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+async function checkGymAchievements() {
+  const summary = await api('/api/gym-sessions/summary');
+  const stats = gymComputeAchievementStats(summary);
+  const seen = gymReadAchievementsSeen();
+  const leveledUp = [];
+  for (const achievement of GYM_ACHIEVEMENTS) {
+    const level = gymAchievementLevel(achievement, achievement.value(stats));
+    if (level > (seen[achievement.id] || 0)) {
+      leveledUp.push({ achievement, value: achievement.value(stats) });
+      seen[achievement.id] = level;
+    }
+  }
+  if (leveledUp.length === 0) return;
+  localStorage.setItem('gymAchievementsSeen', JSON.stringify(seen));
+  document.getElementById('gym-achievement-modal-list').innerHTML =
+    leveledUp.map(({ achievement, value }) => gymAchievementCardHtml(achievement, value)).join('');
+  document.getElementById('gym-achievement-modal').classList.remove('hidden');
+}
+document.getElementById('btn-close-gym-achievement').addEventListener('click', () => {
+  document.getElementById('gym-achievement-modal').classList.add('hidden');
+});
 
 // --- Progreso: grafica SVG a mano ---------------------------------------
 // No hay ninguna libreria de graficas en el proyecto (a proposito, ver
