@@ -1,6 +1,6 @@
 {
   "name": "remindmelater",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "private": true,
   "description": "Calendario, recordatorios, tareas y notas de escritorio (Electron + SQLite), sin servidor ni red",
   "main": "electron/main.js",
@@ -8,10 +8,7 @@
     "start": "electron .",
     "dev": "electron .",
     "electron": "electron .",
-    "dist": "electron-builder --win",
-    "cap:sync": "cap sync",
-    "cap:android": "cap open android",
-    "cap:ios": "cap open ios"
+    "dist": "electron-builder --win"
   },
   "engines": {
     "node": ">=22.5.0"
@@ -20,10 +17,6 @@
     "node-notifier": "^10.0.1"
   },
   "devDependencies": {
-    "@capacitor/android": "^8.5.1",
-    "@capacitor/cli": "^8.5.1",
-    "@capacitor/core": "^8.5.1",
-    "@capacitor/ios": "^8.5.1",
     "electron": "^37.0.0",
     "electron-builder": "^25.1.8"
   },

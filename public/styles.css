@@ -63,19 +63,6 @@ body.modal-open-lock {
    Reutiliza el mismo modal-open-lock que ya marca "hay un modal
    abierto" para ocultarla mientras tanto -- solo en movil, en
    escritorio .mobile-nav ya esta oculta siempre. */
-@media (max-width: 859px) {
-  body.modal-open-lock .mobile-nav { display: none; }
-  /* Excepcion: Configuracion (Fase 5) ya tiene su propio punto de
-     entrada FIJO en la barra inferior -- a diferencia del resto de
-     modales (que son ventanas puntuales sobre otra pantalla), aqui la
-     barra debe seguir visible para poder navegar a otra seccion sin
-     cerrar Configuracion antes. refreshModalScrollLock() marca esta
-     clase aparte, ademas de modal-open-lock (que se sigue aplicando
-     igual, bloqueando el scroll del fondo -- no hace daño aunque
-     Configuracion ya cubra toda la pantalla). Misma especificidad que
-     la regla de arriba, gana por ir despues en la hoja. */
-  body.settings-modal-open .mobile-nav { display: flex; }
-}
 
 body {
   margin: 0;
@@ -91,7 +78,7 @@ body {
    algun dia tiene mas secciones de las que caben) aparece esta barra
    fina en vez de la del sistema, con el color de acento del tema activo
    — asi que cambia sola si cambias de tema. */
-.modal-card, .settings-card-body, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover, .date-popover, .mobile-calendar-month-list, .mobile-calendar-year-grid, .mobile-hours-scroll, .mobile-day-listado-view {
+.modal-card, .settings-card-body, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover, .date-popover {
   scrollbar-width: thin;
   scrollbar-color: var(--accent) transparent;
 }
@@ -106,9 +93,6 @@ body {
 .mobile-calendar-month-list::-webkit-scrollbar,
 .mobile-calendar-year-grid::-webkit-scrollbar,
 .mobile-hours-scroll::-webkit-scrollbar,
-.mobile-day-listado-view::-webkit-scrollbar {
-  width: 8px;
-}
 .modal-card::-webkit-scrollbar-track,
 .settings-card-body::-webkit-scrollbar-track,
 .reminders-list::-webkit-scrollbar-track,
@@ -120,9 +104,6 @@ body {
 .mobile-calendar-month-list::-webkit-scrollbar-track,
 .mobile-calendar-year-grid::-webkit-scrollbar-track,
 .mobile-hours-scroll::-webkit-scrollbar-track,
-.mobile-day-listado-view::-webkit-scrollbar-track {
-  background: transparent;
-}
 .modal-card::-webkit-scrollbar-thumb,
 .settings-card-body::-webkit-scrollbar-thumb,
 .reminders-list::-webkit-scrollbar-thumb,
@@ -134,10 +115,6 @@ body {
 .mobile-calendar-month-list::-webkit-scrollbar-thumb,
 .mobile-calendar-year-grid::-webkit-scrollbar-thumb,
 .mobile-hours-scroll::-webkit-scrollbar-thumb,
-.mobile-day-listado-view::-webkit-scrollbar-thumb {
-  background: var(--accent);
-  border-radius: 4px;
-}
 
 button {
   font: inherit;
@@ -179,7 +156,7 @@ button {
 }
 :root[data-ui-style="directo"] button:active:not(:disabled) { transform: scale(0.97); }
 
-:root[data-ui-style="neon"] button:hover:not(:disabled):not(.mobile-nav-btn) {
+:root[data-ui-style="neon"] button:hover:not(:disabled) {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent);
 }
@@ -213,11 +190,8 @@ button {
    boton (el :hover pegado se soltaba), dejaba de haber conflicto y el
    inset se veia entero -- de ahi "cualquier accion hace que salga el
    resto". Arreglado excluyendo .mobile-nav-btn de esa regla generica
-   (":not(.mobile-nav-btn)" arriba), no solo añadiendo esta de aqui. */
+   ("" arriba), no solo añadiendo esta de aqui. */
 :root[data-ui-style="neon"] .mobile-nav-btn.active,
-:root[data-ui-style="neon"] .mobile-nav-btn:active {
-  box-shadow: inset 0 0 0 1px var(--accent), inset 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
-}
 /* .mobile-nav-btn tiene esquinas rectas (border-radius:0), pero el
    primero/ultimo boton de la fila queda pegado a una esquina REDONDEADA
    del contenedor (.mobile-nav, 18px) -- sin esto, el anillo inset de
@@ -228,8 +202,6 @@ button {
    su borde). Generica (no scoped a Neon) porque sin box-shadow encima
    (Directo/Cristal/Registro) no se nota nada -- el boton no tiene
    fondo ni borde propio visibles. */
-.mobile-nav-btn:first-child { border-top-left-radius: 17px; border-bottom-left-radius: 17px; }
-.mobile-nav-btn:last-child { border-top-right-radius: 17px; border-bottom-right-radius: 17px; }
 
 :root[data-ui-style="cristal"] button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--surface-2-text) 12%, var(--surface-2));
@@ -947,48 +919,9 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    refreshMobileTab en settings.js). Oculta en escritorio (ver el media
    query de abajo). Ver goToMobileSection() en app.js.
    --------------------------------------------------------------------- */
-.mobile-nav {
-  position: fixed;
-  /* Flota con un margen alrededor (en vez de pegada a los 3 bordes) --
-     Koku la vio "demasiado pegada abajo, no se llega a ver bien" y
-     pidio bordes menos cuadriculados. El offset inferior ya incluye
-     el safe-area-inset (notch/home indicator), asi que no hace falta
-     padding-bottom interno aparte -- ver .app mas abajo, que reserva
-     el mismo hueco (0.6rem extra sobre lo de antes) para que el
-     contenido no quede tapado. */
-  left: 0.6rem;
-  right: 0.6rem;
-  bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px));
-  z-index: 70;
-  display: flex;
-  background: var(--surface);
-  color: var(--surface-text);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  /* Recorta los botones de las esquinas para que sigan el radio del
-     contenedor -- si no, sus esquinas cuadradas asoman por fuera. */
-  overflow: hidden;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
-}
-.mobile-nav-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.15rem;
-  padding: 0.5rem 0.2rem calc(0.4rem);
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
-  font-size: 0.68rem;
-}
-.mobile-nav-btn svg { width: 20px; height: 20px; }
-.mobile-nav-btn.active { color: var(--accent); }
 
 /* Barra del mes de ESCRITORIO: su propia fila centrada, encima del
    calendario (no en el header, que se queda solo con el titulo y los
-   botones). En movil no se usa (.desktop-only en index.html), ver la
    barra propia del calendario movil mas abajo. */
 .month-nav-bar {
   display: flex;
@@ -1043,8 +976,6 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   min-width: 0;
 }
 
-.desktop-only { display: none; }
-.mobile-only { display: block; }
 /* Mientras se arrastra el divisor calendario/panel (ver panel-resize-handle
    y app.js): cursor consistente y sin seleccionar texto por accidente en
    toda la pagina, no solo sobre la franja de 6px. */
@@ -1057,189 +988,28 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    contenedores propios, separados por completo de calendar-grid-wrap
    (nunca comparten nodo con la vista de escritorio).
    --------------------------------------------------------------------- */
-.mobile-calendar-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.7rem 1rem 0;
-}
-.mobile-calendar-nav-label {
-  /* Pildora con fondo propio (en vez de texto plano sobre el fondo de la
-     app) para que se note a simple vista que es un boton pulsable -- Koku
-     pregunto si el "▲" delante del año hacia algo, señal de que texto
-     plano no se leia como un control. Ver refreshMobileCalendarNavLabel()
-     en app.js: en vista de mes mete ademas un icono de flecha real
-     (svg), no solo el caracter "▲". */
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: var(--surface-2);
-  color: var(--surface-2-text);
-  border: none;
-  border-radius: 999px;
-  font-weight: 700;
-  font-size: 1.05rem;
-  padding: 0.35rem 0.8rem;
-}
-.mobile-calendar-toolbar-actions { display: flex; align-items: center; gap: 0.2rem; }
-.mobile-calendar-add-wrap { position: relative; }
 /* Desplegable Horas/Listado de la vista diaria (createSelectField) --
    por defecto .select-field ocupa el 100% de su contenedor, aqui hace
    falta compacto (mismo footprint aprox. que los icon-btn de al lado)
    para que quepa junto al buscador y el "+" en la barra. */
-.mobile-day-view-mode-field { width: auto; flex-shrink: 0; }
-.mobile-day-view-mode-field .select-field { width: auto; }
-.mobile-day-view-mode-field .select-field-trigger {
-  width: auto;
-  padding: 0.45rem 0.55rem;
-  font-size: 0.82rem;
-  white-space: nowrap;
-}
 /* Selector de densidad del mes (compacto/apilado/listado) -- mismo
    ajuste compacto que .mobile-day-view-mode-field de arriba, Koku
    pidio poder ver las 3 opciones y elegir directamente en vez de un
    icono que alterna al tocarlo. */
-.mobile-calendar-density-field { width: auto; flex-shrink: 0; }
-.mobile-calendar-density-field .select-field { width: auto; }
-.mobile-calendar-density-field .select-field-trigger {
-  width: auto;
-  padding: 0.45rem 0.55rem;
-  font-size: 0.82rem;
-  white-space: nowrap;
-}
-.mobile-add-menu {
-  position: absolute;
-  top: calc(100% + 0.4rem);
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  align-items: stretch;
-  z-index: 20;
-}
-.mobile-add-menu-item {
-  /* surface-2 (en vez de surface) + sombra mas marcada, igual que el
-     resto de popovers flotantes de la app (.select-popover/.icon-popover/
-     etc. usan 0.4 de opacidad) -- Koku vio poco contraste con el fondo
-     con los valores anteriores. */
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--surface-2-text);
-  white-space: nowrap;
-  text-align: right;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-}
 
 /* Boton flotante "+" (Notas) -- a diferencia de .mobile-calendar-add-wrap
    (relativo a una barra de arriba), este vive pegado al borde de la
    pantalla, por encima de .mobile-nav (z-index 70), igual que el hueco
    que ya reserva .app/Configuracion para esa barra. */
-.mobile-fab-wrap { position: fixed; right: 1rem; bottom: calc(5rem + 1rem + env(safe-area-inset-bottom, 0px)); z-index: 30; }
-.mobile-fab {
-  width: 3.2rem;
-  height: 3.2rem;
-  border-radius: 50%;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--accent);
-  color: var(--accent-text);
-  border: none;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-}
 /* El menu de .mobile-fab-wrap cuelga hacia ARRIBA del boton (a
    diferencia de .mobile-add-menu en una barra superior, que cuelga
    hacia abajo) -- el boton vive pegado al borde inferior, no hay hueco
    debajo para desplegarlo ahi. */
-.mobile-fab-wrap .mobile-add-menu { top: auto; bottom: calc(100% + 0.4rem); }
-
-.mobile-calendar-view {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  gap: 0.5rem;
-  padding: 0.6rem 1rem 0;
-  min-height: 0;
-}
-.mobile-calendar-month-name {
-  text-align: center;
-  font-weight: 700;
-  font-size: 1.3rem;
-  margin: 0;
-}
 
 /* --- Vista mensual movil: dias como circulos --- */
-.mobile-calendar-month-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  /* La fila de cabecera (L M X J V S D) mantiene su alto de contenido;
-     las 6 filas de dias se reparten TODO el alto sobrante del contenedor
-     (que ahora es flex:1 en cascada desde .app, ver arriba) -- antes el
-     grid solo ocupaba lo justo para el contenido y dejaba un hueco vacio
-     grande hasta la barra inferior, que era la queja de Koku ("me sobra
-     demasiada pantalla"). */
-  grid-template-rows: auto repeat(6, 1fr);
-  flex: 1;
-  min-height: 0;
-  gap: 2px;
-  /* none (no pan-y): con pan-y el navegador se cree con derecho a
-     gestionar el gesto vertical el mismo (scroll nativo), compitiendo
-     con el swipe propio (attachSwipe/Pointer Events) que quiere leer
-     ese mismo gesto -- en tactil de verdad el navegador gana esa
-     carrera y el swipe no completa. Mismo criterio que ya usa el mapa
-     de Viajes para su propio pan/zoom (.viajes-map-container). */
-  touch-action: none;
-}
 /* En modo "Listado" el mini-mes ocupa la mitad de arriba, y la lista de
    abajo (.mobile-calendar-month-list) la otra mitad -- pedido explicito
    de Koku ("que la vista ocupe mesa 50% y lista 50%"). */
-.mobile-calendar-view.is-listed { flex: 1; min-height: 0; }
-.mobile-calendar-view.is-listed .mobile-calendar-month-grid { flex: 0 0 50%; }
-.mobile-calendar-view.is-listed .mobile-calendar-month-list { flex: 1; min-height: 0; }
-.mobile-calendar-weekday-heading {
-  text-align: center;
-  font-size: 0.68rem;
-  color: color-mix(in srgb, var(--bg-text) 60%, var(--bg));
-  padding-bottom: 0.2rem;
-}
-.mobile-calendar-day-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  /* Pegado arriba, NO centrado: con las filas del grid repartiendose el
-     alto sobrante (ver grid-template-rows arriba), centrar el contenido
-     hacia el eje vertical hacia una altura que varia segun si el dia
-     tiene indicador de grupo debajo (pildora/barras) o no, desplazaba el
-     circulo del numero de forma distinta entre celdas vecinas -- el dia
-     con evento se veia "levantado" respecto a uno sin eventos. Pegado
-     arriba, el circulo siempre nace en la misma posicion Y sea cual sea
-     el contenido de debajo. */
-  justify-content: flex-start;
-  gap: 2px;
-  padding: 2px 0 4px;
-  cursor: pointer;
-}
-.mobile-calendar-day-cell.other-month { opacity: 0.3; }
-.mobile-calendar-day-circle {
-  width: 1.9rem;
-  height: 1.9rem;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.8rem;
-  color: var(--bg-text);
-}
-.mobile-calendar-day-cell.weekend-day .mobile-calendar-day-circle { background: var(--day-weekend); }
-.mobile-calendar-day-cell.holiday-day .mobile-calendar-day-circle { background: var(--day-holiday); }
-.mobile-calendar-day-cell.special-day .mobile-calendar-day-circle { background: var(--day-special); }
-.mobile-calendar-day-cell.today .mobile-calendar-day-circle {
-  background: var(--day-today);
-  color: var(--day-today-text);
-  font-weight: 700;
-}
 
 /* Modo Compacto: un <span> solido por grupo distinto dentro de una
    pildora con overflow:hidden -- el radio del CONTENEDOR (no de cada
@@ -1247,118 +1017,17 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    que pidio Koku: los bordes internos entre colores quedan rectos, solo
    los extremos del conjunto quedan redondeados. Con un solo grupo es,
    simplemente, un circulo. */
-.mobile-day-group-pill {
-  display: flex;
-  width: 1.15rem;
-  height: 0.5rem;
-  border-radius: 999px;
-  overflow: hidden;
-}
-.mobile-day-group-pill span { flex: 1; }
 
 /* Modo Stakeado: hasta 2 barras anchas apiladas debajo del circulo del
    dia (una por grupo distinto, por orden "todo el dia primero"); a
    partir del 3er grupo, +N debajo de las 2 primeras. */
-.mobile-calendar-day-cell-bars {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: center;
-}
-.mobile-day-group-bar { width: 85%; height: 5px; border-radius: 999px; }
-.mobile-day-group-more {
-  font-size: 0.58rem;
-  color: color-mix(in srgb, var(--bg-text) 65%, var(--bg));
-}
 
 /* Modo Listado: lista de eventos/tareas del dia seleccionado, debajo del
    mini-mes (ver arriba .mobile-calendar-view.is-listed). Rectangulo
    VERTICAL de color de grupo a la izquierda (a diferencia de la barra
    HORIZONTAL de Stakeado), nombre, y rango de horas a la derecha. */
-.mobile-calendar-month-list {
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding-bottom: 0.5rem;
-}
-.mobile-calendar-month-list-row {
-  display: flex;
-  align-items: stretch;
-  gap: 0.6rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.5rem 0.7rem;
-  color: var(--surface-text);
-}
-.mobile-calendar-month-list-bar { width: 4px; border-radius: 999px; flex-shrink: 0; }
-.mobile-calendar-month-list-title { flex: 1; font-weight: 600; align-self: center; }
-.mobile-calendar-month-list-time {
-  font-size: 0.78rem;
-  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
-  white-space: nowrap;
-  align-self: center;
-}
 
 /* --- Vista anual movil: 12 meses en miniatura, circulos de dia --- */
-.mobile-calendar-year-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.6rem;
-  /* Reparte las 4 filas de meses (12 meses / 3 columnas) a lo largo de
-     TODO el alto disponible del contenedor (flex:1 en cascada, ver
-     .mobile-calendar-view) en vez de amontonarlas arriba dejando un
-     hueco vacio grande debajo -- sin forzar cada mosaico a estirarse
-     (eso distorsionaria los circulos de dia de .mobile-calendar-year-day,
-     que dependen de aspect-ratio:1), solo el ESPACIADO entre filas crece. */
-  flex: 1;
-  min-height: 0;
-  align-content: space-evenly;
-  overflow-y: auto;
-  padding-bottom: 0.5rem;
-  /* none (no pan-y): mismo motivo que el grid del mes -- con pan-y el
-     navegador se cree con derecho al gesto vertical (scroll nativo) y
-     gana la carrera contra el swipe propio en tactil de verdad, aunque
-     en Playwright (raton) pareciera funcionar. Se acepta como
-     contrapartida que si algun dia este grid SI desbordase de verdad en
-     un movil muy pequeño, no habria scroll nativo dentro -- el cambio
-     de año por swipe es la interaccion principal de esta zona. */
-  touch-action: none;
-}
-.mobile-calendar-year-tile {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.4rem;
-  display: flex;
-  flex-direction: column;
-  cursor: pointer;
-}
-.mobile-calendar-year-tile-heading {
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-align: center;
-  color: var(--surface-text);
-  margin-bottom: 0.25rem;
-}
-.mobile-calendar-year-tile-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  grid-auto-rows: 1fr;
-  gap: 1px;
-}
-.mobile-calendar-year-day {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.58rem;
-  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
-  border-radius: 50%;
-  aspect-ratio: 1;
-  position: relative;
-}
 /* .other-month se queda sin numero (ver renderMobileCalendarYearGrid en
    app.js) -- no necesita estilo propio, la celda vacia ya "desaparece"
    sola. */
@@ -1366,23 +1035,11 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    en la esquina, que "no se veia bien" segun Koku) con un color propio
    derivado del acento del tema -- distinto a proposito de --day-today,
    para poder diferenciar "hoy" de "tiene eventos" a simple vista. */
-.mobile-calendar-year-day.has-content {
-  background: color-mix(in srgb, var(--accent) 55%, var(--surface));
-  color: var(--surface-text);
-  font-weight: 600;
-}
-.mobile-calendar-year-day.today { background: var(--day-today); color: var(--day-today-text); font-weight: 700; }
 /* Es hoy Y tiene contenido: un tercer tratamiento, ni el relleno solo de
    "hoy" ni el de "tiene contenido" -- el relleno de hoy con un anillo del
    color de "tiene contenido" alrededor, para que los 3 casos (hoy sin
    nada / tiene contenido sin ser hoy / los dos a la vez) se distingan
    entre si de un vistazo. */
-.mobile-calendar-year-day.today.has-content {
-  background: var(--day-today);
-  color: var(--day-today-text);
-  font-weight: 700;
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 70%, var(--day-today-text) 30%);
-}
 
 /* ---------------------------------------------------------------------
    Vista diaria movil completa (Fase 3 del rediseño movil, ver
@@ -1390,43 +1047,11 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    superior reutiliza .mobile-calendar-toolbar/-actions/-nav-label
    (mismo lenguaje visual que la del mes, solo con otros botones).
    --------------------------------------------------------------------- */
-.mobile-calendar-day-view {
-  /* Menos hueco lateral/entre bloques que la ronda anterior -- pedido
-     explicito de Koku de aprovechar mas pantalla a lo ancho y en
-     vertical (sin tocar --hour-row-height, que es "1px = 1 minuto" a
-     proposito). */
-  padding: 0 0.6rem 0.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  min-height: 0;
-  flex: 1;
-}
 /* Animacion de entrada al cambiar de mes/año/dia por swipe (deslizar+
    fundido corto) -- pedido explicito de Koku para "hacerlo mas
    visual". Las clases se añaden/quitan solas via JS
    (playMobileSwipeTransition en app.js), nunca se dejan puestas de
    forma permanente. */
-@keyframes mobile-swipe-in-up {
-  from { transform: translateY(16px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-@keyframes mobile-swipe-in-down {
-  from { transform: translateY(-16px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-@keyframes mobile-swipe-in-left {
-  from { transform: translateX(16px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
-@keyframes mobile-swipe-in-right {
-  from { transform: translateX(-16px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
-.mobile-swipe-anim-up { animation: mobile-swipe-in-up 220ms ease-out; }
-.mobile-swipe-anim-down { animation: mobile-swipe-in-down 220ms ease-out; }
-.mobile-swipe-anim-left { animation: mobile-swipe-in-left 220ms ease-out; }
-.mobile-swipe-anim-right { animation: mobile-swipe-in-right 220ms ease-out; }
 /* Cabecera fija (Volver + tira semanal + fecha) -- ver el comentario del
    propio HTML: en "Vista por horas" la pagina se desplaza sola hasta la
    hora actual (scrollMobileHoursToTime() en app.js), y sin fijar esto
@@ -1434,42 +1059,12 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    de la vista sin forma de recuperarla salvo scrollear a mano. Mismo
    patron ya usado en la app para "Volver" de Configuracion/Mi espacio
    (position:sticky + fondo solido + borde inferior). */
-.mobile-day-sticky-header {
-  position: sticky;
-  top: 0;
-  z-index: 15;
-  background: var(--bg);
-  /* Antes 0.3rem -- quedaba muy pegado a la fila de "00:00" (que
-     ademas se desplaza -0.6em hacia arriba, ver .mobile-hour-label). */
-  padding-bottom: 0.7rem;
-  /* Sangra hasta el borde real de la pantalla (cancela el padding
-     lateral de .mobile-calendar-day-view, que ahora es 0.6rem) y vuelve
-     a meter ese mismo hueco como padding propio, para que su fondo
-     solido cubra el ancho entero mientras el contenido de dentro sigue
-     alineado con el resto de la vista. */
-  margin: 0 -0.6rem;
-  padding-left: 0.6rem;
-  padding-right: 0.6rem;
-  border-bottom: 1px solid var(--border);
-}
 /* El toolbar comparte clase con el de mes (.mobile-calendar-toolbar),
    que vive fuera de cualquier padding ambiente y por eso trae su propio
    padding lateral -- aqui ya lo pone .mobile-day-sticky-header, asi que
    se anula para no duplicar el hueco. */
-.mobile-day-sticky-header .mobile-calendar-toolbar { padding-left: 0; padding-right: 0; }
-.mobile-calendar-day-heading { font-weight: 700; font-size: 1.1rem; margin: 0.2rem 0 0; text-align: center; }
 
 /* --- Tira de dias de la semana --- */
-.mobile-week-strip { padding-top: 0.2rem; }
-.mobile-week-strip-days {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
-  /* none (no pan-x): mismo motivo que el swipe de mes/año -- con pan-x
-     el navegador se cree con derecho al gesto horizontal (paneo nativo)
-     y compite con attachSwipe() por el mismo eje en tactil de verdad. */
-  touch-action: none;
-}
 .week-strip-day {
   display: flex;
   flex-direction: column;
@@ -1506,90 +1101,12 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .week-strip-day-dot.is-empty { visibility: hidden; }
 
 /* --- "Vista por horas" --- */
-.mobile-day-hours-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.mobile-day-allday-row { display: flex; flex-direction: column; gap: 0.3rem; padding-bottom: 0.4rem; }
-.mobile-day-allday-chip {
-  border-radius: var(--radius-sm);
-  padding: 0.3rem 0.6rem;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--accent-text);
-}
-.mobile-hours-scroll { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
 :root { --hour-row-height: 60px; }
-.mobile-hours-grid { position: relative; height: calc(var(--hour-row-height) * 24); }
-.mobile-hour-row {
-  position: absolute;
-  left: 0; right: 0;
-  height: var(--hour-row-height);
-  border-top: 1px solid var(--border);
-}
-.mobile-hour-label {
-  position: absolute;
-  top: -0.6em;
-  left: 0;
-  font-size: 0.68rem;
-  color: color-mix(in srgb, var(--bg-text) 55%, var(--bg));
-  background: var(--bg);
-  padding-right: 0.3rem;
-}
-.mobile-hour-event {
-  position: absolute;
-  left: 3rem;
-  right: 0.3rem;
-  border-radius: var(--radius-sm);
-  padding: 2px 6px;
-  font-size: 0.72rem;
-  overflow: hidden;
-  line-height: 1.25;
-  cursor: pointer;
-}
-.mobile-hour-event.is-event { color: var(--accent-text); }
-.mobile-hour-event.is-task {
-  background: var(--surface);
-  border: 2px solid var(--accent);
-}
-.mobile-current-time-line {
-  position: absolute;
-  left: 3rem;
-  right: 0;
-  height: 2px;
-  background: var(--accent);
-  z-index: 5;
-}
-.mobile-current-time-line::before {
-  content: '';
-  position: absolute;
-  left: -4px; top: -3px;
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-.mobile-current-time-label {
-  position: absolute;
-  left: 0;
-  top: -0.7em;
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: var(--accent);
-  background: var(--bg);
-}
 
 /* --- "Listado" (dia): mismas filas que el modo Listado del mes
    (Fase 2) -- .mobile-calendar-month-list-row/-bar/-title/-time,
    reutilizadas tal cual, sin duplicar CSS. Solo hace falta el
    contenedor con scroll y la cabecera de cada bloque de dia. */
-.mobile-day-listado-view { flex: 1; min-height: 0; overflow-y: auto; }
-.mobile-day-listado-block { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.8rem; }
-.mobile-day-listado-block-heading {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: color-mix(in srgb, var(--bg-text) 75%, var(--bg));
-  text-transform: capitalize;
-  text-align: center;
-}
-.mobile-day-listado-block > .empty-hint { text-align: center; }
-.mobile-day-listado-sentinel { height: 1px; }
 
 /* --- Filas de "agenda" (panel de recordatorios en modo dia, escritorio) --
    antes tambien las usaba la vista movil (lista plana), sustituida por
@@ -1959,177 +1476,29 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    (icono de lupa SVG real, nunca emoji) + una segunda fila con
    Volver/+carpeta/+nota/menu de 3 puntos, mismo criterio de icon-btn ya
    usado en la barra del calendario movil. */
-.mobile-notes-search-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0 1rem 0.5rem;
-  padding: 0.4rem 0.7rem;
-  background: var(--surface-2);
-  color: var(--surface-2-text);
-  border-radius: 999px;
-}
-.mobile-notes-search-icon { flex-shrink: 0; opacity: 0.7; }
-#mobile-notes-search-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  color: inherit;
-  font-size: 0.9rem;
-  padding: 0.15rem 0 0.15rem 0.3rem;
-}
 /* Fila combinada de busqueda+acciones en #mobile-notes-view -- la
    pildora de busqueda pasa a vivir DENTRO de esta fila (por eso
    pierde su propio margin, lo hereda del contenedor) y crece con
    flex:1; "Volver"/+carpeta/+nota/los 3 puntos se quedan a su ancho
    natural de icono, alineados a la derecha. */
-.mobile-notes-header-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin: 1rem 1rem 0.5rem;
-}
-.mobile-notes-header-row .mobile-notes-search-row {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-}
-.mobile-notes-menu-wrap { position: relative; }
-#mobile-notes-list { padding: 0 1rem; }
 
 /* Buscador global (Fase 5): mismo look que el buscador de Notas
    (.mobile-notes-search-row/-icon, reutilizadas tal cual) -- solo el
    input y los resultados son propios de este overlay. */
-#mobile-global-search-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  color: inherit;
-  font-size: 0.9rem;
-  padding: 0.15rem 0 0.15rem 0.3rem;
-}
-.mobile-global-search-results { padding: 0 1rem; max-height: none; }
-.mobile-search-result-item {
-  width: 100%;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.mobile-search-result-item:last-child { border-bottom: none; }
-.mobile-search-result-main { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
-.mobile-search-result-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mobile-search-result-meta {
-  flex-shrink: 0;
-  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
-  font-size: 0.78rem;
-}
 /* Mismo lenguaje visual que los chips del calendario: relleno solido
    para un evento, solo borde para una tarea (calendar-event-chip/
    calendar-task-chip) -- aqui como un punto pequeño en vez de una
    pastilla, ya que el nombre entero va al lado en texto normal. */
-.mobile-search-type-dot {
-  flex-shrink: 0;
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 50%;
-}
-.mobile-search-type-dot.is-event { background: var(--accent); }
-.mobile-search-type-dot.is-task { background: transparent; border: 1.5px solid var(--accent); }
-.mobile-search-type-dot.is-note { background: color-mix(in srgb, var(--accent) 55%, var(--surface-2)); }
 
 /* Vista galeria de Notas movil (Fase 4) -- tarjetas con miniatura (si la
    nota tiene una imagen) o el color de su carpeta + un avance de texto
    si no. */
-.mobile-notes-gallery-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.6rem;
-  margin-bottom: 0.6rem;
-}
-.mobile-note-gallery-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--surface-2);
-  cursor: pointer;
-}
-.mobile-note-gallery-media {
-  aspect-ratio: 1 / 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  padding: 0.5rem;
-}
-.mobile-note-gallery-media img { width: 100%; height: 100%; object-fit: cover; }
-.mobile-note-gallery-preview-text {
-  font-size: 0.72rem;
-  line-height: 1.3;
-  /* Antes rgba(0,0,0,0.65) fijo -- pensado para un fondo claro, casi
-     invisible sobre --surface-2 en el tema oscuro por defecto (negro
-     semitransparente sobre un fondo ya oscuro). Mismo patron ya usado
-     en el resto de la app para texto atenuado sobre esta superficie. */
-  color: color-mix(in srgb, var(--surface-2-text) 70%, var(--surface-2));
-  -webkit-line-clamp: 6;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.mobile-note-gallery-title {
-  padding: 0.4rem 0.5rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--surface-2-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .mobile-note-gallery-card.is-hidden .mobile-note-gallery-media,
-.mobile-note-gallery-card.is-hidden .mobile-note-gallery-title {
-  filter: blur(5px);
-  user-select: none;
-}
-.mobile-note-gallery-eye-btn {
-  position: absolute;
-  top: 0.3rem;
-  left: 0.3rem;
-  z-index: 1;
-  background: rgba(0, 0, 0, 0.45);
-  color: #fff;
-  border: none;
-  border-radius: 999px;
-  padding: 0.25rem;
-  line-height: 0;
-}
-.mobile-note-gallery-checkbox {
-  position: absolute;
-  top: 0.3rem;
-  right: 0.3rem;
-  z-index: 1;
-}
-.mobile-note-gallery-card > .favorite-star-btn {
-  position: absolute;
-  bottom: 2.2rem;
-  right: 0.3rem;
-  z-index: 1;
-}
 
 /* Barra de acciones (Eliminar/Mover, Cancelar/"Mover aqui") -- fija
    abajo dentro de #mobile-notes-view, siempre visible mientras la lista
    de encima hace scroll. */
-.mobile-notes-action-bar {
+.notes-action-bar {
   position: sticky;
   bottom: 0;
   display: flex;
@@ -2138,10 +1507,10 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   background: var(--bg);
   border-top: 1px solid var(--border);
 }
-.mobile-notes-action-bar button { flex: 1; }
+.notes-action-bar button { flex: 1; }
 
 /* Modal de "Eliminar" del modo Seleccionar. */
-.mobile-notes-delete-list {
+.notes-delete-list {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
@@ -2149,7 +1518,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   overflow-y: auto;
   margin-bottom: 0.6rem;
 }
-.mobile-notes-delete-item {
+.notes-delete-item {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -2160,11 +1529,11 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   font-size: 0.88rem;
   cursor: pointer;
 }
-.mobile-notes-delete-item.is-excluded {
+.notes-delete-item.is-excluded {
   opacity: 0.45;
   text-decoration: line-through;
 }
-.mobile-notes-delete-item-icon { flex-shrink: 0; color: inherit; }
+.notes-delete-item-icon { flex-shrink: 0; color: inherit; }
 .note-list-section-heading {
   font-size: 0.72rem;
   font-weight: 700;
@@ -2673,9 +2042,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    (panel local arriba, flechas en fila horizontal, panel remoto
    abajo) -- en escritorio, en fila con las flechas en el centro,
    mismo punto de corte que el resto de la app (860px). */
-
-@media (min-width: 860px) {
-}
 
 /* Envoltorio SOLO de las 3 columnas (el Volver, fuera, en su propia
    fila) -- en movil se quedan apiladas igual que antes. */
@@ -3513,8 +2879,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 
 /* --- Escritorio: pantallas anchas --- */
 @media (min-width: 860px) {
-  .desktop-only { display: block; }
-  .mobile-only { display: none; }
 
   /* Todo el shell (topbar + contenido) ocupa exactamente el alto de la
      ventana del navegador, sin que la pagina en si tenga scroll: solo
@@ -3524,7 +2888,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   html, body { height: 100%; }
   #app.app { height: 100vh; padding-bottom: 0; }
   .topbar { display: flex; flex-shrink: 0; }
-  .mobile-nav { display: none; }
   .month-nav-bar { flex-shrink: 0; }
 
   .layout {

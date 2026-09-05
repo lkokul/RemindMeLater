@@ -18,7 +18,7 @@ commitearlo hay que confirmarlo con Koku igual que cualquier otro commit.
 ## Qué es esto
 
 **App de escritorio para Windows**: calendario, recordatorios, tareas y
-notas, más un hub de "Apps" con 4 extensiones (Gimnasio, Lecturas,
+notas, más un hub de "Herramientas" con 4 secciones (Gimnasio, Lecturas,
 Finanzas y Viajes). Electron + SQLite (`node:sqlite`, el integrado en
 Node, sin compilar nada nativo). La interfaz es HTML/CSS/JS sin build ni
 framework.
@@ -98,10 +98,46 @@ Piezas concretas que conviene conocer antes de tocar nada:
 
 **Consecuencia a tener presente**: `public/` ya solo funciona dentro de
 Electron (llama a `window.electronAPI`). Abrirlo en un navegador normal ya
-no vale para nada, y las carpetas `android/`/`ios/` y los scripts
-`cap:*` de Capacitor están en el repo pero apuntan a una app móvil que
-esta rama ya no puede servir. No se han borrado porque Koku no lo pidió;
-si algún día se retoma el móvil, hay que hablarlo primero.
+no vale para nada.
+
+## El cambio de la v0.35.0: fuera el móvil entero
+
+Koku pidió que a partir de ahora **solo haya cosas de escritorio, nada de
+móvil**, para que un futuro merge sea limpio. Lo que se quitó:
+
+- **Capacitor completo**: `android/`, `ios/`, `capacitor.config.json`, los
+  scripts `cap:*`, las 4 dependencias `@capacitor/*`, `CAPACITOR-POC.md`,
+  `IOS-TESTFLIGHT.md` y el workflow de GitHub Actions que firmaba iOS sin
+  Mac (con él se fue `.github/` entero).
+- **Todo el rediseño móvil**: la barra inferior de navegación, el
+  calendario mensual/anual de círculos, la vista diaria (tira semanal,
+  vista por horas, modo Listado), la vista de Notas móvil con su menú de
+  3 puntos y su modo galería, el buscador global, los menús "+"
+  flotantes y los swipes.
+- El mecanismo `.mobile-only`/`.desktop-only`: ya no existe, la interfaz
+  de escritorio se ve siempre.
+- Los metas de PWA que quedaban (`apple-mobile-web-app-*`).
+
+**Lo que NO se tocó**: la estructura responsive del CSS. El CSS base
+sigue siendo mobile-first y quedan 5 `@media (max-width: 859px)` con
+adaptaciones legítimas (formularios apilados, Configuración a pantalla
+completa en ventana estrecha, padding). Aplanar eso a desktop-first se
+descartó a propósito: es reescribir las 3.253 líneas del stylesheet justo
+antes del rediseño visual, y genera un diff enorme que haría el merge más
+difícil, no menos.
+
+**Cuidado con los nombres**: había bastante código llamado "mobile" que en
+realidad lo usa el ESCRITORIO — todo el modo "Seleccionar" de Notas
+(barra de acción, modal de borrado, mover). Se renombró para que
+"mobile" ya no aparezca en nada vivo: `setMobileNotesMode` →
+`setNotesMode`, `mobileNotesMode` → `notesMode`,
+`refreshMobileNotesActionBar` → `refreshNotesActionBar`,
+`#mobile-notes-delete-modal` → `#notes-delete-modal`, etc. La pestaña de
+Configuración que se llamaba `mobile` por dentro (es "Este dispositivo")
+ahora se llama `device`.
+
+**Renombrado aparte**: el apartado que se veía como "Apps" ahora se llama
+**"Herramientas"** en toda la interfaz.
 
 ## Reglas de trabajo que Koku ha pedido explícitamente
 
@@ -167,11 +203,11 @@ si algún día se retoma el móvil, hay que hablarlo primero.
   densidad del calendario, atajos...) viven en `localStorage`, que en
   Electron cuelga del origen `app://remindmelater`. Cambiar ese host
   equivaldría a empezar de cero con todos esos ajustes.
-- **CSS mobile-first**: el CSS base es para móvil y `min-width: 860px`
-  cambia a layout de escritorio. Todo el rediseño móvil (barra inferior,
-  vista diaria, calendario anual...) sigue en el código: no se activa en
-  una ventana normal, pero sí si se encoge mucho. No se quitó porque Koku
-  no lo pidió.
+- **CSS**: la base sigue escrita mobile-first (el layout de escritorio
+  vive dentro de `@media (min-width: 860px)`), aunque ya no haya móvil.
+  Se dejó así a propósito, ver "El cambio de la v0.35.0". La ventana
+  tiene `minWidth: 720`, así que entre 720 y 860 px se aplican las
+  adaptaciones responsive que quedan.
 - **Tareas**: son filas de `events` con `is_task = 1` (no una tabla
   aparte) — comparten título/grupo con los eventos normales, pero
   `start_at` es opcional y tienen su propio campo `done`. En el
@@ -291,6 +327,22 @@ si algún día se retoma el móvil, hay que hablarlo primero.
   click en una celda VACÍA el navegador a veces deja el cursor "colgado"
   de un antepasado (tr/tbody/table). `getCurrentTableCell()` tiene un
   fallback para eso; cuidado con quitarlo pensando que es código muerto.
+- **Al borrar reglas CSS por selector, revisar los selectores agrupados
+  por comas UNO A UNO.** Esto rompió la app de verdad: al quitar la
+  pantalla de emparejamiento, un script borró las reglas
+  `.modal, .pairing-screen` y `.modal-card, .pairing-card` enteras porque
+  el selector mencionaba `pairing`. Con eso desaparecieron `.modal` y
+  `.modal-card`, o sea la posición y el fondo de TODOS los modales de la
+  app: el JavaScript seguía funcionando (los modales perdían su clase
+  `hidden` correctamente) pero no se veía nada, y parecía que la app
+  entera estaba muerta. En la limpieza del móvil se hizo con una
+  salvaguarda que RECORTA el selector muerto en vez de borrar la regla —
+  y volvió a saltar en la misma regla de `.modal-card`.
+- **Una prueba que comprueba "¿le han quitado la clase hidden?" no sirve.**
+  Hay que medir que el elemento se VEA (tamaño real en pantalla y
+  `position`), y capturar los recursos que no cargan (`webRequest.onCompleted`
+  con `statusCode >= 400`) — los dos fallos de arriba pasaron desapercibidos
+  justo por eso.
 - **Al borrar UI, cuidado con lo que hay pegado alrededor**: quitando la
   pantalla de emparejamiento de `index.html` se coló por delante el modal
   `#app-confirm-modal`, que estaba justo entre medias y no tenía nada que
@@ -316,19 +368,18 @@ de la página. Dos avisos aprendidos a base de colgarse:
 
 ## Estado actual
 
-Rama de trabajo: **`escritorio`**, sacada de
-`claude/desktop-app-electron-web-hdntch` (que a su vez va 27 commits por
-delante de `origin/main` — todo el rediseño móvil, Viajes, y la prueba de
-Capacitor están ahí, no en `main`).
+Rama de trabajo: **`escritorio`**. La rama
+`claude/desktop-app-electron-web-hdntch` ya no existe en el remoto: se
+fusionó en `main`, así que **`main` es ahora el "antes"** — el último
+estado con servidor, app móvil y Capacitor intactos. Recuperarlo es un
+`git checkout main`, no hay que buscar hashes.
 
-`package.json` en **v0.34.0**. Todo lo descrito arriba está hecho y
-probado arrancando la app de verdad: las 6 pestañas de Configuración
-abren, las 5 vistas a pantalla completa abren, se puede crear y borrar en
-las cuatro extensiones, subir una imagen a una nota y verla, y no hay
+`package.json` en **v0.35.0**. Todo lo descrito arriba está hecho y
+probado arrancando la app de verdad con `xvfb-run`: los modales se VEN
+(medido su tamaño real en pantalla, no solo la clase `hidden`), las 6
+pestañas de Configuración abren, las 5 vistas a pantalla completa abren,
+el modo "Seleccionar" de Notas funciona, no falla ningún recurso y no hay
 ningún error en la consola.
-
-**Sin commitear todavía** en el momento de escribir esto — Koku no lo ha
-pedido aún.
 
 ## Pendiente / próximos pasos declarados
 

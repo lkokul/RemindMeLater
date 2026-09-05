@@ -45,11 +45,6 @@ const state = {
   lecturasSagas: [],
   lecturasItems: [],
   lecturasCurrentSagaId: null,
-  // Calendario movil (Fase 2 del rediseño movil, ver CLAUDE.md): que dia
-  // esta seleccionado en el modo Listado del mes, y que dia se esta
-  // viendo en la vista diaria (ver enterMobileDayView() en app.js).
-  mobileCalendarListDate: null,
-  mobileCalendarDayDate: null,
 };
 
 const DEFAULT_EVENT_COLOR = '#5b8cff'; // el --accent de styles.css, para eventos sin grupo
@@ -738,8 +733,6 @@ async function loadMonth() {
   state.events = await api(`/api/events?from=${from}T00:00:00&to=${to}T23:59:59`);
   document.getElementById('current-month-label').textContent = formatMonthYear(state.viewDate);
   renderCalendarGrid();
-  renderMobileCalendarMonthGrid();
-  refreshMobileCalendarNavLabel();
 }
 
 // Los dias marcados como festivo/especial no son muchos (los pones tu a
@@ -1007,11 +1000,6 @@ document.getElementById('btn-day-add-event').addEventListener('click', () => {
   openEventModal(null, state.remindersDayDate);
 });
 
-// renderAgendaList() (la lista plana antigua de movil) se quito por
-// completo en la Fase 2 del rediseño movil -- sustituida por las vistas
-// de mes/año propias mas abajo (renderMobileCalendarMonthGrid() y
-// alrededores).
-
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
@@ -1183,14 +1171,6 @@ async function setCalendarViewMode(mode) {
   }
   // Movil (Fase 2 del rediseño movil): mismo `calendarViewMode` como
   // fuente unica de verdad, para que si alguien redimensiona la ventana
-  // a media sesion la vista se mantenga coherente entre escritorio y
-  // movil. loadMonth() (llamado arriba en la rama "month") ya repinta
-  // #mobile-calendar-month-grid via renderMobileCalendarMonthGrid().
-  if (mode === 'year') {
-    await refreshMobileCalendarYearGrid();
-  }
-  refreshMobileCalendarModeVisibility();
-  refreshMobileCalendarNavLabel();
 }
 
 document.getElementById('btn-calendar-year-toggle').addEventListener('click', () => {
@@ -1332,984 +1312,6 @@ function buildYearTileCellDates(monthDate) {
   }
   return dates;
 }
-
-// Que grupos DISTINTOS estan representados un dia concreto -- no es que
-// un evento pertenezca a varios grupos (un evento/tarea siempre es de UN
-// grupo, ver events.group_id en server/db.js), es agregar varios
-// eventos/tareas de ESE dia que pueden ser de grupos distintos entre si.
-// Orden pedido por Koku: los de "todo el dia" primero, luego por hora de
-// inicio; un grupo que ya aparecio no se repite aunque tenga mas de un
-// evento ese dia.
-function getDistinctGroupsForDay(dayEvents) {
-  const sorted = [...dayEvents].sort((a, b) => {
-    if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
-    return new Date(a.startAt) - new Date(b.startAt);
-  });
-  const seen = new Set();
-  const groups = [];
-  sorted.forEach((ev) => {
-    const key = ev.groupId != null ? `g${ev.groupId}` : `c${ev.groupColor || DEFAULT_EVENT_COLOR}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    groups.push({ color: ev.groupColor || DEFAULT_EVENT_COLOR });
-  });
-  return groups;
-}
-
-function buildMobileDayGroupPill(groups) {
-  const pill = document.createElement('div');
-  pill.className = 'mobile-day-group-pill';
-  groups.forEach((g) => {
-    const span = document.createElement('span');
-    span.style.backgroundColor = g.color;
-    pill.appendChild(span);
-  });
-  return pill;
-}
-
-// Ajuste por dispositivo (localStorage, NO sincronizado -- mismo patron
-// que calendarDayDensity de escritorio, ver getCalendarDensityMode() mas
-// arriba): que tan "denso" se ve un dia con eventos en el mes movil.
-const MOBILE_CALENDAR_MONTH_MODE_IDS = ['compact', 'stacked', 'listed'];
-function getMobileCalendarMonthMode() {
-  const stored = localStorage.getItem('mobileCalendarMonthMode');
-  return MOBILE_CALENDAR_MONTH_MODE_IDS.includes(stored) ? stored : 'compact';
-}
-
-// "De que hora a que hora" para el modo Listado (mes) -- no existia un
-// formateador de RANGO en el proyecto, el resto de sitios solo muestran
-// la hora de inicio.
-function formatMobileEventTimeRange(ev) {
-  if (ev.allDay) return 'Todo el día';
-  const start = TIME_FORMATTER.format(new Date(ev.startAt));
-  if (!ev.endAt) return start;
-  const end = TIME_FORMATTER.format(new Date(ev.endAt));
-  return end === start ? start : `${start}–${end}`;
-}
-
-function renderMobileCalendarMonthGrid() {
-  const grid = document.getElementById('mobile-calendar-month-grid');
-  grid.innerHTML = '';
-  const mode = getMobileCalendarMonthMode();
-  const today = new Date();
-
-  WEEKDAY_LABELS.forEach((label) => {
-    const el = document.createElement('div');
-    el.className = 'mobile-calendar-weekday-heading';
-    el.textContent = label;
-    grid.appendChild(el);
-  });
-
-  buildMonthCellDates(state.viewDate).forEach((cellDate) => {
-    const cell = document.createElement('div');
-    cell.className = 'mobile-calendar-day-cell';
-    if (cellDate.getMonth() !== state.viewDate.getMonth()) cell.classList.add('other-month');
-    if (sameDay(cellDate, today)) cell.classList.add('today');
-    const dayType = state.specialDays[toDateKey(cellDate)];
-    if (dayType === 'holiday') cell.classList.add('holiday-day');
-    else if (dayType === 'special') cell.classList.add('special-day');
-    else if (cellDate.getDay() === 0 || cellDate.getDay() === 6) cell.classList.add('weekend-day');
-
-    const circle = document.createElement('div');
-    circle.className = 'mobile-calendar-day-circle';
-    circle.textContent = cellDate.getDate();
-    cell.appendChild(circle);
-
-    const dayEvents = state.events.filter((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate));
-    const groups = getDistinctGroupsForDay(dayEvents);
-
-    if (groups.length > 0) {
-      if (mode === 'stacked') {
-        const bars = document.createElement('div');
-        bars.className = 'mobile-calendar-day-cell-bars';
-        groups.slice(0, 2).forEach((g) => {
-          const bar = document.createElement('div');
-          bar.className = 'mobile-day-group-bar';
-          bar.style.backgroundColor = g.color;
-          bars.appendChild(bar);
-        });
-        if (groups.length > 2) {
-          const more = document.createElement('div');
-          more.className = 'mobile-day-group-more';
-          more.textContent = `+${groups.length - 2}`;
-          bars.appendChild(more);
-        }
-        cell.appendChild(bars);
-      } else {
-        // 'compact' y el mini-mes de 'listed' usan el mismo formato.
-        cell.appendChild(buildMobileDayGroupPill(groups));
-      }
-    }
-
-    cell.addEventListener('click', () => {
-      if (getMobileCalendarMonthMode() === 'listed') {
-        state.mobileCalendarListDate = cellDate;
-        renderMobileCalendarMonthList(cellDate);
-      } else {
-        enterMobileDayView(cellDate);
-      }
-    });
-
-    grid.appendChild(cell);
-  });
-
-  if (mode === 'listed') {
-    renderMobileCalendarMonthList(ensureMobileCalendarListDate());
-  }
-}
-
-// Que dia muestra la lista del modo Listado por defecto: hoy, si el mes
-// que se esta viendo es el mes real; si no, el dia 1 del mes que se esta
-// viendo. Se recalcula solo cuando el dia guardado ya no pertenece al mes
-// actual (cambiar de mes) -- cambiar solo de modo de densidad conserva el
-// dia que ya tenias elegido.
-function ensureMobileCalendarListDate() {
-  const stored = state.mobileCalendarListDate;
-  if (stored && stored.getFullYear() === state.viewDate.getFullYear() && stored.getMonth() === state.viewDate.getMonth()) {
-    return stored;
-  }
-  const today = new Date();
-  const fallback = (today.getFullYear() === state.viewDate.getFullYear() && today.getMonth() === state.viewDate.getMonth())
-    ? today
-    : startOfMonth(state.viewDate);
-  state.mobileCalendarListDate = fallback;
-  return fallback;
-}
-
-async function renderMobileCalendarMonthList(date) {
-  const container = document.getElementById('mobile-calendar-month-list');
-  const dateStr = toDateKey(date);
-  const dayEvents = await api(`/api/events?from=${dateStr}T00:00:00&to=${dateStr}T23:59:59`);
-  // Si mientras se esperaba la respuesta el usuario ya toco otro dia, o
-  // cambio de modo de densidad, esta respuesta esta obsoleta -- no pisar
-  // lo que se ve ahora.
-  if (!state.mobileCalendarListDate || toDateKey(state.mobileCalendarListDate) !== dateStr) return;
-  if (getMobileCalendarMonthMode() !== 'listed') return;
-
-  container.innerHTML = '';
-  if (dayEvents.length === 0) {
-    container.innerHTML = '<p class="empty-hint">No hay nada este día.</p>';
-    return;
-  }
-  dayEvents.forEach((ev) => {
-    const row = document.createElement('div');
-    row.className = 'mobile-calendar-month-list-row';
-    const bar = document.createElement('div');
-    bar.className = 'mobile-calendar-month-list-bar';
-    bar.style.backgroundColor = ev.isTask ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev)) : (ev.groupColor || DEFAULT_EVENT_COLOR);
-    const title = document.createElement('div');
-    title.className = 'mobile-calendar-month-list-title';
-    title.textContent = ev.title;
-    const time = document.createElement('div');
-    time.className = 'mobile-calendar-month-list-time';
-    time.textContent = formatMobileEventTimeRange(ev);
-    row.append(bar, title, time);
-    row.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
-    container.appendChild(row);
-  });
-}
-
-function renderMobileCalendarYearGrid() {
-  const container = document.getElementById('mobile-calendar-year-grid');
-  container.innerHTML = '';
-  const year = state.viewDate.getFullYear();
-  const today = new Date();
-
-  for (let month = 0; month < 12; month++) {
-    const monthDate = new Date(year, month, 1);
-    const tile = document.createElement('div');
-    tile.className = 'mobile-calendar-year-tile';
-
-    const heading = document.createElement('div');
-    heading.className = 'mobile-calendar-year-tile-heading';
-    const label = MONTH_ONLY_FORMATTER.format(monthDate);
-    heading.textContent = label.charAt(0).toUpperCase() + label.slice(1);
-    tile.appendChild(heading);
-
-    const grid = document.createElement('div');
-    grid.className = 'mobile-calendar-year-tile-grid';
-    buildYearTileCellDates(monthDate).forEach((cellDate) => {
-      const cell = document.createElement('span');
-      cell.className = 'mobile-calendar-year-day';
-      if (cellDate.getMonth() !== month) {
-        // Celda de relleno de otro mes -- Koku pidio que se queden en
-        // blanco (sin numero) en vez de mostrar el dia atenuado; se
-        // deja el hueco vacio para no descuadrar la cuadricula de 7
-        // columnas, pero sin comprobar "hoy"/"tiene contenido" (no
-        // tiene sentido para un dia que no es de este mes).
-        cell.classList.add('other-month');
-        grid.appendChild(cell);
-        return;
-      }
-      cell.textContent = cellDate.getDate();
-      if (sameDay(cellDate, today)) cell.classList.add('today');
-      if (yearViewEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate))) {
-        cell.classList.add('has-content');
-      }
-      grid.appendChild(cell);
-    });
-    tile.appendChild(grid);
-
-    tile.addEventListener('click', () => enterMonthFromYear(month));
-    container.appendChild(tile);
-  }
-}
-
-async function refreshMobileCalendarYearGrid() {
-  await loadYearViewEvents(state.viewDate.getFullYear());
-  renderMobileCalendarYearGrid();
-}
-
-function refreshMobileCalendarModeVisibility() {
-  const view = document.querySelector('.mobile-calendar-view');
-  const monthGrid = document.getElementById('mobile-calendar-month-grid');
-  const monthList = document.getElementById('mobile-calendar-month-list');
-  const yearGrid = document.getElementById('mobile-calendar-year-grid');
-  const isListed = calendarViewMode === 'month' && getMobileCalendarMonthMode() === 'listed';
-  view.classList.toggle('is-listed', isListed);
-  if (calendarViewMode === 'year') {
-    monthGrid.classList.add('hidden');
-    monthList.classList.add('hidden');
-    yearGrid.classList.remove('hidden');
-  } else {
-    yearGrid.classList.add('hidden');
-    monthGrid.classList.remove('hidden');
-    monthList.classList.toggle('hidden', !isListed);
-  }
-  // La densidad (compacto/stakeado/listado) solo tiene sentido dentro del
-  // MES (y, cuando exista, de la vista diaria -- que ya trae su propio
-  // interruptor "Vista por horas"/"Listado" aparte) -- en año no hace
-  // nada visible, Koku confirmo que lo probo y no pasaba nada al pulsarlo.
-  document.getElementById('mobile-calendar-density-field').classList.toggle('hidden', calendarViewMode === 'year');
-}
-
-function refreshMobileCalendarNavLabel() {
-  const label = document.getElementById('btn-mobile-calendar-nav-label');
-  const year = state.viewDate.getFullYear();
-  if (calendarViewMode === 'year') {
-    label.innerHTML = `<span>${year}</span>`;
-  } else {
-    // Icono de flecha real (svg), no solo el caracter "▲" -- Koku
-    // pregunto si ese triangulo hacia algo, señal de que como texto
-    // plano no se leia como el boton que es.
-    label.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg><span>${year}</span>`;
-  }
-  // Nombre del mes, centrado debajo de la barra -- solo visible en modo
-  // mes (la vista anual ya no tiene "un mes concreto" que nombrar).
-  // Se actualiza aqui mismo, en el mismo sitio que ya se llama cada vez
-  // que cambia el mes/año/vista, en vez de buscar cada punto de cambio
-  // por separado.
-  const monthNameEl = document.getElementById('mobile-calendar-month-name');
-  if (monthNameEl) {
-    monthNameEl.classList.toggle('hidden', calendarViewMode === 'year');
-    monthNameEl.textContent = capitalizeFirst(MONTH_ONLY_FORMATTER.format(state.viewDate));
-  }
-}
-
-document.getElementById('btn-mobile-calendar-nav-label').addEventListener('click', () => {
-  if (calendarViewMode === 'year') enterMonthFromYear(state.viewDate.getMonth());
-  else setCalendarViewMode('year');
-});
-// Desplegable en vez de icono ciclico -- mismo motivo/patron que
-// mobileDayViewModeField mas abajo: Koku pidio ver las 3 opciones y
-// elegir directamente, en vez de tener que darle al icono hasta que
-// saliera la que buscaba.
-const mobileCalendarDensityField = createSelectField({
-  options: [
-    { value: 'compact', label: 'Compacto' },
-    { value: 'stacked', label: 'Apilado' },
-    { value: 'listed', label: 'Listado' },
-  ],
-  initialValue: getMobileCalendarMonthMode(),
-  onChange: (v) => {
-    localStorage.setItem('mobileCalendarMonthMode', v);
-    renderMobileCalendarMonthGrid();
-    refreshMobileCalendarModeVisibility();
-  },
-});
-document.getElementById('mobile-calendar-density-field').appendChild(mobileCalendarDensityField.element);
-// El listener real de btn-mobile-calendar-search (abre el buscador
-// global de la Fase 5) se registra mas abajo, junto al resto del
-// buscador (runMobileGlobalSearch/openMobileGlobalSearch).
-
-// Swipe vertical del MES: arriba = mes siguiente, abajo = mes anterior
-// (direccion normal). Swipe vertical del AÑO: arriba = año ANTERIOR,
-// abajo = año siguiente -- direccion EXPLICITAMENTE invertida, pedido
-// asi por Koku.
-
-// Pequeña animacion de entrada (deslizar+fundido) al cambiar de mes/
-// año/dia por swipe -- Koku la pidio para "hacerlo mas visual". Un
-// helper generico: añade la clase, fuerza un reflow (para que se pueda
-// repetir aunque sea la MISMA clase que la ultima vez -- si no, el
-// navegador no vuelve a disparar los @keyframes) y la quita sola al
-// terminar (con un respaldo por si "animationend" no llega, p.ej. si el
-// contenido se vuelve a pintar a medio camino). No espera a que
-// termine de cargar el contenido nuevo (loadMonth()/showMobileDay() son
-// async y no se esperan aqui tampoco) -- es puramente cosmetico, sin
-// bloquear nada.
-function playMobileSwipeTransition(el, direction) {
-  if (!el) return;
-  const cls = `mobile-swipe-anim-${direction}`;
-  el.classList.remove('mobile-swipe-anim-up', 'mobile-swipe-anim-down', 'mobile-swipe-anim-left', 'mobile-swipe-anim-right');
-  void el.offsetWidth;
-  el.classList.add(cls);
-  const cleanup = () => el.classList.remove(cls);
-  el.addEventListener('animationend', cleanup, { once: true });
-  setTimeout(cleanup, 300);
-}
-
-attachSwipe(document.getElementById('mobile-calendar-month-grid'), {
-  onUp: () => {
-    state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() + 1, 1);
-    loadMonth();
-    playMobileSwipeTransition(document.getElementById('mobile-calendar-month-grid'), 'up');
-  },
-  onDown: () => {
-    state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() - 1, 1);
-    loadMonth();
-    playMobileSwipeTransition(document.getElementById('mobile-calendar-month-grid'), 'down');
-  },
-});
-attachSwipe(document.getElementById('mobile-calendar-year-grid'), {
-  onUp: () => {
-    state.viewDate = new Date(state.viewDate.getFullYear() - 1, state.viewDate.getMonth(), 1);
-    refreshMobileCalendarYearGrid();
-    refreshMobileCalendarNavLabel();
-    playMobileSwipeTransition(document.getElementById('mobile-calendar-year-grid'), 'up');
-  },
-  onDown: () => {
-    state.viewDate = new Date(state.viewDate.getFullYear() + 1, state.viewDate.getMonth(), 1);
-    refreshMobileCalendarYearGrid();
-    refreshMobileCalendarNavLabel();
-    playMobileSwipeTransition(document.getElementById('mobile-calendar-year-grid'), 'down');
-  },
-});
-
-// ---------------------------------------------------------------------
-// Vista diaria movil completa (Fase 3 del rediseño movil, ver
-// CLAUDE.md): tira semanal + 2 sub-vistas ("Vista por horas"/"Listado").
-// ---------------------------------------------------------------------
-
-// Formateador propio para la cabecera del dia ("Miercoles - 3 Sep 2026")
-// y los bloques de Listado ("Lunes - 2 Sep") -- se escribe a mano en vez
-// de con Intl.DateTimeFormat porque el mes abreviado en es-ES a veces
-// viene con un punto ("sept.") segun el motor, y aqui se queria un
-// formato corto fijo sin sorpresas.
-const MOBILE_DAY_MONTH_ABBR = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-const MOBILE_DAY_WEEKDAY_FORMATTER = new Intl.DateTimeFormat('es-ES', { weekday: 'long' });
-function capitalizeFirst(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
-function formatMobileDayHeading(date) {
-  const weekday = capitalizeFirst(MOBILE_DAY_WEEKDAY_FORMATTER.format(date));
-  return `${weekday} - ${date.getDate()} ${MOBILE_DAY_MONTH_ABBR[date.getMonth()]} ${date.getFullYear()}`;
-}
-function formatMobileListadoBlockHeading(date) {
-  const weekday = capitalizeFirst(MOBILE_DAY_WEEKDAY_FORMATTER.format(date));
-  return `${weekday} - ${date.getDate()} ${MOBILE_DAY_MONTH_ABBR[date.getMonth()]}`;
-}
-
-// Ajuste por dispositivo (localStorage, NO sincronizado -- mismo patron
-// que mobileCalendarMonthMode de arriba): que sub-vista del dia se ve.
-function getMobileDayViewMode() {
-  return localStorage.getItem('mobileDayViewMode') === 'listado' ? 'listado' : 'hours';
-}
-
-// Los 7 dias (lunes a domingo) de la semana que contiene `date`.
-function getWeekDatesFor(date) {
-  const dow = (date.getDay() + 6) % 7; // 0 = lunes
-  const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate() - dow);
-  const days = [];
-  for (let i = 0; i < 7; i++) days.push(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i));
-  return days;
-}
-
-async function renderMobileWeekStrip(viewingDate) {
-  const days = getWeekDatesFor(viewingDate);
-  const from = toDateKey(days[0]);
-  const to = toDateKey(days[6]);
-  const weekEvents = await api(`/api/events?from=${from}T00:00:00&to=${to}T23:59:59`);
-  // Si mientras se esperaba la respuesta el usuario ya cambio de dia (p.
-  // ej. deslizando varias veces seguidas), esta respuesta esta obsoleta.
-  if (!state.mobileCalendarDayDate || toDateKey(state.mobileCalendarDayDate) !== toDateKey(viewingDate)) return;
-
-  const today = new Date();
-  const container = document.getElementById('mobile-week-strip-days');
-  container.innerHTML = '';
-  days.forEach((d) => {
-    const cell = document.createElement('div');
-    cell.className = 'week-strip-day';
-    if (sameDay(d, today)) cell.classList.add('is-today');
-    if (sameDay(d, viewingDate)) cell.classList.add('is-viewing');
-
-    const label = document.createElement('div');
-    label.className = 'week-strip-day-label';
-    label.textContent = WEEKDAY_LABELS[(d.getDay() + 6) % 7];
-
-    const num = document.createElement('div');
-    num.className = 'week-strip-day-num';
-    num.textContent = d.getDate();
-
-    const dot = document.createElement('div');
-    dot.className = 'week-strip-day-dot';
-    if (!weekEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), d))) dot.classList.add('is-empty');
-
-    cell.append(label, num, dot);
-    cell.addEventListener('click', () => showMobileDay(d, { scrollToNow: true }));
-    container.appendChild(cell);
-  });
-}
-
-// --- "Vista por horas": eventos posicionados por minuto exacto -------
-// (--hour-row-height:60px en styles.css hace que 1px = 1 minuto, asi
-// que "top" es directamente minutosDesdeMedianoche y "height" la
-// duracion en minutos -- sin conversion aparte).
-let mobileCurrentTimeLineTimer = null;
-function stopMobileCurrentTimeLineTimer() {
-  if (mobileCurrentTimeLineTimer) { clearInterval(mobileCurrentTimeLineTimer); mobileCurrentTimeLineTimer = null; }
-}
-
-function refreshMobileCurrentTimeLine(date) {
-  const grid = document.getElementById('mobile-hours-grid');
-  if (!grid) return;
-  const existing = grid.querySelector('.mobile-current-time-line');
-  if (existing) existing.remove();
-  if (!date || !sameDay(date, new Date())) return;
-  const now = new Date();
-  const line = document.createElement('div');
-  line.className = 'mobile-current-time-line';
-  line.style.top = `${now.getHours() * 60 + now.getMinutes()}px`;
-  const label = document.createElement('div');
-  label.className = 'mobile-current-time-label';
-  label.textContent = TIME_FORMATTER.format(now);
-  line.appendChild(label);
-  grid.appendChild(line);
-}
-
-function scrollMobileHoursToTime(date, targetMinutes) {
-  // .mobile-hours-scroll tiene overflow-y:auto, pero en movil ".app"
-  // usa min-height (no height) a proposito, para que la pagina crezca
-  // con el contenido y se pueda hacer scroll normal con el dedo (ver el
-  // comentario junto a ".app" en styles.css) -- eso significa que este
-  // contenedor NUNCA llega a desbordar de verdad (su scrollHeight ==
-  // clientHeight siempre), asi que fijar su propio scrollTop no mueve
-  // nada. El que de verdad se desplaza es la PAGINA entera, asi que hay
-  // que calcular la posicion absoluta en la pagina y usar
-  // window.scrollTo() en su lugar.
-  const grid = document.getElementById('mobile-hours-grid');
-  if (!grid) return;
-  // targetMinutes explicito (p. ej. la hora real de un evento clicado
-  // desde el buscador global) tiene prioridad; si no se pasa, se sigue
-  // el comportamiento de siempre ("ahora" si es hoy, 8:00 si no).
-  if (targetMinutes === undefined) {
-    const now = new Date();
-    targetMinutes = sameDay(date, now) ? (now.getHours() * 60 + now.getMinutes()) : 8 * 60;
-  }
-  const gridTop = grid.getBoundingClientRect().top + window.scrollY;
-  // Deja un par de horas de margen ANTES del objetivo, para que no quede
-  // pegado justo al borde superior de la pantalla.
-  window.scrollTo(0, Math.max(0, gridTop + targetMinutes - 120));
-}
-
-// Reparto de "carriles" simple y voraz para eventos con hora que se
-// solapan ese dia -- un solo contador de carriles para TODO el dia (no
-// por cada grupo de solapes por separado), mas sencillo de razonar y
-// suficiente para el volumen de una agenda personal.
-function assignMobileHourLanes(items) {
-  const laneEnds = [];
-  items.forEach((item) => {
-    let lane = laneEnds.findIndex((endMin) => endMin <= item.startMin);
-    if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
-    laneEnds[lane] = item.endMin;
-    item.lane = lane;
-  });
-  return Math.max(1, laneEnds.length);
-}
-
-async function renderMobileHoursView(date) {
-  const dateStr = toDateKey(date);
-  const dayEvents = await api(`/api/events?from=${dateStr}T00:00:00&to=${dateStr}T23:59:59`);
-  if (!state.mobileCalendarDayDate || toDateKey(state.mobileCalendarDayDate) !== dateStr) return;
-  if (getMobileDayViewMode() !== 'hours') return;
-
-  const allDayRow = document.getElementById('mobile-day-allday-row');
-  const grid = document.getElementById('mobile-hours-grid');
-  allDayRow.innerHTML = '';
-  grid.innerHTML = '';
-
-  const allDayEvents = dayEvents.filter((ev) => ev.allDay);
-  allDayRow.classList.toggle('hidden', allDayEvents.length === 0);
-  allDayEvents.forEach((ev) => {
-    const chip = document.createElement('div');
-    chip.className = 'mobile-day-allday-chip';
-    chip.style.backgroundColor = ev.isTask ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev)) : (ev.groupColor || DEFAULT_EVENT_COLOR);
-    chip.textContent = ev.title;
-    chip.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
-    allDayRow.appendChild(chip);
-  });
-
-  for (let h = 0; h < 24; h++) {
-    const row = document.createElement('div');
-    row.className = 'mobile-hour-row';
-    row.style.top = `${h * 60}px`;
-    const label = document.createElement('div');
-    label.className = 'mobile-hour-label';
-    label.textContent = `${String(h).padStart(2, '0')}:00`;
-    row.appendChild(label);
-    grid.appendChild(row);
-  }
-
-  const timed = dayEvents
-    .filter((ev) => !ev.allDay && ev.startAt)
-    .map((ev) => {
-      const start = new Date(ev.startAt);
-      const startMin = start.getHours() * 60 + start.getMinutes();
-      let endMin;
-      if (ev.endAt) {
-        const end = new Date(ev.endAt);
-        endMin = sameDay(end, date) ? (end.getHours() * 60 + end.getMinutes()) : 24 * 60;
-      } else {
-        endMin = startMin + 30;
-      }
-      if (endMin <= startMin) endMin = startMin + 15;
-      return { ev, startMin, endMin };
-    })
-    .sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
-  const laneCount = assignMobileHourLanes(timed);
-
-  timed.forEach(({ ev, startMin, endMin, lane }) => {
-    const block = document.createElement('div');
-    block.className = `mobile-hour-event ${ev.isTask ? 'is-task' : 'is-event'}`;
-    block.style.top = `${startMin}px`;
-    block.style.height = `${Math.max(endMin - startMin, 15)}px`;
-    if (laneCount > 1) {
-      // Cuando hay solapes, cada carril ocupa una fraccion del ancho
-      // disponible (a la derecha de la columna de horas) -- se calcula
-      // en JS en vez de tocar el left/right fijos de la clase base,
-      // que asumen un solo evento por franja.
-      block.style.right = 'auto';
-      block.style.left = `calc(3rem + (100% - 3rem - 0.3rem) * ${lane} / ${laneCount})`;
-      block.style.width = `calc((100% - 3rem - 0.3rem) / ${laneCount} - 3px)`;
-    }
-    block.textContent = ev.title;
-    if (ev.isTask) {
-      const color = ev.done ? taskCompletedColor(ev) : taskPendingColor(ev);
-      block.style.borderColor = color;
-      block.style.color = color;
-    } else {
-      block.style.backgroundColor = ev.groupColor || DEFAULT_EVENT_COLOR;
-    }
-    block.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
-    grid.appendChild(block);
-  });
-
-  refreshMobileCurrentTimeLine(date);
-}
-
-// --- "Listado" (dia): scroll bidireccional -- ventana inicial de ±3
-// dias, un IntersectionObserver en los centinelas de arriba/abajo la
-// amplia sola al acercarse a un extremo (sin libreria, mismo patron
-// "centinela" que se explico en el plan). -----------------------------
-let mobileDayListadoRange = null; // { from: Date, to: Date }
-let mobileDayListadoObserver = null;
-let mobileDayListadoBusy = false;
-// Si llega una peticion de expandir mientras ya hay otra en curso (pasa
-// de verdad: en una pantalla corta con pocos dias con contenido, los DOS
-// centinelas pueden estar visibles a la vez nada mas entrar, y el
-// IntersectionObserver los notifica juntos en la misma tanda -- sin
-// esto, la segunda se perdia en silencio para siempre, ya que el
-// observer solo vuelve a avisar en un cambio de visible/no-visible, no
-// mientras se queda "visible" sin mas), se apunta aqui para procesarla
-// en cuanto la actual termine, en vez de descartarla.
-let mobileDayListadoPending = new Set();
-const MOBILE_DAY_LISTADO_STEP_DAYS = 4;
-const MOBILE_DAY_LISTADO_MAX_SPAN_DAYS = 180; // red de seguridad, evita crecimiento sin limite
-
-function disconnectMobileDayListadoObserver() {
-  if (mobileDayListadoObserver) { mobileDayListadoObserver.disconnect(); mobileDayListadoObserver = null; }
-  mobileDayListadoPending.clear();
-}
-
-function buildMobileListadoRow(ev) {
-  const row = document.createElement('div');
-  row.className = 'mobile-calendar-month-list-row';
-  const bar = document.createElement('div');
-  bar.className = 'mobile-calendar-month-list-bar';
-  bar.style.backgroundColor = ev.isTask ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev)) : (ev.groupColor || DEFAULT_EVENT_COLOR);
-  const title = document.createElement('div');
-  title.className = 'mobile-calendar-month-list-title';
-  title.textContent = ev.title;
-  const time = document.createElement('div');
-  time.className = 'mobile-calendar-month-list-time';
-  time.textContent = formatMobileEventTimeRange(ev);
-  row.append(bar, title, time);
-  row.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
-  return row;
-}
-
-async function loadAndRenderMobileDayListado() {
-  const range = mobileDayListadoRange;
-  if (!range) return;
-  const fromStr = toDateKey(range.from);
-  const toStr = toDateKey(range.to);
-  const events = await api(`/api/events?from=${fromStr}T00:00:00&to=${toStr}T23:59:59`);
-  // Obsoleto si mientras se esperaba la respuesta se cambio de sub-vista,
-  // se salio de la vista diaria, o el rango volvio a cambiar (peticiones
-  // solapadas de dos expansiones seguidas).
-  if (getMobileDayViewMode() !== 'listado') return;
-  if (document.getElementById('mobile-calendar-day-view').classList.contains('hidden')) return;
-  if (mobileDayListadoRange !== range) return;
-
-  const byDay = new Map();
-  events.forEach((ev) => {
-    if (!ev.startAt) return; // sin fecha no aparece aqui, igual que en el resto del calendario
-    const key = toDateKey(new Date(ev.startAt));
-    if (!byDay.has(key)) byDay.set(key, []);
-    byDay.get(key).push(ev);
-  });
-
-  const content = document.getElementById('mobile-day-listado-content');
-  content.innerHTML = '';
-  let cursor = new Date(range.from);
-  let anyRendered = false;
-  while (cursor <= range.to) {
-    const key = toDateKey(cursor);
-    const dayEvents = (byDay.get(key) || []).sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
-    // Un dia sin nada no pinta ningun bloque -- Koku no quiere ver
-    // "Nada este dia." repetido en cada fecha del rango. Los centinelas
-    // de scroll infinito no dependen de esto, siguen ahi igual.
-    if (dayEvents.length > 0) {
-      const block = document.createElement('div');
-      block.className = 'mobile-day-listado-block';
-      const heading = document.createElement('div');
-      heading.className = 'mobile-day-listado-block-heading';
-      heading.textContent = formatMobileListadoBlockHeading(cursor);
-      block.appendChild(heading);
-      dayEvents.forEach((ev) => block.appendChild(buildMobileListadoRow(ev)));
-      content.appendChild(block);
-      anyRendered = true;
-    }
-    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
-  }
-  if (!anyRendered) {
-    // Si TODO el rango cargado esta vacio, un unico aviso (no uno por
-    // dia) para que la vista no se quede en blanco sin explicacion.
-    const empty = document.createElement('p');
-    empty.className = 'empty-hint';
-    empty.textContent = 'No hay nada en estos días.';
-    content.appendChild(empty);
-  }
-}
-
-async function expandMobileDayListado(direction) {
-  if (!mobileDayListadoRange) return;
-  if (mobileDayListadoBusy) { mobileDayListadoPending.add(direction); return; }
-  mobileDayListadoBusy = true;
-  try {
-    // Bucle en vez de una sola pasada: al terminar, si mientras tanto se
-    // pidio expandir en otro sentido (ver mobileDayListadoPending
-    // arriba), se procesa tambien antes de soltar el candado -- así
-    // nunca se pierde un aviso del observer por haber llegado a la vez
-    // que otro ya en curso.
-    while (true) {
-      const totalSpanDays = Math.round((mobileDayListadoRange.to - mobileDayListadoRange.from) / 86400000);
-      if (totalSpanDays >= MOBILE_DAY_LISTADO_MAX_SPAN_DAYS) { mobileDayListadoPending.clear(); break; }
-      // El scroll real ocurre en la PAGINA, no dentro de
-      // #mobile-day-listado-view (ver comentario de
-      // scrollMobileHoursToTime() sobre por que ".app" nunca llega a
-      // acotar la altura de sus hijos en movil) -- se mide con
-      // document.documentElement/window en vez del propio contenedor.
-      const prevDocHeight = document.documentElement.scrollHeight;
-      const prevScrollY = window.scrollY;
-      if (direction === 'back') {
-        mobileDayListadoRange.from = new Date(mobileDayListadoRange.from.getFullYear(), mobileDayListadoRange.from.getMonth(), mobileDayListadoRange.from.getDate() - MOBILE_DAY_LISTADO_STEP_DAYS);
-      } else {
-        mobileDayListadoRange.to = new Date(mobileDayListadoRange.to.getFullYear(), mobileDayListadoRange.to.getMonth(), mobileDayListadoRange.to.getDate() + MOBILE_DAY_LISTADO_STEP_DAYS);
-      }
-      await loadAndRenderMobileDayListado();
-      if (direction === 'back') {
-        // Compensa el scroll para que anteponer dias arriba no de un
-        // salto visual (el contenido nuevo empuja hacia abajo lo que ya
-        // se veia).
-        window.scrollTo(0, prevScrollY + (document.documentElement.scrollHeight - prevDocHeight));
-      }
-      if (mobileDayListadoPending.size === 0) break;
-      direction = mobileDayListadoPending.values().next().value;
-      mobileDayListadoPending.delete(direction);
-    }
-  } finally {
-    mobileDayListadoBusy = false;
-  }
-}
-
-function setupMobileDayListadoObserver() {
-  disconnectMobileDayListadoObserver();
-  const topSentinel = document.getElementById('mobile-day-listado-top-sentinel');
-  const bottomSentinel = document.getElementById('mobile-day-listado-bottom-sentinel');
-  // root:null (en vez del div) -- observa contra el VIEWPORT real del
-  // navegador, que es lo que de verdad se desplaza en movil (ver el
-  // mismo comentario de scrollMobileHoursToTime()).
-  mobileDayListadoObserver = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (!entry.isIntersecting) return;
-      if (entry.target === topSentinel) expandMobileDayListado('back');
-      else if (entry.target === bottomSentinel) expandMobileDayListado('forward');
-    });
-  }, { root: null, threshold: 0 });
-  mobileDayListadoObserver.observe(topSentinel);
-  mobileDayListadoObserver.observe(bottomSentinel);
-}
-
-async function renderMobileDayListado(centerDate) {
-  mobileDayListadoRange = {
-    from: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() - 3),
-    to: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() + 3),
-  };
-  // El scroll real es el de la PAGINA (ver scrollMobileHoursToTime()),
-  // asi que "empezar arriba del todo" es scrollear la ventana, no el div.
-  window.scrollTo(0, 0);
-  await loadAndRenderMobileDayListado();
-  // El primer observe() de IntersectionObserver avisa de inmediato con
-  // el estado actual -- si la ventana inicial (±3 dias) no llega a
-  // desbordar la pantalla real, esa primera notificacion ya se encarga
-  // de ampliarla sola (ver expandMobileDayListado), sin necesitar aqui
-  // ningun bucle de relleno a mano.
-  setupMobileDayListadoObserver();
-}
-
-async function renderMobileDayActiveSubView({ scrollToNow = false, targetMinutes } = {}) {
-  const mode = getMobileDayViewMode();
-  document.getElementById('mobile-day-hours-view').classList.toggle('hidden', mode !== 'hours');
-  document.getElementById('mobile-day-listado-view').classList.toggle('hidden', mode !== 'listado');
-  stopMobileCurrentTimeLineTimer();
-  if (mode === 'hours') {
-    disconnectMobileDayListadoObserver();
-    await renderMobileHoursView(state.mobileCalendarDayDate);
-    if (targetMinutes !== undefined) scrollMobileHoursToTime(state.mobileCalendarDayDate, targetMinutes);
-    else if (scrollToNow) scrollMobileHoursToTime(state.mobileCalendarDayDate);
-    mobileCurrentTimeLineTimer = setInterval(() => refreshMobileCurrentTimeLine(state.mobileCalendarDayDate), 60 * 1000);
-  } else {
-    await renderMobileDayListado(state.mobileCalendarDayDate);
-  }
-}
-
-// Si la vista diaria movil esta abierta Y mostrando este mismo dia,
-// la vuelve a pintar -- para que guardar/borrar un evento o tarea (p.
-// ej. cambiar "Todo el dia" <-> hora fija) se refleje al instante sin
-// tener que salir y volver a entrar. Sin scrollToNow (no se quiere
-// saltar la posicion de lectura actual solo por haber guardado).
-function refreshOpenMobileDayViewIfShowing(date) {
-  if (!date) return;
-  const dayView = document.getElementById('mobile-calendar-day-view');
-  if (!dayView || dayView.classList.contains('hidden')) return;
-  if (!state.mobileCalendarDayDate || toDateKey(state.mobileCalendarDayDate) !== toDateKey(date)) return;
-  renderMobileDayActiveSubView({ scrollToNow: false });
-}
-
-// Desplegable en vez de icono ciclico -- Koku pidio poder clicar
-// directamente la sub-vista que quiere, en vez de darle al icono hasta
-// que salga la que buscaba (confuso sin eventos de por medio para saber
-// en cual estabas).
-const mobileDayViewModeField = createSelectField({
-  options: [{ value: 'hours', label: 'Horas' }, { value: 'listado', label: 'Listado' }],
-  initialValue: getMobileDayViewMode(),
-  onChange: (v) => {
-    localStorage.setItem('mobileDayViewMode', v);
-    renderMobileDayActiveSubView({ scrollToNow: true });
-  },
-});
-document.getElementById('mobile-day-view-mode-field').appendChild(mobileDayViewModeField.element);
-
-// ---------------------------------------------------------------------
-// Buscador global (Fase 5): eventos+tareas via GET /api/events?q= (ya
-// construido en la Fase 1, ignora from/to a proposito) + notas filtradas
-// en cliente sobre state.notes (ya cargadas de antemano al iniciar la
-// app, sin peticion aparte). Un solo overlay reutilizado desde los dos
-// botones de busqueda (mes y dia).
-// ---------------------------------------------------------------------
-let mobileGlobalSearchDebounceTimer = null;
-
-function openMobileGlobalSearch() {
-  document.getElementById('mobile-global-search-input').value = '';
-  document.getElementById('mobile-global-search-results').innerHTML = '';
-  document.getElementById('mobile-global-search').classList.remove('hidden');
-  document.getElementById('mobile-global-search-input').focus();
-}
-
-function closeMobileGlobalSearch() {
-  document.getElementById('mobile-global-search').classList.add('hidden');
-}
-
-function formatMobileSearchResultDate(date, allDay) {
-  const datePart = `${date.getDate()} ${MOBILE_DAY_MONTH_ABBR[date.getMonth()]}`;
-  return allDay ? datePart : `${datePart}, ${toTimeInputValue(date)}`;
-}
-
-function buildMobileSearchResultRow({ typeClass, typeLabel, title, meta, onClick }) {
-  const row = document.createElement('button');
-  row.type = 'button';
-  row.className = 'reminder-item mobile-search-result-item';
-  row.innerHTML = `
-    <span class="mobile-search-result-main">
-      <span class="mobile-search-type-dot ${typeClass}" aria-hidden="true" title="${typeLabel}"></span>
-      <span class="mobile-search-result-title"></span>
-    </span>
-    <span class="mobile-search-result-meta"></span>
-  `;
-  row.querySelector('.mobile-search-result-title').textContent = title;
-  row.querySelector('.mobile-search-result-meta').textContent = meta || '';
-  row.addEventListener('click', onClick);
-  return row;
-}
-
-async function runMobileGlobalSearch(query) {
-  const results = document.getElementById('mobile-global-search-results');
-  const trimmed = query.trim();
-  if (!trimmed) {
-    results.innerHTML = '';
-    return;
-  }
-  let items;
-  try {
-    items = await api(`/api/events?q=${encodeURIComponent(trimmed)}`);
-  } catch (err) {
-    items = [];
-  }
-  const lowerQuery = trimmed.toLowerCase();
-  const matchingNotes = (state.notes || []).filter(
-    (n) => n.title && n.title.toLowerCase().includes(lowerQuery)
-  );
-
-  results.innerHTML = '';
-  if (!items.length && !matchingNotes.length) {
-    const hint = document.createElement('p');
-    hint.className = 'empty-hint';
-    hint.textContent = 'Sin resultados.';
-    results.appendChild(hint);
-    return;
-  }
-
-  for (const item of items) {
-    const hasDate = !!item.startAt;
-    const date = hasDate ? new Date(item.startAt) : null;
-    const row = buildMobileSearchResultRow({
-      typeClass: item.isTask ? 'is-task' : 'is-event',
-      typeLabel: item.isTask ? 'Tarea' : 'Evento',
-      title: item.title,
-      meta: hasDate ? formatMobileSearchResultDate(date, item.allDay) : 'Sin fecha',
-      onClick: () => {
-        closeMobileGlobalSearch();
-        if (item.isTask && !hasDate) { openTaskModal(item); return; }
-        // "Todo el dia": sin objetivo de scroll (que se vea la fila de
-        // arriba, no desplazarse dentro de la rejilla); si no, la hora
-        // real del evento clicado -- antes esto siempre desplazaba a
-        // "ahora", llevando al dia correcto pero a la hora equivocada.
-        const targetDate = date || new Date();
-        const targetMinutes = item.allDay ? null : (targetDate.getHours() * 60 + targetDate.getMinutes());
-        enterMobileDayView(targetDate, { targetMinutes });
-      },
-    });
-    results.appendChild(row);
-  }
-  for (const note of matchingNotes) {
-    const row = buildMobileSearchResultRow({
-      typeClass: 'is-note',
-      typeLabel: 'Nota',
-      title: note.title || '(sin título)',
-      meta: '',
-      onClick: () => {
-        closeMobileGlobalSearch();
-        openMobileNotesView();
-        openNoteInEditor(note);
-      },
-    });
-    results.appendChild(row);
-  }
-}
-
-document.getElementById('mobile-global-search-input').addEventListener('input', (e) => {
-  clearTimeout(mobileGlobalSearchDebounceTimer);
-  const value = e.target.value;
-  mobileGlobalSearchDebounceTimer = setTimeout(() => runMobileGlobalSearch(value), 250);
-});
-document.getElementById('btn-close-mobile-global-search').addEventListener('click', closeMobileGlobalSearch);
-document.getElementById('btn-mobile-calendar-search').addEventListener('click', openMobileGlobalSearch);
-document.getElementById('btn-mobile-calendar-day-search').addEventListener('click', openMobileGlobalSearch);
-
-async function showMobileDay(date, { scrollToNow = false, targetMinutes } = {}) {
-  state.mobileCalendarDayDate = date;
-  document.getElementById('mobile-calendar-day-heading').textContent = formatMobileDayHeading(date);
-  const monthLabel = capitalizeFirst(MONTH_ONLY_FORMATTER.format(date));
-  document.getElementById('btn-mobile-day-back-label').innerHTML =
-    `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg><span>${monthLabel}</span>`;
-  await Promise.all([renderMobileWeekStrip(date), renderMobileDayActiveSubView({ scrollToNow, targetMinutes })]);
-}
-
-// targetMinutes opcional: si se pasa (p. ej. un resultado del buscador
-// global con hora real), se desplaza ahi en vez de a "ahora". Pasar
-// null explicitamente (evento "todo el dia") evita desplazarse dentro
-// de la rejilla en absoluto, para que se vea la fila de arriba.
-function enterMobileDayView(date, { targetMinutes } = {}) {
-  document.getElementById('mobile-calendar-month-toolbar').classList.add('hidden');
-  document.querySelector('.mobile-calendar-view').classList.add('hidden');
-  document.getElementById('mobile-calendar-day-view').classList.remove('hidden');
-  if (targetMinutes === null) {
-    showMobileDay(date, { scrollToNow: false });
-  } else {
-    showMobileDay(date, { scrollToNow: true, targetMinutes });
-  }
-}
-
-function exitMobileDayView() {
-  stopMobileCurrentTimeLineTimer();
-  disconnectMobileDayListadoObserver();
-  document.getElementById('mobile-calendar-day-view').classList.add('hidden');
-  document.getElementById('mobile-calendar-month-toolbar').classList.remove('hidden');
-  document.querySelector('.mobile-calendar-view').classList.remove('hidden');
-}
-
-document.getElementById('btn-mobile-day-back-label').addEventListener('click', exitMobileDayView);
-
-// Swipe horizontal en la tira semanal (unico area sin scroll vertical
-// propio dentro de la vista diaria -- ya lleva touch-action:pan-x en
-// styles.css, pensado justo para esto): izquierda = dia siguiente,
-// derecha = dia anterior. Si el nuevo dia cae en otra semana, la tira
-// se recalcula sola (showMobileDay -> renderMobileWeekStrip).
-// Enganchado a TODA la vista diaria (cabecera + contenido), no solo a
-// la tira semanal -- antes solo funcionaba deslizando sobre esa fila
-// estrecha, que es justo lo que reporto Koku ("en la vista diaria no
-// funciona el SWIPE"). preserveVerticalScroll:true porque, a diferencia
-// de mes/año/tira semanal (que no necesitan scroll vertical propio), el
-// contenido de la vista diaria (rejilla de horas/listado) SI necesita
-// que el scroll vertical normal de la pagina siga funcionando -- solo
-// se bloquea el gesto nativo cuando el arrastre es claramente
-// horizontal. Un solo listener (no uno aparte para la tira semanal) para
-// no disparar el cambio de dia DOS veces por el mismo gesto (los
-// eventos de puntero suben por burbujeo desde la tira, que vive dentro
-// de esta misma seccion).
-function playMobileDaySwipeAnimation(direction) {
-  playMobileSwipeTransition(document.getElementById('mobile-day-hours-view'), direction);
-  playMobileSwipeTransition(document.getElementById('mobile-day-listado-view'), direction);
-}
-attachSwipe(document.getElementById('mobile-calendar-day-view'), {
-  preserveVerticalScroll: true,
-  onLeft: () => {
-    const d = state.mobileCalendarDayDate;
-    showMobileDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1), { scrollToNow: true });
-    playMobileDaySwipeAnimation('left');
-  },
-  onRight: () => {
-    const d = state.mobileCalendarDayDate;
-    showMobileDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1), { scrollToNow: true });
-    playMobileDaySwipeAnimation('right');
-  },
-});
-
-// Primer pintado: los contenedores existen desde que carga la pagina,
-// pero hasta que loadMonth()/setCalendarViewMode() corren por primera
-// vez (dentro de init()) conviene que la barra ya tenga el texto/estado
-// correcto -- refreshMobileCalendarNavLabel()/refreshMobileCalendarModeVisibility()
-// no dependen de datos de red, se pueden llamar ya.
-refreshMobileCalendarNavLabel();
-refreshMobileCalendarModeVisibility();
 
 // ---------------------------------------------------------------------
 // Modal de evento (crear / editar / borrar)
@@ -2579,19 +1581,16 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
   closeEventModal();
   loadMonth();
   loadReminders();
-  refreshOpenMobileDayViewIfShowing(startDate);
 });
 
 document.getElementById('btn-delete-event').addEventListener('click', async () => {
   const id = document.getElementById('event-id').value;
   if (!id) return;
   if (!confirm('¿Eliminar este evento?')) return;
-  const deletedDate = eventStartDateField.getValue();
   await api(`/api/events/${id}`, { method: 'DELETE' });
   closeEventModal();
   loadMonth();
   loadReminders();
-  refreshOpenMobileDayViewIfShowing(deletedDate);
 });
 
 // ---------------------------------------------------------------------
@@ -2875,20 +1874,17 @@ document.getElementById('task-form').addEventListener('submit', async (e) => {
   await loadTasks();
   renderTasksList();
   loadMonth();
-  refreshOpenMobileDayViewIfShowing(dateValue);
 });
 
 document.getElementById('btn-delete-task').addEventListener('click', async () => {
   const id = document.getElementById('task-id').value;
   if (!id) return;
   if (!confirm('¿Eliminar esta tarea?')) return;
-  const deletedDate = taskDateField.getValue();
   await api(`/api/events/${id}`, { method: 'DELETE' });
   closeTaskModal();
   await loadTasks();
   renderTasksList();
   loadMonth();
-  refreshOpenMobileDayViewIfShowing(deletedDate);
 });
 
 // ---------------------------------------------------------------------
@@ -2946,14 +1942,14 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
   const row = document.createElement('div');
   row.className = 'note-item' + (note.hidden ? ' is-hidden' : '');
 
-  const itemKey = mobileNotesItemKey('note', note.id);
+  const itemKey = notesItemKey('note', note.id);
   if (mode === 'select') {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'styled-checkbox';
-    checkbox.checked = mobileNotesSelectedKeys.has(itemKey);
+    checkbox.checked = notesSelectedKeys.has(itemKey);
     checkbox.addEventListener('click', (e) => e.stopPropagation());
-    checkbox.addEventListener('change', () => toggleMobileNotesSelection(itemKey));
+    checkbox.addEventListener('change', () => toggleNotesSelection(itemKey));
     row.appendChild(checkbox);
   }
 
@@ -2995,7 +1991,7 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
   }));
 
   row.addEventListener('click', () => {
-    if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
+    if (mode === 'select') { toggleNotesSelection(itemKey); return; }
     // Una nota oculta no se abre con un simple clic en la fila — solo el
     // icono de ojo la destapa (sin ningun texto/boton de aviso encima del
     // blur, para no recargar la fila).
@@ -3014,14 +2010,14 @@ function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
   const row = document.createElement('div');
   row.className = 'note-item note-folder-row';
 
-  const itemKey = mobileNotesItemKey('folder', folder.id);
+  const itemKey = notesItemKey('folder', folder.id);
   if (mode === 'select') {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'styled-checkbox';
-    checkbox.checked = mobileNotesSelectedKeys.has(itemKey);
+    checkbox.checked = notesSelectedKeys.has(itemKey);
     checkbox.addEventListener('click', (e) => e.stopPropagation());
-    checkbox.addEventListener('change', () => toggleMobileNotesSelection(itemKey));
+    checkbox.addEventListener('change', () => toggleNotesSelection(itemKey));
     row.appendChild(checkbox);
   }
 
@@ -3066,7 +2062,7 @@ function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
   }));
 
   row.addEventListener('click', () => {
-    if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
+    if (mode === 'select') { toggleNotesSelection(itemKey); return; }
     if (mode === 'editFolders') { openNoteFolderModal(folder); return; }
     state.currentNoteFolderId = folder.id;
     clearNoteSearch();
@@ -3186,7 +2182,6 @@ function appendFavoriteSortedGroup(container, items, buildRowFn, { compareFn } =
 // esté usando, de ahi el "if (!container) return" dentro de cada uno).
 const NOTES_VIEW_TARGETS = {
   desktop: { containerId: 'notes-list', backBtnId: 'btn-note-folder-back' },
-  mobile: { containerId: 'mobile-notes-list', backBtnId: 'btn-mobile-notes-back' },
 };
 
 function renderNotesView(target) {
@@ -3209,26 +2204,14 @@ function renderNotesViewInto(target) {
   // "mode" (Seleccionar/Mover/editFolders) se comparte entre las dos
   // plataformas -- un unico mecanismo para mover notas, ver
   // btn-note-folder-select (escritorio) y el menu de 3 puntos (movil),
-  // ambos llaman a setMobileNotesMode(). Orden/galeria SI siguen siendo
+  // ambos llaman a setNotesMode(). Orden/galeria SI siguen siendo
   // ajustes GLOBALES por dispositivo, solo con efecto en movil (no
   // tienen equivalente en escritorio, que sigue funcionando igual que
   // siempre en eso).
-  const mode = mobileNotesMode;
-  const sortOpts = target === 'mobile' ? { compareFn: compareMobileNotesItems } : {};
-  const useGallery = target === 'mobile' && getMobileNotesViewMode() === 'gallery';
-  const buildNote = useGallery
-    ? (n, opts) => buildNoteGalleryCard(n, opts)
-    : (n, opts) => buildNoteRow(n, opts);
+  const mode = notesMode;
 
   function appendNoteGroup(items, showPath) {
-    if (!useGallery) {
-      appendFavoriteSortedGroup(container, items, (n) => buildNote(n, { showPath, mode }), sortOpts);
-      return;
-    }
-    const grid = document.createElement('div');
-    grid.className = 'mobile-notes-gallery-grid';
-    appendFavoriteSortedGroup(grid, items, (n) => buildNote(n, { showPath, mode }), sortOpts);
-    if (grid.children.length > 0) container.appendChild(grid);
+    appendFavoriteSortedGroup(container, items, (n) => buildNoteRow(n, { showPath, mode }));
   }
 
   // En modo Mover solo tiene sentido navegar entre CARPETAS (elegir el
@@ -3263,126 +2246,11 @@ function renderNotesViewInto(target) {
   appendNoteGroup(notesHere, false);
 }
 
-// Criterio de orden de las notas normales en la vista movil (favoritos
-// siguen yendo primero siempre, ver appendFavoriteSortedGroup) --
-// ajustes GLOBALES por dispositivo (localStorage, nunca por carpeta,
-// confirmado con Koku). Fecha de creacion/edicion comparan el string
-// ISO tal cual (orden lexicografico = orden cronologico para este
-// formato de fecha, mismo truco que ya usa el resto de la app).
-function getMobileNotesSortBy() {
-  const v = localStorage.getItem('notesMobileSortBy');
-  return v === 'createdAt' || v === 'title' ? v : 'updatedAt';
-}
-function getMobileNotesSortDir() {
-  return localStorage.getItem('notesMobileSortDir') === 'asc' ? 'asc' : 'desc';
-}
-function compareMobileNotesItems(a, b) {
-  const sortBy = getMobileNotesSortBy();
-  const dir = getMobileNotesSortDir() === 'asc' ? 1 : -1;
-  if (sortBy === 'title') return getNoteListItemName(a).localeCompare(getNoteListItemName(b)) * dir;
-  const av = a[sortBy] || '';
-  const bv = b[sortBy] || '';
-  if (av === bv) return 0;
-  return (av < bv ? -1 : 1) * dir;
-}
-
-// Vista galeria/listado de la vista movil -- ajuste GLOBAL por
-// dispositivo (nunca por carpeta, ver decision 4 confirmada con Koku).
-function getMobileNotesViewMode() {
-  return localStorage.getItem('notesMobileViewMode') === 'gallery' ? 'gallery' : 'list';
-}
-
-// Extrae la primera <img src="..."> del cuerpo HTML de una nota, si
-// tiene alguna -- solo tiene sentido si bodyFormat es 'html' (las notas
-// de antes de la Fase 4/editor con formato son texto plano, nunca
-// pueden tener una imagen incrustada).
-function extractNoteThumbnailSrc(note) {
-  if (note.bodyFormat !== 'html' || !note.body) return null;
-  const m = note.body.match(/<img[^>]+src="([^"]+)"/i);
-  return m ? m[1] : null;
-}
-
-// Vista previa de texto (sin imagen) para la tarjeta de galeria -- quita
-// las etiquetas de verdad usando el propio DOM (mas fiable que un
-// regex para decodificar entidades correctamente), recortado a un
-// tamano razonable para una tarjeta pequeña.
-function extractNoteTextPreview(note) {
-  if (!note.body) return '';
-  const div = document.createElement('div');
-  div.innerHTML = note.bodyFormat === 'html' ? note.body : legacyNoteBodyToHtml(note.body);
-  return (div.textContent || '').trim().slice(0, 140);
-}
-
-function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
-  const card = document.createElement('div');
-  card.className = 'mobile-note-gallery-card' + (note.hidden ? ' is-hidden' : '');
-  const itemKey = mobileNotesItemKey('note', note.id);
-
-  if (mode === 'select') {
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'styled-checkbox mobile-note-gallery-checkbox';
-    checkbox.checked = mobileNotesSelectedKeys.has(itemKey);
-    checkbox.addEventListener('click', (e) => e.stopPropagation());
-    checkbox.addEventListener('change', () => toggleMobileNotesSelection(itemKey));
-    card.appendChild(checkbox);
-  }
-
-  const eyeBtn = document.createElement('button');
-  eyeBtn.type = 'button';
-  eyeBtn.className = 'mobile-note-gallery-eye-btn';
-  eyeBtn.innerHTML = note.hidden ? EYE_OFF_SVG : EYE_SVG;
-  eyeBtn.setAttribute('aria-label', note.hidden ? 'Destapar nota' : 'Ocultar nota');
-  eyeBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleNoteHidden(note);
-  });
-  card.appendChild(eyeBtn);
-
-  const thumbSrc = extractNoteThumbnailSrc(note);
-  const media = document.createElement('div');
-  media.className = 'mobile-note-gallery-media';
-  if (thumbSrc) {
-    const img = document.createElement('img');
-    img.src = thumbSrc;
-    img.alt = '';
-    media.appendChild(img);
-  } else {
-    media.style.background = note.folderColor || 'var(--surface-2)';
-    const preview = document.createElement('span');
-    preview.className = 'mobile-note-gallery-preview-text';
-    preview.textContent = extractNoteTextPreview(note);
-    media.appendChild(preview);
-  }
-  card.appendChild(media);
-
-  const title = document.createElement('span');
-  title.className = 'mobile-note-gallery-title';
-  title.textContent = note.title || 'Nota sin título';
-  card.appendChild(title);
-
-  card.appendChild(buildFavoriteStarBtn(note.favorite, (e) => {
-    e.stopPropagation();
-    toggleNoteFavorite(note);
-  }));
-
-  card.addEventListener('click', () => {
-    if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
-    if (note.hidden) return;
-    openNoteInEditor(note);
-  });
-  return card;
-}
-
 // Estado compartido (state.noteSearchQuery/...) entre las dos vistas
-// posibles -- limpiar el texto tiene que hacerlo en CUALQUIER input de
-// busqueda que exista en el DOM, no solo el de escritorio.
 function clearNoteSearch() {
   state.noteSearchQuery = '';
-  ['note-search-input', 'mobile-notes-search-input'].forEach((id) => {
-    const input = document.getElementById(id);
-    if (input) input.value = '';
-  });
+  const input = document.getElementById('note-search-input');
+  if (input) input.value = '';
 }
 
 document.getElementById('note-search-input').addEventListener('input', (e) => {
@@ -3405,60 +2273,40 @@ document.getElementById('btn-note-folder-back').addEventListener('click', () => 
 });
 
 // "Seleccionar" de escritorio -- mismo mecanismo Seleccionar/Mover que
-// ya existia solo en movil (mobileNotesMode compartido, ver
-// setMobileNotesMode mas abajo).
+// ya existia solo en movil (notesMode compartido, ver
+// setNotesMode mas abajo).
 document.getElementById('btn-note-folder-select').addEventListener('click', () => {
-  const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
-  setMobileNotesMode(selecting ? 'browse' : 'select');
+  const selecting = notesMode === 'select' || notesMode === 'move';
+  setNotesMode(selecting ? 'browse' : 'select');
 });
 
 // Equivalentes de la vista movil (#mobile-notes-view, Fase 4) -- misma
 // logica exacta que los de escritorio de arriba, apuntando a los ids
 // propios de esa vista. La busqueda movil siempre mira toda la app (sin
-// el boton de "solo esta carpeta" -- no hay sitio en la barra estrecha
-// para ese matiz, y buscar en toda la app es el comportamiento por
-// defecto de todas formas).
-const mobileNoteSearchInput = document.getElementById('mobile-notes-search-input');
-if (mobileNoteSearchInput) {
-  mobileNoteSearchInput.addEventListener('input', (e) => {
-    state.noteSearchQuery = e.target.value;
-    renderNotesView();
-  });
-}
-const btnMobileNotesBack = document.getElementById('btn-mobile-notes-back');
-if (btnMobileNotesBack) {
-  btnMobileNotesBack.addEventListener('click', () => {
-    const current = state.noteFolders.find((f) => f.id === state.currentNoteFolderId);
-    state.currentNoteFolderId = current ? current.parentId : null;
-    clearNoteSearch();
-    renderNotesView();
-  });
-}
-
 // ---------------------------------------------------------------------
 // Notas movil -- menu de 3 puntos y sus 4 modos (Fase 4 del rediseño
 // movil): Editar carpetas / Seleccionar (con Eliminar/Mover) / Vista
 // (galeria-listado) / Ordenar. "mode" es el mismo concepto ya usado en
-// buildNoteRow/buildFolderRow/buildNoteGalleryCard mas arriba.
+// buildNoteRow/buildFolderRow mas arriba.
 // ---------------------------------------------------------------------
-let mobileNotesMode = 'browse'; // 'browse' | 'editFolders' | 'select' | 'move'
-const mobileNotesSelectedKeys = new Set(); // 'folder:<id>' / 'note:<id>'
+let notesMode = 'browse'; // 'browse' | 'editFolders' | 'select' | 'move'
+const notesSelectedKeys = new Set(); // 'folder:<id>' / 'note:<id>'
 
-function mobileNotesItemKey(kind, id) {
+function notesItemKey(kind, id) {
   return `${kind}:${id}`;
 }
 
-function toggleMobileNotesSelection(itemKey) {
-  if (mobileNotesSelectedKeys.has(itemKey)) mobileNotesSelectedKeys.delete(itemKey);
-  else mobileNotesSelectedKeys.add(itemKey);
-  refreshMobileNotesActionBar();
+function toggleNotesSelection(itemKey) {
+  if (notesSelectedKeys.has(itemKey)) notesSelectedKeys.delete(itemKey);
+  else notesSelectedKeys.add(itemKey);
+  refreshNotesActionBar();
   renderNotesView();
 }
 
-function setMobileNotesMode(mode) {
-  mobileNotesMode = mode;
-  if (mode !== 'select' && mode !== 'move') mobileNotesSelectedKeys.clear();
-  refreshMobileNotesActionBar();
+function setNotesMode(mode) {
+  notesMode = mode;
+  if (mode !== 'select' && mode !== 'move') notesSelectedKeys.clear();
+  refreshNotesActionBar();
   renderNotesView();
 }
 
@@ -3468,7 +2316,6 @@ function setMobileNotesMode(mode) {
 // NOTES_VIEW_TARGETS), rellenados con el mismo texto/handler segun el
 // modo activo.
 const NOTES_ACTION_BAR_TARGETS = {
-  mobile: { barId: 'mobile-notes-action-bar', leftId: 'btn-mobile-notes-action-left', rightId: 'btn-mobile-notes-action-right' },
   desktop: { barId: 'note-folder-action-bar', leftId: 'btn-note-folder-action-left', rightId: 'btn-note-folder-action-right' },
 };
 
@@ -3476,33 +2323,33 @@ const NOTES_ACTION_BAR_TARGETS = {
 // o con el par Cancelar/"Mover aquí" durante el modo Mover -- un unico
 // par de botones reutilizado para los dos casos en vez de 2 barras
 // distintas, replicado en las dos plataformas.
-function refreshMobileNotesActionBar() {
+function refreshNotesActionBar() {
   Object.values(NOTES_ACTION_BAR_TARGETS).forEach(({ barId, leftId, rightId }) => {
     const bar = document.getElementById(barId);
     if (!bar) return;
     const leftBtn = document.getElementById(leftId);
     const rightBtn = document.getElementById(rightId);
 
-    if (mobileNotesMode === 'select') {
+    if (notesMode === 'select') {
       bar.classList.remove('hidden');
       leftBtn.textContent = 'Eliminar';
       leftBtn.className = 'danger-btn';
-      leftBtn.disabled = mobileNotesSelectedKeys.size === 0;
-      leftBtn.onclick = openMobileNotesDeleteModal;
+      leftBtn.disabled = notesSelectedKeys.size === 0;
+      leftBtn.onclick = openNotesDeleteModal;
       rightBtn.textContent = 'Mover';
       rightBtn.className = 'secondary-btn';
-      rightBtn.disabled = mobileNotesSelectedKeys.size === 0;
-      rightBtn.onclick = () => setMobileNotesMode('move');
-    } else if (mobileNotesMode === 'move') {
+      rightBtn.disabled = notesSelectedKeys.size === 0;
+      rightBtn.onclick = () => setNotesMode('move');
+    } else if (notesMode === 'move') {
       bar.classList.remove('hidden');
       leftBtn.textContent = 'Cancelar';
       leftBtn.className = 'secondary-btn';
       leftBtn.disabled = false;
-      leftBtn.onclick = () => setMobileNotesMode('select');
+      leftBtn.onclick = () => setNotesMode('select');
       rightBtn.textContent = 'Mover aquí';
       rightBtn.className = 'primary-btn';
       rightBtn.disabled = false;
-      rightBtn.onclick = confirmMobileNotesMove;
+      rightBtn.onclick = confirmNotesMove;
     } else {
       bar.classList.add('hidden');
     }
@@ -3513,14 +2360,14 @@ function refreshMobileNotesActionBar() {
   // que ya existe en movil).
   const selectBtn = document.getElementById('btn-note-folder-select');
   if (selectBtn) {
-    const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
+    const selecting = notesMode === 'select' || notesMode === 'move';
     selectBtn.textContent = selecting ? 'Listo' : 'Seleccionar';
     selectBtn.classList.toggle('is-active', selecting);
     selectBtn.setAttribute('aria-pressed', selecting ? 'true' : 'false');
   }
 }
 
-function resolveMobileNotesItem(key) {
+function resolveNotesItem(key) {
   const [kind, idStr] = key.split(':');
   const id = Number(idStr);
   if (kind === 'note') return { kind, id, item: (state.notes || []).find((n) => n.id === id) };
@@ -3531,9 +2378,9 @@ function resolveMobileNotesItem(key) {
 // seleccion final (ya descontando lo excluido en el modal) incluye una
 // CARPETA con notas o subcarpetas -- se calcula con lo que ya hay en
 // memoria (state.noteFolders/state.notes), sin pedir nada al servidor.
-function mobileNotesDeletionIncludesFolderWithContent(keys) {
+function notesDeletionIncludesFolderWithContent(keys) {
   return keys.some((key) => {
-    const { kind, id } = resolveMobileNotesItem(key);
+    const { kind, id } = resolveNotesItem(key);
     if (kind !== 'folder') return false;
     return state.noteFolders.some((f) => f.parentId === id) || (state.notes || []).some((n) => n.folderId === id);
   });
@@ -3541,17 +2388,17 @@ function mobileNotesDeletionIncludesFolderWithContent(keys) {
 
 let mobileNotesDeleteExcluded = new Set();
 
-function renderMobileNotesDeleteList() {
-  const list = document.getElementById('mobile-notes-delete-list');
+function renderNotesDeleteList() {
+  const list = document.getElementById('notes-delete-list');
   list.innerHTML = '';
-  mobileNotesSelectedKeys.forEach((key) => {
-    const { kind, item } = resolveMobileNotesItem(key);
+  notesSelectedKeys.forEach((key) => {
+    const { kind, item } = resolveNotesItem(key);
     if (!item) return;
     const row = document.createElement('div');
-    row.className = 'mobile-notes-delete-item' + (mobileNotesDeleteExcluded.has(key) ? ' is-excluded' : '');
+    row.className = 'notes-delete-item' + (mobileNotesDeleteExcluded.has(key) ? ' is-excluded' : '');
     if (kind === 'folder') {
       const icon = document.createElement('span');
-      icon.className = 'mobile-notes-delete-item-icon';
+      icon.className = 'notes-delete-item-icon';
       icon.innerHTML = FOLDER_SVG;
       row.appendChild(icon);
     }
@@ -3561,58 +2408,58 @@ function renderMobileNotesDeleteList() {
     row.addEventListener('click', () => {
       if (mobileNotesDeleteExcluded.has(key)) mobileNotesDeleteExcluded.delete(key);
       else mobileNotesDeleteExcluded.add(key);
-      renderMobileNotesDeleteList();
+      renderNotesDeleteList();
     });
     list.appendChild(row);
   });
 }
 
-function openMobileNotesDeleteModal() {
+function openNotesDeleteModal() {
   mobileNotesDeleteExcluded = new Set();
-  renderMobileNotesDeleteList();
-  document.getElementById('mobile-notes-delete-modal').classList.remove('hidden');
+  renderNotesDeleteList();
+  document.getElementById('notes-delete-modal').classList.remove('hidden');
 }
-function closeMobileNotesDeleteModal() {
-  document.getElementById('mobile-notes-delete-modal').classList.add('hidden');
+function closeNotesDeleteModal() {
+  document.getElementById('notes-delete-modal').classList.add('hidden');
 }
-document.getElementById('btn-close-mobile-notes-delete').addEventListener('click', closeMobileNotesDeleteModal);
-document.getElementById('btn-mobile-notes-delete-cancel').addEventListener('click', closeMobileNotesDeleteModal);
+document.getElementById('btn-close-notes-delete').addEventListener('click', closeNotesDeleteModal);
+document.getElementById('btn-notes-delete-cancel').addEventListener('click', closeNotesDeleteModal);
 
-document.getElementById('btn-mobile-notes-delete-confirm').addEventListener('click', async () => {
-  const finalKeys = [...mobileNotesSelectedKeys].filter((k) => !mobileNotesDeleteExcluded.has(k));
-  if (finalKeys.length === 0) { closeMobileNotesDeleteModal(); return; }
+document.getElementById('btn-notes-delete-confirm').addEventListener('click', async () => {
+  const finalKeys = [...notesSelectedKeys].filter((k) => !mobileNotesDeleteExcluded.has(k));
+  if (finalKeys.length === 0) { closeNotesDeleteModal(); return; }
 
   if (
-    mobileNotesDeletionIncludesFolderWithContent(finalKeys)
-    && localStorage.getItem('notesMobileHideFolderDeleteWarning') !== '1'
+    notesDeletionIncludesFolderWithContent(finalKeys)
+    && localStorage.getItem('notesHideFolderDeleteWarning') !== '1'
   ) {
     const proceed = await showAppConfirm(
       'Las notas y subcarpetas que contenga cualquier carpeta seleccionada subirán de nivel, no se borrarán.',
-      { checkbox: { label: 'No volver a mostrar este aviso', storageKey: 'notesMobileHideFolderDeleteWarning' } }
+      { checkbox: { label: 'No volver a mostrar este aviso', storageKey: 'notesHideFolderDeleteWarning' } }
     );
     if (!proceed) return;
   }
 
-  closeMobileNotesDeleteModal();
+  closeNotesDeleteModal();
   for (const key of finalKeys) {
-    const { kind, id } = resolveMobileNotesItem(key);
+    const { kind, id } = resolveNotesItem(key);
     if (kind === 'note') await api(`/api/notes/${id}`, { method: 'DELETE' });
     else await api(`/api/note-folders/${id}`, { method: 'DELETE' });
   }
   await Promise.all([loadNotes(), loadNoteFolders()]);
-  setMobileNotesMode('browse');
+  setNotesMode('browse');
 });
 
 // Modo Mover: usa la navegacion de carpetas de siempre (el usuario entra
 // en la carpeta destino como si estuviera navegando normal, ver el
 // filtrado de "mode === 'move'" en renderNotesViewInto) -- "Mover aqui"
 // aplica state.currentNoteFolderId como destino de todo lo seleccionado.
-async function confirmMobileNotesMove() {
+async function confirmNotesMove() {
   const destinationFolderId = state.currentNoteFolderId;
-  const keys = [...mobileNotesSelectedKeys];
+  const keys = [...notesSelectedKeys];
   try {
     for (const key of keys) {
-      const { kind, id } = resolveMobileNotesItem(key);
+      const { kind, id } = resolveNotesItem(key);
       if (kind === 'note') {
         await api(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify({ folderId: destinationFolderId }) });
       } else {
@@ -3624,84 +2471,7 @@ async function confirmMobileNotesMove() {
     return;
   }
   await Promise.all([loadNotes(), loadNoteFolders()]);
-  setMobileNotesMode('browse');
-}
-
-// ---------------------------------------------------------------------
-// Menu de 3 puntos (Fase 4): popover con Editar carpetas/Seleccionar/
-// Vista/Ordenar, mismo patron positionFixedPopover/closeAllPopovers de
-// settings.js que ya usan el resto de popovers de la app -- el div ya
-// lleva la clase .select-popover en index.html, asi que ya esta
-// incluido en esas dos funciones sin tocarlas.
-// ---------------------------------------------------------------------
-function buildMobileNotesMenuPopover() {
-  const popover = document.getElementById('mobile-notes-menu-popover');
-  popover.innerHTML = '';
-
-  function addOption(label, onClick, active) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'select-option' + (active ? ' active' : '');
-    btn.textContent = label;
-    btn.addEventListener('click', onClick);
-    popover.appendChild(btn);
-  }
-
-  const editingFolders = mobileNotesMode === 'editFolders';
-  addOption(editingFolders ? 'Listo' : 'Editar carpetas', () => {
-    closeAllPopovers();
-    setMobileNotesMode(editingFolders ? 'browse' : 'editFolders');
-  }, editingFolders);
-
-  const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
-  addOption(selecting ? 'Listo' : 'Seleccionar', () => {
-    closeAllPopovers();
-    setMobileNotesMode(selecting ? 'browse' : 'select');
-  }, selecting);
-
-  const galleryActive = getMobileNotesViewMode() === 'gallery';
-  addOption(galleryActive ? 'Ver como listado' : 'Ver como galería', () => {
-    localStorage.setItem('notesMobileViewMode', galleryActive ? 'list' : 'gallery');
-    closeAllPopovers();
-    renderNotesView('mobile');
-  });
-
-  const sortBy = getMobileNotesSortBy();
-  const sortDir = getMobileNotesSortDir();
-  const sortOptions = [
-    ['updatedAt', 'Fecha de edición'],
-    ['createdAt', 'Fecha de creación'],
-    ['title', 'Nombre'],
-  ];
-  sortOptions.forEach(([key, label]) => {
-    const active = sortBy === key;
-    const arrow = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-    addOption(label + arrow, () => {
-      if (sortBy === key) {
-        localStorage.setItem('notesMobileSortDir', sortDir === 'asc' ? 'desc' : 'asc');
-      } else {
-        localStorage.setItem('notesMobileSortBy', key);
-        localStorage.setItem('notesMobileSortDir', 'desc');
-      }
-      closeAllPopovers();
-      renderNotesView('mobile');
-    }, active);
-  });
-}
-
-const btnMobileNotesMenu = document.getElementById('btn-mobile-notes-menu');
-if (btnMobileNotesMenu) {
-  btnMobileNotesMenu.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const popover = document.getElementById('mobile-notes-menu-popover');
-    const willOpen = popover.classList.contains('hidden');
-    closeAllPopovers();
-    if (willOpen) {
-      buildMobileNotesMenuPopover();
-      popover.classList.remove('hidden');
-      positionFixedPopover(btnMobileNotesMenu, popover, { width: 220 });
-    }
-  });
+  setNotesMode('browse');
 }
 
 // El estado del favorito dentro del modal (nota nueva o existente) vive
@@ -6873,30 +5643,6 @@ function openMySpaceView() {
   setCurrentScreen('my-space');
 }
 
-// Vista de Notas movil (Fase 4 del rediseño movil) -- sustituye al
-// puente temporal que abria "Mi espacio" desde la barra inferior (ver
-// goToMobileSection). Se abre siempre en la raiz, sin busqueda activa,
-// para no arrastrar el "donde estabas" de la ultima vez que se uso el
-// panel clasico de escritorio (que comparte el mismo state.currentNoteFolderId).
-function openMobileNotesView() {
-  state.currentNoteFolderId = null;
-  clearNoteSearch();
-  document.getElementById('mobile-notes-view').classList.remove('hidden');
-  setCurrentScreen('mobile-notes');
-  renderNotesView('mobile');
-}
-
-function closeMobileNotesView() {
-  document.getElementById('mobile-notes-view').classList.add('hidden');
-  setCurrentScreen('home');
-  // No dejar el modo Seleccionar/Mover/Editar carpetas "colgado" para la
-  // proxima vez que se abra esta vista.
-  mobileNotesMode = 'browse';
-  mobileNotesSelectedKeys.clear();
-  refreshMobileNotesActionBar();
-}
-document.getElementById('btn-close-mobile-notes').addEventListener('click', closeMobileNotesView);
-
 // Aplica el modo elegido: donde vive el hub, y si hace falta o no el
 // boton de la topbar. Se llama al arrancar y cada vez que cambias el
 // ajuste en Configuracion > Vista.
@@ -6982,180 +5728,6 @@ applyStoredRemindersPanelWidth();
 
 document.getElementById('btn-my-space').addEventListener('click', openMySpaceView);
 document.getElementById('btn-close-my-space').addEventListener('click', closeMySpaceView);
-
-// ---------------------------------------------------------------------
-// Navegacion movil (.mobile-nav + boton flotante "+", ver styles.css):
-// sustituye a la topbar en pantallas estrechas. No duplica logica de
-// abrir/cerrar -- cada seccion dispara el CLICK del boton real que ya
-// existia (btn-my-space/btn-extensions/btn-settings), y antes de eso
-// cierra todo lo que estuviera abierto reutilizando la misma cascada de
-// Esc capa a capa de settings.js (dispararla varias veces seguidas la
-// deja en el fondo del todo, sea cual sea la profundidad en la que
-// estuvieras -- Esc ya sabe deshacer una capa por pulsacion).
-// ---------------------------------------------------------------------
-function closeAllMobileOverlays() {
-  for (let i = 0; i < 6; i++) {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-  }
-}
-
-function refreshMobileNavActive(section) {
-  document.querySelectorAll('.mobile-nav-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.mobileNav === section);
-  });
-}
-
-// Fase 5: el 2o hueco de la barra inferior (id/clase estables,
-// data-mobile-nav="notes" siempre) puede sustituirse por otra App --
-// Notas sigue siendo el valor por defecto. Cada entrada usa el mismo
-// SVG que su tarjeta en Extensiones (btn-open-*), para que el icono
-// sea reconocible en los dos sitios.
-const MOBILE_NAV_SLOT_APPS = {
-  notes: {
-    label: 'Notas',
-    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v5h5"></path><line x1="8" y1="12" x2="16" y2="12"></line><line x1="8" y1="16" x2="13" y2="16"></line></svg>',
-    open: () => openMobileNotesView(),
-  },
-  gym: {
-    label: 'Gimnasio',
-    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="3" height="6" rx="1"></rect><rect x="19" y="9" width="3" height="6" rx="1"></rect><line x1="5" y1="12" x2="19" y2="12"></line><rect x="6.5" y="7" width="2" height="10" rx="1"></rect><rect x="15.5" y="7" width="2" height="10" rx="1"></rect></svg>',
-    open: () => openGymView(),
-  },
-  finanzas: {
-    label: 'Finanzas',
-    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v10M9.5 9.5c0-1.5 1.2-2 2.5-2s2.5.6 2.5 2c0 1.2-1 1.6-2.5 2.2S9.5 13 9.5 14.3c0 1.4 1.1 2.2 2.5 2.2s2.5-.6 2.5-2"></path></svg>',
-    open: () => openFinanzasView(),
-  },
-  lecturas: {
-    label: 'Lecturas',
-    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg>',
-    open: () => openLecturasView(),
-  },
-  viajes: {
-    label: 'Viajes',
-    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>',
-    open: () => openViajesView(),
-  },
-};
-
-function getMobileNavNotesSlot() {
-  const stored = localStorage.getItem('mobileNavNotesSlot');
-  return MOBILE_NAV_SLOT_APPS[stored] ? stored : 'notes';
-}
-
-function applyMobileNavCustomization() {
-  const slot = getMobileNavNotesSlot();
-  const app = MOBILE_NAV_SLOT_APPS[slot];
-  const btn = document.getElementById('mobile-nav-notes-btn');
-  if (!btn) return;
-  btn.setAttribute('aria-label', app.label);
-  btn.innerHTML = `${app.icon}<span>${app.label}</span>`;
-}
-applyMobileNavCustomization();
-
-// Selector en Configuracion > Este dispositivo (ajuste por dispositivo,
-// localStorage, mismo criterio que miEspacioMode/completedTasksDisplay).
-const mobileNavSlotField = createSelectField({
-  options: Object.entries(MOBILE_NAV_SLOT_APPS).map(([value, app]) => ({ value, label: app.label })),
-  initialValue: getMobileNavNotesSlot(),
-  onChange: (v) => {
-    localStorage.setItem('mobileNavNotesSlot', v);
-    applyMobileNavCustomization();
-  },
-});
-document.getElementById('mobile-nav-slot-field').appendChild(mobileNavSlotField.element);
-
-function goToMobileSection(section) {
-  closeAllMobileOverlays();
-  // "notes" es el hueco de la barra inferior -- por defecto abre la
-  // vista de Notas propia del movil (Fase 4), pero puede abrir otra
-  // App si Koku eligio otra en Configuracion -> Este dispositivo (ver
-  // applyMobileNavCustomization() arriba).
-  if (section === 'notes') MOBILE_NAV_SLOT_APPS[getMobileNavNotesSlot()].open();
-  else if (section === 'extensions') document.getElementById('btn-extensions').click();
-  else if (section === 'settings') document.getElementById('btn-settings').click();
-  refreshMobileNavActive(section);
-}
-
-document.querySelectorAll('.mobile-nav-btn').forEach((btn) => {
-  btn.addEventListener('click', () => goToMobileSection(btn.dataset.mobileNav));
-});
-
-// Boton flotante de crear: un solo boton que despliega los 3 accesos
-// directos de siempre (+ Nuevo evento/+ Nueva tarea/+ Nota). Desde la
-// Fase 2 del rediseño movil vive dentro de la barra del calendario
-// movil (antes era un boton flotante aparte, .mobile-fab-wrap, ver
-// CLAUDE.md) -- misma logica, solo cambio donde vive en el DOM.
-// menuId/btnId con los valores del mes como default -- la vista diaria
-// (Fase 3) tenia el mismo boton pero se le olvido meter, y ahora
-// reutiliza esta misma funcion con sus propios ids en vez de duplicarla.
-function toggleMobileCalendarAddMenu(forceOpen, menuId = 'mobile-calendar-add-menu', btnId = 'btn-mobile-calendar-add') {
-  const menu = document.getElementById(menuId);
-  const btn = document.getElementById(btnId);
-  const willBeOpen = forceOpen !== undefined ? forceOpen : menu.classList.contains('hidden');
-  menu.classList.toggle('hidden', !willBeOpen);
-  btn.setAttribute('aria-expanded', willBeOpen ? 'true' : 'false');
-}
-
-document.getElementById('btn-mobile-calendar-add').addEventListener('click', (e) => {
-  e.stopPropagation();
-  toggleMobileCalendarAddMenu();
-});
-document.getElementById('btn-new-event-mobile').addEventListener('click', () => {
-  toggleMobileCalendarAddMenu(false);
-  openEventModal(null);
-});
-document.getElementById('btn-new-task-mobile').addEventListener('click', () => {
-  toggleMobileCalendarAddMenu(false);
-  openTaskModal(null);
-});
-
-// Mismo menu "+", pero en la barra de la vista diaria (id
-// mobile-day-add-wrap/-menu, btn-mobile-day-add) -- crear desde aqui
-// usa como fecha por defecto el DIA que se esta viendo, no "ahora".
-document.getElementById('btn-mobile-day-add').addEventListener('click', (e) => {
-  e.stopPropagation();
-  toggleMobileCalendarAddMenu(undefined, 'mobile-day-add-menu', 'btn-mobile-day-add');
-});
-document.getElementById('btn-new-event-mobile-day').addEventListener('click', () => {
-  toggleMobileCalendarAddMenu(false, 'mobile-day-add-menu', 'btn-mobile-day-add');
-  openEventModal(null, state.mobileCalendarDayDate);
-});
-document.getElementById('btn-new-task-mobile-day').addEventListener('click', () => {
-  toggleMobileCalendarAddMenu(false, 'mobile-day-add-menu', 'btn-mobile-day-add');
-  openTaskModal(null, state.mobileCalendarDayDate);
-});
-
-// Mismo menu "+", ahora como boton flotante en Notas (id
-// mobile-notes-add-wrap/-menu, btn-mobile-notes-add) -- sustituye a los
-// antiguos botones de +carpeta/+nota de la barra superior, para dejarle
-// mas hueco al buscador. Mismas 2 acciones que ya llamaban esos botones
-// (openNoteFolderModal(null)/openNoteInEditor(null)), solo movidas aqui.
-document.getElementById('btn-mobile-notes-add').addEventListener('click', (e) => {
-  e.stopPropagation();
-  toggleMobileCalendarAddMenu(undefined, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
-});
-document.getElementById('btn-mobile-notes-add-folder').addEventListener('click', () => {
-  toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
-  openNoteFolderModal(null);
-});
-document.getElementById('btn-mobile-notes-add-note').addEventListener('click', () => {
-  toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
-  openNoteInEditor(null);
-});
-
-// Tocar fuera del boton/menu tambien lo cierra -- patron normal de menu
-// flotante (ver closeAllPopovers en settings.js para el mismo patron con
-// los popovers de color/icono/fecha). Comprueba los 3 wraps (mes, dia,
-// Notas).
-document.addEventListener('click', (e) => {
-  const monthWrap = document.getElementById('mobile-calendar-add-wrap');
-  if (monthWrap && !monthWrap.contains(e.target)) toggleMobileCalendarAddMenu(false);
-  const dayWrap = document.getElementById('mobile-day-add-wrap');
-  if (dayWrap && !dayWrap.contains(e.target)) toggleMobileCalendarAddMenu(false, 'mobile-day-add-menu', 'btn-mobile-day-add');
-  const notesWrap = document.getElementById('mobile-notes-add-wrap');
-  if (notesWrap && !notesWrap.contains(e.target)) toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
-});
 
 // ---------------------------------------------------------------------
 // Apps (placeholder): mismo patron de pantalla completa que "Mi
@@ -11467,7 +10039,6 @@ async function restoreCurrentScreen() {
     if (getMiEspacioMode() === 'topbar') openMySpaceView();
     return;
   }
-  if (screen === 'mobile-notes') { openMobileNotesView(); return; }
   if (screen === 'extensions') { openExtensionsView(); return; }
   if (screen === 'gym') { await openGymView(); return; }
   if (screen === 'lecturas') { openLecturasView(); return; }

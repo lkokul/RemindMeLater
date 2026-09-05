@@ -263,7 +263,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'mobile', 'shortcuts'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'device', 'shortcuts'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -280,7 +280,7 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();
     else if (tab === 'groups') refreshGroupsTab();
-    else if (tab === 'mobile') refreshMobileTab();
+    else if (tab === 'device') refreshDeviceTab();
     else if (tab === 'shortcuts') refreshShortcutsTab();
   });
 });
@@ -563,9 +563,6 @@ document.getElementById('btn-gym-settings').addEventListener('click', openSettin
 document.getElementById('btn-lecturas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
-// #mobile-notes-view (Fase 4) es tambien .my-space-view a pantalla
-// completa, mismo motivo que las de arriba.
-document.getElementById('btn-mobile-notes-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-close-settings').addEventListener('click', () => {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
@@ -1437,7 +1434,7 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
 // ---------------------------------------------------------------------
 // "Este dispositivo": ajustes locales, no compartidos con nadie mas
 // ---------------------------------------------------------------------
-function refreshMobileTab() {
+function refreshDeviceTab() {
   const checkbox = document.getElementById('setting-notifications');
   const status = document.getElementById('notifications-status');
   const supported = 'Notification' in window;
@@ -1539,14 +1536,14 @@ document.getElementById('setting-notifications').addEventListener('change', asyn
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
       e.target.checked = false;
-      refreshMobileTab();
+      refreshDeviceTab();
       return;
     }
     localStorage.setItem('notificationsEnabled', 'true');
   } else {
     localStorage.setItem('notificationsEnabled', 'false');
   }
-  refreshMobileTab();
+  refreshDeviceTab();
 });
 
 // ---------------------------------------------------------------------
@@ -1669,39 +1666,6 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Buscador global (#mobile-global-search, Fase 5): overlay que se
-  // abre ENCIMA de cualquier vista del calendario (mes/año/dia) sin
-  // ocultarla -- tiene que comprobarse antes que esas vistas, si no un
-  // Esc con el buscador abierto se cuela hasta el check de
-  // mobile-calendar-day-view de mas abajo y cierra la vista diaria en
-  // vez del buscador.
-  const mobileGlobalSearch = document.getElementById('mobile-global-search');
-  if (mobileGlobalSearch && !mobileGlobalSearch.classList.contains('hidden')) {
-    document.getElementById('btn-close-mobile-global-search').click();
-    return;
-  }
-
-  const mobileCalendarAddMenu = document.getElementById('mobile-calendar-add-menu');
-  if (mobileCalendarAddMenu && !mobileCalendarAddMenu.classList.contains('hidden')) {
-    toggleMobileCalendarAddMenu(false);
-    return;
-  }
-
-  const mobileDayAddMenu = document.getElementById('mobile-day-add-menu');
-  if (mobileDayAddMenu && !mobileDayAddMenu.classList.contains('hidden')) {
-    toggleMobileCalendarAddMenu(false, 'mobile-day-add-menu', 'btn-mobile-day-add');
-    return;
-  }
-
-  // Vista diaria del calendario movil (Fase 2/3 del rediseño movil): que
-  // cambiar de pestaña en la barra inferior (via closeAllMobileOverlays)
-  // tambien la cierre, igual que cualquier otra pantalla superpuesta.
-  const mobileCalendarDayView = document.getElementById('mobile-calendar-day-view');
-  if (mobileCalendarDayView && !mobileCalendarDayView.classList.contains('hidden')) {
-    exitMobileDayView();
-    return;
-  }
-
   const openPopover = document.querySelector('.color-popover:not(.hidden), .icon-popover:not(.hidden), .select-popover:not(.hidden), .date-popover:not(.hidden)');
   if (openPopover) {
     closeAllPopovers();
@@ -1752,9 +1716,9 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Modal de "Eliminar" del modo Seleccionar de Notas movil (Fase 4).
-  const mobileNotesDeleteModal = document.getElementById('mobile-notes-delete-modal');
+  const mobileNotesDeleteModal = document.getElementById('notes-delete-modal');
   if (mobileNotesDeleteModal && !mobileNotesDeleteModal.classList.contains('hidden')) {
-    document.getElementById('btn-mobile-notes-delete-cancel').click();
+    document.getElementById('btn-notes-delete-cancel').click();
     return;
   }
 
@@ -1790,26 +1754,6 @@ document.addEventListener('keydown', (e) => {
   const viajesCountryModal = document.getElementById('viajes-country-modal');
   if (viajesCountryModal && !viajesCountryModal.classList.contains('hidden')) {
     document.getElementById('btn-close-viajes-country').click();
-    return;
-  }
-
-  // Notas movil (#mobile-notes-view, Fase 4): capa a capa -- primero
-  // sale del modo Seleccionar/Mover/Editar carpetas si estaba activo
-  // (sin perder la posicion en la carpeta), luego sube un nivel si
-  // estas dentro de una subcarpeta, y solo al final cierra la vista
-  // entera. mobileNotesMode/setMobileNotesMode viven en app.js.
-  const mobileNotesView = document.getElementById('mobile-notes-view');
-  if (mobileNotesView && !mobileNotesView.classList.contains('hidden')) {
-    if (typeof mobileNotesMode !== 'undefined' && mobileNotesMode !== 'browse') {
-      setMobileNotesMode('browse');
-      return;
-    }
-    const backBtn = document.getElementById('btn-mobile-notes-back');
-    if (backBtn && !backBtn.classList.contains('hidden')) {
-      backBtn.click();
-    } else {
-      document.getElementById('btn-close-mobile-notes').click();
-    }
     return;
   }
 

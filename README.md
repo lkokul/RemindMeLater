@@ -5,7 +5,7 @@ escritorio** (Electron + SQLite) para Windows. Los datos viven en tu
 propio ordenador, nunca en una nube de terceros, y la app no tiene
 servidor ni abre ningun puerto: la ventana y la base de datos son el
 mismo programa y hablan entre ellas por dentro. Ademas del calendario,
-hay un hub de "Apps" (Gimnasio, Lecturas, Finanzas y Viajes — ver mas
+hay un hub de "Herramientas" (Gimnasio, Lecturas, Finanzas y Viajes — ver mas
 abajo).
 
 ## Arrancar
@@ -182,9 +182,9 @@ antes):
   el raton al teclado. Los botones de formato/tabla/imagen funcionan
   igual en cualquier modo (a diferencia del vim real).
 
-## Extensiones
+## Herramientas
 
-Desde el botón "Apps" de la barra superior se accede a secciones aparte
+Desde el botón "Herramientas" de la barra superior se accede a secciones aparte
 del calendario, cada una a pantalla completa y sin afectar a nada de lo de
 arriba:
 
@@ -292,12 +292,15 @@ si se lo pides.
   distinta (si se puede mover una nota entre carpetas desde su propio
   editor).
 - Solo se genera instalador para Windows.
-- No hay app movil ni sincronizacion entre dispositivos. La hubo hasta la
-  v0.33.1 (emparejamiento por codigo, copia local en el movil,
-  sincronizacion por wifi local, avisos push y una extension "Archivos"
-  para pasarse archivos entre movil y ordenador); se quito entera al
-  pasar la app a escritorio puro. Sigue disponible en la rama `main` del
-  repositorio si algun dia hace falta recuperarla.
+- **No hay nada de movil, a proposito.** Hasta la v0.33.1 esto era
+  ademas una app web que el movil abria por wifi, con su propio diseño
+  para pantallas estrechas (barra inferior, vista diaria, calendario en
+  circulos, vista de notas propia), emparejamiento por codigo,
+  sincronizacion, avisos push, una extension "Archivos" para pasarse
+  archivos entre los dos, y un envoltorio nativo con Capacitor para
+  Android/iOS. Todo eso se quito: la app de escritorio y la movil son
+  cosas independientes. Sigue disponible en la rama `main` del
+  repositorio si algun dia hace falta recuperarlo.
 - El modo "vim" del editor de notas es un subconjunto pequeño a
   proposito (sin registros con nombre, macros, `:` comandos, `yy`/`p`,
   repetir con numeros) — se puede ampliar mas adelante segun haga falta.
