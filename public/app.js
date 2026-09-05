@@ -37,6 +37,7 @@ const state = {
   // seccion aparte que la mayoria de aperturas de la app ni siquiera
   // visita.
   gymExercises: [],
+  gymBlocks: [],
   gymRoutines: [],
   gymSessions: [],
   // Extension "Lecturas" (ver #lecturas-view en index.html): sagas y,
@@ -7296,8 +7297,9 @@ async function openGymView() {
   closeExtensionsView();
   document.getElementById('gym-view').classList.remove('hidden');
   setCurrentScreen('gym');
-  await Promise.all([loadGymExercises(), loadGymRoutines(), loadGymSessions()]);
+  await Promise.all([loadGymExercises(), loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
   renderGymExercisesList();
+  renderGymBlocksList();
   renderGymRoutinesList();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
@@ -7323,6 +7325,9 @@ document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
 
 async function loadGymExercises() {
   state.gymExercises = await api('/api/gym-exercises');
+}
+async function loadGymBlocks() {
+  state.gymBlocks = await api('/api/gym-blocks');
 }
 async function loadGymRoutines() {
   state.gymRoutines = await api('/api/gym-routines');
@@ -7389,21 +7394,91 @@ function renderGymExercisesList() {
   });
 }
 
+// --- Pestana "Plan": bloques y sus dias (rediseno de Gimnasio) --------
+// Dos niveles dentro de la misma pestana, tipo carpetas de Notas: la
+// lista de bloques, y al entrar en uno, sus dias (las filas de
+// gym_routines de siempre). gymCurrentBlockId dice donde estamos:
+// null = nivel de bloques.
+let gymCurrentBlockId = null;
+
+function renderGymBlocksList() {
+  const list = document.getElementById('gym-blocks-list');
+  list.innerHTML = '';
+  if (state.gymBlocks.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes bloques. Un bloque es una etapa de entrenamiento (ej. "Volumen Invierno") con sus días dentro.</p>';
+    return;
+  }
+  state.gymBlocks.forEach((b) => {
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-block-item';
+    row.dataset.openGymBlock = b.id;
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(b.name)}${b.isActive ? ' <span class="gym-block-active-badge">Activo</span>' : ''}
+        <span class="gym-list-item-muted">(${b.dayCount} día${b.dayCount === 1 ? '' : 's'})</span></span>
+      <div class="gym-list-item-actions">
+        ${b.isActive ? '' : `<button type="button" class="secondary-btn gym-block-activate-btn" data-activate-gym-block="${b.id}">Activar</button>`}
+        <button type="button" class="icon-btn" data-edit-gym-block="${b.id}" aria-label="Editar bloque">✎</button>
+      </div>
+    `;
+    // Toda la fila entra al bloque, salvo los botones de la derecha (que
+    // paran la propagacion) -- mismo patron que las filas de sesion.
+    row.addEventListener('click', () => openGymBlockDays(b.id));
+    list.appendChild(row);
+  });
+  list.querySelectorAll('[data-activate-gym-block]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api(`/api/gym-blocks/${btn.dataset.activateGymBlock}/activate`, { method: 'POST' });
+      await loadGymBlocks();
+      renderGymBlocksList();
+    });
+  });
+  list.querySelectorAll('[data-edit-gym-block]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openGymBlockModal(state.gymBlocks.find((b) => b.id === Number(btn.dataset.editGymBlock)));
+    });
+  });
+}
+
+// Entra al nivel de dias de UN bloque (o vuelve al de bloques con null).
+function openGymBlockDays(blockId) {
+  gymCurrentBlockId = blockId || null;
+  document.getElementById('gym-blocks-level').classList.toggle('hidden', gymCurrentBlockId !== null);
+  document.getElementById('gym-block-days-level').classList.toggle('hidden', gymCurrentBlockId === null);
+  if (gymCurrentBlockId !== null) {
+    const block = state.gymBlocks.find((b) => b.id === gymCurrentBlockId);
+    document.getElementById('gym-block-days-title').textContent = block ? block.name : '';
+    renderGymRoutinesList();
+  }
+}
+document.getElementById('btn-gym-back-to-blocks').addEventListener('click', async () => {
+  // Al volver se recargan los bloques para que el contador de dias de
+  // cada tarjeta refleje lo que se acabe de crear/borrar dentro.
+  await loadGymBlocks();
+  renderGymBlocksList();
+  openGymBlockDays(null);
+});
+
 function renderGymRoutinesList() {
   const list = document.getElementById('gym-routines-list');
   list.innerHTML = '';
-  if (state.gymRoutines.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavía no tienes rutinas. Crea una arriba.</p>';
+  // Solo los dias del bloque abierto -- el filtrado se hace aqui en
+  // cliente (state.gymRoutines ya esta entero en memoria) en vez de
+  // repedir al backend con ?blockId, que existe para quien lo necesite.
+  const days = state.gymRoutines.filter((r) => r.blockId === gymCurrentBlockId);
+  if (days.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Este bloque todavía no tiene días. Crea uno arriba (ej. "Push 1").</p>';
     return;
   }
-  state.gymRoutines.forEach((r) => {
+  days.forEach((r) => {
     const row = document.createElement('div');
     row.className = 'gym-list-item';
     row.innerHTML = `
       <span class="color-dot" style="background-color: ${r.color}"></span>
       <span class="gym-list-item-name">${r.icon ? escapeHtml(r.icon) + ' ' : ''}${escapeHtml(r.name)} <span class="gym-list-item-muted">(${r.exercises.length} ejercicio${r.exercises.length === 1 ? '' : 's'})</span></span>
       <div class="gym-list-item-actions">
-        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar rutina">✎</button>
+        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar día">✎</button>
       </div>
     `;
     list.appendChild(row);
@@ -8127,7 +8202,7 @@ document.getElementById('btn-delete-gym-exercise').addEventListener('click', asy
   try {
     await api(`/api/gym-exercises/${id}`, { method: 'DELETE' });
   } catch (err) {
-    alert(err.message);
+    showAppAlert(err.message);
     return;
   }
   closeGymExerciseModal();
@@ -8135,7 +8210,59 @@ document.getElementById('btn-delete-gym-exercise').addEventListener('click', asy
   renderGymExercisesList();
 });
 
-// --- Modal de rutina ------------------------------------------------------
+// --- Modal de bloque (rediseno de Gimnasio) ---------------------------
+// Un solo campo (el nombre), al estilo de la app de referencia. Activar
+// se hace desde la lista, no desde aqui.
+function openGymBlockModal(block) {
+  document.getElementById('gym-block-modal-title').textContent = block ? 'Editar bloque' : 'Nuevo bloque';
+  document.getElementById('gym-block-id').value = block ? block.id : '';
+  document.getElementById('gym-block-name').value = block ? block.name : '';
+  document.getElementById('btn-delete-gym-block').classList.toggle('hidden', !block);
+  document.getElementById('gym-block-modal').classList.remove('hidden');
+}
+function closeGymBlockModal() {
+  document.getElementById('gym-block-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-gym-block').addEventListener('click', () => openGymBlockModal(null));
+document.getElementById('btn-cancel-gym-block').addEventListener('click', closeGymBlockModal);
+document.getElementById('btn-close-gym-block').addEventListener('click', closeGymBlockModal);
+
+document.getElementById('gym-block-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('gym-block-id').value;
+  const payload = { name: document.getElementById('gym-block-name').value };
+  if (id) {
+    await api(`/api/gym-blocks/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/gym-blocks', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeGymBlockModal();
+  await loadGymBlocks();
+  renderGymBlocksList();
+});
+
+document.getElementById('btn-delete-gym-block').addEventListener('click', async () => {
+  const id = Number(document.getElementById('gym-block-id').value);
+  const block = state.gymBlocks.find((b) => b.id === id);
+  const dayCount = block ? block.dayCount : 0;
+  // Borrar un bloque se lleva sus dias (plantillas), aunque nunca el
+  // historial de sesiones -- se avisa con el confirm propio de la app,
+  // no con el del navegador (regla del proyecto).
+  const ok = await showAppConfirm(
+    dayCount > 0
+      ? `¿Eliminar este bloque y ${dayCount === 1 ? 'su día' : `sus ${dayCount} días`}? Las sesiones ya registradas no se pierden.`
+      : '¿Eliminar este bloque?',
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/gym-blocks/${id}`, { method: 'DELETE' });
+  closeGymBlockModal();
+  await Promise.all([loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
+  renderGymBlocksList();
+  renderGymSessionsList();
+});
+
+// --- Modal de dia (antes "rutina" -- ids gym-routine-* conservados) ---
 // El color/icono usan createColorField/createIconField (definidas en
 // settings.js, que se carga DESPUES de app.js) -- construirlas aqui
 // arriba, al analizar el archivo, fallaria (esas funciones todavia no
@@ -8208,20 +8335,36 @@ function renderGymRoutineExercisesField() {
 
 document.getElementById('btn-add-gym-routine-exercise').addEventListener('click', () => {
   if (state.gymExercises.length === 0) {
-    alert('Primero crea al menos un ejercicio en la lista de abajo.');
+    showAppAlert('Primero crea al menos un ejercicio (pestaña Plan, lista de abajo).');
     return;
   }
   gymRoutineModalExercises.push({ exerciseId: state.gymExercises[0].id, targetSets: '', targetReps: '', targetRestSeconds: '' });
   renderGymRoutineExercisesField();
 });
 
+// Selector de bloque del dia: createSelectField vive en este mismo
+// archivo, asi que se puede construir ya al analizarlo (igual que el de
+// rutina del modal de sesion, mas abajo). Las opciones se rellenan al
+// abrir el modal, que es cuando state.gymBlocks ya esta cargado.
+const gymRoutineBlockField = createSelectField({
+  options: [],
+  initialValue: '',
+  placeholder: 'Elige un bloque',
+});
+document.getElementById('gym-routine-block-field').appendChild(gymRoutineBlockField.element);
+
 function openGymRoutineModal(routine) {
   ensureGymRoutineFieldsReady();
-  document.getElementById('gym-routine-modal-title').textContent = routine ? 'Editar rutina' : 'Nueva rutina';
+  document.getElementById('gym-routine-modal-title').textContent = routine ? 'Editar día' : 'Nuevo día';
   document.getElementById('gym-routine-id').value = routine ? routine.id : '';
   document.getElementById('gym-routine-name').value = routine ? routine.name : '';
   gymRoutineColorField.setValue(routine ? routine.color : '#5b8cff');
   gymRoutineIconField.setValue(routine ? routine.icon || '' : '');
+  // El selector de bloque se repuebla en cada apertura; por defecto, el
+  // bloque cuyo listado esta abierto (o el del propio dia al editar).
+  gymRoutineBlockField.setOptions(state.gymBlocks.map((b) => ({ value: String(b.id), label: b.name })));
+  const defaultBlockId = routine ? routine.blockId : gymCurrentBlockId;
+  gymRoutineBlockField.setValue(defaultBlockId ? String(defaultBlockId) : '');
   gymRoutineModalExercises = routine
     ? routine.exercises.map((ex) => ({
         exerciseId: ex.exerciseId,
@@ -8248,6 +8391,7 @@ document.getElementById('gym-routine-form').addEventListener('submit', async (e)
     name: document.getElementById('gym-routine-name').value,
     color: gymRoutineColorField.getValue(),
     icon: gymRoutineIconField.getValue(),
+    blockId: gymRoutineBlockField.getValue() ? Number(gymRoutineBlockField.getValue()) : null,
     exercises: gymRoutineModalExercises,
   };
   if (id) {
@@ -8256,16 +8400,22 @@ document.getElementById('gym-routine-form').addEventListener('submit', async (e)
     await api('/api/gym-routines', { method: 'POST', body: JSON.stringify(payload) });
   }
   closeGymRoutineModal();
-  await loadGymRoutines();
+  // Los bloques tambien se recargan: el contador de dias de la tarjeta
+  // cambia si el dia es nuevo o se ha movido de bloque.
+  await Promise.all([loadGymRoutines(), loadGymBlocks()]);
   renderGymRoutinesList();
+  renderGymBlocksList();
 });
 
 document.getElementById('btn-delete-gym-routine').addEventListener('click', async () => {
   const id = document.getElementById('gym-routine-id').value;
+  const ok = await showAppConfirm('¿Eliminar este día? Las sesiones ya registradas con él no se pierden.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
   await api(`/api/gym-routines/${id}`, { method: 'DELETE' });
   closeGymRoutineModal();
-  await Promise.all([loadGymRoutines(), loadGymSessions()]);
+  await Promise.all([loadGymRoutines(), loadGymBlocks(), loadGymSessions()]);
   renderGymRoutinesList();
+  renderGymBlocksList();
   renderGymSessionsList();
 });
 
@@ -8279,7 +8429,7 @@ const gymSessionDateField = createDateField({ initialValue: new Date() });
 document.getElementById('gym-session-date-field').appendChild(gymSessionDateField.element);
 
 const gymSessionRoutineField = createSelectField({
-  options: [{ value: '', label: 'Sesion libre (sin rutina)' }],
+  options: [{ value: '', label: 'Sesión libre (sin día)' }],
   initialValue: '',
   onChange: (routineId) => {
     if (!routineId) return;
@@ -8393,7 +8543,7 @@ function renderGymSessionExercisesField() {
 
 document.getElementById('btn-add-gym-session-exercise').addEventListener('click', () => {
   if (state.gymExercises.length === 0) {
-    alert('Primero crea al menos un ejercicio desde la pestaña Rutinas.');
+    showAppAlert('Primero crea al menos un ejercicio desde la pestaña Plan.');
     return;
   }
   gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, sets: [{ reps: '', weightDisplay: '', restSeconds: '' }] });
@@ -8407,7 +8557,7 @@ function openGymSessionModal(session) {
   document.getElementById('gym-session-notes').value = session ? session.notes || '' : '';
 
   gymSessionRoutineField.setOptions([
-    { value: '', label: 'Sesion libre (sin rutina)' },
+    { value: '', label: 'Sesión libre (sin día)' },
     ...state.gymRoutines.map((r) => ({ value: String(r.id), label: r.name, color: r.color, icon: r.icon })),
   ]);
   gymSessionRoutineField.setValue(session && session.routineId ? String(session.routineId) : '');
@@ -8478,6 +8628,10 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
 
 document.getElementById('btn-delete-gym-session').addEventListener('click', async () => {
   const id = document.getElementById('gym-session-id').value;
+  // Borrar una sesion SI pierde historial de verdad (sus series) -- de
+  // ahi el confirm, a diferencia de plantillas como bloques/dias.
+  const ok = await showAppConfirm('¿Eliminar esta sesión y todas sus series? Esto sí borra historial.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
   await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
   closeGymSessionModal();
   await loadGymSessions();

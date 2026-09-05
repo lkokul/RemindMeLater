@@ -2368,6 +2368,56 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .gym-chart-label { font-size: 9px; fill: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
 
 /* ---------------------------------------------------------------------
+   Rediseño de Gimnasio (rama gimnasio-movil): acento morado propio de la
+   seccion, SIN tocar el sistema global de temas -- las variables viven
+   scoped en #gym-view (y en .gym-modal, porque los modales son hermanos
+   de <body> y no heredan del scope de la vista). El resto de la app
+   sigue con su --accent de siempre.
+   --------------------------------------------------------------------- */
+#gym-view, .gym-modal {
+  --gym-accent: #a855f7;          /* morado de referencia (oscargymapp) */
+  --gym-accent-soft: color-mix(in srgb, #a855f7 18%, transparent);
+  --gym-accent-text: #ffffff;
+}
+/* La pestana activa y los botones primarios del gym usan el morado. */
+#gym-view .gym-tab-btn.active {
+  background: var(--gym-accent);
+  color: var(--gym-accent-text);
+  border-color: var(--gym-accent);
+}
+#gym-view .primary-btn, .gym-modal .primary-btn {
+  background: var(--gym-accent);
+  color: var(--gym-accent-text);
+  border-color: var(--gym-accent);
+}
+
+/* Tarjetas de bloque (pestana Plan): mas altas que una fila normal y
+   clicables enteras (drill-down a los dias del bloque). */
+.gym-block-item { cursor: pointer; padding: 0.8rem 0.9rem; }
+.gym-block-item:hover { border-color: var(--gym-accent); }
+.gym-block-item { border: 1px solid transparent; }
+.gym-block-active-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--gym-accent-soft);
+  color: var(--gym-accent);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}
+.gym-block-activate-btn { font-size: 0.75rem; padding: 0.3rem 0.55rem; }
+
+/* Cabecera del nivel de dias (boton volver + nombre del bloque). */
+.gym-block-days-header { display: flex; align-items: center; gap: 0.6rem; }
+.gym-block-days-header .gym-subheading { margin: 0; }
+/* Los dos niveles de la pestana Plan son columnas como el panel padre. */
+#gym-blocks-level, #gym-block-days-level { display: flex; flex-direction: column; gap: 0.6rem; }
+#gym-blocks-level.hidden, #gym-block-days-level.hidden { display: none; }
+
+/* ---------------------------------------------------------------------
    Extension "Finanzas": pestañas simples (Resumen/Movimientos/
    Inversiones) dentro de #finanzas-view, gestion de cuentas/categorias
    (mismo patron inline formulario+lista que Grupos), tablas con scroll

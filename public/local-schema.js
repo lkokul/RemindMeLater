@@ -147,6 +147,12 @@ function applyLocalSchema(db) {
     -- entrenamientos, con prefijo "gym_" para no chocar con nada de lo de
     -- arriba. Borrado en cascada A MANO en routes/, no con ON DELETE
     -- CASCADE de SQL -- mismo patron que groups/note_folders.
+    --
+    -- OJO (rediseno de Gimnasio, rama gimnasio-movil): a partir de aqui
+    -- las tablas gym_* DIVERGEN de server/db.js (la copia del programa de
+    -- escritorio). gym_blocks y las columnas nuevas de las otras tablas
+    -- gym_* existen SOLO en esta version; cuando algun dia se fusionen
+    -- las dos lineas habra que decidir que se lleva cada lado.
     CREATE TABLE IF NOT EXISTS gym_exercises (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -154,14 +160,34 @@ function applyLocalSchema(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- Rutinas reutilizables (ej. "Dia de pierna"), mismo patron
-    -- icono+color+posicion que groups/note_folders.
+    -- Bloques de entrenamiento (rediseno de Gimnasio): una "etapa" con
+    -- nombre propio (ej. "Volumen Invierno") que agrupa varios dias de
+    -- entrenamiento (los gym_routines de abajo). Solo UN bloque puede
+    -- estar activo a la vez (is_active = 1) -- es el que se ofrece al
+    -- empezar a entrenar. El borrado en cascada de sus dias se hace a
+    -- mano en routes-local/gymBlocks.js, como en todo el proyecto.
+    CREATE TABLE IF NOT EXISTS gym_blocks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Dias de entrenamiento reutilizables (ej. "Push 1", "Dia de pierna"),
+    -- mismo patron icono+color+posicion que groups/note_folders. La tabla
+    -- se sigue llamando gym_routines por compatibilidad con los datos ya
+    -- guardados, pero en la interfaz del rediseno son los "dias" de un
+    -- bloque (block_id). block_id puede ser NULL solo de forma transitoria:
+    -- la migracion de mas abajo recoloca cualquier huerfano en el bloque
+    -- "General".
     CREATE TABLE IF NOT EXISTS gym_routines (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       icon TEXT,
       color TEXT NOT NULL DEFAULT '#5b8cff',
       position INTEGER NOT NULL DEFAULT 0,
+      block_id INTEGER REFERENCES gym_blocks(id),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1132,5 +1158,41 @@ function applyLocalSchema(db) {
   if (!lecturasItemColumns.includes('loaned_at')) {
     db.exec('ALTER TABLE lecturas_items ADD COLUMN loaned_at TEXT');
   }
+
+  // ---- Migraciones del rediseno de Gimnasio (SOLO en esta linea movil,
+  // ---- diverge de server/db.js -- ver el comentario junto a gym_blocks).
+  // Fase 1: bloques de entrenamiento. La tabla gym_blocks ya la crea el
+  // CREATE TABLE IF NOT EXISTS de arriba en instalaciones nuevas; aqui va
+  // lo que una base YA EXISTENTE necesita ademas:
+  //
+  // 1) La columna block_id en gym_routines (los "dias").
+  const gymRoutineColumns = db.prepare('PRAGMA table_info(gym_routines)').all().map((c) => c.name);
+  if (!gymRoutineColumns.includes('block_id')) {
+    db.exec('ALTER TABLE gym_routines ADD COLUMN block_id INTEGER REFERENCES gym_blocks(id)');
+  }
+  // 2) Recolocar en un bloque "General" cualquier dia que quedara suelto
+  //    (los datos de antes del rediseno, o un huerfano de un borrado a
+  //    medias). Es idempotente: si no hay huerfanos no hace nada, y el
+  //    bloque "General" solo se crea si de verdad hace falta (se reutiliza
+  //    si ya existe uno con ese nombre).
+  const orphanRoutines = db.prepare('SELECT COUNT(*) AS n FROM gym_routines WHERE block_id IS NULL').get();
+  if (orphanRoutines && orphanRoutines.n > 0) {
+    let general = db.prepare("SELECT id FROM gym_blocks WHERE name = 'General' ORDER BY id ASC").get();
+    if (!general) {
+      // Nace activo solo si todavia no hay ningun otro bloque activo, para
+      // no robarle el estado a uno que el usuario ya hubiera activado.
+      const activeCount = db.prepare('SELECT COUNT(*) AS n FROM gym_blocks WHERE is_active = 1').get();
+      const positionRow = db.prepare('SELECT COUNT(*) AS n FROM gym_blocks').get();
+      db.prepare('INSERT INTO gym_blocks (name, position, is_active) VALUES (?, ?, ?)')
+        .run('General', positionRow.n, activeCount.n > 0 ? 0 : 1);
+      general = db.prepare("SELECT id FROM gym_blocks WHERE name = 'General' ORDER BY id ASC").get();
+    }
+    db.prepare('UPDATE gym_routines SET block_id = ? WHERE block_id IS NULL').run(general.id);
+  }
+  // 3) Indices para las consultas de progreso/heatmap que vienen en fases
+  //    posteriores (baratos y seguros de crear ya).
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sets_session ON gym_sets(session_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sets_exercise ON gym_sets(exercise_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sessions_date ON gym_sessions(date)');
 
 }

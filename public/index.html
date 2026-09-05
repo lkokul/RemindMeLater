@@ -699,7 +699,7 @@
     </div>
     <div class="gym-tabs">
       <button type="button" class="gym-tab-btn active" data-gym-tab="sessions">Sesiones</button>
-      <button type="button" class="gym-tab-btn" data-gym-tab="routines">Rutinas</button>
+      <button type="button" class="gym-tab-btn" data-gym-tab="plan">Plan</button>
       <button type="button" class="gym-tab-btn" data-gym-tab="progress">Progreso</button>
     </div>
     <div class="gym-tab-content">
@@ -709,14 +709,27 @@
         <div id="gym-sessions-list" class="gym-list"></div>
       </div>
 
-      <!-- Rutinas: CRUD tipo grupos/carpetas, cada una con su lista de
-           ejercicios (con series/repeticiones orientativas). -->
-      <div id="gym-tab-routines" class="gym-tab-panel hidden">
-        <button type="button" id="btn-new-gym-routine" class="primary-btn gym-tab-action">+ Nueva rutina</button>
-        <div id="gym-routines-list" class="gym-list"></div>
-        <h3 class="gym-subheading">Ejercicios</h3>
-        <button type="button" id="btn-new-gym-exercise" class="secondary-btn gym-tab-action">+ Nuevo ejercicio</button>
-        <div id="gym-exercises-list" class="gym-list"></div>
+      <!-- Plan (rediseno): jerarquia Bloque -> Dias. La pestana tiene dos
+           "niveles" que se alternan mostrando/ocultando (drill-down tipo
+           carpetas de Notas): la lista de bloques, y dentro de un bloque
+           su lista de dias (las antiguas "rutinas"). Los ejercicios
+           sueltos siguen viviendo al nivel de bloques, debajo. -->
+      <div id="gym-tab-plan" class="gym-tab-panel hidden">
+        <div id="gym-blocks-level">
+          <button type="button" id="btn-new-gym-block" class="primary-btn gym-tab-action">+ Nuevo bloque</button>
+          <div id="gym-blocks-list" class="gym-list"></div>
+          <h3 class="gym-subheading">Ejercicios</h3>
+          <button type="button" id="btn-new-gym-exercise" class="secondary-btn gym-tab-action">+ Nuevo ejercicio</button>
+          <div id="gym-exercises-list" class="gym-list"></div>
+        </div>
+        <div id="gym-block-days-level" class="hidden">
+          <div class="gym-block-days-header">
+            <button type="button" id="btn-gym-back-to-blocks" class="secondary-btn">← Bloques</button>
+            <h3 id="gym-block-days-title" class="gym-subheading"></h3>
+          </div>
+          <button type="button" id="btn-new-gym-routine" class="primary-btn gym-tab-action">+ Nuevo día</button>
+          <div id="gym-routines-list" class="gym-list"></div>
+        </div>
       </div>
 
       <!-- Progreso: selector de ejercicio + grafica SVG a mano (peso
@@ -737,7 +750,7 @@
 
   <!-- Modal para crear / editar un ejercicio de Gimnasio -->
   <div id="gym-exercise-modal" class="modal hidden">
-    <div class="modal-card">
+    <div class="modal-card gym-modal">
       <button type="button" id="btn-close-gym-exercise" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2 id="gym-exercise-modal-title">Nuevo ejercicio</h2>
       <form id="gym-exercise-form">
@@ -760,20 +773,50 @@
     </div>
   </div>
 
-  <!-- Modal para crear / editar una rutina de Gimnasio (nombre+icono+
-       color, mas su lista ORDENADA de ejercicios con series/repeticiones
-       orientativas -- ver #gym-routine-exercises-field, poblado desde
-       app.js con los mismos ejercicios de gym-exercises-list). -->
+  <!-- Modal para crear / editar un BLOQUE de entrenamiento (rediseno de
+       Gimnasio): solo pide el nombre, al estilo de la app de referencia
+       (flujos cortos de 1-2 campos). Activar/desactivar se hace desde la
+       propia lista de bloques, no desde aqui. -->
+  <div id="gym-block-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-block" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-block-modal-title">Nuevo bloque</h2>
+      <form id="gym-block-form">
+        <input type="hidden" id="gym-block-id" />
+        <label>
+          Nombre del bloque
+          <input type="text" id="gym-block-name" placeholder="Ej. Volumen Invierno" required />
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-gym-block" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-gym-block" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar un dia de entrenamiento (antes "rutina" --
+       los ids gym-routine-* se conservan para no renombrar media app):
+       nombre+icono+color, bloque al que pertenece, mas su lista ORDENADA
+       de ejercicios con series/repeticiones orientativas -- ver
+       #gym-routine-exercises-field, poblado desde app.js con los mismos
+       ejercicios de gym-exercises-list. -->
   <div id="gym-routine-modal" class="modal hidden">
-    <div class="modal-card">
+    <div class="modal-card gym-modal">
       <button type="button" id="btn-close-gym-routine" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2 id="gym-routine-modal-title">Nueva rutina</h2>
+      <h2 id="gym-routine-modal-title">Nuevo día</h2>
       <form id="gym-routine-form">
         <input type="hidden" id="gym-routine-id" />
         <div class="group-form-row">
           <div id="gym-routine-icon-field"></div>
-          <input type="text" id="gym-routine-name" placeholder="Nombre de la rutina (ej. Dia de pierna)" required />
+          <input type="text" id="gym-routine-name" placeholder="Nombre del día (ej. Push 1)" required />
           <div id="gym-routine-color-field"></div>
+        </div>
+        <div class="field-label-block">
+          <span class="field-label">Bloque</span>
+          <div id="gym-routine-block-field"></div>
         </div>
         <div class="field-label-block">
           <span class="field-label">Ejercicios</span>
@@ -795,7 +838,7 @@
        applyGymRoutineToSession en app.js) o sesion libre, y las series
        hechas por ejercicio. -->
   <div id="gym-session-modal" class="modal hidden">
-    <div class="modal-card">
+    <div class="modal-card gym-modal">
       <button type="button" id="btn-close-gym-session" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2 id="gym-session-modal-title">Nueva sesion</h2>
       <form id="gym-session-form">
@@ -805,7 +848,7 @@
           <div id="gym-session-date-field"></div>
         </div>
         <div class="field-label-block">
-          <span class="field-label">Rutina (opcional)</span>
+          <span class="field-label">Día (opcional)</span>
           <div id="gym-session-routine-field"></div>
         </div>
         <div id="gym-session-exercises-field" class="gym-routine-exercises-field"></div>
@@ -2230,6 +2273,7 @@
   <script src="routes-local/finanzasTransactions.js"></script>
   <script src="routes-local/groups.js"></script>
   <script src="routes-local/gymExercises.js"></script>
+  <script src="routes-local/gymBlocks.js"></script>
   <script src="routes-local/gymRoutines.js"></script>
   <script src="routes-local/gymSessions.js"></script>
   <script src="routes-local/lecturasItems.js"></script>

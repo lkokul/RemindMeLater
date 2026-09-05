@@ -444,7 +444,46 @@ borra la app pierde todo. Es el siguiente trabajo declarado.
   cada lado y se resuelve entonces. No adelantarse.
 - **Idiomas**: selector español/inglés, apuntado hace mucho y
   explícitamente aplazado. No empezar sin que lo pida.
+- **Rediseño de Gimnasio (EN CURSO)**: rama `gimnasio-movil`, creada a
+  partir de `movil-ui`, se fusionará ahí cuando esté lista. Referencia
+  estética: la app de un amigo, https://oscargymapp.vercel.app/ (Vercel,
+  ajena al repo). Al ser una app 100% local sin cuenta ni internet, se
+  descartan a propósito las partes de esa referencia que dependen de
+  usuarios/red (ranking entre gente, crear cuenta, etc.) — solo interesa
+  lo estético y las funciones que tengan sentido en local.
+  - **Idea pendiente de meter, apuntada por Koku (no estaba en la app de
+    referencia)**: un "mapa de músculos" que muestre con qué frecuencia
+    se entrena cada grupo muscular, calculado a partir de los
+    ejercicios/rutinas ya registrados en Gimnasio.
+  - **Librería de ejercicios externa investigada**: Koku recordaba una
+    librería de ejercicios que se hizo viral en GitHub hace poco.
+    Candidatas encontradas:
+    - [`hasaneyldrm/exercises-dataset`](https://github.com/hasaneyldrm/exercises-dataset) —
+      1.324 ejercicios, instrucciones en varios idiomas, llegó a ser
+      #1 en GitHub Trending (30 jun 2026). Los DATOS (nombre, categoría,
+      músculos, instrucciones) son MIT y libres de usar. Las
+      imágenes/GIFs NO: son de Gym Visual, solo en 180×180, con
+      atribución obligatoria y requieren licencia propia de Gym Visual
+      para usarlas en otra app — no valen para meterlas tal cual.
+      Además el repo pesa ~125 MB (por los GIFs), demasiado para meter
+      entero en una app local pensada para pesar poco.
+    - [`yuhonas/free-exercise-db`](https://github.com/yuhonas/free-exercise-db) —
+      alternativa más ligera y de dominio público real (licencia
+      Unlicense, sin restricciones), ~800 ejercicios con nombre,
+      músculo primario/secundario, equipo e instrucciones en
+      `dist/exercises.json`, con imágenes propias por ejercicio (estas
+      si se pueden usar, son del propio repo). Al ser JSON plano, se
+      puede importar solo el texto (nombre/músculos/instrucciones) sin
+      las imágenes para no engordar la app, o traer alguna imagen suelta
+      si hace falta.
+    - Ninguna de las dos es "de hace un par de semanas" exactamente (la
+      primera es de finales de junio 2026, la segunda lleva desde 2023
+      pero se actualiza a menudo) — no se encontró nada más nuevo que
+      encajara mejor con lo que Koku recordaba. Si aparece algo más
+      concreto, revisar esta lista.
+    - Pendiente de decidir con Koku si merece la pena importar alguna
+      (aunque sea solo el texto) o si se queda con los ejercicios que ya
+      tiene la app.
 - **Backlog sin fecha** (ideas suyas, ninguna empezada): rediseño
   visual del visor de escritorio, repensar Finanzas para que sea
-  "realmente útil", rediseñar Gimnasio inspirándose en la app de un
-  amigo, y una extensión nueva estilo Notion.
+  "realmente útil", y una extensión nueva estilo Notion.
