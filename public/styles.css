@@ -291,31 +291,6 @@ button {
    cambia de tamano al alternar, empujando "+ Nuevo evento" al lado. */
 #btn-quick-color-mode { width: 2.6rem; text-align: center; flex-shrink: 0; }
 
-/* Punto de sincronizacion (fase "movil"): pequeno de proposito, es un
-   vistazo rapido, no un panel -- el detalle de verdad (fecha, cambios
-   pendientes, mensaje de error) esta en Configuracion > Este
-   dispositivo. Colores con significado fijo, no siguen el tema. */
-.sync-indicator {
-  padding: 0.4rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border-color: transparent;
-  flex-shrink: 0;
-}
-.sync-indicator-dot {
-  display: block;
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 50%;
-  background: #9aa0a6; /* gris por defecto, antes de la primera sincronizacion */
-}
-.sync-indicator[data-status="synced"] .sync-indicator-dot { background: #2ecc71; }
-.sync-indicator[data-status="pending"] .sync-indicator-dot { background: #f5b400; }
-.sync-indicator[data-status="offline"] .sync-indicator-dot { background: #9aa0a6; }
-.sync-indicator[data-status="error"] .sync-indicator-dot { background: #e5484d; }
-
 input, textarea, select {
   font: inherit;
   background: var(--surface-2);
@@ -593,8 +568,8 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   cursor: pointer;
 }
 /* Puntito de "sin guardar" -- se apaga en cuanto la nota vuelve a
-   coincidir con lo que hay en el servidor (ver isOpenNoteDirty en
-   app.js), no es un flag manual. */
+   coincidir con lo ultimo guardado (ver isOpenNoteDirty en app.js), no
+   es un flag manual. */
 .note-open-item-dirty-dot {
   flex-shrink: 0;
   width: 0.4rem;
@@ -697,7 +672,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 }
 
 /* Tablas dentro de una nota: sin clase propia a proposito -- el saneado
-   del servidor (sanitizeNoteBody en routes/notes.js) quita cualquier
+   (sanitizeNoteBody en routes-local/notes.js) quita cualquier
    atributo salvo los "style" muy concretos de <col>/<tr> y el
    "data-border" del <table> (ver mas abajo), asi que una clase se
    perderia al guardar. Con un selector generico da igual, toda tabla
@@ -853,7 +828,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    on/off tipo pastilla). Mismo patron que .task-item-checkbox (que ya
    tenia este look para las tareas del calendario), generalizado aqui
    para reutilizarlo en cualquier sitio nuevo -- arbol de activos de
-   Finanzas y checkboxes de la tabla de Archivos, de momento. Nunca
+   Finanzas, de momento. Nunca
    dejar un <input type="checkbox"> con el estilo gris por defecto del
    navegador, usar siempre esta clase. */
 .styled-checkbox {
@@ -2595,7 +2570,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .finanzas-savings-status { font-size: 0.9rem; }
 .finanzas-savings-range-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
 
-
 /* Extension "Lecturas": jerarquia de 2 tablas (sagas -> items de una
    saga). ".gym-tab-action" se reutiliza tal cual para el boton "+
    Nueva/o" (mismo estilo que ya se penso para Gimnasio: alineado a la
@@ -2662,76 +2636,10 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .lecturas-rating-field input[type="range"] { flex: 1; width: auto; padding: 0; background: none; border: none; accent-color: var(--accent); }
 .lecturas-rating-field input[type="number"] { width: 4.5rem; flex-shrink: 0; }
 .form-row > input { flex: 1; min-width: 0; }
-
-/* Extension "Archivos": ver #archivos-view en index.html. Mismo patron
-   que .finanzas-tab-panel: .my-space-view ya es flex-column, este bloque
-   ocupa el resto del alto (la cabecera es flex-shrink:0) y hace scroll
-   propio con su propio padding lateral. */
-.archivos-body { flex: 1; min-height: 0; padding: 1rem 1.2rem; overflow-y: auto; }
-/* "Sincronizar ahora" y "Comprobar ahora" ocupan el ancho del bloque
-   (dentro del padding lateral de .archivos-body, no del todo pegados al
-   borde de la pantalla) -- antes de envolver el contenido en
-   .archivos-body eran hijos directos de #archivos-view (flex-column con
-   align-items:stretch por defecto), que los estiraba solos; al pasar a
-   estar dentro de .archivos-body (que no es un contenedor flex) volvieron
-   a su ancho de contenido, asi que hace falta ponerlo explicito aqui. */
-#btn-sync-now, #btn-archivos-check-update { display: block; width: 100%; }
-/* Estado de "Comprobar ahora" (ver setArchivosCheckButtonState en
-   app.js) integrado en el propio boton -- checking se ve atenuado,
-   error en rojo, ok en el color normal del boton. */
-#btn-archivos-check-update { white-space: normal; text-align: center; line-height: 1.3; }
-#btn-archivos-check-update[data-check-status="checking"] { opacity: 0.7; }
-#btn-archivos-check-update[data-check-status="error"] { color: var(--danger); border-color: var(--danger); }
-#btn-archivos-check-update[data-check-status="error"]:hover:not(:disabled) {
-  background: var(--danger); color: #fff;
-}
-.archivos-folder-row { display: flex; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
-.archivos-folder-row input[type="text"] { flex: 1; min-width: 0; }
-.archivos-folder-browser {
-  margin: 0.5rem 0; padding: 0.7rem; border: 1px solid var(--border);
-  border-radius: 8px; background: var(--surface-2);
-}
-.archivos-browser-list {
-  display: flex; flex-direction: column; gap: 0.2rem; max-height: 220px;
-  overflow-y: auto; margin: 0.5rem 0;
-}
-.archivos-browser-item {
-  text-align: left; padding: 0.4rem 0.6rem; border: none; border-radius: 6px;
-  background: none; color: inherit; cursor: pointer;
-}
-.archivos-browser-item:hover { background: var(--surface); }
-/* Navegacion real del panel "Carpeta compartida en el ordenador" (ver
-   loadArchivosNavPath en app.js) -- reutiliza .archivos-browser-list/
-   -item para las carpetas, mismo aspecto que el explorador de "Carpeta
-   de destino" de arriba. */
-.archivos-nav-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
-.archivos-nav-path { flex: 1; min-width: 0; overflow-wrap: break-word; font-size: 0.85rem; margin: 0; }
-/* Desplegable de subcarpetas (ver comentario en index.html): antes la
-   lista estaba siempre visible debajo de la ruta -- ahora solo se abre
-   al pasar el raton por encima o al pulsar el boton (ver
-   openArchivosFoldersDropdown en app.js). Mismo "molde" que el resto de
-   popovers de la app (.select-popover/.color-popover/etc. en este mismo
-   archivo: fondo var(--surface), borde neutro, sombra, position:fixed +
-   positionFixedPopover() para que nunca quede cortado por el scroll del
-   panel) -- pedido explicito de Koku tras ver que el tinte de acento que
-   tenia antes no encajaba con el resto. El toque "diferente" que
-   tambien pidio es solo el borde izquierdo, no todo el fondo. */
-.archivos-nav-folders-wrap { position: relative; margin: 0.3rem 0; display: inline-block; }
-.archivos-nav-folders-toggle { font-size: 0.85rem; }
-.archivos-nav-folders-dropdown.archivos-browser-list {
-  position: fixed; z-index: 60;
-  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-  padding: 0.3rem; min-width: 180px; max-height: 280px; overflow-y: auto;
-}
-.archivos-nav-folders-dropdown .archivos-browser-item:hover {
-  background: var(--surface-2); color: var(--surface-2-text);
-}
-/* Aviso de seguridad en Archivos (ver index.html) -- mismo padding y
-   radio que .hint, pero con un fondo tenue en tono ambar para que se
-   note como un aviso, no como una nota informativa cualquiera. No es un
-   error (por eso no usa --danger), es solo una recomendacion. */
+/* Aviso: mismo padding y radio que .hint, pero con un fondo tenue en
+   tono ambar para que se note como un aviso, no como una nota
+   informativa cualquiera. No es un error (por eso no usa --danger), es
+   solo una recomendacion. */
 .hint-warning {
   font-size: 0.85rem;
   padding: 0.5rem 0.7rem;
@@ -2740,50 +2648,8 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   color: var(--surface-text);
   margin: 0.4rem 0;
 }
-.archivos-manage-block { margin-bottom: 1rem; }
-.archivos-manage-block summary { cursor: pointer; font-weight: 600; padding: 0.4rem 0; }
-.archivos-table-wrap { overflow-x: auto; margin: 0.8rem 0; }
-.archivos-table { width: 100%; border-collapse: collapse; }
-.archivos-table th, .archivos-table td {
-  text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.archivos-table td:last-child { display: flex; gap: 0.4rem; }
-
-/* Transferencia estilo TightVNC/TeamViewer (ver comentario en
-   index.html): dos paneles + flechas en medio. En movil, apilados
-   (panel local arriba, flechas en fila horizontal, panel remoto
-   abajo) -- en escritorio, en fila con las flechas en el centro,
-   mismo punto de corte que el resto de la app (860px). */
-.archivos-transfer-grid {
-  display: flex; flex-direction: column; gap: 0.8rem; margin: 0.6rem 0;
-}
-.archivos-transfer-panel {
-  flex: 1; min-width: 0; padding: 0.7rem 0.8rem; border: 1px solid var(--border);
-  border-radius: var(--radius); background: var(--surface); color: var(--surface-text);
-}
-.archivos-transfer-panel h4 { margin: 0 0 0.5rem; }
-.archivos-transfer-arrows {
-  display: flex; flex-direction: row; gap: 0.6rem; align-self: center;
-}
-.archivos-transfer-arrows button {
-  font-size: 1.2rem; line-height: 1; padding: 0.5rem 0.9rem;
-}
-.archivos-staged-list { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.5rem 0; }
-.archivos-staged-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
-  background: var(--surface-2); color: var(--surface-2-text);
-  border-radius: 6px; padding: 0.3rem 0.5rem; font-size: 0.85rem;
-}
-.archivos-staged-remove {
-  border: none; background: none; color: inherit; cursor: pointer;
-  font-size: 0.85rem; padding: 0 0.2rem; line-height: 1;
-}
-.archivos-table th:first-child, .archivos-table td:first-child { width: 1.6rem; }
 
 @media (min-width: 860px) {
-  .archivos-transfer-grid { flex-direction: row; align-items: stretch; }
-  .archivos-transfer-arrows { flex-direction: column; justify-content: center; }
 }
 
 /* Envoltorio SOLO de las 3 columnas (el Volver, fuera, en su propia
@@ -3101,32 +2967,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .toast-dismiss { padding: 0.2rem 0.45rem; background: transparent; border-color: transparent; }
 .toast-dismiss:hover { background: var(--surface-2); }
 
-#update-banner.toast { border-color: var(--accent); }
-
-/* Aviso de version nueva: a diferencia de los demas toasts (un mensaje +
-   un boton), este lleva DOS botones de accion ademas de la x, asi que en
-   una sola fila de 300px quedaba todo apretado y el texto partido a
-   mitad de palabra. Se reparte en dos filas: arriba el mensaje + la x,
-   abajo los dos botones de accion ocupando el ancho completo a partes
-   iguales. */
-.toast-release {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.6rem;
-  max-width: 340px;
-  border-color: var(--accent);
-  padding: 0.7rem 0.8rem;
-}
-.toast-release-top { display: flex; align-items: flex-start; gap: 0.5rem; }
-.toast-release-top span { flex: 1; line-height: 1.4; }
-.toast-release-actions { display: flex; gap: 0.5rem; }
-.toast-release-actions button {
-  flex: 1;
-  padding: 0.55rem 0.6rem;
-  font-size: 0.85rem;
-  border-radius: var(--radius-sm);
-}
-
 /* --- Retroalimentacion breve tipo "Guardado" en un boton --- */
 .saved-feedback {
   background: #2e9e5b !important;
@@ -3136,14 +2976,14 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 
 /* --- Modales --- */
-.modal, .pairing-screen {
+.modal {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.6);
   display: flex; align-items: center; justify-content: center;
   padding: 1rem;
   z-index: 20;
 }
-.modal-card, .pairing-card {
+.modal-card {
   background: var(--surface);
   color: var(--surface-text);
   border: 1px solid var(--border);
@@ -3251,13 +3091,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
      inferior), asi que se ocultan en las 7 pantallas que los tienen.
      `#mobile-global-search` NO entra aqui a proposito -- su boton de
      cabecera es solo "cerrar", un rol distinto al par home/config. */
-  #btn-close-mobile-notes, #btn-mobile-notes-settings,
-  #btn-close-extensions, #btn-extensions-settings,
-  #btn-close-gym, #btn-gym-settings,
-  #btn-close-finanzas, #btn-finanzas-settings,
-  #btn-close-archivos, #btn-archivos-settings,
-  #btn-close-viajes, #btn-viajes-settings,
-  #btn-close-lecturas, #btn-lecturas-settings {
+#btn-close-mobile-notes, #btn-mobile-notes-settings, #btn-close-extensions, #btn-extensions-settings, #btn-close-gym, #btn-gym-settings, #btn-close-finanzas, #btn-finanzas-settings, #btn-close-viajes, #btn-viajes-settings, #btn-close-lecturas, #btn-lecturas-settings {
     display: none;
   }
   /* El icono lapiz de cada fila de carpeta queda redundante en movil --
@@ -3269,8 +3103,8 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
      que seccion estas, no hace falta repetirlo con un "Notas"/"Apps"
      arriba (ademas, con los botones ya ocultos arriba, esa cabecera
      hoy solo tiene el h2). Solo en las 3 pantallas alcanzables DIRECTO
-     desde la barra inferior -- las 5 de extension (Gimnasio/Finanzas/
-     Archivos/Viajes/Lecturas) SI la mantienen, confirmado que ahi es
+     desde la barra inferior -- las 4 de extension (Gimnasio/Finanzas/
+     Viajes/Lecturas) SI la mantienen, confirmado que ahi es
      el UNICO sitio donde aparece el nombre de la seccion (sus pestañas
      internas nunca lo repiten). #mobile-global-search tampoco entra
      aqui, su cabecera solo tiene el boton de cerrar, necesario. */
@@ -3302,25 +3136,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    entrar (por eso no lleva flecha ">"), en rojo/aviso para diferenciarla
    del resto de la lista. */
 .settings-menu-item-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
-/* Info de version/commit al final del menu principal (ver
-   refreshVersionInfo en app.js) -- solo lectura, texto pequeño y
-   discreto para no competir visualmente con la lista de secciones. */
-.settings-version-info {
-  margin-top: 1rem;
-  padding-top: 0.8rem;
-  border-top: 1px solid var(--border);
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
-}
-.settings-version-info code {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  background: var(--surface-2);
-  color: var(--surface-2-text);
-  padding: 0.05rem 0.3rem;
-  border-radius: 4px;
-  font-size: 0.72rem;
-}
 /* Sticky y a ancho completo (con "sangrado" hacia los lados igual al
    padding de settings-card-body) para que, al pegarse arriba del todo
    durante el scroll, tape de verdad el contenido que pasa por debajo en
@@ -3404,35 +3219,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .theme-copy-label { flex: 1; }
 .error { color: var(--danger); font-size: 0.85rem; }
 .hint { color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); font-size: 0.85rem; }
-
-.pairing-code-display { text-align: center; margin: 1rem 0; }
-.code-value { font-size: 2.2rem; font-weight: 700; letter-spacing: 0.25em; }
-
-/* El QR lo genera el servidor en blanco/negro fijo (ver
-   server/routes/devices.js), asi que se lee bien pase lo que pase con el
-   tema de color activo -- el marco blanco solo da un margen limpio
-   alrededor cuando el fondo de la app es oscuro. */
-.network-qr-image {
-  display: block; width: 180px; height: 180px; margin: 0.8rem 0;
-  background: #fff; border-radius: var(--radius); padding: 0.6rem;
-}
-
-.scan-server-video {
-  display: block; width: 100%; max-width: 360px; border-radius: var(--radius);
-  margin: 0.8rem 0; background: #000;
-}
-
-.devices-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
-.device-item {
-  display: flex; justify-content: space-between; align-items: center;
-  background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
-  font-size: 0.85rem;
-  gap: 0.5rem;
-}
-.device-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.device-item-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
-.device-item-actions button { padding: 0.35rem 0.6rem; font-size: 0.8rem; }
-.device-rename-input { flex: 1; }
 
 /* --- Grupos: nombre + color, tipo listas de Recordatorios --- */
 .group-form-row { display: flex; gap: 0.5rem; align-items: stretch; margin-bottom: 0.5rem; }
@@ -3864,7 +3650,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 
 /* Extension "Viajes" -- ver #viajes-view en index.html. Mismo patron que
-   .archivos-body/.finanzas-tab-panel: .my-space-view ya es flex-column,
+   .finanzas-tab-panel: .my-space-view ya es flex-column,
    este bloque ocupa el resto del alto y hace scroll propio. */
 .viajes-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .viajes-tabs {

@@ -30,7 +30,7 @@ const state = {
   notifiedReminderIds: new Set(), // evita notificar el mismo recordatorio 2 veces
   remindersMode: 'upcoming', // 'upcoming' | 'day' — que se muestra en el panel de recordatorios
   remindersDayDate: null, // dia seleccionado cuando remindersMode === 'day'
-  upcomingReminders: [], // ultima lista de "proximos recordatorios" recibida del servidor
+  upcomingReminders: [], // ultima lista de "proximos recordatorios" calculada
   // Extension "Gimnasio" (ver #gym-view en index.html): ejercicios,
   // rutinas y sesiones registradas. Se cargan al abrir la vista, no al
   // arrancar la app (a diferencia de groups/events), ya que es una
@@ -1029,7 +1029,7 @@ async function setDayType(dateKey, type) {
   renderCalendarGrid();
 }
 
-// Se piden los eventos de ESE dia directamente al servidor (en vez de
+// Se piden los eventos de ESE dia a la base local (en vez de
 // filtrar state.events, que solo tiene el mes que se esta viendo) para
 // que tambien funcione bien si clicas un dia "de otro mes" que asoma en
 // las esquinas de la cuadricula.
@@ -5218,7 +5218,7 @@ NOTE_EDITOR_BODY.addEventListener('dblclick', (e) => {
 // Imagenes dentro de una nota (Fase 4, ultima sub-ronda): boton "Imagen"
 // que abre el selector de archivo nativo, y Ctrl+V para pegar una imagen
 // copiada (de una captura de pantalla, de otra web...) directamente
-// dentro del editor. Las dos vias acaban subiendo el archivo al servidor
+// dentro del editor. Las dos vias acaban guardando el archivo en el almacen
 // (routes/noteImages.js) y solo metiendo en el HTML de la nota el enlace
 // corto que devuelve -- la imagen entera NO se guarda como texto (base64)
 // dentro de la nota, eso se descarto a proposito hablandolo con Koku
@@ -5897,7 +5897,7 @@ function legacyNoteBodyToHtml(text) {
 // deriva SIEMPRE de la primera linea del cuerpo -- misma logica EXACTA
 // que deriveTitleFromBody en server/routes/notes.js, duplicada aqui a
 // proposito porque este proyecto no tiene ningun mecanismo para
-// compartir codigo entre servidor y navegador sin meter un build nuevo.
+// compartir codigo entre las rutas y la interfaz sin meter un build nuevo.
 // Se usa tanto para la etiqueta de solo lectura del editor (en vivo,
 // sin esperar a guardar) como para la vista previa en las listas/
 // galeria de notas.
@@ -6402,7 +6402,7 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
   // que NOTE_EDITOR_BODY en este momento es justo el contenido de "entry".
   const hasNoteContent = NOTE_EDITOR_BODY.textContent.trim() !== '' || NOTE_EDITOR_BODY.querySelector('img, table');
   const payload = {
-    // Fase 4: ya no se manda titulo, el servidor lo deriva del body
+    // Fase 4: ya no se manda titulo, la ruta lo deriva del body
     // (ver deriveTitleFromBody en server/routes/notes.js).
     body: hasNoteContent ? entry.bodyHtml : null,
     bodyFormat: 'html',
@@ -11411,7 +11411,6 @@ async function maybeShowOnboarding() {
   const profile = await api('/api/profile');
   if (profile.onboardingCompleted) return;
   document.getElementById('onboarding-name').value = profile.name || '';
-  document.getElementById('onboarding-email').value = profile.email || '';
   document.getElementById('onboarding-modal').classList.remove('hidden');
 }
 
@@ -11425,7 +11424,6 @@ document.getElementById('onboarding-form').addEventListener('submit', async (e) 
     method: 'PUT',
     body: JSON.stringify({
       name: document.getElementById('onboarding-name').value,
-      email: document.getElementById('onboarding-email').value,
     }),
   });
   closeOnboardingModal();

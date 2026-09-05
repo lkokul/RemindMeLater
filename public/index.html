@@ -31,7 +31,7 @@
   // Aplica el tema que este dispositivo tuviera guardado ANTES de que se
   // pinte nada, para no ver un parpadeo del tema oscuro por defecto y
   // luego el tuyo. settings.js hace despues la comprobacion "de verdad"
-  // contra el servidor; esto es solo para que la primera pintura ya
+  // desde la base local; esto es solo para que la primera pintura ya
   // salga con tus colores.
   (function () {
     try {
@@ -54,7 +54,7 @@
       // de contraste (formato viejo, con "text"/"textDim" globales), o de
       // una variante inversa a la que le falta algun dato, rellenamos con
       // el mismo patron de "heredar de la superficie mas parecida DE ESTE
-      // MISMO tema" que usa sanitizeColors() en el servidor — asi un tema
+      // MISMO tema" que usa sanitizeColors() en themes.js — asi un tema
       // incompleto no se queda con contraste del tema oscuro por defecto
       // aunque el resto sea claro.
       if (!colors.settingsMenuBg) colors.settingsMenuBg = colors.surface2;
@@ -85,10 +85,8 @@
 </head>
 <body>
 
-  <!-- Avisos discretos en la esquina, apilados (no un header grande):
-       nueva version del servidor, hay una version nueva en GitHub, y "tu
-       vista guardada no es la normal". Ver checkForUpdate(),
-       checkForNewRelease() y applyViewModePrompt() en app.js. -->
+  <!-- Aviso discreto en la esquina (no un header grande): "tu vista
+       guardada no es la normal". Ver applyViewModePrompt() en app.js. -->
   <div id="toast-stack" class="toast-stack">
     <div id="default-view-banner" class="toast hidden">
       <span id="default-view-banner-text"></span>
@@ -97,9 +95,6 @@
     </div>
   </div>
 
-  <!-- Pantalla de emparejamiento: se muestra solo si este dispositivo
-       (normalmente el movil) todavia no tiene token guardado o el servidor
-       lo rechaza. Ver app.js -> showPairingScreen(). -->
   <!-- Confirmacion/aviso propio con el estilo de la app, para sustituir a
        confirm()/alert() nativos del navegador en flujos donde hace falta
        que se note mas -- ver showAppConfirm()/showAppAlert() en app.js.
@@ -662,29 +657,21 @@
     </div>
   </div>
 
-  <!-- Pantalla de bienvenida: aparece UNA sola vez, la primera vez que se
-       abre la app en cualquier dispositivo (el perfil es compartido por
-       toda la instalacion, no por dispositivo -- ver user_profile en
-       server/db.js). Pide el nickname y, opcionalmente, un correo (solo
-       para el contacto tecnico obligatorio de las notificaciones push,
-       ver el hint de dentro). "Ahora no" tambien cierra el modal para
-       siempre (ver app.js maybeShowOnboarding) sin obligar a rellenar
-       nada. -->
+  <!-- Pantalla de bienvenida: aparece UNA sola vez, la primera vez que
+       se abre la app. Solo pide el nickname, que es lo que aparece como
+       "creado por" en lo que vas creando. "Ahora no" tambien cierra el
+       modal para siempre (ver app.js maybeShowOnboarding) sin obligar a
+       rellenar nada. -->
   <div id="onboarding-modal" class="modal hidden">
     <div class="modal-card">
       <h2>Bienvenido a RemindMeLater</h2>
-      <p class="hint">Un par de datos rapidos antes de empezar (puedes cambiarlos luego en Configuracion > Perfil).</p>
+      <p class="hint">Un dato rapido antes de empezar (puedes cambiarlo luego en Configuracion > Perfil).</p>
       <form id="onboarding-form">
         <label>
           Nickname (opcional)
           <input type="text" id="onboarding-name" placeholder="Tu nombre" maxlength="60" />
         </label>
-        <p class="hint">Se ve igual en todos tus dispositivos, para saber quien creo cada evento o nota si usas el ordenador y el movil a la vez.</p>
-        <label>
-          Correo (opcional)
-          <input type="email" id="onboarding-email" placeholder="tucorreo@ejemplo.com" maxlength="200" />
-        </label>
-        <p class="hint">Solo se usaria como contacto tecnico obligatorio si más adelante activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie más.</p>
+        <p class="hint">Aparece como "creado por" en los eventos y tareas que anadas.</p>
         <div class="modal-actions">
           <button type="button" id="btn-onboarding-skip" class="secondary-btn">Ahora no</button>
           <div class="spacer"></div>
@@ -2056,17 +2043,12 @@
       <div id="settings-tab-profile" class="settings-tab-panel hidden">
         <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Perfil</h3>
-        <p class="hint">Tu nickname se ve igual en todos tus dispositivos, para que no haya lios de nombres si tienes varios enlazados. Aparece como "creado por" en las tareas que anadas.</p>
+        <p class="hint">Tu nickname aparece como "creado por" en los eventos y tareas que anadas.</p>
         <form id="profile-form">
           <label>
             Nickname
             <input type="text" id="profile-name" placeholder="Tu nombre" maxlength="60" />
           </label>
-          <label>
-            Correo (opcional)
-            <input type="email" id="profile-email" placeholder="tucorreo@ejemplo.com" maxlength="200" />
-          </label>
-          <p class="hint">Solo se usaria como contacto tecnico obligatorio si activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie más, salvo con Google/Apple para ese uso puntual y solo si activas esos avisos.</p>
           <button type="submit" class="primary-btn">Guardar</button>
         </form>
 

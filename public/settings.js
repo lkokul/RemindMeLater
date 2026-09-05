@@ -286,9 +286,8 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
 });
 
 // ---------------------------------------------------------------------
-// Perfil: tu nickname (compartido entre todos tus dispositivos, como un
-// tema o un grupo) y tu id unico. El id se genera una vez en el servidor
-// y no cambia nunca aunque cambies el nombre; se ensena oculto por
+// Perfil: tu nickname y tu id unico. El id se genera una vez al crear
+// la fila y no cambia nunca aunque cambies el nombre; se ensena oculto por
 // defecto porque no aporta nada verlo siempre, con un interruptor local
 // (por dispositivo) para revelarlo si hace falta.
 // ---------------------------------------------------------------------
@@ -297,7 +296,6 @@ let currentProfile = null;
 async function refreshProfileTab() {
   currentProfile = await api('/api/profile');
   document.getElementById('profile-name').value = currentProfile.name || '';
-  document.getElementById('profile-email').value = currentProfile.email || '';
 
   const showId = localStorage.getItem('showUserId') === 'true';
   document.getElementById('profile-show-id').checked = showId;
@@ -325,14 +323,12 @@ let profileSavedFeedbackTimer = null;
 document.getElementById('profile-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = document.getElementById('profile-name').value;
-  const email = document.getElementById('profile-email').value;
   const btn = document.getElementById('profile-form').querySelector('button[type="submit"]');
   const originalLabel = btn.dataset.originalLabel || btn.textContent;
   btn.dataset.originalLabel = originalLabel;
 
-  currentProfile = await api('/api/profile', { method: 'PUT', body: JSON.stringify({ name, email }) });
+  currentProfile = await api('/api/profile', { method: 'PUT', body: JSON.stringify({ name }) });
   document.getElementById('profile-name').value = currentProfile.name || '';
-  document.getElementById('profile-email').value = currentProfile.email || '';
   updateProfileIdDisplay();
 
   // Retroalimentacion breve: el boton cambia a "Guardado ✓" un momento y
@@ -771,8 +767,7 @@ function applyThemeColors(colors) {
 
 // Aplica un tema a ESTE dispositivo: lo pinta, lo recuerda en localStorage
 // (para la proxima vez que se abra, y para el script del <head> que evita
-// el parpadeo) y, si procede, avisa al servidor de que este dispositivo
-// tiene ese tema activo (para que "copiar de otro dispositivo" funcione).
+// el parpadeo) y lo deja anotado en la base local como el tema activo.
 async function applyTheme(theme, { persist = true } = {}) {
   const colors = resolveThemeVariant(theme);
   applyThemeColors(colors);
@@ -1168,8 +1163,8 @@ function closeThemeForm() {
   positionThemeForm();
 }
 
-// Guarda de verdad (POST/PUT al servidor) lo que haya ahora mismo en el
-// formulario. La usa tanto el boton "Guardar cambios del tema" como el
+// Guarda de verdad (POST/PUT a la ruta de temas) lo que haya ahora mismo
+// en el formulario. La usa tanto el boton "Guardar cambios del tema" como el
 // salto automatico a editar otro tema, para no perder nada al cambiar de
 // tarjeta sin haber guardado antes.
 async function saveCurrentThemeEdit() {
@@ -1324,7 +1319,7 @@ document.getElementById('theme-import-input').addEventListener('change', async (
   }
 });
 
-// Al cargar la app: averigua que tema tenemos activo segun el servidor
+// Al cargar la app: averigua que tema tenemos activo segun la base local
 // (que es la fuente de verdad) y lo aplica. Mientras tanto, el script del
 // <head> ya habra pintado lo que hubiera en cache para evitar parpadeos.
 async function syncActiveTheme() {
