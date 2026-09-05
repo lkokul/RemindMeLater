@@ -6,29 +6,23 @@ nunca. No hay servidor, ni cuenta, ni nube, ni nada que emparejar: se
 abre y funciona. Por dentro es SQLite de verdad (compilado a
 WebAssembly), con las mismas consultas de siempre, guardado en el
 almacenamiento del propio dispositivo. Ademas del calendario, la app
-tiene un hub de "Apps" (Gimnasio, Lecturas, Finanzas y Viajes — ver mas
+tiene un hub de "Herramientas" (Gimnasio, Lecturas, Finanzas y Viajes — ver mas
 abajo).
 
-> **Nota sobre este repositorio.** Aqui conviven dos programas
-> independientes que comparten historia: esta app (la interfaz de
-> `public/`, que es de lo que habla este README) y la version de
-> escritorio con servidor (`server/`, `electron/`), que se desarrolla
-> por separado. Lo que se cuenta aqui describe la app tal y como es
-> ahora: sin servidor.
+> **Nota sobre este repositorio.** Esta rama es **solo la app de
+> movil**. La version de escritorio (servidor Express + Electron) es
+> otro programa, y vive en su propia rama (`escritorio`) con su propio
+> ciclo de desarrollo. Aqui no queda nada de ella.
 
 ## Arrancar
 
-Para verla en el navegador del ordenador mientras se desarrolla, vale
-cualquier servidor de archivos estaticos apuntando a `public/`:
+Para probar cambios rapido durante el desarrollo vale cualquier servidor
+de archivos estaticos apuntando a `public/` (la app de verdad es la
+nativa, ver "Compilarla para el movil" mas abajo):
 
 ```bash
 npx http-server public -p 8080
 ```
-
-O, si prefieres no instalar nada, `npm start` tambien sirve la carpeta
-`public/` en `http://localhost:3000` (arranca ademas el servidor de la
-version de escritorio, que esta app ya no usa para nada — es solo la
-forma mas corta de tener un servidor de archivos a mano).
 
 Los cambios en `public/` se ven con recargar la pagina, sin compilar
 nada.
@@ -36,12 +30,11 @@ nada.
 Para verla como app de verdad en el movil, ver "App nativa de movil"
 mas abajo.
 
-**Navegación en el móvil**: en pantallas estrechas, la barra superior de
-escritorio (título + botones sueltos) se sustituye por una barra fija
-abajo con 4 accesos (Calendario, Notas, Apps, Configuración) y un botón
+**Navegación**: una barra fija abajo con 4 accesos (Calendario, Notas,
+Herramientas, Configuración) y un botón
 flotante "+" para crear. El segundo hueco es configurable desde
 Configuración → Este dispositivo: puedes poner ahí cualquiera de las
-Apps en vez de Notas. En escritorio no cambia nada.
+herramientas en vez de Notas.
 
 ## Configuración
 
@@ -65,7 +58,7 @@ con varias pestanas:
     que fuerza texto blanco o negro si el contraste guardado es demasiado
     bajo. Un tema puede tener ademas una variante clara/oscura emparejada
     (`inverseColors`): si la tiene, aparece un boton de sol/luna rapido en
-    la barra superior para alternar sin entrar en Configuración; y si
+    la barra del calendario para alternar sin entrar en Configuración; y si
     eliges "Sistema" como modo de color (por dispositivo), la app cambia
     sola entre ambas en cuanto el sistema operativo cambia de claro a
     oscuro (o al reves), sin recargar la pagina. Los colores se eligen con
@@ -83,26 +76,10 @@ con varias pestanas:
   Recordatorios de iPhone. Cada grupo puede tener tambien un icono y un
   color especial para cuando una tarea de ese grupo se marca como hecha
   (si no lo pones, se calcula automaticamente atenuando el color normal).
-- **Atajos**: cada accion (nuevo evento, abrir Configuración, mes/dia
-  anterior o siguiente...) se puede asignar a la combinacion de teclas
-  que quieras, por dispositivo. Por defecto: `N` nuevo evento, `←`/`→`
-  dia anterior/siguiente.
 - **Este dispositivo**: ajustes que no se comparten con nadie mas, como
-  las notificaciones del navegador, el modo de vista (ver abajo), como se
-  ven las tareas completadas (tachadas u ocultas), y como se ven los
-  eventos en dias muy llenos del calendario.
-
-## Vista de pantalla completa
-
-Desde Configuración → Este dispositivo puedes activar **Pantalla
-completa** para que la app ocupe toda la pantalla, sin barra del
-navegador ni barra de tareas — pensado para dejarla siempre visible en un
-monitor o tablet dedicado. En la app de escritorio (ver mas abajo) la
-ventana se abre directamente en ese modo la siguiente vez que la
-arrancas. En el navegador normal, por una restriccion de los propios
-navegadores (no dejan activar pantalla completa sin un clic tuyo), al
-cargar la pagina se muestra un aviso con un boton "Activar" en vez de
-activarse sola.
+  los avisos de recordatorios, como se ven las tareas completadas
+  (tachadas u ocultas), y que apartado vive en el hueco personalizable
+  de la barra de abajo.
 
 ## Mi espacio (notas y tareas)
 
@@ -192,10 +169,9 @@ antes):
   el raton al teclado. Los botones de formato/tabla/imagen funcionan
   igual en cualquier modo (a diferencia del vim real).
 
-## Apps
+## Herramientas
 
-Desde el botón "Apps" de la barra superior (o la sección "Apps" de la
-navegación móvil) se accede a secciones aparte del calendario, cada una
+Desde el botón "Herramientas" de la barra inferior se accede a secciones aparte del calendario, cada una
 a pantalla completa y sin afectar a nada de lo de arriba:
 
 - **Gimnasio**: registro de entrenamientos, organizado en bloques
@@ -257,15 +233,6 @@ a pantalla completa y sin afectar a nada de lo de arriba:
   rango de fechas. Una gráfica compara ingresos y gastos mes a mes de los
   últimos 6 meses.
 
-## App de escritorio (Electron)
-
-En este mismo repositorio vive tambien la version de escritorio
-(`server/`, `electron/`): un servidor Express con su propia base de datos
-SQLite, empaquetable como programa de Windows (`npm run electron` para
-probarla, `npm run dist` para generar el instalador). Es **otro
-programa**, con su propio ciclo de desarrollo — lo que se describe en
-este README es la app sin servidor.
-
 ## App nativa de movil (iOS y Android)
 
 La app se empaqueta como app nativa de verdad con
@@ -289,18 +256,12 @@ configuracion inicial de ningun tipo.
   desarrollador, secretos, como instalarla en el iPhone) estan en
   [`IOS-TESTFLIGHT.md`](IOS-TESTFLIGHT.md).
 
-## Instalar como app (PWA)
-
-En el navegador (ordenador o movil) la app tambien se puede "instalar"
-(Añadir a pantalla de inicio / Instalar app) para que se abra como una
-app independiente, con su propio icono, en vez de una pestaña. Funciona
-igual que la app nativa: los datos son los de ese navegador, en ese
-dispositivo.
+## Tus datos
 
 **Cada dispositivo tiene sus propios datos, y no se hablan entre ellos.**
 Lo que crees en el movil no aparece en el ordenador ni al reves — no hay
 sincronizacion de ningun tipo. Y como todo vive dentro de la app,
-**desinstalarla (o borrar los datos del navegador) borra todo**. Poder
+**desinstalarla borra todo**. Poder
 exportar e importar una copia de seguridad es lo siguiente que hace
 falta; hoy no existe.
 
@@ -313,9 +274,7 @@ sistema operativo**: suena a su hora aunque la app este cerrada del todo,
 sin servidor y sin que nada salga del dispositivo.
 
 Los avisos se reprograman solos cada vez que creas, editas o borras algo,
-asi que nunca suena un aviso de algo que ya no existe. En el navegador
-normal (sin empaquetar) no hay avisos programados: ahi solo llega la
-notificacion mientras la pestaña esta abierta.
+asi que nunca suena un aviso de algo que ya no existe.
 
 ## Datos personales
 
@@ -335,8 +294,7 @@ de las notificaciones push, que obligarian a pasar por Google o Apple).
   imagenes) — sin tablas con celdas combinadas, sin cambiar el tamano de
   una imagen ya insertada, sin encabezados/titulos.
 - **No hay copia de seguridad**: no se puede exportar ni importar los
-  datos, asi que desinstalar la app (o borrar los datos del navegador)
-  los borra para siempre. Es lo mas importante que falta.
+  datos, asi que desinstalar la app los borra para siempre. Es lo mas importante que falta.
 - Cada dispositivo tiene sus propios datos, sin ninguna forma de
   pasarlos de uno a otro.
 - Si quitas una imagen de una nota editandola (sin borrar la nota

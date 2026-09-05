@@ -53,16 +53,6 @@ const state = {
   mobileCalendarDayDate: null,
 };
 
-// Registra el service worker (ver sw.js): junto con manifest.json, es lo
-// que hace que el navegador ofrezca "Instalar" (ordenador) o "Anadir a
-// pantalla de inicio" (movil) para RemindMeLater, como una app aparte con
-// su propio icono y sin la barra de direcciones — sin compilar nada.
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
-  });
-}
-
 const DEFAULT_EVENT_COLOR = '#5b8cff'; // el --accent de styles.css, para eventos sin grupo
 
 // ---------------------------------------------------------------------
@@ -438,7 +428,6 @@ function enableCtrlEnterSubmit(formId) {
 enableCtrlEnterSubmit('event-form');
 enableCtrlEnterSubmit('task-form');
 enableCtrlEnterSubmit('note-form');
-enableCtrlEnterSubmit('onboarding-form');
 
 // Bloqueo de scroll de fondo mientras haya un modal abierto -- todos los
 // ~27 modales de la app comparten la clase .modal (confirmado con
@@ -841,8 +830,6 @@ async function loadMonth() {
   const from = toIsoDate(startOfMonth(state.viewDate));
   const to = toIsoDate(endOfMonth(state.viewDate));
   state.events = await api(`/api/events?from=${from}T00:00:00&to=${to}T23:59:59`);
-  document.getElementById('current-month-label').textContent = formatMonthYear(state.viewDate);
-  renderCalendarGrid();
   renderMobileCalendarMonthGrid();
   refreshMobileCalendarNavLabel();
 }
@@ -885,238 +872,6 @@ function buildCalendarEventChip(ev) {
   return chip;
 }
 
-function renderCalendarGrid() {
-  const grid = document.getElementById('calendar-grid');
-  grid.innerHTML = '';
-
-  WEEKDAY_LABELS.forEach((label) => {
-    const el = document.createElement('div');
-    el.className = 'calendar-weekday-heading';
-    el.textContent = label;
-    grid.appendChild(el);
-  });
-
-  const first = startOfMonth(state.viewDate);
-  // getDay() da 0=domingo..6=sabado; queremos que la semana empiece en lunes.
-  const firstWeekday = (first.getDay() + 6) % 7;
-  const gridStart = new Date(first);
-  gridStart.setDate(gridStart.getDate() - firstWeekday);
-
-  const today = new Date();
-
-  for (let i = 0; i < 42; i++) {
-    const cellDate = new Date(gridStart);
-    cellDate.setDate(gridStart.getDate() + i);
-
-    const cell = document.createElement('div');
-    cell.className = 'calendar-cell';
-    if (cellDate.getMonth() !== state.viewDate.getMonth()) cell.classList.add('other-month');
-    if (sameDay(cellDate, today)) cell.classList.add('today');
-    // Dia que se esta viendo ahora mismo en el panel de recordatorios
-    // (clicado en el calendario, o navegado con las flechas del teclado
-    // o de "Mi espacio") — mismo aspecto que el hover, pero fijo en vez
-    // de necesitar el raton encima.
-    if (state.remindersMode === 'day' && state.remindersDayDate && sameDay(cellDate, state.remindersDayDate)) {
-      cell.classList.add('selected-day');
-    }
-
-    // Color de fondo de la celda: festivo/especial (marcados a mano) por
-    // encima de fin de semana (automatico, sabado/domingo); "hoy" no
-    // compite con esto porque se ve en el numero del dia, no en el fondo
-    // (ver .calendar-cell.today .calendar-cell-day en styles.css).
-    const dayType = state.specialDays[toDateKey(cellDate)];
-    if (dayType === 'holiday') cell.classList.add('holiday-day');
-    else if (dayType === 'special') cell.classList.add('special-day');
-    else if (cellDate.getDay() === 0 || cellDate.getDay() === 6) cell.classList.add('weekend-day');
-
-    const dayLabel = document.createElement('div');
-    dayLabel.className = 'calendar-cell-day';
-    dayLabel.textContent = cellDate.getDate();
-    cell.appendChild(dayLabel);
-
-    const dayEvents = state.events.filter((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate));
-    const densityMode = getCalendarDensityMode();
-
-    if (densityMode === 'tint') {
-      // Sin chips ni puntos: solo se marca el dia como "tiene algo", el
-      // detalle de verdad se ve al abrirlo (clicando la celda).
-      if (dayEvents.length > 0) cell.classList.add('has-content');
-    } else if (densityMode === 'dots') {
-      // Un punto de color por evento/tarea, sin texto — las tareas con el
-      // mismo criterio de borde-en-vez-de-relleno que ya usan sus chips.
-      if (dayEvents.length > 0) {
-        const dotsRow = document.createElement('div');
-        dotsRow.className = 'calendar-day-dots';
-        dayEvents.forEach((ev) => {
-          const dot = document.createElement('span');
-          dot.className = 'calendar-day-dot';
-          const color = ev.isTask
-            ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev))
-            : (ev.groupColor || DEFAULT_EVENT_COLOR);
-          if (ev.isTask) {
-            dot.classList.add('is-task');
-            dot.style.borderColor = color;
-          } else {
-            dot.style.backgroundColor = color;
-          }
-          dotsRow.appendChild(dot);
-        });
-        cell.appendChild(dotsRow);
-      }
-    } else {
-      // 'limit': como antes, pero con un tope de chips completos y un
-      // "+N mas" para el resto (en vez de que la celda se desborde con
-      // muchos eventos el mismo dia).
-      const visible = dayEvents.slice(0, CALENDAR_DENSITY_LIMIT);
-      const hiddenCount = dayEvents.length - visible.length;
-      visible.forEach((ev) => {
-        cell.appendChild(ev.isTask ? buildCalendarTaskChip(ev) : buildCalendarEventChip(ev));
-      });
-      if (hiddenCount > 0) {
-        const more = document.createElement('div');
-        more.className = 'calendar-more-chip';
-        more.textContent = `+${hiddenCount} más`;
-        more.addEventListener('click', (e) => {
-          e.stopPropagation();
-          showDayInReminders(cellDate);
-        });
-        cell.appendChild(more);
-      }
-    }
-
-    // Clicar en cualquier otro sitio de la celda (no un chip concreto)
-    // cambia el panel de recordatorios para mostrar TODOS los eventos de
-    // ese dia — los chips se quedan pequenos y no siempre caben todos.
-    cell.addEventListener('click', () => showDayInReminders(cellDate));
-
-    grid.appendChild(cell);
-  }
-}
-
-// ---------------------------------------------------------------------
-// Panel de recordatorios en modo "dia": clicar un dia del calendario NO
-// abre ninguna ventana — en su lugar, el panel de recordatorios (el de
-// al lado del calendario) cambia a mostrar los eventos de ese dia, con
-// opcion de anadir uno nuevo ya con esa fecha puesta y de marcarlo como
-// festivo o dia especial. "← Proximos" vuelve a la vista normal.
-// ---------------------------------------------------------------------
-async function showDayInReminders(date) {
-  state.remindersMode = 'day';
-  state.remindersDayDate = date;
-  renderCalendarGrid();
-  await renderRemindersPanel();
-}
-
-function showUpcomingReminders() {
-  state.remindersMode = 'upcoming';
-  state.remindersDayDate = null;
-  renderCalendarGrid();
-  renderRemindersPanel();
-}
-
-function updateDayMarkButtons(dateKey) {
-  const current = state.specialDays[dateKey];
-  document.getElementById('btn-day-mark-holiday').classList.toggle('active', current === 'holiday');
-  document.getElementById('btn-day-mark-special').classList.toggle('active', current === 'special');
-}
-
-async function setDayType(dateKey, type) {
-  const current = state.specialDays[dateKey];
-  const next = current === type ? null : type; // pulsar el mismo tipo otra vez lo quita
-  await api(`/api/special-days/${dateKey}`, { method: 'PUT', body: JSON.stringify({ type: next }) });
-  if (next) state.specialDays[dateKey] = next;
-  else delete state.specialDays[dateKey];
-  updateDayMarkButtons(dateKey);
-  renderCalendarGrid();
-}
-
-// Se piden los eventos de ESE dia a la base local (en vez de
-// filtrar state.events, que solo tiene el mes que se esta viendo) para
-// que tambien funcione bien si clicas un dia "de otro mes" que asoma en
-// las esquinas de la cuadricula.
-async function renderDayReminders(date) {
-  const dateStr = toDateKey(date);
-  const list = document.getElementById('reminders-list');
-  list.innerHTML = '<p class="empty-hint">Cargando…</p>';
-
-  const dayEvents = await api(`/api/events?from=${dateStr}T00:00:00&to=${dateStr}T23:59:59`);
-
-  list.innerHTML = '';
-  if (dayEvents.length === 0) {
-    list.innerHTML = '<p class="empty-hint">No hay eventos este dia.</p>';
-    return;
-  }
-
-  dayEvents.forEach((ev) => {
-    if (ev.isTask) {
-      const row = buildTaskRow(ev);
-      if (row) list.appendChild(row);
-      return;
-    }
-    const groupLabel = ev.groupName ? `${ev.groupIcon ? ev.groupIcon + ' ' : ''}${ev.groupName}` : null;
-    const item = document.createElement('div');
-    item.className = 'agenda-item';
-    item.innerHTML = `
-      <span class="color-dot" style="background-color: ${ev.groupColor || DEFAULT_EVENT_COLOR}"></span>
-      <div class="agenda-time">${ev.allDay ? 'Todo el dia' : TIME_FORMATTER.format(new Date(ev.startAt))}</div>
-      <div>
-        <div class="agenda-title">${escapeHtml(ev.title)}</div>
-        ${groupLabel || ev.location ? `<div class="agenda-meta">${[groupLabel, ev.location].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
-      </div>
-    `;
-    item.addEventListener('click', () => openEventModal(ev));
-    list.appendChild(item);
-  });
-}
-
-async function renderRemindersPanel() {
-  const title = document.getElementById('reminders-panel-title');
-  const backBtn = document.getElementById('btn-reminders-back');
-  const dayActions = document.getElementById('reminders-day-actions');
-
-  if (state.remindersMode === 'day' && state.remindersDayDate) {
-    title.textContent = DAY_HEADING_FORMATTER.format(state.remindersDayDate);
-    backBtn.classList.remove('hidden');
-    dayActions.classList.remove('hidden');
-    updateDayMarkButtons(toDateKey(state.remindersDayDate));
-    remindersDayNavDateField.setValue(state.remindersDayDate);
-    await renderDayReminders(state.remindersDayDate);
-  } else {
-    title.textContent = 'Proximos recordatorios';
-    backBtn.classList.add('hidden');
-    dayActions.classList.add('hidden');
-    renderUpcomingRemindersList(state.upcomingReminders || []);
-  }
-}
-
-// Navegacion de dia dentro de "Mi espacio" (ver #reminders-day-nav en
-// index.html, oculta fuera de ahi). El campo de fecha se crea UNA vez
-// aqui mismo (igual que los campos de fecha de los modales) y vive
-// siempre dentro de .reminders-top-block, se mueva este donde se mueva.
-const remindersDayNavDateField = createDateField({
-  initialValue: new Date(),
-  onChange: (d) => { if (d) showDayInReminders(d); },
-});
-document.getElementById('reminders-day-nav-date-field').appendChild(remindersDayNavDateField.element);
-document.getElementById('btn-reminders-day-prev').addEventListener('click', () => shiftRemindersDay(-1));
-document.getElementById('btn-reminders-day-next').addEventListener('click', () => shiftRemindersDay(1));
-
-document.getElementById('btn-reminders-back').addEventListener('click', showUpcomingReminders);
-document.getElementById('btn-day-mark-holiday').addEventListener('click', () => {
-  if (state.remindersDayDate) setDayType(toDateKey(state.remindersDayDate), 'holiday');
-});
-document.getElementById('btn-day-mark-special').addEventListener('click', () => {
-  if (state.remindersDayDate) setDayType(toDateKey(state.remindersDayDate), 'special');
-});
-document.getElementById('btn-day-add-event').addEventListener('click', () => {
-  openEventModal(null, state.remindersDayDate);
-});
-
-// renderAgendaList() (la lista plana antigua de movil) se quito por
-// completo en la Fase 2 del rediseño movil -- sustituida por las vistas
-// de mes/año propias mas abajo (renderMobileCalendarMonthGrid() y
-// alrededores).
-
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
@@ -1126,25 +881,6 @@ function escapeHtml(str) {
 // Las flechas del mes navegan por AÑO en vez de por mes mientras estas
 // en la vista anual (ver calendarViewMode mas abajo) -- mismo boton,
 // distinto salto, coherente con lo que se esta mirando.
-document.getElementById('nav-prev').addEventListener('click', () => {
-  if (calendarViewMode === 'year') {
-    state.viewDate = new Date(state.viewDate.getFullYear() - 1, state.viewDate.getMonth(), 1);
-    refreshCalendarYearGrid();
-    return;
-  }
-  state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() - 1, 1);
-  loadMonth();
-});
-document.getElementById('nav-next').addEventListener('click', () => {
-  if (calendarViewMode === 'year') {
-    state.viewDate = new Date(state.viewDate.getFullYear() + 1, state.viewDate.getMonth(), 1);
-    refreshCalendarYearGrid();
-    return;
-  }
-  state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() + 1, 1);
-  loadMonth();
-});
-
 // ---------------------------------------------------------------------
 // Vista anual (solo escritorio): las 12 miniaturas del año a la vez, en
 // vez del mes a mes de siempre -- pedido explicito de Koku, "ya que hay
@@ -1169,7 +905,7 @@ async function loadYearViewEvents(year) {
 function isGestureBlockedByModal() {
   if (document.querySelector('.modal:not(.hidden)')) return true;
   const fullscreenIds = [
-    'my-space-view', 'extensions-view', 'gym-view', 'gym-live-view', 'finanzas-view',
+    'extensions-view', 'gym-view', 'gym-live-view', 'finanzas-view',
     'lecturas-view', 'note-editor-view',
   ];
   return fullscreenIds.some((id) => {
@@ -1181,79 +917,6 @@ function isGestureBlockedByModal() {
 function enterMonthFromYear(month) {
   state.viewDate = new Date(state.viewDate.getFullYear(), month, 1);
   setCalendarViewMode('month');
-}
-
-function renderCalendarYearGrid() {
-  const container = document.getElementById('calendar-year-grid');
-  container.innerHTML = '';
-  const year = state.viewDate.getFullYear();
-  const today = new Date();
-
-  for (let month = 0; month < 12; month++) {
-    const monthDate = new Date(year, month, 1);
-    const tile = document.createElement('div');
-    tile.className = 'calendar-year-tile';
-
-    const heading = document.createElement('div');
-    heading.className = 'calendar-year-tile-heading';
-    const label = MONTH_ONLY_FORMATTER.format(monthDate);
-    heading.textContent = label.charAt(0).toUpperCase() + label.slice(1);
-    tile.appendChild(heading);
-
-    const grid = document.createElement('div');
-    grid.className = 'calendar-year-tile-grid';
-
-    // Igual que el mes grande: la semana empieza en lunes, y solo se
-    // pintan las semanas que hacen falta para ese mes (4 a 6 segun como
-    // caiga), sin filas de sobra vacias.
-    const first = startOfMonth(monthDate);
-    const last = endOfMonth(monthDate);
-    const firstWeekday = (first.getDay() + 6) % 7;
-    const lastWeekday = (last.getDay() + 6) % 7;
-    const gridStart = new Date(first);
-    gridStart.setDate(gridStart.getDate() - firstWeekday);
-    const totalDays = firstWeekday + last.getDate() + (6 - lastWeekday);
-
-    for (let i = 0; i < totalDays; i++) {
-      const cellDate = new Date(gridStart);
-      cellDate.setDate(gridStart.getDate() + i);
-
-      const cell = document.createElement('span');
-      cell.className = 'calendar-year-day';
-      cell.textContent = cellDate.getDate();
-      if (cellDate.getMonth() !== month) cell.classList.add('other-month');
-      if (sameDay(cellDate, today)) cell.classList.add('today');
-
-      const dayType = state.specialDays[toDateKey(cellDate)];
-      if (dayType === 'holiday') cell.classList.add('holiday-day');
-      else if (dayType === 'special') cell.classList.add('special-day');
-      else if (cellDate.getDay() === 0 || cellDate.getDay() === 6) cell.classList.add('weekend-day');
-
-      if (yearViewEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate))) {
-        cell.classList.add('has-content');
-      }
-
-      grid.appendChild(cell);
-    }
-    tile.appendChild(grid);
-
-    tile.addEventListener('click', () => enterMonthFromYear(month));
-    tile.addEventListener('wheel', (e) => {
-      if (isGestureBlockedByModal()) return;
-      if (e.deltaY >= 0) return; // solo hacia arriba = "entrar" en el mes
-      e.preventDefault();
-      enterMonthFromYear(month);
-    }, { passive: false });
-
-    container.appendChild(tile);
-  }
-}
-
-async function refreshCalendarYearGrid() {
-  const year = state.viewDate.getFullYear();
-  document.getElementById('current-month-label').textContent = String(year);
-  await loadYearViewEvents(year);
-  renderCalendarYearGrid();
 }
 
 const CALENDAR_VIEW_ANIMATION_MS = 320;
@@ -1271,65 +934,16 @@ function playCalendarViewAnimation(el) {
 async function setCalendarViewMode(mode) {
   if (mode === calendarViewMode) return;
   calendarViewMode = mode;
-  const monthEl = document.getElementById('calendar-grid');
-  const yearEl = document.getElementById('calendar-year-grid');
-  document.getElementById('btn-calendar-year-toggle').classList.toggle('active', mode === 'year');
-
-  if (mode === 'year') {
-    await refreshCalendarYearGrid();
-    monthEl.classList.add('hidden');
-    yearEl.classList.remove('hidden');
-    playCalendarViewAnimation(yearEl);
-  } else {
-    await loadMonth();
-    yearEl.classList.add('hidden');
-    monthEl.classList.remove('hidden');
-    playCalendarViewAnimation(monthEl);
-  }
-  // Movil (Fase 2 del rediseño movil): mismo `calendarViewMode` como
-  // fuente unica de verdad, para que si alguien redimensiona la ventana
-  // a media sesion la vista se mantenga coherente entre escritorio y
-  // movil. loadMonth() (llamado arriba en la rama "month") ya repinta
-  // #mobile-calendar-month-grid via renderMobileCalendarMonthGrid().
-  if (mode === 'year') {
-    await refreshMobileCalendarYearGrid();
-  }
+  if (mode === 'year') await refreshMobileCalendarYearGrid();
+  else await loadMonth();
   refreshMobileCalendarModeVisibility();
   refreshMobileCalendarNavLabel();
 }
 
-document.getElementById('btn-calendar-year-toggle').addEventListener('click', () => {
-  setCalendarViewMode(calendarViewMode === 'year' ? 'month' : 'year');
-});
-
-// Rueda del raton hacia abajo sobre el mes = vista anual. Si el punto
-// donde estaba el raton es una celda que YA scrollea por su cuenta (un
-// dia con muchos eventos, ver .calendar-cell en styles.css), se deja
-// pasar el scroll normal de esa celda en vez de interceptarlo -- si no,
-// seria imposible leer un dia lleno sin cambiar de vista sin querer.
-document.getElementById('calendar-grid-wrap').addEventListener('wheel', (e) => {
-  if (calendarViewMode !== 'month') return;
-  if (e.deltaY <= 0) return;
-  if (isGestureBlockedByModal()) return;
-  const cell = e.target.closest('.calendar-cell');
-  if (cell && cell.scrollHeight > cell.clientHeight) return;
-  e.preventDefault();
-  setCalendarViewMode('year');
-}, { passive: false });
-
 // ---------------------------------------------------------------------
-// Calendario MOVIL (Fase 2 del rediseño movil, ver CLAUDE.md): vistas de
-// mes/año propias, en contenedores separados de escritorio (nunca
-// comparten nodo con calendar-grid-wrap.desktop-only -- se investigo a
-// fondo antes de construir esto: la vista anual de escritorio vivia
-// ANIDADA dentro de ese contenedor, asi que reutilizar el mismo DOM no
-// era viable sin romper el corte movil/escritorio). Comparten con
-// escritorio la LOGICA de datos (loadYearViewEvents, state.events) pero
-// el pintado es propio -- el calculo de fechas del mes SI se duplica a
-// proposito (buildMonthCellDates de aqui abajo, y el de
-// renderCalendarGrid mas arriba): son solo 6 lineas de aritmetica ya
-// verificadas, y evita tocar la funcion de escritorio que Koku ya usa a
-// diario.
+// Calendario: vistas de mes y de año, cada una con su propio contenedor
+// (se alternan con .hidden desde setCalendarViewMode). Los eventos del año
+// entero se piden de golpe una vez (loadYearViewEvents) y se cachean.
 // ---------------------------------------------------------------------
 
 // Gesto generico de swipe (Pointer Events -- funciona con dedo, raton o
@@ -1440,7 +1054,7 @@ function buildYearTileCellDates(monthDate) {
 
 // Que grupos DISTINTOS estan representados un dia concreto -- no es que
 // un evento pertenezca a varios grupos (un evento/tarea siempre es de UN
-// grupo, ver events.group_id en server/db.js), es agregar varios
+// grupo, ver events.group_id en local-schema.js), es agregar varios
 // eventos/tareas de ESE dia que pueden ser de grupos distintos entre si.
 // Orden pedido por Koku: los de "todo el dia" primero, luego por hora de
 // inicio; un grupo que ya aparecio no se repite aunque tenga mas de un
@@ -1890,17 +1504,15 @@ function refreshMobileCurrentTimeLine(date) {
 }
 
 function scrollMobileHoursToTime(date, targetMinutes) {
-  // .mobile-hours-scroll tiene overflow-y:auto, pero en movil ".app"
-  // usa min-height (no height) a proposito, para que la pagina crezca
-  // con el contenido y se pueda hacer scroll normal con el dedo (ver el
-  // comentario junto a ".app" en styles.css) -- eso significa que este
-  // contenedor NUNCA llega a desbordar de verdad (su scrollHeight ==
-  // clientHeight siempre), asi que fijar su propio scrollTop no mueve
-  // nada. El que de verdad se desplaza es la PAGINA entera, asi que hay
-  // que calcular la posicion absoluta en la pagina y usar
-  // window.scrollTo() en su lugar.
+  // Desde que la vista diaria acota su propio alto (body.mobile-day-
+  // scroll-lock, ver styles.css), quien se desplaza de verdad es
+  // .mobile-hours-scroll, no la pagina -- antes era al reves y esto
+  // usaba window.scrollTo(). El grid es hijo directo de ese contenedor,
+  // que ademas es position:relative, asi que su offsetTop ya esta medido
+  // respecto a el.
   const grid = document.getElementById('mobile-hours-grid');
-  if (!grid) return;
+  const scroller = document.querySelector('.mobile-hours-scroll');
+  if (!grid || !scroller) return;
   // targetMinutes explicito (p. ej. la hora real de un evento clicado
   // desde el buscador global) tiene prioridad; si no se pasa, se sigue
   // el comportamiento de siempre ("ahora" si es hoy, 8:00 si no).
@@ -1908,10 +1520,9 @@ function scrollMobileHoursToTime(date, targetMinutes) {
     const now = new Date();
     targetMinutes = sameDay(date, now) ? (now.getHours() * 60 + now.getMinutes()) : 8 * 60;
   }
-  const gridTop = grid.getBoundingClientRect().top + window.scrollY;
   // Deja un par de horas de margen ANTES del objetivo, para que no quede
   // pegado justo al borde superior de la pantalla.
-  window.scrollTo(0, Math.max(0, gridTop + targetMinutes - 120));
+  scroller.scrollTop = Math.max(0, grid.offsetTop + targetMinutes - 120);
 }
 
 // Reparto de "carriles" simple y voraz para eventos con hora que se
@@ -2117,13 +1728,13 @@ async function expandMobileDayListado(direction) {
     while (true) {
       const totalSpanDays = Math.round((mobileDayListadoRange.to - mobileDayListadoRange.from) / 86400000);
       if (totalSpanDays >= MOBILE_DAY_LISTADO_MAX_SPAN_DAYS) { mobileDayListadoPending.clear(); break; }
-      // El scroll real ocurre en la PAGINA, no dentro de
-      // #mobile-day-listado-view (ver comentario de
-      // scrollMobileHoursToTime() sobre por que ".app" nunca llega a
-      // acotar la altura de sus hijos en movil) -- se mide con
-      // document.documentElement/window en vez del propio contenedor.
-      const prevDocHeight = document.documentElement.scrollHeight;
-      const prevScrollY = window.scrollY;
+      // El scroll ocurre DENTRO de #mobile-day-listado-view (la vista
+      // diaria acota su propio alto, ver body.mobile-day-scroll-lock en
+      // styles.css) -- se mide sobre el propio contenedor, no sobre la
+      // pagina.
+      const listado = document.getElementById('mobile-day-listado-view');
+      const prevDocHeight = listado.scrollHeight;
+      const prevScrollY = listado.scrollTop;
       if (direction === 'back') {
         mobileDayListadoRange.from = new Date(mobileDayListadoRange.from.getFullYear(), mobileDayListadoRange.from.getMonth(), mobileDayListadoRange.from.getDate() - MOBILE_DAY_LISTADO_STEP_DAYS);
       } else {
@@ -2134,7 +1745,7 @@ async function expandMobileDayListado(direction) {
         // Compensa el scroll para que anteponer dias arriba no de un
         // salto visual (el contenido nuevo empuja hacia abajo lo que ya
         // se veia).
-        window.scrollTo(0, prevScrollY + (document.documentElement.scrollHeight - prevDocHeight));
+        listado.scrollTop = prevScrollY + (listado.scrollHeight - prevDocHeight);
       }
       if (mobileDayListadoPending.size === 0) break;
       direction = mobileDayListadoPending.values().next().value;
@@ -2149,16 +1760,16 @@ function setupMobileDayListadoObserver() {
   disconnectMobileDayListadoObserver();
   const topSentinel = document.getElementById('mobile-day-listado-top-sentinel');
   const bottomSentinel = document.getElementById('mobile-day-listado-bottom-sentinel');
-  // root:null (en vez del div) -- observa contra el VIEWPORT real del
-  // navegador, que es lo que de verdad se desplaza en movil (ver el
-  // mismo comentario de scrollMobileHoursToTime()).
+  // root = el propio contenedor que se desplaza (ver
+  // body.mobile-day-scroll-lock en styles.css): desde que la vista
+  // diaria acota su alto, es el quien desborda, no la pagina.
   mobileDayListadoObserver = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (!entry.isIntersecting) return;
       if (entry.target === topSentinel) expandMobileDayListado('back');
       else if (entry.target === bottomSentinel) expandMobileDayListado('forward');
     });
-  }, { root: null, threshold: 0 });
+  }, { root: document.getElementById('mobile-day-listado-view'), threshold: 0 });
   mobileDayListadoObserver.observe(topSentinel);
   mobileDayListadoObserver.observe(bottomSentinel);
 }
@@ -2168,9 +1779,9 @@ async function renderMobileDayListado(centerDate) {
     from: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() - 3),
     to: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() + 3),
   };
-  // El scroll real es el de la PAGINA (ver scrollMobileHoursToTime()),
-  // asi que "empezar arriba del todo" es scrollear la ventana, no el div.
-  window.scrollTo(0, 0);
+  // "Empezar arriba del todo" es desplazar el propio contenedor, que es
+  // quien desborda (ver scrollMobileHoursToTime()).
+  document.getElementById('mobile-day-listado-view').scrollTop = 0;
   await loadAndRenderMobileDayListado();
   // El primer observe() de IntersectionObserver avisa de inmediato con
   // el estado actual -- si la ventana inicial (±3 dias) no llega a
@@ -2356,6 +1967,12 @@ function enterMobileDayView(date, { targetMinutes } = {}) {
   document.getElementById('mobile-calendar-month-toolbar').classList.add('hidden');
   document.querySelector('.mobile-calendar-view').classList.add('hidden');
   document.getElementById('mobile-calendar-day-view').classList.remove('hidden');
+  // Marca para el CSS: mientras se ve el dia, la pagina deja de crecer
+  // con el contenido y el desplazamiento pasa a ser SOLO el de la
+  // rejilla de horas / la lista de eventos, no el de la pantalla
+  // entera (pedido de Koku: "lo unico que se deberia deslizar es la
+  // pantalla de horas o de eventos"). Ver .mobile-day-scroll-lock.
+  document.body.classList.add('mobile-day-scroll-lock');
   if (targetMinutes === null) {
     showMobileDay(date, { scrollToNow: false });
   } else {
@@ -2369,6 +1986,7 @@ function exitMobileDayView() {
   document.getElementById('mobile-calendar-day-view').classList.add('hidden');
   document.getElementById('mobile-calendar-month-toolbar').classList.remove('hidden');
   document.querySelector('.mobile-calendar-view').classList.remove('hidden');
+  document.body.classList.remove('mobile-day-scroll-lock');
 }
 
 document.getElementById('btn-mobile-day-back-label').addEventListener('click', exitMobileDayView);
@@ -2554,14 +2172,13 @@ function combineDateAndTime(date, timeStr) {
 // :30 que de :00 de la hora siguiente), 6:50 -> 7:00, 6:00 se queda en
 // 6:00. Se usa para sugerir la hora de inicio de un evento nuevo en vez
 // de dejar "las 6:37" tal cual.
-function roundToNearestHalfHour(date) {
+// Hora en punto de AHORA, hacia abajo: a las 17:17 propone 17:00 (y con
+// la hora de fin, que ya suma una hora, queda 17:00-18:00). Antes
+// redondeaba a la media hora mas cercana, asi que a las 17:17 proponia
+// 17:30-18:30 -- Koku pidio explicitamente lo primero.
+function roundDownToHour(date) {
   const rounded = new Date(date);
-  rounded.setSeconds(0, 0);
-  const minutes = rounded.getMinutes();
-  const remainder = minutes % 30;
-  if (remainder !== 0) {
-    rounded.setMinutes(remainder < 15 ? minutes - remainder : minutes + (30 - remainder));
-  }
+  rounded.setMinutes(0, 0, 0);
   return rounded;
 }
 
@@ -2593,7 +2210,7 @@ function openEventModal(event, presetDate) {
     defaultStart = new Date(presetDate);
     defaultStart.setHours(9, 0, 0, 0);
   } else {
-    defaultStart = roundToNearestHalfHour(defaultStart);
+    defaultStart = roundDownToHour(defaultStart);
   }
   const startDate = event ? new Date(event.startAt) : defaultStart;
   eventStartDateField.setValue(startDate);
@@ -2642,7 +2259,6 @@ function closeEventModal() {
   document.getElementById('event-modal').classList.add('hidden');
 }
 
-document.getElementById('btn-new-event').addEventListener('click', () => openEventModal(null));
 document.getElementById('btn-cancel-event').addEventListener('click', closeEventModal);
 document.getElementById('btn-close-event').addEventListener('click', closeEventModal);
 
@@ -2725,31 +2341,6 @@ function populateEventGroupSelect() {
 // ---------------------------------------------------------------------
 // Recordatorios: panel + notificaciones del navegador
 // ---------------------------------------------------------------------
-function renderUpcomingRemindersList(upcoming) {
-  const now = new Date();
-  const list = document.getElementById('reminders-list');
-  list.innerHTML = '';
-
-  const future = upcoming.filter((r) => new Date(r.startAt) >= now).slice(0, 10);
-
-  if (future.length === 0) {
-    list.innerHTML = '<p class="empty-hint">No hay recordatorios proximos.</p>';
-  } else {
-    future.forEach((r) => {
-      const remindAt = new Date(r.remindAt);
-      const isDue = remindAt <= now;
-      const row = document.createElement('div');
-      row.className = 'reminder-item';
-      const iconPrefix = r.groupIcon ? `${escapeHtml(r.groupIcon)} ` : '';
-      row.innerHTML = `
-        <span><span class="color-dot" style="background-color: ${r.groupColor || DEFAULT_EVENT_COLOR}"></span> ${iconPrefix}${escapeHtml(r.title)}</span>
-        <span class="${isDue ? 'reminder-due' : ''}">${TIME_FORMATTER.format(new Date(r.startAt))}</span>
-      `;
-      list.appendChild(row);
-    });
-  }
-}
-
 async function loadReminders() {
   const upcoming = await api('/api/reminders/upcoming');
   const now = new Date();
@@ -2759,12 +2350,6 @@ async function loadReminders() {
   // natural para reprogramar los avisos del sistema (los que suenan con
   // la app cerrada) sin tener que acordarse en cada crear/editar/borrar.
   syncScheduledReminders();
-
-  // El DOM de #reminders-list solo se toca si el panel esta mostrando
-  // "proximos" — si el usuario esta viendo un dia concreto, no lo pisamos.
-  if (state.remindersMode !== 'day') {
-    renderUpcomingRemindersList(upcoming);
-  }
 
   // Aviso "en caliente", mientras la app esta ABIERTA. El aviso de
   // verdad con la app cerrada lo programa el sistema operativo (ver
@@ -2920,8 +2505,7 @@ async function toggleTaskDone(task) {
   const idx = state.tasks.findIndex((t) => t.id === task.id);
   if (idx !== -1) state.tasks[idx] = updated;
   renderTasksList();
-  loadMonth(); // refleja el cambio en el calendario/agenda si la tarea tiene fecha
-  if (state.remindersMode === 'day') renderRemindersPanel();
+  loadMonth(); // refleja el cambio en el calendario si la tarea tiene fecha
 }
 
 function populateTaskGroupSelect() {
@@ -2955,7 +2539,6 @@ function closeTaskModal() {
   document.getElementById('task-modal').classList.add('hidden');
 }
 
-document.getElementById('btn-new-task').addEventListener('click', () => openTaskModal(null));
 document.getElementById('btn-cancel-task').addEventListener('click', closeTaskModal);
 document.getElementById('btn-close-task').addEventListener('click', closeTaskModal);
 
@@ -3159,17 +2742,9 @@ function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
   }
   row.appendChild(contentWrap);
 
-  const editBtn = document.createElement('button');
-  editBtn.type = 'button';
-  editBtn.className = 'note-folder-chip-edit';
-  editBtn.textContent = '✎';
-  editBtn.setAttribute('aria-label', `Editar carpeta ${folder.name}`);
-  editBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    openNoteFolderModal(folder);
-  });
-  row.appendChild(editBtn);
-
+  // El lapiz de "editar carpeta" que habia aqui se quito del todo: en la app
+  // movil ya se llega a lo mismo desde el menu de 3 puntos ("Editar carpetas"),
+  // asi que era un boton duplicado ocupando sitio en cada fila.
   row.appendChild(buildFavoriteStarBtn(folder.favorite, (e) => {
     e.stopPropagation();
     toggleFolderFavorite(folder);
@@ -3295,7 +2870,6 @@ function appendFavoriteSortedGroup(container, items, buildRowFn, { compareFn } =
 // del todo o no estara en el DOM segun la version de index.html que se
 // esté usando, de ahi el "if (!container) return" dentro de cada uno).
 const NOTES_VIEW_TARGETS = {
-  desktop: { containerId: 'notes-list', backBtnId: 'btn-note-folder-back' },
   mobile: { containerId: 'mobile-notes-list', backBtnId: 'btn-mobile-notes-back' },
 };
 
@@ -3316,13 +2890,9 @@ function renderNotesViewInto(target) {
   const backBtn = document.getElementById(cfg.backBtnId);
   if (backBtn) backBtn.classList.toggle('hidden', state.currentNoteFolderId === null || searchWholeApp);
 
-  // "mode" (Seleccionar/Mover/editFolders) se comparte entre las dos
-  // plataformas -- un unico mecanismo para mover notas, ver
-  // btn-note-folder-select (escritorio) y el menu de 3 puntos (movil),
-  // ambos llaman a setMobileNotesMode(). Orden/galeria SI siguen siendo
-  // ajustes GLOBALES por dispositivo, solo con efecto en movil (no
-  // tienen equivalente en escritorio, que sigue funcionando igual que
-  // siempre en eso).
+  // "mode" (Seleccionar/Mover/editFolders) lo pone el menu de 3 puntos de la
+  // vista de Notas (setMobileNotesMode). Orden y vista galeria/listado son
+  // ajustes por dispositivo, guardados en localStorage.
   const mode = mobileNotesMode;
   const sortOpts = target === 'mobile' ? { compareFn: compareMobileNotesItems } : {};
   const useGallery = target === 'mobile' && getMobileNotesViewMode() === 'gallery';
@@ -3489,38 +3059,12 @@ function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
 // busqueda que exista en el DOM, no solo el de escritorio.
 function clearNoteSearch() {
   state.noteSearchQuery = '';
-  ['note-search-input', 'mobile-notes-search-input'].forEach((id) => {
+  ['mobile-notes-search-input'].forEach((id) => {
     const input = document.getElementById(id);
     if (input) input.value = '';
   });
 }
 
-document.getElementById('note-search-input').addEventListener('input', (e) => {
-  state.noteSearchQuery = e.target.value;
-  renderNotesView();
-});
-
-document.getElementById('note-search-scope-btn').addEventListener('click', () => {
-  state.noteSearchCurrentFolderOnly = !state.noteSearchCurrentFolderOnly;
-  document.getElementById('note-search-scope-btn').classList.toggle('is-active', state.noteSearchCurrentFolderOnly);
-  document.getElementById('note-search-scope-btn').setAttribute('aria-pressed', state.noteSearchCurrentFolderOnly ? 'true' : 'false');
-  renderNotesView();
-});
-
-document.getElementById('btn-note-folder-back').addEventListener('click', () => {
-  const current = state.noteFolders.find((f) => f.id === state.currentNoteFolderId);
-  state.currentNoteFolderId = current ? current.parentId : null;
-  clearNoteSearch();
-  renderNotesView();
-});
-
-// "Seleccionar" de escritorio -- mismo mecanismo Seleccionar/Mover que
-// ya existia solo en movil (mobileNotesMode compartido, ver
-// setMobileNotesMode mas abajo).
-document.getElementById('btn-note-folder-select').addEventListener('click', () => {
-  const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
-  setMobileNotesMode(selecting ? 'browse' : 'select');
-});
 
 // Equivalentes de la vista movil (#mobile-notes-view, Fase 4) -- misma
 // logica exacta que los de escritorio de arriba, apuntando a los ids
@@ -3579,7 +3123,6 @@ function setMobileNotesMode(mode) {
 // modo activo.
 const NOTES_ACTION_BAR_TARGETS = {
   mobile: { barId: 'mobile-notes-action-bar', leftId: 'btn-mobile-notes-action-left', rightId: 'btn-mobile-notes-action-right' },
-  desktop: { barId: 'note-folder-action-bar', leftId: 'btn-note-folder-action-left', rightId: 'btn-note-folder-action-right' },
 };
 
 // Sin seleccion propia (Eliminar/Mover deshabilitados con nada marcado),
@@ -3618,16 +3161,6 @@ function refreshMobileNotesActionBar() {
     }
   });
 
-  // Boton "Seleccionar" de escritorio: refleja si estamos en
-  // seleccion/mover (equivalente al item de menu "Seleccionar"/"Listo"
-  // que ya existe en movil).
-  const selectBtn = document.getElementById('btn-note-folder-select');
-  if (selectBtn) {
-    const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
-    selectBtn.textContent = selecting ? 'Listo' : 'Seleccionar';
-    selectBtn.classList.toggle('is-active', selecting);
-    selectBtn.setAttribute('aria-pressed', selecting ? 'true' : 'false');
-  }
 }
 
 function resolveMobileNotesItem(key) {
@@ -3831,7 +3364,6 @@ document.getElementById('note-favorite-btn').addEventListener('click', () => {
   noteModalFavorite = !noteModalFavorite;
   refreshNoteFavoriteBtn();
   captureActiveOpenNoteFromDom();
-  renderNoteSectionsPanel();
 });
 
 // ---------------------------------------------------------------------
@@ -3855,7 +3387,7 @@ function execNoteCommand(cmd) {
 // tabla -- ver mas abajo -- comparten la clase .note-editor-btn por el
 // aspecto visual, pero no tienen data-cmd ni pasan por execCommand).
 function refreshNoteEditorToolbar() {
-  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => {
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => {
     const active = document.queryCommandState(btn.dataset.cmd);
     btn.classList.toggle('is-active', !!active);
   });
@@ -3867,7 +3399,7 @@ function refreshNoteEditorToolbar() {
 // estado de la ULTIMA nota que se habia editado, en vez de apagados.
 // Tambien oculta el grupo +Fila/-Fila/+Col/-Col por la misma razon.
 function resetNoteEditorToolbar() {
-  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
   document.getElementById('note-table-context-toolbar').classList.add('hidden');
   document.getElementById('note-paragraph-style-btn').disabled = false;
   document.getElementById('note-quote-toggle-btn').disabled = false;
@@ -3877,10 +3409,9 @@ function resetNoteEditorToolbar() {
   document.getElementById('note-highlight-btn').disabled = false;
   document.getElementById('note-highlight-btn').classList.remove('is-active');
   cancelPendingNoteHighlight();
-  closeNoteFormatPopover();
 }
 
-document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => {
+document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => {
   // mousedown (no click) + preventDefault: si no, el navegador quita la
   // seleccion de texto del editor al pasar el foco al boton ANTES de que
   // se dispare el click, y execCommand ya no tendria sobre que aplicar
@@ -3888,153 +3419,6 @@ document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').for
   btn.addEventListener('mousedown', (e) => e.preventDefault());
   btn.addEventListener('click', () => execNoteCommand(btn.dataset.cmd));
 });
-
-// ---------------------------------------------------------------------
-// Panel de formato (boton "Formato" de la barra principal, ver
-// index.html): abre/cierra #note-format-popover, que contiene las 3
-// filas de controles de siempre. Deliberadamente NO es un popover
-// flotante (position:fixed) -- lo fue en una ronda anterior, pero
-// Koku reporto que "sigue tapando el texto" incluso tras cerrarlo solo
-// al escribir (ronda previa): con el editor pudiendo tener poca altura
-// (sobre todo en movil), un panel flotante encima del texto siempre lo
-// tapaba mientras estuviera abierto, sin importar si se estaba
-// escribiendo o no. Ahora vive DENTRO del flujo normal del documento,
-// como una fila mas de .note-editor-form (flex-column) justo entre la
-// barra principal y .note-editor-main -- al abrirse, .note-editor-main/
-// #note-body (flex:1; min-height:0) simplemente se encogen para dejarle
-// sitio, nunca se les superpone nada.
-//
-// A proposito NO pasa por closeAllPopovers()/el listener generico de
-// "click fuera cierra" de settings.js (ese mecanismo cerraria el panel
-// en cuanto se clica DENTRO de #note-body para seleccionar texto, justo
-// lo contrario de lo que hace falta) -- tiene su propio listener
-// dedicado, que solo cierra si el click cae fuera del propio panel, del
-// boton, del editor, o de cualquiera de sus popovers anidados (Aa/
-// resaltado/insertar tabla).
-// ---------------------------------------------------------------------
-const noteFormatPopover = document.getElementById('note-format-popover');
-const noteFormatBtn = document.getElementById('note-format-btn');
-
-// Posicion vertical (viewport) del cursor real dentro de #note-body --
-// null si no hay seleccion util (fuera del editor, o un rango colapsado
-// sin rects propios, p. ej. una linea vacia) para poder caer a un
-// respaldo mas simple en ese caso.
-function getNoteCaretViewportTop() {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return null;
-  const liveRange = sel.getRangeAt(0);
-  if (!NOTE_EDITOR_BODY.contains(liveRange.startContainer)) return null;
-  const range = liveRange.cloneRange();
-  range.collapse(true);
-  let rect = range.getClientRects()[0];
-  if (!rect || (rect.top === 0 && rect.bottom === 0)) {
-    rect = range.getBoundingClientRect();
-  }
-  if (!rect || (rect.top === 0 && rect.bottom === 0 && rect.height === 0)) {
-    // Rango colapsado sin rects propios (linea vacia, justo antes de un
-    // <br> suelto...) -- usar el propio elemento de la linea como
-    // referencia de respaldo.
-    let node = liveRange.startContainer;
-    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-    const line = node ? getNoteLineElement(node) : null;
-    rect = line ? line.getBoundingClientRect() : null;
-  }
-  return rect && !(rect.top === 0 && rect.bottom === 0) ? rect.top : null;
-}
-
-// Cambiar entre .hidden encoge/agranda #note-body al instante (flex
-// column, ver arriba) -- con el editor todavia enfocado justo cuando su
-// caja cambia de tamano, el navegador "revela" el elemento enfocado por
-// su cuenta, y ademas la caja en si pasa a tener otra altura, asi que
-// mantener el mismo scrollTop numerico de antes (primer intento, ya
-// descartado) NO garantiza que el cursor se quede en el mismo sitio en
-// pantalla -- reportado por Koku como "acorta la vista y baja el
-// principio, mueve todo hacia abajo". En vez de eso, se mide DONDE esta
-// el cursor en la pantalla antes de tocar nada, y despues del cambio de
-// layout (la propia lectura del rect ya fuerza un reflow real) se
-// calcula cuanto se desplazo y se compensa ese delta exacto sobre
-// #note-body.scrollTop -- funciona sin importar la causa exacta del
-// desplazamiento (encogido de la caja, "revelar enfocado" nativo...),
-// porque no depende de anticiparla, solo de comparar "donde estaba" vs
-// "donde esta" el cursor. Se reafirma una vez mas en el siguiente frame
-// por si el navegador revierte el valor al pintar de forma asincrona.
-// El listener de 'scroll' de mas abajo (cierra el panel si el usuario
-// desliza el contenido) tiene que distinguir un scroll REAL del propio
-// usuario de este ajuste PROGRAMATICO de scrollTop -- si no, abrir el
-// panel dispara su propia compensacion, que dispara un evento 'scroll',
-// que el listener interpretaria como "el usuario ha deslizado" y
-// cerraria el panel al instante, justo despues de abrirlo. El evento
-// 'scroll' del navegador no es sincrono con la asignacion de
-// scrollTop (puede tardar hasta el siguiente frame), asi que una
-// bandera sincrona no basta -- se usa una ventana de tiempo corta.
-let noteFormatScrollSuppressUntil = 0;
-
-function restoreNoteScrollAfter(fn) {
-  const caretTopBefore = getNoteCaretViewportTop();
-  const noteScrollBefore = NOTE_EDITOR_BODY.scrollTop; // respaldo si no hay caret valido
-  fn();
-  function reapply() {
-    const caretTopAfter = getNoteCaretViewportTop();
-    noteFormatScrollSuppressUntil = performance.now() + 150;
-    if (caretTopBefore != null && caretTopAfter != null) {
-      NOTE_EDITOR_BODY.scrollTop += (caretTopAfter - caretTopBefore);
-    } else {
-      NOTE_EDITOR_BODY.scrollTop = noteScrollBefore;
-    }
-  }
-  reapply();
-  requestAnimationFrame(reapply);
-}
-
-function closeNoteFormatPopover() {
-  restoreNoteScrollAfter(() => {
-    noteFormatPopover.classList.add('hidden');
-    noteFormatBtn.setAttribute('aria-expanded', 'false');
-  });
-}
-
-function openNoteFormatPopover() {
-  restoreNoteScrollAfter(() => {
-    noteFormatPopover.classList.remove('hidden');
-    noteFormatBtn.setAttribute('aria-expanded', 'true');
-  });
-}
-
-noteFormatBtn.addEventListener('mousedown', (e) => e.preventDefault());
-noteFormatBtn.addEventListener('click', () => {
-  if (noteFormatBtn.disabled) return;
-  if (noteFormatPopover.classList.contains('hidden')) openNoteFormatPopover();
-  else closeNoteFormatPopover();
-});
-
-document.addEventListener('click', (e) => {
-  if (noteFormatPopover.classList.contains('hidden')) return;
-  if (e.target.closest('.note-format-popover, #note-format-btn, .paragraph-style-popover, .highlight-color-popover, .table-insert-popover')) return;
-  // Dentro de #note-body distinguimos: si el clic ha dejado una
-  // seleccion de texto real (arrastrar para elegir que resaltar), el
-  // panel se queda abierto para poder aplicarle un formato. Un simple
-  // toque para colocar el cursor (seleccion colapsada, sin arrastre) ya
-  // no cuenta como "dentro" -- cierra el panel igual que cualquier otro
-  // sitio, para poder seguir escribiendo (bug real reportado: tocar la
-  // pantalla para escribir no cerraba nada, solo pulsar una tecla si lo
-  // hacia).
-  if (e.target.closest('#note-body')) {
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return;
-  }
-  closeNoteFormatPopover();
-});
-
-// Un gesto de scroll/swipe (arrastrar para desplazar el contenido de la
-// nota) nunca dispara un 'click' -- el listener de arriba no lo detecta,
-// asi que el panel se quedaba abierto aunque el usuario ya se hubiera
-// ido a leer/escribir mas abajo. Se cierra tambien con el primer scroll
-// real dentro de #note-body (una vez cerrado, el resto del mismo gesto
-// no hace nada mas, ya que closeNoteFormatPopover() es idempotente).
-NOTE_EDITOR_BODY.addEventListener('scroll', () => {
-  if (performance.now() < noteFormatScrollSuppressUntil) return; // scroll propio de abrir/cerrar el panel, no del usuario
-  if (!noteFormatPopover.classList.contains('hidden')) closeNoteFormatPopover();
-}, { passive: true });
 
 // ---------------------------------------------------------------------
 // Tablas dentro de una nota (Fase 4, sub-ronda de tablas): boton
@@ -4186,16 +3570,18 @@ function isSelectionInsideNoteListItem() {
 // dentro de un bloque de codigo, igual que negrita/cursiva/listas.
 function refreshNoteBlockButtons() {
   const disabled = isSelectionInsideNoteListItem() || isCursorInCodeBlock();
-  const block = disabled ? null : getNoteBlockAncestor(window.getSelection().anchorNode);
+  // Los tres botones de bloque miran la seleccion ENTERA, no solo la
+  // linea del cursor (ver getNoteSelectionBlocks()). La cita se marca
+  // como activa solo si TODAS las lineas seleccionadas lo estan, que es
+  // justo cuando volver a pulsarla las apaga.
+  const indentBlocks = disabled ? [] : getNoteSelectionBlocks();
   document.getElementById('note-paragraph-style-btn').disabled = disabled;
   document.getElementById('note-quote-toggle-btn').disabled = disabled;
-  document.getElementById('note-quote-toggle-btn').classList.toggle('is-active', !!block && block.getAttribute('data-quote') === '1');
+  document.getElementById('note-quote-toggle-btn').classList.toggle(
+    'is-active',
+    indentBlocks.length > 0 && indentBlocks.every((b) => b.getAttribute('data-quote') === '1'),
+  );
 
-  // Sangria: si hay varias lineas seleccionadas, el boton se activa/
-  // desactiva mirando el conjunto (al menos una linea puede moverse en
-  // ese sentido), no solo la linea del cursor -- ver
-  // getNoteIndentSelectionBlocks() mas abajo.
-  const indentBlocks = disabled ? [] : getNoteIndentSelectionBlocks();
   const indents = indentBlocks.length
     ? indentBlocks.map((b) => Math.max(0, Math.min(NOTE_MAX_INDENT, parseInt(b.dataset.indent || '0', 10) || 0)))
     : [0];
@@ -4217,11 +3603,16 @@ function applyNoteParagraphStyle(styleName) {
   // defecto del navegador, que varia entre motores.
   const tagMap = { title: '<h1>', heading: '<h2>', subheading: '<h3>', body: '<div>', mono: '<div>' };
   document.execCommand('formatBlock', false, tagMap[styleName]);
-  const block = getNoteBlockAncestor(window.getSelection().anchorNode);
-  if (block) {
+  // Los bloques se recalculan DESPUES del formatBlock a proposito: ese
+  // comando sustituye cada elemento por uno nuevo con la etiqueta
+  // pedida, asi que cualquier referencia capturada antes apuntaria a
+  // nodos ya desenganchados. Y se recorren TODOS los de la seleccion,
+  // no solo el del cursor -- si no, seleccionar varias lineas y elegir
+  // "Monoespaciado" solo cambiaba la primera (reportado por Koku).
+  getNoteSelectionBlocks().forEach((block) => {
     if (styleName === 'mono') block.setAttribute('data-style', 'mono');
     else block.removeAttribute('data-style');
-  }
+  });
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4233,11 +3624,17 @@ function applyNoteParagraphStyle(styleName) {
 // cosas. Atributo manual data-quote="1", independiente del todo.
 function toggleNoteQuoteBlock() {
   if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return;
-  ensureNoteBlockWrapped();
-  const block = getNoteBlockAncestor(window.getSelection().anchorNode);
-  if (!block) return;
-  if (block.getAttribute('data-quote') === '1') block.removeAttribute('data-quote');
-  else block.setAttribute('data-quote', '1');
+  const blocks = getNoteSelectionBlocks({ ensureWrapped: true });
+  if (blocks.length === 0) return;
+  // Con varias lineas seleccionadas el boton funciona como un unico
+  // interruptor para todas: si YA estan todas en cita, se quita; si
+  // hay alguna que no, se pone en todas (es lo que se espera de un
+  // boton que se ve "encendido" o "apagado", no una mezcla).
+  const todasSonCita = blocks.every((b) => b.getAttribute('data-quote') === '1');
+  blocks.forEach((block) => {
+    if (todasSonCita) block.removeAttribute('data-quote');
+    else block.setAttribute('data-quote', '1');
+  });
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4259,45 +3656,43 @@ function applyNoteIndentDeltaToBlock(block, delta) {
 
 // Bloques (hijos directos de NOTE_EDITOR_BODY) que toca la seleccion
 // actual -- un solo elemento con el cursor sin seleccionar nada, o
-// todos los que la seleccion cruza si hay varias lineas marcadas.
-function getNoteIndentSelectionBlocks() {
+// todos los que la seleccion cruza si hay varias lineas marcadas. Lo
+// comparten las TRES acciones de bloque (sangria, cita y estilo de
+// parrafo): antes solo la sangria miraba la seleccion entera y las
+// otras dos actuaban unicamente sobre la linea del cursor, que es
+// justo lo que Koku reporto ("si selecciono varias lineas y le doy a
+// poner comentario, solo actua en la primera").
+//
+// ensureWrapped: envuelve la linea suelta antes de devolver los
+// bloques, para las acciones que necesitan un elemento real donde
+// colgar un atributo. Se hace con el mismo cuidado de siempre --
+// capturar los limites del Range ANTES de mover nada, porque un Range
+// no sigue al nodo que se mueve cuando su CONTENEDOR es justo ese nodo
+// (ver ensureNoteFirstLineWrapped).
+function getNoteSelectionBlocks({ ensureWrapped = false } = {}) {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return [];
-  const range = sel.getRangeAt(0);
   if (sel.isCollapsed) {
-    const block = getNoteBlockAncestor(sel.anchorNode);
+    if (ensureWrapped) ensureNoteBlockWrapped();
+    const block = getNoteBlockAncestor(window.getSelection().anchorNode);
     return block ? [block] : [];
   }
+  const live = sel.getRangeAt(0);
+  const startContainer = live.startContainer;
+  const startOffset = live.startOffset;
+  const endContainer = live.endContainer;
+  const endOffset = live.endOffset;
+  if (ensureWrapped) ensureNoteFirstLineWrapped();
+  const range = document.createRange();
+  range.setStart(startContainer, startOffset);
+  range.setEnd(endContainer, endOffset);
   return Array.from(NOTE_EDITOR_BODY.children).filter((el) => range.intersectsNode(el));
 }
 
 function applyNoteIndentDelta(delta) {
   if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return;
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return;
-  if (sel.isCollapsed) {
-    ensureNoteBlockWrapped();
-    const block = getNoteBlockAncestor(window.getSelection().anchorNode);
-    if (block) applyNoteIndentDeltaToBlock(block, delta);
-  } else {
-    // Mismo cuidado que wrapNoteHighlightRange: capturar el limite ANTES
-    // de envolver la primera linea suelta si la seleccion la incluye --
-    // el Range en curso no sigue al nodo que se mueve cuando su
-    // CONTENEDOR es justo ese nodo (ver el comentario de
-    // ensureNoteFirstLineWrapped).
-    const liveRange = sel.getRangeAt(0);
-    const startContainer = liveRange.startContainer;
-    const startOffset = liveRange.startOffset;
-    const endContainer = liveRange.endContainer;
-    const endOffset = liveRange.endOffset;
-    ensureNoteFirstLineWrapped();
-    const range = document.createRange();
-    range.setStart(startContainer, startOffset);
-    range.setEnd(endContainer, endOffset);
-    Array.from(NOTE_EDITOR_BODY.children)
-      .filter((el) => range.intersectsNode(el))
-      .forEach((block) => applyNoteIndentDeltaToBlock(block, delta));
-  }
+  getNoteSelectionBlocks({ ensureWrapped: true })
+    .forEach((block) => applyNoteIndentDeltaToBlock(block, delta));
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4451,6 +3846,33 @@ function insertNodeOutsideNoteHighlight(range, node) {
   if (!enclosing.textContent) enclosing.remove();
 }
 
+// Un [data-highlight] sin texto dentro no se ve como "nada": el CSS de
+// resaltado le da padding y border-radius, asi que se pinta como una
+// cajita de color surgida de la nada -- los "resaltados fantasma" que
+// reporto Koku. Salen como residuo natural de partir spans (al quitar
+// el resaltado justo en un borde, o al pulsar Intro dentro de uno), asi
+// que en vez de perseguir cada caso se barren SIEMPRE despues de tocar
+// resaltados. El span semilla del modo pendiente se respeta a proposito
+// (lleva el caracter de ancho cero, y ademas es el que esta esperando
+// que se escriba dentro).
+function removeEmptyNoteHighlights() {
+  NOTE_EDITOR_BODY.querySelectorAll('[data-highlight]').forEach((span) => {
+    if (span === pendingNoteHighlightSpan) return;
+    if (!span.textContent) span.remove();
+  });
+}
+
+// Crea el <span> con el que se envuelve un tramo. key=null significa
+// "sin resaltado": un span pelado, que luego clearNoteHighlight()
+// desenvuelve. Sirve para reutilizar TODO el troceo por lineas de
+// wrapNoteHighlightRange() tambien al QUITAR el resaltado, en vez de
+// tener dos recorridos distintos que puedan divergir.
+function createNoteHighlightSpan(key) {
+  const span = document.createElement('span');
+  if (key) span.setAttribute('data-highlight', key);
+  return span;
+}
+
 // Envuelve el contenido de "range" en uno o varios <span data-highlight>
 // -- si la seleccion cae ENTERA dentro de una sola linea, un solo span
 // (igual que antes de este arreglo). Si CRUZA varias lineas, un span
@@ -4495,8 +3917,7 @@ function wrapNoteHighlightRange(range, key) {
       innerRange.setStart(normStart.container, normStart.offset);
       innerRange.setEnd(normEnd.container, normEnd.offset);
     }
-    const span = document.createElement('span');
-    span.setAttribute('data-highlight', key);
+    const span = createNoteHighlightSpan(key);
     const fragment = innerRange.extractContents();
     stripNoteHighlightWrappers(fragment);
     span.appendChild(fragment);
@@ -4520,8 +3941,7 @@ function wrapNoteHighlightRange(range, key) {
   const startRange = document.createRange();
   startRange.setStart(normStart.container, normStart.offset);
   startRange.setEndAfter(startLine.lastChild || startLine);
-  const startSpan = document.createElement('span');
-  startSpan.setAttribute('data-highlight', key);
+  const startSpan = createNoteHighlightSpan(key);
   const startFragment = startRange.extractContents();
   stripNoteHighlightWrappers(startFragment);
   startSpan.appendChild(startFragment);
@@ -4532,8 +3952,7 @@ function wrapNoteHighlightRange(range, key) {
     const line = allLines[i];
     const lineRange = document.createRange();
     lineRange.selectNodeContents(line);
-    const span = document.createElement('span');
-    span.setAttribute('data-highlight', key);
+    const span = createNoteHighlightSpan(key);
     const lineFragment = lineRange.extractContents();
     stripNoteHighlightWrappers(lineFragment);
     span.appendChild(lineFragment);
@@ -4545,8 +3964,7 @@ function wrapNoteHighlightRange(range, key) {
   const endRange = document.createRange();
   endRange.setStartBefore(endLine.firstChild || endLine);
   endRange.setEnd(normEnd.container, normEnd.offset);
-  const endSpan = document.createElement('span');
-  endSpan.setAttribute('data-highlight', key);
+  const endSpan = createNoteHighlightSpan(key);
   const endFragment = endRange.extractContents();
   stripNoteHighlightWrappers(endFragment);
   endSpan.appendChild(endFragment);
@@ -4658,6 +4076,7 @@ function applyNoteHighlight(key) {
     newRange.setEndAfter(spans[spans.length - 1]);
     sel.addRange(newRange);
   }
+  removeEmptyNoteHighlights();
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4720,10 +4139,29 @@ function clearNoteHighlight() {
     refreshNoteEditorState();
     return;
   }
+  // Antes esto quitaba el atributo del span ENTERO en cuanto la
+  // seleccion lo tocaba (range.intersectsNode). Bug real reportado por
+  // Koku: resaltar varias lineas y quitar el resaltado de UNA se lo
+  // quitaba a todas -- pasa siempre que un mismo span cubre mas de lo
+  // seleccionado (varias lineas separadas por <br>, o simplemente una
+  // frase de la que solo se selecciona una palabra). Ahora se reutiliza
+  // el mismo troceo que al PONER el resaltado, con key=null: se extrae
+  // exactamente el tramo seleccionado, se le quitan los resaltados que
+  // llevara dentro, y se reinserta FUERA del span original -- que asi
+  // queda partido en las mitades de antes y despues, cada una con su
+  // color intacto.
+  ensureNoteFirstLineWrapped();
   const range = sel.getRangeAt(0);
-  NOTE_EDITOR_BODY.querySelectorAll('[data-highlight]').forEach((el) => {
-    if (range.intersectsNode(el)) el.removeAttribute('data-highlight');
+  const spans = wrapNoteHighlightRange(range, null);
+  // Los spans pelados que deja el troceo no aportan nada (el texto ya
+  // no lleva resaltado): se desenvuelven y se unen los nodos de texto
+  // sueltos, para no ir dejando capas vacias en el HTML de la nota cada
+  // vez que se quita un resaltado.
+  spans.forEach((span) => {
+    if (span.parentNode) span.replaceWith(...span.childNodes);
   });
+  removeEmptyNoteHighlights();
+  NOTE_EDITOR_BODY.normalize();
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -5275,10 +4713,6 @@ noteImageFileInput.addEventListener('change', () => {
 // propio navegador ya le quita estilos raros al venir de fuera, el mismo
 // comportamiento por defecto de cualquier contenteditable).
 NOTE_EDITOR_BODY.addEventListener('paste', (e) => {
-  // Pegar tambien cuenta como "escribir" -- mismo criterio que el
-  // keydown de arriba, el panel de Formato no debe quedarse tapando el
-  // contenido que se acaba de pegar.
-  if (!noteFormatPopover.classList.contains('hidden')) closeNoteFormatPopover();
   const items = Array.from(e.clipboardData ? e.clipboardData.items : []);
   const imageItem = items.find((item) => item.type.startsWith('image/'));
   if (!imageItem) return;
@@ -5533,222 +4967,6 @@ function maybeHandleNoteFormatShortcut(e) {
   return false;
 }
 
-// ---------------------------------------------------------------------
-// Modo "vim" (opt-in, ajuste por dispositivo): subconjunto pequeno a
-// proposito -- NO es una replica de vim de verdad (sin registros con
-// nombre, macros, comandos ":", repetir con numeros...), es un punto de
-// partida para moverse y editar rapido sin soltar el teclado, ampliable
-// mas adelante segun lo que haga falta de verdad. A diferencia del vim
-// real, los botones de formato/tabla/imagen de la barra de estado siguen
-// funcionando en cualquiera de los dos modos (Koku lo pidio asi
-// explicitamente).
-// ---------------------------------------------------------------------
-function isVimModeEnabled() {
-  return localStorage.getItem('vimModeEnabled') === 'true';
-}
-
-// 'insert' | 'normal' | 'visual' -- SOLO importa si isVimModeEnabled().
-// Empieza siempre en 'insert' al abrir o cambiar de nota activa (ver
-// loadOpenNoteIntoDom), nunca se hereda de la nota anterior.
-let noteEditorVimSubMode = 'insert';
-
-const VIM_MODE_LABELS = { insert: 'INSERTAR', normal: 'NORMAL', visual: 'VISUAL' };
-// Orden en el que va rotando el indicativo al clicarlo (ver mas abajo).
-const VIM_MODE_CYCLE = ['insert', 'normal', 'visual'];
-
-function refreshVimIndicator() {
-  const indicator = document.getElementById('note-editor-vim-indicator');
-  const show = isVimModeEnabled() && NOTE_EDITOR_BODY.contentEditable !== 'false';
-  indicator.classList.toggle('hidden', !show);
-  if (!show) return;
-  indicator.textContent = VIM_MODE_LABELS[noteEditorVimSubMode] || VIM_MODE_LABELS.insert;
-}
-
-function setVimSubMode(mode) {
-  // Al SALIR de visual (a cualquier otro modo) se colapsa la seleccion
-  // en vez de dejarla como estaba -- entrar en Normal o Insertar con
-  // media pantalla todavia seleccionada seria confuso.
-  if (noteEditorVimSubMode === 'visual' && mode !== 'visual') {
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) sel.collapseToEnd();
-  }
-  noteEditorVimSubMode = mode;
-  refreshVimIndicator();
-}
-
-// Refleja el ajuste guardado (localStorage) en el aspecto del boton
-// desde que carga la pagina, no solo despues de tocarlo por primera vez.
-document.getElementById('note-editor-vim-toggle-btn').classList.toggle('is-active', isVimModeEnabled());
-
-document.getElementById('note-editor-vim-toggle-btn').addEventListener('click', () => {
-  const enabled = !isVimModeEnabled();
-  localStorage.setItem('vimModeEnabled', enabled ? 'true' : 'false');
-  document.getElementById('note-editor-vim-toggle-btn').classList.toggle('is-active', enabled);
-  setVimSubMode('insert');
-});
-
-// El indicativo (INSERTAR/NORMAL/VISUAL) es tambien un boton: clicarlo va
-// rotando entre los 3 modos, como alternativa al teclado (Esc/i/v) para
-// quien prefiera el raton. mousedown con preventDefault, igual que el
-// resto de botones de la barra de estado, para que clicarlo no le quite
-// el foco/seleccion al editor antes de que el click llegue a disparar.
-document.getElementById('note-editor-vim-indicator').addEventListener('mousedown', (e) => e.preventDefault());
-document.getElementById('note-editor-vim-indicator').addEventListener('click', () => {
-  if (!isVimModeEnabled()) return;
-  const next = VIM_MODE_CYCLE[(VIM_MODE_CYCLE.indexOf(noteEditorVimSubMode) + 1) % VIM_MODE_CYCLE.length];
-  if (next === 'visual') vimEnterVisualMode();
-  else setVimSubMode(next);
-  NOTE_EDITOR_BODY.focus();
-});
-
-// action: 'move' (mueve el cursor sin seleccionar, modo Normal) o
-// 'extend' (agranda la seleccion desde donde empezo, modo Visual).
-function vimMoveCaret(direction, granularity, action) {
-  const sel = window.getSelection();
-  if (sel) sel.modify(action || 'move', direction, granularity);
-}
-
-// Entrar en Visual: si el cursor esta colapsado (sin nada seleccionado
-// todavia), el primer 'extend' de Selection.modify() fija el ancla justo
-// ahi y empieza a agrandar desde ese punto -- no hace falta preparar nada
-// mas a mano.
-function vimEnterVisualMode() {
-  setVimSubMode('visual');
-}
-
-// Borra el bloque de texto (div/p/li) donde este el cursor -- SOLO fuera
-// de una tabla, para no borrar una celda entera (y liarla) sin querer.
-function vimDeleteCurrentLine() {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return;
-  const node = sel.getRangeAt(0).startContainer;
-  const containerEl = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
-  if (containerEl && containerEl.closest('td, th')) return;
-  // Selecciona la linea VISUAL entera (de "lineboundary" a
-  // "lineboundary") y la borra -- mas fiable que buscar un <div>/<p>/
-  // <li> en el DOM: la PRIMERA linea de una nota nueva es texto suelto
-  // colgando directamente de NOTE_EDITOR_BODY, sin ningun bloque que lo
-  // envuelva (eso solo aparece a partir del primer Intro que se pulsa
-  // en esa nota), asi que buscar closest('div, p, li') fallaba ahi.
-  sel.modify('move', 'left', 'lineboundary');
-  sel.modify('extend', 'right', 'lineboundary');
-  // Se lleva tambien el salto de linea de despues (si lo hay), para que
-  // las lineas de abajo suban un puesto en vez de dejar una linea vacia.
-  sel.modify('extend', 'right', 'character');
-  document.execCommand('delete', false, null);
-  refreshNoteEditorState();
-}
-
-const VIM_DD_TIMEOUT_MS = 600;
-let vimPendingD = false;
-let vimPendingDTimer = null;
-
-// Se llama SOLO cuando isVimModeEnabled() y estamos en modo Normal.
-// Por defecto CUALQUIER tecla se bloquea (preventDefault, no escribe
-// nada) salvo que este en la lista de comandos de abajo -- asi nunca se
-// escribe sin querer estando en Normal. Las combinaciones con Ctrl/Cmd/
-// Alt (copiar, pegar, deshacer del sistema...) se dejan pasar tal cual,
-// no forman parte de estos comandos.
-function handleVimNormalKeydown(e) {
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-  if (e.key === 'Escape') {
-    // Ya estamos en Normal -- no hace falta cambiar nada, pero SI hay
-    // que cortar la propagacion (ver el otro Escape mas arriba): si no,
-    // llega igual al atajo global de Escape de settings.js y cierra el
-    // editor entero.
-    e.preventDefault();
-    e.stopPropagation();
-    vimPendingD = false;
-    return;
-  }
-  const passthroughKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Tab'];
-  if (passthroughKeys.includes(e.key)) {
-    vimPendingD = false;
-    return;
-  }
-
-  e.preventDefault();
-  const key = e.key;
-  if (key !== 'd') vimPendingD = false;
-
-  switch (key) {
-    case 'h': vimMoveCaret('backward', 'character'); break;
-    case 'l': vimMoveCaret('forward', 'character'); break;
-    case 'j': vimMoveCaret('forward', 'line'); break;
-    case 'k': vimMoveCaret('backward', 'line'); break;
-    case 'w': vimMoveCaret('forward', 'word'); break;
-    case 'b': vimMoveCaret('backward', 'word'); break;
-    case '0': vimMoveCaret('left', 'lineboundary'); break;
-    case '$': vimMoveCaret('right', 'lineboundary'); break;
-    case 'i': setVimSubMode('insert'); break;
-    case 'a': vimMoveCaret('forward', 'character'); setVimSubMode('insert'); break;
-    case 'o':
-      vimMoveCaret('right', 'lineboundary');
-      document.execCommand('insertParagraph', false, null);
-      setVimSubMode('insert');
-      break;
-    case 'x': document.execCommand('forwardDelete', false, null); break;
-    case 'u': document.execCommand('undo', false, null); break;
-    case 'v': vimEnterVisualMode(); break;
-    case 'd':
-      if (vimPendingD) {
-        vimDeleteCurrentLine();
-        vimPendingD = false;
-      } else {
-        vimPendingD = true;
-        clearTimeout(vimPendingDTimer);
-        vimPendingDTimer = setTimeout(() => { vimPendingD = false; }, VIM_DD_TIMEOUT_MS);
-      }
-      break;
-    default:
-      break;
-  }
-  refreshNoteEditorState();
-}
-
-// Se llama SOLO en modo Visual. Las mismas teclas de movimiento que en
-// Normal, pero AGRANDANDO la seleccion en vez de solo mover el cursor
-// (action 'extend' en vez de 'move', ver vimMoveCaret). y/d actuan sobre
-// lo seleccionado y vuelven a Normal solas -- no hace falta pulsar nada
-// mas para salir. Subconjunto minimo a proposito: sin V (seleccion por
-// lineas) ni Ctrl+V (bloque rectangular), que aportan poco en una nota
-// normal frente a lo mucho mas grandes que son de construir bien.
-function handleVimVisualKeydown(e) {
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-  if (e.key === 'Escape') {
-    e.preventDefault();
-    e.stopPropagation();
-    setVimSubMode('normal'); // esto ya colapsa la seleccion (ver setVimSubMode)
-    return;
-  }
-  if (e.key === 'Tab') return;
-
-  e.preventDefault();
-  switch (e.key) {
-    case 'h': vimMoveCaret('backward', 'character', 'extend'); break;
-    case 'l': vimMoveCaret('forward', 'character', 'extend'); break;
-    case 'j': vimMoveCaret('forward', 'line', 'extend'); break;
-    case 'k': vimMoveCaret('backward', 'line', 'extend'); break;
-    case 'w': vimMoveCaret('forward', 'word', 'extend'); break;
-    case 'b': vimMoveCaret('backward', 'word', 'extend'); break;
-    case '0': vimMoveCaret('left', 'lineboundary', 'extend'); break;
-    case '$': vimMoveCaret('right', 'lineboundary', 'extend'); break;
-    case 'y':
-      document.execCommand('copy');
-      setVimSubMode('normal');
-      break;
-    case 'd':
-      document.execCommand('delete', false, null);
-      setVimSubMode('normal');
-      break;
-    default:
-      break;
-  }
-  refreshNoteEditorState();
-}
-
 // Partir el parrafo actual "a mano" (Range API, sin execCommand) cuando
 // la linea donde esta el cursor contiene algun resaltado -- sustituye
 // por completo al Intro NATIVO solo en ese caso. Motivo: el
@@ -5774,11 +4992,19 @@ function handleNoteHighlightAwareEnter() {
   const liveRange = sel.getRangeAt(0);
   if (!NOTE_EDITOR_BODY.contains(liveRange.startContainer)) return false;
 
-  // El resaltado "en vivo" (pendiente, ver beginPendingNoteHighlight) no
-  // debe continuar en el parrafo nuevo -- igual que antes, solo que
-  // ahora el propio cancelPendingNoteHighlight() ya deja el DOM listo
-  // (quita el span semilla vacio si no se llego a escribir nada real)
-  // antes de calcular donde partir.
+  // Color activo en el punto del cursor ANTES de tocar nada: puede venir
+  // del modo "resaltar antes de escribir" (pendiente) o de estar
+  // escribiendo dentro de un resaltado ya aplicado. Sea cual sea el
+  // origen, la linea nueva CONTINUA con ese mismo color -- decision de
+  // Koku, para que el rotulador se comporte igual que la cita, que ya
+  // seguia activa saltara las lineas que saltara. Para dejar de
+  // resaltar esta el boton "Ninguno", como en la cita esta su propio
+  // boton.
+  const colorQueContinua = getActiveNoteHighlightKey() || null;
+
+  // El span semilla del modo pendiente se retira ahora (si no se llego a
+  // escribir nada real dentro), para que no estorbe al partir la linea
+  // -- el color en si ya esta guardado en colorQueContinua.
   if (pendingNoteHighlightKey) cancelPendingNoteHighlight();
 
   // Releer la seleccion YA DESPUES de cancelar el resaltado pendiente
@@ -5794,7 +5020,11 @@ function handleNoteHighlightAwareEnter() {
   ensureNoteFirstLineWrapped();
   const line = getNoteLineElement(caretContainer);
   if (!line || !NOTE_LINE_TAGS.has(line.tagName) || line.tagName === 'LI') return false;
-  if (!line.querySelector('[data-highlight]')) return false;
+  // Una linea sin nada resaltado sigue usando el Intro nativo de
+  // siempre. La excepcion es tener el rotulador recien activado sin
+  // haber escrito todavia: ahi no hay ningun span en la linea, pero el
+  // color igual tiene que continuar abajo.
+  if (!line.querySelector('[data-highlight]') && !colorQueContinua) return false;
 
   const tailRange = document.createRange();
   tailRange.setStart(caretContainer, caretOffset);
@@ -5828,46 +5058,33 @@ function handleNoteHighlightAwareEnter() {
   sel2.removeAllRanges();
   sel2.addRange(newRange);
 
+  // Continuar el resaltado en la linea nueva. Si el corte cayo a mitad
+  // de un resaltado, la linea nueva YA empieza con ese span y basta con
+  // meter el cursor dentro; si el corte fue al final (lo normal al
+  // escribir y pulsar Intro), no hay nada resaltado todavia y se
+  // arranca el modo pendiente con el mismo color, que es exactamente lo
+  // que hace pulsar ese color a mano.
+  if (colorQueContinua) {
+    const primero = newLine.firstChild;
+    const yaResaltada = primero
+      && primero.nodeType === Node.ELEMENT_NODE
+      && primero.getAttribute('data-highlight') === colorQueContinua;
+    if (yaResaltada) {
+      const dentro = document.createRange();
+      dentro.setStart(primero, 0);
+      dentro.collapse(true);
+      sel2.removeAllRanges();
+      sel2.addRange(dentro);
+    } else {
+      beginPendingNoteHighlight(colorQueContinua);
+    }
+  }
+
   NOTE_EDITOR_BODY.dispatchEvent(new Event('input', { bubbles: true }));
   return true;
 }
 
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
-  // El panel "Formato" (Aa/negrita/listas/etc.) se queda abierto a
-  // proposito mientras se selecciona texto dentro de #note-body (ver el
-  // comentario junto a noteFormatPopover mas arriba) -- pero si el
-  // usuario empieza a escribir de verdad, el panel puede quedar tapando
-  // justo la linea donde esta escribiendo. Se cierra solo con cualquier
-  // tecla que produzca/borre contenido (letra, Intro, Backspace/Supr,
-  // Tab) sin modificador -- los atajos con Ctrl/Cmd (negrita, listas...)
-  // no cuentan como "escribir", el panel se queda abierto para ellos
-  // igual que al clicar el boton correspondiente.
-  if (!noteFormatPopover.classList.contains('hidden') && !e.ctrlKey && !e.metaKey && !e.altKey
-    && (e.key.length === 1 || e.key === 'Enter' || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Tab')) {
-    closeNoteFormatPopover();
-  }
-  if (isVimModeEnabled()) {
-    if (noteEditorVimSubMode === 'normal') {
-      handleVimNormalKeydown(e);
-      return;
-    }
-    if (noteEditorVimSubMode === 'visual') {
-      handleVimVisualKeydown(e);
-      return;
-    }
-    if (e.key === 'Escape') {
-      // stopPropagation es imprescindible: settings.js tiene un atajo
-      // GLOBAL de Escape (document, no solo aqui) que cierra el editor
-      // de notas entero -- sin cortar la propagacion, el Esc para entrar
-      // en modo Normal tambien burbujeaba hasta ese atajo y cerraba la
-      // nota (con el aviso de cambios sin guardar si tocaba), visto en
-      // pruebas.
-      e.preventDefault();
-      e.stopPropagation();
-      setVimSubMode('normal');
-      return;
-    }
-  }
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     if (handleNoteHighlightAwareEnter()) {
       e.preventDefault();
@@ -5896,7 +5113,7 @@ function legacyNoteBodyToHtml(text) {
 // Fase 4 del rediseño movil: el titulo de una nota ya no se escribe a
 // mano (se quito el campo #note-title, ver el editor mas abajo), se
 // deriva SIEMPRE de la primera linea del cuerpo -- misma logica EXACTA
-// que deriveTitleFromBody en server/routes/notes.js, duplicada aqui a
+// que deriveTitleFromBody en routes-local/notes.js, duplicada aqui a
 // proposito porque este proyecto no tiene ningun mecanismo para
 // compartir codigo entre las rutas y la interfaz sin meter un build nuevo.
 // Se usa tanto para la etiqueta de solo lectura del editor (en vivo,
@@ -6054,30 +5271,16 @@ function applyNoteEditorReadMode(readOnly) {
   const modeBtn = document.getElementById('note-editor-read-mode-btn');
   modeBtn.textContent = readOnly ? 'Editar' : 'Modo lectura';
   modeBtn.setAttribute('aria-pressed', readOnly ? 'true' : 'false');
-  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
-  document.getElementById('note-format-btn').disabled = readOnly;
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
   if (readOnly) {
     document.getElementById('note-table-context-toolbar').classList.add('hidden');
-    document.getElementById('btn-delete-note').classList.add('hidden');
-    closeNoteFormatPopover();
   }
-  document.querySelector('#note-form button[type="submit"]').classList.toggle('hidden', readOnly);
-  // El indicativo de modo vim (si esta activado) no tiene sentido en
-  // solo lectura -- refreshVimIndicator ya lo oculta solo mirando
-  // contentEditable, pero hay que llamarlo aqui para que se actualice en
-  // cuanto cambia el modo lectura, no solo al tocar algo del vim.
-  refreshVimIndicator();
 }
 
 document.getElementById('note-editor-read-mode-btn').addEventListener('click', () => {
   const entry = findOpenNote(state.activeOpenNoteKey);
   if (!entry) return;
   entry.readMode = !entry.readMode;
-  // Antes de aplicar el modo lectura hay que dejar "Eliminar" en el
-  // estado que le toca segun si la nota tiene id (igual que hace
-  // loadOpenNoteIntoDom) -- applyNoteEditorReadMode solo AÑADE el
-  // ocultado cuando toca, nunca lo deshace por su cuenta.
-  document.getElementById('btn-delete-note').classList.toggle('hidden', !entry.id);
   applyNoteEditorReadMode(entry.readMode);
 });
 
@@ -6087,11 +5290,9 @@ function loadOpenNoteIntoDom(entry) {
   NOTE_EDITOR_BODY.innerHTML = prepareAssetHtmlForDom(entry.bodyHtml);
   hydrateAssetImages(NOTE_EDITOR_BODY);
   resetNoteEditorToolbar();
-  document.getElementById('btn-delete-note').classList.toggle('hidden', !entry.id);
   noteModalFavorite = entry.favorite;
   refreshNoteFavoriteBtn();
   applyNoteEditorReadMode(entry.readMode);
-  setVimSubMode('insert');
 }
 
 function switchActiveOpenNote(key) {
@@ -6101,7 +5302,6 @@ function switchActiveOpenNote(key) {
   if (!entry) return;
   state.activeOpenNoteKey = key;
   loadOpenNoteIntoDom(entry);
-  renderNoteSectionsPanel();
 }
 
 // Quita una nota de la lista de abiertas SIN preguntar nada (el aviso de
@@ -6131,12 +5331,20 @@ function closeOpenNote(key) {
   const entry = findOpenNote(key);
   if (!entry) return;
   if (key === state.activeOpenNoteKey) captureActiveOpenNoteFromDom();
-  if (isOpenNoteDirty(entry)) {
+  if (isMobileLayout()) {
+    // En movil hay autoguardado, asi que preguntar "¿cerrar sin
+    // guardar?" no tenia ningun sentido -- y encima el temporizador del
+    // autoguardado seguia vivo tras cerrar, asi que guardaba igual
+    // despues de haber dicho que no (justo lo que reporto Koku: "me
+    // dice de salir sin guardar, pero al entrar me lo ha guardado").
+    // Ahora se guarda lo que quede pendiente y se cierra sin preguntar
+    // nada.
+    flushMobileNoteAutosave(entry);
+  } else if (isOpenNoteDirty(entry)) {
     const label = entry.title || 'Nota sin título';
     if (!confirm(`"${label}" tiene cambios sin guardar. ¿Cerrar sin guardar?`)) return;
   }
   removeOpenNoteAndAdvance(key);
-  renderNoteSectionsPanel();
 }
 
 // "openNoteInEditor": si la nota (con id real) ya esta abierta, solo se
@@ -6153,7 +5361,6 @@ function openNoteInEditor(note) {
     state.activeOpenNoteKey = entry.key;
     loadOpenNoteIntoDom(entry);
   }
-  renderNoteSectionsPanel();
   document.getElementById('note-editor-view').classList.remove('hidden');
   // Ya no hay campo de titulo al que llevar el foco (Fase 4) -- el
   // cuerpo es el unico sitio donde se escribe de verdad.
@@ -6172,186 +5379,6 @@ function closeNoteEditorView() {
   }
 }
 
-// ---------------------------------------------------------------------
-// Panel "Secciones": lista de notas abiertas a la vez. Cada fila tiene
-// un desplegable ("ver secciones de dentro" -- placeholder por ahora,
-// el editor no tiene todavia ningun concepto de titulos/encabezados
-// dentro del cuerpo de la nota, eso queda para una ronda futura), el
-// nombre (clic = activarla), un punto si tiene cambios sin guardar, y un
-// boton para cerrarla.
-// ---------------------------------------------------------------------
-
-function renderNoteSectionsPanel() {
-  const list = document.getElementById('note-sections-list');
-  if (!list) return;
-  list.innerHTML = '';
-  state.openNotes.forEach((entry) => {
-    const row = document.createElement('div');
-    row.className = 'note-open-item' + (entry.key === state.activeOpenNoteKey ? ' is-active' : '');
-
-    const expandBtn = document.createElement('button');
-    expandBtn.type = 'button';
-    expandBtn.className = 'note-open-item-expand-btn';
-    expandBtn.setAttribute('aria-label', entry.expanded ? 'Ocultar secciones' : 'Ver secciones');
-    expandBtn.textContent = entry.expanded ? '▾' : '▸';
-    expandBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      entry.expanded = !entry.expanded;
-      renderNoteSectionsPanel();
-    });
-    row.appendChild(expandBtn);
-
-    const nameBtn = document.createElement('button');
-    nameBtn.type = 'button';
-    nameBtn.className = 'note-open-item-name';
-    nameBtn.textContent = entry.title || 'Nota sin título';
-    nameBtn.addEventListener('click', () => switchActiveOpenNote(entry.key));
-    row.appendChild(nameBtn);
-
-    if (isOpenNoteDirty(entry)) {
-      const dot = document.createElement('span');
-      dot.className = 'note-open-item-dirty-dot';
-      dot.setAttribute('aria-label', 'Cambios sin guardar');
-      row.appendChild(dot);
-    }
-
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'note-open-item-close-btn';
-    closeBtn.setAttribute('aria-label', 'Cerrar nota');
-    closeBtn.textContent = '✕';
-    closeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeOpenNote(entry.key);
-    });
-    row.appendChild(closeBtn);
-
-    list.appendChild(row);
-
-    if (entry.expanded) {
-      const placeholder = document.createElement('div');
-      placeholder.className = 'note-open-item-sections-placeholder';
-      placeholder.textContent = 'Sin secciones todavía.';
-      list.appendChild(placeholder);
-    }
-  });
-}
-
-// ---------------------------------------------------------------------
-// Panel "Arbol": navegacion tipo arbol (plegable por carpeta) de TODAS
-// las carpetas/notas -- reutiliza state.noteFolders/state.notes, ya
-// cargados enteros de antes (loadNoteFolders/loadNotes), sin ninguna
-// llamada nueva a la API. El plegado de cada carpeta se guarda aparte
-// (noteTreeExpandedFolderIds, por id) para que sobreviva a que
-// state.noteFolders se recargue con objetos nuevos.
-// ---------------------------------------------------------------------
-const noteTreeExpandedFolderIds = new Set();
-
-function renderNoteTreeLevel(container, parentId, depth) {
-  const activeEntry = findOpenNote(state.activeOpenNoteKey);
-  const folders = state.noteFolders
-    .filter((f) => f.parentId === parentId)
-    .slice()
-    .sort(compareNoteListItems);
-  const notes = (state.notes || [])
-    .filter((n) => n.folderId === parentId)
-    .slice()
-    .sort(compareNoteListItems);
-
-  folders.forEach((folder) => {
-    const expanded = noteTreeExpandedFolderIds.has(folder.id);
-    const row = document.createElement('div');
-    row.className = 'note-tree-row note-tree-folder-row';
-    row.style.paddingLeft = `${0.4 + depth}rem`;
-
-    const toggle = document.createElement('span');
-    toggle.className = 'note-tree-toggle';
-    toggle.textContent = expanded ? '▾' : '▸';
-    row.appendChild(toggle);
-
-    const icon = document.createElement('span');
-    icon.className = 'note-tree-folder-icon';
-    icon.innerHTML = FOLDER_SVG;
-    row.appendChild(icon);
-
-    const name = document.createElement('span');
-    name.className = 'note-tree-item-name';
-    name.textContent = folder.name;
-    row.appendChild(name);
-
-    row.addEventListener('click', () => {
-      if (expanded) noteTreeExpandedFolderIds.delete(folder.id);
-      else noteTreeExpandedFolderIds.add(folder.id);
-      renderNoteTreePanel();
-    });
-    container.appendChild(row);
-    if (expanded) renderNoteTreeLevel(container, folder.id, depth + 1);
-  });
-
-  notes.forEach((note) => {
-    const row = document.createElement('div');
-    row.className = 'note-tree-row note-tree-note-row' + (activeEntry && activeEntry.id === note.id ? ' is-active' : '');
-    row.style.paddingLeft = `${0.4 + depth + 1}rem`;
-
-    const icon = document.createElement('span');
-    icon.className = 'note-tree-note-icon';
-    icon.innerHTML = NOTE_FILE_SVG;
-    row.appendChild(icon);
-
-    const name = document.createElement('span');
-    name.className = 'note-tree-item-name';
-    name.textContent = note.title;
-    row.appendChild(name);
-
-    row.addEventListener('click', () => openNoteInEditor(note));
-    container.appendChild(row);
-  });
-}
-
-function renderNoteTreePanel() {
-  const container = document.getElementById('note-tree-list');
-  if (!container) return;
-  container.innerHTML = '';
-  if (state.noteFolders.length === 0 && (state.notes || []).length === 0) {
-    container.innerHTML = '<p class="empty-hint">No hay notas todavía.</p>';
-    return;
-  }
-  renderNoteTreeLevel(container, null, 0);
-}
-
-document.getElementById('note-tree-new-btn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  openNoteInEditor(null);
-});
-
-// Solo uno de los dos paneles laterales (Arbol/Secciones) se ve a la vez
-// -- volver a clicar el que ya esta activo lo cierra sin abrir el otro.
-function setActiveNoteEditorPanel(panel) {
-  const treePanel = document.getElementById('note-tree-panel');
-  const sectionsPanel = document.getElementById('note-sections-panel');
-  const treeBtn = document.getElementById('note-editor-toggle-tree');
-  const sectionsBtn = document.getElementById('note-editor-toggle-sections');
-  treePanel.classList.toggle('hidden', panel !== 'tree');
-  sectionsPanel.classList.toggle('hidden', panel !== 'sections');
-  treeBtn.classList.toggle('is-active', panel === 'tree');
-  sectionsBtn.classList.toggle('is-active', panel === 'sections');
-  if (panel === 'tree') renderNoteTreePanel();
-}
-
-document.getElementById('note-editor-toggle-tree').addEventListener('click', () => {
-  const isOpen = !document.getElementById('note-tree-panel').classList.contains('hidden');
-  setActiveNoteEditorPanel(isOpen ? null : 'tree');
-});
-
-document.getElementById('note-editor-toggle-sections').addEventListener('click', () => {
-  const isOpen = !document.getElementById('note-sections-panel').classList.contains('hidden');
-  setActiveNoteEditorPanel(isOpen ? null : 'sections');
-});
-
-document.getElementById('btn-new-note').addEventListener('click', () => openNoteInEditor(null));
-// Atajo rapido en la topbar, junto a "+ Nuevo evento"/"+ Nueva tarea" --
-// abre directamente el editor, sin tener que entrar antes en Mi espacio.
-document.getElementById('btn-new-note-topbar').addEventListener('click', () => openNoteInEditor(null));
 document.getElementById('btn-close-note-editor').addEventListener('click', closeNoteEditorView);
 
 // El dot de "sin guardar" del panel de Secciones debe reflejar lo que se
@@ -6362,7 +5389,6 @@ document.getElementById('btn-close-note-editor').addEventListener('click', close
 // cambiar de nota o guardar.
 NOTE_EDITOR_BODY.addEventListener('input', () => {
   captureActiveOpenNoteFromDom();
-  renderNoteSectionsPanel();
   scheduleMobileNoteAutosave();
 });
 
@@ -6373,15 +5399,34 @@ NOTE_EDITOR_BODY.addEventListener('input', () => {
 // guardado -- el dialogo de "cambios sin guardar" de closeOpenNote()
 // se queda como red de seguridad para el hueco de tiempo entre el
 // ultimo tecleo y que el debounce dispare.
+// "Estamos en el visor movil": mismo umbral que el CSS (860px), en un
+// unico sitio para que no se repita el matchMedia suelto por el
+// archivo.
+function isMobileLayout() {
+  return window.matchMedia('(max-width: 859px)').matches;
+}
+
 let mobileNoteAutosaveTimer = null;
 function scheduleMobileNoteAutosave() {
-  if (!window.matchMedia('(max-width: 859px)').matches) return;
+  if (!isMobileLayout()) return;
   clearTimeout(mobileNoteAutosaveTimer);
   mobileNoteAutosaveTimer = setTimeout(() => {
     const entry = findOpenNote(state.activeOpenNoteKey);
     if (!entry || entry.readMode) return;
     document.getElementById('note-form').requestSubmit();
   }, 1500);
+}
+
+// Guardar YA lo que estuviera esperando al debounce, y cancelar el
+// temporizador. Se llama al cerrar una nota en movil: sin cancelarlo,
+// el guardado pendiente se disparaba DESPUES de cerrar, sobre una nota
+// que ya no era la activa.
+function flushMobileNoteAutosave(entry) {
+  clearTimeout(mobileNoteAutosaveTimer);
+  mobileNoteAutosaveTimer = null;
+  if (!entry || entry.readMode) return;
+  if (!isOpenNoteDirty(entry)) return;
+  document.getElementById('note-form').requestSubmit();
 }
 
 document.getElementById('note-form').addEventListener('submit', async (e) => {
@@ -6404,7 +5449,7 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
   const hasNoteContent = NOTE_EDITOR_BODY.textContent.trim() !== '' || NOTE_EDITOR_BODY.querySelector('img, table');
   const payload = {
     // Fase 4: ya no se manda titulo, la ruta lo deriva del body
-    // (ver deriveTitleFromBody en server/routes/notes.js).
+    // (ver deriveTitleFromBody en routes-local/notes.js).
     body: hasNoteContent ? entry.bodyHtml : null,
     bodyFormat: 'html',
     folderId: entry.folderId,
@@ -6428,19 +5473,6 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
   entry.savedFolderId = entry.folderId;
   entry.savedFavorite = entry.favorite;
   document.getElementById('note-id').value = entry.id;
-  document.getElementById('btn-delete-note').classList.remove('hidden');
-  renderNoteSectionsPanel();
-  await loadNotes();
-  renderNotesView();
-});
-
-document.getElementById('btn-delete-note').addEventListener('click', async () => {
-  const entry = findOpenNote(state.activeOpenNoteKey);
-  if (!entry || !entry.id) return;
-  if (!confirm('¿Eliminar esta nota?')) return;
-  await api(`/api/notes/${entry.id}`, { method: 'DELETE' });
-  removeOpenNoteAndAdvance(entry.key);
-  renderNoteSectionsPanel();
   await loadNotes();
   renderNotesView();
 });
@@ -6505,7 +5537,6 @@ function closeNoteFolderModal() {
   document.getElementById('note-folder-modal').classList.add('hidden');
 }
 
-document.getElementById('btn-new-note-folder').addEventListener('click', () => openNoteFolderModal(null));
 document.getElementById('btn-cancel-note-folder').addEventListener('click', closeNoteFolderModal);
 document.getElementById('btn-close-note-folder').addEventListener('click', closeNoteFolderModal);
 
@@ -6545,267 +5576,6 @@ document.getElementById('btn-delete-note-folder').addEventListener('click', asyn
 });
 
 // ---------------------------------------------------------------------
-// Atajos de teclado: lista fija de acciones que ofrece la app (no se
-// pueden inventar acciones nuevas), y para cada una el USUARIO decide que
-// tecla la dispara, desde Configuracion > Atajos de teclado (settings.js
-// dibuja esa lista; aqui solo esta el almacenamiento y quien los ejecuta
-// de verdad). Es una preferencia de ESTE dispositivo/navegador, por eso
-// vive en localStorage y no en el servidor.
-// ---------------------------------------------------------------------
-// Mueve el panel de recordatorios un dia adelante/atras: si ya estabas
-// viendo un dia concreto, se mueve desde ESE dia; si estabas en "Proximos",
-// arranca desde hoy. Reutiliza showDayInReminders, que ya cambia el panel
-// a modo "dia" y pide los eventos/tareas de esa fecha al servidor.
-function shiftRemindersDay(delta) {
-  const base = state.remindersMode === 'day' && state.remindersDayDate ? state.remindersDayDate : new Date();
-  const next = new Date(base);
-  next.setDate(next.getDate() + delta);
-  showDayInReminders(next);
-}
-
-const SHORTCUT_ACTIONS = [
-  { id: 'new-event', label: 'Nuevo evento', run: () => document.getElementById('btn-new-event').click() },
-  { id: 'open-settings', label: 'Abrir configuración', run: () => document.getElementById('btn-settings').click() },
-  { id: 'prev-month', label: 'Mes anterior', run: () => document.getElementById('nav-prev').click() },
-  { id: 'next-month', label: 'Mes siguiente', run: () => document.getElementById('nav-next').click() },
-  { id: 'prev-day', label: 'Día anterior', run: () => shiftRemindersDay(-1) },
-  { id: 'next-day', label: 'Día siguiente', run: () => shiftRemindersDay(1) },
-];
-// Atajos de fabrica: el usuario puede cambiarlos, quitarlos, o anadir mas
-// de una combinacion para la MISMA accion (ej. "n" Y "ctrl+shift+a" abren
-// las dos "Nuevo evento"). Un array vacio [] guardado explicitamente
-// significa "sin ningun atajo", distinto de "todavia no tocado" (que usa
-// estos por defecto).
-const DEFAULT_SHORTCUTS = { 'new-event': ['n'], 'prev-day': ['arrowleft'], 'next-day': ['arrowright'] };
-
-// Lee lo guardado y SIEMPRE devuelve arrays — si venia del formato viejo
-// (un string suelto por accion, de antes de que se pudiera tener mas de
-// una combinacion), lo envuelve en un array de un elemento sin perder lo
-// que ya tenias configurado.
-function getShortcutMap() {
-  let stored = {};
-  try {
-    stored = JSON.parse(localStorage.getItem('keyboardShortcuts') || '{}');
-  } catch (e) {
-    stored = {};
-  }
-  const map = {};
-  SHORTCUT_ACTIONS.forEach((a) => {
-    if (Object.prototype.hasOwnProperty.call(stored, a.id)) {
-      const value = stored[a.id];
-      map[a.id] = Array.isArray(value) ? value : (value ? [value] : []);
-    } else {
-      map[a.id] = DEFAULT_SHORTCUTS[a.id] ? [...DEFAULT_SHORTCUTS[a.id]] : [];
-    }
-  });
-  return map;
-}
-
-function saveShortcutMap(map) {
-  localStorage.setItem('keyboardShortcuts', JSON.stringify(map));
-}
-
-// Anade una combinacion nueva a una accion (no reemplaza las que ya
-// tuviera) — si esa combinacion ya la usaba OTRA accion, se la quita de
-// ahi primero para que no queden dos acciones peleandose por la misma
-// tecla.
-function addShortcut(actionId, combo) {
-  const map = getShortcutMap();
-  SHORTCUT_ACTIONS.forEach((a) => {
-    map[a.id] = map[a.id].filter((c) => c !== combo);
-  });
-  map[actionId].push(combo);
-  saveShortcutMap(map);
-}
-
-function removeShortcut(actionId, combo) {
-  const map = getShortcutMap();
-  map[actionId] = map[actionId].filter((c) => c !== combo);
-  saveShortcutMap(map);
-}
-
-// Convierte un evento de teclado en un identificador estable, ej.
-// "ctrl+shift+n". Devuelve null si lo unico que se ha pulsado es una
-// tecla modificadora sola (Ctrl, Alt...), porque eso no es un atajo
-// valido todavia — se sigue esperando la tecla "de verdad".
-function comboFromEvent(e) {
-  const raw = e.key;
-  if (['Control', 'Alt', 'Shift', 'Meta'].includes(raw)) return null;
-  const parts = [];
-  if (e.ctrlKey) parts.push('ctrl');
-  if (e.altKey) parts.push('alt');
-  if (e.shiftKey) parts.push('shift');
-  if (e.metaKey) parts.push('meta');
-  let key = raw === ' ' ? 'space' : raw.toLowerCase();
-  parts.push(key);
-  return parts.join('+');
-}
-
-const SHORTCUT_KEY_LABELS = {
-  ctrl: 'Ctrl', alt: 'Alt', shift: 'Mayús', meta: 'Cmd',
-  arrowleft: '←', arrowright: '→', arrowup: '↑', arrowdown: '↓',
-  escape: 'Esc', enter: 'Intro', space: 'Espacio', tab: 'Tab',
-};
-
-function displayCombo(combo) {
-  if (!combo) return '';
-  return combo
-    .split('+')
-    .map((part) => SHORTCUT_KEY_LABELS[part] || (part.length === 1 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)))
-    .join(' + ');
-}
-
-// Ejecuta la accion que corresponda al atajo pulsado. Se ignora mientras
-// se esta escribiendo en un campo (input/textarea/select), para no robar
-// letras normales como la "n" mientras rellenas un titulo de evento.
-document.addEventListener('keydown', (e) => {
-  const tag = (e.target.tagName || '').toLowerCase();
-  const isEditable = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
-  if (isEditable) return;
-
-  const combo = comboFromEvent(e);
-  if (!combo) return;
-
-  const map = getShortcutMap();
-  const action = SHORTCUT_ACTIONS.find((a) => map[a.id].includes(combo));
-  if (action) {
-    e.preventDefault();
-    action.run();
-  }
-});
-
-// ---------------------------------------------------------------------
-// Vista: un UNICO modo activo a la vez — Normal o Pantalla completa —
-// que se cambia desde Configuracion > Vista (ver refreshViewTab en
-// settings.js). Cambiar de una a otra deshace la anterior (sale de
-// pantalla completa) en vez de dejarlas acumularse.
-// (Hubo tambien un modo "Ventana flotante", quitado: en el navegador
-// window.open() no es fiable — muchos navegadores abren otra PESTANA en
-// vez de una ventana pequeña — y en Electron habria hecho falta
-// configurar setWindowOpenHandler a mano para controlar el tamaño de la
-// ventana nueva. No compensaba el esfuerzo para lo poco que se usaba.)
-// ---------------------------------------------------------------------
-function getViewMode() {
-  return localStorage.getItem('viewMode') || 'normal';
-}
-
-function setViewMode(mode) {
-  localStorage.setItem('viewMode', mode);
-  // En Electron, ademas de localStorage (que solo puede leer la propia
-  // pagina), se lo decimos tambien al proceso principal — asi puede saber
-  // que vista tocaba ANTES de crear la ventana la proxima vez, en vez de
-  // enterarse ya con la pagina cargada (ver electron/main.js).
-  if (window.electronAPI && window.electronAPI.saveViewMode) window.electronAPI.saveViewMode(mode);
-  document.getElementById('default-view-banner').classList.add('hidden');
-  if (typeof refreshViewTab === 'function') refreshViewTab();
-}
-
-// Aplica de verdad el cambio de modo: deshace lo que hubiera activo y
-// activa lo nuevo. Se llama tanto desde el boton en Configuracion como
-// desde el aviso que sale al cargar la pagina si la vista guardada no es
-// la normal (ver applyViewModePrompt).
-function applyViewMode(mode) {
-  if (window.electronAPI) {
-    // Dentro de la app de escritorio, la pantalla completa la controla la
-    // ventana nativa (proceso principal) en vez de la API de pantalla
-    // completa del navegador — por eso puede activarse sola al arrancar,
-    // sin el aviso de "hace falta un clic" (ver applyViewModePrompt).
-    window.electronAPI.setNativeFullscreen(mode === 'fullscreen');
-  } else if (mode !== 'fullscreen' && document.fullscreenElement) {
-    document.exitFullscreen();
-  }
-
-  if (!window.electronAPI && mode === 'fullscreen' && document.documentElement.requestFullscreen) {
-    document.documentElement.requestFullscreen().catch(() => {});
-  }
-  setViewMode(mode);
-}
-
-// Simetrico al 'fullscreenchange' del navegador (ver mas abajo), pero para
-// cuando Electron sale de pantalla completa nativa por su cuenta (Esc, el
-// propio control de la ventana...) — sin esto, Configuracion > Vista se
-// quedaria diciendo "Pantalla completa" aunque ya no lo estuviera.
-if (window.electronAPI && window.electronAPI.onNativeFullscreenChange) {
-  window.electronAPI.onNativeFullscreenChange((isFullscreen) => {
-    if (isClosingPage) return;
-    if (!isFullscreen && getViewMode() === 'fullscreen') {
-      setViewMode('normal');
-    }
-  });
-}
-
-// Si sales de pantalla completa con Esc o con el propio navegador (no con
-// nuestro control), el modo guardado tiene que volver a "normal" para que
-// no se quede desincronizado. OJO: cerrar la pestana/ventana estando en
-// pantalla completa TAMBIEN dispara este mismo evento (el navegador sale
-// de pantalla completa como parte de cerrarse), y sin este aviso eso
-// borraria "pantalla completa" de la preferencia guardada justo al
-// cerrar la app — pareceria que nunca se guarda. isClosingPage se marca
-// en cuanto empieza a cerrarse/recargarse la pagina, para distinguir ese
-// caso del Esc de verdad y no tocar la preferencia guardada entonces.
-let isClosingPage = false;
-window.addEventListener('pagehide', () => { isClosingPage = true; });
-window.addEventListener('beforeunload', () => { isClosingPage = true; });
-
-document.addEventListener('fullscreenchange', () => {
-  if (isClosingPage) return;
-  if (!document.fullscreenElement && getViewMode() === 'fullscreen') {
-    setViewMode('normal');
-  }
-});
-
-// Al cargar la pagina no podemos activar pantalla completa ni abrir la
-// ventana flotante solos (los navegadores exigen un clic del usuario para
-// eso), asi que si la vista guardada no es la normal mostramos un aviso
-// con un boton para activarla con un clic.
-function applyViewModePrompt() {
-  const mode = getViewMode();
-  const banner = document.getElementById('default-view-banner');
-
-  if (window.electronAPI && mode === 'fullscreen') {
-    // En Electron SI podemos activarla solos (ver applyViewMode), asi que
-    // ni falta el aviso.
-    window.electronAPI.setNativeFullscreen(true);
-    banner.classList.add('hidden');
-    return;
-  }
-
-  if (mode === 'normal' || (mode === 'fullscreen' && document.fullscreenElement)) {
-    banner.classList.add('hidden');
-    return;
-  }
-  const label = mode === 'fullscreen' ? 'pantalla completa' : 'ventana flotante';
-  document.getElementById('default-view-banner-text').textContent = `Tu vista guardada es ${label}.`;
-  document.getElementById('btn-apply-default-view').textContent = mode === 'fullscreen' ? 'Activar' : 'Abrir';
-  banner.dataset.pref = mode;
-  banner.classList.remove('hidden');
-}
-
-document.getElementById('btn-apply-default-view').addEventListener('click', () => {
-  const mode = document.getElementById('default-view-banner').dataset.pref;
-  applyViewMode(mode);
-});
-document.getElementById('btn-dismiss-default-view').addEventListener('click', () => {
-  document.getElementById('default-view-banner').classList.add('hidden');
-});
-
-// ---------------------------------------------------------------------
-// "Mi espacio" (Fase 1): hub con 3 columnas (Proximos / Tareas / Notas,
-// esta ultima vacia por ahora) en vez de los bloques apilados de
-// siempre. Como se accede a el es una preferencia de ESTE dispositivo
-// (localStorage), elegida en Configuracion > Vista > Mi espacio (ver
-// refreshMiEspacioModeOptions en settings.js):
-//   - "panel": el hub vive SIEMPRE dentro de #reminders-panel, al lado
-//     del calendario (sustituye a los 2 bloques apilados de siempre).
-//   - "topbar": el panel lateral se queda exactamente como esta hoy
-//     (Proximos arriba, Tareas fijo abajo); un boton nuevo en la topbar
-//     abre el hub a pantalla completa cuando lo necesites.
-// En los dos casos, los bloques #reminders-top-block/#reminders-tasks-block
-// de SIEMPRE se MUEVEN de sitio (Node.appendChild) en vez de duplicarse,
-// asi que su renderizado (loadReminders, renderTasksList...) no cambia
-// nada, solo cambia DONDE viven en el DOM.
-// ---------------------------------------------------------------------
-// ---------------------------------------------------------------------
 // Estilo de interaccion (Neon/Directo/Cristal, ver Configuracion > Estilo):
 // ajuste por dispositivo, independiente del tema de color -- solo cambia
 // como reaccionan los botones al pasar el raton y los interruptores al
@@ -6825,164 +5595,6 @@ function applyUiStyle() {
   document.documentElement.dataset.uiStyle = getUiStylePreference();
 }
 
-const MY_SPACE_MODE_IDS = ['topbar', 'panel'];
-
-function getMiEspacioMode() {
-  const stored = localStorage.getItem('miEspacioMode');
-  return MY_SPACE_MODE_IDS.includes(stored) ? stored : 'topbar';
-}
-
-// Deja los 2 bloques de siempre en su sitio clasico, uno debajo del otro
-// dentro de #reminders-panel — como si "Mi espacio" no existiera. Fuera
-// de Mi espacio no hace falta la navegacion de dia (ya estan el
-// calendario de al lado y los atajos de teclado) ni tiene sentido
-// arrancar siempre en el dia de hoy, asi que se vuelve al "Proximos" de
-// toda la vida.
-function restoreClassicRemindersPanel() {
-  // La colocacion de verdad de los 3 bloques (sueltos o dentro del slot
-  // agrupado) la hace applyRemindersPanelLayout() -- aqui solo se deja
-  // todo lo demas del panel clasico como siempre.
-  document.getElementById('reminders-day-nav').classList.add('hidden');
-  showUpcomingReminders();
-  applyRemindersPanelLayout();
-}
-
-// Coloca los 3 bloques dentro de las columnas del hub, alli donde el hub
-// este montado ahora mismo (dentro del panel lateral o dentro de la
-// pantalla completa de #my-space-view). Dentro de Mi espacio, Proximos
-// arranca siempre en el dia de hoy (en vez del listado general) con la
-// navegacion de dia visible arriba, porque en modo "boton" el calendario
-// de al lado no se ve mientras Mi espacio esta abierto.
-function moveRemindersIntoHub() {
-  document.getElementById('my-space-col-reminders').appendChild(document.getElementById('reminders-top-block'));
-  document.getElementById('my-space-col-tasks').appendChild(document.getElementById('reminders-tasks-block'));
-  document.getElementById('my-space-col-notes').appendChild(document.getElementById('reminders-notes-block'));
-  document.getElementById('reminders-day-nav').classList.remove('hidden');
-  showDayInReminders(new Date());
-  // Dentro del hub (3 columnas propias, cada una con su sitio) el ajuste
-  // de "agrupar con flechas" no pinta nada -- cada seccion vive siempre
-  // en su propia columna, visible entera.
-  document.getElementById('reminders-panel-switcher').classList.add('hidden');
-  document.getElementById('reminders-panel-grouped-slot').classList.add('hidden');
-  REMINDERS_PANEL_PAGES.forEach((p) => document.getElementById(p.blockId).classList.remove('hidden'));
-}
-
-// Panel lateral clasico (modo "topbar" de Mi espacio, ver mas abajo):
-// que secciones de Recordatorios/Tareas/Notas van MARCADAS. Si hay
-// alguna marcada Y alguna sin marcar, las dos "mitades" comparten un
-// unico hueco (#reminders-panel-grouped-slot): las MARCADAS se ven
-// juntas, apiladas, cada una con su scroll; la flecha cambia TODO el
-// hueco a las NO marcadas (tambien juntas) en vez de mostrar una sola
-// cada vez -- pedido explicito de Koku ("las seleccionadas aparecen
-// juntas... si le doy a la flecha toda la columna que se me cambie a la
-// que no esta seleccionada"). Preferencia de ESTE dispositivo
-// (localStorage, un array de ids de las marcadas), elegida con casillas
-// en Configuracion > Vista > "Panel lateral clasico" (ver
-// refreshRemindersPanelGroupedOptions en settings.js). Marcar TODAS o
-// NINGUNA no activa nada especial -- no habria "las otras" a las que
-// cambiar, asi que se trata como si no hubiera agrupacion (las 3
-// sueltas, siempre visibles, como si esto no existiera). En modo
-// "panel" de Mi espacio (hub de 3 columnas) este ajuste no pinta nada:
-// cada columna ya vive en su propio sitio fijo (ver moveRemindersIntoHub).
-//
-// REMINDERS_PANEL_PAGES esta pensado para poder crecer el dia que haya
-// una 4a seccion: toda la logica de abajo itera sobre el array entero,
-// sin ningun "3" fijo en el codigo.
-const REMINDERS_PANEL_PAGES = [
-  { id: 'reminders', label: 'Recordatorios', blockId: 'reminders-top-block' },
-  { id: 'tasks', label: 'Tareas', blockId: 'reminders-tasks-block' },
-  { id: 'notes', label: 'Notas', blockId: 'reminders-notes-block' },
-];
-// true = el hueco compartido muestra las MARCADAS ahora mismo; false =
-// muestra las NO marcadas. Se reinicia a true cada vez que cambia que
-// secciones estan marcadas (ver refreshRemindersPanelGroupedOptions en
-// settings.js), para no dejarte "atascado" viendo las otras tras tocar
-// el ajuste.
-let remindersPanelShowingChecked = true;
-
-function getRemindersGroupedSections() {
-  let stored;
-  try {
-    stored = JSON.parse(localStorage.getItem('remindersPanelGrouped') || '[]');
-  } catch {
-    stored = [];
-  }
-  if (!Array.isArray(stored)) return [];
-  const valid = stored.filter((id) => REMINDERS_PANEL_PAGES.some((p) => p.id === id));
-  return valid.length >= 1 && valid.length < REMINDERS_PANEL_PAGES.length ? valid : [];
-}
-
-// Recoloca cada bloque en su sitio (dentro del hueco compartido, o suelto
-// en el panel si no hay agrupacion activa) y decide que se ve. Se llama
-// al arrancar, al cambiar el ajuste, y cada vez que se le da a la
-// flecha (stepRemindersPanelPage).
-function applyRemindersPanelLayout() {
-  if (getMiEspacioMode() === 'panel') return; // este ajuste no aplica ahi, ver moveRemindersIntoHub
-
-  const panel = document.getElementById('reminders-panel');
-  const groupedSlot = document.getElementById('reminders-panel-grouped-slot');
-  const switcher = document.getElementById('reminders-panel-switcher');
-  const checked = getRemindersGroupedSections();
-
-  if (checked.length === 0) {
-    // Sin agrupacion activa: las 3 sueltas, apiladas, siempre visibles.
-    REMINDERS_PANEL_PAGES.forEach((p) => {
-      const block = document.getElementById(p.blockId);
-      panel.appendChild(block);
-      block.classList.remove('hidden');
-    });
-    groupedSlot.classList.add('hidden');
-    switcher.classList.add('hidden');
-    return;
-  }
-
-  // Con agrupacion activa, las 3 secciones (marcadas Y no marcadas) viven
-  // dentro del hueco compartido -- cual de las dos "mitades" se ve la
-  // decide remindersPanelShowingChecked.
-  panel.appendChild(groupedSlot);
-  REMINDERS_PANEL_PAGES.forEach((p) => groupedSlot.appendChild(document.getElementById(p.blockId)));
-
-  groupedSlot.classList.remove('hidden');
-  switcher.classList.remove('hidden');
-  const unchecked = REMINDERS_PANEL_PAGES.map((p) => p.id).filter((id) => !checked.includes(id));
-  const showing = remindersPanelShowingChecked ? checked : unchecked;
-  REMINDERS_PANEL_PAGES.forEach((p) => {
-    document.getElementById(p.blockId).classList.toggle('hidden', !showing.includes(p.id));
-  });
-  document.getElementById('reminders-panel-switch-label').textContent = showing
-    .map((id) => REMINDERS_PANEL_PAGES.find((p) => p.id === id).label)
-    .join(' + ');
-}
-
-function stepRemindersPanelPage() {
-  if (getRemindersGroupedSections().length === 0) return;
-  // Solo hay dos "mitades" -- prev/next hacen lo mismo, dan la vuelta a
-  // cual se ve, se mantienen los dos botones por simetria visual con el
-  // resto de la app.
-  remindersPanelShowingChecked = !remindersPanelShowingChecked;
-  applyRemindersPanelLayout();
-}
-
-document.getElementById('btn-panel-switch-prev').addEventListener('click', () => stepRemindersPanelPage());
-document.getElementById('btn-panel-switch-next').addEventListener('click', () => stepRemindersPanelPage());
-
-function collapseMySpaceExpandedColumn() {
-  delete document.getElementById('my-space-hub').dataset.expanded;
-  document.getElementById('my-space-back-btn').classList.add('hidden');
-}
-
-function closeMySpaceView() {
-  document.getElementById('my-space-view').classList.add('hidden');
-  collapseMySpaceExpandedColumn();
-  restoreClassicRemindersPanel();
-  setCurrentScreen('home');
-}
-
-function openMySpaceView() {
-  moveRemindersIntoHub();
-  document.getElementById('my-space-view').classList.remove('hidden');
-  setCurrentScreen('my-space');
-}
 
 // Vista de Notas movil (Fase 4 del rediseño movil) -- sustituye al
 // puente temporal que abria "Mi espacio" desde la barra inferior (ver
@@ -7007,92 +5619,6 @@ function closeMobileNotesView() {
   refreshMobileNotesActionBar();
 }
 document.getElementById('btn-close-mobile-notes').addEventListener('click', closeMobileNotesView);
-
-// Aplica el modo elegido: donde vive el hub, y si hace falta o no el
-// boton de la topbar. Se llama al arrancar y cada vez que cambias el
-// ajuste en Configuracion > Vista.
-function applyMiEspacioMode() {
-  const mode = getMiEspacioMode();
-  const panel = document.getElementById('reminders-panel');
-  const hub = document.getElementById('my-space-hub');
-
-  // Al cambiar de modo (o al arrancar) siempre se parte de cero: el hub
-  // cerrado y los bloques en su sitio clasico dentro del panel.
-  document.getElementById('my-space-view').classList.add('hidden');
-  collapseMySpaceExpandedColumn();
-  restoreClassicRemindersPanel();
-  panel.classList.remove('my-space-panel-mode');
-
-  // En modo "panel" el ancho del aside es fijo (640px, ver .my-space-panel-mode
-  // en styles.css) -- el arrastre no tendria ningun efecto ahi, asi que
-  // se oculta para no dejar un control muerto en pantalla.
-  const resizeHandle = document.getElementById('panel-resize-handle');
-  if (mode === 'panel') {
-    panel.appendChild(hub);
-    panel.classList.add('my-space-panel-mode');
-    moveRemindersIntoHub();
-    document.getElementById('btn-my-space').classList.add('hidden');
-    if (resizeHandle) resizeHandle.classList.add('hidden');
-  } else {
-    document.getElementById('my-space-view').appendChild(hub);
-    document.getElementById('btn-my-space').classList.remove('hidden');
-    if (resizeHandle) resizeHandle.classList.remove('hidden');
-  }
-}
-
-// Arrastre del divisor entre el calendario y el panel de recordatorios
-// (pedido explicito de Koku: "en este ordenador me gustaria hacer algo
-// mas ancho el espacio que ocupa la columna de recordatorios"). El ancho
-// se guarda en localStorage POR DISPOSITIVO (cada ordenador puede querer
-// uno distinto) y se aplica como variable CSS que .reminders-panel ya
-// lee (ver styles.css) -- clamp() en JS y en el propio CSS por partida
-// doble, para que nunca se pueda arrastrar a algo inservible.
-const PANEL_WIDTH_MIN = 240;
-const PANEL_WIDTH_MAX = 640;
-
-function applyStoredRemindersPanelWidth() {
-  const stored = Number(localStorage.getItem('remindersPanelWidth'));
-  if (stored && stored >= PANEL_WIDTH_MIN && stored <= PANEL_WIDTH_MAX) {
-    document.documentElement.style.setProperty('--reminders-panel-width', `${stored}px`);
-  }
-}
-applyStoredRemindersPanelWidth();
-
-(function setupPanelResizeHandle() {
-  const handle = document.getElementById('panel-resize-handle');
-  const panel = document.getElementById('reminders-panel');
-  if (!handle || !panel) return;
-
-  handle.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = panel.getBoundingClientRect().width;
-    handle.classList.add('is-dragging');
-    document.body.classList.add('is-resizing-panel');
-
-    function onMouseMove(ev) {
-      // El panel esta a la DERECHA del divisor: arrastrar hacia la
-      // izquierda (deltaX negativo) lo agranda, hacia la derecha lo
-      // encoge -- de ahi el signo invertido.
-      const deltaX = ev.clientX - startX;
-      const newWidth = Math.max(PANEL_WIDTH_MIN, Math.min(PANEL_WIDTH_MAX, startWidth - deltaX));
-      document.documentElement.style.setProperty('--reminders-panel-width', `${newWidth}px`);
-    }
-    function onMouseUp() {
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-      handle.classList.remove('is-dragging');
-      document.body.classList.remove('is-resizing-panel');
-      const finalWidth = panel.getBoundingClientRect().width;
-      localStorage.setItem('remindersPanelWidth', String(Math.round(finalWidth)));
-    }
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  });
-})();
-
-document.getElementById('btn-my-space').addEventListener('click', openMySpaceView);
-document.getElementById('btn-close-my-space').addEventListener('click', closeMySpaceView);
 
 // ---------------------------------------------------------------------
 // Navegacion movil (.mobile-nav + boton flotante "+", ver styles.css):
@@ -7183,8 +5709,8 @@ function goToMobileSection(section) {
   // App si Koku eligio otra en Configuracion -> Este dispositivo (ver
   // applyMobileNavCustomization() arriba).
   if (section === 'notes') MOBILE_NAV_SLOT_APPS[getMobileNavNotesSlot()].open();
-  else if (section === 'extensions') document.getElementById('btn-extensions').click();
-  else if (section === 'settings') document.getElementById('btn-settings').click();
+  else if (section === 'extensions') openExtensionsView();
+  else if (section === 'settings') openSettingsModal();
   refreshMobileNavActive(section);
 }
 
@@ -7282,7 +5808,6 @@ function closeExtensionsView() {
   document.getElementById('extensions-view').classList.add('hidden');
   setCurrentScreen('home');
 }
-document.getElementById('btn-extensions').addEventListener('click', openExtensionsView);
 document.getElementById('btn-close-extensions').addEventListener('click', closeExtensionsView);
 
 // ---------------------------------------------------------------------
@@ -7353,7 +5878,7 @@ function formatGymDate(dateStr) {
 
 // Unidad de peso para Gimnasio (kg o libras): ajuste por dispositivo, no
 // compartido -- el dato en la base de datos SIEMPRE es weight_kg (ver
-// server/db.js), esto solo decide como se escribe/lee en pantalla. El
+// local-schema.js), esto solo decide como se escribe/lee en pantalla. El
 // toggle de verdad vive en Configuracion > Este dispositivo (ver
 // refreshGymWeightUnitOptions en settings.js); aqui solo la lectura y
 // las conversiones, que hacen falta ya en el modal de sesion mas abajo.
@@ -10704,7 +9229,7 @@ document.getElementById('finanzas-recurring-form').addEventListener('submit', as
 });
 
 // -- Pestaña "Deudas": lo que Koku debe a alguien y lo que alguien le
-//    debe a el (ver comentario junto a finanzas_debts en server/db.js).
+//    debe a el (ver comentario junto a finanzas_debts en local-schema.js).
 //    Ligar una deuda a una cuenta es opcional -- si se liga, marcarla
 //    como pagada genera un movimiento real (ver routes/finanzasDebts.js).
 let finanzasDebts = [];
@@ -12582,12 +11107,13 @@ function renderLecturasItemsTable() {
   });
 }
 
+
 // --- Modal de item (con chips de generos) -------------------------------
 let lecturasItemGenres = [];
 
 // Generos ya usados en CUALQUIER saga (no solo la abierta ahora mismo)
 // -- se traen con GET /api/lecturas-items sin sagaId, que ya devuelve
-// todos los items de todas las sagas (ver server/routes/lecturasItems.js).
+// todos los items de todas las sagas (ver routes-local/lecturasItems.js).
 // Sin tabla ni endpoint nuevo: "la opcion de seleccion general" que
 // pidio Koku sale sola de los items ya guardados, combinada con
 // LECTURAS_PREDEFINED_GENRES para tener algo que elegir incluso antes de
@@ -12766,82 +11292,8 @@ document.getElementById('btn-delete-lecturas-item').addEventListener('click', as
 // contenido de dentro se oculta (ver .is-animating en styles.css) para
 // que no se vea el texto reajustandose a media animacion — 340ms es la
 // duracion de la transicion CSS (320ms) con un pelin de margen para que
-// de tiempo a que termine de verdad antes de destaparlo.
-const MY_SPACE_COLUMN_ANIMATION_MS = 340;
-let mySpaceAnimationTimer = null;
 
-function playMySpaceColumnAnimation() {
-  const hub = document.getElementById('my-space-hub');
-  hub.classList.add('is-animating');
-  clearTimeout(mySpaceAnimationTimer);
-  mySpaceAnimationTimer = setTimeout(() => hub.classList.remove('is-animating'), MY_SPACE_COLUMN_ANIMATION_MS);
-}
-
-// Un solo listener en el hub entero (delegacion) en vez de uno por
-// columna: mas simple, y sigue funcionando igual aunque los bloques que
-// hay dentro se muevan de sitio. Ya no hay un boton dedicado para
-// expandir (ocupaba espacio vertical solo para eso) -- clicar la FILA
-// entera de cabecera (.reminders-panel-header, con la clase
-// my-space-col-expand-trigger -- antes solo el h2) la expande
-// directamente, pedido explicito de Koku.
-document.getElementById('my-space-hub').addEventListener('click', (e) => {
-  const trigger = e.target.closest('.my-space-col-expand-trigger');
-  if (!trigger) return;
-  // Si el clic fue sobre un boton propio dentro de la fila (ej.
-  // "Proximos →" en Recordatorios), ese boton ya tiene su propia accion
-  // -- no expandir tambien la columna a la vez.
-  if (e.target.closest('button')) return;
-  const col = trigger.closest('.my-space-col');
-  if (!col) return;
-  playMySpaceColumnAnimation();
-  document.getElementById('my-space-hub').dataset.expanded = col.dataset.col;
-  document.getElementById('my-space-back-btn').classList.remove('hidden');
-});
-document.getElementById('my-space-back-btn').addEventListener('click', () => {
-  playMySpaceColumnAnimation();
-  collapseMySpaceExpandedColumn();
-});
-
-applyMiEspacioMode();
 applyUiStyle();
-
-// ---------------------------------------------------------------------
-// Pantalla de bienvenida (primer arranque): ver el modal en index.html.
-// Se muestra una sola vez, en el dispositivo que abra la app primero
-// (el perfil es compartido por TODA la instalacion, no por dispositivo
-// -- ver user_profile en server/db.js), tanto al guardar como al pulsar
-// "Ahora no" se marca como vista para siempre (los dos llaman a PUT
-// /api/profile, que marca onboardingCompleted=true como efecto
-// secundario -- ver server/routes/profile.js).
-// ---------------------------------------------------------------------
-async function maybeShowOnboarding() {
-  const profile = await api('/api/profile');
-  if (profile.onboardingCompleted) return;
-  document.getElementById('onboarding-name').value = profile.name || '';
-  document.getElementById('onboarding-modal').classList.remove('hidden');
-}
-
-function closeOnboardingModal() {
-  document.getElementById('onboarding-modal').classList.add('hidden');
-}
-
-document.getElementById('onboarding-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  await api('/api/profile', {
-    method: 'PUT',
-    body: JSON.stringify({
-      name: document.getElementById('onboarding-name').value,
-    }),
-  });
-  closeOnboardingModal();
-});
-
-document.getElementById('btn-onboarding-skip').addEventListener('click', async () => {
-  // Body vacio a proposito: no cambia nombre ni correo, solo marca la
-  // pantalla como vista (ver el comentario de PUT /api/profile).
-  await api('/api/profile', { method: 'PUT', body: JSON.stringify({}) });
-  closeOnboardingModal();
-});
 
 // ---------------------------------------------------------------------
 // Arranque
@@ -12875,12 +11327,6 @@ function setCurrentScreen(screen) {
 async function restoreCurrentScreen() {
   const screen = localStorage.getItem('currentScreen');
   if (!screen || screen === 'home') return;
-  if (screen === 'my-space') {
-    // En modo "panel" no existe una pantalla de Mi espacio aparte que
-    // restaurar -- el hub ya vive siempre junto al calendario.
-    if (getMiEspacioMode() === 'topbar') openMySpaceView();
-    return;
-  }
   if (screen === 'mobile-notes') { openMobileNotesView(); return; }
   if (screen === 'extensions') { openExtensionsView(); return; }
   if (screen === 'gym') { await openGymView(); return; }
@@ -12929,7 +11375,6 @@ async function init() {
   // llamadas de red secuenciales que había antes.
   await new Promise((resolve) => setTimeout(resolve, 0));
   await initStep(restoreCurrentScreen);
-  await initStep(maybeShowOnboarding);
   await initStep(loadGroups);
   await initStep(loadSpecialDays);
   await initStep(loadMonth);
@@ -12965,4 +11410,3 @@ async function init() {
 // version es la ultima: la app arranca directamente en el calendario,
 // con su propia base de datos dentro del dispositivo.
 init();
-applyViewModePrompt();

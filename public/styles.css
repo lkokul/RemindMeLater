@@ -63,19 +63,17 @@ body.modal-open-lock {
    Reutiliza el mismo modal-open-lock que ya marca "hay un modal
    abierto" para ocultarla mientras tanto -- solo en movil, en
    escritorio .mobile-nav ya esta oculta siempre. */
-@media (max-width: 859px) {
-  body.modal-open-lock .mobile-nav { display: none; }
-  /* Excepcion: Configuracion (Fase 5) ya tiene su propio punto de
-     entrada FIJO en la barra inferior -- a diferencia del resto de
-     modales (que son ventanas puntuales sobre otra pantalla), aqui la
-     barra debe seguir visible para poder navegar a otra seccion sin
-     cerrar Configuracion antes. refreshModalScrollLock() marca esta
-     clase aparte, ademas de modal-open-lock (que se sigue aplicando
-     igual, bloqueando el scroll del fondo -- no hace daño aunque
-     Configuracion ya cubra toda la pantalla). Misma especificidad que
-     la regla de arriba, gana por ir despues en la hoja. */
-  body.settings-modal-open .mobile-nav { display: flex; }
-}
+body.modal-open-lock .mobile-nav { display: none; }
+/* Excepcion: Configuracion (Fase 5) ya tiene su propio punto de
+   entrada FIJO en la barra inferior -- a diferencia del resto de
+   modales (que son ventanas puntuales sobre otra pantalla), aqui la
+   barra debe seguir visible para poder navegar a otra seccion sin
+   cerrar Configuracion antes. refreshModalScrollLock() marca esta
+   clase aparte, ademas de modal-open-lock (que se sigue aplicando
+   igual, bloqueando el scroll del fondo -- no hace daño aunque
+   Configuracion ya cubra toda la pantalla). Misma especificidad que
+   la regla de arriba, gana por ir despues en la hoja. */
+body.settings-modal-open .mobile-nav { display: flex; }
 
 body {
   margin: 0;
@@ -91,7 +89,7 @@ body {
    algun dia tiene mas secciones de las que caben) aparece esta barra
    fina en vez de la del sistema, con el color de acento del tema activo
    — asi que cambia sola si cambias de tema. */
-.modal-card, .settings-card-body, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover, .date-popover, .mobile-calendar-month-list, .mobile-calendar-year-grid, .mobile-hours-scroll, .mobile-day-listado-view {
+.modal-card, .settings-card-body, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover, .date-popover, .mobile-calendar-month-list, .mobile-calendar-year-grid {
   scrollbar-width: thin;
   scrollbar-color: var(--accent) transparent;
 }
@@ -104,9 +102,7 @@ body {
 .select-popover::-webkit-scrollbar,
 .date-popover::-webkit-scrollbar,
 .mobile-calendar-month-list::-webkit-scrollbar,
-.mobile-calendar-year-grid::-webkit-scrollbar,
-.mobile-hours-scroll::-webkit-scrollbar,
-.mobile-day-listado-view::-webkit-scrollbar {
+.mobile-calendar-year-grid::-webkit-scrollbar {
   width: 8px;
 }
 .modal-card::-webkit-scrollbar-track,
@@ -118,9 +114,7 @@ body {
 .select-popover::-webkit-scrollbar-track,
 .date-popover::-webkit-scrollbar-track,
 .mobile-calendar-month-list::-webkit-scrollbar-track,
-.mobile-calendar-year-grid::-webkit-scrollbar-track,
-.mobile-hours-scroll::-webkit-scrollbar-track,
-.mobile-day-listado-view::-webkit-scrollbar-track {
+.mobile-calendar-year-grid::-webkit-scrollbar-track {
   background: transparent;
 }
 .modal-card::-webkit-scrollbar-thumb,
@@ -132,11 +126,24 @@ body {
 .select-popover::-webkit-scrollbar-thumb,
 .date-popover::-webkit-scrollbar-thumb,
 .mobile-calendar-month-list::-webkit-scrollbar-thumb,
-.mobile-calendar-year-grid::-webkit-scrollbar-thumb,
-.mobile-hours-scroll::-webkit-scrollbar-thumb,
-.mobile-day-listado-view::-webkit-scrollbar-thumb {
+.mobile-calendar-year-grid::-webkit-scrollbar-thumb {
   background: var(--accent);
   border-radius: 4px;
+}
+
+/* La vista diaria del calendario movil NO lleva barra de
+   desplazamiento visible (pedido de Koku: "se ve el desplazamiento por
+   las horas, no hace falta tenerla") -- el propio movimiento de las
+   horas/eventos ya deja claro que se esta desplazando. Por eso estos
+   dos contenedores estan fuera de la lista de arriba y llevan su regla
+   propia. */
+.mobile-hours-scroll,
+.mobile-day-listado-view {
+  scrollbar-width: none;
+}
+.mobile-hours-scroll::-webkit-scrollbar,
+.mobile-day-listado-view::-webkit-scrollbar {
+  display: none;
 }
 
 button {
@@ -281,9 +288,7 @@ button {
 }
 :root[data-ui-style="registro"] .finanzas-account-type-badge,
 :root[data-ui-style="registro"] .lecturas-status-badge,
-:root[data-ui-style="registro"] .lecturas-genre-chip,
-:root[data-ui-style="registro"] .extensions-card-badge,
-:root[data-ui-style="registro"] .shortcut-combo-chip {
+:root[data-ui-style="registro"] .lecturas-genre-chip {
   font-family: var(--font-mono);
 }
 
@@ -340,11 +345,21 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   min-width: 0;
   font-size: 1.1rem;
   font-weight: 600;
+  /* line-height fijo y padding vertical simetrico: sin esto la caja del
+     texto era mas alta que la de la estrella y los dos quedaban a
+     distinta altura pese al align-items:center de la fila (lo que Koku
+     vio como "el texto y el simbolo de favoritos no estan al mismo
+     nivel"). */
+  line-height: 1.3;
   padding: 0.3rem 0.4rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* "Modo lectura" vive en la fila del titulo, junto a la estrella. No
+   crece ni se encoge con el titulo (que si lo hace, flex:1) y su texto
+   nunca se parte en dos lineas, para no descuadrar la fila. */
+.note-editor-read-mode-btn { flex-shrink: 0; white-space: nowrap; }
 .note-editor-title-preview:empty::before {
   content: 'Nota sin título';
   opacity: 0.6;
@@ -362,20 +377,23 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    numerada, mas tabla e imagen), ahora arriba a modo de barra de estado
    fija, separada del contenido por un borde en vez de ir pegada al
    campo. */
-/* Barra principal reducida a "Formato" + "Modo lectura" (ronda "barra
-   colapsada en boton Formato") -- una unica fila deslizable
-   (overflow-x, sin flex-wrap) en vez de crecer sin limite, "maximo 1-2
-   lineas" segun lo pedido. El resto de controles (antes 3 filas aqui
-   mismo) vive ahora en #note-format-popover, ver mas abajo. */
+/* Los controles se ven SIEMPRE desplegados, en 3 filas agrupadas por
+   lo que hacen (formato de texto / estructura de parrafo / tabla-
+   imagen-codigo-vim). Hubo una ronda en la que todo esto vivia
+   colapsado tras un boton "Formato" (primero como popover flotante,
+   luego como fila mas del formulario); Koku pidio volver a tenerlo a la
+   vista, asi que la barra vuelve a ser el contenedor de las 3 filas.
+   max-height de seguridad por si en una pantalla muy baja no caben
+   enteras. */
 .note-editor-toolbar {
   flex-shrink: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 0.35rem;
   padding: 0.5rem 1.2rem;
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  flex-wrap: nowrap;
+  max-height: 45vh;
+  overflow-y: auto;
   scrollbar-width: none;
 }
 .note-editor-toolbar::-webkit-scrollbar { display: none; }
@@ -384,29 +402,6 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   align-items: center;
   gap: 0.35rem;
   flex-wrap: wrap;
-}
-/* Panel de formato (boton "Formato"): era un popover flotante
-   (position:fixed) en una ronda anterior, pero Koku reporto que
-   "sigue tapando el texto" -- flotando encima de #note-body no habia
-   forma de que NUNCA lo tapara mientras estuviera abierto. Ahora vive
-   dentro del flujo normal de .note-editor-form (flex-column, ver
-   app.js): una fila mas entre la barra principal y .note-editor-main,
-   que se encoge solo (flex:1; min-height:0) para dejarle sitio en vez
-   de quedar debajo. max-height + overflow-y de seguridad por si en una
-   pantalla muy baja las 3 filas de botones no caben enteras. A
-   proposito NO esta en la lista generica de closeAllPopovers()/"click
-   fuera cierra" de settings.js: tiene que seguir abierto mientras se
-   selecciona texto dentro de #note-body (que tambien cuenta como
-   "fuera" de este popover para ese mecanismo generico) -- tiene su
-   propio listener de cierre dedicado en app.js. */
-.note-format-popover {
-  flex-shrink: 0;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 0.5rem 1.2rem;
-  max-height: 45vh;
-  overflow-y: auto;
-  display: flex; flex-direction: column; gap: 0.35rem;
 }
 .note-editor-btn {
   padding: 0.3rem 0.6rem;
@@ -419,24 +414,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    document.queryCommandState() en cada cambio de seleccion. */
 .note-editor-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .note-editor-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-/* Indicativo de modo Insertar/Normal/Visual del modo vim (opt-in) --
-   mismo color siempre, solo cambia el texto (INSERTAR/NORMAL/VISUAL):
-   asi el ojo no tiene que aprender un segundo codigo de colores aparte
-   del texto, que ya dice el modo sin ambiguedad. */
-/* Es un <button> (para poder clicarlo y rotar de modo) -- border:none
-   quita el borde que el reset global de <button> (styles.css:81-89) le
-   pondria por defecto, para que se siga viendo como la pastilla de
-   siempre. */
-.note-editor-vim-indicator {
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 0.2rem 0.5rem;
-  border: none;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-text);
-}
+
 /* Modo lectura (por nota abierta, ver applyNoteEditorReadMode en app.js):
    el cuerpo deja de parecer un campo editable y el titulo se atenua un
    poco, para que se note a simple vista que no se puede tocar nada. */
@@ -459,132 +437,10 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    .mobile-nav (que flota encima, z-index 70 vs 15 de esta vista) sin
    ningun margen que lo separe. Mismo valor ya usado para el mismo fin
    en .app/Configuracion/el FAB. */
-@media (max-width: 859px) {
-  .note-editor-content-col {
-    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
-  }
+.note-editor-content-col {
+  padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
 }
 
-/* Rail izquierdo con los botones "Arbol"/"Secciones" -- mismo patron que
-   un rail de iconos de cualquier editor tipo IDE, siempre visible pegado
-   al borde izquierdo del contenido. Texto en vez de emoji (🌳/📑): con
-   tan pocos botones un emoji no aporta nada que el propio texto no diga
-   ya, y evita que se vean distinto entre sistemas operativos. */
-.note-editor-rail {
-  flex-shrink: 0;
-  width: 4.6rem;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.4rem;
-  padding: 0.7rem 0.5rem;
-  border-right: 1px solid var(--border);
-}
-.note-editor-rail-btn {
-  padding: 0.45rem 0.3rem;
-  font-size: 0.78rem;
-  text-align: center;
-  background: transparent;
-  border-color: transparent;
-  color: inherit;
-}
-.note-editor-rail-btn:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.note-editor-rail-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-
-/* Panel lateral deslizante (Secciones/Arbol): ancho fijo, con su propio
-   scroll, se muestra/oculta con .hidden en vez de un ancho a 0 -- mas
-   sencillo que animar, coherente con el resto de paneles de la app
-   (popovers, Mi espacio...) que tampoco animan su aparicion. */
-.note-editor-side-panel {
-  flex-shrink: 0;
-  width: 260px;
-  overflow-y: auto;
-  padding: 0.8rem;
-  border-right: 1px solid var(--border);
-}
-.note-editor-side-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.4rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: color-mix(in srgb, var(--bg-text) 60%, var(--bg));
-  margin-bottom: 0.6rem;
-}
-/* El "+" de nueva nota del panel Arbol no necesita mayusculas/espaciado
-   de titulo -- solo hereda el hueco de la cabecera. */
-.note-editor-side-panel-header .icon-btn { text-transform: none; letter-spacing: normal; }
-
-/* Arbol de carpetas/notas: filas planas con sangria por profundidad
-   (mismo patron que buildFolderSelectOptions, pero como filas clicables
-   de verdad en vez de opciones de un <select>). */
-.note-tree-list { display: flex; flex-direction: column; }
-.note-tree-row {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.35rem 0.4rem;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-.note-tree-row:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.note-tree-note-row.is-active { background: color-mix(in srgb, var(--accent) 20%, transparent); }
-.note-tree-toggle { flex-shrink: 0; width: 0.9rem; text-align: center; font-size: 0.7rem; }
-.note-tree-folder-icon, .note-tree-note-icon { flex-shrink: 0; display: flex; align-items: center; color: color-mix(in srgb, var(--bg-text) 55%, var(--bg)); }
-.note-tree-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.note-sections-list { display: flex; flex-direction: column; gap: 0.2rem; }
-.note-open-item {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  border-radius: var(--radius-sm);
-}
-.note-open-item:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.note-open-item.is-active { background: color-mix(in srgb, var(--accent) 20%, transparent); }
-.note-open-item-expand-btn, .note-open-item-close-btn {
-  flex-shrink: 0;
-  padding: 0.2rem;
-  background: transparent;
-  border-color: transparent;
-  font-size: 0.7rem;
-  line-height: 1;
-}
-.note-open-item-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-  padding: 0.4rem 0;
-  background: transparent;
-  border: none;
-  color: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-/* Puntito de "sin guardar" -- se apaga en cuanto la nota vuelve a
-   coincidir con lo ultimo guardado (ver isOpenNoteDirty en app.js), no
-   es un flag manual. */
-.note-open-item-dirty-dot {
-  flex-shrink: 0;
-  width: 0.4rem;
-  height: 0.4rem;
-  border-radius: 50%;
-  background: var(--accent);
-}
-/* Placeholder de "secciones de dentro" al desplegar una nota abierta --
-   el editor todavia no tiene ningun concepto de titulos/encabezados
-   dentro del cuerpo, asi que aqui no hay nada real que listar todavia. */
-.note-open-item-sections-placeholder {
-  padding: 0.2rem 0.5rem 0.5rem 1.8rem;
-  font-size: 0.78rem;
-  color: color-mix(in srgb, var(--bg-text) 55%, var(--bg));
-}
 /* Las listas dentro del editor no tienen estilos globales de la app que
    las afecten, asi que hace falta el marcador/sangria a mano igual que
    en cualquier pagina sin CSS propio para <ul>/<ol>. */
@@ -880,8 +736,39 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    con overflow-x:hidden, asi que se veian "cortadas"/desencuadradas en
    vez de desbordar visiblemente). Apiladas verticalmente, cada columna
    tiene el ancho completo del modal y sobra sitio de sobra. */
-@media (max-width: 859px) {
-  .form-row { flex-direction: column; gap: 0.6rem; }
+.form-row { flex-direction: column; gap: 0.6rem; }
+
+/* Hueco de arriba en la app empaquetada: la ventana ocupa la pantalla
+   ENTERA (incluido el trozo donde el iPhone pinta el reloj y la
+   bateria), asi que sin reservar este hueco la barra del calendario y
+   la cabecera de las pantallas completas quedan tapadas por el reloj
+   -- que es justo lo que se veia en el movil. env(safe-area-inset-top)
+   trae el alto real de esa franja en cada dispositivo (0 en un
+   navegador de escritorio normal, asi que esto no cambia nada ahi), y
+   solo funciona con viewport-fit=cover en el <meta> de index.html.
+   El hueco de ABAJO ya estaba reservado desde hace rondas (ver
+   .app/.mobile-nav), pero hasta ahora valia 0 por ese mismo motivo. */
+.app,
+.my-space-view,
+#settings-modal .settings-card {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Vista diaria del calendario: el desplazamiento pasa a ser SOLO el de
+   la rejilla de horas / la lista de eventos, no el de la pantalla
+   entera. En el resto de la app movil la pagina crece con el contenido
+   a proposito (.app usa min-height, no height), pero aqui eso hacia
+   que arrastrar en cualquier punto moviera la pantalla completa --
+   cabecera incluida. Fijando el alto exacto y cortando el desbordamiento
+   aqui, la cadena de flex:1/min-height:0 que ya existe deja acotado el
+   contenedor interno y es el, y solo el, quien se desplaza. La clase la
+   pone y quita enterMobileDayView()/exitMobileDayView() en app.js. */
+body.mobile-day-scroll-lock { overflow: hidden; }
+body.mobile-day-scroll-lock .app {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* .app envuelve la topbar + el contenido. En movil, aunque la pagina
@@ -925,11 +812,6 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   background: var(--bg);
   z-index: 5;
 }
-.topbar-title h1 { font-size: 1.1rem; margin: 0; }
-.topbar-actions { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
-/* Solo icono no se entendia bien -- lleva texto al lado, como un
-   secondary-btn normal pero con el icono de los 3 rectangulos delante. */
-.my-space-topbar-btn { display: inline-flex; align-items: center; gap: 0.4rem; }
 
 /* ---------------------------------------------------------------------
    Navegacion movil: sustituye a la topbar de escritorio (titulo +
@@ -981,18 +863,6 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .mobile-nav-btn svg { width: 20px; height: 20px; }
 .mobile-nav-btn.active { color: var(--accent); }
 
-/* Barra del mes de ESCRITORIO: su propia fila centrada, encima del
-   calendario (no en el header, que se queda solo con el titulo y los
-   botones). En movil no se usa (.desktop-only en index.html), ver la
-   barra propia del calendario movil mas abajo. */
-.month-nav-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.6rem;
-  padding: 0.6rem 1rem 0;
-}
-.month-label { min-width: 8rem; text-align: center; font-weight: 600; }
 #btn-calendar-year-toggle.active {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
   border-color: var(--accent);
@@ -1023,9 +893,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
       aunque max-width nunca llegue a limitar nada por debajo de esa
       anchura. Sin este `margin:0` el hueco perdido era mucho mayor que
       el del padding (~57px por lado, no solo unos pocos px). */
-@media (max-width: 859px) {
-  .layout { padding-left: 0.6rem; padding-right: 0.6rem; margin: 0; }
-}
+.layout { padding-left: 0.6rem; padding-right: 0.6rem; margin: 0; }
 
 /* Agrupa la barra del mes + el calendario en su propia columna, separada
    del panel de recordatorios — asi "Agosto 2026 ◀ ▶" se puede centrar
@@ -1037,13 +905,6 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   min-height: 0;
   min-width: 0;
 }
-
-.desktop-only { display: none; }
-.mobile-only { display: block; }
-/* Mientras se arrastra el divisor calendario/panel (ver panel-resize-handle
-   y app.js): cursor consistente y sin seleccionar texto por accidente en
-   toda la pagina, no solo sobre la franja de 6px. */
-body.is-resizing-panel { cursor: col-resize; user-select: none; }
 
 /* ---------------------------------------------------------------------
    Calendario MOVIL (Fase 2 del rediseño movil, ver CLAUDE.md): barra
@@ -1586,109 +1447,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .mobile-day-listado-block > .empty-hint { text-align: center; }
 .mobile-day-listado-sentinel { height: 1px; }
 
-/* --- Filas de "agenda" (panel de recordatorios en modo dia, escritorio) --
-   antes tambien las usaba la vista movil (lista plana), sustituida por
-   completo en la Fase 2 del rediseño movil por el calendario propio de
-   abajo. .agenda-list en si (el contenedor) ya no se usa en ningun sitio,
-   solo estas filas sueltas (ver renderDayReminders en app.js). --- */
-.agenda-day-heading {
-  font-size: 0.8rem;
-  color: color-mix(in srgb, var(--bg-text) 65%, var(--bg));
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-top: 0.6rem;
-}
-.agenda-item {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.8rem;
-  display: flex;
-  gap: 0.8rem;
-  align-items: center;
-  color: var(--surface-text);
-}
-.agenda-item:active { background: var(--surface-2); color: var(--surface-2-text); }
-.agenda-time { font-weight: 600; min-width: 3.6rem; color: var(--accent); }
-.agenda-title { font-weight: 600; }
-.agenda-meta { font-size: 0.8rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); }
-
-/* --- Calendario mensual (escritorio) --- */
-.calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
-}
-
-/* --- Vista anual (escritorio, ver renderCalendarYearGrid en app.js) ---
-   Los 12 meses en miniatura a la vez: cada .calendar-year-tile es un
-   mes propio con su cabecera y una cuadricula pequeña de dias (solo
-   numero + un punto si ese dia tiene algo, sin chips, no cabrian). */
-.calendar-year-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  gap: 0.6rem;
-}
-.calendar-year-tile {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.5rem;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  cursor: pointer;
-}
-.calendar-year-tile:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
-.calendar-year-tile-heading {
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-align: center;
-  color: var(--surface-text);
-  margin-bottom: 0.3rem;
-  flex-shrink: 0;
-}
-.calendar-year-tile-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  /* Antes las filas se dimensionaban solo por su contenido (numeros muy
-     pequeños) y se centraban con align-content -- con menos de 6 semanas
-     en el mes eso dejaba un hueco enorme sin usar y los dias apretados
-     en una esquina, "raro" (Koku). grid-auto-rows: 1fr reparte TODO el
-     alto disponible del hueco entre las filas que hagan falta (4 a 6),
-     igual que ya hace el mes grande de siempre. */
-  grid-auto-rows: 1fr;
-  gap: 1px;
-  flex: 1;
-  min-height: 0;
-}
-.calendar-year-day {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.68rem;
-  line-height: 1;
-  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
-  border-radius: 3px;
-  position: relative;
-}
-.calendar-year-day.other-month { opacity: 0.3; }
-.calendar-year-day.weekend-day { background: var(--day-weekend); }
-.calendar-year-day.holiday-day { background: var(--day-holiday); }
-.calendar-year-day.special-day { background: var(--day-special); }
-.calendar-year-day.today { background: var(--day-today); color: var(--day-today-text); font-weight: 700; }
-/* Punto diminuto pegado a la esquina del numero -- "tiene algo ese dia",
-   mismo espiritu que el modo "puntos" del mes pero sin desglosar por
-   evento (aqui no cabria). */
-.calendar-year-day.has-content::after {
-  content: '';
-  position: absolute; bottom: 1px; right: 1px;
-  width: 3px; height: 3px; border-radius: 50%;
-  background: var(--accent);
-}
-.calendar-year-day.today.has-content::after { background: var(--day-today-text); }
-
 /* Animaciones al alternar mes/año (ver setCalendarViewMode en app.js):
    "zoom-in" para entrar en un mes (se agranda desde un poco mas pequeño,
    como si te acercaras), "zoom-out" para volver al año (se encoge desde
@@ -1701,80 +1459,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   from { transform: scale(1.12); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
-#calendar-grid.calendar-view-entering { animation: calendar-view-zoom-in 0.32s ease; }
-#calendar-year-grid.calendar-view-entering { animation: calendar-view-zoom-out 0.32s ease; }
-.calendar-cell {
-  background: var(--surface);
-  color: var(--surface-text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  min-height: 110px;
-  padding: 0.4rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  cursor: pointer;
-}
-.calendar-cell.other-month { opacity: 0.35; }
-.calendar-cell.today { border-color: var(--accent); }
-/* Retroalimentacion al pasar el raton por encima, para que quede claro
-   que la celda es clicable (cambia el panel de recordatorios a ese dia). */
-.calendar-cell:hover {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
-}
-.calendar-cell.today:hover { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
-/* Fondo de la celda segun el tipo de dia — festivo/especial (marcados a
-   mano) por encima de fin de semana (automatico). Se aplica como mucho
-   uno de los tres a la vez, ver renderCalendarGrid() en app.js. */
-.calendar-cell.weekend-day { background: var(--day-weekend); }
-.calendar-cell.holiday-day { background: var(--day-holiday); }
-.calendar-cell.special-day { background: var(--day-special); }
-/* Estas variantes coloreadas van despues en la cascada (misma especifidad
-   que :hover), asi que sin esto el hover no se notaria en esas celdas.
-   Antes usaba filter:brightness(), que casi no se nota (o se ve sucio)
-   sobre colores oscuros — mezclar con el acento, igual que la celda base,
-   se ve bien tanto en oscuro como en claro. */
-.calendar-cell.weekend-day:hover {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 18%, var(--day-weekend));
-}
-.calendar-cell.holiday-day:hover {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 18%, var(--day-holiday));
-}
-.calendar-cell.special-day:hover {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 18%, var(--day-special));
-}
-/* Dia que se esta viendo ahora mismo en el panel de recordatorios (ver
-   showDayInReminders en app.js) — mismo aspecto que el hover, pero fijo,
-   para que se note cual es sin tener que dejar el raton encima. Mismas
-   variantes por tipo de dia que el hover, y en el mismo orden en la
-   cascada, para que gane igual que gana el hover. */
-.calendar-cell.selected-day {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
-}
-.calendar-cell.today.selected-day { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
-.calendar-cell.weekend-day.selected-day { background: color-mix(in srgb, var(--accent) 18%, var(--day-weekend)); }
-.calendar-cell.holiday-day.selected-day { background: color-mix(in srgb, var(--accent) 18%, var(--day-holiday)); }
-.calendar-cell.special-day.selected-day { background: color-mix(in srgb, var(--accent) 18%, var(--day-special)); }
-.calendar-cell-day { font-size: 0.8rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); }
-/* El dia de hoy no cambia el fondo de toda la celda (para no pelearse
-   con el color de fin de semana/festivo si coincide), sino que resalta
-   solo el numero con una insignia redonda de su propio color. */
-.calendar-cell.today .calendar-cell-day {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  border-radius: 50%;
-  background: var(--day-today);
-  color: var(--day-today-text);
-  font-weight: 700;
-}
+
 .calendar-event-chip {
   background: var(--accent);
   color: var(--accent-text);
@@ -1814,70 +1499,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   cursor: pointer;
 }
 
-/* --- Densidad de dias con mucho contenido (Configuracion > Vista) --- */
-/* Modo "+N mas": mismo hueco que un chip normal, pero de aviso en vez de
-   accion — clicarlo abre el dia entero, como el resto de la celda. */
-.calendar-more-chip {
-  background: var(--surface-2);
-  color: color-mix(in srgb, var(--surface-2-text) 75%, var(--surface-2));
-  font-size: 0.72rem;
-  padding: 0.15rem 0.4rem;
-  border-radius: var(--radius-sm);
-  text-align: center;
-  cursor: pointer;
-}
-.calendar-more-chip:hover { background: color-mix(in srgb, var(--accent) 15%, var(--surface-2)); }
-/* Modo "puntos": un puntito de color por evento/tarea, sin texto. */
-.calendar-day-dots { display: flex; flex-wrap: wrap; gap: 0.2rem; padding: 0.1rem 0; }
-.calendar-day-dot {
-  width: 0.5rem; height: 0.5rem; border-radius: 50%; flex-shrink: 0;
-  border: 1.5px solid transparent;
-}
-.calendar-day-dot.is-task { background: transparent; }
-/* Los puntos de EVENTO (no tarea) piden mas viveza (Koku: "que el punto
-   fuera algo mas colorido") -- las tareas se quedan tal cual (borde sin
-   relleno, a proposito, para distinguirlas de los eventos, ver
-   CLAUDE.md). El borde transparente de la regla de arriba le quitaba
-   area de color al circulo entero en un tamaño ya pequeño; quitarselo a
-   los de evento + un empujon de saturacion hace que se vean mas
-   solidos/vivos sin cambiar el color guardado del grupo. */
-.calendar-day-dot:not(.is-task) { border: none; filter: saturate(1.35); }
-/* Modo "solo marcar el dia": sin chips ni puntos, solo un aro de color
-   alrededor de la celda — un borde en vez de fondo para que no pelee con
-   el color de fin de semana/festivo/especial que ya pueda tener. */
-.calendar-cell.has-content { box-shadow: inset 0 0 0 2px var(--accent); }
-
-.calendar-weekday-heading {
-  text-align: center;
-  font-size: 0.75rem;
-  color: color-mix(in srgb, var(--bg-text) 65%, var(--bg));
-  padding-bottom: 0.3rem;
-}
-
-/* --- Recordatorios --- */
-.reminders-panel {
-  background: var(--surface);
-  color: var(--surface-text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.9rem;
-}
-.reminders-panel h2 { font-size: 0.9rem; margin: 0; flex-shrink: 0; }
-.reminders-panel-header {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0.3rem 0.5rem;
-  margin-bottom: 0.6rem;
-  flex-shrink: 0;
-}
-.reminders-panel-header .secondary-btn { font-size: 0.8rem; padding: 0.35rem 0.6rem; flex-shrink: 0; }
-/* Navegacion de dia dentro de "Mi espacio" (ver #reminders-day-nav en
-   index.html) -- flechas a los lados de un campo de fecha que deja
-   escribir o elegir cualquier dia, no solo avanzar de uno en uno. */
-.reminders-day-nav { display: flex; align-items: center; justify-content: center; gap: 0.4rem; margin-bottom: 0.6rem; flex-shrink: 0; }
-#reminders-day-nav-date-field { flex: 1; max-width: 11rem; }
 /* En movil, altura acotada con scroll propio (ver tambien la version de
    escritorio en el media query de abajo, que ocupa el alto que quede
    libre en vez de un numero fijo de pixeles). */
@@ -1891,61 +1512,8 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   font-size: 0.85rem;
 }
 .reminder-item:last-child { border-bottom: none; }
-.reminder-due { color: var(--danger); font-weight: 600; }
-.empty-hint { color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); font-size: 0.85rem; }
 
-/* --- Tareas: bloque fijo debajo de "Proximos", siempre visible (ver
-   .reminders-top-block/.reminders-tasks-block mas abajo para el reparto
-   de alto en escritorio) --- */
-.reminders-tasks-block,
-.reminders-notes-block,
-.reminders-panel-grouped-slot {
-  margin-top: 0.9rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--border);
-}
-/* El primer bloque visible del panel clasico (sea Recordatorios, Tareas,
-   Notas o el slot agrupado -- segun lo que hayas marcado en
-   Configuracion > Vista, ver applyRemindersPanelLayout en app.js) no
-   necesita el separador de arriba, sea cual sea. */
-#reminders-panel > .reminders-panel-page:first-child {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
-}
-/* Dentro del slot agrupado, el PRIMER bloque visible no necesita su
-   propio separador -- ya lo separa el switcher de flechas de encima.
-   Pero ahora el hueco puede mostrar 2 secciones a la vez (las marcadas o
-   las no marcadas, cuando son 2 de las 3 -- ver applyRemindersPanelLayout
-   en app.js), asi que la SEGUNDA visible si necesita separador entre
-   ambas -- el selector de sibling general (~) solo engancha cuando hay
-   un ":not(.hidden)" ANTES en el DOM, asi que con una sola visible no
-   pinta nada. */
-.reminders-panel-grouped-slot > .reminders-panel-page {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
-}
-.reminders-panel-grouped-slot > .reminders-panel-page:not(.hidden) ~ .reminders-panel-page:not(.hidden) {
-  margin-top: 0.9rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--border);
-}
-.note-add-btn { width: 100%; margin-bottom: 0.5rem; }
-.note-search-row { margin-bottom: 0.5rem; display: flex; flex-direction: column; gap: 0.35rem; }
-#note-search-input { width: 100%; font-size: 0.85rem; padding: 0.4rem 0.6rem; }
-/* Por defecto la busqueda mira toda la app -- este boton la restringe a
-   la carpeta actual (ver renderNotesView). Pastilla pequena, alineada a
-   la derecha, para no competir visualmente con el campo de texto. */
-.note-search-scope-btn {
-  align-self: flex-end;
-  font-size: 0.72rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-  background: transparent;
-  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
-}
-.note-search-scope-btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.empty-hint { color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); font-size: 0.85rem; }
 
 /* Vista de Notas movil (#mobile-notes-view, Fase 4 del rediseño movil) --
    mismo #mobile-notes-list que reutiliza .reminders-list.notes-list de
@@ -2170,17 +1738,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 .note-list-section-heading:first-child { margin-top: 0; }
 
-/* Flechas para alternar Recordatorios/Tareas/Notas (panel lateral
-   clasico en "Alternar", ver applyRemindersPanelLayout en app.js). */
-.reminders-panel-switcher {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.4rem;
-  margin-bottom: 0.6rem;
-  flex-shrink: 0;
-}
-.reminders-panel-switch-label { font-weight: 600; font-size: 0.85rem; text-align: center; flex: 1; }
 .task-item {
   display: flex;
   align-items: center;
@@ -2251,26 +1808,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .my-space-view-header-actions { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; }
 .my-space-close-btn { font-size: 0.85rem; padding: 0.45rem 0.7rem; }
 
-.my-space-hub {
-  flex: 1;
-  min-height: 0;
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  overflow-y: auto;
-  position: relative;
-}
-/* Dentro del panel lateral (modo "panel") el hub no necesita su propio
-   padding/scroll de pantalla completa, ya vive dentro de .reminders-panel
-   (que ya tiene su propio padding y scroll por columna). */
-.reminders-panel > .my-space-hub {
-  flex: 1;
-  min-height: 0;
-  padding: 0;
-  overflow: visible;
-}
-
 /* Extensiones (placeholder): reutiliza .my-space-view/.my-space-view-header
    para el overlay y la cabecera -- solo hace falta la rejilla de tarjetas
    "Proximamente" de aqui abajo. No existia ningun patron de "tarjeta
@@ -2295,13 +1832,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .extensions-card-icon { display: flex; }
 .extensions-card-icon svg { width: 1.8rem; height: 1.8rem; }
 .extensions-card-title { font-weight: 600; }
-.extensions-card-badge {
-  font-size: 0.7rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--surface-2-text);
-}
+
 /* Tarjeta activa (una extension ya construida, ver btn-open-gym /
    btn-open-finanzas / btn-open-lecturas en index.html): mismo bloque
    visual que .extensions-card pero clicable de verdad -- opacidad
@@ -2816,74 +2347,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .lecturas-rating-field input[type="range"] { flex: 1; width: auto; padding: 0; background: none; border: none; accent-color: var(--accent); }
 .lecturas-rating-field input[type="number"] { width: 4.5rem; flex-shrink: 0; }
 .form-row > input { flex: 1; min-width: 0; }
-/* Aviso: mismo padding y radio que .hint, pero con un fondo tenue en
-   tono ambar para que se note como un aviso, no como una nota
-   informativa cualquiera. No es un error (por eso no usa --danger), es
-   solo una recomendacion. */
-.hint-warning {
-  font-size: 0.85rem;
-  padding: 0.5rem 0.7rem;
-  border-radius: var(--radius);
-  background: color-mix(in srgb, #e9a23b 18%, var(--surface));
-  color: var(--surface-text);
-  margin: 0.4rem 0;
-}
-
-@media (min-width: 860px) {
-}
-
-/* Envoltorio SOLO de las 3 columnas (el Volver, fuera, en su propia
-   fila) -- en movil se quedan apiladas igual que antes. */
-.my-space-cols-row { display: flex; flex-direction: column; gap: 1rem; min-height: 0; }
-
-/* Cada columna en su propia "tarjeta" (fondo/borde/esquinas redondeadas)
-   para que se note donde acaba una y empieza la siguiente, en vez de que
-   las 3 se vean flotando sueltas una junto a otra. */
-.my-space-col {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--surface-2);
-  color: var(--surface-2-text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.7rem;
-}
-/* La fila de cabecera entera de cada columna (.reminders-panel-header) es
-   lo que expande esa columna -- no solo el titulo (h2), pedido explicito
-   de Koku. Ya no hay un boton dedicado aparte, para no gastar una fila
-   entera de alto solo para eso. */
-.my-space-col-expand-trigger { cursor: pointer; }
-.my-space-col-expand-trigger:hover { color: var(--accent); }
-
-/* Volver comun a las 3 columnas: solo aparece mientras una esta
-   expandida, fijo arriba igual que en Configuracion. */
-.my-space-back-btn {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: block;
-  width: 100%;
-  padding: 0.5rem 0;
-  margin-bottom: 0.3rem;
-  background: transparent;
-  border-color: transparent;
-  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
-  text-align: left;
-  flex-shrink: 0;
-}
-.reminders-panel .my-space-back-btn { color: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
-
-/* Cuando una columna esta expandida, tapa a las otras 2. En movil, sin
-   animacion (se ocultan del todo con display:none) -- en escritorio,
-   esto se sobreescribe mas abajo (@media min-width:860px) con una
-   transicion de verdad en vez de un salto instantaneo. */
-#my-space-hub[data-expanded] .my-space-col { display: none; }
-#my-space-hub[data-expanded="reminders"] .my-space-col[data-col="reminders"],
-#my-space-hub[data-expanded="tasks"] .my-space-col[data-col="tasks"],
-#my-space-hub[data-expanded="notes"] .my-space-col[data-col="notes"] {
-  display: flex;
-}
 
 /* --- Notas (Fase 2): titulo + primera linea del contenido como avance,
    nada de formato ni carpetas todavia. Vive siempre dentro de una
@@ -2899,16 +2362,9 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   cursor: pointer;
 }
 .note-item:last-child { border-bottom: none; }
-.note-item-title-row { display: flex; align-items: center; min-width: 0; }
+
 .note-item-title {
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.note-item-preview {
-  font-size: 0.78rem;
-  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2969,42 +2425,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .modal-card .favorite-star-btn:hover { color: var(--surface-text); }
 .modal-card .favorite-star-btn.is-favorite { color: var(--accent); }
 
-/* --- Carpetas de notas (Fase 3): navegacion tipo explorador de
-   archivos -- ver renderNotesView en app.js. Solo organizacion, sin PIN
-   (eso ya se resuelve por nota individual con "ocultar"). --- */
-.note-folder-toolbar { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem; }
-/* Boton "Seleccionar" de escritorio -- mismo tratamiento "encendido" que
-   ya usa note-search-scope-btn.is-active mientras esta activo. */
-#btn-note-folder-select.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-/* Pastilla reutilizada por el boton "+ Carpeta" de la barra de arriba Y
-   por el lapiz de editar de cada fila de carpeta en la lista. */
-.note-folder-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.76rem;
-  padding: 0.25rem 0.6rem;
-  border-radius: 999px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: color-mix(in srgb, var(--surface-2-text) 75%, var(--surface-2));
-}
-.note-folder-chip-edit {
-  padding: 0.2rem 0.35rem;
-  font-size: 0.7rem;
-  background: transparent;
-  border-color: transparent;
-  color: color-mix(in srgb, var(--surface-2-text) 50%, var(--surface-2));
-  flex-shrink: 0;
-}
-.note-folder-chip-edit:hover { color: var(--surface-2-text); background: color-mix(in srgb, var(--accent) 15%, transparent); }
-.note-folder-chip-add {
-  padding: 0.25rem 0.6rem;
-  border-style: dashed;
-  flex-shrink: 0;
-}
-.note-folder-chip-add svg { flex-shrink: 0; }
-
 /* Fila de subcarpeta dentro de la lista de Notas: icono/color + nombre,
    igual de alta que una fila de nota para que la lista se vea uniforme
    (carpetas arriba, notas debajo). */
@@ -3013,7 +2433,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 
 /* --- Vista (Normal / Pantalla completa / Ventana flotante) --- */
 .view-mode-options { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
-.reminders-panel-grouped-options { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
+
 .view-mode-btn { text-align: left; }
 .view-mode-btn.active {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
@@ -3050,102 +2470,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   border-color: var(--accent);
   color: var(--surface-2-text);
 }
-
-/* --- Atajos de teclado ---
-   Cada accion puede tener varias combinaciones a la vez, asi que en vez
-   de un unico campo de texto hay una fila de "chips" (uno por
-   combinacion, con su x para quitarla) mas un boton "+ Anadir" que
-   entra en modo grabacion para capturar la siguiente combinacion. */
-.shortcuts-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
-.shortcut-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.6rem;
-  background: var(--surface-2);
-  border-radius: var(--radius);
-  padding: 0.5rem 0.7rem;
-}
-.shortcut-label { flex: 1 1 auto; min-width: 8rem; font-size: 0.9rem; }
-.shortcut-combos {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-  flex: 1 1 auto;
-  justify-content: flex-end;
-}
-.shortcut-empty-hint { font-size: 0.82rem; opacity: 0.6; }
-.shortcut-combo-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.25rem 0.4rem 0.25rem 0.65rem;
-  font-size: 0.78rem;
-}
-.shortcut-combo-remove {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 0.68rem;
-  line-height: 1;
-  padding: 0.2rem;
-  color: inherit;
-  opacity: 0.6;
-}
-.shortcut-combo-remove:hover { opacity: 1; }
-.shortcut-add-btn {
-  font-size: 0.78rem;
-  padding: 0.3rem 0.65rem;
-  border-radius: 999px;
-  border: 1px dashed var(--border);
-  background: transparent;
-  color: var(--surface-2-text);
-  cursor: pointer;
-}
-.shortcut-add-btn.recording {
-  border-style: solid;
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.shortcut-add-btn:disabled { cursor: default; opacity: 0.85; }
-
-/* --- Avisos discretos (nueva version, vista guardada): notificaciones
-   pequenas en la esquina superior, no un header a todo lo ancho. Fijas
-   (position:fixed) y apiladas con gap, asi que si hay mas de una a la vez
-   simplemente se apilan en vez de taparse. --- */
-.toast-stack {
-  position: fixed;
-  top: 0.8rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  max-width: 340px;
-  width: 100%;
-  padding: 0 0.8rem;
-}
-.toast {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.5rem 0.7rem;
-  font-size: 0.8rem;
-  border-radius: var(--radius);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--surface-text);
-}
-.toast span { flex: 1; }
-.toast button { padding: 0.3rem 0.6rem; font-size: 0.78rem; }
-.toast-dismiss { padding: 0.2rem 0.45rem; background: transparent; border-color: transparent; }
-.toast-dismiss:hover { background: var(--surface-2); }
 
 /* --- Retroalimentacion breve tipo "Guardado" en un boton --- */
 .saved-feedback {
@@ -3202,12 +2526,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 #app-confirm-modal { z-index: 30; }
 #app-confirm-modal-message { margin: 0; line-height: 1.4; }
 
-.reminders-day-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.7rem; }
-.day-mark-btn.active {
-  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
-  border-color: var(--accent);
-  color: var(--surface-2-text);
-}
 .spacer { flex: 1; }
 /* El X y el "Volver" tienen que quedarse siempre visibles aunque la
    seccion que estes viendo sea larga y hagas scroll, en vez de
@@ -3246,53 +2564,46 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    padding y la tarjeta ocupa toda la pantalla, sin bordes ni radio --
    a partir de 860px sigue siendo la tarjeta centrada de siempre (la
    regla base de .modal/.settings-card no se toca). */
-@media (max-width: 859px) {
-  #settings-modal { padding: 0; }
-  #settings-modal .settings-card {
-    max-width: none;
-    max-height: none;
-    width: 100%;
-    height: 100%;
-    border-radius: 0;
-    border: none;
-  }
-  /* La barra inferior ahora se queda visible con Configuracion abierta
-     (ver body.settings-modal-open mas arriba) -- reserva el mismo hueco
-     que ya reserva .app para que el contenido no quede tapado al final
-     de una pestaña larga. */
-  #settings-modal .settings-card-body {
-    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
-  }
-  /* En movil, Configuracion ya tiene su propio punto de entrada fijo
-     en la barra inferior (.mobile-nav) y "volver" ya lo resuelve esa
-     misma barra (Calendario/Notas/Apps) -- los botones de "← Home"/
-     "← Apps" y el "☰" de Configuracion de la cabecera de cada pantalla
-     `.my-space-view` sobran en movil (quedan duplicados con la barra
-     inferior), asi que se ocultan en las 7 pantallas que los tienen.
-     `#mobile-global-search` NO entra aqui a proposito -- su boton de
-     cabecera es solo "cerrar", un rol distinto al par home/config. */
+#settings-modal { padding: 0; }
+#settings-modal .settings-card {
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  border: none;
+}
+/* La barra inferior ahora se queda visible con Configuracion abierta
+   (ver body.settings-modal-open mas arriba) -- reserva el mismo hueco
+   que ya reserva .app para que el contenido no quede tapado al final
+   de una pestaña larga. */
+#settings-modal .settings-card-body {
+  padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+}
+/* En movil, Configuracion ya tiene su propio punto de entrada fijo
+   en la barra inferior (.mobile-nav) y "volver" ya lo resuelve esa
+   misma barra (Calendario/Notas/Apps) -- los botones de "← Home"/
+   "← Apps" y el "☰" de Configuracion de la cabecera de cada pantalla
+   `.my-space-view` sobran en movil (quedan duplicados con la barra
+   inferior), asi que se ocultan en las 7 pantallas que los tienen.
+   `#mobile-global-search` NO entra aqui a proposito -- su boton de
+   cabecera es solo "cerrar", un rol distinto al par home/config. */
 #btn-close-mobile-notes, #btn-mobile-notes-settings, #btn-close-extensions, #btn-extensions-settings, #btn-close-gym, #btn-gym-settings, #btn-close-finanzas, #btn-finanzas-settings, #btn-close-viajes, #btn-viajes-settings, #btn-close-lecturas, #btn-lecturas-settings {
-    display: none;
-  }
-  /* El icono lapiz de cada fila de carpeta queda redundante en movil --
-     el menu de 3 puntos de #mobile-notes-view ya tiene su propio modo
-     "Editar carpetas" que cubre lo mismo. En escritorio se queda (ahi
-     sigue siendo el unico acceso directo sin pasar por ningun menu). */
-  .note-folder-chip-edit { display: none; }
-  /* Cabecera con titulo redundante: la barra inferior ya deja claro en
-     que seccion estas, no hace falta repetirlo con un "Notas"/"Apps"
-     arriba (ademas, con los botones ya ocultos arriba, esa cabecera
-     hoy solo tiene el h2). Solo en las 3 pantallas alcanzables DIRECTO
-     desde la barra inferior -- las 4 de extension (Gimnasio/Finanzas/
-     Viajes/Lecturas) SI la mantienen, confirmado que ahi es
-     el UNICO sitio donde aparece el nombre de la seccion (sus pestañas
-     internas nunca lo repiten). #mobile-global-search tampoco entra
-     aqui, su cabecera solo tiene el boton de cerrar, necesario. */
-  #mobile-notes-view .my-space-view-header,
-  #extensions-view .my-space-view-header,
-  #my-space-view .my-space-view-header {
-    display: none;
-  }
+  display: none;
+}
+/* Cabecera con titulo redundante: la barra inferior ya deja claro en
+   que seccion estas, no hace falta repetirlo con un "Notas"/"Apps"
+   arriba (ademas, con los botones ya ocultos arriba, esa cabecera
+   hoy solo tiene el h2). Solo en las 3 pantallas alcanzables DIRECTO
+   desde la barra inferior -- las 4 de extension (Gimnasio/Finanzas/
+   Viajes/Lecturas) SI la mantienen, confirmado que ahi es
+   el UNICO sitio donde aparece el nombre de la seccion (sus pestañas
+   internas nunca lo repiten). #mobile-global-search tampoco entra
+   aqui, su cabecera solo tiene el boton de cerrar, necesario. */
+#mobile-notes-view .my-space-view-header,
+#extensions-view .my-space-view-header,
+#my-space-view .my-space-view-header {
+  display: none;
 }
 .modal-close-x {
   position: absolute; top: 0.8rem; right: 0.8rem;
@@ -3312,10 +2623,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   padding: 0.85rem 1rem;
 }
 .settings-menu-item-arrow { color: color-mix(in srgb, var(--settings-menu-text) 65%, var(--settings-menu-bg)); font-size: 1.1rem; }
-/* Salir de la aplicacion: una accion directa, no una seccion a la que
-   entrar (por eso no lleva flecha ">"), en rojo/aviso para diferenciarla
-   del resto de la lista. */
-.settings-menu-item-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+
 /* Sticky y a ancho completo (con "sangrado" hacia los lados igual al
    padding de settings-card-body) para que, al pegarse arriba del todo
    durante el scroll, tape de verdad el contenido que pasa por debajo en
@@ -3624,210 +2932,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .icon-custom-row input { flex: 1; }
 
 /* --- Escritorio: pantallas anchas --- */
-@media (min-width: 860px) {
-  .desktop-only { display: block; }
-  .mobile-only { display: none; }
-
-  /* Todo el shell (topbar + contenido) ocupa exactamente el alto de la
-     ventana del navegador, sin que la pagina en si tenga scroll: solo
-     hacen scroll por dentro el calendario y la lista de recordatorios,
-     cada uno en su hueco. Asi calendario y recordatorios se ven a la vez
-     sin desplazarte, aprovechando toda la ventana. */
-  html, body { height: 100%; }
-  #app.app { height: 100vh; padding-bottom: 0; }
-  .topbar { display: flex; flex-shrink: 0; }
-  .mobile-nav { display: none; }
-  .month-nav-bar { flex-shrink: 0; }
-
-  .layout {
-    flex: 1;
-    min-height: 0;
-    flex-direction: row;
-    align-items: stretch;
-    max-width: none;
-    width: 100%;
-  }
-  .calendar-column {
-    flex: 1;
-    min-height: 0;
-    min-width: 0;
-  }
-  .calendar-grid-wrap {
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-  /* El grid reparte TODO el alto disponible entre sus filas: una fila
-     "auto" para la cabecera de dias de la semana, y 6 filas iguales (1fr)
-     para las semanas, en vez de un min-height fijo por celda. Asi siempre
-     cabe entero, sin barra de scroll en la pagina. Si un dia concreto
-     tiene demasiados eventos para su celda, esa celda scrollea por su
-     cuenta (ver .calendar-cell) en vez de romper el resto del grid. */
-  .calendar-grid {
-    flex: 1;
-    min-height: 0;
-    grid-template-rows: auto repeat(6, minmax(0, 1fr));
-  }
-  .calendar-year-grid {
-    flex: 1;
-    min-height: 0;
-  }
-  .calendar-cell {
-    min-height: 0;
-    overflow-y: auto;
-  }
-  .panel-resize-handle {
-    width: 6px;
-    flex-shrink: 0;
-    cursor: col-resize;
-    position: relative;
-    background: transparent;
-  }
-  /* Franja fina centrada en el propio ancho de 6px -- mas facil de
-     acertar con el raton que una linea de 1px, pero visualmente discreta
-     hasta que se pasa el raton por encima o se esta arrastrando. */
-  .panel-resize-handle::after {
-    content: '';
-    position: absolute; top: 0; bottom: 0; left: 2px; width: 2px;
-    border-radius: 2px;
-    background: var(--border);
-  }
-  .panel-resize-handle:hover::after,
-  .panel-resize-handle.is-dragging::after {
-    background: var(--accent);
-  }
-
-  /* Arrastre entre calendario y panel (ver panel-resize-handle mas abajo
-     y la logica en app.js): el panel lee su ancho de una variable CSS
-     que JS actualiza al arrastrar y guarda por dispositivo -- clamp()
-     como red de seguridad ademas del clamp que ya hace JS, por si algo
-     dejara la variable fuera de rango (ej. una ventana mas estrecha
-     despues de guardar un ancho grande en un monitor mayor). */
-  .reminders-panel {
-    width: clamp(240px, var(--reminders-panel-width, 320px), 640px);
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
-  }
-  .reminders-list {
-    flex: 1;
-    min-height: 0;
-    max-height: none;
-  }
-  /* Recordatorios/Tareas/Notas se reparten el alto del panel a partes
-     iguales (apilado), cada uno con su propia lista scrolleando por
-     dentro — asi se ven los titulos siempre, sin que uno se coma el
-     hueco del otro. En modo "Alternar" (ver applyRemindersPanelLayout en
-     app.js) solo uno de los 3 esta visible a la vez, asi que ocupa el
-     alto entero el solo. */
-  .reminders-top-block,
-  .reminders-tasks-block,
-  .reminders-notes-block,
-  .reminders-panel-grouped-slot {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  /* "Mi espacio": en escritorio las 3 columnas van una al lado de otra
-     (en movil se quedan apiladas, igual que el resto de la app). En modo
-     "panel" el aside necesita mas ancho que los 320px de siempre para que
-     quepan las 3 columnas sin agobiar. */
-  .reminders-panel.my-space-panel-mode { width: 640px; }
-  .my-space-hub {
-    display: grid;
-    /* 2 filas: la de arriba ("auto") solo para el Volver -- se queda a
-       0 de alto cuando esta oculto, sin hueco reservado -- y la de abajo
-       (minmax(0,1fr)) reparte TODO el alto que quede entre las columnas,
-       igual que el flex:1 del resto del panel. Sin fila explicita para
-       el Volver, la auto-colocacion de la grid lo mete en la primera
-       celda libre (fila 1, columna 1) y empuja las columnas a una
-       SEGUNDA fila aparte, dejando un hueco enorme sin usar. */
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 0.8rem;
-    overflow: hidden;
-  }
-  .my-space-back-btn { grid-row: 1; }
-  .my-space-cols-row {
-    grid-row: 2;
-    display: flex;
-    flex-direction: row;
-    gap: 0.8rem;
-    min-height: 0;
-    overflow: hidden;
-  }
-  /* Cada columna reparte el ancho a partes iguales (flex-grow:1) por
-     defecto. Al expandir una, la suya crece a flex-basis:100% y las
-     otras 2 se encogen a 0 -- con transition en flex-grow/flex-basis
-     esto se anima solo, en vez de saltar de golpe (ver la @keyframes de
-     opacidad tambien: las columnas que se encogen se desvanecen para que
-     no se vea el contenido "aplastandose"). */
-  .my-space-col {
-    flex: 1 1 0%;
-    min-width: 0;
-    overflow: hidden;
-    transition: flex-grow 0.32s ease, flex-basis 0.32s ease, opacity 0.28s ease;
-  }
-  #my-space-hub[data-expanded] .my-space-col {
-    display: flex;
-    flex-grow: 0;
-    flex-basis: 0%;
-    opacity: 0;
-    pointer-events: none;
-    padding-left: 0;
-    padding-right: 0;
-    border-left-width: 0;
-    border-right-width: 0;
-  }
-  #my-space-hub[data-expanded="reminders"] .my-space-col[data-col="reminders"],
-  #my-space-hub[data-expanded="tasks"] .my-space-col[data-col="tasks"],
-  #my-space-hub[data-expanded="notes"] .my-space-col[data-col="notes"] {
-    flex-grow: 1;
-    flex-basis: 100%;
-    opacity: 1;
-    pointer-events: auto;
-    padding-left: 0.7rem;
-    padding-right: 0.7rem;
-    border-left-width: 1px;
-    border-right-width: 1px;
-  }
-  /* El bloque que se mueve aqui dentro (.reminders-top-block o
-     .reminders-tasks-block) lleva su propio flex:1 asumiendo que su
-     padre YA es un contenedor flex en columna — sin esto no tiene
-     ningun efecto y el bloque se queda con su alto minimo de contenido,
-     dejando un hueco vacio enorme debajo. */
-  .my-space-col-body {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  /* Mientras la columna esta cambiando de ancho (ver toggleMySpaceColumn
-     en app.js, que anade/quita esta clase), el contenido de dentro
-     (titulo, fecha, eventos, tareas...) se oculta al instante -- sin
-     fundido, la caja ya se esta moviendo de por si -- para que no se vea
-     el texto reajustandose linea a linea a media animacion. Al terminar
-     se quita la clase y el contenido reaparece con un fundido corto. */
-  .my-space-col-body {
-    transition: opacity 0.15s ease;
-  }
-  #my-space-hub.is-animating .my-space-col-body {
-    opacity: 0;
-    transition: none;
-  }
-  .reminders-tasks-block,
-  .reminders-notes-block {
-    margin-top: 0;
-    padding-top: 0.9rem;
-  }
-}
 
 /* Extension "Viajes" -- ver #viajes-view en index.html. Mismo patron que
    .finanzas-tab-panel: .my-space-view ya es flex-column,

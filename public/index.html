@@ -2,7 +2,12 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<!-- viewport-fit=cover: sin esto, en la app empaquetada el contenido se
+     mete debajo del reloj/notch del iPhone y ademas env(safe-area-inset-*)
+     devuelve siempre 0, asi que no habia forma de apartarlo. Con cover, esas
+     variables ya traen el hueco real de cada dispositivo y el CSS lo reserva
+     (ver .app/.my-space-view en styles.css). -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>RemindMeLater</title>
 <link rel="stylesheet" href="styles.css" />
 
@@ -16,17 +21,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 
-<!-- Manifest PWA: permite "Instalar" (ordenador) o "Anadir a inicio"
-     (movil) para que RemindMeLater se abra como una app de verdad, en su
-     propia ventana/icono y sin la barra de direcciones del navegador —
-     sin necesidad de compilar nada aparte. -->
-<link rel="manifest" href="manifest.json" />
+<!-- El color de la barra de estado y el icono de la app los pone el
+     proyecto nativo (ios/ y android/), no la pagina. -->
 <meta name="theme-color" content="#0f1115" />
-<link rel="icon" href="icons/icon-192.png" />
-<link rel="apple-touch-icon" href="icons/icon-180.png" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="RemindMeLater" />
 <script>
   // Aplica el tema que este dispositivo tuviera guardado ANTES de que se
   // pinte nada, para no ver un parpadeo del tema oscuro por defecto y
@@ -85,16 +82,6 @@
 </head>
 <body>
 
-  <!-- Aviso discreto en la esquina (no un header grande): "tu vista
-       guardada no es la normal". Ver applyViewModePrompt() en app.js. -->
-  <div id="toast-stack" class="toast-stack">
-    <div id="default-view-banner" class="toast hidden">
-      <span id="default-view-banner-text"></span>
-      <button type="button" id="btn-apply-default-view"></button>
-      <button type="button" id="btn-dismiss-default-view" class="toast-dismiss" aria-label="Ahora no">✕</button>
-    </div>
-  </div>
-
   <!-- Confirmacion/aviso propio con el estilo de la app, para sustituir a
        confirm()/alert() nativos del navegador en flujos donde hace falta
        que se note mas -- ver showAppConfirm()/showAppAlert() en app.js.
@@ -120,40 +107,6 @@
 
   <!-- App principal -->
   <div id="app" class="app">
-    <header class="topbar">
-      <div class="topbar-title">
-        <h1>RemindMeLater</h1>
-      </div>
-      <nav class="topbar-actions">
-        <button id="btn-new-event" class="primary-btn">+ Nuevo evento</button>
-        <button id="btn-new-task" class="primary-btn">+ Nueva tarea</button>
-        <button id="btn-new-note-topbar" class="primary-btn">+ Nota</button>
-        <!-- Atajo rapido para alternar claro/oscuro sin entrar en
-             Configuracion — solo se ve si el tema activo tiene variante
-             emparejada (si no, no hay a que alternar). Ver
-             refreshQuickColorModeButton() en settings.js; la forma
-             "oficial" de cambiarlo sigue estando en Configuracion > Estilo. -->
-        <button id="btn-quick-color-mode" class="icon-btn quick-color-mode-btn hidden" aria-label="Cambiar entre claro y oscuro"></button>
-        <!-- Solo se ve si Configuracion > Vista > Mi espacio esta en modo
-             "boton" (ver applyMiEspacioMode en app.js) — en modo "panel" no
-             hace falta, Mi espacio ya esta siempre visible al lado del
-             calendario. -->
-        <button id="btn-my-space" class="secondary-btn my-space-topbar-btn hidden" aria-label="Mi espacio">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4.5" height="16" rx="1"></rect><rect x="9.75" y="4" width="4.5" height="16" rx="1"></rect><rect x="16.5" y="4" width="4.5" height="16" rx="1"></rect></svg>
-          <span>Mi espacio</span>
-        </button>
-        <!-- Apps: futuras secciones aparte del calendario
-             (gimnasio, finanzas, lecturas...). A diferencia de Mi
-             espacio no tiene modo "panel", siempre es pantalla
-             completa, asi que este boton nunca se oculta. -->
-        <button id="btn-extensions" class="secondary-btn my-space-topbar-btn" aria-label="Apps">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-          <span>Apps</span>
-        </button>
-        <button id="btn-settings" class="icon-btn" aria-label="Configuración">☰</button>
-      </nav>
-    </header>
-
     <!-- Navegacion movil: sustituye a la topbar en pantallas estrechas
          (ver .topbar/.mobile-nav en styles.css). Cada boton primero
          cierra cualquier vista/modal abierto (closeAllMobileOverlays en
@@ -178,9 +131,9 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v5h5"></path><line x1="8" y1="12" x2="16" y2="12"></line><line x1="8" y1="16" x2="13" y2="16"></line></svg>
         <span>Notas</span>
       </button>
-      <button type="button" class="mobile-nav-btn" data-mobile-nav="extensions" aria-label="Apps">
+      <button type="button" class="mobile-nav-btn" data-mobile-nav="extensions" aria-label="Herramientas">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-        <span>Apps</span>
+        <span>Herramientas</span>
       </button>
       <button type="button" class="mobile-nav-btn" data-mobile-nav="settings" aria-label="Configuración">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
@@ -193,41 +146,11 @@
            (no en todo el ancho de la app, ni contando el panel de
            recordatorios de al lado). -->
       <div class="calendar-column">
-        <!-- Barra del mes de ESCRITORIO (flechas prev/next + vista anual con
-             boton/rueda del raton). En movil no se usa -- la navegacion de
-             mes/año es por gesto (swipe) y tiene su propia barra propia
-             mas abajo (.mobile-calendar-toolbar), ver Fase 2 del rediseño
-             movil en CLAUDE.md. -->
-        <nav class="month-nav-bar desktop-only">
-          <button id="nav-prev" class="icon-btn" aria-label="Mes anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
-          <span id="current-month-label" class="month-label"></span>
-          <button id="nav-next" class="icon-btn" aria-label="Mes siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
-          <!-- Vista anual (solo escritorio): alterna con la vista de mes.
-               Ademas de este boton de apoyo, tambien se puede con la
-               rueda del raton (hacia abajo sobre el mes = vista anual,
-               hacia arriba sobre un mes en la vista anual = entrar en
-               ese mes) -- ver el "wheel" en app.js. -->
-          <button type="button" id="btn-calendar-year-toggle" class="icon-btn" aria-label="Vista anual" title="Vista anual (o rueda del ratón hacia abajo sobre el mes)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-          </button>
-        </nav>
-
-        <!-- Vista de escritorio: cuadricula del mes, o las 12 en miniatura
-             si se activo la vista anual (CSS oculta las dos en movil). -->
-        <section id="calendar-grid-wrap" class="calendar-grid-wrap desktop-only">
-          <div id="calendar-grid" class="calendar-grid"></div>
-          <div id="calendar-year-grid" class="calendar-year-grid hidden"></div>
-        </section>
-
-        <!-- Calendario MOVIL (Fase 2 del rediseño movil): contenedor propio,
-             NUNCA comparte nodo con calendar-grid-wrap.desktop-only de
-             arriba (ver nota en CLAUDE.md sobre el hallazgo de que la vista
-             anual de escritorio vivia anidada ahi y no se podia reutilizar
-             sin mas). Barra superior sin flechas prev/next a proposito --
-             en movil el cambio de mes/año es por swipe vertical (ver
+        <!-- Calendario: barra superior sin flechas prev/next a proposito --
+             el cambio de mes/año es por swipe vertical (ver
              attachSwipe/setCalendarViewMode en app.js), pedido explicito
              de Koku. -->
-        <div id="mobile-calendar-month-toolbar" class="mobile-calendar-toolbar mobile-only">
+        <div id="mobile-calendar-month-toolbar" class="mobile-calendar-toolbar">
           <button type="button" id="btn-mobile-calendar-nav-label" class="mobile-calendar-nav-label"></button>
           <div class="mobile-calendar-toolbar-actions">
             <div id="mobile-calendar-density-field" class="mobile-calendar-density-field"></div>
@@ -252,7 +175,7 @@
           </div>
         </div>
 
-        <section class="mobile-calendar-view mobile-only">
+        <section class="mobile-calendar-view">
           <!-- Nombre del mes, centrado, debajo de la barra de arriba
                (año/densidad/buscar/+) -- pedido explicito de Koku, antes
                no se mostraba en ningun sitio en la vista mensual (solo
@@ -269,7 +192,7 @@
              barra superior que el mes (.mobile-calendar-toolbar), con su
              propia etiqueta "▲ {Mes}" para volver -- mismo patron que
              Koku pidio para mes->año, aplicado aqui a dia->mes. -->
-        <section id="mobile-calendar-day-view" class="mobile-calendar-day-view mobile-only hidden">
+        <section id="mobile-calendar-day-view" class="mobile-calendar-day-view hidden">
           <!-- Cabecera fija (position:sticky) -- el scroll de verdad es
                el de la PAGINA entera en movil (".app" solo pone un
                min-height, no un height fijo, para que el resto de la app
@@ -330,187 +253,7 @@
         </section>
       </div>
 
-      <!-- Arrastre para hacer mas ancho/fino el panel de recordatorios de
-           al lado (a costa del calendario) -- solo en escritorio, ver
-           .panel-resize-handle en styles.css y la logica de arrastre en
-           app.js. Oculto en modo "panel" de Mi espacio (ese ancho es
-           fijo, ver applyMiEspacioMode). -->
-      <div id="panel-resize-handle" class="panel-resize-handle desktop-only" role="separator" aria-orientation="vertical" aria-label="Redimensionar panel de recordatorios"></div>
-
-      <!-- Panel de recordatorios: arriba "Proximos" (o los eventos de un
-           dia concreto si has clicado uno en el calendario, ver
-           showDayInReminders en app.js), abajo un bloque fijo de "Tareas"
-           que se ve siempre a la vez, cada uno con su propio scroll
-           interno (ver .reminders-top-block/.reminders-tasks-block en
-           styles.css). -->
-      <!-- En movil este panel clasico ya NO se ve -- desde la Fase 2 del
-           rediseño movil, tareas/recordatorios se ven integrados en el
-           propio calendario movil (circulos/pildoras de grupo), y Notas
-           tiene su vista propia (Fase 4). Sigue intacto en escritorio,
-           donde es el panel de siempre al lado del calendario. -->
-      <aside id="reminders-panel" class="reminders-panel desktop-only">
-        <!-- Solo se usa en modo "boton" de Mi espacio (panel lateral
-             clasico): las secciones que marques en Configuracion > Vista
-             > "Agrupar con flechas" se meten AQUI DENTRO (una visible
-             cada vez, con flechas arriba para alternar entre ELLAS);
-             las que no marques se quedan sueltas, apiladas en su sitio
-             de siempre. Si marcas 0 o 1, este slot se queda vacio/oculto
-             (agrupar una sola cosa no cambia nada). Ver
-             applyRemindersPanelLayout() en app.js, que es quien mueve
-             los bloques (reminders-top-block etc.) dentro o fuera de
-             aqui segun el ajuste. -->
-        <div id="reminders-panel-grouped-slot" class="reminders-panel-grouped-slot reminders-panel-page hidden">
-          <div id="reminders-panel-switcher" class="reminders-panel-switcher hidden">
-            <button type="button" id="btn-panel-switch-prev" class="icon-btn" aria-label="Sección anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
-            <span id="reminders-panel-switch-label" class="reminders-panel-switch-label"></span>
-            <button type="button" id="btn-panel-switch-next" class="icon-btn" aria-label="Sección siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
-          </div>
-        </div>
-        <div id="reminders-top-block" class="reminders-top-block reminders-panel-page">
-          <div class="reminders-panel-header my-space-col-expand-trigger">
-            <h2 id="reminders-panel-title">Proximos recordatorios</h2>
-            <button type="button" id="btn-reminders-back" class="secondary-btn hidden">Próximos →</button>
-          </div>
-          <!-- Solo visible dentro de "Mi espacio" (ver applyMiEspacioMode
-               en app.js): fuera de ahi, para cambiar de dia ya estan el
-               calendario de al lado y los atajos de teclado, pero dentro
-               de Mi espacio (sobre todo en modo "boton", a pantalla
-               completa) el calendario no se ve, asi que hace falta un
-               control aqui mismo. -->
-          <div id="reminders-day-nav" class="reminders-day-nav hidden">
-            <button type="button" id="btn-reminders-day-prev" class="icon-btn" aria-label="Día anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
-            <div id="reminders-day-nav-date-field"></div>
-            <button type="button" id="btn-reminders-day-next" class="icon-btn" aria-label="Día siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
-          </div>
-          <div id="reminders-day-actions" class="reminders-day-actions hidden">
-            <button type="button" id="btn-day-mark-holiday" class="secondary-btn day-mark-btn">Festivo</button>
-            <button type="button" id="btn-day-mark-special" class="secondary-btn day-mark-btn">Especial</button>
-            <button type="button" id="btn-day-add-event" class="secondary-btn">+ Añadir evento</button>
-          </div>
-          <div id="reminders-list" class="reminders-list"></div>
-        </div>
-
-        <div id="reminders-tasks-block" class="reminders-tasks-block reminders-panel-page">
-          <div class="reminders-panel-header my-space-col-expand-trigger">
-            <h2>Tareas</h2>
-          </div>
-          <div id="tasks-list" class="reminders-list tasks-list"></div>
-        </div>
-      </aside>
     </main>
-
-    <!-- "Mi espacio" (Fase 1): hub de 3 columnas que reorganiza Proximos y
-         Tareas -- moviendo esos MISMOS bloques del panel lateral de
-         siempre (.reminders-top-block/.reminders-tasks-block), sin
-         duplicar su renderizado -- mas una columna de Notas (vacia por
-         ahora, la rellena la Fase 2). Segun el modo elegido en
-         Configuracion > Vista > Mi espacio, este hub vive DENTRO del
-         panel lateral (modo "panel", siempre visible junto al calendario)
-         o dentro de esta pantalla completa (modo "boton", se abre con
-         #btn-my-space). Ver applyMiEspacioMode() en app.js. -->
-    <div id="my-space-view" class="my-space-view hidden">
-      <div class="my-space-view-header">
-        <h2>Mi espacio</h2>
-        <div class="my-space-view-header-actions">
-          <button type="button" id="btn-close-my-space" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
-          <!-- Configuracion tiene que poder abrirse desde CUALQUIER
-               ventana, y esta pantalla (fija, z-index por encima de la
-               topbar) tapa el boton de Configuracion de siempre -- por
-               eso hace falta uno propio aqui. Abre el mismo panel (ver
-               btn-my-space-settings en app.js/settings.js). Va el
-               ULTIMO (mas a la derecha) a proposito -- Configuracion
-               siempre a la derecha del todo, igual que en la topbar. -->
-          <button type="button" id="btn-my-space-settings" class="icon-btn" aria-label="Configuración">☰</button>
-        </div>
-      </div>
-      <div id="my-space-hub" class="my-space-hub">
-        <!-- Comun a las 3 columnas: cuando una esta expandida (tapando a
-             las otras 2), este es el UNICO "Volver" que hace falta, fijo
-             arriba, igual que en Configuracion. -->
-        <button type="button" id="my-space-back-btn" class="my-space-back-btn hidden">← Volver</button>
-
-        <!-- Envoltorio SOLO para las 3 columnas (el Volver se queda
-             fuera, en su propia fila) -- en escritorio esto es una fila
-             flex con transicion en flex-grow/flex-basis, para que
-             expandir/colapsar una columna se vea como una animacion en
-             vez de un salto instantaneo. Ver la regla #my-space-hub[data-expanded]
-             en styles.css. -->
-        <!-- Las 3 columnas ya NO tienen un boton dedicado para expandir
-             (ocupaba espacio vertical solo para eso, ver CLAUDE.md/ronda
-             de pulido): clicar el TITULO (h2) de cada columna la expande,
-             la clase my-space-col-expand-trigger en cada h2 es lo que
-             delega ese clic (ver el listener en #my-space-hub, app.js). -->
-        <div class="my-space-cols-row">
-          <div class="my-space-col" data-col="reminders">
-            <div id="my-space-col-reminders" class="my-space-col-body"></div>
-          </div>
-
-          <div class="my-space-col" data-col="tasks">
-            <div id="my-space-col-tasks" class="my-space-col-body"></div>
-          </div>
-
-          <div class="my-space-col" data-col="notes">
-            <div id="my-space-col-notes" class="my-space-col-body">
-              <!-- Envuelto en un bloque movible (igual que
-                   reminders-top-block/reminders-tasks-block) para que
-                   tambien pueda vivir dentro del panel lateral clasico
-                   (modo "topbar" de Mi espacio) como 3er bloque, ver
-                   moveRemindersIntoHub/restoreClassicRemindersPanel en
-                   app.js. -->
-              <div id="reminders-notes-block" class="reminders-notes-block reminders-panel-page">
-                <div class="reminders-panel-header my-space-col-expand-trigger">
-                  <h2>Notas</h2>
-                </div>
-                <!-- Carpetas (Fase 3): navegacion tipo explorador de
-                     archivos -- estas en un "sitio" (la raiz, o dentro de
-                     una carpeta), #notes-list ensena las SUBcarpetas de
-                     ese sitio arriba y las notas de ese sitio debajo, todo
-                     en una sola lista. "Volver" solo se ve si no estas en
-                     la raiz. Solo organizacion, sin PIN (eso ya se
-                     resolvio por nota individual con "ocultar"). Ver
-                     renderNotesView en app.js. -->
-                <div id="note-folder-toolbar" class="note-folder-toolbar">
-                  <button type="button" id="btn-note-folder-back" class="secondary-btn hidden">← Volver</button>
-                  <div class="spacer"></div>
-                  <!-- "Seleccionar" (escritorio): mismo mecanismo de
-                       Seleccionar/Mover que ya existia solo en movil --
-                       ver mobileNotesMode/setMobileNotesMode en app.js
-                       (se comparte tal cual, sin duplicar logica). -->
-                  <button type="button" id="btn-note-folder-select" class="secondary-btn" aria-pressed="false">Seleccionar</button>
-                  <button type="button" id="btn-new-note-folder" class="note-folder-chip note-folder-chip-add" aria-label="Nueva carpeta">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
-                    <span>Carpeta</span>
-                  </button>
-                </div>
-                <!-- "+ Nota" debajo de Volver/+ Carpeta a proposito: es la
-                     accion menos frecuente de las dos (normalmente entras
-                     a leer/organizar, no a crear), asi que va debajo. -->
-                <button type="button" id="btn-new-note" class="secondary-btn note-add-btn">+ Nota</button>
-                <div class="note-search-row">
-                  <input type="text" id="note-search-input" placeholder="Buscar por nombre..." autocomplete="off" />
-                  <!-- Por defecto la busqueda mira TODA la app (con la
-                       ruta de carpeta debajo de cada resultado); este
-                       boton la restringe a la carpeta donde estas ahora
-                       mismo, sin ruta debajo porque ya sabes donde estas.
-                       Ver renderNotesView en app.js. -->
-                  <button type="button" id="note-search-scope-btn" class="note-search-scope-btn" aria-pressed="false" title="Restringir la busqueda a esta carpeta">Solo esta carpeta</button>
-                </div>
-                <div id="notes-list" class="reminders-list notes-list"></div>
-                <!-- Barra de accion Eliminar/Mover (escritorio): mismo
-                     patron/handlers que #mobile-notes-action-bar, ver
-                     refreshMobileNotesActionBar en app.js (generalizada
-                     a NOTES_VIEW_TARGETS.desktop). -->
-                <div id="note-folder-action-bar" class="mobile-notes-action-bar hidden">
-                  <button type="button" id="btn-note-folder-action-left" class="danger-btn"></button>
-                  <button type="button" id="btn-note-folder-action-right" class="secondary-btn"></button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <!-- Notas (Fase 4 del rediseño movil): reemplaza al puente temporal
        que abria "Mi espacio" desde la barra inferior -- "Mi espacio"
@@ -518,10 +261,10 @@
        CLAUDE.md/decision 3 de esa ronda: tareas y recordatorios ya viven
        dentro del propio calendario movil, aqui solo quedan las notas.
        Mismo patron de pantalla completa (.my-space-view) que el resto,
-       pero SIEMPRE .mobile-only -- en escritorio las notas se siguen
+       pero SIEMPRE .-- en escritorio las notas se siguen
        viendo dentro de "Mi espacio"/el panel clasico, sin cambios. Ver
        openMobileNotesView/closeMobileNotesView en app.js. -->
-  <div id="mobile-notes-view" class="my-space-view mobile-only hidden">
+  <div id="mobile-notes-view" class="my-space-view hidden">
     <div class="my-space-view-header">
       <h2>Notas</h2>
       <div class="my-space-view-header-actions">
@@ -602,7 +345,7 @@
        mes y de la vista diaria (btn-mobile-calendar-search/
        btn-mobile-calendar-day-search). Mismo patron .my-space-view que
        el resto de pantallas completas de movil. -->
-  <div id="mobile-global-search" class="my-space-view mobile-only hidden">
+  <div id="mobile-global-search" class="my-space-view hidden">
     <div class="my-space-view-header">
       <h2>Buscar</h2>
       <div class="my-space-view-header-actions">
@@ -624,7 +367,7 @@
        openExtensionsView/closeExtensionsView en app.js. -->
   <div id="extensions-view" class="my-space-view hidden">
     <div class="my-space-view-header">
-      <h2>Apps</h2>
+      <h2>Herramientas</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-extensions" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
         <!-- Configuracion tiene que poder abrirse desde CUALQUIER
@@ -657,30 +400,6 @@
     </div>
   </div>
 
-  <!-- Pantalla de bienvenida: aparece UNA sola vez, la primera vez que
-       se abre la app. Solo pide el nickname, que es lo que aparece como
-       "creado por" en lo que vas creando. "Ahora no" tambien cierra el
-       modal para siempre (ver app.js maybeShowOnboarding) sin obligar a
-       rellenar nada. -->
-  <div id="onboarding-modal" class="modal hidden">
-    <div class="modal-card">
-      <h2>Bienvenido a RemindMeLater</h2>
-      <p class="hint">Un dato rapido antes de empezar (puedes cambiarlo luego en Configuracion > Perfil).</p>
-      <form id="onboarding-form">
-        <label>
-          Nickname (opcional)
-          <input type="text" id="onboarding-name" placeholder="Tu nombre" maxlength="60" />
-        </label>
-        <p class="hint">Aparece como "creado por" en los eventos y tareas que anadas.</p>
-        <div class="modal-actions">
-          <button type="button" id="btn-onboarding-skip" class="secondary-btn">Ahora no</button>
-          <div class="spacer"></div>
-          <button type="submit" class="primary-btn">Guardar</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
   <!-- Extension "Gimnasio": registro de entrenamientos de verdad, con 3
        secciones alternables con pestanas (Sesiones/Rutinas/Progreso, ver
        .gym-tabs en styles.css y el interruptor en app.js) -- NO es el
@@ -693,7 +412,7 @@
     <div class="my-space-view-header">
       <h2>Gimnasio</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-gym" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-gym" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-gym-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1084,7 +803,7 @@
     <div class="my-space-view-header">
       <h2>Finanzas</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-finanzas" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-finanzas" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-finanzas-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1599,7 +1318,7 @@
     <div class="my-space-view-header">
       <h2>Viajes</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-viajes" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-viajes" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-viajes-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1788,7 +1507,7 @@
     <div class="my-space-view-header">
       <h2>Lecturas</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-lecturas" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-lecturas" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-lecturas-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -2052,55 +1771,32 @@
           <!-- Fase 4 del rediseño movil: ya no hay un campo de titulo
                editable -- el titulo se deriva SIEMPRE de la primera
                linea del cuerpo (ver deriveTitleFromBody en
-               server/routes/notes.js). Esto es solo una etiqueta de
+               routes-local/notes.js). Esto es solo una etiqueta de
                solo lectura que se recalcula en vivo mientras se
                escribe (ver refreshNoteTitlePreview en app.js), para
                que se vea que titulo va a quedar sin tener que guardar
                primero. -->
           <div id="note-title-preview" class="note-editor-title-preview" aria-live="polite"></div>
           <button type="button" id="note-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
+          <!-- Alterna entre editar (por defecto) y solo lectura, por si
+               solo quieres consultar la nota sin arriesgarte a tocarla
+               sin querer -- ver applyNoteEditorReadMode en app.js. Es un
+               ajuste POR NOTA ABIERTA (entry.readMode), no global del
+               editor. Vive aqui, junto a la estrella, y no en la barra
+               de formato de abajo: es una accion sobre la nota entera,
+               como marcarla favorita, no una herramienta de escritura. -->
+          <button type="button" id="note-editor-read-mode-btn" class="note-editor-btn note-editor-read-mode-btn" aria-pressed="false">Modo lectura</button>
         </div>
         <div class="note-editor-header-actions">
-          <!-- Ya no hay desplegable de carpeta aqui -- mover una nota se
-               hace desde "Seleccionar -> Mover" en el listado (mismo
-               mecanismo en escritorio y movil, ver #note-folder-toolbar
-               mas abajo y mobileNotesMode en app.js), no editando la
-               nota. -->
-          <button type="button" id="btn-delete-note" class="danger-btn hidden desktop-only">Eliminar</button>
-          <button type="submit" class="primary-btn desktop-only">Guardar</button>
         </div>
       </div>
+      <!-- Barra de formato: los controles se ven SIEMPRE desplegados
+           (3 filas: formato de texto / estructura de parrafo / tabla-
+           imagen-codigo-vim). Hubo una ronda en la que todo esto vivia
+           colapsado tras un boton "Formato"; Koku pidio volver a tenerlo
+           a la vista. "Modo lectura" ya no esta aqui: subio a la fila del
+           titulo, junto a la estrella de favoritos. -->
       <div id="note-body-toolbar" class="note-editor-toolbar">
-        <!-- Barra principal reducida a 2 botones (ronda "barra colapsada
-             en Formato"): todo el resto de controles de formato vive
-             ahora en el popover #note-format-popover (mas abajo, fuera de
-             .note-editor-main, mismo criterio que los demas popovers
-             creados por JS -- position:fixed colgado de <body>). Barra
-             deslizable (overflow-x, sin flex-wrap) por si algun dia hay
-             mas botones aqui, aunque con 2 no hace falta scroll. -->
-        <button type="button" id="note-format-btn" class="note-editor-btn" aria-haspopup="true" aria-expanded="false">Formato</button>
-        <!-- Alterna entre editar (por defecto, como antes) y solo lectura,
-             por si solo quieres consultar la nota sin arriesgarte a
-             tocarla sin querer -- ver applyNoteEditorReadMode en app.js.
-             Es un ajuste POR NOTA ABIERTA (entry.readMode), no global del
-             editor: cada nota recuerda su propio modo mientras este
-             abierta. -->
-        <button type="button" id="note-editor-read-mode-btn" class="note-editor-btn" aria-pressed="false">Modo lectura</button>
-      </div>
-      <!-- Panel de formato (boton "Formato" de arriba): las mismas 3 filas
-           de siempre (formato en linea / estructura de parrafo / tabla-
-           imagen-codigo-vim), movidas AQUI tal cual -- mismos ids, mismo
-           wiring en app.js, solo cambia donde viven en el arbol. Vive
-           fuera de .note-editor-main a proposito (hermano de nivel
-           superior, igual que los demas popovers creados por JS) para que
-           su position:fixed no dependa de ningun contexto de apilamiento
-           de por medio. Deliberadamente NO esta en la lista generica de
-           closeAllPopovers()/"click fuera cierra" de settings.js -- tiene
-           que seguir abierto mientras se selecciona texto DENTRO de
-           #note-body, que tambien cuenta como "fuera" del popover para
-           ese mecanismo generico. Ver el wiring de #note-format-btn en
-           app.js para su propio cierre dedicado. -->
-      <div id="note-format-popover" class="note-format-popover hidden">
         <div class="note-editor-toolbar-row">
           <!-- Estilo de parrafo (Titulo/Encabezado/Subencabezado/Cuerpo/
                Monoespaciado, estilo Notas de iPhone) -- abre un popover
@@ -2135,15 +1831,15 @@
           <button type="button" id="note-quote-toggle-btn" class="note-editor-btn" aria-label="Cita" title="Cita">&#10077;</button>
         </div>
         <div class="note-editor-toolbar-row">
-          <button type="button" id="note-table-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
-          <button type="button" id="note-image-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
+          <button type="button" id="note-table-insert-btn" class="note-editor-btn" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
+          <button type="button" id="note-image-insert-btn" class="note-editor-btn" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
           <!-- Bloque de codigo: fuente monoespaciada, SIN colorear por
                lenguaje (para eso haria falta meter una libreria externa,
                y de momento el frontend entero no tiene ninguna). Tambien
                se puede escribir "```lenguaje" + Intro en una linea vacia,
                estilo GitHub/Markdown -- ver maybeAutoStartCodeBlock en
                app.js. Este boton inserta uno sin lenguaje asignado. -->
-          <button type="button" id="note-code-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar bloque de código" title="Insertar bloque de código (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
+          <button type="button" id="note-code-insert-btn" class="note-editor-btn" aria-label="Insertar bloque de código" title="Insertar bloque de código (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
           <!-- Selector de archivo nativo, oculto -- lo abre el boton de
                arriba con .click(). Tambien sirve para el Ctrl+V (ver
                app.js), que reutiliza la misma subida. -->
@@ -2162,51 +1858,9 @@
                  la tabla actual ya esta en grueso. -->
             <button type="button" id="note-table-border-toggle" class="note-editor-btn" aria-label="Alternar grosor de borde" title="Alternar borde fino/grueso">Borde</button>
           </span>
-          <!-- Modo "vim" (opt-in, ajuste por dispositivo en localStorage,
-               ver isVimModeEnabled en app.js): Esc entra en modo Normal
-               (movimiento con h/j/k/l, w/b, x, dd, u -- sin escribir), v
-               entra en Visual (seleccionar con movimiento, y copia, d
-               borra), i/a/o vuelven a Insertar. El indicativo TAMBIEN es
-               un boton: clicarlo va rotando Insertar->Normal->Visual, para
-               quien prefiera el raton al teclado (Esc/i/v). Solo se ve si
-               el ajuste esta activado. -->
-          <button type="button" id="note-editor-vim-indicator" class="note-editor-vim-indicator hidden desktop-only">INSERTAR</button>
-          <button type="button" id="note-editor-vim-toggle-btn" class="note-editor-btn desktop-only" aria-pressed="false" title="Atajos de movimiento estilo vim (Esc = modo Normal, i/a/o = Insertar)">Vim</button>
         </div>
       </div>
       <div class="note-editor-main">
-        <!-- Rail izquierdo: dos botones independientes -- "Arbol" (navegar
-             carpetas/notas sin salir del editor) y "Secciones" (gestor de
-             notas abiertas a la vez, ver state.openNotes en app.js). Solo
-             uno de los dos paneles se ve a la vez (ver setActiveNoteEditorPanel
-             en app.js), volver a clicar el que esta activo lo cierra. -->
-        <div class="note-editor-rail desktop-only">
-          <button type="button" id="note-editor-toggle-tree" class="note-editor-rail-btn" aria-label="Arbol de notas" title="Arbol de carpetas y notas">Árbol</button>
-          <button type="button" id="note-editor-toggle-sections" class="note-editor-rail-btn" aria-label="Secciones" title="Secciones (notas abiertas)">Notas</button>
-        </div>
-        <!-- Arbol de carpetas/notas: navegacion tipo arbol (plegable por
-             carpeta), reutiliza state.noteFolders/state.notes (ya cargados
-             enteros, sin llamada nueva a la API). Clicar una nota la abre
-             en el editor (se anade a las notas abiertas si no lo estaba
-             ya, ver openNoteInEditor). -->
-        <div id="note-tree-panel" class="note-editor-side-panel hidden desktop-only">
-          <div class="note-editor-side-panel-header">
-            <span>Árbol de notas</span>
-            <button type="button" id="note-tree-new-btn" class="icon-btn" aria-label="Nueva nota" title="Nueva nota">+</button>
-          </div>
-          <div id="note-tree-list" class="note-tree-list"></div>
-        </div>
-        <!-- Lista de notas abiertas a la vez (como pestañas, pero sin
-             barra de pestañas visible -- se cambia de una a otra desde
-             aqui, ver switchActiveOpenNote en app.js). Cada nota tiene
-             un desplegable para "ver secciones de dentro": por ahora es
-             un simple placeholder, el editor todavia no tiene ningun
-             concepto de titulos/encabezados dentro del cuerpo de la
-             nota (queda para una ronda futura). -->
-        <div id="note-sections-panel" class="note-editor-side-panel hidden desktop-only">
-          <div class="note-editor-side-panel-header">Notas abiertas</div>
-          <div id="note-sections-list" class="note-sections-list"></div>
-        </div>
         <div class="note-editor-content-col">
           <div id="note-body" class="note-editor-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido de la nota"></div>
         </div>
@@ -2277,15 +1931,6 @@
         <button type="button" class="settings-menu-item" data-tab="mobile">
           <span>Este dispositivo</span><span class="settings-menu-item-arrow">›</span>
         </button>
-        <button type="button" class="settings-menu-item" data-tab="shortcuts">
-          <span>Atajos de teclado</span><span class="settings-menu-item-arrow">›</span>
-        </button>
-        <!-- Accion directa (no navega a ningun sitio, por eso no lleva
-             flecha "›"), solo visible dentro de la app de escritorio —
-             ver refreshQuitMenuItem en settings.js. -->
-        <button type="button" id="btn-quit-app" class="settings-menu-item settings-menu-item-danger hidden">
-          <span>Salir de la aplicación</span>
-        </button>
 
       </div>
 
@@ -2313,23 +1958,12 @@
       <div id="settings-tab-view" class="settings-tab-panel hidden">
         <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Vista</h3>
-        <p class="hint">Cambia entre la ventana normal y pantalla completa (sin las barras del navegador). Se aplica al momento.</p>
-        <div id="view-mode-options" class="view-mode-options"></div>
-        <p id="view-mode-hint" class="hint"></p>
 
         <h4>Días con muchas cosas</h4>
         <p class="hint">Cómo se ven, en el calendario del mes, los días que tienen varios eventos o tareas a la vez.</p>
         <div id="calendar-density-options" class="view-mode-options"></div>
 
-        <h4>Mi espacio</h4>
-        <p class="hint">Cómo acceder a "Mi espacio" (Próximos, Tareas y Notas juntos). En el panel lateral se ve siempre al lado del calendario; con el botón se abre a pantalla completa cuando lo necesites.</p>
-        <div id="my-space-mode-options" class="view-mode-options"></div>
-
-        <h4>Panel lateral clásico</h4>
-        <p class="hint">Solo aplica cuando "Mi espacio" está en modo botón (arriba): cómo se reparten Recordatorios, Tareas y Notas en el panel de siempre, al lado del calendario. Marca las que quieras ver juntas, alternando con flechas (útil si la pantalla es pequeña); las que no marques se quedan cada una sola, siempre visible. Si no marcas ninguna (o solo una), las 3 se ven apiladas como siempre.</p>
-        <div id="reminders-panel-grouped-options" class="reminders-panel-grouped-options"></div>
-
-        <h4>Favoritos en Mi espacio</h4>
+        <h4>Favoritos en Notas</h4>
         <p class="hint">Cómo se ordenan las carpetas y notas favoritas (la estrella del listado) dentro de cada carpeta.</p>
         <div id="favorites-display-options" class="view-mode-options"></div>
       </div>
@@ -2427,8 +2061,9 @@
         <p class="hint">Estos ajustes son solo para el dispositivo en el que estas viendo esto ahora mismo.</p>
         <label class="checkbox-row">
           <input type="checkbox" id="setting-notifications" />
-          Notificaciones del navegador para recordatorios
+          Avisos de recordatorios
         </label>
+        <p class="hint">En la app instalada, el aviso lo programa el propio telefono: suena aunque la app este cerrada, sin que nada salga del dispositivo. Desde un navegador solo puede avisar con la pestana abierta.</p>
         <p id="notifications-status" class="hint"></p>
 
         <h4>Tareas completadas</h4>
@@ -2440,17 +2075,10 @@
         <div id="gym-weight-unit-options" class="view-mode-options"></div>
 
         <h4>Barra inferior (móvil)</h4>
-        <p class="hint">Qué App vive en el segundo hueco de la barra inferior, junto a Calendario/Apps/Configuración (que se quedan siempre fijos).</p>
+        <p class="hint">Qué herramienta vive en el segundo hueco de la barra inferior, junto a Calendario/Herramientas/Configuración (que se quedan siempre fijos).</p>
         <div id="mobile-nav-slot-field"></div>
       </div>
 
-      <!-- --- Atajos de teclado (ajuste local, no compartido) --- -->
-      <div id="settings-tab-shortcuts" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
-        <h3>Atajos de teclado</h3>
-        <p class="hint">Pulsa "+ Añadir" y luego pulsa la tecla (o combinacion) que quieras usar. Puedes tener varias combinaciones para la misma accion; quita las que no quieras con la x.</p>
-        <div id="shortcuts-list" class="shortcuts-list"></div>
-      </div>
 
       </div>
     </div>
