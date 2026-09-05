@@ -744,9 +744,28 @@
         </div>
       </div>
 
-      <!-- Progreso: selector de ejercicio + grafica SVG a mano (peso
-           maximo/volumen por sesion), ver renderGymProgressChart en app.js. -->
+      <!-- Progreso (renovado en la Fase 5): consistencia (heatmap estilo
+           GitHub + racha semanal), records por ejercicio (PRs con 1RM
+           estimado), volumen semanal apilado por grupo muscular, y la
+           grafica por ejercicio de siempre al final. Todo SVG/DOM a mano
+           como el resto del proyecto, ver renderGymProgressSections en
+           app.js. -->
       <div id="gym-tab-progress" class="gym-tab-panel hidden">
+        <h3 class="gym-subheading">Consistencia</h3>
+        <div id="gym-consistency-stats" class="gym-consistency-stats"></div>
+        <div id="gym-heatmap" class="gym-heatmap"></div>
+        <div class="gym-weekly-goal-row">
+          <span class="field-label">Objetivo semanal (sesiones)</span>
+          <div id="gym-weekly-goal-field"></div>
+        </div>
+
+        <h3 class="gym-subheading">Récords (PRs)</h3>
+        <div id="gym-prs-list" class="gym-list"></div>
+
+        <h3 class="gym-subheading">Volumen semanal por músculo</h3>
+        <div id="gym-weekly-volume" class="gym-weekly-volume"></div>
+
+        <h3 class="gym-subheading">Evolución por ejercicio</h3>
         <div class="field-label-block">
           <span class="field-label">Ejercicio</span>
           <div id="gym-progress-exercise-field"></div>

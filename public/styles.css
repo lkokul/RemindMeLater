@@ -2492,6 +2492,31 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .gym-live-summary-stat span { font-size: 0.75rem; color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); }
 #gym-summary-muscle-list { text-align: center; }
 
+/* Progreso avanzado (Fase 5): heatmap de consistencia, PRs y volumen
+   semanal. El heatmap usa UN solo tono (el morado del gym) escalonado
+   de claro a oscuro -- magnitud, no identidad. */
+.gym-consistency-grid { grid-template-columns: repeat(4, 1fr); margin: 0; }
+.gym-heatmap-grid { display: grid; gap: 3px; max-width: 34rem; }
+.gym-heatmap-cell {
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--surface-2-text) 8%, var(--surface-2));
+  display: inline-block;
+  min-width: 0.55rem;
+}
+.gym-heatmap-cell.level-1 { background: color-mix(in srgb, var(--gym-accent) 45%, var(--surface-2)); }
+.gym-heatmap-cell.level-2 { background: var(--gym-accent); }
+.gym-heatmap-cell.future { background: transparent; }
+.gym-heatmap-legend { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.4rem; font-size: 0.75rem; }
+.gym-heatmap-legend .gym-heatmap-cell { width: 0.7rem; min-width: 0.7rem; flex: none; aspect-ratio: 1; }
+.gym-weekly-goal-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.gym-weekly-goal-row > div { min-width: 12rem; }
+.gym-pr-item { justify-content: space-between; }
+.gym-pr-stats { display: flex; flex-direction: column; align-items: flex-end; gap: 0.1rem; flex-shrink: 0; }
+.gym-pr-stats b { font-size: 0.95rem; }
+.gym-viz-legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.4rem; font-size: 0.78rem; }
+.gym-viz-legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+
 /* Cabecera del nivel de dias (boton volver + nombre del bloque). */
 .gym-block-days-header { display: flex; align-items: center; gap: 0.6rem; }
 .gym-block-days-header .gym-subheading { margin: 0; }

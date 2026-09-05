@@ -7319,6 +7319,11 @@ function switchGymTab(tabName) {
   document.querySelectorAll('.gym-tab-panel').forEach((panel) => {
     panel.classList.toggle('hidden', panel.id !== `gym-tab-${tabName}`);
   });
+  // Las secciones de Progreso (heatmap/PRs/volumen) se calculan al
+  // entrar en la pestana, no en cada apertura del Gimnasio -- es una
+  // funcion declarada mas abajo, sin problema de orden porque esto solo
+  // corre dentro de un handler de click (ver la nota de TDZ en CLAUDE.md).
+  if (tabName === 'progress') renderGymProgressSections();
 }
 document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchGymTab(btn.dataset.gymTab));
@@ -9371,6 +9376,263 @@ document.getElementById('btn-delete-gym-session').addEventListener('click', asyn
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
 });
+
+// --- Progreso avanzado (Fase 5 del rediseno) --------------------------
+// Consistencia (heatmap estilo GitHub + racha semanal con objetivo),
+// PRs por ejercicio (mejor peso + 1RM estimado con la formula de Epley)
+// y volumen semanal apilado por grupo muscular. Todo calculado en
+// cliente: el heatmap/racha desde GET /summary (ligero, sin series) y
+// PRs/volumen desde state.gymSessions, que ya esta cargado entero.
+
+// Lunes de la semana ISO de una fecha, como clave 'YYYY-MM-DD' -- las
+// semanas del objetivo/racha/volumen empiezan en lunes (es-ES).
+function gymWeekStartKey(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = (d.getDay() + 6) % 7; // lunes = 0 ... domingo = 6
+  d.setDate(d.getDate() - day);
+  return toDateKey(d);
+}
+
+// Objetivo de sesiones por semana: ajuste por dispositivo, como la
+// unidad de peso (no viaja con los datos).
+function getGymWeeklyGoal() {
+  const stored = Number(localStorage.getItem('gymWeeklyGoal'));
+  return stored >= 1 && stored <= 7 ? stored : 3;
+}
+const gymWeeklyGoalField = createSelectField({
+  options: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: String(n), label: `${n} ${n === 1 ? 'sesión' : 'sesiones'} / semana` })),
+  initialValue: String(getGymWeeklyGoal()),
+  onChange: (value) => {
+    localStorage.setItem('gymWeeklyGoal', value);
+    renderGymProgressSections();
+  },
+});
+document.getElementById('gym-weekly-goal-field').appendChild(gymWeeklyGoalField.element);
+
+// Punto de entrada de toda la seccion: se llama al entrar en la pestana
+// Progreso (ver switchGymTab), no en cada apertura del Gimnasio.
+async function renderGymProgressSections() {
+  const summary = await api('/api/gym-sessions/summary');
+  renderGymConsistency(summary);
+  renderGymPRs();
+  renderGymWeeklyVolume();
+}
+
+// Heatmap de consistencia: 26 semanas x 7 dias, intensidad = sesiones de
+// ese dia. UN solo tono (el morado del gym) de claro a oscuro -- un mapa
+// de magnitud siempre es un unico matiz escalonado, nunca varios colores.
+function renderGymConsistency(summary) {
+  const sessionsByDate = new Map();
+  for (const s of summary) {
+    sessionsByDate.set(s.date, (sessionsByDate.get(s.date) || 0) + 1);
+  }
+
+  // Estadisticas de arriba: dias entrenados, racha de semanas cumpliendo
+  // el objetivo, esta semana y este mes.
+  const goal = getGymWeeklyGoal();
+  const sessionsByWeek = new Map();
+  for (const s of summary) {
+    const week = gymWeekStartKey(new Date(`${s.date}T00:00:00`));
+    sessionsByWeek.set(week, (sessionsByWeek.get(week) || 0) + 1);
+  }
+  const now = new Date();
+  const thisWeekKey = gymWeekStartKey(now);
+  const thisWeekCount = sessionsByWeek.get(thisWeekKey) || 0;
+  // La racha cuenta semanas SEGUIDAS cumpliendo el objetivo, empezando
+  // por la semana pasada hacia atras; la semana en curso suma solo si ya
+  // ha llegado al objetivo (que aun no lo haya hecho no rompe la racha).
+  let streak = thisWeekCount >= goal ? 1 : 0;
+  const probe = new Date(now);
+  probe.setDate(probe.getDate() - 7);
+  while ((sessionsByWeek.get(gymWeekStartKey(probe)) || 0) >= goal) {
+    streak += 1;
+    probe.setDate(probe.getDate() - 7);
+  }
+  const monthPrefix = toDateKey(now).slice(0, 7);
+  const monthCount = summary.filter((s) => s.date.startsWith(monthPrefix)).length;
+
+  document.getElementById('gym-consistency-stats').innerHTML = `
+    <div class="gym-live-summary-grid gym-consistency-grid">
+      <div class="gym-live-summary-stat"><b>${sessionsByDate.size}</b><span>Días entrenados</span></div>
+      <div class="gym-live-summary-stat"><b>🔥 ${streak}</b><span>Racha (semanas)</span></div>
+      <div class="gym-live-summary-stat"><b>${thisWeekCount}/${goal}</b><span>Esta semana</span></div>
+      <div class="gym-live-summary-stat"><b>${monthCount}</b><span>Este mes</span></div>
+    </div>
+  `;
+
+  // La rejilla: columnas = semanas (la actual a la derecha), filas =
+  // lunes a domingo. Celdas div con tooltip, no SVG (mas simple y el
+  // helper de tooltips funciona igual sobre cualquier elemento).
+  const WEEKS = 26;
+  const container = document.getElementById('gym-heatmap');
+  const firstMonday = new Date(`${thisWeekKey}T00:00:00`);
+  firstMonday.setDate(firstMonday.getDate() - (WEEKS - 1) * 7);
+  let cells = '';
+  for (let day = 0; day < 7; day++) {
+    for (let week = 0; week < WEEKS; week++) {
+      const cellDate = new Date(firstMonday);
+      cellDate.setDate(cellDate.getDate() + week * 7 + day);
+      if (cellDate > now) { cells += '<span class="gym-heatmap-cell future"></span>'; continue; }
+      const key = toDateKey(cellDate);
+      const count = sessionsByDate.get(key) || 0;
+      const level = count >= 2 ? 2 : count; // 0 / 1 / 2+
+      cells += `<span class="gym-heatmap-cell level-${level}" data-tooltip="${formatGymDate(key)}: ${count} sesión${count === 1 ? '' : 'es'}"></span>`;
+    }
+  }
+  container.innerHTML = `
+    <div class="gym-heatmap-grid" style="grid-template-columns: repeat(${WEEKS}, 1fr);">${cells}</div>
+    <div class="gym-heatmap-legend"><span class="gym-list-item-muted">Menos</span>
+      <span class="gym-heatmap-cell level-0"></span><span class="gym-heatmap-cell level-1"></span><span class="gym-heatmap-cell level-2"></span>
+      <span class="gym-list-item-muted">Más</span></div>
+  `;
+  attachFinanzasChartTooltips(container);
+}
+
+// 1RM estimado con la formula de Epley: peso x (1 + reps/30). Solo
+// series con 1-12 repeticiones (por encima de 12 la estimacion deja de
+// ser fiable) y sin las de calentamiento.
+function gymEpley1RM(weightKg, reps) {
+  return weightKg * (1 + reps / 30);
+}
+function renderGymPRs() {
+  const list = document.getElementById('gym-prs-list');
+  const byExercise = new Map(); // exerciseId -> { name, muscleGroup, bestWeightKg, best1RM, bestVolumeKg }
+  for (const session of state.gymSessions) {
+    const volumeByExercise = new Map();
+    for (const set of session.sets) {
+      if (set.setType === 'warmup') continue;
+      if (!byExercise.has(set.exerciseId)) {
+        byExercise.set(set.exerciseId, { name: set.exerciseName, bestWeightKg: 0, best1RM: 0, bestVolumeKg: 0 });
+      }
+      const pr = byExercise.get(set.exerciseId);
+      if (set.weightKg > pr.bestWeightKg) pr.bestWeightKg = set.weightKg;
+      if (set.weightKg > 0 && set.reps >= 1 && set.reps <= 12) {
+        const est = gymEpley1RM(set.weightKg, set.reps);
+        if (est > pr.best1RM) pr.best1RM = est;
+      }
+      volumeByExercise.set(set.exerciseId, (volumeByExercise.get(set.exerciseId) || 0) + (set.reps || 0) * (set.weightKg || 0));
+    }
+    for (const [exerciseId, volume] of volumeByExercise) {
+      const pr = byExercise.get(exerciseId);
+      if (pr && volume > pr.bestVolumeKg) pr.bestVolumeKg = volume;
+    }
+  }
+
+  const unit = getGymWeightUnitLabel();
+  const rows = [...byExercise.entries()]
+    .filter(([, pr]) => pr.bestWeightKg > 0)
+    .sort((a, b) => b[1].best1RM - a[1].best1RM);
+  list.innerHTML = '';
+  if (rows.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavía no hay récords: registra series con peso y aparecerán aquí.</p>';
+    return;
+  }
+  rows.forEach(([exerciseId, pr]) => {
+    const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+    const muscle = exercise ? gymMuscleGroupLabel(exercise.muscleGroup) : '';
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-pr-item';
+    row.innerHTML = `
+      <span class="gym-list-item-name">🏅 ${escapeHtml(pr.name)}${muscle ? ` <span class="gym-list-item-muted">(${escapeHtml(muscle)})</span>` : ''}</span>
+      <span class="gym-pr-stats">
+        <b>${gymWeightKgToDisplay(pr.bestWeightKg)} ${unit}</b>
+        <span class="gym-list-item-muted">1RM est. ${gymWeightKgToDisplay(pr.best1RM)} ${unit} · Vol. ${gymWeightKgToDisplay(pr.bestVolumeKg)} ${unit}</span>
+      </span>
+    `;
+    list.appendChild(row);
+  });
+}
+
+// Volumen semanal apilado por grupo muscular (ultimas 8 semanas). Los 5
+// grupos con mas volumen total llevan color propio de la paleta de abajo
+// y el resto se agrupa en "Otros" (gris) -- nunca 14 colores a la vez.
+// Paleta validada con el comprobador de daltonismo/contraste del skill
+// de dataviz (5 tonos, superficie oscura, todas las comprobaciones OK);
+// el color acompaña SIEMPRE al mismo grupo dentro de un render.
+const GYM_VIZ_PALETTE = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'];
+const GYM_VIZ_OTHER = '#8a8a93';
+function renderGymWeeklyVolume() {
+  const container = document.getElementById('gym-weekly-volume');
+  const WEEKS = 8;
+  const now = new Date();
+  const weekKeys = [];
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i * 7);
+    weekKeys.push(gymWeekStartKey(d));
+  }
+  const weekSet = new Set(weekKeys);
+
+  // volumen[semana][grupo] desde las series (grupo del ejercicio; los
+  // ejercicios viejos con texto libre o sin grupo caen en "Otros").
+  const muscleOf = new Map(state.gymExercises.map((e) => [e.id, GYM_MUSCLE_GROUPS.some((g) => g.id === e.muscleGroup) ? e.muscleGroup : null]));
+  const volume = new Map(weekKeys.map((w) => [w, new Map()]));
+  const totalByGroup = new Map();
+  for (const session of state.gymSessions) {
+    const week = gymWeekStartKey(new Date(`${session.date}T00:00:00`));
+    if (!weekSet.has(week)) continue;
+    for (const set of session.sets) {
+      const kg = (set.reps || 0) * (set.weightKg || 0);
+      if (kg <= 0) continue;
+      const group = muscleOf.get(set.exerciseId) || 'otros';
+      volume.get(week).set(group, (volume.get(week).get(group) || 0) + kg);
+      totalByGroup.set(group, (totalByGroup.get(group) || 0) + kg);
+    }
+  }
+
+  if (totalByGroup.size === 0) {
+    container.innerHTML = '<p class="empty-hint">Sin volumen registrado en las últimas 8 semanas.</p>';
+    return;
+  }
+
+  // Top 5 grupos por volumen total; el resto (y lo sin grupo) = "Otros".
+  const topGroups = [...totalByGroup.entries()]
+    .filter(([g]) => g !== 'otros')
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, GYM_VIZ_PALETTE.length)
+    .map(([g]) => g);
+  const colorOf = new Map(topGroups.map((g, i) => [g, GYM_VIZ_PALETTE[i]]));
+
+  const width = 600, height = 190, padding = 26, gap = 8;
+  const barWidth = (width - padding * 2 - gap * (WEEKS - 1)) / WEEKS;
+  const maxWeek = Math.max(1, ...weekKeys.map((w) => [...volume.get(w).values()].reduce((a, b) => a + b, 0)));
+  const unit = getGymWeightUnitLabel();
+
+  let bars = '';
+  weekKeys.forEach((week, i) => {
+    const x = padding + i * (barWidth + gap);
+    let y = height - padding;
+    const groups = [...volume.get(week).entries()];
+    // Otros al fondo de la pila, el resto en el orden fijo del top.
+    const ordered = [
+      ...topGroups.map((g) => [g, volume.get(week).get(g) || 0]),
+      ['otros', groups.filter(([g]) => !colorOf.has(g)).reduce((acc, [, v]) => acc + v, 0)],
+    ];
+    for (const [group, kg] of ordered) {
+      if (kg <= 0) continue;
+      const h = (kg / maxWeek) * (height - padding * 2);
+      y -= h;
+      const label = group === 'otros' ? 'Otros' : gymMuscleGroupLabel(group);
+      // Hueco de 2px entre segmentos: se pinta cada uno 2px mas corto.
+      bars += `<rect x="${x}" y="${y}" width="${barWidth}" height="${Math.max(0, h - 2)}" rx="2"
+        fill="${colorOf.get(group) || GYM_VIZ_OTHER}"
+        data-tooltip="Semana del ${formatGymDate(week)} · ${escapeHtml(label)}: ${gymWeightKgToDisplay(kg)} ${unit}"></rect>`;
+    }
+    const weekLabel = new Date(`${week}T00:00:00`).getDate();
+    bars += `<text class="gym-chart-label" x="${x + barWidth / 2}" y="${height - padding + 12}" text-anchor="middle">${weekLabel}</text>`;
+  });
+
+  const legend = [...topGroups.map((g) => ({ label: gymMuscleGroupLabel(g), color: colorOf.get(g) })), { label: 'Otros', color: GYM_VIZ_OTHER }]
+    .map((item) => `<span class="gym-viz-legend-item"><span class="color-dot" style="background-color: ${item.color}"></span>${escapeHtml(item.label)}</span>`)
+    .join('');
+
+  container.innerHTML = `
+    <svg class="gym-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Volumen semanal por grupo muscular">${bars}</svg>
+    <div class="gym-viz-legend">${legend}</div>
+    <p class="hint">Volumen = repeticiones × peso, apilado por grupo muscular. La etiqueta de cada barra es el día del lunes de esa semana.</p>
+  `;
+  attachFinanzasChartTooltips(container);
+}
 
 // --- Progreso: grafica SVG a mano ---------------------------------------
 // No hay ninguna libreria de graficas en el proyecto (a proposito, ver
