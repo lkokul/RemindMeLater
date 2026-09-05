@@ -91,7 +91,7 @@ body {
    algun dia tiene mas secciones de las que caben) aparece esta barra
    fina en vez de la del sistema, con el color de acento del tema activo
    — asi que cambia sola si cambias de tema. */
-.modal-card, .settings-card-body, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover, .date-popover, .mobile-calendar-month-list, .mobile-calendar-year-grid, .mobile-hours-scroll, .mobile-day-listado-view {
+.modal-card, .settings-card-body, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover, .date-popover, .mobile-calendar-month-list, .mobile-calendar-year-grid {
   scrollbar-width: thin;
   scrollbar-color: var(--accent) transparent;
 }
@@ -104,9 +104,7 @@ body {
 .select-popover::-webkit-scrollbar,
 .date-popover::-webkit-scrollbar,
 .mobile-calendar-month-list::-webkit-scrollbar,
-.mobile-calendar-year-grid::-webkit-scrollbar,
-.mobile-hours-scroll::-webkit-scrollbar,
-.mobile-day-listado-view::-webkit-scrollbar {
+.mobile-calendar-year-grid::-webkit-scrollbar {
   width: 8px;
 }
 .modal-card::-webkit-scrollbar-track,
@@ -118,9 +116,7 @@ body {
 .select-popover::-webkit-scrollbar-track,
 .date-popover::-webkit-scrollbar-track,
 .mobile-calendar-month-list::-webkit-scrollbar-track,
-.mobile-calendar-year-grid::-webkit-scrollbar-track,
-.mobile-hours-scroll::-webkit-scrollbar-track,
-.mobile-day-listado-view::-webkit-scrollbar-track {
+.mobile-calendar-year-grid::-webkit-scrollbar-track {
   background: transparent;
 }
 .modal-card::-webkit-scrollbar-thumb,
@@ -132,11 +128,24 @@ body {
 .select-popover::-webkit-scrollbar-thumb,
 .date-popover::-webkit-scrollbar-thumb,
 .mobile-calendar-month-list::-webkit-scrollbar-thumb,
-.mobile-calendar-year-grid::-webkit-scrollbar-thumb,
-.mobile-hours-scroll::-webkit-scrollbar-thumb,
-.mobile-day-listado-view::-webkit-scrollbar-thumb {
+.mobile-calendar-year-grid::-webkit-scrollbar-thumb {
   background: var(--accent);
   border-radius: 4px;
+}
+
+/* La vista diaria del calendario movil NO lleva barra de
+   desplazamiento visible (pedido de Koku: "se ve el desplazamiento por
+   las horas, no hace falta tenerla") -- el propio movimiento de las
+   horas/eventos ya deja claro que se esta desplazando. Por eso estos
+   dos contenedores estan fuera de la lista de arriba y llevan su regla
+   propia. */
+.mobile-hours-scroll,
+.mobile-day-listado-view {
+  scrollbar-width: none;
+}
+.mobile-hours-scroll::-webkit-scrollbar,
+.mobile-day-listado-view::-webkit-scrollbar {
+  display: none;
 }
 
 button {
@@ -340,11 +349,21 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   min-width: 0;
   font-size: 1.1rem;
   font-weight: 600;
+  /* line-height fijo y padding vertical simetrico: sin esto la caja del
+     texto era mas alta que la de la estrella y los dos quedaban a
+     distinta altura pese al align-items:center de la fila (lo que Koku
+     vio como "el texto y el simbolo de favoritos no estan al mismo
+     nivel"). */
+  line-height: 1.3;
   padding: 0.3rem 0.4rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* "Modo lectura" vive en la fila del titulo, junto a la estrella. No
+   crece ni se encoge con el titulo (que si lo hace, flex:1) y su texto
+   nunca se parte en dos lineas, para no descuadrar la fila. */
+.note-editor-read-mode-btn { flex-shrink: 0; white-space: nowrap; }
 .note-editor-title-preview:empty::before {
   content: 'Nota sin título';
   opacity: 0.6;
@@ -362,20 +381,23 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    numerada, mas tabla e imagen), ahora arriba a modo de barra de estado
    fija, separada del contenido por un borde en vez de ir pegada al
    campo. */
-/* Barra principal reducida a "Formato" + "Modo lectura" (ronda "barra
-   colapsada en boton Formato") -- una unica fila deslizable
-   (overflow-x, sin flex-wrap) en vez de crecer sin limite, "maximo 1-2
-   lineas" segun lo pedido. El resto de controles (antes 3 filas aqui
-   mismo) vive ahora en #note-format-popover, ver mas abajo. */
+/* Los controles se ven SIEMPRE desplegados, en 3 filas agrupadas por
+   lo que hacen (formato de texto / estructura de parrafo / tabla-
+   imagen-codigo-vim). Hubo una ronda en la que todo esto vivia
+   colapsado tras un boton "Formato" (primero como popover flotante,
+   luego como fila mas del formulario); Koku pidio volver a tenerlo a la
+   vista, asi que la barra vuelve a ser el contenedor de las 3 filas.
+   max-height de seguridad por si en una pantalla muy baja no caben
+   enteras. */
 .note-editor-toolbar {
   flex-shrink: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 0.35rem;
   padding: 0.5rem 1.2rem;
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  flex-wrap: nowrap;
+  max-height: 45vh;
+  overflow-y: auto;
   scrollbar-width: none;
 }
 .note-editor-toolbar::-webkit-scrollbar { display: none; }
@@ -384,29 +406,6 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   align-items: center;
   gap: 0.35rem;
   flex-wrap: wrap;
-}
-/* Panel de formato (boton "Formato"): era un popover flotante
-   (position:fixed) en una ronda anterior, pero Koku reporto que
-   "sigue tapando el texto" -- flotando encima de #note-body no habia
-   forma de que NUNCA lo tapara mientras estuviera abierto. Ahora vive
-   dentro del flujo normal de .note-editor-form (flex-column, ver
-   app.js): una fila mas entre la barra principal y .note-editor-main,
-   que se encoge solo (flex:1; min-height:0) para dejarle sitio en vez
-   de quedar debajo. max-height + overflow-y de seguridad por si en una
-   pantalla muy baja las 3 filas de botones no caben enteras. A
-   proposito NO esta en la lista generica de closeAllPopovers()/"click
-   fuera cierra" de settings.js: tiene que seguir abierto mientras se
-   selecciona texto dentro de #note-body (que tambien cuenta como
-   "fuera" de este popover para ese mecanismo generico) -- tiene su
-   propio listener de cierre dedicado en app.js. */
-.note-format-popover {
-  flex-shrink: 0;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 0.5rem 1.2rem;
-  max-height: 45vh;
-  overflow-y: auto;
-  display: flex; flex-direction: column; gap: 0.35rem;
 }
 .note-editor-btn {
   padding: 0.3rem 0.6rem;
@@ -882,6 +881,43 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    tiene el ancho completo del modal y sobra sitio de sobra. */
 @media (max-width: 859px) {
   .form-row { flex-direction: column; gap: 0.6rem; }
+}
+
+/* Hueco de arriba en la app empaquetada: la ventana ocupa la pantalla
+   ENTERA (incluido el trozo donde el iPhone pinta el reloj y la
+   bateria), asi que sin reservar este hueco la barra del calendario y
+   la cabecera de las pantallas completas quedan tapadas por el reloj
+   -- que es justo lo que se veia en el movil. env(safe-area-inset-top)
+   trae el alto real de esa franja en cada dispositivo (0 en un
+   navegador de escritorio normal, asi que esto no cambia nada ahi), y
+   solo funciona con viewport-fit=cover en el <meta> de index.html.
+   El hueco de ABAJO ya estaba reservado desde hace rondas (ver
+   .app/.mobile-nav), pero hasta ahora valia 0 por ese mismo motivo. */
+@media (max-width: 859px) {
+  .app,
+  .my-space-view,
+  #settings-modal .settings-card {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* Vista diaria del calendario: el desplazamiento pasa a ser SOLO el de
+   la rejilla de horas / la lista de eventos, no el de la pantalla
+   entera. En el resto de la app movil la pagina crece con el contenido
+   a proposito (.app usa min-height, no height), pero aqui eso hacia
+   que arrastrar en cualquier punto moviera la pantalla completa --
+   cabecera incluida. Fijando el alto exacto y cortando el desbordamiento
+   aqui, la cadena de flex:1/min-height:0 que ya existe deja acotado el
+   contenedor interno y es el, y solo el, quien se desplaza. La clase la
+   pone y quita enterMobileDayView()/exitMobileDayView() en app.js. */
+@media (max-width: 859px) {
+  body.mobile-day-scroll-lock { overflow: hidden; }
+  body.mobile-day-scroll-lock .app {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
 }
 
 /* .app envuelve la topbar + el contenido. En movil, aunque la pagina

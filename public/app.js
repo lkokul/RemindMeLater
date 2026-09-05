@@ -437,7 +437,6 @@ function enableCtrlEnterSubmit(formId) {
 enableCtrlEnterSubmit('event-form');
 enableCtrlEnterSubmit('task-form');
 enableCtrlEnterSubmit('note-form');
-enableCtrlEnterSubmit('onboarding-form');
 
 // Bloqueo de scroll de fondo mientras haya un modal abierto -- todos los
 // ~27 modales de la app comparten la clase .modal (confirmado con
@@ -1889,17 +1888,15 @@ function refreshMobileCurrentTimeLine(date) {
 }
 
 function scrollMobileHoursToTime(date, targetMinutes) {
-  // .mobile-hours-scroll tiene overflow-y:auto, pero en movil ".app"
-  // usa min-height (no height) a proposito, para que la pagina crezca
-  // con el contenido y se pueda hacer scroll normal con el dedo (ver el
-  // comentario junto a ".app" en styles.css) -- eso significa que este
-  // contenedor NUNCA llega a desbordar de verdad (su scrollHeight ==
-  // clientHeight siempre), asi que fijar su propio scrollTop no mueve
-  // nada. El que de verdad se desplaza es la PAGINA entera, asi que hay
-  // que calcular la posicion absoluta en la pagina y usar
-  // window.scrollTo() en su lugar.
+  // Desde que la vista diaria acota su propio alto (body.mobile-day-
+  // scroll-lock, ver styles.css), quien se desplaza de verdad es
+  // .mobile-hours-scroll, no la pagina -- antes era al reves y esto
+  // usaba window.scrollTo(). El grid es hijo directo de ese contenedor,
+  // que ademas es position:relative, asi que su offsetTop ya esta medido
+  // respecto a el.
   const grid = document.getElementById('mobile-hours-grid');
-  if (!grid) return;
+  const scroller = document.querySelector('.mobile-hours-scroll');
+  if (!grid || !scroller) return;
   // targetMinutes explicito (p. ej. la hora real de un evento clicado
   // desde el buscador global) tiene prioridad; si no se pasa, se sigue
   // el comportamiento de siempre ("ahora" si es hoy, 8:00 si no).
@@ -1907,10 +1904,9 @@ function scrollMobileHoursToTime(date, targetMinutes) {
     const now = new Date();
     targetMinutes = sameDay(date, now) ? (now.getHours() * 60 + now.getMinutes()) : 8 * 60;
   }
-  const gridTop = grid.getBoundingClientRect().top + window.scrollY;
   // Deja un par de horas de margen ANTES del objetivo, para que no quede
   // pegado justo al borde superior de la pantalla.
-  window.scrollTo(0, Math.max(0, gridTop + targetMinutes - 120));
+  scroller.scrollTop = Math.max(0, grid.offsetTop + targetMinutes - 120);
 }
 
 // Reparto de "carriles" simple y voraz para eventos con hora que se
@@ -2116,13 +2112,13 @@ async function expandMobileDayListado(direction) {
     while (true) {
       const totalSpanDays = Math.round((mobileDayListadoRange.to - mobileDayListadoRange.from) / 86400000);
       if (totalSpanDays >= MOBILE_DAY_LISTADO_MAX_SPAN_DAYS) { mobileDayListadoPending.clear(); break; }
-      // El scroll real ocurre en la PAGINA, no dentro de
-      // #mobile-day-listado-view (ver comentario de
-      // scrollMobileHoursToTime() sobre por que ".app" nunca llega a
-      // acotar la altura de sus hijos en movil) -- se mide con
-      // document.documentElement/window en vez del propio contenedor.
-      const prevDocHeight = document.documentElement.scrollHeight;
-      const prevScrollY = window.scrollY;
+      // El scroll ocurre DENTRO de #mobile-day-listado-view (la vista
+      // diaria acota su propio alto, ver body.mobile-day-scroll-lock en
+      // styles.css) -- se mide sobre el propio contenedor, no sobre la
+      // pagina.
+      const listado = document.getElementById('mobile-day-listado-view');
+      const prevDocHeight = listado.scrollHeight;
+      const prevScrollY = listado.scrollTop;
       if (direction === 'back') {
         mobileDayListadoRange.from = new Date(mobileDayListadoRange.from.getFullYear(), mobileDayListadoRange.from.getMonth(), mobileDayListadoRange.from.getDate() - MOBILE_DAY_LISTADO_STEP_DAYS);
       } else {
@@ -2133,7 +2129,7 @@ async function expandMobileDayListado(direction) {
         // Compensa el scroll para que anteponer dias arriba no de un
         // salto visual (el contenido nuevo empuja hacia abajo lo que ya
         // se veia).
-        window.scrollTo(0, prevScrollY + (document.documentElement.scrollHeight - prevDocHeight));
+        listado.scrollTop = prevScrollY + (listado.scrollHeight - prevDocHeight);
       }
       if (mobileDayListadoPending.size === 0) break;
       direction = mobileDayListadoPending.values().next().value;
@@ -2148,16 +2144,16 @@ function setupMobileDayListadoObserver() {
   disconnectMobileDayListadoObserver();
   const topSentinel = document.getElementById('mobile-day-listado-top-sentinel');
   const bottomSentinel = document.getElementById('mobile-day-listado-bottom-sentinel');
-  // root:null (en vez del div) -- observa contra el VIEWPORT real del
-  // navegador, que es lo que de verdad se desplaza en movil (ver el
-  // mismo comentario de scrollMobileHoursToTime()).
+  // root = el propio contenedor que se desplaza (ver
+  // body.mobile-day-scroll-lock en styles.css): desde que la vista
+  // diaria acota su alto, es el quien desborda, no la pagina.
   mobileDayListadoObserver = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (!entry.isIntersecting) return;
       if (entry.target === topSentinel) expandMobileDayListado('back');
       else if (entry.target === bottomSentinel) expandMobileDayListado('forward');
     });
-  }, { root: null, threshold: 0 });
+  }, { root: document.getElementById('mobile-day-listado-view'), threshold: 0 });
   mobileDayListadoObserver.observe(topSentinel);
   mobileDayListadoObserver.observe(bottomSentinel);
 }
@@ -2167,9 +2163,9 @@ async function renderMobileDayListado(centerDate) {
     from: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() - 3),
     to: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() + 3),
   };
-  // El scroll real es el de la PAGINA (ver scrollMobileHoursToTime()),
-  // asi que "empezar arriba del todo" es scrollear la ventana, no el div.
-  window.scrollTo(0, 0);
+  // "Empezar arriba del todo" es desplazar el propio contenedor, que es
+  // quien desborda (ver scrollMobileHoursToTime()).
+  document.getElementById('mobile-day-listado-view').scrollTop = 0;
   await loadAndRenderMobileDayListado();
   // El primer observe() de IntersectionObserver avisa de inmediato con
   // el estado actual -- si la ventana inicial (±3 dias) no llega a
@@ -2355,6 +2351,12 @@ function enterMobileDayView(date, { targetMinutes } = {}) {
   document.getElementById('mobile-calendar-month-toolbar').classList.add('hidden');
   document.querySelector('.mobile-calendar-view').classList.add('hidden');
   document.getElementById('mobile-calendar-day-view').classList.remove('hidden');
+  // Marca para el CSS: mientras se ve el dia, la pagina deja de crecer
+  // con el contenido y el desplazamiento pasa a ser SOLO el de la
+  // rejilla de horas / la lista de eventos, no el de la pantalla
+  // entera (pedido de Koku: "lo unico que se deberia deslizar es la
+  // pantalla de horas o de eventos"). Ver .mobile-day-scroll-lock.
+  document.body.classList.add('mobile-day-scroll-lock');
   if (targetMinutes === null) {
     showMobileDay(date, { scrollToNow: false });
   } else {
@@ -2368,6 +2370,7 @@ function exitMobileDayView() {
   document.getElementById('mobile-calendar-day-view').classList.add('hidden');
   document.getElementById('mobile-calendar-month-toolbar').classList.remove('hidden');
   document.querySelector('.mobile-calendar-view').classList.remove('hidden');
+  document.body.classList.remove('mobile-day-scroll-lock');
 }
 
 document.getElementById('btn-mobile-day-back-label').addEventListener('click', exitMobileDayView);
@@ -2553,14 +2556,13 @@ function combineDateAndTime(date, timeStr) {
 // :30 que de :00 de la hora siguiente), 6:50 -> 7:00, 6:00 se queda en
 // 6:00. Se usa para sugerir la hora de inicio de un evento nuevo en vez
 // de dejar "las 6:37" tal cual.
-function roundToNearestHalfHour(date) {
+// Hora en punto de AHORA, hacia abajo: a las 17:17 propone 17:00 (y con
+// la hora de fin, que ya suma una hora, queda 17:00-18:00). Antes
+// redondeaba a la media hora mas cercana, asi que a las 17:17 proponia
+// 17:30-18:30 -- Koku pidio explicitamente lo primero.
+function roundDownToHour(date) {
   const rounded = new Date(date);
-  rounded.setSeconds(0, 0);
-  const minutes = rounded.getMinutes();
-  const remainder = minutes % 30;
-  if (remainder !== 0) {
-    rounded.setMinutes(remainder < 15 ? minutes - remainder : minutes + (30 - remainder));
-  }
+  rounded.setMinutes(0, 0, 0);
   return rounded;
 }
 
@@ -2592,7 +2594,7 @@ function openEventModal(event, presetDate) {
     defaultStart = new Date(presetDate);
     defaultStart.setHours(9, 0, 0, 0);
   } else {
-    defaultStart = roundToNearestHalfHour(defaultStart);
+    defaultStart = roundDownToHour(defaultStart);
   }
   const startDate = event ? new Date(event.startAt) : defaultStart;
   eventStartDateField.setValue(startDate);
@@ -3854,7 +3856,7 @@ function execNoteCommand(cmd) {
 // tabla -- ver mas abajo -- comparten la clase .note-editor-btn por el
 // aspecto visual, pero no tienen data-cmd ni pasan por execCommand).
 function refreshNoteEditorToolbar() {
-  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => {
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => {
     const active = document.queryCommandState(btn.dataset.cmd);
     btn.classList.toggle('is-active', !!active);
   });
@@ -3866,7 +3868,7 @@ function refreshNoteEditorToolbar() {
 // estado de la ULTIMA nota que se habia editado, en vez de apagados.
 // Tambien oculta el grupo +Fila/-Fila/+Col/-Col por la misma razon.
 function resetNoteEditorToolbar() {
-  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
   document.getElementById('note-table-context-toolbar').classList.add('hidden');
   document.getElementById('note-paragraph-style-btn').disabled = false;
   document.getElementById('note-quote-toggle-btn').disabled = false;
@@ -3876,10 +3878,9 @@ function resetNoteEditorToolbar() {
   document.getElementById('note-highlight-btn').disabled = false;
   document.getElementById('note-highlight-btn').classList.remove('is-active');
   cancelPendingNoteHighlight();
-  closeNoteFormatPopover();
 }
 
-document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => {
+document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => {
   // mousedown (no click) + preventDefault: si no, el navegador quita la
   // seleccion de texto del editor al pasar el foco al boton ANTES de que
   // se dispare el click, y execCommand ya no tendria sobre que aplicar
@@ -3887,153 +3888,6 @@ document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').for
   btn.addEventListener('mousedown', (e) => e.preventDefault());
   btn.addEventListener('click', () => execNoteCommand(btn.dataset.cmd));
 });
-
-// ---------------------------------------------------------------------
-// Panel de formato (boton "Formato" de la barra principal, ver
-// index.html): abre/cierra #note-format-popover, que contiene las 3
-// filas de controles de siempre. Deliberadamente NO es un popover
-// flotante (position:fixed) -- lo fue en una ronda anterior, pero
-// Koku reporto que "sigue tapando el texto" incluso tras cerrarlo solo
-// al escribir (ronda previa): con el editor pudiendo tener poca altura
-// (sobre todo en movil), un panel flotante encima del texto siempre lo
-// tapaba mientras estuviera abierto, sin importar si se estaba
-// escribiendo o no. Ahora vive DENTRO del flujo normal del documento,
-// como una fila mas de .note-editor-form (flex-column) justo entre la
-// barra principal y .note-editor-main -- al abrirse, .note-editor-main/
-// #note-body (flex:1; min-height:0) simplemente se encogen para dejarle
-// sitio, nunca se les superpone nada.
-//
-// A proposito NO pasa por closeAllPopovers()/el listener generico de
-// "click fuera cierra" de settings.js (ese mecanismo cerraria el panel
-// en cuanto se clica DENTRO de #note-body para seleccionar texto, justo
-// lo contrario de lo que hace falta) -- tiene su propio listener
-// dedicado, que solo cierra si el click cae fuera del propio panel, del
-// boton, del editor, o de cualquiera de sus popovers anidados (Aa/
-// resaltado/insertar tabla).
-// ---------------------------------------------------------------------
-const noteFormatPopover = document.getElementById('note-format-popover');
-const noteFormatBtn = document.getElementById('note-format-btn');
-
-// Posicion vertical (viewport) del cursor real dentro de #note-body --
-// null si no hay seleccion util (fuera del editor, o un rango colapsado
-// sin rects propios, p. ej. una linea vacia) para poder caer a un
-// respaldo mas simple en ese caso.
-function getNoteCaretViewportTop() {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return null;
-  const liveRange = sel.getRangeAt(0);
-  if (!NOTE_EDITOR_BODY.contains(liveRange.startContainer)) return null;
-  const range = liveRange.cloneRange();
-  range.collapse(true);
-  let rect = range.getClientRects()[0];
-  if (!rect || (rect.top === 0 && rect.bottom === 0)) {
-    rect = range.getBoundingClientRect();
-  }
-  if (!rect || (rect.top === 0 && rect.bottom === 0 && rect.height === 0)) {
-    // Rango colapsado sin rects propios (linea vacia, justo antes de un
-    // <br> suelto...) -- usar el propio elemento de la linea como
-    // referencia de respaldo.
-    let node = liveRange.startContainer;
-    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-    const line = node ? getNoteLineElement(node) : null;
-    rect = line ? line.getBoundingClientRect() : null;
-  }
-  return rect && !(rect.top === 0 && rect.bottom === 0) ? rect.top : null;
-}
-
-// Cambiar entre .hidden encoge/agranda #note-body al instante (flex
-// column, ver arriba) -- con el editor todavia enfocado justo cuando su
-// caja cambia de tamano, el navegador "revela" el elemento enfocado por
-// su cuenta, y ademas la caja en si pasa a tener otra altura, asi que
-// mantener el mismo scrollTop numerico de antes (primer intento, ya
-// descartado) NO garantiza que el cursor se quede en el mismo sitio en
-// pantalla -- reportado por Koku como "acorta la vista y baja el
-// principio, mueve todo hacia abajo". En vez de eso, se mide DONDE esta
-// el cursor en la pantalla antes de tocar nada, y despues del cambio de
-// layout (la propia lectura del rect ya fuerza un reflow real) se
-// calcula cuanto se desplazo y se compensa ese delta exacto sobre
-// #note-body.scrollTop -- funciona sin importar la causa exacta del
-// desplazamiento (encogido de la caja, "revelar enfocado" nativo...),
-// porque no depende de anticiparla, solo de comparar "donde estaba" vs
-// "donde esta" el cursor. Se reafirma una vez mas en el siguiente frame
-// por si el navegador revierte el valor al pintar de forma asincrona.
-// El listener de 'scroll' de mas abajo (cierra el panel si el usuario
-// desliza el contenido) tiene que distinguir un scroll REAL del propio
-// usuario de este ajuste PROGRAMATICO de scrollTop -- si no, abrir el
-// panel dispara su propia compensacion, que dispara un evento 'scroll',
-// que el listener interpretaria como "el usuario ha deslizado" y
-// cerraria el panel al instante, justo despues de abrirlo. El evento
-// 'scroll' del navegador no es sincrono con la asignacion de
-// scrollTop (puede tardar hasta el siguiente frame), asi que una
-// bandera sincrona no basta -- se usa una ventana de tiempo corta.
-let noteFormatScrollSuppressUntil = 0;
-
-function restoreNoteScrollAfter(fn) {
-  const caretTopBefore = getNoteCaretViewportTop();
-  const noteScrollBefore = NOTE_EDITOR_BODY.scrollTop; // respaldo si no hay caret valido
-  fn();
-  function reapply() {
-    const caretTopAfter = getNoteCaretViewportTop();
-    noteFormatScrollSuppressUntil = performance.now() + 150;
-    if (caretTopBefore != null && caretTopAfter != null) {
-      NOTE_EDITOR_BODY.scrollTop += (caretTopAfter - caretTopBefore);
-    } else {
-      NOTE_EDITOR_BODY.scrollTop = noteScrollBefore;
-    }
-  }
-  reapply();
-  requestAnimationFrame(reapply);
-}
-
-function closeNoteFormatPopover() {
-  restoreNoteScrollAfter(() => {
-    noteFormatPopover.classList.add('hidden');
-    noteFormatBtn.setAttribute('aria-expanded', 'false');
-  });
-}
-
-function openNoteFormatPopover() {
-  restoreNoteScrollAfter(() => {
-    noteFormatPopover.classList.remove('hidden');
-    noteFormatBtn.setAttribute('aria-expanded', 'true');
-  });
-}
-
-noteFormatBtn.addEventListener('mousedown', (e) => e.preventDefault());
-noteFormatBtn.addEventListener('click', () => {
-  if (noteFormatBtn.disabled) return;
-  if (noteFormatPopover.classList.contains('hidden')) openNoteFormatPopover();
-  else closeNoteFormatPopover();
-});
-
-document.addEventListener('click', (e) => {
-  if (noteFormatPopover.classList.contains('hidden')) return;
-  if (e.target.closest('.note-format-popover, #note-format-btn, .paragraph-style-popover, .highlight-color-popover, .table-insert-popover')) return;
-  // Dentro de #note-body distinguimos: si el clic ha dejado una
-  // seleccion de texto real (arrastrar para elegir que resaltar), el
-  // panel se queda abierto para poder aplicarle un formato. Un simple
-  // toque para colocar el cursor (seleccion colapsada, sin arrastre) ya
-  // no cuenta como "dentro" -- cierra el panel igual que cualquier otro
-  // sitio, para poder seguir escribiendo (bug real reportado: tocar la
-  // pantalla para escribir no cerraba nada, solo pulsar una tecla si lo
-  // hacia).
-  if (e.target.closest('#note-body')) {
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return;
-  }
-  closeNoteFormatPopover();
-});
-
-// Un gesto de scroll/swipe (arrastrar para desplazar el contenido de la
-// nota) nunca dispara un 'click' -- el listener de arriba no lo detecta,
-// asi que el panel se quedaba abierto aunque el usuario ya se hubiera
-// ido a leer/escribir mas abajo. Se cierra tambien con el primer scroll
-// real dentro de #note-body (una vez cerrado, el resto del mismo gesto
-// no hace nada mas, ya que closeNoteFormatPopover() es idempotente).
-NOTE_EDITOR_BODY.addEventListener('scroll', () => {
-  if (performance.now() < noteFormatScrollSuppressUntil) return; // scroll propio de abrir/cerrar el panel, no del usuario
-  if (!noteFormatPopover.classList.contains('hidden')) closeNoteFormatPopover();
-}, { passive: true });
 
 // ---------------------------------------------------------------------
 // Tablas dentro de una nota (Fase 4, sub-ronda de tablas): boton
@@ -4185,16 +4039,18 @@ function isSelectionInsideNoteListItem() {
 // dentro de un bloque de codigo, igual que negrita/cursiva/listas.
 function refreshNoteBlockButtons() {
   const disabled = isSelectionInsideNoteListItem() || isCursorInCodeBlock();
-  const block = disabled ? null : getNoteBlockAncestor(window.getSelection().anchorNode);
+  // Los tres botones de bloque miran la seleccion ENTERA, no solo la
+  // linea del cursor (ver getNoteSelectionBlocks()). La cita se marca
+  // como activa solo si TODAS las lineas seleccionadas lo estan, que es
+  // justo cuando volver a pulsarla las apaga.
+  const indentBlocks = disabled ? [] : getNoteSelectionBlocks();
   document.getElementById('note-paragraph-style-btn').disabled = disabled;
   document.getElementById('note-quote-toggle-btn').disabled = disabled;
-  document.getElementById('note-quote-toggle-btn').classList.toggle('is-active', !!block && block.getAttribute('data-quote') === '1');
+  document.getElementById('note-quote-toggle-btn').classList.toggle(
+    'is-active',
+    indentBlocks.length > 0 && indentBlocks.every((b) => b.getAttribute('data-quote') === '1'),
+  );
 
-  // Sangria: si hay varias lineas seleccionadas, el boton se activa/
-  // desactiva mirando el conjunto (al menos una linea puede moverse en
-  // ese sentido), no solo la linea del cursor -- ver
-  // getNoteIndentSelectionBlocks() mas abajo.
-  const indentBlocks = disabled ? [] : getNoteIndentSelectionBlocks();
   const indents = indentBlocks.length
     ? indentBlocks.map((b) => Math.max(0, Math.min(NOTE_MAX_INDENT, parseInt(b.dataset.indent || '0', 10) || 0)))
     : [0];
@@ -4216,11 +4072,16 @@ function applyNoteParagraphStyle(styleName) {
   // defecto del navegador, que varia entre motores.
   const tagMap = { title: '<h1>', heading: '<h2>', subheading: '<h3>', body: '<div>', mono: '<div>' };
   document.execCommand('formatBlock', false, tagMap[styleName]);
-  const block = getNoteBlockAncestor(window.getSelection().anchorNode);
-  if (block) {
+  // Los bloques se recalculan DESPUES del formatBlock a proposito: ese
+  // comando sustituye cada elemento por uno nuevo con la etiqueta
+  // pedida, asi que cualquier referencia capturada antes apuntaria a
+  // nodos ya desenganchados. Y se recorren TODOS los de la seleccion,
+  // no solo el del cursor -- si no, seleccionar varias lineas y elegir
+  // "Monoespaciado" solo cambiaba la primera (reportado por Koku).
+  getNoteSelectionBlocks().forEach((block) => {
     if (styleName === 'mono') block.setAttribute('data-style', 'mono');
     else block.removeAttribute('data-style');
-  }
+  });
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4232,11 +4093,17 @@ function applyNoteParagraphStyle(styleName) {
 // cosas. Atributo manual data-quote="1", independiente del todo.
 function toggleNoteQuoteBlock() {
   if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return;
-  ensureNoteBlockWrapped();
-  const block = getNoteBlockAncestor(window.getSelection().anchorNode);
-  if (!block) return;
-  if (block.getAttribute('data-quote') === '1') block.removeAttribute('data-quote');
-  else block.setAttribute('data-quote', '1');
+  const blocks = getNoteSelectionBlocks({ ensureWrapped: true });
+  if (blocks.length === 0) return;
+  // Con varias lineas seleccionadas el boton funciona como un unico
+  // interruptor para todas: si YA estan todas en cita, se quita; si
+  // hay alguna que no, se pone en todas (es lo que se espera de un
+  // boton que se ve "encendido" o "apagado", no una mezcla).
+  const todasSonCita = blocks.every((b) => b.getAttribute('data-quote') === '1');
+  blocks.forEach((block) => {
+    if (todasSonCita) block.removeAttribute('data-quote');
+    else block.setAttribute('data-quote', '1');
+  });
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4258,45 +4125,43 @@ function applyNoteIndentDeltaToBlock(block, delta) {
 
 // Bloques (hijos directos de NOTE_EDITOR_BODY) que toca la seleccion
 // actual -- un solo elemento con el cursor sin seleccionar nada, o
-// todos los que la seleccion cruza si hay varias lineas marcadas.
-function getNoteIndentSelectionBlocks() {
+// todos los que la seleccion cruza si hay varias lineas marcadas. Lo
+// comparten las TRES acciones de bloque (sangria, cita y estilo de
+// parrafo): antes solo la sangria miraba la seleccion entera y las
+// otras dos actuaban unicamente sobre la linea del cursor, que es
+// justo lo que Koku reporto ("si selecciono varias lineas y le doy a
+// poner comentario, solo actua en la primera").
+//
+// ensureWrapped: envuelve la linea suelta antes de devolver los
+// bloques, para las acciones que necesitan un elemento real donde
+// colgar un atributo. Se hace con el mismo cuidado de siempre --
+// capturar los limites del Range ANTES de mover nada, porque un Range
+// no sigue al nodo que se mueve cuando su CONTENEDOR es justo ese nodo
+// (ver ensureNoteFirstLineWrapped).
+function getNoteSelectionBlocks({ ensureWrapped = false } = {}) {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return [];
-  const range = sel.getRangeAt(0);
   if (sel.isCollapsed) {
-    const block = getNoteBlockAncestor(sel.anchorNode);
+    if (ensureWrapped) ensureNoteBlockWrapped();
+    const block = getNoteBlockAncestor(window.getSelection().anchorNode);
     return block ? [block] : [];
   }
+  const live = sel.getRangeAt(0);
+  const startContainer = live.startContainer;
+  const startOffset = live.startOffset;
+  const endContainer = live.endContainer;
+  const endOffset = live.endOffset;
+  if (ensureWrapped) ensureNoteFirstLineWrapped();
+  const range = document.createRange();
+  range.setStart(startContainer, startOffset);
+  range.setEnd(endContainer, endOffset);
   return Array.from(NOTE_EDITOR_BODY.children).filter((el) => range.intersectsNode(el));
 }
 
 function applyNoteIndentDelta(delta) {
   if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return;
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return;
-  if (sel.isCollapsed) {
-    ensureNoteBlockWrapped();
-    const block = getNoteBlockAncestor(window.getSelection().anchorNode);
-    if (block) applyNoteIndentDeltaToBlock(block, delta);
-  } else {
-    // Mismo cuidado que wrapNoteHighlightRange: capturar el limite ANTES
-    // de envolver la primera linea suelta si la seleccion la incluye --
-    // el Range en curso no sigue al nodo que se mueve cuando su
-    // CONTENEDOR es justo ese nodo (ver el comentario de
-    // ensureNoteFirstLineWrapped).
-    const liveRange = sel.getRangeAt(0);
-    const startContainer = liveRange.startContainer;
-    const startOffset = liveRange.startOffset;
-    const endContainer = liveRange.endContainer;
-    const endOffset = liveRange.endOffset;
-    ensureNoteFirstLineWrapped();
-    const range = document.createRange();
-    range.setStart(startContainer, startOffset);
-    range.setEnd(endContainer, endOffset);
-    Array.from(NOTE_EDITOR_BODY.children)
-      .filter((el) => range.intersectsNode(el))
-      .forEach((block) => applyNoteIndentDeltaToBlock(block, delta));
-  }
+  getNoteSelectionBlocks({ ensureWrapped: true })
+    .forEach((block) => applyNoteIndentDeltaToBlock(block, delta));
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4450,6 +4315,33 @@ function insertNodeOutsideNoteHighlight(range, node) {
   if (!enclosing.textContent) enclosing.remove();
 }
 
+// Un [data-highlight] sin texto dentro no se ve como "nada": el CSS de
+// resaltado le da padding y border-radius, asi que se pinta como una
+// cajita de color surgida de la nada -- los "resaltados fantasma" que
+// reporto Koku. Salen como residuo natural de partir spans (al quitar
+// el resaltado justo en un borde, o al pulsar Intro dentro de uno), asi
+// que en vez de perseguir cada caso se barren SIEMPRE despues de tocar
+// resaltados. El span semilla del modo pendiente se respeta a proposito
+// (lleva el caracter de ancho cero, y ademas es el que esta esperando
+// que se escriba dentro).
+function removeEmptyNoteHighlights() {
+  NOTE_EDITOR_BODY.querySelectorAll('[data-highlight]').forEach((span) => {
+    if (span === pendingNoteHighlightSpan) return;
+    if (!span.textContent) span.remove();
+  });
+}
+
+// Crea el <span> con el que se envuelve un tramo. key=null significa
+// "sin resaltado": un span pelado, que luego clearNoteHighlight()
+// desenvuelve. Sirve para reutilizar TODO el troceo por lineas de
+// wrapNoteHighlightRange() tambien al QUITAR el resaltado, en vez de
+// tener dos recorridos distintos que puedan divergir.
+function createNoteHighlightSpan(key) {
+  const span = document.createElement('span');
+  if (key) span.setAttribute('data-highlight', key);
+  return span;
+}
+
 // Envuelve el contenido de "range" en uno o varios <span data-highlight>
 // -- si la seleccion cae ENTERA dentro de una sola linea, un solo span
 // (igual que antes de este arreglo). Si CRUZA varias lineas, un span
@@ -4494,8 +4386,7 @@ function wrapNoteHighlightRange(range, key) {
       innerRange.setStart(normStart.container, normStart.offset);
       innerRange.setEnd(normEnd.container, normEnd.offset);
     }
-    const span = document.createElement('span');
-    span.setAttribute('data-highlight', key);
+    const span = createNoteHighlightSpan(key);
     const fragment = innerRange.extractContents();
     stripNoteHighlightWrappers(fragment);
     span.appendChild(fragment);
@@ -4519,8 +4410,7 @@ function wrapNoteHighlightRange(range, key) {
   const startRange = document.createRange();
   startRange.setStart(normStart.container, normStart.offset);
   startRange.setEndAfter(startLine.lastChild || startLine);
-  const startSpan = document.createElement('span');
-  startSpan.setAttribute('data-highlight', key);
+  const startSpan = createNoteHighlightSpan(key);
   const startFragment = startRange.extractContents();
   stripNoteHighlightWrappers(startFragment);
   startSpan.appendChild(startFragment);
@@ -4531,8 +4421,7 @@ function wrapNoteHighlightRange(range, key) {
     const line = allLines[i];
     const lineRange = document.createRange();
     lineRange.selectNodeContents(line);
-    const span = document.createElement('span');
-    span.setAttribute('data-highlight', key);
+    const span = createNoteHighlightSpan(key);
     const lineFragment = lineRange.extractContents();
     stripNoteHighlightWrappers(lineFragment);
     span.appendChild(lineFragment);
@@ -4544,8 +4433,7 @@ function wrapNoteHighlightRange(range, key) {
   const endRange = document.createRange();
   endRange.setStartBefore(endLine.firstChild || endLine);
   endRange.setEnd(normEnd.container, normEnd.offset);
-  const endSpan = document.createElement('span');
-  endSpan.setAttribute('data-highlight', key);
+  const endSpan = createNoteHighlightSpan(key);
   const endFragment = endRange.extractContents();
   stripNoteHighlightWrappers(endFragment);
   endSpan.appendChild(endFragment);
@@ -4657,6 +4545,7 @@ function applyNoteHighlight(key) {
     newRange.setEndAfter(spans[spans.length - 1]);
     sel.addRange(newRange);
   }
+  removeEmptyNoteHighlights();
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4719,10 +4608,29 @@ function clearNoteHighlight() {
     refreshNoteEditorState();
     return;
   }
+  // Antes esto quitaba el atributo del span ENTERO en cuanto la
+  // seleccion lo tocaba (range.intersectsNode). Bug real reportado por
+  // Koku: resaltar varias lineas y quitar el resaltado de UNA se lo
+  // quitaba a todas -- pasa siempre que un mismo span cubre mas de lo
+  // seleccionado (varias lineas separadas por <br>, o simplemente una
+  // frase de la que solo se selecciona una palabra). Ahora se reutiliza
+  // el mismo troceo que al PONER el resaltado, con key=null: se extrae
+  // exactamente el tramo seleccionado, se le quitan los resaltados que
+  // llevara dentro, y se reinserta FUERA del span original -- que asi
+  // queda partido en las mitades de antes y despues, cada una con su
+  // color intacto.
+  ensureNoteFirstLineWrapped();
   const range = sel.getRangeAt(0);
-  NOTE_EDITOR_BODY.querySelectorAll('[data-highlight]').forEach((el) => {
-    if (range.intersectsNode(el)) el.removeAttribute('data-highlight');
+  const spans = wrapNoteHighlightRange(range, null);
+  // Los spans pelados que deja el troceo no aportan nada (el texto ya
+  // no lleva resaltado): se desenvuelven y se unen los nodos de texto
+  // sueltos, para no ir dejando capas vacias en el HTML de la nota cada
+  // vez que se quita un resaltado.
+  spans.forEach((span) => {
+    if (span.parentNode) span.replaceWith(...span.childNodes);
   });
+  removeEmptyNoteHighlights();
+  NOTE_EDITOR_BODY.normalize();
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -5274,10 +5182,6 @@ noteImageFileInput.addEventListener('change', () => {
 // propio navegador ya le quita estilos raros al venir de fuera, el mismo
 // comportamiento por defecto de cualquier contenteditable).
 NOTE_EDITOR_BODY.addEventListener('paste', (e) => {
-  // Pegar tambien cuenta como "escribir" -- mismo criterio que el
-  // keydown de arriba, el panel de Formato no debe quedarse tapando el
-  // contenido que se acaba de pegar.
-  if (!noteFormatPopover.classList.contains('hidden')) closeNoteFormatPopover();
   const items = Array.from(e.clipboardData ? e.clipboardData.items : []);
   const imageItem = items.find((item) => item.type.startsWith('image/'));
   if (!imageItem) return;
@@ -5773,11 +5677,19 @@ function handleNoteHighlightAwareEnter() {
   const liveRange = sel.getRangeAt(0);
   if (!NOTE_EDITOR_BODY.contains(liveRange.startContainer)) return false;
 
-  // El resaltado "en vivo" (pendiente, ver beginPendingNoteHighlight) no
-  // debe continuar en el parrafo nuevo -- igual que antes, solo que
-  // ahora el propio cancelPendingNoteHighlight() ya deja el DOM listo
-  // (quita el span semilla vacio si no se llego a escribir nada real)
-  // antes de calcular donde partir.
+  // Color activo en el punto del cursor ANTES de tocar nada: puede venir
+  // del modo "resaltar antes de escribir" (pendiente) o de estar
+  // escribiendo dentro de un resaltado ya aplicado. Sea cual sea el
+  // origen, la linea nueva CONTINUA con ese mismo color -- decision de
+  // Koku, para que el rotulador se comporte igual que la cita, que ya
+  // seguia activa saltara las lineas que saltara. Para dejar de
+  // resaltar esta el boton "Ninguno", como en la cita esta su propio
+  // boton.
+  const colorQueContinua = getActiveNoteHighlightKey() || null;
+
+  // El span semilla del modo pendiente se retira ahora (si no se llego a
+  // escribir nada real dentro), para que no estorbe al partir la linea
+  // -- el color en si ya esta guardado en colorQueContinua.
   if (pendingNoteHighlightKey) cancelPendingNoteHighlight();
 
   // Releer la seleccion YA DESPUES de cancelar el resaltado pendiente
@@ -5793,7 +5705,11 @@ function handleNoteHighlightAwareEnter() {
   ensureNoteFirstLineWrapped();
   const line = getNoteLineElement(caretContainer);
   if (!line || !NOTE_LINE_TAGS.has(line.tagName) || line.tagName === 'LI') return false;
-  if (!line.querySelector('[data-highlight]')) return false;
+  // Una linea sin nada resaltado sigue usando el Intro nativo de
+  // siempre. La excepcion es tener el rotulador recien activado sin
+  // haber escrito todavia: ahi no hay ningun span en la linea, pero el
+  // color igual tiene que continuar abajo.
+  if (!line.querySelector('[data-highlight]') && !colorQueContinua) return false;
 
   const tailRange = document.createRange();
   tailRange.setStart(caretContainer, caretOffset);
@@ -5827,24 +5743,33 @@ function handleNoteHighlightAwareEnter() {
   sel2.removeAllRanges();
   sel2.addRange(newRange);
 
+  // Continuar el resaltado en la linea nueva. Si el corte cayo a mitad
+  // de un resaltado, la linea nueva YA empieza con ese span y basta con
+  // meter el cursor dentro; si el corte fue al final (lo normal al
+  // escribir y pulsar Intro), no hay nada resaltado todavia y se
+  // arranca el modo pendiente con el mismo color, que es exactamente lo
+  // que hace pulsar ese color a mano.
+  if (colorQueContinua) {
+    const primero = newLine.firstChild;
+    const yaResaltada = primero
+      && primero.nodeType === Node.ELEMENT_NODE
+      && primero.getAttribute('data-highlight') === colorQueContinua;
+    if (yaResaltada) {
+      const dentro = document.createRange();
+      dentro.setStart(primero, 0);
+      dentro.collapse(true);
+      sel2.removeAllRanges();
+      sel2.addRange(dentro);
+    } else {
+      beginPendingNoteHighlight(colorQueContinua);
+    }
+  }
+
   NOTE_EDITOR_BODY.dispatchEvent(new Event('input', { bubbles: true }));
   return true;
 }
 
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
-  // El panel "Formato" (Aa/negrita/listas/etc.) se queda abierto a
-  // proposito mientras se selecciona texto dentro de #note-body (ver el
-  // comentario junto a noteFormatPopover mas arriba) -- pero si el
-  // usuario empieza a escribir de verdad, el panel puede quedar tapando
-  // justo la linea donde esta escribiendo. Se cierra solo con cualquier
-  // tecla que produzca/borre contenido (letra, Intro, Backspace/Supr,
-  // Tab) sin modificador -- los atajos con Ctrl/Cmd (negrita, listas...)
-  // no cuentan como "escribir", el panel se queda abierto para ellos
-  // igual que al clicar el boton correspondiente.
-  if (!noteFormatPopover.classList.contains('hidden') && !e.ctrlKey && !e.metaKey && !e.altKey
-    && (e.key.length === 1 || e.key === 'Enter' || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Tab')) {
-    closeNoteFormatPopover();
-  }
   if (isVimModeEnabled()) {
     if (noteEditorVimSubMode === 'normal') {
       handleVimNormalKeydown(e);
@@ -6053,12 +5978,10 @@ function applyNoteEditorReadMode(readOnly) {
   const modeBtn = document.getElementById('note-editor-read-mode-btn');
   modeBtn.textContent = readOnly ? 'Editar' : 'Modo lectura';
   modeBtn.setAttribute('aria-pressed', readOnly ? 'true' : 'false');
-  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
-  document.getElementById('note-format-btn').disabled = readOnly;
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
   if (readOnly) {
     document.getElementById('note-table-context-toolbar').classList.add('hidden');
     document.getElementById('btn-delete-note').classList.add('hidden');
-    closeNoteFormatPopover();
   }
   document.querySelector('#note-form button[type="submit"]').classList.toggle('hidden', readOnly);
   // El indicativo de modo vim (si esta activado) no tiene sentido en
@@ -6130,7 +6053,16 @@ function closeOpenNote(key) {
   const entry = findOpenNote(key);
   if (!entry) return;
   if (key === state.activeOpenNoteKey) captureActiveOpenNoteFromDom();
-  if (isOpenNoteDirty(entry)) {
+  if (isMobileLayout()) {
+    // En movil hay autoguardado, asi que preguntar "¿cerrar sin
+    // guardar?" no tenia ningun sentido -- y encima el temporizador del
+    // autoguardado seguia vivo tras cerrar, asi que guardaba igual
+    // despues de haber dicho que no (justo lo que reporto Koku: "me
+    // dice de salir sin guardar, pero al entrar me lo ha guardado").
+    // Ahora se guarda lo que quede pendiente y se cierra sin preguntar
+    // nada.
+    flushMobileNoteAutosave(entry);
+  } else if (isOpenNoteDirty(entry)) {
     const label = entry.title || 'Nota sin título';
     if (!confirm(`"${label}" tiene cambios sin guardar. ¿Cerrar sin guardar?`)) return;
   }
@@ -6372,15 +6304,34 @@ NOTE_EDITOR_BODY.addEventListener('input', () => {
 // guardado -- el dialogo de "cambios sin guardar" de closeOpenNote()
 // se queda como red de seguridad para el hueco de tiempo entre el
 // ultimo tecleo y que el debounce dispare.
+// "Estamos en el visor movil": mismo umbral que el CSS (860px), en un
+// unico sitio para que no se repita el matchMedia suelto por el
+// archivo.
+function isMobileLayout() {
+  return window.matchMedia('(max-width: 859px)').matches;
+}
+
 let mobileNoteAutosaveTimer = null;
 function scheduleMobileNoteAutosave() {
-  if (!window.matchMedia('(max-width: 859px)').matches) return;
+  if (!isMobileLayout()) return;
   clearTimeout(mobileNoteAutosaveTimer);
   mobileNoteAutosaveTimer = setTimeout(() => {
     const entry = findOpenNote(state.activeOpenNoteKey);
     if (!entry || entry.readMode) return;
     document.getElementById('note-form').requestSubmit();
   }, 1500);
+}
+
+// Guardar YA lo que estuviera esperando al debounce, y cancelar el
+// temporizador. Se llama al cerrar una nota en movil: sin cancelarlo,
+// el guardado pendiente se disparaba DESPUES de cerrar, sobre una nota
+// que ya no era la activa.
+function flushMobileNoteAutosave(entry) {
+  clearTimeout(mobileNoteAutosaveTimer);
+  mobileNoteAutosaveTimer = null;
+  if (!entry || entry.readMode) return;
+  if (!isOpenNoteDirty(entry)) return;
+  document.getElementById('note-form').requestSubmit();
 }
 
 document.getElementById('note-form').addEventListener('submit', async (e) => {
@@ -11399,44 +11350,6 @@ applyMiEspacioMode();
 applyUiStyle();
 
 // ---------------------------------------------------------------------
-// Pantalla de bienvenida (primer arranque): ver el modal en index.html.
-// Se muestra una sola vez, en el dispositivo que abra la app primero
-// (el perfil es compartido por TODA la instalacion, no por dispositivo
-// -- ver user_profile en server/db.js), tanto al guardar como al pulsar
-// "Ahora no" se marca como vista para siempre (los dos llaman a PUT
-// /api/profile, que marca onboardingCompleted=true como efecto
-// secundario -- ver server/routes/profile.js).
-// ---------------------------------------------------------------------
-async function maybeShowOnboarding() {
-  const profile = await api('/api/profile');
-  if (profile.onboardingCompleted) return;
-  document.getElementById('onboarding-name').value = profile.name || '';
-  document.getElementById('onboarding-modal').classList.remove('hidden');
-}
-
-function closeOnboardingModal() {
-  document.getElementById('onboarding-modal').classList.add('hidden');
-}
-
-document.getElementById('onboarding-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  await api('/api/profile', {
-    method: 'PUT',
-    body: JSON.stringify({
-      name: document.getElementById('onboarding-name').value,
-    }),
-  });
-  closeOnboardingModal();
-});
-
-document.getElementById('btn-onboarding-skip').addEventListener('click', async () => {
-  // Body vacio a proposito: no cambia nombre ni correo, solo marca la
-  // pantalla como vista (ver el comentario de PUT /api/profile).
-  await api('/api/profile', { method: 'PUT', body: JSON.stringify({}) });
-  closeOnboardingModal();
-});
-
-// ---------------------------------------------------------------------
 // Arranque
 // ---------------------------------------------------------------------
 // Ejecuta un paso de arranque sin dejar que un fallo suyo aborte los
@@ -11522,7 +11435,6 @@ async function init() {
   // llamadas de red secuenciales que había antes.
   await new Promise((resolve) => setTimeout(resolve, 0));
   await initStep(restoreCurrentScreen);
-  await initStep(maybeShowOnboarding);
   await initStep(loadGroups);
   await initStep(loadSpecialDays);
   await initStep(loadMonth);

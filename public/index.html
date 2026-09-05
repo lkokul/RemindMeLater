@@ -2,7 +2,12 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<!-- viewport-fit=cover: sin esto, en la app empaquetada el contenido se
+     mete debajo del reloj/notch del iPhone y ademas env(safe-area-inset-*)
+     devuelve siempre 0, asi que no habia forma de apartarlo. Con cover, esas
+     variables ya traen el hueco real de cada dispositivo y el CSS lo reserva
+     (ver .app/.my-space-view en styles.css). -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>RemindMeLater</title>
 <link rel="stylesheet" href="styles.css" />
 
@@ -146,9 +151,9 @@
              (gimnasio, finanzas, lecturas...). A diferencia de Mi
              espacio no tiene modo "panel", siempre es pantalla
              completa, asi que este boton nunca se oculta. -->
-        <button id="btn-extensions" class="secondary-btn my-space-topbar-btn" aria-label="Apps">
+        <button id="btn-extensions" class="secondary-btn my-space-topbar-btn" aria-label="Herramientas">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-          <span>Apps</span>
+          <span>Herramientas</span>
         </button>
         <button id="btn-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </nav>
@@ -178,9 +183,9 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v5h5"></path><line x1="8" y1="12" x2="16" y2="12"></line><line x1="8" y1="16" x2="13" y2="16"></line></svg>
         <span>Notas</span>
       </button>
-      <button type="button" class="mobile-nav-btn" data-mobile-nav="extensions" aria-label="Apps">
+      <button type="button" class="mobile-nav-btn" data-mobile-nav="extensions" aria-label="Herramientas">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-        <span>Apps</span>
+        <span>Herramientas</span>
       </button>
       <button type="button" class="mobile-nav-btn" data-mobile-nav="settings" aria-label="Configuración">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
@@ -624,7 +629,7 @@
        openExtensionsView/closeExtensionsView en app.js. -->
   <div id="extensions-view" class="my-space-view hidden">
     <div class="my-space-view-header">
-      <h2>Apps</h2>
+      <h2>Herramientas</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-extensions" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
         <!-- Configuracion tiene que poder abrirse desde CUALQUIER
@@ -657,30 +662,6 @@
     </div>
   </div>
 
-  <!-- Pantalla de bienvenida: aparece UNA sola vez, la primera vez que
-       se abre la app. Solo pide el nickname, que es lo que aparece como
-       "creado por" en lo que vas creando. "Ahora no" tambien cierra el
-       modal para siempre (ver app.js maybeShowOnboarding) sin obligar a
-       rellenar nada. -->
-  <div id="onboarding-modal" class="modal hidden">
-    <div class="modal-card">
-      <h2>Bienvenido a RemindMeLater</h2>
-      <p class="hint">Un dato rapido antes de empezar (puedes cambiarlo luego en Configuracion > Perfil).</p>
-      <form id="onboarding-form">
-        <label>
-          Nickname (opcional)
-          <input type="text" id="onboarding-name" placeholder="Tu nombre" maxlength="60" />
-        </label>
-        <p class="hint">Aparece como "creado por" en los eventos y tareas que anadas.</p>
-        <div class="modal-actions">
-          <button type="button" id="btn-onboarding-skip" class="secondary-btn">Ahora no</button>
-          <div class="spacer"></div>
-          <button type="submit" class="primary-btn">Guardar</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
   <!-- Extension "Gimnasio": registro de entrenamientos de verdad, con 3
        secciones alternables con pestanas (Sesiones/Rutinas/Progreso, ver
        .gym-tabs en styles.css y el interruptor en app.js) -- NO es el
@@ -693,7 +674,7 @@
     <div class="my-space-view-header">
       <h2>Gimnasio</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-gym" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-gym" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-gym-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -834,7 +815,7 @@
     <div class="my-space-view-header">
       <h2>Finanzas</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-finanzas" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-finanzas" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-finanzas-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1349,7 +1330,7 @@
     <div class="my-space-view-header">
       <h2>Viajes</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-viajes" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-viajes" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-viajes-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1538,7 +1519,7 @@
     <div class="my-space-view-header">
       <h2>Lecturas</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-lecturas" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-lecturas" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-lecturas-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1809,6 +1790,14 @@
                primero. -->
           <div id="note-title-preview" class="note-editor-title-preview" aria-live="polite"></div>
           <button type="button" id="note-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
+          <!-- Alterna entre editar (por defecto) y solo lectura, por si
+               solo quieres consultar la nota sin arriesgarte a tocarla
+               sin querer -- ver applyNoteEditorReadMode en app.js. Es un
+               ajuste POR NOTA ABIERTA (entry.readMode), no global del
+               editor. Vive aqui, junto a la estrella, y no en la barra
+               de formato de abajo: es una accion sobre la nota entera,
+               como marcarla favorita, no una herramienta de escritura. -->
+          <button type="button" id="note-editor-read-mode-btn" class="note-editor-btn note-editor-read-mode-btn" aria-pressed="false">Modo lectura</button>
         </div>
         <div class="note-editor-header-actions">
           <!-- Ya no hay desplegable de carpeta aqui -- mover una nota se
@@ -1820,37 +1809,13 @@
           <button type="submit" class="primary-btn desktop-only">Guardar</button>
         </div>
       </div>
+      <!-- Barra de formato: los controles se ven SIEMPRE desplegados
+           (3 filas: formato de texto / estructura de parrafo / tabla-
+           imagen-codigo-vim). Hubo una ronda en la que todo esto vivia
+           colapsado tras un boton "Formato"; Koku pidio volver a tenerlo
+           a la vista. "Modo lectura" ya no esta aqui: subio a la fila del
+           titulo, junto a la estrella de favoritos. -->
       <div id="note-body-toolbar" class="note-editor-toolbar">
-        <!-- Barra principal reducida a 2 botones (ronda "barra colapsada
-             en Formato"): todo el resto de controles de formato vive
-             ahora en el popover #note-format-popover (mas abajo, fuera de
-             .note-editor-main, mismo criterio que los demas popovers
-             creados por JS -- position:fixed colgado de <body>). Barra
-             deslizable (overflow-x, sin flex-wrap) por si algun dia hay
-             mas botones aqui, aunque con 2 no hace falta scroll. -->
-        <button type="button" id="note-format-btn" class="note-editor-btn" aria-haspopup="true" aria-expanded="false">Formato</button>
-        <!-- Alterna entre editar (por defecto, como antes) y solo lectura,
-             por si solo quieres consultar la nota sin arriesgarte a
-             tocarla sin querer -- ver applyNoteEditorReadMode en app.js.
-             Es un ajuste POR NOTA ABIERTA (entry.readMode), no global del
-             editor: cada nota recuerda su propio modo mientras este
-             abierta. -->
-        <button type="button" id="note-editor-read-mode-btn" class="note-editor-btn" aria-pressed="false">Modo lectura</button>
-      </div>
-      <!-- Panel de formato (boton "Formato" de arriba): las mismas 3 filas
-           de siempre (formato en linea / estructura de parrafo / tabla-
-           imagen-codigo-vim), movidas AQUI tal cual -- mismos ids, mismo
-           wiring en app.js, solo cambia donde viven en el arbol. Vive
-           fuera de .note-editor-main a proposito (hermano de nivel
-           superior, igual que los demas popovers creados por JS) para que
-           su position:fixed no dependa de ningun contexto de apilamiento
-           de por medio. Deliberadamente NO esta en la lista generica de
-           closeAllPopovers()/"click fuera cierra" de settings.js -- tiene
-           que seguir abierto mientras se selecciona texto DENTRO de
-           #note-body, que tambien cuenta como "fuera" del popover para
-           ese mecanismo generico. Ver el wiring de #note-format-btn en
-           app.js para su propio cierre dedicado. -->
-      <div id="note-format-popover" class="note-format-popover hidden">
         <div class="note-editor-toolbar-row">
           <!-- Estilo de parrafo (Titulo/Encabezado/Subencabezado/Cuerpo/
                Monoespaciado, estilo Notas de iPhone) -- abre un popover
@@ -2177,8 +2142,9 @@
         <p class="hint">Estos ajustes son solo para el dispositivo en el que estas viendo esto ahora mismo.</p>
         <label class="checkbox-row">
           <input type="checkbox" id="setting-notifications" />
-          Notificaciones del navegador para recordatorios
+          Avisos de recordatorios
         </label>
+        <p class="hint">En la app instalada, el aviso lo programa el propio telefono: suena aunque la app este cerrada, sin que nada salga del dispositivo. Desde un navegador solo puede avisar con la pestana abierta.</p>
         <p id="notifications-status" class="hint"></p>
 
         <h4>Tareas completadas</h4>
@@ -2190,7 +2156,7 @@
         <div id="gym-weight-unit-options" class="view-mode-options"></div>
 
         <h4>Barra inferior (móvil)</h4>
-        <p class="hint">Qué App vive en el segundo hueco de la barra inferior, junto a Calendario/Apps/Configuración (que se quedan siempre fijos).</p>
+        <p class="hint">Qué herramienta vive en el segundo hueco de la barra inferior, junto a Calendario/Herramientas/Configuración (que se quedan siempre fijos).</p>
         <div id="mobile-nav-slot-field"></div>
       </div>
 

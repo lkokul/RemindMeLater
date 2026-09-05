@@ -1470,18 +1470,48 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
 // ---------------------------------------------------------------------
 // "Este dispositivo": ajustes locales, no compartidos con nadie mas
 // ---------------------------------------------------------------------
+// Dos mecanismos posibles, y el orden importa:
+//  1. El plugin nativo (app empaquetada con Capacitor): es el unico que
+//     hace sonar un aviso con la app CERRADA, asi que manda siempre que
+//     exista.
+//  2. La API de notificaciones del navegador: respaldo para cuando se
+//     usa desde un navegador normal, donde solo avisa con la pestana
+//     abierta.
+// Antes esto solo miraba (2) -- y resulta que WKWebView (el motor de la
+// app en el iPhone) NO implementa `Notification`, asi que el interruptor
+// se quedaba deshabilitado con un "este navegador no admite
+// notificaciones" y nunca llegaba a pedirle permiso al sistema. Por eso
+// iOS no mostraba ni el apartado de notificaciones de la app en sus
+// Ajustes: nunca se le habia pedido nada.
 function refreshMobileTab() {
   const checkbox = document.getElementById('setting-notifications');
   const status = document.getElementById('notifications-status');
-  const supported = 'Notification' in window;
+  const nativo = localNotificationsAvailable();
+  const webApi = 'Notification' in window;
   const enabledPref = localStorage.getItem('notificationsEnabled') !== 'false';
 
-  checkbox.disabled = !supported;
-  checkbox.checked = supported && enabledPref && Notification.permission === 'granted';
+  checkbox.disabled = !nativo && !webApi;
 
-  if (!supported) status.textContent = 'Este navegador no admite notificaciones.';
-  else if (Notification.permission === 'denied') status.textContent = 'Estan bloqueadas en el navegador; cambialo en los ajustes del sitio para activarlas.';
-  else status.textContent = '';
+  if (nativo) {
+    // El permiso del sistema se consulta en asincrono; hasta que
+    // conteste se muestra lo que dice la preferencia guardada.
+    checkbox.checked = enabledPref;
+    status.textContent = '';
+    ensureLocalNotificationPermissionSilently().then((concedido) => {
+      checkbox.checked = enabledPref && concedido;
+      if (enabledPref && !concedido) {
+        status.textContent = 'Falta el permiso del sistema: activa el interruptor para pedirlo, o dalo desde los ajustes del telefono.';
+      }
+    });
+  } else if (!webApi) {
+    checkbox.checked = false;
+    status.textContent = 'Este navegador no admite notificaciones.';
+  } else {
+    checkbox.checked = enabledPref && Notification.permission === 'granted';
+    status.textContent = Notification.permission === 'denied'
+      ? 'Estan bloqueadas en el navegador; cambialo en los ajustes del sitio para activarlas.'
+      : '';
+  }
 
   refreshCompletedTasksDisplayOptions();
   refreshGymWeightUnitOptions();
@@ -1576,18 +1606,20 @@ function refreshGymWeightUnitOptions() {
 
 document.getElementById('setting-notifications').addEventListener('change', async (e) => {
   if (e.target.checked) {
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
+    // Se pide el permiso del mecanismo que de verdad se va a usar (ver
+    // refreshMobileTab): el del SISTEMA en la app empaquetada -- que es
+    // ademas la unica forma de que iOS/Android muestren el apartado de
+    // notificaciones de la app en sus ajustes --, y el del navegador
+    // cuando se usa desde un navegador normal.
+    const concedido = localNotificationsAvailable()
+      ? await ensureLocalNotificationPermission()
+      : ('Notification' in window && (await Notification.requestPermission()) === 'granted');
+    if (!concedido) {
       e.target.checked = false;
       refreshMobileTab();
       return;
     }
     localStorage.setItem('notificationsEnabled', 'true');
-    // En la app empaquetada hace falta ademas el permiso del sistema:
-    // es el que permite que el aviso suene con la app cerrada (ver
-    // public/local-notifications.js). En un navegador normal esto no
-    // hace nada y se queda solo con el permiso del navegador de arriba.
-    if (localNotificationsAvailable()) await ensureLocalNotificationPermission();
   } else {
     localStorage.setItem('notificationsEnabled', 'false');
   }
@@ -1771,19 +1803,6 @@ document.addEventListener('keydown', (e) => {
   const taskModal = document.getElementById('task-modal');
   if (taskModal && !taskModal.classList.contains('hidden')) {
     closeTaskModal();
-    return;
-  }
-
-  // Panel de formato del editor de notas (#note-format-popover, boton
-  // "Formato") -- no esta en la lista generica de popovers de mas
-  // arriba (openPopover) a proposito, ver el comentario de
-  // #note-format-btn en app.js. Se comprueba antes que la vista del
-  // editor entero, para que Esc cierre primero el panel y solo en un
-  // segundo Esc cierre la nota. Reutiliza el propio click del boton
-  // (que ya sabe abrir/cerrar) en vez de duplicar esa logica aqui.
-  const noteFormatPopoverEl = document.getElementById('note-format-popover');
-  if (noteFormatPopoverEl && !noteFormatPopoverEl.classList.contains('hidden')) {
-    document.getElementById('note-format-btn').click();
     return;
   }
 
