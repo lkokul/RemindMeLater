@@ -923,13 +923,24 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 /* Barra del mes de ESCRITORIO: su propia fila centrada, encima del
    calendario (no en el header, que se queda solo con el titulo y los
    barra propia del calendario movil mas abajo. */
+/* Rejilla de 3 columnas en vez de un flex centrado: con flex se centraba
+   el grupo ENTERO (flechas + mes + boton de vista anual), asi que el
+   ancho de ese ultimo boton empujaba el mes ~20px a la izquierda del
+   centro real. Con 1fr auto 1fr, la columna del medio queda centrada
+   pase lo que pase con lo que haya a los lados. */
 .month-nav-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: center;
-  gap: 0.6rem;
   padding: 0.6rem 1rem 0;
 }
+.month-nav-center {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+#btn-calendar-year-toggle { grid-column: 3; justify-self: end; }
 .month-label { min-width: 8rem; text-align: center; font-weight: 600; }
 #btn-calendar-year-toggle.active {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));

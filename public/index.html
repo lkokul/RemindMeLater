@@ -171,9 +171,15 @@
              mas abajo (.mobile-calendar-toolbar), ver Fase 2 del rediseño
              movil en CLAUDE.md. -->
         <nav class="month-nav-bar">
-          <button id="nav-prev" class="icon-btn" aria-label="Mes anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
-          <span id="current-month-label" class="month-label"></span>
-          <button id="nav-next" class="icon-btn" aria-label="Mes siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+          <!-- Flechas + mes van juntos en su propio contenedor para poder
+               centrarlos DE VERDAD: la barra es una rejilla de 3 columnas
+               y este grupo ocupa la del medio, asi que el boton de vista
+               anual (que vive en la 3a) no lo desplaza a la izquierda. -->
+          <div class="month-nav-center">
+            <button id="nav-prev" class="icon-btn" aria-label="Mes anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+            <span id="current-month-label" class="month-label"></span>
+            <button id="nav-next" class="icon-btn" aria-label="Mes siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+          </div>
           <!-- Vista anual (solo escritorio): alterna con la vista de mes.
                Ademas de este boton de apoyo, tambien se puede con la
                rueda del raton (hacia abajo sobre el mes = vista anual,
