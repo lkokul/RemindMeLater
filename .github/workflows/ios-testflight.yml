@@ -5,8 +5,22 @@ name: iOS TestFlight
 # defecto, el dialogo "Run workflow" de la pestaña Actions ya trae un
 # desplegable nativo para elegir CUALQUIER rama, sin necesitar nada mas
 # aqui para poder compilar builds de prueba desde otras ramas.
+#
+# El input "descripcion" es opcional y solo cambia el NOMBRE con el que
+# el run aparece en la lista de Actions (run-name), para distinguir a
+# simple vista que se estaba compilando ("rediseno gimnasio fase 7"...)
+# en vez de un "iOS TestFlight #12" generico. OJO: el dialogo de Run
+# workflow lee los inputs del archivo de la RAMA elegida en el
+# desplegable, asi que este campo solo aparece al lanzar desde ramas
+# que ya llevan esta version del archivo.
+run-name: ${{ inputs.descripcion || github.workflow }}
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      descripcion:
+        description: 'Nombre descriptivo para este build (opcional)'
+        required: false
+        type: string
 
 jobs:
   build-and-upload:
