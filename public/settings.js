@@ -1887,6 +1887,7 @@ document.addEventListener('keydown', (e) => {
     // de el, y el primer Esc debe cerrar solo la ficha.
     ['gym-library-detail-modal', closeGymLibraryDetail],
     ['gym-library-modal', closeGymLibraryModal],
+    ['gym-start-modal', closeGymStartModal],
     ['gym-block-modal', closeGymBlockModal],
     ['gym-exercise-modal', closeGymExerciseModal],
     ['gym-routine-modal', closeGymRoutineModal],
@@ -1898,6 +1899,19 @@ document.addEventListener('keydown', (e) => {
       close();
       return;
     }
+  }
+  // El resumen de fin de entreno se cierra con Esc como cualquier modal.
+  const gymSummary = document.getElementById('gym-live-summary-modal');
+  if (gymSummary && !gymSummary.classList.contains('hidden')) {
+    gymSummary.classList.add('hidden');
+    return;
+  }
+  // Con un entrenamiento EN VIVO abierto, Esc no hace nada a proposito:
+  // salir se hace solo con Terminar o Descartar (los dos con
+  // confirmacion/resumen) -- un Esc despistado no debe sacar del entreno.
+  const gymLive = document.getElementById('gym-live-view');
+  if (gymLive && !gymLive.classList.contains('hidden')) {
+    return;
   }
   const gymView = document.getElementById('gym-view');
   if (gymView && !gymView.classList.contains('hidden')) {

@@ -1169,7 +1169,7 @@ async function loadYearViewEvents(year) {
 function isGestureBlockedByModal() {
   if (document.querySelector('.modal:not(.hidden)')) return true;
   const fullscreenIds = [
-    'my-space-view', 'extensions-view', 'gym-view', 'finanzas-view',
+    'my-space-view', 'extensions-view', 'gym-view', 'gym-live-view', 'finanzas-view',
     'lecturas-view', 'note-editor-view',
   ];
   return fullscreenIds.some((id) => {
@@ -7303,6 +7303,7 @@ async function openGymView() {
   renderGymRoutinesList();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+  refreshGymLiveButtons();
 }
 function closeGymView() {
   document.getElementById('gym-view').classList.add('hidden');
@@ -8342,8 +8343,18 @@ function renderGymLibraryList() {
           : `<button type="button" class="secondary-btn gym-library-import-btn" data-import-gym-library="${escapeHtml(e.id)}">+ Importar</button>`}
       </div>
     `;
-    // La fila entera abre la ficha; el boton de importar corta la propagacion.
-    row.addEventListener('click', () => openGymLibraryDetail(e));
+    // La fila entera abre la ficha (o, en modo elegir, elige directamente);
+    // el boton de importar corta la propagacion.
+    row.addEventListener('click', () => {
+      if (gymLibraryPickCallback) {
+        const cb = gymLibraryPickCallback;
+        gymLibraryPickCallback = null;
+        closeGymLibraryModal();
+        cb(e);
+        return;
+      }
+      openGymLibraryDetail(e);
+    });
     list.appendChild(row);
   });
   if (matches.length === 0) {
@@ -8357,6 +8368,14 @@ function renderGymLibraryList() {
   list.querySelectorAll('[data-import-gym-library]').forEach((btn) => {
     btn.addEventListener('click', async (ev) => {
       ev.stopPropagation();
+      if (gymLibraryPickCallback) {
+        const entry = gymExerciseLibrary.find((e) => e.id === btn.dataset.importGymLibrary);
+        const cb = gymLibraryPickCallback;
+        gymLibraryPickCallback = null;
+        closeGymLibraryModal();
+        if (entry) cb(entry);
+        return;
+      }
       await importGymLibraryExercise(btn.dataset.importGymLibrary);
       renderGymLibraryList();
     });
@@ -8406,6 +8425,9 @@ async function openGymLibraryModal() {
 }
 function closeGymLibraryModal() {
   document.getElementById('gym-library-modal').classList.add('hidden');
+  // Si se cierra sin elegir estando en modo elegir, el callback se tira
+  // (cancelar la eleccion no debe dejar el modo pegado para despues).
+  gymLibraryPickCallback = null;
 }
 document.getElementById('btn-open-gym-library').addEventListener('click', openGymLibraryModal);
 document.getElementById('btn-close-gym-library').addEventListener('click', closeGymLibraryModal);
@@ -8447,6 +8469,377 @@ document.getElementById('btn-import-gym-library-detail').addEventListener('click
   await importGymLibraryExercise(gymLibraryDetailEntry.id);
   closeGymLibraryDetail();
   renderGymLibraryList();
+});
+
+// --- Modo entrenar en vivo (Fase 3 del rediseno) ----------------------
+// El estado del entrenamiento en curso vive en localStorage
+// (gymLiveSession) y se reescribe entero en CADA cambio -- asi una
+// recarga o un cierre de la app a mitad de entreno no pierde nada, y al
+// volver aparece el boton de "continuar". Solo al Terminar se convierte
+// en una sesion de verdad (POST /api/gym-sessions) y se limpia.
+//
+// Los tiempos (cronometro de sesion y descanso) se calculan SIEMPRE
+// desde timestamps guardados (startedAt / restUntil), nunca sumando
+// ticks: en iOS el JS se congela con la app en segundo plano y un
+// contador de ticks se quedaria atras al volver.
+let gymLiveSession = null;      // espejo en memoria de localStorage.gymLiveSession
+let gymLiveTicker = null;       // setInterval de 1s SOLO para repintar reloj/descanso
+let gymLivePrevSets = new Map();// exerciseId -> { date, sets } para la columna "Anterior"
+
+function gymLiveStore() {
+  localStorage.setItem('gymLiveSession', JSON.stringify(gymLiveSession));
+}
+function gymLiveReadStored() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('gymLiveSession'));
+    return parsed && typeof parsed === 'object' && parsed.startedAt ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+// Alterna el boton grande de "Empezar" y el banner de "continuar" segun
+// haya o no un entrenamiento a medias guardado.
+function refreshGymLiveButtons() {
+  const stored = gymLiveReadStored();
+  document.getElementById('btn-gym-live-resume').classList.toggle('hidden', !stored);
+  document.getElementById('btn-gym-live-start').classList.toggle('hidden', !!stored);
+}
+
+// -- Selector de "que toca hoy" (dias del bloque activo o sesion libre) --
+function openGymStartModal() {
+  const activeBlock = state.gymBlocks.find((b) => b.isActive);
+  const days = activeBlock ? state.gymRoutines.filter((r) => r.blockId === activeBlock.id) : [];
+  document.getElementById('gym-start-block-name').textContent = activeBlock
+    ? `Bloque activo: ${activeBlock.name}`
+    : 'No hay ningún bloque activo — puedes entrenar libre o crear un bloque en la pestaña Plan.';
+  const list = document.getElementById('gym-start-days');
+  list.innerHTML = '';
+  days.forEach((day) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gym-list-item gym-start-day-btn';
+    btn.innerHTML = `
+      <span class="color-dot" style="background-color: ${day.color}"></span>
+      <span class="gym-list-item-name">${day.icon ? escapeHtml(day.icon) + ' ' : ''}${escapeHtml(day.name)}</span>
+      <span class="gym-list-item-muted">${day.exercises.length} ejercicio${day.exercises.length === 1 ? '' : 's'}</span>
+    `;
+    btn.addEventListener('click', () => {
+      closeGymStartModal();
+      startGymLiveSession(day);
+    });
+    list.appendChild(btn);
+  });
+  if (days.length === 0 && activeBlock) {
+    list.innerHTML = '<p class="empty-hint">El bloque activo no tiene días todavía.</p>';
+  }
+  document.getElementById('gym-start-modal').classList.remove('hidden');
+}
+function closeGymStartModal() {
+  document.getElementById('gym-start-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-live-start').addEventListener('click', openGymStartModal);
+document.getElementById('btn-close-gym-start').addEventListener('click', closeGymStartModal);
+document.getElementById('btn-gym-start-free').addEventListener('click', () => {
+  closeGymStartModal();
+  startGymLiveSession(null);
+});
+document.getElementById('btn-gym-live-resume').addEventListener('click', () => {
+  gymLiveSession = gymLiveReadStored();
+  if (gymLiveSession) openGymLiveView();
+});
+
+// Arranca un entrenamiento nuevo: desde un dia del plan (pre-carga sus
+// ejercicios con tantas series como target_sets, solo con el descanso
+// sugerido -- reps y peso en blanco a proposito, como el modal manual) o
+// completamente libre.
+function startGymLiveSession(day) {
+  gymLiveSession = {
+    startedAt: Date.now(),
+    routineId: day ? day.id : null,
+    routineName: day ? day.name : null,
+    restPreset: 90,
+    restUntil: null,
+    exercises: day
+      ? day.exercises.map((ex) => ({
+          exerciseId: ex.exerciseId,
+          note: '',
+          sets: Array.from({ length: ex.targetSets || 1 }, () => ({
+            reps: '', weightDisplay: '', rpe: '', done: false,
+            restSeconds: ex.targetRestSeconds ?? '',
+          })),
+        }))
+      : [],
+  };
+  gymLiveStore();
+  openGymLiveView();
+}
+
+async function openGymLiveView() {
+  document.getElementById('gym-live-title').textContent = gymLiveSession.routineName || 'Sesión libre';
+  document.getElementById('gym-live-view').classList.remove('hidden');
+  refreshGymLiveRestPresets();
+  renderGymLiveExercises();
+  // Columna "Anterior": se pide en paralelo para cada ejercicio y se
+  // repinta cuando llega (si no hay historial, la columna queda en "—").
+  gymLivePrevSets = new Map();
+  await Promise.all(gymLiveSession.exercises.map(async (ex) => {
+    const prev = await api(`/api/gym-sessions/last-sets/${ex.exerciseId}`);
+    gymLivePrevSets.set(ex.exerciseId, prev);
+  }));
+  renderGymLiveExercises();
+  if (gymLiveTicker) clearInterval(gymLiveTicker);
+  gymLiveTicker = setInterval(gymLiveTick, 1000);
+  gymLiveTick();
+}
+function closeGymLiveView() {
+  document.getElementById('gym-live-view').classList.add('hidden');
+  if (gymLiveTicker) { clearInterval(gymLiveTicker); gymLiveTicker = null; }
+  refreshGymLiveButtons();
+}
+
+// Un tick por segundo mientras el overlay esta abierto: reloj de sesion
+// y cuenta atras del descanso, ambos derivados de timestamps.
+function gymLiveFormatClock(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+function gymLiveTick() {
+  if (!gymLiveSession) return;
+  const elapsed = Math.max(0, Math.floor((Date.now() - gymLiveSession.startedAt) / 1000));
+  document.getElementById('gym-live-clock').textContent = gymLiveFormatClock(elapsed);
+
+  const bar = document.getElementById('gym-live-rest-bar');
+  if (gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    const remaining = Math.ceil((gymLiveSession.restUntil - Date.now()) / 1000);
+    document.getElementById('gym-live-rest-remaining').textContent = gymLiveFormatClock(remaining);
+    bar.classList.remove('hidden');
+  } else {
+    if (gymLiveSession.restUntil) { gymLiveSession.restUntil = null; gymLiveStore(); }
+    bar.classList.add('hidden');
+  }
+}
+
+// Presets de descanso (60/90/120/180): eligen la duracion que arrancara
+// al marcar la SIGUIENTE serie (por serie puede venir ya un descanso
+// sugerido del plan, que tiene prioridad).
+function refreshGymLiveRestPresets() {
+  document.querySelectorAll('[data-gym-rest-preset]').forEach((btn) => {
+    btn.classList.toggle('active', Number(btn.dataset.gymRestPreset) === gymLiveSession.restPreset);
+  });
+}
+document.querySelectorAll('[data-gym-rest-preset]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymLiveSession.restPreset = Number(btn.dataset.gymRestPreset);
+    gymLiveStore();
+    refreshGymLiveRestPresets();
+  });
+});
+document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () => {
+  if (gymLiveSession && gymLiveSession.restUntil) {
+    gymLiveSession.restUntil += 30000;
+    gymLiveStore();
+    gymLiveTick();
+  }
+});
+document.getElementById('btn-gym-live-rest-close').addEventListener('click', () => {
+  if (gymLiveSession) { gymLiveSession.restUntil = null; gymLiveStore(); gymLiveTick(); }
+});
+
+// Tarjetas de ejercicio del entreno en vivo. Igual que el resto del
+// proyecto: se reconstruye el DOM entero en cada cambio estructural
+// (anadir/quitar series o ejercicios); los inputs escriben directo en
+// gymLiveSession y guardan en localStorage.
+function renderGymLiveExercises() {
+  const container = document.getElementById('gym-live-exercises');
+  container.innerHTML = '';
+  if (gymLiveSession.exercises.length === 0) {
+    container.innerHTML = '<p class="empty-hint">Añade ejercicios con el botón de abajo.</p>';
+    return;
+  }
+  const unit = getGymWeightUnitLabel();
+  gymLiveSession.exercises.forEach((ex, exIndex) => {
+    const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+    const prev = gymLivePrevSets.get(ex.exerciseId);
+    const card = document.createElement('div');
+    card.className = 'gym-live-exercise-card';
+
+    const setsHtml = ex.sets.map((set, setIndex) => {
+      const prevSet = prev && prev.sets[setIndex];
+      const prevLabel = prevSet
+        ? `${prevSet.weightKg !== null ? gymWeightKgToDisplay(prevSet.weightKg) + unit : '—'}×${prevSet.reps ?? '—'}`
+        : '—';
+      return `
+        <div class="gym-live-set-row ${set.done ? 'done' : ''}">
+          <span class="gym-live-set-number">${setIndex + 1}</span>
+          <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
+          <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${unit}" data-live-field="weightDisplay" data-set="${setIndex}" value="${set.weightDisplay}" />
+          <input type="number" inputmode="numeric" min="0" placeholder="reps" data-live-field="reps" data-set="${setIndex}" value="${set.reps}" />
+          <input type="number" inputmode="decimal" step="0.5" min="1" max="10" placeholder="RPE" data-live-field="rpe" data-set="${setIndex}" value="${set.rpe}" />
+          <input type="checkbox" class="styled-checkbox" data-live-done="${setIndex}" ${set.done ? 'checked' : ''} aria-label="Serie hecha" />
+        </div>
+      `;
+    }).join('');
+
+    card.innerHTML = `
+      <div class="gym-live-exercise-header">
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <span class="gym-list-item-muted">${escapeHtml(exercise ? gymMuscleGroupLabel(exercise.muscleGroup) : '')}</span>
+        <button type="button" class="icon-btn" data-live-remove-exercise aria-label="Quitar ejercicio">✕</button>
+      </div>
+      <div class="gym-live-set-row gym-live-set-head">
+        <span class="gym-live-set-number">#</span>
+        <span class="gym-live-set-prev">Anterior</span>
+        <span>${unit}</span><span>Reps</span><span>RPE</span><span>✓</span>
+      </div>
+      ${setsHtml}
+      <button type="button" class="secondary-btn gym-add-set-btn" data-live-add-set>+ Serie</button>
+      <input type="text" class="gym-live-note" data-live-note placeholder="Nota (sensaciones, peso próximo...)" value="${escapeHtml(ex.note || '')}" />
+    `;
+
+    card.querySelectorAll('[data-live-field]').forEach((input) => {
+      input.addEventListener('input', () => {
+        ex.sets[Number(input.dataset.set)][input.dataset.liveField] = input.value;
+        gymLiveStore();
+      });
+    });
+    card.querySelectorAll('[data-live-done]').forEach((check) => {
+      check.addEventListener('change', () => {
+        const set = ex.sets[Number(check.dataset.liveDone)];
+        set.done = check.checked;
+        // Marcar una serie como hecha arranca el descanso: el sugerido de
+        // esa serie si lo tiene, si no el preset elegido arriba.
+        if (check.checked) {
+          const seconds = Number(set.restSeconds) || gymLiveSession.restPreset;
+          gymLiveSession.restUntil = Date.now() + seconds * 1000;
+        }
+        gymLiveStore();
+        gymLiveTick();
+        check.closest('.gym-live-set-row').classList.toggle('done', check.checked);
+      });
+    });
+    card.querySelector('[data-live-add-set]').addEventListener('click', () => {
+      const last = ex.sets[ex.sets.length - 1];
+      ex.sets.push({ reps: '', weightDisplay: '', rpe: '', done: false, restSeconds: last ? last.restSeconds : '' });
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    card.querySelector('[data-live-remove-exercise]').addEventListener('click', async () => {
+      const ok = await showAppConfirm('¿Quitar este ejercicio del entrenamiento (con sus series de hoy)?', { okText: 'Quitar', danger: true });
+      if (!ok) return;
+      gymLiveSession.exercises.splice(exIndex, 1);
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    card.querySelector('[data-live-note]').addEventListener('input', (e) => {
+      ex.note = e.target.value;
+      gymLiveStore();
+    });
+
+    container.appendChild(card);
+  });
+}
+
+// "+ Añadir ejercicio" en vivo: reutiliza el MISMO buscador de la
+// libreria de la Fase 2, pero en "modo elegir" -- si
+// gymLibraryPickCallback esta puesto, elegir un ejercicio (fila o boton)
+// llama al callback en vez del flujo normal de importar, y cierra el
+// buscador. Asi no hay que construir un segundo selector solo para el
+// entreno en vivo.
+let gymLibraryPickCallback = null;
+document.getElementById('btn-gym-live-add-exercise').addEventListener('click', () => {
+  gymLibraryPickCallback = async (libraryEntry) => {
+    // Importa (idempotente) y anade la tarjeta al entreno en curso.
+    await importGymLibraryExercise(libraryEntry.id);
+    const imported = state.gymExercises.find((e) => e.libraryId === libraryEntry.id);
+    if (!imported) return;
+    if (!gymLiveSession.exercises.some((e) => e.exerciseId === imported.id)) {
+      gymLiveSession.exercises.push({ exerciseId: imported.id, note: '', sets: [{ reps: '', weightDisplay: '', rpe: '', done: false, restSeconds: '' }] });
+      gymLiveStore();
+      const prev = await api(`/api/gym-sessions/last-sets/${imported.id}`);
+      gymLivePrevSets.set(imported.id, prev);
+      renderGymLiveExercises();
+    }
+  };
+  openGymLibraryModal();
+});
+
+// Descartar: tirar el entrenamiento en curso sin guardar nada.
+document.getElementById('btn-gym-live-discard').addEventListener('click', async () => {
+  const ok = await showAppConfirm('¿Descartar el entrenamiento? No se guardará nada de hoy.', { okText: 'Descartar', danger: true });
+  if (!ok) return;
+  localStorage.removeItem('gymLiveSession');
+  gymLiveSession = null;
+  closeGymLiveView();
+});
+
+// Terminar: convertir lo hecho en una sesion de verdad + resumen.
+document.getElementById('btn-gym-live-finish').addEventListener('click', async () => {
+  // Solo cuentan las series marcadas como hechas o con algun dato; las
+  // filas vacias pre-creadas por el plan se ignoran sin molestar.
+  const sets = [];
+  const exerciseNotes = {};
+  const musclesTouched = new Set();
+  let volumeKg = 0;
+  for (const ex of gymLiveSession.exercises) {
+    if (ex.note && ex.note.trim()) exerciseNotes[ex.exerciseId] = ex.note.trim();
+    for (const set of ex.sets) {
+      if (!set.done && set.reps === '' && set.weightDisplay === '') continue;
+      const weightKg = gymWeightDisplayToKg(set.weightDisplay);
+      sets.push({
+        exerciseId: ex.exerciseId,
+        reps: set.reps,
+        weightKg,
+        restSeconds: set.restSeconds,
+        rpe: set.rpe,
+      });
+      volumeKg += (Number(set.reps) || 0) * (weightKg || 0);
+      const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+      if (exercise && exercise.muscleGroup) musclesTouched.add(gymMuscleGroupLabel(exercise.muscleGroup));
+    }
+  }
+  if (sets.length === 0) {
+    const ok = await showAppConfirm('No has marcado ninguna serie. ¿Descartar el entrenamiento?', { okText: 'Descartar', danger: true });
+    if (!ok) return;
+    localStorage.removeItem('gymLiveSession');
+    gymLiveSession = null;
+    closeGymLiveView();
+    return;
+  }
+
+  const durationSeconds = Math.max(0, Math.floor((Date.now() - gymLiveSession.startedAt) / 1000));
+  await api('/api/gym-sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      date: toDateKey(new Date()),
+      routineId: gymLiveSession.routineId,
+      sets,
+      startedAt: new Date(gymLiveSession.startedAt).toISOString(),
+      durationSeconds,
+      exerciseNotes,
+    }),
+  });
+
+  // Resumen: duracion, series, volumen (en la unidad del dispositivo) y
+  // grupos musculares tocados.
+  const minutes = Math.max(1, Math.round(durationSeconds / 60));
+  document.getElementById('gym-summary-duration').textContent = `${minutes} min`;
+  document.getElementById('gym-summary-sets').textContent = String(sets.length);
+  document.getElementById('gym-summary-volume').textContent = `${gymWeightKgToDisplay(volumeKg)} ${getGymWeightUnitLabel()}`;
+  document.getElementById('gym-summary-muscles').textContent = String(musclesTouched.size);
+  document.getElementById('gym-summary-muscle-list').textContent = [...musclesTouched].join(' · ');
+
+  localStorage.removeItem('gymLiveSession');
+  gymLiveSession = null;
+  closeGymLiveView();
+  document.getElementById('gym-live-summary-modal').classList.remove('hidden');
+
+  await loadGymSessions();
+  renderGymSessionsList();
+  populateGymProgressExerciseSelect();
+});
+document.getElementById('btn-close-gym-summary').addEventListener('click', () => {
+  document.getElementById('gym-live-summary-modal').classList.add('hidden');
 });
 
 // --- Modal de bloque (rediseno de Gimnasio) ---------------------------
@@ -8742,6 +9135,7 @@ function renderGymSessionExercisesField() {
         <span class="gym-session-set-number">Serie ${setIndex + 1}</span>
         <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
         <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
+        <input type="number" data-field="rpe" placeholder="RPE" min="1" max="10" step="0.5" value="${set.rpe ?? ''}" />
         <input type="number" data-field="restSeconds" placeholder="Descanso (s)" min="0" value="${set.restSeconds ?? ''}" />
         <button type="button" class="icon-btn" aria-label="Quitar serie">✕</button>
       `;
@@ -8750,6 +9144,9 @@ function renderGymSessionExercisesField() {
       });
       setRow.querySelector('[data-field="weight"]').addEventListener('input', (e) => {
         set.weightDisplay = e.target.value;
+      });
+      setRow.querySelector('[data-field="rpe"]').addEventListener('input', (e) => {
+        set.rpe = e.target.value;
       });
       setRow.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => {
         set.restSeconds = e.target.value;
@@ -8810,6 +9207,7 @@ function openGymSessionModal(session) {
       byExercise.get(set.exerciseId).push({
         reps: set.reps ?? '',
         weightDisplay: gymWeightKgToDisplay(set.weightKg),
+        rpe: set.rpe ?? '',
         restSeconds: set.restSeconds ?? '',
       });
     });
@@ -8844,6 +9242,7 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         exerciseId: exRow.exerciseId,
         reps: set.reps,
         weightKg: gymWeightDisplayToKg(set.weightDisplay),
+        rpe: set.rpe,
         restSeconds: set.restSeconds,
       });
     });

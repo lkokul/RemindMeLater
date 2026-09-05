@@ -698,14 +698,20 @@
       </div>
     </div>
     <div class="gym-tabs">
-      <button type="button" class="gym-tab-btn active" data-gym-tab="sessions">Sesiones</button>
+      <button type="button" class="gym-tab-btn active" data-gym-tab="sessions">Entrenar</button>
       <button type="button" class="gym-tab-btn" data-gym-tab="plan">Plan</button>
       <button type="button" class="gym-tab-btn" data-gym-tab="progress">Progreso</button>
     </div>
     <div class="gym-tab-content">
-      <!-- Sesiones: historial + boton de nueva sesion. -->
+      <!-- Entrenar (Fase 3 del rediseno): el boton grande arranca un
+           entrenamiento EN VIVO (overlay #gym-live-view); si hay uno a
+           medias (localStorage.gymLiveSession) aparece el banner de
+           reanudar en su lugar. Debajo, el historial de sesiones de
+           siempre y el alta manual (para apuntar a posteriori). -->
       <div id="gym-tab-sessions" class="gym-tab-panel">
-        <button type="button" id="btn-new-gym-session" class="primary-btn gym-tab-action">+ Nueva sesion</button>
+        <button type="button" id="btn-gym-live-resume" class="primary-btn gym-live-start-btn hidden">▶ Entrenamiento en curso — continuar</button>
+        <button type="button" id="btn-gym-live-start" class="primary-btn gym-live-start-btn">💪 ¡Empezar entrenamiento!</button>
+        <button type="button" id="btn-new-gym-session" class="secondary-btn gym-tab-action">+ Apuntar sesión a mano</button>
         <div id="gym-sessions-list" class="gym-list"></div>
       </div>
 
@@ -777,6 +783,71 @@
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Selector de dia al empezar a entrenar (Fase 3): los dias del
+       bloque ACTIVO como botones grandes + "sesion libre". -->
+  <div id="gym-start-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-start" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>¿Qué toca hoy?</h2>
+      <p id="gym-start-block-name" class="gym-list-item-muted"></p>
+      <div id="gym-start-days" class="gym-list"></div>
+      <button type="button" id="btn-gym-start-free" class="secondary-btn">Sesión libre (sin día)</button>
+    </div>
+  </div>
+
+  <!-- Overlay del entrenamiento EN VIVO (Fase 3): pantalla completa por
+       encima de la vista de Gimnasio. El estado vive en
+       localStorage.gymLiveSession hasta guardar (sobrevive a recargas y
+       cierres) y el cronometro/descanso se calculan SIEMPRE desde
+       timestamps, nunca contando ticks (iOS congela el JS en segundo
+       plano y un contador se quedaria atras). -->
+  <div id="gym-live-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2 id="gym-live-title">Entrenamiento</h2>
+      <div class="my-space-view-header-actions">
+        <span id="gym-live-clock" class="gym-live-clock">0:00</span>
+        <button type="button" id="btn-gym-live-discard" class="secondary-btn">Descartar</button>
+        <button type="button" id="btn-gym-live-finish" class="primary-btn">✓ Terminar</button>
+      </div>
+    </div>
+    <div class="gym-live-rest-presets">
+      <span class="gym-list-item-muted">Descanso:</span>
+      <button type="button" class="view-mode-btn" data-gym-rest-preset="60">60s</button>
+      <button type="button" class="view-mode-btn" data-gym-rest-preset="90">90s</button>
+      <button type="button" class="view-mode-btn" data-gym-rest-preset="120">120s</button>
+      <button type="button" class="view-mode-btn" data-gym-rest-preset="180">180s</button>
+    </div>
+    <div class="gym-live-content">
+      <div id="gym-live-exercises" class="gym-live-exercises"></div>
+      <button type="button" id="btn-gym-live-add-exercise" class="secondary-btn gym-tab-action">+ Añadir ejercicio</button>
+    </div>
+    <!-- Barra inferior del temporizador de descanso: aparece al marcar
+         una serie como hecha y desaparece sola al llegar a 0. -->
+    <div id="gym-live-rest-bar" class="gym-live-rest-bar hidden">
+      <span>⏱ Descanso: <b id="gym-live-rest-remaining">0:00</b></span>
+      <button type="button" id="btn-gym-live-rest-plus" class="secondary-btn">+30s</button>
+      <button type="button" id="btn-gym-live-rest-close" class="icon-btn" aria-label="Saltar descanso">✕</button>
+    </div>
+  </div>
+
+  <!-- Resumen al terminar el entrenamiento en vivo (Fase 3). -->
+  <div id="gym-live-summary-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-live-summary-card">
+      <h2>💪 ¡Entreno completado!</h2>
+      <div class="gym-live-summary-grid">
+        <div class="gym-live-summary-stat"><b id="gym-summary-duration">—</b><span>Duración</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-sets">—</b><span>Series hechas</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-volume">—</b><span>Volumen total</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-muscles">—</b><span>Grupos musculares</span></div>
+      </div>
+      <p id="gym-summary-muscle-list" class="gym-list-item-muted"></p>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-summary" class="primary-btn">Cerrar</button>
+      </div>
     </div>
   </div>
 

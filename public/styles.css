@@ -2425,6 +2425,73 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .gym-library-instructions { margin: 0.6rem 0 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.85rem; }
 .gym-exercises-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
+/* Modo entrenar en vivo (Fase 3): overlay a pantalla completa con las
+   mismas variables moradas del gym (#gym-live-view es hermano de
+   #gym-view, asi que declara las suyas propias). */
+#gym-live-view {
+  --gym-accent: #a855f7;
+  --gym-accent-soft: color-mix(in srgb, #a855f7 18%, transparent);
+  --gym-accent-text: #ffffff;
+  z-index: 16; /* por encima de #gym-view (15), debajo de los modales (20) */
+}
+#gym-live-view .primary-btn { background: var(--gym-accent); color: var(--gym-accent-text); border-color: var(--gym-accent); }
+.gym-live-clock { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.05rem; margin-right: 0.4rem; }
+.gym-live-rest-presets { display: flex; align-items: center; gap: 0.4rem; padding: 0.6rem 1.2rem 0; flex-shrink: 0; }
+#gym-live-view .view-mode-btn.active { background: var(--gym-accent); color: var(--gym-accent-text); border-color: var(--gym-accent); }
+.gym-live-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem 4.5rem; display: flex; flex-direction: column; gap: 0.8rem; }
+.gym-live-exercises { display: flex; flex-direction: column; gap: 0.8rem; }
+.gym-live-exercise-card {
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.8rem;
+  display: flex; flex-direction: column; gap: 0.45rem;
+}
+.gym-live-exercise-header { display: flex; align-items: center; gap: 0.5rem; }
+.gym-live-exercise-header .gym-list-item-name { font-weight: 600; }
+.gym-live-exercise-header .icon-btn { margin-left: auto; }
+/* Filas de serie: rejilla fija para que las columnas queden alineadas
+   entre filas (nº / anterior / peso / reps / RPE / check). */
+.gym-live-set-row {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(3.5rem, 1fr) 4.4rem 4rem 3.6rem 1.6rem;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.85rem;
+}
+.gym-live-set-row input[type="number"] { width: 100%; min-width: 0; }
+.gym-live-set-head { color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); font-size: 0.75rem; }
+.gym-live-set-number { font-variant-numeric: tabular-nums; }
+.gym-live-set-prev { font-size: 0.78rem; color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gym-live-set-row.done .gym-live-set-number,
+.gym-live-set-row.done .gym-live-set-prev { color: var(--gym-accent); }
+.gym-live-note { margin-top: 0.2rem; font-size: 0.82rem; }
+.gym-live-start-btn { font-size: 1rem; padding: 0.8rem 1.1rem; align-self: stretch; }
+.gym-start-day-btn { cursor: pointer; text-align: left; border: 1px solid var(--border); width: 100%; }
+/* Barra inferior de descanso: fija abajo del overlay, con el acento. */
+.gym-live-rest-bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; gap: 0.7rem;
+  padding: 0.7rem 1.2rem;
+  background: color-mix(in srgb, var(--gym-accent) 22%, var(--surface));
+  border-top: 1px solid var(--gym-accent);
+  font-size: 0.95rem;
+}
+.gym-live-rest-bar b { font-variant-numeric: tabular-nums; }
+.gym-live-rest-bar .secondary-btn { margin-left: auto; }
+/* Resumen de fin de entreno: rejilla 2x2 de estadisticas grandes. */
+.gym-live-summary-card h2 { text-align: center; }
+.gym-live-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin: 0.8rem 0 0.4rem; }
+.gym-live-summary-stat {
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.8rem;
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+}
+.gym-live-summary-stat b { font-size: 1.25rem; }
+.gym-live-summary-stat span { font-size: 0.75rem; color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); }
+#gym-summary-muscle-list { text-align: center; }
+
 /* Cabecera del nivel de dias (boton volver + nombre del bloque). */
 .gym-block-days-header { display: flex; align-items: center; gap: 0.6rem; }
 .gym-block-days-header .gym-subheading { margin: 0; }

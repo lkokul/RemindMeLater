@@ -224,6 +224,16 @@ function applyLocalSchema(db) {
       date TEXT NOT NULL,                             -- YYYY-MM-DD
       routine_id INTEGER REFERENCES gym_routines(id),
       notes TEXT,
+      -- Fase 3 (modo entrenar en vivo): cuando la sesion se registro
+      -- entrenando en directo, aqui quedan la hora de inicio (ISO) y la
+      -- duracion total en segundos; NULL en sesiones apuntadas a mano.
+      started_at TEXT,
+      duration_seconds INTEGER,
+      -- Nota libre POR EJERCICIO de esa sesion ("subir peso la proxima",
+      -- "molestia en el hombro"...): JSON {exerciseId: "texto"}. Es un
+      -- dato puramente de presentacion, por eso va como JSON en una
+      -- columna en vez de montar una tabla y rutas nuevas solo para esto.
+      exercise_notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -242,6 +252,11 @@ function applyLocalSchema(db) {
       -- target_rest_seconds de la rutina al auto-rellenar la sesion (ver
       -- app.js), pero se guarda por serie porque se puede editar suelto.
       rest_seconds INTEGER,
+      -- Fase 3: esfuerzo percibido de la serie (RPE, 1-10 con decimales,
+      -- opcional) y tipo de serie (NULL = normal; 'warmup'/'dropset'/
+      -- 'failure' reservados -- el calculo de PRs excluye warmup).
+      rpe REAL,
+      set_type TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1212,6 +1227,25 @@ function applyLocalSchema(db) {
   }
   if (!gymExerciseColumns.includes('equipment')) {
     db.exec('ALTER TABLE gym_exercises ADD COLUMN equipment TEXT');
+  }
+  // Fase 3: modo entrenar en vivo -- RPE y tipo de serie en gym_sets,
+  // hora de inicio/duracion/notas por ejercicio en gym_sessions.
+  const gymSetColumns2 = db.prepare('PRAGMA table_info(gym_sets)').all().map((c) => c.name);
+  if (!gymSetColumns2.includes('rpe')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN rpe REAL');
+  }
+  if (!gymSetColumns2.includes('set_type')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN set_type TEXT');
+  }
+  const gymSessionColumns = db.prepare('PRAGMA table_info(gym_sessions)').all().map((c) => c.name);
+  if (!gymSessionColumns.includes('started_at')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN started_at TEXT');
+  }
+  if (!gymSessionColumns.includes('duration_seconds')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN duration_seconds INTEGER');
+  }
+  if (!gymSessionColumns.includes('exercise_notes')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN exercise_notes TEXT');
   }
 
 }
