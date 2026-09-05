@@ -359,7 +359,6 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 /* "Modo lectura" vive en la fila del titulo, junto a la estrella. No
    crece ni se encoge con el titulo (que si lo hace, flex:1) y su texto
    nunca se parte en dos lineas, para no descuadrar la fila. */
-.note-editor-read-mode-btn { flex-shrink: 0; white-space: nowrap; }
 .note-editor-title-preview:empty::before {
   content: 'Nota sin título';
   opacity: 0.6;
@@ -385,29 +384,50 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    vista, asi que la barra vuelve a ser el contenedor de las 3 filas.
    max-height de seguridad por si en una pantalla muy baja no caben
    enteras. */
+/* UNA sola fila que se desliza de lado: en un movil no caben 15 botones
+   a la vez, y apilarlos en varias filas comia demasiada pantalla del
+   propio texto. Sin barra de desplazamiento visible (el propio corte de
+   los botones en el borde ya dice que hay mas). */
 .note-editor-toolbar {
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  flex-wrap: nowrap;
   gap: 0.35rem;
   padding: 0.5rem 1.2rem;
   border-bottom: 1px solid var(--border);
-  max-height: 45vh;
-  overflow-y: auto;
+  overflow-x: auto;
   scrollbar-width: none;
+  /* pan-x: el gesto horizontal es de esta barra, no de la pagina. */
+  touch-action: pan-x;
 }
 .note-editor-toolbar::-webkit-scrollbar { display: none; }
-.note-editor-toolbar-row {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
+/* Separador fino entre grupos (texto | parrafo | insertar). */
+.note-editor-toolbar-divider {
+  flex-shrink: 0;
+  width: 1px;
+  height: 1.2rem;
+  background: var(--border);
+  margin: 0 0.15rem;
 }
 .note-editor-btn {
+  flex-shrink: 0;
+  /* Alto fijo para todos (texto e icono por igual): si no, los que
+     llevan un SVG dentro salen un par de pixeles mas altos y la fila se
+     ve desalineada. */
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0.3rem 0.6rem;
   font-size: 0.85rem;
   line-height: 1;
 }
+/* Botones cuyo contenido es un icono dibujado (listas): el SVG manda el
+   tamano, y el padding se iguala al de los de texto para que la fila se
+   vea pareja. */
+.note-editor-btn-icon { padding: 0.3rem 0.5rem; }
+.note-editor-btn-icon svg { width: 16px; height: 16px; display: block; }
 /* Se enciende (mismo tratamiento que .primary-btn) mientras el cursor
    esta dentro de texto ya puesto en negrita/cursiva/lista -- ver
    refreshNoteEditorToolbar en app.js, que consulta
@@ -570,12 +590,21 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .table-insert-popover {
   position: fixed; z-index: 60;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 0.8rem; width: 200px;
+  padding: 0.8rem; width: 220px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.4);
 }
 .table-insert-popover label { margin-bottom: 0.5rem; }
 .table-insert-popover label:last-of-type { margin-bottom: 0.7rem; }
-.table-insert-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+/* Los dos botones a mitades iguales, en vez de pegados a la derecha con
+   su ancho natural: con el padding normal de un boton no cabian los dos
+   en el ancho del popover y se veian descuadrados. */
+.table-insert-actions { display: flex; gap: 0.5rem; }
+.table-insert-actions button {
+  flex: 1;
+  padding: 0.5rem 0.4rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
 
 /* Popover de estilo de parrafo (boton "Aa") -- mismo look que
    .table-insert-popover, pero solo una columna de botones, cada uno
@@ -835,7 +864,11 @@ body.mobile-day-scroll-lock .app {
      contenido no quede tapado. */
   left: 0.6rem;
   right: 0.6rem;
-  bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px));
+  /* Baja hasta casi el borde: solo la MITAD del safe-area de abajo (la
+     franja del indicador de inicio del iPhone), en vez del alto entero
+     -- con el entero quedaba flotando demasiado arriba. La mitad basta
+     para no pisar el indicador y gana bastante pantalla. */
+  bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px) / 2);
   z-index: 70;
   display: flex;
   background: var(--surface);
@@ -918,7 +951,10 @@ body.mobile-day-scroll-lock .app {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.7rem 1rem 0;
+  /* Sin hueco propio arriba: encima ya esta el de la muesca (ver
+     .app/padding-top mas arriba), y sumarle otro dejaba la barra
+     "bastante separada" del reloj, como se veia en el movil. */
+  padding: 0.15rem 1rem 0;
 }
 .mobile-calendar-nav-label {
   /* Pildora con fondo propio (en vez de texto plano sobre el fondo de la
@@ -1317,6 +1353,13 @@ body.mobile-day-scroll-lock .app {
 
 /* --- Tira de dias de la semana --- */
 .mobile-week-strip { padding-top: 0.2rem; }
+/* En "Listado" no se ve (ver renderMobileDayActiveSubView en app.js):
+   ahi no se mira un dia concreto, es una tira continua con scroll
+   infinito y cada bloque ya lleva su fecha delante. */
+#mobile-calendar-day-view.is-listado .mobile-week-strip,
+#mobile-calendar-day-view.is-listado .mobile-calendar-day-heading {
+  display: none;
+}
 .mobile-week-strip-days {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -1702,6 +1745,37 @@ body.mobile-day-scroll-lock .app {
   border-top: 1px solid var(--border);
 }
 .mobile-notes-action-bar button { flex: 1; }
+/* El hueco izquierdo de la barra, usado como TEXTO de ayuda en "Editar
+   carpetas" (sigue siendo un <button> deshabilitado para no cambiar el
+   marcado, pero no debe parecerlo). */
+.mobile-notes-action-hint {
+  flex: 2;
+  background: transparent;
+  border-color: transparent;
+  color: color-mix(in srgb, var(--bg-text) 70%, var(--bg));
+  font-size: 0.82rem;
+  text-align: left;
+  padding-left: 0;
+  opacity: 1;
+  cursor: default;
+}
+
+/* Modo "Editar carpetas": las carpetas se resaltan (son lo unico
+   tocable) y las notas se atenuan. Sin esto el modo no se notaba y
+   parecia que el menu no habia hecho nada. */
+#mobile-notes-view.mode-edit-folders .note-folder-row {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
+#mobile-notes-view.mode-edit-folders .note-folder-row::after {
+  content: '✎';
+  margin-left: auto;
+  padding-left: 0.4rem;
+  color: var(--accent);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+#mobile-notes-view.mode-edit-folders .note-item:not(.note-folder-row) { opacity: 0.4; }
 
 /* Modal de "Eliminar" del modo Seleccionar. */
 .mobile-notes-delete-list {
@@ -1801,7 +1875,8 @@ body.mobile-day-scroll-lock .app {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 1.2rem 1.2rem 0.6rem;
+  /* Poco hueco arriba: el de la muesca ya lo pone .my-space-view. */
+  padding: 0.4rem 1.2rem 0.6rem;
   border-bottom: 1px solid var(--border);
 }
 .my-space-view-header h2 { margin: 0; }
@@ -2194,6 +2269,17 @@ body.mobile-day-scroll-lock .app {
    verdad, solo desenfoca el titulo/avance en la lista para que no se lea
    de un vistazo. El icono de ojo de cada fila es el UNICO control para
    ocultar/destapar, sin ningun texto extra encima del blur. */
+.note-item-read-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.35rem;
+  background: transparent;
+  border-color: transparent;
+  color: color-mix(in srgb, var(--surface-2-text) 55%, var(--surface-2));
+}
+.note-item-read-btn svg { width: 16px; height: 16px; }
+.note-item-read-btn:active { color: var(--accent); }
 .note-item-eye-btn {
   flex-shrink: 0;
   padding: 0.25rem;

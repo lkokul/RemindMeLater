@@ -1528,87 +1528,87 @@
                primero. -->
           <div id="note-title-preview" class="note-editor-title-preview" aria-live="polite"></div>
           <button type="button" id="note-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
-          <!-- Alterna entre editar (por defecto) y solo lectura, por si
-               solo quieres consultar la nota sin arriesgarte a tocarla
-               sin querer -- ver applyNoteEditorReadMode en app.js. Es un
-               ajuste POR NOTA ABIERTA (entry.readMode), no global del
-               editor. Vive aqui, junto a la estrella, y no en la barra
-               de formato de abajo: es una accion sobre la nota entera,
-               como marcarla favorita, no una herramienta de escritura. -->
-          <button type="button" id="note-editor-read-mode-btn" class="note-editor-btn note-editor-read-mode-btn" aria-pressed="false">Modo lectura</button>
         </div>
         <div class="note-editor-header-actions">
         </div>
       </div>
-      <!-- Barra de formato: los controles se ven SIEMPRE desplegados
-           (3 filas: formato de texto / estructura de parrafo / tabla-
-           imagen-codigo-vim). Hubo una ronda en la que todo esto vivia
-           colapsado tras un boton "Formato"; Koku pidio volver a tenerlo
-           a la vista. "Modo lectura" ya no esta aqui: subio a la fila del
-           titulo, junto a la estrella de favoritos. -->
+      <!-- Barra de formato: siempre a la vista (hubo una ronda con todo
+           esto colapsado tras un boton "Formato"; Koku pidio volver a
+           tenerlo desplegado). El modo lectura ya no se alterna desde
+           aqui: se elige al ABRIR la nota, desde su fila del listado --
+           en solo lectura esta barra entera se oculta. -->
+      <!-- UNA sola fila, que se desliza de lado cuando no cabe (pedido de
+           Koku: "me gustaria que los formatos fueran en una unica linea y
+           para ir viendolos tuviera que ir deslizando lateralmente"). Los
+           separadores solo agrupan visualmente: texto | parrafo | insertar. -->
       <div id="note-body-toolbar" class="note-editor-toolbar">
-        <div class="note-editor-toolbar-row">
-          <!-- Estilo de parrafo (Titulo/Encabezado/Subencabezado/Cuerpo/
-               Monoespaciado, estilo Notas de iPhone) -- abre un popover
-               con las 5 opciones, ver applyNoteParagraphStyle en app.js.
-               Se aplica al PARRAFO ENTERO donde este el cursor, no a una
-               seleccion de texto (por eso vive en la fila 1 igualmente,
-               es el unico control "de bloque" que va junto al de texto
-               por ser el mas usado). -->
-          <button type="button" id="note-paragraph-style-btn" class="note-editor-btn" aria-label="Estilo de párrafo" title="Estilo de párrafo">Aa</button>
-          <button type="button" data-cmd="bold" class="note-editor-btn" aria-label="Negrita" title="Negrita"><b>N</b></button>
-          <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
-          <button type="button" data-cmd="underline" class="note-editor-btn" aria-label="Subrayado" title="Subrayado"><u>S</u></button>
-          <button type="button" data-cmd="strikeThrough" class="note-editor-btn" aria-label="Tachado" title="Tachado"><s>T</s></button>
-          <!-- Color de resaltado (fondo, tipo rotulador) -- ver
-               applyNoteHighlight/clearNoteHighlight en app.js. Formato EN
-               LINEA con una seleccion real; con el cursor sin seleccionar
-               nada activa el modo "resaltar lo que se escriba a partir de
-               ahora" (ver beginPendingNoteHighlight), reflejado con
-               .is-active en este mismo boton mientras esta pendiente. -->
-          <button type="button" id="note-highlight-btn" class="note-editor-btn" aria-label="Resaltar con color" title="Resaltar con color">&#9635;</button>
-        </div>
-        <div class="note-editor-toolbar-row">
-          <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn" aria-label="Lista con viñetas" title="Lista con viñetas">&#8226;</button>
-          <button type="button" data-cmd="insertOrderedList" class="note-editor-btn" aria-label="Lista numerada" title="Lista numerada">1.</button>
-          <!-- Sangria/quitar sangria y bloque de cita -- se aplican al
-               PARRAFO ENTERO, con un atributo propio (data-indent/
-               data-quote) en vez de execCommand('indent')/<blockquote>
-               nativos, para no chocar entre si -- ver applyNoteIndentDelta/
-               toggleNoteQuoteBlock en app.js. -->
-          <button type="button" id="note-outdent-btn" class="note-editor-btn" aria-label="Quitar sangría" title="Quitar sangría">&#8676;</button>
-          <button type="button" id="note-indent-btn" class="note-editor-btn" aria-label="Añadir sangría" title="Añadir sangría">&#8677;</button>
-          <button type="button" id="note-quote-toggle-btn" class="note-editor-btn" aria-label="Cita" title="Cita">&#10077;</button>
-        </div>
-        <div class="note-editor-toolbar-row">
-          <button type="button" id="note-table-insert-btn" class="note-editor-btn" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
-          <button type="button" id="note-image-insert-btn" class="note-editor-btn" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
-          <!-- Bloque de codigo: fuente monoespaciada, SIN colorear por
-               lenguaje (para eso haria falta meter una libreria externa,
-               y de momento el frontend entero no tiene ninguna). Tambien
-               se puede escribir "```lenguaje" + Intro en una linea vacia,
-               estilo GitHub/Markdown -- ver maybeAutoStartCodeBlock en
-               app.js. Este boton inserta uno sin lenguaje asignado. -->
-          <button type="button" id="note-code-insert-btn" class="note-editor-btn" aria-label="Insertar bloque de código" title="Insertar bloque de código (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
-          <!-- Selector de archivo nativo, oculto -- lo abre el boton de
-               arriba con .click(). Tambien sirve para el Ctrl+V (ver
-               app.js), que reutiliza la misma subida. -->
-          <input type="file" id="note-image-file-input" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" />
-          <!-- Solo visible con el cursor dentro de una tabla (ver
-               refreshTableContextToolbar en app.js) -- actua siempre sobre
-               la fila/columna donde este el cursor en ese momento. -->
-          <span id="note-table-context-toolbar" class="note-table-context-toolbar hidden">
-            <button type="button" id="note-table-add-row" class="note-editor-btn" aria-label="Añadir fila" title="Añadir fila">+Fila</button>
-            <button type="button" id="note-table-remove-row" class="note-editor-btn" aria-label="Eliminar fila" title="Eliminar fila">-Fila</button>
-            <button type="button" id="note-table-add-col" class="note-editor-btn" aria-label="Añadir columna" title="Añadir columna">+Col</button>
-            <button type="button" id="note-table-remove-col" class="note-editor-btn" aria-label="Eliminar columna" title="Eliminar columna">-Col</button>
-            <!-- Grosor fino/grueso, por tabla (atributo data-border en el
-                 <table>, ver toggleTableBorderThickness en app.js) -- se
-                 enciende igual que los botones de negrita/cursiva cuando
-                 la tabla actual ya esta en grueso. -->
-            <button type="button" id="note-table-border-toggle" class="note-editor-btn" aria-label="Alternar grosor de borde" title="Alternar borde fino/grueso">Borde</button>
-          </span>
-        </div>
+        <!-- Estilo de parrafo (Titulo/Encabezado/Subencabezado/Cuerpo/
+             Monoespaciado, estilo Notas de iPhone) -- abre un popover
+             con las 5 opciones, ver applyNoteParagraphStyle en app.js.
+             Se aplica al PARRAFO ENTERO donde este el cursor, no a una
+             seleccion de texto. -->
+        <button type="button" id="note-paragraph-style-btn" class="note-editor-btn" aria-label="Estilo de párrafo" title="Estilo de párrafo">Aa</button>
+        <button type="button" data-cmd="bold" class="note-editor-btn" aria-label="Negrita" title="Negrita"><b>N</b></button>
+        <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
+        <button type="button" data-cmd="underline" class="note-editor-btn" aria-label="Subrayado" title="Subrayado"><u>S</u></button>
+        <button type="button" data-cmd="strikeThrough" class="note-editor-btn" aria-label="Tachado" title="Tachado"><s>T</s></button>
+        <!-- Color de resaltado (fondo, tipo rotulador) -- ver
+             applyNoteHighlight/clearNoteHighlight en app.js. Formato EN
+             LINEA con una seleccion real; con el cursor sin seleccionar
+             nada activa el modo "resaltar lo que se escriba a partir de
+             ahora" (ver beginPendingNoteHighlight), reflejado con
+             .is-active en este mismo boton mientras esta pendiente. -->
+        <button type="button" id="note-highlight-btn" class="note-editor-btn" aria-label="Resaltar con color" title="Resaltar con color">&#9635;</button>
+
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
+
+        <!-- Listas: icono dibujado (rayas con viñeta / con numeros) en vez
+             de un glifo de texto -- es lo que usan Notion/Apple Notes/Word,
+             se reconoce de un vistazo y no depende de la fuente. -->
+        <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn note-editor-btn-icon" aria-label="Lista con viñetas" title="Lista con viñetas">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="4" cy="6" r="1.4" fill="currentColor" stroke="none"></circle><circle cx="4" cy="12" r="1.4" fill="currentColor" stroke="none"></circle><circle cx="4" cy="18" r="1.4" fill="currentColor" stroke="none"></circle><line x1="9" y1="6" x2="20" y2="6"></line><line x1="9" y1="12" x2="20" y2="12"></line><line x1="9" y1="18" x2="20" y2="18"></line></svg>
+        </button>
+        <button type="button" data-cmd="insertOrderedList" class="note-editor-btn note-editor-btn-icon" aria-label="Lista numerada" title="Lista numerada">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><text x="1" y="8.4" font-size="8" fill="currentColor" stroke="none">1</text><text x="1" y="14.9" font-size="8" fill="currentColor" stroke="none">2</text><text x="1" y="21.4" font-size="8" fill="currentColor" stroke="none">3</text><line x1="9" y1="6" x2="20" y2="6"></line><line x1="9" y1="12" x2="20" y2="12"></line><line x1="9" y1="18" x2="20" y2="18"></line></svg>
+        </button>
+        <!-- Sangria/quitar sangria y bloque de cita -- se aplican al
+             PARRAFO ENTERO, con un atributo propio (data-indent/
+             data-quote) en vez de execCommand('indent')/<blockquote>
+             nativos, para no chocar entre si -- ver applyNoteIndentDelta/
+             toggleNoteQuoteBlock en app.js. -->
+        <button type="button" id="note-outdent-btn" class="note-editor-btn" aria-label="Quitar sangría" title="Quitar sangría">&#8676;</button>
+        <button type="button" id="note-indent-btn" class="note-editor-btn" aria-label="Añadir sangría" title="Añadir sangría">&#8677;</button>
+        <button type="button" id="note-quote-toggle-btn" class="note-editor-btn" aria-label="Cita" title="Cita">&#10077;</button>
+
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
+
+        <button type="button" id="note-table-insert-btn" class="note-editor-btn" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
+        <button type="button" id="note-image-insert-btn" class="note-editor-btn" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
+        <!-- Bloque de codigo: fuente monoespaciada, SIN colorear por
+             lenguaje (para eso haria falta meter una libreria externa,
+             y de momento el frontend entero no tiene ninguna). Tambien
+             se puede escribir "```lenguaje" + Intro en una linea vacia,
+             estilo GitHub/Markdown -- ver maybeAutoStartCodeBlock en
+             app.js. Este boton inserta uno sin lenguaje asignado. -->
+        <button type="button" id="note-code-insert-btn" class="note-editor-btn" aria-label="Insertar bloque de código" title="Insertar bloque de código (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
+        <!-- Selector de archivo nativo, oculto -- lo abre el boton de
+             arriba con .click(). Tambien sirve para el Ctrl+V (ver
+             app.js), que reutiliza la misma subida. -->
+        <input type="file" id="note-image-file-input" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" />
+        <!-- Solo visible con el cursor dentro de una tabla (ver
+             refreshTableContextToolbar en app.js) -- actua siempre sobre
+             la fila/columna donde este el cursor en ese momento. -->
+        <span id="note-table-context-toolbar" class="note-table-context-toolbar hidden">
+          <button type="button" id="note-table-add-row" class="note-editor-btn" aria-label="Añadir fila" title="Añadir fila">+Fila</button>
+          <button type="button" id="note-table-remove-row" class="note-editor-btn" aria-label="Eliminar fila" title="Eliminar fila">-Fila</button>
+          <button type="button" id="note-table-add-col" class="note-editor-btn" aria-label="Añadir columna" title="Añadir columna">+Col</button>
+          <button type="button" id="note-table-remove-col" class="note-editor-btn" aria-label="Eliminar columna" title="Eliminar columna">-Col</button>
+          <!-- Grosor fino/grueso, por tabla (atributo data-border en el
+               <table>, ver toggleTableBorderThickness en app.js) -- se
+               enciende igual que los botones de negrita/cursiva cuando
+               la tabla actual ya esta en grueso. -->
+          <button type="button" id="note-table-border-toggle" class="note-editor-btn" aria-label="Alternar grosor de borde" title="Alternar borde fino/grueso">Borde</button>
+        </span>
       </div>
       <div class="note-editor-main">
         <div class="note-editor-content-col">
@@ -1842,6 +1842,13 @@
        (routes-local/*.js). El orden importa: cada uno usa lo que
        declara el anterior, y viajesTrips.js consume una global que
        publica viajesEntries.js. -->
+  <!-- Runtime de Capacitor (MIT, copiado de node_modules/@capacitor/core).
+       Hace falta a mano porque este proyecto no tiene bundler: la app
+       nativa inyecta su "puente" con el sistema, pero ese puente NO crea
+       solo los plugins en Capacitor.Plugins -- eso lo hace registerPlugin,
+       que vive justo aqui. Sin este archivo, pedir permiso de avisos era
+       imposible desde la app empaquetada (ver local-notifications.js). -->
+  <script src="vendor/capacitor.js"></script>
   <script src="vendor/sql-wasm.js"></script>
   <script src="local-schema.js"></script>
   <script src="local-db.js"></script>

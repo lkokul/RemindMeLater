@@ -13,13 +13,35 @@
 // existe: entonces esto no hace nada y se sigue avisando como siempre
 // mientras la app esta abierta (ver loadReminders() en app.js).
 
-// El plugin solo existe dentro de la app empaquetada (Capacitor lo
-// inyecta). Se comprueba en cada llamada, no una vez al cargar, porque
-// este archivo puede evaluarse antes de que Capacitor termine de
-// registrar sus plugins.
+// Como no hay bundler, el plugin hay que REGISTRARLO a mano. Esto costo
+// una ronda entera de "el interruptor no hace nada": la app nativa
+// inyecta su puente con el sistema, pero ese puente NO rellena
+// Capacitor.Plugins por su cuenta -- eso solo pasa cuando alguien llama a
+// registerPlugin(), que normalmente hace el `import` del paquete del
+// plugin. Sin import (ni bundler que lo resuelva),
+// Capacitor.Plugins.LocalNotifications era undefined SIEMPRE, asi que el
+// interruptor se quedaba deshabilitado, nunca se pedia permiso, y por eso
+// iOS ni siquiera mostraba el apartado de notificaciones de la app en sus
+// Ajustes. Registrandolo aqui, el proxy habla con el plugin nativo igual
+// que lo haria el paquete oficial.
+//
+// Se registra una sola vez y se cachea; se hace de forma perezosa (no al
+// cargar el archivo) porque el puente puede no estar listo todavia.
+let localNotificationsPlugin = null;
+
 function getLocalNotificationsPlugin() {
+  if (localNotificationsPlugin) return localNotificationsPlugin;
   const cap = window.Capacitor;
-  return (cap && cap.Plugins && cap.Plugins.LocalNotifications) || null;
+  // Fuera de la app empaquetada (un navegador normal) no hay plugin: el
+  // proxy existiria igual, pero cada llamada fallaria con
+  // "not implemented", que es peor que no tenerlo.
+  if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null;
+  if (cap.Plugins && cap.Plugins.LocalNotifications) {
+    localNotificationsPlugin = cap.Plugins.LocalNotifications;
+  } else if (window.capacitorExports && typeof window.capacitorExports.registerPlugin === 'function') {
+    localNotificationsPlugin = window.capacitorExports.registerPlugin('LocalNotifications');
+  }
+  return localNotificationsPlugin;
 }
 
 function localNotificationsAvailable() {

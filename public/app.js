@@ -1794,6 +1794,13 @@ async function renderMobileDayActiveSubView({ scrollToNow = false, targetMinutes
   const mode = getMobileDayViewMode();
   document.getElementById('mobile-day-hours-view').classList.toggle('hidden', mode !== 'hours');
   document.getElementById('mobile-day-listado-view').classList.toggle('hidden', mode !== 'listado');
+  // En "Listado" no hay un dia concreto que mirar: es una tira continua
+  // de dias con scroll infinito hacia los dos lados, y cada bloque ya
+  // lleva su propia fecha. Asi que la tira de dias de la semana y el
+  // titulo del dia sobran ahi (pedido de Koku: "que sea solo una
+  // pantalla de scroll infinito"). En "Vista por horas" se quedan, que
+  // ahi si estas viendo UN dia.
+  document.getElementById('mobile-calendar-day-view').classList.toggle('is-listado', mode === 'listado');
   stopMobileCurrentTimeLineTimer();
   if (mode === 'hours') {
     disconnectMobileDayListadoObserver();
@@ -2681,6 +2688,24 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
   contentWrap.appendChild(content);
   row.appendChild(contentWrap);
 
+  // Abrir en SOLO LECTURA: el modo se elige aqui, al entrar, no dentro
+  // de la nota (pedido de Koku -- clic normal en la fila = editar, este
+  // boton = leer sin poder tocar nada; para cambiar de modo se sale al
+  // listado y se vuelve a entrar por el otro camino).
+  if (mode === 'browse' && !note.hidden) {
+    const readBtn = document.createElement('button');
+    readBtn.type = 'button';
+    readBtn.className = 'note-item-read-btn';
+    readBtn.setAttribute('aria-label', `Abrir "${note.title}" en solo lectura`);
+    readBtn.title = 'Abrir en solo lectura';
+    readBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg>';
+    readBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openNoteInEditor(note, { readMode: true });
+    });
+    row.appendChild(readBtn);
+  }
+
   row.appendChild(buildFavoriteStarBtn(note.favorite, (e) => {
     e.stopPropagation();
     toggleNoteFavorite(note);
@@ -3111,6 +3136,11 @@ function toggleMobileNotesSelection(itemKey) {
 function setMobileNotesMode(mode) {
   mobileNotesMode = mode;
   if (mode !== 'select' && mode !== 'move') mobileNotesSelectedKeys.clear();
+  // Marca para el CSS: en "Editar carpetas" las carpetas se resaltan y
+  // las notas se atenuan (ahi no hacen nada), para que se vea de un
+  // vistazo que la lista esta en otro modo.
+  const notesView = document.getElementById('mobile-notes-view');
+  if (notesView) notesView.classList.toggle('mode-edit-folders', mode === 'editFolders');
   refreshMobileNotesActionBar();
   renderNotesView();
 }
@@ -3155,6 +3185,21 @@ function refreshMobileNotesActionBar() {
       rightBtn.className = 'primary-btn';
       rightBtn.disabled = false;
       rightBtn.onclick = confirmMobileNotesMove;
+    } else if (mobileNotesMode === 'editFolders') {
+      // Sin esta barra, "Editar carpetas" no se notaba en absoluto: la
+      // lista se veia igual que siempre y parecia que no habia pasado
+      // nada (lo reporto Koku). Ahora dice en que modo estas y como
+      // salir, ademas del resalte de las carpetas (ver .mode-edit-folders
+      // en styles.css).
+      bar.classList.remove('hidden');
+      leftBtn.textContent = 'Toca una carpeta para editarla';
+      leftBtn.className = 'mobile-notes-action-hint';
+      leftBtn.disabled = true;
+      leftBtn.onclick = null;
+      rightBtn.textContent = 'Listo';
+      rightBtn.className = 'primary-btn';
+      rightBtn.disabled = false;
+      rightBtn.onclick = () => setMobileNotesMode('browse');
     } else {
       bar.classList.add('hidden');
     }
@@ -4340,7 +4385,7 @@ tableInsertBtn.addEventListener('click', () => {
   if (willOpen) saveNoteEditorSelection();
   closeAllPopovers(tableInsertPopover);
   tableInsertPopover.classList.toggle('hidden');
-  if (willOpen) positionFixedPopover(tableInsertBtn, tableInsertPopover, { width: 200 });
+  if (willOpen) positionFixedPopover(tableInsertBtn, tableInsertPopover, { width: 220 });
 });
 
 document.getElementById('table-insert-cancel').addEventListener('click', () => {
@@ -5083,8 +5128,33 @@ function handleNoteHighlightAwareEnter() {
   return true;
 }
 
+// Intro en una linea de cita VACIA: sale de la cita, en vez de añadir
+// otra linea citada debajo. Sin esto no habia forma de TERMINAR una cita
+// escribiendo: cada Intro heredaba el data-quote del parrafo anterior,
+// asi que se acumulaban lineas en blanco y la barra de la izquierda se
+// repetia una y otra vez (lo reporto Koku). Es lo mismo que hacen Notion
+// o Apple Notes: la linea vacia sale del bloque en vez de continuarlo.
+// Devuelve true si ha actuado (quien llama debe hacer preventDefault).
+function handleNoteQuoteEnterExit() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return false;
+  const line = getNoteBlockAncestor(sel.getRangeAt(0).startContainer);
+  if (!line || line.getAttribute('data-quote') !== '1') return false;
+  if (line.textContent.trim() !== '') return false;
+  line.removeAttribute('data-quote');
+  line.removeAttribute('data-indent');
+  NOTE_EDITOR_BODY.dispatchEvent(new Event('input', { bubbles: true }));
+  refreshNoteEditorState();
+  return true;
+}
+
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    if (handleNoteQuoteEnterExit()) {
+      e.preventDefault();
+      return;
+    }
     if (handleNoteHighlightAwareEnter()) {
       e.preventDefault();
       return;
@@ -5267,21 +5337,15 @@ function refreshNoteTitlePreview(title) {
 // una etiqueta de solo lectura siempre, no hace falta desactivarla).
 function applyNoteEditorReadMode(readOnly) {
   NOTE_EDITOR_BODY.contentEditable = readOnly ? 'false' : 'true';
-  const modeBtn = document.getElementById('note-editor-read-mode-btn');
-  modeBtn.textContent = readOnly ? 'Editar' : 'Modo lectura';
-  modeBtn.setAttribute('aria-pressed', readOnly ? 'true' : 'false');
+  // En solo lectura la barra de formato entera sobra (no hay nada que
+  // formatear), asi que se oculta en vez de dejarla ahi desactivada --
+  // de paso el texto gana la pantalla que ocupaba.
+  document.getElementById('note-body-toolbar').classList.toggle('hidden', readOnly);
   document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
   if (readOnly) {
     document.getElementById('note-table-context-toolbar').classList.add('hidden');
   }
 }
-
-document.getElementById('note-editor-read-mode-btn').addEventListener('click', () => {
-  const entry = findOpenNote(state.activeOpenNoteKey);
-  if (!entry) return;
-  entry.readMode = !entry.readMode;
-  applyNoteEditorReadMode(entry.readMode);
-});
 
 function loadOpenNoteIntoDom(entry) {
   document.getElementById('note-id').value = entry.id || '';
@@ -5349,13 +5413,20 @@ function closeOpenNote(key) {
 // "openNoteInEditor": si la nota (con id real) ya esta abierta, solo se
 // activa -- no se duplica en la lista de notas abiertas. Si no, se anade
 // como una entrada nueva y se activa.
-function openNoteInEditor(note) {
+// readMode: se decide AQUI, al abrir desde el listado (clic normal en la
+// fila = editar; el boton de "solo lectura" de la fila = leer). Dentro de
+// la nota ya no hay forma de alternar -- para cambiar de modo se sale y
+// se vuelve a entrar por el otro camino, tal y como lo pidio Koku.
+function openNoteInEditor(note, { readMode = false } = {}) {
   const existing = note ? state.openNotes.find((n) => n.id === note.id) : null;
   if (existing) {
     switchActiveOpenNote(existing.key);
+    existing.readMode = readMode;
+    applyNoteEditorReadMode(readMode);
   } else {
     if (state.activeOpenNoteKey) captureActiveOpenNoteFromDom();
     const entry = noteEntrySnapshot(note);
+    entry.readMode = readMode;
     state.openNotes.push(entry);
     state.activeOpenNoteKey = entry.key;
     loadOpenNoteIntoDom(entry);
@@ -9913,8 +9984,27 @@ applyUiStyle();
 // ("que se cancele, pero mantenme en la ventana"). Por dispositivo
 // (localStorage), no sincronizado entre movil/ordenador.
 // ---------------------------------------------------------------------
+// Que boton de la barra de abajo le corresponde a cada pantalla. Las 4
+// extensiones se cuentan como "Herramientas" (es de donde se entra),
+// salvo la que este puesta en el hueco personalizable de la barra, que
+// entonces se enciende ella misma.
+function mobileNavSectionForScreen(screen) {
+  if (screen === 'mobile-notes') return 'notes';
+  if (screen === 'extensions') return 'extensions';
+  if (['gym', 'lecturas', 'finanzas', 'viajes'].includes(screen)) {
+    return getMobileNavNotesSlot() === screen ? 'notes' : 'extensions';
+  }
+  return 'calendar';
+}
+
+// Ademas de recordar la pantalla, deja encendido el boton que toca de la
+// barra de abajo. Va aqui (y no solo en goToMobileSection) porque al
+// ABRIR una pantalla por cualquier otro camino -- sobre todo al arrancar
+// la app restaurando donde lo dejaste -- la barra se quedaba marcando
+// "Calendario" aunque estuvieras en otro sitio.
 function setCurrentScreen(screen) {
   localStorage.setItem('currentScreen', screen);
+  refreshMobileNavActive(mobileNavSectionForScreen(screen));
 }
 
 async function restoreCurrentScreen() {
