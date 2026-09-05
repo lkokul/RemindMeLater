@@ -8424,6 +8424,7 @@ async function importGymLibraryExercise(libraryId) {
       muscleGroup: entry.muscleGroup,
       equipment: entry.equipment,
       libraryId: entry.id,
+      secondaryMuscles: entry.secondaryMuscles,
     }),
   });
   await loadGymExercises();
@@ -9414,6 +9415,7 @@ document.getElementById('gym-weekly-goal-field').appendChild(gymWeeklyGoalField.
 async function renderGymProgressSections() {
   const summary = await api('/api/gym-sessions/summary');
   renderGymConsistency(summary);
+  renderGymBodyMap();
   renderGymPRs();
   renderGymWeeklyVolume();
 }
@@ -9484,6 +9486,138 @@ function renderGymConsistency(summary) {
     <div class="gym-heatmap-legend"><span class="gym-list-item-muted">Menos</span>
       <span class="gym-heatmap-cell level-0"></span><span class="gym-heatmap-cell level-1"></span><span class="gym-heatmap-cell level-2"></span>
       <span class="gym-list-item-muted">Más</span></div>
+  `;
+  attachFinanzasChartTooltips(container);
+}
+
+// --- Mapa de musculos (Fase 6 del rediseno, idea propia de Koku) ------
+// Dos siluetas dibujadas a medida (vista frontal y trasera) donde cada
+// zona es un grupo de GYM_MUSCLE_GROUPS y se colorea segun cuanto se ha
+// entrenado en la ventana elegida (7/30/90 dias), en series o volumen.
+// Los musculos SECUNDARIOS del ejercicio (si vino de la libreria)
+// puntuan a la mitad (x0.5) que el principal. El SVG se genera aqui
+// mismo (no es un archivo aparte) para poder usar las variables CSS del
+// tema en los rellenos; el dibujo es propio, sin assets de terceros.
+let gymMapWindowDays = 30;
+let gymMapMetric = 'series'; // 'series' | 'volume'
+document.querySelectorAll('[data-gym-map-window]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymMapWindowDays = Number(btn.dataset.gymMapWindow);
+    document.querySelectorAll('[data-gym-map-window]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderGymBodyMap();
+  });
+});
+document.querySelectorAll('[data-gym-map-metric]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymMapMetric = btn.dataset.gymMapMetric;
+    document.querySelectorAll('[data-gym-map-metric]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderGymBodyMap();
+  });
+});
+
+// Las zonas del cuerpo: cada entrada es un grupo de la taxonomia con
+// sus formas SVG (puede tener varias, y puede aparecer en las dos
+// vistas). Coordenadas sobre un viewBox de 400x430: figura frontal
+// centrada en x=100, trasera en x=300.
+const GYM_BODYMAP_ZONES = [
+  // -- vista FRONTAL (cx = 100) --
+  { g: 'trapecio', shapes: ['<path d="M 78 56 L 100 50 L 122 56 L 112 66 L 88 66 Z" />'] },
+  { g: 'hombros', shapes: ['<circle cx="59" cy="74" r="13" />', '<circle cx="141" cy="74" r="13" />'] },
+  { g: 'pecho', shapes: ['<ellipse cx="83" cy="98" rx="19" ry="15" />', '<ellipse cx="117" cy="98" rx="19" ry="15" />'] },
+  { g: 'biceps', shapes: ['<ellipse cx="53" cy="112" rx="9" ry="19" />', '<ellipse cx="147" cy="112" rx="9" ry="19" />'] },
+  { g: 'antebrazo', shapes: ['<ellipse cx="48" cy="158" rx="8" ry="21" />', '<ellipse cx="152" cy="158" rx="8" ry="21" />'] },
+  { g: 'core', shapes: ['<rect x="85" y="118" width="30" height="52" rx="9" />'] },
+  { g: 'aductores', shapes: ['<ellipse cx="90" cy="216" rx="7" ry="26" />', '<ellipse cx="110" cy="216" rx="7" ry="26" />'] },
+  { g: 'cuadriceps', shapes: ['<ellipse cx="76" cy="242" rx="13" ry="40" />', '<ellipse cx="124" cy="242" rx="13" ry="40" />'] },
+  // -- vista TRASERA (cx = 300) --
+  { g: 'trapecio', shapes: ['<path d="M 278 56 L 300 50 L 322 56 L 314 92 L 300 100 L 286 92 Z" />'] },
+  { g: 'hombros', shapes: ['<circle cx="259" cy="74" r="12" />', '<circle cx="341" cy="74" r="12" />'] },
+  { g: 'espalda', shapes: ['<path d="M 276 100 Q 268 130 284 152 L 300 158 L 300 104 Z" />', '<path d="M 324 100 Q 332 130 316 152 L 300 158 L 300 104 Z" />'] },
+  { g: 'triceps', shapes: ['<ellipse cx="253" cy="112" rx="9" ry="19" />', '<ellipse cx="347" cy="112" rx="9" ry="19" />'] },
+  { g: 'lumbar', shapes: ['<rect x="287" y="146" width="26" height="26" rx="7" />'] },
+  { g: 'gluteo', shapes: ['<ellipse cx="288" cy="192" rx="13" ry="15" />', '<ellipse cx="312" cy="192" rx="13" ry="15" />'] },
+  { g: 'isquios', shapes: ['<ellipse cx="283" cy="248" rx="12" ry="36" />', '<ellipse cx="317" cy="248" rx="12" ry="36" />'] },
+  { g: 'gemelos', shapes: ['<ellipse cx="283" cy="330" rx="10" ry="26" />', '<ellipse cx="317" cy="330" rx="10" ry="26" />'] },
+];
+// Siluetas de fondo (contorno tenue para que "parezca un cuerpo" aunque
+// una zona este apagada): cabeza + tronco + piernas, por figura.
+function gymBodySilhouette(cx) {
+  return `
+    <g class="gym-bodymap-silhouette">
+      <circle cx="${cx}" cy="28" r="15" />
+      <path d="M ${cx - 42} 66 Q ${cx} 52 ${cx + 42} 66 L ${cx + 34} 176 Q ${cx} 188 ${cx - 34} 176 Z" />
+      <path d="M ${cx - 32} 180 L ${cx - 12} 180 L ${cx - 14} 300 L ${cx - 20} 385 L ${cx - 32} 385 Z" />
+      <path d="M ${cx + 32} 180 L ${cx + 12} 180 L ${cx + 14} 300 L ${cx + 20} 385 L ${cx + 32} 385 Z" />
+      <path d="M ${cx - 44} 68 L ${cx - 56} 180 L ${cx - 44} 180 L ${cx - 36} 78 Z" />
+      <path d="M ${cx + 44} 68 L ${cx + 56} 180 L ${cx + 44} 180 L ${cx + 36} 78 Z" />
+    </g>
+  `;
+}
+
+function renderGymBodyMap() {
+  const container = document.getElementById('gym-bodymap');
+  const since = new Date();
+  since.setDate(since.getDate() - gymMapWindowDays);
+  const sinceKey = toDateKey(since);
+
+  // Puntuacion por grupo: por cada serie de la ventana, 1 punto (o el
+  // volumen de la serie) al grupo principal del ejercicio, y la mitad a
+  // cada secundario. Tambien apuntamos los ejercicios con mas series de
+  // cada grupo para el tooltip.
+  const score = new Map();
+  const exercisesByGroup = new Map();
+  const exerciseById = new Map(state.gymExercises.map((e) => [e.id, e]));
+  for (const session of state.gymSessions) {
+    if (session.date < sinceKey) continue;
+    for (const set of session.sets) {
+      const exercise = exerciseById.get(set.exerciseId);
+      if (!exercise) continue;
+      const amount = gymMapMetric === 'volume' ? (set.reps || 0) * (set.weightKg || 0) : 1;
+      if (amount <= 0) continue;
+      const primary = GYM_MUSCLE_GROUPS.some((g) => g.id === exercise.muscleGroup) ? exercise.muscleGroup : null;
+      if (primary) {
+        score.set(primary, (score.get(primary) || 0) + amount);
+        if (!exercisesByGroup.has(primary)) exercisesByGroup.set(primary, new Map());
+        const perEx = exercisesByGroup.get(primary);
+        perEx.set(exercise.name, (perEx.get(exercise.name) || 0) + 1);
+      }
+      for (const secondary of exercise.secondaryMuscles || []) {
+        if (secondary === primary) continue;
+        score.set(secondary, (score.get(secondary) || 0) + amount * 0.5);
+      }
+    }
+  }
+
+  const max = Math.max(...score.values(), 0);
+  const unit = getGymWeightUnitLabel();
+  const zonesHtml = GYM_BODYMAP_ZONES.map((zone) => {
+    const value = score.get(zone.g) || 0;
+    // Intensidad continua sobre el morado: de un 12% (entrenado poco)
+    // hasta el acento pleno; 0 = gris base de la silueta.
+    const pct = max > 0 && value > 0 ? Math.round(12 + 78 * (value / max)) : 0;
+    const fill = pct === 0
+      ? 'color-mix(in srgb, var(--surface-2-text) 10%, var(--surface-2))'
+      : `color-mix(in srgb, var(--gym-accent) ${pct}%, var(--surface-2))`;
+    const label = gymMuscleGroupLabel(zone.g);
+    const topExercises = exercisesByGroup.has(zone.g)
+      ? [...exercisesByGroup.get(zone.g).entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name]) => name).join(', ')
+      : '';
+    const valueLabel = gymMapMetric === 'volume'
+      ? `${gymWeightKgToDisplay(value)} ${unit}`
+      : `${Math.round(value * 10) / 10} serie${value === 1 ? '' : 's'}`;
+    const tooltip = `${label}: ${valueLabel}${topExercises ? ` · ${topExercises}` : ''}`;
+    return `<g style="fill: ${fill}" data-tooltip="${escapeHtml(tooltip)}">${zone.shapes.join('')}</g>`;
+  }).join('');
+
+  container.innerHTML = `
+    <svg class="gym-chart-svg gym-bodymap-svg" viewBox="0 0 400 430" role="img" aria-label="Mapa de músculos entrenados">
+      ${gymBodySilhouette(100)}
+      ${gymBodySilhouette(300)}
+      ${zonesHtml}
+      <text class="gym-chart-label" x="100" y="420" text-anchor="middle">Frente</text>
+      <text class="gym-chart-label" x="300" y="420" text-anchor="middle">Espalda</text>
+    </svg>
+    <p class="hint">Cuanto más morado, más entrenado en los últimos ${gymMapWindowDays} días (los músculos secundarios de cada ejercicio puntúan la mitad). Pasa el cursor por una zona para el detalle.</p>
   `;
   attachFinanzasChartTooltips(container);
 }

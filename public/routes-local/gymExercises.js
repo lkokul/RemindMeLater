@@ -15,13 +15,30 @@
   const router = createLocalRouter();
 
   function serialize(row) {
+    // secondary_muscles es un JSON array de ids de la taxonomia; si no
+    // parsea (o no hay), lista vacia en vez de romper.
+    let secondary = [];
+    if (row.secondary_muscles) {
+      try {
+        const parsed = JSON.parse(row.secondary_muscles);
+        if (Array.isArray(parsed)) secondary = parsed;
+      } catch { /* lista vacia */ }
+    }
     return {
       id: row.id,
       name: row.name,
       muscleGroup: row.muscle_group || null,
       libraryId: row.library_id || null,
       equipment: row.equipment || null,
+      secondaryMuscles: secondary,
     };
+  }
+
+  // Normaliza el secondaryMuscles que llega del cliente a JSON o NULL.
+  function stringifySecondary(value) {
+    if (!Array.isArray(value)) return null;
+    const clean = value.filter((m) => typeof m === 'string' && m.trim()).map((m) => m.trim());
+    return clean.length > 0 ? JSON.stringify(clean) : null;
   }
 
   router.get('/', (req, res) => {
@@ -30,7 +47,7 @@
   });
 
   router.post('/', (req, res) => {
-    const { name, muscleGroup, libraryId, equipment } = req.body || {};
+    const { name, muscleGroup, libraryId, equipment, secondaryMuscles } = req.body || {};
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'invalid_request', message: 'El ejercicio necesita un nombre.' });
     }
@@ -44,12 +61,13 @@
     }
 
     const info = db
-      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment) VALUES (?, ?, ?, ?)')
+      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment, secondary_muscles) VALUES (?, ?, ?, ?, ?)')
       .run(
         name.trim(),
         muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null,
         libraryId ? String(libraryId) : null,
-        equipment && equipment.trim() ? equipment.trim() : null
+        equipment && equipment.trim() ? equipment.trim() : null,
+        stringifySecondary(secondaryMuscles)
       );
 
     const row = db.prepare('SELECT * FROM gym_exercises WHERE id = ?').get(info.lastInsertRowid);

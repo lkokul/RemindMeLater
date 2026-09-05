@@ -2517,6 +2517,13 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .gym-viz-legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.4rem; font-size: 0.78rem; }
 .gym-viz-legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
 
+/* Mapa de musculos (Fase 6): dos siluetas, zonas coloreadas por uso. */
+.gym-bodymap-controls { display: flex; gap: 0.8rem; flex-wrap: wrap; }
+.gym-bodymap-svg { max-width: 30rem; }
+.gym-bodymap-silhouette { fill: color-mix(in srgb, var(--surface-2-text) 5%, var(--surface-2)); }
+.gym-bodymap-svg [data-tooltip] { cursor: default; }
+.gym-bodymap-svg [data-tooltip]:hover { stroke: var(--gym-accent); stroke-width: 1.5; }
+
 /* Cabecera del nivel de dias (boton volver + nombre del bloque). */
 .gym-block-days-header { display: flex; align-items: center; gap: 0.6rem; }
 .gym-block-days-header .gym-subheading { margin: 0; }

@@ -166,6 +166,10 @@ function applyLocalSchema(db) {
       -- "Barbell_Squat") -- sirve para no importar dos veces el mismo.
       library_id TEXT,
       equipment TEXT,             -- opcional (ej. "Barra", "Mancuernas")
+      -- Grupos musculares SECUNDARIOS (JSON array de ids de la
+      -- taxonomia, ej. '["hombros","triceps"]') -- los rellena el import
+      -- de la libreria y los usa el mapa de musculos (ponderados a 0.5).
+      secondary_muscles TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1237,6 +1241,10 @@ function applyLocalSchema(db) {
   }
   if (!gymExerciseColumns.includes('equipment')) {
     db.exec('ALTER TABLE gym_exercises ADD COLUMN equipment TEXT');
+  }
+  // Fase 6 (mapa de musculos): grupos secundarios del ejercicio.
+  if (!gymExerciseColumns.includes('secondary_muscles')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN secondary_muscles TEXT');
   }
   // Fase 3: modo entrenar en vivo -- RPE y tipo de serie en gym_sets,
   // hora de inicio/duracion/notas por ejercicio en gym_sessions.
