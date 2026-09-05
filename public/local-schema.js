@@ -234,6 +234,16 @@ function applyLocalSchema(db) {
       -- dato puramente de presentacion, por eso va como JSON en una
       -- columna en vez de montar una tabla y rutas nuevas solo para esto.
       exercise_notes TEXT,
+      -- Fase 4 (actividad rapida): una fila de gym_sessions puede ser un
+      -- entrenamiento de pesas de siempre (type = 'gym', con sus series
+      -- en gym_sets) o una actividad suelta sin series -- cardio, clase,
+      -- deporte (type = 'activity', con activity_kind + activity_name y
+      -- la duracion en duration_seconds). Comparte tabla a proposito:
+      -- heatmap, racha y logros necesitan UNA sola fuente de "dias con
+      -- actividad".
+      type TEXT NOT NULL DEFAULT 'gym',
+      activity_kind TEXT,
+      activity_name TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1246,6 +1256,16 @@ function applyLocalSchema(db) {
   }
   if (!gymSessionColumns.includes('exercise_notes')) {
     db.exec('ALTER TABLE gym_sessions ADD COLUMN exercise_notes TEXT');
+  }
+  // Fase 4: actividad rapida (cardio/clases/deporte sin series).
+  if (!gymSessionColumns.includes('type')) {
+    db.exec("ALTER TABLE gym_sessions ADD COLUMN type TEXT NOT NULL DEFAULT 'gym'");
+  }
+  if (!gymSessionColumns.includes('activity_kind')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN activity_kind TEXT');
+  }
+  if (!gymSessionColumns.includes('activity_name')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN activity_name TEXT');
   }
 
 }

@@ -7551,18 +7551,42 @@ function renderGymSessionsList() {
     list.innerHTML = '<p class="empty-hint">Todavía no has registrado ninguna sesión.</p>';
     return;
   }
+  const unit = getGymWeightUnitLabel();
   state.gymSessions.forEach((s) => {
-    const exerciseNames = [...new Set(s.sets.map((set) => set.exerciseName))];
     const row = document.createElement('div');
     row.className = 'gym-list-item gym-session-item';
     row.dataset.editGymSession = s.id;
+
+    // Linea de datos rapidos: duracion (si la hay), y para entrenos de
+    // pesas tambien nº de series y volumen total.
+    const statBits = [];
+    if (s.durationSeconds) statBits.push(`${Math.max(1, Math.round(s.durationSeconds / 60))} min`);
+    if (s.type !== 'activity' && s.sets.length > 0) {
+      statBits.push(`${s.sets.length} serie${s.sets.length === 1 ? '' : 's'}`);
+      const volumeKg = s.sets.reduce((acc, set) => acc + (set.reps || 0) * (set.weightKg || 0), 0);
+      if (volumeKg > 0) statBits.push(`${gymWeightKgToDisplay(volumeKg)} ${unit}`);
+    }
+
+    if (s.type === 'activity') {
+      row.innerHTML = `
+        <span class="gym-session-item-date">${gymActivityKindIcon(s.activityKind)} ${formatGymDate(s.date)}</span>
+        <span class="gym-session-item-routine">${escapeHtml(s.activityName || 'Actividad')}</span>
+        ${statBits.length ? `<span class="gym-list-item-muted">${escapeHtml(statBits.join(' · '))}</span>` : ''}
+      `;
+      row.addEventListener('click', () => openGymActivityModal(s));
+      list.appendChild(row);
+      return;
+    }
+
+    const exerciseNames = [...new Set(s.sets.map((set) => set.exerciseName))];
     row.innerHTML = `
-      <span class="gym-session-item-date">${formatGymDate(s.date)}</span>
+      <span class="gym-session-item-date">🏋️ ${formatGymDate(s.date)}</span>
       ${
         s.routineName
           ? `<span class="gym-session-item-routine"><span class="color-dot" style="background-color: ${s.routineColor}"></span>${s.routineIcon ? escapeHtml(s.routineIcon) + ' ' : ''}${escapeHtml(s.routineName)}</span>`
-          : '<span class="gym-session-item-routine gym-list-item-muted">Sesion libre</span>'
+          : '<span class="gym-session-item-routine gym-list-item-muted">Sesión libre</span>'
       }
+      ${statBits.length ? `<span class="gym-list-item-muted">${escapeHtml(statBits.join(' · '))}</span>` : ''}
       <span class="gym-list-item-muted">${exerciseNames.length ? exerciseNames.map(escapeHtml).join(', ') : 'Sin ejercicios'}</span>
     `;
     row.addEventListener('click', () => openGymSessionModal(s));
@@ -8469,6 +8493,77 @@ document.getElementById('btn-import-gym-library-detail').addEventListener('click
   await importGymLibraryExercise(gymLibraryDetailEntry.id);
   closeGymLibraryDetail();
   renderGymLibraryList();
+});
+
+// --- Actividad rapida (Fase 4 del rediseno) ---------------------------
+// Cardio/clases/deporte sin series: tipo + nombre + duracion + fecha.
+// Se guarda como una gym_session con type='activity' (misma tabla que
+// los entrenos, ver el comentario del esquema) para que heatmap/racha
+// tengan una sola fuente de "dias con actividad".
+const GYM_ACTIVITY_KINDS = [
+  { id: 'cardio', label: '🏃 Cardio', icon: '🏃' },
+  { id: 'clase', label: '🧘 Clase dirigida', icon: '🧘' },
+  { id: 'deporte', label: '⚽ Deporte', icon: '⚽' },
+  { id: 'otro', label: '⚡ Otro', icon: '⚡' },
+];
+function gymActivityKindIcon(kind) {
+  const found = GYM_ACTIVITY_KINDS.find((k) => k.id === kind);
+  return found ? found.icon : '⚡';
+}
+const gymActivityKindField = createSelectField({
+  options: GYM_ACTIVITY_KINDS.map((k) => ({ value: k.id, label: k.label })),
+  initialValue: 'cardio',
+});
+document.getElementById('gym-activity-kind-field').appendChild(gymActivityKindField.element);
+const gymActivityDateField = createDateField({ initialValue: new Date() });
+document.getElementById('gym-activity-date-field').appendChild(gymActivityDateField.element);
+
+function openGymActivityModal(session) {
+  document.getElementById('gym-activity-modal-title').textContent = session ? 'Editar actividad' : 'Actividad rápida';
+  document.getElementById('gym-activity-id').value = session ? session.id : '';
+  document.getElementById('gym-activity-name').value = session ? session.activityName || '' : '';
+  document.getElementById('gym-activity-duration').value = session && session.durationSeconds ? Math.round(session.durationSeconds / 60) : '';
+  gymActivityKindField.setValue(session && session.activityKind ? session.activityKind : 'cardio');
+  gymActivityDateField.setValue(session ? new Date(`${session.date}T00:00:00`) : new Date());
+  document.getElementById('btn-delete-gym-activity').classList.toggle('hidden', !session);
+  document.getElementById('gym-activity-modal').classList.remove('hidden');
+}
+function closeGymActivityModal() {
+  document.getElementById('gym-activity-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-gym-activity').addEventListener('click', () => openGymActivityModal(null));
+document.getElementById('btn-cancel-gym-activity').addEventListener('click', closeGymActivityModal);
+document.getElementById('btn-close-gym-activity').addEventListener('click', closeGymActivityModal);
+
+document.getElementById('gym-activity-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('gym-activity-id').value;
+  const minutes = Number(document.getElementById('gym-activity-duration').value);
+  const payload = {
+    date: toDateKey(gymActivityDateField.getValue()),
+    type: 'activity',
+    activityKind: gymActivityKindField.getValue(),
+    activityName: document.getElementById('gym-activity-name').value,
+    durationSeconds: minutes > 0 ? minutes * 60 : null,
+  };
+  if (id) {
+    await api(`/api/gym-sessions/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/gym-sessions', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeGymActivityModal();
+  await loadGymSessions();
+  renderGymSessionsList();
+});
+
+document.getElementById('btn-delete-gym-activity').addEventListener('click', async () => {
+  const id = document.getElementById('gym-activity-id').value;
+  const ok = await showAppConfirm('¿Eliminar esta actividad?', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
+  closeGymActivityModal();
+  await loadGymSessions();
+  renderGymSessionsList();
 });
 
 // --- Modo entrenar en vivo (Fase 3 del rediseno) ----------------------

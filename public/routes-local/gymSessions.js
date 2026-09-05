@@ -56,6 +56,9 @@
     return {
       id: row.id,
       date: row.date,
+      type: row.type || 'gym',
+      activityKind: row.activity_kind || null,
+      activityName: row.activity_name || null,
       routineId: row.routine_id,
       routineName: routine ? routine.name : null,
       routineColor: routine ? routine.color : null,
@@ -117,25 +120,85 @@
     res.json(rows.map(serialize));
   });
 
+  // Resumen LIGERO de todas las sesiones, para las vistas que pintan
+  // muchas de golpe (heatmap de consistencia, racha, logros, mapa de
+  // musculos): una fila por sesion con agregados, SIN la lista de series
+  // (el GET / de arriba serializa todos los sets de cada sesion y se
+  // hace pesado para pintar un año entero).
+  // Un solo segmento como '/' -- no colisiona con nada porque no existe
+  // ningun GET /:id en este router, pero si algun dia se añade, esta
+  // ruta tiene que declararse ANTES (gana el primer match, ver
+  // local-api.js).
+  router.get('/summary', (req, res) => {
+    const rows = db
+      .prepare(`
+        SELECT s.id, s.date, s.type, s.activity_kind, s.activity_name, s.duration_seconds, s.routine_id,
+               COUNT(st.id) as set_count,
+               SUM(COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0)) as volume_kg
+        FROM gym_sessions s
+        LEFT JOIN gym_sets st ON st.session_id = s.id
+        GROUP BY s.id
+        ORDER BY s.date DESC, s.id DESC
+      `)
+      .all();
+    // Grupos musculares por sesion, en una sola consulta aparte (mas
+    // simple que un GROUP_CONCAT anidado y sigue siendo barato).
+    const muscleRows = db
+      .prepare(`
+        SELECT st.session_id, ge.muscle_group
+        FROM gym_sets st
+        JOIN gym_exercises ge ON ge.id = st.exercise_id
+        WHERE ge.muscle_group IS NOT NULL
+        GROUP BY st.session_id, ge.muscle_group
+      `)
+      .all();
+    const musclesBySession = new Map();
+    for (const r of muscleRows) {
+      if (!musclesBySession.has(r.session_id)) musclesBySession.set(r.session_id, []);
+      musclesBySession.get(r.session_id).push(r.muscle_group);
+    }
+    res.json(rows.map((r) => ({
+      id: r.id,
+      date: r.date,
+      type: r.type || 'gym',
+      activityKind: r.activity_kind || null,
+      activityName: r.activity_name || null,
+      durationSeconds: r.duration_seconds ?? null,
+      routineId: r.routine_id,
+      setCount: r.set_count,
+      volumeKg: r.volume_kg || 0,
+      muscleGroups: musclesBySession.get(r.id) || [],
+    })));
+  });
+
   router.post('/', (req, res) => {
-    const { date, routineId, notes, sets, startedAt, durationSeconds, exerciseNotes } = req.body || {};
+    const { date, routineId, notes, sets, startedAt, durationSeconds, exerciseNotes, type, activityKind, activityName } = req.body || {};
     if (!DATE_RE.test(date || '')) {
       return res.status(400).json({ error: 'invalid_request', message: 'Falta la fecha de la sesion (YYYY-MM-DD).' });
     }
-    const safeRoutineId = routineId ? db.prepare('SELECT id FROM gym_routines WHERE id = ?').get(routineId)?.id ?? null : null;
+    // Una actividad rapida no lleva series ni dia del plan: se fuerza
+    // aqui (en vez de rechazar con 400) para que un cliente despistado
+    // no pueda crear un hibrido raro.
+    const safeType = type === 'activity' ? 'activity' : 'gym';
+    const safeRoutineId = safeType === 'activity'
+      ? null
+      : (routineId ? db.prepare('SELECT id FROM gym_routines WHERE id = ?').get(routineId)?.id ?? null : null);
 
     const info = db
-      .prepare('INSERT INTO gym_sessions (date, routine_id, notes, started_at, duration_seconds, exercise_notes) VALUES (?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO gym_sessions (date, routine_id, notes, started_at, duration_seconds, exercise_notes, type, activity_kind, activity_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         date,
         safeRoutineId,
         notes && notes.trim() ? notes.trim() : null,
         startedAt ? String(startedAt) : null,
         durationSeconds !== undefined && durationSeconds !== null && durationSeconds !== '' ? Number(durationSeconds) : null,
-        stringifyExerciseNotes(exerciseNotes)
+        stringifyExerciseNotes(exerciseNotes),
+        safeType,
+        safeType === 'activity' && activityKind ? String(activityKind) : null,
+        safeType === 'activity' && activityName && activityName.trim() ? activityName.trim() : null
       );
 
-    replaceSessionSets(info.lastInsertRowid, sets);
+    replaceSessionSets(info.lastInsertRowid, safeType === 'activity' ? [] : sets);
 
     const row = db.prepare('SELECT * FROM gym_sessions WHERE id = ?').get(info.lastInsertRowid);
     res.status(201).json(serialize(row));
@@ -145,10 +208,14 @@
     const existing = db.prepare('SELECT * FROM gym_sessions WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'not_found' });
 
-    const { date, routineId, notes, sets, startedAt, durationSeconds, exerciseNotes } = req.body || {};
+    const { date, routineId, notes, sets, startedAt, durationSeconds, exerciseNotes, activityKind, activityName } = req.body || {};
     const safeDate = date !== undefined && DATE_RE.test(date) ? date : existing.date;
-    const safeRoutineId =
-      routineId === undefined
+    // El type de una sesion NUNCA cambia en un PUT (una actividad no se
+    // convierte en entreno de pesas ni al reves -- se borra y se crea).
+    const isActivity = (existing.type || 'gym') === 'activity';
+    const safeRoutineId = isActivity
+      ? null
+      : routineId === undefined
         ? existing.routine_id
         : routineId
           ? db.prepare('SELECT id FROM gym_routines WHERE id = ?').get(routineId)?.id ?? null
@@ -157,17 +224,19 @@
     // Igual que notes: undefined = "no tocar" (el modal de editar a mano
     // no manda estos campos y no debe borrar la duracion/notas del
     // entreno en vivo original).
-    db.prepare('UPDATE gym_sessions SET date = ?, routine_id = ?, notes = ?, started_at = ?, duration_seconds = ?, exercise_notes = ? WHERE id = ?').run(
+    db.prepare('UPDATE gym_sessions SET date = ?, routine_id = ?, notes = ?, started_at = ?, duration_seconds = ?, exercise_notes = ?, activity_kind = ?, activity_name = ? WHERE id = ?').run(
       safeDate,
       safeRoutineId,
       notes === undefined ? existing.notes : (notes && notes.trim() ? notes.trim() : null),
       startedAt === undefined ? existing.started_at : (startedAt ? String(startedAt) : null),
       durationSeconds === undefined ? existing.duration_seconds : (durationSeconds !== null && durationSeconds !== '' ? Number(durationSeconds) : null),
       exerciseNotes === undefined ? existing.exercise_notes : stringifyExerciseNotes(exerciseNotes),
+      activityKind === undefined ? existing.activity_kind : (isActivity && activityKind ? String(activityKind) : null),
+      activityName === undefined ? existing.activity_name : (isActivity && activityName && activityName.trim() ? activityName.trim() : null),
       req.params.id
     );
 
-    if (sets !== undefined) replaceSessionSets(req.params.id, sets);
+    if (sets !== undefined && !isActivity) replaceSessionSets(req.params.id, sets);
 
     const row = db.prepare('SELECT * FROM gym_sessions WHERE id = ?').get(req.params.id);
     res.json(serialize(row));

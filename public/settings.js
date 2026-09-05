@@ -1888,6 +1888,7 @@ document.addEventListener('keydown', (e) => {
     ['gym-library-detail-modal', closeGymLibraryDetail],
     ['gym-library-modal', closeGymLibraryModal],
     ['gym-start-modal', closeGymStartModal],
+    ['gym-activity-modal', closeGymActivityModal],
     ['gym-block-modal', closeGymBlockModal],
     ['gym-exercise-modal', closeGymExerciseModal],
     ['gym-routine-modal', closeGymRoutineModal],

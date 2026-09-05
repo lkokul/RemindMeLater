@@ -711,7 +711,10 @@
       <div id="gym-tab-sessions" class="gym-tab-panel">
         <button type="button" id="btn-gym-live-resume" class="primary-btn gym-live-start-btn hidden">▶ Entrenamiento en curso — continuar</button>
         <button type="button" id="btn-gym-live-start" class="primary-btn gym-live-start-btn">💪 ¡Empezar entrenamiento!</button>
-        <button type="button" id="btn-new-gym-session" class="secondary-btn gym-tab-action">+ Apuntar sesión a mano</button>
+        <div class="gym-exercises-actions">
+          <button type="button" id="btn-new-gym-activity" class="secondary-btn gym-tab-action">⚡ Actividad rápida</button>
+          <button type="button" id="btn-new-gym-session" class="secondary-btn gym-tab-action">+ Apuntar sesión a mano</button>
+        </div>
         <div id="gym-sessions-list" class="gym-list"></div>
       </div>
 
@@ -780,6 +783,42 @@
           <button type="button" id="btn-delete-gym-exercise" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
           <button type="button" id="btn-cancel-gym-exercise" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Actividad rapida (Fase 4): registrar cardio/clases/deporte sin
+       series -- tipo + nombre + duracion + fecha, y ya. Comparte tabla
+       con las sesiones (type='activity'), asi que cuenta para el heatmap
+       de consistencia y la racha de las fases siguientes. -->
+  <div id="gym-activity-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-activity" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-activity-modal-title">Actividad rápida</h2>
+      <form id="gym-activity-form">
+        <input type="hidden" id="gym-activity-id" />
+        <div class="field-label-block">
+          <span class="field-label">Tipo</span>
+          <div id="gym-activity-kind-field"></div>
+        </div>
+        <label>
+          Nombre
+          <input type="text" id="gym-activity-name" placeholder="Ej. Running 5K, Clase de GAP, Pádel..." required />
+        </label>
+        <label>
+          Duración (minutos)
+          <input type="number" id="gym-activity-duration" min="1" inputmode="numeric" placeholder="Ej. 45" />
+        </label>
+        <div class="field-label-block">
+          <span class="field-label">Fecha</span>
+          <div id="gym-activity-date-field"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-gym-activity" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-gym-activity" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
