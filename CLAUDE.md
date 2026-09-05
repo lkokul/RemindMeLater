@@ -1,55 +1,55 @@
 # RemindMeLater — notas para retomar el proyecto en otra conversación
 
-Esto no es documentación de usuario (eso es `README.md`, que se
-reescribió por completo en la ronda de v0.19.0 y se ha ido manteniendo al
-día en rondas posteriores — última vez actualizado por completo en esta
-misma ronda, ver "Estado actual" más abajo). Esto es un resumen para que
-una conversación nueva
-(Cowork, Claude Code local o una sesión de control remoto) pueda seguir
-donde lo dejamos sin que Koku tenga que repetir todo el contexto.
+Esto no es documentación de usuario (eso es `README.md`). Esto es un
+resumen para que una conversación nueva (Cowork, Claude Code local o una
+sesión de control remoto) pueda seguir donde lo dejamos sin que Koku
+tenga que repetir todo el contexto.
 
 **Quién es Koku**: no sabe JavaScript a fondo, así que las explicaciones y
 los comentarios en el código van con más detalle de lo normal a propósito.
 Mantén ese estilo.
 
-**Nota sobre este archivo**: normalmente CLAUDE.md NO se commitea (ver
-regla de abajo) — vive solo local, como notas de trabajo. La excepción:
-si Koku va a cambiar a una sesión distinta (p. ej. control remoto) que
-puede arrancar con un clon nuevo del repo, sí se commitea este archivo
-puntualmente para que el resumen viaje con el repo. Eso fue lo que pasó
-justo antes de este commit — no lo tomes como que la regla cambió para
-siempre, cada vez que quieras commitearlo hay que confirmarlo con Koku
-igual que cualquier otro commit.
+**Este archivo se commitea como uno más.** Antes había una regla de "no
+commitear CLAUDE.md"; Koku la quitó explícitamente — a partir de ahora se
+actualiza y se commitea igual que cualquier otro archivo del repo,
+siguiendo las mismas reglas de commit de abajo (o sea: cuando él lo pida,
+no por tu cuenta).
 
 ## Qué es esto
 
-Calendario, recordatorios, tareas y notas local-first: Node.js + Express +
-`node:sqlite` (SQLite integrado en Node, sin compilar nada nativo) por
-detrás, HTML/CSS/JS sin build ni framework por delante (`app.js` y
+Calendario, recordatorios, tareas y notas local-first. **Ahora mismo hay
+DOS programas independientes conviviendo en el mismo repositorio**, y es
+lo primero que hay que tener claro antes de tocar nada:
+
+- **La app sin servidor** (rama `movil-ui`, la que se está desarrollando
+  activamente): todo vive dentro de la propia app, en el dispositivo. No
+  hay servidor, ni emparejamiento, ni sincronización, ni cuenta. Por
+  dentro es SQLite de verdad compilado a WebAssembly (`sql.js`,
+  vendorizado en `public/vendor/`), con las MISMAS rutas del backend de
+  siempre portadas a `public/routes-local/`. Se empaqueta como app nativa
+  de iOS/Android con Capacitor.
+- **La versión de escritorio** (`server/`, `electron/`): el servidor
+  Express + `node:sqlite` original. Koku la trabaja **por su cuenta en
+  una rama `escritorio`** — **NO la toques** salvo que te lo pida
+  explícitamente. Al fusionar, él preguntará qué falta en cada lado.
+
+La interfaz sigue siendo HTML/CSS/JS sin build ni framework (`app.js` y
 `settings.js` se cargan como `<script>` normales y comparten variables
 globales — `settings.js` va después de `app.js`, cuidado con el orden si
-tocas ambos). Corre en el ordenador de Koku; el móvil se conecta a la
-misma app por wifi local, emparejado con un código de 6 dígitos (30s de
-validez, con límite de intentos fallidos — ver "Emparejamiento" más
-abajo), y guarda su propia copia local (IndexedDB) que sincroniza con el
-ordenador de forma MANUAL (sin ningún disparador automático de fondo,
-ver "Sincronización móvil" más abajo). También se puede empaquetar como
-app de escritorio (Electron) y se anuncia por mDNS
-(`remindmelater.local`). Además del calendario, hay un hub de
-"Extensiones" a pantalla completa con 4 secciones independientes:
-Gimnasio, Lecturas, Finanzas y Archivos (ver "Extensiones" más abajo).
-Vive en la rama `main` de GitHub (no `main-wmqm2f`, que era el nombre de
-rama de una ronda anterior de esta sesión — el repo se fusionó
-limpiamente a `main` hace varias rondas). Detalle completo de features en
-`README.md`, que ahora sí está actualizado.
+tocas ambos). Además del calendario hay un hub de "Apps" a pantalla
+completa con 4 secciones independientes: Gimnasio, Lecturas, Finanzas y
+Viajes. Detalle completo de features en `README.md`, que está al día.
 
 ## Reglas de trabajo que Koku ha pedido explícitamente
 
-- **No hacer commit ni push sin que él lo pida.** Antes probaba todo local
-  con `npm run dev` y daba luz verde a cada ronda; últimamente directamente
-  dice "haz commit" o "haz push" cuando quiere — y a veces solo pide UNA de
-  las dos cosas (commit sin push, por ejemplo), hay que hacer justo lo que
-  pide, no más. No asumas autorización de una ronda para la siguiente.
+- **No hacer commit ni push sin que él lo pida.** A veces pide solo UNA
+  de las dos cosas (commit sin push, por ejemplo): hay que hacer justo lo
+  que pide, no más. No asumas autorización de una ronda para la
+  siguiente. En rondas largas por fases, ha pedido **un commit al
+  terminar cada fase y un solo push al final de todas**.
+- **`CLAUDE.md` se trata como un archivo más** (regla nueva, sustituye a
+  la anterior de "nunca se commitea"): se actualiza cuando el proyecto
+  cambia, y se commitea con el resto.
 - **No hace falta avisar de que una tarea es larga antes de empezar** — lo
   pidió al principio, pero luego dijo explícitamente que como no puedo
   comprimir contexto por mi cuenta, no sirve de nada que avise. No lo hagas.
@@ -95,6 +95,57 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
 
 ## Arquitectura y convenciones establecidas
 
+- **El "servidor" vive dentro de la app** (lo más importante de entender):
+  - `public/vendor/sql-wasm.js` + `.wasm` — SQLite compilado a
+    WebAssembly (sql.js, MIT, vendorizado; sin build, sin CDN). Se eligió
+    frente a reescribir a IndexedDB porque conserva las 45+ consultas con
+    SQL de verdad (JOIN/GROUP BY/SUM), y frente a un plugin nativo de
+    SQLite porque sql.js es **síncrono** igual que `node:sqlite`: si
+    fuera asíncrono habría que convertir a `await` los ~396 sitios que
+    consultan la base, o sea reescribir todas las rutas.
+  - `public/local-schema.js` — el esquema (tablas + migraciones) portado
+    de `server/db.js`.
+  - `public/local-db.js` — expone `localDb`, con la MISMA forma que el
+    `db` de `node:sqlite` (`prepare(sql).all/get/run`, `exec`), y vuelca
+    la base entera a IndexedDB tras cada escritura (agrupando 250ms, y
+    también al ocultarse la página, para no perder la última escritura
+    si se cierra la app justo después).
+  - `public/local-api.js` — router mínimo que imita a Express
+    (`createLocalRouter`/`mountLocalRouter`/`dispatchLocalRequest`).
+  - `public/routes-local/*.js` — las 25 rutas del backend, copiadas
+    **mecánicamente** de `server/routes/`: misma lógica y mismo SQL, solo
+    cambia la fontanería (sin require/module.exports, cada archivo en un
+    IIFE para que los nombres repetidos no choquen en el ámbito global).
+  - `api()` en `app.js` despacha contra ese router en vez de hacer
+    `fetch`. Misma firma y misma forma de error, así que ninguno de los
+    ~50 sitios que la llaman cambió.
+  - **Si tocas una ruta, tócala en `public/routes-local/`**, no en
+    `server/routes/` (eso es el otro programa).
+- **Verificación del porte**: hay un guion de comparación diferencial que
+  lanza las MISMAS peticiones contra el servidor Express real y contra el
+  motor local y compara las respuestas (79 comprobaciones, 0
+  diferencias). Si algún día se toca el porte a lo grande, merece la pena
+  rehacerlo antes de dar nada por bueno.
+- **Imágenes y fotos**: los bytes van al almacén `noteAssets` de
+  IndexedDB, NO dentro de la base SQLite (la inflaría y haría lento cada
+  volcado). El HTML de una nota sigue guardando la ruta de siempre
+  (`/api/notes/images/<uuid>.<ext>`), así que el saneador no cambia; al
+  MOSTRARLA, `resolveAssetUrl()`/`hydrateAssetImages()` cambian el `src`
+  por una URL `blob:` y guardan la ruta original en `data-asset-src`,
+  que `serializeAssetImages()` devuelve al guardar. Cuidado: poner el
+  `src` original en un `<img>` (aunque sea un clon suelto) hace que el
+  navegador pida esa ruta igualmente — por eso serializar se hace sobre
+  el texto, no clonando el DOM.
+- **Recordatorios**: `public/local-notifications.js` los programa en el
+  propio sistema operativo con `@capacitor/local-notifications`, así que
+  suenan con la app cerrada sin servidor ni push. Se reprograman en
+  bloque (cancelar todo y rehacer) desde `loadReminders()`, que es por
+  donde ya pasa cualquier cambio de eventos. En un navegador normal el
+  plugin no existe y todo esto es no-op.
+- **Gastos fijos**: `public/finanzas-recurring.js`, portado de
+  `server/finanzasRecurringChecker.js`, se ejecuta al ABRIR la app en vez
+  de en un `setInterval` de 24h.
+
 - **Temas de color**: cada fondo real de la interfaz (`bg`, `surface`,
   `surface2`, `settingsMenuBg`, `accent`, `dayToday`) lleva su propio color
   de contraste emparejado (`bgText`, `surfaceText`, etc.) en vez de un
@@ -113,15 +164,10 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
   anterior solo (sin preguntar); cerrar sin guardar descarta. No hay botón
   de guardado por tema, es un único flujo global (`saveCurrentThemeEdit`,
   `switchThemeEdit` en `settings.js`).
-- **Dispositivo de confianza**: el propio ordenador se identifica por IP de
-  loopback (`isTrustedRequest()`); los móviles emparejados usan un header
-  `X-Device-Token`. Ver `server/auth.js`.
-- **Carpeta de datos configurable**: `server/dataDir.js` lee
-  `REMINDMELATER_DATA_DIR` si existe (la pone Electron, apuntando a la
-  carpeta de datos del usuario), si no usa `data/` del proyecto. Se sacó
-  de `db.js` a su propio archivo en la ronda de imágenes de notas (Fase
-  4) para que `routes/noteImages.js` pudiera usar el mismo cálculo sin
-  duplicarlo.
+- **No hay autenticación de ningún tipo** en la app sin servidor: sin
+  servidor no hay a quién autenticar, todo es acceso local del dueño del
+  dispositivo. El router local ignora a propósito los middlewares que
+  traían las rutas portadas (`requireDeviceOrTrusted` y similares).
 - **Mobile-first**: CSS base es para móvil, `min-width: 860px` cambia a
   layout de escritorio (calendario en grid + panel de recordatorios al
   lado, todo dentro de `100vh` sin scroll de página).
@@ -251,48 +297,23 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
 - **PWA**: `public/manifest.json` + `public/sw.js` (service worker
   mínimo, solo cachea el shell — HTML/CSS/JS —, nunca `/api/*`, para que
   los datos siempre sean en vivo). Instalable como app en móvil/escritorio.
-- **Sincronización móvil (manual)**: el móvil guarda su copia local en
-  IndexedDB (`public/db-local.js`) y sincroniza en los DOS sentidos con
-  el ordenador — pero, desde la ronda de la extensión Archivos, SOLO de
-  forma MANUAL: se quitaron a propósito los 3 disparadores automáticos
-  que había antes (`init()`, un `setInterval` de 30s, el evento
-  `online`), decisión explícita de Koku aunque significa que si no abre
-  Archivos los cambios no llegan solos. El botón "Sincronizar ahora"
-  vive en Extensiones → Archivos (ya no en Configuración → Este
-  dispositivo, se movió). El punto de color de la topbar sigue
-  reflejando el estado del ÚLTIMO intento manual (verde/amarillo/gris/
-  rojo), y clicarlo abre Archivos directamente en vez de Configuración.
-- **Emparejamiento con límite de intentos**: `server/pairing.js` — el
-  código de 6 dígitos dura 30s (antes 5 minutos) y de un solo uso; además
-  un `Map` en memoria por IP cuenta intentos fallidos de
-  `POST /api/devices/pair`, bloqueando esa IP 10 minutos tras 5 fallos
-  seguidos (`isPairingLocked`/`recordFailedPairing`/
-  `recordSuccessfulPairing`, aplicados en `routes/devices.js`). Un
-  `400 invalid_request` (faltan campos) no cuenta como intento fallido,
-  solo un código con formato correcto pero incorrecto/caducado.
-- **Checkers en segundo plano (patrón repetido)**: para trabajo periódico
-  del lado del servidor, la forma establecida es
-  `function start...() { doWorkOnce(); const timer = setInterval(doWorkOnce, MS); timer.unref(); return timer; }`,
-  llamado UNA vez desde el callback de `app.listen()` en
-  `server/index.js`. Ejemplos: `reminderChecker.js` (30s),
-  `finanzasRecurringChecker.js` (24h, genera la transacción real de cada
-  plantilla de gasto fijo cuando toca), `pruneSyncLog` en
-  `routes/sync.js` (24h). Cuando el estado es efímero y nunca hay nada
-  pendiente justo después de reiniciar (no hace falta "arrancar" nada al
-  boot), el mismo `setInterval(...).unref()` vive a nivel de módulo sin
-  necesidad de exportar un `start...()` ni tocar `index.js` — así son
-  `pairing.js` (códigos de emparejamiento) y `archivosTransfers.js`
-  (solicitudes de doble confirmación de Archivos, ver más abajo).
-- **Extensiones** (hub a pantalla completa, botón "Extensiones" en la
-  topbar): cuatro secciones independientes del calendario, todas
-  siguiendo el mismo patrón de esquema (`CREATE TABLE IF NOT EXISTS` +
-  migraciones condicionales en `db.js`, `PRAGMA table_info` +
-  `ALTER TABLE`) y borrado en cascada A MANO en las rutas (nunca
-  `ON DELETE CASCADE` de SQL). Detalle de usuario completo en
-  `README.md`; resumen técnico rápido aquí:
+- **No hay sincronización ni emparejamiento.** Cada dispositivo tiene
+  sus propios datos y no se hablan entre ellos. Todo lo que había
+  (`sync_log`, pull/push, cola de pendientes, código de 6 dígitos, QR de
+  reconexión, Web Push/VAPID, la extensión Archivos y los avisos de
+  versión nueva) se quitó de la app; sigue vivo solo en `server/`, que es
+  el otro programa.
+- **Apps** (hub a pantalla completa, botón "Apps" en la topbar —
+  antes se llamaba "Extensiones", solo cambió el texto visible, los
+  ids/clases internas siguen diciendo `extensions`): cuatro secciones
+  independientes del calendario, todas con el mismo patrón de esquema
+  (`CREATE TABLE IF NOT EXISTS` + migraciones condicionales,
+  `PRAGMA table_info` + `ALTER TABLE`) y borrado en cascada A MANO en
+  las rutas (nunca `ON DELETE CASCADE` de SQL). Detalle de usuario en
+  `README.md`; resumen técnico:
   - **Gimnasio**: `gym_exercises`/`gym_routines`/`gym_routine_exercises`/
     `gym_sessions`/`gym_sets`. Progreso con gráfica SVG a mano (peso
-    máximo/volumen), primera gráfica del proyecto sin ninguna librería.
+    máximo/volumen), sin ninguna librería.
   - **Lecturas**: `lecturas_sagas`/`lecturas_items` (sagas obligatorias,
     un item puede ser de cualquier tipo — manga/cómic/libro/serie/anime/
     película — dentro de la misma saga). Géneros como columna JSON de
@@ -305,25 +326,19 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
     `finanzas_asset_valuations` (carteras anidadas tipo `note_folders`,
     activos con valoración manual de precio) +
     `finanzas_recurring_expenses` (plantillas de gasto fijo, generador
-    en `finanzasRecurringChecker.js`, ver arriba). Saldo de cuenta
-    SIEMPRE calculado, nunca guardado. Borrar una cuenta con historial
-    se rechaza (`has_history`); borrar una categoría/cartera no destruye
-    lo que la usaba (queda sin categoría/cartera, o reparentado).
-  - **Archivos**: sin tabla SQL — la "base de datos" es la propia
-    carpeta del sistema de archivos (`server/routes/archivos.js`, ruta
-    guardada en `app_settings.archivosFolder`). Transferencia con doble
-    panel (estilo TightVNC), navegación real de cualquier carpeta del
-    disco desde el ordenador (`GET /browse`, `requireTrusted`), y desde
-    la última ronda **doble confirmación** cuando quien inicia un envío/
-    descarga es un móvil emparejado — nunca cuando lo inicia el
-    ordenador, que puede copiar un archivo local a su propia carpeta sin
-    "otro dispositivo" al que pedirle permiso (ver
-    `server/archivosTransfers.js`: `Map` en memoria, TTL 2 minutos,
-    mismo patrón que `pairing.js`). No es una barrera de seguridad
-    (un móvil emparejado ya tiene acceso completo, ver
-    "Dispositivo de confianza" arriba) — es una salvaguarda de UX contra
-    accidentes, documentado explícitamente así en el mensaje del commit
-    a petición de Koku.
+    en `public/finanzas-recurring.js`). Saldo de cuenta SIEMPRE
+    calculado, nunca guardado. Borrar una cuenta con historial se
+    rechaza (`has_history`); borrar una categoría/cartera no destruye lo
+    que la usaba (queda sin categoría/cartera, o reparentado).
+  - **Viajes**: `viajes_trips`/`viajes_trip_countries`/`viajes_entries`/
+    `viajes_entry_attachments`/`viajes_entry_movements`. Mapa SVG por
+    países (`raphaellepuschitz/SVG-World-Map`, MIT) con zoom/paneo
+    propios; los ids del SVG vienen en MAYÚSCULAS y se normalizan a
+    minúsculas en `dataset.countryCode` (el atributo `id` no se toca).
+    Un movimiento de una entrada puede enlazarse a una transacción real
+    de Finanzas. La extensión **Archivos** existió y se quitó al
+    desaparecer el servidor (no tenía sentido leer las carpetas de un
+    ordenador que ya no está).
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
@@ -377,43 +392,59 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
 
 ## Estado actual
 
-Último commit en `origin/main` (pusheado): `v0.32.0` (`d0f9051`) —
-límite de intentos de emparejamiento (5 fallos por IP, bloqueo 10 min) +
-código de 6 dígitos de 5min→30s, y doble confirmación al transferir
-archivos en la extensión Archivos (solo cuando la inicia un móvil).
-`README.md` y este archivo se pusieron al día por completo en esta misma
-ronda (llevaban desactualizados desde antes de que existiera la
-extensión Archivos y varias rondas grandes de Finanzas). El tag
-`v0.32.0` da 403 al pushear desde esta sesión de control remoto
-(limitación conocida, ver regla de tags arriba) — pendiente de que Koku
-lo cree a mano desde su ordenador.
+**Rama de trabajo: `movil-ui`** (no `main`). Ahí vive la app móvil sin
+servidor. `main` sigue teniendo la versión vieja cliente-servidor, y la
+rama `escritorio` es donde Koku trabaja el programa de escritorio por su
+cuenta — no las toques desde aquí.
 
-Desde la última vez que esto se puso al día de verdad (v0.23.1, cuando
-el proyecto aún vivía en la rama `main-wmqm2f` y solo tenía calendario +
-Mi espacio) ha pasado mucho, resumido:
-- **Móvil independiente**: copia local (IndexedDB) + sincronización LAN
-  (ahora manual, ver arriba) + notificaciones push reales (Web Push/
-  VAPID) + pantalla de bienvenida pidiendo nombre/correo la primera vez.
-- **Las 4 extensiones completas**: Gimnasio, Lecturas, Finanzas y
-  Archivos (ver bloque "Extensiones" más arriba para el detalle técnico
-  de cada una).
-- Varias rondas grandes solo en **Finanzas**: selects/fechas propios,
-  tooltip real en gráficas, editar cuenta como modal, objetivo de ahorro
-  con vista mensual + histórica, carteras/activos con valoración manual
-  y gráfica de líneas, y gasto fijo recurrente auto-generado.
-- Varias rondas en **Archivos**: transferencia de dos paneles, navegar
-  cualquier carpeta del disco desde el ordenador, y esta última ronda de
-  doble confirmación + límite de intentos de emparejamiento.
-- Tema de color nuevo "Registro" + su estilo de interacción a juego (4º,
-  junto a Directo/Neón/Cristal).
-- El repo se fusionó de las ramas de trabajo por pieza (`gimnasio`,
-  `lecturas`, `finanzas`, `movil`...) a la rama `main`, que es la real.
+Últimos commits en `origin/movil-ui`:
+
+- `29b2233` — **Fase 1**: SQLite dentro del propio móvil (sql.js
+  vendorizado + `local-schema.js` + `local-db.js`).
+- `f721bf1` — **Fase 2**: el backend entero corre dentro de la app
+  (shim de Express + 25 archivos en `public/routes-local/`, `api()`
+  despachando contra el motor local).
+- `9360c09` — **Fase 3**: entrada directa (fuera la pantalla de
+  vinculación), avisos nativos con `@capacitor/local-notifications`, y
+  fuera todo lo que dependía del servidor (sincronización, Archivos,
+  emparejamiento, push, aviso de versión).
+- `9f65425` — **Fase 4**: limpieza final del cliente (`db-local.js`
+  reescrito, CSS muerto fuera, `settings.js` sin Dispositivos/QR/push)
+  y `README.md` reescrito para la app sin servidor.
+
+Antes de eso, en la misma rama: la prueba de Capacitor (`0500249`), el
+pipeline de iOS con GitHub Actions (`798d2c9` + 3 commits de arreglos
+de firma), y las 5 fases del rediseño móvil.
+
+**Verificación hecha en las 4 fases**: comparación diferencial entre el
+servidor Express real y el motor portado (79 peticiones idénticas, 0
+diferencias, incluidas las agregaciones de Finanzas, el progreso de
+Gimnasio y los borrados en cascada de Viajes), más pruebas de extremo a
+extremo con la app servida como estático puro, sin ningún backend.
+
+**Lo que NO existe todavía y es el hueco más importante**: no hay
+ninguna copia de seguridad. Sin servidor y sin export/import, si Koku
+borra la app pierde todo. Es el siguiente trabajo declarado.
 
 ## Pendiente / próximos pasos declarados
 
-- **Idiomas**: Koku quiere en algún momento un selector español/inglés
-  ("por tener la opción y ver cómo se desarrolla"), pero pidió
-  explícitamente dejarlo para más adelante — no es prioridad ahora mismo,
-  no empezar sin que lo pida.
-- **README.md** / **este archivo**: al día (ver "Estado actual" arriba).
-- Sin nada más declarado explícitamente en el momento de escribir esto.
+- **Copia de seguridad (export/import)**: lo más urgente, ver arriba.
+  Sin diseñar todavía — falta decidir dónde vive el archivo (el propio
+  móvil, iCloud/Drive, mandarlo a otro sitio…) y cuándo se hace.
+- **Probar la Fase 5 en su iPhone**: Koku instala desde TestFlight
+  (`IOS-TESTFLIGHT.md` tiene la guía completa). Las notificaciones
+  locales reales y el arranque directo solo se pueden confirmar ahí,
+  no desde este contenedor.
+- **Android**: el proyecto de Capacitor ya está generado (`android/`),
+  pero no hay workflow de GitHub Actions para compilarlo todavía. Solo
+  está hecho el de iOS.
+- **Fusionar `movil-ui` con `escritorio`**: móvil y escritorio son dos
+  programas independientes que hoy comparten `public/`. Cuando toque
+  fusionar habrá conflictos ahí; Koku dijo que preguntará qué falta en
+  cada lado y se resuelve entonces. No adelantarse.
+- **Idiomas**: selector español/inglés, apuntado hace mucho y
+  explícitamente aplazado. No empezar sin que lo pida.
+- **Backlog sin fecha** (ideas suyas, ninguna empezada): rediseño
+  visual del visor de escritorio, repensar Finanzas para que sea
+  "realmente útil", rediseñar Gimnasio inspirándose en la app de un
+  amigo, y una extensión nueva estilo Notion.
