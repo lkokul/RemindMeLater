@@ -719,7 +719,10 @@
           <button type="button" id="btn-new-gym-block" class="primary-btn gym-tab-action">+ Nuevo bloque</button>
           <div id="gym-blocks-list" class="gym-list"></div>
           <h3 class="gym-subheading">Ejercicios</h3>
-          <button type="button" id="btn-new-gym-exercise" class="secondary-btn gym-tab-action">+ Nuevo ejercicio</button>
+          <div class="gym-exercises-actions">
+            <button type="button" id="btn-open-gym-library" class="primary-btn gym-tab-action">🔍 Librería de ejercicios</button>
+            <button type="button" id="btn-new-gym-exercise" class="secondary-btn gym-tab-action">+ Nuevo ejercicio</button>
+          </div>
           <div id="gym-exercises-list" class="gym-list"></div>
         </div>
         <div id="gym-block-days-level" class="hidden">
@@ -759,9 +762,13 @@
           Nombre
           <input type="text" id="gym-exercise-name" required />
         </label>
+        <div class="field-label-block">
+          <span class="field-label">Grupo muscular (opcional)</span>
+          <div id="gym-exercise-muscle-field"></div>
+        </div>
         <label>
-          Grupo muscular (opcional)
-          <input type="text" id="gym-exercise-muscle-group" placeholder="Ej. Pierna" />
+          Material (opcional)
+          <input type="text" id="gym-exercise-equipment" placeholder="Ej. Barra, Mancuernas" />
         </label>
         <div class="modal-actions">
           <button type="button" id="btn-delete-gym-exercise" class="danger-btn hidden">Eliminar</button>
@@ -770,6 +777,40 @@
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Buscador de la libreria de ejercicios empaquetada (Fase 2 del
+       rediseno de Gimnasio): ~870 ejercicios de yuhonas/free-exercise-db
+       (dominio publico), cargados por fetch perezoso desde
+       gym-exercise-library.json al abrir esto por primera vez. Importar
+       uno lo copia a gym_exercises (idempotente por library_id). -->
+  <div id="gym-library-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-library-card">
+      <button type="button" id="btn-close-gym-library" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Librería de ejercicios</h2>
+      <input type="text" id="gym-library-search" placeholder="Buscar por nombre (español o inglés)..." autocomplete="off" />
+      <div class="gym-library-filters">
+        <div id="gym-library-muscle-field"></div>
+        <div id="gym-library-equipment-field"></div>
+      </div>
+      <div id="gym-library-list" class="gym-list gym-library-list"></div>
+    </div>
+  </div>
+
+  <!-- Ficha de un ejercicio de la libreria: datos + instrucciones +
+       boton de importar. Se abre encima del buscador. -->
+  <div id="gym-library-detail-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-library-detail" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-library-detail-title"></h2>
+      <p id="gym-library-detail-meta" class="gym-list-item-muted"></p>
+      <ol id="gym-library-detail-instructions" class="gym-library-instructions"></ol>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-library-detail-2" class="secondary-btn">Cerrar</button>
+        <button type="button" id="btn-import-gym-library-detail" class="primary-btn">Importar a mis ejercicios</button>
+      </div>
     </div>
   </div>
 

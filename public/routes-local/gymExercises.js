@@ -19,6 +19,8 @@
       id: row.id,
       name: row.name,
       muscleGroup: row.muscle_group || null,
+      libraryId: row.library_id || null,
+      equipment: row.equipment || null,
     };
   }
 
@@ -28,13 +30,27 @@
   });
 
   router.post('/', (req, res) => {
-    const { name, muscleGroup } = req.body || {};
+    const { name, muscleGroup, libraryId, equipment } = req.body || {};
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'invalid_request', message: 'El ejercicio necesita un nombre.' });
     }
+
+    // Import idempotente desde la libreria empaquetada: si este
+    // libraryId ya se importo antes, se devuelve el ejercicio existente
+    // en vez de crear un duplicado (200, no 201 -- no se creo nada).
+    if (libraryId) {
+      const existing = db.prepare('SELECT * FROM gym_exercises WHERE library_id = ?').get(String(libraryId));
+      if (existing) return res.json(serialize(existing));
+    }
+
     const info = db
-      .prepare('INSERT INTO gym_exercises (name, muscle_group) VALUES (?, ?)')
-      .run(name.trim(), muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null);
+      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment) VALUES (?, ?, ?, ?)')
+      .run(
+        name.trim(),
+        muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null,
+        libraryId ? String(libraryId) : null,
+        equipment && equipment.trim() ? equipment.trim() : null
+      );
 
     const row = db.prepare('SELECT * FROM gym_exercises WHERE id = ?').get(info.lastInsertRowid);
     res.status(201).json(serialize(row));
@@ -44,10 +60,13 @@
     const existing = db.prepare('SELECT * FROM gym_exercises WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'not_found' });
 
-    const { name, muscleGroup } = req.body || {};
-    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ? WHERE id = ?').run(
+    // library_id no se toca desde el PUT a proposito: es la marca de "de
+    // donde salio", editar el ejercicio no cambia su origen.
+    const { name, muscleGroup, equipment } = req.body || {};
+    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ?, equipment = ? WHERE id = ?').run(
       name !== undefined && name.trim() ? name.trim() : existing.name,
       muscleGroup === undefined ? existing.muscle_group : (muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null),
+      equipment === undefined ? existing.equipment : (equipment && equipment.trim() ? equipment.trim() : null),
       req.params.id
     );
 

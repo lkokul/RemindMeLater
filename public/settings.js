@@ -1883,6 +1883,11 @@ document.addEventListener('keydown', (e) => {
   // de Koku: "el primer esc me saque de la ventana de añadir... luego ya
   // con el siguiente que me lleve a la ventana anterior").
   const gymModalIds = [
+    // La ficha de la libreria va ANTES que el buscador: se abre encima
+    // de el, y el primer Esc debe cerrar solo la ficha.
+    ['gym-library-detail-modal', closeGymLibraryDetail],
+    ['gym-library-modal', closeGymLibraryModal],
+    ['gym-block-modal', closeGymBlockModal],
     ['gym-exercise-modal', closeGymExerciseModal],
     ['gym-routine-modal', closeGymRoutineModal],
     ['gym-session-modal', closeGymSessionModal],
@@ -1896,6 +1901,13 @@ document.addEventListener('keydown', (e) => {
   }
   const gymView = document.getElementById('gym-view');
   if (gymView && !gymView.classList.contains('hidden')) {
+    // Dentro del Plan, si estas viendo los dias de un bloque, el Esc
+    // primero sube al nivel de bloques (sub-navegacion, como Lecturas).
+    const daysLevel = document.getElementById('gym-block-days-level');
+    if (daysLevel && !daysLevel.classList.contains('hidden')) {
+      document.getElementById('btn-gym-back-to-blocks').click();
+      return;
+    }
     document.getElementById('btn-close-gym').click();
     return;
   }

@@ -156,7 +156,16 @@ function applyLocalSchema(db) {
     CREATE TABLE IF NOT EXISTS gym_exercises (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      muscle_group TEXT,          -- opcional, texto libre (ej. "Pierna")
+      -- Grupo muscular: los ejercicios nuevos guardan un id de la
+      -- taxonomia fija (GYM_MUSCLE_GROUPS en app.js, ej. "pecho"); los
+      -- de antes del rediseno pueden traer texto libre (ej. "Pierna"),
+      -- que se muestra tal cual hasta que se reediten.
+      muscle_group TEXT,
+      -- Si el ejercicio se importo de la libreria empaquetada
+      -- (gym-exercise-library.json), aqui va su id de alli (slug tipo
+      -- "Barbell_Squat") -- sirve para no importar dos veces el mismo.
+      library_id TEXT,
+      equipment TEXT,             -- opcional (ej. "Barra", "Mancuernas")
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1194,5 +1203,15 @@ function applyLocalSchema(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sets_session ON gym_sets(session_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sets_exercise ON gym_sets(exercise_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sessions_date ON gym_sessions(date)');
+  // Fase 2: libreria de ejercicios -- columnas nuevas de gym_exercises
+  // (library_id para el import idempotente, equipment para mostrar el
+  // material del ejercicio).
+  const gymExerciseColumns = db.prepare('PRAGMA table_info(gym_exercises)').all().map((c) => c.name);
+  if (!gymExerciseColumns.includes('library_id')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN library_id TEXT');
+  }
+  if (!gymExerciseColumns.includes('equipment')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN equipment TEXT');
+  }
 
 }

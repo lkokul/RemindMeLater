@@ -7369,18 +7369,71 @@ function gymWeightDisplayToKg(displayValue) {
   return getGymWeightUnit() === 'lb' ? num / KG_TO_LB : num;
 }
 
+// --- Taxonomia de grupos musculares (Fase 2 del rediseno) -------------
+// La UNICA fuente de verdad de los grupos musculares de toda la
+// extension: la usan el select del modal de ejercicio, los filtros de
+// la libreria, y (en fases posteriores) el volumen por musculo y el
+// mapa del cuerpo -- los `id` de aqui tienen que coincidir con los ids
+// de zona del SVG del cuerpo y con los `muscleGroup` que trae
+// gym-exercise-library.json (ver el generador en el historial de la
+// rama). Los ejercicios guardan el `id` en muscle_group; los de antes
+// del rediseno pueden tener texto libre, que se muestra tal cual.
+const GYM_MUSCLE_GROUPS = [
+  { id: 'pecho', label: 'Pecho' },
+  { id: 'espalda', label: 'Espalda' },
+  { id: 'lumbar', label: 'Lumbar' },
+  { id: 'hombros', label: 'Hombros' },
+  { id: 'trapecio', label: 'Trapecio' },
+  { id: 'biceps', label: 'Bíceps' },
+  { id: 'triceps', label: 'Tríceps' },
+  { id: 'antebrazo', label: 'Antebrazo' },
+  { id: 'core', label: 'Core / Abdomen' },
+  { id: 'gluteo', label: 'Glúteo' },
+  { id: 'cuadriceps', label: 'Cuádriceps' },
+  { id: 'isquios', label: 'Isquiosurales' },
+  { id: 'aductores', label: 'Aductores / Abductores' },
+  { id: 'gemelos', label: 'Gemelos' },
+];
+// id de la taxonomia -> etiqueta bonita; cualquier otra cosa (texto
+// libre de antes del rediseno) se devuelve tal cual.
+function gymMuscleGroupLabel(value) {
+  if (!value) return '';
+  const group = GYM_MUSCLE_GROUPS.find((g) => g.id === value);
+  return group ? group.label : value;
+}
+
+// --- Libreria de ejercicios empaquetada (Fase 2) ----------------------
+// ~870 ejercicios de https://github.com/yuhonas/free-exercise-db
+// (dominio publico, licencia Unlicense), que a su vez nacio de
+// https://github.com/wrkout/exercises.json de Ollie Jennings (tambien
+// Unlicense). ¡Gracias a ambos! Los nombres/musculos/material estan
+// traducidos al español; las instrucciones se van traduciendo por
+// tandas. El JSON pesa ~840 KB, asi que NO se carga al arrancar la app:
+// fetch perezoso la primera vez que se abre el buscador, cacheado en
+// esta variable para el resto de la sesion (mismo patron que
+// loadViajesMap).
+let gymExerciseLibrary = null;
+async function loadGymExerciseLibrary() {
+  if (gymExerciseLibrary) return gymExerciseLibrary;
+  const resp = await fetch('gym-exercise-library.json');
+  if (!resp.ok) throw new Error('No se pudo cargar la librería de ejercicios.');
+  gymExerciseLibrary = await resp.json();
+  return gymExerciseLibrary;
+}
+
 function renderGymExercisesList() {
   const list = document.getElementById('gym-exercises-list');
   list.innerHTML = '';
   if (state.gymExercises.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavía no tienes ejercicios. Se crean desde aquí o al añadirlos a una rutina/sesión.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes ejercicios. Añádelos desde la librería o crea uno a mano.</p>';
     return;
   }
   state.gymExercises.forEach((ex) => {
+    const extras = [gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' · ');
     const row = document.createElement('div');
     row.className = 'gym-list-item';
     row.innerHTML = `
-      <span class="gym-list-item-name">${escapeHtml(ex.name)}${ex.muscleGroup ? ` <span class="gym-list-item-muted">(${escapeHtml(ex.muscleGroup)})</span>` : ''}</span>
+      <span class="gym-list-item-name">${escapeHtml(ex.name)}${extras ? ` <span class="gym-list-item-muted">(${escapeHtml(extras)})</span>` : ''}</span>
       <div class="gym-list-item-actions">
         <button type="button" class="icon-btn" data-edit-gym-exercise="${ex.id}" aria-label="Editar ejercicio">✎</button>
       </div>
@@ -8165,11 +8218,32 @@ function renderFinanzasAssetValuationChart(valuations) {
 }
 
 // --- Modal de ejercicio -------------------------------------------------
+// El grupo muscular ya no es texto libre: select con la taxonomia fija
+// (GYM_MUSCLE_GROUPS). Si se edita un ejercicio de antes del rediseno
+// cuyo valor no esta en la taxonomia, ese valor viejo se anade como
+// opcion extra para no perderlo sin querer al guardar.
+const gymExerciseMuscleField = createSelectField({
+  options: [{ value: '', label: 'Sin grupo' }],
+  initialValue: '',
+  placeholder: 'Sin grupo',
+});
+document.getElementById('gym-exercise-muscle-field').appendChild(gymExerciseMuscleField.element);
+
 function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
   document.getElementById('gym-exercise-id').value = exercise ? exercise.id : '';
   document.getElementById('gym-exercise-name').value = exercise ? exercise.name : '';
-  document.getElementById('gym-exercise-muscle-group').value = exercise ? exercise.muscleGroup || '' : '';
+  document.getElementById('gym-exercise-equipment').value = exercise ? exercise.equipment || '' : '';
+  const options = [
+    { value: '', label: 'Sin grupo' },
+    ...GYM_MUSCLE_GROUPS.map((g) => ({ value: g.id, label: g.label })),
+  ];
+  const current = exercise ? exercise.muscleGroup || '' : '';
+  if (current && !GYM_MUSCLE_GROUPS.some((g) => g.id === current)) {
+    options.push({ value: current, label: `${current} (texto antiguo)` });
+  }
+  gymExerciseMuscleField.setOptions(options);
+  gymExerciseMuscleField.setValue(current);
   document.getElementById('btn-delete-gym-exercise').classList.toggle('hidden', !exercise);
   document.getElementById('gym-exercise-modal').classList.remove('hidden');
 }
@@ -8185,7 +8259,8 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
   const id = document.getElementById('gym-exercise-id').value;
   const payload = {
     name: document.getElementById('gym-exercise-name').value,
-    muscleGroup: document.getElementById('gym-exercise-muscle-group').value,
+    muscleGroup: gymExerciseMuscleField.getValue(),
+    equipment: document.getElementById('gym-exercise-equipment').value,
   };
   if (id) {
     await api(`/api/gym-exercises/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -8208,6 +8283,170 @@ document.getElementById('btn-delete-gym-exercise').addEventListener('click', asy
   closeGymExerciseModal();
   await loadGymExercises();
   renderGymExercisesList();
+});
+
+// --- Buscador de la libreria de ejercicios (Fase 2) --------------------
+// Ver el comentario de loadGymExerciseLibrary() arriba (origen del
+// dataset y creditos). El buscador filtra en cliente sobre el JSON
+// entero; para no pintar 870 filas de golpe se corta en 80 con un aviso
+// de "afina la busqueda".
+const gymLibraryMuscleField = createSelectField({
+  options: [{ value: '', label: 'Todos los músculos' }, ...GYM_MUSCLE_GROUPS.map((g) => ({ value: g.id, label: g.label }))],
+  initialValue: '',
+  onChange: () => renderGymLibraryList(),
+});
+document.getElementById('gym-library-muscle-field').appendChild(gymLibraryMuscleField.element);
+
+const gymLibraryEquipmentField = createSelectField({
+  options: [{ value: '', label: 'Todo el material' }],
+  initialValue: '',
+  onChange: () => renderGymLibraryList(),
+});
+document.getElementById('gym-library-equipment-field').appendChild(gymLibraryEquipmentField.element);
+
+// Busqueda sin acentos ni mayusculas ("prensa" encuentra "Prensa",
+// "bicep" encuentra "Bíceps"...).
+function gymNormalizeSearch(text) {
+  return String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function renderGymLibraryList() {
+  const list = document.getElementById('gym-library-list');
+  if (!gymExerciseLibrary) return;
+  const search = gymNormalizeSearch(document.getElementById('gym-library-search').value.trim());
+  const muscle = gymLibraryMuscleField.getValue();
+  const equipment = gymLibraryEquipmentField.getValue();
+
+  // Ejercicios ya importados, para marcarlos y no ofrecer importarlos otra vez.
+  const importedIds = new Set(state.gymExercises.map((ex) => ex.libraryId).filter(Boolean));
+
+  const matches = gymExerciseLibrary.filter((e) => {
+    if (muscle && e.muscleGroup !== muscle && !e.primaryMuscles.includes(muscle)) return false;
+    if (equipment && e.equipment !== equipment) return false;
+    if (search && !gymNormalizeSearch(e.name).includes(search) && !gymNormalizeSearch(e.nameEn).includes(search)) return false;
+    return true;
+  });
+
+  list.innerHTML = '';
+  const CAP = 80;
+  matches.slice(0, CAP).forEach((e) => {
+    const meta = [gymMuscleGroupLabel(e.muscleGroup), e.equipment, e.level].filter(Boolean).join(' · ');
+    const imported = importedIds.has(e.id);
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-library-item';
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(e.name)}${meta ? ` <span class="gym-list-item-muted">(${escapeHtml(meta)})</span>` : ''}</span>
+      <div class="gym-list-item-actions">
+        ${imported
+          ? '<span class="gym-library-imported">✓ Importado</span>'
+          : `<button type="button" class="secondary-btn gym-library-import-btn" data-import-gym-library="${escapeHtml(e.id)}">+ Importar</button>`}
+      </div>
+    `;
+    // La fila entera abre la ficha; el boton de importar corta la propagacion.
+    row.addEventListener('click', () => openGymLibraryDetail(e));
+    list.appendChild(row);
+  });
+  if (matches.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Ningún ejercicio coincide con la búsqueda.</p>';
+  } else if (matches.length > CAP) {
+    const hint = document.createElement('p');
+    hint.className = 'empty-hint';
+    hint.textContent = `Mostrando ${CAP} de ${matches.length} — afina la búsqueda para ver el resto.`;
+    list.appendChild(hint);
+  }
+  list.querySelectorAll('[data-import-gym-library]').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      await importGymLibraryExercise(btn.dataset.importGymLibrary);
+      renderGymLibraryList();
+    });
+  });
+}
+
+// Importa un ejercicio de la libreria a gym_exercises. El backend es
+// idempotente por libraryId (reimportar devuelve el existente), asi que
+// llamar esto dos veces no duplica nada.
+async function importGymLibraryExercise(libraryId) {
+  const entry = gymExerciseLibrary.find((e) => e.id === libraryId);
+  if (!entry) return;
+  await api('/api/gym-exercises', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: entry.name,
+      muscleGroup: entry.muscleGroup,
+      equipment: entry.equipment,
+      libraryId: entry.id,
+    }),
+  });
+  await loadGymExercises();
+  renderGymExercisesList();
+}
+
+async function openGymLibraryModal() {
+  document.getElementById('gym-library-modal').classList.remove('hidden');
+  const list = document.getElementById('gym-library-list');
+  if (!gymExerciseLibrary) {
+    list.innerHTML = '<p class="empty-hint">Cargando librería…</p>';
+    try {
+      await loadGymExerciseLibrary();
+    } catch (err) {
+      list.innerHTML = '';
+      showAppAlert(err.message);
+      return;
+    }
+    // El filtro de material se construye con lo que de verdad hay en el
+    // dataset (y solo la primera vez, el JSON no cambia en caliente).
+    const equipments = [...new Set(gymExerciseLibrary.map((e) => e.equipment).filter(Boolean))].sort();
+    gymLibraryEquipmentField.setOptions([
+      { value: '', label: 'Todo el material' },
+      ...equipments.map((eq) => ({ value: eq, label: eq })),
+    ]);
+  }
+  renderGymLibraryList();
+}
+function closeGymLibraryModal() {
+  document.getElementById('gym-library-modal').classList.add('hidden');
+}
+document.getElementById('btn-open-gym-library').addEventListener('click', openGymLibraryModal);
+document.getElementById('btn-close-gym-library').addEventListener('click', closeGymLibraryModal);
+document.getElementById('gym-library-search').addEventListener('input', () => renderGymLibraryList());
+
+// --- Ficha de un ejercicio de la libreria ------------------------------
+let gymLibraryDetailEntry = null;
+function openGymLibraryDetail(entry) {
+  gymLibraryDetailEntry = entry;
+  document.getElementById('gym-library-detail-title').textContent = entry.name;
+  const meta = [
+    gymMuscleGroupLabel(entry.muscleGroup),
+    entry.secondaryMuscles.length ? `secundarios: ${entry.secondaryMuscles.map(gymMuscleGroupLabel).join(', ')}` : null,
+    entry.equipment,
+    entry.level,
+    entry.category,
+  ].filter(Boolean).join(' · ');
+  document.getElementById('gym-library-detail-meta').textContent = `${meta} · (${entry.nameEn})`;
+  const listEl = document.getElementById('gym-library-detail-instructions');
+  listEl.innerHTML = '';
+  if (entry.instructions.length === 0) {
+    listEl.innerHTML = '<p class="empty-hint">Este ejercicio no trae instrucciones.</p>';
+  } else {
+    entry.instructions.forEach((step) => {
+      const li = document.createElement('li');
+      li.textContent = step;
+      listEl.appendChild(li);
+    });
+  }
+  document.getElementById('gym-library-detail-modal').classList.remove('hidden');
+}
+function closeGymLibraryDetail() {
+  document.getElementById('gym-library-detail-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-gym-library-detail').addEventListener('click', closeGymLibraryDetail);
+document.getElementById('btn-close-gym-library-detail-2').addEventListener('click', closeGymLibraryDetail);
+document.getElementById('btn-import-gym-library-detail').addEventListener('click', async () => {
+  if (!gymLibraryDetailEntry) return;
+  await importGymLibraryExercise(gymLibraryDetailEntry.id);
+  closeGymLibraryDetail();
+  renderGymLibraryList();
 });
 
 // --- Modal de bloque (rediseno de Gimnasio) ---------------------------

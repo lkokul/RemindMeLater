@@ -2410,6 +2410,21 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 .gym-block-activate-btn { font-size: 0.75rem; padding: 0.3rem 0.55rem; }
 
+/* Buscador de la libreria de ejercicios (Fase 2): tarjeta mas ancha y
+   alta que un modal normal (lista larga), filtros en fila, y lista con
+   su propio scroll para que la tarjeta no crezca sin fin. */
+.gym-library-card { max-width: 640px; width: min(640px, 94vw); display: flex; flex-direction: column; }
+.gym-library-card h2 { margin-bottom: 0.6rem; }
+.gym-library-filters { display: flex; gap: 0.5rem; margin: 0.5rem 0; }
+.gym-library-filters > div { flex: 1; min-width: 0; }
+.gym-library-list { max-height: 50vh; overflow-y: auto; }
+.gym-library-item { cursor: pointer; }
+.gym-library-item:hover { outline: 1px solid var(--gym-accent); }
+.gym-library-import-btn { font-size: 0.75rem; padding: 0.3rem 0.55rem; flex-shrink: 0; }
+.gym-library-imported { font-size: 0.75rem; color: var(--gym-accent); flex-shrink: 0; }
+.gym-library-instructions { margin: 0.6rem 0 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.85rem; }
+.gym-exercises-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
 /* Cabecera del nivel de dias (boton volver + nombre del bloque). */
 .gym-block-days-header { display: flex; align-items: center; gap: 0.6rem; }
 .gym-block-days-header .gym-subheading { margin: 0; }

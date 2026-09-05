@@ -198,14 +198,24 @@ Desde el botón "Apps" de la barra superior (o la sección "Apps" de la
 navegación móvil) se accede a secciones aparte del calendario, cada una
 a pantalla completa y sin afectar a nada de lo de arriba:
 
-- **Gimnasio**: registro de entrenamientos. Una biblioteca de
-  ejercicios y de rutinas reutilizables (con icono y color propios); una
-  sesión puede partir de una rutina guardada (auto-rellena los
-  ejercicios esperados) o ser completamente libre. Cada serie de un
-  ejercicio se apunta con repeticiones y peso — elegible en kg o libras,
-  por dispositivo (el dato se guarda siempre en kg, la conversión es
-  solo de presentación). Una pestaña de progreso muestra una gráfica
-  (peso máximo o volumen levantado) por ejercicio a lo largo del tiempo.
+- **Gimnasio**: registro de entrenamientos, organizado en bloques
+  (etapas con nombre, ej. "Volumen Invierno", con un único bloque activo
+  a la vez) que contienen días de entrenamiento reutilizables (con icono
+  y color propios); una sesión puede partir de un día guardado
+  (auto-rellena los ejercicios esperados) o ser completamente libre.
+  Cada serie de un ejercicio se apunta con repeticiones y peso —
+  elegible en kg o libras, por dispositivo (el dato se guarda siempre en
+  kg, la conversión es solo de presentación). Una pestaña de progreso
+  muestra una gráfica (peso máximo o volumen levantado) por ejercicio a
+  lo largo del tiempo. Incluye además una **librería de ~870 ejercicios**
+  buscable y filtrable por grupo muscular y material, con instrucciones
+  paso a paso, de la que se importa a tus ejercicios lo que uses. Los
+  datos de esa librería vienen de
+  [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (de
+  yuhonas), que a su vez nació de
+  [exercises.json](https://github.com/wrkout/exercises.json) (de Ollie
+  Jennings) — ambos de dominio público (Unlicense), ¡gracias a los dos!
+  Los nombres están traducidos al español dentro de la propia app.
 - **Lecturas**: historial de entretenimiento — mangas, cómics, libros,
   series, animes y películas juntos — agrupado en sagas (obligatorias:
   incluso algo suelto es una saga de un único elemento, y una misma saga
