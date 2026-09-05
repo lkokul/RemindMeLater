@@ -263,7 +263,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'mobile', 'shortcuts'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'mobile'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -281,7 +281,6 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     else if (tab === 'style') refreshStyleTab();
     else if (tab === 'groups') refreshGroupsTab();
     else if (tab === 'mobile') refreshMobileTab();
-    else if (tab === 'shortcuts') refreshShortcutsTab();
   });
 });
 
@@ -343,122 +342,16 @@ document.getElementById('profile-form').addEventListener('submit', async (e) => 
 });
 
 // ---------------------------------------------------------------------
-// Vista: Normal / Pantalla completa. Un solo modo activo a la vez
-// (aplicado de verdad por applyViewMode, en app.js); aqui solo se dibujan
-// los botones y cual esta resaltado como actual, igual que "En uso" en la
-// biblioteca de temas.
+// Vista: ajustes de como se ve el contenido (densidad del calendario y
+// orden de favoritos en Notas). Cada uno se guarda por dispositivo en
+// localStorage, no se comparte.
 // ---------------------------------------------------------------------
-const VIEW_MODES = [
-  { id: 'normal', label: 'Normal' },
-  { id: 'fullscreen', label: 'Pantalla completa' },
-];
-
 function refreshViewTab() {
-  const container = document.getElementById('view-mode-options');
-  container.innerHTML = '';
-  const current = getViewMode();
-
-  VIEW_MODES.forEach((vm) => {
-    const isActive = vm.id === current;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
-    btn.textContent = isActive ? `${vm.label} (actual)` : vm.label;
-    if (isActive) {
-      btn.disabled = true;
-    } else {
-      btn.addEventListener('click', () => applyViewMode(vm.id));
-    }
-    container.appendChild(btn);
-  });
-
-  const hint = document.getElementById('view-mode-hint');
-  hint.textContent = current === 'fullscreen' ? 'Pulsa Esc en cualquier momento para salir de pantalla completa.' : '';
-
   refreshCalendarDensityOptions();
-  refreshMiEspacioModeOptions();
-  refreshRemindersPanelGroupedOptions();
   refreshFavoritesDisplayOptions();
 }
 
-// Como se accede a "Mi espacio" (Proximos + Tareas + Notas) — preferencia
-// de ESTE dispositivo (localStorage), leida por getMiEspacioMode() y
-// aplicada de verdad por applyMiEspacioMode() en app.js.
-const MY_SPACE_MODES = [
-  { id: 'topbar', label: 'Botón en la barra superior' },
-  { id: 'panel', label: 'Panel lateral' },
-];
-
-function refreshMiEspacioModeOptions() {
-  const container = document.getElementById('my-space-mode-options');
-  if (!container) return;
-  container.innerHTML = '';
-  const current = getMiEspacioMode();
-
-  MY_SPACE_MODES.forEach((mode) => {
-    const isActive = mode.id === current;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
-    btn.textContent = mode.label;
-    if (isActive) {
-      btn.disabled = true;
-    } else {
-      btn.addEventListener('click', () => {
-        localStorage.setItem('miEspacioMode', mode.id);
-        applyMiEspacioMode();
-        refreshMiEspacioModeOptions();
-      });
-    }
-    container.appendChild(btn);
-  });
-}
-
-// Panel lateral clasico (solo aplica en modo "topbar" de Mi espacio, ver
-// arriba): una casilla por seccion (Recordatorios/Tareas/Notas, ver
-// REMINDERS_PANEL_PAGES en app.js). Con alguna marcada y alguna sin
-// marcar, las marcadas se ven juntas en un hueco compartido y la flecha
-// cambia TODO el hueco a las no marcadas (tambien juntas) -- marcar
-// todas o ninguna deja las 3 sueltas, como si esto no existiera. Ver
-// applyRemindersPanelLayout()/getRemindersGroupedSections() en app.js.
-function refreshRemindersPanelGroupedOptions() {
-  const container = document.getElementById('reminders-panel-grouped-options');
-  if (!container) return;
-  container.innerHTML = '';
-
-  let stored;
-  try {
-    stored = JSON.parse(localStorage.getItem('remindersPanelGrouped') || '[]');
-  } catch {
-    stored = [];
-  }
-  if (!Array.isArray(stored)) stored = [];
-
-  REMINDERS_PANEL_PAGES.forEach((p) => {
-    const label = document.createElement('label');
-    label.className = 'checkbox-row';
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.checked = stored.includes(p.id);
-    checkbox.addEventListener('change', () => {
-      const next = checkbox.checked
-        ? [...stored.filter((id) => id !== p.id), p.id]
-        : stored.filter((id) => id !== p.id);
-      localStorage.setItem('remindersPanelGrouped', JSON.stringify(next));
-      // Vuelve a mostrar las marcadas (no las de antes de tocar el
-      // ajuste) -- si no, podrias quedarte viendo "las otras" con un
-      // significado distinto al que tenian antes del cambio.
-      remindersPanelShowingChecked = true;
-      applyRemindersPanelLayout();
-      refreshRemindersPanelGroupedOptions();
-    });
-    label.appendChild(checkbox);
-    label.appendChild(document.createTextNode(p.label));
-    container.appendChild(label);
-  });
-}
-
-// Favoritos en Mi espacio (carpetas y notas): "merged" (por defecto)
+// Favoritos en el listado de Notas (carpetas y notas): "merged" (por defecto)
 // ordena los favoritos primero sin cabeceras; "sections" separa con una
 // cabecera "Favoritos"/"Todo lo demas" (solo si hay algun favorito). Ver
 // getFavoritesDisplayMode()/appendFavoriteSortedGroup() en app.js.
@@ -540,17 +433,11 @@ function openSettingsModal() {
   document.getElementById('settings-modal').classList.remove('hidden');
   closeThemeForm();
   showSettingsScreen(null);
-  refreshQuitMenuItem();
 }
 
-document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
-// Mismo panel, boton aparte: #my-space-view tapa la topbar (z-index por
-// encima), asi que el boton de Configuracion de siempre no se puede
-// clicar mientras Mi espacio esta abierto a pantalla completa. Este
-// boton vive dentro de la cabecera de Mi espacio para que Configuracion
-// se pueda abrir desde cualquier ventana.
-document.getElementById('btn-my-space-settings').addEventListener('click', openSettingsModal);
-// Mismo motivo que btn-my-space-settings: Apps y cada extension
+// Cada pantalla completa (.my-space-view) tapa a la de debajo, asi que
+// cada una lleva su propio boton de Configuracion en la cabecera.
+// Mismo motivo: Herramientas y cada extension
 // (Gimnasio/Lecturas/Finanzas/Archivos) son tambien .my-space-view a
 // pantalla completa que tapan la topbar -- cada una necesita su propio
 // boton de Configuracion.
@@ -1517,21 +1404,6 @@ function refreshMobileTab() {
   refreshGymWeightUnitOptions();
 }
 
-// "Salir de la aplicacion": vive como accion directa en la lista principal
-// de Configuracion (no dentro de una sub-seccion), asi que se refresca al
-// abrir el panel entero (ver openSettingsModal), no al entrar en una
-// pestana concreta. window.electronAPI solo existe si esto corre dentro
-// de la app de escritorio (lo expone electron/preload.js) — en el
-// navegador normal (o desde el movil) el boton se queda oculto, porque
-// "salir" no significa nada ahi.
-function refreshQuitMenuItem() {
-  document.getElementById('btn-quit-app').classList.toggle('hidden', !window.electronAPI);
-}
-
-document.getElementById('btn-quit-app').addEventListener('click', () => {
-  if (window.electronAPI) window.electronAPI.quitApp();
-});
-
 // Tachar vs ocultar tareas completadas: preferencia de ESTE dispositivo
 // (como el modo de vista o el tema), no compartida — cada movil/ordenador
 // puede verlo a su manera. La lee renderTasksList() en app.js.
@@ -1636,100 +1508,6 @@ document.getElementById('setting-notifications').addEventListener('change', asyn
 // lista y el "modo grabacion" para capturar la siguiente tecla que
 // pulses. Cada accion puede tener VARIAS combinaciones a la vez (se
 // muestran como chips con una x cada una), no solo una.
-// ---------------------------------------------------------------------
-function startRecordingShortcut(actionId, addBtn) {
-  const originalText = addBtn.textContent;
-  addBtn.textContent = 'Pulsa una tecla…';
-  addBtn.classList.add('recording');
-  addBtn.disabled = true;
-
-  const handler = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (e.key === 'Escape') {
-      // Esc siempre cancela la grabacion (no se puede asignar Esc solo:
-      // ya tiene su propio significado fijo de "salir").
-      document.removeEventListener('keydown', handler, true);
-      renderShortcutsList();
-      return;
-    }
-
-    const combo = comboFromEvent(e);
-    if (!combo) return; // solo se ha soltado una tecla modificadora, seguimos esperando
-
-    addShortcut(actionId, combo);
-    document.removeEventListener('keydown', handler, true);
-    renderShortcutsList();
-  };
-
-  document.addEventListener('keydown', handler, true);
-}
-
-function renderShortcutsList() {
-  const container = document.getElementById('shortcuts-list');
-  container.innerHTML = '';
-  const map = getShortcutMap();
-
-  SHORTCUT_ACTIONS.forEach((action) => {
-    const row = document.createElement('div');
-    row.className = 'shortcut-row';
-
-    const label = document.createElement('span');
-    label.className = 'shortcut-label';
-    label.textContent = action.label;
-
-    const combos = document.createElement('div');
-    combos.className = 'shortcut-combos';
-
-    const activeCombos = map[action.id] || [];
-    if (activeCombos.length === 0) {
-      const hint = document.createElement('span');
-      hint.className = 'shortcut-empty-hint';
-      hint.textContent = 'Sin atajo';
-      combos.appendChild(hint);
-    } else {
-      activeCombos.forEach((combo) => {
-        const chip = document.createElement('span');
-        chip.className = 'shortcut-combo-chip';
-
-        const chipLabel = document.createElement('span');
-        chipLabel.textContent = displayCombo(combo);
-        chip.appendChild(chipLabel);
-
-        const removeBtn = document.createElement('button');
-        removeBtn.type = 'button';
-        removeBtn.className = 'shortcut-combo-remove';
-        removeBtn.textContent = '✕';
-        removeBtn.setAttribute('aria-label', `Quitar atajo ${displayCombo(combo)}`);
-        removeBtn.addEventListener('click', () => {
-          removeShortcut(action.id, combo);
-          renderShortcutsList();
-        });
-        chip.appendChild(removeBtn);
-
-        combos.appendChild(chip);
-      });
-    }
-
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'shortcut-add-btn';
-    addBtn.textContent = '+ Añadir';
-    addBtn.addEventListener('click', () => startRecordingShortcut(action.id, addBtn));
-    combos.appendChild(addBtn);
-
-    row.appendChild(label);
-    row.appendChild(combos);
-    container.appendChild(row);
-  });
-}
-
-function refreshShortcutsTab() {
-  renderShortcutsList();
-}
-
-
 // ---------------------------------------------------------------------
 // Esc: hace lo mismo que cerrar / clicar fuera, capa a capa — primero lo
 // que este mas "encima" (un popover), y solo al final el modal entero de
@@ -1876,17 +1654,6 @@ document.addEventListener('keydown', (e) => {
       backBtn.click();
     } else {
       document.getElementById('btn-close-mobile-notes').click();
-    }
-    return;
-  }
-
-  const mySpaceView = document.getElementById('my-space-view');
-  if (mySpaceView && !mySpaceView.classList.contains('hidden')) {
-    const hub = document.getElementById('my-space-hub');
-    if (hub && hub.dataset.expanded) {
-      document.getElementById('my-space-back-btn').click();
-    } else {
-      document.getElementById('btn-close-my-space').click();
     }
     return;
   }
