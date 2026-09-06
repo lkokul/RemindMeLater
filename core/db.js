@@ -491,6 +491,86 @@ db.exec(`
     finanzas_transaction_id INTEGER REFERENCES finanzas_transactions(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Herramienta "Proyectos" (estilo Notion): paginas anidadas sin limite
+  -- de profundidad. Cada pagina puede colgar de otra (parent_id, NULL =
+  -- nivel raiz) igual que note_folders, pero aqui NO hay distincion
+  -- carpeta/nota: TODA pagina puede tener contenido propio (body) Y
+  -- paginas hijas a la vez, que es la idea central de Notion. El
+  -- contenido es HTML saneado con lista blanca (ver
+  -- routes/proyectosPages.js), producido por el editor de bloques con
+  -- menu "/" -- sistema completamente SEPARADO de las Notas de Mi
+  -- espacio, a proposito (decidido con Koku: las Notas no se tocan).
+  CREATE TABLE IF NOT EXISTS proyectos_pages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER REFERENCES proyectos_pages(id),
+    title TEXT NOT NULL DEFAULT '',
+    icon TEXT,                  -- emoji opcional, como note_folders.icon
+    cover_color TEXT,           -- "portada" de color plano opcional (sin imagenes de portada)
+    body TEXT,                  -- HTML saneado (lista blanca en la ruta)
+    favorite INTEGER NOT NULL DEFAULT 0,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Bases de datos embebidas en una pagina de Proyectos (la otra mitad
+  -- de la idea de Notion): una coleccion de filas con propiedades
+  -- tipadas, que la pagina enseña como tabla, tablero (kanban) o lista.
+  -- El HTML de la pagina solo guarda un marcador
+  -- <div data-proyectos-db="id">; la interfaz lo "hidrata" al mostrar.
+  --
+  -- La configuracion de la vista (tipo, orden, filtro, agrupacion) vive
+  -- AQUI y no en localStorage a proposito: es parte del contenido (como
+  -- en Notion), no una preferencia del dispositivo.
+  CREATE TABLE IF NOT EXISTS proyectos_databases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_id INTEGER NOT NULL REFERENCES proyectos_pages(id),
+    name TEXT NOT NULL DEFAULT '',
+    view_type TEXT NOT NULL DEFAULT 'table' CHECK (view_type IN ('table', 'board', 'list')),
+    board_prop_id INTEGER,      -- que propiedad "select" agrupa el tablero
+    sort_prop_id INTEGER,       -- orden opcional por una propiedad
+    sort_dir TEXT NOT NULL DEFAULT 'asc' CHECK (sort_dir IN ('asc', 'desc')),
+    filter_prop_id INTEGER,     -- filtro simple opcional: propiedad = valor
+    filter_value TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Propiedades (columnas) de una base de datos. "options" es un JSON
+  -- de texto con la lista de opciones de un "select" -- mismo criterio
+  -- que los generos de Lecturas (columna JSON, no tabla N:M).
+  CREATE TABLE IF NOT EXISTS proyectos_db_props (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    database_id INTEGER NOT NULL REFERENCES proyectos_databases(id),
+    name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text', 'number', 'select', 'date', 'checkbox')),
+    options TEXT,
+    position INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- Filas. Cada fila es tambien una mini-pagina: ademas de sus valores
+  -- tiene titulo y un cuerpo HTML propio que se edita en el panel
+  -- lateral ("side peek").
+  CREATE TABLE IF NOT EXISTS proyectos_db_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    database_id INTEGER NOT NULL REFERENCES proyectos_databases(id),
+    title TEXT NOT NULL DEFAULT '',
+    body TEXT,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Valores: una celda = (fila, propiedad, valor como texto). El tipo
+  -- real lo dicta la propiedad; aqui todo se guarda como texto ("1" para
+  -- un checkbox marcado, "2026-09-06" para una fecha...).
+  CREATE TABLE IF NOT EXISTS proyectos_db_values (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    row_id INTEGER NOT NULL REFERENCES proyectos_db_rows(id),
+    prop_id INTEGER NOT NULL REFERENCES proyectos_db_props(id),
+    value TEXT,
+    UNIQUE (row_id, prop_id)
+  );
 `);
 
 // Migracion sencilla: group_id se anadio despues de crear la tabla

@@ -55,6 +55,14 @@ const MOUNTS = [
   ['/api/viajes-trips', require('./routes/viajesTrips')],
   ['/api/viajes-entries', require('./routes/viajesEntries')],
 
+  // Herramienta "Proyectos" (estilo Notion): paginas anidadas con editor
+  // de bloques. El prefijo de imagenes es mas largo que el de paginas a
+  // proposito -- el orden de abajo (mas largo primero) ya lo resuelve,
+  // igual que con /api/notes/images.
+  ['/api/proyectos-pages', require('./routes/proyectosPages')],
+  ['/api/proyectos/images', require('./routes/proyectosImages')],
+  ['/api/proyectos-databases', require('./routes/proyectosDatabases')],
+
   // Traer una version nueva del codigo desde GitHub con "git pull".
   ['/api/update', require('./routes/update')],
 ];

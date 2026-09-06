@@ -10002,6 +10002,1886 @@ document.getElementById('btn-onboarding-skip').addEventListener('click', async (
 });
 
 // ---------------------------------------------------------------------
+// Herramienta "Proyectos" (estilo Notion) — Fase 1: paginas anidadas.
+//
+// La idea central (copiada de Notion a proposito): NO hay distincion
+// entre "carpeta" y "documento" -- toda pagina puede tener contenido
+// propio Y subpaginas a la vez. El arbol entero se pinta en un sidebar
+// propio a la izquierda, y la pagina abierta ocupa el resto, con el
+// titulo gigante editable en el sitio (sin modal ni boton de guardar:
+// se guarda solo con un pequeño retraso mientras escribes).
+//
+// Sistema SEPARADO de las Notas de Mi espacio (decidido con Koku): ni
+// comparte tablas ni toca su editor. El backend es
+// core/routes/proyectosPages.js.
+// ---------------------------------------------------------------------
+
+// Lista plana de paginas (sin body, ver el GET del backend) -- el arbol
+// se monta en memoria a partir de parentId cada vez que se pinta.
+let proyectosPages = [];
+// Pagina abierta ahora mismo (el objeto COMPLETO, con body), o null.
+let proyectosCurrentPage = null;
+// Ids de paginas con sus hijas desplegadas en el arbol. Por dispositivo
+// (localStorage), como cualquier otro estado de interfaz.
+let proyectosExpandedIds = new Set(JSON.parse(localStorage.getItem('proyectosExpandedIds') || '[]'));
+// Guardado con retraso: cada tecla reinicia el temporizador, y a los
+// 600 ms sin escribir se manda el PUT. flushProyectosSave() fuerza el
+// guardado pendiente YA (al cambiar de pagina o cerrar la vista), para
+// no perder lo ultimo escrito.
+let proyectosSaveTimer = null;
+let proyectosPendingSave = null; // campos acumulados a la espera de mandarse
+
+function saveProyectosExpanded() {
+  localStorage.setItem('proyectosExpandedIds', JSON.stringify([...proyectosExpandedIds]));
+}
+
+async function loadProyectosPages() {
+  proyectosPages = await api('/api/proyectos-pages');
+}
+
+// Encola campos para guardar en la pagina abierta. Los campos de varias
+// llamadas seguidas se van fusionando en un solo PUT.
+function queueProyectosSave(fields) {
+  if (!proyectosCurrentPage) return;
+  proyectosPendingSave = { ...(proyectosPendingSave || {}), ...fields };
+  if (proyectosSaveTimer) clearTimeout(proyectosSaveTimer);
+  proyectosSaveTimer = setTimeout(() => { flushProyectosSave(); }, 600);
+}
+
+async function flushProyectosSave() {
+  if (proyectosSaveTimer) { clearTimeout(proyectosSaveTimer); proyectosSaveTimer = null; }
+  if (!proyectosPendingSave || !proyectosCurrentPage) { proyectosPendingSave = null; return; }
+  const fields = proyectosPendingSave;
+  proyectosPendingSave = null;
+  const pageId = proyectosCurrentPage.id;
+  try {
+    const updated = await api(`/api/proyectos-pages/${pageId}`, { method: 'PUT', body: JSON.stringify(fields) });
+    // Refrescar la copia en memoria y el arbol (el titulo/icono de la
+    // fila del sidebar tienen que reflejar lo escrito) -- pero solo si
+    // no se ha cambiado de pagina mientras tanto.
+    if (proyectosCurrentPage && proyectosCurrentPage.id === pageId) proyectosCurrentPage = updated;
+    const idx = proyectosPages.findIndex((p) => p.id === pageId);
+    if (idx !== -1) {
+      proyectosPages[idx] = { ...proyectosPages[idx], title: updated.title, icon: updated.icon, coverColor: updated.coverColor, favorite: updated.favorite, parentId: updated.parentId };
+    }
+    renderProyectosTree();
+    // El breadcrumb tambien enseña el titulo de la pagina actual --
+    // sin esto se quedaba en "Sin titulo" hasta cambiar de pagina.
+    renderProyectosBreadcrumb();
+  } catch (err) {
+    console.error('No se pudo guardar la página de Proyectos:', err);
+  }
+}
+
+// ---------------------------------------------------------------------
+// El arbol del sidebar
+// ---------------------------------------------------------------------
+function proyectosChildrenOf(parentId) {
+  return proyectosPages
+    .filter((p) => p.parentId === parentId)
+    .sort((a, b) => a.position - b.position || a.id - b.id);
+}
+
+// Texto del buscador del sidebar (Fase 4): con algo escrito, el arbol
+// se sustituye por una lista PLANA de paginas cuyo titulo coincide --
+// mas util que intentar podar el arbol manteniendo la jerarquia.
+let proyectosTreeFilter = '';
+
+function renderProyectosTree() {
+  const tree = document.getElementById('proyectos-tree');
+  tree.innerHTML = '';
+
+  if (proyectosTreeFilter) {
+    const query = proyectosTreeFilter.toLowerCase();
+    const matches = proyectosPages.filter((p) => (p.title || '').toLowerCase().includes(query));
+    for (const page of matches) {
+      const row = document.createElement('div');
+      row.className = 'proyectos-tree-row';
+      if (proyectosCurrentPage && proyectosCurrentPage.id === page.id) row.classList.add('active');
+      const icon = document.createElement('span');
+      icon.className = 'proyectos-tree-icon';
+      icon.textContent = page.icon || '📄';
+      row.appendChild(icon);
+      const title = document.createElement('span');
+      title.className = 'proyectos-tree-title';
+      title.textContent = page.title || 'Sin título';
+      row.appendChild(title);
+      row.addEventListener('click', () => openProyectosPage(page.id));
+      tree.appendChild(row);
+    }
+    if (matches.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'proyectos-tree-empty hint';
+      empty.textContent = 'Ninguna página coincide.';
+      tree.appendChild(empty);
+    }
+    return;
+  }
+
+  // Pinta un nivel y, recursivamente, los niveles desplegados de dentro.
+  function renderLevel(parentId, depth) {
+    for (const page of proyectosChildrenOf(parentId)) {
+      const children = proyectosChildrenOf(page.id);
+      const expanded = proyectosExpandedIds.has(page.id);
+
+      const row = document.createElement('div');
+      row.className = 'proyectos-tree-row';
+      if (proyectosCurrentPage && proyectosCurrentPage.id === page.id) row.classList.add('active');
+      // La sangria por nivel se hace con padding, no anidando listas --
+      // mas simple de pintar y de estilar.
+      row.style.paddingLeft = `${0.4 + depth * 1.1}rem`;
+
+      // Flecha de desplegar: solo si tiene hijas; si no, un hueco del
+      // mismo ancho para que los titulos queden alineados.
+      const arrow = document.createElement('button');
+      arrow.type = 'button';
+      arrow.className = 'proyectos-tree-arrow';
+      if (children.length > 0) {
+        arrow.textContent = expanded ? '▾' : '▸';
+        arrow.setAttribute('aria-label', expanded ? 'Plegar' : 'Desplegar');
+        arrow.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (expanded) proyectosExpandedIds.delete(page.id);
+          else proyectosExpandedIds.add(page.id);
+          saveProyectosExpanded();
+          renderProyectosTree();
+        });
+      } else {
+        arrow.classList.add('empty');
+      }
+      row.appendChild(arrow);
+
+      const icon = document.createElement('span');
+      icon.className = 'proyectos-tree-icon';
+      icon.textContent = page.icon || '📄';
+      row.appendChild(icon);
+
+      const title = document.createElement('span');
+      title.className = 'proyectos-tree-title';
+      title.textContent = page.title || 'Sin título';
+      if (!page.title) title.classList.add('untitled');
+      row.appendChild(title);
+
+      if (page.favorite) {
+        const star = document.createElement('span');
+        star.className = 'proyectos-tree-star';
+        star.textContent = '★';
+        row.appendChild(star);
+      }
+
+      // "+" para crear una subpagina directamente desde el arbol (solo
+      // visible al pasar el raton, ver CSS).
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'proyectos-tree-add';
+      addBtn.textContent = '+';
+      addBtn.title = 'Nueva subpágina';
+      addBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await createProyectosPage(page.id);
+      });
+      row.appendChild(addBtn);
+
+      row.addEventListener('click', () => { openProyectosPage(page.id); });
+      tree.appendChild(row);
+
+      if (children.length > 0 && expanded) renderLevel(page.id, depth + 1);
+    }
+  }
+
+  renderLevel(null, 0);
+
+  if (proyectosPages.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'proyectos-tree-empty hint';
+    empty.textContent = 'Todavía no hay páginas.';
+    tree.appendChild(empty);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Abrir/pintar una pagina
+// ---------------------------------------------------------------------
+// El selector de icono se crea UNA vez, la primera vez que se abre la
+// vista -- usa createIconField de settings.js, que aqui es seguro llamar
+// porque esto solo corre dentro de manejadores (para entonces settings.js
+// ya cargo entero; ver la nota de TDZ en CLAUDE.md).
+let proyectosIconField = null;
+let proyectosCoverField = null;
+
+function ensureProyectosFields() {
+  if (!proyectosIconField) {
+    proyectosIconField = createIconField({
+      initialValue: '',
+      onChange: (value) => {
+        if (!proyectosCurrentPage) return;
+        queueProyectosSave({ icon: value || null });
+      },
+    });
+    document.getElementById('proyectos-icon-slot').appendChild(proyectosIconField.element);
+  }
+  if (!proyectosCoverField) {
+    proyectosCoverField = createColorField({
+      initialValue: '#5b8cff',
+      onChange: (value) => {
+        if (!proyectosCurrentPage) return;
+        // El swatch solo se enseña con la portada puesta, asi que
+        // cambiar el color siempre significa "portada de este color".
+        document.getElementById('proyectos-cover').style.backgroundColor = value;
+        queueProyectosSave({ coverColor: value });
+      },
+    });
+    proyectosCoverField.element.classList.add('hidden');
+    document.querySelector('#proyectos-view .proyectos-page-toolbar').insertBefore(
+      proyectosCoverField.element,
+      document.getElementById('btn-proyectos-subpage')
+    );
+  }
+}
+
+function renderProyectosBreadcrumb() {
+  const crumb = document.getElementById('proyectos-breadcrumb');
+  crumb.innerHTML = '';
+  if (!proyectosCurrentPage) return;
+  // Cadena de antepasados, de la raiz hacia aqui. Se recorre hacia
+  // arriba por parentId sobre la lista en memoria.
+  const chain = [];
+  let current = proyectosPages.find((p) => p.id === proyectosCurrentPage.id);
+  const seen = new Set();
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    chain.unshift(current);
+    current = proyectosPages.find((p) => p.id === current.parentId);
+  }
+  chain.forEach((page, i) => {
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'proyectos-breadcrumb-sep';
+      sep.textContent = '/';
+      crumb.appendChild(sep);
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'proyectos-breadcrumb-item';
+    btn.textContent = `${page.icon ? page.icon + ' ' : ''}${page.title || 'Sin título'}`;
+    if (i < chain.length - 1) btn.addEventListener('click', () => openProyectosPage(page.id));
+    else btn.disabled = true; // la pagina actual no es un enlace
+    crumb.appendChild(btn);
+  });
+}
+
+async function openProyectosPage(id) {
+  // Antes de irse: mandar lo que hubiera a medio guardar de la anterior.
+  await flushProyectosSave();
+
+  const page = await api(`/api/proyectos-pages/${id}`);
+  proyectosCurrentPage = page;
+
+  ensureProyectosFields();
+  document.getElementById('proyectos-empty').classList.add('hidden');
+  document.getElementById('proyectos-page').classList.remove('hidden');
+
+  const titleEl = document.getElementById('proyectos-page-title');
+  titleEl.textContent = page.title || '';
+
+  const bodyEl = document.getElementById('proyectos-page-body');
+  bodyEl.innerHTML = page.body || '';
+  // Montar los widgets de las bases de datos embebidas (los marcadores
+  // <div data-proyectos-db> del HTML guardado) -- Fase 3. Sin await a
+  // proposito: cada base carga por su cuenta sin bloquear la pagina.
+  hydrateProyectosDbBlocks();
+  // Cambiar de pagina cierra el side peek si estaba abierto.
+  closeProyectosPeek();
+
+  proyectosIconField.setValue(page.icon || '');
+
+  const cover = document.getElementById('proyectos-cover');
+  if (page.coverColor) {
+    cover.style.backgroundColor = page.coverColor;
+    cover.classList.remove('hidden');
+    proyectosCoverField.setValue(page.coverColor);
+    proyectosCoverField.element.classList.remove('hidden');
+  } else {
+    cover.classList.add('hidden');
+    proyectosCoverField.element.classList.add('hidden');
+  }
+
+  document.getElementById('btn-proyectos-favorite').textContent = page.favorite ? '★' : '☆';
+
+  renderProyectosBreadcrumb();
+  renderProyectosTree();
+
+  // Recordar que pagina esta abierta, para reabrirla al volver a la
+  // vista (por dispositivo).
+  localStorage.setItem('proyectosLastPageId', String(page.id));
+}
+
+async function createProyectosPage(parentId) {
+  await flushProyectosSave();
+  const created = await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({ title: '', parentId: parentId ?? null }),
+  });
+  proyectosPages.push({
+    id: created.id, parentId: created.parentId, title: created.title, icon: created.icon,
+    coverColor: created.coverColor, favorite: created.favorite, position: created.position,
+    hasBody: false, updatedAt: created.updatedAt,
+  });
+  // Si es una subpagina, dejar a la madre desplegada para que se vea.
+  if (parentId) { proyectosExpandedIds.add(parentId); saveProyectosExpanded(); }
+  await openProyectosPage(created.id);
+  // El foco directo al titulo: una pagina nueva se empieza nombrandola.
+  document.getElementById('proyectos-page-title').focus();
+}
+
+// ---------------------------------------------------------------------
+// Abrir/cerrar la vista entera
+// ---------------------------------------------------------------------
+async function openProyectosView() {
+  closeExtensionsView();
+  document.getElementById('proyectos-view').classList.remove('hidden');
+  setCurrentScreen('proyectos');
+  await loadProyectosPages();
+  renderProyectosTree();
+  // Reabrir la ultima pagina que estuviera abierta (por dispositivo).
+  const lastId = Number(localStorage.getItem('proyectosLastPageId'));
+  if (lastId && proyectosPages.some((p) => p.id === lastId)) {
+    await openProyectosPage(lastId);
+  }
+}
+
+function closeProyectosView() {
+  // No perder lo ultimo escrito al salir (ni de la pagina ni de la fila
+  // abierta en el side peek).
+  closeProyectosPeek();
+  flushProyectosSave();
+  document.getElementById('proyectos-view').classList.add('hidden');
+  openExtensionsView();
+}
+
+document.getElementById('btn-open-proyectos').addEventListener('click', openProyectosView);
+document.getElementById('btn-close-proyectos').addEventListener('click', closeProyectosView);
+// (el boton de Configuracion de esta vista, btn-proyectos-settings, se
+// registra en settings.js junto a los de las demas vistas)
+document.getElementById('btn-proyectos-new-root').addEventListener('click', () => createProyectosPage(null));
+document.getElementById('proyectos-search').addEventListener('input', (e) => {
+  proyectosTreeFilter = e.target.value.trim();
+  renderProyectosTree();
+});
+document.getElementById('btn-proyectos-new-empty').addEventListener('click', () => createProyectosPage(null));
+document.getElementById('btn-proyectos-subpage').addEventListener('click', () => {
+  if (proyectosCurrentPage) createProyectosPage(proyectosCurrentPage.id);
+});
+
+// Titulo: guardar con retraso mientras se escribe. contenteditable de
+// UNA linea -- el Intro no crea parrafos, pasa el foco al cuerpo (como
+// en Notion).
+document.getElementById('proyectos-page-title').addEventListener('input', (e) => {
+  queueProyectosSave({ title: e.target.textContent.trim() });
+});
+document.getElementById('proyectos-page-title').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    document.getElementById('proyectos-page-body').focus();
+  }
+});
+
+// Cuerpo: igual, guardar con retraso el HTML tal cual (el saneado de
+// verdad lo hace siempre el backend al guardar).
+document.getElementById('proyectos-page-body').addEventListener('input', () => {
+  queueProyectosSaveBody();
+});
+
+document.getElementById('btn-proyectos-favorite').addEventListener('click', () => {
+  if (!proyectosCurrentPage) return;
+  const next = !proyectosCurrentPage.favorite;
+  proyectosCurrentPage.favorite = next; // reflejo inmediato, sin esperar al PUT
+  document.getElementById('btn-proyectos-favorite').textContent = next ? '★' : '☆';
+  queueProyectosSave({ favorite: next });
+});
+
+// Portada: el boton alterna ponerla (con el ultimo color elegido) o
+// quitarla; el color concreto se cambia con el swatch de al lado, que
+// solo se enseña mientras hay portada.
+document.getElementById('btn-proyectos-cover').addEventListener('click', () => {
+  if (!proyectosCurrentPage) return;
+  ensureProyectosFields();
+  const cover = document.getElementById('proyectos-cover');
+  if (proyectosCurrentPage.coverColor) {
+    proyectosCurrentPage.coverColor = null;
+    cover.classList.add('hidden');
+    proyectosCoverField.element.classList.add('hidden');
+    queueProyectosSave({ coverColor: null });
+  } else {
+    const color = proyectosCoverField.getValue() || '#5b8cff';
+    proyectosCurrentPage.coverColor = color;
+    cover.style.backgroundColor = color;
+    cover.classList.remove('hidden');
+    proyectosCoverField.element.classList.remove('hidden');
+    queueProyectosSave({ coverColor: color });
+  }
+});
+
+document.getElementById('btn-proyectos-delete').addEventListener('click', async () => {
+  if (!proyectosCurrentPage) return;
+  const label = proyectosCurrentPage.title || 'Sin título';
+  if (!confirm(`¿Eliminar la página "${label}"? Sus subpáginas no se borran: suben un nivel.`)) return;
+  // Descartar cualquier guardado pendiente de esta pagina (se va a
+  // borrar igualmente) y borrar.
+  if (proyectosSaveTimer) { clearTimeout(proyectosSaveTimer); proyectosSaveTimer = null; }
+  proyectosPendingSave = null;
+  const deletedId = proyectosCurrentPage.id;
+  await api(`/api/proyectos-pages/${deletedId}`, { method: 'DELETE' });
+  proyectosCurrentPage = null;
+  localStorage.removeItem('proyectosLastPageId');
+  document.getElementById('proyectos-page').classList.add('hidden');
+  document.getElementById('proyectos-empty').classList.remove('hidden');
+  await loadProyectosPages();
+  renderProyectosTree();
+});
+
+// ---------------------------------------------------------------------
+// Proyectos — Fase 2: el editor de bloques con menu "/".
+//
+// El cuerpo de la pagina (#proyectos-page-body) es un contenteditable
+// donde cada linea es un "bloque" (un hijo directo: div, h1, ul,
+// blockquote...). Al escribir "/" en un bloque se abre un menu flotante
+// con buscador para convertir ese bloque en otro tipo (titulo, lista,
+// tarea, toggle, callout, cita, tabla, imagen...) -- la interaccion
+// nuclear de Notion. Ademas hay atajos tipo markdown ("#" + espacio =
+// titulo, "-" + espacio = lista, etc.) y Ctrl+B/I/U funcionan solos por
+// ser un contenteditable.
+//
+// El HTML resultante siempre pasa por la lista blanca del backend al
+// guardar (sanitizePageBody en core/routes/proyectosPages.js) -- lo de
+// aqui es solo la experiencia de edicion.
+// ---------------------------------------------------------------------
+
+const PROYECTOS_BODY = () => document.getElementById('proyectos-page-body');
+
+// Estado del menu "/": el bloque donde se escribio, y que opcion esta
+// resaltada con el teclado.
+let proyectosSlashBlock = null;
+let proyectosSlashIndex = 0;
+let proyectosSlashPopover = null; // se crea una sola vez, al primer uso
+
+// Catalogo de bloques del menu. "keywords" amplia la busqueda (se filtra
+// contra label + keywords, sin distinguir mayusculas/acentos... bueno,
+// acentos si distinguen, por eso las keywords van sin ellos).
+const PROYECTOS_BLOCK_TYPES = [
+  { id: 'text', label: 'Texto', hint: 'Parrafo normal', icon: 'T', keywords: 'texto parrafo normal' },
+  { id: 'h1', label: 'Título 1', hint: 'El más grande', icon: 'H1', keywords: 'titulo encabezado h1 heading' },
+  { id: 'h2', label: 'Título 2', hint: 'Sección', icon: 'H2', keywords: 'titulo encabezado h2 heading' },
+  { id: 'h3', label: 'Título 3', hint: 'Subsección', icon: 'H3', keywords: 'titulo encabezado h3 heading' },
+  { id: 'bullet', label: 'Lista de viñetas', hint: 'Lista simple', icon: '•', keywords: 'lista vinetas bullet puntos' },
+  { id: 'numbered', label: 'Lista numerada', hint: '1, 2, 3…', icon: '1.', keywords: 'lista numerada numeros ordenada' },
+  { id: 'todo', label: 'Lista de tareas', hint: 'Con casilla para marcar', icon: '☑', keywords: 'tarea todo checkbox casilla pendiente' },
+  { id: 'toggle', label: 'Desplegable', hint: 'Se pliega y despliega', icon: '▸', keywords: 'desplegable toggle plegar acordeon' },
+  { id: 'callout', label: 'Callout', hint: 'Recuadro destacado con icono', icon: '💡', keywords: 'callout destacado aviso recuadro nota' },
+  { id: 'quote', label: 'Cita', hint: 'Texto citado', icon: '❝', keywords: 'cita quote' },
+  { id: 'divider', label: 'Divisor', hint: 'Línea separadora', icon: '—', keywords: 'divisor separador linea hr' },
+  { id: 'code', label: 'Código', hint: 'Bloque de código', icon: '</>', keywords: 'codigo code programar' },
+  { id: 'table', label: 'Tabla', hint: 'Filas y columnas', icon: '▦', keywords: 'tabla table filas columnas' },
+  { id: 'image', label: 'Imagen', hint: 'Subir una imagen', icon: '🖼', keywords: 'imagen foto image subir' },
+  { id: 'page', label: 'Subpágina', hint: 'Crear una página dentro de esta', icon: '📄', keywords: 'pagina subpagina page anidar' },
+  { id: 'database', label: 'Base de datos', hint: 'Tabla, tablero o lista con propiedades', icon: '🗄', keywords: 'base datos database tabla tablero kanban lista coleccion' },
+];
+
+// Serializa el cuerpo para GUARDARLO: igual que innerHTML, pero
+// vaciando por dentro los bloques de base de datos -- en el HTML
+// guardado solo debe viajar el marcador <div data-proyectos-db="id">,
+// nunca el widget que la interfaz monta dentro (ese se reconstruye al
+// abrir la pagina; ver hydrateProyectosDbBlocks). Se trabaja sobre un
+// clon para no tocar lo que hay en pantalla.
+function getProyectosBodyHtml() {
+  const clone = PROYECTOS_BODY().cloneNode(true);
+  clone.querySelectorAll('[data-proyectos-db]').forEach((el) => {
+    const marker = document.createElement('div');
+    marker.setAttribute('data-proyectos-db', el.getAttribute('data-proyectos-db'));
+    el.replaceWith(marker);
+  });
+  return clone.innerHTML;
+}
+
+function queueProyectosSaveBody() {
+  queueProyectosSave({ body: getProyectosBodyHtml() });
+}
+
+// ---------------------------------------------------------------------
+// Utilidades de bloque
+// ---------------------------------------------------------------------
+// Chrome deja la PRIMERA linea de un contenteditable como texto suelto,
+// sin envolver (mismo caso documentado en las notas). Para que "cada
+// linea es un bloque" sea verdad siempre, se normaliza al editar:
+// cualquier texto/etiqueta en linea suelto al nivel raiz se envuelve en
+// su propio <div>.
+function ensureProyectosBodyBlocks() {
+  const body = PROYECTOS_BODY();
+  const inline = [];
+  for (const node of [...body.childNodes]) {
+    const isElement = node.nodeType === Node.ELEMENT_NODE;
+    const isBlock = isElement && /^(div|p|h1|h2|h3|ul|ol|blockquote|details|hr|pre|table|img)$/i.test(node.tagName);
+    if (isBlock) continue;
+    inline.push(node);
+  }
+  if (inline.length === 0) return;
+  // Se envuelven TODOS los sueltos consecutivos en un solo div (son la
+  // primera linea partida en trocitos: texto + <b> + texto, etc.).
+  const wrapper = document.createElement('div');
+  inline[0].before(wrapper);
+  const selection = window.getSelection();
+  const hadCaret = selection.rangeCount > 0 && inline.some((n) => n.contains?.(selection.anchorNode) || n === selection.anchorNode);
+  const caretOffset = hadCaret ? selection.anchorOffset : 0;
+  const caretNode = hadCaret ? selection.anchorNode : null;
+  inline.forEach((n) => wrapper.appendChild(n));
+  if (caretNode) {
+    // Restaurar el cursor donde estaba (moverlo de sitio en el DOM lo
+    // habia soltado).
+    const range = document.createRange();
+    range.setStart(caretNode, caretOffset);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+}
+
+// El bloque donde esta el cursor, o null. Normalmente es un hijo
+// directo del cuerpo, pero dentro de un toggle (details) los bloques
+// hijos del details cuentan tambien como bloques de pleno derecho --
+// asi el menu "/", los atajos markdown y el Intro especial funcionan
+// igual dentro de un desplegable que fuera.
+function getProyectosCurrentBlock() {
+  const body = PROYECTOS_BODY();
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  let node = sel.anchorNode;
+  if (!node || !body.contains(node) || node === body) return null;
+  if (node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement;
+  let el = node;
+  while (el && el !== body) {
+    const parent = el.parentElement;
+    if (parent === body || (parent && parent.tagName === 'DETAILS')) return el;
+    el = parent;
+  }
+  return null;
+}
+
+// Coloca el cursor al principio (o final) de un elemento.
+function placeCaretIn(el, { atEnd = false } = {}) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(!atEnd);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+// Un div vacio listo para escribir (el <br> es lo que lo mantiene
+// "abierto" con altura de linea en un contenteditable).
+function emptyProyectosBlock() {
+  const div = document.createElement('div');
+  div.appendChild(document.createElement('br'));
+  return div;
+}
+
+// ---------------------------------------------------------------------
+// El menu "/" en si
+// ---------------------------------------------------------------------
+function ensureProyectosSlashPopover() {
+  if (proyectosSlashPopover) return;
+  proyectosSlashPopover = document.createElement('div');
+  proyectosSlashPopover.className = 'proyectos-slash-popover hidden';
+  document.body.appendChild(proyectosSlashPopover);
+}
+
+// Texto de busqueda actual: lo que hay despues del "/" en el bloque.
+function getProyectosSlashQuery() {
+  if (!proyectosSlashBlock) return null;
+  const text = proyectosSlashBlock.textContent;
+  const slashAt = text.lastIndexOf('/');
+  if (slashAt === -1) return null;
+  return text.slice(slashAt + 1);
+}
+
+function getProyectosSlashMatches() {
+  const query = (getProyectosSlashQuery() || '').trim().toLowerCase();
+  if (!query) return PROYECTOS_BLOCK_TYPES;
+  return PROYECTOS_BLOCK_TYPES.filter((t) =>
+    t.label.toLowerCase().includes(query) || t.keywords.includes(query)
+  );
+}
+
+function renderProyectosSlashMenu() {
+  ensureProyectosSlashPopover();
+  const matches = getProyectosSlashMatches();
+  if (matches.length === 0) { closeProyectosSlashMenu(); return; }
+  if (proyectosSlashIndex >= matches.length) proyectosSlashIndex = 0;
+
+  proyectosSlashPopover.innerHTML = '';
+  matches.forEach((type, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'proyectos-slash-item';
+    if (i === proyectosSlashIndex) btn.classList.add('selected');
+    const icon = document.createElement('span');
+    icon.className = 'proyectos-slash-icon';
+    icon.textContent = type.icon;
+    const textWrap = document.createElement('span');
+    textWrap.className = 'proyectos-slash-text';
+    const label = document.createElement('span');
+    label.className = 'proyectos-slash-label';
+    label.textContent = type.label;
+    const hint = document.createElement('span');
+    hint.className = 'proyectos-slash-hint';
+    hint.textContent = type.hint;
+    textWrap.appendChild(label);
+    textWrap.appendChild(hint);
+    btn.appendChild(icon);
+    btn.appendChild(textWrap);
+    // mousedown y no click: el click normal primero quita el foco del
+    // editor (blur), y para entonces la seleccion/el bloque ya no estan.
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      applyProyectosBlockType(type.id);
+    });
+    proyectosSlashPopover.appendChild(btn);
+  });
+
+  // Posicionar junto al cursor (o al bloque si no hay rectangulo).
+  proyectosSlashPopover.classList.remove('hidden');
+  const sel = window.getSelection();
+  let rect = null;
+  if (sel.rangeCount) {
+    rect = sel.getRangeAt(0).getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) rect = null;
+  }
+  if (!rect && proyectosSlashBlock) rect = proyectosSlashBlock.getBoundingClientRect();
+  if (!rect) { closeProyectosSlashMenu(); return; }
+  const popRect = proyectosSlashPopover.getBoundingClientRect();
+  let top = rect.bottom + 6;
+  // Si no cabe por abajo, se pone por encima del cursor.
+  if (top + popRect.height > window.innerHeight - 8) top = rect.top - popRect.height - 6;
+  let left = Math.min(rect.left, window.innerWidth - popRect.width - 8);
+  proyectosSlashPopover.style.top = `${Math.max(8, top)}px`;
+  proyectosSlashPopover.style.left = `${Math.max(8, left)}px`;
+}
+
+function openProyectosSlashMenu(block) {
+  proyectosSlashBlock = block;
+  proyectosSlashIndex = 0;
+  renderProyectosSlashMenu();
+}
+
+function closeProyectosSlashMenu() {
+  proyectosSlashBlock = null;
+  proyectosSlashIndex = 0;
+  if (proyectosSlashPopover) proyectosSlashPopover.classList.add('hidden');
+}
+
+// Quita del bloque el "/busqueda" que disparo el menu (para que no se
+// quede escrito al convertir el bloque).
+function stripProyectosSlashText(block) {
+  if (!block) return;
+  const text = block.textContent;
+  const slashAt = text.lastIndexOf('/');
+  if (slashAt === -1) return;
+  // El "/" siempre se escribe al final (el menu se cierra en cuanto el
+  // cursor se mueve), asi que basta recortar el texto plano del bloque.
+  const kept = text.slice(0, slashAt);
+  block.textContent = kept;
+  if (!kept) block.appendChild(document.createElement('br'));
+  placeCaretIn(block, { atEnd: true });
+}
+
+// ---------------------------------------------------------------------
+// Conversiones de bloque (lo que hace cada opcion del menu)
+// ---------------------------------------------------------------------
+// Sustituye el bloque actual por otro elemento, moviendo el contenido
+// dentro (o al hueco que diga "contentInto").
+function replaceProyectosBlock(block, newEl, { contentInto = null } = {}) {
+  const target = contentInto || newEl;
+  while (block.firstChild) target.appendChild(block.firstChild);
+  if (!target.firstChild) target.appendChild(document.createElement('br'));
+  block.replaceWith(newEl);
+  placeCaretIn(target, { atEnd: true });
+}
+
+function applyProyectosBlockType(typeId) {
+  const block = proyectosSlashBlock;
+  closeProyectosSlashMenu();
+  if (!block) return;
+  stripProyectosSlashText(block);
+
+  const makeSimple = (tag) => {
+    const el = document.createElement(tag);
+    replaceProyectosBlock(block, el);
+  };
+
+  switch (typeId) {
+    case 'text': makeSimple('div'); break;
+    case 'h1': makeSimple('h1'); break;
+    case 'h2': makeSimple('h2'); break;
+    case 'h3': makeSimple('h3'); break;
+    case 'quote': makeSimple('blockquote'); break;
+    case 'bullet': {
+      const ul = document.createElement('ul');
+      const li = document.createElement('li');
+      ul.appendChild(li);
+      replaceProyectosBlock(block, ul, { contentInto: li });
+      break;
+    }
+    case 'numbered': {
+      const ol = document.createElement('ol');
+      const li = document.createElement('li');
+      ol.appendChild(li);
+      replaceProyectosBlock(block, ol, { contentInto: li });
+      break;
+    }
+    case 'todo': {
+      const div = document.createElement('div');
+      div.setAttribute('data-todo', '1');
+      div.setAttribute('data-done', '0');
+      replaceProyectosBlock(block, div);
+      break;
+    }
+    case 'toggle': {
+      // <details open> con el texto en el <summary> y un hueco editable
+      // dentro para el contenido plegable.
+      const details = document.createElement('details');
+      details.setAttribute('open', '');
+      const summary = document.createElement('summary');
+      const inner = emptyProyectosBlock();
+      details.appendChild(summary);
+      details.appendChild(inner);
+      replaceProyectosBlock(block, details, { contentInto: summary });
+      break;
+    }
+    case 'callout': {
+      const div = document.createElement('div');
+      div.setAttribute('data-callout', '1');
+      div.setAttribute('data-icon', '💡');
+      replaceProyectosBlock(block, div);
+      break;
+    }
+    case 'divider': {
+      // El divisor no es editable: se inserta el <hr> y un bloque vacio
+      // detras para seguir escribiendo.
+      const hr = document.createElement('hr');
+      const after = emptyProyectosBlock();
+      block.replaceWith(hr);
+      hr.after(after);
+      placeCaretIn(after);
+      break;
+    }
+    case 'code': {
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      pre.appendChild(code);
+      replaceProyectosBlock(block, pre, { contentInto: code });
+      break;
+    }
+    case 'table': openProyectosTablePopover(block); break;
+    case 'image': insertProyectosImage(block); break;
+    case 'database': insertProyectosDatabase(block); return; // guarda por su cuenta al terminar
+    case 'page': {
+      // Crea una subpagina de la actual y la abre -- el bloque desde el
+      // que se pidio se queda como bloque vacio normal.
+      if (block.textContent.trim() === '') block.replaceWith(emptyProyectosBlock());
+      queueProyectosSaveBody();
+      if (proyectosCurrentPage) createProyectosPage(proyectosCurrentPage.id);
+      return; // sin guardado extra: createProyectosPage ya hace flush
+    }
+  }
+
+  queueProyectosSaveBody();
+}
+
+// ---------------------------------------------------------------------
+// Tabla: mini-popover pidiendo filas x columnas antes de insertar
+// ---------------------------------------------------------------------
+let proyectosTablePopover = null;
+let proyectosTableTargetBlock = null;
+
+function openProyectosTablePopover(block) {
+  proyectosTableTargetBlock = block;
+  if (!proyectosTablePopover) {
+    proyectosTablePopover = document.createElement('div');
+    proyectosTablePopover.className = 'proyectos-table-popover hidden';
+    proyectosTablePopover.innerHTML = `
+      <label>Filas <input type="text" inputmode="numeric" value="3" data-table-rows /></label>
+      <label>Columnas <input type="text" inputmode="numeric" value="3" data-table-cols /></label>
+      <button type="button" class="primary-btn" data-table-insert>Insertar</button>
+    `;
+    document.body.appendChild(proyectosTablePopover);
+    proyectosTablePopover.querySelector('[data-table-insert]').addEventListener('click', () => {
+      const rows = Math.min(30, Math.max(1, parseInt(proyectosTablePopover.querySelector('[data-table-rows]').value, 10) || 3));
+      const cols = Math.min(10, Math.max(1, parseInt(proyectosTablePopover.querySelector('[data-table-cols]').value, 10) || 3));
+      insertProyectosTable(rows, cols);
+    });
+  }
+  proyectosTablePopover.classList.remove('hidden');
+  const rect = block.getBoundingClientRect();
+  proyectosTablePopover.style.top = `${rect.bottom + 6}px`;
+  proyectosTablePopover.style.left = `${rect.left}px`;
+}
+
+function closeProyectosTablePopover() {
+  if (proyectosTablePopover) proyectosTablePopover.classList.add('hidden');
+  proyectosTableTargetBlock = null;
+}
+
+function insertProyectosTable(rows, cols) {
+  const block = proyectosTableTargetBlock;
+  closeProyectosTablePopover();
+  if (!block || !PROYECTOS_BODY().contains(block)) return;
+  const table = document.createElement('table');
+  const tbody = document.createElement('tbody');
+  for (let r = 0; r < rows; r++) {
+    const tr = document.createElement('tr');
+    for (let c = 0; c < cols; c++) {
+      const td = document.createElement('td');
+      td.appendChild(document.createElement('br'));
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  const after = emptyProyectosBlock();
+  block.replaceWith(table);
+  table.after(after);
+  placeCaretIn(table.querySelector('td'));
+  queueProyectosSaveBody();
+}
+
+// ---------------------------------------------------------------------
+// Imagen: selector de archivo -> subir -> <img> con el enlace corto
+// ---------------------------------------------------------------------
+let proyectosImageTargetBlock = null;
+let proyectosImageInput = null;
+
+function insertProyectosImage(block) {
+  proyectosImageTargetBlock = block;
+  if (!proyectosImageInput) {
+    // Un input de archivo oculto de usar y tirar. (Es un control nativo,
+    // pero el selector de archivos del sistema es la UNICA forma de
+    // elegir un archivo -- la regla de "nada de controles nativos" va de
+    // checkbox/select/fecha, no de esto; las notas y Viajes hacen igual.)
+    proyectosImageInput = document.createElement('input');
+    proyectosImageInput.type = 'file';
+    proyectosImageInput.accept = 'image/jpeg,image/png,image/gif,image/webp';
+    proyectosImageInput.style.display = 'none';
+    document.body.appendChild(proyectosImageInput);
+    proyectosImageInput.addEventListener('change', async () => {
+      const file = proyectosImageInput.files[0];
+      proyectosImageInput.value = '';
+      const block = proyectosImageTargetBlock;
+      proyectosImageTargetBlock = null;
+      if (!file || !block || !PROYECTOS_BODY().contains(block)) return;
+      try {
+        const { url } = await api('/api/proyectos/images', {
+          method: 'POST',
+          headers: { 'Content-Type': file.type },
+          body: file,
+        });
+        const img = document.createElement('img');
+        img.src = url;
+        const wrapper = document.createElement('div');
+        wrapper.appendChild(img);
+        const after = emptyProyectosBlock();
+        block.replaceWith(wrapper);
+        wrapper.after(after);
+        placeCaretIn(after);
+        queueProyectosSaveBody();
+      } catch (err) {
+        console.error('No se pudo subir la imagen:', err);
+        alert(`No se pudo subir la imagen: ${err.message}`);
+      }
+    });
+  }
+  proyectosImageInput.click();
+}
+
+// ---------------------------------------------------------------------
+// Atajos tipo markdown: "#", "##", "###", "-", "*", "1.", "[]", ">"
+// convierten el bloque al escribir un ESPACIO detras; "---" convierte en
+// divisor directamente.
+// ---------------------------------------------------------------------
+const PROYECTOS_MD_SHORTCUTS = {
+  '#': 'h1', '##': 'h2', '###': 'h3',
+  '-': 'bullet', '*': 'bullet', '1.': 'numbered',
+  '[]': 'todo', '>': 'quote',
+};
+
+function tryProyectosMarkdownShortcut(block) {
+  const type = PROYECTOS_MD_SHORTCUTS[block.textContent];
+  if (!type) return false;
+  // Se vacia el prefijo y se reutiliza la conversion del menu "/" (que
+  // lee proyectosSlashBlock como "bloque a convertir"; ya sin texto, no
+  // hay ningun "/" que recortar).
+  block.textContent = '';
+  block.appendChild(document.createElement('br'));
+  proyectosSlashBlock = block;
+  applyProyectosBlockType(type);
+  return true;
+}
+
+// ---------------------------------------------------------------------
+// Teclado y clics dentro del cuerpo
+// ---------------------------------------------------------------------
+PROYECTOS_BODY().addEventListener('keydown', (e) => {
+  // Lo que pasa DENTRO de un widget de base de datos (sus inputs,
+  // botones...) no es cosa del editor de bloques.
+  if (e.target.closest?.('[data-proyectos-db]')) return;
+  // Con el menu "/" abierto, las flechas/Intro/Escape son del menu.
+  if (proyectosSlashBlock && proyectosSlashPopover && !proyectosSlashPopover.classList.contains('hidden')) {
+    const matches = getProyectosSlashMatches();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      proyectosSlashIndex = (proyectosSlashIndex + 1) % matches.length;
+      renderProyectosSlashMenu();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      proyectosSlashIndex = (proyectosSlashIndex - 1 + matches.length) % matches.length;
+      renderProyectosSlashMenu();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const type = matches[proyectosSlashIndex];
+      if (type) applyProyectosBlockType(type.id);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeProyectosSlashMenu();
+      return;
+    }
+  }
+
+  if (e.key === ' ') {
+    // Atajos markdown: el texto del bloque ES el prefijo y se pulsa
+    // espacio. Se comprueba antes de que el espacio se escriba.
+    const block = getProyectosCurrentBlock();
+    if (block && /^(div|p)$/i.test(block.tagName) && tryProyectosMarkdownShortcut(block)) {
+      e.preventDefault();
+      return;
+    }
+  }
+
+  if (e.key === 'Enter' && !e.shiftKey) {
+    const block = getProyectosCurrentBlock();
+    if (!block) return;
+
+    // "---" + Intro = divisor.
+    if (/^(div|p)$/i.test(block.tagName) && block.textContent === '---') {
+      e.preventDefault();
+      const hr = document.createElement('hr');
+      const after = emptyProyectosBlock();
+      block.replaceWith(hr);
+      hr.after(after);
+      placeCaretIn(after);
+      queueProyectosSaveBody();
+      return;
+    }
+
+    // Intro en la cabecera de un toggle (summary): no crear otra
+    // cabecera (lo que hace Chrome), sino bajar al contenido de dentro.
+    if (block.tagName === 'SUMMARY') {
+      const details = block.parentElement;
+      e.preventDefault();
+      details.setAttribute('open', '');
+      let inner = details.querySelector(':scope > div');
+      if (!inner) { inner = emptyProyectosBlock(); details.appendChild(inner); }
+      placeCaretIn(inner);
+      return;
+    }
+
+    const isTodo = block.matches('[data-todo]');
+    const isCallout = block.matches('[data-callout]');
+    const isHeading = /^h[1-3]$/i.test(block.tagName);
+    const isQuote = block.tagName === 'BLOCKQUOTE';
+
+    // Intro en un bloque especial VACIO = volver a texto normal (la
+    // salida natural de una lista de tareas o una cita, como en Notion).
+    if ((isTodo || isCallout || isQuote) && block.textContent.trim() === '') {
+      e.preventDefault();
+      const div = emptyProyectosBlock();
+      block.replaceWith(div);
+      placeCaretIn(div);
+      queueProyectosSaveBody();
+      return;
+    }
+
+    // Intro en una tarea con texto = otra tarea debajo (sin marcar).
+    if (isTodo) {
+      e.preventDefault();
+      const next = document.createElement('div');
+      next.setAttribute('data-todo', '1');
+      next.setAttribute('data-done', '0');
+      next.appendChild(document.createElement('br'));
+      block.after(next);
+      placeCaretIn(next);
+      queueProyectosSaveBody();
+      return;
+    }
+
+    // Intro al final de un titulo/callout/cita = parrafo normal debajo
+    // (si no, Chrome clona el mismo tipo de bloque y no hay forma
+    // comoda de "salir" de el).
+    if (isHeading || isCallout || isQuote) {
+      const sel = window.getSelection();
+      const atEnd = sel.rangeCount > 0 && (() => {
+        const range = sel.getRangeAt(0).cloneRange();
+        range.selectNodeContents(block);
+        range.setStart(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
+        return range.toString() === '';
+      })();
+      if (atEnd) {
+        e.preventDefault();
+        const div = emptyProyectosBlock();
+        block.after(div);
+        placeCaretIn(div);
+        queueProyectosSaveBody();
+        return;
+      }
+    }
+  }
+});
+
+PROYECTOS_BODY().addEventListener('input', (e) => {
+  if (e.target.closest?.('[data-proyectos-db]')) return; // inputs del widget de BD
+  ensureProyectosBodyBlocks();
+
+  // ¿Hay que abrir/refrescar/cerrar el menu "/"? Se abre cuando lo
+  // ULTIMO escrito en el bloque es un "/" (o ya estaba abierto y se
+  // sigue filtrando).
+  const block = getProyectosCurrentBlock();
+  if (proyectosSlashBlock) {
+    if (block !== proyectosSlashBlock || getProyectosSlashQuery() === null) closeProyectosSlashMenu();
+    else { proyectosSlashIndex = 0; renderProyectosSlashMenu(); }
+  } else if (block && /^(div|p)$/i.test(block.tagName) && block.textContent.endsWith('/')) {
+    openProyectosSlashMenu(block);
+  }
+});
+
+// El menu se cierra si el cursor se va a otro sitio (clic fuera, etc.).
+document.addEventListener('selectionchange', () => {
+  if (!proyectosSlashBlock) return;
+  const block = getProyectosCurrentBlock();
+  if (block !== proyectosSlashBlock) closeProyectosSlashMenu();
+});
+
+PROYECTOS_BODY().addEventListener('click', (e) => {
+  if (e.target.closest?.('[data-proyectos-db]')) return; // el widget gestiona sus propios clics
+  // Marcar/desmarcar una tarea: el "checkbox" es la zona de la
+  // izquierda del bloque (pintada con CSS ::before), asi que un clic en
+  // los primeros ~28px del bloque cuenta como clic en la casilla.
+  const todo = e.target.closest('[data-todo]');
+  if (todo && PROYECTOS_BODY().contains(todo)) {
+    const rect = todo.getBoundingClientRect();
+    if (e.clientX - rect.left < 28) {
+      e.preventDefault();
+      todo.setAttribute('data-done', todo.getAttribute('data-done') === '1' ? '0' : '1');
+      queueProyectosSaveBody();
+      return;
+    }
+  }
+  // Plegar/desplegar un toggle: clic en la flecha (la zona izquierda
+  // del summary). Se hace a mano porque dentro de un contenteditable el
+  // triangulo nativo de <details> no siempre responde.
+  const summary = e.target.closest('summary');
+  if (summary && PROYECTOS_BODY().contains(summary)) {
+    const rect = summary.getBoundingClientRect();
+    if (e.clientX - rect.left < 24) {
+      e.preventDefault();
+      const details = summary.parentElement;
+      if (details.hasAttribute('open')) details.removeAttribute('open');
+      else details.setAttribute('open', '');
+      queueProyectosSaveBody();
+    }
+  }
+});
+
+// Pegar una imagen del portapapeles directamente (Ctrl+V con una
+// captura copiada), como en las notas.
+PROYECTOS_BODY().addEventListener('paste', async (e) => {
+  if (e.target.closest?.('[data-proyectos-db]')) return;
+  const items = e.clipboardData?.items || [];
+  const imageItem = [...items].find((item) => item.type.startsWith('image/'));
+  if (!imageItem) return; // pegado normal de texto, que siga su curso
+  e.preventDefault();
+  const file = imageItem.getAsFile();
+  if (!file) return;
+  try {
+    const { url } = await api('/api/proyectos/images', {
+      method: 'POST',
+      headers: { 'Content-Type': file.type },
+      body: file,
+    });
+    const block = getProyectosCurrentBlock();
+    const img = document.createElement('img');
+    img.src = url;
+    const wrapper = document.createElement('div');
+    wrapper.appendChild(img);
+    const after = emptyProyectosBlock();
+    if (block) { block.after(wrapper); }
+    else PROYECTOS_BODY().appendChild(wrapper);
+    wrapper.after(after);
+    placeCaretIn(after);
+    queueProyectosSaveBody();
+  } catch (err) {
+    console.error('No se pudo pegar la imagen:', err);
+  }
+});
+
+// Cerrar los popovers propios al clicar fuera de ellos.
+document.addEventListener('click', (e) => {
+  if (proyectosTablePopover && !proyectosTablePopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-table-popover')) {
+    closeProyectosTablePopover();
+  }
+  // OJO: elegir una opcion en un createSelectField repinta las opciones
+  // DENTRO de su manejador de click, asi que cuando el click llega aqui
+  // (burbujeando) el boton pulsado ya no esta en el documento -- y un
+  // nodo suelto no tiene ancestros, con lo que pareceria un "clic
+  // fuera". Un clic de un nodo ya desconectado nunca cierra nada.
+  if (e.target instanceof Node && !document.contains(e.target)) return;
+  if (proyectosDbConfigPopover && !proyectosDbConfigPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-db-config-popover')
+      && !e.target.closest('.select-popover, .select-field-trigger')) {
+    proyectosDbConfigPopover.classList.add('hidden');
+  }
+});
+
+// ---------------------------------------------------------------------
+// Proyectos — Fase 3: bases de datos embebidas (tabla / tablero / lista)
+//
+// Un bloque <div data-proyectos-db="id"> del HTML es solo un marcador:
+// al abrir la pagina, hydrateProyectosDbBlocks() pide la base al backend
+// (core/routes/proyectosDatabases.js) y monta dentro un widget
+// interactivo NO editable (contentEditable=false, una "isla" dentro del
+// contenteditable). Al guardar la pagina, getProyectosBodyHtml() vacia
+// el widget y deja solo el marcador.
+//
+// La configuracion de la vista (tipo, orden, filtro, agrupacion del
+// tablero) se guarda EN la base (compartida, parte del contenido), no
+// en localStorage.
+// ---------------------------------------------------------------------
+
+// Cache en memoria de las bases cargadas (id -> datos completos con
+// props, filas y valores). Se refresca con cada respuesta del backend.
+const proyectosDbCache = new Map();
+// Cada widget vivo, para poder repintarlo: dbId -> el contenedor.
+const proyectosDbContainers = new Map();
+
+async function hydrateProyectosDbBlocks() {
+  proyectosDbContainers.clear();
+  for (const el of PROYECTOS_BODY().querySelectorAll('[data-proyectos-db]')) {
+    const dbId = Number(el.getAttribute('data-proyectos-db'));
+    el.contentEditable = 'false';
+    el.classList.add('proyectos-db-block');
+    proyectosDbContainers.set(dbId, el);
+    try {
+      const data = await api(`/api/proyectos-databases/${dbId}`);
+      proyectosDbCache.set(dbId, data);
+      renderProyectosDbWidget(el, data);
+    } catch (err) {
+      el.innerHTML = '<p class="hint">Esta base de datos ya no existe.</p>';
+    }
+  }
+}
+
+// Crear una base nueva desde el menu "/" y convertir el bloque en su
+// marcador.
+async function insertProyectosDatabase(block) {
+  if (!proyectosCurrentPage) return;
+  try {
+    const data = await api('/api/proyectos-databases', {
+      method: 'POST',
+      body: JSON.stringify({ pageId: proyectosCurrentPage.id, name: '' }),
+    });
+    proyectosDbCache.set(data.id, data);
+    const marker = document.createElement('div');
+    marker.setAttribute('data-proyectos-db', String(data.id));
+    marker.contentEditable = 'false';
+    marker.classList.add('proyectos-db-block');
+    const after = emptyProyectosBlock();
+    block.replaceWith(marker);
+    marker.after(after);
+    placeCaretIn(after);
+    proyectosDbContainers.set(data.id, marker);
+    renderProyectosDbWidget(marker, data);
+    queueProyectosSaveBody();
+  } catch (err) {
+    console.error('No se pudo crear la base de datos:', err);
+    alert(`No se pudo crear la base de datos: ${err.message}`);
+  }
+}
+
+// Repinta el widget de una base tras cualquier cambio.
+function refreshProyectosDbWidget(dbId) {
+  const container = proyectosDbContainers.get(dbId);
+  const data = proyectosDbCache.get(dbId);
+  if (container && data && document.contains(container)) renderProyectosDbWidget(container, data);
+}
+
+// Los campos de celda (createSelectField/createDateField) cuelgan sus
+// popovers de document.body y no los recogen solos -- al repintar el
+// widget se quedarian huerfanos y se irian acumulando. Se apunta que
+// popovers aparecieron durante el pintado y se retiran en el siguiente.
+function renderTrackingPopovers(container, renderFn) {
+  (container._ownedPopovers || []).forEach((el) => el.remove());
+  const before = new Set(document.body.children);
+  renderFn();
+  container._ownedPopovers = [...document.body.children].filter(
+    (el) => !before.has(el) && el.matches('.select-popover, .date-popover, .icon-popover, .color-popover')
+  );
+}
+
+// Filas visibles de una base segun su filtro y orden guardados.
+function visibleProyectosDbRows(data) {
+  let rows = [...data.rows];
+  if (data.filterPropId && data.filterValue) {
+    rows = rows.filter((r) => (r.values[data.filterPropId] || '') === data.filterValue);
+  }
+  if (data.sortPropId) {
+    const prop = data.props.find((p) => p.id === data.sortPropId);
+    const dir = data.sortDir === 'desc' ? -1 : 1;
+    rows.sort((a, b) => {
+      const va = a.values[data.sortPropId] || '';
+      const vb = b.values[data.sortPropId] || '';
+      // Los vacios siempre al final, da igual la direccion.
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      if (prop && prop.type === 'number') return (Number(va) - Number(vb)) * dir;
+      return va.localeCompare(vb) * dir;
+    });
+  }
+  return rows;
+}
+
+async function saveProyectosDbConfig(dbId, fields) {
+  try {
+    const data = await api(`/api/proyectos-databases/${dbId}`, { method: 'PUT', body: JSON.stringify(fields) });
+    proyectosDbCache.set(dbId, data);
+    refreshProyectosDbWidget(dbId);
+  } catch (err) {
+    console.error('No se pudo guardar la base de datos:', err);
+  }
+}
+
+async function saveProyectosDbValue(dbId, rowId, propId, value) {
+  try {
+    await api(`/api/proyectos-databases/rows/${rowId}/values/${propId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    });
+    const data = proyectosDbCache.get(dbId);
+    const row = data?.rows.find((r) => r.id === rowId);
+    if (row) {
+      if (value === null || value === '') delete row.values[propId];
+      else row.values[propId] = String(value);
+    }
+  } catch (err) {
+    console.error('No se pudo guardar el valor:', err);
+  }
+}
+
+// ---------------------------------------------------------------------
+// El widget: cabecera comun + una de las tres vistas
+// ---------------------------------------------------------------------
+function renderProyectosDbWidget(container, data) {
+  renderTrackingPopovers(container, () => {
+    container.innerHTML = '';
+
+    // --- Cabecera: nombre + pestañas de vista + acciones ---
+    const header = document.createElement('div');
+    header.className = 'proyectos-db-header';
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'proyectos-db-name';
+    nameInput.placeholder = 'Base de datos sin nombre';
+    nameInput.value = data.name || '';
+    nameInput.addEventListener('change', () => saveProyectosDbConfig(data.id, { name: nameInput.value.trim() }));
+    header.appendChild(nameInput);
+
+    const tabs = document.createElement('div');
+    tabs.className = 'proyectos-db-tabs';
+    [['table', 'Tabla'], ['board', 'Tablero'], ['list', 'Lista']].forEach(([type, label]) => {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'proyectos-db-tab' + (data.viewType === type ? ' active' : '');
+      tab.textContent = label;
+      tab.addEventListener('click', () => { if (data.viewType !== type) saveProyectosDbConfig(data.id, { viewType: type }); });
+      tabs.appendChild(tab);
+    });
+    header.appendChild(tabs);
+
+    const spacer = document.createElement('div');
+    spacer.className = 'spacer';
+    header.appendChild(spacer);
+
+    const configBtn = document.createElement('button');
+    configBtn.type = 'button';
+    configBtn.className = 'icon-btn';
+    configBtn.textContent = '⚙';
+    configBtn.title = 'Orden, filtro y agrupación';
+    configBtn.addEventListener('click', (e) => { e.stopPropagation(); openProyectosDbConfigPopover(configBtn, data); });
+    header.appendChild(configBtn);
+
+    const newRowBtn = document.createElement('button');
+    newRowBtn.type = 'button';
+    newRowBtn.className = 'secondary-btn proyectos-db-new-btn';
+    newRowBtn.textContent = '+ Fila';
+    newRowBtn.addEventListener('click', () => createProyectosDbRow(data.id, {}));
+    header.appendChild(newRowBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'icon-btn proyectos-db-delete-btn';
+    deleteBtn.textContent = '✕';
+    deleteBtn.title = 'Quitar la base de datos (borra sus filas)';
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm('¿Quitar esta base de datos de la página? Se borran también todas sus filas.')) return;
+      await api(`/api/proyectos-databases/${data.id}`, { method: 'DELETE' });
+      proyectosDbCache.delete(data.id);
+      proyectosDbContainers.delete(data.id);
+      const next = container.nextElementSibling;
+      container.remove();
+      if (next) placeCaretIn(next);
+      queueProyectosSaveBody();
+    });
+    header.appendChild(deleteBtn);
+
+    container.appendChild(header);
+
+    // --- La vista activa ---
+    const view = document.createElement('div');
+    view.className = 'proyectos-db-view';
+    if (data.viewType === 'board') renderProyectosDbBoard(view, data);
+    else if (data.viewType === 'list') renderProyectosDbList(view, data);
+    else renderProyectosDbTable(view, data);
+    container.appendChild(view);
+  });
+}
+
+async function createProyectosDbRow(dbId, values) {
+  try {
+    const data = await api(`/api/proyectos-databases/${dbId}/rows`, {
+      method: 'POST',
+      body: JSON.stringify({ title: '', values }),
+    });
+    proyectosDbCache.set(dbId, data);
+    refreshProyectosDbWidget(dbId);
+    // Abrir la fila nueva directamente en el side peek, lista para
+    // ponerle titulo.
+    const newest = data.rows[data.rows.length - 1];
+    if (newest) openProyectosPeek(dbId, newest.id);
+  } catch (err) {
+    console.error('No se pudo crear la fila:', err);
+  }
+}
+
+// Editor de UNA celda segun el tipo de su propiedad. Devuelve el
+// elemento a colocar. Siempre componentes propios de la app
+// (createSelectField/createDateField/.styled-checkbox), nunca controles
+// nativos -- regla de la casa.
+function buildProyectosDbCellEditor(data, row, prop) {
+  const current = row.values[prop.id] || '';
+  if (prop.type === 'select') {
+    const field = createSelectField({
+      options: [{ value: '', label: '—' }, ...prop.options.map((o) => ({ value: o, label: o }))],
+      initialValue: current,
+      placeholder: '—',
+      onChange: (value) => saveProyectosDbValue(data.id, row.id, prop.id, value),
+    });
+    return field.element;
+  }
+  if (prop.type === 'date') {
+    const field = createDateField({
+      initialValue: current ? new Date(`${current}T00:00:00`) : null,
+      allowClear: true,
+      placeholder: '—',
+      onChange: (value) => saveProyectosDbValue(data.id, row.id, prop.id, value ? toIsoDate(value) : null),
+    });
+    return field.element;
+  }
+  if (prop.type === 'checkbox') {
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox';
+    checkbox.checked = current === '1';
+    checkbox.addEventListener('change', () => saveProyectosDbValue(data.id, row.id, prop.id, checkbox.checked ? '1' : null));
+    return checkbox;
+  }
+  // texto y numero: campo de texto simple que guarda al salir/cambiar.
+  const input = document.createElement('input');
+  input.type = 'text';
+  if (prop.type === 'number') input.inputMode = 'decimal';
+  input.className = 'proyectos-db-cell-input';
+  input.value = current;
+  input.addEventListener('change', () => saveProyectosDbValue(data.id, row.id, prop.id, input.value.trim() || null));
+  return input;
+}
+
+// --------------------------- Vista tabla -----------------------------
+function renderProyectosDbTable(view, data) {
+  const wrap = document.createElement('div');
+  wrap.className = 'proyectos-db-table-wrap';
+  const table = document.createElement('table');
+  table.className = 'proyectos-db-table';
+
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  const titleTh = document.createElement('th');
+  titleTh.textContent = 'Título';
+  headRow.appendChild(titleTh);
+  for (const prop of data.props) {
+    const th = document.createElement('th');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'proyectos-db-prop-btn';
+    btn.textContent = prop.name;
+    btn.title = 'Editar propiedad';
+    btn.addEventListener('click', (e) => { e.stopPropagation(); openProyectosPropPopover(btn, data, prop); });
+    th.appendChild(btn);
+    headRow.appendChild(th);
+  }
+  const addTh = document.createElement('th');
+  addTh.className = 'proyectos-db-add-prop-th';
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'icon-btn';
+  addBtn.textContent = '+';
+  addBtn.title = 'Nueva propiedad';
+  addBtn.addEventListener('click', (e) => { e.stopPropagation(); openProyectosPropPopover(addBtn, data, null); });
+  addTh.appendChild(addBtn);
+  headRow.appendChild(addTh);
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  for (const row of visibleProyectosDbRows(data)) {
+    const tr = document.createElement('tr');
+    const titleTd = document.createElement('td');
+    titleTd.className = 'proyectos-db-title-cell';
+    const titleBtn = document.createElement('button');
+    titleBtn.type = 'button';
+    titleBtn.className = 'proyectos-db-title-btn';
+    titleBtn.textContent = row.title || 'Sin título';
+    if (!row.title) titleBtn.classList.add('untitled');
+    titleBtn.addEventListener('click', () => openProyectosPeek(data.id, row.id));
+    titleTd.appendChild(titleBtn);
+    tr.appendChild(titleTd);
+    for (const prop of data.props) {
+      const td = document.createElement('td');
+      td.appendChild(buildProyectosDbCellEditor(data, row, prop));
+      tr.appendChild(td);
+    }
+    tr.appendChild(document.createElement('td'));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  view.appendChild(wrap);
+
+  if (data.rows.length === 0) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'Sin filas todavía — usa “+ Fila”.';
+    view.appendChild(hint);
+  }
+}
+
+// -------------------------- Vista tablero ----------------------------
+function renderProyectosDbBoard(view, data) {
+  const groupProp = data.props.find((p) => p.id === data.boardPropId && p.type === 'select')
+    || data.props.find((p) => p.type === 'select');
+  if (!groupProp) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'El tablero necesita una propiedad de tipo “select” por la que agrupar — crea una desde la vista Tabla.';
+    view.appendChild(hint);
+    return;
+  }
+
+  const board = document.createElement('div');
+  board.className = 'proyectos-db-board';
+
+  // Una columna por opcion del select + la de "sin valor".
+  const columns = [...groupProp.options.map((o) => ({ key: o, label: o })), { key: '', label: 'Sin valor' }];
+  const rows = visibleProyectosDbRows(data);
+
+  for (const col of columns) {
+    const colRows = rows.filter((r) => (r.values[groupProp.id] || '') === col.key);
+    const colEl = document.createElement('div');
+    colEl.className = 'proyectos-db-board-col';
+
+    const colHead = document.createElement('div');
+    colHead.className = 'proyectos-db-board-col-head';
+    colHead.textContent = `${col.label} · ${colRows.length}`;
+    colEl.appendChild(colHead);
+
+    // Soltar una tarjeta aqui = cambiarle el valor del select.
+    colEl.addEventListener('dragover', (e) => { e.preventDefault(); colEl.classList.add('dragover'); });
+    colEl.addEventListener('dragleave', () => colEl.classList.remove('dragover'));
+    colEl.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      colEl.classList.remove('dragover');
+      const rowId = Number(e.dataTransfer.getData('text/plain'));
+      if (!rowId) return;
+      await saveProyectosDbValue(data.id, rowId, groupProp.id, col.key || null);
+      refreshProyectosDbWidget(data.id);
+    });
+
+    for (const row of colRows) {
+      const card = document.createElement('div');
+      card.className = 'proyectos-db-card';
+      card.draggable = true;
+      card.textContent = row.title || 'Sin título';
+      if (!row.title) card.classList.add('untitled');
+      card.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', String(row.id)));
+      card.addEventListener('click', () => openProyectosPeek(data.id, row.id));
+      colEl.appendChild(card);
+    }
+
+    const addCard = document.createElement('button');
+    addCard.type = 'button';
+    addCard.className = 'proyectos-db-card-add';
+    addCard.textContent = '+ Nueva';
+    addCard.addEventListener('click', () => createProyectosDbRow(data.id, col.key ? { [groupProp.id]: col.key } : {}));
+    colEl.appendChild(addCard);
+
+    board.appendChild(colEl);
+  }
+  view.appendChild(board);
+}
+
+// --------------------------- Vista lista -----------------------------
+function renderProyectosDbList(view, data) {
+  const list = document.createElement('div');
+  list.className = 'proyectos-db-list';
+  for (const row of visibleProyectosDbRows(data)) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'proyectos-db-list-item';
+    const title = document.createElement('span');
+    title.className = 'proyectos-db-list-title';
+    title.textContent = row.title || 'Sin título';
+    if (!row.title) title.classList.add('untitled');
+    item.appendChild(title);
+    // Chips con los valores no vacios, para ver algo mas que el titulo.
+    for (const prop of data.props) {
+      const value = row.values[prop.id];
+      if (!value) continue;
+      const chip = document.createElement('span');
+      chip.className = 'proyectos-db-chip';
+      chip.textContent = prop.type === 'checkbox' ? prop.name : value;
+      item.appendChild(chip);
+    }
+    item.addEventListener('click', () => openProyectosPeek(data.id, row.id));
+    list.appendChild(item);
+  }
+  if (data.rows.length === 0) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'Sin filas todavía — usa “+ Fila”.';
+    list.appendChild(hint);
+  }
+  view.appendChild(list);
+}
+
+// ---------------------------------------------------------------------
+// Popover de configuracion de la vista (orden / filtro / agrupacion)
+// ---------------------------------------------------------------------
+let proyectosDbConfigPopover = null;
+
+function openProyectosDbConfigPopover(anchorBtn, data) {
+  if (!proyectosDbConfigPopover) {
+    proyectosDbConfigPopover = document.createElement('div');
+    proyectosDbConfigPopover.className = 'proyectos-db-config-popover hidden';
+    document.body.appendChild(proyectosDbConfigPopover);
+  }
+  const popover = proyectosDbConfigPopover;
+  popover.innerHTML = '';
+
+  const propOptions = [{ value: '', label: '— ninguna —' }, ...data.props.map((p) => ({ value: String(p.id), label: p.name }))];
+  const selectProps = data.props.filter((p) => p.type === 'select');
+
+  function addField(labelText, fieldEl) {
+    const label = document.createElement('label');
+    label.className = 'proyectos-db-config-field';
+    const span = document.createElement('span');
+    span.textContent = labelText;
+    label.appendChild(span);
+    label.appendChild(fieldEl);
+    popover.appendChild(label);
+  }
+
+  addField('Ordenar por', createSelectField({
+    options: propOptions,
+    initialValue: data.sortPropId ? String(data.sortPropId) : '',
+    placeholder: '— ninguna —',
+    onChange: (v) => saveProyectosDbConfig(data.id, { sortPropId: v || null }),
+  }).element);
+
+  addField('Dirección', createSelectField({
+    options: [{ value: 'asc', label: 'Ascendente' }, { value: 'desc', label: 'Descendente' }],
+    initialValue: data.sortDir,
+    onChange: (v) => saveProyectosDbConfig(data.id, { sortDir: v }),
+  }).element);
+
+  addField('Filtrar por', createSelectField({
+    options: propOptions,
+    initialValue: data.filterPropId ? String(data.filterPropId) : '',
+    placeholder: '— ninguna —',
+    onChange: (v) => saveProyectosDbConfig(data.id, { filterPropId: v || null, filterValue: v ? data.filterValue : null }),
+  }).element);
+
+  const filterInput = document.createElement('input');
+  filterInput.type = 'text';
+  filterInput.className = 'proyectos-db-cell-input';
+  filterInput.placeholder = 'Valor exacto';
+  filterInput.value = data.filterValue || '';
+  filterInput.addEventListener('change', () => saveProyectosDbConfig(data.id, { filterValue: filterInput.value || null }));
+  addField('Valor del filtro', filterInput);
+
+  if (selectProps.length > 0) {
+    addField('Agrupar tablero por', createSelectField({
+      options: selectProps.map((p) => ({ value: String(p.id), label: p.name })),
+      initialValue: data.boardPropId ? String(data.boardPropId) : '',
+      placeholder: '— elegir —',
+      onChange: (v) => saveProyectosDbConfig(data.id, { boardPropId: v || null }),
+    }).element);
+  }
+
+  popover.classList.remove('hidden');
+  positionFixedPopover(anchorBtn, popover, { width: 260 });
+}
+
+// ---------------------------------------------------------------------
+// Popover de propiedad: crear una nueva (prop = null) o editar/borrar
+// una existente.
+// ---------------------------------------------------------------------
+let proyectosPropPopover = null;
+
+function openProyectosPropPopover(anchorBtn, data, prop) {
+  if (proyectosPropPopover) proyectosPropPopover.remove();
+  const popover = document.createElement('div');
+  popover.className = 'proyectos-db-config-popover proyectos-prop-popover';
+  document.body.appendChild(popover);
+  proyectosPropPopover = popover;
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'proyectos-db-cell-input';
+  nameInput.placeholder = 'Nombre de la propiedad';
+  nameInput.value = prop ? prop.name : '';
+
+  let typeValue = prop ? prop.type : 'text';
+  const typeField = createSelectField({
+    options: [
+      { value: 'text', label: 'Texto' },
+      { value: 'number', label: 'Número' },
+      { value: 'select', label: 'Select (opciones)' },
+      { value: 'date', label: 'Fecha' },
+      { value: 'checkbox', label: 'Casilla' },
+    ],
+    initialValue: typeValue,
+    onChange: (v) => {
+      typeValue = v;
+      optionsLabel.classList.toggle('hidden', v !== 'select');
+    },
+  });
+
+  const optionsInput = document.createElement('input');
+  optionsInput.type = 'text';
+  optionsInput.className = 'proyectos-db-cell-input';
+  optionsInput.placeholder = 'Opción A, Opción B, …';
+  optionsInput.value = prop && prop.options.length ? prop.options.join(', ') : '';
+
+  function addField(labelText, fieldEl) {
+    const label = document.createElement('label');
+    label.className = 'proyectos-db-config-field';
+    const span = document.createElement('span');
+    span.textContent = labelText;
+    label.appendChild(span);
+    label.appendChild(fieldEl);
+    popover.appendChild(label);
+    return label;
+  }
+
+  addField('Nombre', nameInput);
+  addField('Tipo', typeField.element);
+  const optionsLabel = addField('Opciones (separadas por comas)', optionsInput);
+  optionsLabel.classList.toggle('hidden', typeValue !== 'select');
+
+  const actions = document.createElement('div');
+  actions.className = 'proyectos-db-config-actions';
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'primary-btn';
+  saveBtn.textContent = prop ? 'Guardar' : 'Crear';
+  saveBtn.addEventListener('click', async () => {
+    const name = nameInput.value.trim();
+    if (!name) return;
+    const payload = {
+      name,
+      type: typeValue,
+      options: typeValue === 'select'
+        ? optionsInput.value.split(',').map((s) => s.trim()).filter(Boolean)
+        : undefined,
+    };
+    try {
+      if (prop) await api(`/api/proyectos-databases/props/${prop.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      else await api(`/api/proyectos-databases/${data.id}/props`, { method: 'POST', body: JSON.stringify(payload) });
+      const fresh = await api(`/api/proyectos-databases/${data.id}`);
+      proyectosDbCache.set(data.id, fresh);
+      popover.remove();
+      proyectosPropPopover = null;
+      refreshProyectosDbWidget(data.id);
+    } catch (err) {
+      console.error('No se pudo guardar la propiedad:', err);
+    }
+  });
+  actions.appendChild(saveBtn);
+
+  if (prop) {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'danger-btn';
+    deleteBtn.textContent = 'Borrar';
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm(`¿Borrar la propiedad "${prop.name}"? Se pierden sus valores en todas las filas.`)) return;
+      await api(`/api/proyectos-databases/props/${prop.id}`, { method: 'DELETE' });
+      const fresh = await api(`/api/proyectos-databases/${data.id}`);
+      proyectosDbCache.set(data.id, fresh);
+      popover.remove();
+      proyectosPropPopover = null;
+      refreshProyectosDbWidget(data.id);
+    });
+    actions.appendChild(deleteBtn);
+  }
+  popover.appendChild(actions);
+
+  positionFixedPopover(anchorBtn, popover, { width: 280 });
+
+  // Cerrar al clicar fuera (los popovers de esta familia se crean y
+  // destruyen cada vez, no se reutilizan).
+  setTimeout(() => {
+    const closeOnOutside = (e) => {
+      // Mismo caso que en el cierre del popover de configuracion: un
+      // click cuyo objetivo ya no esta en el documento (una opcion de
+      // select repintada en su propio manejador) no es un "clic fuera".
+      if (e.target instanceof Node && !document.contains(e.target)) return;
+      if (e.target.closest('.proyectos-prop-popover') || e.target.closest('.select-popover')) return;
+      popover.remove();
+      if (proyectosPropPopover === popover) proyectosPropPopover = null;
+      document.removeEventListener('click', closeOnOutside);
+    };
+    document.addEventListener('click', closeOnOutside);
+  }, 0);
+}
+
+// ---------------------------------------------------------------------
+// Side peek: una fila abierta como mini-pagina
+// ---------------------------------------------------------------------
+// Que fila esta abierta: { dbId, rowId } o null.
+let proyectosPeekOpen = null;
+let proyectosPeekSaveTimer = null;
+
+function closeProyectosPeek() {
+  flushProyectosPeekSave();
+  proyectosPeekOpen = null;
+  document.getElementById('proyectos-peek').classList.add('hidden');
+}
+
+// El titulo/cuerpo del peek se guardan con retraso, igual que la pagina.
+function queueProyectosPeekSave() {
+  if (proyectosPeekSaveTimer) clearTimeout(proyectosPeekSaveTimer);
+  proyectosPeekSaveTimer = setTimeout(() => flushProyectosPeekSave(), 600);
+}
+
+async function flushProyectosPeekSave() {
+  if (proyectosPeekSaveTimer) { clearTimeout(proyectosPeekSaveTimer); proyectosPeekSaveTimer = null; }
+  if (!proyectosPeekOpen) return;
+  const { dbId, rowId } = proyectosPeekOpen;
+  const title = document.getElementById('proyectos-peek-title').textContent.trim();
+  const body = document.getElementById('proyectos-peek-body').innerHTML;
+  try {
+    const updated = await api(`/api/proyectos-databases/rows/${rowId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ title, body }),
+    });
+    const data = proyectosDbCache.get(dbId);
+    const idx = data?.rows.findIndex((r) => r.id === rowId);
+    if (data && idx !== -1) data.rows[idx] = { ...data.rows[idx], title: updated.title, body: updated.body };
+    refreshProyectosDbWidget(dbId);
+  } catch (err) {
+    console.error('No se pudo guardar la fila:', err);
+  }
+}
+
+function openProyectosPeek(dbId, rowId) {
+  // Si habia otra fila abierta, guardar lo suyo primero.
+  flushProyectosPeekSave();
+
+  const data = proyectosDbCache.get(dbId);
+  const row = data?.rows.find((r) => r.id === rowId);
+  if (!row) return;
+  proyectosPeekOpen = { dbId, rowId };
+
+  document.getElementById('proyectos-peek-title').textContent = row.title || '';
+  document.getElementById('proyectos-peek-body').innerHTML = row.body || '';
+
+  // Las propiedades, cada una con su editor de tipo.
+  const propsEl = document.getElementById('proyectos-peek-props');
+  propsEl.innerHTML = '';
+  for (const prop of data.props) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'proyectos-peek-prop';
+    const label = document.createElement('span');
+    label.className = 'proyectos-peek-prop-name';
+    label.textContent = prop.name;
+    rowEl.appendChild(label);
+    rowEl.appendChild(buildProyectosDbCellEditor(data, row, prop));
+    propsEl.appendChild(rowEl);
+  }
+
+  document.getElementById('proyectos-peek').classList.remove('hidden');
+}
+
+document.getElementById('btn-proyectos-peek-close').addEventListener('click', () => {
+  const dbId = proyectosPeekOpen?.dbId;
+  closeProyectosPeek();
+  if (dbId) refreshProyectosDbWidget(dbId);
+});
+
+document.getElementById('btn-proyectos-peek-delete').addEventListener('click', async () => {
+  if (!proyectosPeekOpen) return;
+  const { dbId, rowId } = proyectosPeekOpen;
+  if (!confirm('¿Borrar esta fila?')) return;
+  // Nada pendiente que guardar de una fila que se borra.
+  if (proyectosPeekSaveTimer) { clearTimeout(proyectosPeekSaveTimer); proyectosPeekSaveTimer = null; }
+  proyectosPeekOpen = null;
+  await api(`/api/proyectos-databases/rows/${rowId}`, { method: 'DELETE' });
+  const data = proyectosDbCache.get(dbId);
+  if (data) data.rows = data.rows.filter((r) => r.id !== rowId);
+  document.getElementById('proyectos-peek').classList.add('hidden');
+  refreshProyectosDbWidget(dbId);
+});
+
+document.getElementById('proyectos-peek-title').addEventListener('input', queueProyectosPeekSave);
+document.getElementById('proyectos-peek-body').addEventListener('input', queueProyectosPeekSave);
+document.getElementById('proyectos-peek-title').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('proyectos-peek-body').focus(); }
+});
+
+// ---------------------------------------------------------------------
 // Arranque
 // ---------------------------------------------------------------------
 // Ejecuta un paso de arranque sin dejar que un fallo suyo aborte los
@@ -10044,6 +11924,7 @@ async function restoreCurrentScreen() {
   if (screen === 'lecturas') { openLecturasView(); return; }
   if (screen === 'finanzas') { await openFinanzasView(); return; }
   if (screen === 'viajes') { await openViajesView(); return; }
+  if (screen === 'proyectos') { await openProyectosView(); return; }
 }
 
 async function initStep(fn) {

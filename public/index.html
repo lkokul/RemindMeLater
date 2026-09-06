@@ -437,7 +437,84 @@
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></span>
           <span class="extensions-card-title">Viajes</span>
         </button>
+        <button type="button" id="btn-open-proyectos" class="extensions-card extensions-card-active">
+          <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg></span>
+          <span class="extensions-card-title">Proyectos</span>
+        </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Herramienta "Proyectos" (estilo Notion): paginas anidadas sin
+       limite con un editor de bloques (menu "/"). Layout de dos columnas
+       propio (NO el patron de pestañas de Gimnasio ni el de columnas de
+       Mi espacio): sidebar con el arbol de paginas a la izquierda y la
+       pagina abierta a la derecha, como el propio Notion. Ver la seccion
+       "Proyectos" en app.js. -->
+  <div id="proyectos-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2>Proyectos</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-proyectos" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
+        <button type="button" id="btn-proyectos-settings" class="icon-btn" aria-label="Configuración">☰</button>
+      </div>
+    </div>
+    <div class="proyectos-layout">
+      <aside class="proyectos-sidebar">
+        <div class="proyectos-sidebar-header">
+          <span>Páginas</span>
+          <button type="button" id="btn-proyectos-new-root" class="icon-btn" aria-label="Nueva página" title="Nueva página">+</button>
+        </div>
+        <!-- Buscador del arbol: filtra por titulo. Con texto escrito, el
+             arbol se sustituye por una lista plana de coincidencias. -->
+        <input type="text" id="proyectos-search" class="proyectos-search" placeholder="Buscar página…" />
+        <div id="proyectos-tree" class="proyectos-tree"></div>
+      </aside>
+      <section class="proyectos-page-area">
+        <!-- Sin pagina abierta: invitacion a elegir o crear. -->
+        <div id="proyectos-empty" class="proyectos-empty">
+          <p>Elige una página del panel de la izquierda, o crea una nueva.</p>
+          <button type="button" id="btn-proyectos-new-empty" class="primary-btn">+ Nueva página</button>
+        </div>
+        <!-- Pagina abierta: portada (opcional) + icono + titulo gigante
+             editable en el sitio + cuerpo. El titulo y el cuerpo son
+             contenteditable y se guardan solos (con retraso) al escribir,
+             sin boton de guardar -- como Notion. -->
+        <div id="proyectos-page" class="proyectos-page hidden">
+          <div id="proyectos-cover" class="proyectos-cover hidden"></div>
+          <div class="proyectos-page-inner">
+            <div id="proyectos-breadcrumb" class="proyectos-breadcrumb"></div>
+            <div class="proyectos-title-row">
+              <span id="proyectos-icon-slot"></span>
+              <h1 id="proyectos-page-title" class="proyectos-page-title" contenteditable="true" data-placeholder="Sin título"></h1>
+            </div>
+            <div class="proyectos-page-toolbar">
+              <button type="button" id="btn-proyectos-favorite" class="icon-btn" aria-label="Favorito" title="Favorito">☆</button>
+              <button type="button" id="btn-proyectos-cover" class="icon-btn" aria-label="Portada" title="Color de portada">▦</button>
+              <button type="button" id="btn-proyectos-subpage" class="secondary-btn" title="Crear una subpágina dentro de esta">+ Subpágina</button>
+              <div class="spacer"></div>
+              <button type="button" id="btn-proyectos-delete" class="danger-btn" title="Borrar esta página (sus subpáginas suben un nivel)">Borrar</button>
+            </div>
+            <div id="proyectos-page-body" class="proyectos-page-body" contenteditable="true" data-placeholder="Escribe algo, o pulsa “/” para insertar un bloque…"></div>
+          </div>
+        </div>
+      </section>
+      <!-- "Side peek": panel lateral que abre una FILA de una base de
+           datos como si fuera una mini-pagina (titulo + propiedades +
+           cuerpo libre), sin salir de la pagina donde vive la base --
+           calcado del comportamiento de Notion. -->
+      <aside id="proyectos-peek" class="proyectos-peek hidden">
+        <div class="proyectos-peek-header">
+          <button type="button" id="btn-proyectos-peek-close" class="icon-btn" aria-label="Cerrar">✕</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-proyectos-peek-delete" class="danger-btn">Borrar fila</button>
+        </div>
+        <div class="proyectos-peek-scroll">
+          <h2 id="proyectos-peek-title" class="proyectos-peek-title" contenteditable="true" data-placeholder="Sin título"></h2>
+          <div id="proyectos-peek-props" class="proyectos-peek-props"></div>
+          <div id="proyectos-peek-body" class="proyectos-peek-body" contenteditable="true" data-placeholder="Notas de esta fila…"></div>
+        </div>
+      </aside>
     </div>
   </div>
 

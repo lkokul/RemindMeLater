@@ -43,6 +43,7 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const FILE_ROUTES = [
   { prefix: '/api/notes/images/', dir: () => path.join(require('../core/dataDir'), 'note-images') },
   { prefix: '/api/viajes-entries/attachments/', dir: () => path.join(require('../core/dataDir'), 'viajes-photos') },
+  { prefix: '/api/proyectos/images/', dir: () => path.join(require('../core/dataDir'), 'proyectos-images') },
 ];
 
 const MIME_TYPES = {

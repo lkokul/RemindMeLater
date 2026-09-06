@@ -5,8 +5,8 @@ escritorio** (Electron + SQLite) para Windows. Los datos viven en tu
 propio ordenador, nunca en una nube de terceros, y la app no tiene
 servidor ni abre ningun puerto: la ventana y la base de datos son el
 mismo programa y hablan entre ellas por dentro. Ademas del calendario,
-hay un hub de "Herramientas" (Gimnasio, Lecturas, Finanzas y Viajes — ver mas
-abajo).
+hay un hub de "Herramientas" (Gimnasio, Lecturas, Finanzas, Viajes y
+Proyectos — ver mas abajo).
 
 ## Arrancar
 
@@ -236,6 +236,22 @@ arriba:
   concreto (no solo el actual) y otra con el histórico de ahorro en un
   rango de fechas. Una gráfica compara ingresos y gastos mes a mes de los
   últimos 6 meses.
+- **Proyectos**: páginas al estilo Notion. Cada página tiene un icono
+  emoji, un color de portada opcional, un título grande y un cuerpo de
+  **bloques**: escribe `/` y aparece un menú con buscador para insertar
+  títulos, listas, listas de tareas con casilla, desplegables (toggles),
+  callouts, citas, divisores, código, tablas, imágenes (también pegando
+  con Ctrl+V), subpáginas y bases de datos. También valen atajos tipo
+  markdown (`#` + espacio = título, `-` = lista, `[]` = tarea, `>` =
+  cita, `---` = divisor). Las páginas se anidan sin límite en un árbol
+  con buscador (sidebar propio), con migas de pan arriba y favoritos con
+  estrella; borrar una página nunca borra sus subpáginas (suben un
+  nivel). Las **bases de datos** embebidas son colecciones de filas con
+  propiedades tipadas (texto, número, select, fecha, casilla) que se ven
+  como tabla editable, tablero kanban (arrastrando tarjetas entre
+  columnas) o lista, con orden, filtro y agrupación guardados en la
+  propia base; cada fila se abre en un panel lateral ("side peek") con
+  sus propiedades y notas propias, como una mini-página.
 ## Como esta montada por dentro
 
 No hay servidor, ni puerto, ni HTTP. La app son tres piezas:

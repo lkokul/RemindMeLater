@@ -291,8 +291,68 @@ ahora se llama `device`.
     `fetch`), cada país un `<g id="XX">`. Un viaje puede tocar VARIOS
     países (por eso `countries` es siempre un array). Las fotos viven en
     `DATA_DIR/viajes-photos/` y los tickets pueden enlazarse a Finanzas.
+  - **Proyectos** (rama `proyectos`, construida en una ronda de 4 fases;
+    inspirada en Notion tras explorarlo en vivo con la sesión de Koku,
+    que eligió los 4 pilares: editor de bloques con "/", páginas
+    anidadas, bases de datos con vistas, y la estética):
+    `proyectos_pages` (árbol con `parent_id` + detección de ciclos como
+    `note_folders`; borrar una página SUBE sus hijas un nivel, y toda
+    página puede tener cuerpo Y subpáginas a la vez — no hay distinción
+    carpeta/nota, esa es la gracia) + `proyectos_databases`/
+    `_db_props`/`_db_rows`/`_db_values` (bases embebidas: propiedades
+    tipadas text/number/select/date/checkbox, valores siempre como
+    texto, config de vista — tabla/tablero/lista, orden, filtro,
+    agrupación — guardada EN la base porque es contenido, no preferencia
+    de dispositivo). Sistema COMPLETAMENTE separado de las Notas de Mi
+    espacio (decidido con Koku; no comparten tablas ni editor).
+    - El cuerpo es HTML saneado con lista blanca
+      (`sanitizePageBody` en `core/routes/proyectosPages.js`), como las
+      notas pero con etiquetas extra: `blockquote`, `details/summary`
+      (toggle, conserva `open`), `hr`, `a` (solo http/https), y divs
+      con `data-callout`/`data-icon`, `data-todo`/`data-done` y
+      `data-proyectos-db` (marcador de base embebida, solo dígitos).
+    - El editor de bloques vive en `app.js` (sección "Proyectos — Fase
+      2"): menú "/" con buscador (`PROYECTOS_BLOCK_TYPES`), atajos
+      markdown (`#`/`-`/`[]`/`>`/`---` + espacio o Intro), Intro
+      "inteligente" (tarea → otra tarea; especial vacío → párrafo;
+      final de título/callout/cita → párrafo). Un bloque puede vivir
+      como hijo directo del cuerpo O dentro de un `<details>` — ver
+      `getProyectosCurrentBlock()`.
+    - Los widgets de base de datos se montan al abrir la página
+      (`hydrateProyectosDbBlocks`) dentro del marcador, como isla
+      `contentEditable=false`; al guardar, `getProyectosBodyHtml()`
+      vacía los widgets y deja solo el marcador. Los listeners del
+      editor ignoran todo lo que pase dentro de un widget
+      (`e.target.closest('[data-proyectos-db]')`).
+    - Imágenes en `DATA_DIR/proyectos-images/`
+      (`core/routes/proyectosImages.js` + ruta en
+      `electron/protocol.js`), separadas de las de notas a propósito.
+    - Borrar una página borra en cascada (a mano) sus bases embebidas —
+      con un require diferido dentro del handler para no crear un
+      require circular con `proyectosDatabases.js`, que importa
+      `sanitizePageBody` de páginas.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
+
+- **Clic en una opción de `createSelectField` "cierra" popovers que no
+  debía (ronda de Proyectos)**: elegir una opción repinta las opciones
+  DENTRO de su propio manejador de click, así que cuando el click llega
+  burbujeando a un listener de `document` el botón pulsado ya no está en
+  el documento — y un nodo suelto no tiene ancestros, con lo que
+  cualquier comprobación `e.target.closest('.mi-popover')` da null y
+  parece un "clic fuera". Regla: en un listener de cierre-por-clic-fuera,
+  ignora los clicks cuyo target ya no esté en `document`
+  (`!document.contains(e.target)`). Aplicado dos veces en la sección de
+  Proyectos de `app.js`.
+- **Las pruebas con la app real escriben en los datos REALES de Koku si
+  no apuntas a otra carpeta**: `electron/main.js` fija
+  `REMINDMELATER_DATA_DIR` a la carpeta de usuario
+  (`%APPDATA%/remindmelater/data`), NO a `data/` del proyecto (esa es
+  solo para `node` a pelo). Pasó de verdad: las páginas de prueba de
+  Proyectos acabaron en la base real y hubo que limpiarlas. Desde esa
+  ronda `main.js` respeta la variable si ya viene puesta del entorno —
+  cualquier prueba con Electron debe lanzarse con
+  `REMINDMELATER_DATA_DIR` apuntando a una carpeta desechable.
 
 - **Nombres de cabecera y el paso a IPC**: con HTTP, Node pasaba los
   nombres de cabecera a minúsculas por su cuenta, y las rutas se
@@ -368,7 +428,17 @@ de la página. Dos avisos aprendidos a base de colgarse:
 
 ## Estado actual
 
-Rama de trabajo: **`escritorio`**. La rama
+Rama de trabajo de esta ronda: **`proyectos`** (creada desde
+`escritorio` para la herramienta Proyectos, ver su bloque en
+Arquitectura). Las 4 fases están hechas y probadas arrancando la app
+real con Playwright (`playwright-core` instalado con `--no-save`, no es
+dependencia del proyecto): árbol/breadcrumb/guardado automático, todos
+los bloques del menú "/", las 3 vistas de base de datos con side peek, y
+la persistencia tras cerrar y reabrir. En Windows no hace falta
+`xvfb-run` (hay pantalla de verdad); el resto de avisos de la sección de
+abajo siguen valiendo.
+
+Rama base: **`escritorio`**. La rama
 `claude/desktop-app-electron-web-hdntch` ya no existe en el remoto: se
 fusionó en `main`, así que **`main` es ahora el "antes"** — el último
 estado con servidor, app móvil y Capacitor intactos. Recuperarlo es un

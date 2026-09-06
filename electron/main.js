@@ -21,7 +21,12 @@ const { registerScheme, registerHandler, ORIGIN } = require('./protocol');
 // propia carpeta de instalacion — esa carpeta se borra y se sustituye
 // entera cada vez que se instala una version nueva, asi que guardar ahi
 // los datos de verdad los perderia en cada actualizacion.
-process.env.REMINDMELATER_DATA_DIR = path.join(app.getPath('userData'), 'data');
+//
+// Si la variable YA viene puesta desde fuera, se respeta: permite
+// arrancar la app contra una carpeta de datos aparte (para probar cosas
+// sin tocar los datos de verdad) sin cambiar nada del codigo.
+process.env.REMINDMELATER_DATA_DIR = process.env.REMINDMELATER_DATA_DIR
+  || path.join(app.getPath('userData'), 'data');
 
 // El registro del esquema app:// tiene que ocurrir antes de que Electron
 // termine de arrancar (whenReady), no despues — por eso se llama aqui

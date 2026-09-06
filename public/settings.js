@@ -563,6 +563,7 @@ document.getElementById('btn-gym-settings').addEventListener('click', openSettin
 document.getElementById('btn-lecturas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-proyectos-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-close-settings').addEventListener('click', () => {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
