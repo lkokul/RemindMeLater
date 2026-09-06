@@ -6096,8 +6096,9 @@ async function openGroupsView() {
   document.getElementById('groups-view').classList.remove('hidden');
   setCurrentScreen('groups');
   showGroupsList();
-  await loadGroups();
-  renderGroupsViewList();
+  // refreshGroupsTab (settings.js) recarga los grupos y pinta LAS DOS
+  // listas de esta pantalla: las tarjetas de navegacion y la de gestion.
+  await refreshGroupsTab();
 }
 
 function closeGroupsView() {
@@ -6246,13 +6247,6 @@ document.getElementById('btn-groups-back').addEventListener('click', () => {
   showGroupsList();
   renderGroupsViewList();
 });
-document.getElementById('btn-groups-manage').addEventListener('click', () => {
-  // El alta/edicion de grupos vive en Configuracion, no duplicada aqui.
-  openSettingsModal();
-  showSettingsScreen('groups');
-  refreshGroupsTab();
-});
-
 // Los dos accesos rapidos de la pantalla del calendario.
 document.getElementById('btn-calendar-quick-today').addEventListener('click', () => {
   enterMobileDayView(new Date());

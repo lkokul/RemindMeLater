@@ -263,7 +263,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'mobile', 'store'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'store'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -279,7 +279,6 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     if (tab === 'profile') refreshProfileTab();
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();
-    else if (tab === 'groups') refreshGroupsTab();
     else if (tab === 'mobile') refreshMobileTab();
   });
 });
@@ -1263,9 +1262,13 @@ const groupColorField = createColorField({
 document.getElementById('group-color-field').appendChild(groupColorField.element);
 suppressGroupCompletedTouch = false;
 
+// Los grupos se gestionan dentro de su propio apartado (Calendario ->
+// Grupos), ya no en Configuracion: esto refresca TANTO la lista de
+// gestion como las tarjetas de navegacion de esa misma pantalla.
 async function refreshGroupsTab() {
   await loadGroups();
   renderGroupsList();
+  if (typeof renderGroupsViewList === 'function') renderGroupsViewList();
 }
 
 // Cambia el color de "completada" SIN que cuente como que la persona lo ha

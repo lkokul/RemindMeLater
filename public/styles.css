@@ -3103,7 +3103,15 @@ body.modal-open-lock .calendar-quick-actions { display: none; }
   flex-direction: column;
   gap: 0.6rem;
 }
-.groups-manage-btn { width: 100%; margin-bottom: 0.6rem; }
+.groups-manage-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.6rem;
+}
+.groups-manage-block > summary { cursor: pointer; font-size: 0.95rem; }
+.groups-manage-block > summary + * { margin-top: 0.6rem; }
 .groups-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .group-card {
   display: flex;

@@ -284,7 +284,31 @@
       <div class="groups-body">
         <!-- Nivel 1: los grupos -->
         <div id="groups-list-panel">
-          <button type="button" id="btn-groups-manage" class="secondary-btn groups-manage-btn">Gestionar grupos</button>
+          <!-- Los grupos se crean y se editan AQUI, dentro de su propio
+               apartado, igual que cada herramienta gestiona lo suyo por
+               dentro -- ya no hay una pestana de Grupos en Configuracion. -->
+          <details class="groups-manage-block">
+            <summary>Gestionar grupos</summary>
+            <p class="hint">Un color y, si quieres, un simbolo o emoji al lado del nombre para diferenciarlos de un vistazo.</p>
+            <form id="group-form" class="group-form">
+              <input type="hidden" id="group-id" />
+              <div class="group-form-row">
+                <div id="group-icon-field"></div>
+                <input type="text" id="group-name" placeholder="Nombre del grupo (ej. Gimnasio)" required />
+                <div id="group-color-field"></div>
+              </div>
+              <div class="group-form-row group-form-row-completed">
+                <span class="hint">Color de las tareas de este grupo al completarse</span>
+                <div id="group-completed-color-field"></div>
+              </div>
+              <div class="group-form-actions">
+                <button type="button" id="btn-cancel-group" class="secondary-btn hidden">Cancelar</button>
+                <button type="submit" class="primary-btn">Guardar grupo</button>
+              </div>
+            </form>
+
+            <div id="groups-list" class="groups-list"></div>
+          </details>
           <div id="groups-view-list" class="groups-list"></div>
         </div>
 
@@ -1726,10 +1750,6 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.7-.9 1.4-1.8-.3-.9.3-1.7 1.2-1.7H17a4 4 0 0 0 4-4c0-5-4-10.5-9-10.5Z"/><circle cx="8" cy="11" r="1.1"/><circle cx="12" cy="8" r="1.1"/><circle cx="16" cy="11" r="1.1"/></svg>
           <span>Estilo</span>
         </button>
-        <button type="button" class="settings-menu-item" data-tab="groups">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M7 12h10"/></svg>
-          <span>Grupos</span>
-        </button>
         <button type="button" class="settings-menu-item" data-tab="mobile">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
           <span>Este dispositivo</span>
@@ -1848,31 +1868,6 @@
       </div>
 
       <!-- --- Grupos --- -->
-      <div id="settings-tab-groups" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
-        <h3>Grupos</h3>
-        <p class="hint">Un color y, si quieres, un simbolo o emoji al lado del nombre para diferenciarlos de un vistazo.</p>
-
-        <form id="group-form" class="group-form">
-          <input type="hidden" id="group-id" />
-          <div class="group-form-row">
-            <div id="group-icon-field"></div>
-            <input type="text" id="group-name" placeholder="Nombre del grupo (ej. Gimnasio)" required />
-            <div id="group-color-field"></div>
-          </div>
-          <div class="group-form-row group-form-row-completed">
-            <span class="hint">Color de las tareas de este grupo al completarse</span>
-            <div id="group-completed-color-field"></div>
-          </div>
-          <div class="group-form-actions">
-            <button type="button" id="btn-cancel-group" class="secondary-btn hidden">Cancelar</button>
-            <button type="submit" class="primary-btn">Guardar grupo</button>
-          </div>
-        </form>
-
-        <div id="groups-list" class="groups-list"></div>
-      </div>
-
       <!-- --- Este dispositivo (ajustes locales, no compartidos) --- -->
       <div id="settings-tab-mobile" class="settings-tab-panel hidden">
         <button type="button" class="settings-back-btn" data-back>← Volver</button>
