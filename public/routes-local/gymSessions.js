@@ -296,9 +296,9 @@
     if (!last) return res.json({ date: null, sets: [] });
 
     const sets = db
-      .prepare('SELECT set_number, reps, weight_kg, rpe FROM gym_sets WHERE session_id = ? AND exercise_id = ? ORDER BY id ASC')
+      .prepare('SELECT set_number, reps, weight_kg, rpe, rest_seconds FROM gym_sets WHERE session_id = ? AND exercise_id = ? ORDER BY id ASC')
       .all(last.id, req.params.exerciseId)
-      .map((r) => ({ setNumber: r.set_number, reps: r.reps, weightKg: r.weight_kg, rpe: r.rpe }));
+      .map((r) => ({ setNumber: r.set_number, reps: r.reps, weightKg: r.weight_kg, rpe: r.rpe, restSeconds: r.rest_seconds }));
     res.json({ date: last.date, sets });
   });
 

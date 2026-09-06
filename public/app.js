@@ -7229,6 +7229,13 @@ function closeGymLiveView() {
 
 // Un tick por segundo mientras el overlay esta abierto: reloj de sesion
 // y cuenta atras del descanso, ambos derivados de timestamps.
+// "(2)" = 2 minutos justos de descanso, "(1:30)" = minuto y medio --
+// formato corto para la columna Anterior (peticion de Koku).
+function gymFormatRestShort(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return s === 0 ? `${m}` : `${m}:${String(s).padStart(2, '0')}`;
+}
 function gymLiveFormatClock(totalSeconds) {
   const m = Math.floor(totalSeconds / 60);
   const s = totalSeconds % 60;
@@ -7316,7 +7323,7 @@ function renderGymLiveExercises() {
     const setsHtml = ex.sets.map((set, setIndex) => {
       const prevSet = prev && prev.sets[setIndex];
       const prevLabel = prevSet
-        ? `${prevSet.weightKg !== null ? gymWeightKgToDisplay(prevSet.weightKg) + unit : '—'}×${prevSet.reps ?? '—'}`
+        ? `${prevSet.restSeconds ? `(${gymFormatRestShort(prevSet.restSeconds)})` : ''}${prevSet.weightKg !== null ? gymWeightKgToDisplay(prevSet.weightKg) : '—'}×${prevSet.reps ?? '—'}`
         : '—';
       return `
         <div class="gym-live-set-row ${set.done ? 'done' : ''}">
