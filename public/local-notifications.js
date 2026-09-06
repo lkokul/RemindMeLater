@@ -48,6 +48,23 @@ function localNotificationsAvailable() {
   return getLocalNotificationsPlugin() !== null;
 }
 
+// Como debe avisar una notificacion, segun el ajuste "Como avisan las
+// notificaciones" (Configuracion > Este dispositivo). Devuelve el valor
+// para el campo `sound`, o null si no hay que ponerlo:
+// - 'full'    -> "default": el sonido del sistema; la vibracion la
+//                decide el telefono (iOS no deja quitarla por app).
+// - 'vibrate' -> "silencio.wav": un archivo de medio segundo de silencio
+//                que va DENTRO de la app. iOS lo "reproduce" como sonido
+//                (no se oye nada) y justo por eso dispara la vibracion.
+//                Es el unico truco que iOS permite para vibrar sin sonar.
+// - 'silent'  -> null: sin campo sound, iOS entrega el aviso solo visual.
+function notificationSoundValue() {
+  const estilo = localStorage.getItem('notifAlertStyle') || 'full';
+  if (estilo === 'vibrate') return 'silencio.wav';
+  if (estilo === 'silent') return null;
+  return 'default';
+}
+
 // Pide permiso al sistema. Se llama desde el interruptor de
 // Configuracion > Este dispositivo (nunca sola al arrancar: iOS y
 // Android exigen que el permiso se pida a raiz de algo que haya hecho
@@ -114,20 +131,23 @@ async function syncScheduledReminders() {
 
     const proximos = await api('/api/reminders/upcoming');
     const ahora = Date.now();
+    const sonido = notificationSoundValue();
     const aProgramar = proximos
       .filter((r) => new Date(r.remindAt).getTime() > ahora)
-      .map((r) => ({
-        // El id del evento vale como id del aviso: es un entero unico y
-        // estable, asi que reprogramar el mismo evento nunca duplica.
-        id: r.eventId,
-        title: 'RemindMeLater',
-        body: r.title,
-        schedule: { at: new Date(r.remindAt) },
+      .map((r) => {
+        const aviso = {
+          // El id del evento vale como id del aviso: es un entero unico y
+          // estable, asi que reprogramar el mismo evento nunca duplica.
+          id: r.eventId,
+          title: 'RemindMeLater',
+          body: r.title,
+          schedule: { at: new Date(r.remindAt) },
+        };
         // Sin `sound`, iOS entrega la notificacion en silencio (ni suena
-        // ni vibra). "default" no existe como archivo, y por eso iOS cae
-        // al sonido del sistema de siempre.
-        sound: 'default',
-      }));
+        // ni vibra) -- ver notificationSoundValue() para los tres modos.
+        if (sonido) aviso.sound = sonido;
+        return aviso;
+      });
     if (aProgramar.length > 0) await plugin.schedule({ notifications: aProgramar });
   } catch (err) {
     // Que falle programar un aviso nunca debe romper lo que el usuario

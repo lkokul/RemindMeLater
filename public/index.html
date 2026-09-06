@@ -669,15 +669,11 @@
   <div id="gym-live-view" class="my-space-view hidden">
     <div class="my-space-view-header">
       <h2 id="gym-live-title">Entrenamiento</h2>
+      <!-- Solo el nombre del dia y el reloj: los botones de accion viven
+           en el menu flotante de abajo a la derecha (peticion de Koku:
+           con nombres largos aqui arriba no cabia nada). -->
       <div class="my-space-view-header-actions">
         <span id="gym-live-clock" class="gym-live-clock">0:00</span>
-        <!-- Ocultar (no descartar): cierra el overlay dejando el entreno en
-             marcha, para poder moverse por las pestañas del Gimnasio. Se
-             vuelve con "Reanudar", el aviso de la tarjeta o la barra de
-             descanso de arriba. -->
-        <button type="button" id="btn-gym-live-minimize" class="icon-btn" aria-label="Ocultar entrenamiento (sigue en marcha)" title="Ocultar (el entrenamiento sigue en marcha)">▾</button>
-        <button type="button" id="btn-gym-live-discard" class="secondary-btn">Descartar</button>
-        <button type="button" id="btn-gym-live-finish" class="primary-btn">✓ Terminar</button>
       </div>
     </div>
     <!-- La barra de descanso vive AQUI arriba (donde antes estaban los
@@ -702,9 +698,27 @@
       <div id="gym-live-exercises" class="gym-live-exercises"></div>
       <button type="button" id="btn-gym-live-add-exercise" class="secondary-btn gym-tab-action">+ Añadir ejercicio</button>
     </div>
-    <!-- Boton de ayuda flotante, abajo a la derecha (peticion de Koku):
-         abre el modal con todas las explicaciones, incluida la del RPE. -->
-    <button type="button" id="btn-gym-live-help" class="gym-live-help-btn" aria-label="Cómo funciona el entrenamiento">?</button>
+    <!-- Menu flotante de acciones (abajo a la derecha): el boton central
+         despliega en abanico las 4 acciones del entreno -- dudas,
+         pausar/ocultar, terminar y descartar (idea de Koku, "que salgan
+         alrededor del boton, no listados"). Los ids son los mismos que
+         tenian los botones de la cabecera, asi que sus manejadores de
+         app.js no cambian. -->
+    <div id="gym-live-fab" class="gym-live-fab">
+      <button type="button" id="btn-gym-live-help" class="gym-live-fab-action gym-fab-pos-1" aria-label="Cómo funciona el entrenamiento" title="Dudas">?</button>
+      <button type="button" id="btn-gym-live-minimize" class="gym-live-fab-action gym-fab-pos-2" aria-label="Pausar (ocultar; el entrenamiento sigue en marcha)" title="Pausar">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-finish" class="gym-live-fab-action gym-live-fab-primary gym-fab-pos-3" aria-label="Terminar y guardar el entrenamiento" title="Terminar">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4.5 12.5 9.5 17.5 19.5 6.5"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-discard" class="gym-live-fab-action gym-live-fab-danger gym-fab-pos-4" aria-label="Descartar el entrenamiento" title="Descartar">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3.5 6.5 20.5 6.5"/><path d="M8.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h4.4a1.3 1.3 0 0 1 1.3 1.3v1.7"/><path d="M5.5 6.5l1 13a1.3 1.3 0 0 0 1.3 1.2h8.4a1.3 1.3 0 0 0 1.3-1.2l1-13"/><line x1="10" y1="10.5" x2="10" y2="16.5"/><line x1="14" y1="10.5" x2="14" y2="16.5"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-menu" class="gym-live-fab-main" aria-label="Acciones del entrenamiento" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+      </button>
+    </div>
   </div>
 
   <!-- Ayuda del modo entrenamiento: se abre SOLA la primera vez que se
@@ -723,10 +737,10 @@
         <p>Al marcar una serie como hecha, el descanso apuntado en tu plan empieza solo y aparece como barra arriba. Con +30s lo alargas, con ✕ lo saltas, y si desmarcas la casilla (te equivocaste de serie) se cancela. Puedes tocar el tiempo para cambiar entre formato m:ss y segundos.</p>
         <h4>El RPE</h4>
         <p>Es una medida del esfuerzo, del 1 al 10: 10 es que no podrías haber hecho ni una repetición más, 9 es que te quedaba una, 8 que te quedaban dos... Es opcional, pero apuntarlo ayuda a saber si un peso se te está quedando corto. Si una serie te sale a RPE 7 o menos, probablemente toca subir peso.</p>
-        <h4>Moverte por la app sin perder el entreno</h4>
-        <p>Con el botón ▾ de arriba escondes esta pantalla y el entrenamiento sigue en marcha: puedes mirar otras pestañas del Gimnasio o cualquier otra parte de la app. Para volver, toca Reanudar en la pestaña Entrenar, o la barra de descanso que se queda arriba del todo mientras descansas.</p>
+        <h4>El menú de abajo a la derecha</h4>
+        <p>El botón flotante despliega las acciones del entrenamiento: esta ayuda, pausar, terminar y descartar. Pausar esconde la pantalla con el entrenamiento en marcha: puedes mirar otras pestañas del Gimnasio o cualquier otra parte de la app. Para volver, toca Reanudar en la pestaña Entrenar, o la barra de descanso que se queda arriba del todo mientras descansas.</p>
         <h4>Si se acaba el descanso y no estás mirando</h4>
-        <p>La app puede avisarte con una notificación del sistema (con su sonido y vibración) justo cuando el descanso termina, aunque tengas el móvil bloqueado. Se activa en Configuración, en el apartado Este dispositivo.</p>
+        <p>Mientras descansas, la cuenta atrás aparece en vivo en la pantalla de bloqueo (y en la isla dinámica, en los iPhone que la tienen). Además, la app puede avisarte con una notificación justo cuando el descanso termina. Las dos cosas se configuran en Configuración, en el apartado Este dispositivo, donde también eliges si los avisos suenan, solo vibran o van en silencio.</p>
       </div>
       <label class="app-confirm-checkbox-row gym-help-dont-show-row">
         <input type="checkbox" id="gym-help-dont-show" class="styled-checkbox" />
@@ -2213,7 +2227,11 @@
           <input type="checkbox" id="setting-gym-rest-notify" />
           Aviso al terminar el descanso (Gimnasio)
         </label>
-        <p class="hint">Durante un entrenamiento, cuando se acabe el descanso entre series el telefono lanza una notificacion con su sonido y vibracion, aunque la pantalla este bloqueada. Asi no hace falta estar mirando el movil. Usa el mismo permiso de notificaciones de arriba.</p>
+        <p class="hint">Durante un entrenamiento, cuando se acabe el descanso entre series el telefono lanza una notificacion, aunque la pantalla este bloqueada. Asi no hace falta estar mirando el movil. Usa el mismo permiso de notificaciones de arriba.</p>
+
+        <h4>Cómo avisan las notificaciones</h4>
+        <p class="hint">Vale para todos los avisos de la app (recordatorios y fin de descanso). No hay opcion de "solo sonido" porque iOS no la permite: cuando un aviso suena, vibrar o no lo decide el ajuste del telefono (Ajustes > Sonidos y vibraciones).</p>
+        <div id="notif-alert-style-options" class="view-mode-options"></div>
 
         <h4>Tareas completadas</h4>
         <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>

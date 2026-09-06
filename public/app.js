@@ -7983,9 +7983,11 @@ function gymLiveStopTicker() {
   if (gymLiveTicker) { clearInterval(gymLiveTicker); gymLiveTicker = null; }
   document.getElementById('gym-global-rest').classList.add('hidden');
   document.body.classList.remove('gym-rest-push');
-  // Si quedaba un aviso de descanso programado, ya no tiene sentido:
-  // el entreno se ha terminado o descartado. Aqui cubre ambos caminos.
+  // Si quedaba un aviso de descanso programado (o su tarjeta en la
+  // pantalla de bloqueo), ya no tienen sentido: el entreno se ha
+  // terminado o descartado. Aqui cubre ambos caminos.
   gymCancelRestNotification();
+  gymEndRestLiveActivity();
 }
 
 // Un tick por segundo mientras el overlay esta abierto: reloj de sesion
@@ -8055,7 +8057,14 @@ function gymLiveTick() {
     document.getElementById('gym-live-rest-fill-extra').style.width = `${(extraRemaining / planned) * 100}%`;
     bar.classList.remove('hidden');
   } else {
-    if (gymLiveSession.restUntil) { gymLiveSession.restUntil = null; gymLiveStore(); }
+    if (gymLiveSession.restUntil) {
+      gymLiveSession.restUntil = null;
+      gymLiveStore();
+      // El descanso llego a cero con la app despierta: la tarjeta de la
+      // pantalla de bloqueo ya no pinta nada. (Si la app estaba
+      // congelada, se quita aqui mismo en cuanto vuelve a ejecutarse.)
+      gymEndRestLiveActivity();
+    }
     bar.classList.add('hidden');
   }
 }
@@ -8068,6 +8077,9 @@ document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () =
     gymLiveTick();
     // El aviso programado apuntaba al final antiguo: se reprograma.
     gymScheduleRestNotification();
+    // Y la tarjeta de la pantalla de bloqueo pasa a contar hasta el
+    // nuevo final.
+    gymUpdateRestLiveActivity();
   }
 });
 // El tiempo restante se puede ver como m:ss o como segundos a secas
@@ -8079,7 +8091,13 @@ document.getElementById('gym-live-rest-remaining').addEventListener('click', () 
   gymLiveTick();
 });
 document.getElementById('btn-gym-live-rest-close').addEventListener('click', () => {
-  if (gymLiveSession) { gymLiveSession.restUntil = null; gymLiveStore(); gymLiveTick(); gymCancelRestNotification(); }
+  if (gymLiveSession) {
+    gymLiveSession.restUntil = null;
+    gymLiveStore();
+    gymLiveTick();
+    gymCancelRestNotification();
+    gymEndRestLiveActivity();
+  }
 });
 
 // --- Aviso al terminar el descanso -------------------------------------
@@ -8110,18 +8128,17 @@ async function gymScheduleRestNotification() {
     // Cancelar antes de programar: si habia un aviso del descanso
     // anterior aun pendiente, no debe sonar ademas del nuevo.
     await plugin.cancel({ notifications: [{ id: GYM_REST_NOTIFICATION_ID }] });
-    await plugin.schedule({
-      notifications: [{
-        id: GYM_REST_NOTIFICATION_ID,
-        title: 'Descanso terminado',
-        body: 'Siguiente serie.',
-        schedule: { at: new Date(gymLiveSession.restUntil) },
-        // Sin `sound`, iOS entrega la notificacion EN SILENCIO: ni suena
-        // ni vibra (la vibracion va ligada al sonido). "default" no es un
-        // archivo real, y justo por eso iOS cae al sonido del sistema.
-        sound: 'default',
-      }],
-    });
+    const aviso = {
+      id: GYM_REST_NOTIFICATION_ID,
+      title: 'Descanso terminado',
+      body: 'Siguiente serie.',
+      schedule: { at: new Date(gymLiveSession.restUntil) },
+    };
+    // Sonido/vibracion/silencio segun el ajuste del dispositivo -- ver
+    // notificationSoundValue() en local-notifications.js.
+    const sonido = notificationSoundValue();
+    if (sonido) aviso.sound = sonido;
+    await plugin.schedule({ notifications: [aviso] });
   } catch (err) {
     console.error('No se pudo programar el aviso de descanso:', err);
   }
@@ -8135,6 +8152,68 @@ async function gymCancelRestNotification() {
     await plugin.cancel({ notifications: [{ id: GYM_REST_NOTIFICATION_ID }] });
   } catch (err) {
     console.error('No se pudo cancelar el aviso de descanso:', err);
+  }
+}
+
+// --- Live Activity del descanso (pantalla de bloqueo) ------------------
+// La cuenta atras EN VIVO en la pantalla de bloqueo y la isla dinamica
+// (peticion de Koku). Habla con el plugin nativo LiveActivityPlugin
+// (ios/App/App/LiveActivityPlugin.swift); el dibujo lo hace la extension
+// DescansoWidget. La gracia: la app solo manda las FECHAS de inicio y
+// fin -- la cuenta atras y la barra las mueve iOS solo, aunque la app
+// este congelada y el movil bloqueado. Requiere iOS 16.2; en moviles
+// anteriores (o en navegador) estas funciones no hacen nada.
+let gymLiveActivityPlugin = null;
+function getGymLiveActivityPlugin() {
+  if (gymLiveActivityPlugin) return gymLiveActivityPlugin;
+  const cap = window.Capacitor;
+  if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null;
+  if (window.capacitorExports && typeof window.capacitorExports.registerPlugin === 'function') {
+    gymLiveActivityPlugin = window.capacitorExports.registerPlugin('LiveActivity');
+  }
+  return gymLiveActivityPlugin;
+}
+
+// Fechas que necesita la tarjeta, derivadas del estado del descanso.
+function gymRestActivityParams() {
+  const totalSeconds = (gymLiveSession.restBaseSeconds || 0) + (gymLiveSession.restExtraSeconds || 0);
+  return {
+    startAt: totalSeconds > 0 ? gymLiveSession.restUntil - totalSeconds * 1000 : Date.now(),
+    endAt: gymLiveSession.restUntil,
+    dayName: gymLiveSession.routineName || 'Sesión libre',
+  };
+}
+
+async function gymStartRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    await plugin.startRest(gymRestActivityParams());
+  } catch (err) {
+    console.error('No se pudo iniciar la Live Activity del descanso:', err);
+  }
+}
+
+async function gymUpdateRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    const res = await plugin.updateRest(gymRestActivityParams());
+    // Si iOS ya habia soltado la tarjeta (p. ej. la app se relanzo),
+    // updated viene en false: se crea una nueva en su lugar.
+    if (!res || !res.updated) await plugin.startRest(gymRestActivityParams());
+  } catch (err) {
+    console.error('No se pudo actualizar la Live Activity del descanso:', err);
+  }
+}
+
+async function gymEndRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.endRest();
+  } catch (err) {
+    console.error('No se pudo cerrar la Live Activity del descanso:', err);
   }
 }
 
@@ -8209,9 +8288,11 @@ function renderGymLiveExercises() {
           gymLiveSession.restBaseSeconds = seconds;
           gymLiveSession.restExtraSeconds = 0;
           gymScheduleRestNotification();
+          gymStartRestLiveActivity();
         } else {
           gymLiveSession.restUntil = null;
           gymCancelRestNotification();
+          gymEndRestLiveActivity();
         }
         gymLiveStore();
         gymLiveTick();
@@ -8287,10 +8368,34 @@ function closeGymHelpModal() {
 document.getElementById('btn-gym-live-help').addEventListener('click', openGymHelpModal);
 document.getElementById('btn-close-gym-help').addEventListener('click', closeGymHelpModal);
 
-// Ocultar el entrenamiento sin descartarlo: vuelve al Gimnasio con sus
-// pestanas utilizables (peticion de Koku: "poder moverme por las
+// Pausar/ocultar el entrenamiento sin descartarlo: vuelve al Gimnasio
+// con sus pestanas utilizables (peticion de Koku: "poder moverme por las
 // pestanas de gimnasio" en mitad de un entreno). El ticker sigue vivo.
 document.getElementById('btn-gym-live-minimize').addEventListener('click', closeGymLiveView);
+
+// El menu flotante de acciones del entreno: el boton central abre/cierra
+// el abanico de 4 botones (dudas / pausar / terminar / descartar).
+// Cualquier accion lo cierra, y un toque fuera tambien.
+const GYM_LIVE_FAB = document.getElementById('gym-live-fab');
+function closeGymLiveFab() {
+  GYM_LIVE_FAB.classList.remove('open');
+  document.getElementById('btn-gym-live-menu').setAttribute('aria-expanded', 'false');
+}
+document.getElementById('btn-gym-live-menu').addEventListener('click', () => {
+  const abierto = GYM_LIVE_FAB.classList.toggle('open');
+  document.getElementById('btn-gym-live-menu').setAttribute('aria-expanded', abierto ? 'true' : 'false');
+});
+GYM_LIVE_FAB.querySelectorAll('.gym-live-fab-action').forEach((btn) => {
+  btn.addEventListener('click', closeGymLiveFab);
+});
+document.addEventListener('click', (e) => {
+  if (!GYM_LIVE_FAB.classList.contains('open')) return;
+  // Leccion aprendida (ver CLAUDE.md): si el nodo pulsado ya no esta en
+  // el documento (repintado en su propio manejador), closest() daria
+  // null y pareceria un "clic fuera" -- se ignora.
+  if (!document.contains(e.target)) return;
+  if (!e.target.closest('#gym-live-fab')) closeGymLiveFab();
+});
 
 // Con el entreno en vivo abierto, tocar la navegacion inferior del
 // movil no "funcionaba" (la nav cambiaba la pantalla POR DEBAJO del

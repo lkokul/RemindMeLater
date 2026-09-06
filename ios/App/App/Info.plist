@@ -33,6 +33,8 @@
 	<string>RemindMeLater se conecta a tu ordenador por la red local (wifi) para sincronizar tu calendario, notas y tareas. Tus datos nunca salen de tus dispositivos.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

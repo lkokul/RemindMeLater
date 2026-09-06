@@ -1255,8 +1255,49 @@ function refreshMobileTab() {
   restNotify.disabled = !nativo;
   restNotify.checked = nativo && localStorage.getItem('gymRestNotify') !== 'false';
 
+  refreshNotifAlertStyleOptions();
   refreshCompletedTasksDisplayOptions();
   refreshGymWeightUnitOptions();
+}
+
+// Como avisan las notificaciones (peticion de Koku: sonido y vibracion
+// controlables desde la app). Son las TRES combinaciones que iOS permite
+// de verdad -- "solo sonido" no existe porque con sonido, vibrar o no lo
+// decide el ajuste del sistema. Ver notificationSoundValue() en
+// local-notifications.js, que es quien traduce el modo elegido.
+const NOTIF_ALERT_STYLES = [
+  { id: 'full', label: 'Sonido y vibración' },
+  { id: 'vibrate', label: 'Solo vibración' },
+  { id: 'silent', label: 'En silencio' },
+];
+
+function refreshNotifAlertStyleOptions() {
+  const container = document.getElementById('notif-alert-style-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = localStorage.getItem('notifAlertStyle') || 'full';
+
+  NOTIF_ALERT_STYLES.forEach((mode) => {
+    const isActive = mode.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = mode.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', async () => {
+        localStorage.setItem('notifAlertStyle', mode.id);
+        refreshNotifAlertStyleOptions();
+        // Los avisos ya programados llevan el sonido antiguo dentro:
+        // se reprograman con el nuevo. El del descanso en curso tambien,
+        // si lo hay (la funcion ya no hace nada si no toca).
+        await syncScheduledReminders();
+        if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
+      });
+    }
+    container.appendChild(btn);
+  });
 }
 
 // Tachar vs ocultar tareas completadas: preferencia de ESTE dispositivo
@@ -1578,8 +1619,14 @@ document.addEventListener('keydown', (e) => {
   // Con un entrenamiento EN VIVO abierto, Esc no hace nada a proposito:
   // salir se hace solo con Terminar o Descartar (los dos con
   // confirmacion/resumen) -- un Esc despistado no debe sacar del entreno.
+  // Excepcion: si el menu flotante de acciones esta desplegado, Esc lo
+  // recoge (es la capa de mas arriba).
   const gymLive = document.getElementById('gym-live-view');
   if (gymLive && !gymLive.classList.contains('hidden')) {
+    const gymFab = document.getElementById('gym-live-fab');
+    if (gymFab && gymFab.classList.contains('open') && typeof closeGymLiveFab === 'function') {
+      closeGymLiveFab();
+    }
     return;
   }
   const gymView = document.getElementById('gym-view');

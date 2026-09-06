@@ -2280,24 +2280,78 @@ body.gym-rest-push #settings-modal .settings-card {
   padding-top: var(--gym-rest-offset);
 }
 
-/* Boton "?" flotante del entreno en vivo: abajo a la derecha, por
-   encima del contenido pero sin tapar la nav (que va a z-index 70 y
-   ocupa el borde inferior -- por eso el bottom la esquiva). */
-.gym-live-help-btn {
+/* Menu flotante de acciones del entreno (abajo a la derecha, sin tapar
+   la nav): el boton central despliega en ABANICO los 4 botones de
+   accion, en un cuarto de circulo hacia arriba/izquierda (idea de Koku:
+   "que salgan alrededor del boton, no listados"). Cerrado, los botones
+   viven apilados bajo el central (opacidad 0, sin eventos); abierto,
+   cada uno viaja a su posicion con transform. */
+.gym-live-fab {
   position: fixed;
   right: 1rem;
   bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
   z-index: 65;
+  width: 52px;
+  height: 52px;
+}
+.gym-live-fab-main {
+  position: absolute;
+  inset: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  transition: transform 0.18s ease;
+}
+/* Girado 90 grados, los tres puntos verticales pasan a horizontales:
+   pista visual barata de "abierto". */
+.gym-live-fab.open .gym-live-fab-main { transform: rotate(90deg); }
+.gym-live-fab-action {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--border);
   background: var(--surface);
-  color: var(--accent);
-  font-size: 1.25rem;
+  color: var(--surface-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
   font-weight: 700;
   line-height: 1;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(0, 0);
+  transition: transform 0.18s ease, opacity 0.14s ease;
+}
+.gym-live-fab.open .gym-live-fab-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* Posiciones del abanico (radio 74px): 1 arriba, 4 a la izquierda. */
+.gym-live-fab.open .gym-fab-pos-1 { transform: translate(0, -74px); }
+.gym-live-fab.open .gym-fab-pos-2 { transform: translate(-37px, -64px); }
+.gym-live-fab.open .gym-fab-pos-3 { transform: translate(-64px, -37px); }
+.gym-live-fab.open .gym-fab-pos-4 { transform: translate(-74px, 0); }
+.gym-live-fab-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.gym-live-fab-danger {
+  background: var(--surface);
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 /* Modal de ayuda del entrenamiento: el texto es largo, asi que el
