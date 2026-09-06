@@ -17,6 +17,10 @@ struct DescansoAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         var startAt: Date
         var endAt: Date
+        // Segundos anadidos con +30s (desde la app o desde el boton de la
+        // propia tarjeta): la tarjeta los ensena en otro color, como la
+        // barra bicolor de dentro de la app.
+        var extraSeconds: Int
     }
 
     // Nombre del dia de entreno ("Torso", "Sesion libre"...): fijo

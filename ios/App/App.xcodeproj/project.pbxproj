@@ -23,6 +23,8 @@
 		DE5CA25000000000000000B5 /* DescansoWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A2 /* DescansoWidgetBundle.swift */; };
 		DE5CA25000000000000000B6 /* DescansoAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A5 /* DescansoAttributes.swift */; };
 		DE5CA25000000000000000B7 /* DescansoWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A1 /* DescansoWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DE5CA25000000000000000B8 /* ExtenderDescansoIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */; };
+		DE5CA25000000000000000B9 /* ExtenderDescansoIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -68,6 +70,7 @@
 		DE5CA25000000000000000A5 /* DescansoAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DescansoAttributes.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A6 /* BridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeViewController.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A7 /* silencio.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = silencio.wav; sourceTree = "<group>"; };
+		DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtenderDescansoIntent.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -126,6 +129,7 @@
 				DE5CA25000000000000000A6 /* BridgeViewController.swift */,
 				DE5CA25000000000000000A4 /* LiveActivityPlugin.swift */,
 				DE5CA25000000000000000A5 /* DescansoAttributes.swift */,
+				DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */,
 				DE5CA25000000000000000A7 /* silencio.wav */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
@@ -255,6 +259,7 @@
 				DE5CA25000000000000000B1 /* LiveActivityPlugin.swift in Sources */,
 				DE5CA25000000000000000B2 /* DescansoAttributes.swift in Sources */,
 				DE5CA25000000000000000B3 /* BridgeViewController.swift in Sources */,
+				DE5CA25000000000000000B8 /* ExtenderDescansoIntent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -264,6 +269,7 @@
 			files = (
 				DE5CA25000000000000000B5 /* DescansoWidgetBundle.swift in Sources */,
 				DE5CA25000000000000000B6 /* DescansoAttributes.swift in Sources */,
+				DE5CA25000000000000000B9 /* ExtenderDescansoIntent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

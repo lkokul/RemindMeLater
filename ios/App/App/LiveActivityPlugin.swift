@@ -22,7 +22,8 @@ public class LiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "startRest", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "updateRest", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "endRest", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "endRest", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "consumeRestExtension", returnType: CAPPluginReturnPromise)
     ]
 
     // Empieza (o reinicia) la actividad del descanso. startAt/endAt
@@ -38,7 +39,8 @@ public class LiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
             let dayName = call.getString("dayName") ?? "Entrenamiento"
             let state = DescansoAttributes.ContentState(
                 startAt: Date(timeIntervalSince1970: startMs / 1000),
-                endAt: Date(timeIntervalSince1970: endMs / 1000)
+                endAt: Date(timeIntervalSince1970: endMs / 1000),
+                extraSeconds: call.getInt("extraSeconds") ?? 0
             )
             Task {
                 // Solo puede haber UNA tarjeta de descanso: si quedaba
@@ -83,7 +85,8 @@ public class LiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
             let startMs = call.getDouble("startAt") ?? Date().timeIntervalSince1970 * 1000
             let state = DescansoAttributes.ContentState(
                 startAt: Date(timeIntervalSince1970: startMs / 1000),
-                endAt: Date(timeIntervalSince1970: endMs / 1000)
+                endAt: Date(timeIntervalSince1970: endMs / 1000),
+                extraSeconds: call.getInt("extraSeconds") ?? 0
             )
             Task {
                 guard let act = Activity<DescansoAttributes>.activities.first else {
@@ -97,6 +100,18 @@ public class LiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         #endif
         call.resolve(["updated": false])
+    }
+
+    // Recoge (y pone a cero) los segundos que el boton +30s de la
+    // PANTALLA DE BLOQUEO haya anadido mientras el JS estaba congelado --
+    // ver ExtenderDescansoIntent, que es quien los apunta en
+    // UserDefaults. El JS llama aqui al volver a primer plano y pone al
+    // dia su temporizador y la serie.
+    @objc func consumeRestExtension(_ call: CAPPluginCall) {
+        let defaults = UserDefaults.standard
+        let seconds = defaults.integer(forKey: "gymPendingRestExtra")
+        if seconds != 0 { defaults.set(0, forKey: "gymPendingRestExtra") }
+        call.resolve(["seconds": seconds])
     }
 
     // Quita la tarjeta (descanso saltado, serie desmarcada, entreno

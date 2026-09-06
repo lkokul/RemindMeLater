@@ -8245,8 +8245,42 @@ function gymRestActivityParams() {
     startAt: totalSeconds > 0 ? gymLiveSession.restUntil - totalSeconds * 1000 : Date.now(),
     endAt: gymLiveSession.restUntil,
     dayName: gymLiveSession.routineName || 'Sesión libre',
+    extraSeconds: gymLiveSession.restExtraSeconds || 0,
   };
 }
+
+// El +30s pulsado EN LA PANTALLA DE BLOQUEO (boton de la Live Activity,
+// iOS 17+): mientras el movil esta bloqueado el JS esta congelado, asi
+// que el intent nativo lo hace todo el (alargar la tarjeta y reprogramar
+// el aviso) y deja los segundos apuntados. Aqui se recogen al volver a
+// primer plano y se pone al dia el estado del JS: el temporizador de la
+// app, el total de extra y el "+Ns" de la serie en descanso.
+async function gymConsumeRestExtensionFromLockScreen() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin) return;
+  try {
+    const res = await plugin.consumeRestExtension();
+    const seconds = res && res.seconds ? Number(res.seconds) : 0;
+    if (!seconds || !gymLiveSession || !gymLiveSession.restUntil) return;
+    gymLiveSession.restUntil += seconds * 1000;
+    gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + seconds;
+    const ref = gymLiveSession.restSetRef;
+    if (ref) {
+      const refEx = gymLiveSession.exercises.find((x) => x.exerciseId === ref.exerciseId);
+      const refSet = refEx && refEx.sets[ref.setIndex];
+      if (refSet) refSet.extraRest = (refSet.extraRest || 0) + seconds;
+    }
+    gymLiveStore();
+    gymLiveTick();
+  } catch (err) {
+    console.error('No se pudo recoger el +30s de la pantalla de bloqueo:', err);
+  }
+}
+// Al volver la app a primer plano (desbloquear/cambiar de app) es cuando
+// puede haber +30s pendientes.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) gymConsumeRestExtensionFromLockScreen();
+});
 
 async function gymStartRestLiveActivity() {
   const plugin = getGymLiveActivityPlugin();
@@ -8700,6 +8734,9 @@ document.getElementById('gym-global-rest').addEventListener('click', () => {
 gymLiveSession = gymLiveReadStored();
 if (gymLiveSession) {
   gymLiveTicker = setInterval(gymLiveTick, 1000);
+  // Por si la app se relanzo con +30s de la pantalla de bloqueo sin
+  // recoger (el visibilitychange no cubre el primer arranque).
+  gymConsumeRestExtensionFromLockScreen();
 }
 refreshGymLiveIndicators();
 
