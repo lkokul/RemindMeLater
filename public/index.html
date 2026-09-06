@@ -255,6 +255,51 @@
 
     </main>
 
+    <!-- Dos accesos rapidos justo encima de la barra inferior, solo en la
+         pantalla del calendario: "Hoy" abre la vista diaria de hoy con la
+         sub-vista que tengas guardada (horas o listado), y "Grupos" abre
+         la pantalla de grupos. Flotan igual que la barra (position:fixed)
+         para caer siempre en el mismo sitio, sea cual sea la vista de
+         calendario que estes mirando. -->
+    <div id="calendar-quick-actions" class="calendar-quick-actions">
+      <button type="button" id="btn-calendar-quick-today" class="secondary-btn">Hoy</button>
+      <button type="button" id="btn-calendar-quick-groups" class="secondary-btn">Grupos</button>
+    </div>
+
+    <!-- Pantalla de Grupos: dos niveles, igual que Notas (lista ->
+         detalle). Arriba, un grupo por tarjeta mas "Todos los eventos";
+         dentro, todo lo que hay en ese grupo con buscador y filtros por
+         tipo (recordatorio/tarea) y por si esta terminada o no. Las
+         tareas se pueden tachar desde aqui; los recordatorios no (no
+         tienen ese concepto, son un aviso, no algo que se complete). -->
+    <div id="groups-view" class="my-space-view hidden">
+      <div class="my-space-view-header">
+        <h2 id="groups-view-title">Grupos</h2>
+        <div class="my-space-view-header-actions">
+          <button type="button" id="btn-groups-back" class="secondary-btn hidden">← Grupos</button>
+          <button type="button" id="btn-close-groups" class="secondary-btn">← Calendario</button>
+        </div>
+      </div>
+
+      <div class="groups-body">
+        <!-- Nivel 1: los grupos -->
+        <div id="groups-list-panel">
+          <button type="button" id="btn-groups-manage" class="secondary-btn groups-manage-btn">Gestionar grupos</button>
+          <div id="groups-view-list" class="groups-list"></div>
+        </div>
+
+        <!-- Nivel 2: lo que hay dentro de un grupo (o de todos) -->
+        <div id="groups-detail-panel" class="hidden">
+          <div class="groups-filters">
+            <input type="search" id="groups-search" placeholder="Buscar por título" aria-label="Buscar por título" />
+            <div id="groups-filter-type-field" class="groups-filter-field"></div>
+            <div id="groups-filter-done-field" class="groups-filter-field"></div>
+          </div>
+          <div id="groups-detail-list" class="groups-detail-list"></div>
+        </div>
+      </div>
+    </div>
+
   <!-- Notas (Fase 4 del rediseño movil): reemplaza al puente temporal
        que abria "Mi espacio" desde la barra inferior -- "Mi espacio"
        (recordatorios+tareas+notas juntos) no tiene sentido en movil, ver
@@ -1599,10 +1644,11 @@
              refreshTableContextToolbar en app.js) -- actua siempre sobre
              la fila/columna donde este el cursor en ese momento. -->
         <span id="note-table-context-toolbar" class="note-table-context-toolbar hidden">
-          <button type="button" id="note-table-add-row" class="note-editor-btn" aria-label="Añadir fila" title="Añadir fila">+Fila</button>
-          <button type="button" id="note-table-remove-row" class="note-editor-btn" aria-label="Eliminar fila" title="Eliminar fila">-Fila</button>
-          <button type="button" id="note-table-add-col" class="note-editor-btn" aria-label="Añadir columna" title="Añadir columna">+Col</button>
-          <button type="button" id="note-table-remove-col" class="note-editor-btn" aria-label="Eliminar columna" title="Eliminar columna">-Col</button>
+          <!-- Anadir/quitar filas y columnas ya NO viven aqui: son
+               mandos flotantes pegados a los propios bordes de la tabla
+               (ver #note-table-handles en app.js), que es donde Koku
+               espera encontrarlos. Aqui solo queda lo que no tiene un
+               sitio natural en la tabla. -->
           <!-- Grosor fino/grueso, por tabla (atributo data-border en el
                <table>, ver toggleTableBorderThickness en app.js) -- se
                enciende igual que los botones de negrita/cursiva cuando
@@ -1650,38 +1696,61 @@
        vez de un botón suelto por cada cosa. Ver settings.js. -->
   <div id="settings-modal" class="modal hidden">
     <div class="modal-card settings-card">
-      <!-- Cabecera FIJA (fuera de la zona con scroll): la x de cerrar
-           siempre visible aunque la seccion que estes mirando sea larga.
-           El "Volver" de cada seccion no vive aqui (es distinto por
-           pestana), va dentro de settings-card-body con position:sticky
-           para quedarse pegado arriba SOLO mientras haces scroll dentro
-           de esa seccion. -->
+      <!-- Cabecera FIJA (fuera de la zona con scroll). Ya no lleva boton
+           de cerrar: la barra inferior sigue visible con Configuracion
+           abierta, asi que se sale tocando cualquier otro apartado (y con
+           Esc en un teclado). El "Volver" de cada seccion no vive aqui
+           (es distinto por pestana), va dentro de settings-card-body con
+           position:sticky para quedarse pegado arriba SOLO mientras haces
+           scroll dentro de esa seccion. -->
       <div class="settings-card-header">
-        <button type="button" id="btn-close-settings" class="modal-close-x" aria-label="Cerrar">✕</button>
         <h2>Configuración</h2>
       </div>
 
       <div class="settings-card-body">
 
-      <!-- Menu: lista vertical, solo texto. Al pulsar una entra a esa
-           seccion a pantalla completa (ver showSettingsScreen en settings.js). -->
+      <!-- Menu en galeria (mismo aire que la vista de galeria de Notas):
+           una tarjeta con icono por apartado, en vez de una lista de
+           texto. Al pulsar una entra a esa seccion a pantalla completa
+           (ver showSettingsScreen en settings.js). -->
       <div id="settings-menu" class="settings-menu">
         <button type="button" class="settings-menu-item" data-tab="profile">
-          <span>Perfil</span><span class="settings-menu-item-arrow">›</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>
+          <span>Perfil</span>
         </button>
         <button type="button" class="settings-menu-item" data-tab="view">
-          <span>Vista</span><span class="settings-menu-item-arrow">›</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg>
+          <span>Vista</span>
         </button>
         <button type="button" class="settings-menu-item" data-tab="style">
-          <span>Estilo</span><span class="settings-menu-item-arrow">›</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.7-.9 1.4-1.8-.3-.9.3-1.7 1.2-1.7H17a4 4 0 0 0 4-4c0-5-4-10.5-9-10.5Z"/><circle cx="8" cy="11" r="1.1"/><circle cx="12" cy="8" r="1.1"/><circle cx="16" cy="11" r="1.1"/></svg>
+          <span>Estilo</span>
         </button>
         <button type="button" class="settings-menu-item" data-tab="groups">
-          <span>Grupos</span><span class="settings-menu-item-arrow">›</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M7 12h10"/></svg>
+          <span>Grupos</span>
         </button>
         <button type="button" class="settings-menu-item" data-tab="mobile">
-          <span>Este dispositivo</span><span class="settings-menu-item-arrow">›</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
+          <span>Este dispositivo</span>
+        </button>
+        <button type="button" class="settings-menu-item" data-tab="store">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16l-1.2 11a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
+          <span>Tienda</span>
         </button>
 
+      </div>
+
+      <!-- --- Tienda (todavia sin mecanica: solo el hueco) --- -->
+      <div id="settings-tab-store" class="settings-tab-panel hidden">
+        <button type="button" class="settings-back-btn" data-back>← Volver</button>
+        <h3>Tienda</h3>
+        <p class="hint">
+          Aquí vivirán los módulos de Herramientas: los que ya tienes
+          vienen de serie, y más adelante se podrán añadir otros desde
+          aquí, con su propio buscador.
+        </p>
+        <p class="hint">Todavía no está construida — es solo el sitio donde va a ir.</p>
       </div>
 
       <!-- --- Perfil --- -->

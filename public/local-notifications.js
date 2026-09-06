@@ -62,6 +62,27 @@ async function ensureLocalNotificationPermission() {
   return pedido.display === 'granted';
 }
 
+// Pide el permiso del sistema LA PRIMERA VEZ que se abre la app, sin
+// tener que ir a Configuracion a buscarlo -- que es lo que pidio Koku
+// ("que no me tenga que ir hasta ahi la primera vez, no seria
+// intuitivo"). Se marca en localStorage que ya se pregunto, asi que:
+// - Si dice que si, los avisos quedan activados.
+// - Si dice que no, no se vuelve a preguntar NUNCA desde aqui (iOS
+//   tampoco deja volver a preguntar: hay que ir a los Ajustes del
+//   telefono), y el interruptor de Configuracion sigue ahi para
+//   apagarlos/encenderlos como cualquier otro ajuste.
+async function maybeAskNotificationPermissionOnStartup() {
+  if (!localNotificationsAvailable()) return;
+  if (localStorage.getItem('notificationsPermissionAsked') === '1') return;
+  localStorage.setItem('notificationsPermissionAsked', '1');
+  const concedido = await ensureLocalNotificationPermission();
+  // El ajuste propio de la app sigue el resultado: si no hay permiso del
+  // sistema, no tiene sentido dejarlo "encendido" prometiendo avisos que
+  // nunca van a sonar.
+  localStorage.setItem('notificationsEnabled', concedido ? 'true' : 'false');
+  if (typeof refreshMobileTab === 'function') refreshMobileTab();
+}
+
 // Vuelve a programar TODOS los avisos futuros desde cero: primero
 // cancela lo que hubiera programado, luego programa lo que toca ahora.
 // Es a proposito "borrar y rehacer" en vez de ir tocando avisos uno a

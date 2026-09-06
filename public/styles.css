@@ -64,6 +64,14 @@ body.modal-open-lock {
    abierto" para ocultarla mientras tanto -- solo en movil, en
    escritorio .mobile-nav ya esta oculta siempre. */
 body.modal-open-lock .mobile-nav { display: none; }
+/* Mientras se escribe en una nota, el teclado del sistema sube desde
+   abajo -- y una barra fija al fondo de la pantalla acaba flotando JUSTO
+   ENCIMA del teclado, que es lo que Koku describio como "la barra de
+   estado llega a estar por encima del teclado". Se esconde mientras el
+   cursor esta dentro del texto (vuelve sola al tocar fuera), y de paso
+   el hueco que tenia reservado se lo queda el area de escritura. */
+body.note-typing .mobile-nav { display: none; }
+body.note-typing .note-editor-content-col { padding-bottom: 0.6rem; }
 /* Excepcion: Configuracion (Fase 5) ya tiene su propio punto de
    entrada FIJO en la barra inferior -- a diferencia del resto de
    modales (que son ventanas puntuales sobre otra pantalla), aqui la
@@ -583,6 +591,31 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    formato normales. */
 .note-table-context-toolbar { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: 0.35rem; padding-left: 0.5rem; border-left: 1px solid var(--border); }
 
+/* Mandos pegados a la tabla: los de COLUMNA a su derecha (en vertical,
+   como el borde que ensanchan) y los de FILA debajo (en horizontal).
+   Van sueltos en <body> con position:fixed y se recolocan desde
+   refreshTableHandles() en app.js. */
+.note-table-handles { position: fixed; inset: 0; pointer-events: none; z-index: 16; }
+.note-table-handle-group { position: absolute; display: flex; gap: 0.2rem; pointer-events: auto; }
+.note-table-handle-cols { flex-direction: column; }
+.note-table-handle-rows { flex-direction: row; }
+.note-table-handles button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--surface-2-text);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.note-table-handles button:hover { border-color: var(--accent); color: var(--accent); }
+
 /* Popover de "Insertar tabla": mismo patron visual que
    .color-popover/.select-popover/.date-popover (position:fixed colgado
    de <body>, posicionado en JS con positionFixedPopover), pero con un
@@ -817,9 +850,10 @@ body.mobile-day-scroll-lock .app {
   min-height: 100dvh;
   /* Sitio para que el contenido no quede tapado por .mobile-nav (fija
      abajo del todo, ahora flotando con 0.6rem de margen -- ver
-     .mobile-nav mas arriba) -- se quita en escritorio, que no lleva
-     esa barra. */
-  padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+     .mobile-nav mas arriba) NI por la fila de accesos rapidos
+     (Hoy/Grupos) que va justo encima de ella -- se quita en escritorio,
+     que no lleva ninguna de las dos. */
+  padding-bottom: calc(8rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* --- Topbar --- */
@@ -862,19 +896,21 @@ body.mobile-day-scroll-lock .app {
      padding-bottom interno aparte -- ver .app mas abajo, que reserva
      el mismo hueco (0.6rem extra sobre lo de antes) para que el
      contenido no quede tapado. */
-  left: 0.6rem;
-  right: 0.6rem;
-  /* Baja hasta casi el borde: solo la MITAD del safe-area de abajo (la
-     franja del indicador de inicio del iPhone), en vez del alto entero
-     -- con el entero quedaba flotando demasiado arriba. La mitad basta
-     para no pisar el indicador y gana bastante pantalla. */
-  bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px) / 2);
+  /* Pegada a los 3 bordes y a todo el ancho: flotando con margen se veia
+     "como que sobra espacio en los laterales y por debajo". La franja
+     del indicador de inicio del iPhone se reserva como padding DENTRO de
+     la barra (asi el fondo llega hasta el borde de la pantalla, pero los
+     botones no quedan debajo del indicador). */
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   z-index: 70;
   display: flex;
   background: var(--surface);
   color: var(--surface-text);
-  border: 1px solid var(--border);
-  border-radius: 18px;
+  border-top: 1px solid var(--border);
+  border-radius: 18px 18px 0 0;
   /* Recorta los botones de las esquinas para que sigan el radio del
      contenedor -- si no, sus esquinas cuadradas asoman por fuera. */
   overflow: hidden;
@@ -926,7 +962,15 @@ body.mobile-day-scroll-lock .app {
       aunque max-width nunca llegue a limitar nada por debajo de esa
       anchura. Sin este `margin:0` el hueco perdido era mucho mayor que
       el del padding (~57px por lado, no solo unos pocos px). */
-.layout { padding-left: 0.6rem; padding-right: 0.6rem; margin: 0; }
+.layout {
+  padding-left: 0.6rem;
+  padding-right: 0.6rem;
+  /* Casi nada arriba: el hueco del reloj/muesca ya lo reserva .app, y
+     sumarle este dejaba la barra del calendario visiblemente separada
+     del reloj (Koku lo señalo dos veces). */
+  padding-top: 0.15rem;
+  margin: 0;
+}
 
 /* Agrupa la barra del mes + el calendario en su propia columna, separada
    del panel de recordatorios — asi "Agosto 2026 ◀ ▶" se puede centrar
@@ -1028,6 +1072,7 @@ body.mobile-day-scroll-lock .app {
    pantalla, por encima de .mobile-nav (z-index 70), igual que el hueco
    que ya reserva .app/Configuracion para esa barra. */
 .mobile-fab-wrap { position: fixed; right: 1rem; bottom: calc(5rem + 1rem + env(safe-area-inset-bottom, 0px)); z-index: 30; }
+.mobile-fab.is-done { background: var(--accent); }
 .mobile-fab {
   width: 3.2rem;
   height: 3.2rem;
@@ -1046,6 +1091,30 @@ body.mobile-day-scroll-lock .app {
    hacia abajo) -- el boton vive pegado al borde inferior, no hay hueco
    debajo para desplegarlo ahi. */
 .mobile-fab-wrap .mobile-add-menu { top: auto; bottom: calc(100% + 0.4rem); }
+
+/* Fila de accesos rapidos (Hoy / Grupos) justo encima de la barra
+   inferior. Fija como la barra, para que caiga siempre en el mismo sitio
+   sea cual sea la vista de calendario. El z-index queda POR DEBAJO del
+   de las pantallas completas (.my-space-view, 15) a proposito: asi
+   desaparece sola en cuanto se abre cualquiera de ellas, sin tener que
+   ocultarla a mano en cada open*View(). */
+.calendar-quick-actions {
+  position: fixed;
+  left: 0.6rem;
+  right: 0.6rem;
+  bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  z-index: 14;
+  display: flex;
+  gap: 0.5rem;
+}
+.calendar-quick-actions button { flex: 1; }
+/* Con un modal abierto se aparta igual que la barra de abajo. */
+body.modal-open-lock .calendar-quick-actions { display: none; }
+/* En escritorio no hay barra inferior contra la que apoyarse -- estos
+   accesos son propios del visor movil. */
+@media (min-width: 860px) {
+  .calendar-quick-actions { display: none; }
+}
 
 .mobile-calendar-view {
   display: flex;
@@ -1767,14 +1836,17 @@ body.mobile-day-scroll-lock .app {
   outline: 1px dashed var(--accent);
   outline-offset: -1px;
 }
-#mobile-notes-view.mode-edit-folders .note-folder-row::after {
-  content: '✎';
-  margin-left: auto;
-  padding-left: 0.4rem;
-  color: var(--accent);
-  font-size: 0.9rem;
+/* Lapiz de cada carpeta mientras se editan (es un elemento real, ver
+   buildFolderRow en app.js): va a la IZQUIERDA de la estrella. */
+.note-folder-edit-mark {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 0 0.15rem;
+  color: var(--accent);
 }
+.note-folder-edit-mark svg { width: 16px; height: 16px; }
 #mobile-notes-view.mode-edit-folders .note-item:not(.note-folder-row) { opacity: 0.4; }
 
 /* Modal de "Eliminar" del modo Seleccionar. */
@@ -2519,16 +2591,25 @@ body.mobile-day-scroll-lock .app {
 }
 .modal-close-x:hover { background: var(--surface-2); }
 
-/* --- Panel de Configuracion: menu vertical + pantalla por seccion --- */
-.settings-menu { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.8rem; }
+/* --- Panel de Configuracion: galeria de apartados + pantalla por seccion ---
+   Tarjeta con icono por apartado (mismo aire que la vista de galeria de
+   Notas) en vez de la lista de texto que habia antes. */
+.settings-menu {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+}
 .settings-menu-item {
-  display: flex; align-items: center; justify-content: space-between;
-  width: 100%; text-align: left; font-size: 0.95rem;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0.5rem;
+  width: 100%; text-align: center; font-size: 0.9rem;
   background: var(--settings-menu-bg); border-color: var(--border);
   color: var(--settings-menu-text);
-  padding: 0.85rem 1rem;
+  padding: 1.1rem 0.6rem;
+  min-height: 104px;
 }
-.settings-menu-item-arrow { color: color-mix(in srgb, var(--settings-menu-text) 65%, var(--settings-menu-bg)); font-size: 1.1rem; }
+.settings-menu-item svg { width: 30px; height: 30px; color: var(--accent); }
 
 /* Sticky y a ancho completo (con "sangrado" hacia los lados igual al
    padding de settings-card-body) para que, al pegarse arriba del todo
@@ -3009,3 +3090,66 @@ body.mobile-day-scroll-lock .app {
   font: inherit; padding: 0.2rem; width: 100%;
 }
 .country-picker-input:focus { outline: none; }
+
+/* --- Pantalla de Grupos (accesible desde el calendario) --------------
+   Dos niveles: tarjetas de grupo y, dentro, lo que hay en ese grupo con
+   buscador y filtros. Mismo lenguaje visual que la lista de Notas. */
+.groups-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.6rem 1rem calc(5rem + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.groups-manage-btn { width: 100%; margin-bottom: 0.6rem; }
+.groups-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.group-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.85rem 1rem;
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--surface-2-text);
+}
+.group-card-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+.groups-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.groups-filters input[type="search"] { flex: 1 1 100%; }
+.groups-filter-field { flex: 1 1 140px; min-width: 130px; }
+.groups-detail-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.group-item-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+/* Barra vertical del color del grupo, igual que en el listado del
+   calendario -- ahi es donde se ve de un vistazo a que grupo pertenece. */
+.group-item-bar { width: 4px; align-self: stretch; border-radius: 2px; flex-shrink: 0; }
+.group-item-texts { display: flex; flex-direction: column; min-width: 0; }
+.group-item-title { font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-item-meta { font-size: 0.78rem; color: color-mix(in srgb, var(--surface-2-text) 60%, var(--surface-2)); }
+/* Tarea ya hecha: tachada y atenuada (los recordatorios nunca llegan
+   aqui, no tienen "terminada"). */
+.group-item-row.is-done .group-item-title { text-decoration: line-through; }
+.group-item-row.is-done { opacity: 0.6; }
+/* El titulo es el nombre del grupo abierto, que puede ser largo: se
+   recorta en una sola linea para no empujar los botones de volver ni
+   comerse tres renglones de cabecera. */
+#groups-view-title {
+  font-size: 1.15rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

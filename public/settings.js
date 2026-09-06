@@ -263,7 +263,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'mobile'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'mobile', 'store'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -449,11 +449,13 @@ document.getElementById('btn-viajes-settings').addEventListener('click', openSet
 // #mobile-notes-view (Fase 4) es tambien .my-space-view a pantalla
 // completa, mismo motivo que las de arriba.
 document.getElementById('btn-mobile-notes-settings').addEventListener('click', openSettingsModal);
-document.getElementById('btn-close-settings').addEventListener('click', () => {
+// Ya no hay boton de cerrar en la cabecera (la barra inferior sigue
+// visible con Configuracion abierta y es por donde se sale). Se queda
+// como funcion para que Esc y cualquier otro sitio cierren igual.
+function closeSettingsModal() {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
-  clearInterval(pairingCountdownTimer);
-});
+}
 
 // ---------------------------------------------------------------------
 // Estilo: biblioteca de temas compartida + cual tengo activo YO
@@ -1751,6 +1753,20 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Grupos tambien tiene dos capas: el detalle de un grupo dentro de la
+  // lista. Esc vuelve primero a la lista y solo despues sale al
+  // calendario, igual que Notas o Viajes.
+  const groupsView = document.getElementById('groups-view');
+  if (groupsView && !groupsView.classList.contains('hidden')) {
+    const detail = document.getElementById('groups-detail-panel');
+    if (detail && !detail.classList.contains('hidden')) {
+      document.getElementById('btn-groups-back').click();
+    } else {
+      document.getElementById('btn-close-groups').click();
+    }
+    return;
+  }
+
   const extensionsView = document.getElementById('extensions-view');
   if (extensionsView && !extensionsView.classList.contains('hidden')) {
     document.getElementById('btn-close-extensions').click();
@@ -1768,7 +1784,7 @@ document.addEventListener('keydown', (e) => {
     if (settingsMenu && settingsMenu.classList.contains('hidden')) {
       showSettingsScreen(null);
     } else {
-      document.getElementById('btn-close-settings').click();
+      closeSettingsModal();
     }
   }
 });
