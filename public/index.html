@@ -430,7 +430,7 @@
            siempre y el alta manual (para apuntar a posteriori). -->
       <div id="gym-tab-sessions" class="gym-tab-panel">
         <button type="button" id="btn-gym-live-resume" class="primary-btn gym-live-start-btn hidden">Entrenamiento en curso — continuar</button>
-        <button type="button" id="btn-gym-live-start" class="primary-btn gym-live-start-btn">¡Empezar entrenamiento!</button>
+        <button type="button" id="btn-gym-live-start" class="primary-btn gym-live-start-btn">Empezar entrenamiento</button>
         <div class="gym-exercises-actions">
           <button type="button" id="btn-new-gym-activity" class="secondary-btn gym-tab-action">Actividad rápida</button>
           <button type="button" id="btn-new-gym-session" class="secondary-btn gym-tab-action">+ Apuntar sesión a mano</button>
@@ -614,20 +614,10 @@
         <button type="button" id="btn-gym-live-finish" class="primary-btn">✓ Terminar</button>
       </div>
     </div>
-    <div class="gym-live-rest-presets">
-      <span class="gym-list-item-muted">Descanso:</span>
-      <button type="button" class="view-mode-btn" data-gym-rest-preset="60">60s</button>
-      <button type="button" class="view-mode-btn" data-gym-rest-preset="90">90s</button>
-      <button type="button" class="view-mode-btn" data-gym-rest-preset="120">120s</button>
-      <button type="button" class="view-mode-btn" data-gym-rest-preset="180">180s</button>
-    </div>
-    <div class="gym-live-content">
-      <p class="hint gym-live-hint">Apunta el peso y las repeticiones de cada serie y marca la casilla al terminarla: el descanso empieza solo. La columna "Anterior" muestra tu última sesión como (descanso)peso×reps — ej. (1:30)60×10. Al darle a Terminar solo se guardan las series marcadas o con datos.</p>
-      <div id="gym-live-exercises" class="gym-live-exercises"></div>
-      <button type="button" id="btn-gym-live-add-exercise" class="secondary-btn gym-tab-action">+ Añadir ejercicio</button>
-    </div>
-    <!-- Barra inferior del temporizador de descanso: aparece al marcar
-         una serie como hecha y desaparece sola al llegar a 0. -->
+    <!-- La barra de descanso vive AQUI arriba (donde antes estaban los
+         presets de 60/90/120/180, que se quitaron: el descanso ya sale
+         del apuntado en cada ejercicio del plan, con +30s para ampliar).
+         Oculta salvo durante un descanso. -->
     <div id="gym-live-rest-bar" class="gym-live-rest-bar hidden">
       <div class="gym-live-rest-info">
         <span>Descanso: <b id="gym-live-rest-remaining" title="Tocar para cambiar entre m:ss y segundos">0:00</b></span>
@@ -639,17 +629,22 @@
         <div id="gym-live-rest-fill-extra" class="gym-live-rest-fill-extra"></div>
       </div>
     </div>
+    <div class="gym-live-content">
+      <p class="hint gym-live-hint">Apunta el peso y las repeticiones de cada serie y marca la casilla al terminarla: el descanso empieza solo. La columna "Anterior" muestra tu última sesión como (descanso)peso×reps — ej. (1:30)60×10. Al darle a Terminar solo se guardan las series marcadas o con datos.</p>
+      <div id="gym-live-exercises" class="gym-live-exercises"></div>
+      <button type="button" id="btn-gym-live-add-exercise" class="secondary-btn gym-tab-action">+ Añadir ejercicio</button>
+    </div>
   </div>
 
   <!-- Celebracion de logros nuevos (Fase 7): se abre tras guardar una
        sesion/actividad si algun logro ha subido de nivel. -->
   <div id="gym-achievement-modal" class="modal hidden">
     <div class="modal-card gym-modal gym-live-summary-card">
-      <h2>¡Logro conseguido!</h2>
+      <h2>Logro conseguido</h2>
       <div id="gym-achievement-modal-list" class="gym-achievements-list"></div>
       <div class="modal-actions">
         <div class="spacer"></div>
-        <button type="button" id="btn-close-gym-achievement" class="primary-btn">¡Genial!</button>
+        <button type="button" id="btn-close-gym-achievement" class="primary-btn">Cerrar</button>
       </div>
     </div>
   </div>
@@ -657,7 +652,7 @@
   <!-- Resumen al terminar el entrenamiento en vivo (Fase 3). -->
   <div id="gym-live-summary-modal" class="modal hidden">
     <div class="modal-card gym-modal gym-live-summary-card">
-      <h2>¡Entreno completado!</h2>
+      <h2>Entreno completado</h2>
       <div class="gym-live-summary-grid">
         <div class="gym-live-summary-stat"><b id="gym-summary-duration">—</b><span>Duración</span></div>
         <div class="gym-live-summary-stat"><b id="gym-summary-sets">—</b><span>Series hechas</span></div>

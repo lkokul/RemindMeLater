@@ -7207,7 +7207,6 @@ function startGymLiveSession(day) {
 async function openGymLiveView() {
   document.getElementById('gym-live-title').textContent = gymLiveSession.routineName || 'Sesión libre';
   document.getElementById('gym-live-view').classList.remove('hidden');
-  refreshGymLiveRestPresets();
   renderGymLiveExercises();
   // Columna "Anterior": se pide en paralelo para cada ejercicio y se
   // repinta cuando llega (si no hay historial, la columna queda en "—").
@@ -7251,9 +7250,16 @@ function gymLiveTick() {
     const remaining = Math.ceil((gymLiveSession.restUntil - Date.now()) / 1000);
     document.getElementById('gym-live-rest-remaining').textContent =
       localStorage.getItem('gymRestFormat') === 'sec' ? `${remaining}s` : gymLiveFormatClock(remaining);
+    // Si la sesion en curso venia de una version sin restBaseSeconds, se
+    // rellena UNA vez con el restante actual y se guarda -- sin esto el
+    // total se recalculaba en cada tick y la barra se quedaba llena.
+    if (!gymLiveSession.restBaseSeconds) {
+      gymLiveSession.restBaseSeconds = remaining;
+      gymLiveStore();
+    }
     // Barra: el descanso planificado son base + extra; el tramo base se
     // vacia primero y el extra (los +30s) al final, en otro color.
-    const baseTotal = gymLiveSession.restBaseSeconds || remaining;
+    const baseTotal = gymLiveSession.restBaseSeconds;
     const extraTotal = gymLiveSession.restExtraSeconds || 0;
     const planned = Math.max(1, baseTotal + extraTotal);
     const baseRemaining = Math.max(0, remaining - extraTotal);
@@ -7267,21 +7273,6 @@ function gymLiveTick() {
   }
 }
 
-// Presets de descanso (60/90/120/180): eligen la duracion que arrancara
-// al marcar la SIGUIENTE serie (por serie puede venir ya un descanso
-// sugerido del plan, que tiene prioridad).
-function refreshGymLiveRestPresets() {
-  document.querySelectorAll('[data-gym-rest-preset]').forEach((btn) => {
-    btn.classList.toggle('active', Number(btn.dataset.gymRestPreset) === gymLiveSession.restPreset);
-  });
-}
-document.querySelectorAll('[data-gym-rest-preset]').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    gymLiveSession.restPreset = Number(btn.dataset.gymRestPreset);
-    gymLiveStore();
-    refreshGymLiveRestPresets();
-  });
-});
 document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () => {
   if (gymLiveSession && gymLiveSession.restUntil) {
     gymLiveSession.restUntil += 30000;
@@ -7430,6 +7421,17 @@ document.getElementById('gym-live-exercises').addEventListener('click', (e) => {
     showAppAlert('RPE = esfuerzo percibido (Rate of Perceived Exertion), del 1 al 10: cuanto te ha costado la serie. 10 = fallo (no podias hacer ni una repeticion mas), 9 = te quedaba 1, 8 = te quedaban 2... Es opcional: si no lo usas, dejalo en blanco.');
   }
 });
+
+// Con el entreno en vivo abierto, tocar la navegacion inferior del
+// movil no "funcionaba" (la nav cambiaba la pantalla POR DEBAJO del
+// overlay y no se veia nada). Ahora esconde el overlay primero: la
+// sesion sigue viva en localStorage y en Entrenar queda el boton de
+// "continuar". Listener en captura para adelantarse al de la nav.
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.mobile-nav')) return;
+  const live = document.getElementById('gym-live-view');
+  if (live && !live.classList.contains('hidden')) closeGymLiveView();
+}, true);
 
 // Descartar: tirar el entrenamiento en curso sin guardar nada.
 document.getElementById('btn-gym-live-discard').addEventListener('click', async () => {
@@ -8128,7 +8130,7 @@ const GYM_BODYMAP_ZONES = [
     '527 1102 543 1249 600 1102 620 1000 649 943 600 927 567 1045',
     '478 1106 449 1253 420 1159 404 1131 396 1073 380 1024 347 939 396 922 416 992 437 1053',
   ] },
-  { g: 'abductores', tx: 0, polys: ['252 964 240 1020 250 1072 276 1090 288 1016', '748 964 760 1020 750 1072 724 1090 712 1016'] },
+  { g: 'abductores', tx: 0, polys: ['268 962 254 1018 262 1074 288 1094 300 1014', '732 962 746 1018 738 1074 712 1094 700 1014'] },
   { g: 'cuadriceps', tx: 0, polys: [
     '347 988 371 1082 371 1278 343 1371 310 1327 294 1200 282 1114 294 1008 322 947',
     '633 1057 645 1000 669 947 702 1012 710 1118 682 1331 653 1376 624 1286 620 1114',
@@ -8176,7 +8178,7 @@ const GYM_BODYMAP_ZONES = [
     '447 996 302 1085 298 1187 315 1260 472 1213 494 1149',
     '553 991 511 1145 523 1209 681 1260 698 1191 694 1085',
   ] },
-  { g: 'abductores', tx: 1120, polys: ['292 1082 272 1150 278 1230 300 1258 312 1150', '708 1082 728 1150 722 1230 700 1258 688 1150'] },
+  { g: 'abductores', tx: 1120, polys: ['302 1078 284 1148 290 1224 312 1252 324 1146', '698 1078 716 1148 710 1224 688 1252 676 1146'] },
   { g: 'aductores', tx: 1120, polys: [
     '481 1230 447 1230 413 1255 451 1443 485 1357 489 1294',
     '519 1226 557 1234 591 1260 549 1443 519 1362 511 1294',
@@ -8265,7 +8267,7 @@ function renderGymBodyMap() {
       : `${Math.round(value * 10) / 10} serie${value === 1 ? '' : 's'}`;
     detailByGroup.set(zone.g, `${label}: ${valueLabel}${topExercises ? ` · ${topExercises}` : ''}`);
     const polys = zone.polys.map((points) => `<polygon points="${points}" />`).join('');
-    return `<g style="fill: ${fill}" transform="translate(${zone.tx}, 0)" data-bodymap-group="${zone.g}">${polys}</g>`;
+    return `<g style="fill: ${fill}; stroke: ${fill}" transform="translate(${zone.tx}, 0)" data-bodymap-group="${zone.g}">${polys}</g>`;
   }).join('');
   const silhouetteHtml = GYM_BODYMAP_SILHOUETTE.map((part) =>
     `<g class="gym-bodymap-silhouette" transform="translate(${part.tx}, 0)">${part.polys.map((points) => `<polygon points="${points}" />`).join('')}</g>`
