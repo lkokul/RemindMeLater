@@ -444,6 +444,13 @@ borra la app pierde todo. Es el siguiente trabajo declarado.
   cada lado y se resuelve entonces. No adelantarse.
 - **Idiomas**: selector español/inglés, apuntado hace mucho y
   explícitamente aplazado. No empezar sin que lo pida.
+- **Guías de uso dentro de la Tienda**: en el apartado de Tienda de
+  Configuración, que cada herramienta tenga su guía de uso (cómo va el
+  editor de tablas, Grupos, etc.). Koku lo dejó apuntado a propósito
+  para más adelante — **no empezar hasta que lo pida**. Precedente ya
+  existente al que se puede enganchar: el aviso de "mover a mano" de
+  las tablas, que sale la primera vez con casilla de "no volver a
+  mostrar" (`tableMoveHintSeen_*` en localStorage).
 - **Backlog sin fecha** (ideas suyas, ninguna empezada): rediseño
   visual del visor de escritorio, repensar Finanzas para que sea
   "realmente útil", rediseñar Gimnasio inspirándose en la app de un

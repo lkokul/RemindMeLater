@@ -1695,12 +1695,19 @@
            botones, cada uno con sus opciones dentro, para no tener 16
            botones sueltos en una fila que no se acaba nunca. -->
       <div id="note-table-toolbar" class="note-editor-toolbar hidden">
+        <button type="button" class="note-editor-btn" id="btn-note-table-mark">Marcar</button>
         <button type="button" class="note-editor-btn" data-table-menu="row">Fila ▾</button>
         <button type="button" class="note-editor-btn" data-table-menu="col">Columna ▾</button>
         <button type="button" class="note-editor-btn" data-table-menu="move">Mover ▾</button>
         <button type="button" class="note-editor-btn" data-table-menu="size">Tamaño ▾</button>
         <button type="button" class="note-editor-btn" data-table-menu="border">Borde ▾</button>
         <button type="button" class="note-editor-btn" data-table-menu="cells">Celdas ▾</button>
+        <button type="button" class="note-editor-btn" id="btn-note-table-undo" aria-label="Deshacer" title="Deshacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+        </button>
+        <button type="button" class="note-editor-btn" id="btn-note-table-redo" aria-label="Rehacer" title="Rehacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+        </button>
       </div>
       <div class="note-editor-main">
         <div class="note-editor-content-col">

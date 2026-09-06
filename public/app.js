@@ -391,8 +391,8 @@ function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', 
     document.getElementById('app-confirm-modal').classList.remove('hidden');
   });
 }
-function showAppAlert(message, { okText = 'Aceptar' } = {}) {
-  return showAppConfirm(message, { okText, alertOnly: true });
+function showAppAlert(message, { okText = 'Aceptar', checkbox = null } = {}) {
+  return showAppConfirm(message, { okText, alertOnly: true, checkbox });
 }
 // Pide un numero con el mismo aviso propio de la app (nada de prompt()
 // del navegador, que no sigue el tema). Devuelve el texto escrito, o
@@ -2731,7 +2731,7 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
     if (note.hidden) return;
     openNoteInEditor(note);
   });
-  return row;
+  return mode === 'browse' ? wrapNoteRowWithSwipe(row, itemKey) : row;
 }
 
 // Carpeta con icono de ojo (Fase 3, navegacion tipo explorador de
@@ -2801,7 +2801,7 @@ function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
     clearNoteSearch();
     renderNotesView();
   });
-  return row;
+  return mode === 'browse' ? wrapNoteRowWithSwipe(row, itemKey) : row;
 }
 
 // Boton de estrella compartido por filas de nota y de carpeta, y por el
@@ -2926,6 +2926,9 @@ function renderNotesViewInto(target) {
   const cfg = NOTES_VIEW_TARGETS[target];
   const container = cfg && document.getElementById(cfg.containerId);
   if (!container) return;
+  // Al repintar, la fila que estuviera deslizada desaparece del DOM: sin
+  // esto la referencia se quedaria apuntando a un nodo ya suelto.
+  openSwipedNoteRow = null;
   container.innerHTML = '';
 
   const query = (state.noteSearchQuery || '').trim().toLowerCase();
@@ -2955,6 +2958,19 @@ function renderNotesViewInto(target) {
     if (grid.children.length > 0) container.appendChild(grid);
   }
 
+  // En galeria las CARPETAS tambien son tarjetas: mezclarlas con la fila
+  // de listado dejaba dos formatos distintos en la misma pantalla.
+  function appendFolderGroup(items, showPath) {
+    if (!useGallery) {
+      appendFavoriteSortedGroup(container, items, (f) => buildFolderRow(f, { showPath, mode }));
+      return;
+    }
+    const grid = document.createElement('div');
+    grid.className = 'mobile-notes-gallery-grid';
+    appendFavoriteSortedGroup(grid, items, (f) => buildFolderGalleryCard(f, { mode }));
+    if (grid.children.length > 0) container.appendChild(grid);
+  }
+
   // En modo Mover solo tiene sentido navegar entre CARPETAS (elegir el
   // destino) -- las notas no pueden contener nada, se ocultan del todo
   // para no confundir con "¿tambien puedo moverlo aqui dentro?".
@@ -2965,7 +2981,7 @@ function renderNotesViewInto(target) {
       container.innerHTML = '<p class="empty-hint">Nada coincide con esa búsqueda.</p>';
       return;
     }
-    appendFavoriteSortedGroup(container, matchFolders, (f) => buildFolderRow(f, { showPath: true, mode }));
+    appendFolderGroup(matchFolders, true);
     appendNoteGroup(matchNotes, true);
     return;
   }
@@ -2983,7 +2999,7 @@ function renderNotesViewInto(target) {
     return;
   }
 
-  appendFavoriteSortedGroup(container, subfolders, (f) => buildFolderRow(f, { mode }));
+  appendFolderGroup(subfolders, false);
   appendNoteGroup(notesHere, false);
 }
 
@@ -3085,6 +3101,22 @@ function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
   title.textContent = note.title || 'Nota sin título';
   card.appendChild(title);
 
+  // Abrir en solo lectura: mismo boton que la fila del listado, que aqui
+  // faltaba (la galeria solo dejaba abrir para editar).
+  if (mode === 'browse' && !note.hidden) {
+    const readBtn = document.createElement('button');
+    readBtn.type = 'button';
+    readBtn.className = 'mobile-note-gallery-read-btn';
+    readBtn.setAttribute('aria-label', `Abrir "${note.title}" en solo lectura`);
+    readBtn.title = 'Abrir en solo lectura';
+    readBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg>';
+    readBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openNoteInEditor(note, { readMode: true });
+    });
+    card.appendChild(readBtn);
+  }
+
   card.appendChild(buildFavoriteStarBtn(note.favorite, (e) => {
     e.stopPropagation();
     toggleNoteFavorite(note);
@@ -3095,7 +3127,204 @@ function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
     if (note.hidden) return;
     openNoteInEditor(note);
   });
+  if (mode === 'browse') attachNoteItemLongPress(card, itemKey);
   return card;
+}
+
+// Carpeta como TARJETA de galeria: en vista galeria las carpetas se
+// veian con la fila de listado de siempre, y quedaba una mezcla rara de
+// dos formatos. Misma tarjeta que una nota, con el icono de carpeta
+// grande sobre su color en vez de miniatura.
+function buildFolderGalleryCard(folder, { mode = 'browse' } = {}) {
+  const card = document.createElement('div');
+  card.className = 'mobile-note-gallery-card is-folder';
+  const itemKey = mobileNotesItemKey('folder', folder.id);
+
+  if (mode === 'select') {
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox mobile-note-gallery-checkbox';
+    checkbox.checked = mobileNotesSelectedKeys.has(itemKey);
+    checkbox.addEventListener('click', (e) => e.stopPropagation());
+    checkbox.addEventListener('change', () => toggleMobileNotesSelection(itemKey));
+    card.appendChild(checkbox);
+  }
+
+  const media = document.createElement('div');
+  media.className = 'mobile-note-gallery-media';
+  media.style.background = folder.color || 'var(--surface-2)';
+  media.innerHTML = '<svg class="mobile-note-gallery-folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+  card.appendChild(media);
+
+  const title = document.createElement('span');
+  title.className = 'mobile-note-gallery-title';
+  title.textContent = folder.name;
+  card.appendChild(title);
+
+  card.appendChild(buildFavoriteStarBtn(folder.favorite, (e) => {
+    e.stopPropagation();
+    toggleFolderFavorite(folder);
+  }));
+
+  card.addEventListener('click', () => {
+    if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
+    if (mode === 'editFolders') { openNoteFolderModal(folder); return; }
+    state.currentNoteFolderId = folder.id;
+    clearNoteSearch();
+    renderNotesView();
+  });
+  if (mode === 'browse') attachNoteItemLongPress(card, itemKey);
+  return card;
+}
+
+// ---------------------------------------------------------------------
+// Acciones rapidas de una nota/carpeta sin pasar por "Seleccionar":
+// deslizar la fila hacia la izquierda en el listado, o mantener pulsada
+// la tarjeta en galeria. Las dos abren lo mismo: Mover y Eliminar, que
+// reutilizan el modo Seleccionar de siempre con ese unico elemento
+// marcado (una sola forma de mover/borrar por dentro, ver la regla de
+// simplicidad en CLAUDE.md).
+// ---------------------------------------------------------------------
+function startNoteItemMove(itemKey) {
+  mobileNotesSelectedKeys.clear();
+  mobileNotesSelectedKeys.add(itemKey);
+  setMobileNotesMode('move');
+}
+
+function startNoteItemDelete(itemKey) {
+  mobileNotesSelectedKeys.clear();
+  mobileNotesSelectedKeys.add(itemKey);
+  setMobileNotesMode('select');
+  openMobileNotesDeleteModal();
+}
+
+const noteItemActionMenu = document.createElement('div');
+noteItemActionMenu.className = 'select-popover note-item-action-menu hidden';
+document.body.appendChild(noteItemActionMenu);
+
+function openNoteItemActionMenu(anchorEl, itemKey) {
+  noteItemActionMenu.innerHTML = '';
+  [['Mover', () => startNoteItemMove(itemKey)], ['Eliminar', () => startNoteItemDelete(itemKey)]].forEach(([texto, fn]) => {
+    const opt = document.createElement('button');
+    opt.type = 'button';
+    opt.className = 'select-option';
+    opt.textContent = texto;
+    opt.addEventListener('click', () => {
+      noteItemActionMenu.classList.add('hidden');
+      fn();
+    });
+    noteItemActionMenu.appendChild(opt);
+  });
+  noteItemActionMenu.classList.remove('hidden');
+  positionFixedPopover(anchorEl, noteItemActionMenu, { width: 180 });
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (noteItemActionMenu.classList.contains('hidden')) return;
+  if (e.target.closest && e.target.closest('.note-item-action-menu')) return;
+  noteItemActionMenu.classList.add('hidden');
+});
+
+const NOTE_LONG_PRESS_MS = 450;
+
+function attachNoteItemLongPress(el, itemKey) {
+  let temporizador = null;
+  let inicio = null;
+  const cancelar = () => { clearTimeout(temporizador); temporizador = null; inicio = null; };
+  el.addEventListener('pointerdown', (e) => {
+    inicio = { x: e.clientX, y: e.clientY };
+    temporizador = setTimeout(() => {
+      temporizador = null;
+      el.dataset.longPressed = '1';
+      openNoteItemActionMenu(el, itemKey);
+    }, NOTE_LONG_PRESS_MS);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!inicio) return;
+    if (Math.abs(e.clientX - inicio.x) > 10 || Math.abs(e.clientY - inicio.y) > 10) cancelar();
+  });
+  el.addEventListener('pointerup', cancelar);
+  el.addEventListener('pointercancel', cancelar);
+  // Tras una pulsacion larga NO se abre la nota: el click llega despues
+  // del pointerup, asi que se marca y se descarta ese unico click.
+  el.addEventListener('click', (e) => {
+    if (el.dataset.longPressed) {
+      delete el.dataset.longPressed;
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
+}
+
+// Solo una fila abierta a la vez -- abrir otra cierra la anterior.
+let openSwipedNoteRow = null;
+
+function closeSwipedNoteRow() {
+  if (!openSwipedNoteRow) return;
+  openSwipedNoteRow.classList.remove('is-open');
+  openSwipedNoteRow = null;
+}
+
+// Envuelve la fila para poder deslizarla: los dos botones viven DEBAJO,
+// y la fila se desplaza hacia la izquierda para descubrirlos.
+function wrapNoteRowWithSwipe(row, itemKey) {
+  const wrap = document.createElement('div');
+  wrap.className = 'note-swipe-wrap';
+
+  const acciones = document.createElement('div');
+  acciones.className = 'note-swipe-actions';
+  [['Mover', 'secondary-btn', () => startNoteItemMove(itemKey)],
+    ['Eliminar', 'danger-btn', () => startNoteItemDelete(itemKey)]].forEach(([texto, clase, fn]) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = clase;
+    btn.textContent = texto;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeSwipedNoteRow();
+      fn();
+    });
+    acciones.appendChild(btn);
+  });
+  wrap.appendChild(acciones);
+  wrap.appendChild(row);
+
+  let inicio = null;
+  let horizontal = false;
+  row.addEventListener('pointerdown', (e) => {
+    inicio = { x: e.clientX, y: e.clientY };
+    horizontal = false;
+  });
+  row.addEventListener('pointermove', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    const dy = e.clientY - inicio.y;
+    // En cuanto se ve que el gesto es horizontal, deja de ser scroll de
+    // la lista y pasa a ser "deslizar la fila".
+    if (!horizontal && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) horizontal = true;
+  });
+  row.addEventListener('pointerup', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    inicio = null;
+    if (!horizontal) return;
+    if (dx < -40) {
+      if (openSwipedNoteRow !== wrap) closeSwipedNoteRow();
+      wrap.classList.add('is-open');
+      openSwipedNoteRow = wrap;
+    } else if (dx > 20) {
+      closeSwipedNoteRow();
+    }
+    // Un deslizamiento no debe abrir la nota: se descarta ese click.
+    row.dataset.swiped = '1';
+  });
+  row.addEventListener('click', (e) => {
+    if (row.dataset.swiped) {
+      delete row.dataset.swiped;
+      if (wrap.classList.contains('is-open')) { e.stopPropagation(); e.preventDefault(); }
+    }
+  }, true);
+  return wrap;
 }
 
 // Estado compartido (state.noteSearchQuery/...) entre las dos vistas
@@ -4558,13 +4787,149 @@ const TABLE_BORDER_LEVELS = ['1', '2', '3', '4'];
 // 4 grosores fijos, elegibles directamente (el 1 es el fino de siempre,
 // y es el que traen las tablas nuevas). Antes habia que ir dando a
 // "mas grueso"/"mas fino" hasta dar con el que se buscaba.
+//
+// Alcance: si hay celdas marcadas (modo "Marcar"), solo cambian ESAS; si
+// no hay ninguna, cambia la tabla entera. Las celdas guardan su propio
+// data-border, que manda sobre el de la tabla.
 function setTableBorder(nivel) {
+  const marcadas = getMarkedTableCells();
+  if (marcadas.length) {
+    marcadas.forEach((celda) => {
+      if (nivel === TABLE_BORDER_LEVELS[0]) celda.removeAttribute('data-border');
+      else celda.setAttribute('data-border', nivel);
+    });
+    refreshNoteEditorState();
+    return;
+  }
   const cell = getCurrentTableCell();
   if (!cell) return;
   const table = cell.closest('table');
+  // Al cambiar el grosor de la tabla entera se limpian los de cada celda:
+  // si no, las que se hubieran tocado antes se quedarian con el suyo y
+  // pareceria que el cambio "no ha hecho nada" en esa parte.
+  table.querySelectorAll('td[data-border], th[data-border]').forEach((c) => c.removeAttribute('data-border'));
   if (nivel === TABLE_BORDER_LEVELS[0]) table.removeAttribute('data-border');
   else table.setAttribute('data-border', nivel);
   refreshNoteEditorState();
+}
+
+// ---------------------------------------------------------------------
+// Modo "Marcar": en vez de pelearse con la seleccion de texto de iOS
+// para elegir celdas, se toca cada casilla y se marca/desmarca. Lo usan
+// Agrupar, el grosor de borde y "Mover > Bloque".
+//
+// Mientras esta activo el editor queda en solo lectura: si no, cada
+// toque colocaria el cursor dentro de la celda en vez de marcarla.
+// ---------------------------------------------------------------------
+let tableMarkMode = null; // { table }
+
+function getMarkedTableCells() {
+  if (!tableMarkMode) return [];
+  return Array.from(tableMarkMode.table.querySelectorAll('td.is-marked, th.is-marked'));
+}
+
+function refreshTableMarkButton() {
+  const btn = document.getElementById('btn-note-table-mark');
+  if (!btn) return;
+  const n = getMarkedTableCells().length;
+  btn.textContent = tableMarkMode ? (n ? `Marcar (${n})` : 'Marcar…') : 'Marcar';
+  btn.classList.toggle('is-active', !!tableMarkMode);
+}
+
+function startTableMarkMode() {
+  const cell = getCurrentTableCell();
+  const table = cell ? cell.closest('table') : null;
+  if (!table) return;
+  stopTableManualMove();
+  tableMarkMode = { table };
+  table.classList.add('is-marking');
+  NOTE_EDITOR_BODY.setAttribute('contenteditable', 'false');
+  table.addEventListener('click', onTableMarkClick);
+  refreshTableMarkButton();
+}
+
+function stopTableMarkMode({ conservarMarcas = false } = {}) {
+  if (!tableMarkMode) return;
+  const { table } = tableMarkMode;
+  if (!conservarMarcas) table.querySelectorAll('.is-marked').forEach((c) => c.classList.remove('is-marked'));
+  table.classList.remove('is-marking');
+  table.removeEventListener('click', onTableMarkClick);
+  tableMarkMode = null;
+  if (!tableManualMove) NOTE_EDITOR_BODY.setAttribute('contenteditable', 'true');
+  refreshTableMarkButton();
+}
+
+function onTableMarkClick(e) {
+  const celda = e.target.closest && e.target.closest('td, th');
+  if (!celda || !tableMarkMode || !tableMarkMode.table.contains(celda)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  celda.classList.toggle('is-marked');
+  refreshTableMarkButton();
+}
+
+// ---------------------------------------------------------------------
+// Deshacer/rehacer de la ESTRUCTURA de la tabla (no del texto: eso lo
+// sigue llevando el propio sistema). Antes de cada accion se guarda una
+// foto de la tabla; si la accion la borra entera (quitar la ultima fila),
+// se guarda tambien una del contenido completo para poder recuperarla.
+// ---------------------------------------------------------------------
+const TABLE_HISTORY_MAX = 30;
+const tableHistory = { atras: [], adelante: [] };
+
+function captureTableState() {
+  const cell = getCurrentTableCell() || (tableMarkMode && tableMarkMode.table.querySelector('td, th'));
+  const table = (tableManualMove && tableManualMove.table)
+    || (tableMarkMode && tableMarkMode.table)
+    || (cell && cell.closest('table'));
+  if (!table) return null;
+  const tablas = Array.from(NOTE_EDITOR_BODY.querySelectorAll('table'));
+  return { indice: tablas.indexOf(table), tabla: table.outerHTML, cuerpo: NOTE_EDITOR_BODY.innerHTML };
+}
+
+function restoreTableState(estado) {
+  if (!estado) return;
+  const tablas = Array.from(NOTE_EDITOR_BODY.querySelectorAll('table'));
+  const table = tablas[estado.indice];
+  // Si la tabla ya no existe (la accion la borro entera) se recupera el
+  // contenido completo; si existe, solo se repone ella para no pisar el
+  // texto que se haya escrito despues en el resto de la nota.
+  if (table) table.outerHTML = estado.tabla;
+  else NOTE_EDITOR_BODY.innerHTML = estado.cuerpo;
+  const nueva = NOTE_EDITOR_BODY.querySelectorAll('table')[estado.indice];
+  if (nueva) {
+    const primera = nueva.querySelector('td, th');
+    if (primera) putCaretInCell(primera);
+  }
+  refreshNoteEditorState();
+  refreshTableHistoryButtons();
+}
+
+function refreshTableHistoryButtons() {
+  const undo = document.getElementById('btn-note-table-undo');
+  const redo = document.getElementById('btn-note-table-redo');
+  if (undo) undo.disabled = tableHistory.atras.length === 0;
+  if (redo) redo.disabled = tableHistory.adelante.length === 0;
+}
+
+function undoTableChange() {
+  if (!tableHistory.atras.length) return;
+  stopTableMarkMode();
+  stopTableManualMove();
+  const actual = captureTableState();
+  const estado = tableHistory.atras.pop();
+  if (actual) tableHistory.adelante.push(actual);
+  restoreTableState(estado);
+}
+
+function redoTableChange() {
+  if (!tableHistory.adelante.length) return;
+  stopTableMarkMode();
+  stopTableManualMove();
+  const actual = captureTableState();
+  const estado = tableHistory.adelante.pop();
+  if (actual) tableHistory.atras.push(actual);
+  restoreTableState(estado);
 }
 
 // Ensancha o estrecha la COLUMNA donde esta el cursor, tocando su <col>
@@ -4642,13 +5007,34 @@ function moveTableColumn(delta, celdaDada) {
 // ---------------------------------------------------------------------
 let tableManualMove = null;
 
-function startTableManualMove() {
-  const cell = getCurrentTableCell();
+// Aviso la primera vez: "mover a mano" no se adivina solo (Koku).
+const TABLE_MOVE_HINTS = {
+  line: 'Arrastra una casilla: hacia arriba o abajo mueve su FILA, hacia los lados mueve su COLUMNA. Se sale tocando fuera de la tabla.',
+  cell: 'Arrastra una casilla hacia la de al lado y las dos intercambian su contenido. Se sale tocando fuera de la tabla.',
+  block: 'Arrastra cualquiera de las casillas marcadas y el bloque entero se cambia por las de al lado. Se sale tocando fuera de la tabla.',
+};
+
+async function startTableManualMove(alcance = 'line') {
+  const cell = getCurrentTableCell() || (tableMarkMode && getMarkedTableCells()[0]);
   if (!cell) return;
   const table = cell.closest('table');
   if (!table) return;
+  const marcadas = getMarkedTableCells();
+  if (alcance === 'block' && marcadas.length === 0) {
+    await showAppAlert('Marca antes las casillas que quieres mover (botón "Marcar" de la barra).');
+    return;
+  }
+  const clave = `tableMoveHintSeen_${alcance}`;
+  if (localStorage.getItem(clave) !== '1') {
+    await showAppAlert(TABLE_MOVE_HINTS[alcance], {
+      checkbox: { label: 'No volver a mostrar este aviso', storageKey: clave },
+    });
+  }
   if (tableManualMove) stopTableManualMove();
-  tableManualMove = { table, arrastre: null };
+  // El bloque se mueve con las marcas puestas: hay que conservarlas.
+  if (alcance === 'block') stopTableMarkMode({ conservarMarcas: true });
+  else stopTableMarkMode();
+  tableManualMove = { table, arrastre: null, alcance, bloque: alcance === 'block' ? marcadas : [] };
   table.classList.add('is-manual-move');
   NOTE_EDITOR_BODY.setAttribute('contenteditable', 'false');
   table.addEventListener('pointerdown', onTableManualMoveDown);
@@ -4660,6 +5046,7 @@ function startTableManualMove() {
 function stopTableManualMove() {
   if (!tableManualMove) return;
   const { table } = tableManualMove;
+  table.querySelectorAll('.is-marked').forEach((c) => c.classList.remove('is-marked'));
   table.classList.remove('is-manual-move');
   table.removeEventListener('pointerdown', onTableManualMoveDown);
   table.removeEventListener('pointermove', onTableManualMoveMove);
@@ -4688,13 +5075,86 @@ function onTableManualMoveMove(e) {
   const caja = arrastre.cell.getBoundingClientRect();
   // Se mueve de una en una: cada vez que el dedo recorre una celda
   // entera, se da un paso y se vuelve a tomar la referencia desde ahi.
-  if (Math.abs(dx) > Math.abs(dy)) {
-    if (Math.abs(dx) < caja.width) return;
-    if (moveTableColumn(dx > 0 ? 1 : -1, arrastre.cell)) { arrastre.x = e.clientX; arrastre.y = e.clientY; }
-  } else {
-    if (Math.abs(dy) < caja.height) return;
-    if (moveTableRow(dy > 0 ? 1 : -1, arrastre.cell)) { arrastre.x = e.clientX; arrastre.y = e.clientY; }
+  const horizontal = Math.abs(dx) > Math.abs(dy);
+  if (horizontal ? Math.abs(dx) < caja.width : Math.abs(dy) < caja.height) return;
+  const paso = horizontal ? (dx > 0 ? 1 : -1) : (dy > 0 ? 1 : -1);
+  const dc = horizontal ? paso : 0;
+  const dr = horizontal ? 0 : paso;
+
+  let movido = false;
+  if (tableManualMove.alcance === 'cell') movido = swapTableCellWithNeighbour(arrastre.cell, dr, dc);
+  else if (tableManualMove.alcance === 'block') movido = moveTableBlock(tableManualMove.bloque, dr, dc);
+  else movido = horizontal ? moveTableColumn(paso, arrastre.cell) : moveTableRow(paso, arrastre.cell);
+
+  if (movido) { arrastre.x = e.clientX; arrastre.y = e.clientY; }
+}
+
+// Mover UNA casilla = intercambiar su contenido con el de la de al lado
+// (decision de Koku): sacarla de la fila y meterla en otro sitio dejaria
+// la tabla descuadrada, con una fila mas corta que las demas.
+function swapTableCellWithNeighbour(cell, dr, dc) {
+  const table = cell.closest('table');
+  const rejilla = buildTableGrid(table);
+  let r0 = -1; let c0 = -1;
+  rejilla.forEach((fila, r) => fila.forEach((celda, c) => {
+    if (celda === cell && r0 < 0) { r0 = r; c0 = c; }
+  }));
+  if (r0 < 0) return false;
+  const destino = rejilla[r0 + dr] && rejilla[r0 + dr][c0 + dc];
+  if (!destino || destino === cell) return false;
+  const suyo = destino.innerHTML;
+  destino.innerHTML = cell.innerHTML;
+  cell.innerHTML = suyo;
+  refreshNoteEditorState();
+  return true;
+}
+
+// Mover un BLOQUE de casillas marcadas: el bloque se intercambia con la
+// franja de casillas sobre la que pasa. Solo se mueve el CONTENIDO -- la
+// rejilla de la tabla se queda como esta, igual que al mover una casilla.
+function moveTableBlock(bloque, dr, dc) {
+  if (!bloque || bloque.length === 0) return false;
+  const table = bloque[0].closest('table');
+  const rejilla = buildTableGrid(table);
+  const pos = new Map();
+  rejilla.forEach((fila, r) => fila.forEach((celda, c) => {
+    if (!pos.has(celda)) pos.set(celda, { r, c });
+  }));
+
+  const seleccion = new Set(bloque);
+  const destinos = [];
+  for (const celda of bloque) {
+    const p = pos.get(celda);
+    if (!p) return false;
+    const destino = rejilla[p.r + dr] && rejilla[p.r + dr][p.c + dc];
+    if (!destino) return false; // el bloque se saldria de la tabla
+    destinos.push([celda, destino]);
   }
+  // Alto/ancho del bloque en la direccion del movimiento, para saber a
+  // que casilla vuelve el contenido de las que se quedan por el camino.
+  const filas = new Set(bloque.map((c) => pos.get(c).r));
+  const cols = new Set(bloque.map((c) => pos.get(c).c));
+  const salto = dr !== 0 ? filas.size : cols.size;
+
+  const original = new Map();
+  table.querySelectorAll('td, th').forEach((c) => original.set(c, c.innerHTML));
+
+  destinos.forEach(([celda, destino]) => { destino.innerHTML = original.get(celda); });
+  // Las que el bloque ha pisado (y no estaban marcadas) pasan al hueco
+  // que deja el bloque por el otro lado.
+  destinos.forEach(([, destino]) => {
+    if (seleccion.has(destino)) return;
+    const p = pos.get(destino);
+    const vuelta = rejilla[p.r - dr * salto] && rejilla[p.r - dr * salto][p.c - dc * salto];
+    if (vuelta) vuelta.innerHTML = original.get(destino);
+  });
+  // La marca viaja con el bloque para poder seguir moviendolo.
+  bloque.forEach((c) => c.classList.remove('is-marked'));
+  const nuevos = destinos.map(([, destino]) => destino);
+  nuevos.forEach((c) => c.classList.add('is-marked'));
+  tableManualMove.bloque = nuevos;
+  refreshNoteEditorState();
+  return true;
 }
 
 function onTableManualMoveUp() {
@@ -4753,7 +5213,10 @@ function getSelectionCornerCells() {
 }
 
 function mergeTableCell() {
-  const esquinas = getSelectionCornerCells();
+  // Con celdas marcadas manda esa marca; si no, se usan las dos esquinas
+  // de la seleccion de texto (util con raton, incomodo con el dedo).
+  const marcadas = getMarkedTableCells();
+  const esquinas = marcadas.length ? marcadas : getSelectionCornerCells();
   if (!esquinas.length || !esquinas[0]) return;
   const table = esquinas[0].closest('table');
   const rejilla = buildTableGrid(table);
@@ -4824,7 +5287,7 @@ function isMergedTableCell(cell) {
 // Deshace una combinacion: devuelve la celda a un solo hueco y rellena
 // con celdas vacias los que habia ocupando.
 function splitTableCell() {
-  const cell = getCurrentTableCell();
+  const cell = getMarkedTableCells().find((c) => isMergedTableCell(c)) || getCurrentTableCell();
   if (!isMergedTableCell(cell)) return;
   const table = cell.closest('table');
   const filas = Array.from(table.rows);
@@ -5050,7 +5513,9 @@ const NOTE_TABLE_COMMANDS = {
   'col-remove': removeTableColumn,
   'col-remove-first': () => removeTableColumnAtEdge('first'),
   'col-remove-last': () => removeTableColumnAtEdge('last'),
-  'move-manual': startTableManualMove,
+  'move-cell': () => startTableManualMove('cell'),
+  'move-line': () => startTableManualMove('line'),
+  'move-block': () => startTableManualMove('block'),
   'width-plus': () => changeTableColumnWidth(20),
   'width-minus': () => changeTableColumnWidth(-20),
   'width-exact': () => setTableSizeByHand('col'),
@@ -5096,7 +5561,9 @@ const NOTE_TABLE_MENUS = {
   move: {
     label: 'Mover',
     opciones: [
-      ['move-manual', 'Mover a mano'],
+      ['move-cell', 'Una casilla'],
+      ['move-line', 'Fila o columna'],
+      ['move-block', 'Casillas marcadas'],
     ],
   },
   size: {
@@ -5112,20 +5579,23 @@ const NOTE_TABLE_MENUS = {
   },
   border: {
     label: 'Borde',
-    opciones: [
-      ['border-1', 'Fino'],
-      ['border-2', 'Medio'],
-      ['border-3', 'Grueso'],
-      ['border-4', 'Muy grueso'],
-    ],
+    // Con celdas marcadas el grosor solo cambia ahi; sin marcar nada,
+    // cambia la tabla entera (ver setTableBorder). Cada opcion lleva a la
+    // derecha una muestra de como se ve ese grosor.
+    opciones: () => TABLE_BORDER_LEVELS.map((nivel, i) => [
+      `border-${nivel}`,
+      ['Fino', 'Medio', 'Grueso', 'Muy grueso'][i],
+      `<span class="table-border-preview" style="border-bottom-width:${nivel}px"></span>`,
+    ]),
   },
   cells: {
     label: 'Celdas',
     // Lista calculada al abrir: "Separar" solo aparece si la celda de
     // verdad esta agrupada -- ofrecerlo siempre llevaba a confusion.
     opciones: () => {
-      const lista = [['merge', 'Agrupar las seleccionadas']];
-      if (isMergedTableCell(getCurrentTableCell())) lista.push(['split', 'Separar esta']);
+      const lista = [['merge', 'Agrupar las marcadas']];
+      const encendida = getMarkedTableCells().find((c) => isMergedTableCell(c)) || getCurrentTableCell();
+      if (isMergedTableCell(encendida)) lista.push(['split', 'Separar esta']);
       return lista;
     },
   },
@@ -5135,9 +5605,22 @@ const tableMenuPopover = document.createElement('div');
 tableMenuPopover.className = 'select-popover table-menu-popover hidden';
 document.body.appendChild(tableMenuPopover);
 
+// Las acciones que solo ENTRAN en un modo (mover a mano) no cambian nada
+// todavia: no tiene sentido guardarlas en el historial.
+const TABLE_COMMANDS_WITHOUT_HISTORY = new Set(['move-cell', 'move-line', 'move-block']);
+
 function runTableCommand(nombre) {
   const fn = NOTE_TABLE_COMMANDS[nombre];
   if (!fn) return;
+  if (!TABLE_COMMANDS_WITHOUT_HISTORY.has(nombre)) {
+    const antes = captureTableState();
+    if (antes) {
+      tableHistory.atras.push(antes);
+      if (tableHistory.atras.length > TABLE_HISTORY_MAX) tableHistory.atras.shift();
+      tableHistory.adelante.length = 0;
+      refreshTableHistoryButtons();
+    }
+  }
   const resultado = fn();
   const despues = () => {
     // Quitar la ultima fila o columna borra la tabla entera: si ya no
@@ -5160,11 +5643,17 @@ document.querySelectorAll('#note-table-toolbar [data-table-menu]').forEach((btn)
     tableMenuPopover.dataset.menu = btn.dataset.tableMenu;
     tableMenuPopover.innerHTML = '';
     const opciones = typeof menu.opciones === 'function' ? menu.opciones() : menu.opciones;
-    opciones.forEach(([cmd, texto]) => {
+    opciones.forEach(([cmd, texto, muestra]) => {
       const opt = document.createElement('button');
       opt.type = 'button';
       opt.className = 'select-option';
       opt.textContent = texto;
+      // Tercer elemento opcional: una muestra a la derecha (lo usa el
+      // menu de Borde para enseñar como se ve cada grosor).
+      if (muestra) {
+        opt.classList.add('has-preview');
+        opt.insertAdjacentHTML('beforeend', muestra);
+      }
       opt.addEventListener('mousedown', (ev) => ev.preventDefault());
       opt.addEventListener('click', () => {
         tableMenuPopover.classList.add('hidden');
@@ -5204,23 +5693,39 @@ document.body.appendChild(tableCornerBtn);
 
 // Alterna entre la barra de formato de texto y la de tabla.
 function setNoteTableToolbarOpen(open) {
-  // Cerrar la barra de tabla sale tambien del modo "mover a mano": si no,
-  // el editor se quedaria bloqueado sin nada que lo delate.
-  if (!open) stopTableManualMove();
+  // Cerrar la barra de tabla sale tambien de los modos que bloquean el
+  // editor ("mover a mano" y "Marcar"): si no, se quedaria bloqueado sin
+  // nada que lo delate.
+  if (!open) { stopTableManualMove(); stopTableMarkMode(); }
+  if (open) { tableHistory.atras.length = 0; tableHistory.adelante.length = 0; refreshTableHistoryButtons(); }
   document.getElementById('note-body-toolbar').classList.toggle('hidden', open);
   document.getElementById('note-table-toolbar').classList.toggle('hidden', !open);
   if (!open) NOTE_EDITOR_BODY.focus();
   refreshTableCornerButton();
 }
 
-// Tocar fuera de la tabla sale del modo "mover a mano" -- mismo criterio
-// que la propia barra de tabla, que se cierra al sacar el cursor de ella.
+// Tocar fuera de la tabla sale de "mover a mano" y de "Marcar" -- mismo
+// criterio que la propia barra de tabla, que se cierra al sacar el
+// cursor de ella.
 document.addEventListener('pointerdown', (e) => {
-  if (!tableManualMove) return;
-  if (e.target.closest && e.target.closest('table') === tableManualMove.table) return;
-  if (e.target.closest && e.target.closest('#note-table-toolbar, .table-menu-popover')) return;
+  const modo = tableManualMove || tableMarkMode;
+  if (!modo) return;
+  if (e.target.closest && e.target.closest('table') === modo.table) return;
+  if (e.target.closest && e.target.closest('#note-table-toolbar, .table-menu-popover, #app-confirm-modal')) return;
   stopTableManualMove();
+  stopTableMarkMode();
 });
+
+document.getElementById('btn-note-table-mark').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('btn-note-table-mark').addEventListener('click', () => {
+  if (tableMarkMode) stopTableMarkMode();
+  else startTableMarkMode();
+});
+document.getElementById('btn-note-table-undo').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('btn-note-table-undo').addEventListener('click', undoTableChange);
+document.getElementById('btn-note-table-redo').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('btn-note-table-redo').addEventListener('click', redoTableChange);
+refreshTableHistoryButtons();
 
 function isNoteTableToolbarOpen() {
   return !document.getElementById('note-table-toolbar').classList.contains('hidden');
@@ -5265,9 +5770,9 @@ NOTE_EDITOR_BODY.addEventListener('scroll', refreshTableCornerButton);
 // cursor deja de estar dentro de una tabla (tocando el texto de fuera,
 // por ejemplo). Pedido de Koku, que ese boton no lo veia claro.
 function closeTableToolbarIfCaretLeft() {
-  // En modo "mover a mano" no hay cursor (el editor esta bloqueado a
-  // proposito): ahi se sale tocando fuera de la tabla, no por esto.
-  if (tableManualMove) return;
+  // En "mover a mano" y en "Marcar" no hay cursor (el editor esta
+  // bloqueado a proposito): ahi se sale tocando fuera, no por esto.
+  if (tableManualMove || tableMarkMode) return;
   if (isNoteTableToolbarOpen() && !getCurrentTableCell()) setNoteTableToolbarOpen(false);
 }
 
@@ -6131,6 +6636,14 @@ function removeOpenNoteAndAdvance(key) {
     state.activeOpenNoteKey = null;
     document.getElementById('note-editor-view').classList.add('hidden');
     stopNoteEditorViewportAnchor();
+    // El icono de esquina de tabla vive en <body> con position:fixed, no
+    // dentro del editor: al salir hay que esconderlo a mano o se queda
+    // flotando encima del listado de notas.
+    stopTableManualMove();
+    tableCornerBtn.classList.add('hidden');
+    tableMenuPopover.classList.add('hidden');
+    document.getElementById('note-table-toolbar').classList.add('hidden');
+    document.getElementById('note-body-toolbar').classList.remove('hidden');
     NOTE_EDITOR_BODY.innerHTML = '';
   }
 }
@@ -6661,10 +7174,15 @@ const MOBILE_NOTES_FAB_DONE_ICON = '<svg width="22" height="22" viewBox="0 0 24 
 function refreshMobileNotesFab() {
   const btn = document.getElementById('btn-mobile-notes-add');
   const editando = mobileNotesMode === 'editFolders';
+  // Seleccionando o moviendo, el "+" estorba: no tiene sentido crear
+  // nada a medias de eso, y ademas chocaria con la barra de acciones que
+  // aparece justo encima de la barra inferior.
+  const seleccionando = mobileNotesMode === 'select' || mobileNotesMode === 'move';
+  document.getElementById('mobile-notes-add-wrap').classList.toggle('hidden', seleccionando);
   btn.innerHTML = editando ? MOBILE_NOTES_FAB_DONE_ICON : MOBILE_NOTES_FAB_ADD_ICON;
   btn.setAttribute('aria-label', editando ? 'Listo' : 'Añadir');
   btn.classList.toggle('is-done', editando);
-  if (editando) toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
+  if (editando || seleccionando) toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
 }
 
 document.getElementById('btn-mobile-notes-add').addEventListener('click', (e) => {

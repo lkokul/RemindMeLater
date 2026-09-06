@@ -583,6 +583,37 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .note-editor-body table[data-border="thick"] td, .note-editor-body table[data-border="thick"] th { border-width: 3px; }
 .note-editor-body table[data-border="4"] td, .note-editor-body table[data-border="4"] th { border-width: 4px; }
 
+/* Grosor de una CELDA suelta (menu Borde con casillas marcadas): manda
+   sobre el de la tabla, de ahi que vaya despues en la hoja. */
+.note-editor-body td[data-border="1"], .note-editor-body th[data-border="1"] { border-width: 1px; }
+.note-editor-body td[data-border="2"], .note-editor-body th[data-border="2"] { border-width: 2px; }
+.note-editor-body td[data-border="3"], .note-editor-body th[data-border="3"] { border-width: 3px; }
+.note-editor-body td[data-border="4"], .note-editor-body th[data-border="4"] { border-width: 4px; }
+
+/* Modo "Marcar": se toca cada casilla para marcarla/desmarcarla (con la
+   seleccion de texto de iOS era imposible acertar). */
+.note-editor-body table.is-marking {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+  user-select: none;
+}
+.note-editor-body table.is-marking td,
+.note-editor-body table.is-marking th { cursor: pointer; }
+.note-editor-body td.is-marked,
+.note-editor-body th.is-marked {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Muestra del grosor a la derecha de cada opcion del menu de Borde. */
+.select-option.has-preview { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.table-border-preview {
+  width: 46px;
+  border-bottom-style: solid;
+  border-bottom-color: var(--surface-2-text);
+  flex-shrink: 0;
+}
+
 /* Modo "mover a mano": la tabla se marca con el color de acento para que
    se vea que ahora el arrastre mueve filas/columnas en vez de
    seleccionar texto. */
@@ -1750,7 +1781,8 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 0.6rem;
-  margin-bottom: 0.6rem;
+  /* Aire arriba y abajo: pegada al buscador parecia parte de la barra. */
+  margin: 0.5rem 0 0.8rem;
 }
 .mobile-note-gallery-card {
   position: relative;
@@ -1760,6 +1792,19 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   overflow: hidden;
   background: var(--surface-2);
   cursor: pointer;
+  /* El texto de la tarjeta es decoracion, no algo que copiar: sin esto,
+     mantener pulsado (que aqui abre Mover/Eliminar) disparaba la lupa de
+     seleccionar texto de iOS. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+/* Carpeta en galeria: mismo formato de tarjeta que una nota, con el
+   icono de carpeta grande sobre su propio color. */
+.mobile-note-gallery-folder-icon {
+  width: 46%;
+  height: 46%;
+  color: rgba(255, 255, 255, 0.9);
 }
 .mobile-note-gallery-media {
   aspect-ratio: 1 / 1;
@@ -1797,18 +1842,21 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   filter: blur(5px);
   user-select: none;
 }
+/* Area de toque generosa: es el UNICO control que tapa/destapa la nota,
+   y con el difuminado encima cuesta acertar si es diminuto. */
 .mobile-note-gallery-eye-btn {
   position: absolute;
   top: 0.3rem;
   left: 0.3rem;
-  z-index: 1;
-  background: rgba(0, 0, 0, 0.45);
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.55);
   color: #fff;
   border: none;
   border-radius: 999px;
-  padding: 0.25rem;
+  padding: 0.4rem;
   line-height: 0;
 }
+.mobile-note-gallery-eye-btn svg { width: 18px; height: 18px; display: block; }
 .mobile-note-gallery-checkbox {
   position: absolute;
   top: 0.3rem;
@@ -1821,18 +1869,74 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   right: 0.3rem;
   z-index: 1;
 }
+.mobile-note-gallery-read-btn {
+  position: absolute;
+  bottom: 2.2rem;
+  left: 0.3rem;
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 0.3rem;
+  line-height: 0;
+}
+.mobile-note-gallery-read-btn svg { width: 16px; height: 16px; }
 
-/* Barra de acciones (Eliminar/Mover, Cancelar/"Mover aqui") -- fija
-   abajo dentro de #mobile-notes-view, siempre visible mientras la lista
-   de encima hace scroll. */
-.mobile-notes-action-bar {
-  position: sticky;
+/* Deslizar una fila del listado hacia la izquierda descubre Mover y
+   Eliminar, que viven DEBAJO de la propia fila. `touch-action: pan-y`
+   deja el scroll vertical de la lista al navegador y nos quedamos solo
+   con el gesto horizontal. */
+.note-swipe-wrap {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+  touch-action: pan-y;
+}
+.note-swipe-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
   bottom: 0;
   display: flex;
-  gap: 0.6rem;
-  padding: 0.6rem 1rem;
+  gap: 0.3rem;
+  align-items: stretch;
+  padding: 0.2rem;
+}
+.note-swipe-actions button {
+  font-size: 0.8rem;
+  padding: 0 0.7rem;
+  border-radius: var(--radius);
+}
+.note-swipe-wrap > .note-item {
+  position: relative;
   background: var(--bg);
-  border-top: 1px solid var(--border);
+  transition: transform 0.16s ease-out;
+}
+.note-swipe-wrap.is-open > .note-item { transform: translateX(-9.5rem); }
+
+/* Menu de Mover/Eliminar de una pulsacion larga en galeria. */
+.note-item-action-menu { width: 180px; }
+
+/* Barra de acciones (Eliminar/Mover, Cancelar/"Mover aqui"). Va FIJA
+   justo encima de la barra inferior de la app: antes era `sticky` dentro
+   de la vista y, al no tener un contenedor con scroll propio, acababa
+   pegada al borde de abajo -- o sea, TAPADA por la barra inferior
+   flotante, que va por encima. De ahi la sensacion de que "Seleccionar
+   no hace nada": los botones estaban ahi, pero debajo del menu. */
+.mobile-notes-action-bar {
+  position: fixed;
+  left: 0.6rem;
+  right: 0.6rem;
+  bottom: calc(5.2rem + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 .mobile-notes-action-bar button { flex: 1; }
 /* El hueco izquierdo de la barra, usado como TEXTO de ayuda en "Editar
