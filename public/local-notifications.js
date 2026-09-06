@@ -13,13 +13,35 @@
 // existe: entonces esto no hace nada y se sigue avisando como siempre
 // mientras la app esta abierta (ver loadReminders() en app.js).
 
-// El plugin solo existe dentro de la app empaquetada (Capacitor lo
-// inyecta). Se comprueba en cada llamada, no una vez al cargar, porque
-// este archivo puede evaluarse antes de que Capacitor termine de
-// registrar sus plugins.
+// Como no hay bundler, el plugin hay que REGISTRARLO a mano. Esto costo
+// una ronda entera de "el interruptor no hace nada": la app nativa
+// inyecta su puente con el sistema, pero ese puente NO rellena
+// Capacitor.Plugins por su cuenta -- eso solo pasa cuando alguien llama a
+// registerPlugin(), que normalmente hace el `import` del paquete del
+// plugin. Sin import (ni bundler que lo resuelva),
+// Capacitor.Plugins.LocalNotifications era undefined SIEMPRE, asi que el
+// interruptor se quedaba deshabilitado, nunca se pedia permiso, y por eso
+// iOS ni siquiera mostraba el apartado de notificaciones de la app en sus
+// Ajustes. Registrandolo aqui, el proxy habla con el plugin nativo igual
+// que lo haria el paquete oficial.
+//
+// Se registra una sola vez y se cachea; se hace de forma perezosa (no al
+// cargar el archivo) porque el puente puede no estar listo todavia.
+let localNotificationsPlugin = null;
+
 function getLocalNotificationsPlugin() {
+  if (localNotificationsPlugin) return localNotificationsPlugin;
   const cap = window.Capacitor;
-  return (cap && cap.Plugins && cap.Plugins.LocalNotifications) || null;
+  // Fuera de la app empaquetada (un navegador normal) no hay plugin: el
+  // proxy existiria igual, pero cada llamada fallaria con
+  // "not implemented", que es peor que no tenerlo.
+  if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null;
+  if (cap.Plugins && cap.Plugins.LocalNotifications) {
+    localNotificationsPlugin = cap.Plugins.LocalNotifications;
+  } else if (window.capacitorExports && typeof window.capacitorExports.registerPlugin === 'function') {
+    localNotificationsPlugin = window.capacitorExports.registerPlugin('LocalNotifications');
+  }
+  return localNotificationsPlugin;
 }
 
 function localNotificationsAvailable() {
@@ -38,6 +60,27 @@ async function ensureLocalNotificationPermission() {
   if (actual.display === 'granted') return true;
   const pedido = await plugin.requestPermissions();
   return pedido.display === 'granted';
+}
+
+// Pide el permiso del sistema LA PRIMERA VEZ que se abre la app, sin
+// tener que ir a Configuracion a buscarlo -- que es lo que pidio Koku
+// ("que no me tenga que ir hasta ahi la primera vez, no seria
+// intuitivo"). Se marca en localStorage que ya se pregunto, asi que:
+// - Si dice que si, los avisos quedan activados.
+// - Si dice que no, no se vuelve a preguntar NUNCA desde aqui (iOS
+//   tampoco deja volver a preguntar: hay que ir a los Ajustes del
+//   telefono), y el interruptor de Configuracion sigue ahi para
+//   apagarlos/encenderlos como cualquier otro ajuste.
+async function maybeAskNotificationPermissionOnStartup() {
+  if (!localNotificationsAvailable()) return;
+  if (localStorage.getItem('notificationsPermissionAsked') === '1') return;
+  localStorage.setItem('notificationsPermissionAsked', '1');
+  const concedido = await ensureLocalNotificationPermission();
+  // El ajuste propio de la app sigue el resultado: si no hay permiso del
+  // sistema, no tiene sentido dejarlo "encendido" prometiendo avisos que
+  // nunca van a sonar.
+  localStorage.setItem('notificationsEnabled', concedido ? 'true' : 'false');
+  if (typeof refreshMobileTab === 'function') refreshMobileTab();
 }
 
 // Vuelve a programar TODOS los avisos futuros desde cero: primero

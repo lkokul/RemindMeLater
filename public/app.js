@@ -441,7 +441,13 @@ enableCtrlEnterSubmit('note-form');
 // "rebote" del fondo).
 let modalScrollLockY = 0;
 function refreshModalScrollLock() {
-  const anyOpen = document.querySelector('.modal:not(.hidden)') !== null;
+  // Cuenta tanto un modal como una pantalla completa (.my-space-view):
+  // esas pantallas son position:fixed y traen su propio scroll dentro,
+  // pero la PAGINA de debajo (el calendario, mas alto que la ventana)
+  // se sigue pudiendo arrastrar por detras -- son los "dos scrolls" que
+  // se notaban al abrir una nota. Bloqueando el de la pagina mientras
+  // hay algo encima, solo queda el de dentro.
+  const anyOpen = document.querySelector('.modal:not(.hidden), .my-space-view:not(.hidden)') !== null;
   const isLocked = document.body.classList.contains('modal-open-lock');
   if (anyOpen && !isLocked) {
     modalScrollLockY = window.scrollY;
@@ -461,9 +467,14 @@ function refreshModalScrollLock() {
   const settingsModal = document.getElementById('settings-modal');
   const settingsOpen = settingsModal ? !settingsModal.classList.contains('hidden') : false;
   document.body.classList.toggle('settings-modal-open', settingsOpen);
+  // OJO: "hay un modal de verdad abierto" es DISTINTO de "hay algo
+  // encima". El bloqueo de scroll aplica a los dos, pero la barra
+  // inferior solo se aparta ante un modal (una ventana puntual); una
+  // pantalla completa la necesita para poder salir de ella.
+  document.body.classList.toggle('real-modal-open', document.querySelector('.modal:not(.hidden)') !== null);
 }
 const modalScrollLockObserver = new MutationObserver(refreshModalScrollLock);
-document.querySelectorAll('.modal').forEach((el) => modalScrollLockObserver.observe(el, { attributes: true, attributeFilter: ['class'] }));
+document.querySelectorAll('.modal, .my-space-view').forEach((el) => modalScrollLockObserver.observe(el, { attributes: true, attributeFilter: ['class'] }));
 
 // ---------------------------------------------------------------------
 // Selector de fecha con estilo propio: sustituye <input type="date"> (o
@@ -844,18 +855,6 @@ async function loadSpecialDays() {
   rows.forEach((r) => { state.specialDays[r.date] = r.type; });
 }
 
-// Como se ven, en el calendario del mes, los dias con varios
-// eventos/tareas a la vez — preferencia de ESTE dispositivo, se cambia
-// desde Configuracion > Vista (ver refreshCalendarDensityOptions en
-// settings.js).
-const CALENDAR_DENSITY_MODE_IDS = ['limit', 'dots', 'tint'];
-const CALENDAR_DENSITY_LIMIT = 3; // cuantos chips completos se ven en modo "limite" antes del "+N mas"
-
-function getCalendarDensityMode() {
-  const stored = localStorage.getItem('calendarDayDensity');
-  return CALENDAR_DENSITY_MODE_IDS.includes(stored) ? stored : 'limit';
-}
-
 // Construye el chip de un evento normal (no tarea) para una celda del
 // calendario — se saco aparte de renderCalendarGrid porque el modo
 // "limite" solo pinta ALGUNOS de los eventos del dia, no todos.
@@ -1086,9 +1085,9 @@ function buildMobileDayGroupPill(groups) {
   return pill;
 }
 
-// Ajuste por dispositivo (localStorage, NO sincronizado -- mismo patron
-// que calendarDayDensity de escritorio, ver getCalendarDensityMode() mas
-// arriba): que tan "denso" se ve un dia con eventos en el mes movil.
+// Ajuste por dispositivo (localStorage, NO sincronizado): que tan
+// "denso" se ve un dia con eventos en el mes. Se elige en la propia
+// barra del calendario, no en Configuracion.
 const MOBILE_CALENDAR_MONTH_MODE_IDS = ['compact', 'stacked', 'listed'];
 function getMobileCalendarMonthMode() {
   const stored = localStorage.getItem('mobileCalendarMonthMode');
@@ -1620,11 +1619,19 @@ async function renderMobileHoursView(date) {
   refreshMobileCurrentTimeLine(date);
 }
 
-// --- "Listado" (dia): scroll bidireccional -- ventana inicial de ±3
-// dias, un IntersectionObserver en los centinelas de arriba/abajo la
-// amplia sola al acercarse a un extremo (sin libreria, mismo patron
-// "centinela" que se explico en el plan). -----------------------------
-let mobileDayListadoRange = null; // { from: Date, to: Date }
+// --- "Listado": UNA sola lista continua con TODOS los eventos, de
+// cualquier año (pedido de Koku: "que muestre todo, de todos los años,
+// un scroll infinito con todos los eventos"). Antes era una ventana de
+// ±3 dias alrededor del dia que estuvieras viendo, asi que al cambiar de
+// mes desaparecian los demas.
+//
+// Se piden TODOS los eventos de golpe (GET /api/events sin from/to, ya
+// ordenado por fecha) y se agrupan por dia una sola vez; lo que se
+// amplia al deslizar no es un rango de fechas sino cuantos de esos dias
+// se PINTAN -- asi da igual que entre dos eventos haya tres años de
+// hueco, no hay que recorrer dia a dia el calendario entero.
+let mobileListadoDays = null;    // [{ key, date, events[] }], solo dias CON algo
+let mobileListadoWindow = null;  // { start, end } indices dentro de mobileListadoDays
 let mobileDayListadoObserver = null;
 let mobileDayListadoBusy = false;
 // Si llega una peticion de expandir mientras ya hay otra en curso (pasa
@@ -1636,8 +1643,9 @@ let mobileDayListadoBusy = false;
 // mientras se queda "visible" sin mas), se apunta aqui para procesarla
 // en cuanto la actual termine, en vez de descartarla.
 let mobileDayListadoPending = new Set();
-const MOBILE_DAY_LISTADO_STEP_DAYS = 4;
-const MOBILE_DAY_LISTADO_MAX_SPAN_DAYS = 180; // red de seguridad, evita crecimiento sin limite
+// Cuantos dias-con-contenido se añaden cada vez que se llega a un
+// extremo. No hay tope: la lista puede acabar mostrandolo todo.
+const MOBILE_LISTADO_CHUNK = 20;
 
 function disconnectMobileDayListadoObserver() {
   if (mobileDayListadoObserver) { mobileDayListadoObserver.disconnect(); mobileDayListadoObserver = null; }
@@ -1661,19 +1669,11 @@ function buildMobileListadoRow(ev) {
   return row;
 }
 
-async function loadAndRenderMobileDayListado() {
-  const range = mobileDayListadoRange;
-  if (!range) return;
-  const fromStr = toDateKey(range.from);
-  const toStr = toDateKey(range.to);
-  const events = await api(`/api/events?from=${fromStr}T00:00:00&to=${toStr}T23:59:59`);
-  // Obsoleto si mientras se esperaba la respuesta se cambio de sub-vista,
-  // se salio de la vista diaria, o el rango volvio a cambiar (peticiones
-  // solapadas de dos expansiones seguidas).
-  if (getMobileDayViewMode() !== 'listado') return;
-  if (document.getElementById('mobile-calendar-day-view').classList.contains('hidden')) return;
-  if (mobileDayListadoRange !== range) return;
-
+// Trae TODOS los eventos con fecha y los agrupa por dia (solo los dias
+// que tienen algo). Se hace una vez por entrada en la vista; ampliar la
+// lista al deslizar ya no vuelve a pedir nada.
+async function loadMobileListadoDays() {
+  const events = await api('/api/events');
   const byDay = new Map();
   events.forEach((ev) => {
     if (!ev.startAt) return; // sin fecha no aparece aqui, igual que en el resto del calendario
@@ -1681,42 +1681,40 @@ async function loadAndRenderMobileDayListado() {
     if (!byDay.has(key)) byDay.set(key, []);
     byDay.get(key).push(ev);
   });
+  mobileListadoDays = [...byDay.entries()]
+    .map(([key, evs]) => ({
+      key,
+      date: new Date(`${key}T00:00:00`),
+      events: evs.sort((a, b) => new Date(a.startAt) - new Date(b.startAt)),
+    }))
+    .sort((a, b) => a.date - b.date);
+}
 
+function renderMobileListadoWindow() {
   const content = document.getElementById('mobile-day-listado-content');
   content.innerHTML = '';
-  let cursor = new Date(range.from);
-  let anyRendered = false;
-  while (cursor <= range.to) {
-    const key = toDateKey(cursor);
-    const dayEvents = (byDay.get(key) || []).sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
-    // Un dia sin nada no pinta ningun bloque -- Koku no quiere ver
-    // "Nada este dia." repetido en cada fecha del rango. Los centinelas
-    // de scroll infinito no dependen de esto, siguen ahi igual.
-    if (dayEvents.length > 0) {
-      const block = document.createElement('div');
-      block.className = 'mobile-day-listado-block';
-      const heading = document.createElement('div');
-      heading.className = 'mobile-day-listado-block-heading';
-      heading.textContent = formatMobileListadoBlockHeading(cursor);
-      block.appendChild(heading);
-      dayEvents.forEach((ev) => block.appendChild(buildMobileListadoRow(ev)));
-      content.appendChild(block);
-      anyRendered = true;
-    }
-    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
-  }
-  if (!anyRendered) {
-    // Si TODO el rango cargado esta vacio, un unico aviso (no uno por
-    // dia) para que la vista no se quede en blanco sin explicacion.
+  if (!mobileListadoDays || mobileListadoDays.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'empty-hint';
-    empty.textContent = 'No hay nada en estos días.';
+    empty.textContent = 'Todavía no hay ningún evento ni tarea con fecha.';
     content.appendChild(empty);
+    return;
   }
+  const { start, end } = mobileListadoWindow;
+  mobileListadoDays.slice(start, end).forEach((day) => {
+    const block = document.createElement('div');
+    block.className = 'mobile-day-listado-block';
+    const heading = document.createElement('div');
+    heading.className = 'mobile-day-listado-block-heading';
+    heading.textContent = formatMobileListadoBlockHeading(day.date);
+    block.appendChild(heading);
+    day.events.forEach((ev) => block.appendChild(buildMobileListadoRow(ev)));
+    content.appendChild(block);
+  });
 }
 
 async function expandMobileDayListado(direction) {
-  if (!mobileDayListadoRange) return;
+  if (!mobileListadoDays || !mobileListadoWindow) return;
   if (mobileDayListadoBusy) { mobileDayListadoPending.add(direction); return; }
   mobileDayListadoBusy = true;
   try {
@@ -1726,26 +1724,25 @@ async function expandMobileDayListado(direction) {
     // nunca se pierde un aviso del observer por haber llegado a la vez
     // que otro ya en curso.
     while (true) {
-      const totalSpanDays = Math.round((mobileDayListadoRange.to - mobileDayListadoRange.from) / 86400000);
-      if (totalSpanDays >= MOBILE_DAY_LISTADO_MAX_SPAN_DAYS) { mobileDayListadoPending.clear(); break; }
-      // El scroll ocurre DENTRO de #mobile-day-listado-view (la vista
-      // diaria acota su propio alto, ver body.mobile-day-scroll-lock en
-      // styles.css) -- se mide sobre el propio contenedor, no sobre la
-      // pagina.
-      const listado = document.getElementById('mobile-day-listado-view');
-      const prevDocHeight = listado.scrollHeight;
-      const prevScrollY = listado.scrollTop;
-      if (direction === 'back') {
-        mobileDayListadoRange.from = new Date(mobileDayListadoRange.from.getFullYear(), mobileDayListadoRange.from.getMonth(), mobileDayListadoRange.from.getDate() - MOBILE_DAY_LISTADO_STEP_DAYS);
-      } else {
-        mobileDayListadoRange.to = new Date(mobileDayListadoRange.to.getFullYear(), mobileDayListadoRange.to.getMonth(), mobileDayListadoRange.to.getDate() + MOBILE_DAY_LISTADO_STEP_DAYS);
-      }
-      await loadAndRenderMobileDayListado();
-      if (direction === 'back') {
-        // Compensa el scroll para que anteponer dias arriba no de un
-        // salto visual (el contenido nuevo empuja hacia abajo lo que ya
-        // se veia).
-        listado.scrollTop = prevScrollY + (listado.scrollHeight - prevDocHeight);
+      const { start, end } = mobileListadoWindow;
+      const yaTodo = direction === 'back' ? start === 0 : end >= mobileListadoDays.length;
+      if (!yaTodo) {
+        // El scroll ocurre DENTRO de #mobile-day-listado-view (la vista
+        // acota su propio alto, ver body.mobile-day-scroll-lock en
+        // styles.css) -- se mide sobre el propio contenedor, no sobre la
+        // pagina.
+        const listado = document.getElementById('mobile-day-listado-view');
+        const prevDocHeight = listado.scrollHeight;
+        const prevScrollY = listado.scrollTop;
+        if (direction === 'back') mobileListadoWindow.start = Math.max(0, start - MOBILE_LISTADO_CHUNK);
+        else mobileListadoWindow.end = Math.min(mobileListadoDays.length, end + MOBILE_LISTADO_CHUNK);
+        renderMobileListadoWindow();
+        if (direction === 'back') {
+          // Compensa el scroll para que anteponer dias arriba no de un
+          // salto visual (el contenido nuevo empuja hacia abajo lo que ya
+          // se veia).
+          listado.scrollTop = prevScrollY + (listado.scrollHeight - prevDocHeight);
+        }
       }
       if (mobileDayListadoPending.size === 0) break;
       direction = mobileDayListadoPending.values().next().value;
@@ -1774,15 +1771,28 @@ function setupMobileDayListadoObserver() {
   mobileDayListadoObserver.observe(bottomSentinel);
 }
 
+// centerDate solo decide por DONDE empieza la lista (lo mas cerca de hoy
+// o del dia que estuvieras mirando); la lista en si lo contiene todo.
 async function renderMobileDayListado(centerDate) {
-  mobileDayListadoRange = {
-    from: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() - 3),
-    to: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() + 3),
+  await loadMobileListadoDays();
+  // Obsoleto si mientras se cargaba se cambio de sub-vista o se salio.
+  if (getMobileDayViewMode() !== 'listado') return;
+  if (document.getElementById('mobile-calendar-day-view').classList.contains('hidden')) return;
+
+  const refKey = toDateKey(centerDate || new Date());
+  let idx = mobileListadoDays.findIndex((d) => d.key >= refKey);
+  if (idx === -1) idx = Math.max(0, mobileListadoDays.length - 1); // todo es pasado: al final
+  mobileListadoWindow = {
+    start: Math.max(0, idx - 5),
+    end: Math.min(mobileListadoDays.length, idx + MOBILE_LISTADO_CHUNK),
   };
-  // "Empezar arriba del todo" es desplazar el propio contenedor, que es
-  // quien desborda (ver scrollMobileHoursToTime()).
-  document.getElementById('mobile-day-listado-view').scrollTop = 0;
-  await loadAndRenderMobileDayListado();
+  renderMobileListadoWindow();
+  // Deja el dia de referencia arriba del todo, en vez del primero de los
+  // 5 anteriores que se cargan de contexto.
+  const listado = document.getElementById('mobile-day-listado-view');
+  const bloques = document.querySelectorAll('#mobile-day-listado-content .mobile-day-listado-block');
+  const objetivo = bloques[idx - mobileListadoWindow.start];
+  listado.scrollTop = objetivo ? Math.max(0, objetivo.offsetTop - 8) : 0;
   // El primer observe() de IntersectionObserver avisa de inmediato con
   // el estado actual -- si la ventana inicial (±3 dias) no llega a
   // desbordar la pantalla real, esa primera notificacion ya se encarga
@@ -1795,6 +1805,13 @@ async function renderMobileDayActiveSubView({ scrollToNow = false, targetMinutes
   const mode = getMobileDayViewMode();
   document.getElementById('mobile-day-hours-view').classList.toggle('hidden', mode !== 'hours');
   document.getElementById('mobile-day-listado-view').classList.toggle('hidden', mode !== 'listado');
+  // En "Listado" no hay un dia concreto que mirar: es una tira continua
+  // de dias con scroll infinito hacia los dos lados, y cada bloque ya
+  // lleva su propia fecha. Asi que la tira de dias de la semana y el
+  // titulo del dia sobran ahi (pedido de Koku: "que sea solo una
+  // pantalla de scroll infinito"). En "Vista por horas" se quedan, que
+  // ahi si estas viendo UN dia.
+  document.getElementById('mobile-calendar-day-view').classList.toggle('is-listado', mode === 'listado');
   stopMobileCurrentTimeLineTimer();
   if (mode === 'hours') {
     disconnectMobileDayListadoObserver();
@@ -2682,6 +2699,24 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
   contentWrap.appendChild(content);
   row.appendChild(contentWrap);
 
+  // Abrir en SOLO LECTURA: el modo se elige aqui, al entrar, no dentro
+  // de la nota (pedido de Koku -- clic normal en la fila = editar, este
+  // boton = leer sin poder tocar nada; para cambiar de modo se sale al
+  // listado y se vuelve a entrar por el otro camino).
+  if (mode === 'browse' && !note.hidden) {
+    const readBtn = document.createElement('button');
+    readBtn.type = 'button';
+    readBtn.className = 'note-item-read-btn';
+    readBtn.setAttribute('aria-label', `Abrir "${note.title}" en solo lectura`);
+    readBtn.title = 'Abrir en solo lectura';
+    readBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg>';
+    readBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openNoteInEditor(note, { readMode: true });
+    });
+    row.appendChild(readBtn);
+  }
+
   row.appendChild(buildFavoriteStarBtn(note.favorite, (e) => {
     e.stopPropagation();
     toggleNoteFavorite(note);
@@ -2689,6 +2724,9 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
 
   row.addEventListener('click', () => {
     if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
+    // Editando carpetas, las notas no se abren: ahi solo se tocan
+    // carpetas (pedido de Koku, "que no me deje meterme en una nota").
+    if (mode === 'editFolders') return;
     // Una nota oculta no se abre con un simple clic en la fila — solo el
     // icono de ojo la destapa (sin ningun texto/boton de aviso encima del
     // blur, para no recargar la fila).
@@ -2742,9 +2780,17 @@ function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
   }
   row.appendChild(contentWrap);
 
-  // El lapiz de "editar carpeta" que habia aqui se quito del todo: en la app
-  // movil ya se llega a lo mismo desde el menu de 3 puntos ("Editar carpetas"),
-  // asi que era un boton duplicado ocupando sitio en cada fila.
+  // Lapiz SOLO en modo "Editar carpetas" (en la navegacion normal seria
+  // un boton duplicado: el menu de 3 puntos ya lleva a lo mismo). Va
+  // ANTES de la estrella, a su izquierda, tal y como lo pidio Koku.
+  if (mode === 'editFolders') {
+    const pencil = document.createElement('span');
+    pencil.className = 'note-folder-edit-mark';
+    pencil.setAttribute('aria-hidden', 'true');
+    pencil.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>';
+    row.appendChild(pencil);
+  }
+
   row.appendChild(buildFavoriteStarBtn(folder.favorite, (e) => {
     e.stopPropagation();
     toggleFolderFavorite(folder);
@@ -3112,7 +3158,13 @@ function toggleMobileNotesSelection(itemKey) {
 function setMobileNotesMode(mode) {
   mobileNotesMode = mode;
   if (mode !== 'select' && mode !== 'move') mobileNotesSelectedKeys.clear();
+  // Marca para el CSS: en "Editar carpetas" las carpetas se resaltan y
+  // las notas se atenuan (ahi no hacen nada), para que se vea de un
+  // vistazo que la lista esta en otro modo.
+  const notesView = document.getElementById('mobile-notes-view');
+  if (notesView) notesView.classList.toggle('mode-edit-folders', mode === 'editFolders');
   refreshMobileNotesActionBar();
+  refreshMobileNotesFab();
   renderNotesView();
 }
 
@@ -3157,6 +3209,10 @@ function refreshMobileNotesActionBar() {
       rightBtn.disabled = false;
       rightBtn.onclick = confirmMobileNotesMove;
     } else {
+      // "Editar carpetas" no usa esta barra: su "Listo" vive en el boton
+      // flotante de abajo (ver refreshMobileNotesFab), y que estas en ese
+      // modo se ve por el resalte de las carpetas y el lapiz de cada
+      // fila (ver .mode-edit-folders en styles.css).
       bar.classList.add('hidden');
     }
   });
@@ -3400,7 +3456,11 @@ function refreshNoteEditorToolbar() {
 // Tambien oculta el grupo +Fila/-Fila/+Col/-Col por la misma razon.
 function resetNoteEditorToolbar() {
   document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
-  document.getElementById('note-table-context-toolbar').classList.add('hidden');
+  const corner = document.getElementById('note-table-corner');
+  if (corner) corner.classList.add('hidden');
+  const tableToolbar = document.getElementById('note-table-toolbar');
+  if (tableToolbar) tableToolbar.classList.add('hidden');
+  document.getElementById('note-body-toolbar').classList.remove('hidden');
   document.getElementById('note-paragraph-style-btn').disabled = false;
   document.getElementById('note-quote-toggle-btn').disabled = false;
   document.getElementById('note-quote-toggle-btn').classList.remove('is-active');
@@ -3456,26 +3516,12 @@ function getCurrentTableCell() {
   return cell && NOTE_EDITOR_BODY.contains(cell) ? cell : null;
 }
 
-function refreshTableContextToolbar() {
-  const cell = getCurrentTableCell();
-  document.getElementById('note-table-context-toolbar').classList.toggle('hidden', !cell);
-  // El boton de grosor de borde refleja el estado de la tabla donde esta
-  // el cursor AHORA MISMO -- cada tabla lleva su propio grosor (atributo
-  // data-border en el <table>, ver toggleTableBorderThickness), no es un
-  // ajuste global del editor.
-  const borderBtn = document.getElementById('note-table-border-toggle');
-  if (borderBtn) {
-    const isThick = cell && cell.closest('table').getAttribute('data-border') === 'thick';
-    borderBtn.classList.toggle('is-active', !!isThick);
-  }
-}
-
-// Junta el refresco de negrita/cursiva/lista y el de la barra contextual
-// de tabla en una sola llamada -- se disparan siempre juntos, con el
-// mismo cambio de seleccion o tecla dentro del editor.
+// Junta el refresco de negrita/cursiva/lista y el del icono de tabla en
+// una sola llamada -- se disparan siempre juntos, con el mismo cambio de
+// seleccion o tecla dentro del editor.
 function refreshNoteEditorState() {
   refreshNoteEditorToolbar();
-  refreshTableContextToolbar();
+  refreshTableCornerButton();
   refreshNoteBlockButtons();
   refreshPendingNoteHighlightState();
   refreshNoteHighlightSwatchActiveState();
@@ -3856,10 +3902,33 @@ function insertNodeOutsideNoteHighlight(range, node) {
 // (lleva el caracter de ancho cero, y ademas es el que esta esperando
 // que se escriba dentro).
 function removeEmptyNoteHighlights() {
+  const sel = window.getSelection();
+  const caret = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+  let caretParent = null;
+  let caretIndex = -1;
   NOTE_EDITOR_BODY.querySelectorAll('[data-highlight]').forEach((span) => {
     if (span === pendingNoteHighlightSpan) return;
-    if (!span.textContent) span.remove();
+    // El caracter de ancho cero (el que usa el modo "resaltar antes de
+    // escribir") no cuenta como texto: un span que solo tenga eso, y que
+    // ya no sea el pendiente, es un residuo igual que uno vacio del todo.
+    if (span.textContent.replace(/​/g, '') !== '') return;
+    // Si el cursor estaba justo dentro del span que se va a quitar, se
+    // apunta donde vivia para devolverlo ahi despues -- si no, el
+    // navegador lo manda a cualquier sitio y se pierde el punto de
+    // escritura mientras se borra.
+    if (caret && span.contains(caret.startContainer)) {
+      caretParent = span.parentNode;
+      caretIndex = Array.prototype.indexOf.call(span.parentNode.childNodes, span);
+    }
+    span.remove();
   });
+  if (caretParent && caretIndex >= 0 && sel) {
+    const restored = document.createRange();
+    restored.setStart(caretParent, Math.min(caretIndex, caretParent.childNodes.length));
+    restored.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(restored);
+  }
 }
 
 // Crea el <span> con el que se envuelve un tramo. key=null significa
@@ -4315,7 +4384,11 @@ function buildTableHtml(rows, cols) {
   // El <div><br></div> de despues da un sitio donde dejar el cursor tras
   // insertar la tabla -- sin el, si la tabla queda como ultimo elemento
   // del editor no habria forma de escribir nada debajo de ella.
-  return `<table>${colgroupHtml}<tbody>${rowsHtml}</tbody></table><div><br></div>`;
+  // data-just-inserted: marca temporal para poder localizar ESTA tabla
+  // justo despues de insertarla y meter el cursor dentro. Se quita en el
+  // acto, asi que nunca llega a guardarse en la nota (el saneador
+  // tampoco lo dejaria pasar).
+  return `<table data-just-inserted="1">${colgroupHtml}<tbody>${rowsHtml}</tbody></table><div><br></div>`;
 }
 
 const tableInsertBtn = document.getElementById('note-table-insert-btn');
@@ -4341,7 +4414,7 @@ tableInsertBtn.addEventListener('click', () => {
   if (willOpen) saveNoteEditorSelection();
   closeAllPopovers(tableInsertPopover);
   tableInsertPopover.classList.toggle('hidden');
-  if (willOpen) positionFixedPopover(tableInsertBtn, tableInsertPopover, { width: 200 });
+  if (willOpen) positionFixedPopover(tableInsertBtn, tableInsertPopover, { width: 220 });
 });
 
 document.getElementById('table-insert-cancel').addEventListener('click', () => {
@@ -4354,6 +4427,26 @@ document.getElementById('table-insert-confirm').addEventListener('click', () => 
   tableInsertPopover.classList.add('hidden');
   restoreNoteEditorSelection();
   document.execCommand('insertHTML', false, buildTableHtml(rows, cols));
+  // El cursor se queda donde estaba antes de insertar, asi que la vista
+  // "se movia" a otro sitio en vez de llevarte a la tabla recien puesta
+  // (lo que reporto Koku). Se marca la tabla al construirla para poder
+  // encontrarla justo despues y dejar el cursor dentro de su primera
+  // celda -- se puede empezar a escribir en ella directamente.
+  const nueva = NOTE_EDITOR_BODY.querySelector('table[data-just-inserted]');
+  if (nueva) {
+    nueva.removeAttribute('data-just-inserted');
+    const primera = nueva.querySelector('td, th');
+    if (primera) {
+      const range = document.createRange();
+      range.setStart(primera, 0);
+      range.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      NOTE_EDITOR_BODY.focus();
+      primera.scrollIntoView({ block: 'nearest' });
+    }
+  }
   refreshNoteEditorState();
 });
 
@@ -4458,27 +4551,282 @@ function removeTableColumn() {
 // en el <table> (ausente = fino, el de siempre). El saneado del servidor
 // (sanitizeNoteBody en routes/notes.js) solo deja pasar ese atributo con
 // el valor EXACTO "thick", cualquier otra cosa se descarta.
-function toggleTableBorderThickness() {
+// Nivel de grosor del borde, por tabla (1 fino ... 4 muy grueso). Antes
+// era un simple "fino o grueso"; Koku lo queria estilo Excel, subiendo y
+// bajando de nivel.
+const TABLE_BORDER_LEVELS = ['1', '2', '3', '4'];
+
+function changeTableBorder(delta) {
   const cell = getCurrentTableCell();
   if (!cell) return;
   const table = cell.closest('table');
-  if (table.getAttribute('data-border') === 'thick') table.removeAttribute('data-border');
-  else table.setAttribute('data-border', 'thick');
+  const actual = table.getAttribute('data-border');
+  // "thick" es lo que guardaban las notas de antes de que esto tuviera
+  // niveles: cuenta como el nivel 3.
+  const idx = actual === 'thick' ? 2 : Math.max(0, TABLE_BORDER_LEVELS.indexOf(actual));
+  const siguiente = Math.min(TABLE_BORDER_LEVELS.length - 1, Math.max(0, idx + delta));
+  if (siguiente === 0) table.removeAttribute('data-border');
+  else table.setAttribute('data-border', TABLE_BORDER_LEVELS[siguiente]);
+  refreshNoteEditorState();
+}
+
+// Ensancha o estrecha la COLUMNA donde esta el cursor, tocando su <col>
+// del colgroup (que es lo que manda de verdad con table-layout:fixed).
+function changeTableColumnWidth(delta) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const colIndex = Array.from(row.children).indexOf(cell);
+  const table = row.closest('table');
+  const colgroup = ensureTableColgroup(table, row.children.length);
+  const col = colgroup.children[colIndex];
+  if (!col) return;
+  const actual = parseInt(col.style.width, 10) || DEFAULT_TABLE_COL_WIDTH;
+  col.style.width = `${Math.max(TABLE_MIN_COL_WIDTH, actual + delta)}px`;
+  refreshNoteEditorState();
+}
+
+// Sube o baja la fila del cursor intercambiandola con su vecina.
+function moveTableRow(delta) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const vecina = delta < 0 ? row.previousElementSibling : row.nextElementSibling;
+  if (!vecina) return;
+  if (delta < 0) vecina.before(row);
+  else vecina.after(row);
+  putCaretInCell(cell);
+  refreshNoteEditorState();
+}
+
+// Mueve la columna del cursor a izquierda o derecha: intercambia esa
+// celda con su vecina EN CADA FILA, y tambien los <col> del colgroup
+// (si no, los anchos se quedarian con la columna equivocada).
+function moveTableColumn(delta) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const colIndex = Array.from(row.children).indexOf(cell);
+  const destino = colIndex + delta;
+  const table = row.closest('table');
+  if (destino < 0 || destino >= row.children.length) return;
+  table.querySelectorAll('tr').forEach((tr) => {
+    const a = tr.children[colIndex];
+    const b = tr.children[destino];
+    if (!a || !b) return;
+    if (delta < 0) b.before(a);
+    else b.after(a);
+  });
+  const colgroup = table.querySelector('colgroup');
+  if (colgroup && colgroup.children[colIndex] && colgroup.children[destino]) {
+    const ca = colgroup.children[colIndex];
+    const cb = colgroup.children[destino];
+    if (delta < 0) cb.before(ca);
+    else cb.after(ca);
+  }
+  putCaretInCell(cell);
+  refreshNoteEditorState();
+}
+
+// Combina la celda del cursor con la de su derecha (colspan). Es la
+// forma sencilla y predecible: nada de seleccionar un rectangulo de
+// celdas, que en un movil no hay forma comoda de hacer.
+function mergeTableCell() {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const siguiente = cell.nextElementSibling;
+  if (!siguiente) return;
+  const actual = parseInt(cell.getAttribute('colspan'), 10) || 1;
+  const suya = parseInt(siguiente.getAttribute('colspan'), 10) || 1;
+  // El contenido de la que se absorbe no se pierde: se pega detras.
+  const texto = siguiente.textContent.trim();
+  if (texto) cell.innerHTML = `${cell.innerHTML} ${siguiente.innerHTML}`;
+  siguiente.remove();
+  cell.setAttribute('colspan', String(actual + suya));
+  putCaretInCell(cell);
+  refreshNoteEditorState();
+}
+
+// Deshace una combinacion: devuelve la celda a una sola columna y crea
+// las vacias que faltaban.
+function splitTableCell() {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const actual = parseInt(cell.getAttribute('colspan'), 10) || 1;
+  if (actual <= 1) return;
+  cell.removeAttribute('colspan');
+  let anterior = cell;
+  for (let i = 1; i < actual; i++) {
+    const nueva = document.createElement(cell.tagName);
+    nueva.innerHTML = '<br>';
+    anterior.after(nueva);
+    anterior = nueva;
+  }
+  putCaretInCell(cell);
+  refreshNoteEditorState();
+}
+
+// Deja el cursor dentro de una celda concreta -- las funciones de mover
+// y combinar reordenan el DOM, y sin esto el cursor se quedaria colgado
+// donde estaba la celda antes.
+function putCaretInCell(cell) {
+  const range = document.createRange();
+  range.setStart(cell, 0);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  NOTE_EDITOR_BODY.focus();
+}
+
+// Insertar una fila encima o debajo de la del cursor.
+function insertTableRow(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const nueva = document.createElement('tr');
+  nueva.style.height = `${DEFAULT_TABLE_ROW_HEIGHT}px`;
+  Array.from(row.children).forEach((existente) => {
+    const celda = document.createElement(existente.tagName);
+    celda.innerHTML = '<br>';
+    const span = existente.getAttribute('colspan');
+    if (span) celda.setAttribute('colspan', span);
+    nueva.appendChild(celda);
+  });
+  if (donde === 'above') row.before(nueva);
+  else row.after(nueva);
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
 
-[
-  ['note-table-add-row', addTableRow],
-  ['note-table-remove-row', removeTableRow],
-  ['note-table-add-col', addTableColumn],
-  ['note-table-remove-col', removeTableColumn],
-  ['note-table-border-toggle', toggleTableBorderThickness],
-].forEach(([id, handler]) => {
-  const btn = document.getElementById(id);
+// Insertar una columna a un lado u otro de la del cursor.
+function insertTableColumn(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const colIndex = Array.from(row.children).indexOf(cell);
+  const table = row.closest('table');
+  table.querySelectorAll('tr').forEach((tr) => {
+    const referencia = tr.children[colIndex];
+    if (!referencia) return;
+    const nueva = document.createElement(referencia.tagName);
+    nueva.innerHTML = '<br>';
+    if (donde === 'left') referencia.before(nueva);
+    else referencia.after(nueva);
+  });
+  const colgroup = ensureTableColgroup(table, row.children.length);
+  const nuevaCol = document.createElement('col');
+  nuevaCol.style.width = `${DEFAULT_TABLE_COL_WIDTH}px`;
+  const referenciaCol = colgroup.children[colIndex];
+  if (referenciaCol && donde === 'left') referenciaCol.before(nuevaCol);
+  else if (referenciaCol) referenciaCol.after(nuevaCol);
+  else colgroup.appendChild(nuevaCol);
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+const NOTE_TABLE_COMMANDS = {
+  'row-above': () => insertTableRow('above'),
+  'row-below': () => insertTableRow('below'),
+  'row-remove': removeTableRow,
+  'col-left': () => insertTableColumn('left'),
+  'col-right': () => insertTableColumn('right'),
+  'col-remove': removeTableColumn,
+  'move-row-up': () => moveTableRow(-1),
+  'move-row-down': () => moveTableRow(1),
+  'move-col-left': () => moveTableColumn(-1),
+  'move-col-right': () => moveTableColumn(1),
+  'width-plus': () => changeTableColumnWidth(20),
+  'width-minus': () => changeTableColumnWidth(-20),
+  'border-plus': () => changeTableBorder(1),
+  'border-minus': () => changeTableBorder(-1),
+  merge: mergeTableCell,
+  split: splitTableCell,
+};
+
+document.querySelectorAll('#note-table-toolbar [data-table-cmd]').forEach((btn) => {
   btn.addEventListener('mousedown', (e) => e.preventDefault());
-  btn.addEventListener('click', handler);
+  btn.addEventListener('click', () => {
+    const fn = NOTE_TABLE_COMMANDS[btn.dataset.tableCmd];
+    if (fn) fn();
+    // Quitar la ultima fila o columna borra la tabla entera: si ya no
+    // queda ninguna, no tiene sentido seguir en la barra de tabla.
+    if (!getCurrentTableCell()) setNoteTableToolbarOpen(false);
+  });
 });
+
+// ---------------------------------------------------------------------
+// Tablas: un solo icono en la ESQUINA de la tabla (la mas cercana a la
+// celda donde esta el cursor, de las 4 exteriores) que abre la barra de
+// tabla -- la de formato de texto se aparta mientras tanto. Es lo que
+// pidio Koku: "pincho la tabla, en la esquina mas cercana me muestra un
+// icono... la barra de formato cambia".
+//
+// El icono va en <body> con position:fixed y se recoloca a partir del
+// rectangulo real de la tabla, porque el editor tiene su propio scroll:
+// colgarlo del <table> obligaria a envolverla en un contenedor y a tocar
+// el HTML que se guarda en la nota.
+// ---------------------------------------------------------------------
+const tableCornerBtn = document.createElement('button');
+tableCornerBtn.type = 'button';
+tableCornerBtn.id = 'note-table-corner';
+tableCornerBtn.className = 'note-table-corner hidden';
+tableCornerBtn.setAttribute('aria-label', 'Modificar la tabla');
+tableCornerBtn.title = 'Modificar la tabla';
+tableCornerBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>';
+// mousedown preventDefault: sin esto el navegador quita el cursor de la
+// celda al pulsar, y para cuando llega el click ya no hay "celda actual".
+tableCornerBtn.addEventListener('mousedown', (e) => e.preventDefault());
+tableCornerBtn.addEventListener('click', () => setNoteTableToolbarOpen(true));
+document.body.appendChild(tableCornerBtn);
+
+// Alterna entre la barra de formato de texto y la de tabla.
+function setNoteTableToolbarOpen(open) {
+  document.getElementById('note-body-toolbar').classList.toggle('hidden', open);
+  document.getElementById('note-table-toolbar').classList.toggle('hidden', !open);
+  if (!open) NOTE_EDITOR_BODY.focus();
+  refreshTableCornerButton();
+}
+
+function isNoteTableToolbarOpen() {
+  return !document.getElementById('note-table-toolbar').classList.contains('hidden');
+}
+
+// Coloca (o esconde) el icono de esquina. Se llama en cada cambio de
+// seleccion dentro del editor y al hacer scroll del texto, que es cuando
+// la tabla se mueve por la pantalla.
+function refreshTableCornerButton() {
+  const box = document.getElementById('note-table-corner');
+  if (!box) return;
+  const cell = getCurrentTableCell();
+  const table = cell ? cell.closest('table') : null;
+  // Con la barra de tabla abierta el icono sobra (ya estas dentro), y en
+  // modo lectura no hay nada que modificar.
+  if (!table || isNoteTableToolbarOpen() || NOTE_EDITOR_BODY.getAttribute('contenteditable') === 'false') {
+    box.classList.add('hidden');
+    return;
+  }
+  const rect = table.getBoundingClientRect();
+  const visible = NOTE_EDITOR_BODY.getBoundingClientRect();
+  if (rect.bottom < visible.top || rect.top > visible.bottom) {
+    box.classList.add('hidden');
+    return;
+  }
+  // De las 4 esquinas exteriores, la mas cercana a la celda donde esta
+  // el cursor -- el icono aparece "al lado" de donde acabas de tocar.
+  const cellRect = cell.getBoundingClientRect();
+  const cx = cellRect.left + cellRect.width / 2;
+  const cy = cellRect.top + cellRect.height / 2;
+  const izquierda = cx < rect.left + rect.width / 2;
+  const arriba = cy < rect.top + rect.height / 2;
+  box.classList.remove('hidden');
+  const tamano = box.offsetWidth || 28;
+  box.style.left = `${(izquierda ? rect.left - tamano - 4 : rect.right + 4)}px`;
+  box.style.top = `${(arriba ? rect.top - 4 : rect.bottom - tamano + 4)}px`;
+}
+
+NOTE_EDITOR_BODY.addEventListener('scroll', refreshTableCornerButton);
+document.getElementById('btn-note-table-toolbar-close').addEventListener('click', () => setNoteTableToolbarOpen(false));
 
 // ---------------------------------------------------------------------
 // Redimensionar tablas a mano (estilo Excel): arrastrar el borde derecho
@@ -5084,8 +5432,33 @@ function handleNoteHighlightAwareEnter() {
   return true;
 }
 
+// Intro en una linea de cita VACIA: sale de la cita, en vez de añadir
+// otra linea citada debajo. Sin esto no habia forma de TERMINAR una cita
+// escribiendo: cada Intro heredaba el data-quote del parrafo anterior,
+// asi que se acumulaban lineas en blanco y la barra de la izquierda se
+// repetia una y otra vez (lo reporto Koku). Es lo mismo que hacen Notion
+// o Apple Notes: la linea vacia sale del bloque en vez de continuarlo.
+// Devuelve true si ha actuado (quien llama debe hacer preventDefault).
+function handleNoteQuoteEnterExit() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return false;
+  const line = getNoteBlockAncestor(sel.getRangeAt(0).startContainer);
+  if (!line || line.getAttribute('data-quote') !== '1') return false;
+  if (line.textContent.trim() !== '') return false;
+  line.removeAttribute('data-quote');
+  line.removeAttribute('data-indent');
+  NOTE_EDITOR_BODY.dispatchEvent(new Event('input', { bubbles: true }));
+  refreshNoteEditorState();
+  return true;
+}
+
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    if (handleNoteQuoteEnterExit()) {
+      e.preventDefault();
+      return;
+    }
     if (handleNoteHighlightAwareEnter()) {
       e.preventDefault();
       return;
@@ -5268,21 +5641,14 @@ function refreshNoteTitlePreview(title) {
 // una etiqueta de solo lectura siempre, no hace falta desactivarla).
 function applyNoteEditorReadMode(readOnly) {
   NOTE_EDITOR_BODY.contentEditable = readOnly ? 'false' : 'true';
-  const modeBtn = document.getElementById('note-editor-read-mode-btn');
-  modeBtn.textContent = readOnly ? 'Editar' : 'Modo lectura';
-  modeBtn.setAttribute('aria-pressed', readOnly ? 'true' : 'false');
+  // En solo lectura la barra de formato entera sobra (no hay nada que
+  // formatear), asi que se oculta en vez de dejarla ahi desactivada --
+  // de paso el texto gana la pantalla que ocupaba.
+  document.getElementById('note-body-toolbar').classList.toggle('hidden', readOnly);
   document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
   if (readOnly) {
-    document.getElementById('note-table-context-toolbar').classList.add('hidden');
-  }
+    }
 }
-
-document.getElementById('note-editor-read-mode-btn').addEventListener('click', () => {
-  const entry = findOpenNote(state.activeOpenNoteKey);
-  if (!entry) return;
-  entry.readMode = !entry.readMode;
-  applyNoteEditorReadMode(entry.readMode);
-});
 
 function loadOpenNoteIntoDom(entry) {
   document.getElementById('note-id').value = entry.id || '';
@@ -5350,13 +5716,20 @@ function closeOpenNote(key) {
 // "openNoteInEditor": si la nota (con id real) ya esta abierta, solo se
 // activa -- no se duplica en la lista de notas abiertas. Si no, se anade
 // como una entrada nueva y se activa.
-function openNoteInEditor(note) {
+// readMode: se decide AQUI, al abrir desde el listado (clic normal en la
+// fila = editar; el boton de "solo lectura" de la fila = leer). Dentro de
+// la nota ya no hay forma de alternar -- para cambiar de modo se sale y
+// se vuelve a entrar por el otro camino, tal y como lo pidio Koku.
+function openNoteInEditor(note, { readMode = false } = {}) {
   const existing = note ? state.openNotes.find((n) => n.id === note.id) : null;
   if (existing) {
     switchActiveOpenNote(existing.key);
+    existing.readMode = readMode;
+    applyNoteEditorReadMode(readMode);
   } else {
     if (state.activeOpenNoteKey) captureActiveOpenNoteFromDom();
     const entry = noteEntrySnapshot(note);
+    entry.readMode = readMode;
     state.openNotes.push(entry);
     state.activeOpenNoteKey = entry.key;
     loadOpenNoteIntoDom(entry);
@@ -5388,8 +5761,26 @@ document.getElementById('btn-close-note-editor').addEventListener('click', close
 // propio cuerpo dentro de captureActiveOpenNoteFromDom), no solo al
 // cambiar de nota o guardar.
 NOTE_EDITOR_BODY.addEventListener('input', () => {
+  // Borrar el texto de un resaltado a mano (seleccionar y Suprimir, o
+  // ir borrando letra a letra) deja el <span> vacio: sin texto dentro
+  // no hay nada que se pueda seleccionar ni borrar, pero el CSS le sigue
+  // pintando su padding/borde redondeado -- la "marca que se queda ahi"
+  // que reporto Koku. Se barren aqui, en cada cambio del contenido, y no
+  // solo despues de una accion de resaltado.
+  removeEmptyNoteHighlights();
   captureActiveOpenNoteFromDom();
   scheduleMobileNoteAutosave();
+});
+
+// Mientras el cursor esta dentro del texto de la nota, el teclado del
+// sistema esta abierto: se marca en <body> para que la barra inferior
+// (fija abajo del todo) se aparte -- si no, queda flotando justo encima
+// del teclado. Vuelve sola en cuanto el cursor sale del texto.
+NOTE_EDITOR_BODY.addEventListener('focus', () => {
+  document.body.classList.add('note-typing');
+});
+NOTE_EDITOR_BODY.addEventListener('blur', () => {
+  document.body.classList.remove('note-typing');
 });
 
 // Autoguardado -- SOLO en movil, pedido explicito de Koku (en
@@ -5768,8 +6159,25 @@ document.getElementById('btn-new-task-mobile-day').addEventListener('click', () 
 // antiguos botones de +carpeta/+nota de la barra superior, para dejarle
 // mas hueco al buscador. Mismas 2 acciones que ya llamaban esos botones
 // (openNoteFolderModal(null)/openNoteInEditor(null)), solo movidas aqui.
+const MOBILE_NOTES_FAB_ADD_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+const MOBILE_NOTES_FAB_DONE_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 11"></polyline></svg>';
+
+// El MISMO boton flotante cambia de trabajo segun el modo: "+" para
+// crear, y un tick para salir de "Editar carpetas" (pedido de Koku: que
+// el "Listo" viva siempre abajo, sustituyendo al de añadir, en vez de en
+// una barra pegada justo debajo de la lista).
+function refreshMobileNotesFab() {
+  const btn = document.getElementById('btn-mobile-notes-add');
+  const editando = mobileNotesMode === 'editFolders';
+  btn.innerHTML = editando ? MOBILE_NOTES_FAB_DONE_ICON : MOBILE_NOTES_FAB_ADD_ICON;
+  btn.setAttribute('aria-label', editando ? 'Listo' : 'Añadir');
+  btn.classList.toggle('is-done', editando);
+  if (editando) toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
+}
+
 document.getElementById('btn-mobile-notes-add').addEventListener('click', (e) => {
   e.stopPropagation();
+  if (mobileNotesMode === 'editFolders') { setMobileNotesMode('browse'); return; }
   toggleMobileCalendarAddMenu(undefined, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
 });
 document.getElementById('btn-mobile-notes-add-folder').addEventListener('click', () => {
@@ -5809,6 +6217,334 @@ function closeExtensionsView() {
   setCurrentScreen('home');
 }
 document.getElementById('btn-close-extensions').addEventListener('click', closeExtensionsView);
+
+// ---------------------------------------------------------------------
+// Pantalla de Grupos: dos niveles (lista de grupos -> lo que hay dentro
+// de uno). No duplica el alta/edicion/borrado de grupos, que ya vive en
+// Configuracion -> Grupos: el boton "Gestionar grupos" lleva ahi mismo,
+// para que solo haya UN sitio donde se editan.
+// ---------------------------------------------------------------------
+// null = "Todos los eventos"; si no, el id del grupo abierto.
+let groupsViewSelectedId = undefined; // undefined = todavia en la lista
+let groupsViewItems = [];
+let groupsEditMode = false;
+const groupsViewFilters = { type: 'all', done: 'all', q: '' };
+
+const groupsFilterTypeField = createSelectField({
+  options: [
+    { value: 'all', label: 'Todo' },
+    { value: 'event', label: 'Recordatorios' },
+    { value: 'task', label: 'Tareas' },
+  ],
+  initialValue: 'all',
+  onChange: (v) => { groupsViewFilters.type = v; renderGroupsDetailList(); },
+});
+document.getElementById('groups-filter-type-field').appendChild(groupsFilterTypeField.element);
+
+const groupsFilterDoneField = createSelectField({
+  options: [
+    { value: 'all', label: 'Terminadas o no' },
+    { value: 'pending', label: 'Sin terminar' },
+    { value: 'done', label: 'Terminadas' },
+  ],
+  initialValue: 'all',
+  onChange: (v) => { groupsViewFilters.done = v; renderGroupsDetailList(); },
+});
+document.getElementById('groups-filter-done-field').appendChild(groupsFilterDoneField.element);
+
+document.getElementById('groups-search').addEventListener('input', (e) => {
+  groupsViewFilters.q = e.target.value;
+  renderGroupsDetailList();
+});
+
+async function openGroupsView() {
+  document.getElementById('groups-view').classList.remove('hidden');
+  setCurrentScreen('groups');
+  showGroupsList();
+  await refreshGroupsView();
+}
+
+// Recarga los grupos y repinta sus tarjetas. Lo llaman tanto la apertura
+// de la pantalla como cualquier alta/edicion/borrado desde su ficha.
+async function refreshGroupsView() {
+  await loadGroups();
+  renderGroupsViewList();
+}
+
+function closeGroupsView() {
+  document.getElementById('groups-view').classList.add('hidden');
+  setCurrentScreen('home');
+}
+
+// Nivel 1: las tarjetas de grupo.
+function showGroupsList() {
+  groupsViewSelectedId = undefined;
+  document.getElementById('groups-list-panel').classList.remove('hidden');
+  document.getElementById('groups-detail-panel').classList.add('hidden');
+  document.getElementById('btn-groups-back').classList.add('hidden');
+  document.getElementById('groups-view-title').textContent = 'Grupos';
+}
+
+function renderGroupsViewList() {
+  const box = document.getElementById('groups-view-list');
+  box.innerHTML = '';
+  // "Todos" primero: es el atajo para ver el conjunto sin tener que
+  // entrar grupo por grupo.
+  box.appendChild(buildGroupViewCard(null, 'Todos los eventos', 'var(--accent)'));
+  state.groups.forEach((g) => {
+    box.appendChild(buildGroupViewCard(g.id, g.name, g.color));
+  });
+}
+
+function buildGroupViewCard(id, name, color) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'group-card';
+  const dot = document.createElement('span');
+  dot.className = 'group-card-dot';
+  dot.style.background = color || 'var(--accent)';
+  const label = document.createElement('span');
+  label.textContent = name;
+  btn.append(dot, label);
+  // En modo editar, tocar un grupo abre su ficha en vez de entrar
+  // dentro. "Todos los eventos" no es un grupo de verdad, asi que ahi no
+  // hay nada que editar y se queda apagado.
+  if (groupsEditMode) {
+    if (id === null) {
+      btn.disabled = true;
+    } else {
+      btn.classList.add('is-editing');
+      const lapiz = document.createElement('span');
+      lapiz.className = 'group-card-edit-mark';
+      lapiz.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+      btn.appendChild(lapiz);
+      btn.addEventListener('click', () => openGroupModal(state.groups.find((g) => g.id === id)));
+    }
+    return btn;
+  }
+  // En la cabecera del detalle cabe poco: "Todos los eventos" se queda
+  // en "Todos" ahi (en la tarjeta si va el texto entero).
+  btn.addEventListener('click', () => openGroupDetail(id, id === null ? 'Todos' : name));
+  return btn;
+}
+
+// Nivel 2: todo lo que hay dentro de un grupo (o de todos).
+async function openGroupDetail(groupId, name) {
+  groupsViewSelectedId = groupId;
+  document.getElementById('groups-list-panel').classList.add('hidden');
+  document.getElementById('groups-detail-panel').classList.remove('hidden');
+  document.getElementById('btn-groups-back').classList.remove('hidden');
+  document.getElementById('groups-view-title').textContent = name;
+  // Se piden TODOS los eventos y tareas (sin rango de fechas): aqui la
+  // pregunta es "que hay en este grupo", no "que hay este mes".
+  groupsViewItems = await api('/api/events');
+  renderGroupsDetailList();
+}
+
+// Un mismo sitio para decidir que entra y que no, para que el buscador y
+// los dos filtros no se pisen entre ellos.
+function groupsDetailVisibleItems() {
+  const q = groupsViewFilters.q.trim().toLowerCase();
+  return groupsViewItems.filter((item) => {
+    if (groupsViewSelectedId !== null && item.groupId !== groupsViewSelectedId) return false;
+    if (groupsViewFilters.type === 'task' && !item.isTask) return false;
+    if (groupsViewFilters.type === 'event' && item.isTask) return false;
+    if (groupsViewFilters.done === 'done' && !item.done) return false;
+    if (groupsViewFilters.done === 'pending' && item.done) return false;
+    if (q && !(item.title || '').toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function renderGroupsDetailList() {
+  const box = document.getElementById('groups-detail-list');
+  box.innerHTML = '';
+  const items = groupsDetailVisibleItems();
+  if (items.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'hint';
+    empty.textContent = 'No hay nada que coincida.';
+    box.appendChild(empty);
+    return;
+  }
+  items.forEach((item) => box.appendChild(buildGroupDetailRow(item)));
+}
+
+function buildGroupDetailRow(item) {
+  const row = document.createElement('div');
+  row.className = 'group-item-row';
+  if (item.done) row.classList.add('is-done');
+
+  const bar = document.createElement('span');
+  bar.className = 'group-item-bar';
+  bar.style.background = item.groupColor || 'var(--border)';
+  row.appendChild(bar);
+
+  // Tareas Y recordatorios se pueden marcar como hechos desde aqui: la
+  // columna "done" es de la fila del evento, la tenga o no marcada como
+  // tarea, asi que vale para los dos.
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.className = 'styled-checkbox';
+  check.checked = !!item.done;
+  check.addEventListener('click', (e) => e.stopPropagation());
+  check.addEventListener('change', async () => {
+    await toggleTaskDone(item);
+    item.done = !item.done;
+    renderGroupsDetailList();
+  });
+  row.appendChild(check);
+
+  const texts = document.createElement('div');
+  texts.className = 'group-item-texts';
+  const title = document.createElement('span');
+  title.className = 'group-item-title';
+  title.textContent = item.title;
+  const meta = document.createElement('span');
+  meta.className = 'group-item-meta';
+  meta.textContent = groupItemMetaText(item);
+  texts.append(title, meta);
+  row.appendChild(texts);
+
+  row.addEventListener('click', () => {
+    if (item.isTask) openTaskModal(item);
+    else openEventModal(item);
+  });
+  return row;
+}
+
+function groupItemMetaText(item) {
+  const partes = [item.isTask ? 'Tarea' : 'Recordatorio'];
+  if (item.groupName) partes.push(item.groupName);
+  if (item.startAt) {
+    const d = new Date(item.startAt);
+    partes.push(item.allDay ? formatMobileDayHeading(d) : `${formatMobileDayHeading(d)} · ${toTimeInputValue(d)}`);
+  } else if (item.isTask) {
+    partes.push('Sin fecha');
+  }
+  return partes.join(' · ');
+}
+
+// ---------------------------------------------------------------------
+// Ficha de un grupo (nombre, color, y el color con el que se ven sus
+// tareas al completarse). Antes esto vivia en Configuracion -> Grupos;
+// ahora la gestion es de este apartado, igual que cada herramienta
+// gestiona lo suyo por dentro.
+//
+// Los dos selectores de color se crean PEREZOSAMENTE, la primera vez que
+// se abre la ficha: createColorField vive en settings.js, que carga
+// DESPUES de app.js -- crearlos aqui a nivel de modulo daria
+// ReferenceError (mismo motivo por el que Finanzas hace lo mismo con los
+// suyos, ver setupFinanzasIconColorFields).
+// ---------------------------------------------------------------------
+let groupColorField = null;
+let groupCompletedColorField = null;
+// El color de "completada" sigue al del grupo (atenuado) mientras no se
+// toque a mano; en cuanto se elige uno explicito, deja de seguirle.
+let groupCompletedColorTouched = false;
+let suppressGroupCompletedTouch = false;
+
+function setupGroupColorFields() {
+  if (groupColorField) return;
+  groupCompletedColorField = createColorField({
+    initialValue: mutedTaskColor(DEFAULT_EVENT_COLOR),
+    onChange: () => { if (!suppressGroupCompletedTouch) groupCompletedColorTouched = true; },
+  });
+  document.getElementById('group-completed-color-field').appendChild(groupCompletedColorField.element);
+  groupColorField = createColorField({
+    initialValue: DEFAULT_EVENT_COLOR,
+    onChange: (nuevo) => {
+      if (!groupCompletedColorTouched) setGroupCompletedColorProgrammatically(mutedTaskColor(nuevo));
+    },
+  });
+  document.getElementById('group-color-field').appendChild(groupColorField.element);
+}
+
+// Cambia el color de completada SIN que cuente como que se ha tocado a
+// mano (carga inicial, o cargar el valor guardado de un grupo).
+function setGroupCompletedColorProgrammatically(hex) {
+  suppressGroupCompletedTouch = true;
+  groupCompletedColorField.setValue(hex);
+  suppressGroupCompletedTouch = false;
+}
+
+function openGroupModal(group) {
+  setupGroupColorFields();
+  document.getElementById('group-modal-title').textContent = group ? 'Editar grupo' : 'Nuevo grupo';
+  document.getElementById('group-id').value = group ? group.id : '';
+  document.getElementById('group-name').value = group ? group.name : '';
+  groupColorField.setValue(group ? group.color : DEFAULT_EVENT_COLOR);
+  // Si el grupo ya tiene un color de completada EXPLICITO se trata como
+  // "tocado", para que cambiar el color normal no se lo pise.
+  groupCompletedColorTouched = !!(group && group.completedColor);
+  setGroupCompletedColorProgrammatically(
+    (group && group.completedColor) || mutedTaskColor(group ? group.color : DEFAULT_EVENT_COLOR),
+  );
+  document.getElementById('btn-delete-group').classList.toggle('hidden', !group);
+  document.getElementById('group-modal').classList.remove('hidden');
+  document.getElementById('group-name').focus();
+}
+
+function closeGroupModal() {
+  document.getElementById('group-modal').classList.add('hidden');
+}
+
+// Todo lo que se ve del grupo (chips del calendario, recordatorios,
+// tareas) cambia con el: se recarga lo que lo pinta, no solo la lista.
+async function refreshAfterGroupChange() {
+  await refreshGroupsView();
+  loadMonth();
+  loadReminders();
+  loadTasks().then(renderTasksList);
+}
+
+document.getElementById('btn-groups-add').addEventListener('click', () => openGroupModal(null));
+document.getElementById('btn-close-group').addEventListener('click', closeGroupModal);
+document.getElementById('btn-cancel-group').addEventListener('click', closeGroupModal);
+
+document.getElementById('btn-groups-edit-mode').addEventListener('click', () => {
+  groupsEditMode = !groupsEditMode;
+  document.getElementById('btn-groups-edit-mode').classList.toggle('is-active', groupsEditMode);
+  renderGroupsViewList();
+});
+
+document.getElementById('group-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('group-id').value;
+  const payload = {
+    name: document.getElementById('group-name').value,
+    color: groupColorField.getValue(),
+    completedColor: groupCompletedColorField.getValue(),
+  };
+  if (id) await api(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  else await api('/api/groups', { method: 'POST', body: JSON.stringify(payload) });
+  closeGroupModal();
+  await refreshAfterGroupChange();
+});
+
+document.getElementById('btn-delete-group').addEventListener('click', async () => {
+  const id = document.getElementById('group-id').value;
+  if (!id) return;
+  const grupo = state.groups.find((g) => String(g.id) === String(id));
+  const seguro = await showAppConfirm(
+    `¿Eliminar el grupo "${grupo ? grupo.name : ''}"? Los eventos que lo usen se quedarán sin grupo.`,
+  );
+  if (!seguro) return;
+  await api(`/api/groups/${id}`, { method: 'DELETE' });
+  closeGroupModal();
+  await refreshAfterGroupChange();
+});
+
+document.getElementById('btn-close-groups').addEventListener('click', closeGroupsView);
+document.getElementById('btn-groups-back').addEventListener('click', () => {
+  showGroupsList();
+  renderGroupsViewList();
+});
+// Los dos accesos rapidos de la pantalla del calendario.
+document.getElementById('btn-calendar-quick-today').addEventListener('click', () => {
+  enterMobileDayView(new Date());
+});
+document.getElementById('btn-calendar-quick-groups').addEventListener('click', openGroupsView);
 
 // ---------------------------------------------------------------------
 // Extension "Gimnasio": registro de entrenamientos de verdad (ejercicios,
@@ -11512,19 +12248,27 @@ applyUiStyle();
 // ("que se cancele, pero mantenme en la ventana"). Por dispositivo
 // (localStorage), no sincronizado entre movil/ordenador.
 // ---------------------------------------------------------------------
-function setCurrentScreen(screen) {
-  localStorage.setItem('currentScreen', screen);
+// Que boton de la barra de abajo le corresponde a cada pantalla. Las 4
+// extensiones se cuentan como "Herramientas" (es de donde se entra),
+// salvo la que este puesta en el hueco personalizable de la barra, que
+// entonces se enciende ella misma.
+function mobileNavSectionForScreen(screen) {
+  if (screen === 'mobile-notes') return 'notes';
+  if (screen === 'extensions') return 'extensions';
+  if (['gym', 'lecturas', 'finanzas', 'viajes'].includes(screen)) {
+    return getMobileNavNotesSlot() === screen ? 'notes' : 'extensions';
+  }
+  return 'calendar';
 }
 
-async function restoreCurrentScreen() {
-  const screen = localStorage.getItem('currentScreen');
-  if (!screen || screen === 'home') return;
-  if (screen === 'mobile-notes') { openMobileNotesView(); return; }
-  if (screen === 'extensions') { openExtensionsView(); return; }
-  if (screen === 'gym') { await openGymView(); return; }
-  if (screen === 'lecturas') { openLecturasView(); return; }
-  if (screen === 'finanzas') { await openFinanzasView(); return; }
-  if (screen === 'viajes') { await openViajesView(); return; }
+// Ademas de recordar la pantalla, deja encendido el boton que toca de la
+// barra de abajo. Va aqui (y no solo en goToMobileSection) porque al
+// ABRIR una pantalla por cualquier otro camino -- sobre todo al arrancar
+// la app restaurando donde lo dejaste -- la barra se quedaba marcando
+// "Calendario" aunque estuvieras en otro sitio.
+function setCurrentScreen(screen) {
+  localStorage.setItem('currentScreen', screen);
+  refreshMobileNavActive(mobileNavSectionForScreen(screen));
 }
 
 async function initStep(fn) {
@@ -11536,37 +12280,10 @@ async function initStep(fn) {
 }
 
 async function init() {
-  // Lo PRIMERO de todo (antes incluso de cargar datos del calendario):
-  // si veniamos de una recarga dentro de una vista a pantalla completa,
-  // cubrir el calendario con esa vista cuanto antes -- el calendario ya
-  // esta visible desde el primer momento, así que cuanto mas tarde se
-  // llame a esto, mas se nota el "flashazo" antes de taparlo. Moverlo aqui
-  // (en vez de al final de init(), donde estaba antes) no depende de
-  // nada de lo que carga init() despues -- cada open*View() ya carga sus
-  // propios datos por su cuenta.
-  //
-  // OJO -- bug real encontrado al mover esto tan pronto: algunas vistas
-  // (Finanzas, via setupFinanzasIconColorFields) llaman en su apertura a
-  // funciones que viven en settings.js (createIconField/createColorField),
-  // que carga DESPUES de app.js (ver la nota de "Orden de declaracion"
-  // en CLAUDE.md) -- normalmente esto no es problema porque esas
-  // llamadas solo ocurren dentro de manejadores de eventos, que se
-  // disparan mucho despues de que TODOS los <script> ya han terminado
-  // de cargar. Pero al llamar a restoreCurrentScreen() de forma
-  // SINCRONA nada mas arrancar init() (que a su vez se invoca de forma
-  // sincrona al final de app.js), app.js seguia "en mitad de su propio
-  // <script>" cuando esto se ejecutaba -- settings.js ni siquiera habia
-  // empezado a cargar todavia, y createIconField no existia aun
-  // (ReferenceError). Un simple `await Promise.resolve()` NO basta para
-  // arreglarlo (los microtasks se vacian ENTRE cada <script> del
-  // documento, antes de pasar al siguiente) -- hace falta un macrotask
-  // de verdad (setTimeout) para que el navegador termine de
-  // parsear/ejecutar el resto de los <script> del documento (incluido
-  // settings.js entero) antes de continuar aqui. Sigue siendo
-  // practicamente instantaneo para quien lo ve, muy lejos de las 7
-  // llamadas de red secuenciales que había antes.
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await initStep(restoreCurrentScreen);
+  // La app abre SIEMPRE en el calendario, sin importar donde se cerro
+  // (pedido explicito de Koku tras probarlo: reabrirla en Herramientas
+  // no era lo que esperaba). currentScreen se sigue guardando, pero solo
+  // para saber que boton de la barra de abajo encender mientras navegas.
   await initStep(loadGroups);
   await initStep(loadSpecialDays);
   await initStep(loadMonth);
@@ -11581,6 +12298,13 @@ async function init() {
   // ordenador: se comprueba al abrir la app si toca generar el de este
   // periodo (ver public/finanzas-recurring.js).
   await initStep(generateDueRecurringExpenses);
+
+  // Permiso de avisos: se pide AQUI, al abrir la app, no escondido en
+  // Configuracion (pedido de Koku: "que no me tenga que ir hasta ahi la
+  // primera vez, no seria intuitivo"). Solo la primera vez -- si ya se
+  // pregunto una vez, no se vuelve a insistir nunca, se apaga o enciende
+  // desde Configuracion > Este dispositivo como cualquier otro ajuste.
+  await initStep(maybeAskNotificationPermissionOnStartup);
 
   // Y los avisos de los recordatorios se (re)programan en el propio
   // dispositivo, para que suenen aunque la app este cerrada (ver

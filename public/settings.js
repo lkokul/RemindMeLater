@@ -263,10 +263,13 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'mobile'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'store'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
+  // El "Volver" comparte fila con el titulo y solo se ve estando DENTRO
+  // de una seccion.
+  document.getElementById('btn-settings-back').classList.toggle('hidden', tab === null);
   SETTINGS_TABS.forEach((t) => {
     document.getElementById(`settings-tab-${t}`).classList.toggle('hidden', t !== tab);
   });
@@ -279,7 +282,6 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     if (tab === 'profile') refreshProfileTab();
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();
-    else if (tab === 'groups') refreshGroupsTab();
     else if (tab === 'mobile') refreshMobileTab();
   });
 });
@@ -347,7 +349,6 @@ document.getElementById('profile-form').addEventListener('submit', async (e) => 
 // localStorage, no se comparte.
 // ---------------------------------------------------------------------
 function refreshViewTab() {
-  refreshCalendarDensityOptions();
   refreshFavoritesDisplayOptions();
 }
 
@@ -385,39 +386,6 @@ function refreshFavoritesDisplayOptions() {
   });
 }
 
-// Como se ven, en el calendario del mes, los dias que tienen varios
-// eventos/tareas a la vez — preferencia de ESTE dispositivo (localStorage),
-// leida por getCalendarDensityMode() en app.js al dibujar la cuadricula.
-const CALENDAR_DENSITY_MODES = [
-  { id: 'limit', label: 'Limite + "+N más"' },
-  { id: 'dots', label: 'Puntos de color' },
-  { id: 'tint', label: 'Solo marcar el día' },
-];
-
-function refreshCalendarDensityOptions() {
-  const container = document.getElementById('calendar-density-options');
-  if (!container) return;
-  container.innerHTML = '';
-  const current = getCalendarDensityMode();
-
-  CALENDAR_DENSITY_MODES.forEach((mode) => {
-    const isActive = mode.id === current;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
-    btn.textContent = mode.label;
-    if (isActive) {
-      btn.disabled = true;
-    } else {
-      btn.addEventListener('click', () => {
-        localStorage.setItem('calendarDayDensity', mode.id);
-        refreshCalendarDensityOptions();
-        if (typeof renderCalendarGrid === 'function') renderCalendarGrid();
-      });
-    }
-    container.appendChild(btn);
-  });
-}
 
 // Salir de la pestana Estilo (volver al menu, o cerrar Configuracion del
 // todo) sin haber guardado descarta el borrador que hubiera a medias —
@@ -449,11 +417,13 @@ document.getElementById('btn-viajes-settings').addEventListener('click', openSet
 // #mobile-notes-view (Fase 4) es tambien .my-space-view a pantalla
 // completa, mismo motivo que las de arriba.
 document.getElementById('btn-mobile-notes-settings').addEventListener('click', openSettingsModal);
-document.getElementById('btn-close-settings').addEventListener('click', () => {
+// Ya no hay boton de cerrar en la cabecera (la barra inferior sigue
+// visible con Configuracion abierta y es por donde se sale). Se queda
+// como funcion para que Esc y cualquier otro sitio cierren igual.
+function closeSettingsModal() {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
-  clearInterval(pairingCountdownTimer);
-});
+}
 
 // ---------------------------------------------------------------------
 // Estilo: biblioteca de temas compartida + cual tengo activo YO
@@ -1227,132 +1197,10 @@ async function syncActiveTheme() {
 syncActiveTheme();
 
 // ---------------------------------------------------------------------
-// Grupos (gestion completa; el <select> del formulario de evento sigue
-// viviendo en app.js porque forma parte de ese modal)
+// Los grupos ya no se gestionan desde aqui: viven en su propio apartado
+// (Calendario -> Grupos), igual que cada herramienta gestiona lo suyo
+// por dentro. Todo su codigo se movio a app.js.
 // ---------------------------------------------------------------------
-const groupIconField = createIconField({ initialValue: '' });
-document.getElementById('group-icon-field').appendChild(groupIconField.element);
-
-// OJO orden: groupCompletedColorField se crea ANTES que groupColorField
-// porque el onChange de groupColorField la referencia — crearla antes evita
-// el bug de "variable declarada mas abajo leida por un callback que se
-// dispara al construir" documentado en CLAUDE.md (createColorField llama a
-// su onChange una vez de inmediato, al pintar el cuadradito inicial).
-// suppressGroupCompletedTouch evita que esas llamadas de INICIALIZACION (la
-// propia y la que dispara groupColorField al crearse, que la actualiza en
-// cascada) cuenten como "la persona ha tocado el selector a mano".
-let suppressGroupCompletedTouch = true;
-let groupCompletedColorTouched = false;
-const groupCompletedColorField = createColorField({
-  initialValue: mutedTaskColor(DEFAULT_EVENT_COLOR),
-  onChange: () => { if (!suppressGroupCompletedTouch) groupCompletedColorTouched = true; },
-});
-document.getElementById('group-completed-color-field').appendChild(groupCompletedColorField.element);
-
-const groupColorField = createColorField({
-  initialValue: DEFAULT_EVENT_COLOR,
-  // Si el color normal del grupo cambia y todavia no se ha tocado a mano
-  // el de "completada", seguimos su tono atenuado como sugerencia — en
-  // cuanto se toque el propio selector de completada, deja de seguirle.
-  onChange: (newColor) => {
-    if (!groupCompletedColorTouched) groupCompletedColorField.setValue(mutedTaskColor(newColor));
-  },
-});
-document.getElementById('group-color-field').appendChild(groupColorField.element);
-suppressGroupCompletedTouch = false;
-
-async function refreshGroupsTab() {
-  await loadGroups();
-  renderGroupsList();
-}
-
-// Cambia el color de "completada" SIN que cuente como que la persona lo ha
-// tocado a mano (carga inicial, reset del formulario, o cargar el valor
-// guardado de un grupo existente al editarlo) — solo un click real en su
-// selector marca groupCompletedColorTouched.
-function setGroupCompletedColorProgrammatically(hex) {
-  suppressGroupCompletedTouch = true;
-  groupCompletedColorField.setValue(hex);
-  suppressGroupCompletedTouch = false;
-}
-
-function resetGroupForm() {
-  document.getElementById('group-id').value = '';
-  document.getElementById('group-name').value = '';
-  groupIconField.setValue('');
-  groupColorField.setValue(DEFAULT_EVENT_COLOR);
-  groupCompletedColorTouched = false;
-  setGroupCompletedColorProgrammatically(mutedTaskColor(DEFAULT_EVENT_COLOR));
-  document.getElementById('btn-cancel-group').classList.add('hidden');
-}
-
-function renderGroupsList() {
-  const list = document.getElementById('groups-list');
-  list.innerHTML = '';
-  if (state.groups.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavía no tienes grupos. Crea uno arriba.</p>';
-    return;
-  }
-  state.groups.forEach((g) => {
-    const row = document.createElement('div');
-    row.className = 'group-item';
-    row.innerHTML = `
-      <span class="color-dot" style="background-color: ${g.color}"></span>
-      <span class="group-item-name">${g.icon ? escapeHtml(g.icon) + ' ' : ''}${escapeHtml(g.name)}</span>
-      <div class="group-item-actions">
-        <button type="button" class="secondary-btn" data-action="edit">Editar</button>
-        <button type="button" class="danger-btn" data-action="delete">Eliminar</button>
-      </div>
-    `;
-    row.querySelector('[data-action="edit"]').addEventListener('click', () => {
-      document.getElementById('group-id').value = g.id;
-      document.getElementById('group-name').value = g.name;
-      groupIconField.setValue(g.icon || '');
-      groupColorField.setValue(g.color);
-      // Si el grupo ya tiene un color de completada EXPLICITO, lo tratamos
-      // como "tocado" para que cambiar el color normal no se lo pise; si
-      // no, sigue el color normal como hasta ahora.
-      groupCompletedColorTouched = !!g.completedColor;
-      setGroupCompletedColorProgrammatically(g.completedColor || mutedTaskColor(g.color));
-      document.getElementById('btn-cancel-group').classList.remove('hidden');
-      document.getElementById('group-name').focus();
-    });
-    row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
-      if (!confirm(`¿Eliminar el grupo "${g.name}"? Los eventos que lo usen se quedaran sin grupo.`)) return;
-      await api(`/api/groups/${g.id}`, { method: 'DELETE' });
-      await refreshGroupsTab();
-      loadMonth();
-      loadReminders();
-      if (typeof loadTasks === 'function') loadTasks().then(renderTasksList);
-    });
-    list.appendChild(row);
-  });
-}
-
-document.getElementById('btn-cancel-group').addEventListener('click', resetGroupForm);
-
-document.getElementById('group-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const id = document.getElementById('group-id').value;
-  const payload = {
-    name: document.getElementById('group-name').value,
-    color: groupColorField.getValue(),
-    icon: groupIconField.getValue() || null,
-    completedColor: groupCompletedColorField.getValue(),
-  };
-
-  if (id) {
-    await api(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
-  } else {
-    await api('/api/groups', { method: 'POST', body: JSON.stringify(payload) });
-  }
-
-  resetGroupForm();
-  await refreshGroupsTab();
-  loadMonth();
-  loadReminders();
-  if (typeof loadTasks === 'function') loadTasks().then(renderTasksList);
-});
 
 // ---------------------------------------------------------------------
 // "Este dispositivo": ajustes locales, no compartidos con nadie mas
@@ -1784,6 +1632,26 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  const groupModal = document.getElementById('group-modal');
+  if (groupModal && !groupModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-group').click();
+    return;
+  }
+
+  // Grupos tambien tiene dos capas: el detalle de un grupo dentro de la
+  // lista. Esc vuelve primero a la lista y solo despues sale al
+  // calendario, igual que Notas o Viajes.
+  const groupsView = document.getElementById('groups-view');
+  if (groupsView && !groupsView.classList.contains('hidden')) {
+    const detail = document.getElementById('groups-detail-panel');
+    if (detail && !detail.classList.contains('hidden')) {
+      document.getElementById('btn-groups-back').click();
+    } else {
+      document.getElementById('btn-close-groups').click();
+    }
+    return;
+  }
+
   const extensionsView = document.getElementById('extensions-view');
   if (extensionsView && !extensionsView.classList.contains('hidden')) {
     document.getElementById('btn-close-extensions').click();
@@ -1801,7 +1669,7 @@ document.addEventListener('keydown', (e) => {
     if (settingsMenu && settingsMenu.classList.contains('hidden')) {
       showSettingsScreen(null);
     } else {
-      document.getElementById('btn-close-settings').click();
+      closeSettingsModal();
     }
   }
 });
