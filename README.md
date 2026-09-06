@@ -241,11 +241,26 @@ arriba:
   **bloques**: escribe `/` y aparece un menú con buscador para insertar
   títulos, listas, listas de tareas con casilla, desplegables (toggles),
   callouts, citas, divisores, código, tablas, imágenes (también pegando
-  con Ctrl+V), subpáginas y bases de datos. También valen atajos tipo
+  con Ctrl+V), subpáginas y bases de datos — y funciona en cualquier
+  tipo de línea, no solo en texto normal. También valen atajos tipo
   markdown (`#` + espacio = título, `-` = lista, `[]` = tarea, `>` =
-  cita, `---` = divisor). Las páginas se anidan sin límite en un árbol
-  con buscador (sidebar propio), con migas de pan arriba y favoritos con
-  estrella; borrar una página nunca borra sus subpáginas (suben un
+  cita, `---` = divisor, `!tip`/`!nota`/`!aviso`… = alert de color
+  estilo GitHub con icono). El **código** se colorea solo al salir del
+  bloque (highlight.js vendorizado), con selector de lenguaje al pasar
+  el ratón, sangría respetada (Tab = 4 espacios, Intro mantiene la
+  sangría, Mayús+Intro crea otro bloque y Ctrl+Intro sale a texto
+  normal) y sin corrector ortográfico. Los **diagramas** (bloque
+  Diagrama, sintaxis Mermaid vendorizada) se dibujan como SVG al salir
+  del bloque: flujos y secuencias para documentar programas, módulos o
+  funciones. Cualquier bloque (menos el código) se puede **alinear**
+  (izquierda/centro/derecha/justificado, atajos de Word: Ctrl+Q/T/D/J),
+  y en las tablas además hay alineación vertical por celda, un menú `▦`
+  con submenús para añadir/quitar filas y columnas (también relativas a
+  la celda del cursor) y bordes arrastrables estilo Excel para ajustar
+  anchos y altos. Las páginas se anidan sin límite en un árbol
+  con buscador (sidebar propio), con migas de pan arriba, favoritos con
+  estrella y un desplegable de subpáginas bajo el título (chips);
+  borrar una página nunca borra sus subpáginas (suben un
   nivel). Las **bases de datos** embebidas son colecciones de filas con
   propiedades tipadas (texto, número, select, fecha, casilla) que se ven
   como tabla editable, tablero kanban (arrastrando tarjetas entre

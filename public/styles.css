@@ -3927,21 +3927,133 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   border-left: 3px solid var(--alert-color);
   background: color-mix(in srgb, var(--alert-color) 10%, var(--surface-2));
 }
-/* La cabecera "icono + etiqueta" en su color, y el texto debajo. */
+/* La cabecera "icono + etiqueta" en su color, y el texto debajo. El
+   icono NO es un emoji (chocaba: la exclamacion roja del emoji sobre el
+   morado de "Importante", feedback de Koku), sino un SVG lineal dibujado
+   a mano y embebido como background-image, con el trazo YA en el color
+   del alert -- un background-image no puede leer var(--alert-color), asi
+   que cada kind lleva su color repetido dentro del SVG (son los mismos
+   hex fijos de aqui al lado, no colores del tema). Iconos calcados del
+   estilo de los octicons de GitHub: circulo-info, bombilla, bocadillo
+   con !, triangulo con ! y octagono con !. */
 .proyectos-page-body [data-callout][data-kind]::before {
   display: block;
   font-weight: 700;
   font-size: 0.85rem;
   color: var(--alert-color);
   margin-bottom: 0.15rem;
+  padding-left: 1.45rem;
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 1.05rem;
 }
 .proyectos-page-body [data-callout][data-kind="note"] { --alert-color: #4493f8; }
-.proyectos-page-body [data-callout][data-kind="note"]::before { content: 'ℹ️ Nota'; }
+.proyectos-page-body [data-callout][data-kind="note"]::before {
+  content: 'Nota';
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234493f8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cline x1='12' y1='11' x2='12' y2='16'/%3E%3Cline x1='12' y1='8' x2='12' y2='8.01'/%3E%3C/svg%3E");
+}
 .proyectos-page-body [data-callout][data-kind="tip"] { --alert-color: #3fb950; }
-.proyectos-page-body [data-callout][data-kind="tip"]::before { content: '💡 Consejo'; }
+.proyectos-page-body [data-callout][data-kind="tip"]::before {
+  content: 'Consejo';
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233fb950' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3a6 6 0 0 0-4 10.5c.6.5 1 1.5 1 2.5h6c0-1 .4-2 1-2.5A6 6 0 0 0 12 3z'/%3E%3Cline x1='9.5' y1='19' x2='14.5' y2='19'/%3E%3Cline x1='10.5' y1='22' x2='13.5' y2='22'/%3E%3C/svg%3E");
+}
 .proyectos-page-body [data-callout][data-kind="important"] { --alert-color: #ab7df8; }
-.proyectos-page-body [data-callout][data-kind="important"]::before { content: '❗ Importante'; }
+.proyectos-page-body [data-callout][data-kind="important"]::before {
+  content: 'Importante';
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ab7df8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3Cline x1='12' y1='7' x2='12' y2='11'/%3E%3Cline x1='12' y1='14' x2='12' y2='14.01'/%3E%3C/svg%3E");
+}
 .proyectos-page-body [data-callout][data-kind="warning"] { --alert-color: #d29922; }
-.proyectos-page-body [data-callout][data-kind="warning"]::before { content: '⚠️ Aviso'; }
+.proyectos-page-body [data-callout][data-kind="warning"]::before {
+  content: 'Aviso';
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23d29922' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'/%3E%3Cline x1='12' y1='9' x2='12' y2='13'/%3E%3Cline x1='12' y1='17' x2='12' y2='17.01'/%3E%3C/svg%3E");
+}
 .proyectos-page-body [data-callout][data-kind="caution"] { --alert-color: #f85149; }
-.proyectos-page-body [data-callout][data-kind="caution"]::before { content: '🛑 Peligro'; }
+.proyectos-page-body [data-callout][data-kind="caution"]::before {
+  content: 'Peligro';
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f85149' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolygon points='7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86'/%3E%3Cline x1='12' y1='7' x2='12' y2='13'/%3E%3Cline x1='12' y1='16.5' x2='12' y2='16.51'/%3E%3C/svg%3E");
+}
+
+/* --- Ronda de feedback 2 de Proyectos --- */
+
+/* Alineacion por bloque (data-align; "left" no se guarda, es el valor
+   por defecto). Vale para cualquier bloque de texto, celdas incluidas;
+   los bloques de codigo no llevan alineacion a proposito. */
+.proyectos-page-body [data-align="center"] { text-align: center; }
+.proyectos-page-body [data-align="right"] { text-align: right; }
+.proyectos-page-body [data-align="justify"] { text-align: justify; }
+/* Alineacion VERTICAL en celdas (data-valign; sin atributo = el centro
+   de siempre del navegador). */
+.proyectos-page-body td[data-valign="top"], .proyectos-page-body th[data-valign="top"] { vertical-align: top; }
+.proyectos-page-body td[data-valign="middle"], .proyectos-page-body th[data-valign="middle"] { vertical-align: middle; }
+.proyectos-page-body td[data-valign="bottom"], .proyectos-page-body th[data-valign="bottom"] { vertical-align: bottom; }
+
+/* Tablas con tamaños puestos a mano: en cuanto una tabla tiene
+   <colgroup> (se le crea al primer arrastre de un borde), pasa a
+   table-layout:fixed para que los anchos de sus <col> manden de verdad.
+   Sin colgroup se queda como siempre (auto, ajustada al contenido). */
+.proyectos-page-body table:has(> colgroup) { table-layout: fixed; width: auto; }
+.proyectos-page-body table:has(> colgroup) td,
+.proyectos-page-body table:has(> colgroup) th { overflow-wrap: break-word; }
+.proyectos-page-body table[data-width="full"]:has(> colgroup) { width: 100%; }
+
+/* Los items del menu de tabla con submenus: los deshabilitados son las
+   opciones "del cursor" cuando el cursor no esta en ninguna celda. */
+.proyectos-table-menu-item:disabled { opacity: 0.4; cursor: default; }
+.proyectos-table-menu-item:disabled:hover { background: none; }
+
+/* Boton de lenguaje de un bloque de codigo: flota en la esquina del
+   <pre> señalado con el raton (uno solo compartido, como el ▦ de las
+   tablas) y abre el popover para elegir lenguaje. */
+.proyectos-pre-lang-btn {
+  position: fixed; z-index: 55;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.72rem;
+  background: var(--surface); color: var(--surface-text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.proyectos-pre-lang-btn:hover { border-color: var(--accent); }
+.proyectos-pre-lang-btn.hidden { display: none; }
+/* Mientras el raton esta encima del pre, la etiqueta pasiva del ::after
+   sobra (el boton, que dice lo mismo y ademas se puede clicar, aparece
+   justo en su sitio). */
+.proyectos-page-body pre[data-lang]:hover::after { opacity: 0; }
+
+/* Diagramas (mermaid): la vista previa es una isla no editable debajo
+   del <pre data-lang="mermaid">; mientras se ve el dibujo, el texto se
+   esconde (clic en el dibujo para editarlo). */
+.proyectos-page-body pre.proyectos-diagram-source-hidden { display: none; }
+.proyectos-diagram-preview {
+  margin: 0.4rem 0;
+  padding: 0.6rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--surface-text);
+  cursor: pointer;
+  overflow-x: auto;
+}
+.proyectos-diagram-preview:hover { border-color: var(--accent); }
+.proyectos-diagram-preview svg { max-width: 100%; height: auto; }
+.proyectos-diagram-preview.error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  cursor: text;
+}
+
+/* Subpaginas desplegadas debajo del titulo (el ▾ del titulo las abre):
+   chips integrados en el documento, no un popover flotante. */
+.proyectos-subnav {
+  display: flex; flex-wrap: wrap; gap: 0.35rem;
+  margin: 0 0 0.6rem;
+}
+.proyectos-subnav.hidden { display: none; }
+.proyectos-subnav-chip {
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); color: var(--surface-text);
+  padding: 0.22rem 0.7rem;
+  font: inherit; font-size: 0.85rem;
+  cursor: pointer;
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.proyectos-subnav-chip:hover { background: var(--surface-2); color: var(--surface-2-text); border-color: var(--accent); }
+.proyectos-subnav-new { opacity: 0.7; border-style: dashed; }
+.proyectos-subnav-empty { font-size: 0.85rem; opacity: 0.5; align-self: center; }

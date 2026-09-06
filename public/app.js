@@ -10291,6 +10291,7 @@ async function openProyectosPage(id) {
   // proposito: cada base carga por su cuenta sin bloquear la pagina.
   hydrateProyectosDbBlocks();
   highlightProyectosCodeBlocks();
+  renderProyectosDiagrams();
   // La pila de deshacer empieza de cero en cada pagina.
   resetProyectosUndo();
   // Cambiar de pagina cierra el side peek si estaba abierto.
@@ -10313,6 +10314,7 @@ async function openProyectosPage(id) {
 
   renderProyectosBreadcrumb();
   renderProyectosTree();
+  renderProyectosSubnav(); // si esta desplegado, que enseñe las de ESTA pagina
 
   // Recordar que pagina esta abierta, para reabrirla al volver a la
   // vista (por dispositivo).
@@ -10468,48 +10470,41 @@ document.getElementById('btn-proyectos-focus').addEventListener('click', () => {
   applyProyectosFocusMode();
 });
 
-// El desplegable de subpaginas de la pagina abierta.
-let proyectosSubnavPopover = null;
-document.getElementById('btn-proyectos-subnav').addEventListener('click', (e) => {
-  e.stopPropagation();
-  if (!proyectosCurrentPage) return;
-  if (!proyectosSubnavPopover) {
-    proyectosSubnavPopover = document.createElement('div');
-    proyectosSubnavPopover.className = 'proyectos-slash-popover proyectos-subnav-popover hidden';
-    document.body.appendChild(proyectosSubnavPopover);
-  }
-  const popover = proyectosSubnavPopover;
-  if (!popover.classList.contains('hidden')) { popover.classList.add('hidden'); return; }
-  popover.innerHTML = '';
+// Las subpaginas de la pagina abierta, desplegadas DEBAJO del titulo
+// como chips integrados en el documento (antes era un popover flotante;
+// Koku pidio que no fuera "tan ajeno al programa"). El ▾ del titulo las
+// enseña/esconde; mientras esten abiertas se refrescan solas al navegar
+// (comodo en el modo sin panel para ir bajando por el arbol).
+function renderProyectosSubnav() {
+  const wrap = document.getElementById('proyectos-subnav');
+  if (wrap.classList.contains('hidden') || !proyectosCurrentPage) return;
+  wrap.innerHTML = '';
   const children = proyectosChildrenOf(proyectosCurrentPage.id);
   for (const page of children) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'proyectos-slash-item';
+    btn.className = 'proyectos-subnav-chip';
     btn.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
-    btn.addEventListener('click', () => {
-      popover.classList.add('hidden');
-      openProyectosPage(page.id);
-    });
-    popover.appendChild(btn);
+    btn.addEventListener('click', () => openProyectosPage(page.id));
+    wrap.appendChild(btn);
   }
   if (children.length === 0) {
-    const hint = document.createElement('p');
-    hint.className = 'hint';
-    hint.textContent = 'Esta página no tiene subpáginas.';
-    popover.appendChild(hint);
+    const hint = document.createElement('span');
+    hint.className = 'proyectos-subnav-empty';
+    hint.textContent = 'Sin subpáginas todavía';
+    wrap.appendChild(hint);
   }
   const newBtn = document.createElement('button');
   newBtn.type = 'button';
-  newBtn.className = 'proyectos-slash-item';
-  newBtn.textContent = '＋ Nueva subpágina';
-  newBtn.addEventListener('click', () => {
-    popover.classList.add('hidden');
-    createProyectosPage(proyectosCurrentPage.id);
-  });
-  popover.appendChild(newBtn);
-  popover.classList.remove('hidden');
-  positionFixedPopover(document.getElementById('btn-proyectos-subnav'), popover, { width: 260 });
+  newBtn.className = 'proyectos-subnav-chip proyectos-subnav-new';
+  newBtn.textContent = '＋ Subpágina';
+  newBtn.addEventListener('click', () => createProyectosPage(proyectosCurrentPage.id));
+  wrap.appendChild(newBtn);
+}
+document.getElementById('btn-proyectos-subnav').addEventListener('click', () => {
+  if (!proyectosCurrentPage) return;
+  document.getElementById('proyectos-subnav').classList.toggle('hidden');
+  renderProyectosSubnav();
 });
 
 // ---------------------------------------------------------------------
@@ -10561,12 +10556,24 @@ const PROYECTOS_BLOCK_TYPES = [
   { id: 'quote', label: 'Cita', hint: 'Texto citado', icon: '❝', keywords: 'cita quote' },
   { id: 'divider', label: 'Divisor', hint: 'Línea separadora', icon: '—', keywords: 'divisor separador linea hr' },
   { id: 'code', label: 'Código', hint: 'Bloque de código', icon: '</>', keywords: 'codigo code programar' },
+  // Diagramas (mermaid): un bloque de codigo especial cuyo texto se
+  // dibuja como diagrama SVG al salir de el. Sirve para los "3 niveles"
+  // que pidio Koku (programas / codigos / funciones) -- la guia trae un
+  // ejemplo de cada uno.
+  { id: 'diagram', label: 'Diagrama', hint: 'Flujo o secuencia dibujado (Mermaid)', icon: '⤳', keywords: 'diagrama flujo workflow mermaid secuencia grafo pseudocodigo' },
   { id: 'table', label: 'Tabla', hint: 'Filas y columnas', icon: '▦', keywords: 'tabla table filas columnas' },
   { id: 'image', label: 'Imagen', hint: 'Subir una imagen', icon: '🖼', keywords: 'imagen foto image subir' },
   { id: 'page', label: 'Subpágina', hint: 'Crear una página dentro de esta', icon: '📄', keywords: 'pagina subpagina page anidar' },
   { id: 'weblink', label: 'Enlace web', hint: 'A una página de internet', icon: '🔗', keywords: 'enlace link web url internet' },
   { id: 'pagelink', label: 'Enlace a página', hint: 'A otra página de Proyectos', icon: '🔀', keywords: 'enlace link pagina conector interno' },
   { id: 'database', label: 'Base de datos', hint: 'Tabla, tablero o lista con propiedades', icon: '🗄', keywords: 'base datos database tabla tablero kanban lista coleccion' },
+  // Alineacion: estas opciones NO convierten el bloque, le ponen (o
+  // quitan) el data-align. Tambien existen como atajos de teclado (los
+  // de Word en español) -- ver el manejador de keydown.
+  { id: 'align-left', label: 'Alinear a la izquierda', hint: 'Ctrl+Q (es lo normal)', icon: '⇤', keywords: 'alinear izquierda align left' },
+  { id: 'align-center', label: 'Centrar', hint: 'Ctrl+T', icon: '↔', keywords: 'alinear centrar centro align center' },
+  { id: 'align-right', label: 'Alinear a la derecha', hint: 'Ctrl+D', icon: '⇥', keywords: 'alinear derecha align right' },
+  { id: 'align-justify', label: 'Justificar', hint: 'Ctrl+J', icon: '☰', keywords: 'alinear justificar justify' },
 ];
 
 // Serializa el cuerpo para GUARDARLO: igual que innerHTML, pero
@@ -10590,6 +10597,12 @@ function getProyectosBodyHtml() {
   clone.querySelectorAll('pre > code').forEach((code) => {
     code.textContent = plainProyectosCodeText(code);
   });
+  // Los diagramas: la vista previa (el SVG que monta mermaid) es
+  // interfaz, no contenido -- solo viaja el texto del
+  // <pre data-lang="mermaid">. Y la clase auxiliar que esconde ese pre
+  // mientras se ve el diagrama tampoco se guarda.
+  clone.querySelectorAll('.proyectos-diagram-preview').forEach((el) => el.remove());
+  clone.querySelectorAll('pre').forEach((pre) => pre.removeAttribute('class'));
   return clone.innerHTML;
 }
 
@@ -10654,6 +10667,7 @@ function restoreProyectosBodySnapshot(html) {
   PROYECTOS_BODY().innerHTML = html;
   hydrateProyectosDbBlocks();
   highlightProyectosCodeBlocks();
+  renderProyectosDiagrams();
   proyectosUndoLastSnapshot = html;
   queueProyectosSave({ body: html });
 }
@@ -10680,15 +10694,31 @@ function proyectosRedo() {
 // highlight.js lo adivina y se apunta el resultado.
 // ---------------------------------------------------------------------
 function highlightProyectosCodeBlocks(root) {
+  const scope = root || PROYECTOS_BODY();
+  // De paso, todo <pre> va sin corrector ortografico: el subrayado rojo
+  // en "function" o "return" no aporta nada dentro de codigo (pedido
+  // por Koku). Se pone por JS porque el saneador del servidor no guarda
+  // este atributo (es solo de la experiencia de edicion).
+  scope.querySelectorAll('pre').forEach((pre) => { pre.spellcheck = false; });
   if (typeof hljs === 'undefined') return;
-  (root || PROYECTOS_BODY()).querySelectorAll('pre > code').forEach((code) => {
+  scope.querySelectorAll('pre > code').forEach((code) => {
+    const lang = code.parentElement.getAttribute('data-lang');
+    if (lang === 'mermaid') return; // eso es un diagrama, lo pinta renderProyectosDiagrams
     const text = plainProyectosCodeText(code);
     if (!text.trim()) return;
-    const lang = code.parentElement.getAttribute('data-lang');
     try {
-      const result = lang && hljs.getLanguage(lang)
-        ? hljs.highlight(text, { language: lang })
-        : hljs.highlightAuto(text);
+      let result;
+      if (lang && hljs.getLanguage(lang)) {
+        result = hljs.highlight(text, { language: lang });
+      } else if (!lang) {
+        result = hljs.highlightAuto(text);
+      } else {
+        // Lenguaje elegido a proposito pero que highlight.js no conoce
+        // (p.ej. "pseudocodigo"): se queda en texto plano, SIN dejar que
+        // el detector automatico lo coloree como otra cosa.
+        code.textContent = text;
+        return;
+      }
       code.innerHTML = result.value;
       if (!lang && result.language) code.parentElement.setAttribute('data-lang', result.language);
     } catch (err) {
@@ -10696,6 +10726,84 @@ function highlightProyectosCodeBlocks(root) {
       // el bloque simplemente se queda sin colorear.
     }
   });
+}
+
+// ---------------------------------------------------------------------
+// Diagramas (mermaid, vendorizado en public/vendor/mermaid.min.js, MIT)
+//
+// Un diagrama es un <pre data-lang="mermaid"> normal y corriente: lo
+// que se guarda es su TEXTO (la sintaxis de mermaid, p.ej.
+// "flowchart TD / A --> B"). Al mostrarlo, se dibuja el SVG en una
+// "vista previa" no editable justo debajo (mismo espiritu de isla que
+// los widgets de base de datos) y el texto se esconde; clic en el
+// diagrama = volver a ver y editar el texto, y al salir del bloque se
+// redibuja. La vista previa NUNCA se guarda (ver getProyectosBodyHtml).
+// ---------------------------------------------------------------------
+let proyectosMermaidReady = false;
+let proyectosMermaidSeq = 0; // mermaid.render exige un id unico por dibujo
+
+function ensureProyectosMermaid() {
+  if (typeof mermaid === 'undefined') return false;
+  if (!proyectosMermaidReady) {
+    // El tema del diagrama se decide mirando si el fondo real de la app
+    // es oscuro o claro (formula de luminancia relativa aproximada) --
+    // con un tema oscuro, el tema "default" de mermaid seria ilegible.
+    let dark = false;
+    try {
+      const bg = getComputedStyle(document.body).backgroundColor;
+      const parts = bg.match(/\d+/g);
+      if (parts) {
+        const [r, g, b] = parts.map(Number);
+        dark = (0.2126 * r + 0.7152 * g + 0.0722 * b) < 128;
+      }
+    } catch (err) { /* sin fondo medible: se queda el tema claro */ }
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark ? 'dark' : 'default' });
+    proyectosMermaidReady = true;
+  }
+  return true;
+}
+
+async function renderProyectosDiagrams(root) {
+  if (!ensureProyectosMermaid()) return;
+  for (const pre of (root || PROYECTOS_BODY()).querySelectorAll('pre[data-lang="mermaid"]')) {
+    if (pre.closest('[data-proyectos-db]')) continue;
+    const code = pre.querySelector('code') || pre;
+    const text = plainProyectosCodeText(code).trim();
+    let preview = pre.nextElementSibling && pre.nextElementSibling.classList
+      && pre.nextElementSibling.classList.contains('proyectos-diagram-preview')
+      ? pre.nextElementSibling : null;
+    if (!text) {
+      // Bloque vacio: nada que dibujar, el texto se queda a la vista.
+      if (preview) preview.remove();
+      pre.classList.remove('proyectos-diagram-source-hidden');
+      continue;
+    }
+    if (!preview) {
+      preview = document.createElement('div');
+      preview.className = 'proyectos-diagram-preview';
+      preview.contentEditable = 'false';
+      pre.after(preview);
+    }
+    const renderId = `proyectos-diagram-${++proyectosMermaidSeq}`;
+    try {
+      const { svg } = await mermaid.render(renderId, text);
+      preview.innerHTML = svg;
+      preview.classList.remove('error');
+      // Con el diagrama dibujado, el texto se esconde. Clic en el
+      // diagrama para volver a editarlo (ver el manejador de clics).
+      pre.classList.add('proyectos-diagram-source-hidden');
+    } catch (err) {
+      // Sintaxis a medias o con errores: aviso debajo y el texto se
+      // queda visible para poder corregirlo.
+      preview.textContent = `⚠ El diagrama tiene un error de sintaxis: ${err && err.message ? err.message : err}`;
+      preview.classList.add('error');
+      pre.classList.remove('proyectos-diagram-source-hidden');
+      // mermaid a veces deja en el body un contenedor temporal del
+      // dibujo fallido -- fuera.
+      document.getElementById(renderId)?.remove();
+      document.getElementById(`d${renderId}`)?.remove();
+    }
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -10755,6 +10863,213 @@ function getProyectosCurrentBlock() {
     el = parent;
   }
   return null;
+}
+
+// La "linea" donde esta el cursor: como getProyectosCurrentBlock, pero
+// afinando a la unidad editable mas pequeña con sentido propio -- un
+// <li> dentro de una lista o el <summary> de un toggle cuentan como
+// linea, aunque el "bloque" (hijo directo del cuerpo) sea la lista o el
+// details entero. Es lo que usan el menu "/", los atajos markdown y la
+// alineacion, para que funcionen DENTRO de listas y toggles y actuen
+// solo sobre esa linea (no sobre la lista entera).
+function getProyectosCurrentLine() {
+  const body = PROYECTOS_BODY();
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  let node = sel.anchorNode;
+  if (!node || !body.contains(node) || node === body) return null;
+  if (node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement;
+  const line = node ? node.closest('li, summary') : null;
+  if (line && body.contains(line)) return line;
+  return getProyectosCurrentBlock();
+}
+
+// ¿Puede esta linea abrir el menu "/" (y usar los atajos markdown)?
+// Vale CUALQUIER tipo de texto (titulo, cita, callout, tarea, elemento
+// de lista, cabecera de toggle...) -- Koku pidio que el comando
+// funcione en todos y que la conversion "fuerce a base" si hace falta
+// (ver liftProyectosLineToBlock). Quedan fuera el codigo (un "/" ahi es
+// codigo, no un comando) y las tablas (convertir una celda desmontaria
+// la tabla).
+function proyectosLineAcceptsSlash(line) {
+  if (!line) return false;
+  if (line.closest('pre, td, th')) return false;
+  return /^(div|p|h1|h2|h3|blockquote|li|summary)$/i.test(line.tagName);
+}
+
+// "Forzar a base": si una conversion del menu "/" se pide desde un <li>
+// o un <summary>, esa linea primero se saca a un bloque normal al nivel
+// del cuerpo, y la conversion de despues ya trabaja como si siempre
+// hubiera sido texto. Para un li de en medio, la lista se parte en dos;
+// para un summary, el toggle se disuelve (su contenido sube detras).
+function liftProyectosLineToBlock(line) {
+  if (line.tagName === 'LI') {
+    const list = line.parentElement; // el ul/ol que lo contiene
+    const div = document.createElement('div');
+    while (line.firstChild) div.appendChild(line.firstChild);
+    if (!div.firstChild) div.appendChild(document.createElement('br'));
+    // Los li de DESPUES del convertido se van a una lista nueva del
+    // mismo tipo, para que queden: lista-de-antes, bloque, lista-de-despues.
+    const tailItems = [];
+    let sibling = line.nextElementSibling;
+    while (sibling) { tailItems.push(sibling); sibling = sibling.nextElementSibling; }
+    line.remove();
+    list.after(div);
+    if (tailItems.length > 0) {
+      const tail = document.createElement(list.tagName);
+      tailItems.forEach((item) => tail.appendChild(item));
+      div.after(tail);
+    }
+    if (!list.querySelector('li')) list.remove();
+    placeCaretIn(div, { atEnd: true });
+    return div;
+  }
+  if (line.tagName === 'SUMMARY') {
+    // Convertir la cabecera de un toggle lo disuelve: la cabecera pasa
+    // a ser el bloque nuevo y lo que habia dentro sube detras de el.
+    const details = line.parentElement;
+    const div = document.createElement('div');
+    while (line.firstChild) div.appendChild(line.firstChild);
+    if (!div.firstChild) div.appendChild(document.createElement('br'));
+    line.remove();
+    details.replaceWith(div, ...details.childNodes);
+    placeCaretIn(div, { atEnd: true });
+    return div;
+  }
+  return line;
+}
+
+// Pone (o quita) la alineacion de una linea o celda. "left" es el valor
+// por defecto del navegador, asi que alinear a la izquierda QUITA el
+// atributo -- el HTML guardado no arrastra data-align="left" por todas
+// partes. Los bloques de codigo no se alinean (pedido asi por Koku).
+function setProyectosAlign(target, align) {
+  if (!target || target.closest('pre') || target.tagName === 'TABLE') return;
+  if (align === 'left') target.removeAttribute('data-align');
+  else target.setAttribute('data-align', align);
+}
+
+// Sobre que actua un atajo de alineacion: la celda si el cursor esta en
+// una tabla, y si no la linea actual (li/summary/bloque).
+function proyectosAlignTarget() {
+  const cell = getProyectosTableCell();
+  if (cell) return cell;
+  const line = getProyectosCurrentLine();
+  if (!line || line.tagName === 'TABLE' || line.closest('pre')) return null;
+  return line;
+}
+
+// Herencia de la alineacion al crear el bloque siguiente con Intro
+// (estilo Word, pedido por Koku: la alineacion se mantiene al seguir
+// escribiendo hasta que se cambie).
+function copyProyectosAlign(from, to) {
+  const align = from.getAttribute && from.getAttribute('data-align');
+  if (align) to.setAttribute('data-align', align);
+}
+
+// La celda (td/th) de una tabla DEL CONTENIDO donde esta el cursor, o
+// null. Copia de getCurrentTableCell (notas), con su mismo fallback
+// documentado para celdas vacias, pero acotada al cuerpo de Proyectos y
+// sin contar las tablas internas de los widgets de base de datos.
+function getProyectosTableCell() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  let node = range.startContainer;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  let cell = node ? node.closest('td, th') : null;
+  // En una celda VACIA el navegador a veces deja el cursor "colgado" de
+  // un antepasado (tr/tbody/table) con un offset -- se mira el hijo que
+  // señala ese offset antes de dar la celda por no encontrada.
+  if (!cell && node && node.nodeType === Node.ELEMENT_NODE) {
+    const child = node.childNodes[range.startOffset] || node.childNodes[range.startOffset - 1];
+    if (child) {
+      cell = child.closest ? child.closest('td, th') : null;
+      if (!cell && child.querySelector) cell = child.querySelector('td, th');
+    }
+  }
+  if (!cell || !PROYECTOS_BODY().contains(cell)) return null;
+  if (cell.closest('[data-proyectos-db]')) return null; // tabla del widget: interfaz, no contenido
+  return cell;
+}
+
+// El <pre> (bloque de codigo o diagrama) donde esta la seleccion, o null.
+function proyectosSelectionPre() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  let node = sel.anchorNode;
+  if (node && node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement;
+  const pre = node && node.closest ? node.closest('pre') : null;
+  return pre && PROYECTOS_BODY().contains(pre) && !pre.closest('[data-proyectos-db]') ? pre : null;
+}
+
+// Inserta texto plano donde este el cursor y lo deja detras. Se hace
+// con Range a mano (no execCommand): dentro de un <pre> es la unica
+// forma fiable de meter un "\n" o espacios sin que el navegador los
+// convierta en <div>s o <br>s por su cuenta.
+function insertProyectosPlainText(text) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+  const node = document.createTextNode(text);
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+// Intro dentro de un bloque de codigo: salto de linea en el MISMO
+// bloque, arrancando la linea nueva con la misma sangria que la actual
+// (lo que uno espera escribiendo Python).
+function insertProyectosCodeNewline(pre) {
+  const code = pre.querySelector('code') || pre;
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  // La sangria de la linea actual: el texto desde el principio del
+  // bloque hasta el cursor, cortado en su ultimo \n, y de ahi los
+  // espacios/tabuladores iniciales.
+  const beforeRange = document.createRange();
+  beforeRange.selectNodeContents(code);
+  beforeRange.setEnd(sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
+  const before = beforeRange.toString();
+  const currentLine = before.slice(before.lastIndexOf('\n') + 1);
+  const indent = (currentLine.match(/^[ \t]*/) || [''])[0];
+  insertProyectosPlainText('\n' + indent);
+  // Si el cursor queda como lo ULTIMO del bloque, hace falta un <br> de
+  // cierre para que la linea nueva se VEA (un \n final a secas no pinta
+  // linea vacia en un contenteditable).
+  const afterRange = document.createRange();
+  afterRange.selectNodeContents(code);
+  const sel2 = window.getSelection();
+  afterRange.setStart(sel2.getRangeAt(0).endContainer, sel2.getRangeAt(0).endOffset);
+  if (afterRange.toString() === '' && !(code.lastChild && code.lastChild.nodeName === 'BR')) {
+    code.appendChild(document.createElement('br'));
+  }
+}
+
+// Mayus+Tab en codigo: quitar hasta 4 espacios justo antes del cursor
+// (el gesto inverso del Tab, que mete 4).
+function outdentProyectosCodeAtCaret() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return;
+  let offset = range.startOffset;
+  let removed = 0;
+  while (removed < 4 && offset > 0 && node.data[offset - 1] === ' ') { offset--; removed++; }
+  if (removed > 0) node.deleteData(offset, removed);
+}
+
+// Tab dentro de una tabla: pasar a la celda siguiente (o anterior con
+// Mayus), en orden de lectura.
+function moveProyectosTableFocus(cell, dir) {
+  const table = cell.closest('table');
+  const cells = [...table.querySelectorAll('td, th')];
+  const next = cells[cells.indexOf(cell) + dir];
+  if (next) placeCaretIn(next, { atEnd: true });
 }
 
 // Coloca el cursor al principio (o final) de un elemento.
@@ -10898,10 +11213,23 @@ function replaceProyectosBlock(block, newEl, { contentInto = null } = {}) {
 }
 
 function applyProyectosBlockType(typeId) {
-  const block = proyectosSlashBlock;
+  let block = proyectosSlashBlock;
   closeProyectosSlashMenu();
   if (!block) return;
   stripProyectosSlashText(block);
+
+  // Las opciones de alineacion NO convierten el bloque: ponen (o
+  // quitan) su data-align y listo. Van antes del "forzar a base" a
+  // proposito -- centrar un li centra ESE li sin sacarlo de la lista.
+  if (typeId.startsWith('align-')) {
+    setProyectosAlign(block, typeId.slice('align-'.length));
+    queueProyectosSaveBody();
+    return;
+  }
+
+  // "Forzar a base" (pedido por Koku): desde un li o un summary, la
+  // linea primero se saca a un bloque normal y luego se convierte.
+  block = liftProyectosLineToBlock(block);
 
   const makeSimple = (tag) => {
     const el = document.createElement(tag);
@@ -10977,9 +11305,31 @@ function applyProyectosBlockType(typeId) {
     }
     case 'code': {
       const pre = document.createElement('pre');
+      pre.spellcheck = false;
       const code = document.createElement('code');
       pre.appendChild(code);
       replaceProyectosBlock(block, pre, { contentInto: code });
+      break;
+    }
+    case 'diagram': {
+      // Un diagrama es un bloque de codigo con lenguaje "mermaid" (ver
+      // renderProyectosDiagrams). Si el bloque estaba vacio se inserta
+      // una plantilla minima para no arrancar en blanco; el dibujo
+      // aparece al salir del bloque.
+      const pre = document.createElement('pre');
+      pre.setAttribute('data-lang', 'mermaid');
+      pre.spellcheck = false;
+      const code = document.createElement('code');
+      pre.appendChild(code);
+      if (block.textContent.trim()) {
+        replaceProyectosBlock(block, pre, { contentInto: code });
+      } else {
+        code.textContent = 'flowchart TD\n  A[Inicio] --> B{¿Decisión?}\n  B -->|Sí| C[Un camino]\n  B -->|No| D[Otro camino]';
+        block.replaceWith(pre);
+        const after = emptyProyectosBlock();
+        pre.after(after);
+        placeCaretIn(code, { atEnd: true });
+      }
       break;
     }
     case 'table': openProyectosTablePopover(block); break;
@@ -11076,6 +11426,10 @@ function ensureProyectosTableMenuBtn() {
   proyectosTableMenuBtn.textContent = '▦';
   proyectosTableMenuBtn.title = 'Editar tabla';
   document.body.appendChild(proyectosTableMenuBtn);
+  // mousedown y preventDefault: que abrir el menu no le robe la
+  // seleccion al editor -- las opciones "del cursor" (encima/debajo,
+  // izquierda/derecha) dependen de saber en que celda estaba.
+  proyectosTableMenuBtn.addEventListener('mousedown', (e) => e.preventDefault());
   proyectosTableMenuBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     openProyectosTableMenu();
@@ -11090,7 +11444,12 @@ PROYECTOS_BODY().addEventListener('mouseover', (e) => {
     ensureProyectosTableMenuBtn();
     proyectosTableMenuTable = table;
     const rect = table.getBoundingClientRect();
-    proyectosTableMenuBtn.style.top = `${rect.top + 4}px`;
+    // El boton va ENCIMA del borde superior de la tabla (no dentro):
+    // en una tabla pequeña, dentro tapaba el contenido de la ultima
+    // celda e interceptaba sus clics. Se solapa 4px con la tabla para
+    // que el raton pueda cruzar hasta el sin pasar por "fuera" (si
+    // hubiera hueco, el mouseover intermedio lo esconderia).
+    proyectosTableMenuBtn.style.top = `${Math.max(8, rect.top - 20)}px`;
     proyectosTableMenuBtn.style.left = `${Math.min(rect.right - 30, window.innerWidth - 40)}px`;
     proyectosTableMenuBtn.classList.remove('hidden');
   } else if (proyectosTableMenuBtn && !e.target.closest?.('.proyectos-table-menu-btn')) {
@@ -11101,7 +11460,12 @@ PROYECTOS_BODY().addEventListener('mouseover', (e) => {
   }
 });
 
-function openProyectosTableMenu() {
+// El menu ▦, reorganizado como pidio Koku: cuatro entradas con submenu
+// (añadir/quitar fila/columna, cada una eligiendo DONDE: al principio,
+// al final o pegada a la celda del cursor), la alineacion vertical del
+// texto en las celdas, el alternador de ancho de siempre y borrar.
+// "view" dice que nivel se esta pintando ('root' o el id del submenu).
+function openProyectosTableMenu(view = 'root') {
   const table = proyectosTableMenuTable;
   if (!table || !PROYECTOS_BODY().contains(table)) return;
   if (!proyectosTableMenuPopover) {
@@ -11120,52 +11484,397 @@ function openProyectosTableMenu() {
   const rows = () => [...table.querySelectorAll('tr')];
   const colCount = () => (rows()[0] ? rows()[0].children.length : 0);
 
-  function action(label, fn, { danger = false } = {}) {
+  // La celda del cursor, SI el cursor esta en ESTA tabla (para las
+  // opciones relativas). Gracias al preventDefault del mousedown del
+  // boton y de los items, la seleccion sigue viva al llegar aqui.
+  const cursorCell = (() => {
+    const c = getProyectosTableCell();
+    return c && c.closest('table') === table ? c : null;
+  })();
+  const cursorRow = cursorCell ? cursorCell.parentElement : null;
+  const cursorColIndex = cursorCell ? [...cursorRow.children].indexOf(cursorCell) : -1;
+
+  function item(label, fn, { danger = false, disabled = false, keepOpen = false } = {}) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'proyectos-table-menu-item' + (danger ? ' danger' : '');
     btn.textContent = label;
+    btn.disabled = disabled;
+    if (disabled) btn.title = 'Pon el cursor en una celda de la tabla para usar esto';
+    btn.addEventListener('mousedown', (ev) => ev.preventDefault()); // no robar la seleccion
     btn.addEventListener('click', () => {
+      if (keepOpen) { fn(); return; }
       popover.classList.add('hidden');
       fn();
       queueProyectosSaveBody();
     });
     popover.appendChild(btn);
   }
+  const submenu = (label, viewId) => item(`${label}  ▸`, () => openProyectosTableMenu(viewId), { keepOpen: true });
+  const back = () => item('‹ Volver', () => openProyectosTableMenu('root'), { keepOpen: true });
 
-  action('+ Fila al final', () => {
+  // Operaciones. Mantienen el <colgroup> a la par que las celdas (si la
+  // tabla ya tiene anchos puestos a mano), igual que las tablas de las
+  // notas.
+  const addRowAt = (refRow, where) => {
     const tr = document.createElement('tr');
     for (let i = 0; i < colCount(); i++) tr.appendChild(emptyCell());
-    rows()[rows().length - 1].after(tr);
-  });
-  action('+ Fila al principio', () => {
-    const tr = document.createElement('tr');
-    for (let i = 0; i < colCount(); i++) tr.appendChild(emptyCell());
-    rows()[0].before(tr);
-  });
-  action('+ Columna al final', () => {
-    rows().forEach((tr) => tr.appendChild(emptyCell()));
-  });
-  action('+ Columna al principio', () => {
-    rows().forEach((tr) => tr.prepend(emptyCell()));
-  });
-  action('− Quitar última fila', () => {
-    const all = rows();
-    if (all.length > 1) all[all.length - 1].remove();
+    if (where === 'before') refRow.before(tr); else refRow.after(tr);
+  };
+  const addColAt = (index, side) => {
+    rows().forEach((tr) => {
+      const ref = tr.children[index];
+      const cell = emptyCell();
+      if (!ref) tr.appendChild(cell);
+      else if (side === 'before') ref.before(cell);
+      else ref.after(cell);
+    });
+    const colgroup = table.querySelector('colgroup');
+    if (colgroup) {
+      const ref = colgroup.children[index];
+      const col = document.createElement('col');
+      col.style.width = '120px';
+      if (!ref) colgroup.appendChild(col);
+      else if (side === 'before') ref.before(col);
+      else ref.after(col);
+    }
+  };
+  const removeRow = (tr) => {
+    if (!tr) return;
+    if (rows().length > 1) tr.remove();
     else removeProyectosTable(table); // sin filas no hay tabla
-  });
-  action('− Quitar última columna', () => {
-    if (colCount() > 1) rows().forEach((tr) => tr.lastElementChild?.remove());
-    else removeProyectosTable(table);
-  });
-  action(table.getAttribute('data-width') === 'full' ? 'Ancho ajustado al contenido' : 'Ancho completo', () => {
-    if (table.getAttribute('data-width') === 'full') table.removeAttribute('data-width');
-    else table.setAttribute('data-width', 'full');
-  });
-  action('Borrar la tabla', () => removeProyectosTable(table), { danger: true });
+  };
+  const removeCol = (index) => {
+    if (index < 0) return;
+    if (colCount() <= 1) { removeProyectosTable(table); return; }
+    rows().forEach((tr) => tr.children[index]?.remove());
+    table.querySelector('colgroup')?.children[index]?.remove();
+  };
+  // Alineacion vertical del texto: la celda del cursor, o toda la tabla
+  // si el cursor no esta en ninguna. "Centrado" es el valor por defecto
+  // del navegador, asi que centra QUITANDO el atributo.
+  const applyValign = (value) => {
+    const targets = cursorCell ? [cursorCell] : [...table.querySelectorAll('td, th')];
+    targets.forEach((cell) => {
+      if (value) cell.setAttribute('data-valign', value);
+      else cell.removeAttribute('data-valign');
+    });
+  };
+
+  if (view === 'add-row') {
+    back();
+    item('Al principio', () => addRowAt(rows()[0], 'before'));
+    item('Encima del cursor', () => addRowAt(cursorRow, 'before'), { disabled: !cursorRow });
+    item('Debajo del cursor', () => addRowAt(cursorRow, 'after'), { disabled: !cursorRow });
+    item('Al final', () => addRowAt(rows()[rows().length - 1], 'after'));
+  } else if (view === 'add-col') {
+    back();
+    item('Al principio', () => addColAt(0, 'before'));
+    item('A la izquierda del cursor', () => addColAt(cursorColIndex, 'before'), { disabled: cursorColIndex < 0 });
+    item('A la derecha del cursor', () => addColAt(cursorColIndex, 'after'), { disabled: cursorColIndex < 0 });
+    item('Al final', () => addColAt(colCount() - 1, 'after'));
+  } else if (view === 'del-row') {
+    back();
+    item('La del cursor', () => removeRow(cursorRow), { disabled: !cursorRow });
+    item('La primera', () => removeRow(rows()[0]));
+    item('La última', () => removeRow(rows()[rows().length - 1]));
+  } else if (view === 'del-col') {
+    back();
+    item('La del cursor', () => removeCol(cursorColIndex), { disabled: cursorColIndex < 0 });
+    item('La primera', () => removeCol(0));
+    item('La última', () => removeCol(colCount() - 1));
+  } else if (view === 'valign') {
+    back();
+    item('Pegado arriba', () => applyValign('top'));
+    item('Centrado', () => applyValign(null));
+    item('Pegado abajo', () => applyValign('bottom'));
+  } else {
+    submenu('Añadir fila', 'add-row');
+    submenu('Añadir columna', 'add-col');
+    submenu('Quitar fila', 'del-row');
+    submenu('Quitar columna', 'del-col');
+    // La etiqueta dice sobre que va a actuar, para que no pille por
+    // sorpresa: celda concreta si hay cursor, toda la tabla si no.
+    submenu(cursorCell ? 'Altura del texto (celda del cursor)' : 'Altura del texto (toda la tabla)', 'valign');
+    item(table.getAttribute('data-width') === 'full' ? 'Ancho ajustado al contenido' : 'Ancho completo', () => {
+      if (table.getAttribute('data-width') === 'full') table.removeAttribute('data-width');
+      else table.setAttribute('data-width', 'full');
+    });
+    item('Borrar la tabla', () => removeProyectosTable(table), { danger: true });
+  }
 
   popover.classList.remove('hidden');
-  positionFixedPopover(proyectosTableMenuBtn, popover, { width: 220 });
+  positionFixedPopover(proyectosTableMenuBtn, popover, { width: 250 });
+}
+
+// ---------------------------------------------------------------------
+// Redimensionar tablas arrastrando bordes (mismo gesto que las tablas
+// de las notas): arrastrar el borde derecho de una celda cambia el
+// ancho de esa COLUMNA; el borde inferior, el alto de esa FILA. Doble
+// clic en un borde = ajustar al contenido. La primera vez que se toca
+// un ancho, la tabla "se fija": se le crea un <colgroup> con el ancho
+// ACTUAL de cada columna (para que nada pegue un salto) y el CSS le
+// aplica table-layout:fixed (regla table:has(> colgroup)). El saneador
+// del servidor solo admite "width:Npx"/"height:Npx" en col/tr.
+// ---------------------------------------------------------------------
+const PROYECTOS_TABLE_EDGE_PX = 5;
+const PROYECTOS_TABLE_MIN_COL = 40;
+const PROYECTOS_TABLE_MIN_ROW = 24;
+let proyectosTableDrag = null; // datos del arrastre en curso, o null
+
+function ensureProyectosTableColgroup(table) {
+  let colgroup = table.querySelector('colgroup');
+  if (colgroup) return colgroup;
+  colgroup = document.createElement('colgroup');
+  const firstRow = table.querySelector('tr');
+  const cells = firstRow ? [...firstRow.children] : [];
+  for (const cell of cells) {
+    const col = document.createElement('col');
+    col.style.width = `${Math.max(PROYECTOS_TABLE_MIN_COL, Math.round(cell.getBoundingClientRect().width))}px`;
+    colgroup.appendChild(col);
+  }
+  table.insertBefore(colgroup, table.firstChild);
+  return colgroup;
+}
+
+// ¿Esta el raton pegado a un borde redimensionable de una celda?
+// (Excluyendo las tablas internas de los widgets de base de datos.)
+function findProyectosTableEdge(clientX, clientY) {
+  const el = document.elementFromPoint(clientX, clientY);
+  const cell = el && el.closest ? el.closest('td, th') : null;
+  if (!cell || !PROYECTOS_BODY().contains(cell) || cell.closest('[data-proyectos-db]')) return null;
+  const rect = cell.getBoundingClientRect();
+  // El borde entre dos celdas es "de las dos": se miran ambos lados de
+  // la celda devuelta (mismo detalle documentado en las notas).
+  if (Math.abs(clientX - rect.left) <= PROYECTOS_TABLE_EDGE_PX && cell.previousElementSibling) {
+    return { type: 'col', cell: cell.previousElementSibling };
+  }
+  if (Math.abs(clientX - rect.right) <= PROYECTOS_TABLE_EDGE_PX) return { type: 'col', cell };
+  if (Math.abs(clientY - rect.top) <= PROYECTOS_TABLE_EDGE_PX) {
+    const row = cell.parentElement;
+    const prevRow = row.previousElementSibling;
+    if (prevRow) {
+      const colIndex = [...row.children].indexOf(cell);
+      const prevCell = prevRow.children[colIndex] || prevRow.children[0];
+      if (prevCell) return { type: 'row', cell: prevCell };
+    }
+    return null;
+  }
+  if (Math.abs(clientY - rect.bottom) <= PROYECTOS_TABLE_EDGE_PX) return { type: 'row', cell };
+  return null;
+}
+
+PROYECTOS_BODY().addEventListener('mousemove', (e) => {
+  if (proyectosTableDrag) return;
+  const target = findProyectosTableEdge(e.clientX, e.clientY);
+  PROYECTOS_BODY().style.cursor = target ? (target.type === 'col' ? 'col-resize' : 'row-resize') : '';
+});
+PROYECTOS_BODY().addEventListener('mouseleave', () => {
+  if (!proyectosTableDrag) PROYECTOS_BODY().style.cursor = '';
+});
+PROYECTOS_BODY().addEventListener('mousedown', (e) => {
+  const target = findProyectosTableEdge(e.clientX, e.clientY);
+  if (!target) return;
+  e.preventDefault(); // es un gesto de redimensionar, no de poner el cursor
+  const table = target.cell.closest('table');
+  if (target.type === 'col') {
+    const colgroup = ensureProyectosTableColgroup(table);
+    const index = [...target.cell.parentElement.children].indexOf(target.cell);
+    const col = colgroup.children[index];
+    if (!col) return;
+    proyectosTableDrag = {
+      type: 'col', col, startX: e.clientX,
+      startWidth: col.getBoundingClientRect().width || parseFloat(col.style.width) || target.cell.getBoundingClientRect().width,
+    };
+  } else {
+    const row = target.cell.parentElement;
+    proyectosTableDrag = { type: 'row', row, startY: e.clientY, startHeight: row.getBoundingClientRect().height };
+  }
+});
+document.addEventListener('mousemove', (e) => {
+  if (!proyectosTableDrag) return;
+  if (proyectosTableDrag.type === 'col') {
+    const width = Math.max(PROYECTOS_TABLE_MIN_COL, Math.round(proyectosTableDrag.startWidth + e.clientX - proyectosTableDrag.startX));
+    proyectosTableDrag.col.style.width = `${width}px`;
+  } else {
+    const height = Math.max(PROYECTOS_TABLE_MIN_ROW, Math.round(proyectosTableDrag.startHeight + e.clientY - proyectosTableDrag.startY));
+    proyectosTableDrag.row.style.height = `${height}px`;
+  }
+});
+document.addEventListener('mouseup', () => {
+  if (!proyectosTableDrag) return;
+  proyectosTableDrag = null;
+  PROYECTOS_BODY().style.cursor = '';
+  queueProyectosSaveBody(); // el tamaño nuevo es contenido: se guarda
+});
+
+// Doble clic en un borde = ajustar esa columna/fila a su contenido.
+// La medicion usa un clon fuera de pantalla (mismo motivo documentado
+// en las notas: con el tamaño ya fijado, scrollWidth no dice nada).
+function measureProyectosCellNatural(cell, { width = null } = {}) {
+  const clone = cell.cloneNode(true);
+  clone.style.position = 'absolute';
+  clone.style.visibility = 'hidden';
+  clone.style.left = '-9999px';
+  clone.style.top = '0';
+  if (width === null) { clone.style.width = 'auto'; clone.style.whiteSpace = 'nowrap'; }
+  else { clone.style.width = `${width}px`; clone.style.height = 'auto'; }
+  PROYECTOS_BODY().appendChild(clone);
+  const size = width === null ? clone.offsetWidth : clone.offsetHeight;
+  clone.remove();
+  return size;
+}
+
+PROYECTOS_BODY().addEventListener('dblclick', (e) => {
+  const target = findProyectosTableEdge(e.clientX, e.clientY);
+  if (!target) return;
+  e.preventDefault();
+  const table = target.cell.closest('table');
+  if (target.type === 'col') {
+    const colgroup = ensureProyectosTableColgroup(table);
+    const index = [...target.cell.parentElement.children].indexOf(target.cell);
+    const col = colgroup.children[index];
+    if (!col) return;
+    const cellsInCol = [...table.querySelectorAll('tr')].map((tr) => tr.children[index]).filter(Boolean);
+    const natural = Math.max(PROYECTOS_TABLE_MIN_COL, ...cellsInCol.map((c) => measureProyectosCellNatural(c)));
+    col.style.width = `${natural}px`;
+  } else {
+    const row = target.cell.parentElement;
+    const natural = Math.max(
+      PROYECTOS_TABLE_MIN_ROW,
+      ...[...row.children].map((c) => measureProyectosCellNatural(c, { width: c.getBoundingClientRect().width }))
+    );
+    row.style.height = `${natural}px`;
+  }
+  queueProyectosSaveBody();
+});
+
+// ---------------------------------------------------------------------
+// Boton de lenguaje de un bloque de codigo: al pasar el raton por un
+// <pre> aparece su lenguaje actual (o "lenguaje ▾") en la esquina;
+// clic = popover con buscador para elegirlo a mano. Opciones ademas de
+// los lenguajes de highlight.js: deteccion automatica (quita el
+// data-lang y deja que la libreria adivine al recolorear),
+// "pseudocodigo" (sin colorear a proposito) y "mermaid" (convierte el
+// bloque en diagrama).
+// ---------------------------------------------------------------------
+let proyectosPreLangBtn = null;
+let proyectosPreLangPopover = null;
+let proyectosPreLangPre = null; // el <pre> señalado ahora mismo
+
+function ensureProyectosPreLangBtn() {
+  if (proyectosPreLangBtn) return;
+  proyectosPreLangBtn = document.createElement('button');
+  proyectosPreLangBtn.type = 'button';
+  proyectosPreLangBtn.className = 'proyectos-pre-lang-btn hidden';
+  proyectosPreLangBtn.title = 'Lenguaje del bloque de código';
+  document.body.appendChild(proyectosPreLangBtn);
+  proyectosPreLangBtn.addEventListener('mousedown', (e) => e.preventDefault());
+  proyectosPreLangBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openProyectosPreLangPopover();
+  });
+}
+
+PROYECTOS_BODY().addEventListener('mouseover', (e) => {
+  const pre = e.target.closest?.('pre');
+  if (pre && PROYECTOS_BODY().contains(pre) && !pre.closest('[data-proyectos-db]')
+      && !pre.classList.contains('proyectos-diagram-source-hidden')) {
+    ensureProyectosPreLangBtn();
+    proyectosPreLangPre = pre;
+    proyectosPreLangBtn.textContent = `${pre.getAttribute('data-lang') || 'lenguaje'} ▾`;
+    proyectosPreLangBtn.classList.remove('hidden');
+    const rect = pre.getBoundingClientRect();
+    proyectosPreLangBtn.style.top = `${rect.top + 4}px`;
+    proyectosPreLangBtn.style.left = `${Math.max(8, rect.right - proyectosPreLangBtn.offsetWidth - 6)}px`;
+  } else if (proyectosPreLangBtn && !e.target.closest?.('.proyectos-pre-lang-btn')) {
+    if (!proyectosPreLangPopover || proyectosPreLangPopover.classList.contains('hidden')) {
+      proyectosPreLangBtn.classList.add('hidden');
+    }
+  }
+});
+
+function openProyectosPreLangPopover() {
+  const pre = proyectosPreLangPre;
+  if (!pre || !PROYECTOS_BODY().contains(pre)) return;
+  if (!proyectosPreLangPopover) {
+    proyectosPreLangPopover = document.createElement('div');
+    proyectosPreLangPopover.className = 'proyectos-slash-popover proyectos-prelang-popover hidden';
+    document.body.appendChild(proyectosPreLangPopover);
+  }
+  const popover = proyectosPreLangPopover;
+
+  // value: null = deteccion automatica; un string = data-lang fijo.
+  function choose(value) {
+    popover.classList.add('hidden');
+    const code = pre.querySelector('code') || pre;
+    code.textContent = plainProyectosCodeText(code); // limpiar spans del coloreado anterior
+    // Si deja de ser un diagrama, su vista previa sobra.
+    if (value !== 'mermaid') {
+      pre.classList.remove('proyectos-diagram-source-hidden');
+      if (pre.nextElementSibling && pre.nextElementSibling.classList.contains('proyectos-diagram-preview')) {
+        pre.nextElementSibling.remove();
+      }
+    }
+    if (value === null) pre.removeAttribute('data-lang');
+    else pre.setAttribute('data-lang', value);
+    if (value === 'mermaid') renderProyectosDiagrams(pre.parentElement || PROYECTOS_BODY());
+    else highlightProyectosCodeBlocks(pre.parentElement || PROYECTOS_BODY());
+    if (proyectosPreLangBtn) {
+      proyectosPreLangBtn.textContent = `${pre.getAttribute('data-lang') || 'lenguaje'} ▾`;
+    }
+    queueProyectosSaveBody();
+  }
+
+  const SPECIAL = [
+    { value: null, label: 'Detectar automáticamente' },
+    { value: 'pseudocodigo', label: 'pseudocódigo (sin colorear)' },
+    { value: 'mermaid', label: 'mermaid (diagrama)' },
+  ];
+  const langs = (typeof hljs !== 'undefined' ? hljs.listLanguages() : []).slice().sort();
+
+  function renderList(query) {
+    popover.innerHTML = '';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'proyectos-db-cell-input';
+    input.placeholder = 'Buscar lenguaje…';
+    input.value = query;
+    input.addEventListener('input', () => {
+      const next = renderList(input.value);
+      next.focus();
+      next.setSelectionRange(next.value.length, next.value.length);
+    });
+    popover.appendChild(input);
+
+    const lower = query.trim().toLowerCase();
+    const entries = [
+      ...SPECIAL.filter((s) => !lower || s.label.toLowerCase().includes(lower)),
+      ...langs.filter((l) => !lower || l.includes(lower)).map((l) => ({ value: l, label: l })),
+    ];
+    for (const entry of entries.slice(0, 14)) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'proyectos-slash-item';
+      btn.textContent = entry.label;
+      btn.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        choose(entry.value);
+      });
+      popover.appendChild(btn);
+    }
+    if (entries.length === 0) {
+      const hint = document.createElement('p');
+      hint.className = 'hint';
+      hint.textContent = 'Ningún lenguaje coincide.';
+      popover.appendChild(hint);
+    }
+    return input;
+  }
+
+  popover.classList.remove('hidden');
+  renderList('').focus();
+  positionFixedPopover(proyectosPreLangBtn, popover, { width: 240 });
 }
 
 function removeProyectosTable(table) {
@@ -11459,6 +12168,97 @@ PROYECTOS_BODY().addEventListener('keydown', (e) => {
     return;
   }
 
+  // Atajos de alineacion (los de Word en español, que es lo que Koku
+  // conoce): Ctrl+Q izquierda, Ctrl+T centrar, Ctrl+D derecha, Ctrl+J
+  // justificar. Actuan sobre la linea actual (o la celda, en una
+  // tabla); en un bloque de codigo no hacen nada (no se alinea).
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+    const alignValue = { q: 'left', t: 'center', d: 'right', j: 'justify' }[e.key.toLowerCase()];
+    if (alignValue) {
+      const target = proyectosAlignTarget();
+      if (target) {
+        e.preventDefault();
+        setProyectosAlign(target, alignValue);
+        queueProyectosSaveBody();
+        return;
+      }
+    }
+  }
+
+  // Teclas especiales DENTRO de un bloque de codigo/diagrama (pedidas
+  // por Koku):
+  //   Intro        -> salto de linea en el MISMO bloque (con auto-sangria)
+  //   Mayus+Intro  -> otro bloque de codigo debajo (hereda el lenguaje)
+  //   Ctrl+Intro   -> salir a una linea de texto normal debajo
+  //   Tab          -> 4 espacios (sangria); Mayus+Tab los quita
+  const currentPre = proyectosSelectionPre();
+  if (currentPre) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      const after = emptyProyectosBlock();
+      currentPre.after(after);
+      placeCaretIn(after);
+      queueProyectosSaveBody();
+      return;
+    }
+    if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault();
+      const pre = document.createElement('pre');
+      pre.spellcheck = false;
+      const lang = currentPre.getAttribute('data-lang');
+      if (lang) pre.setAttribute('data-lang', lang);
+      const code = document.createElement('code');
+      code.appendChild(document.createElement('br'));
+      pre.appendChild(code);
+      // Detras de la vista previa del diagrama, si la hay (es la
+      // hermana pegada al pre).
+      const anchor = currentPre.nextElementSibling
+        && currentPre.nextElementSibling.classList.contains('proyectos-diagram-preview')
+        ? currentPre.nextElementSibling : currentPre;
+      anchor.after(pre);
+      placeCaretIn(code);
+      queueProyectosSaveBody();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      insertProyectosCodeNewline(currentPre);
+      queueProyectosSaveBody();
+      return;
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) outdentProyectosCodeAtCaret();
+      else insertProyectosPlainText('    ');
+      queueProyectosSaveBody();
+      return;
+    }
+  }
+
+  // Tab fuera del codigo. Sin esto, el Tab del navegador saltaba el
+  // foco a cualquier otro control de la app -- el movimiento
+  // "impredecible" que vio Koku. Ahora tiene significado fijo:
+  //   - en una tabla: moverse a la celda siguiente (Mayus = anterior)
+  //   - en una lista: sangrar / quitar sangria (anidar la lista)
+  //   - en cualquier otro sitio: nada (el foco se queda quieto)
+  if (e.key === 'Tab') {
+    const cell = getProyectosTableCell();
+    if (cell) {
+      e.preventDefault();
+      moveProyectosTableFocus(cell, e.shiftKey ? -1 : 1);
+      return;
+    }
+    const line = getProyectosCurrentLine();
+    if (line && line.tagName === 'LI') {
+      e.preventDefault();
+      document.execCommand(e.shiftKey ? 'outdent' : 'indent');
+      queueProyectosSaveBody();
+      return;
+    }
+    e.preventDefault();
+    return;
+  }
+
   // Con el menu "/" abierto, las flechas/Intro/Escape son del menu.
   if (proyectosSlashBlock && proyectosSlashPopover && !proyectosSlashPopover.classList.contains('hidden')) {
     const matches = getProyectosSlashMatches();
@@ -11488,10 +12288,11 @@ PROYECTOS_BODY().addEventListener('keydown', (e) => {
   }
 
   if (e.key === ' ') {
-    // Atajos markdown: el texto del bloque ES el prefijo y se pulsa
-    // espacio. Se comprueba antes de que el espacio se escriba.
-    const block = getProyectosCurrentBlock();
-    if (block && /^(div|p)$/i.test(block.tagName) && tryProyectosMarkdownShortcut(block)) {
+    // Atajos markdown: el texto de la linea ES el prefijo y se pulsa
+    // espacio. Se comprueba antes de que el espacio se escriba. Vale en
+    // cualquier tipo de linea (mismo criterio que el menu "/").
+    const block = getProyectosCurrentLine();
+    if (proyectosLineAcceptsSlash(block) && tryProyectosMarkdownShortcut(block)) {
       e.preventDefault();
       return;
     }
@@ -11548,6 +12349,7 @@ PROYECTOS_BODY().addEventListener('keydown', (e) => {
       next.setAttribute('data-todo', '1');
       next.setAttribute('data-done', '0');
       next.appendChild(document.createElement('br'));
+      copyProyectosAlign(block, next); // la alineacion se hereda (estilo Word)
       block.after(next);
       placeCaretIn(next);
       queueProyectosSaveBody();
@@ -11568,6 +12370,7 @@ PROYECTOS_BODY().addEventListener('keydown', (e) => {
       if (atEnd) {
         e.preventDefault();
         const div = emptyProyectosBlock();
+        copyProyectosAlign(block, div); // la alineacion se hereda (estilo Word)
         block.after(div);
         placeCaretIn(div);
         queueProyectosSaveBody();
@@ -11584,11 +12387,11 @@ PROYECTOS_BODY().addEventListener('input', (e) => {
   // ¿Hay que abrir/refrescar/cerrar el menu "/"? Se abre cuando lo
   // ULTIMO escrito en el bloque es un "/" (o ya estaba abierto y se
   // sigue filtrando).
-  const block = getProyectosCurrentBlock();
+  const block = getProyectosCurrentLine();
   if (proyectosSlashBlock) {
     if (block !== proyectosSlashBlock || getProyectosSlashQuery() === null) closeProyectosSlashMenu();
     else { proyectosSlashIndex = 0; renderProyectosSlashMenu(); }
-  } else if (block && /^(div|p)$/i.test(block.tagName) && block.textContent.endsWith('/')) {
+  } else if (proyectosLineAcceptsSlash(block) && block.textContent.endsWith('/')) {
     openProyectosSlashMenu(block);
   }
 });
@@ -11596,12 +12399,27 @@ PROYECTOS_BODY().addEventListener('input', (e) => {
 // El menu se cierra si el cursor se va a otro sitio (clic fuera, etc.).
 document.addEventListener('selectionchange', () => {
   if (!proyectosSlashBlock) return;
-  const block = getProyectosCurrentBlock();
+  const block = getProyectosCurrentLine();
   if (block !== proyectosSlashBlock) closeProyectosSlashMenu();
 });
 
 PROYECTOS_BODY().addEventListener('click', (e) => {
   if (e.target.closest?.('[data-proyectos-db]')) return; // el widget gestiona sus propios clics
+
+  // Clic en la vista previa de un diagrama = volver a editar su texto.
+  // (Va ANTES que los enlaces: el SVG de mermaid puede llevar <a>
+  // dentro y no queremos que ese clic navegue a ningun sitio.)
+  const diagramPreview = e.target.closest?.('.proyectos-diagram-preview');
+  if (diagramPreview && PROYECTOS_BODY().contains(diagramPreview)) {
+    e.preventDefault();
+    const pre = diagramPreview.previousElementSibling;
+    if (pre && pre.tagName === 'PRE') {
+      pre.classList.remove('proyectos-diagram-source-hidden');
+      PROYECTOS_BODY().focus();
+      placeCaretIn(pre.querySelector('code') || pre, { atEnd: true });
+    }
+    return;
+  }
 
   // Enlaces: clic = navegar, como en Notion (para editar su texto se
   // entra con el teclado, o se rehace el enlace).
@@ -11683,16 +12501,33 @@ PROYECTOS_BODY().addEventListener('paste', async (e) => {
   }
 });
 
-// Al salir de un bloque de codigo, normalizar (texto plano) y volver a
-// colorear -- escribir dentro de un codigo ya coloreado deja spans a
-// medias, y este es el momento de dejarlo limpio otra vez.
-PROYECTOS_BODY().addEventListener('focusout', (e) => {
-  const pre = e.target.closest?.('pre');
-  if (!pre || !PROYECTOS_BODY().contains(pre)) return;
-  const code = pre.querySelector('code');
+// Al SALIR de un bloque de codigo (el cursor lo abandona), normalizar
+// (texto plano) y volver a colorear -- escribir dentro de un codigo ya
+// coloreado deja spans a medias, y este es el momento de dejarlo limpio.
+// Un diagrama, en ese mismo momento, se redibuja y esconde su texto.
+//
+// OJO: esto NO puede hacerse con focusout en el <pre> (la primera
+// version lo intentaba asi y por eso el coloreado parecia no llegar
+// nunca): dentro de un contenteditable el foco lo tiene el CUERPO
+// entero, no el pre, asi que ese evento no salta al mover el cursor
+// fuera del bloque. Lo que si delata el momento exacto es
+// selectionchange: se apunta en que pre esta el cursor, y cuando deja
+// de estar en el, ese es "el salir".
+let proyectosCaretPre = null; // el <pre> donde estaba el cursor en el ultimo vistazo
+document.addEventListener('selectionchange', () => {
+  const pre = proyectosSelectionPre();
+  if (pre === proyectosCaretPre) return;
+  const left = proyectosCaretPre; // el bloque que se acaba de abandonar
+  proyectosCaretPre = pre;
+  if (!left || !PROYECTOS_BODY().contains(left)) return;
+  const code = left.querySelector('code');
   if (!code) return;
   code.textContent = plainProyectosCodeText(code);
-  highlightProyectosCodeBlocks(pre.parentElement || PROYECTOS_BODY());
+  if (left.getAttribute('data-lang') === 'mermaid') {
+    renderProyectosDiagrams(left.parentElement || PROYECTOS_BODY());
+    return;
+  }
+  highlightProyectosCodeBlocks(left.parentElement || PROYECTOS_BODY());
 });
 
 // Cerrar los popovers propios al clicar fuera de ellos.
@@ -11719,9 +12554,9 @@ document.addEventListener('click', (e) => {
       && !e.target.closest('.proyectos-table-menu-popover') && !e.target.closest('.proyectos-table-menu-btn')) {
     proyectosTableMenuPopover.classList.add('hidden');
   }
-  if (proyectosSubnavPopover && !proyectosSubnavPopover.classList.contains('hidden')
-      && !e.target.closest('.proyectos-subnav-popover') && !e.target.closest('.proyectos-subnav-btn')) {
-    proyectosSubnavPopover.classList.add('hidden');
+  if (proyectosPreLangPopover && !proyectosPreLangPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-prelang-popover') && !e.target.closest('.proyectos-pre-lang-btn')) {
+    proyectosPreLangPopover.classList.add('hidden');
   }
   // (el caso de "nodo ya desconectado" lo corta el guard de arriba)
   if (proyectosDbConfigPopover && !proyectosDbConfigPopover.classList.contains('hidden')
@@ -12531,8 +13366,16 @@ async function createProyectosGuide() {
     '<tr><td><b>!tip</b>, <b>!nota</b>, <b>!aviso</b>… + espacio</td><td>Alert de color (estilo GitHub)</td></tr>',
     '<tr><td><b>Ctrl+Z</b> / <b>Ctrl+Y</b></td><td>Deshacer / rehacer</td></tr>',
     '<tr><td><b>Ctrl+K</b></td><td>Convertir el texto seleccionado en enlace</td></tr>',
+    '<tr><td><b>Ctrl+Q / T / D / J</b></td><td>Alinear: izquierda / centro / derecha / justificado</td></tr>',
     '</tbody></table>',
     '<div>Y lo de siempre en cualquier texto: <b>Ctrl+B</b> para <b>negrita</b>, <b>Ctrl+I</b> para <i>cursiva</i>, <b>Ctrl+U</b> para <u>subrayado</u>.</div>',
+    '<div data-callout="1" data-kind="tip">El menú «/» funciona en CUALQUIER línea, no solo en las de texto normal: dentro de un título, una cita, un callout, una tarea o una lista también vale — el bloque se convierte a lo que elijas.</div>',
+    '<h2>La tecla Tab</h2>',
+    '<div>Tab tiene un significado fijo según dónde esté el cursor: en una <b>lista</b> anida el punto (Mayús+Tab lo saca); en una <b>tabla</b> salta a la celda siguiente (Mayús+Tab a la anterior); en un <b>bloque de código</b> mete 4 espacios de sangría; y en texto normal no hace nada (el cursor se queda quieto).</div>',
+    '<h2>Alinear texto</h2>',
+    '<div data-align="center">Cualquier bloque se puede centrar…</div>',
+    '<div data-align="right">…pegar a la derecha…</div>',
+    '<div>…o justificar, con los atajos de la tabla de arriba (los de Word) o desde el menú «/» buscando «alinear». La alineación se hereda al seguir escribiendo, como en Word, hasta que la cambies. Los bloques de código son la excepción: no se alinean. En las celdas de una tabla, además del horizontal está el vertical (arriba/centro/abajo), en el menú <b>▦</b> de la tabla.</div>',
     '<div data-callout="1" data-icon="🔍">Esta guía no lo enseña TODO: abre el menú «/» y repásalo entero — cada opción lleva una pequeña descripción debajo del nombre.</div>',
     '<hr>',
     '<h1>Todos los bloques, en vivo</h1>',
@@ -12559,10 +13402,19 @@ async function createProyectosGuide() {
     '<blockquote>Las citas se ven así, con su barra al lado.</blockquote>',
     '<hr>',
     '<h2>Código, con colores</h2>',
-    '<div>Los bloques de código se colorean solos (estilo GitHub); si no dices el lenguaje, lo adivina y lo apunta en la esquina:</div>',
-    '<pre data-lang="js"><code>// Un bloque de código respeta espacios y saltos\nfunction saluda(nombre) {\n  return "Hola, " + nombre + "!";\n}</code></pre>',
+    '<div>Los bloques de código se colorean <b>al salir del bloque</b> (y al abrir la página) — mientras escribes dentro no cambia nada, es normal. Si no dices el lenguaje, lo adivina; para fijarlo tú, pasa el ratón por el bloque y pulsa la etiqueta de su esquina (ahí está también «pseudocódigo», que lo deja sin colorear a propósito).</div>',
+    '<pre data-lang="python"><code>def saluda(nombre):\n    # La sangría se respeta: Tab mete 4 espacios\n    # y al pulsar Intro la línea nueva arranca igual de sangrada\n    return f"Hola, {nombre}!"</code></pre>',
+    '<div>Dentro de un bloque de código el teclado cambia: <b>Intro</b> = salto de línea en el mismo bloque (manteniendo la sangría), <b>Mayús+Intro</b> = otro bloque de código debajo, <b>Ctrl+Intro</b> = salir a una línea de texto normal.</div>',
+    '<h2>Diagramas</h2>',
+    '<div>El bloque <b>Diagrama</b> del menú «/» dibuja lo que escribas en sintaxis <a href="https://mermaid.js.org/intro/">Mermaid</a>. Se dibuja al salir del bloque; clic en el dibujo para volver a editar el texto. Tres ejemplos, de más grande a más pequeño:</div>',
+    '<h3>1. Comunicación entre programas</h3>',
+    '<pre data-lang="mermaid"><code>sequenceDiagram\n  participant App as Esta app\n  participant API as Servicio web\n  participant BD as Base de datos\n  App->>API: petición (datos del día)\n  API->>BD: consulta\n  BD-->>API: filas\n  API-->>App: respuesta JSON</code></pre>',
+    '<h3>2. Comunicación entre códigos (módulos)</h3>',
+    '<pre data-lang="mermaid"><code>flowchart LR\n  UI[interfaz app.js] --> IPC[puente ipc.js]\n  IPC --> API[core/api.js]\n  API --> R1[rutas de páginas]\n  API --> R2[rutas de bases]\n  R1 --> DB[(SQLite)]\n  R2 --> DB</code></pre>',
+    '<h3>3. Comunicación entre funciones</h3>',
+    '<pre data-lang="mermaid"><code>flowchart TD\n  A[abrirPagina] --> B[cargarCuerpo]\n  B --> C{¿tiene código?}\n  C -->|sí| D[colorear]\n  C -->|no| E[mostrar]\n  D --> E</code></pre>',
     '<h2>Tablas</h2>',
-    '<div>Pasa el ratón por una tabla y aparece un botón <b>▦</b> en su esquina: con él añades o quitas filas y columnas (al principio o al final), la pones a ancho completo, o la borras entera.</div>',
+    '<div>Pasa el ratón por una tabla y aparece un botón <b>▦</b> en su esquina, con submenús para <b>añadir o quitar filas y columnas</b> — al principio, al final o pegadas a la celda donde tengas el cursor —, la alineación vertical del texto, el ancho completo y borrarla. Y al estilo Excel: <b>arrastra el borde</b> de una celda para cambiar el ancho de su columna o el alto de su fila (doble clic en un borde = ajustar al contenido).</div>',
     '<table><tbody><tr><th>Prueba</th><th>el botón</th></tr><tr><td>pasando el ratón</td><td>por aquí</td></tr></tbody></table>',
     '<h2>Enlaces (conectores)</h2>',
     '<div>Desde el menú «/» hay dos tipos: <b>Enlace web</b> (a internet, se abre en tu navegador) y <b>Enlace a página</b> (a cualquier página de Proyectos — el punteado de abajo lleva a las subpáginas de esta guía). También puedes seleccionar un texto y pulsar <b>Ctrl+K</b>.</div>',
@@ -12591,7 +13443,7 @@ async function createProyectosGuide() {
     '<li><b>Todo se guarda solo</b> mientras escribes: no hay botón de guardar.</li>',
     '</ul>',
     '<h1>Pantalla completa (sin panel)</h1>',
-    '<div>El botón <b>⛶</b> de arriba a la derecha esconde el sidebar para leer y escribir sin distracciones. Sin árbol te sigues moviendo igual: las <b>migas de pan</b> suben, y el <b>▾</b> junto al título despliega las subpáginas de la página abierta para bajar.</div>',
+    '<div>El botón <b>⛶</b> de arriba a la derecha esconde el sidebar para leer y escribir sin distracciones. Sin árbol te sigues moviendo igual: las <b>migas de pan</b> suben, y el <b>▾</b> junto al título despliega las subpáginas justo debajo del título, como chips — se quedan a la vista mientras navegas, para ir bajando por el árbol.</div>',
     '<h1>Borrar sin miedo</h1>',
     '<div data-callout="1" data-icon="🛟">El botón <b>Borrar</b> nunca borra las subpáginas: suben un nivel y ocupan su sitio. Si de verdad quieres llevarte el árbol entero por delante, para eso está el rojo de al lado, <b>Borrar con subpáginas</b> — con él puedes borrar esta guía completa de un golpe cuando ya no la necesites.</div>',
   ].join('');

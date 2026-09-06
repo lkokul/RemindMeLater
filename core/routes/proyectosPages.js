@@ -55,6 +55,28 @@ const CALLOUT_KINDS = new Set(['note', 'tip', 'important', 'warning', 'caution']
 // interfaz lo "hidrata" al mostrar la pagina -- mismo truco que las
 // imagenes de notas con data-asset-src en la version movil.
 const DB_BLOCK_ID = /^\d{1,10}$/;
+// Alineacion de texto por bloque (data-align, ronda de feedback):
+// "left" no se guarda nunca (es el valor por defecto, el cliente quita
+// el atributo), asi que la lista cerrada son los otros tres.
+const ALIGN_VALUES = new Set(['center', 'right', 'justify']);
+// Alineacion VERTICAL dentro de una celda de tabla (data-valign).
+const VALIGN_VALUES = new Set(['top', 'middle', 'bottom']);
+// Etiquetas que pueden llevar data-align. Los divs van aparte (su rama
+// del saneador es especial por los data-* de callout/todo/db).
+const ALIGNABLE_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'blockquote', 'li', 'summary']);
+// Ancho de columna / alto de fila de una tabla, puestos a mano
+// arrastrando un borde (mismo mecanismo y misma lista blanca estricta
+// que las tablas de las notas: SOLO "width:Npx"/"height:Npx", nada de
+// CSS libre -- ver NOTE_COL_WIDTH_STYLE en notes.js).
+const COL_WIDTH_STYLE = /^width:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
+const ROW_HEIGHT_STYLE = /^height:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
+
+// Saca el trocito ' data-align="..."' ya validado de los atributos de
+// una etiqueta, o '' si no trae alineacion (o trae una invalida).
+function alignAttr(attrs) {
+  const m = attrs.match(/\sdata-align\s*=\s*"([^"]*)"/i);
+  return m && ALIGN_VALUES.has(m[1]) ? ` data-align="${m[1]}"` : '';
+}
 
 function sanitizePageBody(html) {
   if (!html) return html;
@@ -94,6 +116,28 @@ function sanitizePageBody(html) {
       const widthMatch = attrs.match(/\sdata-width\s*=\s*"([^"]*)"/i);
       return widthMatch && widthMatch[1] === 'full' ? '<table data-width="full">' : '<table>';
     }
+    if (lower === 'col') {
+      // Ancho de columna puesto arrastrando su borde: se reconstruye el
+      // style desde cero con el numero capturado (nunca se copia el
+      // atributo tal cual).
+      const styleMatch = attrs.match(/\sstyle\s*=\s*"([^"]*)"/i);
+      const widthMatch = (styleMatch ? styleMatch[1].trim() : '').match(COL_WIDTH_STYLE);
+      return widthMatch ? `<col style="width:${widthMatch[1]}px">` : '<col>';
+    }
+    if (lower === 'tr') {
+      // Alto de fila, mismo mecanismo que el ancho de columna.
+      const styleMatch = attrs.match(/\sstyle\s*=\s*"([^"]*)"/i);
+      const heightMatch = (styleMatch ? styleMatch[1].trim() : '').match(ROW_HEIGHT_STYLE);
+      return heightMatch ? `<tr style="height:${heightMatch[1]}px">` : '<tr>';
+    }
+    if (lower === 'td' || lower === 'th') {
+      // Las celdas pueden alinear su texto en horizontal (data-align,
+      // como cualquier bloque) y ademas en VERTICAL (data-valign:
+      // arriba/centro/abajo -- solo tiene sentido en celdas).
+      const valignMatch = attrs.match(/\sdata-valign\s*=\s*"([^"]*)"/i);
+      const valign = valignMatch && VALIGN_VALUES.has(valignMatch[1]) ? ` data-valign="${valignMatch[1]}"` : '';
+      return `<${lower}${alignAttr(attrs)}${valign}>`;
+    }
     if (lower === 'details') {
       // "open" (sin valor) = el toggle se guarda desplegado. Es el unico
       // atributo booleano que se conserva.
@@ -118,27 +162,30 @@ function sanitizePageBody(html) {
         // que un callout tipado no lleva data-icon.
         const kindMatch = attrs.match(/\sdata-kind\s*=\s*"([^"]*)"/i);
         if (kindMatch && CALLOUT_KINDS.has(kindMatch[1])) {
-          return `<div data-callout="1" data-kind="${kindMatch[1]}">`;
+          return `<div data-callout="1" data-kind="${kindMatch[1]}"${alignAttr(attrs)}>`;
         }
         const iconMatch = attrs.match(/\sdata-icon\s*=\s*"([^"]*)"/i);
         // El emoji se re-escapa a mano: solo se admite algo corto y sin
         // caracteres con significado en HTML.
         const rawIcon = iconMatch ? iconMatch[1] : '';
         const icon = /["'<>&]/.test(rawIcon) ? '' : rawIcon.slice(0, CALLOUT_ICON_MAX);
-        return icon ? `<div data-callout="1" data-icon="${icon}">` : '<div data-callout="1">';
+        return (icon ? `<div data-callout="1" data-icon="${icon}"` : '<div data-callout="1"') + `${alignAttr(attrs)}>`;
       }
       const todoMatch = attrs.match(/\sdata-todo\s*=\s*"([^"]*)"/i);
       if (todoMatch && todoMatch[1] === '1') {
         const doneMatch = attrs.match(/\sdata-done\s*=\s*"([^"]*)"/i);
         const done = doneMatch && doneMatch[1] === '1' ? '1' : '0';
-        return `<div data-todo="1" data-done="${done}">`;
+        return `<div data-todo="1" data-done="${done}"${alignAttr(attrs)}>`;
       }
       const dbMatch = attrs.match(/\sdata-proyectos-db\s*=\s*"([^"]*)"/i);
       if (dbMatch && DB_BLOCK_ID.test(dbMatch[1])) {
         return `<div data-proyectos-db="${dbMatch[1]}">`;
       }
-      return '<div>';
+      return `<div${alignAttr(attrs)}>`;
     }
+    // El resto de bloques de texto tambien puede llevar alineacion
+    // (data-align) -- los de codigo NO a proposito (pedido por Koku).
+    if (ALIGNABLE_TAGS.has(lower)) return `<${lower}${alignAttr(attrs)}>`;
     return `<${lower}>`;
   });
   return clean;

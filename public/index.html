@@ -507,6 +507,10 @@
                    oculto (modo sin panel). -->
               <button type="button" id="btn-proyectos-subnav" class="icon-btn proyectos-subnav-btn" aria-label="Ver subpáginas" title="Subpáginas de esta página">▾</button>
             </div>
+            <!-- Las subpaginas de esta pagina, desplegadas EN el
+                 documento (debajo del titulo, como chips), no en un
+                 popover flotante -- Koku pidio que estuviera integrado. -->
+            <div id="proyectos-subnav" class="proyectos-subnav hidden"></div>
             <div class="proyectos-page-toolbar">
               <button type="button" id="btn-proyectos-favorite" class="icon-btn" aria-label="Favorito" title="Favorito">☆</button>
               <button type="button" id="btn-proyectos-cover" class="icon-btn" aria-label="Portada" title="Color de portada">▦</button>
@@ -2109,6 +2113,11 @@
        de Proyectos. Solo presentacion -- se aplica al mostrar y el HTML
        guardado sigue siendo texto plano. -->
   <script src="vendor/highlight.min.js"></script>
+  <!-- mermaid (vendorizado, MIT): dibuja los bloques de diagrama de
+       Proyectos (pre data-lang="mermaid") como SVG. Igual que el
+       coloreado: solo presentacion, lo guardado es el texto del
+       diagrama. -->
+  <script src="vendor/mermaid.min.js"></script>
   <script src="app.js"></script>
   <script src="settings.js"></script>
 </body>

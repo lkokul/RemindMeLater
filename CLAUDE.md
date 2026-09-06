@@ -365,9 +365,90 @@ ahora se llama `device`.
       el saneador), con color/icono/etiqueta puestos por CSS; se crean
       con `!tip`/`!nota`/`!aviso`… + espacio (mayúsculas también) o
       desde el menú "/".
+    - **Ronda de feedback 2** (todo verificado con la app real,
+      drivers `drive-round2.js`/`drive-round2b.js` del scratchpad):
+      - El menú "/" y los atajos markdown funcionan en CUALQUIER línea
+        (título, cita, callout, tarea, li, summary), no solo div/p:
+        `getProyectosCurrentLine()` (afina a li/summary) +
+        `proyectosLineAcceptsSlash()` (excluye pre y celdas de tabla) +
+        `liftProyectosLineToBlock()` ("forzar a base": saca un li
+        partiendo la lista en dos, o disuelve el toggle si era summary).
+      - **Coloreado de código al salir del bloque**: la versión con
+        `focusout` en el `<pre>` NUNCA funcionó (ver "Cosas que ya
+        rompieron"); ahora un listener de `selectionchange` apunta en
+        qué pre está el cursor (`proyectosCaretPre`) y cuando lo
+        abandona, normaliza a texto plano y recolorea (o redibuja el
+        diagrama). Selector de lenguaje: botón flotante al pasar el
+        ratón por un pre (`.proyectos-pre-lang-btn`, patrón del ▦ de
+        tablas) con popover-buscador: detectar automáticamente,
+        "pseudocodigo" (data-lang puesto pero desconocido para hljs =
+        se queda plano a propósito), "mermaid" y los de
+        `hljs.listLanguages()`. `pre.spellcheck = false` se pone por JS
+        (el saneador no guarda ese atributo).
+      - **Teclas en código**: Intro = `\n` en el mismo bloque con
+        auto-sangría (copia los espacios iniciales de la línea actual);
+        Mayús+Intro = otro pre debajo (hereda data-lang); Ctrl+Intro =
+        salir a un div normal; Tab/Mayús+Tab = mete/quita 4 espacios.
+      - **Tab fuera de código**: en tabla salta de celda, en lista
+        anida/desanida (`execCommand('indent'/'outdent')`), en el resto
+        no hace nada (antes el navegador movía el foco por la app, el
+        "movimiento impredecible" que reportó Koku).
+      - **Diagramas Mermaid** (`public/vendor/mermaid.min.js`, 11.15.0,
+        MIT, ~3,3 MB, expone `globalThis.mermaid`): bloque "Diagrama"
+        del menú "/" = `pre data-lang="mermaid"`; se guarda SOLO el
+        texto. `renderProyectosDiagrams()` dibuja el SVG en una
+        `.proyectos-diagram-preview` no editable pegada detrás del pre
+        y esconde el pre (clase `proyectos-diagram-source-hidden`,
+        limpiada al serializar); clic en el dibujo vuelve al texto; con
+        error de sintaxis enseña el aviso y deja el texto visible. Tema
+        dark/default según la luminancia del fondo real. La guía trae
+        los 3 niveles que pidió Koku (programas/módulos/funciones).
+      - **Alineación**: `data-align` (center/right/justify; left =
+        quitar el atributo) en cualquier bloque menos pre, y en celdas
+        también `data-valign` (top/bottom; centro = sin atributo).
+        Atajos de Word en español Ctrl+Q/T/D/J + 4 entradas "align-*"
+        en el menú "/" (no convierten el bloque). Se hereda al crear
+        bloque nuevo con Intro (estilo Word, elegido por Koku vía
+        `copyProyectosAlign` + el clonado nativo de atributos de
+        Chrome).
+      - **Tablas**: menú ▦ reorganizado con submenús (Añadir/Quitar
+        fila/columna → al principio/final o relativa a la celda del
+        cursor, deshabilitadas si el cursor no está en la tabla;
+        mousedown con preventDefault en botón e items para no perder la
+        selección) + "Altura del texto" (valign de la celda del cursor,
+        o de toda la tabla si no hay cursor) + el alternador de ancho +
+        borrar. El botón ▦ ahora flota ENCIMA del borde superior (antes
+        tapaba la última celda en tablas pequeñas). Redimensionado
+        arrastrando bordes estilo Excel (calco del de notas):
+        `ensureProyectosTableColgroup` crea el colgroup con los anchos
+        ACTUALES al primer arrastre, CSS `table:has(> colgroup)` aplica
+        `table-layout:fixed`; doble clic = ajustar al contenido. El
+        saneador admite `col style="width:Npx"` / `tr style="height:Npx"`
+        (mismas regex que notes.js).
+      - **Alerts con iconos SVG**: los emojis del ::before chocaban con
+        el color del bloque (la ❗ roja sobre "Importante" morado);
+        ahora cada kind lleva un SVG lineal embebido como
+        background-image con el trazo en SU color (hardcodeado dentro
+        del data URI porque un background-image no puede leer
+        variables CSS).
+      - **Subnav bajo el título**: el ▾ ya no abre popover; alterna
+        `#proyectos-subnav`, una fila de chips EN el documento debajo
+        del título (`renderProyectosSubnav()`, se refresca al navegar
+        mientras esté abierta).
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
+- **`focusout` en un elemento DENTRO de un contenteditable no salta
+  nunca**: dentro de un contenteditable el foco lo tiene el CUERPO
+  entero (document.activeElement es el div editable), no el `<pre>` o
+  el bloque donde esté el cursor — así que un
+  `addEventListener('focusout')` esperando `e.target` dentro del pre no
+  se dispara al mover el cursor fuera. Pasó de verdad: el "recolorear el
+  código al salir del bloque" estuvo roto desde el principio sin dar
+  ningún error (solo coloreaba al reabrir la página), y es justo lo que
+  Koku reportó como "¿cuánto tarda en colorearlo?". La señal correcta es
+  `selectionchange`: apuntar en qué bloque está el cursor y comparar en
+  cada cambio (ver `proyectosCaretPre` en app.js).
 - **Clic en una opción de `createSelectField` "cierra" popovers que no
   debía (ronda de Proyectos)**: elegir una opción repinta las opciones
   DENTRO de su propio manejador de click, así que cuando el click llega
