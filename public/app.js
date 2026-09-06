@@ -7133,6 +7133,17 @@ function refreshGymLiveButtons() {
   const stored = gymLiveReadStored();
   document.getElementById('btn-gym-live-resume').classList.toggle('hidden', !stored);
   document.getElementById('btn-gym-live-start').classList.toggle('hidden', !!stored);
+  refreshGymLiveIndicators();
+}
+// Con un entrenamiento activo, el boton "Herramientas" de la nav y la
+// tarjeta de Gimnasio se marcan en el color de acento con un puntito,
+// para que se vea de un vistazo que hay un entreno en marcha.
+function refreshGymLiveIndicators() {
+  const active = !!gymLiveReadStored();
+  const navBtn = document.querySelector('[data-mobile-nav="extensions"]');
+  if (navBtn) navBtn.classList.toggle('gym-live-indicator', active);
+  const gymCard = document.getElementById('btn-open-gym');
+  if (gymCard) gymCard.classList.toggle('gym-live-indicator', active);
 }
 
 // -- Selector de "que toca hoy" (dias del bloque activo o sesion libre) --
@@ -7222,8 +7233,14 @@ async function openGymLiveView() {
 }
 function closeGymLiveView() {
   document.getElementById('gym-live-view').classList.add('hidden');
-  if (gymLiveTicker) { clearInterval(gymLiveTicker); gymLiveTicker = null; }
+  // El ticker NO se para: sigue moviendo la mini-barra de descanso
+  // global mientras te mueves por la app. Se para al terminar/descartar.
   refreshGymLiveButtons();
+  gymLiveTick();
+}
+function gymLiveStopTicker() {
+  if (gymLiveTicker) { clearInterval(gymLiveTicker); gymLiveTicker = null; }
+  document.getElementById('gym-global-rest').classList.add('hidden');
 }
 
 // Un tick por segundo mientras el overlay esta abierto: reloj de sesion
@@ -7244,6 +7261,24 @@ function gymLiveTick() {
   if (!gymLiveSession) return;
   const elapsed = Math.max(0, Math.floor((Date.now() - gymLiveSession.startedAt) / 1000));
   document.getElementById('gym-live-clock').textContent = gymLiveFormatClock(elapsed);
+
+  // Mini-barra global: solo cuando el entreno esta OCULTO y hay descanso.
+  const liveHidden = document.getElementById('gym-live-view').classList.contains('hidden');
+  const globalBar = document.getElementById('gym-global-rest');
+  if (liveHidden && gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    const gRemaining = Math.ceil((gymLiveSession.restUntil - Date.now()) / 1000);
+    document.getElementById('gym-global-rest-remaining').textContent =
+      localStorage.getItem('gymRestFormat') === 'sec' ? `${gRemaining}s` : gymLiveFormatClock(gRemaining);
+    const gBase = gymLiveSession.restBaseSeconds || gRemaining;
+    const gExtra = gymLiveSession.restExtraSeconds || 0;
+    const gPlanned = Math.max(1, gBase + gExtra);
+    const gBaseRemaining = Math.max(0, gRemaining - gExtra);
+    document.getElementById('gym-global-rest-fill-base').style.width = `${(gBaseRemaining / gPlanned) * 100}%`;
+    document.getElementById('gym-global-rest-fill-extra').style.width = `${((gRemaining - gBaseRemaining) / gPlanned) * 100}%`;
+    globalBar.classList.remove('hidden');
+  } else {
+    globalBar.classList.add('hidden');
+  }
 
   const bar = document.getElementById('gym-live-rest-bar');
   if (gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
@@ -7433,12 +7468,27 @@ document.addEventListener('click', (e) => {
   if (live && !live.classList.contains('hidden')) closeGymLiveView();
 }, true);
 
+// Tocar la mini-barra global de descanso vuelve al entrenamiento.
+document.getElementById('gym-global-rest').addEventListener('click', () => {
+  if (gymLiveSession) openGymLiveView();
+});
+
+// Al arrancar la app, si quedo una sesion en curso guardada se carga en
+// memoria (sin abrir el overlay): asi el indicador de la nav y la
+// mini-barra de descanso funcionan desde el primer momento.
+gymLiveSession = gymLiveReadStored();
+if (gymLiveSession) {
+  gymLiveTicker = setInterval(gymLiveTick, 1000);
+}
+refreshGymLiveIndicators();
+
 // Descartar: tirar el entrenamiento en curso sin guardar nada.
 document.getElementById('btn-gym-live-discard').addEventListener('click', async () => {
   const ok = await showAppConfirm('¿Descartar el entrenamiento? No se guardará nada de hoy.', { okText: 'Descartar', danger: true });
   if (!ok) return;
   localStorage.removeItem('gymLiveSession');
   gymLiveSession = null;
+  gymLiveStopTicker();
   closeGymLiveView();
 });
 
@@ -7472,6 +7522,7 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
     if (!ok) return;
     localStorage.removeItem('gymLiveSession');
     gymLiveSession = null;
+    gymLiveStopTicker();
     closeGymLiveView();
     return;
   }
@@ -7500,6 +7551,7 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
 
   localStorage.removeItem('gymLiveSession');
   gymLiveSession = null;
+  gymLiveStopTicker();
   closeGymLiveView();
   document.getElementById('gym-live-summary-modal').classList.remove('hidden');
 
@@ -8130,7 +8182,6 @@ const GYM_BODYMAP_ZONES = [
     '527 1102 543 1249 600 1102 620 1000 649 943 600 927 567 1045',
     '478 1106 449 1253 420 1159 404 1131 396 1073 380 1024 347 939 396 922 416 992 437 1053',
   ] },
-  { g: 'abductores', tx: 0, polys: ['268 962 254 1018 262 1074 288 1094 300 1014', '732 962 746 1018 738 1074 712 1094 700 1014'] },
   { g: 'cuadriceps', tx: 0, polys: [
     '347 988 371 1082 371 1278 343 1371 310 1327 294 1200 282 1114 294 1008 322 947',
     '633 1057 645 1000 669 947 702 1012 710 1118 682 1331 653 1376 624 1286 620 1114',
@@ -8138,12 +8189,6 @@ const GYM_BODYMAP_ZONES = [
     '596 1457 555 1290 608 1139 612 1302 641 1396 629 1465',
     '327 1384 265 1457 257 1367 257 1273 269 1143 294 1335',
     '718 1131 739 1241 739 1404 727 1457 665 1384 702 1335',
-  ] },
-  { g: 'gemelos', tx: 0, polys: [
-    '714 1604 735 1535 767 1612 796 1678 784 1878 796 1955 747 1955',
-    '249 1947 278 1649 282 1604 261 1543 249 1576 224 1616 208 1678 220 1882 208 1955',
-    '727 1951 698 1592 653 1584 641 1624 641 1653 657 1771',
-    '355 1584 359 1624 359 1669 351 1722 351 1767 322 1820 306 1873 269 1947 273 1878 282 1804 286 1755 290 1698 298 1641 302 1588',
   ] },
   { g: 'antebrazo', tx: 0, polys: [
     '61 886 102 751 147 702 163 743 192 735 45 976 0 1000',
@@ -8174,11 +8219,11 @@ const GYM_BODYMAP_ZONES = [
     '813 796 774 779 791 847 911 1038 932 1089 945 1047',
     '187 796 221 779 209 843 94 1030 68 1085 51 1047',
   ] },
+  { g: 'abductores', tx: 1120, polys: ['330 1070 288 1130 282 1230 316 1290 356 1180', '670 1070 712 1130 718 1230 684 1290 644 1180'] },
   { g: 'gluteo', tx: 1120, polys: [
     '447 996 302 1085 298 1187 315 1260 472 1213 494 1149',
     '553 991 511 1145 523 1209 681 1260 698 1191 694 1085',
   ] },
-  { g: 'abductores', tx: 1120, polys: ['302 1078 284 1148 290 1224 312 1252 324 1146', '698 1078 716 1148 710 1224 688 1252 676 1146'] },
   { g: 'aductores', tx: 1120, polys: [
     '481 1230 447 1230 413 1255 451 1443 485 1357 489 1294',
     '519 1226 557 1234 591 1260 549 1443 519 1362 511 1294',
@@ -8205,6 +8250,10 @@ const GYM_BODYMAP_SILHOUETTE = [
     '424 29 400 118 420 196 461 233 498 253 547 224 576 192 592 102 571 24 498 0',
     '339 1400 347 1433 355 1473 363 1510 351 1567 298 1567 273 1527 273 1473 302 1441',
     '657 1400 722 1478 722 1522 698 1571 649 1567 629 1510',
+    '714 1604 735 1535 767 1612 796 1678 784 1878 796 1955 747 1955',
+    '249 1947 278 1649 282 1604 261 1543 249 1576 224 1616 208 1678 220 1882 208 1955',
+    '727 1951 698 1592 653 1584 641 1624 641 1653 657 1771',
+    '355 1584 359 1624 359 1669 351 1722 351 1767 322 1820 306 1873 269 1947 273 1878 282 1804 286 1755 290 1698 298 1641 302 1588',
   ] },
   { tx: 1120, polys: [
     '506 0 460 9 409 55 404 128 451 200 557 200 591 136 596 47 557 13',
@@ -8267,7 +8316,7 @@ function renderGymBodyMap() {
       : `${Math.round(value * 10) / 10} serie${value === 1 ? '' : 's'}`;
     detailByGroup.set(zone.g, `${label}: ${valueLabel}${topExercises ? ` · ${topExercises}` : ''}`);
     const polys = zone.polys.map((points) => `<polygon points="${points}" />`).join('');
-    return `<g style="fill: ${fill}; stroke: ${fill}" transform="translate(${zone.tx}, 0)" data-bodymap-group="${zone.g}">${polys}</g>`;
+    return `<g style="fill: ${fill}" transform="translate(${zone.tx}, 0)" data-bodymap-group="${zone.g}">${polys}</g>`;
   }).join('');
   const silhouetteHtml = GYM_BODYMAP_SILHOUETTE.map((part) =>
     `<g class="gym-bodymap-silhouette" transform="translate(${part.tx}, 0)">${part.polys.map((points) => `<polygon points="${points}" />`).join('')}</g>`
@@ -8288,7 +8337,16 @@ function renderGymBodyMap() {
   // hacer scroll -- feedback de Koku).
   const info = document.getElementById('gym-bodymap-info');
   container.querySelectorAll('[data-bodymap-group]').forEach((zoneEl) => {
-    const show = () => { info.textContent = detailByGroup.get(zoneEl.dataset.bodymapGroup) || ''; };
+    const show = () => {
+      const group = zoneEl.dataset.bodymapGroup;
+      info.textContent = detailByGroup.get(group) || '';
+      // El resaltado se aplica a TODAS las zonas del mismo grupo (un
+      // musculo que sale en las dos vistas, como el triceps, se marca
+      // en ambas a la vez -- feedback de Koku).
+      container.querySelectorAll('[data-bodymap-group]').forEach((other) => {
+        other.classList.toggle('bodymap-active', other.dataset.bodymapGroup === group);
+      });
+    };
     zoneEl.addEventListener('click', show);
     zoneEl.addEventListener('mouseenter', show);
   });

@@ -2091,17 +2091,69 @@ body.mobile-day-scroll-lock .app {
 .gym-achievement-bar { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--surface-2-text) 12%, var(--surface-2)); overflow: hidden; }
 .gym-achievement-bar-fill { height: 100%; border-radius: 999px; background: var(--gym-accent); }
 
+/* Mini-barra GLOBAL de descanso: fija arriba de toda la app mientras
+   corre un descanso con el entreno oculto. Tocarla vuelve al entreno.
+   Usa el acento del tema directamente (vive fuera de #gym-view). */
+.gym-global-rest {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 60; /* sobre el contenido, bajo la nav (70) y los dialogos */
+  display: flex; flex-direction: column; gap: 0.25rem;
+  padding: 0.45rem 1rem 0.5rem;
+  background: color-mix(in srgb, var(--accent) 25%, var(--surface));
+  border-bottom: 1px solid var(--accent);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.gym-global-rest b { font-variant-numeric: tabular-nums; }
+.gym-global-rest-track {
+  display: flex;
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-text) 14%, var(--surface));
+  overflow: hidden;
+}
+.gym-global-rest .gym-live-rest-fill-base { background: var(--accent); }
+.gym-global-rest .gym-live-rest-fill-extra { background: color-mix(in srgb, var(--accent) 45%, var(--surface-text)); }
+
+/* Indicador de entreno activo: el boton "Herramientas" de la nav y la
+   tarjeta de Gimnasio se tiñen del acento con un puntito de aviso. */
+.mobile-nav-btn.gym-live-indicator { color: var(--accent); position: relative; }
+.mobile-nav-btn.gym-live-indicator::after {
+  content: '';
+  position: absolute;
+  top: 0.35rem; right: 28%;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+#btn-open-gym.gym-live-indicator {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  position: relative;
+}
+#btn-open-gym.gym-live-indicator::after {
+  content: '';
+  position: absolute;
+  top: 0.5rem; right: 0.5rem;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 /* Mapa de musculos (Fase 6): dos siluetas, zonas coloreadas por uso. */
 .gym-bodymap-controls { display: flex; gap: 0.8rem; flex-wrap: wrap; }
 .gym-bodymap-svg { max-width: 30rem; }
 .gym-bodymap-silhouette { fill: color-mix(in srgb, var(--surface-2-text) 5%, var(--surface-2)); }
 .gym-bodymap-svg [data-bodymap-group] { cursor: pointer; }
-/* Esquinas redondeadas "gratis": cada poligono lleva un stroke grueso de
-   su MISMO color con stroke-linejoin redondo (el color lo pone el estilo
-   inline del grupo). Al pasar el cursor, el borde cambia al acento. */
-.gym-bodymap-svg polygon { stroke-width: 16; stroke-linejoin: round; paint-order: stroke; }
-.gym-bodymap-svg .gym-bodymap-silhouette polygon { stroke: color-mix(in srgb, var(--surface-2-text) 5%, var(--surface-2)); }
-.gym-bodymap-svg [data-bodymap-group]:hover polygon { stroke: var(--gym-accent); }
+/* Cada poligono lleva un stroke grueso del color del FONDO con esquinas
+   redondeadas (paint-order pinta el stroke debajo del fill): eso les da
+   corners suaves, los encoge un pelin y deja un canal oscuro de
+   separacion entre musculos vecinos. El grupo activo (tocado) cambia el
+   borde al acento -- en las DOS vistas a la vez, via .bodymap-active. */
+.gym-bodymap-svg polygon { stroke: var(--bg); stroke-width: 14; stroke-linejoin: round; paint-order: stroke; }
+.gym-bodymap-svg .gym-bodymap-silhouette polygon { stroke: var(--bg); }
+.gym-bodymap-svg .bodymap-active polygon { stroke: var(--gym-accent); stroke-width: 8; }
 .gym-bodymap-caption { font-size: 52px; }
 .gym-bodymap-info { text-align: center; min-height: 2.4em; font-size: 0.82rem; color: color-mix(in srgb, var(--bg-text) 70%, var(--bg)); margin: 0.3rem 0 0; }
 
