@@ -123,6 +123,10 @@ async function syncScheduledReminders() {
         title: 'RemindMeLater',
         body: r.title,
         schedule: { at: new Date(r.remindAt) },
+        // Sin `sound`, iOS entrega la notificacion en silencio (ni suena
+        // ni vibra). "default" no existe como archivo, y por eso iOS cae
+        // al sonido del sistema de siempre.
+        sound: 'default',
       }));
     if (aProgramar.length > 0) await plugin.schedule({ notifications: aProgramar });
   } catch (err) {

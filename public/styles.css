@@ -2154,6 +2154,9 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 .gym-live-note { margin-top: 0.2rem; font-size: 0.82rem; }
 .gym-live-start-btn { font-size: 1rem; padding: 0.8rem 1.1rem; align-self: stretch; }
 .gym-start-day-btn { cursor: pointer; text-align: left; border: 1px solid var(--border); width: 100%; }
+/* "Sesion libre" es otra cosa distinta a los dias del plan: un hueco de
+   separacion para que no parezca el ultimo dia de la lista. */
+#btn-gym-start-free { margin-top: 0.9rem; width: 100%; }
 /* Barra inferior de descanso: fija abajo del overlay, con el acento. */
 .gym-live-rest-bar {
   display: flex; flex-direction: column; gap: 0.45rem;
@@ -2263,6 +2266,19 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 }
 .gym-global-rest .gym-live-rest-fill-base { background: var(--accent); }
 .gym-global-rest .gym-live-rest-fill-extra { background: color-mix(in srgb, var(--accent) 45%, var(--surface-text)); }
+/* Mientras la mini-barra esta visible, TODA la interfaz baja lo que mide
+   la barra para que no tape nada (el cambio mensual/anual del calendario,
+   el titulo y el Volver de Configuracion... -- feedback de Koku). Son los
+   mismos tres contenedores que reservan el hueco de la muesca mas arriba:
+   como la barra ya incluye ese hueco dentro (su padding-top con
+   safe-area), aqui se SUSTITUYE ese padding por la altura total de la
+   barra, que gymLiveTick() mide y deja en --gym-rest-offset. */
+:root { --gym-rest-offset: 0px; }
+body.gym-rest-push .app,
+body.gym-rest-push .my-space-view,
+body.gym-rest-push #settings-modal .settings-card {
+  padding-top: var(--gym-rest-offset);
+}
 
 /* Boton "?" flotante del entreno en vivo: abajo a la derecha, por
    encima del contenido pero sin tapar la nav (que va a z-index 70 y

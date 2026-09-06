@@ -7949,14 +7949,16 @@ function startGymLiveSession(day) {
   };
   gymLiveStore();
   openGymLiveView();
+  // La ayuda se abre sola SOLO al iniciar un entrenamiento nuevo (aqui),
+  // no cada vez que se vuelve a el tras moverse por la app -- eso
+  // molestaba (feedback de Koku). Hasta que marque "no volver a
+  // mostrar"; el boton "?" la abre cuando quiera.
+  if (localStorage.getItem('gymLiveHelpSeen') !== '1') openGymHelpModal();
 }
 
 async function openGymLiveView() {
   document.getElementById('gym-live-title').textContent = gymLiveSession.routineName || 'Sesión libre';
   document.getElementById('gym-live-view').classList.remove('hidden');
-  // La ayuda se abre sola encima del entreno hasta que el usuario marque
-  // "no volver a mostrar" (el boton "?" de abajo la abre cuando quiera).
-  if (localStorage.getItem('gymLiveHelpSeen') !== '1') openGymHelpModal();
   renderGymLiveExercises();
   // Columna "Anterior": se pide en paralelo para cada ejercicio y se
   // repinta cuando llega (si no hay historial, la columna queda en "—").
@@ -7980,6 +7982,7 @@ function closeGymLiveView() {
 function gymLiveStopTicker() {
   if (gymLiveTicker) { clearInterval(gymLiveTicker); gymLiveTicker = null; }
   document.getElementById('gym-global-rest').classList.add('hidden');
+  document.body.classList.remove('gym-rest-push');
   // Si quedaba un aviso de descanso programado, ya no tiene sentido:
   // el entreno se ha terminado o descartado. Aqui cubre ambos caminos.
   gymCancelRestNotification();
@@ -8018,8 +8021,15 @@ function gymLiveTick() {
     document.getElementById('gym-global-rest-fill-base').style.width = `${(gBaseRemaining / gPlanned) * 100}%`;
     document.getElementById('gym-global-rest-fill-extra').style.width = `${((gRemaining - gBaseRemaining) / gPlanned) * 100}%`;
     globalBar.classList.remove('hidden');
+    // Con la barra visible, la interfaz entera baja lo que mide la barra
+    // para que no tape nada (ver body.gym-rest-push en styles.css). La
+    // altura se mide DESPUES de mostrarla (oculta mediria 0), cada tick:
+    // es barata y asi se adapta si cambia (giro de pantalla, etc.).
+    document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
+    document.body.classList.add('gym-rest-push');
   } else {
     globalBar.classList.add('hidden');
+    document.body.classList.remove('gym-rest-push');
   }
 
   const bar = document.getElementById('gym-live-rest-bar');
@@ -8106,6 +8116,10 @@ async function gymScheduleRestNotification() {
         title: 'Descanso terminado',
         body: 'Siguiente serie.',
         schedule: { at: new Date(gymLiveSession.restUntil) },
+        // Sin `sound`, iOS entrega la notificacion EN SILENCIO: ni suena
+        // ni vibra (la vibracion va ligada al sonido). "default" no es un
+        // archivo real, y justo por eso iOS cae al sonido del sistema.
+        sound: 'default',
       }],
     });
   } catch (err) {
@@ -8168,7 +8182,7 @@ function renderGymLiveExercises() {
       <div class="gym-live-set-row gym-live-set-head">
         <span class="gym-live-set-number">#</span>
         <span class="gym-live-set-prev">Anterior</span>
-        <span>${unit}</span><span>Reps</span><span class="gym-rpe-head" data-rpe-help title="¿Qué es RPE?">RPE(?)</span><span>✓</span>
+        <span>${unit}</span><span>Reps</span><span class="gym-rpe-head">RPE</span><span>✓</span>
       </div>
       ${setsHtml}
       <button type="button" class="secondary-btn gym-add-set-btn" data-live-add-set>+ Serie</button>
@@ -8248,14 +8262,6 @@ document.getElementById('btn-gym-live-add-exercise').addEventListener('click', (
     }
   };
   openGymLibraryModal();
-});
-
-// Ayuda de RPE (Koku: "no entiendo que es RPE"): tocar la cabecera de la
-// columna abre el modal de ayuda, donde vive la explicacion junto al
-// resto (antes era un aviso suelto; Koku pidio moverlo ahi). Listener
-// delegado porque las tarjetas se reconstruyen en cada cambio.
-document.getElementById('gym-live-exercises').addEventListener('click', (e) => {
-  if (e.target.closest('[data-rpe-help]')) openGymHelpModal();
 });
 
 // --- Modal de ayuda del entrenamiento --------------------------------
