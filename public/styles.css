@@ -583,12 +583,16 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .note-editor-body table[data-border="thick"] td, .note-editor-body table[data-border="thick"] th { border-width: 3px; }
 .note-editor-body table[data-border="4"] td, .note-editor-body table[data-border="4"] th { border-width: 4px; }
 
-/* Grosor de una CELDA suelta (menu Borde con casillas marcadas): manda
-   sobre el de la tabla, de ahi que vaya despues en la hoja. */
-.note-editor-body td[data-border="1"], .note-editor-body th[data-border="1"] { border-width: 1px; }
-.note-editor-body td[data-border="2"], .note-editor-body th[data-border="2"] { border-width: 2px; }
-.note-editor-body td[data-border="3"], .note-editor-body th[data-border="3"] { border-width: 3px; }
-.note-editor-body td[data-border="4"], .note-editor-body th[data-border="4"] { border-width: 4px; }
+/* Grosor de una CELDA suelta (menu Borde con casillas marcadas). El
+   selector lleva `table` a proposito: las reglas de la tabla entera son
+   `.note-editor-body table[data-border="N"] td`, que pesan MAS que un
+   simple `.note-editor-body td[...]` -- sin esto, cambiar el grosor de
+   una casilla no hacia nada en cuanto la tabla ya tenia el suyo puesto
+   (el "a veces se raya" que reporto Koku). */
+.note-editor-body table td[data-border="1"], .note-editor-body table th[data-border="1"] { border-width: 1px; }
+.note-editor-body table td[data-border="2"], .note-editor-body table th[data-border="2"] { border-width: 2px; }
+.note-editor-body table td[data-border="3"], .note-editor-body table th[data-border="3"] { border-width: 3px; }
+.note-editor-body table td[data-border="4"], .note-editor-body table th[data-border="4"] { border-width: 4px; }
 
 /* Modo "Marcar": se toca cada casilla para marcarla/desmarcarla (con la
    seleccion de texto de iOS era imposible acertar). */
@@ -1799,13 +1803,10 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
-/* Carpeta en galeria: mismo formato de tarjeta que una nota, con el
-   icono de carpeta grande sobre su propio color. */
-.mobile-note-gallery-folder-icon {
-  width: 46%;
-  height: 46%;
-  color: rgba(255, 255, 255, 0.9);
-}
+/* Carpeta en galeria: la que se pinta con su color es la CARPETA, no el
+   fondo de la tarjeta (que se queda igual que en las notas). */
+.mobile-note-gallery-folder-icon { width: 58%; height: 58%; }
+.mobile-note-gallery-card.is-folder .mobile-note-gallery-media { background: var(--surface-2); }
 .mobile-note-gallery-media {
   aspect-ratio: 1 / 1;
   display: flex;
@@ -1915,8 +1916,79 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 }
 .note-swipe-wrap.is-open > .note-item { transform: translateX(-9.5rem); }
 
-/* Menu de Mover/Eliminar de una pulsacion larga en galeria. */
-.note-item-action-menu { width: 180px; }
+/* Arrastrar y soltar notas/carpetas: la etiqueta que sigue al dedo, y el
+   resalte de la carpeta (o del boton "Volver") sobre la que se suelta. */
+.note-drag-ghost {
+  position: fixed;
+  z-index: 80;
+  transform: translate(-50%, -140%);
+  pointer-events: none;
+  max-width: 60vw;
+  padding: 0.4rem 0.7rem;
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+body.note-dragging { cursor: grabbing; }
+/* Mientras se arrastra, nada de seleccionar texto ni de scroll por
+   accidente al pasar por encima de la lista. */
+body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: none; }
+.is-drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* Menu de Mover/Eliminar (pulsacion larga en galeria, o el mismo par de
+   acciones desde el listado). Tarjeta propia con el nombre arriba y una
+   fila por accion con su icono -- no una lista de texto suelto. */
+.note-item-action-menu {
+  position: fixed;
+  z-index: 60;
+  width: 210px;
+  padding: 0.35rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.note-item-action-title {
+  margin: 0;
+  padding: 0.35rem 0.6rem 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+.note-item-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.6rem;
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  color: var(--surface-text);
+  font-size: 0.9rem;
+  text-align: left;
+}
+.note-item-action-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+.note-item-action-btn:hover { background: var(--surface-2); }
+.note-item-action-btn.is-danger { color: var(--danger); }
 
 /* Barra de acciones (Eliminar/Mover, Cancelar/"Mover aqui"). Va FIJA
    justo encima de la barra inferior de la app: antes era `sticky` dentro

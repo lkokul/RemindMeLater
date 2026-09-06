@@ -2720,6 +2720,7 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
     toggleNoteFavorite(note);
   }));
 
+  attachNoteItemGestures(row, itemKey);
   row.addEventListener('click', () => {
     if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
     // Editando carpetas, las notas no se abren: ahi solo se tocan
@@ -2742,6 +2743,8 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
 function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
   const row = document.createElement('div');
   row.className = 'note-item note-folder-row';
+  // Marca de "aqui se puede soltar" para arrastrar y soltar.
+  row.dataset.folderId = String(folder.id);
 
   const itemKey = mobileNotesItemKey('folder', folder.id);
   if (mode === 'select') {
@@ -2794,6 +2797,7 @@ function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
     toggleFolderFavorite(folder);
   }));
 
+  attachNoteItemGestures(row, itemKey);
   row.addEventListener('click', () => {
     if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
     if (mode === 'editFolders') { openNoteFolderModal(folder); return; }
@@ -3127,7 +3131,7 @@ function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
     if (note.hidden) return;
     openNoteInEditor(note);
   });
-  if (mode === 'browse') attachNoteItemLongPress(card, itemKey);
+  if (mode === 'browse') attachNoteItemGestures(card, itemKey);
   return card;
 }
 
@@ -3138,6 +3142,7 @@ function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
 function buildFolderGalleryCard(folder, { mode = 'browse' } = {}) {
   const card = document.createElement('div');
   card.className = 'mobile-note-gallery-card is-folder';
+  card.dataset.folderId = String(folder.id);
   const itemKey = mobileNotesItemKey('folder', folder.id);
 
   if (mode === 'select') {
@@ -3150,10 +3155,13 @@ function buildFolderGalleryCard(folder, { mode = 'browse' } = {}) {
     card.appendChild(checkbox);
   }
 
+  // Se pinta la CARPETA con su color, no el fondo de la tarjeta: asi la
+  // galeria mantiene el mismo tono de fondo en todas y el color solo
+  // sirve para distinguir la carpeta de un vistazo.
   const media = document.createElement('div');
   media.className = 'mobile-note-gallery-media';
-  media.style.background = folder.color || 'var(--surface-2)';
-  media.innerHTML = '<svg class="mobile-note-gallery-folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+  media.innerHTML = '<svg class="mobile-note-gallery-folder-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+  media.querySelector('svg').style.color = folder.color || 'var(--accent)';
   card.appendChild(media);
 
   const title = document.createElement('span');
@@ -3173,7 +3181,7 @@ function buildFolderGalleryCard(folder, { mode = 'browse' } = {}) {
     clearNoteSearch();
     renderNotesView();
   });
-  if (mode === 'browse') attachNoteItemLongPress(card, itemKey);
+  if (mode === 'browse') attachNoteItemGestures(card, itemKey);
   return card;
 }
 
@@ -3198,17 +3206,30 @@ function startNoteItemDelete(itemKey) {
   openMobileNotesDeleteModal();
 }
 
+const NOTE_ACTION_MOVE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m12 11 3 3-3 3"/><path d="M9 14h6"/></svg>';
+const NOTE_ACTION_DELETE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+
 const noteItemActionMenu = document.createElement('div');
-noteItemActionMenu.className = 'select-popover note-item-action-menu hidden';
+noteItemActionMenu.className = 'note-item-action-menu hidden';
 document.body.appendChild(noteItemActionMenu);
 
 function openNoteItemActionMenu(anchorEl, itemKey) {
   noteItemActionMenu.innerHTML = '';
-  [['Mover', () => startNoteItemMove(itemKey)], ['Eliminar', () => startNoteItemDelete(itemKey)]].forEach(([texto, fn]) => {
+  const { item } = resolveMobileNotesItem(itemKey) || {};
+  if (item) {
+    const titulo = document.createElement('p');
+    titulo.className = 'note-item-action-title';
+    titulo.textContent = getNoteListItemName(item);
+    noteItemActionMenu.appendChild(titulo);
+  }
+  [
+    ['Mover', NOTE_ACTION_MOVE_ICON, '', () => startNoteItemMove(itemKey)],
+    ['Eliminar', NOTE_ACTION_DELETE_ICON, 'is-danger', () => startNoteItemDelete(itemKey)],
+  ].forEach(([texto, icono, extra, fn]) => {
     const opt = document.createElement('button');
     opt.type = 'button';
-    opt.className = 'select-option';
-    opt.textContent = texto;
+    opt.className = `note-item-action-btn ${extra}`.trim();
+    opt.innerHTML = `${icono}<span>${texto}</span>`;
     opt.addEventListener('click', () => {
       noteItemActionMenu.classList.add('hidden');
       fn();
@@ -3216,7 +3237,7 @@ function openNoteItemActionMenu(anchorEl, itemKey) {
     noteItemActionMenu.appendChild(opt);
   });
   noteItemActionMenu.classList.remove('hidden');
-  positionFixedPopover(anchorEl, noteItemActionMenu, { width: 180 });
+  positionFixedPopover(anchorEl, noteItemActionMenu, { width: 210 });
 }
 
 document.addEventListener('pointerdown', (e) => {
@@ -3226,25 +3247,135 @@ document.addEventListener('pointerdown', (e) => {
 });
 
 const NOTE_LONG_PRESS_MS = 450;
+const NOTE_DRAG_THRESHOLD_PX = 12;
 
-function attachNoteItemLongPress(el, itemKey) {
+// ---------------------------------------------------------------------
+// Arrastrar y soltar para mover notas/carpetas: mantener pulsado LEVANTA
+// el elemento (o todos los marcados, si estas en modo Seleccionar y este
+// es uno de ellos). Si lo sueltas encima de una carpeta, se mueve ahi
+// dentro; encima del boton "Volver", sube un nivel. Si lo sueltas sin
+// haberte movido, lo que sale es el menu de Mover/Eliminar.
+// ---------------------------------------------------------------------
+let noteDrag = null; // { keys, ghost, target, targetEl }
+
+function noteDragKeysFor(itemKey) {
+  // Con varios marcados, arrastrar uno de ellos los mueve todos.
+  if ((mobileNotesMode === 'select' || mobileNotesMode === 'move')
+    && mobileNotesSelectedKeys.has(itemKey)) return [...mobileNotesSelectedKeys];
+  return [itemKey];
+}
+
+// No se puede meter una carpeta dentro de si misma ni de una hija suya
+// (el servidor lo rechazaria; aqui se evita antes para no dar un error).
+function isNoteFolderInside(folderId, possibleAncestorId) {
+  let actual = state.noteFolders.find((f) => f.id === folderId);
+  while (actual) {
+    if (actual.id === possibleAncestorId) return true;
+    actual = state.noteFolders.find((f) => f.id === actual.parentId);
+  }
+  return false;
+}
+
+function noteDropTargetAt(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!el || !el.closest) return null;
+  const volver = el.closest('#btn-mobile-notes-back');
+  if (volver && !volver.classList.contains('hidden')) {
+    const actual = state.noteFolders.find((f) => f.id === state.currentNoteFolderId);
+    return { el: volver, folderId: actual ? actual.parentId : null };
+  }
+  const fila = el.closest('.note-folder-row, .mobile-note-gallery-card.is-folder');
+  if (!fila || !fila.dataset.folderId) return null;
+  const folderId = Number(fila.dataset.folderId);
+  // Ni sobre si misma ni sobre una carpeta que este dentro de la que
+  // arrastras.
+  const invalido = noteDrag && noteDrag.keys.some((k) => {
+    const { kind, id } = resolveMobileNotesItem(k);
+    return kind === 'folder' && (id === folderId || isNoteFolderInside(folderId, id));
+  });
+  if (invalido) return null;
+  return { el: fila, folderId };
+}
+
+function setNoteDropTarget(destino) {
+  if (noteDrag.targetEl && noteDrag.targetEl !== (destino && destino.el)) {
+    noteDrag.targetEl.classList.remove('is-drop-target');
+  }
+  noteDrag.target = destino;
+  noteDrag.targetEl = destino ? destino.el : null;
+  if (noteDrag.targetEl) noteDrag.targetEl.classList.add('is-drop-target');
+}
+
+function startNoteDrag(el, itemKey, e) {
+  const keys = noteDragKeysFor(itemKey);
+  const ghost = document.createElement('div');
+  ghost.className = 'note-drag-ghost';
+  const { item } = resolveMobileNotesItem(keys[0]) || {};
+  ghost.textContent = keys.length > 1
+    ? `${keys.length} elementos`
+    : (item ? getNoteListItemName(item) : 'Moviendo…');
+  document.body.appendChild(ghost);
+  noteDrag = { keys, ghost, target: null, targetEl: null };
+  document.body.classList.add('note-dragging');
+  moveNoteDragGhost(e);
+}
+
+function moveNoteDragGhost(e) {
+  noteDrag.ghost.style.left = `${e.clientX}px`;
+  noteDrag.ghost.style.top = `${e.clientY}px`;
+}
+
+async function finishNoteDrag() {
+  if (!noteDrag) return;
+  const { keys, target } = noteDrag;
+  if (noteDrag.targetEl) noteDrag.targetEl.classList.remove('is-drop-target');
+  noteDrag.ghost.remove();
+  document.body.classList.remove('note-dragging');
+  noteDrag = null;
+  if (!target) return;
+  const ok = await moveNoteItemsTo(keys, target.folderId);
+  if (ok && mobileNotesMode !== 'browse') setMobileNotesMode('browse');
+  else if (ok) renderNotesView();
+}
+
+function attachNoteItemGestures(el, itemKey) {
   let temporizador = null;
   let inicio = null;
-  const cancelar = () => { clearTimeout(temporizador); temporizador = null; inicio = null; };
+  let levantado = false;
+  const cancelar = () => { clearTimeout(temporizador); temporizador = null; inicio = null; levantado = false; };
+
   el.addEventListener('pointerdown', (e) => {
-    inicio = { x: e.clientX, y: e.clientY };
+    inicio = { x: e.clientX, y: e.clientY, id: e.pointerId, evento: e };
     temporizador = setTimeout(() => {
       temporizador = null;
+      levantado = true;
       el.dataset.longPressed = '1';
-      openNoteItemActionMenu(el, itemKey);
+      if (el.setPointerCapture) el.setPointerCapture(inicio.id);
     }, NOTE_LONG_PRESS_MS);
   });
+
   el.addEventListener('pointermove', (e) => {
     if (!inicio) return;
-    if (Math.abs(e.clientX - inicio.x) > 10 || Math.abs(e.clientY - inicio.y) > 10) cancelar();
+    const lejos = Math.abs(e.clientX - inicio.x) > NOTE_DRAG_THRESHOLD_PX
+      || Math.abs(e.clientY - inicio.y) > NOTE_DRAG_THRESHOLD_PX;
+    // Antes de que se cumpla la pulsacion larga, moverse es scroll o
+    // deslizar la fila: se descarta el gesto.
+    if (!levantado) { if (lejos) cancelar(); return; }
+    e.preventDefault();
+    if (!noteDrag) { if (!lejos) return; startNoteDrag(el, itemKey, e); }
+    moveNoteDragGhost(e);
+    setNoteDropTarget(noteDropTargetAt(e.clientX, e.clientY));
   });
-  el.addEventListener('pointerup', cancelar);
-  el.addEventListener('pointercancel', cancelar);
+
+  el.addEventListener('pointerup', (e) => {
+    const eraLevantado = levantado;
+    clearTimeout(temporizador); temporizador = null; inicio = null; levantado = false;
+    if (noteDrag) { finishNoteDrag(); return; }
+    // Pulsacion larga sin moverse: el menu de acciones.
+    if (eraLevantado) openNoteItemActionMenu(el, itemKey);
+  });
+  el.addEventListener('pointercancel', () => { cancelar(); if (noteDrag) finishNoteDrag(); });
+
   // Tras una pulsacion larga NO se abre la nota: el click llega despues
   // del pointerup, asi que se marca y se descarta ese unico click.
   el.addEventListener('click', (e) => {
@@ -3307,6 +3438,9 @@ function wrapNoteRowWithSwipe(row, itemKey) {
     if (!inicio) return;
     const dx = e.clientX - inicio.x;
     inicio = null;
+    // Si el gesto acabo siendo una pulsacion larga (menu o arrastre), no
+    // es un deslizamiento.
+    if (row.dataset.longPressed || noteDrag) return;
     if (!horizontal) return;
     if (dx < -40) {
       if (openSwipedNoteRow !== wrap) closeSwipedNoteRow();
@@ -3533,9 +3667,9 @@ document.getElementById('btn-mobile-notes-delete-confirm').addEventListener('cli
 // en la carpeta destino como si estuviera navegando normal, ver el
 // filtrado de "mode === 'move'" en renderNotesViewInto) -- "Mover aqui"
 // aplica state.currentNoteFolderId como destino de todo lo seleccionado.
-async function confirmMobileNotesMove() {
-  const destinationFolderId = state.currentNoteFolderId;
-  const keys = [...mobileNotesSelectedKeys];
+// Mueve una lista de elementos a una carpeta (o a la raiz, con null).
+// Lo comparten "Mover aquí" del modo Mover y el arrastrar y soltar.
+async function moveNoteItemsTo(keys, destinationFolderId) {
   try {
     for (const key of keys) {
       const { kind, id } = resolveMobileNotesItem(key);
@@ -3547,10 +3681,15 @@ async function confirmMobileNotesMove() {
     }
   } catch (err) {
     await showAppAlert(err.message || 'No se pudo mover.');
-    return;
+    return false;
   }
   await Promise.all([loadNotes(), loadNoteFolders()]);
-  setMobileNotesMode('browse');
+  return true;
+}
+
+async function confirmMobileNotesMove() {
+  const ok = await moveNoteItemsTo([...mobileNotesSelectedKeys], state.currentNoteFolderId);
+  if (ok) setMobileNotesMode('browse');
 }
 
 // ---------------------------------------------------------------------
@@ -5692,16 +5831,41 @@ tableCornerBtn.addEventListener('click', () => setNoteTableToolbarOpen(true));
 document.body.appendChild(tableCornerBtn);
 
 // Alterna entre la barra de formato de texto y la de tabla.
+// Entrar/salir de la barra de tabla o de sus modos cambia el alto de la
+// barra y bloquea/desbloquea el editor -- y con eso el navegador reajusta
+// el scroll por su cuenta, dejando la tabla en otro sitio de la pantalla
+// ("me baja la vista y marea"). Se mide donde esta la tabla ANTES, se
+// hace el cambio, y se compensa la diferencia sobre el scroll del
+// editor. El segundo pase en requestAnimationFrame es por si el
+// navegador lo reajusta otra vez al pintar.
+function keepTableInPlace(fn) {
+  const cell = getCurrentTableCell()
+    || (tableMarkMode && tableMarkMode.table.querySelector('td, th'))
+    || (tableManualMove && tableManualMove.table.querySelector('td, th'));
+  const table = cell ? cell.closest('table') : null;
+  const antes = table ? table.getBoundingClientRect().top : null;
+  fn();
+  if (antes === null || !table || !NOTE_EDITOR_BODY.contains(table)) return;
+  const ajustar = () => {
+    const despues = table.getBoundingClientRect().top;
+    if (Math.abs(despues - antes) > 1) NOTE_EDITOR_BODY.scrollTop += despues - antes;
+  };
+  ajustar();
+  requestAnimationFrame(ajustar);
+}
+
 function setNoteTableToolbarOpen(open) {
-  // Cerrar la barra de tabla sale tambien de los modos que bloquean el
-  // editor ("mover a mano" y "Marcar"): si no, se quedaria bloqueado sin
-  // nada que lo delate.
-  if (!open) { stopTableManualMove(); stopTableMarkMode(); }
-  if (open) { tableHistory.atras.length = 0; tableHistory.adelante.length = 0; refreshTableHistoryButtons(); }
-  document.getElementById('note-body-toolbar').classList.toggle('hidden', open);
-  document.getElementById('note-table-toolbar').classList.toggle('hidden', !open);
-  if (!open) NOTE_EDITOR_BODY.focus();
-  refreshTableCornerButton();
+  keepTableInPlace(() => {
+    // Cerrar la barra de tabla sale tambien de los modos que bloquean el
+    // editor ("mover a mano" y "Marcar"): si no, se quedaria bloqueado sin
+    // nada que lo delate.
+    if (!open) { stopTableManualMove(); stopTableMarkMode(); }
+    if (open) { tableHistory.atras.length = 0; tableHistory.adelante.length = 0; refreshTableHistoryButtons(); }
+    document.getElementById('note-body-toolbar').classList.toggle('hidden', open);
+    document.getElementById('note-table-toolbar').classList.toggle('hidden', !open);
+    if (!open) NOTE_EDITOR_BODY.focus();
+    refreshTableCornerButton();
+  });
 }
 
 // Tocar fuera de la tabla sale de "mover a mano" y de "Marcar" -- mismo
@@ -5718,8 +5882,10 @@ document.addEventListener('pointerdown', (e) => {
 
 document.getElementById('btn-note-table-mark').addEventListener('mousedown', (e) => e.preventDefault());
 document.getElementById('btn-note-table-mark').addEventListener('click', () => {
-  if (tableMarkMode) stopTableMarkMode();
-  else startTableMarkMode();
+  keepTableInPlace(() => {
+    if (tableMarkMode) stopTableMarkMode();
+    else startTableMarkMode();
+  });
 });
 document.getElementById('btn-note-table-undo').addEventListener('mousedown', (e) => e.preventDefault());
 document.getElementById('btn-note-table-undo').addEventListener('click', undoTableChange);
@@ -6723,6 +6889,11 @@ function applyNoteEditorViewportAnchor() {
   const view = document.getElementById('note-editor-view');
   const vv = window.visualViewport;
   if (!vv || view.classList.contains('hidden')) return;
+  // Si el sistema ha desplazado la PAGINA para dejar sitio al teclado,
+  // se devuelve a cero: con la pagina quieta ya no queda ese segundo
+  // scroll "general" que se podia arrastrar, y el editor se ajusta solo
+  // al hueco que de verdad se ve.
+  if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
   view.style.height = `${vv.height}px`;
   view.style.transform = `translateY(${vv.offsetTop}px)`;
 }
