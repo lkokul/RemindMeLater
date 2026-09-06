@@ -99,8 +99,15 @@ async function syncScheduledReminders() {
 
   try {
     const pendientes = await plugin.getPending();
-    if (pendientes.notifications.length > 0) {
-      await plugin.cancel({ notifications: pendientes.notifications.map((n) => ({ id: n.id })) });
+    // Los ids a partir de 999999900 estan RESERVADOS para avisos internos
+    // de la app que no son eventos del calendario (por ejemplo, el fin del
+    // descanso entre series del Gimnasio, id 999999901). Esos no se tocan
+    // desde aqui: los programa y cancela quien los creo. Sin este filtro,
+    // guardar cualquier evento reprogramaria los recordatorios y de paso
+    // se cargaria el aviso de descanso en mitad de un entrenamiento.
+    const cancelables = pendientes.notifications.filter((n) => n.id < 999999900);
+    if (cancelables.length > 0) {
+      await plugin.cancel({ notifications: cancelables.map((n) => ({ id: n.id })) });
     }
     if (!activados) return;
     if (!(await ensureLocalNotificationPermissionSilently())) return;

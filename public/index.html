@@ -671,6 +671,11 @@
       <h2 id="gym-live-title">Entrenamiento</h2>
       <div class="my-space-view-header-actions">
         <span id="gym-live-clock" class="gym-live-clock">0:00</span>
+        <!-- Ocultar (no descartar): cierra el overlay dejando el entreno en
+             marcha, para poder moverse por las pestañas del Gimnasio. Se
+             vuelve con "Reanudar", el aviso de la tarjeta o la barra de
+             descanso de arriba. -->
+        <button type="button" id="btn-gym-live-minimize" class="icon-btn" aria-label="Ocultar entrenamiento (sigue en marcha)" title="Ocultar (el entrenamiento sigue en marcha)">▾</button>
         <button type="button" id="btn-gym-live-discard" class="secondary-btn">Descartar</button>
         <button type="button" id="btn-gym-live-finish" class="primary-btn">✓ Terminar</button>
       </div>
@@ -691,9 +696,46 @@
       </div>
     </div>
     <div class="gym-live-content">
-      <p class="hint gym-live-hint">Apunta el peso y las repeticiones de cada serie y marca la casilla al terminarla: el descanso empieza solo. La columna "Anterior" muestra tu última sesión como (descanso)peso×reps — ej. (1:30)60×10. Al darle a Terminar solo se guardan las series marcadas o con datos.</p>
+      <!-- La explicacion del sistema ya no vive aqui como parrafo fijo: se
+           muestra en #gym-help-modal (la primera vez sola, y siempre desde
+           el boton de ayuda de abajo a la derecha). -->
       <div id="gym-live-exercises" class="gym-live-exercises"></div>
       <button type="button" id="btn-gym-live-add-exercise" class="secondary-btn gym-tab-action">+ Añadir ejercicio</button>
+    </div>
+    <!-- Boton de ayuda flotante, abajo a la derecha (peticion de Koku):
+         abre el modal con todas las explicaciones, incluida la del RPE. -->
+    <button type="button" id="btn-gym-live-help" class="gym-live-help-btn" aria-label="Cómo funciona el entrenamiento">?</button>
+  </div>
+
+  <!-- Ayuda del modo entrenamiento: se abre SOLA la primera vez que se
+       entra a entrenar (localStorage.gymLiveHelpSeen) y siempre desde el
+       boton "?" de abajo a la derecha. Aqui vive tambien la explicacion
+       del RPE, que antes era un aviso aparte. -->
+  <div id="gym-help-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-help-card">
+      <h2>Cómo funciona el entrenamiento</h2>
+      <div class="gym-help-body">
+        <h4>Apuntar las series</h4>
+        <p>Cada ejercicio tiene su tabla: escribe el peso y las repeticiones de cada serie y marca la casilla al terminarla. Al darle a Terminar solo se guardan las series marcadas o con datos, así que las que dejes en blanco no ensucian el historial.</p>
+        <h4>La columna "Anterior"</h4>
+        <p>Muestra lo que hiciste en tu última sesión con ese ejercicio, en formato (descanso)peso×reps. Por ejemplo, (1:30)60×10 significa: 1 minuto y medio de descanso, 60 kg, 10 repeticiones. Tócala para copiar esos valores a la serie.</p>
+        <h4>El descanso</h4>
+        <p>Al marcar una serie como hecha, el descanso apuntado en tu plan empieza solo y aparece como barra arriba. Con +30s lo alargas, con ✕ lo saltas, y si desmarcas la casilla (te equivocaste de serie) se cancela. Puedes tocar el tiempo para cambiar entre formato m:ss y segundos.</p>
+        <h4>El RPE</h4>
+        <p>Es una medida del esfuerzo, del 1 al 10: 10 es que no podrías haber hecho ni una repetición más, 9 es que te quedaba una, 8 que te quedaban dos... Es opcional, pero apuntarlo ayuda a saber si un peso se te está quedando corto. Si una serie te sale a RPE 7 o menos, probablemente toca subir peso.</p>
+        <h4>Moverte por la app sin perder el entreno</h4>
+        <p>Con el botón ▾ de arriba escondes esta pantalla y el entrenamiento sigue en marcha: puedes mirar otras pestañas del Gimnasio o cualquier otra parte de la app. Para volver, toca Reanudar en la pestaña Entrenar, o la barra de descanso que se queda arriba del todo mientras descansas.</p>
+        <h4>Si se acaba el descanso y no estás mirando</h4>
+        <p>La app puede avisarte con una notificación del sistema (con su sonido y vibración) justo cuando el descanso termina, aunque tengas el móvil bloqueado. Se activa en Configuración, en el apartado Este dispositivo.</p>
+      </div>
+      <label class="app-confirm-checkbox-row gym-help-dont-show-row">
+        <input type="checkbox" id="gym-help-dont-show" class="styled-checkbox" />
+        <span>No volver a mostrar esto automáticamente</span>
+      </label>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-help" class="primary-btn">Entendido</button>
+      </div>
     </div>
   </div>
 
@@ -2166,6 +2208,12 @@
         </label>
         <p class="hint">En la app instalada, el aviso lo programa el propio telefono: suena aunque la app este cerrada, sin que nada salga del dispositivo. Desde un navegador solo puede avisar con la pestana abierta.</p>
         <p id="notifications-status" class="hint"></p>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="setting-gym-rest-notify" />
+          Aviso al terminar el descanso (Gimnasio)
+        </label>
+        <p class="hint">Durante un entrenamiento, cuando se acabe el descanso entre series el telefono lanza una notificacion con su sonido y vibracion, aunque la pantalla este bloqueada. Asi no hace falta estar mirando el movil. Usa el mismo permiso de notificaciones de arriba.</p>
 
         <h4>Tareas completadas</h4>
         <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>

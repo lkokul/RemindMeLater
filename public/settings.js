@@ -1248,6 +1248,13 @@ function refreshMobileTab() {
       : '';
   }
 
+  // Aviso de fin de descanso del Gimnasio: solo tiene sentido en la app
+  // instalada (lo programa el plugin nativo; un navegador normal no
+  // puede avisar con la pestana cerrada). Activado por defecto.
+  const restNotify = document.getElementById('setting-gym-rest-notify');
+  restNotify.disabled = !nativo;
+  restNotify.checked = nativo && localStorage.getItem('gymRestNotify') !== 'false';
+
   refreshCompletedTasksDisplayOptions();
   refreshGymWeightUnitOptions();
 }
@@ -1347,6 +1354,24 @@ document.getElementById('setting-notifications').addEventListener('change', asyn
   // el interruptor.
   await syncScheduledReminders();
   refreshMobileTab();
+});
+
+// Aviso al terminar el descanso entre series (Gimnasio). Usa el mismo
+// permiso del sistema que los recordatorios: si aun no esta dado, se
+// pide aqui mismo al encenderlo.
+document.getElementById('setting-gym-rest-notify').addEventListener('change', async (e) => {
+  if (e.target.checked) {
+    const concedido = await ensureLocalNotificationPermission();
+    if (!concedido) {
+      e.target.checked = false;
+      return;
+    }
+    localStorage.setItem('gymRestNotify', 'true');
+  } else {
+    localStorage.setItem('gymRestNotify', 'false');
+    // Si habia un aviso ya programado para el descanso en curso, fuera.
+    if (typeof gymCancelRestNotification === 'function') gymCancelRestNotification();
+  }
 });
 
 // ---------------------------------------------------------------------
@@ -1517,6 +1542,9 @@ document.addEventListener('keydown', (e) => {
   // de Koku: "el primer esc me saque de la ventana de añadir... luego ya
   // con el siguiente que me lleve a la ventana anterior").
   const gymModalIds = [
+    // La ayuda del entrenamiento la primera: se abre encima de todo
+    // (incluso encima del entreno en vivo).
+    ['gym-help-modal', closeGymHelpModal],
     // La ficha de la libreria va ANTES que el buscador: se abre encima
     // de el, y el primer Esc debe cerrar solo la ficha.
     ['gym-library-detail-modal', closeGymLibraryDetail],

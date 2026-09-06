@@ -7954,6 +7954,9 @@ function startGymLiveSession(day) {
 async function openGymLiveView() {
   document.getElementById('gym-live-title').textContent = gymLiveSession.routineName || 'Sesión libre';
   document.getElementById('gym-live-view').classList.remove('hidden');
+  // La ayuda se abre sola encima del entreno hasta que el usuario marque
+  // "no volver a mostrar" (el boton "?" de abajo la abre cuando quiera).
+  if (localStorage.getItem('gymLiveHelpSeen') !== '1') openGymHelpModal();
   renderGymLiveExercises();
   // Columna "Anterior": se pide en paralelo para cada ejercicio y se
   // repinta cuando llega (si no hay historial, la columna queda en "—").
@@ -7977,6 +7980,9 @@ function closeGymLiveView() {
 function gymLiveStopTicker() {
   if (gymLiveTicker) { clearInterval(gymLiveTicker); gymLiveTicker = null; }
   document.getElementById('gym-global-rest').classList.add('hidden');
+  // Si quedaba un aviso de descanso programado, ya no tiene sentido:
+  // el entreno se ha terminado o descartado. Aqui cubre ambos caminos.
+  gymCancelRestNotification();
 }
 
 // Un tick por segundo mientras el overlay esta abierto: reloj de sesion
@@ -8050,6 +8056,8 @@ document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () =
     gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + 30;
     gymLiveStore();
     gymLiveTick();
+    // El aviso programado apuntaba al final antiguo: se reprograma.
+    gymScheduleRestNotification();
   }
 });
 // El tiempo restante se puede ver como m:ss o como segundos a secas
@@ -8061,8 +8069,60 @@ document.getElementById('gym-live-rest-remaining').addEventListener('click', () 
   gymLiveTick();
 });
 document.getElementById('btn-gym-live-rest-close').addEventListener('click', () => {
-  if (gymLiveSession) { gymLiveSession.restUntil = null; gymLiveStore(); gymLiveTick(); }
+  if (gymLiveSession) { gymLiveSession.restUntil = null; gymLiveStore(); gymLiveTick(); gymCancelRestNotification(); }
 });
+
+// --- Aviso al terminar el descanso -------------------------------------
+// En la app instalada, al arrancar un descanso se PROGRAMA una
+// notificacion del sistema para el momento en que acaba (mismo mecanismo
+// que los recordatorios, ver local-notifications.js): suena/vibra segun
+// los ajustes del telefono aunque la pantalla este bloqueada o estes en
+// otra app, asi no hay que estar mirando el movil a ver cuanto queda.
+// En un navegador normal no hay plugin y esto no hace nada.
+//
+// El id es uno RESERVADO fijo: como siempre es el mismo, programar el
+// siguiente descanso sustituye al anterior sin acumular avisos, y
+// syncScheduledReminders() sabe que no debe cancelarlo al reprogramar
+// los recordatorios (ids >= 999999900 son internos, no eventos).
+const GYM_REST_NOTIFICATION_ID = 999999901;
+
+function gymRestNotifyEnabled() {
+  return localStorage.getItem('gymRestNotify') !== 'false';
+}
+
+async function gymScheduleRestNotification() {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin || !gymRestNotifyEnabled()) return;
+  if (!gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    if (!(await ensureLocalNotificationPermissionSilently())) return;
+    // Cancelar antes de programar: si habia un aviso del descanso
+    // anterior aun pendiente, no debe sonar ademas del nuevo.
+    await plugin.cancel({ notifications: [{ id: GYM_REST_NOTIFICATION_ID }] });
+    await plugin.schedule({
+      notifications: [{
+        id: GYM_REST_NOTIFICATION_ID,
+        title: 'Descanso terminado',
+        body: 'Siguiente serie.',
+        schedule: { at: new Date(gymLiveSession.restUntil) },
+      }],
+    });
+  } catch (err) {
+    console.error('No se pudo programar el aviso de descanso:', err);
+  }
+}
+
+async function gymCancelRestNotification() {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.cancel({ notifications: [{ id: GYM_REST_NOTIFICATION_ID }] });
+  } catch (err) {
+    console.error('No se pudo cancelar el aviso de descanso:', err);
+  }
+}
 
 // Tarjetas de ejercicio del entreno en vivo. Igual que el resto del
 // proyecto: se reconstruye el DOM entero en cada cambio estructural
@@ -8127,11 +8187,17 @@ function renderGymLiveExercises() {
         set.done = check.checked;
         // Marcar una serie como hecha arranca el descanso: el sugerido de
         // esa serie si lo tiene, si no el preset elegido arriba.
+        // Desmarcarla (te equivocaste de casilla) lo cancela, para no
+        // quedarte con un temporizador de una serie que no has hecho.
         if (check.checked) {
           const seconds = Number(set.restSeconds) || gymLiveSession.restPreset;
           gymLiveSession.restUntil = Date.now() + seconds * 1000;
           gymLiveSession.restBaseSeconds = seconds;
           gymLiveSession.restExtraSeconds = 0;
+          gymScheduleRestNotification();
+        } else {
+          gymLiveSession.restUntil = null;
+          gymCancelRestNotification();
         }
         gymLiveStore();
         gymLiveTick();
@@ -8185,13 +8251,40 @@ document.getElementById('btn-gym-live-add-exercise').addEventListener('click', (
 });
 
 // Ayuda de RPE (Koku: "no entiendo que es RPE"): tocar la cabecera de la
-// columna lo explica. Listener delegado porque las tarjetas se
-// reconstruyen en cada cambio.
+// columna abre el modal de ayuda, donde vive la explicacion junto al
+// resto (antes era un aviso suelto; Koku pidio moverlo ahi). Listener
+// delegado porque las tarjetas se reconstruyen en cada cambio.
 document.getElementById('gym-live-exercises').addEventListener('click', (e) => {
-  if (e.target.closest('[data-rpe-help]')) {
-    showAppAlert('RPE = esfuerzo percibido (Rate of Perceived Exertion), del 1 al 10: cuanto te ha costado la serie. 10 = fallo (no podias hacer ni una repeticion mas), 9 = te quedaba 1, 8 = te quedaban 2... Es opcional: si no lo usas, dejalo en blanco.');
-  }
+  if (e.target.closest('[data-rpe-help]')) openGymHelpModal();
 });
+
+// --- Modal de ayuda del entrenamiento --------------------------------
+// Se abre SOLO la primera vez que entras a entrenar (y cada vez, hasta
+// que marques "no volver a mostrar"), y siempre a mano desde el boton
+// "?" flotante o tocando la cabecera RPE. El flag vive en localStorage
+// porque es una preferencia de ESTE dispositivo, como el resto.
+function openGymHelpModal() {
+  // El checkbox refleja lo guardado: si ya pediste no verlo mas y lo
+  // abres a mano, aparece marcado (y puedes desmarcarlo para que vuelva
+  // a salir solo).
+  document.getElementById('gym-help-dont-show').checked =
+    localStorage.getItem('gymLiveHelpSeen') === '1';
+  document.getElementById('gym-help-modal').classList.remove('hidden');
+}
+function closeGymHelpModal() {
+  localStorage.setItem(
+    'gymLiveHelpSeen',
+    document.getElementById('gym-help-dont-show').checked ? '1' : '0'
+  );
+  document.getElementById('gym-help-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-live-help').addEventListener('click', openGymHelpModal);
+document.getElementById('btn-close-gym-help').addEventListener('click', closeGymHelpModal);
+
+// Ocultar el entrenamiento sin descartarlo: vuelve al Gimnasio con sus
+// pestanas utilizables (peticion de Koku: "poder moverme por las
+// pestanas de gimnasio" en mitad de un entreno). El ticker sigue vivo.
+document.getElementById('btn-gym-live-minimize').addEventListener('click', closeGymLiveView);
 
 // Con el entreno en vivo abierto, tocar la navegacion inferior del
 // movil no "funcionaba" (la nav cambiaba la pantalla POR DEBAJO del
@@ -9289,8 +9382,11 @@ function gymAchievementCardHtml(achievement, value) {
   const level = gymAchievementLevel(achievement, value);
   const maxed = level >= achievement.levels.length;
   const nextThreshold = maxed ? achievement.levels[achievement.levels.length - 1] : achievement.levels[level];
-  const prevThreshold = level > 0 ? achievement.levels[level - 1] : 0;
-  const progress = maxed ? 1 : Math.min(1, (value - prevThreshold) / (nextThreshold - prevThreshold));
+  // La barra mide LO MISMO que el texto de debajo ("1 / 10" = 10%). Antes
+  // media solo el tramo entre el nivel anterior y el siguiente, y al subir
+  // de nivel la barra se quedaba a cero aunque el texto dijera 1/10 --
+  // parecia rota (feedback de Koku).
+  const progress = maxed ? 1 : Math.min(1, value / nextThreshold);
   const shownValue = Math.round(value * 10) / 10;
   return `
     <div class="gym-achievement-card ${level > 0 ? 'unlocked' : ''}">

@@ -2243,7 +2243,11 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   top: 0; left: 0; right: 0;
   z-index: 60; /* sobre el contenido, bajo la nav (70) y los dialogos */
   display: flex; flex-direction: column; gap: 0.25rem;
-  padding: 0.45rem 1rem 0.5rem;
+  /* safe-area: en iPhone el borde superior lo ocupan el reloj y la
+     "isla"; sin este margen extra la barra quedaba debajo del reloj y
+     no se leia (feedback de Koku). En navegador la variable vale 0 y
+     no cambia nada. */
+  padding: calc(0.45rem + env(safe-area-inset-top, 0px)) 1rem 0.5rem;
   background: color-mix(in srgb, var(--accent) 25%, var(--surface));
   border-bottom: 1px solid var(--accent);
   font-size: 0.85rem;
@@ -2259,6 +2263,42 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 }
 .gym-global-rest .gym-live-rest-fill-base { background: var(--accent); }
 .gym-global-rest .gym-live-rest-fill-extra { background: color-mix(in srgb, var(--accent) 45%, var(--surface-text)); }
+
+/* Boton "?" flotante del entreno en vivo: abajo a la derecha, por
+   encima del contenido pero sin tapar la nav (que va a z-index 70 y
+   ocupa el borde inferior -- por eso el bottom la esquiva). */
+.gym-live-help-btn {
+  position: fixed;
+  right: 1rem;
+  bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  z-index: 65;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Modal de ayuda del entrenamiento: el texto es largo, asi que el
+   cuerpo tiene su propio scroll y el titulo/checkbox/boton quedan
+   siempre a la vista. */
+.gym-help-card { max-width: 480px; }
+.gym-help-body {
+  overflow-y: auto;
+  max-height: 55vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-right: 0.3rem;
+}
+.gym-help-body h4 { margin: 0.7rem 0 0.15rem; color: var(--gym-accent); }
+.gym-help-body h4:first-child { margin-top: 0; }
+.gym-help-body p { margin: 0; font-size: 0.9rem; line-height: 1.45; }
 
 /* Indicador de entreno activo: el boton "Herramientas" de la nav y la
    tarjeta de Gimnasio se tiñen del acento con un puntito de aviso. */
