@@ -260,12 +260,22 @@ arriba:
   anchos y altos. Las páginas se anidan sin límite en un árbol
   con buscador (sidebar propio), con migas de pan arriba, favoritos con
   estrella y un desplegable de subpáginas bajo el título (chips);
-  borrar una página nunca borra sus subpáginas (suben un
+  las páginas se **mueven arrastrándolas** en el sidebar (entre dos =
+  reordenar, al centro de otra = meterla dentro) o varias a la vez con
+  el modo selección (☑ + «Mover a…»), y borrar una página nunca borra
+  sus subpáginas (suben un
   nivel). Las **bases de datos** embebidas son colecciones de filas con
-  propiedades tipadas (texto, número, select, fecha, casilla) que se ven
+  propiedades tipadas (texto, número, select, fecha, casilla,
+  etiquetas de color y color de tarjeta) que se ven
   como tabla editable, tablero kanban (arrastrando tarjetas entre
-  columnas) o lista, con orden, filtro y agrupación guardados en la
-  propia base; cada fila se abre en un panel lateral ("side peek") con
+  columnas), lista o **cronograma** (Gantt: cada fila con fecha es una
+  barra arrastrable sobre un calendario, con línea de hoy, zoom
+  semana/mes/trimestre y hueco de "sin fechas"), con orden, filtro y
+  agrupación guardados en la
+  propia base. Las tarjetas del tablero enseñan etiquetas, fechas con
+  colores de urgencia (amarillo hoy/mañana, rojo vencida), el progreso
+  de sus tareas (2/5) y una franja del color elegido; cada fila se abre
+  en un panel lateral ("side peek") con
   sus propiedades y notas propias, como una mini-página.
 ## Como esta montada por dentro
 

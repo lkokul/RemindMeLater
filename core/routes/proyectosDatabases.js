@@ -11,8 +11,11 @@ const db = require('../db');
 
 const router = createRouter();
 
-const PROP_TYPES = new Set(['text', 'number', 'select', 'date', 'checkbox']);
-const VIEW_TYPES = new Set(['table', 'board', 'list']);
+// Tipos de propiedad. "labels" (etiquetas de color, varias por fila,
+// estilo Trello) y "color" (un color por fila, la "portada" de su
+// tarjeta) llegaron en la ronda de tarjetas.
+const PROP_TYPES = new Set(['text', 'number', 'select', 'date', 'checkbox', 'labels', 'color']);
+const VIEW_TYPES = new Set(['table', 'board', 'list', 'timeline']);
 
 // "options" (solo selects): siempre un JSON de array de textos cortos.
 // Cualquier otra cosa se descarta y se guarda null.
@@ -22,6 +25,28 @@ function sanitizeOptions(options) {
     .map((o) => String(o).trim().slice(0, 60))
     .filter((o) => o !== '');
   return clean.length ? JSON.stringify(clean) : null;
+}
+
+// "options" de una propiedad de etiquetas: array de { name, color }.
+// El color va validado como hex de 6 SIEMPRE -- la interfaz lo pinta
+// tal cual como fondo de la pastilla, asi que aqui no puede colarse
+// nada que no sea un color.
+function sanitizeLabelOptions(options) {
+  if (!Array.isArray(options)) return null;
+  const clean = options
+    .map((o) => ({
+      name: String(o && o.name !== undefined ? o.name : '').trim().slice(0, 60),
+      color: o && /^#[0-9a-fA-F]{6}$/.test(o.color) ? o.color : '#4493f8',
+    }))
+    .filter((o) => o.name !== '');
+  return clean.length ? JSON.stringify(clean) : null;
+}
+
+// Que saneador de opciones le toca a cada tipo (los demas no llevan).
+function optionsForType(type, options) {
+  if (type === 'select') return sanitizeOptions(options);
+  if (type === 'labels') return sanitizeLabelOptions(options);
+  return null;
 }
 
 function serializeProp(row) {
@@ -77,6 +102,8 @@ function serializeDatabase(dbRow) {
     sortDir: dbRow.sort_dir,
     filterPropId: dbRow.filter_prop_id,
     filterValue: dbRow.filter_value,
+    timelineStartPropId: dbRow.timeline_start_prop_id,
+    timelineEndPropId: dbRow.timeline_end_prop_id,
     props: props.map(serializeProp),
     rows: rows.map((r) => serializeRow(r, valuesByRow)),
   };
@@ -117,7 +144,7 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM proyectos_databases WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { name, viewType, boardPropId, sortPropId, sortDir, filterPropId, filterValue } = req.body || {};
+  const { name, viewType, boardPropId, sortPropId, sortDir, filterPropId, filterValue, timelineStartPropId, timelineEndPropId } = req.body || {};
 
   // Un id de propiedad que se manda aqui tiene que ser de ESTA base (o
   // null para "sin"). Si no, se ignora y se deja el que estaba.
@@ -130,7 +157,8 @@ router.put('/:id', (req, res) => {
 
   db.prepare(`
     UPDATE proyectos_databases
-    SET name = ?, view_type = ?, board_prop_id = ?, sort_prop_id = ?, sort_dir = ?, filter_prop_id = ?, filter_value = ?
+    SET name = ?, view_type = ?, board_prop_id = ?, sort_prop_id = ?, sort_dir = ?, filter_prop_id = ?, filter_value = ?,
+        timeline_start_prop_id = ?, timeline_end_prop_id = ?
     WHERE id = ?
   `).run(
     name !== undefined ? String(name).slice(0, 200) : existing.name,
@@ -140,6 +168,8 @@ router.put('/:id', (req, res) => {
     sortDir === 'asc' || sortDir === 'desc' ? sortDir : existing.sort_dir,
     resolvePropId(filterPropId, existing.filter_prop_id),
     filterValue !== undefined ? (filterValue === null ? null : String(filterValue).slice(0, 200)) : existing.filter_value,
+    resolvePropId(timelineStartPropId, existing.timeline_start_prop_id),
+    resolvePropId(timelineEndPropId, existing.timeline_end_prop_id),
     existing.id
   );
 
@@ -181,7 +211,7 @@ router.post('/:id/props', (req, res) => {
   const { count } = db.prepare('SELECT COUNT(*) as count FROM proyectos_db_props WHERE database_id = ?').get(database.id);
   const info = db
     .prepare('INSERT INTO proyectos_db_props (database_id, name, type, options, position) VALUES (?, ?, ?, ?, ?)')
-    .run(database.id, String(name).trim().slice(0, 100), safeType, safeType === 'select' ? sanitizeOptions(options) : null, count);
+    .run(database.id, String(name).trim().slice(0, 100), safeType, optionsForType(safeType, options), count);
   const row = db.prepare('SELECT * FROM proyectos_db_props WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json(serializeProp(row));
 });
@@ -195,8 +225,8 @@ router.put('/props/:propId', (req, res) => {
   db.prepare('UPDATE proyectos_db_props SET name = ?, type = ?, options = ? WHERE id = ?').run(
     name !== undefined && String(name).trim() ? String(name).trim().slice(0, 100) : existing.name,
     nextType,
-    nextType === 'select'
-      ? (options !== undefined ? sanitizeOptions(options) : existing.options)
+    (nextType === 'select' || nextType === 'labels')
+      ? (options !== undefined ? optionsForType(nextType, options) : existing.options)
       : null,
     existing.id
   );
@@ -213,6 +243,8 @@ router.delete('/props/:propId', (req, res) => {
   db.prepare('UPDATE proyectos_databases SET board_prop_id = NULL WHERE board_prop_id = ?').run(existing.id);
   db.prepare('UPDATE proyectos_databases SET sort_prop_id = NULL WHERE sort_prop_id = ?').run(existing.id);
   db.prepare('UPDATE proyectos_databases SET filter_prop_id = NULL, filter_value = NULL WHERE filter_prop_id = ?').run(existing.id);
+  db.prepare('UPDATE proyectos_databases SET timeline_start_prop_id = NULL WHERE timeline_start_prop_id = ?').run(existing.id);
+  db.prepare('UPDATE proyectos_databases SET timeline_end_prop_id = NULL WHERE timeline_end_prop_id = ?').run(existing.id);
   db.prepare('DELETE FROM proyectos_db_props WHERE id = ?').run(existing.id);
   res.status(204).end();
 });

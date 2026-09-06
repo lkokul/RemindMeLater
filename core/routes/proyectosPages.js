@@ -339,6 +339,44 @@ router.put('/:id', (req, res) => {
   res.json(serializeFullRow(row));
 });
 
+// Mover una pagina: cambiar de madre y/o de posicion entre sus hermanas
+// EN UNA sola operacion (lo usan el arrastre del arbol y el "Mover a…"
+// del modo seleccion). El cuerpo trae parentId (null = primer nivel;
+// mandarlo SIEMPRE, aunque no cambie) y position, el indice deseado
+// entre las hermanas del destino (0 = la primera; sin position, al
+// final). Ojo al orden de registro: '/:id/move' tiene DOS trozos y
+// '/:id' uno solo, asi que el enrutador nunca los confunde y da igual
+// cual se declare antes.
+router.put('/:id/move', (req, res) => {
+  const existing = db.prepare('SELECT * FROM proyectos_pages WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'not_found' });
+
+  const { parentId, position } = req.body || {};
+  const resolved = resolveParentId(existing.id, parentId);
+  if (resolved === undefined) {
+    return res.status(400).json({ error: 'invalid_request', message: 'Una pagina no puede meterse dentro de si misma (ni de una de sus subpaginas).' });
+  }
+
+  // Las hermanas del destino SIN la pagina que se mueve, en su orden
+  // actual; se inserta donde toque y se renumera el nivel entero de una
+  // vez -- mas robusto que ir haciendo hueco con sumas y restas.
+  const siblings = db
+    .prepare('SELECT id FROM proyectos_pages WHERE parent_id IS ? AND id != ? ORDER BY position ASC, id ASC')
+    .all(resolved ?? null, existing.id)
+    .map((row) => row.id);
+  let index = position === undefined || position === null ? siblings.length : Number(position);
+  if (!Number.isFinite(index)) index = siblings.length;
+  index = Math.max(0, Math.min(siblings.length, Math.round(index)));
+  siblings.splice(index, 0, existing.id);
+
+  db.prepare("UPDATE proyectos_pages SET parent_id = ?, updated_at = datetime('now') WHERE id = ?").run(resolved ?? null, existing.id);
+  const setPosition = db.prepare('UPDATE proyectos_pages SET position = ? WHERE id = ?');
+  siblings.forEach((id, i) => setPosition.run(i, id));
+
+  const row = db.prepare('SELECT * FROM proyectos_pages WHERE id = ?').get(existing.id);
+  res.json(serializeFullRow(row));
+});
+
 // Limpieza que acompaña SIEMPRE al borrado de una pagina: sus imagenes
 // del disco y sus bases de datos embebidas (filas, propiedades y
 // valores). El require de proyectosDatabases es diferido (dentro de la

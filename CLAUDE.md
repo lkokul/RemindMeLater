@@ -435,6 +435,55 @@ ahora se llama `device`.
         `#proyectos-subnav`, una fila de chips EN el documento debajo
         del título (`renderProyectosSubnav()`, se refresca al navegar
         mientras esté abierta).
+    - **Ronda "registro de proyectos"** (tras explorar el Trello de Koku
+      en vivo — decidió: árbol movible, tarjetas estilo Trello sobre las
+      bases existentes, y Gantt como 4ª vista; drivers `drive-tree.js`/
+      `drive-cards.js`/`drive-gantt.js`):
+      - **Mover páginas del árbol**: `PUT /api/proyectos-pages/:id/move`
+        (parentId SIEMPRE en el body + position = índice entre las
+        hermanas del destino SIN contar la movida; renumera el nivel
+        entero). Arrastre en el sidebar: tercio superior = delante,
+        inferior = detrás, centro = dentro (clases drop-before/after/
+        inside; soltar en el hueco del árbol = a raíz al final);
+        prohibido soltar dentro del propio subárbol
+        (`proyectosPageIsDescendantOf`, y el backend revalida). Modo
+        selección: botón ☑ (`setProyectosSelectMode`), casillas
+        .styled-checkbox por fila, barra `#proyectos-select-bar` con
+        contador y «Mover a…» (popover-buscador que excluye las marcadas
+        y sus descendientes, con opción «Primer nivel»).
+      - **Tarjetas**: tipos de propiedad nuevos `labels` (opciones =
+        JSON de `{name, color}`; valor = JSON de nombres elegidos) y
+        `color` (valor = hex). MIGRACIÓN con reconstrucción de tabla:
+        los CHECK de type (props) y view_type (databases) no se pueden
+        alterar — se detecta por el SQL en sqlite_master y se recrea la
+        tabla con `PRAGMA foreign_keys = OFF` alrededor (node:sqlite
+        arranca con FKs ON y el DROP de una tabla referenciada falla; ya
+        pasó de verdad). Paleta FIJA de 10 colores
+        (`PROYECTOS_LABEL_PALETTE`) — sin selector nativo ni popovers de
+        color por fila. Tarjetas del tablero: franja de portada
+        (primera prop color), pastillas, badges de fecha con urgencia
+        (`proyectosDateUrgency`: soon = hoy/mañana amarillo, overdue
+        rojo) y progreso de tareas contando data-todo del body de la
+        fila (`proyectosRowTodoProgress`, sin backend). La Lista pinta
+        lo mismo en chips.
+      - **Cronograma (Gantt)**: view_type `timeline` + columnas
+        `timeline_start_prop_id`/`timeline_end_prop_id` (elegibles en el
+        ⚙; sin configurar, 1ª y 2ª propiedad de fecha). Render con divs
+        absolutos (`renderProyectosDbTimeline`): cabecera de meses+días,
+        sombreado de findes, línea de HOY, una barra por fila con fecha
+        (color de su prop color o acento), cubo «Sin fechas». Arrastre a
+        nivel de documento (`proyectosTlDrag`): cuerpo = mover ambas
+        fechas, bordes (8px) = estirar inicio/fin, snap por día; un clic
+        sin arrastre abre el peek (el estado se limpia con setTimeout 0
+        para que el click posterior al mouseup sepa distinguir). Zoom
+        semana/mes/trimestre en localStorage (presentación, no
+        contenido).
+      - **Ojo con `<label>` envolviendo controles que se repintan**: el
+        editor de etiquetas del popover de propiedad vivía en el
+        `<label>` de addField y el "+ Etiqueta" perdía el foco recién
+        puesto (el label reenvía la activación a su primer control
+        cuando el botón clicado ya no está en el documento). Se montó en
+        un `<div>` con la misma clase.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 

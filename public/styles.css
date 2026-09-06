@@ -4057,3 +4057,182 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .proyectos-subnav-chip:hover { background: var(--surface-2); color: var(--surface-2-text); border-color: var(--accent); }
 .proyectos-subnav-new { opacity: 0.7; border-style: dashed; }
 .proyectos-subnav-empty { font-size: 0.85rem; opacity: 0.5; align-self: center; }
+
+/* --- Mover paginas en el arbol (arrastre + modo seleccion) --- */
+/* Marcas de donde va a caer lo arrastrado: raya encima/debajo para
+   "entre hermanas", resaltado entero para "dentro como subpagina". */
+.proyectos-tree-row.drop-before { border-top: 2px solid var(--accent); }
+.proyectos-tree-row.drop-after { border-bottom: 2px solid var(--accent); }
+.proyectos-tree-row.drop-inside { background: var(--surface-2); outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
+.proyectos-tree.drop-root { outline: 2px dashed var(--accent); outline-offset: -4px; border-radius: var(--radius-sm); }
+
+/* Barra del modo seleccion, bajo el buscador del sidebar. */
+.proyectos-select-bar {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.35rem 0.2rem;
+}
+.proyectos-select-bar.hidden { display: none; }
+.proyectos-select-bar .secondary-btn { padding: 0.25rem 0.55rem; font-size: 0.8rem; }
+.proyectos-select-count { font-size: 0.8rem; opacity: 0.7; flex: 1; }
+#btn-proyectos-move-selected:disabled { opacity: 0.45; cursor: default; }
+/* El boton ☑ de la cabecera, marcado mientras el modo esta activo. */
+#btn-proyectos-select.active { background: var(--accent); color: var(--accent-text); border-radius: var(--radius-sm); }
+/* La casilla dentro de una fila del arbol, a escala del arbol. */
+.proyectos-tree-row .styled-checkbox { flex-shrink: 0; margin-right: 0.15rem; }
+
+/* --- Tarjetas con chicha (etiquetas, fechas, progreso, color) --- */
+/* Pastilla de etiqueta: fondo de su color, texto blanco (la paleta es
+   fija y de luminosidad media, elegida para que esto siempre lea). */
+.proyectos-db-label-pill {
+  display: inline-block;
+  padding: 0.06rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600;
+  color: #fff;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: middle;
+}
+/* El boton de celda que enseña las pastillas (vista Tabla y peek). */
+.proyectos-db-labels-btn {
+  display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center;
+  border: none; background: none; cursor: pointer;
+  font: inherit; color: inherit;
+  padding: 0.15rem 0.2rem; border-radius: var(--radius-sm);
+  min-height: 1.6rem; min-width: 2.5rem;
+  text-align: left;
+}
+.proyectos-db-labels-btn:hover { background: var(--surface-2); }
+.proyectos-db-labels-btn.empty { opacity: 0.45; }
+.proyectos-db-labels-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.25rem 0.1rem;
+  cursor: pointer;
+}
+/* Swatch del color de tarjeta en una celda. */
+.proyectos-db-color-btn {
+  width: 1.7rem; height: 1.15rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 0;
+}
+.proyectos-db-color-btn.empty { background: repeating-linear-gradient(45deg, transparent, transparent 4px, var(--border) 4px, var(--border) 5px); opacity: 0.6; }
+.proyectos-db-color-dot {
+  display: inline-block; width: 0.8rem; height: 0.8rem;
+  border-radius: 50%; vertical-align: middle;
+}
+/* La paleta fija (etiquetas del popover de propiedad y color de
+   tarjeta): puntos redondos, el elegido con anillo de acento. */
+.proyectos-db-palette { display: flex; flex-wrap: wrap; gap: 0.35rem; padding: 0.25rem 0; }
+.proyectos-db-palette-dot {
+  width: 1.25rem; height: 1.25rem;
+  border-radius: 50%; border: 2px solid transparent;
+  cursor: pointer; padding: 0; flex-shrink: 0;
+}
+.proyectos-db-palette-dot.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--surface); }
+.proyectos-db-palette-dot:hover { transform: scale(1.12); }
+.proyectos-db-color-clear { width: 100%; margin-top: 0.3rem; }
+/* Editor de etiquetas del popover de propiedad. */
+.proyectos-db-labels-editor { display: flex; flex-direction: column; gap: 0.25rem; }
+.proyectos-db-labels-editor-row { display: flex; align-items: center; gap: 0.4rem; }
+.proyectos-db-labels-editor-row .proyectos-db-cell-input { flex: 1; }
+
+/* La tarjeta del tablero, ahora con partes. */
+.proyectos-db-card-strip {
+  height: 6px;
+  border-radius: 999px;
+  margin-bottom: 0.35rem;
+}
+.proyectos-db-card-pills { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-bottom: 0.3rem; }
+.proyectos-db-card-pills .proyectos-db-label-pill { font-size: 0.66rem; padding: 0.02rem 0.45rem; }
+.proyectos-db-card-title { word-break: break-word; }
+.proyectos-db-card-badges { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.35rem; }
+.proyectos-db-card-badge {
+  font-size: 0.72rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--surface-2-text);
+}
+/* Urgencia de fechas: pronto (hoy/mañana) y vencida. Colores fijos de
+   la misma familia que los alerts, con texto blanco. */
+.proyectos-db-card-badge.soon, .proyectos-db-chip.soon { background: #d29922; color: #fff; }
+.proyectos-db-card-badge.overdue, .proyectos-db-chip.overdue { background: #f85149; color: #fff; }
+.proyectos-db-card-badge.complete, .proyectos-db-chip.complete { background: #3fb950; color: #fff; }
+
+/* --- Vista Cronograma (Gantt) de las bases de datos --- */
+.proyectos-tl-controls {
+  display: flex; align-items: center; gap: 0.7rem;
+  margin-bottom: 0.4rem;
+}
+/* El desplegable del zoom no necesita ocupar media pantalla. */
+.proyectos-tl-controls > :first-child { width: 180px; flex-shrink: 0; }
+.proyectos-tl-legend { font-size: 0.78rem; }
+.proyectos-tl-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.proyectos-tl-canvas { position: relative; }
+.proyectos-tl-months { position: relative; height: 1.5rem; }
+.proyectos-tl-month {
+  position: absolute; top: 0; height: 100%;
+  display: flex; align-items: center;
+  padding-left: 0.5rem;
+  font-size: 0.78rem; font-weight: 600; text-transform: capitalize;
+  border-left: 1px solid var(--border);
+  overflow: hidden; white-space: nowrap;
+  opacity: 0.8;
+}
+.proyectos-tl-days { position: relative; height: 1.3rem; border-bottom: 1px solid var(--border); }
+.proyectos-tl-day {
+  position: absolute; top: 0; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.68rem; opacity: 0.55;
+}
+.proyectos-tl-day.weekend { opacity: 0.3; }
+.proyectos-tl-day.today {
+  opacity: 1; font-weight: 700;
+  color: var(--accent);
+}
+.proyectos-tl-body { position: relative; min-height: 46px; }
+.proyectos-tl-weekend-shade {
+  position: absolute; top: 0; bottom: 0;
+  background: var(--surface-2);
+  opacity: 0.35;
+}
+.proyectos-tl-today-line {
+  position: absolute; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0.8;
+  pointer-events: none;
+}
+/* La barra de una fila: color de la tarjeta (o acento), texto blanco,
+   agarradores invisibles en los bordes (el cursor ya avisa). */
+.proyectos-tl-bar {
+  position: absolute; height: 28px;
+  background: var(--accent);
+  border-radius: 999px;
+  display: flex; align-items: center;
+  padding: 0 0.7rem;
+  cursor: grab;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+.proyectos-tl-bar:active { cursor: grabbing; }
+.proyectos-tl-bar::before, .proyectos-tl-bar::after {
+  content: '';
+  position: absolute; top: 0; bottom: 0; width: 8px;
+  cursor: col-resize;
+}
+.proyectos-tl-bar::before { left: 0; }
+.proyectos-tl-bar::after { right: 0; }
+.proyectos-tl-bar-label {
+  font-size: 0.78rem; font-weight: 600; color: #fff;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  pointer-events: none;
+}
+.proyectos-tl-undated {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+.proyectos-tl-undated-chip { cursor: pointer; border: none; font: inherit; font-size: 0.78rem; }
+.proyectos-tl-undated-chip:hover { outline: 1px solid var(--accent); }

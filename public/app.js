@@ -10131,6 +10131,73 @@ function renderProyectosTree() {
       // mas simple de pintar y de estilar.
       row.style.paddingLeft = `${0.4 + depth * 1.1}rem`;
 
+      // Arrastrar para reordenar/mover (fuera del modo seleccion): la
+      // fila entera se puede coger y soltar sobre otra. Segun DONDE se
+      // suelte: tercio de arriba = delante de esa pagina, tercio de
+      // abajo = detras, el centro = DENTRO (como subpagina al final).
+      if (!proyectosSelectMode) {
+        row.draggable = true;
+        row.addEventListener('dragstart', (e) => {
+          proyectosDragId = page.id;
+          e.dataTransfer.effectAllowed = 'move';
+          try { e.dataTransfer.setData('text/plain', String(page.id)); } catch (err) { /* da igual */ }
+        });
+        row.addEventListener('dragend', () => {
+          proyectosDragId = null;
+          clearProyectosDropMarks();
+        });
+        row.addEventListener('dragover', (e) => {
+          if (proyectosDragId === null || proyectosDragId === page.id) return;
+          // Nunca dentro de si misma ni de una de sus descendientes.
+          if (proyectosPageIsDescendantOf(page.id, proyectosDragId)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          const rect = row.getBoundingClientRect();
+          const y = e.clientY - rect.top;
+          clearProyectosDropMarks();
+          if (y < rect.height * 0.3) row.classList.add('drop-before');
+          else if (y > rect.height * 0.7) row.classList.add('drop-after');
+          else row.classList.add('drop-inside');
+        });
+        row.addEventListener('dragleave', () => {
+          row.classList.remove('drop-before', 'drop-after', 'drop-inside');
+        });
+        row.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          const mode = row.classList.contains('drop-before') ? 'before'
+            : row.classList.contains('drop-inside') ? 'inside' : 'after';
+          clearProyectosDropMarks();
+          const dragId = proyectosDragId;
+          proyectosDragId = null;
+          if (dragId === null || dragId === page.id) return;
+          if (proyectosPageIsDescendantOf(page.id, dragId)) return;
+          if (mode === 'inside') {
+            const count = proyectosChildrenOf(page.id).filter((p) => p.id !== dragId).length;
+            proyectosExpandedIds.add(page.id);
+            saveProyectosExpanded();
+            await moveProyectosPage(dragId, page.id, count);
+          } else {
+            // Colocarla justo delante/detras de esta fila, entre sus
+            // MISMAS hermanas (el indice se calcula sin contar a la que
+            // se esta moviendo, que es como lo espera el backend).
+            const siblings = proyectosChildrenOf(page.parentId).filter((p) => p.id !== dragId);
+            const idx = siblings.findIndex((p) => p.id === page.id);
+            await moveProyectosPage(dragId, page.parentId, mode === 'before' ? idx : idx + 1);
+          }
+        });
+      }
+
+      // Modo seleccion: casilla delante de cada fila.
+      if (proyectosSelectMode) {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'styled-checkbox';
+        checkbox.checked = proyectosSelectedIds.has(page.id);
+        checkbox.addEventListener('click', (e) => e.stopPropagation());
+        checkbox.addEventListener('change', () => toggleProyectosSelection(page.id));
+        row.appendChild(checkbox);
+      }
+
       // Flecha de desplegar: solo si tiene hijas; si no, un hueco del
       // mismo ancho para que los titulos queden alineados.
       const arrow = document.createElement('button');
@@ -10171,18 +10238,25 @@ function renderProyectosTree() {
 
       // "+" para crear una subpagina directamente desde el arbol (solo
       // visible al pasar el raton, ver CSS).
-      const addBtn = document.createElement('button');
-      addBtn.type = 'button';
-      addBtn.className = 'proyectos-tree-add';
-      addBtn.textContent = '+';
-      addBtn.title = 'Nueva subpágina';
-      addBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await createProyectosPage(page.id);
-      });
-      row.appendChild(addBtn);
+      if (!proyectosSelectMode) {
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'proyectos-tree-add';
+        addBtn.textContent = '+';
+        addBtn.title = 'Nueva subpágina';
+        addBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await createProyectosPage(page.id);
+        });
+        row.appendChild(addBtn);
+      }
 
-      row.addEventListener('click', () => { openProyectosPage(page.id); });
+      // En modo seleccion, el clic en la fila marca/desmarca (la flecha
+      // de desplegar sigue funcionando igual); fuera de el, abre.
+      row.addEventListener('click', () => {
+        if (proyectosSelectMode) toggleProyectosSelection(page.id);
+        else openProyectosPage(page.id);
+      });
       tree.appendChild(row);
 
       if (children.length > 0 && expanded) renderLevel(page.id, depth + 1);
@@ -10198,6 +10272,194 @@ function renderProyectosTree() {
     tree.appendChild(empty);
   }
 }
+
+// ---------------------------------------------------------------------
+// Mover paginas: arrastrar en el arbol + modo seleccion
+// ---------------------------------------------------------------------
+// Id de la pagina que se esta arrastrando ahora mismo, o null.
+let proyectosDragId = null;
+// Modo seleccion (casillas en el arbol para mover varias de golpe).
+let proyectosSelectMode = false;
+let proyectosSelectedIds = new Set();
+
+// ¿pageId esta DENTRO del subarbol de ancestorId? (para prohibir soltar
+// una pagina dentro de si misma; el backend tambien lo comprueba, esto
+// es solo para que el arbol ni siquiera lo ofrezca).
+function proyectosPageIsDescendantOf(pageId, ancestorId) {
+  let current = proyectosPages.find((p) => p.id === pageId);
+  const seen = new Set();
+  while (current && current.parentId !== null && !seen.has(current.id)) {
+    seen.add(current.id);
+    if (current.parentId === ancestorId) return true;
+    current = proyectosPages.find((p) => p.id === current.parentId);
+  }
+  return false;
+}
+
+function clearProyectosDropMarks() {
+  document.querySelectorAll('.proyectos-tree-row.drop-before, .proyectos-tree-row.drop-after, .proyectos-tree-row.drop-inside')
+    .forEach((el) => el.classList.remove('drop-before', 'drop-after', 'drop-inside'));
+  document.getElementById('proyectos-tree').classList.remove('drop-root');
+}
+
+// El movimiento en si: PUT al endpoint de mover y repintar todo lo que
+// enseña posiciones o jerarquia (arbol, migas, subnav).
+async function moveProyectosPage(id, parentId, position) {
+  try {
+    await api(`/api/proyectos-pages/${id}/move`, {
+      method: 'PUT',
+      body: JSON.stringify({ parentId: parentId ?? null, position }),
+    });
+  } catch (err) {
+    console.error('No se pudo mover la página:', err);
+    showAppAlert(`No se pudo mover la página: ${err.message}`);
+  }
+  await loadProyectosPages();
+  renderProyectosTree();
+  renderProyectosBreadcrumb();
+  renderProyectosSubnav();
+}
+
+// Soltar en el HUECO del arbol (debajo de la ultima fila) = llevar la
+// pagina al primer nivel, al final.
+document.getElementById('proyectos-tree').addEventListener('dragover', (e) => {
+  if (proyectosDragId === null) return;
+  if (e.target !== e.currentTarget) return; // sobre una fila manda la fila
+  e.preventDefault();
+  clearProyectosDropMarks();
+  e.currentTarget.classList.add('drop-root');
+});
+document.getElementById('proyectos-tree').addEventListener('dragleave', (e) => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('drop-root');
+});
+document.getElementById('proyectos-tree').addEventListener('drop', async (e) => {
+  if (e.target !== e.currentTarget) return;
+  e.preventDefault();
+  clearProyectosDropMarks();
+  const dragId = proyectosDragId;
+  proyectosDragId = null;
+  if (dragId === null) return;
+  const rootCount = proyectosChildrenOf(null).filter((p) => p.id !== dragId).length;
+  await moveProyectosPage(dragId, null, rootCount);
+});
+
+function setProyectosSelectMode(on) {
+  proyectosSelectMode = on;
+  if (!on) proyectosSelectedIds = new Set();
+  document.getElementById('proyectos-select-bar').classList.toggle('hidden', !on);
+  document.getElementById('btn-proyectos-select').classList.toggle('active', on);
+  refreshProyectosSelectBar();
+  renderProyectosTree();
+}
+
+function toggleProyectosSelection(id) {
+  if (proyectosSelectedIds.has(id)) proyectosSelectedIds.delete(id);
+  else proyectosSelectedIds.add(id);
+  refreshProyectosSelectBar();
+  renderProyectosTree();
+}
+
+function refreshProyectosSelectBar() {
+  const count = proyectosSelectedIds.size;
+  document.getElementById('proyectos-select-count').textContent = `${count} sel.`;
+  document.getElementById('btn-proyectos-move-selected').disabled = count === 0;
+}
+
+document.getElementById('btn-proyectos-select').addEventListener('click', () => {
+  setProyectosSelectMode(!proyectosSelectMode);
+});
+document.getElementById('btn-proyectos-select-cancel').addEventListener('click', () => {
+  setProyectosSelectMode(false);
+});
+
+// "Mover a…": popover con buscador para elegir el destino de TODAS las
+// paginas marcadas (o "primer nivel"). Quedan fuera de la lista las
+// propias marcadas y todo lo que cuelgue de ellas (meterlas ahi seria
+// meterlas dentro de si mismas).
+let proyectosMovePopover = null;
+
+document.getElementById('btn-proyectos-move-selected').addEventListener('click', () => {
+  if (proyectosSelectedIds.size === 0) return;
+  if (!proyectosMovePopover) {
+    proyectosMovePopover = document.createElement('div');
+    proyectosMovePopover.className = 'proyectos-slash-popover proyectos-move-popover hidden';
+    document.body.appendChild(proyectosMovePopover);
+  }
+  const popover = proyectosMovePopover;
+
+  const isValidTarget = (page) => {
+    if (proyectosSelectedIds.has(page.id)) return false;
+    for (const selectedId of proyectosSelectedIds) {
+      if (page.id === selectedId || proyectosPageIsDescendantOf(page.id, selectedId)) return false;
+    }
+    return true;
+  };
+
+  async function moveSelectionTo(parentId) {
+    popover.classList.add('hidden');
+    // En el orden del arbol, para que conserven su orden relativo al
+    // llegar (cada una entra al final del destino).
+    const ordered = proyectosPages.filter((p) => proyectosSelectedIds.has(p.id));
+    for (const page of ordered) {
+      try {
+        await api(`/api/proyectos-pages/${page.id}/move`, {
+          method: 'PUT',
+          body: JSON.stringify({ parentId }),
+        });
+      } catch (err) {
+        console.error('No se pudo mover la página:', err);
+        showAppAlert(`No se pudo mover "${page.title || 'Sin título'}": ${err.message}`);
+      }
+    }
+    if (parentId) { proyectosExpandedIds.add(parentId); saveProyectosExpanded(); }
+    setProyectosSelectMode(false);
+    await loadProyectosPages();
+    renderProyectosTree();
+    renderProyectosBreadcrumb();
+    renderProyectosSubnav();
+  }
+
+  function renderList(query) {
+    popover.innerHTML = '';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'proyectos-db-cell-input';
+    input.placeholder = 'Buscar destino…';
+    input.value = query;
+    input.addEventListener('input', () => {
+      const next = renderList(input.value);
+      next.focus();
+      next.setSelectionRange(next.value.length, next.value.length);
+    });
+    popover.appendChild(input);
+
+    const rootBtn = document.createElement('button');
+    rootBtn.type = 'button';
+    rootBtn.className = 'proyectos-slash-item';
+    rootBtn.textContent = '🏠 Primer nivel (sin madre)';
+    rootBtn.addEventListener('mousedown', (e) => { e.preventDefault(); moveSelectionTo(null); });
+    popover.appendChild(rootBtn);
+
+    const lower = query.trim().toLowerCase();
+    const matches = proyectosPages
+      .filter(isValidTarget)
+      .filter((p) => !lower || (p.title || '').toLowerCase().includes(lower))
+      .slice(0, 12);
+    for (const page of matches) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'proyectos-slash-item';
+      btn.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
+      btn.addEventListener('mousedown', (e) => { e.preventDefault(); moveSelectionTo(page.id); });
+      popover.appendChild(btn);
+    }
+    return input;
+  }
+
+  popover.classList.remove('hidden');
+  renderList('').focus();
+  positionFixedPopover(document.getElementById('btn-proyectos-move-selected'), popover, { width: 280 });
+});
 
 // ---------------------------------------------------------------------
 // Abrir/pintar una pagina
@@ -12558,6 +12820,18 @@ document.addEventListener('click', (e) => {
       && !e.target.closest('.proyectos-prelang-popover') && !e.target.closest('.proyectos-pre-lang-btn')) {
     proyectosPreLangPopover.classList.add('hidden');
   }
+  if (proyectosMovePopover && !proyectosMovePopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-move-popover') && !e.target.closest('#btn-proyectos-move-selected')) {
+    proyectosMovePopover.classList.add('hidden');
+  }
+  if (proyectosDbLabelsPopover && !proyectosDbLabelsPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-db-labels-popover') && !e.target.closest('.proyectos-db-labels-btn')) {
+    closeProyectosDbLabelsPopover(); // repinta el tablero si se marco algo
+  }
+  if (proyectosDbColorPopover && !proyectosDbColorPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-db-color-popover') && !e.target.closest('.proyectos-db-color-btn')) {
+    proyectosDbColorPopover.classList.add('hidden');
+  }
   // (el caso de "nodo ya desconectado" lo corta el guard de arriba)
   if (proyectosDbConfigPopover && !proyectosDbConfigPopover.classList.contains('hidden')
       && !e.target.closest('.proyectos-db-config-popover')
@@ -12722,7 +12996,7 @@ function renderProyectosDbWidget(container, data) {
 
     const tabs = document.createElement('div');
     tabs.className = 'proyectos-db-tabs';
-    [['table', 'Tabla'], ['board', 'Tablero'], ['list', 'Lista']].forEach(([type, label]) => {
+    [['table', 'Tabla'], ['board', 'Tablero'], ['list', 'Lista'], ['timeline', 'Cronograma']].forEach(([type, label]) => {
       const tab = document.createElement('button');
       tab.type = 'button';
       tab.className = 'proyectos-db-tab' + (data.viewType === type ? ' active' : '');
@@ -12776,6 +13050,7 @@ function renderProyectosDbWidget(container, data) {
     view.className = 'proyectos-db-view';
     if (data.viewType === 'board') renderProyectosDbBoard(view, data);
     else if (data.viewType === 'list') renderProyectosDbList(view, data);
+    else if (data.viewType === 'timeline') renderProyectosDbTimeline(view, data);
     else renderProyectosDbTable(view, data);
     container.appendChild(view);
   });
@@ -12798,12 +13073,229 @@ async function createProyectosDbRow(dbId, values) {
   }
 }
 
+// ---------------------------------------------------------------------
+// Tarjetas con chicha (ronda "registro de proyectos"): etiquetas de
+// color, fechas con urgencia, progreso de tareas y color de tarjeta.
+// ---------------------------------------------------------------------
+// Paleta fija para etiquetas y colores de tarjeta: ni selector nativo
+// ni popovers de color sueltos -- 10 colores de luminosidad media,
+// legibles con texto blanco encima y sobre --surface en claro y oscuro
+// (mismo criterio que la paleta de los alerts).
+const PROYECTOS_LABEL_PALETTE = ['#4493f8', '#3fb950', '#d29922', '#f85149', '#ab7df8', '#f78166', '#26a5c9', '#e85aad', '#8b949e', '#6e7681'];
+const PROYECTOS_HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+// El valor de una propiedad de etiquetas es un JSON con los NOMBRES
+// elegidos; los colores viven en las opciones de la propiedad (como en
+// los tableros de tareas tipicos: la paleta es del tablero, la tarjeta
+// solo marca cuales lleva).
+function parseProyectosLabelsValue(value) {
+  try {
+    const arr = JSON.parse(value);
+    return Array.isArray(arr) ? arr.map(String) : [];
+  } catch (err) { return []; }
+}
+
+// Progreso de tareas de una fila: cuenta los bloques con casilla
+// (data-todo) de su cuerpo. No hay que preguntar nada al backend -- el
+// cuerpo ya viene con la fila.
+function proyectosRowTodoProgress(row) {
+  const body = row.body || '';
+  return {
+    total: (body.match(/data-todo="1"/g) || []).length,
+    done: (body.match(/data-done="1"/g) || []).length,
+  };
+}
+
+// Urgencia de una fecha (YYYY-MM-DD) para el badge de la tarjeta:
+// 'overdue' (ya paso), 'soon' (hoy o mañana) o '' (normal).
+function proyectosDateUrgency(value) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return '';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((date - today) / 86400000);
+  if (diffDays < 0) return 'overdue';
+  if (diffDays <= 1) return 'soon';
+  return '';
+}
+
+function formatProyectosBadgeDate(value) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+}
+
+// Pinta dentro de "target" las pastillas de las etiquetas elegidas (las
+// que ya no existan en la propiedad simplemente no se pintan).
+function renderProyectosLabelPills(target, prop, selectedNames) {
+  target.innerHTML = '';
+  for (const name of selectedNames) {
+    const opt = prop.options.find((o) => o && o.name === name);
+    if (!opt) continue;
+    const pill = document.createElement('span');
+    pill.className = 'proyectos-db-label-pill';
+    pill.textContent = name;
+    pill.style.backgroundColor = opt.color;
+    target.appendChild(pill);
+  }
+}
+
+// Popover de elegir etiquetas de una celda: una casilla por etiqueta
+// definida en la propiedad. Es UNO compartido (como el menu de tabla);
+// se puede marcar varias seguidas y el tablero se repinta al cerrarlo.
+let proyectosDbLabelsPopover = null;
+let proyectosDbLabelsDirtyDbId = null; // base pendiente de repintar al cerrar
+
+function closeProyectosDbLabelsPopover() {
+  if (proyectosDbLabelsPopover) proyectosDbLabelsPopover.classList.add('hidden');
+  if (proyectosDbLabelsDirtyDbId !== null) {
+    const dbId = proyectosDbLabelsDirtyDbId;
+    proyectosDbLabelsDirtyDbId = null;
+    refreshProyectosDbWidget(dbId);
+  }
+}
+
+function openProyectosDbLabelsPopover(anchorBtn, data, row, prop, onChanged) {
+  if (!proyectosDbLabelsPopover) {
+    proyectosDbLabelsPopover = document.createElement('div');
+    proyectosDbLabelsPopover.className = 'proyectos-db-config-popover proyectos-db-labels-popover hidden';
+    document.body.appendChild(proyectosDbLabelsPopover);
+  }
+  const popover = proyectosDbLabelsPopover;
+  popover.innerHTML = '';
+
+  if (prop.options.length === 0) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'Esta propiedad aún no tiene etiquetas: defínelas clicando su cabecera en la vista Tabla.';
+    popover.appendChild(hint);
+  }
+  for (const opt of prop.options) {
+    const rowEl = document.createElement('label');
+    rowEl.className = 'proyectos-db-labels-row';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox';
+    checkbox.checked = parseProyectosLabelsValue(row.values[prop.id] || '').includes(opt.name);
+    checkbox.addEventListener('change', () => {
+      const selected = parseProyectosLabelsValue(row.values[prop.id] || '');
+      const next = checkbox.checked
+        ? [...selected, opt.name]
+        : selected.filter((n) => n !== opt.name);
+      // Se conserva el ORDEN de las opciones de la propiedad, no el de
+      // marcado -- asi las pastillas salen siempre igual ordenadas.
+      const ordered = prop.options.map((o) => o.name).filter((n) => next.includes(n));
+      const value = ordered.length ? JSON.stringify(ordered) : null;
+      // Reflejo inmediato en la copia en memoria (el guardado es
+      // asincrono y el onChanged de justo debajo lee de aqui).
+      if (value === null) delete row.values[prop.id];
+      else row.values[prop.id] = value;
+      saveProyectosDbValue(data.id, row.id, prop.id, value);
+      proyectosDbLabelsDirtyDbId = data.id;
+      if (onChanged) onChanged();
+    });
+    const pill = document.createElement('span');
+    pill.className = 'proyectos-db-label-pill';
+    pill.textContent = opt.name;
+    pill.style.backgroundColor = opt.color;
+    rowEl.appendChild(checkbox);
+    rowEl.appendChild(pill);
+    popover.appendChild(rowEl);
+  }
+
+  popover.classList.remove('hidden');
+  positionFixedPopover(anchorBtn, popover, { width: 230 });
+}
+
+// Popover del color de tarjeta: la paleta fija + "sin color". Elegir
+// cierra y repinta (a diferencia de las etiquetas, aqui no hay "varios
+// seguidos" que marcar).
+let proyectosDbColorPopover = null;
+
+function openProyectosDbColorPopover(anchorBtn, data, row, prop, onChanged) {
+  if (!proyectosDbColorPopover) {
+    proyectosDbColorPopover = document.createElement('div');
+    proyectosDbColorPopover.className = 'proyectos-db-config-popover proyectos-db-color-popover hidden';
+    document.body.appendChild(proyectosDbColorPopover);
+  }
+  const popover = proyectosDbColorPopover;
+  popover.innerHTML = '';
+
+  const grid = document.createElement('div');
+  grid.className = 'proyectos-db-palette';
+  const current = row.values[prop.id] || '';
+  const choose = async (value) => {
+    popover.classList.add('hidden');
+    await saveProyectosDbValue(data.id, row.id, prop.id, value);
+    if (onChanged) onChanged();
+    refreshProyectosDbWidget(data.id);
+  };
+  for (const color of PROYECTOS_LABEL_PALETTE) {
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.className = 'proyectos-db-palette-dot' + (color.toLowerCase() === current.toLowerCase() ? ' selected' : '');
+    dot.style.backgroundColor = color;
+    dot.addEventListener('click', () => choose(color));
+    grid.appendChild(dot);
+  }
+  popover.appendChild(grid);
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'secondary-btn proyectos-db-color-clear';
+  clearBtn.textContent = 'Sin color';
+  clearBtn.addEventListener('click', () => choose(null));
+  popover.appendChild(clearBtn);
+
+  popover.classList.remove('hidden');
+  positionFixedPopover(anchorBtn, popover, { width: 190 });
+}
+
 // Editor de UNA celda segun el tipo de su propiedad. Devuelve el
 // elemento a colocar. Siempre componentes propios de la app
 // (createSelectField/createDateField/.styled-checkbox), nunca controles
 // nativos -- regla de la casa.
 function buildProyectosDbCellEditor(data, row, prop) {
   const current = row.values[prop.id] || '';
+  if (prop.type === 'labels') {
+    // Boton con las pastillas actuales; clic = popover de casillas.
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'proyectos-db-labels-btn';
+    const refreshPills = () => {
+      const selected = parseProyectosLabelsValue(row.values[prop.id] || '');
+      renderProyectosLabelPills(btn, prop, selected);
+      if (!btn.firstChild) {
+        btn.textContent = '—';
+        btn.classList.add('empty');
+      } else {
+        btn.classList.remove('empty');
+      }
+    };
+    refreshPills();
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openProyectosDbLabelsPopover(btn, data, row, prop, refreshPills);
+    });
+    return btn;
+  }
+  if (prop.type === 'color') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'proyectos-db-color-btn';
+    btn.title = 'Color de la tarjeta';
+    const refreshSwatch = () => {
+      const value = row.values[prop.id] || '';
+      const valid = PROYECTOS_HEX_COLOR.test(value);
+      btn.style.backgroundColor = valid ? value : 'transparent';
+      btn.classList.toggle('empty', !valid);
+    };
+    refreshSwatch();
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openProyectosDbColorPopover(btn, data, row, prop, refreshSwatch);
+    });
+    return btn;
+  }
   if (prop.type === 'select') {
     const field = createSelectField({
       options: [{ value: '', label: '—' }, ...prop.options.map((o) => ({ value: o, label: o }))],
@@ -12954,8 +13446,60 @@ function renderProyectosDbBoard(view, data) {
       const card = document.createElement('div');
       card.className = 'proyectos-db-card';
       card.draggable = true;
-      card.textContent = row.title || 'Sin título';
+
+      // Franja de "portada": la primera propiedad de tipo color con
+      // valor pinta una barra arriba de la tarjeta.
+      const colorProp = data.props.find((p) => p.type === 'color');
+      const colorValue = colorProp ? row.values[colorProp.id] : null;
+      if (colorValue && PROYECTOS_HEX_COLOR.test(colorValue)) {
+        const strip = document.createElement('div');
+        strip.className = 'proyectos-db-card-strip';
+        strip.style.backgroundColor = colorValue;
+        card.appendChild(strip);
+      }
+
+      // Etiquetas: pastillas pequeñas encima del titulo.
+      for (const prop of data.props.filter((p) => p.type === 'labels')) {
+        const selected = parseProyectosLabelsValue(row.values[prop.id] || '');
+        if (selected.length === 0) continue;
+        const pills = document.createElement('div');
+        pills.className = 'proyectos-db-card-pills';
+        renderProyectosLabelPills(pills, prop, selected);
+        if (pills.firstChild) card.appendChild(pills);
+      }
+
+      const titleEl = document.createElement('div');
+      titleEl.className = 'proyectos-db-card-title';
+      titleEl.textContent = row.title || 'Sin título';
       if (!row.title) card.classList.add('untitled');
+      card.appendChild(titleEl);
+
+      // Badges debajo del titulo: cada fecha con su urgencia (amarillo
+      // si es hoy/mañana, rojo si ya paso) y el progreso de tareas del
+      // cuerpo de la fila.
+      const badges = document.createElement('div');
+      badges.className = 'proyectos-db-card-badges';
+      for (const prop of data.props.filter((p) => p.type === 'date')) {
+        const value = row.values[prop.id];
+        if (!value) continue;
+        const badge = document.createElement('span');
+        badge.className = 'proyectos-db-card-badge';
+        const urgency = proyectosDateUrgency(value);
+        if (urgency) badge.classList.add(urgency);
+        badge.textContent = formatProyectosBadgeDate(value);
+        badge.title = prop.name;
+        badges.appendChild(badge);
+      }
+      const progress = proyectosRowTodoProgress(row);
+      if (progress.total > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'proyectos-db-card-badge' + (progress.done === progress.total ? ' complete' : '');
+        badge.textContent = `☑ ${progress.done}/${progress.total}`;
+        badge.title = 'Tareas del cuerpo de la fila';
+        badges.appendChild(badge);
+      }
+      if (badges.firstChild) card.appendChild(badges);
+
       card.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', String(row.id)));
       card.addEventListener('click', () => openProyectosPeek(data.id, row.id));
       colEl.appendChild(card);
@@ -13015,9 +13559,40 @@ function renderProyectosDbList(view, data) {
     for (const prop of data.props) {
       const value = row.values[prop.id];
       if (!value) continue;
+      if (prop.type === 'labels') {
+        // Las etiquetas van como pastillas de color, no como su JSON.
+        const pills = document.createElement('span');
+        pills.className = 'proyectos-db-card-pills';
+        renderProyectosLabelPills(pills, prop, parseProyectosLabelsValue(value));
+        if (pills.firstChild) item.appendChild(pills);
+        continue;
+      }
+      if (prop.type === 'color') {
+        if (!PROYECTOS_HEX_COLOR.test(value)) continue;
+        const dot = document.createElement('span');
+        dot.className = 'proyectos-db-color-dot';
+        dot.style.backgroundColor = value;
+        dot.title = prop.name;
+        item.appendChild(dot);
+        continue;
+      }
       const chip = document.createElement('span');
       chip.className = 'proyectos-db-chip';
-      chip.textContent = prop.type === 'checkbox' ? prop.name : value;
+      if (prop.type === 'date') {
+        const urgency = proyectosDateUrgency(value);
+        if (urgency) chip.classList.add(urgency);
+        chip.textContent = formatProyectosBadgeDate(value);
+      } else {
+        chip.textContent = prop.type === 'checkbox' ? prop.name : value;
+      }
+      item.appendChild(chip);
+    }
+    // Y el progreso de tareas, si el cuerpo de la fila tiene casillas.
+    const progress = proyectosRowTodoProgress(row);
+    if (progress.total > 0) {
+      const chip = document.createElement('span');
+      chip.className = 'proyectos-db-chip' + (progress.done === progress.total ? ' complete' : '');
+      chip.textContent = `☑ ${progress.done}/${progress.total}`;
       item.appendChild(chip);
     }
     item.addEventListener('click', () => openProyectosPeek(data.id, row.id));
@@ -13031,6 +13606,308 @@ function renderProyectosDbList(view, data) {
   }
   view.appendChild(list);
 }
+
+// ------------------------- Vista cronograma --------------------------
+// El "Gantt": cada fila con fecha es una barra horizontal sobre un
+// calendario. La barra va de la fecha de inicio a la de fin (dos
+// propiedades de fecha, configurables en el ⚙; con una sola fecha, la
+// barra dura un dia). Se puede ARRASTRAR: el cuerpo mueve la barra
+// entera (las dos fechas a la vez) y los bordes estiran el inicio o el
+// fin. El zoom (semana/mes/trimestre) es preferencia del dispositivo
+// (localStorage), no contenido.
+// ---------------------------------------------------------------------
+const PROYECTOS_TL_DAY_PX = { week: 90, month: 34, quarter: 13 };
+
+// Fechas como dias enteros locales, sin horas de por medio.
+function proyectosTlParseDate(value) {
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function proyectosTlAddDays(date, days) {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+function proyectosTlDiffDays(a, b) {
+  return Math.round((b - a) / 86400000);
+}
+function proyectosTlToIso(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+// Estado del arrastre de una barra en curso, o null.
+let proyectosTlDrag = null;
+
+function renderProyectosDbTimeline(view, data) {
+  const dateProps = data.props.filter((p) => p.type === 'date');
+  if (dateProps.length === 0) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'El cronograma necesita al menos una propiedad de tipo “fecha” — créala desde la vista Tabla (con dos, una hace de inicio y otra de fin).';
+    view.appendChild(hint);
+    return;
+  }
+  // Que fecha abre y cual cierra cada barra: lo configurado en el ⚙, y
+  // si no, la primera y la segunda propiedad de fecha que haya.
+  const startProp = data.props.find((p) => p.id === data.timelineStartPropId && p.type === 'date') || dateProps[0];
+  const endProp = data.props.find((p) => p.id === data.timelineEndPropId && p.type === 'date') || dateProps[1] || startProp;
+
+  const zoomKey = `proyectosTimelineZoom-${data.id}`;
+  const zoom = PROYECTOS_TL_DAY_PX[localStorage.getItem(zoomKey)] ? localStorage.getItem(zoomKey) : 'month';
+  const dayPx = PROYECTOS_TL_DAY_PX[zoom];
+
+  // Reparto: filas con alguna fecha (una barra cada una) y sin ninguna
+  // (el cubo de "sin fechas" de abajo).
+  const rows = visibleProyectosDbRows(data);
+  const dated = [];
+  const undated = [];
+  for (const row of rows) {
+    const startValue = row.values[startProp.id];
+    const endValue = row.values[endProp.id];
+    const start = startValue ? proyectosTlParseDate(startValue) : null;
+    const end = endValue ? proyectosTlParseDate(endValue) : null;
+    if (!start && !end) { undated.push(row); continue; }
+    // Con una sola fecha, la barra empieza y acaba el mismo dia; si
+    // vinieran cruzadas (fin antes que inicio), se pintan ordenadas.
+    let barStart = start || end;
+    let barEnd = end || start;
+    if (barEnd < barStart) [barStart, barEnd] = [barEnd, barStart];
+    dated.push({ row, start, end, barStart, barEnd });
+  }
+
+  // Rango visible: de la fecha mas temprana a la mas tardia, incluyendo
+  // siempre HOY, con margen a los lados.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let rangeStart = today;
+  let rangeEnd = today;
+  for (const item of dated) {
+    if (item.barStart < rangeStart) rangeStart = item.barStart;
+    if (item.barEnd > rangeEnd) rangeEnd = item.barEnd;
+  }
+  rangeStart = proyectosTlAddDays(rangeStart, -3);
+  rangeEnd = proyectosTlAddDays(rangeEnd, 14);
+  const totalDays = proyectosTlDiffDays(rangeStart, rangeEnd) + 1;
+  const totalWidth = totalDays * dayPx;
+  const xOf = (date) => proyectosTlDiffDays(rangeStart, date) * dayPx;
+
+  // --- Barrita de controles: el zoom ---
+  const controls = document.createElement('div');
+  controls.className = 'proyectos-tl-controls';
+  const zoomField = createSelectField({
+    options: [
+      { value: 'week', label: 'Zoom: semana' },
+      { value: 'month', label: 'Zoom: mes' },
+      { value: 'quarter', label: 'Zoom: trimestre' },
+    ],
+    initialValue: zoom,
+    onChange: (v) => {
+      localStorage.setItem(zoomKey, v);
+      refreshProyectosDbWidget(data.id);
+    },
+  });
+  controls.appendChild(zoomField.element);
+  const legend = document.createElement('span');
+  legend.className = 'hint proyectos-tl-legend';
+  legend.textContent = startProp === endProp
+    ? `Barras por “${startProp.name}” (añade otra propiedad de fecha para tener inicio y fin)`
+    : `De “${startProp.name}” a “${endProp.name}” — arrastra una barra para moverla, o sus bordes para estirarla`;
+  controls.appendChild(legend);
+  view.appendChild(controls);
+
+  // --- El lienzo desplazable ---
+  const scroll = document.createElement('div');
+  scroll.className = 'proyectos-tl-scroll';
+  const canvas = document.createElement('div');
+  canvas.className = 'proyectos-tl-canvas';
+  canvas.style.width = `${totalWidth}px`;
+
+  // Cabecera de meses (bloques que abarcan sus dias)...
+  const monthsRow = document.createElement('div');
+  monthsRow.className = 'proyectos-tl-months';
+  let cursor = new Date(rangeStart);
+  while (cursor <= rangeEnd) {
+    const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+    const segmentEnd = monthEnd < rangeEnd ? monthEnd : rangeEnd;
+    const seg = document.createElement('div');
+    seg.className = 'proyectos-tl-month';
+    seg.style.left = `${xOf(cursor)}px`;
+    seg.style.width = `${(proyectosTlDiffDays(cursor, segmentEnd) + 1) * dayPx}px`;
+    seg.textContent = cursor.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+    monthsRow.appendChild(seg);
+    cursor = proyectosTlAddDays(segmentEnd, 1);
+  }
+  canvas.appendChild(monthsRow);
+
+  // ...y de dias (numeros; en trimestre solo los lunes, que si no es
+  // una papilla de cifras).
+  const daysRow = document.createElement('div');
+  daysRow.className = 'proyectos-tl-days';
+  for (let i = 0; i < totalDays; i++) {
+    const day = proyectosTlAddDays(rangeStart, i);
+    if (zoom === 'quarter' && day.getDay() !== 1) continue;
+    const cell = document.createElement('div');
+    cell.className = 'proyectos-tl-day';
+    if (day.getDay() === 0 || day.getDay() === 6) cell.classList.add('weekend');
+    if (proyectosTlDiffDays(day, today) === 0) cell.classList.add('today');
+    cell.style.left = `${i * dayPx}px`;
+    cell.style.width = `${dayPx}px`;
+    cell.textContent = String(day.getDate());
+    daysRow.appendChild(cell);
+  }
+  canvas.appendChild(daysRow);
+
+  // Cuerpo: la rejilla de fondo (findes sombreados + linea de hoy) y
+  // una "calle" por fila con su barra.
+  const body = document.createElement('div');
+  body.className = 'proyectos-tl-body';
+  body.style.height = `${Math.max(1, dated.length) * 40}px`;
+  for (let i = 0; i < totalDays; i++) {
+    const day = proyectosTlAddDays(rangeStart, i);
+    if (day.getDay() !== 0 && day.getDay() !== 6) continue;
+    const shade = document.createElement('div');
+    shade.className = 'proyectos-tl-weekend-shade';
+    shade.style.left = `${i * dayPx}px`;
+    shade.style.width = `${dayPx}px`;
+    body.appendChild(shade);
+  }
+  const todayLine = document.createElement('div');
+  todayLine.className = 'proyectos-tl-today-line';
+  todayLine.style.left = `${xOf(today) + dayPx / 2}px`;
+  body.appendChild(todayLine);
+
+  const colorProp = data.props.find((p) => p.type === 'color');
+  dated.forEach((item, index) => {
+    const bar = document.createElement('div');
+    bar.className = 'proyectos-tl-bar';
+    bar.style.top = `${index * 40 + 6}px`;
+    bar.style.left = `${xOf(item.barStart)}px`;
+    bar.style.width = `${Math.max(dayPx, (proyectosTlDiffDays(item.barStart, item.barEnd) + 1) * dayPx)}px`;
+    const rowColor = colorProp ? item.row.values[colorProp.id] : null;
+    if (rowColor && PROYECTOS_HEX_COLOR.test(rowColor)) bar.style.backgroundColor = rowColor;
+    const label = document.createElement('span');
+    label.className = 'proyectos-tl-bar-label';
+    label.textContent = item.row.title || 'Sin título';
+    bar.appendChild(label);
+    bar.title = `${item.row.title || 'Sin título'} · ${proyectosTlToIso(item.barStart)} → ${proyectosTlToIso(item.barEnd)}`;
+
+    // Arrastre: bordes (6px) = estirar inicio/fin; el resto = mover la
+    // barra entera. El movimiento se ve en vivo y se guarda al soltar.
+    bar.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = bar.getBoundingClientRect();
+      const mode = e.clientX - rect.left <= 8 ? 'start'
+        : rect.right - e.clientX <= 8 ? 'end' : 'move';
+      proyectosTlDrag = {
+        data, item, bar, mode, dayPx,
+        startX: e.clientX,
+        origLeft: parseFloat(bar.style.left),
+        origWidth: parseFloat(bar.style.width),
+        moved: false,
+        startProp, endProp,
+      };
+    });
+    // Clic sin arrastre = abrir la fila (como una tarjeta).
+    bar.addEventListener('click', () => {
+      if (proyectosTlDrag === null) openProyectosPeek(data.id, item.row.id);
+    });
+
+    body.appendChild(bar);
+  });
+  canvas.appendChild(body);
+  scroll.appendChild(canvas);
+  view.appendChild(scroll);
+
+  // Al abrir, la vista se coloca sola con HOY a la izquierda.
+  requestAnimationFrame(() => {
+    scroll.scrollLeft = Math.max(0, xOf(today) - dayPx * 2);
+  });
+
+  if (dated.length === 0) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = `Ninguna fila tiene todavía “${startProp.name}” — ponles fecha y aparecerán como barras.`;
+    view.appendChild(hint);
+  }
+
+  // Cubo de "sin fechas": las filas que aun no estan programadas.
+  if (undated.length > 0) {
+    const bucket = document.createElement('div');
+    bucket.className = 'proyectos-tl-undated';
+    const label = document.createElement('span');
+    label.className = 'hint';
+    label.textContent = 'Sin fechas:';
+    bucket.appendChild(label);
+    for (const row of undated) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'proyectos-db-chip proyectos-tl-undated-chip';
+      chip.textContent = row.title || 'Sin título';
+      chip.addEventListener('click', () => openProyectosPeek(data.id, row.id));
+      bucket.appendChild(chip);
+    }
+    view.appendChild(bucket);
+  }
+}
+
+// El arrastre vivo de las barras del cronograma (a nivel de documento,
+// como el redimensionado de tablas: el raton se sale de la barra).
+document.addEventListener('mousemove', (e) => {
+  if (!proyectosTlDrag) return;
+  const drag = proyectosTlDrag;
+  const deltaDays = Math.round((e.clientX - drag.startX) / drag.dayPx);
+  if (deltaDays !== 0) drag.moved = true;
+  const deltaPx = deltaDays * drag.dayPx;
+  if (drag.mode === 'move') {
+    drag.bar.style.left = `${drag.origLeft + deltaPx}px`;
+  } else if (drag.mode === 'start') {
+    const newWidth = drag.origWidth - deltaPx;
+    if (newWidth >= drag.dayPx) {
+      drag.bar.style.left = `${drag.origLeft + deltaPx}px`;
+      drag.bar.style.width = `${newWidth}px`;
+    }
+  } else {
+    const newWidth = drag.origWidth + deltaPx;
+    if (newWidth >= drag.dayPx) drag.bar.style.width = `${newWidth}px`;
+  }
+});
+document.addEventListener('mouseup', async (e) => {
+  if (!proyectosTlDrag) return;
+  const drag = proyectosTlDrag;
+  const deltaDays = Math.round((e.clientX - drag.startX) / drag.dayPx);
+  // El click que el navegador dispara justo despues de este mouseup no
+  // debe abrir el side peek si esto fue un ARRASTRE: en ese caso el
+  // estado se limpia un instante despues (setTimeout 0), y el manejador
+  // de click de la barra lo ve todavia puesto y no abre nada. Un clic
+  // sin arrastre limpia ya y el click abre la fila con normalidad.
+  if (drag.moved) setTimeout(() => { proyectosTlDrag = null; }, 0);
+  else proyectosTlDrag = null;
+  if (!drag.moved) return;
+  if (deltaDays === 0) {
+    refreshProyectosDbWidget(drag.data.id); // volver a dejar la barra en su sitio
+    return;
+  }
+  const { item, startProp, endProp } = drag;
+  // Fechas nuevas segun el modo. Solo se escriben las propiedades que
+  // procedan (si la fila solo tenia fin, mover no le inventa un inicio).
+  const updates = [];
+  if (drag.mode === 'move') {
+    if (item.start) updates.push([startProp.id, proyectosTlToIso(proyectosTlAddDays(item.start, deltaDays))]);
+    if (item.end && endProp !== startProp) updates.push([endProp.id, proyectosTlToIso(proyectosTlAddDays(item.end, deltaDays))]);
+  } else if (drag.mode === 'start') {
+    const newStart = proyectosTlAddDays(item.barStart, deltaDays);
+    if (newStart <= item.barEnd) updates.push([startProp.id, proyectosTlToIso(newStart)]);
+  } else {
+    const newEnd = proyectosTlAddDays(item.barEnd, deltaDays);
+    const targetProp = endProp !== startProp ? endProp : startProp;
+    if (newEnd >= item.barStart || targetProp === startProp) updates.push([targetProp.id, proyectosTlToIso(newEnd)]);
+  }
+  for (const [propId, value] of updates) {
+    await saveProyectosDbValue(drag.data.id, item.row.id, propId, value);
+  }
+  refreshProyectosDbWidget(drag.data.id);
+});
 
 // ---------------------------------------------------------------------
 // Popover de configuracion de la vista (orden / filtro / agrupacion)
@@ -13099,6 +13976,25 @@ function openProyectosDbConfigPopover(anchorBtn, data) {
     }).element);
   }
 
+  // Las fechas del Cronograma: cual abre cada barra y cual la cierra.
+  // Solo aparecen si hay propiedades de fecha con las que elegir.
+  const dateProps = data.props.filter((p) => p.type === 'date');
+  if (dateProps.length > 0) {
+    const dateOptions = [{ value: '', label: '— automática —' }, ...dateProps.map((p) => ({ value: String(p.id), label: p.name }))];
+    addField('Cronograma: fecha de inicio', createSelectField({
+      options: dateOptions,
+      initialValue: data.timelineStartPropId ? String(data.timelineStartPropId) : '',
+      placeholder: '— automática —',
+      onChange: (v) => saveProyectosDbConfig(data.id, { timelineStartPropId: v || null }),
+    }).element);
+    addField('Cronograma: fecha de fin', createSelectField({
+      options: dateOptions,
+      initialValue: data.timelineEndPropId ? String(data.timelineEndPropId) : '',
+      placeholder: '— automática —',
+      onChange: (v) => saveProyectosDbConfig(data.id, { timelineEndPropId: v || null }),
+    }).element);
+  }
+
   popover.classList.remove('hidden');
   positionFixedPopover(anchorBtn, popover, { width: 260 });
 }
@@ -13130,11 +14026,14 @@ function openProyectosPropPopover(anchorBtn, data, prop) {
       { value: 'select', label: 'Select (opciones)' },
       { value: 'date', label: 'Fecha' },
       { value: 'checkbox', label: 'Casilla' },
+      { value: 'labels', label: 'Etiquetas (colores)' },
+      { value: 'color', label: 'Color de tarjeta' },
     ],
     initialValue: typeValue,
     onChange: (v) => {
       typeValue = v;
       optionsLabel.classList.toggle('hidden', v !== 'select');
+      labelsLabel.classList.toggle('hidden', v !== 'labels');
     },
   });
 
@@ -13142,7 +14041,77 @@ function openProyectosPropPopover(anchorBtn, data, prop) {
   optionsInput.type = 'text';
   optionsInput.className = 'proyectos-db-cell-input';
   optionsInput.placeholder = 'Opción A, Opción B, …';
-  optionsInput.value = prop && prop.options.length ? prop.options.join(', ') : '';
+  optionsInput.value = prop && prop.type === 'select' && prop.options.length ? prop.options.join(', ') : '';
+
+  // Editor de etiquetas (solo tipo "labels"): cada etiqueta es nombre +
+  // color de la paleta fija. El punto de color abre su paletita justo
+  // debajo -- sin selector nativo y sin popovers aparte que recoger.
+  const labelsState = prop && prop.type === 'labels'
+    ? prop.options.map((o) => ({ name: o.name, color: o.color }))
+    : [];
+  const labelsWrap = document.createElement('div');
+  labelsWrap.className = 'proyectos-db-labels-editor';
+  function renderLabelsEditor({ focusLast = false } = {}) {
+    labelsWrap.innerHTML = '';
+    labelsState.forEach((labelDef, i) => {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'proyectos-db-labels-editor-row';
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.className = 'proyectos-db-palette-dot';
+      dot.style.backgroundColor = labelDef.color;
+      dot.title = 'Cambiar el color';
+      const nameInput2 = document.createElement('input');
+      nameInput2.type = 'text';
+      nameInput2.className = 'proyectos-db-cell-input';
+      nameInput2.placeholder = 'Nombre de la etiqueta';
+      nameInput2.value = labelDef.name;
+      nameInput2.addEventListener('input', () => { labelDef.name = nameInput2.value; });
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'icon-btn';
+      removeBtn.textContent = '✕';
+      removeBtn.title = 'Quitar esta etiqueta';
+      removeBtn.addEventListener('click', () => {
+        labelsState.splice(i, 1);
+        renderLabelsEditor();
+      });
+      rowEl.appendChild(dot);
+      rowEl.appendChild(nameInput2);
+      rowEl.appendChild(removeBtn);
+      labelsWrap.appendChild(rowEl);
+
+      const palette = document.createElement('div');
+      palette.className = 'proyectos-db-palette hidden';
+      for (const color of PROYECTOS_LABEL_PALETTE) {
+        const swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.className = 'proyectos-db-palette-dot' + (color === labelDef.color ? ' selected' : '');
+        swatch.style.backgroundColor = color;
+        swatch.addEventListener('click', () => {
+          labelDef.color = color;
+          renderLabelsEditor(); // los nombres tecleados no se pierden: viven en labelsState
+        });
+        palette.appendChild(swatch);
+      }
+      labelsWrap.appendChild(palette);
+      dot.addEventListener('click', () => palette.classList.toggle('hidden'));
+    });
+    const addLabelBtn = document.createElement('button');
+    addLabelBtn.type = 'button';
+    addLabelBtn.className = 'secondary-btn';
+    addLabelBtn.textContent = '+ Etiqueta';
+    addLabelBtn.addEventListener('click', () => {
+      labelsState.push({ name: '', color: PROYECTOS_LABEL_PALETTE[labelsState.length % PROYECTOS_LABEL_PALETTE.length] });
+      renderLabelsEditor({ focusLast: true });
+    });
+    labelsWrap.appendChild(addLabelBtn);
+    if (focusLast) {
+      const inputs = labelsWrap.querySelectorAll('.proyectos-db-cell-input');
+      if (inputs.length) inputs[inputs.length - 1].focus();
+    }
+  }
+  renderLabelsEditor();
 
   function addField(labelText, fieldEl) {
     const label = document.createElement('label');
@@ -13159,6 +14128,19 @@ function openProyectosPropPopover(anchorBtn, data, prop) {
   addField('Tipo', typeField.element);
   const optionsLabel = addField('Opciones (separadas por comas)', optionsInput);
   optionsLabel.classList.toggle('hidden', typeValue !== 'select');
+  // El editor de etiquetas va en un <div>, NO en el <label> de addField:
+  // un label reenvia la activacion de sus clics a su primer control, y
+  // como "+ Etiqueta" repinta el editor dentro de su propio manejador
+  // (dejando el boton clicado fuera del documento), ese reenvio acababa
+  // robandole el foco al campo de nombre recien creado.
+  const labelsLabel = document.createElement('div');
+  labelsLabel.className = 'proyectos-db-config-field';
+  const labelsSpan = document.createElement('span');
+  labelsSpan.textContent = 'Etiquetas';
+  labelsLabel.appendChild(labelsSpan);
+  labelsLabel.appendChild(labelsWrap);
+  popover.appendChild(labelsLabel);
+  labelsLabel.classList.toggle('hidden', typeValue !== 'labels');
 
   const actions = document.createElement('div');
   actions.className = 'proyectos-db-config-actions';
@@ -13174,7 +14156,9 @@ function openProyectosPropPopover(anchorBtn, data, prop) {
       type: typeValue,
       options: typeValue === 'select'
         ? optionsInput.value.split(',').map((s) => s.trim()).filter(Boolean)
-        : undefined,
+        : typeValue === 'labels'
+          ? labelsState.filter((l) => l.name.trim()).map((l) => ({ name: l.name.trim(), color: l.color }))
+          : undefined,
     };
     try {
       if (prop) await api(`/api/proyectos-databases/props/${prop.id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -13432,6 +14416,8 @@ async function createProyectosGuide() {
     '<ul>',
     '<li>La <b>flecha</b> de una página del sidebar la pliega/despliega.</li>',
     '<li>El <b>+</b> que aparece al pasar el ratón crea una subpágina dentro.</li>',
+    '<li><b>Arrastra</b> una página del sidebar para reordenarla (suéltala entre dos) o para meterla DENTRO de otra (suéltala en su centro). Soltarla en el hueco de debajo del árbol la saca al primer nivel.</li>',
+    '<li>El botón <b>☑</b> de arriba del árbol activa el modo selección: marca varias páginas con sus casillas y muévelas todas de golpe con <b>«Mover a…»</b>.</li>',
     '<li>Las <b>migas de pan</b> de arriba te dicen dónde estás y te llevan a cualquier antepasado con un clic.</li>',
     '<li>El <b>buscador</b> de arriba del sidebar filtra por título entre TODAS las páginas.</li>',
     '</ul>',
@@ -13498,12 +14484,22 @@ async function createProyectosGuide() {
     '<div data-callout="1" data-icon="🗄">Una base de datos es una colección de filas con propiedades. La de abajo es de verdad: tócala.</div>',
     '<h1>Qué probar aquí</h1>',
     '<ul>',
-    '<li>Las pestañas <b>Tabla / Tablero / Lista</b> son la misma información vista de tres formas.</li>',
+    '<li>Las pestañas <b>Tabla / Tablero / Lista / Cronograma</b> son la misma información vista de cuatro formas.</li>',
     '<li>En el <b>Tablero</b>, arrastra una tarjeta a otra columna: le cambia el Estado.</li>',
     '<li>Haz clic en el <b>título de una fila</b>: se abre en un panel lateral con sus propiedades y sus propias notas, como una mini-página.</li>',
-    '<li>En la Tabla, el <b>+</b> de la cabecera añade propiedades nuevas (texto, número, select, fecha o casilla), y clicar el nombre de una la edita o la borra.</li>',
+    '<li>En la Tabla, el <b>+</b> de la cabecera añade propiedades nuevas (texto, número, select, fecha, casilla, <b>etiquetas de color</b> o <b>color de tarjeta</b>), y clicar el nombre de una la edita o la borra.</li>',
     '<li>Para insertar una base en cualquier página: menú «/» → <b>Base de datos</b>.</li>',
     '</ul>',
+    '<h1>Tarjetas con chicha</h1>',
+    '<div>Las tarjetas del Tablero (y la Lista) enseñan solas todo lo importante de un vistazo:</div>',
+    '<ul>',
+    '<li><b>Etiquetas</b>: crea una propiedad de tipo «Etiquetas (colores)», define tu paleta (nombre + color) y marca las de cada fila — salen como pastillas de color.</li>',
+    '<li>Las <b>fechas</b> aparecen como badge con urgencia: amarillo si es hoy o mañana, rojo si ya pasó.</li>',
+    '<li>Si el cuerpo de una fila tiene <b>tareas con casilla</b>, la tarjeta enseña su progreso (2/3, verde al completarlo).</li>',
+    '<li>Una propiedad de <b>color de tarjeta</b> le pone una franja de color arriba, para distinguirlas de un vistazo.</li>',
+    '</ul>',
+    '<h1>El Cronograma (Gantt)</h1>',
+    '<div>La 4ª pestaña pinta cada fila con fecha como una <b>barra sobre un calendario</b> (esta demo usa «Fecha límite»: barras de un día; con DOS propiedades de fecha, una hace de inicio y otra de fin — se eligen en el ⚙). Arrastra una barra para moverla de fechas, o sus bordes para estirarla; la línea vertical marca hoy, y las filas sin fecha esperan en «Sin fechas» debajo. El zoom (semana/mes/trimestre) es tuyo de este dispositivo.</div>',
     '<h1>Móntatela a tu manera</h1>',
     '<div>Esta demo es de un viaje, pero los estados y propiedades son 100% tuyos. Para un tablero de trabajos, por ejemplo:</div>',
     '<ol>',

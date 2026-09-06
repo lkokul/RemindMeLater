@@ -527,12 +527,14 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     page_id INTEGER NOT NULL REFERENCES proyectos_pages(id),
     name TEXT NOT NULL DEFAULT '',
-    view_type TEXT NOT NULL DEFAULT 'table' CHECK (view_type IN ('table', 'board', 'list')),
+    view_type TEXT NOT NULL DEFAULT 'table' CHECK (view_type IN ('table', 'board', 'list', 'timeline')),
     board_prop_id INTEGER,      -- que propiedad "select" agrupa el tablero
     sort_prop_id INTEGER,       -- orden opcional por una propiedad
     sort_dir TEXT NOT NULL DEFAULT 'asc' CHECK (sort_dir IN ('asc', 'desc')),
     filter_prop_id INTEGER,     -- filtro simple opcional: propiedad = valor
     filter_value TEXT,
+    timeline_start_prop_id INTEGER, -- que fecha abre cada barra del Cronograma
+    timeline_end_prop_id INTEGER,   -- y que fecha la cierra
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -543,7 +545,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     database_id INTEGER NOT NULL REFERENCES proyectos_databases(id),
     name TEXT NOT NULL,
-    type TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text', 'number', 'select', 'date', 'checkbox')),
+    type TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text', 'number', 'select', 'date', 'checkbox', 'labels', 'color')),
     options TEXT,
     position INTEGER NOT NULL DEFAULT 0
   );
@@ -572,6 +574,73 @@ db.exec(`
     UNIQUE (row_id, prop_id)
   );
 `);
+
+// Migracion: los tipos 'labels' (etiquetas de color) y 'color' (color
+// de tarjeta) se añadieron al CHECK de proyectos_db_props en la ronda
+// de tarjetas. SQLite no permite tocar un CHECK con ALTER TABLE: si el
+// esquema guardado aun tiene la lista vieja, se reconstruye la tabla
+// entera (copia con el esquema nuevo, volcar filas, borrar la vieja,
+// renombrar -- mismo patron que la migracion de start_at de events).
+// Se detecta mirando el SQL de la tabla en sqlite_master; una vez
+// reconstruida ya contiene 'labels' y esto no se repite.
+// OJO: node:sqlite arranca con las foreign keys ACTIVADAS, y con ellas
+// no se puede hacer DROP de una tabla a la que otras apuntan (aqui,
+// proyectos_db_values apunta a props, y props/rows apuntan a
+// databases). Se apagan solo durante la reconstruccion; el RENAME final
+// deja las referencias de las tablas hijas apuntando bien. El "DROP
+// ... IF EXISTS ..._new" del principio limpia el rastro de una
+// reconstruccion que se hubiera quedado a medias.
+const propsTableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'proyectos_db_props'").get();
+if (propsTableSql && !propsTableSql.sql.includes("'labels'")) {
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    DROP TABLE IF EXISTS proyectos_db_props_new;
+    CREATE TABLE proyectos_db_props_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      database_id INTEGER NOT NULL REFERENCES proyectos_databases(id),
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text', 'number', 'select', 'date', 'checkbox', 'labels', 'color')),
+      options TEXT,
+      position INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO proyectos_db_props_new (id, database_id, name, type, options, position)
+      SELECT id, database_id, name, type, options, position FROM proyectos_db_props;
+    DROP TABLE proyectos_db_props;
+    ALTER TABLE proyectos_db_props_new RENAME TO proyectos_db_props;
+    PRAGMA foreign_keys = ON;
+  `);
+}
+
+// Migracion pareja a la de arriba: la vista 'timeline' (Cronograma) se
+// añadio al CHECK de view_type de proyectos_databases, junto con las
+// dos columnas que dicen que fechas abren y cierran cada barra. Mismo
+// truco de reconstruccion, detectando por el SQL guardado.
+const databasesTableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'proyectos_databases'").get();
+if (databasesTableSql && !databasesTableSql.sql.includes("'timeline'")) {
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    DROP TABLE IF EXISTS proyectos_databases_new;
+    CREATE TABLE proyectos_databases_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      page_id INTEGER NOT NULL REFERENCES proyectos_pages(id),
+      name TEXT NOT NULL DEFAULT '',
+      view_type TEXT NOT NULL DEFAULT 'table' CHECK (view_type IN ('table', 'board', 'list', 'timeline')),
+      board_prop_id INTEGER,
+      sort_prop_id INTEGER,
+      sort_dir TEXT NOT NULL DEFAULT 'asc' CHECK (sort_dir IN ('asc', 'desc')),
+      filter_prop_id INTEGER,
+      filter_value TEXT,
+      timeline_start_prop_id INTEGER,
+      timeline_end_prop_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO proyectos_databases_new (id, page_id, name, view_type, board_prop_id, sort_prop_id, sort_dir, filter_prop_id, filter_value, created_at)
+      SELECT id, page_id, name, view_type, board_prop_id, sort_prop_id, sort_dir, filter_prop_id, filter_value, created_at FROM proyectos_databases;
+    DROP TABLE proyectos_databases;
+    ALTER TABLE proyectos_databases_new RENAME TO proyectos_databases;
+    PRAGMA foreign_keys = ON;
+  `);
+}
 
 // Migracion sencilla: group_id se anadio despues de crear la tabla
 // events en versiones anteriores. SQLite no
