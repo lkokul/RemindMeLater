@@ -8006,6 +8006,7 @@ async function openGymLiveView() {
   renderGymLiveExercises();
   if (gymLiveTicker) clearInterval(gymLiveTicker);
   gymLiveTicker = setInterval(gymLiveTick, 1000);
+  refreshGymLivePauseUi();
   gymLiveTick();
 }
 function closeGymLiveView() {
@@ -8048,10 +8049,21 @@ function gymLiveFormatClock(totalSeconds) {
   const s = totalSeconds % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
 }
+// Tiempo de sesion transcurrido DESCONTANDO las pausas: pausedMs acumula
+// las pausas ya cerradas, y pausedAt marca la pausa en curso (si la hay).
+// Todo con timestamps, como siempre -- sobrevive a recargas y al
+// congelado de iOS en segundo plano.
+function gymLiveElapsedSeconds() {
+  const pausedMs = (gymLiveSession.pausedMs || 0) +
+    (gymLiveSession.pausedAt ? Date.now() - gymLiveSession.pausedAt : 0);
+  return Math.max(0, Math.floor((Date.now() - gymLiveSession.startedAt - pausedMs) / 1000));
+}
+
 function gymLiveTick() {
   if (!gymLiveSession) return;
-  const elapsed = Math.max(0, Math.floor((Date.now() - gymLiveSession.startedAt) / 1000));
-  document.getElementById('gym-live-clock').textContent = gymLiveFormatClock(elapsed);
+  const clock = document.getElementById('gym-live-clock');
+  clock.textContent = gymLiveFormatClock(gymLiveElapsedSeconds());
+  clock.classList.toggle('paused', !!gymLiveSession.pausedAt);
 
   // Mini-barra global: solo cuando el entreno esta OCULTO y hay descanso.
   const liveHidden = document.getElementById('gym-live-view').classList.contains('hidden');
@@ -8281,15 +8293,22 @@ async function gymEndRestLiveActivity() {
 // proyecto: se reconstruye el DOM entero en cada cambio estructural
 // (anadir/quitar series o ejercicios); los inputs escriben directo en
 // gymLiveSession y guardan en localStorage.
-// La lista de ejercicios ocultos empieza recogida; recordarlo en una
-// variable (no en la sesion guardada) basta -- es un estado de vista.
+// Las listas de ejercicios ocultos/quitados empiezan recogidas;
+// recordarlo en variables (no en la sesion guardada) basta -- es estado
+// de vista.
 let gymLiveHiddenPoolOpen = false;
+let gymLiveRemovedPoolOpen = false;
 
 function renderGymLiveExercises() {
   const container = document.getElementById('gym-live-exercises');
   container.innerHTML = '';
-  if (gymLiveSession.exercises.length === 0 && !(gymLiveSession.hiddenPool || []).length) {
-    container.innerHTML = '<p class="empty-hint">Añade ejercicios con el botón de abajo.</p>';
+  // El atajo de "lista vacia" solo aplica si TAMPOCO hay nada que
+  // recuperar (ni ocultos del dia ni quitados en esta sesion) -- si no,
+  // esas secciones de abajo no se pintarian nunca.
+  if (gymLiveSession.exercises.length === 0
+      && !(gymLiveSession.hiddenPool || []).length
+      && !(gymLiveSession.removedPool || []).length) {
+    container.innerHTML = '<p class="empty-hint">Añade ejercicios con el botón del menú de abajo a la derecha.</p>';
     return;
   }
   const unit = getGymWeightUnitLabel();
@@ -8467,8 +8486,12 @@ function renderGymLiveExercises() {
       renderGymLiveExercises();
     });
     card.querySelector('[data-live-remove-exercise]').addEventListener('click', async () => {
-      const ok = await showAppConfirm('¿Quitar este ejercicio del entrenamiento (con sus series de hoy)?', { okText: 'Quitar', danger: true });
+      const ok = await showAppConfirm('¿Quitar este ejercicio del entrenamiento? Podrás recuperarlo con sus series desde "Ejercicios quitados", abajo del todo.', { okText: 'Quitar', danger: true });
       if (!ok) return;
+      // No se pierde: va al pool de quitados de ESTA sesion, con sus
+      // series tal cual estaban (peticion de Koku: poder recuperarlo).
+      if (!gymLiveSession.removedPool) gymLiveSession.removedPool = [];
+      gymLiveSession.removedPool.push(gymLiveSession.exercises[exIndex]);
       gymLiveSession.exercises.splice(exIndex, 1);
       gymLiveStore();
       renderGymLiveExercises();
@@ -8480,6 +8503,38 @@ function renderGymLiveExercises() {
 
     container.appendChild(card);
   });
+
+  // Ejercicios QUITADOS durante esta sesion: recuperables con sus series
+  // (peticion de Koku, "no es que me lo haya saltado, es un cambio").
+  const removed = gymLiveSession.removedPool || [];
+  if (removed.length > 0) {
+    const removedBox = document.createElement('div');
+    removedBox.className = 'gym-live-hidden-pool';
+    removedBox.innerHTML = `<button type="button" class="secondary-btn" data-live-toggle-removed>${gymLiveRemovedPoolOpen ? 'Ocultar' : 'Ver'} ejercicios quitados (${removed.length})</button><div class="gym-live-hidden-list ${gymLiveRemovedPoolOpen ? '' : 'hidden'}"></div>`;
+    removedBox.querySelector('[data-live-toggle-removed]').addEventListener('click', () => {
+      gymLiveRemovedPoolOpen = !gymLiveRemovedPoolOpen;
+      renderGymLiveExercises();
+    });
+    const removedList = removedBox.querySelector('.gym-live-hidden-list');
+    removed.forEach((r, removedIndex) => {
+      const exercise = state.gymExercises.find((e) => e.id === r.exerciseId);
+      const row = document.createElement('div');
+      row.className = 'gym-live-hidden-row';
+      row.innerHTML = `
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <button type="button" class="secondary-btn">Recuperar</button>
+      `;
+      row.querySelector('button').addEventListener('click', () => {
+        r.collapsed = false;
+        gymLiveSession.exercises.push(r);
+        gymLiveSession.removedPool.splice(removedIndex, 1);
+        gymLiveStore();
+        renderGymLiveExercises();
+      });
+      removedList.appendChild(row);
+    });
+    container.appendChild(removedBox);
+  }
 
   // Ejercicios OCULTOS del dia: no estan en el entreno, pero se pueden
   // recuperar para esta sesion concreta (peticion de Koku).
@@ -8572,13 +8627,32 @@ function closeGymHelpModal() {
 document.getElementById('btn-gym-live-help').addEventListener('click', openGymHelpModal);
 document.getElementById('btn-close-gym-help').addEventListener('click', closeGymHelpModal);
 
-// Pausar/ocultar el entrenamiento sin descartarlo: vuelve al Gimnasio
-// con sus pestanas utilizables (peticion de Koku: "poder moverme por las
-// pestanas de gimnasio" en mitad de un entreno). El ticker sigue vivo.
-// Dos puntos de entrada: el boton de pausa del menu flotante y el ▾ de
-// la cabecera (Koku pidio recuperarlo).
-document.getElementById('btn-gym-live-minimize').addEventListener('click', closeGymLiveView);
+// Ocultar el entrenamiento sin descartarlo (el ▾ de la cabecera): vuelve
+// al Gimnasio con sus pestanas utilizables. El ticker sigue vivo.
 document.getElementById('btn-gym-live-header-hide').addEventListener('click', closeGymLiveView);
+
+// Pausar/reanudar el CRONOMETRO de la sesion (aclarado con Koku: la
+// pausa del menu congela el tiempo de sesion -- si te interrumpen, el
+// entreno no "engorda"). El descanso entre series NO se pausa: es tiempo
+// de reloj de pared. pausedMs/pausedAt, ver gymLiveElapsedSeconds().
+function gymToggleSessionPause() {
+  if (!gymLiveSession) return;
+  if (gymLiveSession.pausedAt) {
+    gymLiveSession.pausedMs = (gymLiveSession.pausedMs || 0) + (Date.now() - gymLiveSession.pausedAt);
+    gymLiveSession.pausedAt = null;
+  } else {
+    gymLiveSession.pausedAt = Date.now();
+  }
+  gymLiveStore();
+  refreshGymLivePauseUi();
+  gymLiveTick();
+}
+function refreshGymLivePauseUi() {
+  const paused = !!(gymLiveSession && gymLiveSession.pausedAt);
+  document.getElementById('btn-gym-live-pause').classList.toggle('is-paused', paused);
+  document.getElementById('btn-gym-live-pause').setAttribute('aria-label', paused ? 'Reanudar el cronómetro' : 'Pausar el cronómetro');
+}
+document.getElementById('btn-gym-live-pause').addEventListener('click', gymToggleSessionPause);
 
 // El menu flotante de acciones del entreno: el boton central abre/cierra
 // el abanico de 4 botones (dudas / pausar / terminar / descartar).
@@ -8677,7 +8751,7 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
     return;
   }
 
-  const durationSeconds = Math.max(0, Math.floor((Date.now() - gymLiveSession.startedAt) / 1000));
+  const durationSeconds = gymLiveElapsedSeconds();
   await api('/api/gym-sessions', {
     method: 'POST',
     body: JSON.stringify({
@@ -9025,7 +9099,11 @@ function renderGymSessionExercisesField() {
     header.querySelector('[data-field="exRpe"]').addEventListener('input', (e) => {
       gymSessionModalExercises[exIndex].rpe = e.target.value;
     });
-    header.querySelector('.icon-btn').addEventListener('click', () => {
+    header.querySelector('.icon-btn').addEventListener('click', async () => {
+      // Quitar un ejercicio aqui borra sus series apuntadas: confirmacion
+      // (peticion de Koku, "seguro que quieres quitar...").
+      const ok = await showAppConfirm('¿Quitar este ejercicio de la sesión, con sus series apuntadas?', { okText: 'Quitar', danger: true });
+      if (!ok) return;
       gymSessionModalExercises.splice(exIndex, 1);
       renderGymSessionExercisesField();
     });

@@ -88,6 +88,17 @@ body {
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--bg-text);
+  /* App, no pagina web: el texto plano no se selecciona (en el iPhone el
+     toque largo seleccionaba cualquier etiqueta -- peticion de Koku). Lo
+     editable se re-permite justo debajo. -webkit-touch-callout quita
+     ademas el menu contextual del toque largo en iOS. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+input, textarea, [contenteditable="true"], [contenteditable="true"] * {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .hidden { display: none !important; }
@@ -2043,9 +2054,17 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   display: flex; flex-direction: column; gap: 0.5rem;
 }
 .gym-session-sets-list { display: flex; flex-direction: column; gap: 0.4rem; }
-.gym-session-set-row { display: flex; align-items: center; gap: 0.4rem; }
-.gym-session-set-number { font-size: 0.78rem; flex-shrink: 0; width: 4rem; }
-.gym-session-set-row input { width: 5.5rem; }
+/* Rejilla que SIEMPRE cabe en el ancho de la tarjeta (con los anchos
+   fijos de antes, el ultimo campo se salia del cuadro en el iPhone --
+   feedback de Koku con captura): Serie / Reps / Peso / Desc / ✕. */
+.gym-session-set-row {
+  display: grid;
+  grid-template-columns: 3.4rem 1fr 1.2fr 3.6rem 1.8rem;
+  gap: 0.4rem;
+  align-items: center;
+}
+.gym-session-set-number { font-size: 0.78rem; }
+.gym-session-set-row input { width: 100%; min-width: 0; box-sizing: border-box; }
 .gym-add-set-btn { align-self: flex-start; font-size: 0.8rem; padding: 0.35rem 0.6rem; }
 
 .gym-progress-metric-toggle { display: flex; gap: 0.4rem; }
@@ -2235,6 +2254,10 @@ body.real-modal-open .calendar-quick-actions { display: none; }
    parrafos de letra pequena siempre a la vista (peticion de Koku). */
 .settings-subheading-row, .gym-subheading-row { display: flex; align-items: center; gap: 0.5rem; }
 .settings-subheading-row h4, .gym-subheading-row h3 { margin-bottom: 0; }
+/* Toggle + su "?" en la misma fila (apartado Notificaciones). */
+.settings-toggle-help-row { display: flex; align-items: center; gap: 0.5rem; }
+.settings-toggle-help-row .checkbox-row { flex: 1; min-width: 0; }
+.settings-toggle-help-row .settings-help-btn { flex-shrink: 0; }
 .settings-help-btn {
   width: 24px;
   height: 24px;
@@ -2433,12 +2456,22 @@ body.gym-rest-push #settings-modal .settings-card {
   opacity: 1;
   pointer-events: auto;
 }
-/* Posiciones del abanico (radio 100px -- con 74 los botones de 44px
-   quedaban casi pegados, feedback de Koku): 1 arriba, 4 a la izquierda. */
-.gym-live-fab.open .gym-fab-pos-1 { transform: translate(0, -100px); }
-.gym-live-fab.open .gym-fab-pos-2 { transform: translate(-50px, -87px); }
-.gym-live-fab.open .gym-fab-pos-3 { transform: translate(-87px, -50px); }
-.gym-live-fab.open .gym-fab-pos-4 { transform: translate(-100px, 0); }
+/* Posiciones del abanico, ahora con 5 botones (entro "+ ejercicio"):
+   radio 130px para que los contiguos queden a ~51px de centro a centro
+   (con radio menor, los de 44px se tocaban). 1 arriba, 5 a la izquierda. */
+.gym-live-fab.open .gym-fab-pos-1 { transform: translate(0, -130px); }
+.gym-live-fab.open .gym-fab-pos-2 { transform: translate(-50px, -120px); }
+.gym-live-fab.open .gym-fab-pos-3 { transform: translate(-92px, -92px); }
+.gym-live-fab.open .gym-fab-pos-4 { transform: translate(-120px, -50px); }
+.gym-live-fab.open .gym-fab-pos-5 { transform: translate(-130px, 0); }
+
+/* Boton de pausa del cronometro: ensena pausa o play segun el estado. */
+#btn-gym-live-pause .gym-icon-play { display: none; }
+#btn-gym-live-pause.is-paused .gym-icon-pause { display: none; }
+#btn-gym-live-pause.is-paused .gym-icon-play { display: block; }
+#btn-gym-live-pause.is-paused { border-color: var(--gym-accent); color: var(--gym-accent); }
+/* Reloj de sesion en pausa: atenuado, para que se note de un vistazo. */
+.gym-live-clock.paused { opacity: 0.45; }
 .gym-live-fab-primary {
   background: var(--accent);
   color: var(--accent-text);

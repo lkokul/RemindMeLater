@@ -8,7 +8,13 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
-        window?.rootViewController = CAPBridgeViewController()
+        // BridgeViewController (subclase nuestra) y NO CAPBridgeViewController
+        // a secas: la subclase es quien registra los plugins LOCALES
+        // (LiveActivityPlugin). Aqui estuvo el bug de "LiveActivity plugin
+        // is not implemented on ios": el controlador se crea AQUI por
+        // codigo, asi que cambiar la clase solo en Main.storyboard no
+        // servia de nada -- el storyboard ni se usa para esto.
+        window?.rootViewController = BridgeViewController()
         window?.makeKeyAndVisible()
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)

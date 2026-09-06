@@ -700,9 +700,10 @@
     <div class="gym-live-content">
       <!-- La explicacion del sistema ya no vive aqui como parrafo fijo: se
            muestra en #gym-help-modal (la primera vez sola, y siempre desde
-           el boton de ayuda de abajo a la derecha). -->
+           el boton de ayuda de abajo a la derecha). El "+ Añadir
+           ejercicio" tampoco: vive en el menu flotante (peticion de
+           Koku). -->
       <div id="gym-live-exercises" class="gym-live-exercises"></div>
-      <button type="button" id="btn-gym-live-add-exercise" class="secondary-btn gym-tab-action">+ Añadir ejercicio</button>
     </div>
     <!-- Menu flotante de acciones (abajo a la derecha): el boton central
          despliega en abanico las 4 acciones del entreno -- dudas,
@@ -712,13 +713,20 @@
          app.js no cambian. -->
     <div id="gym-live-fab" class="gym-live-fab">
       <button type="button" id="btn-gym-live-help" class="gym-live-fab-action gym-fab-pos-1" aria-label="Cómo funciona el entrenamiento" title="Dudas">?</button>
-      <button type="button" id="btn-gym-live-minimize" class="gym-live-fab-action gym-fab-pos-2" aria-label="Pausar (ocultar; el entrenamiento sigue en marcha)" title="Pausar">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg>
+      <!-- Pausa DEL CRONOMETRO (no oculta la pantalla; para eso esta el ▾
+           de la cabecera): congela el tiempo de sesion. Los dos iconos
+           conviven y el CSS ensena uno u otro segun .is-paused. -->
+      <button type="button" id="btn-gym-live-pause" class="gym-live-fab-action gym-fab-pos-2" aria-label="Pausar el cronómetro" title="Pausar/reanudar el cronómetro">
+        <svg class="gym-icon-pause" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg>
+        <svg class="gym-icon-play" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>
       </button>
-      <button type="button" id="btn-gym-live-finish" class="gym-live-fab-action gym-live-fab-primary gym-fab-pos-3" aria-label="Terminar y guardar el entrenamiento" title="Terminar">
+      <button type="button" id="btn-gym-live-add-exercise" class="gym-live-fab-action gym-fab-pos-3" aria-label="Añadir ejercicio al entrenamiento" title="Añadir ejercicio">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-finish" class="gym-live-fab-action gym-live-fab-primary gym-fab-pos-4" aria-label="Terminar y guardar el entrenamiento" title="Terminar">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4.5 12.5 9.5 17.5 19.5 6.5"/></svg>
       </button>
-      <button type="button" id="btn-gym-live-discard" class="gym-live-fab-action gym-live-fab-danger gym-fab-pos-4" aria-label="Descartar el entrenamiento" title="Descartar">
+      <button type="button" id="btn-gym-live-discard" class="gym-live-fab-action gym-live-fab-danger gym-fab-pos-5" aria-label="Descartar el entrenamiento" title="Descartar">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3.5 6.5 20.5 6.5"/><path d="M8.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h4.4a1.3 1.3 0 0 1 1.3 1.3v1.7"/><path d="M5.5 6.5l1 13a1.3 1.3 0 0 0 1.3 1.2h8.4a1.3 1.3 0 0 0 1.3-1.2l1-13"/><line x1="10" y1="10.5" x2="10" y2="16.5"/><line x1="14" y1="10.5" x2="14" y2="16.5"/></svg>
       </button>
       <button type="button" id="btn-gym-live-menu" class="gym-live-fab-main" aria-label="Acciones del entrenamiento" aria-expanded="false">
@@ -784,7 +792,9 @@
         <h4>El RPE</h4>
         <p>Es una medida del esfuerzo, del 1 al 10: 10 es que no podrías haber hecho ni una repetición más, 9 es que te quedaba una, 8 que te quedaban dos... Se apunta uno por ejercicio, en la casilla RPE junto a "+ Serie". Es opcional, pero ayuda a saber si un peso se te está quedando corto: a RPE 7 o menos, probablemente toca subir.</p>
         <h4>El menú de abajo a la derecha</h4>
-        <p>El botón flotante despliega las acciones del entrenamiento: esta ayuda, pausar, terminar y descartar. Pausar esconde la pantalla con el entrenamiento en marcha: puedes mirar otras pestañas del Gimnasio o cualquier otra parte de la app. Para volver, toca Reanudar en la pestaña Entrenar, o la barra de descanso que se queda arriba del todo mientras descansas.</p>
+        <p>El botón flotante despliega las acciones del entrenamiento: esta ayuda, pausar el cronómetro (congela el tiempo de sesión si te interrumpen; el descanso entre series sigue corriendo), añadir un ejercicio, terminar y descartar.</p>
+        <h4>Moverte por la app sin perder el entreno</h4>
+        <p>Con el botón ▾ de arriba escondes esta pantalla y el entrenamiento sigue en marcha: puedes mirar otras pestañas del Gimnasio o cualquier otra parte de la app. Para volver, toca Reanudar en la pestaña Entrenar, o la barra de descanso que se queda arriba del todo mientras descansas.</p>
         <h4>Si se acaba el descanso y no estás mirando</h4>
         <p>Mientras descansas, la cuenta atrás aparece en vivo en la pantalla de bloqueo (y en la isla dinámica, en los iPhone que la tienen). Además, la app puede avisarte con una notificación justo cuando el descanso termina. Las dos cosas se configuran en Configuración, en el apartado Este dispositivo, donde también eliges si los avisos suenan, solo vibran o van en silencio.</p>
       </div>
@@ -2152,11 +2162,54 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
           <span>Este dispositivo</span>
         </button>
+        <button type="button" class="settings-menu-item" data-tab="notifications">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M10.3 19a2 2 0 0 0 3.4 0"/></svg>
+          <span>Notificaciones</span>
+        </button>
         <button type="button" class="settings-menu-item" data-tab="store">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16l-1.2 11a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
           <span>Tienda</span>
         </button>
 
+      </div>
+
+      <!-- --- Notificaciones (apartado propio, peticion de Koku: "van a
+           haber un par"). Cada opcion lleva SU boton "?" con su
+           explicacion como dialogo, en vez de parrafos siempre a la
+           vista. Los ids son los de siempre: refreshMobileTab() y los
+           listeners de settings.js siguen funcionando igual. --- -->
+      <div id="settings-tab-notifications" class="settings-tab-panel hidden">
+        <h3>Notificaciones</h3>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-notifications" />
+            Avisos de recordatorios
+          </label>
+          <button type="button" id="btn-help-notif-reminders" class="icon-btn settings-help-btn" aria-label="Qué son los avisos de recordatorios">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-gym-rest-notify" />
+            Aviso al terminar el descanso
+          </label>
+          <button type="button" id="btn-help-notif-rest" class="icon-btn settings-help-btn" aria-label="Qué es el aviso de fin de descanso">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-notif-sound" />
+            Sonido
+          </label>
+          <button type="button" id="btn-help-notif-sound" class="icon-btn settings-help-btn" aria-label="Cómo funciona el sonido de los avisos">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-notif-vibrate" />
+            Vibración
+          </label>
+          <button type="button" id="btn-help-notif-vibrate" class="icon-btn settings-help-btn" aria-label="Cómo funciona la vibración de los avisos">?</button>
+        </div>
+        <p id="notifications-status" class="hint"></p>
+        <p id="gym-live-activity-status" class="hint"></p>
       </div>
 
       <!-- --- Tienda (todavia sin mecanica: solo el hueco) --- -->
@@ -2262,31 +2315,6 @@
       <div id="settings-tab-mobile" class="settings-tab-panel hidden">
         <h3>Este dispositivo</h3>
         <p class="hint">Estos ajustes son solo para el dispositivo en el que estas viendo esto ahora mismo.</p>
-        <!-- Poco texto a la vista (peticion de Koku): la explicacion
-             completa vive en el boton "?" y sale como dialogo. -->
-        <div class="settings-subheading-row">
-          <h4>Notificaciones</h4>
-          <button type="button" id="btn-notifications-help" class="icon-btn settings-help-btn" aria-label="Dudas sobre las notificaciones">?</button>
-        </div>
-        <label class="checkbox-row">
-          <input type="checkbox" id="setting-notifications" />
-          Avisos de recordatorios
-        </label>
-        <label class="checkbox-row">
-          <input type="checkbox" id="setting-gym-rest-notify" />
-          Aviso al terminar el descanso (Gimnasio)
-        </label>
-        <label class="checkbox-row">
-          <input type="checkbox" id="setting-notif-sound" />
-          Sonido
-        </label>
-        <label class="checkbox-row">
-          <input type="checkbox" id="setting-notif-vibrate" />
-          Vibración
-        </label>
-        <p id="notifications-status" class="hint"></p>
-        <p id="gym-live-activity-status" class="hint"></p>
-
         <h4>Gimnasio: formato de tiempo</h4>
         <div id="gym-time-format-options" class="view-mode-options"></div>
 

@@ -263,7 +263,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'store'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'notifications', 'store'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -282,7 +282,9 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     if (tab === 'profile') refreshProfileTab();
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();
-    else if (tab === 'mobile') refreshMobileTab();
+    // refreshMobileTab refresca por id, asi que vale para las DOS
+    // secciones que reparte: Este dispositivo y Notificaciones.
+    else if (tab === 'mobile' || tab === 'notifications') refreshMobileTab();
   });
 });
 
@@ -1298,15 +1300,19 @@ document.getElementById('setting-notif-vibrate').addEventListener('change', (e) 
   onNotifAlertToggleChange();
 });
 
-// El "?" de Notificaciones: toda la letra pequena que antes ocupaba la
-// pantalla (peticion de Koku: "no pongas tanto texto... un boton de
-// dudas para que no este siempre").
-document.getElementById('btn-notifications-help').addEventListener('click', () => {
-  showAppAlert(
-    'Avisos de recordatorios: en la app instalada los programa el propio teléfono, así que suenan aunque la app esté cerrada y sin que nada salga del dispositivo. Desde un navegador solo pueden avisar con la pestaña abierta.\n\n' +
-    'Aviso al terminar el descanso: durante un entrenamiento, cuando se acaba el descanso entre series llega una notificación aunque la pantalla esté bloqueada. Usa el mismo permiso que los recordatorios.\n\n' +
-    'Sonido y vibración: valen para todos los avisos de la app. Un detalle de iOS: cuando un aviso suena, vibrar o no lo decide el teléfono (Ajustes > Sonidos y vibraciones), no la app — por eso no existe "sonido sin vibración". "Solo vibración" sí funciona: la app reproduce medio segundo de silencio y eso dispara la vibración sin que se oiga nada.'
-  );
+// Un "?" POR OPCION (peticion de Koku: "cada apartado tiene su propio
+// boton con su texto"), en vez de un unico dialogo con todo.
+document.getElementById('btn-help-notif-reminders').addEventListener('click', () => {
+  showAppAlert('En la app instalada, los avisos de recordatorios los programa el propio teléfono: suenan aunque la app esté cerrada y sin que nada salga del dispositivo. Desde un navegador solo pueden avisar con la pestaña abierta.');
+});
+document.getElementById('btn-help-notif-rest').addEventListener('click', () => {
+  showAppAlert('Durante un entrenamiento del Gimnasio, cuando se acaba el descanso entre series llega una notificación aunque la pantalla esté bloqueada — así no hace falta estar mirando el móvil. Usa el mismo permiso que los recordatorios.');
+});
+document.getElementById('btn-help-notif-sound').addEventListener('click', () => {
+  showAppAlert('Con el sonido activado, los avisos usan el sonido del sistema. Un detalle de iOS: cuando un aviso suena, vibrar o no lo decide el teléfono (Ajustes > Sonidos y vibraciones), no la app — por eso no existe la combinación "sonido sin vibración".');
+});
+document.getElementById('btn-help-notif-vibrate').addEventListener('click', () => {
+  showAppAlert('Con el sonido apagado y la vibración encendida, la app usa un truco: "reproduce" medio segundo de silencio, que es lo único que iOS acepta para disparar la vibración sin que se oiga nada. Con los dos apagados, el aviso llega solo en pantalla, sin ruido ni vibración.');
 });
 
 // Formato de tiempo del Gimnasio (descansos): minutos:segundos o
