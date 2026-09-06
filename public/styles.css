@@ -3769,3 +3769,179 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 
 /* Botones de la cabecera del sidebar de Proyectos (guia + nueva pagina) */
 .proyectos-sidebar-header-btns { display: flex; align-items: center; gap: 0.15rem; }
+
+/* =====================================================================
+   Ronda de feedback de Proyectos (Koku probando la herramienta)
+   ===================================================================== */
+
+/* Scrollbars con el estilo de la app EN TODA LA APLICACION (pedido
+   explicito: "todos los scrollbars", tambien el del menu "/"). Electron
+   es Chromium, asi que con ::-webkit-scrollbar llega a todos. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+  /* El borde transparente hace de "margen" para que el pulgar se vea
+     mas fino que la pista sin encoger la zona clicable. */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--accent); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* El popover de insertar tabla: el boton Insertar a la misma altura que
+   los campos (antes quedaba descolgado por su padding mayor). */
+.proyectos-table-popover { align-items: flex-end; }
+.proyectos-table-popover .primary-btn { padding: 0.42rem 0.9rem; }
+
+/* Tablas del cuerpo: ahora el ancho por defecto se ajusta al contenido,
+   y el boton de editar tabla permite ponerla a ancho completo
+   (data-width="full", que tambien entiende el saneador del backend). */
+.proyectos-page-body table { width: auto; max-width: 100%; }
+.proyectos-page-body table[data-width="full"] { width: 100%; }
+
+/* Boton flotante de editar tabla (aparece al pasar el raton por una
+   tabla) y su menu de acciones. */
+.proyectos-table-menu-btn {
+  position: fixed; z-index: 55;
+  width: 26px; height: 26px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--surface-2-text);
+  cursor: pointer; font-size: 0.85rem; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.proyectos-table-menu-btn:hover { border-color: var(--accent); }
+.proyectos-table-menu-btn.hidden { display: none; }
+.proyectos-table-menu-popover {
+  position: fixed; z-index: 60;
+  background: var(--surface); color: var(--surface-text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  padding: 0.35rem;
+  display: flex; flex-direction: column; gap: 0.1rem;
+  width: 220px;
+}
+.proyectos-table-menu-popover.hidden { display: none; }
+.proyectos-table-menu-item {
+  border: none; background: none; color: inherit; font: inherit;
+  font-size: 0.88rem; text-align: left; cursor: pointer;
+  padding: 0.38rem 0.5rem; border-radius: var(--radius-sm);
+}
+.proyectos-table-menu-item:hover { background: var(--surface-2); }
+.proyectos-table-menu-item.danger { color: var(--danger); }
+
+/* Enlaces dentro del cuerpo (web e internos) */
+.proyectos-page-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.proyectos-page-body a[data-page-link] { text-decoration-style: dotted; }
+.proyectos-link-popover label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; }
+.proyectos-link-popover input { width: 12rem; }
+.proyectos-link-popover .hidden { display: none; }
+.proyectos-pagelink-popover { padding: 0.5rem; gap: 0.3rem; }
+
+/* Modo "sin panel" (⛶): el arbol desaparece y la pagina ocupa todo. */
+.proyectos-layout.no-sidebar .proyectos-sidebar { display: none; }
+.proyectos-subnav-btn { flex-shrink: 0; opacity: 0.6; }
+.proyectos-subnav-btn:hover { opacity: 1; }
+
+/* Borrar con subpaginas: version "rellena" del boton de peligro, para
+   distinguirla del borrado normal de al lado. */
+.danger-btn-solid {
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  color: #fff;
+}
+.danger-btn-solid:hover:not(:disabled) { filter: brightness(1.1); }
+
+/* Tablero: aire alrededor para que las columnas no queden pegadas al
+   borde del widget, y la columna fantasma de "+ Columna". */
+.proyectos-db-board { padding: 0.2rem 0.2rem 0.5rem; }
+.proyectos-db-board-addcol {
+  background: transparent;
+  border: 1px dashed var(--border);
+  justify-content: flex-start;
+}
+.proyectos-db-board-addcol input { font-size: 0.85rem; }
+
+/* Popover de configuracion de vista: ancho fijo acorde a lo que se le
+   pasa a positionFixedPopover, para que no se salga por la derecha. */
+.proyectos-db-config-popover { width: 280px; box-sizing: border-box; }
+
+/* --- Colores de sintaxis de los bloques de codigo (highlight.js) ---
+   Paleta unica, elegida para leerse sobre el fondo de --surface-2 tanto
+   en temas oscuros como claros (tonos de luminosidad media, estilo
+   GitHub). No usa los tokens del tema porque un tema no define 8
+   colores de sintaxis; si algun dia hay temas de codigo, es cambiar
+   estas variables. */
+.proyectos-page-body pre code .hljs-comment,
+.proyectos-page-body pre code .hljs-quote { color: #8b949e; font-style: italic; }
+.proyectos-page-body pre code .hljs-keyword,
+.proyectos-page-body pre code .hljs-selector-tag,
+.proyectos-page-body pre code .hljs-meta { color: #f47067; }
+.proyectos-page-body pre code .hljs-string,
+.proyectos-page-body pre code .hljs-regexp,
+.proyectos-page-body pre code .hljs-addition { color: #57ab5a; }
+.proyectos-page-body pre code .hljs-number,
+.proyectos-page-body pre code .hljs-literal { color: #6cb6ff; }
+.proyectos-page-body pre code .hljs-title,
+.proyectos-page-body pre code .hljs-title.function_,
+.proyectos-page-body pre code .hljs-section { color: #c69026; }
+.proyectos-page-body pre code .hljs-title.class_,
+.proyectos-page-body pre code .hljs-type,
+.proyectos-page-body pre code .hljs-built_in { color: #dcbdfb; }
+.proyectos-page-body pre code .hljs-attr,
+.proyectos-page-body pre code .hljs-attribute,
+.proyectos-page-body pre code .hljs-variable,
+.proyectos-page-body pre code .hljs-template-variable { color: #6cb6ff; }
+.proyectos-page-body pre code .hljs-symbol,
+.proyectos-page-body pre code .hljs-bullet,
+.proyectos-page-body pre code .hljs-link { color: #f69d50; }
+.proyectos-page-body pre code .hljs-deletion { color: #f47067; }
+.proyectos-page-body pre code .hljs-emphasis { font-style: italic; }
+.proyectos-page-body pre code .hljs-strong { font-weight: bold; }
+
+/* La etiqueta del lenguaje detectado, discreta en la esquina del pre */
+.proyectos-page-body pre { position: relative; }
+.proyectos-page-body pre[data-lang]::after {
+  content: attr(data-lang);
+  position: absolute; top: 0.3rem; right: 0.55rem;
+  font-size: 0.68rem; opacity: 0.45;
+  font-family: inherit;
+}
+
+/* --- Alerts estilo GitHub (> [!TIP] y compañia): callouts tipados ---
+   Cinco tipos cerrados (data-kind, validado tambien en el saneador del
+   backend): nota, consejo, importante, aviso y peligro. El color, el
+   icono y la etiqueta salen del kind via CSS -- el bloque solo guarda
+   <div data-callout="1" data-kind="tip">texto</div>. Colores calcados
+   de los alerts de GitHub (luminosidad media, legibles sobre
+   --surface-2 en temas claros y oscuros, mismo criterio que la paleta
+   de codigo de arriba). */
+.proyectos-page-body [data-callout][data-kind] {
+  display: block;
+  border-left: 3px solid var(--alert-color);
+  background: color-mix(in srgb, var(--alert-color) 10%, var(--surface-2));
+}
+/* La cabecera "icono + etiqueta" en su color, y el texto debajo. */
+.proyectos-page-body [data-callout][data-kind]::before {
+  display: block;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--alert-color);
+  margin-bottom: 0.15rem;
+}
+.proyectos-page-body [data-callout][data-kind="note"] { --alert-color: #4493f8; }
+.proyectos-page-body [data-callout][data-kind="note"]::before { content: 'ℹ️ Nota'; }
+.proyectos-page-body [data-callout][data-kind="tip"] { --alert-color: #3fb950; }
+.proyectos-page-body [data-callout][data-kind="tip"]::before { content: '💡 Consejo'; }
+.proyectos-page-body [data-callout][data-kind="important"] { --alert-color: #ab7df8; }
+.proyectos-page-body [data-callout][data-kind="important"]::before { content: '❗ Importante'; }
+.proyectos-page-body [data-callout][data-kind="warning"] { --alert-color: #d29922; }
+.proyectos-page-body [data-callout][data-kind="warning"]::before { content: '⚠️ Aviso'; }
+.proyectos-page-body [data-callout][data-kind="caution"] { --alert-color: #f85149; }
+.proyectos-page-body [data-callout][data-kind="caution"]::before { content: '🛑 Peligro'; }

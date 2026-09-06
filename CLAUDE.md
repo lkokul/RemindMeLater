@@ -340,6 +340,31 @@ ahora se llama `device`.
       `createProyectosGuide()` en `app.js` — usa las APIs normales, así
       que también sirve de prueba de humo. Es un proyecto normal: se
       edita y se borra como cualquier otro, y se puede crear N veces.
+    - **Ronda de feedback tras probarlo Koku** (todo verificado con la
+      app real): deshacer/rehacer PROPIO con Ctrl+Z/Ctrl+Y
+      (instantáneas del cuerpo serializado — el nativo no vale porque
+      las conversiones de bloque por JS no entran en su historial);
+      enlaces web (`<a href>`, Ctrl+K sobre selección, se abren en el
+      navegador del sistema vía `setWindowOpenHandler`) y conectores a
+      páginas (`<a data-page-link="id">`); botón ▦ flotante al pasar el
+      ratón por una tabla (filas/columnas al principio o final, ancho
+      completo con `data-width="full"`, borrar); coloreado de código
+      con highlight.js vendorizado (`public/vendor/highlight.min.js`,
+      BSD-3; solo presentación — al guardar, `getProyectosBodyHtml()`
+      devuelve el código a texto plano); modo "sin panel" ⛶ (oculta el
+      sidebar; para bajar por el árbol está el ▾ de subpáginas junto al
+      título); "Borrar con subpáginas" (rojo relleno,
+      `DELETE ?withChildren=1`, borra el subárbol entero con su
+      limpieza); "+ Columna" en el tablero (añade opción al select que
+      agrupa); scrollbars con tema en TODA la app
+      (`::-webkit-scrollbar`); y los avisos de Proyectos usan
+      `showAppConfirm`/`showAppAlert` (los modales propios que ya
+      existían), no `confirm()`/`alert()` nativos. También los **alerts
+      estilo GitHub** (`> [!TIP]` y compañía): callouts tipados
+      `data-kind` (note/tip/important/warning/caution, lista cerrada en
+      el saneador), con color/icono/etiqueta puestos por CSS; se crean
+      con `!tip`/`!nota`/`!aviso`… + espacio (mayúsculas también) o
+      desde el menú "/".
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 

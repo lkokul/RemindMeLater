@@ -47,6 +47,9 @@ const IMAGE_SRC = /^\/api\/proyectos\/images\/[a-zA-Z0-9._-]+$/;
 const CODE_LANG = /^[a-zA-Z0-9+#.-]{0,20}$/;
 // El icono de un callout es un emoji corto, como note_folders.icon.
 const CALLOUT_ICON_MAX = 8;
+// Tipos de callout "estilo GitHub" (> [!TIP] y compañia): lista cerrada,
+// el CSS del cliente les pone color/icono/etiqueta segun el kind.
+const CALLOUT_KINDS = new Set(['note', 'tip', 'important', 'warning', 'caution']);
 // Id numerico de una base de datos embebida (bloque de la Fase 3): el
 // HTML solo guarda un marcador <div data-proyectos-db="123"> y la
 // interfaz lo "hidrata" al mostrar la pagina -- mismo truco que las
@@ -69,12 +72,27 @@ function sanitizePageBody(html) {
       return `<img src="${src}">`;
     }
     if (lower === 'a') {
-      // Solo enlaces http(s) normales -- nada de javascript: ni rutas
-      // raras. Se quita el enlace (dejando su texto) si no encaja.
+      // Dos tipos de enlace y nada mas:
+      //   - interno: <a data-page-link="id"> lleva a otra pagina de
+      //     Proyectos (la interfaz intercepta el click, no hay href)
+      //   - externo: <a href="http(s)://..."> -- nada de javascript:
+      //     ni rutas raras. Se quita el enlace (dejando su texto) si no
+      //     encaja en ninguno de los dos.
+      const pageMatch = attrs.match(/\sdata-page-link\s*=\s*"([^"]*)"/i);
+      if (pageMatch && /^\d{1,10}$/.test(pageMatch[1])) {
+        return `<a data-page-link="${pageMatch[1]}">`;
+      }
       const hrefMatch = attrs.match(/\shref\s*=\s*"([^"]*)"/i);
       const href = hrefMatch ? hrefMatch[1] : '';
       if (!/^https?:\/\//i.test(href)) return '';
       return `<a href="${href}">`;
+    }
+    if (lower === 'table') {
+      // data-width="full" = tabla a ancho completo (boton de editar
+      // tabla en la interfaz). Unico valor admitido, como data-border
+      // en las notas.
+      const widthMatch = attrs.match(/\sdata-width\s*=\s*"([^"]*)"/i);
+      return widthMatch && widthMatch[1] === 'full' ? '<table data-width="full">' : '<table>';
     }
     if (lower === 'details') {
       // "open" (sin valor) = el toggle se guarda desplegado. Es el unico
@@ -94,6 +112,14 @@ function sanitizePageBody(html) {
       // Cualquier otro data-*/atributo se descarta.
       const calloutMatch = attrs.match(/\sdata-callout\s*=\s*"([^"]*)"/i);
       if (calloutMatch && calloutMatch[1] === '1') {
+        // Variante "tipada" (los alerts de GitHub: nota/consejo/
+        // importante/aviso/peligro): data-kind de una lista cerrada. El
+        // color, icono y etiqueta los pone el CSS a partir del kind, asi
+        // que un callout tipado no lleva data-icon.
+        const kindMatch = attrs.match(/\sdata-kind\s*=\s*"([^"]*)"/i);
+        if (kindMatch && CALLOUT_KINDS.has(kindMatch[1])) {
+          return `<div data-callout="1" data-kind="${kindMatch[1]}">`;
+        }
         const iconMatch = attrs.match(/\sdata-icon\s*=\s*"([^"]*)"/i);
         // El emoji se re-escapa a mano: solo se admite algo corto y sin
         // caracteres con significado en HTML.
@@ -266,28 +292,49 @@ router.put('/:id', (req, res) => {
   res.json(serializeFullRow(row));
 });
 
+// Limpieza que acompaña SIEMPRE al borrado de una pagina: sus imagenes
+// del disco y sus bases de datos embebidas (filas, propiedades y
+// valores). El require de proyectosDatabases es diferido (dentro de la
+// funcion, no arriba del todo) a proposito: ese archivo ya importa
+// cosas de ESTE (sanitizePageBody), y un require circular en tiempo de
+// carga dejaria a uno de los dos a medias.
+function deletePageOwnedContent(page) {
+  deleteImagesInBody(page.body);
+  const { deleteDatabaseCascade } = require('./proyectosDatabases');
+  const databases = db.prepare('SELECT id FROM proyectos_databases WHERE page_id = ?').all(page.id);
+  for (const database of databases) deleteDatabaseCascade(database.id);
+}
+
 router.delete('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM proyectos_pages WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  // Las subpaginas NO se borran: suben un nivel, al padre de la pagina
-  // borrada (o a la raiz si no tenia) -- la misma regla de la casa que
-  // las carpetas de notas: borrar un contenedor nunca destruye lo que
-  // habia dentro.
+  // Dos modos de borrar:
+  //   - normal: las subpaginas NO se borran, suben un nivel (la regla
+  //     de la casa de siempre: borrar un contenedor nunca destruye lo
+  //     de dentro).
+  //   - ?withChildren=1: se borra la pagina Y todo su subarbol (lo
+  //     pidio Koku para no tener que borrar una a una) -- cada pagina
+  //     borrada limpia lo suyo (imagenes + bases embebidas).
+  if (req.query && String(req.query.withChildren) === '1') {
+    // Recorrido en anchura para juntar el subarbol entero.
+    const toDelete = [existing];
+    let frontier = [existing.id];
+    while (frontier.length > 0) {
+      const placeholders = frontier.map(() => '?').join(',');
+      const children = db.prepare(`SELECT * FROM proyectos_pages WHERE parent_id IN (${placeholders})`).all(...frontier);
+      toDelete.push(...children);
+      frontier = children.map((c) => c.id);
+    }
+    for (const page of toDelete) deletePageOwnedContent(page);
+    const ids = toDelete.map((p) => p.id);
+    const placeholders = ids.map(() => '?').join(',');
+    db.prepare(`DELETE FROM proyectos_pages WHERE id IN (${placeholders})`).run(...ids);
+    return res.status(204).end();
+  }
+
   db.prepare('UPDATE proyectos_pages SET parent_id = ? WHERE parent_id = ?').run(existing.parent_id, req.params.id);
-
-  // Las imagenes del cuerpo si se limpian del disco (nadie mas las
-  // referencia -- cada imagen pertenece a la pagina donde se subio).
-  deleteImagesInBody(existing.body);
-
-  // Y las bases de datos embebidas en esta pagina tambien se van con
-  // ella (filas, propiedades y valores incluidos). El require es aqui
-  // dentro y no arriba del todo a proposito: proyectosDatabases.js ya
-  // importa cosas de ESTE archivo (sanitizePageBody), y un require
-  // circular en tiempo de carga dejaria a uno de los dos a medias.
-  const { deleteDatabaseCascade } = require('./proyectosDatabases');
-  const databases = db.prepare('SELECT id FROM proyectos_databases WHERE page_id = ?').all(req.params.id);
-  for (const database of databases) deleteDatabaseCascade(database.id);
+  deletePageOwnedContent(existing);
 
   const info = db.prepare('DELETE FROM proyectos_pages WHERE id = ?').run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ error: 'not_found' });

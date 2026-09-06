@@ -455,6 +455,11 @@
     <div class="my-space-view-header">
       <h2>Proyectos</h2>
       <div class="my-space-view-header-actions">
+        <!-- Modo "sin panel": esconde el sidebar del arbol para leer/
+             escribir a pantalla completa. Para moverse sin arbol estan
+             las migas de pan (antepasados) y el desplegable de
+             subpaginas junto al titulo (descendientes). Por dispositivo. -->
+        <button type="button" id="btn-proyectos-focus" class="icon-btn" aria-label="Ocultar o mostrar el panel de páginas" title="Ocultar/mostrar el panel de páginas">⛶</button>
         <button type="button" id="btn-close-proyectos" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-proyectos-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
@@ -497,6 +502,10 @@
             <div class="proyectos-title-row">
               <span id="proyectos-icon-slot"></span>
               <h1 id="proyectos-page-title" class="proyectos-page-title" contenteditable="true" data-placeholder="Sin título"></h1>
+              <!-- Desplegable con las subpaginas de ESTA pagina: la
+                   forma de bajar por el arbol cuando el sidebar esta
+                   oculto (modo sin panel). -->
+              <button type="button" id="btn-proyectos-subnav" class="icon-btn proyectos-subnav-btn" aria-label="Ver subpáginas" title="Subpáginas de esta página">▾</button>
             </div>
             <div class="proyectos-page-toolbar">
               <button type="button" id="btn-proyectos-favorite" class="icon-btn" aria-label="Favorito" title="Favorito">☆</button>
@@ -504,6 +513,7 @@
               <button type="button" id="btn-proyectos-subpage" class="secondary-btn" title="Crear una subpágina dentro de esta">+ Subpágina</button>
               <div class="spacer"></div>
               <button type="button" id="btn-proyectos-delete" class="danger-btn" title="Borrar esta página (sus subpáginas suben un nivel)">Borrar</button>
+              <button type="button" id="btn-proyectos-delete-tree" class="danger-btn-solid" title="Borrar esta página Y todas sus subpáginas">Borrar con subpáginas</button>
             </div>
             <div id="proyectos-page-body" class="proyectos-page-body" contenteditable="true" data-placeholder="Escribe algo, o pulsa “/” para insertar un bloque…"></div>
           </div>
@@ -2095,6 +2105,10 @@
   </div>
 
   <script src="viajesCountries.js"></script>
+  <!-- highlight.js (vendorizado, BSD-3): colorea los bloques de codigo
+       de Proyectos. Solo presentacion -- se aplica al mostrar y el HTML
+       guardado sigue siendo texto plano. -->
+  <script src="vendor/highlight.min.js"></script>
   <script src="app.js"></script>
   <script src="settings.js"></script>
 </body>

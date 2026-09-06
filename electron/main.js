@@ -7,7 +7,7 @@
 // hablan entre ellas por IPC (ver electron/ipc.js). Lo que se ve en
 // pantalla es exactamente el mismo public/ de siempre, servido por un
 // esquema propio app:// (ver electron/protocol.js).
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -89,6 +89,15 @@ function createWindow() {
   // SQLite en este mismo proceso, asi que la ventana puede cargar de
   // inmediato.
   mainWindow.loadURL(`${ORIGIN}/index.html`);
+
+  // Un enlace externo (los <a href="http..."> de una pagina de
+  // Proyectos, por ejemplo) se abre en el navegador de verdad del
+  // sistema, nunca en una ventana nueva de la app: esta ventana es la
+  // app entera, no un navegador.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
   // Avisa a la pagina si sales de pantalla completa nativa por tu cuenta
   // (Esc, el propio control de la ventana...) para que Configuracion > Vista

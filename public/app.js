@@ -10290,6 +10290,9 @@ async function openProyectosPage(id) {
   // <div data-proyectos-db> del HTML guardado) -- Fase 3. Sin await a
   // proposito: cada base carga por su cuenta sin bloquear la pagina.
   hydrateProyectosDbBlocks();
+  highlightProyectosCodeBlocks();
+  // La pila de deshacer empieza de cero en cada pagina.
+  resetProyectosUndo();
   // Cambiar de pagina cierra el side peek si estaba abierto.
   closeProyectosPeek();
 
@@ -10341,6 +10344,7 @@ async function openProyectosView() {
   closeExtensionsView();
   document.getElementById('proyectos-view').classList.remove('hidden');
   setCurrentScreen('proyectos');
+  applyProyectosFocusMode();
   await loadProyectosPages();
   renderProyectosTree();
   // Reabrir la ultima pagina que estuviera abierta (por dispositivo).
@@ -10422,22 +10426,90 @@ document.getElementById('btn-proyectos-cover').addEventListener('click', () => {
   }
 });
 
-document.getElementById('btn-proyectos-delete').addEventListener('click', async () => {
+// Borrado de la pagina abierta. Los dos botones comparten este flujo;
+// el "recursivo" añade ?withChildren=1 y otro texto de aviso.
+async function deleteCurrentProyectosPage({ withChildren = false } = {}) {
   if (!proyectosCurrentPage) return;
   const label = proyectosCurrentPage.title || 'Sin título';
-  if (!confirm(`¿Eliminar la página "${label}"? Sus subpáginas no se borran: suben un nivel.`)) return;
+  const message = withChildren
+    ? `¿Borrar "${label}" Y TODAS sus subpáginas? Esto no se puede deshacer.`
+    : `¿Borrar la página "${label}"? Sus subpáginas no se borran: suben un nivel.`;
+  const ok = await showAppConfirm(message, { danger: true, okText: withChildren ? 'Borrar todo' : 'Borrar' });
+  if (!ok) return;
   // Descartar cualquier guardado pendiente de esta pagina (se va a
   // borrar igualmente) y borrar.
   if (proyectosSaveTimer) { clearTimeout(proyectosSaveTimer); proyectosSaveTimer = null; }
   proyectosPendingSave = null;
   const deletedId = proyectosCurrentPage.id;
-  await api(`/api/proyectos-pages/${deletedId}`, { method: 'DELETE' });
+  await api(`/api/proyectos-pages/${deletedId}${withChildren ? '?withChildren=1' : ''}`, { method: 'DELETE' });
   proyectosCurrentPage = null;
   localStorage.removeItem('proyectosLastPageId');
   document.getElementById('proyectos-page').classList.add('hidden');
   document.getElementById('proyectos-empty').classList.remove('hidden');
   await loadProyectosPages();
   renderProyectosTree();
+}
+document.getElementById('btn-proyectos-delete').addEventListener('click', () => deleteCurrentProyectosPage());
+document.getElementById('btn-proyectos-delete-tree').addEventListener('click', () => deleteCurrentProyectosPage({ withChildren: true }));
+
+// ---------------------------------------------------------------------
+// Modo "sin panel" (⛶): esconde el sidebar para leer/escribir a pantalla
+// completa. Por dispositivo. Para moverse sin arbol: migas de pan hacia
+// arriba, y el desplegable de subpaginas (▾ junto al titulo) hacia
+// abajo.
+// ---------------------------------------------------------------------
+function applyProyectosFocusMode() {
+  const on = localStorage.getItem('proyectosFocusMode') === '1';
+  document.querySelector('#proyectos-view .proyectos-layout').classList.toggle('no-sidebar', on);
+}
+document.getElementById('btn-proyectos-focus').addEventListener('click', () => {
+  const on = localStorage.getItem('proyectosFocusMode') === '1';
+  localStorage.setItem('proyectosFocusMode', on ? '0' : '1');
+  applyProyectosFocusMode();
+});
+
+// El desplegable de subpaginas de la pagina abierta.
+let proyectosSubnavPopover = null;
+document.getElementById('btn-proyectos-subnav').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!proyectosCurrentPage) return;
+  if (!proyectosSubnavPopover) {
+    proyectosSubnavPopover = document.createElement('div');
+    proyectosSubnavPopover.className = 'proyectos-slash-popover proyectos-subnav-popover hidden';
+    document.body.appendChild(proyectosSubnavPopover);
+  }
+  const popover = proyectosSubnavPopover;
+  if (!popover.classList.contains('hidden')) { popover.classList.add('hidden'); return; }
+  popover.innerHTML = '';
+  const children = proyectosChildrenOf(proyectosCurrentPage.id);
+  for (const page of children) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'proyectos-slash-item';
+    btn.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
+    btn.addEventListener('click', () => {
+      popover.classList.add('hidden');
+      openProyectosPage(page.id);
+    });
+    popover.appendChild(btn);
+  }
+  if (children.length === 0) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'Esta página no tiene subpáginas.';
+    popover.appendChild(hint);
+  }
+  const newBtn = document.createElement('button');
+  newBtn.type = 'button';
+  newBtn.className = 'proyectos-slash-item';
+  newBtn.textContent = '＋ Nueva subpágina';
+  newBtn.addEventListener('click', () => {
+    popover.classList.add('hidden');
+    createProyectosPage(proyectosCurrentPage.id);
+  });
+  popover.appendChild(newBtn);
+  popover.classList.remove('hidden');
+  positionFixedPopover(document.getElementById('btn-proyectos-subnav'), popover, { width: 260 });
 });
 
 // ---------------------------------------------------------------------
@@ -10477,13 +10549,23 @@ const PROYECTOS_BLOCK_TYPES = [
   { id: 'numbered', label: 'Lista numerada', hint: '1, 2, 3…', icon: '1.', keywords: 'lista numerada numeros ordenada' },
   { id: 'todo', label: 'Lista de tareas', hint: 'Con casilla para marcar', icon: '☑', keywords: 'tarea todo checkbox casilla pendiente' },
   { id: 'toggle', label: 'Desplegable', hint: 'Se pliega y despliega', icon: '▸', keywords: 'desplegable toggle plegar acordeon' },
-  { id: 'callout', label: 'Callout', hint: 'Recuadro destacado con icono', icon: '💡', keywords: 'callout destacado aviso recuadro nota' },
+  { id: 'callout', label: 'Callout', hint: 'Recuadro destacado con icono', icon: '💬', keywords: 'callout destacado recuadro' },
+  // Los "alerts" de GitHub (> [!TIP] y compañia): callouts tipados con
+  // color, icono y etiqueta fijos. Tambien salen escribiendo !tip,
+  // !nota, !aviso... + espacio (ver PROYECTOS_MD_SHORTCUTS).
+  { id: 'callout-note', label: 'Nota', hint: 'Alert azul (!nota)', icon: 'ℹ️', keywords: 'nota note alert informacion azul' },
+  { id: 'callout-tip', label: 'Consejo', hint: 'Alert verde (!tip)', icon: '💡', keywords: 'consejo tip alert truco verde' },
+  { id: 'callout-important', label: 'Importante', hint: 'Alert morado (!importante)', icon: '❗', keywords: 'importante important alert morado' },
+  { id: 'callout-warning', label: 'Aviso', hint: 'Alert amarillo (!aviso)', icon: '⚠️', keywords: 'aviso warning alert cuidado amarillo' },
+  { id: 'callout-caution', label: 'Peligro', hint: 'Alert rojo (!peligro)', icon: '🛑', keywords: 'peligro caution alert rojo' },
   { id: 'quote', label: 'Cita', hint: 'Texto citado', icon: '❝', keywords: 'cita quote' },
   { id: 'divider', label: 'Divisor', hint: 'Línea separadora', icon: '—', keywords: 'divisor separador linea hr' },
   { id: 'code', label: 'Código', hint: 'Bloque de código', icon: '</>', keywords: 'codigo code programar' },
   { id: 'table', label: 'Tabla', hint: 'Filas y columnas', icon: '▦', keywords: 'tabla table filas columnas' },
   { id: 'image', label: 'Imagen', hint: 'Subir una imagen', icon: '🖼', keywords: 'imagen foto image subir' },
   { id: 'page', label: 'Subpágina', hint: 'Crear una página dentro de esta', icon: '📄', keywords: 'pagina subpagina page anidar' },
+  { id: 'weblink', label: 'Enlace web', hint: 'A una página de internet', icon: '🔗', keywords: 'enlace link web url internet' },
+  { id: 'pagelink', label: 'Enlace a página', hint: 'A otra página de Proyectos', icon: '🔀', keywords: 'enlace link pagina conector interno' },
   { id: 'database', label: 'Base de datos', hint: 'Tabla, tablero o lista con propiedades', icon: '🗄', keywords: 'base datos database tabla tablero kanban lista coleccion' },
 ];
 
@@ -10500,11 +10582,120 @@ function getProyectosBodyHtml() {
     marker.setAttribute('data-proyectos-db', el.getAttribute('data-proyectos-db'));
     el.replaceWith(marker);
   });
+  // Los bloques de codigo se guardan como TEXTO PLANO: el coloreado de
+  // sintaxis (highlight.js, ver highlightProyectosCodeBlocks) mete un
+  // monton de <span> que son solo presentacion -- guardarlos ensuciaria
+  // el HTML y ademas el saneador les quitaria la clase que les da el
+  // color, dejando spans inutiles anidandose con cada guardado.
+  clone.querySelectorAll('pre > code').forEach((code) => {
+    code.textContent = plainProyectosCodeText(code);
+  });
   return clone.innerHTML;
+}
+
+// El texto plano de un bloque de codigo, con los <br> convertidos en
+// saltos de linea de verdad (textContent a secas se los comeria y
+// juntaria las lineas).
+function plainProyectosCodeText(code) {
+  const copy = code.cloneNode(true);
+  copy.querySelectorAll('br').forEach((br) => br.replaceWith(document.createTextNode('\n')));
+  return copy.textContent;
 }
 
 function queueProyectosSaveBody() {
   queueProyectosSave({ body: getProyectosBodyHtml() });
+  // Cada cambio del cuerpo alimenta tambien la pila de deshacer.
+  noteProyectosBodyChanged();
+}
+
+// ---------------------------------------------------------------------
+// Deshacer/rehacer propio (Ctrl+Z / Ctrl+Y)
+//
+// El deshacer nativo del navegador no sirve aqui: las conversiones de
+// bloque (menu "/", atajos markdown, el boton de tabla...) tocan el DOM
+// por JavaScript, y eso el navegador no lo apunta en su historial -- un
+// Ctrl+Z nativo tras convertir un bloque hace cosas raras o nada. En su
+// lugar se guardan instantaneas del cuerpo entero (el mismo HTML
+// serializado que se manda al guardar): cada vez que el cuerpo cambia y
+// se queda quieto ~400 ms, la version ANTERIOR se apunta en la pila.
+// ---------------------------------------------------------------------
+let proyectosUndoStack = [];
+let proyectosRedoStack = [];
+let proyectosUndoLastSnapshot = '';
+let proyectosUndoTimer = null;
+const PROYECTOS_UNDO_MAX = 100;
+
+// Al abrir una pagina, su estado recien cargado es el punto de partida.
+function resetProyectosUndo() {
+  proyectosUndoStack = [];
+  proyectosRedoStack = [];
+  proyectosUndoLastSnapshot = getProyectosBodyHtml();
+  if (proyectosUndoTimer) { clearTimeout(proyectosUndoTimer); proyectosUndoTimer = null; }
+}
+
+// "El cuerpo ha cambiado": agrupa rafagas de teclas en una sola entrada
+// de la pila (mismo espiritu que el guardado con retraso).
+function noteProyectosBodyChanged() {
+  if (proyectosUndoTimer) clearTimeout(proyectosUndoTimer);
+  proyectosUndoTimer = setTimeout(() => { commitProyectosUndoSnapshot(); }, 400);
+}
+
+function commitProyectosUndoSnapshot() {
+  if (proyectosUndoTimer) { clearTimeout(proyectosUndoTimer); proyectosUndoTimer = null; }
+  const current = getProyectosBodyHtml();
+  if (current === proyectosUndoLastSnapshot) return;
+  proyectosUndoStack.push(proyectosUndoLastSnapshot);
+  if (proyectosUndoStack.length > PROYECTOS_UNDO_MAX) proyectosUndoStack.shift();
+  proyectosRedoStack = []; // un cambio nuevo invalida lo "rehacible"
+  proyectosUndoLastSnapshot = current;
+}
+
+function restoreProyectosBodySnapshot(html) {
+  PROYECTOS_BODY().innerHTML = html;
+  hydrateProyectosDbBlocks();
+  highlightProyectosCodeBlocks();
+  proyectosUndoLastSnapshot = html;
+  queueProyectosSave({ body: html });
+}
+
+function proyectosUndo() {
+  commitProyectosUndoSnapshot(); // capturar lo ultimo tecleado antes de volver
+  if (proyectosUndoStack.length === 0) return;
+  proyectosRedoStack.push(proyectosUndoLastSnapshot);
+  restoreProyectosBodySnapshot(proyectosUndoStack.pop());
+}
+
+function proyectosRedo() {
+  if (proyectosRedoStack.length === 0) return;
+  proyectosUndoStack.push(proyectosUndoLastSnapshot);
+  restoreProyectosBodySnapshot(proyectosRedoStack.pop());
+}
+
+// ---------------------------------------------------------------------
+// Coloreado de sintaxis de los bloques de codigo (highlight.js,
+// vendorizado en public/vendor/highlight.min.js, BSD-3) -- "los colores
+// de GitHub" que pidio Koku. El coloreado es SOLO presentacion: se
+// aplica al mostrar, y al guardar el bloque vuelve a texto plano (ver
+// getProyectosBodyHtml). Si el <pre> no dice lenguaje (data-lang),
+// highlight.js lo adivina y se apunta el resultado.
+// ---------------------------------------------------------------------
+function highlightProyectosCodeBlocks(root) {
+  if (typeof hljs === 'undefined') return;
+  (root || PROYECTOS_BODY()).querySelectorAll('pre > code').forEach((code) => {
+    const text = plainProyectosCodeText(code);
+    if (!text.trim()) return;
+    const lang = code.parentElement.getAttribute('data-lang');
+    try {
+      const result = lang && hljs.getLanguage(lang)
+        ? hljs.highlight(text, { language: lang })
+        : hljs.highlightAuto(text);
+      code.innerHTML = result.value;
+      if (!lang && result.language) code.parentElement.setAttribute('data-lang', result.language);
+    } catch (err) {
+      // Un lenguaje raro o un fallo de la libreria no debe romper nada:
+      // el bloque simplemente se queda sin colorear.
+    }
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -10763,6 +10954,17 @@ function applyProyectosBlockType(typeId) {
       replaceProyectosBlock(block, div);
       break;
     }
+    case 'callout-note':
+    case 'callout-tip':
+    case 'callout-important':
+    case 'callout-warning':
+    case 'callout-caution': {
+      const div = document.createElement('div');
+      div.setAttribute('data-callout', '1');
+      div.setAttribute('data-kind', typeId.slice('callout-'.length));
+      replaceProyectosBlock(block, div);
+      break;
+    }
     case 'divider': {
       // El divisor no es editable: se inserta el <hr> y un bloque vacio
       // detras para seguir escribiendo.
@@ -10782,6 +10984,8 @@ function applyProyectosBlockType(typeId) {
     }
     case 'table': openProyectosTablePopover(block); break;
     case 'image': insertProyectosImage(block); break;
+    case 'weblink': openProyectosLinkPopover({ mode: 'insert', block }); return; // guarda al insertar
+    case 'pagelink': openProyectosPageLinkPopover(block); return; // idem
     case 'database': insertProyectosDatabase(block); return; // guarda por su cuenta al terminar
     case 'page': {
       // Crea una subpagina de la actual y la abre -- el bloque desde el
@@ -10854,6 +11058,124 @@ function insertProyectosTable(rows, cols) {
 }
 
 // ---------------------------------------------------------------------
+// Boton de editar tabla: al pasar el raton por una tabla del cuerpo
+// aparece un boton "▦" en su esquina superior derecha, con un menu para
+// añadir/quitar filas y columnas (al principio o al final), ponerla a
+// ancho completo o borrarla entera -- pedido por Koku, mas comodo que
+// hacerlo todo con el teclado.
+// ---------------------------------------------------------------------
+let proyectosTableMenuBtn = null;
+let proyectosTableMenuPopover = null;
+let proyectosTableMenuTable = null; // la tabla señalada ahora mismo
+
+function ensureProyectosTableMenuBtn() {
+  if (proyectosTableMenuBtn) return;
+  proyectosTableMenuBtn = document.createElement('button');
+  proyectosTableMenuBtn.type = 'button';
+  proyectosTableMenuBtn.className = 'proyectos-table-menu-btn hidden';
+  proyectosTableMenuBtn.textContent = '▦';
+  proyectosTableMenuBtn.title = 'Editar tabla';
+  document.body.appendChild(proyectosTableMenuBtn);
+  proyectosTableMenuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openProyectosTableMenu();
+  });
+}
+
+// Señalar/dejar de señalar tablas con el raton. El boton es UNO solo,
+// compartido, que se recoloca sobre la tabla que toque.
+PROYECTOS_BODY().addEventListener('mouseover', (e) => {
+  const table = e.target.closest?.('table');
+  if (table && PROYECTOS_BODY().contains(table) && !table.closest('[data-proyectos-db]')) {
+    ensureProyectosTableMenuBtn();
+    proyectosTableMenuTable = table;
+    const rect = table.getBoundingClientRect();
+    proyectosTableMenuBtn.style.top = `${rect.top + 4}px`;
+    proyectosTableMenuBtn.style.left = `${Math.min(rect.right - 30, window.innerWidth - 40)}px`;
+    proyectosTableMenuBtn.classList.remove('hidden');
+  } else if (proyectosTableMenuBtn && !e.target.closest?.('.proyectos-table-menu-btn')) {
+    // Fuera de la tabla: se esconde salvo que el menu este abierto.
+    if (!proyectosTableMenuPopover || proyectosTableMenuPopover.classList.contains('hidden')) {
+      proyectosTableMenuBtn.classList.add('hidden');
+    }
+  }
+});
+
+function openProyectosTableMenu() {
+  const table = proyectosTableMenuTable;
+  if (!table || !PROYECTOS_BODY().contains(table)) return;
+  if (!proyectosTableMenuPopover) {
+    proyectosTableMenuPopover = document.createElement('div');
+    proyectosTableMenuPopover.className = 'proyectos-table-menu-popover hidden';
+    document.body.appendChild(proyectosTableMenuPopover);
+  }
+  const popover = proyectosTableMenuPopover;
+  popover.innerHTML = '';
+
+  const emptyCell = () => {
+    const td = document.createElement('td');
+    td.appendChild(document.createElement('br'));
+    return td;
+  };
+  const rows = () => [...table.querySelectorAll('tr')];
+  const colCount = () => (rows()[0] ? rows()[0].children.length : 0);
+
+  function action(label, fn, { danger = false } = {}) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'proyectos-table-menu-item' + (danger ? ' danger' : '');
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      popover.classList.add('hidden');
+      fn();
+      queueProyectosSaveBody();
+    });
+    popover.appendChild(btn);
+  }
+
+  action('+ Fila al final', () => {
+    const tr = document.createElement('tr');
+    for (let i = 0; i < colCount(); i++) tr.appendChild(emptyCell());
+    rows()[rows().length - 1].after(tr);
+  });
+  action('+ Fila al principio', () => {
+    const tr = document.createElement('tr');
+    for (let i = 0; i < colCount(); i++) tr.appendChild(emptyCell());
+    rows()[0].before(tr);
+  });
+  action('+ Columna al final', () => {
+    rows().forEach((tr) => tr.appendChild(emptyCell()));
+  });
+  action('+ Columna al principio', () => {
+    rows().forEach((tr) => tr.prepend(emptyCell()));
+  });
+  action('− Quitar última fila', () => {
+    const all = rows();
+    if (all.length > 1) all[all.length - 1].remove();
+    else removeProyectosTable(table); // sin filas no hay tabla
+  });
+  action('− Quitar última columna', () => {
+    if (colCount() > 1) rows().forEach((tr) => tr.lastElementChild?.remove());
+    else removeProyectosTable(table);
+  });
+  action(table.getAttribute('data-width') === 'full' ? 'Ancho ajustado al contenido' : 'Ancho completo', () => {
+    if (table.getAttribute('data-width') === 'full') table.removeAttribute('data-width');
+    else table.setAttribute('data-width', 'full');
+  });
+  action('Borrar la tabla', () => removeProyectosTable(table), { danger: true });
+
+  popover.classList.remove('hidden');
+  positionFixedPopover(proyectosTableMenuBtn, popover, { width: 220 });
+}
+
+function removeProyectosTable(table) {
+  const after = emptyProyectosBlock();
+  table.replaceWith(after);
+  placeCaretIn(after);
+  if (proyectosTableMenuBtn) proyectosTableMenuBtn.classList.add('hidden');
+}
+
+// ---------------------------------------------------------------------
 // Imagen: selector de archivo -> subir -> <img> con el enlace corto
 // ---------------------------------------------------------------------
 let proyectosImageTargetBlock = null;
@@ -10894,11 +11216,185 @@ function insertProyectosImage(block) {
         queueProyectosSaveBody();
       } catch (err) {
         console.error('No se pudo subir la imagen:', err);
-        alert(`No se pudo subir la imagen: ${err.message}`);
+        showAppAlert(`No se pudo subir la imagen: ${err.message}`);
       }
     });
   }
   proyectosImageInput.click();
+}
+
+// ---------------------------------------------------------------------
+// Enlaces ("conectores"): web (<a href>) y a otra pagina de Proyectos
+// (<a data-page-link="id">). Se crean desde el menu "/" o con Ctrl+K
+// sobre un texto seleccionado; el click sobre uno navega (interno) o
+// abre el navegador del sistema (externo, via setWindowOpenHandler en
+// electron/main.js).
+// ---------------------------------------------------------------------
+let proyectosLinkPopover = null;
+let proyectosLinkContext = null; // { mode: 'insert'|'wrap', block?, range? }
+
+function openProyectosLinkPopover({ mode, block = null } = {}) {
+  // En modo "wrap" hay que congelar la seleccion YA: abrir el popover y
+  // clicar en su input la destruye.
+  const sel = window.getSelection();
+  const range = mode === 'wrap' && sel.rangeCount > 0 && !sel.isCollapsed
+    && PROYECTOS_BODY().contains(sel.anchorNode)
+    ? sel.getRangeAt(0).cloneRange()
+    : null;
+  // Sin seleccion, Ctrl+K degenera en "insertar enlace nuevo aqui".
+  const effectiveMode = mode === 'wrap' && !range ? 'insert' : mode;
+  proyectosLinkContext = { mode: effectiveMode, block: block || getProyectosCurrentBlock(), range };
+
+  if (!proyectosLinkPopover) {
+    proyectosLinkPopover = document.createElement('div');
+    proyectosLinkPopover.className = 'proyectos-table-popover proyectos-link-popover hidden';
+    proyectosLinkPopover.innerHTML = `
+      <label class="proyectos-link-text-label">Texto <input type="text" data-link-text placeholder="Texto del enlace" /></label>
+      <label>URL <input type="text" data-link-url placeholder="https://…" /></label>
+      <button type="button" class="primary-btn" data-link-insert>Insertar</button>
+    `;
+    document.body.appendChild(proyectosLinkPopover);
+    proyectosLinkPopover.querySelector('[data-link-insert]').addEventListener('click', applyProyectosLink);
+    proyectosLinkPopover.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); applyProyectosLink(); }
+      if (e.key === 'Escape') closeProyectosLinkPopover();
+    });
+  }
+
+  // Con seleccion, el texto ya lo pone la propia seleccion.
+  proyectosLinkPopover.querySelector('.proyectos-link-text-label').classList.toggle('hidden', effectiveMode === 'wrap');
+  proyectosLinkPopover.querySelector('[data-link-text]').value = '';
+  proyectosLinkPopover.querySelector('[data-link-url]').value = '';
+  proyectosLinkPopover.classList.remove('hidden');
+
+  const anchorRect = (range || proyectosLinkContext.block)?.getBoundingClientRect?.()
+    || PROYECTOS_BODY().getBoundingClientRect();
+  proyectosLinkPopover.style.top = `${Math.min(anchorRect.bottom + 6, window.innerHeight - 80)}px`;
+  proyectosLinkPopover.style.left = `${Math.max(8, Math.min(anchorRect.left, window.innerWidth - 380))}px`;
+  proyectosLinkPopover.querySelector(effectiveMode === 'wrap' ? '[data-link-url]' : '[data-link-text]').focus();
+}
+
+function closeProyectosLinkPopover() {
+  if (proyectosLinkPopover) proyectosLinkPopover.classList.add('hidden');
+  proyectosLinkContext = null;
+}
+
+function applyProyectosLink() {
+  if (!proyectosLinkContext) return;
+  let url = proyectosLinkPopover.querySelector('[data-link-url]').value.trim();
+  const text = proyectosLinkPopover.querySelector('[data-link-text]').value.trim();
+  if (!url) return;
+  // "google.com" tambien vale: se le antepone https:// si no lo trae.
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+
+  const { mode, block, range } = proyectosLinkContext;
+  closeProyectosLinkPopover();
+
+  if (mode === 'wrap' && range) {
+    // Envolver la seleccion tal cual. surroundContents falla si la
+    // seleccion cruza limites de etiqueta; en ese caso se degrada a
+    // extraer el contenido y meterlo dentro del enlace.
+    const a = document.createElement('a');
+    a.setAttribute('href', url);
+    try {
+      range.surroundContents(a);
+    } catch (err) {
+      a.appendChild(range.extractContents());
+      range.insertNode(a);
+    }
+  } else {
+    const a = document.createElement('a');
+    a.setAttribute('href', url);
+    a.textContent = text || url;
+    const target = block && PROYECTOS_BODY().contains(block) ? block : null;
+    if (target) {
+      target.appendChild(a);
+      target.appendChild(document.createTextNode(' '));
+      placeCaretIn(target, { atEnd: true });
+    } else {
+      const wrapper = document.createElement('div');
+      wrapper.appendChild(a);
+      PROYECTOS_BODY().appendChild(wrapper);
+    }
+  }
+  queueProyectosSaveBody();
+}
+
+// Enlace a otra pagina de Proyectos: popover con buscador sobre el
+// arbol entero; elegir una inserta <a data-page-link="id"> con su
+// icono + titulo como texto.
+let proyectosPageLinkPopover = null;
+let proyectosPageLinkBlock = null;
+
+function openProyectosPageLinkPopover(block) {
+  proyectosPageLinkBlock = block;
+  if (!proyectosPageLinkPopover) {
+    proyectosPageLinkPopover = document.createElement('div');
+    proyectosPageLinkPopover.className = 'proyectos-slash-popover proyectos-pagelink-popover hidden';
+    document.body.appendChild(proyectosPageLinkPopover);
+  }
+  const popover = proyectosPageLinkPopover;
+
+  function renderList(query) {
+    popover.innerHTML = '';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'proyectos-db-cell-input';
+    input.placeholder = 'Buscar página…';
+    input.value = query;
+    input.addEventListener('input', () => renderListKeepFocus(input.value));
+    popover.appendChild(input);
+
+    const lower = query.trim().toLowerCase();
+    const matches = proyectosPages
+      .filter((p) => p.id !== proyectosCurrentPage?.id)
+      .filter((p) => !lower || (p.title || '').toLowerCase().includes(lower))
+      .slice(0, 12);
+    for (const page of matches) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'proyectos-slash-item';
+      btn.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        insertProyectosPageLink(page);
+      });
+      popover.appendChild(btn);
+    }
+    if (matches.length === 0) {
+      const hint = document.createElement('p');
+      hint.className = 'hint';
+      hint.textContent = 'Ninguna página coincide.';
+      popover.appendChild(hint);
+    }
+    return input;
+  }
+  // Repintar la lista sin que el input pierda el foco ni el cursor.
+  function renderListKeepFocus(query) {
+    const input = renderList(query);
+    input.focus();
+    input.setSelectionRange(query.length, query.length);
+  }
+
+  popover.classList.remove('hidden');
+  const rect = block.getBoundingClientRect();
+  popover.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 260)}px`;
+  popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 310))}px`;
+  renderList('').focus();
+}
+
+function insertProyectosPageLink(page) {
+  const block = proyectosPageLinkBlock;
+  proyectosPageLinkPopover.classList.add('hidden');
+  proyectosPageLinkBlock = null;
+  if (!block || !PROYECTOS_BODY().contains(block)) return;
+  const a = document.createElement('a');
+  a.setAttribute('data-page-link', String(page.id));
+  a.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
+  block.appendChild(a);
+  block.appendChild(document.createTextNode(' '));
+  placeCaretIn(block, { atEnd: true });
+  queueProyectosSaveBody();
 }
 
 // ---------------------------------------------------------------------
@@ -10910,10 +11406,19 @@ const PROYECTOS_MD_SHORTCUTS = {
   '#': 'h1', '##': 'h2', '###': 'h3',
   '-': 'bullet', '*': 'bullet', '1.': 'numbered',
   '[]': 'todo', '>': 'quote',
+  // Los alerts de GitHub, en español y en su nombre original.
+  '!nota': 'callout-note', '!note': 'callout-note',
+  '!consejo': 'callout-tip', '!tip': 'callout-tip',
+  '!importante': 'callout-important', '!important': 'callout-important',
+  '!aviso': 'callout-warning', '!warning': 'callout-warning',
+  '!peligro': 'callout-caution', '!caution': 'callout-caution',
 };
 
 function tryProyectosMarkdownShortcut(block) {
-  const type = PROYECTOS_MD_SHORTCUTS[block.textContent];
+  // En minusculas tambien: "!TIP" y "!tip" valen igual (a GitHub se le
+  // escribe en mayusculas, aqui da lo mismo).
+  const text = block.textContent;
+  const type = PROYECTOS_MD_SHORTCUTS[text] || PROYECTOS_MD_SHORTCUTS[text.toLowerCase()];
   if (!type) return false;
   // Se vacia el prefijo y se reutiliza la conversion del menu "/" (que
   // lee proyectosSlashBlock como "bloque a convertir"; ya sin texto, no
@@ -10932,6 +11437,28 @@ PROYECTOS_BODY().addEventListener('keydown', (e) => {
   // Lo que pasa DENTRO de un widget de base de datos (sus inputs,
   // botones...) no es cosa del editor de bloques.
   if (e.target.closest?.('[data-proyectos-db]')) return;
+
+  // Deshacer/rehacer propio (ver la seccion de arriba): Ctrl+Z vuelve
+  // atras, Ctrl+Y (o Ctrl+Shift+Z) vuelve adelante.
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+    e.preventDefault();
+    proyectosUndo();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
+    e.preventDefault();
+    proyectosRedo();
+    return;
+  }
+
+  // Ctrl+K: convertir el texto seleccionado en un enlace web (o, sin
+  // seleccion, abrir el insertador de enlace).
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    openProyectosLinkPopover({ mode: 'wrap' });
+    return;
+  }
+
   // Con el menu "/" abierto, las flechas/Intro/Escape son del menu.
   if (proyectosSlashBlock && proyectosSlashPopover && !proyectosSlashPopover.classList.contains('hidden')) {
     const matches = getProyectosSlashMatches();
@@ -11075,6 +11602,26 @@ document.addEventListener('selectionchange', () => {
 
 PROYECTOS_BODY().addEventListener('click', (e) => {
   if (e.target.closest?.('[data-proyectos-db]')) return; // el widget gestiona sus propios clics
+
+  // Enlaces: clic = navegar, como en Notion (para editar su texto se
+  // entra con el teclado, o se rehace el enlace).
+  const link = e.target.closest('a');
+  if (link && PROYECTOS_BODY().contains(link)) {
+    e.preventDefault();
+    const pageId = link.getAttribute('data-page-link');
+    if (pageId) {
+      const exists = proyectosPages.some((p) => p.id === Number(pageId));
+      if (exists) openProyectosPage(Number(pageId));
+      else showAppAlert('La página enlazada ya no existe.');
+      return;
+    }
+    const href = link.getAttribute('href');
+    // window.open no abre nada dentro de la app: electron/main.js lo
+    // intercepta y lo manda al navegador del sistema.
+    if (href) window.open(href);
+    return;
+  }
+
   // Marcar/desmarcar una tarea: el "checkbox" es la zona de la
   // izquierda del bloque (pintada con CSS ::before), asi que un clic en
   // los primeros ~28px del bloque cuenta como clic en la casilla.
@@ -11136,18 +11683,47 @@ PROYECTOS_BODY().addEventListener('paste', async (e) => {
   }
 });
 
+// Al salir de un bloque de codigo, normalizar (texto plano) y volver a
+// colorear -- escribir dentro de un codigo ya coloreado deja spans a
+// medias, y este es el momento de dejarlo limpio otra vez.
+PROYECTOS_BODY().addEventListener('focusout', (e) => {
+  const pre = e.target.closest?.('pre');
+  if (!pre || !PROYECTOS_BODY().contains(pre)) return;
+  const code = pre.querySelector('code');
+  if (!code) return;
+  code.textContent = plainProyectosCodeText(code);
+  highlightProyectosCodeBlocks(pre.parentElement || PROYECTOS_BODY());
+});
+
 // Cerrar los popovers propios al clicar fuera de ellos.
 document.addEventListener('click', (e) => {
+  // Un click cuyo objetivo ya no esta en el documento (una opcion del
+  // menu "/" o de un select, repintada/retirada en su propio manejador)
+  // no es un "clic fuera" -- sin esto, el popover que ese mismo click
+  // acaba de abrir se cerraria al instante.
+  if (e.target instanceof Node && !document.contains(e.target)) return;
   if (proyectosTablePopover && !proyectosTablePopover.classList.contains('hidden')
       && !e.target.closest('.proyectos-table-popover')) {
     closeProyectosTablePopover();
   }
-  // OJO: elegir una opcion en un createSelectField repinta las opciones
-  // DENTRO de su manejador de click, asi que cuando el click llega aqui
-  // (burbujeando) el boton pulsado ya no esta en el documento -- y un
-  // nodo suelto no tiene ancestros, con lo que pareceria un "clic
-  // fuera". Un clic de un nodo ya desconectado nunca cierra nada.
-  if (e.target instanceof Node && !document.contains(e.target)) return;
+  if (proyectosLinkPopover && !proyectosLinkPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-link-popover')) {
+    closeProyectosLinkPopover();
+  }
+  if (proyectosPageLinkPopover && !proyectosPageLinkPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-pagelink-popover')) {
+    proyectosPageLinkPopover.classList.add('hidden');
+    proyectosPageLinkBlock = null;
+  }
+  if (proyectosTableMenuPopover && !proyectosTableMenuPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-table-menu-popover') && !e.target.closest('.proyectos-table-menu-btn')) {
+    proyectosTableMenuPopover.classList.add('hidden');
+  }
+  if (proyectosSubnavPopover && !proyectosSubnavPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-subnav-popover') && !e.target.closest('.proyectos-subnav-btn')) {
+    proyectosSubnavPopover.classList.add('hidden');
+  }
+  // (el caso de "nodo ya desconectado" lo corta el guard de arriba)
   if (proyectosDbConfigPopover && !proyectosDbConfigPopover.classList.contains('hidden')
       && !e.target.closest('.proyectos-db-config-popover')
       && !e.target.closest('.select-popover, .select-field-trigger')) {
@@ -11216,7 +11792,7 @@ async function insertProyectosDatabase(block) {
     queueProyectosSaveBody();
   } catch (err) {
     console.error('No se pudo crear la base de datos:', err);
-    alert(`No se pudo crear la base de datos: ${err.message}`);
+    showAppAlert(`No se pudo crear la base de datos: ${err.message}`);
   }
 }
 
@@ -11346,7 +11922,8 @@ function renderProyectosDbWidget(container, data) {
     deleteBtn.textContent = '✕';
     deleteBtn.title = 'Quitar la base de datos (borra sus filas)';
     deleteBtn.addEventListener('click', async () => {
-      if (!confirm('¿Quitar esta base de datos de la página? Se borran también todas sus filas.')) return;
+      const ok = await showAppConfirm('¿Quitar esta base de datos de la página? Se borran también todas sus filas.', { danger: true, okText: 'Quitar' });
+      if (!ok) return;
       await api(`/api/proyectos-databases/${data.id}`, { method: 'DELETE' });
       proyectosDbCache.delete(data.id);
       proyectosDbContainers.delete(data.id);
@@ -11558,6 +12135,31 @@ function renderProyectosDbBoard(view, data) {
 
     board.appendChild(colEl);
   }
+
+  // "+ Columna": añade una opcion nueva al select que agrupa el tablero
+  // (la forma rapida de montarte TUS estados sin pasar por la vista
+  // Tabla) -- un mini-formulario en la propia columna fantasma.
+  const addColEl = document.createElement('div');
+  addColEl.className = 'proyectos-db-board-col proyectos-db-board-addcol';
+  const addColInput = document.createElement('input');
+  addColInput.type = 'text';
+  addColInput.className = 'proyectos-db-cell-input';
+  addColInput.placeholder = '+ Columna…';
+  addColInput.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return;
+    const name = addColInput.value.trim();
+    if (!name || groupProp.options.includes(name)) return;
+    await api(`/api/proyectos-databases/props/${groupProp.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ options: [...groupProp.options, name] }),
+    });
+    const fresh = await api(`/api/proyectos-databases/${data.id}`);
+    proyectosDbCache.set(data.id, fresh);
+    refreshProyectosDbWidget(data.id);
+  });
+  addColEl.appendChild(addColInput);
+  board.appendChild(addColEl);
+
   view.appendChild(board);
 }
 
@@ -11622,20 +12224,23 @@ function openProyectosDbConfigPopover(anchorBtn, data) {
     popover.appendChild(label);
   }
 
-  addField('Ordenar por', createSelectField({
+  // "Ordenar por": recoloca las filas segun una propiedad (p. ej. por
+  // fecha limite, o de mas caro a mas barato) en vez del orden de
+  // creacion de siempre. Vacio = orden de creacion.
+  addField('Ordenar filas por', createSelectField({
     options: propOptions,
     initialValue: data.sortPropId ? String(data.sortPropId) : '',
-    placeholder: '— ninguna —',
+    placeholder: '— orden de creación —',
     onChange: (v) => saveProyectosDbConfig(data.id, { sortPropId: v || null }),
   }).element);
 
   addField('Dirección', createSelectField({
-    options: [{ value: 'asc', label: 'Ascendente' }, { value: 'desc', label: 'Descendente' }],
+    options: [{ value: 'asc', label: 'Ascendente (A→Z, antiguo→nuevo)' }, { value: 'desc', label: 'Descendente (Z→A, nuevo→antiguo)' }],
     initialValue: data.sortDir,
     onChange: (v) => saveProyectosDbConfig(data.id, { sortDir: v }),
   }).element);
 
-  addField('Filtrar por', createSelectField({
+  addField('Mostrar solo filas donde', createSelectField({
     options: propOptions,
     initialValue: data.filterPropId ? String(data.filterPropId) : '',
     placeholder: '— ninguna —',
@@ -11648,7 +12253,7 @@ function openProyectosDbConfigPopover(anchorBtn, data) {
   filterInput.placeholder = 'Valor exacto';
   filterInput.value = data.filterValue || '';
   filterInput.addEventListener('change', () => saveProyectosDbConfig(data.id, { filterValue: filterInput.value || null }));
-  addField('Valor del filtro', filterInput);
+  addField('…tenga exactamente este valor', filterInput);
 
   if (selectProps.length > 0) {
     addField('Agrupar tablero por', createSelectField({
@@ -11756,7 +12361,8 @@ function openProyectosPropPopover(anchorBtn, data, prop) {
     deleteBtn.className = 'danger-btn';
     deleteBtn.textContent = 'Borrar';
     deleteBtn.addEventListener('click', async () => {
-      if (!confirm(`¿Borrar la propiedad "${prop.name}"? Se pierden sus valores en todas las filas.`)) return;
+      const ok = await showAppConfirm(`¿Borrar la propiedad "${prop.name}"? Se pierden sus valores en todas las filas.`, { danger: true, okText: 'Borrar' });
+      if (!ok) return;
       await api(`/api/proyectos-databases/props/${prop.id}`, { method: 'DELETE' });
       const fresh = await api(`/api/proyectos-databases/${data.id}`);
       proyectosDbCache.set(data.id, fresh);
@@ -11864,7 +12470,8 @@ document.getElementById('btn-proyectos-peek-close').addEventListener('click', ()
 document.getElementById('btn-proyectos-peek-delete').addEventListener('click', async () => {
   if (!proyectosPeekOpen) return;
   const { dbId, rowId } = proyectosPeekOpen;
-  if (!confirm('¿Borrar esta fila?')) return;
+  const ok = await showAppConfirm('¿Borrar esta fila?', { danger: true, okText: 'Borrar' });
+  if (!ok) return;
   // Nada pendiente que guardar de una fila que se borra.
   if (proyectosPeekSaveTimer) { clearTimeout(proyectosPeekSaveTimer); proyectosPeekSaveTimer = null; }
   proyectosPeekOpen = null;
@@ -11898,11 +12505,16 @@ document.getElementById('proyectos-peek-title').addEventListener('keydown', (e) 
 async function createProyectosGuide() {
   await flushProyectosSave();
 
-  // --- 1) La página principal: el recorrido por el editor de bloques ---
-  // El HTML respeta la lista blanca del saneador (ver sanitizePageBody
-  // en core/routes/proyectosPages.js): si aquí se usara algo fuera de
-  // ella, el backend lo quitaría al guardar.
-  const guideBody = [
+  // --- 1) La página principal se crea VACIA y se rellena al final ---
+  // Motivo: su cuerpo enlaza a las subpáginas con conectores
+  // (data-page-link), y para eso hacen falta los ids de las subpáginas,
+  // que aún no existen.
+  const guide = await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Guía de Proyectos', icon: '📖', coverColor: '#5b8cff' }),
+  });
+
+  const guideBodyOf = (orgPageId, dbPageId) => [
     '<div data-callout="1" data-icon="👋">Bienvenido. Este proyecto es una guía viva: todo lo que ves está hecho con la propia herramienta, así que puedes tocarlo, romperlo y borrarlo sin miedo. Las páginas de la izquierda son parte de la guía.</div>',
     '<h1>El menú «/»</h1>',
     '<div>Escribe <b>/</b> en cualquier línea vacía y aparece un menú con buscador. Con él insertas cualquier bloque: prueba a escribir <b>/tit</b> o <b>/tabla</b> y elige con las flechas + Intro.</div>',
@@ -11916,8 +12528,12 @@ async function createProyectosGuide() {
     '<tr><td><b>[]</b> + espacio</td><td>Tarea con casilla</td></tr>',
     '<tr><td><b>&gt;</b> + espacio</td><td>Cita</td></tr>',
     '<tr><td><b>---</b> + Intro</td><td>Divisor</td></tr>',
+    '<tr><td><b>!tip</b>, <b>!nota</b>, <b>!aviso</b>… + espacio</td><td>Alert de color (estilo GitHub)</td></tr>',
+    '<tr><td><b>Ctrl+Z</b> / <b>Ctrl+Y</b></td><td>Deshacer / rehacer</td></tr>',
+    '<tr><td><b>Ctrl+K</b></td><td>Convertir el texto seleccionado en enlace</td></tr>',
     '</tbody></table>',
     '<div>Y lo de siempre en cualquier texto: <b>Ctrl+B</b> para <b>negrita</b>, <b>Ctrl+I</b> para <i>cursiva</i>, <b>Ctrl+U</b> para <u>subrayado</u>.</div>',
+    '<div data-callout="1" data-icon="🔍">Esta guía no lo enseña TODO: abre el menú «/» y repásalo entero — cada opción lleva una pequeña descripción debajo del nombre.</div>',
     '<hr>',
     '<h1>Todos los bloques, en vivo</h1>',
     '<h2>Listas</h2>',
@@ -11931,23 +12547,31 @@ async function createProyectosGuide() {
     '<h2>Desplegables (toggles)</h2>',
     '<details><summary>Haz clic en la flecha para abrirme</summary><div>El contenido de dentro se pliega y despliega. Dentro puedes escribir más bloques: prueba el menú «/» aquí dentro.</div></details>',
     '<h2>Callouts</h2>',
-    '<div data-callout="1" data-icon="💡">Un callout destaca una idea. El emoji vive en el propio bloque.</div>',
-    '<div data-callout="1" data-icon="⚠️">Sirven para avisos, notas importantes, lo que quieras.</div>',
+    '<div data-callout="1" data-icon="💬">Un callout destaca una idea. El emoji vive en el propio bloque.</div>',
+    '<h2>Alerts de color (estilo GitHub)</h2>',
+    '<div>Cinco tipos con su color y etiqueta, escribiendo <b>!nota</b>, <b>!tip</b>, <b>!importante</b>, <b>!aviso</b> o <b>!peligro</b> + espacio (o desde el menú «/»):</div>',
+    '<div data-callout="1" data-kind="note">Información neutra que conviene tener presente.</div>',
+    '<div data-callout="1" data-kind="tip">Un truco o una forma mejor de hacer algo.</div>',
+    '<div data-callout="1" data-kind="important">Algo clave que no debería pasarse por alto.</div>',
+    '<div data-callout="1" data-kind="warning">Cuidado: esto puede dar problemas.</div>',
+    '<div data-callout="1" data-kind="caution">Riesgo de verdad — consecuencias serias.</div>',
     '<h2>Citas y divisores</h2>',
     '<blockquote>Las citas se ven así, con su barra al lado.</blockquote>',
     '<hr>',
-    '<h2>Código</h2>',
-    '<pre data-lang="js"><code>// Un bloque de código respeta espacios y saltos\nconst saludo = "hola";</code></pre>',
+    '<h2>Código, con colores</h2>',
+    '<div>Los bloques de código se colorean solos (estilo GitHub); si no dices el lenguaje, lo adivina y lo apunta en la esquina:</div>',
+    '<pre data-lang="js"><code>// Un bloque de código respeta espacios y saltos\nfunction saluda(nombre) {\n  return "Hola, " + nombre + "!";\n}</code></pre>',
+    '<h2>Tablas</h2>',
+    '<div>Pasa el ratón por una tabla y aparece un botón <b>▦</b> en su esquina: con él añades o quitas filas y columnas (al principio o al final), la pones a ancho completo, o la borras entera.</div>',
+    '<table><tbody><tr><th>Prueba</th><th>el botón</th></tr><tr><td>pasando el ratón</td><td>por aquí</td></tr></tbody></table>',
+    '<h2>Enlaces (conectores)</h2>',
+    '<div>Desde el menú «/» hay dos tipos: <b>Enlace web</b> (a internet, se abre en tu navegador) y <b>Enlace a página</b> (a cualquier página de Proyectos — el punteado de abajo lleva a las subpáginas de esta guía). También puedes seleccionar un texto y pulsar <b>Ctrl+K</b>.</div>',
+    '<div>Ejemplo web: <a href="https://es.wikipedia.org">Wikipedia</a> · Ejemplo interno: los dos de aquí debajo 👇</div>',
     '<h2>Imágenes</h2>',
     '<div>Con el bloque <b>Imagen</b> del menú «/» eliges un archivo, o simplemente <b>pega una captura con Ctrl+V</b> dentro del cuerpo. La imagen se guarda dentro de la app.</div>',
     '<hr>',
-    '<div data-callout="1" data-icon="🧭">Sigue con las dos subpáginas de la izquierda: <b>Organizar páginas</b> y <b>Bases de datos</b> (la parte más potente).</div>',
+    '<div data-callout="1" data-icon="🧭">Sigue el recorrido: <a data-page-link="' + orgPageId + '">🗂 Organizar páginas</a> y después <a data-page-link="' + dbPageId + '">🗄 Bases de datos</a> (la parte más potente).</div>',
   ].join('');
-
-  const guide = await api('/api/proyectos-pages', {
-    method: 'POST',
-    body: JSON.stringify({ title: 'Guía de Proyectos', icon: '📖', coverColor: '#5b8cff', body: guideBody }),
-  });
 
   // --- 2) Subpágina: organización de páginas ---
   const orgBody = [
@@ -11966,8 +12590,10 @@ async function createProyectosGuide() {
     '<li>El botón de <b>portada</b> le pone una franja de color arriba; el color se eligen en el selector que aparece al lado.</li>',
     '<li><b>Todo se guarda solo</b> mientras escribes: no hay botón de guardar.</li>',
     '</ul>',
+    '<h1>Pantalla completa (sin panel)</h1>',
+    '<div>El botón <b>⛶</b> de arriba a la derecha esconde el sidebar para leer y escribir sin distracciones. Sin árbol te sigues moviendo igual: las <b>migas de pan</b> suben, y el <b>▾</b> junto al título despliega las subpáginas de la página abierta para bajar.</div>',
     '<h1>Borrar sin miedo</h1>',
-    '<div data-callout="1" data-icon="🛟">Borrar una página <b>nunca</b> borra sus subpáginas: suben un nivel y ocupan su sitio. Puedes borrar esta guía entera cuando ya no la necesites (empezando por las subpáginas, o borrando la principal y luego las que suban).</div>',
+    '<div data-callout="1" data-icon="🛟">El botón <b>Borrar</b> nunca borra las subpáginas: suben un nivel y ocupan su sitio. Si de verdad quieres llevarte el árbol entero por delante, para eso está el rojo de al lado, <b>Borrar con subpáginas</b> — con él puedes borrar esta guía completa de un golpe cuando ya no la necesites.</div>',
   ].join('');
 
   const orgPage = await api('/api/proyectos-pages', {
@@ -12024,9 +12650,17 @@ async function createProyectosGuide() {
     '<li>En el <b>Tablero</b>, arrastra una tarjeta a otra columna: le cambia el Estado.</li>',
     '<li>Haz clic en el <b>título de una fila</b>: se abre en un panel lateral con sus propiedades y sus propias notas, como una mini-página.</li>',
     '<li>En la Tabla, el <b>+</b> de la cabecera añade propiedades nuevas (texto, número, select, fecha o casilla), y clicar el nombre de una la edita o la borra.</li>',
-    '<li>El <b>engranaje</b> guarda orden, filtro y por qué propiedad agrupa el tablero — se guarda en la propia base, no en este dispositivo.</li>',
     '<li>Para insertar una base en cualquier página: menú «/» → <b>Base de datos</b>.</li>',
     '</ul>',
+    '<h1>Móntatela a tu manera</h1>',
+    '<div>Esta demo es de un viaje, pero los estados y propiedades son 100% tuyos. Para un tablero de trabajos, por ejemplo:</div>',
+    '<ol>',
+    '<li>En la vista <b>Tabla</b>, haz clic en la cabecera <b>Estado</b>: ahí renombras la propiedad y escribes TUS opciones separadas por comas (p. ej. «Por hacer, Haciendo, Completado»).</li>',
+    '<li>La vía rápida: en el <b>Tablero</b>, la columna punteada del final (<b>+ Columna…</b>) añade un estado nuevo escribiendo su nombre + Intro.</li>',
+    '<li>Lo que no te sirva (¿Pagado?), se borra clicando su cabecera → <b>Borrar</b>; y añades lo que sí con el <b>+</b>.</li>',
+    '</ol>',
+    '<h1>El engranaje ⚙: orden y filtro</h1>',
+    '<div><b>Ordenar filas por</b> recoloca las filas según una propiedad — por fecha límite para ver lo urgente arriba, por coste de más a menos… Si no eliges nada, quedan en su orden de creación. <b>Mostrar solo filas donde…</b> esconde las que no cumplan un valor exacto (p. ej. Estado = Hecho). Todo esto se guarda en la propia base, no en este dispositivo.</div>',
     `<div data-proyectos-db="${demoDb.id}"></div>`,
     '<div><br></div>',
   ].join('');
@@ -12034,6 +12668,13 @@ async function createProyectosGuide() {
   await api(`/api/proyectos-pages/${dbPage.id}`, {
     method: 'PUT',
     body: JSON.stringify({ body: dbBody }),
+  });
+
+  // Con las subpáginas ya creadas (y sus ids conocidos), se rellena por
+  // fin el cuerpo de la página principal, que las enlaza.
+  await api(`/api/proyectos-pages/${guide.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ body: guideBodyOf(orgPage.id, dbPage.id) }),
   });
 
   // --- 4) Recargar y abrir la guía con sus subpáginas a la vista ---
@@ -12049,7 +12690,7 @@ async function handleCreateProyectosGuide() {
     await createProyectosGuide();
   } catch (err) {
     console.error('No se pudo crear el proyecto de ejemplo:', err);
-    alert(`No se pudo crear el proyecto de ejemplo: ${err.message}`);
+    showAppAlert(`No se pudo crear el proyecto de ejemplo: ${err.message}`);
   }
 }
 
