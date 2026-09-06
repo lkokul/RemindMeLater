@@ -3110,7 +3110,16 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 }
 .group-card-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
 
-.groups-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+/* Hueco y linea bajo los filtros: sin eso, la primera fila de la lista
+   quedaba pegada a los desplegables y parecia una mas de la barra. */
+.groups-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-bottom: 0.7rem;
+  margin-bottom: 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
 .groups-filters input[type="search"] { flex: 1 1 100%; }
 .groups-filter-field { flex: 1 1 140px; min-width: 130px; }
 .groups-detail-list { display: flex; flex-direction: column; gap: 0.4rem; }
@@ -3128,6 +3137,10 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 /* Barra vertical del color del grupo, igual que en el listado del
    calendario -- ahi es donde se ve de un vistazo a que grupo pertenece. */
 .group-item-bar { width: 4px; align-self: stretch; border-radius: 2px; flex-shrink: 0; }
+/* Campana (recordatorio) o cuadro con tick (tarea) -- se distingue el
+   tipo de un vistazo, sin tener que leer la linea de debajo. */
+.group-item-type { flex-shrink: 0; display: inline-flex; align-items: center; color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); }
+.group-item-type svg { width: 17px; height: 17px; }
 .group-item-texts { display: flex; flex-direction: column; min-width: 0; }
 .group-item-title { font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-item-meta { font-size: 0.78rem; color: color-mix(in srgb, var(--surface-2-text) 60%, var(--surface-2)); }
@@ -3145,3 +3158,11 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Lista de opciones de cada boton de la barra de tabla (Fila, Columna,
+   Mover, Tamano, Celdas). Reutiliza el popover de los selectores de la
+   app, solo un poco mas ancho para que quepan los textos largos. */
+.table-menu-popover { width: 220px; }
+/* Campo para pedir un numero dentro del aviso propio (ancho/alto exactos
+   de una tabla) -- ver showAppPrompt en app.js. */
+.app-confirm-input { width: 100%; margin-bottom: 0.6rem; }

@@ -97,6 +97,10 @@
         <input type="checkbox" id="app-confirm-checkbox" class="styled-checkbox" />
         <span id="app-confirm-checkbox-label"></span>
       </label>
+      <!-- Campo opcional para pedir un valor (lo usa showAppPrompt, p. ej.
+           el ancho exacto de una columna de tabla). Oculto salvo que se
+           pida -- ver app.js. -->
+      <input type="number" id="app-confirm-input" class="app-confirm-input hidden" />
       <div class="modal-actions">
         <div class="spacer"></div>
         <button type="button" id="btn-app-confirm-cancel" class="secondary-btn">Cancelar</button>
@@ -1687,31 +1691,15 @@
 
       <!-- Barra de TABLA: sustituye a la de formato mientras se esta
            trasteando con una tabla (se entra tocando el icono que aparece
-           en su esquina). Una sola linea que se desliza de lado, igual
-           que la de formato. -->
+           en su esquina, y se sale sacando el cursor de ella). Cinco
+           botones, cada uno con sus opciones dentro, para no tener 16
+           botones sueltos en una fila que no se acaba nunca. -->
       <div id="note-table-toolbar" class="note-editor-toolbar hidden">
-        <button type="button" class="note-editor-btn" data-table-cmd="row-above" title="Insertar fila encima">Fila ↑</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="row-below" title="Insertar fila debajo">Fila ↓</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="row-remove" title="Eliminar esta fila">Fila −</button>
-        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
-        <button type="button" class="note-editor-btn" data-table-cmd="col-left" title="Insertar columna a la izquierda">Col ←</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="col-right" title="Insertar columna a la derecha">Col →</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="col-remove" title="Eliminar esta columna">Col −</button>
-        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
-        <button type="button" class="note-editor-btn" data-table-cmd="move-row-up" title="Mover la fila arriba">Mover ↑</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="move-row-down" title="Mover la fila abajo">Mover ↓</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="move-col-left" title="Mover la columna a la izquierda">Mover ←</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="move-col-right" title="Mover la columna a la derecha">Mover →</button>
-        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
-        <button type="button" class="note-editor-btn" data-table-cmd="width-plus" title="Columna más ancha">Ancho +</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="width-minus" title="Columna más estrecha">Ancho −</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="border-plus" title="Borde más grueso">Borde +</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="border-minus" title="Borde más fino">Borde −</button>
-        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
-        <button type="button" class="note-editor-btn" data-table-cmd="merge" title="Combinar con la celda de la derecha">Combinar</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="split" title="Separar la celda combinada">Separar</button>
-        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
-        <button type="button" id="btn-note-table-toolbar-close" class="note-editor-btn" title="Volver al formato de texto">Listo</button>
+        <button type="button" class="note-editor-btn" data-table-menu="row">Fila ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="col">Columna ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="move">Mover ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="size">Tamaño ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="cells">Celdas ▾</button>
       </div>
       <div class="note-editor-main">
         <div class="note-editor-content-col">

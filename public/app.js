@@ -394,8 +394,22 @@ function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', 
 function showAppAlert(message, { okText = 'Aceptar' } = {}) {
   return showAppConfirm(message, { okText, alertOnly: true });
 }
+// Pide un numero con el mismo aviso propio de la app (nada de prompt()
+// del navegador, que no sigue el tema). Devuelve el texto escrito, o
+// null si se cancela.
+function showAppPrompt(message, initialValue = '') {
+  const input = document.getElementById('app-confirm-input');
+  input.value = initialValue;
+  input.classList.remove('hidden');
+  return showAppConfirm(message).then((ok) => {
+    const valor = input.value;
+    input.classList.add('hidden');
+    return ok ? valor : null;
+  });
+}
 function closeAppConfirm(result) {
   document.getElementById('app-confirm-modal').classList.add('hidden');
+  if (!result) document.getElementById('app-confirm-input').classList.add('hidden');
   if (result && appConfirmCheckboxStorageKey && document.getElementById('app-confirm-checkbox').checked) {
     localStorage.setItem(appConfirmCheckboxStorageKey, '1');
   }
@@ -3520,6 +3534,7 @@ function getCurrentTableCell() {
 // seleccion o tecla dentro del editor.
 function refreshNoteEditorState() {
   refreshNoteEditorToolbar();
+  closeTableToolbarIfCaretLeft();
   refreshTableCornerButton();
   refreshNoteBlockButtons();
   refreshPendingNoteHighlightState();
@@ -4724,33 +4739,249 @@ function insertTableColumn(donde) {
   refreshNoteEditorState();
 }
 
+// Insertar fila en un extremo de la tabla (no junto al cursor).
+function insertTableRowAtEdge(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const tbody = cell.closest('tbody') || cell.closest('table');
+  const referencia = donde === 'first' ? tbody.firstElementChild : tbody.lastElementChild;
+  if (!referencia) return;
+  const nueva = document.createElement('tr');
+  nueva.style.height = `${DEFAULT_TABLE_ROW_HEIGHT}px`;
+  Array.from(referencia.children).forEach((existente) => {
+    const celda = document.createElement(existente.tagName);
+    celda.innerHTML = '<br>';
+    nueva.appendChild(celda);
+  });
+  if (donde === 'first') referencia.before(nueva);
+  else referencia.after(nueva);
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+function insertTableColumnAtEdge(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const table = cell.closest('table');
+  table.querySelectorAll('tr').forEach((tr) => {
+    const nueva = document.createElement(tr.children[0] ? tr.children[0].tagName : 'td');
+    nueva.innerHTML = '<br>';
+    if (donde === 'first') tr.prepend(nueva);
+    else tr.appendChild(nueva);
+  });
+  const colgroup = ensureTableColgroup(table, cell.parentElement.children.length);
+  const nuevaCol = document.createElement('col');
+  nuevaCol.style.width = `${DEFAULT_TABLE_COL_WIDTH}px`;
+  if (donde === 'first') colgroup.prepend(nuevaCol);
+  else colgroup.appendChild(nuevaCol);
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+// Quitar la fila/columna de un extremo, no la del cursor.
+function removeTableRowAtEdge(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const table = cell.closest('table');
+  const tbody = cell.closest('tbody') || table;
+  if (tbody.children.length <= 1) { table.remove(); }
+  else (donde === 'first' ? tbody.firstElementChild : tbody.lastElementChild).remove();
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+function removeTableColumnAtEdge(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const table = cell.closest('table');
+  const columnas = cell.parentElement.children.length;
+  if (columnas <= 1) { table.remove(); }
+  else {
+    table.querySelectorAll('tr').forEach((tr) => {
+      const objetivo = donde === 'first' ? tr.firstElementChild : tr.lastElementChild;
+      if (objetivo) objetivo.remove();
+    });
+    const colgroup = table.querySelector('colgroup');
+    if (colgroup) {
+      const objetivo = donde === 'first' ? colgroup.firstElementChild : colgroup.lastElementChild;
+      if (objetivo) objetivo.remove();
+    }
+  }
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+// Alto de la fila del cursor (el ancho de columna ya lo hace
+// changeTableColumnWidth).
+function changeTableRowHeight(delta) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const actual = parseInt(row.style.height, 10) || Math.round(row.getBoundingClientRect().height);
+  row.style.height = `${Math.max(TABLE_MIN_ROW_HEIGHT, actual + delta)}px`;
+  refreshNoteEditorState();
+}
+
+// Ancho/alto exactos, para cuando no vale con ir dando toques: pide el
+// numero y lo aplica tal cual.
+async function setTableSizeByHand(que) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const table = cell.closest('table');
+  const colIndex = Array.from(row.children).indexOf(cell);
+  if (que === 'col') {
+    const colgroup = ensureTableColgroup(table, row.children.length);
+    const col = colgroup.children[colIndex];
+    if (!col) return;
+    const actual = parseInt(col.style.width, 10) || DEFAULT_TABLE_COL_WIDTH;
+    const valor = await showAppPrompt('Ancho de esta columna, en puntos:', String(actual));
+    const num = parseInt(valor, 10);
+    if (Number.isFinite(num)) col.style.width = `${Math.max(TABLE_MIN_COL_WIDTH, num)}px`;
+  } else {
+    const actual = parseInt(row.style.height, 10) || Math.round(row.getBoundingClientRect().height);
+    const valor = await showAppPrompt('Alto de esta fila, en puntos:', String(actual));
+    const num = parseInt(valor, 10);
+    if (Number.isFinite(num)) row.style.height = `${Math.max(TABLE_MIN_ROW_HEIGHT, num)}px`;
+  }
+  // Al pasar por el aviso, el cursor se fue al boton "Aceptar": hay que
+  // devolverlo a la celda, o al refrescar se cerraria la barra de tabla
+  // creyendo que has salido de ella.
+  putCaretInCell(cell);
+  refreshNoteEditorState();
+}
+
 const NOTE_TABLE_COMMANDS = {
   'row-above': () => insertTableRow('above'),
   'row-below': () => insertTableRow('below'),
+  'row-first': () => insertTableRowAtEdge('first'),
+  'row-last': () => insertTableRowAtEdge('last'),
   'row-remove': removeTableRow,
+  'row-remove-first': () => removeTableRowAtEdge('first'),
+  'row-remove-last': () => removeTableRowAtEdge('last'),
   'col-left': () => insertTableColumn('left'),
   'col-right': () => insertTableColumn('right'),
+  'col-first': () => insertTableColumnAtEdge('first'),
+  'col-last': () => insertTableColumnAtEdge('last'),
   'col-remove': removeTableColumn,
+  'col-remove-first': () => removeTableColumnAtEdge('first'),
+  'col-remove-last': () => removeTableColumnAtEdge('last'),
   'move-row-up': () => moveTableRow(-1),
   'move-row-down': () => moveTableRow(1),
   'move-col-left': () => moveTableColumn(-1),
   'move-col-right': () => moveTableColumn(1),
   'width-plus': () => changeTableColumnWidth(20),
   'width-minus': () => changeTableColumnWidth(-20),
+  'width-exact': () => setTableSizeByHand('col'),
+  'height-plus': () => changeTableRowHeight(10),
+  'height-minus': () => changeTableRowHeight(-10),
+  'height-exact': () => setTableSizeByHand('row'),
   'border-plus': () => changeTableBorder(1),
   'border-minus': () => changeTableBorder(-1),
   merge: mergeTableCell,
   split: splitTableCell,
 };
 
-document.querySelectorAll('#note-table-toolbar [data-table-cmd]').forEach((btn) => {
-  btn.addEventListener('mousedown', (e) => e.preventDefault());
-  btn.addEventListener('click', () => {
-    const fn = NOTE_TABLE_COMMANDS[btn.dataset.tableCmd];
-    if (fn) fn();
+// Cada boton de la barra abre su lista de opciones, en vez de tener 20
+// botones sueltos en una fila que no se acaba nunca. Mismo popover que
+// el resto de la app (positionFixedPopover/closeAllPopovers).
+const NOTE_TABLE_MENUS = {
+  row: {
+    label: 'Fila',
+    opciones: [
+      ['row-above', 'Añadir arriba'],
+      ['row-below', 'Añadir debajo'],
+      ['row-first', 'Añadir al principio'],
+      ['row-last', 'Añadir al final'],
+      ['row-remove', 'Quitar esta'],
+      ['row-remove-first', 'Quitar la primera'],
+      ['row-remove-last', 'Quitar la última'],
+    ],
+  },
+  col: {
+    label: 'Columna',
+    opciones: [
+      ['col-left', 'Añadir a la izquierda'],
+      ['col-right', 'Añadir a la derecha'],
+      ['col-first', 'Añadir al principio'],
+      ['col-last', 'Añadir al final'],
+      ['col-remove', 'Quitar esta'],
+      ['col-remove-first', 'Quitar la primera'],
+      ['col-remove-last', 'Quitar la última'],
+    ],
+  },
+  move: {
+    label: 'Mover',
+    opciones: [
+      ['move-row-up', 'Fila arriba'],
+      ['move-row-down', 'Fila abajo'],
+      ['move-col-left', 'Columna a la izquierda'],
+      ['move-col-right', 'Columna a la derecha'],
+    ],
+  },
+  size: {
+    label: 'Tamaño',
+    opciones: [
+      ['width-plus', 'Columna más ancha'],
+      ['width-minus', 'Columna más estrecha'],
+      ['width-exact', 'Ancho exacto…'],
+      ['height-plus', 'Fila más alta'],
+      ['height-minus', 'Fila más baja'],
+      ['height-exact', 'Alto exacto…'],
+      ['border-plus', 'Borde más grueso'],
+      ['border-minus', 'Borde más fino'],
+    ],
+  },
+  cells: {
+    label: 'Celdas',
+    opciones: [
+      ['merge', 'Combinar con la de la derecha'],
+      ['split', 'Separar la combinada'],
+    ],
+  },
+};
+
+const tableMenuPopover = document.createElement('div');
+tableMenuPopover.className = 'select-popover table-menu-popover hidden';
+document.body.appendChild(tableMenuPopover);
+
+function runTableCommand(nombre) {
+  const fn = NOTE_TABLE_COMMANDS[nombre];
+  if (!fn) return;
+  const resultado = fn();
+  const despues = () => {
     // Quitar la ultima fila o columna borra la tabla entera: si ya no
     // queda ninguna, no tiene sentido seguir en la barra de tabla.
     if (!getCurrentTableCell()) setNoteTableToolbarOpen(false);
+  };
+  if (resultado && typeof resultado.then === 'function') resultado.then(despues);
+  else despues();
+}
+
+document.querySelectorAll('#note-table-toolbar [data-table-menu]').forEach((btn) => {
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = NOTE_TABLE_MENUS[btn.dataset.tableMenu];
+    const yaAbierto = !tableMenuPopover.classList.contains('hidden') && tableMenuPopover.dataset.menu === btn.dataset.tableMenu;
+    closeAllPopovers(tableMenuPopover);
+    if (yaAbierto) { tableMenuPopover.classList.add('hidden'); return; }
+    tableMenuPopover.dataset.menu = btn.dataset.tableMenu;
+    tableMenuPopover.innerHTML = '';
+    menu.opciones.forEach(([cmd, texto]) => {
+      const opt = document.createElement('button');
+      opt.type = 'button';
+      opt.className = 'select-option';
+      opt.textContent = texto;
+      opt.addEventListener('mousedown', (ev) => ev.preventDefault());
+      opt.addEventListener('click', () => {
+        tableMenuPopover.classList.add('hidden');
+        runTableCommand(cmd);
+      });
+      tableMenuPopover.appendChild(opt);
+    });
+    tableMenuPopover.classList.remove('hidden');
+    positionFixedPopover(btn, tableMenuPopover, { width: 220 });
   });
 });
 
@@ -4825,7 +5056,13 @@ function refreshTableCornerButton() {
 }
 
 NOTE_EDITOR_BODY.addEventListener('scroll', refreshTableCornerButton);
-document.getElementById('btn-note-table-toolbar-close').addEventListener('click', () => setNoteTableToolbarOpen(false));
+
+// No hay boton de "Listo": se sale de la barra de tabla en cuanto el
+// cursor deja de estar dentro de una tabla (tocando el texto de fuera,
+// por ejemplo). Pedido de Koku, que ese boton no lo veia claro.
+function closeTableToolbarIfCaretLeft() {
+  if (isNoteTableToolbarOpen() && !getCurrentTableCell()) setNoteTableToolbarOpen(false);
+}
 
 // ---------------------------------------------------------------------
 // Redimensionar tablas a mano (estilo Excel): arrastrar el borde derecho
@@ -5683,6 +5920,7 @@ function removeOpenNoteAndAdvance(key) {
   } else {
     state.activeOpenNoteKey = null;
     document.getElementById('note-editor-view').classList.add('hidden');
+    stopNoteEditorViewportAnchor();
     NOTE_EDITOR_BODY.innerHTML = '';
   }
 }
@@ -5734,9 +5972,54 @@ function openNoteInEditor(note, { readMode = false } = {}) {
     loadOpenNoteIntoDom(entry);
   }
   document.getElementById('note-editor-view').classList.remove('hidden');
+  startNoteEditorViewportAnchor();
   // Ya no hay campo de titulo al que llevar el foco (Fase 4) -- el
   // cuerpo es el unico sitio donde se escribe de verdad.
   NOTE_EDITOR_BODY.focus();
+}
+
+// ---------------------------------------------------------------------
+// El editor, clavado al trozo de pantalla que de verdad se ve.
+//
+// Con el teclado abierto, el telefono NO encoge la ventana: la deja
+// igual de alta y tapa la parte de abajo. Una pantalla fija a inset:0
+// sigue midiendo la ventana ENTERA, asi que su mitad inferior queda
+// debajo del teclado -- y el sistema deja arrastrar toda la vista para
+// llegar a ella. Eso es el segundo scroll que se notaba: no era del
+// texto, era la vista entera moviendose.
+//
+// visualViewport es justo lo que dice cuanto se ve de verdad y donde
+// empieza: fijando ahi el alto y el desplazamiento del editor, no queda
+// nada fuera y no hay nada que arrastrar. La cabecera y la barra de
+// formato se quedan quietas todo el rato, que es lo que hacia falta para
+// poder tocar una tabla con calma.
+// ---------------------------------------------------------------------
+let noteEditorViewportAnchored = false;
+
+function applyNoteEditorViewportAnchor() {
+  const view = document.getElementById('note-editor-view');
+  const vv = window.visualViewport;
+  if (!vv || view.classList.contains('hidden')) return;
+  view.style.height = `${vv.height}px`;
+  view.style.transform = `translateY(${vv.offsetTop}px)`;
+}
+
+function startNoteEditorViewportAnchor() {
+  applyNoteEditorViewportAnchor();
+  if (noteEditorViewportAnchored || !window.visualViewport) return;
+  noteEditorViewportAnchored = true;
+  window.visualViewport.addEventListener('resize', applyNoteEditorViewportAnchor);
+  window.visualViewport.addEventListener('scroll', applyNoteEditorViewportAnchor);
+}
+
+function stopNoteEditorViewportAnchor() {
+  const view = document.getElementById('note-editor-view');
+  view.style.height = '';
+  view.style.transform = '';
+  if (!noteEditorViewportAnchored) return;
+  noteEditorViewportAnchored = false;
+  window.visualViewport.removeEventListener('resize', applyNoteEditorViewportAnchor);
+  window.visualViewport.removeEventListener('scroll', applyNoteEditorViewportAnchor);
 }
 
 // "Volver": cierra cada nota abierta una a una (mismo aviso de cambios
@@ -6260,6 +6543,8 @@ async function openGroupsView() {
   document.getElementById('groups-view').classList.remove('hidden');
   setCurrentScreen('groups');
   showGroupsList();
+  groupsEditMode = false;
+  refreshGroupsEditModeButton();
   await refreshGroupsView();
 }
 
@@ -6369,6 +6654,9 @@ function renderGroupsDetailList() {
   items.forEach((item) => box.appendChild(buildGroupDetailRow(item)));
 }
 
+const GROUP_ITEM_EVENT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M10.5 20a2 2 0 0 0 3 0"/></svg>';
+const GROUP_ITEM_TASK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M8 12.5 11 15.5 16.5 9"/></svg>';
+
 function buildGroupDetailRow(item) {
   const row = document.createElement('div');
   row.className = 'group-item-row';
@@ -6393,6 +6681,15 @@ function buildGroupDetailRow(item) {
     renderGroupsDetailList();
   });
   row.appendChild(check);
+
+  // Icono propio por tipo: una campana para el recordatorio y un
+  // cuadro con un tick para la tarea. El texto de debajo lo sigue
+  // diciendo, pero de un vistazo se distinguen sin leer.
+  const tipo = document.createElement('span');
+  tipo.className = 'group-item-type';
+  tipo.innerHTML = item.isTask ? GROUP_ITEM_TASK_ICON : GROUP_ITEM_EVENT_ICON;
+  tipo.title = item.isTask ? 'Tarea' : 'Recordatorio';
+  row.appendChild(tipo);
 
   const texts = document.createElement('div');
   texts.className = 'group-item-texts';
@@ -6501,9 +6798,26 @@ document.getElementById('btn-groups-add').addEventListener('click', () => openGr
 document.getElementById('btn-close-group').addEventListener('click', closeGroupModal);
 document.getElementById('btn-cancel-group').addEventListener('click', closeGroupModal);
 
+// Lapiz cuando no estas editando, tick cuando si -- sin esto no habia
+// forma clara de salir del modo editar (el mismo boton lo cierra, pero
+// no lo parecia).
+const GROUPS_EDIT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+const GROUPS_DONE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6.5"/></svg>';
+
+function refreshGroupsEditModeButton() {
+  const btn = document.getElementById('btn-groups-edit-mode');
+  btn.innerHTML = groupsEditMode ? GROUPS_DONE_ICON : GROUPS_EDIT_ICON;
+  btn.classList.toggle('is-active', groupsEditMode);
+  btn.setAttribute('aria-label', groupsEditMode ? 'Listo' : 'Editar grupos');
+  btn.title = groupsEditMode ? 'Listo' : 'Editar grupos';
+  // Crear un grupo nuevo mientras editas no tiene mucho sentido, y
+  // ademas el "+" tapa al tick si estan los dos.
+  document.getElementById('btn-groups-add').classList.toggle('hidden', groupsEditMode);
+}
+
 document.getElementById('btn-groups-edit-mode').addEventListener('click', () => {
   groupsEditMode = !groupsEditMode;
-  document.getElementById('btn-groups-edit-mode').classList.toggle('is-active', groupsEditMode);
+  refreshGroupsEditModeButton();
   renderGroupsViewList();
 });
 
