@@ -284,32 +284,17 @@
       <div class="groups-body">
         <!-- Nivel 1: los grupos -->
         <div id="groups-list-panel">
-          <!-- Los grupos se crean y se editan AQUI, dentro de su propio
-               apartado, igual que cada herramienta gestiona lo suyo por
-               dentro -- ya no hay una pestana de Grupos en Configuracion. -->
-          <details class="groups-manage-block">
-            <summary>Gestionar grupos</summary>
-            <p class="hint">Un color y, si quieres, un simbolo o emoji al lado del nombre para diferenciarlos de un vistazo.</p>
-            <form id="group-form" class="group-form">
-              <input type="hidden" id="group-id" />
-              <div class="group-form-row">
-                <div id="group-icon-field"></div>
-                <input type="text" id="group-name" placeholder="Nombre del grupo (ej. Gimnasio)" required />
-                <div id="group-color-field"></div>
-              </div>
-              <div class="group-form-row group-form-row-completed">
-                <span class="hint">Color de las tareas de este grupo al completarse</span>
-                <div id="group-completed-color-field"></div>
-              </div>
-              <div class="group-form-actions">
-                <button type="button" id="btn-cancel-group" class="secondary-btn hidden">Cancelar</button>
-                <button type="submit" class="primary-btn">Guardar grupo</button>
-              </div>
-            </form>
-
-            <div id="groups-list" class="groups-list"></div>
-          </details>
           <div id="groups-view-list" class="groups-list"></div>
+
+          <!-- Lapiz (entrar en modo editar) y "+" (grupo nuevo), abajo a
+               la derecha, mismo sitio que el "+" de Notas. En modo editar,
+               tocar un grupo abre su ficha en vez de entrar dentro. -->
+          <div class="mobile-fab-wrap groups-fab-wrap">
+            <button type="button" id="btn-groups-edit-mode" class="mobile-fab groups-fab-secondary" aria-label="Editar grupos" title="Editar grupos">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            </button>
+            <button type="button" id="btn-groups-add" class="mobile-fab" aria-label="Nuevo grupo" title="Nuevo grupo">+</button>
+          </div>
         </div>
 
         <!-- Nivel 2: lo que hay dentro de un grupo (o de todos) -->
@@ -1540,6 +1525,37 @@
     </div>
   </div>
 
+  <!-- Ficha de un grupo (nombre y color, mas el color con el que se ven
+       sus tareas al completarse). Se abre desde la pantalla de Grupos:
+       con el "+" para uno nuevo, o tocando un grupo en modo editar. -->
+  <div id="group-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-group" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="group-modal-title">Nuevo grupo</h2>
+      <form id="group-form">
+        <input type="hidden" id="group-id" />
+        <label>
+          Nombre
+          <input type="text" id="group-name" placeholder="Ej. Gimnasio" maxlength="60" required />
+        </label>
+        <label>
+          Color
+          <div id="group-color-field"></div>
+        </label>
+        <label>
+          Color de sus tareas al completarse
+          <div id="group-completed-color-field"></div>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-group" class="danger-btn hidden">Eliminar</button>
+          <span class="modal-actions-spacer"></span>
+          <button type="button" id="btn-cancel-group" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Modal para crear / editar tarea: aparte del de evento porque una
        tarea es mas simple (sin hora de fin, ubicacion, recordatorio ni
        "todo el dia") y la fecha es opcional (ver btn-new-task en app.js). -->
@@ -1667,18 +1683,35 @@
         <!-- Solo visible con el cursor dentro de una tabla (ver
              refreshTableContextToolbar en app.js) -- actua siempre sobre
              la fila/columna donde este el cursor en ese momento. -->
-        <span id="note-table-context-toolbar" class="note-table-context-toolbar hidden">
-          <!-- Anadir/quitar filas y columnas ya NO viven aqui: son
-               mandos flotantes pegados a los propios bordes de la tabla
-               (ver #note-table-handles en app.js), que es donde Koku
-               espera encontrarlos. Aqui solo queda lo que no tiene un
-               sitio natural en la tabla. -->
-          <!-- Grosor fino/grueso, por tabla (atributo data-border en el
-               <table>, ver toggleTableBorderThickness en app.js) -- se
-               enciende igual que los botones de negrita/cursiva cuando
-               la tabla actual ya esta en grueso. -->
-          <button type="button" id="note-table-border-toggle" class="note-editor-btn" aria-label="Alternar grosor de borde" title="Alternar borde fino/grueso">Borde</button>
-        </span>
+      </div>
+
+      <!-- Barra de TABLA: sustituye a la de formato mientras se esta
+           trasteando con una tabla (se entra tocando el icono que aparece
+           en su esquina). Una sola linea que se desliza de lado, igual
+           que la de formato. -->
+      <div id="note-table-toolbar" class="note-editor-toolbar hidden">
+        <button type="button" class="note-editor-btn" data-table-cmd="row-above" title="Insertar fila encima">Fila ↑</button>
+        <button type="button" class="note-editor-btn" data-table-cmd="row-below" title="Insertar fila debajo">Fila ↓</button>
+        <button type="button" class="note-editor-btn" data-table-cmd="row-remove" title="Eliminar esta fila">Fila −</button>
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
+        <button type="button" class="note-editor-btn" data-table-cmd="col-left" title="Insertar columna a la izquierda">Col ←</button>
+        <button type="button" class="note-editor-btn" data-table-cmd="col-right" title="Insertar columna a la derecha">Col →</button>
+        <button type="button" class="note-editor-btn" data-table-cmd="col-remove" title="Eliminar esta columna">Col −</button>
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
+        <button type="button" class="note-editor-btn" data-table-cmd="move-row-up" title="Mover la fila arriba">Mover ↑</button>
+        <button type="button" class="note-editor-btn" data-table-cmd="move-row-down" title="Mover la fila abajo">Mover ↓</button>
+        <button type="button" class="note-editor-btn" data-table-cmd="move-col-left" title="Mover la columna a la izquierda">Mover ←</button>
+        <button type="button" class="note-editor-btn" data-table-cmd="move-col-right" title="Mover la columna a la derecha">Mover →</button>
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
+        <button type="button" class="note-editor-btn" data-table-cmd="width-plus" title="Columna más ancha">Ancho +</button>
+        <button type="button" class="note-editor-btn" data-table-cmd="width-minus" title="Columna más estrecha">Ancho −</button>
+        <button type="button" class="note-editor-btn" data-table-cmd="border-plus" title="Borde más grueso">Borde +</button>
+        <button type="button" class="note-editor-btn" data-table-cmd="border-minus" title="Borde más fino">Borde −</button>
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
+        <button type="button" class="note-editor-btn" data-table-cmd="merge" title="Combinar con la celda de la derecha">Combinar</button>
+        <button type="button" class="note-editor-btn" data-table-cmd="split" title="Separar la celda combinada">Separar</button>
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
+        <button type="button" id="btn-note-table-toolbar-close" class="note-editor-btn" title="Volver al formato de texto">Listo</button>
       </div>
       <div class="note-editor-main">
         <div class="note-editor-content-col">
@@ -1729,6 +1762,10 @@
            scroll dentro de esa seccion. -->
       <div class="settings-card-header">
         <h2>Configuración</h2>
+        <!-- "Volver" vive AQUI, en la misma fila que el titulo, y no
+             dentro de cada seccion: ahi quedaba debajo del texto y, al
+             hacer scroll, se pegaba arriba tapando el contenido. -->
+        <button type="button" id="btn-settings-back" class="secondary-btn hidden" data-back>← Volver</button>
       </div>
 
       <div class="settings-card-body">
@@ -1763,7 +1800,6 @@
 
       <!-- --- Tienda (todavia sin mecanica: solo el hueco) --- -->
       <div id="settings-tab-store" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Tienda</h3>
         <p class="hint">
           Aquí vivirán los módulos de Herramientas: los que ya tienes
@@ -1775,7 +1811,6 @@
 
       <!-- --- Perfil --- -->
       <div id="settings-tab-profile" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Perfil</h3>
         <p class="hint">Tu nickname aparece como "creado por" en los eventos y tareas que anadas.</p>
         <form id="profile-form">
@@ -1795,12 +1830,7 @@
 
       <!-- --- Vista --- -->
       <div id="settings-tab-view" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Vista</h3>
-
-        <h4>Días con muchas cosas</h4>
-        <p class="hint">Cómo se ven, en el calendario del mes, los días que tienen varios eventos o tareas a la vez.</p>
-        <div id="calendar-density-options" class="view-mode-options"></div>
 
         <h4>Favoritos en Notas</h4>
         <p class="hint">Cómo se ordenan las carpetas y notas favoritas (la estrella del listado) dentro de cada carpeta.</p>
@@ -1809,7 +1839,6 @@
 
       <!-- --- Estilo --- -->
       <div id="settings-tab-style" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Estilo</h3>
 
         <h4>Estilo de interacción</h4>
@@ -1870,7 +1899,6 @@
       <!-- --- Grupos --- -->
       <!-- --- Este dispositivo (ajustes locales, no compartidos) --- -->
       <div id="settings-tab-mobile" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Este dispositivo</h3>
         <p class="hint">Estos ajustes son solo para el dispositivo en el que estas viendo esto ahora mismo.</p>
         <label class="checkbox-row">

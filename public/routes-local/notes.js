@@ -45,6 +45,7 @@
     'table', 'colgroup', 'col', 'tbody', 'tr', 'td', 'th',
     'img', 'pre', 'code',
   ]);
+  const NOTE_TABLE_BORDER_LEVELS = new Set(['1', '2', '3', '4']);
   const NOTE_IMAGE_SRC = /^\/api\/notes\/images\/[a-zA-Z0-9._-]+$/;
   // Bloques de codigo (```lenguaje + Intro, o el boton "Codigo"): el
   // "lenguaje" es solo una etiqueta visual (no hay coloreado de verdad
@@ -163,10 +164,24 @@
         return heightMatch ? `<tr style="height:${heightMatch[1]}px">` : '<tr>';
       }
       if (lower === 'table') {
-        // Solo el valor EXACTO "thick" -- cualquier otra cosa se descarta
-        // (whitelist de un unico literal, no una expresion regular suelta).
+        // Grosor de borde por niveles (1 = fino, 4 = muy grueso). Lista
+        // blanca de valores exactos, no una expresion suelta. "thick" se
+        // sigue aceptando porque es lo que guardaban las notas de antes
+        // de que esto pasara a tener niveles.
         const borderMatch = attrs.match(/\sdata-border\s*=\s*"([^"]*)"/i);
-        return borderMatch && borderMatch[1] === 'thick' ? '<table data-border="thick">' : '<table>';
+        const borde = borderMatch ? borderMatch[1] : '';
+        if (borde === 'thick') return '<table data-border="3">';
+        return NOTE_TABLE_BORDER_LEVELS.has(borde) ? `<table data-border="${borde}">` : '<table>';
+      }
+      if (lower === 'td' || lower === 'th') {
+        // Celdas combinadas: solo colspan/rowspan, y solo numeros de una
+        // o dos cifras -- nada de estilos ni de cualquier otro atributo.
+        const colspan = attrs.match(/\scolspan\s*=\s*"(\d{1,2})"/i);
+        const rowspan = attrs.match(/\srowspan\s*=\s*"(\d{1,2})"/i);
+        let out = `<${lower}`;
+        if (colspan && Number(colspan[1]) > 1) out += ` colspan="${colspan[1]}"`;
+        if (rowspan && Number(rowspan[1]) > 1) out += ` rowspan="${rowspan[1]}"`;
+        return `${out}>`;
       }
       if (lower === 'pre') {
         const langMatch = attrs.match(/\sdata-lang\s*=\s*"([^"]*)"/i);

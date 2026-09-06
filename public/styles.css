@@ -60,10 +60,10 @@ body.modal-open-lock {
    (.my-space-view:15) -- pero un modal de verdad (p. ej. Configuracion
    a pantalla completa, Fase 5) puede llegar hasta el borde inferior, y
    entonces la barra queda encima tapando/interceptando sus botones.
-   Reutiliza el mismo modal-open-lock que ya marca "hay un modal
-   abierto" para ocultarla mientras tanto -- solo en movil, en
-   escritorio .mobile-nav ya esta oculta siempre. */
-body.modal-open-lock .mobile-nav { display: none; }
+   Solo ante un modal DE VERDAD (real-modal-open): una pantalla completa
+   tambien bloquea el scroll de fondo, pero ahi la barra hace falta para
+   poder salir. Solo en movil; en escritorio ya esta oculta siempre. */
+body.real-modal-open .mobile-nav { display: none; }
 /* Mientras se escribe en una nota, el teclado del sistema sube desde
    abajo -- y una barra fija al fondo de la pantalla acaba flotando JUSTO
    ENCIMA del teclado, que es lo que Koku describio como "la barra de
@@ -574,13 +574,33 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   vertical-align: top;
   overflow: hidden;
 }
-/* Grosor de borde grueso (por tabla, atributo data-border="thick" -- ver
-   toggleTableBorderThickness en app.js). Sin este atributo (por defecto)
-   se queda en el borde fino de siempre. */
-.note-editor-body table[data-border="thick"] td,
-.note-editor-body table[data-border="thick"] th {
-  border-width: 2px;
+/* Grosor del borde por niveles (atributo data-border en el <table>, ver
+   changeTableBorder en app.js). Sin atributo se queda en el borde fino
+   de siempre; "thick" es lo que guardaban las notas de antes de que esto
+   tuviera niveles y equivale al 3. */
+.note-editor-body table[data-border="2"] td, .note-editor-body table[data-border="2"] th { border-width: 2px; }
+.note-editor-body table[data-border="3"] td, .note-editor-body table[data-border="3"] th,
+.note-editor-body table[data-border="thick"] td, .note-editor-body table[data-border="thick"] th { border-width: 3px; }
+.note-editor-body table[data-border="4"] td, .note-editor-body table[data-border="4"] th { border-width: 4px; }
+
+/* Icono en la esquina de la tabla: abre la barra de tabla. Va suelto en
+   <body> con position:fixed y lo recoloca refreshTableCornerButton(). */
+.note-table-corner {
+  position: fixed;
+  z-index: 16;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--accent-text);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
+.note-table-corner svg { width: 16px; height: 16px; }
 /* max-width 100% para que una foto grande no se salga del editor (ni del
    modal) -- se ve a su tamano real hasta ese limite, sin recorte ni
    mangos para redimensionar (eso queda fuera de esta sub-ronda). */
@@ -589,32 +609,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    dentro de una tabla (ver refreshTableContextToolbar en app.js), con un
    separador a la izquierda para no confundirse con los botones de
    formato normales. */
-.note-table-context-toolbar { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: 0.35rem; padding-left: 0.5rem; border-left: 1px solid var(--border); }
 
-/* Mandos pegados a la tabla: los de COLUMNA a su derecha (en vertical,
-   como el borde que ensanchan) y los de FILA debajo (en horizontal).
-   Van sueltos en <body> con position:fixed y se recolocan desde
-   refreshTableHandles() en app.js. */
-.note-table-handles { position: fixed; inset: 0; pointer-events: none; z-index: 16; }
-.note-table-handle-group { position: absolute; display: flex; gap: 0.2rem; pointer-events: auto; }
-.note-table-handle-cols { flex-direction: column; }
-.note-table-handle-rows { flex-direction: row; }
-.note-table-handles button {
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1rem;
-  line-height: 1;
-  border-radius: 50%;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--surface-2-text);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
-}
-.note-table-handles button:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Popover de "Insertar tabla": mismo patron visual que
    .color-popover/.select-popover/.date-popover (position:fixed colgado
@@ -1109,7 +1104,7 @@ body.mobile-day-scroll-lock .app {
 }
 .calendar-quick-actions button { flex: 1; }
 /* Con un modal abierto se aparta igual que la barra de abajo. */
-body.modal-open-lock .calendar-quick-actions { display: none; }
+body.real-modal-open .calendar-quick-actions { display: none; }
 /* En escritorio no hay barra inferior contra la que apoyarse -- estos
    accesos son propios del visor movil. */
 @media (min-width: 860px) {
@@ -1947,8 +1942,10 @@ body.modal-open-lock .calendar-quick-actions { display: none; }
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  /* Poco hueco arriba: el de la muesca ya lo pone .my-space-view. */
-  padding: 0.4rem 1.2rem 0.6rem;
+  /* Encima solo esta la muesca/isla del telefono (el hueco de la muesca
+     en si ya lo pone .my-space-view): sin algo de aire propio, el titulo
+     y los botones quedan pegados a ella. */
+  padding: 0.9rem 1.2rem 0.6rem;
   border-bottom: 1px solid var(--border);
 }
 .my-space-view-header h2 { margin: 0; }
@@ -2511,13 +2508,11 @@ body.modal-open-lock .calendar-quick-actions { display: none; }
    ser la zona con scroll (antes lo era: overflow-y:auto en .modal-card
    se le aplicaba a ella entera, asi que el X con position:absolute se
    iba con el resto del contenido al hacer scroll). Ahora es un flex
-   column con dos partes: settings-card-header (fija, con el X) y
-   settings-card-body (la unica que hace scroll). El "Volver" de cada
-   seccion vive dentro de settings-card-body pero con position:sticky,
-   asi que se pega arriba del todo SOLO mientras estas dentro de esa
-   seccion con scroll, sin necesidad de sacarlo fuera (cada seccion
-   tiene su propio Volver con texto/comportamiento igual, no uno
-   compartido). */
+   column con dos partes: settings-card-header (fija, con el titulo y el
+   boton de Volver) y settings-card-body (la unica que hace scroll). El
+   Volver es UNO solo, en esa cabecera fija: dentro de cada seccion
+   quedaba debajo del titulo y, al hacer scroll, se pegaba arriba
+   tapando el contenido. */
 .settings-card {
   max-width: 560px;
   position: relative;
@@ -2529,7 +2524,10 @@ body.modal-open-lock .calendar-quick-actions { display: none; }
 .settings-card-header {
   flex-shrink: 0;
   padding: 1.2rem 1.2rem 0.4rem;
-  position: relative; /* ancla para el X, igual que antes */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 .settings-card-header h2 { margin: 0; }
 .settings-card-body {
@@ -2611,28 +2609,6 @@ body.modal-open-lock .calendar-quick-actions { display: none; }
 }
 .settings-menu-item svg { width: 30px; height: 30px; color: var(--accent); }
 
-/* Sticky y a ancho completo (con "sangrado" hacia los lados igual al
-   padding de settings-card-body) para que, al pegarse arriba del todo
-   durante el scroll, tape de verdad el contenido que pasa por debajo en
-   vez de dejarlo asomar a los lados. */
-.settings-back-btn {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: inline-block;
-  width: auto;
-  margin: 0 0 0.3rem;
-  padding: 0.5rem 1.1rem;
-  /* surface-2 (en vez de surface, igual que --surface- del contenedor
-     del panel) para que se note como un boton de verdad -- antes era
-     el MISMO color que el fondo detras, sin ningun contraste, Koku lo
-     vio "casi invisible". Sigue siendo opaco de sobra para cumplir su
-     otro trabajo (taparse encima del contenido al quedar pegado arriba
-     durante el scroll). */
-  background: var(--surface-2);
-  border-color: var(--border);
-  color: var(--surface-2-text);
-}
 .settings-tab-panel h3 { margin: 0 0 0.6rem; font-size: 1rem; }
 .settings-tab-panel h4 { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); text-transform: uppercase; letter-spacing: 0.03em; margin: 1rem 0 0.4rem; }
 .settings-subactions { display: flex; gap: 0.5rem; margin: 0.8rem 0; }
@@ -3097,21 +3073,29 @@ body.modal-open-lock .calendar-quick-actions { display: none; }
 .groups-body {
   flex: 1;
   min-height: 0;
+  /* El scroll es de ESTA caja, no de la pagina: la pantalla es fija
+     (inset:0) y la cabecera con el buscador y los filtros se queda
+     arriba mientras la lista corre por debajo. */
   overflow-y: auto;
-  padding: 0.6rem 1rem calc(5rem + env(safe-area-inset-bottom, 0px));
+  -webkit-overflow-scrolling: touch;
+  padding: 0.6rem 1rem calc(9rem + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
 }
-.groups-manage-block {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.6rem 0.8rem;
-  margin-bottom: 0.6rem;
-}
-.groups-manage-block > summary { cursor: pointer; font-size: 0.95rem; }
-.groups-manage-block > summary + * { margin-top: 0.6rem; }
+/* Los dos botones flotantes de la pantalla de Grupos: el lapiz (modo
+   editar) a la izquierda del "+" (grupo nuevo). Reutilizan .mobile-fab-wrap,
+   que ya deja el hueco justo por encima de la barra inferior. */
+.groups-fab-wrap { display: flex; align-items: center; gap: 0.6rem; }
+.groups-fab-secondary { background: var(--surface-2); color: var(--surface-2-text); border: 1px solid var(--border); }
+.groups-fab-secondary svg { width: 20px; height: 20px; }
+.groups-fab-secondary.is-active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+/* Grupo en modo editar: borde discontinuo y el lapiz al final, mismo
+   tratamiento que las carpetas de Notas al editarlas. */
+.group-card.is-editing { outline: 1px dashed var(--accent); outline-offset: -1px; }
+.group-card-edit-mark { margin-left: auto; display: inline-flex; align-items: center; color: var(--accent); }
+.group-card-edit-mark svg { width: 16px; height: 16px; }
+.group-card:disabled { opacity: 0.4; }
 .groups-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .group-card {
   display: flex;

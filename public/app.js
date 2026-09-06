@@ -440,7 +440,13 @@ enableCtrlEnterSubmit('note-form');
 // "rebote" del fondo).
 let modalScrollLockY = 0;
 function refreshModalScrollLock() {
-  const anyOpen = document.querySelector('.modal:not(.hidden)') !== null;
+  // Cuenta tanto un modal como una pantalla completa (.my-space-view):
+  // esas pantallas son position:fixed y traen su propio scroll dentro,
+  // pero la PAGINA de debajo (el calendario, mas alto que la ventana)
+  // se sigue pudiendo arrastrar por detras -- son los "dos scrolls" que
+  // se notaban al abrir una nota. Bloqueando el de la pagina mientras
+  // hay algo encima, solo queda el de dentro.
+  const anyOpen = document.querySelector('.modal:not(.hidden), .my-space-view:not(.hidden)') !== null;
   const isLocked = document.body.classList.contains('modal-open-lock');
   if (anyOpen && !isLocked) {
     modalScrollLockY = window.scrollY;
@@ -460,9 +466,14 @@ function refreshModalScrollLock() {
   const settingsModal = document.getElementById('settings-modal');
   const settingsOpen = settingsModal ? !settingsModal.classList.contains('hidden') : false;
   document.body.classList.toggle('settings-modal-open', settingsOpen);
+  // OJO: "hay un modal de verdad abierto" es DISTINTO de "hay algo
+  // encima". El bloqueo de scroll aplica a los dos, pero la barra
+  // inferior solo se aparta ante un modal (una ventana puntual); una
+  // pantalla completa la necesita para poder salir de ella.
+  document.body.classList.toggle('real-modal-open', document.querySelector('.modal:not(.hidden)') !== null);
 }
 const modalScrollLockObserver = new MutationObserver(refreshModalScrollLock);
-document.querySelectorAll('.modal').forEach((el) => modalScrollLockObserver.observe(el, { attributes: true, attributeFilter: ['class'] }));
+document.querySelectorAll('.modal, .my-space-view').forEach((el) => modalScrollLockObserver.observe(el, { attributes: true, attributeFilter: ['class'] }));
 
 // ---------------------------------------------------------------------
 // Selector de fecha con estilo propio: sustituye <input type="date"> (o
@@ -843,18 +854,6 @@ async function loadSpecialDays() {
   rows.forEach((r) => { state.specialDays[r.date] = r.type; });
 }
 
-// Como se ven, en el calendario del mes, los dias con varios
-// eventos/tareas a la vez — preferencia de ESTE dispositivo, se cambia
-// desde Configuracion > Vista (ver refreshCalendarDensityOptions en
-// settings.js).
-const CALENDAR_DENSITY_MODE_IDS = ['limit', 'dots', 'tint'];
-const CALENDAR_DENSITY_LIMIT = 3; // cuantos chips completos se ven en modo "limite" antes del "+N mas"
-
-function getCalendarDensityMode() {
-  const stored = localStorage.getItem('calendarDayDensity');
-  return CALENDAR_DENSITY_MODE_IDS.includes(stored) ? stored : 'limit';
-}
-
 // Construye el chip de un evento normal (no tarea) para una celda del
 // calendario — se saco aparte de renderCalendarGrid porque el modo
 // "limite" solo pinta ALGUNOS de los eventos del dia, no todos.
@@ -1085,9 +1084,9 @@ function buildMobileDayGroupPill(groups) {
   return pill;
 }
 
-// Ajuste por dispositivo (localStorage, NO sincronizado -- mismo patron
-// que calendarDayDensity de escritorio, ver getCalendarDensityMode() mas
-// arriba): que tan "denso" se ve un dia con eventos en el mes movil.
+// Ajuste por dispositivo (localStorage, NO sincronizado): que tan
+// "denso" se ve un dia con eventos en el mes. Se elige en la propia
+// barra del calendario, no en Configuracion.
 const MOBILE_CALENDAR_MONTH_MODE_IDS = ['compact', 'stacked', 'listed'];
 function getMobileCalendarMonthMode() {
   const stored = localStorage.getItem('mobileCalendarMonthMode');
@@ -3456,9 +3455,11 @@ function refreshNoteEditorToolbar() {
 // Tambien oculta el grupo +Fila/-Fila/+Col/-Col por la misma razon.
 function resetNoteEditorToolbar() {
   document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
-  document.getElementById('note-table-context-toolbar').classList.add('hidden');
-  const handles = document.getElementById('note-table-handles');
-  if (handles) handles.classList.add('hidden');
+  const corner = document.getElementById('note-table-corner');
+  if (corner) corner.classList.add('hidden');
+  const tableToolbar = document.getElementById('note-table-toolbar');
+  if (tableToolbar) tableToolbar.classList.add('hidden');
+  document.getElementById('note-body-toolbar').classList.remove('hidden');
   document.getElementById('note-paragraph-style-btn').disabled = false;
   document.getElementById('note-quote-toggle-btn').disabled = false;
   document.getElementById('note-quote-toggle-btn').classList.remove('is-active');
@@ -3514,27 +3515,12 @@ function getCurrentTableCell() {
   return cell && NOTE_EDITOR_BODY.contains(cell) ? cell : null;
 }
 
-function refreshTableContextToolbar() {
-  const cell = getCurrentTableCell();
-  document.getElementById('note-table-context-toolbar').classList.toggle('hidden', !cell);
-  // El boton de grosor de borde refleja el estado de la tabla donde esta
-  // el cursor AHORA MISMO -- cada tabla lleva su propio grosor (atributo
-  // data-border en el <table>, ver toggleTableBorderThickness), no es un
-  // ajuste global del editor.
-  const borderBtn = document.getElementById('note-table-border-toggle');
-  if (borderBtn) {
-    const isThick = cell && cell.closest('table').getAttribute('data-border') === 'thick';
-    borderBtn.classList.toggle('is-active', !!isThick);
-  }
-}
-
-// Junta el refresco de negrita/cursiva/lista y el de la barra contextual
-// de tabla en una sola llamada -- se disparan siempre juntos, con el
-// mismo cambio de seleccion o tecla dentro del editor.
+// Junta el refresco de negrita/cursiva/lista y el del icono de tabla en
+// una sola llamada -- se disparan siempre juntos, con el mismo cambio de
+// seleccion o tecla dentro del editor.
 function refreshNoteEditorState() {
   refreshNoteEditorToolbar();
-  refreshTableContextToolbar();
-  refreshTableHandles();
+  refreshTableCornerButton();
   refreshNoteBlockButtons();
   refreshPendingNoteHighlightState();
   refreshNoteHighlightSwatchActiveState();
@@ -4564,104 +4550,282 @@ function removeTableColumn() {
 // en el <table> (ausente = fino, el de siempre). El saneado del servidor
 // (sanitizeNoteBody en routes/notes.js) solo deja pasar ese atributo con
 // el valor EXACTO "thick", cualquier otra cosa se descarta.
-function toggleTableBorderThickness() {
+// Nivel de grosor del borde, por tabla (1 fino ... 4 muy grueso). Antes
+// era un simple "fino o grueso"; Koku lo queria estilo Excel, subiendo y
+// bajando de nivel.
+const TABLE_BORDER_LEVELS = ['1', '2', '3', '4'];
+
+function changeTableBorder(delta) {
   const cell = getCurrentTableCell();
   if (!cell) return;
   const table = cell.closest('table');
-  if (table.getAttribute('data-border') === 'thick') table.removeAttribute('data-border');
-  else table.setAttribute('data-border', 'thick');
+  const actual = table.getAttribute('data-border');
+  // "thick" es lo que guardaban las notas de antes de que esto tuviera
+  // niveles: cuenta como el nivel 3.
+  const idx = actual === 'thick' ? 2 : Math.max(0, TABLE_BORDER_LEVELS.indexOf(actual));
+  const siguiente = Math.min(TABLE_BORDER_LEVELS.length - 1, Math.max(0, idx + delta));
+  if (siguiente === 0) table.removeAttribute('data-border');
+  else table.setAttribute('data-border', TABLE_BORDER_LEVELS[siguiente]);
+  refreshNoteEditorState();
+}
+
+// Ensancha o estrecha la COLUMNA donde esta el cursor, tocando su <col>
+// del colgroup (que es lo que manda de verdad con table-layout:fixed).
+function changeTableColumnWidth(delta) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const colIndex = Array.from(row.children).indexOf(cell);
+  const table = row.closest('table');
+  const colgroup = ensureTableColgroup(table, row.children.length);
+  const col = colgroup.children[colIndex];
+  if (!col) return;
+  const actual = parseInt(col.style.width, 10) || DEFAULT_TABLE_COL_WIDTH;
+  col.style.width = `${Math.max(TABLE_MIN_COL_WIDTH, actual + delta)}px`;
+  refreshNoteEditorState();
+}
+
+// Sube o baja la fila del cursor intercambiandola con su vecina.
+function moveTableRow(delta) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const vecina = delta < 0 ? row.previousElementSibling : row.nextElementSibling;
+  if (!vecina) return;
+  if (delta < 0) vecina.before(row);
+  else vecina.after(row);
+  putCaretInCell(cell);
+  refreshNoteEditorState();
+}
+
+// Mueve la columna del cursor a izquierda o derecha: intercambia esa
+// celda con su vecina EN CADA FILA, y tambien los <col> del colgroup
+// (si no, los anchos se quedarian con la columna equivocada).
+function moveTableColumn(delta) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const colIndex = Array.from(row.children).indexOf(cell);
+  const destino = colIndex + delta;
+  const table = row.closest('table');
+  if (destino < 0 || destino >= row.children.length) return;
+  table.querySelectorAll('tr').forEach((tr) => {
+    const a = tr.children[colIndex];
+    const b = tr.children[destino];
+    if (!a || !b) return;
+    if (delta < 0) b.before(a);
+    else b.after(a);
+  });
+  const colgroup = table.querySelector('colgroup');
+  if (colgroup && colgroup.children[colIndex] && colgroup.children[destino]) {
+    const ca = colgroup.children[colIndex];
+    const cb = colgroup.children[destino];
+    if (delta < 0) cb.before(ca);
+    else cb.after(ca);
+  }
+  putCaretInCell(cell);
+  refreshNoteEditorState();
+}
+
+// Combina la celda del cursor con la de su derecha (colspan). Es la
+// forma sencilla y predecible: nada de seleccionar un rectangulo de
+// celdas, que en un movil no hay forma comoda de hacer.
+function mergeTableCell() {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const siguiente = cell.nextElementSibling;
+  if (!siguiente) return;
+  const actual = parseInt(cell.getAttribute('colspan'), 10) || 1;
+  const suya = parseInt(siguiente.getAttribute('colspan'), 10) || 1;
+  // El contenido de la que se absorbe no se pierde: se pega detras.
+  const texto = siguiente.textContent.trim();
+  if (texto) cell.innerHTML = `${cell.innerHTML} ${siguiente.innerHTML}`;
+  siguiente.remove();
+  cell.setAttribute('colspan', String(actual + suya));
+  putCaretInCell(cell);
+  refreshNoteEditorState();
+}
+
+// Deshace una combinacion: devuelve la celda a una sola columna y crea
+// las vacias que faltaban.
+function splitTableCell() {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const actual = parseInt(cell.getAttribute('colspan'), 10) || 1;
+  if (actual <= 1) return;
+  cell.removeAttribute('colspan');
+  let anterior = cell;
+  for (let i = 1; i < actual; i++) {
+    const nueva = document.createElement(cell.tagName);
+    nueva.innerHTML = '<br>';
+    anterior.after(nueva);
+    anterior = nueva;
+  }
+  putCaretInCell(cell);
+  refreshNoteEditorState();
+}
+
+// Deja el cursor dentro de una celda concreta -- las funciones de mover
+// y combinar reordenan el DOM, y sin esto el cursor se quedaria colgado
+// donde estaba la celda antes.
+function putCaretInCell(cell) {
+  const range = document.createRange();
+  range.setStart(cell, 0);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  NOTE_EDITOR_BODY.focus();
+}
+
+// Insertar una fila encima o debajo de la del cursor.
+function insertTableRow(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const nueva = document.createElement('tr');
+  nueva.style.height = `${DEFAULT_TABLE_ROW_HEIGHT}px`;
+  Array.from(row.children).forEach((existente) => {
+    const celda = document.createElement(existente.tagName);
+    celda.innerHTML = '<br>';
+    const span = existente.getAttribute('colspan');
+    if (span) celda.setAttribute('colspan', span);
+    nueva.appendChild(celda);
+  });
+  if (donde === 'above') row.before(nueva);
+  else row.after(nueva);
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
 
-[
-  ['note-table-border-toggle', toggleTableBorderThickness],
-].forEach(([id, handler]) => {
-  const btn = document.getElementById(id);
-  btn.addEventListener('mousedown', (e) => e.preventDefault());
-  btn.addEventListener('click', handler);
-});
+// Insertar una columna a un lado u otro de la del cursor.
+function insertTableColumn(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const colIndex = Array.from(row.children).indexOf(cell);
+  const table = row.closest('table');
+  table.querySelectorAll('tr').forEach((tr) => {
+    const referencia = tr.children[colIndex];
+    if (!referencia) return;
+    const nueva = document.createElement(referencia.tagName);
+    nueva.innerHTML = '<br>';
+    if (donde === 'left') referencia.before(nueva);
+    else referencia.after(nueva);
+  });
+  const colgroup = ensureTableColgroup(table, row.children.length);
+  const nuevaCol = document.createElement('col');
+  nuevaCol.style.width = `${DEFAULT_TABLE_COL_WIDTH}px`;
+  const referenciaCol = colgroup.children[colIndex];
+  if (referenciaCol && donde === 'left') referenciaCol.before(nuevaCol);
+  else if (referenciaCol) referenciaCol.after(nuevaCol);
+  else colgroup.appendChild(nuevaCol);
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
 
-// ---------------------------------------------------------------------
-// Mandos pegados a la tabla (sustituyen a los antiguos +Fila/-Fila/
-// +Col/-Col de la barra de formato). Con el cursor dentro de una celda
-// aparecen dos parejas de botones: a la DERECHA de la tabla los de
-// columna, y DEBAJO los de fila -- asi se ve de un vistazo que uno
-// ensancha y el otro alarga, sin tener que leer ninguna etiqueta.
-// Van en <body> con position:fixed y se recolocan a partir del rectangulo
-// real de la tabla, porque el editor tiene su propio scroll: colgarlos
-// del propio <table> obligaria a envolverla en un contenedor y a tocar
-// el HTML que se guarda en la nota, que es justo lo que no se quiere.
-// ---------------------------------------------------------------------
-const tableHandles = document.createElement('div');
-tableHandles.id = 'note-table-handles';
-tableHandles.className = 'note-table-handles hidden';
-tableHandles.innerHTML = `
-  <div class="note-table-handle-group note-table-handle-cols">
-    <button type="button" data-table-action="add-col" aria-label="Añadir columna" title="Añadir columna">+</button>
-    <button type="button" data-table-action="remove-col" aria-label="Eliminar columna" title="Eliminar columna">−</button>
-  </div>
-  <div class="note-table-handle-group note-table-handle-rows">
-    <button type="button" data-table-action="add-row" aria-label="Añadir fila" title="Añadir fila">+</button>
-    <button type="button" data-table-action="remove-row" aria-label="Eliminar fila" title="Eliminar fila">−</button>
-  </div>
-`;
-document.body.appendChild(tableHandles);
-
-const TABLE_HANDLE_ACTIONS = {
-  'add-row': addTableRow,
-  'remove-row': removeTableRow,
-  'add-col': addTableColumn,
-  'remove-col': removeTableColumn,
+const NOTE_TABLE_COMMANDS = {
+  'row-above': () => insertTableRow('above'),
+  'row-below': () => insertTableRow('below'),
+  'row-remove': removeTableRow,
+  'col-left': () => insertTableColumn('left'),
+  'col-right': () => insertTableColumn('right'),
+  'col-remove': removeTableColumn,
+  'move-row-up': () => moveTableRow(-1),
+  'move-row-down': () => moveTableRow(1),
+  'move-col-left': () => moveTableColumn(-1),
+  'move-col-right': () => moveTableColumn(1),
+  'width-plus': () => changeTableColumnWidth(20),
+  'width-minus': () => changeTableColumnWidth(-20),
+  'border-plus': () => changeTableBorder(1),
+  'border-minus': () => changeTableBorder(-1),
+  merge: mergeTableCell,
+  split: splitTableCell,
 };
 
-tableHandles.querySelectorAll('button').forEach((btn) => {
-  // mousedown preventDefault: sin esto el navegador quita el cursor de la
-  // celda al pulsar, y para cuando llega el click ya no hay "celda
-  // actual" sobre la que actuar.
+document.querySelectorAll('#note-table-toolbar [data-table-cmd]').forEach((btn) => {
   btn.addEventListener('mousedown', (e) => e.preventDefault());
   btn.addEventListener('click', () => {
-    const handler = TABLE_HANDLE_ACTIONS[btn.dataset.tableAction];
-    if (handler) handler();
-    refreshTableHandles();
+    const fn = NOTE_TABLE_COMMANDS[btn.dataset.tableCmd];
+    if (fn) fn();
+    // Quitar la ultima fila o columna borra la tabla entera: si ya no
+    // queda ninguna, no tiene sentido seguir en la barra de tabla.
+    if (!getCurrentTableCell()) setNoteTableToolbarOpen(false);
   });
 });
 
-// Recoloca (o esconde) los mandos segun donde este el cursor. Se llama
-// en cada cambio de seleccion dentro del editor y tambien al hacer
-// scroll del texto, que es cuando la tabla se mueve por la pantalla.
-function refreshTableHandles() {
-  // Se busca por id a proposito (en vez de usar la constante de arriba):
-  // esta funcion se llama desde refreshNoteEditorState(), que vive mucho
-  // mas arriba en el archivo, y una constante declarada mas abajo daria
-  // error si algo la llamara mientras el archivo todavia se esta
-  // ejecutando -- el fallo de "zona muerta" ya documentado en CLAUDE.md.
-  const box = document.getElementById('note-table-handles');
+// ---------------------------------------------------------------------
+// Tablas: un solo icono en la ESQUINA de la tabla (la mas cercana a la
+// celda donde esta el cursor, de las 4 exteriores) que abre la barra de
+// tabla -- la de formato de texto se aparta mientras tanto. Es lo que
+// pidio Koku: "pincho la tabla, en la esquina mas cercana me muestra un
+// icono... la barra de formato cambia".
+//
+// El icono va en <body> con position:fixed y se recoloca a partir del
+// rectangulo real de la tabla, porque el editor tiene su propio scroll:
+// colgarlo del <table> obligaria a envolverla en un contenedor y a tocar
+// el HTML que se guarda en la nota.
+// ---------------------------------------------------------------------
+const tableCornerBtn = document.createElement('button');
+tableCornerBtn.type = 'button';
+tableCornerBtn.id = 'note-table-corner';
+tableCornerBtn.className = 'note-table-corner hidden';
+tableCornerBtn.setAttribute('aria-label', 'Modificar la tabla');
+tableCornerBtn.title = 'Modificar la tabla';
+tableCornerBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>';
+// mousedown preventDefault: sin esto el navegador quita el cursor de la
+// celda al pulsar, y para cuando llega el click ya no hay "celda actual".
+tableCornerBtn.addEventListener('mousedown', (e) => e.preventDefault());
+tableCornerBtn.addEventListener('click', () => setNoteTableToolbarOpen(true));
+document.body.appendChild(tableCornerBtn);
+
+// Alterna entre la barra de formato de texto y la de tabla.
+function setNoteTableToolbarOpen(open) {
+  document.getElementById('note-body-toolbar').classList.toggle('hidden', open);
+  document.getElementById('note-table-toolbar').classList.toggle('hidden', !open);
+  if (!open) NOTE_EDITOR_BODY.focus();
+  refreshTableCornerButton();
+}
+
+function isNoteTableToolbarOpen() {
+  return !document.getElementById('note-table-toolbar').classList.contains('hidden');
+}
+
+// Coloca (o esconde) el icono de esquina. Se llama en cada cambio de
+// seleccion dentro del editor y al hacer scroll del texto, que es cuando
+// la tabla se mueve por la pantalla.
+function refreshTableCornerButton() {
+  const box = document.getElementById('note-table-corner');
   if (!box) return;
   const cell = getCurrentTableCell();
   const table = cell ? cell.closest('table') : null;
-  if (!table || NOTE_EDITOR_BODY.getAttribute('contenteditable') === 'false') {
+  // Con la barra de tabla abierta el icono sobra (ya estas dentro), y en
+  // modo lectura no hay nada que modificar.
+  if (!table || isNoteTableToolbarOpen() || NOTE_EDITOR_BODY.getAttribute('contenteditable') === 'false') {
     box.classList.add('hidden');
     return;
   }
   const rect = table.getBoundingClientRect();
   const visible = NOTE_EDITOR_BODY.getBoundingClientRect();
-  // Si la tabla se ha ido fuera del area visible del texto, los mandos
-  // se esconden en vez de quedarse flotando sobre otra cosa.
   if (rect.bottom < visible.top || rect.top > visible.bottom) {
     box.classList.add('hidden');
     return;
   }
+  // De las 4 esquinas exteriores, la mas cercana a la celda donde esta
+  // el cursor -- el icono aparece "al lado" de donde acabas de tocar.
+  const cellRect = cell.getBoundingClientRect();
+  const cx = cellRect.left + cellRect.width / 2;
+  const cy = cellRect.top + cellRect.height / 2;
+  const izquierda = cx < rect.left + rect.width / 2;
+  const arriba = cy < rect.top + rect.height / 2;
   box.classList.remove('hidden');
-  const cols = box.querySelector('.note-table-handle-cols');
-  const rows = box.querySelector('.note-table-handle-rows');
-  cols.style.left = `${rect.right + 6}px`;
-  cols.style.top = `${rect.top + rect.height / 2 - cols.offsetHeight / 2}px`;
-  rows.style.left = `${rect.left + rect.width / 2 - rows.offsetWidth / 2}px`;
-  rows.style.top = `${rect.bottom + 6}px`;
+  const tamano = box.offsetWidth || 28;
+  box.style.left = `${(izquierda ? rect.left - tamano - 4 : rect.right + 4)}px`;
+  box.style.top = `${(arriba ? rect.top - 4 : rect.bottom - tamano + 4)}px`;
 }
 
-NOTE_EDITOR_BODY.addEventListener('scroll', refreshTableHandles);
+NOTE_EDITOR_BODY.addEventListener('scroll', refreshTableCornerButton);
+document.getElementById('btn-note-table-toolbar-close').addEventListener('click', () => setNoteTableToolbarOpen(false));
 
 // ---------------------------------------------------------------------
 // Redimensionar tablas a mano (estilo Excel): arrastrar el borde derecho
@@ -5482,8 +5646,7 @@ function applyNoteEditorReadMode(readOnly) {
   document.getElementById('note-body-toolbar').classList.toggle('hidden', readOnly);
   document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
   if (readOnly) {
-    document.getElementById('note-table-context-toolbar').classList.add('hidden');
-  }
+    }
 }
 
 function loadOpenNoteIntoDom(entry) {
@@ -6063,6 +6226,7 @@ document.getElementById('btn-close-extensions').addEventListener('click', closeE
 // null = "Todos los eventos"; si no, el id del grupo abierto.
 let groupsViewSelectedId = undefined; // undefined = todavia en la lista
 let groupsViewItems = [];
+let groupsEditMode = false;
 const groupsViewFilters = { type: 'all', done: 'all', q: '' };
 
 const groupsFilterTypeField = createSelectField({
@@ -6096,9 +6260,14 @@ async function openGroupsView() {
   document.getElementById('groups-view').classList.remove('hidden');
   setCurrentScreen('groups');
   showGroupsList();
-  // refreshGroupsTab (settings.js) recarga los grupos y pinta LAS DOS
-  // listas de esta pantalla: las tarjetas de navegacion y la de gestion.
-  await refreshGroupsTab();
+  await refreshGroupsView();
+}
+
+// Recarga los grupos y repinta sus tarjetas. Lo llaman tanto la apertura
+// de la pantalla como cualquier alta/edicion/borrado desde su ficha.
+async function refreshGroupsView() {
+  await loadGroups();
+  renderGroupsViewList();
 }
 
 function closeGroupsView() {
@@ -6136,6 +6305,22 @@ function buildGroupViewCard(id, name, color) {
   const label = document.createElement('span');
   label.textContent = name;
   btn.append(dot, label);
+  // En modo editar, tocar un grupo abre su ficha en vez de entrar
+  // dentro. "Todos los eventos" no es un grupo de verdad, asi que ahi no
+  // hay nada que editar y se queda apagado.
+  if (groupsEditMode) {
+    if (id === null) {
+      btn.disabled = true;
+    } else {
+      btn.classList.add('is-editing');
+      const lapiz = document.createElement('span');
+      lapiz.className = 'group-card-edit-mark';
+      lapiz.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+      btn.appendChild(lapiz);
+      btn.addEventListener('click', () => openGroupModal(state.groups.find((g) => g.id === id)));
+    }
+    return btn;
+  }
   // En la cabecera del detalle cabe poco: "Todos los eventos" se queda
   // en "Todos" ahi (en la tarjeta si va el texto entero).
   btn.addEventListener('click', () => openGroupDetail(id, id === null ? 'Todos' : name));
@@ -6163,10 +6348,8 @@ function groupsDetailVisibleItems() {
     if (groupsViewSelectedId !== null && item.groupId !== groupsViewSelectedId) return false;
     if (groupsViewFilters.type === 'task' && !item.isTask) return false;
     if (groupsViewFilters.type === 'event' && item.isTask) return false;
-    // "Terminadas o no" solo tiene sentido en tareas: un recordatorio no
-    // se completa, asi que se queda fuera en cuanto se filtra por eso.
-    if (groupsViewFilters.done === 'done' && !(item.isTask && item.done)) return false;
-    if (groupsViewFilters.done === 'pending' && !(item.isTask && !item.done)) return false;
+    if (groupsViewFilters.done === 'done' && !item.done) return false;
+    if (groupsViewFilters.done === 'pending' && item.done) return false;
     if (q && !(item.title || '').toLowerCase().includes(q)) return false;
     return true;
   });
@@ -6189,28 +6372,27 @@ function renderGroupsDetailList() {
 function buildGroupDetailRow(item) {
   const row = document.createElement('div');
   row.className = 'group-item-row';
-  if (item.isTask && item.done) row.classList.add('is-done');
+  if (item.done) row.classList.add('is-done');
 
   const bar = document.createElement('span');
   bar.className = 'group-item-bar';
   bar.style.background = item.groupColor || 'var(--border)';
   row.appendChild(bar);
 
-  // Solo las tareas se pueden tachar; un recordatorio es un aviso, no
-  // algo que se complete (pedido explicito de Koku).
-  if (item.isTask) {
-    const check = document.createElement('input');
-    check.type = 'checkbox';
-    check.className = 'styled-checkbox';
-    check.checked = !!item.done;
-    check.addEventListener('click', (e) => e.stopPropagation());
-    check.addEventListener('change', async () => {
-      await toggleTaskDone(item);
-      item.done = !item.done;
-      renderGroupsDetailList();
-    });
-    row.appendChild(check);
-  }
+  // Tareas Y recordatorios se pueden marcar como hechos desde aqui: la
+  // columna "done" es de la fila del evento, la tenga o no marcada como
+  // tarea, asi que vale para los dos.
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.className = 'styled-checkbox';
+  check.checked = !!item.done;
+  check.addEventListener('click', (e) => e.stopPropagation());
+  check.addEventListener('change', async () => {
+    await toggleTaskDone(item);
+    item.done = !item.done;
+    renderGroupsDetailList();
+  });
+  row.appendChild(check);
 
   const texts = document.createElement('div');
   texts.className = 'group-item-texts';
@@ -6241,6 +6423,116 @@ function groupItemMetaText(item) {
   }
   return partes.join(' · ');
 }
+
+// ---------------------------------------------------------------------
+// Ficha de un grupo (nombre, color, y el color con el que se ven sus
+// tareas al completarse). Antes esto vivia en Configuracion -> Grupos;
+// ahora la gestion es de este apartado, igual que cada herramienta
+// gestiona lo suyo por dentro.
+//
+// Los dos selectores de color se crean PEREZOSAMENTE, la primera vez que
+// se abre la ficha: createColorField vive en settings.js, que carga
+// DESPUES de app.js -- crearlos aqui a nivel de modulo daria
+// ReferenceError (mismo motivo por el que Finanzas hace lo mismo con los
+// suyos, ver setupFinanzasIconColorFields).
+// ---------------------------------------------------------------------
+let groupColorField = null;
+let groupCompletedColorField = null;
+// El color de "completada" sigue al del grupo (atenuado) mientras no se
+// toque a mano; en cuanto se elige uno explicito, deja de seguirle.
+let groupCompletedColorTouched = false;
+let suppressGroupCompletedTouch = false;
+
+function setupGroupColorFields() {
+  if (groupColorField) return;
+  groupCompletedColorField = createColorField({
+    initialValue: mutedTaskColor(DEFAULT_EVENT_COLOR),
+    onChange: () => { if (!suppressGroupCompletedTouch) groupCompletedColorTouched = true; },
+  });
+  document.getElementById('group-completed-color-field').appendChild(groupCompletedColorField.element);
+  groupColorField = createColorField({
+    initialValue: DEFAULT_EVENT_COLOR,
+    onChange: (nuevo) => {
+      if (!groupCompletedColorTouched) setGroupCompletedColorProgrammatically(mutedTaskColor(nuevo));
+    },
+  });
+  document.getElementById('group-color-field').appendChild(groupColorField.element);
+}
+
+// Cambia el color de completada SIN que cuente como que se ha tocado a
+// mano (carga inicial, o cargar el valor guardado de un grupo).
+function setGroupCompletedColorProgrammatically(hex) {
+  suppressGroupCompletedTouch = true;
+  groupCompletedColorField.setValue(hex);
+  suppressGroupCompletedTouch = false;
+}
+
+function openGroupModal(group) {
+  setupGroupColorFields();
+  document.getElementById('group-modal-title').textContent = group ? 'Editar grupo' : 'Nuevo grupo';
+  document.getElementById('group-id').value = group ? group.id : '';
+  document.getElementById('group-name').value = group ? group.name : '';
+  groupColorField.setValue(group ? group.color : DEFAULT_EVENT_COLOR);
+  // Si el grupo ya tiene un color de completada EXPLICITO se trata como
+  // "tocado", para que cambiar el color normal no se lo pise.
+  groupCompletedColorTouched = !!(group && group.completedColor);
+  setGroupCompletedColorProgrammatically(
+    (group && group.completedColor) || mutedTaskColor(group ? group.color : DEFAULT_EVENT_COLOR),
+  );
+  document.getElementById('btn-delete-group').classList.toggle('hidden', !group);
+  document.getElementById('group-modal').classList.remove('hidden');
+  document.getElementById('group-name').focus();
+}
+
+function closeGroupModal() {
+  document.getElementById('group-modal').classList.add('hidden');
+}
+
+// Todo lo que se ve del grupo (chips del calendario, recordatorios,
+// tareas) cambia con el: se recarga lo que lo pinta, no solo la lista.
+async function refreshAfterGroupChange() {
+  await refreshGroupsView();
+  loadMonth();
+  loadReminders();
+  loadTasks().then(renderTasksList);
+}
+
+document.getElementById('btn-groups-add').addEventListener('click', () => openGroupModal(null));
+document.getElementById('btn-close-group').addEventListener('click', closeGroupModal);
+document.getElementById('btn-cancel-group').addEventListener('click', closeGroupModal);
+
+document.getElementById('btn-groups-edit-mode').addEventListener('click', () => {
+  groupsEditMode = !groupsEditMode;
+  document.getElementById('btn-groups-edit-mode').classList.toggle('is-active', groupsEditMode);
+  renderGroupsViewList();
+});
+
+document.getElementById('group-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('group-id').value;
+  const payload = {
+    name: document.getElementById('group-name').value,
+    color: groupColorField.getValue(),
+    completedColor: groupCompletedColorField.getValue(),
+  };
+  if (id) await api(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  else await api('/api/groups', { method: 'POST', body: JSON.stringify(payload) });
+  closeGroupModal();
+  await refreshAfterGroupChange();
+});
+
+document.getElementById('btn-delete-group').addEventListener('click', async () => {
+  const id = document.getElementById('group-id').value;
+  if (!id) return;
+  const grupo = state.groups.find((g) => String(g.id) === String(id));
+  const seguro = await showAppConfirm(
+    `¿Eliminar el grupo "${grupo ? grupo.name : ''}"? Los eventos que lo usen se quedarán sin grupo.`,
+  );
+  if (!seguro) return;
+  await api(`/api/groups/${id}`, { method: 'DELETE' });
+  closeGroupModal();
+  await refreshAfterGroupChange();
+});
 
 document.getElementById('btn-close-groups').addEventListener('click', closeGroupsView);
 document.getElementById('btn-groups-back').addEventListener('click', () => {
@@ -10380,18 +10672,6 @@ function setCurrentScreen(screen) {
   refreshMobileNavActive(mobileNavSectionForScreen(screen));
 }
 
-async function restoreCurrentScreen() {
-  const screen = localStorage.getItem('currentScreen');
-  if (!screen || screen === 'home') return;
-  if (screen === 'mobile-notes') { openMobileNotesView(); return; }
-  if (screen === 'extensions') { openExtensionsView(); return; }
-  if (screen === 'gym') { await openGymView(); return; }
-  if (screen === 'lecturas') { openLecturasView(); return; }
-  if (screen === 'finanzas') { await openFinanzasView(); return; }
-  if (screen === 'viajes') { await openViajesView(); return; }
-  if (screen === 'groups') { await openGroupsView(); return; }
-}
-
 async function initStep(fn) {
   try {
     await fn();
@@ -10401,37 +10681,10 @@ async function initStep(fn) {
 }
 
 async function init() {
-  // Lo PRIMERO de todo (antes incluso de cargar datos del calendario):
-  // si veniamos de una recarga dentro de una vista a pantalla completa,
-  // cubrir el calendario con esa vista cuanto antes -- el calendario ya
-  // esta visible desde el primer momento, así que cuanto mas tarde se
-  // llame a esto, mas se nota el "flashazo" antes de taparlo. Moverlo aqui
-  // (en vez de al final de init(), donde estaba antes) no depende de
-  // nada de lo que carga init() despues -- cada open*View() ya carga sus
-  // propios datos por su cuenta.
-  //
-  // OJO -- bug real encontrado al mover esto tan pronto: algunas vistas
-  // (Finanzas, via setupFinanzasIconColorFields) llaman en su apertura a
-  // funciones que viven en settings.js (createIconField/createColorField),
-  // que carga DESPUES de app.js (ver la nota de "Orden de declaracion"
-  // en CLAUDE.md) -- normalmente esto no es problema porque esas
-  // llamadas solo ocurren dentro de manejadores de eventos, que se
-  // disparan mucho despues de que TODOS los <script> ya han terminado
-  // de cargar. Pero al llamar a restoreCurrentScreen() de forma
-  // SINCRONA nada mas arrancar init() (que a su vez se invoca de forma
-  // sincrona al final de app.js), app.js seguia "en mitad de su propio
-  // <script>" cuando esto se ejecutaba -- settings.js ni siquiera habia
-  // empezado a cargar todavia, y createIconField no existia aun
-  // (ReferenceError). Un simple `await Promise.resolve()` NO basta para
-  // arreglarlo (los microtasks se vacian ENTRE cada <script> del
-  // documento, antes de pasar al siguiente) -- hace falta un macrotask
-  // de verdad (setTimeout) para que el navegador termine de
-  // parsear/ejecutar el resto de los <script> del documento (incluido
-  // settings.js entero) antes de continuar aqui. Sigue siendo
-  // practicamente instantaneo para quien lo ve, muy lejos de las 7
-  // llamadas de red secuenciales que había antes.
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await initStep(restoreCurrentScreen);
+  // La app abre SIEMPRE en el calendario, sin importar donde se cerro
+  // (pedido explicito de Koku tras probarlo: reabrirla en Herramientas
+  // no era lo que esperaba). currentScreen se sigue guardando, pero solo
+  // para saber que boton de la barra de abajo encender mientras navegas.
   await initStep(loadGroups);
   await initStep(loadSpecialDays);
   await initStep(loadMonth);
