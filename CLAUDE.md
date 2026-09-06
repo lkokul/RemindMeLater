@@ -331,6 +331,15 @@ ahora se llama `device`.
       con un require diferido dentro del handler para no crear un
       require circular con `proyectosDatabases.js`, que importa
       `sanitizePageBody` de páginas.
+    - **Proyecto de ejemplo (guía de uso)**: idea de Koku — como Notion
+      tiene barrera de entrada alta, hay un botón 📖 (sidebar y pantalla
+      vacía) que crea un proyecto YA relleno enseñando todas las
+      funcionalidades con contenido real: página principal con todos los
+      bloques en vivo + subpágina de organización + subpágina con una
+      base de datos demo poblada (4 filas, 4 tipos de propiedad). Ver
+      `createProyectosGuide()` en `app.js` — usa las APIs normales, así
+      que también sirve de prueba de humo. Es un proyecto normal: se
+      edita y se borra como cualquier otro, y se puede crear N veces.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 

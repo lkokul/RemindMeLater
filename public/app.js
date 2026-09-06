@@ -11882,6 +11882,181 @@ document.getElementById('proyectos-peek-title').addEventListener('keydown', (e) 
 });
 
 // ---------------------------------------------------------------------
+// El "proyecto de ejemplo" (guía de uso)
+//
+// Notion da tanta libertad que cuesta saber por dónde empezar — idea de
+// Koku: un proyecto YA relleno que enseña todas las funcionalidades de
+// la herramienta con contenido real que se puede tocar, en vez de un
+// manual aparte. Se crea bajo demanda (botón 📖 del sidebar o el de la
+// pantalla vacía), es un proyecto normal (se edita/borra como cualquier
+// otro) y se puede crear tantas veces como se quiera.
+//
+// Todo se construye llamando a las MISMAS APIs que usa la interfaz
+// (crear páginas, base de datos, propiedades, filas), así que además de
+// guía sirve de prueba de humo de la herramienta entera.
+// ---------------------------------------------------------------------
+async function createProyectosGuide() {
+  await flushProyectosSave();
+
+  // --- 1) La página principal: el recorrido por el editor de bloques ---
+  // El HTML respeta la lista blanca del saneador (ver sanitizePageBody
+  // en core/routes/proyectosPages.js): si aquí se usara algo fuera de
+  // ella, el backend lo quitaría al guardar.
+  const guideBody = [
+    '<div data-callout="1" data-icon="👋">Bienvenido. Este proyecto es una guía viva: todo lo que ves está hecho con la propia herramienta, así que puedes tocarlo, romperlo y borrarlo sin miedo. Las páginas de la izquierda son parte de la guía.</div>',
+    '<h1>El menú «/»</h1>',
+    '<div>Escribe <b>/</b> en cualquier línea vacía y aparece un menú con buscador. Con él insertas cualquier bloque: prueba a escribir <b>/tit</b> o <b>/tabla</b> y elige con las flechas + Intro.</div>',
+    '<h2>Atajos rápidos de teclado</h2>',
+    '<div>Además del menú, estos prefijos convierten la línea al pulsar espacio:</div>',
+    '<table><tbody>',
+    '<tr><th>Escribe</th><th>Y sale</th></tr>',
+    '<tr><td><b>#</b> + espacio</td><td>Título 1 (## y ### para 2 y 3)</td></tr>',
+    '<tr><td><b>-</b> + espacio</td><td>Lista de viñetas</td></tr>',
+    '<tr><td><b>1.</b> + espacio</td><td>Lista numerada</td></tr>',
+    '<tr><td><b>[]</b> + espacio</td><td>Tarea con casilla</td></tr>',
+    '<tr><td><b>&gt;</b> + espacio</td><td>Cita</td></tr>',
+    '<tr><td><b>---</b> + Intro</td><td>Divisor</td></tr>',
+    '</tbody></table>',
+    '<div>Y lo de siempre en cualquier texto: <b>Ctrl+B</b> para <b>negrita</b>, <b>Ctrl+I</b> para <i>cursiva</i>, <b>Ctrl+U</b> para <u>subrayado</u>.</div>',
+    '<hr>',
+    '<h1>Todos los bloques, en vivo</h1>',
+    '<h2>Listas</h2>',
+    '<ul><li>Una lista de viñetas normal</li><li>Con varios puntos</li></ul>',
+    '<ol><li>Una numerada</li><li>Que cuenta sola</li></ol>',
+    '<h2>Tareas</h2>',
+    '<div>Haz clic en la casilla para marcarlas (Intro en una tarea crea otra debajo; Intro en una vacía vuelve a texto normal):</div>',
+    '<div data-todo="1" data-done="1">Construir la herramienta de Proyectos</div>',
+    '<div data-todo="1" data-done="0">Marcar esta tarea como hecha (clic en la casilla)</div>',
+    '<div data-todo="1" data-done="0">Crear tu primer proyecto de verdad</div>',
+    '<h2>Desplegables (toggles)</h2>',
+    '<details><summary>Haz clic en la flecha para abrirme</summary><div>El contenido de dentro se pliega y despliega. Dentro puedes escribir más bloques: prueba el menú «/» aquí dentro.</div></details>',
+    '<h2>Callouts</h2>',
+    '<div data-callout="1" data-icon="💡">Un callout destaca una idea. El emoji vive en el propio bloque.</div>',
+    '<div data-callout="1" data-icon="⚠️">Sirven para avisos, notas importantes, lo que quieras.</div>',
+    '<h2>Citas y divisores</h2>',
+    '<blockquote>Las citas se ven así, con su barra al lado.</blockquote>',
+    '<hr>',
+    '<h2>Código</h2>',
+    '<pre data-lang="js"><code>// Un bloque de código respeta espacios y saltos\nconst saludo = "hola";</code></pre>',
+    '<h2>Imágenes</h2>',
+    '<div>Con el bloque <b>Imagen</b> del menú «/» eliges un archivo, o simplemente <b>pega una captura con Ctrl+V</b> dentro del cuerpo. La imagen se guarda dentro de la app.</div>',
+    '<hr>',
+    '<div data-callout="1" data-icon="🧭">Sigue con las dos subpáginas de la izquierda: <b>Organizar páginas</b> y <b>Bases de datos</b> (la parte más potente).</div>',
+  ].join('');
+
+  const guide = await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Guía de Proyectos', icon: '📖', coverColor: '#5b8cff', body: guideBody }),
+  });
+
+  // --- 2) Subpágina: organización de páginas ---
+  const orgBody = [
+    '<div data-callout="1" data-icon="🗂">Fíjate en el sidebar: esta página vive DENTRO de «Guía de Proyectos». No hay carpetas y documentos: toda página puede tener contenido y subpáginas a la vez, sin límite de niveles.</div>',
+    '<h1>Mover(se) por el árbol</h1>',
+    '<ul>',
+    '<li>La <b>flecha</b> de una página del sidebar la pliega/despliega.</li>',
+    '<li>El <b>+</b> que aparece al pasar el ratón crea una subpágina dentro.</li>',
+    '<li>Las <b>migas de pan</b> de arriba te dicen dónde estás y te llevan a cualquier antepasado con un clic.</li>',
+    '<li>El <b>buscador</b> de arriba del sidebar filtra por título entre TODAS las páginas.</li>',
+    '</ul>',
+    '<h1>La página en sí</h1>',
+    '<ul>',
+    '<li>El <b>icono</b> de al lado del título se cambia con un clic (símbolos, emoji o el que escribas tú).</li>',
+    '<li>La <b>estrella</b> marca la página como favorita (sale con ★ en el sidebar).</li>',
+    '<li>El botón de <b>portada</b> le pone una franja de color arriba; el color se eligen en el selector que aparece al lado.</li>',
+    '<li><b>Todo se guarda solo</b> mientras escribes: no hay botón de guardar.</li>',
+    '</ul>',
+    '<h1>Borrar sin miedo</h1>',
+    '<div data-callout="1" data-icon="🛟">Borrar una página <b>nunca</b> borra sus subpáginas: suben un nivel y ocupan su sitio. Puedes borrar esta guía entera cuando ya no la necesites (empezando por las subpáginas, o borrando la principal y luego las que suban).</div>',
+  ].join('');
+
+  const orgPage = await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Organizar páginas', icon: '🗂', parentId: guide.id, body: orgBody }),
+  });
+
+  // --- 3) Subpágina de bases de datos, con una demo de verdad ---
+  const dbPage = await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Bases de datos', icon: '🗄', parentId: guide.id }),
+  });
+
+  // La base demo: nace con la propiedad "Estado" (select); se le añaden
+  // una fecha, un número y una casilla para enseñar todos los tipos.
+  const demoDb = await api('/api/proyectos-databases', {
+    method: 'POST',
+    body: JSON.stringify({ pageId: dbPage.id, name: 'Demo: preparar un viaje' }),
+  });
+  const estadoProp = demoDb.props[0];
+  const fechaProp = await api(`/api/proyectos-databases/${demoDb.id}/props`, {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Fecha límite', type: 'date' }),
+  });
+  const costeProp = await api(`/api/proyectos-databases/${demoDb.id}/props`, {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Coste (€)', type: 'number' }),
+  });
+  const pagadoProp = await api(`/api/proyectos-databases/${demoDb.id}/props`, {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Pagado', type: 'checkbox' }),
+  });
+
+  // Filas de ejemplo repartidas por los tres estados, para que el
+  // tablero se vea poblado nada más abrirlo.
+  const demoRows = [
+    { title: 'Reservar los vuelos', values: { [estadoProp.id]: 'Hecho', [fechaProp.id]: '2026-09-20', [costeProp.id]: '240', [pagadoProp.id]: '1' } },
+    { title: 'Buscar alojamiento', values: { [estadoProp.id]: 'En curso', [fechaProp.id]: '2026-09-25', [costeProp.id]: '380' } },
+    { title: 'Hacer la maleta', values: { [estadoProp.id]: 'Pendiente', [fechaProp.id]: '2026-10-02' } },
+    { title: 'Cambiar divisas', values: { [estadoProp.id]: 'Pendiente', [costeProp.id]: '150' } },
+  ];
+  for (const row of demoRows) {
+    await api(`/api/proyectos-databases/${demoDb.id}/rows`, {
+      method: 'POST',
+      body: JSON.stringify(row),
+    });
+  }
+
+  const dbBody = [
+    '<div data-callout="1" data-icon="🗄">Una base de datos es una colección de filas con propiedades. La de abajo es de verdad: tócala.</div>',
+    '<h1>Qué probar aquí</h1>',
+    '<ul>',
+    '<li>Las pestañas <b>Tabla / Tablero / Lista</b> son la misma información vista de tres formas.</li>',
+    '<li>En el <b>Tablero</b>, arrastra una tarjeta a otra columna: le cambia el Estado.</li>',
+    '<li>Haz clic en el <b>título de una fila</b>: se abre en un panel lateral con sus propiedades y sus propias notas, como una mini-página.</li>',
+    '<li>En la Tabla, el <b>+</b> de la cabecera añade propiedades nuevas (texto, número, select, fecha o casilla), y clicar el nombre de una la edita o la borra.</li>',
+    '<li>El <b>engranaje</b> guarda orden, filtro y por qué propiedad agrupa el tablero — se guarda en la propia base, no en este dispositivo.</li>',
+    '<li>Para insertar una base en cualquier página: menú «/» → <b>Base de datos</b>.</li>',
+    '</ul>',
+    `<div data-proyectos-db="${demoDb.id}"></div>`,
+    '<div><br></div>',
+  ].join('');
+
+  await api(`/api/proyectos-pages/${dbPage.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ body: dbBody }),
+  });
+
+  // --- 4) Recargar y abrir la guía con sus subpáginas a la vista ---
+  await loadProyectosPages();
+  proyectosExpandedIds.add(guide.id);
+  saveProyectosExpanded();
+  await openProyectosPage(guide.id);
+  return { guide, orgPage, dbPage };
+}
+
+async function handleCreateProyectosGuide() {
+  try {
+    await createProyectosGuide();
+  } catch (err) {
+    console.error('No se pudo crear el proyecto de ejemplo:', err);
+    alert(`No se pudo crear el proyecto de ejemplo: ${err.message}`);
+  }
+}
+
+document.getElementById('btn-proyectos-guide').addEventListener('click', handleCreateProyectosGuide);
+document.getElementById('btn-proyectos-guide-empty').addEventListener('click', handleCreateProyectosGuide);
+
+// ---------------------------------------------------------------------
 // Arranque
 // ---------------------------------------------------------------------
 // Ejecuta un paso de arranque sin dejar que un fallo suyo aborte los

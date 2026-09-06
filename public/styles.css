@@ -3280,6 +3280,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 .proyectos-sidebar-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -3765,3 +3766,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   font: inherit; font-size: 0.85rem;
 }
 .proyectos-search:focus { outline: none; border-color: var(--accent); }
+
+/* Botones de la cabecera del sidebar de Proyectos (guia + nueva pagina) */
+.proyectos-sidebar-header-btns { display: flex; align-items: center; gap: 0.15rem; }
