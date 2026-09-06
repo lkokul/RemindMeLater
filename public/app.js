@@ -5848,6 +5848,7 @@ function switchGymTab(tabName) {
   // pestana, no en cada apertura del Gimnasio -- son funciones
   // declaradas mas abajo, sin problema de orden porque esto solo corre
   // dentro de un handler de click (ver la nota de TDZ en CLAUDE.md).
+  if (tabName === 'plan') openGymBlockDays(null);
   if (tabName === 'progress') renderGymProgressSections();
   if (tabName === 'achievements') renderGymAchievements();
 }
@@ -5923,7 +5924,8 @@ const GYM_MUSCLE_GROUPS = [
   { id: 'gluteo', label: 'Glúteo' },
   { id: 'cuadriceps', label: 'Cuádriceps' },
   { id: 'isquios', label: 'Isquiosurales' },
-  { id: 'aductores', label: 'Aductores / Abductores' },
+  { id: 'aductores', label: 'Aductores' },
+  { id: 'abductores', label: 'Abductores' },
   { id: 'gemelos', label: 'Gemelos' },
 ];
 // id de la taxonomia -> etiqueta bonita; cualquier otra cosa (texto
@@ -6100,9 +6102,9 @@ function renderGymSessionsList() {
 
     if (s.type === 'activity') {
       row.innerHTML = `
-        <span class="gym-session-item-date">${gymActivityKindIcon(s.activityKind)} ${formatGymDate(s.date)}</span>
+        <span class="gym-session-item-date">${formatGymDate(s.date)}</span>
         <span class="gym-session-item-routine">${escapeHtml(s.activityName || 'Actividad')}</span>
-        ${statBits.length ? `<span class="gym-list-item-muted">${escapeHtml(statBits.join(' · '))}</span>` : ''}
+        <span class="gym-list-item-muted">${escapeHtml([gymActivityKindLabel(s.activityKind), ...statBits].join(' · '))}</span>
       `;
       row.addEventListener('click', () => openGymActivityModal(s));
       list.appendChild(row);
@@ -6111,7 +6113,7 @@ function renderGymSessionsList() {
 
     const exerciseNames = [...new Set(s.sets.map((set) => set.exerciseName))];
     row.innerHTML = `
-      <span class="gym-session-item-date">🏋️ ${formatGymDate(s.date)}</span>
+      <span class="gym-session-item-date">${formatGymDate(s.date)}</span>
       ${
         s.routineName
           ? `<span class="gym-session-item-routine"><span class="color-dot" style="background-color: ${s.routineColor}"></span>${s.routineIcon ? escapeHtml(s.routineIcon) + ' ' : ''}${escapeHtml(s.routineName)}</span>`
@@ -7033,14 +7035,14 @@ document.getElementById('btn-import-gym-library-detail').addEventListener('click
 // los entrenos, ver el comentario del esquema) para que heatmap/racha
 // tengan una sola fuente de "dias con actividad".
 const GYM_ACTIVITY_KINDS = [
-  { id: 'cardio', label: '🏃 Cardio', icon: '🏃' },
-  { id: 'clase', label: '🧘 Clase dirigida', icon: '🧘' },
-  { id: 'deporte', label: '⚽ Deporte', icon: '⚽' },
-  { id: 'otro', label: '⚡ Otro', icon: '⚡' },
+  { id: 'cardio', label: 'Cardio' },
+  { id: 'clase', label: 'Clase dirigida' },
+  { id: 'deporte', label: 'Deporte' },
+  { id: 'otro', label: 'Otro' },
 ];
-function gymActivityKindIcon(kind) {
+function gymActivityKindLabel(kind) {
   const found = GYM_ACTIVITY_KINDS.find((k) => k.id === kind);
-  return found ? found.icon : '⚡';
+  return found ? found.label : 'Actividad';
 }
 const gymActivityKindField = createSelectField({
   options: GYM_ACTIVITY_KINDS.map((k) => ({ value: k.id, label: k.label })),
@@ -7240,7 +7242,17 @@ function gymLiveTick() {
   const bar = document.getElementById('gym-live-rest-bar');
   if (gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
     const remaining = Math.ceil((gymLiveSession.restUntil - Date.now()) / 1000);
-    document.getElementById('gym-live-rest-remaining').textContent = gymLiveFormatClock(remaining);
+    document.getElementById('gym-live-rest-remaining').textContent =
+      localStorage.getItem('gymRestFormat') === 'sec' ? `${remaining}s` : gymLiveFormatClock(remaining);
+    // Barra: el descanso planificado son base + extra; el tramo base se
+    // vacia primero y el extra (los +30s) al final, en otro color.
+    const baseTotal = gymLiveSession.restBaseSeconds || remaining;
+    const extraTotal = gymLiveSession.restExtraSeconds || 0;
+    const planned = Math.max(1, baseTotal + extraTotal);
+    const baseRemaining = Math.max(0, remaining - extraTotal);
+    const extraRemaining = remaining - baseRemaining;
+    document.getElementById('gym-live-rest-fill-base').style.width = `${(baseRemaining / planned) * 100}%`;
+    document.getElementById('gym-live-rest-fill-extra').style.width = `${(extraRemaining / planned) * 100}%`;
     bar.classList.remove('hidden');
   } else {
     if (gymLiveSession.restUntil) { gymLiveSession.restUntil = null; gymLiveStore(); }
@@ -7266,9 +7278,18 @@ document.querySelectorAll('[data-gym-rest-preset]').forEach((btn) => {
 document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () => {
   if (gymLiveSession && gymLiveSession.restUntil) {
     gymLiveSession.restUntil += 30000;
+    gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + 30;
     gymLiveStore();
     gymLiveTick();
   }
+});
+// El tiempo restante se puede ver como m:ss o como segundos a secas
+// (peticion de Koku) -- se alterna tocandolo, y se recuerda por
+// dispositivo.
+document.getElementById('gym-live-rest-remaining').addEventListener('click', () => {
+  const next = localStorage.getItem('gymRestFormat') === 'sec' ? 'min' : 'sec';
+  localStorage.setItem('gymRestFormat', next);
+  gymLiveTick();
 });
 document.getElementById('btn-gym-live-rest-close').addEventListener('click', () => {
   if (gymLiveSession) { gymLiveSession.restUntil = null; gymLiveStore(); gymLiveTick(); }
@@ -7318,7 +7339,7 @@ function renderGymLiveExercises() {
       <div class="gym-live-set-row gym-live-set-head">
         <span class="gym-live-set-number">#</span>
         <span class="gym-live-set-prev">Anterior</span>
-        <span>${unit}</span><span>Reps</span><span>RPE</span><span>✓</span>
+        <span>${unit}</span><span>Reps</span><span class="gym-rpe-head" data-rpe-help title="¿Qué es RPE?">RPE(?)</span><span>✓</span>
       </div>
       ${setsHtml}
       <button type="button" class="secondary-btn gym-add-set-btn" data-live-add-set>+ Serie</button>
@@ -7340,6 +7361,8 @@ function renderGymLiveExercises() {
         if (check.checked) {
           const seconds = Number(set.restSeconds) || gymLiveSession.restPreset;
           gymLiveSession.restUntil = Date.now() + seconds * 1000;
+          gymLiveSession.restBaseSeconds = seconds;
+          gymLiveSession.restExtraSeconds = 0;
         }
         gymLiveStore();
         gymLiveTick();
@@ -7390,6 +7413,15 @@ document.getElementById('btn-gym-live-add-exercise').addEventListener('click', (
     }
   };
   openGymLibraryModal();
+});
+
+// Ayuda de RPE (Koku: "no entiendo que es RPE"): tocar la cabecera de la
+// columna lo explica. Listener delegado porque las tarjetas se
+// reconstruyen en cada cambio.
+document.getElementById('gym-live-exercises').addEventListener('click', (e) => {
+  if (e.target.closest('[data-rpe-help]')) {
+    showAppAlert('RPE = esfuerzo percibido (Rate of Perceived Exertion), del 1 al 10: cuanto te ha costado la serie. 10 = fallo (no podias hacer ni una repeticion mas), 9 = te quedaba 1, 8 = te quedaban 2... Es opcional: si no lo usas, dejalo en blanco.');
+  }
 });
 
 // Descartar: tirar el entrenamiento en curso sin guardar nada.
@@ -7568,13 +7600,17 @@ function renderGymRoutineExercisesField() {
   }
   gymRoutineModalExercises.forEach((row, index) => {
     const rowEl = document.createElement('div');
-    rowEl.className = 'gym-routine-exercise-row';
+    rowEl.className = 'gym-routine-exercise-row gym-routine-exercise-stacked';
     rowEl.innerHTML = `
-      <select data-field="exerciseId">${gymExerciseOptionsHtml(row.exerciseId)}</select>
-      <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
-      <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
-      <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" value="${row.targetRestSeconds ?? ''}" />
-      <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
+      <div class="gym-routine-exercise-name-row">
+        <select data-field="exerciseId">${gymExerciseOptionsHtml(row.exerciseId)}</select>
+        <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
+      </div>
+      <div class="gym-routine-exercise-targets-row">
+        <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
+        <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
+        <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" value="${row.targetRestSeconds ?? ''}" />
+      </div>
     `;
     rowEl.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
       gymRoutineModalExercises[index].exerciseId = Number(e.target.value);
@@ -7994,7 +8030,7 @@ function renderGymConsistency(summary) {
   document.getElementById('gym-consistency-stats').innerHTML = `
     <div class="gym-live-summary-grid gym-consistency-grid">
       <div class="gym-live-summary-stat"><b>${sessionsByDate.size}</b><span>Días entrenados</span></div>
-      <div class="gym-live-summary-stat"><b>🔥 ${streak}</b><span>Racha (semanas)</span></div>
+      <div class="gym-live-summary-stat"><b>${streak}</b><span>Racha (semanas)</span></div>
       <div class="gym-live-summary-stat"><b>${thisWeekCount}/${goal}</b><span>Esta semana</span></div>
       <div class="gym-live-summary-stat"><b>${monthCount}</b><span>Este mes</span></div>
     </div>
@@ -8053,44 +8089,120 @@ document.querySelectorAll('[data-gym-map-metric]').forEach((btn) => {
   });
 });
 
-// Las zonas del cuerpo: cada entrada es un grupo de la taxonomia con
-// sus formas SVG (puede tener varias, y puede aparecer en las dos
-// vistas). Coordenadas sobre un viewBox de 400x430: figura frontal
-// centrada en x=100, trasera en x=300.
+// Las zonas del cuerpo (v2): poligonos anatomicos por musculo portados
+// de react-body-highlighter (https://github.com/giavinh79/react-body-highlighter,
+// licencia MIT -- ¡gracias!), mucho mejor dibujados que las elipses de la
+// primera version. Cada entrada es un grupo de la taxonomia con sus
+// poligonos y a que figura pertenece (tx = desplazamiento horizontal:
+// 0 la frontal, 1120 la trasera). Los abductores no traen poligono en la
+// fuente, asi que sus dos parches de cadera externa son dibujo propio.
 const GYM_BODYMAP_ZONES = [
-  // -- vista FRONTAL (cx = 100) --
-  { g: 'trapecio', shapes: ['<path d="M 78 56 L 100 50 L 122 56 L 112 66 L 88 66 Z" />'] },
-  { g: 'hombros', shapes: ['<circle cx="59" cy="74" r="13" />', '<circle cx="141" cy="74" r="13" />'] },
-  { g: 'pecho', shapes: ['<ellipse cx="83" cy="98" rx="19" ry="15" />', '<ellipse cx="117" cy="98" rx="19" ry="15" />'] },
-  { g: 'biceps', shapes: ['<ellipse cx="53" cy="112" rx="9" ry="19" />', '<ellipse cx="147" cy="112" rx="9" ry="19" />'] },
-  { g: 'antebrazo', shapes: ['<ellipse cx="48" cy="158" rx="8" ry="21" />', '<ellipse cx="152" cy="158" rx="8" ry="21" />'] },
-  { g: 'core', shapes: ['<rect x="85" y="118" width="30" height="52" rx="9" />'] },
-  { g: 'aductores', shapes: ['<ellipse cx="90" cy="216" rx="7" ry="26" />', '<ellipse cx="110" cy="216" rx="7" ry="26" />'] },
-  { g: 'cuadriceps', shapes: ['<ellipse cx="76" cy="242" rx="13" ry="40" />', '<ellipse cx="124" cy="242" rx="13" ry="40" />'] },
-  // -- vista TRASERA (cx = 300) --
-  { g: 'trapecio', shapes: ['<path d="M 278 56 L 300 50 L 322 56 L 314 92 L 300 100 L 286 92 Z" />'] },
-  { g: 'hombros', shapes: ['<circle cx="259" cy="74" r="12" />', '<circle cx="341" cy="74" r="12" />'] },
-  { g: 'espalda', shapes: ['<path d="M 276 100 Q 268 130 284 152 L 300 158 L 300 104 Z" />', '<path d="M 324 100 Q 332 130 316 152 L 300 158 L 300 104 Z" />'] },
-  { g: 'triceps', shapes: ['<ellipse cx="253" cy="112" rx="9" ry="19" />', '<ellipse cx="347" cy="112" rx="9" ry="19" />'] },
-  { g: 'lumbar', shapes: ['<rect x="287" y="146" width="26" height="26" rx="7" />'] },
-  { g: 'gluteo', shapes: ['<ellipse cx="288" cy="192" rx="13" ry="15" />', '<ellipse cx="312" cy="192" rx="13" ry="15" />'] },
-  { g: 'isquios', shapes: ['<ellipse cx="283" cy="248" rx="12" ry="36" />', '<ellipse cx="317" cy="248" rx="12" ry="36" />'] },
-  { g: 'gemelos', shapes: ['<ellipse cx="283" cy="330" rx="10" ry="26" />', '<ellipse cx="317" cy="330" rx="10" ry="26" />'] },
+  // -- figura FRONTAL --
+  { g: 'pecho', tx: 0, polys: ['518 416 510 551 580 580 678 555 706 473 620 416', '298 465 314 555 408 580 482 551 478 420 376 420'] },
+  { g: 'core', tx: 0, polys: [
+    '686 633 673 571 588 596 600 641 604 833 657 788 665 698',
+    '339 784 331 718 310 633 322 571 408 592 392 633 392 837',
+    '563 592 580 641 584 780 584 927 563 984 551 1041 514 1078 510 845 506 673 510 571',
+    '437 588 486 571 490 673 486 845 482 1073 445 1037 408 914 408 784 412 645',
+  ] },
+  { g: 'biceps', tx: 0, polys: ['167 682 180 714 229 661 290 539 278 494 204 559', '714 494 702 547 763 661 816 718 829 690 788 555'] },
+  { g: 'triceps', tx: 0, polys: ['694 555 694 616 759 727 776 702 755 673', '224 694 298 555 298 608 229 731'] },
+  { g: 'trapecio', tx: 0, polys: [
+    '555 237 506 335 506 392 616 400 706 449 694 367 633 351 584 306',
+    '290 449 302 371 363 351 412 302 445 245 490 339 486 392 380 396',
+  ] },
+  { g: 'hombros', tx: 0, polys: [
+    '784 531 796 478 792 412 759 380 710 363 722 429 714 473',
+    '282 473 212 531 200 478 204 408 245 371 286 371 269 433',
+  ] },
+  // (la fuente etiqueta esta zona interna del muslo como "abductors",
+  // pero anatomicamente es la de los ADUCTORES -- corregido aqui)
+  { g: 'aductores', tx: 0, polys: [
+    '527 1102 543 1249 600 1102 620 1000 649 943 600 927 567 1045',
+    '478 1106 449 1253 420 1159 404 1131 396 1073 380 1024 347 939 396 922 416 992 437 1053',
+  ] },
+  { g: 'abductores', tx: 0, polys: ['252 964 240 1020 250 1072 276 1090 288 1016', '748 964 760 1020 750 1072 724 1090 712 1016'] },
+  { g: 'cuadriceps', tx: 0, polys: [
+    '347 988 371 1082 371 1278 343 1371 310 1327 294 1200 282 1114 294 1008 322 947',
+    '633 1057 645 1000 669 947 702 1012 710 1118 682 1331 653 1376 624 1286 620 1114',
+    '388 1294 384 1122 412 1184 445 1294 429 1351 400 1461 363 1465 355 1400',
+    '596 1457 555 1290 608 1139 612 1302 641 1396 629 1465',
+    '327 1384 265 1457 257 1367 257 1273 269 1143 294 1335',
+    '718 1131 739 1241 739 1404 727 1457 665 1384 702 1335',
+  ] },
+  { g: 'gemelos', tx: 0, polys: [
+    '714 1604 735 1535 767 1612 796 1678 784 1878 796 1955 747 1955',
+    '249 1947 278 1649 282 1604 261 1543 249 1576 224 1616 208 1678 220 1882 208 1955',
+    '727 1951 698 1592 653 1584 641 1624 641 1653 657 1771',
+    '355 1584 359 1624 359 1669 351 1722 351 1767 322 1820 306 1873 269 1947 273 1878 282 1804 286 1755 290 1698 298 1641 302 1588',
+  ] },
+  { g: 'antebrazo', tx: 0, polys: [
+    '61 886 102 751 147 702 163 743 192 735 45 976 0 1000',
+    '845 698 833 735 800 731 951 984 1000 1004 935 894 898 763',
+    '776 722 776 776 804 841 853 898 922 1012 947 996',
+    '69 1012 135 906 188 841 216 771 212 718 49 988',
+  ] },
+  // -- figura TRASERA --
+  { g: 'trapecio', tx: 1120, polys: [
+    '447 217 477 217 472 383 477 647 383 532 353 409 311 366 391 332 438 272',
+    '523 217 557 217 566 272 609 328 689 366 647 404 617 532 523 647 532 383',
+  ] },
+  { g: 'hombros', tx: 1120, polys: ['294 370 230 391 174 443 183 536 243 494 272 464', '711 370 783 396 826 447 817 536 749 489 723 451'] },
+  { g: 'espalda', tx: 1120, polys: [
+    '311 387 281 489 285 553 340 753 472 711 472 664 366 540 336 413',
+    '689 387 719 494 715 562 660 753 528 711 528 664 634 545 664 417',
+  ] },
+  { g: 'triceps', tx: 1120, polys: [
+    '268 498 179 557 145 723 166 817 217 638 268 557',
+    '736 502 821 557 860 732 834 821 779 630 732 557',
+    '268 583 268 685 230 753 191 774 226 655',
+    '728 583 770 647 804 774 766 753 728 689',
+  ] },
+  { g: 'lumbar', tx: 1120, polys: ['477 728 345 770 353 834 494 1021 468 830', '523 728 655 770 647 834 506 1021 532 838'] },
+  { g: 'antebrazo', tx: 1120, polys: [
+    '864 757 911 834 932 940 1000 1064 962 1043 881 894 843 838',
+    '136 757 89 838 68 936 0 1064 38 1043 123 885 157 830',
+    '813 796 774 779 791 847 911 1038 932 1089 945 1047',
+    '187 796 221 779 209 843 94 1030 68 1085 51 1047',
+  ] },
+  { g: 'gluteo', tx: 1120, polys: [
+    '447 996 302 1085 298 1187 315 1260 472 1213 494 1149',
+    '553 991 511 1145 523 1209 681 1260 698 1191 694 1085',
+  ] },
+  { g: 'abductores', tx: 1120, polys: ['292 1082 272 1150 278 1230 300 1258 312 1150', '708 1082 728 1150 722 1230 700 1258 688 1150'] },
+  { g: 'aductores', tx: 1120, polys: [
+    '481 1230 447 1230 413 1255 451 1443 485 1357 489 1294',
+    '519 1226 557 1234 591 1260 549 1443 519 1362 511 1294',
+  ] },
+  { g: 'isquios', tx: 1120, polys: [
+    '289 1221 311 1294 366 1260 353 1353 345 1502 294 1583 289 1468 277 1413 272 1315',
+    '715 1217 694 1289 638 1260 655 1366 664 1502 711 1583 715 1477 728 1421 736 1319',
+    '387 1255 443 1460 404 1668 362 1528 370 1353',
+    '617 1255 634 1362 643 1532 600 1668 562 1464',
+  ] },
+  { g: 'gemelos', tx: 1120, polys: [
+    '294 1604 285 1672 247 1796 238 1928 255 1970 285 1932 298 1800 319 1711 319 1668',
+    '374 1651 353 1677 332 1719 311 1804 302 1919 340 2000 387 1906 391 1689',
+    '630 1651 613 1685 617 1906 664 1996 706 1919 689 1796 668 1702',
+    '706 1604 723 1685 757 1791 766 1928 745 1966 723 1936 706 1796 681 1681',
+    '285 1957 302 1957 336 2017 306 2200 285 2136 268 1983',
+    '698 1957 719 1957 736 1983 719 2132 702 2196 672 2021',
+  ] },
 ];
-// Siluetas de fondo (contorno tenue para que "parezca un cuerpo" aunque
-// una zona este apagada): cabeza + tronco + piernas, por figura.
-function gymBodySilhouette(cx) {
-  return `
-    <g class="gym-bodymap-silhouette">
-      <circle cx="${cx}" cy="28" r="15" />
-      <path d="M ${cx - 42} 66 Q ${cx} 52 ${cx + 42} 66 L ${cx + 34} 176 Q ${cx} 188 ${cx - 34} 176 Z" />
-      <path d="M ${cx - 32} 180 L ${cx - 12} 180 L ${cx - 14} 300 L ${cx - 20} 385 L ${cx - 32} 385 Z" />
-      <path d="M ${cx + 32} 180 L ${cx + 12} 180 L ${cx + 14} 300 L ${cx + 20} 385 L ${cx + 32} 385 Z" />
-      <path d="M ${cx - 44} 68 L ${cx - 56} 180 L ${cx - 44} 180 L ${cx - 36} 78 Z" />
-      <path d="M ${cx + 44} 68 L ${cx + 56} 180 L ${cx + 44} 180 L ${cx + 36} 78 Z" />
-    </g>
-  `;
-}
+// Partes no interactivas que completan la silueta (cabeza y rodillas de
+// cada figura, del mismo dataset).
+const GYM_BODYMAP_SILHOUETTE = [
+  { tx: 0, polys: [
+    '424 29 400 118 420 196 461 233 498 253 547 224 576 192 592 102 571 24 498 0',
+    '339 1400 347 1433 355 1473 363 1510 351 1567 298 1567 273 1527 273 1473 302 1441',
+    '657 1400 722 1478 722 1522 698 1571 649 1567 629 1510',
+  ] },
+  { tx: 1120, polys: [
+    '506 0 460 9 409 55 404 128 451 200 557 200 591 136 596 47 557 13',
+    '345 1532 311 1591 336 1664 374 1626',
+    '664 1536 630 1630 668 1664 694 1591',
+  ] },
+];
 
 function renderGymBodyMap() {
   const container = document.getElementById('gym-bodymap');
@@ -8101,7 +8213,7 @@ function renderGymBodyMap() {
   // Puntuacion por grupo: por cada serie de la ventana, 1 punto (o el
   // volumen de la serie) al grupo principal del ejercicio, y la mitad a
   // cada secundario. Tambien apuntamos los ejercicios con mas series de
-  // cada grupo para el tooltip.
+  // cada grupo para el detalle.
   const score = new Map();
   const exercisesByGroup = new Map();
   const exerciseById = new Map(state.gymExercises.map((e) => [e.id, e]));
@@ -8128,10 +8240,11 @@ function renderGymBodyMap() {
 
   const max = Math.max(...score.values(), 0);
   const unit = getGymWeightUnitLabel();
+  const detailByGroup = new Map();
   const zonesHtml = GYM_BODYMAP_ZONES.map((zone) => {
     const value = score.get(zone.g) || 0;
-    // Intensidad continua sobre el morado: de un 12% (entrenado poco)
-    // hasta el acento pleno; 0 = gris base de la silueta.
+    // Intensidad continua sobre el acento del tema: de un 12% (entrenado
+    // poco) al acento pleno; 0 = gris base de la silueta.
     const pct = max > 0 && value > 0 ? Math.round(12 + 78 * (value / max)) : 0;
     const fill = pct === 0
       ? 'color-mix(in srgb, var(--surface-2-text) 10%, var(--surface-2))'
@@ -8143,22 +8256,35 @@ function renderGymBodyMap() {
     const valueLabel = gymMapMetric === 'volume'
       ? `${gymWeightKgToDisplay(value)} ${unit}`
       : `${Math.round(value * 10) / 10} serie${value === 1 ? '' : 's'}`;
-    const tooltip = `${label}: ${valueLabel}${topExercises ? ` · ${topExercises}` : ''}`;
-    return `<g style="fill: ${fill}" data-tooltip="${escapeHtml(tooltip)}">${zone.shapes.join('')}</g>`;
+    detailByGroup.set(zone.g, `${label}: ${valueLabel}${topExercises ? ` · ${topExercises}` : ''}`);
+    const polys = zone.polys.map((points) => `<polygon points="${points}" />`).join('');
+    return `<g style="fill: ${fill}" transform="translate(${zone.tx}, 0)" data-bodymap-group="${zone.g}">${polys}</g>`;
   }).join('');
+  const silhouetteHtml = GYM_BODYMAP_SILHOUETTE.map((part) =>
+    `<g class="gym-bodymap-silhouette" transform="translate(${part.tx}, 0)">${part.polys.map((points) => `<polygon points="${points}" />`).join('')}</g>`
+  ).join('');
 
   container.innerHTML = `
-    <svg class="gym-chart-svg gym-bodymap-svg" viewBox="0 0 400 430" role="img" aria-label="Mapa de músculos entrenados">
-      ${gymBodySilhouette(100)}
-      ${gymBodySilhouette(300)}
+    <svg class="gym-chart-svg gym-bodymap-svg" viewBox="0 0 2120 2210" role="img" aria-label="Mapa de músculos entrenados">
+      ${silhouetteHtml}
       ${zonesHtml}
-      <text class="gym-chart-label" x="100" y="420" text-anchor="middle">Frente</text>
-      <text class="gym-chart-label" x="300" y="420" text-anchor="middle">Espalda</text>
+      <text class="gym-chart-label gym-bodymap-caption" x="500" y="2140" text-anchor="middle">Frente</text>
+      <text class="gym-chart-label gym-bodymap-caption" x="1620" y="2140" text-anchor="middle">Espalda</text>
     </svg>
-    <p class="hint">Cuanto más morado, más entrenado en los últimos ${gymMapWindowDays} días (los músculos secundarios de cada ejercicio puntúan la mitad). Pasa el cursor por una zona para el detalle.</p>
+    <p id="gym-bodymap-info" class="gym-bodymap-info">Toca un músculo para ver su detalle.</p>
+    <p class="hint">Cuanto más intenso el color, más entrenado en los últimos ${gymMapWindowDays} días (los músculos secundarios de cada ejercicio puntúan la mitad).</p>
   `;
-  attachFinanzasChartTooltips(container);
+  // El detalle se muestra en una linea FIJA bajo el mapa (nada de
+  // tooltips flotantes: en el movil se quedaban pegados a la pantalla al
+  // hacer scroll -- feedback de Koku).
+  const info = document.getElementById('gym-bodymap-info');
+  container.querySelectorAll('[data-bodymap-group]').forEach((zoneEl) => {
+    const show = () => { info.textContent = detailByGroup.get(zoneEl.dataset.bodymapGroup) || ''; };
+    zoneEl.addEventListener('click', show);
+    zoneEl.addEventListener('mouseenter', show);
+  });
 }
+
 
 // 1RM estimado con la formula de Epley: peso x (1 + reps/30). Solo
 // series con 1-12 repeticiones (por encima de 12 la estimacion deja de
@@ -8205,7 +8331,7 @@ function renderGymPRs() {
     const row = document.createElement('div');
     row.className = 'gym-list-item gym-pr-item';
     row.innerHTML = `
-      <span class="gym-list-item-name">🏅 ${escapeHtml(pr.name)}${muscle ? ` <span class="gym-list-item-muted">(${escapeHtml(muscle)})</span>` : ''}</span>
+      <span class="gym-list-item-name">${escapeHtml(pr.name)}${muscle ? ` <span class="gym-list-item-muted">(${escapeHtml(muscle)})</span>` : ''}</span>
       <span class="gym-pr-stats">
         <b>${gymWeightKgToDisplay(pr.bestWeightKg)} ${unit}</b>
         <span class="gym-list-item-muted">1RM est. ${gymWeightKgToDisplay(pr.best1RM)} ${unit} · Vol. ${gymWeightKgToDisplay(pr.bestVolumeKg)} ${unit}</span>
@@ -8313,12 +8439,12 @@ function renderGymWeeklyVolume() {
 // que se guarda (por dispositivo) es hasta que nivel se ha CELEBRADO ya
 // cada logro, para no repetir la fiesta (localStorage.gymAchievementsSeen).
 const GYM_ACHIEVEMENTS = [
-  { id: 'sessions', icon: '🏋️', name: 'Constancia', desc: 'Entrenamientos de pesas totales', levels: [1, 10, 25, 50, 100, 250], value: (s) => s.gymCount },
-  { id: 'streak', icon: '🔥', name: 'Racha', desc: 'Semanas seguidas cumpliendo tu objetivo', levels: [1, 4, 8, 16, 26, 52], value: (s) => s.streak },
-  { id: 'volume', icon: '🏆', name: 'Toneladas', desc: 'Volumen total acumulado (kg)', levels: [10000, 50000, 100000, 250000, 500000, 1000000], value: (s) => s.totalVolumeKg },
-  { id: 'activities', icon: '⚡', name: 'Todoterreno', desc: 'Actividades fuera de las pesas', levels: [1, 10, 25, 50, 100], value: (s) => s.activityCount },
-  { id: 'exercises', icon: '📚', name: 'Repertorio', desc: 'Ejercicios distintos con series registradas', levels: [3, 10, 20, 40, 80], value: (s) => s.distinctExercises },
-  { id: 'months', icon: '📅', name: 'Meses activos', desc: 'Meses con al menos una sesión', levels: [1, 3, 6, 12, 24], value: (s) => s.activeMonths },
+  { id: 'sessions', name: 'Constancia', desc: 'Entrenamientos de pesas totales', levels: [1, 10, 25, 50, 100, 250], value: (s) => s.gymCount },
+  { id: 'streak', name: 'Racha', desc: 'Semanas seguidas cumpliendo tu objetivo', levels: [1, 4, 8, 16, 26, 52], value: (s) => s.streak },
+  { id: 'volume', name: 'Toneladas', desc: 'Volumen total acumulado (kg)', levels: [10000, 50000, 100000, 250000, 500000, 1000000], value: (s) => s.totalVolumeKg },
+  { id: 'activities', name: 'Todoterreno', desc: 'Actividades fuera de las pesas', levels: [1, 10, 25, 50, 100], value: (s) => s.activityCount },
+  { id: 'exercises', name: 'Repertorio', desc: 'Ejercicios distintos con series registradas', levels: [3, 10, 20, 40, 80], value: (s) => s.distinctExercises },
+  { id: 'months', name: 'Meses activos', desc: 'Meses con al menos una sesión', levels: [1, 3, 6, 12, 24], value: (s) => s.activeMonths },
 ];
 
 // Junta en un objeto todas las cifras que consumen los logros.
@@ -8366,7 +8492,6 @@ function gymAchievementCardHtml(achievement, value) {
   return `
     <div class="gym-achievement-card ${level > 0 ? 'unlocked' : ''}">
       <div class="gym-achievement-head">
-        <span class="gym-achievement-icon">${achievement.icon}</span>
         <span class="gym-list-item-name">${escapeHtml(achievement.name)}
           ${level > 0 ? `<span class="gym-block-active-badge">Nivel ${level}${maxed ? ' · MAX' : ''}</span>` : ''}
         </span>

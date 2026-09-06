@@ -1858,7 +1858,7 @@ body.mobile-day-scroll-lock .app {
   font-size: 0.85rem;
 }
 .gym-tab-btn.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-.gym-tab-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem; }
+.gym-tab-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem 7rem; }
 .gym-tab-panel { display: flex; flex-direction: column; gap: 0.6rem; }
 .gym-tab-action { align-self: flex-start; }
 .gym-subheading { margin: 1.2rem 0 0; font-size: 0.95rem; }
@@ -1869,7 +1869,13 @@ body.mobile-day-scroll-lock .app {
   background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
   font-size: 0.85rem;
 }
-.gym-list-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gym-list-item-name {
+  flex: 1;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
 .gym-list-item-muted { color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); font-weight: normal; }
 .gym-list-item-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
 .gym-session-item { flex-direction: column; align-items: flex-start; gap: 0.2rem; cursor: pointer; }
@@ -1883,6 +1889,11 @@ body.mobile-day-scroll-lock .app {
 .gym-routine-exercise-row { display: flex; align-items: center; gap: 0.4rem; }
 .gym-routine-exercise-row select { flex: 1; min-width: 0; }
 .gym-routine-exercise-row input { width: 4.5rem; }
+.gym-routine-exercise-stacked { flex-direction: column; align-items: stretch; }
+.gym-routine-exercise-name-row { display: flex; align-items: center; gap: 0.4rem; }
+.gym-routine-exercise-name-row select { flex: 1; min-width: 0; }
+.gym-routine-exercise-targets-row { display: flex; gap: 0.4rem; }
+.gym-routine-exercise-targets-row input { flex: 1; width: auto; min-width: 0; }
 .gym-session-exercise-block {
   background: var(--surface-2); border-radius: var(--radius); padding: 0.6rem;
   display: flex; flex-direction: column; gap: 0.5rem;
@@ -1906,9 +1917,12 @@ body.mobile-day-scroll-lock .app {
    sigue con su --accent de siempre.
    --------------------------------------------------------------------- */
 #gym-view, .gym-modal {
-  --gym-accent: #a855f7;          /* morado de referencia (oscargymapp) */
-  --gym-accent-soft: color-mix(in srgb, #a855f7 18%, transparent);
-  --gym-accent-text: #ffffff;
+  /* El gym usa el acento del TEMA activo (antes llevaba un morado fijo
+     copiado de la app de referencia; Koku pidio quitarlo). Las variables
+     --gym-* se conservan como alias para no tocar todas las reglas. */
+  --gym-accent: var(--accent);
+  --gym-accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+  --gym-accent-text: var(--accent-text);
 }
 /* La pestana activa y los botones primarios del gym usan el morado. */
 #gym-view .gym-tab-btn.active {
@@ -1960,16 +1974,16 @@ body.mobile-day-scroll-lock .app {
    mismas variables moradas del gym (#gym-live-view es hermano de
    #gym-view, asi que declara las suyas propias). */
 #gym-live-view {
-  --gym-accent: #a855f7;
-  --gym-accent-soft: color-mix(in srgb, #a855f7 18%, transparent);
-  --gym-accent-text: #ffffff;
+  --gym-accent: var(--accent);
+  --gym-accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+  --gym-accent-text: var(--accent-text);
   z-index: 16; /* por encima de #gym-view (15), debajo de los modales (20) */
 }
 #gym-live-view .primary-btn { background: var(--gym-accent); color: var(--gym-accent-text); border-color: var(--gym-accent); }
 .gym-live-clock { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.05rem; margin-right: 0.4rem; }
 .gym-live-rest-presets { display: flex; align-items: center; gap: 0.4rem; padding: 0.6rem 1.2rem 0; flex-shrink: 0; }
 #gym-live-view .view-mode-btn.active { background: var(--gym-accent); color: var(--gym-accent-text); border-color: var(--gym-accent); }
-.gym-live-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem 4.5rem; display: flex; flex-direction: column; gap: 0.8rem; }
+.gym-live-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem 8rem; display: flex; flex-direction: column; gap: 0.8rem; }
 .gym-live-exercises { display: flex; flex-direction: column; gap: 0.8rem; }
 .gym-live-exercise-card {
   background: var(--surface-2);
@@ -2001,17 +2015,36 @@ body.mobile-day-scroll-lock .app {
 /* Barra inferior de descanso: fija abajo del overlay, con el acento. */
 .gym-live-rest-bar {
   position: absolute;
-  left: 0; right: 0; bottom: 0;
-  display: flex; align-items: center; gap: 0.7rem;
-  padding: 0.7rem 1.2rem;
+  /* Flotando POR ENCIMA de la barra de navegacion inferior del movil
+     (.mobile-nav: ~53px de alto + ~10px de margen, z-index 70): si se
+     queda en bottom:0 la nav la tapa y el boton de +30s acaba pulsando
+     "Configuración" (paso probandolo). */
+  left: 0.5rem; right: 0.5rem; bottom: 4.4rem;
+  display: flex; flex-direction: column; gap: 0.45rem;
+  padding: 0.7rem 1.2rem 0.8rem;
   background: color-mix(in srgb, var(--gym-accent) 22%, var(--surface));
-  border-top: 1px solid var(--gym-accent);
+  border: 1px solid var(--gym-accent);
+  border-radius: var(--radius);
   font-size: 0.95rem;
 }
-.gym-live-rest-bar b { font-variant-numeric: tabular-nums; }
-.gym-live-rest-bar .secondary-btn { margin-left: auto; }
+.gym-live-rest-info { display: flex; align-items: center; gap: 0.7rem; }
+.gym-live-rest-info b { font-variant-numeric: tabular-nums; cursor: pointer; }
+.gym-live-rest-info .secondary-btn { margin-left: auto; }
+.gym-live-rest-track {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-text) 14%, var(--surface));
+  overflow: hidden;
+}
+.gym-live-rest-fill-base { height: 100%; background: var(--gym-accent); transition: width 0.4s linear; }
+/* El tramo extra en un tono claramente distinto del acento (mezcla con
+   el color de texto para que funcione con cualquier tema). */
+.gym-live-rest-fill-extra { height: 100%; background: color-mix(in srgb, var(--gym-accent) 45%, var(--surface-text)); transition: width 0.4s linear; }
 /* Resumen de fin de entreno: rejilla 2x2 de estadisticas grandes. */
 .gym-live-summary-card h2 { text-align: center; }
+#gym-start-block-name { text-align: center; }
+.gym-live-hint { text-align: center; }
 .gym-live-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin: 0.8rem 0 0.4rem; }
 .gym-live-summary-stat {
   background: var(--surface-2);
@@ -2068,8 +2101,10 @@ body.mobile-day-scroll-lock .app {
 .gym-bodymap-controls { display: flex; gap: 0.8rem; flex-wrap: wrap; }
 .gym-bodymap-svg { max-width: 30rem; }
 .gym-bodymap-silhouette { fill: color-mix(in srgb, var(--surface-2-text) 5%, var(--surface-2)); }
-.gym-bodymap-svg [data-tooltip] { cursor: default; }
-.gym-bodymap-svg [data-tooltip]:hover { stroke: var(--gym-accent); stroke-width: 1.5; }
+.gym-bodymap-svg [data-bodymap-group] { cursor: pointer; }
+.gym-bodymap-svg [data-bodymap-group]:hover polygon { stroke: var(--gym-accent); stroke-width: 6; }
+.gym-bodymap-caption { font-size: 52px; }
+.gym-bodymap-info { text-align: center; min-height: 2.4em; font-size: 0.82rem; color: color-mix(in srgb, var(--bg-text) 70%, var(--bg)); margin: 0.3rem 0 0; }
 
 /* Cabecera del nivel de dias (boton volver + nombre del bloque). */
 .gym-block-days-header { display: flex; align-items: center; gap: 0.6rem; }
