@@ -540,7 +540,10 @@
           <div id="gym-weekly-goal-field"></div>
         </div>
 
-        <h3 class="gym-subheading">Mapa de músculos</h3>
+        <div class="gym-subheading-row">
+          <h3 class="gym-subheading">Mapa de músculos</h3>
+          <button type="button" id="btn-gym-progress-help" class="icon-btn settings-help-btn" aria-label="Qué significan los colores del mapa">?</button>
+        </div>
         <div class="gym-bodymap-controls">
           <div class="gym-progress-metric-toggle">
             <button type="button" class="view-mode-btn" data-gym-map-window="7">7 días</button>
@@ -669,11 +672,14 @@
   <div id="gym-live-view" class="my-space-view hidden">
     <div class="my-space-view-header">
       <h2 id="gym-live-title">Entrenamiento</h2>
-      <!-- Solo el nombre del dia y el reloj: los botones de accion viven
-           en el menu flotante de abajo a la derecha (peticion de Koku:
-           con nombres largos aqui arriba no cabia nada). -->
+      <!-- Solo el nombre del dia, el reloj y el ▾ de ocultar: el resto de
+           acciones vive en el menu flotante de abajo a la derecha
+           (peticion de Koku: con nombres largos aqui arriba no cabia
+           nada; el ▾ volvio porque lo echaba de menos para cambiar de
+           vista con el entreno activo). -->
       <div class="my-space-view-header-actions">
         <span id="gym-live-clock" class="gym-live-clock">0:00</span>
+        <button type="button" id="btn-gym-live-header-hide" class="icon-btn" aria-label="Ocultar entrenamiento (sigue en marcha)" title="Ocultar (sigue en marcha)">▾</button>
       </div>
     </div>
     <!-- La barra de descanso vive AQUI arriba (donde antes estaban los
@@ -721,6 +727,46 @@
     </div>
   </div>
 
+  <!-- Aviso sobre el mapa de musculos (pestana Progreso): se abre solo
+       la primera vez (localStorage.gymProgressHelpSeen) y desde el "?"
+       de la seccion. Mismo patron que la ayuda del entreno. -->
+  <div id="gym-progress-help-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <h2>Sobre el mapa de músculos</h2>
+      <p>Los colores del mapa no significan "demasiadas" ni "pocas" series: no es una valoración. Es solo una forma visual de ver cuánto has trabajado cada músculo en el periodo elegido — cuanto más intenso el color, más series (o volumen) lleva ese músculo comparado con el resto.</p>
+      <label class="app-confirm-checkbox-row">
+        <input type="checkbox" id="gym-progress-help-dont-show" class="styled-checkbox" />
+        <span>No volver a mostrar esto automáticamente</span>
+      </label>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-progress-help" class="primary-btn">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Primer arranque en el movil: iOS exige que muchas cosas (permiso de
+       notificaciones, Live Activities...) las conceda el usuario -- la app
+       no puede activarlas sola. Este dialogo lo explica de una vez y deja
+       elegir (peticion de Koku), en vez de pedir el permiso "a pelo" nada
+       mas abrir. Solo se ensena una vez (notificationsPermissionAsked). -->
+  <div id="permissions-modal" class="modal hidden">
+    <div class="modal-card gym-help-card">
+      <h2>Avisos de la app</h2>
+      <div class="gym-help-body">
+        <h4>Notificaciones</h4>
+        <p>Para avisarte de recordatorios y del fin del descanso entre series aunque la app esté cerrada, iOS necesita que le des permiso una vez. Si dices que no, la app funciona igual pero sin avisos (puedes cambiarlo luego en los Ajustes del teléfono).</p>
+        <h4>Cuenta atrás en la pantalla de bloqueo</h4>
+        <p>El temporizador de descanso del Gimnasio aparece en la pantalla de bloqueo automáticamente, sin permiso previo. Si no lo quieres, se desactiva en Ajustes &gt; RemindMeLater &gt; Actividades en directo.</p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="btn-permissions-later" class="secondary-btn">Ahora no</button>
+        <div class="spacer"></div>
+        <button type="button" id="btn-permissions-allow" class="primary-btn">Permitir avisos</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Ayuda del modo entrenamiento: se abre SOLA la primera vez que se
        entra a entrenar (localStorage.gymLiveHelpSeen) y siempre desde el
        boton "?" de abajo a la derecha. Aqui vive tambien la explicacion
@@ -734,9 +780,9 @@
         <h4>La columna "Anterior"</h4>
         <p>Muestra lo que hiciste en tu última sesión con ese ejercicio, en formato (descanso)peso×reps. Por ejemplo, (1:30)60×10 significa: 1 minuto y medio de descanso, 60 kg, 10 repeticiones. Tócala para copiar esos valores a la serie.</p>
         <h4>El descanso</h4>
-        <p>Al marcar una serie como hecha, el descanso apuntado en tu plan empieza solo y aparece como barra arriba. Con +30s lo alargas, con ✕ lo saltas, y si desmarcas la casilla (te equivocaste de serie) se cancela. Puedes tocar el tiempo para cambiar entre formato m:ss y segundos.</p>
+        <p>Al marcar una serie como hecha, el descanso del ejercicio empieza solo y aparece como barra arriba. El tiempo se ve en la pastilla junto al nombre del ejercicio, y tocándola lo cambias para esa sesión. Con +30s lo alargas (y ese extra queda apuntado en el historial de la serie), con ✕ lo saltas, y si desmarcas la casilla se cancela.</p>
         <h4>El RPE</h4>
-        <p>Es una medida del esfuerzo, del 1 al 10: 10 es que no podrías haber hecho ni una repetición más, 9 es que te quedaba una, 8 que te quedaban dos... Es opcional, pero apuntarlo ayuda a saber si un peso se te está quedando corto. Si una serie te sale a RPE 7 o menos, probablemente toca subir peso.</p>
+        <p>Es una medida del esfuerzo, del 1 al 10: 10 es que no podrías haber hecho ni una repetición más, 9 es que te quedaba una, 8 que te quedaban dos... Se apunta uno por ejercicio, en la casilla RPE junto a "+ Serie". Es opcional, pero ayuda a saber si un peso se te está quedando corto: a RPE 7 o menos, probablemente toca subir.</p>
         <h4>El menú de abajo a la derecha</h4>
         <p>El botón flotante despliega las acciones del entrenamiento: esta ayuda, pausar, terminar y descartar. Pausar esconde la pantalla con el entrenamiento en marcha: puedes mirar otras pestañas del Gimnasio o cualquier otra parte de la app. Para volver, toca Reanudar en la pestaña Entrenar, o la barra de descanso que se queda arriba del todo mientras descansas.</p>
         <h4>Si se acaba el descanso y no estás mirando</h4>
@@ -2216,22 +2262,33 @@
       <div id="settings-tab-mobile" class="settings-tab-panel hidden">
         <h3>Este dispositivo</h3>
         <p class="hint">Estos ajustes son solo para el dispositivo en el que estas viendo esto ahora mismo.</p>
+        <!-- Poco texto a la vista (peticion de Koku): la explicacion
+             completa vive en el boton "?" y sale como dialogo. -->
+        <div class="settings-subheading-row">
+          <h4>Notificaciones</h4>
+          <button type="button" id="btn-notifications-help" class="icon-btn settings-help-btn" aria-label="Dudas sobre las notificaciones">?</button>
+        </div>
         <label class="checkbox-row">
           <input type="checkbox" id="setting-notifications" />
           Avisos de recordatorios
         </label>
-        <p class="hint">En la app instalada, el aviso lo programa el propio telefono: suena aunque la app este cerrada, sin que nada salga del dispositivo. Desde un navegador solo puede avisar con la pestana abierta.</p>
-        <p id="notifications-status" class="hint"></p>
-
         <label class="checkbox-row">
           <input type="checkbox" id="setting-gym-rest-notify" />
           Aviso al terminar el descanso (Gimnasio)
         </label>
-        <p class="hint">Durante un entrenamiento, cuando se acabe el descanso entre series el telefono lanza una notificacion, aunque la pantalla este bloqueada. Asi no hace falta estar mirando el movil. Usa el mismo permiso de notificaciones de arriba.</p>
+        <label class="checkbox-row">
+          <input type="checkbox" id="setting-notif-sound" />
+          Sonido
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="setting-notif-vibrate" />
+          Vibración
+        </label>
+        <p id="notifications-status" class="hint"></p>
+        <p id="gym-live-activity-status" class="hint"></p>
 
-        <h4>Cómo avisan las notificaciones</h4>
-        <p class="hint">Vale para todos los avisos de la app (recordatorios y fin de descanso). No hay opcion de "solo sonido" porque iOS no la permite: cuando un aviso suena, vibrar o no lo decide el ajuste del telefono (Ajustes > Sonidos y vibraciones).</p>
-        <div id="notif-alert-style-options" class="view-mode-options"></div>
+        <h4>Gimnasio: formato de tiempo</h4>
+        <div id="gym-time-format-options" class="view-mode-options"></div>
 
         <h4>Tareas completadas</h4>
         <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>

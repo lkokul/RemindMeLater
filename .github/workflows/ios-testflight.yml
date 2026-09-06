@@ -76,6 +76,18 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
 
+      # La Live Activity solo funciona si la extension DescansoWidget viaja
+      # DENTRO de la app (App.app/PlugIns/DescansoWidget.appex). Este paso
+      # lo comprueba y tira el build si falta -- sin el, un fallo de
+      # embedding pasa en silencio y la tarjeta simplemente "no sale" en el
+      # movil, sin ninguna pista de por que.
+      - name: Comprobar que el widget va dentro de la app
+        run: |
+          PLUGINS="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app/PlugIns"
+          echo "Contenido de PlugIns:"
+          ls -la "$PLUGINS" || true
+          test -d "$PLUGINS/DescansoWidget.appex"
+
       - name: Generar ExportOptions.plist
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

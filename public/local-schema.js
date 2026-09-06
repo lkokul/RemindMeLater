@@ -218,7 +218,12 @@ function applyLocalSchema(db) {
       -- dentro de la rutina -- solo una sugerencia, igual que target_sets/
       -- target_reps; se copia como punto de partida a cada serie al crear
       -- una sesion desde esta rutina, y se puede cambiar libremente ahi.
-      target_rest_seconds INTEGER
+      target_rest_seconds INTEGER,
+      -- Oculto: el ejercicio sigue EN el dia (no se ha borrado), pero un
+      -- entrenamiento nuevo no lo pre-carga -- para "aparcar" un ejercicio
+      -- mientras se prueba otro (peticion de Koku). En el entreno en vivo
+      -- se puede recuperar desde "Ejercicios ocultos".
+      hidden INTEGER NOT NULL DEFAULT 0
     );
 
     -- Una sesion real en una fecha. routine_id es opcional: NULL = sesion
@@ -271,6 +276,10 @@ function applyLocalSchema(db) {
       -- 'failure' reservados -- el calculo de PRs excluye warmup).
       rpe REAL,
       set_type TEXT,
+      -- Segundos de descanso EXTRA anadidos con +30s durante el descanso
+      -- de esta serie (rest_seconds guarda el planificado). Se ensena en
+      -- el historial como "Serie 1: +60s" (peticion de Koku).
+      extra_rest_seconds INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1182,6 +1191,9 @@ function applyLocalSchema(db) {
   if (!gymRoutineExerciseColumns.includes('target_rest_seconds')) {
     db.exec('ALTER TABLE gym_routine_exercises ADD COLUMN target_rest_seconds INTEGER');
   }
+  if (!gymRoutineExerciseColumns.includes('hidden')) {
+    db.exec('ALTER TABLE gym_routine_exercises ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
+  }
   const gymSetColumns = db.prepare('PRAGMA table_info(gym_sets)').all().map((c) => c.name);
   if (!gymSetColumns.includes('rest_seconds')) {
     db.exec('ALTER TABLE gym_sets ADD COLUMN rest_seconds INTEGER');
@@ -1254,6 +1266,9 @@ function applyLocalSchema(db) {
   }
   if (!gymSetColumns2.includes('set_type')) {
     db.exec('ALTER TABLE gym_sets ADD COLUMN set_type TEXT');
+  }
+  if (!gymSetColumns2.includes('extra_rest_seconds')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN extra_rest_seconds INTEGER');
   }
   const gymSessionColumns = db.prepare('PRAGMA table_info(gym_sessions)').all().map((c) => c.name);
   if (!gymSessionColumns.includes('started_at')) {

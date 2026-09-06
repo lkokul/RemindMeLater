@@ -1255,29 +1255,75 @@ function refreshMobileTab() {
   restNotify.disabled = !nativo;
   restNotify.checked = nativo && localStorage.getItem('gymRestNotify') !== 'false';
 
-  refreshNotifAlertStyleOptions();
+  // Sonido y vibracion de los avisos, como on-off separados (peticion
+  // de Koku). El matiz de iOS (con sonido, vibrar lo decide el sistema;
+  // "solo vibracion" usa el truco del sonido de silencio) vive en el
+  // dialogo del boton "?" -- ver notificationSoundValue() en
+  // local-notifications.js, que traduce estos dos toggles.
+  document.getElementById('setting-notif-sound').checked = localStorage.getItem('notifSound') !== 'false';
+  document.getElementById('setting-notif-vibrate').checked = localStorage.getItem('notifVibrate') !== 'false';
+
+  // Estado de la Live Activity (cuenta atras en la pantalla de bloqueo):
+  // en el iPhone no hay consola que mirar, asi que el resultado del
+  // ultimo intento se ensena aqui para poder diagnosticar.
+  const laStatus = document.getElementById('gym-live-activity-status');
+  if (!nativo) {
+    laStatus.textContent = '';
+  } else {
+    const last = localStorage.getItem('gymLiveActivityStatus');
+    laStatus.textContent = last
+      ? (last === 'ok'
+          ? 'Cuenta atrás en pantalla de bloqueo: funcionando.'
+          : `Cuenta atrás en pantalla de bloqueo: ${last}`)
+      : 'Cuenta atrás en pantalla de bloqueo: sin datos todavía (marca una serie en un entreno).';
+  }
+
+  refreshGymTimeFormatOptions();
   refreshCompletedTasksDisplayOptions();
   refreshGymWeightUnitOptions();
 }
 
-// Como avisan las notificaciones (peticion de Koku: sonido y vibracion
-// controlables desde la app). Son las TRES combinaciones que iOS permite
-// de verdad -- "solo sonido" no existe porque con sonido, vibrar o no lo
-// decide el ajuste del sistema. Ver notificationSoundValue() en
-// local-notifications.js, que es quien traduce el modo elegido.
-const NOTIF_ALERT_STYLES = [
-  { id: 'full', label: 'Sonido y vibración' },
-  { id: 'vibrate', label: 'Solo vibración' },
-  { id: 'silent', label: 'En silencio' },
+// Sonido / vibracion: al cambiar cualquiera se reprograman los avisos ya
+// puestos (llevan el sonido "dentro" desde que se programan).
+async function onNotifAlertToggleChange() {
+  await syncScheduledReminders();
+  if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
+}
+document.getElementById('setting-notif-sound').addEventListener('change', (e) => {
+  localStorage.setItem('notifSound', e.target.checked ? 'true' : 'false');
+  onNotifAlertToggleChange();
+});
+document.getElementById('setting-notif-vibrate').addEventListener('change', (e) => {
+  localStorage.setItem('notifVibrate', e.target.checked ? 'true' : 'false');
+  onNotifAlertToggleChange();
+});
+
+// El "?" de Notificaciones: toda la letra pequena que antes ocupaba la
+// pantalla (peticion de Koku: "no pongas tanto texto... un boton de
+// dudas para que no este siempre").
+document.getElementById('btn-notifications-help').addEventListener('click', () => {
+  showAppAlert(
+    'Avisos de recordatorios: en la app instalada los programa el propio teléfono, así que suenan aunque la app esté cerrada y sin que nada salga del dispositivo. Desde un navegador solo pueden avisar con la pestaña abierta.\n\n' +
+    'Aviso al terminar el descanso: durante un entrenamiento, cuando se acaba el descanso entre series llega una notificación aunque la pantalla esté bloqueada. Usa el mismo permiso que los recordatorios.\n\n' +
+    'Sonido y vibración: valen para todos los avisos de la app. Un detalle de iOS: cuando un aviso suena, vibrar o no lo decide el teléfono (Ajustes > Sonidos y vibraciones), no la app — por eso no existe "sonido sin vibración". "Solo vibración" sí funciona: la app reproduce medio segundo de silencio y eso dispara la vibración sin que se oiga nada.'
+  );
+});
+
+// Formato de tiempo del Gimnasio (descansos): minutos:segundos o
+// segundos a secas. El mismo ajuste que alterna el contador al tocarlo
+// (gymRestFormat) -- Koku pidio tenerlo tambien aqui, a la vista.
+const GYM_TIME_FORMAT_MODES = [
+  { id: 'min', label: 'Minutos y segundos (1:30)' },
+  { id: 'sec', label: 'Solo segundos (90s)' },
 ];
 
-function refreshNotifAlertStyleOptions() {
-  const container = document.getElementById('notif-alert-style-options');
+function refreshGymTimeFormatOptions() {
+  const container = document.getElementById('gym-time-format-options');
   if (!container) return;
   container.innerHTML = '';
-  const current = localStorage.getItem('notifAlertStyle') || 'full';
+  const current = localStorage.getItem('gymRestFormat') === 'sec' ? 'sec' : 'min';
 
-  NOTIF_ALERT_STYLES.forEach((mode) => {
+  GYM_TIME_FORMAT_MODES.forEach((mode) => {
     const isActive = mode.id === current;
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -1286,14 +1332,9 @@ function refreshNotifAlertStyleOptions() {
     if (isActive) {
       btn.disabled = true;
     } else {
-      btn.addEventListener('click', async () => {
-        localStorage.setItem('notifAlertStyle', mode.id);
-        refreshNotifAlertStyleOptions();
-        // Los avisos ya programados llevan el sonido antiguo dentro:
-        // se reprograman con el nuevo. El del descanso en curso tambien,
-        // si lo hay (la funcion ya no hace nada si no toca).
-        await syncScheduledReminders();
-        if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
+      btn.addEventListener('click', () => {
+        localStorage.setItem('gymRestFormat', mode.id);
+        refreshGymTimeFormatOptions();
       });
     }
     container.appendChild(btn);
@@ -1586,6 +1627,7 @@ document.addEventListener('keydown', (e) => {
     // La ayuda del entrenamiento la primera: se abre encima de todo
     // (incluso encima del entreno en vivo).
     ['gym-help-modal', closeGymHelpModal],
+    ['gym-progress-help-modal', closeGymProgressHelpModal],
     // La ficha de la libreria va ANTES que el buscador: se abre encima
     // de el, y el primer Esc debe cerrar solo la ficha.
     ['gym-library-detail-modal', closeGymLibraryDetail],

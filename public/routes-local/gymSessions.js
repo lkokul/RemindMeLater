@@ -19,7 +19,7 @@
   function serializeSets(sessionId) {
     return db
       .prepare(`
-        SELECT gs.id, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, ge.name
+        SELECT gs.id, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, gs.extra_rest_seconds, ge.name
         FROM gym_sets gs
         JOIN gym_exercises ge ON ge.id = gs.exercise_id
         WHERE gs.session_id = ?
@@ -35,6 +35,7 @@
         restSeconds: r.rest_seconds,
         rpe: r.rpe,
         setType: r.set_type,
+        extraRestSeconds: r.extra_rest_seconds,
       }));
   }
 
@@ -93,7 +94,7 @@
     if (!Array.isArray(sets)) return;
 
     const insert = db.prepare(
-      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     const VALID_SET_TYPES = ['warmup', 'dropset', 'failure'];
     const countByExercise = new Map();
@@ -110,7 +111,8 @@
         s.weightKg !== undefined && s.weightKg !== null && s.weightKg !== '' ? Number(s.weightKg) : null,
         s.restSeconds !== undefined && s.restSeconds !== null && s.restSeconds !== '' ? Number(s.restSeconds) : null,
         s.rpe !== undefined && s.rpe !== null && s.rpe !== '' ? Number(s.rpe) : null,
-        VALID_SET_TYPES.includes(s.setType) ? s.setType : null
+        VALID_SET_TYPES.includes(s.setType) ? s.setType : null,
+        s.extraRestSeconds !== undefined && s.extraRestSeconds !== null && s.extraRestSeconds !== '' && Number(s.extraRestSeconds) > 0 ? Number(s.extraRestSeconds) : null
       );
     });
   }

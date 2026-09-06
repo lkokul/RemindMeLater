@@ -6585,9 +6585,31 @@ function switchGymTab(tabName) {
   // declaradas mas abajo, sin problema de orden porque esto solo corre
   // dentro de un handler de click (ver la nota de TDZ en CLAUDE.md).
   if (tabName === 'plan') openGymBlockDays(null);
-  if (tabName === 'progress') renderGymProgressSections();
+  if (tabName === 'progress') {
+    renderGymProgressSections();
+    // El aviso sobre los colores del mapa (que no significan "demasiado"
+    // ni "poco", solo cantidad relativa) se ensena SOLO la primera vez;
+    // el boton "?" de la seccion lo reabre cuando se quiera.
+    if (localStorage.getItem('gymProgressHelpSeen') !== '1') openGymProgressHelpModal();
+  }
   if (tabName === 'achievements') renderGymAchievements();
 }
+
+// --- Aviso del mapa de musculos (pestana Progreso) --------------------
+function openGymProgressHelpModal() {
+  document.getElementById('gym-progress-help-dont-show').checked =
+    localStorage.getItem('gymProgressHelpSeen') === '1';
+  document.getElementById('gym-progress-help-modal').classList.remove('hidden');
+}
+function closeGymProgressHelpModal() {
+  localStorage.setItem(
+    'gymProgressHelpSeen',
+    document.getElementById('gym-progress-help-dont-show').checked ? '1' : '0'
+  );
+  document.getElementById('gym-progress-help-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-progress-help').addEventListener('click', openGymProgressHelpModal);
+document.getElementById('btn-close-gym-progress-help').addEventListener('click', closeGymProgressHelpModal);
 document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchGymTab(btn.dataset.gymTab));
 });
@@ -7898,7 +7920,7 @@ function openGymStartModal() {
     btn.innerHTML = `
       <span class="color-dot" style="background-color: ${day.color}"></span>
       <span class="gym-list-item-name">${day.icon ? escapeHtml(day.icon) + ' ' : ''}${escapeHtml(day.name)}</span>
-      <span class="gym-list-item-muted">${day.exercises.length} ejercicio${day.exercises.length === 1 ? '' : 's'}</span>
+      <span class="gym-list-item-muted">${day.exercises.filter((ex) => !ex.hidden).length} ejercicio${day.exercises.filter((ex) => !ex.hidden).length === 1 ? '' : 's'}</span>
     `;
     btn.addEventListener('click', () => {
       closeGymStartModal();
@@ -7930,20 +7952,34 @@ document.getElementById('btn-gym-live-resume').addEventListener('click', () => {
 // sugerido -- reps y peso en blanco a proposito, como el modal manual) o
 // completamente libre.
 function startGymLiveSession(day) {
+  // Solo se pre-cargan los ejercicios VISIBLES del dia; los ocultos
+  // quedan en hiddenPool, recuperables desde "Ejercicios ocultos" en el
+  // propio entreno (peticion de Koku: aparcar un ejercicio sin borrarlo).
+  const visibles = day ? day.exercises.filter((ex) => !ex.hidden) : [];
   gymLiveSession = {
     startedAt: Date.now(),
     routineId: day ? day.id : null,
     routineName: day ? day.name : null,
     restPreset: 90,
     restUntil: null,
-    exercises: day
-      ? day.exercises.map((ex) => ({
+    // Para no deslizar durante 40 minutos (Koku): todas las tarjetas
+    // nacen RECOGIDAS menos la primera; cada una se pliega/despliega
+    // tocando su cabecera, y hay botones de plegar/desplegar todo.
+    exercises: visibles.map((ex, i) => ({
+        exerciseId: ex.exerciseId,
+        note: '',
+        rpe: '',
+        collapsed: i > 0,
+        sets: Array.from({ length: ex.targetSets || 1 }, () => ({
+          reps: '', weightDisplay: '', done: false,
+          restSeconds: ex.targetRestSeconds ?? '',
+        })),
+      })),
+    hiddenPool: day
+      ? day.exercises.filter((ex) => ex.hidden).map((ex) => ({
           exerciseId: ex.exerciseId,
-          note: '',
-          sets: Array.from({ length: ex.targetSets || 1 }, () => ({
-            reps: '', weightDisplay: '', rpe: '', done: false,
-            restSeconds: ex.targetRestSeconds ?? '',
-          })),
+          targetSets: ex.targetSets,
+          targetRestSeconds: ex.targetRestSeconds,
         }))
       : [],
   };
@@ -7998,6 +8034,14 @@ function gymFormatRestShort(totalSeconds) {
   const m = Math.floor(totalSeconds / 60);
   const s = totalSeconds % 60;
   return s === 0 ? `${m}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+// Un tiempo de descanso "para ensenar", respetando el formato elegido en
+// Configuracion (m:ss o segundos a secas -- mismo ajuste gymRestFormat
+// que alterna el contador tocandolo).
+function gymFormatRestDisplay(totalSeconds) {
+  const n = Number(totalSeconds);
+  if (!n) return '';
+  return localStorage.getItem('gymRestFormat') === 'sec' ? `${n}s` : gymLiveFormatClock(n);
 }
 function gymLiveFormatClock(totalSeconds) {
   const m = Math.floor(totalSeconds / 60);
@@ -8073,6 +8117,14 @@ document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () =
   if (gymLiveSession && gymLiveSession.restUntil) {
     gymLiveSession.restUntil += 30000;
     gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + 30;
+    // El extra se le apunta a la serie cuyo descanso esta corriendo, para
+    // que el historial pueda ensenar "Serie 1: +60s" (peticion de Koku).
+    const ref = gymLiveSession.restSetRef;
+    if (ref) {
+      const refEx = gymLiveSession.exercises.find((x) => x.exerciseId === ref.exerciseId);
+      const refSet = refEx && refEx.sets[ref.setIndex];
+      if (refSet) refSet.extraRest = (refSet.extraRest || 0) + 30;
+    }
     gymLiveStore();
     gymLiveTick();
     // El aviso programado apuntaba al final antiguo: se reprograma.
@@ -8188,8 +8240,16 @@ async function gymStartRestLiveActivity() {
   const plugin = getGymLiveActivityPlugin();
   if (!plugin || !gymLiveSession || !gymLiveSession.restUntil) return;
   try {
-    await plugin.startRest(gymRestActivityParams());
+    const res = await plugin.startRest(gymRestActivityParams());
+    // Diagnostico visible en Configuracion > Este dispositivo: como no
+    // hay forma de ver la consola en el iPhone, el resultado del ultimo
+    // intento se guarda y se ensena alli (Koku reporto que la tarjeta no
+    // aparecia y no habia manera de saber por que).
+    localStorage.setItem('gymLiveActivityStatus', res && res.started
+      ? 'ok'
+      : `no: ${res && res.error ? res.error : 'el sistema no lo permite (¿iOS < 16.2, o desactivado en Ajustes?)'}`);
   } catch (err) {
+    localStorage.setItem('gymLiveActivityStatus', `error: ${err && err.message ? err.message : err}`);
     console.error('No se pudo iniciar la Live Activity del descanso:', err);
   }
 }
@@ -8221,19 +8281,48 @@ async function gymEndRestLiveActivity() {
 // proyecto: se reconstruye el DOM entero en cada cambio estructural
 // (anadir/quitar series o ejercicios); los inputs escriben directo en
 // gymLiveSession y guardan en localStorage.
+// La lista de ejercicios ocultos empieza recogida; recordarlo en una
+// variable (no en la sesion guardada) basta -- es un estado de vista.
+let gymLiveHiddenPoolOpen = false;
+
 function renderGymLiveExercises() {
   const container = document.getElementById('gym-live-exercises');
   container.innerHTML = '';
-  if (gymLiveSession.exercises.length === 0) {
+  if (gymLiveSession.exercises.length === 0 && !(gymLiveSession.hiddenPool || []).length) {
     container.innerHTML = '<p class="empty-hint">Añade ejercicios con el botón de abajo.</p>';
     return;
   }
   const unit = getGymWeightUnitLabel();
+
+  // Plegar/desplegar todo (peticion de Koku: no deslizar 40 minutos).
+  if (gymLiveSession.exercises.length > 1) {
+    const toolsRow = document.createElement('div');
+    toolsRow.className = 'gym-live-cards-tools';
+    toolsRow.innerHTML = `
+      <button type="button" class="secondary-btn" data-live-expand-all>Desplegar todo</button>
+      <button type="button" class="secondary-btn" data-live-collapse-all>Recoger todo</button>
+    `;
+    toolsRow.querySelector('[data-live-expand-all]').addEventListener('click', () => {
+      gymLiveSession.exercises.forEach((ex) => { ex.collapsed = false; });
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    toolsRow.querySelector('[data-live-collapse-all]').addEventListener('click', () => {
+      gymLiveSession.exercises.forEach((ex) => { ex.collapsed = true; });
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    container.appendChild(toolsRow);
+  }
+
   gymLiveSession.exercises.forEach((ex, exIndex) => {
     const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
     const prev = gymLivePrevSets.get(ex.exerciseId);
+    // Sesiones guardadas por versiones anteriores: el RPE vivia por
+    // serie; se recupera el primero que hubiera como RPE del ejercicio.
+    if (ex.rpe === undefined) ex.rpe = (ex.sets.find((s) => s.rpe) || {}).rpe || '';
     const card = document.createElement('div');
-    card.className = 'gym-live-exercise-card';
+    card.className = 'gym-live-exercise-card' + (ex.collapsed ? ' collapsed' : '');
 
     const setsHtml = ex.sets.map((set, setIndex) => {
       const prevSet = prev && prev.sets[setIndex];
@@ -8242,31 +8331,91 @@ function renderGymLiveExercises() {
         : '—';
       return `
         <div class="gym-live-set-row ${set.done ? 'done' : ''}">
-          <span class="gym-live-set-number">${setIndex + 1}</span>
+          <span class="gym-live-set-number">${setIndex + 1}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}</span>
           <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
           <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${unit}" data-live-field="weightDisplay" data-set="${setIndex}" value="${set.weightDisplay}" />
           <input type="number" inputmode="numeric" min="0" placeholder="reps" data-live-field="reps" data-set="${setIndex}" value="${set.reps}" />
-          <input type="number" inputmode="decimal" step="0.5" min="1" max="10" placeholder="RPE" data-live-field="rpe" data-set="${setIndex}" value="${set.rpe}" />
           <input type="checkbox" class="styled-checkbox" data-live-done="${setIndex}" ${set.done ? 'checked' : ''} aria-label="Serie hecha" />
         </div>
       `;
     }).join('');
 
+    const doneCount = ex.sets.filter((s) => s.done).length;
+    const restSeconds = Number(ex.sets[0] && ex.sets[0].restSeconds) || '';
     card.innerHTML = `
-      <div class="gym-live-exercise-header">
+      <div class="gym-live-exercise-header" data-live-toggle-collapse>
+        <span class="gym-live-caret" aria-hidden="true">▾</span>
         <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
-        <span class="gym-list-item-muted">${escapeHtml(exercise ? gymMuscleGroupLabel(exercise.muscleGroup) : '')}</span>
-        <button type="button" class="icon-btn" data-live-remove-exercise aria-label="Quitar ejercicio">✕</button>
+        <button type="button" class="gym-live-rest-chip" data-live-rest-chip title="Descanso entre series de este ejercicio (tocar para cambiarlo)">${restSeconds ? gymFormatRestDisplay(restSeconds) : 'descanso'}</button>
+        <span class="gym-live-card-progress">${doneCount}/${ex.sets.length}</span>
+        <button type="button" class="icon-btn gym-live-card-btn" data-live-move-up aria-label="Subir ejercicio" ${exIndex === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" class="icon-btn gym-live-card-btn" data-live-move-down aria-label="Bajar ejercicio" ${exIndex === gymLiveSession.exercises.length - 1 ? 'disabled' : ''}>↓</button>
+        <button type="button" class="icon-btn gym-live-card-btn" data-live-remove-exercise aria-label="Quitar ejercicio">✕</button>
       </div>
-      <div class="gym-live-set-row gym-live-set-head">
-        <span class="gym-live-set-number">#</span>
-        <span class="gym-live-set-prev">Anterior</span>
-        <span>${unit}</span><span>Reps</span><span class="gym-rpe-head">RPE</span><span>✓</span>
+      <div class="gym-live-card-body">
+        <div class="gym-live-set-row gym-live-set-head">
+          <span class="gym-live-set-number">#</span>
+          <span class="gym-live-set-prev">Anterior</span>
+          <span>${unit}</span><span>Reps</span><span>✓</span>
+        </div>
+        ${setsHtml}
+        <div class="gym-live-card-footer">
+          <button type="button" class="secondary-btn gym-add-set-btn" data-live-add-set>+ Serie</button>
+          <label class="gym-live-exrpe">RPE
+            <input type="number" inputmode="decimal" step="0.5" min="1" max="10" placeholder="—" data-live-exrpe value="${ex.rpe}" />
+          </label>
+        </div>
+        <input type="text" class="gym-live-note" data-live-note placeholder="Nota (sensaciones, peso próximo...)" value="${escapeHtml(ex.note || '')}" />
       </div>
-      ${setsHtml}
-      <button type="button" class="secondary-btn gym-add-set-btn" data-live-add-set>+ Serie</button>
-      <input type="text" class="gym-live-note" data-live-note placeholder="Nota (sensaciones, peso próximo...)" value="${escapeHtml(ex.note || '')}" />
     `;
+
+    // Tocar la cabecera pliega/despliega la tarjeta -- salvo que el toque
+    // caiga en un boton o input de la propia cabecera.
+    card.querySelector('[data-live-toggle-collapse]').addEventListener('click', (e) => {
+      if (e.target.closest('button, input')) return;
+      ex.collapsed = !ex.collapsed;
+      gymLiveStore();
+      card.classList.toggle('collapsed', ex.collapsed);
+    });
+    // Chip de descanso: tocarlo lo convierte en un campo de segundos; al
+    // confirmar, el nuevo descanso se aplica a TODAS las series del
+    // ejercicio (es "el descanso de este ejercicio", no de una serie).
+    card.querySelector('[data-live-rest-chip]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const chip = e.currentTarget;
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.inputMode = 'numeric';
+      input.min = '0';
+      input.className = 'gym-live-rest-chip-input';
+      input.value = restSeconds || '';
+      input.placeholder = 's';
+      input.title = 'Segundos de descanso';
+      chip.replaceWith(input);
+      input.focus();
+      const commit = () => {
+        const value = input.value === '' ? '' : Math.max(0, Number(input.value));
+        ex.sets.forEach((s) => { s.restSeconds = value; });
+        gymLiveStore();
+        renderGymLiveExercises();
+      };
+      input.addEventListener('blur', commit);
+      input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); } });
+    });
+    card.querySelector('[data-live-move-up]').addEventListener('click', () => {
+      if (exIndex === 0) return;
+      const arr = gymLiveSession.exercises;
+      [arr[exIndex - 1], arr[exIndex]] = [arr[exIndex], arr[exIndex - 1]];
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    card.querySelector('[data-live-move-down]').addEventListener('click', () => {
+      const arr = gymLiveSession.exercises;
+      if (exIndex >= arr.length - 1) return;
+      [arr[exIndex], arr[exIndex + 1]] = [arr[exIndex + 1], arr[exIndex]];
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
 
     card.querySelectorAll('[data-live-field]').forEach((input) => {
       input.addEventListener('input', () => {
@@ -8274,9 +8423,14 @@ function renderGymLiveExercises() {
         gymLiveStore();
       });
     });
+    card.querySelector('[data-live-exrpe]').addEventListener('input', (e) => {
+      ex.rpe = e.target.value;
+      gymLiveStore();
+    });
     card.querySelectorAll('[data-live-done]').forEach((check) => {
       check.addEventListener('change', () => {
-        const set = ex.sets[Number(check.dataset.liveDone)];
+        const setIndex = Number(check.dataset.liveDone);
+        const set = ex.sets[setIndex];
         set.done = check.checked;
         // Marcar una serie como hecha arranca el descanso: el sugerido de
         // esa serie si lo tiene, si no el preset elegido arriba.
@@ -8287,21 +8441,28 @@ function renderGymLiveExercises() {
           gymLiveSession.restUntil = Date.now() + seconds * 1000;
           gymLiveSession.restBaseSeconds = seconds;
           gymLiveSession.restExtraSeconds = 0;
+          // A que serie pertenece el descanso en marcha: los +30s se le
+          // apuntan a ELLA, para poder ensenar "Serie 1: +60s" luego.
+          gymLiveSession.restSetRef = { exerciseId: ex.exerciseId, setIndex };
+          set.extraRest = 0;
           gymScheduleRestNotification();
           gymStartRestLiveActivity();
         } else {
           gymLiveSession.restUntil = null;
+          set.extraRest = 0;
           gymCancelRestNotification();
           gymEndRestLiveActivity();
         }
         gymLiveStore();
         gymLiveTick();
         check.closest('.gym-live-set-row').classList.toggle('done', check.checked);
+        const progress = card.querySelector('.gym-live-card-progress');
+        if (progress) progress.textContent = `${ex.sets.filter((s) => s.done).length}/${ex.sets.length}`;
       });
     });
     card.querySelector('[data-live-add-set]').addEventListener('click', () => {
       const last = ex.sets[ex.sets.length - 1];
-      ex.sets.push({ reps: '', weightDisplay: '', rpe: '', done: false, restSeconds: last ? last.restSeconds : '' });
+      ex.sets.push({ reps: '', weightDisplay: '', done: false, restSeconds: last ? last.restSeconds : '' });
       gymLiveStore();
       renderGymLiveExercises();
     });
@@ -8319,6 +8480,49 @@ function renderGymLiveExercises() {
 
     container.appendChild(card);
   });
+
+  // Ejercicios OCULTOS del dia: no estan en el entreno, pero se pueden
+  // recuperar para esta sesion concreta (peticion de Koku).
+  const pool = gymLiveSession.hiddenPool || [];
+  if (pool.length > 0) {
+    const poolBox = document.createElement('div');
+    poolBox.className = 'gym-live-hidden-pool';
+    poolBox.innerHTML = `<button type="button" class="secondary-btn" data-live-toggle-hidden>${gymLiveHiddenPoolOpen ? 'Ocultar' : 'Ver'} ejercicios ocultos (${pool.length})</button><div class="gym-live-hidden-list ${gymLiveHiddenPoolOpen ? '' : 'hidden'}"></div>`;
+    poolBox.querySelector('[data-live-toggle-hidden]').addEventListener('click', () => {
+      gymLiveHiddenPoolOpen = !gymLiveHiddenPoolOpen;
+      renderGymLiveExercises();
+    });
+    const listEl = poolBox.querySelector('.gym-live-hidden-list');
+    pool.forEach((p, poolIndex) => {
+      const exercise = state.gymExercises.find((e) => e.id === p.exerciseId);
+      const row = document.createElement('div');
+      row.className = 'gym-live-hidden-row';
+      row.innerHTML = `
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <button type="button" class="secondary-btn">+ Añadir a esta sesión</button>
+      `;
+      row.querySelector('button').addEventListener('click', async () => {
+        gymLiveSession.exercises.push({
+          exerciseId: p.exerciseId,
+          note: '',
+          rpe: '',
+          collapsed: false,
+          sets: Array.from({ length: p.targetSets || 1 }, () => ({
+            reps: '', weightDisplay: '', done: false,
+            restSeconds: p.targetRestSeconds ?? '',
+          })),
+        });
+        gymLiveSession.hiddenPool.splice(poolIndex, 1);
+        gymLiveStore();
+        if (!gymLivePrevSets.has(p.exerciseId)) {
+          gymLivePrevSets.set(p.exerciseId, await api(`/api/gym-sessions/last-sets/${p.exerciseId}`));
+        }
+        renderGymLiveExercises();
+      });
+      listEl.appendChild(row);
+    });
+    container.appendChild(poolBox);
+  }
 }
 
 // "+ Añadir ejercicio" en vivo: reutiliza el MISMO buscador de la
@@ -8371,7 +8575,10 @@ document.getElementById('btn-close-gym-help').addEventListener('click', closeGym
 // Pausar/ocultar el entrenamiento sin descartarlo: vuelve al Gimnasio
 // con sus pestanas utilizables (peticion de Koku: "poder moverme por las
 // pestanas de gimnasio" en mitad de un entreno). El ticker sigue vivo.
+// Dos puntos de entrada: el boton de pausa del menu flotante y el ▾ de
+// la cabecera (Koku pidio recuperarlo).
 document.getElementById('btn-gym-live-minimize').addEventListener('click', closeGymLiveView);
+document.getElementById('btn-gym-live-header-hide').addEventListener('click', closeGymLiveView);
 
 // El menu flotante de acciones del entreno: el boton central abre/cierra
 // el abanico de 4 botones (dudas / pausar / terminar / descartar).
@@ -8450,7 +8657,10 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
         reps: set.reps,
         weightKg,
         restSeconds: set.restSeconds,
-        rpe: set.rpe,
+        // El RPE es del EJERCICIO (peticion de Koku): se guarda replicado
+        // en cada serie para no cambiar el esquema de gym_sets.
+        rpe: ex.rpe,
+        extraRestSeconds: set.extraRest || null,
       });
       volumeKg += (Number(set.reps) || 0) * (weightKg || 0);
       const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
@@ -8601,17 +8811,29 @@ function renderGymRoutineExercisesField() {
   }
   gymRoutineModalExercises.forEach((row, index) => {
     const rowEl = document.createElement('div');
-    rowEl.className = 'gym-routine-exercise-row gym-routine-exercise-stacked';
+    rowEl.className = 'gym-routine-exercise-row gym-routine-exercise-stacked' + (row.hidden ? ' gym-exercise-hidden' : '');
+    // El ojo oculta el ejercicio SIN quitarlo del dia: los entrenos nuevos
+    // no lo pre-cargan, pero se puede recuperar durante la sesion desde
+    // "Ejercicios ocultos" (peticion de Koku: aparcar sin borrar).
+    const eyeSvg = row.hidden
+      ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.8 9.8 0 0 1 12 5c5 0 9 4.5 10 7-.4 1-1.3 2.4-2.6 3.7M6.6 6.6C4.1 8.1 2.5 10.4 2 12c1 2.5 5 7 10 7 1.5 0 2.9-.4 4.2-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>'
+      : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12c1-2.5 5-7 10-7s9 4.5 10 7c-1 2.5-5 7-10 7S3 14.5 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const restPreviewText = (seconds) => {
+      const n = Number(seconds);
+      return n > 0 ? `Descanso: ${gymLiveFormatClock(n)} min` : '';
+    };
     rowEl.innerHTML = `
       <div class="gym-routine-exercise-name-row">
         <select data-field="exerciseId">${gymExerciseOptionsHtml(row.exerciseId)}</select>
-        <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
+        <button type="button" class="icon-btn" data-field="toggleHidden" aria-label="${row.hidden ? 'Mostrar en los entrenos' : 'Ocultar de los entrenos'}" title="${row.hidden ? 'Oculto: los entrenos nuevos no lo cargan. Tocar para mostrarlo.' : 'Ocultar de los entrenos nuevos (sin borrarlo del día)'}">${eyeSvg}</button>
+        <button type="button" class="icon-btn" data-field="remove" aria-label="Quitar ejercicio">✕</button>
       </div>
       <div class="gym-routine-exercise-targets-row">
         <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
         <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
-        <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" value="${row.targetRestSeconds ?? ''}" />
+        <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" title="En segundos" value="${row.targetRestSeconds ?? ''}" />
       </div>
+      <p class="hint gym-rest-preview">${restPreviewText(row.targetRestSeconds)}</p>
     `;
     rowEl.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
       gymRoutineModalExercises[index].exerciseId = Number(e.target.value);
@@ -8624,8 +8846,15 @@ function renderGymRoutineExercisesField() {
     });
     rowEl.querySelector('[data-field="targetRestSeconds"]').addEventListener('input', (e) => {
       gymRoutineModalExercises[index].targetRestSeconds = e.target.value;
+      // Vista previa en vivo del descanso ("90" -> "1:30 min"): el campo
+      // esta en segundos y no se notaba (feedback de Koku).
+      rowEl.querySelector('.gym-rest-preview').textContent = restPreviewText(e.target.value);
     });
-    rowEl.querySelector('button').addEventListener('click', () => {
+    rowEl.querySelector('[data-field="toggleHidden"]').addEventListener('click', () => {
+      gymRoutineModalExercises[index].hidden = !gymRoutineModalExercises[index].hidden;
+      renderGymRoutineExercisesField();
+    });
+    rowEl.querySelector('[data-field="remove"]').addEventListener('click', () => {
       gymRoutineModalExercises.splice(index, 1);
       renderGymRoutineExercisesField();
     });
@@ -8638,7 +8867,7 @@ document.getElementById('btn-add-gym-routine-exercise').addEventListener('click'
     showAppAlert('Primero crea al menos un ejercicio (pestaña Plan, lista de abajo).');
     return;
   }
-  gymRoutineModalExercises.push({ exerciseId: state.gymExercises[0].id, targetSets: '', targetReps: '', targetRestSeconds: '' });
+  gymRoutineModalExercises.push({ exerciseId: state.gymExercises[0].id, targetSets: '', targetReps: '', targetRestSeconds: '', hidden: false });
   renderGymRoutineExercisesField();
 });
 
@@ -8671,6 +8900,7 @@ function openGymRoutineModal(routine) {
         targetSets: ex.targetSets ?? '',
         targetReps: ex.targetReps ?? '',
         targetRestSeconds: ex.targetRestSeconds ?? '',
+        hidden: !!ex.hidden,
       }))
     : [];
   renderGymRoutineExercisesField();
@@ -8781,14 +9011,21 @@ function renderGymSessionExercisesField() {
 
     const header = document.createElement('div');
     header.className = 'gym-routine-exercise-row';
+    // El RPE es UNO por ejercicio (peticion de Koku), no por serie: vive
+    // aqui en la cabecera. Ademas, sacandolo de las filas de serie estas
+    // dejan de desbordarse en pantallas estrechas (el RPE se salia).
     header.innerHTML = `
       <select data-field="exerciseId">${gymExerciseOptionsHtml(exRow.exerciseId)}</select>
+      <input type="number" data-field="exRpe" placeholder="RPE" min="1" max="10" step="0.5" title="RPE del ejercicio" value="${exRow.rpe ?? ''}" />
       <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
     `;
     header.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
       gymSessionModalExercises[exIndex].exerciseId = Number(e.target.value);
     });
-    header.querySelector('button').addEventListener('click', () => {
+    header.querySelector('[data-field="exRpe"]').addEventListener('input', (e) => {
+      gymSessionModalExercises[exIndex].rpe = e.target.value;
+    });
+    header.querySelector('.icon-btn').addEventListener('click', () => {
       gymSessionModalExercises.splice(exIndex, 1);
       renderGymSessionExercisesField();
     });
@@ -8799,12 +9036,13 @@ function renderGymSessionExercisesField() {
     exRow.sets.forEach((set, setIndex) => {
       const setRow = document.createElement('div');
       setRow.className = 'gym-session-set-row';
+      // "+60s" = descanso extra anadido con +30s durante el entreno en
+      // vivo (peticion de Koku: que el historial lo ensene por serie).
       setRow.innerHTML = `
-        <span class="gym-session-set-number">Serie ${setIndex + 1}</span>
+        <span class="gym-session-set-number">Serie ${setIndex + 1}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}</span>
         <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
         <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
-        <input type="number" data-field="rpe" placeholder="RPE" min="1" max="10" step="0.5" value="${set.rpe ?? ''}" />
-        <input type="number" data-field="restSeconds" placeholder="Descanso (s)" min="0" value="${set.restSeconds ?? ''}" />
+        <input type="number" data-field="restSeconds" placeholder="Desc. (s)" min="0" title="Descanso planificado, en segundos" value="${set.restSeconds ?? ''}" />
         <button type="button" class="icon-btn" aria-label="Quitar serie">✕</button>
       `;
       setRow.querySelector('[data-field="reps"]').addEventListener('input', (e) => {
@@ -8812,9 +9050,6 @@ function renderGymSessionExercisesField() {
       });
       setRow.querySelector('[data-field="weight"]').addEventListener('input', (e) => {
         set.weightDisplay = e.target.value;
-      });
-      setRow.querySelector('[data-field="rpe"]').addEventListener('input', (e) => {
-        set.rpe = e.target.value;
       });
       setRow.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => {
         set.restSeconds = e.target.value;
@@ -8836,7 +9071,7 @@ function renderGymSessionExercisesField() {
       // (suele ser el mismo entre series seguidas) -- reps/peso se dejan
       // en blanco, varian serie a serie.
       const lastSet = exRow.sets[exRow.sets.length - 1];
-      exRow.sets.push({ reps: '', weightDisplay: '', restSeconds: lastSet ? lastSet.restSeconds : '' });
+      exRow.sets.push({ reps: '', weightDisplay: '', restSeconds: lastSet ? lastSet.restSeconds : '', extraRestSeconds: null });
       renderGymSessionExercisesField();
     });
     block.appendChild(addSetBtn);
@@ -8850,7 +9085,7 @@ document.getElementById('btn-add-gym-session-exercise').addEventListener('click'
     showAppAlert('Primero crea al menos un ejercicio desde la pestaña Plan.');
     return;
   }
-  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, sets: [{ reps: '', weightDisplay: '', restSeconds: '' }] });
+  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, rpe: '', sets: [{ reps: '', weightDisplay: '', restSeconds: '' }] });
   renderGymSessionExercisesField();
 });
 
@@ -8870,16 +9105,21 @@ function openGymSessionModal(session) {
     // Reagrupa las series planas que devuelve el servidor (una fila por
     // serie) en un bloque por ejercicio, tal y como lo edita el modal.
     const byExercise = new Map();
+    // El RPE por ejercicio: el primero no vacio de sus series (todas
+    // llevan el mismo desde que el RPE es por ejercicio; las sesiones
+    // antiguas con RPEs distintos ensenan el primero).
+    const rpeByExercise = new Map();
     session.sets.forEach((set) => {
       if (!byExercise.has(set.exerciseId)) byExercise.set(set.exerciseId, []);
+      if (set.rpe != null && !rpeByExercise.has(set.exerciseId)) rpeByExercise.set(set.exerciseId, set.rpe);
       byExercise.get(set.exerciseId).push({
         reps: set.reps ?? '',
         weightDisplay: gymWeightKgToDisplay(set.weightKg),
-        rpe: set.rpe ?? '',
         restSeconds: set.restSeconds ?? '',
+        extraRestSeconds: set.extraRestSeconds ?? null,
       });
     });
-    gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets }));
+    gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets, rpe: rpeByExercise.get(exerciseId) ?? '' }));
   } else {
     gymSessionModalExercises = [];
   }
@@ -8910,8 +9150,9 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         exerciseId: exRow.exerciseId,
         reps: set.reps,
         weightKg: gymWeightDisplayToKg(set.weightDisplay),
-        rpe: set.rpe,
+        rpe: exRow.rpe,
         restSeconds: set.restSeconds,
+        extraRestSeconds: set.extraRestSeconds ?? null,
       });
     });
   });

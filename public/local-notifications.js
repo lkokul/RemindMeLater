@@ -48,21 +48,24 @@ function localNotificationsAvailable() {
   return getLocalNotificationsPlugin() !== null;
 }
 
-// Como debe avisar una notificacion, segun el ajuste "Como avisan las
-// notificaciones" (Configuracion > Este dispositivo). Devuelve el valor
-// para el campo `sound`, o null si no hay que ponerlo:
-// - 'full'    -> "default": el sonido del sistema; la vibracion la
-//                decide el telefono (iOS no deja quitarla por app).
-// - 'vibrate' -> "silencio.wav": un archivo de medio segundo de silencio
-//                que va DENTRO de la app. iOS lo "reproduce" como sonido
-//                (no se oye nada) y justo por eso dispara la vibracion.
-//                Es el unico truco que iOS permite para vibrar sin sonar.
-// - 'silent'  -> null: sin campo sound, iOS entrega el aviso solo visual.
+// Como debe avisar una notificacion, segun los dos on-off de Sonido y
+// Vibracion (Configuracion > Este dispositivo). Devuelve el valor para
+// el campo `sound`, o null si no hay que ponerlo:
+// - Sonido ON            -> "default": el sonido del sistema. OJO: con
+//   sonido, vibrar o no lo decide el TELEFONO (Ajustes > Sonidos y
+//   vibraciones) -- iOS no deja quitar la vibracion por app, asi que el
+//   toggle de Vibracion no pinta nada en este caso.
+// - Sonido OFF + Vibr ON -> "silencio.wav": medio segundo de silencio
+//   empaquetado DENTRO de la app. iOS lo "reproduce" como sonido (no se
+//   oye nada) y justo por eso dispara la vibracion. Es el unico truco
+//   que iOS permite para vibrar sin sonar.
+// - Los dos OFF          -> null: sin campo sound, el aviso es solo visual.
 function notificationSoundValue() {
-  const estilo = localStorage.getItem('notifAlertStyle') || 'full';
-  if (estilo === 'vibrate') return 'silencio.wav';
-  if (estilo === 'silent') return null;
-  return 'default';
+  const sonido = localStorage.getItem('notifSound') !== 'false';
+  const vibrar = localStorage.getItem('notifVibrate') !== 'false';
+  if (sonido) return 'default';
+  if (vibrar) return 'silencio.wav';
+  return null;
 }
 
 // Pide permiso al sistema. Se llama desde el interruptor de
@@ -79,26 +82,39 @@ async function ensureLocalNotificationPermission() {
   return pedido.display === 'granted';
 }
 
-// Pide el permiso del sistema LA PRIMERA VEZ que se abre la app, sin
-// tener que ir a Configuracion a buscarlo -- que es lo que pidio Koku
-// ("que no me tenga que ir hasta ahi la primera vez, no seria
-// intuitivo"). Se marca en localStorage que ya se pregunto, asi que:
-// - Si dice que si, los avisos quedan activados.
-// - Si dice que no, no se vuelve a preguntar NUNCA desde aqui (iOS
-//   tampoco deja volver a preguntar: hay que ir a los Ajustes del
-//   telefono), y el interruptor de Configuracion sigue ahi para
-//   apagarlos/encenderlos como cualquier otro ajuste.
+// LA PRIMERA VEZ que se abre la app instalada, en vez de pedir el
+// permiso del sistema "a pelo", se ensena el dialogo #permissions-modal
+// explicando que puede activar y que no (peticion de Koku: "que al
+// instalar la app te muestre para activar o dejar desactivadas todas
+// estas cosas"). Solo una vez (notificationsPermissionAsked):
+// - "Permitir avisos" lanza el dialogo REAL de permiso de iOS (que
+//   tampoco se puede repetir: si se niega ahi, luego hay que ir a los
+//   Ajustes del telefono).
+// - "Ahora no" deja los avisos apagados; el interruptor de Configuracion
+//   sigue disponible para activarlos cuando se quiera.
 async function maybeAskNotificationPermissionOnStartup() {
   if (!localNotificationsAvailable()) return;
   if (localStorage.getItem('notificationsPermissionAsked') === '1') return;
+  document.getElementById('permissions-modal').classList.remove('hidden');
+}
+
+document.getElementById('btn-permissions-allow').addEventListener('click', async () => {
   localStorage.setItem('notificationsPermissionAsked', '1');
+  document.getElementById('permissions-modal').classList.add('hidden');
   const concedido = await ensureLocalNotificationPermission();
   // El ajuste propio de la app sigue el resultado: si no hay permiso del
   // sistema, no tiene sentido dejarlo "encendido" prometiendo avisos que
   // nunca van a sonar.
   localStorage.setItem('notificationsEnabled', concedido ? 'true' : 'false');
+  if (concedido) await syncScheduledReminders();
   if (typeof refreshMobileTab === 'function') refreshMobileTab();
-}
+});
+document.getElementById('btn-permissions-later').addEventListener('click', () => {
+  localStorage.setItem('notificationsPermissionAsked', '1');
+  localStorage.setItem('notificationsEnabled', 'false');
+  document.getElementById('permissions-modal').classList.add('hidden');
+  if (typeof refreshMobileTab === 'function') refreshMobileTab();
+});
 
 // Vuelve a programar TODOS los avisos futuros desde cero: primero
 // cancela lo que hubiera programado, luego programa lo que toca ahora.
