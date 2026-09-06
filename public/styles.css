@@ -583,6 +583,18 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .note-editor-body table[data-border="thick"] td, .note-editor-body table[data-border="thick"] th { border-width: 3px; }
 .note-editor-body table[data-border="4"] td, .note-editor-body table[data-border="4"] th { border-width: 4px; }
 
+/* Modo "mover a mano": la tabla se marca con el color de acento para que
+   se vea que ahora el arrastre mueve filas/columnas en vez de
+   seleccionar texto. */
+.note-editor-body table.is-manual-move {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+  touch-action: none;
+  user-select: none;
+}
+.note-editor-body table.is-manual-move td,
+.note-editor-body table.is-manual-move th { cursor: grab; }
+
 /* Icono en la esquina de la tabla: abre la barra de tabla. Va suelto en
    <body> con position:fixed y lo recoloca refreshTableCornerButton(). */
 .note-table-corner {
@@ -1659,6 +1671,8 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   align-items: center;
   gap: 0.4rem;
   margin: 1rem 1rem 0.5rem;
+  /* Clavada arriba: quien scrollea es la lista de abajo. */
+  flex-shrink: 0;
 }
 .mobile-notes-header-row .mobile-notes-search-row {
   flex: 1;
@@ -1666,7 +1680,19 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   margin: 0;
 }
 .mobile-notes-menu-wrap { position: relative; }
-#mobile-notes-list { padding: 0 1rem; }
+/* La lista ocupa TODO el alto que queda y scrollea ella sola. Sin esto
+   heredaba el `max-height: 260px` de .reminders-list (pensado para el
+   panel lateral del calendario, no para una pantalla completa): la
+   lista quedaba como una cajita de 260px en mitad de la pantalla, con
+   su propia barra de desplazamiento y el resto del alto vacio. */
+#mobile-notes-list {
+  padding: 0 1rem calc(9rem + env(safe-area-inset-bottom, 0px));
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
 /* Buscador global (Fase 5): mismo look que el buscador de Notas
    (.mobile-notes-search-row/-icon, reutilizadas tal cual) -- solo el
@@ -2681,7 +2707,6 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 .group-form-row-completed .hint { flex: 1; margin: 0; }
 .group-form-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
 
-.groups-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
 .group-item {
   display: flex; align-items: center; gap: 0.6rem;
   background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
@@ -3073,12 +3098,23 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 .groups-body {
   flex: 1;
   min-height: 0;
-  /* El scroll es de ESTA caja, no de la pagina: la pantalla es fija
-     (inset:0) y la cabecera con el buscador y los filtros se queda
-     arriba mientras la lista corre por debajo. */
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 0.6rem 1rem calc(9rem + env(safe-area-inset-bottom, 0px));
+  /* Esta caja NO scrollea a proposito: el scroll vive dentro de cada
+     listado (ver .groups-list / .groups-detail-list mas abajo). Asi el
+     buscador y los filtros se quedan clavados arriba y solo corre la
+     lista, en vez de irse todo hacia arriba a la vez. */
+  overflow: hidden;
+  padding: 0.6rem 1rem 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Los dos niveles (tarjetas de grupo / contenido de un grupo) ocupan
+   todo el alto disponible para que su lista pueda tener scroll propio.
+   El .hidden global (display:none !important) sigue mandando sobre esto
+   cuando el panel esta oculto. */
+#groups-list-panel,
+#groups-detail-panel {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -3096,7 +3132,18 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 .group-card-edit-mark { margin-left: auto; display: inline-flex; align-items: center; color: var(--accent); }
 .group-card-edit-mark svg { width: 16px; height: 16px; }
 .group-card:disabled { opacity: 0.4; }
-.groups-list { display: flex; flex-direction: column; gap: 0.4rem; }
+/* El hueco de abajo deja sitio para los botones flotantes y la barra
+   inferior, que van fijos por encima de la lista. */
+.groups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(9rem + env(safe-area-inset-bottom, 0px));
+}
 .group-card {
   display: flex;
   align-items: center;
@@ -3119,10 +3166,21 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   padding-bottom: 0.7rem;
   margin-bottom: 0.2rem;
   border-bottom: 1px solid var(--border);
+  /* Se queda clavada arriba: el scroll es de la lista de abajo. */
+  flex-shrink: 0;
 }
 .groups-filters input[type="search"] { flex: 1 1 100%; }
 .groups-filter-field { flex: 1 1 140px; min-width: 130px; }
-.groups-detail-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.groups-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(9rem + env(safe-area-inset-bottom, 0px));
+}
 .group-item-row {
   display: flex;
   align-items: center;

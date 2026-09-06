@@ -1248,51 +1248,11 @@ function refreshMobileTab() {
       : '';
   }
 
-  refreshCompletedTasksDisplayOptions();
   refreshGymWeightUnitOptions();
 }
 
-// Tachar vs ocultar tareas completadas: preferencia de ESTE dispositivo
-// (como el modo de vista o el tema), no compartida — cada movil/ordenador
-// puede verlo a su manera. La lee renderTasksList() en app.js.
-const COMPLETED_TASKS_DISPLAY_MODES = [
-  { id: 'strike', label: 'Tachadas (siguen en la lista)' },
-  { id: 'hide', label: 'Ocultas' },
-];
-
-function getCompletedTasksDisplayMode() {
-  return localStorage.getItem('completedTasksDisplay') || 'strike';
-}
-
-function refreshCompletedTasksDisplayOptions() {
-  const container = document.getElementById('completed-tasks-display-options');
-  if (!container) return;
-  container.innerHTML = '';
-  const current = getCompletedTasksDisplayMode();
-
-  COMPLETED_TASKS_DISPLAY_MODES.forEach((mode) => {
-    const isActive = mode.id === current;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
-    // Aqui NO se anade "(actual)" al texto — el resaltado de color ya deja
-    // claro cual esta activa, y repetirlo con texto era redundante.
-    btn.textContent = mode.label;
-    if (isActive) {
-      btn.disabled = true;
-    } else {
-      btn.addEventListener('click', () => {
-        localStorage.setItem('completedTasksDisplay', mode.id);
-        refreshCompletedTasksDisplayOptions();
-        if (typeof renderTasksList === 'function') renderTasksList();
-      });
-    }
-    container.appendChild(btn);
-  });
-}
-
-// Unidad de peso de Gimnasio: preferencia de ESTE dispositivo, mismo
-// patron que arriba. getGymWeightUnit() (definida en app.js, que se
+// Unidad de peso de Gimnasio: preferencia de ESTE dispositivo (como el
+// tema), no compartida. getGymWeightUnit() (definida en app.js, que se
 // carga antes que este archivo) es quien de verdad lee/usa el valor al
 // mostrar/guardar pesos -- aqui solo esta el interruptor visual.
 const GYM_WEIGHT_UNIT_MODES = [

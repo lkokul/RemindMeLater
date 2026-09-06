@@ -2406,8 +2406,8 @@ async function loadReminders() {
 // bloque fijo del panel de recordatorios (#tasks-list en index.html)
 // ademas de en el calendario si tiene fecha (ver buildCalendarTaskChip,
 // llamada desde renderCalendarGrid mas arriba).
-// mutedTaskColor/getCompletedTasksDisplayMode viven en settings.js (se
-// carga despues de este archivo) — solo se usan aqui dentro de funciones
+// mutedTaskColor vive en settings.js (se carga despues de este
+// archivo) — solo se usa aqui dentro de funciones
 // que se EJECUTAN despues de que la pagina ha cargado del todo (nunca al
 // evaluar app.js en si), asi que para cuando se llaman de verdad ya
 // existen. Mismo patron que el resto de referencias cruzadas entre los
@@ -2454,9 +2454,6 @@ async function loadTasks() {
 }
 
 function buildTaskRow(task) {
-  const displayMode = typeof getCompletedTasksDisplayMode === 'function' ? getCompletedTasksDisplayMode() : 'strike';
-  if (task.done && displayMode === 'hide') return null;
-
   const row = document.createElement('div');
   row.className = 'task-item' + (task.done ? ' done' : '');
 
@@ -2504,9 +2501,8 @@ function renderTasksList() {
     return;
   }
 
-  // Pendientes primero (por fecha, las sin fecha al final), hechas
-  // despues (si se muestran, ver getCompletedTasksDisplayMode en
-  // settings.js — ajuste de Configuracion > Este dispositivo).
+  // Pendientes primero (por fecha, las sin fecha al final) y las hechas
+  // despues, tachadas.
   const byDate = (a, b) => {
     if (!a.startAt && !b.startAt) return 0;
     if (!a.startAt) return 1;
@@ -2516,18 +2512,7 @@ function renderTasksList() {
   const pending = state.tasks.filter((t) => !t.done).sort(byDate);
   const done = state.tasks.filter((t) => t.done).sort(byDate);
 
-  let rendered = 0;
-  [...pending, ...done].forEach((task) => {
-    const row = buildTaskRow(task);
-    if (row) {
-      container.appendChild(row);
-      rendered++;
-    }
-  });
-
-  if (rendered === 0) {
-    container.innerHTML = '<p class="empty-hint">No tienes tareas.</p>';
-  }
+  [...pending, ...done].forEach((task) => container.appendChild(buildTaskRow(task)));
 }
 
 async function toggleTaskDone(task) {
@@ -4570,17 +4555,15 @@ function removeTableColumn() {
 // bajando de nivel.
 const TABLE_BORDER_LEVELS = ['1', '2', '3', '4'];
 
-function changeTableBorder(delta) {
+// 4 grosores fijos, elegibles directamente (el 1 es el fino de siempre,
+// y es el que traen las tablas nuevas). Antes habia que ir dando a
+// "mas grueso"/"mas fino" hasta dar con el que se buscaba.
+function setTableBorder(nivel) {
   const cell = getCurrentTableCell();
   if (!cell) return;
   const table = cell.closest('table');
-  const actual = table.getAttribute('data-border');
-  // "thick" es lo que guardaban las notas de antes de que esto tuviera
-  // niveles: cuenta como el nivel 3.
-  const idx = actual === 'thick' ? 2 : Math.max(0, TABLE_BORDER_LEVELS.indexOf(actual));
-  const siguiente = Math.min(TABLE_BORDER_LEVELS.length - 1, Math.max(0, idx + delta));
-  if (siguiente === 0) table.removeAttribute('data-border');
-  else table.setAttribute('data-border', TABLE_BORDER_LEVELS[siguiente]);
+  if (nivel === TABLE_BORDER_LEVELS[0]) table.removeAttribute('data-border');
+  else table.setAttribute('data-border', nivel);
   refreshNoteEditorState();
 }
 
@@ -4601,29 +4584,33 @@ function changeTableColumnWidth(delta) {
 }
 
 // Sube o baja la fila del cursor intercambiandola con su vecina.
-function moveTableRow(delta) {
-  const cell = getCurrentTableCell();
-  if (!cell) return;
+// `celdaDada` la usa el modo "mover a mano" (ver mas abajo): ahi el
+// editor esta bloqueado a proposito, asi que no hay cursor del que sacar
+// la celda ni tiene sentido devolverselo al terminar.
+function moveTableRow(delta, celdaDada) {
+  const cell = celdaDada || getCurrentTableCell();
+  if (!cell) return false;
   const row = cell.parentElement;
   const vecina = delta < 0 ? row.previousElementSibling : row.nextElementSibling;
-  if (!vecina) return;
+  if (!vecina) return false;
   if (delta < 0) vecina.before(row);
   else vecina.after(row);
-  putCaretInCell(cell);
+  if (!celdaDada) putCaretInCell(cell);
   refreshNoteEditorState();
+  return true;
 }
 
 // Mueve la columna del cursor a izquierda o derecha: intercambia esa
 // celda con su vecina EN CADA FILA, y tambien los <col> del colgroup
 // (si no, los anchos se quedarian con la columna equivocada).
-function moveTableColumn(delta) {
-  const cell = getCurrentTableCell();
-  if (!cell) return;
+function moveTableColumn(delta, celdaDada) {
+  const cell = celdaDada || getCurrentTableCell();
+  if (!cell) return false;
   const row = cell.parentElement;
   const colIndex = Array.from(row.children).indexOf(cell);
   const destino = colIndex + delta;
   const table = row.closest('table');
-  if (destino < 0 || destino >= row.children.length) return;
+  if (destino < 0 || destino >= row.children.length) return false;
   table.querySelectorAll('tr').forEach((tr) => {
     const a = tr.children[colIndex];
     const b = tr.children[destino];
@@ -4638,43 +4625,240 @@ function moveTableColumn(delta) {
     if (delta < 0) cb.before(ca);
     else cb.after(ca);
   }
-  putCaretInCell(cell);
+  if (!celdaDada) putCaretInCell(cell);
   refreshNoteEditorState();
+  return true;
 }
 
-// Combina la celda del cursor con la de su derecha (colspan). Es la
-// forma sencilla y predecible: nada de seleccionar un rectangulo de
-// celdas, que en un movil no hay forma comoda de hacer.
-function mergeTableCell() {
+// ---------------------------------------------------------------------
+// "Mover a mano": sustituye a los 4 botones de direccion que habia antes
+// (fila arriba/abajo, columna izquierda/derecha). Se activa desde el
+// menu Mover, y a partir de ahi ARRASTRAS con el dedo sobre la tabla:
+// arrastrar en vertical mueve la FILA que has cogido, en horizontal
+// mueve la COLUMNA. Se sale tocando fuera de la tabla.
+//
+// Mientras dura, el editor se pone en solo lectura: si no, el navegador
+// intenta seleccionar texto con el mismo arrastre y pelea con el gesto.
+// ---------------------------------------------------------------------
+let tableManualMove = null;
+
+function startTableManualMove() {
   const cell = getCurrentTableCell();
   if (!cell) return;
-  const siguiente = cell.nextElementSibling;
-  if (!siguiente) return;
-  const actual = parseInt(cell.getAttribute('colspan'), 10) || 1;
-  const suya = parseInt(siguiente.getAttribute('colspan'), 10) || 1;
-  // El contenido de la que se absorbe no se pierde: se pega detras.
-  const texto = siguiente.textContent.trim();
-  if (texto) cell.innerHTML = `${cell.innerHTML} ${siguiente.innerHTML}`;
-  siguiente.remove();
-  cell.setAttribute('colspan', String(actual + suya));
-  putCaretInCell(cell);
+  const table = cell.closest('table');
+  if (!table) return;
+  if (tableManualMove) stopTableManualMove();
+  tableManualMove = { table, arrastre: null };
+  table.classList.add('is-manual-move');
+  NOTE_EDITOR_BODY.setAttribute('contenteditable', 'false');
+  table.addEventListener('pointerdown', onTableManualMoveDown);
+  table.addEventListener('pointermove', onTableManualMoveMove);
+  table.addEventListener('pointerup', onTableManualMoveUp);
+  table.addEventListener('pointercancel', onTableManualMoveUp);
+}
+
+function stopTableManualMove() {
+  if (!tableManualMove) return;
+  const { table } = tableManualMove;
+  table.classList.remove('is-manual-move');
+  table.removeEventListener('pointerdown', onTableManualMoveDown);
+  table.removeEventListener('pointermove', onTableManualMoveMove);
+  table.removeEventListener('pointerup', onTableManualMoveUp);
+  table.removeEventListener('pointercancel', onTableManualMoveUp);
+  NOTE_EDITOR_BODY.setAttribute('contenteditable', 'true');
+  tableManualMove = null;
+}
+
+function onTableManualMoveDown(e) {
+  if (!tableManualMove) return;
+  const cell = e.target.closest && e.target.closest('td, th');
+  if (!cell) return;
+  e.preventDefault();
+  tableManualMove.arrastre = { cell, x: e.clientX, y: e.clientY };
+  // Sin capturar el puntero, sacar el dedo de la tabla a mitad de
+  // arrastre corta el gesto (mismo motivo que en attachSwipe).
+  if (e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId);
+}
+
+function onTableManualMoveMove(e) {
+  if (!tableManualMove || !tableManualMove.arrastre) return;
+  const arrastre = tableManualMove.arrastre;
+  const dx = e.clientX - arrastre.x;
+  const dy = e.clientY - arrastre.y;
+  const caja = arrastre.cell.getBoundingClientRect();
+  // Se mueve de una en una: cada vez que el dedo recorre una celda
+  // entera, se da un paso y se vuelve a tomar la referencia desde ahi.
+  if (Math.abs(dx) > Math.abs(dy)) {
+    if (Math.abs(dx) < caja.width) return;
+    if (moveTableColumn(dx > 0 ? 1 : -1, arrastre.cell)) { arrastre.x = e.clientX; arrastre.y = e.clientY; }
+  } else {
+    if (Math.abs(dy) < caja.height) return;
+    if (moveTableRow(dy > 0 ? 1 : -1, arrastre.cell)) { arrastre.x = e.clientX; arrastre.y = e.clientY; }
+  }
+}
+
+function onTableManualMoveUp() {
+  if (tableManualMove) tableManualMove.arrastre = null;
+}
+
+// ---------------------------------------------------------------------
+// Combinar celdas (agrupar) -- ahora a partir de la SELECCION de verdad:
+// arrastras por encima de varias celdas como si seleccionaras texto y le
+// das a "Agrupar". Antes solo sabia juntar la celda del cursor con la de
+// su derecha, que es lo que Koku vio como "no funciona".
+//
+// Para saber que celda ocupa cada hueco hace falta una rejilla: con
+// colspan/rowspan de por medio, la posicion de una celda dentro de su
+// <tr> ya no coincide con su columna real.
+// ---------------------------------------------------------------------
+function buildTableGrid(table) {
+  const filas = Array.from(table.rows);
+  const rejilla = filas.map(() => []);
+  filas.forEach((fila, r) => {
+    let c = 0;
+    Array.from(fila.cells).forEach((celda) => {
+      while (rejilla[r][c]) c += 1;
+      const cs = parseInt(celda.getAttribute('colspan'), 10) || 1;
+      const rs = parseInt(celda.getAttribute('rowspan'), 10) || 1;
+      for (let i = 0; i < rs; i += 1) {
+        for (let j = 0; j < cs; j += 1) {
+          if (rejilla[r + i]) rejilla[r + i][c + j] = celda;
+        }
+      }
+      c += cs;
+    });
+  });
+  return rejilla;
+}
+
+// Las dos ESQUINAS de la seleccion: donde empieza y donde acaba. A
+// proposito no se cogen "todas las celdas que toca el rango": una
+// seleccion de texto de A a D incluye tambien lo que hay en medio en
+// orden de lectura (toda la primera fila), asi que arrastrar en diagonal
+// agruparia de mas. Con las dos esquinas sale el rectangulo que uno
+// espera al arrastrar.
+function getSelectionCornerCells() {
+  const cell = getCurrentTableCell();
+  const table = cell ? cell.closest('table') : null;
+  if (!table) return [];
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return [cell, cell];
+  const range = sel.getRangeAt(0);
+  const deNodo = (nodo) => {
+    const el = nodo.nodeType === Node.TEXT_NODE ? nodo.parentElement : nodo;
+    const celda = el && el.closest ? el.closest('td, th') : null;
+    return celda && table.contains(celda) ? celda : null;
+  };
+  return [deNodo(range.startContainer) || cell, deNodo(range.endContainer) || cell];
+}
+
+function mergeTableCell() {
+  const esquinas = getSelectionCornerCells();
+  if (!esquinas.length || !esquinas[0]) return;
+  const table = esquinas[0].closest('table');
+  const rejilla = buildTableGrid(table);
+
+  // Rectangulo entre las dos esquinas. Si las dos son la misma celda, se
+  // estira una columna a la derecha -- asi un toque simple sigue
+  // agrupando algo, sin obligar a seleccionar en un movil.
+  let r0 = Infinity; let r1 = -1; let c0 = Infinity; let c1 = -1;
+  rejilla.forEach((fila, r) => fila.forEach((celda, c) => {
+    if (!esquinas.includes(celda)) return;
+    r0 = Math.min(r0, r); r1 = Math.max(r1, r);
+    c0 = Math.min(c0, c); c1 = Math.max(c1, c);
+  }));
+  if (r1 < 0) return;
+  if (r0 === r1 && c0 === c1) {
+    if (c1 + 1 >= (rejilla[r0] || []).length) return;
+    c1 += 1;
+  }
+  // Una celda que asome fuera del rectangulo lo agranda hasta que cierra
+  // (si no, quedarian huecos imposibles de dibujar).
+  let creciendo = true;
+  while (creciendo) {
+    creciendo = false;
+    for (let r = r0; r <= r1; r += 1) {
+      for (let c = c0; c <= c1; c += 1) {
+        const celda = rejilla[r] && rejilla[r][c];
+        if (!celda) continue;
+        rejilla.forEach((fila, rr) => fila.forEach((otra, cc) => {
+          if (otra !== celda) return;
+          if (rr < r0) { r0 = rr; creciendo = true; }
+          if (rr > r1) { r1 = rr; creciendo = true; }
+          if (cc < c0) { c0 = cc; creciendo = true; }
+          if (cc > c1) { c1 = cc; creciendo = true; }
+        }));
+      }
+    }
+  }
+
+  const principal = rejilla[r0][c0];
+  const absorbidas = [];
+  for (let r = r0; r <= r1; r += 1) {
+    for (let c = c0; c <= c1; c += 1) {
+      const celda = rejilla[r] && rejilla[r][c];
+      if (celda && celda !== principal && !absorbidas.includes(celda)) absorbidas.push(celda);
+    }
+  }
+  // El contenido de las que se absorben no se pierde: se pega detras.
+  absorbidas.forEach((celda) => {
+    if (celda.textContent.trim()) principal.innerHTML = `${principal.innerHTML} ${celda.innerHTML}`;
+    celda.remove();
+  });
+  const ancho = c1 - c0 + 1;
+  const alto = r1 - r0 + 1;
+  if (ancho > 1) principal.setAttribute('colspan', String(ancho));
+  else principal.removeAttribute('colspan');
+  if (alto > 1) principal.setAttribute('rowspan', String(alto));
+  else principal.removeAttribute('rowspan');
+  putCaretInCell(principal);
   refreshNoteEditorState();
 }
 
-// Deshace una combinacion: devuelve la celda a una sola columna y crea
-// las vacias que faltaban.
+function isMergedTableCell(cell) {
+  if (!cell) return false;
+  return (parseInt(cell.getAttribute('colspan'), 10) || 1) > 1
+    || (parseInt(cell.getAttribute('rowspan'), 10) || 1) > 1;
+}
+
+// Deshace una combinacion: devuelve la celda a un solo hueco y rellena
+// con celdas vacias los que habia ocupando.
 function splitTableCell() {
   const cell = getCurrentTableCell();
-  if (!cell) return;
-  const actual = parseInt(cell.getAttribute('colspan'), 10) || 1;
-  if (actual <= 1) return;
+  if (!isMergedTableCell(cell)) return;
+  const table = cell.closest('table');
+  const filas = Array.from(table.rows);
+  const rejilla = buildTableGrid(table);
+  const ancho = parseInt(cell.getAttribute('colspan'), 10) || 1;
+  const alto = parseInt(cell.getAttribute('rowspan'), 10) || 1;
+
+  let r0 = -1; let c0 = -1;
+  rejilla.forEach((fila, r) => fila.forEach((celda, c) => {
+    if (celda === cell && r0 < 0) { r0 = r; c0 = c; }
+  }));
+  if (r0 < 0) return;
+
   cell.removeAttribute('colspan');
-  let anterior = cell;
-  for (let i = 1; i < actual; i++) {
-    const nueva = document.createElement(cell.tagName);
-    nueva.innerHTML = '<br>';
-    anterior.after(nueva);
-    anterior = nueva;
+  cell.removeAttribute('rowspan');
+  for (let r = r0; r < r0 + alto; r += 1) {
+    const fila = filas[r];
+    if (!fila) continue;
+    for (let c = c0; c < c0 + ancho; c += 1) {
+      if (r === r0 && c === c0) continue;
+      const nueva = document.createElement(cell.tagName);
+      nueva.innerHTML = '<br>';
+      // Se inserta delante de la primera celda de ESA fila que empiece
+      // mas a la derecha; si no hay ninguna, al final.
+      let referencia = null;
+      for (let x = c + 1; x < rejilla[r].length; x += 1) {
+        const candidata = rejilla[r][x];
+        if (candidata && candidata !== cell && candidata.parentElement === fila) { referencia = candidata; break; }
+      }
+      if (referencia) fila.insertBefore(nueva, referencia);
+      else if (r === r0 && c === c0 + 1) cell.after(nueva);
+      else fila.appendChild(nueva);
+      rejilla[r][c] = nueva;
+    }
   }
   putCaretInCell(cell);
   refreshNoteEditorState();
@@ -4866,18 +5050,17 @@ const NOTE_TABLE_COMMANDS = {
   'col-remove': removeTableColumn,
   'col-remove-first': () => removeTableColumnAtEdge('first'),
   'col-remove-last': () => removeTableColumnAtEdge('last'),
-  'move-row-up': () => moveTableRow(-1),
-  'move-row-down': () => moveTableRow(1),
-  'move-col-left': () => moveTableColumn(-1),
-  'move-col-right': () => moveTableColumn(1),
+  'move-manual': startTableManualMove,
   'width-plus': () => changeTableColumnWidth(20),
   'width-minus': () => changeTableColumnWidth(-20),
   'width-exact': () => setTableSizeByHand('col'),
   'height-plus': () => changeTableRowHeight(10),
   'height-minus': () => changeTableRowHeight(-10),
   'height-exact': () => setTableSizeByHand('row'),
-  'border-plus': () => changeTableBorder(1),
-  'border-minus': () => changeTableBorder(-1),
+  'border-1': () => setTableBorder('1'),
+  'border-2': () => setTableBorder('2'),
+  'border-3': () => setTableBorder('3'),
+  'border-4': () => setTableBorder('4'),
   merge: mergeTableCell,
   split: splitTableCell,
 };
@@ -4913,10 +5096,7 @@ const NOTE_TABLE_MENUS = {
   move: {
     label: 'Mover',
     opciones: [
-      ['move-row-up', 'Fila arriba'],
-      ['move-row-down', 'Fila abajo'],
-      ['move-col-left', 'Columna a la izquierda'],
-      ['move-col-right', 'Columna a la derecha'],
+      ['move-manual', 'Mover a mano'],
     ],
   },
   size: {
@@ -4928,16 +5108,26 @@ const NOTE_TABLE_MENUS = {
       ['height-plus', 'Fila más alta'],
       ['height-minus', 'Fila más baja'],
       ['height-exact', 'Alto exacto…'],
-      ['border-plus', 'Borde más grueso'],
-      ['border-minus', 'Borde más fino'],
+    ],
+  },
+  border: {
+    label: 'Borde',
+    opciones: [
+      ['border-1', 'Fino'],
+      ['border-2', 'Medio'],
+      ['border-3', 'Grueso'],
+      ['border-4', 'Muy grueso'],
     ],
   },
   cells: {
     label: 'Celdas',
-    opciones: [
-      ['merge', 'Combinar con la de la derecha'],
-      ['split', 'Separar la combinada'],
-    ],
+    // Lista calculada al abrir: "Separar" solo aparece si la celda de
+    // verdad esta agrupada -- ofrecerlo siempre llevaba a confusion.
+    opciones: () => {
+      const lista = [['merge', 'Agrupar las seleccionadas']];
+      if (isMergedTableCell(getCurrentTableCell())) lista.push(['split', 'Separar esta']);
+      return lista;
+    },
   },
 };
 
@@ -4951,8 +5141,9 @@ function runTableCommand(nombre) {
   const resultado = fn();
   const despues = () => {
     // Quitar la ultima fila o columna borra la tabla entera: si ya no
-    // queda ninguna, no tiene sentido seguir en la barra de tabla.
-    if (!getCurrentTableCell()) setNoteTableToolbarOpen(false);
+    // queda ninguna, no tiene sentido seguir en la barra de tabla. En
+    // modo "mover a mano" no aplica: ahi no hay cursor a proposito.
+    if (!tableManualMove && !getCurrentTableCell()) setNoteTableToolbarOpen(false);
   };
   if (resultado && typeof resultado.then === 'function') resultado.then(despues);
   else despues();
@@ -4968,7 +5159,8 @@ document.querySelectorAll('#note-table-toolbar [data-table-menu]').forEach((btn)
     if (yaAbierto) { tableMenuPopover.classList.add('hidden'); return; }
     tableMenuPopover.dataset.menu = btn.dataset.tableMenu;
     tableMenuPopover.innerHTML = '';
-    menu.opciones.forEach(([cmd, texto]) => {
+    const opciones = typeof menu.opciones === 'function' ? menu.opciones() : menu.opciones;
+    opciones.forEach(([cmd, texto]) => {
       const opt = document.createElement('button');
       opt.type = 'button';
       opt.className = 'select-option';
@@ -5012,11 +5204,23 @@ document.body.appendChild(tableCornerBtn);
 
 // Alterna entre la barra de formato de texto y la de tabla.
 function setNoteTableToolbarOpen(open) {
+  // Cerrar la barra de tabla sale tambien del modo "mover a mano": si no,
+  // el editor se quedaria bloqueado sin nada que lo delate.
+  if (!open) stopTableManualMove();
   document.getElementById('note-body-toolbar').classList.toggle('hidden', open);
   document.getElementById('note-table-toolbar').classList.toggle('hidden', !open);
   if (!open) NOTE_EDITOR_BODY.focus();
   refreshTableCornerButton();
 }
+
+// Tocar fuera de la tabla sale del modo "mover a mano" -- mismo criterio
+// que la propia barra de tabla, que se cierra al sacar el cursor de ella.
+document.addEventListener('pointerdown', (e) => {
+  if (!tableManualMove) return;
+  if (e.target.closest && e.target.closest('table') === tableManualMove.table) return;
+  if (e.target.closest && e.target.closest('#note-table-toolbar, .table-menu-popover')) return;
+  stopTableManualMove();
+});
 
 function isNoteTableToolbarOpen() {
   return !document.getElementById('note-table-toolbar').classList.contains('hidden');
@@ -5061,6 +5265,9 @@ NOTE_EDITOR_BODY.addEventListener('scroll', refreshTableCornerButton);
 // cursor deja de estar dentro de una tabla (tocando el texto de fuera,
 // por ejemplo). Pedido de Koku, que ese boton no lo veia claro.
 function closeTableToolbarIfCaretLeft() {
+  // En modo "mover a mano" no hay cursor (el editor esta bloqueado a
+  // proposito): ahi se sale tocando fuera de la tabla, no por esto.
+  if (tableManualMove) return;
   if (isNoteTableToolbarOpen() && !getCurrentTableCell()) setNoteTableToolbarOpen(false);
 }
 
@@ -5138,6 +5345,9 @@ NOTE_EDITOR_BODY.addEventListener('mouseleave', () => {
 });
 
 NOTE_EDITOR_BODY.addEventListener('mousedown', (e) => {
+  // En modo "mover a mano" el arrastre es para reordenar filas/columnas,
+  // no para redimensionar: si no, los dos gestos se pisan.
+  if (tableManualMove) return;
   const target = findTableResizeTarget(e.clientX, e.clientY);
   if (!target) return;
   // Evita que el navegador coloque el cursor de texto o empiece una
@@ -6364,7 +6574,7 @@ function applyMobileNavCustomization() {
 applyMobileNavCustomization();
 
 // Selector en Configuracion > Este dispositivo (ajuste por dispositivo,
-// localStorage, mismo criterio que miEspacioMode/completedTasksDisplay).
+// localStorage, mismo criterio que la unidad de peso de Gimnasio).
 const mobileNavSlotField = createSelectField({
   options: Object.entries(MOBILE_NAV_SLOT_APPS).map(([value, app]) => ({ value, label: app.label })),
   initialValue: getMobileNavNotesSlot(),
@@ -6655,7 +6865,10 @@ function renderGroupsDetailList() {
 }
 
 const GROUP_ITEM_EVENT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M10.5 20a2 2 0 0 0 3 0"/></svg>';
-const GROUP_ITEM_TASK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M8 12.5 11 15.5 16.5 9"/></svg>';
+// El icono de tarea es una tablilla con lineas (tipo lista de tareas) a
+// proposito: el cuadrado con el check de antes se confundia con la propia
+// casilla de "hecha" que lleva cada fila justo al lado.
+const GROUP_ITEM_TASK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2.5" width="8" height="4" rx="1.2"/><path d="M8.5 4.5H6.5A1.5 1.5 0 0 0 5 6v13a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V6a1.5 1.5 0 0 0-1.5-1.5h-2"/><path d="M8.5 11.5h7"/><path d="M8.5 15.5h4.5"/></svg>';
 
 function buildGroupDetailRow(item) {
   const row = document.createElement('div');
