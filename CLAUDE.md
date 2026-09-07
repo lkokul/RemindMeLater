@@ -42,11 +42,16 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
 
 ## Reglas de trabajo que Koku ha pedido explícitamente
 
-- **No hacer commit ni push sin que él lo pida.** A veces pide solo UNA
-  de las dos cosas (commit sin push, por ejemplo): hay que hacer justo lo
-  que pide, no más. No asumas autorización de una ronda para la
-  siguiente. En rondas largas por fases, ha pedido **un commit al
-  terminar cada fase y un solo push al final de todas**.
+- **Commit y push: SÍ, sin pedir permiso cada vez** (regla nueva,
+  sustituye a la anterior de "no commitear sin que lo pida" — Koku dio
+  la autorización de forma permanente en la ronda de retoques de notas
+  de la rama `movil-ui`): al terminar y verificar una ronda de trabajo,
+  se commitea y se pushea directamente, agrupando por ronda como
+  siempre.
+- **GitHub Actions: NUNCA lanzarlo por cuenta propia** (misma ronda que
+  la regla anterior): el número de compilaciones/subidas que Koku puede
+  lanzar es limitado (no lo sabía y se enteró al agotarse). Solo se
+  lanza un workflow si él lo pide explícitamente en ESA ronda.
 - **`CLAUDE.md` se trata como un archivo más** (regla nueva, sustituye a
   la anterior de "nunca se commitea"): se actualiza cuando el proyecto
   cambia, y se commitea con el resto.

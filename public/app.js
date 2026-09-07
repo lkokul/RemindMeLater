@@ -6622,6 +6622,40 @@ function openNoteInEditor(note, { readMode = false } = {}) {
 // ---------------------------------------------------------------------
 let noteEditorViewportAnchored = false;
 
+// Trae el CURSOR a la zona visible del editor -- se llama cuando el
+// teclado del movil cambia el alto disponible (abrirse/cerrarse): el
+// editor se encoge para no quedar debajo del teclado, pero nada movia el
+// contenido, asi que la linea/casilla donde estabas escribiendo se
+// quedaba tapada detras ("no tiene en cuenta el teclado del movil").
+function scrollNoteCaretIntoView() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  let node = sel.anchorNode;
+  if (!node || !NOTE_EDITOR_BODY.contains(node)) return;
+  const range = sel.getRangeAt(0).cloneRange();
+  range.collapse(true);
+  let rect = range.getClientRects()[0] || range.getBoundingClientRect();
+  if (!rect || (rect.top === 0 && rect.bottom === 0 && rect.height === 0)) {
+    // Un rango colapsado en una linea/casilla vacia no tiene caja: se usa
+    // la del elemento donde esta el cursor.
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    if (!node || !node.getBoundingClientRect) return;
+    rect = node.getBoundingClientRect();
+  }
+  const visible = NOTE_EDITOR_BODY.getBoundingClientRect();
+  const margen = 28; // un poco de aire, que el cursor no quede pegado al borde
+  if (rect.bottom > visible.bottom - margen) {
+    NOTE_EDITOR_BODY.scrollTop += rect.bottom - (visible.bottom - margen);
+  } else if (rect.top < visible.top + margen) {
+    NOTE_EDITOR_BODY.scrollTop -= (visible.top + margen) - rect.top;
+  }
+}
+
+// Alto del hueco visible la ultima vez -- solo cuando CAMBIA (el teclado
+// se abre o se cierra) se recoloca el cursor; los demas avisos de
+// visualViewport (scroll) no deben pelearse con el scroll del usuario.
+let lastNoteViewportHeight = null;
+
 function applyNoteEditorViewportAnchor() {
   const view = document.getElementById('note-editor-view');
   const vv = window.visualViewport;
@@ -6631,8 +6665,13 @@ function applyNoteEditorViewportAnchor() {
   // scroll "general" que se podia arrastrar, y el editor se ajusta solo
   // al hueco que de verdad se ve.
   if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+  const cambioDeAlto = lastNoteViewportHeight !== null && Math.abs(lastNoteViewportHeight - vv.height) > 1;
+  lastNoteViewportHeight = vv.height;
   view.style.height = `${vv.height}px`;
   view.style.transform = `translateY(${vv.offsetTop}px)`;
+  // En el siguiente pintado el editor ya tiene su alto nuevo: es cuando
+  // se puede saber si el cursor quedo fuera y cuanto hay que moverse.
+  if (cambioDeAlto) requestAnimationFrame(scrollNoteCaretIntoView);
 }
 
 function startNoteEditorViewportAnchor() {
@@ -6651,6 +6690,7 @@ function startNoteEditorViewportAnchor() {
 
 function stopNoteEditorViewportAnchor() {
   document.body.classList.remove('note-editor-open');
+  lastNoteViewportHeight = null;
   const view = document.getElementById('note-editor-view');
   view.style.height = '';
   view.style.transform = '';
@@ -6690,6 +6730,11 @@ NOTE_EDITOR_BODY.addEventListener('input', () => {
   removeEmptyNoteHighlights();
   captureActiveOpenNoteFromDom();
   scheduleMobileNoteAutosave();
+  // Escribiendo cerca del borde de abajo (con el teclado ya abierto), el
+  // navegador no siempre acerca el cursor solo cuando el scroll es de un
+  // contenedor interno como este -- se comprueba en cada cambio. Si el
+  // cursor ya se ve, no hace nada.
+  scrollNoteCaretIntoView();
 });
 
 // Mientras el cursor esta dentro del texto de la nota, el teclado del
@@ -6758,6 +6803,13 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
   // la nota activa (es el unico <div contenteditable> que existe), asi
   // que NOTE_EDITOR_BODY en este momento es justo el contenido de "entry".
   const hasNoteContent = NOTE_EDITOR_BODY.textContent.trim() !== '' || NOTE_EDITOR_BODY.querySelector('img, table');
+  // Una nota NUEVA sin nada escrito no se guarda: abrir el editor y
+  // salirse sin escribir no debe dejar una "Nota sin título" vacia en el
+  // listado (el cierre en movil dispara este mismo submit via
+  // flushMobileNoteAutosave, que considera "con cambios" cualquier nota
+  // sin id). Una nota YA guardada que se vacia si se guarda vacia, eso
+  // es una edicion normal.
+  if (!entry.id && !hasNoteContent) return;
   const payload = {
     // Fase 4: ya no se manda titulo, la ruta lo deriva del body
     // (ver deriveTitleFromBody en routes-local/notes.js).
