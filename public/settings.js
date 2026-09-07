@@ -1323,7 +1323,7 @@ document.getElementById('btn-help-notif-sound').addEventListener('click', () => 
   showAppAlert('Con el sonido activado, los avisos usan el sonido del sistema. Un detalle de iOS: cuando un aviso suena, vibrar o no lo decide el teléfono (Ajustes > Sonidos y vibraciones), no la app — por eso no existe la combinación "sonido sin vibración".');
 });
 document.getElementById('btn-help-notif-vibrate').addEventListener('click', () => {
-  showAppAlert('Con el sonido apagado y la vibración encendida, la app usa un truco: "reproduce" medio segundo de silencio, que es lo único que iOS acepta para disparar la vibración sin que se oiga nada. Con los dos apagados, el aviso llega solo en pantalla, sin ruido ni vibración.');
+  showAppAlert('Con el sonido apagado y la vibración encendida, la app usa un truco: "reproduce" medio segundo de silencio, que es lo único que iOS acepta para disparar la vibración sin que se oiga nada. Con los dos apagados, el aviso llega solo en pantalla.\n\nImportante: que un aviso vibre o no lo decide al final el teléfono. Con el móvil en silencio (interruptor lateral), iOS solo vibra si tienes activado Ajustes > Sonidos y vibraciones > "Reproducir respuesta háptica en modo silencio" (y en modo timbre, su gemelo "en modo timbre"). Si eso está apagado, ninguna app puede hacer vibrar sus avisos.');
 });
 
 // Formato de tiempo del Gimnasio (descansos): minutos:segundos o

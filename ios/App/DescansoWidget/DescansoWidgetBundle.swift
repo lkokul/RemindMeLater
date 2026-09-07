@@ -1,4 +1,4 @@
-import WidgetKit
+﻿import WidgetKit
 import SwiftUI
 import ActivityKit
 
@@ -54,9 +54,10 @@ struct DescansoLiveActivity: Widget {
             let accent = Color(hexAccent: context.attributes.accentHex)
             let surfaceText = Color(hexAccent: context.attributes.surfaceTextHex)
             // Fraccion de la barra que corresponde al tiempo anadido con
-            // +30s: se pinta como banda naranja fija sobre la barra (la
-            // barra animada la mueve iOS y no admite dos colores de
-            // relleno, pero la banda marca el tramo extra, como en la app).
+            // +30s: se pinta como banda fija del color "extra" del tema
+            // sobre la barra (la barra animada la mueve iOS y no admite
+            // dos colores de relleno; la banda marca el tramo extra, con
+            // el mismo color que la barra bicolor de la app).
             let total = context.state.endAt.timeIntervalSince(context.state.startAt)
             let extraFraction = total > 0 ? min(1, Double(context.state.extraSeconds) / total) : 0
             VStack(alignment: .leading, spacing: 8) {
@@ -79,7 +80,7 @@ struct DescansoLiveActivity: Widget {
                     if context.state.extraSeconds > 0 {
                         Text("+\(context.state.extraSeconds)s")
                             .font(.callout.weight(.bold))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color(hexAccent: context.attributes.extraHex))
                     }
                     Spacer()
                     // El boton +30s: solo iOS 17+ (las Live Activities no
@@ -107,7 +108,7 @@ struct DescansoLiveActivity: Widget {
                     if extraFraction > 0 {
                         GeometryReader { geo in
                             Capsule()
-                                .fill(Color.orange.opacity(0.45))
+                                .fill(Color(hexAccent: context.attributes.extraHex).opacity(0.55))
                                 .frame(width: geo.size.width * extraFraction, height: 4)
                                 .frame(maxHeight: .infinity, alignment: .center)
                         }
@@ -149,7 +150,7 @@ struct DescansoLiveActivity: Widget {
                         if context.state.extraSeconds > 0 {
                             Text("+\(context.state.extraSeconds)s")
                                 .font(.caption.weight(.bold))
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Color(hexAccent: context.attributes.extraHex))
                         }
                         if #available(iOS 17.0, *) {
                             Button(intent: ExtenderDescansoIntent()) {
@@ -180,3 +181,4 @@ struct DescansoLiveActivity: Widget {
         }
     }
 }
+

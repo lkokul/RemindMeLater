@@ -59,7 +59,8 @@ public class LiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
                             dayName: dayName,
                             accentHex: call.getString("accentHex") ?? "#5b8cff",
                             surfaceHex: call.getString("surfaceHex") ?? "#1c1c27",
-                            surfaceTextHex: call.getString("surfaceTextHex") ?? "#f2f2f7"
+                            surfaceTextHex: call.getString("surfaceTextHex") ?? "#f2f2f7",
+                            extraHex: call.getString("extraHex") ?? "#a5b5e8"
                         ),
                         // staleDate = el final del descanso: si la app no
                         // llega a cerrarla (movil bloqueado), el sistema

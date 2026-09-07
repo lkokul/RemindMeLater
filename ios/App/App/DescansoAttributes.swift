@@ -34,5 +34,9 @@ struct DescansoAttributes: ActivityAttributes {
     var accentHex: String
     var surfaceHex: String
     var surfaceTextHex: String
+    // Color del tramo/tiempo EXTRA (+30s): el mismo que usa la barra
+    // bicolor dentro de la app (mezcla de acento y texto), calculado en
+    // el JS -- nada de naranja fijo (peticion de Koku).
+    var extraHex: String
 }
 #endif

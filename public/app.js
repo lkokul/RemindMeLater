@@ -8065,6 +8065,18 @@ function gymLiveTick() {
   clock.textContent = gymLiveFormatClock(gymLiveElapsedSeconds());
   clock.classList.toggle('paused', !!gymLiveSession.pausedAt);
 
+  // Mientras corre un descanso, sondear cada 2s los +30s pendientes del
+  // boton de la pantalla de bloqueo. Hace falta ADEMAS de los eventos de
+  // volver a primer plano: al bajar la barra de notificaciones la app no
+  // llega a irse a segundo plano, asi que no hay ningun "resume" que
+  // dispare la recogida -- y los segundos se quedaban sin aplicar hasta
+  // que el tiempo normal acababa (bug que vio Koku). La llamada es
+  // baratisima (leer un contador) y solo corre durante el descanso.
+  if (gymLiveSession.restUntil && Date.now() - gymLastExtensionPoll > 2000) {
+    gymLastExtensionPoll = Date.now();
+    gymConsumeRestExtensionFromLockScreen();
+  }
+
   // Mini-barra global: solo cuando el entreno esta OCULTO y hay descanso.
   const liveHidden = document.getElementById('gym-live-view').classList.contains('hidden');
   const globalBar = document.getElementById('gym-global-rest');
@@ -8137,6 +8149,8 @@ function gymLiveTick() {
 }
 // Evita encolar mil recogidas mientras la primera esta en camino.
 let gymRestExpiryPending = false;
+// Ultimo sondeo de +30s pendientes (ver gymLiveTick).
+let gymLastExtensionPoll = 0;
 
 document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () => {
   if (gymLiveSession && gymLiveSession.restUntil) {
@@ -8277,18 +8291,34 @@ function gymThemeColorHex(varName, fallback) {
 function gymCurrentAccentHex() {
   return gymThemeColorHex('--accent', '#5b8cff');
 }
+// Mezcla dos colores hex (el equivalente JS del color-mix del CSS): es
+// EXACTAMENTE la formula del tramo extra de la barra de la app
+// (color-mix(in srgb, var(--accent) 45%, var(--surface-text))), para que
+// la tarjeta de la pantalla de bloqueo use el mismo color (peticion de
+// Koku: nada de naranja).
+function gymMixHex(hexA, hexB, weightA) {
+  const parse = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [a, b] = [parse(hexA), parse(hexB)];
+  return '#' + a.map((va, i) =>
+    Math.round(va * weightA + b[i] * (1 - weightA)).toString(16).padStart(2, '0')
+  ).join('');
+}
 
 // Fechas que necesita la tarjeta, derivadas del estado del descanso.
 function gymRestActivityParams() {
   const totalSeconds = (gymLiveSession.restBaseSeconds || 0) + (gymLiveSession.restExtraSeconds || 0);
+  const accent = gymCurrentAccentHex();
+  const surfaceText = gymThemeColorHex('--surface-text', '#f2f2f7');
   return {
     startAt: totalSeconds > 0 ? gymLiveSession.restUntil - totalSeconds * 1000 : Date.now(),
     endAt: gymLiveSession.restUntil,
     dayName: gymLiveSession.routineName || 'Sesión libre',
     extraSeconds: gymLiveSession.restExtraSeconds || 0,
-    accentHex: gymCurrentAccentHex(),
+    accentHex: accent,
     surfaceHex: gymThemeColorHex('--surface', '#1c1c27'),
-    surfaceTextHex: gymThemeColorHex('--surface-text', '#f2f2f7'),
+    surfaceTextHex: surfaceText,
+    // El color del tramo extra, calcado del de la barra de la app.
+    extraHex: gymMixHex(accent, surfaceText, 0.45),
   };
 }
 
