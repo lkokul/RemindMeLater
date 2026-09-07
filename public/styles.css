@@ -2471,6 +2471,30 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 }
 .gym-live-hidden-row .secondary-btn { font-size: 0.78rem; padding: 0.3rem 0.5rem; flex-shrink: 0; }
 
+/* Nota FIJA del ejercicio ("polea altura 3") en la tarjeta del entreno:
+   pequena y con el acento, para localizarla de un vistazo. */
+.gym-live-fixed-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--gym-accent);
+}
+
+/* Chips de musculos secundarios en el modal de ejercicio. */
+.gym-secondary-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.gym-secondary-chip {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--surface-text);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.6rem;
+}
+.gym-secondary-chip.active {
+  border-color: var(--gym-accent);
+  background: color-mix(in srgb, var(--gym-accent) 18%, var(--surface));
+  color: var(--gym-accent);
+}
+
 /* Fila de ejercicio oculto en el editor del dia: atenuada, con el ojo
    tachado como unico indicador extra. */
 .gym-routine-exercise-row.gym-exercise-hidden { opacity: 0.55; }

@@ -8547,11 +8547,39 @@ const gymExerciseMuscleField = createSelectField({
 });
 document.getElementById('gym-exercise-muscle-field').appendChild(gymExerciseMuscleField.element);
 
+// Musculos SECUNDARIOS del ejercicio (chips activables): cuentan en el
+// mapa de musculos a mitad de peso, igual que los de la libreria.
+let gymExerciseSecondarySel = new Set();
+function renderGymExerciseSecondaryChips() {
+  const container = document.getElementById('gym-exercise-secondary-field');
+  container.innerHTML = '';
+  GYM_MUSCLE_GROUPS.forEach((g) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'gym-secondary-chip' + (gymExerciseSecondarySel.has(g.id) ? ' active' : '');
+    chip.textContent = g.label;
+    chip.addEventListener('click', () => {
+      if (gymExerciseSecondarySel.has(g.id)) gymExerciseSecondarySel.delete(g.id);
+      else gymExerciseSecondarySel.add(g.id);
+      renderGymExerciseSecondaryChips();
+    });
+    container.appendChild(chip);
+  });
+}
+
+// Si el modal se abrio desde el buscador estando en "modo elegir" (el +
+// del entreno en vivo), el ejercicio recien creado se añade directo a la
+// sesion en curso al guardar.
+let gymExerciseAddToLivePending = false;
+
 function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
   document.getElementById('gym-exercise-id').value = exercise ? exercise.id : '';
   document.getElementById('gym-exercise-name').value = exercise ? exercise.name : '';
   document.getElementById('gym-exercise-equipment').value = exercise ? exercise.equipment || '' : '';
+  document.getElementById('gym-exercise-notes').value = exercise ? exercise.notes || '' : '';
+  gymExerciseSecondarySel = new Set(exercise && Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : []);
+  renderGymExerciseSecondaryChips();
   const options = [
     { value: '', label: 'Sin grupo' },
     ...GYM_MUSCLE_GROUPS.map((g) => ({ value: g.id, label: g.label })),
@@ -8566,6 +8594,7 @@ function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal').classList.remove('hidden');
 }
 function closeGymExerciseModal() {
+  gymExerciseAddToLivePending = false;
   document.getElementById('gym-exercise-modal').classList.add('hidden');
 }
 document.getElementById('btn-new-gym-exercise').addEventListener('click', () => openGymExerciseModal(null));
@@ -8579,15 +8608,33 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
     name: document.getElementById('gym-exercise-name').value,
     muscleGroup: gymExerciseMuscleField.getValue(),
     equipment: document.getElementById('gym-exercise-equipment').value,
+    secondaryMuscles: [...gymExerciseSecondarySel],
+    notes: document.getElementById('gym-exercise-notes').value,
   };
+  // El flag se captura ANTES de cerrar: closeGymExerciseModal lo resetea.
+  const addToLive = !id && gymExerciseAddToLivePending;
+  let saved;
   if (id) {
-    await api(`/api/gym-exercises/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    saved = await api(`/api/gym-exercises/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   } else {
-    await api('/api/gym-exercises', { method: 'POST', body: JSON.stringify(payload) });
+    saved = await api('/api/gym-exercises', { method: 'POST', body: JSON.stringify(payload) });
   }
   closeGymExerciseModal();
   await loadGymExercises();
   renderGymExercisesList();
+  // Creado desde el buscador en modo elegir: directo al entreno en curso.
+  if (addToLive && gymLiveSession && saved && !gymLiveSession.exercises.some((x) => x.exerciseId === saved.id)) {
+    gymLiveSession.exercises.push({
+      exerciseId: saved.id,
+      note: '',
+      rpe: '',
+      collapsed: false,
+      sets: [{ reps: '', weightDisplay: '', done: false, restSeconds: '' }],
+    });
+    gymLiveStore();
+    gymLivePrevSets.set(saved.id, await api(`/api/gym-sessions/last-sets/${saved.id}`));
+    renderGymLiveExercises();
+  }
 });
 
 document.getElementById('btn-delete-gym-exercise').addEventListener('click', async () => {
@@ -8750,6 +8797,16 @@ function closeGymLibraryModal() {
 document.getElementById('btn-open-gym-library').addEventListener('click', openGymLibraryModal);
 document.getElementById('btn-close-gym-library').addEventListener('click', closeGymLibraryModal);
 document.getElementById('gym-library-search').addEventListener('input', () => renderGymLibraryList());
+
+// "+ Crear ejercicio propio" desde el buscador (peticion de Koku: la
+// libreria es una propuesta, no un limite). Si el buscador estaba en
+// modo elegir (el + del entreno en vivo), se recuerda con el flag para
+// que el ejercicio recien creado entre directo a la sesion al guardar.
+document.getElementById('btn-gym-library-new-custom').addEventListener('click', () => {
+  gymExerciseAddToLivePending = !!gymLibraryPickCallback;
+  closeGymLibraryModal();
+  openGymExerciseModal(null);
+});
 
 // --- Ficha de un ejercicio de la libreria ------------------------------
 let gymLibraryDetailEntry = null;
@@ -9533,6 +9590,7 @@ function renderGymLiveExercises() {
         <button type="button" class="icon-btn gym-live-card-btn" data-live-remove-exercise aria-label="Quitar ejercicio">✕</button>
       </div>
       <div class="gym-live-card-body">
+        ${exercise && exercise.notes ? `<p class="gym-live-fixed-note">${escapeHtml(exercise.notes)}</p>` : ''}
         <div class="gym-live-set-row gym-live-set-head">
           <span class="gym-live-set-number">#</span>
           <span class="gym-live-set-prev">Anterior</span>

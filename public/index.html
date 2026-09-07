@@ -601,9 +601,23 @@
           <span class="field-label">Grupo muscular (opcional)</span>
           <div id="gym-exercise-muscle-field"></div>
         </div>
+        <!-- Secundarios: chips activables. Cuentan en el mapa de musculos
+             a mitad de peso, igual que los de la libreria. -->
+        <div class="field-label-block">
+          <span class="field-label">Músculos secundarios (opcional)</span>
+          <div id="gym-exercise-secondary-field" class="gym-secondary-chips"></div>
+        </div>
         <label>
           Material (opcional)
           <input type="text" id="gym-exercise-equipment" placeholder="Ej. Barra, Mancuernas" />
+        </label>
+        <!-- Nota FIJA: acompana siempre al ejercicio (alturas de polea,
+             posicion del banco...), a diferencia de la nota de sesion,
+             que es de un dia concreto. Se ensena en la tarjeta del
+             entreno en vivo. -->
+        <label>
+          Nota fija (opcional)
+          <input type="text" id="gym-exercise-notes" placeholder="Ej. polea altura 3" />
         </label>
         <div class="modal-actions">
           <button type="button" id="btn-delete-gym-exercise" class="danger-btn hidden">Eliminar</button>
@@ -854,6 +868,11 @@
         <div id="gym-library-muscle-field"></div>
         <div id="gym-library-equipment-field"></div>
       </div>
+      <!-- La libreria es solo una propuesta: si el ejercicio no esta, se
+           crea uno propio desde aqui mismo (peticion de Koku). Si el
+           buscador estaba en "modo elegir" (añadir al entreno en vivo),
+           el ejercicio recien creado se añade directo a la sesion. -->
+      <button type="button" id="btn-gym-library-new-custom" class="secondary-btn gym-tab-action">+ Crear ejercicio propio</button>
       <div id="gym-library-list" class="gym-list gym-library-list"></div>
     </div>
   </div>

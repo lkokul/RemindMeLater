@@ -170,6 +170,10 @@ function applyLocalSchema(db) {
       -- taxonomia, ej. '["hombros","triceps"]') -- los rellena el import
       -- de la libreria y los usa el mapa de musculos (ponderados a 0.5).
       secondary_muscles TEXT,
+      -- Nota FIJA del ejercicio ("polea altura 3", "banco posicion 2"):
+      -- acompana siempre al ejercicio, a diferencia de la nota de sesion
+      -- (exercise_notes en gym_sessions, que es de UNA sesion concreta).
+      notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1257,6 +1261,9 @@ function applyLocalSchema(db) {
   // Fase 6 (mapa de musculos): grupos secundarios del ejercicio.
   if (!gymExerciseColumns.includes('secondary_muscles')) {
     db.exec('ALTER TABLE gym_exercises ADD COLUMN secondary_muscles TEXT');
+  }
+  if (!gymExerciseColumns.includes('notes')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN notes TEXT');
   }
   // Fase 3: modo entrenar en vivo -- RPE y tipo de serie en gym_sets,
   // hora de inicio/duracion/notas por ejercicio en gym_sessions.
