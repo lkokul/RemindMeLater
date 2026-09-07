@@ -3063,7 +3063,9 @@ function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
     img.alt = '';
     media.appendChild(img);
   } else {
-    media.style.background = note.folderColor || 'var(--surface-2)';
+    // Fondo neutro SIEMPRE (el de la tarjeta): pintarlo del color de la
+    // carpeta hacia que la galeria cambiara de color entera segun donde
+    // estuvieras, y el avance de texto encima se leia fatal.
     const preview = document.createElement('span');
     preview.className = 'mobile-note-gallery-preview-text';
     preview.textContent = extractNoteTextPreview(note);
@@ -3170,11 +3172,16 @@ function startNoteItemMove(itemKey) {
   setMobileNotesMode('move');
 }
 
-function startNoteItemDelete(itemKey) {
-  mobileNotesSelectedKeys.clear();
-  mobileNotesSelectedKeys.add(itemKey);
-  setMobileNotesMode('select');
-  openMobileNotesDeleteModal();
+// Borrar UNO desde sus acciones va directo, con su aviso y ya esta: antes
+// metia la vista entera en modo Seleccionar (checkboxes y barra incluidos)
+// para borrar un solo elemento, que es justo lo que Koku no queria.
+async function startNoteItemDelete(itemKey) {
+  const { item } = resolveMobileNotesItem(itemKey) || {};
+  const nombre = item ? getNoteListItemName(item) : 'esto';
+  const ok = await showAppConfirm(`¿Eliminar "${nombre}"?`, { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  await runNoteItemsDeletion([itemKey]);
+  renderNotesView();
 }
 
 // Editar SOLO tiene sentido en una carpeta (nombre y color) -- una nota
@@ -3641,28 +3648,34 @@ function closeMobileNotesDeleteModal() {
 document.getElementById('btn-close-mobile-notes-delete').addEventListener('click', closeMobileNotesDeleteModal);
 document.getElementById('btn-mobile-notes-delete-cancel').addEventListener('click', closeMobileNotesDeleteModal);
 
-document.getElementById('btn-mobile-notes-delete-confirm').addEventListener('click', async () => {
-  const finalKeys = [...mobileNotesSelectedKeys].filter((k) => !mobileNotesDeleteExcluded.has(k));
-  if (finalKeys.length === 0) { closeMobileNotesDeleteModal(); return; }
-
+// Borrado de verdad, compartido por el modal de varios y por la accion
+// de una sola fila. Devuelve false si el aviso de "esto tiene contenido
+// dentro" se cancela.
+async function runNoteItemsDeletion(keys) {
   if (
-    mobileNotesDeletionIncludesFolderWithContent(finalKeys)
+    mobileNotesDeletionIncludesFolderWithContent(keys)
     && localStorage.getItem('notesMobileHideFolderDeleteWarning') !== '1'
   ) {
     const proceed = await showAppConfirm(
-      'Las notas y subcarpetas que contenga cualquier carpeta seleccionada subirán de nivel, no se borrarán.',
+      'Las notas y subcarpetas que contenga cualquier carpeta que borres subirán de nivel, no se borrarán.',
       { checkbox: { label: 'No volver a mostrar este aviso', storageKey: 'notesMobileHideFolderDeleteWarning' } }
     );
-    if (!proceed) return;
+    if (!proceed) return false;
   }
-
-  closeMobileNotesDeleteModal();
-  for (const key of finalKeys) {
+  for (const key of keys) {
     const { kind, id } = resolveMobileNotesItem(key);
     if (kind === 'note') await api(`/api/notes/${id}`, { method: 'DELETE' });
     else await api(`/api/note-folders/${id}`, { method: 'DELETE' });
   }
   await Promise.all([loadNotes(), loadNoteFolders()]);
+  return true;
+}
+
+document.getElementById('btn-mobile-notes-delete-confirm').addEventListener('click', async () => {
+  const finalKeys = [...mobileNotesSelectedKeys].filter((k) => !mobileNotesDeleteExcluded.has(k));
+  if (finalKeys.length === 0) { closeMobileNotesDeleteModal(); return; }
+  if (!(await runNoteItemsDeletion(finalKeys))) return;
+  closeMobileNotesDeleteModal();
   setMobileNotesMode('browse');
 });
 
@@ -4718,6 +4731,22 @@ document.getElementById('note-indent-btn').addEventListener('mousedown', (e) => 
 document.getElementById('note-indent-btn').addEventListener('click', () => applyNoteIndentDelta(1));
 document.getElementById('note-outdent-btn').addEventListener('mousedown', (e) => e.preventDefault());
 document.getElementById('note-outdent-btn').addEventListener('click', () => applyNoteIndentDelta(-1));
+
+// Deshacer/rehacer del TEXTO. Es el deshacer propio del navegador sobre
+// el editor (lo mismo que Ctrl+Z), asi que cubre lo que se escribe y los
+// formatos que pasan por execCommand (negrita, cursiva, listas...). Los
+// cambios que la app hace a mano sobre el HTML -- resaltado, cita,
+// sangria y la estructura de una tabla -- no entran ahi: la estructura de
+// tabla tiene su propio par de botones en la barra de tabla.
+[['note-text-undo-btn', 'undo'], ['note-text-redo-btn', 'redo']].forEach(([id, cmd]) => {
+  const btn = document.getElementById(id);
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+  btn.addEventListener('click', () => {
+    NOTE_EDITOR_BODY.focus();
+    document.execCommand(cmd);
+    refreshNoteEditorState();
+  });
+});
 
 function clampTableSize(value) {
   const n = Math.round(Number(value));

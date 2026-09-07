@@ -88,6 +88,22 @@ body {
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--bg-text);
+  /* Nada de la interfaz se selecciona: es una app, no una pagina web que
+     se copia. Sin esto, mantener pulsado en cualquier sitio (el mes del
+     calendario, el nombre de una herramienta...) sacaba la lupa de
+     seleccionar texto de iOS, que ademas se pisa con los gestos propios
+     (deslizar una fila, mantener pulsado para las acciones). Se devuelve
+     abajo donde SI se escribe de verdad. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
 }
 
 .hidden { display: none !important; }
@@ -97,7 +113,7 @@ body {
    algun dia tiene mas secciones de las que caben) aparece esta barra
    fina en vez de la del sistema, con el color de acento del tema activo
    — asi que cambia sola si cambias de tema. */
-.modal-card, .settings-card-body, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover, .date-popover, .mobile-calendar-month-list, .mobile-calendar-year-grid {
+.modal-card, .settings-card-body, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover, .date-popover, .mobile-calendar-month-list, .mobile-calendar-year-grid, .note-editor-body table {
   scrollbar-width: thin;
   scrollbar-color: var(--accent) transparent;
 }
@@ -110,8 +126,10 @@ body {
 .select-popover::-webkit-scrollbar,
 .date-popover::-webkit-scrollbar,
 .mobile-calendar-month-list::-webkit-scrollbar,
-.mobile-calendar-year-grid::-webkit-scrollbar {
+.mobile-calendar-year-grid::-webkit-scrollbar,
+.note-editor-body table::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 .modal-card::-webkit-scrollbar-track,
 .settings-card-body::-webkit-scrollbar-track,
@@ -122,7 +140,8 @@ body {
 .select-popover::-webkit-scrollbar-track,
 .date-popover::-webkit-scrollbar-track,
 .mobile-calendar-month-list::-webkit-scrollbar-track,
-.mobile-calendar-year-grid::-webkit-scrollbar-track {
+.mobile-calendar-year-grid::-webkit-scrollbar-track,
+.note-editor-body table::-webkit-scrollbar-track {
   background: transparent;
 }
 .modal-card::-webkit-scrollbar-thumb,
@@ -134,7 +153,8 @@ body {
 .select-popover::-webkit-scrollbar-thumb,
 .date-popover::-webkit-scrollbar-thumb,
 .mobile-calendar-month-list::-webkit-scrollbar-thumb,
-.mobile-calendar-year-grid::-webkit-scrollbar-thumb {
+.mobile-calendar-year-grid::-webkit-scrollbar-thumb,
+.note-editor-body table::-webkit-scrollbar-thumb {
   background: var(--accent);
   border-radius: 4px;
 }
@@ -565,7 +585,24 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    que tenga dentro. Antes era "fixed" con un <colgroup> de anchos en px
    y un menu "Tamaño" para tocarlos -- Koku lo quito a proposito ("que
    siempre se ajuste al texto de dentro y ya está"). */
-.note-editor-body table { border-collapse: collapse; table-layout: auto; width: auto; max-width: 100%; margin: 0.5rem 0; }
+/* Una tabla mas ancha que la pantalla se desplaza DENTRO de si misma
+   (display:block + overflow-x:auto le da su propia barra), en vez de
+   hacer que se mueva de lado la nota entera. Ademas eso quitaba de en
+   medio un efecto secundario feo: con la pagina desplazada a lo ancho,
+   el reajuste del editor al abrir el teclado la devolvia a cero y la
+   vista "se iba al principio de la tabla". width:fit-content mantiene el
+   ancho pegado al contenido cuando SI cabe. */
+.note-editor-body table {
+  border-collapse: collapse;
+  table-layout: auto;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+/* Y la nota en si nunca se desplaza a lo ancho. */
+.note-editor-body { overflow-x: hidden; }
 .note-editor-body td, .note-editor-body th {
   border: 1px solid var(--border);
   padding: 0.4rem;
@@ -1809,8 +1846,11 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 /* Carpeta en galeria: la que se pinta con su color es la CARPETA, no el
    fondo de la tarjeta (que se queda igual que en las notas). */
 .mobile-note-gallery-folder-icon { width: 58%; height: 58%; }
-.mobile-note-gallery-card.is-folder .mobile-note-gallery-media { background: var(--surface-2); }
 .mobile-note-gallery-media {
+  /* Mismo fondo en TODAS las tarjetas (antes las notas sin miniatura se
+     teñian del color de su carpeta, y la galeria entera cambiaba de
+     color segun donde estuvieras). */
+  background: var(--surface-2);
   aspect-ratio: 1 / 1;
   display: flex;
   align-items: center;

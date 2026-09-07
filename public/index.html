@@ -1632,6 +1632,16 @@
              con las 5 opciones, ver applyNoteParagraphStyle en app.js.
              Se aplica al PARRAFO ENTERO donde este el cursor, no a una
              seleccion de texto. -->
+        <!-- Deshacer/rehacer del TEXTO (los de la barra de tabla son de
+             su estructura: filas, columnas, celdas). Van los primeros
+             para tenerlos a mano sin desplazar la barra. -->
+        <button type="button" id="note-text-undo-btn" class="note-editor-btn note-editor-btn-icon" aria-label="Deshacer" title="Deshacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+        </button>
+        <button type="button" id="note-text-redo-btn" class="note-editor-btn note-editor-btn-icon" aria-label="Rehacer" title="Rehacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+        </button>
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
         <button type="button" id="note-paragraph-style-btn" class="note-editor-btn" aria-label="Estilo de párrafo" title="Estilo de párrafo">Aa</button>
         <button type="button" data-cmd="bold" class="note-editor-btn" aria-label="Negrita" title="Negrita"><b>N</b></button>
         <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
