@@ -394,22 +394,8 @@ function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', 
 function showAppAlert(message, { okText = 'Aceptar', checkbox = null } = {}) {
   return showAppConfirm(message, { okText, alertOnly: true, checkbox });
 }
-// Pide un numero con el mismo aviso propio de la app (nada de prompt()
-// del navegador, que no sigue el tema). Devuelve el texto escrito, o
-// null si se cancela.
-function showAppPrompt(message, initialValue = '') {
-  const input = document.getElementById('app-confirm-input');
-  input.value = initialValue;
-  input.classList.remove('hidden');
-  return showAppConfirm(message).then((ok) => {
-    const valor = input.value;
-    input.classList.add('hidden');
-    return ok ? valor : null;
-  });
-}
 function closeAppConfirm(result) {
   document.getElementById('app-confirm-modal').classList.add('hidden');
-  if (!result) document.getElementById('app-confirm-input').classList.add('hidden');
   if (result && appConfirmCheckboxStorageKey && document.getElementById('app-confirm-checkbox').checked) {
     localStorage.setItem(appConfirmCheckboxStorageKey, '1');
   }
@@ -2646,10 +2632,10 @@ function buildNoteFolderPathLabel(folderId) {
 }
 
 // "mode" (Fase 4, solo tiene efecto viniendo de la vista movil -- ver
-// renderNotesViewInto): 'browse' (normal, como siempre funcionaba
-// desktop), 'select' (checkbox delante, la fila entera marca/desmarca
-// en vez de abrir/navegar) o 'editFolders' (solo afecta a
-// buildFolderRow: tap en la fila edita la carpeta en vez de entrar).
+// renderNotesViewInto): 'browse' (normal) o 'select' (checkbox delante,
+// la fila entera marca/desmarca en vez de abrir/navegar). Editar una
+// carpeta ya no es un modo aparte: vive en las acciones de deslizar/
+// mantener pulsado, junto a Mover y Eliminar.
 function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
   const row = document.createElement('div');
   row.className = 'note-item' + (note.hidden ? ' is-hidden' : '');
@@ -2723,9 +2709,6 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
   attachNoteItemGestures(row, itemKey);
   row.addEventListener('click', () => {
     if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
-    // Editando carpetas, las notas no se abren: ahi solo se tocan
-    // carpetas (pedido de Koku, "que no me deje meterme en una nota").
-    if (mode === 'editFolders') return;
     // Una nota oculta no se abre con un simple clic en la fila — solo el
     // icono de ojo la destapa (sin ningun texto/boton de aviso encima del
     // blur, para no recargar la fila).
@@ -2781,17 +2764,6 @@ function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
   }
   row.appendChild(contentWrap);
 
-  // Lapiz SOLO en modo "Editar carpetas" (en la navegacion normal seria
-  // un boton duplicado: el menu de 3 puntos ya lleva a lo mismo). Va
-  // ANTES de la estrella, a su izquierda, tal y como lo pidio Koku.
-  if (mode === 'editFolders') {
-    const pencil = document.createElement('span');
-    pencil.className = 'note-folder-edit-mark';
-    pencil.setAttribute('aria-hidden', 'true');
-    pencil.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>';
-    row.appendChild(pencil);
-  }
-
   row.appendChild(buildFavoriteStarBtn(folder.favorite, (e) => {
     e.stopPropagation();
     toggleFolderFavorite(folder);
@@ -2800,7 +2772,6 @@ function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
   attachNoteItemGestures(row, itemKey);
   row.addEventListener('click', () => {
     if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
-    if (mode === 'editFolders') { openNoteFolderModal(folder); return; }
     state.currentNoteFolderId = folder.id;
     clearNoteSearch();
     renderNotesView();
@@ -2941,7 +2912,7 @@ function renderNotesViewInto(target) {
   const backBtn = document.getElementById(cfg.backBtnId);
   if (backBtn) backBtn.classList.toggle('hidden', state.currentNoteFolderId === null || searchWholeApp);
 
-  // "mode" (Seleccionar/Mover/editFolders) lo pone el menu de 3 puntos de la
+  // "mode" (Seleccionar/Mover) lo pone el menu de 3 puntos de la
   // vista de Notas (setMobileNotesMode). Orden y vista galeria/listado son
   // ajustes por dispositivo, guardados en localStorage.
   const mode = mobileNotesMode;
@@ -3155,12 +3126,13 @@ function buildFolderGalleryCard(folder, { mode = 'browse' } = {}) {
     card.appendChild(checkbox);
   }
 
-  // Se pinta la CARPETA con su color, no el fondo de la tarjeta: asi la
-  // galeria mantiene el mismo tono de fondo en todas y el color solo
-  // sirve para distinguir la carpeta de un vistazo.
+  // Carpeta de CONTORNO, no pintada del todo: rellena de su color se
+  // veia como un bloque plano ("me gustaba la carpeta sólo el icono, el
+  // borde, sin estar pintada del todo, le daba más clase"). El color de
+  // la carpeta sigue siendo el del trazo, asi que se distingue igual.
   const media = document.createElement('div');
   media.className = 'mobile-note-gallery-media';
-  media.innerHTML = '<svg class="mobile-note-gallery-folder-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+  media.innerHTML = '<svg class="mobile-note-gallery-folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
   media.querySelector('svg').style.color = folder.color || 'var(--accent)';
   card.appendChild(media);
 
@@ -3176,7 +3148,6 @@ function buildFolderGalleryCard(folder, { mode = 'browse' } = {}) {
 
   card.addEventListener('click', () => {
     if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
-    if (mode === 'editFolders') { openNoteFolderModal(folder); return; }
     state.currentNoteFolderId = folder.id;
     clearNoteSearch();
     renderNotesView();
@@ -3206,6 +3177,21 @@ function startNoteItemDelete(itemKey) {
   openMobileNotesDeleteModal();
 }
 
+// Editar SOLO tiene sentido en una carpeta (nombre y color) -- una nota
+// se edita abriendola sin mas. Sustituye al modo "Editar carpetas" del
+// menu de 3 puntos, que hacia justo esto pero obligando a entrar y salir
+// de un modo entero para tocar una sola carpeta.
+function startNoteItemEdit(itemKey) {
+  const { kind, item } = resolveMobileNotesItem(itemKey) || {};
+  if (kind === 'folder' && item) openNoteFolderModal(item);
+}
+
+function isNoteItemFolder(itemKey) {
+  return itemKey.startsWith('folder:');
+}
+
+const NOTE_ACTION_EDIT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+
 const NOTE_ACTION_MOVE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m12 11 3 3-3 3"/><path d="M9 14h6"/></svg>';
 const NOTE_ACTION_DELETE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
 
@@ -3222,10 +3208,12 @@ function openNoteItemActionMenu(anchorEl, itemKey) {
     titulo.textContent = getNoteListItemName(item);
     noteItemActionMenu.appendChild(titulo);
   }
-  [
-    ['Mover', NOTE_ACTION_MOVE_ICON, '', () => startNoteItemMove(itemKey)],
-    ['Eliminar', NOTE_ACTION_DELETE_ICON, 'is-danger', () => startNoteItemDelete(itemKey)],
-  ].forEach(([texto, icono, extra, fn]) => {
+  const acciones = [['Mover', NOTE_ACTION_MOVE_ICON, '', () => startNoteItemMove(itemKey)]];
+  if (isNoteItemFolder(itemKey)) {
+    acciones.push(['Editar', NOTE_ACTION_EDIT_ICON, '', () => startNoteItemEdit(itemKey)]);
+  }
+  acciones.push(['Eliminar', NOTE_ACTION_DELETE_ICON, 'is-danger', () => startNoteItemDelete(itemKey)]);
+  acciones.forEach(([texto, icono, extra, fn]) => {
     const opt = document.createElement('button');
     opt.type = 'button';
     opt.className = `note-item-action-btn ${extra}`.trim();
@@ -3396,6 +3384,15 @@ function closeSwipedNoteRow() {
   openSwipedNoteRow = null;
 }
 
+// Pinchar en cualquier otro sitio cierra la fila deslizada -- antes solo
+// se cerraba deslizandola de vuelta o pulsando una de sus acciones, asi
+// que se quedaba abierta "a medias" mientras tocabas otra cosa.
+document.addEventListener('pointerdown', (e) => {
+  if (!openSwipedNoteRow) return;
+  if (e.target.closest && e.target.closest('.note-swipe-wrap') === openSwipedNoteRow) return;
+  closeSwipedNoteRow();
+}, true);
+
 // Envuelve la fila para poder deslizarla: los dos botones viven DEBAJO,
 // y la fila se desplaza hacia la izquierda para descubrirlos.
 function wrapNoteRowWithSwipe(row, itemKey) {
@@ -3404,8 +3401,12 @@ function wrapNoteRowWithSwipe(row, itemKey) {
 
   const acciones = document.createElement('div');
   acciones.className = 'note-swipe-actions';
-  [['Mover', 'secondary-btn', () => startNoteItemMove(itemKey)],
-    ['Eliminar', 'danger-btn', () => startNoteItemDelete(itemKey)]].forEach(([texto, clase, fn]) => {
+  const lista = [['Mover', 'secondary-btn', () => startNoteItemMove(itemKey)]];
+  // "Editar" solo en carpetas (nombre y color) -- una nota se edita
+  // abriendola sin mas.
+  if (isNoteItemFolder(itemKey)) lista.push(['Editar', 'secondary-btn', () => startNoteItemEdit(itemKey)]);
+  lista.push(['Eliminar', 'danger-btn', () => startNoteItemDelete(itemKey)]);
+  lista.forEach(([texto, clase, fn]) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = clase;
@@ -3444,6 +3445,10 @@ function wrapNoteRowWithSwipe(row, itemKey) {
     if (!horizontal) return;
     if (dx < -40) {
       if (openSwipedNoteRow !== wrap) closeSwipedNoteRow();
+      // Cuanto se desplaza la fila depende de cuantos botones haya (una
+      // carpeta tiene uno mas, "Editar"): se mide el ancho real en vez
+      // de dejar un valor fijo que se quedaria corto o largo.
+      wrap.style.setProperty('--swipe-actions-width', `${acciones.offsetWidth}px`);
       wrap.classList.add('is-open');
       openSwipedNoteRow = wrap;
     } else if (dx > 20) {
@@ -3502,7 +3507,7 @@ if (btnMobileNotesBack) {
 // (galeria-listado) / Ordenar. "mode" es el mismo concepto ya usado en
 // buildNoteRow/buildFolderRow/buildNoteGalleryCard mas arriba.
 // ---------------------------------------------------------------------
-let mobileNotesMode = 'browse'; // 'browse' | 'editFolders' | 'select' | 'move'
+let mobileNotesMode = 'browse'; // 'browse' | 'select' | 'move'
 const mobileNotesSelectedKeys = new Set(); // 'folder:<id>' / 'note:<id>'
 
 function mobileNotesItemKey(kind, id) {
@@ -3519,11 +3524,6 @@ function toggleMobileNotesSelection(itemKey) {
 function setMobileNotesMode(mode) {
   mobileNotesMode = mode;
   if (mode !== 'select' && mode !== 'move') mobileNotesSelectedKeys.clear();
-  // Marca para el CSS: en "Editar carpetas" las carpetas se resaltan y
-  // las notas se atenuan (ahi no hacen nada), para que se vea de un
-  // vistazo que la lista esta en otro modo.
-  const notesView = document.getElementById('mobile-notes-view');
-  if (notesView) notesView.classList.toggle('mode-edit-folders', mode === 'editFolders');
   refreshMobileNotesActionBar();
   refreshMobileNotesFab();
   renderNotesView();
@@ -3550,30 +3550,33 @@ function refreshMobileNotesActionBar() {
     const rightBtn = document.getElementById(rightId);
 
     if (mobileNotesMode === 'select') {
+      // Seleccionar sirve para BORRAR varios de una vez, y ya esta:
+      // mover se hace arrastrando (pedido explicito de Koku), asi que
+      // aqui el par es Eliminar / Cancelar.
       bar.classList.remove('hidden');
       leftBtn.textContent = 'Eliminar';
       leftBtn.className = 'danger-btn';
       leftBtn.disabled = mobileNotesSelectedKeys.size === 0;
       leftBtn.onclick = openMobileNotesDeleteModal;
-      rightBtn.textContent = 'Mover';
+      rightBtn.textContent = 'Cancelar';
       rightBtn.className = 'secondary-btn';
-      rightBtn.disabled = mobileNotesSelectedKeys.size === 0;
-      rightBtn.onclick = () => setMobileNotesMode('move');
+      rightBtn.disabled = false;
+      rightBtn.onclick = () => setMobileNotesMode('browse');
     } else if (mobileNotesMode === 'move') {
+      // Modo Mover: solo se llega aqui desde la accion "Mover" de una
+      // fila (deslizar / mantener pulsado). Cancelar vuelve a la
+      // navegacion normal, NO al modo Seleccionar -- volver ahi dejaba
+      // la vista con checkboxes puestos sin haberlos pedido.
       bar.classList.remove('hidden');
       leftBtn.textContent = 'Cancelar';
       leftBtn.className = 'secondary-btn';
       leftBtn.disabled = false;
-      leftBtn.onclick = () => setMobileNotesMode('select');
+      leftBtn.onclick = () => setMobileNotesMode('browse');
       rightBtn.textContent = 'Mover aquí';
       rightBtn.className = 'primary-btn';
       rightBtn.disabled = false;
       rightBtn.onclick = confirmMobileNotesMove;
     } else {
-      // "Editar carpetas" no usa esta barra: su "Listo" vive en el boton
-      // flotante de abajo (ver refreshMobileNotesFab), y que estas en ese
-      // modo se ve por el resalte de las carpetas y el lapiz de cada
-      // fila (ver .mode-edit-folders en styles.css).
       bar.classList.add('hidden');
     }
   });
@@ -3711,12 +3714,6 @@ function buildMobileNotesMenuPopover() {
     btn.addEventListener('click', onClick);
     popover.appendChild(btn);
   }
-
-  const editingFolders = mobileNotesMode === 'editFolders';
-  addOption(editingFolders ? 'Listo' : 'Editar carpetas', () => {
-    closeAllPopovers();
-    setMobileNotesMode(editingFolders ? 'browse' : 'editFolders');
-  }, editingFolders);
 
   const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
   addOption(selecting ? 'Listo' : 'Seleccionar', () => {
@@ -4728,25 +4725,15 @@ function clampTableSize(value) {
   return Math.min(10, Math.max(1, n));
 }
 
-// Ancho/alto por defecto de una tabla nueva, en px -- antes la tabla se
-// autoajustaba sola (width:100% + table-layout automatico) al escribir,
-// ahora es "constante" desde que se inserta (table-layout:fixed, ver
-// styles.css) y se queda en estos valores hasta que se arrastre un borde
-// a mano (ver el bloque de redimensionado mas abajo).
-const DEFAULT_TABLE_COL_WIDTH = 120;
-const DEFAULT_TABLE_ROW_HEIGHT = 36;
-
+// La tabla NO lleva anchos ni altos fijos: se ajusta sola al texto que
+// tenga dentro (table-layout:auto en styles.css). Antes se insertaba con
+// un <colgroup> de anchos en px y un alto por fila, y habia un menu
+// "Tamaño" para tocarlos -- Koku lo quito a proposito ("que siempre se
+// ajuste al texto de dentro y ya está").
 function buildTableHtml(rows, cols) {
-  // <colgroup> con un <col> por columna: es lo que de verdad manda el
-  // ancho de cada columna con table-layout:fixed (los <td> por si solos
-  // no bastarian). El saneado del servidor (sanitizeNoteBody en
-  // routes/notes.js) valida el "style" de cada <col>/<tr> con una lista
-  // blanca MUY estricta (solo "width:Npx"/"height:Npx"), no cualquier CSS.
-  const colHtml = `<col style="width:${DEFAULT_TABLE_COL_WIDTH}px">`;
-  const colgroupHtml = `<colgroup>${colHtml.repeat(cols)}</colgroup>`;
   let rowsHtml = '';
   for (let r = 0; r < rows; r++) {
-    rowsHtml += `<tr style="height:${DEFAULT_TABLE_ROW_HEIGHT}px">${'<td><br></td>'.repeat(cols)}</tr>`;
+    rowsHtml += `<tr>${'<td><br></td>'.repeat(cols)}</tr>`;
   }
   // El <div><br></div> de despues da un sitio donde dejar el cursor tras
   // insertar la tabla -- sin el, si la tabla queda como ultimo elemento
@@ -4755,7 +4742,7 @@ function buildTableHtml(rows, cols) {
   // justo despues de insertarla y meter el cursor dentro. Se quita en el
   // acto, asi que nunca llega a guardarse en la nota (el saneador
   // tampoco lo dejaria pasar).
-  return `<table data-just-inserted="1">${colgroupHtml}<tbody>${rowsHtml}</tbody></table><div><br></div>`;
+  return `<table data-just-inserted="1"><tbody>${rowsHtml}</tbody></table><div><br></div>`;
 }
 
 const tableInsertBtn = document.getElementById('note-table-insert-btn');
@@ -4822,10 +4809,6 @@ function addTableRow() {
   if (!cell) return;
   const row = cell.parentElement;
   const newRow = document.createElement('tr');
-  // Misma altura por defecto que una fila nueva desde "Insertar tabla" --
-  // luego se puede arrastrar igual que cualquier otra (ver el
-  // redimensionado mas abajo).
-  newRow.style.height = `${DEFAULT_TABLE_ROW_HEIGHT}px`;
   Array.from(row.children).forEach((existingCell) => {
     const newCell = document.createElement(existingCell.tagName);
     newCell.innerHTML = '<br>';
@@ -4850,26 +4833,6 @@ function removeTableRow() {
   refreshNoteEditorState();
 }
 
-// El <colgroup> tiene que tener SIEMPRE un <col> por columna, en el
-// mismo orden -- si no, con table-layout:fixed el ancho de cada columna
-// dejaria de corresponder a la columna que toca en cuanto se anada o
-// quite una. Si por lo que sea la tabla no tiene colgroup (notas de
-// antes de esta ronda, guardadas sin el), se crea uno de cero con el
-// ancho por defecto para todas las columnas ya existentes.
-function ensureTableColgroup(table, colCount) {
-  let colgroup = table.querySelector('colgroup');
-  if (!colgroup) {
-    colgroup = document.createElement('colgroup');
-    table.insertBefore(colgroup, table.firstChild);
-    for (let i = 0; i < colCount; i++) {
-      const col = document.createElement('col');
-      col.style.width = `${DEFAULT_TABLE_COL_WIDTH}px`;
-      colgroup.appendChild(col);
-    }
-  }
-  return colgroup;
-}
-
 function addTableColumn() {
   const cell = getCurrentTableCell();
   if (!cell) return;
@@ -4883,12 +4846,6 @@ function addTableColumn() {
     newCell.innerHTML = '<br>';
     referenceCell.after(newCell);
   });
-  const colgroup = ensureTableColgroup(table, row.children.length);
-  const newCol = document.createElement('col');
-  newCol.style.width = `${DEFAULT_TABLE_COL_WIDTH}px`;
-  const referenceCol = colgroup.children[colIndex];
-  if (referenceCol) referenceCol.after(newCol);
-  else colgroup.appendChild(newCol);
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4907,8 +4864,6 @@ function removeTableColumn() {
     table.querySelectorAll('tr').forEach((tr) => {
       if (tr.children[colIndex]) tr.children[colIndex].remove();
     });
-    const colgroup = table.querySelector('colgroup');
-    if (colgroup && colgroup.children[colIndex]) colgroup.children[colIndex].remove();
   }
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
@@ -4933,10 +4888,12 @@ const TABLE_BORDER_LEVELS = ['1', '2', '3', '4'];
 function setTableBorder(nivel) {
   const marcadas = getMarkedTableCells();
   if (marcadas.length) {
-    marcadas.forEach((celda) => {
-      if (nivel === TABLE_BORDER_LEVELS[0]) celda.removeAttribute('data-border');
-      else celda.setAttribute('data-border', nivel);
-    });
+    // El nivel 1 se pone SIEMPRE de forma explicita, tambien en la
+    // celda: quitarle el atributo la dejaba heredando el grosor de la
+    // tabla, asi que sobre una tabla ya gruesa elegir "Fino" no hacia
+    // nada ("el borde fino no quiere ponerlo"). El saneado ya acepta
+    // data-border="1" en td/th igual que el resto de niveles.
+    marcadas.forEach((celda) => celda.setAttribute('data-border', nivel));
     refreshNoteEditorState();
     return;
   }
@@ -5071,22 +5028,6 @@ function redoTableChange() {
   restoreTableState(estado);
 }
 
-// Ensancha o estrecha la COLUMNA donde esta el cursor, tocando su <col>
-// del colgroup (que es lo que manda de verdad con table-layout:fixed).
-function changeTableColumnWidth(delta) {
-  const cell = getCurrentTableCell();
-  if (!cell) return;
-  const row = cell.parentElement;
-  const colIndex = Array.from(row.children).indexOf(cell);
-  const table = row.closest('table');
-  const colgroup = ensureTableColgroup(table, row.children.length);
-  const col = colgroup.children[colIndex];
-  if (!col) return;
-  const actual = parseInt(col.style.width, 10) || DEFAULT_TABLE_COL_WIDTH;
-  col.style.width = `${Math.max(TABLE_MIN_COL_WIDTH, actual + delta)}px`;
-  refreshNoteEditorState();
-}
-
 // Sube o baja la fila del cursor intercambiandola con su vecina.
 // `celdaDada` la usa el modo "mover a mano" (ver mas abajo): ahi el
 // editor esta bloqueado a proposito, asi que no hay cursor del que sacar
@@ -5105,8 +5046,7 @@ function moveTableRow(delta, celdaDada) {
 }
 
 // Mueve la columna del cursor a izquierda o derecha: intercambia esa
-// celda con su vecina EN CADA FILA, y tambien los <col> del colgroup
-// (si no, los anchos se quedarian con la columna equivocada).
+// celda con su vecina EN CADA FILA.
 function moveTableColumn(delta, celdaDada) {
   const cell = celdaDada || getCurrentTableCell();
   if (!cell) return false;
@@ -5122,13 +5062,6 @@ function moveTableColumn(delta, celdaDada) {
     if (delta < 0) b.before(a);
     else b.after(a);
   });
-  const colgroup = table.querySelector('colgroup');
-  if (colgroup && colgroup.children[colIndex] && colgroup.children[destino]) {
-    const ca = colgroup.children[colIndex];
-    const cb = colgroup.children[destino];
-    if (delta < 0) cb.before(ca);
-    else cb.after(ca);
-  }
   if (!celdaDada) putCaretInCell(cell);
   refreshNoteEditorState();
   return true;
@@ -5485,7 +5418,6 @@ function insertTableRow(donde) {
   if (!cell) return;
   const row = cell.parentElement;
   const nueva = document.createElement('tr');
-  nueva.style.height = `${DEFAULT_TABLE_ROW_HEIGHT}px`;
   Array.from(row.children).forEach((existente) => {
     const celda = document.createElement(existente.tagName);
     celda.innerHTML = '<br>';
@@ -5514,13 +5446,6 @@ function insertTableColumn(donde) {
     if (donde === 'left') referencia.before(nueva);
     else referencia.after(nueva);
   });
-  const colgroup = ensureTableColgroup(table, row.children.length);
-  const nuevaCol = document.createElement('col');
-  nuevaCol.style.width = `${DEFAULT_TABLE_COL_WIDTH}px`;
-  const referenciaCol = colgroup.children[colIndex];
-  if (referenciaCol && donde === 'left') referenciaCol.before(nuevaCol);
-  else if (referenciaCol) referenciaCol.after(nuevaCol);
-  else colgroup.appendChild(nuevaCol);
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -5533,7 +5458,6 @@ function insertTableRowAtEdge(donde) {
   const referencia = donde === 'first' ? tbody.firstElementChild : tbody.lastElementChild;
   if (!referencia) return;
   const nueva = document.createElement('tr');
-  nueva.style.height = `${DEFAULT_TABLE_ROW_HEIGHT}px`;
   Array.from(referencia.children).forEach((existente) => {
     const celda = document.createElement(existente.tagName);
     celda.innerHTML = '<br>';
@@ -5555,11 +5479,6 @@ function insertTableColumnAtEdge(donde) {
     if (donde === 'first') tr.prepend(nueva);
     else tr.appendChild(nueva);
   });
-  const colgroup = ensureTableColgroup(table, cell.parentElement.children.length);
-  const nuevaCol = document.createElement('col');
-  nuevaCol.style.width = `${DEFAULT_TABLE_COL_WIDTH}px`;
-  if (donde === 'first') colgroup.prepend(nuevaCol);
-  else colgroup.appendChild(nuevaCol);
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -5587,55 +5506,11 @@ function removeTableColumnAtEdge(donde) {
       const objetivo = donde === 'first' ? tr.firstElementChild : tr.lastElementChild;
       if (objetivo) objetivo.remove();
     });
-    const colgroup = table.querySelector('colgroup');
-    if (colgroup) {
-      const objetivo = donde === 'first' ? colgroup.firstElementChild : colgroup.lastElementChild;
-      if (objetivo) objetivo.remove();
-    }
   }
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
 
-// Alto de la fila del cursor (el ancho de columna ya lo hace
-// changeTableColumnWidth).
-function changeTableRowHeight(delta) {
-  const cell = getCurrentTableCell();
-  if (!cell) return;
-  const row = cell.parentElement;
-  const actual = parseInt(row.style.height, 10) || Math.round(row.getBoundingClientRect().height);
-  row.style.height = `${Math.max(TABLE_MIN_ROW_HEIGHT, actual + delta)}px`;
-  refreshNoteEditorState();
-}
-
-// Ancho/alto exactos, para cuando no vale con ir dando toques: pide el
-// numero y lo aplica tal cual.
-async function setTableSizeByHand(que) {
-  const cell = getCurrentTableCell();
-  if (!cell) return;
-  const row = cell.parentElement;
-  const table = cell.closest('table');
-  const colIndex = Array.from(row.children).indexOf(cell);
-  if (que === 'col') {
-    const colgroup = ensureTableColgroup(table, row.children.length);
-    const col = colgroup.children[colIndex];
-    if (!col) return;
-    const actual = parseInt(col.style.width, 10) || DEFAULT_TABLE_COL_WIDTH;
-    const valor = await showAppPrompt('Ancho de esta columna, en puntos:', String(actual));
-    const num = parseInt(valor, 10);
-    if (Number.isFinite(num)) col.style.width = `${Math.max(TABLE_MIN_COL_WIDTH, num)}px`;
-  } else {
-    const actual = parseInt(row.style.height, 10) || Math.round(row.getBoundingClientRect().height);
-    const valor = await showAppPrompt('Alto de esta fila, en puntos:', String(actual));
-    const num = parseInt(valor, 10);
-    if (Number.isFinite(num)) row.style.height = `${Math.max(TABLE_MIN_ROW_HEIGHT, num)}px`;
-  }
-  // Al pasar por el aviso, el cursor se fue al boton "Aceptar": hay que
-  // devolverlo a la celda, o al refrescar se cerraria la barra de tabla
-  // creyendo que has salido de ella.
-  putCaretInCell(cell);
-  refreshNoteEditorState();
-}
 
 const NOTE_TABLE_COMMANDS = {
   'row-above': () => insertTableRow('above'),
@@ -5655,12 +5530,6 @@ const NOTE_TABLE_COMMANDS = {
   'move-cell': () => startTableManualMove('cell'),
   'move-line': () => startTableManualMove('line'),
   'move-block': () => startTableManualMove('block'),
-  'width-plus': () => changeTableColumnWidth(20),
-  'width-minus': () => changeTableColumnWidth(-20),
-  'width-exact': () => setTableSizeByHand('col'),
-  'height-plus': () => changeTableRowHeight(10),
-  'height-minus': () => changeTableRowHeight(-10),
-  'height-exact': () => setTableSizeByHand('row'),
   'border-1': () => setTableBorder('1'),
   'border-2': () => setTableBorder('2'),
   'border-3': () => setTableBorder('3'),
@@ -5703,17 +5572,6 @@ const NOTE_TABLE_MENUS = {
       ['move-cell', 'Una casilla'],
       ['move-line', 'Fila o columna'],
       ['move-block', 'Casillas marcadas'],
-    ],
-  },
-  size: {
-    label: 'Tamaño',
-    opciones: [
-      ['width-plus', 'Columna más ancha'],
-      ['width-minus', 'Columna más estrecha'],
-      ['width-exact', 'Ancho exacto…'],
-      ['height-plus', 'Fila más alta'],
-      ['height-minus', 'Fila más baja'],
-      ['height-exact', 'Alto exacto…'],
     ],
   },
   border: {
@@ -5839,15 +5697,18 @@ document.body.appendChild(tableCornerBtn);
 // editor. El segundo pase en requestAnimationFrame es por si el
 // navegador lo reajusta otra vez al pintar.
 function keepTableInPlace(fn) {
+  // Se ancla la CELDA donde esta el cursor, no el principio de la tabla:
+  // en una tabla mas alta que la pantalla, mantener quieta su primera
+  // fila mandaba la vista al principio de la tabla aunque estuvieras
+  // escribiendo en la ultima ("va al inicio de esta").
   const cell = getCurrentTableCell()
     || (tableMarkMode && tableMarkMode.table.querySelector('td, th'))
     || (tableManualMove && tableManualMove.table.querySelector('td, th'));
-  const table = cell ? cell.closest('table') : null;
-  const antes = table ? table.getBoundingClientRect().top : null;
+  const antes = cell ? cell.getBoundingClientRect().top : null;
   fn();
-  if (antes === null || !table || !NOTE_EDITOR_BODY.contains(table)) return;
+  if (antes === null || !NOTE_EDITOR_BODY.contains(cell)) return;
   const ajustar = () => {
-    const despues = table.getBoundingClientRect().top;
+    const despues = cell.getBoundingClientRect().top;
     if (Math.abs(despues - antes) > 1) NOTE_EDITOR_BODY.scrollTop += despues - antes;
   };
   ajustar();
@@ -5941,182 +5802,6 @@ function closeTableToolbarIfCaretLeft() {
   if (tableManualMove || tableMarkMode) return;
   if (isNoteTableToolbarOpen() && !getCurrentTableCell()) setNoteTableToolbarOpen(false);
 }
-
-// ---------------------------------------------------------------------
-// Redimensionar tablas a mano (estilo Excel): arrastrar el borde derecho
-// de una celda cambia el ancho de esa COLUMNA entera (el <col> del
-// colgroup); arrastrar el borde inferior cambia el alto de esa FILA
-// entera (el <tr>). Doble clic en un borde ajusta esa columna/fila al
-// contenido que tenga en ese momento. Nada de esto anade elementos
-// nuevos al HTML de la nota -- son listeners en NOTE_EDITOR_BODY que
-// detectan la cercania al borde de una celda por posicion del raton, sin
-// "tiradores" propios que el saneado del servidor tendria que aprender a
-// permitir.
-// ---------------------------------------------------------------------
-const TABLE_RESIZE_EDGE_PX = 5;
-const TABLE_MIN_COL_WIDTH = 40;
-const TABLE_MIN_ROW_HEIGHT = 24;
-
-// { type: 'col'|'row', table, col|row, startX/startY, startWidth/startHeight }
-// mientras se esta arrastrando un borde; null el resto del tiempo.
-let tableResizeDrag = null;
-
-// Averigua si (clientX, clientY) esta cerca del borde derecho o inferior
-// de una celda de tabla dentro del editor, y de que tipo. null si no.
-function findTableResizeTarget(clientX, clientY) {
-  const el = document.elementFromPoint(clientX, clientY);
-  const cell = el ? el.closest('td, th') : null;
-  if (!cell || !NOTE_EDITOR_BODY.contains(cell)) return null;
-  const rect = cell.getBoundingClientRect();
-
-  // El borde de 1px entre dos celdas es "de las dos a la vez" -- segun
-  // redondeo, elementFromPoint a veces devuelve la celda de la izquierda/
-  // arriba y a veces la de la derecha/abajo para el MISMO pixel. Se
-  // comprueban los dos lados de la celda que haya devuelto, no solo el
-  // derecho/inferior, para no depender de cual haya tocado.
-  if (Math.abs(clientX - rect.left) <= TABLE_RESIZE_EDGE_PX && cell.previousElementSibling) {
-    return { type: 'col', cell: cell.previousElementSibling };
-  }
-  if (Math.abs(clientX - rect.right) <= TABLE_RESIZE_EDGE_PX) {
-    return { type: 'col', cell };
-  }
-  if (Math.abs(clientY - rect.top) <= TABLE_RESIZE_EDGE_PX) {
-    const row = cell.parentElement;
-    const prevRow = row.previousElementSibling;
-    if (prevRow) {
-      const colIndex = Array.from(row.children).indexOf(cell);
-      const prevCell = prevRow.children[colIndex] || prevRow.children[0];
-      if (prevCell) return { type: 'row', cell: prevCell };
-    }
-  }
-  if (Math.abs(clientY - rect.bottom) <= TABLE_RESIZE_EDGE_PX) {
-    return { type: 'row', cell };
-  }
-  return null;
-}
-
-function tableColIndex(cell) {
-  return Array.from(cell.parentElement.children).indexOf(cell);
-}
-
-function tableColElement(table, colIndex) {
-  const colgroup = ensureTableColgroup(table, table.rows[0] ? table.rows[0].children.length : 0);
-  return colgroup.children[colIndex] || null;
-}
-
-// Cursor col-resize/row-resize solo cerca de un borde redimensionable --
-// se recalcula en cada movimiento del raton (sin arrastrar todavia).
-NOTE_EDITOR_BODY.addEventListener('mousemove', (e) => {
-  if (tableResizeDrag) return;
-  const target = findTableResizeTarget(e.clientX, e.clientY);
-  NOTE_EDITOR_BODY.style.cursor = target ? (target.type === 'col' ? 'col-resize' : 'row-resize') : '';
-});
-NOTE_EDITOR_BODY.addEventListener('mouseleave', () => {
-  if (!tableResizeDrag) NOTE_EDITOR_BODY.style.cursor = '';
-});
-
-NOTE_EDITOR_BODY.addEventListener('mousedown', (e) => {
-  // En modo "mover a mano" el arrastre es para reordenar filas/columnas,
-  // no para redimensionar: si no, los dos gestos se pisan.
-  if (tableManualMove) return;
-  const target = findTableResizeTarget(e.clientX, e.clientY);
-  if (!target) return;
-  // Evita que el navegador coloque el cursor de texto o empiece una
-  // seleccion al arrastrar un borde -- es un gesto de redimensionar, no
-  // de editar contenido.
-  e.preventDefault();
-  const table = target.cell.closest('table');
-  if (target.type === 'col') {
-    const col = tableColElement(table, tableColIndex(target.cell));
-    if (!col) return;
-    tableResizeDrag = { type: 'col', col, startX: e.clientX, startWidth: col.getBoundingClientRect().width };
-  } else {
-    const row = target.cell.parentElement;
-    tableResizeDrag = { type: 'row', row, startY: e.clientY, startHeight: row.getBoundingClientRect().height };
-  }
-});
-
-document.addEventListener('mousemove', (e) => {
-  if (!tableResizeDrag) return;
-  if (tableResizeDrag.type === 'col') {
-    const delta = e.clientX - tableResizeDrag.startX;
-    const newWidth = Math.max(TABLE_MIN_COL_WIDTH, Math.round(tableResizeDrag.startWidth + delta));
-    tableResizeDrag.col.style.width = `${newWidth}px`;
-  } else {
-    const delta = e.clientY - tableResizeDrag.startY;
-    const newHeight = Math.max(TABLE_MIN_ROW_HEIGHT, Math.round(tableResizeDrag.startHeight + delta));
-    tableResizeDrag.row.style.height = `${newHeight}px`;
-  }
-});
-
-document.addEventListener('mouseup', () => {
-  if (!tableResizeDrag) return;
-  tableResizeDrag = null;
-  NOTE_EDITOR_BODY.style.cursor = '';
-});
-
-// Doble clic en un borde = ajustar esa columna/fila al contenido que
-// tenga en ese momento -- scrollWidth/scrollHeight reflejan el tamano
-// natural del contenido aunque table-layout:fixed este recortando la
-// celda visualmente en pantalla.
-// scrollWidth/scrollHeight de la celda tal cual NO sirven para medir su
-// tamano "natural": con la celda ya fija a un tamano grande (o igual a
-// las demas de su fila/columna), el contenido no desborda nada que
-// scrollWidth/scrollHeight puedan detectar -- simplemente devuelven el
-// tamano actual, no el minimo que necesitaria el contenido. Se mide con
-// un CLON fuera de pantalla, con "width"/"height" en auto (o el ancho
-// actual, para la altura) para que el navegador calcule el tamano de
-// verdad, y se descarta el clon despues.
-function measureTableCellNaturalWidth(cell) {
-  const clone = cell.cloneNode(true);
-  clone.style.position = 'absolute';
-  clone.style.visibility = 'hidden';
-  clone.style.left = '-9999px';
-  clone.style.top = '0';
-  clone.style.width = 'auto';
-  clone.style.whiteSpace = 'nowrap';
-  NOTE_EDITOR_BODY.appendChild(clone);
-  const width = clone.offsetWidth;
-  clone.remove();
-  return width;
-}
-
-function measureTableCellNaturalHeight(cell, width) {
-  const clone = cell.cloneNode(true);
-  clone.style.position = 'absolute';
-  clone.style.visibility = 'hidden';
-  clone.style.left = '-9999px';
-  clone.style.top = '0';
-  clone.style.width = `${width}px`;
-  clone.style.height = 'auto';
-  NOTE_EDITOR_BODY.appendChild(clone);
-  const height = clone.offsetHeight;
-  clone.remove();
-  return height;
-}
-
-NOTE_EDITOR_BODY.addEventListener('dblclick', (e) => {
-  const target = findTableResizeTarget(e.clientX, e.clientY);
-  if (!target) return;
-  e.preventDefault();
-  const table = target.cell.closest('table');
-  if (target.type === 'col') {
-    const colIndex = tableColIndex(target.cell);
-    const col = tableColElement(table, colIndex);
-    if (!col) return;
-    const cellsInCol = Array.from(table.querySelectorAll('tr')).map((tr) => tr.children[colIndex]).filter(Boolean);
-    const natural = Math.max(TABLE_MIN_COL_WIDTH, ...cellsInCol.map((c) => measureTableCellNaturalWidth(c)));
-    col.style.width = `${natural}px`;
-  } else {
-    const row = target.cell.parentElement;
-    const cells = Array.from(row.children);
-    // La altura natural depende del ancho ACTUAL de cada celda (el texto
-    // hace mas o menos saltos de linea segun cuanto sitio tenga) -- se
-    // mide con el ancho que ya tiene ahora mismo, no en auto.
-    const natural = Math.max(TABLE_MIN_ROW_HEIGHT, ...cells.map((c) => measureTableCellNaturalHeight(c, c.getBoundingClientRect().width)));
-    row.style.height = `${natural}px`;
-  }
-});
 
 // ---------------------------------------------------------------------
 // Imagenes dentro de una nota (Fase 4, ultima sub-ronda): boton "Imagen"
@@ -6899,6 +6584,12 @@ function applyNoteEditorViewportAnchor() {
 }
 
 function startNoteEditorViewportAnchor() {
+  // Con el editor abierto, la PAGINA de debajo no se desplaza (misma
+  // idea que body.mobile-day-scroll-lock en la vista diaria): si puede
+  // desplazarse, el sistema la mueve al abrir el teclado y acabas con
+  // dos pantallas apiladas -- la cabecera del listado de notas asomando
+  // por encima de la del editor.
+  document.body.classList.add('note-editor-open');
   applyNoteEditorViewportAnchor();
   if (noteEditorViewportAnchored || !window.visualViewport) return;
   noteEditorViewportAnchored = true;
@@ -6907,6 +6598,7 @@ function startNoteEditorViewportAnchor() {
 }
 
 function stopNoteEditorViewportAnchor() {
+  document.body.classList.remove('note-editor-open');
   const view = document.getElementById('note-editor-view');
   view.style.height = '';
   view.style.transform = '';
@@ -7336,29 +7028,19 @@ document.getElementById('btn-new-task-mobile-day').addEventListener('click', () 
 // mas hueco al buscador. Mismas 2 acciones que ya llamaban esos botones
 // (openNoteFolderModal(null)/openNoteInEditor(null)), solo movidas aqui.
 const MOBILE_NOTES_FAB_ADD_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
-const MOBILE_NOTES_FAB_DONE_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 11"></polyline></svg>';
 
-// El MISMO boton flotante cambia de trabajo segun el modo: "+" para
-// crear, y un tick para salir de "Editar carpetas" (pedido de Koku: que
-// el "Listo" viva siempre abajo, sustituyendo al de añadir, en vez de en
-// una barra pegada justo debajo de la lista).
+// Seleccionando o moviendo, el "+" estorba: no tiene sentido crear nada
+// a medias de eso, y ademas chocaria con la barra de acciones que
+// aparece justo encima de la barra inferior.
 function refreshMobileNotesFab() {
-  const btn = document.getElementById('btn-mobile-notes-add');
-  const editando = mobileNotesMode === 'editFolders';
-  // Seleccionando o moviendo, el "+" estorba: no tiene sentido crear
-  // nada a medias de eso, y ademas chocaria con la barra de acciones que
-  // aparece justo encima de la barra inferior.
   const seleccionando = mobileNotesMode === 'select' || mobileNotesMode === 'move';
   document.getElementById('mobile-notes-add-wrap').classList.toggle('hidden', seleccionando);
-  btn.innerHTML = editando ? MOBILE_NOTES_FAB_DONE_ICON : MOBILE_NOTES_FAB_ADD_ICON;
-  btn.setAttribute('aria-label', editando ? 'Listo' : 'Añadir');
-  btn.classList.toggle('is-done', editando);
-  if (editando || seleccionando) toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
+  document.getElementById('btn-mobile-notes-add').innerHTML = MOBILE_NOTES_FAB_ADD_ICON;
+  if (seleccionando) toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
 }
 
 document.getElementById('btn-mobile-notes-add').addEventListener('click', (e) => {
   e.stopPropagation();
-  if (mobileNotesMode === 'editFolders') { setMobileNotesMode('browse'); return; }
   toggleMobileCalendarAddMenu(undefined, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
 });
 document.getElementById('btn-mobile-notes-add-folder').addEventListener('click', () => {

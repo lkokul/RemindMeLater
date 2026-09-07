@@ -561,18 +561,16 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    "data-border" del <table> (ver mas abajo), asi que una clase se
    perderia al guardar. Con un selector generico da igual, toda tabla
    del editor se ve igual siempre salvo por esos dos ajustes concretos.
-   table-layout:fixed + width:auto (en vez del 100% de antes) es lo que
-   hace que el tamano sea CONSTANTE desde que se inserta -- ya no se
-   autoajusta al escribir, y el ancho real de la tabla es la suma de lo
-   que diga cada <col> (ver buildTableHtml en app.js), no un porcentaje
-   del contenedor. */
-.note-editor-body table { border-collapse: collapse; table-layout: fixed; width: auto; max-width: 100%; margin: 0.5rem 0; }
+   table-layout:auto es lo que hace que cada columna se ajuste al texto
+   que tenga dentro. Antes era "fixed" con un <colgroup> de anchos en px
+   y un menu "Tamaño" para tocarlos -- Koku lo quito a proposito ("que
+   siempre se ajuste al texto de dentro y ya está"). */
+.note-editor-body table { border-collapse: collapse; table-layout: auto; width: auto; max-width: 100%; margin: 0.5rem 0; }
 .note-editor-body td, .note-editor-body th {
   border: 1px solid var(--border);
   padding: 0.4rem;
   min-width: 2.5rem;
   vertical-align: top;
-  overflow: hidden;
 }
 /* Grosor del borde por niveles (atributo data-border en el <table>, ver
    changeTableBorder en app.js). Sin atributo se queda en el borde fino
@@ -867,7 +865,13 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    aqui, la cadena de flex:1/min-height:0 que ya existe deja acotado el
    contenedor interno y es el, y solo el, quien se desplaza. La clase la
    pone y quita enterMobileDayView()/exitMobileDayView() en app.js. */
-body.mobile-day-scroll-lock { overflow: hidden; }
+/* Mismo criterio con el editor de notas abierto: si la pagina de debajo
+   puede desplazarse, el sistema la mueve al abrir el teclado y se acaban
+   viendo dos pantallas apiladas (la cabecera del listado de notas
+   asomando por encima de la del editor). La clase la pone y quita
+   start/stopNoteEditorViewportAnchor() en app.js. */
+body.mobile-day-scroll-lock, body.note-editor-open { overflow: hidden; }
+body.note-editor-open .app,
 body.mobile-day-scroll-lock .app {
   height: 100vh;
   height: 100dvh;
@@ -1114,7 +1118,6 @@ body.mobile-day-scroll-lock .app {
    pantalla, por encima de .mobile-nav (z-index 70), igual que el hueco
    que ya reserva .app/Configuracion para esa barra. */
 .mobile-fab-wrap { position: fixed; right: 1rem; bottom: calc(5rem + 1rem + env(safe-area-inset-bottom, 0px)); z-index: 30; }
-.mobile-fab.is-done { background: var(--accent); }
 .mobile-fab {
   width: 3.2rem;
   height: 3.2rem;
@@ -1914,7 +1917,10 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   background: var(--bg);
   transition: transform 0.16s ease-out;
 }
-.note-swipe-wrap.is-open > .note-item { transform: translateX(-9.5rem); }
+/* El desplazamiento lo fija wrapNoteRowWithSwipe() midiendo el ancho
+   real de los botones (una carpeta lleva uno mas, "Editar"). El 9.5rem
+   es solo el valor de respaldo si por lo que sea no se pudo medir. */
+.note-swipe-wrap.is-open > .note-item { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
 
 /* Arrastrar y soltar notas/carpetas: la etiqueta que sigue al dedo, y el
    resalte de la carpeta (o del boton "Volver") sobre la que se suelta. */
@@ -1939,11 +1945,15 @@ body.note-dragging { cursor: grabbing; }
 /* Mientras se arrastra, nada de seleccionar texto ni de scroll por
    accidente al pasar por encima de la lista. */
 body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: none; }
+/* Solo un aro punteado, SIN teñir el fondo: al arrastrar sobre una
+   tarjeta de galeria, pintarle el fondo de acento se confundia con el
+   color de la propia carpeta ("el fondo se pone como del color de la
+   carpeta??"). Mismo lenguaje visual que los otros modos temporales de
+   la app (.is-marking / .is-manual-move de las tablas). */
 .is-drop-target {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  outline: 2px dashed var(--accent);
+  outline-offset: -3px;
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 /* Menu de Mover/Eliminar (pulsacion larga en galeria, o el mismo par de
@@ -2025,26 +2035,6 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   opacity: 1;
   cursor: default;
 }
-
-/* Modo "Editar carpetas": las carpetas se resaltan (son lo unico
-   tocable) y las notas se atenuan. Sin esto el modo no se notaba y
-   parecia que el menu no habia hecho nada. */
-#mobile-notes-view.mode-edit-folders .note-folder-row {
-  outline: 1px dashed var(--accent);
-  outline-offset: -1px;
-}
-/* Lapiz de cada carpeta mientras se editan (es un elemento real, ver
-   buildFolderRow en app.js): va a la IZQUIERDA de la estrella. */
-.note-folder-edit-mark {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  margin-left: auto;
-  padding: 0 0.15rem;
-  color: var(--accent);
-}
-.note-folder-edit-mark svg { width: 16px; height: 16px; }
-#mobile-notes-view.mode-edit-folders .note-item:not(.note-folder-row) { opacity: 0.4; }
 
 /* Modal de "Eliminar" del modo Seleccionar. */
 .mobile-notes-delete-list {
@@ -2526,6 +2516,12 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
   cursor: pointer;
+  /* Igual que en las tarjetas de galeria: el nombre de una fila es algo
+     que se toca, no que se copia -- sin esto, mantener pulsado (que aqui
+     abre Mover/Editar/Eliminar) disparaba la lupa de seleccionar texto. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .note-item:last-child { border-bottom: none; }
 
@@ -3394,9 +3390,6 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 }
 
 /* Lista de opciones de cada boton de la barra de tabla (Fila, Columna,
-   Mover, Tamano, Celdas). Reutiliza el popover de los selectores de la
+   Mover, Borde, Celdas). Reutiliza el popover de los selectores de la
    app, solo un poco mas ancho para que quepan los textos largos. */
 .table-menu-popover { width: 220px; }
-/* Campo para pedir un numero dentro del aviso propio (ancho/alto exactos
-   de una tabla) -- ver showAppPrompt en app.js. */
-.app-confirm-input { width: 100%; margin-bottom: 0.6rem; }
