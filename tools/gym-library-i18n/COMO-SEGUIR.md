@@ -7,12 +7,12 @@ desde el primer día — esto es solo para los pasos de cada ficha.
 
 ## Estado
 
-- **Traducidos: 120 / 876** (tandas 1-3, commiteadas en la ronda del
-  rediseño de Gimnasio). El orden de prioridad está en
-  `priority-ids.json`: primero fuerza con material común
-  (barra/mancuernas/peso corporal/polea/máquina) de nivel
-  principiante→avanzado, después el resto. Las 3 primeras tandas cubren
-  las posiciones 0-119 de esa lista.
+- **Traducidos: 200 / 876** (tandas 1-5; las tandas 4-5 traducidas
+  directamente por Claude en vez de DeepL, mismo formato y fusión). El
+  orden de prioridad está en `priority-ids.json`: primero fuerza con
+  material común (barra/mancuernas/peso corporal/polea/máquina) de nivel
+  principiante→avanzado, después el resto. Las tandas hechas cubren las
+  posiciones 0-199 de esa lista. Siguiente: DESDE = 200.
 
 ## Cómo hacer una tanda nueva
 
