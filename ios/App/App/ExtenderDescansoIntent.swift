@@ -51,6 +51,10 @@ struct ExtenderDescansoIntent: LiveActivityIntent {
             try? await center.add(UNNotificationRequest(identifier: req.identifier, content: req.content, trigger: trigger))
         }
 
+        // Si la vigilancia de audio ("bajar la musica al acabar") esta en
+        // marcha en este proceso, el final se retrasa con el descanso.
+        RestAudioWatcher.shared.reschedule(endAt: state.endAt)
+
         let defaults = UserDefaults.standard
         defaults.set(defaults.integer(forKey: "gymPendingRestExtra") + 30, forKey: "gymPendingRestExtra")
         return .result()

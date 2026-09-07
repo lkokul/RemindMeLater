@@ -9080,10 +9080,11 @@ function gymLiveStopTicker() {
   document.getElementById('gym-global-rest').classList.add('hidden');
   document.body.classList.remove('gym-rest-push');
   // Si quedaba un aviso de descanso programado (o su tarjeta en la
-  // pantalla de bloqueo), ya no tienen sentido: el entreno se ha
-  // terminado o descartado. Aqui cubre ambos caminos.
+  // pantalla de bloqueo, o la vigilancia de audio), ya no tienen
+  // sentido: el entreno se ha terminado o descartado.
   gymCancelRestNotification();
   gymEndRestLiveActivity();
+  gymCancelRestAudioWatch();
 }
 
 // Un tick por segundo mientras el overlay esta abierto: reloj de sesion
@@ -9233,8 +9234,9 @@ document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () =
     // El aviso programado apuntaba al final antiguo: se reprograma.
     gymScheduleRestNotification();
     // Y la tarjeta de la pantalla de bloqueo pasa a contar hasta el
-    // nuevo final.
+    // nuevo final, igual que la vigilancia de audio.
     gymUpdateRestLiveActivity();
+    gymUpdateRestAudioWatch();
   }
 });
 // El tiempo restante se puede ver como m:ss o como segundos a secas
@@ -9252,6 +9254,7 @@ document.getElementById('btn-gym-live-rest-close').addEventListener('click', () 
     gymLiveTick();
     gymCancelRestNotification();
     gymEndRestLiveActivity();
+    gymCancelRestAudioWatch();
   }
 });
 
@@ -9507,6 +9510,53 @@ async function gymEndRestLiveActivity() {
   }
 }
 
+// --- Bajar la musica al acabar el descanso -----------------------------
+// (Peticion de Koku: "que baje un poco el volumen de la musica, no
+// quitarla".) El trabajo de verdad lo hace RestAudioWatcher en nativo
+// (audio ducking de iOS + la app despierta durante el descanso); aqui
+// solo se le avisa de cuando empieza/cambia/se cancela el descanso.
+// En navegador no hay plugin y no pasa nada.
+let gymRestAudioPlugin = null;
+function getGymRestAudioPlugin() {
+  if (gymRestAudioPlugin) return gymRestAudioPlugin;
+  const cap = window.Capacitor;
+  if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null;
+  if (window.capacitorExports && typeof window.capacitorExports.registerPlugin === 'function') {
+    gymRestAudioPlugin = window.capacitorExports.registerPlugin('RestAudio');
+  }
+  return gymRestAudioPlugin;
+}
+function gymRestDuckEnabled() {
+  return localStorage.getItem('gymRestDuck') !== 'false';
+}
+async function gymStartRestAudioWatch() {
+  const plugin = getGymRestAudioPlugin();
+  if (!plugin || !gymRestDuckEnabled() || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    await plugin.startWatch({ endAt: gymLiveSession.restUntil });
+  } catch (err) {
+    console.error('No se pudo vigilar el audio del descanso:', err);
+  }
+}
+async function gymUpdateRestAudioWatch() {
+  const plugin = getGymRestAudioPlugin();
+  if (!plugin || !gymRestDuckEnabled() || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    await plugin.updateWatch({ endAt: gymLiveSession.restUntil });
+  } catch (err) {
+    console.error('No se pudo mover la vigilancia de audio:', err);
+  }
+}
+async function gymCancelRestAudioWatch() {
+  const plugin = getGymRestAudioPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.cancelWatch();
+  } catch (err) {
+    console.error('No se pudo cancelar la vigilancia de audio:', err);
+  }
+}
+
 // Tarjetas de ejercicio del entreno en vivo. Igual que el resto del
 // proyecto: se reconstruye el DOM entero en cada cambio estructural
 // (anadir/quitar series o ejercicios); los inputs escriben directo en
@@ -9685,11 +9735,13 @@ function renderGymLiveExercises() {
           set.extraRest = 0;
           gymScheduleRestNotification();
           gymStartRestLiveActivity();
+          gymStartRestAudioWatch();
         } else {
           gymLiveSession.restUntil = null;
           set.extraRest = 0;
           gymCancelRestNotification();
           gymEndRestLiveActivity();
+          gymCancelRestAudioWatch();
         }
         gymLiveStore();
         gymLiveTick();
@@ -9927,6 +9979,11 @@ if (gymLiveSession) {
   // Por si la app se relanzo con +30s de la pantalla de bloqueo sin
   // recoger (el visibilitychange no cubre el primer arranque).
   gymConsumeRestExtensionFromLockScreen();
+  // Y si el relanzamiento pillo un descanso a medias, la vigilancia de
+  // audio (bajar la musica al acabar) se rearma con el final vigente.
+  if (gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    gymStartRestAudioWatch();
+  }
 }
 refreshGymLiveIndicators();
 

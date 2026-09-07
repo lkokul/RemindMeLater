@@ -1259,6 +1259,9 @@ function refreshMobileTab() {
   const restBurst = document.getElementById('setting-gym-rest-burst');
   restBurst.disabled = !nativo;
   restBurst.checked = nativo && localStorage.getItem('gymRestBurst') !== 'false';
+  const restDuck = document.getElementById('setting-gym-rest-duck');
+  restDuck.disabled = !nativo;
+  restDuck.checked = nativo && localStorage.getItem('gymRestDuck') !== 'false';
 
   // Sonido y vibracion de los avisos, como on-off separados (peticion
   // de Koku). El matiz de iOS (con sonido, vibrar lo decide el sistema;
@@ -1314,6 +1317,19 @@ document.getElementById('setting-gym-rest-burst').addEventListener('change', (e)
   localStorage.setItem('gymRestBurst', e.target.checked ? 'true' : 'false');
   // Si hay un descanso en marcha, se reprograma con el modo nuevo.
   if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
+});
+document.getElementById('setting-gym-rest-duck').addEventListener('change', (e) => {
+  localStorage.setItem('gymRestDuck', e.target.checked ? 'true' : 'false');
+  // Si hay un descanso en marcha: encenderlo lo vigila ya; apagarlo
+  // suelta la vigilancia al momento.
+  if (e.target.checked) {
+    if (typeof gymStartRestAudioWatch === 'function') gymStartRestAudioWatch();
+  } else if (typeof gymCancelRestAudioWatch === 'function') {
+    gymCancelRestAudioWatch();
+  }
+});
+document.getElementById('btn-help-notif-duck').addEventListener('click', () => {
+  showAppAlert('Al acabar el descanso, la app baja unos segundos el volumen de lo que esté sonando (Spotify, Música...) y luego lo devuelve — como hace el GPS al hablar. No pausa ni corta nada.\n\nPara conseguirlo, durante el descanso la app se mantiene despierta en segundo plano (reproduce silencio a volumen cero); el gasto de batería es mínimo y solo dura lo que dura el descanso. Si iOS llegara a cerrar la app del todo, ese descanso no podría bajar la música (la notificación llega igual).');
 });
 document.getElementById('btn-help-notif-burst').addEventListener('click', () => {
   showAppAlert('Con el modo insistente, el aviso de fin de descanso se repite 3 veces seguidas (cada 2 segundos), para que la vibración se note aunque el móvil esté en el bolsillo. iOS no permite una vibración larga tipo "temporizador del sistema" en apps normales (eso son alertas críticas, con permiso especial de Apple): repetir el aviso es lo más parecido.');

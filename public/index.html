@@ -810,7 +810,7 @@
         <h4>Moverte por la app sin perder el entreno</h4>
         <p>Con el botón ▾ de arriba escondes esta pantalla y el entrenamiento sigue en marcha: puedes mirar otras pestañas del Gimnasio o cualquier otra parte de la app. Para volver, toca Reanudar en la pestaña Entrenar, o la barra de descanso que se queda arriba del todo mientras descansas.</p>
         <h4>Si se acaba el descanso y no estás mirando</h4>
-        <p>Mientras descansas, la cuenta atrás aparece en vivo en la pantalla de bloqueo (y en la isla dinámica, en los iPhone que la tienen), con los colores de tu tema y su propio botón +30s para alargar el descanso sin desbloquear — el tiempo añadido se ve en otro color. Tocar la tarjeta te lleva directo al entrenamiento. Las primeras veces que uses el +30s con el móvil bloqueado, iOS pedirá confirmación ("Permitir"): es su medida de seguridad para botones en pantalla bloqueada, y con "Permitir siempre" deja de preguntar. Además, la app puede avisarte con una notificación justo cuando el descanso termina — todo se configura en Configuración &gt; Notificaciones.</p>
+        <p>Mientras descansas, la cuenta atrás aparece en vivo en la pantalla de bloqueo (y en la isla dinámica, en los iPhone que la tienen), con los colores de tu tema y su propio botón +30s para alargar el descanso sin desbloquear — el tiempo añadido se ve en otro color. Tocar la tarjeta te lleva directo al entrenamiento. Las primeras veces que uses el +30s con el móvil bloqueado, iOS pedirá confirmación ("Permitir"): es su medida de seguridad para botones en pantalla bloqueada, y con "Permitir siempre" deja de preguntar. Además, la app puede avisarte con una notificación justo cuando el descanso termina, y bajar unos segundos el volumen de tu música al acabar (como el GPS al hablar) — todo se configura en Configuración &gt; Notificaciones.</p>
       </div>
       <label class="app-confirm-checkbox-row gym-help-dont-show-row">
         <input type="checkbox" id="gym-help-dont-show" class="styled-checkbox" />
@@ -2220,6 +2220,13 @@
             Aviso de descanso insistente
           </label>
           <button type="button" id="btn-help-notif-burst" class="icon-btn settings-help-btn" aria-label="Qué es el aviso insistente">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-gym-rest-duck" />
+            Bajar la música al acabar el descanso
+          </label>
+          <button type="button" id="btn-help-notif-duck" class="icon-btn settings-help-btn" aria-label="Cómo funciona el bajar la música">?</button>
         </div>
         <div class="settings-toggle-help-row">
           <label class="checkbox-row">
