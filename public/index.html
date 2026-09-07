@@ -478,7 +478,18 @@
             <button type="button" id="btn-proyectos-guide" class="icon-btn" aria-label="Crear el proyecto de ejemplo" title="Crear el proyecto de ejemplo (guía de uso)">📖</button>
             <!-- Modo seleccion: casillas en el arbol para mover varias
                  paginas de golpe (ver la barra de abajo). -->
-            <button type="button" id="btn-proyectos-select" class="icon-btn" aria-label="Seleccionar páginas" title="Seleccionar varias páginas para moverlas">☑</button>
+            <!-- El icono es un SVG lineal (una lista con casillas), no
+                 el caracter ☑ -- se pinta con currentColor y queda a
+                 juego con el resto de iconos. -->
+            <button type="button" id="btn-proyectos-select" class="icon-btn proyectos-select-btn" aria-label="Seleccionar páginas" title="Seleccionar varias páginas para moverlas">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="4" width="7" height="7" rx="1.6"/>
+                <polyline points="5 7.4 6.4 8.8 8.6 6.2"/>
+                <line x1="13.5" y1="7.5" x2="21" y2="7.5"/>
+                <rect x="3" y="14" width="7" height="7" rx="1.6"/>
+                <line x1="13.5" y1="17.5" x2="21" y2="17.5"/>
+              </svg>
+            </button>
             <button type="button" id="btn-proyectos-new-root" class="icon-btn" aria-label="Nueva página" title="Nueva página">+</button>
           </span>
         </div>
@@ -525,6 +536,9 @@
               <button type="button" id="btn-proyectos-favorite" class="icon-btn" aria-label="Favorito" title="Favorito">☆</button>
               <button type="button" id="btn-proyectos-cover" class="icon-btn" aria-label="Portada" title="Color de portada">▦</button>
               <button type="button" id="btn-proyectos-subpage" class="secondary-btn" title="Crear una subpágina dentro de esta">+ Subpágina</button>
+              <!-- Exportar la pagina (o su arbol entero) a un PDF de
+                   verdad, para llevarsela fuera de la app. -->
+              <button type="button" id="btn-proyectos-pdf" class="secondary-btn" title="Exportar a PDF (esta página o con sus subpáginas)">PDF</button>
               <div class="spacer"></div>
               <button type="button" id="btn-proyectos-delete" class="danger-btn" title="Borrar esta página (sus subpáginas suben un nivel)">Borrar</button>
               <button type="button" id="btn-proyectos-delete-tree" class="danger-btn-solid" title="Borrar esta página Y todas sus subpáginas">Borrar con subpáginas</button>

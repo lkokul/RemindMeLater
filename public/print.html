@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<!-- print.html: la plantilla del "Exportar a PDF" de Proyectos.
+
+     La carga una ventana OCULTA de Electron (ver 'export-pdf' en
+     electron/main.js), que mete el contenido en #print-root y llama a
+     printToPDF. Va por el mismo origen app:// que la app, asi que las
+     imagenes de /api/proyectos/images/... cargan tal cual.
+
+     Los estilos van FIJOS en claro (papel blanco, texto oscuro) a
+     proposito: un PDF no tiene tema, y los colores fijos de la app
+     (etiquetas, alerts, urgencias) ya estan elegidos para leer bien
+     sobre claro Y oscuro. Replica los bloques del editor de Proyectos
+     (styles.css) en version imprimible. -->
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Exportar a PDF</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 11pt;
+      line-height: 1.55;
+      color: #1c2128;
+      background: #ffffff;
+    }
+    #print-root { padding: 0.4cm 0.2cm; }
+
+    /* Cada pagina exportada empieza en una hoja nueva (menos la primera). */
+    .pdf-page { page-break-before: always; }
+    .pdf-page:first-child { page-break-before: auto; }
+    .pdf-title {
+      font-size: 20pt; font-weight: 800;
+      margin: 0 0 0.15cm;
+    }
+    /* La "miga de pan" de una subpagina: de que pagina cuelga. */
+    .pdf-crumb { font-size: 8.5pt; color: #6e7681; margin-bottom: 0.35cm; }
+    .pdf-body { }
+
+    /* --- Los bloques del editor, en version papel --- */
+    .pdf-body h1 { font-size: 15pt; margin: 0.5cm 0 0.1cm; }
+    .pdf-body h2 { font-size: 13pt; margin: 0.4cm 0 0.1cm; }
+    .pdf-body h3 { font-size: 11.5pt; margin: 0.3cm 0 0.1cm; }
+    .pdf-body ul, .pdf-body ol { margin: 0.1cm 0; padding-left: 0.7cm; }
+    .pdf-body blockquote {
+      margin: 0.15cm 0; padding: 0.05cm 0 0.05cm 0.35cm;
+      border-left: 3px solid #8b949e; color: #444c56;
+    }
+    .pdf-body hr { border: none; border-top: 1px solid #d0d7de; margin: 0.3cm 0; }
+    .pdf-body img { max-width: 100%; border-radius: 4px; }
+    .pdf-body a { color: #0969da; }
+    .pdf-body pre {
+      background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+      padding: 0.25cm 0.3cm; margin: 0.2cm 0;
+      font-size: 9pt; overflow-x: hidden; white-space: pre-wrap; word-break: break-word;
+      page-break-inside: avoid;
+    }
+    .pdf-body pre code { font-family: Consolas, 'Courier New', monospace; }
+    /* La etiqueta del lenguaje, arriba a la derecha como en la app. */
+    .pdf-body pre { position: relative; }
+    .pdf-body pre[data-lang]::after {
+      content: attr(data-lang);
+      position: absolute; top: 0.1cm; right: 0.2cm;
+      font-size: 7.5pt; color: #8b949e; font-family: inherit;
+    }
+
+    /* Alineacion por bloque, la misma que en la app. */
+    .pdf-body [data-align="center"] { text-align: center; }
+    .pdf-body [data-align="right"] { text-align: right; }
+    .pdf-body [data-align="justify"] { text-align: justify; }
+
+    /* Tablas del cuerpo. */
+    .pdf-body table { border-collapse: collapse; margin: 0.2cm 0; }
+    .pdf-body td, .pdf-body th {
+      border: 1px solid #d0d7de; padding: 0.1cm 0.18cm;
+      vertical-align: middle;
+    }
+    .pdf-body td[data-valign="top"], .pdf-body th[data-valign="top"] { vertical-align: top; }
+    .pdf-body td[data-valign="bottom"], .pdf-body th[data-valign="bottom"] { vertical-align: bottom; }
+    .pdf-body th { background: #f6f8fa; font-weight: 600; }
+
+    /* Tareas con casilla (data-todo). */
+    .pdf-body [data-todo] { position: relative; padding-left: 0.55cm; }
+    .pdf-body [data-todo]::before {
+      content: '';
+      position: absolute; left: 0; top: 0.1cm;
+      width: 0.32cm; height: 0.32cm;
+      border: 1.5pt solid #8b949e; border-radius: 2px;
+    }
+    .pdf-body [data-todo][data-done="1"]::before {
+      background: #3fb950; border-color: #3fb950;
+    }
+    .pdf-body [data-todo][data-done="1"] { text-decoration: line-through; color: #6e7681; }
+
+    /* Toggles (details): en papel no se pliega nada — todo abierto. */
+    .pdf-body details, .pdf-body details > * { display: block; }
+    .pdf-body summary { font-weight: 600; list-style: none; }
+    .pdf-body summary::before { content: '▾ '; color: #8b949e; }
+    .pdf-body details > div { padding-left: 0.45cm; }
+
+    /* Callouts y alerts (mismos colores fijos que la app). */
+    .pdf-body [data-callout] {
+      background: #f6f8fa; border-radius: 6px;
+      padding: 0.2cm 0.3cm; margin: 0.15cm 0;
+      page-break-inside: avoid;
+    }
+    .pdf-body [data-callout][data-icon]::before {
+      content: attr(data-icon) ' ';
+    }
+    .pdf-body [data-callout][data-kind] { border-left: 3px solid var(--alert-color); }
+    .pdf-body [data-callout][data-kind]::before {
+      display: block; font-weight: 700; font-size: 9pt;
+      color: var(--alert-color); margin-bottom: 0.05cm;
+    }
+    .pdf-body [data-callout][data-kind="note"] { --alert-color: #4493f8; }
+    .pdf-body [data-callout][data-kind="note"]::before { content: 'Nota'; }
+    .pdf-body [data-callout][data-kind="tip"] { --alert-color: #3fb950; }
+    .pdf-body [data-callout][data-kind="tip"]::before { content: 'Consejo'; }
+    .pdf-body [data-callout][data-kind="important"] { --alert-color: #ab7df8; }
+    .pdf-body [data-callout][data-kind="important"]::before { content: 'Importante'; }
+    .pdf-body [data-callout][data-kind="warning"] { --alert-color: #d29922; }
+    .pdf-body [data-callout][data-kind="warning"]::before { content: 'Aviso'; }
+    .pdf-body [data-callout][data-kind="caution"] { --alert-color: #f85149; }
+    .pdf-body [data-callout][data-kind="caution"]::before { content: 'Peligro'; }
+
+    /* Diagramas ya renderizados (SVG de mermaid). */
+    .pdf-diagram { margin: 0.2cm 0; page-break-inside: avoid; }
+    .pdf-diagram svg { max-width: 100%; height: auto; }
+
+    /* Una base de datos, volcada como tabla estatica. */
+    .pdf-db { margin: 0.3cm 0; page-break-inside: avoid; }
+    .pdf-db-name { font-weight: 700; font-size: 10pt; margin-bottom: 0.1cm; }
+    .pdf-db table { border-collapse: collapse; width: 100%; font-size: 9pt; }
+    .pdf-db td, .pdf-db th { border: 1px solid #d0d7de; padding: 0.08cm 0.15cm; text-align: left; }
+    .pdf-db th { background: #f6f8fa; }
+    .pdf-label-pill {
+      display: inline-block; padding: 0 0.15cm; border-radius: 999px;
+      color: #fff; font-size: 8pt; font-weight: 600; margin-right: 0.06cm;
+      -webkit-print-color-adjust: exact;
+    }
+    .pdf-color-dot {
+      display: inline-block; width: 0.28cm; height: 0.28cm;
+      border-radius: 50%; vertical-align: middle;
+      -webkit-print-color-adjust: exact;
+    }
+
+    /* Que los fondos de color se impriman de verdad. */
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  </style>
+</head>
+<body>
+  <div id="print-root"></div>
+</body>
+</html>

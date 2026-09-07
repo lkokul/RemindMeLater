@@ -7,7 +7,7 @@
 // hablan entre ellas por IPC (ver electron/ipc.js). Lo que se ve en
 // pantalla es exactamente el mismo public/ de siempre, servido por un
 // esquema propio app:// (ver electron/protocol.js).
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -130,6 +130,61 @@ ipcMain.on('relaunch-app', () => {
 });
 ipcMain.on('set-fullscreen', (event, value) => {
   if (mainWindow) mainWindow.setFullScreen(!!value);
+});
+
+// Exportar a PDF (boton "PDF" de una pagina de Proyectos). La pagina
+// manda el HTML ya montado (titulos, cuerpo, bases de datos como tablas
+// estaticas, diagramas como SVG); aqui:
+//   1. se pregunta DONDE guardarlo con el dialogo nativo de archivos
+//      (la unica forma correcta de elegir un destino en el disco),
+//   2. se pinta ese HTML en una ventana OCULTA que carga
+//      public/print.html (mismo origen app://, asi las imagenes de
+//      /api/proyectos/images/... cargan igual que en la app), y
+//   3. se convierte a PDF con printToPDF y se escribe el archivo.
+ipcMain.handle('export-pdf', async (event, payload) => {
+  const title = payload && typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'proyecto';
+  const html = payload && typeof payload.html === 'string' ? payload.html : '';
+  // Nombre de archivo sin caracteres que Windows no admite.
+  const safeName = title.replace(/[\\/:*?"<>|]/g, '-').slice(0, 120);
+
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Exportar a PDF',
+    defaultPath: `${safeName}.pdf`,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (canceled || !filePath) return { canceled: true };
+
+  const printWindow = new BrowserWindow({
+    show: false,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  try {
+    await printWindow.loadURL(`${ORIGIN}/print.html`);
+    // Colocar el contenido y esperar a que TODAS sus imagenes carguen
+    // (si no, el PDF podria salir con huecos donde iban las fotos).
+    await printWindow.webContents.executeJavaScript(`
+      (async () => {
+        document.getElementById('print-root').innerHTML = ${JSON.stringify(html)};
+        const images = [...document.images];
+        await Promise.all(images.map((img) => img.complete ? null : new Promise((resolve) => {
+          img.addEventListener('load', resolve);
+          img.addEventListener('error', resolve);
+          setTimeout(resolve, 4000); // ninguna imagen cuelga el export
+        })));
+        return true;
+      })()
+    `);
+    const pdf = await printWindow.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'A4',
+    });
+    fs.writeFileSync(filePath, pdf);
+    return { ok: true, path: filePath };
+  } catch (err) {
+    return { error: err.message || String(err) };
+  } finally {
+    printWindow.destroy();
+  }
 });
 ipcMain.on('save-view-mode', (event, mode) => {
   writeSavedViewMode(typeof mode === 'string' ? mode : 'normal');

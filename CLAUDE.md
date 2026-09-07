@@ -484,6 +484,46 @@ ahora se llama `device`.
         puesto (el label reenvía la activación a su primer control
         cuando el botón clicado ya no está en el documento). Se montó en
         un `<div>` con la misma clase.
+    - **Ronda de pulido 4** (feedback tras probar la anterior; driver
+      `drive-round4.js` + `drive-pdf.js`):
+      - **Selección + arrastre**: arrastrar una fila MARCADA arrastra la
+        selección entera (`proyectosEffectiveDragIds`); al soltar se
+        sale solo del modo. Seleccionar una madre marca sus
+        descendientes como "incluidas de serie" (casilla marcada y
+        deshabilitada) y `proyectosSelectionTopLevel()` filtra las que
+        viajan dentro de otra marcada — moverlas aparte las sacaría de
+        su madre, justo lo contrario de lo esperado.
+        `moveProyectosPage` → `moveProyectosPages(ids, parentId,
+        basePosition)` (posiciones base+i; null = al final). Botón ☑
+        sustituido por SVG lineal (`.proyectos-select-btn`).
+      - **Zoom del Cronograma**: botones −/+ junto al desplegable y
+        Ctrl+rueda sobre el lienzo, siempre anclando el día bajo el
+        cursor/centro (`proyectosTlPendingAnchor`, un solo uso, lo
+        consume el siguiente render; el rango no cambia entre zooms así
+        que el nº de día vale tal cual).
+      - **Diagramas en vivo**: escribiendo dentro de un pre mermaid, el
+        dibujo se refresca solo (debounce 500ms,
+        `renderProyectosDiagramPre(pre, {hideSource:false})`) sin
+        esconder el texto; con sintaxis a medias se CONSERVA el último
+        dibujo bueno (nada de error a cada tecla). El error solo se
+        enseña al salir del bloque.
+      - **La demo de la guía trae las tarjetas puestas**: propiedades
+        Etiquetas (3 colores) y Color ya creadas, valores en las filas,
+        fechas RELATIVAS a hoy (para que el amarillo/rojo se vea) y un
+        cuerpo con tareas — antes había que crear las propiedades a
+        mano para llegar a ver lo de "estilo Trello", y Koku no lo vio.
+      - **Exportar a PDF**: botón "PDF" en la barra de la página (solo
+        esta / con subpáginas, popover). El cliente monta HTML
+        imprimible (`buildProyectosPdfSection`: bases → tabla estática
+        con pastillas/colores, mermaid → SVG con tema CLARO temporal —
+        `proyectosMermaidReady = false` al acabar para volver al de la
+        app), y `window.electronAPI.exportPdf` (preload) →
+        `'export-pdf'` en main.js: diálogo nativo de guardar + ventana
+        oculta con `public/print.html` (mismo origen app://, las
+        imágenes cargan; espera a que carguen) + `printToPDF` + escribir
+        el archivo. print.html lleva los estilos de TODOS los bloques
+        en claro fijo (papel). OJO: cambiar preload/main pide reiniciar
+        la app.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 

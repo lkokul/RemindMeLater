@@ -276,7 +276,10 @@ arriba:
   colores de urgencia (amarillo hoy/mañana, rojo vencida), el progreso
   de sus tareas (2/5) y una franja del color elegido; cada fila se abre
   en un panel lateral ("side peek") con
-  sus propiedades y notas propias, como una mini-página.
+  sus propiedades y notas propias, como una mini-página. Cualquier
+  página se puede **exportar a PDF** (sola o con todas sus subpáginas,
+  cada una en su hoja) con las bases de datos volcadas como tablas y
+  los diagramas dibujados.
 ## Como esta montada por dentro
 
 No hay servidor, ni puerto, ni HTTP. La app son tres piezas:

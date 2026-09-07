@@ -4164,7 +4164,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   margin-bottom: 0.4rem;
 }
 /* El desplegable del zoom no necesita ocupar media pantalla. */
-.proyectos-tl-controls > :first-child { width: 180px; flex-shrink: 0; }
+.proyectos-tl-controls .select-field { width: 180px; flex-shrink: 0; }
 .proyectos-tl-legend { font-size: 0.78rem; }
 .proyectos-tl-scroll {
   overflow-x: auto;
@@ -4236,3 +4236,17 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 .proyectos-tl-undated-chip { cursor: pointer; border: none; font: inherit; font-size: 0.78rem; }
 .proyectos-tl-undated-chip:hover { outline: 1px solid var(--accent); }
+
+/* --- Ronda de pulido: seleccion, zoom del cronograma y PDF --- */
+/* El icono SVG del boton de seleccionar, centrado y a juego. */
+.proyectos-select-btn { display: inline-flex; align-items: center; justify-content: center; }
+.proyectos-select-btn svg { display: block; }
+/* Zoom del cronograma: padding lateral explicito en el desplegable y
+   botones -/+ compactos a los lados. */
+.proyectos-tl-controls .select-field-trigger { padding: 0.35rem 0.8rem; }
+.proyectos-tl-zoom-btn {
+  width: 1.8rem; height: 1.8rem; flex-shrink: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 1rem; line-height: 1;
+}
+.proyectos-tl-zoom-btn:disabled { opacity: 0.35; cursor: default; }

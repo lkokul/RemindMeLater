@@ -44,6 +44,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // mismo sigue con el viejo cargado en memoria — hace falta cerrar y
   // volver a abrir de verdad para que se note.
   relaunchApp: () => ipcRenderer.send('relaunch-app'),
+  // Exportar una pagina de Proyectos (con o sin subpaginas) a PDF: la
+  // pagina monta el HTML imprimible y el proceso principal pregunta
+  // donde guardarlo y lo convierte (ver 'export-pdf' en main.js).
+  // Devuelve { ok, path } | { canceled } | { error }.
+  exportPdf: (payload) => ipcRenderer.invoke('export-pdf', payload),
   // window.electronAPI.isElectron existe siempre que estamos aqui dentro
   // (a diferencia de las demas funciones, no manda nada) — sirve para que
   // el codigo de la pagina pueda preguntar "¿estoy en Electron?" sin

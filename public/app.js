@@ -10131,68 +10131,75 @@ function renderProyectosTree() {
       // mas simple de pintar y de estilar.
       row.style.paddingLeft = `${0.4 + depth * 1.1}rem`;
 
-      // Arrastrar para reordenar/mover (fuera del modo seleccion): la
-      // fila entera se puede coger y soltar sobre otra. Segun DONDE se
-      // suelte: tercio de arriba = delante de esa pagina, tercio de
-      // abajo = detras, el centro = DENTRO (como subpagina al final).
-      if (!proyectosSelectMode) {
-        row.draggable = true;
-        row.addEventListener('dragstart', (e) => {
-          proyectosDragId = page.id;
-          e.dataTransfer.effectAllowed = 'move';
-          try { e.dataTransfer.setData('text/plain', String(page.id)); } catch (err) { /* da igual */ }
-        });
-        row.addEventListener('dragend', () => {
-          proyectosDragId = null;
-          clearProyectosDropMarks();
-        });
-        row.addEventListener('dragover', (e) => {
-          if (proyectosDragId === null || proyectosDragId === page.id) return;
-          // Nunca dentro de si misma ni de una de sus descendientes.
-          if (proyectosPageIsDescendantOf(page.id, proyectosDragId)) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          const rect = row.getBoundingClientRect();
-          const y = e.clientY - rect.top;
-          clearProyectosDropMarks();
-          if (y < rect.height * 0.3) row.classList.add('drop-before');
-          else if (y > rect.height * 0.7) row.classList.add('drop-after');
-          else row.classList.add('drop-inside');
-        });
-        row.addEventListener('dragleave', () => {
-          row.classList.remove('drop-before', 'drop-after', 'drop-inside');
-        });
-        row.addEventListener('drop', async (e) => {
-          e.preventDefault();
-          const mode = row.classList.contains('drop-before') ? 'before'
-            : row.classList.contains('drop-inside') ? 'inside' : 'after';
-          clearProyectosDropMarks();
-          const dragId = proyectosDragId;
-          proyectosDragId = null;
-          if (dragId === null || dragId === page.id) return;
-          if (proyectosPageIsDescendantOf(page.id, dragId)) return;
-          if (mode === 'inside') {
-            const count = proyectosChildrenOf(page.id).filter((p) => p.id !== dragId).length;
-            proyectosExpandedIds.add(page.id);
-            saveProyectosExpanded();
-            await moveProyectosPage(dragId, page.id, count);
-          } else {
-            // Colocarla justo delante/detras de esta fila, entre sus
-            // MISMAS hermanas (el indice se calcula sin contar a la que
-            // se esta moviendo, que es como lo espera el backend).
-            const siblings = proyectosChildrenOf(page.parentId).filter((p) => p.id !== dragId);
-            const idx = siblings.findIndex((p) => p.id === page.id);
-            await moveProyectosPage(dragId, page.parentId, mode === 'before' ? idx : idx + 1);
-          }
-        });
-      }
+      // Arrastrar para reordenar/mover: la fila entera se puede coger y
+      // soltar sobre otra. Segun DONDE se suelte: tercio de arriba =
+      // delante de esa pagina, tercio de abajo = detras, el centro =
+      // DENTRO (como subpagina al final). En modo seleccion, arrastrar
+      // una fila MARCADA arrastra toda la seleccion de golpe.
+      row.draggable = true;
+      row.addEventListener('dragstart', (e) => {
+        proyectosDragId = page.id;
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', String(page.id)); } catch (err) { /* da igual */ }
+      });
+      row.addEventListener('dragend', () => {
+        proyectosDragId = null;
+        clearProyectosDropMarks();
+      });
+      row.addEventListener('dragover', (e) => {
+        if (proyectosDragBlockedOn(page.id)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const rect = row.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        clearProyectosDropMarks();
+        if (y < rect.height * 0.3) row.classList.add('drop-before');
+        else if (y > rect.height * 0.7) row.classList.add('drop-after');
+        else row.classList.add('drop-inside');
+      });
+      row.addEventListener('dragleave', () => {
+        row.classList.remove('drop-before', 'drop-after', 'drop-inside');
+      });
+      row.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        const mode = row.classList.contains('drop-before') ? 'before'
+          : row.classList.contains('drop-inside') ? 'inside' : 'after';
+        clearProyectosDropMarks();
+        if (proyectosDragBlockedOn(page.id)) { proyectosDragId = null; return; }
+        const dragIds = proyectosEffectiveDragIds();
+        // Si lo arrastrado era LA SELECCION, el trabajo del modo ya esta
+        // hecho: se sale solo (igual que tras "Mover a…").
+        const fromSelection = proyectosSelectMode && proyectosSelectedIds.has(proyectosDragId);
+        proyectosDragId = null;
+        if (dragIds.length === 0) return;
+        if (fromSelection) setProyectosSelectMode(false);
+        if (mode === 'inside') {
+          proyectosExpandedIds.add(page.id);
+          saveProyectosExpanded();
+          await moveProyectosPages(dragIds, page.id, null); // al final, en orden
+        } else {
+          // Colocarlas justo delante/detras de esta fila, entre sus
+          // MISMAS hermanas (el indice se calcula sin contar a las que
+          // se estan moviendo, que es como lo espera el backend).
+          const siblings = proyectosChildrenOf(page.parentId).filter((p) => !dragIds.includes(p.id));
+          const idx = siblings.findIndex((p) => p.id === page.id);
+          await moveProyectosPages(dragIds, page.parentId, mode === 'before' ? idx : idx + 1);
+        }
+      });
 
-      // Modo seleccion: casilla delante de cada fila.
+      // Modo seleccion: casilla delante de cada fila. Si una pagina de
+      // MAS ARRIBA ya esta marcada, esta va incluida de serie (viaja
+      // dentro de su madre): su casilla sale marcada y bloqueada.
       if (proyectosSelectMode) {
+        const implicit = [...proyectosSelectedIds].some(
+          (selectedId) => selectedId !== page.id && proyectosPageIsDescendantOf(page.id, selectedId)
+        );
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.className = 'styled-checkbox';
-        checkbox.checked = proyectosSelectedIds.has(page.id);
+        checkbox.checked = implicit || proyectosSelectedIds.has(page.id);
+        checkbox.disabled = implicit;
+        if (implicit) checkbox.title = 'Va incluida: una página de más arriba ya está seleccionada';
         checkbox.addEventListener('click', (e) => e.stopPropagation());
         checkbox.addEventListener('change', () => toggleProyectosSelection(page.id));
         row.appendChild(checkbox);
@@ -10252,10 +10259,17 @@ function renderProyectosTree() {
       }
 
       // En modo seleccion, el clic en la fila marca/desmarca (la flecha
-      // de desplegar sigue funcionando igual); fuera de el, abre.
+      // de desplegar sigue funcionando igual); fuera de el, abre. Una
+      // fila incluida de serie (madre marcada) no se toca.
       row.addEventListener('click', () => {
-        if (proyectosSelectMode) toggleProyectosSelection(page.id);
-        else openProyectosPage(page.id);
+        if (proyectosSelectMode) {
+          const implicit = [...proyectosSelectedIds].some(
+            (selectedId) => selectedId !== page.id && proyectosPageIsDescendantOf(page.id, selectedId)
+          );
+          if (!implicit) toggleProyectosSelection(page.id);
+        } else {
+          openProyectosPage(page.id);
+        }
       });
       tree.appendChild(row);
 
@@ -10302,17 +10316,54 @@ function clearProyectosDropMarks() {
   document.getElementById('proyectos-tree').classList.remove('drop-root');
 }
 
-// El movimiento en si: PUT al endpoint de mover y repintar todo lo que
-// enseña posiciones o jerarquia (arbol, migas, subnav).
-async function moveProyectosPage(id, parentId, position) {
-  try {
-    await api(`/api/proyectos-pages/${id}/move`, {
-      method: 'PUT',
-      body: JSON.stringify({ parentId: parentId ?? null, position }),
-    });
-  } catch (err) {
-    console.error('No se pudo mover la página:', err);
-    showAppAlert(`No se pudo mover la página: ${err.message}`);
+// Lo "de verdad" seleccionado a efectos de mover: las marcadas SIN las
+// que ya viajan dentro de otra marcada (mover a la madre ya se lleva a
+// sus hijas — moverlas tambien las sacaria de ella, justo lo contrario
+// de lo que se espera). En orden del arbol, para que al llegar al
+// destino conserven su orden relativo.
+function proyectosSelectionTopLevel() {
+  return proyectosPages
+    .filter((p) => proyectosSelectedIds.has(p.id))
+    .filter((p) => ![...proyectosSelectedIds].some(
+      (other) => other !== p.id && proyectosPageIsDescendantOf(p.id, other)
+    ))
+    .map((p) => p.id);
+}
+
+// Que paginas viajan en el arrastre actual: si la cogida esta marcada
+// (en modo seleccion), viaja la seleccion entera; si no, ella sola.
+function proyectosEffectiveDragIds() {
+  if (proyectosDragId === null) return [];
+  if (!proyectosSelectMode || !proyectosSelectedIds.has(proyectosDragId)) return [proyectosDragId];
+  return proyectosSelectionTopLevel();
+}
+
+// ¿Es esta fila un destino PROHIBIDO para el arrastre actual? (una de
+// las que viajan, o algo que cuelga de ellas).
+function proyectosDragBlockedOn(pageId) {
+  if (proyectosDragId === null) return true;
+  return proyectosEffectiveDragIds().some(
+    (id) => id === pageId || proyectosPageIsDescendantOf(pageId, id)
+  );
+}
+
+// El movimiento en si: un PUT de mover por pagina (en orden, cada una
+// una posicion mas alla) y repintar todo lo que enseña posiciones o
+// jerarquia (arbol, migas, subnav). basePosition null = al final.
+async function moveProyectosPages(ids, parentId, basePosition) {
+  for (let i = 0; i < ids.length; i++) {
+    try {
+      await api(`/api/proyectos-pages/${ids[i]}/move`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          parentId: parentId ?? null,
+          position: basePosition === null || basePosition === undefined ? undefined : basePosition + i,
+        }),
+      });
+    } catch (err) {
+      console.error('No se pudo mover la página:', err);
+      showAppAlert(`No se pudo mover la página: ${err.message}`);
+    }
   }
   await loadProyectosPages();
   renderProyectosTree();
@@ -10336,11 +10387,12 @@ document.getElementById('proyectos-tree').addEventListener('drop', async (e) => 
   if (e.target !== e.currentTarget) return;
   e.preventDefault();
   clearProyectosDropMarks();
-  const dragId = proyectosDragId;
+  const dragIds = proyectosEffectiveDragIds();
+  const fromSelection = proyectosSelectMode && proyectosSelectedIds.has(proyectosDragId);
   proyectosDragId = null;
-  if (dragId === null) return;
-  const rootCount = proyectosChildrenOf(null).filter((p) => p.id !== dragId).length;
-  await moveProyectosPage(dragId, null, rootCount);
+  if (dragIds.length === 0) return;
+  if (fromSelection) setProyectosSelectMode(false);
+  await moveProyectosPages(dragIds, null, null); // al primer nivel, al final
 });
 
 function setProyectosSelectMode(on) {
@@ -10397,26 +10449,12 @@ document.getElementById('btn-proyectos-move-selected').addEventListener('click',
 
   async function moveSelectionTo(parentId) {
     popover.classList.add('hidden');
-    // En el orden del arbol, para que conserven su orden relativo al
-    // llegar (cada una entra al final del destino).
-    const ordered = proyectosPages.filter((p) => proyectosSelectedIds.has(p.id));
-    for (const page of ordered) {
-      try {
-        await api(`/api/proyectos-pages/${page.id}/move`, {
-          method: 'PUT',
-          body: JSON.stringify({ parentId }),
-        });
-      } catch (err) {
-        console.error('No se pudo mover la página:', err);
-        showAppAlert(`No se pudo mover "${page.title || 'Sin título'}": ${err.message}`);
-      }
-    }
+    // Solo las "de arriba" de la seleccion: las marcadas que cuelgan de
+    // otra marcada viajan solas dentro de su madre.
+    const ids = proyectosSelectionTopLevel();
     if (parentId) { proyectosExpandedIds.add(parentId); saveProyectosExpanded(); }
     setProyectosSelectMode(false);
-    await loadProyectosPages();
-    renderProyectosTree();
-    renderProyectosBreadcrumb();
-    renderProyectosSubnav();
+    await moveProyectosPages(ids, parentId, null);
   }
 
   function renderList(query) {
@@ -10715,6 +10753,240 @@ async function deleteCurrentProyectosPage({ withChildren = false } = {}) {
 }
 document.getElementById('btn-proyectos-delete').addEventListener('click', () => deleteCurrentProyectosPage());
 document.getElementById('btn-proyectos-delete-tree').addEventListener('click', () => deleteCurrentProyectosPage({ withChildren: true }));
+
+// ---------------------------------------------------------------------
+// Exportar a PDF (boton "PDF" de la barra de la pagina)
+//
+// La pagina monta aqui un HTML "imprimible" y se lo pasa a Electron,
+// que pregunta donde guardarlo (dialogo nativo de archivos) y lo
+// convierte con una ventana oculta (ver 'export-pdf' en
+// electron/main.js y la plantilla public/print.html). Antes de mandar
+// nada se transforma lo que en la app es interactivo:
+//   - cada base de datos embebida se vuelca como tabla estatica
+//     (titulo + propiedades, con sus pastillas y colores),
+//   - cada diagrama se dibuja como SVG (con el tema CLARO de mermaid,
+//     que un PDF es papel blanco aunque la app este en oscuro),
+//   - el resto (titulos, tareas, callouts, alerts, tablas, imagenes)
+//     ya es HTML normal y lo estila print.html.
+// Con subpaginas: cada pagina del subarbol sale en su propia hoja, con
+// su cadena de antepasados como miga de pan.
+// ---------------------------------------------------------------------
+// Ids del subarbol de una pagina, en orden de documento (la madre y
+// luego cada hija con lo suyo, en profundidad).
+function proyectosSubtreeIds(rootId) {
+  const out = [rootId];
+  const walk = (id) => {
+    for (const child of proyectosChildrenOf(id)) {
+      out.push(child.id);
+      walk(child.id);
+    }
+  };
+  walk(rootId);
+  return out;
+}
+
+// "Guía de Proyectos / Bases de datos" — de que cuelga una subpagina.
+function proyectosPdfCrumb(pageId) {
+  const parts = [];
+  let current = proyectosPages.find((p) => p.id === pageId);
+  const seen = new Set();
+  while (current && current.parentId !== null && !seen.has(current.id)) {
+    seen.add(current.id);
+    current = proyectosPages.find((p) => p.id === current.parentId);
+    if (current) parts.unshift(current.title || 'Sin título');
+  }
+  return parts.join(' / ');
+}
+
+// Una base de datos como tabla estatica para el papel.
+function buildProyectosPdfDbTable(data) {
+  const wrap = document.createElement('div');
+  wrap.className = 'pdf-db';
+  if (data.name) {
+    const nameEl = document.createElement('div');
+    nameEl.className = 'pdf-db-name';
+    nameEl.textContent = data.name;
+    wrap.appendChild(nameEl);
+  }
+  const table = document.createElement('table');
+  const headRow = document.createElement('tr');
+  const titleTh = document.createElement('th');
+  titleTh.textContent = 'Título';
+  headRow.appendChild(titleTh);
+  for (const prop of data.props) {
+    const th = document.createElement('th');
+    th.textContent = prop.name;
+    headRow.appendChild(th);
+  }
+  table.appendChild(headRow);
+  for (const row of visibleProyectosDbRows(data)) {
+    const tr = document.createElement('tr');
+    const titleTd = document.createElement('td');
+    titleTd.textContent = row.title || 'Sin título';
+    tr.appendChild(titleTd);
+    for (const prop of data.props) {
+      const td = document.createElement('td');
+      const value = row.values[prop.id] || '';
+      if (prop.type === 'labels') {
+        for (const name of parseProyectosLabelsValue(value)) {
+          const opt = prop.options.find((o) => o && o.name === name);
+          if (!opt) continue;
+          const pill = document.createElement('span');
+          pill.className = 'pdf-label-pill';
+          pill.textContent = name;
+          pill.style.backgroundColor = opt.color;
+          td.appendChild(pill);
+        }
+      } else if (prop.type === 'color') {
+        if (PROYECTOS_HEX_COLOR.test(value)) {
+          const dot = document.createElement('span');
+          dot.className = 'pdf-color-dot';
+          dot.style.backgroundColor = value;
+          td.appendChild(dot);
+        }
+      } else if (prop.type === 'checkbox') {
+        td.textContent = value === '1' ? '✓' : '—';
+      } else if (prop.type === 'date' && value) {
+        td.textContent = new Date(`${value}T00:00:00`).toLocaleDateString('es-ES');
+      } else {
+        td.textContent = value;
+      }
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  }
+  wrap.appendChild(table);
+  return wrap;
+}
+
+// Una pagina -> su <section> imprimible (titulo + miga + cuerpo ya
+// transformado).
+async function buildProyectosPdfSection(pageId) {
+  const page = await api(`/api/proyectos-pages/${pageId}`);
+  const holder = document.createElement('div');
+  holder.innerHTML = page.body || '';
+
+  // Bases de datos: del marcador a la tabla estatica.
+  for (const marker of [...holder.querySelectorAll('[data-proyectos-db]')]) {
+    const dbId = Number(marker.getAttribute('data-proyectos-db'));
+    try {
+      const data = await api(`/api/proyectos-databases/${dbId}`);
+      marker.replaceWith(buildProyectosPdfDbTable(data));
+    } catch (err) {
+      marker.remove(); // una base ya borrada no rompe el export
+    }
+  }
+  // Diagramas: del texto mermaid al SVG dibujado.
+  if (typeof mermaid !== 'undefined') {
+    for (const pre of [...holder.querySelectorAll('pre[data-lang="mermaid"]')]) {
+      const text = (pre.textContent || '').trim();
+      if (!text) { pre.remove(); continue; }
+      const renderId = `pdf-diagram-${++proyectosMermaidSeq}`;
+      try {
+        const { svg } = await mermaid.render(renderId, text);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'pdf-diagram';
+        wrapper.innerHTML = svg;
+        pre.replaceWith(wrapper);
+      } catch (err) {
+        // Con la sintaxis rota se imprime el texto tal cual.
+        document.getElementById(renderId)?.remove();
+        document.getElementById(`d${renderId}`)?.remove();
+      }
+    }
+  }
+
+  const section = document.createElement('section');
+  section.className = 'pdf-page';
+  const crumb = proyectosPdfCrumb(page.id);
+  if (crumb) {
+    const crumbEl = document.createElement('div');
+    crumbEl.className = 'pdf-crumb';
+    crumbEl.textContent = crumb;
+    section.appendChild(crumbEl);
+  }
+  const titleEl = document.createElement('h1');
+  titleEl.className = 'pdf-title';
+  titleEl.textContent = `${page.icon ? page.icon + ' ' : ''}${page.title || 'Sin título'}`;
+  section.appendChild(titleEl);
+  const bodyEl = document.createElement('div');
+  bodyEl.className = 'pdf-body';
+  bodyEl.append(...holder.childNodes);
+  section.appendChild(bodyEl);
+  return section;
+}
+
+async function exportProyectosPdf({ withChildren }) {
+  if (!proyectosCurrentPage) return;
+  await flushProyectosSave();
+  const ids = withChildren ? proyectosSubtreeIds(proyectosCurrentPage.id) : [proyectosCurrentPage.id];
+  try {
+    // mermaid en tema claro mientras dura el export (el PDF es papel).
+    if (typeof mermaid !== 'undefined') {
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
+      proyectosMermaidReady = true;
+    }
+    const root = document.createElement('div');
+    for (const id of ids) root.appendChild(await buildProyectosPdfSection(id));
+    const result = await window.electronAPI.exportPdf({
+      html: root.innerHTML,
+      title: proyectosCurrentPage.title || 'proyecto',
+    });
+    if (result && result.error) showAppAlert(`No se pudo exportar el PDF: ${result.error}`);
+    else if (result && result.ok) showAppAlert(`PDF guardado en:\n${result.path}`);
+    // (cancelar el dialogo no dice nada: ya lo has cancelado tu)
+  } catch (err) {
+    console.error('No se pudo exportar el PDF:', err);
+    showAppAlert(`No se pudo exportar el PDF: ${err.message}`);
+  } finally {
+    // El proximo dibujo EN la app vuelve al tema claro/oscuro que toque.
+    proyectosMermaidReady = false;
+  }
+}
+
+// El boton: con subpaginas pregunta que alcance quieres; sin ellas
+// exporta directo.
+let proyectosPdfPopover = null;
+document.getElementById('btn-proyectos-pdf').addEventListener('click', (e) => {
+  if (!proyectosCurrentPage) return;
+  if (!window.electronAPI || !window.electronAPI.exportPdf) {
+    showAppAlert('Exportar a PDF necesita la app de escritorio (reiníciala si acabas de actualizar).');
+    return;
+  }
+  const descendants = proyectosSubtreeIds(proyectosCurrentPage.id).length - 1;
+  if (descendants === 0) {
+    exportProyectosPdf({ withChildren: false });
+    return;
+  }
+  e.stopPropagation();
+  if (!proyectosPdfPopover) {
+    proyectosPdfPopover = document.createElement('div');
+    proyectosPdfPopover.className = 'proyectos-table-menu-popover proyectos-pdf-popover hidden';
+    document.body.appendChild(proyectosPdfPopover);
+  }
+  const popover = proyectosPdfPopover;
+  popover.innerHTML = '';
+  const soloBtn = document.createElement('button');
+  soloBtn.type = 'button';
+  soloBtn.className = 'proyectos-table-menu-item';
+  soloBtn.textContent = 'Solo esta página';
+  soloBtn.addEventListener('click', () => {
+    popover.classList.add('hidden');
+    exportProyectosPdf({ withChildren: false });
+  });
+  popover.appendChild(soloBtn);
+  const allBtn = document.createElement('button');
+  allBtn.type = 'button';
+  allBtn.className = 'proyectos-table-menu-item';
+  allBtn.textContent = `Con subpáginas (${descendants + 1} páginas)`;
+  allBtn.addEventListener('click', () => {
+    popover.classList.add('hidden');
+    exportProyectosPdf({ withChildren: true });
+  });
+  popover.appendChild(allBtn);
+  popover.classList.remove('hidden');
+  positionFixedPopover(document.getElementById('btn-proyectos-pdf'), popover, { width: 230 });
+});
 
 // ---------------------------------------------------------------------
 // Modo "sin panel" (⛶): esconde el sidebar para leer/escribir a pantalla
@@ -11025,46 +11297,62 @@ function ensureProyectosMermaid() {
   return true;
 }
 
+// Dibuja UN bloque de diagrama. Dos modos:
+//   - normal (hideSource: true): al terminar bien, el texto se esconde
+//     y queda solo el dibujo (es lo que pasa al salir del bloque o al
+//     abrir la pagina).
+//   - "en vivo" (hideSource: false): mientras se ESCRIBE dentro, el
+//     dibujo se refresca debajo sin esconder el texto; y si la sintaxis
+//     esta a medias (lo normal a mitad de tecleo), se conserva el
+//     ultimo dibujo bueno en vez de enseñar el error a cada letra.
+async function renderProyectosDiagramPre(pre, { hideSource = true } = {}) {
+  if (!ensureProyectosMermaid()) return;
+  const code = pre.querySelector('code') || pre;
+  const text = plainProyectosCodeText(code).trim();
+  let preview = pre.nextElementSibling && pre.nextElementSibling.classList
+    && pre.nextElementSibling.classList.contains('proyectos-diagram-preview')
+    ? pre.nextElementSibling : null;
+  if (!text) {
+    // Bloque vacio: nada que dibujar, el texto se queda a la vista.
+    if (preview) preview.remove();
+    pre.classList.remove('proyectos-diagram-source-hidden');
+    return;
+  }
+  if (!preview) {
+    preview = document.createElement('div');
+    preview.className = 'proyectos-diagram-preview';
+    preview.contentEditable = 'false';
+    pre.after(preview);
+  }
+  const renderId = `proyectos-diagram-${++proyectosMermaidSeq}`;
+  try {
+    const { svg } = await mermaid.render(renderId, text);
+    preview.innerHTML = svg;
+    preview.classList.remove('error');
+    if (hideSource) {
+      // Con el diagrama dibujado, el texto se esconde. Clic en el
+      // diagrama para volver a editarlo (ver el manejador de clics).
+      pre.classList.add('proyectos-diagram-source-hidden');
+    }
+  } catch (err) {
+    // mermaid a veces deja en el body un contenedor temporal del
+    // dibujo fallido -- fuera, pase lo que pase.
+    document.getElementById(renderId)?.remove();
+    document.getElementById(`d${renderId}`)?.remove();
+    if (!hideSource) return; // en vivo: se conserva el ultimo dibujo bueno
+    // Sintaxis con errores al salir del bloque: aviso debajo y el
+    // texto se queda visible para poder corregirlo.
+    preview.textContent = `⚠ El diagrama tiene un error de sintaxis: ${err && err.message ? err.message : err}`;
+    preview.classList.add('error');
+    pre.classList.remove('proyectos-diagram-source-hidden');
+  }
+}
+
 async function renderProyectosDiagrams(root) {
   if (!ensureProyectosMermaid()) return;
   for (const pre of (root || PROYECTOS_BODY()).querySelectorAll('pre[data-lang="mermaid"]')) {
     if (pre.closest('[data-proyectos-db]')) continue;
-    const code = pre.querySelector('code') || pre;
-    const text = plainProyectosCodeText(code).trim();
-    let preview = pre.nextElementSibling && pre.nextElementSibling.classList
-      && pre.nextElementSibling.classList.contains('proyectos-diagram-preview')
-      ? pre.nextElementSibling : null;
-    if (!text) {
-      // Bloque vacio: nada que dibujar, el texto se queda a la vista.
-      if (preview) preview.remove();
-      pre.classList.remove('proyectos-diagram-source-hidden');
-      continue;
-    }
-    if (!preview) {
-      preview = document.createElement('div');
-      preview.className = 'proyectos-diagram-preview';
-      preview.contentEditable = 'false';
-      pre.after(preview);
-    }
-    const renderId = `proyectos-diagram-${++proyectosMermaidSeq}`;
-    try {
-      const { svg } = await mermaid.render(renderId, text);
-      preview.innerHTML = svg;
-      preview.classList.remove('error');
-      // Con el diagrama dibujado, el texto se esconde. Clic en el
-      // diagrama para volver a editarlo (ver el manejador de clics).
-      pre.classList.add('proyectos-diagram-source-hidden');
-    } catch (err) {
-      // Sintaxis a medias o con errores: aviso debajo y el texto se
-      // queda visible para poder corregirlo.
-      preview.textContent = `⚠ El diagrama tiene un error de sintaxis: ${err && err.message ? err.message : err}`;
-      preview.classList.add('error');
-      pre.classList.remove('proyectos-diagram-source-hidden');
-      // mermaid a veces deja en el body un contenedor temporal del
-      // dibujo fallido -- fuera.
-      document.getElementById(renderId)?.remove();
-      document.getElementById(`d${renderId}`)?.remove();
-    }
+    await renderProyectosDiagramPre(pre);
   }
 }
 
@@ -12656,7 +12944,23 @@ PROYECTOS_BODY().addEventListener('input', (e) => {
   } else if (proyectosLineAcceptsSlash(block) && block.textContent.endsWith('/')) {
     openProyectosSlashMenu(block);
   }
+
+  // Diagrama "en vivo": escribiendo dentro de un bloque mermaid, el
+  // dibujo de debajo se refresca solo (con medio segundo de calma para
+  // no redibujar a cada tecla). El texto no se esconde hasta salir.
+  const editingPre = proyectosSelectionPre();
+  if (editingPre && editingPre.getAttribute('data-lang') === 'mermaid') {
+    if (proyectosDiagramLiveTimer) clearTimeout(proyectosDiagramLiveTimer);
+    proyectosDiagramLiveTimer = setTimeout(() => {
+      proyectosDiagramLiveTimer = null;
+      if (document.contains(editingPre)) {
+        renderProyectosDiagramPre(editingPre, { hideSource: false });
+      }
+    }, 500);
+  }
 });
+// El temporizador del refresco en vivo de diagramas (una sola espera).
+let proyectosDiagramLiveTimer = null;
 
 // El menu se cierra si el cursor se va a otro sitio (clic fuera, etc.).
 document.addEventListener('selectionchange', () => {
@@ -12831,6 +13135,10 @@ document.addEventListener('click', (e) => {
   if (proyectosDbColorPopover && !proyectosDbColorPopover.classList.contains('hidden')
       && !e.target.closest('.proyectos-db-color-popover') && !e.target.closest('.proyectos-db-color-btn')) {
     proyectosDbColorPopover.classList.add('hidden');
+  }
+  if (proyectosPdfPopover && !proyectosPdfPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-pdf-popover') && !e.target.closest('#btn-proyectos-pdf')) {
+    proyectosPdfPopover.classList.add('hidden');
   }
   // (el caso de "nodo ya desconectado" lo corta el guard de arriba)
   if (proyectosDbConfigPopover && !proyectosDbConfigPopover.classList.contains('hidden')
@@ -13637,6 +13945,12 @@ function proyectosTlToIso(date) {
 
 // Estado del arrastre de una barra en curso, o null.
 let proyectosTlDrag = null;
+// Del mas lejos al mas cerca (para los botones -/+ y la rueda).
+const PROYECTOS_TL_ZOOM_ORDER = ['quarter', 'month', 'week'];
+// Al cambiar de zoom se apunta que DIA tenia que quedarse quieto bajo
+// que pixel, para que el repintado no te mande a otra parte del
+// calendario. Un solo uso; lo consume el siguiente render.
+let proyectosTlPendingAnchor = null; // { dbId, day, cursorX } o null
 
 function renderProyectosDbTimeline(view, data) {
   const dateProps = data.props.filter((p) => p.type === 'date');
@@ -13692,8 +14006,32 @@ function renderProyectosDbTimeline(view, data) {
   const xOf = (date) => proyectosTlDiffDays(rangeStart, date) * dayPx;
 
   // --- Barrita de controles: el zoom ---
+  // Cambia el zoom manteniendo un punto quieto: el dia que estaba bajo
+  // "cursorX" pixeles del borde sigue ahi tras repintar.
+  const setTimelineZoom = (next, anchor) => {
+    if (!PROYECTOS_TL_DAY_PX[next] || next === zoom) return;
+    localStorage.setItem(zoomKey, next);
+    proyectosTlPendingAnchor = anchor || null;
+    refreshProyectosDbWidget(data.id);
+  };
+  const centerAnchor = () => ({
+    dbId: data.id,
+    day: (scroll.scrollLeft + scroll.clientWidth / 2) / dayPx,
+    cursorX: scroll.clientWidth / 2,
+  });
+
   const controls = document.createElement('div');
   controls.className = 'proyectos-tl-controls';
+  const zoomOutBtn = document.createElement('button');
+  zoomOutBtn.type = 'button';
+  zoomOutBtn.className = 'icon-btn proyectos-tl-zoom-btn';
+  zoomOutBtn.textContent = '−';
+  zoomOutBtn.title = 'Alejar (también Ctrl + rueda del ratón)';
+  zoomOutBtn.disabled = PROYECTOS_TL_ZOOM_ORDER.indexOf(zoom) === 0;
+  zoomOutBtn.addEventListener('click', () => {
+    setTimelineZoom(PROYECTOS_TL_ZOOM_ORDER[PROYECTOS_TL_ZOOM_ORDER.indexOf(zoom) - 1], centerAnchor());
+  });
+  controls.appendChild(zoomOutBtn);
   const zoomField = createSelectField({
     options: [
       { value: 'week', label: 'Zoom: semana' },
@@ -13701,12 +14039,19 @@ function renderProyectosDbTimeline(view, data) {
       { value: 'quarter', label: 'Zoom: trimestre' },
     ],
     initialValue: zoom,
-    onChange: (v) => {
-      localStorage.setItem(zoomKey, v);
-      refreshProyectosDbWidget(data.id);
-    },
+    onChange: (v) => setTimelineZoom(v, centerAnchor()),
   });
   controls.appendChild(zoomField.element);
+  const zoomInBtn = document.createElement('button');
+  zoomInBtn.type = 'button';
+  zoomInBtn.className = 'icon-btn proyectos-tl-zoom-btn';
+  zoomInBtn.textContent = '+';
+  zoomInBtn.title = 'Acercar (también Ctrl + rueda del ratón)';
+  zoomInBtn.disabled = PROYECTOS_TL_ZOOM_ORDER.indexOf(zoom) === PROYECTOS_TL_ZOOM_ORDER.length - 1;
+  zoomInBtn.addEventListener('click', () => {
+    setTimelineZoom(PROYECTOS_TL_ZOOM_ORDER[PROYECTOS_TL_ZOOM_ORDER.indexOf(zoom) + 1], centerAnchor());
+  });
+  controls.appendChild(zoomInBtn);
   const legend = document.createElement('span');
   legend.className = 'hint proyectos-tl-legend';
   legend.textContent = startProp === endProp
@@ -13718,6 +14063,18 @@ function renderProyectosDbTimeline(view, data) {
   // --- El lienzo desplazable ---
   const scroll = document.createElement('div');
   scroll.className = 'proyectos-tl-scroll';
+  // Ctrl + rueda del raton = acercar/alejar, dejando quieto el dia que
+  // estaba bajo el cursor (como el zoom de un mapa).
+  scroll.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const index = PROYECTOS_TL_ZOOM_ORDER.indexOf(zoom);
+    const next = PROYECTOS_TL_ZOOM_ORDER[index + (e.deltaY < 0 ? 1 : -1)];
+    if (!next) return;
+    const rect = scroll.getBoundingClientRect();
+    const cursorX = e.clientX - rect.left;
+    setTimelineZoom(next, { dbId: data.id, day: (scroll.scrollLeft + cursorX) / dayPx, cursorX });
+  }, { passive: false });
   const canvas = document.createElement('div');
   canvas.className = 'proyectos-tl-canvas';
   canvas.style.width = `${totalWidth}px`;
@@ -13819,9 +14176,18 @@ function renderProyectosDbTimeline(view, data) {
   scroll.appendChild(canvas);
   view.appendChild(scroll);
 
-  // Al abrir, la vista se coloca sola con HOY a la izquierda.
+  // Al abrir, la vista se coloca sola con HOY a la izquierda — salvo que
+  // este repintado venga de un cambio de zoom, que entonces recoloca el
+  // dia anclado bajo su pixel (el rango no cambia entre zooms, asi que
+  // el numero de dia vale tal cual).
   requestAnimationFrame(() => {
-    scroll.scrollLeft = Math.max(0, xOf(today) - dayPx * 2);
+    if (proyectosTlPendingAnchor && proyectosTlPendingAnchor.dbId === data.id) {
+      const anchor = proyectosTlPendingAnchor;
+      proyectosTlPendingAnchor = null;
+      scroll.scrollLeft = Math.max(0, anchor.day * dayPx - anchor.cursorX);
+    } else {
+      scroll.scrollLeft = Math.max(0, xOf(today) - dayPx * 2);
+    }
   });
 
   if (dated.length === 0) {
@@ -14464,19 +14830,52 @@ async function createProyectosGuide() {
     method: 'POST',
     body: JSON.stringify({ name: 'Pagado', type: 'checkbox' }),
   });
+  // Etiquetas de color y color de tarjeta: los dos tipos "de tarjeta"
+  // van YA montados en la demo, para que el tablero enseñe pastillas,
+  // franjas y badges nada mas abrir la guia (si no, habia que crearlos
+  // a mano para llegar a verlos).
+  const etiquetasProp = await api(`/api/proyectos-databases/${demoDb.id}/props`, {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Etiquetas', type: 'labels', options: [
+      { name: 'vuelo', color: '#4493f8' },
+      { name: 'alojamiento', color: '#ab7df8' },
+      { name: 'urgente', color: '#f85149' },
+    ] }),
+  });
+  const colorProp = await api(`/api/proyectos-databases/${demoDb.id}/props`, {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Color', type: 'color' }),
+  });
 
   // Filas de ejemplo repartidas por los tres estados, para que el
-  // tablero se vea poblado nada más abrirlo.
+  // tablero se vea poblado nada más abrirlo. Las fechas se calculan
+  // RELATIVAS a hoy, para que los badges de urgencia (amarillo/rojo) se
+  // vean de verdad se cree la guía cuando se cree.
+  const demoIso = (offsetDays) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
   const demoRows = [
-    { title: 'Reservar los vuelos', values: { [estadoProp.id]: 'Hecho', [fechaProp.id]: '2026-09-20', [costeProp.id]: '240', [pagadoProp.id]: '1' } },
-    { title: 'Buscar alojamiento', values: { [estadoProp.id]: 'En curso', [fechaProp.id]: '2026-09-25', [costeProp.id]: '380' } },
-    { title: 'Hacer la maleta', values: { [estadoProp.id]: 'Pendiente', [fechaProp.id]: '2026-10-02' } },
+    { title: 'Reservar los vuelos', values: { [estadoProp.id]: 'Hecho', [fechaProp.id]: demoIso(-3), [costeProp.id]: '240', [pagadoProp.id]: '1', [etiquetasProp.id]: JSON.stringify(['vuelo']), [colorProp.id]: '#3fb950' } },
+    { title: 'Buscar alojamiento', values: { [estadoProp.id]: 'En curso', [fechaProp.id]: demoIso(1), [costeProp.id]: '380', [etiquetasProp.id]: JSON.stringify(['alojamiento', 'urgente']) } },
+    { title: 'Hacer la maleta', values: { [estadoProp.id]: 'Pendiente', [fechaProp.id]: demoIso(12) } },
     { title: 'Cambiar divisas', values: { [estadoProp.id]: 'Pendiente', [costeProp.id]: '150' } },
   ];
+  let demoDbFull = null;
   for (const row of demoRows) {
-    await api(`/api/proyectos-databases/${demoDb.id}/rows`, {
+    demoDbFull = await api(`/api/proyectos-databases/${demoDb.id}/rows`, {
       method: 'POST',
       body: JSON.stringify(row),
+    });
+  }
+  // "Hacer la maleta" lleva tareas en su cuerpo, para que su tarjeta
+  // enseñe el progreso (1/3).
+  const maletaRow = demoDbFull.rows.find((r) => r.title === 'Hacer la maleta');
+  if (maletaRow) {
+    await api(`/api/proyectos-databases/rows/${maletaRow.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ body: '<div data-todo="1" data-done="1">Ropa</div><div data-todo="1" data-done="0">Cargadores</div><div data-todo="1" data-done="0">Documentación</div>' }),
     });
   }
 
