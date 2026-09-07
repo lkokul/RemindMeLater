@@ -1256,6 +1256,9 @@ function refreshMobileTab() {
   const restNotify = document.getElementById('setting-gym-rest-notify');
   restNotify.disabled = !nativo;
   restNotify.checked = nativo && localStorage.getItem('gymRestNotify') !== 'false';
+  const restBurst = document.getElementById('setting-gym-rest-burst');
+  restBurst.disabled = !nativo;
+  restBurst.checked = nativo && localStorage.getItem('gymRestBurst') !== 'false';
 
   // Sonido y vibracion de los avisos, como on-off separados (peticion
   // de Koku). El matiz de iOS (con sonido, vibrar lo decide el sistema;
@@ -1307,6 +1310,14 @@ document.getElementById('btn-help-notif-reminders').addEventListener('click', ()
 });
 document.getElementById('btn-help-notif-rest').addEventListener('click', () => {
   showAppAlert('Durante un entrenamiento del Gimnasio, cuando se acaba el descanso entre series llega una notificación aunque la pantalla esté bloqueada — así no hace falta estar mirando el móvil. Usa el mismo permiso que los recordatorios.');
+});
+document.getElementById('setting-gym-rest-burst').addEventListener('change', (e) => {
+  localStorage.setItem('gymRestBurst', e.target.checked ? 'true' : 'false');
+  // Si hay un descanso en marcha, se reprograma con el modo nuevo.
+  if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
+});
+document.getElementById('btn-help-notif-burst').addEventListener('click', () => {
+  showAppAlert('Con el modo insistente, el aviso de fin de descanso se repite 3 veces seguidas (cada 2 segundos), para que la vibración se note aunque el móvil esté en el bolsillo. iOS no permite una vibración larga tipo "temporizador del sistema" en apps normales (eso son alertas críticas, con permiso especial de Apple): repetir el aviso es lo más parecido.');
 });
 document.getElementById('btn-help-notif-sound').addEventListener('click', () => {
   showAppAlert('Con el sonido activado, los avisos usan el sonido del sistema. Un detalle de iOS: cuando un aviso suena, vibrar o no lo decide el teléfono (Ajustes > Sonidos y vibraciones), no la app — por eso no existe la combinación "sonido sin vibración".');

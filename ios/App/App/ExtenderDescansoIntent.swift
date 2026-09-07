@@ -37,12 +37,17 @@ struct ExtenderDescansoIntent: LiveActivityIntent {
         )
         await act.update(ActivityContent(state: state, staleDate: state.endAt))
 
+        // El aviso de fin puede ser 1 o 3 notificaciones (modo insistente,
+        // ids 999999901/902/903 separadas 2s): se reprograman TODAS las
+        // que hubiera pendientes, conservando su content (y su sonido).
         let center = UNUserNotificationCenter.current()
         let pendientes = await center.pendingNotificationRequests()
-        if let req = pendientes.first(where: { $0.identifier == "999999901" }) {
+        let restante = max(1, state.endAt.timeIntervalSinceNow)
+        let offsets: [String: TimeInterval] = ["999999901": 0, "999999902": 2, "999999903": 4]
+        for req in pendientes {
+            guard let offset = offsets[req.identifier] else { continue }
             center.removePendingNotificationRequests(withIdentifiers: [req.identifier])
-            let restante = max(1, state.endAt.timeIntervalSinceNow)
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: restante, repeats: false)
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: restante + offset, repeats: false)
             try? await center.add(UNNotificationRequest(identifier: req.identifier, content: req.content, trigger: trigger))
         }
 

@@ -8190,9 +8190,20 @@ document.getElementById('btn-gym-live-rest-close').addEventListener('click', () 
 // syncScheduledReminders() sabe que no debe cancelarlo al reprogramar
 // los recordatorios (ids >= 999999900 son internos, no eventos).
 const GYM_REST_NOTIFICATION_ID = 999999901;
+// Modo insistente (peticion de Koku: "una vibracion a veces no se nota,
+// si esta un rato si"): iOS no permite alargar la vibracion de una
+// notificacion ni sonar "como el temporizador del sistema" (eso son
+// alertas criticas, que requieren un permiso especial de Apple), asi que
+// el truco es repetir el aviso: 3 notificaciones seguidas separadas 2s
+// (ids 999999901/902/903, todos en el rango reservado). Se apaga en
+// Configuracion > Notificaciones.
+const GYM_REST_NOTIFICATION_IDS = [999999901, 999999902, 999999903];
 
 function gymRestNotifyEnabled() {
   return localStorage.getItem('gymRestNotify') !== 'false';
+}
+function gymRestBurstEnabled() {
+  return localStorage.getItem('gymRestBurst') !== 'false';
 }
 
 async function gymScheduleRestNotification() {
@@ -8202,20 +8213,25 @@ async function gymScheduleRestNotification() {
   if (!gymLiveSession || !gymLiveSession.restUntil) return;
   try {
     if (!(await ensureLocalNotificationPermissionSilently())) return;
-    // Cancelar antes de programar: si habia un aviso del descanso
-    // anterior aun pendiente, no debe sonar ademas del nuevo.
-    await plugin.cancel({ notifications: [{ id: GYM_REST_NOTIFICATION_ID }] });
-    const aviso = {
-      id: GYM_REST_NOTIFICATION_ID,
-      title: 'Descanso terminado',
-      body: 'Siguiente serie.',
-      schedule: { at: new Date(gymLiveSession.restUntil) },
-    };
+    // Cancelar antes de programar: si habia avisos del descanso anterior
+    // aun pendientes, no deben sonar ademas de los nuevos.
+    await plugin.cancel({ notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })) });
     // Sonido/vibracion/silencio segun el ajuste del dispositivo -- ver
     // notificationSoundValue() en local-notifications.js.
     const sonido = notificationSoundValue();
-    if (sonido) aviso.sound = sonido;
-    await plugin.schedule({ notifications: [aviso] });
+    // 1 aviso, o 3 seguidos (cada 2s) si el modo insistente esta activo.
+    const cuantos = gymRestBurstEnabled() ? GYM_REST_NOTIFICATION_IDS.length : 1;
+    const avisos = GYM_REST_NOTIFICATION_IDS.slice(0, cuantos).map((id, i) => {
+      const aviso = {
+        id,
+        title: 'Descanso terminado',
+        body: 'Siguiente serie.',
+        schedule: { at: new Date(gymLiveSession.restUntil + i * 2000) },
+      };
+      if (sonido) aviso.sound = sonido;
+      return aviso;
+    });
+    await plugin.schedule({ notifications: avisos });
   } catch (err) {
     console.error('No se pudo programar el aviso de descanso:', err);
   }
@@ -8226,7 +8242,7 @@ async function gymCancelRestNotification() {
   const plugin = getLocalNotificationsPlugin();
   if (!plugin) return;
   try {
-    await plugin.cancel({ notifications: [{ id: GYM_REST_NOTIFICATION_ID }] });
+    await plugin.cancel({ notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })) });
   } catch (err) {
     console.error('No se pudo cancelar el aviso de descanso:', err);
   }
@@ -8251,11 +8267,15 @@ function getGymLiveActivityPlugin() {
   return gymLiveActivityPlugin;
 }
 
-// El acento del tema activo, para que la tarjeta de la pantalla de
-// bloqueo siga el estilo de la app (peticion de Koku).
+// Colores del tema activo, para que la tarjeta de la pantalla de bloqueo
+// siga el estilo de la app entera (peticion de Koku): acento + fondo de
+// tarjeta (surface) + su texto emparejado.
+function gymThemeColorHex(varName, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback;
+}
 function gymCurrentAccentHex() {
-  const v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
-  return /^#[0-9a-fA-F]{6}$/.test(v) ? v : '#5b8cff';
+  return gymThemeColorHex('--accent', '#5b8cff');
 }
 
 // Fechas que necesita la tarjeta, derivadas del estado del descanso.
@@ -8267,6 +8287,8 @@ function gymRestActivityParams() {
     dayName: gymLiveSession.routineName || 'Sesión libre',
     extraSeconds: gymLiveSession.restExtraSeconds || 0,
     accentHex: gymCurrentAccentHex(),
+    surfaceHex: gymThemeColorHex('--surface', '#1c1c27'),
+    surfaceTextHex: gymThemeColorHex('--surface-text', '#f2f2f7'),
   };
 }
 
@@ -8315,9 +8337,15 @@ async function gymConsumeRestExtensionFromLockScreen() {
   }
 }
 // Al volver la app a primer plano (desbloquear/cambiar de app) es cuando
-// puede haber +30s pendientes.
+// puede haber +30s pendientes. Se escuchan LOS DOS eventos: el 'resume'
+// que dispara Capacitor suele llegar antes que visibilitychange, y con
+// ambos el tiempo tarda menos en reflejarse (Koku notaba ~3s de espera).
+// Recoger dos veces no duplica nada: la segunda lectura ya devuelve 0.
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) gymConsumeRestExtensionFromLockScreen();
+});
+document.addEventListener('resume', () => {
+  gymConsumeRestExtensionFromLockScreen();
 });
 
 async function gymStartRestLiveActivity() {

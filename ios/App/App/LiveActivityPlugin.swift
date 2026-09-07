@@ -57,7 +57,9 @@ public class LiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
                     _ = try Activity.request(
                         attributes: DescansoAttributes(
                             dayName: dayName,
-                            accentHex: call.getString("accentHex") ?? "#5b8cff"
+                            accentHex: call.getString("accentHex") ?? "#5b8cff",
+                            surfaceHex: call.getString("surfaceHex") ?? "#1c1c27",
+                            surfaceTextHex: call.getString("surfaceTextHex") ?? "#f2f2f7"
                         ),
                         // staleDate = el final del descanso: si la app no
                         // llega a cerrarla (movil bloqueado), el sistema

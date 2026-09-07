@@ -49,13 +49,21 @@ struct DescansoLiveActivity: Widget {
         ActivityConfiguration(for: DescansoAttributes.self) { context in
             // ----- Tarjeta de la pantalla de bloqueo (y centro de
             // notificaciones). Eleccion de Koku: cuenta atras grande +
-            // barra de progreso + nombre del dia, con el acento del tema.
+            // barra de progreso + nombre del dia, con los COLORES del tema
+            // de la app (fondo de tarjeta, texto y acento).
             let accent = Color(hexAccent: context.attributes.accentHex)
+            let surfaceText = Color(hexAccent: context.attributes.surfaceTextHex)
+            // Fraccion de la barra que corresponde al tiempo anadido con
+            // +30s: se pinta como banda naranja fija sobre la barra (la
+            // barra animada la mueve iOS y no admite dos colores de
+            // relleno, pero la banda marca el tramo extra, como en la app).
+            let total = context.state.endAt.timeIntervalSince(context.state.startAt)
+            let extraFraction = total > 0 ? min(1, Double(context.state.extraSeconds) / total) : 0
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(context.attributes.dayName)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(surfaceText.opacity(0.7))
                     Spacer()
                     Text("Descanso")
                         .font(.caption.weight(.semibold))
@@ -65,6 +73,7 @@ struct DescansoLiveActivity: Widget {
                     Text(timerInterval: context.state.startAt...context.state.endAt, countsDown: true)
                         .font(.system(size: 42, weight: .bold, design: .rounded))
                         .monospacedDigit()
+                        .foregroundStyle(surfaceText)
                     // Tiempo anadido con +30s, en otro color (como el tramo
                     // extra de la barra dentro de la app).
                     if context.state.extraSeconds > 0 {
@@ -85,14 +94,31 @@ struct DescansoLiveActivity: Widget {
                         .tint(accent)
                     }
                 }
-                ProgressView(timerInterval: context.state.startAt...context.state.endAt, countsDown: true) {
-                    EmptyView()
-                } currentValueLabel: {
-                    EmptyView()
+                ZStack(alignment: .leading) {
+                    ProgressView(timerInterval: context.state.startAt...context.state.endAt, countsDown: true) {
+                        EmptyView()
+                    } currentValueLabel: {
+                        EmptyView()
+                    }
+                    .tint(accent)
+                    // La banda del tramo extra: los ULTIMOS extraSeconds del
+                    // descanso son el lado por el que la barra termina de
+                    // vaciarse (el izquierdo).
+                    if extraFraction > 0 {
+                        GeometryReader { geo in
+                            Capsule()
+                                .fill(Color.orange.opacity(0.45))
+                                .frame(width: geo.size.width * extraFraction, height: 4)
+                                .frame(maxHeight: .infinity, alignment: .center)
+                        }
+                        .allowsHitTesting(false)
+                    }
                 }
-                .tint(accent)
+                .frame(height: 6)
             }
             .padding(16)
+            .activityBackgroundTint(Color(hexAccent: context.attributes.surfaceHex))
+            .activitySystemActionForegroundColor(accent)
             .widgetURL(abrirEntrenoURL)
         } dynamicIsland: { context in
             DynamicIsland {
