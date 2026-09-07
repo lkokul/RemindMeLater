@@ -123,13 +123,37 @@
     if (!existing) return res.status(404).json({ error: 'not_found' });
     const originId = req.device ? req.device.id : null;
 
-    // Las notas de esta carpeta no se borran: se quedan sin carpeta
-    // (folder_id a NULL), igual que al borrar un Grupo los eventos no
-    // desaparecen, solo pierden la etiqueta. Para sincronizar hay que
-    // avisar de ese cambio en cada nota afectada (ver el mismo caso en
-    // routes/groups.js).
+    // Con ?deleteContents=1 se borra TODO lo de dentro (notas y
+    // subcarpetas, hasta el fondo del arbol). Sin el, el comportamiento de
+    // siempre: nada se destruye, lo de dentro sube UN nivel.
+    if (String(req.query.deleteContents) === '1') {
+      // De abajo a arriba: primero las hijas, para que ninguna quede
+      // huerfana si algo fallara a mitad.
+      const borrarCarpeta = (folderId) => {
+        db.prepare('SELECT id FROM note_folders WHERE parent_id = ?').all(folderId)
+          .forEach((hija) => borrarCarpeta(hija.id));
+        db.prepare('SELECT id FROM notes WHERE folder_id = ?').all(folderId).forEach((nota) => {
+          db.prepare('DELETE FROM notes WHERE id = ?').run(nota.id);
+          db.recordSyncChange('notes', nota.id, 'delete', null, originId);
+        });
+        if (String(folderId) !== String(req.params.id)) {
+          db.prepare('DELETE FROM note_folders WHERE id = ?').run(folderId);
+          db.recordSyncChange('note_folders', folderId, 'delete', null, originId);
+        }
+      };
+      borrarCarpeta(existing.id);
+      db.prepare('DELETE FROM note_folders WHERE id = ?').run(req.params.id);
+      db.recordSyncChange('note_folders', req.params.id, 'delete', null, originId);
+      return res.status(204).end();
+    }
+
+    // Las notas de esta carpeta no se borran: suben UN nivel, a la carpeta
+    // padre de la que se borra (o a la raiz si no tenia padre) -- igual que
+    // las subcarpetas de aqui abajo. Antes se les ponia folder_id = NULL,
+    // que las mandaba a la raiz aunque la carpeta borrada estuviera anidada.
+    // Para sincronizar hay que avisar de ese cambio en cada nota afectada.
     const affectedNoteIds = db.prepare('SELECT id FROM notes WHERE folder_id = ?').all(req.params.id).map((r) => r.id);
-    db.prepare('UPDATE notes SET folder_id = NULL WHERE folder_id = ?').run(req.params.id);
+    db.prepare('UPDATE notes SET folder_id = ? WHERE folder_id = ?').run(existing.parent_id, req.params.id);
     // Las SUBcarpetas tampoco se borran: suben un nivel, al padre de la
     // carpeta borrada (o a la raiz si no tenia) -- como quitar una carpeta
     // de en medio del arbol y que sus hijas ocupen su sitio. Tambien hay
@@ -144,6 +168,9 @@
     affectedNoteIds.forEach((id) => {
       const row = db.prepare('SELECT * FROM notes WHERE id = ?').get(id);
       if (!row) return;
+      const carpeta = row.folder_id
+        ? db.prepare('SELECT * FROM note_folders WHERE id = ?').get(row.folder_id)
+        : null;
       db.recordSyncChange('notes', row.id, 'upsert', {
         id: row.id,
         title: row.title,
@@ -151,9 +178,9 @@
         hidden: !!row.hidden,
         favorite: !!row.favorite,
         folderId: row.folder_id,
-        folderName: null,
-        folderColor: null,
-        folderIcon: null,
+        folderName: carpeta ? carpeta.name : null,
+        folderColor: carpeta ? carpeta.color : null,
+        folderIcon: carpeta ? carpeta.icon : null,
         createdByName: row.created_by_name || null,
         createdByPublicId: row.created_by_id || null,
         createdAt: row.created_at,

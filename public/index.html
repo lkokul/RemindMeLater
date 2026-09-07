@@ -2003,6 +2003,16 @@
              con las 5 opciones, ver applyNoteParagraphStyle en app.js.
              Se aplica al PARRAFO ENTERO donde este el cursor, no a una
              seleccion de texto. -->
+        <!-- Deshacer/rehacer del TEXTO (los de la barra de tabla son de
+             su estructura: filas, columnas, celdas). Van los primeros
+             para tenerlos a mano sin desplazar la barra. -->
+        <button type="button" id="note-text-undo-btn" class="note-editor-btn note-editor-btn-icon" aria-label="Deshacer" title="Deshacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+        </button>
+        <button type="button" id="note-text-redo-btn" class="note-editor-btn note-editor-btn-icon" aria-label="Rehacer" title="Rehacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+        </button>
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
         <button type="button" id="note-paragraph-style-btn" class="note-editor-btn" aria-label="Estilo de párrafo" title="Estilo de párrafo">Aa</button>
         <button type="button" data-cmd="bold" class="note-editor-btn" aria-label="Negrita" title="Negrita"><b>N</b></button>
         <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
@@ -2058,31 +2068,22 @@
 
       <!-- Barra de TABLA: sustituye a la de formato mientras se esta
            trasteando con una tabla (se entra tocando el icono que aparece
-           en su esquina). Una sola linea que se desliza de lado, igual
-           que la de formato. -->
+           en su esquina, y se sale sacando el cursor de ella). Cinco
+           botones, cada uno con sus opciones dentro, para no tener 16
+           botones sueltos en una fila que no se acaba nunca. -->
       <div id="note-table-toolbar" class="note-editor-toolbar hidden">
-        <button type="button" class="note-editor-btn" data-table-cmd="row-above" title="Insertar fila encima">Fila ↑</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="row-below" title="Insertar fila debajo">Fila ↓</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="row-remove" title="Eliminar esta fila">Fila −</button>
-        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
-        <button type="button" class="note-editor-btn" data-table-cmd="col-left" title="Insertar columna a la izquierda">Col ←</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="col-right" title="Insertar columna a la derecha">Col →</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="col-remove" title="Eliminar esta columna">Col −</button>
-        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
-        <button type="button" class="note-editor-btn" data-table-cmd="move-row-up" title="Mover la fila arriba">Mover ↑</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="move-row-down" title="Mover la fila abajo">Mover ↓</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="move-col-left" title="Mover la columna a la izquierda">Mover ←</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="move-col-right" title="Mover la columna a la derecha">Mover →</button>
-        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
-        <button type="button" class="note-editor-btn" data-table-cmd="width-plus" title="Columna más ancha">Ancho +</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="width-minus" title="Columna más estrecha">Ancho −</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="border-plus" title="Borde más grueso">Borde +</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="border-minus" title="Borde más fino">Borde −</button>
-        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
-        <button type="button" class="note-editor-btn" data-table-cmd="merge" title="Combinar con la celda de la derecha">Combinar</button>
-        <button type="button" class="note-editor-btn" data-table-cmd="split" title="Separar la celda combinada">Separar</button>
-        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
-        <button type="button" id="btn-note-table-toolbar-close" class="note-editor-btn" title="Volver al formato de texto">Listo</button>
+        <button type="button" class="note-editor-btn" id="btn-note-table-mark">Marcar</button>
+        <button type="button" class="note-editor-btn" data-table-menu="row">Fila ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="col">Columna ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="move">Mover ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="border">Borde ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="cells">Celdas ▾</button>
+        <button type="button" class="note-editor-btn note-editor-btn-icon" id="btn-note-table-undo" aria-label="Deshacer" title="Deshacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+        </button>
+        <button type="button" class="note-editor-btn note-editor-btn-icon" id="btn-note-table-redo" aria-label="Rehacer" title="Rehacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+        </button>
       </div>
       <div class="note-editor-main">
         <div class="note-editor-content-col">
@@ -2324,10 +2325,6 @@
         <p class="hint">Estos ajustes son solo para el dispositivo en el que estas viendo esto ahora mismo.</p>
         <h4>Gimnasio: formato de tiempo</h4>
         <div id="gym-time-format-options" class="view-mode-options"></div>
-
-        <h4>Tareas completadas</h4>
-        <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>
-        <div id="completed-tasks-display-options" class="view-mode-options"></div>
 
         <h4>Gimnasio: unidad de peso</h4>
         <p class="hint">Solo cambia como se escriben/leen los pesos en este dispositivo -- por dentro siempre se guardan en kilogramos.</p>

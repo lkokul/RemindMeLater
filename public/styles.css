@@ -88,17 +88,24 @@ body {
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--bg-text);
-  /* App, no pagina web: el texto plano no se selecciona (en el iPhone el
-     toque largo seleccionaba cualquier etiqueta -- peticion de Koku). Lo
-     editable se re-permite justo debajo. -webkit-touch-callout quita
-     ademas el menu contextual del toque largo en iOS. */
-  -webkit-user-select: none;
+  /* Nada de la interfaz se selecciona: es una app, no una pagina web que
+     se copia. Sin esto, mantener pulsado en cualquier sitio (el mes del
+     calendario, el nombre de una herramienta...) sacaba la lupa de
+     seleccionar texto de iOS, que ademas se pisa con los gestos propios
+     (deslizar una fila, mantener pulsado para las acciones). Se devuelve
+     abajo donde SI se escribe de verdad. (Las dos ramas lo implementaron
+     a la vez; en el merge gano esta version, que ademas restaura el menu
+     contextual del toque largo en lo editable.) */
   user-select: none;
+  -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
-input, textarea, [contenteditable="true"], [contenteditable="true"] * {
-  -webkit-user-select: text;
+input,
+textarea,
+[contenteditable="true"] {
   user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
 }
 
 .hidden { display: none !important; }
@@ -108,7 +115,7 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
    algun dia tiene mas secciones de las que caben) aparece esta barra
    fina en vez de la del sistema, con el color de acento del tema activo
    — asi que cambia sola si cambias de tema. */
-.modal-card, .settings-card-body, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover, .date-popover, .mobile-calendar-month-list, .mobile-calendar-year-grid {
+.modal-card, .settings-card-body, .reminders-list, .settings-menu, .icon-popover, .color-popover, .select-popover, .date-popover, .mobile-calendar-month-list, .mobile-calendar-year-grid, .note-editor-body table {
   scrollbar-width: thin;
   scrollbar-color: var(--accent) transparent;
 }
@@ -121,8 +128,10 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
 .select-popover::-webkit-scrollbar,
 .date-popover::-webkit-scrollbar,
 .mobile-calendar-month-list::-webkit-scrollbar,
-.mobile-calendar-year-grid::-webkit-scrollbar {
+.mobile-calendar-year-grid::-webkit-scrollbar,
+.note-editor-body table::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 .modal-card::-webkit-scrollbar-track,
 .settings-card-body::-webkit-scrollbar-track,
@@ -133,7 +142,8 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
 .select-popover::-webkit-scrollbar-track,
 .date-popover::-webkit-scrollbar-track,
 .mobile-calendar-month-list::-webkit-scrollbar-track,
-.mobile-calendar-year-grid::-webkit-scrollbar-track {
+.mobile-calendar-year-grid::-webkit-scrollbar-track,
+.note-editor-body table::-webkit-scrollbar-track {
   background: transparent;
 }
 .modal-card::-webkit-scrollbar-thumb,
@@ -145,7 +155,8 @@ input, textarea, [contenteditable="true"], [contenteditable="true"] * {
 .select-popover::-webkit-scrollbar-thumb,
 .date-popover::-webkit-scrollbar-thumb,
 .mobile-calendar-month-list::-webkit-scrollbar-thumb,
-.mobile-calendar-year-grid::-webkit-scrollbar-thumb {
+.mobile-calendar-year-grid::-webkit-scrollbar-thumb,
+.note-editor-body table::-webkit-scrollbar-thumb {
   background: var(--accent);
   border-radius: 4px;
 }
@@ -572,18 +583,33 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    "data-border" del <table> (ver mas abajo), asi que una clase se
    perderia al guardar. Con un selector generico da igual, toda tabla
    del editor se ve igual siempre salvo por esos dos ajustes concretos.
-   table-layout:fixed + width:auto (en vez del 100% de antes) es lo que
-   hace que el tamano sea CONSTANTE desde que se inserta -- ya no se
-   autoajusta al escribir, y el ancho real de la tabla es la suma de lo
-   que diga cada <col> (ver buildTableHtml en app.js), no un porcentaje
-   del contenedor. */
-.note-editor-body table { border-collapse: collapse; table-layout: fixed; width: auto; max-width: 100%; margin: 0.5rem 0; }
+   table-layout:auto es lo que hace que cada columna se ajuste al texto
+   que tenga dentro. Antes era "fixed" con un <colgroup> de anchos en px
+   y un menu "Tamaño" para tocarlos -- Koku lo quito a proposito ("que
+   siempre se ajuste al texto de dentro y ya está"). */
+/* Una tabla mas ancha que la pantalla se desplaza DENTRO de si misma
+   (display:block + overflow-x:auto le da su propia barra), en vez de
+   hacer que se mueva de lado la nota entera. Ademas eso quitaba de en
+   medio un efecto secundario feo: con la pagina desplazada a lo ancho,
+   el reajuste del editor al abrir el teclado la devolvia a cero y la
+   vista "se iba al principio de la tabla". width:fit-content mantiene el
+   ancho pegado al contenido cuando SI cabe. */
+.note-editor-body table {
+  border-collapse: collapse;
+  table-layout: auto;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+/* Y la nota en si nunca se desplaza a lo ancho. */
+.note-editor-body { overflow-x: hidden; }
 .note-editor-body td, .note-editor-body th {
   border: 1px solid var(--border);
   padding: 0.4rem;
   min-width: 2.5rem;
   vertical-align: top;
-  overflow: hidden;
 }
 /* Grosor del borde por niveles (atributo data-border en el <table>, ver
    changeTableBorder en app.js). Sin atributo se queda en el borde fino
@@ -593,6 +619,53 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .note-editor-body table[data-border="3"] td, .note-editor-body table[data-border="3"] th,
 .note-editor-body table[data-border="thick"] td, .note-editor-body table[data-border="thick"] th { border-width: 3px; }
 .note-editor-body table[data-border="4"] td, .note-editor-body table[data-border="4"] th { border-width: 4px; }
+
+/* Grosor de una CELDA suelta (menu Borde con casillas marcadas). El
+   selector lleva `table` a proposito: las reglas de la tabla entera son
+   `.note-editor-body table[data-border="N"] td`, que pesan MAS que un
+   simple `.note-editor-body td[...]` -- sin esto, cambiar el grosor de
+   una casilla no hacia nada en cuanto la tabla ya tenia el suyo puesto
+   (el "a veces se raya" que reporto Koku). */
+.note-editor-body table td[data-border="1"], .note-editor-body table th[data-border="1"] { border-width: 1px; }
+.note-editor-body table td[data-border="2"], .note-editor-body table th[data-border="2"] { border-width: 2px; }
+.note-editor-body table td[data-border="3"], .note-editor-body table th[data-border="3"] { border-width: 3px; }
+.note-editor-body table td[data-border="4"], .note-editor-body table th[data-border="4"] { border-width: 4px; }
+
+/* Modo "Marcar": se toca cada casilla para marcarla/desmarcarla (con la
+   seleccion de texto de iOS era imposible acertar). */
+.note-editor-body table.is-marking {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+  user-select: none;
+}
+.note-editor-body table.is-marking td,
+.note-editor-body table.is-marking th { cursor: pointer; }
+.note-editor-body td.is-marked,
+.note-editor-body th.is-marked {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Muestra del grosor a la derecha de cada opcion del menu de Borde. */
+.select-option.has-preview { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.table-border-preview {
+  width: 46px;
+  border-bottom-style: solid;
+  border-bottom-color: var(--surface-2-text);
+  flex-shrink: 0;
+}
+
+/* Modo "mover a mano": la tabla se marca con el color de acento para que
+   se vea que ahora el arrastre mueve filas/columnas en vez de
+   seleccionar texto. */
+.note-editor-body table.is-manual-move {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+  touch-action: none;
+  user-select: none;
+}
+.note-editor-body table.is-manual-move td,
+.note-editor-body table.is-manual-move th { cursor: grab; }
 
 /* Icono en la esquina de la tabla: abre la barra de tabla. Va suelto en
    <body> con position:fixed y lo recoloca refreshTableCornerButton(). */
@@ -831,7 +904,13 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    aqui, la cadena de flex:1/min-height:0 que ya existe deja acotado el
    contenedor interno y es el, y solo el, quien se desplaza. La clase la
    pone y quita enterMobileDayView()/exitMobileDayView() en app.js. */
-body.mobile-day-scroll-lock { overflow: hidden; }
+/* Mismo criterio con el editor de notas abierto: si la pagina de debajo
+   puede desplazarse, el sistema la mueve al abrir el teclado y se acaban
+   viendo dos pantallas apiladas (la cabecera del listado de notas
+   asomando por encima de la del editor). La clase la pone y quita
+   start/stopNoteEditorViewportAnchor() en app.js. */
+body.mobile-day-scroll-lock, body.note-editor-open { overflow: hidden; }
+body.note-editor-open .app,
 body.mobile-day-scroll-lock .app {
   height: 100vh;
   height: 100dvh;
@@ -1078,7 +1157,6 @@ body.mobile-day-scroll-lock .app {
    pantalla, por encima de .mobile-nav (z-index 70), igual que el hueco
    que ya reserva .app/Configuracion para esa barra. */
 .mobile-fab-wrap { position: fixed; right: 1rem; bottom: calc(5rem + 1rem + env(safe-area-inset-bottom, 0px)); z-index: 30; }
-.mobile-fab.is-done { background: var(--accent); }
 .mobile-fab {
   width: 3.2rem;
   height: 3.2rem;
@@ -1670,6 +1748,8 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   align-items: center;
   gap: 0.4rem;
   margin: 1rem 1rem 0.5rem;
+  /* Clavada arriba: quien scrollea es la lista de abajo. */
+  flex-shrink: 0;
 }
 .mobile-notes-header-row .mobile-notes-search-row {
   flex: 1;
@@ -1677,7 +1757,19 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   margin: 0;
 }
 .mobile-notes-menu-wrap { position: relative; }
-#mobile-notes-list { padding: 0 1rem; }
+/* La lista ocupa TODO el alto que queda y scrollea ella sola. Sin esto
+   heredaba el `max-height: 260px` de .reminders-list (pensado para el
+   panel lateral del calendario, no para una pantalla completa): la
+   lista quedaba como una cajita de 260px en mitad de la pantalla, con
+   su propia barra de desplazamiento y el resto del alto vacio. */
+#mobile-notes-list {
+  padding: 0 1rem calc(9rem + env(safe-area-inset-bottom, 0px));
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
 /* Buscador global (Fase 5): mismo look que el buscador de Notas
    (.mobile-notes-search-row/-icon, reutilizadas tal cual) -- solo el
@@ -1735,7 +1827,8 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 0.6rem;
-  margin-bottom: 0.6rem;
+  /* Aire arriba y abajo: pegada al buscador parecia parte de la barra. */
+  margin: 0.5rem 0 0.8rem;
 }
 .mobile-note-gallery-card {
   position: relative;
@@ -1745,8 +1838,21 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   overflow: hidden;
   background: var(--surface-2);
   cursor: pointer;
+  /* El texto de la tarjeta es decoracion, no algo que copiar: sin esto,
+     mantener pulsado (que aqui abre Mover/Eliminar) disparaba la lupa de
+     seleccionar texto de iOS. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
+/* Carpeta en galeria: la que se pinta con su color es la CARPETA, no el
+   fondo de la tarjeta (que se queda igual que en las notas). */
+.mobile-note-gallery-folder-icon { width: 58%; height: 58%; }
 .mobile-note-gallery-media {
+  /* Mismo fondo en TODAS las tarjetas (antes las notas sin miniatura se
+     teñian del color de su carpeta, y la galeria entera cambiaba de
+     color segun donde estuvieras). */
+  background: var(--surface-2);
   aspect-ratio: 1 / 1;
   display: flex;
   align-items: center;
@@ -1782,18 +1888,21 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   filter: blur(5px);
   user-select: none;
 }
+/* Area de toque generosa: es el UNICO control que tapa/destapa la nota,
+   y con el difuminado encima cuesta acertar si es diminuto. */
 .mobile-note-gallery-eye-btn {
   position: absolute;
   top: 0.3rem;
   left: 0.3rem;
-  z-index: 1;
-  background: rgba(0, 0, 0, 0.45);
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.55);
   color: #fff;
   border: none;
   border-radius: 999px;
-  padding: 0.25rem;
+  padding: 0.4rem;
   line-height: 0;
 }
+.mobile-note-gallery-eye-btn svg { width: 18px; height: 18px; display: block; }
 .mobile-note-gallery-checkbox {
   position: absolute;
   top: 0.3rem;
@@ -1806,18 +1915,152 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   right: 0.3rem;
   z-index: 1;
 }
+.mobile-note-gallery-read-btn {
+  position: absolute;
+  bottom: 2.2rem;
+  left: 0.3rem;
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 0.3rem;
+  line-height: 0;
+}
+.mobile-note-gallery-read-btn svg { width: 16px; height: 16px; }
 
-/* Barra de acciones (Eliminar/Mover, Cancelar/"Mover aqui") -- fija
-   abajo dentro de #mobile-notes-view, siempre visible mientras la lista
-   de encima hace scroll. */
-.mobile-notes-action-bar {
-  position: sticky;
+/* Deslizar una fila del listado hacia la izquierda descubre Mover y
+   Eliminar, que viven DEBAJO de la propia fila. `touch-action: pan-y`
+   deja el scroll vertical de la lista al navegador y nos quedamos solo
+   con el gesto horizontal. */
+.note-swipe-wrap {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+  touch-action: pan-y;
+}
+.note-swipe-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
   bottom: 0;
   display: flex;
-  gap: 0.6rem;
-  padding: 0.6rem 1rem;
+  gap: 0.3rem;
+  align-items: stretch;
+  padding: 0.2rem;
+}
+.note-swipe-actions button {
+  font-size: 0.8rem;
+  padding: 0 0.7rem;
+  border-radius: var(--radius);
+}
+.note-swipe-wrap > .note-item {
+  position: relative;
   background: var(--bg);
-  border-top: 1px solid var(--border);
+  transition: transform 0.16s ease-out;
+}
+/* El desplazamiento lo fija wrapNoteRowWithSwipe() midiendo el ancho
+   real de los botones (una carpeta lleva uno mas, "Editar"). El 9.5rem
+   es solo el valor de respaldo si por lo que sea no se pudo medir. */
+.note-swipe-wrap.is-open > .note-item { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
+
+/* Arrastrar y soltar notas/carpetas: la etiqueta que sigue al dedo, y el
+   resalte de la carpeta (o del boton "Volver") sobre la que se suelta. */
+.note-drag-ghost {
+  position: fixed;
+  z-index: 80;
+  transform: translate(-50%, -140%);
+  pointer-events: none;
+  max-width: 60vw;
+  padding: 0.4rem 0.7rem;
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+body.note-dragging { cursor: grabbing; }
+/* Mientras se arrastra, nada de seleccionar texto ni de scroll por
+   accidente al pasar por encima de la lista. */
+body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: none; }
+/* Solo un aro punteado, SIN teñir el fondo: al arrastrar sobre una
+   tarjeta de galeria, pintarle el fondo de acento se confundia con el
+   color de la propia carpeta ("el fondo se pone como del color de la
+   carpeta??"). Mismo lenguaje visual que los otros modos temporales de
+   la app (.is-marking / .is-manual-move de las tablas). */
+.is-drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -3px;
+  border-radius: var(--radius);
+}
+
+/* Menu de Mover/Eliminar (pulsacion larga en galeria, o el mismo par de
+   acciones desde el listado). Tarjeta propia con el nombre arriba y una
+   fila por accion con su icono -- no una lista de texto suelto. */
+.note-item-action-menu {
+  position: fixed;
+  z-index: 60;
+  width: 210px;
+  padding: 0.35rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.note-item-action-title {
+  margin: 0;
+  padding: 0.35rem 0.6rem 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+.note-item-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.6rem;
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  color: var(--surface-text);
+  font-size: 0.9rem;
+  text-align: left;
+}
+.note-item-action-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+.note-item-action-btn:hover { background: var(--surface-2); }
+.note-item-action-btn.is-danger { color: var(--danger); }
+
+/* Barra de acciones (Eliminar/Mover, Cancelar/"Mover aqui"). Va FIJA
+   justo encima de la barra inferior de la app: antes era `sticky` dentro
+   de la vista y, al no tener un contenedor con scroll propio, acababa
+   pegada al borde de abajo -- o sea, TAPADA por la barra inferior
+   flotante, que va por encima. De ahi la sensacion de que "Seleccionar
+   no hace nada": los botones estaban ahi, pero debajo del menu. */
+.mobile-notes-action-bar {
+  position: fixed;
+  left: 0.6rem;
+  right: 0.6rem;
+  bottom: calc(5.2rem + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 .mobile-notes-action-bar button { flex: 1; }
 /* El hueco izquierdo de la barra, usado como TEXTO de ayuda en "Editar
@@ -1834,26 +2077,6 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   opacity: 1;
   cursor: default;
 }
-
-/* Modo "Editar carpetas": las carpetas se resaltan (son lo unico
-   tocable) y las notas se atenuan. Sin esto el modo no se notaba y
-   parecia que el menu no habia hecho nada. */
-#mobile-notes-view.mode-edit-folders .note-folder-row {
-  outline: 1px dashed var(--accent);
-  outline-offset: -1px;
-}
-/* Lapiz de cada carpeta mientras se editan (es un elemento real, ver
-   buildFolderRow en app.js): va a la IZQUIERDA de la estrella. */
-.note-folder-edit-mark {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  margin-left: auto;
-  padding: 0 0.15rem;
-  color: var(--accent);
-}
-.note-folder-edit-mark svg { width: 16px; height: 16px; }
-#mobile-notes-view.mode-edit-folders .note-item:not(.note-folder-row) { opacity: 0.4; }
 
 /* Modal de "Eliminar" del modo Seleccionar. */
 .mobile-notes-delete-list {
@@ -2838,6 +3061,12 @@ body.gym-rest-push #settings-modal .settings-card {
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
   cursor: pointer;
+  /* Igual que en las tarjetas de galeria: el nombre de una fila es algo
+     que se toca, no que se copia -- sin esto, mantener pulsado (que aqui
+     abre Mover/Editar/Eliminar) disparaba la lupa de seleccionar texto. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .note-item:last-child { border-bottom: none; }
 
@@ -3195,7 +3424,6 @@ body.gym-rest-push #settings-modal .settings-card {
 .group-form-row-completed .hint { flex: 1; margin: 0; }
 .group-form-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
 
-.groups-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
 .group-item {
   display: flex; align-items: center; gap: 0.6rem;
   background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
@@ -3587,12 +3815,23 @@ body.gym-rest-push #settings-modal .settings-card {
 .groups-body {
   flex: 1;
   min-height: 0;
-  /* El scroll es de ESTA caja, no de la pagina: la pantalla es fija
-     (inset:0) y la cabecera con el buscador y los filtros se queda
-     arriba mientras la lista corre por debajo. */
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 0.6rem 1rem calc(9rem + env(safe-area-inset-bottom, 0px));
+  /* Esta caja NO scrollea a proposito: el scroll vive dentro de cada
+     listado (ver .groups-list / .groups-detail-list mas abajo). Asi el
+     buscador y los filtros se quedan clavados arriba y solo corre la
+     lista, en vez de irse todo hacia arriba a la vez. */
+  overflow: hidden;
+  padding: 0.6rem 1rem 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Los dos niveles (tarjetas de grupo / contenido de un grupo) ocupan
+   todo el alto disponible para que su lista pueda tener scroll propio.
+   El .hidden global (display:none !important) sigue mandando sobre esto
+   cuando el panel esta oculto. */
+#groups-list-panel,
+#groups-detail-panel {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -3610,7 +3849,18 @@ body.gym-rest-push #settings-modal .settings-card {
 .group-card-edit-mark { margin-left: auto; display: inline-flex; align-items: center; color: var(--accent); }
 .group-card-edit-mark svg { width: 16px; height: 16px; }
 .group-card:disabled { opacity: 0.4; }
-.groups-list { display: flex; flex-direction: column; gap: 0.4rem; }
+/* El hueco de abajo deja sitio para los botones flotantes y la barra
+   inferior, que van fijos por encima de la lista. */
+.groups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(9rem + env(safe-area-inset-bottom, 0px));
+}
 .group-card {
   display: flex;
   align-items: center;
@@ -3624,10 +3874,30 @@ body.gym-rest-push #settings-modal .settings-card {
 }
 .group-card-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
 
-.groups-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+/* Hueco y linea bajo los filtros: sin eso, la primera fila de la lista
+   quedaba pegada a los desplegables y parecia una mas de la barra. */
+.groups-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-bottom: 0.7rem;
+  margin-bottom: 0.2rem;
+  border-bottom: 1px solid var(--border);
+  /* Se queda clavada arriba: el scroll es de la lista de abajo. */
+  flex-shrink: 0;
+}
 .groups-filters input[type="search"] { flex: 1 1 100%; }
 .groups-filter-field { flex: 1 1 140px; min-width: 130px; }
-.groups-detail-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.groups-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(9rem + env(safe-area-inset-bottom, 0px));
+}
 .group-item-row {
   display: flex;
   align-items: center;
@@ -3642,6 +3912,10 @@ body.gym-rest-push #settings-modal .settings-card {
 /* Barra vertical del color del grupo, igual que en el listado del
    calendario -- ahi es donde se ve de un vistazo a que grupo pertenece. */
 .group-item-bar { width: 4px; align-self: stretch; border-radius: 2px; flex-shrink: 0; }
+/* Campana (recordatorio) o cuadro con tick (tarea) -- se distingue el
+   tipo de un vistazo, sin tener que leer la linea de debajo. */
+.group-item-type { flex-shrink: 0; display: inline-flex; align-items: center; color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); }
+.group-item-type svg { width: 17px; height: 17px; }
 .group-item-texts { display: flex; flex-direction: column; min-width: 0; }
 .group-item-title { font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-item-meta { font-size: 0.78rem; color: color-mix(in srgb, var(--surface-2-text) 60%, var(--surface-2)); }
@@ -3659,3 +3933,8 @@ body.gym-rest-push #settings-modal .settings-card {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Lista de opciones de cada boton de la barra de tabla (Fila, Columna,
+   Mover, Borde, Celdas). Reutiliza el popover de los selectores de la
+   app, solo un poco mas ancho para que quepan los textos largos. */
+.table-menu-popover { width: 220px; }

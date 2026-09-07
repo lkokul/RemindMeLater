@@ -178,9 +178,13 @@
         // o dos cifras -- nada de estilos ni de cualquier otro atributo.
         const colspan = attrs.match(/\scolspan\s*=\s*"(\d{1,2})"/i);
         const rowspan = attrs.match(/\srowspan\s*=\s*"(\d{1,2})"/i);
+        // El grosor de borde tambien puede ir por celda (menu Borde con
+        // casillas marcadas), con la misma lista cerrada de niveles.
+        const borderCelda = attrs.match(/\sdata-border\s*=\s*"([^"]*)"/i);
         let out = `<${lower}`;
         if (colspan && Number(colspan[1]) > 1) out += ` colspan="${colspan[1]}"`;
         if (rowspan && Number(rowspan[1]) > 1) out += ` rowspan="${rowspan[1]}"`;
+        if (borderCelda && NOTE_TABLE_BORDER_LEVELS.has(borderCelda[1])) out += ` data-border="${borderCelda[1]}"`;
         return `${out}>`;
       }
       if (lower === 'pre') {
@@ -320,6 +324,13 @@
     // se conserva el titulo ya guardado tal cual.
     const title = body !== undefined ? deriveTitleFromBody(cleanBody, format) : existing.title;
 
+    // Tapar/destapar una nota NO cuenta como editarla: si tocara
+    // updated_at, la nota se iria al principio de la lista (el orden por
+    // defecto es por fecha de edicion) solo por taparla, que es justo lo
+    // que Koku no queria. Cambiar contenido/carpeta/favorito si cuenta.
+    const soloOcultar = hidden !== undefined
+      && body === undefined && folderId === undefined && favorite === undefined && bodyFormat === undefined;
+
     db.prepare(`
       UPDATE notes SET
         title = ?,
@@ -328,7 +339,7 @@
         hidden = ?,
         folder_id = ?,
         favorite = ?,
-        updated_at = datetime('now')
+        updated_at = ${soloOcultar ? 'updated_at' : "datetime('now')"}
       WHERE id = ?
     `).run(
       title,
