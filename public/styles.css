@@ -3433,3 +3433,42 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    Mover, Borde, Celdas). Reutiliza el popover de los selectores de la
    app, solo un poco mas ancho para que quepan los textos largos. */
 .table-menu-popover { width: 220px; }
+
+/* --- Copia de seguridad (backup.js) --------------------------------- */
+/* Aviso discreto de "hace mucho que no haces copia": una pastilla
+   flotante arriba, tocable (lleva a Configuracion > Este dispositivo),
+   con una X para posponerlo unos dias. Por debajo de los modales
+   (z-index 20) a proposito: si se abre Configuracion, no debe quedarse
+   flotando por encima. */
+.backup-reminder-banner {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 0.6rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 19;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: calc(100vw - 1.2rem);
+  padding: 0.45rem 0.6rem 0.45rem 0.8rem;
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  font-size: 0.82rem;
+}
+.backup-reminder-banner span { cursor: pointer; }
+.backup-reminder-close {
+  background: transparent;
+  border: none;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.85rem;
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+/* Botones de Exportar/Importar en Configuracion > Este dispositivo. */
+.backup-actions { display: flex; gap: 0.5rem; }
+.backup-actions button { flex: 1; }

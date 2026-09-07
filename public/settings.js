@@ -1249,6 +1249,9 @@ function refreshMobileTab() {
   }
 
   refreshGymWeightUnitOptions();
+  // La linea de "Ultima copia: ..." del bloque de copia de seguridad
+  // (ver backup.js, que se carga antes que este archivo).
+  refreshBackupStatusLine();
 }
 
 // Unidad de peso de Gimnasio: preferencia de ESTE dispositivo (como el

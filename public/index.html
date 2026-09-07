@@ -105,6 +105,15 @@
     </div>
   </div>
 
+  <!-- Aviso discreto de copia de seguridad: aparece al abrir la app si
+       hace mas de ~30 dias de la ultima copia (o nunca se hizo una).
+       Tocarlo lleva a Configuracion > Este dispositivo; la X lo pospone
+       unos dias. Ver maybeShowBackupReminder() en backup.js. -->
+  <div id="backup-reminder-banner" class="backup-reminder-banner hidden">
+    <span id="backup-reminder-text"></span>
+    <button type="button" id="btn-backup-reminder-close" class="backup-reminder-close" aria-label="Posponer aviso">✕</button>
+  </div>
+
   <!-- App principal -->
   <div id="app" class="app">
     <!-- Navegacion movil: sustituye a la topbar en pantallas estrechas
@@ -1916,6 +1925,15 @@
         <h4>Barra inferior (móvil)</h4>
         <p class="hint">Qué herramienta vive en el segundo hueco de la barra inferior, junto a Calendario/Herramientas/Configuración (que se quedan siempre fijos).</p>
         <div id="mobile-nav-slot-field"></div>
+
+        <h4>Copia de seguridad</h4>
+        <p class="hint">Todos tus datos viven solo en este dispositivo: si borras la app sin una copia, se pierden. Exportar crea un único archivo con todo (calendario, notas, herramientas, fotos y ajustes) y lo manda por la hoja de compartir del sistema, para guardarlo donde quieras. Importar restaura ese archivo, sustituyendo lo que haya ahora.</p>
+        <p id="backup-status" class="hint"></p>
+        <div class="backup-actions">
+          <button type="button" id="btn-backup-export" class="primary-btn">Exportar copia</button>
+          <button type="button" id="btn-backup-import" class="secondary-btn">Importar copia</button>
+        </div>
+        <input type="file" id="backup-import-input" accept="application/json,.json" class="hidden" />
       </div>
 
 
@@ -1969,6 +1987,7 @@
   <script src="routes-local/viajesTrips.js"></script>
   <script src="finanzas-recurring.js"></script>
   <script src="local-notifications.js"></script>
+  <script src="backup.js"></script>
   <script src="viajesCountries.js"></script>
   <script src="app.js"></script>
   <script src="settings.js"></script>

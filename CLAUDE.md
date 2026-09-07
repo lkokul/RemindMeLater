@@ -404,6 +404,38 @@ cuenta — no las toques desde aquí.
 
 Últimos commits en `origin/movil-ui`:
 
+- (esta ronda) — **Copia de seguridad + workflow de Android**:
+  - `public/backup.js` (nuevo): exportar crea un `.json` con TODO (la
+    base SQLite en base64, todas las imágenes/fotos de `noteAssets`, y
+    el localStorage entero) y lo manda por la hoja de compartir del
+    sistema (`Filesystem`+`Share` de Capacitor, registrados con el
+    mismo patrón perezoso de `local-notifications.js`; en navegador,
+    descarga normal). Importar valida el archivo (incluye abrir la base
+    de prueba ANTES de borrar nada), avisa con `showAppConfirm`
+    (destructivo), y restaura base+fotos+ajustes con `location.reload()`
+    al final — una copia de una versión vieja migra sola al arrancar
+    (`applyLocalSchema`). Detalle importante del import: se pone
+    `sqlDatabase = null` antes de escribir los bytes nuevos, para que
+    ni el volcado agrupado pendiente ni el de `pagehide` pisen lo
+    importado con la base vieja en memoria.
+  - Recordatorio: si pasan ~30 días sin copia (`lastBackupAt`, o
+    `backupFirstOpenAt` si nunca hubo), un aviso discreto flotante al
+    abrir; la ✕ lo pospone 7 días (`backupReminderSnoozedAt`), tocarlo
+    abre Configuración → Este dispositivo. UI (Exportar/Importar +
+    "Última copia: ...") en ese mismo panel.
+  - `db-local.js`: `assetGetAll()`/`assetClear()` nuevos.
+  - Android: `.github/workflows/android-play.yml` (manual, compila un
+    `.aab` FIRMADO para Google Play y lo deja como artefacto — la
+    subida a Play Console es a mano), firma cableada en
+    `android/app/build.gradle` vía propiedades `-P` (sin nada del
+    keystore en el repo; secretos `ANDROID_KEYSTORE_BASE64`/
+    `ANDROID_KEYSTORE_PASSWORD`/`ANDROID_KEY_ALIAS`/
+    `ANDROID_KEY_PASSWORD`, solo por la web de GitHub), y guía completa
+    en `ANDROID-PLAY.md` (keytool, Play Console, probadores internos).
+    **El workflow NO se ha lanzado** (regla de Actions). La primera
+    ejecución real con sus secretos será la primera prueba real.
+- `8a89a72` — Ronda G: nota nueva vacía no se guarda + cursor esquiva
+  el teclado + reglas nuevas en CLAUDE.md.
 - `29b2233` — **Fase 1**: SQLite dentro del propio móvil (sql.js
   vendorizado + `local-schema.js` + `local-db.js`).
 - `f721bf1` — **Fase 2**: el backend entero corre dentro de la app
@@ -427,26 +459,36 @@ diferencias, incluidas las agregaciones de Finanzas, el progreso de
 Gimnasio y los borrados en cascada de Viajes), más pruebas de extremo a
 extremo con la app servida como estático puro, sin ningún backend.
 
-**Lo que NO existe todavía y es el hueco más importante**: no hay
-ninguna copia de seguridad. Sin servidor y sin export/import, si Koku
-borra la app pierde todo. Es el siguiente trabajo declarado.
+**Copia de seguridad: YA EXISTE** (ronda de esta ventana, ver arriba).
+Diseño acordado con Koku: export por la hoja de compartir del sistema,
+manual + recordatorio de ~30 días, y TODO dentro del archivo incluidas
+las fotos. Sigue sin haber sincronización en vivo entre dispositivos —
+la copia es la forma de pasar datos de un aparato a otro.
 
 ## Pendiente / próximos pasos declarados
 
-- **Copia de seguridad (export/import)**: lo más urgente, ver arriba.
-  Sin diseñar todavía — falta decidir dónde vive el archivo (el propio
-  móvil, iCloud/Drive, mandarlo a otro sitio…) y cuándo se hace.
-- **Probar la Fase 5 en su iPhone**: Koku instala desde TestFlight
+- **Comunicación escritorio↔móvil en la v1** (nota que Koku pidió dejar
+  apuntada expresamente): cuando la app de escritorio (rama
+  `escritorio`, suya) y esta app móvil lleguen las dos a la versión 1,
+  la idea es que puedan comunicarse para pasar la copia de seguridad al
+  ordenador (y similares). Sin diseñar — solo constancia.
+- **Probar en su iPhone**: Koku instala desde TestFlight
   (`IOS-TESTFLIGHT.md` tiene la guía completa). Las notificaciones
-  locales reales y el arranque directo solo se pueden confirmar ahí,
-  no desde este contenedor.
-- **Android**: el proyecto de Capacitor ya está generado (`android/`),
-  pero no hay workflow de GitHub Actions para compilarlo todavía. Solo
-  está hecho el de iOS.
+  locales reales, el arranque directo y ahora la hoja de compartir de
+  la copia de seguridad solo se pueden confirmar ahí, no desde este
+  contenedor.
+- **Android**: workflow hecho (`android-play.yml`, ver arriba) pero
+  NUNCA ejecutado — a Koku le quedan los preparativos de
+  `ANDROID-PLAY.md` (keystore + 4 secretos + cuenta de Play Console) y
+  lanzarlo él cuando quiera.
 - **Fusionar `movil-ui` con `escritorio`**: móvil y escritorio son dos
   programas independientes que hoy comparten `public/`. Cuando toque
   fusionar habrá conflictos ahí; Koku dijo que preguntará qué falta en
   cada lado y se resuelve entonces. No adelantarse.
+- **Rama `gimnasio-movil` (de Koku, NO tocar)**: tiene su propia rama
+  bastante desarrollada con un rediseño de Gimnasio ("ya verás cuando
+  haga merge"). Se puede mirar en solo-lectura si hace falta contexto,
+  pero NUNCA tocarla ni fusionarla — lo hará él.
 - **Idiomas**: selector español/inglés, apuntado hace mucho y
   explícitamente aplazado. No empezar sin que lo pida.
 - **Guías de uso dentro de la Tienda**: en el apartado de Tienda de

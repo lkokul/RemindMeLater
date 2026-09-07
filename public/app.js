@@ -11714,6 +11714,11 @@ async function init() {
   // public/local-notifications.js).
   await initStep(syncScheduledReminders);
 
+  // Recordatorio discreto de copia de seguridad si hace mucho de la
+  // ultima (ver public/backup.js) -- sin servidor, la copia es la unica
+  // red de seguridad de los datos.
+  await initStep(maybeShowBackupReminder);
+
   setInterval(loadReminders, 30 * 1000);
   // Igual que los recordatorios: si otro dispositivo vinculado anade o
   // completa una tarea, este se entera sin recargar la pagina.

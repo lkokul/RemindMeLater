@@ -245,15 +245,38 @@ configuracion inicial de ningun tipo.
   resultado a TestFlight. Los pasos de configuracion (cuenta de
   desarrollador, secretos, como instalarla en el iPhone) estan en
   [`IOS-TESTFLIGHT.md`](IOS-TESTFLIGHT.md).
+- Para Android hay otro workflow equivalente
+  (`.github/workflows/android-play.yml`, tambien manual) que compila un
+  `.aab` **firmado para Google Play** y lo deja como artefacto
+  descargable, listo para subir a la Play Console (pruebas internas).
+  Los preparativos (keystore, secretos, cuenta de Play Console) estan
+  en [`ANDROID-PLAY.md`](ANDROID-PLAY.md).
 
-## Tus datos
+## Tus datos y la copia de seguridad
 
 **Cada dispositivo tiene sus propios datos, y no se hablan entre ellos.**
 Lo que crees en el movil no aparece en el ordenador ni al reves — no hay
 sincronizacion de ningun tipo. Y como todo vive dentro de la app,
-**desinstalarla borra todo**. Poder
-exportar e importar una copia de seguridad es lo siguiente que hace
-falta; hoy no existe.
+**desinstalarla borra todo**... salvo que tengas una copia de seguridad.
+
+En Configuración → Este dispositivo → **Copia de seguridad**:
+
+- **Exportar copia** crea un unico archivo `.json` con TODO (calendario,
+  tareas, notas con sus imagenes, todas las herramientas, fotos de
+  viajes y ajustes) y abre la hoja de compartir del sistema para
+  guardarlo donde quieras: en Archivos, iCloud/Drive, mandartelo por
+  mensaje... Desde un navegador normal, se descarga sin mas.
+- **Importar copia** restaura ese archivo, **sustituyendo** todo lo que
+  haya en la app en ese momento (avisa antes, no se puede deshacer).
+  Una copia hecha con una version anterior de la app se importa igual:
+  la base de datos se pone al dia sola al arrancar.
+- La copia es **manual**: si pasa mas de un mes sin hacer ninguna, un
+  aviso discreto al abrir la app lo recuerda (se puede posponer con la
+  ✕; tocarlo lleva directo al boton de exportar).
+
+Importar la copia de un dispositivo en otro tambien vale como forma de
+**pasar todos los datos de un aparato a otro** (por ejemplo, al cambiar
+de movil).
 
 ## Recordatorios
 
@@ -283,10 +306,9 @@ de las notificaciones push, que obligarian a pasar por Google o Apple).
 - El formato de las notas es basico (negrita, cursiva, listas, tablas,
   imagenes) — sin tablas con celdas combinadas, sin cambiar el tamano de
   una imagen ya insertada, sin encabezados/titulos.
-- **No hay copia de seguridad**: no se puede exportar ni importar los
-  datos, asi que desinstalar la app los borra para siempre. Es lo mas importante que falta.
-- Cada dispositivo tiene sus propios datos, sin ninguna forma de
-  pasarlos de uno a otro.
+- Cada dispositivo tiene sus propios datos: no hay sincronizacion en
+  vivo entre aparatos (la copia de seguridad permite pasarlos a mano,
+  pero no mantenerlos al dia solos).
 - Si quitas una imagen de una nota editandola (sin borrar la nota
   entera), sus bytes se quedan huerfanos — solo se limpian al borrar la
   nota completa.

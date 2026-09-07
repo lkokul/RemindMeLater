@@ -110,6 +110,27 @@ async function assetDelete(name) {
   return localDelete('noteAssets', name);
 }
 
+// Todas las imagenes/fotos de golpe -- lo usa la copia de seguridad
+// (backup.js) para meterlas en el archivo exportado. Para el volumen de
+// una app personal, traerlas todas a memoria de una vez es asumible.
+async function assetGetAll() {
+  const db = await openLocalDb();
+  return reqToPromise(db.transaction('noteAssets', 'readonly').objectStore('noteAssets').getAll());
+}
+
+// Vacia el almacen entero. Solo lo usa importar una copia de seguridad,
+// justo antes de volver a meter las imagenes que trae el archivo -- asi
+// no queda ninguna imagen huerfana de los datos anteriores.
+async function assetClear() {
+  const db = await openLocalDb();
+  const tx = db.transaction('noteAssets', 'readwrite');
+  tx.objectStore('noteAssets').clear();
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 // --- La base de datos entera ------------------------------------------
 async function metaGet(key) {
   const row = await localGet('_meta', key);
