@@ -8081,7 +8081,11 @@ function gymLiveTick() {
   const liveHidden = document.getElementById('gym-live-view').classList.contains('hidden');
   const globalBar = document.getElementById('gym-global-rest');
   if (liveHidden && gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
-    const gRemaining = Math.ceil((gymLiveSession.restUntil - Date.now()) / 1000);
+    // floor y no ceil: la tarjeta de la pantalla de bloqueo redondea
+    // HACIA ABAJO (estilo reloj del sistema: un temporizador de 1:00
+    // ensena 0:59 nada mas empezar), y con ceil la app iba un segundo
+    // "por detras" (feedback de Koku). Mismo criterio en los dos sitios.
+    const gRemaining = Math.max(0, Math.floor((gymLiveSession.restUntil - Date.now()) / 1000));
     document.getElementById('gym-global-rest-remaining').textContent =
       localStorage.getItem('gymRestFormat') === 'sec' ? `${gRemaining}s` : gymLiveFormatClock(gRemaining);
     const gBase = gymLiveSession.restBaseSeconds || gRemaining;
@@ -8104,7 +8108,8 @@ function gymLiveTick() {
 
   const bar = document.getElementById('gym-live-rest-bar');
   if (gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
-    const remaining = Math.ceil((gymLiveSession.restUntil - Date.now()) / 1000);
+    // floor, como la tarjeta de bloqueo (ver el comentario de gRemaining).
+    const remaining = Math.max(0, Math.floor((gymLiveSession.restUntil - Date.now()) / 1000));
     document.getElementById('gym-live-rest-remaining').textContent =
       localStorage.getItem('gymRestFormat') === 'sec' ? `${remaining}s` : gymLiveFormatClock(remaining);
     // Si la sesion en curso venia de una version sin restBaseSeconds, se
@@ -8241,6 +8246,10 @@ async function gymScheduleRestNotification() {
         title: 'Descanso terminado',
         body: 'Siguiente serie.',
         schedule: { at: new Date(gymLiveSession.restUntil + i * 2000) },
+        // Mismo hilo: iOS agrupa las repeticiones en UNA pila en vez de
+        // ensenar 3 avisos sueltos (feedback de Koku). Vibrar sin
+        // notificacion no existe en iOS, pero al menos se ven como una.
+        threadIdentifier: 'gym-descanso',
       };
       if (sonido) aviso.sound = sonido;
       return aviso;
@@ -8259,6 +8268,22 @@ async function gymCancelRestNotification() {
     await plugin.cancel({ notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })) });
   } catch (err) {
     console.error('No se pudo cancelar el aviso de descanso:', err);
+  }
+}
+
+// Al volver a la app tras un descanso avisado en modo insistente, las
+// repeticiones (902/903) ya cumplieron su funcion (vibrar): se quitan
+// del centro de notificaciones y queda solo el aviso principal.
+async function gymCleanupRestNotificationStack() {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin || typeof plugin.removeDeliveredNotifications !== 'function') return;
+  try {
+    await plugin.removeDeliveredNotifications({
+      notifications: GYM_REST_NOTIFICATION_IDS.slice(1).map((id) => ({ id })),
+    });
+  } catch (err) {
+    // Limpiar es cosmetico: si falla, no pasa nada.
   }
 }
 
@@ -8372,10 +8397,14 @@ async function gymConsumeRestExtensionFromLockScreen() {
 // ambos el tiempo tarda menos en reflejarse (Koku notaba ~3s de espera).
 // Recoger dos veces no duplica nada: la segunda lectura ya devuelve 0.
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) gymConsumeRestExtensionFromLockScreen();
+  if (!document.hidden) {
+    gymConsumeRestExtensionFromLockScreen();
+    gymCleanupRestNotificationStack();
+  }
 });
 document.addEventListener('resume', () => {
   gymConsumeRestExtensionFromLockScreen();
+  gymCleanupRestNotificationStack();
 });
 
 async function gymStartRestLiveActivity() {
