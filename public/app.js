@@ -10937,7 +10937,13 @@ async function exportProyectosPdf({ withChildren }) {
     // (cancelar el dialogo no dice nada: ya lo has cancelado tu)
   } catch (err) {
     console.error('No se pudo exportar el PDF:', err);
-    showAppAlert(`No se pudo exportar el PDF: ${err.message}`);
+    // "No handler registered" = la app en marcha es una version
+    // anterior a este boton (se actualizo el codigo pero el proceso
+    // sigue siendo el viejo): con cerrar y abrir se arregla.
+    const friendly = /No handler registered/i.test(err.message || '')
+      ? 'la app que está corriendo es una versión anterior. Ciérrala del todo y vuelve a abrirla.'
+      : err.message;
+    showAppAlert(`No se pudo exportar el PDF: ${friendly}`);
   } finally {
     // El proximo dibujo EN la app vuelve al tema claro/oscuro que toque.
     proyectosMermaidReady = false;
@@ -14020,44 +14026,31 @@ function renderProyectosDbTimeline(view, data) {
     cursorX: scroll.clientWidth / 2,
   });
 
+  // Dos lupas y punto (pedido asi por Koku: ni desplegable ni texto de
+  // ayuda): lupa con − para alejar, lupa con + para acercar. Con Ctrl +
+  // rueda del raton sobre el calendario, lo mismo.
   const controls = document.createElement('div');
   controls.className = 'proyectos-tl-controls';
-  const zoomOutBtn = document.createElement('button');
-  zoomOutBtn.type = 'button';
-  zoomOutBtn.className = 'icon-btn proyectos-tl-zoom-btn';
-  zoomOutBtn.textContent = '−';
-  zoomOutBtn.title = 'Alejar (también Ctrl + rueda del ratón)';
-  zoomOutBtn.disabled = PROYECTOS_TL_ZOOM_ORDER.indexOf(zoom) === 0;
-  zoomOutBtn.addEventListener('click', () => {
-    setTimelineZoom(PROYECTOS_TL_ZOOM_ORDER[PROYECTOS_TL_ZOOM_ORDER.indexOf(zoom) - 1], centerAnchor());
-  });
-  controls.appendChild(zoomOutBtn);
-  const zoomField = createSelectField({
-    options: [
-      { value: 'week', label: 'Zoom: semana' },
-      { value: 'month', label: 'Zoom: mes' },
-      { value: 'quarter', label: 'Zoom: trimestre' },
-    ],
-    initialValue: zoom,
-    onChange: (v) => setTimelineZoom(v, centerAnchor()),
-  });
-  controls.appendChild(zoomField.element);
-  const zoomInBtn = document.createElement('button');
-  zoomInBtn.type = 'button';
-  zoomInBtn.className = 'icon-btn proyectos-tl-zoom-btn';
-  zoomInBtn.textContent = '+';
-  zoomInBtn.title = 'Acercar (también Ctrl + rueda del ratón)';
-  zoomInBtn.disabled = PROYECTOS_TL_ZOOM_ORDER.indexOf(zoom) === PROYECTOS_TL_ZOOM_ORDER.length - 1;
-  zoomInBtn.addEventListener('click', () => {
-    setTimelineZoom(PROYECTOS_TL_ZOOM_ORDER[PROYECTOS_TL_ZOOM_ORDER.indexOf(zoom) + 1], centerAnchor());
-  });
-  controls.appendChild(zoomInBtn);
-  const legend = document.createElement('span');
-  legend.className = 'hint proyectos-tl-legend';
-  legend.textContent = startProp === endProp
-    ? `Barras por “${startProp.name}” (añade otra propiedad de fecha para tener inicio y fin)`
-    : `De “${startProp.name}” a “${endProp.name}” — arrastra una barra para moverla, o sus bordes para estirarla`;
-  controls.appendChild(legend);
+  const ZOOM_LABEL = { week: 'semana', month: 'mes', quarter: 'trimestre' };
+  const makeZoomBtn = (dir) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'icon-btn proyectos-tl-zoom-btn';
+    // Lupa dibujada en SVG con el "+" o el "−" dentro del cristal.
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">`
+      + '<circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.6" y1="15.6" x2="21" y2="21"/>'
+      + '<line x1="7.7" y1="10.5" x2="13.3" y2="10.5"/>'
+      + (dir > 0 ? '<line x1="10.5" y1="7.7" x2="10.5" y2="13.3"/>' : '')
+      + '</svg>';
+    const next = PROYECTOS_TL_ZOOM_ORDER[PROYECTOS_TL_ZOOM_ORDER.indexOf(zoom) + dir];
+    btn.disabled = !next;
+    btn.title = `${dir > 0 ? 'Acercar' : 'Alejar'}${next ? ` (a ${ZOOM_LABEL[next]})` : ''} — también Ctrl + rueda del ratón`;
+    btn.setAttribute('aria-label', dir > 0 ? 'Acercar' : 'Alejar');
+    btn.addEventListener('click', () => setTimelineZoom(next, centerAnchor()));
+    return btn;
+  };
+  controls.appendChild(makeZoomBtn(-1));
+  controls.appendChild(makeZoomBtn(1));
   view.appendChild(controls);
 
   // --- El lienzo desplazable ---
@@ -14535,7 +14528,12 @@ function openProyectosPropPopover(anchorBtn, data, prop) {
       proyectosPropPopover = null;
       refreshProyectosDbWidget(data.id);
     } catch (err) {
+      // El error A LA VISTA: si esto fallaba en silencio (solo consola),
+      // el popover se quedaba abierto sin reaccionar y parecia que la
+      // app se habia congelado (paso de verdad, con una app a medio
+      // actualizar cuyo backend no conocia aun los tipos nuevos).
       console.error('No se pudo guardar la propiedad:', err);
+      showAppAlert(`No se pudo guardar la propiedad: ${err.message}`);
     }
   });
   actions.appendChild(saveBtn);

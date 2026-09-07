@@ -2446,7 +2446,16 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    botones no se podian pulsar. z-index propio mas alto para que siempre
    quede encima, sea cual sea el modal que tenga debajo. */
 #app-confirm-modal { z-index: 30; }
-#app-confirm-modal-message { margin: 0; line-height: 1.4; }
+/* overflow-wrap: los mensajes pueden traer trozos sin espacios (una
+   ruta de Windows entera, "PDF guardado en C:\...\..."), y sin esto el
+   texto se salia del recuadro por la derecha. Se parte donde haga
+   falta. Los \n del mensaje (la ruta en su propia linea) se respetan
+   con pre-line. */
+#app-confirm-modal-message {
+  margin: 0; line-height: 1.4;
+  overflow-wrap: anywhere; word-break: break-word;
+  white-space: pre-line;
+}
 
 .reminders-day-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.7rem; }
 .day-mark-btn.active {
@@ -3592,6 +3601,10 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   border: none; background: transparent; color: inherit;
   font: inherit; font-weight: 700; font-size: 1.05rem;
   padding: 0.15rem 0.2rem;
+  /* Un nombre mas largo que su hueco se recorta con puntos suspensivos
+     (mientras no lo estas editando); al entrar a editarlo se ve entero
+     desplazandose como cualquier input. */
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .proyectos-db-name:focus { outline: none; border-bottom: 1px solid var(--accent); }
 .proyectos-db-tabs { display: flex; gap: 0.15rem; }
@@ -4159,13 +4172,13 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .proyectos-db-card-badge.complete, .proyectos-db-chip.complete { background: #3fb950; color: #fff; }
 
 /* --- Vista Cronograma (Gantt) de las bases de datos --- */
+/* Solo las dos lupas de zoom, con aire lateral para que la primera no
+   quede pegada al borde del marco del calendario. */
 .proyectos-tl-controls {
-  display: flex; align-items: center; gap: 0.7rem;
+  display: flex; align-items: center; gap: 0.4rem;
   margin-bottom: 0.4rem;
+  padding: 0 0.35rem;
 }
-/* El desplegable del zoom no necesita ocupar media pantalla. */
-.proyectos-tl-controls .select-field { width: 180px; flex-shrink: 0; }
-.proyectos-tl-legend { font-size: 0.78rem; }
 .proyectos-tl-scroll {
   overflow-x: auto;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -4241,12 +4254,11 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 /* El icono SVG del boton de seleccionar, centrado y a juego. */
 .proyectos-select-btn { display: inline-flex; align-items: center; justify-content: center; }
 .proyectos-select-btn svg { display: block; }
-/* Zoom del cronograma: padding lateral explicito en el desplegable y
-   botones -/+ compactos a los lados. */
-.proyectos-tl-controls .select-field-trigger { padding: 0.35rem 0.8rem; }
+/* Las lupas de zoom del cronograma. */
 .proyectos-tl-zoom-btn {
   width: 1.8rem; height: 1.8rem; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
-  font-size: 1rem; line-height: 1;
 }
+.proyectos-tl-zoom-btn svg { display: block; width: 17px; height: 17px; }
 .proyectos-tl-zoom-btn:disabled { opacity: 0.35; cursor: default; }

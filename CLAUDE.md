@@ -657,6 +657,11 @@ ningún error en la consola.
 
 ## Pendiente / próximos pasos declarados
 
+- **Formato del PDF de Proyectos**: a Koku le gusta cómo quedó el
+  exportar a PDF pero quiere una pasada de formato más adelante para
+  que se vea mejor (pedido el 2026-09-08). Los estilos viven en
+  `public/print.html`.
+
 - **Documento de cambios visuales**: Koku dijo que iba a pasar "un
   documento detallado de todos los cambios visuales que quiero hacer, no
   serán pocos". Eso es lo siguiente.
