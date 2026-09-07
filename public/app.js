@@ -13296,17 +13296,28 @@ function renderProyectosDbWidget(container, data) {
   renderTrackingPopovers(container, () => {
     container.innerHTML = '';
 
-    // --- Cabecera: nombre + pestañas de vista + acciones ---
+    // --- El nombre, en su propia linea centrada encima de todo ---
+    // Es un contenteditable y no un <input> a proposito: un nombre
+    // largo ENVUELVE en varias lineas en vez de recortarse (pedido por
+    // Koku). Sigue siendo una sola linea de texto como dato (Intro no
+    // mete saltos: guarda y sale).
+    const nameEl = document.createElement('div');
+    nameEl.className = 'proyectos-db-name';
+    nameEl.contentEditable = 'true';
+    nameEl.setAttribute('data-placeholder', 'Base de datos sin nombre');
+    nameEl.textContent = data.name || '';
+    nameEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); }
+    });
+    nameEl.addEventListener('blur', () => {
+      const value = nameEl.textContent.trim();
+      if (value !== (data.name || '')) saveProyectosDbConfig(data.id, { name: value });
+    });
+    container.appendChild(nameEl);
+
+    // --- Cabecera: pestañas de vista + acciones ---
     const header = document.createElement('div');
     header.className = 'proyectos-db-header';
-
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.className = 'proyectos-db-name';
-    nameInput.placeholder = 'Base de datos sin nombre';
-    nameInput.value = data.name || '';
-    nameInput.addEventListener('change', () => saveProyectosDbConfig(data.id, { name: nameInput.value.trim() }));
-    header.appendChild(nameInput);
 
     const tabs = document.createElement('div');
     tabs.className = 'proyectos-db-tabs';

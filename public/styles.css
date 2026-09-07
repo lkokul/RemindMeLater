@@ -3596,17 +3596,26 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   margin-bottom: 0.6rem;
   flex-wrap: wrap;
 }
+/* El nombre de la base: linea propia centrada encima de las pestañas.
+   Es un contenteditable (no un input) para que un nombre largo pueda
+   ocupar varias lineas envolviendo, en vez de recortarse. */
 .proyectos-db-name {
-  flex: 1; min-width: 8rem;
-  border: none; background: transparent; color: inherit;
-  font: inherit; font-weight: 700; font-size: 1.05rem;
-  padding: 0.15rem 0.2rem;
-  /* Un nombre mas largo que su hueco se recorta con puntos suspensivos
-     (mientras no lo estas editando); al entrar a editarlo se ve entero
-     desplazandose como cualquier input. */
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: center;
+  font-weight: 700; font-size: 1.05rem;
+  padding: 0.1rem 0.4rem;
+  margin-bottom: 0.45rem;
+  outline: none;
+  word-break: break-word;
+  border-radius: var(--radius-sm);
 }
-.proyectos-db-name:focus { outline: none; border-bottom: 1px solid var(--accent); }
+.proyectos-db-name:hover { background: var(--surface-2); }
+.proyectos-db-name:focus { background: var(--surface-2); box-shadow: inset 0 -2px 0 var(--accent); }
+/* Placeholder del contenteditable vacio, como el del titulo de pagina. */
+.proyectos-db-name:empty::before {
+  content: attr(data-placeholder);
+  opacity: 0.35;
+  pointer-events: none;
+}
 .proyectos-db-tabs { display: flex; gap: 0.15rem; }
 .proyectos-db-tab {
   border: none; background: none; color: inherit;
@@ -4256,9 +4265,12 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .proyectos-select-btn svg { display: block; }
 /* Las lupas de zoom del cronograma. */
 .proyectos-tl-zoom-btn {
-  width: 1.8rem; height: 1.8rem; flex-shrink: 0;
+  width: 2.15rem; height: 2.15rem; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
+  /* padding 0: el que hereda de .icon-btn dejaba tan poco hueco que el
+     flex ENCOGIA el svg por debajo de su tamaño (lupas diminutas). */
+  padding: 0;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
 }
-.proyectos-tl-zoom-btn svg { display: block; width: 17px; height: 17px; }
+.proyectos-tl-zoom-btn svg { display: block; width: 21px; height: 21px; flex-shrink: 0; }
 .proyectos-tl-zoom-btn:disabled { opacity: 0.35; cursor: default; }
