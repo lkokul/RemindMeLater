@@ -2183,12 +2183,16 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 .gym-live-exercise-card.collapsed .gym-live-card-body { display: none; }
 .gym-live-card-body { display: flex; flex-direction: column; gap: 0.45rem; }
 .gym-live-exercise-header { cursor: pointer; }
+/* Nombres largos: hasta 2 lineas en vez de cortar con "..." en una
+   (feedback de Koku: no podia leer el ejercicio entero). */
 .gym-live-exercise-header .gym-list-item-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.25;
 }
 .gym-live-card-progress {
   flex-shrink: 0;
@@ -2472,6 +2476,11 @@ body.gym-rest-push #settings-modal .settings-card {
 #btn-gym-live-pause.is-paused { border-color: var(--gym-accent); color: var(--gym-accent); }
 /* Reloj de sesion en pausa: atenuado, para que se note de un vistazo. */
 .gym-live-clock.paused { opacity: 0.45; }
+
+/* El entreno en vivo por ENCIMA del resto de pantallas completas (todas
+   comparten .my-space-view con z-index 15): tocar la barra de descanso
+   desde Finanzas/Notas/etc debe ensenar el entreno, no abrirlo debajo. */
+#gym-live-view { z-index: 40; }
 .gym-live-fab-primary {
   background: var(--accent);
   color: var(--accent-text);

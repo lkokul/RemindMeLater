@@ -8113,17 +8113,30 @@ function gymLiveTick() {
     document.getElementById('gym-live-rest-fill-extra').style.width = `${(extraRemaining / planned) * 100}%`;
     bar.classList.remove('hidden');
   } else {
-    if (gymLiveSession.restUntil) {
-      gymLiveSession.restUntil = null;
-      gymLiveStore();
-      // El descanso llego a cero con la app despierta: la tarjeta de la
-      // pantalla de bloqueo ya no pinta nada. (Si la app estaba
-      // congelada, se quita aqui mismo en cuanto vuelve a ejecutarse.)
-      gymEndRestLiveActivity();
+    if (gymLiveSession.restUntil && !gymRestExpiryPending) {
+      // OJO, orden importante (bug real): antes de dar el descanso por
+      // vencido hay que RECOGER los +30s que se hayan pulsado en la
+      // pantalla de bloqueo. Si no, al despertar la app (incluso cuando
+      // iOS la lanza en segundo plano para ejecutar el boton), este tick
+      // veia el restUntil viejo ya vencido, mataba la tarjeta y tiraba
+      // los segundos sin aplicarlos -- "es como si no lo hubiera hecho".
+      gymRestExpiryPending = true;
+      gymConsumeRestExtensionFromLockScreen().finally(() => {
+        gymRestExpiryPending = false;
+        if (gymLiveSession && gymLiveSession.restUntil && gymLiveSession.restUntil <= Date.now()) {
+          gymLiveSession.restUntil = null;
+          gymLiveStore();
+          // Ahora si: el descanso termino de verdad, fuera la tarjeta.
+          gymEndRestLiveActivity();
+          gymLiveTick();
+        }
+      });
     }
     bar.classList.add('hidden');
   }
 }
+// Evita encolar mil recogidas mientras la primera esta en camino.
+let gymRestExpiryPending = false;
 
 document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () => {
   if (gymLiveSession && gymLiveSession.restUntil) {
@@ -8238,6 +8251,13 @@ function getGymLiveActivityPlugin() {
   return gymLiveActivityPlugin;
 }
 
+// El acento del tema activo, para que la tarjeta de la pantalla de
+// bloqueo siga el estilo de la app (peticion de Koku).
+function gymCurrentAccentHex() {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v : '#5b8cff';
+}
+
 // Fechas que necesita la tarjeta, derivadas del estado del descanso.
 function gymRestActivityParams() {
   const totalSeconds = (gymLiveSession.restBaseSeconds || 0) + (gymLiveSession.restExtraSeconds || 0);
@@ -8246,6 +8266,7 @@ function gymRestActivityParams() {
     endAt: gymLiveSession.restUntil,
     dayName: gymLiveSession.routineName || 'Sesión libre',
     extraSeconds: gymLiveSession.restExtraSeconds || 0,
+    accentHex: gymCurrentAccentHex(),
   };
 }
 
@@ -8261,17 +8282,34 @@ async function gymConsumeRestExtensionFromLockScreen() {
   try {
     const res = await plugin.consumeRestExtension();
     const seconds = res && res.seconds ? Number(res.seconds) : 0;
-    if (!seconds || !gymLiveSession || !gymLiveSession.restUntil) return;
-    gymLiveSession.restUntil += seconds * 1000;
-    gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + seconds;
-    const ref = gymLiveSession.restSetRef;
-    if (ref) {
-      const refEx = gymLiveSession.exercises.find((x) => x.exerciseId === ref.exerciseId);
-      const refSet = refEx && refEx.sets[ref.setIndex];
-      if (refSet) refSet.extraRest = (refSet.extraRest || 0) + seconds;
+    if (seconds > 0 && gymLiveSession && gymLiveSession.restUntil) {
+      gymLiveSession.restUntil += seconds * 1000;
+      gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + seconds;
+      const ref = gymLiveSession.restSetRef;
+      if (ref) {
+        const refEx = gymLiveSession.exercises.find((x) => x.exerciseId === ref.exerciseId);
+        const refSet = refEx && refEx.sets[ref.setIndex];
+        if (refSet) refSet.extraRest = (refSet.extraRest || 0) + seconds;
+      }
+      gymLiveStore();
+      gymLiveTick();
+      // Con el entreno a la vista, repintar para que el "+Ns" de la serie
+      // se vea al momento (oculto, ya se repintara al abrirlo).
+      if (!document.getElementById('gym-live-view').classList.contains('hidden')) {
+        renderGymLiveExercises();
+      }
+      // Reafirma la tarjeta con el estado ya cuadrado (y la resucita si
+      // un despertar anterior la hubiera cerrado de mas).
+      gymUpdateRestLiveActivity();
     }
-    gymLiveStore();
-    gymLiveTick();
+    // Tocar la tarjeta de la pantalla de bloqueo abre la app pidiendo ir
+    // al entreno (peticion de Koku): el SceneDelegate deja la marca y
+    // aqui se ejecuta la navegacion.
+    if (res && res.openGym && gymLiveSession) {
+      if (typeof closeSettingsModal === 'function') closeSettingsModal();
+      if (typeof openGymView === 'function') openGymView();
+      openGymLiveView();
+    }
   } catch (err) {
     console.error('No se pudo recoger el +30s de la pantalla de bloqueo:', err);
   }
@@ -8724,8 +8762,13 @@ document.addEventListener('click', (e) => {
 }, true);
 
 // Tocar la mini-barra global de descanso vuelve al entrenamiento.
+// Configuracion es un modal que quedaria POR ENCIMA del entreno, asi que
+// se cierra primero (feedback de Koku: "desde configuracion no me lleva
+// al entrenamiento").
 document.getElementById('gym-global-rest').addEventListener('click', () => {
-  if (gymLiveSession) openGymLiveView();
+  if (!gymLiveSession) return;
+  if (typeof closeSettingsModal === 'function') closeSettingsModal();
+  openGymLiveView();
 });
 
 // Al arrancar la app, si quedo una sesion en curso guardada se carga en

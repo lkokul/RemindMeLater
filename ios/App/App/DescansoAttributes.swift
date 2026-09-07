@@ -26,5 +26,10 @@ struct DescansoAttributes: ActivityAttributes {
     // Nombre del dia de entreno ("Torso", "Sesion libre"...): fijo
     // durante toda la actividad, por eso va en attributes y no en state.
     var dayName: String
+    // Color de acento del TEMA activo de la app (hex "#rrggbb"), para que
+    // la tarjeta siga el estilo de la app (peticion de Koku). Fijo por
+    // actividad: si cambias de tema en mitad de un descanso, se aplica
+    // al siguiente.
+    var accentHex: String
 }
 #endif

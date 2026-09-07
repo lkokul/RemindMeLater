@@ -55,7 +55,10 @@ public class LiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
                 do {
                     _ = try Activity.request(
-                        attributes: DescansoAttributes(dayName: dayName),
+                        attributes: DescansoAttributes(
+                            dayName: dayName,
+                            accentHex: call.getString("accentHex") ?? "#5b8cff"
+                        ),
                         // staleDate = el final del descanso: si la app no
                         // llega a cerrarla (movil bloqueado), el sistema
                         // la marca como pasada en vez de dejarla "viva".
@@ -111,7 +114,12 @@ public class LiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
         let defaults = UserDefaults.standard
         let seconds = defaults.integer(forKey: "gymPendingRestExtra")
         if seconds != 0 { defaults.set(0, forKey: "gymPendingRestExtra") }
-        call.resolve(["seconds": seconds])
+        // openGym: el usuario toco la tarjeta de la pantalla de bloqueo
+        // (SceneDelegate deja la marca al recibir remindmelater://gym-live)
+        // y el JS debe navegar al entrenamiento.
+        let abrirGym = defaults.bool(forKey: "gymPendingOpenFromActivity")
+        if abrirGym { defaults.set(false, forKey: "gymPendingOpenFromActivity") }
+        call.resolve(["seconds": seconds, "openGym": abrirGym])
     }
 
     // Quita la tarjeta (descanso saltado, serie desmarcada, entreno

@@ -23,12 +23,34 @@ struct DescansoWidgetBundle: WidgetBundle {
     }
 }
 
+// "#rrggbb" -> Color. Es el acento del TEMA activo de la app, que viaja
+// en los attributes de la actividad: asi la tarjeta sigue el estilo de la
+// app (peticion de Koku).
+private extension Color {
+    init(hexAccent: String) {
+        var hex = hexAccent
+        if hex.hasPrefix("#") { hex.removeFirst() }
+        var value: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&value)
+        self.init(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+}
+
+// Tocar la tarjeta (o la isla) abre la app directamente en el entreno --
+// ver marcarAperturaDesdeActividad en SceneDelegate.swift.
+private let abrirEntrenoURL = URL(string: "remindmelater://gym-live")
+
 struct DescansoLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: DescansoAttributes.self) { context in
             // ----- Tarjeta de la pantalla de bloqueo (y centro de
             // notificaciones). Eleccion de Koku: cuenta atras grande +
-            // barra de progreso + nombre del dia.
+            // barra de progreso + nombre del dia, con el acento del tema.
+            let accent = Color(hexAccent: context.attributes.accentHex)
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(context.attributes.dayName)
@@ -37,7 +59,7 @@ struct DescansoLiveActivity: Widget {
                     Spacer()
                     Text("Descanso")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(accent)
                 }
                 HStack(alignment: .center, spacing: 10) {
                     Text(timerInterval: context.state.startAt...context.state.endAt, countsDown: true)
@@ -60,7 +82,7 @@ struct DescansoLiveActivity: Widget {
                                 .font(.callout.weight(.semibold))
                         }
                         .buttonStyle(.bordered)
-                        .tint(.orange)
+                        .tint(accent)
                     }
                 }
                 ProgressView(timerInterval: context.state.startAt...context.state.endAt, countsDown: true) {
@@ -68,8 +90,10 @@ struct DescansoLiveActivity: Widget {
                 } currentValueLabel: {
                     EmptyView()
                 }
+                .tint(accent)
             }
             .padding(16)
+            .widgetURL(abrirEntrenoURL)
         } dynamicIsland: { context in
             DynamicIsland {
                 // Vista EXPANDIDA (dejar pulsada la isla).
@@ -95,6 +119,7 @@ struct DescansoLiveActivity: Widget {
                         } currentValueLabel: {
                             EmptyView()
                         }
+                        .tint(Color(hexAccent: context.attributes.accentHex))
                         if context.state.extraSeconds > 0 {
                             Text("+\(context.state.extraSeconds)s")
                                 .font(.caption.weight(.bold))
@@ -106,20 +131,25 @@ struct DescansoLiveActivity: Widget {
                                     .font(.caption.weight(.semibold))
                             }
                             .buttonStyle(.bordered)
-                            .tint(.orange)
+                            .tint(Color(hexAccent: context.attributes.accentHex))
                         }
                     }
                 }
             } compactLeading: {
                 Image(systemName: "timer")
+                    .foregroundStyle(Color(hexAccent: context.attributes.accentHex))
+                    .widgetURL(abrirEntrenoURL)
             } compactTrailing: {
                 // La cuenta atras compacta junto a la camara. El frame
                 // fijo evita que la isla "respire" a cada segundo.
                 Text(timerInterval: context.state.startAt...context.state.endAt, countsDown: true)
                     .monospacedDigit()
                     .frame(width: 44)
+                    .widgetURL(abrirEntrenoURL)
             } minimal: {
                 Image(systemName: "timer")
+                    .foregroundStyle(Color(hexAccent: context.attributes.accentHex))
+                    .widgetURL(abrirEntrenoURL)
             }
         }
     }
