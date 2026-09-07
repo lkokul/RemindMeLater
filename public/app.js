@@ -364,14 +364,18 @@ const STAR_OUTLINE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="
 // ---------------------------------------------------------------------
 let appConfirmResolve = null;
 let appConfirmCheckboxStorageKey = null;
-// opts.checkbox = { label, storageKey } (Fase 4 del rediseño movil,
-// usado por el aviso de borrar una carpeta con contenido en modo
-// Seleccionar de Notas): añade una fila con .styled-checkbox debajo del
-// mensaje -- si esta marcada al pulsar Aceptar, se guarda
-// localStorage[storageKey] = '1' (por dispositivo, mismo patron que el
-// resto de ajustes de este tipo en la app) ANTES de resolver la
-// promesa. Aditivo: no cambia nada para los usos existentes que no
-// pasan "checkbox".
+// Como quedo marcada la casilla del ultimo aviso, para los casos en que
+// es una ELECCION de verdad (y no un "no volver a mostrar" que se guarda
+// solo) -- p. ej. "eliminar tambien lo que hay dentro" al borrar una
+// carpeta. Se lee justo despues de que showAppConfirm() resuelva.
+let lastAppConfirmCheckbox = false;
+// opts.checkbox = { label, storageKey? }: añade una fila con
+// .styled-checkbox debajo del mensaje. Con "storageKey" es un "no volver
+// a mostrar" (si esta marcada al Aceptar se guarda
+// localStorage[storageKey] = '1', por dispositivo, mismo patron que el
+// resto de ajustes de este tipo); sin el, es una eleccion normal y el
+// que llama la lee en lastAppConfirmCheckbox nada mas resolverse.
+// Aditivo: no cambia nada para los usos que no pasan "checkbox".
 function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', danger = false, alertOnly = false, checkbox = null } = {}) {
   return new Promise((resolve) => {
     appConfirmResolve = resolve;
@@ -384,6 +388,7 @@ function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', 
     const checkboxRow = document.getElementById('app-confirm-checkbox-row');
     const checkboxInput = document.getElementById('app-confirm-checkbox');
     checkboxRow.classList.toggle('hidden', !checkbox);
+    lastAppConfirmCheckbox = false;
     if (checkbox) {
       document.getElementById('app-confirm-checkbox-label').textContent = checkbox.label;
       checkboxInput.checked = false;
@@ -396,7 +401,8 @@ function showAppAlert(message, { okText = 'Aceptar', checkbox = null } = {}) {
 }
 function closeAppConfirm(result) {
   document.getElementById('app-confirm-modal').classList.add('hidden');
-  if (result && appConfirmCheckboxStorageKey && document.getElementById('app-confirm-checkbox').checked) {
+  lastAppConfirmCheckbox = document.getElementById('app-confirm-checkbox').checked;
+  if (result && appConfirmCheckboxStorageKey && lastAppConfirmCheckbox) {
     localStorage.setItem(appConfirmCheckboxStorageKey, '1');
   }
   appConfirmCheckboxStorageKey = null;
@@ -3178,9 +3184,19 @@ function startNoteItemMove(itemKey) {
 async function startNoteItemDelete(itemKey) {
   const { item } = resolveMobileNotesItem(itemKey) || {};
   const nombre = item ? getNoteListItemName(item) : 'esto';
-  const ok = await showAppConfirm(`¿Eliminar "${nombre}"?`, { okText: 'Eliminar', danger: true });
+  const conContenido = mobileNotesDeletionIncludesFolderWithContent([itemKey]);
+  const ok = await showAppConfirm(
+    conContenido
+      ? `¿Eliminar "${nombre}"? Lo que hay dentro subirá un nivel, salvo que marques la casilla.`
+      : `¿Eliminar "${nombre}"?`,
+    {
+      okText: 'Eliminar',
+      danger: true,
+      checkbox: conContenido ? { label: 'Eliminar también lo que hay dentro' } : null,
+    }
+  );
   if (!ok) return;
-  await runNoteItemsDeletion([itemKey]);
+  await deleteNoteItems([itemKey], conContenido && lastAppConfirmCheckbox);
   renderNotesView();
 }
 
@@ -3648,26 +3664,32 @@ function closeMobileNotesDeleteModal() {
 document.getElementById('btn-close-mobile-notes-delete').addEventListener('click', closeMobileNotesDeleteModal);
 document.getElementById('btn-mobile-notes-delete-cancel').addEventListener('click', closeMobileNotesDeleteModal);
 
-// Borrado de verdad, compartido por el modal de varios y por la accion
-// de una sola fila. Devuelve false si el aviso de "esto tiene contenido
-// dentro" se cancela.
-async function runNoteItemsDeletion(keys) {
-  if (
-    mobileNotesDeletionIncludesFolderWithContent(keys)
-    && localStorage.getItem('notesMobileHideFolderDeleteWarning') !== '1'
-  ) {
-    const proceed = await showAppConfirm(
-      'Las notas y subcarpetas que contenga cualquier carpeta que borres subirán de nivel, no se borrarán.',
-      { checkbox: { label: 'No volver a mostrar este aviso', storageKey: 'notesMobileHideFolderDeleteWarning' } }
-    );
-    if (!proceed) return false;
-  }
+// El borrado en si. Con "conContenido" a true, una carpeta arrastra todo
+// lo que tenga dentro (ver ?deleteContents=1 en routes-local/noteFolders.js);
+// sin el, lo de dentro sube UN nivel y no se pierde nada.
+async function deleteNoteItems(keys, conContenido) {
   for (const key of keys) {
     const { kind, id } = resolveMobileNotesItem(key);
     if (kind === 'note') await api(`/api/notes/${id}`, { method: 'DELETE' });
-    else await api(`/api/note-folders/${id}`, { method: 'DELETE' });
+    else await api(`/api/note-folders/${id}${conContenido ? '?deleteContents=1' : ''}`, { method: 'DELETE' });
   }
   await Promise.all([loadNotes(), loadNoteFolders()]);
+}
+
+// Pregunta lo que haya que preguntar y borra. Devuelve false si se
+// cancela. Lo usa el modal de borrar varios.
+async function runNoteItemsDeletion(keys) {
+  const conContenido = mobileNotesDeletionIncludesFolderWithContent(keys);
+  if (conContenido) {
+    const proceed = await showAppConfirm(
+      'Lo que haya dentro de las carpetas que borres subirá un nivel, salvo que marques la casilla.',
+      { okText: 'Eliminar', danger: true, checkbox: { label: 'Eliminar también lo que hay dentro' } }
+    );
+    if (!proceed) return false;
+    await deleteNoteItems(keys, lastAppConfirmCheckbox);
+    return true;
+  }
+  await deleteNoteItems(keys, false);
   return true;
 }
 
@@ -5801,23 +5823,24 @@ function refreshTableCornerButton() {
     box.classList.add('hidden');
     return;
   }
+  // SIEMPRE en la esquina superior derecha de la tabla, a caballo sobre
+  // ella. Antes saltaba a la esquina mas cercana al cursor, y con la
+  // tabla a medio salir de la pantalla acababa en un sitio distinto cada
+  // vez. Si esa esquina no se ve, el icono tampoco.
   const rect = table.getBoundingClientRect();
   const visible = NOTE_EDITOR_BODY.getBoundingClientRect();
-  if (rect.bottom < visible.top || rect.top > visible.bottom) {
+  const esquinaX = rect.right;
+  const esquinaY = rect.top;
+  const aLaVista = esquinaY >= visible.top && esquinaY <= visible.bottom
+    && esquinaX >= visible.left && esquinaX <= visible.right;
+  if (!aLaVista) {
     box.classList.add('hidden');
     return;
   }
-  // De las 4 esquinas exteriores, la mas cercana a la celda donde esta
-  // el cursor -- el icono aparece "al lado" de donde acabas de tocar.
-  const cellRect = cell.getBoundingClientRect();
-  const cx = cellRect.left + cellRect.width / 2;
-  const cy = cellRect.top + cellRect.height / 2;
-  const izquierda = cx < rect.left + rect.width / 2;
-  const arriba = cy < rect.top + rect.height / 2;
   box.classList.remove('hidden');
   const tamano = box.offsetWidth || 28;
-  box.style.left = `${(izquierda ? rect.left - tamano - 4 : rect.right + 4)}px`;
-  box.style.top = `${(arriba ? rect.top - 4 : rect.bottom - tamano + 4)}px`;
+  box.style.left = `${esquinaX - tamano / 2}px`;
+  box.style.top = `${esquinaY - tamano / 2}px`;
 }
 
 NOTE_EDITOR_BODY.addEventListener('scroll', refreshTableCornerButton);
