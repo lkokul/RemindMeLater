@@ -141,9 +141,12 @@ ahora se llama `device`.
 
 ## Reglas de trabajo que Koku ha pedido explícitamente
 
-- **No hacer commit ni push sin que él lo pida.** A veces pide solo UNA de
-  las dos cosas (commit sin push, por ejemplo) — haz justo lo que pide, no
-  más. No asumas autorización de una ronda para la siguiente.
+- **Commit y push por tu cuenta.** Hasta el 5/9/2026 la regla era no
+  commitear ni pushear sin pedirlo; Koku la retiró para igualar esta
+  conversación con el resto. Ahora se commitea y se pushea sin
+  preguntar. **La única excepción: lanzar GitHub Actions, que sí se
+  consulta antes.** (En esta rama, de hecho, `.github/` ya no existe —
+  se fue con el workflow de iOS.)
 - **No hace falta avisar de que una tarea es larga antes de empezar** — lo
   pidió al principio, pero luego dijo explícitamente que como no puedo
   comprimir contexto por mi cuenta, no sirve de nada que avise.
