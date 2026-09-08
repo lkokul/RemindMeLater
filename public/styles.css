@@ -2344,6 +2344,11 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    vertical -- cada ficha lleva texto largo (guia/novedades), la rejilla
    de tarjetas cuadradas no le vale. */
 .store-list { display: flex; flex-direction: column; gap: 1rem; max-width: 720px; margin: 0 auto; }
+/* Barra de acciones globales de la Tienda (hoy solo "Copia completa";
+   solo se pinta en el ordenador de confianza, ver renderStoreList). */
+.store-global-actions { display: flex; justify-content: flex-end; gap: 0.4rem; flex-wrap: wrap; }
+/* Filas del modal de restaurar copia: casilla + nombre + resumen. */
+.store-restore-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0; cursor: pointer; }
 .store-card {
   padding: 1rem 1.2rem;
   border-radius: var(--radius);

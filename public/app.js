@@ -375,6 +375,11 @@ const STAR_OUTLINE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="
 // ---------------------------------------------------------------------
 let appConfirmResolve = null;
 let appConfirmCheckboxStorageKey = null;
+// opts.extraButton = { label, onClick } (ronda de la Tienda): un tercer
+// boton opcional que dispara una accion SIN cerrar el aviso -- se usa
+// para "Hacer copia primero" en el aviso de borrar los datos de una
+// herramienta. Aditivo, mismo criterio que "checkbox" de abajo.
+let appConfirmExtraHandler = null;
 // opts.checkbox = { label, storageKey } (Fase 4 del rediseño movil,
 // usado por el aviso de borrar una carpeta con contenido en modo
 // Seleccionar de Notas): añade una fila con .styled-checkbox debajo del
@@ -383,10 +388,14 @@ let appConfirmCheckboxStorageKey = null;
 // resto de ajustes de este tipo en la app) ANTES de resolver la
 // promesa. Aditivo: no cambia nada para los usos existentes que no
 // pasan "checkbox".
-function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', danger = false, alertOnly = false, checkbox = null } = {}) {
+function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', danger = false, alertOnly = false, checkbox = null, extraButton = null } = {}) {
   return new Promise((resolve) => {
     appConfirmResolve = resolve;
     appConfirmCheckboxStorageKey = checkbox ? checkbox.storageKey : null;
+    appConfirmExtraHandler = extraButton ? extraButton.onClick : null;
+    const extraBtn = document.getElementById('btn-app-confirm-extra');
+    extraBtn.classList.toggle('hidden', !extraButton);
+    if (extraButton) extraBtn.textContent = extraButton.label;
     document.getElementById('app-confirm-modal-message').textContent = message;
     const okBtn = document.getElementById('btn-app-confirm-ok');
     okBtn.textContent = okText;
@@ -411,6 +420,7 @@ function closeAppConfirm(result) {
     localStorage.setItem(appConfirmCheckboxStorageKey, '1');
   }
   appConfirmCheckboxStorageKey = null;
+  appConfirmExtraHandler = null;
   if (appConfirmResolve) {
     const resolve = appConfirmResolve;
     appConfirmResolve = null;
@@ -419,6 +429,11 @@ function closeAppConfirm(result) {
 }
 document.getElementById('btn-app-confirm-ok').addEventListener('click', () => closeAppConfirm(true));
 document.getElementById('btn-app-confirm-cancel').addEventListener('click', () => closeAppConfirm(false));
+// El boton extra NO cierra el aviso: dispara su accion (p. ej. descargar
+// la copia de seguridad) y el modal se queda esperando Aceptar/Cancelar.
+document.getElementById('btn-app-confirm-extra').addEventListener('click', () => {
+  if (appConfirmExtraHandler) appConfirmExtraHandler();
+});
 
 // Ctrl+Intro (o Cmd+Intro en Mac) guarda directamente, sin tener que ir
 // a buscar el boton "Guardar" con el raton -- util sobre todo en el
@@ -7925,6 +7940,140 @@ async function downloadToolBackup(toolIds, boton) {
   }
 }
 
+// Borrar los datos de una herramienta -- accion GLOBAL (todos los
+// dispositivos), a diferencia de ocultar (que es solo de este aparato).
+// El aviso previo dice numeros reales (pedidos a /tool-summary), avisa de
+// los enlaces cruzados Viajes<->Finanzas que se van a desenlazar (nunca
+// se destruye nada de la OTRA herramienta, decision de Koku), y lleva al
+// lado un boton "Hacer copia primero" que descarga la copia de seguridad
+// sin cerrar el aviso.
+async function confirmDeleteToolData(tool) {
+  let resumen;
+  try {
+    resumen = await api(`/api/backup/tool-summary/${tool.id}`);
+  } catch (err) {
+    await showAppAlert('No se pudo preparar el borrado: ' + err.message);
+    return;
+  }
+
+  let msg = `Vas a borrar TODOS los datos de ${tool.nombre}: ${resumen.totalRows} registro${resumen.totalRows === 1 ? '' : 's'}`;
+  if (resumen.totalFiles > 0) msg += ` y ${resumen.totalFiles} archivo${resumen.totalFiles === 1 ? '' : 's'} (fotos)`;
+  msg += ', en TODOS los dispositivos.';
+  if (resumen.crossLinks > 0) {
+    if (tool.id === 'finanzas') {
+      msg += ` Se desenlazarán ${resumen.crossLinks} ticket${resumen.crossLinks === 1 ? '' : 's'} de Viajes (sus fotos e importes se conservan).`;
+    } else if (tool.id === 'viajes') {
+      msg += ` Las transacciones que estos viajes crearon en Finanzas (${resumen.crossLinks}) se quedarán allí, desenlazadas.`;
+    }
+  }
+  msg += ' No se puede deshacer.';
+
+  const ok = await showAppConfirm(msg, {
+    okText: 'Borrar datos',
+    danger: true,
+    extraButton: { label: 'Hacer copia primero', onClick: () => downloadToolBackup([tool.id], null) },
+  });
+  if (!ok) return;
+
+  try {
+    await api(`/api/backup/tool-data/${tool.id}`, { method: 'DELETE' });
+  } catch (err) {
+    await showAppAlert('No se pudieron borrar los datos: ' + err.message);
+    return;
+  }
+  // Recargar es lo mas honesto tras un borrado masivo (mismo criterio
+  // que la restauracion de movil-ui): cualquier vista abierta podria
+  // estar enseñando datos que ya no existen.
+  await showAppAlert(`Datos de ${tool.nombre} borrados.`);
+  location.reload();
+}
+
+// --- Restaurar una copia (fase 5): elegir archivo -> el servidor lo
+// valida sin aplicar nada -> modal de casillas -> restaurar lo marcado.
+// La restauracion AÑADE sin duplicar (fusion por uid, ver
+// routes/backup.js): lo que ya tienes ni se borra ni se duplica.
+async function handleRestoreFileChosen(file) {
+  let inspeccion;
+  try {
+    const headers = { 'Content-Type': 'application/octet-stream' };
+    const token = localStorage.getItem('deviceToken');
+    if (token) headers['X-Device-Token'] = token;
+    // fetch directo (no api()): el cuerpo es el ARCHIVO tal cual, no un
+    // JSON pequeño -- octet-stream a proposito para que el middleware
+    // json del servidor no intente parsear cientos de megas dos veces.
+    const res = await fetch(new URL('/api/backup/inspect', getServerBaseUrl()), { method: 'POST', headers, body: file });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.message || `Error ${res.status}`);
+    inspeccion = body;
+  } catch (err) {
+    await showAppAlert('No se pudo leer la copia: ' + err.message);
+    return;
+  }
+
+  const lista = document.getElementById('store-restore-list');
+  lista.innerHTML = '';
+  inspeccion.tools.forEach((t) => {
+    const marcada = !isToolHidden(t.id);
+    const row = document.createElement('label');
+    row.className = 'store-restore-row';
+    row.innerHTML = `
+      <input type="checkbox" class="styled-checkbox" data-restore-tool="${t.id}" ${marcada ? 'checked' : ''} />
+      <span>${escapeHtml(t.nombre)} <span class="store-card-meta">· ${t.rows} registro${t.rows === 1 ? '' : 's'}${t.files ? ` y ${t.files} archivo${t.files === 1 ? '' : 's'}` : ''}${marcada ? '' : ' · oculta en este dispositivo'}</span></span>`;
+    lista.appendChild(row);
+  });
+  const fecha = inspeccion.exportedAt ? ` (del ${String(inspeccion.exportedAt).slice(0, 10)})` : '';
+  document.getElementById('store-restore-hint').textContent =
+    `Copia${fecha}. Marca qué herramientas cargar. Se AÑADE lo que falte: nada de lo que ya tienes se borra ni se duplica, aunque restaures la misma copia dos veces.`;
+  document.getElementById('store-restore-modal').dataset.inspectId = inspeccion.inspectId;
+  document.getElementById('store-restore-modal').classList.remove('hidden');
+}
+
+async function doRestoreBackup() {
+  const modal = document.getElementById('store-restore-modal');
+  const marcadas = [...modal.querySelectorAll('[data-restore-tool]:checked')].map((c) => c.dataset.restoreTool);
+  if (!marcadas.length) {
+    await showAppAlert('No has marcado ninguna herramienta.');
+    return;
+  }
+  const okBtn = document.getElementById('btn-store-restore-ok');
+  okBtn.disabled = true;
+  let respuesta;
+  try {
+    respuesta = await api('/api/backup/restore', {
+      method: 'POST',
+      body: JSON.stringify({ inspectId: modal.dataset.inspectId, tools: marcadas }),
+    });
+  } catch (err) {
+    okBtn.disabled = false;
+    await showAppAlert('No se pudo restaurar: ' + err.message);
+    return;
+  }
+  okBtn.disabled = false;
+  modal.classList.add('hidden');
+
+  const partes = [];
+  for (const [id, r] of Object.entries(respuesta.tools || {})) {
+    const tool = TOOLS_REGISTRY.find((t) => t.id === id);
+    const nombre = tool ? tool.nombre : id;
+    if (r.error) partes.push(`${nombre}: FALLÓ (${r.error})`);
+    else partes.push(`${nombre}: ${r.inserted} añadido${r.inserted === 1 ? '' : 's'}, ${r.skipped} ya existía${r.skipped === 1 ? '' : 'n'}${r.files ? `, ${r.files} archivo${r.files === 1 ? '' : 's'}` : ''}`);
+  }
+  // Recargar tras restaurar (mismo criterio que el borrado): las vistas
+  // abiertas no saben nada de las filas nuevas.
+  await showAppAlert('Restauración terminada. ' + partes.join(' — ') + '. La página se recargará.');
+  location.reload();
+}
+
+document.getElementById('store-restore-input').addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = ''; // permitir volver a elegir el mismo archivo
+  if (file) handleRestoreFileChosen(file);
+});
+document.getElementById('btn-store-restore-cancel').addEventListener('click', () => {
+  document.getElementById('store-restore-modal').classList.add('hidden');
+});
+document.getElementById('btn-store-restore-ok').addEventListener('click', doRestoreBackup);
+
 function openStoreView() {
   closeExtensionsView();
   document.getElementById('store-view').classList.remove('hidden');
@@ -7940,6 +8089,28 @@ function closeStoreView() {
 function renderStoreList() {
   const list = document.getElementById('store-list');
   list.innerHTML = '';
+
+  // Los botones de copia de seguridad solo aparecen en el ordenador de
+  // confianza: el servidor los rechazaria igual desde un movil
+  // (requireTrusted en routes/backup.js), esto evita enseñar botones que
+  // solo darian error. En el movil la copia es cosa de la app autonoma
+  // (rama movil-ui), no de esta pantalla.
+  const trusted = isTrustedDevice();
+  if (trusted) {
+    const barra = document.createElement('div');
+    barra.className = 'store-global-actions';
+    barra.innerHTML =
+      '<button type="button" class="secondary-btn" id="btn-store-restore">Restaurar una copia</button>' +
+      '<button type="button" class="secondary-btn" id="btn-store-backup-all">Copia completa de todos los datos</button>';
+    barra
+      .querySelector('#btn-store-backup-all')
+      .addEventListener('click', (e) => downloadToolBackup(null, e.currentTarget));
+    barra
+      .querySelector('#btn-store-restore')
+      .addEventListener('click', () => document.getElementById('store-restore-input').click());
+    list.appendChild(barra);
+  }
+
   TOOLS_REGISTRY.forEach((tool) => {
     const hidden = !tool.core && isToolHidden(tool.id);
     const estado = tool.core ? 'App base' : hidden ? 'Oculta en este dispositivo' : 'Activada';
@@ -7960,8 +8131,8 @@ function renderStoreList() {
       <div class="store-card-actions">
         <button type="button" class="secondary-btn store-panel-btn" data-store-panel="guia">Guía</button>
         <button type="button" class="secondary-btn store-panel-btn" data-store-panel="changelog">Novedades</button>
-        <!-- Hueco a proposito: aqui iran "Copia de seguridad" y "Borrar
-             datos" en las fases de backup/borrado por herramienta. -->
+        ${trusted && toolHasBackupData(tool) ? `<button type="button" class="secondary-btn" data-store-backup="${tool.id}">Copia de seguridad</button>` : ''}
+        ${trusted && !tool.core && toolHasBackupData(tool) ? `<button type="button" class="danger-btn" data-store-delete="${tool.id}">Borrar datos</button>` : ''}
       </div>
       <div class="store-card-panel hidden" data-panel="guia">
         ${tool.guia.map((p) => `<p>${escapeHtml(p)}</p>`).join('')}
@@ -7995,6 +8166,14 @@ function renderStoreList() {
     const toggleBtn = card.querySelector('[data-store-toggle]');
     if (toggleBtn) {
       toggleBtn.addEventListener('click', () => toggleToolHidden(toggleBtn.dataset.storeToggle));
+    }
+    const backupBtn = card.querySelector('[data-store-backup]');
+    if (backupBtn) {
+      backupBtn.addEventListener('click', () => downloadToolBackup([tool.id], backupBtn));
+    }
+    const deleteBtn = card.querySelector('[data-store-delete]');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => confirmDeleteToolData(tool));
     }
     list.appendChild(card);
   });

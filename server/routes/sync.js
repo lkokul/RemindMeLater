@@ -660,7 +660,7 @@ router.post('/push', (req, res) => {
         const idCol = TABLES[table].idColumn;
         const currentRow = db.prepare(`SELECT * FROM ${table} WHERE ${idCol} = ?`).get(table === 'special_days' ? rowId : Number(rowId));
         if (currentRow) {
-          const serializeFn = { events: serializeEvent, notes: serializeNote, groups: serializeGroup, note_folders: serializeNoteFolder, special_days: (r) => ({ date: r.date, type: r.type }), themes: serializeTheme, viajes_trips: serializeViajesTrip, viajes_entries: serializeViajesEntry }[table];
+          const serializeFn = SYNC_SERIALIZERS[table];
           return { clientOpId, status: 'superseded', serverPayload: serializeFn(currentRow) };
         }
       }
@@ -690,6 +690,24 @@ function startSyncLogCleanup() {
   return timer;
 }
 
+// Mapa tabla sincronizada -> su serializador (el payload que se guarda
+// en sync_log y que el movil sabe aplicar). Vivia incrustado en una
+// expresion dentro de /push; se saco a constante con nombre en la ronda
+// de la Tienda porque la restauracion de copias (routes/backup.js)
+// necesita EXACTAMENTE el mismo formato al registrar sus upserts -- una
+// sola fuente de verdad para los dos usos.
+const SYNC_SERIALIZERS = {
+  events: serializeEvent,
+  notes: serializeNote,
+  groups: serializeGroup,
+  note_folders: serializeNoteFolder,
+  special_days: (r) => ({ date: r.date, type: r.type }),
+  themes: serializeTheme,
+  viajes_trips: serializeViajesTrip,
+  viajes_entries: serializeViajesEntry,
+};
+
 module.exports = router;
 module.exports.pruneSyncLog = pruneSyncLog;
 module.exports.startSyncLogCleanup = startSyncLogCleanup;
+module.exports.SYNC_SERIALIZERS = SYNC_SERIALIZERS;

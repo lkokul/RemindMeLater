@@ -292,6 +292,38 @@ arriba:
   como app" más abajo) y el de comprobar si hay una versión nueva de la
   app (instalarla de verdad sigue siendo solo desde el ordenador).
 
+## La Tienda
+
+Dentro del hub de Apps hay un botón "Tienda": un catálogo con una ficha
+por herramienta (el calendario incluido) donde se ve qué hace cada una
+(botón "Guía"), sus novedades con su propia versión (botón "Novedades"),
+y su estado. Desde ahí se puede:
+
+- **Ocultar/activar una herramienta**: es un ajuste de CADA dispositivo
+  (el móvil puede llevar solo calendario y notas mientras el ordenador
+  lo lleva todo). Ocultar NO borra nada — solo quita la tarjeta del hub
+  en ese aparato. La parte base (Calendario y Mi espacio) no se puede
+  ocultar. Si ocultas Archivos, el botón "Sincronizar ahora" vuelve a
+  Configuración → Este dispositivo para no dejarte sin sincronización.
+- **Copia de seguridad por herramienta** (solo desde el ordenador): un
+  único archivo `.json` con los datos de esa herramienta — fotos e
+  imágenes incluidas — o una copia completa de todo. Guárdalo donde
+  quieras (disco externo, nube...).
+- **Borrar los datos de una herramienta** (solo ordenador): al contrario
+  que ocultar, esto borra de verdad y para todos los dispositivos. El
+  aviso previo dice cuántos registros y archivos se van a borrar y lleva
+  al lado un botón "Hacer copia primero". Si dos herramientas están
+  enlazadas (un ticket de Viajes convertido en movimiento de Finanzas),
+  borrar una NUNCA destruye datos de la otra: solo se rompe el enlace
+  (el ticket conserva su foto e importe; el movimiento de dinero se
+  queda en Finanzas).
+- **Restaurar una copia**: eliges el archivo, la app enseña qué
+  herramientas trae (con casillas — las que tengas ocultas vienen
+  desmarcadas) y carga solo lo que marques. La restauración **añade sin
+  duplicar**: lo que ya tienes no se toca, y restaurar la misma copia
+  dos veces no duplica nada. Puedes restaurar por tandas (hoy solo el
+  calendario, mañana solo el gimnasio).
+
 ## App de escritorio (Electron)
 
 Ademas de correr como servidor web, la app se puede empaquetar como

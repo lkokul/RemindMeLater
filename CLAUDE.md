@@ -325,6 +325,57 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
     accidentes, documentado explícitamente así en el mensaje del commit
     a petición de Koku.
 
+- **La Tienda (ronda "Tienda de herramientas", en rama
+  `claude/repo-architecture-tools-store-gd0ftx`)**: catálogo dentro del
+  hub de Apps con ficha por herramienta (guía, changelog con versión
+  propia, estado) + ocultar/activar + copia de seguridad/borrado/
+  restauración POR HERRAMIENTA. Piezas clave:
+  - **`public/tools-registry.js`** — EL registro central: un solo archivo
+    válido en navegador (script clásico, global `TOOLS_REGISTRY`, carga
+    ANTES de app.js) y en Node (`module.exports` al final). Cada entrada
+    lista las `tablas` de su herramienta EN ORDEN padres→hijos — backup/
+    borrado/restauración y la migración del uid dependen de ese orden
+    (restaurar recorre el array tal cual, borrar al revés). Añadir una
+    herramienta = añadir una entrada + su tarjeta `btn-open-<id>` en el
+    hub; todo lo demás la recoge solo. Renombrar de cara al usuario =
+    tocar solo el campo `nombre` (el `id` interno NO se cambia).
+  - **`uid` (identidad fija por fila)**: columna de 32 hex + índice único
+    en las ~27 tablas de datos, con un TRIGGER `AFTER INSERT ... WHEN
+    NEW.uid IS NULL` por tabla (migración en `db.js`) — un INSERT nuevo
+    en cualquier ruta recibe uid solo, es imposible olvidarlo. Un INSERT
+    que SÍ trae uid (la restauración) pasa tal cual. Los serializadores
+    NO exponen el uid al cliente.
+  - **Ocultar/activar**: por dispositivo, localStorage `hiddenTools`
+    (array de ids); `applyToolVisibility()` en app.js. Ocultar Archivos
+    muda el bloque `#sync-controls` a Configuración > Este dispositivo
+    (se mueve el nodo del DOM, los listeners viajan con él) y oculta el
+    punto de sync. `restoreCurrentScreen()` no restaura pantallas de
+    herramientas ocultas (los ids de pantalla y de herramienta coinciden
+    a propósito).
+  - **Backup formato v2** (`server/routes/backup.js`, todo
+    `requireTrusted`): mismo sobre `{app, kind, version}` que el backup
+    v1 de la app móvil autónoma (rama movil-ui), pero con secciones por
+    herramienta (filas `SELECT *` crudas + archivos en base64), escrito
+    en STREAMING a un temporal (nunca el JSON gigante en memoria) y con
+    `PRAGMA wal_checkpoint(TRUNCATE)` antes de leer (sin eso la copia
+    puede salir vieja). Las copias v1 se rechazan con mensaje claro;
+    compatibilidad cruzada con movil-ui = trabajo futuro.
+  - **Borrar datos**: regla de oro con enlaces cruzados Viajes↔Finanzas:
+    DESENLAZAR, NUNCA destruir la otra herramienta. Al borrar Viajes se
+    desenlazan sus movimientos ANTES de llamar a `deleteTripCascade` —
+    si no, `deleteMovementRow` borraría las transacciones de Finanzas en
+    cascada (correcto al borrar un movimiento suelto, NO aquí).
+  - **Restaurar = añadir sin duplicar** (fusión por uid): uid existente
+    se salta, uid nuevo se inserta con id nuevo y las referencias se
+    recolocan vía uid (los FK salen de `PRAGMA foreign_key_list`, no de
+    una lista a mano); referencia irrecuperable → NULL (filosofía
+    `resolveRef` de sync.js), o se salta la fila si la columna es NOT
+    NULL. Flujo en 2 pasos: `POST /inspect` (valida sin tocar nada,
+    guarda temporal, TTL 30 min) → `POST /restore {inspectId, tools}`.
+    Los upserts de tablas sincronizadas se registran en sync_log con
+    `SYNC_SERIALIZERS` (exportado de sync.js en esta ronda, única fuente
+    de verdad con /push).
+
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
 - **Orden de declaración de variables en `settings.js`**: hubo un bug real
@@ -376,6 +427,17 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
   se reproduce con facilidad en el flujo normal de usar +Fila/-Fila.
 
 ## Estado actual
+
+**Ronda en curso (v0.34.0, rama
+`claude/repo-architecture-tools-store-gd0ftx`, SIN fusionar a main)**: la
+Tienda completa — ver el bloque "La Tienda" en Arquitectura. Decidido
+además en esa conversación: monorepo (NO un repo por herramienta), la
+tienda es catálogo + activar/ocultar (no descarga código: iOS lo
+prohíbe y el backend es compartido), y el renombre Lecturas→
+Entretenimiento queda pendiente (será tocar `nombre` en
+tools-registry.js). Probado todo con Chromium headless y baterías de
+API (export/borrado/restauración, enlaces cruzados en ambos sentidos,
+idempotencia de la restauración).
 
 Último commit en `origin/main` (pusheado): `v0.32.0` (`d0f9051`) —
 límite de intentos de emparejamiento (5 fallos por IP, bloqueo 10 min) +

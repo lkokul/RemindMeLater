@@ -176,6 +176,13 @@
       </label>
       <div class="modal-actions">
         <div class="spacer"></div>
+        <!-- Boton extra opcional (ronda de la Tienda: "Hacer copia
+             primero" en el aviso de borrar datos). Oculto salvo que
+             showAppConfirm() reciba opts.extraButton; NO cierra el
+             modal al pulsarlo -- dispara su accion y el aviso sigue
+             abierto para decidir con calma. Aditivo, igual que se hizo
+             con el checkbox de arriba. -->
+        <button type="button" id="btn-app-confirm-extra" class="secondary-btn hidden"></button>
         <button type="button" id="btn-app-confirm-cancel" class="secondary-btn">Cancelar</button>
         <button type="button" id="btn-app-confirm-ok" class="primary-btn">Aceptar</button>
       </div>
@@ -758,6 +765,28 @@
     <div class="extensions-hub">
       <p class="extensions-intro">Todas las herramientas de la app: qué hace cada una, sus novedades, y cuáles quieres ver en este dispositivo.</p>
       <div id="store-list" class="store-list"></div>
+    </div>
+  </div>
+
+  <!-- Restaurar una copia de seguridad (fase 5 de la Tienda): tras elegir
+       el archivo, el servidor lo valida SIN aplicar nada (/api/backup/
+       inspect) y este modal enseña que herramientas trae, con una casilla
+       por cada una -- premarcada si la herramienta esta activa en ESTE
+       dispositivo, desmarcada si esta oculta (peticion de Koku: lo oculto
+       no se carga por defecto, pero se puede marcar a mano). Restaurar
+       AÑADE sin duplicar (fusion por uid, ver routes/backup.js) -- por
+       eso el texto no amenaza con sustituir nada. -->
+  <input type="file" id="store-restore-input" class="hidden" accept="application/json,.json" />
+  <div id="store-restore-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Restaurar copia</h2>
+      <p id="store-restore-hint" class="hint"></p>
+      <div id="store-restore-list"></div>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-store-restore-cancel" class="secondary-btn">Cancelar</button>
+        <button type="button" id="btn-store-restore-ok" class="primary-btn">Restaurar</button>
+      </div>
     </div>
   </div>
 

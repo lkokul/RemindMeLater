@@ -5,7 +5,11 @@
 // vivo al servidor, nunca servidos desde cache, o veriamos eventos
 // desactualizados.
 const CACHE_NAME = 'remindmelater-shell-v1';
-const SHELL_FILES = ['/', '/styles.css', '/app.js', '/settings.js', '/vendor/jsQR.js'];
+// OJO: tools-registry.js es imprescindible aqui — app.js lo lee AL CARGAR
+// (TOOLS_REGISTRY en applyToolVisibility), asi que si en un arranque sin
+// conexion no estuviera en cache, app.js entero moriria con un
+// ReferenceError (misma clase de fallo TDZ documentada en CLAUDE.md).
+const SHELL_FILES = ['/', '/styles.css', '/tools-registry.js', '/app.js', '/settings.js', '/vendor/jsQR.js'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
