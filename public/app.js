@@ -39,12 +39,12 @@ const state = {
   gymExercises: [],
   gymRoutines: [],
   gymSessions: [],
-  // Extension "Lecturas" (ver #lecturas-view en index.html): sagas y,
+  // Extension "Entretenimiento" (ver #entretenimiento-view en index.html): sagas y,
   // cuando entras en una, los items de ESA saga. Se cargan al abrir la
   // vista/entrar en una saga, no al arrancar la app.
-  lecturasSagas: [],
-  lecturasItems: [],
-  lecturasCurrentSagaId: null,
+  entretenimientoSagas: [],
+  entretenimientoItems: [],
+  entretenimientoCurrentSagaId: null,
   // Calendario movil (Fase 2 del rediseño movil, ver CLAUDE.md): que dia
   // esta seleccionado en el modo Listado del mes, y que dia se esta
   // viendo en la vista diaria (ver enterMobileDayView() en app.js).
@@ -910,7 +910,7 @@ function isGestureBlockedByModal() {
   if (document.querySelector('.modal:not(.hidden)')) return true;
   const fullscreenIds = [
     'extensions-view', 'gym-view', 'finanzas-view',
-    'lecturas-view', 'note-editor-view',
+    'entretenimiento-view', 'note-editor-view',
   ];
   return fullscreenIds.some((id) => {
     const el = document.getElementById(id);
@@ -7026,10 +7026,10 @@ const MOBILE_NAV_SLOT_APPS = {
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v10M9.5 9.5c0-1.5 1.2-2 2.5-2s2.5.6 2.5 2c0 1.2-1 1.6-2.5 2.2S9.5 13 9.5 14.3c0 1.4 1.1 2.2 2.5 2.2s2.5-.6 2.5-2"></path></svg>',
     open: () => openFinanzasView(),
   },
-  lecturas: {
-    label: 'Lecturas',
+  entretenimiento: {
+    label: 'Entretenimiento',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg>',
-    open: () => openLecturasView(),
+    open: () => openEntretenimientoView(),
   },
   viajes: {
     label: 'Viajes',
@@ -7743,7 +7743,7 @@ const FINANZAS_MONTH_OPTIONS = FINANZAS_MONTH_NAMES.map((label, i) => ({ value: 
 // Selectores/fechas con estilo propio para Finanzas (createSelectField/
 // createDateField, definidos mas arriba en este archivo) -- antes eran
 // <select>/<input type="date"> nativos, desentonaban con el resto del
-// tema (mismo motivo que la ronda de Lecturas). Los que dependen de
+// tema (mismo motivo que la ronda de Entretenimiento). Los que dependen de
 // datos (cuenta/categoria/activo) se crean con opciones vacias y se
 // rellenan via .setOptions() (ver populateFinanzasSelects() e
 // refreshFinanzasInvestmentTrendChart() mas abajo). createSelectField()
@@ -9248,21 +9248,52 @@ async function refreshFinanzasTransactionsTab() {
 }
 
 // ---------------------------------------------------------------------
-// Extension "Lecturas": historial de entretenimiento en general (manga,
+// Extension "Entretenimiento": historial de entretenimiento en general (manga,
 // comic, libro, serie, anime, pelicula), agrupado en SAGAS obligatorias
 // (hasta algo suelto es una saga de un solo item). Jerarquia de 2
 // tablas: sagas primero, items de la saga elegida despues -- mas
 // parecido a como Notas navega carpetas que a las pestañas de Gimnasio.
 // ---------------------------------------------------------------------
-const LECTURAS_TYPE_LABELS = { manga: 'Manga', comic: 'Cómic', libro: 'Libro', serie: 'Serie', anime: 'Anime', pelicula: 'Película' };
-const LECTURAS_STATUS_LABELS = { wishlist: 'Deseado', in_progress: 'En progreso', completed: 'Completado', dropped: 'Abandonado' };
-const LECTURAS_STATUS_COLORS = { wishlist: '#9aa0a6', in_progress: '#f5b400', completed: '#2ecc71', dropped: '#e5484d' };
+// Los tipos que se pueden elegir. Añadir uno nuevo es añadir una linea AQUI
+// y otra en el array TYPES de routes-local/entretenimientoItems.js -- y ya
+// esta: el desplegable del modal y el filtro de tipo se construyen los dos
+// recorriendo este objeto, y la base de datos ya no valida tipos (se le
+// quito el CHECK a proposito, ver local-schema.js). Sin migracion.
+const ENTRETENIMIENTO_TYPE_LABELS = {
+  manga: 'Manga',
+  comic: 'Cómic',
+  libro: 'Libro',
+  serie: 'Serie',
+  anime: 'Anime',
+  pelicula: 'Película',
+  videojuego: 'Videojuego',
+  podcast: 'Podcast',
+  musica: 'Música',
+  otro: 'Otro',
+};
+// Color por tipo, para la franja lateral de las fichas del visor movil.
+// Un tipo sin color entra por el fallback (el acento de la seccion), asi
+// que añadir un tipo sin tocar esto no rompe nada, solo se ve mas soso.
+const ENTRETENIMIENTO_TYPE_COLORS = {
+  manga: '#e5484d',
+  comic: '#f5b400',
+  libro: '#2ecc71',
+  serie: '#5b8cff',
+  anime: '#c651d6',
+  pelicula: '#00b3a4',
+  videojuego: '#ff7a1a',
+  podcast: '#8e8ff5',
+  musica: '#f25db0',
+  otro: '#9aa0a6',
+};
+const ENTRETENIMIENTO_STATUS_LABELS = { wishlist: 'Deseado', in_progress: 'En progreso', completed: 'Completado', dropped: 'Abandonado' };
+const ENTRETENIMIENTO_STATUS_COLORS = { wishlist: '#9aa0a6', in_progress: '#f5b400', completed: '#2ecc71', dropped: '#e5484d' };
 // Punto de partida de generos sugeridos -- se une con los que ya se
-// hayan usado en CUALQUIER item de Lecturas (no solo la saga abierta,
-// ver renderLecturasItemGenreChips) para formar la lista de sugerencias.
+// hayan usado en CUALQUIER item de Entretenimiento (no solo la saga abierta,
+// ver renderEntretenimientoItemGenreChips) para formar la lista de sugerencias.
 // Ajustable con el tiempo, no es una lista cerrada: escribir uno nuevo a
 // mano en el input sigue funcionando igual que siempre.
-const LECTURAS_PREDEFINED_GENRES = [
+const ENTRETENIMIENTO_PREDEFINED_GENRES = [
   'Acción', 'Aventura', 'Comedia', 'Drama', 'Fantasía', 'Terror', 'Misterio',
   'Romance', 'Ciencia ficción', 'Slice of life', 'Thriller', 'Deportes',
   'Histórico', 'Musical', 'Documental', 'Infantil',
@@ -9272,26 +9303,26 @@ const LECTURAS_PREDEFINED_GENRES = [
 // eran <select> nativos, ver CLAUDE.md/plan -- desentonaban con el resto
 // del modal, que ya usa los colores del tema). Mismo patron que
 // eventGroupField/taskGroupField: se crean UNA vez al cargar el script,
-// openLecturasItemModal() solo llama a .setValue().
-const lecturasItemTypeField = createSelectField({
-  options: Object.entries(LECTURAS_TYPE_LABELS).map(([value, label]) => ({ value, label })),
+// openEntretenimientoItemModal() solo llama a .setValue().
+const entretenimientoItemTypeField = createSelectField({
+  options: Object.entries(ENTRETENIMIENTO_TYPE_LABELS).map(([value, label]) => ({ value, label })),
   initialValue: 'manga',
 });
-document.getElementById('lecturas-item-type-field').appendChild(lecturasItemTypeField.element);
+document.getElementById('entretenimiento-item-type-field').appendChild(entretenimientoItemTypeField.element);
 
-const lecturasItemStatusField = createSelectField({
-  options: Object.entries(LECTURAS_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+const entretenimientoItemStatusField = createSelectField({
+  options: Object.entries(ENTRETENIMIENTO_STATUS_LABELS).map(([value, label]) => ({ value, label })),
   initialValue: 'wishlist',
 });
-document.getElementById('lecturas-item-status-field').appendChild(lecturasItemStatusField.element);
+document.getElementById('entretenimiento-item-status-field').appendChild(entretenimientoItemStatusField.element);
 
-// "Prestado a alguien" (ver comentario junto a lecturas_items en
+// "Prestado a alguien" (ver comentario junto a entretenimiento_items en
 // db.js): el bloque de detalles (a quien + desde cuando) solo se ve con
 // la casilla marcada.
-const lecturasItemLoanedAtField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
-document.getElementById('lecturas-item-loaned-at-field').appendChild(lecturasItemLoanedAtField.element);
-document.getElementById('lecturas-item-loaned').addEventListener('change', (e) => {
-  document.getElementById('lecturas-item-loaned-details').classList.toggle('hidden', !e.target.checked);
+const entretenimientoItemLoanedAtField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('entretenimiento-item-loaned-at-field').appendChild(entretenimientoItemLoanedAtField.element);
+document.getElementById('entretenimiento-item-loaned').addEventListener('change', (e) => {
+  document.getElementById('entretenimiento-item-loaned-details').classList.toggle('hidden', !e.target.checked);
 });
 
 // Rating: slider + numero sincronizados -- cualquiera de los dos vale
@@ -9300,63 +9331,63 @@ document.getElementById('lecturas-item-loaned').addEventListener('change', (e) =
 // forma de marcar "sin valorar todavia". Los listeners se ponen una sola
 // vez (los elementos del modal no se recrean nunca, siempre son los
 // mismos de index.html).
-function clampLecturasRatingInput(el) {
+function clampEntretenimientoRatingInput(el) {
   if (el.value === '') return;
   const clamped = Math.max(0, Math.min(10, Number(el.value)));
   if (String(clamped) !== el.value) el.value = clamped;
 }
-const lecturasItemRatingRange = document.getElementById('lecturas-item-rating-range');
-const lecturasItemRatingNumber = document.getElementById('lecturas-item-rating');
-lecturasItemRatingRange.addEventListener('input', () => {
-  lecturasItemRatingNumber.value = lecturasItemRatingRange.value;
+const entretenimientoItemRatingRange = document.getElementById('entretenimiento-item-rating-range');
+const entretenimientoItemRatingNumber = document.getElementById('entretenimiento-item-rating');
+entretenimientoItemRatingRange.addEventListener('input', () => {
+  entretenimientoItemRatingNumber.value = entretenimientoItemRatingRange.value;
 });
-lecturasItemRatingNumber.addEventListener('input', () => {
-  clampLecturasRatingInput(lecturasItemRatingNumber);
-  lecturasItemRatingRange.value = lecturasItemRatingNumber.value === '' ? 0 : lecturasItemRatingNumber.value;
+entretenimientoItemRatingNumber.addEventListener('input', () => {
+  clampEntretenimientoRatingInput(entretenimientoItemRatingNumber);
+  entretenimientoItemRatingRange.value = entretenimientoItemRatingNumber.value === '' ? 0 : entretenimientoItemRatingNumber.value;
 });
 
-async function refreshLecturasSagasView() {
-  document.getElementById('lecturas-sagas-panel').classList.remove('hidden');
-  document.getElementById('lecturas-saga-detail-panel').classList.add('hidden');
-  state.lecturasCurrentSagaId = null;
-  await loadLecturasSagas();
-  renderLecturasSagasTable();
+async function refreshEntretenimientoSagasView() {
+  document.getElementById('entretenimiento-sagas-panel').classList.remove('hidden');
+  document.getElementById('entretenimiento-saga-detail-panel').classList.add('hidden');
+  state.entretenimientoCurrentSagaId = null;
+  await loadEntretenimientoSagas();
+  renderEntretenimientoSagasTable();
 }
 
-function openLecturasView() {
+function openEntretenimientoView() {
   closeExtensionsView();
-  document.getElementById('lecturas-view').classList.remove('hidden');
-  setCurrentScreen('lecturas');
-  refreshLecturasSagasView();
+  document.getElementById('entretenimiento-view').classList.remove('hidden');
+  setCurrentScreen('entretenimiento');
+  refreshEntretenimientoSagasView();
 }
-function closeLecturasView() {
-  document.getElementById('lecturas-view').classList.add('hidden');
+function closeEntretenimientoView() {
+  document.getElementById('entretenimiento-view').classList.add('hidden');
   openExtensionsView();
 }
-document.getElementById('btn-open-lecturas').addEventListener('click', openLecturasView);
-document.getElementById('btn-close-lecturas').addEventListener('click', closeLecturasView);
-document.getElementById('btn-back-lecturas-sagas').addEventListener('click', refreshLecturasSagasView);
+document.getElementById('btn-open-entretenimiento').addEventListener('click', openEntretenimientoView);
+document.getElementById('btn-close-entretenimiento').addEventListener('click', closeEntretenimientoView);
+document.getElementById('btn-back-entretenimiento-sagas').addEventListener('click', refreshEntretenimientoSagasView);
 
-async function loadLecturasSagas() {
-  state.lecturasSagas = await api('/api/lecturas-sagas');
+async function loadEntretenimientoSagas() {
+  state.entretenimientoSagas = await api('/api/entretenimiento-sagas');
 }
-async function loadLecturasItems(sagaId) {
-  state.lecturasItems = await api(`/api/lecturas-items?sagaId=${sagaId}`);
+async function loadEntretenimientoItems(sagaId) {
+  state.entretenimientoItems = await api(`/api/entretenimiento-items?sagaId=${sagaId}`);
 }
 
-function renderLecturasSagasTable() {
-  const tbody = document.getElementById('lecturas-sagas-tbody');
-  const empty = document.getElementById('lecturas-sagas-empty');
+function renderEntretenimientoSagasTable() {
+  const tbody = document.getElementById('entretenimiento-sagas-tbody');
+  const empty = document.getElementById('entretenimiento-sagas-empty');
   tbody.innerHTML = '';
-  empty.classList.toggle('hidden', state.lecturasSagas.length > 0);
-  state.lecturasSagas.forEach((saga) => {
+  empty.classList.toggle('hidden', state.entretenimientoSagas.length > 0);
+  state.entretenimientoSagas.forEach((saga) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${escapeHtml(saga.name)}</td>
-      <td>${saga.types.map((t) => LECTURAS_TYPE_LABELS[t] || t).join(', ') || '—'}</td>
+      <td>${saga.types.map((t) => ENTRETENIMIENTO_TYPE_LABELS[t] || t).join(', ') || '—'}</td>
       <td>${saga.itemCount}</td>
     `;
-    tr.addEventListener('click', () => openLecturasSagaDetail(saga));
+    tr.addEventListener('click', () => openEntretenimientoSagaDetail(saga));
     tbody.appendChild(tr);
   });
 }
@@ -10243,7 +10274,7 @@ function renderViajesTripCards(container, trips, onClick) {
 }
 
 // --- Filtros de "Mis viajes" (año/mes/país, varios a la vez) ------------
-// Mismo patron "build once" que Lecturas (renderLecturasItemFilters) --
+// Mismo patron "build once" que Entretenimiento (renderEntretenimientoItemFilters) --
 // los campos con componente propio se crean UNA vez a nivel de modulo,
 // las llamadas siguientes solo actualizan .setOptions()/.setValue() para
 // no acumular popovers huerfanos. Los 3 son ahora multi-seleccion
@@ -11250,74 +11281,74 @@ function closeViajesView() {
 document.getElementById('btn-open-viajes').addEventListener('click', openViajesView);
 document.getElementById('btn-close-viajes').addEventListener('click', closeViajesView);
 
-async function openLecturasSagaDetail(saga) {
-  state.lecturasCurrentSagaId = saga.id;
-  document.getElementById('lecturas-sagas-panel').classList.add('hidden');
-  document.getElementById('lecturas-saga-detail-panel').classList.remove('hidden');
-  document.getElementById('lecturas-saga-detail-name').textContent = saga.name;
-  document.getElementById('lecturas-saga-detail-description').textContent = saga.description || '';
-  document.getElementById('lecturas-saga-detail-description').classList.toggle('hidden', !saga.description);
+async function openEntretenimientoSagaDetail(saga) {
+  state.entretenimientoCurrentSagaId = saga.id;
+  document.getElementById('entretenimiento-sagas-panel').classList.add('hidden');
+  document.getElementById('entretenimiento-saga-detail-panel').classList.remove('hidden');
+  document.getElementById('entretenimiento-saga-detail-name').textContent = saga.name;
+  document.getElementById('entretenimiento-saga-detail-description').textContent = saga.description || '';
+  document.getElementById('entretenimiento-saga-detail-description').classList.toggle('hidden', !saga.description);
   // Los filtros arrancan limpios en cada saga -- si no, entrar en una
   // saga distinta con un filtro puesto podia parecer "esta vacia" sin
   // motivo aparente.
-  lecturasItemFilters = { type: '', status: '', genre: '', minRating: '' };
-  await loadLecturasItems(saga.id);
-  renderLecturasItemFilters();
-  renderLecturasItemsTable();
+  entretenimientoItemFilters = { type: '', status: '', genre: '', minRating: '' };
+  await loadEntretenimientoItems(saga.id);
+  renderEntretenimientoItemFilters();
+  renderEntretenimientoItemsTable();
 }
 
 // --- Modal de saga ------------------------------------------------------
-function openLecturasSagaModal(saga) {
-  document.getElementById('lecturas-saga-modal-title').textContent = saga ? 'Editar saga' : 'Nueva saga';
-  document.getElementById('lecturas-saga-id').value = saga ? saga.id : '';
-  document.getElementById('lecturas-saga-name').value = saga ? saga.name : '';
-  document.getElementById('lecturas-saga-description').value = saga ? saga.description || '' : '';
-  document.getElementById('lecturas-saga-modal').classList.remove('hidden');
+function openEntretenimientoSagaModal(saga) {
+  document.getElementById('entretenimiento-saga-modal-title').textContent = saga ? 'Editar saga' : 'Nueva saga';
+  document.getElementById('entretenimiento-saga-id').value = saga ? saga.id : '';
+  document.getElementById('entretenimiento-saga-name').value = saga ? saga.name : '';
+  document.getElementById('entretenimiento-saga-description').value = saga ? saga.description || '' : '';
+  document.getElementById('entretenimiento-saga-modal').classList.remove('hidden');
 }
-function closeLecturasSagaModal() {
-  document.getElementById('lecturas-saga-modal').classList.add('hidden');
+function closeEntretenimientoSagaModal() {
+  document.getElementById('entretenimiento-saga-modal').classList.add('hidden');
 }
-document.getElementById('btn-new-lecturas-saga').addEventListener('click', () => openLecturasSagaModal(null));
-document.getElementById('btn-cancel-lecturas-saga').addEventListener('click', closeLecturasSagaModal);
-document.getElementById('btn-close-lecturas-saga').addEventListener('click', closeLecturasSagaModal);
-document.getElementById('btn-edit-lecturas-saga').addEventListener('click', () => {
-  openLecturasSagaModal(state.lecturasSagas.find((s) => s.id === state.lecturasCurrentSagaId));
+document.getElementById('btn-new-entretenimiento-saga').addEventListener('click', () => openEntretenimientoSagaModal(null));
+document.getElementById('btn-cancel-entretenimiento-saga').addEventListener('click', closeEntretenimientoSagaModal);
+document.getElementById('btn-close-entretenimiento-saga').addEventListener('click', closeEntretenimientoSagaModal);
+document.getElementById('btn-edit-entretenimiento-saga').addEventListener('click', () => {
+  openEntretenimientoSagaModal(state.entretenimientoSagas.find((s) => s.id === state.entretenimientoCurrentSagaId));
 });
 
-document.getElementById('lecturas-saga-form').addEventListener('submit', async (e) => {
+document.getElementById('entretenimiento-saga-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const id = document.getElementById('lecturas-saga-id').value;
+  const id = document.getElementById('entretenimiento-saga-id').value;
   const payload = {
-    name: document.getElementById('lecturas-saga-name').value,
-    description: document.getElementById('lecturas-saga-description').value,
+    name: document.getElementById('entretenimiento-saga-name').value,
+    description: document.getElementById('entretenimiento-saga-description').value,
   };
-  const wasEditingCurrent = id && Number(id) === state.lecturasCurrentSagaId;
+  const wasEditingCurrent = id && Number(id) === state.entretenimientoCurrentSagaId;
   if (id) {
-    await api(`/api/lecturas-sagas/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    await api(`/api/entretenimiento-sagas/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   } else {
-    await api('/api/lecturas-sagas', { method: 'POST', body: JSON.stringify(payload) });
+    await api('/api/entretenimiento-sagas', { method: 'POST', body: JSON.stringify(payload) });
   }
-  closeLecturasSagaModal();
-  await loadLecturasSagas();
+  closeEntretenimientoSagaModal();
+  await loadEntretenimientoSagas();
   if (wasEditingCurrent) {
-    const updated = state.lecturasSagas.find((s) => s.id === state.lecturasCurrentSagaId);
-    document.getElementById('lecturas-saga-detail-name').textContent = updated.name;
-    document.getElementById('lecturas-saga-detail-description').textContent = updated.description || '';
-    document.getElementById('lecturas-saga-detail-description').classList.toggle('hidden', !updated.description);
+    const updated = state.entretenimientoSagas.find((s) => s.id === state.entretenimientoCurrentSagaId);
+    document.getElementById('entretenimiento-saga-detail-name').textContent = updated.name;
+    document.getElementById('entretenimiento-saga-detail-description').textContent = updated.description || '';
+    document.getElementById('entretenimiento-saga-detail-description').classList.toggle('hidden', !updated.description);
   } else {
-    renderLecturasSagasTable();
+    renderEntretenimientoSagasTable();
   }
 });
 
-document.getElementById('btn-delete-lecturas-saga').addEventListener('click', async () => {
-  if (!state.lecturasCurrentSagaId) return;
+document.getElementById('btn-delete-entretenimiento-saga').addEventListener('click', async () => {
+  if (!state.entretenimientoCurrentSagaId) return;
   if (!confirm('¿Eliminar esta saga y TODO su contenido? No se puede deshacer.')) return;
-  await api(`/api/lecturas-sagas/${state.lecturasCurrentSagaId}`, { method: 'DELETE' });
-  await refreshLecturasSagasView();
+  await api(`/api/entretenimiento-sagas/${state.entretenimientoCurrentSagaId}`, { method: 'DELETE' });
+  await refreshEntretenimientoSagasView();
 });
 
 // --- Filtros de la tabla de items ---------------------------------------
-let lecturasItemFilters = { type: '', status: '', genre: '', minRating: '' };
+let entretenimientoItemFilters = { type: '', status: '', genre: '', minRating: '' };
 
 // Selectores con estilo propio para los filtros de tipo/estado/genero
 // (antes <select> nativos, mismo motivo que en el modal de item). A
@@ -11325,64 +11356,64 @@ let lecturasItemFilters = { type: '', status: '', genre: '', minRating: '' };
 // opciones despues de creados (el genero depende de lo que haya en cada
 // saga) -- por eso se crean UNA sola vez aqui (createSelectField cuelga
 // su popover de <body> y no lo quita solo: crear una instancia nueva en
-// CADA repintado de renderLecturasItemFilters() iria acumulando popovers
-// huerfanos) y renderLecturasItemFilters() solo llama a
+// CADA repintado de renderEntretenimientoItemFilters() iria acumulando popovers
+// huerfanos) y renderEntretenimientoItemFilters() solo llama a
 // .setOptions()/.setValue() en las siguientes veces que se ejecuta.
-const lecturasFilterTypeField = createSelectField({
-  options: [{ value: '', label: 'Todos los tipos' }, ...Object.entries(LECTURAS_TYPE_LABELS).map(([value, label]) => ({ value, label }))],
+const entretenimientoFilterTypeField = createSelectField({
+  options: [{ value: '', label: 'Todos los tipos' }, ...Object.entries(ENTRETENIMIENTO_TYPE_LABELS).map(([value, label]) => ({ value, label }))],
   initialValue: '',
-  onChange: (value) => { lecturasItemFilters.type = value; renderLecturasItemsTable(); },
+  onChange: (value) => { entretenimientoItemFilters.type = value; renderEntretenimientoItemsTable(); },
 });
-const lecturasFilterStatusField = createSelectField({
-  options: [{ value: '', label: 'Todos los estados' }, ...Object.entries(LECTURAS_STATUS_LABELS).map(([value, label]) => ({ value, label }))],
+const entretenimientoFilterStatusField = createSelectField({
+  options: [{ value: '', label: 'Todos los estados' }, ...Object.entries(ENTRETENIMIENTO_STATUS_LABELS).map(([value, label]) => ({ value, label }))],
   initialValue: '',
-  onChange: (value) => { lecturasItemFilters.status = value; renderLecturasItemsTable(); },
+  onChange: (value) => { entretenimientoItemFilters.status = value; renderEntretenimientoItemsTable(); },
 });
-const lecturasFilterGenreField = createSelectField({
+const entretenimientoFilterGenreField = createSelectField({
   options: [{ value: '', label: 'Todos los géneros' }],
   initialValue: '',
-  onChange: (value) => { lecturasItemFilters.genre = value; renderLecturasItemsTable(); },
+  onChange: (value) => { entretenimientoItemFilters.genre = value; renderEntretenimientoItemsTable(); },
 });
 
-function renderLecturasItemFilters() {
-  const container = document.getElementById('lecturas-item-filters');
+function renderEntretenimientoItemFilters() {
+  const container = document.getElementById('entretenimiento-item-filters');
   if (!container.dataset.built) {
     container.dataset.built = '1';
     const typeWrap = document.createElement('div');
-    typeWrap.className = 'lecturas-filter-field';
-    typeWrap.appendChild(lecturasFilterTypeField.element);
+    typeWrap.className = 'entretenimiento-filter-field';
+    typeWrap.appendChild(entretenimientoFilterTypeField.element);
     const statusWrap = document.createElement('div');
-    statusWrap.className = 'lecturas-filter-field';
-    statusWrap.appendChild(lecturasFilterStatusField.element);
+    statusWrap.className = 'entretenimiento-filter-field';
+    statusWrap.appendChild(entretenimientoFilterStatusField.element);
     const genreWrap = document.createElement('div');
-    genreWrap.className = 'lecturas-filter-field';
-    genreWrap.appendChild(lecturasFilterGenreField.element);
+    genreWrap.className = 'entretenimiento-filter-field';
+    genreWrap.appendChild(entretenimientoFilterGenreField.element);
 
     const ratingInput = document.createElement('input');
     ratingInput.type = 'number';
-    ratingInput.id = 'lecturas-filter-min-rating';
+    ratingInput.id = 'entretenimiento-filter-min-rating';
     ratingInput.placeholder = 'Rating mín.';
     ratingInput.min = '0';
     ratingInput.max = '10';
     ratingInput.step = '0.5';
     ratingInput.addEventListener('input', () => {
-      clampLecturasRatingInput(ratingInput);
-      lecturasItemFilters.minRating = ratingInput.value;
-      renderLecturasItemsTable();
+      clampEntretenimientoRatingInput(ratingInput);
+      entretenimientoItemFilters.minRating = ratingInput.value;
+      renderEntretenimientoItemsTable();
     });
 
     const clearBtn = document.createElement('button');
     clearBtn.type = 'button';
-    clearBtn.id = 'btn-clear-lecturas-filters';
+    clearBtn.id = 'btn-clear-entretenimiento-filters';
     clearBtn.className = 'secondary-btn';
     clearBtn.textContent = 'Quitar filtros';
     clearBtn.addEventListener('click', () => {
-      lecturasItemFilters = { type: '', status: '', genre: '', minRating: '' };
-      lecturasFilterTypeField.setValue('');
-      lecturasFilterStatusField.setValue('');
-      lecturasFilterGenreField.setValue('');
+      entretenimientoItemFilters = { type: '', status: '', genre: '', minRating: '' };
+      entretenimientoFilterTypeField.setValue('');
+      entretenimientoFilterStatusField.setValue('');
+      entretenimientoFilterGenreField.setValue('');
       ratingInput.value = '';
-      renderLecturasItemsTable();
+      renderEntretenimientoItemsTable();
     });
 
     container.append(typeWrap, statusWrap, genreWrap, ratingInput, clearBtn);
@@ -11390,89 +11421,89 @@ function renderLecturasItemFilters() {
 
   // Lo unico que cambia entre repintados es el listado de generos
   // disponibles (depende de la saga) y los valores actuales -- los
-  // filtros se resetean al cambiar de saga (ver openLecturasSagaDetail),
-  // asi que reflejar lecturasItemFilters aqui basta.
-  const allGenres = [...new Set(state.lecturasItems.flatMap((it) => it.genres))].sort();
-  lecturasFilterGenreField.setOptions([{ value: '', label: 'Todos los géneros' }, ...allGenres.map((g) => ({ value: g, label: g }))]);
-  lecturasFilterTypeField.setValue(lecturasItemFilters.type);
-  lecturasFilterStatusField.setValue(lecturasItemFilters.status);
-  lecturasFilterGenreField.setValue(lecturasItemFilters.genre);
-  document.getElementById('lecturas-filter-min-rating').value = lecturasItemFilters.minRating;
+  // filtros se resetean al cambiar de saga (ver openEntretenimientoSagaDetail),
+  // asi que reflejar entretenimientoItemFilters aqui basta.
+  const allGenres = [...new Set(state.entretenimientoItems.flatMap((it) => it.genres))].sort();
+  entretenimientoFilterGenreField.setOptions([{ value: '', label: 'Todos los géneros' }, ...allGenres.map((g) => ({ value: g, label: g }))]);
+  entretenimientoFilterTypeField.setValue(entretenimientoItemFilters.type);
+  entretenimientoFilterStatusField.setValue(entretenimientoItemFilters.status);
+  entretenimientoFilterGenreField.setValue(entretenimientoItemFilters.genre);
+  document.getElementById('entretenimiento-filter-min-rating').value = entretenimientoItemFilters.minRating;
 }
 
-function lecturasItemMatchesFilters(item) {
-  if (lecturasItemFilters.type && item.type !== lecturasItemFilters.type) return false;
-  if (lecturasItemFilters.status && item.status !== lecturasItemFilters.status) return false;
-  if (lecturasItemFilters.genre && !item.genres.includes(lecturasItemFilters.genre)) return false;
-  if (lecturasItemFilters.minRating !== '' && (item.rating === null || item.rating < Number(lecturasItemFilters.minRating))) return false;
+function entretenimientoItemMatchesFilters(item) {
+  if (entretenimientoItemFilters.type && item.type !== entretenimientoItemFilters.type) return false;
+  if (entretenimientoItemFilters.status && item.status !== entretenimientoItemFilters.status) return false;
+  if (entretenimientoItemFilters.genre && !item.genres.includes(entretenimientoItemFilters.genre)) return false;
+  if (entretenimientoItemFilters.minRating !== '' && (item.rating === null || item.rating < Number(entretenimientoItemFilters.minRating))) return false;
   return true;
 }
 
-function renderLecturasItemsTable() {
-  const tbody = document.getElementById('lecturas-items-tbody');
-  const empty = document.getElementById('lecturas-items-empty');
+function renderEntretenimientoItemsTable() {
+  const tbody = document.getElementById('entretenimiento-items-tbody');
+  const empty = document.getElementById('entretenimiento-items-empty');
   tbody.innerHTML = '';
-  const filtered = state.lecturasItems.filter(lecturasItemMatchesFilters);
+  const filtered = state.entretenimientoItems.filter(entretenimientoItemMatchesFilters);
   empty.classList.toggle('hidden', filtered.length > 0);
 
   filtered.forEach((item) => {
     const progress = item.progressTotal ? `${item.progressCurrent ?? 0}/${item.progressTotal}${item.progressUnit ? ' ' + escapeHtml(item.progressUnit) : ''}` : '—';
     const owned = item.ownedTotal ? `${item.ownedCount ?? 0} de ${item.ownedTotal}` : '—';
-    const statusColor = LECTURAS_STATUS_COLORS[item.status];
+    const statusColor = ENTRETENIMIENTO_STATUS_COLORS[item.status];
     const tr = document.createElement('tr');
     // "Prestado" se muestra como una insignia junto al titulo (en vez de
     // una columna aparte) para no reestructurar toda la tabla solo por
     // esto -- con quien y desde cuando como tooltip, si se sabe.
-    const loanedBadge = item.loaned ? `<span class="lecturas-loaned-badge" title="Prestado${item.loanedTo ? ` a ${escapeHtml(item.loanedTo)}` : ''}${item.loanedAt ? ` desde ${item.loanedAt}` : ''}">Prestado</span>` : '';
+    const loanedBadge = item.loaned ? `<span class="entretenimiento-loaned-badge" title="Prestado${item.loanedTo ? ` a ${escapeHtml(item.loanedTo)}` : ''}${item.loanedAt ? ` desde ${item.loanedAt}` : ''}">Prestado</span>` : '';
     tr.innerHTML = `
       <td>${escapeHtml(item.title)} ${loanedBadge}</td>
-      <td>${LECTURAS_TYPE_LABELS[item.type] || item.type}</td>
-      <td><span class="lecturas-status-badge" style="background-color:${statusColor}33; color:${statusColor};">${LECTURAS_STATUS_LABELS[item.status]}</span></td>
+      <td>${ENTRETENIMIENTO_TYPE_LABELS[item.type] || item.type}</td>
+      <td><span class="entretenimiento-status-badge" style="background-color:${statusColor}33; color:${statusColor};">${ENTRETENIMIENTO_STATUS_LABELS[item.status]}</span></td>
       <td>${item.rating !== null ? item.rating + '/10' : '—'}</td>
       <td>${item.genres.map(escapeHtml).join(', ') || '—'}</td>
       <td>${progress}</td>
       <td>${owned}</td>
     `;
-    tr.addEventListener('click', () => openLecturasItemModal(item));
+    tr.addEventListener('click', () => openEntretenimientoItemModal(item));
     tbody.appendChild(tr);
   });
 }
 
 
 // --- Modal de item (con chips de generos) -------------------------------
-let lecturasItemGenres = [];
+let entretenimientoItemGenres = [];
 
 // Generos ya usados en CUALQUIER saga (no solo la abierta ahora mismo)
-// -- se traen con GET /api/lecturas-items sin sagaId, que ya devuelve
-// todos los items de todas las sagas (ver routes-local/lecturasItems.js).
+// -- se traen con GET /api/entretenimiento-items sin sagaId, que ya devuelve
+// todos los items de todas las sagas (ver routes-local/entretenimientoItems.js).
 // Sin tabla ni endpoint nuevo: "la opcion de seleccion general" que
 // pidio Koku sale sola de los items ya guardados, combinada con
-// LECTURAS_PREDEFINED_GENRES para tener algo que elegir incluso antes de
+// ENTRETENIMIENTO_PREDEFINED_GENRES para tener algo que elegir incluso antes de
 // haber usado ningun genero todavia.
-let lecturasGlobalGenres = [];
-async function refreshLecturasGlobalGenres() {
+let entretenimientoGlobalGenres = [];
+async function refreshEntretenimientoGlobalGenres() {
   try {
-    const allItems = await api('/api/lecturas-items');
-    lecturasGlobalGenres = [...new Set(allItems.flatMap((it) => it.genres))];
+    const allItems = await api('/api/entretenimiento-items');
+    entretenimientoGlobalGenres = [...new Set(allItems.flatMap((it) => it.genres))];
   } catch (err) {
-    lecturasGlobalGenres = [];
+    entretenimientoGlobalGenres = [];
   }
 }
-function lecturasGenreSuggestions() {
-  const combined = [...new Set([...LECTURAS_PREDEFINED_GENRES, ...lecturasGlobalGenres])];
+function entretenimientoGenreSuggestions() {
+  const combined = [...new Set([...ENTRETENIMIENTO_PREDEFINED_GENRES, ...entretenimientoGlobalGenres])];
   return combined.sort((a, b) => a.localeCompare(b, 'es'));
 }
 
-function renderLecturasGenreChipsList() {
-  const list = document.getElementById('lecturas-genre-chips-list');
-  list.innerHTML = lecturasItemGenres
-    .map((g, i) => `<span class="lecturas-genre-chip">${escapeHtml(g)}<button type="button" data-remove-genre="${i}" aria-label="Quitar género">✕</button></span>`)
+function renderEntretenimientoGenreChipsList() {
+  const list = document.getElementById('entretenimiento-genre-chips-list');
+  list.innerHTML = entretenimientoItemGenres
+    .map((g, i) => `<span class="entretenimiento-genre-chip">${escapeHtml(g)}<button type="button" data-remove-genre="${i}" aria-label="Quitar género">✕</button></span>`)
     .join('');
   list.querySelectorAll('[data-remove-genre]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      lecturasItemGenres.splice(Number(btn.dataset.removeGenre), 1);
-      renderLecturasGenreChipsList();
-      renderLecturasGenreSuggestionsRow();
+      entretenimientoItemGenres.splice(Number(btn.dataset.removeGenre), 1);
+      renderEntretenimientoGenreChipsList();
+      renderEntretenimientoGenreSuggestionsRow();
     });
   });
 }
@@ -11482,53 +11513,53 @@ function renderLecturasGenreChipsList() {
 // las añade igual que escribirla + Intro. El <datalist> del input de
 // texto libre se refresca con el mismo conjunto, para quien prefiera
 // escribir y autocompletar en vez de clicar.
-function renderLecturasGenreSuggestionsRow() {
-  const row = document.getElementById('lecturas-genre-suggestions-row');
-  const datalist = document.getElementById('lecturas-genre-suggestions');
+function renderEntretenimientoGenreSuggestionsRow() {
+  const row = document.getElementById('entretenimiento-genre-suggestions-row');
+  const datalist = document.getElementById('entretenimiento-genre-suggestions');
   if (!row || !datalist) return;
-  const already = new Set(lecturasItemGenres.map((g) => g.toLowerCase()));
-  const suggestions = lecturasGenreSuggestions();
+  const already = new Set(entretenimientoItemGenres.map((g) => g.toLowerCase()));
+  const suggestions = entretenimientoGenreSuggestions();
   datalist.innerHTML = suggestions.map((g) => `<option value="${escapeHtml(g)}"></option>`).join('');
   row.innerHTML = suggestions
     .filter((g) => !already.has(g.toLowerCase()))
-    .map((g) => `<button type="button" class="lecturas-genre-suggestion-chip" data-add-genre="${escapeHtml(g)}">+ ${escapeHtml(g)}</button>`)
+    .map((g) => `<button type="button" class="entretenimiento-genre-suggestion-chip" data-add-genre="${escapeHtml(g)}">+ ${escapeHtml(g)}</button>`)
     .join('');
   row.querySelectorAll('[data-add-genre]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      lecturasItemGenres.push(btn.dataset.addGenre);
-      renderLecturasGenreChipsList();
-      renderLecturasGenreSuggestionsRow();
+      entretenimientoItemGenres.push(btn.dataset.addGenre);
+      renderEntretenimientoGenreChipsList();
+      renderEntretenimientoGenreSuggestionsRow();
     });
   });
 }
 
-function renderLecturasItemGenreChips() {
-  const container = document.getElementById('lecturas-item-genres-field');
+function renderEntretenimientoItemGenreChips() {
+  const container = document.getElementById('entretenimiento-item-genres-field');
   container.innerHTML = `
-    <div class="lecturas-genre-chips" id="lecturas-genre-chips-list"></div>
-    <div class="lecturas-genre-input-row">
-      <input type="text" id="lecturas-genre-input" placeholder="Escribe un género y pulsa Intro" list="lecturas-genre-suggestions" />
-      <datalist id="lecturas-genre-suggestions"></datalist>
-      <button type="button" id="btn-add-lecturas-genre" class="secondary-btn">+</button>
+    <div class="entretenimiento-genre-chips" id="entretenimiento-genre-chips-list"></div>
+    <div class="entretenimiento-genre-input-row">
+      <input type="text" id="entretenimiento-genre-input" placeholder="Escribe un género y pulsa Intro" list="entretenimiento-genre-suggestions" />
+      <datalist id="entretenimiento-genre-suggestions"></datalist>
+      <button type="button" id="btn-add-entretenimiento-genre" class="secondary-btn">+</button>
     </div>
-    <div class="lecturas-genre-suggestions-row" id="lecturas-genre-suggestions-row"></div>
+    <div class="entretenimiento-genre-suggestions-row" id="entretenimiento-genre-suggestions-row"></div>
   `;
-  renderLecturasGenreChipsList();
+  renderEntretenimientoGenreChipsList();
   // Se pinta ya con los predefinidos + lo que se supiera de una
   // apertura anterior del modal, sin esperar a la red -- en cuanto
-  // responde GET /api/lecturas-items se repinta con el conjunto
+  // responde GET /api/entretenimiento-items se repinta con el conjunto
   // completo y actualizado.
-  renderLecturasGenreSuggestionsRow();
-  refreshLecturasGlobalGenres().then(renderLecturasGenreSuggestionsRow);
+  renderEntretenimientoGenreSuggestionsRow();
+  refreshEntretenimientoGlobalGenres().then(renderEntretenimientoGenreSuggestionsRow);
 
-  const input = document.getElementById('lecturas-genre-input');
+  const input = document.getElementById('entretenimiento-genre-input');
   function addFromInput() {
     const value = input.value.trim();
     if (!value) return;
-    if (!lecturasItemGenres.some((g) => g.toLowerCase() === value.toLowerCase())) {
-      lecturasItemGenres.push(value);
-      renderLecturasGenreChipsList();
-      renderLecturasGenreSuggestionsRow();
+    if (!entretenimientoItemGenres.some((g) => g.toLowerCase() === value.toLowerCase())) {
+      entretenimientoItemGenres.push(value);
+      renderEntretenimientoGenreChipsList();
+      renderEntretenimientoGenreSuggestionsRow();
     }
     input.value = '';
   }
@@ -11538,85 +11569,85 @@ function renderLecturasItemGenreChips() {
       addFromInput();
     }
   });
-  document.getElementById('btn-add-lecturas-genre').addEventListener('click', addFromInput);
+  document.getElementById('btn-add-entretenimiento-genre').addEventListener('click', addFromInput);
 }
 
-function openLecturasItemModal(item) {
-  document.getElementById('lecturas-item-modal-title').textContent = item ? 'Editar item' : 'Nuevo item';
-  document.getElementById('lecturas-item-id').value = item ? item.id : '';
-  document.getElementById('lecturas-item-title').value = item ? item.title : '';
-  lecturasItemTypeField.setValue(item ? item.type : 'manga');
-  lecturasItemStatusField.setValue(item ? item.status : 'wishlist');
-  document.getElementById('lecturas-item-description').value = item ? item.description || '' : '';
+function openEntretenimientoItemModal(item) {
+  document.getElementById('entretenimiento-item-modal-title').textContent = item ? 'Editar item' : 'Nuevo item';
+  document.getElementById('entretenimiento-item-id').value = item ? item.id : '';
+  document.getElementById('entretenimiento-item-title').value = item ? item.title : '';
+  entretenimientoItemTypeField.setValue(item ? item.type : 'manga');
+  entretenimientoItemStatusField.setValue(item ? item.status : 'wishlist');
+  document.getElementById('entretenimiento-item-description').value = item ? item.description || '' : '';
   const ratingValue = item && item.rating !== null ? item.rating : '';
-  document.getElementById('lecturas-item-rating').value = ratingValue;
-  document.getElementById('lecturas-item-rating-range').value = ratingValue === '' ? 0 : ratingValue;
-  document.getElementById('lecturas-item-progress-current').value = item && item.progressCurrent !== null ? item.progressCurrent : '';
-  document.getElementById('lecturas-item-progress-total').value = item && item.progressTotal !== null ? item.progressTotal : '';
-  document.getElementById('lecturas-item-progress-unit').value = item ? item.progressUnit || '' : '';
-  document.getElementById('lecturas-item-owned-count').value = item && item.ownedCount !== null ? item.ownedCount : '';
-  document.getElementById('lecturas-item-owned-total').value = item && item.ownedTotal !== null ? item.ownedTotal : '';
-  lecturasItemGenres = item ? [...item.genres] : [];
-  renderLecturasItemGenreChips();
+  document.getElementById('entretenimiento-item-rating').value = ratingValue;
+  document.getElementById('entretenimiento-item-rating-range').value = ratingValue === '' ? 0 : ratingValue;
+  document.getElementById('entretenimiento-item-progress-current').value = item && item.progressCurrent !== null ? item.progressCurrent : '';
+  document.getElementById('entretenimiento-item-progress-total').value = item && item.progressTotal !== null ? item.progressTotal : '';
+  document.getElementById('entretenimiento-item-progress-unit').value = item ? item.progressUnit || '' : '';
+  document.getElementById('entretenimiento-item-owned-count').value = item && item.ownedCount !== null ? item.ownedCount : '';
+  document.getElementById('entretenimiento-item-owned-total').value = item && item.ownedTotal !== null ? item.ownedTotal : '';
+  entretenimientoItemGenres = item ? [...item.genres] : [];
+  renderEntretenimientoItemGenreChips();
   const loanedChecked = !!(item && item.loaned);
-  document.getElementById('lecturas-item-loaned').checked = loanedChecked;
-  document.getElementById('lecturas-item-loaned-to').value = item ? item.loanedTo || '' : '';
-  lecturasItemLoanedAtField.setValue(item && item.loanedAt ? new Date(`${item.loanedAt}T00:00:00`) : null);
-  document.getElementById('lecturas-item-loaned-details').classList.toggle('hidden', !loanedChecked);
-  document.getElementById('btn-delete-lecturas-item').classList.toggle('hidden', !item);
-  document.getElementById('lecturas-item-modal').classList.remove('hidden');
+  document.getElementById('entretenimiento-item-loaned').checked = loanedChecked;
+  document.getElementById('entretenimiento-item-loaned-to').value = item ? item.loanedTo || '' : '';
+  entretenimientoItemLoanedAtField.setValue(item && item.loanedAt ? new Date(`${item.loanedAt}T00:00:00`) : null);
+  document.getElementById('entretenimiento-item-loaned-details').classList.toggle('hidden', !loanedChecked);
+  document.getElementById('btn-delete-entretenimiento-item').classList.toggle('hidden', !item);
+  document.getElementById('entretenimiento-item-modal').classList.remove('hidden');
 }
-function closeLecturasItemModal() {
-  document.getElementById('lecturas-item-modal').classList.add('hidden');
+function closeEntretenimientoItemModal() {
+  document.getElementById('entretenimiento-item-modal').classList.add('hidden');
 }
-document.getElementById('btn-new-lecturas-item').addEventListener('click', () => openLecturasItemModal(null));
-document.getElementById('btn-cancel-lecturas-item').addEventListener('click', closeLecturasItemModal);
-document.getElementById('btn-close-lecturas-item').addEventListener('click', closeLecturasItemModal);
+document.getElementById('btn-new-entretenimiento-item').addEventListener('click', () => openEntretenimientoItemModal(null));
+document.getElementById('btn-cancel-entretenimiento-item').addEventListener('click', closeEntretenimientoItemModal);
+document.getElementById('btn-close-entretenimiento-item').addEventListener('click', closeEntretenimientoItemModal);
 
-async function refreshLecturasAfterItemChange() {
-  await loadLecturasItems(state.lecturasCurrentSagaId);
-  renderLecturasItemFilters();
-  renderLecturasItemsTable();
+async function refreshEntretenimientoAfterItemChange() {
+  await loadEntretenimientoItems(state.entretenimientoCurrentSagaId);
+  renderEntretenimientoItemFilters();
+  renderEntretenimientoItemsTable();
   // El resumen de tipos/cantidad de la saga (tabla de sagas) puede haber
   // cambiado -- se refresca en segundo plano, no bloquea la pantalla.
-  loadLecturasSagas();
+  loadEntretenimientoSagas();
 }
 
-document.getElementById('lecturas-item-form').addEventListener('submit', async (e) => {
+document.getElementById('entretenimiento-item-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const id = document.getElementById('lecturas-item-id').value;
+  const id = document.getElementById('entretenimiento-item-id').value;
   const payload = {
-    sagaId: state.lecturasCurrentSagaId,
-    title: document.getElementById('lecturas-item-title').value,
-    type: lecturasItemTypeField.getValue(),
-    status: lecturasItemStatusField.getValue(),
-    description: document.getElementById('lecturas-item-description').value,
-    rating: document.getElementById('lecturas-item-rating').value,
-    genres: lecturasItemGenres,
-    progressCurrent: document.getElementById('lecturas-item-progress-current').value,
-    progressTotal: document.getElementById('lecturas-item-progress-total').value,
-    progressUnit: document.getElementById('lecturas-item-progress-unit').value,
-    ownedCount: document.getElementById('lecturas-item-owned-count').value,
-    ownedTotal: document.getElementById('lecturas-item-owned-total').value,
-    loaned: document.getElementById('lecturas-item-loaned').checked,
-    loanedTo: document.getElementById('lecturas-item-loaned-to').value,
-    loanedAt: lecturasItemLoanedAtField.getValue() ? toDateKey(lecturasItemLoanedAtField.getValue()) : null,
+    sagaId: state.entretenimientoCurrentSagaId,
+    title: document.getElementById('entretenimiento-item-title').value,
+    type: entretenimientoItemTypeField.getValue(),
+    status: entretenimientoItemStatusField.getValue(),
+    description: document.getElementById('entretenimiento-item-description').value,
+    rating: document.getElementById('entretenimiento-item-rating').value,
+    genres: entretenimientoItemGenres,
+    progressCurrent: document.getElementById('entretenimiento-item-progress-current').value,
+    progressTotal: document.getElementById('entretenimiento-item-progress-total').value,
+    progressUnit: document.getElementById('entretenimiento-item-progress-unit').value,
+    ownedCount: document.getElementById('entretenimiento-item-owned-count').value,
+    ownedTotal: document.getElementById('entretenimiento-item-owned-total').value,
+    loaned: document.getElementById('entretenimiento-item-loaned').checked,
+    loanedTo: document.getElementById('entretenimiento-item-loaned-to').value,
+    loanedAt: entretenimientoItemLoanedAtField.getValue() ? toDateKey(entretenimientoItemLoanedAtField.getValue()) : null,
   };
   if (id) {
-    await api(`/api/lecturas-items/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    await api(`/api/entretenimiento-items/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   } else {
-    await api('/api/lecturas-items', { method: 'POST', body: JSON.stringify(payload) });
+    await api('/api/entretenimiento-items', { method: 'POST', body: JSON.stringify(payload) });
   }
-  closeLecturasItemModal();
-  await refreshLecturasAfterItemChange();
+  closeEntretenimientoItemModal();
+  await refreshEntretenimientoAfterItemChange();
 });
 
-document.getElementById('btn-delete-lecturas-item').addEventListener('click', async () => {
-  const id = document.getElementById('lecturas-item-id').value;
+document.getElementById('btn-delete-entretenimiento-item').addEventListener('click', async () => {
+  const id = document.getElementById('entretenimiento-item-id').value;
   if (!confirm('¿Eliminar este item?')) return;
-  await api(`/api/lecturas-items/${id}`, { method: 'DELETE' });
-  closeLecturasItemModal();
-  await refreshLecturasAfterItemChange();
+  await api(`/api/entretenimiento-items/${id}`, { method: 'DELETE' });
+  closeEntretenimientoItemModal();
+  await refreshEntretenimientoAfterItemChange();
 });
 
 // Mientras una columna cambia de ancho (expandir o volver a las 3), el
@@ -11642,7 +11673,7 @@ applyUiStyle();
 // siempre al calendario. Ambito deliberadamente limitado a las vistas de
 // NIVEL SUPERIOR (Mi espacio, Apps, y cada extension) -- NO
 // restaura pestañas/detalles concretos dentro de cada una (que pestaña
-// de Finanzas, que viaje abierto en Viajes, que saga de Lecturas...), ni
+// de Finanzas, que viaje abierto en Viajes, que saga de Entretenimiento...), ni
 // el editor de notas (junta varias notas abiertas a la vez, con mas
 // estado del que compensa persistir aqui) -- se quedan en su pantalla
 // de entrada normal, no es una regresion respecto a hoy. Los
@@ -11658,7 +11689,7 @@ applyUiStyle();
 function mobileNavSectionForScreen(screen) {
   if (screen === 'mobile-notes') return 'notes';
   if (screen === 'extensions') return 'extensions';
-  if (['gym', 'lecturas', 'finanzas', 'viajes'].includes(screen)) {
+  if (['gym', 'entretenimiento', 'finanzas', 'viajes'].includes(screen)) {
     return getMobileNavNotesSlot() === screen ? 'notes' : 'extensions';
   }
   return 'calendar';

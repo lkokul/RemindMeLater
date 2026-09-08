@@ -17,6 +17,31 @@
 // Si algun dia cambia el esquema del servidor, este archivo hay que
 // volver a generarlo de la misma forma (mismo tramo de server/db.js).
 function applyLocalSchema(db) {
+  // --- Migracion PREVIA: "Lecturas" ahora se llama "Entretenimiento" ------
+  //
+  // Esto tiene que correr ANTES del bloque de esquema de aqui abajo, y es
+  // importante entender por que: ese bloque usa CREATE TABLE IF NOT EXISTS
+  // con los nombres NUEVOS. Si llegara primero, veria que
+  // "entretenimiento_items" no existe, crearia una tabla VACIA, y los datos
+  // de verdad se quedarian para siempre en la vieja "lecturas_items" sin
+  // que nadie los mire otra vez. Renombrando primero, el CREATE de abajo se
+  // encuentra la tabla ya hecha (con los datos dentro) y no hace nada.
+  //
+  // Es idempotente: solo renombra si la vieja existe Y la nueva todavia no,
+  // asi que arrancar la app mil veces da igual, y una instalacion nueva (que
+  // nunca tuvo tablas "lecturas_*") ni se entera.
+  function tableExists(name) {
+    return !!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+  }
+  for (const [oldName, newName] of [
+    ['lecturas_sagas', 'entretenimiento_sagas'],
+    ['lecturas_items', 'entretenimiento_items'],
+  ]) {
+    if (tableExists(oldName) && !tableExists(newName)) {
+      db.exec(`ALTER TABLE ${oldName} RENAME TO ${newName}`);
+    }
+  }
+
   // --- Esquema -----------------------------------------------------------
   // Se ejecuta cada vez que arranca el servidor; CREATE TABLE IF NOT EXISTS
   // hace que sea seguro repetirlo (no borra nada si la tabla ya existe).
@@ -383,13 +408,13 @@ function applyLocalSchema(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- Extension "Lecturas" (tercera tarjeta de #extensions-view): historial
+    -- Extension "Entretenimiento" (tercera tarjeta de #extensions-view): historial
     -- de entretenimiento en general, no solo libros -- manga, comic, libro,
     -- serie, anime, pelicula. Una "saga" es el contenedor OBLIGATORIO de
     -- todo (hasta algo suelto es una saga de un solo item), para poder
     -- agrupar bajo un mismo nombre cosas de tipos distintos (ej. el manga Y
     -- el anime de la misma obra) en vez de repetir el nombre en cada fila.
-    CREATE TABLE IF NOT EXISTS lecturas_sagas (
+    CREATE TABLE IF NOT EXISTS entretenimiento_sagas (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       description TEXT,
@@ -405,11 +430,22 @@ function applyLocalSchema(db) {
     -- cubre tambien la lista de deseos (wishlist = todavia no lo tienes/no
     -- has empezado), sin una seccion aparte. "owned_count/owned_total" es
     -- una cantidad simple ("tengo 5 de 10"), sin marcar cuales exactamente.
-    CREATE TABLE IF NOT EXISTS lecturas_items (
+    -- "type" NO lleva CHECK contra una lista cerrada A PROPOSITO (antes si
+    -- lo llevaba, con los 6 tipos de cuando esto se llamaba "Lecturas").
+    -- Motivo: en SQLite un CHECK no se puede modificar con ALTER TABLE, hay
+    -- que reconstruir la tabla entera para tocarlo -- y esta lista va a
+    -- seguir creciendo (videojuegos, podcasts...). Dejarla abierta aqui
+    -- convierte "añadir un tipo nuevo" en cambiar UNA linea de
+    -- ENTRETENIMIENTO_TYPE_LABELS (app.js) y el array TYPES de la ruta, sin
+    -- migracion ninguna. La validacion sigue existiendo, solo que en la
+    -- ruta (routes-local/entretenimientoItems.js) en vez de en la base.
+    -- Mismo criterio que ya usa viajes_trip_countries con los codigos de
+    -- pais, y por la misma razon.
+    CREATE TABLE IF NOT EXISTS entretenimiento_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      saga_id INTEGER NOT NULL REFERENCES lecturas_sagas(id),
+      saga_id INTEGER NOT NULL REFERENCES entretenimiento_sagas(id),
       title TEXT NOT NULL,
-      type TEXT NOT NULL CHECK (type IN ('manga','comic','libro','serie','anime','pelicula')),
+      type TEXT NOT NULL,
       description TEXT,
       rating REAL,
       status TEXT NOT NULL DEFAULT 'wishlist' CHECK (status IN ('wishlist','in_progress','completed','dropped')),
@@ -426,6 +462,12 @@ function applyLocalSchema(db) {
       loaned INTEGER NOT NULL DEFAULT 0,
       loaned_to TEXT,
       loaned_at TEXT,
+      -- Portada: la RUTA de la imagen, nunca los bytes (mismo criterio que
+      -- las imagenes de las notas -- meter base64 aqui inflaria la base y
+      -- haria lento cada volcado a IndexedDB). Los bytes viven en el
+      -- almacen noteAssets, y resolveAssetUrl() la convierte en blob: al
+      -- pintarla. NULL = sin portada, que es lo normal.
+      cover TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -1111,7 +1153,7 @@ function applyLocalSchema(db) {
   }
 
   // Migraciones puntuales de la ronda "Deudas + descanso en Gimnasio +
-  // prestamos en Lecturas": las tablas de arriba (CREATE TABLE IF NOT
+  // prestamos en Entretenimiento": las tablas de arriba (CREATE TABLE IF NOT
   // EXISTS) ya llevan las columnas nuevas para una instalacion desde cero,
   // pero una base de datos YA EXISTENTE necesita el ALTER TABLE de rigor.
   const gymRoutineExerciseColumns = db.prepare('PRAGMA table_info(gym_routine_exercises)').all().map((c) => c.name);
@@ -1122,15 +1164,74 @@ function applyLocalSchema(db) {
   if (!gymSetColumns.includes('rest_seconds')) {
     db.exec('ALTER TABLE gym_sets ADD COLUMN rest_seconds INTEGER');
   }
-  const lecturasItemColumns = db.prepare('PRAGMA table_info(lecturas_items)').all().map((c) => c.name);
-  if (!lecturasItemColumns.includes('loaned')) {
-    db.exec('ALTER TABLE lecturas_items ADD COLUMN loaned INTEGER NOT NULL DEFAULT 0');
+  const entretenimientoItemColumns = db.prepare('PRAGMA table_info(entretenimiento_items)').all().map((c) => c.name);
+  if (!entretenimientoItemColumns.includes('loaned')) {
+    db.exec('ALTER TABLE entretenimiento_items ADD COLUMN loaned INTEGER NOT NULL DEFAULT 0');
   }
-  if (!lecturasItemColumns.includes('loaned_to')) {
-    db.exec('ALTER TABLE lecturas_items ADD COLUMN loaned_to TEXT');
+  if (!entretenimientoItemColumns.includes('loaned_to')) {
+    db.exec('ALTER TABLE entretenimiento_items ADD COLUMN loaned_to TEXT');
   }
-  if (!lecturasItemColumns.includes('loaned_at')) {
-    db.exec('ALTER TABLE lecturas_items ADD COLUMN loaned_at TEXT');
+  if (!entretenimientoItemColumns.includes('loaned_at')) {
+    db.exec('ALTER TABLE entretenimiento_items ADD COLUMN loaned_at TEXT');
+  }
+  // Portada (ronda "Entretenimiento"): la ruta de la imagen, ver el
+  // comentario junto a la columna en el CREATE TABLE de mas arriba.
+  if (!entretenimientoItemColumns.includes('cover')) {
+    db.exec('ALTER TABLE entretenimiento_items ADD COLUMN cover TEXT');
+  }
+
+  // Abrir la lista de tipos en una base YA EXISTENTE.
+  //
+  // La tabla vieja tenia CHECK (type IN ('manga',...,'pelicula')), y en
+  // SQLite un CHECK no se puede quitar con ALTER TABLE: la unica forma es
+  // reconstruir la tabla (crear una nueva sin el CHECK, copiar las filas,
+  // borrar la vieja, renombrar). Es exactamente lo mismo que hubo que hacer
+  // en Proyectos para ampliar los tipos de propiedad.
+  //
+  // Se detecta mirando el SQL guardado en sqlite_master: si ya no menciona
+  // "CHECK (type IN", esta migracion ya corrio y no hay nada que hacer.
+  //
+  // OJO con las claves foraneas: node:sqlite y sql.js arrancan con
+  // PRAGMA foreign_keys = ON, y entretenimiento_items apunta a
+  // entretenimiento_sagas -- sin apagarlas, el DROP de la tabla vieja falla
+  // de verdad (ya paso en Proyectos, no es teorico). Por eso se apagan
+  // alrededor y se vuelven a encender despues.
+  const itemsSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entretenimiento_items'").get();
+  if (itemsSql && itemsSql.sql && itemsSql.sql.includes('CHECK (type IN')) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE entretenimiento_items_nuevo (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        saga_id INTEGER NOT NULL REFERENCES entretenimiento_sagas(id),
+        title TEXT NOT NULL,
+        type TEXT NOT NULL,
+        description TEXT,
+        rating REAL,
+        status TEXT NOT NULL DEFAULT 'wishlist' CHECK (status IN ('wishlist','in_progress','completed','dropped')),
+        genres TEXT,
+        progress_current INTEGER,
+        progress_total INTEGER,
+        progress_unit TEXT,
+        owned_count INTEGER,
+        owned_total INTEGER,
+        position INTEGER NOT NULL DEFAULT 0,
+        loaned INTEGER NOT NULL DEFAULT 0,
+        loaned_to TEXT,
+        loaned_at TEXT,
+        cover TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO entretenimiento_items_nuevo
+        SELECT id, saga_id, title, type, description, rating, status, genres,
+               progress_current, progress_total, progress_unit,
+               owned_count, owned_total, position,
+               loaned, loaned_to, loaned_at, cover, created_at, updated_at
+        FROM entretenimiento_items;
+      DROP TABLE entretenimiento_items;
+      ALTER TABLE entretenimiento_items_nuevo RENAME TO entretenimiento_items;
+    `);
+    db.exec('PRAGMA foreign_keys = ON');
   }
 
 }

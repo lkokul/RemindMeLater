@@ -309,14 +309,14 @@ button {
 :root[data-ui-style="registro"] button:active:not(:disabled) { transform: scale(0.97); }
 
 :root[data-ui-style="registro"] .finanzas-table th,
-:root[data-ui-style="registro"] .lecturas-table th {
+:root[data-ui-style="registro"] .entretenimiento-table th {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 :root[data-ui-style="registro"] .finanzas-account-type-badge,
-:root[data-ui-style="registro"] .lecturas-status-badge,
-:root[data-ui-style="registro"] .lecturas-genre-chip {
+:root[data-ui-style="registro"] .entretenimiento-status-badge,
+:root[data-ui-style="registro"] .entretenimiento-genre-chip {
   font-family: var(--font-mono);
 }
 
@@ -2210,7 +2210,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .extensions-card-title { font-weight: 600; }
 
 /* Tarjeta activa (una extension ya construida, ver btn-open-gym /
-   btn-open-finanzas / btn-open-lecturas en index.html): mismo bloque
+   btn-open-finanzas / btn-open-entretenimiento en index.html): mismo bloque
    visual que .extensions-card pero clicable de verdad -- opacidad
    completa y un resalte de borde al pasar el raton. */
 .extensions-card-active {
@@ -2372,7 +2372,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .finanzas-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.8rem 0; }
 /* Cuenta/Categoria/Tipo/Desde/Hasta (createSelectField/createDateField,
    ver app.js) con un ancho base consistente -- mismo criterio que
-   .lecturas-filter-field, para que quepan en una fila en vez de
+   .entretenimiento-filter-field, para que quepan en una fila en vez de
    apilarse por anchos desiguales. */
 .finanzas-filter-field { flex: 1 1 160px; min-width: 140px; }
 .finanzas-filter-field .select-field,
@@ -2477,71 +2477,71 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .finanzas-savings-status { font-size: 0.9rem; }
 .finanzas-savings-range-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
 
-/* Extension "Lecturas": jerarquia de 2 tablas (sagas -> items de una
+/* Extension "Entretenimiento": jerarquia de 2 tablas (sagas -> items de una
    saga). ".gym-tab-action" se reutiliza tal cual para el boton "+
    Nueva/o" (mismo estilo que ya se penso para Gimnasio: alineado a la
    izquierda, no a todo el ancho). */
-.lecturas-panel { padding: 1rem 1.2rem; overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.entretenimiento-panel { padding: 1rem 1.2rem; overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.6rem; }
 .gym-tab-action { align-self: flex-start; }
-.lecturas-table-wrap { overflow-x: auto; }
-.lecturas-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.lecturas-table th {
+.entretenimiento-table-wrap { overflow-x: auto; }
+.entretenimiento-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.entretenimiento-table th {
   text-align: left; padding: 0.5rem 0.6rem; font-weight: 600;
   border-bottom: 1px solid var(--border);
   color: color-mix(in srgb, var(--bg-text) 70%, var(--bg));
   white-space: nowrap;
 }
-.lecturas-table td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
-.lecturas-table tbody tr { cursor: pointer; }
-.lecturas-table tbody tr:hover { background: var(--surface-2); }
-.lecturas-saga-detail-header { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
-.lecturas-saga-detail-header h3 { margin: 0; }
-.lecturas-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
-.lecturas-filters input { font-size: 0.82rem; padding: 0.35rem 0.5rem; width: 6.5rem; flex: 0 1 auto; }
+.entretenimiento-table td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.entretenimiento-table tbody tr { cursor: pointer; }
+.entretenimiento-table tbody tr:hover { background: var(--surface-2); }
+.entretenimiento-saga-detail-header { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
+.entretenimiento-saga-detail-header h3 { margin: 0; }
+.entretenimiento-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.entretenimiento-filters input { font-size: 0.82rem; padding: 0.35rem 0.5rem; width: 6.5rem; flex: 0 1 auto; }
 /* Tipo/Estado/Genero (createSelectField, ver app.js) con un ancho base
    consistente en vez de ajustarse al texto de la opcion elegida -- asi
    los 4 controles del filtro caben en una fila en una pantalla normal
    de escritorio, en vez de apilarse por anchos desiguales. Siguen
-   pudiendo apilarse en movil gracias al flex-wrap de .lecturas-filters. */
-.lecturas-filter-field { flex: 1 1 160px; min-width: 140px; }
-.lecturas-filter-field .select-field { width: 100%; }
-.lecturas-filter-field .select-field-trigger { font-size: 0.82rem; padding: 0.4rem 0.6rem; }
-.lecturas-status-badge {
+   pudiendo apilarse en movil gracias al flex-wrap de .entretenimiento-filters. */
+.entretenimiento-filter-field { flex: 1 1 160px; min-width: 140px; }
+.entretenimiento-filter-field .select-field { width: 100%; }
+.entretenimiento-filter-field .select-field-trigger { font-size: 0.82rem; padding: 0.4rem 0.6rem; }
+.entretenimiento-status-badge {
   font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 999px;
   background: var(--surface-2); color: var(--surface-2-text); white-space: nowrap;
 }
 /* Insignia "Prestado" junto al titulo, en la tabla de items (ver
-   renderLecturasItemsTable en app.js) -- tono ambar para que llame la
+   renderEntretenimientoItemsTable en app.js) -- tono ambar para que llame la
    atencion sin ser tan fuerte como un error. */
-.lecturas-loaned-badge {
+.entretenimiento-loaned-badge {
   font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 999px;
   background: #f5b40033; color: #a97600; white-space: nowrap;
 }
-.lecturas-genre-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
-.lecturas-genre-chip {
+.entretenimiento-genre-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.entretenimiento-genre-chip {
   display: inline-flex; align-items: center; gap: 0.3rem;
   background: var(--surface-2); color: var(--surface-2-text);
   border-radius: 999px; padding: 0.15rem 0.5rem; font-size: 0.78rem;
 }
-.lecturas-genre-chip button { border: none; background: none; color: inherit; cursor: pointer; padding: 0; font-size: 0.85rem; line-height: 1; }
-.lecturas-genre-input-row { display: flex; gap: 0.4rem; margin-top: 0.4rem; }
-.lecturas-genre-input-row input { flex: 1; }
+.entretenimiento-genre-chip button { border: none; background: none; color: inherit; cursor: pointer; padding: 0; font-size: 0.85rem; line-height: 1; }
+.entretenimiento-genre-input-row { display: flex; gap: 0.4rem; margin-top: 0.4rem; }
+.entretenimiento-genre-input-row input { flex: 1; }
 /* Sugerencias clicables (predefinidas + ya usadas en cualquier saga, ver
-   renderLecturasGenreSuggestionsRow en app.js) -- distinguibles de los
-   chips ya añadidos (.lecturas-genre-chip, solidos) con un borde
+   renderEntretenimientoGenreSuggestionsRow en app.js) -- distinguibles de los
+   chips ya añadidos (.entretenimiento-genre-chip, solidos) con un borde
    discontinuo, para que se note que son "para añadir" y no "ya puestos". */
-.lecturas-genre-suggestions-row { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.5rem; }
-.lecturas-genre-suggestion-chip {
+.entretenimiento-genre-suggestions-row { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.5rem; }
+.entretenimiento-genre-suggestion-chip {
   background: transparent; color: color-mix(in srgb, var(--surface-text) 75%, var(--surface));
   border: 1px dashed var(--border); border-radius: 999px;
   padding: 0.15rem 0.5rem; font-size: 0.76rem; cursor: pointer;
 }
-.lecturas-genre-suggestion-chip:hover { border-color: var(--accent); color: var(--accent); }
-/* Rating: slider + numero en la misma fila, ver #lecturas-item-rating-range
+.entretenimiento-genre-suggestion-chip:hover { border-color: var(--accent); color: var(--accent); }
+/* Rating: slider + numero en la misma fila, ver #entretenimiento-item-rating-range
    en app.js/index.html. */
-.lecturas-rating-field { display: flex; align-items: center; gap: 0.6rem; }
-.lecturas-rating-field input[type="range"] { flex: 1; width: auto; padding: 0; background: none; border: none; accent-color: var(--accent); }
-.lecturas-rating-field input[type="number"] { width: 4.5rem; flex-shrink: 0; }
+.entretenimiento-rating-field { display: flex; align-items: center; gap: 0.6rem; }
+.entretenimiento-rating-field input[type="range"] { flex: 1; width: auto; padding: 0; background: none; border: none; accent-color: var(--accent); }
+.entretenimiento-rating-field input[type="number"] { width: 4.5rem; flex-shrink: 0; }
 .form-row > input { flex: 1; min-width: 0; }
 
 /* --- Notas (Fase 2): titulo + primera linea del contenido como avance,
@@ -2802,7 +2802,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    inferior), asi que se ocultan en las 7 pantallas que los tienen.
    `#mobile-global-search` NO entra aqui a proposito -- su boton de
    cabecera es solo "cerrar", un rol distinto al par home/config. */
-#btn-close-mobile-notes, #btn-mobile-notes-settings, #btn-close-extensions, #btn-extensions-settings, #btn-close-gym, #btn-gym-settings, #btn-close-finanzas, #btn-finanzas-settings, #btn-close-viajes, #btn-viajes-settings, #btn-close-lecturas, #btn-lecturas-settings {
+#btn-close-mobile-notes, #btn-mobile-notes-settings, #btn-close-extensions, #btn-extensions-settings, #btn-close-gym, #btn-gym-settings, #btn-close-finanzas, #btn-finanzas-settings, #btn-close-viajes, #btn-viajes-settings, #btn-close-entretenimiento, #btn-entretenimiento-settings {
   display: none;
 }
 /* Cabecera con titulo redundante: la barra inferior ya deja claro en
@@ -2810,7 +2810,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    arriba (ademas, con los botones ya ocultos arriba, esa cabecera
    hoy solo tiene el h2). Solo en las 3 pantallas alcanzables DIRECTO
    desde la barra inferior -- las 4 de extension (Gimnasio/Finanzas/
-   Viajes/Lecturas) SI la mantienen, confirmado que ahi es
+   Viajes/Entretenimiento) SI la mantienen, confirmado que ahi es
    el UNICO sitio donde aparece el nombre de la seccion (sus pestañas
    internas nunca lo repiten). #mobile-global-search tampoco entra
    aqui, su cabecera solo tiene el boton de cerrar, necesario. */
@@ -3202,7 +3202,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    que un pais normal para que el punto no desaparezca a zoom 1x. */
 .viajes-map-micro-state { stroke-width: 0.4; }
 
-/* Filtros de "Mis viajes" -- mismo criterio que .lecturas-filters (ancho
+/* Filtros de "Mis viajes" -- mismo criterio que .entretenimiento-filters (ancho
    base consistente para que quepan en una fila en escritorio, apilables
    en movil via flex-wrap). align-items:flex-start (no "center"): año/mes/
    país son ahora multi-seleccion, cada uno con su propia fila de chips

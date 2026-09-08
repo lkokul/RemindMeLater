@@ -6,7 +6,7 @@ nunca. No hay servidor, ni cuenta, ni nube, ni nada que emparejar: se
 abre y funciona. Por dentro es SQLite de verdad (compilado a
 WebAssembly), con las mismas consultas de siempre, guardado en el
 almacenamiento del propio dispositivo. Ademas del calendario, la app
-tiene un hub de "Herramientas" (Gimnasio, Lecturas, Finanzas y Viajes — ver mas
+tiene un hub de "Herramientas" (Gimnasio, Entretenimiento, Finanzas y Viajes — ver mas
 abajo).
 
 > **Nota sobre este repositorio.** Esta rama es **solo la app de
@@ -182,7 +182,7 @@ a pantalla completa y sin afectar a nada de lo de arriba:
   por dispositivo (el dato se guarda siempre en kg, la conversión es
   solo de presentación). Una pestaña de progreso muestra una gráfica
   (peso máximo o volumen levantado) por ejercicio a lo largo del tiempo.
-- **Lecturas**: historial de entretenimiento — mangas, cómics, libros,
+- **Entretenimiento**: historial de entretenimiento — mangas, cómics, libros,
   series, animes y películas juntos — agrupado en sagas (obligatorias:
   incluso algo suelto es una saga de un único elemento, y una misma saga
   puede mezclar tipos distintos, ej. las temporadas de una serie y los

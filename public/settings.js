@@ -406,12 +406,12 @@ function openSettingsModal() {
 // Cada pantalla completa (.my-space-view) tapa a la de debajo, asi que
 // cada una lleva su propio boton de Configuracion en la cabecera.
 // Mismo motivo: Herramientas y cada extension
-// (Gimnasio/Lecturas/Finanzas/Archivos) son tambien .my-space-view a
+// (Gimnasio/Entretenimiento/Finanzas/Archivos) son tambien .my-space-view a
 // pantalla completa que tapan la topbar -- cada una necesita su propio
 // boton de Configuracion.
 document.getElementById('btn-extensions-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-gym-settings').addEventListener('click', openSettingsModal);
-document.getElementById('btn-lecturas-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-entretenimiento-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
 // #mobile-notes-view (Fase 4) es tambien .my-space-view a pantalla
@@ -1472,7 +1472,7 @@ document.addEventListener('keydown', (e) => {
   // Apps: cada una es pantalla completa igual que "Mi espacio", asi
   // que Esc capa a capa igual -- PRIMERO cualquier modal de "añadir/editar"
   // abierto ENCIMA de la extension (se cierra sin guardar, te deja en la
-  // misma vista), luego la sub-navegacion de dentro (solo Lecturas la
+  // misma vista), luego la sub-navegacion de dentro (solo Entretenimiento la
   // tiene: saga -> detalle de esa saga), luego la extension entera vuelve
   // a la rejilla de Apps, y la rejilla vuelve a Home. Antes estos
   // modales no estaban aqui: el primer Esc se saltaba directamente a
@@ -1521,24 +1521,24 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const lecturasModalIds = [
-    ['lecturas-saga-modal', closeLecturasSagaModal],
-    ['lecturas-item-modal', closeLecturasItemModal],
+  const entretenimientoModalIds = [
+    ['entretenimiento-saga-modal', closeEntretenimientoSagaModal],
+    ['entretenimiento-item-modal', closeEntretenimientoItemModal],
   ];
-  for (const [id, close] of lecturasModalIds) {
+  for (const [id, close] of entretenimientoModalIds) {
     const modal = document.getElementById(id);
     if (modal && !modal.classList.contains('hidden')) {
       close();
       return;
     }
   }
-  const lecturasView = document.getElementById('lecturas-view');
-  if (lecturasView && !lecturasView.classList.contains('hidden')) {
-    const sagaDetailPanel = document.getElementById('lecturas-saga-detail-panel');
+  const entretenimientoView = document.getElementById('entretenimiento-view');
+  if (entretenimientoView && !entretenimientoView.classList.contains('hidden')) {
+    const sagaDetailPanel = document.getElementById('entretenimiento-saga-detail-panel');
     if (sagaDetailPanel && !sagaDetailPanel.classList.contains('hidden')) {
-      document.getElementById('btn-back-lecturas-sagas').click();
+      document.getElementById('btn-back-entretenimiento-sagas').click();
     } else {
-      document.getElementById('btn-close-lecturas').click();
+      document.getElementById('btn-close-entretenimiento').click();
     }
     return;
   }

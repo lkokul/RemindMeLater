@@ -423,7 +423,7 @@
   </div>
 
   <!-- "Apps": futuras secciones aparte del calendario. Gimnasio ya
-       es real (ver #gym-view mas abajo); Finanzas y Lecturas siguen de
+       es real (ver #gym-view mas abajo); Finanzas y Entretenimiento siguen de
        momento como placeholder "Proximamente". Mismo patron de pantalla
        completa que "Mi espacio" (.my-space-view), pero sin modo panel:
        siempre se abre a pantalla completa con #btn-extensions. Ver
@@ -451,9 +451,9 @@
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v10M9.5 9.5c0-1.5 1.2-2 2.5-2s2.5.6 2.5 2c0 1.2-1 1.6-2.5 2.2S9.5 13 9.5 14.3c0 1.4 1.1 2.2 2.5 2.2s2.5-.6 2.5-2"></path></svg></span>
           <span class="extensions-card-title">Finanzas</span>
         </button>
-        <button type="button" id="btn-open-lecturas" class="extensions-card extensions-card-active">
+        <button type="button" id="btn-open-entretenimiento" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg></span>
-          <span class="extensions-card-title">Lecturas</span>
+          <span class="extensions-card-title">Entretenimiento</span>
         </button>
         <button type="button" id="btn-open-viajes" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></span>
@@ -1307,169 +1307,169 @@
     </div>
   </div>
 
-  <!-- Extension "Lecturas": historial de entretenimiento (manga, comic,
+  <!-- Extension "Entretenimiento": historial de entretenimiento (manga, comic,
        libro, serie, anime, pelicula), agrupado en SAGAS obligatorias --
        hasta algo suelto es una saga de un solo item, para poder juntar
        bajo un mismo nombre cosas de tipos distintos (ej. el manga Y el
        anime de la misma obra). Jerarquia de 2 tablas: sagas primero
-       (#lecturas-sagas-panel), y al entrar en una, sus items
-       (#lecturas-saga-detail-panel) -- mas parecido a como Notas navega
+       (#entretenimiento-sagas-panel), y al entrar en una, sus items
+       (#entretenimiento-saga-detail-panel) -- mas parecido a como Notas navega
        carpetas que a las pestañas de Gimnasio, ver
-       openLecturasSagaDetail/backToLecturasSagas en app.js. -->
-  <div id="lecturas-view" class="my-space-view hidden">
+       openEntretenimientoSagaDetail/backToEntretenimientoSagas en app.js. -->
+  <div id="entretenimiento-view" class="my-space-view hidden">
     <div class="my-space-view-header">
-      <h2>Lecturas</h2>
+      <h2>Entretenimiento</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-lecturas" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
-        <button type="button" id="btn-lecturas-settings" class="icon-btn" aria-label="Configuración">☰</button>
+        <button type="button" id="btn-close-entretenimiento" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
+        <button type="button" id="btn-entretenimiento-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
 
-    <div id="lecturas-sagas-panel" class="lecturas-panel">
-      <button type="button" id="btn-new-lecturas-saga" class="primary-btn gym-tab-action">+ Nueva saga</button>
-      <div class="lecturas-table-wrap">
-        <table class="lecturas-table">
+    <div id="entretenimiento-sagas-panel" class="entretenimiento-panel">
+      <button type="button" id="btn-new-entretenimiento-saga" class="primary-btn gym-tab-action">+ Nueva saga</button>
+      <div class="entretenimiento-table-wrap">
+        <table class="entretenimiento-table">
           <thead>
             <tr><th>Nombre</th><th>Tipos</th><th>Items</th></tr>
           </thead>
-          <tbody id="lecturas-sagas-tbody"></tbody>
+          <tbody id="entretenimiento-sagas-tbody"></tbody>
         </table>
       </div>
-      <p id="lecturas-sagas-empty" class="empty-hint hidden">Todavía no tienes ninguna saga. Crea una arriba (hasta algo suelto, como una novela, es una saga de un solo item).</p>
+      <p id="entretenimiento-sagas-empty" class="empty-hint hidden">Todavía no tienes ninguna saga. Crea una arriba (hasta algo suelto, como una novela, es una saga de un solo item).</p>
     </div>
 
-    <div id="lecturas-saga-detail-panel" class="lecturas-panel hidden">
-      <button type="button" id="btn-back-lecturas-sagas" class="secondary-btn">← Sagas</button>
-      <div class="lecturas-saga-detail-header">
-        <h3 id="lecturas-saga-detail-name"></h3>
-        <button type="button" id="btn-edit-lecturas-saga" class="icon-btn" aria-label="Editar saga">✎</button>
+    <div id="entretenimiento-saga-detail-panel" class="entretenimiento-panel hidden">
+      <button type="button" id="btn-back-entretenimiento-sagas" class="secondary-btn">← Sagas</button>
+      <div class="entretenimiento-saga-detail-header">
+        <h3 id="entretenimiento-saga-detail-name"></h3>
+        <button type="button" id="btn-edit-entretenimiento-saga" class="icon-btn" aria-label="Editar saga">✎</button>
         <div class="spacer"></div>
-        <button type="button" id="btn-delete-lecturas-saga" class="danger-btn">Eliminar saga</button>
+        <button type="button" id="btn-delete-entretenimiento-saga" class="danger-btn">Eliminar saga</button>
       </div>
-      <p id="lecturas-saga-detail-description" class="hint"></p>
+      <p id="entretenimiento-saga-detail-description" class="hint"></p>
 
-      <div id="lecturas-item-filters" class="lecturas-filters"></div>
+      <div id="entretenimiento-item-filters" class="entretenimiento-filters"></div>
 
-      <button type="button" id="btn-new-lecturas-item" class="primary-btn gym-tab-action">+ Nuevo item</button>
-      <div class="lecturas-table-wrap">
-        <table class="lecturas-table">
+      <button type="button" id="btn-new-entretenimiento-item" class="primary-btn gym-tab-action">+ Nuevo item</button>
+      <div class="entretenimiento-table-wrap">
+        <table class="entretenimiento-table">
           <thead>
             <tr>
               <th>Título</th><th>Tipo</th><th>Estado</th><th>Rating</th>
               <th>Género</th><th>Progreso</th><th>Tomos</th>
             </tr>
           </thead>
-          <tbody id="lecturas-items-tbody"></tbody>
+          <tbody id="entretenimiento-items-tbody"></tbody>
         </table>
       </div>
-      <p id="lecturas-items-empty" class="empty-hint hidden">Todavía no tienes ningun item en esta saga (o ninguno coincide con los filtros).</p>
+      <p id="entretenimiento-items-empty" class="empty-hint hidden">Todavía no tienes ningun item en esta saga (o ninguno coincide con los filtros).</p>
     </div>
   </div>
 
-  <!-- Modal para crear / editar una saga de Lecturas -->
-  <div id="lecturas-saga-modal" class="modal hidden">
+  <!-- Modal para crear / editar una saga de Entretenimiento -->
+  <div id="entretenimiento-saga-modal" class="modal hidden">
     <div class="modal-card">
-      <button type="button" id="btn-close-lecturas-saga" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2 id="lecturas-saga-modal-title">Nueva saga</h2>
-      <form id="lecturas-saga-form">
-        <input type="hidden" id="lecturas-saga-id" />
+      <button type="button" id="btn-close-entretenimiento-saga" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="entretenimiento-saga-modal-title">Nueva saga</h2>
+      <form id="entretenimiento-saga-form">
+        <input type="hidden" id="entretenimiento-saga-id" />
         <label>
           Nombre
-          <input type="text" id="lecturas-saga-name" placeholder="Ej. Kimetsu no Yaiba, o el título suelto si es solo uno" required />
+          <input type="text" id="entretenimiento-saga-name" placeholder="Ej. Kimetsu no Yaiba, o el título suelto si es solo uno" required />
         </label>
         <label>
           Descripción (opcional)
-          <textarea id="lecturas-saga-description" rows="2"></textarea>
+          <textarea id="entretenimiento-saga-description" rows="2"></textarea>
         </label>
         <div class="modal-actions">
           <div class="spacer"></div>
-          <button type="button" id="btn-cancel-lecturas-saga" class="secondary-btn">Cancelar</button>
+          <button type="button" id="btn-cancel-entretenimiento-saga" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- Modal para crear / editar un item de Lecturas -->
-  <div id="lecturas-item-modal" class="modal hidden">
+  <!-- Modal para crear / editar un item de Entretenimiento -->
+  <div id="entretenimiento-item-modal" class="modal hidden">
     <div class="modal-card">
-      <button type="button" id="btn-close-lecturas-item" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2 id="lecturas-item-modal-title">Nuevo item</h2>
-      <form id="lecturas-item-form">
-        <input type="hidden" id="lecturas-item-id" />
+      <button type="button" id="btn-close-entretenimiento-item" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="entretenimiento-item-modal-title">Nuevo item</h2>
+      <form id="entretenimiento-item-form">
+        <input type="hidden" id="entretenimiento-item-id" />
         <label>
           Título
-          <input type="text" id="lecturas-item-title" placeholder="Ej. Temporada 1, Tomo 1-10..." required />
+          <input type="text" id="entretenimiento-item-title" placeholder="Ej. Temporada 1, Tomo 1-10..." required />
         </label>
         <div class="form-row">
           <label>
             Tipo
-            <div id="lecturas-item-type-field"></div>
+            <div id="entretenimiento-item-type-field"></div>
           </label>
           <label>
             Estado
-            <div id="lecturas-item-status-field"></div>
+            <div id="entretenimiento-item-status-field"></div>
           </label>
         </div>
         <label>
           Descripción (opcional)
-          <textarea id="lecturas-item-description" rows="2"></textarea>
+          <textarea id="entretenimiento-item-description" rows="2"></textarea>
         </label>
         <label>
           Rating (0-10, opcional)
-          <div class="lecturas-rating-field">
-            <input type="range" id="lecturas-item-rating-range" min="0" max="10" step="0.5" value="0" />
-            <input type="number" id="lecturas-item-rating" min="0" max="10" step="0.5" />
+          <div class="entretenimiento-rating-field">
+            <input type="range" id="entretenimiento-item-rating-range" min="0" max="10" step="0.5" value="0" />
+            <input type="number" id="entretenimiento-item-rating" min="0" max="10" step="0.5" />
           </div>
         </label>
         <div class="field-label-block">
           <span class="field-label">Géneros</span>
-          <div id="lecturas-item-genres-field"></div>
+          <div id="entretenimiento-item-genres-field"></div>
         </div>
         <div class="field-label-block">
           <span class="field-label">Progreso (opcional)</span>
           <div class="form-row">
             <label>
               <span class="field-label">Vas por</span>
-              <input type="number" id="lecturas-item-progress-current" placeholder="Ej. 12" min="0" />
+              <input type="number" id="entretenimiento-item-progress-current" placeholder="Ej. 12" min="0" />
             </label>
             <label>
               <span class="field-label">de un total de</span>
-              <input type="number" id="lecturas-item-progress-total" placeholder="Ej. 24" min="0" />
+              <input type="number" id="entretenimiento-item-progress-total" placeholder="Ej. 24" min="0" />
             </label>
             <label>
               <span class="field-label">Unidad</span>
-              <input type="text" id="lecturas-item-progress-unit" placeholder="Ej. capítulos, tomos" />
+              <input type="text" id="entretenimiento-item-progress-unit" placeholder="Ej. capítulos, tomos" />
             </label>
           </div>
         </div>
         <div class="field-label-block">
           <span class="field-label">Tomos comprados (opcional)</span>
           <div class="form-row">
-            <input type="number" id="lecturas-item-owned-count" placeholder="Tienes" min="0" />
-            <input type="number" id="lecturas-item-owned-total" placeholder="De un total de" min="0" />
+            <input type="number" id="entretenimiento-item-owned-count" placeholder="Tienes" min="0" />
+            <input type="number" id="entretenimiento-item-owned-total" placeholder="De un total de" min="0" />
           </div>
         </div>
         <div class="field-label-block">
           <label class="checkbox-row">
-            <input type="checkbox" id="lecturas-item-loaned" />
+            <input type="checkbox" id="entretenimiento-item-loaned" />
             Prestado
           </label>
-          <div id="lecturas-item-loaned-details" class="form-row hidden">
+          <div id="entretenimiento-item-loaned-details" class="form-row hidden">
             <label>
               <span class="field-label">A quién</span>
-              <input type="text" id="lecturas-item-loaned-to" placeholder="Nombre" />
+              <input type="text" id="entretenimiento-item-loaned-to" placeholder="Nombre" />
             </label>
             <label>
               <span class="field-label">Desde cuándo (opcional)</span>
-              <div id="lecturas-item-loaned-at-field"></div>
+              <div id="entretenimiento-item-loaned-at-field"></div>
             </label>
           </div>
         </div>
         <div class="modal-actions">
-          <button type="button" id="btn-delete-lecturas-item" class="danger-btn hidden">Eliminar</button>
+          <button type="button" id="btn-delete-entretenimiento-item" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
-          <button type="button" id="btn-cancel-lecturas-item" class="secondary-btn">Cancelar</button>
+          <button type="button" id="btn-cancel-entretenimiento-item" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
@@ -1974,8 +1974,8 @@
   <script src="routes-local/gymExercises.js"></script>
   <script src="routes-local/gymRoutines.js"></script>
   <script src="routes-local/gymSessions.js"></script>
-  <script src="routes-local/lecturasItems.js"></script>
-  <script src="routes-local/lecturasSagas.js"></script>
+  <script src="routes-local/entretenimientoItems.js"></script>
+  <script src="routes-local/entretenimientoSagas.js"></script>
   <script src="routes-local/noteFolders.js"></script>
   <script src="routes-local/noteImages.js"></script>
   <script src="routes-local/notes.js"></script>

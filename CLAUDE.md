@@ -46,7 +46,7 @@ La interfaz sigue siendo HTML/CSS/JS sin build ni framework (`app.js` y
 `settings.js` se cargan como `<script>` normales y comparten variables
 globales — `settings.js` va después de `app.js`, cuidado con el orden si
 tocas ambos). Además del calendario hay un hub de "Apps" a pantalla
-completa con 4 secciones independientes: Gimnasio, Lecturas, Finanzas y
+completa con 4 secciones independientes: Gimnasio, Entretenimiento, Finanzas y
 Viajes. Detalle completo de features en `README.md`, que está al día.
 
 ## Reglas de trabajo que Koku ha pedido explícitamente
@@ -98,7 +98,7 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
   componente propio de la app que siga el tema activo:
   `createSelectField()`/`createDateField()` (`app.js`) para
   desplegables/fechas (ya son el patrón establecido, usados en
-  Lecturas/Gimnasio/Finanzas), y para checkboxes de selección (listas,
+  Entretenimiento/Gimnasio/Finanzas), y para checkboxes de selección (listas,
   árboles) la clase `.styled-checkbox` (`styles.css`, cuadrado con
   esquinas redondeadas + check de acento, soporta `:indeterminate`) — NO
   la clase `.checkbox-row` (esa es el interruptor tipo pastilla para
@@ -328,11 +328,18 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
   - **Gimnasio**: `gym_exercises`/`gym_routines`/`gym_routine_exercises`/
     `gym_sessions`/`gym_sets`. Progreso con gráfica SVG a mano (peso
     máximo/volumen), sin ninguna librería.
-  - **Lecturas**: `lecturas_sagas`/`lecturas_items` (sagas obligatorias,
-    un item puede ser de cualquier tipo — manga/cómic/libro/serie/anime/
-    película — dentro de la misma saga). Géneros como columna JSON de
-    texto libre (no tabla N:M), con sugerencias globales calculadas de
-    `GET /api/lecturas-items` sin `sagaId`.
+  - **Entretenimiento** (se llamaba "Lecturas" hasta la rama
+    `entretenimiento-movil`; ver `ENTRETENIMIENTO.md`):
+    `entretenimiento_sagas`/`entretenimiento_items` (sagas obligatorias,
+    un item puede ser de cualquier tipo dentro de la misma saga).
+    Géneros como columna JSON de texto libre (no tabla N:M), con
+    sugerencias globales calculadas de `GET /api/entretenimiento-items`
+    sin `sagaId`. **La columna `type` NO lleva CHECK a propósito**: en
+    SQLite un CHECK obliga a reconstruir la tabla para tocarlo, así que
+    la lista válida vive en el array `TYPES` de la ruta y añadir un tipo
+    nuevo son dos líneas sin migración (mismo criterio que los códigos
+    de país de Viajes). `cover` guarda la RUTA de la portada, nunca los
+    bytes — esos van al almacén `noteAssets` como las imágenes de notas.
   - **Finanzas**: `finanzas_accounts`/`finanzas_categories`/
     `finanzas_transactions`/`finanzas_investment_transactions`/
     `finanzas_settings` (fila única, límite mensual + objetivo de
@@ -406,10 +413,31 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
 
 ## Estado actual
 
-**Rama de trabajo: `movil-ui`** (no `main`). Ahí vive la app móvil sin
-servidor. `main` sigue teniendo la versión vieja cliente-servidor, y la
-rama `escritorio` es donde Koku trabaja el programa de escritorio por su
-cuenta — no las toques desde aquí.
+**Rama de trabajo: `entretenimiento-movil`**, sacada del tronco
+`origin/movil-ui`. Ahí vive la app móvil sin servidor. `main` sigue
+teniendo la versión vieja cliente-servidor, y la rama `escritorio` es
+donde Koku trabaja el programa de escritorio por su cuenta — no las
+toques desde aquí.
+
+**Ronda de Entretenimiento (ver `ENTRETENIMIENTO.md` para el detalle):**
+la extensión que se llamaba "Lecturas" pasó a llamarse
+"Entretenimiento", renombrada hasta el fondo (textos, ids del HTML,
+clases CSS, funciones, rutas `/api/entretenimiento-*` y las tablas
+`entretenimiento_sagas`/`entretenimiento_items`, con migración). Además
+se le quitó el CHECK cerrado a la columna `type` y se añadió la columna
+`cover`. **El visor móvil todavía NO está hecho**: la UI sigue siendo
+la tabla de escritorio, que es justo lo que queda por rehacer.
+
+Dos cosas que se aprendieron creando estas ramas y conviene no repetir:
+
+- `lecturas` **no era una rama viva**: apuntaba a un commit de la época
+  de la v0.27 ya fusionado en todo (`git diff main...lecturas` vacío).
+  Antes de partir de una rama, comprueba que de verdad va por delante.
+- Al crear una rama con `git branch <nueva> origin/<tronco>`, git la
+  deja **rastreando el tronco**, así que un `git push` a secas habría
+  pushado a `movil-ui`. Hay que quitarle el upstream a mano. Comprueba
+  con `git for-each-ref --format='%(refname:short) -> %(upstream:short)'
+  refs/heads/` antes de pushear una rama recién creada.
 
 Últimos commits en `origin/movil-ui`:
 
