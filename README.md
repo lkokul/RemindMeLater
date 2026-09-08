@@ -287,7 +287,29 @@ sistema operativo**: suena a su hora aunque la app este cerrada del todo,
 sin servidor y sin que nada salga del dispositivo.
 
 Los avisos se reprograman solos cada vez que creas, editas o borras algo,
-asi que nunca suena un aviso de algo que ya no existe.
+asi que nunca suena un aviso de algo que ya no existe. Cada aviso llega
+**con sonido y vibracion**, como cualquier notificacion normal del
+sistema (en Android, la app crea su propio canal "Recordatorios" — desde
+los ajustes del sistema se puede afinar como suena, igual que con
+cualquier otra app).
+
+## Compartir texto a la app (crear un evento desde otra app)
+
+Al seleccionar un texto en cualquier otra app (un mensaje, una web...)
+y tocar **Compartir → RemindMeLater**, la app se abre con el modal de
+**evento nuevo ya rellenado**: detecta la fecha y la hora escritas en
+español dentro del texto ("cena el 12/10 a las 21:30", "medico mañana a
+las 9", "el viernes cumple de Luis"...) y propone el resto del texto
+como titulo. Solo queda revisar y guardar.
+
+Formatos que entiende: fechas como `12/10`, `12/10/2026`, "el 3 de
+febrero", "hoy", "mañana", "pasado mañana", dias de la semana ("el
+viernes", "viernes 25"); horas como "a las 21:30", "a las 9", "19h",
+con "de la mañana/tarde/noche". Si el texto no lleva fecha, el modal
+abre igualmente con el texto como titulo, sin fecha propuesta.
+
+De momento esta disponible en **iOS** (la parte de Android llegara mas
+adelante, cuando se pueda probar en un dispositivo Android real).
 
 ## Datos personales
 
