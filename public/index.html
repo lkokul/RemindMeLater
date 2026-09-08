@@ -468,10 +468,32 @@
         <button type="button" id="btn-proyectos-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
+    <!-- La HOME de Proyectos (pedida por Koku): pestañas Mis proyectos /
+         Plantillas, buscador y una tarjeta por proyecto raiz. 1 clic =
+         seleccionar la tarjeta (salen sus acciones: abrir, PDF, archivo
+         .rmproj, plantilla), doble clic = entrar. Al entrar, el sidebar
+         de al lado enseña SOLO el arbol de ese proyecto. -->
+    <div id="proyectos-home" class="proyectos-home hidden">
+      <div class="proyectos-home-topbar">
+        <div class="proyectos-home-tabs" id="proyectos-home-tabs">
+          <button type="button" data-home-tab="mine" class="proyectos-home-tab active">Mis proyectos</button>
+          <button type="button" data-home-tab="templates" class="proyectos-home-tab">Plantillas</button>
+        </div>
+        <input type="text" id="proyectos-home-search" class="proyectos-search proyectos-home-search" placeholder="Buscar proyecto…" />
+        <div class="spacer"></div>
+        <button type="button" id="btn-proyectos-home-new" class="primary-btn">+ Nuevo proyecto</button>
+        <button type="button" id="btn-proyectos-home-import" class="secondary-btn" title="Importar un proyecto exportado (.rmproj) de este u otro ordenador">Importar…</button>
+        <button type="button" id="btn-proyectos-home-guide" class="icon-btn" aria-label="Crear el proyecto de ejemplo" title="Crear el proyecto de ejemplo (guía de uso)">📖</button>
+      </div>
+      <p class="hint proyectos-home-hint">Un clic selecciona un proyecto (salen sus acciones) · doble clic lo abre</p>
+      <div id="proyectos-home-grid" class="proyectos-home-grid"></div>
+    </div>
     <div class="proyectos-layout">
       <aside class="proyectos-sidebar">
         <div class="proyectos-sidebar-header">
-          <span>Páginas</span>
+          <!-- ⌂ vuelve a la home (la lista de todos los proyectos). -->
+          <button type="button" id="btn-proyectos-home" class="icon-btn" aria-label="Todos los proyectos" title="Volver a todos los proyectos">⌂</button>
+          <span>Proyecto</span>
           <span class="proyectos-sidebar-header-btns">
             <!-- Crea el "proyecto de ejemplo": un arbol de paginas ya
                  rellenas que enseña TODAS las funcionalidades de la
@@ -510,12 +532,9 @@
         <div id="proyectos-tree" class="proyectos-tree"></div>
       </aside>
       <section class="proyectos-page-area">
-        <!-- Sin pagina abierta: invitacion a elegir o crear. -->
-        <div id="proyectos-empty" class="proyectos-empty">
-          <p>Elige una página del panel de la izquierda, o crea una nueva.</p>
-          <button type="button" id="btn-proyectos-new-empty" class="primary-btn">+ Nueva página</button>
-          <button type="button" id="btn-proyectos-guide-empty" class="secondary-btn">📖 Crear el proyecto de ejemplo</button>
-        </div>
+        <!-- (El estado "sin pagina abierta" ya no existe: sin pagina se
+             enseña la HOME de arriba, no este panel.) -->
+        <div id="proyectos-empty" class="proyectos-empty hidden"></div>
         <!-- Pagina abierta: portada (opcional) + icono + titulo gigante
              editable en el sitio + cuerpo. El titulo y el cuerpo son
              contenteditable y se guardan solos (con retraso) al escribir,

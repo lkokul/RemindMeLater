@@ -67,5 +67,54 @@ function deleteImagesInBody(body) {
   }
 }
 
+// --- Ayudas para clonar y exportar/importar proyectos ---------------
+// (las usan las rutas de proyectosPages.js: clonar una pagina copia sus
+// archivos de imagen, exportar los mete en el paquete como base64 e
+// importar los vuelve a escribir con nombre nuevo)
+
+const EXT_BY_NAME = new Set(['jpg', 'png', 'gif', 'webp']);
+
+// Copia fisica de una imagen ya subida; devuelve el nombre nuevo (URL
+// corta aparte) o null si el original no existe.
+function copyImageFile(filename) {
+  const safe = path.basename(filename);
+  const source = path.join(IMAGES_DIR, safe);
+  if (!fs.existsSync(source)) return null;
+  const ext = safe.split('.').pop().toLowerCase();
+  if (!EXT_BY_NAME.has(ext)) return null;
+  const next = `${crypto.randomUUID()}.${ext}`;
+  fs.copyFileSync(source, path.join(IMAGES_DIR, next));
+  return next;
+}
+
+// Lee una imagen como base64 para el paquete de exportacion.
+function readImageAsBase64(filename) {
+  const safe = path.basename(filename);
+  const source = path.join(IMAGES_DIR, safe);
+  if (!fs.existsSync(source)) return null;
+  const ext = safe.split('.').pop().toLowerCase();
+  if (!EXT_BY_NAME.has(ext)) return null;
+  return { ext, data: fs.readFileSync(source).toString('base64') };
+}
+
+// Escribe una imagen venida de un paquete importado. Mismo limite de
+// tamaño que subirla a mano; extension de la lista cerrada.
+function writeImageFromBase64(data, ext) {
+  if (!EXT_BY_NAME.has(ext)) return null;
+  let buffer;
+  try {
+    buffer = Buffer.from(String(data), 'base64');
+  } catch (err) {
+    return null;
+  }
+  if (!buffer || buffer.length === 0 || buffer.length > MAX_IMAGE_BYTES) return null;
+  const filename = `${crypto.randomUUID()}.${ext}`;
+  fs.writeFileSync(path.join(IMAGES_DIR, filename), buffer);
+  return filename;
+}
+
 module.exports = router;
 module.exports.deleteImagesInBody = deleteImagesInBody;
+module.exports.copyImageFile = copyImageFile;
+module.exports.readImageAsBase64 = readImageAsBase64;
+module.exports.writeImageFromBase64 = writeImageFromBase64;

@@ -141,9 +141,15 @@ ahora se llama `device`.
 
 ## Reglas de trabajo que Koku ha pedido explícitamente
 
-- **No hacer commit ni push sin que él lo pida.** A veces pide solo UNA de
-  las dos cosas (commit sin push, por ejemplo) — haz justo lo que pide, no
-  más. No asumas autorización de una ronda para la siguiente.
+- **Commit y push: SÍ, automáticos** (regla nueva del 8/9/2026,
+  sustituye a la anterior de "no commitear sin que lo pida"): al
+  terminar y verificar una ronda de trabajo se commitea y pushea
+  directamente, agrupando por ronda como siempre. DOS cuidados que
+  siguen vigentes: (1) **GitHub Actions NUNCA se lanza sin permiso
+  explícito de Koku en esa ronda** (sus ejecuciones son limitadas), y
+  (2) nada de `git add -A` a ciegas — añadir archivos por nombre
+  (una vez se coló un archivo de otra ronda, y
+  `PROYECTOS-SEGUIMIENTO.md` es LOCAL y no debe subirse jamás).
 - **No hace falta avisar de que una tarea es larga antes de empezar** — lo
   pidió al principio, pero luego dijo explícitamente que como no puedo
   comprimir contexto por mi cuenta, no sirve de nada que avise.
@@ -573,12 +579,71 @@ ahora se llama `device`.
         llamadas de siempre ni se enteran) y dos IPC nuevos
         (open-exported-pdf → shell.openPath, show-exported-pdf →
         shell.showItemInFolder).
-      - PENDIENTE de esta vision (fases B y C): home de Proyectos con
-        pestañas Mis proyectos / Plantillas (tarjetas + buscador,
-        sidebar solo con el arbol del proyecto abierto), plantillas de
-        proyectos Y de piezas (clonado profundo con bases e imagenes;
-        insertables tambien como subpagina via "/"), y guia especifica
-        del exportar a PDF.
+      - De la vision original queda pendiente SOLO la fase C: la guia
+        especifica del exportar a PDF (la fase B se hizo, ver la ronda
+        siguiente).
+    - **Ronda "home + plantillas + consistencia"** (encargo del 8/9 con
+      Koku fuera; drivers `drive-round7.js`/`drive-round7b.js`/
+      `drive-align-bug.js`. OJO: esta ronda se trabajo en el WORKTREE
+      `C:\Users\mrobe\PROYECTOS\RemindMeLater-proyectos` porque la
+      carpeta principal la estaban usando otras sesiones con otras
+      ramas — el worktree comparte el .git y su node_modules es una
+      union/junction a la carpeta principal):
+      - **HOME de Proyectos** (`#proyectos-home`): pestañas Mis
+        proyectos / Plantillas, buscador y tarjeta por proyecto raiz
+        (franja del color, icono, titulo, nº de paginas). 1 clic =
+        seleccionar (acciones EN la tarjeta: Abrir / PDF / Archivo /
+        → Plantilla, y en plantillas Usar), doble clic = abrir. Al
+        entrar, el sidebar enseña SOLO el arbol de ese proyecto
+        (`proyectosCurrentRootId`; ⌂ vuelve a la home; el buscador del
+        sidebar busca solo dentro del proyecto). El estado
+        #proyectos-empty ya no existe. El export/import vive AQUI, no
+        dentro del proyecto (pedido por Koku). El dialogo de PDF es
+        compartido (`openProyectosPdfDialog(rootLite, anchor,
+        {rolePage})` — desde la home sin selector de rol).
+      - **Plantillas**: `is_template` en proyectos_pages. "→ Plantilla"
+        alterna; "Usar" clona ENTERO; "/plantilla" (Desde plantilla…)
+        clona como subpagina de la pagina abierta — para piezas tipo
+        "mi base de viajes configurada".
+      - **Clonado / .rmproj**: motor comun `materializeProject` en
+        proyectosPages.js (paginas madre-primero con cuerpos al final,
+        bases con propiedades/filas/valores, remapeo de
+        data-proyectos-db, data-page-link — el enlace a una pagina que
+        no viaja se deshace a texto — e imagenes). POST /:id/clone
+        (copia fisica de imagenes), GET /:id/export (paquete JSON con
+        imagenes en base64) y POST /import. Electron:
+        export-project-file / import-project-file (dialogos nativos,
+        extension .rmproj). Helpers de imagen en proyectosImages.js
+        (copyImageFile / readImageAsBase64 / writeImageFromBase64).
+      - **Vista Consistencia** (`heatmap`, 5ª pestaña; el heatmap del
+        Gimnasio de la rama gimnasio-movil traido a las bases): 26
+        semanas x 7 dias, intensidad = filas con esa fecha (la del
+        Cronograma o la primera fecha), un solo tono del acento
+        (color-mix), stats (dias con actividad / semana / mes / total)
+        y clic en un dia = lista de filas → side peek. OTRA
+        reconstruccion del CHECK de view_type (migracion pareada,
+        detecta 'heatmap' en sqlite_master).
+      - **Alineacion en tablas, arreglada de verdad** (feedback "no
+        funciona del todo"): el diagnostico dio que la mecanica
+        funcionaba pero (a) el menu ▦ NO tenia alineacion horizontal
+        (solo el atajo Ctrl+T...) y (b) la vertical era invisible con
+        el centrado por defecto del navegador y filas de altura justa.
+        Ahora: submenus "Alinear texto" (izquierda/centro/derecha) y
+        "Alinear en vertical" (arriba = por defecto SIN atributo /
+        centrado = data-valign="middle" / abajo) + celdas con
+        `vertical-align: top` por defecto (como Word/Notion, tambien en
+        print.html) + notita en el submenu explicando que se aprecia al
+        estirar la fila.
+      - **Boton ▦ anclado**: pegado a la esquina superior IZQUIERDA de
+        su tabla (a la altura del canal de numeros), se recoloca con
+        scroll/resize (listener de scroll EN CAPTURA: el evento no
+        burbujea desde contenedores con scroll interno) y desaparece si
+        la esquina sale de la vista.
+      - **Guias estilo Excel**: con el cursor dentro de una tabla,
+        letras de columnas (A, B…, `proyectosColumnLetter`) encima y
+        numeros de filas a la izquierda, con la del cursor resaltada.
+        Flotantes con pointer-events:none — no se guardan ni se
+        imprimen. Se refrescan con selectionchange/input/scroll.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 

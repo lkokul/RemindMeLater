@@ -15,7 +15,7 @@ const router = createRouter();
 // estilo Trello) y "color" (un color por fila, la "portada" de su
 // tarjeta) llegaron en la ronda de tarjetas.
 const PROP_TYPES = new Set(['text', 'number', 'select', 'date', 'checkbox', 'labels', 'color']);
-const VIEW_TYPES = new Set(['table', 'board', 'list', 'timeline']);
+const VIEW_TYPES = new Set(['table', 'board', 'list', 'timeline', 'heatmap']);
 
 // "options" (solo selects): siempre un JSON de array de textos cortos.
 // Cualquier otra cosa se descarta y se guarda null.

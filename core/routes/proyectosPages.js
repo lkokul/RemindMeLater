@@ -9,7 +9,7 @@
 // pueda romper Notas.
 const { createRouter } = require('../router');
 const db = require('../db');
-const { deleteImagesInBody } = require('./proyectosImages');
+const { deleteImagesInBody, copyImageFile, readImageAsBase64, writeImageFromBase64 } = require('./proyectosImages');
 
 const router = createRouter();
 
@@ -251,6 +251,7 @@ function serializeListRow(row) {
     position: row.position,
     hasBody: !!row.has_body,
     pdfRole: row.pdf_role || null,
+    isTemplate: !!row.is_template,
     updatedAt: row.updated_at,
   };
 }
@@ -266,13 +267,14 @@ function serializeFullRow(row) {
     favorite: !!row.favorite,
     position: row.position,
     pdfRole: row.pdf_role || null,
+    isTemplate: !!row.is_template,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
 const LIST_SELECT = `
-  SELECT id, parent_id, title, icon, cover_color, favorite, position, pdf_role, updated_at,
+  SELECT id, parent_id, title, icon, cover_color, favorite, position, pdf_role, is_template, updated_at,
          (body IS NOT NULL AND body != '') AS has_body
   FROM proyectos_pages
 `;
@@ -317,7 +319,7 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM proyectos_pages WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { title, icon, coverColor, parentId, body, favorite, pdfRole } = req.body || {};
+  const { title, icon, coverColor, parentId, body, favorite, pdfRole, isTemplate } = req.body || {};
 
   let nextParentId = existing.parent_id;
   if (parentId !== undefined) {
@@ -341,7 +343,7 @@ router.put('/:id', (req, res) => {
     nextPdfRole = pdfRole === 'cover' || pdfRole === 'skip' ? pdfRole : null;
   }
 
-  db.prepare("UPDATE proyectos_pages SET title = ?, icon = ?, cover_color = ?, parent_id = ?, body = ?, favorite = ?, pdf_role = ?, updated_at = datetime('now') WHERE id = ?").run(
+  db.prepare("UPDATE proyectos_pages SET title = ?, icon = ?, cover_color = ?, parent_id = ?, body = ?, favorite = ?, pdf_role = ?, is_template = ?, updated_at = datetime('now') WHERE id = ?").run(
     title !== undefined ? String(title).slice(0, 300) : existing.title,
     sanitizedIcon === undefined ? existing.icon : sanitizedIcon,
     nextCover,
@@ -349,6 +351,7 @@ router.put('/:id', (req, res) => {
     body !== undefined ? (sanitizePageBody(body) || null) : existing.body,
     favorite !== undefined ? (favorite ? 1 : 0) : existing.favorite,
     nextPdfRole,
+    isTemplate !== undefined ? (isTemplate ? 1 : 0) : existing.is_template,
     req.params.id
   );
 
@@ -392,6 +395,308 @@ router.put('/:id/move', (req, res) => {
 
   const row = db.prepare('SELECT * FROM proyectos_pages WHERE id = ?').get(existing.id);
   res.json(serializeFullRow(row));
+});
+
+// ---------------------------------------------------------------------
+// Clonar, exportar e importar proyectos (ronda de la home + plantillas)
+//
+// Las tres operaciones comparten el mismo "motor" (materializeProject):
+// se describe el proyecto como datos planos (paginas madre-primero +
+// bases de datos + imagenes) y el motor lo CREA entero remapeando los
+// cuerpos al final -- marcadores de base de datos, enlaces internos e
+// imagenes apuntan a los ids/archivos NUEVOS. Un enlace a una pagina
+// que no viaja se deshace dejando su texto.
+// ---------------------------------------------------------------------
+
+// El subarbol de una pagina, con cada madre ANTES que sus hijas (el
+// orden que necesita la creacion: al insertar una hija, su madre nueva
+// ya existe).
+function collectSubtree(rootId) {
+  const root = db.prepare('SELECT * FROM proyectos_pages WHERE id = ?').get(rootId);
+  if (!root) return null;
+  const pages = [root];
+  let frontier = [root.id];
+  while (frontier.length > 0) {
+    const placeholders = frontier.map(() => '?').join(',');
+    const children = db.prepare(`SELECT * FROM proyectos_pages WHERE parent_id IN (${placeholders}) ORDER BY position ASC, id ASC`).all(...frontier);
+    pages.push(...children);
+    frontier = children.map((c) => c.id);
+  }
+  return pages;
+}
+
+const IMAGE_URL_RE = /\/api\/proyectos\/images\/([a-zA-Z0-9._-]+)/g;
+const DB_MARKER_RE = /data-proyectos-db="(\d+)"/g;
+const PAGE_LINK_RE = /<a data-page-link="(\d+)">([\s\S]*?)<\/a>/g;
+
+function remapBody(body, { dbMap, pageMap, imageMap }) {
+  if (!body) return body;
+  let out = body;
+  out = out.replace(DB_MARKER_RE, (match, id) => `data-proyectos-db="${dbMap.get(Number(id)) ?? id}"`);
+  out = out.replace(PAGE_LINK_RE, (match, id, inner) => {
+    const mapped = pageMap.get(Number(id));
+    return mapped ? `<a data-page-link="${mapped}">${inner}</a>` : inner;
+  });
+  out = out.replace(IMAGE_URL_RE, (match, name) => `/api/proyectos/images/${imageMap.get(name) ?? name}`);
+  return out;
+}
+
+// Todas las bases de datos de un conjunto de paginas, con propiedades,
+// filas y valores colgando de cada una.
+function collectDatabases(pageIds) {
+  if (pageIds.length === 0) return [];
+  const placeholders = pageIds.map(() => '?').join(',');
+  const databases = db.prepare(`SELECT * FROM proyectos_databases WHERE page_id IN (${placeholders})`).all(...pageIds);
+  return databases.map((database) => ({
+    ...database,
+    props: db.prepare('SELECT * FROM proyectos_db_props WHERE database_id = ? ORDER BY position ASC, id ASC').all(database.id),
+    rows: db.prepare('SELECT * FROM proyectos_db_rows WHERE database_id = ? ORDER BY position ASC, id ASC').all(database.id).map((row) => ({
+      ...row,
+      values: db.prepare('SELECT prop_id, value FROM proyectos_db_values WHERE row_id = ?').all(row.id),
+    })),
+  }));
+}
+
+function collectImageNames(bodies) {
+  const names = new Set();
+  for (const body of bodies) {
+    if (!body) continue;
+    for (const match of body.matchAll(IMAGE_URL_RE)) names.add(match[1]);
+  }
+  return [...names];
+}
+
+// Saneador local de "options" para el motor (acepta el JSON-texto que
+// viene de la base al clonar Y el array ya parseado de un paquete
+// importado; misma politica que proyectosDatabases.js).
+function safeOptionsFor(type, options) {
+  let parsed = options;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch (err) { parsed = null; }
+  }
+  if (!Array.isArray(parsed)) return null;
+  if (type === 'select') {
+    const clean = parsed.map((o) => String(o).trim().slice(0, 60)).filter(Boolean);
+    return clean.length ? JSON.stringify(clean) : null;
+  }
+  if (type === 'labels') {
+    const clean = parsed
+      .map((o) => ({
+        name: String(o && o.name !== undefined ? o.name : '').trim().slice(0, 60),
+        color: o && /^#[0-9a-fA-F]{6}$/.test(o.color) ? o.color : '#4493f8',
+      }))
+      .filter((o) => o.name);
+    return clean.length ? JSON.stringify(clean) : null;
+  }
+  return null;
+}
+
+const MATERIALIZE_VIEW_TYPES = ['table', 'board', 'list', 'timeline', 'heatmap'];
+const MATERIALIZE_PROP_TYPES = ['text', 'number', 'select', 'date', 'checkbox', 'labels', 'color'];
+
+// El motor: crea el proyecto entero y devuelve el id de la raiz nueva.
+function materializeProject(pagesData, databasesData, imageMap, { parentId = null, title = null, asTemplate = false } = {}) {
+  const pageMap = new Map();
+  const rootKey = pagesData[0].key;
+  const { count } = db.prepare('SELECT COUNT(*) as count FROM proyectos_pages WHERE parent_id IS ?').get(parentId ?? null);
+
+  // 1) Paginas con el cuerpo VACIO (los cuerpos referencian bases e
+  //    imagenes que aun no existen; se rellenan al final).
+  for (const page of pagesData) {
+    const isRoot = page.key === rootKey;
+    const info = db.prepare(`
+      INSERT INTO proyectos_pages (parent_id, title, icon, cover_color, body, favorite, position, pdf_role, is_template, updated_at)
+      VALUES (?, ?, ?, ?, NULL, 0, ?, ?, ?, datetime('now'))
+    `).run(
+      isRoot ? (parentId ?? null) : (pageMap.get(page.parentKey) ?? null),
+      String(isRoot && title ? title : (page.title || '')).slice(0, 300),
+      sanitizeIcon(page.icon) ?? null,
+      page.coverColor && /^#[0-9a-fA-F]{6}$/.test(page.coverColor) ? page.coverColor : null,
+      isRoot ? count : (Number(page.position) || 0),
+      page.pdfRole === 'cover' || page.pdfRole === 'skip' ? page.pdfRole : null,
+      isRoot && asTemplate ? 1 : 0
+    );
+    pageMap.set(page.key, info.lastInsertRowid);
+  }
+
+  // 2) Bases de datos: base -> propiedades -> referencias de la vista
+  //    -> filas y valores.
+  const dbMap = new Map();
+  const rowBodiesToPatch = [];
+  for (const database of databasesData) {
+    const pageId = pageMap.get(database.pageKey);
+    if (!pageId) continue;
+    const dbInfo = db.prepare('INSERT INTO proyectos_databases (page_id, name, view_type, sort_dir, filter_value) VALUES (?, ?, ?, ?, ?)').run(
+      pageId,
+      String(database.name || '').slice(0, 200),
+      MATERIALIZE_VIEW_TYPES.includes(database.viewType) ? database.viewType : 'table',
+      database.sortDir === 'desc' ? 'desc' : 'asc',
+      database.filterValue == null ? null : String(database.filterValue).slice(0, 200)
+    );
+    const newDbId = dbInfo.lastInsertRowid;
+    dbMap.set(database.key, newDbId);
+
+    const propMap = new Map();
+    for (const prop of database.props || []) {
+      const type = MATERIALIZE_PROP_TYPES.includes(prop.type) ? prop.type : 'text';
+      const propInfo = db.prepare('INSERT INTO proyectos_db_props (database_id, name, type, options, position) VALUES (?, ?, ?, ?, ?)').run(
+        newDbId,
+        String(prop.name || '').slice(0, 100) || 'Propiedad',
+        type,
+        safeOptionsFor(type, prop.options),
+        Number(prop.position) || 0
+      );
+      propMap.set(prop.key, propInfo.lastInsertRowid);
+    }
+    db.prepare('UPDATE proyectos_databases SET board_prop_id = ?, sort_prop_id = ?, filter_prop_id = ?, timeline_start_prop_id = ?, timeline_end_prop_id = ? WHERE id = ?').run(
+      propMap.get(database.boardPropKey) ?? null,
+      propMap.get(database.sortPropKey) ?? null,
+      propMap.get(database.filterPropKey) ?? null,
+      propMap.get(database.timelineStartPropKey) ?? null,
+      propMap.get(database.timelineEndPropKey) ?? null,
+      newDbId
+    );
+    for (const row of database.rows || []) {
+      const rowInfo = db.prepare("INSERT INTO proyectos_db_rows (database_id, title, position, updated_at) VALUES (?, ?, ?, datetime('now'))").run(
+        newDbId,
+        String(row.title || '').slice(0, 300),
+        Number(row.position) || 0
+      );
+      for (const value of row.values || []) {
+        const propId = propMap.get(value.propKey);
+        if (!propId || value.value == null || value.value === '') continue;
+        db.prepare('INSERT INTO proyectos_db_values (row_id, prop_id, value) VALUES (?, ?, ?)').run(rowInfo.lastInsertRowid, propId, String(value.value).slice(0, 500));
+      }
+      if (row.body) rowBodiesToPatch.push({ rowId: rowInfo.lastInsertRowid, body: row.body });
+    }
+  }
+
+  // 3) Los cuerpos, ya con todos los mapas montados. Se re-sanean al
+  //    escribirlos (los de un paquete importado vienen de fuera).
+  const maps = { dbMap, pageMap, imageMap };
+  for (const page of pagesData) {
+    if (!page.body) continue;
+    db.prepare('UPDATE proyectos_pages SET body = ? WHERE id = ?').run(
+      sanitizePageBody(remapBody(String(page.body), maps)) || null,
+      pageMap.get(page.key)
+    );
+  }
+  for (const patch of rowBodiesToPatch) {
+    db.prepare('UPDATE proyectos_db_rows SET body = ? WHERE id = ?').run(
+      sanitizePageBody(remapBody(String(patch.body), maps)) || null,
+      patch.rowId
+    );
+  }
+  return pageMap.get(rootKey);
+}
+
+// Filas de la base -> el formato plano del motor.
+function subtreeAsData(pages, databases) {
+  return {
+    pagesData: pages.map((p) => ({
+      key: p.id,
+      parentKey: p.parent_id,
+      title: p.title,
+      icon: p.icon,
+      coverColor: p.cover_color,
+      position: p.position,
+      pdfRole: p.pdf_role,
+      isTemplate: !!p.is_template,
+      body: p.body,
+    })),
+    databasesData: databases.map((d) => ({
+      key: d.id,
+      pageKey: d.page_id,
+      name: d.name,
+      viewType: d.view_type,
+      sortDir: d.sort_dir,
+      filterValue: d.filter_value,
+      boardPropKey: d.board_prop_id,
+      sortPropKey: d.sort_prop_id,
+      filterPropKey: d.filter_prop_id,
+      timelineStartPropKey: d.timeline_start_prop_id,
+      timelineEndPropKey: d.timeline_end_prop_id,
+      props: d.props.map((prop) => ({ key: prop.id, name: prop.name, type: prop.type, options: prop.options, position: prop.position })),
+      rows: d.rows.map((row) => ({
+        title: row.title,
+        body: row.body,
+        position: row.position,
+        values: row.values.map((v) => ({ propKey: v.prop_id, value: v.value })),
+      })),
+    })),
+  };
+}
+
+// Clonar un subarbol dentro de la app ("Usar plantilla", "Desde
+// plantilla…"): copia fisica de las imagenes incluida.
+router.post('/:id/clone', (req, res) => {
+  const pages = collectSubtree(Number(req.params.id));
+  if (!pages) return res.status(404).json({ error: 'not_found' });
+  const { parentId, title, asTemplate } = req.body || {};
+  const safeParent = resolveParentId(null, parentId);
+
+  const databases = collectDatabases(pages.map((p) => p.id));
+  const bodies = [...pages.map((p) => p.body), ...databases.flatMap((d) => d.rows.map((r) => r.body))];
+  const imageMap = new Map();
+  for (const name of collectImageNames(bodies)) {
+    const copy = copyImageFile(name);
+    if (copy) imageMap.set(name, copy);
+  }
+  const { pagesData, databasesData } = subtreeAsData(pages, databases);
+  const newRootId = materializeProject(pagesData, databasesData, imageMap, {
+    parentId: safeParent,
+    title: title ? String(title) : null,
+    asTemplate: !!asTemplate,
+  });
+  const row = db.prepare(`${LIST_SELECT} WHERE id = ?`).get(newRootId);
+  res.status(201).json(serializeListRow(row));
+});
+
+// Exportar un proyecto como paquete (el archivo .rmproj que se guarda
+// en disco lo escribe Electron; aqui solo se monta el JSON, con las
+// imagenes dentro en base64 para que viaje completo a otro ordenador).
+router.get('/:id/export', (req, res) => {
+  const pages = collectSubtree(Number(req.params.id));
+  if (!pages) return res.status(404).json({ error: 'not_found' });
+  const databases = collectDatabases(pages.map((p) => p.id));
+  const bodies = [...pages.map((p) => p.body), ...databases.flatMap((d) => d.rows.map((r) => r.body))];
+  const images = {};
+  for (const name of collectImageNames(bodies)) {
+    const image = readImageAsBase64(name);
+    if (image) images[name] = image;
+  }
+  const { pagesData, databasesData } = subtreeAsData(pages, databases);
+  res.json({
+    format: 'remindmelater-proyecto',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    pages: pagesData,
+    databases: databasesData,
+    images,
+  });
+});
+
+// Importar un paquete exportado (en este u otro ordenador): crea un
+// proyecto RAIZ nuevo con todo dentro.
+router.post('/import', (req, res) => {
+  const bundle = req.body || {};
+  if (bundle.format !== 'remindmelater-proyecto' || !Array.isArray(bundle.pages) || bundle.pages.length === 0) {
+    return res.status(400).json({ error: 'invalid_request', message: 'El archivo no es un proyecto exportado de esta app.' });
+  }
+  const imageMap = new Map();
+  const images = bundle.images && typeof bundle.images === 'object' ? bundle.images : {};
+  for (const [name, image] of Object.entries(images)) {
+    if (!image) continue;
+    const filename = writeImageFromBase64(image.data, String(image.ext || '').toLowerCase());
+    if (filename) imageMap.set(String(name), filename);
+  }
+  const databases = Array.isArray(bundle.databases) ? bundle.databases : [];
+  const newRootId = materializeProject(bundle.pages, databases, imageMap, {
+    parentId: null,
+    asTemplate: !!bundle.pages[0].isTemplate,
+  });
+  const row = db.prepare(`${LIST_SELECT} WHERE id = ?`).get(newRootId);
+  res.status(201).json(serializeListRow(row));
 });
 
 // Limpieza que acompaña SIEMPRE al borrado de una pagina: sus imagenes

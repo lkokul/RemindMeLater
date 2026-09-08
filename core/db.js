@@ -527,7 +527,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     page_id INTEGER NOT NULL REFERENCES proyectos_pages(id),
     name TEXT NOT NULL DEFAULT '',
-    view_type TEXT NOT NULL DEFAULT 'table' CHECK (view_type IN ('table', 'board', 'list', 'timeline')),
+    view_type TEXT NOT NULL DEFAULT 'table' CHECK (view_type IN ('table', 'board', 'list', 'timeline', 'heatmap')),
     board_prop_id INTEGER,      -- que propiedad "select" agrupa el tablero
     sort_prop_id INTEGER,       -- orden opcional por una propiedad
     sort_dir TEXT NOT NULL DEFAULT 'asc' CHECK (sort_dir IN ('asc', 'desc')),
@@ -624,7 +624,7 @@ if (databasesTableSql && !databasesTableSql.sql.includes("'timeline'")) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       page_id INTEGER NOT NULL REFERENCES proyectos_pages(id),
       name TEXT NOT NULL DEFAULT '',
-      view_type TEXT NOT NULL DEFAULT 'table' CHECK (view_type IN ('table', 'board', 'list', 'timeline')),
+      view_type TEXT NOT NULL DEFAULT 'table' CHECK (view_type IN ('table', 'board', 'list', 'timeline', 'heatmap')),
       board_prop_id INTEGER,
       sort_prop_id INTEGER,
       sort_dir TEXT NOT NULL DEFAULT 'asc' CHECK (sort_dir IN ('asc', 'desc')),
@@ -648,6 +648,43 @@ if (databasesTableSql && !databasesTableSql.sql.includes("'timeline'")) {
 const proyectosPagesColumns = db.prepare('PRAGMA table_info(proyectos_pages)').all().map((c) => c.name);
 if (!proyectosPagesColumns.includes('pdf_role')) {
   db.exec('ALTER TABLE proyectos_pages ADD COLUMN pdf_role TEXT');
+}
+// is_template: una pagina RAIZ marcada como plantilla vive en la
+// pestaña "Plantillas" de la home de Proyectos y se puede clonar
+// ("Usar plantilla" / "Desde plantilla…" del menu "/").
+if (!proyectosPagesColumns.includes('is_template')) {
+  db.exec('ALTER TABLE proyectos_pages ADD COLUMN is_template INTEGER NOT NULL DEFAULT 0');
+}
+
+// Migracion pareja a la de 'timeline': la vista 'heatmap' (Consistencia)
+// se añadio despues al CHECK de view_type. Si el esquema guardado ya
+// paso por la reconstruccion de 'timeline' pero no conoce 'heatmap',
+// se reconstruye otra vez con la lista completa.
+const databasesTableSql2 = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'proyectos_databases'").get();
+if (databasesTableSql2 && !databasesTableSql2.sql.includes("'heatmap'")) {
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    DROP TABLE IF EXISTS proyectos_databases_new;
+    CREATE TABLE proyectos_databases_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      page_id INTEGER NOT NULL REFERENCES proyectos_pages(id),
+      name TEXT NOT NULL DEFAULT '',
+      view_type TEXT NOT NULL DEFAULT 'table' CHECK (view_type IN ('table', 'board', 'list', 'timeline', 'heatmap')),
+      board_prop_id INTEGER,
+      sort_prop_id INTEGER,
+      sort_dir TEXT NOT NULL DEFAULT 'asc' CHECK (sort_dir IN ('asc', 'desc')),
+      filter_prop_id INTEGER,
+      filter_value TEXT,
+      timeline_start_prop_id INTEGER,
+      timeline_end_prop_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO proyectos_databases_new (id, page_id, name, view_type, board_prop_id, sort_prop_id, sort_dir, filter_prop_id, filter_value, timeline_start_prop_id, timeline_end_prop_id, created_at)
+      SELECT id, page_id, name, view_type, board_prop_id, sort_prop_id, sort_dir, filter_prop_id, filter_value, timeline_start_prop_id, timeline_end_prop_id, created_at FROM proyectos_databases;
+    DROP TABLE proyectos_databases;
+    ALTER TABLE proyectos_databases_new RENAME TO proyectos_databases;
+    PRAGMA foreign_keys = ON;
+  `);
 }
 
 // Migracion sencilla: group_id se anadio despues de crear la tabla

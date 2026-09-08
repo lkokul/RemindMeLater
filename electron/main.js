@@ -141,6 +141,50 @@ ipcMain.on('show-exported-pdf', (event, filePath) => {
   if (typeof filePath === 'string' && filePath) shell.showItemInFolder(filePath);
 });
 
+// Exportar un proyecto como ARCHIVO (.rmproj): el JSON lo monta la
+// pagina (GET /api/proyectos-pages/:id/export, con las imagenes dentro
+// en base64); aqui solo el dialogo de guardar y la escritura.
+ipcMain.handle('export-project-file', async (event, payload) => {
+  const title = payload && typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'proyecto';
+  const content = payload && typeof payload.content === 'string' ? payload.content : '';
+  const safeName = title.replace(/[\\/:*?"<>|]/g, '-').slice(0, 120);
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Exportar proyecto',
+    defaultPath: `${safeName}.rmproj`,
+    filters: [{ name: 'Proyecto de RemindMeLater', extensions: ['rmproj'] }],
+  });
+  if (canceled || !filePath) return { canceled: true };
+  try {
+    fs.writeFileSync(filePath, content, 'utf8');
+    return { ok: true, path: filePath };
+  } catch (err) {
+    return { error: err.message || String(err) };
+  }
+});
+
+// Importar: dialogo de abrir + leer el archivo; el crear el proyecto a
+// partir del JSON lo hace la pagina (POST /api/proyectos-pages/import).
+ipcMain.handle('import-project-file', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Importar proyecto',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Proyecto de RemindMeLater', extensions: ['rmproj'] },
+      { name: 'Todos los archivos', extensions: ['*'] },
+    ],
+  });
+  if (canceled || !filePaths || !filePaths[0]) return { canceled: true };
+  try {
+    // Tope generoso pero real (200 MB): un .rmproj gigante seguramente
+    // no es un proyecto de esta app.
+    const stats = fs.statSync(filePaths[0]);
+    if (stats.size > 200 * 1024 * 1024) return { error: 'El archivo es demasiado grande para ser un proyecto.' };
+    return { ok: true, content: fs.readFileSync(filePaths[0], 'utf8') };
+  } catch (err) {
+    return { error: err.message || String(err) };
+  }
+});
+
 // Exportar a PDF (boton "PDF" de una pagina de Proyectos). La pagina
 // manda el HTML ya montado (titulos, cuerpo, bases de datos como tablas
 // estaticas, diagramas como SVG); aqui:

@@ -10095,6 +10095,22 @@ function proyectosChildrenOf(parentId) {
 // se sustituye por una lista PLANA de paginas cuyo titulo coincide --
 // mas util que intentar podar el arbol manteniendo la jerarquia.
 let proyectosTreeFilter = '';
+// El proyecto (pagina RAIZ) dentro del que se esta trabajando: el
+// sidebar enseña solo su arbol. null = estamos en la home.
+let proyectosCurrentRootId = null;
+
+// La raiz de la que cuelga una pagina (o ella misma si ya es raiz).
+function proyectosRootOf(pageId) {
+  let current = proyectosPages.find((p) => p.id === pageId);
+  const seen = new Set();
+  while (current && current.parentId !== null && !seen.has(current.id)) {
+    seen.add(current.id);
+    const parent = proyectosPages.find((p) => p.id === current.parentId);
+    if (!parent) break;
+    current = parent;
+  }
+  return current ? current.id : pageId;
+}
 
 function renderProyectosTree() {
   const tree = document.getElementById('proyectos-tree');
@@ -10102,7 +10118,13 @@ function renderProyectosTree() {
 
   if (proyectosTreeFilter) {
     const query = proyectosTreeFilter.toLowerCase();
-    const matches = proyectosPages.filter((p) => (p.title || '').toLowerCase().includes(query));
+    // Con la home por proyectos, el buscador del sidebar busca SOLO
+    // dentro del proyecto abierto (para buscar entre todos esta el
+    // buscador de la home).
+    const scope = proyectosCurrentRootId ? new Set(proyectosSubtreeIds(proyectosCurrentRootId)) : null;
+    const matches = proyectosPages
+      .filter((p) => !scope || scope.has(p.id))
+      .filter((p) => (p.title || '').toLowerCase().includes(query));
     for (const page of matches) {
       const row = document.createElement('div');
       row.className = 'proyectos-tree-row';
@@ -10129,7 +10151,13 @@ function renderProyectosTree() {
 
   // Pinta un nivel y, recursivamente, los niveles desplegados de dentro.
   function renderLevel(parentId, depth) {
-    for (const page of proyectosChildrenOf(parentId)) {
+    let pagesAtLevel = proyectosChildrenOf(parentId);
+    // Dentro de un proyecto, el primer nivel del arbol es SOLO su raiz
+    // (los demas proyectos viven en la home, no aqui).
+    if (parentId === null && proyectosCurrentRootId) {
+      pagesAtLevel = pagesAtLevel.filter((p) => p.id === proyectosCurrentRootId);
+    }
+    for (const page of pagesAtLevel) {
       const children = proyectosChildrenOf(page.id);
       const expanded = proyectosExpandedIds.has(page.id);
 
@@ -10587,7 +10615,12 @@ async function openProyectosPage(id) {
   proyectosCurrentPage = page;
 
   ensureProyectosFields();
-  document.getElementById('proyectos-empty').classList.add('hidden');
+  // Entrar en una pagina = entrar en SU proyecto: fuera la home, y el
+  // sidebar queda acotado al arbol de esa raiz (desplegada).
+  proyectosCurrentRootId = proyectosRootOf(page.id);
+  proyectosExpandedIds.add(proyectosCurrentRootId);
+  document.getElementById('proyectos-home').classList.add('hidden');
+  document.querySelector('#proyectos-view .proyectos-layout').classList.remove('hidden');
   document.getElementById('proyectos-page').classList.remove('hidden');
 
   const titleEl = document.getElementById('proyectos-page-title');
@@ -10650,6 +10683,223 @@ async function createProyectosPage(parentId) {
 }
 
 // ---------------------------------------------------------------------
+// La HOME de Proyectos: pestañas Mis proyectos / Plantillas, buscador y
+// una tarjeta por proyecto raiz. 1 clic selecciona (salen las acciones
+// de la tarjeta), doble clic abre. Desde aqui tambien se exporta (PDF o
+// archivo .rmproj), se importa, y se convierte un proyecto en plantilla
+// (o al reves). "Usar plantilla" clona el arbol entero.
+// ---------------------------------------------------------------------
+let proyectosHomeTab = 'mine'; // 'mine' | 'templates'
+let proyectosHomeFilter = '';
+let proyectosHomeSelectedId = null;
+
+function showProyectosHome() {
+  proyectosCurrentPage = null;
+  proyectosCurrentRootId = null;
+  localStorage.removeItem('proyectosLastPageId');
+  document.getElementById('proyectos-page').classList.add('hidden');
+  document.querySelector('#proyectos-view .proyectos-layout').classList.add('hidden');
+  document.getElementById('proyectos-home').classList.remove('hidden');
+  renderProyectosHome();
+}
+
+function renderProyectosHome() {
+  const grid = document.getElementById('proyectos-home-grid');
+  if (!grid || document.getElementById('proyectos-home').classList.contains('hidden')) return;
+  grid.innerHTML = '';
+
+  // Pestañas al dia.
+  document.querySelectorAll('#proyectos-home-tabs .proyectos-home-tab').forEach((tab) => {
+    tab.classList.toggle('active', tab.getAttribute('data-home-tab') === proyectosHomeTab);
+  });
+
+  const wantTemplates = proyectosHomeTab === 'templates';
+  const query = proyectosHomeFilter.trim().toLowerCase();
+  const roots = proyectosChildrenOf(null)
+    .filter((p) => !!p.isTemplate === wantTemplates)
+    .filter((p) => !query || (p.title || '').toLowerCase().includes(query));
+
+  for (const root of roots) {
+    const card = document.createElement('div');
+    card.className = 'proyectos-home-card';
+    if (proyectosHomeSelectedId === root.id) card.classList.add('selected');
+
+    const strip = document.createElement('div');
+    strip.className = 'proyectos-home-card-strip';
+    strip.style.backgroundColor = root.coverColor || 'var(--surface-2)';
+    card.appendChild(strip);
+
+    const iconEl = document.createElement('div');
+    iconEl.className = 'proyectos-home-card-icon';
+    iconEl.textContent = root.icon || '📄';
+    card.appendChild(iconEl);
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'proyectos-home-card-title';
+    titleEl.textContent = root.title || 'Sin título';
+    if (!root.title) titleEl.classList.add('untitled');
+    card.appendChild(titleEl);
+
+    const meta = document.createElement('div');
+    meta.className = 'proyectos-home-card-meta';
+    const pageCount = proyectosSubtreeIds(root.id).length;
+    meta.textContent = `${pageCount} ${pageCount === 1 ? 'página' : 'páginas'}${root.favorite ? ' · ★' : ''}`;
+    card.appendChild(meta);
+
+    if (root.isTemplate) {
+      const badge = document.createElement('span');
+      badge.className = 'proyectos-home-card-badge';
+      badge.textContent = 'Plantilla';
+      card.appendChild(badge);
+    }
+
+    // 1 clic = seleccionar (y ver acciones); doble clic = abrir.
+    card.addEventListener('click', () => {
+      if (proyectosHomeSelectedId !== root.id) {
+        proyectosHomeSelectedId = root.id;
+        renderProyectosHome();
+      }
+    });
+    card.addEventListener('dblclick', () => openProyectosPage(root.id));
+
+    if (proyectosHomeSelectedId === root.id) {
+      const actions = document.createElement('div');
+      actions.className = 'proyectos-home-card-actions';
+      const action = (label, fn, { title = '' } = {}) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'secondary-btn proyectos-home-card-action';
+        btn.textContent = label;
+        if (title) btn.title = title;
+        btn.addEventListener('click', (e) => { e.stopPropagation(); fn(btn); });
+        actions.appendChild(btn);
+      };
+      if (root.isTemplate) {
+        action('Usar', () => useProyectosTemplate(root), { title: 'Crear un proyecto nuevo a partir de esta plantilla (clona todo)' });
+      }
+      action('Abrir', () => openProyectosPage(root.id));
+      action('PDF', (btn) => openProyectosPdfDialog(root, btn), { title: 'Exportar a PDF' });
+      action('Archivo', (btn) => exportProyectosProjectFile(root), { title: 'Exportar como archivo de proyecto (.rmproj) para llevarlo a otro ordenador' });
+      action(root.isTemplate ? '→ Proyecto' : '→ Plantilla', () => toggleProyectosTemplate(root), {
+        title: root.isTemplate ? 'Convertirla en un proyecto normal' : 'Convertirlo en plantilla (pasa a la pestaña Plantillas)',
+      });
+      card.appendChild(actions);
+    }
+
+    grid.appendChild(card);
+  }
+
+  if (roots.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'hint proyectos-home-empty';
+    empty.textContent = wantTemplates
+      ? 'Todavía no hay plantillas: selecciona un proyecto en "Mis proyectos" y pulsa "→ Plantilla". También puedes montar una página con lo que repitas (una base de datos de viajes, la estructura de un documento…) y convertirla.'
+      : (query ? 'Ningún proyecto coincide.' : 'Todavía no hay proyectos: crea uno nuevo, importa un archivo .rmproj o empieza por el proyecto de ejemplo 📖.');
+    grid.appendChild(empty);
+  }
+}
+
+// "Usar plantilla": un proyecto nuevo clonando el arbol entero (bases
+// de datos con filas e imagenes incluidas) y se abre directamente.
+async function useProyectosTemplate(root) {
+  try {
+    const created = await api(`/api/proyectos-pages/${root.id}/clone`, {
+      method: 'POST',
+      body: JSON.stringify({ parentId: null, asTemplate: false }),
+    });
+    await loadProyectosPages();
+    await openProyectosPage(created.id);
+  } catch (err) {
+    console.error('No se pudo usar la plantilla:', err);
+    showAppAlert(`No se pudo usar la plantilla: ${err.message}`);
+  }
+}
+
+async function toggleProyectosTemplate(root) {
+  try {
+    await api(`/api/proyectos-pages/${root.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ isTemplate: !root.isTemplate }),
+    });
+    await loadProyectosPages();
+    // Seguir a la tarjeta a su pestaña nueva, para verla llegar.
+    proyectosHomeTab = root.isTemplate ? 'mine' : 'templates';
+    renderProyectosHome();
+  } catch (err) {
+    showAppAlert(`No se pudo cambiar: ${err.message}`);
+  }
+}
+
+// Exportar como ARCHIVO (.rmproj): el backend monta el paquete completo
+// (paginas + bases + imagenes en base64) y Electron pregunta donde
+// guardarlo.
+async function exportProyectosProjectFile(root) {
+  if (!window.electronAPI || !window.electronAPI.exportProjectFile) {
+    showAppAlert('Exportar necesita la app de escritorio (ciérrala del todo y ábrela si acabas de actualizar).');
+    return;
+  }
+  try {
+    const bundle = await api(`/api/proyectos-pages/${root.id}/export`);
+    const result = await window.electronAPI.exportProjectFile({
+      content: JSON.stringify(bundle),
+      title: root.title || 'proyecto',
+    });
+    if (result && result.error) showAppAlert(`No se pudo exportar: ${result.error}`);
+    else if (result && result.ok) {
+      const choice = await showAppConfirm(`Proyecto exportado en:\n${result.path}`, {
+        okText: 'Abrir ubicación',
+        cancelText: 'Cerrar',
+      });
+      if (choice === true) window.electronAPI.showExportedPdf?.(result.path);
+    }
+  } catch (err) {
+    console.error('No se pudo exportar el proyecto:', err);
+    showAppAlert(`No se pudo exportar el proyecto: ${err.message}`);
+  }
+}
+
+async function importProyectosProjectFile() {
+  if (!window.electronAPI || !window.electronAPI.importProjectFile) {
+    showAppAlert('Importar necesita la app de escritorio (ciérrala del todo y ábrela si acabas de actualizar).');
+    return;
+  }
+  try {
+    const picked = await window.electronAPI.importProjectFile();
+    if (!picked || picked.canceled) return;
+    if (picked.error) { showAppAlert(`No se pudo leer el archivo: ${picked.error}`); return; }
+    let bundle;
+    try {
+      bundle = JSON.parse(picked.content);
+    } catch (err) {
+      showAppAlert('Ese archivo no es un proyecto exportado de esta app.');
+      return;
+    }
+    const created = await api('/api/proyectos-pages/import', {
+      method: 'POST',
+      body: JSON.stringify(bundle),
+    });
+    await loadProyectosPages();
+    await openProyectosPage(created.id);
+  } catch (err) {
+    console.error('No se pudo importar el proyecto:', err);
+    showAppAlert(`No se pudo importar el proyecto: ${err.message}`);
+  }
+}
+
+document.getElementById('proyectos-home-tabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('[data-home-tab]');
+  if (!tab) return;
+  proyectosHomeTab = tab.getAttribute('data-home-tab');
+  proyectosHomeSelectedId = null;
+  renderProyectosHome();
+});
+document.getElementById('proyectos-home-search').addEventListener('input', (e) => {
+  proyectosHomeFilter = e.target.value;
+  renderProyectosHome();
+});
+document.getElementById('btn-proyectos-home-import').addEventListener('click', () => importProyectosProjectFile());
+
+// ---------------------------------------------------------------------
 // Abrir/cerrar la vista entera
 // ---------------------------------------------------------------------
 async function openProyectosView() {
@@ -10659,10 +10909,13 @@ async function openProyectosView() {
   applyProyectosFocusMode();
   await loadProyectosPages();
   renderProyectosTree();
-  // Reabrir la ultima pagina que estuviera abierta (por dispositivo).
+  // Reabrir la ultima pagina que estuviera abierta (por dispositivo);
+  // sin ultima pagina, la HOME con todos los proyectos.
   const lastId = Number(localStorage.getItem('proyectosLastPageId'));
   if (lastId && proyectosPages.some((p) => p.id === lastId)) {
     await openProyectosPage(lastId);
+  } else {
+    showProyectosHome();
   }
 }
 
@@ -10684,7 +10937,12 @@ document.getElementById('proyectos-search').addEventListener('input', (e) => {
   proyectosTreeFilter = e.target.value.trim();
   renderProyectosTree();
 });
-document.getElementById('btn-proyectos-new-empty').addEventListener('click', () => createProyectosPage(null));
+document.getElementById('btn-proyectos-home-new').addEventListener('click', () => createProyectosPage(null));
+document.getElementById('btn-proyectos-home').addEventListener('click', async () => {
+  await flushProyectosSave();
+  closeProyectosPeek();
+  showProyectosHome();
+});
 document.getElementById('btn-proyectos-subpage').addEventListener('click', () => {
   if (proyectosCurrentPage) createProyectosPage(proyectosCurrentPage.id);
 });
@@ -10757,9 +11015,9 @@ async function deleteCurrentProyectosPage({ withChildren = false } = {}) {
   proyectosCurrentPage = null;
   localStorage.removeItem('proyectosLastPageId');
   document.getElementById('proyectos-page').classList.add('hidden');
-  document.getElementById('proyectos-empty').classList.remove('hidden');
   await loadProyectosPages();
   renderProyectosTree();
+  showProyectosHome(); // sin pagina abierta se vuelve a la lista de proyectos
 }
 document.getElementById('btn-proyectos-delete').addEventListener('click', () => deleteCurrentProyectosPage());
 document.getElementById('btn-proyectos-delete-tree').addEventListener('click', () => deleteCurrentProyectosPage({ withChildren: true }));
@@ -11092,19 +11350,21 @@ async function buildProyectosPdfDocument(ids, rootPage, { autoCover = true, auto
   return root.innerHTML;
 }
 
-async function exportProyectosPdf({ ids, autoCover = true, autoToc = true }) {
-  if (!proyectosCurrentPage || !ids || ids.length === 0) return;
+async function exportProyectosPdf({ rootId, ids, autoCover = true, autoToc = true }) {
+  if (!rootId || !ids || ids.length === 0) return;
   await flushProyectosSave();
   try {
+    // La raiz completa (portada automatica usa su color/icono/titulo).
+    const rootPage = await api(`/api/proyectos-pages/${rootId}`);
     // mermaid en tema claro mientras dura el export (el PDF es papel).
     if (typeof mermaid !== 'undefined') {
       mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
       proyectosMermaidReady = true;
     }
-    const html = await buildProyectosPdfDocument(ids, proyectosCurrentPage, { autoCover, autoToc });
+    const html = await buildProyectosPdfDocument(ids, rootPage, { autoCover, autoToc });
     const result = await window.electronAPI.exportPdf({
       html,
-      title: proyectosCurrentPage.title || 'proyecto',
+      title: rootPage.title || 'proyecto',
     });
     if (result && result.error) {
       showAppAlert(`No se pudo exportar el PDF: ${result.error}`);
@@ -11135,17 +11395,17 @@ async function exportProyectosPdf({ ids, autoCover = true, autoToc = true }) {
   }
 }
 
-// El boton PDF: un popover con las opciones del documento (alcance,
-// portada e indice automaticos) y el ROL de la pagina abierta (normal /
-// portada del documento / no incluir).
+// El dialogo de exportar a PDF: opciones del documento (selector de
+// paginas, portada e indice automaticos) y, si se abre desde DENTRO de
+// una pagina, el rol de esa pagina (normal / portada / no incluir).
+// Compartido entre el boton PDF de la barra de la pagina y la accion
+// PDF de las tarjetas de la home.
 let proyectosPdfPopover = null;
-document.getElementById('btn-proyectos-pdf').addEventListener('click', (e) => {
-  if (!proyectosCurrentPage) return;
+function openProyectosPdfDialog(rootLite, anchorEl, { rolePage = null } = {}) {
   if (!window.electronAPI || !window.electronAPI.exportPdf) {
     showAppAlert('Exportar a PDF necesita la app de escritorio (reiníciala si acabas de actualizar).');
     return;
   }
-  e.stopPropagation();
   if (!proyectosPdfPopover) {
     proyectosPdfPopover = document.createElement('div');
     proyectosPdfPopover.className = 'proyectos-db-config-popover proyectos-pdf-popover hidden';
@@ -11154,41 +11414,43 @@ document.getElementById('btn-proyectos-pdf').addEventListener('click', (e) => {
   const popover = proyectosPdfPopover;
   popover.innerHTML = '';
 
-  const subtree = proyectosSubtreeIds(proyectosCurrentPage.id);
+  const subtree = proyectosSubtreeIds(rootLite.id);
   const byId = new Map(proyectosPages.map((p) => [p.id, p]));
   // ¿Alguna pagina del subarbol hace ELLA de portada? Entonces la
   // automatica sobra y arranca desmarcada.
   const hasOwnCover = subtree.some((id) => byId.get(id)?.pdfRole === 'cover');
 
-  // --- El rol de ESTA pagina en el documento ---
-  const roleField = createSelectField({
-    options: [
-      { value: '', label: 'Página normal' },
-      { value: 'cover', label: 'Es la portada del documento' },
-      { value: 'skip', label: 'No incluir en el PDF' },
-    ],
-    initialValue: proyectosCurrentPage.pdfRole || '',
-    onChange: async (value) => {
-      try {
-        const updated = await api(`/api/proyectos-pages/${proyectosCurrentPage.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({ pdfRole: value || null }),
-        });
-        proyectosCurrentPage.pdfRole = updated.pdfRole;
-        const entry = proyectosPages.find((p) => p.id === proyectosCurrentPage.id);
-        if (entry) entry.pdfRole = updated.pdfRole;
-      } catch (err) {
-        showAppAlert(`No se pudo guardar el rol: ${err.message}`);
-      }
-    },
-  });
-  const roleLabel = document.createElement('label');
-  roleLabel.className = 'proyectos-db-config-field';
-  const roleSpan = document.createElement('span');
-  roleSpan.textContent = 'Esta página en el PDF';
-  roleLabel.appendChild(roleSpan);
-  roleLabel.appendChild(roleField.element);
-  popover.appendChild(roleLabel);
+  // --- El rol de la pagina abierta en el documento (solo desde dentro) ---
+  if (rolePage) {
+    const roleField = createSelectField({
+      options: [
+        { value: '', label: 'Página normal' },
+        { value: 'cover', label: 'Es la portada del documento' },
+        { value: 'skip', label: 'No incluir en el PDF' },
+      ],
+      initialValue: rolePage.pdfRole || '',
+      onChange: async (value) => {
+        try {
+          const updated = await api(`/api/proyectos-pages/${rolePage.id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ pdfRole: value || null }),
+          });
+          rolePage.pdfRole = updated.pdfRole;
+          const entry = proyectosPages.find((p) => p.id === rolePage.id);
+          if (entry) entry.pdfRole = updated.pdfRole;
+        } catch (err) {
+          showAppAlert(`No se pudo guardar el rol: ${err.message}`);
+        }
+      },
+    });
+    const roleLabel = document.createElement('label');
+    roleLabel.className = 'proyectos-db-config-field';
+    const roleSpan = document.createElement('span');
+    roleSpan.textContent = 'Esta página en el PDF';
+    roleLabel.appendChild(roleSpan);
+    roleLabel.appendChild(roleField.element);
+    popover.appendChild(roleLabel);
+  }
 
   // --- Opciones del documento ---
   function addCheckbox(labelText, initial) {
@@ -11214,7 +11476,7 @@ document.getElementById('btn-proyectos-pdf').addEventListener('click', (e) => {
     let depth = 0;
     let current = byId.get(pageId);
     const seen = new Set();
-    while (current && current.id !== proyectosCurrentPage.id && current.parentId !== null && !seen.has(current.id)) {
+    while (current && current.id !== rootLite.id && current.parentId !== null && !seen.has(current.id)) {
       seen.add(current.id);
       depth += 1;
       current = byId.get(current.parentId);
@@ -11277,6 +11539,7 @@ document.getElementById('btn-proyectos-pdf').addEventListener('click', (e) => {
     popover.classList.add('hidden');
     // En orden de documento (el del subarbol), no de marcado.
     exportProyectosPdf({
+      rootId: rootLite.id,
       ids: subtree.filter((id) => selected.has(id)),
       autoCover: coverBox.checked,
       autoToc: tocBox.checked,
@@ -11286,7 +11549,15 @@ document.getElementById('btn-proyectos-pdf').addEventListener('click', (e) => {
   refreshExportLabel();
 
   popover.classList.remove('hidden');
-  positionFixedPopover(document.getElementById('btn-proyectos-pdf'), popover, { width: 300 });
+  positionFixedPopover(anchorEl, popover, { width: 300 });
+}
+
+document.getElementById('btn-proyectos-pdf').addEventListener('click', (e) => {
+  if (!proyectosCurrentPage) return;
+  e.stopPropagation();
+  // Desde dentro de una pagina, el documento nace en ESA pagina (con
+  // sus subpaginas) y el selector de rol edita esa misma pagina.
+  openProyectosPdfDialog(proyectosCurrentPage, document.getElementById('btn-proyectos-pdf'), { rolePage: proyectosCurrentPage });
 });
 
 // ---------------------------------------------------------------------
@@ -11405,6 +11676,7 @@ const PROYECTOS_BLOCK_TYPES = [
   { id: 'pdf-break', label: 'Salto de página (PDF)', hint: 'El documento salta de hoja aquí', icon: '⤓', keywords: 'salto pagina hoja pdf exportar break' },
   { id: 'image', label: 'Imagen', hint: 'Subir una imagen', icon: '🖼', keywords: 'imagen foto image subir' },
   { id: 'page', label: 'Subpágina', hint: 'Crear una página dentro de esta', icon: '📄', keywords: 'pagina subpagina page anidar' },
+  { id: 'template', label: 'Desde plantilla…', hint: 'Insertar una plantilla como subpágina', icon: '📋', keywords: 'plantilla template insertar clonar' },
   { id: 'weblink', label: 'Enlace web', hint: 'A una página de internet', icon: '🔗', keywords: 'enlace link web url internet' },
   { id: 'pagelink', label: 'Enlace a página', hint: 'A otra página de Proyectos', icon: '🔀', keywords: 'enlace link pagina conector interno' },
   { id: 'database', label: 'Base de datos', hint: 'Tabla, tablero o lista con propiedades', icon: '🗄', keywords: 'base datos database tabla tablero kanban lista coleccion' },
@@ -12208,6 +12480,7 @@ function applyProyectosBlockType(typeId) {
     case 'image': insertProyectosImage(block); break;
     case 'weblink': openProyectosLinkPopover({ mode: 'insert', block }); return; // guarda al insertar
     case 'pagelink': openProyectosPageLinkPopover(block); return; // idem
+    case 'template': openProyectosTemplatePopover(block); return; // clona al elegir
     case 'database': insertProyectosDatabase(block); return; // guarda por su cuenta al terminar
     case 'page': {
       // Crea una subpagina de la actual y la abre -- el bloque desde el
@@ -12310,20 +12583,48 @@ function ensureProyectosTableMenuBtn() {
 
 // Señalar/dejar de señalar tablas con el raton. El boton es UNO solo,
 // compartido, que se recoloca sobre la tabla que toque.
+// La zona VISIBLE del area de la pagina, para saber si la esquina de
+// una tabla sigue a la vista al hacer scroll.
+function proyectosPageAreaRect() {
+  const area = document.querySelector('#proyectos-view .proyectos-page-area');
+  return area ? area.getBoundingClientRect() : { top: 0, left: 0, bottom: window.innerHeight, right: window.innerWidth };
+}
+
+// Recoloca el boton ▦ PEGADO a la esquina superior izquierda de su
+// tabla (pedido por Koku: antes se quedaba flotando donde nacio al
+// hacer scroll, "el boton se va"). Si esa esquina sale de la vista, el
+// boton desaparece con ella.
+function repositionProyectosTableMenuBtn() {
+  if (!proyectosTableMenuBtn) return;
+  const table = proyectosTableMenuTable;
+  if (!table || !document.contains(table)) {
+    proyectosTableMenuBtn.classList.add('hidden');
+    return;
+  }
+  const rect = table.getBoundingClientRect();
+  const area = proyectosPageAreaRect();
+  const cornerVisible = rect.top >= area.top - 6 && rect.top <= area.bottom
+    && rect.left >= area.left - 6 && rect.left <= area.right;
+  if (!cornerVisible) {
+    proyectosTableMenuBtn.classList.add('hidden');
+    if (proyectosTableMenuPopover) proyectosTableMenuPopover.classList.add('hidden');
+    return;
+  }
+  // Encima del borde superior, alineado a la IZQUIERDA (solapando 4px
+  // para que el raton pueda cruzar hasta el sin pasar por "fuera"). Se
+  // corre un pelin a la izquierda, a la altura del canal de numeros de
+  // las guias Excel: asi hace de "esquina" y no tapa la letra A.
+  proyectosTableMenuBtn.style.top = `${rect.top - 20}px`;
+  proyectosTableMenuBtn.style.left = `${Math.max(area.left + 2, rect.left - 18)}px`;
+  proyectosTableMenuBtn.classList.remove('hidden');
+}
+
 PROYECTOS_BODY().addEventListener('mouseover', (e) => {
   const table = e.target.closest?.('table');
   if (table && PROYECTOS_BODY().contains(table) && !table.closest('[data-proyectos-db]')) {
     ensureProyectosTableMenuBtn();
     proyectosTableMenuTable = table;
-    const rect = table.getBoundingClientRect();
-    // El boton va ENCIMA del borde superior de la tabla (no dentro):
-    // en una tabla pequeña, dentro tapaba el contenido de la ultima
-    // celda e interceptaba sus clics. Se solapa 4px con la tabla para
-    // que el raton pueda cruzar hasta el sin pasar por "fuera" (si
-    // hubiera hueco, el mouseover intermedio lo esconderia).
-    proyectosTableMenuBtn.style.top = `${Math.max(8, rect.top - 20)}px`;
-    proyectosTableMenuBtn.style.left = `${Math.min(rect.right - 30, window.innerWidth - 40)}px`;
-    proyectosTableMenuBtn.classList.remove('hidden');
+    repositionProyectosTableMenuBtn();
   } else if (proyectosTableMenuBtn && !e.target.closest?.('.proyectos-table-menu-btn')) {
     // Fuera de la tabla: se esconde salvo que el menu este abierto.
     if (!proyectosTableMenuPopover || proyectosTableMenuPopover.classList.contains('hidden')) {
@@ -12331,6 +12632,113 @@ PROYECTOS_BODY().addEventListener('mouseover', (e) => {
     }
   }
 });
+
+// Con scroll o cambio de tamaño, el boton sigue a su esquina (y las
+// guias estilo Excel a su tabla). El scroll se escucha en captura:
+// el evento no burbujea desde los contenedores con scroll interno.
+document.addEventListener('scroll', () => {
+  if (proyectosTableMenuBtn && !proyectosTableMenuBtn.classList.contains('hidden')) {
+    repositionProyectosTableMenuBtn();
+  }
+  updateProyectosTableGuides();
+}, { capture: true, passive: true });
+window.addEventListener('resize', () => {
+  repositionProyectosTableMenuBtn();
+  updateProyectosTableGuides();
+});
+
+// ---------------------------------------------------------------------
+// Guias estilo Excel (pedidas por Koku): MIENTRAS el cursor esta dentro
+// de una tabla, aparecen las letras de sus columnas (A, B, C…) encima y
+// los numeros de sus filas (1, 2, 3…) a la izquierda, con la columna y
+// fila del cursor resaltadas. Son pura ayuda de edicion: viven
+// flotando fuera del documento, no se guardan ni salen en el PDF.
+// ---------------------------------------------------------------------
+let proyectosGuideCols = null;
+let proyectosGuideRows = null;
+
+function ensureProyectosTableGuides() {
+  if (proyectosGuideCols) return;
+  proyectosGuideCols = document.createElement('div');
+  proyectosGuideCols.className = 'proyectos-table-guides proyectos-table-guides-cols hidden';
+  proyectosGuideRows = document.createElement('div');
+  proyectosGuideRows.className = 'proyectos-table-guides proyectos-table-guides-rows hidden';
+  document.body.appendChild(proyectosGuideCols);
+  document.body.appendChild(proyectosGuideRows);
+}
+
+// "A".."Z", "AA".."AZ"... como Excel.
+function proyectosColumnLetter(index) {
+  let label = '';
+  let n = index;
+  do {
+    label = String.fromCharCode(65 + (n % 26)) + label;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return label;
+}
+
+function updateProyectosTableGuides() {
+  const cell = getProyectosTableCell();
+  const table = cell ? cell.closest('table') : null;
+  if (!table || !document.contains(table)) {
+    if (proyectosGuideCols) {
+      proyectosGuideCols.classList.add('hidden');
+      proyectosGuideRows.classList.add('hidden');
+    }
+    return;
+  }
+  ensureProyectosTableGuides();
+
+  const rect = table.getBoundingClientRect();
+  const area = proyectosPageAreaRect();
+  // Si la tabla esta (casi) fuera de la vista, las guias sobran.
+  if (rect.bottom < area.top || rect.top > area.bottom) {
+    proyectosGuideCols.classList.add('hidden');
+    proyectosGuideRows.classList.add('hidden');
+    return;
+  }
+
+  const currentRow = cell.parentElement;
+  const currentColIndex = [...currentRow.children].indexOf(cell);
+  const firstRow = table.querySelector('tr');
+  const rowsList = [...table.querySelectorAll('tr')];
+  const currentRowIndex = rowsList.indexOf(currentRow);
+
+  // Letras de columnas, encima del borde superior (cada una del ancho
+  // real de su columna).
+  proyectosGuideCols.innerHTML = '';
+  proyectosGuideCols.style.top = `${rect.top - 17}px`;
+  proyectosGuideCols.style.left = `${rect.left}px`;
+  [...(firstRow ? firstRow.children : [])].forEach((headCell, i) => {
+    const label = document.createElement('span');
+    label.className = 'proyectos-table-guide-label';
+    if (i === currentColIndex) label.classList.add('current');
+    label.style.width = `${headCell.getBoundingClientRect().width}px`;
+    label.textContent = proyectosColumnLetter(i);
+    proyectosGuideCols.appendChild(label);
+  });
+  proyectosGuideCols.classList.remove('hidden');
+
+  // Numeros de filas, a la izquierda (cada uno del alto real de su fila).
+  proyectosGuideRows.innerHTML = '';
+  proyectosGuideRows.style.top = `${rect.top}px`;
+  proyectosGuideRows.style.left = `${Math.max(area.left + 2, rect.left - 18)}px`;
+  rowsList.forEach((tr, i) => {
+    const label = document.createElement('span');
+    label.className = 'proyectos-table-guide-label';
+    if (i === currentRowIndex) label.classList.add('current');
+    label.style.height = `${tr.getBoundingClientRect().height}px`;
+    label.textContent = String(i + 1);
+    proyectosGuideRows.appendChild(label);
+  });
+  proyectosGuideRows.classList.remove('hidden');
+}
+
+// El cursor entra o sale de una tabla: guias al dia. (El input tambien
+// las refresca: escribir puede cambiar anchos y altos.)
+document.addEventListener('selectionchange', () => updateProyectosTableGuides());
+PROYECTOS_BODY().addEventListener('input', () => updateProyectosTableGuides());
 
 // El menu ▦, reorganizado como pidio Koku: cuatro entradas con submenu
 // (añadir/quitar fila/columna, cada una eligiendo DONDE: al principio,
@@ -12422,14 +12830,23 @@ function openProyectosTableMenu(view = 'root') {
     rows().forEach((tr) => tr.children[index]?.remove());
     table.querySelector('colgroup')?.children[index]?.remove();
   };
-  // Alineacion vertical del texto: la celda del cursor, o toda la tabla
-  // si el cursor no esta en ninguna. "Centrado" es el valor por defecto
-  // del navegador, asi que centra QUITANDO el atributo.
+  // Alineaciones del texto en celdas: la del cursor, o toda la tabla si
+  // el cursor no esta en ninguna. El valor por defecto (que se aplica
+  // QUITANDO el atributo) es izquierda en horizontal y ARRIBA en
+  // vertical -- como en Word/Notion; con el centrado vertical que traia
+  // el navegador, "pegado arriba" parecia no hacer nada (feedback real
+  // de Koku: "no funciona del todo").
+  const cellTargets = () => (cursorCell ? [cursorCell] : [...table.querySelectorAll('td, th')]);
   const applyValign = (value) => {
-    const targets = cursorCell ? [cursorCell] : [...table.querySelectorAll('td, th')];
-    targets.forEach((cell) => {
+    cellTargets().forEach((cell) => {
       if (value) cell.setAttribute('data-valign', value);
       else cell.removeAttribute('data-valign');
+    });
+  };
+  const applyCellAlign = (value) => {
+    cellTargets().forEach((cell) => {
+      if (value) cell.setAttribute('data-align', value);
+      else cell.removeAttribute('data-align');
     });
   };
 
@@ -12455,19 +12872,31 @@ function openProyectosTableMenu(view = 'root') {
     item('La del cursor', () => removeCol(cursorColIndex), { disabled: cursorColIndex < 0 });
     item('La primera', () => removeCol(0));
     item('La última', () => removeCol(colCount() - 1));
+  } else if (view === 'align') {
+    back();
+    item('Izquierda', () => applyCellAlign(null));
+    item('Centrado', () => applyCellAlign('center'));
+    item('Derecha', () => applyCellAlign('right'));
   } else if (view === 'valign') {
     back();
-    item('Pegado arriba', () => applyValign('top'));
-    item('Centrado', () => applyValign(null));
+    item('Pegado arriba', () => applyValign(null));
+    item('Centrado', () => applyValign('middle'));
     item('Pegado abajo', () => applyValign('bottom'));
+    // Aviso honesto: si la fila mide justo lo que su texto, no hay
+    // hueco por el que moverse.
+    const note = document.createElement('p');
+    note.className = 'hint proyectos-table-menu-hint';
+    note.textContent = 'Se aprecia cuando la fila es más alta que su texto (arrastra su borde inferior).';
+    popover.appendChild(note);
   } else {
     submenu('Añadir fila', 'add-row');
     submenu('Añadir columna', 'add-col');
     submenu('Quitar fila', 'del-row');
     submenu('Quitar columna', 'del-col');
-    // La etiqueta dice sobre que va a actuar, para que no pille por
+    // Las etiquetas dicen sobre que van a actuar, para que no pille por
     // sorpresa: celda concreta si hay cursor, toda la tabla si no.
-    submenu(cursorCell ? 'Altura del texto (celda del cursor)' : 'Altura del texto (toda la tabla)', 'valign');
+    submenu(cursorCell ? 'Alinear texto (celda del cursor)' : 'Alinear texto (toda la tabla)', 'align');
+    submenu(cursorCell ? 'Alinear en vertical (celda del cursor)' : 'Alinear en vertical (toda la tabla)', 'valign');
     item(table.getAttribute('data-width') === 'full' ? 'Ancho ajustado al contenido' : 'Ancho completo', () => {
       if (table.getAttribute('data-width') === 'full') table.removeAttribute('data-width');
       else table.setAttribute('data-width', 'full');
@@ -13024,6 +13453,71 @@ function insertProyectosPageLink(page) {
   queueProyectosSaveBody();
 }
 
+// "Desde plantilla…" del menu "/": elegir una plantilla de la galeria y
+// clonarla ENTERA como subpagina de la pagina abierta (asi una pieza
+// que repites — la base de datos de viajes ya configurada, por ejemplo
+// — se inserta donde haga falta). El clonado lo hace el backend, con
+// bases de datos, filas e imagenes incluidas.
+let proyectosTemplatePopover = null;
+let proyectosTemplateBlock = null;
+
+function openProyectosTemplatePopover(block) {
+  proyectosTemplateBlock = block;
+  if (!proyectosTemplatePopover) {
+    proyectosTemplatePopover = document.createElement('div');
+    proyectosTemplatePopover.className = 'proyectos-slash-popover proyectos-template-popover hidden';
+    document.body.appendChild(proyectosTemplatePopover);
+  }
+  const popover = proyectosTemplatePopover;
+  popover.innerHTML = '';
+
+  const templates = proyectosChildrenOf(null).filter((p) => p.isTemplate);
+  if (templates.length === 0) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'No hay plantillas todavía: en la home (⌂), selecciona un proyecto y pulsa "→ Plantilla".';
+    popover.appendChild(hint);
+  }
+  for (const template of templates) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'proyectos-slash-item';
+    btn.textContent = `${template.icon || '📋'} ${template.title || 'Sin título'}`;
+    btn.addEventListener('mousedown', async (e) => {
+      e.preventDefault();
+      popover.classList.add('hidden');
+      const target = proyectosTemplateBlock;
+      proyectosTemplateBlock = null;
+      if (!proyectosCurrentPage) return;
+      // El bloque desde el que se pidio queda como bloque vacio normal.
+      if (target && PROYECTOS_BODY().contains(target) && target.textContent.trim() === '') {
+        target.replaceWith(emptyProyectosBlock());
+      }
+      queueProyectosSaveBody();
+      try {
+        await api(`/api/proyectos-pages/${template.id}/clone`, {
+          method: 'POST',
+          body: JSON.stringify({ parentId: proyectosCurrentPage.id, asTemplate: false }),
+        });
+        await loadProyectosPages();
+        proyectosExpandedIds.add(proyectosCurrentPage.id);
+        saveProyectosExpanded();
+        renderProyectosTree();
+        renderProyectosSubnav();
+      } catch (err) {
+        console.error('No se pudo insertar la plantilla:', err);
+        showAppAlert(`No se pudo insertar la plantilla: ${err.message}`);
+      }
+    });
+    popover.appendChild(btn);
+  }
+
+  popover.classList.remove('hidden');
+  const rect = block.getBoundingClientRect();
+  popover.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 260)}px`;
+  popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 310))}px`;
+}
+
 // ---------------------------------------------------------------------
 // Atajos tipo markdown: "#", "##", "###", "-", "*", "1.", "[]", ">"
 // convierten el bloque al escribir un ESPACIO detras; "---" convierte en
@@ -13506,8 +14000,24 @@ document.addEventListener('click', (e) => {
   }
   if (proyectosPdfPopover && !proyectosPdfPopover.classList.contains('hidden')
       && !e.target.closest('.proyectos-pdf-popover') && !e.target.closest('#btn-proyectos-pdf')
+      && !e.target.closest('.proyectos-home-card-action') // la accion PDF de una tarjeta de la home
       && !e.target.closest('.select-popover')) { // el desplegable del rol vive fuera
     proyectosPdfPopover.classList.add('hidden');
+  }
+  if (proyectosTemplatePopover && !proyectosTemplatePopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-template-popover')) {
+    proyectosTemplatePopover.classList.add('hidden');
+    proyectosTemplateBlock = null;
+  }
+  if (proyectosHmDayPopover && !proyectosHmDayPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-hm-popover') && !e.target.closest('.proyectos-hm-cell')) {
+    proyectosHmDayPopover.classList.add('hidden');
+  }
+  // Clic fuera de las tarjetas de la home = quitar la seleccion.
+  if (proyectosHomeSelectedId !== null && !document.getElementById('proyectos-home').classList.contains('hidden')
+      && !e.target.closest('.proyectos-home-card') && !e.target.closest('.proyectos-pdf-popover')) {
+    proyectosHomeSelectedId = null;
+    renderProyectosHome();
   }
   // (el caso de "nodo ya desconectado" lo corta el guard de arriba)
   if (proyectosDbConfigPopover && !proyectosDbConfigPopover.classList.contains('hidden')
@@ -13694,7 +14204,7 @@ function renderProyectosDbWidget(container, data) {
 
     const tabs = document.createElement('div');
     tabs.className = 'proyectos-db-tabs';
-    [['table', 'Tabla'], ['board', 'Tablero'], ['list', 'Lista'], ['timeline', 'Cronograma']].forEach(([type, label]) => {
+    [['table', 'Tabla'], ['board', 'Tablero'], ['list', 'Lista'], ['timeline', 'Cronograma'], ['heatmap', 'Consistencia']].forEach(([type, label]) => {
       const tab = document.createElement('button');
       tab.type = 'button';
       tab.className = 'proyectos-db-tab' + (data.viewType === type ? ' active' : '');
@@ -13749,6 +14259,7 @@ function renderProyectosDbWidget(container, data) {
     if (data.viewType === 'board') renderProyectosDbBoard(view, data);
     else if (data.viewType === 'list') renderProyectosDbList(view, data);
     else if (data.viewType === 'timeline') renderProyectosDbTimeline(view, data);
+    else if (data.viewType === 'heatmap') renderProyectosDbHeatmap(view, data);
     else renderProyectosDbTable(view, data);
     container.appendChild(view);
   });
@@ -14658,6 +15169,151 @@ document.addEventListener('mouseup', async (e) => {
   refreshProyectosDbWidget(drag.data.id);
 });
 
+// ------------------------ Vista consistencia -------------------------
+// El heatmap estilo GitHub que Koku tiene en el Gimnasio (rama movil),
+// traido a las bases de datos: 26 semanas x 7 dias, y cada dia se pinta
+// mas intenso cuantas mas filas tengan esa fecha (la propiedad de fecha
+// del Cronograma, o la primera que haya). Un solo tono escalonado del
+// acento -- un mapa de magnitud es un unico matiz, nunca varios
+// colores. Clic en un dia con filas = lista para abrirlas.
+// ---------------------------------------------------------------------
+let proyectosHmDayPopover = null;
+
+function renderProyectosDbHeatmap(view, data) {
+  const dateProps = data.props.filter((p) => p.type === 'date');
+  if (dateProps.length === 0) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'La consistencia necesita una propiedad de tipo "fecha" — créala desde la vista Tabla.';
+    view.appendChild(hint);
+    return;
+  }
+  const dateProp = data.props.find((p) => p.id === data.timelineStartPropId && p.type === 'date') || dateProps[0];
+
+  // Filas por dia (aplicando el filtro/orden guardados de la base).
+  const rows = visibleProyectosDbRows(data);
+  const rowsByDate = new Map();
+  for (const row of rows) {
+    const value = row.values[dateProp.id];
+    if (!value) continue;
+    if (!rowsByDate.has(value)) rowsByDate.set(value, []);
+    rowsByDate.get(value).push(row);
+  }
+
+  // Estadisticas de arriba: dias con actividad, esta semana, este mes y
+  // el total de filas con fecha.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const mondayKey = (date) => {
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // lunes = 0
+    return proyectosTlToIso(d);
+  };
+  const thisWeekKey = mondayKey(today);
+  const monthPrefix = proyectosTlToIso(today).slice(0, 7);
+  let thisWeek = 0;
+  let thisMonth = 0;
+  let totalDated = 0;
+  for (const [date, dayRows] of rowsByDate) {
+    totalDated += dayRows.length;
+    const parsed = proyectosTlParseDate(date);
+    if (!parsed) continue;
+    if (mondayKey(parsed) === thisWeekKey) thisWeek += dayRows.length;
+    if (date.startsWith(monthPrefix)) thisMonth += dayRows.length;
+  }
+  const stats = document.createElement('div');
+  stats.className = 'proyectos-hm-stats';
+  const stat = (value, label) => {
+    const el = document.createElement('div');
+    el.className = 'proyectos-hm-stat';
+    const b = document.createElement('b');
+    b.textContent = String(value);
+    const span = document.createElement('span');
+    span.textContent = label;
+    el.appendChild(b);
+    el.appendChild(span);
+    stats.appendChild(el);
+  };
+  stat(rowsByDate.size, 'Días con actividad');
+  stat(thisWeek, 'Esta semana');
+  stat(thisMonth, 'Este mes');
+  stat(totalDated, `Filas con “${dateProp.name}”`);
+  view.appendChild(stats);
+
+  // La rejilla: columnas = 26 semanas (la actual a la derecha), filas =
+  // lunes a domingo. Celdas div con tooltip (como el heatmap del gym).
+  const WEEKS = 26;
+  const firstMonday = proyectosTlParseDate(thisWeekKey);
+  firstMonday.setDate(firstMonday.getDate() - (WEEKS - 1) * 7);
+  const wrap = document.createElement('div');
+  wrap.className = 'proyectos-hm';
+  const grid = document.createElement('div');
+  grid.className = 'proyectos-hm-grid';
+  grid.style.gridTemplateColumns = `repeat(${WEEKS}, 1fr)`;
+  for (let day = 0; day < 7; day++) {
+    for (let week = 0; week < WEEKS; week++) {
+      const cellDate = proyectosTlAddDays(firstMonday, week * 7 + day);
+      const cell = document.createElement('span');
+      cell.className = 'proyectos-hm-cell';
+      if (cellDate > today) {
+        cell.classList.add('future');
+      } else {
+        const key = proyectosTlToIso(cellDate);
+        const dayRows = rowsByDate.get(key) || [];
+        const level = dayRows.length >= 3 ? 3 : dayRows.length; // 0/1/2/3+
+        cell.classList.add(`level-${level}`);
+        cell.setAttribute('data-tooltip', `${formatProyectosBadgeDate(key)}: ${dayRows.length} fila${dayRows.length === 1 ? '' : 's'}`);
+        if (dayRows.length > 0) {
+          cell.classList.add('clickable');
+          cell.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openProyectosHmDayPopover(cell, data, key, dayRows);
+          });
+        }
+      }
+      grid.appendChild(cell);
+    }
+  }
+  wrap.appendChild(grid);
+  const legend = document.createElement('div');
+  legend.className = 'proyectos-hm-legend';
+  legend.innerHTML = '<span class="hint">Menos</span>'
+    + '<span class="proyectos-hm-cell level-0"></span><span class="proyectos-hm-cell level-1"></span>'
+    + '<span class="proyectos-hm-cell level-2"></span><span class="proyectos-hm-cell level-3"></span>'
+    + '<span class="hint">Más</span>';
+  wrap.appendChild(legend);
+  view.appendChild(wrap);
+  if (typeof attachFinanzasChartTooltips === 'function') attachFinanzasChartTooltips(wrap);
+}
+
+// Clic en un dia con filas: sus titulos, y cada uno abre su side peek.
+function openProyectosHmDayPopover(anchorEl, data, dateKey, dayRows) {
+  if (!proyectosHmDayPopover) {
+    proyectosHmDayPopover = document.createElement('div');
+    proyectosHmDayPopover.className = 'proyectos-slash-popover proyectos-hm-popover hidden';
+    document.body.appendChild(proyectosHmDayPopover);
+  }
+  const popover = proyectosHmDayPopover;
+  popover.innerHTML = '';
+  const heading = document.createElement('p');
+  heading.className = 'hint proyectos-hm-popover-date';
+  heading.textContent = formatProyectosBadgeDate(dateKey);
+  popover.appendChild(heading);
+  for (const row of dayRows) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'proyectos-slash-item';
+    btn.textContent = row.title || 'Sin título';
+    btn.addEventListener('click', () => {
+      popover.classList.add('hidden');
+      openProyectosPeek(data.id, row.id);
+    });
+    popover.appendChild(btn);
+  }
+  popover.classList.remove('hidden');
+  positionFixedPopover(anchorEl, popover, { width: 230 });
+}
+
 // ---------------------------------------------------------------------
 // Popover de configuracion de la vista (orden / filtro / agrupacion)
 // ---------------------------------------------------------------------
@@ -15330,7 +15986,7 @@ async function handleCreateProyectosGuide() {
 }
 
 document.getElementById('btn-proyectos-guide').addEventListener('click', handleCreateProyectosGuide);
-document.getElementById('btn-proyectos-guide-empty').addEventListener('click', handleCreateProyectosGuide);
+document.getElementById('btn-proyectos-home-guide').addEventListener('click', handleCreateProyectosGuide);
 
 // ---------------------------------------------------------------------
 // Arranque

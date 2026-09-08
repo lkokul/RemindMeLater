@@ -127,9 +127,9 @@
     .pdf-body table { border-collapse: collapse; margin: 0.2cm 0; }
     .pdf-body td, .pdf-body th {
       border: 1px solid #d0d7de; padding: 0.1cm 0.18cm;
-      vertical-align: middle;
+      vertical-align: top; /* mismo valor por defecto que en la app */
     }
-    .pdf-body td[data-valign="top"], .pdf-body th[data-valign="top"] { vertical-align: top; }
+    .pdf-body td[data-valign="middle"], .pdf-body th[data-valign="middle"] { vertical-align: middle; }
     .pdf-body td[data-valign="bottom"], .pdf-body th[data-valign="bottom"] { vertical-align: bottom; }
     .pdf-body th { background: #f6f8fa; font-weight: 600; }
 
