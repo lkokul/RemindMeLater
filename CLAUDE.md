@@ -30,8 +30,17 @@ lo primero que hay que tener claro antes de tocar nada:
   de iOS/Android con Capacitor.
 - **La versión de escritorio** (`server/`, `electron/`): el servidor
   Express + `node:sqlite` original. Koku la trabaja **por su cuenta en
-  una rama `escritorio`** — **NO la toques** salvo que te lo pida
-  explícitamente. Al fusionar, él preguntará qué falta en cada lado.
+  una rama `escritorio`** — **NO toques su código** salvo que te lo
+  pida explícitamente. Al fusionar, él preguntará qué falta en cada
+  lado. Matiz añadido el 8/9/2026: Koku autorizó **commit y push por
+  cuenta propia también en la rama `escritorio`** (lo dio al pedir que
+  se commiteara ahí `IDEAS.md`, el ideario del proyecto generado desde
+  esta conversación) — la autorización es de commit/push para entregas
+  que él pida, no una invitación a modificar su código por iniciativa
+  propia. Ojo: él trabaja esa rama en paralelo, así que antes de
+  pushear ahí toca `git fetch` + rebase sobre `origin/escritorio` (ya
+  pasó de verdad: un push rechazado por un commit suyo de minutos
+  antes).
 
 La interfaz sigue siendo HTML/CSS/JS sin build ni framework (`app.js` y
 `settings.js` se cargan como `<script>` normales y comparten variables
