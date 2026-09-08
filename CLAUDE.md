@@ -488,6 +488,29 @@ la copia es la forma de pasar datos de un aparato a otro.
 
 ## Pendiente / próximos pasos declarados
 
+- **BANCO DE PRUEBAS — animaciones de zoom del calendario (ronda del
+  8/9/2026, en esta rama)**: pellizcar sube de nivel (día→mes,
+  mes→año; NUNCA al revés, decidido así por Koku) y hay animación de
+  zoom al cambiar de nivel (in al bajar, out al subir) + interruptor
+  "Animaciones" en Configuración → Este dispositivo
+  (`localStorage.animationsEnabled`, apagado también salta las de
+  deslizar). Koku avisó EXPLÍCITAMENTE que quiere verlo en su móvil y
+  que **es posible que se retire** — si pide volver atrás, las piezas
+  son: `attachPinch()`/`playMobileZoomTransition()`/
+  `areAnimationsEnabled()` y sus llamadas en `setCalendarViewMode`/
+  `enterMobileDayView`/`exitMobileDayView` (app.js), las keyframes
+  `mobile-zoom-*` (styles.css), y el bloque "Animaciones" de
+  index.html/settings.js.
+- **Compartir → RemindMeLater (fecha detectada → evento)**: aprobado
+  por Koku ("Sí, iOS y Android") como PRÓXIMA ronda grande, sin
+  empezar. Diseño hablado: extensión de compartir nativa (Swift en
+  iOS — hay precedente de pieza nativa en el widget de descanso de
+  gimnasio-movil —, intent-filter en Android) que abre la app con el
+  modal de evento prerrelleno con la fecha/hora detectadas en el texto
+  compartido (detección en español hecha por nosotros). El menú nativo
+  de "añadir a iCalendar" al tocar una fecha es privado de Apple —
+  imposible meterse ahí, se le explicó y lo aceptó.
+
 - **Comunicación escritorio↔móvil en la v1** (nota que Koku pidió dejar
   apuntada expresamente): cuando la app de escritorio (rama
   `escritorio`, suya) y esta app móvil lleguen las dos a la versión 1,
