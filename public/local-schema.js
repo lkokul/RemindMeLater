@@ -147,21 +147,64 @@ function applyLocalSchema(db) {
     -- entrenamientos, con prefijo "gym_" para no chocar con nada de lo de
     -- arriba. Borrado en cascada A MANO en routes/, no con ON DELETE
     -- CASCADE de SQL -- mismo patron que groups/note_folders.
+    --
+    -- OJO (rediseno de Gimnasio, rama gimnasio-movil): a partir de aqui
+    -- las tablas gym_* DIVERGEN de server/db.js (la copia del programa de
+    -- escritorio). gym_blocks y las columnas nuevas de las otras tablas
+    -- gym_* existen SOLO en esta version; cuando algun dia se fusionen
+    -- las dos lineas habra que decidir que se lleva cada lado.
     CREATE TABLE IF NOT EXISTS gym_exercises (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      muscle_group TEXT,          -- opcional, texto libre (ej. "Pierna")
+      -- Grupo muscular: los ejercicios nuevos guardan un id de la
+      -- taxonomia fija (GYM_MUSCLE_GROUPS en app.js, ej. "pecho"); los
+      -- de antes del rediseno pueden traer texto libre (ej. "Pierna"),
+      -- que se muestra tal cual hasta que se reediten.
+      muscle_group TEXT,
+      -- Si el ejercicio se importo de la libreria empaquetada
+      -- (gym-exercise-library.json), aqui va su id de alli (slug tipo
+      -- "Barbell_Squat") -- sirve para no importar dos veces el mismo.
+      library_id TEXT,
+      equipment TEXT,             -- opcional (ej. "Barra", "Mancuernas")
+      -- Grupos musculares SECUNDARIOS (JSON array de ids de la
+      -- taxonomia, ej. '["hombros","triceps"]') -- los rellena el import
+      -- de la libreria y los usa el mapa de musculos (ponderados a 0.5).
+      secondary_muscles TEXT,
+      -- Nota FIJA del ejercicio ("polea altura 3", "banco posicion 2"):
+      -- acompana siempre al ejercicio, a diferencia de la nota de sesion
+      -- (exercise_notes en gym_sessions, que es de UNA sesion concreta).
+      notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- Rutinas reutilizables (ej. "Dia de pierna"), mismo patron
-    -- icono+color+posicion que groups/note_folders.
+    -- Bloques de entrenamiento (rediseno de Gimnasio): una "etapa" con
+    -- nombre propio (ej. "Volumen Invierno") que agrupa varios dias de
+    -- entrenamiento (los gym_routines de abajo). Solo UN bloque puede
+    -- estar activo a la vez (is_active = 1) -- es el que se ofrece al
+    -- empezar a entrenar. El borrado en cascada de sus dias se hace a
+    -- mano en routes-local/gymBlocks.js, como en todo el proyecto.
+    CREATE TABLE IF NOT EXISTS gym_blocks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Dias de entrenamiento reutilizables (ej. "Push 1", "Dia de pierna"),
+    -- mismo patron icono+color+posicion que groups/note_folders. La tabla
+    -- se sigue llamando gym_routines por compatibilidad con los datos ya
+    -- guardados, pero en la interfaz del rediseno son los "dias" de un
+    -- bloque (block_id). block_id puede ser NULL solo de forma transitoria:
+    -- la migracion de mas abajo recoloca cualquier huerfano en el bloque
+    -- "General".
     CREATE TABLE IF NOT EXISTS gym_routines (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       icon TEXT,
       color TEXT NOT NULL DEFAULT '#5b8cff',
       position INTEGER NOT NULL DEFAULT 0,
+      block_id INTEGER REFERENCES gym_blocks(id),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -179,7 +222,12 @@ function applyLocalSchema(db) {
       -- dentro de la rutina -- solo una sugerencia, igual que target_sets/
       -- target_reps; se copia como punto de partida a cada serie al crear
       -- una sesion desde esta rutina, y se puede cambiar libremente ahi.
-      target_rest_seconds INTEGER
+      target_rest_seconds INTEGER,
+      -- Oculto: el ejercicio sigue EN el dia (no se ha borrado), pero un
+      -- entrenamiento nuevo no lo pre-carga -- para "aparcar" un ejercicio
+      -- mientras se prueba otro (peticion de Koku). En el entreno en vivo
+      -- se puede recuperar desde "Ejercicios ocultos".
+      hidden INTEGER NOT NULL DEFAULT 0
     );
 
     -- Una sesion real en una fecha. routine_id es opcional: NULL = sesion
@@ -189,6 +237,26 @@ function applyLocalSchema(db) {
       date TEXT NOT NULL,                             -- YYYY-MM-DD
       routine_id INTEGER REFERENCES gym_routines(id),
       notes TEXT,
+      -- Fase 3 (modo entrenar en vivo): cuando la sesion se registro
+      -- entrenando en directo, aqui quedan la hora de inicio (ISO) y la
+      -- duracion total en segundos; NULL en sesiones apuntadas a mano.
+      started_at TEXT,
+      duration_seconds INTEGER,
+      -- Nota libre POR EJERCICIO de esa sesion ("subir peso la proxima",
+      -- "molestia en el hombro"...): JSON {exerciseId: "texto"}. Es un
+      -- dato puramente de presentacion, por eso va como JSON en una
+      -- columna en vez de montar una tabla y rutas nuevas solo para esto.
+      exercise_notes TEXT,
+      -- Fase 4 (actividad rapida): una fila de gym_sessions puede ser un
+      -- entrenamiento de pesas de siempre (type = 'gym', con sus series
+      -- en gym_sets) o una actividad suelta sin series -- cardio, clase,
+      -- deporte (type = 'activity', con activity_kind + activity_name y
+      -- la duracion en duration_seconds). Comparte tabla a proposito:
+      -- heatmap, racha y logros necesitan UNA sola fuente de "dias con
+      -- actividad".
+      type TEXT NOT NULL DEFAULT 'gym',
+      activity_kind TEXT,
+      activity_name TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -207,6 +275,15 @@ function applyLocalSchema(db) {
       -- target_rest_seconds de la rutina al auto-rellenar la sesion (ver
       -- app.js), pero se guarda por serie porque se puede editar suelto.
       rest_seconds INTEGER,
+      -- Fase 3: esfuerzo percibido de la serie (RPE, 1-10 con decimales,
+      -- opcional) y tipo de serie (NULL = normal; 'warmup'/'dropset'/
+      -- 'failure' reservados -- el calculo de PRs excluye warmup).
+      rpe REAL,
+      set_type TEXT,
+      -- Segundos de descanso EXTRA anadidos con +30s durante el descanso
+      -- de esta serie (rest_seconds guarda el planificado). Se ensena en
+      -- el historial como "Serie 1: +60s" (peticion de Koku).
+      extra_rest_seconds INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1118,6 +1195,9 @@ function applyLocalSchema(db) {
   if (!gymRoutineExerciseColumns.includes('target_rest_seconds')) {
     db.exec('ALTER TABLE gym_routine_exercises ADD COLUMN target_rest_seconds INTEGER');
   }
+  if (!gymRoutineExerciseColumns.includes('hidden')) {
+    db.exec('ALTER TABLE gym_routine_exercises ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
+  }
   const gymSetColumns = db.prepare('PRAGMA table_info(gym_sets)').all().map((c) => c.name);
   if (!gymSetColumns.includes('rest_seconds')) {
     db.exec('ALTER TABLE gym_sets ADD COLUMN rest_seconds INTEGER');
@@ -1131,6 +1211,91 @@ function applyLocalSchema(db) {
   }
   if (!lecturasItemColumns.includes('loaned_at')) {
     db.exec('ALTER TABLE lecturas_items ADD COLUMN loaned_at TEXT');
+  }
+
+  // ---- Migraciones del rediseno de Gimnasio (SOLO en esta linea movil,
+  // ---- diverge de server/db.js -- ver el comentario junto a gym_blocks).
+  // Fase 1: bloques de entrenamiento. La tabla gym_blocks ya la crea el
+  // CREATE TABLE IF NOT EXISTS de arriba en instalaciones nuevas; aqui va
+  // lo que una base YA EXISTENTE necesita ademas:
+  //
+  // 1) La columna block_id en gym_routines (los "dias").
+  const gymRoutineColumns = db.prepare('PRAGMA table_info(gym_routines)').all().map((c) => c.name);
+  if (!gymRoutineColumns.includes('block_id')) {
+    db.exec('ALTER TABLE gym_routines ADD COLUMN block_id INTEGER REFERENCES gym_blocks(id)');
+  }
+  // 2) Recolocar en un bloque "General" cualquier dia que quedara suelto
+  //    (los datos de antes del rediseno, o un huerfano de un borrado a
+  //    medias). Es idempotente: si no hay huerfanos no hace nada, y el
+  //    bloque "General" solo se crea si de verdad hace falta (se reutiliza
+  //    si ya existe uno con ese nombre).
+  const orphanRoutines = db.prepare('SELECT COUNT(*) AS n FROM gym_routines WHERE block_id IS NULL').get();
+  if (orphanRoutines && orphanRoutines.n > 0) {
+    let general = db.prepare("SELECT id FROM gym_blocks WHERE name = 'General' ORDER BY id ASC").get();
+    if (!general) {
+      // Nace activo solo si todavia no hay ningun otro bloque activo, para
+      // no robarle el estado a uno que el usuario ya hubiera activado.
+      const activeCount = db.prepare('SELECT COUNT(*) AS n FROM gym_blocks WHERE is_active = 1').get();
+      const positionRow = db.prepare('SELECT COUNT(*) AS n FROM gym_blocks').get();
+      db.prepare('INSERT INTO gym_blocks (name, position, is_active) VALUES (?, ?, ?)')
+        .run('General', positionRow.n, activeCount.n > 0 ? 0 : 1);
+      general = db.prepare("SELECT id FROM gym_blocks WHERE name = 'General' ORDER BY id ASC").get();
+    }
+    db.prepare('UPDATE gym_routines SET block_id = ? WHERE block_id IS NULL').run(general.id);
+  }
+  // 3) Indices para las consultas de progreso/heatmap que vienen en fases
+  //    posteriores (baratos y seguros de crear ya).
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sets_session ON gym_sets(session_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sets_exercise ON gym_sets(exercise_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sessions_date ON gym_sessions(date)');
+  // Fase 2: libreria de ejercicios -- columnas nuevas de gym_exercises
+  // (library_id para el import idempotente, equipment para mostrar el
+  // material del ejercicio).
+  const gymExerciseColumns = db.prepare('PRAGMA table_info(gym_exercises)').all().map((c) => c.name);
+  if (!gymExerciseColumns.includes('library_id')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN library_id TEXT');
+  }
+  if (!gymExerciseColumns.includes('equipment')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN equipment TEXT');
+  }
+  // Fase 6 (mapa de musculos): grupos secundarios del ejercicio.
+  if (!gymExerciseColumns.includes('secondary_muscles')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN secondary_muscles TEXT');
+  }
+  if (!gymExerciseColumns.includes('notes')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN notes TEXT');
+  }
+  // Fase 3: modo entrenar en vivo -- RPE y tipo de serie en gym_sets,
+  // hora de inicio/duracion/notas por ejercicio en gym_sessions.
+  const gymSetColumns2 = db.prepare('PRAGMA table_info(gym_sets)').all().map((c) => c.name);
+  if (!gymSetColumns2.includes('rpe')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN rpe REAL');
+  }
+  if (!gymSetColumns2.includes('set_type')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN set_type TEXT');
+  }
+  if (!gymSetColumns2.includes('extra_rest_seconds')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN extra_rest_seconds INTEGER');
+  }
+  const gymSessionColumns = db.prepare('PRAGMA table_info(gym_sessions)').all().map((c) => c.name);
+  if (!gymSessionColumns.includes('started_at')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN started_at TEXT');
+  }
+  if (!gymSessionColumns.includes('duration_seconds')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN duration_seconds INTEGER');
+  }
+  if (!gymSessionColumns.includes('exercise_notes')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN exercise_notes TEXT');
+  }
+  // Fase 4: actividad rapida (cardio/clases/deporte sin series).
+  if (!gymSessionColumns.includes('type')) {
+    db.exec("ALTER TABLE gym_sessions ADD COLUMN type TEXT NOT NULL DEFAULT 'gym'");
+  }
+  if (!gymSessionColumns.includes('activity_kind')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN activity_kind TEXT');
+  }
+  if (!gymSessionColumns.includes('activity_name')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN activity_name TEXT');
   }
 
 }

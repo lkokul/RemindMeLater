@@ -4,6 +4,13 @@
 // mismos, solo cambia la fontaneria (sin require/module.exports de
 // Node, y envuelto en un IIFE para que los nombres repetidos entre
 // rutas no choquen al cargarse todas como <script> en el mismo ambito).
+//
+// OJO (rediseno de Gimnasio): desde la ronda de bloques este archivo ya
+// NO es copia literal del servidor -- las rutinas ahora son los "dias"
+// de un bloque de entrenamiento (block_id, ver gymBlocks.js) y este
+// archivo entiende ese campo. La palabra "rutina" se mantiene por dentro
+// (tabla, rutas, variables) para no renombrar medio proyecto; en la
+// interfaz se muestran como "dias".
 (function () {
   const db = localDb;
   // routes/gymRoutines.js — rutinas reutilizables de la extension Gimnasio
@@ -28,7 +35,7 @@
   function serializeExerciseList(routineId) {
     return db
       .prepare(`
-        SELECT gre.id, gre.exercise_id, gre.position, gre.target_sets, gre.target_reps, gre.target_rest_seconds, ge.name, ge.muscle_group
+        SELECT gre.id, gre.exercise_id, gre.position, gre.target_sets, gre.target_reps, gre.target_rest_seconds, gre.hidden, ge.name, ge.muscle_group
         FROM gym_routine_exercises gre
         JOIN gym_exercises ge ON ge.id = gre.exercise_id
         WHERE gre.routine_id = ?
@@ -43,6 +50,7 @@
         targetSets: r.target_sets,
         targetReps: r.target_reps,
         targetRestSeconds: r.target_rest_seconds,
+        hidden: !!r.hidden,
       }));
   }
 
@@ -53,8 +61,18 @@
       icon: row.icon || null,
       color: row.color,
       position: row.position,
+      blockId: row.block_id || null,
       exercises: serializeExerciseList(row.id),
     };
+  }
+
+  // Valida que un blockId recibido apunte a un bloque real; devuelve el
+  // id numerico o null (igual que gymSessions.js hace con routine_id).
+  function resolveBlockId(blockId) {
+    const id = Number(blockId);
+    if (!id) return null;
+    const row = db.prepare('SELECT id FROM gym_blocks WHERE id = ?').get(id);
+    return row ? id : null;
   }
 
   // Reemplaza TODA la lista de ejercicios de una rutina por la que llega
@@ -66,7 +84,7 @@
     if (!Array.isArray(exercises)) return;
 
     const insert = db.prepare(
-      'INSERT INTO gym_routine_exercises (routine_id, exercise_id, position, target_sets, target_reps, target_rest_seconds) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO gym_routine_exercises (routine_id, exercise_id, position, target_sets, target_reps, target_rest_seconds, hidden) VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
     exercises.forEach((ex, index) => {
       const exerciseId = Number(ex && ex.exerciseId);
@@ -77,27 +95,33 @@
         index,
         ex.targetSets !== undefined && ex.targetSets !== null && ex.targetSets !== '' ? Number(ex.targetSets) : null,
         ex.targetReps !== undefined && ex.targetReps !== null && ex.targetReps !== '' ? Number(ex.targetReps) : null,
-        ex.targetRestSeconds !== undefined && ex.targetRestSeconds !== null && ex.targetRestSeconds !== '' ? Number(ex.targetRestSeconds) : null
+        ex.targetRestSeconds !== undefined && ex.targetRestSeconds !== null && ex.targetRestSeconds !== '' ? Number(ex.targetRestSeconds) : null,
+        ex.hidden ? 1 : 0
       );
     });
   }
 
   router.get('/', (req, res) => {
-    const rows = db.prepare('SELECT * FROM gym_routines ORDER BY position ASC, id ASC').all();
+    // ?blockId=N filtra los dias de UN bloque (lo usa el drill-down de la
+    // pestana Plan); sin el parametro se devuelven todos, como siempre.
+    const blockId = Number(req.query && req.query.blockId);
+    const rows = blockId
+      ? db.prepare('SELECT * FROM gym_routines WHERE block_id = ? ORDER BY position ASC, id ASC').all(blockId)
+      : db.prepare('SELECT * FROM gym_routines ORDER BY position ASC, id ASC').all();
     res.json(rows.map(serialize));
   });
 
   router.post('/', (req, res) => {
-    const { name, icon, color, exercises } = req.body || {};
+    const { name, icon, color, exercises, blockId } = req.body || {};
     if (!name || !name.trim()) {
-      return res.status(400).json({ error: 'invalid_request', message: 'La rutina necesita un nombre.' });
+      return res.status(400).json({ error: 'invalid_request', message: 'El día necesita un nombre.' });
     }
     const safeColor = /^#[0-9a-fA-F]{6}$/.test(color || '') ? color : '#5b8cff';
 
     const { count } = db.prepare('SELECT COUNT(*) as count FROM gym_routines').get();
     const info = db
-      .prepare('INSERT INTO gym_routines (name, icon, color, position) VALUES (?, ?, ?, ?)')
-      .run(name.trim(), sanitizeIcon(icon) ?? null, safeColor, count);
+      .prepare('INSERT INTO gym_routines (name, icon, color, position, block_id) VALUES (?, ?, ?, ?, ?)')
+      .run(name.trim(), sanitizeIcon(icon) ?? null, safeColor, count, resolveBlockId(blockId));
 
     replaceRoutineExercises(info.lastInsertRowid, exercises);
 
@@ -109,14 +133,18 @@
     const existing = db.prepare('SELECT * FROM gym_routines WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'not_found' });
 
-    const { name, icon, color, exercises } = req.body || {};
+    const { name, icon, color, exercises, blockId } = req.body || {};
     const safeColor = color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : existing.color;
     const sanitizedIcon = sanitizeIcon(icon);
+    // blockId solo se toca si viene en el body (undefined = "no cambiar",
+    // el mismo convenio que exercises justo debajo).
+    const nextBlockId = blockId === undefined ? existing.block_id : resolveBlockId(blockId);
 
-    db.prepare('UPDATE gym_routines SET name = ?, icon = ?, color = ? WHERE id = ?').run(
+    db.prepare('UPDATE gym_routines SET name = ?, icon = ?, color = ?, block_id = ? WHERE id = ?').run(
       name !== undefined && name.trim() ? name.trim() : existing.name,
       sanitizedIcon === undefined ? existing.icon : sanitizedIcon,
       safeColor,
+      nextBlockId,
       req.params.id
     );
 

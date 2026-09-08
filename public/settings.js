@@ -263,7 +263,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'store'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'notifications', 'store'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -282,7 +282,9 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     if (tab === 'profile') refreshProfileTab();
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();
-    else if (tab === 'mobile') refreshMobileTab();
+    // refreshMobileTab refresca por id, asi que vale para las DOS
+    // secciones que reparte: Este dispositivo y Notificaciones.
+    else if (tab === 'mobile' || tab === 'notifications') refreshMobileTab();
   });
 });
 
@@ -1248,10 +1250,130 @@ function refreshMobileTab() {
       : '';
   }
 
+  // Aviso de fin de descanso del Gimnasio: solo tiene sentido en la app
+  // instalada (lo programa el plugin nativo; un navegador normal no
+  // puede avisar con la pestana cerrada). Activado por defecto.
+  const restNotify = document.getElementById('setting-gym-rest-notify');
+  restNotify.disabled = !nativo;
+  restNotify.checked = nativo && localStorage.getItem('gymRestNotify') !== 'false';
+  const restBurst = document.getElementById('setting-gym-rest-burst');
+  restBurst.disabled = !nativo;
+  restBurst.checked = nativo && localStorage.getItem('gymRestBurst') !== 'false';
+  const restDuck = document.getElementById('setting-gym-rest-duck');
+  restDuck.disabled = !nativo;
+  restDuck.checked = nativo && localStorage.getItem('gymRestDuck') !== 'false';
+
+  // Sonido y vibracion de los avisos, como on-off separados (peticion
+  // de Koku). El matiz de iOS (con sonido, vibrar lo decide el sistema;
+  // "solo vibracion" usa el truco del sonido de silencio) vive en el
+  // dialogo del boton "?" -- ver notificationSoundValue() en
+  // local-notifications.js, que traduce estos dos toggles.
+  document.getElementById('setting-notif-sound').checked = localStorage.getItem('notifSound') !== 'false';
+  document.getElementById('setting-notif-vibrate').checked = localStorage.getItem('notifVibrate') !== 'false';
+
+  // Estado de la Live Activity (cuenta atras en la pantalla de bloqueo):
+  // en el iPhone no hay consola que mirar, asi que el resultado del
+  // ultimo intento se ensena aqui para poder diagnosticar.
+  const laStatus = document.getElementById('gym-live-activity-status');
+  if (!nativo) {
+    laStatus.textContent = '';
+  } else {
+    const last = localStorage.getItem('gymLiveActivityStatus');
+    laStatus.textContent = last
+      ? (last === 'ok'
+          ? 'Cuenta atrás en pantalla de bloqueo: funcionando.'
+          : `Cuenta atrás en pantalla de bloqueo: ${last}`)
+      : 'Cuenta atrás en pantalla de bloqueo: sin datos todavía (marca una serie en un entreno).';
+  }
+
+  refreshGymTimeFormatOptions();
   refreshGymWeightUnitOptions();
   // La linea de "Ultima copia: ..." del bloque de copia de seguridad
   // (ver backup.js, que se carga antes que este archivo).
   refreshBackupStatusLine();
+}
+
+// Sonido / vibracion: al cambiar cualquiera se reprograman los avisos ya
+// puestos (llevan el sonido "dentro" desde que se programan).
+async function onNotifAlertToggleChange() {
+  await syncScheduledReminders();
+  if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
+}
+document.getElementById('setting-notif-sound').addEventListener('change', (e) => {
+  localStorage.setItem('notifSound', e.target.checked ? 'true' : 'false');
+  onNotifAlertToggleChange();
+});
+document.getElementById('setting-notif-vibrate').addEventListener('change', (e) => {
+  localStorage.setItem('notifVibrate', e.target.checked ? 'true' : 'false');
+  onNotifAlertToggleChange();
+});
+
+// Un "?" POR OPCION (peticion de Koku: "cada apartado tiene su propio
+// boton con su texto"), en vez de un unico dialogo con todo.
+document.getElementById('btn-help-notif-reminders').addEventListener('click', () => {
+  showAppAlert('En la app instalada, los avisos de recordatorios los programa el propio teléfono: suenan aunque la app esté cerrada y sin que nada salga del dispositivo. Desde un navegador solo pueden avisar con la pestaña abierta.');
+});
+document.getElementById('btn-help-notif-rest').addEventListener('click', () => {
+  showAppAlert('Durante un entrenamiento del Gimnasio, cuando se acaba el descanso entre series llega una notificación aunque la pantalla esté bloqueada — así no hace falta estar mirando el móvil. Usa el mismo permiso que los recordatorios.');
+});
+document.getElementById('setting-gym-rest-burst').addEventListener('change', (e) => {
+  localStorage.setItem('gymRestBurst', e.target.checked ? 'true' : 'false');
+  // Si hay un descanso en marcha, se reprograma con el modo nuevo.
+  if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
+});
+document.getElementById('setting-gym-rest-duck').addEventListener('change', (e) => {
+  localStorage.setItem('gymRestDuck', e.target.checked ? 'true' : 'false');
+  // Si hay un descanso en marcha: encenderlo lo vigila ya; apagarlo
+  // suelta la vigilancia al momento.
+  if (e.target.checked) {
+    if (typeof gymStartRestAudioWatch === 'function') gymStartRestAudioWatch();
+  } else if (typeof gymCancelRestAudioWatch === 'function') {
+    gymCancelRestAudioWatch();
+  }
+});
+document.getElementById('btn-help-notif-duck').addEventListener('click', () => {
+  showAppAlert('Al acabar el descanso, la app baja unos segundos el volumen de lo que esté sonando (Spotify, Música...) y luego lo devuelve — como hace el GPS al hablar. No pausa ni corta nada.\n\nPara conseguirlo, durante el descanso la app se mantiene despierta en segundo plano (reproduce silencio a volumen cero); el gasto de batería es mínimo y solo dura lo que dura el descanso. Si iOS llegara a cerrar la app del todo, ese descanso no podría bajar la música (la notificación llega igual).');
+});
+document.getElementById('btn-help-notif-burst').addEventListener('click', () => {
+  showAppAlert('Con el modo insistente, el aviso de fin de descanso se repite 3 veces seguidas (cada 2 segundos), para que la vibración se note aunque el móvil esté en el bolsillo. iOS no permite una vibración larga tipo "temporizador del sistema" en apps normales (eso son alertas críticas, con permiso especial de Apple): repetir el aviso es lo más parecido.');
+});
+document.getElementById('btn-help-notif-sound').addEventListener('click', () => {
+  showAppAlert('Con el sonido activado, los avisos usan el sonido del sistema. Un detalle de iOS: cuando un aviso suena, vibrar o no lo decide el teléfono (Ajustes > Sonidos y vibraciones), no la app — por eso no existe la combinación "sonido sin vibración".');
+});
+document.getElementById('btn-help-notif-vibrate').addEventListener('click', () => {
+  showAppAlert('Con el sonido apagado y la vibración encendida, la app usa un truco: "reproduce" medio segundo de silencio, que es lo único que iOS acepta para disparar la vibración sin que se oiga nada. Con los dos apagados, el aviso llega solo en pantalla.\n\nImportante: que un aviso vibre o no lo decide al final el teléfono. Con el móvil en silencio (interruptor lateral), iOS solo vibra si tienes activado Ajustes > Sonidos y vibraciones > "Reproducir respuesta háptica en modo silencio" (y en modo timbre, su gemelo "en modo timbre"). Si eso está apagado, ninguna app puede hacer vibrar sus avisos.');
+});
+
+// Formato de tiempo del Gimnasio (descansos): minutos:segundos o
+// segundos a secas. El mismo ajuste que alterna el contador al tocarlo
+// (gymRestFormat) -- Koku pidio tenerlo tambien aqui, a la vista.
+const GYM_TIME_FORMAT_MODES = [
+  { id: 'min', label: 'Minutos y segundos (1:30)' },
+  { id: 'sec', label: 'Solo segundos (90s)' },
+];
+
+function refreshGymTimeFormatOptions() {
+  const container = document.getElementById('gym-time-format-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = localStorage.getItem('gymRestFormat') === 'sec' ? 'sec' : 'min';
+
+  GYM_TIME_FORMAT_MODES.forEach((mode) => {
+    const isActive = mode.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = mode.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('gymRestFormat', mode.id);
+        refreshGymTimeFormatOptions();
+      });
+    }
+    container.appendChild(btn);
+  });
 }
 
 // Unidad de peso de Gimnasio: preferencia de ESTE dispositivo (como el
@@ -1310,6 +1432,24 @@ document.getElementById('setting-notifications').addEventListener('change', asyn
   // el interruptor.
   await syncScheduledReminders();
   refreshMobileTab();
+});
+
+// Aviso al terminar el descanso entre series (Gimnasio). Usa el mismo
+// permiso del sistema que los recordatorios: si aun no esta dado, se
+// pide aqui mismo al encenderlo.
+document.getElementById('setting-gym-rest-notify').addEventListener('change', async (e) => {
+  if (e.target.checked) {
+    const concedido = await ensureLocalNotificationPermission();
+    if (!concedido) {
+      e.target.checked = false;
+      return;
+    }
+    localStorage.setItem('gymRestNotify', 'true');
+  } else {
+    localStorage.setItem('gymRestNotify', 'false');
+    // Si habia un aviso ya programado para el descanso en curso, fuera.
+    if (typeof gymCancelRestNotification === 'function') gymCancelRestNotification();
+  }
 });
 
 // ---------------------------------------------------------------------
@@ -1480,6 +1620,17 @@ document.addEventListener('keydown', (e) => {
   // de Koku: "el primer esc me saque de la ventana de añadir... luego ya
   // con el siguiente que me lleve a la ventana anterior").
   const gymModalIds = [
+    // La ayuda del entrenamiento la primera: se abre encima de todo
+    // (incluso encima del entreno en vivo).
+    ['gym-help-modal', closeGymHelpModal],
+    ['gym-progress-help-modal', closeGymProgressHelpModal],
+    // La ficha de la libreria va ANTES que el buscador: se abre encima
+    // de el, y el primer Esc debe cerrar solo la ficha.
+    ['gym-library-detail-modal', closeGymLibraryDetail],
+    ['gym-library-modal', closeGymLibraryModal],
+    ['gym-start-modal', closeGymStartModal],
+    ['gym-activity-modal', closeGymActivityModal],
+    ['gym-block-modal', closeGymBlockModal],
     ['gym-exercise-modal', closeGymExerciseModal],
     ['gym-routine-modal', closeGymRoutineModal],
     ['gym-session-modal', closeGymSessionModal],
@@ -1491,8 +1642,40 @@ document.addEventListener('keydown', (e) => {
       return;
     }
   }
+  // El resumen de fin de entreno y la celebracion de logros se cierran
+  // con Esc como cualquier modal (la celebracion primero: se abre encima).
+  const gymAchievement = document.getElementById('gym-achievement-modal');
+  if (gymAchievement && !gymAchievement.classList.contains('hidden')) {
+    gymAchievement.classList.add('hidden');
+    return;
+  }
+  const gymSummary = document.getElementById('gym-live-summary-modal');
+  if (gymSummary && !gymSummary.classList.contains('hidden')) {
+    gymSummary.classList.add('hidden');
+    return;
+  }
+  // Con un entrenamiento EN VIVO abierto, Esc no hace nada a proposito:
+  // salir se hace solo con Terminar o Descartar (los dos con
+  // confirmacion/resumen) -- un Esc despistado no debe sacar del entreno.
+  // Excepcion: si el menu flotante de acciones esta desplegado, Esc lo
+  // recoge (es la capa de mas arriba).
+  const gymLive = document.getElementById('gym-live-view');
+  if (gymLive && !gymLive.classList.contains('hidden')) {
+    const gymFab = document.getElementById('gym-live-fab');
+    if (gymFab && gymFab.classList.contains('open') && typeof closeGymLiveFab === 'function') {
+      closeGymLiveFab();
+    }
+    return;
+  }
   const gymView = document.getElementById('gym-view');
   if (gymView && !gymView.classList.contains('hidden')) {
+    // Dentro del Plan, si estas viendo los dias de un bloque, el Esc
+    // primero sube al nivel de bloques (sub-navegacion, como Lecturas).
+    const daysLevel = document.getElementById('gym-block-days-level');
+    if (daysLevel && !daysLevel.classList.contains('hidden')) {
+      document.getElementById('btn-gym-back-to-blocks').click();
+      return;
+    }
     document.getElementById('btn-close-gym').click();
     return;
   }

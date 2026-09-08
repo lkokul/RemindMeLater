@@ -5,8 +5,22 @@ name: iOS TestFlight
 # defecto, el dialogo "Run workflow" de la pestaña Actions ya trae un
 # desplegable nativo para elegir CUALQUIER rama, sin necesitar nada mas
 # aqui para poder compilar builds de prueba desde otras ramas.
+#
+# El input "descripcion" es opcional y solo cambia el NOMBRE con el que
+# el run aparece en la lista de Actions (run-name), para distinguir a
+# simple vista que se estaba compilando ("rediseno gimnasio fase 7"...)
+# en vez de un "iOS TestFlight #12" generico. OJO: el dialogo de Run
+# workflow lee los inputs del archivo de la RAMA elegida en el
+# desplegable, asi que este campo solo aparece al lanzar desde ramas
+# que ya llevan esta version del archivo.
+run-name: ${{ inputs.descripcion || github.workflow }}
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      descripcion:
+        description: 'Nombre descriptivo para este build (opcional)'
+        required: false
+        type: string
 
 jobs:
   build-and-upload:
@@ -61,6 +75,18 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+
+      # La Live Activity solo funciona si la extension DescansoWidget viaja
+      # DENTRO de la app (App.app/PlugIns/DescansoWidget.appex). Este paso
+      # lo comprueba y tira el build si falta -- sin el, un fallo de
+      # embedding pasa en silencio y la tarjeta simplemente "no sale" en el
+      # movil, sin ninguna pista de por que.
+      - name: Comprobar que el widget va dentro de la app
+        run: |
+          PLUGINS="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app/PlugIns"
+          echo "Contenido de PlugIns:"
+          ls -la "$PLUGINS" || true
+          test -d "$PLUGINS/DescansoWidget.appex"
 
       - name: Generar ExportOptions.plist
         env:

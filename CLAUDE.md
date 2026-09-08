@@ -507,7 +507,61 @@ la copia es la forma de pasar datos de un aparato a otro.
   existente al que se puede enganchar: el aviso de "mover a mano" de
   las tablas, que sale la primera vez con casilla de "no volver a
   mostrar" (`tableMoveHintSeen_*` en localStorage).
+- **Rediseño de Gimnasio (HECHO, pendiente de validar en iPhone)**:
+  rama `gimnasio-movil` (creada desde `movil-ui`), trabajada en un
+  WORKTREE aparte (`../RemindMeLater-gimnasio`) porque el checkout
+  principal estaba en `escritorio`. Las 7 fases están commiteadas y
+  probadas en Chrome con la app servida como estático:
+  1. **Bloques → Días** (tabla `gym_blocks` + `block_id` en
+     `gym_routines`; migración idempotente que recoloca días huérfanos
+     en un bloque "General"; solo un bloque activo). Pestaña "Plan" con
+     drill-down bloque↔días. Acento morado scoped en
+     `#gym-view`/`.gym-modal`/`#gym-live-view`, sin tocar los temas.
+  2. **Librería de ~870 ejercicios** (`public/gym-exercise-library.json`,
+     ~840 KB, fetch perezoso): de
+     [`yuhonas/free-exercise-db`](https://github.com/yuhonas/free-exercise-db)
+     (Unlicense, dominio público; nacido de `wrkout/exercises.json` de
+     Ollie Jennings, también Unlicense — créditos en README y código).
+     Nombres/músculos/material traducidos al español por Claude;
+     **las INSTRUCCIONES siguen en inglés** — se irán traduciendo por
+     tandas con la cuenta DeepL de Koku vía Chrome (pendiente).
+     Taxonomía fija `GYM_MUSCLE_GROUPS` (14 grupos) en app.js: única
+     fuente de verdad para selects, volumen por músculo y mapa.
+     Import idempotente por `library_id`.
+  3. **Modo entrenar en vivo**: estado en `localStorage.gymLiveSession`
+     (sobrevive recargas), tiempos SIEMPRE desde timestamps (iOS congela
+     el JS de fondo), cronómetro, columna "Anterior"
+     (`GET /last-sets/:exerciseId`), RPE, descanso automático al marcar
+     serie (presets + +30s), resumen final. Columnas nuevas: `rpe`/
+     `set_type` en `gym_sets`; `started_at`/`duration_seconds`/
+     `exercise_notes` (JSON) en `gym_sessions`. Esc NO saca del entreno.
+  4. **Actividad rápida** (`type='activity'` en `gym_sessions`, sin
+     series — misma tabla a propósito para heatmap/racha) + historial
+     con iconos/duración/volumen + `GET /summary` ligero.
+  5. **Progreso avanzado**: heatmap 26 semanas (un solo tono morado),
+     racha semanal con objetivo configurable (`gymWeeklyGoal`, por
+     dispositivo, semanas ISO lunes), PRs con 1RM de Epley (excluye
+     warmup y >12 reps), volumen semanal apilado top-5 grupos + "Otros"
+     (paleta de 5 tonos validada contra daltonismo con el skill dataviz).
+  6. **Mapa de músculos** (idea de Koku): dos siluetas SVG propias
+     (frente/espalda) generadas en app.js (para usar variables CSS),
+     zonas = ids de la taxonomía, intensidad continua, ventana 7/30/90
+     días, series o volumen, secundarios ×0.5 (columna
+     `secondary_muscles` en `gym_exercises`, la rellena el import).
+  7. **Logros**: 6 logros con niveles calculados AL VUELO desde
+     /summary (nada en BD; solo `gymAchievementsSeen` en localStorage
+     para celebrar una vez). Pestaña "Logros" + modal de celebración.
+  - **Pendiente**: tandas de DeepL para las instrucciones; push +
+    run de GitHub Actions (TestFlight) desde `gimnasio-movil`; prueba
+    en iPhone (foco: timers con pantalla bloqueada, recuperación de
+    gymLiveSession, tamaño del JSON, SVG en pantalla pequeña); merge a
+    `movil-ui` + segundo run. Los ejercicios importados ANTES de la
+    Fase 6 no tienen `secondary_muscles` (limitación conocida).
+  - Referencia estética explorada en vivo: https://oscargymapp.vercel.app/
+    (app de un amigo). Descartado lo social/red a propósito.
+  - Descartada la otra librería candidata
+    (`hasaneyldrm/exercises-dataset`): datos MIT pero imágenes de Gym
+    Visual con licencia restrictiva y ~125 MB de peso.
 - **Backlog sin fecha** (ideas suyas, ninguna empezada): rediseño
   visual del visor de escritorio, repensar Finanzas para que sea
-  "realmente útil", rediseñar Gimnasio inspirándose en la app de un
-  amigo, y una extensión nueva estilo Notion.
+  "realmente útil", y una extensión nueva estilo Notion.

@@ -37,6 +37,7 @@ const state = {
   // seccion aparte que la mayoria de aperturas de la app ni siquiera
   // visita.
   gymExercises: [],
+  gymBlocks: [],
   gymRoutines: [],
   gymSessions: [],
   // Extension "Lecturas" (ver #lecturas-view en index.html): sagas y,
@@ -909,7 +910,7 @@ async function loadYearViewEvents(year) {
 function isGestureBlockedByModal() {
   if (document.querySelector('.modal:not(.hidden)')) return true;
   const fullscreenIds = [
-    'extensions-view', 'gym-view', 'finanzas-view',
+    'extensions-view', 'gym-view', 'gym-live-view', 'finanzas-view',
     'lecturas-view', 'note-editor-view',
   ];
   return fullscreenIds.some((id) => {
@@ -7559,11 +7560,13 @@ async function openGymView() {
   closeExtensionsView();
   document.getElementById('gym-view').classList.remove('hidden');
   setCurrentScreen('gym');
-  await Promise.all([loadGymExercises(), loadGymRoutines(), loadGymSessions()]);
+  await Promise.all([loadGymExercises(), loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
   renderGymExercisesList();
+  renderGymBlocksList();
   renderGymRoutinesList();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+  refreshGymLiveButtons();
 }
 function closeGymView() {
   document.getElementById('gym-view').classList.add('hidden');
@@ -7579,13 +7582,45 @@ function switchGymTab(tabName) {
   document.querySelectorAll('.gym-tab-panel').forEach((panel) => {
     panel.classList.toggle('hidden', panel.id !== `gym-tab-${tabName}`);
   });
+  // Las secciones de Progreso/Logros se calculan al entrar en su
+  // pestana, no en cada apertura del Gimnasio -- son funciones
+  // declaradas mas abajo, sin problema de orden porque esto solo corre
+  // dentro de un handler de click (ver la nota de TDZ en CLAUDE.md).
+  if (tabName === 'plan') openGymBlockDays(null);
+  if (tabName === 'progress') {
+    renderGymProgressSections();
+    // El aviso sobre los colores del mapa (que no significan "demasiado"
+    // ni "poco", solo cantidad relativa) se ensena SOLO la primera vez;
+    // el boton "?" de la seccion lo reabre cuando se quiera.
+    if (localStorage.getItem('gymProgressHelpSeen') !== '1') openGymProgressHelpModal();
+  }
+  if (tabName === 'achievements') renderGymAchievements();
 }
+
+// --- Aviso del mapa de musculos (pestana Progreso) --------------------
+function openGymProgressHelpModal() {
+  document.getElementById('gym-progress-help-dont-show').checked =
+    localStorage.getItem('gymProgressHelpSeen') === '1';
+  document.getElementById('gym-progress-help-modal').classList.remove('hidden');
+}
+function closeGymProgressHelpModal() {
+  localStorage.setItem(
+    'gymProgressHelpSeen',
+    document.getElementById('gym-progress-help-dont-show').checked ? '1' : '0'
+  );
+  document.getElementById('gym-progress-help-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-progress-help').addEventListener('click', openGymProgressHelpModal);
+document.getElementById('btn-close-gym-progress-help').addEventListener('click', closeGymProgressHelpModal);
 document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchGymTab(btn.dataset.gymTab));
 });
 
 async function loadGymExercises() {
   state.gymExercises = await api('/api/gym-exercises');
+}
+async function loadGymBlocks() {
+  state.gymBlocks = await api('/api/gym-blocks');
 }
 async function loadGymRoutines() {
   state.gymRoutines = await api('/api/gym-routines');
@@ -7627,18 +7662,72 @@ function gymWeightDisplayToKg(displayValue) {
   return getGymWeightUnit() === 'lb' ? num / KG_TO_LB : num;
 }
 
+// --- Taxonomia de grupos musculares (Fase 2 del rediseno) -------------
+// La UNICA fuente de verdad de los grupos musculares de toda la
+// extension: la usan el select del modal de ejercicio, los filtros de
+// la libreria, y (en fases posteriores) el volumen por musculo y el
+// mapa del cuerpo -- los `id` de aqui tienen que coincidir con los ids
+// de zona del SVG del cuerpo y con los `muscleGroup` que trae
+// gym-exercise-library.json (ver el generador en el historial de la
+// rama). Los ejercicios guardan el `id` en muscle_group; los de antes
+// del rediseno pueden tener texto libre, que se muestra tal cual.
+const GYM_MUSCLE_GROUPS = [
+  { id: 'pecho', label: 'Pecho' },
+  { id: 'espalda', label: 'Espalda' },
+  { id: 'lumbar', label: 'Lumbar' },
+  { id: 'hombros', label: 'Hombros' },
+  { id: 'trapecio', label: 'Trapecio' },
+  { id: 'biceps', label: 'Bíceps' },
+  { id: 'triceps', label: 'Tríceps' },
+  { id: 'antebrazo', label: 'Antebrazo' },
+  { id: 'core', label: 'Core / Abdomen' },
+  { id: 'gluteo', label: 'Glúteo' },
+  { id: 'cuadriceps', label: 'Cuádriceps' },
+  { id: 'isquios', label: 'Isquiosurales' },
+  { id: 'aductores', label: 'Aductores' },
+  { id: 'abductores', label: 'Abductores' },
+  { id: 'gemelos', label: 'Gemelos' },
+];
+// id de la taxonomia -> etiqueta bonita; cualquier otra cosa (texto
+// libre de antes del rediseno) se devuelve tal cual.
+function gymMuscleGroupLabel(value) {
+  if (!value) return '';
+  const group = GYM_MUSCLE_GROUPS.find((g) => g.id === value);
+  return group ? group.label : value;
+}
+
+// --- Libreria de ejercicios empaquetada (Fase 2) ----------------------
+// ~870 ejercicios de https://github.com/yuhonas/free-exercise-db
+// (dominio publico, licencia Unlicense), que a su vez nacio de
+// https://github.com/wrkout/exercises.json de Ollie Jennings (tambien
+// Unlicense). ¡Gracias a ambos! Los nombres/musculos/material estan
+// traducidos al español; las instrucciones se van traduciendo por
+// tandas. El JSON pesa ~840 KB, asi que NO se carga al arrancar la app:
+// fetch perezoso la primera vez que se abre el buscador, cacheado en
+// esta variable para el resto de la sesion (mismo patron que
+// loadViajesMap).
+let gymExerciseLibrary = null;
+async function loadGymExerciseLibrary() {
+  if (gymExerciseLibrary) return gymExerciseLibrary;
+  const resp = await fetch('gym-exercise-library.json');
+  if (!resp.ok) throw new Error('No se pudo cargar la librería de ejercicios.');
+  gymExerciseLibrary = await resp.json();
+  return gymExerciseLibrary;
+}
+
 function renderGymExercisesList() {
   const list = document.getElementById('gym-exercises-list');
   list.innerHTML = '';
   if (state.gymExercises.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavía no tienes ejercicios. Se crean desde aquí o al añadirlos a una rutina/sesión.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes ejercicios. Añádelos desde la librería o crea uno a mano.</p>';
     return;
   }
   state.gymExercises.forEach((ex) => {
+    const extras = [gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' · ');
     const row = document.createElement('div');
     row.className = 'gym-list-item';
     row.innerHTML = `
-      <span class="gym-list-item-name">${escapeHtml(ex.name)}${ex.muscleGroup ? ` <span class="gym-list-item-muted">(${escapeHtml(ex.muscleGroup)})</span>` : ''}</span>
+      <span class="gym-list-item-name">${escapeHtml(ex.name)}${extras ? ` <span class="gym-list-item-muted">(${escapeHtml(extras)})</span>` : ''}</span>
       <div class="gym-list-item-actions">
         <button type="button" class="icon-btn" data-edit-gym-exercise="${ex.id}" aria-label="Editar ejercicio">✎</button>
       </div>
@@ -7652,21 +7741,91 @@ function renderGymExercisesList() {
   });
 }
 
+// --- Pestana "Plan": bloques y sus dias (rediseno de Gimnasio) --------
+// Dos niveles dentro de la misma pestana, tipo carpetas de Notas: la
+// lista de bloques, y al entrar en uno, sus dias (las filas de
+// gym_routines de siempre). gymCurrentBlockId dice donde estamos:
+// null = nivel de bloques.
+let gymCurrentBlockId = null;
+
+function renderGymBlocksList() {
+  const list = document.getElementById('gym-blocks-list');
+  list.innerHTML = '';
+  if (state.gymBlocks.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes bloques. Un bloque es una etapa de entrenamiento (ej. "Volumen Invierno") con sus días dentro.</p>';
+    return;
+  }
+  state.gymBlocks.forEach((b) => {
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-block-item';
+    row.dataset.openGymBlock = b.id;
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(b.name)}${b.isActive ? ' <span class="gym-block-active-badge">Activo</span>' : ''}
+        <span class="gym-list-item-muted">(${b.dayCount} día${b.dayCount === 1 ? '' : 's'})</span></span>
+      <div class="gym-list-item-actions">
+        ${b.isActive ? '' : `<button type="button" class="secondary-btn gym-block-activate-btn" data-activate-gym-block="${b.id}">Activar</button>`}
+        <button type="button" class="icon-btn" data-edit-gym-block="${b.id}" aria-label="Editar bloque">✎</button>
+      </div>
+    `;
+    // Toda la fila entra al bloque, salvo los botones de la derecha (que
+    // paran la propagacion) -- mismo patron que las filas de sesion.
+    row.addEventListener('click', () => openGymBlockDays(b.id));
+    list.appendChild(row);
+  });
+  list.querySelectorAll('[data-activate-gym-block]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api(`/api/gym-blocks/${btn.dataset.activateGymBlock}/activate`, { method: 'POST' });
+      await loadGymBlocks();
+      renderGymBlocksList();
+    });
+  });
+  list.querySelectorAll('[data-edit-gym-block]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openGymBlockModal(state.gymBlocks.find((b) => b.id === Number(btn.dataset.editGymBlock)));
+    });
+  });
+}
+
+// Entra al nivel de dias de UN bloque (o vuelve al de bloques con null).
+function openGymBlockDays(blockId) {
+  gymCurrentBlockId = blockId || null;
+  document.getElementById('gym-blocks-level').classList.toggle('hidden', gymCurrentBlockId !== null);
+  document.getElementById('gym-block-days-level').classList.toggle('hidden', gymCurrentBlockId === null);
+  if (gymCurrentBlockId !== null) {
+    const block = state.gymBlocks.find((b) => b.id === gymCurrentBlockId);
+    document.getElementById('gym-block-days-title').textContent = block ? block.name : '';
+    renderGymRoutinesList();
+  }
+}
+document.getElementById('btn-gym-back-to-blocks').addEventListener('click', async () => {
+  // Al volver se recargan los bloques para que el contador de dias de
+  // cada tarjeta refleje lo que se acabe de crear/borrar dentro.
+  await loadGymBlocks();
+  renderGymBlocksList();
+  openGymBlockDays(null);
+});
+
 function renderGymRoutinesList() {
   const list = document.getElementById('gym-routines-list');
   list.innerHTML = '';
-  if (state.gymRoutines.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavía no tienes rutinas. Crea una arriba.</p>';
+  // Solo los dias del bloque abierto -- el filtrado se hace aqui en
+  // cliente (state.gymRoutines ya esta entero en memoria) en vez de
+  // repedir al backend con ?blockId, que existe para quien lo necesite.
+  const days = state.gymRoutines.filter((r) => r.blockId === gymCurrentBlockId);
+  if (days.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Este bloque todavía no tiene días. Crea uno arriba (ej. "Push 1").</p>';
     return;
   }
-  state.gymRoutines.forEach((r) => {
+  days.forEach((r) => {
     const row = document.createElement('div');
     row.className = 'gym-list-item';
     row.innerHTML = `
       <span class="color-dot" style="background-color: ${r.color}"></span>
       <span class="gym-list-item-name">${r.icon ? escapeHtml(r.icon) + ' ' : ''}${escapeHtml(r.name)} <span class="gym-list-item-muted">(${r.exercises.length} ejercicio${r.exercises.length === 1 ? '' : 's'})</span></span>
       <div class="gym-list-item-actions">
-        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar rutina">✎</button>
+        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar día">✎</button>
       </div>
     `;
     list.appendChild(row);
@@ -7685,18 +7844,42 @@ function renderGymSessionsList() {
     list.innerHTML = '<p class="empty-hint">Todavía no has registrado ninguna sesión.</p>';
     return;
   }
+  const unit = getGymWeightUnitLabel();
   state.gymSessions.forEach((s) => {
-    const exerciseNames = [...new Set(s.sets.map((set) => set.exerciseName))];
     const row = document.createElement('div');
     row.className = 'gym-list-item gym-session-item';
     row.dataset.editGymSession = s.id;
+
+    // Linea de datos rapidos: duracion (si la hay), y para entrenos de
+    // pesas tambien nº de series y volumen total.
+    const statBits = [];
+    if (s.durationSeconds) statBits.push(`${Math.max(1, Math.round(s.durationSeconds / 60))} min`);
+    if (s.type !== 'activity' && s.sets.length > 0) {
+      statBits.push(`${s.sets.length} serie${s.sets.length === 1 ? '' : 's'}`);
+      const volumeKg = s.sets.reduce((acc, set) => acc + (set.reps || 0) * (set.weightKg || 0), 0);
+      if (volumeKg > 0) statBits.push(`${gymWeightKgToDisplay(volumeKg)} ${unit}`);
+    }
+
+    if (s.type === 'activity') {
+      row.innerHTML = `
+        <span class="gym-session-item-date">${formatGymDate(s.date)}</span>
+        <span class="gym-session-item-routine">${escapeHtml(s.activityName || 'Actividad')}</span>
+        <span class="gym-list-item-muted">${escapeHtml([gymActivityKindLabel(s.activityKind), ...statBits].join(' · '))}</span>
+      `;
+      row.addEventListener('click', () => openGymActivityModal(s));
+      list.appendChild(row);
+      return;
+    }
+
+    const exerciseNames = [...new Set(s.sets.map((set) => set.exerciseName))];
     row.innerHTML = `
       <span class="gym-session-item-date">${formatGymDate(s.date)}</span>
       ${
         s.routineName
           ? `<span class="gym-session-item-routine"><span class="color-dot" style="background-color: ${s.routineColor}"></span>${s.routineIcon ? escapeHtml(s.routineIcon) + ' ' : ''}${escapeHtml(s.routineName)}</span>`
-          : '<span class="gym-session-item-routine gym-list-item-muted">Sesion libre</span>'
+          : '<span class="gym-session-item-routine gym-list-item-muted">Sesión libre</span>'
       }
+      ${statBits.length ? `<span class="gym-list-item-muted">${escapeHtml(statBits.join(' · '))}</span>` : ''}
       <span class="gym-list-item-muted">${exerciseNames.length ? exerciseNames.map(escapeHtml).join(', ') : 'Sin ejercicios'}</span>
     `;
     row.addEventListener('click', () => openGymSessionModal(s));
@@ -8353,15 +8536,65 @@ function renderFinanzasAssetValuationChart(valuations) {
 }
 
 // --- Modal de ejercicio -------------------------------------------------
+// El grupo muscular ya no es texto libre: select con la taxonomia fija
+// (GYM_MUSCLE_GROUPS). Si se edita un ejercicio de antes del rediseno
+// cuyo valor no esta en la taxonomia, ese valor viejo se anade como
+// opcion extra para no perderlo sin querer al guardar.
+const gymExerciseMuscleField = createSelectField({
+  options: [{ value: '', label: 'Sin grupo' }],
+  initialValue: '',
+  placeholder: 'Sin grupo',
+});
+document.getElementById('gym-exercise-muscle-field').appendChild(gymExerciseMuscleField.element);
+
+// Musculos SECUNDARIOS del ejercicio (chips activables): cuentan en el
+// mapa de musculos a mitad de peso, igual que los de la libreria.
+let gymExerciseSecondarySel = new Set();
+function renderGymExerciseSecondaryChips() {
+  const container = document.getElementById('gym-exercise-secondary-field');
+  container.innerHTML = '';
+  GYM_MUSCLE_GROUPS.forEach((g) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'gym-secondary-chip' + (gymExerciseSecondarySel.has(g.id) ? ' active' : '');
+    chip.textContent = g.label;
+    chip.addEventListener('click', () => {
+      if (gymExerciseSecondarySel.has(g.id)) gymExerciseSecondarySel.delete(g.id);
+      else gymExerciseSecondarySel.add(g.id);
+      renderGymExerciseSecondaryChips();
+    });
+    container.appendChild(chip);
+  });
+}
+
+// Si el modal se abrio desde el buscador estando en "modo elegir" (el +
+// del entreno en vivo), el ejercicio recien creado se añade directo a la
+// sesion en curso al guardar.
+let gymExerciseAddToLivePending = false;
+
 function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
   document.getElementById('gym-exercise-id').value = exercise ? exercise.id : '';
   document.getElementById('gym-exercise-name').value = exercise ? exercise.name : '';
-  document.getElementById('gym-exercise-muscle-group').value = exercise ? exercise.muscleGroup || '' : '';
+  document.getElementById('gym-exercise-equipment').value = exercise ? exercise.equipment || '' : '';
+  document.getElementById('gym-exercise-notes').value = exercise ? exercise.notes || '' : '';
+  gymExerciseSecondarySel = new Set(exercise && Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : []);
+  renderGymExerciseSecondaryChips();
+  const options = [
+    { value: '', label: 'Sin grupo' },
+    ...GYM_MUSCLE_GROUPS.map((g) => ({ value: g.id, label: g.label })),
+  ];
+  const current = exercise ? exercise.muscleGroup || '' : '';
+  if (current && !GYM_MUSCLE_GROUPS.some((g) => g.id === current)) {
+    options.push({ value: current, label: `${current} (texto antiguo)` });
+  }
+  gymExerciseMuscleField.setOptions(options);
+  gymExerciseMuscleField.setValue(current);
   document.getElementById('btn-delete-gym-exercise').classList.toggle('hidden', !exercise);
   document.getElementById('gym-exercise-modal').classList.remove('hidden');
 }
 function closeGymExerciseModal() {
+  gymExerciseAddToLivePending = false;
   document.getElementById('gym-exercise-modal').classList.add('hidden');
 }
 document.getElementById('btn-new-gym-exercise').addEventListener('click', () => openGymExerciseModal(null));
@@ -8373,16 +8606,35 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
   const id = document.getElementById('gym-exercise-id').value;
   const payload = {
     name: document.getElementById('gym-exercise-name').value,
-    muscleGroup: document.getElementById('gym-exercise-muscle-group').value,
+    muscleGroup: gymExerciseMuscleField.getValue(),
+    equipment: document.getElementById('gym-exercise-equipment').value,
+    secondaryMuscles: [...gymExerciseSecondarySel],
+    notes: document.getElementById('gym-exercise-notes').value,
   };
+  // El flag se captura ANTES de cerrar: closeGymExerciseModal lo resetea.
+  const addToLive = !id && gymExerciseAddToLivePending;
+  let saved;
   if (id) {
-    await api(`/api/gym-exercises/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    saved = await api(`/api/gym-exercises/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   } else {
-    await api('/api/gym-exercises', { method: 'POST', body: JSON.stringify(payload) });
+    saved = await api('/api/gym-exercises', { method: 'POST', body: JSON.stringify(payload) });
   }
   closeGymExerciseModal();
   await loadGymExercises();
   renderGymExercisesList();
+  // Creado desde el buscador en modo elegir: directo al entreno en curso.
+  if (addToLive && gymLiveSession && saved && !gymLiveSession.exercises.some((x) => x.exerciseId === saved.id)) {
+    gymLiveSession.exercises.push({
+      exerciseId: saved.id,
+      note: '',
+      rpe: '',
+      collapsed: false,
+      sets: [{ reps: '', weightDisplay: '', done: false, restSeconds: '' }],
+    });
+    gymLiveStore();
+    gymLivePrevSets.set(saved.id, await api(`/api/gym-sessions/last-sets/${saved.id}`));
+    renderGymLiveExercises();
+  }
 });
 
 document.getElementById('btn-delete-gym-exercise').addEventListener('click', async () => {
@@ -8390,7 +8642,7 @@ document.getElementById('btn-delete-gym-exercise').addEventListener('click', asy
   try {
     await api(`/api/gym-exercises/${id}`, { method: 'DELETE' });
   } catch (err) {
-    alert(err.message);
+    showAppAlert(err.message);
     return;
   }
   closeGymExerciseModal();
@@ -8398,7 +8650,1483 @@ document.getElementById('btn-delete-gym-exercise').addEventListener('click', asy
   renderGymExercisesList();
 });
 
-// --- Modal de rutina ------------------------------------------------------
+// --- Buscador de la libreria de ejercicios (Fase 2) --------------------
+// Ver el comentario de loadGymExerciseLibrary() arriba (origen del
+// dataset y creditos). El buscador filtra en cliente sobre el JSON
+// entero; para no pintar 870 filas de golpe se corta en 80 con un aviso
+// de "afina la busqueda".
+const gymLibraryMuscleField = createSelectField({
+  options: [{ value: '', label: 'Todos los músculos' }, ...GYM_MUSCLE_GROUPS.map((g) => ({ value: g.id, label: g.label }))],
+  initialValue: '',
+  onChange: () => renderGymLibraryList(),
+});
+document.getElementById('gym-library-muscle-field').appendChild(gymLibraryMuscleField.element);
+
+const gymLibraryEquipmentField = createSelectField({
+  options: [{ value: '', label: 'Todo el material' }],
+  initialValue: '',
+  onChange: () => renderGymLibraryList(),
+});
+document.getElementById('gym-library-equipment-field').appendChild(gymLibraryEquipmentField.element);
+
+// Busqueda sin acentos ni mayusculas ("prensa" encuentra "Prensa",
+// "bicep" encuentra "Bíceps"...).
+function gymNormalizeSearch(text) {
+  return String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function renderGymLibraryList() {
+  const list = document.getElementById('gym-library-list');
+  if (!gymExerciseLibrary) return;
+  const search = gymNormalizeSearch(document.getElementById('gym-library-search').value.trim());
+  const muscle = gymLibraryMuscleField.getValue();
+  const equipment = gymLibraryEquipmentField.getValue();
+
+  // Ejercicios ya importados, para marcarlos y no ofrecer importarlos otra vez.
+  const importedIds = new Set(state.gymExercises.map((ex) => ex.libraryId).filter(Boolean));
+
+  const matches = gymExerciseLibrary.filter((e) => {
+    if (muscle && e.muscleGroup !== muscle && !e.primaryMuscles.includes(muscle)) return false;
+    if (equipment && e.equipment !== equipment) return false;
+    if (search && !gymNormalizeSearch(e.name).includes(search) && !gymNormalizeSearch(e.nameEn).includes(search)) return false;
+    return true;
+  });
+
+  list.innerHTML = '';
+  const CAP = 80;
+  matches.slice(0, CAP).forEach((e) => {
+    const meta = [gymMuscleGroupLabel(e.muscleGroup), e.equipment, e.level].filter(Boolean).join(' · ');
+    const imported = importedIds.has(e.id);
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-library-item';
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(e.name)}${meta ? ` <span class="gym-list-item-muted">(${escapeHtml(meta)})</span>` : ''}</span>
+      <div class="gym-list-item-actions">
+        ${imported
+          ? '<span class="gym-library-imported">✓ Importado</span>'
+          : `<button type="button" class="secondary-btn gym-library-import-btn" data-import-gym-library="${escapeHtml(e.id)}">+ Importar</button>`}
+      </div>
+    `;
+    // La fila entera abre la ficha (o, en modo elegir, elige directamente);
+    // el boton de importar corta la propagacion.
+    row.addEventListener('click', () => {
+      if (gymLibraryPickCallback) {
+        const cb = gymLibraryPickCallback;
+        gymLibraryPickCallback = null;
+        closeGymLibraryModal();
+        cb(e);
+        return;
+      }
+      openGymLibraryDetail(e);
+    });
+    list.appendChild(row);
+  });
+  if (matches.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Ningún ejercicio coincide con la búsqueda.</p>';
+  } else if (matches.length > CAP) {
+    const hint = document.createElement('p');
+    hint.className = 'empty-hint';
+    hint.textContent = `Mostrando ${CAP} de ${matches.length} — afina la búsqueda para ver el resto.`;
+    list.appendChild(hint);
+  }
+  list.querySelectorAll('[data-import-gym-library]').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (gymLibraryPickCallback) {
+        const entry = gymExerciseLibrary.find((e) => e.id === btn.dataset.importGymLibrary);
+        const cb = gymLibraryPickCallback;
+        gymLibraryPickCallback = null;
+        closeGymLibraryModal();
+        if (entry) cb(entry);
+        return;
+      }
+      await importGymLibraryExercise(btn.dataset.importGymLibrary);
+      renderGymLibraryList();
+    });
+  });
+}
+
+// Importa un ejercicio de la libreria a gym_exercises. El backend es
+// idempotente por libraryId (reimportar devuelve el existente), asi que
+// llamar esto dos veces no duplica nada.
+async function importGymLibraryExercise(libraryId) {
+  const entry = gymExerciseLibrary.find((e) => e.id === libraryId);
+  if (!entry) return;
+  await api('/api/gym-exercises', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: entry.name,
+      muscleGroup: entry.muscleGroup,
+      equipment: entry.equipment,
+      libraryId: entry.id,
+      secondaryMuscles: entry.secondaryMuscles,
+    }),
+  });
+  await loadGymExercises();
+  renderGymExercisesList();
+}
+
+async function openGymLibraryModal() {
+  document.getElementById('gym-library-modal').classList.remove('hidden');
+  const list = document.getElementById('gym-library-list');
+  if (!gymExerciseLibrary) {
+    list.innerHTML = '<p class="empty-hint">Cargando librería…</p>';
+    try {
+      await loadGymExerciseLibrary();
+    } catch (err) {
+      list.innerHTML = '';
+      showAppAlert(err.message);
+      return;
+    }
+    // El filtro de material se construye con lo que de verdad hay en el
+    // dataset (y solo la primera vez, el JSON no cambia en caliente).
+    const equipments = [...new Set(gymExerciseLibrary.map((e) => e.equipment).filter(Boolean))].sort();
+    gymLibraryEquipmentField.setOptions([
+      { value: '', label: 'Todo el material' },
+      ...equipments.map((eq) => ({ value: eq, label: eq })),
+    ]);
+  }
+  renderGymLibraryList();
+}
+function closeGymLibraryModal() {
+  document.getElementById('gym-library-modal').classList.add('hidden');
+  // Si se cierra sin elegir estando en modo elegir, el callback se tira
+  // (cancelar la eleccion no debe dejar el modo pegado para despues).
+  gymLibraryPickCallback = null;
+}
+document.getElementById('btn-open-gym-library').addEventListener('click', openGymLibraryModal);
+document.getElementById('btn-close-gym-library').addEventListener('click', closeGymLibraryModal);
+document.getElementById('gym-library-search').addEventListener('input', () => renderGymLibraryList());
+
+// "+ Crear ejercicio propio" desde el buscador (peticion de Koku: la
+// libreria es una propuesta, no un limite). Si el buscador estaba en
+// modo elegir (el + del entreno en vivo), se recuerda con el flag para
+// que el ejercicio recien creado entre directo a la sesion al guardar.
+document.getElementById('btn-gym-library-new-custom').addEventListener('click', () => {
+  gymExerciseAddToLivePending = !!gymLibraryPickCallback;
+  closeGymLibraryModal();
+  openGymExerciseModal(null);
+});
+
+// --- Ficha de un ejercicio de la libreria ------------------------------
+let gymLibraryDetailEntry = null;
+function openGymLibraryDetail(entry) {
+  gymLibraryDetailEntry = entry;
+  document.getElementById('gym-library-detail-title').textContent = entry.name;
+  const meta = [
+    gymMuscleGroupLabel(entry.muscleGroup),
+    entry.secondaryMuscles.length ? `secundarios: ${entry.secondaryMuscles.map(gymMuscleGroupLabel).join(', ')}` : null,
+    entry.equipment,
+    entry.level,
+    entry.category,
+  ].filter(Boolean).join(' · ');
+  document.getElementById('gym-library-detail-meta').textContent = `${meta} · (${entry.nameEn})`;
+  const listEl = document.getElementById('gym-library-detail-instructions');
+  listEl.innerHTML = '';
+  if (entry.instructions.length === 0) {
+    listEl.innerHTML = '<p class="empty-hint">Este ejercicio no trae instrucciones.</p>';
+  } else {
+    entry.instructions.forEach((step) => {
+      const li = document.createElement('li');
+      li.textContent = step;
+      listEl.appendChild(li);
+    });
+  }
+  document.getElementById('gym-library-detail-modal').classList.remove('hidden');
+}
+function closeGymLibraryDetail() {
+  document.getElementById('gym-library-detail-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-gym-library-detail').addEventListener('click', closeGymLibraryDetail);
+document.getElementById('btn-close-gym-library-detail-2').addEventListener('click', closeGymLibraryDetail);
+document.getElementById('btn-import-gym-library-detail').addEventListener('click', async () => {
+  if (!gymLibraryDetailEntry) return;
+  await importGymLibraryExercise(gymLibraryDetailEntry.id);
+  closeGymLibraryDetail();
+  renderGymLibraryList();
+});
+
+// --- Actividad rapida (Fase 4 del rediseno) ---------------------------
+// Cardio/clases/deporte sin series: tipo + nombre + duracion + fecha.
+// Se guarda como una gym_session con type='activity' (misma tabla que
+// los entrenos, ver el comentario del esquema) para que heatmap/racha
+// tengan una sola fuente de "dias con actividad".
+const GYM_ACTIVITY_KINDS = [
+  { id: 'cardio', label: 'Cardio' },
+  { id: 'clase', label: 'Clase dirigida' },
+  { id: 'deporte', label: 'Deporte' },
+  { id: 'otro', label: 'Otro' },
+];
+function gymActivityKindLabel(kind) {
+  const found = GYM_ACTIVITY_KINDS.find((k) => k.id === kind);
+  return found ? found.label : 'Actividad';
+}
+const gymActivityKindField = createSelectField({
+  options: GYM_ACTIVITY_KINDS.map((k) => ({ value: k.id, label: k.label })),
+  initialValue: 'cardio',
+});
+document.getElementById('gym-activity-kind-field').appendChild(gymActivityKindField.element);
+const gymActivityDateField = createDateField({ initialValue: new Date() });
+document.getElementById('gym-activity-date-field').appendChild(gymActivityDateField.element);
+
+function openGymActivityModal(session) {
+  document.getElementById('gym-activity-modal-title').textContent = session ? 'Editar actividad' : 'Actividad rápida';
+  document.getElementById('gym-activity-id').value = session ? session.id : '';
+  document.getElementById('gym-activity-name').value = session ? session.activityName || '' : '';
+  document.getElementById('gym-activity-duration').value = session && session.durationSeconds ? Math.round(session.durationSeconds / 60) : '';
+  gymActivityKindField.setValue(session && session.activityKind ? session.activityKind : 'cardio');
+  gymActivityDateField.setValue(session ? new Date(`${session.date}T00:00:00`) : new Date());
+  document.getElementById('btn-delete-gym-activity').classList.toggle('hidden', !session);
+  document.getElementById('gym-activity-modal').classList.remove('hidden');
+}
+function closeGymActivityModal() {
+  document.getElementById('gym-activity-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-gym-activity').addEventListener('click', () => openGymActivityModal(null));
+document.getElementById('btn-cancel-gym-activity').addEventListener('click', closeGymActivityModal);
+document.getElementById('btn-close-gym-activity').addEventListener('click', closeGymActivityModal);
+
+document.getElementById('gym-activity-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('gym-activity-id').value;
+  const minutes = Number(document.getElementById('gym-activity-duration').value);
+  const payload = {
+    date: toDateKey(gymActivityDateField.getValue()),
+    type: 'activity',
+    activityKind: gymActivityKindField.getValue(),
+    activityName: document.getElementById('gym-activity-name').value,
+    durationSeconds: minutes > 0 ? minutes * 60 : null,
+  };
+  if (id) {
+    await api(`/api/gym-sessions/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/gym-sessions', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeGymActivityModal();
+  await loadGymSessions();
+  renderGymSessionsList();
+  checkGymAchievements();
+});
+
+document.getElementById('btn-delete-gym-activity').addEventListener('click', async () => {
+  const id = document.getElementById('gym-activity-id').value;
+  const ok = await showAppConfirm('¿Eliminar esta actividad?', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
+  closeGymActivityModal();
+  await loadGymSessions();
+  renderGymSessionsList();
+});
+
+// --- Modo entrenar en vivo (Fase 3 del rediseno) ----------------------
+// El estado del entrenamiento en curso vive en localStorage
+// (gymLiveSession) y se reescribe entero en CADA cambio -- asi una
+// recarga o un cierre de la app a mitad de entreno no pierde nada, y al
+// volver aparece el boton de "continuar". Solo al Terminar se convierte
+// en una sesion de verdad (POST /api/gym-sessions) y se limpia.
+//
+// Los tiempos (cronometro de sesion y descanso) se calculan SIEMPRE
+// desde timestamps guardados (startedAt / restUntil), nunca sumando
+// ticks: en iOS el JS se congela con la app en segundo plano y un
+// contador de ticks se quedaria atras al volver.
+let gymLiveSession = null;      // espejo en memoria de localStorage.gymLiveSession
+let gymLiveTicker = null;       // setInterval de 1s SOLO para repintar reloj/descanso
+let gymLivePrevSets = new Map();// exerciseId -> { date, sets } para la columna "Anterior"
+
+function gymLiveStore() {
+  localStorage.setItem('gymLiveSession', JSON.stringify(gymLiveSession));
+}
+function gymLiveReadStored() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('gymLiveSession'));
+    return parsed && typeof parsed === 'object' && parsed.startedAt ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+// Alterna el boton grande de "Empezar" y el banner de "continuar" segun
+// haya o no un entrenamiento a medias guardado.
+function refreshGymLiveButtons() {
+  const stored = gymLiveReadStored();
+  document.getElementById('btn-gym-live-resume').classList.toggle('hidden', !stored);
+  document.getElementById('btn-gym-live-start').classList.toggle('hidden', !!stored);
+  refreshGymLiveIndicators();
+}
+// Con un entrenamiento activo, el boton "Herramientas" de la nav y la
+// tarjeta de Gimnasio se marcan en el color de acento con un puntito,
+// para que se vea de un vistazo que hay un entreno en marcha.
+function refreshGymLiveIndicators() {
+  const active = !!gymLiveReadStored();
+  const navBtn = document.querySelector('[data-mobile-nav="extensions"]');
+  if (navBtn) navBtn.classList.toggle('gym-live-indicator', active);
+  const gymCard = document.getElementById('btn-open-gym');
+  if (gymCard) gymCard.classList.toggle('gym-live-indicator', active);
+}
+
+// -- Selector de "que toca hoy" (dias del bloque activo o sesion libre) --
+function openGymStartModal() {
+  const activeBlock = state.gymBlocks.find((b) => b.isActive);
+  const days = activeBlock ? state.gymRoutines.filter((r) => r.blockId === activeBlock.id) : [];
+  document.getElementById('gym-start-block-name').textContent = activeBlock
+    ? `Bloque activo: ${activeBlock.name}`
+    : 'No hay ningún bloque activo — puedes entrenar libre o crear un bloque en la pestaña Plan.';
+  const list = document.getElementById('gym-start-days');
+  list.innerHTML = '';
+  days.forEach((day) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gym-list-item gym-start-day-btn';
+    btn.innerHTML = `
+      <span class="color-dot" style="background-color: ${day.color}"></span>
+      <span class="gym-list-item-name">${day.icon ? escapeHtml(day.icon) + ' ' : ''}${escapeHtml(day.name)}</span>
+      <span class="gym-list-item-muted">${day.exercises.filter((ex) => !ex.hidden).length} ejercicio${day.exercises.filter((ex) => !ex.hidden).length === 1 ? '' : 's'}</span>
+    `;
+    btn.addEventListener('click', () => {
+      closeGymStartModal();
+      startGymLiveSession(day);
+    });
+    list.appendChild(btn);
+  });
+  if (days.length === 0 && activeBlock) {
+    list.innerHTML = '<p class="empty-hint">El bloque activo no tiene días todavía.</p>';
+  }
+  document.getElementById('gym-start-modal').classList.remove('hidden');
+}
+function closeGymStartModal() {
+  document.getElementById('gym-start-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-live-start').addEventListener('click', openGymStartModal);
+document.getElementById('btn-close-gym-start').addEventListener('click', closeGymStartModal);
+document.getElementById('btn-gym-start-free').addEventListener('click', () => {
+  closeGymStartModal();
+  startGymLiveSession(null);
+});
+document.getElementById('btn-gym-live-resume').addEventListener('click', () => {
+  gymLiveSession = gymLiveReadStored();
+  if (gymLiveSession) openGymLiveView();
+});
+
+// Arranca un entrenamiento nuevo: desde un dia del plan (pre-carga sus
+// ejercicios con tantas series como target_sets, solo con el descanso
+// sugerido -- reps y peso en blanco a proposito, como el modal manual) o
+// completamente libre.
+function startGymLiveSession(day) {
+  // Solo se pre-cargan los ejercicios VISIBLES del dia; los ocultos
+  // quedan en hiddenPool, recuperables desde "Ejercicios ocultos" en el
+  // propio entreno (peticion de Koku: aparcar un ejercicio sin borrarlo).
+  const visibles = day ? day.exercises.filter((ex) => !ex.hidden) : [];
+  gymLiveSession = {
+    startedAt: Date.now(),
+    routineId: day ? day.id : null,
+    routineName: day ? day.name : null,
+    restPreset: 90,
+    restUntil: null,
+    // Para no deslizar durante 40 minutos (Koku): todas las tarjetas
+    // nacen RECOGIDAS menos la primera; cada una se pliega/despliega
+    // tocando su cabecera, y hay botones de plegar/desplegar todo.
+    exercises: visibles.map((ex, i) => ({
+        exerciseId: ex.exerciseId,
+        note: '',
+        rpe: '',
+        collapsed: i > 0,
+        sets: Array.from({ length: ex.targetSets || 1 }, () => ({
+          reps: '', weightDisplay: '', done: false,
+          restSeconds: ex.targetRestSeconds ?? '',
+        })),
+      })),
+    hiddenPool: day
+      ? day.exercises.filter((ex) => ex.hidden).map((ex) => ({
+          exerciseId: ex.exerciseId,
+          targetSets: ex.targetSets,
+          targetRestSeconds: ex.targetRestSeconds,
+        }))
+      : [],
+  };
+  gymLiveStore();
+  openGymLiveView();
+  // La ayuda se abre sola SOLO al iniciar un entrenamiento nuevo (aqui),
+  // no cada vez que se vuelve a el tras moverse por la app -- eso
+  // molestaba (feedback de Koku). Hasta que marque "no volver a
+  // mostrar"; el boton "?" la abre cuando quiera.
+  if (localStorage.getItem('gymLiveHelpSeen') !== '1') openGymHelpModal();
+}
+
+async function openGymLiveView() {
+  document.getElementById('gym-live-title').textContent = gymLiveSession.routineName || 'Sesión libre';
+  document.getElementById('gym-live-view').classList.remove('hidden');
+  renderGymLiveExercises();
+  // Columna "Anterior": se pide en paralelo para cada ejercicio y se
+  // repinta cuando llega (si no hay historial, la columna queda en "—").
+  gymLivePrevSets = new Map();
+  await Promise.all(gymLiveSession.exercises.map(async (ex) => {
+    const prev = await api(`/api/gym-sessions/last-sets/${ex.exerciseId}`);
+    gymLivePrevSets.set(ex.exerciseId, prev);
+  }));
+  renderGymLiveExercises();
+  if (gymLiveTicker) clearInterval(gymLiveTicker);
+  gymLiveTicker = setInterval(gymLiveTick, 1000);
+  refreshGymLivePauseUi();
+  gymLiveTick();
+}
+function closeGymLiveView() {
+  document.getElementById('gym-live-view').classList.add('hidden');
+  // El ticker NO se para: sigue moviendo la mini-barra de descanso
+  // global mientras te mueves por la app. Se para al terminar/descartar.
+  refreshGymLiveButtons();
+  gymLiveTick();
+}
+function gymLiveStopTicker() {
+  if (gymLiveTicker) { clearInterval(gymLiveTicker); gymLiveTicker = null; }
+  document.getElementById('gym-global-rest').classList.add('hidden');
+  document.body.classList.remove('gym-rest-push');
+  // Si quedaba un aviso de descanso programado (o su tarjeta en la
+  // pantalla de bloqueo, o la vigilancia de audio), ya no tienen
+  // sentido: el entreno se ha terminado o descartado.
+  gymCancelRestNotification();
+  gymEndRestLiveActivity();
+  gymCancelRestAudioWatch();
+}
+
+// Un tick por segundo mientras el overlay esta abierto: reloj de sesion
+// y cuenta atras del descanso, ambos derivados de timestamps.
+// "(2)" = 2 minutos justos de descanso, "(1:30)" = minuto y medio --
+// formato corto para la columna Anterior (peticion de Koku).
+function gymFormatRestShort(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return s === 0 ? `${m}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+// Un tiempo de descanso "para ensenar", respetando el formato elegido en
+// Configuracion (m:ss o segundos a secas -- mismo ajuste gymRestFormat
+// que alterna el contador tocandolo).
+function gymFormatRestDisplay(totalSeconds) {
+  const n = Number(totalSeconds);
+  if (!n) return '';
+  return localStorage.getItem('gymRestFormat') === 'sec' ? `${n}s` : gymLiveFormatClock(n);
+}
+function gymLiveFormatClock(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+// Tiempo de sesion transcurrido DESCONTANDO las pausas: pausedMs acumula
+// las pausas ya cerradas, y pausedAt marca la pausa en curso (si la hay).
+// Todo con timestamps, como siempre -- sobrevive a recargas y al
+// congelado de iOS en segundo plano.
+function gymLiveElapsedSeconds() {
+  const pausedMs = (gymLiveSession.pausedMs || 0) +
+    (gymLiveSession.pausedAt ? Date.now() - gymLiveSession.pausedAt : 0);
+  return Math.max(0, Math.floor((Date.now() - gymLiveSession.startedAt - pausedMs) / 1000));
+}
+
+function gymLiveTick() {
+  if (!gymLiveSession) return;
+  const clock = document.getElementById('gym-live-clock');
+  clock.textContent = gymLiveFormatClock(gymLiveElapsedSeconds());
+  clock.classList.toggle('paused', !!gymLiveSession.pausedAt);
+
+  // Mientras corre un descanso, sondear cada 2s los +30s pendientes del
+  // boton de la pantalla de bloqueo. Hace falta ADEMAS de los eventos de
+  // volver a primer plano: al bajar la barra de notificaciones la app no
+  // llega a irse a segundo plano, asi que no hay ningun "resume" que
+  // dispare la recogida -- y los segundos se quedaban sin aplicar hasta
+  // que el tiempo normal acababa (bug que vio Koku). La llamada es
+  // baratisima (leer un contador) y solo corre durante el descanso.
+  if (gymLiveSession.restUntil && Date.now() - gymLastExtensionPoll > 2000) {
+    gymLastExtensionPoll = Date.now();
+    gymConsumeRestExtensionFromLockScreen();
+  }
+
+  // Mini-barra global: solo cuando el entreno esta OCULTO y hay descanso.
+  const liveHidden = document.getElementById('gym-live-view').classList.contains('hidden');
+  const globalBar = document.getElementById('gym-global-rest');
+  if (liveHidden && gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    // floor y no ceil: la tarjeta de la pantalla de bloqueo redondea
+    // HACIA ABAJO (estilo reloj del sistema: un temporizador de 1:00
+    // ensena 0:59 nada mas empezar), y con ceil la app iba un segundo
+    // "por detras" (feedback de Koku). Mismo criterio en los dos sitios.
+    const gRemaining = Math.max(0, Math.floor((gymLiveSession.restUntil - Date.now()) / 1000));
+    document.getElementById('gym-global-rest-remaining').textContent =
+      localStorage.getItem('gymRestFormat') === 'sec' ? `${gRemaining}s` : gymLiveFormatClock(gRemaining);
+    const gBase = gymLiveSession.restBaseSeconds || gRemaining;
+    const gExtra = gymLiveSession.restExtraSeconds || 0;
+    const gPlanned = Math.max(1, gBase + gExtra);
+    const gBaseRemaining = Math.max(0, gRemaining - gExtra);
+    document.getElementById('gym-global-rest-fill-base').style.width = `${(gBaseRemaining / gPlanned) * 100}%`;
+    document.getElementById('gym-global-rest-fill-extra').style.width = `${((gRemaining - gBaseRemaining) / gPlanned) * 100}%`;
+    globalBar.classList.remove('hidden');
+    // Con la barra visible, la interfaz entera baja lo que mide la barra
+    // para que no tape nada (ver body.gym-rest-push en styles.css). La
+    // altura se mide DESPUES de mostrarla (oculta mediria 0), cada tick:
+    // es barata y asi se adapta si cambia (giro de pantalla, etc.).
+    document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
+    document.body.classList.add('gym-rest-push');
+  } else {
+    globalBar.classList.add('hidden');
+    document.body.classList.remove('gym-rest-push');
+  }
+
+  const bar = document.getElementById('gym-live-rest-bar');
+  if (gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    // floor, como la tarjeta de bloqueo (ver el comentario de gRemaining).
+    const remaining = Math.max(0, Math.floor((gymLiveSession.restUntil - Date.now()) / 1000));
+    document.getElementById('gym-live-rest-remaining').textContent =
+      localStorage.getItem('gymRestFormat') === 'sec' ? `${remaining}s` : gymLiveFormatClock(remaining);
+    // Si la sesion en curso venia de una version sin restBaseSeconds, se
+    // rellena UNA vez con el restante actual y se guarda -- sin esto el
+    // total se recalculaba en cada tick y la barra se quedaba llena.
+    if (!gymLiveSession.restBaseSeconds) {
+      gymLiveSession.restBaseSeconds = remaining;
+      gymLiveStore();
+    }
+    // Barra: el descanso planificado son base + extra; el tramo base se
+    // vacia primero y el extra (los +30s) al final, en otro color.
+    const baseTotal = gymLiveSession.restBaseSeconds;
+    const extraTotal = gymLiveSession.restExtraSeconds || 0;
+    const planned = Math.max(1, baseTotal + extraTotal);
+    const baseRemaining = Math.max(0, remaining - extraTotal);
+    const extraRemaining = remaining - baseRemaining;
+    document.getElementById('gym-live-rest-fill-base').style.width = `${(baseRemaining / planned) * 100}%`;
+    document.getElementById('gym-live-rest-fill-extra').style.width = `${(extraRemaining / planned) * 100}%`;
+    bar.classList.remove('hidden');
+  } else {
+    if (gymLiveSession.restUntil && !gymRestExpiryPending) {
+      // OJO, orden importante (bug real): antes de dar el descanso por
+      // vencido hay que RECOGER los +30s que se hayan pulsado en la
+      // pantalla de bloqueo. Si no, al despertar la app (incluso cuando
+      // iOS la lanza en segundo plano para ejecutar el boton), este tick
+      // veia el restUntil viejo ya vencido, mataba la tarjeta y tiraba
+      // los segundos sin aplicarlos -- "es como si no lo hubiera hecho".
+      gymRestExpiryPending = true;
+      gymConsumeRestExtensionFromLockScreen().finally(() => {
+        gymRestExpiryPending = false;
+        if (gymLiveSession && gymLiveSession.restUntil && gymLiveSession.restUntil <= Date.now()) {
+          gymLiveSession.restUntil = null;
+          gymLiveStore();
+          // Ahora si: el descanso termino de verdad, fuera la tarjeta.
+          gymEndRestLiveActivity();
+          gymLiveTick();
+        }
+      });
+    }
+    bar.classList.add('hidden');
+  }
+}
+// Evita encolar mil recogidas mientras la primera esta en camino.
+let gymRestExpiryPending = false;
+// Ultimo sondeo de +30s pendientes (ver gymLiveTick).
+let gymLastExtensionPoll = 0;
+
+document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () => {
+  if (gymLiveSession && gymLiveSession.restUntil) {
+    gymLiveSession.restUntil += 30000;
+    gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + 30;
+    // El extra se le apunta a la serie cuyo descanso esta corriendo, para
+    // que el historial pueda ensenar "Serie 1: +60s" (peticion de Koku).
+    const ref = gymLiveSession.restSetRef;
+    if (ref) {
+      const refEx = gymLiveSession.exercises.find((x) => x.exerciseId === ref.exerciseId);
+      const refSet = refEx && refEx.sets[ref.setIndex];
+      if (refSet) refSet.extraRest = (refSet.extraRest || 0) + 30;
+    }
+    gymLiveStore();
+    gymLiveTick();
+    // El aviso programado apuntaba al final antiguo: se reprograma.
+    gymScheduleRestNotification();
+    // Y la tarjeta de la pantalla de bloqueo pasa a contar hasta el
+    // nuevo final, igual que la vigilancia de audio.
+    gymUpdateRestLiveActivity();
+    gymUpdateRestAudioWatch();
+  }
+});
+// El tiempo restante se puede ver como m:ss o como segundos a secas
+// (peticion de Koku) -- se alterna tocandolo, y se recuerda por
+// dispositivo.
+document.getElementById('gym-live-rest-remaining').addEventListener('click', () => {
+  const next = localStorage.getItem('gymRestFormat') === 'sec' ? 'min' : 'sec';
+  localStorage.setItem('gymRestFormat', next);
+  gymLiveTick();
+});
+document.getElementById('btn-gym-live-rest-close').addEventListener('click', () => {
+  if (gymLiveSession) {
+    gymLiveSession.restUntil = null;
+    gymLiveStore();
+    gymLiveTick();
+    gymCancelRestNotification();
+    gymEndRestLiveActivity();
+    gymCancelRestAudioWatch();
+  }
+});
+
+// --- Aviso al terminar el descanso -------------------------------------
+// En la app instalada, al arrancar un descanso se PROGRAMA una
+// notificacion del sistema para el momento en que acaba (mismo mecanismo
+// que los recordatorios, ver local-notifications.js): suena/vibra segun
+// los ajustes del telefono aunque la pantalla este bloqueada o estes en
+// otra app, asi no hay que estar mirando el movil a ver cuanto queda.
+// En un navegador normal no hay plugin y esto no hace nada.
+//
+// El id es uno RESERVADO fijo: como siempre es el mismo, programar el
+// siguiente descanso sustituye al anterior sin acumular avisos, y
+// syncScheduledReminders() sabe que no debe cancelarlo al reprogramar
+// los recordatorios (ids >= 999999900 son internos, no eventos).
+const GYM_REST_NOTIFICATION_ID = 999999901;
+// Modo insistente (peticion de Koku: "una vibracion a veces no se nota,
+// si esta un rato si"): iOS no permite alargar la vibracion de una
+// notificacion ni sonar "como el temporizador del sistema" (eso son
+// alertas criticas, que requieren un permiso especial de Apple), asi que
+// el truco es repetir el aviso: 3 notificaciones seguidas separadas 2s
+// (ids 999999901/902/903, todos en el rango reservado). Se apaga en
+// Configuracion > Notificaciones.
+const GYM_REST_NOTIFICATION_IDS = [999999901, 999999902, 999999903];
+
+function gymRestNotifyEnabled() {
+  return localStorage.getItem('gymRestNotify') !== 'false';
+}
+function gymRestBurstEnabled() {
+  return localStorage.getItem('gymRestBurst') !== 'false';
+}
+
+async function gymScheduleRestNotification() {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin || !gymRestNotifyEnabled()) return;
+  if (!gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    if (!(await ensureLocalNotificationPermissionSilently())) return;
+    // Cancelar antes de programar: si habia avisos del descanso anterior
+    // aun pendientes, no deben sonar ademas de los nuevos.
+    await plugin.cancel({ notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })) });
+    // Sonido/vibracion/silencio segun el ajuste del dispositivo -- ver
+    // notificationSoundValue() en local-notifications.js.
+    const sonido = notificationSoundValue();
+    // 1 aviso, o 3 seguidos (cada 2s) si el modo insistente esta activo.
+    const cuantos = gymRestBurstEnabled() ? GYM_REST_NOTIFICATION_IDS.length : 1;
+    const avisos = GYM_REST_NOTIFICATION_IDS.slice(0, cuantos).map((id, i) => {
+      const aviso = {
+        id,
+        title: 'Descanso terminado',
+        body: 'Siguiente serie.',
+        schedule: { at: new Date(gymLiveSession.restUntil + i * 2000) },
+        // Mismo hilo: iOS agrupa las repeticiones en UNA pila en vez de
+        // ensenar 3 avisos sueltos (feedback de Koku). Vibrar sin
+        // notificacion no existe en iOS, pero al menos se ven como una.
+        threadIdentifier: 'gym-descanso',
+      };
+      if (sonido) aviso.sound = sonido;
+      return aviso;
+    });
+    await plugin.schedule({ notifications: avisos });
+  } catch (err) {
+    console.error('No se pudo programar el aviso de descanso:', err);
+  }
+}
+
+async function gymCancelRestNotification() {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.cancel({ notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })) });
+  } catch (err) {
+    console.error('No se pudo cancelar el aviso de descanso:', err);
+  }
+}
+
+// Al volver a la app tras un descanso avisado en modo insistente, las
+// repeticiones (902/903) ya cumplieron su funcion (vibrar): se quitan
+// del centro de notificaciones y queda solo el aviso principal.
+async function gymCleanupRestNotificationStack() {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin || typeof plugin.removeDeliveredNotifications !== 'function') return;
+  try {
+    await plugin.removeDeliveredNotifications({
+      notifications: GYM_REST_NOTIFICATION_IDS.slice(1).map((id) => ({ id })),
+    });
+  } catch (err) {
+    // Limpiar es cosmetico: si falla, no pasa nada.
+  }
+}
+
+// --- Live Activity del descanso (pantalla de bloqueo) ------------------
+// La cuenta atras EN VIVO en la pantalla de bloqueo y la isla dinamica
+// (peticion de Koku). Habla con el plugin nativo LiveActivityPlugin
+// (ios/App/App/LiveActivityPlugin.swift); el dibujo lo hace la extension
+// DescansoWidget. La gracia: la app solo manda las FECHAS de inicio y
+// fin -- la cuenta atras y la barra las mueve iOS solo, aunque la app
+// este congelada y el movil bloqueado. Requiere iOS 16.2; en moviles
+// anteriores (o en navegador) estas funciones no hacen nada.
+let gymLiveActivityPlugin = null;
+function getGymLiveActivityPlugin() {
+  if (gymLiveActivityPlugin) return gymLiveActivityPlugin;
+  const cap = window.Capacitor;
+  if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null;
+  if (window.capacitorExports && typeof window.capacitorExports.registerPlugin === 'function') {
+    gymLiveActivityPlugin = window.capacitorExports.registerPlugin('LiveActivity');
+  }
+  return gymLiveActivityPlugin;
+}
+
+// Colores del tema activo, para que la tarjeta de la pantalla de bloqueo
+// siga el estilo de la app entera (peticion de Koku): acento + fondo de
+// tarjeta (surface) + su texto emparejado.
+function gymThemeColorHex(varName, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback;
+}
+function gymCurrentAccentHex() {
+  return gymThemeColorHex('--accent', '#5b8cff');
+}
+// Mezcla dos colores hex (el equivalente JS del color-mix del CSS): es
+// EXACTAMENTE la formula del tramo extra de la barra de la app
+// (color-mix(in srgb, var(--accent) 45%, var(--surface-text))), para que
+// la tarjeta de la pantalla de bloqueo use el mismo color (peticion de
+// Koku: nada de naranja).
+function gymMixHex(hexA, hexB, weightA) {
+  const parse = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [a, b] = [parse(hexA), parse(hexB)];
+  return '#' + a.map((va, i) =>
+    Math.round(va * weightA + b[i] * (1 - weightA)).toString(16).padStart(2, '0')
+  ).join('');
+}
+
+// Fechas que necesita la tarjeta, derivadas del estado del descanso.
+function gymRestActivityParams() {
+  const totalSeconds = (gymLiveSession.restBaseSeconds || 0) + (gymLiveSession.restExtraSeconds || 0);
+  const accent = gymCurrentAccentHex();
+  const surfaceText = gymThemeColorHex('--surface-text', '#f2f2f7');
+  return {
+    startAt: totalSeconds > 0 ? gymLiveSession.restUntil - totalSeconds * 1000 : Date.now(),
+    endAt: gymLiveSession.restUntil,
+    dayName: gymLiveSession.routineName || 'Sesión libre',
+    extraSeconds: gymLiveSession.restExtraSeconds || 0,
+    accentHex: accent,
+    surfaceHex: gymThemeColorHex('--surface', '#1c1c27'),
+    surfaceTextHex: surfaceText,
+    // El color del tramo extra, calcado del de la barra de la app.
+    extraHex: gymMixHex(accent, surfaceText, 0.45),
+  };
+}
+
+// El +30s pulsado EN LA PANTALLA DE BLOQUEO (boton de la Live Activity,
+// iOS 17+): mientras el movil esta bloqueado el JS esta congelado, asi
+// que el intent nativo lo hace todo el (alargar la tarjeta y reprogramar
+// el aviso) y deja los segundos apuntados. Aqui se recogen al volver a
+// primer plano y se pone al dia el estado del JS: el temporizador de la
+// app, el total de extra y el "+Ns" de la serie en descanso.
+async function gymConsumeRestExtensionFromLockScreen() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin) return;
+  try {
+    const res = await plugin.consumeRestExtension();
+    const seconds = res && res.seconds ? Number(res.seconds) : 0;
+    if (seconds > 0 && gymLiveSession && gymLiveSession.restUntil) {
+      gymLiveSession.restUntil += seconds * 1000;
+      gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + seconds;
+      const ref = gymLiveSession.restSetRef;
+      if (ref) {
+        const refEx = gymLiveSession.exercises.find((x) => x.exerciseId === ref.exerciseId);
+        const refSet = refEx && refEx.sets[ref.setIndex];
+        if (refSet) refSet.extraRest = (refSet.extraRest || 0) + seconds;
+      }
+      gymLiveStore();
+      gymLiveTick();
+      // Con el entreno a la vista, repintar para que el "+Ns" de la serie
+      // se vea al momento (oculto, ya se repintara al abrirlo).
+      if (!document.getElementById('gym-live-view').classList.contains('hidden')) {
+        renderGymLiveExercises();
+      }
+      // Reafirma la tarjeta con el estado ya cuadrado (y la resucita si
+      // un despertar anterior la hubiera cerrado de mas).
+      gymUpdateRestLiveActivity();
+    }
+    // Tocar la tarjeta de la pantalla de bloqueo abre la app pidiendo ir
+    // al entreno (peticion de Koku): el SceneDelegate deja la marca y
+    // aqui se ejecuta la navegacion.
+    if (res && res.openGym && gymLiveSession) {
+      if (typeof closeSettingsModal === 'function') closeSettingsModal();
+      if (typeof openGymView === 'function') openGymView();
+      openGymLiveView();
+    }
+  } catch (err) {
+    console.error('No se pudo recoger el +30s de la pantalla de bloqueo:', err);
+  }
+}
+// Al volver la app a primer plano (desbloquear/cambiar de app) es cuando
+// puede haber +30s pendientes. Se escuchan LOS DOS eventos: el 'resume'
+// que dispara Capacitor suele llegar antes que visibilitychange, y con
+// ambos el tiempo tarda menos en reflejarse (Koku notaba ~3s de espera).
+// Recoger dos veces no duplica nada: la segunda lectura ya devuelve 0.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    gymConsumeRestExtensionFromLockScreen();
+    gymCleanupRestNotificationStack();
+  }
+});
+document.addEventListener('resume', () => {
+  gymConsumeRestExtensionFromLockScreen();
+  gymCleanupRestNotificationStack();
+});
+
+async function gymStartRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    const res = await plugin.startRest(gymRestActivityParams());
+    // Diagnostico visible en Configuracion > Este dispositivo: como no
+    // hay forma de ver la consola en el iPhone, el resultado del ultimo
+    // intento se guarda y se ensena alli (Koku reporto que la tarjeta no
+    // aparecia y no habia manera de saber por que).
+    localStorage.setItem('gymLiveActivityStatus', res && res.started
+      ? 'ok'
+      : `no: ${res && res.error ? res.error : 'el sistema no lo permite (¿iOS < 16.2, o desactivado en Ajustes?)'}`);
+  } catch (err) {
+    localStorage.setItem('gymLiveActivityStatus', `error: ${err && err.message ? err.message : err}`);
+    console.error('No se pudo iniciar la Live Activity del descanso:', err);
+  }
+}
+
+async function gymUpdateRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    const res = await plugin.updateRest(gymRestActivityParams());
+    // Si iOS ya habia soltado la tarjeta (p. ej. la app se relanzo),
+    // updated viene en false: se crea una nueva en su lugar.
+    if (!res || !res.updated) await plugin.startRest(gymRestActivityParams());
+  } catch (err) {
+    console.error('No se pudo actualizar la Live Activity del descanso:', err);
+  }
+}
+
+async function gymEndRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.endRest();
+  } catch (err) {
+    console.error('No se pudo cerrar la Live Activity del descanso:', err);
+  }
+}
+
+// --- Bajar la musica al acabar el descanso -----------------------------
+// (Peticion de Koku: "que baje un poco el volumen de la musica, no
+// quitarla".) El trabajo de verdad lo hace RestAudioWatcher en nativo
+// (audio ducking de iOS + la app despierta durante el descanso); aqui
+// solo se le avisa de cuando empieza/cambia/se cancela el descanso.
+// En navegador no hay plugin y no pasa nada.
+let gymRestAudioPlugin = null;
+function getGymRestAudioPlugin() {
+  if (gymRestAudioPlugin) return gymRestAudioPlugin;
+  const cap = window.Capacitor;
+  if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null;
+  if (window.capacitorExports && typeof window.capacitorExports.registerPlugin === 'function') {
+    gymRestAudioPlugin = window.capacitorExports.registerPlugin('RestAudio');
+  }
+  return gymRestAudioPlugin;
+}
+function gymRestDuckEnabled() {
+  return localStorage.getItem('gymRestDuck') !== 'false';
+}
+async function gymStartRestAudioWatch() {
+  const plugin = getGymRestAudioPlugin();
+  if (!plugin || !gymRestDuckEnabled() || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    await plugin.startWatch({ endAt: gymLiveSession.restUntil });
+  } catch (err) {
+    console.error('No se pudo vigilar el audio del descanso:', err);
+  }
+}
+async function gymUpdateRestAudioWatch() {
+  const plugin = getGymRestAudioPlugin();
+  if (!plugin || !gymRestDuckEnabled() || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    await plugin.updateWatch({ endAt: gymLiveSession.restUntil });
+  } catch (err) {
+    console.error('No se pudo mover la vigilancia de audio:', err);
+  }
+}
+async function gymCancelRestAudioWatch() {
+  const plugin = getGymRestAudioPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.cancelWatch();
+  } catch (err) {
+    console.error('No se pudo cancelar la vigilancia de audio:', err);
+  }
+}
+
+// Tarjetas de ejercicio del entreno en vivo. Igual que el resto del
+// proyecto: se reconstruye el DOM entero en cada cambio estructural
+// (anadir/quitar series o ejercicios); los inputs escriben directo en
+// gymLiveSession y guardan en localStorage.
+// Las listas de ejercicios ocultos/quitados empiezan recogidas;
+// recordarlo en variables (no en la sesion guardada) basta -- es estado
+// de vista.
+let gymLiveHiddenPoolOpen = false;
+let gymLiveRemovedPoolOpen = false;
+
+function renderGymLiveExercises() {
+  const container = document.getElementById('gym-live-exercises');
+  container.innerHTML = '';
+  // El atajo de "lista vacia" solo aplica si TAMPOCO hay nada que
+  // recuperar (ni ocultos del dia ni quitados en esta sesion) -- si no,
+  // esas secciones de abajo no se pintarian nunca.
+  if (gymLiveSession.exercises.length === 0
+      && !(gymLiveSession.hiddenPool || []).length
+      && !(gymLiveSession.removedPool || []).length) {
+    container.innerHTML = '<p class="empty-hint">Añade ejercicios con el botón del menú de abajo a la derecha.</p>';
+    return;
+  }
+  const unit = getGymWeightUnitLabel();
+
+  // Plegar/desplegar todo (peticion de Koku: no deslizar 40 minutos).
+  if (gymLiveSession.exercises.length > 1) {
+    const toolsRow = document.createElement('div');
+    toolsRow.className = 'gym-live-cards-tools';
+    toolsRow.innerHTML = `
+      <button type="button" class="secondary-btn" data-live-expand-all>Desplegar todo</button>
+      <button type="button" class="secondary-btn" data-live-collapse-all>Recoger todo</button>
+    `;
+    toolsRow.querySelector('[data-live-expand-all]').addEventListener('click', () => {
+      gymLiveSession.exercises.forEach((ex) => { ex.collapsed = false; });
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    toolsRow.querySelector('[data-live-collapse-all]').addEventListener('click', () => {
+      gymLiveSession.exercises.forEach((ex) => { ex.collapsed = true; });
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    container.appendChild(toolsRow);
+  }
+
+  gymLiveSession.exercises.forEach((ex, exIndex) => {
+    const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+    const prev = gymLivePrevSets.get(ex.exerciseId);
+    // Sesiones guardadas por versiones anteriores: el RPE vivia por
+    // serie; se recupera el primero que hubiera como RPE del ejercicio.
+    if (ex.rpe === undefined) ex.rpe = (ex.sets.find((s) => s.rpe) || {}).rpe || '';
+    const card = document.createElement('div');
+    card.className = 'gym-live-exercise-card' + (ex.collapsed ? ' collapsed' : '');
+
+    const setsHtml = ex.sets.map((set, setIndex) => {
+      const prevSet = prev && prev.sets[setIndex];
+      const prevLabel = prevSet
+        ? `${prevSet.restSeconds ? `(${gymFormatRestShort(prevSet.restSeconds)})` : ''}${prevSet.weightKg !== null ? gymWeightKgToDisplay(prevSet.weightKg) : '—'}×${prevSet.reps ?? '—'}`
+        : '—';
+      return `
+        <div class="gym-live-set-row ${set.done ? 'done' : ''}">
+          <span class="gym-live-set-number">${setIndex + 1}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}</span>
+          <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
+          <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${unit}" data-live-field="weightDisplay" data-set="${setIndex}" value="${set.weightDisplay}" />
+          <input type="number" inputmode="numeric" min="0" placeholder="reps" data-live-field="reps" data-set="${setIndex}" value="${set.reps}" />
+          <input type="checkbox" class="styled-checkbox" data-live-done="${setIndex}" ${set.done ? 'checked' : ''} aria-label="Serie hecha" />
+        </div>
+      `;
+    }).join('');
+
+    const doneCount = ex.sets.filter((s) => s.done).length;
+    const restSeconds = Number(ex.sets[0] && ex.sets[0].restSeconds) || '';
+    card.innerHTML = `
+      <div class="gym-live-exercise-header" data-live-toggle-collapse>
+        <span class="gym-live-caret" aria-hidden="true">▾</span>
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <button type="button" class="gym-live-rest-chip" data-live-rest-chip title="Descanso entre series de este ejercicio (tocar para cambiarlo)">${restSeconds ? gymFormatRestDisplay(restSeconds) : 'descanso'}</button>
+        <span class="gym-live-card-progress">${doneCount}/${ex.sets.length}</span>
+        <button type="button" class="icon-btn gym-live-card-btn" data-live-move-up aria-label="Subir ejercicio" ${exIndex === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" class="icon-btn gym-live-card-btn" data-live-move-down aria-label="Bajar ejercicio" ${exIndex === gymLiveSession.exercises.length - 1 ? 'disabled' : ''}>↓</button>
+        <button type="button" class="icon-btn gym-live-card-btn" data-live-remove-exercise aria-label="Quitar ejercicio">✕</button>
+      </div>
+      <div class="gym-live-card-body">
+        ${exercise && exercise.notes ? `<p class="gym-live-fixed-note">${escapeHtml(exercise.notes)}</p>` : ''}
+        <div class="gym-live-set-row gym-live-set-head">
+          <span class="gym-live-set-number">#</span>
+          <span class="gym-live-set-prev">Anterior</span>
+          <span>${unit}</span><span>Reps</span><span>✓</span>
+        </div>
+        ${setsHtml}
+        <div class="gym-live-card-footer">
+          <button type="button" class="secondary-btn gym-add-set-btn" data-live-add-set>+ Serie</button>
+          <label class="gym-live-exrpe">RPE
+            <input type="number" inputmode="decimal" step="0.5" min="1" max="10" placeholder="—" data-live-exrpe value="${ex.rpe}" />
+          </label>
+        </div>
+        <input type="text" class="gym-live-note" data-live-note placeholder="Nota (sensaciones, peso próximo...)" value="${escapeHtml(ex.note || '')}" />
+      </div>
+    `;
+
+    // Tocar la cabecera pliega/despliega la tarjeta -- salvo que el toque
+    // caiga en un boton o input de la propia cabecera.
+    card.querySelector('[data-live-toggle-collapse]').addEventListener('click', (e) => {
+      if (e.target.closest('button, input')) return;
+      ex.collapsed = !ex.collapsed;
+      gymLiveStore();
+      card.classList.toggle('collapsed', ex.collapsed);
+    });
+    // Chip de descanso: tocarlo lo convierte en un campo de segundos; al
+    // confirmar, el nuevo descanso se aplica a TODAS las series del
+    // ejercicio (es "el descanso de este ejercicio", no de una serie).
+    card.querySelector('[data-live-rest-chip]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const chip = e.currentTarget;
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.inputMode = 'numeric';
+      input.min = '0';
+      input.className = 'gym-live-rest-chip-input';
+      input.value = restSeconds || '';
+      input.placeholder = 's';
+      input.title = 'Segundos de descanso';
+      chip.replaceWith(input);
+      input.focus();
+      const commit = () => {
+        const value = input.value === '' ? '' : Math.max(0, Number(input.value));
+        ex.sets.forEach((s) => { s.restSeconds = value; });
+        gymLiveStore();
+        renderGymLiveExercises();
+      };
+      input.addEventListener('blur', commit);
+      input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); } });
+    });
+    card.querySelector('[data-live-move-up]').addEventListener('click', () => {
+      if (exIndex === 0) return;
+      const arr = gymLiveSession.exercises;
+      [arr[exIndex - 1], arr[exIndex]] = [arr[exIndex], arr[exIndex - 1]];
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    card.querySelector('[data-live-move-down]').addEventListener('click', () => {
+      const arr = gymLiveSession.exercises;
+      if (exIndex >= arr.length - 1) return;
+      [arr[exIndex], arr[exIndex + 1]] = [arr[exIndex + 1], arr[exIndex]];
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+
+    card.querySelectorAll('[data-live-field]').forEach((input) => {
+      input.addEventListener('input', () => {
+        ex.sets[Number(input.dataset.set)][input.dataset.liveField] = input.value;
+        gymLiveStore();
+      });
+    });
+    card.querySelector('[data-live-exrpe]').addEventListener('input', (e) => {
+      ex.rpe = e.target.value;
+      gymLiveStore();
+    });
+    card.querySelectorAll('[data-live-done]').forEach((check) => {
+      check.addEventListener('change', () => {
+        const setIndex = Number(check.dataset.liveDone);
+        const set = ex.sets[setIndex];
+        set.done = check.checked;
+        // Marcar una serie como hecha arranca el descanso: el sugerido de
+        // esa serie si lo tiene, si no el preset elegido arriba.
+        // Desmarcarla (te equivocaste de casilla) lo cancela, para no
+        // quedarte con un temporizador de una serie que no has hecho.
+        if (check.checked) {
+          const seconds = Number(set.restSeconds) || gymLiveSession.restPreset;
+          gymLiveSession.restUntil = Date.now() + seconds * 1000;
+          gymLiveSession.restBaseSeconds = seconds;
+          gymLiveSession.restExtraSeconds = 0;
+          // A que serie pertenece el descanso en marcha: los +30s se le
+          // apuntan a ELLA, para poder ensenar "Serie 1: +60s" luego.
+          gymLiveSession.restSetRef = { exerciseId: ex.exerciseId, setIndex };
+          set.extraRest = 0;
+          gymScheduleRestNotification();
+          gymStartRestLiveActivity();
+          gymStartRestAudioWatch();
+        } else {
+          gymLiveSession.restUntil = null;
+          set.extraRest = 0;
+          gymCancelRestNotification();
+          gymEndRestLiveActivity();
+          gymCancelRestAudioWatch();
+        }
+        gymLiveStore();
+        gymLiveTick();
+        check.closest('.gym-live-set-row').classList.toggle('done', check.checked);
+        const progress = card.querySelector('.gym-live-card-progress');
+        if (progress) progress.textContent = `${ex.sets.filter((s) => s.done).length}/${ex.sets.length}`;
+      });
+    });
+    card.querySelector('[data-live-add-set]').addEventListener('click', () => {
+      const last = ex.sets[ex.sets.length - 1];
+      ex.sets.push({ reps: '', weightDisplay: '', done: false, restSeconds: last ? last.restSeconds : '' });
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    card.querySelector('[data-live-remove-exercise]').addEventListener('click', async () => {
+      const ok = await showAppConfirm('¿Quitar este ejercicio del entrenamiento? Podrás recuperarlo con sus series desde "Ejercicios quitados", abajo del todo.', { okText: 'Quitar', danger: true });
+      if (!ok) return;
+      // No se pierde: va al pool de quitados de ESTA sesion, con sus
+      // series tal cual estaban (peticion de Koku: poder recuperarlo).
+      if (!gymLiveSession.removedPool) gymLiveSession.removedPool = [];
+      gymLiveSession.removedPool.push(gymLiveSession.exercises[exIndex]);
+      gymLiveSession.exercises.splice(exIndex, 1);
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    card.querySelector('[data-live-note]').addEventListener('input', (e) => {
+      ex.note = e.target.value;
+      gymLiveStore();
+    });
+
+    container.appendChild(card);
+  });
+
+  // Ejercicios QUITADOS durante esta sesion: recuperables con sus series
+  // (peticion de Koku, "no es que me lo haya saltado, es un cambio").
+  const removed = gymLiveSession.removedPool || [];
+  if (removed.length > 0) {
+    const removedBox = document.createElement('div');
+    removedBox.className = 'gym-live-hidden-pool';
+    removedBox.innerHTML = `<button type="button" class="secondary-btn" data-live-toggle-removed>${gymLiveRemovedPoolOpen ? 'Ocultar' : 'Ver'} ejercicios quitados (${removed.length})</button><div class="gym-live-hidden-list ${gymLiveRemovedPoolOpen ? '' : 'hidden'}"></div>`;
+    removedBox.querySelector('[data-live-toggle-removed]').addEventListener('click', () => {
+      gymLiveRemovedPoolOpen = !gymLiveRemovedPoolOpen;
+      renderGymLiveExercises();
+    });
+    const removedList = removedBox.querySelector('.gym-live-hidden-list');
+    removed.forEach((r, removedIndex) => {
+      const exercise = state.gymExercises.find((e) => e.id === r.exerciseId);
+      const row = document.createElement('div');
+      row.className = 'gym-live-hidden-row';
+      row.innerHTML = `
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <button type="button" class="secondary-btn">Recuperar</button>
+      `;
+      row.querySelector('button').addEventListener('click', () => {
+        r.collapsed = false;
+        gymLiveSession.exercises.push(r);
+        gymLiveSession.removedPool.splice(removedIndex, 1);
+        gymLiveStore();
+        renderGymLiveExercises();
+      });
+      removedList.appendChild(row);
+    });
+    container.appendChild(removedBox);
+  }
+
+  // Ejercicios OCULTOS del dia: no estan en el entreno, pero se pueden
+  // recuperar para esta sesion concreta (peticion de Koku).
+  const pool = gymLiveSession.hiddenPool || [];
+  if (pool.length > 0) {
+    const poolBox = document.createElement('div');
+    poolBox.className = 'gym-live-hidden-pool';
+    poolBox.innerHTML = `<button type="button" class="secondary-btn" data-live-toggle-hidden>${gymLiveHiddenPoolOpen ? 'Ocultar' : 'Ver'} ejercicios ocultos (${pool.length})</button><div class="gym-live-hidden-list ${gymLiveHiddenPoolOpen ? '' : 'hidden'}"></div>`;
+    poolBox.querySelector('[data-live-toggle-hidden]').addEventListener('click', () => {
+      gymLiveHiddenPoolOpen = !gymLiveHiddenPoolOpen;
+      renderGymLiveExercises();
+    });
+    const listEl = poolBox.querySelector('.gym-live-hidden-list');
+    pool.forEach((p, poolIndex) => {
+      const exercise = state.gymExercises.find((e) => e.id === p.exerciseId);
+      const row = document.createElement('div');
+      row.className = 'gym-live-hidden-row';
+      row.innerHTML = `
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <button type="button" class="secondary-btn">+ Añadir a esta sesión</button>
+      `;
+      row.querySelector('button').addEventListener('click', async () => {
+        gymLiveSession.exercises.push({
+          exerciseId: p.exerciseId,
+          note: '',
+          rpe: '',
+          collapsed: false,
+          sets: Array.from({ length: p.targetSets || 1 }, () => ({
+            reps: '', weightDisplay: '', done: false,
+            restSeconds: p.targetRestSeconds ?? '',
+          })),
+        });
+        gymLiveSession.hiddenPool.splice(poolIndex, 1);
+        gymLiveStore();
+        if (!gymLivePrevSets.has(p.exerciseId)) {
+          gymLivePrevSets.set(p.exerciseId, await api(`/api/gym-sessions/last-sets/${p.exerciseId}`));
+        }
+        renderGymLiveExercises();
+      });
+      listEl.appendChild(row);
+    });
+    container.appendChild(poolBox);
+  }
+}
+
+// "+ Añadir ejercicio" en vivo: reutiliza el MISMO buscador de la
+// libreria de la Fase 2, pero en "modo elegir" -- si
+// gymLibraryPickCallback esta puesto, elegir un ejercicio (fila o boton)
+// llama al callback en vez del flujo normal de importar, y cierra el
+// buscador. Asi no hay que construir un segundo selector solo para el
+// entreno en vivo.
+let gymLibraryPickCallback = null;
+document.getElementById('btn-gym-live-add-exercise').addEventListener('click', () => {
+  gymLibraryPickCallback = async (libraryEntry) => {
+    // Importa (idempotente) y anade la tarjeta al entreno en curso.
+    await importGymLibraryExercise(libraryEntry.id);
+    const imported = state.gymExercises.find((e) => e.libraryId === libraryEntry.id);
+    if (!imported) return;
+    if (!gymLiveSession.exercises.some((e) => e.exerciseId === imported.id)) {
+      gymLiveSession.exercises.push({ exerciseId: imported.id, note: '', sets: [{ reps: '', weightDisplay: '', rpe: '', done: false, restSeconds: '' }] });
+      gymLiveStore();
+      const prev = await api(`/api/gym-sessions/last-sets/${imported.id}`);
+      gymLivePrevSets.set(imported.id, prev);
+      renderGymLiveExercises();
+    }
+  };
+  openGymLibraryModal();
+});
+
+// --- Modal de ayuda del entrenamiento --------------------------------
+// Se abre SOLO la primera vez que entras a entrenar (y cada vez, hasta
+// que marques "no volver a mostrar"), y siempre a mano desde el boton
+// "?" flotante o tocando la cabecera RPE. El flag vive en localStorage
+// porque es una preferencia de ESTE dispositivo, como el resto.
+function openGymHelpModal() {
+  // El checkbox refleja lo guardado: si ya pediste no verlo mas y lo
+  // abres a mano, aparece marcado (y puedes desmarcarlo para que vuelva
+  // a salir solo).
+  document.getElementById('gym-help-dont-show').checked =
+    localStorage.getItem('gymLiveHelpSeen') === '1';
+  document.getElementById('gym-help-modal').classList.remove('hidden');
+}
+function closeGymHelpModal() {
+  localStorage.setItem(
+    'gymLiveHelpSeen',
+    document.getElementById('gym-help-dont-show').checked ? '1' : '0'
+  );
+  document.getElementById('gym-help-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-live-help').addEventListener('click', openGymHelpModal);
+document.getElementById('btn-close-gym-help').addEventListener('click', closeGymHelpModal);
+
+// Ocultar el entrenamiento sin descartarlo (el ▾ de la cabecera): vuelve
+// al Gimnasio con sus pestanas utilizables. El ticker sigue vivo.
+document.getElementById('btn-gym-live-header-hide').addEventListener('click', closeGymLiveView);
+
+// Pausar/reanudar el CRONOMETRO de la sesion (aclarado con Koku: la
+// pausa del menu congela el tiempo de sesion -- si te interrumpen, el
+// entreno no "engorda"). El descanso entre series NO se pausa: es tiempo
+// de reloj de pared. pausedMs/pausedAt, ver gymLiveElapsedSeconds().
+function gymToggleSessionPause() {
+  if (!gymLiveSession) return;
+  if (gymLiveSession.pausedAt) {
+    gymLiveSession.pausedMs = (gymLiveSession.pausedMs || 0) + (Date.now() - gymLiveSession.pausedAt);
+    gymLiveSession.pausedAt = null;
+  } else {
+    gymLiveSession.pausedAt = Date.now();
+  }
+  gymLiveStore();
+  refreshGymLivePauseUi();
+  gymLiveTick();
+}
+function refreshGymLivePauseUi() {
+  const paused = !!(gymLiveSession && gymLiveSession.pausedAt);
+  document.getElementById('btn-gym-live-pause').classList.toggle('is-paused', paused);
+  document.getElementById('btn-gym-live-pause').setAttribute('aria-label', paused ? 'Reanudar el cronómetro' : 'Pausar el cronómetro');
+}
+document.getElementById('btn-gym-live-pause').addEventListener('click', gymToggleSessionPause);
+
+// El menu flotante de acciones del entreno: el boton central abre/cierra
+// el abanico de 4 botones (dudas / pausar / terminar / descartar).
+// Cualquier accion lo cierra, y un toque fuera tambien.
+const GYM_LIVE_FAB = document.getElementById('gym-live-fab');
+function closeGymLiveFab() {
+  GYM_LIVE_FAB.classList.remove('open');
+  document.getElementById('btn-gym-live-menu').setAttribute('aria-expanded', 'false');
+}
+document.getElementById('btn-gym-live-menu').addEventListener('click', () => {
+  const abierto = GYM_LIVE_FAB.classList.toggle('open');
+  document.getElementById('btn-gym-live-menu').setAttribute('aria-expanded', abierto ? 'true' : 'false');
+});
+GYM_LIVE_FAB.querySelectorAll('.gym-live-fab-action').forEach((btn) => {
+  btn.addEventListener('click', closeGymLiveFab);
+});
+document.addEventListener('click', (e) => {
+  if (!GYM_LIVE_FAB.classList.contains('open')) return;
+  // Leccion aprendida (ver CLAUDE.md): si el nodo pulsado ya no esta en
+  // el documento (repintado en su propio manejador), closest() daria
+  // null y pareceria un "clic fuera" -- se ignora.
+  if (!document.contains(e.target)) return;
+  if (!e.target.closest('#gym-live-fab')) closeGymLiveFab();
+});
+
+// Con el entreno en vivo abierto, tocar la navegacion inferior del
+// movil no "funcionaba" (la nav cambiaba la pantalla POR DEBAJO del
+// overlay y no se veia nada). Ahora esconde el overlay primero: la
+// sesion sigue viva en localStorage y en Entrenar queda el boton de
+// "continuar". Listener en captura para adelantarse al de la nav.
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.mobile-nav')) return;
+  const live = document.getElementById('gym-live-view');
+  if (live && !live.classList.contains('hidden')) closeGymLiveView();
+}, true);
+
+// Tocar la mini-barra global de descanso vuelve al entrenamiento.
+// Configuracion es un modal que quedaria POR ENCIMA del entreno, asi que
+// se cierra primero (feedback de Koku: "desde configuracion no me lleva
+// al entrenamiento").
+document.getElementById('gym-global-rest').addEventListener('click', () => {
+  if (!gymLiveSession) return;
+  if (typeof closeSettingsModal === 'function') closeSettingsModal();
+  openGymLiveView();
+});
+
+// Al arrancar la app, si quedo una sesion en curso guardada se carga en
+// memoria (sin abrir el overlay): asi el indicador de la nav y la
+// mini-barra de descanso funcionan desde el primer momento.
+gymLiveSession = gymLiveReadStored();
+if (gymLiveSession) {
+  gymLiveTicker = setInterval(gymLiveTick, 1000);
+  // Por si la app se relanzo con +30s de la pantalla de bloqueo sin
+  // recoger (el visibilitychange no cubre el primer arranque).
+  gymConsumeRestExtensionFromLockScreen();
+  // Y si el relanzamiento pillo un descanso a medias, la vigilancia de
+  // audio (bajar la musica al acabar) se rearma con el final vigente.
+  if (gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    gymStartRestAudioWatch();
+  }
+}
+refreshGymLiveIndicators();
+
+// Descartar: tirar el entrenamiento en curso sin guardar nada.
+document.getElementById('btn-gym-live-discard').addEventListener('click', async () => {
+  const ok = await showAppConfirm('¿Descartar el entrenamiento? No se guardará nada de hoy.', { okText: 'Descartar', danger: true });
+  if (!ok) return;
+  localStorage.removeItem('gymLiveSession');
+  gymLiveSession = null;
+  gymLiveStopTicker();
+  closeGymLiveView();
+});
+
+// Terminar: convertir lo hecho en una sesion de verdad + resumen.
+document.getElementById('btn-gym-live-finish').addEventListener('click', async () => {
+  // Solo cuentan las series marcadas como hechas o con algun dato; las
+  // filas vacias pre-creadas por el plan se ignoran sin molestar.
+  const sets = [];
+  const exerciseNotes = {};
+  const musclesTouched = new Set();
+  let volumeKg = 0;
+  for (const ex of gymLiveSession.exercises) {
+    if (ex.note && ex.note.trim()) exerciseNotes[ex.exerciseId] = ex.note.trim();
+    for (const set of ex.sets) {
+      if (!set.done && set.reps === '' && set.weightDisplay === '') continue;
+      const weightKg = gymWeightDisplayToKg(set.weightDisplay);
+      sets.push({
+        exerciseId: ex.exerciseId,
+        reps: set.reps,
+        weightKg,
+        restSeconds: set.restSeconds,
+        // El RPE es del EJERCICIO (peticion de Koku): se guarda replicado
+        // en cada serie para no cambiar el esquema de gym_sets.
+        rpe: ex.rpe,
+        extraRestSeconds: set.extraRest || null,
+      });
+      volumeKg += (Number(set.reps) || 0) * (weightKg || 0);
+      const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+      if (exercise && exercise.muscleGroup) musclesTouched.add(gymMuscleGroupLabel(exercise.muscleGroup));
+    }
+  }
+  if (sets.length === 0) {
+    const ok = await showAppConfirm('No has marcado ninguna serie. ¿Descartar el entrenamiento?', { okText: 'Descartar', danger: true });
+    if (!ok) return;
+    localStorage.removeItem('gymLiveSession');
+    gymLiveSession = null;
+    gymLiveStopTicker();
+    closeGymLiveView();
+    return;
+  }
+
+  const durationSeconds = gymLiveElapsedSeconds();
+  await api('/api/gym-sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      date: toDateKey(new Date()),
+      routineId: gymLiveSession.routineId,
+      sets,
+      startedAt: new Date(gymLiveSession.startedAt).toISOString(),
+      durationSeconds,
+      exerciseNotes,
+    }),
+  });
+
+  // Resumen: duracion, series, volumen (en la unidad del dispositivo) y
+  // grupos musculares tocados.
+  const minutes = Math.max(1, Math.round(durationSeconds / 60));
+  document.getElementById('gym-summary-duration').textContent = `${minutes} min`;
+  document.getElementById('gym-summary-sets').textContent = String(sets.length);
+  document.getElementById('gym-summary-volume').textContent = `${gymWeightKgToDisplay(volumeKg)} ${getGymWeightUnitLabel()}`;
+  document.getElementById('gym-summary-muscles').textContent = String(musclesTouched.size);
+  document.getElementById('gym-summary-muscle-list').textContent = [...musclesTouched].join(' · ');
+
+  localStorage.removeItem('gymLiveSession');
+  gymLiveSession = null;
+  gymLiveStopTicker();
+  closeGymLiveView();
+  document.getElementById('gym-live-summary-modal').classList.remove('hidden');
+
+  await loadGymSessions();
+  renderGymSessionsList();
+  populateGymProgressExerciseSelect();
+  // La celebracion de logros (si algo subio de nivel) queda ABIERTA
+  // detras del resumen: al cerrar el resumen aparece ella.
+  checkGymAchievements();
+});
+document.getElementById('btn-close-gym-summary').addEventListener('click', () => {
+  document.getElementById('gym-live-summary-modal').classList.add('hidden');
+});
+
+// --- Modal de bloque (rediseno de Gimnasio) ---------------------------
+// Un solo campo (el nombre), al estilo de la app de referencia. Activar
+// se hace desde la lista, no desde aqui.
+function openGymBlockModal(block) {
+  document.getElementById('gym-block-modal-title').textContent = block ? 'Editar bloque' : 'Nuevo bloque';
+  document.getElementById('gym-block-id').value = block ? block.id : '';
+  document.getElementById('gym-block-name').value = block ? block.name : '';
+  document.getElementById('btn-delete-gym-block').classList.toggle('hidden', !block);
+  document.getElementById('gym-block-modal').classList.remove('hidden');
+}
+function closeGymBlockModal() {
+  document.getElementById('gym-block-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-gym-block').addEventListener('click', () => openGymBlockModal(null));
+document.getElementById('btn-cancel-gym-block').addEventListener('click', closeGymBlockModal);
+document.getElementById('btn-close-gym-block').addEventListener('click', closeGymBlockModal);
+
+document.getElementById('gym-block-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('gym-block-id').value;
+  const payload = { name: document.getElementById('gym-block-name').value };
+  if (id) {
+    await api(`/api/gym-blocks/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/gym-blocks', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeGymBlockModal();
+  await loadGymBlocks();
+  renderGymBlocksList();
+});
+
+document.getElementById('btn-delete-gym-block').addEventListener('click', async () => {
+  const id = Number(document.getElementById('gym-block-id').value);
+  const block = state.gymBlocks.find((b) => b.id === id);
+  const dayCount = block ? block.dayCount : 0;
+  // Borrar un bloque se lleva sus dias (plantillas), aunque nunca el
+  // historial de sesiones -- se avisa con el confirm propio de la app,
+  // no con el del navegador (regla del proyecto).
+  const ok = await showAppConfirm(
+    dayCount > 0
+      ? `¿Eliminar este bloque y ${dayCount === 1 ? 'su día' : `sus ${dayCount} días`}? Las sesiones ya registradas no se pierden.`
+      : '¿Eliminar este bloque?',
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/gym-blocks/${id}`, { method: 'DELETE' });
+  closeGymBlockModal();
+  await Promise.all([loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
+  renderGymBlocksList();
+  renderGymSessionsList();
+});
+
+// --- Modal de dia (antes "rutina" -- ids gym-routine-* conservados) ---
 // El color/icono usan createColorField/createIconField (definidas en
 // settings.js, que se carga DESPUES de app.js) -- construirlas aqui
 // arriba, al analizar el archivo, fallaria (esas funciones todavia no
@@ -8441,13 +10169,29 @@ function renderGymRoutineExercisesField() {
   }
   gymRoutineModalExercises.forEach((row, index) => {
     const rowEl = document.createElement('div');
-    rowEl.className = 'gym-routine-exercise-row';
+    rowEl.className = 'gym-routine-exercise-row gym-routine-exercise-stacked' + (row.hidden ? ' gym-exercise-hidden' : '');
+    // El ojo oculta el ejercicio SIN quitarlo del dia: los entrenos nuevos
+    // no lo pre-cargan, pero se puede recuperar durante la sesion desde
+    // "Ejercicios ocultos" (peticion de Koku: aparcar sin borrar).
+    const eyeSvg = row.hidden
+      ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.8 9.8 0 0 1 12 5c5 0 9 4.5 10 7-.4 1-1.3 2.4-2.6 3.7M6.6 6.6C4.1 8.1 2.5 10.4 2 12c1 2.5 5 7 10 7 1.5 0 2.9-.4 4.2-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>'
+      : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12c1-2.5 5-7 10-7s9 4.5 10 7c-1 2.5-5 7-10 7S3 14.5 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const restPreviewText = (seconds) => {
+      const n = Number(seconds);
+      return n > 0 ? `Descanso: ${gymLiveFormatClock(n)} min` : '';
+    };
     rowEl.innerHTML = `
-      <select data-field="exerciseId">${gymExerciseOptionsHtml(row.exerciseId)}</select>
-      <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
-      <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
-      <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" value="${row.targetRestSeconds ?? ''}" />
-      <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
+      <div class="gym-routine-exercise-name-row">
+        <select data-field="exerciseId">${gymExerciseOptionsHtml(row.exerciseId)}</select>
+        <button type="button" class="icon-btn" data-field="toggleHidden" aria-label="${row.hidden ? 'Mostrar en los entrenos' : 'Ocultar de los entrenos'}" title="${row.hidden ? 'Oculto: los entrenos nuevos no lo cargan. Tocar para mostrarlo.' : 'Ocultar de los entrenos nuevos (sin borrarlo del día)'}">${eyeSvg}</button>
+        <button type="button" class="icon-btn" data-field="remove" aria-label="Quitar ejercicio">✕</button>
+      </div>
+      <div class="gym-routine-exercise-targets-row">
+        <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
+        <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
+        <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" title="En segundos" value="${row.targetRestSeconds ?? ''}" />
+      </div>
+      <p class="hint gym-rest-preview">${restPreviewText(row.targetRestSeconds)}</p>
     `;
     rowEl.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
       gymRoutineModalExercises[index].exerciseId = Number(e.target.value);
@@ -8460,8 +10204,15 @@ function renderGymRoutineExercisesField() {
     });
     rowEl.querySelector('[data-field="targetRestSeconds"]').addEventListener('input', (e) => {
       gymRoutineModalExercises[index].targetRestSeconds = e.target.value;
+      // Vista previa en vivo del descanso ("90" -> "1:30 min"): el campo
+      // esta en segundos y no se notaba (feedback de Koku).
+      rowEl.querySelector('.gym-rest-preview').textContent = restPreviewText(e.target.value);
     });
-    rowEl.querySelector('button').addEventListener('click', () => {
+    rowEl.querySelector('[data-field="toggleHidden"]').addEventListener('click', () => {
+      gymRoutineModalExercises[index].hidden = !gymRoutineModalExercises[index].hidden;
+      renderGymRoutineExercisesField();
+    });
+    rowEl.querySelector('[data-field="remove"]').addEventListener('click', () => {
       gymRoutineModalExercises.splice(index, 1);
       renderGymRoutineExercisesField();
     });
@@ -8471,26 +10222,43 @@ function renderGymRoutineExercisesField() {
 
 document.getElementById('btn-add-gym-routine-exercise').addEventListener('click', () => {
   if (state.gymExercises.length === 0) {
-    alert('Primero crea al menos un ejercicio en la lista de abajo.');
+    showAppAlert('Primero crea al menos un ejercicio (pestaña Plan, lista de abajo).');
     return;
   }
-  gymRoutineModalExercises.push({ exerciseId: state.gymExercises[0].id, targetSets: '', targetReps: '', targetRestSeconds: '' });
+  gymRoutineModalExercises.push({ exerciseId: state.gymExercises[0].id, targetSets: '', targetReps: '', targetRestSeconds: '', hidden: false });
   renderGymRoutineExercisesField();
 });
 
+// Selector de bloque del dia: createSelectField vive en este mismo
+// archivo, asi que se puede construir ya al analizarlo (igual que el de
+// rutina del modal de sesion, mas abajo). Las opciones se rellenan al
+// abrir el modal, que es cuando state.gymBlocks ya esta cargado.
+const gymRoutineBlockField = createSelectField({
+  options: [],
+  initialValue: '',
+  placeholder: 'Elige un bloque',
+});
+document.getElementById('gym-routine-block-field').appendChild(gymRoutineBlockField.element);
+
 function openGymRoutineModal(routine) {
   ensureGymRoutineFieldsReady();
-  document.getElementById('gym-routine-modal-title').textContent = routine ? 'Editar rutina' : 'Nueva rutina';
+  document.getElementById('gym-routine-modal-title').textContent = routine ? 'Editar día' : 'Nuevo día';
   document.getElementById('gym-routine-id').value = routine ? routine.id : '';
   document.getElementById('gym-routine-name').value = routine ? routine.name : '';
   gymRoutineColorField.setValue(routine ? routine.color : '#5b8cff');
   gymRoutineIconField.setValue(routine ? routine.icon || '' : '');
+  // El selector de bloque se repuebla en cada apertura; por defecto, el
+  // bloque cuyo listado esta abierto (o el del propio dia al editar).
+  gymRoutineBlockField.setOptions(state.gymBlocks.map((b) => ({ value: String(b.id), label: b.name })));
+  const defaultBlockId = routine ? routine.blockId : gymCurrentBlockId;
+  gymRoutineBlockField.setValue(defaultBlockId ? String(defaultBlockId) : '');
   gymRoutineModalExercises = routine
     ? routine.exercises.map((ex) => ({
         exerciseId: ex.exerciseId,
         targetSets: ex.targetSets ?? '',
         targetReps: ex.targetReps ?? '',
         targetRestSeconds: ex.targetRestSeconds ?? '',
+        hidden: !!ex.hidden,
       }))
     : [];
   renderGymRoutineExercisesField();
@@ -8511,6 +10279,7 @@ document.getElementById('gym-routine-form').addEventListener('submit', async (e)
     name: document.getElementById('gym-routine-name').value,
     color: gymRoutineColorField.getValue(),
     icon: gymRoutineIconField.getValue(),
+    blockId: gymRoutineBlockField.getValue() ? Number(gymRoutineBlockField.getValue()) : null,
     exercises: gymRoutineModalExercises,
   };
   if (id) {
@@ -8519,16 +10288,22 @@ document.getElementById('gym-routine-form').addEventListener('submit', async (e)
     await api('/api/gym-routines', { method: 'POST', body: JSON.stringify(payload) });
   }
   closeGymRoutineModal();
-  await loadGymRoutines();
+  // Los bloques tambien se recargan: el contador de dias de la tarjeta
+  // cambia si el dia es nuevo o se ha movido de bloque.
+  await Promise.all([loadGymRoutines(), loadGymBlocks()]);
   renderGymRoutinesList();
+  renderGymBlocksList();
 });
 
 document.getElementById('btn-delete-gym-routine').addEventListener('click', async () => {
   const id = document.getElementById('gym-routine-id').value;
+  const ok = await showAppConfirm('¿Eliminar este día? Las sesiones ya registradas con él no se pierden.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
   await api(`/api/gym-routines/${id}`, { method: 'DELETE' });
   closeGymRoutineModal();
-  await Promise.all([loadGymRoutines(), loadGymSessions()]);
+  await Promise.all([loadGymRoutines(), loadGymBlocks(), loadGymSessions()]);
   renderGymRoutinesList();
+  renderGymBlocksList();
   renderGymSessionsList();
 });
 
@@ -8542,7 +10317,7 @@ const gymSessionDateField = createDateField({ initialValue: new Date() });
 document.getElementById('gym-session-date-field').appendChild(gymSessionDateField.element);
 
 const gymSessionRoutineField = createSelectField({
-  options: [{ value: '', label: 'Sesion libre (sin rutina)' }],
+  options: [{ value: '', label: 'Sesión libre (sin día)' }],
   initialValue: '',
   onChange: (routineId) => {
     if (!routineId) return;
@@ -8594,14 +10369,25 @@ function renderGymSessionExercisesField() {
 
     const header = document.createElement('div');
     header.className = 'gym-routine-exercise-row';
+    // El RPE es UNO por ejercicio (peticion de Koku), no por serie: vive
+    // aqui en la cabecera. Ademas, sacandolo de las filas de serie estas
+    // dejan de desbordarse en pantallas estrechas (el RPE se salia).
     header.innerHTML = `
       <select data-field="exerciseId">${gymExerciseOptionsHtml(exRow.exerciseId)}</select>
+      <input type="number" data-field="exRpe" placeholder="RPE" min="1" max="10" step="0.5" title="RPE del ejercicio" value="${exRow.rpe ?? ''}" />
       <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
     `;
     header.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
       gymSessionModalExercises[exIndex].exerciseId = Number(e.target.value);
     });
-    header.querySelector('button').addEventListener('click', () => {
+    header.querySelector('[data-field="exRpe"]').addEventListener('input', (e) => {
+      gymSessionModalExercises[exIndex].rpe = e.target.value;
+    });
+    header.querySelector('.icon-btn').addEventListener('click', async () => {
+      // Quitar un ejercicio aqui borra sus series apuntadas: confirmacion
+      // (peticion de Koku, "seguro que quieres quitar...").
+      const ok = await showAppConfirm('¿Quitar este ejercicio de la sesión, con sus series apuntadas?', { okText: 'Quitar', danger: true });
+      if (!ok) return;
       gymSessionModalExercises.splice(exIndex, 1);
       renderGymSessionExercisesField();
     });
@@ -8612,11 +10398,13 @@ function renderGymSessionExercisesField() {
     exRow.sets.forEach((set, setIndex) => {
       const setRow = document.createElement('div');
       setRow.className = 'gym-session-set-row';
+      // "+60s" = descanso extra anadido con +30s durante el entreno en
+      // vivo (peticion de Koku: que el historial lo ensene por serie).
       setRow.innerHTML = `
-        <span class="gym-session-set-number">Serie ${setIndex + 1}</span>
+        <span class="gym-session-set-number">Serie ${setIndex + 1}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}</span>
         <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
         <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
-        <input type="number" data-field="restSeconds" placeholder="Descanso (s)" min="0" value="${set.restSeconds ?? ''}" />
+        <input type="number" data-field="restSeconds" placeholder="Desc. (s)" min="0" title="Descanso planificado, en segundos" value="${set.restSeconds ?? ''}" />
         <button type="button" class="icon-btn" aria-label="Quitar serie">✕</button>
       `;
       setRow.querySelector('[data-field="reps"]').addEventListener('input', (e) => {
@@ -8645,7 +10433,7 @@ function renderGymSessionExercisesField() {
       // (suele ser el mismo entre series seguidas) -- reps/peso se dejan
       // en blanco, varian serie a serie.
       const lastSet = exRow.sets[exRow.sets.length - 1];
-      exRow.sets.push({ reps: '', weightDisplay: '', restSeconds: lastSet ? lastSet.restSeconds : '' });
+      exRow.sets.push({ reps: '', weightDisplay: '', restSeconds: lastSet ? lastSet.restSeconds : '', extraRestSeconds: null });
       renderGymSessionExercisesField();
     });
     block.appendChild(addSetBtn);
@@ -8656,10 +10444,10 @@ function renderGymSessionExercisesField() {
 
 document.getElementById('btn-add-gym-session-exercise').addEventListener('click', () => {
   if (state.gymExercises.length === 0) {
-    alert('Primero crea al menos un ejercicio desde la pestaña Rutinas.');
+    showAppAlert('Primero crea al menos un ejercicio desde la pestaña Plan.');
     return;
   }
-  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, sets: [{ reps: '', weightDisplay: '', restSeconds: '' }] });
+  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, rpe: '', sets: [{ reps: '', weightDisplay: '', restSeconds: '' }] });
   renderGymSessionExercisesField();
 });
 
@@ -8670,7 +10458,7 @@ function openGymSessionModal(session) {
   document.getElementById('gym-session-notes').value = session ? session.notes || '' : '';
 
   gymSessionRoutineField.setOptions([
-    { value: '', label: 'Sesion libre (sin rutina)' },
+    { value: '', label: 'Sesión libre (sin día)' },
     ...state.gymRoutines.map((r) => ({ value: String(r.id), label: r.name, color: r.color, icon: r.icon })),
   ]);
   gymSessionRoutineField.setValue(session && session.routineId ? String(session.routineId) : '');
@@ -8679,15 +10467,21 @@ function openGymSessionModal(session) {
     // Reagrupa las series planas que devuelve el servidor (una fila por
     // serie) en un bloque por ejercicio, tal y como lo edita el modal.
     const byExercise = new Map();
+    // El RPE por ejercicio: el primero no vacio de sus series (todas
+    // llevan el mismo desde que el RPE es por ejercicio; las sesiones
+    // antiguas con RPEs distintos ensenan el primero).
+    const rpeByExercise = new Map();
     session.sets.forEach((set) => {
       if (!byExercise.has(set.exerciseId)) byExercise.set(set.exerciseId, []);
+      if (set.rpe != null && !rpeByExercise.has(set.exerciseId)) rpeByExercise.set(set.exerciseId, set.rpe);
       byExercise.get(set.exerciseId).push({
         reps: set.reps ?? '',
         weightDisplay: gymWeightKgToDisplay(set.weightKg),
         restSeconds: set.restSeconds ?? '',
+        extraRestSeconds: set.extraRestSeconds ?? null,
       });
     });
-    gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets }));
+    gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets, rpe: rpeByExercise.get(exerciseId) ?? '' }));
   } else {
     gymSessionModalExercises = [];
   }
@@ -8718,7 +10512,9 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         exerciseId: exRow.exerciseId,
         reps: set.reps,
         weightKg: gymWeightDisplayToKg(set.weightDisplay),
+        rpe: exRow.rpe,
         restSeconds: set.restSeconds,
+        extraRestSeconds: set.extraRestSeconds ?? null,
       });
     });
   });
@@ -8737,15 +10533,626 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
   await loadGymSessions();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+  checkGymAchievements();
 });
 
 document.getElementById('btn-delete-gym-session').addEventListener('click', async () => {
   const id = document.getElementById('gym-session-id').value;
+  // Borrar una sesion SI pierde historial de verdad (sus series) -- de
+  // ahi el confirm, a diferencia de plantillas como bloques/dias.
+  const ok = await showAppConfirm('¿Eliminar esta sesión y todas sus series? Esto sí borra historial.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
   await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
   closeGymSessionModal();
   await loadGymSessions();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+});
+
+// --- Progreso avanzado (Fase 5 del rediseno) --------------------------
+// Consistencia (heatmap estilo GitHub + racha semanal con objetivo),
+// PRs por ejercicio (mejor peso + 1RM estimado con la formula de Epley)
+// y volumen semanal apilado por grupo muscular. Todo calculado en
+// cliente: el heatmap/racha desde GET /summary (ligero, sin series) y
+// PRs/volumen desde state.gymSessions, que ya esta cargado entero.
+
+// Lunes de la semana ISO de una fecha, como clave 'YYYY-MM-DD' -- las
+// semanas del objetivo/racha/volumen empiezan en lunes (es-ES).
+function gymWeekStartKey(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = (d.getDay() + 6) % 7; // lunes = 0 ... domingo = 6
+  d.setDate(d.getDate() - day);
+  return toDateKey(d);
+}
+
+// Objetivo de sesiones por semana: ajuste por dispositivo, como la
+// unidad de peso (no viaja con los datos).
+function getGymWeeklyGoal() {
+  const stored = Number(localStorage.getItem('gymWeeklyGoal'));
+  return stored >= 1 && stored <= 7 ? stored : 3;
+}
+const gymWeeklyGoalField = createSelectField({
+  options: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: String(n), label: `${n} ${n === 1 ? 'sesión' : 'sesiones'} / semana` })),
+  initialValue: String(getGymWeeklyGoal()),
+  onChange: (value) => {
+    localStorage.setItem('gymWeeklyGoal', value);
+    renderGymProgressSections();
+  },
+});
+document.getElementById('gym-weekly-goal-field').appendChild(gymWeeklyGoalField.element);
+
+// Punto de entrada de toda la seccion: se llama al entrar en la pestana
+// Progreso (ver switchGymTab), no en cada apertura del Gimnasio.
+async function renderGymProgressSections() {
+  const summary = await api('/api/gym-sessions/summary');
+  renderGymConsistency(summary);
+  renderGymBodyMap();
+  renderGymPRs();
+  renderGymWeeklyVolume();
+}
+
+// La racha cuenta semanas SEGUIDAS cumpliendo el objetivo, empezando
+// por la semana pasada hacia atras; la semana en curso suma solo si ya
+// ha llegado al objetivo (que aun no lo haya hecho no rompe la racha).
+// Compartida entre la tarjeta de Consistencia y los logros.
+function gymComputeWeeklyStreak(sessionsByWeek, goal) {
+  const now = new Date();
+  let streak = (sessionsByWeek.get(gymWeekStartKey(now)) || 0) >= goal ? 1 : 0;
+  const probe = new Date(now);
+  probe.setDate(probe.getDate() - 7);
+  while ((sessionsByWeek.get(gymWeekStartKey(probe)) || 0) >= goal) {
+    streak += 1;
+    probe.setDate(probe.getDate() - 7);
+  }
+  return streak;
+}
+
+// Heatmap de consistencia: 26 semanas x 7 dias, intensidad = sesiones de
+// ese dia. UN solo tono (el morado del gym) de claro a oscuro -- un mapa
+// de magnitud siempre es un unico matiz escalonado, nunca varios colores.
+function renderGymConsistency(summary) {
+  const sessionsByDate = new Map();
+  for (const s of summary) {
+    sessionsByDate.set(s.date, (sessionsByDate.get(s.date) || 0) + 1);
+  }
+
+  // Estadisticas de arriba: dias entrenados, racha de semanas cumpliendo
+  // el objetivo, esta semana y este mes.
+  const goal = getGymWeeklyGoal();
+  const sessionsByWeek = new Map();
+  for (const s of summary) {
+    const week = gymWeekStartKey(new Date(`${s.date}T00:00:00`));
+    sessionsByWeek.set(week, (sessionsByWeek.get(week) || 0) + 1);
+  }
+  const now = new Date();
+  const thisWeekKey = gymWeekStartKey(now);
+  const thisWeekCount = sessionsByWeek.get(thisWeekKey) || 0;
+  const streak = gymComputeWeeklyStreak(sessionsByWeek, goal);
+  const monthPrefix = toDateKey(now).slice(0, 7);
+  const monthCount = summary.filter((s) => s.date.startsWith(monthPrefix)).length;
+
+  document.getElementById('gym-consistency-stats').innerHTML = `
+    <div class="gym-live-summary-grid gym-consistency-grid">
+      <div class="gym-live-summary-stat"><b>${sessionsByDate.size}</b><span>Días entrenados</span></div>
+      <div class="gym-live-summary-stat"><b>${streak}</b><span>Racha (semanas)</span></div>
+      <div class="gym-live-summary-stat"><b>${thisWeekCount}/${goal}</b><span>Esta semana</span></div>
+      <div class="gym-live-summary-stat"><b>${monthCount}</b><span>Este mes</span></div>
+    </div>
+  `;
+
+  // La rejilla: columnas = semanas (la actual a la derecha), filas =
+  // lunes a domingo. Celdas div con tooltip, no SVG (mas simple y el
+  // helper de tooltips funciona igual sobre cualquier elemento).
+  const WEEKS = 26;
+  const container = document.getElementById('gym-heatmap');
+  const firstMonday = new Date(`${thisWeekKey}T00:00:00`);
+  firstMonday.setDate(firstMonday.getDate() - (WEEKS - 1) * 7);
+  let cells = '';
+  for (let day = 0; day < 7; day++) {
+    for (let week = 0; week < WEEKS; week++) {
+      const cellDate = new Date(firstMonday);
+      cellDate.setDate(cellDate.getDate() + week * 7 + day);
+      if (cellDate > now) { cells += '<span class="gym-heatmap-cell future"></span>'; continue; }
+      const key = toDateKey(cellDate);
+      const count = sessionsByDate.get(key) || 0;
+      const level = count >= 2 ? 2 : count; // 0 / 1 / 2+
+      cells += `<span class="gym-heatmap-cell level-${level}" data-tooltip="${formatGymDate(key)}: ${count} sesión${count === 1 ? '' : 'es'}"></span>`;
+    }
+  }
+  container.innerHTML = `
+    <div class="gym-heatmap-grid" style="grid-template-columns: repeat(${WEEKS}, 1fr);">${cells}</div>
+    <div class="gym-heatmap-legend"><span class="gym-list-item-muted">Menos</span>
+      <span class="gym-heatmap-cell level-0"></span><span class="gym-heatmap-cell level-1"></span><span class="gym-heatmap-cell level-2"></span>
+      <span class="gym-list-item-muted">Más</span></div>
+  `;
+  attachFinanzasChartTooltips(container);
+}
+
+// --- Mapa de musculos (Fase 6 del rediseno, idea propia de Koku) ------
+// Dos siluetas dibujadas a medida (vista frontal y trasera) donde cada
+// zona es un grupo de GYM_MUSCLE_GROUPS y se colorea segun cuanto se ha
+// entrenado en la ventana elegida (7/30/90 dias), en series o volumen.
+// Los musculos SECUNDARIOS del ejercicio (si vino de la libreria)
+// puntuan a la mitad (x0.5) que el principal. El SVG se genera aqui
+// mismo (no es un archivo aparte) para poder usar las variables CSS del
+// tema en los rellenos; el dibujo es propio, sin assets de terceros.
+let gymMapWindowDays = 30;
+let gymMapMetric = 'series'; // 'series' | 'volume'
+document.querySelectorAll('[data-gym-map-window]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymMapWindowDays = Number(btn.dataset.gymMapWindow);
+    document.querySelectorAll('[data-gym-map-window]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderGymBodyMap();
+  });
+});
+document.querySelectorAll('[data-gym-map-metric]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymMapMetric = btn.dataset.gymMapMetric;
+    document.querySelectorAll('[data-gym-map-metric]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderGymBodyMap();
+  });
+});
+
+// Las zonas del cuerpo (v2): poligonos anatomicos por musculo portados
+// de react-body-highlighter (https://github.com/giavinh79/react-body-highlighter,
+// licencia MIT -- ¡gracias!), mucho mejor dibujados que las elipses de la
+// primera version. Cada entrada es un grupo de la taxonomia con sus
+// poligonos y a que figura pertenece (tx = desplazamiento horizontal:
+// 0 la frontal, 1120 la trasera). Los abductores no traen poligono en la
+// fuente, asi que sus dos parches de cadera externa son dibujo propio.
+const GYM_BODYMAP_ZONES = [
+  // -- figura FRONTAL --
+  { g: 'pecho', tx: 0, polys: ['518 416 510 551 580 580 678 555 706 473 620 416', '298 465 314 555 408 580 482 551 478 420 376 420'] },
+  { g: 'core', tx: 0, polys: [
+    '686 633 673 571 588 596 600 641 604 833 657 788 665 698',
+    '339 784 331 718 310 633 322 571 408 592 392 633 392 837',
+    '563 592 580 641 584 780 584 927 563 984 551 1041 514 1078 510 845 506 673 510 571',
+    '437 588 486 571 490 673 486 845 482 1073 445 1037 408 914 408 784 412 645',
+  ] },
+  { g: 'biceps', tx: 0, polys: ['167 682 180 714 229 661 290 539 278 494 204 559', '714 494 702 547 763 661 816 718 829 690 788 555'] },
+  { g: 'triceps', tx: 0, polys: ['694 555 694 616 759 727 776 702 755 673', '224 694 298 555 298 608 229 731'] },
+  { g: 'trapecio', tx: 0, polys: [
+    '555 237 506 335 506 392 616 400 706 449 694 367 633 351 584 306',
+    '290 449 302 371 363 351 412 302 445 245 490 339 486 392 380 396',
+  ] },
+  { g: 'hombros', tx: 0, polys: [
+    '784 531 796 478 792 412 759 380 710 363 722 429 714 473',
+    '282 473 212 531 200 478 204 408 245 371 286 371 269 433',
+  ] },
+  // (la fuente etiqueta esta zona interna del muslo como "abductors",
+  // pero anatomicamente es la de los ADUCTORES -- corregido aqui)
+  { g: 'aductores', tx: 0, polys: [
+    '527 1102 543 1249 600 1102 620 1000 649 943 600 927 567 1045',
+    '478 1106 449 1253 420 1159 404 1131 396 1073 380 1024 347 939 396 922 416 992 437 1053',
+  ] },
+  { g: 'cuadriceps', tx: 0, polys: [
+    '347 988 371 1082 371 1278 343 1371 310 1327 294 1200 282 1114 294 1008 322 947',
+    '633 1057 645 1000 669 947 702 1012 710 1118 682 1331 653 1376 624 1286 620 1114',
+    '388 1294 384 1122 412 1184 445 1294 429 1351 400 1461 363 1465 355 1400',
+    '596 1457 555 1290 608 1139 612 1302 641 1396 629 1465',
+    '327 1384 265 1457 257 1367 257 1273 269 1143 294 1335',
+    '718 1131 739 1241 739 1404 727 1457 665 1384 702 1335',
+  ] },
+  { g: 'antebrazo', tx: 0, polys: [
+    '61 886 102 751 147 702 163 743 192 735 45 976 0 1000',
+    '845 698 833 735 800 731 951 984 1000 1004 935 894 898 763',
+    '776 722 776 776 804 841 853 898 922 1012 947 996',
+    '69 1012 135 906 188 841 216 771 212 718 49 988',
+  ] },
+  // -- figura TRASERA --
+  { g: 'trapecio', tx: 1120, polys: [
+    '447 217 477 217 472 383 477 647 383 532 353 409 311 366 391 332 438 272',
+    '523 217 557 217 566 272 609 328 689 366 647 404 617 532 523 647 532 383',
+  ] },
+  { g: 'hombros', tx: 1120, polys: ['294 370 230 391 174 443 183 536 243 494 272 464', '711 370 783 396 826 447 817 536 749 489 723 451'] },
+  { g: 'espalda', tx: 1120, polys: [
+    '311 387 281 489 285 553 340 753 472 711 472 664 366 540 336 413',
+    '689 387 719 494 715 562 660 753 528 711 528 664 634 545 664 417',
+  ] },
+  { g: 'triceps', tx: 1120, polys: [
+    '268 498 179 557 145 723 166 817 217 638 268 557',
+    '736 502 821 557 860 732 834 821 779 630 732 557',
+    '268 583 268 685 230 753 191 774 226 655',
+    '728 583 770 647 804 774 766 753 728 689',
+  ] },
+  { g: 'lumbar', tx: 1120, polys: ['477 728 345 770 353 834 494 1021 468 830', '523 728 655 770 647 834 506 1021 532 838'] },
+  { g: 'antebrazo', tx: 1120, polys: [
+    '864 757 911 834 932 940 1000 1064 962 1043 881 894 843 838',
+    '136 757 89 838 68 936 0 1064 38 1043 123 885 157 830',
+    '813 796 774 779 791 847 911 1038 932 1089 945 1047',
+    '187 796 221 779 209 843 94 1030 68 1085 51 1047',
+  ] },
+  { g: 'abductores', tx: 1120, polys: ['330 1070 288 1130 282 1230 316 1290 356 1180', '670 1070 712 1130 718 1230 684 1290 644 1180'] },
+  { g: 'gluteo', tx: 1120, polys: [
+    '447 996 302 1085 298 1187 315 1260 472 1213 494 1149',
+    '553 991 511 1145 523 1209 681 1260 698 1191 694 1085',
+  ] },
+  { g: 'aductores', tx: 1120, polys: [
+    '481 1230 447 1230 413 1255 451 1443 485 1357 489 1294',
+    '519 1226 557 1234 591 1260 549 1443 519 1362 511 1294',
+  ] },
+  { g: 'isquios', tx: 1120, polys: [
+    '289 1221 311 1294 366 1260 353 1353 345 1502 294 1583 289 1468 277 1413 272 1315',
+    '715 1217 694 1289 638 1260 655 1366 664 1502 711 1583 715 1477 728 1421 736 1319',
+    '387 1255 443 1460 404 1668 362 1528 370 1353',
+    '617 1255 634 1362 643 1532 600 1668 562 1464',
+  ] },
+  { g: 'gemelos', tx: 1120, polys: [
+    '294 1604 285 1672 247 1796 238 1928 255 1970 285 1932 298 1800 319 1711 319 1668',
+    '374 1651 353 1677 332 1719 311 1804 302 1919 340 2000 387 1906 391 1689',
+    '630 1651 613 1685 617 1906 664 1996 706 1919 689 1796 668 1702',
+    '706 1604 723 1685 757 1791 766 1928 745 1966 723 1936 706 1796 681 1681',
+    '285 1957 302 1957 336 2017 306 2200 285 2136 268 1983',
+    '698 1957 719 1957 736 1983 719 2132 702 2196 672 2021',
+  ] },
+];
+// Partes no interactivas que completan la silueta (cabeza y rodillas de
+// cada figura, del mismo dataset).
+const GYM_BODYMAP_SILHOUETTE = [
+  { tx: 0, polys: [
+    '424 29 400 118 420 196 461 233 498 253 547 224 576 192 592 102 571 24 498 0',
+    '339 1400 347 1433 355 1473 363 1510 351 1567 298 1567 273 1527 273 1473 302 1441',
+    '657 1400 722 1478 722 1522 698 1571 649 1567 629 1510',
+    '714 1604 735 1535 767 1612 796 1678 784 1878 796 1955 747 1955',
+    '249 1947 278 1649 282 1604 261 1543 249 1576 224 1616 208 1678 220 1882 208 1955',
+    '727 1951 698 1592 653 1584 641 1624 641 1653 657 1771',
+    '355 1584 359 1624 359 1669 351 1722 351 1767 322 1820 306 1873 269 1947 273 1878 282 1804 286 1755 290 1698 298 1641 302 1588',
+  ] },
+  { tx: 1120, polys: [
+    '506 0 460 9 409 55 404 128 451 200 557 200 591 136 596 47 557 13',
+    '345 1532 311 1591 336 1664 374 1626',
+    '664 1536 630 1630 668 1664 694 1591',
+  ] },
+];
+
+function renderGymBodyMap() {
+  const container = document.getElementById('gym-bodymap');
+  const since = new Date();
+  since.setDate(since.getDate() - gymMapWindowDays);
+  const sinceKey = toDateKey(since);
+
+  // Puntuacion por grupo: por cada serie de la ventana, 1 punto (o el
+  // volumen de la serie) al grupo principal del ejercicio, y la mitad a
+  // cada secundario. Tambien apuntamos los ejercicios con mas series de
+  // cada grupo para el detalle.
+  const score = new Map();
+  const exercisesByGroup = new Map();
+  const exerciseById = new Map(state.gymExercises.map((e) => [e.id, e]));
+  for (const session of state.gymSessions) {
+    if (session.date < sinceKey) continue;
+    for (const set of session.sets) {
+      const exercise = exerciseById.get(set.exerciseId);
+      if (!exercise) continue;
+      const amount = gymMapMetric === 'volume' ? (set.reps || 0) * (set.weightKg || 0) : 1;
+      if (amount <= 0) continue;
+      const primary = GYM_MUSCLE_GROUPS.some((g) => g.id === exercise.muscleGroup) ? exercise.muscleGroup : null;
+      if (primary) {
+        score.set(primary, (score.get(primary) || 0) + amount);
+        if (!exercisesByGroup.has(primary)) exercisesByGroup.set(primary, new Map());
+        const perEx = exercisesByGroup.get(primary);
+        perEx.set(exercise.name, (perEx.get(exercise.name) || 0) + 1);
+      }
+      for (const secondary of exercise.secondaryMuscles || []) {
+        if (secondary === primary) continue;
+        score.set(secondary, (score.get(secondary) || 0) + amount * 0.5);
+      }
+    }
+  }
+
+  const max = Math.max(...score.values(), 0);
+  const unit = getGymWeightUnitLabel();
+  const detailByGroup = new Map();
+  const zonesHtml = GYM_BODYMAP_ZONES.map((zone) => {
+    const value = score.get(zone.g) || 0;
+    // Intensidad continua sobre el acento del tema: de un 12% (entrenado
+    // poco) al acento pleno; 0 = gris base de la silueta.
+    const pct = max > 0 && value > 0 ? Math.round(12 + 78 * (value / max)) : 0;
+    const fill = pct === 0
+      ? 'color-mix(in srgb, var(--surface-2-text) 10%, var(--surface-2))'
+      : `color-mix(in srgb, var(--gym-accent) ${pct}%, var(--surface-2))`;
+    const label = gymMuscleGroupLabel(zone.g);
+    const topExercises = exercisesByGroup.has(zone.g)
+      ? [...exercisesByGroup.get(zone.g).entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name]) => name).join(', ')
+      : '';
+    const valueLabel = gymMapMetric === 'volume'
+      ? `${gymWeightKgToDisplay(value)} ${unit}`
+      : `${Math.round(value * 10) / 10} serie${value === 1 ? '' : 's'}`;
+    detailByGroup.set(zone.g, `${label}: ${valueLabel}${topExercises ? ` · ${topExercises}` : ''}`);
+    const polys = zone.polys.map((points) => `<polygon points="${points}" />`).join('');
+    return `<g style="fill: ${fill}" transform="translate(${zone.tx}, 0)" data-bodymap-group="${zone.g}">${polys}</g>`;
+  }).join('');
+  const silhouetteHtml = GYM_BODYMAP_SILHOUETTE.map((part) =>
+    `<g class="gym-bodymap-silhouette" transform="translate(${part.tx}, 0)">${part.polys.map((points) => `<polygon points="${points}" />`).join('')}</g>`
+  ).join('');
+
+  container.innerHTML = `
+    <svg class="gym-chart-svg gym-bodymap-svg" viewBox="0 0 2120 2210" role="img" aria-label="Mapa de músculos entrenados">
+      ${silhouetteHtml}
+      ${zonesHtml}
+      <text class="gym-chart-label gym-bodymap-caption" x="500" y="2140" text-anchor="middle">Frente</text>
+      <text class="gym-chart-label gym-bodymap-caption" x="1620" y="2140" text-anchor="middle">Espalda</text>
+    </svg>
+    <p id="gym-bodymap-info" class="gym-bodymap-info">Toca un músculo para ver su detalle.</p>
+    <p class="hint">Cuanto más intenso el color, más entrenado en los últimos ${gymMapWindowDays} días (los músculos secundarios de cada ejercicio puntúan la mitad).</p>
+  `;
+  // El detalle se muestra en una linea FIJA bajo el mapa (nada de
+  // tooltips flotantes: en el movil se quedaban pegados a la pantalla al
+  // hacer scroll -- feedback de Koku).
+  const info = document.getElementById('gym-bodymap-info');
+  container.querySelectorAll('[data-bodymap-group]').forEach((zoneEl) => {
+    const show = () => {
+      const group = zoneEl.dataset.bodymapGroup;
+      info.textContent = detailByGroup.get(group) || '';
+      // El resaltado se aplica a TODAS las zonas del mismo grupo (un
+      // musculo que sale en las dos vistas, como el triceps, se marca
+      // en ambas a la vez -- feedback de Koku).
+      container.querySelectorAll('[data-bodymap-group]').forEach((other) => {
+        other.classList.toggle('bodymap-active', other.dataset.bodymapGroup === group);
+      });
+    };
+    zoneEl.addEventListener('click', show);
+    zoneEl.addEventListener('mouseenter', show);
+  });
+}
+
+
+// 1RM estimado con la formula de Epley: peso x (1 + reps/30). Solo
+// series con 1-12 repeticiones (por encima de 12 la estimacion deja de
+// ser fiable) y sin las de calentamiento.
+function gymEpley1RM(weightKg, reps) {
+  return weightKg * (1 + reps / 30);
+}
+function renderGymPRs() {
+  const list = document.getElementById('gym-prs-list');
+  const byExercise = new Map(); // exerciseId -> { name, muscleGroup, bestWeightKg, best1RM, bestVolumeKg }
+  for (const session of state.gymSessions) {
+    const volumeByExercise = new Map();
+    for (const set of session.sets) {
+      if (set.setType === 'warmup') continue;
+      if (!byExercise.has(set.exerciseId)) {
+        byExercise.set(set.exerciseId, { name: set.exerciseName, bestWeightKg: 0, best1RM: 0, bestVolumeKg: 0 });
+      }
+      const pr = byExercise.get(set.exerciseId);
+      if (set.weightKg > pr.bestWeightKg) pr.bestWeightKg = set.weightKg;
+      if (set.weightKg > 0 && set.reps >= 1 && set.reps <= 12) {
+        const est = gymEpley1RM(set.weightKg, set.reps);
+        if (est > pr.best1RM) pr.best1RM = est;
+      }
+      volumeByExercise.set(set.exerciseId, (volumeByExercise.get(set.exerciseId) || 0) + (set.reps || 0) * (set.weightKg || 0));
+    }
+    for (const [exerciseId, volume] of volumeByExercise) {
+      const pr = byExercise.get(exerciseId);
+      if (pr && volume > pr.bestVolumeKg) pr.bestVolumeKg = volume;
+    }
+  }
+
+  const unit = getGymWeightUnitLabel();
+  const rows = [...byExercise.entries()]
+    .filter(([, pr]) => pr.bestWeightKg > 0)
+    .sort((a, b) => b[1].best1RM - a[1].best1RM);
+  list.innerHTML = '';
+  if (rows.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavía no hay récords: registra series con peso y aparecerán aquí.</p>';
+    return;
+  }
+  rows.forEach(([exerciseId, pr]) => {
+    const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+    const muscle = exercise ? gymMuscleGroupLabel(exercise.muscleGroup) : '';
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-pr-item';
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(pr.name)}${muscle ? ` <span class="gym-list-item-muted">(${escapeHtml(muscle)})</span>` : ''}</span>
+      <span class="gym-pr-stats">
+        <b>${gymWeightKgToDisplay(pr.bestWeightKg)} ${unit}</b>
+        <span class="gym-list-item-muted">1RM est. ${gymWeightKgToDisplay(pr.best1RM)} ${unit} · Vol. ${gymWeightKgToDisplay(pr.bestVolumeKg)} ${unit}</span>
+      </span>
+    `;
+    list.appendChild(row);
+  });
+}
+
+// Volumen semanal apilado por grupo muscular (ultimas 8 semanas). Los 5
+// grupos con mas volumen total llevan color propio de la paleta de abajo
+// y el resto se agrupa en "Otros" (gris) -- nunca 14 colores a la vez.
+// Paleta validada con el comprobador de daltonismo/contraste del skill
+// de dataviz (5 tonos, superficie oscura, todas las comprobaciones OK);
+// el color acompaña SIEMPRE al mismo grupo dentro de un render.
+const GYM_VIZ_PALETTE = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'];
+const GYM_VIZ_OTHER = '#8a8a93';
+function renderGymWeeklyVolume() {
+  const container = document.getElementById('gym-weekly-volume');
+  const WEEKS = 8;
+  const now = new Date();
+  const weekKeys = [];
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i * 7);
+    weekKeys.push(gymWeekStartKey(d));
+  }
+  const weekSet = new Set(weekKeys);
+
+  // volumen[semana][grupo] desde las series (grupo del ejercicio; los
+  // ejercicios viejos con texto libre o sin grupo caen en "Otros").
+  const muscleOf = new Map(state.gymExercises.map((e) => [e.id, GYM_MUSCLE_GROUPS.some((g) => g.id === e.muscleGroup) ? e.muscleGroup : null]));
+  const volume = new Map(weekKeys.map((w) => [w, new Map()]));
+  const totalByGroup = new Map();
+  for (const session of state.gymSessions) {
+    const week = gymWeekStartKey(new Date(`${session.date}T00:00:00`));
+    if (!weekSet.has(week)) continue;
+    for (const set of session.sets) {
+      const kg = (set.reps || 0) * (set.weightKg || 0);
+      if (kg <= 0) continue;
+      const group = muscleOf.get(set.exerciseId) || 'otros';
+      volume.get(week).set(group, (volume.get(week).get(group) || 0) + kg);
+      totalByGroup.set(group, (totalByGroup.get(group) || 0) + kg);
+    }
+  }
+
+  if (totalByGroup.size === 0) {
+    container.innerHTML = '<p class="empty-hint">Sin volumen registrado en las últimas 8 semanas.</p>';
+    return;
+  }
+
+  // Top 5 grupos por volumen total; el resto (y lo sin grupo) = "Otros".
+  const topGroups = [...totalByGroup.entries()]
+    .filter(([g]) => g !== 'otros')
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, GYM_VIZ_PALETTE.length)
+    .map(([g]) => g);
+  const colorOf = new Map(topGroups.map((g, i) => [g, GYM_VIZ_PALETTE[i]]));
+
+  const width = 600, height = 190, padding = 26, gap = 8;
+  const barWidth = (width - padding * 2 - gap * (WEEKS - 1)) / WEEKS;
+  const maxWeek = Math.max(1, ...weekKeys.map((w) => [...volume.get(w).values()].reduce((a, b) => a + b, 0)));
+  const unit = getGymWeightUnitLabel();
+
+  let bars = '';
+  weekKeys.forEach((week, i) => {
+    const x = padding + i * (barWidth + gap);
+    let y = height - padding;
+    const groups = [...volume.get(week).entries()];
+    // Otros al fondo de la pila, el resto en el orden fijo del top.
+    const ordered = [
+      ...topGroups.map((g) => [g, volume.get(week).get(g) || 0]),
+      ['otros', groups.filter(([g]) => !colorOf.has(g)).reduce((acc, [, v]) => acc + v, 0)],
+    ];
+    for (const [group, kg] of ordered) {
+      if (kg <= 0) continue;
+      const h = (kg / maxWeek) * (height - padding * 2);
+      y -= h;
+      const label = group === 'otros' ? 'Otros' : gymMuscleGroupLabel(group);
+      // Hueco de 2px entre segmentos: se pinta cada uno 2px mas corto.
+      bars += `<rect x="${x}" y="${y}" width="${barWidth}" height="${Math.max(0, h - 2)}" rx="2"
+        fill="${colorOf.get(group) || GYM_VIZ_OTHER}"
+        data-tooltip="Semana del ${formatGymDate(week)} · ${escapeHtml(label)}: ${gymWeightKgToDisplay(kg)} ${unit}"></rect>`;
+    }
+    const weekLabel = new Date(`${week}T00:00:00`).getDate();
+    bars += `<text class="gym-chart-label" x="${x + barWidth / 2}" y="${height - padding + 12}" text-anchor="middle">${weekLabel}</text>`;
+  });
+
+  const legend = [...topGroups.map((g) => ({ label: gymMuscleGroupLabel(g), color: colorOf.get(g) })), { label: 'Otros', color: GYM_VIZ_OTHER }]
+    .map((item) => `<span class="gym-viz-legend-item"><span class="color-dot" style="background-color: ${item.color}"></span>${escapeHtml(item.label)}</span>`)
+    .join('');
+
+  container.innerHTML = `
+    <svg class="gym-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Volumen semanal por grupo muscular">${bars}</svg>
+    <div class="gym-viz-legend">${legend}</div>
+    <p class="hint">Volumen = repeticiones × peso, apilado por grupo muscular. La etiqueta de cada barra es el día del lunes de esa semana.</p>
+  `;
+  attachFinanzasChartTooltips(container);
+}
+
+// --- Logros (Fase 7 del rediseno) -------------------------------------
+// Gamificacion sin estado en la base de datos: cada logro tiene NIVELES
+// (umbral creciente) y se evalua al vuelo contra el historial real, asi
+// que editar/borrar sesiones recalcula todo de forma coherente. Lo unico
+// que se guarda (por dispositivo) es hasta que nivel se ha CELEBRADO ya
+// cada logro, para no repetir la fiesta (localStorage.gymAchievementsSeen).
+const GYM_ACHIEVEMENTS = [
+  { id: 'sessions', name: 'Constancia', desc: 'Entrenamientos de pesas totales', levels: [1, 10, 25, 50, 100, 250], value: (s) => s.gymCount },
+  { id: 'streak', name: 'Racha', desc: 'Semanas seguidas cumpliendo tu objetivo', levels: [1, 4, 8, 16, 26, 52], value: (s) => s.streak },
+  { id: 'volume', name: 'Toneladas', desc: 'Volumen total acumulado (kg)', levels: [10000, 50000, 100000, 250000, 500000, 1000000], value: (s) => s.totalVolumeKg },
+  { id: 'activities', name: 'Todoterreno', desc: 'Actividades fuera de las pesas', levels: [1, 10, 25, 50, 100], value: (s) => s.activityCount },
+  { id: 'exercises', name: 'Repertorio', desc: 'Ejercicios distintos con series registradas', levels: [3, 10, 20, 40, 80], value: (s) => s.distinctExercises },
+  { id: 'months', name: 'Meses activos', desc: 'Meses con al menos una sesión', levels: [1, 3, 6, 12, 24], value: (s) => s.activeMonths },
+];
+
+// Junta en un objeto todas las cifras que consumen los logros.
+function gymComputeAchievementStats(summary) {
+  const goal = getGymWeeklyGoal();
+  const sessionsByWeek = new Map();
+  const months = new Set();
+  let gymCount = 0, activityCount = 0, totalVolumeKg = 0;
+  for (const s of summary) {
+    const week = gymWeekStartKey(new Date(`${s.date}T00:00:00`));
+    sessionsByWeek.set(week, (sessionsByWeek.get(week) || 0) + 1);
+    months.add(s.date.slice(0, 7));
+    if (s.type === 'activity') activityCount += 1; else gymCount += 1;
+    totalVolumeKg += s.volumeKg || 0;
+  }
+  const distinct = new Set();
+  for (const session of state.gymSessions) {
+    for (const set of session.sets) distinct.add(set.exerciseId);
+  }
+  return {
+    gymCount,
+    activityCount,
+    totalVolumeKg,
+    streak: gymComputeWeeklyStreak(sessionsByWeek, goal),
+    distinctExercises: distinct.size,
+    activeMonths: months.size,
+  };
+}
+
+// Nivel alcanzado (0 = ninguno) y HTML de la tarjeta de un logro.
+function gymAchievementLevel(achievement, value) {
+  let level = 0;
+  for (const threshold of achievement.levels) {
+    if (value >= threshold) level += 1; else break;
+  }
+  return level;
+}
+function gymAchievementCardHtml(achievement, value) {
+  const level = gymAchievementLevel(achievement, value);
+  const maxed = level >= achievement.levels.length;
+  const nextThreshold = maxed ? achievement.levels[achievement.levels.length - 1] : achievement.levels[level];
+  // La barra mide LO MISMO que el texto de debajo ("1 / 10" = 10%). Antes
+  // media solo el tramo entre el nivel anterior y el siguiente, y al subir
+  // de nivel la barra se quedaba a cero aunque el texto dijera 1/10 --
+  // parecia rota (feedback de Koku).
+  const progress = maxed ? 1 : Math.min(1, value / nextThreshold);
+  const shownValue = Math.round(value * 10) / 10;
+  return `
+    <div class="gym-achievement-card ${level > 0 ? 'unlocked' : ''}">
+      <div class="gym-achievement-head">
+        <span class="gym-list-item-name">${escapeHtml(achievement.name)}
+          ${level > 0 ? `<span class="gym-block-active-badge">Nivel ${level}${maxed ? ' · MAX' : ''}</span>` : ''}
+        </span>
+      </div>
+      <span class="gym-list-item-muted">${escapeHtml(achievement.desc)}</span>
+      <div class="gym-achievement-bar"><div class="gym-achievement-bar-fill" style="width: ${Math.round(progress * 100)}%"></div></div>
+      <span class="gym-list-item-muted">${shownValue} / ${nextThreshold}${maxed ? ' (máximo alcanzado)' : ''}</span>
+    </div>
+  `;
+}
+
+async function renderGymAchievements() {
+  const summary = await api('/api/gym-sessions/summary');
+  const stats = gymComputeAchievementStats(summary);
+  document.getElementById('gym-achievements-list').innerHTML =
+    GYM_ACHIEVEMENTS.map((a) => gymAchievementCardHtml(a, a.value(stats))).join('');
+}
+
+// Tras guardar una sesion/actividad: si algun logro ha SUBIDO de nivel
+// respecto a lo ya celebrado, se ensena la celebracion una unica vez.
+function gymReadAchievementsSeen() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('gymAchievementsSeen'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+async function checkGymAchievements() {
+  const summary = await api('/api/gym-sessions/summary');
+  const stats = gymComputeAchievementStats(summary);
+  const seen = gymReadAchievementsSeen();
+  const leveledUp = [];
+  for (const achievement of GYM_ACHIEVEMENTS) {
+    const level = gymAchievementLevel(achievement, achievement.value(stats));
+    if (level > (seen[achievement.id] || 0)) {
+      leveledUp.push({ achievement, value: achievement.value(stats) });
+      seen[achievement.id] = level;
+    }
+  }
+  if (leveledUp.length === 0) return;
+  localStorage.setItem('gymAchievementsSeen', JSON.stringify(seen));
+  document.getElementById('gym-achievement-modal-list').innerHTML =
+    leveledUp.map(({ achievement, value }) => gymAchievementCardHtml(achievement, value)).join('');
+  document.getElementById('gym-achievement-modal').classList.remove('hidden');
+}
+document.getElementById('btn-close-gym-achievement').addEventListener('click', () => {
+  document.getElementById('gym-achievement-modal').classList.add('hidden');
 });
 
 // --- Progreso: grafica SVG a mano ---------------------------------------

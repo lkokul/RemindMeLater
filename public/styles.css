@@ -93,7 +93,9 @@ body {
      calendario, el nombre de una herramienta...) sacaba la lupa de
      seleccionar texto de iOS, que ademas se pisa con los gestos propios
      (deslizar una fila, mantener pulsado para las acciones). Se devuelve
-     abajo donde SI se escribe de verdad. */
+     abajo donde SI se escribe de verdad. (Las dos ramas lo implementaron
+     a la vez; en el merge gano esta version, que ademas restaura el menu
+     contextual del toque largo en lo editable.) */
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -2223,7 +2225,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 /* Extension "Gimnasio": pestañas simples (Sesiones/Rutinas/Progreso),
    reutilizando .view-mode-btn para el estilo activo/inactivo en vez de
    inventar uno nuevo. */
-.gym-tabs { display: flex; gap: 0.4rem; padding: 0.8rem 1.2rem 0; flex-shrink: 0; }
+.gym-tabs { display: flex; gap: 0.4rem; padding: 0.8rem 1.2rem 0.8rem; flex-shrink: 0; }
 .gym-tab-btn {
   padding: 0.5rem 0.9rem;
   border-radius: var(--radius);
@@ -2234,7 +2236,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   font-size: 0.85rem;
 }
 .gym-tab-btn.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-.gym-tab-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem; }
+.gym-tab-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem 7rem; }
 .gym-tab-panel { display: flex; flex-direction: column; gap: 0.6rem; }
 .gym-tab-action { align-self: flex-start; }
 .gym-subheading { margin: 1.2rem 0 0; font-size: 0.95rem; }
@@ -2245,7 +2247,13 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
   font-size: 0.85rem;
 }
-.gym-list-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gym-list-item-name {
+  flex: 1;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
 .gym-list-item-muted { color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); font-weight: normal; }
 .gym-list-item-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
 .gym-session-item { flex-direction: column; align-items: flex-start; gap: 0.2rem; cursor: pointer; }
@@ -2259,20 +2267,541 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .gym-routine-exercise-row { display: flex; align-items: center; gap: 0.4rem; }
 .gym-routine-exercise-row select { flex: 1; min-width: 0; }
 .gym-routine-exercise-row input { width: 4.5rem; }
+.gym-routine-exercise-stacked { flex-direction: column; align-items: stretch; }
+.gym-routine-exercise-name-row { display: flex; align-items: center; gap: 0.4rem; }
+.gym-routine-exercise-name-row select { flex: 1; min-width: 0; }
+.gym-routine-exercise-targets-row { display: flex; gap: 0.4rem; }
+.gym-routine-exercise-targets-row input { flex: 1; width: auto; min-width: 0; }
 .gym-session-exercise-block {
   background: var(--surface-2); border-radius: var(--radius); padding: 0.6rem;
   display: flex; flex-direction: column; gap: 0.5rem;
 }
 .gym-session-sets-list { display: flex; flex-direction: column; gap: 0.4rem; }
-.gym-session-set-row { display: flex; align-items: center; gap: 0.4rem; }
-.gym-session-set-number { font-size: 0.78rem; flex-shrink: 0; width: 4rem; }
-.gym-session-set-row input { width: 5.5rem; }
+/* Rejilla que SIEMPRE cabe en el ancho de la tarjeta (con los anchos
+   fijos de antes, el ultimo campo se salia del cuadro en el iPhone --
+   feedback de Koku con captura): Serie / Reps / Peso / Desc / ✕. */
+.gym-session-set-row {
+  display: grid;
+  grid-template-columns: 3.4rem 1fr 1.2fr 3.6rem 1.8rem;
+  gap: 0.4rem;
+  align-items: center;
+}
+.gym-session-set-number { font-size: 0.78rem; }
+.gym-session-set-row input { width: 100%; min-width: 0; box-sizing: border-box; }
 .gym-add-set-btn { align-self: flex-start; font-size: 0.8rem; padding: 0.35rem 0.6rem; }
 
 .gym-progress-metric-toggle { display: flex; gap: 0.4rem; }
 .gym-progress-chart { margin-top: 0.5rem; }
 .gym-chart-svg { width: 100%; height: auto; }
 .gym-chart-label { font-size: 9px; fill: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
+
+/* ---------------------------------------------------------------------
+   Rediseño de Gimnasio (rama gimnasio-movil): acento morado propio de la
+   seccion, SIN tocar el sistema global de temas -- las variables viven
+   scoped en #gym-view (y en .gym-modal, porque los modales son hermanos
+   de <body> y no heredan del scope de la vista). El resto de la app
+   sigue con su --accent de siempre.
+   --------------------------------------------------------------------- */
+#gym-view, .gym-modal {
+  /* El gym usa el acento del TEMA activo (antes llevaba un morado fijo
+     copiado de la app de referencia; Koku pidio quitarlo). Las variables
+     --gym-* se conservan como alias para no tocar todas las reglas. */
+  --gym-accent: var(--accent);
+  --gym-accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+  --gym-accent-text: var(--accent-text);
+}
+/* La pestana activa y los botones primarios del gym usan el morado. */
+#gym-view .gym-tab-btn.active {
+  background: var(--gym-accent);
+  color: var(--gym-accent-text);
+  border-color: var(--gym-accent);
+}
+#gym-view .primary-btn, .gym-modal .primary-btn {
+  background: var(--gym-accent);
+  color: var(--gym-accent-text);
+  border-color: var(--gym-accent);
+}
+
+/* Tarjetas de bloque (pestana Plan): mas altas que una fila normal y
+   clicables enteras (drill-down a los dias del bloque). */
+.gym-block-item { cursor: pointer; padding: 0.8rem 0.9rem; }
+.gym-block-item:hover { border-color: var(--gym-accent); }
+.gym-block-item { border: 1px solid transparent; }
+.gym-block-active-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--gym-accent-soft);
+  color: var(--gym-accent);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}
+.gym-block-activate-btn { font-size: 0.75rem; padding: 0.3rem 0.55rem; }
+
+/* Buscador de la libreria de ejercicios (Fase 2): tarjeta mas ancha y
+   alta que un modal normal (lista larga), filtros en fila, y lista con
+   su propio scroll para que la tarjeta no crezca sin fin. */
+.gym-library-card { max-width: 640px; width: min(640px, 94vw); display: flex; flex-direction: column; }
+.gym-library-card h2 { margin-bottom: 0.6rem; }
+.gym-library-filters { display: flex; gap: 0.5rem; margin: 0.5rem 0; }
+.gym-library-filters > div { flex: 1; min-width: 0; }
+.gym-library-list { max-height: 50vh; overflow-y: auto; }
+.gym-library-item { cursor: pointer; }
+.gym-library-item:hover { outline: 1px solid var(--gym-accent); }
+.gym-library-import-btn { font-size: 0.75rem; padding: 0.3rem 0.55rem; flex-shrink: 0; }
+.gym-library-imported { font-size: 0.75rem; color: var(--gym-accent); flex-shrink: 0; }
+.gym-library-instructions { margin: 0.6rem 0 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.85rem; }
+.gym-exercises-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+/* Modo entrenar en vivo (Fase 3): overlay a pantalla completa con las
+   mismas variables moradas del gym (#gym-live-view es hermano de
+   #gym-view, asi que declara las suyas propias). */
+#gym-live-view {
+  --gym-accent: var(--accent);
+  --gym-accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+  --gym-accent-text: var(--accent-text);
+  z-index: 16; /* por encima de #gym-view (15), debajo de los modales (20) */
+}
+#gym-live-view .primary-btn { background: var(--gym-accent); color: var(--gym-accent-text); border-color: var(--gym-accent); }
+.gym-live-clock { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.05rem; margin-right: 0.4rem; }
+.gym-live-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem 8rem; display: flex; flex-direction: column; gap: 0.8rem; }
+.gym-live-exercises { display: flex; flex-direction: column; gap: 0.8rem; }
+.gym-live-exercise-card {
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.8rem;
+  display: flex; flex-direction: column; gap: 0.45rem;
+}
+.gym-live-exercise-header { display: flex; align-items: center; gap: 0.5rem; }
+.gym-live-exercise-header .gym-list-item-name { font-weight: 600; }
+.gym-live-exercise-header .icon-btn { margin-left: auto; }
+/* Filas de serie: rejilla fija para que las columnas queden alineadas
+   entre filas (nº / anterior / peso / reps / RPE / check). */
+/* 5 columnas desde que el RPE es por ejercicio (vivia aqui como sexta
+   y desbordaba en pantallas estrechas): # / Anterior / peso / reps / ✓. */
+.gym-live-set-row {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(3.5rem, 1fr) 4.4rem 4rem 1.6rem;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.85rem;
+}
+.gym-live-set-row input[type="number"] { width: 100%; min-width: 0; }
+.gym-live-set-head { color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); font-size: 0.75rem; }
+.gym-live-set-number { font-variant-numeric: tabular-nums; }
+.gym-live-set-prev { font-size: 0.78rem; color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gym-live-set-row.done .gym-live-set-number,
+.gym-live-set-row.done .gym-live-set-prev { color: var(--gym-accent); }
+.gym-live-note { margin-top: 0.2rem; font-size: 0.82rem; }
+.gym-live-start-btn { font-size: 1rem; padding: 0.8rem 1.1rem; align-self: stretch; }
+
+/* Tarjetas plegables del entreno (peticion de Koku: no deslizar 40
+   minutos): tocar la cabecera pliega/despliega; plegada solo se ve la
+   cabecera con el progreso X/N. El caret gira para indicar el estado. */
+.gym-live-caret { flex-shrink: 0; font-size: 0.8rem; transition: transform 0.15s ease; }
+.gym-live-exercise-card.collapsed .gym-live-caret { transform: rotate(-90deg); }
+.gym-live-exercise-card.collapsed .gym-live-card-body { display: none; }
+.gym-live-card-body { display: flex; flex-direction: column; gap: 0.45rem; }
+.gym-live-exercise-header { cursor: pointer; }
+/* Nombres largos: hasta 2 lineas en vez de cortar con "..." en una
+   (feedback de Koku: no podia leer el ejercicio entero). */
+.gym-live-exercise-header .gym-list-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.25;
+}
+.gym-live-card-progress {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}
+.gym-live-card-btn { padding: 0.2rem 0.35rem; flex-shrink: 0; }
+.gym-live-cards-tools { display: flex; gap: 0.5rem; }
+.gym-live-cards-tools .secondary-btn { font-size: 0.8rem; padding: 0.35rem 0.6rem; }
+
+/* Chip del descanso del ejercicio: se ve el tiempo formateado y tocarlo
+   lo convierte en un campo de segundos (se aplica a todas las series). */
+.gym-live-rest-chip {
+  flex-shrink: 0;
+  border: 1px solid var(--gym-accent);
+  color: var(--gym-accent);
+  background: transparent;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.55rem;
+  font-variant-numeric: tabular-nums;
+}
+.gym-live-rest-chip-input { width: 4rem; flex-shrink: 0; font-size: 0.85rem; }
+
+/* Pie de tarjeta: + Serie a la izquierda, RPE del ejercicio a la derecha
+   (el RPE es por ejercicio, no por serie -- peticion de Koku). */
+.gym-live-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.gym-live-exrpe { display: flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; }
+.gym-live-exrpe input { width: 3.6rem; }
+
+/* "+60s": descanso extra anadido con +30s, tanto en el entreno como en
+   el historial de la sesion. */
+.gym-set-extra-chip {
+  margin-left: 0.25rem;
+  font-size: 0.68rem;
+  color: var(--gym-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ejercicios ocultos del dia, recuperables durante la sesion. */
+.gym-live-hidden-pool { display: flex; flex-direction: column; gap: 0.5rem; }
+.gym-live-hidden-pool > .secondary-btn { align-self: flex-start; font-size: 0.8rem; padding: 0.35rem 0.6rem; }
+.gym-live-hidden-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.gym-live-hidden-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.7rem;
+}
+.gym-live-hidden-row .secondary-btn { font-size: 0.78rem; padding: 0.3rem 0.5rem; flex-shrink: 0; }
+
+/* Nota FIJA del ejercicio ("polea altura 3") en la tarjeta del entreno:
+   pequena y con el acento, para localizarla de un vistazo. */
+.gym-live-fixed-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--gym-accent);
+}
+
+/* Chips de musculos secundarios en el modal de ejercicio. */
+.gym-secondary-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.gym-secondary-chip {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--surface-text);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.6rem;
+}
+.gym-secondary-chip.active {
+  border-color: var(--gym-accent);
+  background: color-mix(in srgb, var(--gym-accent) 18%, var(--surface));
+  color: var(--gym-accent);
+}
+
+/* Fila de ejercicio oculto en el editor del dia: atenuada, con el ojo
+   tachado como unico indicador extra. */
+.gym-routine-exercise-row.gym-exercise-hidden { opacity: 0.55; }
+.gym-rest-preview { margin: 0; }
+
+/* Cabeceras con boton de dudas al lado (Configuracion y Progreso):
+   el "?" abre un dialogo con la explicacion completa, para no tener
+   parrafos de letra pequena siempre a la vista (peticion de Koku). */
+.settings-subheading-row, .gym-subheading-row { display: flex; align-items: center; gap: 0.5rem; }
+.settings-subheading-row h4, .gym-subheading-row h3 { margin-bottom: 0; }
+/* Toggle + su "?" en la misma fila (apartado Notificaciones). */
+.settings-toggle-help-row { display: flex; align-items: center; gap: 0.5rem; }
+.settings-toggle-help-row .checkbox-row { flex: 1; min-width: 0; }
+.settings-toggle-help-row .settings-help-btn { flex-shrink: 0; }
+.settings-help-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.gym-start-day-btn { cursor: pointer; text-align: left; border: 1px solid var(--border); width: 100%; }
+/* "Sesion libre" es otra cosa distinta a los dias del plan: un hueco de
+   separacion para que no parezca el ultimo dia de la lista. */
+#btn-gym-start-free { margin-top: 0.9rem; width: 100%; }
+/* Barra inferior de descanso: fija abajo del overlay, con el acento. */
+.gym-live-rest-bar {
+  display: flex; flex-direction: column; gap: 0.45rem;
+  margin: 0.6rem 1.2rem 0;
+  padding: 0.6rem 0.9rem 0.7rem;
+  background: color-mix(in srgb, var(--gym-accent) 22%, var(--surface));
+  border: 1px solid var(--gym-accent);
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+.gym-live-rest-info { display: flex; align-items: center; gap: 0.7rem; }
+.gym-live-rest-info b { font-variant-numeric: tabular-nums; cursor: pointer; }
+.gym-live-rest-info .secondary-btn { margin-left: auto; }
+.gym-live-rest-track {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-text) 14%, var(--surface));
+  overflow: hidden;
+}
+.gym-live-rest-fill-base { height: 100%; background: var(--gym-accent); transition: width 0.4s linear; }
+/* El tramo extra en un tono claramente distinto del acento (mezcla con
+   el color de texto para que funcione con cualquier tema). */
+.gym-live-rest-fill-extra { height: 100%; background: color-mix(in srgb, var(--gym-accent) 45%, var(--surface-text)); transition: width 0.4s linear; }
+/* Resumen de fin de entreno: rejilla 2x2 de estadisticas grandes. */
+.gym-live-summary-card h2 { text-align: center; }
+#gym-start-block-name { text-align: center; }
+.gym-live-hint { text-align: center; }
+.gym-live-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin: 0.8rem 0 0.4rem; }
+.gym-live-summary-stat {
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.8rem;
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+}
+.gym-live-summary-stat b { font-size: 1.25rem; }
+.gym-live-summary-stat span { font-size: 0.75rem; color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); }
+#gym-summary-muscle-list { text-align: center; }
+
+/* Progreso avanzado (Fase 5): heatmap de consistencia, PRs y volumen
+   semanal. El heatmap usa UN solo tono (el morado del gym) escalonado
+   de claro a oscuro -- magnitud, no identidad. */
+.gym-consistency-grid { grid-template-columns: repeat(4, 1fr); margin: 0; }
+.gym-heatmap-grid { display: grid; gap: 3px; max-width: 34rem; }
+.gym-heatmap-cell {
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--surface-2-text) 8%, var(--surface-2));
+  display: inline-block;
+  min-width: 0.55rem;
+}
+.gym-heatmap-cell.level-1 { background: color-mix(in srgb, var(--gym-accent) 45%, var(--surface-2)); }
+.gym-heatmap-cell.level-2 { background: var(--gym-accent); }
+.gym-heatmap-cell.future { background: transparent; }
+.gym-heatmap-legend { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.4rem; font-size: 0.75rem; }
+.gym-heatmap-legend .gym-heatmap-cell { width: 0.7rem; min-width: 0.7rem; flex: none; aspect-ratio: 1; }
+.gym-weekly-goal-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.gym-weekly-goal-row > div { min-width: 12rem; }
+.gym-pr-item { justify-content: space-between; }
+.gym-pr-stats { display: flex; flex-direction: column; align-items: flex-end; gap: 0.1rem; flex-shrink: 0; }
+.gym-pr-stats b { font-size: 0.95rem; }
+.gym-viz-legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.4rem; font-size: 0.78rem; }
+.gym-viz-legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+/* Logros (Fase 7): tarjetas con nivel y barra de progreso al siguiente. */
+.gym-achievements-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 0.6rem; }
+.gym-achievement-card {
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.8rem;
+  display: flex; flex-direction: column; gap: 0.35rem;
+  opacity: 0.75;
+  font-size: 0.85rem;
+}
+.gym-achievement-card.unlocked { opacity: 1; border: 1px solid color-mix(in srgb, var(--gym-accent) 45%, transparent); }
+.gym-achievement-head { display: flex; align-items: center; gap: 0.5rem; }
+.gym-achievement-icon { font-size: 1.3rem; }
+.gym-achievement-bar { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--surface-2-text) 12%, var(--surface-2)); overflow: hidden; }
+.gym-achievement-bar-fill { height: 100%; border-radius: 999px; background: var(--gym-accent); }
+
+/* Mini-barra GLOBAL de descanso: fija arriba de toda la app mientras
+   corre un descanso con el entreno oculto. Tocarla vuelve al entreno.
+   Usa el acento del tema directamente (vive fuera de #gym-view). */
+.gym-global-rest {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 60; /* sobre el contenido, bajo la nav (70) y los dialogos */
+  display: flex; flex-direction: column; gap: 0.25rem;
+  /* safe-area: en iPhone el borde superior lo ocupan el reloj y la
+     "isla"; sin este margen extra la barra quedaba debajo del reloj y
+     no se leia (feedback de Koku). En navegador la variable vale 0 y
+     no cambia nada. */
+  padding: calc(0.45rem + env(safe-area-inset-top, 0px)) 1rem 0.5rem;
+  background: color-mix(in srgb, var(--accent) 25%, var(--surface));
+  border-bottom: 1px solid var(--accent);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.gym-global-rest b { font-variant-numeric: tabular-nums; }
+.gym-global-rest-track {
+  display: flex;
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-text) 14%, var(--surface));
+  overflow: hidden;
+}
+.gym-global-rest .gym-live-rest-fill-base { background: var(--accent); }
+.gym-global-rest .gym-live-rest-fill-extra { background: color-mix(in srgb, var(--accent) 45%, var(--surface-text)); }
+/* Mientras la mini-barra esta visible, TODA la interfaz baja lo que mide
+   la barra para que no tape nada (el cambio mensual/anual del calendario,
+   el titulo y el Volver de Configuracion... -- feedback de Koku). Son los
+   mismos tres contenedores que reservan el hueco de la muesca mas arriba:
+   como la barra ya incluye ese hueco dentro (su padding-top con
+   safe-area), aqui se SUSTITUYE ese padding por la altura total de la
+   barra, que gymLiveTick() mide y deja en --gym-rest-offset. */
+:root { --gym-rest-offset: 0px; }
+body.gym-rest-push .app,
+body.gym-rest-push .my-space-view,
+body.gym-rest-push #settings-modal .settings-card {
+  padding-top: var(--gym-rest-offset);
+}
+
+/* Menu flotante de acciones del entreno (abajo a la derecha, sin tapar
+   la nav): el boton central despliega en ABANICO los 4 botones de
+   accion, en un cuarto de circulo hacia arriba/izquierda (idea de Koku:
+   "que salgan alrededor del boton, no listados"). Cerrado, los botones
+   viven apilados bajo el central (opacidad 0, sin eventos); abierto,
+   cada uno viaja a su posicion con transform. */
+.gym-live-fab {
+  position: fixed;
+  right: 1rem;
+  bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  z-index: 65;
+  width: 52px;
+  height: 52px;
+}
+.gym-live-fab-main {
+  position: absolute;
+  inset: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  transition: transform 0.18s ease;
+}
+/* Girado 90 grados, los tres puntos verticales pasan a horizontales:
+   pista visual barata de "abierto". */
+.gym-live-fab.open .gym-live-fab-main { transform: rotate(90deg); }
+.gym-live-fab-action {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--surface-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(0, 0);
+  transition: transform 0.18s ease, opacity 0.14s ease;
+}
+.gym-live-fab.open .gym-live-fab-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* Posiciones del abanico, ahora con 5 botones (entro "+ ejercicio"):
+   radio 130px para que los contiguos queden a ~51px de centro a centro
+   (con radio menor, los de 44px se tocaban). 1 arriba, 5 a la izquierda. */
+.gym-live-fab.open .gym-fab-pos-1 { transform: translate(0, -130px); }
+.gym-live-fab.open .gym-fab-pos-2 { transform: translate(-50px, -120px); }
+.gym-live-fab.open .gym-fab-pos-3 { transform: translate(-92px, -92px); }
+.gym-live-fab.open .gym-fab-pos-4 { transform: translate(-120px, -50px); }
+.gym-live-fab.open .gym-fab-pos-5 { transform: translate(-130px, 0); }
+
+/* Boton de pausa del cronometro: ensena pausa o play segun el estado. */
+#btn-gym-live-pause .gym-icon-play { display: none; }
+#btn-gym-live-pause.is-paused .gym-icon-pause { display: none; }
+#btn-gym-live-pause.is-paused .gym-icon-play { display: block; }
+#btn-gym-live-pause.is-paused { border-color: var(--gym-accent); color: var(--gym-accent); }
+/* Reloj de sesion en pausa: atenuado, para que se note de un vistazo. */
+.gym-live-clock.paused { opacity: 0.45; }
+
+/* El entreno en vivo por ENCIMA del resto de pantallas completas (todas
+   comparten .my-space-view con z-index 15): tocar la barra de descanso
+   desde Finanzas/Notas/etc debe ensenar el entreno, no abrirlo debajo. */
+#gym-live-view { z-index: 40; }
+.gym-live-fab-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.gym-live-fab-danger {
+  background: var(--surface);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* Modal de ayuda del entrenamiento: el texto es largo, asi que el
+   cuerpo tiene su propio scroll y el titulo/checkbox/boton quedan
+   siempre a la vista. */
+.gym-help-card { max-width: 480px; }
+.gym-help-body {
+  overflow-y: auto;
+  max-height: 55vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-right: 0.3rem;
+}
+.gym-help-body h4 { margin: 0.7rem 0 0.15rem; color: var(--gym-accent); }
+.gym-help-body h4:first-child { margin-top: 0; }
+.gym-help-body p { margin: 0; font-size: 0.9rem; line-height: 1.45; }
+
+/* Indicador de entreno activo: el boton "Herramientas" de la nav y la
+   tarjeta de Gimnasio se tiñen del acento con un puntito de aviso. */
+.mobile-nav-btn.gym-live-indicator { color: var(--accent); position: relative; }
+.mobile-nav-btn.gym-live-indicator::after {
+  content: '';
+  position: absolute;
+  top: 0.35rem; right: 28%;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+#btn-open-gym.gym-live-indicator {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  position: relative;
+}
+#btn-open-gym.gym-live-indicator::after {
+  content: '';
+  position: absolute;
+  top: 0.5rem; right: 0.5rem;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Mapa de musculos (Fase 6): dos siluetas, zonas coloreadas por uso. */
+.gym-bodymap-controls { display: flex; gap: 0.8rem; flex-wrap: wrap; }
+.gym-bodymap-svg { max-width: 30rem; }
+.gym-bodymap-silhouette { fill: color-mix(in srgb, var(--surface-2-text) 5%, var(--surface-2)); }
+.gym-bodymap-svg [data-bodymap-group] { cursor: pointer; }
+/* Cada poligono lleva un stroke grueso del color del FONDO con esquinas
+   redondeadas (paint-order pinta el stroke debajo del fill): eso les da
+   corners suaves, los encoge un pelin y deja un canal oscuro de
+   separacion entre musculos vecinos. El grupo activo (tocado) cambia el
+   borde al acento -- en las DOS vistas a la vez, via .bodymap-active. */
+.gym-bodymap-svg polygon { stroke: var(--bg); stroke-width: 14; stroke-linejoin: round; paint-order: stroke; }
+.gym-bodymap-svg .gym-bodymap-silhouette polygon { stroke: var(--bg); }
+.gym-bodymap-svg .bodymap-active polygon { stroke: var(--gym-accent); stroke-width: 8; }
+.gym-bodymap-caption { font-size: 52px; }
+.gym-bodymap-info { text-align: center; min-height: 2.4em; font-size: 0.82rem; color: color-mix(in srgb, var(--bg-text) 70%, var(--bg)); margin: 0.3rem 0 0; }
+
+/* Cabecera del nivel de dias (boton volver + nombre del bloque). */
+.gym-block-days-header { display: flex; align-items: center; gap: 0.6rem; }
+.gym-block-days-header .gym-subheading { margin: 0; }
+/* Los dos niveles de la pestana Plan son columnas como el panel padre. */
+#gym-blocks-level, #gym-block-days-level { display: flex; flex-direction: column; gap: 0.6rem; }
+#gym-blocks-level.hidden, #gym-block-days-level.hidden { display: none; }
 
 /* ---------------------------------------------------------------------
    Extension "Finanzas": pestañas simples (Resumen/Movimientos/

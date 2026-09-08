@@ -15,11 +15,34 @@
   const router = createLocalRouter();
 
   function serialize(row) {
+    // secondary_muscles es un JSON array de ids de la taxonomia; si no
+    // parsea (o no hay), lista vacia en vez de romper.
+    let secondary = [];
+    if (row.secondary_muscles) {
+      try {
+        const parsed = JSON.parse(row.secondary_muscles);
+        if (Array.isArray(parsed)) secondary = parsed;
+      } catch { /* lista vacia */ }
+    }
     return {
       id: row.id,
       name: row.name,
       muscleGroup: row.muscle_group || null,
+      libraryId: row.library_id || null,
+      equipment: row.equipment || null,
+      secondaryMuscles: secondary,
+      // Nota FIJA del ejercicio ("polea altura 3"): a diferencia de la
+      // nota de sesion (que vive en cada sesion), esta acompana siempre
+      // al ejercicio -- peticion de Koku para apuntar posiciones/alturas.
+      notes: row.notes || null,
     };
+  }
+
+  // Normaliza el secondaryMuscles que llega del cliente a JSON o NULL.
+  function stringifySecondary(value) {
+    if (!Array.isArray(value)) return null;
+    const clean = value.filter((m) => typeof m === 'string' && m.trim()).map((m) => m.trim());
+    return clean.length > 0 ? JSON.stringify(clean) : null;
   }
 
   router.get('/', (req, res) => {
@@ -28,13 +51,29 @@
   });
 
   router.post('/', (req, res) => {
-    const { name, muscleGroup } = req.body || {};
+    const { name, muscleGroup, libraryId, equipment, secondaryMuscles, notes } = req.body || {};
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'invalid_request', message: 'El ejercicio necesita un nombre.' });
     }
+
+    // Import idempotente desde la libreria empaquetada: si este
+    // libraryId ya se importo antes, se devuelve el ejercicio existente
+    // en vez de crear un duplicado (200, no 201 -- no se creo nada).
+    if (libraryId) {
+      const existing = db.prepare('SELECT * FROM gym_exercises WHERE library_id = ?').get(String(libraryId));
+      if (existing) return res.json(serialize(existing));
+    }
+
     const info = db
-      .prepare('INSERT INTO gym_exercises (name, muscle_group) VALUES (?, ?)')
-      .run(name.trim(), muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null);
+      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment, secondary_muscles, notes) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(
+        name.trim(),
+        muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null,
+        libraryId ? String(libraryId) : null,
+        equipment && equipment.trim() ? equipment.trim() : null,
+        stringifySecondary(secondaryMuscles),
+        notes && notes.trim() ? notes.trim() : null
+      );
 
     const row = db.prepare('SELECT * FROM gym_exercises WHERE id = ?').get(info.lastInsertRowid);
     res.status(201).json(serialize(row));
@@ -44,10 +83,15 @@
     const existing = db.prepare('SELECT * FROM gym_exercises WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'not_found' });
 
-    const { name, muscleGroup } = req.body || {};
-    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ? WHERE id = ?').run(
+    // library_id no se toca desde el PUT a proposito: es la marca de "de
+    // donde salio", editar el ejercicio no cambia su origen.
+    const { name, muscleGroup, equipment, secondaryMuscles, notes } = req.body || {};
+    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ?, equipment = ?, secondary_muscles = ?, notes = ? WHERE id = ?').run(
       name !== undefined && name.trim() ? name.trim() : existing.name,
       muscleGroup === undefined ? existing.muscle_group : (muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null),
+      equipment === undefined ? existing.equipment : (equipment && equipment.trim() ? equipment.trim() : null),
+      secondaryMuscles === undefined ? existing.secondary_muscles : stringifySecondary(secondaryMuscles),
+      notes === undefined ? existing.notes : (notes && notes.trim() ? notes.trim() : null),
       req.params.id
     );
 
