@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import AudioToolbox
 
 // "Baja un poco la musica al acabar el descanso" (peticion de Koku): el
 // truco de iOS para esto es el audio DUCKING -- activar una sesion de
@@ -30,12 +31,24 @@ final class RestAudioWatcher {
     private var player: AVAudioPlayer?
     private var duckTimer: Timer?
     private var restoreTimer: Timer?
+    private var pulseTimer: Timer?
+    private var pulsesLeft = 0
+    private var duckEnabled = true
+    private var vibrateEnabled = false
     private(set) var watching = false
+
+    // Cuantas vibraciones seguidas y cada cuanto, cuando esta activada la
+    // vibracion larga. 6 pulsos separados 0.8s = casi 5 segundos de aviso
+    // notable, sin mandar ni una notificacion extra.
+    private static let pulseCount = 6
+    private static let pulseInterval: TimeInterval = 0.8
 
     // Empieza (o reinicia) la vigilancia de un descanso que acaba en
     // endAt. Devuelve false si el audio no se pudo preparar.
     @discardableResult
-    func start(endAt: Date) -> Bool {
+    func start(endAt: Date, duck: Bool = true, vibrate: Bool = false) -> Bool {
+        duckEnabled = duck
+        vibrateEnabled = vibrate
         teardown(deactivate: false)
         let session = AVAudioSession.sharedInstance()
         do {
@@ -80,21 +93,50 @@ final class RestAudioWatcher {
 
     private func duckNow() {
         watching = false
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, options: [.mixWithOthers, .duckOthers])
-            try session.setActive(true)
-        } catch { /* si falla, al menos no rompemos nada */ }
-        let t = Timer(timeInterval: 3.0, repeats: false) { [weak self] _ in
+        if duckEnabled {
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try session.setCategory(.playback, options: [.mixWithOthers, .duckOthers])
+                try session.setActive(true)
+            } catch { /* si falla, al menos no rompemos nada */ }
+        }
+        // Vibracion LARGA: varios pulsos seguidos en vez de mandar una
+        // notificacion por vibracion (peticion de Koku). iOS no permite
+        // alargar la vibracion de una notificacion, pero como la app esta
+        // despierta durante el descanso (el silencio en bucle de arriba),
+        // aqui si se puede repetir la vibracion del sistema a mano.
+        if vibrateEnabled {
+            pulsesLeft = RestAudioWatcher.pulseCount
+            vibrarPulso()
+            let p = Timer(timeInterval: RestAudioWatcher.pulseInterval, repeats: true) { [weak self] t in
+                guard let self = self else { t.invalidate(); return }
+                if self.pulsesLeft <= 0 { t.invalidate(); self.pulseTimer = nil; return }
+                self.vibrarPulso()
+            }
+            RunLoop.main.add(p, forMode: .common)
+            pulseTimer = p
+        }
+        // Se suelta el audio cuando ya han pasado el duck y los pulsos.
+        let espera = vibrateEnabled
+            ? Double(RestAudioWatcher.pulseCount) * RestAudioWatcher.pulseInterval + 0.5
+            : 3.0
+        let t = Timer(timeInterval: espera, repeats: false) { [weak self] _ in
             self?.teardown(deactivate: true)
         }
         RunLoop.main.add(t, forMode: .common)
         restoreTimer = t
     }
 
+    private func vibrarPulso() {
+        pulsesLeft -= 1
+        AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+    }
+
     private func teardown(deactivate: Bool) {
         duckTimer?.invalidate(); duckTimer = nil
         restoreTimer?.invalidate(); restoreTimer = nil
+        pulseTimer?.invalidate(); pulseTimer = nil
+        pulsesLeft = 0
         player?.stop(); player = nil
         watching = false
         if deactivate {

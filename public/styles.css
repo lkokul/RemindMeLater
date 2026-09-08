@@ -1963,6 +1963,14 @@ body.real-modal-open .calendar-quick-actions { display: none; }
    real de los botones (una carpeta lleva uno mas, "Editar"). El 9.5rem
    es solo el valor de respaldo si por lo que sea no se pudo medir. */
 .note-swipe-wrap.is-open > .note-item { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
+/* El mismo deslizar, reutilizado en el historial de Gimnasio (Editar /
+   Eliminar) -- ver wrapGymRowWithSwipe en app.js. */
+.note-swipe-wrap > .gym-list-item {
+  position: relative;
+  background: var(--surface);
+  transition: transform 0.16s ease-out;
+}
+.note-swipe-wrap.is-open > .gym-list-item { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
 
 /* Arrastrar y soltar notas/carpetas: la etiqueta que sigue al dedo, y el
    resalte de la carpeta (o del boton "Volver") sobre la que se suelta. */
@@ -2862,10 +2870,13 @@ body.gym-rest-push #settings-modal .settings-card {
 /* Reloj de sesion en pausa: atenuado, para que se note de un vistazo. */
 .gym-live-clock.paused { opacity: 0.45; }
 
-/* El entreno en vivo por ENCIMA del resto de pantallas completas (todas
-   comparten .my-space-view con z-index 15): tocar la barra de descanso
-   desde Finanzas/Notas/etc debe ensenar el entreno, no abrirlo debajo. */
-#gym-live-view { z-index: 40; }
+/* El z-index del entreno en vivo se declara UNA sola vez, arriba con el
+   resto de #gym-live-view (16: por encima de #gym-view, por debajo de
+   los modales). Aqui hubo un rato un "z-index: 40" para que la barra de
+   descanso lo trajera por encima de otras pantallas completas, y eso
+   dejaba los dialogos (empezar/terminar serie, descartar entreno) por
+   DETRAS del entreno: solo se veian al ocultarlo con el ▾. Si algun dia
+   hace falta subirlo, tiene que seguir por debajo de .modal (20). */
 .gym-live-fab-primary {
   background: var(--accent);
   color: var(--accent-text);

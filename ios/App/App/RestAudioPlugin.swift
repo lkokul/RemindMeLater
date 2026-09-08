@@ -20,8 +20,16 @@ public class RestAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Falta endAt")
             return
         }
+        // duck = bajar la musica al acabar; vibrate = vibracion larga
+        // (varios pulsos seguidos, sin notificaciones extra).
+        let duck = call.getBool("duck") ?? true
+        let vibrate = call.getBool("vibrate") ?? false
         DispatchQueue.main.async {
-            let ok = RestAudioWatcher.shared.start(endAt: Date(timeIntervalSince1970: endMs / 1000))
+            let ok = RestAudioWatcher.shared.start(
+                endAt: Date(timeIntervalSince1970: endMs / 1000),
+                duck: duck,
+                vibrate: vibrate
+            )
             call.resolve(["watching": ok])
         }
     }
@@ -33,12 +41,14 @@ public class RestAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Falta endAt")
             return
         }
+        let duck = call.getBool("duck") ?? true
+        let vibrate = call.getBool("vibrate") ?? false
         DispatchQueue.main.async {
             let end = Date(timeIntervalSince1970: endMs / 1000)
             if RestAudioWatcher.shared.watching {
                 RestAudioWatcher.shared.reschedule(endAt: end)
             } else {
-                RestAudioWatcher.shared.start(endAt: end)
+                RestAudioWatcher.shared.start(endAt: end, duck: duck, vibrate: vibrate)
             }
             call.resolve()
         }

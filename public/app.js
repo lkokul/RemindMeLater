@@ -7723,7 +7723,13 @@ function renderGymExercisesList() {
     return;
   }
   state.gymExercises.forEach((ex) => {
-    const extras = [gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' · ');
+    // "unilateral" se ensena aqui para que se vea DONDE se configura (el
+    // lapiz de esta misma fila) -- Koku lo estuvo buscando en el dia.
+    const extras = [
+      gymMuscleGroupLabel(ex.muscleGroup),
+      ex.equipment,
+      ex.unilateral ? (ex.countSidesSeparately ? 'unilateral, por lados' : 'unilateral') : '',
+    ].filter(Boolean).join(' · ');
     const row = document.createElement('div');
     row.className = 'gym-list-item';
     row.innerHTML = `
@@ -7837,6 +7843,80 @@ function renderGymRoutinesList() {
   });
 }
 
+// Deslizar una sesion del historial hacia la izquierda para Editar /
+// Eliminar (peticion de Koku: "como está hecho en las notas"). Reutiliza
+// las mismas clases y el mismo estado de "solo una fila abierta"
+// (openSwipedNoteRow) que wrapNoteRowWithSwipe, para que abrir una cierre
+// la otra y el toque fuera las cierre todas.
+function wrapGymRowWithSwipe(row, { onEdit, onDelete }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'note-swipe-wrap';
+
+  const acciones = document.createElement('div');
+  acciones.className = 'note-swipe-actions';
+  [['Editar', 'secondary-btn', onEdit], ['Eliminar', 'danger-btn', onDelete]].forEach(([texto, clase, fn]) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = clase;
+    btn.textContent = texto;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeSwipedNoteRow();
+      fn();
+    });
+    acciones.appendChild(btn);
+  });
+  wrap.appendChild(acciones);
+  wrap.appendChild(row);
+
+  let inicio = null;
+  let horizontal = false;
+  row.addEventListener('pointerdown', (e) => {
+    inicio = { x: e.clientX, y: e.clientY };
+    horizontal = false;
+  });
+  row.addEventListener('pointermove', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    const dy = e.clientY - inicio.y;
+    if (!horizontal && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) horizontal = true;
+  });
+  row.addEventListener('pointerup', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    inicio = null;
+    if (!horizontal) return;
+    if (dx < -40) {
+      if (openSwipedNoteRow !== wrap) closeSwipedNoteRow();
+      wrap.style.setProperty('--swipe-actions-width', `${acciones.offsetWidth}px`);
+      wrap.classList.add('is-open');
+      openSwipedNoteRow = wrap;
+    } else if (dx > 20) {
+      closeSwipedNoteRow();
+    }
+    // Un deslizamiento no debe abrir la sesion: se descarta ese click.
+    row.dataset.swiped = '1';
+  });
+  row.addEventListener('click', (e) => {
+    if (row.dataset.swiped) {
+      delete row.dataset.swiped;
+      if (wrap.classList.contains('is-open')) { e.stopPropagation(); e.preventDefault(); }
+    }
+  }, true);
+  return wrap;
+}
+
+// Borrar una sesion desde el deslizamiento (mismo aviso que el boton de
+// dentro del modal: aqui SI se pierde historial).
+async function deleteGymSessionById(id) {
+  const ok = await showAppConfirm('¿Eliminar esta sesión y todas sus series? Esto sí borra historial.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
+  await loadGymSessions();
+  renderGymSessionsList();
+  populateGymProgressExerciseSelect();
+}
+
 function renderGymSessionsList() {
   const list = document.getElementById('gym-sessions-list');
   list.innerHTML = '';
@@ -7871,7 +7951,10 @@ function renderGymSessionsList() {
         <span class="gym-list-item-muted">${escapeHtml([gymActivityKindLabel(s.activityKind), ...statBits].join(' · '))}</span>
       `;
       row.addEventListener('click', () => openGymActivityModal(s));
-      list.appendChild(row);
+      list.appendChild(wrapGymRowWithSwipe(row, {
+        onEdit: () => openGymActivityModal(s),
+        onDelete: () => deleteGymSessionById(s.id),
+      }));
       return;
     }
 
@@ -7887,7 +7970,10 @@ function renderGymSessionsList() {
       <span class="gym-list-item-muted">${exerciseNames.length ? exerciseNames.map(escapeHtml).join(', ') : 'Sin ejercicios'}</span>
     `;
     row.addEventListener('click', () => openGymSessionModal(s));
-    list.appendChild(row);
+    list.appendChild(wrapGymRowWithSwipe(row, {
+      onEdit: () => openGymSessionModal(s),
+      onDelete: () => deleteGymSessionById(s.id),
+    }));
   });
 }
 
@@ -9348,23 +9434,20 @@ async function gymScheduleRestNotification() {
     // Sonido/vibracion/silencio segun el ajuste del dispositivo -- ver
     // notificationSoundValue() en local-notifications.js.
     const sonido = notificationSoundValue();
-    // 1 aviso, o 3 seguidos (cada 2s) si el modo insistente esta activo.
-    const cuantos = gymRestBurstEnabled() ? GYM_REST_NOTIFICATION_IDS.length : 1;
-    const avisos = GYM_REST_NOTIFICATION_IDS.slice(0, cuantos).map((id, i) => {
-      const aviso = {
-        id,
-        title: 'Descanso terminado',
-        body: 'Siguiente serie.',
-        schedule: { at: new Date(gymLiveSession.restUntil + i * 2000) },
-        // Mismo hilo: iOS agrupa las repeticiones en UNA pila en vez de
-        // ensenar 3 avisos sueltos (feedback de Koku). Vibrar sin
-        // notificacion no existe en iOS, pero al menos se ven como una.
-        threadIdentifier: 'gym-descanso',
-      };
-      if (sonido) aviso.sound = sonido;
-      return aviso;
-    });
-    await plugin.schedule({ notifications: avisos });
+    // UNA sola notificacion. La insistencia ya no se hace repitiendo
+    // avisos (a Koku le molestaba ver 3 notificaciones): ahora la pone la
+    // vibracion larga nativa de RestAudioWatcher, que puede repetir la
+    // vibracion del sistema sin notificar nada porque la app sigue
+    // despierta durante el descanso.
+    const aviso = {
+      id: GYM_REST_NOTIFICATION_ID,
+      title: 'Descanso terminado',
+      body: 'Siguiente serie.',
+      schedule: { at: new Date(gymLiveSession.restUntil) },
+      threadIdentifier: 'gym-descanso',
+    };
+    if (sonido) aviso.sound = sonido;
+    await plugin.schedule({ notifications: [aviso] });
   } catch (err) {
     console.error('No se pudo programar el aviso de descanso:', err);
   }
@@ -9577,20 +9660,27 @@ function getGymRestAudioPlugin() {
 function gymRestDuckEnabled() {
   return localStorage.getItem('gymRestDuck') !== 'false';
 }
+// La vigilancia hace falta si hay que bajar la musica O si hay que
+// vibrar largo al acabar: las dos cosas necesitan la app despierta.
+function gymRestWatchParams() {
+  return { duck: gymRestDuckEnabled(), vibrate: gymRestBurstEnabled() };
+}
 async function gymStartRestAudioWatch() {
   const plugin = getGymRestAudioPlugin();
-  if (!plugin || !gymRestDuckEnabled() || !gymLiveSession || !gymLiveSession.restUntil) return;
+  const flags = gymRestWatchParams();
+  if (!plugin || (!flags.duck && !flags.vibrate) || !gymLiveSession || !gymLiveSession.restUntil) return;
   try {
-    await plugin.startWatch({ endAt: gymLiveSession.restUntil });
+    await plugin.startWatch({ endAt: gymLiveSession.restUntil, ...flags });
   } catch (err) {
     console.error('No se pudo vigilar el audio del descanso:', err);
   }
 }
 async function gymUpdateRestAudioWatch() {
   const plugin = getGymRestAudioPlugin();
-  if (!plugin || !gymRestDuckEnabled() || !gymLiveSession || !gymLiveSession.restUntil) return;
+  const flags = gymRestWatchParams();
+  if (!plugin || (!flags.duck && !flags.vibrate) || !gymLiveSession || !gymLiveSession.restUntil) return;
   try {
-    await plugin.updateWatch({ endAt: gymLiveSession.restUntil });
+    await plugin.updateWatch({ endAt: gymLiveSession.restUntil, ...flags });
   } catch (err) {
     console.error('No se pudo mover la vigilancia de audio:', err);
   }
@@ -9845,20 +9935,18 @@ document.getElementById('btn-gym-set-end-done').addEventListener('click', () => 
   const ex = gymActiveSetExercise();
   const set = ex && ex.sets[a.setIndex];
   if (!set) return;
-  let peso = set.weightDisplay;
-  let reps = set.reps;
-  if (peso === '' || reps === '') {
-    // Ultima serie hecha del mismo lado (o de cualquiera si no hay).
-    const previa = [...ex.sets.slice(0, a.setIndex)].reverse()
-      .find((s) => s.done && (s.side === set.side || !set.side));
-    if (previa) {
-      if (peso === '') peso = previa.weightDisplay || '';
-      if (reps === '') reps = previa.reps || '';
-    }
-  }
+  // La sugerencia (ultima serie hecha del mismo lado) va como PLACEHOLDER,
+  // en gris de ejemplo, no como valor escrito (peticion de Koku): si no
+  // tocas el campo, al guardar se usa igualmente ese valor.
+  const previa = [...ex.sets.slice(0, a.setIndex)].reverse()
+    .find((s) => s.done && (s.side === set.side || !set.side));
+  const wEl = document.getElementById('gym-set-end-weight');
+  const rEl = document.getElementById('gym-set-end-reps');
   document.querySelector('#gym-set-end-form .gym-set-field span').textContent = `Peso (${getGymWeightUnitLabel()})`;
-  document.getElementById('gym-set-end-weight').value = peso;
-  document.getElementById('gym-set-end-reps').value = reps;
+  wEl.value = set.weightDisplay || '';
+  rEl.value = set.reps || '';
+  wEl.placeholder = previa && previa.weightDisplay ? String(previa.weightDisplay) : '';
+  rEl.placeholder = previa && previa.reps ? String(previa.reps) : '';
   document.getElementById('gym-set-end-note').value = set.note || '';
   gymSetEndShowForm(true);
 });
@@ -9872,8 +9960,11 @@ function gymFinishActiveSet() {
   const ex = gymActiveSetExercise();
   const set = ex && ex.sets[a.setIndex];
   if (set) {
-    set.weightDisplay = document.getElementById('gym-set-end-weight').value;
-    set.reps = document.getElementById('gym-set-end-reps').value;
+    // Campo vacio = te vale la sugerencia gris, asi que se guarda esa.
+    const wEl = document.getElementById('gym-set-end-weight');
+    const rEl = document.getElementById('gym-set-end-reps');
+    set.weightDisplay = wEl.value !== '' ? wEl.value : (wEl.placeholder || '');
+    set.reps = rEl.value !== '' ? rEl.value : (rEl.placeholder || '');
     set.note = document.getElementById('gym-set-end-note').value;
     set.done = true;
     set.durationSeconds = gymActiveSetSeconds();
