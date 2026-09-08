@@ -10789,11 +10789,23 @@ function renderProyectosHome() {
     grid.appendChild(card);
   }
 
+  // Tarjeta punteada de "Importar" al final de Mis proyectos (mas a la
+  // vista que solo el boton de arriba; Koku no lo encontraba).
+  if (!wantTemplates && !query) {
+    const importCard = document.createElement('button');
+    importCard.type = 'button';
+    importCard.className = 'proyectos-home-card proyectos-home-card-import';
+    importCard.innerHTML = '<b>⤓</b><span>Importar un proyecto<br>(.rmproj)</span>';
+    importCard.title = 'Traer un proyecto exportado en este u otro ordenador';
+    importCard.addEventListener('click', () => importProyectosProjectFile());
+    grid.appendChild(importCard);
+  }
+
   if (roots.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'hint proyectos-home-empty';
     empty.textContent = wantTemplates
-      ? 'Todavía no hay plantillas: selecciona un proyecto en "Mis proyectos" y pulsa "→ Plantilla". También puedes montar una página con lo que repitas (una base de datos de viajes, la estructura de un documento…) y convertirla.'
+      ? 'Todavía no hay plantillas: selecciona un proyecto en "Mis proyectos" y pulsa "→ Plantilla". También puedes montar una página con lo que repitas (una base de datos de viajes, la estructura de un documento…) y convertirla. El proyecto de ejemplo 📖 crea además una plantilla "Documento PDF" lista para usar.'
       : (query ? 'Ningún proyecto coincide.' : 'Todavía no hay proyectos: crea uno nuevo, importa un archivo .rmproj o empieza por el proyecto de ejemplo 📖.');
     grid.appendChild(empty);
   }
@@ -11395,13 +11407,12 @@ async function exportProyectosPdf({ rootId, ids, autoCover = true, autoToc = tru
   }
 }
 
-// El dialogo de exportar a PDF: opciones del documento (selector de
-// paginas, portada e indice automaticos) y, si se abre desde DENTRO de
-// una pagina, el rol de esa pagina (normal / portada / no incluir).
-// Compartido entre el boton PDF de la barra de la pagina y la accion
-// PDF de las tarjetas de la home.
+// El dialogo de exportar a PDF (se abre desde la accion PDF de la
+// tarjeta del proyecto en la home): selector de paginas con el ROL de
+// cada una como pastilla clicable (normal → portada → no incluir →
+// normal), y las opciones de portada e indice automaticos.
 let proyectosPdfPopover = null;
-function openProyectosPdfDialog(rootLite, anchorEl, { rolePage = null } = {}) {
+function openProyectosPdfDialog(rootLite, anchorEl) {
   if (!window.electronAPI || !window.electronAPI.exportPdf) {
     showAppAlert('Exportar a PDF necesita la app de escritorio (reiníciala si acabas de actualizar).');
     return;
@@ -11419,38 +11430,6 @@ function openProyectosPdfDialog(rootLite, anchorEl, { rolePage = null } = {}) {
   // ¿Alguna pagina del subarbol hace ELLA de portada? Entonces la
   // automatica sobra y arranca desmarcada.
   const hasOwnCover = subtree.some((id) => byId.get(id)?.pdfRole === 'cover');
-
-  // --- El rol de la pagina abierta en el documento (solo desde dentro) ---
-  if (rolePage) {
-    const roleField = createSelectField({
-      options: [
-        { value: '', label: 'Página normal' },
-        { value: 'cover', label: 'Es la portada del documento' },
-        { value: 'skip', label: 'No incluir en el PDF' },
-      ],
-      initialValue: rolePage.pdfRole || '',
-      onChange: async (value) => {
-        try {
-          const updated = await api(`/api/proyectos-pages/${rolePage.id}`, {
-            method: 'PUT',
-            body: JSON.stringify({ pdfRole: value || null }),
-          });
-          rolePage.pdfRole = updated.pdfRole;
-          const entry = proyectosPages.find((p) => p.id === rolePage.id);
-          if (entry) entry.pdfRole = updated.pdfRole;
-        } catch (err) {
-          showAppAlert(`No se pudo guardar el rol: ${err.message}`);
-        }
-      },
-    });
-    const roleLabel = document.createElement('label');
-    roleLabel.className = 'proyectos-db-config-field';
-    const roleSpan = document.createElement('span');
-    roleSpan.textContent = 'Esta página en el PDF';
-    roleLabel.appendChild(roleSpan);
-    roleLabel.appendChild(roleField.element);
-    popover.appendChild(roleLabel);
-  }
 
   // --- Opciones del documento ---
   function addCheckbox(labelText, initial) {
@@ -11512,12 +11491,43 @@ function openProyectosPdfDialog(rootLite, anchorEl, { rolePage = null } = {}) {
     span.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
     row.appendChild(checkbox);
     row.appendChild(span);
-    if (page.pdfRole === 'cover' || page.pdfRole === 'skip') {
-      const note = document.createElement('span');
-      note.className = 'proyectos-pdf-page-note';
-      note.textContent = page.pdfRole === 'cover' ? 'portada' : 'no incluir';
-      row.appendChild(note);
-    }
+    // La pastilla de ROL, clicable: normal → portada → no incluir →
+    // normal. Es donde se decide ahora (el boton PDF de dentro de la
+    // pagina se quito). El rol se guarda en la pagina, no es solo de
+    // este export.
+    const ROLE_LABEL = { '': 'normal', cover: 'portada', skip: 'no incluir' };
+    const NEXT_ROLE = { '': 'cover', cover: 'skip', skip: '' };
+    const rolePill = document.createElement('button');
+    rolePill.type = 'button';
+    rolePill.className = 'proyectos-pdf-page-note proyectos-pdf-page-role';
+    const paintRole = () => {
+      const role = page.pdfRole || '';
+      rolePill.textContent = ROLE_LABEL[role];
+      rolePill.classList.toggle('is-normal', role === '');
+      rolePill.title = 'Cambiar el papel de esta página en el PDF (normal / portada / no incluir)';
+    };
+    paintRole();
+    rolePill.addEventListener('click', async (e) => {
+      e.preventDefault(); // que el <label> no toquetee la casilla
+      e.stopPropagation();
+      const nextRole = NEXT_ROLE[page.pdfRole || ''];
+      try {
+        const updated = await api(`/api/proyectos-pages/${page.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ pdfRole: nextRole || null }),
+        });
+        page.pdfRole = updated.pdfRole;
+        if (proyectosCurrentPage && proyectosCurrentPage.id === page.id) proyectosCurrentPage.pdfRole = updated.pdfRole;
+        paintRole();
+        // Una pagina que pasa a "no incluir" se desmarca sola (y al
+        // reves, vuelve a marcarse).
+        checkbox.checked = updated.pdfRole !== 'skip';
+        checkbox.dispatchEvent(new Event('change'));
+      } catch (err) {
+        showAppAlert(`No se pudo cambiar el rol: ${err.message}`);
+      }
+    });
+    row.appendChild(rolePill);
     pagesList.appendChild(row);
   }
   popover.appendChild(pagesList);
@@ -11552,13 +11562,10 @@ function openProyectosPdfDialog(rootLite, anchorEl, { rolePage = null } = {}) {
   positionFixedPopover(anchorEl, popover, { width: 300 });
 }
 
-document.getElementById('btn-proyectos-pdf').addEventListener('click', (e) => {
-  if (!proyectosCurrentPage) return;
-  e.stopPropagation();
-  // Desde dentro de una pagina, el documento nace en ESA pagina (con
-  // sus subpaginas) y el selector de rol edita esa misma pagina.
-  openProyectosPdfDialog(proyectosCurrentPage, document.getElementById('btn-proyectos-pdf'), { rolePage: proyectosCurrentPage });
-});
+// (El boton PDF de la barra de la pagina se quito a peticion de Koku:
+// exportar — PDF o .rmproj — se hace desde la tarjeta del proyecto en
+// la home. El rol de cada pagina se cambia en el propio dialogo, con
+// la pastilla de su fila.)
 
 // ---------------------------------------------------------------------
 // Modo "sin panel" (⛶): esconde el sidebar para leer/escribir a pantalla
@@ -15743,7 +15750,7 @@ async function createProyectosGuide() {
     body: JSON.stringify({ title: 'Guía de Proyectos', icon: '📖', coverColor: '#5b8cff' }),
   });
 
-  const guideBodyOf = (orgPageId, dbPageId) => [
+  const guideBodyOf = (orgPageId, dbPageId, exportPageId) => [
     '<div data-callout="1" data-icon="👋">Bienvenido. Este proyecto es una guía viva: todo lo que ves está hecho con la propia herramienta, así que puedes tocarlo, romperlo y borrarlo sin miedo. Las páginas de la izquierda son parte de la guía.</div>',
     '<h1>El menú «/»</h1>',
     '<div>Escribe <b>/</b> en cualquier línea vacía y aparece un menú con buscador. Con él insertas cualquier bloque: prueba a escribir <b>/tit</b> o <b>/tabla</b> y elige con las flechas + Intro.</div>',
@@ -15816,7 +15823,7 @@ async function createProyectosGuide() {
     '<h2>Imágenes</h2>',
     '<div>Con el bloque <b>Imagen</b> del menú «/» eliges un archivo, o simplemente <b>pega una captura con Ctrl+V</b> dentro del cuerpo. La imagen se guarda dentro de la app.</div>',
     '<hr>',
-    '<div data-callout="1" data-icon="🧭">Sigue el recorrido: <a data-page-link="' + orgPageId + '">🗂 Organizar páginas</a> y después <a data-page-link="' + dbPageId + '">🗄 Bases de datos</a> (la parte más potente).</div>',
+    '<div data-callout="1" data-icon="🧭">Sigue el recorrido: <a data-page-link="' + orgPageId + '">🗂 Organizar páginas</a>, <a data-page-link="' + dbPageId + '">🗄 Bases de datos</a> (la parte más potente) y <a data-page-link="' + exportPageId + '">📤 Exportar y compartir</a>.</div>',
   ].join('');
 
   // --- 2) Subpágina: organización de páginas ---
@@ -15961,11 +15968,72 @@ async function createProyectosGuide() {
     body: JSON.stringify({ body: dbBody }),
   });
 
+  // --- 3bis) Subpágina de exportar y compartir (fase C del PDF) ---
+  const exportBody = [
+    '<div data-callout="1" data-icon="📤">Exportar vive en la HOME (⌂): un clic en la tarjeta de un proyecto y salen sus acciones — <b>PDF</b> (un documento de verdad) y <b>Archivo</b> (un .rmproj para llevarlo a otro ordenador).</div>',
+    '<h1>Exportar a PDF</h1>',
+    '<ul>',
+    '<li>En el diálogo eliges <b>qué páginas</b> entran (listado con casillas y contador). Las marcadas salen en el documento, cada una en su hoja, con su miga de antepasados.</li>',
+    '<li>La <b>pastilla de la derecha</b> de cada página es su papel en el PDF: clícala para alternar <b>normal → portada → no incluir</b>. Una página "portada" se imprime solo con su cuerpo (tú diseñas la portada: título centrado, imagen…), y desactiva la portada automática. Una "no incluir" queda fuera por defecto (borradores).</li>',
+    '<li><b>Portada automática</b> e <b>índice automático</b> se activan o desactivan con sus casillas — el índice lleva enlaces que funcionan dentro del PDF.</li>',
+    '</ul>',
+    '<h2>Diseña el documento desde el proyecto</h2>',
+    '<div>El proyecto puede SER la estructura del PDF. Tres bloques del menú «/» cobran vida al exportar:</div>',
+    '<ul>',
+    '<li><b>Índice de contenido</b>: tu propia página "Índice" lo lleva dentro, y al exportar se rellena ahí (con tu título, no el automático).</li>',
+    '<li><b>Índice de figuras</b>: lista las imágenes CON pie de foto ("Figura 1: …", con enlace y página de origen).</li>',
+    '<li><b>Salto de página</b>: el documento salta de hoja donde tú digas.</li>',
+    '</ul>',
+    '<div>Los <b>pies de foto</b> son opcionales: pasa el ratón por una imagen y pulsa «＋ Pie de foto». Solo las imágenes con pie se numeran.</div>',
+    '<div>El pie de cada hoja lleva "título · pág. X de Y"; los enlaces web imprimen su dirección; y si una base de datos cruza de hoja, sus cabeceras se repiten.</div>',
+    '<h1>Archivo de proyecto (.rmproj)</h1>',
+    '<div>La acción <b>Archivo</b> guarda el proyecto ENTERO en un solo archivo: páginas, bases de datos con sus filas, e imágenes incluidas dentro. En otro ordenador (o en este), <b>Importar…</b> en la home lo recrea tal cual, con los enlaces internos reapuntados. Es el formato para moverte proyectos entre equipos o guardarte copias.</div>',
+    '<div data-callout="1" data-kind="tip">En la pestaña <b>Plantillas</b> de la home tienes «📕 Documento PDF»: una plantilla con esta estructura ya montada (portada propia + índice + contenido + anexos). Pulsa «Usar» y rellena.</div>',
+  ].join('');
+  const exportPage = await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Exportar y compartir', icon: '📤', parentId: guide.id, body: exportBody }),
+  });
+
   // Con las subpáginas ya creadas (y sus ids conocidos), se rellena por
   // fin el cuerpo de la página principal, que las enlaza.
   await api(`/api/proyectos-pages/${guide.id}`, {
     method: 'PUT',
-    body: JSON.stringify({ body: guideBodyOf(orgPage.id, dbPage.id) }),
+    body: JSON.stringify({ body: guideBodyOf(orgPage.id, dbPage.id, exportPage.id) }),
+  });
+
+  // --- 3ter) Plantilla de ejemplo "Documento PDF" (galería de
+  // Plantillas): la estructura de un documento ya montada — portada
+  // propia + índice + contenido + anexos. Se crea como plantilla de
+  // verdad, lista para "Usar".
+  const pdfTemplate = await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Documento PDF', icon: '📕', coverColor: '#ab7df8' }),
+  });
+  await api(`/api/proyectos-pages/${pdfTemplate.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      isTemplate: true,
+      pdfRole: 'cover',
+      body: '<div><br></div><div><br></div><h1 data-align="center">TÍTULO DEL DOCUMENTO</h1><div data-align="center">Subtítulo o autor</div><div data-align="center"><i>Fecha</i></div>',
+    }),
+  });
+  await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Índice', icon: '☰', parentId: pdfTemplate.id, body: '<h2>Contenido</h2><div data-pdf-block="toc"></div>' }),
+  });
+  await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: 'Contenido', icon: '✍', parentId: pdfTemplate.id,
+      body: '<div>Escribe aquí. Inserta imágenes y ponles pie de foto (ratón encima → «＋ Pie de foto») para que se numeren como figuras.</div>'
+        + '<div data-pdf-block="pagebreak"></div>'
+        + '<h2>Segunda sección</h2><div>Tras el salto de página.</div>',
+    }),
+  });
+  await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Anexos', icon: '🖼', parentId: pdfTemplate.id, body: '<h2>Índice de figuras</h2><div data-pdf-block="figures"></div>' }),
   });
 
   // --- 4) Recargar y abrir la guía con sus subpáginas a la vista ---

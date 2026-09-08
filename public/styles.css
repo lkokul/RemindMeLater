@@ -4491,3 +4491,25 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   font-weight: 800;
   opacity: 1;
 }
+
+/* La pastilla de ROL del selector de paginas del PDF, ahora clicable. */
+.proyectos-pdf-page-role {
+  background: none; color: inherit; font: inherit;
+  font-size: 0.7rem; cursor: pointer;
+}
+.proyectos-pdf-page-role:hover { border-color: var(--accent); opacity: 1; }
+.proyectos-pdf-page-role.is-normal { opacity: 0.4; }
+
+/* Tarjeta punteada de "Importar" al final de la galeria. */
+.proyectos-home-card-import {
+  border-style: dashed;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0.3rem;
+  min-height: 120px;
+  padding: 0.8rem;
+  opacity: 0.75;
+  text-align: center;
+  font-size: 0.9rem;
+}
+.proyectos-home-card-import:hover { opacity: 1; }
+.proyectos-home-card-import b { font-size: 1.4rem; font-weight: 400; }

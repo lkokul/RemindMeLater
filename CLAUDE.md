@@ -644,6 +644,25 @@ ahora se llama `device`.
         numeros de filas a la izquierda, con la del cursor resaltada.
         Flotantes con pointer-events:none — no se guardan ni se
         imprimen. Se refrescan con selectionchange/input/scroll.
+    - **Ronda "exportar solo desde la galeria + fase C"** (driver
+      `drive-round8.js`):
+      - El boton PDF de la barra de la pagina SE QUITO (pedido por
+        Koku: exportar vive en la home). El ROL de cada pagina se
+        cambia ahora en el propio dialogo de PDF: la pastilla de la
+        derecha de cada fila del selector es un boton que cicla
+        normal → portada → no incluir (PUT pdfRole al vuelo; pasar a
+        "no incluir" desmarca la casilla y al reves).
+      - Tarjeta punteada "Importar un proyecto (.rmproj)" al final de
+        la pestaña Mis proyectos (Koku no encontraba el boton de
+        arriba).
+      - **Fase C hecha**: subpagina "📤 Exportar y compartir" en la
+        guia 📖 (galeria, selector, pastilla de rol, bloques de PDF,
+        pies de foto, .rmproj) + la guia crea ademas la plantilla
+        "📕 Documento PDF" (is_template, raiz con rol portada +
+        Índice con bloque toc + Contenido con salto + Anexos con
+        bloque figures) — la galeria de Plantillas nunca esta vacia
+        tras crear la guia. La vision de "plantillas de PDF" queda
+        COMPLETA.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
