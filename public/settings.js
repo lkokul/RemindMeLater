@@ -1287,6 +1287,10 @@ function refreshMobileTab() {
   }
 
   refreshGymTimeFormatOptions();
+  // Animaciones del calendario (zoom de nivel + deslizar): encendidas
+  // por defecto -- ver areAnimationsEnabled() en app.js.
+  document.getElementById('setting-animations').checked = localStorage.getItem('animationsEnabled') !== 'false';
+
   refreshGymWeightUnitOptions();
   // La linea de "Ultima copia: ..." del bloque de copia de seguridad
   // (ver backup.js, que se carga antes que este archivo).
@@ -1375,6 +1379,10 @@ function refreshGymTimeFormatOptions() {
     container.appendChild(btn);
   });
 }
+
+document.getElementById('setting-animations').addEventListener('change', (e) => {
+  localStorage.setItem('animationsEnabled', e.target.checked ? 'true' : 'false');
+});
 
 // Unidad de peso de Gimnasio: preferencia de ESTE dispositivo (como el
 // tema), no compartida. getGymWeightUnit() (definida en app.js, que se

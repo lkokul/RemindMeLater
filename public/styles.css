@@ -1472,6 +1472,21 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 .mobile-swipe-anim-down { animation: mobile-swipe-in-down 220ms ease-out; }
 .mobile-swipe-anim-left { animation: mobile-swipe-in-left 220ms ease-out; }
 .mobile-swipe-anim-right { animation: mobile-swipe-in-right 220ms ease-out; }
+/* Zoom al cambiar de NIVEL (año <-> mes <-> dia) -- ver
+   playMobileZoomTransition() en app.js. "in" = bajar de nivel (la vista
+   nueva crece desde pequeña, como acercandose); "out" = subir (encoge
+   desde grande, como alejandose). BANCO DE PRUEBAS: puede retirarse
+   segun lo vea Koku en el movil. */
+@keyframes mobile-zoom-in {
+  from { transform: scale(0.86); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes mobile-zoom-out {
+  from { transform: scale(1.12); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.mobile-zoom-anim-in { animation: mobile-zoom-in 240ms ease-out; }
+.mobile-zoom-anim-out { animation: mobile-zoom-out 240ms ease-out; }
 /* Cabecera fija (Volver + tira semanal + fecha) -- ver el comentario del
    propio HTML: en "Vista por horas" la pagina se desplaza sola hasta la
    hora actual (scrollMobileHoursToTime() en app.js), y sin fijar esto

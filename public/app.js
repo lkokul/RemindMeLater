@@ -924,16 +924,30 @@ function enterMonthFromYear(month) {
   setCalendarViewMode('month');
 }
 
-const CALENDAR_VIEW_ANIMATION_MS = 320;
+// Interruptor de animaciones (Configuracion > Este dispositivo, por
+// dispositivo): con el apagado, TODAS las transiciones del calendario
+// (deslizar y zoom) se saltan -- pedido de Koku, para no gastar
+// recursos cuando no se quieren.
+function areAnimationsEnabled() {
+  return localStorage.getItem('animationsEnabled') !== 'false';
+}
 
-function playCalendarViewAnimation(el) {
-  el.classList.remove('calendar-view-entering');
-  // Forzar reflow para que la animacion se pueda relanzar si el modo se
-  // cambia varias veces seguidas muy rapido (si no, quitar y volver a
-  // poner la misma clase en el mismo "tick" no reinicia la animacion).
+// Animacion de zoom al cambiar de NIVEL del calendario (año <-> mes <->
+// dia) -- distinta de la de deslizar (playMobileSwipeTransition), que es
+// para moverse DENTRO del mismo nivel. "in" = bajar de nivel (meterse en
+// un mes/dia: la vista nueva crece desde pequeña, como acercandose);
+// "out" = subir de nivel (la vista nueva encoge desde grande, como
+// alejandose). BANCO DE PRUEBAS: Koku quiere verlo en el movil antes de
+// darlo por bueno -- es posible que se retire (ver CLAUDE.md).
+function playMobileZoomTransition(el, direction) {
+  if (!el || !areAnimationsEnabled()) return;
+  const cls = `mobile-zoom-anim-${direction}`;
+  el.classList.remove('mobile-zoom-anim-in', 'mobile-zoom-anim-out');
   void el.offsetWidth;
-  el.classList.add('calendar-view-entering');
-  setTimeout(() => el.classList.remove('calendar-view-entering'), CALENDAR_VIEW_ANIMATION_MS);
+  el.classList.add(cls);
+  const cleanup = () => el.classList.remove(cls);
+  el.addEventListener('animationend', cleanup, { once: true });
+  setTimeout(cleanup, 350);
 }
 
 async function setCalendarViewMode(mode) {
@@ -943,6 +957,11 @@ async function setCalendarViewMode(mode) {
   else await loadMonth();
   refreshMobileCalendarModeVisibility();
   refreshMobileCalendarNavLabel();
+  // Zoom segun el sentido del cambio: al año se SUBE de nivel (out), al
+  // mes se BAJA desde el año (in). La vista diaria tiene sus propias
+  // llamadas en enterMobileDayView()/exitMobileDayView().
+  if (mode === 'year') playMobileZoomTransition(document.getElementById('mobile-calendar-year-grid'), 'out');
+  else playMobileZoomTransition(document.getElementById('mobile-calendar-month-grid'), 'in');
 }
 
 // ---------------------------------------------------------------------
@@ -960,6 +979,15 @@ function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preser
   let startY = null;
   el.addEventListener('pointerdown', (e) => {
     if (isGestureBlockedByModal()) return;
+    // Un SEGUNDO dedo mientras habia un swipe empezado = es un pellizco
+    // (ver attachPinch), no un deslizamiento -- se cancela el swipe para
+    // que al levantar los dedos no se dispare un cambio de mes/dia por
+    // accidente ademas del cambio de nivel.
+    if (startX !== null) {
+      startX = null;
+      startY = null;
+      return;
+    }
     startX = e.clientX;
     startY = e.clientY;
     // Sin esto, si el dedo se sale del contenedor durante el arrastre (muy
@@ -967,8 +995,10 @@ function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preser
     // "pointerup" llega al elemento que haya debajo del dedo en ESE
     // momento, no a este -- y el gesto se queda "colgado" sin completarse.
     // setPointerCapture fuerza a que TODO el gesto (incluido el pointerup)
-    // siga llegando aqui pase lo que pase.
-    el.setPointerCapture(e.pointerId);
+    // siga llegando aqui pase lo que pase. (En try/catch: un pointerId
+    // que el navegador ya no reconoce como activo lanza excepcion, y eso
+    // no debe tumbar el resto del gesto.)
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* sin capture, el gesto normal sigue valiendo */ }
   });
   el.addEventListener('pointerup', (e) => {
     if (startX === null) return;
@@ -1016,6 +1046,60 @@ function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preser
     } else if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
       e.preventDefault();
     }
+  }, { passive: false });
+}
+
+// Gesto de PELLIZCO (dos dedos juntandose) para SUBIR de nivel en el
+// calendario: dia -> mes, mes -> año. Solo hacia arriba a proposito
+// (decision de Koku): el pellizco inverso para bajar exigiria saber
+// DONDE se hace zoom (que mes, que dia), y bajar ya es solo tocar el
+// mes/dia -- no compensa la complejidad. Mismo mecanismo de Pointer
+// Events que attachSwipe (y que el zoom del mapa de Viajes): se apuntan
+// los punteros activos y, con dos a la vez, se compara la distancia
+// entre ellos con la del principio -- si encoge por debajo del umbral,
+// se dispara UNA vez por gesto. attachSwipe ya se cancela solo en
+// cuanto detecta el segundo dedo (ver su pointerdown), asi que un
+// pellizco nunca dispara ademas un cambio de mes/dia por accidente.
+function attachPinch(el, onPinchIn) {
+  const punteros = new Map();
+  let distanciaInicial = null;
+  let disparado = false;
+  const medir = () => {
+    const pts = [...punteros.values()];
+    return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  };
+  el.addEventListener('pointerdown', (e) => {
+    if (isGestureBlockedByModal()) return;
+    punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (punteros.size === 2) {
+      distanciaInicial = medir();
+      disparado = false;
+    }
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!punteros.has(e.pointerId)) return;
+    punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (punteros.size === 2 && distanciaInicial && !disparado) {
+      // 0.72: los dedos tienen que acercarse de verdad (a menos de 3/4
+      // de la distancia inicial) -- un roce accidental de dos dedos no
+      // llega a esto.
+      if (medir() < distanciaInicial * 0.72) {
+        disparado = true;
+        onPinchIn();
+      }
+    }
+  });
+  const soltar = (e) => {
+    punteros.delete(e.pointerId);
+    if (punteros.size < 2) distanciaInicial = null;
+  };
+  el.addEventListener('pointerup', soltar);
+  el.addEventListener('pointercancel', soltar);
+  // Con dos dedos en pantalla, que el navegador no intente su propio
+  // zoom/scroll nativo mientras dura el pellizco (mismo refuerzo de
+  // touchmove sin passive que ya usa attachSwipe).
+  el.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2) e.preventDefault();
   }, { passive: false });
 }
 
@@ -1372,7 +1456,7 @@ document.getElementById('mobile-calendar-density-field').appendChild(mobileCalen
 // async y no se esperan aqui tampoco) -- es puramente cosmetico, sin
 // bloquear nada.
 function playMobileSwipeTransition(el, direction) {
-  if (!el) return;
+  if (!el || !areAnimationsEnabled()) return;
   const cls = `mobile-swipe-anim-${direction}`;
   el.classList.remove('mobile-swipe-anim-up', 'mobile-swipe-anim-down', 'mobile-swipe-anim-left', 'mobile-swipe-anim-right');
   void el.offsetWidth;
@@ -1407,6 +1491,12 @@ attachSwipe(document.getElementById('mobile-calendar-year-grid'), {
     refreshMobileCalendarNavLabel();
     playMobileSwipeTransition(document.getElementById('mobile-calendar-year-grid'), 'down');
   },
+});
+
+// Pellizco = subir de nivel: en el mes lleva al año. (En el año no hay
+// nada por encima, ahi no se engancha nada.)
+attachPinch(document.getElementById('mobile-calendar-month-grid'), () => {
+  if (calendarViewMode === 'month') setCalendarViewMode('year');
 });
 
 // ---------------------------------------------------------------------
@@ -2001,6 +2091,8 @@ function enterMobileDayView(date, { targetMinutes } = {}) {
   } else {
     showMobileDay(date, { scrollToNow: true, targetMinutes });
   }
+  // Bajar de nivel (meterse en el dia): zoom de entrada.
+  playMobileZoomTransition(document.getElementById('mobile-calendar-day-view'), 'in');
 }
 
 function exitMobileDayView() {
@@ -2010,6 +2102,8 @@ function exitMobileDayView() {
   document.getElementById('mobile-calendar-month-toolbar').classList.remove('hidden');
   document.querySelector('.mobile-calendar-view').classList.remove('hidden');
   document.body.classList.remove('mobile-day-scroll-lock');
+  // Subir de nivel (dia -> mes): zoom de salida sobre la vista que vuelve.
+  playMobileZoomTransition(document.querySelector('.mobile-calendar-view'), 'out');
 }
 
 document.getElementById('btn-mobile-day-back-label').addEventListener('click', exitMobileDayView);
@@ -2035,6 +2129,8 @@ function playMobileDaySwipeAnimation(direction) {
   playMobileSwipeTransition(document.getElementById('mobile-day-hours-view'), direction);
   playMobileSwipeTransition(document.getElementById('mobile-day-listado-view'), direction);
 }
+// Pellizco en la vista diaria = subir al mes.
+attachPinch(document.getElementById('mobile-calendar-day-view'), exitMobileDayView);
 attachSwipe(document.getElementById('mobile-calendar-day-view'), {
   preserveVerticalScroll: true,
   onLeft: () => {

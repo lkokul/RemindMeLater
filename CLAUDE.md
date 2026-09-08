@@ -406,19 +406,25 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
 
 ## Estado actual
 
-**Reorganización de ramas (8/9/2026, pedida por Koku)**: `movil-ui`
-pasa a ser EXCLUSIVAMENTE la rama de integración para compilar y probar
-ipa/apk — el trabajo se hace por separado en ramas por área y se
-combina aquí cuando está funcional:
+**Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de
+configuración del visor móvil trabaja en `claude/mobile-viewer-config-b59uf1`,
+creada desde `movil-ui` y con `calendario-notas-movil-UI` ya fusionada).
+Reorganización de ramas del 8/9/2026, pedida por Koku:
 
-- `calendario-notas-movil-UI` — calendario y notas (creada desde
-  `movil-ui` en `d3a65d4`; es donde sigue esta conversación).
-- `gimnasio-movil`, `finanzas-movil`, `viajes-movil` — cada herramienta
-  en la suya (Gimnasio con el rediseño grande de Koku ya fusionado a
-  `movil-ui`; Finanzas y Viajes de momento solo con su ideario/plan).
+- **`movil-ui` ya NO se toca** salvo que Koku lo pida explícitamente:
+  queda solo como rama de integración para compilar y probar ipa/apk.
+  Cuando el trabajo de una rama de área está funcional, se combina ahí
+  (la primera combinación ya está hecha: gimnasio-movil + finanzas-movil
+  + viajes-movil + la copia de seguridad, merges limpios, humo en verde,
+  build de iOS #32 lanzado).
+- El trabajo se hace por separado en ramas por área:
+  `calendario-notas-movil-UI` (calendario y notas), `gimnasio-movil`,
+  `finanzas-movil`, `viajes-movil`.
+- Las ramas viejas ya terminadas se renombraron con prefijo
+  `archivo/` (git no tiene "cerrar" una rama: o existe o no; el prefijo
+  las agrupa al final de la lista sin perder nada).
 
-En `movil-ui` ya están combinadas las tres (merges limpios, pasada de
-humo con Playwright en verde). Ahí vive la app móvil sin servidor. `main` sigue teniendo la versión vieja cliente-servidor, y la
+En `movil-ui` (y por herencia aquí) vive la app móvil sin servidor. `main` sigue teniendo la versión vieja cliente-servidor, y la
 rama `escritorio` es donde Koku trabaja el programa de escritorio por su
 cuenta — no las toques desde aquí.
 
@@ -486,6 +492,29 @@ las fotos. Sigue sin haber sincronización en vivo entre dispositivos —
 la copia es la forma de pasar datos de un aparato a otro.
 
 ## Pendiente / próximos pasos declarados
+
+- **BANCO DE PRUEBAS — animaciones de zoom del calendario (ronda del
+  8/9/2026, en esta rama)**: pellizcar sube de nivel (día→mes,
+  mes→año; NUNCA al revés, decidido así por Koku) y hay animación de
+  zoom al cambiar de nivel (in al bajar, out al subir) + interruptor
+  "Animaciones" en Configuración → Este dispositivo
+  (`localStorage.animationsEnabled`, apagado también salta las de
+  deslizar). Koku avisó EXPLÍCITAMENTE que quiere verlo en su móvil y
+  que **es posible que se retire** — si pide volver atrás, las piezas
+  son: `attachPinch()`/`playMobileZoomTransition()`/
+  `areAnimationsEnabled()` y sus llamadas en `setCalendarViewMode`/
+  `enterMobileDayView`/`exitMobileDayView` (app.js), las keyframes
+  `mobile-zoom-*` (styles.css), y el bloque "Animaciones" de
+  index.html/settings.js.
+- **Compartir → RemindMeLater (fecha detectada → evento)**: aprobado
+  por Koku ("Sí, iOS y Android") como PRÓXIMA ronda grande, sin
+  empezar. Diseño hablado: extensión de compartir nativa (Swift en
+  iOS — hay precedente de pieza nativa en el widget de descanso de
+  gimnasio-movil —, intent-filter en Android) que abre la app con el
+  modal de evento prerrelleno con la fecha/hora detectadas en el texto
+  compartido (detección en español hecha por nosotros). El menú nativo
+  de "añadir a iCalendar" al tocar una fecha es privado de Apple —
+  imposible meterse ahí, se le explicó y lo aceptó.
 
 - **Comunicación escritorio↔móvil en la v1** (nota que Koku pidió dejar
   apuntada expresamente): cuando la app de escritorio (rama
