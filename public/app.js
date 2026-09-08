@@ -925,11 +925,30 @@ function enterMonthFromYear(month) {
 }
 
 // Interruptor de animaciones (Configuracion > Este dispositivo, por
-// dispositivo): con el apagado, TODAS las transiciones del calendario
-// (deslizar y zoom) se saltan -- pedido de Koku, para no gastar
-// recursos cuando no se quieren.
+// dispositivo, encendido por defecto): con el apagado se salta TODO el
+// movimiento de la app -- no solo el del calendario. Pedido de Koku
+// para no gastar recursos cuando no se quieren.
+//
+// Funciona en DOS mitades, porque hay dos clases de animacion:
+//  1. Las de CSS (@keyframes y transition:) -- las apaga una unica
+//     regla global de styles.css que se activa con
+//     data-animations="off" en el <html>. Al ser una sola regla, una
+//     animacion NUEVA que se añada a la hoja de estilos el dia de
+//     mañana ya nace obedeciendo al interruptor sin tocar nada.
+//  2. Las que dispara el JavaScript a mano (poner una clase de
+//     animacion, esperar un timeout, etc.) -- esas preguntan por
+//     areAnimationsEnabled() antes de hacer nada.
 function areAnimationsEnabled() {
   return localStorage.getItem('animationsEnabled') !== 'false';
+}
+
+// Pone/quita el atributo del <html> que dispara la regla global. El
+// script de arranque de index.html ya lo hace antes de pintar (para que
+// no se vea un trozo de animacion al abrir); esta funcion es la que usa
+// el interruptor de Configuracion para cambiarlo en caliente.
+function applyAnimationsPreference() {
+  if (areAnimationsEnabled()) delete document.documentElement.dataset.animations;
+  else document.documentElement.dataset.animations = 'off';
 }
 
 // Animacion de zoom al cambiar de NIVEL del calendario (año <-> mes <->
@@ -974,7 +993,13 @@ async function setCalendarViewMode(mode) {
 // lapiz con un unico mecanismo, sin depender de eventos "touch"
 // especificos). Solo detecta la DIRECCION al soltar, sin arrastre en
 // vivo -- suficiente para cambiar de mes/año/dia, no hace falta mas.
-function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preserveVerticalScroll = false } = {}) {
+// centerOnly: los callbacks HORIZONTALES (onLeft/onRight) solo se
+// disparan si el dedo empezo en el carril CENTRAL de la pantalla. Lo
+// pidio Koku para la vista diaria: alli deslizar de lado cambia de dia,
+// pero desde los BORDES tiene que cambiar de pestaña (ver el bloque
+// "GESTOS DE NAVEGACION" al final de este archivo). Los verticales no
+// se tocan: no compiten con nada.
+function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preserveVerticalScroll = false, centerOnly = false } = {}) {
   let startX = null;
   let startY = null;
   el.addEventListener('pointerdown', (e) => {
@@ -1004,10 +1029,15 @@ function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preser
     if (startX === null) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
+    const inicioX = startX;
     startX = null;
     startY = null;
     if (Math.abs(dx) > Math.abs(dy)) {
       if (Math.abs(dx) < threshold) return;
+      // Carril lateral con centerOnly: el gesto no es para esta vista,
+      // es para cambiar de pestaña -- se deja pasar sin hacer nada (de
+      // eso ya se encarga el detector global de navegacion).
+      if (centerOnly && isMobileEdgeZone(inicioX)) return;
       if (dx < 0 && onLeft) onLeft();
       else if (dx > 0 && onRight) onRight();
     } else {
@@ -2133,6 +2163,10 @@ function playMobileDaySwipeAnimation(direction) {
 attachPinch(document.getElementById('mobile-calendar-day-view'), exitMobileDayView);
 attachSwipe(document.getElementById('mobile-calendar-day-view'), {
   preserveVerticalScroll: true,
+  // Solo cambia de dia si el dedo empieza por el CENTRO: desde los
+  // bordes, el mismo gesto cambia de pestaña de la barra de abajo
+  // (peticion de Koku -- ver "GESTOS DE NAVEGACION" al final).
+  centerOnly: true,
   onLeft: () => {
     const d = state.mobileCalendarDayDate;
     showMobileDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1), { scrollToNow: true });
@@ -14127,7 +14161,378 @@ document.getElementById('btn-delete-lecturas-item').addEventListener('click', as
 // que no se vea el texto reajustandose a media animacion — 340ms es la
 // duracion de la transicion CSS (320ms) con un pelin de margen para que
 
+// =====================================================================
+// GESTOS DE NAVEGACION (solo movil)
+//
+// Idea general, pedida por Koku: moverse por la app deslizando el dedo,
+// no solo tocando botones. Hay DOS gestos horizontales que compiten por
+// el mismo dedo, asi que se reparten la pantalla en CARRILES:
+//
+//   |  lateral  |        centro         |  lateral  |
+//   |  cambiar  |   gesto propio de     |  cambiar  |
+//   | de PESTAÑA|   ESTA pantalla       | de PESTAÑA|
+//
+// - Carril LATERAL (los bordes izquierdo y derecho): cambia de pestaña
+//   de la barra de abajo, de una en una y en el orden en que se ven:
+//   Calendario -> Notas -> Herramientas -> Configuracion. Deslizar a la
+//   izquierda avanza, a la derecha retrocede.
+// - Carril CENTRAL: lo que tenga sentido DENTRO de la pantalla actual
+//   (cambiar de dia en el calendario, subir de carpeta en Notas, volver
+//   al menu de Configuracion, cambiar de pestaña dentro de Gimnasio...).
+//   Si en esa pantalla el centro no tiene nada que hacer, el gesto cae
+//   hacia atras y hace lo mismo que el lateral, para que nunca haya un
+//   deslizamiento "muerto" que parezca que la app no responde.
+//
+// Todo esto convive con los gestos que ya existian (deslizar vertical
+// para cambiar de mes/año, pellizcar para subir de nivel, deslizar una
+// fila de nota para sacar sus acciones): esos siguen igual, y este
+// modulo se aparta solo cuando toca (ver NAV_SWIPE_OPT_OUT y el trato
+// especial del mapa de Viajes).
+// =====================================================================
+
+// Orden de las pestañas, el MISMO que el de los botones de la barra de
+// abajo (ver .mobile-nav en index.html). Si algun dia se reordena la
+// barra, hay que reordenar esto a juego -- se deja como lista aparte y
+// no se lee del DOM porque el hueco central es configurable (puede
+// enseñar Notas u otra App) y el ORDEN de navegacion no debe depender
+// de que icono tenga puesto ahora mismo.
+const MOBILE_TAB_ORDER = ['calendar', 'notes', 'extensions', 'settings'];
+
+// Ancho del carril lateral: 22% del ancho de la pantalla a cada lado,
+// pero nunca menos de 56px (en un movil estrecho haria falta demasiada
+// punteria) ni mas de 120px (en una tablet se comeria media pantalla).
+function mobileEdgeRailWidth() {
+  return Math.min(Math.max(window.innerWidth * 0.22, 56), 120);
+}
+
+function isMobileEdgeZone(x) {
+  const carril = mobileEdgeRailWidth();
+  return x <= carril || x >= window.innerWidth - carril;
+}
+
+// Los gestos de navegacion son cosa del movil: en escritorio el
+// calendario y el panel conviven en pantalla y no hay barra de pestañas
+// que recorrer. 860px es el mismo corte que usa styles.css.
+function isMobileLayout() {
+  return window.innerWidth < 860;
+}
+
+// Un modal abierto se lleva TODA la atencion: mientras haya uno, ningun
+// gesto de navegacion. (Ojo: esto NO es isGestureBlockedByModal(), que
+// ademas bloquea con cualquier pantalla completa abierta -- eso vale
+// para los gestos del calendario, pero aqui hace falta justo lo
+// contrario: que el gesto siga funcionando DENTRO de Gimnasio, Notas o
+// Configuracion.)
+// "¿Se ve de verdad este elemento?". No vale mirar solo la clase
+// .hidden: hay trozos de la app (por ejemplo el dialogo de ayuda de
+// Progreso del Gimnasio) que se quedan SIN esa clase aunque no se vean,
+// porque quien los tapa es un padre suyo. Tampoco vale offsetParent a
+// secas: un elemento con position:fixed -- como son casi todos los
+// modales -- tiene offsetParent nulo aunque este perfectamente visible.
+// getClientRects() sale bien de los dos casos: devuelve 0 rectangulos si
+// el elemento (o cualquier padre) no se esta pintando, y al menos uno si
+// se ve, fixed o no.
+function estaVisibleDeVerdad(el) {
+  return !!el && el.getClientRects().length > 0;
+}
+
+function isNavGestureBlocked() {
+  // Ojo con el :not(#settings-modal): el panel de Configuracion usa la
+  // clase .modal como todos los dialogos, pero NO es un dialogo suelto
+  // -- es una de las cuatro pestañas de la barra de abajo, y tiene que
+  // dejarse navegar con gestos como las otras tres (deslizar para
+  // volver de una seccion a su menu, o para salirse a Herramientas).
+  return [...document.querySelectorAll('.modal:not(.hidden):not(#settings-modal)')]
+    .some(estaVisibleDeVerdad);
+}
+
+// Sitios donde arrastrar el dedo YA significa otra cosa, y donde este
+// modulo se aparta del todo para no pisarlo.
+const NAV_SWIPE_OPT_OUT = [
+  '.note-swipe-wrap',   // fila de nota: desliza para Editar/Mover/Eliminar
+  '#note-body table',   // tabla del editor: arrastrar es seleccionar celdas
+  '#gym-live-view',     // entreno en vivo: salirse sin querer seria feo
+  '[data-no-nav-swipe]', // escotilla generica para lo que venga despues
+].join(', ');
+
+// ---------------------------------------------------------------------
+// Que App estaba abierta dentro de Herramientas.
+//
+// Peticion de Koku: si estaba en Gimnasio y me voy a Notas, al volver
+// deslizando quiero entrar DIRECTO a Gimnasio, no al menu de
+// Herramientas. Para cambiar de App, el boton de Herramientas de la
+// barra de abajo (que siempre lleva al menu y borra este recuerdo).
+//
+// Es una variable normal en memoria a proposito, NO localStorage: al
+// cerrar la app se olvida sola, que es justo lo que pidio ("que al
+// cerrar la app se resetee eso para que no se quede abierta ninguna").
+// ---------------------------------------------------------------------
+let ultimaHerramientaAbierta = null;
+
+const HERRAMIENTAS_APPS = {
+  gym: { viewId: 'gym-view', open: () => openGymView() },
+  finanzas: { viewId: 'finanzas-view', open: () => openFinanzasView() },
+  lecturas: { viewId: 'lecturas-view', open: () => openLecturasView() },
+  viajes: { viewId: 'viajes-view', open: () => openViajesView() },
+};
+
+// Cual de las Apps de Herramientas esta abierta AHORA mismo (mirando el
+// DOM, que es la unica verdad: se puede haber abierto desde el menu,
+// desde el hueco de la barra o desde un gesto).
+function appDeHerramientasAbierta() {
+  for (const [id, app] of Object.entries(HERRAMIENTAS_APPS)) {
+    const el = document.getElementById(app.viewId);
+    if (el && !el.classList.contains('hidden')) return id;
+  }
+  return null;
+}
+
+// La pestaña en la que estamos = la que la barra de abajo pinta como
+// activa. Se usa el DOM en vez de una variable propia para que no haya
+// dos "verdades" que se puedan desincronizar: los botones de la barra,
+// los de cerrar de cada pantalla y estos gestos pasan todos por
+// refreshMobileNavActive().
+function currentMobileTab() {
+  const activo = document.querySelector('.mobile-nav-btn.active');
+  const tab = activo && activo.dataset.mobileNav;
+  return MOBILE_TAB_ORDER.includes(tab) ? tab : 'calendar';
+}
+
+// Animacion del cambio de pestaña: se reutiliza la MISMA que ya hacia
+// el calendario al cambiar de mes (playMobileSwipeTransition), aplicada
+// a la pantalla que queda a la vista. Asi el movimiento de la app es
+// uno solo y obedece al interruptor de Animaciones sin nada aparte.
+function animarCambioDePantalla(direccion) {
+  const capas = [
+    'settings-modal', 'gym-view', 'finanzas-view', 'lecturas-view',
+    'viajes-view', 'extensions-view', 'mobile-notes-view', 'app',
+  ];
+  for (const id of capas) {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains('hidden')) {
+      playMobileSwipeTransition(el, direccion);
+      return;
+    }
+  }
+}
+
+// Cambiar de pestaña un paso. paso = +1 (deslizar a la izquierda,
+// avanzar) o -1 (deslizar a la derecha, retroceder).
+function moverPestanaMovil(paso) {
+  const actual = currentMobileTab();
+  // Justo ANTES de irse de Herramientas se apunta que App quedaba
+  // abierta, para poder volver directo a ella (ver la nota de
+  // ultimaHerramientaAbierta). Se hace aqui, en el unico sitio por el
+  // que pasan todos los cambios de pestaña por gesto, en vez de meter
+  // una linea dentro de cada open*/close* de las cuatro Apps.
+  if (actual === 'extensions') ultimaHerramientaAbierta = appDeHerramientasAbierta();
+  const i = MOBILE_TAB_ORDER.indexOf(actual);
+  const destino = MOBILE_TAB_ORDER[i + paso];
+  // En los extremos (antes de Calendario, despues de Configuracion) no
+  // se da la vuelta a proposito: dar la vuelta desorienta, y ademas
+  // haria imposible saber por el gesto si estas al principio o al final.
+  if (!destino) return false;
+
+  // Herramientas con memoria: si habia una App abierta, se vuelve a
+  // ella directamente (ver ultimaHerramientaAbierta arriba).
+  if (destino === 'extensions' && ultimaHerramientaAbierta) {
+    closeAllMobileOverlays();
+    HERRAMIENTAS_APPS[ultimaHerramientaAbierta].open();
+    refreshMobileNavActive('extensions');
+  } else {
+    goToMobileSection(destino);
+  }
+  animarCambioDePantalla(paso > 0 ? 'left' : 'right');
+  return true;
+}
+
+// ---------------------------------------------------------------------
+// Carril CENTRAL: el gesto propio de cada pantalla.
+//
+// Devuelve true si ha hecho algo; false si en esta pantalla el centro no
+// tenia nada que hacer (y entonces quien llama deja que el gesto haga lo
+// mismo que el lateral, cambiar de pestaña).
+// ---------------------------------------------------------------------
+
+// Barras de sub-pestañas de las Apps. Generico a proposito: se busca la
+// primera barra VISIBLE y se mueve su boton activo un puesto. Una App
+// nueva con su propia barra solo tiene que añadir su selector aqui.
+const MOBILE_SUBTAB_BARS = ['.gym-tabs', '.finanzas-tabs', '.viajes-tabs'];
+
+function moverSubPestana(paso) {
+  for (const sel of MOBILE_SUBTAB_BARS) {
+    const barra = document.querySelector(sel);
+    if (!estaVisibleDeVerdad(barra)) continue;
+    const botones = [...barra.querySelectorAll('button')];
+    const i = botones.findIndex((b) => b.classList.contains('active'));
+    if (i === -1) return false;
+    const destino = botones[i + paso];
+    if (!destino) return true; // hay barra, pero ya estas en el extremo
+    destino.click();
+    animarCambioDePantalla(paso > 0 ? 'left' : 'right');
+    return true;
+  }
+  return false;
+}
+
+// "Volver un paso" dentro de la pantalla actual. Cada entrada es un
+// boton de volver que YA existe en la app: el gesto no duplica logica,
+// solo pulsa el mismo boton (asi lo que hagan esos botones -- descartar
+// el borrador de un tema, limpiar la busqueda de Notas... -- pasa igual
+// deslizando que tocando). El orden importa: de la capa mas de dentro a
+// la mas de fuera.
+const VOLVER_UN_PASO = [
+  // Configuracion: de una seccion (Perfil, Vista, Este dispositivo...)
+  // al menu de Configuracion.
+  'btn-settings-back',
+  // Gimnasio: de los dias de un bloque a la lista de bloques.
+  'btn-gym-back-to-blocks',
+  // Lecturas: del detalle de una saga a la lista de sagas.
+  'btn-back-lecturas-sagas',
+  // Viajes: del detalle de un viaje a la lista de viajes.
+  'btn-back-viajes-trips',
+  // Grupos: del detalle de un grupo a la lista de grupos.
+  'btn-groups-back',
+  // Notas: subir un nivel de carpeta. Va el ULTIMO de la lista porque
+  // es el mas "de fuera" de todos. Peticion expresa de Koku: deslizar
+  // en Notas solo sirve para SALIR (subir), nunca para entrar -- entrar
+  // exige elegir en que carpeta, y ademas deslizar sobre una carpeta ya
+  // significa otra cosa (sacar Editar/Mover/Eliminar).
+  'btn-mobile-notes-back',
+];
+
+function volverUnPasoDentroDeLaPantalla() {
+  for (const id of VOLVER_UN_PASO) {
+    const btn = document.getElementById(id);
+    // Un boton de volver que no se ve = esa capa no esta abierta.
+    if (btn && !btn.classList.contains('hidden') && estaVisibleDeVerdad(btn)) {
+      // La animacion NO se lanza aqui: la lanza el propio boton (ver
+      // justo debajo), asi sale igual lo pulses o lo deslices -- que es
+      // lo que pidio Koku ("que el boton volver tambien haga esa
+      // animacion").
+      btn.click();
+      return true;
+    }
+  }
+  return false;
+}
+
+// Los botones de volver/cerrar animan igual que el gesto. Se registran
+// aqui, todos juntos, en vez de uno a uno donde vive cada boton:
+// - los de VOLVER_UN_PASO (subir una capa dentro de la pantalla),
+// - los "← Home"/"← Herramientas" de las pantallas completas
+//   (.my-space-close-btn) y el "← Calendario" de Grupos.
+// El listener solo AÑADE la animacion; lo que hace el boton de verdad
+// sigue en su propio sitio, sin tocar.
+[...VOLVER_UN_PASO, 'btn-close-groups'].forEach((id) => {
+  const btn = document.getElementById(id);
+  if (btn) btn.addEventListener('click', () => animarCambioDePantalla('right'));
+});
+document.querySelectorAll('.my-space-close-btn').forEach((btn) => {
+  btn.addEventListener('click', () => animarCambioDePantalla('right'));
+});
+
+// Pantallas donde el carril CENTRAL ya tiene dueño: alli el
+// deslizamiento horizontal por el centro ya significa algo (la vista
+// diaria del calendario cambia de dia con attachSwipe, ver mas arriba),
+// asi que este modulo no se mete ni deja que el gesto caiga hacia el
+// cambio de pestaña -- si no, un mismo deslizamiento haria las dos
+// cosas a la vez. Los BORDES siguen cambiando de pestaña con
+// normalidad, que es justo el reparto que pidio Koku ("si deslizo en el
+// centro cambio de dia, si deslizo en el lateral a la pestaña de al
+// lado").
+const CENTRO_CON_DUENO = ['mobile-calendar-day-view'];
+
+function centroYaTieneDueno() {
+  return CENTRO_CON_DUENO.some((id) => estaVisibleDeVerdad(document.getElementById(id)));
+}
+
+// El gesto central, segun el sentido. Devolver true significa "ya esta
+// resuelto, no hagas nada mas".
+function gestoCentral(paso) {
+  if (centroYaTieneDueno()) return true;
+  // Hacia la derecha (paso -1): primero intentar salir de una capa.
+  if (paso < 0 && volverUnPasoDentroDeLaPantalla()) return true;
+  // Dentro de una App con sub-pestañas, el centro las recorre.
+  if (moverSubPestana(paso)) return true;
+  return false;
+}
+
+// ---------------------------------------------------------------------
+// El detector en si. Va en el <body> en fase de captura para enterarse
+// del gesto ANTES que nadie, pero sin cancelar nada: solo mira. Los
+// gestos que ya existian (deslizar la vista diaria, mover el mapa)
+// siguen recibiendo sus eventos igual.
+// ---------------------------------------------------------------------
+
+const NAV_SWIPE_UMBRAL = 60;      // px minimos de recorrido horizontal
+const NAV_SWIPE_MAX_VERTICAL = 0.8; // el gesto tiene que ser mas ancho que alto
+
+// El mapa de Viajes es el unico sitio con un trato aparte, y lo pidio
+// Koku tal cual: alli arrastrar YA sirve para mover el mapa, asi que la
+// diferencia la marca la VELOCIDAD -- un arrastre lento y pausado es
+// mover el mapa (y este modulo no se mete), uno rapido y decidido es
+// navegar. 0.55 px/ms es aproximadamente "media pantalla en un tercio de
+// segundo": un arrastre normal de mapa no llega ahi ni queriendo.
+const NAV_SWIPE_VELOCIDAD_MAPA = 0.55;
+
+let navSwipe = null;
+
+// El boton de Herramientas de la barra de abajo SIEMPRE lleva al menu
+// y borra el recuerdo: es justo el gesto de "quiero cambiar de App" que
+// describio Koku. (El listener que de verdad abre la vista ya esta
+// registrado mas arriba, sobre .mobile-nav-btn; este solo se suma.)
+document.querySelectorAll('.mobile-nav-btn[data-mobile-nav="extensions"]').forEach((btn) => {
+  btn.addEventListener('click', () => { ultimaHerramientaAbierta = null; });
+});
+
+document.addEventListener('pointerdown', (e) => {
+  navSwipe = null;
+  if (!isMobileLayout() || isNavGestureBlocked()) return;
+  if (e.target.closest && e.target.closest(NAV_SWIPE_OPT_OUT)) return;
+  navSwipe = {
+    x: e.clientX,
+    y: e.clientY,
+    t: e.timeStamp,
+    // Si el gesto empieza dentro del mapa, se le exige velocidad.
+    enMapa: !!(e.target.closest && e.target.closest('#viajes-map-container')),
+  };
+}, true);
+
+document.addEventListener('pointerup', (e) => {
+  const inicio = navSwipe;
+  navSwipe = null;
+  if (!inicio || !isMobileLayout() || isNavGestureBlocked()) return;
+
+  const dx = e.clientX - inicio.x;
+  const dy = e.clientY - inicio.y;
+  if (Math.abs(dx) < NAV_SWIPE_UMBRAL) return;
+  if (Math.abs(dy) > Math.abs(dx) * NAV_SWIPE_MAX_VERTICAL) return;
+
+  if (inicio.enMapa) {
+    const ms = Math.max(e.timeStamp - inicio.t, 1);
+    if (Math.abs(dx) / ms < NAV_SWIPE_VELOCIDAD_MAPA) return; // arrastre de mapa
+  }
+
+  // paso: -1 = deslizar a la DERECHA (atras), +1 = a la IZQUIERDA
+  // (adelante). El dedo va hacia la derecha => dx positivo => atras.
+  const paso = dx > 0 ? -1 : 1;
+
+  // El carril se decide por DONDE EMPEZO el dedo, no por donde acaba:
+  // si se mirara el final, un gesto que arranca en el centro y termina
+  // cerca del borde cambiaria de significado a mitad de camino.
+  if (isMobileEdgeZone(inicio.x)) {
+    moverPestanaMovil(paso);
+    return;
+  }
+  // Centro: primero lo propio de la pantalla y, si ahi no habia nada que
+  // hacer, lo mismo que el lateral (para que el gesto nunca se sienta
+  // ignorado).
+  if (!gestoCentral(paso)) moverPestanaMovil(paso);
+}, true);
+
 applyUiStyle();
+applyAnimationsPreference();
 
 // ---------------------------------------------------------------------
 // Arranque

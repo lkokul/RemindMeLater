@@ -238,9 +238,12 @@ el calendario.
   global" — cada superficie garantiza su legibilidad. Red de seguridad
   de contraste real (fórmula WCAG). Variante clara/oscura opcional por
   tema (`inverseColors`) + botón rápido ☀/☾; preferencia de modo por
-  dispositivo. Temas sembrados: Predeterminado, EINES, Registro (de
-  guías de diseño externas), etc. Biblioteca editable con borrador en
-  vivo (editar aplica al instante, cambiar de tema guarda solo).
+  dispositivo. Temas sembrados: Predeterminado, Pastel y Neón (los dos
+  que salían de guías de diseño privadas de Koku, "EINES" y "Registro",
+  se quitaron del sembrado: no viajan dentro de la app, solo siguen en
+  la base de datos de quien ya los tuviera). Biblioteca editable con
+  borrador en vivo (editar aplica al instante, cambiar de tema guarda
+  solo).
 - ✅ **Estilos de interacción** independientes del color: Directo /
   Neón / Cristal / Registro (cómo reaccionan botones e interruptores;
   Registro añade tipografía mono en tablas/etiquetas).

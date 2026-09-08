@@ -390,10 +390,31 @@ function refreshFavoritesDisplayOptions() {
 
 
 // Salir de la pestana Estilo (volver al menu, o cerrar Configuracion del
-// todo) sin haber guardado descarta el borrador que hubiera a medias —
-// closeThemeForm() no hace nada raro si no habia ningun tema en edicion.
+// todo) GUARDA el borrador que hubiera a medias, en vez de descartarlo.
+//
+// Cambio pedido por Koku ("hay autoguardado en ese sentido no?, al
+// deslizar se deberia quedar el nuevo tema puesto"): ahora que se sale
+// de una seccion deslizando el dedo y no solo pulsando un boton, perder
+// lo editado por un gesto casi sin querer seria muy fastidioso. Ademas
+// deja el comportamiento coherente con lo que ya hacia switchThemeEdit()
+// (pasar a editar otro tema guarda el anterior solo, sin preguntar).
+//
+// closeThemeForm() sigue detras por si el guardado no aplica (no habia
+// ningun tema en edicion, o el borrador estaba limpio): no hace nada
+// raro en ese caso.
 document.querySelectorAll('[data-back]').forEach((btn) => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
+    if (themeDraftDirty) {
+      // Si el guardado falla (nombre vacio, por ejemplo), mejor no
+      // tragarse el error en silencio: se avisa y NO se sale, para que
+      // se pueda arreglar sin haber perdido nada.
+      try {
+        await saveCurrentThemeEdit();
+      } catch (err) {
+        showAppAlert('No se ha podido guardar el tema que estabas editando, así que la pantalla se queda abierta para que no pierdas los cambios.');
+        return;
+      }
+    }
     closeThemeForm();
     showSettingsScreen(null);
   });
@@ -1287,8 +1308,10 @@ function refreshMobileTab() {
   }
 
   refreshGymTimeFormatOptions();
-  // Animaciones del calendario (zoom de nivel + deslizar): encendidas
-  // por defecto -- ver areAnimationsEnabled() en app.js.
+  // Animaciones de TODA la app (zoom y deslizar del calendario, pero
+  // tambien transiciones de botones, listas, paneles...): encendidas por
+  // defecto -- ver areAnimationsEnabled()/applyAnimationsPreference() en
+  // app.js y la regla [data-animations="off"] de styles.css.
   document.getElementById('setting-animations').checked = localStorage.getItem('animationsEnabled') !== 'false';
 
   refreshGymWeightUnitOptions();
@@ -1382,6 +1405,11 @@ function refreshGymTimeFormatOptions() {
 
 document.getElementById('setting-animations').addEventListener('change', (e) => {
   localStorage.setItem('animationsEnabled', e.target.checked ? 'true' : 'false');
+  // Aplicar en caliente: marca/desmarca el <html>, que es lo que
+  // enciende la regla global de styles.css que apaga TODAS las
+  // animaciones de la app (no solo las del calendario). Sin esto haria
+  // falta recargar para notar el cambio.
+  applyAnimationsPreference();
 });
 
 // Unidad de peso de Gimnasio: preferencia de ESTE dispositivo (como el

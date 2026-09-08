@@ -281,10 +281,12 @@ button {
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #8c6eff));
 }
 
-/* "Registro": sacado de la guia de diseño del Report Generator de Koku
-   (mismo origen que el tema de color "Registro" de server/db.js, pero
-   esto es la mitad de "estilo de interaccion" -- las dos piezas son
-   independientes, como ya pasa con EINES/Directo). A diferencia de los
+/* "Registro": sacado de la guia de diseño del Report Generator de Koku.
+   Ojo con el nombre: hubo un TEMA DE COLOR llamado igual, que ya NO se
+   siembra con la app (era de una guia privada de Koku, ver la nota en
+   public/local-schema.js). Esto de aqui es otra cosa distinta y SI se
+   queda: la mitad de "estilo de interaccion" (como reaccionan botones e
+   interruptores), que es independiente del color. A diferencia de los
    otros 3, aqui la reaccion es solo de BORDE en hover (sin tintar el
    fondo) y sin brillo/degradado ninguno -- la propia guia lo deja como
    principio ("sin gradientes ni sombras decorativas", solo tonos y
@@ -1487,6 +1489,43 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 }
 .mobile-zoom-anim-in { animation: mobile-zoom-in 240ms ease-out; }
 .mobile-zoom-anim-out { animation: mobile-zoom-out 240ms ease-out; }
+
+/* ---------------------------------------------------------------------
+   INTERRUPTOR DE ANIMACIONES (Configuracion > Este dispositivo).
+
+   Una UNICA regla que apaga TODO el movimiento de la app -- no solo el
+   del calendario: @keyframes, transiciones de color/tamaño de los
+   botones, el deslizamiento de las filas de notas, el ancho de las
+   columnas de Mi espacio... todo. Es a proposito que sea global y no
+   una lista de clases: asi una animacion NUEVA que se añada mañana a
+   esta hoja ya nace obedeciendo al interruptor, sin que haya que
+   acordarse de apuntarla aqui.
+
+   Por que 0.01ms en vez de "none": con duracion 0 algunos navegadores
+   no llegan a disparar el evento "animationend", y hay codigo en app.js
+   que lo espera para limpiar la clase que acaba de poner (ver
+   playMobileSwipeTransition). Con 0.01ms la animacion es invisible pero
+   el evento SI llega, asi que no se queda nada a medias. Es el mismo
+   truco que usa la receta estandar de "prefers-reduced-motion".
+
+   El atributo lo pone el script de arranque de index.html (antes de
+   pintar, para que no se vea un trozo de animacion al abrir) y lo
+   cambia en caliente applyAnimationsPreference() en app.js.
+
+   Ojo: esto apaga la animacion, no la funcion. Cambiar de mes, entrar
+   en una carpeta o abrir un modal siguen funcionando igual, solo que
+   el cambio es instantaneo.
+   --------------------------------------------------------------------- */
+:root[data-animations="off"] *,
+:root[data-animations="off"] *::before,
+:root[data-animations="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
 /* Cabecera fija (Volver + tira semanal + fecha) -- ver el comentario del
    propio HTML: en "Vista por horas" la pagina se desplaza sola hasta la
    hora actual (scrollMobileHoursToTime() en app.js), y sin fijar esto

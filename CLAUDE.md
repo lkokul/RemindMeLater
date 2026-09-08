@@ -404,6 +404,84 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
   función, cuidado con quitar ese fallback pensando que es código muerto,
   se reproduce con facilidad en el flujo normal de usar +Fila/-Fila.
 
+## Gestos de navegación (móvil) — ronda del visor móvil
+
+Diseñado con Koku en la conversación de "configuración del visor móvil".
+El código vive todo junto al final de `public/app.js`, bajo el título
+"GESTOS DE NAVEGACIÓN". La idea, en una frase: **la pantalla se reparte
+en carriles**.
+
+```
+|  lateral  |         centro          |  lateral  |
+|  cambiar  |  gesto propio de ESTA   |  cambiar  |
+| de PESTAÑA|       pantalla          | de PESTAÑA|
+```
+
+- **Carril lateral** (22% del ancho a cada lado, mínimo 56px y máximo
+  120px — `mobileEdgeRailWidth()`): recorre las pestañas de la barra de
+  abajo de una en una y en el orden en que se ven,
+  `Calendario → Notas → Herramientas → Configuración`
+  (`MOBILE_TAB_ORDER`). Izquierda avanza, derecha retrocede. En los
+  extremos NO da la vuelta, a propósito.
+- **Carril central**: lo propio de la pantalla. Hacia la derecha
+  intenta primero *subir una capa* (`VOLVER_UN_PASO`: volver al menú de
+  Configuración, subir de carpeta en Notas, salir del detalle de una
+  saga/viaje/bloque...); si no hay capa que soltar, recorre las
+  sub-pestañas de la App en la que estés (`MOBILE_SUBTAB_BARS`:
+  Gimnasio, Finanzas, Viajes). Si en esa pantalla el centro no tiene
+  nada que hacer, el gesto **cae hacia atrás** y hace lo mismo que el
+  lateral, para que nunca haya un deslizamiento muerto.
+
+Detalles que costaron y conviene no deshacer:
+
+- **`VOLVER_UN_PASO` pulsa los botones de volver que YA existen**, no
+  duplica su lógica. Así lo que hagan esos botones (guardar el borrador
+  de un tema, limpiar la búsqueda de Notas...) pasa igual deslizando que
+  tocando. Los mismos botones lanzan la animación (`animarCambioDePantalla`),
+  que es lo que pidió Koku: el botón "Volver" se mueve igual que el gesto.
+- **`estaVisibleDeVerdad(el)`**: ni `.hidden` ni `offsetParent` valen por
+  separado. Hay diálogos que se quedan sin la clase `.hidden` aunque no
+  se vean (los tapa un padre), y casi todos los modales son
+  `position:fixed`, que tienen `offsetParent` nulo aunque se vean
+  perfectamente. `getClientRects().length > 0` sale bien de los dos.
+- **`CENTRO_CON_DUENO`**: la vista diaria ya usa el deslizamiento
+  horizontal central para cambiar de día (`attachSwipe` con
+  `centerOnly: true`), así que ahí el módulo no se mete NI deja que el
+  gesto caiga al cambio de pestaña — si no, un solo deslizamiento haría
+  las dos cosas a la vez.
+- **El mapa de Viajes se distingue por VELOCIDAD**, tal cual lo pidió
+  Koku: arrastrar despacio mueve el mapa, un gesto rápido
+  (`NAV_SWIPE_VELOCIDAD_MAPA`, 0.55 px/ms ≈ media pantalla en un tercio
+  de segundo) navega.
+- **`ultimaHerramientaAbierta`**: si estabas en Gimnasio y te vas, al
+  volver deslizando entras directo a Gimnasio. Es una variable en
+  memoria a propósito (NO localStorage): al cerrar la app se olvida
+  sola, que es lo que pidió Koku. El botón de Herramientas de la barra
+  siempre lleva al menú y borra el recuerdo — ese es el gesto de "quiero
+  cambiar de App".
+- **`NAV_SWIPE_OPT_OUT`**: sitios donde arrastrar ya significa otra cosa
+  y el módulo se aparta del todo (filas de notas con sus acciones,
+  tablas del editor, entreno en vivo). Para algo nuevo, basta con
+  ponerle `data-no-nav-swipe`.
+
+**Interruptor de animaciones** (Configuración > Este dispositivo): ya no
+es solo del calendario, apaga TODO el movimiento de la app. Funciona en
+dos mitades: una única regla global de `styles.css`
+(`:root[data-animations="off"] *`, con 0.01ms en vez de `none` para que
+`animationend` siga llegando y no se quede ninguna clase a medio limpiar)
+y `areAnimationsEnabled()` para lo que dispara el JavaScript a mano. El
+atributo se pone en el script de arranque de `index.html`, antes de
+pintar. Ventaja de que la regla sea global: una animación nueva nace ya
+obedeciendo al interruptor sin tener que acordarse de apuntarla.
+
+**Temas de color privados fuera del sembrado**: "EINES" y "Registro"
+salían de guías de diseño privadas de Koku y ya NO viajan dentro de la
+app (ver la nota en `public/local-schema.js`). Quitarlos de `SEED_THEMES`
+no los borra de una base que ya los tenga: el sembrado solo inserta un
+tema si no existe uno con ese nombre. Ojo con el nombre "Registro": el
+**estilo de interacción** que se llama igual (`[data-ui-style]` en
+`styles.css`) es otra cosa y SÍ se queda.
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de

@@ -1056,91 +1056,13 @@ function applyLocalSchema(db) {
         daySpecial: '#10202a',
       },
     },
-    // "EINES": panel tecnico oscuro con acento naranja, sacado de una guia de
-    // diseño (sistema-de-estilos.md/estilos-panel-oscuro.css) que Koku trajo
-    // de otra herramienta ya construida. Mapeo: --bg->bg, --panel->surface,
-    // --panel-2->surface2/settingsMenuBg (fondo "hundido" de inputs), --line
-    // ->border, --accent->accent (con accentText oscuro, tal cual pide el
-    // .btn-primary del original: fondo solido + texto oscuro, no blanco).
-    // dayWeekend usa el tono --grid de la cuadricula de fondo; dayHoliday y
-    // daySpecial son --danger/--info del original mezclados oscuros con bg,
-    // ya que ese sistema no define esos dos casos (son propios de este
-    // calendario, no de la guia original).
-    {
-      name: 'EINES',
-      colors: {
-        bg: '#12181f',
-        bgText: '#e7edf2',
-        surface: '#1a222b',
-        surfaceText: '#e7edf2',
-        surface2: '#20303a',
-        surface2Text: '#e7edf2',
-        border: '#2c3947',
-        accent: '#ff8a3d',
-        accentText: '#1a0f05',
-        danger: '#e24b4a',
-        settingsMenuBg: '#20303a',
-        settingsMenuText: '#e7edf2',
-        dayToday: '#ff8a3d',
-        dayTodayText: '#1a0f05',
-        dayWeekend: '#233240',
-        dayHoliday: '#2e1a1a',
-        daySpecial: '#16232e',
-      },
-    },
-
-    // "Registro": panel tecnico con acento verde, sacado de otra guia de
-    // diseño (misma pareja de archivos sistema-de-estilos.md/
-    // estilos-panel-oscuro.css, pero de un proyecto distinto -- el "Report
-    // Generator" de Koku) que esta vez SI trae variante clara Y oscura de
-    // verdad, a diferencia de EINES (solo oscuro) -- por eso aqui si hay
-    // inverseColors. Mismo mapeo que EINES: --bg->bg, --panel->surface,
-    // --panel-2->surface2/settingsMenuBg, --line->border, --accent->accent
-    // (accentText oscuro en el oscuro, blanco en el claro, tal cual definia
-    // --accent-text en cada variante del original). dayWeekend usa --grid;
-    // dayHoliday/daySpecial son --danger/--info del original mezclados con
-    // el bg de cada variante (ese sistema tampoco define esos dos casos).
-    {
-      name: 'Registro',
-      colors: {
-        bg: '#101813',
-        bgText: '#e7f2ec',
-        surface: '#17211b',
-        surfaceText: '#e7f2ec',
-        surface2: '#1e2b23',
-        surface2Text: '#e7f2ec',
-        border: '#2b3d33',
-        accent: '#3ddc84',
-        accentText: '#08150f',
-        danger: '#e24b4a',
-        settingsMenuBg: '#1e2b23',
-        settingsMenuText: '#e7f2ec',
-        dayToday: '#3ddc84',
-        dayTodayText: '#08150f',
-        dayWeekend: '#22322a',
-        dayHoliday: '#2c1a1a',
-        daySpecial: '#16212f',
-      },
-      inverseColors: {
-        bg: '#f4f8f5',
-        bgText: '#16211c',
-        surface: '#ffffff',
-        surfaceText: '#16211c',
-        surface2: '#eef4f0',
-        surface2Text: '#16211c',
-        border: '#d5e2da',
-        accent: '#1f9d5c',
-        accentText: '#ffffff',
-        danger: '#c0392b',
-        settingsMenuBg: '#eef4f0',
-        settingsMenuText: '#16211c',
-        dayToday: '#1f9d5c',
-        dayTodayText: '#ffffff',
-        dayWeekend: '#e3ede7',
-        dayHoliday: '#fbeaea',
-        daySpecial: '#e8eff8',
-      },
-    },
+    // NOTA: aqui vivian dos temas mas ("EINES" y "Registro") sacados de
+    // guias de diseño privadas de Koku. Se quitaron del sembrado a
+    // proposito: no deben viajar dentro de la app para todo el mundo.
+    // Ojo, quitarlos de esta lista NO los borra de una base de datos que
+    // ya los tenga -- el sembrado de abajo solo inserta un tema si NO
+    // existe ya uno con ese nombre, asi que en el movil de Koku siguen
+    // intactos y su copia de seguridad los restaura tal cual.
   ];
 
   // ---------------------------------------------------------------------

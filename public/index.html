@@ -77,6 +77,20 @@
     } catch (e) {
       document.documentElement.dataset.uiStyle = 'directo';
     }
+
+    // Interruptor de animaciones (Configuracion > Este dispositivo). Va
+    // AQUI, antes de pintar, por el mismo motivo que el tema: si se
+    // pusiera mas tarde, con el interruptor apagado se llegaria a ver un
+    // trozo de animacion antes de que el atributo llegase. Marca el
+    // <html> con data-animations="off" y de eso se encarga UNA regla
+    // global de styles.css que apaga TODAS las animaciones y
+    // transiciones de la app de golpe (ver applyAnimationsPreference()
+    // en app.js).
+    try {
+      if (localStorage.getItem('animationsEnabled') === 'false') {
+        document.documentElement.dataset.animations = 'off';
+      }
+    } catch (e) { /* sin localStorage, animaciones encendidas */ }
   })();
 </script>
 </head>
@@ -2364,9 +2378,9 @@
         <h4>Animaciones</h4>
         <label class="checkbox-row">
           <input type="checkbox" id="setting-animations" />
-          Animaciones al moverse por el calendario
+          Animaciones de la app
         </label>
-        <p class="hint">El zoom al entrar/salir de un mes o un día y el deslizamiento al cambiar de mes. Apagarlas ahorra recursos: los cambios de vista pasan al instante, sin transición.</p>
+        <p class="hint">Todo el movimiento de la app: el zoom al entrar y salir de un mes o un día, el deslizamiento al cambiar de mes o de pestaña, y las transiciones de botones, listas y paneles. Apagarlas ahorra recursos: todo pasa al instante, sin transición. Nada deja de funcionar, solo deja de moverse.</p>
 
         <h4>Gimnasio: unidad de peso</h4>
         <p class="hint">Solo cambia como se escriben/leen los pesos en este dispositivo -- por dentro siempre se guardan en kilogramos.</p>
