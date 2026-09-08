@@ -32,15 +32,15 @@ lo primero que hay que tener claro antes de tocar nada:
   Express + `node:sqlite` original. Koku la trabaja **por su cuenta en
   una rama `escritorio`** — **NO toques su código** salvo que te lo
   pida explícitamente. Al fusionar, él preguntará qué falta en cada
-  lado. Matiz añadido el 8/9/2026: Koku autorizó **commit y push por
-  cuenta propia también en la rama `escritorio`** (lo dio al pedir que
-  se commiteara ahí `IDEAS.md`, el ideario del proyecto generado desde
-  esta conversación) — la autorización es de commit/push para entregas
-  que él pida, no una invitación a modificar su código por iniciativa
-  propia. Ojo: él trabaja esa rama en paralelo, así que antes de
-  pushear ahí toca `git fetch` + rebase sobre `origin/escritorio` (ya
-  pasó de verdad: un push rechazado por un commit suyo de minutos
-  antes).
+  lado. Aviso de un malentendido real del 8/9/2026, para no repetirlo:
+  el ideario de esta conversación (`IDEAS-MOVIL-UI.md`) se subió por
+  error a `escritorio` interpretando mal un "es para la rama de
+  escritorio" — Koku lo corrigió: **los documentos de esta conversación
+  van en `movil-ui`**, y la autorización de commit/push libre que dio
+  aquí es para ESTA rama. En `escritorio` no se commitea nada sin
+  petición explícita (y si algún día toca, `git fetch` + rebase antes
+  de pushear: él trabaja esa rama en paralelo y sus pushes se cruzan de
+  verdad).
 
 La interfaz sigue siendo HTML/CSS/JS sin build ni framework (`app.js` y
 `settings.js` se cargan como `<script>` normales y comparten variables
