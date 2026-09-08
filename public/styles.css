@@ -2558,7 +2558,11 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    el "?" abre un dialogo con la explicacion completa, para no tener
    parrafos de letra pequena siempre a la vista (peticion de Koku). */
 .settings-subheading-row, .gym-subheading-row { display: flex; align-items: center; gap: 0.5rem; }
-.settings-subheading-row h4, .gym-subheading-row h3 { margin-bottom: 0; }
+/* El margen superior vive en la FILA, no en el titulo: si el h3/h4
+   conserva su margin-top dentro del flex, el texto queda mas bajo que
+   el boton "?" y parece que el boton flota (feedback de Koku). */
+.gym-subheading-row { margin-top: 1.2rem; }
+.settings-subheading-row h4, .gym-subheading-row h3 { margin: 0; }
 /* Toggle + su "?" en la misma fila (apartado Notificaciones). */
 .settings-toggle-help-row { display: flex; align-items: center; gap: 0.5rem; }
 .settings-toggle-help-row .checkbox-row { flex: 1; min-width: 0; }
