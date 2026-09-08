@@ -2384,7 +2384,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    y desbordaba en pantallas estrechas): # / Anterior / peso / reps / ✓. */
 .gym-live-set-row {
   display: grid;
-  grid-template-columns: 2.4rem minmax(3.5rem, 1fr) 4.4rem 4rem 1.6rem;
+  grid-template-columns: 2.4rem minmax(3.5rem, 1fr) 4.4rem 4rem 2rem;
   gap: 0.4rem;
   align-items: center;
   font-size: 0.85rem;
@@ -2470,6 +2470,117 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   padding: 0.5rem 0.7rem;
 }
 .gym-live-hidden-row .secondary-btn { font-size: 0.78rem; padding: 0.3rem 0.5rem; flex-shrink: 0; }
+
+/* --- Empezar/terminar serie con botones grandes ----------------------
+   La casilla diminuta de cada fila paso a ser solo un INDICADOR de
+   estado (y el atajo para deshacer); el control de verdad es el boton
+   ancho de la tarjeta (peticion de Koku: verlo bien aunque vayas
+   mareado a mitad de serie). */
+.gym-set-status {
+  width: 100%;
+  height: 1.9rem;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: color-mix(in srgb, var(--surface-2-text) 45%, var(--surface-2));
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.gym-set-status.done {
+  border-color: var(--gym-accent);
+  background: color-mix(in srgb, var(--gym-accent) 20%, var(--surface-2));
+  color: var(--gym-accent);
+  font-weight: 700;
+}
+
+/* Boton grande: el de la tarjeta y los de los dos dialogos comparten
+   tamano (alto de sobra para acertar sin mirar). */
+.gym-set-big-btn {
+  display: block;
+  width: 100%;
+  min-height: 3rem;
+  border-radius: var(--radius);
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.7rem 0.9rem;
+}
+.gym-set-start-btn {
+  border: 1px solid var(--gym-accent);
+  background: color-mix(in srgb, var(--gym-accent) 14%, var(--surface-2));
+  color: var(--gym-accent);
+}
+.gym-set-start-btn:disabled { opacity: 0.45; }
+/* Serie corriendo: relleno de acento para que cante a la vista. */
+.gym-set-run-btn {
+  border: 1px solid var(--gym-accent);
+  background: var(--gym-accent);
+  color: var(--gym-accent-text);
+  font-variant-numeric: tabular-nums;
+}
+.gym-set-run-btn.paused { opacity: 0.75; }
+
+/* Dialogos de empezar/terminar serie. */
+.gym-set-modal { text-align: center; }
+.gym-set-modal-info { margin: 0.2rem 0 0; color: color-mix(in srgb, var(--surface-text) 70%, var(--surface)); }
+.gym-set-modal-timer {
+  font-size: 2.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin: 0.4rem 0 0.2rem;
+  color: var(--gym-accent);
+}
+.gym-set-modal-actions { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.9rem; }
+/* Selector de ejercicio del dialogo de empezar: el nombre es pulsable y
+   despliega la lista de ejercicios del dia. */
+.gym-set-exercise-picker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  min-height: 2.6rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  font-size: 1.05rem;
+  font-weight: 600;
+  padding: 0.5rem 0.8rem;
+}
+.gym-set-picker-caret { font-size: 0.8rem; opacity: 0.7; }
+.gym-set-exercise-picker[aria-expanded="true"] .gym-set-picker-caret { transform: rotate(180deg); }
+.gym-set-exercise-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.gym-set-exercise-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--surface-text);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.7rem;
+}
+.gym-set-exercise-option.active { border-color: var(--gym-accent); color: var(--gym-accent); }
+
+/* Cuanto duro una serie, en el historial (junto al "+60s" del descanso). */
+.gym-set-dur-chip {
+  margin-left: 0.25rem;
+  font-size: 0.68rem;
+  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
+  font-variant-numeric: tabular-nums;
+}
+/* Estadistica que ocupa la fila entera (tiempo de trabajo del mes). */
+.gym-stat-wide { grid-column: 1 / -1; }
 
 /* Nota FIJA del ejercicio ("polea altura 3") en la tarjeta del entreno:
    pequena y con el acento, para localizarla de un vistazo. */

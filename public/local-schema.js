@@ -284,6 +284,10 @@ function applyLocalSchema(db) {
       -- de esta serie (rest_seconds guarda el planificado). Se ensena en
       -- el historial como "Serie 1: +60s" (peticion de Koku).
       extra_rest_seconds INTEGER,
+      -- Cuanto DURO la serie en si (del boton "empezar serie" al
+      -- "terminar serie" del entreno en vivo, descontando pausas). NULL
+      -- en series apuntadas a mano o de versiones anteriores.
+      duration_seconds INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1276,6 +1280,9 @@ function applyLocalSchema(db) {
   }
   if (!gymSetColumns2.includes('extra_rest_seconds')) {
     db.exec('ALTER TABLE gym_sets ADD COLUMN extra_rest_seconds INTEGER');
+  }
+  if (!gymSetColumns2.includes('duration_seconds')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN duration_seconds INTEGER');
   }
   const gymSessionColumns = db.prepare('PRAGMA table_info(gym_sessions)').all().map((c) => c.name);
   if (!gymSessionColumns.includes('started_at')) {

@@ -1617,7 +1617,11 @@ document.addEventListener('keydown', (e) => {
   // de Koku: "el primer esc me saque de la ventana de añadir... luego ya
   // con el siguiente que me lleve a la ventana anterior").
   const gymModalIds = [
-    // La ayuda del entrenamiento la primera: se abre encima de todo
+    // Los dialogos de empezar/terminar serie son los mas "de encima"
+    // durante un entreno; Esc equivale a Cancelar / Seguir.
+    ['gym-set-start-modal', closeGymSetStartModal],
+    ['gym-set-end-modal', closeGymSetEndModal],
+    // La ayuda del entrenamiento despues: se abre encima de todo
     // (incluso encima del entreno en vivo).
     ['gym-help-modal', closeGymHelpModal],
     ['gym-progress-help-modal', closeGymProgressHelpModal],

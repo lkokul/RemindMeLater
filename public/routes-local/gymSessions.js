@@ -19,7 +19,7 @@
   function serializeSets(sessionId) {
     return db
       .prepare(`
-        SELECT gs.id, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, gs.extra_rest_seconds, ge.name
+        SELECT gs.id, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, gs.extra_rest_seconds, gs.duration_seconds, ge.name
         FROM gym_sets gs
         JOIN gym_exercises ge ON ge.id = gs.exercise_id
         WHERE gs.session_id = ?
@@ -36,6 +36,7 @@
         rpe: r.rpe,
         setType: r.set_type,
         extraRestSeconds: r.extra_rest_seconds,
+        durationSeconds: r.duration_seconds,
       }));
   }
 
@@ -94,7 +95,7 @@
     if (!Array.isArray(sets)) return;
 
     const insert = db.prepare(
-      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds, duration_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     const VALID_SET_TYPES = ['warmup', 'dropset', 'failure'];
     const countByExercise = new Map();
@@ -112,7 +113,8 @@
         s.restSeconds !== undefined && s.restSeconds !== null && s.restSeconds !== '' ? Number(s.restSeconds) : null,
         s.rpe !== undefined && s.rpe !== null && s.rpe !== '' ? Number(s.rpe) : null,
         VALID_SET_TYPES.includes(s.setType) ? s.setType : null,
-        s.extraRestSeconds !== undefined && s.extraRestSeconds !== null && s.extraRestSeconds !== '' && Number(s.extraRestSeconds) > 0 ? Number(s.extraRestSeconds) : null
+        s.extraRestSeconds !== undefined && s.extraRestSeconds !== null && s.extraRestSeconds !== '' && Number(s.extraRestSeconds) > 0 ? Number(s.extraRestSeconds) : null,
+        s.durationSeconds !== undefined && s.durationSeconds !== null && s.durationSeconds !== '' && Number(s.durationSeconds) > 0 ? Number(s.durationSeconds) : null
       );
     });
   }
@@ -136,7 +138,8 @@
       .prepare(`
         SELECT s.id, s.date, s.type, s.activity_kind, s.activity_name, s.duration_seconds, s.routine_id,
                COUNT(st.id) as set_count,
-               SUM(COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0)) as volume_kg
+               SUM(COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0)) as volume_kg,
+               SUM(COALESCE(st.duration_seconds, 0)) as work_seconds
         FROM gym_sessions s
         LEFT JOIN gym_sets st ON st.session_id = s.id
         GROUP BY s.id
@@ -169,6 +172,9 @@
       routineId: r.routine_id,
       setCount: r.set_count,
       volumeKg: r.volume_kg || 0,
+      // Tiempo real de trabajo: suma de lo que duraron las series (solo
+      // las registradas con el boton de empezar/terminar serie).
+      workSeconds: r.work_seconds || 0,
       muscleGroups: musclesBySession.get(r.id) || [],
     })));
   });

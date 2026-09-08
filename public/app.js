@@ -7858,6 +7858,10 @@ function renderGymSessionsList() {
       statBits.push(`${s.sets.length} serie${s.sets.length === 1 ? '' : 's'}`);
       const volumeKg = s.sets.reduce((acc, set) => acc + (set.reps || 0) * (set.weightKg || 0), 0);
       if (volumeKg > 0) statBits.push(`${gymWeightKgToDisplay(volumeKg)} ${unit}`);
+      // Tiempo REAL de trabajo (suma de lo que duraron las series), solo
+      // si la sesion se registro con el boton de empezar/terminar serie.
+      const workSeconds = s.sets.reduce((acc, set) => acc + (set.durationSeconds || 0), 0);
+      if (workSeconds > 0) statBits.push(`${gymFormatWorkTime(workSeconds)} de trabajo`);
     }
 
     if (s.type === 'activity') {
@@ -9099,6 +9103,13 @@ function gymFormatRestShort(totalSeconds) {
 // Un tiempo de descanso "para ensenar", respetando el formato elegido en
 // Configuracion (m:ss o segundos a secas -- mismo ajuste gymRestFormat
 // que alterna el contador tocandolo).
+// Tiempo de trabajo acumulado: en segundos si es poco, en minutos si ya
+// pasa del minuto ("45s", "6 min").
+function gymFormatWorkTime(totalSeconds) {
+  const n = Math.round(Number(totalSeconds) || 0);
+  if (n < 60) return `${n}s`;
+  return `${Math.round(n / 60)} min`;
+}
 function gymFormatRestDisplay(totalSeconds) {
   const n = Number(totalSeconds);
   if (!n) return '';
@@ -9137,10 +9148,35 @@ function gymLiveTick() {
     gymConsumeRestExtensionFromLockScreen();
   }
 
-  // Mini-barra global: solo cuando el entreno esta OCULTO y hay descanso.
+  // Cronometro de la serie en curso: se actualiza el texto en vez de
+  // repintar la tarjeta entera cada segundo.
+  const setTimers = document.querySelectorAll('[data-live-set-timer]');
+  if (setTimers.length > 0) {
+    const t = gymLiveFormatClock(gymActiveSetSeconds());
+    setTimers.forEach((el) => { el.textContent = t; });
+  }
+  const endTimer = document.getElementById('gym-set-end-timer');
+  if (endTimer && !document.getElementById('gym-set-end-modal').classList.contains('hidden')) {
+    endTimer.textContent = gymLiveFormatClock(gymActiveSetSeconds());
+  }
+
+  // Mini-barra global: cuando el entreno esta OCULTO y hay algo en
+  // marcha -- una serie corriendo o un descanso.
   const liveHidden = document.getElementById('gym-live-view').classList.contains('hidden');
   const globalBar = document.getElementById('gym-global-rest');
-  if (liveHidden && gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+  const globalLabel = document.getElementById('gym-global-rest-label');
+  if (liveHidden && gymLiveSession.activeSet) {
+    // Serie en curso: la barra ensena su cronometro (llena, sin cuenta
+    // atras) y tocarla vuelve al entreno para poder terminarla.
+    globalLabel.textContent = gymLiveSession.activeSet.pausedAt ? 'Serie en pausa' : 'Serie';
+    document.getElementById('gym-global-rest-remaining').textContent = gymLiveFormatClock(gymActiveSetSeconds());
+    document.getElementById('gym-global-rest-fill-base').style.width = '100%';
+    document.getElementById('gym-global-rest-fill-extra').style.width = '0%';
+    globalBar.classList.remove('hidden');
+    document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
+    document.body.classList.add('gym-rest-push');
+  } else if (liveHidden && gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    globalLabel.textContent = 'Descanso';
     // floor y no ceil: la tarjeta de la pantalla de bloqueo redondea
     // HACIA ABAJO (estilo reloj del sistema: un temporizador de 1:00
     // ensena 0:59 nada mas empezar), y con ceil la app iba un segundo
@@ -9567,6 +9603,190 @@ async function gymCancelRestAudioWatch() {
 let gymLiveHiddenPoolOpen = false;
 let gymLiveRemovedPoolOpen = false;
 
+// --- Serie EN CURSO (empezar/terminar con botones grandes) -------------
+// Sustituye a la casilla diminuta de cada fila (Koku: "si vas un poco
+// mareado costara verlo"). El ciclo es: boton grande de la tarjeta ->
+// dialogo "vas a empezar X, serie N" -> serie corriendo con cronometro ->
+// dialogo "¿has acabado?" con Si / Pausar / Seguir. De paso queda
+// registrado cuanto duro cada serie (set.durationSeconds), que se guarda
+// y se ensena en el historial y en Progreso.
+//
+// El estado vive en gymLiveSession.activeSet, asi que sobrevive a
+// recargas y al congelado de iOS igual que el resto (todo por
+// timestamps): { exerciseId, setIndex, startedAt, pausedMs, pausedAt }.
+
+// La serie que toca: la primera SIN HACER del ejercicio (con 4 series y
+// 2 hechas, la 3). -1 si ya estan todas.
+function gymNextPendingSetIndex(ex) {
+  return ex.sets.findIndex((s) => !s.done);
+}
+
+// Segundos de la serie en curso, descontando las pausas.
+function gymActiveSetSeconds() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return 0;
+  const paused = (a.pausedMs || 0) + (a.pausedAt ? Date.now() - a.pausedAt : 0);
+  return Math.max(0, Math.floor((Date.now() - a.startedAt - paused) / 1000));
+}
+
+// Ejercicio (del entreno) al que pertenece la serie en curso.
+function gymActiveSetExercise() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return null;
+  return gymLiveSession.exercises.find((e) => e.exerciseId === a.exerciseId) || null;
+}
+
+// --- Dialogo "empezar serie" ---
+// Indice (dentro de gymLiveSession.exercises) del ejercicio elegido.
+let gymSetStartTargetIndex = null;
+
+function openGymSetStartModal(exIndex) {
+  if (!gymLiveSession || gymLiveSession.activeSet) return;
+  gymSetStartTargetIndex = exIndex;
+  gymSetStartListOpen = false;
+  renderGymSetStartModal();
+  document.getElementById('gym-set-start-modal').classList.remove('hidden');
+}
+function closeGymSetStartModal() {
+  document.getElementById('gym-set-start-modal').classList.add('hidden');
+}
+
+// La lista de ejercicios del dia empieza recogida; se despliega tocando
+// el nombre (peticion de Koku: poder cambiar de ejercicio desde aqui).
+let gymSetStartListOpen = false;
+
+function renderGymSetStartModal() {
+  const ex = gymLiveSession.exercises[gymSetStartTargetIndex];
+  if (!ex) return;
+  const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+  document.getElementById('gym-set-start-exercise-name').textContent = exercise ? exercise.name : 'Ejercicio';
+  const idx = gymNextPendingSetIndex(ex);
+  document.getElementById('gym-set-start-info').textContent = idx >= 0
+    ? `Serie ${idx + 1} de ${ex.sets.length}`
+    : `Serie ${ex.sets.length + 1} (extra)`;
+
+  const picker = document.getElementById('gym-set-start-exercise');
+  picker.setAttribute('aria-expanded', gymSetStartListOpen ? 'true' : 'false');
+  const list = document.getElementById('gym-set-start-exercise-list');
+  list.classList.toggle('hidden', !gymSetStartListOpen);
+  list.innerHTML = '';
+  gymLiveSession.exercises.forEach((other, otherIndex) => {
+    const otherExercise = state.gymExercises.find((e) => e.id === other.exerciseId);
+    const hechas = other.sets.filter((s) => s.done).length;
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'gym-set-exercise-option' + (otherIndex === gymSetStartTargetIndex ? ' active' : '');
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(otherExercise ? otherExercise.name : 'Ejercicio')}</span>
+      <span class="gym-list-item-muted">${hechas}/${other.sets.length}</span>
+    `;
+    row.addEventListener('click', () => {
+      gymSetStartTargetIndex = otherIndex;
+      gymSetStartListOpen = false;
+      renderGymSetStartModal();
+    });
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('gym-set-start-exercise').addEventListener('click', () => {
+  gymSetStartListOpen = !gymSetStartListOpen;
+  renderGymSetStartModal();
+});
+document.getElementById('btn-gym-set-start-cancel').addEventListener('click', closeGymSetStartModal);
+document.getElementById('btn-gym-set-start-go').addEventListener('click', () => {
+  gymStartSet(gymSetStartTargetIndex);
+  closeGymSetStartModal();
+});
+
+// Arranca la serie: apunta a la primera sin hacer y, si ya estaban todas,
+// añade una serie extra heredando el descanso de la anterior.
+function gymStartSet(exIndex) {
+  const ex = gymLiveSession && gymLiveSession.exercises[exIndex];
+  if (!ex || gymLiveSession.activeSet) return;
+  let idx = gymNextPendingSetIndex(ex);
+  if (idx < 0) {
+    const last = ex.sets[ex.sets.length - 1];
+    ex.sets.push({ reps: '', weightDisplay: '', done: false, restSeconds: last ? last.restSeconds : '' });
+    idx = ex.sets.length - 1;
+  }
+  gymLiveSession.activeSet = {
+    exerciseId: ex.exerciseId,
+    setIndex: idx,
+    startedAt: Date.now(),
+    pausedMs: 0,
+    pausedAt: null,
+  };
+  // Si estabas descansando, empezar la siguiente serie corta el descanso:
+  // ya estas entrenando otra vez.
+  if (gymLiveSession.restUntil) {
+    gymLiveSession.restUntil = null;
+    gymCancelRestNotification();
+    gymEndRestLiveActivity();
+    gymCancelRestAudioWatch();
+  }
+  // La tarjeta del ejercicio en marcha siempre desplegada.
+  ex.collapsed = false;
+  gymLiveStore();
+  renderGymLiveExercises();
+  gymLiveTick();
+}
+
+// --- Dialogo "¿has acabado la serie?" ---
+function openGymSetEndModal() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const exercise = state.gymExercises.find((e) => e.id === a.exerciseId);
+  document.getElementById('gym-set-end-info').textContent =
+    `${exercise ? exercise.name : 'Ejercicio'} · Serie ${a.setIndex + 1}`;
+  document.getElementById('gym-set-end-timer').textContent = gymLiveFormatClock(gymActiveSetSeconds());
+  document.getElementById('gym-set-end-modal').classList.remove('hidden');
+}
+function closeGymSetEndModal() {
+  document.getElementById('gym-set-end-modal').classList.add('hidden');
+}
+
+// "Si, terminada": guarda la duracion, marca la serie y arranca el
+// descanso (lo que antes hacia marcar la casilla).
+function gymFinishActiveSet() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const ex = gymActiveSetExercise();
+  const set = ex && ex.sets[a.setIndex];
+  if (set) {
+    set.done = true;
+    set.durationSeconds = gymActiveSetSeconds();
+    set.extraRest = 0;
+    const seconds = Number(set.restSeconds) || gymLiveSession.restPreset;
+    gymLiveSession.restUntil = Date.now() + seconds * 1000;
+    gymLiveSession.restBaseSeconds = seconds;
+    gymLiveSession.restExtraSeconds = 0;
+    // A que serie pertenece el descanso en marcha: los +30s se le
+    // apuntan a ELLA, para poder ensenar "Serie 1: +60s" luego.
+    gymLiveSession.restSetRef = { exerciseId: ex.exerciseId, setIndex: a.setIndex };
+    gymScheduleRestNotification();
+    gymStartRestLiveActivity();
+    gymStartRestAudioWatch();
+  }
+  gymLiveSession.activeSet = null;
+  gymLiveStore();
+  closeGymSetEndModal();
+  renderGymLiveExercises();
+  gymLiveTick();
+}
+
+document.getElementById('btn-gym-set-end-done').addEventListener('click', gymFinishActiveSet);
+document.getElementById('btn-gym-set-end-continue').addEventListener('click', closeGymSetEndModal);
+document.getElementById('btn-gym-set-end-pause').addEventListener('click', () => {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  if (!a.pausedAt) a.pausedAt = Date.now();
+  gymLiveStore();
+  closeGymSetEndModal();
+  renderGymLiveExercises();
+  gymLiveTick();
+});
+
 function renderGymLiveExercises() {
   const container = document.getElementById('gym-live-exercises');
   container.innerHTML = '';
@@ -9622,10 +9842,34 @@ function renderGymLiveExercises() {
           <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
           <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${unit}" data-live-field="weightDisplay" data-set="${setIndex}" value="${set.weightDisplay}" />
           <input type="number" inputmode="numeric" min="0" placeholder="reps" data-live-field="reps" data-set="${setIndex}" value="${set.reps}" />
-          <input type="checkbox" class="styled-checkbox" data-live-done="${setIndex}" ${set.done ? 'checked' : ''} aria-label="Serie hecha" />
+          <button type="button" class="gym-set-status${set.done ? ' done' : ''}" data-live-status="${setIndex}" aria-label="${set.done ? 'Deshacer esta serie' : 'Serie pendiente'}" title="${set.done ? 'Deshacer esta serie' : 'Pendiente'}">${set.done ? '✓' : ''}</button>
         </div>
       `;
     }).join('');
+
+    // Boton GRANDE de empezar/terminar serie (sustituye a la casilla
+    // diminuta, peticion de Koku). Apunta siempre a la primera serie sin
+    // hacer del ejercicio; si ya estan todas, empieza una extra. Solo
+    // puede haber UNA serie en curso en todo el entreno.
+    const active = gymLiveSession.activeSet;
+    const activeHere = !!active && active.exerciseId === ex.exerciseId;
+    const pendingIdx = gymNextPendingSetIndex(ex);
+    let bigBtnHtml;
+    if (activeHere) {
+      const paused = !!active.pausedAt;
+      bigBtnHtml = `
+        <button type="button" class="gym-set-big-btn gym-set-run-btn${paused ? ' paused' : ''}" data-live-set-action>
+          ${paused ? '▶ Reanudar serie' : '■ Terminar serie'} · <span data-live-set-timer>0:00</span>
+        </button>`;
+    } else {
+      const label = pendingIdx >= 0
+        ? `▶ Empezar serie ${pendingIdx + 1} de ${ex.sets.length}`
+        : '▶ Empezar serie extra';
+      bigBtnHtml = `
+        <button type="button" class="gym-set-big-btn gym-set-start-btn" data-live-set-start ${active ? 'disabled' : ''}>
+          ${label}
+        </button>`;
+    }
 
     const doneCount = ex.sets.filter((s) => s.done).length;
     const restSeconds = Number(ex.sets[0] && ex.sets[0].restSeconds) || '';
@@ -9647,6 +9891,7 @@ function renderGymLiveExercises() {
           <span>${unit}</span><span>Reps</span><span>✓</span>
         </div>
         ${setsHtml}
+        ${bigBtnHtml}
         <div class="gym-live-card-footer">
           <button type="button" class="secondary-btn gym-add-set-btn" data-live-add-set>+ Serie</button>
           <label class="gym-live-exrpe">RPE
@@ -9715,41 +9960,48 @@ function renderGymLiveExercises() {
       ex.rpe = e.target.value;
       gymLiveStore();
     });
-    card.querySelectorAll('[data-live-done]').forEach((check) => {
-      check.addEventListener('change', () => {
-        const setIndex = Number(check.dataset.liveDone);
+    // El ✓ de cada fila ya no es un control para MARCAR (eso lo hace el
+    // boton grande): solo indica estado y sirve para DESHACER una serie
+    // dada por buena por error.
+    card.querySelectorAll('[data-live-status]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const setIndex = Number(btn.dataset.liveStatus);
         const set = ex.sets[setIndex];
-        set.done = check.checked;
-        // Marcar una serie como hecha arranca el descanso: el sugerido de
-        // esa serie si lo tiene, si no el preset elegido arriba.
-        // Desmarcarla (te equivocaste de casilla) lo cancela, para no
-        // quedarte con un temporizador de una serie que no has hecho.
-        if (check.checked) {
-          const seconds = Number(set.restSeconds) || gymLiveSession.restPreset;
-          gymLiveSession.restUntil = Date.now() + seconds * 1000;
-          gymLiveSession.restBaseSeconds = seconds;
-          gymLiveSession.restExtraSeconds = 0;
-          // A que serie pertenece el descanso en marcha: los +30s se le
-          // apuntan a ELLA, para poder ensenar "Serie 1: +60s" luego.
-          gymLiveSession.restSetRef = { exerciseId: ex.exerciseId, setIndex };
-          set.extraRest = 0;
-          gymScheduleRestNotification();
-          gymStartRestLiveActivity();
-          gymStartRestAudioWatch();
-        } else {
-          gymLiveSession.restUntil = null;
-          set.extraRest = 0;
-          gymCancelRestNotification();
-          gymEndRestLiveActivity();
-          gymCancelRestAudioWatch();
-        }
+        if (!set.done) return;
+        set.done = false;
+        set.durationSeconds = null;
+        set.extraRest = 0;
+        // El descanso que habia arrancado esa serie ya no pinta nada.
+        gymLiveSession.restUntil = null;
+        gymCancelRestNotification();
+        gymEndRestLiveActivity();
+        gymCancelRestAudioWatch();
         gymLiveStore();
+        renderGymLiveExercises();
         gymLiveTick();
-        check.closest('.gym-live-set-row').classList.toggle('done', check.checked);
-        const progress = card.querySelector('.gym-live-card-progress');
-        if (progress) progress.textContent = `${ex.sets.filter((s) => s.done).length}/${ex.sets.length}`;
       });
     });
+    // Empezar serie: pasa por el dialogo de confirmacion (que ejercicio y
+    // que serie), con el nombre pulsable para cambiar de ejercicio.
+    const startBtn = card.querySelector('[data-live-set-start]');
+    if (startBtn) startBtn.addEventListener('click', () => openGymSetStartModal(exIndex));
+    // Terminar (o reanudar si estaba pausada) la serie en curso.
+    const actionBtn = card.querySelector('[data-live-set-action]');
+    if (actionBtn) {
+      actionBtn.addEventListener('click', () => {
+        const a = gymLiveSession.activeSet;
+        if (!a) return;
+        if (a.pausedAt) {
+          a.pausedMs = (a.pausedMs || 0) + (Date.now() - a.pausedAt);
+          a.pausedAt = null;
+          gymLiveStore();
+          renderGymLiveExercises();
+          gymLiveTick();
+        } else {
+          openGymSetEndModal();
+        }
+      });
+    }
     card.querySelector('[data-live-add-set]').addEventListener('click', () => {
       const last = ex.sets[ex.sets.length - 1];
       ex.sets.push({ reps: '', weightDisplay: '', done: false, restSeconds: last ? last.restSeconds : '' });
@@ -10019,6 +10271,8 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
         // en cada serie para no cambiar el esquema de gym_sets.
         rpe: ex.rpe,
         extraRestSeconds: set.extraRest || null,
+        // Cuanto duro la serie (del boton "empezar" al "terminar").
+        durationSeconds: set.durationSeconds || null,
       });
       volumeKg += (Number(set.reps) || 0) * (weightKg || 0);
       const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
@@ -10401,7 +10655,7 @@ function renderGymSessionExercisesField() {
       // "+60s" = descanso extra anadido con +30s durante el entreno en
       // vivo (peticion de Koku: que el historial lo ensene por serie).
       setRow.innerHTML = `
-        <span class="gym-session-set-number">Serie ${setIndex + 1}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}</span>
+        <span class="gym-session-set-number">Serie ${setIndex + 1}${set.durationSeconds ? `<span class="gym-set-dur-chip" title="Lo que duró la serie">${gymFormatWorkTime(set.durationSeconds)}</span>` : ''}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}</span>
         <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
         <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
         <input type="number" data-field="restSeconds" placeholder="Desc. (s)" min="0" title="Descanso planificado, en segundos" value="${set.restSeconds ?? ''}" />
@@ -10479,6 +10733,9 @@ function openGymSessionModal(session) {
         weightDisplay: gymWeightKgToDisplay(set.weightKg),
         restSeconds: set.restSeconds ?? '',
         extraRestSeconds: set.extraRestSeconds ?? null,
+        // Se arrastra tal cual: editar una sesion a mano no debe borrar
+        // lo que duraron sus series.
+        durationSeconds: set.durationSeconds ?? null,
       });
     });
     gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets, rpe: rpeByExercise.get(exerciseId) ?? '' }));
@@ -10515,6 +10772,7 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         rpe: exRow.rpe,
         restSeconds: set.restSeconds,
         extraRestSeconds: set.extraRestSeconds ?? null,
+        durationSeconds: set.durationSeconds ?? null,
       });
     });
   });
@@ -10629,7 +10887,12 @@ function renderGymConsistency(summary) {
   const thisWeekCount = sessionsByWeek.get(thisWeekKey) || 0;
   const streak = gymComputeWeeklyStreak(sessionsByWeek, goal);
   const monthPrefix = toDateKey(now).slice(0, 7);
-  const monthCount = summary.filter((s) => s.date.startsWith(monthPrefix)).length;
+  const monthSessions = summary.filter((s) => s.date.startsWith(monthPrefix));
+  const monthCount = monthSessions.length;
+  // Tiempo REAL de trabajo del mes: suma de lo que duraron las series
+  // (solo cuenta lo registrado con el boton de empezar/terminar serie,
+  // asi que en sesiones apuntadas a mano sale 0 y no se ensena).
+  const monthWork = monthSessions.reduce((acc, s) => acc + (s.workSeconds || 0), 0);
 
   document.getElementById('gym-consistency-stats').innerHTML = `
     <div class="gym-live-summary-grid gym-consistency-grid">
@@ -10637,6 +10900,7 @@ function renderGymConsistency(summary) {
       <div class="gym-live-summary-stat"><b>${streak}</b><span>Racha (semanas)</span></div>
       <div class="gym-live-summary-stat"><b>${thisWeekCount}/${goal}</b><span>Esta semana</span></div>
       <div class="gym-live-summary-stat"><b>${monthCount}</b><span>Este mes</span></div>
+      ${monthWork > 0 ? `<div class="gym-live-summary-stat gym-stat-wide"><b>${gymFormatWorkTime(monthWork)}</b><span>Tiempo de trabajo este mes</span></div>` : ''}
     </div>
   `;
 
