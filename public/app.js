@@ -2163,7 +2163,7 @@ const REMINDER_OPTIONS = [
   { value: '60', label: '1 hora antes' },
   { value: '1440', label: '1 dia antes' },
 ];
-const eventReminderField = createSelectField({ options: REMINDER_OPTIONS, initialValue: '' });
+const eventReminderField = createSelectField({ options: REMINDER_OPTIONS, initialValue: '0' });
 document.getElementById('event-reminder-field').appendChild(eventReminderField.element);
 
 const eventGroupField = createSelectField({ options: [{ value: '', label: 'Sin grupo' }], initialValue: '' });
@@ -2290,12 +2290,18 @@ function combineDateAndTime(date, timeStr) {
 // :30 que de :00 de la hora siguiente), 6:50 -> 7:00, 6:00 se queda en
 // 6:00. Se usa para sugerir la hora de inicio de un evento nuevo en vez
 // de dejar "las 6:37" tal cual.
-// Hora en punto de AHORA, hacia abajo: a las 17:17 propone 17:00 (y con
-// la hora de fin, que ya suma una hora, queda 17:00-18:00). Antes
-// redondeaba a la media hora mas cercana, asi que a las 17:17 proponia
-// 17:30-18:30 -- Koku pidio explicitamente lo primero.
-function roundDownToHour(date) {
+// Hora en punto MAS CERCANA a la de ahora: a las 17:05 propone 17:00, y
+// a las 9:37 propone las 10:00 (con la hora de fin, que ya suma una
+// hora, quedan 17:00-18:00 y 10:00-11:00). Antes solo redondeaba hacia
+// abajo, asi que a las 9:37 proponia 9:00 -- por eso parecia que "unas
+// veces si y otras no": con los minutos por debajo de la media hora
+// coincidia con lo esperado, y por encima no.
+// Ojo: a partir de las 23:30 esto salta al dia siguiente a las 00:00, y
+// es lo correcto -- el campo de fecha se rellena desde esta misma fecha,
+// asi que la fecha propuesta pasa a ser manana sola.
+function roundToNearestHour(date) {
   const rounded = new Date(date);
+  if (rounded.getMinutes() >= 30) rounded.setHours(rounded.getHours() + 1);
   rounded.setMinutes(0, 0, 0);
   return rounded;
 }
@@ -2328,7 +2334,7 @@ function openEventModal(event, presetDate) {
     defaultStart = new Date(presetDate);
     defaultStart.setHours(9, 0, 0, 0);
   } else {
-    defaultStart = roundDownToHour(defaultStart);
+    defaultStart = roundToNearestHour(defaultStart);
   }
   const startDate = event ? new Date(event.startAt) : defaultStart;
   eventStartDateField.setValue(startDate);
@@ -2355,9 +2361,15 @@ function openEventModal(event, presetDate) {
   // es el MISMO elemento reutilizado en cada apertura del modal — sin
   // esto, un evento nuevo heredaria el tamaño que dejaste en el anterior.
   descriptionEl.style.height = '';
-  eventReminderField.setValue(event && event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
-    ? String(event.reminderMinutesBefore)
-    : '');
+  // Uno NUEVO nace con "En el momento" puesto (pedido de Koku: crear un
+  // recordatorio y que no avise no tiene sentido como caso por defecto).
+  // Uno YA GUARDADO respeta lo que tenga, incluido "Sin recordatorio" si
+  // se quito a mano -- eso es una eleccion suya, no un valor por defecto.
+  eventReminderField.setValue(event
+    ? (event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
+      ? String(event.reminderMinutesBefore)
+      : '')
+    : '0');
   populateEventGroupSelect();
   eventGroupField.setValue(event && event.groupId ? String(event.groupId) : '');
   document.getElementById('btn-delete-event').classList.toggle('hidden', !event);

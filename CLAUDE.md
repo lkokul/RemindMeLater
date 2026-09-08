@@ -519,13 +519,30 @@ la copia es la forma de pasar datos de un aparato a otro.
     CI); esquema de URL en App/Info.plist; la URL llega a la web por
     el plugin `@capacitor/app` (appUrlOpen + getLaunchUrl, con
     anti-duplicado de 3s para el arranque en frío).
-  - **NO COMPILADO TODAVÍA**: la primera build con el target nuevo es
-    la primera prueba real del pbxproj editado a mano — si falla, el
-    log de Actions dirá qué; Koku no ha pedido lanzar todavía.
-  - **Pendiente**: la parte de ANDROID (intent-filter + forwarding
-    nativo) — aplazada a propósito hasta que Koku pueda probar Android
-    (aún sin keystore/Play Console); y probar en el iPhone real
-    (compartir desde otra app de verdad no se puede simular aquí).
+  - **COMPILA BIEN** (build #34, iOS): confirmado en el log que el
+    target `CompartirExtension` se compiló, que el `.appex` se incrustó
+    en `App.app/PlugIns/` y que `ValidateEmbeddedBinary` pasó — el
+    pbxproj editado a mano funcionó a la primera.
+  - **PERO EN EL IPHONE REAL NO TERMINA DE FUNCIONAR** (probado por
+    Koku, build #34): dijo textualmente "lo de compartir no del todo.
+    Nada, era saber si podía funcionar, **déjalo apuntado y ya vemos
+    cómo podemos hacerlo en el futuro**". O sea: **NO seguir tocándolo
+    hasta que él lo retome**. No dio detalle de QUÉ falla exactamente
+    (¿no aparece en la hoja de compartir?, ¿aparece pero no abre la
+    app?, ¿abre pero sin datos?) — es lo PRIMERO que hay que
+    preguntarle cuando se retome, porque cada síntoma apunta a una
+    causa distinta:
+    - No aparece en la hoja → `NSExtensionActivationRule` del
+      Info.plist de la extensión.
+    - Aparece pero no abre la app → el truco de la cadena de
+      responders (`openURL:`) está cada vez más restringido por Apple;
+      la alternativa moderna sería un App Group compartido (la
+      extensión escribe el texto ahí y la app lo lee al abrirse) en
+      vez de pasar el dato por la URL.
+    - Abre sin datos → el esquema de URL o el `appUrlOpen`.
+  - **Pendiente aparte**: la parte de ANDROID (intent-filter +
+    forwarding nativo), aplazada a propósito hasta que Koku pueda
+    probar Android (aún sin keystore/Play Console).
 - **Vibración de los avisos — ARREGLADA (misma ronda)**: el plugin de
   notificaciones solo pone sonido si se le pasa `sound` (comprobado en
   su fuente), y sin sonido iOS entrega el aviso en silencio total (ni
