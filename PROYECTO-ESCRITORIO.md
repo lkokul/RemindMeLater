@@ -197,12 +197,16 @@ Heredadas, no son fallos nuevos:
 
 ### Reglas de Koku
 
-- **Commit y push por tu cuenta.** Hasta el 5/9/2026 la regla era no
-  commitear ni pushear sin pedirlo; Koku la retiró para igualar esta
-  conversación con el resto. Ahora se commitea y se pushea sin
-  preguntar. **La única excepción: lanzar GitHub Actions, que sí se
-  consulta antes.** (En esta rama, de hecho, `.github/` ya no existe —
-  se fue con el workflow de iOS.)
+- **Commit y push por tu cuenta, PERO SOLO EN LA RAMA `escritorio`.**
+  Hasta el 5/9/2026 la regla era no commitear ni pushear sin pedirlo;
+  Koku la retiró para esta rama, para igualarla con el resto de sus
+  conversaciones. Dos límites que siguen en pie:
+    1. **Cualquier otra rama (`main` incluida) sigue necesitando permiso
+       explícito.** El permiso libre no se hereda al cambiar de rama ni
+       al fusionar.
+    2. **Lanzar GitHub Actions se consulta siempre**, en cualquier rama.
+       (En `escritorio`, de hecho, `.github/` ya no existe — se fue con
+       el workflow de iOS.)
 - Versionado semántico con tag de git a juego. Los tags hay que crearlos
   desde el ordenador de Koku: las sesiones de control remoto dan 403.
 - Cuando algo es ambiguo, **preguntar antes de construir**. Con
