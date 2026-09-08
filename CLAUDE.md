@@ -406,8 +406,19 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
 
 ## Estado actual
 
-**Rama de trabajo: `movil-ui`** (no `main`). Ahí vive la app móvil sin
-servidor. `main` sigue teniendo la versión vieja cliente-servidor, y la
+**Reorganización de ramas (8/9/2026, pedida por Koku)**: `movil-ui`
+pasa a ser EXCLUSIVAMENTE la rama de integración para compilar y probar
+ipa/apk — el trabajo se hace por separado en ramas por área y se
+combina aquí cuando está funcional:
+
+- `calendario-notas-movil-UI` — calendario y notas (creada desde
+  `movil-ui` en `d3a65d4`; es donde sigue esta conversación).
+- `gimnasio-movil`, `finanzas-movil`, `viajes-movil` — cada herramienta
+  en la suya (Gimnasio con el rediseño grande de Koku ya fusionado a
+  `movil-ui`; Finanzas y Viajes de momento solo con su ideario/plan).
+
+En `movil-ui` ya están combinadas las tres (merges limpios, pasada de
+humo con Playwright en verde). Ahí vive la app móvil sin servidor. `main` sigue teniendo la versión vieja cliente-servidor, y la
 rama `escritorio` es donde Koku trabaja el programa de escritorio por su
 cuenta — no las toques desde aquí.
 
