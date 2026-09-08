@@ -8576,12 +8576,24 @@ function renderGymExerciseSecondaryChips() {
 // sesion en curso al guardar.
 let gymExerciseAddToLivePending = false;
 
+// Lo de "contar cada lado por separado" y el descanso entre lados solo
+// pinta algo si el ejercicio es unilateral: se esconde si no lo es.
+function refreshGymUnilateralFields() {
+  const on = document.getElementById('gym-exercise-unilateral').checked;
+  document.getElementById('gym-exercise-unilateral-extra').classList.toggle('hidden', !on);
+}
+document.getElementById('gym-exercise-unilateral').addEventListener('change', refreshGymUnilateralFields);
+
 function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
   document.getElementById('gym-exercise-id').value = exercise ? exercise.id : '';
   document.getElementById('gym-exercise-name').value = exercise ? exercise.name : '';
   document.getElementById('gym-exercise-equipment').value = exercise ? exercise.equipment || '' : '';
   document.getElementById('gym-exercise-notes').value = exercise ? exercise.notes || '' : '';
+  document.getElementById('gym-exercise-unilateral').checked = !!(exercise && exercise.unilateral);
+  document.getElementById('gym-exercise-sides-separately').checked = !!(exercise && exercise.countSidesSeparately);
+  document.getElementById('gym-exercise-side-rest').value = exercise && exercise.sideRestSeconds != null ? exercise.sideRestSeconds : '';
+  refreshGymUnilateralFields();
   gymExerciseSecondarySel = new Set(exercise && Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : []);
   renderGymExerciseSecondaryChips();
   const options = [
@@ -8614,6 +8626,9 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
     equipment: document.getElementById('gym-exercise-equipment').value,
     secondaryMuscles: [...gymExerciseSecondarySel],
     notes: document.getElementById('gym-exercise-notes').value,
+    unilateral: document.getElementById('gym-exercise-unilateral').checked,
+    countSidesSeparately: document.getElementById('gym-exercise-sides-separately').checked,
+    sideRestSeconds: document.getElementById('gym-exercise-side-rest').value,
   };
   // El flag se captura ANTES de cerrar: closeGymExerciseModal lo resetea.
   const addToLive = !id && gymExerciseAddToLivePending;
@@ -8633,7 +8648,7 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
       note: '',
       rpe: '',
       collapsed: false,
-      sets: [{ reps: '', weightDisplay: '', done: false, restSeconds: '' }],
+      sets: gymBuildSetsForExercise(saved.id, 1, ''),
     });
     gymLiveStore();
     gymLivePrevSets.set(saved.id, await api(`/api/gym-sessions/last-sets/${saved.id}`));
@@ -9033,10 +9048,7 @@ function startGymLiveSession(day) {
         note: '',
         rpe: '',
         collapsed: i > 0,
-        sets: Array.from({ length: ex.targetSets || 1 }, () => ({
-          reps: '', weightDisplay: '', done: false,
-          restSeconds: ex.targetRestSeconds ?? '',
-        })),
+        sets: gymBuildSetsForExercise(ex.exerciseId, ex.targetSets, ex.targetRestSeconds ?? ''),
       })),
     hiddenPool: day
       ? day.exercises.filter((ex) => ex.hidden).map((ex) => ({
@@ -9621,6 +9633,69 @@ function gymNextPendingSetIndex(ex) {
   return ex.sets.findIndex((s) => !s.done);
 }
 
+// --- Ejercicios UNILATERALES contados por lado ------------------------
+// Cuando un ejercicio es unilateral y se cuentan los lados por separado,
+// cada lado es una SERIE PROPIA (set.side = 'left'/'right'). Asi el ciclo
+// de empezar/terminar, el historial y el volumen funcionan sin casos
+// especiales: solo cambian las etiquetas y el descanso entre lados.
+function gymExerciseUsesSides(ex) {
+  const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+  return !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
+}
+// Numero de serie que le toca a un set (los dos lados comparten numero).
+function gymSetSerieNumber(ex, setIndex) {
+  if (!gymExerciseUsesSides(ex)) return setIndex + 1;
+  let n = 0;
+  for (let i = 0; i <= setIndex; i++) if (ex.sets[i].side !== 'right') n += 1;
+  return Math.max(1, n);
+}
+// Cuantas series (no lados) tiene el ejercicio.
+function gymSerieCount(ex) {
+  if (!gymExerciseUsesSides(ex)) return ex.sets.length;
+  return ex.sets.filter((s) => s.side !== 'right').length;
+}
+function gymSideLabel(side) {
+  if (side === 'left') return 'izquierdo';
+  if (side === 'right') return 'derecho';
+  return '';
+}
+// Crea las series de un ejercicio: una fila por serie, o DOS (izquierda
+// y derecha) si el ejercicio cuenta los lados por separado.
+function gymBuildSetsForExercise(exerciseId, count, restSeconds) {
+  const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+  const sides = !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
+  const out = [];
+  for (let i = 0; i < Math.max(1, Number(count) || 1); i++) {
+    if (sides) {
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'left', note: '' });
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'right', note: '' });
+    } else {
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: null, note: '' });
+    }
+  }
+  return out;
+}
+
+// Junta las notas de las series en la nota del EJERCICIO de esta sesion
+// (peticion de Koku: que sirvan de referencia para el siguiente entreno,
+// donde se ensenan como "La última vez"). Es idempotente: la parte
+// generada se reescribe entera y lo que hubiera escrito a mano se
+// respeta delante.
+const GYM_SET_NOTES_TAG = 'Series — ';
+function gymCombineSetNotes(ex) {
+  const usesSides = gymExerciseUsesSides(ex);
+  const parts = [];
+  ex.sets.forEach((s, i) => {
+    if (!s.note || !String(s.note).trim()) return;
+    const lado = usesSides ? (s.side === 'left' ? ' I' : ' D') : '';
+    parts.push(`S${gymSetSerieNumber(ex, i)}${lado}: ${String(s.note).trim()}`);
+  });
+  const manual = String(ex.note || '').split(GYM_SET_NOTES_TAG)[0].trim();
+  ex.note = parts.length
+    ? `${manual ? `${manual} ` : ''}${GYM_SET_NOTES_TAG}${parts.join(' · ')}`
+    : manual;
+}
+
 // Segundos de la serie en curso, descontando las pausas.
 function gymActiveSetSeconds() {
   const a = gymLiveSession && gymLiveSession.activeSet;
@@ -9733,31 +9808,82 @@ function gymStartSet(exIndex) {
 }
 
 // --- Dialogo "¿has acabado la serie?" ---
+// Dos pasos: primero la pregunta (Si / Pausar / Seguir) y, al decir que
+// si, el formulario con peso, repeticiones y nota de ESA serie (peticion
+// de Koku). Nada se guarda hasta "Guardar serie".
+function gymSetEndShowForm(show) {
+  document.getElementById('gym-set-end-choices').classList.toggle('hidden', show);
+  document.getElementById('gym-set-end-form').classList.toggle('hidden', !show);
+  document.querySelector('#gym-set-end-modal h2').textContent = show
+    ? 'Datos de la serie'
+    : '¿Has acabado la serie?';
+}
+
 function openGymSetEndModal() {
   const a = gymLiveSession && gymLiveSession.activeSet;
   if (!a) return;
+  const ex = gymActiveSetExercise();
   const exercise = state.gymExercises.find((e) => e.id === a.exerciseId);
+  const set = ex && ex.sets[a.setIndex];
+  const lado = set && set.side ? ` · lado ${gymSideLabel(set.side)}` : '';
   document.getElementById('gym-set-end-info').textContent =
-    `${exercise ? exercise.name : 'Ejercicio'} · Serie ${a.setIndex + 1}`;
+    `${exercise ? exercise.name : 'Ejercicio'} · Serie ${ex ? gymSetSerieNumber(ex, a.setIndex) : a.setIndex + 1}${lado}`;
   document.getElementById('gym-set-end-timer').textContent = gymLiveFormatClock(gymActiveSetSeconds());
+  gymSetEndShowForm(false);
   document.getElementById('gym-set-end-modal').classList.remove('hidden');
 }
 function closeGymSetEndModal() {
   document.getElementById('gym-set-end-modal').classList.add('hidden');
 }
 
-// "Si, terminada": guarda la duracion, marca la serie y arranca el
-// descanso (lo que antes hacia marcar la casilla).
+// "Si, terminada" -> pasa al formulario, con lo que ya hubiera escrito en
+// la fila y, si estaba vacio, lo de la ultima serie hecha del mismo
+// ejercicio y lado (asi normalmente solo hay que confirmar).
+document.getElementById('btn-gym-set-end-done').addEventListener('click', () => {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const ex = gymActiveSetExercise();
+  const set = ex && ex.sets[a.setIndex];
+  if (!set) return;
+  let peso = set.weightDisplay;
+  let reps = set.reps;
+  if (peso === '' || reps === '') {
+    // Ultima serie hecha del mismo lado (o de cualquiera si no hay).
+    const previa = [...ex.sets.slice(0, a.setIndex)].reverse()
+      .find((s) => s.done && (s.side === set.side || !set.side));
+    if (previa) {
+      if (peso === '') peso = previa.weightDisplay || '';
+      if (reps === '') reps = previa.reps || '';
+    }
+  }
+  document.querySelector('#gym-set-end-form .gym-set-field span').textContent = `Peso (${getGymWeightUnitLabel()})`;
+  document.getElementById('gym-set-end-weight').value = peso;
+  document.getElementById('gym-set-end-reps').value = reps;
+  document.getElementById('gym-set-end-note').value = set.note || '';
+  gymSetEndShowForm(true);
+});
+
+// "Guardar serie": vuelca peso/reps/nota, marca la serie con su duracion
+// y arranca el descanso -- el CORTO entre lados si acaba de hacerse el
+// lado izquierdo de un ejercicio contado por lados, el normal si no.
 function gymFinishActiveSet() {
   const a = gymLiveSession && gymLiveSession.activeSet;
   if (!a) return;
   const ex = gymActiveSetExercise();
   const set = ex && ex.sets[a.setIndex];
   if (set) {
+    set.weightDisplay = document.getElementById('gym-set-end-weight').value;
+    set.reps = document.getElementById('gym-set-end-reps').value;
+    set.note = document.getElementById('gym-set-end-note').value;
     set.done = true;
     set.durationSeconds = gymActiveSetSeconds();
     set.extraRest = 0;
-    const seconds = Number(set.restSeconds) || gymLiveSession.restPreset;
+
+    const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+    const entreLados = set.side === 'left' && exercise && Number(exercise.sideRestSeconds) > 0;
+    const seconds = entreLados
+      ? Number(exercise.sideRestSeconds)
+      : (Number(set.restSeconds) || gymLiveSession.restPreset);
     gymLiveSession.restUntil = Date.now() + seconds * 1000;
     gymLiveSession.restBaseSeconds = seconds;
     gymLiveSession.restExtraSeconds = 0;
@@ -9767,6 +9893,10 @@ function gymFinishActiveSet() {
     gymScheduleRestNotification();
     gymStartRestLiveActivity();
     gymStartRestAudioWatch();
+
+    // Ejercicio terminado: las notas de sus series se combinan en la
+    // nota del ejercicio, que es la que se vera el proximo entreno.
+    if (ex.sets.every((s) => s.done)) gymCombineSetNotes(ex);
   }
   gymLiveSession.activeSet = null;
   gymLiveStore();
@@ -9775,7 +9905,7 @@ function gymFinishActiveSet() {
   gymLiveTick();
 }
 
-document.getElementById('btn-gym-set-end-done').addEventListener('click', gymFinishActiveSet);
+document.getElementById('btn-gym-set-end-save').addEventListener('click', gymFinishActiveSet);
 document.getElementById('btn-gym-set-end-continue').addEventListener('click', closeGymSetEndModal);
 document.getElementById('btn-gym-set-end-pause').addEventListener('click', () => {
   const a = gymLiveSession && gymLiveSession.activeSet;
@@ -9838,7 +9968,7 @@ function renderGymLiveExercises() {
         : '—';
       return `
         <div class="gym-live-set-row ${set.done ? 'done' : ''}">
-          <span class="gym-live-set-number">${setIndex + 1}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}</span>
+          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}</span>
           <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
           <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${unit}" data-live-field="weightDisplay" data-set="${setIndex}" value="${set.weightDisplay}" />
           <input type="number" inputmode="numeric" min="0" placeholder="reps" data-live-field="reps" data-set="${setIndex}" value="${set.reps}" />
@@ -9857,13 +9987,16 @@ function renderGymLiveExercises() {
     let bigBtnHtml;
     if (activeHere) {
       const paused = !!active.pausedAt;
+      const activeSide = (ex.sets[active.setIndex] || {}).side;
+      const que = activeSide ? `lado ${gymSideLabel(activeSide)}` : 'serie';
       bigBtnHtml = `
         <button type="button" class="gym-set-big-btn gym-set-run-btn${paused ? ' paused' : ''}" data-live-set-action>
-          ${paused ? '▶ Reanudar serie' : '■ Terminar serie'} · <span data-live-set-timer>0:00</span>
+          ${paused ? `▶ Reanudar ${que}` : `■ Terminar ${que}`} · <span data-live-set-timer>0:00</span>
         </button>`;
     } else {
+      const pendingSet = pendingIdx >= 0 ? ex.sets[pendingIdx] : null;
       const label = pendingIdx >= 0
-        ? `▶ Empezar serie ${pendingIdx + 1} de ${ex.sets.length}`
+        ? `▶ Empezar serie ${gymSetSerieNumber(ex, pendingIdx)} de ${gymSerieCount(ex)}${pendingSet && pendingSet.side ? ` · lado ${gymSideLabel(pendingSet.side)}` : ''}`
         : '▶ Empezar serie extra';
       bigBtnHtml = `
         <button type="button" class="gym-set-big-btn gym-set-start-btn" data-live-set-start ${active ? 'disabled' : ''}>
@@ -9885,6 +10018,7 @@ function renderGymLiveExercises() {
       </div>
       <div class="gym-live-card-body">
         ${exercise && exercise.notes ? `<p class="gym-live-fixed-note">${escapeHtml(exercise.notes)}</p>` : ''}
+        ${prev && prev.note ? `<p class="gym-live-prev-note">La última vez: ${escapeHtml(prev.note)}</p>` : ''}
         <div class="gym-live-set-row gym-live-set-head">
           <span class="gym-live-set-number">#</span>
           <span class="gym-live-set-prev">Anterior</span>
@@ -10004,7 +10138,8 @@ function renderGymLiveExercises() {
     }
     card.querySelector('[data-live-add-set]').addEventListener('click', () => {
       const last = ex.sets[ex.sets.length - 1];
-      ex.sets.push({ reps: '', weightDisplay: '', done: false, restSeconds: last ? last.restSeconds : '' });
+      // Una serie mas: dos filas si el ejercicio cuenta los lados aparte.
+      ex.sets.push(...gymBuildSetsForExercise(ex.exerciseId, 1, last ? last.restSeconds : ''));
       gymLiveStore();
       renderGymLiveExercises();
     });
@@ -10085,10 +10220,7 @@ function renderGymLiveExercises() {
           note: '',
           rpe: '',
           collapsed: false,
-          sets: Array.from({ length: p.targetSets || 1 }, () => ({
-            reps: '', weightDisplay: '', done: false,
-            restSeconds: p.targetRestSeconds ?? '',
-          })),
+          sets: gymBuildSetsForExercise(p.exerciseId, p.targetSets, p.targetRestSeconds ?? ''),
         });
         gymLiveSession.hiddenPool.splice(poolIndex, 1);
         gymLiveStore();
@@ -10117,7 +10249,7 @@ document.getElementById('btn-gym-live-add-exercise').addEventListener('click', (
     const imported = state.gymExercises.find((e) => e.libraryId === libraryEntry.id);
     if (!imported) return;
     if (!gymLiveSession.exercises.some((e) => e.exerciseId === imported.id)) {
-      gymLiveSession.exercises.push({ exerciseId: imported.id, note: '', sets: [{ reps: '', weightDisplay: '', rpe: '', done: false, restSeconds: '' }] });
+      gymLiveSession.exercises.push({ exerciseId: imported.id, note: '', rpe: '', collapsed: false, sets: gymBuildSetsForExercise(imported.id, 1, '') });
       gymLiveStore();
       const prev = await api(`/api/gym-sessions/last-sets/${imported.id}`);
       gymLivePrevSets.set(imported.id, prev);
@@ -10273,6 +10405,8 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
         extraRestSeconds: set.extraRest || null,
         // Cuanto duro la serie (del boton "empezar" al "terminar").
         durationSeconds: set.durationSeconds || null,
+        side: set.side || null,
+        notes: set.note || null,
       });
       volumeKg += (Number(set.reps) || 0) * (weightKg || 0);
       const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
@@ -10655,7 +10789,7 @@ function renderGymSessionExercisesField() {
       // "+60s" = descanso extra anadido con +30s durante el entreno en
       // vivo (peticion de Koku: que el historial lo ensene por serie).
       setRow.innerHTML = `
-        <span class="gym-session-set-number">Serie ${setIndex + 1}${set.durationSeconds ? `<span class="gym-set-dur-chip" title="Lo que duró la serie">${gymFormatWorkTime(set.durationSeconds)}</span>` : ''}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}</span>
+        <span class="gym-session-set-number" ${set.notes ? `title="${escapeHtml(set.notes)}"` : ''}>Serie ${setIndex + 1}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.durationSeconds ? `<span class="gym-set-dur-chip" title="Lo que duró la serie">${gymFormatWorkTime(set.durationSeconds)}</span>` : ''}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}</span>
         <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
         <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
         <input type="number" data-field="restSeconds" placeholder="Desc. (s)" min="0" title="Descanso planificado, en segundos" value="${set.restSeconds ?? ''}" />
@@ -10733,9 +10867,11 @@ function openGymSessionModal(session) {
         weightDisplay: gymWeightKgToDisplay(set.weightKg),
         restSeconds: set.restSeconds ?? '',
         extraRestSeconds: set.extraRestSeconds ?? null,
-        // Se arrastra tal cual: editar una sesion a mano no debe borrar
-        // lo que duraron sus series.
+        // Se arrastran tal cual: editar una sesion a mano no debe borrar
+        // lo que duraron sus series, su lado ni sus notas.
         durationSeconds: set.durationSeconds ?? null,
+        side: set.side ?? null,
+        notes: set.notes ?? null,
       });
     });
     gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets, rpe: rpeByExercise.get(exerciseId) ?? '' }));
@@ -10773,6 +10909,8 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         restSeconds: set.restSeconds,
         extraRestSeconds: set.extraRestSeconds ?? null,
         durationSeconds: set.durationSeconds ?? null,
+        side: set.side ?? null,
+        notes: set.notes ?? null,
       });
     });
   });

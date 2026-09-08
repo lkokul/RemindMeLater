@@ -619,6 +619,25 @@
           Nota fija (opcional)
           <input type="text" id="gym-exercise-notes" placeholder="Ej. polea altura 3" />
         </label>
+        <!-- Unilateral: un lado cada vez (mancuerna a una mano, prensa a
+             una pierna...). Si ademas se cuentan los lados por separado,
+             cada lado pasa a ser su propia serie en el entreno, con su
+             peso/reps, y entre lado y lado corre el descanso corto de
+             abajo. -->
+        <label class="checkbox-row">
+          <input type="checkbox" id="gym-exercise-unilateral" />
+          Ejercicio unilateral (un lado cada vez)
+        </label>
+        <div id="gym-exercise-unilateral-extra" class="gym-unilateral-extra hidden">
+          <label class="checkbox-row">
+            <input type="checkbox" id="gym-exercise-sides-separately" />
+            Contar cada lado por separado
+          </label>
+          <label>
+            Descanso entre lados (segundos)
+            <input type="number" id="gym-exercise-side-rest" min="0" inputmode="numeric" placeholder="Ej. 30" />
+          </label>
+        </div>
         <div class="modal-actions">
           <button type="button" id="btn-delete-gym-exercise" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
@@ -778,10 +797,33 @@
       <h2>¿Has acabado la serie?</h2>
       <p id="gym-set-end-info" class="gym-set-modal-info"></p>
       <div id="gym-set-end-timer" class="gym-set-modal-timer">0:00</div>
-      <div class="gym-set-modal-actions">
+      <div class="gym-set-modal-actions" id="gym-set-end-choices">
         <button type="button" id="btn-gym-set-end-done" class="primary-btn gym-set-big-btn">Sí, terminada</button>
         <button type="button" id="btn-gym-set-end-pause" class="secondary-btn gym-set-big-btn">Pausar serie</button>
         <button type="button" id="btn-gym-set-end-continue" class="secondary-btn gym-set-big-btn">Seguir</button>
+      </div>
+
+      <!-- Al decir que si, el mismo dialogo pasa a pedir los datos de la
+           serie recien hecha (peticion de Koku): peso, repeticiones y una
+           nota suya. Las notas de todas las series de un ejercicio se
+           combinan al acabarlo en la nota del ejercicio, que se ensena en
+           el entrenamiento siguiente. -->
+      <div id="gym-set-end-form" class="gym-set-end-form hidden">
+        <label class="gym-set-field">
+          <span>Peso</span>
+          <input type="number" id="gym-set-end-weight" inputmode="decimal" step="0.5" min="0" />
+        </label>
+        <label class="gym-set-field">
+          <span>Repeticiones</span>
+          <input type="number" id="gym-set-end-reps" inputmode="numeric" min="0" />
+        </label>
+        <label class="gym-set-field">
+          <span>Notas de la serie (opcional)</span>
+          <input type="text" id="gym-set-end-note" placeholder="Ej. se me fue el codo" />
+        </label>
+        <div class="gym-set-modal-actions">
+          <button type="button" id="btn-gym-set-end-save" class="primary-btn gym-set-big-btn">Guardar serie</button>
+        </div>
       </div>
     </div>
   </div>
@@ -836,6 +878,10 @@
       <div class="gym-help-body">
         <h4>Apuntar las series</h4>
         <p>Cada ejercicio tiene su tabla: escribe el peso y las repeticiones de cada serie. Para registrarla usa el botón grande de la tarjeta: <b>Empezar serie</b> te confirma qué ejercicio y qué serie vas a hacer (siempre la primera sin hacer; y tocando el nombre puedes cambiar de ejercicio), y mientras la haces el botón se convierte en <b>Terminar serie</b> con el cronómetro. Al terminarla te pregunta si de verdad has acabado, con la opción de pausarla o seguir. El ✓ de cada fila solo indica el estado: tócalo si necesitas deshacer una serie. Al darle a Terminar el entrenamiento solo se guardan las series hechas o con datos.</p>
+        <h4>Los datos y las notas de cada serie</h4>
+        <p>Al confirmar que has acabado, la app te pide el peso, las repeticiones y una nota de esa serie (te propone lo de la serie anterior, así que normalmente solo hay que confirmar). Cuando terminas todas las series de un ejercicio, sus notas se juntan en la nota del ejercicio, y esa es la que verás como "La última vez" la próxima vez que lo entrenes.</p>
+        <h4>Ejercicios a un lado</h4>
+        <p>Si marcas un ejercicio como unilateral (en su ficha) y pides contar cada lado por separado, cada serie se divide en dos: primero el lado izquierdo y luego el derecho, cada uno con su peso y sus repeticiones. Entre lado y lado corre el descanso corto que le pongas en la ficha; el descanso normal del ejercicio queda para después del segundo lado.</p>
         <h4>Cuánto dura cada serie</h4>
         <p>Como la app sabe cuándo empiezas y cuándo acabas, guarda lo que duró cada serie. Lo ves en el historial junto a la serie, y en Progreso como tiempo de trabajo real del mes (que no es lo mismo que la duración del entrenamiento, donde entran los descansos).</p>
         <h4>La columna "Anterior"</h4>

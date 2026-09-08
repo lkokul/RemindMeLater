@@ -19,7 +19,7 @@
   function serializeSets(sessionId) {
     return db
       .prepare(`
-        SELECT gs.id, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, gs.extra_rest_seconds, gs.duration_seconds, ge.name
+        SELECT gs.id, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, gs.extra_rest_seconds, gs.duration_seconds, gs.side, gs.notes, ge.name
         FROM gym_sets gs
         JOIN gym_exercises ge ON ge.id = gs.exercise_id
         WHERE gs.session_id = ?
@@ -37,6 +37,8 @@
         setType: r.set_type,
         extraRestSeconds: r.extra_rest_seconds,
         durationSeconds: r.duration_seconds,
+        side: r.side || null,
+        notes: r.notes || null,
       }));
   }
 
@@ -95,9 +97,10 @@
     if (!Array.isArray(sets)) return;
 
     const insert = db.prepare(
-      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds, duration_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds, duration_seconds, side, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     const VALID_SET_TYPES = ['warmup', 'dropset', 'failure'];
+    const VALID_SIDES = ['left', 'right'];
     const countByExercise = new Map();
     sets.forEach((s) => {
       const exerciseId = Number(s && s.exerciseId);
@@ -114,7 +117,9 @@
         s.rpe !== undefined && s.rpe !== null && s.rpe !== '' ? Number(s.rpe) : null,
         VALID_SET_TYPES.includes(s.setType) ? s.setType : null,
         s.extraRestSeconds !== undefined && s.extraRestSeconds !== null && s.extraRestSeconds !== '' && Number(s.extraRestSeconds) > 0 ? Number(s.extraRestSeconds) : null,
-        s.durationSeconds !== undefined && s.durationSeconds !== null && s.durationSeconds !== '' && Number(s.durationSeconds) > 0 ? Number(s.durationSeconds) : null
+        s.durationSeconds !== undefined && s.durationSeconds !== null && s.durationSeconds !== '' && Number(s.durationSeconds) > 0 ? Number(s.durationSeconds) : null,
+        VALID_SIDES.includes(s.side) ? s.side : null,
+        s.notes && String(s.notes).trim() ? String(s.notes).trim() : null
       );
     });
   }
@@ -294,20 +299,23 @@
   router.get('/last-sets/:exerciseId', (req, res) => {
     const last = db
       .prepare(`
-        SELECT s.id, s.date
+        SELECT s.id, s.date, s.exercise_notes
         FROM gym_sessions s
         WHERE EXISTS (SELECT 1 FROM gym_sets st WHERE st.session_id = s.id AND st.exercise_id = ?)
         ORDER BY s.date DESC, s.id DESC
         LIMIT 1
       `)
       .get(req.params.exerciseId);
-    if (!last) return res.json({ date: null, sets: [] });
+    if (!last) return res.json({ date: null, sets: [], note: null });
 
     const sets = db
-      .prepare('SELECT set_number, reps, weight_kg, rpe, rest_seconds FROM gym_sets WHERE session_id = ? AND exercise_id = ? ORDER BY id ASC')
+      .prepare('SELECT set_number, reps, weight_kg, rpe, rest_seconds, side FROM gym_sets WHERE session_id = ? AND exercise_id = ? ORDER BY id ASC')
       .all(last.id, req.params.exerciseId)
-      .map((r) => ({ setNumber: r.set_number, reps: r.reps, weightKg: r.weight_kg, rpe: r.rpe, restSeconds: r.rest_seconds }));
-    res.json({ date: last.date, sets });
+      .map((r) => ({ setNumber: r.set_number, reps: r.reps, weightKg: r.weight_kg, rpe: r.rpe, restSeconds: r.rest_seconds, side: r.side || null }));
+    // La nota que quedo de ese ejercicio la ultima vez (incluye las notas
+    // de sus series ya combinadas): se ensena en el entreno siguiente.
+    const note = parseExerciseNotes(last.exercise_notes)[String(req.params.exerciseId)] || null;
+    res.json({ date: last.date, sets, note });
   });
 
   mountLocalRouter('/api/gym-sessions', router);

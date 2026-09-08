@@ -35,6 +35,9 @@
       // nota de sesion (que vive en cada sesion), esta acompana siempre
       // al ejercicio -- peticion de Koku para apuntar posiciones/alturas.
       notes: row.notes || null,
+      unilateral: !!row.unilateral,
+      countSidesSeparately: !!row.count_sides_separately,
+      sideRestSeconds: row.side_rest_seconds,
     };
   }
 
@@ -51,7 +54,7 @@
   });
 
   router.post('/', (req, res) => {
-    const { name, muscleGroup, libraryId, equipment, secondaryMuscles, notes } = req.body || {};
+    const { name, muscleGroup, libraryId, equipment, secondaryMuscles, notes, unilateral, countSidesSeparately, sideRestSeconds } = req.body || {};
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'invalid_request', message: 'El ejercicio necesita un nombre.' });
     }
@@ -65,14 +68,17 @@
     }
 
     const info = db
-      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment, secondary_muscles, notes) VALUES (?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment, secondary_muscles, notes, unilateral, count_sides_separately, side_rest_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         name.trim(),
         muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null,
         libraryId ? String(libraryId) : null,
         equipment && equipment.trim() ? equipment.trim() : null,
         stringifySecondary(secondaryMuscles),
-        notes && notes.trim() ? notes.trim() : null
+        notes && notes.trim() ? notes.trim() : null,
+        unilateral ? 1 : 0,
+        unilateral && countSidesSeparately ? 1 : 0,
+        sideRestSeconds !== undefined && sideRestSeconds !== null && sideRestSeconds !== '' ? Number(sideRestSeconds) : null
       );
 
     const row = db.prepare('SELECT * FROM gym_exercises WHERE id = ?').get(info.lastInsertRowid);
@@ -85,13 +91,20 @@
 
     // library_id no se toca desde el PUT a proposito: es la marca de "de
     // donde salio", editar el ejercicio no cambia su origen.
-    const { name, muscleGroup, equipment, secondaryMuscles, notes } = req.body || {};
-    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ?, equipment = ?, secondary_muscles = ?, notes = ? WHERE id = ?').run(
+    const { name, muscleGroup, equipment, secondaryMuscles, notes, unilateral, countSidesSeparately, sideRestSeconds } = req.body || {};
+    const nextUnilateral = unilateral === undefined ? existing.unilateral : (unilateral ? 1 : 0);
+    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ?, equipment = ?, secondary_muscles = ?, notes = ?, unilateral = ?, count_sides_separately = ?, side_rest_seconds = ? WHERE id = ?').run(
       name !== undefined && name.trim() ? name.trim() : existing.name,
       muscleGroup === undefined ? existing.muscle_group : (muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null),
       equipment === undefined ? existing.equipment : (equipment && equipment.trim() ? equipment.trim() : null),
       secondaryMuscles === undefined ? existing.secondary_muscles : stringifySecondary(secondaryMuscles),
       notes === undefined ? existing.notes : (notes && notes.trim() ? notes.trim() : null),
+      nextUnilateral,
+      // Contar lados por separado solo tiene sentido si es unilateral.
+      nextUnilateral && (countSidesSeparately === undefined ? existing.count_sides_separately : (countSidesSeparately ? 1 : 0)) ? 1 : 0,
+      sideRestSeconds === undefined
+        ? existing.side_rest_seconds
+        : (sideRestSeconds !== null && sideRestSeconds !== '' ? Number(sideRestSeconds) : null),
       req.params.id
     );
 

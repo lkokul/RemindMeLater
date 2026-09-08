@@ -2572,6 +2572,29 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 }
 .gym-set-exercise-option.active { border-color: var(--gym-accent); color: var(--gym-accent); }
 
+/* Formulario de la serie recien hecha (peso / reps / nota) dentro del
+   dialogo de terminar: campos apilados con su texto encima. */
+.gym-set-end-form { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.6rem; text-align: left; }
+.gym-set-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.gym-set-field span { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 70%, var(--surface)); }
+.gym-set-field input { width: 100%; box-sizing: border-box; min-height: 2.6rem; font-size: 1rem; }
+
+/* Lado (I/D) en ejercicios unilaterales contados por separado. */
+.gym-set-side-chip {
+  margin-left: 0.2rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--gym-accent);
+}
+/* Ajustes de unilateral en el modal de ejercicio. */
+.gym-unilateral-extra { display: flex; flex-direction: column; gap: 0.5rem; padding-left: 0.6rem; border-left: 2px solid var(--border); }
+/* Nota que quedo del mismo ejercicio la ULTIMA vez. */
+.gym-live-prev-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}
+
 /* Cuanto duro una serie, en el historial (junto al "+60s" del descanso). */
 .gym-set-dur-chip {
   margin-left: 0.25rem;

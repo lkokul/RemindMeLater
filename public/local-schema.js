@@ -174,6 +174,13 @@ function applyLocalSchema(db) {
       -- acompana siempre al ejercicio, a diferencia de la nota de sesion
       -- (exercise_notes en gym_sessions, que es de UNA sesion concreta).
       notes TEXT,
+      -- Unilateral (un lado cada vez: mancuerna a una mano, prensa a una
+      -- pierna...). Si ademas count_sides_separately = 1, cada lado se
+      -- registra como su propia serie (gym_sets.side), y entre lado y
+      -- lado corre un descanso corto propio (side_rest_seconds).
+      unilateral INTEGER NOT NULL DEFAULT 0,
+      count_sides_separately INTEGER NOT NULL DEFAULT 0,
+      side_rest_seconds INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -288,6 +295,12 @@ function applyLocalSchema(db) {
       -- "terminar serie" del entreno en vivo, descontando pausas). NULL
       -- en series apuntadas a mano o de versiones anteriores.
       duration_seconds INTEGER,
+      -- Lado del cuerpo en ejercicios unilaterales contados por separado:
+      -- 'left' / 'right' (NULL = serie normal, a dos lados).
+      side TEXT,
+      -- Nota de ESTA serie ("se me fue el codo"): al acabar el ejercicio
+      -- se combinan todas en la nota del ejercicio de la sesion.
+      notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1269,6 +1282,15 @@ function applyLocalSchema(db) {
   if (!gymExerciseColumns.includes('notes')) {
     db.exec('ALTER TABLE gym_exercises ADD COLUMN notes TEXT');
   }
+  if (!gymExerciseColumns.includes('unilateral')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN unilateral INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!gymExerciseColumns.includes('count_sides_separately')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN count_sides_separately INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!gymExerciseColumns.includes('side_rest_seconds')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN side_rest_seconds INTEGER');
+  }
   // Fase 3: modo entrenar en vivo -- RPE y tipo de serie en gym_sets,
   // hora de inicio/duracion/notas por ejercicio en gym_sessions.
   const gymSetColumns2 = db.prepare('PRAGMA table_info(gym_sets)').all().map((c) => c.name);
@@ -1283,6 +1305,12 @@ function applyLocalSchema(db) {
   }
   if (!gymSetColumns2.includes('duration_seconds')) {
     db.exec('ALTER TABLE gym_sets ADD COLUMN duration_seconds INTEGER');
+  }
+  if (!gymSetColumns2.includes('side')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN side TEXT');
+  }
+  if (!gymSetColumns2.includes('notes')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN notes TEXT');
   }
   const gymSessionColumns = db.prepare('PRAGMA table_info(gym_sessions)').all().map((c) => c.name);
   if (!gymSessionColumns.includes('started_at')) {
