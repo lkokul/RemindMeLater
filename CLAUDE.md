@@ -406,8 +406,20 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
 
 ## Estado actual
 
-**Rama de trabajo: `movil-ui`** (no `main`). Ahí vive la app móvil sin
-servidor. `main` sigue teniendo la versión vieja cliente-servidor, y la
+**Rama de trabajo: `calendario-notas-movil-UI` — ESTA rama.**
+Reorganización de ramas del 8/9/2026, pedida por Koku:
+
+- **`movil-ui` ya NO se toca** salvo que Koku lo pida explícitamente:
+  queda solo como rama de integración para compilar y probar ipa/apk.
+  Cuando el trabajo de una rama de área está funcional, se combina ahí
+  (la primera combinación ya está hecha: gimnasio-movil + la copia de
+  seguridad, merges limpios, humo en verde, build de iOS #32 lanzado).
+- El trabajo se hace por separado en ramas por área:
+  `calendario-notas-movil-UI` (esta conversación: calendario y notas),
+  `gimnasio-movil`, `finanzas-movil`, `viajes-movil`.
+- La autorización de commit/push libre aplica a ESTA rama de trabajo.
+
+En `movil-ui` (y por herencia aquí) vive la app móvil sin servidor. `main` sigue teniendo la versión vieja cliente-servidor, y la
 rama `escritorio` es donde Koku trabaja el programa de escritorio por su
 cuenta — no las toques desde aquí.
 
