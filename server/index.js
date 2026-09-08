@@ -35,6 +35,7 @@ const viajesTripsRouter = require('./routes/viajesTrips');
 const viajesEntriesRouter = require('./routes/viajesEntries');
 const archivosRouter = require('./routes/archivos');
 const updateRouter = require('./routes/update');
+const backupRouter = require('./routes/backup');
 const { startReminderChecker } = require('./reminderChecker');
 const { startFinanzasRecurringChecker } = require('./finanzasRecurringChecker');
 const { startMdns } = require('./mdns');
@@ -136,6 +137,10 @@ app.use('/api/devices', devicesRouter);
 // Comprobar/instalar version nueva: solo el ordenador (cada ruta lo exige
 // por dentro, ver routes/update.js).
 app.use('/api/update', updateRouter);
+// Copias de seguridad por herramienta (ronda de la Tienda): exportar (y
+// mas adelante borrar datos y restaurar). Todo solo-ordenador -- cada
+// ruta lo exige por dentro, ver routes/backup.js.
+app.use('/api/backup', backupRouter);
 
 // La app web (HTML/CSS/JS) vive en /public y se sirve tal cual.
 app.use(express.static(path.join(__dirname, '..', 'public')));

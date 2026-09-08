@@ -561,6 +561,7 @@ document.getElementById('btn-my-space-settings').addEventListener('click', openS
 // pantalla completa que tapan la topbar -- cada una necesita su propio
 // boton de Configuracion.
 document.getElementById('btn-extensions-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-store-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-gym-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-lecturas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);

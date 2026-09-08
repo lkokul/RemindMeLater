@@ -701,6 +701,10 @@
       <h2>Apps</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-extensions" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
+        <!-- La Tienda: catalogo de herramientas (guia, novedades y
+             activar/ocultar por dispositivo). Ver #store-view mas abajo
+             y la seccion "Tienda" en app.js. -->
+        <button type="button" id="btn-open-store" class="secondary-btn my-space-close-btn">Tienda</button>
         <!-- Configuracion tiene que poder abrirse desde CUALQUIER
              ventana -- esta pantalla (fija, z-index por encima de la
              topbar) tapa el boton de Configuracion de siempre, ver
@@ -732,6 +736,28 @@
           <span class="extensions-card-title">Viajes</span>
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- La Tienda: catalogo de herramientas. Se abre desde el boton
+       "Tienda" del hub de Apps y vuelve ahi al cerrarse (mismo patron de
+       pantalla completa que las extensiones). Las fichas NO estan aqui
+       fijas: las pinta renderStoreList() en app.js iterando
+       TOOLS_REGISTRY (tools-registry.js), para que añadir una
+       herramienta al registro baste para que aparezca aqui sola. -->
+  <div id="store-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2>Tienda</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-store" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <!-- Mismo patron que btn-extensions-settings: esta pantalla tapa
+             la topbar, necesita su propio acceso a Configuracion. -->
+        <button type="button" id="btn-store-settings" class="icon-btn" aria-label="Configuración">☰</button>
+      </div>
+    </div>
+    <div class="extensions-hub">
+      <p class="extensions-intro">Todas las herramientas de la app: qué hace cada una, sus novedades, y cuáles quieres ver en este dispositivo.</p>
+      <div id="store-list" class="store-list"></div>
     </div>
   </div>
 
@@ -1452,10 +1478,20 @@
     </div>
 
     <div class="archivos-body">
+    <!-- El bloque de sincronizacion manual vive normalmente aqui, pero
+         NO esta clavado a esta pantalla: si la herramienta Archivos se
+         oculta desde la Tienda en este dispositivo, applyToolVisibility()
+         (app.js) MUEVE #sync-controls entero (con sus listeners) al hueco
+         #sync-controls-settings-slot de Configuracion > Este dispositivo,
+         para no dejar al dispositivo sin forma de sincronizar. -->
+    <div id="sync-controls-archivos-slot">
+    <div id="sync-controls">
     <h3>Sincronización</h3>
     <p class="hint">Recordatorios, tareas, notas, eventos y temas ya no se sincronizan solos de fondo -- pulsa este botón cuando quieras poner al día este dispositivo y el ordenador.</p>
     <p id="sync-status" class="hint"></p>
     <button type="button" id="btn-sync-now" class="secondary-btn">Sincronizar ahora</button>
+    </div>
+    </div>
 
     <h3>Nueva versión</h3>
     <!-- Info de version/commit -- mismo bloque que en Configuracion >
@@ -2450,7 +2486,12 @@
         <!-- Fase "Archivos": el boton "Sincronizar ahora" vivia aqui, pero
              se ha movido al apartado Apps > Archivos (junto con el
              resto de acciones manuales de esa pantalla) -- ver
-             "Sincronizacion" en app.js. -->
+             "Sincronizacion" en app.js. Este hueco vacio es su sitio de
+             VUELTA: si Archivos se oculta desde la Tienda en este
+             dispositivo, applyToolVisibility() (app.js) mueve aqui el
+             bloque #sync-controls para que la sincronizacion manual siga
+             accesible. -->
+        <div id="sync-controls-settings-slot"></div>
 
         <!-- Fase "multi-red": si cambias de wifi (o de ordenador), la IP de
              antes deja de servir -- escanear el QR nuevo actualiza a dónde
@@ -2485,6 +2526,11 @@
   <script src="db-local.js"></script>
   <script src="vendor/jsQR.js"></script>
   <script src="viajesCountries.js"></script>
+  <!-- El registro de herramientas tiene que cargar ANTES de app.js: deja
+       la global TOOLS_REGISTRY que app.js usa al arrancar (Tienda y
+       ocultar/mostrar herramientas). Ver la regla de orden de
+       declaracion en CLAUDE.md. -->
+  <script src="tools-registry.js"></script>
   <script src="app.js"></script>
   <script src="settings.js"></script>
 </body>

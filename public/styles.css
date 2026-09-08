@@ -2338,6 +2338,40 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 .extensions-card-active:hover { border-color: var(--accent); }
 
+/* Tienda (#store-view): fichas apiladas, una por herramienta del
+   registro (renderStoreList en app.js). Mismo lenguaje visual que
+   .extensions-card (superficie + borde + radio del tema), pero en lista
+   vertical -- cada ficha lleva texto largo (guia/novedades), la rejilla
+   de tarjetas cuadradas no le vale. */
+.store-list { display: flex; flex-direction: column; gap: 1rem; max-width: 720px; margin: 0 auto; }
+.store-card {
+  padding: 1rem 1.2rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--surface-text);
+}
+/* Herramienta oculta en este dispositivo: misma señal de "inactivo" que
+   .extensions-card deshabilitada (opacidad 0.6), pero SOLO en la
+   cabecera -- la guia/novedades desplegadas se leen a opacidad completa,
+   y el boton "Activar" tiene que seguir viendose clicable. */
+.store-card-hidden-tool .store-card-icon,
+.store-card-hidden-tool .store-card-titles { opacity: 0.6; }
+.store-card-header { display: flex; align-items: center; gap: 0.8rem; }
+.store-card-icon { display: flex; flex-shrink: 0; }
+.store-card-icon svg { width: 1.8rem; height: 1.8rem; }
+.store-card-titles { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; flex: 1; }
+.store-card-name { font-weight: 600; }
+.store-card-meta { font-size: 0.8rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); }
+.store-toggle-btn { flex-shrink: 0; }
+.store-card-actions { display: flex; gap: 0.4rem; margin-top: 0.8rem; flex-wrap: wrap; }
+.store-panel-btn.active { border-color: var(--accent); color: var(--accent); }
+.store-card-panel { margin-top: 0.8rem; border-top: 1px solid var(--border); padding-top: 0.2rem; }
+.store-card-panel p { margin: 0.6rem 0 0; }
+.store-card-panel h4 { margin: 0.8rem 0 0.2rem; }
+.store-card-panel ul { margin: 0.2rem 0 0; padding-left: 1.2rem; }
+.store-card-panel li { margin-top: 0.2rem; }
+
 /* Extension "Gimnasio": pestañas simples (Sesiones/Rutinas/Progreso),
    reutilizando .view-mode-btn para el estilo activo/inactivo en vez de
    inventar uno nuevo. */

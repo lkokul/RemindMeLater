@@ -1154,6 +1154,57 @@ if (!lecturasItemColumns.includes('loaned_at')) {
 // el id numerico del dispositivo movil si lo hizo el movil -- asi un
 // dispositivo puede reconocer y no re-aplicarse sus propios cambios al
 // leer el historial.
+// ---------------------------------------------------------------------
+// Identidad fija por fila ("uid") -- ronda de la Tienda.
+//
+// Cada fila de datos de usuario recibe un identificador aleatorio de 32
+// caracteres hexadecimales (128 bits, mismo tamano que un UUID) que NO
+// cambia nunca, aunque el id numerico autoincremental si pueda cambiar
+// entre instalaciones. Es la pieza que permite restaurar una copia de
+// seguridad en modo "añadir sin duplicar": si una fila con ese uid ya
+// existe, la restauracion la salta en vez de duplicarla, y las
+// referencias entre filas (rutina -> ejercicios, movimiento ->
+// transaccion...) se recolocan buscando por uid en vez de por el numero
+// viejo. Decision hablada con Koku en la ronda de la Tienda.
+//
+// La lista de tablas NO esta escrita aqui a mano: sale del registro de
+// herramientas (public/tools-registry.js, el mismo archivo que usa el
+// navegador), campo "tablas" de cada herramienta. Añadir una tabla al
+// registro hace que reciba su uid sola en el siguiente arranque.
+//
+// El relleno automatico va con un TRIGGER de SQLite en vez de tocar cada
+// INSERT de server/routes/*.js: cualquier INSERT que no traiga uid (los
+// de hoy y CUALQUIERA que se escriba en el futuro) lo recibe al momento,
+// asi es imposible olvidarse en una ruta nueva -- era el riesgo numero
+// uno de hacerlo a mano en ~30 sitios. Un INSERT que SI traiga uid (la
+// restauracion de copias) pasa tal cual, el trigger solo actua "WHEN
+// NEW.uid IS NULL". Se usa "rowid" y no "id" porque no todas las tablas
+// tienen columna id (special_days usa la fecha como clave).
+//
+// lower(hex(randomblob(16))) se evalua POR FILA (randomblob no es
+// deterministica), asi que el UPDATE de relleno da un uid distinto a
+// cada fila ya existente -- no hace falta un bucle en JS.
+// ---------------------------------------------------------------------
+const TOOLS_REGISTRY = require(path.join(__dirname, '..', 'public', 'tools-registry.js'));
+for (const uidTable of TOOLS_REGISTRY.flatMap((tool) => tool.tablas)) {
+  const uidTableColumns = db.prepare(`PRAGMA table_info(${uidTable})`).all().map((c) => c.name);
+  if (!uidTableColumns.includes('uid')) {
+    db.exec(`ALTER TABLE ${uidTable} ADD COLUMN uid TEXT`);
+  }
+  db.exec(`UPDATE ${uidTable} SET uid = lower(hex(randomblob(16))) WHERE uid IS NULL`);
+  // Indice UNICO: dos filas con el mismo uid seria un error de verdad
+  // (la fusion de copias dejaria de ser fiable) -- mejor que explote
+  // aqui que fallar en silencio.
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_${uidTable}_uid ON ${uidTable}(uid)`);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_${uidTable}_uid AFTER INSERT ON ${uidTable}
+    WHEN NEW.uid IS NULL
+    BEGIN
+      UPDATE ${uidTable} SET uid = lower(hex(randomblob(16))) WHERE rowid = NEW.rowid;
+    END;
+  `);
+}
+
 const recordSyncChangeStmt = db.prepare(
   'INSERT INTO sync_log (table_name, row_id, op, payload, device_origin) VALUES (?, ?, ?, ?, ?)'
 );

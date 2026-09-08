@@ -7811,6 +7811,205 @@ document.getElementById('btn-extensions').addEventListener('click', openExtensio
 document.getElementById('btn-close-extensions').addEventListener('click', closeExtensionsView);
 
 // ---------------------------------------------------------------------
+// Tienda: catalogo de herramientas (ver #store-view en index.html).
+// Las fichas se pintan iterando TOOLS_REGISTRY (tools-registry.js, que
+// carga ANTES que este archivo) -- añadir una herramienta al registro
+// basta para que salga aqui, sin tocar nada de esta seccion.
+//
+// "Ocultar" una herramienta es un ajuste POR DISPOSITIVO (localStorage,
+// como miEspacioMode): solo quita su tarjeta del hub de Apps en este
+// aparato. Los datos no se tocan, y otro dispositivo puede tenerla
+// activa a la vez -- por eso el servidor NO rechaza las rutas de una
+// herramienta oculta. El borrado de datos de verdad (global) llegara en
+// una fase posterior, como accion aparte con su propio aviso.
+// ---------------------------------------------------------------------
+function getHiddenTools() {
+  // Se filtra contra el registro por si localStorage trae ids viejos o
+  // basura (o un id que en el futuro pase a ser core): un id desconocido
+  // aqui no debe poder dejar nada oculto para siempre.
+  try {
+    const raw = JSON.parse(localStorage.getItem('hiddenTools') || '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((id) => TOOLS_REGISTRY.some((t) => t.id === id && !t.core));
+  } catch (err) {
+    return [];
+  }
+}
+
+function setHiddenTools(ids) {
+  localStorage.setItem('hiddenTools', JSON.stringify(ids));
+}
+
+function isToolHidden(id) {
+  return getHiddenTools().includes(id);
+}
+
+// Aplica el ocultar/mostrar a toda la interfaz. Se llama al cargar la
+// pagina y cada vez que se cambia algo desde la Tienda.
+function applyToolVisibility() {
+  TOOLS_REGISTRY.forEach((tool) => {
+    if (tool.core) return;
+    // Las tarjetas del hub siguen la convencion "btn-open-<id>" (ver
+    // #extensions-view en index.html y el comentario de id en
+    // tools-registry.js).
+    const card = document.getElementById(`btn-open-${tool.id}`);
+    if (card) card.classList.toggle('hidden', isToolHidden(tool.id));
+  });
+
+  // Caso especial de Archivos: es la unica herramienta con presencia
+  // fuera de su propia pantalla (el punto de estado de sincronizacion de
+  // la topbar abre Archivos, y el boton "Sincronizar ahora" vive alli).
+  // Al ocultarla, el punto se oculta tambien y el bloque de
+  // sincronizacion ENTERO se muda a Configuracion > Este dispositivo (su
+  // sitio original antes de existir Archivos) -- se mueve el nodo del
+  // DOM tal cual, que conserva los listeners ya registrados, en vez de
+  // duplicar botones con dos handlers que mantener.
+  const archivosHidden = isToolHidden('archivos');
+  const syncIndicator = document.getElementById('sync-indicator');
+  if (syncIndicator) syncIndicator.classList.toggle('hidden', archivosHidden);
+  const syncControls = document.getElementById('sync-controls');
+  const syncSlot = document.getElementById(
+    archivosHidden ? 'sync-controls-settings-slot' : 'sync-controls-archivos-slot'
+  );
+  if (syncControls && syncSlot && syncControls.parentElement !== syncSlot) {
+    syncSlot.appendChild(syncControls);
+  }
+}
+
+function toggleToolHidden(id) {
+  const hidden = getHiddenTools();
+  setHiddenTools(hidden.includes(id) ? hidden.filter((x) => x !== id) : [...hidden, id]);
+  applyToolVisibility();
+  renderStoreList();
+}
+
+// ¿Tiene la herramienta datos propios que copiar/borrar? Archivos no:
+// su carpeta son archivos sueltos del usuario, no datos de la app (ver
+// su entrada en tools-registry.js) -- sin tablas ni carpetas, su ficha
+// no lleva boton de copia.
+function toolHasBackupData(tool) {
+  return tool.tablas.length > 0 || tool.singletons.length > 0 || tool.carpetas.length > 0;
+}
+
+// Descargar una copia de seguridad. toolIds = array de ids, o null para
+// la copia completa. Mismo patron blob + <a download> que
+// downloadArchivo() (confirmado con Koku en su dia como lo mas
+// sencillo). El servidor solo lo permite desde el ordenador de confianza
+// (ver routes/backup.js) -- los botones que llaman aqui ya se ocultan en
+// el movil (isTrustedDevice() en renderStoreList), esto es la segunda
+// barrera.
+async function downloadToolBackup(toolIds, boton) {
+  const headers = {};
+  const token = localStorage.getItem('deviceToken');
+  if (token) headers['X-Device-Token'] = token;
+  const query = toolIds && toolIds.length ? `?tools=${encodeURIComponent(toolIds.join(','))}` : '';
+  const url = new URL(`/api/backup/export${query}`, getServerBaseUrl());
+  if (boton) boton.disabled = true;
+  try {
+    const res = await fetch(url.toString(), { headers });
+    if (!res.ok) throw new Error(`Error ${res.status}`);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    const fecha = new Date().toISOString().slice(0, 10);
+    a.download = `remindmelater-copia-${toolIds && toolIds.length ? toolIds.join('+') : 'todo'}-${fecha}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    await showAppAlert('No se pudo crear la copia de seguridad: ' + err.message);
+  } finally {
+    if (boton) boton.disabled = false;
+  }
+}
+
+function openStoreView() {
+  closeExtensionsView();
+  document.getElementById('store-view').classList.remove('hidden');
+  setCurrentScreen('store');
+  renderStoreList();
+}
+
+function closeStoreView() {
+  document.getElementById('store-view').classList.add('hidden');
+  openExtensionsView();
+}
+
+function renderStoreList() {
+  const list = document.getElementById('store-list');
+  list.innerHTML = '';
+  TOOLS_REGISTRY.forEach((tool) => {
+    const hidden = !tool.core && isToolHidden(tool.id);
+    const estado = tool.core ? 'App base' : hidden ? 'Oculta en este dispositivo' : 'Activada';
+    const card = document.createElement('div');
+    card.className = 'store-card' + (hidden ? ' store-card-hidden-tool' : '');
+    // El icono viene del propio registro (SVG estatico escrito por
+    // nosotros, no datos de usuario) -- es el unico campo que se mete
+    // sin escapar; todo lo demas pasa por escapeHtml.
+    card.innerHTML = `
+      <div class="store-card-header">
+        <span class="store-card-icon">${tool.icono}</span>
+        <div class="store-card-titles">
+          <span class="store-card-name">${escapeHtml(tool.nombre)}</span>
+          <span class="store-card-meta">v${escapeHtml(tool.version)} · ${escapeHtml(estado)}</span>
+        </div>
+        ${tool.core ? '' : `<button type="button" class="secondary-btn store-toggle-btn" data-store-toggle="${tool.id}">${hidden ? 'Activar' : 'Ocultar'}</button>`}
+      </div>
+      <div class="store-card-actions">
+        <button type="button" class="secondary-btn store-panel-btn" data-store-panel="guia">Guía</button>
+        <button type="button" class="secondary-btn store-panel-btn" data-store-panel="changelog">Novedades</button>
+        <!-- Hueco a proposito: aqui iran "Copia de seguridad" y "Borrar
+             datos" en las fases de backup/borrado por herramienta. -->
+      </div>
+      <div class="store-card-panel hidden" data-panel="guia">
+        ${tool.guia.map((p) => `<p>${escapeHtml(p)}</p>`).join('')}
+      </div>
+      <div class="store-card-panel hidden" data-panel="changelog">
+        ${tool.changelog
+          .map(
+            (entry) => `
+          <h4>v${escapeHtml(entry.version)} · ${escapeHtml(entry.fecha)}</h4>
+          <ul>${entry.notas.map((n) => `<li>${escapeHtml(n)}</li>`).join('')}</ul>`
+          )
+          .join('')}
+      </div>
+    `;
+    // Guia/Novedades: cada boton pliega/despliega su panel dentro de ESTA
+    // ficha (los paneles de otras fichas no se tocan).
+    card.querySelectorAll('[data-store-panel]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const panel = card.querySelector(`.store-card-panel[data-panel="${btn.dataset.storePanel}"]`);
+        const abrir = panel.classList.contains('hidden');
+        // Solo un panel abierto a la vez por ficha, para que la lista no
+        // se haga kilometrica.
+        card.querySelectorAll('.store-card-panel').forEach((p) => p.classList.add('hidden'));
+        card.querySelectorAll('[data-store-panel]').forEach((b) => b.classList.remove('active'));
+        if (abrir) {
+          panel.classList.remove('hidden');
+          btn.classList.add('active');
+        }
+      });
+    });
+    const toggleBtn = card.querySelector('[data-store-toggle]');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => toggleToolHidden(toggleBtn.dataset.storeToggle));
+    }
+    list.appendChild(card);
+  });
+}
+
+document.getElementById('btn-open-store').addEventListener('click', openStoreView);
+document.getElementById('btn-close-store').addEventListener('click', closeStoreView);
+
+// Al cargar la pagina: aplicar lo que este dispositivo tenga oculto
+// (tarjetas del hub, punto de sincronizacion, sitio del bloque de
+// sincronizacion). TOOLS_REGISTRY ya existe seguro -- tools-registry.js
+// carga antes que este archivo (ver index.html).
+applyToolVisibility();
+
+// ---------------------------------------------------------------------
 // Extension "Gimnasio": registro de entrenamientos de verdad (ejercicios,
 // rutinas reutilizables, sesiones con series/repeticiones/peso, y
 // progreso con graficas). Se abre desde la tarjeta de Apps y
@@ -12740,6 +12939,15 @@ function setCurrentScreen(screen) {
 async function restoreCurrentScreen() {
   const screen = localStorage.getItem('currentScreen');
   if (!screen || screen === 'home') return;
+  // Red de seguridad de la Tienda: si la pantalla guardada es la de una
+  // herramienta que este dispositivo tiene OCULTA (los ids de pantalla y
+  // de herramienta coinciden a proposito, ver tools-registry.js), no se
+  // restaura -- F5 con 'gym' guardado y Gimnasio oculto debe abrir el
+  // calendario, no una pantalla a la que ya no hay boton para volver.
+  // Para pantallas que no son herramientas ('my-space', 'extensions'...)
+  // isToolHidden devuelve false y no cambia nada.
+  if (isToolHidden(screen)) return;
+  if (screen === 'store') { openStoreView(); return; }
   if (screen === 'my-space') {
     // En modo "panel" no existe una pantalla de Mi espacio aparte que
     // restaurar -- el hub ya vive siempre junto al calendario.
