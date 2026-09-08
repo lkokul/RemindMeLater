@@ -4192,6 +4192,10 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   overflow-x: auto;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--surface);
+  /* Aire entre el calendario y el marco (pedido por Koku): en Chrome el
+     padding de un contenedor con scroll horizontal cuenta por los dos
+     lados porque el lienzo de dentro tiene ancho explicito. */
+  padding: 0.55rem 0.65rem 0.65rem;
 }
 .proyectos-tl-canvas { position: relative; }
 .proyectos-tl-months { position: relative; height: 1.5rem; }
@@ -4274,3 +4278,77 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 .proyectos-tl-zoom-btn svg { display: block; width: 21px; height: 21px; flex-shrink: 0; }
 .proyectos-tl-zoom-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* La etiqueta del mes se queda a la vista mientras su mes cruza la
+   pantalla (sticky respecto al scroll horizontal del cronograma). */
+.proyectos-tl-month { overflow: visible; }
+.proyectos-tl-month-label {
+  position: sticky; left: 0.65rem;
+  white-space: nowrap;
+}
+
+/* --- Ronda "plantillas de PDF": bloques de PDF, pies de foto, dialogo --- */
+/* Los marcadores de bloque de PDF: una tira discreta con su etiqueta
+   (el contenido real solo existe al exportar). */
+.proyectos-pdf-block {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.6rem;
+  margin: 0.3rem 0;
+  font-size: 0.82rem;
+  opacity: 0.65;
+}
+.proyectos-pdf-block::before { font-style: italic; }
+.proyectos-pdf-block[data-pdf-block="toc"]::before { content: '☰ Índice de contenido — se rellena al exportar a PDF'; }
+.proyectos-pdf-block[data-pdf-block="figures"]::before { content: '🖼 Índice de figuras — se rellena al exportar a PDF'; }
+.proyectos-pdf-block[data-pdf-block="pagebreak"]::before { content: '⤓ Salto de página al exportar a PDF'; }
+
+/* Imagen con pie de foto (figure/figcaption) en el editor. */
+.proyectos-page-body figure { margin: 0.4rem 0; }
+.proyectos-page-body figcaption {
+  font-size: 0.82rem; opacity: 0.75;
+  padding: 0.15rem 0.2rem;
+}
+.proyectos-page-body figcaption:empty::before {
+  content: 'Pie de foto…';
+  opacity: 0.5;
+  pointer-events: none;
+}
+.proyectos-img-caption-btn {
+  position: fixed; z-index: 55;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+  background: var(--surface); color: var(--surface-text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.proyectos-img-caption-btn:hover { border-color: var(--accent); }
+.proyectos-img-caption-btn.hidden { display: none; }
+
+/* El dialogo del boton PDF. */
+.proyectos-pdf-option {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.3rem 0.1rem;
+  cursor: pointer;
+}
+.proyectos-pdf-hint { margin: 0.1rem 0 0; font-size: 0.78rem; }
+.proyectos-pdf-export-btn { width: 100%; margin-top: 0.5rem; }
+
+/* El selector de paginas del dialogo de PDF. */
+.proyectos-pdf-pages-label { font-size: 0.78rem; opacity: 0.7; margin: 0.4rem 0 0.15rem; }
+.proyectos-pdf-pages {
+  max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 0.2rem 0.35rem;
+  margin-bottom: 0.3rem;
+}
+.proyectos-pdf-page-row { padding-top: 0.18rem; padding-bottom: 0.18rem; }
+.proyectos-pdf-page-title {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.proyectos-pdf-page-note {
+  font-size: 0.7rem; opacity: 0.6;
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 0 0.4rem; flex-shrink: 0;
+}

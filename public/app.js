@@ -367,7 +367,10 @@ let appConfirmCheckboxStorageKey = null;
 // resto de ajustes de este tipo en la app) ANTES de resolver la
 // promesa. Aditivo: no cambia nada para los usos existentes que no
 // pasan "checkbox".
-function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', danger = false, alertOnly = false, checkbox = null } = {}) {
+// extraText (opcional) añade un TERCER boton; si se pulsa, la promesa
+// resuelve la cadena 'extra' (que es "truthy", asi que las llamadas de
+// siempre con true/false no se enteran de que esto existe).
+function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', danger = false, alertOnly = false, checkbox = null, extraText = null } = {}) {
   return new Promise((resolve) => {
     appConfirmResolve = resolve;
     appConfirmCheckboxStorageKey = checkbox ? checkbox.storageKey : null;
@@ -375,7 +378,12 @@ function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', 
     const okBtn = document.getElementById('btn-app-confirm-ok');
     okBtn.textContent = okText;
     okBtn.className = danger ? 'danger-btn' : 'primary-btn';
-    document.getElementById('btn-app-confirm-cancel').classList.toggle('hidden', alertOnly);
+    const cancelBtn = document.getElementById('btn-app-confirm-cancel');
+    cancelBtn.classList.toggle('hidden', alertOnly);
+    cancelBtn.textContent = cancelText;
+    const extraBtn = document.getElementById('btn-app-confirm-extra');
+    extraBtn.classList.toggle('hidden', !extraText);
+    if (extraText) extraBtn.textContent = extraText;
     const checkboxRow = document.getElementById('app-confirm-checkbox-row');
     const checkboxInput = document.getElementById('app-confirm-checkbox');
     checkboxRow.classList.toggle('hidden', !checkbox);
@@ -403,6 +411,7 @@ function closeAppConfirm(result) {
 }
 document.getElementById('btn-app-confirm-ok').addEventListener('click', () => closeAppConfirm(true));
 document.getElementById('btn-app-confirm-cancel').addEventListener('click', () => closeAppConfirm(false));
+document.getElementById('btn-app-confirm-extra').addEventListener('click', () => closeAppConfirm('extra'));
 
 // Ctrl+Intro (o Cmd+Intro en Mac) guarda directamente, sin tener que ir
 // a buscar el boton "Guardar" con el raton -- util sobre todo en el
@@ -10590,6 +10599,7 @@ async function openProyectosPage(id) {
   // <div data-proyectos-db> del HTML guardado) -- Fase 3. Sin await a
   // proposito: cada base carga por su cuenta sin bloquear la pagina.
   hydrateProyectosDbBlocks();
+  hydrateProyectosPdfBlocks();
   highlightProyectosCodeBlocks();
   renderProyectosDiagrams();
   // La pila de deshacer empieza de cero en cada pagina.
@@ -10809,6 +10819,9 @@ function buildProyectosPdfDbTable(data) {
     wrap.appendChild(nameEl);
   }
   const table = document.createElement('table');
+  // Cabeceras en un <thead> de verdad: en el papel se repiten al
+  // cambiar de hoja (ver .pdf-db thead en print.html).
+  const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
   const titleTh = document.createElement('th');
   titleTh.textContent = 'Título';
@@ -10818,7 +10831,10 @@ function buildProyectosPdfDbTable(data) {
     th.textContent = prop.name;
     headRow.appendChild(th);
   }
-  table.appendChild(headRow);
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  table.appendChild(tbody);
   for (const row of visibleProyectosDbRows(data)) {
     const tr = document.createElement('tr');
     const titleTd = document.createElement('td');
@@ -10853,10 +10869,75 @@ function buildProyectosPdfDbTable(data) {
       }
       tr.appendChild(td);
     }
-    table.appendChild(tr);
+    tbody.appendChild(tr);
   }
   wrap.appendChild(table);
   return wrap;
+}
+
+// Fecha larga en español para la portada/meta ("8 de septiembre de 2026").
+function proyectosPdfLongDate() {
+  return new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+// La PORTADA del documento (solo al exportar con subpaginas): franja
+// del color del proyecto, icono grande, titulo y una linea de datos.
+function buildProyectosPdfCover(rootPage, pageCount) {
+  const cover = document.createElement('section');
+  cover.className = 'pdf-cover';
+  const band = document.createElement('div');
+  band.className = 'pdf-cover-band';
+  band.style.backgroundColor = rootPage.coverColor || '#5b8cff';
+  cover.appendChild(band);
+  if (rootPage.icon) {
+    const icon = document.createElement('div');
+    icon.className = 'pdf-cover-icon';
+    icon.textContent = rootPage.icon;
+    cover.appendChild(icon);
+  }
+  const title = document.createElement('h1');
+  title.className = 'pdf-cover-title';
+  title.textContent = rootPage.title || 'Sin título';
+  cover.appendChild(title);
+  const meta = document.createElement('div');
+  meta.className = 'pdf-cover-meta';
+  meta.textContent = `${pageCount} ${pageCount === 1 ? 'página' : 'páginas'} · ${proyectosPdfLongDate()}`;
+  cover.appendChild(meta);
+  return cover;
+}
+
+// El INDICE ("Contenido"): la jerarquia del subarbol, con sangria por
+// nivel y cada entrada enlazada a su pagina (los enlaces internos del
+// PDF funcionan: printToPDF los conserva).
+function buildProyectosPdfToc(ids, rootId) {
+  const toc = document.createElement('section');
+  toc.className = 'pdf-toc pdf-page';
+  const heading = document.createElement('h1');
+  heading.className = 'pdf-toc-title';
+  heading.textContent = 'Contenido';
+  toc.appendChild(heading);
+  const depthOf = (pageId) => {
+    let depth = 0;
+    let current = proyectosPages.find((p) => p.id === pageId);
+    const seen = new Set();
+    while (current && current.id !== rootId && current.parentId !== null && !seen.has(current.id)) {
+      seen.add(current.id);
+      depth += 1;
+      current = proyectosPages.find((p) => p.id === current.parentId);
+    }
+    return depth;
+  };
+  for (const id of ids) {
+    const page = proyectosPages.find((p) => p.id === id);
+    if (!page) continue;
+    const entry = document.createElement('a');
+    entry.className = 'pdf-toc-entry';
+    entry.href = `#pdf-page-${id}`;
+    entry.style.paddingLeft = `${depthOf(id) * 0.55}cm`;
+    entry.textContent = `${page.icon ? page.icon + ' ' : ''}${page.title || 'Sin título'}`;
+    toc.appendChild(entry);
+  }
+  return toc;
 }
 
 // Una pagina -> su <section> imprimible (titulo + miga + cuerpo ya
@@ -10898,17 +10979,27 @@ async function buildProyectosPdfSection(pageId) {
 
   const section = document.createElement('section');
   section.className = 'pdf-page';
-  const crumb = proyectosPdfCrumb(page.id);
-  if (crumb) {
-    const crumbEl = document.createElement('div');
-    crumbEl.className = 'pdf-crumb';
-    crumbEl.textContent = crumb;
-    section.appendChild(crumbEl);
+  section.id = `pdf-page-${page.id}`; // ancla del indice
+  // Una pagina con rol "portada" se imprime SOLO con su cuerpo: tu
+  // diseñas la portada como una pagina normal (titulo grande, imagen,
+  // lo que quieras) y el export no le planta encima titulo ni miga.
+  const isCoverRole = page.pdfRole === 'cover';
+  if (!isCoverRole) {
+    const crumb = proyectosPdfCrumb(page.id);
+    if (crumb) {
+      const crumbEl = document.createElement('div');
+      crumbEl.className = 'pdf-crumb';
+      crumbEl.textContent = crumb;
+      section.appendChild(crumbEl);
+    }
+    const titleEl = document.createElement('h1');
+    titleEl.className = 'pdf-title';
+    titleEl.textContent = `${page.icon ? page.icon + ' ' : ''}${page.title || 'Sin título'}`;
+    // El subrayado del titulo lleva el color de portada de la pagina (o
+    // el azul por defecto): el mismo acento que la portada del documento.
+    titleEl.style.borderBottomColor = page.coverColor || '#5b8cff';
+    section.appendChild(titleEl);
   }
-  const titleEl = document.createElement('h1');
-  titleEl.className = 'pdf-title';
-  titleEl.textContent = `${page.icon ? page.icon + ' ' : ''}${page.title || 'Sin título'}`;
-  section.appendChild(titleEl);
   const bodyEl = document.createElement('div');
   bodyEl.className = 'pdf-body';
   bodyEl.append(...holder.childNodes);
@@ -10916,25 +11007,119 @@ async function buildProyectosPdfSection(pageId) {
   return section;
 }
 
-async function exportProyectosPdf({ withChildren }) {
-  if (!proyectosCurrentPage) return;
+// Post-proceso del documento montado: aqui cobran vida los bloques "de
+// PDF" y los pies de foto.
+//   1. data-pdf-block="pagebreak" -> salto de hoja de verdad.
+//   2. Las <figure> con pie NO vacio se numeran ("Figura N: ...") en
+//      orden de documento y reciben su ancla.
+//   3. data-pdf-block="toc" -> el indice de contenido, EN el sitio del
+//      bloque (sin el titulo "Contenido": ese lo escribes tu al lado).
+//   4. data-pdf-block="figures" -> la lista de figuras numeradas, con
+//      enlace a cada una y la pagina donde vive.
+function postProcessProyectosPdf(root, includedIds, rootId) {
+  root.querySelectorAll('[data-pdf-block="pagebreak"]').forEach((el) => {
+    const pageBreak = document.createElement('div');
+    pageBreak.className = 'pdf-pagebreak';
+    el.replaceWith(pageBreak);
+  });
+
+  const figures = [];
+  root.querySelectorAll('section.pdf-page').forEach((section) => {
+    const pageTitle = section.querySelector('.pdf-title')?.textContent || '';
+    section.querySelectorAll('figure').forEach((figure) => {
+      const caption = figure.querySelector('figcaption');
+      const text = caption ? caption.textContent.trim() : '';
+      if (!text) return; // sin pie no es "Figura", es una imagen normal
+      const number = figures.length + 1;
+      figure.id = `pdf-fig-${number}`;
+      caption.textContent = `Figura ${number}: ${text}`;
+      figures.push({ number, text, pageTitle });
+    });
+  });
+
+  root.querySelectorAll('[data-pdf-block="toc"]').forEach((el) => {
+    const toc = buildProyectosPdfToc(includedIds, rootId);
+    toc.querySelector('.pdf-toc-title')?.remove();
+    toc.classList.remove('pdf-page'); // vive dentro de TU pagina, no en hoja aparte
+    el.replaceWith(toc);
+  });
+
+  root.querySelectorAll('[data-pdf-block="figures"]').forEach((el) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'pdf-figures';
+    if (figures.length === 0) {
+      const hint = document.createElement('div');
+      hint.className = 'pdf-meta';
+      hint.textContent = 'No hay imágenes con pie de foto.';
+      wrap.appendChild(hint);
+    }
+    for (const figure of figures) {
+      const entry = document.createElement('a');
+      entry.className = 'pdf-toc-entry';
+      entry.href = `#pdf-fig-${figure.number}`;
+      entry.textContent = `Figura ${figure.number}: ${figure.text}${figure.pageTitle ? ` — ${figure.pageTitle}` : ''}`;
+      wrap.appendChild(entry);
+    }
+    el.replaceWith(wrap);
+  });
+}
+
+// El documento entero: portada e indice automaticos (opcionales), una
+// seccion por pagina (sin las marcadas "no incluir") y el post-proceso
+// de bloques de PDF y figuras. Es lo que se manda a imprimir; el driver
+// de pruebas tambien lo usa tal cual.
+async function buildProyectosPdfDocument(ids, rootPage, { autoCover = true, autoToc = true } = {}) {
+  // La lista de ids ya viene decidida por quien llama (el selector de
+  // paginas del dialogo, donde las "no incluir" arrancan desmarcadas
+  // pero se pueden re-marcar a mano).
+  const included = [...ids];
+  const root = document.createElement('div');
+  if (included.length > 1 && autoCover) root.appendChild(buildProyectosPdfCover(rootPage, included.length));
+  if (included.length > 1 && autoToc) root.appendChild(buildProyectosPdfToc(included, rootPage.id));
+  for (let i = 0; i < included.length; i++) {
+    const section = await buildProyectosPdfSection(included[i]);
+    // Sin portada automatica ni propia, la primera pagina lleva su linea
+    // de fecha (un documento suelto tambien dice de cuando es).
+    if (included.length === 1 && section.querySelector('.pdf-title')) {
+      const meta = document.createElement('div');
+      meta.className = 'pdf-meta';
+      meta.textContent = proyectosPdfLongDate();
+      section.querySelector('.pdf-title').after(meta);
+    }
+    root.appendChild(section);
+  }
+  postProcessProyectosPdf(root, included, rootPage.id);
+  return root.innerHTML;
+}
+
+async function exportProyectosPdf({ ids, autoCover = true, autoToc = true }) {
+  if (!proyectosCurrentPage || !ids || ids.length === 0) return;
   await flushProyectosSave();
-  const ids = withChildren ? proyectosSubtreeIds(proyectosCurrentPage.id) : [proyectosCurrentPage.id];
   try {
     // mermaid en tema claro mientras dura el export (el PDF es papel).
     if (typeof mermaid !== 'undefined') {
       mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
       proyectosMermaidReady = true;
     }
-    const root = document.createElement('div');
-    for (const id of ids) root.appendChild(await buildProyectosPdfSection(id));
+    const html = await buildProyectosPdfDocument(ids, proyectosCurrentPage, { autoCover, autoToc });
     const result = await window.electronAPI.exportPdf({
-      html: root.innerHTML,
+      html,
       title: proyectosCurrentPage.title || 'proyecto',
     });
-    if (result && result.error) showAppAlert(`No se pudo exportar el PDF: ${result.error}`);
-    else if (result && result.ok) showAppAlert(`PDF guardado en:\n${result.path}`);
-    // (cancelar el dialogo no dice nada: ya lo has cancelado tu)
+    if (result && result.error) {
+      showAppAlert(`No se pudo exportar el PDF: ${result.error}`);
+    } else if (result && result.ok) {
+      // Guardado: ofrecer abrirlo o ver donde quedo. "Abrir documento"
+      // es el boton principal; "Abrir ubicación" el tercero; Cerrar, nada.
+      const choice = await showAppConfirm(`PDF guardado en:\n${result.path}`, {
+        okText: 'Abrir documento',
+        cancelText: 'Cerrar',
+        extraText: 'Abrir ubicación',
+      });
+      if (choice === 'extra') window.electronAPI.showExportedPdf?.(result.path);
+      else if (choice === true) window.electronAPI.openExportedPdf?.(result.path);
+    }
+    // (cancelar el dialogo de guardar no dice nada: ya lo has cancelado tu)
   } catch (err) {
     console.error('No se pudo exportar el PDF:', err);
     // "No handler registered" = la app en marcha es una version
@@ -10950,8 +11135,9 @@ async function exportProyectosPdf({ withChildren }) {
   }
 }
 
-// El boton: con subpaginas pregunta que alcance quieres; sin ellas
-// exporta directo.
+// El boton PDF: un popover con las opciones del documento (alcance,
+// portada e indice automaticos) y el ROL de la pagina abierta (normal /
+// portada del documento / no incluir).
 let proyectosPdfPopover = null;
 document.getElementById('btn-proyectos-pdf').addEventListener('click', (e) => {
   if (!proyectosCurrentPage) return;
@@ -10959,39 +11145,148 @@ document.getElementById('btn-proyectos-pdf').addEventListener('click', (e) => {
     showAppAlert('Exportar a PDF necesita la app de escritorio (reiníciala si acabas de actualizar).');
     return;
   }
-  const descendants = proyectosSubtreeIds(proyectosCurrentPage.id).length - 1;
-  if (descendants === 0) {
-    exportProyectosPdf({ withChildren: false });
-    return;
-  }
   e.stopPropagation();
   if (!proyectosPdfPopover) {
     proyectosPdfPopover = document.createElement('div');
-    proyectosPdfPopover.className = 'proyectos-table-menu-popover proyectos-pdf-popover hidden';
+    proyectosPdfPopover.className = 'proyectos-db-config-popover proyectos-pdf-popover hidden';
     document.body.appendChild(proyectosPdfPopover);
   }
   const popover = proyectosPdfPopover;
   popover.innerHTML = '';
-  const soloBtn = document.createElement('button');
-  soloBtn.type = 'button';
-  soloBtn.className = 'proyectos-table-menu-item';
-  soloBtn.textContent = 'Solo esta página';
-  soloBtn.addEventListener('click', () => {
-    popover.classList.add('hidden');
-    exportProyectosPdf({ withChildren: false });
+
+  const subtree = proyectosSubtreeIds(proyectosCurrentPage.id);
+  const byId = new Map(proyectosPages.map((p) => [p.id, p]));
+  // ¿Alguna pagina del subarbol hace ELLA de portada? Entonces la
+  // automatica sobra y arranca desmarcada.
+  const hasOwnCover = subtree.some((id) => byId.get(id)?.pdfRole === 'cover');
+
+  // --- El rol de ESTA pagina en el documento ---
+  const roleField = createSelectField({
+    options: [
+      { value: '', label: 'Página normal' },
+      { value: 'cover', label: 'Es la portada del documento' },
+      { value: 'skip', label: 'No incluir en el PDF' },
+    ],
+    initialValue: proyectosCurrentPage.pdfRole || '',
+    onChange: async (value) => {
+      try {
+        const updated = await api(`/api/proyectos-pages/${proyectosCurrentPage.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ pdfRole: value || null }),
+        });
+        proyectosCurrentPage.pdfRole = updated.pdfRole;
+        const entry = proyectosPages.find((p) => p.id === proyectosCurrentPage.id);
+        if (entry) entry.pdfRole = updated.pdfRole;
+      } catch (err) {
+        showAppAlert(`No se pudo guardar el rol: ${err.message}`);
+      }
+    },
   });
-  popover.appendChild(soloBtn);
-  const allBtn = document.createElement('button');
-  allBtn.type = 'button';
-  allBtn.className = 'proyectos-table-menu-item';
-  allBtn.textContent = `Con subpáginas (${descendants + 1} páginas)`;
-  allBtn.addEventListener('click', () => {
+  const roleLabel = document.createElement('label');
+  roleLabel.className = 'proyectos-db-config-field';
+  const roleSpan = document.createElement('span');
+  roleSpan.textContent = 'Esta página en el PDF';
+  roleLabel.appendChild(roleSpan);
+  roleLabel.appendChild(roleField.element);
+  popover.appendChild(roleLabel);
+
+  // --- Opciones del documento ---
+  function addCheckbox(labelText, initial) {
+    const row = document.createElement('label');
+    row.className = 'proyectos-pdf-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox';
+    checkbox.checked = initial;
+    const span = document.createElement('span');
+    span.textContent = labelText;
+    row.appendChild(checkbox);
+    row.appendChild(span);
+    popover.appendChild(row);
+    return checkbox;
+  }
+  // --- El selector de paginas: el subarbol entero con casillas, en
+  // orden de documento y con sangria por nivel. Todo marcado de serie
+  // salvo las paginas con rol "no incluir" (que se pueden re-marcar).
+  // Lo que quede marcado es EXACTAMENTE lo que sale en el PDF.
+  const selected = new Set(subtree.filter((id) => byId.get(id)?.pdfRole !== 'skip'));
+  const depthOfPage = (pageId) => {
+    let depth = 0;
+    let current = byId.get(pageId);
+    const seen = new Set();
+    while (current && current.id !== proyectosCurrentPage.id && current.parentId !== null && !seen.has(current.id)) {
+      seen.add(current.id);
+      depth += 1;
+      current = byId.get(current.parentId);
+    }
+    return depth;
+  };
+  const pagesLabel = document.createElement('div');
+  pagesLabel.className = 'proyectos-pdf-pages-label';
+  popover.appendChild(pagesLabel);
+  const pagesList = document.createElement('div');
+  pagesList.className = 'proyectos-pdf-pages';
+  const refreshExportLabel = () => {
+    pagesLabel.textContent = `Páginas a exportar (${selected.size} de ${subtree.length})`;
+    exportBtn.disabled = selected.size === 0;
+  };
+  for (const id of subtree) {
+    const page = byId.get(id);
+    if (!page) continue;
+    const row = document.createElement('label');
+    row.className = 'proyectos-pdf-option proyectos-pdf-page-row';
+    row.style.paddingLeft = `${0.1 + depthOfPage(id) * 0.9}rem`;
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox';
+    checkbox.checked = selected.has(id);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) selected.add(id);
+      else selected.delete(id);
+      refreshExportLabel();
+    });
+    const span = document.createElement('span');
+    span.className = 'proyectos-pdf-page-title';
+    span.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
+    row.appendChild(checkbox);
+    row.appendChild(span);
+    if (page.pdfRole === 'cover' || page.pdfRole === 'skip') {
+      const note = document.createElement('span');
+      note.className = 'proyectos-pdf-page-note';
+      note.textContent = page.pdfRole === 'cover' ? 'portada' : 'no incluir';
+      row.appendChild(note);
+    }
+    pagesList.appendChild(row);
+  }
+  popover.appendChild(pagesList);
+
+  const coverBox = addCheckbox('Portada automática', !hasOwnCover);
+  const tocBox = addCheckbox('Índice automático', true);
+  if (hasOwnCover) {
+    const hint = document.createElement('p');
+    hint.className = 'hint proyectos-pdf-hint';
+    hint.textContent = 'Una de las páginas ya hace de portada, por eso la automática viene desmarcada.';
+    popover.appendChild(hint);
+  }
+
+  const exportBtn = document.createElement('button');
+  exportBtn.type = 'button';
+  exportBtn.className = 'primary-btn proyectos-pdf-export-btn';
+  exportBtn.textContent = 'Exportar…';
+  exportBtn.addEventListener('click', () => {
     popover.classList.add('hidden');
-    exportProyectosPdf({ withChildren: true });
+    // En orden de documento (el del subarbol), no de marcado.
+    exportProyectosPdf({
+      ids: subtree.filter((id) => selected.has(id)),
+      autoCover: coverBox.checked,
+      autoToc: tocBox.checked,
+    });
   });
-  popover.appendChild(allBtn);
+  popover.appendChild(exportBtn);
+  refreshExportLabel();
+
   popover.classList.remove('hidden');
-  positionFixedPopover(document.getElementById('btn-proyectos-pdf'), popover, { width: 230 });
+  positionFixedPopover(document.getElementById('btn-proyectos-pdf'), popover, { width: 300 });
 });
 
 // ---------------------------------------------------------------------
@@ -11102,6 +11397,12 @@ const PROYECTOS_BLOCK_TYPES = [
   // ejemplo de cada uno.
   { id: 'diagram', label: 'Diagrama', hint: 'Flujo o secuencia dibujado (Mermaid)', icon: '⤳', keywords: 'diagrama flujo workflow mermaid secuencia grafo pseudocodigo' },
   { id: 'table', label: 'Tabla', hint: 'Filas y columnas', icon: '▦', keywords: 'tabla table filas columnas' },
+  // Bloques "de PDF": marcadores que solo cobran vida al exportar (asi
+  // el proyecto PUEDE ser la estructura del documento: tu pagina de
+  // indice lleva el bloque de indice, etc.).
+  { id: 'pdf-toc', label: 'Índice de contenido (PDF)', hint: 'Se rellena al exportar, con enlaces', icon: '☰', keywords: 'indice contenido tabla contenidos toc pdf exportar' },
+  { id: 'pdf-figures', label: 'Índice de figuras (PDF)', hint: 'Lista las imágenes con pie de foto', icon: '🖼', keywords: 'indice figuras imagenes fotos pdf exportar' },
+  { id: 'pdf-break', label: 'Salto de página (PDF)', hint: 'El documento salta de hoja aquí', icon: '⤓', keywords: 'salto pagina hoja pdf exportar break' },
   { id: 'image', label: 'Imagen', hint: 'Subir una imagen', icon: '🖼', keywords: 'imagen foto image subir' },
   { id: 'page', label: 'Subpágina', hint: 'Crear una página dentro de esta', icon: '📄', keywords: 'pagina subpagina page anidar' },
   { id: 'weblink', label: 'Enlace web', hint: 'A una página de internet', icon: '🔗', keywords: 'enlace link web url internet' },
@@ -11206,6 +11507,7 @@ function commitProyectosUndoSnapshot() {
 function restoreProyectosBodySnapshot(html) {
   PROYECTOS_BODY().innerHTML = html;
   hydrateProyectosDbBlocks();
+  hydrateProyectosPdfBlocks();
   highlightProyectosCodeBlocks();
   renderProyectosDiagrams();
   proyectosUndoLastSnapshot = html;
@@ -11375,7 +11677,7 @@ function ensureProyectosBodyBlocks() {
   const inline = [];
   for (const node of [...body.childNodes]) {
     const isElement = node.nodeType === Node.ELEMENT_NODE;
-    const isBlock = isElement && /^(div|p|h1|h2|h3|ul|ol|blockquote|details|hr|pre|table|img)$/i.test(node.tagName);
+    const isBlock = isElement && /^(div|p|h1|h2|h3|ul|ol|blockquote|details|hr|pre|table|img|figure)$/i.test(node.tagName);
     if (isBlock) continue;
     inline.push(node);
   }
@@ -11888,6 +12190,20 @@ function applyProyectosBlockType(typeId) {
       }
       break;
     }
+    case 'pdf-toc':
+    case 'pdf-figures':
+    case 'pdf-break': {
+      // Un marcador vacio; la etiqueta que se VE la pinta el CSS y lo
+      // que hara de verdad lo decide el export (postProcessProyectosPdf).
+      const marker = document.createElement('div');
+      marker.setAttribute('data-pdf-block', typeId === 'pdf-break' ? 'pagebreak' : typeId.slice('pdf-'.length));
+      const after = emptyProyectosBlock();
+      block.replaceWith(marker);
+      marker.after(after);
+      hydrateProyectosPdfBlocks();
+      placeCaretIn(after);
+      break;
+    }
     case 'table': openProyectosTablePopover(block); break;
     case 'image': insertProyectosImage(block); break;
     case 'weblink': openProyectosLinkPopover({ mode: 'insert', block }); return; // guarda al insertar
@@ -12347,6 +12663,52 @@ PROYECTOS_BODY().addEventListener('mouseover', (e) => {
     if (!proyectosPreLangPopover || proyectosPreLangPopover.classList.contains('hidden')) {
       proyectosPreLangBtn.classList.add('hidden');
     }
+  }
+});
+
+// ---------------------------------------------------------------------
+// Pie de foto: al pasar el raton por una imagen SIN pie aparece un
+// boton "+ Pie de foto"; clic = envolver la imagen en <figure> con su
+// <figcaption> editable debajo. Es opcional a proposito: solo las
+// imagenes CON pie cuentan como "Figura N" al exportar a PDF.
+// ---------------------------------------------------------------------
+let proyectosImgCaptionBtn = null;
+let proyectosImgCaptionImg = null; // la imagen señalada ahora mismo
+
+function ensureProyectosImgCaptionBtn() {
+  if (proyectosImgCaptionBtn) return;
+  proyectosImgCaptionBtn = document.createElement('button');
+  proyectosImgCaptionBtn.type = 'button';
+  proyectosImgCaptionBtn.className = 'proyectos-img-caption-btn hidden';
+  proyectosImgCaptionBtn.textContent = '＋ Pie de foto';
+  proyectosImgCaptionBtn.title = 'Añadir un pie de foto (la imagen pasa a ser "Figura N" al exportar a PDF)';
+  document.body.appendChild(proyectosImgCaptionBtn);
+  proyectosImgCaptionBtn.addEventListener('mousedown', (e) => e.preventDefault());
+  proyectosImgCaptionBtn.addEventListener('click', () => {
+    const img = proyectosImgCaptionImg;
+    proyectosImgCaptionBtn.classList.add('hidden');
+    if (!img || !PROYECTOS_BODY().contains(img)) return;
+    const figure = document.createElement('figure');
+    img.replaceWith(figure);
+    figure.appendChild(img);
+    const caption = document.createElement('figcaption');
+    figure.appendChild(caption);
+    placeCaretIn(caption);
+    queueProyectosSaveBody();
+  });
+}
+
+PROYECTOS_BODY().addEventListener('mouseover', (e) => {
+  const img = e.target.closest?.('img');
+  if (img && PROYECTOS_BODY().contains(img) && !img.closest('figure') && !img.closest('[data-proyectos-db]')) {
+    ensureProyectosImgCaptionBtn();
+    proyectosImgCaptionImg = img;
+    const rect = img.getBoundingClientRect();
+    proyectosImgCaptionBtn.classList.remove('hidden');
+    proyectosImgCaptionBtn.style.top = `${rect.top + 6}px`;
+    proyectosImgCaptionBtn.style.left = `${Math.max(8, rect.right - proyectosImgCaptionBtn.offsetWidth - 8)}px`;
+  } else if (proyectosImgCaptionBtn && !e.target.closest?.('.proyectos-img-caption-btn')) {
+    proyectosImgCaptionBtn.classList.add('hidden');
   }
 });
 
@@ -13143,7 +13505,8 @@ document.addEventListener('click', (e) => {
     proyectosDbColorPopover.classList.add('hidden');
   }
   if (proyectosPdfPopover && !proyectosPdfPopover.classList.contains('hidden')
-      && !e.target.closest('.proyectos-pdf-popover') && !e.target.closest('#btn-proyectos-pdf')) {
+      && !e.target.closest('.proyectos-pdf-popover') && !e.target.closest('#btn-proyectos-pdf')
+      && !e.target.closest('.select-popover')) { // el desplegable del rol vive fuera
     proyectosPdfPopover.classList.add('hidden');
   }
   // (el caso de "nodo ya desconectado" lo corta el guard de arriba)
@@ -13174,6 +13537,16 @@ document.addEventListener('click', (e) => {
 const proyectosDbCache = new Map();
 // Cada widget vivo, para poder repintarlo: dbId -> el contenedor.
 const proyectosDbContainers = new Map();
+
+// Los marcadores de bloque de PDF son islas no editables y VACIAS (la
+// etiqueta visible la pone el CSS con ::before): asi lo guardado es
+// solo el marcador y no arrastra texto de interfaz.
+function hydrateProyectosPdfBlocks() {
+  for (const el of PROYECTOS_BODY().querySelectorAll('[data-pdf-block]')) {
+    el.contentEditable = 'false';
+    el.classList.add('proyectos-pdf-block');
+  }
+}
 
 async function hydrateProyectosDbBlocks() {
   proyectosDbContainers.clear();
@@ -14094,7 +14467,13 @@ function renderProyectosDbTimeline(view, data) {
     seg.className = 'proyectos-tl-month';
     seg.style.left = `${xOf(cursor)}px`;
     seg.style.width = `${(proyectosTlDiffDays(cursor, segmentEnd) + 1) * dayPx}px`;
-    seg.textContent = cursor.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+    // La etiqueta va en un span "pegajoso": mientras su mes ocupa la
+    // pantalla, el nombre se queda a la vista en vez de cortarse al
+    // hacer scroll ("...iembre de 2026").
+    const segLabel = document.createElement('span');
+    segLabel.className = 'proyectos-tl-month-label';
+    segLabel.textContent = cursor.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+    seg.appendChild(segLabel);
     monthsRow.appendChild(seg);
     cursor = proyectosTlAddDays(segmentEnd, 1);
   }

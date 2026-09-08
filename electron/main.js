@@ -132,6 +132,15 @@ ipcMain.on('set-fullscreen', (event, value) => {
   if (mainWindow) mainWindow.setFullScreen(!!value);
 });
 
+// Tras exportar un PDF, el aviso de "guardado en..." ofrece abrir el
+// documento o su carpeta. Los abre el sistema (shell), no la app.
+ipcMain.on('open-exported-pdf', (event, filePath) => {
+  if (typeof filePath === 'string' && filePath) shell.openPath(filePath);
+});
+ipcMain.on('show-exported-pdf', (event, filePath) => {
+  if (typeof filePath === 'string' && filePath) shell.showItemInFolder(filePath);
+});
+
 // Exportar a PDF (boton "PDF" de una pagina de Proyectos). La pagina
 // manda el HTML ya montado (titulos, cuerpo, bases de datos como tablas
 // estaticas, diagramas como SVG); aqui:
@@ -174,9 +183,25 @@ ipcMain.handle('export-pdf', async (event, payload) => {
         return true;
       })()
     `);
+    // Pie de pagina en todas las hojas ("titulo · pag. X de Y") con las
+    // clases especiales que printToPDF rellena solo (pageNumber /
+    // totalPages). El estilo va EN LINEA a la fuerza: estas plantillas
+    // viven fuera de la pagina y no ven ningun CSS suyo. El titulo se
+    // escapa a mano (viene del usuario y aqui es HTML).
+    const escapedTitle = title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const pdf = await printWindow.webContents.printToPDF({
       printBackground: true,
       pageSize: 'A4',
+      // Margenes de documento de verdad (en pulgadas): 1,5 cm arriba,
+      // 1,7 abajo (deja sitio al pie) y 1,6 a los lados.
+      margins: { top: 0.59, bottom: 0.67, left: 0.63, right: 0.63 },
+      displayHeaderFooter: true,
+      headerTemplate: '<div></div>',
+      footerTemplate: `
+        <div style="width:100%; text-align:center; font-size:8px; color:#8b949e; font-family:'Segoe UI',system-ui,sans-serif; padding-bottom:6px;">
+          ${escapedTitle} · pág. <span class="pageNumber"></span> de <span class="totalPages"></span>
+        </div>
+      `,
     });
     fs.writeFileSync(filePath, pdf);
     return { ok: true, path: filePath };

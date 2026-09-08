@@ -642,6 +642,14 @@ if (databasesTableSql && !databasesTableSql.sql.includes("'timeline'")) {
   `);
 }
 
+// Migracion: pdf_role dice que papel juega una pagina al exportar a PDF
+// ('cover' = es la portada del documento, 'skip' = no se incluye; NULL =
+// pagina normal). Lo puso la ronda de "plantillas de PDF".
+const proyectosPagesColumns = db.prepare('PRAGMA table_info(proyectos_pages)').all().map((c) => c.name);
+if (!proyectosPagesColumns.includes('pdf_role')) {
+  db.exec('ALTER TABLE proyectos_pages ADD COLUMN pdf_role TEXT');
+}
+
 // Migracion sencilla: group_id se anadio despues de crear la tabla
 // events en versiones anteriores. SQLite no
 // tiene "ADD COLUMN IF NOT EXISTS", asi que miramos el esquema actual

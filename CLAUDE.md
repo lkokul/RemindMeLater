@@ -524,6 +524,61 @@ ahora se llama `device`.
         el archivo. print.html lleva los estilos de TODOS los bloques
         en claro fijo (papel). OJO: cambiar preload/main pide reiniciar
         la app.
+      - **Pasada de formato del PDF** (pedida y hecha, "que sirva de
+        verdad"): `buildProyectosPdfDocument(ids, rootPage)` monta el
+        documento entero — PORTADA (franja del color de portada del
+        proyecto, icono, título, "N páginas · fecha") + ÍNDICE
+        jerárquico con enlaces internos (`#pdf-page-<id>`, printToPDF
+        los conserva) cuando va con subpáginas; con una sola página,
+        línea de fecha bajo el título. printToPDF con márgenes A4 de
+        documento y `displayHeaderFooter` + footerTemplate ("título ·
+        pág. X de Y" — estilos EN LÍNEA obligatorios, la plantilla no
+        ve el CSS de la página; título escapado a mano). En
+        print.html: título con subrayado del color de portada,
+        `break-after: avoid` en títulos, viudas/huérfanas a 2, los
+        enlaces web imprimen su URL entre paréntesis, y el `<thead>` de
+        las tablas de bases se repite al cambiar de hoja (el volcado
+        ahora usa thead/tbody de verdad).
+
+    - **Ronda "plantillas de PDF", fase A** (driver `drive-pdf2.js`; la
+      vision de Koku: el proyecto ES la estructura del documento — su
+      raiz la portada, una subpagina el indice, etc.):
+      - **Roles de pagina** (`pdf_role`: 'cover' | 'skip' | NULL, en
+        proyectos_pages, editable desde el dialogo del boton PDF):
+        'cover' = esa pagina se imprime SOLO con su cuerpo (sin titulo
+        ni miga plantados) y desactiva por defecto la portada
+        automatica; 'skip' = fuera del PDF.
+      - **Bloques de PDF** en el menu "/" (marcadores
+        `data-pdf-block="toc|figures|pagebreak"`, lista cerrada en el
+        saneador): islas vacias no editables en el editor (etiqueta via
+        CSS ::before, `hydrateProyectosPdfBlocks`); cobran vida en
+        `postProcessProyectosPdf` al exportar (indice EN tu pagina sin
+        el titulo "Contenido", lista de figuras con enlaces, salto de
+        hoja).
+      - **Pies de foto**: figure/figcaption en el saneador; boton
+        flotante "+ Pie de foto" al pasar el raton por una imagen sin
+        pie. OPCIONALES a proposito: solo las figure con pie NO vacio se
+        numeran ("Figura N: ...") y salen en el indice de figuras.
+      - **Dialogo del boton PDF**: rol de la pagina abierta + SELECTOR
+        DE PAGINAS (el subarbol entero como listado jerarquico con
+        casillas y contador "N de M"; las 'skip' arrancan desmarcadas
+        pero se pueden re-marcar; pildoritas "portada"/"no incluir") +
+        portada automatica (desmarcada si alguna pagina ya hace de
+        portada) + indice automatico + Exportar.
+        `buildProyectosPdfDocument(ids, ...)` respeta los ids tal cual
+        (ya NO filtra 'skip': eso lo decide el selector).
+      - **Aviso de "PDF guardado"** con "Abrir documento" / "Abrir
+        ubicación" / Cerrar: showAppConfirm gano un tercer boton
+        opcional (`extraText`, resuelve la cadena 'extra' — truthy, las
+        llamadas de siempre ni se enteran) y dos IPC nuevos
+        (open-exported-pdf → shell.openPath, show-exported-pdf →
+        shell.showItemInFolder).
+      - PENDIENTE de esta vision (fases B y C): home de Proyectos con
+        pestañas Mis proyectos / Plantillas (tarjetas + buscador,
+        sidebar solo con el arbol del proyecto abierto), plantillas de
+        proyectos Y de piezas (clonado profundo con bases e imagenes;
+        insertables tambien como subpagina via "/"), y guia especifica
+        del exportar a PDF.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
@@ -657,10 +712,10 @@ ningún error en la consola.
 
 ## Pendiente / próximos pasos declarados
 
-- **Formato del PDF de Proyectos**: a Koku le gusta cómo quedó el
-  exportar a PDF pero quiere una pasada de formato más adelante para
-  que se vea mejor (pedido el 2026-09-08). Los estilos viven en
-  `public/print.html`.
+- **Ideas de Proyectos que le interesan a Koku** (dijo "las ideas que
+  has propuesto me interesan", 2026-09-08 — sin encargar aún): filtro
+  por etiquetas/vencimiento en el tablero, ocultar pestañas de vistas
+  por base, asa de arrastre de bloques (⋮⋮), duplicar páginas/bases.
 
 - **Documento de cambios visuales**: Koku dijo que iba a pasar "un
   documento detallado de todos los cambios visuales que quiero hacer, no

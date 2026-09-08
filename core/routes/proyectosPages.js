@@ -36,8 +36,8 @@ const ALLOWED_TAGS = new Set([
   'pre', 'code',
   // tabla
   'table', 'colgroup', 'col', 'tbody', 'tr', 'td', 'th',
-  // imagen
-  'img',
+  // imagen (figure/figcaption = imagen con pie de foto, ronda del PDF)
+  'img', 'figure', 'figcaption',
 ]);
 // Solo imagenes subidas a ESTA app por la ruta de Proyectos -- nada de
 // "data:" ni servidores externos (mismo criterio que las notas).
@@ -181,6 +181,13 @@ function sanitizePageBody(html) {
       if (dbMatch && DB_BLOCK_ID.test(dbMatch[1])) {
         return `<div data-proyectos-db="${dbMatch[1]}">`;
       }
+      // Bloques "de PDF" (ronda de plantillas de PDF): marcadores que
+      // solo cobran vida al exportar -- el indice de contenido, el de
+      // figuras y el salto de pagina. Lista cerrada.
+      const pdfMatch = attrs.match(/\sdata-pdf-block\s*=\s*"([^"]*)"/i);
+      if (pdfMatch && ['toc', 'figures', 'pagebreak'].includes(pdfMatch[1])) {
+        return `<div data-pdf-block="${pdfMatch[1]}">`;
+      }
       return `<div${alignAttr(attrs)}>`;
     }
     // El resto de bloques de texto tambien puede llevar alineacion
@@ -243,6 +250,7 @@ function serializeListRow(row) {
     favorite: !!row.favorite,
     position: row.position,
     hasBody: !!row.has_body,
+    pdfRole: row.pdf_role || null,
     updatedAt: row.updated_at,
   };
 }
@@ -257,13 +265,14 @@ function serializeFullRow(row) {
     body: row.body || null,
     favorite: !!row.favorite,
     position: row.position,
+    pdfRole: row.pdf_role || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
 const LIST_SELECT = `
-  SELECT id, parent_id, title, icon, cover_color, favorite, position, updated_at,
+  SELECT id, parent_id, title, icon, cover_color, favorite, position, pdf_role, updated_at,
          (body IS NOT NULL AND body != '') AS has_body
   FROM proyectos_pages
 `;
@@ -308,7 +317,7 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM proyectos_pages WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { title, icon, coverColor, parentId, body, favorite } = req.body || {};
+  const { title, icon, coverColor, parentId, body, favorite, pdfRole } = req.body || {};
 
   let nextParentId = existing.parent_id;
   if (parentId !== undefined) {
@@ -325,13 +334,21 @@ router.put('/:id', (req, res) => {
     nextCover = coverColor && /^#[0-9a-fA-F]{6}$/.test(coverColor) ? coverColor : null;
   }
 
-  db.prepare("UPDATE proyectos_pages SET title = ?, icon = ?, cover_color = ?, parent_id = ?, body = ?, favorite = ?, updated_at = datetime('now') WHERE id = ?").run(
+  // El papel de la pagina en el PDF: 'cover' (portada), 'skip' (no se
+  // incluye) o null (normal). Lista cerrada; cualquier otra cosa = null.
+  let nextPdfRole = existing.pdf_role;
+  if (pdfRole !== undefined) {
+    nextPdfRole = pdfRole === 'cover' || pdfRole === 'skip' ? pdfRole : null;
+  }
+
+  db.prepare("UPDATE proyectos_pages SET title = ?, icon = ?, cover_color = ?, parent_id = ?, body = ?, favorite = ?, pdf_role = ?, updated_at = datetime('now') WHERE id = ?").run(
     title !== undefined ? String(title).slice(0, 300) : existing.title,
     sanitizedIcon === undefined ? existing.icon : sanitizedIcon,
     nextCover,
     nextParentId,
     body !== undefined ? (sanitizePageBody(body) || null) : existing.body,
     favorite !== undefined ? (favorite ? 1 : 0) : existing.favorite,
+    nextPdfRole,
     req.params.id
   );
 
