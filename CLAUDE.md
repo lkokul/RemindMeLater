@@ -141,15 +141,19 @@ ahora se llama `device`.
 
 ## Reglas de trabajo que Koku ha pedido explícitamente
 
-- **Commit y push por tu cuenta, PERO SOLO EN LA RAMA `escritorio`.**
-  Hasta el 5/9/2026 la regla era no commitear ni pushear sin pedirlo;
-  Koku la retiró para esta rama, para igualarla con el resto de sus
-  conversaciones. Dos límites que siguen en pie:
-    1. **Cualquier otra rama (`main` incluida) sigue necesitando permiso
+- **Commit y push por tu cuenta EN LA RAMA DE TRABAJO**, que ahora es
+  `calendario-notas-escritorio-UI`. Hasta el 5/9/2026 la regla era no
+  commitear ni pushear sin pedirlo; Koku la retiró para igualar esta
+  conversación con el resto. Tres límites que siguen en pie:
+    1. **`escritorio` NO se toca** salvo que Koku lo diga expresamente.
+       Es la rama central de la que salen todos los programas de
+       escritorio; lo que se rompa ahí se propaga a todas las demás.
+    2. **Cualquier otra rama (`main` incluida) necesita permiso
        explícito.** El permiso libre no se hereda al cambiar de rama ni
-       al fusionar.
-    2. **Lanzar GitHub Actions se consulta siempre**, en cualquier rama.
-       (En `escritorio`, de hecho, `.github/` ya no existe — se fue con
+       al fusionar: llevar esta rama a `escritorio` es tocar
+       `escritorio`, así que se pregunta.
+    3. **Lanzar GitHub Actions se consulta siempre**, en cualquier rama.
+       (En estas ramas, de hecho, `.github/` ya no existe — se fue con
        el workflow de iOS.)
 - **No hace falta avisar de que una tarea es larga antes de empezar** — lo
   pidió al principio, pero luego dijo explícitamente que como no puedo
@@ -375,11 +379,13 @@ de la página. Dos avisos aprendidos a base de colgarse:
 
 ## Estado actual
 
-Rama de trabajo: **`escritorio`**. La rama
-`claude/desktop-app-electron-web-hdntch` ya no existe en el remoto: se
-fusionó en `main`, así que **`main` es ahora el "antes"** — el último
-estado con servidor, app móvil y Capacitor intactos. Recuperarlo es un
-`git checkout main`, no hay que buscar hashes.
+Rama de trabajo: **`calendario-notas-escritorio-UI`**, sacada de
+`escritorio`, que es la rama CENTRAL de la que salen todos los programas
+de escritorio y que **no se toca** salvo orden expresa.
+
+**`main` es el "antes"** — el último estado con servidor, app móvil y
+Capacitor intactos. Recuperarlo es un `git checkout main`, no hay que
+buscar hashes.
 
 `package.json` en **v0.35.0**. Todo lo descrito arriba está hecho y
 probado arrancando la app de verdad con `xvfb-run`: los modales se VEN

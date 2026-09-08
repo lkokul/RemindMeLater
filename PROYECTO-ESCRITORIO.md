@@ -10,9 +10,20 @@ notas de traspaso entre sesiones (`CLAUDE.md`, que explica cómo está
 montado el código hoy). Esto es lo que **queda por hacer** y **por qué se
 decidió cada cosa**.
 
-Rama de trabajo: `escritorio`. La rama `main` conserva el estado
-anterior (con servidor, app móvil y Capacitor) por si hace falta
-recuperar algo.
+### Cómo están repartidas las ramas
+
+- **`escritorio`** — rama CENTRAL de la que salen todos los programas de
+  escritorio. Aquí está la base común (sin servidor, sin móvil). **No se
+  toca** salvo que Koku lo diga: lo que se rompa aquí se propaga a todas
+  las demás.
+- **`calendario-notas-escritorio-UI`** — la rama de trabajo de esta
+  conversación. Todo lo de calendario y notas se hace aquí.
+- **`main`** — el "antes": conserva el servidor, la app móvil y
+  Capacitor por si hace falta recuperar algo.
+
+Hay más ramas por programa (`finanzas-escritorio`, `viajes-escritorio`,
+y sus equivalentes de móvil) que se llevan en otras conversaciones. No
+tocarlas desde aquí.
 
 ---
 
@@ -197,15 +208,19 @@ Heredadas, no son fallos nuevos:
 
 ### Reglas de Koku
 
-- **Commit y push por tu cuenta, PERO SOLO EN LA RAMA `escritorio`.**
-  Hasta el 5/9/2026 la regla era no commitear ni pushear sin pedirlo;
-  Koku la retiró para esta rama, para igualarla con el resto de sus
-  conversaciones. Dos límites que siguen en pie:
-    1. **Cualquier otra rama (`main` incluida) sigue necesitando permiso
+- **Commit y push por tu cuenta EN LA RAMA DE TRABAJO**, que ahora es
+  `calendario-notas-escritorio-UI`. Hasta el 5/9/2026 la regla era no
+  commitear ni pushear sin pedirlo; Koku la retiró para igualar esta
+  conversación con el resto. Tres límites que siguen en pie:
+    1. **`escritorio` NO se toca** salvo que Koku lo diga expresamente.
+       Es la rama central de la que salen todos los programas de
+       escritorio; lo que se rompa ahí se propaga a todas las demás.
+    2. **Cualquier otra rama (`main` incluida) necesita permiso
        explícito.** El permiso libre no se hereda al cambiar de rama ni
-       al fusionar.
-    2. **Lanzar GitHub Actions se consulta siempre**, en cualquier rama.
-       (En `escritorio`, de hecho, `.github/` ya no existe — se fue con
+       al fusionar: llevar esta rama a `escritorio` es tocar
+       `escritorio`, así que se pregunta.
+    3. **Lanzar GitHub Actions se consulta siempre**, en cualquier rama.
+       (En estas ramas, de hecho, `.github/` ya no existe — se fue con
        el workflow de iOS.)
 - Versionado semántico con tag de git a juego. Los tags hay que crearlos
   desde el ordenador de Koku: las sesiones de control remoto dan 403.
