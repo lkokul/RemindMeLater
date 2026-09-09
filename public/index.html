@@ -561,6 +561,16 @@
           <span class="field-label">Objetivo semanal (sesiones)</span>
           <div id="gym-weekly-goal-field"></div>
         </div>
+        <!-- Cuanto suma de mas una serie llevada al fallo en el volumen.
+             Es un numero INVENTADO (no hay una cifra estandar), por eso
+             se deja a mano en vez de cablearlo: si el x1,2 se te queda
+             corto o largo, lo cambias aqui sin tocar nada mas. Los kg
+             GUARDADOS son siempre los de verdad; esto es solo como se
+             cuentan al pintar. -->
+        <div class="gym-weekly-goal-row">
+          <span class="field-label">Peso extra de una serie al fallo</span>
+          <div id="gym-failure-factor-field"></div>
+        </div>
 
         <div class="gym-subheading-row">
           <h3 class="gym-subheading">Mapa de músculos</h3>
@@ -871,6 +881,18 @@
           <input type="text" id="gym-set-end-note" placeholder="Ej. se me fue el codo" />
         </label>
 
+        <!-- Marcar que ESTA serie se llevo al fallo (peticion de Koku).
+             Es por serie, no por ejercicio: unas se llevan al fallo y
+             otras no. Boton propio con su marca, no un checkbox nativo
+             (regla de CLAUDE.md). Se guarda en set_type = 'failure', que
+             ya estaba reservado en el esquema. -->
+        <div class="gym-set-flags">
+          <button type="button" class="gym-set-flag-btn" id="btn-gym-set-end-failure" aria-pressed="false">
+            <span class="gym-set-flag-mark" aria-hidden="true"></span>
+            <span>Llegué al fallo</span>
+          </button>
+        </div>
+
         <!-- Series alargadas (dropset / rest-pause). Va aqui, en una
              linea discreta dentro del formulario que ya existia, y no en
              una pantalla propia: la mayoria de las series no se alargan y
@@ -994,6 +1016,7 @@
         <div class="gym-live-summary-stat"><b id="gym-summary-duration">—</b><span>Duración</span></div>
         <div class="gym-live-summary-stat"><b id="gym-summary-sets">—</b><span>Series hechas</span></div>
         <div class="gym-live-summary-stat"><b id="gym-summary-volume">—</b><span>Volumen total</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-failure">—</b><span>Series al fallo</span></div>
         <div class="gym-live-summary-stat"><b id="gym-summary-muscles">—</b><span>Grupos musculares</span></div>
       </div>
       <p id="gym-summary-muscle-list" class="gym-list-item-muted"></p>
@@ -2385,6 +2408,13 @@
             Bajar la música al acabar el descanso
           </label>
           <button type="button" id="btn-help-notif-duck" class="icon-btn settings-help-btn" aria-label="Cómo funciona el bajar la música">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-gym-auto-start" />
+            Empezar la siguiente serie sola
+          </label>
+          <button type="button" id="btn-help-notif-autostart" class="icon-btn settings-help-btn" aria-label="Qué hace empezar la siguiente serie sola">?</button>
         </div>
         <div class="settings-toggle-help-row">
           <label class="checkbox-row">

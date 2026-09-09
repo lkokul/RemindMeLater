@@ -213,10 +213,21 @@
       .prepare(`
         SELECT s.id, s.date, s.type, s.activity_kind, s.activity_name, s.duration_seconds, s.routine_id,
                COUNT(CASE WHEN st.parent_set_id IS NULL THEN st.id END) as set_count,
+               COUNT(CASE WHEN st.parent_set_id IS NULL AND st.set_type = 'failure' THEN st.id END) as failure_set_count,
                SUM(COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0)) as volume_kg,
+               -- Cuantos de esos kg salieron de una serie llevada al
+               -- fallo. Se devuelve APARTE y en kg de verdad: el peso
+               -- extra lo aplica el cliente al pintar (es un ajuste de
+               -- presentacion y ademas configurable, ver
+               -- gymVolumenAjustado en app.js). Un TRAMO de dropset no
+               -- lleva 'failure' en su propio set_type -- lo hereda de su
+               -- madre, de ahi el COALESCE con el padre.
+               SUM(CASE WHEN COALESCE(p.set_type, st.set_type) = 'failure'
+                        THEN COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) ELSE 0 END) as failure_volume_kg,
                SUM(COALESCE(st.duration_seconds, 0)) as work_seconds
         FROM gym_sessions s
         LEFT JOIN gym_sets st ON st.session_id = s.id
+        LEFT JOIN gym_sets p ON p.id = st.parent_set_id
         GROUP BY s.id
         ORDER BY s.date DESC, s.id DESC
       `)
@@ -246,7 +257,9 @@
       durationSeconds: r.duration_seconds ?? null,
       routineId: r.routine_id,
       setCount: r.set_count,
+      failureSetCount: r.failure_set_count || 0,
       volumeKg: r.volume_kg || 0,
+      failureVolumeKg: r.failure_volume_kg || 0,
       // Tiempo real de trabajo: suma de lo que duraron las series (solo
       // las registradas con el boton de empezar/terminar serie).
       workSeconds: r.work_seconds || 0,
@@ -343,9 +356,16 @@
   router.get('/progress/:exerciseId', (req, res) => {
     const rows = db
       .prepare(`
-        SELECT s.date, MAX(st.weight_kg) as max_weight_kg, SUM(COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0)) as volume_kg
+        SELECT s.date, MAX(st.weight_kg) as max_weight_kg,
+               SUM(COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0)) as volume_kg,
+               -- Igual que en /summary: los kg que salieron de series al
+               -- fallo, aparte y sin ajustar (ver alli el porque).
+               SUM(CASE WHEN COALESCE(p.set_type, st.set_type) = 'failure'
+                        THEN COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) ELSE 0 END) as failure_volume_kg,
+               COUNT(CASE WHEN st.parent_set_id IS NULL AND st.set_type = 'failure' THEN st.id END) as failure_set_count
         FROM gym_sets st
         JOIN gym_sessions s ON s.id = st.session_id
+        LEFT JOIN gym_sets p ON p.id = st.parent_set_id
         WHERE st.exercise_id = ?
         GROUP BY s.id
         ORDER BY s.date ASC, s.id ASC
@@ -357,6 +377,8 @@
         date: r.date,
         maxWeightKg: r.max_weight_kg,
         volumeKg: r.volume_kg,
+        failureVolumeKg: r.failure_volume_kg || 0,
+        failureSetCount: r.failure_set_count || 0,
       }))
     );
   });

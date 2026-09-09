@@ -1010,6 +1010,99 @@ series viejas sin el campo, 12 tramos seguidos, la unidad en libras, la
 idempotencia de la migración, y que borrar la sesión no deja tramos
 huérfanos.
 
+## Series al fallo, y por qué el volumen deja de ser "kilos movidos"
+
+Petición de Koku (9/9/2026): *"quiero poder marcar si llego al fallo en
+una serie específica... para indicar que esa serie me ha exprimido al
+máximo aunque haga dropset y no haga las mismas repes que en la primera,
+para que se tenga en cuenta para las gráficas"*.
+
+**Marcarlo**: un botón propio ("Llegué al fallo") en el mismo diálogo de
+fin de serie, guardado en `set_type = 'failure'`, valor que el esquema ya
+tenía reservado. Es por SERIE, no por ejercicio. Botón con su marca
+cuadrada, no un checkbox nativo (regla de CLAUDE.md).
+
+**Contarlo — decisión suya, y va contra mi recomendación**: se le
+ofrecieron tres formas (solo etiquetar / un contador propio de series al
+fallo / que además pese más en el volumen) y eligió la tercera. Le avisé
+de que ponderar el volumen "se inventa peso que no levantaste"; lo eligió
+igualmente, así que se hizo. **No deshacerlo sin volver a preguntarle.**
+Las tres salvaguardas con las que se construyó:
+
+1. **Lo GUARDADO son siempre los kg reales.** El factor se aplica solo al
+   pintar. Las rutas (`/summary`, `/progress/:exerciseId`) devuelven el
+   volumen real Y, aparte, cuántos de esos kg salieron de series al fallo
+   (`failureVolumeKg`) — el ajuste lo hace el cliente con
+   `gymVolumenAjustado()`. Por eso cambiar el factor no reescribe ningún
+   historial: los mismos datos se vuelven a sumar con otro número.
+2. **Es ajustable** (Gimnasio > Progreso > "Peso extra de una serie al
+   fallo"): ×1 / ×1,1 / ×1,2 (por defecto) / ×1,25 / ×1,5. **×1 lo
+   desactiva del todo.** Se dejó a mano precisamente porque el número es
+   inventado: no hay cifra estándar para esto.
+3. **Se aplica a la serie ENTERA**, tramos de dropset/rest-pause
+   incluidos: lo que se llevó al fallo fue la serie completa. En SQL eso
+   es un `COALESCE(p.set_type, st.set_type) = 'failure'` con un LEFT JOIN
+   al padre, porque un tramo lleva su propio `set_type` ('dropset') y
+   hereda el "fallo" de su madre.
+
+Dónde cuenta: historial, mapa de músculos en modo volumen, gráfica
+semanal, PRs (`bestVolumeKg`), gráfica de progreso del ejercicio, logros
+y el resumen del entreno. El **peso máximo NO se ajusta nunca** — ese es
+el peso que de verdad moviste. Piezas en `app.js`:
+`gymSetVolumeRealKg()` (kg de verdad), `gymSetEsAlFallo()`,
+`gymSetVolumeKg()` (lo que se pinta) y `gymVolumenAjustado()`.
+
+Además hay un **contador de series al fallo**: en el resumen del entreno
+y, si hay alguna, en Consistencia ("Series al fallo este mes").
+
+**Bug arreglado de rebote**: el modal de "editar sesión" a mano no
+mandaba `setType`, así que editar una sesión **borraba en silencio** la
+marca de fallo (y la de calentamiento). Ahora viaja igual que los tramos.
+
+## Al acabar el descanso: que no se te pase la siguiente serie
+
+Koku: *"cada vez que acaba el tiempo de descanso se me olvida darle a
+empezar serie"*. Ofreció dos vías (botón grande o que empiece sola) y al
+preguntarle eligió **las dos, con interruptor**:
+
+- **Siempre**: el botón "Empezar serie N" del ejercicio cuyo descanso
+  acaba de terminar se pone grande y con latido, y la mini-barra global
+  (con el entreno oculto) deja de ser una cuenta atrás y pasa a decir
+  "Empezar serie N" — **tocarla arranca la serie**, además de llevarte al
+  entreno.
+- **Opcional** (Configuración > Notificaciones > "Empezar la siguiente
+  serie sola", **apagado de fábrica**): la serie arranca sola. El "?" de
+  esa fila avisa del precio: el cronómetro cuenta desde ese momento, así
+  que lo que tardes en volver a la máquina se suma a la serie.
+
+Detalles que importan:
+
+- **Solo si queda serie pendiente**, tal cual lo pidió. Nunca inventa una
+  serie extra — eso lo hace `gymStartSet` cuando ya están todas hechas, y
+  aquí se comprueba antes con `gymNextPendingSetIndex`.
+- Quién es "el que le toca" sale de `gymLiveSession.restSetRef`, que
+  apunta a la serie cuyo descanso estaba corriendo y **no se borra al
+  vencer**, así que sigue sirviendo después.
+- `gymLiveSession.restEndedAt` enciende el aviso y `gymStartSet()` lo
+  apaga, así que no se queda puesto para siempre.
+- El latido obedece solo al interruptor de Animaciones, gratis, gracias a
+  la regla global `:root[data-animations="off"] *`.
+
+## El aviso de descanso se borra solo al volver a la app
+
+Koku: *"si hay una notificación y entro en la app, que se borre, y así no
+hace falta que la borre manualmente cada vez"*. `gymCleanupRestNotificationStack()`
+ya se llamaba en el foreground (`visibilitychange` + `resume`), pero solo
+quitaba las repeticiones 902/903 y dejaba puesta la principal (901).
+Ahora las quita todas.
+
+Cubre los dos casos de una vez: tocar el aviso abre la app, y volver a
+ella por tu cuenta lo limpia igual. **Solo los avisos del descanso** (los
+ids reservados) — se le preguntó y prefirió que los recordatorios de
+eventos se queden hasta que él los quite. Y no pelea con la vigilancia de
+audio que calla la vibración: abrir la app ya la callaba, esto va en la
+misma dirección.
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de

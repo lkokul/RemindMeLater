@@ -2822,6 +2822,90 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   font-variant-numeric: tabular-nums;
 }
 
+/* --- "Te toca": el descanso acabo y queda serie pendiente -------------
+   Koku se olvidaba de darle a "Empezar serie" al acabar el descanso, asi
+   que ese boton (y la mini-barra global, si el entreno esta oculto) se
+   ponen llamativos. El latido obedece solo al interruptor de Animaciones
+   gracias a la regla global :root[data-animations="off"] *. */
+@keyframes gym-ready-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gym-accent) 55%, transparent); }
+  50%      { box-shadow: 0 0 0 0.5rem color-mix(in srgb, var(--gym-accent) 0%, transparent); }
+}
+.gym-set-start-btn.is-ready {
+  background: var(--gym-accent);
+  color: var(--gym-accent-text);
+  border-color: var(--gym-accent);
+  font-weight: 700;
+  animation: gym-ready-pulse 1.6s ease-out infinite;
+}
+.gym-global-rest.is-ready {
+  background: var(--gym-accent);
+  color: var(--gym-accent-text);
+  font-weight: 700;
+  animation: gym-ready-pulse 1.6s ease-out infinite;
+}
+/* En modo "te toca" la barra de progreso no cuenta nada: se apaga para
+   que no parezca un descanso a medias. */
+.gym-global-rest.is-ready .gym-global-rest-track { visibility: hidden; }
+
+/* "Llegué al fallo": un boton propio con su marca cuadrada, NO un
+   checkbox nativo (regla de CLAUDE.md). Encendido = relleno con el
+   acento del gimnasio, para que se vea de un vistazo cual esta puesta. */
+.gym-set-flags { margin-top: 0.1rem; }
+.gym-set-flag-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+.gym-set-flag-mark {
+  flex: 0 0 auto;
+  width: 1.15rem; height: 1.15rem;
+  border: 2px solid color-mix(in srgb, var(--surface-2-text) 45%, var(--surface-2));
+  border-radius: 0.3rem;
+  position: relative;
+}
+.gym-set-flag-btn.is-on {
+  border-color: var(--gym-accent);
+  color: var(--gym-accent);
+  font-weight: 600;
+}
+.gym-set-flag-btn.is-on .gym-set-flag-mark {
+  border-color: var(--gym-accent);
+  background: var(--gym-accent);
+}
+/* El check: dos lados de un cuadrado girado, el truco de siempre para
+   dibujarlo sin una imagen ni una fuente de iconos. */
+.gym-set-flag-btn.is-on .gym-set-flag-mark::after {
+  content: '';
+  position: absolute;
+  left: 0.3rem; top: 0.06rem;
+  width: 0.28rem; height: 0.6rem;
+  border: solid var(--gym-accent-text);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* Chip "Fallo" en la fila de la serie, junto al lado I/D y al "+60s". */
+.gym-set-failure-chip {
+  margin-left: 0.25rem;
+  padding: 0 0.28rem;
+  border-radius: 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--gym-accent);
+  border: 1px solid var(--gym-accent);
+}
+
 /* La linea discreta del dialogo de fin de serie: no debe competir con
    "Guardar serie", porque la mayoria de las series no se alargan. La
    pregunta va en su propia linea y las dos opciones DEBAJO, en lista

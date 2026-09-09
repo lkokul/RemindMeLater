@@ -1418,6 +1418,11 @@ function refreshMobileTab() {
   const restDuck = document.getElementById('setting-gym-rest-duck');
   restDuck.disabled = !nativo;
   restDuck.checked = nativo && localStorage.getItem('gymRestDuck') !== 'false';
+  // Este NO se deshabilita fuera de la app instalada: no depende de
+  // ningun plugin, es solo lo que hace la pantalla del entreno cuando se
+  // acaba el descanso. Apagado de fabrica.
+  document.getElementById('setting-gym-auto-start').checked =
+    localStorage.getItem('gymAutoStartNextSet') === 'true';
 
   // Sonido y vibracion de los avisos, como on-off separados (peticion
   // de Koku). El matiz de iOS (con sonido, vibrar lo decide el sistema;
@@ -1489,6 +1494,12 @@ document.getElementById('setting-gym-rest-burst').addEventListener('change', (e)
   localStorage.setItem('gymRestBurst', e.target.checked ? 'true' : 'false');
   // Si hay un descanso en marcha, se reprograma con el modo nuevo.
   if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
+});
+document.getElementById('setting-gym-auto-start').addEventListener('change', (e) => {
+  localStorage.setItem('gymAutoStartNextSet', e.target.checked ? 'true' : 'false');
+});
+document.getElementById('btn-help-notif-autostart').addEventListener('click', () => {
+  showAppAlert('Al acabar el descanso, la siguiente serie empieza sola sin que tengas que darle a "Empezar serie" — solo si queda alguna serie pendiente de ese ejercicio. Ojo: el cronómetro de la serie arranca en ese momento, así que lo que tardes en volver a la máquina o colocar el peso cuenta como tiempo de serie. Apagado, el botón "Empezar serie" se pone grande al acabar el descanso y lo arrancas tú.');
 });
 document.getElementById('setting-gym-rest-duck').addEventListener('change', (e) => {
   localStorage.setItem('gymRestDuck', e.target.checked ? 'true' : 'false');

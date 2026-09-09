@@ -8519,18 +8519,74 @@ async function deleteGymSessionById(id) {
 //      igual -- por eso existe gymSetConTramos().
 const GYM_SEGMENT_LABELS = { dropset: 'Drop', restpause: 'R-P' };
 
+// Serie llevada al fallo: se marca en el mismo dialogo de fin de serie y
+// se guarda en set_type = 'failure' (valor que el esquema ya tenia
+// reservado). Es una ETIQUETA, no cambia ningun calculo: al fallo o no,
+// las repeticiones y los kilos son los que son, y una serie al fallo es
+// justo la que MAS merece contar como record (a diferencia del
+// calentamiento, que sigue fuera de los PRs).
+const GYM_FAILURE_CHIP = '<span class="gym-set-failure-chip" title="Serie llevada al fallo">Fallo</span>';
+function gymFailureChipHtml(esAlFallo) {
+  return esAlFallo ? GYM_FAILURE_CHIP : '';
+}
+
+// CUANTO PESA DE MAS una serie al fallo en el volumen. Decision de Koku
+// ("para que se tenga en cuenta para las graficas, aunque haga dropset y
+// no haga las mismas repes que en la primera"): al final de una serie
+// exprimida mueves menos kilos pero el esfuerzo es mayor, y con el
+// volumen a pelo esa serie parecia PEOR que una floja.
+//
+// Aviso importante, porque es facil olvidarlo: no hay ninguna cifra
+// estandar para esto, es un numero elegido. Por eso
+//   1. los kg GUARDADOS son siempre los de verdad -- el factor se aplica
+//      solo al PINTAR, nunca al escribir en la base;
+//   2. es ajustable por dispositivo (Progreso > "Peso extra de una serie
+//      al fallo"), asi que cambiarlo no reescribe ningun historial: los
+//      mismos datos se vuelven a sumar con otro numero;
+//   3. x1 lo desactiva del todo y deja el volumen como los kg reales.
+// El factor se aplica a la serie ENTERA, tramos de dropset/rest-pause
+// incluidos: lo que se llevo al fallo fue la serie completa.
+const GYM_FAILURE_FACTORS = [1, 1.1, 1.2, 1.25, 1.5];
+function getGymFailureFactor() {
+  const guardado = Number(localStorage.getItem('gymFailureFactor'));
+  return GYM_FAILURE_FACTORS.includes(guardado) ? guardado : 1.2;
+}
+// Volumen ya ajustado a partir de los kg REALES y de cuantos de esos kg
+// salieron de series al fallo. Lo usan por igual el cliente y lo que
+// llega agregado de las rutas (que devuelven las dos cifras aparte, en
+// kg de verdad, precisamente para poder hacer esta cuenta aqui).
+function gymVolumenAjustado(volumenKg, volumenAlFalloKg) {
+  return (Number(volumenKg) || 0) + (Number(volumenAlFalloKg) || 0) * (getGymFailureFactor() - 1);
+}
+
 function gymSetSegments(set) {
   return set && Array.isArray(set.segments) ? set.segments.filter(Boolean) : [];
 }
 
-// Kilos movidos por la serie ENTERA (madre + tramos). Es lo que usan el
-// volumen del historial, el mapa de musculos y la grafica semanal.
-function gymSetVolumeKg(set) {
+// Kilos REALES movidos por la serie entera (madre + tramos), sin
+// ajustar. Es lo que se guarda y lo que hay que usar para cualquier cosa
+// que quiera saber cuanto peso se movio de verdad.
+function gymSetVolumeRealKg(set) {
   let total = (Number(set.reps) || 0) * (Number(set.weightKg) || 0);
   for (const seg of gymSetSegments(set)) {
     total += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
   }
   return total;
+}
+
+// ¿Esta serie se llevo al fallo? Los tramos heredan la marca de su madre
+// (llevan su propio set_type de 'dropset'/'restpause'), asi que la
+// pregunta siempre es por la serie, nunca por un tramo suelto.
+function gymSetEsAlFallo(set) {
+  return set.setType === 'failure' || set.failure === true;
+}
+
+// El volumen tal y como se PINTA: los kg reales, con el peso extra si la
+// serie fue al fallo. Lo usan el historial, el mapa de musculos, la
+// grafica semanal y los PRs, para que todos cuenten igual.
+function gymSetVolumeKg(set) {
+  const real = gymSetVolumeRealKg(set);
+  return gymSetEsAlFallo(set) ? gymVolumenAjustado(real, real) : real;
 }
 
 // La serie y sus tramos como una lista plana de "cosas con peso y
@@ -9980,7 +10036,22 @@ function gymLiveTick() {
     globalBar.classList.remove('hidden');
     document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
     document.body.classList.add('gym-rest-push');
+  } else if (liveHidden && gymIndiceDelEjercicioEnEspera() >= 0) {
+    // Descanso terminado y serie pendiente: la barra deja de ser una
+    // cuenta atras y pasa a ser el aviso de "te toca". Tocarla arranca
+    // la serie directamente, sin tener que volver antes al entreno.
+    const iEspera = gymIndiceDelEjercicioEnEspera();
+    const exEspera = gymLiveSession.exercises[iEspera];
+    globalLabel.textContent = `Empezar serie ${gymSetSerieNumber(exEspera, gymNextPendingSetIndex(exEspera))}`;
+    document.getElementById('gym-global-rest-remaining').textContent = '▶';
+    document.getElementById('gym-global-rest-fill-base').style.width = '100%';
+    document.getElementById('gym-global-rest-fill-extra').style.width = '0%';
+    globalBar.classList.add('is-ready');
+    globalBar.classList.remove('hidden');
+    document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
+    document.body.classList.add('gym-rest-push');
   } else if (liveHidden && gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    globalBar.classList.remove('is-ready');
     globalLabel.textContent = 'Descanso';
     // floor y no ceil: la tarjeta de la pantalla de bloqueo redondea
     // HACIA ABAJO (estilo reloj del sistema: un temporizador de 1:00
@@ -10004,6 +10075,7 @@ function gymLiveTick() {
     document.body.classList.add('gym-rest-push');
   } else {
     globalBar.classList.add('hidden');
+    globalBar.classList.remove('is-ready');
     document.body.classList.remove('gym-rest-push');
   }
 
@@ -10043,9 +10115,13 @@ function gymLiveTick() {
         gymRestExpiryPending = false;
         if (gymLiveSession && gymLiveSession.restUntil && gymLiveSession.restUntil <= Date.now()) {
           gymLiveSession.restUntil = null;
+          // Momento en que se acabo: enciende el aviso de "te toca" y,
+          // si esta puesto, arranca la siguiente serie sola.
+          gymLiveSession.restEndedAt = Date.now();
           gymLiveStore();
           // Ahora si: el descanso termino de verdad, fuera la tarjeta.
           gymEndRestLiveActivity();
+          gymAvisarFinDeDescanso();
           gymLiveTick();
         }
       });
@@ -10053,6 +10129,49 @@ function gymLiveTick() {
     bar.classList.add('hidden');
   }
 }
+// --- Al acabar el descanso: que no se te pase la siguiente serie ------
+// Koku: "cada vez que acaba el tiempo de descanso se me olvida darle a
+// empezar serie". Dos cosas, y las dos a la vez (eligio las dos):
+//   1. SIEMPRE: el boton "Empezar serie N" del ejercicio cuyo descanso
+//      acaba de terminar se pone grande y llamativo, y la mini-barra
+//      global pasa a decir "Empezar serie N" (tocarla la arranca desde
+//      donde estes, sin tener que volver a mano al entreno).
+//   2. OPCIONAL (Configuracion > Notificaciones, apagado de fabrica):
+//      que la serie arranque SOLA. Solo si queda alguna pendiente --
+//      nunca inventa una serie extra, que es lo que hace gymStartSet
+//      cuando ya estan todas hechas.
+// El aviso se apaga solo en cuanto empieza una serie (gymStartSet limpia
+// restEndedAt), asi que no se queda encendido para siempre.
+
+// El ejercicio al que "le toca" ahora: el del descanso que acaba de
+// terminar. gymLiveSession.restSetRef ya apunta a la serie cuyo descanso
+// estaba corriendo, y NO se borra al vencer, asi que sigue sirviendo.
+function gymIndiceDelEjercicioEnEspera() {
+  if (!gymLiveSession || !gymLiveSession.restEndedAt || gymLiveSession.activeSet) return -1;
+  const ref = gymLiveSession.restSetRef;
+  if (!ref) return -1;
+  const i = gymLiveSession.exercises.findIndex((e) => e.exerciseId === ref.exerciseId);
+  if (i < 0) return -1;
+  // Sin serie pendiente no hay nada que anunciar (el ejercicio se acabo).
+  return gymNextPendingSetIndex(gymLiveSession.exercises[i]) >= 0 ? i : -1;
+}
+
+function gymAutoStartEnabled() {
+  return localStorage.getItem('gymAutoStartNextSet') === 'true';
+}
+
+// Se llama justo despues de dar el descanso por vencido.
+function gymAvisarFinDeDescanso() {
+  const i = gymIndiceDelEjercicioEnEspera();
+  if (i < 0) return;
+  if (gymAutoStartEnabled()) {
+    gymStartSet(i);
+    renderGymLiveExercises();
+    return;
+  }
+  renderGymLiveExercises();
+}
+
 // Evita encolar mil recogidas mientras la primera esta en camino.
 let gymRestExpiryPending = false;
 // Ultimo sondeo de +30s pendientes (ver gymLiveTick).
@@ -10175,16 +10294,29 @@ async function gymCancelRestNotification() {
   }
 }
 
-// Al volver a la app tras un descanso avisado en modo insistente, las
-// repeticiones (902/903) ya cumplieron su funcion (vibrar): se quitan
-// del centro de notificaciones y queda solo el aviso principal.
+// Al volver a la app, el aviso de "Descanso terminado" ya ha cumplido su
+// funcion: quitarlo del centro de notificaciones. Antes solo se quitaban
+// las repeticiones (902/903) y el principal (901) se quedaba puesto, asi
+// que habia que borrarlo A MANO cada vez -- lo pidio Koku: "si hay una
+// notificacion y entro en la app, que se borre".
+//
+// Se hace en el foreground, que cubre los dos casos de una vez: tocar el
+// aviso abre la app (y de paso iOS ya lo retira), y volver a la app por
+// tu cuenta lo limpia igual. Se limita a los avisos del DESCANSO (los
+// ids reservados): los recordatorios de eventos no se tocan, se quedan
+// hasta que los quites tu (decision de Koku frente a limpiarlo todo).
+//
+// Ojo: esto NO pelea con la vigilancia de audio que para la vibracion
+// (RestAudioWatcher sondea getDeliveredNotifications y se detiene cuando
+// el aviso desaparece). Abrir la app ya callaba la vibracion, asi que
+// quitar el aviso aqui va en la misma direccion.
 async function gymCleanupRestNotificationStack() {
   if (typeof getLocalNotificationsPlugin !== 'function') return;
   const plugin = getLocalNotificationsPlugin();
   if (!plugin || typeof plugin.removeDeliveredNotifications !== 'function') return;
   try {
     await plugin.removeDeliveredNotifications({
-      notifications: GYM_REST_NOTIFICATION_IDS.slice(1).map((id) => ({ id })),
+      notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })),
     });
   } catch (err) {
     // Limpiar es cosmetico: si falla, no pasa nada.
@@ -10723,6 +10855,8 @@ function gymStartSet(exIndex, setIndexOverride = null) {
     pausedMs: 0,
     pausedAt: null,
   };
+  // Ya has empezado: el aviso de "te toca" del fin de descanso sobra.
+  gymLiveSession.restEndedAt = null;
   // Si estabas descansando, empezar la siguiente serie corta el descanso:
   // ya estas entrenando otra vez.
   if (gymLiveSession.restUntil) {
@@ -10839,6 +10973,20 @@ function gymTapShouldOpenEnd(target) {
   });
   vista.addEventListener('pointercancel', () => { gymTapStart = null; });
 })();
+
+// --- "Llegué al fallo" dentro del dialogo de fin de serie -------------
+let gymSetEndFailure = false;
+
+function renderGymSetEndFailure() {
+  const btn = document.getElementById('btn-gym-set-end-failure');
+  btn.classList.toggle('is-on', gymSetEndFailure);
+  btn.setAttribute('aria-pressed', gymSetEndFailure ? 'true' : 'false');
+}
+
+document.getElementById('btn-gym-set-end-failure').addEventListener('click', () => {
+  gymSetEndFailure = !gymSetEndFailure;
+  renderGymSetEndFailure();
+});
 
 // --- Tramos de una serie alargada dentro del dialogo de fin de serie ---
 // Lo que se este escribiendo ahora mismo en la linea "¿Has alargado la
@@ -10969,6 +11117,8 @@ document.getElementById('btn-gym-set-end-done').addEventListener('click', () => 
   // deshizo y se esta rehaciendo, se recupera lo que tuviera apuntado.
   gymSetEndSegments = (set.segments || []).map((seg) => ({ ...seg }));
   renderGymSetEndSegments();
+  gymSetEndFailure = !!set.failure;
+  renderGymSetEndFailure();
   gymSetEndShowForm(true);
 });
 
@@ -10988,6 +11138,7 @@ function gymFinishActiveSet() {
     set.reps = rEl.value !== '' ? rEl.value : (rEl.placeholder || '');
     set.note = document.getElementById('gym-set-end-note').value;
     set.segments = gymLeerTramosDelFormulario();
+    set.failure = gymSetEndFailure;
     set.done = true;
     set.durationSeconds = gymActiveSetSeconds();
     set.extraRest = 0;
@@ -11091,7 +11242,7 @@ function renderGymLiveExercises() {
         : '—';
       return `
         <div class="gym-live-set-row ${set.done ? 'done' : ''}">
-          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymSegmentChipHtml(set)}</span>
+          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymFailureChipHtml(set.failure)}${gymSegmentChipHtml(set)}</span>
           <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
           <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${unit}" data-live-field="weightDisplay" data-set="${setIndex}" value="${set.weightDisplay}" />
           <input type="number" inputmode="numeric" min="0" placeholder="reps" data-live-field="reps" data-set="${setIndex}" value="${set.reps}" />
@@ -11121,8 +11272,11 @@ function renderGymLiveExercises() {
       const label = pendingIdx >= 0
         ? `▶ Empezar serie ${gymSetSerieNumber(ex, pendingIdx)} de ${gymSerieCount(ex)}${pendingSet && pendingSet.side ? ` · lado ${gymSideLabel(pendingSet.side)}` : ''}`
         : '▶ Empezar serie extra';
+      // Con el descanso recien acabado, el boton de ESTE ejercicio se
+      // pone grande y llamativo: es el que se le olvidaba pulsar a Koku.
+      const leToca = gymIndiceDelEjercicioEnEspera() === exIndex;
       bigBtnHtml = `
-        <button type="button" class="gym-set-big-btn gym-set-start-btn" data-live-set-start ${active ? 'disabled' : ''}>
+        <button type="button" class="gym-set-big-btn gym-set-start-btn${leToca ? ' is-ready' : ''}" data-live-set-start ${active ? 'disabled' : ''}>
           ${label}
         </button>`;
     }
@@ -11482,7 +11636,16 @@ document.addEventListener('click', (e) => {
 document.getElementById('gym-global-rest').addEventListener('click', () => {
   if (!gymLiveSession) return;
   if (typeof closeSettingsModal === 'function') closeSettingsModal();
+  // En modo "te toca" (descanso acabado, serie pendiente) la barra
+  // arranca la serie ademas de llevarte al entreno: es justo el paso que
+  // se olvidaba.
+  const iEspera = gymIndiceDelEjercicioEnEspera();
   openGymLiveView();
+  if (iEspera >= 0) {
+    gymStartSet(iEspera);
+    renderGymLiveExercises();
+    gymLiveTick();
+  }
 });
 
 // Al arrancar la app, si quedo una sesion en curso guardada se carga en
@@ -11520,6 +11683,7 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
   const exerciseNotes = {};
   const musclesTouched = new Set();
   let volumeKg = 0;
+  let failureSets = 0;
   for (const ex of gymLiveSession.exercises) {
     if (ex.note && ex.note.trim()) exerciseNotes[ex.exerciseId] = ex.note.trim();
     for (const set of ex.sets) {
@@ -11538,6 +11702,7 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
         reps: set.reps,
         weightKg,
         segments,
+        setType: set.failure ? 'failure' : null,
         restSeconds: set.restSeconds,
         // El RPE es del EJERCICIO (peticion de Koku): se guarda replicado
         // en cada serie para no cambiar el esquema de gym_sets.
@@ -11548,8 +11713,13 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
         side: set.side || null,
         notes: set.note || null,
       });
-      volumeKg += (Number(set.reps) || 0) * (weightKg || 0);
-      for (const seg of segments) volumeKg += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
+      let volumenDeLaSerie = (Number(set.reps) || 0) * (weightKg || 0);
+      for (const seg of segments) volumenDeLaSerie += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
+      if (set.failure) {
+        failureSets += 1;
+        volumenDeLaSerie = gymVolumenAjustado(volumenDeLaSerie, volumenDeLaSerie);
+      }
+      volumeKg += volumenDeLaSerie;
       const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
       if (exercise && exercise.muscleGroup) musclesTouched.add(gymMuscleGroupLabel(exercise.muscleGroup));
     }
@@ -11583,6 +11753,7 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
   document.getElementById('gym-summary-duration').textContent = `${minutes} min`;
   document.getElementById('gym-summary-sets').textContent = String(sets.length);
   document.getElementById('gym-summary-volume').textContent = `${gymWeightKgToDisplay(volumeKg)} ${getGymWeightUnitLabel()}`;
+  document.getElementById('gym-summary-failure').textContent = String(failureSets);
   document.getElementById('gym-summary-muscles').textContent = String(musclesTouched.size);
   document.getElementById('gym-summary-muscle-list').textContent = [...musclesTouched].join(' · ');
 
@@ -12012,7 +12183,7 @@ function renderGymSessionExercisesField() {
       // "+60s" = descanso extra anadido con +30s durante el entreno en
       // vivo (peticion de Koku: que el historial lo ensene por serie).
       setRow.innerHTML = `
-        <span class="gym-session-set-number" ${set.notes ? `title="${escapeHtml(set.notes)}"` : ''}>Serie ${setIndex + 1}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.durationSeconds ? `<span class="gym-set-dur-chip" title="Lo que duró la serie">${gymFormatWorkTime(set.durationSeconds)}</span>` : ''}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}${gymSegmentChipHtml(set)}</span>
+        <span class="gym-session-set-number" ${set.notes ? `title="${escapeHtml(set.notes)}"` : ''}>Serie ${setIndex + 1}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.durationSeconds ? `<span class="gym-set-dur-chip" title="Lo que duró la serie">${gymFormatWorkTime(set.durationSeconds)}</span>` : ''}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}${gymFailureChipHtml(set.setType === 'failure')}${gymSegmentChipHtml(set)}</span>
         <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
         <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
         <input type="number" data-field="restSeconds" placeholder="Desc. (s)" min="0" title="Descanso planificado, en segundos" value="${set.restSeconds ?? ''}" />
@@ -12107,6 +12278,9 @@ function openGymSessionModal(session) {
         // como llegan): aqui solo se VEN, se editan en el entreno. Lo
         // importante es que editar una sesion a mano no los borre.
         segments: (set.segments || []).map((seg) => ({ ...seg })),
+        // Y lo mismo con el tipo de serie ('failure', 'warmup'...): antes
+        // no viajaba y editar una sesion a mano lo borraba sin avisar.
+        setType: set.setType ?? null,
       });
     });
     gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets, rpe: rpeByExercise.get(exerciseId) ?? '' }));
@@ -12147,6 +12321,7 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         side: set.side ?? null,
         notes: set.notes ?? null,
         segments: set.segments || [],
+        setType: set.setType ?? null,
       });
     });
   });
@@ -12213,6 +12388,24 @@ const gymWeeklyGoalField = createSelectField({
 });
 document.getElementById('gym-weekly-goal-field').appendChild(gymWeeklyGoalField.element);
 
+// Cuanto pesa de mas una serie al fallo en el volumen. Ajuste por
+// dispositivo, como la unidad de peso y el objetivo semanal: no viaja
+// con los datos, y cambiarlo NO reescribe nada -- los kg guardados son
+// los reales y esto solo cambia como se suman al pintar.
+const gymFailureFactorField = createSelectField({
+  options: GYM_FAILURE_FACTORS.map((n) => ({
+    value: String(n),
+    label: n === 1 ? 'No contar de más (×1)' : `×${String(n).replace('.', ',')}`,
+  })),
+  initialValue: String(getGymFailureFactor()),
+  onChange: (value) => {
+    localStorage.setItem('gymFailureFactor', value);
+    renderGymProgressSections();
+    renderGymSessionsList();
+  },
+});
+document.getElementById('gym-failure-factor-field').appendChild(gymFailureFactorField.element);
+
 // Punto de entrada de toda la seccion: se llama al entrar en la pestana
 // Progreso (ver switchGymTab), no en cada apertura del Gimnasio.
 async function renderGymProgressSections() {
@@ -12267,6 +12460,10 @@ function renderGymConsistency(summary) {
   // (solo cuenta lo registrado con el boton de empezar/terminar serie,
   // asi que en sesiones apuntadas a mano sale 0 y no se ensena).
   const monthWork = monthSessions.reduce((acc, s) => acc + (s.workSeconds || 0), 0);
+  // Series al fallo del mes: el "cuanto has apretado" al lado del
+  // "cuanto has entrenado" (peticion de Koku). Solo sale si hay alguna,
+  // para no ensenar un 0 permanente a quien no las marque.
+  const monthFailureSets = monthSessions.reduce((acc, s) => acc + (s.failureSetCount || 0), 0);
 
   document.getElementById('gym-consistency-stats').innerHTML = `
     <div class="gym-live-summary-grid gym-consistency-grid">
@@ -12274,6 +12471,7 @@ function renderGymConsistency(summary) {
       <div class="gym-live-summary-stat"><b>${streak}</b><span>Racha (semanas)</span></div>
       <div class="gym-live-summary-stat"><b>${thisWeekCount}/${goal}</b><span>Esta semana</span></div>
       <div class="gym-live-summary-stat"><b>${monthCount}</b><span>Este mes</span></div>
+      ${monthFailureSets > 0 ? `<div class="gym-live-summary-stat"><b>${monthFailureSets}</b><span>Series al fallo este mes</span></div>` : ''}
       ${monthWork > 0 ? `<div class="gym-live-summary-stat gym-stat-wide"><b>${gymFormatWorkTime(monthWork)}</b><span>Tiempo de trabajo este mes</span></div>` : ''}
     </div>
   `;
@@ -12726,7 +12924,7 @@ function gymComputeAchievementStats(summary) {
     sessionsByWeek.set(week, (sessionsByWeek.get(week) || 0) + 1);
     months.add(s.date.slice(0, 7));
     if (s.type === 'activity') activityCount += 1; else gymCount += 1;
-    totalVolumeKg += s.volumeKg || 0;
+    totalVolumeKg += gymVolumenAjustado(s.volumeKg, s.failureVolumeKg);
   }
   const distinct = new Set();
   for (const session of state.gymSessions) {
@@ -12859,7 +13057,9 @@ async function renderGymProgressChart(exerciseId) {
   const unit = getGymWeightUnitLabel();
   const isVolume = gymProgressMetric === 'volume';
   const values = points.map((p) => {
-    const raw = isVolume ? p.volumeKg : p.maxWeightKg;
+    // El volumen de la grafica cuenta el peso extra de las series al
+    // fallo; el peso maximo no, que ese es el peso que de verdad movio.
+    const raw = isVolume ? gymVolumenAjustado(p.volumeKg, p.failureVolumeKg) : p.maxWeightKg;
     return gymWeightKgToDisplay(raw) || 0;
   });
   const maxValue = Math.max(...values, 1);
