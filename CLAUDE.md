@@ -482,6 +482,58 @@ tema si no existe uno con ese nombre. Ojo con el nombre "Registro": el
 **estilo de interacción** que se llama igual (`[data-ui-style]` en
 `styles.css`) es otra cosa y SÍ se queda.
 
+## Orientación bloqueada en vertical
+
+Petición de Koku (9/9/2026): la app no rota a apaisado. Toda la interfaz
+está pensada mobile-first en vertical y en horizontal la barra de abajo,
+el calendario y las pantallas completas se quedan sin alto útil.
+
+- **iOS**: `ios/App/App/Info.plist` — `UISupportedInterfaceOrientations`
+  se queda solo con `UIInterfaceOrientationPortrait` (sin
+  `PortraitUpsideDown`: el iPhone no gira solo del revés). El iPad
+  (`~ipad`) sí admite además del revés, que en tablet es natural.
+- **Android**: `android/app/src/main/AndroidManifest.xml` —
+  `android:screenOrientation="portrait"` en la MainActivity. Ojo: NO se
+  quita `orientation` de `configChanges`, que es lo que evita que
+  Android reinicie la Activity (y la webview con ella) ante un cambio de
+  configuración de ese tipo.
+
+No hay `manifest.json` en el repo (se quitó en su día), así que por el
+lado web no hay nada que bloquear.
+
+## Vibración del fin de descanso: qué la calla de verdad
+
+Probado por Koku en el iPhone (ronda del 9/9/2026), con el botón
+"Probar el aviso (10 s)" de Configuración → Notificaciones:
+
+- **Sí la callan**: un botón de volumen, desbloquear la pantalla, abrir
+  la app, y quitar el aviso desde el centro de notificaciones.
+- **No la callan, y no es un fallo nuestro**:
+  - *La pausa de los AirPods.* Los mandos remotos
+    (`MPRemoteCommandCenter`, ver `RestAlertStopper.swift`) solo llegan
+    a la app que está reproduciendo. Con Spotify sonando, esa pulsación
+    es suya y iOS no se la pasa a nadie más. Quitarle el mando a Spotify
+    sí lo detectaría, pero entonces esa misma pulsación le pausaría la
+    música — justo lo que Koku no quería.
+  - *Deslizar el aviso hacia arriba.* Eso solo lo esconde: sigue
+    entregado, y iOS no avisa a la app. La detección va por sondeo de
+    `getDeliveredNotifications` (`bannerTimer` en `RestAudioWatcher`),
+    así que solo se entera cuando el aviso desaparece DE VERDAD, o sea
+    al quitarlo del centro de notificaciones.
+
+Los textos de los "?" de esa sección dicen exactamente esto, para no
+prometer lo que no se cumple.
+
+**Bug arreglado en la misma ronda**: la línea de diagnóstico
+(`gym-rest-alert-status`, "se paró X a los N segundos") se rellenaba
+SOLO dentro de `refreshMobileTab()`, o sea al *entrar* en la sección —
+que es justo cuando todavía no hay nada que contar. El recorrido real es
+entrar, pulsar Probar, bloquear, callarlo, desbloquear... y la pantalla
+seguía siendo la misma de antes de la prueba. Ahora es
+`refreshGymRestAlertStatus()` en `settings.js`, a la que llaman también
+un listener de `visibilitychange` (al volver a primer plano, solo si esa
+sección está a la vista) y un temporizador tras lanzar la prueba.
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de

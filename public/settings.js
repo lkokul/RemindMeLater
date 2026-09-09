@@ -1311,17 +1311,8 @@ function refreshMobileTab() {
   // QUE corto el ultimo aviso (lo apunta la parte nativa), que es la
   // unica forma de saber desde el propio movil si callarla con el
   // volumen, el mando del auricular o quitando la notificacion funciona.
-  const alertStatus = document.getElementById('gym-rest-alert-status');
-  const testBtn = document.getElementById('btn-test-gym-rest-alert');
-  testBtn.disabled = !nativo;
-  if (!nativo) {
-    alertStatus.textContent = '';
-  } else if (typeof gymRestAlertLastStatus === 'function') {
-    alertStatus.textContent = 'Vibración del descanso: comprobando...';
-    gymRestAlertLastStatus().then((info) => {
-      alertStatus.textContent = gymFormatRestAlertStatus(info);
-    });
-  }
+  document.getElementById('btn-test-gym-rest-alert').disabled = !nativo;
+  refreshGymRestAlertStatus();
 
   refreshGymTimeFormatOptions();
   // Animaciones de TODA la app (zoom y deslizar del calendario, pero
@@ -1378,11 +1369,45 @@ document.getElementById('btn-help-notif-duck').addEventListener('click', () => {
   showAppAlert('Al acabar el descanso, la app baja unos segundos el volumen de lo que esté sonando (Spotify, Música...) y luego lo devuelve — como hace el GPS al hablar. No pausa ni corta nada.\n\nPara conseguirlo, durante el descanso la app se mantiene despierta en segundo plano (reproduce silencio a volumen cero); el gasto de batería es mínimo y solo dura lo que dura el descanso. Si iOS llegara a cerrar la app del todo, ese descanso no podría bajar la música (la notificación llega igual).');
 });
 document.getElementById('btn-help-notif-burst').addEventListener('click', () => {
-  showAppAlert('Al acabar el descanso, el móvil vibra varias veces seguidas (unos 10 segundos, como un aviso del sistema) para que se note aunque lo lleves en el bolsillo. Se calla en cuanto te enteras: al tocar un botón de volumen, con la pausa del auricular, quitando la notificación de la pantalla, al desbloquear el móvil o al abrir la app. Antes esto se hacía repitiendo la notificación tres veces; ahora la vibración la produce la propia app y solo llega UNA notificación.\n\nFunciona porque durante el descanso la app se mantiene despierta (lo mismo que permite bajarte la música). Si iOS llegara a cerrarla del todo, ese descanso avisaría solo con la notificación normal.');
+  showAppAlert('Al acabar el descanso, el móvil vibra varias veces seguidas (unos 10 segundos, como un aviso del sistema) para que se note aunque lo lleves en el bolsillo. Antes esto se hacía repitiendo la notificación tres veces; ahora la vibración la produce la propia app y solo llega UNA notificación.\n\nFormas de callarla que funcionan (probadas en iPhone): tocar un botón de volumen, desbloquear la pantalla, abrir la app, o quitar el aviso desde el centro de notificaciones.\n\nDos que NO funcionan, y no es un fallo de la app:\n\n• La pausa de los AirPods. Si hay música sonando, ese botón pertenece a quien está reproduciendo (Spotify, Música...), y iOS no se lo pasa a nadie más. Para enterarnos habría que quitarle a Spotify el mando — y entonces esa pulsación le pausaría la música, que es justo lo que no queremos.\n\n• Deslizar el aviso hacia arriba para quitarlo de la pantalla. Eso solo lo esconde: el aviso sigue estando en el centro de notificaciones, e iOS no avisa a la app de que lo has apartado. Quitarlo del centro de notificaciones sí funciona, porque ahí sí desaparece de verdad.\n\nTodo esto funciona porque durante el descanso la app se mantiene despierta (lo mismo que permite bajarte la música). Si iOS llegara a cerrarla del todo, ese descanso avisaría solo con la notificación normal.');
 });
 document.getElementById('btn-help-notif-test').addEventListener('click', () => {
-  showAppAlert('Lanza el aviso de fin de descanso dentro de 10 segundos, con los mismos ajustes de arriba y sin tener que empezar un entrenamiento. Da tiempo a bloquear el móvil (y a poner música, si quieres probar que baja de volumen).\n\nCuando vibre, prueba a callarlo: tocando un botón de volumen, con la pausa del auricular, quitando la notificación de la pantalla o abriendo la app. Al volver aquí, la línea de abajo dice qué lo paró y a los cuántos segundos.');
+  showAppAlert('Lanza el aviso de fin de descanso dentro de 10 segundos, con los mismos ajustes de arriba y sin tener que empezar un entrenamiento. Da tiempo a bloquear el móvil (y a poner música, si quieres probar que baja de volumen).\n\nCuando vibre, prueba a callarlo: tocando un botón de volumen, desbloqueando la pantalla, abriendo la app o quitando el aviso desde el centro de notificaciones. La línea de abajo dice qué lo paró y a los cuántos segundos, y se actualiza sola al volver a esta pantalla.');
 });
+// Rellena la linea de "asi acabo el ultimo aviso".
+//
+// ANTES esto vivia suelto dentro de refreshMobileTab(), o sea que solo
+// se leia al ENTRAR en la seccion -- y ese es justo el momento en que
+// todavia no hay nada que contar. El recorrido real es: entras aqui,
+// pulsas "Probar el aviso", bloqueas el movil, lo callas como sea, lo
+// desbloqueas... y la pantalla sigue siendo la MISMA que se pinto antes
+// de la prueba, asi que la linea se quedaba con el texto viejo ("Aviso
+// lanzado: salta en 10 segundos") y parecia que el diagnostico no
+// existia. Por eso ahora es una funcion aparte a la que se llama
+// tambien al volver a primer plano y al terminar la prueba.
+function refreshGymRestAlertStatus() {
+  const alertStatus = document.getElementById('gym-rest-alert-status');
+  if (!alertStatus) return;
+  // localNotificationsAvailable(): "¿estamos en la app instalada?" -- en
+  // un navegador normal no hay parte nativa que pueda apuntar nada.
+  if (!localNotificationsAvailable() || typeof gymRestAlertLastStatus !== 'function') {
+    alertStatus.textContent = '';
+    return;
+  }
+  gymRestAlertLastStatus().then((info) => {
+    alertStatus.textContent = gymFormatRestAlertStatus(info);
+  });
+}
+
+// Al volver a primer plano (desbloquear el movil, volver desde otra app)
+// se vuelve a leer el diagnostico, pero SOLO si la seccion de
+// Notificaciones esta a la vista -- si no, seria trabajo para nada.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  const panel = document.getElementById('settings-tab-notifications');
+  if (panel && !panel.classList.contains('hidden')) refreshGymRestAlertStatus();
+});
+
 document.getElementById('btn-test-gym-rest-alert').addEventListener('click', async () => {
   const status = document.getElementById('gym-rest-alert-status');
   if (typeof gymLiveSession !== 'undefined' && gymLiveSession && gymLiveSession.restUntil) {
@@ -1392,6 +1417,11 @@ document.getElementById('btn-test-gym-rest-alert').addEventListener('click', asy
   try {
     await gymTestRestAlert(10);
     status.textContent = 'Aviso lanzado: salta en 10 segundos. Bloquea el móvil y prueba a callarlo.';
+    // 10s hasta que salta + los ~10s que dura la vibracion + un margen:
+    // si para entonces sigues en esta pantalla (por ejemplo lo callaste
+    // sin bloquear el movil, asi que no hubo vuelta a primer plano que
+    // dispare el listener de arriba), la linea se actualiza sola.
+    setTimeout(refreshGymRestAlertStatus, 23000);
   } catch (err) {
     status.textContent = 'No se pudo lanzar el aviso de prueba.';
   }

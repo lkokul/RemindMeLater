@@ -82,18 +82,24 @@
 	<array>
 		<string>armv7</string>
 	</array>
+	<!-- SOLO VERTICAL (peticion de Koku). Toda la interfaz esta pensada
+	     mobile-first en vertical: en apaisado la barra de abajo, el
+	     calendario y las pantallas completas se quedan sin alto util. Se
+	     deja UIInterfaceOrientationPortrait a secas, sin
+	     PortraitUpsideDown, porque el iPhone no gira solo del reves.
+	     Quitar las dos de apaisado es lo unico que hace falta: iOS
+	     respeta esta lista y ni siquiera intenta rotar. -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- El iPad va igual: aqui si se deja tambien del reves, porque una
+	     tablet en vertical se coge de las dos formas con la misma
+	     comodidad y no hay "arriba" evidente como en el movil. -->
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
