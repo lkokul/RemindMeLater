@@ -2566,7 +2566,10 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    y desbordaba en pantallas estrechas): # / Anterior / peso / reps / ✓. */
 .gym-live-set-row {
   display: grid;
-  grid-template-columns: 2.4rem minmax(3.5rem, 1fr) 4.4rem 4rem 2rem;
+  /* Sin la columna del ✓ (se quito: no aportaba y no cabia). El numero
+     ya no lleva chips -- van en su propia linea debajo -- asi que puede
+     ser estrecho y el resto respira. */
+  grid-template-columns: 2rem minmax(3.5rem, 1fr) 4.6rem 4.2rem;
   gap: 0.4rem;
   align-items: center;
   font-size: 0.85rem;
@@ -2653,29 +2656,6 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 }
 .gym-live-hidden-row .secondary-btn { font-size: 0.78rem; padding: 0.3rem 0.5rem; flex-shrink: 0; }
 
-/* --- Empezar/terminar serie con botones grandes ----------------------
-   La casilla diminuta de cada fila paso a ser solo un INDICADOR de
-   estado (y el atajo para deshacer); el control de verdad es el boton
-   ancho de la tarjeta (peticion de Koku: verlo bien aunque vayas
-   mareado a mitad de serie). */
-.gym-set-status {
-  width: 100%;
-  height: 1.9rem;
-  padding: 0;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: color-mix(in srgb, var(--surface-2-text) 45%, var(--surface-2));
-  font-size: 0.9rem;
-  line-height: 1;
-}
-.gym-set-status.done {
-  border-color: var(--gym-accent);
-  background: color-mix(in srgb, var(--gym-accent) 20%, var(--surface-2));
-  color: var(--gym-accent);
-  font-weight: 700;
-}
-
 /* Boton grande: el de la tarjeta y los de los dos dialogos comparten
    tamano (alto de sobra para acertar sin mirar). */
 .gym-set-big-btn {
@@ -2739,6 +2719,9 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   margin-top: 0.4rem;
   max-height: 40vh;
   overflow-y: auto;
+  /* El borde del elegido quedaba CORTADO contra el recorte del scroll
+     (lo vio Koku). Con un par de pixeles de aire ya no roza. */
+  padding: 2px;
 }
 .gym-set-exercise-option {
   display: flex;
@@ -2752,7 +2735,13 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   border-radius: var(--radius);
   padding: 0.6rem 0.7rem;
 }
-.gym-set-exercise-option.active { border-color: var(--gym-accent); color: var(--gym-accent); }
+.gym-set-exercise-option.active {
+  border-color: var(--gym-accent);
+  color: var(--gym-accent);
+  /* El resalte va POR DENTRO (box-shadow inset): un borde mas grueso
+     movia la fila, y uno normal se corta contra el recorte del scroll. */
+  box-shadow: inset 0 0 0 1px var(--gym-accent);
+}
 
 /* Formulario de la serie recien hecha (peso / reps / nota) dentro del
    dialogo de terminar: campos apilados con su texto encima. */
@@ -2873,6 +2862,16 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   transition: transform 0.18s ease;
 }
 .note-swipe-wrap.is-dragging > .gym-live-exercise-card { transition: none; }
+/* LA REGLA QUE FALTABA. Sin ella la tarjeta se deslizaba mientras
+   arrastrabas y volvia sola a su sitio al soltar, tapando otra vez los
+   botones: "se despliega, pero no se mantiene, no puedo pulsar ninguna
+   de las 3 opciones". CLAUDE.md ya avisaba de que hacen falta las DOS
+   reglas (la del transform abierto y la de is-dragging) y se coló solo
+   una. Y la prueba no lo pilló porque miraba la clase is-open, que SI
+   se ponia -- hay que comprobar el transform de verdad. */
+.note-swipe-wrap.is-open > .gym-live-exercise-card {
+  transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem)));
+}
 
 /* Modo mover armado: la tarjeta se levanta y avisa de que ahora se
    arrastra. Al soltar se desarma sola. */
@@ -2894,6 +2893,17 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 /* Las tarjetas que se apartan para dejar el hueco lo hacen con calma. */
 .note-swipe-wrap[data-exercise-id] { transition: transform 0.16s ease; }
 .note-swipe-wrap.arrastrando { transition: none; }
+
+/* Plegar/recoger un ejercicio en el modal de editar una sesión. */
+.gym-session-exercise-block.collapsed .gym-session-sets-list,
+.gym-session-exercise-block.collapsed .gym-add-set-btn { display: none; }
+.gym-session-caret {
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+.gym-session-exercise-block.collapsed .gym-session-caret { transform: rotate(-90deg); }
+/* Cuántas series tiene, para que recogido siga diciendo algo. */
+.gym-session-set-count { flex-shrink: 0; font-variant-numeric: tabular-nums; }
 
 /* --- El diálogo de editar un ejercicio entero ------------------------- */
 .gym-exercise-edit-card { max-width: 34rem; }
@@ -2959,8 +2969,13 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   width: 1.15rem; height: 1.15rem;
   border: 2px solid color-mix(in srgb, var(--surface-2-text) 45%, var(--surface-2));
   border-radius: 0.3rem;
-  position: relative;
+  /* El check dentro va centrado por flex, no colocado a mano. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
+.gym-set-flag-mark svg { width: 80%; height: 80%; display: none; }
 .gym-set-flag-btn.is-on {
   border-color: var(--gym-accent);
   color: var(--gym-accent);
@@ -2970,17 +2985,23 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   border-color: var(--gym-accent);
   background: var(--gym-accent);
 }
-/* El check: dos lados de un cuadrado girado, el truco de siempre para
-   dibujarlo sin una imagen ni una fuente de iconos. */
-.gym-set-flag-btn.is-on .gym-set-flag-mark::after {
-  content: '';
-  position: absolute;
-  left: 0.3rem; top: 0.06rem;
-  width: 0.28rem; height: 0.6rem;
-  border: solid var(--gym-accent-text);
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
+.gym-set-flag-btn.is-on .gym-set-flag-mark svg {
+  display: block;
+  color: var(--gym-accent-text);
 }
+
+/* Los chips de la serie (fallo, tramos, +30s) van en su PROPIA linea
+   debajo de la fila: metidos en la celda del numero se comian la columna
+   de "Anterior" (lo vio Koku: "el fallo corta un poco con el apartado de
+   anterior"). */
+.gym-live-set-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding-left: 2.4rem;
+  margin: -0.15rem 0 0.15rem;
+}
+.gym-live-set-chips > * { margin-left: 0; }
 
 /* Chip "Fallo" en la fila de la serie, junto al lado I/D y al "+60s". */
 .gym-set-failure-chip {

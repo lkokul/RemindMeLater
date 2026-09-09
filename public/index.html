@@ -928,7 +928,13 @@
              ya estaba reservado en el esquema. -->
         <div class="gym-set-flags">
           <button type="button" class="gym-set-flag-btn" id="btn-gym-set-end-failure" aria-pressed="false">
-            <span class="gym-set-flag-mark" aria-hidden="true"></span>
+            <!-- El check va en SVG y no dibujado con bordes girados: eso
+                 ultimo nunca queda centrado del todo (Koku: "el tick está
+                 un poco movido") porque el aspa no es simetrica. Mismo
+                 motivo por el que el sol y la luna son SVG. -->
+            <span class="gym-set-flag-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </span>
             <span>Llegué al fallo</span>
           </button>
         </div>

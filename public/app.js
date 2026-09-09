@@ -8549,10 +8549,14 @@ function gymFailureChipHtml(esAlFallo) {
 //   3. x1 lo desactiva del todo y deja el volumen como los kg reales.
 // El factor se aplica a la serie ENTERA, tramos de dropset/rest-pause
 // incluidos: lo que se llevo al fallo fue la serie completa.
+// Por defecto x1,25: lo eligio Koku ya usando la app de verdad, y con un
+// criterio concreto de que es "al fallo" -- "tratar de hacer la
+// repeticion y no poder terminarla, no decir okey creo que no puedo una
+// mas, sino forzar esa otra mas y no conseguir sacarla".
 const GYM_FAILURE_FACTORS = [1, 1.1, 1.2, 1.25, 1.5];
 function getGymFailureFactor() {
   const guardado = Number(localStorage.getItem('gymFailureFactor'));
-  return GYM_FAILURE_FACTORS.includes(guardado) ? guardado : 1.2;
+  return GYM_FAILURE_FACTORS.includes(guardado) ? guardado : 1.25;
 }
 // Volumen ya ajustado a partir de los kg REALES y de cuantos de esos kg
 // salieron de series al fallo. Lo usan por igual el cliente y lo que
@@ -11040,10 +11044,19 @@ function renderGymExerciseEditSets() {
         <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
         <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
         <button type="button" class="gym-set-extend-btn${set.failure ? ' is-on' : ''}" data-toggle-failure>${set.failure ? '✓ ' : ''}Al fallo</button>
+        <button type="button" class="gym-set-extend-btn${set.done ? ' is-on' : ''}" data-toggle-done>${set.done ? '✓ Hecha' : 'Sin hacer'}</button>
       </div>
     `;
     bloque.querySelectorAll('[data-set-field]').forEach((input) => {
       input.addEventListener('input', () => { set[input.dataset.setField] = input.value; });
+    });
+    // Marcar/desmarcar la serie como hecha. Antes era el ✓ de la fila del
+    // entreno, que se quito: la columna no aportaba (ya se ve el "—"
+    // cuando no hay nada) y ahi no habia sitio.
+    bloque.querySelector('[data-toggle-done]').addEventListener('click', () => {
+      set.done = !set.done;
+      if (!set.done) { set.durationSeconds = null; set.extraRest = 0; }
+      renderGymExerciseEditSets();
     });
     bloque.querySelector('[data-quitar-serie]').addEventListener('click', async () => {
       const ok = await showAppConfirm('¿Quitar esta serie del ejercicio?', { okText: 'Quitar', danger: true });
@@ -11502,12 +11515,14 @@ function renderGymLiveExercises() {
         : '—';
       return `
         <div class="gym-live-set-row ${set.done ? 'done' : ''}">
-          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymFailureChipHtml(set.failure)}${gymSegmentChipHtml(set)}</span>
+          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}</span>
           <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
           <span class="gym-live-set-value">${escapeHtml(String(set.weightDisplay || '—'))}</span>
           <span class="gym-live-set-value">${escapeHtml(String(set.reps || '—'))}</span>
-          <button type="button" class="gym-set-status${set.done ? ' done' : ''}" data-live-status="${setIndex}" aria-label="${set.done ? 'Deshacer esta serie' : 'Serie pendiente'}" title="${set.done ? 'Deshacer esta serie' : 'Pendiente'}">${set.done ? '✓' : ''}</button>
         </div>
+        ${set.extraRest || set.failure || gymSetSegments(set).length
+          ? `<div class="gym-live-set-chips">${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymFailureChipHtml(set.failure)}${gymSegmentChipHtml(set)}</div>`
+          : ''}
       `;
     }).join('');
 
@@ -11556,7 +11571,8 @@ function renderGymLiveExercises() {
         <div class="gym-live-set-row gym-live-set-head">
           <span class="gym-live-set-number">#</span>
           <span class="gym-live-set-prev">Anterior</span>
-          <span>${unit}</span><span>Reps</span><span>✓</span>
+          <span class="gym-live-set-value">${unit}</span>
+          <span class="gym-live-set-value">Reps</span>
         </div>
         ${setsHtml}
         ${bigBtnHtml}
@@ -11573,27 +11589,6 @@ function renderGymLiveExercises() {
       card.classList.toggle('collapsed', ex.collapsed);
     });
 
-    // El ✓ de cada fila ya no es un control para MARCAR (eso lo hace el
-    // boton grande): solo indica estado y sirve para DESHACER una serie
-    // dada por buena por error.
-    card.querySelectorAll('[data-live-status]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const setIndex = Number(btn.dataset.liveStatus);
-        const set = ex.sets[setIndex];
-        if (!set.done) return;
-        set.done = false;
-        set.durationSeconds = null;
-        set.extraRest = 0;
-        // El descanso que habia arrancado esa serie ya no pinta nada.
-        gymLiveSession.restUntil = null;
-        gymCancelRestNotification();
-        gymEndRestLiveActivity();
-        gymCancelRestAudioWatch();
-        gymLiveStore();
-        renderGymLiveExercises();
-        gymLiveTick();
-      });
-    });
     // Empezar serie: pasa por el dialogo de confirmacion (que ejercicio y
     // que serie), con el nombre pulsable para cambiar de ejercicio.
     const startBtn = card.querySelector('[data-live-set-start]');
@@ -12353,6 +12348,12 @@ document.getElementById('gym-session-routine-field').appendChild(gymSessionRouti
 // una a una.
 let gymSessionModalExercises = [];
 
+// Que ejercicios del modal de historial estan RECOGIDOS, por indice.
+// Peticion de Koku: "me gustaria que los ejercicios en historial tambien
+// tuvieran lo de desplegar y recoger, seria mas comodo a la hora de
+// modificar cosas". Se vacia al abrir el modal.
+let gymSessionExercisesCollapsed = new Set();
+
 function renderGymSessionExercisesField() {
   const container = document.getElementById('gym-session-exercises-field');
   container.innerHTML = '';
@@ -12364,28 +12365,41 @@ function renderGymSessionExercisesField() {
     const block = document.createElement('div');
     block.className = 'gym-session-exercise-block';
 
+    const recogido = gymSessionExercisesCollapsed.has(exIndex);
+    block.classList.toggle('collapsed', recogido);
+
     const header = document.createElement('div');
     header.className = 'gym-routine-exercise-row';
     // El RPE es UNO por ejercicio (peticion de Koku), no por serie: vive
     // aqui en la cabecera. Ademas, sacandolo de las filas de serie estas
     // dejan de desbordarse en pantallas estrechas (el RPE se salia).
     header.innerHTML = `
+      <button type="button" class="icon-btn gym-session-caret" data-plegar aria-label="${recogido ? 'Desplegar' : 'Recoger'} ejercicio" aria-expanded="${recogido ? 'false' : 'true'}">▾</button>
       <select data-field="exerciseId">${gymExerciseOptionsHtml(exRow.exerciseId)}</select>
+      <span class="gym-list-item-muted gym-session-set-count">${exRow.sets.length}</span>
       <input type="number" data-field="exRpe" placeholder="RPE" min="1" max="10" step="0.5" title="RPE del ejercicio" value="${exRow.rpe ?? ''}" />
       <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
     `;
+    header.querySelector('[data-plegar]').addEventListener('click', () => {
+      if (gymSessionExercisesCollapsed.has(exIndex)) gymSessionExercisesCollapsed.delete(exIndex);
+      else gymSessionExercisesCollapsed.add(exIndex);
+      renderGymSessionExercisesField();
+    });
     header.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
       gymSessionModalExercises[exIndex].exerciseId = Number(e.target.value);
     });
     header.querySelector('[data-field="exRpe"]').addEventListener('input', (e) => {
       gymSessionModalExercises[exIndex].rpe = e.target.value;
     });
-    header.querySelector('.icon-btn').addEventListener('click', async () => {
+    header.querySelector('[aria-label="Quitar ejercicio"]').addEventListener('click', async () => {
       // Quitar un ejercicio aqui borra sus series apuntadas: confirmacion
       // (peticion de Koku, "seguro que quieres quitar...").
       const ok = await showAppConfirm('¿Quitar este ejercicio de la sesión, con sus series apuntadas?', { okText: 'Quitar', danger: true });
       if (!ok) return;
       gymSessionModalExercises.splice(exIndex, 1);
+      // Los indices se corren al quitar uno: se olvida que estaba
+      // recogido, si no el plegado se le quedaria al de al lado.
+      gymSessionExercisesCollapsed = new Set();
       renderGymSessionExercisesField();
     });
     block.appendChild(header);
@@ -12393,75 +12407,75 @@ function renderGymSessionExercisesField() {
     const setsList = document.createElement('div');
     setsList.className = 'gym-session-sets-list';
     exRow.sets.forEach((set, setIndex) => {
-      const setRow = document.createElement('div');
-      setRow.className = 'gym-session-set-row';
-      // "+60s" = descanso extra anadido con +30s durante el entreno en
-      // vivo (peticion de Koku: que el historial lo ensene por serie).
-      setRow.innerHTML = `
-        <span class="gym-session-set-number" ${set.notes ? `title="${escapeHtml(set.notes)}"` : ''}>Serie ${setIndex + 1}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.durationSeconds ? `<span class="gym-set-dur-chip" title="Lo que duró la serie">${gymFormatWorkTime(set.durationSeconds)}</span>` : ''}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}${gymFailureChipHtml(set.setType === 'failure')}${gymSegmentChipHtml(set)}</span>
-        <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
-        <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
-        <input type="number" data-field="restSeconds" placeholder="Desc. (s)" min="0" title="Descanso planificado, en segundos" value="${set.restSeconds ?? ''}" />
-        <button type="button" class="icon-btn" aria-label="Quitar serie">✕</button>
+      // Cada serie es un BLOQUE con el mismo formato que los tramos:
+      // cabecera arriba y campos con su etiqueta encima. Antes era una
+      // fila apretada con rotulos dentro de los campos y una ristra de
+      // chips en el numero, y se rompia: Koku vio "Serie 1 2 min R-P"
+      // partido en dos lineas y el "Drop" comiendose la casilla de las
+      // repeticiones. Aqui cada cosa tiene su sitio y su nombre.
+      const bloqueSerie = document.createElement('div');
+      bloqueSerie.className = 'gym-exercise-edit-set';
+      const unidad = getGymWeightUnitLabel();
+      // En la cabecera solo lo que NO se ve ya en otro sitio: el lado, lo
+      // que duro y el descanso extra. El "Drop"/"R-P" NO se repite -- se
+      // ve entero en su editor, justo debajo (peticion de Koku: "si tengo
+      // el menu para ver la dropset, no hace falta que me lo indiques en
+      // la serie, ya lo veo").
+      bloqueSerie.innerHTML = `
+        <div class="gym-set-segment-head">
+          <span class="gym-set-segment-tag">${setIndex + 1}</span>
+          <span class="gym-set-segment-name">Serie${set.side ? ` · lado ${gymSideLabel(set.side)}` : ''}</span>
+          ${set.setType === 'failure' ? `<span class="gym-set-failure-chip" title="Serie llevada al fallo">Fallo</span>` : ''}
+          <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar serie">✕</button>
+        </div>
+        ${set.durationSeconds || set.extraRestSeconds
+          ? `<div class="gym-live-set-chips">${set.durationSeconds ? `<span class="gym-set-dur-chip" title="Lo que duró la serie">${gymFormatWorkTime(set.durationSeconds)}</span>` : ''}${set.extraRestSeconds ? `<span class="gym-set-extra-chip" title="Descanso extra añadido durante el entreno">+${set.extraRestSeconds}s</span>` : ''}</div>`
+          : ''}
+        <div class="gym-set-segment-fields">
+          <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><input type="number" data-field="weight" min="0" step="0.5" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
+          <label class="gym-set-segment-field"><span>Reps</span><input type="number" data-field="reps" min="0" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
+          <label class="gym-set-segment-field"><span>Descanso (s)</span><input type="number" data-field="restSeconds" min="0" value="${escapeHtml(String(set.restSeconds ?? ''))}" /></label>
+        </div>
+        ${set.notes ? `<p class="gym-live-card-meta">${escapeHtml(set.notes)}</p>` : ''}
+        <div class="gym-set-segments" data-seg-editor="${exIndex}-${setIndex}"></div>
+        <div class="gym-set-extend-list gym-session-set-actions"></div>
       `;
-      setRow.querySelector('[data-field="reps"]').addEventListener('input', (e) => {
-        set.reps = e.target.value;
-      });
-      setRow.querySelector('[data-field="weight"]').addEventListener('input', (e) => {
-        set.weightDisplay = e.target.value;
-      });
-      setRow.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => {
-        set.restSeconds = e.target.value;
-      });
-      setRow.querySelector('button').addEventListener('click', () => {
+      bloqueSerie.querySelector('[data-field="reps"]').addEventListener('input', (e) => { set.reps = e.target.value; });
+      bloqueSerie.querySelector('[data-field="weight"]').addEventListener('input', (e) => { set.weightDisplay = e.target.value; });
+      bloqueSerie.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => { set.restSeconds = e.target.value; });
+      bloqueSerie.querySelector('[data-quitar-serie]').addEventListener('click', () => {
         exRow.sets.splice(setIndex, 1);
         renderGymSessionExercisesField();
       });
-      setsList.appendChild(setRow);
 
       // Los tramos, EDITABLES tambien aqui (peticion de Koku: "a lo mejor
       // le he dado a acabar y se me ha olvidado darle a que he hecho
       // alguna o le he dado mal al peso"). Mismo editor que el del
       // entreno en vivo, montado sobre este contenedor.
-      const extras = document.createElement('div');
-      extras.className = 'gym-session-set-extras';
-      const editor = document.createElement('div');
-      editor.className = 'gym-set-segments';
-      editor.dataset.segEditor = `${exIndex}-${setIndex}`;
-      const pesoMadreDeLaFila = () => {
-        const el = setRow.querySelector('[data-field="weight"]');
-        return el && el.value !== '' ? el.value : '';
-      };
+      const editor = bloqueSerie.querySelector('[data-seg-editor]');
+      const acciones = bloqueSerie.querySelector('.gym-session-set-actions');
       if (!Array.isArray(set.segments)) set.segments = [];
       const pintarTramos = () => montarEditorDeTramos(editor, set.segments, {
-        pesoMadre: pesoMadreDeLaFila(),
-        alQuitar: () => { pintarTramos(); pintarAcciones(); },
+        pesoMadre: bloqueSerie.querySelector('[data-field="weight"]').value || '',
+        alQuitar: () => pintarTramos(),
       });
-
-      const acciones = document.createElement('div');
-      acciones.className = 'gym-set-extend-list gym-session-set-actions';
-      const pintarAcciones = () => {
-        acciones.innerHTML = `
-          <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
-          <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
-          <button type="button" class="gym-set-extend-btn${set.setType === 'failure' ? ' is-on' : ''}" data-toggle-failure>${set.setType === 'failure' ? '✓ ' : ''}Al fallo</button>
-        `;
-        acciones.querySelectorAll('[data-add-seg]').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            set.segments.push({ kind: btn.dataset.addSeg, weightDisplay: '', reps: '', pauseSeconds: '' });
-            pintarTramos();
-          });
+      acciones.innerHTML = `
+        <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
+        <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
+        <button type="button" class="gym-set-extend-btn${set.setType === 'failure' ? ' is-on' : ''}" data-toggle-failure>${set.setType === 'failure' ? '✓ ' : ''}Al fallo</button>
+      `;
+      acciones.querySelectorAll('[data-add-seg]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          set.segments.push({ kind: btn.dataset.addSeg, weightDisplay: '', reps: '', pauseSeconds: '' });
+          pintarTramos();
         });
-        acciones.querySelector('[data-toggle-failure]').addEventListener('click', () => {
-          set.setType = set.setType === 'failure' ? null : 'failure';
-          renderGymSessionExercisesField();
-        });
-      };
+      });
+      acciones.querySelector('[data-toggle-failure]').addEventListener('click', () => {
+        set.setType = set.setType === 'failure' ? null : 'failure';
+        renderGymSessionExercisesField();
+      });
       pintarTramos();
-      pintarAcciones();
-      extras.appendChild(editor);
-      extras.appendChild(acciones);
-      setsList.appendChild(extras);
+      setsList.appendChild(bloqueSerie);
     });
     block.appendChild(setsList);
 
@@ -12542,6 +12556,7 @@ function openGymSessionModal(session) {
       });
     });
     gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets, rpe: rpeByExercise.get(exerciseId) ?? '' }));
+    gymSessionExercisesCollapsed = new Set();
   } else {
     gymSessionModalExercises = [];
   }
@@ -13348,8 +13363,15 @@ async function renderGymProgressChart(exerciseId) {
   // Koku no queria "la fecha por defecto" (mismo motivo por el que ya se
   // quito de la grafica de Evolucion mensual de Finanzas, ver el
   // comentario junto a attachFinanzasChartTooltips mas abajo).
+  // Dos circulos por punto: el que se VE (r=4) y uno transparente mucho
+  // mas grande que es el que se toca -- con el dedo, 4px de radio es
+  // imposible de acertar (por eso "no te deja pinchar el punto").
   const dots = coords
-    .map((c, i) => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="var(--accent)" data-tooltip="${escapeHtml(`${formatGymDate(points[i].date)}: ${values[i]} ${unit}`)}"></circle>`)
+    .map((c, i) => {
+      const texto = escapeHtml(`${formatGymDate(points[i].date)}: ${values[i]} ${unit}`);
+      return `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="var(--accent)" data-tooltip="${texto}"></circle>`
+        + `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="18" fill="transparent" data-tooltip="${texto}"></circle>`;
+    })
     .join('');
   // Solo se etiquetan la primera, la ultima, y todas si hay pocos puntos
   // -- con muchas sesiones, poner una fecha bajo cada punto se solapa.
@@ -13366,7 +13388,7 @@ async function renderGymProgressChart(exerciseId) {
       ${dots}
       ${labels}
     </svg>
-    <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso máximo'} por sesión, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Pasa el ratón por un punto para ver la fecha exacta.</p>
+    <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso máximo'} por sesión, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Toca un punto para ver la fecha exacta.</p>
   `;
   attachFinanzasChartTooltips(container.querySelector('svg'));
 }
@@ -13502,22 +13524,38 @@ function getFinanzasChartTooltip() {
 // barras ya renderizados no se reutilizan entre repintados (wrap.innerHTML
 // se reescribe entero cada vez), asi que no hace falta quitar listeners
 // viejos.
+// Ojo: esto nacio para el raton (mouseenter/mousemove/mouseleave) y en
+// el movil no habia forma de ver el dato -- Koku: "la grafica de volumen
+// total no te deja pinchar el punto". Ahora escucha TAMBIEN pointerdown,
+// que cubre dedo y raton por igual, y el aviso se va solo a los 2,5s o
+// al tocar en otro sitio.
+let gymChartTooltipTimer = null;
 function attachFinanzasChartTooltips(svgEl) {
   if (!svgEl) return;
   const tooltip = getFinanzasChartTooltip();
+  const mostrar = (el, x, y) => {
+    tooltip.textContent = el.dataset.tooltip;
+    tooltip.classList.remove('hidden');
+    // Pegado al borde derecho se saldria de la pantalla: se cambia de
+    // lado cuando no cabe.
+    const ancho = tooltip.offsetWidth || 160;
+    tooltip.style.left = `${x + 14 + ancho > window.innerWidth ? Math.max(8, x - 14 - ancho) : x + 14}px`;
+    tooltip.style.top = `${y + 14}px`;
+  };
+  const esconder = () => tooltip.classList.add('hidden');
   svgEl.querySelectorAll('[data-tooltip]').forEach((el) => {
-    el.addEventListener('mouseenter', () => {
-      tooltip.textContent = el.dataset.tooltip;
-      tooltip.classList.remove('hidden');
-    });
-    el.addEventListener('mousemove', (e) => {
-      tooltip.style.left = `${e.clientX + 14}px`;
-      tooltip.style.top = `${e.clientY + 14}px`;
-    });
-    el.addEventListener('mouseleave', () => {
-      tooltip.classList.add('hidden');
+    el.addEventListener('mouseenter', (e) => mostrar(el, e.clientX, e.clientY));
+    el.addEventListener('mousemove', (e) => mostrar(el, e.clientX, e.clientY));
+    el.addEventListener('mouseleave', esconder);
+    el.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      mostrar(el, e.clientX, e.clientY);
+      if (gymChartTooltipTimer) clearTimeout(gymChartTooltipTimer);
+      gymChartTooltipTimer = setTimeout(esconder, 2500);
     });
   });
+  // Tocar fuera lo quita al momento.
+  svgEl.addEventListener('pointerdown', esconder);
 }
 
 function renderFinanzasMonthlyTrendChart(data) {

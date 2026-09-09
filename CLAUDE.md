@@ -1024,8 +1024,13 @@ ya, todo el resto deslizando, editar o eliminar"*.
 
 **La tarjeta ya no tiene ni un campo donde escribir.** Peso, repes, RPE
 y nota se VEN, no se tocan; el descanso es un dato, no un chip pulsable.
-Lo que queda a golpe de toque: plegar/desplegar, empezar o terminar la
-serie, y el ✓ de deshacer. Eso tiene una consecuencia que hace que todo
+Lo que queda a golpe de toque: plegar/desplegar y empezar o terminar la
+serie. La columna del ✓ también se fue (Koku: *"sabiendo que ahora te
+aparece lo de — si no hay nada, esa columna te la puedes cargar"*);
+`done` sigue existiendo por dentro, y marcar/desmarcar una serie vive
+ahora en el diálogo del ejercicio. Los chips de la serie (fallo, tramos,
++30s) van en **su propia línea** debajo: metidos en la celda del número
+se comían la columna de "Anterior". Eso tiene una consecuencia que hace que todo
 encaje: **sin inputs, la tarjeta se puede deslizar sin pelearse con
 nadie** — antes, arrastrarla habría chocado con meter el dedo en un
 campo.
@@ -1049,6 +1054,17 @@ campo.
   se pisan. Ver `armarMovimientoDeEjercicio()` y
   `habilitarArrastreDeEjercicio()`.
 - **Quitar** es lo de siempre: va al pool de quitados, recuperable.
+
+**Trampa que costó la ronda entera**: `.note-swipe-wrap.is-open >
+.gym-live-exercise-card` — la regla del transform en estado ABIERTO. Sin
+ella la tarjeta se desliza mientras arrastras y **vuelve sola a su sitio
+al soltar**, tapando otra vez los botones: *"se despliega, pero no se
+mantiene, no puedo pulsar ninguna de las 3 opciones"*. CLAUDE.md ya
+avisaba de que hacen falta las DOS reglas (transform abierto +
+`is-dragging`) y se coló solo una. Y la prueba **no lo pilló** porque
+miraba la clase `is-open`, que sí se ponía: al envolver una fila nueva
+hay que comprobar el `transform` de verdad, o que el botón de acción esté
+DESTAPADO con `elementFromPoint`.
 
 Trampas que ya mordieron al construirlo:
 
