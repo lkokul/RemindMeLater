@@ -936,10 +936,6 @@ function renderThemeLibrary() {
         ${activeBadge}
       </div>
       <div class="theme-card-name">${escapeHtml(theme.name)} ${pairBadge}</div>
-      <div class="theme-card-actions">
-        <button type="button" data-action="edit" class="secondary-btn">Editar</button>
-        <button type="button" data-action="export" class="secondary-btn">Exportar</button>
-      </div>
     `;
     // Clicar la tarjeta (fuera de sus botones, que paran la propagacion)
     // fija ese tema como el de este dispositivo — ya no hace falta un
@@ -947,14 +943,6 @@ function renderThemeLibrary() {
     if (!isActive) {
       card.addEventListener('click', () => applyTheme(theme));
     }
-    card.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
-      e.stopPropagation();
-      switchThemeEdit(theme);
-    });
-    card.querySelector('[data-action="export"]').addEventListener('click', (e) => {
-      e.stopPropagation();
-      exportTheme(theme);
-    });
     const toggleBtn = card.querySelector('[data-action="toggle-variant"]');
     if (toggleBtn) {
       toggleBtn.addEventListener('click', (e) => {
@@ -970,7 +958,19 @@ function renderThemeLibrary() {
         setColorModePreference(resolvedIsLight ? 'dark' : 'light');
       });
     }
-    container.appendChild(card);
+    // Editar / Exportar / Eliminar se sacan DESLIZANDO la tarjeta, igual
+    // que las carpetas y notas de Mi espacio, las sesiones del historial
+    // del Gimnasio y las tarjetas de grupo (peticion de Koku). Antes
+    // "Editar" y "Exportar" eran dos botones siempre a la vista y
+    // "Eliminar" solo aparecia dentro de la ficha de edicion -- tres
+    // sitios distintos para tres acciones del mismo tema.
+    container.appendChild(wrapRowWithSwipeActions(card, {
+      botones: [
+        ['Editar', 'secondary-btn', () => switchThemeEdit(theme)],
+        ['Exportar', 'secondary-btn', () => exportTheme(theme)],
+        ['Eliminar', 'danger-btn', () => deleteThemeById(theme.id, theme.name)],
+      ],
+    }));
   });
 
   positionThemeForm();
@@ -1169,10 +1169,20 @@ document.getElementById('theme-form').addEventListener('submit', async (e) => {
   await saveCurrentThemeEdit();
 });
 
-document.getElementById('btn-delete-theme').addEventListener('click', async () => {
-  const id = document.getElementById('theme-id').value;
-  if (!id) return;
-  if (!confirm('¿Eliminar este tema? Los dispositivos que lo tuvieran activo se quedaran sin tema.')) return;
+// Borrar un tema con su confirmacion. Sale del boton "Eliminar" de la
+// ficha para poder usarse tambien desde el deslizamiento de la tarjeta,
+// sin tener que abrir la ficha antes.
+//
+// Ojo: antes esto usaba el confirm() del navegador. Es un dialogo del
+// sistema, no sigue el tema activo y ademas en la app instalada sale con
+// el nombre del sitio, asi que se cambia por showAppConfirm() como en el
+// resto de la app.
+async function deleteThemeById(id, nombre) {
+  if (!id) return false;
+  const seguro = await showAppConfirm(
+    `¿Eliminar el tema "${nombre || ''}"? Los dispositivos que lo tuvieran activo se quedarán sin tema.`,
+  );
+  if (!seguro) return false;
   await api(`/api/themes/${id}`, { method: 'DELETE' });
   document.getElementById('theme-form').classList.add('hidden');
   document.getElementById('btn-save-theme-changes').classList.add('hidden');
@@ -1180,6 +1190,12 @@ document.getElementById('btn-delete-theme').addEventListener('click', async () =
   themeDraftDirty = false;
   positionThemeForm();
   await refreshStyleTab();
+  return true;
+}
+
+document.getElementById('btn-delete-theme').addEventListener('click', () => {
+  const id = document.getElementById('theme-id').value;
+  deleteThemeById(id, document.getElementById('theme-name').value);
 });
 
 // --- Copiar estilo de otro dispositivo conectado ---

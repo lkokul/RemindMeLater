@@ -2067,7 +2067,8 @@ body {
    El fondo se pone explicito a proposito: la fila tiene que TAPAR a los
    botones que hay debajo, si no se transparentan al deslizar. */
 .note-swipe-wrap > .gym-list-item,
-.note-swipe-wrap > .group-card {
+.note-swipe-wrap > .group-card,
+.note-swipe-wrap > .theme-card {
   position: relative;
   background: var(--surface);
   transition: transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -2075,19 +2076,26 @@ body {
 }
 /* La tarjeta de grupo tiene su propio fondo (mas claro que el de una
    fila de gimnasio), que hay que conservar. */
-.note-swipe-wrap > .group-card { background: var(--surface-2); }
+.note-swipe-wrap > .group-card,
+.note-swipe-wrap > .theme-card { background: var(--surface-2); }
+/* El tema EN USO tiene su propio fondo tintado, que hay que conservar
+   tambien mientras se desliza. */
+.note-swipe-wrap > .theme-card.active { background: color-mix(in srgb, var(--accent) 18%, var(--surface-2)); }
 .note-swipe-wrap.is-open > .gym-list-item,
-.note-swipe-wrap.is-open > .group-card { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
+.note-swipe-wrap.is-open > .group-card,
+.note-swipe-wrap.is-open > .theme-card { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
 /* Mientras el dedo arrastra manda el transform en linea que escribe
    wrapRowWithSwipeActions(): sin transicion, para que la fila vaya
    pegada al dedo; al soltar vuelve el CSS de arriba y anima el ultimo
    tramo. */
 .note-swipe-wrap.is-dragging > .gym-list-item,
 .note-swipe-wrap.is-dragging > .group-card,
+.note-swipe-wrap.is-dragging > .theme-card,
 .note-swipe-wrap.is-dragging > .note-item { transition: none; }
 /* Los botones de accion viven detras de la tarjeta, asi que necesitan
    el mismo redondeo por la derecha para no asomar en las esquinas. */
-.note-swipe-wrap > .group-card { border-radius: var(--radius); }
+.note-swipe-wrap > .group-card,
+.note-swipe-wrap > .theme-card { border-radius: var(--radius); }
 /* Los botones asoman en vez de aparecer de golpe. */
 .note-swipe-wrap > .note-swipe-actions {
   opacity: 0.55;
@@ -3711,8 +3719,6 @@ body.gym-rest-push #settings-modal .settings-card {
 .theme-card-preview { display: flex; gap: 0.3rem; margin-bottom: 0.3rem; }
 .theme-card-preview .color-dot { width: 1.1rem; height: 1.1rem; }
 .theme-card-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem; }
-.theme-card-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
-.theme-card-actions button { padding: 0.35rem 0.6rem; font-size: 0.8rem; }
 
 .theme-form { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 1rem; }
 .theme-color-grid { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.6rem 0 1rem; }
@@ -4231,6 +4237,17 @@ body.gym-rest-push #settings-modal .settings-card {
   color: var(--surface-2-text);
 }
 .group-card-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+/* Candado de "Todos los eventos" cuando esta fijado (ver
+   todosLosEventosFijado en app.js): la tarjeta deja de moverse y esto
+   dice por que. Tocarlo lo suelta. */
+.group-card-lock {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  color: color-mix(in srgb, var(--surface-2-text) 55%, var(--surface-2));
+}
+.group-card-lock svg { width: 15px; height: 15px; }
+.group-card.is-locked { cursor: default; }
 
 /* Hueco y linea bajo los filtros: sin eso, la primera fila de la lista
    quedaba pegada a los desplegables y parecia una mas de la barra. */

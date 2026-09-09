@@ -7685,13 +7685,66 @@ function buildGroupViewCard(id, name, color) {
 
   // Deslizar para Editar / Eliminar, igual que las carpetas y notas de
   // Mi espacio y las sesiones del historial del Gimnasio (pedido de
-  // Koku). "Todos los eventos" queda fuera: no es un grupo de verdad,
-  // no hay nada que editar ni que borrar.
-  if (id === null) return btn;
-  return wrapRowWithSwipeActions(btn, {
-    onEdit: () => openGroupModal(state.groups.find((g) => g.id === id)),
-    onDelete: () => deleteGroupById(id),
+  // Koku).
+  if (id !== null) {
+    return wrapRowWithSwipeActions(btn, {
+      onEdit: () => openGroupModal(state.groups.find((g) => g.id === id)),
+      onDelete: () => deleteGroupById(id),
+    });
+  }
+
+  // "Todos los eventos" es el caso raro: no es un grupo de verdad, asi
+  // que no hay nada que editar ni que borrar. Pero dejarlo como la unica
+  // tarjeta que NO se mueve tampoco esta bien -- parece que la app se ha
+  // quedado colgada. Solucion pedida por Koku: que se deslice igual, sin
+  // botones, y que al hacerlo salga un aviso explicando por que, con la
+  // opcion de dejarlo fijo para que no vuelva a moverse.
+  if (todosLosEventosFijado()) {
+    btn.classList.add('is-locked');
+    btn.appendChild(iconoCandado());
+    return btn; // fijado: ni se mueve ni vuelve a preguntar
+  }
+  const wrap = wrapRowWithSwipeActions(btn, { botones: [], anchoFijo: 120 });
+  // El aviso sale al abrirse, no al empezar a arrastrar: si saltara a
+  // mitad del gesto cortaria el movimiento en seco.
+  btn.addEventListener('swipeabierto', async () => {
+    const fijar = await showAppConfirm(
+      '«Todos los eventos» no es un grupo de verdad: es el atajo para verlos todos juntos, así que no se puede editar ni eliminar.\n\n¿Quieres dejarlo fijo para que no se mueva? Aparecerá con un candado. Puedes volver a soltarlo desde aquí mismo.',
+      { okText: 'Dejarlo fijo', cancelText: 'Dejarlo como está' },
+    );
+    closeSwipedNoteRow();
+    if (!fijar) return; // sigue moviendose, y el aviso volvera a salir
+    localStorage.setItem('gruposTodosFijado', 'true');
+    renderGroupsViewList();
   });
+  return wrap;
+}
+
+// "Todos los eventos" fijado: preferencia de ESTE dispositivo (como el
+// tema o la unidad de peso), no algo compartido -- es una mania de como
+// te gusta ver la lista, no un dato del calendario.
+function todosLosEventosFijado() {
+  return localStorage.getItem('gruposTodosFijado') === 'true';
+}
+
+function iconoCandado() {
+  const span = document.createElement('span');
+  span.className = 'group-card-lock';
+  span.title = 'Fijo: no se puede editar ni eliminar. Tócalo para soltarlo.';
+  span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>';
+  // Tocar el candado lo suelta, para no dejarlo fijo para siempre sin
+  // forma de volver atras.
+  span.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const soltar = await showAppConfirm(
+      '«Todos los eventos» está fijo ahora mismo. ¿Quieres soltarlo para que vuelva a moverse al deslizarlo?',
+      { okText: 'Soltarlo', cancelText: 'Dejarlo fijo' },
+    );
+    if (!soltar) return;
+    localStorage.removeItem('gruposTodosFijado');
+    renderGroupsViewList();
+  });
+  return span;
 }
 
 // Borrar un grupo con su confirmacion. Sale del boton "Eliminar" de la
@@ -8236,13 +8289,22 @@ function renderGymRoutinesList() {
 // Reutiliza las mismas clases y el mismo estado de "solo una fila
 // abierta" (openSwipedNoteRow) que wrapNoteRowWithSwipe, para que abrir
 // una cierre la otra y el toque fuera las cierre todas.
-function wrapRowWithSwipeActions(row, { onEdit, onDelete }) {
+// botones: si se pasa, sustituye a la pareja Editar/Eliminar de siempre.
+// Cada entrada es [texto, clase, funcion]. Sirve para sitios que
+// necesitan otra combinacion -- los temas, por ejemplo, llevan tambien
+// "Exportar", y "Todos los eventos" no lleva ninguno.
+// anchoFijo: cuanto se desplaza la fila, en px, cuando NO hay botones
+// que medir (el caso de "Todos los eventos", que se desliza solo para
+// que salte su aviso). Sin esto, un contenedor de acciones vacio mide
+// cuatro pixeles y el gesto no se notaria.
+function wrapRowWithSwipeActions(row, { onEdit, onDelete, botones, anchoFijo } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'note-swipe-wrap';
 
   const acciones = document.createElement('div');
   acciones.className = 'note-swipe-actions';
-  [['Editar', 'secondary-btn', onEdit], ['Eliminar', 'danger-btn', onDelete]].forEach(([texto, clase, fn]) => {
+  const lista = botones || [['Editar', 'secondary-btn', onEdit], ['Eliminar', 'danger-btn', onDelete]];
+  lista.forEach(([texto, clase, fn]) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = clase;
@@ -8263,7 +8325,7 @@ function wrapRowWithSwipeActions(row, { onEdit, onDelete }) {
   // is-dragging) y se escribe el transform a mano; al soltar se borra el
   // transform en linea y manda otra vez el CSS, que anima el ultimo
   // tramo.
-  const anchoAcciones = () => acciones.offsetWidth || 152;
+  const anchoAcciones = () => anchoFijo || acciones.offsetWidth || 152;
   let inicio = null;
   let horizontal = false;
   const soltarArrastre = () => {
@@ -8306,8 +8368,14 @@ function wrapRowWithSwipeActions(row, { onEdit, onDelete }) {
     if (x < -ancho / 2) {
       if (openSwipedNoteRow !== wrap) closeSwipedNoteRow();
       wrap.style.setProperty('--swipe-actions-width', `${ancho}px`);
+      const yaEstaba = wrap.classList.contains('is-open');
       wrap.classList.add('is-open');
       openSwipedNoteRow = wrap;
+      // Aviso para quien quiera enterarse de que esta fila ACABA de
+      // abrirse (lo usa "Todos los eventos" para sacar su dialogo). Va
+      // aqui y no en el pointermove a proposito: si saltara a mitad del
+      // arrastre, cortaria el gesto en seco.
+      if (!yaEstaba) row.dispatchEvent(new CustomEvent('swipeabierto'));
     } else if (wrap.classList.contains('is-open')) {
       closeSwipedNoteRow();
     }
@@ -9856,57 +9924,7 @@ function gymRestBurstEnabled() {
 // atMs: cuando debe saltar. Por defecto, el final del descanso en curso;
 // se puede pasar a mano para el boton de PROBAR el aviso de
 // Configuracion (que recorre exactamente este mismo camino).
-// Tiene que ser EL MISMO texto que RestAlertStopper.categoriaDescanso en
-// la parte nativa: alli se registra la categoria con
-// .customDismissAction, aqui se le cuelga al aviso.
-const GYM_REST_NOTIFICATION_CATEGORY = 'descanso';
-
-// Apartar el aviso de la pantalla calla la vibracion (peticion de Koku:
-// "al subir la barra del banner que se quite tambien").
-//
-// El camino completo, que pasa por cuatro sitios: iOS ve que has
-// apartado el aviso -> como su categoria lleva .customDismissAction, se
-// lo cuenta al delegado -> el delegado es el del plugin de
-// notificaciones de Capacitor, que lo reenvia a la web como
-// "localNotificationActionPerformed" -> y eso acaba aqui.
-//
-// Se apunta ademas una marca en localStorage porque lo que para la
-// vibracion es cancelWatch(), y la parte nativa apunta esa parada como
-// "cancelado" (que normalmente significa otra cosa: que empezaste otra
-// serie). La marca sirve para que la linea de diagnostico diga la verdad
-// -- ver gymFormatRestAlertStatus().
-function gymHandleRestNotificationAction(evento) {
-  const accion = evento && evento.actionId;
-  const id = evento && evento.notification && evento.notification.id;
-  // Este es el identificador que usa iOS para "lo he apartado", tal cual
-  // lo reenvia Capacitor.
-  const esDescartar = accion === 'com.apple.UNNotificationDismissActionIdentifier'
-    || accion === 'dismiss';
-  if (!esDescartar || id !== GYM_REST_NOTIFICATION_ID) return;
-  localStorage.setItem('gymRestAlertDismissedAt', String(Date.now()));
-  gymCancelRestAudioWatch();
-}
-
-// Engancharse al aviso de "has apartado la notificacion". Se hace una
-// sola vez y de forma perezosa: el plugin solo existe en la app
-// instalada, y ademas no conviene registrar el mismo listener dos veces.
-let gymRestActionListenerPuesto = false;
-
-function gymEnsureRestNotificationActionListener() {
-  if (gymRestActionListenerPuesto) return;
-  if (typeof getLocalNotificationsPlugin !== 'function') return;
-  const plugin = getLocalNotificationsPlugin();
-  if (!plugin || typeof plugin.addListener !== 'function') return;
-  gymRestActionListenerPuesto = true;
-  try {
-    plugin.addListener('localNotificationActionPerformed', gymHandleRestNotificationAction);
-  } catch (err) {
-    console.error('No se pudo escuchar las acciones de las notificaciones:', err);
-  }
-}
-
 async function gymScheduleRestNotification(atMs = null) {
-  gymEnsureRestNotificationActionListener();
   if (typeof getLocalNotificationsPlugin !== 'function') return;
   const plugin = getLocalNotificationsPlugin();
   if (!plugin || !gymRestNotifyEnabled()) return;
@@ -9931,11 +9949,6 @@ async function gymScheduleRestNotification(atMs = null) {
       body: 'Siguiente serie.',
       schedule: { at: new Date(cuando) },
       threadIdentifier: 'gym-descanso',
-      // Categoria registrada en la parte nativa con .customDismissAction
-      // (ver RestAlertStopper.swift): es lo que hace que iOS avise
-      // cuando apartas el aviso de la pantalla, que es la unica forma de
-      // enterarse de que has deslizado el banner hacia arriba.
-      actionTypeId: GYM_REST_NOTIFICATION_CATEGORY,
     };
     if (sonido) aviso.sound = sonido;
     await plugin.schedule({ notifications: [aviso] });
@@ -10216,15 +10229,7 @@ async function gymRestAlertLastStatus() {
 }
 function gymFormatRestAlertStatus(info) {
   if (!info) return 'Vibración del descanso: sin datos todavía (prueba el aviso).';
-  let como = GYM_REST_STOP_LABELS[info.stoppedBy] || info.stoppedBy;
-  // La parada por apartar el aviso llega desde la web (ver
-  // gymHandleRestNotificationAction) y la parte nativa la apunta como
-  // "cancelado", que normalmente significa otra cosa. Si la marca de la
-  // web es de ese mismo instante, mandaria la marca.
-  const marca = Number(localStorage.getItem('gymRestAlertDismissedAt') || 0);
-  if (info.stoppedBy === 'cancelado' && marca && Math.abs(marca - Number(info.when || 0)) < 2000) {
-    como = 'al apartar el aviso de la pantalla';
-  }
+  const como = GYM_REST_STOP_LABELS[info.stoppedBy] || info.stoppedBy;
   const seg = Number(info.afterSeconds || 0).toFixed(1).replace('.', ',');
   const pulsos = Number(info.pulses || 0);
   const banner = info.bannerSeen ? '' : ' · la notificación no llegó a verse en pantalla';
@@ -15262,9 +15267,10 @@ document.getElementById('btn-delete-lecturas-item').addEventListener('click', as
 // - Carril CENTRAL: lo que tenga sentido DENTRO de la pantalla actual
 //   (cambiar de dia en el calendario, subir de carpeta en Notas, volver
 //   al menu de Configuracion, cambiar de pestaña dentro de Gimnasio...).
-//   Si en esa pantalla el centro no tiene nada que hacer, el gesto cae
-//   hacia atras y hace lo mismo que el lateral, para que nunca haya un
-//   deslizamiento "muerto" que parezca que la app no responde.
+//   Si en esa pantalla el centro no tiene nada que hacer, NO pasa nada:
+//   cambiar de pestaña es siempre cosa de los bordes, en cualquier
+//   pantalla. Asi un mismo deslizamiento por el centro nunca significa
+//   dos cosas distintas segun donde estes.
 //
 // Todo esto convive con los gestos que ya existian (deslizar vertical
 // para cambiar de mes/año, pellizcar para subir de nivel, deslizar una
@@ -15388,7 +15394,7 @@ function currentMobileTab() {
 function animarCambioDePantalla(direccion) {
   const capas = [
     'settings-modal', 'gym-view', 'finanzas-view', 'lecturas-view',
-    'viajes-view', 'extensions-view', 'mobile-notes-view', 'app',
+    'viajes-view', 'extensions-view', 'mobile-notes-view',
   ];
   for (const id of capas) {
     const el = document.getElementById(id);
@@ -15397,6 +15403,18 @@ function animarCambioDePantalla(direccion) {
       return;
     }
   }
+  // La pantalla del calendario es el caso especial: se anima
+  // <main class="layout">, NO el #app entero.
+  //
+  // Motivo (lo vio Koku: "tambien se mueve la barra de apps, esa no
+  // quiero que se mueva, marea"): la barra de abajo vive DENTRO de #app,
+  // asi que animar #app se la llevaba por delante. Y no basta con que la
+  // barra sea position:fixed -- un transform en un antepasado hace que
+  // lo fixed pase a colocarse respecto a EL, o sea que viaja igual. La
+  // unica forma limpia es mover solo el contenido y dejar la barra
+  // fuera del elemento que se transforma.
+  const contenido = document.querySelector('main.layout');
+  if (contenido) playMobileSwipeTransition(contenido, direccion);
 }
 
 // Cambiar de pestaña un paso. paso = +1 (deslizar a la izquierda,
@@ -15544,15 +15562,15 @@ function centroYaTieneDueno() {
   return CENTRO_CON_DUENO.some((id) => estaVisibleDeVerdad(document.getElementById(id)));
 }
 
-// El gesto central, segun el sentido. Devolver true significa "ya esta
-// resuelto, no hagas nada mas".
+// El gesto central, segun el sentido.
 function gestoCentral(paso) {
-  if (centroYaTieneDueno()) return true;
+  // Pantallas que ya usan el centro para lo suyo (la vista diaria): ahi
+  // este modulo no se mete.
+  if (centroYaTieneDueno()) return;
   // Hacia la derecha (paso -1): primero intentar salir de una capa.
-  if (paso < 0 && volverUnPasoDentroDeLaPantalla()) return true;
+  if (paso < 0 && volverUnPasoDentroDeLaPantalla()) return;
   // Dentro de una App con sub-pestañas, el centro las recorre.
-  if (moverSubPestana(paso)) return true;
-  return false;
+  moverSubPestana(paso);
 }
 
 // ---------------------------------------------------------------------
@@ -15622,10 +15640,17 @@ document.addEventListener('pointerup', (e) => {
     moverPestanaMovil(paso);
     return;
   }
-  // Centro: primero lo propio de la pantalla y, si ahi no habia nada que
-  // hacer, lo mismo que el lateral (para que el gesto nunca se sienta
-  // ignorado).
-  if (!gestoCentral(paso)) moverPestanaMovil(paso);
+  // Centro: SOLO lo propio de la pantalla. Si ahi no hay nada que hacer,
+  // no pasa nada -- cambiar de pestaña es siempre cosa de los bordes.
+  //
+  // Antes el centro "caia" al cambio de pestaña cuando no tenia nada que
+  // hacer, para que ningun gesto se sintiera ignorado. Koku pidio
+  // quitarlo: "que el movimiento entre vistas, da igual que tenga o no
+  // movimiento intra-app, que sea por los laterales, como en calendario
+  // diario o gimnasio". Y es mejor asi: con la regla vieja, el mismo
+  // deslizamiento por el centro hacia una cosa u otra segun la pantalla
+  // en la que estuvieras, que es justo lo que confunde.
+  gestoCentral(paso);
 }, true);
 
 applyUiStyle();
