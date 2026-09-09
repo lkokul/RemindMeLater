@@ -8110,7 +8110,22 @@ function gymWeightDisplayToKg(displayValue) {
 // del rediseno pueden tener texto libre, que se muestra tal cual.
 const GYM_MUSCLE_GROUPS = [
   { id: 'pecho', label: 'Pecho' },
-  { id: 'espalda', label: 'Espalda' },
+  // La espalda va en TRES, como pidio Koku: alta, media y dorsales.
+  // "Lumbar" es la de abajo y se queda como estaba, con su nombre de
+  // siempre.
+  //
+  // De donde sale el reparto de los ~870 ejercicios de la libreria: el
+  // origen (free-exercise-db) solo distingue "lats" y "middle back", asi
+  // que "lats" -> dorsales y "middle back" -> espalda media (que son
+  // casi todo remos, espalda media de manual). Espalda ALTA no existe
+  // como categoria alli, asi que se rescataron por nombre los pocos que
+  // de verdad trabajan la parte de arriba (romboides, remo alto,
+  // retraccion escapular) -- por eso sale con menos ejercicios que las
+  // otras dos. Si algun ejercicio esta en el sitio que no toca, se
+  // cambia a mano desde su ficha, sin tocar codigo.
+  { id: 'espalda_alta', label: 'Espalda alta' },
+  { id: 'espalda_media', label: 'Espalda media' },
+  { id: 'dorsales', label: 'Dorsales' },
   { id: 'lumbar', label: 'Lumbar' },
   { id: 'hombros', label: 'Hombros' },
   { id: 'trapecio', label: 'Trapecio' },
@@ -11963,9 +11978,22 @@ const GYM_BODYMAP_ZONES = [
     '523 217 557 217 566 272 609 328 689 366 647 404 617 532 523 647 532 383',
   ] },
   { g: 'hombros', tx: 1120, polys: ['294 370 230 391 174 443 183 536 243 494 272 464', '711 370 783 396 826 447 817 536 749 489 723 451'] },
-  { g: 'espalda', tx: 1120, polys: [
-    '311 387 281 489 285 553 340 753 472 711 472 664 366 540 336 413',
-    '689 387 719 494 715 562 660 753 528 711 528 664 634 545 664 417',
+  // La mancha de la espalda, partida en TRES franjas (alta, media y
+  // dorsales) con dos cortes horizontales, a y=470 y a y=560. Los
+  // puntos de los cortes salen de interpolar sobre los bordes del
+  // poligono original, asi que las tres piezas encajan sin dejar hueco
+  // ni solaparse -- si se tocan estos numeros a ojo, se nota.
+  { g: 'espalda_alta', tx: 1120, polys: [
+    '311 387 287 470 349 470 336 413',
+    '689 387 712 470 652 470 664 417',
+  ] },
+  { g: 'espalda_media', tx: 1120, polys: [
+    '287 470 281 489 285 553 287 560 383 560 366 540 349 470',
+    '712 470 719 494 715 560 621 560 634 545 652 470',
+  ] },
+  { g: 'dorsales', tx: 1120, polys: [
+    '287 560 340 753 472 711 472 664 383 560',
+    '715 560 660 753 528 711 528 664 621 560',
   ] },
   { g: 'triceps', tx: 1120, polys: [
     '268 498 179 557 145 723 166 817 217 638 268 557',

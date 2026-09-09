@@ -1414,6 +1414,118 @@ function applyLocalSchema(db) {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // La espalda pasa de UN grupo muscular a TRES (peticion de Koku el
+  // 9/9/2026): espalda alta, espalda media y dorsales. "lumbar" no se
+  // toca, esa ya existia y se queda igual.
+  //
+  // Los ejercicios que ya estan importados en la base guardan
+  // muscle_group = 'espalda', que a partir de ahora no significa nada.
+  // Reimportar la libreria NO los arregla: el import es idempotente por
+  // library_id y devuelve la fila que ya hay sin tocarla (a proposito,
+  // para no pisar los cambios que hayas hecho a mano). Asi que hay que
+  // recolocarlos aqui.
+  //
+  // El reparto se calculo a partir del origen de la libreria
+  // (free-exercise-db), que si distinguia "lats" de "middle back". Como
+  // la INMENSA mayoria de los "lats" son dorsales, el valor por defecto
+  // es ese y aqui solo se listan los que van a otro sitio -- 68 ids en
+  // vez de los 100 y pico que habria que listar al reves.
+  //
+  // Es idempotente: cuando ya no queda ningun 'espalda' no hace nada.
+  const ejerciciosConEspaldaVieja = db
+    .prepare("SELECT id, library_id, secondary_muscles FROM gym_exercises WHERE muscle_group = 'espalda' OR secondary_muscles LIKE '%\"espalda\"%'")
+    .all();
+  if (ejerciciosConEspaldaVieja.length) {
+    const ESPALDA_NO_DORSAL = {
+    'Alternating_Kettlebell_Row': 'espalda_media',
+    'Alternating_Renegade_Row': 'espalda_media',
+    'Anti-Gravity_Press': 'espalda_media',
+    'Atlas_Stones': 'espalda_media',
+    'Axle_Deadlift': 'espalda_media',
+    'Back_Flyes_-_With_Bands': 'espalda_media',
+    'Band_Pull_Apart': 'espalda_media',
+    'Barbell_Shrug_Behind_The_Back': 'espalda_media',
+    'Bent_Over_Barbell_Row': 'espalda_media',
+    'Bent_Over_Low-Pulley_Side_Lateral': 'espalda_media',
+    'Bent_Over_One-Arm_Long_Bar_Row': 'espalda_media',
+    'Bent_Over_Two-Arm_Long_Bar_Row': 'espalda_media',
+    'Bent_Over_Two-Dumbbell_Row': 'espalda_media',
+    'Bent_Over_Two-Dumbbell_Row_With_Palms_In': 'espalda_media',
+    'Bodyweight_Mid_Row': 'espalda_media',
+    'Cable_Rope_Rear-Delt_Rows': 'espalda_media',
+    'Cable_Seated_Lateral_Raise': 'espalda_media',
+    'Cat_Stretch': 'espalda_media',
+    'Childs_Pose': 'espalda_media',
+    'Clean_Deadlift': 'espalda_media',
+    'Clean_and_Press': 'espalda_media',
+    'Deadlift_with_Bands': 'espalda_media',
+    'Deadlift_with_Chains': 'espalda_media',
+    'Deficit_Deadlift': 'espalda_media',
+    'Dumbbell_Incline_Row': 'espalda_media',
+    'Dumbbell_Lying_One-Arm_Rear_Lateral_Raise': 'espalda_media',
+    'Dynamic_Chest_Stretch': 'espalda_media',
+    'Face_Pull': 'espalda_media',
+    'Incline_Bench_Pull': 'espalda_media',
+    'Inverted_Row': 'espalda_media',
+    'Inverted_Row_with_Straps': 'espalda_media',
+    'Keg_Load': 'espalda_media',
+    'Kettlebell_Halo': 'espalda_media',
+    'Kettlebell_Halo_With_Overhead_Extension': 'espalda_media',
+    'Leverage_High_Row': 'espalda_alta',
+    'Log_Lift': 'espalda_media',
+    'Low_Pulley_Row_To_Neck': 'espalda_media',
+    'Lying_Cambered_Barbell_Row': 'espalda_media',
+    'Lying_T-Bar_Row': 'espalda_media',
+    'Middle_Back_Shrug': 'espalda_alta',
+    'Middle_Back_Stretch': 'espalda_media',
+    'Mixed_Grip_Chin': 'espalda_media',
+    'One-Arm_Dumbbell_Row': 'espalda_media',
+    'One-Arm_Kettlebell_Row': 'espalda_media',
+    'One-Arm_Long_Bar_Row': 'espalda_media',
+    'One_Arm_Chin-Up': 'espalda_media',
+    'Power_Clean': 'espalda_media',
+    'Reverse_Grip_Bent-Over_Rows': 'espalda_media',
+    'Rhomboids-SMR': 'espalda_alta',
+    'Rowing_Stationary': 'espalda_media',
+    'Sandbag_Load': 'espalda_media',
+    'Seated_Cable_Rows': 'espalda_media',
+    'Seated_One-arm_Cable_Pulley_Rows': 'espalda_media',
+    'Sled_Overhead_Backward_Walk': 'espalda_media',
+    'Sled_Row': 'espalda_media',
+    'Smith_Machine_Bent_Over_Row': 'espalda_media',
+    'Smith_Machine_Upright_Row': 'espalda_media',
+    'Spinal_Stretch': 'espalda_media',
+    'Straight_Bar_Bench_Mid_Rows': 'espalda_media',
+    'Sumo_Deadlift': 'espalda_media',
+    'Sumo_Deadlift_with_Bands': 'espalda_media',
+    'Sumo_Deadlift_with_Chains': 'espalda_media',
+    'Suspended_Row': 'espalda_media',
+    'T-Bar_Row_with_Handle': 'espalda_media',
+    'Two-Arm_Kettlebell_Row': 'espalda_media',
+    'Upper_Back-Leg_Grab': 'espalda_alta',
+    'Upper_Back_Stretch': 'espalda_alta',
+    'Weighted_Ball_Hyperextension': 'espalda_media',
+    };
+    const actualizarEspalda = db.prepare('UPDATE gym_exercises SET muscle_group = ?, secondary_muscles = ? WHERE id = ?');
+    for (const ej of ejerciciosConEspaldaVieja) {
+      const destino = ESPALDA_NO_DORSAL[ej.library_id] || 'dorsales';
+      const fila = db.prepare('SELECT muscle_group FROM gym_exercises WHERE id = ?').get(ej.id);
+      const grupo = fila.muscle_group === 'espalda' ? destino : fila.muscle_group;
+      let secundarios = ej.secondary_muscles;
+      if (secundarios && secundarios.includes('"espalda"')) {
+        try {
+          const lista = JSON.parse(secundarios).map((m) => (m === 'espalda' ? destino : m));
+          secundarios = JSON.stringify(lista);
+        } catch (err) {
+          // JSON roto de alguna version vieja: mejor dejarlo como esta
+          // que romper el arranque de la app entera por esto.
+        }
+      }
+      actualizarEspalda.run(grupo, secundarios, ej.id);
+    }
+  }
+
   const existingThemeNames = new Set(db.prepare('SELECT name FROM themes').all().map((t) => t.name));
   const seedTheme = db.prepare('INSERT INTO themes (name, colors, inverse_colors) VALUES (?, ?, ?)');
   for (const theme of SEED_THEMES) {

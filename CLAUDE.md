@@ -716,6 +716,46 @@ Verificado con Playwright congelando el reloj en las 24 horas × 6
 minutos × los dos caminos (288 casos), incluido el salto de las 23:30 a
 las 00:00 del día siguiente.
 
+## La espalda, en tres grupos musculares
+
+Petición de Koku (9/9/2026): la espalda deja de ser un solo grupo y pasa
+a ser **Espalda alta**, **Espalda media** y **Dorsales**. **Lumbar** ya
+existía y se queda exactamente igual, con su nombre de siempre.
+
+Tres piezas, y hacen falta las tres:
+
+1. **La taxonomía** (`GYM_MUSCLE_GROUPS` en `app.js`): fuera `espalda`,
+   dentro `espalda_alta`, `espalda_media` y `dorsales`.
+2. **La librería empaquetada** (`public/gym-exercise-library.json`, los
+   ~870 ejercicios): se rehízo el reparto **desde el origen**
+   (free-exercise-db, descargado y cotejado por `id`, casan los 876).
+   Ese origen sí distinguía `lats` de `middle back`, que es justo la
+   información que nuestra traducción había aplanado en un solo
+   "espalda". `lats` → **dorsales** (38) y `middle back` → **espalda
+   media** (30, casi todo remos). **Espalda alta no existe como
+   categoría allí**, así que se rescataron por nombre los pocos que de
+   verdad trabajan la parte de arriba (romboides, remo alto, retracción
+   escapular): salen 4. Es poco a propósito — preferible que sea honesto
+   a repartirlos a ojo. Cualquier ejercicio mal colocado se cambia desde
+   su ficha, sin tocar código.
+3. **El diagrama** (`GYM_BODYMAP_ZONES`): la mancha de la espalda se
+   parte en tres franjas con dos cortes horizontales, a `y=470` y a
+   `y=560`. Los puntos de los cortes salen de **interpolar sobre los
+   bordes del polígono original**, así que las tres piezas encajan sin
+   dejar hueco ni solaparse — comprobado renderizando el SVG. Si se
+   tocan esos números a ojo, se nota enseguida.
+
+**Migración de lo ya importado** (`local-schema.js`): los ejercicios que
+ya están en la base guardan `muscle_group = 'espalda'`, que ya no
+significa nada. **Reimportar la librería NO los arregla**: el import es
+idempotente por `library_id` y devuelve la fila existente sin tocarla (a
+propósito, para no pisar cambios hechos a mano). Por eso hay una
+migración que los recoloca, con una tabla de los 68 `library_id` que van
+a algo distinto de `dorsales` (que es el valor por defecto, y también el
+que reciben los ejercicios propios sin `library_id`). Toca tanto
+`muscle_group` como los `secondary_muscles` en JSON, y es idempotente:
+cuando ya no queda ningún `'espalda'`, no hace nada.
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de
