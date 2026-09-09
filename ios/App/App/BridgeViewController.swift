@@ -10,5 +10,8 @@ class BridgeViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(LiveActivityPlugin())
         bridge?.registerPluginInstance(RestAudioPlugin())
+        // Mandos del auricular para callar la vibracion del descanso:
+        // solo existe en el target de la app (ver RestAlertStopper).
+        RestAlertStopper.instalar()
     }
 }

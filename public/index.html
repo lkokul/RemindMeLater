@@ -138,7 +138,7 @@
          -- asi toda la logica de abrir/cerrar sigue viviendo en un solo
          sitio, esto solo la dispara desde otro botón. -->
     <div id="gym-global-rest" class="gym-global-rest hidden" role="button" title="Volver al entrenamiento">
-      <span>Descanso <b id="gym-global-rest-remaining">0:00</b></span>
+      <span><span id="gym-global-rest-label">Descanso</span> <b id="gym-global-rest-remaining">0:00</b></span>
       <div class="gym-global-rest-track">
         <div id="gym-global-rest-fill-base" class="gym-live-rest-fill-base"></div>
         <div id="gym-global-rest-fill-extra" class="gym-live-rest-fill-extra"></div>
@@ -642,6 +642,25 @@
           Nota fija (opcional)
           <input type="text" id="gym-exercise-notes" placeholder="Ej. polea altura 3" />
         </label>
+        <!-- Unilateral: un lado cada vez (mancuerna a una mano, prensa a
+             una pierna...). Si ademas se cuentan los lados por separado,
+             cada lado pasa a ser su propia serie en el entreno, con su
+             peso/reps, y entre lado y lado corre el descanso corto de
+             abajo. -->
+        <label class="checkbox-row">
+          <input type="checkbox" id="gym-exercise-unilateral" />
+          Ejercicio unilateral (un lado cada vez)
+        </label>
+        <div id="gym-exercise-unilateral-extra" class="gym-unilateral-extra hidden">
+          <label class="checkbox-row">
+            <input type="checkbox" id="gym-exercise-sides-separately" />
+            Contar cada lado por separado
+          </label>
+          <label>
+            Descanso entre lados (segundos)
+            <input type="number" id="gym-exercise-side-rest" min="0" inputmode="numeric" placeholder="Ej. 30" />
+          </label>
+        </div>
         <div class="modal-actions">
           <button type="button" id="btn-delete-gym-exercise" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
@@ -772,6 +791,78 @@
     </div>
   </div>
 
+  <!-- Empezar una serie: en vez de una casilla diminuta, el ciclo pasa
+       por dos dialogos con botones grandes (peticion de Koku: "si vas un
+       poco mareado cuesta ver la casilla"). Este confirma QUE ejercicio
+       y QUE serie se empieza; el nombre es pulsable y despliega la lista
+       de ejercicios del dia por si te has equivocado de tarjeta. La
+       serie que apunta es siempre la primera sin hacer. -->
+  <div id="gym-set-start-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-set-modal">
+      <h2>Empezar serie</h2>
+      <button type="button" id="gym-set-start-exercise" class="gym-set-exercise-picker" aria-expanded="false">
+        <span id="gym-set-start-exercise-name">Ejercicio</span>
+        <span class="gym-set-picker-caret" aria-hidden="true">▾</span>
+      </button>
+      <div id="gym-set-start-exercise-list" class="gym-set-exercise-list hidden"></div>
+      <p id="gym-set-start-info" class="gym-set-modal-info"></p>
+      <!-- Solo en ejercicios unilaterales contados por lado: con cual
+           empiezas (peticion de Koku: "hay veces que se comienza con el
+           lado derecho y otras el izquierdo"). A partir de ahi se van
+           alternando solos, y el lado elegido se queda como el de salida
+           de las siguientes series de ese ejercicio. -->
+      <div id="gym-set-start-sides" class="gym-set-side-choice hidden">
+        <span>¿Con qué lado empiezas?</span>
+        <div class="gym-set-side-buttons">
+          <button type="button" class="secondary-btn" data-start-side="left">Izquierdo</button>
+          <button type="button" class="secondary-btn" data-start-side="right">Derecho</button>
+        </div>
+      </div>
+      <div class="gym-set-modal-actions">
+        <button type="button" id="btn-gym-set-start-go" class="primary-btn gym-set-big-btn">Empezar</button>
+        <button type="button" id="btn-gym-set-start-cancel" class="secondary-btn gym-set-big-btn">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Terminar la serie en curso: Si / Pausar / Seguir, con el tiempo de
+       la serie a la vista (ese tiempo se guarda y se ve en el historial). -->
+  <div id="gym-set-end-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-set-modal">
+      <h2>¿Has acabado la serie?</h2>
+      <p id="gym-set-end-info" class="gym-set-modal-info"></p>
+      <div id="gym-set-end-timer" class="gym-set-modal-timer">0:00</div>
+      <div class="gym-set-modal-actions" id="gym-set-end-choices">
+        <button type="button" id="btn-gym-set-end-done" class="primary-btn gym-set-big-btn">Sí, terminada</button>
+        <button type="button" id="btn-gym-set-end-pause" class="secondary-btn gym-set-big-btn">Pausar serie</button>
+        <button type="button" id="btn-gym-set-end-continue" class="secondary-btn gym-set-big-btn">Seguir</button>
+      </div>
+
+      <!-- Al decir que si, el mismo dialogo pasa a pedir los datos de la
+           serie recien hecha (peticion de Koku): peso, repeticiones y una
+           nota suya. Las notas de todas las series de un ejercicio se
+           combinan al acabarlo en la nota del ejercicio, que se ensena en
+           el entrenamiento siguiente. -->
+      <div id="gym-set-end-form" class="gym-set-end-form hidden">
+        <label class="gym-set-field">
+          <span>Peso</span>
+          <input type="number" id="gym-set-end-weight" inputmode="decimal" step="0.5" min="0" />
+        </label>
+        <label class="gym-set-field">
+          <span>Repeticiones</span>
+          <input type="number" id="gym-set-end-reps" inputmode="numeric" min="0" />
+        </label>
+        <label class="gym-set-field">
+          <span>Notas de la serie (opcional)</span>
+          <input type="text" id="gym-set-end-note" placeholder="Ej. se me fue el codo" />
+        </label>
+        <div class="gym-set-modal-actions">
+          <button type="button" id="btn-gym-set-end-save" class="primary-btn gym-set-big-btn">Guardar serie</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Aviso sobre el mapa de musculos (pestana Progreso): se abre solo
        la primera vez (localStorage.gymProgressHelpSeen) y desde el "?"
        de la seccion. Mismo patron que la ayuda del entreno. -->
@@ -821,11 +912,17 @@
       <h2>Cómo funciona el entrenamiento</h2>
       <div class="gym-help-body">
         <h4>Apuntar las series</h4>
-        <p>Cada ejercicio tiene su tabla: escribe el peso y las repeticiones de cada serie y marca la casilla al terminarla. Al darle a Terminar solo se guardan las series marcadas o con datos, así que las que dejes en blanco no ensucian el historial.</p>
+        <p>Cada ejercicio tiene su tabla: escribe el peso y las repeticiones de cada serie. Para registrarla usa el botón grande de la tarjeta: <b>Empezar serie</b> te confirma qué ejercicio y qué serie vas a hacer (siempre la primera sin hacer; y tocando el nombre puedes cambiar de ejercicio), y mientras la haces el botón se convierte en <b>Terminar serie</b> con el cronómetro. Al terminarla te pregunta si de verdad has acabado, con la opción de pausarla o seguir. El ✓ de cada fila solo indica el estado: tócalo si necesitas deshacer una serie. Al darle a Terminar el entrenamiento solo se guardan las series hechas o con datos.</p>
+        <h4>Los datos y las notas de cada serie</h4>
+        <p>Al confirmar que has acabado, la app te pide el peso, las repeticiones y una nota de esa serie (te propone lo de la serie anterior, así que normalmente solo hay que confirmar). Cuando terminas todas las series de un ejercicio, sus notas se juntan en la nota del ejercicio, y esa es la que verás como "La última vez" la próxima vez que lo entrenes.</p>
+        <h4>Ejercicios a un lado</h4>
+        <p>Si marcas un ejercicio como unilateral (en su ficha) y pides contar cada lado por separado, cada serie se divide en dos: primero el lado izquierdo y luego el derecho, cada uno con su peso y sus repeticiones. Entre lado y lado corre el descanso corto que le pongas en la ficha; el descanso normal del ejercicio queda para después del segundo lado.</p>
+        <h4>Cuánto dura cada serie</h4>
+        <p>Como la app sabe cuándo empiezas y cuándo acabas, guarda lo que duró cada serie. Lo ves en el historial junto a la serie, y en Progreso como tiempo de trabajo real del mes (que no es lo mismo que la duración del entrenamiento, donde entran los descansos).</p>
         <h4>La columna "Anterior"</h4>
         <p>Muestra lo que hiciste en tu última sesión con ese ejercicio, en formato (descanso)peso×reps. Por ejemplo, (1:30)60×10 significa: 1 minuto y medio de descanso, 60 kg, 10 repeticiones. Tócala para copiar esos valores a la serie.</p>
         <h4>El descanso</h4>
-        <p>Al marcar una serie como hecha, el descanso del ejercicio empieza solo y aparece como barra arriba. El tiempo se ve en la pastilla junto al nombre del ejercicio, y tocándola lo cambias para esa sesión. Con +30s lo alargas (y ese extra queda apuntado en el historial de la serie), con ✕ lo saltas, y si desmarcas la casilla se cancela.</p>
+        <p>Al terminar una serie, el descanso del ejercicio empieza solo y aparece como barra arriba. El tiempo se ve en la pastilla junto al nombre del ejercicio, y tocándola lo cambias para esa sesión. Con +30s lo alargas (y ese extra queda apuntado en el historial de la serie), con ✕ lo saltas, y si deshaces la serie o empiezas ya la siguiente, se cancela.</p>
         <h4>El RPE</h4>
         <p>Es una medida del esfuerzo, del 1 al 10: 10 es que no podrías haber hecho ni una repetición más, 9 es que te quedaba una, 8 que te quedaban dos... Se apunta uno por ejercicio, en la casilla RPE junto a "+ Serie". Es opcional, pero ayuda a saber si un peso se te está quedando corto: a RPE 7 o menos, probablemente toca subir.</p>
         <h4>El menú de abajo a la derecha</h4>
@@ -2240,9 +2337,9 @@
         <div class="settings-toggle-help-row">
           <label class="checkbox-row">
             <input type="checkbox" id="setting-gym-rest-burst" />
-            Aviso de descanso insistente
+            Vibración larga al acabar el descanso
           </label>
-          <button type="button" id="btn-help-notif-burst" class="icon-btn settings-help-btn" aria-label="Qué es el aviso insistente">?</button>
+          <button type="button" id="btn-help-notif-burst" class="icon-btn settings-help-btn" aria-label="Qué es la vibración larga">?</button>
         </div>
         <div class="settings-toggle-help-row">
           <label class="checkbox-row">
@@ -2265,8 +2362,17 @@
           </label>
           <button type="button" id="btn-help-notif-vibrate" class="icon-btn settings-help-btn" aria-label="Cómo funciona la vibración de los avisos">?</button>
         </div>
+        <!-- Probar el aviso de fin de descanso sin montar un entreno:
+             salta a los 10 segundos, con los mismos ajustes de arriba,
+             y debajo se ensena QUE lo paro (en el movil no hay consola
+             que mirar, esto es el unico diagnostico posible). -->
+        <div class="settings-toggle-help-row">
+          <button type="button" id="btn-test-gym-rest-alert" class="secondary-btn">Probar el aviso (10 s)</button>
+          <button type="button" id="btn-help-notif-test" class="icon-btn settings-help-btn" aria-label="Para qué sirve probar el aviso">?</button>
+        </div>
         <p id="notifications-status" class="hint"></p>
         <p id="gym-live-activity-status" class="hint"></p>
+        <p id="gym-rest-alert-status" class="hint"></p>
       </div>
 
       <!-- --- Tienda (todavia sin mecanica: solo el hueco) --- -->

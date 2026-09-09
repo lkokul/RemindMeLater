@@ -1307,6 +1307,22 @@ function refreshMobileTab() {
       : 'Cuenta atrás en pantalla de bloqueo: sin datos todavía (marca una serie en un entreno).';
   }
 
+  // Y lo mismo con la vibracion larga del fin de descanso: se ensena
+  // QUE corto el ultimo aviso (lo apunta la parte nativa), que es la
+  // unica forma de saber desde el propio movil si callarla con el
+  // volumen, el mando del auricular o quitando la notificacion funciona.
+  const alertStatus = document.getElementById('gym-rest-alert-status');
+  const testBtn = document.getElementById('btn-test-gym-rest-alert');
+  testBtn.disabled = !nativo;
+  if (!nativo) {
+    alertStatus.textContent = '';
+  } else if (typeof gymRestAlertLastStatus === 'function') {
+    alertStatus.textContent = 'Vibración del descanso: comprobando...';
+    gymRestAlertLastStatus().then((info) => {
+      alertStatus.textContent = gymFormatRestAlertStatus(info);
+    });
+  }
+
   refreshGymTimeFormatOptions();
   // Animaciones de TODA la app (zoom y deslizar del calendario, pero
   // tambien transiciones de botones, listas, paneles...): encendidas por
@@ -1362,7 +1378,23 @@ document.getElementById('btn-help-notif-duck').addEventListener('click', () => {
   showAppAlert('Al acabar el descanso, la app baja unos segundos el volumen de lo que esté sonando (Spotify, Música...) y luego lo devuelve — como hace el GPS al hablar. No pausa ni corta nada.\n\nPara conseguirlo, durante el descanso la app se mantiene despierta en segundo plano (reproduce silencio a volumen cero); el gasto de batería es mínimo y solo dura lo que dura el descanso. Si iOS llegara a cerrar la app del todo, ese descanso no podría bajar la música (la notificación llega igual).');
 });
 document.getElementById('btn-help-notif-burst').addEventListener('click', () => {
-  showAppAlert('Con el modo insistente, el aviso de fin de descanso se repite 3 veces seguidas (cada 2 segundos), para que la vibración se note aunque el móvil esté en el bolsillo. iOS no permite una vibración larga tipo "temporizador del sistema" en apps normales (eso son alertas críticas, con permiso especial de Apple): repetir el aviso es lo más parecido.');
+  showAppAlert('Al acabar el descanso, el móvil vibra varias veces seguidas (unos 10 segundos, como un aviso del sistema) para que se note aunque lo lleves en el bolsillo. Se calla en cuanto te enteras: al tocar un botón de volumen, con la pausa del auricular, quitando la notificación de la pantalla, al desbloquear el móvil o al abrir la app. Antes esto se hacía repitiendo la notificación tres veces; ahora la vibración la produce la propia app y solo llega UNA notificación.\n\nFunciona porque durante el descanso la app se mantiene despierta (lo mismo que permite bajarte la música). Si iOS llegara a cerrarla del todo, ese descanso avisaría solo con la notificación normal.');
+});
+document.getElementById('btn-help-notif-test').addEventListener('click', () => {
+  showAppAlert('Lanza el aviso de fin de descanso dentro de 10 segundos, con los mismos ajustes de arriba y sin tener que empezar un entrenamiento. Da tiempo a bloquear el móvil (y a poner música, si quieres probar que baja de volumen).\n\nCuando vibre, prueba a callarlo: tocando un botón de volumen, con la pausa del auricular, quitando la notificación de la pantalla o abriendo la app. Al volver aquí, la línea de abajo dice qué lo paró y a los cuántos segundos.');
+});
+document.getElementById('btn-test-gym-rest-alert').addEventListener('click', async () => {
+  const status = document.getElementById('gym-rest-alert-status');
+  if (typeof gymLiveSession !== 'undefined' && gymLiveSession && gymLiveSession.restUntil) {
+    showAppAlert('Ahora mismo hay un descanso en marcha; espera a que acabe para probar el aviso (si no, se pisarían el uno al otro).');
+    return;
+  }
+  try {
+    await gymTestRestAlert(10);
+    status.textContent = 'Aviso lanzado: salta en 10 segundos. Bloquea el móvil y prueba a callarlo.';
+  } catch (err) {
+    status.textContent = 'No se pudo lanzar el aviso de prueba.';
+  }
 });
 document.getElementById('btn-help-notif-sound').addEventListener('click', () => {
   showAppAlert('Con el sonido activado, los avisos usan el sonido del sistema. Un detalle de iOS: cuando un aviso suena, vibrar o no lo decide el teléfono (Ajustes > Sonidos y vibraciones), no la app — por eso no existe la combinación "sonido sin vibración".');
@@ -1656,7 +1688,11 @@ document.addEventListener('keydown', (e) => {
   // de Koku: "el primer esc me saque de la ventana de añadir... luego ya
   // con el siguiente que me lleve a la ventana anterior").
   const gymModalIds = [
-    // La ayuda del entrenamiento la primera: se abre encima de todo
+    // Los dialogos de empezar/terminar serie son los mas "de encima"
+    // durante un entreno; Esc equivale a Cancelar / Seguir.
+    ['gym-set-start-modal', closeGymSetStartModal],
+    ['gym-set-end-modal', closeGymSetEndModal],
+    // La ayuda del entrenamiento despues: se abre encima de todo
     // (incluso encima del entreno en vivo).
     ['gym-help-modal', closeGymHelpModal],
     ['gym-progress-help-modal', closeGymProgressHelpModal],

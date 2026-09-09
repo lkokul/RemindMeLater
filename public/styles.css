@@ -2017,6 +2017,27 @@ body.real-modal-open .calendar-quick-actions { display: none; }
    real de los botones (una carpeta lleva uno mas, "Editar"). El 9.5rem
    es solo el valor de respaldo si por lo que sea no se pudo medir. */
 .note-swipe-wrap.is-open > .note-item { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
+/* El mismo deslizar, reutilizado en el historial de Gimnasio (Editar /
+   Eliminar) -- ver wrapGymRowWithSwipe en app.js. */
+.note-swipe-wrap > .gym-list-item {
+  position: relative;
+  background: var(--surface);
+  transition: transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+.note-swipe-wrap.is-open > .gym-list-item { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
+/* Mientras el dedo arrastra manda el transform en linea que escribe
+   wrapGymRowWithSwipe(): sin transicion, para que la fila vaya pegada al
+   dedo; al soltar vuelve el CSS de arriba y anima el ultimo tramo. */
+.note-swipe-wrap.is-dragging > .gym-list-item,
+.note-swipe-wrap.is-dragging > .note-item { transition: none; }
+/* Los botones asoman en vez de aparecer de golpe. */
+.note-swipe-wrap > .note-swipe-actions {
+  opacity: 0.55;
+  transition: opacity 0.22s ease-out;
+}
+.note-swipe-wrap.is-open > .note-swipe-actions,
+.note-swipe-wrap.is-dragging > .note-swipe-actions { opacity: 1; }
 
 /* Arrastrar y soltar notas/carpetas: la etiqueta que sigue al dedo, y el
    resalte de la carpeta (o del boton "Volver") sobre la que se suelta. */
@@ -2438,7 +2459,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    y desbordaba en pantallas estrechas): # / Anterior / peso / reps / ✓. */
 .gym-live-set-row {
   display: grid;
-  grid-template-columns: 2.4rem minmax(3.5rem, 1fr) 4.4rem 4rem 1.6rem;
+  grid-template-columns: 2.4rem minmax(3.5rem, 1fr) 4.4rem 4rem 2rem;
   gap: 0.4rem;
   align-items: center;
   font-size: 0.85rem;
@@ -2524,6 +2545,158 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   padding: 0.5rem 0.7rem;
 }
 .gym-live-hidden-row .secondary-btn { font-size: 0.78rem; padding: 0.3rem 0.5rem; flex-shrink: 0; }
+
+/* --- Empezar/terminar serie con botones grandes ----------------------
+   La casilla diminuta de cada fila paso a ser solo un INDICADOR de
+   estado (y el atajo para deshacer); el control de verdad es el boton
+   ancho de la tarjeta (peticion de Koku: verlo bien aunque vayas
+   mareado a mitad de serie). */
+.gym-set-status {
+  width: 100%;
+  height: 1.9rem;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: color-mix(in srgb, var(--surface-2-text) 45%, var(--surface-2));
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.gym-set-status.done {
+  border-color: var(--gym-accent);
+  background: color-mix(in srgb, var(--gym-accent) 20%, var(--surface-2));
+  color: var(--gym-accent);
+  font-weight: 700;
+}
+
+/* Boton grande: el de la tarjeta y los de los dos dialogos comparten
+   tamano (alto de sobra para acertar sin mirar). */
+.gym-set-big-btn {
+  display: block;
+  width: 100%;
+  min-height: 3rem;
+  border-radius: var(--radius);
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.7rem 0.9rem;
+}
+.gym-set-start-btn {
+  border: 1px solid var(--gym-accent);
+  background: color-mix(in srgb, var(--gym-accent) 14%, var(--surface-2));
+  color: var(--gym-accent);
+}
+.gym-set-start-btn:disabled { opacity: 0.45; }
+/* Serie corriendo: relleno de acento para que cante a la vista. */
+.gym-set-run-btn {
+  border: 1px solid var(--gym-accent);
+  background: var(--gym-accent);
+  color: var(--gym-accent-text);
+  font-variant-numeric: tabular-nums;
+}
+.gym-set-run-btn.paused { opacity: 0.75; }
+
+/* Dialogos de empezar/terminar serie. */
+.gym-set-modal { text-align: center; }
+.gym-set-modal-info { margin: 0.2rem 0 0; color: color-mix(in srgb, var(--surface-text) 70%, var(--surface)); }
+.gym-set-modal-timer {
+  font-size: 2.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin: 0.4rem 0 0.2rem;
+  color: var(--gym-accent);
+}
+.gym-set-modal-actions { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.9rem; }
+/* Selector de ejercicio del dialogo de empezar: el nombre es pulsable y
+   despliega la lista de ejercicios del dia. */
+.gym-set-exercise-picker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  min-height: 2.6rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  font-size: 1.05rem;
+  font-weight: 600;
+  padding: 0.5rem 0.8rem;
+}
+.gym-set-picker-caret { font-size: 0.8rem; opacity: 0.7; }
+.gym-set-exercise-picker[aria-expanded="true"] .gym-set-picker-caret { transform: rotate(180deg); }
+.gym-set-exercise-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.gym-set-exercise-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--surface-text);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.7rem;
+}
+.gym-set-exercise-option.active { border-color: var(--gym-accent); color: var(--gym-accent); }
+
+/* Formulario de la serie recien hecha (peso / reps / nota) dentro del
+   dialogo de terminar: campos apilados con su texto encima. */
+.gym-set-end-form { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.6rem; text-align: left; }
+.gym-set-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.gym-set-field span { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 70%, var(--surface)); }
+.gym-set-field input { width: 100%; box-sizing: border-box; min-height: 2.6rem; font-size: 1rem; }
+
+/* Elegir con que lado se empieza la serie (solo unilaterales por lado). */
+.gym-set-side-choice {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: color-mix(in srgb, var(--surface-text) 70%, var(--surface));
+}
+.gym-set-side-buttons { display: flex; gap: 0.5rem; }
+.gym-set-side-buttons button { flex: 1; min-height: 2.6rem; font-size: 1rem; }
+.gym-set-side-buttons button.active {
+  background: var(--gym-accent);
+  border-color: var(--gym-accent);
+  color: var(--gym-accent-text);
+  font-weight: 600;
+}
+
+/* Lado (I/D) en ejercicios unilaterales contados por separado. */
+.gym-set-side-chip {
+  margin-left: 0.2rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--gym-accent);
+}
+/* Ajustes de unilateral en el modal de ejercicio. */
+.gym-unilateral-extra { display: flex; flex-direction: column; gap: 0.5rem; padding-left: 0.6rem; border-left: 2px solid var(--border); }
+/* Nota que quedo del mismo ejercicio la ULTIMA vez. */
+.gym-live-prev-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}
+
+/* Cuanto duro una serie, en el historial (junto al "+60s" del descanso). */
+.gym-set-dur-chip {
+  margin-left: 0.25rem;
+  font-size: 0.68rem;
+  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
+  font-variant-numeric: tabular-nums;
+}
+/* Estadistica que ocupa la fila entera (tiempo de trabajo del mes). */
+.gym-stat-wide { grid-column: 1 / -1; }
 
 /* Nota FIJA del ejercicio ("polea altura 3") en la tarjeta del entreno:
    pequena y con el acento, para localizarla de un vistazo. */
@@ -2782,10 +2955,13 @@ body.gym-rest-push #settings-modal .settings-card {
 /* Reloj de sesion en pausa: atenuado, para que se note de un vistazo. */
 .gym-live-clock.paused { opacity: 0.45; }
 
-/* El entreno en vivo por ENCIMA del resto de pantallas completas (todas
-   comparten .my-space-view con z-index 15): tocar la barra de descanso
-   desde Finanzas/Notas/etc debe ensenar el entreno, no abrirlo debajo. */
-#gym-live-view { z-index: 40; }
+/* El z-index del entreno en vivo se declara UNA sola vez, arriba con el
+   resto de #gym-live-view (16: por encima de #gym-view, por debajo de
+   los modales). Aqui hubo un rato un "z-index: 40" para que la barra de
+   descanso lo trajera por encima de otras pantallas completas, y eso
+   dejaba los dialogos (empezar/terminar serie, descartar entreno) por
+   DETRAS del entreno: solo se veian al ocultarlo con el ▾. Si algun dia
+   hace falta subirlo, tiene que seguir por debajo de .modal (20). */
 .gym-live-fab-primary {
   background: var(--accent);
   color: var(--accent-text);

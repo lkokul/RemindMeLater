@@ -710,12 +710,57 @@ la copia es la forma de pasar datos de un aparato a otro.
   7. **Logros**: 6 logros con niveles calculados AL VUELO desde
      /summary (nada en BD; solo `gymAchievementsSeen` en localStorage
      para celebrar una vez). Pestaña "Logros" + modal de celebración.
-  - **Pendiente**: tandas de DeepL para las instrucciones; push +
-    run de GitHub Actions (TestFlight) desde `gimnasio-movil`; prueba
-    en iPhone (foco: timers con pantalla bloqueada, recuperación de
-    gymLiveSession, tamaño del JSON, SVG en pantalla pequeña); merge a
-    `movil-ui` + segundo run. Los ejercicios importados ANTES de la
-    Fase 6 no tienen `secondary_muscles` (limitación conocida).
+  - **Rondas de feedback de TestFlight** (varias tandas de Koku
+    probando en su iPhone, ya integradas — lo más importante de
+    entender de la versión actual):
+    - **Ciclo de series con botones grandes**, no casillas ("si vas un
+      poco mareado cuesta ver la casilla"): botón grande por ejercicio
+      → diálogo "vas a empezar X, serie N" (el nombre es pulsable y
+      despliega los ejercicios del día) → serie corriendo con
+      cronómetro → diálogo "¿has acabado?" (Sí / Pausar / Seguir) →
+      formulario con peso, repeticiones y **nota de esa serie**. Las
+      notas de las series se combinan al acabar el ejercicio en la nota
+      del ejercicio, que es la que se ve el siguiente entreno. El ✓ de
+      cada fila ya solo sirve para DESHACER. Estado en
+      `gymLiveSession.activeSet`, todo por timestamps.
+    - **Terminar la serie tocando la pantalla**: con la serie en
+      marcha, un toque en hueco de la pantalla del entreno abre el
+      diálogo. Solo con la app delante (quien se va a Spotify no
+      dispara nada al volver), no antes de 5s, y 12s de silencio tras
+      decir "Seguir". Ver `gymTapShouldOpenEnd()` en `app.js`.
+    - **Unilaterales**: `unilateral` + `count_sides_separately` +
+      `side_rest_seconds` en `gym_exercises` (se configuran en el modal
+      del propio ejercicio). Cada lado es una SERIE PROPIA
+      (`gym_sets.side`), así el historial y el volumen no necesitan
+      casos especiales. El diálogo pregunta por qué lado empiezas y eso
+      se aplica a todas las series pendientes del ejercicio; el
+      descanso corto entre lados se decide por "¿queda el otro lado
+      pendiente?", NO por "¿es el izquierdo?".
+    - **Avisos del fin de descanso** (todo en `RestAudioWatcher.swift`
+      + `LiveActivityPlugin.swift`): tarjeta con cuenta atrás en la
+      pantalla de bloqueo (ActivityKit + widget `DescansoWidget`, con
+      botón +30s vía `LiveActivityIntent`, en los colores del tema);
+      la música BAJA de volumen al acabar (audio ducking con
+      `.duckOthers`, la app se mantiene despierta con un silencio en
+      bucle y el modo de fondo `audio`); vibración larga = 6 pulsos del
+      sistema seguidos (NO 3 notificaciones), que se callan al volver a
+      la app, desbloquear, tocar el volumen, pausar la música desde el
+      auricular o descartar la notificación.
+    - Sonido y vibración de la notificación son dos interruptores
+      aparte en Configuración > Notificaciones.
+    - **Historial**: deslizar una sesión a la izquierda descubre
+      Editar/Eliminar (mismas clases que las notas,
+      `wrapGymRowWithSwipe`), siguiendo el dedo con animación.
+    - **Bug ya cometido, no repetir**: subir `#gym-live-view` por
+      encima de `.modal` (z-index 20) deja los diálogos ABIERTOS PERO
+      DETRÁS del entreno. Se queda en 16. Y en los guiones de prueba,
+      comprobar que un diálogo se VE (`document.elementFromPoint`), no
+      solo que no tiene la clase `hidden` — por eso se coló.
+  - **Pendiente**: tandas de DeepL para las instrucciones; merge de
+    `gimnasio-movil` a `movil-ui` (ojo: ya hubo un run "Combinado"
+    desde `movil-ui`, revisar qué se llevó). Los ejercicios importados
+    ANTES de la Fase 6 no tienen `secondary_muscles` (limitación
+    conocida).
   - Referencia estética explorada en vivo: https://oscargymapp.vercel.app/
     (app de un amigo). Descartado lo social/red a propósito.
   - Descartada la otra librería candidata

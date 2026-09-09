@@ -27,6 +27,7 @@
 		DE5CA25000000000000000B9 /* ExtenderDescansoIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */; };
 		DE5CA25000000000000000BA /* RestAudioWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A9 /* RestAudioWatcher.swift */; };
 		DE5CA25000000000000000BB /* RestAudioWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A9 /* RestAudioWatcher.swift */; };
+		DE5CA25000000000000000BD /* RestAlertStopper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AB /* RestAlertStopper.swift */; };
 		DE5CA25000000000000000BC /* RestAudioPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AA /* RestAudioPlugin.swift */; };
 		CE5CA25000000000000000B1 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE5CA25000000000000000A2 /* ShareViewController.swift */; };
 		CE5CA25000000000000000B7 /* CompartirExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CE5CA25000000000000000A1 /* CompartirExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -94,6 +95,7 @@
 		DE5CA25000000000000000A6 /* BridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeViewController.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A7 /* silencio.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = silencio.wav; sourceTree = "<group>"; };
 		DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtenderDescansoIntent.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000AB /* RestAlertStopper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAlertStopper.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A9 /* RestAudioWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAudioWatcher.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000AA /* RestAudioPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAudioPlugin.swift; sourceTree = "<group>"; };
 		CE5CA25000000000000000A1 /* CompartirExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CompartirExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -169,6 +171,7 @@
 				DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */,
 				DE5CA25000000000000000A9 /* RestAudioWatcher.swift */,
 				DE5CA25000000000000000AA /* RestAudioPlugin.swift */,
+				DE5CA25000000000000000AB /* RestAlertStopper.swift */,
 				DE5CA25000000000000000A7 /* silencio.wav */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
@@ -341,6 +344,7 @@
 				DE5CA25000000000000000B8 /* ExtenderDescansoIntent.swift in Sources */,
 				DE5CA25000000000000000BA /* RestAudioWatcher.swift in Sources */,
 				DE5CA25000000000000000BC /* RestAudioPlugin.swift in Sources */,
+				DE5CA25000000000000000BD /* RestAlertStopper.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

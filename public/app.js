@@ -7865,7 +7865,13 @@ function renderGymExercisesList() {
     return;
   }
   state.gymExercises.forEach((ex) => {
-    const extras = [gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' · ');
+    // "unilateral" se ensena aqui para que se vea DONDE se configura (el
+    // lapiz de esta misma fila) -- Koku lo estuvo buscando en el dia.
+    const extras = [
+      gymMuscleGroupLabel(ex.muscleGroup),
+      ex.equipment,
+      ex.unilateral ? (ex.countSidesSeparately ? 'unilateral, por lados' : 'unilateral') : '',
+    ].filter(Boolean).join(' · ');
     const row = document.createElement('div');
     row.className = 'gym-list-item';
     row.innerHTML = `
@@ -7979,6 +7985,114 @@ function renderGymRoutinesList() {
   });
 }
 
+// Deslizar una sesion del historial hacia la izquierda para Editar /
+// Eliminar (peticion de Koku: "como está hecho en las notas"). Reutiliza
+// las mismas clases y el mismo estado de "solo una fila abierta"
+// (openSwipedNoteRow) que wrapNoteRowWithSwipe, para que abrir una cierre
+// la otra y el toque fuera las cierre todas.
+function wrapGymRowWithSwipe(row, { onEdit, onDelete }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'note-swipe-wrap';
+
+  const acciones = document.createElement('div');
+  acciones.className = 'note-swipe-actions';
+  [['Editar', 'secondary-btn', onEdit], ['Eliminar', 'danger-btn', onDelete]].forEach(([texto, clase, fn]) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = clase;
+    btn.textContent = texto;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeSwipedNoteRow();
+      fn();
+    });
+    acciones.appendChild(btn);
+  });
+  wrap.appendChild(acciones);
+  wrap.appendChild(row);
+
+  // La fila SIGUE AL DEDO mientras deslizas y luego cae sola a su sitio
+  // (peticion de Koku: "dale animación al deslizar, para que se vea más
+  // fluido"). Mientras se arrastra se quita la transicion (clase
+  // is-dragging) y se escribe el transform a mano; al soltar se borra el
+  // transform en linea y manda otra vez el CSS, que anima el ultimo
+  // tramo.
+  const anchoAcciones = () => acciones.offsetWidth || 152;
+  let inicio = null;
+  let horizontal = false;
+  const soltarArrastre = () => {
+    wrap.classList.remove('is-dragging');
+    row.style.transform = '';
+  };
+  row.addEventListener('pointerdown', (e) => {
+    inicio = { x: e.clientX, y: e.clientY };
+    horizontal = false;
+  });
+  row.addEventListener('pointermove', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    const dy = e.clientY - inicio.y;
+    if (!horizontal && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+      horizontal = true;
+      wrap.style.setProperty('--swipe-actions-width', `${anchoAcciones()}px`);
+      wrap.classList.add('is-dragging');
+    }
+    if (!horizontal) return;
+    const ancho = anchoAcciones();
+    const desde = wrap.classList.contains('is-open') ? -ancho : 0;
+    let x = desde + dx;
+    // Fuera de los topes cuesta mas tirar (goma), para que se note el
+    // limite sin bloquearse de golpe.
+    if (x > 0) x *= 0.3;
+    else if (x < -ancho) x = -ancho + (x + ancho) * 0.3;
+    row.style.transform = `translateX(${x}px)`;
+  });
+  row.addEventListener('pointerup', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    inicio = null;
+    if (!horizontal) return;
+    const ancho = anchoAcciones();
+    const desde = wrap.classList.contains('is-open') ? -ancho : 0;
+    const x = desde + dx;
+    soltarArrastre();
+    // Se queda donde estuviera mas cerca: pasada la mitad, abierta.
+    if (x < -ancho / 2) {
+      if (openSwipedNoteRow !== wrap) closeSwipedNoteRow();
+      wrap.style.setProperty('--swipe-actions-width', `${ancho}px`);
+      wrap.classList.add('is-open');
+      openSwipedNoteRow = wrap;
+    } else if (wrap.classList.contains('is-open')) {
+      closeSwipedNoteRow();
+    }
+    // Un deslizamiento no debe abrir la sesion: se descarta ese click.
+    row.dataset.swiped = '1';
+  });
+  row.addEventListener('pointercancel', () => {
+    inicio = null;
+    horizontal = false;
+    soltarArrastre();
+  });
+  row.addEventListener('click', (e) => {
+    if (row.dataset.swiped) {
+      delete row.dataset.swiped;
+      if (wrap.classList.contains('is-open')) { e.stopPropagation(); e.preventDefault(); }
+    }
+  }, true);
+  return wrap;
+}
+
+// Borrar una sesion desde el deslizamiento (mismo aviso que el boton de
+// dentro del modal: aqui SI se pierde historial).
+async function deleteGymSessionById(id) {
+  const ok = await showAppConfirm('¿Eliminar esta sesión y todas sus series? Esto sí borra historial.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
+  await loadGymSessions();
+  renderGymSessionsList();
+  populateGymProgressExerciseSelect();
+}
+
 function renderGymSessionsList() {
   const list = document.getElementById('gym-sessions-list');
   list.innerHTML = '';
@@ -8000,6 +8114,10 @@ function renderGymSessionsList() {
       statBits.push(`${s.sets.length} serie${s.sets.length === 1 ? '' : 's'}`);
       const volumeKg = s.sets.reduce((acc, set) => acc + (set.reps || 0) * (set.weightKg || 0), 0);
       if (volumeKg > 0) statBits.push(`${gymWeightKgToDisplay(volumeKg)} ${unit}`);
+      // Tiempo REAL de trabajo (suma de lo que duraron las series), solo
+      // si la sesion se registro con el boton de empezar/terminar serie.
+      const workSeconds = s.sets.reduce((acc, set) => acc + (set.durationSeconds || 0), 0);
+      if (workSeconds > 0) statBits.push(`${gymFormatWorkTime(workSeconds)} de trabajo`);
     }
 
     if (s.type === 'activity') {
@@ -8009,7 +8127,10 @@ function renderGymSessionsList() {
         <span class="gym-list-item-muted">${escapeHtml([gymActivityKindLabel(s.activityKind), ...statBits].join(' · '))}</span>
       `;
       row.addEventListener('click', () => openGymActivityModal(s));
-      list.appendChild(row);
+      list.appendChild(wrapGymRowWithSwipe(row, {
+        onEdit: () => openGymActivityModal(s),
+        onDelete: () => deleteGymSessionById(s.id),
+      }));
       return;
     }
 
@@ -8025,7 +8146,10 @@ function renderGymSessionsList() {
       <span class="gym-list-item-muted">${exerciseNames.length ? exerciseNames.map(escapeHtml).join(', ') : 'Sin ejercicios'}</span>
     `;
     row.addEventListener('click', () => openGymSessionModal(s));
-    list.appendChild(row);
+    list.appendChild(wrapGymRowWithSwipe(row, {
+      onEdit: () => openGymSessionModal(s),
+      onDelete: () => deleteGymSessionById(s.id),
+    }));
   });
 }
 
@@ -8714,12 +8838,24 @@ function renderGymExerciseSecondaryChips() {
 // sesion en curso al guardar.
 let gymExerciseAddToLivePending = false;
 
+// Lo de "contar cada lado por separado" y el descanso entre lados solo
+// pinta algo si el ejercicio es unilateral: se esconde si no lo es.
+function refreshGymUnilateralFields() {
+  const on = document.getElementById('gym-exercise-unilateral').checked;
+  document.getElementById('gym-exercise-unilateral-extra').classList.toggle('hidden', !on);
+}
+document.getElementById('gym-exercise-unilateral').addEventListener('change', refreshGymUnilateralFields);
+
 function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
   document.getElementById('gym-exercise-id').value = exercise ? exercise.id : '';
   document.getElementById('gym-exercise-name').value = exercise ? exercise.name : '';
   document.getElementById('gym-exercise-equipment').value = exercise ? exercise.equipment || '' : '';
   document.getElementById('gym-exercise-notes').value = exercise ? exercise.notes || '' : '';
+  document.getElementById('gym-exercise-unilateral').checked = !!(exercise && exercise.unilateral);
+  document.getElementById('gym-exercise-sides-separately').checked = !!(exercise && exercise.countSidesSeparately);
+  document.getElementById('gym-exercise-side-rest').value = exercise && exercise.sideRestSeconds != null ? exercise.sideRestSeconds : '';
+  refreshGymUnilateralFields();
   gymExerciseSecondarySel = new Set(exercise && Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : []);
   renderGymExerciseSecondaryChips();
   const options = [
@@ -8752,6 +8888,9 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
     equipment: document.getElementById('gym-exercise-equipment').value,
     secondaryMuscles: [...gymExerciseSecondarySel],
     notes: document.getElementById('gym-exercise-notes').value,
+    unilateral: document.getElementById('gym-exercise-unilateral').checked,
+    countSidesSeparately: document.getElementById('gym-exercise-sides-separately').checked,
+    sideRestSeconds: document.getElementById('gym-exercise-side-rest').value,
   };
   // El flag se captura ANTES de cerrar: closeGymExerciseModal lo resetea.
   const addToLive = !id && gymExerciseAddToLivePending;
@@ -8771,7 +8910,7 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
       note: '',
       rpe: '',
       collapsed: false,
-      sets: [{ reps: '', weightDisplay: '', done: false, restSeconds: '' }],
+      sets: gymBuildSetsForExercise(saved.id, 1, ''),
     });
     gymLiveStore();
     gymLivePrevSets.set(saved.id, await api(`/api/gym-sessions/last-sets/${saved.id}`));
@@ -9171,10 +9310,7 @@ function startGymLiveSession(day) {
         note: '',
         rpe: '',
         collapsed: i > 0,
-        sets: Array.from({ length: ex.targetSets || 1 }, () => ({
-          reps: '', weightDisplay: '', done: false,
-          restSeconds: ex.targetRestSeconds ?? '',
-        })),
+        sets: gymBuildSetsForExercise(ex.exerciseId, ex.targetSets, ex.targetRestSeconds ?? ''),
       })),
     hiddenPool: day
       ? day.exercises.filter((ex) => ex.hidden).map((ex) => ({
@@ -9241,6 +9377,13 @@ function gymFormatRestShort(totalSeconds) {
 // Un tiempo de descanso "para ensenar", respetando el formato elegido en
 // Configuracion (m:ss o segundos a secas -- mismo ajuste gymRestFormat
 // que alterna el contador tocandolo).
+// Tiempo de trabajo acumulado: en segundos si es poco, en minutos si ya
+// pasa del minuto ("45s", "6 min").
+function gymFormatWorkTime(totalSeconds) {
+  const n = Math.round(Number(totalSeconds) || 0);
+  if (n < 60) return `${n}s`;
+  return `${Math.round(n / 60)} min`;
+}
 function gymFormatRestDisplay(totalSeconds) {
   const n = Number(totalSeconds);
   if (!n) return '';
@@ -9263,6 +9406,16 @@ function gymLiveElapsedSeconds() {
 
 function gymLiveTick() {
   if (!gymLiveSession) return;
+  // Red de seguridad: una serie en curso de un ejercicio que ya no esta
+  // en el entreno no puede quedarse ahi (bloquearia empezar cualquier
+  // otra). Normalmente lo limpia quien quita el ejercicio; esto cubre
+  // sesiones guardadas por versiones anteriores.
+  if (gymLiveSession.activeSet
+      && !gymLiveSession.exercises.some((e) => e.exerciseId === gymLiveSession.activeSet.exerciseId)) {
+    gymLiveSession.activeSet = null;
+    gymLiveStore();
+    renderGymLiveExercises();
+  }
   const clock = document.getElementById('gym-live-clock');
   clock.textContent = gymLiveFormatClock(gymLiveElapsedSeconds());
   clock.classList.toggle('paused', !!gymLiveSession.pausedAt);
@@ -9279,10 +9432,35 @@ function gymLiveTick() {
     gymConsumeRestExtensionFromLockScreen();
   }
 
-  // Mini-barra global: solo cuando el entreno esta OCULTO y hay descanso.
+  // Cronometro de la serie en curso: se actualiza el texto en vez de
+  // repintar la tarjeta entera cada segundo.
+  const setTimers = document.querySelectorAll('[data-live-set-timer]');
+  if (setTimers.length > 0) {
+    const t = gymLiveFormatClock(gymActiveSetSeconds());
+    setTimers.forEach((el) => { el.textContent = t; });
+  }
+  const endTimer = document.getElementById('gym-set-end-timer');
+  if (endTimer && !document.getElementById('gym-set-end-modal').classList.contains('hidden')) {
+    endTimer.textContent = gymLiveFormatClock(gymActiveSetSeconds());
+  }
+
+  // Mini-barra global: cuando el entreno esta OCULTO y hay algo en
+  // marcha -- una serie corriendo o un descanso.
   const liveHidden = document.getElementById('gym-live-view').classList.contains('hidden');
   const globalBar = document.getElementById('gym-global-rest');
-  if (liveHidden && gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+  const globalLabel = document.getElementById('gym-global-rest-label');
+  if (liveHidden && gymLiveSession.activeSet) {
+    // Serie en curso: la barra ensena su cronometro (llena, sin cuenta
+    // atras) y tocarla vuelve al entreno para poder terminarla.
+    globalLabel.textContent = gymLiveSession.activeSet.pausedAt ? 'Serie en pausa' : 'Serie';
+    document.getElementById('gym-global-rest-remaining').textContent = gymLiveFormatClock(gymActiveSetSeconds());
+    document.getElementById('gym-global-rest-fill-base').style.width = '100%';
+    document.getElementById('gym-global-rest-fill-extra').style.width = '0%';
+    globalBar.classList.remove('hidden');
+    document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
+    document.body.classList.add('gym-rest-push');
+  } else if (liveHidden && gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    globalLabel.textContent = 'Descanso';
     // floor y no ceil: la tarjeta de la pantalla de bloqueo redondea
     // HACIA ABAJO (estilo reloj del sistema: un temporizador de 1:00
     // ensena 0:59 nada mas empezar), y con ceil la app iba un segundo
@@ -9429,11 +9607,15 @@ function gymRestBurstEnabled() {
   return localStorage.getItem('gymRestBurst') !== 'false';
 }
 
-async function gymScheduleRestNotification() {
+// atMs: cuando debe saltar. Por defecto, el final del descanso en curso;
+// se puede pasar a mano para el boton de PROBAR el aviso de
+// Configuracion (que recorre exactamente este mismo camino).
+async function gymScheduleRestNotification(atMs = null) {
   if (typeof getLocalNotificationsPlugin !== 'function') return;
   const plugin = getLocalNotificationsPlugin();
   if (!plugin || !gymRestNotifyEnabled()) return;
-  if (!gymLiveSession || !gymLiveSession.restUntil) return;
+  const cuando = atMs || (gymLiveSession && gymLiveSession.restUntil);
+  if (!cuando) return;
   try {
     if (!(await ensureLocalNotificationPermissionSilently())) return;
     // Cancelar antes de programar: si habia avisos del descanso anterior
@@ -9442,23 +9624,20 @@ async function gymScheduleRestNotification() {
     // Sonido/vibracion/silencio segun el ajuste del dispositivo -- ver
     // notificationSoundValue() en local-notifications.js.
     const sonido = notificationSoundValue();
-    // 1 aviso, o 3 seguidos (cada 2s) si el modo insistente esta activo.
-    const cuantos = gymRestBurstEnabled() ? GYM_REST_NOTIFICATION_IDS.length : 1;
-    const avisos = GYM_REST_NOTIFICATION_IDS.slice(0, cuantos).map((id, i) => {
-      const aviso = {
-        id,
-        title: 'Descanso terminado',
-        body: 'Siguiente serie.',
-        schedule: { at: new Date(gymLiveSession.restUntil + i * 2000) },
-        // Mismo hilo: iOS agrupa las repeticiones en UNA pila en vez de
-        // ensenar 3 avisos sueltos (feedback de Koku). Vibrar sin
-        // notificacion no existe en iOS, pero al menos se ven como una.
-        threadIdentifier: 'gym-descanso',
-      };
-      if (sonido) aviso.sound = sonido;
-      return aviso;
-    });
-    await plugin.schedule({ notifications: avisos });
+    // UNA sola notificacion. La insistencia ya no se hace repitiendo
+    // avisos (a Koku le molestaba ver 3 notificaciones): ahora la pone la
+    // vibracion larga nativa de RestAudioWatcher, que puede repetir la
+    // vibracion del sistema sin notificar nada porque la app sigue
+    // despierta durante el descanso.
+    const aviso = {
+      id: GYM_REST_NOTIFICATION_ID,
+      title: 'Descanso terminado',
+      body: 'Siguiente serie.',
+      schedule: { at: new Date(cuando) },
+      threadIdentifier: 'gym-descanso',
+    };
+    if (sonido) aviso.sound = sonido;
+    await plugin.schedule({ notifications: [aviso] });
   } catch (err) {
     console.error('No se pudo programar el aviso de descanso:', err);
   }
@@ -9671,24 +9850,78 @@ function getGymRestAudioPlugin() {
 function gymRestDuckEnabled() {
   return localStorage.getItem('gymRestDuck') !== 'false';
 }
-async function gymStartRestAudioWatch() {
+// La vigilancia hace falta si hay que bajar la musica O si hay que
+// vibrar largo al acabar: las dos cosas necesitan la app despierta.
+function gymRestWatchParams() {
+  return { duck: gymRestDuckEnabled(), vibrate: gymRestBurstEnabled() };
+}
+async function gymStartRestAudioWatch(endAtMs = null) {
   const plugin = getGymRestAudioPlugin();
-  if (!plugin || !gymRestDuckEnabled() || !gymLiveSession || !gymLiveSession.restUntil) return;
+  const flags = gymRestWatchParams();
+  const fin = endAtMs || (gymLiveSession && gymLiveSession.restUntil);
+  if (!plugin || (!flags.duck && !flags.vibrate) || !fin) return;
   try {
-    await plugin.startWatch({ endAt: gymLiveSession.restUntil });
+    await plugin.startWatch({ endAt: fin, ...flags });
   } catch (err) {
     console.error('No se pudo vigilar el audio del descanso:', err);
   }
 }
 async function gymUpdateRestAudioWatch() {
   const plugin = getGymRestAudioPlugin();
-  if (!plugin || !gymRestDuckEnabled() || !gymLiveSession || !gymLiveSession.restUntil) return;
+  const flags = gymRestWatchParams();
+  if (!plugin || (!flags.duck && !flags.vibrate) || !gymLiveSession || !gymLiveSession.restUntil) return;
   try {
-    await plugin.updateWatch({ endAt: gymLiveSession.restUntil });
+    await plugin.updateWatch({ endAt: gymLiveSession.restUntil, ...flags });
   } catch (err) {
     console.error('No se pudo mover la vigilancia de audio:', err);
   }
 }
+// --- Probar el aviso de fin de descanso -------------------------------
+// En el movil no hay consola ni forma de ver que pasa por dentro, y
+// montar un entreno entero para comprobar si la vibracion se calla es
+// una locura. Este atajo recorre EXACTAMENTE el mismo camino que un
+// descanso de verdad (misma notificacion, misma vigilancia de audio con
+// los mismos ajustes), solo que a los 10 segundos: da tiempo a bloquear
+// el movil y probar a callarlo como quieras.
+async function gymTestRestAlert(delaySeconds = 10) {
+  const fin = Date.now() + delaySeconds * 1000;
+  await gymScheduleRestNotification(fin);
+  await gymStartRestAudioWatch(fin);
+  return fin;
+}
+
+// Como acabo el ultimo aviso, segun lo que apunto la parte nativa.
+const GYM_REST_STOP_LABELS = {
+  app: 'al abrir la app',
+  desbloqueo: 'al desbloquear el móvil',
+  volumen: 'con un botón de volumen',
+  'audio-secundario': 'al pausar la música',
+  'ruta-audio': 'al cambiar la salida de audio',
+  interrupcion: 'por una interrupción de audio',
+  mando: 'con el mando del auricular',
+  banner: 'al quitar la notificación de la pantalla',
+  fin: 'no lo paró nada, terminó solo',
+  cancelado: 'se cortó al empezar otra serie o terminar el entreno',
+};
+async function gymRestAlertLastStatus() {
+  const plugin = getGymRestAudioPlugin();
+  if (!plugin || typeof plugin.getStatus !== 'function') return null;
+  try {
+    const info = await plugin.getStatus();
+    return info && info.stoppedBy ? info : null;
+  } catch (err) {
+    return null;
+  }
+}
+function gymFormatRestAlertStatus(info) {
+  if (!info) return 'Vibración del descanso: sin datos todavía (prueba el aviso).';
+  const como = GYM_REST_STOP_LABELS[info.stoppedBy] || info.stoppedBy;
+  const seg = Number(info.afterSeconds || 0).toFixed(1).replace('.', ',');
+  const pulsos = Number(info.pulses || 0);
+  const banner = info.bannerSeen ? '' : ' · la notificación no llegó a verse en pantalla';
+  return `Último aviso: se paró ${como}, a los ${seg} s (${pulsos} vibraciones)${banner}.`;
+}
+
 async function gymCancelRestAudioWatch() {
   const plugin = getGymRestAudioPlugin();
   if (!plugin) return;
@@ -9708,6 +9941,475 @@ async function gymCancelRestAudioWatch() {
 // de vista.
 let gymLiveHiddenPoolOpen = false;
 let gymLiveRemovedPoolOpen = false;
+
+// --- Serie EN CURSO (empezar/terminar con botones grandes) -------------
+// Sustituye a la casilla diminuta de cada fila (Koku: "si vas un poco
+// mareado costara verlo"). El ciclo es: boton grande de la tarjeta ->
+// dialogo "vas a empezar X, serie N" -> serie corriendo con cronometro ->
+// dialogo "¿has acabado?" con Si / Pausar / Seguir. De paso queda
+// registrado cuanto duro cada serie (set.durationSeconds), que se guarda
+// y se ensena en el historial y en Progreso.
+//
+// El estado vive en gymLiveSession.activeSet, asi que sobrevive a
+// recargas y al congelado de iOS igual que el resto (todo por
+// timestamps): { exerciseId, setIndex, startedAt, pausedMs, pausedAt }.
+
+// La serie que toca: la primera SIN HACER del ejercicio (con 4 series y
+// 2 hechas, la 3). -1 si ya estan todas.
+function gymNextPendingSetIndex(ex) {
+  return ex.sets.findIndex((s) => !s.done);
+}
+
+// --- Ejercicios UNILATERALES contados por lado ------------------------
+// Cuando un ejercicio es unilateral y se cuentan los lados por separado,
+// cada lado es una SERIE PROPIA (set.side = 'left'/'right'). Asi el ciclo
+// de empezar/terminar, el historial y el volumen funcionan sin casos
+// especiales: solo cambian las etiquetas y el descanso entre lados.
+function gymExerciseUsesSides(ex) {
+  const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+  return !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
+}
+// Numero de serie que le toca a un set (los dos lados comparten numero).
+function gymSetSerieNumber(ex, setIndex) {
+  if (!gymExerciseUsesSides(ex)) return setIndex + 1;
+  let n = 0;
+  for (let i = 0; i <= setIndex; i++) if (ex.sets[i].side !== 'right') n += 1;
+  return Math.max(1, n);
+}
+// Cuantas series (no lados) tiene el ejercicio.
+function gymSerieCount(ex) {
+  if (!gymExerciseUsesSides(ex)) return ex.sets.length;
+  return ex.sets.filter((s) => s.side !== 'right').length;
+}
+function gymSideLabel(side) {
+  if (side === 'left') return 'izquierdo';
+  if (side === 'right') return 'derecho';
+  return '';
+}
+// El otro lado de la MISMA serie (los dos comparten numero de serie).
+// -1 si el ejercicio no va por lados o si no encuentra pareja.
+function gymSidePartnerIndex(ex, setIndex) {
+  if (!gymExerciseUsesSides(ex) || !ex.sets[setIndex]) return -1;
+  const n = gymSetSerieNumber(ex, setIndex);
+  for (let i = 0; i < ex.sets.length; i++) {
+    if (i !== setIndex && gymSetSerieNumber(ex, i) === n) return i;
+  }
+  return -1;
+}
+// Cambia por cual de los dos lados se empieza esta serie: como los dos
+// lados son dos filas seguidas, basta con intercambiarles la etiqueta
+// (asi no se toca ni la numeracion ni nada de lo ya hecho). Solo tiene
+// sentido si la pareja sigue pendiente.
+function gymSetStartSide(ex, setIndex, side) {
+  const partner = gymSidePartnerIndex(ex, setIndex);
+  if (partner < 0 || ex.sets[partner].done) return false;
+  if (ex.sets[setIndex].side === side) return false;
+  ex.sets[setIndex].side = side;
+  ex.sets[partner].side = side === 'left' ? 'right' : 'left';
+  // Se recuerda para las siguientes series de este ejercicio en la
+  // sesion: si empiezas por la derecha, sigues empezando por la derecha
+  // hasta que lo cambies otra vez.
+  ex.firstSide = side;
+  return true;
+}
+// Pone TODAS las series pendientes de un ejercicio a salir por el mismo
+// lado (el que acabas de elegir): si has dicho que empiezas por la
+// derecha, se empieza por la derecha el resto del ejercicio, y desde ahi
+// se van alternando los lados solos. Se puede volver a cambiar en el
+// dialogo de cualquier serie.
+function gymApplyFirstSideToPending(ex, side) {
+  ex.sets.forEach((s, i) => {
+    if (s.done) return;
+    const pareja = gymSidePartnerIndex(ex, i);
+    if (pareja > i && !ex.sets[pareja].done) gymSetStartSide(ex, i, side);
+  });
+  ex.firstSide = side;
+}
+// Crea las series de un ejercicio: una fila por serie, o DOS (izquierda
+// y derecha) si el ejercicio cuenta los lados por separado.
+function gymBuildSetsForExercise(exerciseId, count, restSeconds) {
+  const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+  const sides = !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
+  const out = [];
+  for (let i = 0; i < Math.max(1, Number(count) || 1); i++) {
+    if (sides) {
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'left', note: '' });
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'right', note: '' });
+    } else {
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: null, note: '' });
+    }
+  }
+  return out;
+}
+
+// Junta las notas de las series en la nota del EJERCICIO de esta sesion
+// (peticion de Koku: que sirvan de referencia para el siguiente entreno,
+// donde se ensenan como "La última vez"). Es idempotente: la parte
+// generada se reescribe entera y lo que hubiera escrito a mano se
+// respeta delante.
+const GYM_SET_NOTES_TAG = 'Series — ';
+function gymCombineSetNotes(ex) {
+  const usesSides = gymExerciseUsesSides(ex);
+  const parts = [];
+  ex.sets.forEach((s, i) => {
+    if (!s.note || !String(s.note).trim()) return;
+    const lado = usesSides ? (s.side === 'left' ? ' I' : ' D') : '';
+    parts.push(`S${gymSetSerieNumber(ex, i)}${lado}: ${String(s.note).trim()}`);
+  });
+  const manual = String(ex.note || '').split(GYM_SET_NOTES_TAG)[0].trim();
+  ex.note = parts.length
+    ? `${manual ? `${manual} ` : ''}${GYM_SET_NOTES_TAG}${parts.join(' · ')}`
+    : manual;
+}
+
+// Segundos de la serie en curso, descontando las pausas.
+function gymActiveSetSeconds() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return 0;
+  const paused = (a.pausedMs || 0) + (a.pausedAt ? Date.now() - a.pausedAt : 0);
+  return Math.max(0, Math.floor((Date.now() - a.startedAt - paused) / 1000));
+}
+
+// Cancela la serie en curso si es de este ejercicio (se usa al quitar un
+// ejercicio del entreno). Sin esto la sesion se quedaba con una serie
+// "corriendo" de algo que ya no estaba en la lista.
+function gymDropActiveSetIfExercise(exerciseId) {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a || a.exerciseId !== exerciseId) return false;
+  gymLiveSession.activeSet = null;
+  return true;
+}
+
+// Ejercicio (del entreno) al que pertenece la serie en curso.
+function gymActiveSetExercise() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return null;
+  return gymLiveSession.exercises.find((e) => e.exerciseId === a.exerciseId) || null;
+}
+
+// --- Dialogo "empezar serie" ---
+// Indice (dentro de gymLiveSession.exercises) del ejercicio elegido.
+let gymSetStartTargetIndex = null;
+
+function openGymSetStartModal(exIndex) {
+  if (!gymLiveSession || gymLiveSession.activeSet) return;
+  gymSetStartTargetIndex = exIndex;
+  gymSetStartListOpen = false;
+  renderGymSetStartModal();
+  document.getElementById('gym-set-start-modal').classList.remove('hidden');
+}
+function closeGymSetStartModal() {
+  document.getElementById('gym-set-start-modal').classList.add('hidden');
+}
+
+// La lista de ejercicios del dia empieza recogida; se despliega tocando
+// el nombre (peticion de Koku: poder cambiar de ejercicio desde aqui).
+let gymSetStartListOpen = false;
+
+function renderGymSetStartModal() {
+  const ex = gymLiveSession.exercises[gymSetStartTargetIndex];
+  if (!ex) return;
+  const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+  document.getElementById('gym-set-start-exercise-name').textContent = exercise ? exercise.name : 'Ejercicio';
+  const idx = gymNextPendingSetIndex(ex);
+  const pendiente = idx >= 0 ? ex.sets[idx] : null;
+  const lado = pendiente && pendiente.side ? ` · lado ${gymSideLabel(pendiente.side)}` : '';
+  document.getElementById('gym-set-start-info').textContent = idx >= 0
+    ? `Serie ${gymSetSerieNumber(ex, idx)} de ${gymSerieCount(ex)}${lado}`
+    : `Serie ${gymSerieCount(ex) + 1} (extra)`;
+
+  // Elegir lado de salida: solo si el ejercicio va por lados y la serie
+  // que toca aun tiene su pareja pendiente (si ya hiciste el primer
+  // lado, el que queda es el otro y no hay nada que elegir).
+  const sides = document.getElementById('gym-set-start-sides');
+  const partner = idx >= 0 ? gymSidePartnerIndex(ex, idx) : -1;
+  const puedeElegir = partner >= 0 && !ex.sets[partner].done;
+  sides.classList.toggle('hidden', !puedeElegir);
+  if (puedeElegir) {
+    sides.querySelectorAll('[data-start-side]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.startSide === pendiente.side);
+    });
+  }
+
+  const picker = document.getElementById('gym-set-start-exercise');
+  picker.setAttribute('aria-expanded', gymSetStartListOpen ? 'true' : 'false');
+  const list = document.getElementById('gym-set-start-exercise-list');
+  list.classList.toggle('hidden', !gymSetStartListOpen);
+  list.innerHTML = '';
+  gymLiveSession.exercises.forEach((other, otherIndex) => {
+    const otherExercise = state.gymExercises.find((e) => e.id === other.exerciseId);
+    const hechas = other.sets.filter((s) => s.done).length;
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'gym-set-exercise-option' + (otherIndex === gymSetStartTargetIndex ? ' active' : '');
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(otherExercise ? otherExercise.name : 'Ejercicio')}</span>
+      <span class="gym-list-item-muted">${hechas}/${other.sets.length}</span>
+    `;
+    row.addEventListener('click', () => {
+      gymSetStartTargetIndex = otherIndex;
+      gymSetStartListOpen = false;
+      renderGymSetStartModal();
+    });
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('gym-set-start-exercise').addEventListener('click', () => {
+  gymSetStartListOpen = !gymSetStartListOpen;
+  renderGymSetStartModal();
+});
+document.getElementById('gym-set-start-sides').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-start-side]');
+  if (!btn) return;
+  const ex = gymLiveSession && gymLiveSession.exercises[gymSetStartTargetIndex];
+  if (!ex) return;
+  const idx = gymNextPendingSetIndex(ex);
+  if (idx < 0) return;
+  gymApplyFirstSideToPending(ex, btn.dataset.startSide);
+  gymLiveStore();
+  renderGymLiveExercises();
+  renderGymSetStartModal();
+});
+document.getElementById('btn-gym-set-start-cancel').addEventListener('click', closeGymSetStartModal);
+document.getElementById('btn-gym-set-start-go').addEventListener('click', () => {
+  gymStartSet(gymSetStartTargetIndex);
+  closeGymSetStartModal();
+});
+
+// Arranca la serie: apunta a la primera sin hacer y, si ya estaban todas,
+// añade una serie extra heredando el descanso de la anterior.
+function gymStartSet(exIndex, setIndexOverride = null) {
+  const ex = gymLiveSession && gymLiveSession.exercises[exIndex];
+  if (!ex || gymLiveSession.activeSet) return;
+  let idx = setIndexOverride !== null ? setIndexOverride : gymNextPendingSetIndex(ex);
+  if (idx < 0 || !ex.sets[idx]) {
+    // Serie extra: en un ejercicio por lados se añade el BLOQUE entero
+    // (izquierdo + derecho), no una fila suelta -- antes se colaba una
+    // serie sin lado y descuadraba la numeracion (lo vio Koku).
+    const last = ex.sets[ex.sets.length - 1];
+    const nuevas = gymBuildSetsForExercise(ex.exerciseId, 1, last ? last.restSeconds : '');
+    idx = ex.sets.length;
+    ex.sets.push(...nuevas);
+    // El bloque nuevo sale por el lado que hayas elegido antes en este
+    // ejercicio (gymSetStartSide lo apunta en ex.firstSide).
+    if (ex.firstSide === 'right') gymSetStartSide(ex, idx, 'right');
+  }
+  gymLiveSession.activeSet = {
+    exerciseId: ex.exerciseId,
+    setIndex: idx,
+    startedAt: Date.now(),
+    pausedMs: 0,
+    pausedAt: null,
+  };
+  // Si estabas descansando, empezar la siguiente serie corta el descanso:
+  // ya estas entrenando otra vez.
+  if (gymLiveSession.restUntil) {
+    gymLiveSession.restUntil = null;
+    gymCancelRestNotification();
+    gymEndRestLiveActivity();
+    gymCancelRestAudioWatch();
+  }
+  // La tarjeta del ejercicio en marcha siempre desplegada.
+  ex.collapsed = false;
+  // Serie nueva, cuenta nueva: el silencio que deja cerrar el dialogo de
+  // la serie anterior no debe seguir vigente en esta.
+  gymTapSnoozeUntil = 0;
+  gymLiveStore();
+  renderGymLiveExercises();
+  gymLiveTick();
+}
+
+// --- Dialogo "¿has acabado la serie?" ---
+// Dos pasos: primero la pregunta (Si / Pausar / Seguir) y, al decir que
+// si, el formulario con peso, repeticiones y nota de ESA serie (peticion
+// de Koku). Nada se guarda hasta "Guardar serie".
+function gymSetEndShowForm(show) {
+  document.getElementById('gym-set-end-choices').classList.toggle('hidden', show);
+  document.getElementById('gym-set-end-form').classList.toggle('hidden', !show);
+  document.querySelector('#gym-set-end-modal h2').textContent = show
+    ? 'Datos de la serie'
+    : '¿Has acabado la serie?';
+}
+
+function openGymSetEndModal() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const ex = gymActiveSetExercise();
+  const exercise = state.gymExercises.find((e) => e.id === a.exerciseId);
+  const set = ex && ex.sets[a.setIndex];
+  const lado = set && set.side ? ` · lado ${gymSideLabel(set.side)}` : '';
+  document.getElementById('gym-set-end-info').textContent =
+    `${exercise ? exercise.name : 'Ejercicio'} · Serie ${ex ? gymSetSerieNumber(ex, a.setIndex) : a.setIndex + 1}${lado}`;
+  document.getElementById('gym-set-end-timer').textContent = gymLiveFormatClock(gymActiveSetSeconds());
+  gymSetEndShowForm(false);
+  document.getElementById('gym-set-end-modal').classList.remove('hidden');
+}
+function closeGymSetEndModal() {
+  document.getElementById('gym-set-end-modal').classList.add('hidden');
+  // Si acabas de cerrarlo, el toque en la pantalla no lo vuelve a abrir
+  // de inmediato (ver gymHandleLiveTap mas abajo).
+  gymTapSnoozeUntil = Date.now() + GYM_TAP_SNOOZE_MS;
+}
+
+// --- Tocar la pantalla durante la serie abre el dialogo ----------------
+// Peticion de Koku: con la serie en marcha el movil suele estar en el
+// banco o en el bolsillo, asi que cuando lo vuelves a tocar lo normal es
+// que la serie haya acabado. Condiciones para que no moleste:
+//  - Solo con la app DELANTE. Mucha gente empieza la serie y se va a
+//    Spotify: al volver, ese primer toque NO cuenta (se pide un margen
+//    desde que la app vuelve a estar visible).
+//  - No antes de unos segundos desde que empezo la serie (si no, el
+//    propio toque de "Empezar" la daria por acabada).
+//  - Solo tocando "hueco" de la pantalla: si tocas un boton o un campo
+//    manda lo que hayas tocado, asi el boton de Terminar serie y el
+//    resto de la vista siguen funcionando exactamente igual.
+//  - Y solo un TOQUE, no un arrastre ni un scroll.
+const GYM_TAP_MIN_SET_SECONDS = 5;      // desde que empieza la serie
+const GYM_TAP_AFTER_FOREGROUND_MS = 1500; // desde que la app vuelve
+// Tras cerrar el dialogo se vuelve a contar lo MISMO que al empezar la
+// serie (peticion de Koku: "si le doy a seguir, que vuelva a contar 5s
+// desde el tiempo en el que este"), no un silencio largo aparte.
+const GYM_TAP_SNOOZE_MS = GYM_TAP_MIN_SET_SECONDS * 1000;
+const GYM_TAP_MAX_MOVE_PX = 12;
+const GYM_TAP_MAX_MS = 700;
+let gymTapSnoozeUntil = 0;
+let gymAppVisibleSince = Date.now();
+let gymTapStart = null;
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') gymAppVisibleSince = Date.now();
+});
+
+// ¿Toca abrir el dialogo con este toque?
+function gymTapShouldOpenEnd(target) {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a || a.pausedAt) return false;
+  if (document.visibilityState !== 'visible') return false;
+  if (Date.now() - gymAppVisibleSince < GYM_TAP_AFTER_FOREGROUND_MS) return false;
+  if (Date.now() < gymTapSnoozeUntil) return false;
+  if (gymActiveSetSeconds() < GYM_TAP_MIN_SET_SECONDS) return false;
+  // Con cualquier dialogo abierto (o el menu flotante desplegado) el
+  // toque es para eso, no para terminar la serie.
+  if (document.querySelector('.modal:not(.hidden)')) return false;
+  if (!target || !target.closest) return false;
+  // Controles de la vista: mandan ellos. Ademas de los de siempre hay
+  // que contar la cabecera de la tarjeta, que no es un <button> pero se
+  // pulsa para plegar/desplegar el ejercicio.
+  if (target.closest('button, input, textarea, select, a, label, [contenteditable], [role="button"], [data-live-toggle-collapse]')) return false;
+  return true;
+}
+
+(function registrarToqueDeSerie() {
+  const vista = document.getElementById('gym-live-view');
+  if (!vista) return;
+  vista.addEventListener('pointerdown', (e) => {
+    gymTapStart = { x: e.clientX, y: e.clientY, t: Date.now(), target: e.target };
+  });
+  vista.addEventListener('pointerup', (e) => {
+    const inicio = gymTapStart;
+    gymTapStart = null;
+    if (!inicio) return;
+    if (Date.now() - inicio.t > GYM_TAP_MAX_MS) return;
+    if (Math.abs(e.clientX - inicio.x) > GYM_TAP_MAX_MOVE_PX) return;
+    if (Math.abs(e.clientY - inicio.y) > GYM_TAP_MAX_MOVE_PX) return;
+    if (!gymTapShouldOpenEnd(inicio.target)) return;
+    openGymSetEndModal();
+  });
+  vista.addEventListener('pointercancel', () => { gymTapStart = null; });
+})();
+
+// "Si, terminada" -> pasa al formulario, con lo que ya hubiera escrito en
+// la fila y, si estaba vacio, lo de la ultima serie hecha del mismo
+// ejercicio y lado (asi normalmente solo hay que confirmar).
+document.getElementById('btn-gym-set-end-done').addEventListener('click', () => {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const ex = gymActiveSetExercise();
+  const set = ex && ex.sets[a.setIndex];
+  if (!set) return;
+  // La sugerencia va como PLACEHOLDER, en gris de ejemplo, no como valor
+  // escrito (peticion de Koku): si no tocas el campo, al guardar se usa
+  // igualmente ese valor. Se busca primero la ultima serie hecha del
+  // MISMO lado y, si no hay, la ultima de cualquier lado -- en un
+  // unilateral se suele mover el mismo peso con los dos, asi que al
+  // cambiar de lado tambien conviene proponerlo (peticion de Koku).
+  const hechasAntes = [...ex.sets.slice(0, a.setIndex)].reverse().filter((s) => s.done);
+  const previa = hechasAntes.find((s) => s.side === set.side) || hechasAntes[0];
+  const wEl = document.getElementById('gym-set-end-weight');
+  const rEl = document.getElementById('gym-set-end-reps');
+  document.querySelector('#gym-set-end-form .gym-set-field span').textContent = `Peso (${getGymWeightUnitLabel()})`;
+  wEl.value = set.weightDisplay || '';
+  rEl.value = set.reps || '';
+  wEl.placeholder = previa && previa.weightDisplay ? String(previa.weightDisplay) : '';
+  rEl.placeholder = previa && previa.reps ? String(previa.reps) : '';
+  document.getElementById('gym-set-end-note').value = set.note || '';
+  gymSetEndShowForm(true);
+});
+
+// "Guardar serie": vuelca peso/reps/nota, marca la serie con su duracion
+// y arranca el descanso -- el CORTO entre lados si acaba de hacerse el
+// lado izquierdo de un ejercicio contado por lados, el normal si no.
+function gymFinishActiveSet() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const ex = gymActiveSetExercise();
+  const set = ex && ex.sets[a.setIndex];
+  if (set) {
+    // Campo vacio = te vale la sugerencia gris, asi que se guarda esa.
+    const wEl = document.getElementById('gym-set-end-weight');
+    const rEl = document.getElementById('gym-set-end-reps');
+    set.weightDisplay = wEl.value !== '' ? wEl.value : (wEl.placeholder || '');
+    set.reps = rEl.value !== '' ? rEl.value : (rEl.placeholder || '');
+    set.note = document.getElementById('gym-set-end-note').value;
+    set.done = true;
+    set.durationSeconds = gymActiveSetSeconds();
+    set.extraRest = 0;
+
+    const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+    // Descanso CORTO entre lados: cuando lo que acaba de hacerse es el
+    // primer lado de la serie, o sea que el otro lado sigue pendiente.
+    // Ojo: no vale mirar si es el izquierdo -- se puede empezar por el
+    // derecho (lo eliges en el dialogo), y entonces el corto va despues
+    // del derecho.
+    const pareja = gymSidePartnerIndex(ex, a.setIndex);
+    const entreLados = pareja >= 0 && !ex.sets[pareja].done
+      && exercise && Number(exercise.sideRestSeconds) > 0;
+    const seconds = entreLados
+      ? Number(exercise.sideRestSeconds)
+      : (Number(set.restSeconds) || gymLiveSession.restPreset);
+    gymLiveSession.restUntil = Date.now() + seconds * 1000;
+    gymLiveSession.restBaseSeconds = seconds;
+    gymLiveSession.restExtraSeconds = 0;
+    // A que serie pertenece el descanso en marcha: los +30s se le
+    // apuntan a ELLA, para poder ensenar "Serie 1: +60s" luego.
+    gymLiveSession.restSetRef = { exerciseId: ex.exerciseId, setIndex: a.setIndex };
+    gymScheduleRestNotification();
+    gymStartRestLiveActivity();
+    gymStartRestAudioWatch();
+
+    // Ejercicio terminado: las notas de sus series se combinan en la
+    // nota del ejercicio, que es la que se vera el proximo entreno.
+    if (ex.sets.every((s) => s.done)) gymCombineSetNotes(ex);
+  }
+  gymLiveSession.activeSet = null;
+  gymLiveStore();
+  closeGymSetEndModal();
+  renderGymLiveExercises();
+  gymLiveTick();
+}
+
+document.getElementById('btn-gym-set-end-save').addEventListener('click', gymFinishActiveSet);
+document.getElementById('btn-gym-set-end-continue').addEventListener('click', closeGymSetEndModal);
+document.getElementById('btn-gym-set-end-pause').addEventListener('click', () => {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  if (!a.pausedAt) a.pausedAt = Date.now();
+  gymLiveStore();
+  closeGymSetEndModal();
+  renderGymLiveExercises();
+  gymLiveTick();
+});
 
 function renderGymLiveExercises() {
   const container = document.getElementById('gym-live-exercises');
@@ -9760,14 +10462,41 @@ function renderGymLiveExercises() {
         : '—';
       return `
         <div class="gym-live-set-row ${set.done ? 'done' : ''}">
-          <span class="gym-live-set-number">${setIndex + 1}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}</span>
+          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}</span>
           <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
           <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${unit}" data-live-field="weightDisplay" data-set="${setIndex}" value="${set.weightDisplay}" />
           <input type="number" inputmode="numeric" min="0" placeholder="reps" data-live-field="reps" data-set="${setIndex}" value="${set.reps}" />
-          <input type="checkbox" class="styled-checkbox" data-live-done="${setIndex}" ${set.done ? 'checked' : ''} aria-label="Serie hecha" />
+          <button type="button" class="gym-set-status${set.done ? ' done' : ''}" data-live-status="${setIndex}" aria-label="${set.done ? 'Deshacer esta serie' : 'Serie pendiente'}" title="${set.done ? 'Deshacer esta serie' : 'Pendiente'}">${set.done ? '✓' : ''}</button>
         </div>
       `;
     }).join('');
+
+    // Boton GRANDE de empezar/terminar serie (sustituye a la casilla
+    // diminuta, peticion de Koku). Apunta siempre a la primera serie sin
+    // hacer del ejercicio; si ya estan todas, empieza una extra. Solo
+    // puede haber UNA serie en curso en todo el entreno.
+    const active = gymLiveSession.activeSet;
+    const activeHere = !!active && active.exerciseId === ex.exerciseId;
+    const pendingIdx = gymNextPendingSetIndex(ex);
+    let bigBtnHtml;
+    if (activeHere) {
+      const paused = !!active.pausedAt;
+      const activeSide = (ex.sets[active.setIndex] || {}).side;
+      const que = activeSide ? `lado ${gymSideLabel(activeSide)}` : 'serie';
+      bigBtnHtml = `
+        <button type="button" class="gym-set-big-btn gym-set-run-btn${paused ? ' paused' : ''}" data-live-set-action>
+          ${paused ? `▶ Reanudar ${que}` : `■ Terminar ${que}`} · <span data-live-set-timer>0:00</span>
+        </button>`;
+    } else {
+      const pendingSet = pendingIdx >= 0 ? ex.sets[pendingIdx] : null;
+      const label = pendingIdx >= 0
+        ? `▶ Empezar serie ${gymSetSerieNumber(ex, pendingIdx)} de ${gymSerieCount(ex)}${pendingSet && pendingSet.side ? ` · lado ${gymSideLabel(pendingSet.side)}` : ''}`
+        : '▶ Empezar serie extra';
+      bigBtnHtml = `
+        <button type="button" class="gym-set-big-btn gym-set-start-btn" data-live-set-start ${active ? 'disabled' : ''}>
+          ${label}
+        </button>`;
+    }
 
     const doneCount = ex.sets.filter((s) => s.done).length;
     const restSeconds = Number(ex.sets[0] && ex.sets[0].restSeconds) || '';
@@ -9783,12 +10512,14 @@ function renderGymLiveExercises() {
       </div>
       <div class="gym-live-card-body">
         ${exercise && exercise.notes ? `<p class="gym-live-fixed-note">${escapeHtml(exercise.notes)}</p>` : ''}
+        ${prev && prev.note ? `<p class="gym-live-prev-note">La última vez: ${escapeHtml(prev.note)}</p>` : ''}
         <div class="gym-live-set-row gym-live-set-head">
           <span class="gym-live-set-number">#</span>
           <span class="gym-live-set-prev">Anterior</span>
           <span>${unit}</span><span>Reps</span><span>✓</span>
         </div>
         ${setsHtml}
+        ${bigBtnHtml}
         <div class="gym-live-card-footer">
           <button type="button" class="secondary-btn gym-add-set-btn" data-live-add-set>+ Serie</button>
           <label class="gym-live-exrpe">RPE
@@ -9857,44 +10588,55 @@ function renderGymLiveExercises() {
       ex.rpe = e.target.value;
       gymLiveStore();
     });
-    card.querySelectorAll('[data-live-done]').forEach((check) => {
-      check.addEventListener('change', () => {
-        const setIndex = Number(check.dataset.liveDone);
+    // El ✓ de cada fila ya no es un control para MARCAR (eso lo hace el
+    // boton grande): solo indica estado y sirve para DESHACER una serie
+    // dada por buena por error.
+    card.querySelectorAll('[data-live-status]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const setIndex = Number(btn.dataset.liveStatus);
         const set = ex.sets[setIndex];
-        set.done = check.checked;
-        // Marcar una serie como hecha arranca el descanso: el sugerido de
-        // esa serie si lo tiene, si no el preset elegido arriba.
-        // Desmarcarla (te equivocaste de casilla) lo cancela, para no
-        // quedarte con un temporizador de una serie que no has hecho.
-        if (check.checked) {
-          const seconds = Number(set.restSeconds) || gymLiveSession.restPreset;
-          gymLiveSession.restUntil = Date.now() + seconds * 1000;
-          gymLiveSession.restBaseSeconds = seconds;
-          gymLiveSession.restExtraSeconds = 0;
-          // A que serie pertenece el descanso en marcha: los +30s se le
-          // apuntan a ELLA, para poder ensenar "Serie 1: +60s" luego.
-          gymLiveSession.restSetRef = { exerciseId: ex.exerciseId, setIndex };
-          set.extraRest = 0;
-          gymScheduleRestNotification();
-          gymStartRestLiveActivity();
-          gymStartRestAudioWatch();
-        } else {
-          gymLiveSession.restUntil = null;
-          set.extraRest = 0;
-          gymCancelRestNotification();
-          gymEndRestLiveActivity();
-          gymCancelRestAudioWatch();
-        }
+        if (!set.done) return;
+        set.done = false;
+        set.durationSeconds = null;
+        set.extraRest = 0;
+        // El descanso que habia arrancado esa serie ya no pinta nada.
+        gymLiveSession.restUntil = null;
+        gymCancelRestNotification();
+        gymEndRestLiveActivity();
+        gymCancelRestAudioWatch();
         gymLiveStore();
+        renderGymLiveExercises();
         gymLiveTick();
-        check.closest('.gym-live-set-row').classList.toggle('done', check.checked);
-        const progress = card.querySelector('.gym-live-card-progress');
-        if (progress) progress.textContent = `${ex.sets.filter((s) => s.done).length}/${ex.sets.length}`;
       });
     });
+    // Empezar serie: pasa por el dialogo de confirmacion (que ejercicio y
+    // que serie), con el nombre pulsable para cambiar de ejercicio.
+    const startBtn = card.querySelector('[data-live-set-start]');
+    if (startBtn) startBtn.addEventListener('click', () => openGymSetStartModal(exIndex));
+    // Terminar (o reanudar si estaba pausada) la serie en curso.
+    const actionBtn = card.querySelector('[data-live-set-action]');
+    if (actionBtn) {
+      actionBtn.addEventListener('click', () => {
+        const a = gymLiveSession.activeSet;
+        if (!a) return;
+        if (a.pausedAt) {
+          a.pausedMs = (a.pausedMs || 0) + (Date.now() - a.pausedAt);
+          a.pausedAt = null;
+          gymLiveStore();
+          renderGymLiveExercises();
+          gymLiveTick();
+        } else {
+          openGymSetEndModal();
+        }
+      });
+    }
     card.querySelector('[data-live-add-set]').addEventListener('click', () => {
       const last = ex.sets[ex.sets.length - 1];
-      ex.sets.push({ reps: '', weightDisplay: '', done: false, restSeconds: last ? last.restSeconds : '' });
+      // Una serie mas: dos filas si el ejercicio cuenta los lados aparte,
+      // saliendo por el lado que se venga usando en este ejercicio.
+      const desde = ex.sets.length;
+      ex.sets.push(...gymBuildSetsForExercise(ex.exerciseId, 1, last ? last.restSeconds : ''));
+      if (ex.firstSide === 'right') gymSetStartSide(ex, desde, 'right');
       gymLiveStore();
       renderGymLiveExercises();
     });
@@ -9904,6 +10646,11 @@ function renderGymLiveExercises() {
       // No se pierde: va al pool de quitados de ESTA sesion, con sus
       // series tal cual estaban (peticion de Koku: poder recuperarlo).
       if (!gymLiveSession.removedPool) gymLiveSession.removedPool = [];
+      // Si la serie en curso era de ESTE ejercicio, se cancela: si no, la
+      // sesion se quedaba con una serie corriendo de un ejercicio que ya
+      // no esta, el cronometro no paraba y ningun otro ejercicio dejaba
+      // empezar (solo puede haber una serie a la vez).
+      gymDropActiveSetIfExercise(gymLiveSession.exercises[exIndex].exerciseId);
       gymLiveSession.removedPool.push(gymLiveSession.exercises[exIndex]);
       gymLiveSession.exercises.splice(exIndex, 1);
       gymLiveStore();
@@ -9975,10 +10722,7 @@ function renderGymLiveExercises() {
           note: '',
           rpe: '',
           collapsed: false,
-          sets: Array.from({ length: p.targetSets || 1 }, () => ({
-            reps: '', weightDisplay: '', done: false,
-            restSeconds: p.targetRestSeconds ?? '',
-          })),
+          sets: gymBuildSetsForExercise(p.exerciseId, p.targetSets, p.targetRestSeconds ?? ''),
         });
         gymLiveSession.hiddenPool.splice(poolIndex, 1);
         gymLiveStore();
@@ -10007,7 +10751,7 @@ document.getElementById('btn-gym-live-add-exercise').addEventListener('click', (
     const imported = state.gymExercises.find((e) => e.libraryId === libraryEntry.id);
     if (!imported) return;
     if (!gymLiveSession.exercises.some((e) => e.exerciseId === imported.id)) {
-      gymLiveSession.exercises.push({ exerciseId: imported.id, note: '', sets: [{ reps: '', weightDisplay: '', rpe: '', done: false, restSeconds: '' }] });
+      gymLiveSession.exercises.push({ exerciseId: imported.id, note: '', rpe: '', collapsed: false, sets: gymBuildSetsForExercise(imported.id, 1, '') });
       gymLiveStore();
       const prev = await api(`/api/gym-sessions/last-sets/${imported.id}`);
       gymLivePrevSets.set(imported.id, prev);
@@ -10161,6 +10905,10 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
         // en cada serie para no cambiar el esquema de gym_sets.
         rpe: ex.rpe,
         extraRestSeconds: set.extraRest || null,
+        // Cuanto duro la serie (del boton "empezar" al "terminar").
+        durationSeconds: set.durationSeconds || null,
+        side: set.side || null,
+        notes: set.note || null,
       });
       volumeKg += (Number(set.reps) || 0) * (weightKg || 0);
       const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
@@ -10543,7 +11291,7 @@ function renderGymSessionExercisesField() {
       // "+60s" = descanso extra anadido con +30s durante el entreno en
       // vivo (peticion de Koku: que el historial lo ensene por serie).
       setRow.innerHTML = `
-        <span class="gym-session-set-number">Serie ${setIndex + 1}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}</span>
+        <span class="gym-session-set-number" ${set.notes ? `title="${escapeHtml(set.notes)}"` : ''}>Serie ${setIndex + 1}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.durationSeconds ? `<span class="gym-set-dur-chip" title="Lo que duró la serie">${gymFormatWorkTime(set.durationSeconds)}</span>` : ''}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}</span>
         <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
         <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
         <input type="number" data-field="restSeconds" placeholder="Desc. (s)" min="0" title="Descanso planificado, en segundos" value="${set.restSeconds ?? ''}" />
@@ -10621,6 +11369,11 @@ function openGymSessionModal(session) {
         weightDisplay: gymWeightKgToDisplay(set.weightKg),
         restSeconds: set.restSeconds ?? '',
         extraRestSeconds: set.extraRestSeconds ?? null,
+        // Se arrastran tal cual: editar una sesion a mano no debe borrar
+        // lo que duraron sus series, su lado ni sus notas.
+        durationSeconds: set.durationSeconds ?? null,
+        side: set.side ?? null,
+        notes: set.notes ?? null,
       });
     });
     gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets, rpe: rpeByExercise.get(exerciseId) ?? '' }));
@@ -10657,6 +11410,9 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         rpe: exRow.rpe,
         restSeconds: set.restSeconds,
         extraRestSeconds: set.extraRestSeconds ?? null,
+        durationSeconds: set.durationSeconds ?? null,
+        side: set.side ?? null,
+        notes: set.notes ?? null,
       });
     });
   });
@@ -10771,7 +11527,12 @@ function renderGymConsistency(summary) {
   const thisWeekCount = sessionsByWeek.get(thisWeekKey) || 0;
   const streak = gymComputeWeeklyStreak(sessionsByWeek, goal);
   const monthPrefix = toDateKey(now).slice(0, 7);
-  const monthCount = summary.filter((s) => s.date.startsWith(monthPrefix)).length;
+  const monthSessions = summary.filter((s) => s.date.startsWith(monthPrefix));
+  const monthCount = monthSessions.length;
+  // Tiempo REAL de trabajo del mes: suma de lo que duraron las series
+  // (solo cuenta lo registrado con el boton de empezar/terminar serie,
+  // asi que en sesiones apuntadas a mano sale 0 y no se ensena).
+  const monthWork = monthSessions.reduce((acc, s) => acc + (s.workSeconds || 0), 0);
 
   document.getElementById('gym-consistency-stats').innerHTML = `
     <div class="gym-live-summary-grid gym-consistency-grid">
@@ -10779,6 +11540,7 @@ function renderGymConsistency(summary) {
       <div class="gym-live-summary-stat"><b>${streak}</b><span>Racha (semanas)</span></div>
       <div class="gym-live-summary-stat"><b>${thisWeekCount}/${goal}</b><span>Esta semana</span></div>
       <div class="gym-live-summary-stat"><b>${monthCount}</b><span>Este mes</span></div>
+      ${monthWork > 0 ? `<div class="gym-live-summary-stat gym-stat-wide"><b>${gymFormatWorkTime(monthWork)}</b><span>Tiempo de trabajo este mes</span></div>` : ''}
     </div>
   `;
 
