@@ -16,17 +16,27 @@
   const router = createLocalRouter();
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+  // Las series de una sesion. Los TRAMOS de una serie alargada (dropset
+  // o rest-pause) viven en la base como filas propias colgadas de su
+  // madre, pero hacia el cliente se devuelven ANIDADOS en ella
+  // (`segments`): asi `sets.length` sigue siendo el numero de series de
+  // verdad y nadie tiene que acordarse de filtrar.
   function serializeSets(sessionId) {
-    return db
+    const rows = db
       .prepare(`
-        SELECT gs.id, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, gs.extra_rest_seconds, gs.duration_seconds, gs.side, gs.notes, ge.name
+        SELECT gs.id, gs.parent_set_id, gs.segment_index, gs.pause_seconds, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, gs.extra_rest_seconds, gs.duration_seconds, gs.side, gs.notes, ge.name
         FROM gym_sets gs
         JOIN gym_exercises ge ON ge.id = gs.exercise_id
         WHERE gs.session_id = ?
         ORDER BY gs.id ASC
       `)
-      .all(sessionId)
-      .map((r) => ({
+      .all(sessionId);
+
+    const parents = [];
+    const byId = new Map();
+    for (const r of rows) {
+      if (r.parent_set_id) continue;
+      const set = {
         exerciseId: r.exercise_id,
         exerciseName: r.name,
         setNumber: r.set_number,
@@ -39,7 +49,28 @@
         durationSeconds: r.duration_seconds,
         side: r.side || null,
         notes: r.notes || null,
-      }));
+        segments: [],
+      };
+      byId.set(r.id, set);
+      parents.push(set);
+    }
+    // Segunda pasada: cada tramo a su madre. Si la madre no aparece
+    // (base a medio migrar, borrado raro), el tramo se ignora en vez de
+    // colarse como una serie suelta que inflaria el conteo.
+    for (const r of rows) {
+      if (!r.parent_set_id) continue;
+      const parent = byId.get(r.parent_set_id);
+      if (!parent) continue;
+      parent.segments.push({
+        kind: r.set_type === 'restpause' ? 'restpause' : 'dropset',
+        segmentIndex: r.segment_index,
+        reps: r.reps,
+        weightKg: r.weight_kg,
+        pauseSeconds: r.pause_seconds,
+      });
+    }
+    for (const set of parents) set.segments.sort((a, b) => (a.segmentIndex || 0) - (b.segmentIndex || 0));
+    return parents;
   }
 
   // exercise_notes se guarda como JSON {exerciseId: "nota"} (ver el
@@ -97,30 +128,69 @@
     if (!Array.isArray(sets)) return;
 
     const insert = db.prepare(
-      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds, duration_seconds, side, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds, duration_seconds, side, notes, parent_set_id, segment_index, pause_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    const VALID_SET_TYPES = ['warmup', 'dropset', 'failure'];
+    const VALID_SET_TYPES = ['warmup', 'dropset', 'restpause', 'failure'];
     const VALID_SIDES = ['left', 'right'];
     const countByExercise = new Map();
+    const numeroONulo = (v) => (v !== undefined && v !== null && v !== '' ? Number(v) : null);
     sets.forEach((s) => {
       const exerciseId = Number(s && s.exerciseId);
       if (!exerciseId) return; // entrada invalida, se ignora en vez de romper el resto
       const setNumber = (countByExercise.get(exerciseId) || 0) + 1;
       countByExercise.set(exerciseId, setNumber);
-      insert.run(
+      const info = insert.run(
         sessionId,
         exerciseId,
         setNumber,
-        s.reps !== undefined && s.reps !== null && s.reps !== '' ? Number(s.reps) : null,
-        s.weightKg !== undefined && s.weightKg !== null && s.weightKg !== '' ? Number(s.weightKg) : null,
-        s.restSeconds !== undefined && s.restSeconds !== null && s.restSeconds !== '' ? Number(s.restSeconds) : null,
-        s.rpe !== undefined && s.rpe !== null && s.rpe !== '' ? Number(s.rpe) : null,
+        numeroONulo(s.reps),
+        numeroONulo(s.weightKg),
+        numeroONulo(s.restSeconds),
+        numeroONulo(s.rpe),
         VALID_SET_TYPES.includes(s.setType) ? s.setType : null,
         s.extraRestSeconds !== undefined && s.extraRestSeconds !== null && s.extraRestSeconds !== '' && Number(s.extraRestSeconds) > 0 ? Number(s.extraRestSeconds) : null,
         s.durationSeconds !== undefined && s.durationSeconds !== null && s.durationSeconds !== '' && Number(s.durationSeconds) > 0 ? Number(s.durationSeconds) : null,
         VALID_SIDES.includes(s.side) ? s.side : null,
-        s.notes && String(s.notes).trim() ? String(s.notes).trim() : null
+        s.notes && String(s.notes).trim() ? String(s.notes).trim() : null,
+        null, // parent_set_id: esta es la serie madre
+        null,
+        null
       );
+
+      // Tramos de una serie alargada. Comparten exercise_id y set_number
+      // con su madre (son la MISMA serie), pero llevan parent_set_id, asi
+      // que ni suben el contador de series ni se numeran aparte.
+      if (!Array.isArray(s.segments)) return;
+      // El indice del tramo se lleva aparte del de la lista para que los
+      // tramos descartados (nulos o sin repeticiones) no dejen huecos.
+      let segmentIndex = 0;
+      s.segments.forEach((seg) => {
+        if (!seg) return;
+        const kind = seg.kind === 'restpause' ? 'restpause' : 'dropset';
+        const reps = numeroONulo(seg.reps);
+        const weightKg = numeroONulo(seg.weightKg);
+        // Un tramo sin repeticiones no aporta nada y solo ensuciaria el
+        // historial: se descarta.
+        if (!reps) return;
+        segmentIndex += 1;
+        insert.run(
+          sessionId,
+          exerciseId,
+          setNumber,
+          reps,
+          weightKg,
+          null, // el descanso es de la serie entera, no del tramo
+          numeroONulo(s.rpe),
+          kind,
+          null,
+          null,
+          VALID_SIDES.includes(s.side) ? s.side : null,
+          null,
+          info.lastInsertRowid,
+          segmentIndex,
+          kind === 'restpause' ? numeroONulo(seg.pauseSeconds) : null
+        );
+      });
     });
   }
 
@@ -142,7 +212,7 @@
     const rows = db
       .prepare(`
         SELECT s.id, s.date, s.type, s.activity_kind, s.activity_name, s.duration_seconds, s.routine_id,
-               COUNT(st.id) as set_count,
+               COUNT(CASE WHEN st.parent_set_id IS NULL THEN st.id END) as set_count,
                SUM(COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0)) as volume_kg,
                SUM(COALESCE(st.duration_seconds, 0)) as work_seconds
         FROM gym_sessions s
@@ -308,10 +378,33 @@
       .get(req.params.exerciseId);
     if (!last) return res.json({ date: null, sets: [], note: null });
 
-    const sets = db
-      .prepare('SELECT set_number, reps, weight_kg, rpe, rest_seconds, side FROM gym_sets WHERE session_id = ? AND exercise_id = ? ORDER BY id ASC')
-      .all(last.id, req.params.exerciseId)
-      .map((r) => ({ setNumber: r.set_number, reps: r.reps, weightKg: r.weight_kg, rpe: r.rpe, restSeconds: r.rest_seconds, side: r.side || null }));
+    const rows = db
+      .prepare('SELECT id, parent_set_id, segment_index, pause_seconds, set_type, set_number, reps, weight_kg, rpe, rest_seconds, side FROM gym_sets WHERE session_id = ? AND exercise_id = ? ORDER BY id ASC')
+      .all(last.id, req.params.exerciseId);
+    // Mismo anidado que serializeSets: los tramos van dentro de su
+    // madre, para que la columna "Anterior" del entreno en vivo siga
+    // teniendo una fila por serie de verdad.
+    const sets = [];
+    const byId = new Map();
+    for (const r of rows) {
+      if (r.parent_set_id) continue;
+      const set = { setNumber: r.set_number, reps: r.reps, weightKg: r.weight_kg, rpe: r.rpe, restSeconds: r.rest_seconds, side: r.side || null, segments: [] };
+      byId.set(r.id, set);
+      sets.push(set);
+    }
+    for (const r of rows) {
+      if (!r.parent_set_id) continue;
+      const parent = byId.get(r.parent_set_id);
+      if (!parent) continue;
+      parent.segments.push({
+        kind: r.set_type === 'restpause' ? 'restpause' : 'dropset',
+        segmentIndex: r.segment_index,
+        reps: r.reps,
+        weightKg: r.weight_kg,
+        pauseSeconds: r.pause_seconds,
+      });
+    }
+    for (const set of sets) set.segments.sort((a, b) => (a.segmentIndex || 0) - (b.segmentIndex || 0));
     // La nota que quedo de ese ejercicio la ultima vez (incluye las notas
     // de sus series ya combinadas): se ensena en el entreno siguiente.
     const note = parseExerciseNotes(last.exercise_notes)[String(req.params.exerciseId)] || null;

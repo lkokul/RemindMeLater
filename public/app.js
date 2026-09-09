@@ -8499,6 +8499,82 @@ async function deleteGymSessionById(id) {
   populateGymProgressExerciseSelect();
 }
 
+// --- Series alargadas: dropset y rest-pause ---------------------------
+// Un DROPSET es una serie que, al llegar al limite, sigue bajando el
+// peso; un REST-PAUSE es una serie que para unos segundos y sigue con el
+// MISMO peso. Los dos se apuntan DESPUES de la serie (peticion de Koku:
+// "hay veces que lo hago y otras que no, depende de la serie"), asi que
+// no son una configuracion del ejercicio sino algo que se anade en el
+// dialogo de "¿has acabado la serie?".
+//
+// Cada tramo extra viaja dentro de su serie madre, en `set.segments`
+// (ver serializeSets en routes-local/gymSessions.js). Las tres reglas
+// que decidio Koku, y de donde salen estas funciones:
+//   1. Una serie alargada cuenta como UNA serie, no como tres. Por eso
+//      los tramos van anidados y nunca sueltos en la lista.
+//   2. El VOLUMEN suma todos los tramos: es trabajo real, y si no
+//      sumara, la grafica bajaria justo el dia que mas aprietas.
+//   3. Cualquier tramo puede ser RECORD ("hay veces que la segunda sale
+//      mejor que la primera"), asi que los PRs miran serie y tramos por
+//      igual -- por eso existe gymSetConTramos().
+const GYM_SEGMENT_LABELS = { dropset: 'Drop', restpause: 'R-P' };
+
+function gymSetSegments(set) {
+  return set && Array.isArray(set.segments) ? set.segments.filter(Boolean) : [];
+}
+
+// Kilos movidos por la serie ENTERA (madre + tramos). Es lo que usan el
+// volumen del historial, el mapa de musculos y la grafica semanal.
+function gymSetVolumeKg(set) {
+  let total = (Number(set.reps) || 0) * (Number(set.weightKg) || 0);
+  for (const seg of gymSetSegments(set)) {
+    total += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
+  }
+  return total;
+}
+
+// La serie y sus tramos como una lista plana de "cosas con peso y
+// repeticiones", para lo que mira serie a serie (los PRs). Los tramos
+// heredan el ejercicio y el lado de su madre.
+function gymSetConTramos(set) {
+  const lista = [set];
+  for (const seg of gymSetSegments(set)) {
+    lista.push({
+      exerciseId: set.exerciseId,
+      exerciseName: set.exerciseName,
+      reps: seg.reps,
+      weightKg: seg.weightKg,
+      setType: seg.kind,
+      side: set.side || null,
+    });
+  }
+  return lista;
+}
+
+// Etiqueta corta para la fila de una serie alargada: "Drop x2", "R-P".
+function gymSegmentChipHtml(set) {
+  const segs = gymSetSegments(set);
+  if (segs.length === 0) return '';
+  const kinds = [...new Set(segs.map((seg) => (seg.kind === 'restpause' ? 'restpause' : 'dropset')))];
+  const texto = kinds.map((k) => GYM_SEGMENT_LABELS[k]).join('+');
+  const sufijo = segs.length > 1 ? ` ×${segs.length}` : '';
+  return `<span class="gym-set-segment-chip" title="Serie alargada: ${segs.length} tramo${segs.length === 1 ? '' : 's'} extra">${texto}${sufijo}</span>`;
+}
+
+// Las sub-lineas que se ven debajo de la serie en el historial:
+//   ↳ 45 kg × 6            (dropset)
+//   ↳ 15 s → 80 kg × 3     (rest-pause)
+function gymSegmentLinesHtml(set) {
+  const segs = gymSetSegments(set);
+  if (segs.length === 0) return '';
+  const unit = getGymWeightUnitLabel();
+  return `<div class="gym-set-segment-lines">${segs.map((seg) => {
+    const pausa = seg.kind === 'restpause' && seg.pauseSeconds ? `${seg.pauseSeconds} s → ` : '';
+    const peso = seg.weightKg != null ? `${gymWeightKgToDisplay(seg.weightKg)} ${unit}` : '—';
+    return `<span class="gym-set-segment-line">↳ ${escapeHtml(pausa)}${escapeHtml(peso)} × ${escapeHtml(String(seg.reps ?? '—'))}</span>`;
+  }).join('')}</div>`;
+}
+
 function renderGymSessionsList() {
   const list = document.getElementById('gym-sessions-list');
   list.innerHTML = '';
@@ -8518,7 +8594,10 @@ function renderGymSessionsList() {
     if (s.durationSeconds) statBits.push(`${Math.max(1, Math.round(s.durationSeconds / 60))} min`);
     if (s.type !== 'activity' && s.sets.length > 0) {
       statBits.push(`${s.sets.length} serie${s.sets.length === 1 ? '' : 's'}`);
-      const volumeKg = s.sets.reduce((acc, set) => acc + (set.reps || 0) * (set.weightKg || 0), 0);
+      // Los tramos de una serie alargada suman kilos pero NO series:
+      // por eso el volumen usa gymSetVolumeKg y el conteo de arriba es
+      // sets.length a secas (los tramos van anidados, no en la lista).
+      const volumeKg = s.sets.reduce((acc, set) => acc + gymSetVolumeKg(set), 0);
       if (volumeKg > 0) statBits.push(`${gymWeightKgToDisplay(volumeKg)} ${unit}`);
       // Tiempo REAL de trabajo (suma de lo que duraron las series), solo
       // si la sesion se registro con el boton de empezar/terminar serie.
@@ -10741,6 +10820,97 @@ function gymTapShouldOpenEnd(target) {
   vista.addEventListener('pointercancel', () => { gymTapStart = null; });
 })();
 
+// --- Tramos de una serie alargada dentro del dialogo de fin de serie ---
+// Lo que se este escribiendo ahora mismo en la linea "¿Has alargado la
+// serie?". Se vacia al abrir el formulario y se vuelca en la serie al
+// guardar; mientras tanto vive solo aqui, porque hasta que no le das a
+// "Guardar serie" no hay nada que apuntar.
+let gymSetEndSegments = [];
+
+// El peso de la SERIE MADRE tal y como esta el formulario ahora: lo que
+// hayas escrito o, si lo dejaste en blanco, la sugerencia gris (misma
+// regla que usa gymFinishActiveSet para guardar la serie).
+function gymPesoMadreDeTramos() {
+  const wEl = document.getElementById('gym-set-end-weight');
+  return wEl.value !== '' ? wEl.value : (wEl.placeholder || '');
+}
+
+function renderGymSetEndSegments() {
+  const cont = document.getElementById('gym-set-end-segments');
+  cont.innerHTML = '';
+  const unit = getGymWeightUnitLabel();
+  const pesoMadre = gymPesoMadreDeTramos();
+  // El peso que se propone en cada tramo: en un rest-pause es SIEMPRE el
+  // de la madre (es la definicion: misma carga tras la pausa), y en un
+  // dropset el del tramo de arriba, porque un dropset encadenado va
+  // bajando desde el anterior. Koku pidio que el de la madre sea el
+  // valor por defecto pero se pueda cambiar: va como sugerencia gris,
+  // que es el patron que ya usa el resto del dialogo (campo vacio =
+  // te vale la sugerencia).
+  let pesoAnterior = pesoMadre;
+  gymSetEndSegments.forEach((seg, i) => {
+    const sugerencia = seg.kind === 'restpause' ? pesoMadre : pesoAnterior;
+    const row = document.createElement('div');
+    row.className = 'gym-set-segment-row';
+    row.dataset.segKind = seg.kind;
+    row.innerHTML = `
+      <span class="gym-set-segment-tag">${GYM_SEGMENT_LABELS[seg.kind]}</span>
+      ${seg.kind === 'restpause'
+        ? `<input type="number" inputmode="numeric" min="0" placeholder="pausa s" title="Segundos de pausa" data-seg-field="pauseSeconds" value="${escapeHtml(String(seg.pauseSeconds ?? ''))}" />`
+        : ''}
+      <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${escapeHtml(String(sugerencia || unit))}" title="Peso del tramo (${escapeHtml(unit)})" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" />
+      <input type="number" inputmode="numeric" min="0" placeholder="reps" title="Repeticiones del tramo" data-seg-field="reps" value="${escapeHtml(String(seg.reps ?? ''))}" />
+      <button type="button" class="icon-btn" data-seg-remove aria-label="Quitar tramo">✕</button>
+    `;
+    row.querySelectorAll('[data-seg-field]').forEach((input) => {
+      input.addEventListener('input', () => { seg[input.dataset.segField] = input.value; });
+    });
+    row.querySelector('[data-seg-remove]').addEventListener('click', () => {
+      gymSetEndSegments.splice(i, 1);
+      renderGymSetEndSegments();
+    });
+    cont.appendChild(row);
+    pesoAnterior = (seg.weightDisplay !== '' && seg.weightDisplay != null) ? seg.weightDisplay : sugerencia;
+  });
+}
+
+// Lo escrito en los tramos, ya resuelto (campo vacio = la sugerencia
+// gris que se veia). Se lee del DOM y no del array porque la sugerencia
+// solo existe ahi, igual que pasa con el peso de la serie madre.
+function gymLeerTramosDelFormulario() {
+  const filas = [...document.querySelectorAll('#gym-set-end-segments .gym-set-segment-row')];
+  return filas.map((fila) => {
+    const leer = (campo) => {
+      const el = fila.querySelector(`[data-seg-field="${campo}"]`);
+      if (!el) return '';
+      if (el.value !== '') return el.value;
+      // Campo vacio: vale la sugerencia gris, pero SOLO si de verdad es
+      // un numero. Hay placeholders que son texto ("reps", "pausa s") y
+      // colarlos aqui guardaria un NaN en la base de datos.
+      return Number.isFinite(Number(el.placeholder)) && el.placeholder !== '' ? el.placeholder : '';
+    };
+    const kind = fila.dataset.segKind === 'restpause' ? 'restpause' : 'dropset';
+    return {
+      kind,
+      weightDisplay: leer('weightDisplay'),
+      reps: leer('reps'),
+      pauseSeconds: kind === 'restpause' ? leer('pauseSeconds') : null,
+    };
+  // Un tramo sin repeticiones esta a medio escribir: no se guarda.
+  }).filter((seg) => Number(seg.reps) > 0);
+}
+
+document.querySelectorAll('[data-add-segment]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymSetEndSegments.push({ kind: btn.dataset.addSegment, weightDisplay: '', reps: '', pauseSeconds: '' });
+    renderGymSetEndSegments();
+    // El foco al ultimo campo que se acaba de crear, para poder escribir
+    // sin tener que apuntar con el dedo.
+    const ultimo = document.querySelector('#gym-set-end-segments .gym-set-segment-row:last-child input');
+    if (ultimo) ultimo.focus();
+  });
+});
+
 // "Si, terminada" -> pasa al formulario, con lo que ya hubiera escrito en
 // la fila y, si estaba vacio, lo de la ultima serie hecha del mismo
 // ejercicio y lado (asi normalmente solo hay que confirmar).
@@ -10766,6 +10936,10 @@ document.getElementById('btn-gym-set-end-done').addEventListener('click', () => 
   wEl.placeholder = previa && previa.weightDisplay ? String(previa.weightDisplay) : '';
   rEl.placeholder = previa && previa.reps ? String(previa.reps) : '';
   document.getElementById('gym-set-end-note').value = set.note || '';
+  // Los tramos de la serie: normalmente ninguno, pero si la serie se
+  // deshizo y se esta rehaciendo, se recupera lo que tuviera apuntado.
+  gymSetEndSegments = (set.segments || []).map((seg) => ({ ...seg }));
+  renderGymSetEndSegments();
   gymSetEndShowForm(true);
 });
 
@@ -10784,6 +10958,7 @@ function gymFinishActiveSet() {
     set.weightDisplay = wEl.value !== '' ? wEl.value : (wEl.placeholder || '');
     set.reps = rEl.value !== '' ? rEl.value : (rEl.placeholder || '');
     set.note = document.getElementById('gym-set-end-note').value;
+    set.segments = gymLeerTramosDelFormulario();
     set.done = true;
     set.durationSeconds = gymActiveSetSeconds();
     set.extraRest = 0;
@@ -10879,12 +11054,15 @@ function renderGymLiveExercises() {
 
     const setsHtml = ex.sets.map((set, setIndex) => {
       const prevSet = prev && prev.sets[setIndex];
+      // Si la ultima vez esa serie se alargo, se marca con un "+N" para
+      // saber que ese numero no salio de una serie normal.
+      const prevExtra = prevSet && gymSetSegments(prevSet).length;
       const prevLabel = prevSet
-        ? `${prevSet.restSeconds ? `(${gymFormatRestShort(prevSet.restSeconds)})` : ''}${prevSet.weightKg !== null ? gymWeightKgToDisplay(prevSet.weightKg) : '—'}×${prevSet.reps ?? '—'}`
+        ? `${prevSet.restSeconds ? `(${gymFormatRestShort(prevSet.restSeconds)})` : ''}${prevSet.weightKg !== null ? gymWeightKgToDisplay(prevSet.weightKg) : '—'}×${prevSet.reps ?? '—'}${prevExtra ? ` +${prevExtra}` : ''}`
         : '—';
       return `
         <div class="gym-live-set-row ${set.done ? 'done' : ''}">
-          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}</span>
+          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymSegmentChipHtml(set)}</span>
           <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
           <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${unit}" data-live-field="weightDisplay" data-set="${setIndex}" value="${set.weightDisplay}" />
           <input type="number" inputmode="numeric" min="0" placeholder="reps" data-live-field="reps" data-set="${setIndex}" value="${set.reps}" />
@@ -11318,10 +11496,19 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
     for (const set of ex.sets) {
       if (!set.done && set.reps === '' && set.weightDisplay === '') continue;
       const weightKg = gymWeightDisplayToKg(set.weightDisplay);
+      // Tramos de una serie alargada: el peso viaja en kg como el de la
+      // serie madre (la libra es solo de presentacion, ver el esquema).
+      const segments = (set.segments || []).map((seg) => ({
+        kind: seg.kind,
+        reps: seg.reps,
+        weightKg: gymWeightDisplayToKg(seg.weightDisplay),
+        pauseSeconds: seg.pauseSeconds,
+      })).filter((seg) => Number(seg.reps) > 0);
       sets.push({
         exerciseId: ex.exerciseId,
         reps: set.reps,
         weightKg,
+        segments,
         restSeconds: set.restSeconds,
         // El RPE es del EJERCICIO (peticion de Koku): se guarda replicado
         // en cada serie para no cambiar el esquema de gym_sets.
@@ -11333,6 +11520,7 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
         notes: set.note || null,
       });
       volumeKg += (Number(set.reps) || 0) * (weightKg || 0);
+      for (const seg of segments) volumeKg += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
       const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
       if (exercise && exercise.muscleGroup) musclesTouched.add(gymMuscleGroupLabel(exercise.muscleGroup));
     }
@@ -11795,7 +11983,7 @@ function renderGymSessionExercisesField() {
       // "+60s" = descanso extra anadido con +30s durante el entreno en
       // vivo (peticion de Koku: que el historial lo ensene por serie).
       setRow.innerHTML = `
-        <span class="gym-session-set-number" ${set.notes ? `title="${escapeHtml(set.notes)}"` : ''}>Serie ${setIndex + 1}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.durationSeconds ? `<span class="gym-set-dur-chip" title="Lo que duró la serie">${gymFormatWorkTime(set.durationSeconds)}</span>` : ''}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}</span>
+        <span class="gym-session-set-number" ${set.notes ? `title="${escapeHtml(set.notes)}"` : ''}>Serie ${setIndex + 1}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.durationSeconds ? `<span class="gym-set-dur-chip" title="Lo que duró la serie">${gymFormatWorkTime(set.durationSeconds)}</span>` : ''}${set.extraRestSeconds ? `<span class="gym-set-extra-chip">+${set.extraRestSeconds}s</span>` : ''}${gymSegmentChipHtml(set)}</span>
         <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
         <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
         <input type="number" data-field="restSeconds" placeholder="Desc. (s)" min="0" title="Descanso planificado, en segundos" value="${set.restSeconds ?? ''}" />
@@ -11815,6 +12003,14 @@ function renderGymSessionExercisesField() {
         renderGymSessionExercisesField();
       });
       setsList.appendChild(setRow);
+      // Los tramos van en su propia linea debajo de la serie, no dentro
+      // de la rejilla de campos: son informacion, no algo que se edite
+      // aqui (se apuntan durante el entreno, que es cuando ocurren).
+      if (gymSetSegments(set).length > 0) {
+        const lines = document.createElement('div');
+        lines.innerHTML = gymSegmentLinesHtml(set);
+        setsList.appendChild(lines.firstElementChild);
+      }
     });
     block.appendChild(setsList);
 
@@ -11878,6 +12074,10 @@ function openGymSessionModal(session) {
         durationSeconds: set.durationSeconds ?? null,
         side: set.side ?? null,
         notes: set.notes ?? null,
+        // Los tramos de una serie alargada se arrastran tal cual (en kg,
+        // como llegan): aqui solo se VEN, se editan en el entreno. Lo
+        // importante es que editar una sesion a mano no los borre.
+        segments: (set.segments || []).map((seg) => ({ ...seg })),
       });
     });
     gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets, rpe: rpeByExercise.get(exerciseId) ?? '' }));
@@ -11917,6 +12117,7 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         durationSeconds: set.durationSeconds ?? null,
         side: set.side ?? null,
         notes: set.notes ?? null,
+        segments: set.segments || [],
       });
     });
   });
@@ -12244,7 +12445,9 @@ function renderGymBodyMap() {
     for (const set of session.sets) {
       const exercise = exerciseById.get(set.exerciseId);
       if (!exercise) continue;
-      const amount = gymMapMetric === 'volume' ? (set.reps || 0) * (set.weightKg || 0) : 1;
+      // En "volumen" cuentan todos los tramos; en "series" una serie
+      // alargada sigue siendo UNA serie (decision de Koku).
+      const amount = gymMapMetric === 'volume' ? gymSetVolumeKg(set) : 1;
       if (amount <= 0) continue;
       const primary = GYM_MUSCLE_GROUPS.some((g) => g.id === exercise.muscleGroup) ? exercise.muscleGroup : null;
       if (primary) {
@@ -12330,16 +12533,21 @@ function renderGymPRs() {
     const volumeByExercise = new Map();
     for (const set of session.sets) {
       if (set.setType === 'warmup') continue;
-      if (!byExercise.has(set.exerciseId)) {
-        byExercise.set(set.exerciseId, { name: set.exerciseName, bestWeightKg: 0, best1RM: 0, bestVolumeKg: 0 });
+      // Serie madre Y tramos: Koku pidio expresamente que cualquiera
+      // pueda ser record ("hay veces que la segunda sale mejor que la
+      // primera, sobre todo cuando empiezas y mejoras la tecnica").
+      for (const tramo of gymSetConTramos(set)) {
+        if (!byExercise.has(tramo.exerciseId)) {
+          byExercise.set(tramo.exerciseId, { name: tramo.exerciseName, bestWeightKg: 0, best1RM: 0, bestVolumeKg: 0 });
+        }
+        const pr = byExercise.get(tramo.exerciseId);
+        if (tramo.weightKg > pr.bestWeightKg) pr.bestWeightKg = tramo.weightKg;
+        if (tramo.weightKg > 0 && tramo.reps >= 1 && tramo.reps <= 12) {
+          const est = gymEpley1RM(tramo.weightKg, tramo.reps);
+          if (est > pr.best1RM) pr.best1RM = est;
+        }
       }
-      const pr = byExercise.get(set.exerciseId);
-      if (set.weightKg > pr.bestWeightKg) pr.bestWeightKg = set.weightKg;
-      if (set.weightKg > 0 && set.reps >= 1 && set.reps <= 12) {
-        const est = gymEpley1RM(set.weightKg, set.reps);
-        if (est > pr.best1RM) pr.best1RM = est;
-      }
-      volumeByExercise.set(set.exerciseId, (volumeByExercise.get(set.exerciseId) || 0) + (set.reps || 0) * (set.weightKg || 0));
+      volumeByExercise.set(set.exerciseId, (volumeByExercise.get(set.exerciseId) || 0) + gymSetVolumeKg(set));
     }
     for (const [exerciseId, volume] of volumeByExercise) {
       const pr = byExercise.get(exerciseId);
@@ -12401,7 +12609,7 @@ function renderGymWeeklyVolume() {
     const week = gymWeekStartKey(new Date(`${session.date}T00:00:00`));
     if (!weekSet.has(week)) continue;
     for (const set of session.sets) {
-      const kg = (set.reps || 0) * (set.weightKg || 0);
+      const kg = gymSetVolumeKg(set);
       if (kg <= 0) continue;
       const group = muscleOf.get(set.exerciseId) || 'otros';
       volume.get(week).set(group, (volume.get(week).get(group) || 0) + kg);

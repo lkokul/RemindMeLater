@@ -870,6 +870,20 @@
           <span>Notas de la serie (opcional)</span>
           <input type="text" id="gym-set-end-note" placeholder="Ej. se me fue el codo" />
         </label>
+
+        <!-- Series alargadas (dropset / rest-pause). Va aqui, en una
+             linea discreta dentro del formulario que ya existia, y no en
+             una pantalla propia: la mayoria de las series no se alargan y
+             tienen que seguir guardandose de un solo toque. Se pregunta
+             DESPUES de la serie porque depende de la serie y del dia, no
+             es una configuracion fija del ejercicio (peticion de Koku). -->
+        <div class="gym-set-extend">
+          <span class="gym-set-extend-label">¿Has alargado la serie?</span>
+          <button type="button" class="gym-set-extend-btn" data-add-segment="dropset" title="Bajaste el peso y seguiste">+ Dropset</button>
+          <button type="button" class="gym-set-extend-btn" data-add-segment="restpause" title="Paraste unos segundos y seguiste con el mismo peso">+ Rest-pause</button>
+        </div>
+        <div id="gym-set-end-segments" class="gym-set-segments"></div>
+
         <div class="gym-set-modal-actions">
           <button type="button" id="btn-gym-set-end-save" class="primary-btn gym-set-big-btn">Guardar serie</button>
         </div>

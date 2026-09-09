@@ -315,6 +315,14 @@ function applyLocalSchema(db) {
       -- Nota de ESTA serie ("se me fue el codo"): al acabar el ejercicio
       -- se combinan todas en la nota del ejercicio de la sesion.
       notes TEXT,
+      -- Series alargadas: un TRAMO de dropset o de rest-pause es una
+      -- fila propia colgada de su serie madre (parent_set_id), con su
+      -- orden (segment_index) y, en rest-pause, los segundos que se
+      -- paro antes de hacerlo (pause_seconds). set_type dice cual es.
+      -- Contar series = parent_set_id IS NULL; contar kilos = todas.
+      parent_set_id INTEGER REFERENCES gym_sets(id),
+      segment_index INTEGER,
+      pause_seconds INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1691,6 +1699,25 @@ function applyLocalSchema(db) {
   }
   if (!gymSetColumns2.includes('notes')) {
     db.exec('ALTER TABLE gym_sets ADD COLUMN notes TEXT');
+  }
+  // Series alargadas (dropset y rest-pause): cada TRAMO extra es una
+  // fila propia de gym_sets colgada de su serie madre, igual que cada
+  // lado de un unilateral es una serie propia -- asi el volumen sale
+  // solo con el SUM de siempre y no hace falta ningun caso especial.
+  //   parent_set_id  NULL = serie normal; si no, el id de su madre.
+  //   segment_index  1, 2, 3... el orden del tramo dentro de la serie.
+  //   pause_seconds  solo en rest-pause: lo que se paro antes del tramo.
+  // Contar SERIES es entonces "parent_set_id IS NULL" (un dropset de
+  // tres bajadas es UNA serie, decision de Koku), mientras que contar
+  // KILOS suma todas las filas.
+  if (!gymSetColumns2.includes('parent_set_id')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN parent_set_id INTEGER');
+  }
+  if (!gymSetColumns2.includes('segment_index')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN segment_index INTEGER');
+  }
+  if (!gymSetColumns2.includes('pause_seconds')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN pause_seconds INTEGER');
   }
   const gymSessionColumns = db.prepare('PRAGMA table_info(gym_sessions)').all().map((c) => c.name);
   if (!gymSessionColumns.includes('started_at')) {

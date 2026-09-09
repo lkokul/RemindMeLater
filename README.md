@@ -192,6 +192,12 @@ a pantalla completa y sin afectar a nada de lo de arriba:
   [exercises.json](https://github.com/wrkout/exercises.json) (de Ollie
   Jennings) — ambos de dominio público (Unlicense), ¡gracias a los dos!
   Los nombres están traducidos al español dentro de la propia app.
+  Al terminar una serie durante el entrenamiento puedes apuntar que la
+  **alargaste**: un *dropset* (bajas el peso y sigues) o un *rest-pause*
+  (paras unos segundos y sigues con el mismo peso), con tantos tramos
+  como hagas. Una serie alargada sigue contando como **una serie** para
+  la racha y el objetivo semanal, pero **sus kilos sí suman** al volumen
+  y cualquiera de sus tramos puede marcar un récord.
 - **Lecturas**: historial de entretenimiento — mangas, cómics, libros,
   series, animes y películas juntos — agrupado en sagas (obligatorias:
   incluso algo suelto es una saga de un único elemento, y una misma saga

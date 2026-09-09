@@ -866,6 +866,82 @@ a la vez no te deja puesto el descanso del ejercicio de antes.
 Las piezas comunes están en `GYM_TARGET_FIELDS` y `gymTargetsPorDefecto()`
 (`app.js`), para no repetir el trío series/reps/descanso por todas partes.
 
+## Series alargadas: dropsets y rest-pause
+
+Petición de Koku (9/9/2026). Un **dropset** es una serie que, al llegar
+al límite, baja el peso y sigue; un **rest-pause** para unos segundos y
+sigue con el MISMO peso. Se apuntan **después** de la serie, en el
+diálogo de "¿has acabado?", porque dependen de la serie y del día: *"hay
+veces que lo hago y otras que no, por lo que no puedo ponerlo fijo desde
+ejercicio"*.
+
+**El modelo**: cada TRAMO extra es una fila propia de `gym_sets` colgada
+de su serie madre (`parent_set_id`, `segment_index`, `pause_seconds`) —
+el mismo truco que ya se usaba con los unilaterales, donde cada lado es
+una serie propia. Así el volumen sale con el `SUM` de siempre sin ningún
+caso especial, y **contar series es `parent_set_id IS NULL`**. Los
+tramos comparten `exercise_id`, `set_number` y `side` con su madre: son
+la MISMA serie.
+
+Hacia el cliente los tramos viajan **anidados** en su madre
+(`set.segments`), no sueltos en la lista — así `sets.length` sigue
+siendo el número de series de verdad y nadie tiene que acordarse de
+filtrar. La conversión va en `serializeSets()` (y otra igual en
+`/last-sets/:exerciseId`).
+
+**Las cuatro decisiones que tomó Koku**, tras enseñarle qué hacen otras
+apps (Hevy/Strong etiquetan cada tramo como una serie más) y qué dice la
+literatura (un rest-pause equivale en reps efectivas a ~2 series, pero
+eso es interpretación, no medida). No cambiarlas sin volver a
+preguntarle:
+
+1. **Cuenta como UNA serie**, no como tres. Si contara los tramos, la
+   racha, el heatmap y el objetivo semanal dirían que entrenaste el
+   triple.
+2. **Cualquier tramo puede ser récord**: *"a nivel de lógica la primera
+   debería ser la que más esfuerzo se haga, pero... hay veces que la
+   segunda sale más, más cuando comienzas a entrenar, que en la primera
+   no haces buena técnica"*. Por eso `gymSetConTramos()` aplana serie +
+   tramos y los PRs los miran por igual. Sigue excluyéndose el
+   calentamiento entero (madre y tramos) y el 1RM de Epley sigue pidiendo
+   1-12 reps.
+3. **La entrada es una línea discreta** dentro del formulario de
+   peso/reps que ya existía, no una pantalla propia: la mayoría de las
+   series no se alargan y tienen que seguir guardándose de un toque.
+4. **El peso del tramo se puede cambiar, con el de la madre por
+   defecto.** Va como sugerencia gris (el patrón "campo vacío = te vale
+   la sugerencia" que ya usa el resto del diálogo). Matiz: en rest-pause
+   se propone SIEMPRE el de la madre (es la definición); en un dropset
+   encadenado, el del tramo de arriba, porque va bajando desde él.
+
+**Las piezas** (`app.js`, bloque "Series alargadas"): `gymSetSegments()`,
+`gymSetVolumeKg()` (madre + tramos, la usan el volumen del historial, el
+mapa de músculos y la gráfica semanal), `gymSetConTramos()` (para los
+PRs), `gymSegmentChipHtml()` ("Drop ×2" en la fila) y
+`gymSegmentLinesHtml()` (las sub-líneas `↳ 15 s → 80 kg × 3` del
+historial). En el diálogo: `gymSetEndSegments`,
+`renderGymSetEndSegments()` y `gymLeerTramosDelFormulario()`.
+
+**Trampa que ya mordió al escribirlo**: leer "campo vacío → su
+placeholder" sin comprobar que el placeholder sea un NÚMERO. Los de las
+reps y la pausa son texto ("reps", "pausa s"), así que se colaba un
+`NaN` hasta la base de datos. `gymLeerTramosDelFormulario()` solo acepta
+el placeholder si `Number.isFinite()`.
+
+**Lo que NO se hace a propósito**: los tramos no se editan desde el modal
+de "editar sesión" a mano — ahí solo se VEN (chip + sub-líneas) y se
+arrastran intactos al guardar, para que editar una sesión no los borre.
+Se apuntan durante el entreno, que es cuando ocurren.
+
+Verificado con 25 comprobaciones de Playwright, incluidas las raras:
+`segments` que no es un array, tramos nulos o con `kind` inventado,
+tramos sin repeticiones (se descartan) o sin peso, pausa no numérica,
+un calentamiento con un tramo de 999 kg (no sale como PR), unilaterales,
+quitar la serie madre a mano, recargar la app en medio del entreno,
+series viejas sin el campo, 12 tramos seguidos, la unidad en libras, la
+idempotencia de la migración, y que borrar la sesión no deja tramos
+huérfanos.
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de

@@ -2794,6 +2794,83 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
   font-variant-numeric: tabular-nums;
 }
+/* --- Series alargadas: dropset y rest-pause ------------------------- */
+/* Chip que marca una serie alargada ("Drop x2", "R-P") en la fila del
+   entreno y en la del historial, al lado del "+60s" y del lado I/D. */
+.gym-set-segment-chip {
+  margin-left: 0.25rem;
+  padding: 0 0.28rem;
+  border-radius: 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--gym-accent-text);
+  background: var(--gym-accent);
+}
+
+/* Las sub-lineas de los tramos, debajo de su serie en el historial. */
+.gym-set-segment-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding-left: 1.4rem;
+  margin-bottom: 0.25rem;
+}
+.gym-set-segment-line {
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
+  font-variant-numeric: tabular-nums;
+}
+
+/* La linea discreta del dialogo de fin de serie: no debe competir con
+   "Guardar serie", porque la mayoria de las series no se alargan. */
+.gym-set-extend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.1rem;
+}
+.gym-set-extend-label {
+  font-size: 0.8rem;
+  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
+}
+.gym-set-extend-btn {
+  border: 1px solid var(--gym-accent);
+  background: transparent;
+  color: var(--gym-accent);
+  border-radius: 0.5rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Un tramo escribiendose: etiqueta + (pausa) + peso + reps + quitar. */
+.gym-set-segments { display: flex; flex-direction: column; gap: 0.35rem; }
+.gym-set-segment-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.gym-set-segment-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.4rem;
+  box-sizing: border-box;
+}
+.gym-set-segment-tag {
+  flex: 0 0 auto;
+  min-width: 2.6rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: 0.35rem;
+  text-align: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--gym-accent-text);
+  background: var(--gym-accent);
+}
+
 /* Estadistica que ocupa la fila entera (tiempo de trabajo del mes). */
 .gym-stat-wide { grid-column: 1 / -1; }
 
