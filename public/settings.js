@@ -95,6 +95,28 @@ function positionFixedPopover(anchorBtn, popover, { width = 248 } = {}) {
   popover.style.top = `${top}px`;
 }
 
+// La paleta son 32 colores mas el color a medida: flotando en un movil
+// ocupa media pantalla, tapa lo que estabas mirando y queda recargada
+// (Koku: "es un poco enfarragoso y la vista se ve sucia"). En movil se
+// abre a PANTALLA COMPLETA con su propia X; en escritorio, donde sobra
+// sitio y el raton hace comodo cerrar tocando fuera, sigue flotando
+// junto a su boton como siempre.
+const ANCHO_ESCRITORIO = 860; // el mismo corte que usa styles.css
+function abrirPopoverDeColor(anchorBtn, popover) {
+  const aPantallaCompleta = window.innerWidth < ANCHO_ESCRITORIO;
+  popover.classList.toggle('is-fullscreen', aPantallaCompleta);
+  if (aPantallaCompleta) {
+    // positionFixedPopover deja left/top/max-height en el atributo
+    // style, y eso ganaria a las reglas de pantalla completa. Se limpian.
+    popover.style.left = '';
+    popover.style.top = '';
+    popover.style.maxHeight = '';
+    popover.style.overflowY = '';
+    return;
+  }
+  positionFixedPopover(anchorBtn, popover);
+}
+
 function closeAllPopovers(except) {
   document.querySelectorAll('.color-popover, .icon-popover, .select-popover, .date-popover, .table-insert-popover, .paragraph-style-popover, .highlight-color-popover').forEach((el) => {
     if (el !== except) el.classList.add('hidden');
@@ -134,6 +156,27 @@ function createColorField({ initialValue, onChange }) {
   const popover = document.createElement('div');
   popover.className = 'color-popover hidden';
   document.body.appendChild(popover);
+
+  // Cabecera con el titulo y la X. Solo se VE en modo pantalla completa
+  // (ver .color-popover.is-fullscreen en styles.css): flotando encima de
+  // su boton no hace falta, se cierra tocando fuera.
+  const header = document.createElement('div');
+  header.className = 'color-popover-header';
+  const headerTitle = document.createElement('span');
+  headerTitle.className = 'color-popover-title';
+  headerTitle.textContent = 'Elige un color';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'icon-btn color-popover-close';
+  closeBtn.setAttribute('aria-label', 'Cerrar');
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    popover.classList.add('hidden');
+  });
+  header.appendChild(headerTitle);
+  header.appendChild(closeBtn);
+  popover.appendChild(header);
 
   const nativeInput = document.createElement('input');
   nativeInput.type = 'color';
@@ -188,7 +231,7 @@ function createColorField({ initialValue, onChange }) {
     const willOpen = popover.classList.contains('hidden');
     closeAllPopovers(popover);
     popover.classList.toggle('hidden');
-    if (willOpen) positionFixedPopover(swatchBtn, popover);
+    if (willOpen) abrirPopoverDeColor(swatchBtn, popover);
   });
 
   root.appendChild(swatchBtn);

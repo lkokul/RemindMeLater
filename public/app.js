@@ -9830,7 +9830,21 @@ function startGymLiveSession(day) {
   if (localStorage.getItem('gymLiveHelpSeen') !== '1') openGymHelpModal();
 }
 
+// La pantalla en la que estabas antes de entrar al entreno, para
+// devolver la barra de abajo a su sitio al salir. Se guarda aqui y no en
+// localStorage porque solo vale mientras el entreno esta a la vista.
+let pantallaAntesDelEntreno = null;
+
 async function openGymLiveView() {
+  // La barra de abajo tiene que marcar el Gimnasio mientras el entreno
+  // esta delante. Pasaba sobre todo entrando desde la mini-barra de
+  // descanso (Koku: "me lleva a la vista pero en la barra sigue
+  // marcando que estoy en calendario"): esa barra abre el entreno
+  // directamente, sin pasar por openGymView, que es quien avisaba.
+  if (document.getElementById('gym-live-view').classList.contains('hidden')) {
+    pantallaAntesDelEntreno = localStorage.getItem('currentScreen') || 'calendar';
+    setCurrentScreen('gym');
+  }
   document.getElementById('gym-live-title').textContent = gymLiveSession.routineName || 'Sesión libre';
   document.getElementById('gym-live-view').classList.remove('hidden');
   renderGymLiveExercises();
@@ -9849,6 +9863,12 @@ async function openGymLiveView() {
 }
 function closeGymLiveView() {
   document.getElementById('gym-live-view').classList.add('hidden');
+  // Debajo del entreno sigue estando la pantalla desde la que entraste
+  // (el calendario, por ejemplo): la barra vuelve a marcarla.
+  if (pantallaAntesDelEntreno) {
+    setCurrentScreen(pantallaAntesDelEntreno);
+    pantallaAntesDelEntreno = null;
+  }
   // El ticker NO se para: sigue moviendo la mini-barra de descanso
   // global mientras te mueves por la app. Se para al terminar/descartar.
   refreshGymLiveButtons();
@@ -10853,14 +10873,23 @@ function renderGymSetEndSegments() {
     const row = document.createElement('div');
     row.className = 'gym-set-segment-row';
     row.dataset.segKind = seg.kind;
+    // Cada campo lleva su etiqueta ENCIMA, no dentro como sugerencia:
+    // metidos los tres en una fila, "pausa s" se cortaba y no se leia
+    // la unidad (lo vio Koku en el iPhone). La sugerencia gris del peso
+    // sigue estando, que es la que se usa si lo dejas en blanco.
     row.innerHTML = `
-      <span class="gym-set-segment-tag">${GYM_SEGMENT_LABELS[seg.kind]}</span>
-      ${seg.kind === 'restpause'
-        ? `<input type="number" inputmode="numeric" min="0" placeholder="pausa s" title="Segundos de pausa" data-seg-field="pauseSeconds" value="${escapeHtml(String(seg.pauseSeconds ?? ''))}" />`
-        : ''}
-      <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${escapeHtml(String(sugerencia || unit))}" title="Peso del tramo (${escapeHtml(unit)})" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" />
-      <input type="number" inputmode="numeric" min="0" placeholder="reps" title="Repeticiones del tramo" data-seg-field="reps" value="${escapeHtml(String(seg.reps ?? ''))}" />
-      <button type="button" class="icon-btn" data-seg-remove aria-label="Quitar tramo">✕</button>
+      <div class="gym-set-segment-head">
+        <span class="gym-set-segment-tag">${GYM_SEGMENT_LABELS[seg.kind]}</span>
+        <span class="gym-set-segment-name">${seg.kind === 'restpause' ? 'Rest-pause' : 'Dropset'}</span>
+        <button type="button" class="icon-btn" data-seg-remove aria-label="Quitar tramo">✕</button>
+      </div>
+      <div class="gym-set-segment-fields">
+        ${seg.kind === 'restpause'
+          ? `<label class="gym-set-segment-field"><span>Pausa (s)</span><input type="number" inputmode="numeric" min="0" data-seg-field="pauseSeconds" value="${escapeHtml(String(seg.pauseSeconds ?? ''))}" /></label>`
+          : ''}
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-seg-field="reps" value="${escapeHtml(String(seg.reps ?? ''))}" /></label>
+      </div>
     `;
     row.querySelectorAll('[data-seg-field]').forEach((input) => {
       input.addEventListener('input', () => { seg[input.dataset.segField] = input.value; });

@@ -274,7 +274,15 @@
       resolvedThemeId = theme.id;
     }
 
-    if (req.isTrusted) {
+    // En la app sin servidor NO hay dispositivos vinculados: el unico
+    // que hay es este, asi que la seleccion se guarda como la del
+    // "anfitrion". El resto del archivo ya lo tenia en cuenta escribiendo
+    // `req.device ? req.device.id : null`, pero aqui se colo el acceso
+    // directo tal cual venia del servidor y reventaba en CADA cambio de
+    // tema (lo tapaba el try/catch de applyTheme en settings.js, asi que
+    // se veia bien en pantalla pero no se guardaba nada y quedaba un
+    // error en la consola).
+    if (req.isTrusted || !req.device) {
       db.prepare(
         "INSERT INTO app_settings (key, value) VALUES ('host_active_theme_id', ?) " +
           'ON CONFLICT(key) DO UPDATE SET value = excluded.value'

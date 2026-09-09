@@ -590,6 +590,28 @@ seguía siendo la misma de antes de la prueba. Ahora es
 un listener de `visibilitychange` (al volver a primer plano, solo si esa
 sección está a la vista) y un temporizador tras lanzar la prueba.
 
+## La barra de abajo con el entrenamiento delante
+
+Koku (9/9/2026): *"si le doy a la barra dentro de la app de cuando está
+en descanso, me lleva a la vista pero en la barra de estado sigue
+marcando que estoy en calendario"*.
+
+La causa: quien avisaba a la barra era `openGymView()` (con su
+`setCurrentScreen('gym')`), pero la mini-barra global de descanso llama
+directamente a `openGymLiveView()`, saltándoselo.
+
+Ahora es `openGymLiveView()` quien marca la barra, que es donde
+corresponde: el entreno es una capa por encima de lo que hubiera. Guarda
+la pantalla anterior en `pantallaAntesDelEntreno` (variable en memoria,
+no `localStorage`: solo vale mientras el entreno está a la vista) y
+`closeGymLiveView()` la devuelve — porque al cerrarlo sigues donde
+estabas, normalmente el calendario. Solo se guarda si la vista estaba
+oculta, para que reabrirla estando ya abierta no pise el recuerdo.
+
+No pelea con la barra: `goToMobileSection()` cierra las capas PRIMERO y
+llama a `refreshMobileNavActive()` al final, así que tocar una pestaña
+con el entreno delante gana siempre.
+
 ## Eventos de varios días
 
 Koku lo vio con un "Viaje Mallorca" del jueves 17 al domingo 20: solo
@@ -736,6 +758,19 @@ Afecta a TODOS los popovers por igual (color, icono, desplegable,
 fecha), así que el de crear un tema y el de un grupo se arreglan de una
 sola vez.
 
+**Y aun así el de COLOR se salió del molde** (9/9/2026, tras verlo en el
+iPhone): son 32 colores más el color a medida, y flotando tapaba media
+pantalla dejando la vista recargada — Koku: *"es un poco enfarragoso y
+la vista se ve sucia, con demasiada cosa"*. En móvil ahora se abre a
+**pantalla completa**, con cabecera propia ("Elige un color" + ✕) y los
+colores más grandes; en escritorio sigue flotando junto a su botón, que
+ahí sobra sitio. Lo decide `abrirPopoverDeColor()` en `settings.js`
+mirando el ancho (< 860px), NO una media query — porque además de
+cambiar el aspecto tiene que **saltarse `positionFixedPopover()` y
+limpiar el `left`/`top`/`max-height` en línea** que esa función deja
+puestos, o ganarían a las reglas de pantalla completa. La cabecera
+existe siempre en el DOM y solo se ve con `.is-fullscreen`.
+
 ## Hora propuesta al crear un evento
 
 Siempre la hora en punto **más cercana** a la de ahora, y el fin a +1h.
@@ -866,6 +901,27 @@ a la vez no te deja puesto el descanso del ejercicio de antes.
 Las piezas comunes están en `GYM_TARGET_FIELDS` y `gymTargetsPorDefecto()`
 (`app.js`), para no repetir el trío series/reps/descanso por todas partes.
 
+## Elegir un tema reventaba por dentro (sin que se notara)
+
+Encontrado el 9/9/2026 mirando la consola en una prueba de otra cosa.
+`PUT /api/themes/selection/mine` acababa en
+`db.prepare('UPDATE devices ...').run(resolvedThemeId, req.device.id)`,
+y en la app sin servidor **`req.device` no existe** (el router local
+ignora a propósito los middlewares de autenticación, ver más arriba).
+O sea que cambiar de tema lanzaba una excepción SIEMPRE.
+
+No se veía porque `applyTheme()` en `settings.js` envuelve esa llamada
+en un `try/catch` que se la traga: el tema se aplicaba igual en pantalla
+y quedaba guardado en `localStorage`, que es lo que de verdad manda por
+dispositivo. Solo se notaba en la consola.
+
+Arreglado tratando "no hay dispositivo" como el anfitrión
+(`app_settings.host_active_theme_id`). **El resto del archivo ya lo
+hacía bien** con `req.device ? req.device.id : null`; a esta línea se le
+coló el acceso directo tal cual venía del servidor. Si aparece otro
+`req.device` sin guardar en `public/routes-local/`, es el mismo
+descuido.
+
 ## Series alargadas: dropsets y rest-pause
 
 Petición de Koku (9/9/2026). Un **dropset** es una serie que, al llegar
@@ -927,6 +983,18 @@ placeholder" sin comprobar que el placeholder sea un NÚMERO. Los de las
 reps y la pausa son texto ("reps", "pausa s"), así que se colaba un
 `NaN` hasta la base de datos. `gymLeerTramosDelFormulario()` solo acepta
 el placeholder si `Number.isFinite()`.
+
+**Retoques tras probarlo en el iPhone** (misma fecha):
+
+- Las dos opciones van **en lista**, una debajo de otra y a todo lo
+  ancho, con la pregunta en su propia línea. Antes "+ Dropset" quedaba
+  al lado de la pregunta y "+ Rest-pause" solo en la línea siguiente, y
+  se leía fatal.
+- Los campos de un tramo llevan **etiqueta encima** (Pausa (s) / Peso
+  (kg) / Reps) en vez de rótulo dentro del campo: metidos los tres en
+  una fila, "pausa s" se cortaba y no se llegaba a leer la unidad. Cada
+  tramo es ahora un bloquecito con cabecera (tipo + ✕) y sus campos
+  debajo. La sugerencia gris del peso sigue igual.
 
 **Lo que NO se hace a propósito**: los tramos no se editan desde el modal
 de "editar sesión" a mano — ahí solo se VEN (chip + sub-líneas) y se

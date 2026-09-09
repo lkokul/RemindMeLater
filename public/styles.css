@@ -2823,38 +2823,60 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 }
 
 /* La linea discreta del dialogo de fin de serie: no debe competir con
-   "Guardar serie", porque la mayoria de las series no se alargan. */
-.gym-set-extend {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.1rem;
-}
+   "Guardar serie", porque la mayoria de las series no se alargan. La
+   pregunta va en su propia linea y las dos opciones DEBAJO, en lista
+   (peticion de Koku: antes una quedaba al lado de la pregunta y la otra
+   sola en la linea siguiente, y se leia mal). */
+.gym-set-extend { margin-top: 0.1rem; }
 .gym-set-extend-label {
+  display: block;
+  margin-bottom: 0.4rem;
   font-size: 0.8rem;
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
 }
+.gym-set-extend-list { display: flex; flex-direction: column; gap: 0.35rem; }
 .gym-set-extend-btn {
+  width: 100%;
   border: 1px solid var(--gym-accent);
   background: transparent;
   color: var(--gym-accent);
-  border-radius: 0.5rem;
-  padding: 0.2rem 0.5rem;
-  font-size: 0.78rem;
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
   font-weight: 600;
+  text-align: left;
   cursor: pointer;
 }
 
-/* Un tramo escribiendose: etiqueta + (pausa) + peso + reps + quitar. */
-.gym-set-segments { display: flex; flex-direction: column; gap: 0.35rem; }
+/* Un tramo escribiendose. Dos alturas a proposito: cabecera (que tipo es
+   y la X) y debajo sus campos con ETIQUETA propia. Antes iba todo en una
+   fila con los rotulos dentro de los campos, y "pausa s" se cortaba en
+   el iPhone. */
+.gym-set-segments { display: flex; flex-direction: column; gap: 0.5rem; }
 .gym-set-segment-row {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 0.35rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
 }
-.gym-set-segment-row input {
+.gym-set-segment-head { display: flex; align-items: center; gap: 0.4rem; }
+.gym-set-segment-name {
   flex: 1;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--surface-2-text) 80%, var(--surface-2));
+}
+.gym-set-segment-fields { display: flex; gap: 0.4rem; }
+.gym-set-segment-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+.gym-set-segment-field span {
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}
+.gym-set-segment-field input {
+  width: 100%;
   min-width: 0;
   min-height: 2.4rem;
   box-sizing: border-box;
@@ -3912,6 +3934,38 @@ body.gym-rest-push #settings-modal .settings-card {
   border: 1px solid rgba(255,255,255,0.15); cursor: pointer;
 }
 .palette-swatch:hover { transform: scale(1.1); }
+
+/* Cabecera del selector de color: solo pinta en pantalla completa. */
+.color-popover-header { display: none; }
+.color-popover-title { font-size: 1rem; font-weight: 600; }
+
+/* --- Selector de color a PANTALLA COMPLETA (movil) ---------------------
+   Peticion de Koku: flotando encima del boton tapaba media pantalla y
+   la vista quedaba recargada. En movil ocupa la pantalla entera, con su
+   cabecera y su X, y los colores se ven mas grandes porque hay sitio.
+   Lo decide settings.js (abrirPopoverDeColor) mirando el ancho, no una
+   media query, porque tambien tiene que SALTARSE el posicionamiento. */
+.color-popover.is-fullscreen {
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  max-height: none;
+  border: none; border-radius: 0;
+  box-shadow: none;
+  overflow-y: auto;
+  /* El hueco del sistema (Dynamic Island arriba, barra de gestos abajo)
+     lo mide el propio CSS aqui: al ocupar la pantalla entera no hace
+     falta el safeAreaInsets() de JavaScript. */
+  padding: calc(env(safe-area-inset-top) + 0.9rem) 1rem calc(env(safe-area-inset-bottom) + 1.2rem);
+  z-index: 80;
+}
+.color-popover.is-fullscreen .color-popover-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem; margin-bottom: 1rem;
+}
+.color-popover.is-fullscreen .palette-section { margin-bottom: 1.4rem; }
+.color-popover.is-fullscreen .palette-section-heading { font-size: 0.8rem; margin-bottom: 0.6rem; }
+.color-popover.is-fullscreen .palette-grid { gap: 0.7rem; }
+.color-popover.is-fullscreen .color-native-input { height: 3rem; }
 
 /* --- Selector con estilo propio, sustituye un <select> nativo
    (createSelectField en app.js) --- */
