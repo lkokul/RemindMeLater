@@ -1258,6 +1258,89 @@ flex-end` en `.gym-set-segment-field`, el input del descanso bajaba solo.
 Ahora los tres arrancan y acaban a la misma altura (comprobado midiendo
 los rectángulos, no a ojo).
 
+## El ciclo de días de un bloque
+
+Petición de Koku (9/9/2026): *"que en el bloque de entrenamiento te
+permita poner como opcional cuánto dura la rutina (en día): lunes
+entreno x, martes entreno y, miércoles descanso, jueves entreno x otra
+vez"*, para engancharlo con el calendario y con el widget.
+
+**El modelo**: el bloque guarda si usa ciclo (`cycle_enabled`) y por
+dónde va (`cycle_position` + `cycle_position_date`), y las posiciones
+viven en una tabla aparte, `gym_block_cycle_days` (`block_id`,
+`position`, `routine_id`). **`routine_id` a NULL es un DESCANSO**, que es
+una posición de verdad y no un hueco que haya que adivinar.
+
+Tabla aparte y no un campo en `gym_routines` a propósito: así **un mismo
+día de entreno puede repetirse** en varias posiciones (día 1 y día 4 de
+un ciclo de 6), que con un campo por rutina sería imposible.
+
+**Las tres decisiones que tomó Koku**, no cambiarlas sin volver a
+preguntarle:
+
+1. **El ciclo avanza por ENTRENOS HECHOS, no por calendario.** Si te
+   saltas el martes, el miércoles te sigue tocando lo mismo: el plan no
+   te deja atrás. La excepción es un **descanso**, que se consume solo al
+   pasar el día — si no, te bloquearía el ciclo para siempre. Por eso
+   hace falta `cycle_position_date`: para saber desde cuándo lleva puesta
+   la posición actual. `resolverCiclo()` en `routes-local/gymBlocks.js`
+   solo adelanta descansos ya pasados, uno por día transcurrido, con un
+   tope de vueltas por si el ciclo fuera todo descansos.
+2. **El "hoy te toca" del calendario es CALCULADO, no una tarea
+   guardada.** No se crean filas de `events`: `gymCicloDeHoy()` mira el
+   ciclo cada vez. Siempre está al día, cambiar el plan lo cambia solo, y
+   no quedan tareas viejas que regenerar ni limpiar.
+3. **Si hoy toca descanso y te apetece entrenar, entrenas** — te avisa,
+   pero no te lo impide. Y al terminar, si lo que has hecho **no era lo
+   que tocaba**, se pregunta dónde recolocar el ciclo, que es lo que él
+   pidió para que el aviso y el widget sepan cómo seguir. Tres caminos en
+   `gymAvanzarCicloTrasEntrenar()`:
+   - Era lo que tocaba → avanza solo y en silencio (el caso normal).
+   - Has hecho otro día **que sí está en el ciclo** → pregunta
+     "¿recoloco el ciclo ahí?", diciendo qué te tocaría mañana.
+   - Entreno libre o un día que no está en el ciclo → solo avisa de que
+     el ciclo se queda donde estaba (no hay nada sensato a lo que
+     saltar).
+
+**Quién mueve el cursor es el CLIENTE** (`POST /:id/cycle/position`), no
+la ruta de guardar la sesión: cuando lo entrenado no es lo que tocaba
+hace falta preguntar, y esa pregunta vive en la pantalla.
+
+**Dónde se ve**:
+- **Ficha del bloque**: sección "Ciclo de días" con su interruptor y la
+  lista ordenada de posiciones, cada una con un `createSelectField` (día
+  del bloque o "Descanso") y flechas ↑↓ + ✕. Encenderlo con el ciclo
+  vacío propone una posición por cada día del bloque. El ciclo se edita
+  en un **borrador** (`gymCicloBorrador`) y solo se guarda al dar a
+  Guardar, igual que el nombre — Cancelar descarta de verdad. En un
+  bloque NUEVO la sección entera está oculta: hasta que no existe no
+  tiene días que colocar.
+- **Calendario**: una tira pulsable bajo la cabecera del día
+  (`#gym-cycle-today-banner`), **solo en el día de hoy** — el ciclo
+  avanza por entrenos hechos, así que no se puede saber qué tocará
+  pasado mañana sin saber si entrenarás mañana. Tocarla lleva al
+  Gimnasio y arranca el entreno de hoy.
+- **"¿Qué toca hoy?"**: el día que toca va primero y marcado "Hoy"; si
+  toca descanso, lo dice y deja elegir igualmente.
+
+**`hoyISO()` usa la fecha LOCAL, no `toISOString()`**: a las 00:30 en
+España el UTC todavía es el día anterior y el ciclo se quedaría un día
+atrás.
+
+**Lo que aguanta** (26 comprobaciones de Playwright): un ciclo de solo
+descansos con nueve días pasados (no se cuelga), una posición que apunta
+a un día borrado (se lee como descanso), posiciones inventadas en la
+ruta (99, -1, 0, texto, null, 1.5 — todas rechazadas), un día de otro
+bloque en el ciclo (se guarda como descanso), un ciclo de 61 días
+(rechazado), un ciclo encendido pero vacío, el cursor apuntando a una
+posición recortada por debajo (vuelve al día 1), una fecha futura en el
+cursor por si alguien mueve el reloj, y que borrar el bloque no deja
+posiciones huérfanas.
+
+**Sin empezar todavía**: el widget que lea esto. El modelo ya está
+pensado para él (una sola lectura da "qué toca hoy" y el id del día para
+arrancarlo), pero la parte nativa está por hacer.
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de

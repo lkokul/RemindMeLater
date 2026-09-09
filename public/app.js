@@ -2298,6 +2298,7 @@ document.getElementById('btn-mobile-calendar-day-search').addEventListener('clic
 async function showMobileDay(date, { scrollToNow = false, targetMinutes } = {}) {
   state.mobileCalendarDayDate = date;
   document.getElementById('mobile-calendar-day-heading').textContent = formatMobileDayHeading(date);
+  renderGymCicloDeHoy(date);
   const monthLabel = capitalizeFirst(MONTH_ONLY_FORMATTER.format(date));
   document.getElementById('btn-mobile-day-back-label').innerHTML =
     `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg><span>${monthLabel}</span>`;
@@ -8114,6 +8115,10 @@ async function loadGymExercises() {
 }
 async function loadGymBlocks() {
   state.gymBlocks = await api('/api/gym-blocks');
+  // El aviso del calendario sale del ciclo del bloque activo, asi que se
+  // repinta cada vez que los bloques cambian (incluida la carga inicial:
+  // showMobileDay puede haber corrido antes de que existieran).
+  renderGymCicloDeHoy();
 }
 async function loadGymRoutines() {
   state.gymRoutines = await api('/api/gym-routines');
@@ -9803,13 +9808,34 @@ function openGymStartModal() {
     : 'No hay ningún bloque activo — puedes entrenar libre o crear un bloque en la pestaña Plan.';
   const list = document.getElementById('gym-start-days');
   list.innerHTML = '';
-  days.forEach((day) => {
+
+  // Si el bloque usa ciclo, lo que toca hoy va PRIMERO y marcado. Aunque
+  // hoy toque descanso se sigue pudiendo elegir cualquier dia (decision
+  // de Koku: te avisa, pero no te lo impide).
+  const cicloHoy = gymCicloDeHoy();
+  const aviso = document.getElementById('gym-start-cycle-note');
+  if (cicloHoy) {
+    aviso.classList.remove('hidden');
+    aviso.textContent = cicloHoy.esDescanso
+      ? `Hoy toca descanso (día ${cicloHoy.position} de ${cicloHoy.length}). Puedes entrenar igualmente: al terminar te pregunto cómo sigo el ciclo.`
+      : `Tu ciclo dice que hoy toca “${cicloHoy.rutina.name}” (día ${cicloHoy.position} de ${cicloHoy.length}).`;
+  } else {
+    aviso.classList.add('hidden');
+    aviso.textContent = '';
+  }
+  const idDeHoy = cicloHoy && cicloHoy.rutina ? cicloHoy.rutina.id : null;
+  const ordenados = idDeHoy
+    ? [...days].sort((a, b) => (a.id === idDeHoy ? -1 : 0) - (b.id === idDeHoy ? -1 : 0))
+    : days;
+
+  ordenados.forEach((day) => {
+    const esDeHoy = day.id === idDeHoy;
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'gym-list-item gym-start-day-btn';
+    btn.className = 'gym-list-item gym-start-day-btn' + (esDeHoy ? ' es-de-hoy' : '');
     btn.innerHTML = `
       <span class="color-dot" style="background-color: ${day.color}"></span>
-      <span class="gym-list-item-name">${day.icon ? escapeHtml(day.icon) + ' ' : ''}${escapeHtml(day.name)}</span>
+      <span class="gym-list-item-name">${day.icon ? escapeHtml(day.icon) + ' ' : ''}${escapeHtml(day.name)}${esDeHoy ? ' <span class="gym-block-active-badge">Hoy</span>' : ''}</span>
       <span class="gym-list-item-muted">${day.exercises.filter((ex) => !ex.hidden).length} ejercicio${day.exercises.filter((ex) => !ex.hidden).length === 1 ? '' : 's'}</span>
     `;
     btn.addEventListener('click', () => {
@@ -11964,6 +11990,9 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
   }
 
   const durationSeconds = gymLiveElapsedSeconds();
+  // Se guarda antes de vaciar gymLiveSession: mas abajo se pone a null y
+  // para entonces ya no habria de donde sacar que dia del plan se hizo.
+  const rutinaDelEntreno = gymLiveSession.routineId;
   await api('/api/gym-sessions', {
     method: 'POST',
     body: JSON.stringify({
@@ -11995,12 +12024,253 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
   await loadGymSessions();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+  // El ciclo del bloque avanza AQUI, tras guardar: si lo entrenado era
+  // lo que tocaba pasa solo, y si no, pregunta donde recolocarlo. Se
+  // hace despues del resumen para no meter un dialogo por delante del
+  // "ya has terminado".
+  await gymAvanzarCicloTrasEntrenar(rutinaDelEntreno);
   // La celebracion de logros (si algo subio de nivel) queda ABIERTA
   // detras del resumen: al cerrar el resumen aparece ella.
   checkGymAchievements();
 });
 document.getElementById('btn-close-gym-summary').addEventListener('click', () => {
   document.getElementById('gym-live-summary-modal').classList.add('hidden');
+});
+
+// --- "Hoy te toca": el ciclo visto desde fuera del Gimnasio -----------
+//
+// El ciclo del bloque ACTIVO se consulta al vuelo (decision de Koku: es
+// un aviso calculado, no una tarea guardada en la base). Asi siempre
+// esta al dia y cambiar el plan lo cambia solo, sin filas viejas por
+// ahi ni nada que regenerar.
+//
+// Devuelve null si no hay bloque activo o si ese bloque no usa ciclo.
+function gymCicloDeHoy() {
+  const bloque = state.gymBlocks.find((b) => b.isActive);
+  if (!bloque || !bloque.cycleEnabled || !bloque.cycleToday) return null;
+  const rutina = bloque.cycleToday.routineId
+    ? state.gymRoutines.find((r) => r.id === bloque.cycleToday.routineId) || null
+    : null;
+  // Una posicion que apunta a un dia BORRADO se trata como descanso, en
+  // vez de dejar el aviso a medias.
+  return {
+    bloque,
+    position: bloque.cycleToday.position,
+    length: bloque.cycleLength,
+    rutina,
+    esDescanso: bloque.cycleToday.isRest || !rutina,
+  };
+}
+
+// Cual es la posicion SIGUIENTE del ciclo (dando la vuelta al final).
+function gymCicloSiguientePosicion(bloque, desde) {
+  if (!bloque || !bloque.cycleDays || bloque.cycleDays.length === 0) return null;
+  const i = bloque.cycleDays.findIndex((d) => d.position === desde);
+  if (i === -1) return bloque.cycleDays[0].position;
+  return bloque.cycleDays[(i + 1) % bloque.cycleDays.length].position;
+}
+
+// El aviso del calendario. Solo se ve en el dia de HOY: el ciclo avanza
+// por entrenos hechos, asi que no se puede saber que tocara pasado
+// mañana sin saber si entrenaras mañana.
+function renderGymCicloDeHoy(date) {
+  const banner = document.getElementById('gym-cycle-today-banner');
+  if (!banner) return;
+  const dia = date || state.mobileCalendarDayDate;
+  const hoy = gymCicloDeHoy();
+  if (!hoy || !dia || !sameDay(dia, new Date())) {
+    banner.classList.add('hidden');
+    return;
+  }
+  const cual = `día ${hoy.position} de ${hoy.length}`;
+  if (hoy.esDescanso) {
+    banner.className = 'gym-cycle-banner es-descanso';
+    banner.innerHTML = `<span class="gym-cycle-banner-icon">🌙</span><span>Hoy toca <b>descanso</b> · ${cual}</span>`;
+  } else {
+    banner.className = 'gym-cycle-banner';
+    banner.innerHTML = `<span class="gym-cycle-banner-icon">🏋️</span><span>Hoy toca <b>${escapeHtml(hoy.rutina.name)}</b> · ${cual}</span><span class="gym-cycle-banner-go">Empezar</span>`;
+  }
+  banner.classList.remove('hidden');
+}
+
+// Tocar el aviso lleva al Gimnasio: al entreno de hoy directamente si
+// hay uno, o al selector si hoy toca descanso (que tambien deja
+// entrenar, ver openGymStartModal).
+document.getElementById('gym-cycle-today-banner').addEventListener('click', async () => {
+  const hoy = gymCicloDeHoy();
+  if (!hoy) return;
+  goToMobileSection('extensions');
+  await openGymView();
+  if (hoy.esDescanso) openGymStartModal();
+  else startGymLiveSession(hoy.rutina);
+});
+
+// Al terminar un entreno: mover el cursor del ciclo. Si lo entrenado era
+// lo que tocaba, avanza solo y en silencio (el caso normal). Si NO lo
+// era -- hoy tocaba descanso y has entrenado igual, o has hecho otro dia
+// --, se PREGUNTA donde recolocar el ciclo, que es lo que pidio Koku
+// para saber como sigue el aviso y el widget.
+async function gymAvanzarCicloTrasEntrenar(routineId) {
+  const hoy = gymCicloDeHoy();
+  if (!hoy) return;
+  const bloque = hoy.bloque;
+
+  const acertaste = !hoy.esDescanso && hoy.rutina && Number(routineId) === hoy.rutina.id;
+  if (acertaste) {
+    const siguiente = gymCicloSiguientePosicion(bloque, hoy.position);
+    if (siguiente !== null) {
+      await api(`/api/gym-blocks/${bloque.id}/cycle/position`, {
+        method: 'POST', body: JSON.stringify({ position: siguiente }),
+      });
+      await loadGymBlocks();
+      renderGymCicloDeHoy();
+    }
+    return;
+  }
+
+  // Fuera de plan. Si lo que has hecho ESTA en el ciclo, se puede
+  // recolocar detras de eso; si no (entreno libre o un dia que no esta
+  // en el ciclo), lo unico sensato es dejarlo como estaba.
+  const enElCiclo = routineId
+    ? (bloque.cycleDays || []).find((d) => d.routineId === Number(routineId))
+    : null;
+  const queTocaba = hoy.esDescanso ? 'descanso' : `“${hoy.rutina.name}”`;
+  if (!enElCiclo) {
+    // Dos redacciones: "no has hecho el dia que tocaba" y "hoy tocaba
+    // descansar y has entrenado igual" no son la misma frase.
+    await showAppAlert(hoy.esDescanso
+      ? 'Hoy tocaba descanso en tu ciclo y lo que has entrenado no es ninguno de sus días, así que el ciclo se queda donde estaba: mañana seguirá tocando este descanso.'
+      : `Hoy tocaba ${queTocaba} en tu ciclo y no lo has hecho, así que el ciclo se queda donde estaba: mañana te seguirá tocando ${queTocaba}.`);
+    return;
+  }
+
+  const nombreHecho = state.gymRoutines.find((r) => r.id === Number(routineId));
+  const siguienteAlHecho = gymCicloSiguientePosicion(bloque, enElCiclo.position);
+  const rutinaSiguiente = (bloque.cycleDays || []).find((d) => d.position === siguienteAlHecho);
+  const nombreSiguiente = rutinaSiguiente && rutinaSiguiente.routineId
+    ? (state.gymRoutines.find((r) => r.id === rutinaSiguiente.routineId) || {}).name || 'descanso'
+    : 'descanso';
+  const recolocar = await showAppConfirm(
+    `Hoy tocaba ${queTocaba}, pero has hecho “${nombreHecho ? nombreHecho.name : 'otro día'}”. ¿Recoloco el ciclo ahí? Mañana te tocaría ${nombreSiguiente === 'descanso' ? 'descanso' : `“${nombreSiguiente}”`}.`,
+    { okText: 'Recolocar', cancelText: 'Dejarlo como estaba' }
+  );
+  if (!recolocar) return;
+  await api(`/api/gym-blocks/${bloque.id}/cycle/position`, {
+    method: 'POST', body: JSON.stringify({ position: siguienteAlHecho }),
+  });
+  await loadGymBlocks();
+  renderGymCicloDeHoy();
+}
+
+// --- Ciclo de dias de un bloque ---------------------------------------
+//
+// Un bloque puede repetirse en ciclo: "dia 1 Empuje, dia 2 Tiron, dia 3
+// descanso, y vuelta a empezar". Se edita como una LISTA ordenada de
+// posiciones, cada una con un desplegable propio de la app (nunca un
+// <select> nativo, regla del proyecto) donde eliges un dia del bloque o
+// "Descanso".
+//
+// El borrador vive aparte del bloque guardado para que Cancelar de
+// verdad descarte, igual que el nombre.
+let gymCicloBloqueId = null;
+let gymCicloBorrador = [];
+// Los desplegables se guardan para poder leerlos, y se recrean enteros
+// en cada repintado (como el resto de listas de este formulario): asi
+// las flechas de los extremos se apagan solas y los indices de los
+// listeners vuelven a cuadrar.
+let gymCicloCampos = [];
+
+function gymCicloDiasDelBloque() {
+  if (!gymCicloBloqueId) return [];
+  return state.gymRoutines.filter((r) => r.blockId === gymCicloBloqueId);
+}
+
+function renderGymCicloEditor() {
+  const encendido = document.getElementById('gym-block-cycle-enabled').checked;
+  const wrap = document.getElementById('gym-block-cycle-wrap');
+  wrap.classList.toggle('hidden', !encendido || !gymCicloBloqueId);
+  const lista = document.getElementById('gym-block-cycle-list');
+  lista.innerHTML = '';
+  gymCicloCampos = [];
+  if (!encendido || !gymCicloBloqueId) return;
+
+  const dias = gymCicloDiasDelBloque();
+  const opciones = [
+    { value: '', label: 'Descanso' },
+    ...dias.map((d) => ({ value: String(d.id), label: d.name, color: d.color, icon: d.icon || '' })),
+  ];
+
+  gymCicloBorrador.forEach((pos, i) => {
+    const fila = document.createElement('div');
+    fila.className = 'gym-cycle-row';
+    fila.innerHTML = `
+      <span class="gym-cycle-row-num">Día ${i + 1}</span>
+      <div class="gym-cycle-row-field"></div>
+      <div class="gym-cycle-row-actions">
+        <button type="button" class="icon-btn" data-subir aria-label="Subir">↑</button>
+        <button type="button" class="icon-btn" data-bajar aria-label="Bajar">↓</button>
+        <button type="button" class="icon-btn" data-quitar aria-label="Quitar del ciclo">✕</button>
+      </div>
+    `;
+    const campo = createSelectField({
+      options: opciones,
+      initialValue: pos.routineId === null || pos.routineId === undefined ? '' : String(pos.routineId),
+      onChange: (v) => { pos.routineId = v === '' ? null : Number(v); actualizarResumenDelCiclo(); },
+    });
+    fila.querySelector('.gym-cycle-row-field').appendChild(campo.element);
+    gymCicloCampos.push(campo);
+    const subir = fila.querySelector('[data-subir]');
+    const bajar = fila.querySelector('[data-bajar]');
+    subir.disabled = i === 0;
+    bajar.disabled = i === gymCicloBorrador.length - 1;
+    subir.addEventListener('click', () => {
+      [gymCicloBorrador[i - 1], gymCicloBorrador[i]] = [gymCicloBorrador[i], gymCicloBorrador[i - 1]];
+      renderGymCicloEditor();
+    });
+    bajar.addEventListener('click', () => {
+      [gymCicloBorrador[i + 1], gymCicloBorrador[i]] = [gymCicloBorrador[i], gymCicloBorrador[i + 1]];
+      renderGymCicloEditor();
+    });
+    fila.querySelector('[data-quitar]').addEventListener('click', () => {
+      gymCicloBorrador.splice(i, 1);
+      renderGymCicloEditor();
+    });
+    lista.appendChild(fila);
+  });
+
+  if (gymCicloBorrador.length === 0) {
+    lista.innerHTML = '<p class="empty-hint">Todavía no has colocado ningún día. Añade tantos como dure tu ciclo.</p>';
+  }
+  actualizarResumenDelCiclo();
+}
+
+// Una linea en cristiano de lo que va a pasar, para no tener que
+// interpretar la lista de desplegables: "Ciclo de 3 días: Empuje ·
+// Tirón · Descanso".
+function actualizarResumenDelCiclo() {
+  const el = document.getElementById('gym-block-cycle-status');
+  if (!el) return;
+  if (gymCicloBorrador.length === 0) { el.textContent = ''; return; }
+  const dias = gymCicloDiasDelBloque();
+  const nombres = gymCicloBorrador.map((p) => {
+    if (p.routineId === null || p.routineId === undefined) return 'Descanso';
+    const d = dias.find((x) => x.id === p.routineId);
+    return d ? d.name : 'Descanso';
+  });
+  el.textContent = `Ciclo de ${gymCicloBorrador.length} día${gymCicloBorrador.length === 1 ? '' : 's'}: ${nombres.join(' · ')}`;
+}
+
+document.getElementById('gym-block-cycle-enabled').addEventListener('change', () => {
+  // Encenderlo con el ciclo vacio propone directamente una posicion por
+  // cada dia del bloque, que es lo que casi siempre se quiere.
+  if (document.getElementById('gym-block-cycle-enabled').checked && gymCicloBorrador.length === 0) {
+    gymCicloBorrador = gymCicloDiasDelBloque().map((d) => ({ routineId: d.id }));
+  }
+  renderGymCicloEditor();
+});
+document.getElementById('btn-gym-cycle-add').addEventListener('click', () => {
+  gymCicloBorrador.push({ routineId: null });
+  renderGymCicloEditor();
 });
 
 // --- Modal de bloque (rediseno de Gimnasio) ---------------------------
@@ -12011,6 +12281,16 @@ function openGymBlockModal(block) {
   document.getElementById('gym-block-id').value = block ? block.id : '';
   document.getElementById('gym-block-name').value = block ? block.name : '';
   document.getElementById('btn-delete-gym-block').classList.toggle('hidden', !block);
+  // El ciclo se edita en el borrador gymCicloBorrador y solo se guarda al
+  // dar a Guardar, igual que el nombre: cancelar tiene que descartarlo.
+  gymCicloBloqueId = block ? block.id : null;
+  gymCicloBorrador = block && block.cycleDays ? block.cycleDays.map((d) => ({ routineId: d.routineId })) : [];
+  document.getElementById('gym-block-cycle-enabled').checked = !!(block && block.cycleEnabled);
+  // Un bloque que aun no existe no tiene dias que colocar en un ciclo:
+  // se esconde entero hasta que se guarde y se vuelva a abrir.
+  document.getElementById('gym-block-cycle-enabled').closest('.checkbox-row').classList.toggle('hidden', !block);
+  document.querySelector('#gym-block-modal .gym-cycle-heading').classList.toggle('hidden', !block);
+  renderGymCicloEditor();
   document.getElementById('gym-block-modal').classList.remove('hidden');
 }
 function closeGymBlockModal() {
@@ -12026,12 +12306,22 @@ document.getElementById('gym-block-form').addEventListener('submit', async (e) =
   const payload = { name: document.getElementById('gym-block-name').value };
   if (id) {
     await api(`/api/gym-blocks/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    // El ciclo va en su propia llamada: es una lista entera que se
+    // reescribe, no un campo mas del bloque.
+    await api(`/api/gym-blocks/${id}/cycle`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled: document.getElementById('gym-block-cycle-enabled').checked,
+        days: gymCicloBorrador.map((p) => ({ routineId: p.routineId })),
+      }),
+    });
   } else {
     await api('/api/gym-blocks', { method: 'POST', body: JSON.stringify(payload) });
   }
   closeGymBlockModal();
   await loadGymBlocks();
   renderGymBlocksList();
+  renderGymCicloDeHoy();
 });
 
 document.getElementById('btn-delete-gym-block').addEventListener('click', async () => {
@@ -16762,7 +17052,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.36.3';
+const APP_VERSION = '0.37.0';
 const APP_VERSION_DATE = '2026-09-09';
 
 function renderAppVersionLine() {

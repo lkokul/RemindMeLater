@@ -204,12 +204,33 @@ function applyLocalSchema(db) {
     -- estar activo a la vez (is_active = 1) -- es el que se ofrece al
     -- empezar a entrenar. El borrado en cascada de sus dias se hace a
     -- mano en routes-local/gymBlocks.js, como en todo el proyecto.
+    -- cycle_*: el "ciclo de dias" OPCIONAL del bloque (ver
+    -- gym_block_cycle_days). cycle_position es la posicion del ciclo que
+    -- toca AHORA y cycle_position_date el dia en que se le asigno ese
+    -- turno: el ciclo avanza al ENTRENAR (no con el calendario), pero un
+    -- descanso se consume solo al pasar el dia, y para eso hace falta
+    -- saber desde cuando lleva puesto.
     CREATE TABLE IF NOT EXISTS gym_blocks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       position INTEGER NOT NULL DEFAULT 0,
       is_active INTEGER NOT NULL DEFAULT 0,
+      cycle_enabled INTEGER NOT NULL DEFAULT 0,
+      cycle_position INTEGER,
+      cycle_position_date TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Las posiciones del ciclo de un bloque: "dia 1 = Empuje, dia 2 =
+    -- Tiron, dia 3 = descanso". routine_id a NULL es un DESCANSO, que es
+    -- una posicion de verdad y no un hueco. Se usa una tabla aparte (y no
+    -- un campo en gym_routines) para que un mismo dia de entreno pueda
+    -- repetirse en varias posiciones del ciclo.
+    CREATE TABLE IF NOT EXISTS gym_block_cycle_days (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      block_id INTEGER NOT NULL REFERENCES gym_blocks(id),
+      position INTEGER NOT NULL,
+      routine_id INTEGER REFERENCES gym_routines(id)
     );
 
     -- Dias de entrenamiento reutilizables (ej. "Push 1", "Dia de pierna"),
@@ -1636,6 +1657,23 @@ function applyLocalSchema(db) {
     }
     db.prepare('UPDATE gym_routines SET block_id = ? WHERE block_id IS NULL').run(general.id);
   }
+  // 2 bis) El ciclo de dias del bloque (opcional). La tabla
+  //    gym_block_cycle_days ya la crea el CREATE TABLE IF NOT EXISTS de
+  //    arriba; aqui van solo las columnas que le faltan a una base vieja.
+  //    Todo queda apagado (cycle_enabled = 0) hasta que se configure, asi
+  //    que quien no lo use no nota ningun cambio.
+  const gymBlockColumns = db.prepare('PRAGMA table_info(gym_blocks)').all().map((c) => c.name);
+  if (!gymBlockColumns.includes('cycle_enabled')) {
+    db.exec('ALTER TABLE gym_blocks ADD COLUMN cycle_enabled INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!gymBlockColumns.includes('cycle_position')) {
+    db.exec('ALTER TABLE gym_blocks ADD COLUMN cycle_position INTEGER');
+  }
+  if (!gymBlockColumns.includes('cycle_position_date')) {
+    db.exec('ALTER TABLE gym_blocks ADD COLUMN cycle_position_date TEXT');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gym_cycle_block ON gym_block_cycle_days(block_id)');
+
   // 3) Indices para las consultas de progreso/heatmap que vienen en fases
   //    posteriores (baratos y seguros de crear ya).
   db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sets_session ON gym_sets(session_id)');

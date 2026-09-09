@@ -262,6 +262,12 @@
               <div id="mobile-week-strip-days" class="mobile-week-strip-days"></div>
             </div>
             <p id="mobile-calendar-day-heading" class="mobile-calendar-day-heading"></p>
+            <!-- Aviso CALCULADO de que toca hoy segun el ciclo del bloque
+                 activo del Gimnasio. No es una tarea de verdad de la base
+                 (decision de Koku): se saca del ciclo cada vez, asi que
+                 siempre esta al dia y cambiar el plan lo cambia solo.
+                 Solo se ve en el dia de HOY. -->
+            <button type="button" id="gym-cycle-today-banner" class="gym-cycle-banner hidden"></button>
           </div>
 
           <!-- "Vista por horas": franjas 00-23h, eventos posicionados por
@@ -738,6 +744,9 @@
       <button type="button" id="btn-close-gym-start" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2>¿Qué toca hoy?</h2>
       <p id="gym-start-block-name" class="gym-list-item-muted"></p>
+      <!-- Que dice el ciclo del bloque, si lo usa. Avisa, pero nunca
+           impide elegir otro dia (decision de Koku). -->
+      <p id="gym-start-cycle-note" class="gym-cycle-note hidden"></p>
       <div id="gym-start-days" class="gym-list"></div>
       <button type="button" id="btn-gym-start-free" class="secondary-btn">Sesión libre (sin día)</button>
     </div>
@@ -1127,6 +1136,23 @@
           Nombre del bloque
           <input type="text" id="gym-block-name" placeholder="Ej. Volumen Invierno" required />
         </label>
+
+        <!-- Ciclo de dias: OPCIONAL. Apagado, el bloque es una simple
+             lista de dias que eliges a mano al entrenar (como siempre).
+             Encendido, la app sabe que toca hoy y lo enseña en el
+             calendario y al empezar a entrenar. -->
+        <h4 class="gym-cycle-heading">Ciclo de días</h4>
+        <label class="checkbox-row">
+          <input type="checkbox" id="gym-block-cycle-enabled" />
+          Repetir estos días en ciclo
+        </label>
+        <div id="gym-block-cycle-wrap" class="hidden">
+          <p class="hint">Coloca en orden lo que haces: cada posición es un día de entreno o un descanso. Al llegar al final vuelve a empezar.</p>
+          <div id="gym-block-cycle-list" class="gym-cycle-list"></div>
+          <button type="button" id="btn-gym-cycle-add" class="secondary-btn">+ Añadir día al ciclo</button>
+          <p id="gym-block-cycle-status" class="hint"></p>
+        </div>
+
         <div class="modal-actions">
           <button type="button" id="btn-delete-gym-block" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>

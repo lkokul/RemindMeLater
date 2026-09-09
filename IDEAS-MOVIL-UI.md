@@ -189,7 +189,7 @@ el calendario.
   `SUM` de siempre. Cuentan como UNA serie, sus kilos SÍ suman, y
   cualquier tramo puede ser récord.
 - ✅ **Series al fallo**: se marcan por serie. Ponderan el volumen con
-  un factor ajustable (×1 a ×1,5, por defecto ×1,2; ×1 lo desactiva) —
+  un factor ajustable (×1 a ×1,5, por defecto ×1,25; ×1 lo desactiva) —
   decisión de Koku, avisado de que el número es inventado. Los kg
   GUARDADOS son siempre los reales: el ajuste se aplica solo al pintar,
   así que cambiar el factor no reescribe historial. Contador de series
@@ -207,6 +207,18 @@ el calendario.
   un interruptor (apagado de fábrica) para que empiece sola.
 - ✅ El aviso de "Descanso terminado" **se borra solo** al volver a la
   app, en vez de tener que quitarlo a mano del centro de notificaciones.
+- ✅ **Ciclo de días del bloque** (opcional): colocas en orden lo que
+  haces — "día 1 Empuje, día 2 Tirón, día 3 descanso" — y la app sabe
+  qué toca hoy. El ciclo avanza **por entrenos hechos**, no por
+  calendario (si te saltas un día, al siguiente te sigue tocando lo
+  mismo); solo los descansos se consumen al pasar el día. El "hoy te
+  toca" del calendario es un aviso **calculado**, no una tarea guardada,
+  y tocarlo arranca el entreno de hoy. Si hoy toca descanso puedes
+  entrenar igual: te avisa, y al terminar pregunta dónde recolocar el
+  ciclo.
+- 💡 **Widget de "qué toca hoy"**: el modelo del ciclo ya está pensado
+  para alimentarlo (una lectura da el día y su id para arrancarlo); la
+  parte nativa está sin empezar.
 - 💡 Traducir a tandas las instrucciones de la librería (siguen en
   inglés). Koku tiene además una rama propia `gimnasio-movil` con su
   propio rediseño, sin fusionar.
