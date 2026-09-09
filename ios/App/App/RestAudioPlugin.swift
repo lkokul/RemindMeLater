@@ -12,8 +12,20 @@ public class RestAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "startWatch", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "updateWatch", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "cancelWatch", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "cancelWatch", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getStatus", returnType: CAPPluginReturnPromise)
     ]
+
+    // Que paso con el ULTIMO aviso de fin de descanso: quien corto la
+    // vibracion, a los cuantos segundos y cuantos pulsos dio. En el
+    // iPhone no hay consola que mirar, asi que esto es lo que se ensena
+    // en Configuracion > Notificaciones para poder diagnosticar por que
+    // una forma de callarlo no funciona.
+    @objc func getStatus(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            call.resolve(RestAudioWatcher.shared.diagnostico() as [String: Any])
+        }
+    }
 
     @objc func startWatch(_ call: CAPPluginCall) {
         guard let endMs = call.getDouble("endAt") else {

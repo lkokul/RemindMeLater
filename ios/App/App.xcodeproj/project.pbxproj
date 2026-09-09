@@ -27,6 +27,7 @@
 		DE5CA25000000000000000B9 /* ExtenderDescansoIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */; };
 		DE5CA25000000000000000BA /* RestAudioWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A9 /* RestAudioWatcher.swift */; };
 		DE5CA25000000000000000BB /* RestAudioWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A9 /* RestAudioWatcher.swift */; };
+		DE5CA25000000000000000BD /* RestAlertStopper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AB /* RestAlertStopper.swift */; };
 		DE5CA25000000000000000BC /* RestAudioPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AA /* RestAudioPlugin.swift */; };
 /* End PBXBuildFile section */
 
@@ -74,6 +75,7 @@
 		DE5CA25000000000000000A6 /* BridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeViewController.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A7 /* silencio.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = silencio.wav; sourceTree = "<group>"; };
 		DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtenderDescansoIntent.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000AB /* RestAlertStopper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAlertStopper.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A9 /* RestAudioWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAudioWatcher.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000AA /* RestAudioPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAudioPlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -137,6 +139,7 @@
 				DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */,
 				DE5CA25000000000000000A9 /* RestAudioWatcher.swift */,
 				DE5CA25000000000000000AA /* RestAudioPlugin.swift */,
+				DE5CA25000000000000000AB /* RestAlertStopper.swift */,
 				DE5CA25000000000000000A7 /* silencio.wav */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
@@ -269,6 +272,7 @@
 				DE5CA25000000000000000B8 /* ExtenderDescansoIntent.swift in Sources */,
 				DE5CA25000000000000000BA /* RestAudioWatcher.swift in Sources */,
 				DE5CA25000000000000000BC /* RestAudioPlugin.swift in Sources */,
+				DE5CA25000000000000000BD /* RestAlertStopper.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

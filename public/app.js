@@ -9465,11 +9465,15 @@ function gymRestBurstEnabled() {
   return localStorage.getItem('gymRestBurst') !== 'false';
 }
 
-async function gymScheduleRestNotification() {
+// atMs: cuando debe saltar. Por defecto, el final del descanso en curso;
+// se puede pasar a mano para el boton de PROBAR el aviso de
+// Configuracion (que recorre exactamente este mismo camino).
+async function gymScheduleRestNotification(atMs = null) {
   if (typeof getLocalNotificationsPlugin !== 'function') return;
   const plugin = getLocalNotificationsPlugin();
   if (!plugin || !gymRestNotifyEnabled()) return;
-  if (!gymLiveSession || !gymLiveSession.restUntil) return;
+  const cuando = atMs || (gymLiveSession && gymLiveSession.restUntil);
+  if (!cuando) return;
   try {
     if (!(await ensureLocalNotificationPermissionSilently())) return;
     // Cancelar antes de programar: si habia avisos del descanso anterior
@@ -9487,7 +9491,7 @@ async function gymScheduleRestNotification() {
       id: GYM_REST_NOTIFICATION_ID,
       title: 'Descanso terminado',
       body: 'Siguiente serie.',
-      schedule: { at: new Date(gymLiveSession.restUntil) },
+      schedule: { at: new Date(cuando) },
       threadIdentifier: 'gym-descanso',
     };
     if (sonido) aviso.sound = sonido;
@@ -9709,12 +9713,13 @@ function gymRestDuckEnabled() {
 function gymRestWatchParams() {
   return { duck: gymRestDuckEnabled(), vibrate: gymRestBurstEnabled() };
 }
-async function gymStartRestAudioWatch() {
+async function gymStartRestAudioWatch(endAtMs = null) {
   const plugin = getGymRestAudioPlugin();
   const flags = gymRestWatchParams();
-  if (!plugin || (!flags.duck && !flags.vibrate) || !gymLiveSession || !gymLiveSession.restUntil) return;
+  const fin = endAtMs || (gymLiveSession && gymLiveSession.restUntil);
+  if (!plugin || (!flags.duck && !flags.vibrate) || !fin) return;
   try {
-    await plugin.startWatch({ endAt: gymLiveSession.restUntil, ...flags });
+    await plugin.startWatch({ endAt: fin, ...flags });
   } catch (err) {
     console.error('No se pudo vigilar el audio del descanso:', err);
   }
@@ -9729,6 +9734,52 @@ async function gymUpdateRestAudioWatch() {
     console.error('No se pudo mover la vigilancia de audio:', err);
   }
 }
+// --- Probar el aviso de fin de descanso -------------------------------
+// En el movil no hay consola ni forma de ver que pasa por dentro, y
+// montar un entreno entero para comprobar si la vibracion se calla es
+// una locura. Este atajo recorre EXACTAMENTE el mismo camino que un
+// descanso de verdad (misma notificacion, misma vigilancia de audio con
+// los mismos ajustes), solo que a los 10 segundos: da tiempo a bloquear
+// el movil y probar a callarlo como quieras.
+async function gymTestRestAlert(delaySeconds = 10) {
+  const fin = Date.now() + delaySeconds * 1000;
+  await gymScheduleRestNotification(fin);
+  await gymStartRestAudioWatch(fin);
+  return fin;
+}
+
+// Como acabo el ultimo aviso, segun lo que apunto la parte nativa.
+const GYM_REST_STOP_LABELS = {
+  app: 'al abrir la app',
+  desbloqueo: 'al desbloquear el móvil',
+  volumen: 'con un botón de volumen',
+  'audio-secundario': 'al pausar la música',
+  'ruta-audio': 'al cambiar la salida de audio',
+  interrupcion: 'por una interrupción de audio',
+  mando: 'con el mando del auricular',
+  banner: 'al quitar la notificación de la pantalla',
+  fin: 'no lo paró nada, terminó solo',
+  cancelado: 'se cortó al empezar otra serie o terminar el entreno',
+};
+async function gymRestAlertLastStatus() {
+  const plugin = getGymRestAudioPlugin();
+  if (!plugin || typeof plugin.getStatus !== 'function') return null;
+  try {
+    const info = await plugin.getStatus();
+    return info && info.stoppedBy ? info : null;
+  } catch (err) {
+    return null;
+  }
+}
+function gymFormatRestAlertStatus(info) {
+  if (!info) return 'Vibración del descanso: sin datos todavía (prueba el aviso).';
+  const como = GYM_REST_STOP_LABELS[info.stoppedBy] || info.stoppedBy;
+  const seg = Number(info.afterSeconds || 0).toFixed(1).replace('.', ',');
+  const pulsos = Number(info.pulses || 0);
+  const banner = info.bannerSeen ? '' : ' · la notificación no llegó a verse en pantalla';
+  return `Último aviso: se paró ${como}, a los ${seg} s (${pulsos} vibraciones)${banner}.`;
+}
+
 async function gymCancelRestAudioWatch() {
   const plugin = getGymRestAudioPlugin();
   if (!plugin) return;
@@ -10074,7 +10125,10 @@ function closeGymSetEndModal() {
 //  - Y solo un TOQUE, no un arrastre ni un scroll.
 const GYM_TAP_MIN_SET_SECONDS = 5;      // desde que empieza la serie
 const GYM_TAP_AFTER_FOREGROUND_MS = 1500; // desde que la app vuelve
-const GYM_TAP_SNOOZE_MS = 12000;        // tras cerrar el dialogo
+// Tras cerrar el dialogo se vuelve a contar lo MISMO que al empezar la
+// serie (peticion de Koku: "si le doy a seguir, que vuelva a contar 5s
+// desde el tiempo en el que este"), no un silencio largo aparte.
+const GYM_TAP_SNOOZE_MS = GYM_TAP_MIN_SET_SECONDS * 1000;
 const GYM_TAP_MAX_MOVE_PX = 12;
 const GYM_TAP_MAX_MS = 700;
 let gymTapSnoozeUntil = 0;

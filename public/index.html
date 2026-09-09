@@ -2339,8 +2339,17 @@
           </label>
           <button type="button" id="btn-help-notif-vibrate" class="icon-btn settings-help-btn" aria-label="Cómo funciona la vibración de los avisos">?</button>
         </div>
+        <!-- Probar el aviso de fin de descanso sin montar un entreno:
+             salta a los 10 segundos, con los mismos ajustes de arriba,
+             y debajo se ensena QUE lo paro (en el movil no hay consola
+             que mirar, esto es el unico diagnostico posible). -->
+        <div class="settings-toggle-help-row">
+          <button type="button" id="btn-test-gym-rest-alert" class="secondary-btn">Probar el aviso (10 s)</button>
+          <button type="button" id="btn-help-notif-test" class="icon-btn settings-help-btn" aria-label="Para qué sirve probar el aviso">?</button>
+        </div>
         <p id="notifications-status" class="hint"></p>
         <p id="gym-live-activity-status" class="hint"></p>
+        <p id="gym-rest-alert-status" class="hint"></p>
       </div>
 
       <!-- --- Tienda (todavia sin mecanica: solo el hueco) --- -->
