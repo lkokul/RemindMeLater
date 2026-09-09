@@ -4804,32 +4804,39 @@ body.gym-rest-push #settings-modal .settings-card {
 /* El dia que toca hoy, resaltado en la lista de dias. */
 .gym-start-day-btn.es-de-hoy { border-color: var(--gym-accent); }
 
-/* El aviso del CALENDARIO: una tira pulsable bajo la cabecera del dia.
-   Es calculado, no una tarea guardada -- ver renderGymCicloDeHoy(). */
-.gym-cycle-banner {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  margin: 0.35rem 0 0;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--accent);
-  border-radius: 0.7rem;
-  background: var(--surface);
-  color: var(--surface-text);
-  font-size: 0.85rem;
-  text-align: left;
-  cursor: pointer;
+
+/* --- Buscador de TUS ejercicios (pestaña Plan) ---------------------- */
+.gym-exercises-search { display: flex; align-items: center; gap: 0.35rem; margin: 0 0 0.5rem; }
+.gym-exercises-search input { flex: 1 1 auto; min-width: 0; }
+
+/* --- Buscador dentro de un desplegable (createSelectField searchable) */
+/* La cabecera se queda pegada arriba mientras la lista se desplaza: con
+   ~870 ejercicios, tener que volver al principio para reescribir seria
+   justo el problema que esto viene a arreglar. */
+/* Con buscador, el relleno pasa a la lista: si se quedara en el popover,
+   por ese hueco de arriba se verian pasar las opciones por detras de la
+   cabecera pegada. */
+.select-popover.has-search { padding: 0; gap: 0; }
+.select-popover.has-search .select-popover-list {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  padding: 0.4rem;
 }
-.gym-cycle-banner.es-descanso { border-color: var(--border); opacity: 0.85; }
-.gym-cycle-banner-icon { flex: 0 0 auto; font-size: 1rem; }
-.gym-cycle-banner-go {
-  margin-left: auto;
-  flex: 0 0 auto;
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-text);
-  font-size: 0.75rem;
-  font-weight: 600;
+.select-popover-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.4rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.select-popover-search input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+}
+.select-popover-empty {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.82rem;
+  opacity: 0.75;
 }

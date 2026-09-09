@@ -893,11 +893,10 @@ reordenar una lista larga. Al mover se repinta la lista entera (como
 hace todo ese formulario) para que las flechas de los extremos se
 apaguen solas y los índices de los listeners vuelvan a cuadrar.
 
-**Descuido conocido, sin arreglar**: la fila de ejercicio usa un
-`<select>` NATIVO para elegir el ejercicio, que va contra la regla de no
-usar controles del navegador. Es código anterior a esa regla; cambiarlo
-por `createSelectField()` es un rato de trabajo aparte y no se ha hecho
-para no mezclarlo con esta ronda.
+**Aquel descuido YA ESTÁ ARREGLADO**: la fila de ejercicio usaba un
+`<select>` NATIVO, contra la regla de no usar controles del navegador.
+Se cambió por `createSelectField({ searchable: true })` en la ronda del
+buscador de ejercicios — ver "Buscar ejercicios" más abajo.
 
 ## Configuración por defecto del ejercicio
 
@@ -1315,19 +1314,30 @@ hace falta preguntar, y esa pregunta vive en la pantalla.
   Guardar, igual que el nombre — Cancelar descarta de verdad. En un
   bloque NUEVO la sección entera está oculta: hasta que no existe no
   tiene días que colocar.
-- **Calendario**: una tira pulsable bajo la cabecera del día
-  (`#gym-cycle-today-banner`), **solo en el día de hoy** — el ciclo
-  avanza por entrenos hechos, así que no se puede saber qué tocará
-  pasado mañana sin saber si entrenarás mañana. Tocarla lleva al
-  Gimnasio y arranca el entreno de hoy.
 - **"¿Qué toca hoy?"**: el día que toca va primero y marcado "Hoy"; si
   toca descanso, lo dice y deja elegir igualmente.
+
+**En el CALENDARIO no se ve nada, y es a propósito.** Llegó a haber una
+tira bajo la cabecera del día ("Hoy toca Empuje · día 1 de 3"), y Koku la
+quitó el mismo día: *"que te muestre lo de qué entrenamiento toca en el
+calendario realmente no me aporta nada, era más bien el que pudiera saber
+el widget qué día es y así saber a qué día está enlazado cada
+entrenamiento"*. O sea: **el ciclo no existe para pintar el calendario**,
+existe para que el Gimnasio sepa qué ofrecerte y para alimentar el
+widget. Si algún día vuelve a hacer falta, `gymCicloDeHoy()` da todo lo
+necesario en una sola llamada (bloque, posición, día y si es descanso).
+
+Y el motivo de que aquí no haya "qué toca mañana" tampoco le preocupa —
+lo dijo él: *"supuestamente te sabes lo que toca, esto es sólo para
+facilitar el acceso desde un botón"*. El ciclo es un atajo, no una
+agenda.
 
 **`hoyISO()` usa la fecha LOCAL, no `toISOString()`**: a las 00:30 en
 España el UTC todavía es el día anterior y el ciclo se quedaría un día
 atrás.
 
-**Lo que aguanta** (26 comprobaciones de Playwright): un ciclo de solo
+**Lo que aguanta** (26 comprobaciones de Playwright, `ciclo.mjs` y
+`ciclo-raros.mjs`): un ciclo de solo
 descansos con nueve días pasados (no se cuelga), una posición que apunta
 a un día borrado (se lee como descanso), posiciones inventadas en la
 ruta (99, -1, 0, texto, null, 1.5 — todas rechazadas), un día de otro
@@ -1340,6 +1350,60 @@ posiciones huérfanas.
 **Sin empezar todavía**: el widget que lea esto. El modelo ya está
 pensado para él (una sola lectura da "qué toca hoy" y el id del día para
 arrancarlo), pero la parte nativa está por hacer.
+
+## Buscar ejercicios (y adiós al último `<select>` nativo)
+
+Petición de Koku (9/9/2026): *"que en los ejercicios que yo creo de 0 me
+pusiera una opción para filtrar o buscar, porque si tengo muchos
+diferentes se hace un poco una odisea"*. Se hizo en los DOS sitios donde
+duele, no solo en el que nombró:
+
+**1. Tu lista de ejercicios** (pestaña Plan): un campo encima del listado
+que filtra por **nombre, músculo y material** — así "pierna" saca todas
+las de pierna aunque ninguna se llame así. Sin tildes y en minúsculas
+(`gymNormalizarBusqueda`), para que "biceps" encuentre "Bíceps". **Solo
+aparece a partir de 8 ejercicios** (o si ya hay algo escrito): con cuatro
+sería una fila desperdiciada. El filtro vive en memoria
+(`gymExercisesFiltro`), **NO en localStorage**: un filtro que sobrevive a
+cerrar la app hace pensar que has perdido ejercicios.
+
+**2. Los desplegables para elegir ejercicio**, que eran los **dos últimos
+`<select>` nativos de la app** — el de la fila de un día del plan y el de
+editar una sesión del historial. CLAUDE.md los tenía apuntados como
+descuido conocido desde que se puso la regla de no usar controles del
+navegador; se han ido con esta ronda. **Ya no queda ni un `<select>`
+nativo en toda la app** (comprobado contando `document.querySelectorAll('select')`).
+
+Para eso, `createSelectField()` acepta ahora **`searchable: true`**, que
+le mete un buscador dentro del popover. Detalles:
+
+- El buscador y la lista son **hermanos dentro del popover**, y
+  `renderOptions()` repinta solo la lista — si repintara el popover
+  entero, escribir destruiría el campo y perderías el foco a media
+  palabra.
+- La cabecera va **`position: sticky`**: con ~870 ejercicios, tener que
+  volver arriba del todo para reescribir sería justo el problema que esto
+  viene a arreglar. Y con `.has-search` el relleno pasa del popover a la
+  lista, o por ese hueco se verían pasar las opciones por detrás.
+- **No se enfoca solo** a propósito: en el móvil, abrir el teclado nada
+  más desplegar tapa media lista, y muchas veces solo quieres mirar.
+- **Enter no envía el formulario** de alrededor (estos desplegables viven
+  dentro de modales con `<form>`).
+- **Cada apertura empieza con la lista entera**: un filtro heredado de la
+  vez anterior parece que faltan ejercicios.
+- Clicar dentro del buscador no cierra el popover porque el listener
+  global de `settings.js` ya ignora los clics dentro de `.select-popover`.
+
+Las opciones llevan el músculo pegado al nombre (`Curl martillo ·
+Bíceps`, `gymExerciseSelectOptions()`): con la librería importada hay
+ejercicios que se llaman casi igual, y además deja buscar por músculo.
+
+**Bug encontrado forzando fallos, no en el uso normal**: escribir **solo
+espacios** en el buscador de la lista vaciaba el listado, porque
+`normalizar('   ')` no es cadena vacía y se buscaba literalmente `"   "`.
+En el móvil eso pasa con facilidad (el autocorrector mete espacios) y
+parecería que has perdido los ejercicios. Va con `.trim()`. La versión
+del popover ya lo hacía bien; a la de la lista se le escapó.
 
 ## Estado actual
 

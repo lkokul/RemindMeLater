@@ -67,9 +67,16 @@ const DEFAULT_EVENT_COLOR = '#5b8cff'; // el --accent de styles.css, para evento
 // DENTRO de manejadores de click, que no se disparan hasta que la persona
 // interactua — para entonces los dos archivos ya estan cargados, igual
 // que el resto de referencias cruzadas entre app.js y settings.js.
-function createSelectField({ options = [], initialValue = '', placeholder = '', onChange, scrollToValue } = {}) {
+// `searchable`: anade un buscador dentro del desplegable. Se pide donde
+// la lista puede crecer sin limite (los ejercicios del gimnasio, que son
+// los que crea la persona mas los ~870 de la libreria) -- peticion de
+// Koku: "si tengo muchos diferentes se hace un poco una odisea". No se
+// enfoca solo a proposito: en el movil abrir el teclado nada mas
+// desplegar tapa media lista, y muchas veces solo quieres mirar.
+function createSelectField({ options = [], initialValue = '', placeholder = '', onChange, scrollToValue, searchable = false } = {}) {
   let value = initialValue;
   let opts = options;
+  let busqueda = '';
 
   const root = document.createElement('div');
   root.className = 'select-field';
@@ -81,6 +88,40 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
   const popover = document.createElement('div');
   popover.className = 'select-popover hidden';
   document.body.appendChild(popover);
+
+  // El buscador y la lista son hermanos DENTRO del popover: renderOptions
+  // repinta solo la lista, asi que escribir no destruye el campo (ni
+  // pierde el foco ni el cursor a media palabra).
+  let campoBusqueda = null;
+  let listaOpciones = popover;
+  if (searchable) {
+    popover.classList.add('has-search');
+    const cabecera = document.createElement('div');
+    cabecera.className = 'select-popover-search';
+    campoBusqueda = document.createElement('input');
+    campoBusqueda.type = 'text';
+    campoBusqueda.placeholder = 'Buscar...';
+    campoBusqueda.autocomplete = 'off';
+    cabecera.appendChild(campoBusqueda);
+    popover.appendChild(cabecera);
+    listaOpciones = document.createElement('div');
+    listaOpciones.className = 'select-popover-list';
+    popover.appendChild(listaOpciones);
+    campoBusqueda.addEventListener('input', () => { busqueda = campoBusqueda.value; renderOptions(); });
+    // Enter dentro del buscador no debe enviar el formulario que haya
+    // alrededor (estos desplegables viven dentro de modales con <form>).
+    campoBusqueda.addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
+  }
+
+  // Sin tildes y en minusculas, para que "biceps" encuentre "Bíceps".
+  function normalizar(texto) {
+    return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+  function opcionesVisibles() {
+    if (!searchable || !busqueda.trim()) return opts;
+    const q = normalizar(busqueda);
+    return opts.filter((o) => normalizar(o.label).includes(q));
+  }
 
   function findCurrent() {
     return opts.find((o) => String(o.value) === String(value));
@@ -99,8 +140,16 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
   }
 
   function renderOptions() {
-    popover.innerHTML = '';
-    opts.forEach((opt) => {
+    listaOpciones.innerHTML = '';
+    const visibles = opcionesVisibles();
+    if (visibles.length === 0) {
+      const vacio = document.createElement('p');
+      vacio.className = 'select-popover-empty';
+      vacio.textContent = 'Nada con ese nombre.';
+      listaOpciones.appendChild(vacio);
+      return;
+    }
+    visibles.forEach((opt) => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'select-option' + (String(opt.value) === String(value) ? ' active' : '');
@@ -109,11 +158,14 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
       item.addEventListener('click', () => {
         value = opt.value;
         renderTrigger();
-        renderOptions();
         popover.classList.add('hidden');
+        // El repintado va DESPUES de cerrar: si onChange rehace la lista
+        // (pasa en las filas de ejercicio), repintar antes seria trabajo
+        // tirado sobre un popover que ya no se ve.
+        renderOptions();
         if (onChange) onChange(value);
       });
-      popover.appendChild(item);
+      listaOpciones.appendChild(item);
     });
   }
 
@@ -123,6 +175,9 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
     closeAllPopovers(popover);
     popover.classList.toggle('hidden');
     if (willOpen) {
+      // Cada apertura empieza con la lista entera: un filtro heredado de
+      // la vez anterior parece que faltan ejercicios.
+      if (campoBusqueda) { busqueda = ''; campoBusqueda.value = ''; renderOptions(); }
       positionFixedPopover(trigger, popover, {
         width: Math.max(200, trigger.getBoundingClientRect().width),
       });
@@ -2298,7 +2353,6 @@ document.getElementById('btn-mobile-calendar-day-search').addEventListener('clic
 async function showMobileDay(date, { scrollToNow = false, targetMinutes } = {}) {
   state.mobileCalendarDayDate = date;
   document.getElementById('mobile-calendar-day-heading').textContent = formatMobileDayHeading(date);
-  renderGymCicloDeHoy(date);
   const monthLabel = capitalizeFirst(MONTH_ONLY_FORMATTER.format(date));
   document.getElementById('btn-mobile-day-back-label').innerHTML =
     `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg><span>${monthLabel}</span>`;
@@ -8115,10 +8169,6 @@ async function loadGymExercises() {
 }
 async function loadGymBlocks() {
   state.gymBlocks = await api('/api/gym-blocks');
-  // El aviso del calendario sale del ciclo del bloque activo, asi que se
-  // repinta cada vez que los bloques cambian (incluida la carga inicial:
-  // showMobileDay puede haber corrido antes de que existieran).
-  renderGymCicloDeHoy();
 }
 async function loadGymRoutines() {
   state.gymRoutines = await api('/api/gym-routines');
@@ -8240,14 +8290,56 @@ async function loadGymExerciseLibrary() {
   return gymExerciseLibrary;
 }
 
+// Lo que hay escrito en el buscador de TUS ejercicios. Vive en memoria a
+// proposito (no en localStorage): un filtro que sobrevive a cerrar la app
+// hace pensar que has perdido ejercicios.
+let gymExercisesFiltro = '';
+
+// Sin tildes y en minusculas, para que "biceps" encuentre "Bíceps".
+function gymNormalizarBusqueda(texto) {
+  return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function renderGymExercisesList() {
   const list = document.getElementById('gym-exercises-list');
   list.innerHTML = '';
+
+  // El buscador solo asoma cuando hay bastantes como para que estorbe
+  // buscarlos a ojo -- con cuatro ejercicios seria una fila desperdiciada.
+  // Se queda visible si hay algo escrito, para poder borrarlo.
+  const wrap = document.getElementById('gym-exercises-search-wrap');
+  const campo = document.getElementById('gym-exercises-search');
+  const merecePena = state.gymExercises.length >= 8 || gymExercisesFiltro.trim() !== '';
+  wrap.classList.toggle('hidden', !merecePena);
+  document.getElementById('btn-gym-exercises-search-clear').classList.toggle('hidden', gymExercisesFiltro === '');
+  // No se pisa lo que la persona esta escribiendo (el repintado puede
+  // venir de otra cosa, como guardar un ejercicio).
+  if (campo.value !== gymExercisesFiltro) campo.value = gymExercisesFiltro;
+
   if (state.gymExercises.length === 0) {
     list.innerHTML = '<p class="empty-hint">Todavía no tienes ejercicios. Añádelos desde la librería o crea uno a mano.</p>';
     return;
   }
-  state.gymExercises.forEach((ex) => {
+
+  // Busca por nombre Y por musculo: "pierna" saca todas las de pierna
+  // aunque ninguna se llame asi.
+  // El .trim() NO es cosmetico: sin el, escribir solo espacios (el
+  // autocorrector del movil los mete con facilidad) buscaba " " y dejaba
+  // la lista vacia, como si hubieras perdido los ejercicios. Encontrado
+  // forzando fallos.
+  const q = gymNormalizarBusqueda(gymExercisesFiltro).trim();
+  const visibles = q === ''
+    ? state.gymExercises
+    : state.gymExercises.filter((ex) => gymNormalizarBusqueda(
+        `${ex.name} ${gymMuscleGroupLabel(ex.muscleGroup) || ''} ${ex.equipment || ''}`
+      ).includes(q));
+
+  if (visibles.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Ningún ejercicio tuyo coincide con eso.</p>';
+    return;
+  }
+
+  visibles.forEach((ex) => {
     // "unilateral" se ensena aqui para que se vea DONDE se configura (el
     // lapiz de esta misma fila) -- Koku lo estuvo buscando en el dia.
     const extras = [
@@ -8271,6 +8363,16 @@ function renderGymExercisesList() {
     });
   });
 }
+
+document.getElementById('gym-exercises-search').addEventListener('input', (e) => {
+  gymExercisesFiltro = e.target.value;
+  renderGymExercisesList();
+});
+document.getElementById('btn-gym-exercises-search-clear').addEventListener('click', () => {
+  gymExercisesFiltro = '';
+  renderGymExercisesList();
+  document.getElementById('gym-exercises-search').focus();
+});
 
 // --- Pestana "Plan": bloques y sus dias (rediseno de Gimnasio) --------
 // Dos niveles dentro de la misma pestana, tipo carpetas de Notas: la
@@ -12070,40 +12172,14 @@ function gymCicloSiguientePosicion(bloque, desde) {
   return bloque.cycleDays[(i + 1) % bloque.cycleDays.length].position;
 }
 
-// El aviso del calendario. Solo se ve en el dia de HOY: el ciclo avanza
-// por entrenos hechos, asi que no se puede saber que tocara pasado
-// mañana sin saber si entrenaras mañana.
-function renderGymCicloDeHoy(date) {
-  const banner = document.getElementById('gym-cycle-today-banner');
-  if (!banner) return;
-  const dia = date || state.mobileCalendarDayDate;
-  const hoy = gymCicloDeHoy();
-  if (!hoy || !dia || !sameDay(dia, new Date())) {
-    banner.classList.add('hidden');
-    return;
-  }
-  const cual = `día ${hoy.position} de ${hoy.length}`;
-  if (hoy.esDescanso) {
-    banner.className = 'gym-cycle-banner es-descanso';
-    banner.innerHTML = `<span class="gym-cycle-banner-icon">🌙</span><span>Hoy toca <b>descanso</b> · ${cual}</span>`;
-  } else {
-    banner.className = 'gym-cycle-banner';
-    banner.innerHTML = `<span class="gym-cycle-banner-icon">🏋️</span><span>Hoy toca <b>${escapeHtml(hoy.rutina.name)}</b> · ${cual}</span><span class="gym-cycle-banner-go">Empezar</span>`;
-  }
-  banner.classList.remove('hidden');
-}
-
-// Tocar el aviso lleva al Gimnasio: al entreno de hoy directamente si
-// hay uno, o al selector si hoy toca descanso (que tambien deja
-// entrenar, ver openGymStartModal).
-document.getElementById('gym-cycle-today-banner').addEventListener('click', async () => {
-  const hoy = gymCicloDeHoy();
-  if (!hoy) return;
-  goToMobileSection('extensions');
-  await openGymView();
-  if (hoy.esDescanso) openGymStartModal();
-  else startGymLiveSession(hoy.rutina);
-});
+// NO hay aviso de "hoy toca X" en el CALENDARIO. Llego a existir (una
+// tira bajo la cabecera del dia) y Koku lo quito el 9/9/2026: "que te
+// muestre lo de que entrenamiento toca en el calendario realmente no me
+// aporta nada, era mas bien el que pudiera saber el widget que dia es y
+// asi saber a que dia esta enlazado cada entrenamiento". O sea que el
+// ciclo NO es para pintar el calendario: es para que el Gimnasio sepa
+// que ofrecerte y para alimentar el widget. Si vuelve a hacer falta,
+// gymCicloDeHoy() da todo lo necesario en una sola llamada.
 
 // Al terminar un entreno: mover el cursor del ciclo. Si lo entrenado era
 // lo que tocaba, avanza solo y en silencio (el caso normal). Si NO lo
@@ -12123,7 +12199,6 @@ async function gymAvanzarCicloTrasEntrenar(routineId) {
         method: 'POST', body: JSON.stringify({ position: siguiente }),
       });
       await loadGymBlocks();
-      renderGymCicloDeHoy();
     }
     return;
   }
@@ -12159,7 +12234,6 @@ async function gymAvanzarCicloTrasEntrenar(routineId) {
     method: 'POST', body: JSON.stringify({ position: siguienteAlHecho }),
   });
   await loadGymBlocks();
-  renderGymCicloDeHoy();
 }
 
 // --- Ciclo de dias de un bloque ---------------------------------------
@@ -12321,7 +12395,6 @@ document.getElementById('gym-block-form').addEventListener('submit', async (e) =
   closeGymBlockModal();
   await loadGymBlocks();
   renderGymBlocksList();
-  renderGymCicloDeHoy();
 });
 
 document.getElementById('btn-delete-gym-block').addEventListener('click', async () => {
@@ -12368,15 +12441,16 @@ function ensureGymRoutineFieldsReady() {
   document.getElementById('gym-routine-icon-field').appendChild(gymRoutineIconField.element);
 }
 
-// Construye las opciones <option> de un <select> nativo con la
-// biblioteca de ejercicios -- se usa tanto en filas de rutina como de
-// sesion. Nativo a proposito (no el select-field a medida): estas filas
-// se repiten un numero variable de veces, y un <select> normal no
-// necesita gestionar su propio popover por cada copia.
-function gymExerciseOptionsHtml(selectedId) {
-  return state.gymExercises
-    .map((ex) => `<option value="${ex.id}" ${Number(selectedId) === ex.id ? 'selected' : ''}>${escapeHtml(ex.name)}</option>`)
-    .join('');
+// Las opciones para el selector PROPIO con buscador (createSelectField),
+// que sustituyo a los <select> nativos de estas filas. Lleva el grupo
+// muscular en el nombre: con la libreria importada hay ejercicios que se
+// llaman casi igual y asi se distinguen de un vistazo, ademas de poder
+// buscar por musculo ("pierna") y no solo por nombre.
+function gymExerciseSelectOptions() {
+  return state.gymExercises.map((ex) => ({
+    value: String(ex.id),
+    label: ex.muscleGroup ? `${ex.name} · ${gymMuscleGroupLabel(ex.muscleGroup)}` : ex.name,
+  }));
 }
 
 function renderGymRoutineExercisesField() {
@@ -12415,7 +12489,7 @@ function renderGymRoutineExercisesField() {
           <button type="button" class="icon-btn" data-field="subir" aria-label="Subir el ejercicio" title="Subir" ${esPrimero ? 'disabled' : ''}>${flechaArriba}</button>
           <button type="button" class="icon-btn" data-field="bajar" aria-label="Bajar el ejercicio" title="Bajar" ${esUltimo ? 'disabled' : ''}>${flechaAbajo}</button>
         </div>
-        <select data-field="exerciseId">${gymExerciseOptionsHtml(row.exerciseId)}</select>
+        <div class="gym-routine-exercise-picker"></div>
         <button type="button" class="icon-btn" data-field="toggleHidden" aria-label="${row.hidden ? 'Mostrar en los entrenos' : 'Ocultar de los entrenos'}" title="${row.hidden ? 'Oculto: los entrenos nuevos no lo cargan. Tocar para mostrarlo.' : 'Ocultar de los entrenos nuevos (sin borrarlo del día)'}">${eyeSvg}</button>
         <button type="button" class="icon-btn" data-field="remove" aria-label="Quitar ejercicio">✕</button>
       </div>
@@ -12426,9 +12500,21 @@ function renderGymRoutineExercisesField() {
       </div>
       <p class="hint gym-rest-preview">${restPreviewText(row.targetRestSeconds)}</p>
     `;
-    rowEl.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
+    // Selector propio CON BUSCADOR (peticion de Koku: con muchos
+    // ejercicios, un desplegable pelado es una odisea). Sustituye al
+    // <select> nativo que habia aqui, que ademas incumplia la regla del
+    // proyecto de no usar controles del navegador.
+    const picker = createSelectField({
+      options: gymExerciseSelectOptions(),
+      initialValue: row.exerciseId != null ? String(row.exerciseId) : '',
+      placeholder: 'Elige un ejercicio',
+      searchable: true,
+      onChange: (valor) => cambiarEjercicioDeLaFila(valor),
+    });
+    rowEl.querySelector('.gym-routine-exercise-picker').appendChild(picker.element);
+    function cambiarEjercicioDeLaFila(valor) {
       const anteriores = gymTargetsPorDefecto(gymRoutineModalExercises[index].exerciseId);
-      const nuevoId = Number(e.target.value);
+      const nuevoId = Number(valor);
       gymRoutineModalExercises[index].exerciseId = nuevoId;
       // La fila pasa a ser OTRO ejercicio, asi que se traen sus valores
       // por defecto -- pero solo en los campos que no hayas tocado tu.
@@ -12443,7 +12529,7 @@ function renderGymRoutineExercisesField() {
         if (sinTocar) gymRoutineModalExercises[index][enElDia] = nuevos[enElDia];
       });
       renderGymRoutineExercisesField();
-    });
+    }
     rowEl.querySelector('[data-field="targetSets"]').addEventListener('input', (e) => {
       gymRoutineModalExercises[index].targetSets = e.target.value;
     });
@@ -12684,7 +12770,7 @@ function renderGymSessionExercisesField() {
     // dejan de desbordarse en pantallas estrechas (el RPE se salia).
     header.innerHTML = `
       <button type="button" class="icon-btn gym-session-caret" data-plegar aria-label="${recogido ? 'Desplegar' : 'Recoger'} ejercicio" aria-expanded="${recogido ? 'false' : 'true'}">▾</button>
-      <select data-field="exerciseId">${gymExerciseOptionsHtml(exRow.exerciseId)}</select>
+      <div class="gym-routine-exercise-picker"></div>
       <span class="gym-list-item-muted gym-session-set-count">${exRow.sets.length}</span>
       <input type="number" data-field="exRpe" placeholder="RPE" min="1" max="10" step="0.5" title="RPE del ejercicio" value="${exRow.rpe ?? ''}" />
       <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
@@ -12694,9 +12780,15 @@ function renderGymSessionExercisesField() {
       else gymSessionExercisesCollapsed.add(exIndex);
       renderGymSessionExercisesField();
     });
-    header.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
-      gymSessionModalExercises[exIndex].exerciseId = Number(e.target.value);
+    // Mismo selector con buscador que en el dia del plan.
+    const pickerSesion = createSelectField({
+      options: gymExerciseSelectOptions(),
+      initialValue: exRow.exerciseId != null ? String(exRow.exerciseId) : '',
+      placeholder: 'Elige un ejercicio',
+      searchable: true,
+      onChange: (valor) => { gymSessionModalExercises[exIndex].exerciseId = Number(valor); },
     });
+    header.querySelector('.gym-routine-exercise-picker').appendChild(pickerSesion.element);
     header.querySelector('[data-field="exRpe"]').addEventListener('input', (e) => {
       gymSessionModalExercises[exIndex].rpe = e.target.value;
     });
@@ -17052,7 +17144,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.37.0';
+const APP_VERSION = '0.38.0';
 const APP_VERSION_DATE = '2026-09-09';
 
 function renderAppVersionLine() {

@@ -262,12 +262,6 @@
               <div id="mobile-week-strip-days" class="mobile-week-strip-days"></div>
             </div>
             <p id="mobile-calendar-day-heading" class="mobile-calendar-day-heading"></p>
-            <!-- Aviso CALCULADO de que toca hoy segun el ciclo del bloque
-                 activo del Gimnasio. No es una tarea de verdad de la base
-                 (decision de Koku): se saca del ciclo cada vez, asi que
-                 siempre esta al dia y cambiar el plan lo cambia solo.
-                 Solo se ve en el dia de HOY. -->
-            <button type="button" id="gym-cycle-today-banner" class="gym-cycle-banner hidden"></button>
           </div>
 
           <!-- "Vista por horas": franjas 00-23h, eventos posicionados por
@@ -540,6 +534,13 @@
           <div class="gym-exercises-actions">
             <button type="button" id="btn-open-gym-library" class="primary-btn gym-tab-action">Librería de ejercicios</button>
             <button type="button" id="btn-new-gym-exercise" class="secondary-btn gym-tab-action">+ Nuevo ejercicio</button>
+          </div>
+          <!-- Buscador de TUS ejercicios (peticion de Koku: con muchos se
+               hace una odisea). Filtra por nombre y por musculo, y solo
+               aparece cuando de verdad hay unos cuantos. -->
+          <div id="gym-exercises-search-wrap" class="gym-exercises-search hidden">
+            <input type="text" id="gym-exercises-search" placeholder="Buscar por nombre o músculo..." autocomplete="off" />
+            <button type="button" id="btn-gym-exercises-search-clear" class="icon-btn hidden" aria-label="Limpiar la búsqueda">✕</button>
           </div>
           <div id="gym-exercises-list" class="gym-list"></div>
         </div>

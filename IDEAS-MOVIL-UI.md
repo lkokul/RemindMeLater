@@ -179,6 +179,10 @@ el calendario.
   (nombre, color, bloque, eliminar) y tocarlo abre solo sus ejercicios,
   que es a lo que se entra el 90% de las veces. Los ejercicios se
   reordenan con flechas.
+- ✅ **Buscar ejercicios**: campo de búsqueda sobre tu lista de
+  ejercicios (por nombre, músculo o material, sin tildes, y solo visible
+  a partir de 8) y buscador dentro de los desplegables donde eliges
+  ejercicio, tanto en el día del plan como al editar una sesión.
 - ✅ **La espalda, repartida**: espalda media, dorsales y lumbar, más un
   hombro posterior que vive junto a hombros. Repartido desde el origen
   de la librería, no a ojo.
@@ -211,14 +215,16 @@ el calendario.
   haces — "día 1 Empuje, día 2 Tirón, día 3 descanso" — y la app sabe
   qué toca hoy. El ciclo avanza **por entrenos hechos**, no por
   calendario (si te saltas un día, al siguiente te sigue tocando lo
-  mismo); solo los descansos se consumen al pasar el día. El "hoy te
-  toca" del calendario es un aviso **calculado**, no una tarea guardada,
-  y tocarlo arranca el entreno de hoy. Si hoy toca descanso puedes
-  entrenar igual: te avisa, y al terminar pregunta dónde recolocar el
-  ciclo.
-- 💡 **Widget de "qué toca hoy"**: el modelo del ciclo ya está pensado
-  para alimentarlo (una lectura da el día y su id para arrancarlo); la
-  parte nativa está sin empezar.
+  mismo); solo los descansos se consumen al pasar el día. Al empezar a
+  entrenar, el día que toca va primero y marcado. Si hoy toca descanso
+  puedes entrenar igual: te avisa, y al terminar pregunta dónde
+  recolocar el ciclo. **En el calendario no se enseña nada** — se probó
+  y Koku lo quitó: el ciclo es para el Gimnasio y para el widget, no
+  para pintar el mes.
+- 💡 **Widget de "qué toca hoy"**: es el destino real del ciclo. El
+  modelo ya está pensado para alimentarlo (una lectura da el día, su id
+  para arrancarlo y en qué posición del ciclo estás); la parte nativa
+  está sin empezar.
 - 💡 Traducir a tandas las instrucciones de la librería (siguen en
   inglés). Koku tiene además una rama propia `gimnasio-movil` con su
   propio rediseño, sin fusionar.
@@ -335,7 +341,10 @@ el calendario.
   Neón / Cristal / Registro (cómo reaccionan botones e interruptores;
   Registro añade tipografía mono en tablas/etiquetas).
 - ✅ **Nunca controles nativos del navegador**: selects, fechas, horas
-  y checkboxes siempre con componentes propios (`createSelectField`,
+  y checkboxes siempre con componentes propios — y desde la ronda del
+  buscador de ejercicios **ya no queda ni un `<select>` nativo en toda
+  la app**. `createSelectField` acepta además `searchable: true`, que le
+  añade un buscador dentro del desplegable (`createSelectField`,
   `createDateField`, `createTimeField`, `createMultiSelectField` con
   chips, `.styled-checkbox`, popovers de color/icono). Modal de
   confirmación/aviso propio en vez de `confirm()`/`alert()` (con

@@ -198,6 +198,17 @@ a pantalla completa y sin afectar a nada de lo de arriba:
   como hagas. Una serie alargada sigue contando como **una serie** para
   la racha y el objetivo semanal, pero **sus kilos sí suman** al volumen
   y cualquiera de sus tramos puede marcar un récord.
+  Un bloque puede además repetirse en un **ciclo de días** opcional:
+  colocas en orden lo que haces ("día 1 Empuje, día 2 Tirón, día 3
+  descanso") y al empezar a entrenar la app te ofrece primero el que
+  toca. El ciclo avanza **según lo que entrenas de verdad**, no según el
+  calendario: si te saltas un día, al siguiente te sigue tocando lo
+  mismo — solo los descansos se consumen solos al pasar el día. Y si un
+  día de descanso te apetece entrenar, puedes: te avisa y, al terminar,
+  te pregunta cómo continuar el ciclo.
+  Tanto tu lista de ejercicios como los desplegables donde eliges uno
+  llevan **buscador** (por nombre, músculo o material), para que tener
+  muchos no sea un problema.
 - **Lecturas**: historial de entretenimiento — mangas, cómics, libros,
   series, animes y películas juntos — agrupado en sagas (obligatorias:
   incluso algo suelto es una saga de un único elemento, y una misma saga
