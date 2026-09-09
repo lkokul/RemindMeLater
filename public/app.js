@@ -9184,6 +9184,15 @@ function refreshGymUnilateralFields() {
 }
 document.getElementById('gym-exercise-unilateral').addEventListener('change', refreshGymUnilateralFields);
 
+// "90" -> "Descanso: 1:30 min". El campo va en segundos y sin esto no se
+// nota (mismo apano que ya tenia la fila del dia).
+function refreshGymExerciseDefaultRestPreview() {
+  const n = Number(document.getElementById('gym-exercise-default-rest').value);
+  document.getElementById('gym-exercise-default-rest-preview').textContent =
+    n > 0 ? `Descanso: ${gymLiveFormatClock(n)} min` : '';
+}
+document.getElementById('gym-exercise-default-rest').addEventListener('input', refreshGymExerciseDefaultRestPreview);
+
 function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
   document.getElementById('gym-exercise-id').value = exercise ? exercise.id : '';
@@ -9193,6 +9202,10 @@ function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-unilateral').checked = !!(exercise && exercise.unilateral);
   document.getElementById('gym-exercise-sides-separately').checked = !!(exercise && exercise.countSidesSeparately);
   document.getElementById('gym-exercise-side-rest').value = exercise && exercise.sideRestSeconds != null ? exercise.sideRestSeconds : '';
+  document.getElementById('gym-exercise-default-sets').value = exercise && exercise.defaultSets != null ? exercise.defaultSets : '';
+  document.getElementById('gym-exercise-default-reps').value = exercise && exercise.defaultReps != null ? exercise.defaultReps : '';
+  document.getElementById('gym-exercise-default-rest').value = exercise && exercise.defaultRestSeconds != null ? exercise.defaultRestSeconds : '';
+  refreshGymExerciseDefaultRestPreview();
   refreshGymUnilateralFields();
   gymExerciseSecondarySel = new Set(exercise && Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : []);
   renderGymExerciseSecondaryChips();
@@ -9229,6 +9242,9 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
     unilateral: document.getElementById('gym-exercise-unilateral').checked,
     countSidesSeparately: document.getElementById('gym-exercise-sides-separately').checked,
     sideRestSeconds: document.getElementById('gym-exercise-side-rest').value,
+    defaultSets: document.getElementById('gym-exercise-default-sets').value,
+    defaultReps: document.getElementById('gym-exercise-default-reps').value,
+    defaultRestSeconds: document.getElementById('gym-exercise-default-rest').value,
   };
   // El flag se captura ANTES de cerrar: closeGymExerciseModal lo resetea.
   const addToLive = !id && gymExerciseAddToLivePending;
@@ -11436,7 +11452,22 @@ function renderGymRoutineExercisesField() {
       <p class="hint gym-rest-preview">${restPreviewText(row.targetRestSeconds)}</p>
     `;
     rowEl.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
-      gymRoutineModalExercises[index].exerciseId = Number(e.target.value);
+      const anteriores = gymTargetsPorDefecto(gymRoutineModalExercises[index].exerciseId);
+      const nuevoId = Number(e.target.value);
+      gymRoutineModalExercises[index].exerciseId = nuevoId;
+      // La fila pasa a ser OTRO ejercicio, asi que se traen sus valores
+      // por defecto -- pero solo en los campos que no hayas tocado tu.
+      // "No tocado" = vacio, o igual a lo que traia el ejercicio
+      // anterior. Asi cambiar de ejercicio no te borra un 4x8 que
+      // habias escrito a mano, y a la vez no te deja el descanso del
+      // ejercicio de antes puesto sin querer.
+      const nuevos = gymTargetsPorDefecto(nuevoId);
+      GYM_TARGET_FIELDS.forEach(({ enElDia }) => {
+        const actual = gymRoutineModalExercises[index][enElDia];
+        const sinTocar = actual === '' || actual == null || String(actual) === String(anteriores[enElDia]);
+        if (sinTocar) gymRoutineModalExercises[index][enElDia] = nuevos[enElDia];
+      });
+      renderGymRoutineExercisesField();
     });
     rowEl.querySelector('[data-field="targetSets"]').addEventListener('input', (e) => {
       gymRoutineModalExercises[index].targetSets = e.target.value;
@@ -11473,12 +11504,35 @@ function renderGymRoutineExercisesField() {
   });
 }
 
+// Los tres campos del dia y de donde sale cada uno en la ficha del
+// ejercicio. En una sola lista para no repetir el trio por todas
+// partes.
+const GYM_TARGET_FIELDS = [
+  { enElDia: 'targetSets', porDefecto: 'defaultSets' },
+  { enElDia: 'targetReps', porDefecto: 'defaultReps' },
+  { enElDia: 'targetRestSeconds', porDefecto: 'defaultRestSeconds' },
+];
+
+// La configuracion por defecto de un ejercicio, lista para copiar en una
+// fila del dia. Lo que no tenga valor se queda vacio, como antes.
+function gymTargetsPorDefecto(exerciseId) {
+  const ej = state.gymExercises.find((x) => x.id === Number(exerciseId));
+  const fila = {};
+  GYM_TARGET_FIELDS.forEach(({ enElDia, porDefecto }) => {
+    fila[enElDia] = ej && ej[porDefecto] != null ? ej[porDefecto] : '';
+  });
+  return fila;
+}
+
 document.getElementById('btn-add-gym-routine-exercise').addEventListener('click', () => {
   if (state.gymExercises.length === 0) {
     showAppAlert('Primero crea al menos un ejercicio (pestaña Plan, lista de abajo).');
     return;
   }
-  gymRoutineModalExercises.push({ exerciseId: state.gymExercises[0].id, targetSets: '', targetReps: '', targetRestSeconds: '', hidden: false });
+  // Llega ya configurado con lo que suelas hacer con el (peticion de
+  // Koku): series, reps y descanso salen de la ficha del ejercicio.
+  const id = state.gymExercises[0].id;
+  gymRoutineModalExercises.push({ exerciseId: id, ...gymTargetsPorDefecto(id), hidden: false });
   renderGymRoutineExercisesField();
 });
 

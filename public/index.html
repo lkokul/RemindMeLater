@@ -633,6 +633,21 @@
           Material (opcional)
           <input type="text" id="gym-exercise-equipment" placeholder="Ej. Barra, Mancuernas" />
         </label>
+        <!-- Como sueles hacer ESTE ejercicio (peticion de Koku): al
+             meterlo en un dia, estos tres llegan ya rellenos y no hay
+             que escribirlos otra vez. Son un punto de partida, no la
+             verdad: en cada dia se pueden cambiar, y cambiarlos aqui NO
+             toca los dias que ya lo tenian. -->
+        <div class="field-label-block">
+          <span class="field-label">Cómo lo sueles hacer (opcional)</span>
+          <div class="gym-routine-exercise-targets-row">
+            <input type="number" id="gym-exercise-default-sets" placeholder="Series" min="0" inputmode="numeric" />
+            <input type="number" id="gym-exercise-default-reps" placeholder="Reps" min="0" inputmode="numeric" />
+            <input type="number" id="gym-exercise-default-rest" placeholder="Descanso (s)" min="0" inputmode="numeric" title="En segundos" />
+          </div>
+          <p class="hint" id="gym-exercise-default-rest-preview"></p>
+          <p class="hint">Se copia como punto de partida cada vez que añadas este ejercicio a un día. Los días que ya lo tengan no cambian.</p>
+        </div>
         <!-- Nota FIJA: acompana siempre al ejercicio (alturas de polea,
              posicion del banco...), a diferencia de la nota de sesion,
              que es de un dia concreto. Se ensena en la tarjeta del

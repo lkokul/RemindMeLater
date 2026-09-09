@@ -181,6 +181,20 @@ function applyLocalSchema(db) {
       unilateral INTEGER NOT NULL DEFAULT 0,
       count_sides_separately INTEGER NOT NULL DEFAULT 0,
       side_rest_seconds INTEGER,
+      -- Configuracion POR DEFECTO del ejercicio (peticion de Koku): las
+      -- series, repeticiones y descanso que sueles hacer con el. Al
+      -- meterlo en un dia, esos tres campos llegan ya rellenos y no hay
+      -- que escribirlos otra vez.
+      --
+      -- Ojo, son un PUNTO DE PARTIDA, no la verdad: lo que manda en un
+      -- dia concreto sigue siendo lo que hay en gym_routine_exercises,
+      -- que se puede cambiar ahi (5x5 el lunes y 3x12 el jueves con el
+      -- mismo ejercicio). Y cambiar esto NO toca los dias que ya lo
+      -- tenian metido -- decision de Koku, para que editar un ejercicio
+      -- nunca te cambie un plan por sorpresa.
+      default_sets INTEGER,
+      default_reps INTEGER,
+      default_rest_seconds INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1608,6 +1622,18 @@ function applyLocalSchema(db) {
   // Fase 6 (mapa de musculos): grupos secundarios del ejercicio.
   if (!gymExerciseColumns.includes('secondary_muscles')) {
     db.exec('ALTER TABLE gym_exercises ADD COLUMN secondary_muscles TEXT');
+  }
+  // Configuracion por defecto del ejercicio (series/reps/descanso). Se
+  // quedan a NULL en lo que ya existe, que es justo lo que se quiere:
+  // hasta que no las rellenes, un ejercicio se comporta como siempre.
+  if (!gymExerciseColumns.includes('default_sets')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN default_sets INTEGER');
+  }
+  if (!gymExerciseColumns.includes('default_reps')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN default_reps INTEGER');
+  }
+  if (!gymExerciseColumns.includes('default_rest_seconds')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN default_rest_seconds INTEGER');
   }
   if (!gymExerciseColumns.includes('notes')) {
     db.exec('ALTER TABLE gym_exercises ADD COLUMN notes TEXT');

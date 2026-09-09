@@ -38,7 +38,18 @@
       unilateral: !!row.unilateral,
       countSidesSeparately: !!row.count_sides_separately,
       sideRestSeconds: row.side_rest_seconds,
+      // Configuracion por defecto: series/reps/descanso que sueles hacer
+      // con este ejercicio. Al meterlo en un dia llegan ya rellenos.
+      defaultSets: row.default_sets,
+      defaultReps: row.default_reps,
+      defaultRestSeconds: row.default_rest_seconds,
     };
+  }
+
+  // "" y undefined significan "sin valor" y tienen que llegar a la base
+  // como NULL, no como 0 -- un 0 se leeria luego como "cero series".
+  function numeroONulo(valor) {
+    return valor !== undefined && valor !== null && valor !== '' ? Number(valor) : null;
   }
 
   // Normaliza el secondaryMuscles que llega del cliente a JSON o NULL.
@@ -54,7 +65,7 @@
   });
 
   router.post('/', (req, res) => {
-    const { name, muscleGroup, libraryId, equipment, secondaryMuscles, notes, unilateral, countSidesSeparately, sideRestSeconds } = req.body || {};
+    const { name, muscleGroup, libraryId, equipment, secondaryMuscles, notes, unilateral, countSidesSeparately, sideRestSeconds, defaultSets, defaultReps, defaultRestSeconds } = req.body || {};
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'invalid_request', message: 'El ejercicio necesita un nombre.' });
     }
@@ -68,7 +79,7 @@
     }
 
     const info = db
-      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment, secondary_muscles, notes, unilateral, count_sides_separately, side_rest_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment, secondary_muscles, notes, unilateral, count_sides_separately, side_rest_seconds, default_sets, default_reps, default_rest_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         name.trim(),
         muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null,
@@ -78,7 +89,10 @@
         notes && notes.trim() ? notes.trim() : null,
         unilateral ? 1 : 0,
         unilateral && countSidesSeparately ? 1 : 0,
-        sideRestSeconds !== undefined && sideRestSeconds !== null && sideRestSeconds !== '' ? Number(sideRestSeconds) : null
+        numeroONulo(sideRestSeconds),
+        numeroONulo(defaultSets),
+        numeroONulo(defaultReps),
+        numeroONulo(defaultRestSeconds)
       );
 
     const row = db.prepare('SELECT * FROM gym_exercises WHERE id = ?').get(info.lastInsertRowid);
@@ -91,9 +105,9 @@
 
     // library_id no se toca desde el PUT a proposito: es la marca de "de
     // donde salio", editar el ejercicio no cambia su origen.
-    const { name, muscleGroup, equipment, secondaryMuscles, notes, unilateral, countSidesSeparately, sideRestSeconds } = req.body || {};
+    const { name, muscleGroup, equipment, secondaryMuscles, notes, unilateral, countSidesSeparately, sideRestSeconds, defaultSets, defaultReps, defaultRestSeconds } = req.body || {};
     const nextUnilateral = unilateral === undefined ? existing.unilateral : (unilateral ? 1 : 0);
-    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ?, equipment = ?, secondary_muscles = ?, notes = ?, unilateral = ?, count_sides_separately = ?, side_rest_seconds = ? WHERE id = ?').run(
+    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ?, equipment = ?, secondary_muscles = ?, notes = ?, unilateral = ?, count_sides_separately = ?, side_rest_seconds = ?, default_sets = ?, default_reps = ?, default_rest_seconds = ? WHERE id = ?').run(
       name !== undefined && name.trim() ? name.trim() : existing.name,
       muscleGroup === undefined ? existing.muscle_group : (muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null),
       equipment === undefined ? existing.equipment : (equipment && equipment.trim() ? equipment.trim() : null),
@@ -102,9 +116,14 @@
       nextUnilateral,
       // Contar lados por separado solo tiene sentido si es unilateral.
       nextUnilateral && (countSidesSeparately === undefined ? existing.count_sides_separately : (countSidesSeparately ? 1 : 0)) ? 1 : 0,
-      sideRestSeconds === undefined
-        ? existing.side_rest_seconds
-        : (sideRestSeconds !== null && sideRestSeconds !== '' ? Number(sideRestSeconds) : null),
+      sideRestSeconds === undefined ? existing.side_rest_seconds : numeroONulo(sideRestSeconds),
+      // Cambiar esto NO toca los dias que ya tenian el ejercicio metido
+      // (decision de Koku): lo que manda en un dia concreto sigue siendo
+      // gym_routine_exercises. Esto solo cambia el punto de partida de
+      // las proximas veces que lo anadas.
+      defaultSets === undefined ? existing.default_sets : numeroONulo(defaultSets),
+      defaultReps === undefined ? existing.default_reps : numeroONulo(defaultReps),
+      defaultRestSeconds === undefined ? existing.default_rest_seconds : numeroONulo(defaultRestSeconds),
       req.params.id
     );
 

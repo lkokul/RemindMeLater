@@ -791,6 +791,40 @@ usar controles del navegador. Es código anterior a esa regla; cambiarlo
 por `createSelectField()` es un rato de trabajo aparte y no se ha hecho
 para no mezclarlo con esta ronda.
 
+## Configuración por defecto del ejercicio
+
+Petición de Koku (9/9/2026): "yo añado el ejercicio y ahí ya le digo
+cuántas series se esperan, tiempo de descanso etc; en el día de entrene
+solo añado el ejercicio con esa configuración".
+
+Columnas nuevas en `gym_exercises`: `default_sets`, `default_reps`,
+`default_rest_seconds` (con su migración condicional; quedan a NULL en
+lo que ya existe, así que hasta que no las rellenes nada cambia). Se
+editan en la ficha del ejercicio, bajo "Cómo lo sueles hacer".
+
+**Las dos decisiones que tomó Koku cuando se le preguntó**, y que
+conviene no cambiar sin volver a preguntarle:
+
+1. **Heredar, pero poder cambiarlo por día.** El valor del ejercicio es
+   un PUNTO DE PARTIDA: al añadirlo a un día, los tres campos de
+   `gym_routine_exercises` llegan rellenos, pero siguen ahí y se pueden
+   cambiar. Así se puede hacer 5×5 el lunes y 3×12 el jueves con el
+   mismo ejercicio. Lo que manda en un día concreto sigue siendo
+   `gym_routine_exercises`, no el ejercicio.
+2. **Editar un ejercicio NO toca los días que ya lo tenían.** Lo ya
+   montado se queda como está y el valor nuevo solo se aplica de ahí en
+   adelante — para que editar un ejercicio nunca te cambie un plan por
+   sorpresa.
+
+Detalle fino, al **cambiar el ejercicio de una fila** del día: se traen
+los valores del ejercicio nuevo, pero **solo en los campos que no hayas
+tocado tú** ("no tocado" = vacío, o igual a lo que traía el ejercicio
+anterior). Así cambiar de ejercicio no te borra un 4×8 escrito a mano y
+a la vez no te deja puesto el descanso del ejercicio de antes.
+
+Las piezas comunes están en `GYM_TARGET_FIELDS` y `gymTargetsPorDefecto()`
+(`app.js`), para no repetir el trío series/reps/descanso por todas partes.
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de
