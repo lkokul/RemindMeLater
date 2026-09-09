@@ -29,16 +29,66 @@
 // hasta el (justo el bug que reporto Koku al anadir un icono a una
 // carpeta). Medir de verdad evita que esto se repita aunque el
 // contenido de un popover cambie en el futuro.
+// Cuanto ocupan las zonas del movil donde NO se puede pintar: arriba la
+// Dynamic Island / muesca / barra de estado, abajo la barrita de inicio.
+// El navegador solo las expone como env(safe-area-inset-*) desde CSS, no
+// hay forma de leerlas directamente desde JavaScript -- asi que se
+// miden con un elemento de usar y tirar que las pide como padding y
+// luego se le pregunta cuanto le ha quedado.
+function safeAreaInsets() {
+  const sonda = document.createElement('div');
+  sonda.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;top:0;left:0;'
+    + 'padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);';
+  document.body.appendChild(sonda);
+  const estilo = getComputedStyle(sonda);
+  const arriba = parseFloat(estilo.paddingTop) || 0;
+  const abajo = parseFloat(estilo.paddingBottom) || 0;
+  sonda.remove();
+  return { arriba, abajo };
+}
+
+// Coloca un popover flotante (color, icono, desplegable, fecha...) sin
+// que se salga de la pantalla.
+//
+// Historia de este codigo, para no repetir los mismos errores:
+//  1. Al principio estimaba la altura con un numero fijo. Se quedaba
+//     corta con el popover de iconos y lo dejaba fuera de la pantalla.
+//     Arreglado midiendo la altura REAL (offsetHeight), que se puede
+//     porque cuando se llama a esto el popover ya esta pintado.
+//  2. (9/9/2026) Koku enseño una captura del selector de color de un
+//     grupo: la mitad de arriba quedaba TAPADA por la Dynamic Island.
+//     El motivo: cuando no cabia debajo del boton, esto lo subia y lo
+//     topaba en 8px desde el borde de la PANTALLA -- pero los primeros
+//     ~60px de esa pantalla no se ven, los ocupa el sistema. Y si el
+//     popover es mas alto que el hueco util (la paleta de color son 32
+//     colores en cuatro grupos), ninguna posicion lo arregla: hace
+//     falta que se pueda desplazar por dentro.
 function positionFixedPopover(anchorBtn, popover, { width = 248 } = {}) {
   const rect = anchorBtn.getBoundingClientRect();
   let left = rect.left;
   if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
   popover.style.left = `${Math.max(8, left)}px`;
 
-  const actualHeight = popover.offsetHeight;
-  const top = rect.bottom + 6 + actualHeight > window.innerHeight
-    ? Math.max(8, rect.top - actualHeight - 6)
-    : rect.bottom + 6;
+  // Los limites de verdad: la franja de pantalla donde SI se ve algo.
+  const { arriba, abajo } = safeAreaInsets();
+  const limiteArriba = arriba + 8;
+  const limiteAbajo = window.innerHeight - abajo - 8;
+
+  // Que nunca sea mas alto que esa franja. Si su contenido no cabe, se
+  // desplaza por dentro en vez de salirse (a la paleta de color le pasa
+  // en cuanto el movil no es muy alto).
+  popover.style.maxHeight = `${limiteAbajo - limiteArriba}px`;
+  popover.style.overflowY = 'auto';
+
+  const alto = popover.offsetHeight;
+  let top;
+  if (rect.bottom + 6 + alto <= limiteAbajo) {
+    top = rect.bottom + 6;                 // cabe debajo del boton
+  } else if (rect.top - 6 - alto >= limiteArriba) {
+    top = rect.top - alto - 6;             // cabe encima
+  } else {
+    top = limiteArriba;                    // no cabe: arriba del todo, con scroll
+  }
   popover.style.top = `${top}px`;
 }
 

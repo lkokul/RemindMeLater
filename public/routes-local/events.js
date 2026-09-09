@@ -61,8 +61,23 @@
       conditions.push('e.title LIKE ?');
       params.push(`%${q.trim()}%`);
     } else if (from && to) {
-      conditions.push('e.start_at >= ? AND e.start_at <= ?');
-      params.push(from, to);
+      // SOLAPE con el rango, no "empieza dentro del rango".
+      //
+      // Antes esto era 'start_at >= ? AND start_at <= ?', y por eso un
+      // evento de varios dias solo salia el dia que empezaba: pidiendo
+      // el viernes, un viaje que arranco el jueves no cumplia
+      // start_at >= viernes 00:00 y desaparecia (lo vio Koku con un
+      // "Viaje Mallorca" del 17 al 20: solo se veia el 17). Lo mismo
+      // pasaba con un evento que viene del mes anterior.
+      //
+      // La condicion correcta es la de toda la vida para solapes: el
+      // evento empieza antes de que acabe el rango Y acaba despues de
+      // que empiece. COALESCE cubre a los que no tienen fin: ahi el
+      // final es el propio inicio, o sea que se comportan igual que
+      // antes. Los que no tienen start_at siguen fuera, porque NULL no
+      // cumple ninguna comparacion.
+      conditions.push('e.start_at <= ? AND COALESCE(e.end_at, e.start_at) >= ?');
+      params.push(to, from);
     }
     if (isTask !== undefined) {
       conditions.push('e.is_task = ?');

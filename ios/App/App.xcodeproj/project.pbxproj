@@ -29,8 +29,6 @@
 		DE5CA25000000000000000BB /* RestAudioWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A9 /* RestAudioWatcher.swift */; };
 		DE5CA25000000000000000BD /* RestAlertStopper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AB /* RestAlertStopper.swift */; };
 		DE5CA25000000000000000BC /* RestAudioPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AA /* RestAudioPlugin.swift */; };
-		CE5CA25000000000000000B1 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE5CA25000000000000000A2 /* ShareViewController.swift */; };
-		CE5CA25000000000000000B7 /* CompartirExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CE5CA25000000000000000A1 /* CompartirExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -40,13 +38,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = DE5CA25000000000000000D1;
 			remoteInfo = DescansoWidget;
-		};
-		CE5CA25000000000000000D3 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = CE5CA25000000000000000D1;
-			remoteInfo = CompartirExtension;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -58,17 +49,6 @@
 			dstSubfolderSpec = 13;
 			files = (
 				DE5CA25000000000000000B7 /* DescansoWidget.appex in Embed Foundation Extensions */,
-			);
-			name = "Embed Foundation Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		CE5CA25000000000000000C4 /* Embed Foundation Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				CE5CA25000000000000000B7 /* CompartirExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -98,9 +78,6 @@
 		DE5CA25000000000000000AB /* RestAlertStopper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAlertStopper.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A9 /* RestAudioWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAudioWatcher.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000AA /* RestAudioPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAudioPlugin.swift; sourceTree = "<group>"; };
-		CE5CA25000000000000000A1 /* CompartirExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CompartirExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		CE5CA25000000000000000A2 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
-		CE5CA25000000000000000A3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -119,13 +96,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		CE5CA25000000000000000C2 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -135,7 +105,6 @@
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
 				DE5CA25000000000000000E1 /* DescansoWidget */,
-				CE5CA25000000000000000E1 /* CompartirExtension */,
 				504EC3051FED79650016851F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -145,7 +114,6 @@
 			children = (
 				504EC3041FED79650016851F /* App.app */,
 				DE5CA25000000000000000A1 /* DescansoWidget.appex */,
-				CE5CA25000000000000000A1 /* CompartirExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -183,15 +151,6 @@
 			path = App;
 			sourceTree = "<group>";
 		};
-		CE5CA25000000000000000E1 /* CompartirExtension */ = {
-			isa = PBXGroup;
-			children = (
-				CE5CA25000000000000000A2 /* ShareViewController.swift */,
-				CE5CA25000000000000000A3 /* Info.plist */,
-			);
-			path = CompartirExtension;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -203,13 +162,11 @@
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
 				DE5CA25000000000000000C4 /* Embed Foundation Extensions */,
-				CE5CA25000000000000000C4 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				DE5CA25000000000000000D2 /* PBXTargetDependency */,
-				CE5CA25000000000000000D2 /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -236,23 +193,6 @@
 			productReference = DE5CA25000000000000000A1 /* DescansoWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		CE5CA25000000000000000D1 /* CompartirExtension */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = CE5CA25000000000000000F3 /* Build configuration list for PBXNativeTarget "CompartirExtension" */;
-			buildPhases = (
-				CE5CA25000000000000000C1 /* Sources */,
-				CE5CA25000000000000000C2 /* Frameworks */,
-				CE5CA25000000000000000C3 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = CompartirExtension;
-			productName = CompartirExtension;
-			productReference = CE5CA25000000000000000A1 /* CompartirExtension.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -262,10 +202,6 @@
 				LastSwiftUpdateCheck = 0920;
 				LastUpgradeCheck = 0920;
 				TargetAttributes = {
-					CE5CA25000000000000000D1 = {
-						CreatedOnToolsVersion = 15.0;
-						ProvisioningStyle = Automatic;
-					};
 					504EC3031FED79650016851F = {
 						CreatedOnToolsVersion = 9.2;
 						LastSwiftMigration = 1100;
@@ -295,7 +231,6 @@
 			targets = (
 				504EC3031FED79650016851F /* App */,
 				DE5CA25000000000000000D1 /* DescansoWidget */,
-				CE5CA25000000000000000D1 /* CompartirExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -316,13 +251,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		DE5CA25000000000000000C3 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		CE5CA25000000000000000C3 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -359,14 +287,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		CE5CA25000000000000000C1 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				CE5CA25000000000000000B1 /* ShareViewController.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -374,11 +294,6 @@
 			isa = PBXTargetDependency;
 			target = DE5CA25000000000000000D1 /* DescansoWidget */;
 			targetProxy = DE5CA25000000000000000D3 /* PBXContainerItemProxy */;
-		};
-		CE5CA25000000000000000D2 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = CE5CA25000000000000000D1 /* CompartirExtension */;
-			targetProxy = CE5CA25000000000000000D3 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -600,51 +515,6 @@
 			};
 			name = Release;
 		};
-		CE5CA25000000000000000F1 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = CompartirExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.koku.remindmelater.CompartirExtension;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		CE5CA25000000000000000F2 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = CompartirExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.koku.remindmelater.CompartirExtension;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -671,15 +541,6 @@
 			buildConfigurations = (
 				DE5CA25000000000000000F1 /* Debug */,
 				DE5CA25000000000000000F2 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		CE5CA25000000000000000F3 /* Build configuration list for PBXNativeTarget "CompartirExtension" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				CE5CA25000000000000000F1 /* Debug */,
-				CE5CA25000000000000000F2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

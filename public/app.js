@@ -816,7 +816,44 @@ async function api(path, options = {}) {
 const WEEKDAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 const MONTH_ONLY_FORMATTER = new Intl.DateTimeFormat('es-ES', { month: 'long' });
 const DAY_HEADING_FORMATTER = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
-const TIME_FORMATTER = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' });
+// ---------------------------------------------------------------------
+// Reloj de 12 o de 24 horas: se sigue al SISTEMA (peticion de Koku, que
+// lo tiene en 24h: "hay gente que lo tiene en 12h, con am y pm, tenlo en
+// cuenta"). No es un ajuste de la app a proposito -- si tu telefono
+// esta en 12h es porque asi lo lees tu, y tener que repetirlo aqui
+// sobra.
+//
+// Como se sabe: se le pregunta a Intl por el idioma del DISPOSITIVO
+// (undefined = el suyo, no el nuestro) y se mira si su reloj es de 12.
+// El idioma de los textos sigue siendo es-ES; lo unico que se toma
+// prestado del sistema es esta decision.
+function systemUses12hClock() {
+  try {
+    return new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hour12 === true;
+  } catch (err) {
+    return false; // ante la duda, 24h
+  }
+}
+
+const USES_12H_CLOCK = systemUses12hClock();
+
+// hour12 se pasa EXPLICITO: sin el, 'es-ES' impone siempre 24h y daria
+// igual como tenga el telefono quien mira la pantalla. Con reloj de 12,
+// la hora va sin el cero delante ('numeric'), que es como se escribe:
+// "9:00 a. m.", no "09:00 a. m.".
+const TIME_FORMATTER = new Intl.DateTimeFormat('es-ES', {
+  hour: USES_12H_CLOCK ? 'numeric' : '2-digit',
+  minute: '2-digit',
+  hour12: USES_12H_CLOCK,
+});
+
+// Una hora en punto suelta (0-23) con el formato del sistema, para las
+// etiquetas de la columna de horas de la vista diaria.
+function formatHourLabel(hour) {
+  const d = new Date();
+  d.setHours(hour, 0, 0, 0);
+  return TIME_FORMATTER.format(d);
+}
 
 // "Agosto 2026" en vez del "agosto de 2026" que da Intl por defecto en
 // español (con "de" en medio, y en minuscula) — quitamos el "de" y
@@ -830,6 +867,62 @@ function startOfMonth(date) { return new Date(date.getFullYear(), date.getMonth(
 function endOfMonth(date) { return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59); }
 function toIsoDate(date) { return date.toISOString().slice(0, 10); }
 function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+
+// ---------------------------------------------------------------------
+// Eventos de VARIOS DIAS
+//
+// Un evento con fin en otro dia (un viaje del jueves 17 al domingo 20)
+// tiene que verse en LOS CUATRO dias, no solo el que empieza. Antes cada
+// vista filtraba por su cuenta con sameDay(inicio, dia), asi que el
+// evento desaparecia a partir del segundo dia -- lo vio Koku con un
+// "Viaje Mallorca". Estas dos funciones son ahora la unica fuente de
+// verdad de "¿este evento sale este dia?" y "¿como lo ocupa?", y las usan
+// todas las vistas (mes, año, tira de la semana y vista diaria).
+//
+// Ojo, hay dos mitades del arreglo y las dos hacen falta: esto es la de
+// pintar; la de PEDIR los datos esta en public/routes-local/events.js
+// (el filtro de rango pasa a ser de solape, si no el evento ni llega).
+// ---------------------------------------------------------------------
+
+// Principio y fin del dia local, para comparar sin liarse con las horas.
+function dayBounds(date) {
+  const inicio = new Date(date);
+  inicio.setHours(0, 0, 0, 0);
+  const fin = new Date(date);
+  fin.setHours(23, 59, 59, 999);
+  return { inicio, fin };
+}
+
+function eventOccursOnDay(ev, date) {
+  if (!ev || !ev.startAt) return false;
+  const start = new Date(ev.startAt);
+  // Sin fin, un evento vive solo en su dia (lo de siempre).
+  if (!ev.endAt) return sameDay(start, date);
+  const end = new Date(ev.endAt);
+  const { inicio, fin } = dayBounds(date);
+  return start <= fin && end >= inicio;
+}
+
+// Como ocupa el evento ESE dia concreto. Devuelve null si no lo toca.
+//  - 'unico'  : empieza y acaba el mismo dia (lo normal de siempre).
+//  - 'inicio' : empieza aqui y sigue mañana.
+//  - 'entero' : lo ocupa de punta a punta (ni empieza ni acaba aqui).
+//  - 'fin'    : viene de ayer y acaba aqui.
+// "entero" es el que Koku pidio tratar como TODO EL DIA: pintar un
+// bloque de 00:00 a 24:00 tapa la pantalla entera y no dice nada que no
+// diga una etiqueta arriba.
+function eventDaySpan(ev, date) {
+  if (!eventOccursOnDay(ev, date)) return null;
+  if (!ev.endAt) return 'unico';
+  const start = new Date(ev.startAt);
+  const end = new Date(ev.endAt);
+  const empiezaHoy = sameDay(start, date);
+  const acabaHoy = sameDay(end, date);
+  if (empiezaHoy && acabaHoy) return 'unico';
+  if (empiezaHoy) return 'inicio';
+  if (acabaHoy) return 'fin';
+  return 'entero';
+}
 
 // Como toIsoDate() pasa por toISOString() (que es UTC), un dia a horas
 // cercanas a medianoche podria "saltar" al dia de al lado segun la zona
@@ -1217,11 +1310,26 @@ function getMobileCalendarMonthMode() {
 // "De que hora a que hora" para el modo Listado (mes) -- no existia un
 // formateador de RANGO en el proyecto, el resto de sitios solo muestran
 // la hora de inicio.
-function formatMobileEventTimeRange(ev) {
+// La hora que se ensena en un listado. Con "date" se sabe EN QUE DIA se
+// esta pintando, que hace falta para los eventos de varios dias: de un
+// viaje del jueves 20:00 al domingo 14:00, poner "20:00-14:00" los
+// cuatro dias no dice nada. Asi se ve de un vistazo si el evento
+// empieza, sigue o acaba ese dia:
+//   jueves  -> "20:00 →"   (empieza y sigue)
+//   viernes -> "Todo el día"
+//   sabado  -> "Todo el día"
+//   domingo -> "→ 14:00"   (viene de antes y acaba)
+// Sin "date" se comporta como siempre (rango completo), que es lo que
+// vale para una lista que no es de un dia concreto.
+function formatMobileEventTimeRange(ev, date) {
   if (ev.allDay) return 'Todo el día';
   const start = TIME_FORMATTER.format(new Date(ev.startAt));
   if (!ev.endAt) return start;
   const end = TIME_FORMATTER.format(new Date(ev.endAt));
+  const tramo = date ? eventDaySpan(ev, date) : 'unico';
+  if (tramo === 'entero') return 'Todo el día';
+  if (tramo === 'inicio') return `${start} →`;
+  if (tramo === 'fin') return `→ ${end}`;
   return end === start ? start : `${start}–${end}`;
 }
 
@@ -1253,7 +1361,7 @@ function renderMobileCalendarMonthGrid() {
     circle.textContent = cellDate.getDate();
     cell.appendChild(circle);
 
-    const dayEvents = state.events.filter((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate));
+    const dayEvents = state.events.filter((ev) => eventOccursOnDay(ev, cellDate));
     const groups = getDistinctGroupsForDay(dayEvents);
 
     if (groups.length > 0) {
@@ -1340,7 +1448,7 @@ async function renderMobileCalendarMonthList(date) {
     title.textContent = ev.title;
     const time = document.createElement('div');
     time.className = 'mobile-calendar-month-list-time';
-    time.textContent = formatMobileEventTimeRange(ev);
+    time.textContent = formatMobileEventTimeRange(ev, state.mobileCalendarListDate);
     row.append(bar, title, time);
     row.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
     container.appendChild(row);
@@ -1381,7 +1489,7 @@ function renderMobileCalendarYearGrid() {
       }
       cell.textContent = cellDate.getDate();
       if (sameDay(cellDate, today)) cell.classList.add('today');
-      if (yearViewEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate))) {
+      if (yearViewEvents.some((ev) => eventOccursOnDay(ev, cellDate))) {
         cell.classList.add('has-content');
       }
       grid.appendChild(cell);
@@ -1594,7 +1702,7 @@ async function renderMobileWeekStrip(viewingDate) {
 
     const dot = document.createElement('div');
     dot.className = 'week-strip-day-dot';
-    if (!weekEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), d))) dot.classList.add('is-empty');
+    if (!weekEvents.some((ev) => eventOccursOnDay(ev, d))) dot.classList.add('is-empty');
 
     cell.append(label, num, dot);
     cell.addEventListener('click', () => showMobileDay(d, { scrollToNow: true }));
@@ -1676,7 +1784,14 @@ async function renderMobileHoursView(date) {
   allDayRow.innerHTML = '';
   grid.innerHTML = '';
 
-  const allDayEvents = dayEvents.filter((ev) => ev.allDay);
+  // Arriba, en la fila de "todo el dia", van dos cosas: los eventos
+  // marcados como de todo el dia, y los de VARIOS DIAS en los dias que
+  // ocupan de punta a punta (el viernes y el sabado de un viaje que va
+  // del jueves al domingo). Peticion de Koku: "si ocupa el dia entero,
+  // que se marque como todo el dia esos dias, para no tapar toda la
+  // pantalla" -- y tiene razon, un bloque de 00:00 a 24:00 llena la
+  // vista sin decir nada que no diga ya esta etiqueta.
+  const allDayEvents = dayEvents.filter((ev) => ev.allDay || eventDaySpan(ev, date) === 'entero');
   allDayRow.classList.toggle('hidden', allDayEvents.length === 0);
   allDayEvents.forEach((ev) => {
     const chip = document.createElement('div');
@@ -1693,16 +1808,24 @@ async function renderMobileHoursView(date) {
     row.style.top = `${h * 60}px`;
     const label = document.createElement('div');
     label.className = 'mobile-hour-label';
-    label.textContent = `${String(h).padStart(2, '0')}:00`;
+    label.textContent = formatHourLabel(h);
     row.appendChild(label);
     grid.appendChild(row);
   }
 
   const timed = dayEvents
-    .filter((ev) => !ev.allDay && ev.startAt)
+    // Fuera los de todo el dia y los que ya se han puesto arriba por
+    // ocupar este dia entero (ver allDayEvents).
+    .filter((ev) => !ev.allDay && ev.startAt && eventDaySpan(ev, date) !== 'entero')
     .map((ev) => {
+      // El bloque se RECORTA a este dia: de un viaje que empieza el
+      // jueves a las 20:00 y acaba el domingo a las 14:00, el jueves se
+      // pinta de 20:00 a medianoche y el domingo de medianoche a las
+      // 14:00. Antes solo se recortaba el final; el principio daba por
+      // hecho que el evento empezaba hoy, asi que en el ultimo dia
+      // habria salido a la hora de INICIO del primero.
       const start = new Date(ev.startAt);
-      const startMin = start.getHours() * 60 + start.getMinutes();
+      const startMin = sameDay(start, date) ? start.getHours() * 60 + start.getMinutes() : 0;
       let endMin;
       if (ev.endAt) {
         const end = new Date(ev.endAt);
@@ -1778,7 +1901,7 @@ function disconnectMobileDayListadoObserver() {
   mobileDayListadoPending.clear();
 }
 
-function buildMobileListadoRow(ev) {
+function buildMobileListadoRow(ev, date) {
   const row = document.createElement('div');
   row.className = 'mobile-calendar-month-list-row';
   const bar = document.createElement('div');
@@ -1789,7 +1912,7 @@ function buildMobileListadoRow(ev) {
   title.textContent = ev.title;
   const time = document.createElement('div');
   time.className = 'mobile-calendar-month-list-time';
-  time.textContent = formatMobileEventTimeRange(ev);
+  time.textContent = formatMobileEventTimeRange(ev, date);
   row.append(bar, title, time);
   row.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
   return row;
@@ -1803,9 +1926,22 @@ async function loadMobileListadoDays() {
   const byDay = new Map();
   events.forEach((ev) => {
     if (!ev.startAt) return; // sin fecha no aparece aqui, igual que en el resto del calendario
-    const key = toDateKey(new Date(ev.startAt));
-    if (!byDay.has(key)) byDay.set(key, []);
-    byDay.get(key).push(ev);
+    // Un evento de varios dias se apunta en TODOS los que ocupa, no solo
+    // en el que empieza -- misma correccion que en el resto de vistas
+    // (ver eventOccursOnDay). El tope de 366 dias es una red de
+    // seguridad boba: si alguna vez se cuela un evento con un fin
+    // absurdo (un año 3000 por un dedazo), que no se coma la memoria
+    // generando un dia por cada jornada hasta entonces.
+    const inicio = new Date(ev.startAt);
+    const fin = ev.endAt ? new Date(ev.endAt) : inicio;
+    const dia = new Date(inicio);
+    dia.setHours(0, 0, 0, 0);
+    for (let n = 0; n <= 366 && dia <= fin; n++) {
+      const key = toDateKey(dia);
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key).push(ev);
+      dia.setDate(dia.getDate() + 1);
+    }
   });
   mobileListadoDays = [...byDay.entries()]
     .map(([key, evs]) => ({
@@ -1834,7 +1970,7 @@ function renderMobileListadoWindow() {
     heading.className = 'mobile-day-listado-block-heading';
     heading.textContent = formatMobileListadoBlockHeading(day.date);
     block.appendChild(heading);
-    day.events.forEach((ev) => block.appendChild(buildMobileListadoRow(ev)));
+    day.events.forEach((ev) => block.appendChild(buildMobileListadoRow(ev, day.date)));
     content.appendChild(block);
   });
 }
@@ -2364,12 +2500,21 @@ function openEventModal(event, presetDate) {
   document.getElementById('event-title').value = event ? event.title : '';
   document.getElementById('event-all-day').checked = event ? event.allDay : false;
   refreshEventAllDayFields();
-  let defaultStart = new Date();
+  // Hora propuesta: SIEMPRE la hora en punto mas cercana a la de ahora,
+  // venga de donde venga el evento nuevo. La hora de fin se calcula mas
+  // abajo como inicio + 1h, asi que a las 7:59 sale 8:00-9:00.
+  //
+  // Antes, si el evento se creaba desde un DIA concreto (el "+" de la
+  // vista diaria), esta rama plantaba las 9:00 fijas -- daba igual la
+  // hora que fuera. Eso es lo que Koku vio a las 7:59: le proponia
+  // 9:00-10:00 en vez de 8:00-9:00. Ahora la fecha sale del dia que
+  // eligio y la HORA del reloj, que es lo que pidio ("que te marque la
+  // hora mas cercana de inicio y la final recomendada sea +1h de esa").
+  const ahora = roundToNearestHour(new Date());
+  let defaultStart = ahora;
   if (presetDate) {
     defaultStart = new Date(presetDate);
-    defaultStart.setHours(9, 0, 0, 0);
-  } else {
-    defaultStart = roundToNearestHour(defaultStart);
+    defaultStart.setHours(ahora.getHours(), 0, 0, 0);
   }
   const startDate = event ? new Date(event.startAt) : defaultStart;
   eventStartDateField.setValue(startDate);
@@ -7437,7 +7582,29 @@ function buildGroupViewCard(id, name, color) {
   // En la cabecera del detalle cabe poco: "Todos los eventos" se queda
   // en "Todos" ahi (en la tarjeta si va el texto entero).
   btn.addEventListener('click', () => openGroupDetail(id, id === null ? 'Todos' : name));
-  return btn;
+
+  // Deslizar para Editar / Eliminar, igual que las carpetas y notas de
+  // Mi espacio y las sesiones del historial del Gimnasio (pedido de
+  // Koku). "Todos los eventos" queda fuera: no es un grupo de verdad,
+  // no hay nada que editar ni que borrar.
+  if (id === null) return btn;
+  return wrapRowWithSwipeActions(btn, {
+    onEdit: () => openGroupModal(state.groups.find((g) => g.id === id)),
+    onDelete: () => deleteGroupById(id),
+  });
+}
+
+// Borrar un grupo con su confirmacion. Sale del boton "Eliminar" de la
+// ficha para poder usarse tambien desde el deslizamiento de la tarjeta,
+// sin tener que abrir la ficha antes.
+async function deleteGroupById(id) {
+  const grupo = state.groups.find((g) => String(g.id) === String(id));
+  const seguro = await showAppConfirm(
+    `¿Eliminar el grupo "${grupo ? grupo.name : ''}"? Los eventos que lo usen se quedarán sin grupo.`,
+  );
+  if (!seguro) return;
+  await api(`/api/groups/${id}`, { method: 'DELETE' });
+  await refreshAfterGroupChange();
 }
 
 // Nivel 2: todo lo que hay dentro de un grupo (o de todos).
@@ -7669,14 +7836,12 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
 document.getElementById('btn-delete-group').addEventListener('click', async () => {
   const id = document.getElementById('group-id').value;
   if (!id) return;
-  const grupo = state.groups.find((g) => String(g.id) === String(id));
-  const seguro = await showAppConfirm(
-    `¿Eliminar el grupo "${grupo ? grupo.name : ''}"? Los eventos que lo usen se quedarán sin grupo.`,
-  );
-  if (!seguro) return;
-  await api(`/api/groups/${id}`, { method: 'DELETE' });
-  closeGroupModal();
-  await refreshAfterGroupChange();
+  // Cerrar ANTES de preguntar seria raro (desaparece la ficha y luego
+  // sale el aviso), asi que se cierra despues, y solo si de verdad se
+  // borro -- si dices que no, te quedas donde estabas.
+  const habia = state.groups.length;
+  await deleteGroupById(id);
+  if (state.groups.length < habia) closeGroupModal();
 });
 
 document.getElementById('btn-close-groups').addEventListener('click', closeGroupsView);
@@ -7985,12 +8150,16 @@ function renderGymRoutinesList() {
   });
 }
 
-// Deslizar una sesion del historial hacia la izquierda para Editar /
-// Eliminar (peticion de Koku: "como está hecho en las notas"). Reutiliza
-// las mismas clases y el mismo estado de "solo una fila abierta"
-// (openSwipedNoteRow) que wrapNoteRowWithSwipe, para que abrir una cierre
-// la otra y el toque fuera las cierre todas.
-function wrapGymRowWithSwipe(row, { onEdit, onDelete }) {
+// Deslizar una fila hacia la izquierda para sacar Editar / Eliminar
+// ("como esta hecho en las notas", pedido de Koku). Nacio para el
+// historial del Gimnasio y ahora la usan tambien los grupos del
+// calendario, por eso el nombre generico -- si hace falta en un sitio
+// nuevo, basta con envolver la fila con esto.
+//
+// Reutiliza las mismas clases y el mismo estado de "solo una fila
+// abierta" (openSwipedNoteRow) que wrapNoteRowWithSwipe, para que abrir
+// una cierre la otra y el toque fuera las cierre todas.
+function wrapRowWithSwipeActions(row, { onEdit, onDelete }) {
   const wrap = document.createElement('div');
   wrap.className = 'note-swipe-wrap';
 
@@ -8127,7 +8296,7 @@ function renderGymSessionsList() {
         <span class="gym-list-item-muted">${escapeHtml([gymActivityKindLabel(s.activityKind), ...statBits].join(' · '))}</span>
       `;
       row.addEventListener('click', () => openGymActivityModal(s));
-      list.appendChild(wrapGymRowWithSwipe(row, {
+      list.appendChild(wrapRowWithSwipeActions(row, {
         onEdit: () => openGymActivityModal(s),
         onDelete: () => deleteGymSessionById(s.id),
       }));
@@ -8146,7 +8315,7 @@ function renderGymSessionsList() {
       <span class="gym-list-item-muted">${exerciseNames.length ? exerciseNames.map(escapeHtml).join(', ') : 'Sin ejercicios'}</span>
     `;
     row.addEventListener('click', () => openGymSessionModal(s));
-    list.appendChild(wrapGymRowWithSwipe(row, {
+    list.appendChild(wrapRowWithSwipeActions(row, {
       onEdit: () => openGymSessionModal(s),
       onDelete: () => deleteGymSessionById(s.id),
     }));
@@ -9610,7 +9779,57 @@ function gymRestBurstEnabled() {
 // atMs: cuando debe saltar. Por defecto, el final del descanso en curso;
 // se puede pasar a mano para el boton de PROBAR el aviso de
 // Configuracion (que recorre exactamente este mismo camino).
+// Tiene que ser EL MISMO texto que RestAlertStopper.categoriaDescanso en
+// la parte nativa: alli se registra la categoria con
+// .customDismissAction, aqui se le cuelga al aviso.
+const GYM_REST_NOTIFICATION_CATEGORY = 'descanso';
+
+// Apartar el aviso de la pantalla calla la vibracion (peticion de Koku:
+// "al subir la barra del banner que se quite tambien").
+//
+// El camino completo, que pasa por cuatro sitios: iOS ve que has
+// apartado el aviso -> como su categoria lleva .customDismissAction, se
+// lo cuenta al delegado -> el delegado es el del plugin de
+// notificaciones de Capacitor, que lo reenvia a la web como
+// "localNotificationActionPerformed" -> y eso acaba aqui.
+//
+// Se apunta ademas una marca en localStorage porque lo que para la
+// vibracion es cancelWatch(), y la parte nativa apunta esa parada como
+// "cancelado" (que normalmente significa otra cosa: que empezaste otra
+// serie). La marca sirve para que la linea de diagnostico diga la verdad
+// -- ver gymFormatRestAlertStatus().
+function gymHandleRestNotificationAction(evento) {
+  const accion = evento && evento.actionId;
+  const id = evento && evento.notification && evento.notification.id;
+  // Este es el identificador que usa iOS para "lo he apartado", tal cual
+  // lo reenvia Capacitor.
+  const esDescartar = accion === 'com.apple.UNNotificationDismissActionIdentifier'
+    || accion === 'dismiss';
+  if (!esDescartar || id !== GYM_REST_NOTIFICATION_ID) return;
+  localStorage.setItem('gymRestAlertDismissedAt', String(Date.now()));
+  gymCancelRestAudioWatch();
+}
+
+// Engancharse al aviso de "has apartado la notificacion". Se hace una
+// sola vez y de forma perezosa: el plugin solo existe en la app
+// instalada, y ademas no conviene registrar el mismo listener dos veces.
+let gymRestActionListenerPuesto = false;
+
+function gymEnsureRestNotificationActionListener() {
+  if (gymRestActionListenerPuesto) return;
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin || typeof plugin.addListener !== 'function') return;
+  gymRestActionListenerPuesto = true;
+  try {
+    plugin.addListener('localNotificationActionPerformed', gymHandleRestNotificationAction);
+  } catch (err) {
+    console.error('No se pudo escuchar las acciones de las notificaciones:', err);
+  }
+}
+
 async function gymScheduleRestNotification(atMs = null) {
+  gymEnsureRestNotificationActionListener();
   if (typeof getLocalNotificationsPlugin !== 'function') return;
   const plugin = getLocalNotificationsPlugin();
   if (!plugin || !gymRestNotifyEnabled()) return;
@@ -9635,6 +9854,11 @@ async function gymScheduleRestNotification(atMs = null) {
       body: 'Siguiente serie.',
       schedule: { at: new Date(cuando) },
       threadIdentifier: 'gym-descanso',
+      // Categoria registrada en la parte nativa con .customDismissAction
+      // (ver RestAlertStopper.swift): es lo que hace que iOS avise
+      // cuando apartas el aviso de la pantalla, que es la unica forma de
+      // enterarse de que has deslizado el banner hacia arriba.
+      actionTypeId: GYM_REST_NOTIFICATION_CATEGORY,
     };
     if (sonido) aviso.sound = sonido;
     await plugin.schedule({ notifications: [aviso] });
@@ -9915,7 +10139,15 @@ async function gymRestAlertLastStatus() {
 }
 function gymFormatRestAlertStatus(info) {
   if (!info) return 'Vibración del descanso: sin datos todavía (prueba el aviso).';
-  const como = GYM_REST_STOP_LABELS[info.stoppedBy] || info.stoppedBy;
+  let como = GYM_REST_STOP_LABELS[info.stoppedBy] || info.stoppedBy;
+  // La parada por apartar el aviso llega desde la web (ver
+  // gymHandleRestNotificationAction) y la parte nativa la apunta como
+  // "cancelado", que normalmente significa otra cosa. Si la marca de la
+  // web es de ese mismo instante, mandaria la marca.
+  const marca = Number(localStorage.getItem('gymRestAlertDismissedAt') || 0);
+  if (info.stoppedBy === 'cancelado' && marca && Math.abs(marca - Number(info.when || 0)) < 2000) {
+    como = 'al apartar el aviso de la pantalla';
+  }
   const seg = Number(info.afterSeconds || 0).toFixed(1).replace('.', ',');
   const pulsos = Number(info.pulses || 0);
   const banner = info.bannerSeen ? '' : ' · la notificación no llegó a verse en pantalla';
@@ -15130,12 +15362,24 @@ function moverPestanaMovil(paso) {
 
 // Barras de sub-pestañas de las Apps. Generico a proposito: se busca la
 // primera barra VISIBLE y se mueve su boton activo un puesto. Una App
-// nueva con su propia barra solo tiene que añadir su selector aqui.
-const MOBILE_SUBTAB_BARS = ['.gym-tabs', '.finanzas-tabs', '.viajes-tabs'];
+// nueva con su propia barra solo tiene que añadir aqui su pareja de
+// selectores: la BARRA de botones y los PANELES que esos botones
+// enseñan.
+//
+// Hacen falta los dos porque la animacion de carrusel se le pone al
+// PANEL, no a la App entera: en un carrusel de verdad la barra de
+// pestañas se queda quieta y lo que viaja es el contenido. Animar la
+// vista completa haria que la propia barra se fuera de la pantalla, que
+// es justo lo que no se quiere.
+const MOBILE_SUBTAB_BARS = [
+  { barra: '.gym-tabs', paneles: '.gym-tab-panel' },
+  { barra: '.finanzas-tabs', paneles: '[data-finanzas-panel]' },
+  { barra: '.viajes-tabs', paneles: '[data-viajes-panel]' },
+];
 
 function moverSubPestana(paso) {
-  for (const sel of MOBILE_SUBTAB_BARS) {
-    const barra = document.querySelector(sel);
+  for (const { barra: selBarra, paneles: selPaneles } of MOBILE_SUBTAB_BARS) {
+    const barra = document.querySelector(selBarra);
     if (!estaVisibleDeVerdad(barra)) continue;
     const botones = [...barra.querySelectorAll('button')];
     const i = botones.findIndex((b) => b.classList.contains('active'));
@@ -15143,7 +15387,9 @@ function moverSubPestana(paso) {
     const destino = botones[i + paso];
     if (!destino) return true; // hay barra, pero ya estas en el extremo
     destino.click();
-    animarCambioDePantalla(paso > 0 ? 'left' : 'right');
+    // El panel que acaba de quedar a la vista es el que entra deslizando.
+    const panel = [...document.querySelectorAll(selPaneles)].find(estaVisibleDeVerdad);
+    if (panel) playMobileSwipeTransition(panel, paso > 0 ? 'left' : 'right');
     return true;
   }
   return false;

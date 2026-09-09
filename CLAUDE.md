@@ -548,6 +548,120 @@ seguía siendo la misma de antes de la prueba. Ahora es
 un listener de `visibilitychange` (al volver a primer plano, solo si esa
 sección está a la vista) y un temporizador tras lanzar la prueba.
 
+## Eventos de varios días
+
+Koku lo vio con un "Viaje Mallorca" del jueves 17 al domingo 20: solo
+aparecía el día 17. El arreglo tiene **dos mitades y hacen falta las
+dos** — si solo se hace una, parece que no cambia nada:
+
+1. **Pedir los datos** (`public/routes-local/events.js`): el filtro de
+   rango era `start_at >= from AND start_at <= to`, o sea "empieza
+   dentro del rango". Pidiendo el viernes, un viaje que arrancó el
+   jueves ni se devolvía. Ahora es la condición de SOLAPE de toda la
+   vida: `start_at <= to AND COALESCE(end_at, start_at) >= from`. El
+   `COALESCE` cubre a los que no tienen fin (se comportan igual que
+   antes) y los que no tienen `start_at` siguen fuera, porque NULL no
+   cumple ninguna comparación. Esto arregla de paso un segundo caso que
+   nadie había mirado: un evento que viene del mes anterior.
+2. **Pintarlos** (`public/app.js`): `eventOccursOnDay(ev, date)` y
+   `eventDaySpan(ev, date)` son ahora la única fuente de verdad de
+   "¿sale este día?" y "¿cómo lo ocupa?". Las usan las cuatro vistas
+   (rejilla del mes, del año, tira de la semana y vista diaria), que
+   antes filtraban cada una por su cuenta con `sameDay(inicio, día)`.
+
+`eventDaySpan` devuelve `unico` / `inicio` / `entero` / `fin`, y de ahí
+sale todo lo demás:
+
+- **`entero`** (ni empieza ni acaba ese día) va a la fila de **todo el
+  día**, no como bloque. Petición de Koku: un bloque de 00:00 a 24:00
+  tapa la pantalla entera y no dice nada que no diga ya la etiqueta.
+- **`inicio`** y **`fin`** se pintan como bloque **recortado a ese día**:
+  del jueves 20:00 a medianoche, y de medianoche al domingo 14:00. Antes
+  solo se recortaba el final; el principio daba por hecho que el evento
+  empezaba hoy.
+- En los listados, `formatMobileEventTimeRange(ev, date)` enseña
+  `20:00 →`, `Todo el día` o `→ 14:00` según el tramo. Sin el segundo
+  parámetro se comporta como siempre (rango completo).
+
+**Pendiente de decidir**: el ÚLTIMO día de un evento largo (el domingo
+del ejemplo) sale como bloque de 00:00 a la hora de fin. Ocupa casi toda
+la pantalla, y Koku dijo que no sabía cómo resolverlo. Se dejó así por
+ser lo honesto (se ve dónde acaba); la alternativa sería tratar como
+"todo el día" también los días que superen cierto porcentaje, perdiendo
+la hora de fin. **No cambiarlo sin preguntarle.**
+
+## Reloj de 12 o de 24 horas
+
+Se sigue al SISTEMA, no hay ajuste en la app (Koku: "yo lo tengo en 24h
+el sistema, pero hay gente que lo tiene en 12h, con am y pm, tenlo en
+cuenta"). Si tu teléfono está en 12h es porque así lo lees tú; repetirlo
+aquí sobra.
+
+`systemUses12hClock()` en `app.js` le pregunta a Intl por el idioma del
+DISPOSITIVO (`undefined`, no el nuestro) y mira su `hour12`. El idioma de
+los textos sigue siendo `es-ES` a pelo en toda la app; lo único que se
+toma prestado del sistema es esta decisión. `TIME_FORMATTER` pasa
+`hour12` explícito — sin eso, `es-ES` impone siempre 24h.
+
+**Pendiente**: el CAMPO donde se ESCRIBE la hora (`createTimeField`)
+sigue siendo de 4 dígitos en 24h. En 12h haría falta decidir cómo se
+teclea (¿un AM/PM al lado?, ¿se escribe "8:30 pm"?) y eso es diseño, así
+que hay que preguntárselo a Koku antes de tocarlo. Mientras tanto, lo
+que se MUESTRA ya respeta el sistema y lo que se ESCRIBE es 24h.
+
+## Deslizar filas para Editar / Eliminar
+
+`wrapRowWithSwipeActions(row, { onEdit, onDelete })` en `app.js` (antes
+se llamaba `wrapGymRowWithSwipe`, se renombró al usarse en más sitios).
+La fila sigue al dedo mientras arrastras y cae sola a su sitio. Comparte
+con `wrapNoteRowWithSwipe` las clases y el estado de "solo una fila
+abierta" (`openSwipedNoteRow`), así abrir una cierra la otra.
+
+Dónde está puesto: carpetas y notas de Mi espacio, sesiones del
+historial del Gimnasio, y **tarjetas de grupo del calendario** (añadido
+el 9/9/2026). "Todos los eventos" queda fuera a propósito: no es un
+grupo de verdad.
+
+Para ponerlo en un sitio nuevo: envolver la fila con esa función y
+añadir su selector a las reglas `.note-swipe-wrap > ...` de
+`styles.css` (hacen falta las dos: la del `transform` y la de
+`is-dragging`), con su fondo propio — la fila tiene que TAPAR los
+botones que quedan debajo.
+
+## Popovers flotantes y el área segura
+
+`positionFixedPopover()` en `settings.js` ha roto dos veces, por motivos
+distintos:
+
+1. Estimaba la altura con un número fijo, se quedaba corta con el
+   popover de iconos y lo dejaba fuera de la pantalla. Arreglado
+   midiendo la altura REAL.
+2. (9/9/2026) Koku enseñó una captura del selector de color de un grupo
+   con la mitad de arriba tapada por la Dynamic Island: cuando no cabía
+   debajo del botón, lo subía y lo topaba a 8px del borde de la
+   PANTALLA — pero esos primeros ~60px no se ven. Y si el popover es más
+   alto que el hueco útil (la paleta son 32 colores), ninguna posición lo
+   arregla: hace falta que se desplace por dentro.
+
+Ahora se miden las franjas inútiles con `safeAreaInsets()` (un elemento
+de usar y tirar que pide `env(safe-area-inset-*)` como padding, porque
+desde JavaScript no hay forma de leerlas), se le pone al popover un
+`max-height` de la franja visible con `overflow-y: auto`, y solo entonces
+se decide si va debajo, encima o pegado arriba.
+
+## Hora propuesta al crear un evento
+
+Siempre la hora en punto **más cercana** a la de ahora, y el fin a +1h.
+A las 7:59 sale 8:00–9:00. `roundToNearestHour()` en `app.js`.
+
+El fallo que vio Koku (a las 7:59 le proponía 9:00–10:00) estaba en la
+otra rama: si el evento se creaba desde un DÍA concreto (el "+" de la
+vista diaria), se plantaban las 9:00 fijas, daba igual la hora que
+fuera. Ahora la FECHA sale del día que elegiste y la HORA del reloj.
+Verificado con Playwright congelando el reloj en las 24 horas × 6
+minutos × los dos caminos (288 casos), incluido el salto de las 23:30 a
+las 00:00 del día siguiente.
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de
@@ -650,48 +764,44 @@ la copia es la forma de pasar datos de un aparato a otro.
   `enterMobileDayView`/`exitMobileDayView` (app.js), las keyframes
   `mobile-zoom-*` (styles.css), y el bloque "Animaciones" de
   index.html/settings.js.
-- **Compartir → RemindMeLater (fecha detectada → evento)** — la parte
-  de iOS + toda la detección YA CONSTRUIDA (ronda del 8/9/2026, en esta
-  rama):
-  - `public/share-import.js` (nuevo): `detectSpanishDateTime()`
-    (dd/mm(/aaaa), "el N de MES (de AAAA)", hoy/mañana/pasado mañana,
-    días de la semana, "viernes 12", horas "a las 21:30"/"9h"/"de la
-    tarde+12"; devuelve fecha+hora+título limpio) y
-    `openEventModalFromSharedText()` (modal de evento prerrelleno).
-    Verificado con 19 casos de Playwright. Se carga el ÚLTIMO en
-    index.html (usa cosas de app.js).
-  - iOS: extensión de compartir nativa `ios/App/CompartirExtension/`
-    (ShareViewController.swift sin UI propia: recoge texto/URL y abre
-    la app con `remindmelater://share?text=...` vía el truco de la
-    cadena de responders), target añadido A MANO al pbxproj copiando
-    el patrón del DescansoWidget de gimnasio-movil (que ya compila en
-    CI); esquema de URL en App/Info.plist; la URL llega a la web por
-    el plugin `@capacitor/app` (appUrlOpen + getLaunchUrl, con
-    anti-duplicado de 3s para el arranque en frío).
-  - **COMPILA BIEN** (build #34, iOS): confirmado en el log que el
-    target `CompartirExtension` se compiló, que el `.appex` se incrustó
-    en `App.app/PlugIns/` y que `ValidateEmbeddedBinary` pasó — el
-    pbxproj editado a mano funcionó a la primera.
-  - **PERO EN EL IPHONE REAL NO TERMINA DE FUNCIONAR** (probado por
-    Koku, build #34): dijo textualmente "lo de compartir no del todo.
-    Nada, era saber si podía funcionar, **déjalo apuntado y ya vemos
-    cómo podemos hacerlo en el futuro**". O sea: **NO seguir tocándolo
-    hasta que él lo retome**. No dio detalle de QUÉ falla exactamente
-    (¿no aparece en la hoja de compartir?, ¿aparece pero no abre la
-    app?, ¿abre pero sin datos?) — es lo PRIMERO que hay que
-    preguntarle cuando se retome, porque cada síntoma apunta a una
-    causa distinta:
-    - No aparece en la hoja → `NSExtensionActivationRule` del
-      Info.plist de la extensión.
+- **Compartir → RemindMeLater (fecha detectada → evento) — QUITADO DE
+  ESTA RAMA, aplazado**: se construyó el 8/9/2026 en
+  `calendario-notas-movil-UI`, llegó aquí con el merge, y Koku pidió
+  sacarlo el 9/9/2026 ("debería estar quitado ahora, en las pruebas en
+  la rama no funcionaba correctamente, por lo que se había aplazado").
+  **No volver a meterlo hasta que él lo retome.**
+  - Qué se quitó: `public/share-import.js` y su `<script>` de
+    index.html, `ios/App/CompartirExtension/` entera, el target
+    `CompartirExtension` del `project.pbxproj` (todos los ids con
+    prefijo `CE5CA250`, más sus líneas en las listas de children,
+    buildPhases, dependencies, targets y TargetAttributes) y la sección
+    del README.
+  - Qué NO se quitó, a propósito: el esquema de URL `remindmelater://`
+    del `App/Info.plist` — lo usa TAMBIÉN el widget de descanso del
+    Gimnasio (`remindmelater://gym-live`, ver SceneDelegate) y quitarlo
+    lo rompería. Y la dependencia `@capacitor/app` sigue en
+    package.json: ya no la usa nadie, pero sacarla obliga a regenerar
+    los archivos nativos con `cap sync`, y como esto está aplazado (no
+    cancelado) sale más a cuenta dejarla puesta.
+  - **Dónde está el código para recuperarlo**: intacto en la rama
+    `calendario-notas-movil-UI` y en su commit `73cbdbc`. Recuperarlo es
+    un cherry-pick de ese commit, no reescribirlo.
+  - Estado real cuando se aplazó: **compilaba bien** (build #34 de iOS:
+    el target se compiló, el `.appex` se incrustó en `App.app/PlugIns/`
+    y `ValidateEmbeddedBinary` pasó), pero **en el iPhone real no
+    terminaba de funcionar**. Koku no dijo QUÉ falla exactamente, y es
+    lo PRIMERO que hay que preguntarle al retomarlo, porque cada
+    síntoma apunta a una causa distinta:
+    - No aparece en la hoja de compartir → `NSExtensionActivationRule`
+      del Info.plist de la extensión.
     - Aparece pero no abre la app → el truco de la cadena de
       responders (`openURL:`) está cada vez más restringido por Apple;
       la alternativa moderna sería un App Group compartido (la
-      extensión escribe el texto ahí y la app lo lee al abrirse) en
-      vez de pasar el dato por la URL.
+      extensión escribe el texto ahí y la app lo lee al abrirse) en vez
+      de pasar el dato por la URL.
     - Abre sin datos → el esquema de URL o el `appUrlOpen`.
-  - **Pendiente aparte**: la parte de ANDROID (intent-filter +
-    forwarding nativo), aplazada a propósito hasta que Koku pueda
-    probar Android (aún sin keystore/Play Console).
+  - La parte de ANDROID (intent-filter + forwarding nativo) nunca llegó
+    a construirse.
 - **Vibración de los avisos — ARREGLADA (misma ronda)**: el plugin de
   notificaciones solo pone sonido si se le pasa `sound` (comprobado en
   su fuente), y sin sonido iOS entrega el aviso en silencio total (ni

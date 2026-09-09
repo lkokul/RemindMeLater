@@ -1454,26 +1454,69 @@ body.real-modal-open .calendar-quick-actions { display: none; }
    visual". Las clases se añaden/quitan solas via JS
    (playMobileSwipeTransition en app.js), nunca se dejan puestas de
    forma permanente. */
+/* CARRUSEL (peticion de Koku, 9/9/2026: "me gustaria que la animacion
+   sea mas estilo carrusel, no una transicion. Tanto intra app como para
+   cambiar entre apps").
+
+   Antes esto era un empujoncito de 16px con fundido -- se leia como
+   "algo ha cambiado", no como "me he movido de sitio". Ahora la pantalla
+   nueva entra ENTERA desde el borde (100% de su propio ancho o alto),
+   como si las pantallas estuvieran puestas en fila y el dedo arrastrara
+   la tira: si deslizas a la izquierda, la nueva llega por la derecha; si
+   deslizas a la derecha, llega por la izquierda.
+
+   Sin fundido a proposito: un carrusel de verdad no aparece, se
+   DESPLAZA. El opacity de antes era lo que mas lo delataba como
+   transicion.
+
+   La curva es cubic-bezier(0.22, 0.61, 0.36, 1) -- arranca rapido y
+   frena al final, que es como se comporta algo que llevaba inercia y se
+   para en su sitio. Y 280ms en vez de 220: un recorrido de pantalla
+   entera en 220ms se percibe como un salto, no como un deslizamiento.
+
+   Ojo, esto lo usan DOS cosas: el cambio de pestaña/pantalla (los
+   gestos, ver app.js) y el cambio de mes/año/dia dentro del calendario.
+   Por eso los cuatro sentidos, no solo los dos horizontales. */
 @keyframes mobile-swipe-in-up {
-  from { transform: translateY(16px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
 }
 @keyframes mobile-swipe-in-down {
-  from { transform: translateY(-16px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from { transform: translateY(-100%); }
+  to { transform: translateY(0); }
 }
 @keyframes mobile-swipe-in-left {
-  from { transform: translateX(16px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
 }
 @keyframes mobile-swipe-in-right {
-  from { transform: translateX(-16px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
 }
-.mobile-swipe-anim-up { animation: mobile-swipe-in-up 220ms ease-out; }
-.mobile-swipe-anim-down { animation: mobile-swipe-in-down 220ms ease-out; }
-.mobile-swipe-anim-left { animation: mobile-swipe-in-left 220ms ease-out; }
-.mobile-swipe-anim-right { animation: mobile-swipe-in-right 220ms ease-out; }
+.mobile-swipe-anim-up,
+.mobile-swipe-anim-down,
+.mobile-swipe-anim-left,
+.mobile-swipe-anim-right {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  animation-fill-mode: both;
+  /* Aviso al navegador de que esto se va a mover, para que lo mande a su
+     propia capa y el desplazamiento vaya fino en el movil. */
+  will-change: transform;
+}
+.mobile-swipe-anim-up { animation-name: mobile-swipe-in-up; }
+.mobile-swipe-anim-down { animation-name: mobile-swipe-in-down; }
+.mobile-swipe-anim-left { animation-name: mobile-swipe-in-left; }
+.mobile-swipe-anim-right { animation-name: mobile-swipe-in-right; }
+
+/* Una pantalla desplazandose a lo ancho asoma por fuera del cuerpo de la
+   pagina. Sin esto, durante esos 280ms el navegador cree que la pagina
+   es mas ancha y deja arrastrarla de lado (o saca barra horizontal).
+   Va en html Y body porque cada motor decide en uno u otro. */
+html,
+body {
+  overflow-x: hidden;
+}
 /* Zoom al cambiar de NIVEL (año <-> mes <-> dia) -- ver
    playMobileZoomTransition() en app.js. "in" = bajar de nivel (la vista
    nueva crece desde pequeña, como acercandose); "out" = subir (encoge
@@ -2017,20 +2060,34 @@ body.real-modal-open .calendar-quick-actions { display: none; }
    real de los botones (una carpeta lleva uno mas, "Editar"). El 9.5rem
    es solo el valor de respaldo si por lo que sea no se pudo medir. */
 .note-swipe-wrap.is-open > .note-item { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
-/* El mismo deslizar, reutilizado en el historial de Gimnasio (Editar /
-   Eliminar) -- ver wrapGymRowWithSwipe en app.js. */
-.note-swipe-wrap > .gym-list-item {
+/* El mismo deslizar, reutilizado en el historial de Gimnasio y en las
+   tarjetas de grupo del calendario (Editar / Eliminar) -- ver
+   wrapRowWithSwipeActions en app.js. Si hace falta en un sitio nuevo,
+   basta con añadir aqui su selector a estas dos reglas.
+   El fondo se pone explicito a proposito: la fila tiene que TAPAR a los
+   botones que hay debajo, si no se transparentan al deslizar. */
+.note-swipe-wrap > .gym-list-item,
+.note-swipe-wrap > .group-card {
   position: relative;
   background: var(--surface);
   transition: transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
   will-change: transform;
 }
-.note-swipe-wrap.is-open > .gym-list-item { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
+/* La tarjeta de grupo tiene su propio fondo (mas claro que el de una
+   fila de gimnasio), que hay que conservar. */
+.note-swipe-wrap > .group-card { background: var(--surface-2); }
+.note-swipe-wrap.is-open > .gym-list-item,
+.note-swipe-wrap.is-open > .group-card { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
 /* Mientras el dedo arrastra manda el transform en linea que escribe
-   wrapGymRowWithSwipe(): sin transicion, para que la fila vaya pegada al
-   dedo; al soltar vuelve el CSS de arriba y anima el ultimo tramo. */
+   wrapRowWithSwipeActions(): sin transicion, para que la fila vaya
+   pegada al dedo; al soltar vuelve el CSS de arriba y anima el ultimo
+   tramo. */
 .note-swipe-wrap.is-dragging > .gym-list-item,
+.note-swipe-wrap.is-dragging > .group-card,
 .note-swipe-wrap.is-dragging > .note-item { transition: none; }
+/* Los botones de accion viven detras de la tarjeta, asi que necesitan
+   el mismo redondeo por la derecha para no asomar en las esquinas. */
+.note-swipe-wrap > .group-card { border-radius: var(--radius); }
 /* Los botones asoman en vez de aparecer de golpe. */
 .note-swipe-wrap > .note-swipe-actions {
   opacity: 0.55;
