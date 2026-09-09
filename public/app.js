@@ -1791,13 +1791,37 @@ async function renderMobileHoursView(date) {
   // que se marque como todo el dia esos dias, para no tapar toda la
   // pantalla" -- y tiene razon, un bloque de 00:00 a 24:00 llena la
   // vista sin decir nada que no diga ya esta etiqueta.
-  const allDayEvents = dayEvents.filter((ev) => ev.allDay || eventDaySpan(ev, date) === 'entero');
+  // Arriba van los que ocupan el dia entero Y TAMBIEN el ULTIMO dia de
+  // un evento largo (decision de Koku sobre el domingo de un viaje que
+  // empieza el jueves: "me parece bien, que aparezca en la seccion de
+  // dia entero"). Un bloque de medianoche a las 14:00 se come casi toda
+  // la pantalla para decir algo que la etiqueta dice mejor.
+  //
+  // OJO, esto es SOLO como se pinta: el evento sigue guardado con su
+  // hora de fin de verdad, no se convierte en "todo el dia" (lo pidio
+  // expresamente: "que se quede guardado que la hora es la que aparece
+  // puesta"). Por eso la etiqueta enseña "→ 14:00" y no un simple
+  // "Todo el dia": la hora sigue estando y se ve.
+  //
+  // El PRIMER dia se queda como bloque a proposito: empezar a las 20:00
+  // son cuatro horas de alto, no molesta, y ver donde arranca dentro
+  // del dia si aporta.
+  const allDayEvents = dayEvents.filter((ev) => {
+    if (ev.allDay) return true;
+    const tramo = eventDaySpan(ev, date);
+    return tramo === 'entero' || tramo === 'fin';
+  });
   allDayRow.classList.toggle('hidden', allDayEvents.length === 0);
   allDayEvents.forEach((ev) => {
     const chip = document.createElement('div');
     chip.className = 'mobile-day-allday-chip';
     chip.style.backgroundColor = ev.isTask ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev)) : (ev.groupColor || DEFAULT_EVENT_COLOR);
-    chip.textContent = ev.title;
+    // En el ultimo dia se añade la hora a la que acaba; en el resto, el
+    // titulo a secas (que ya se entiende como "todo el dia").
+    const tramo = eventDaySpan(ev, date);
+    chip.textContent = tramo === 'fin'
+      ? `${ev.title} · ${formatMobileEventTimeRange(ev, date)}`
+      : ev.title;
     chip.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
     allDayRow.appendChild(chip);
   });
@@ -1816,7 +1840,10 @@ async function renderMobileHoursView(date) {
   const timed = dayEvents
     // Fuera los de todo el dia y los que ya se han puesto arriba por
     // ocupar este dia entero (ver allDayEvents).
-    .filter((ev) => !ev.allDay && ev.startAt && eventDaySpan(ev, date) !== 'entero')
+    // Fuera los que ya se han puesto arriba (ver allDayEvents): los de
+    // todo el dia, los que ocupan este dia entero y el ultimo dia de un
+    // evento largo.
+    .filter((ev) => !ev.allDay && ev.startAt && !['entero', 'fin'].includes(eventDaySpan(ev, date)))
     .map((ev) => {
       // El bloque se RECORTA a este dia: de un viaje que empieza el
       // jueves a las 20:00 y acaba el domingo a las 14:00, el jueves se
@@ -2362,24 +2389,67 @@ function toTimeInputValue(date) {
 // menos de 3 digitos todavia no hay suficiente informacion para saber
 // si es valido (se sigue escribiendo la hora), asi que no se marca
 // error todavia.
-function parseTimeFieldDigits(digits) {
+// Interpreta los digitos que se van tecleando en un campo de hora. Los
+// dos ultimos son SIEMPRE los minutos y lo de delante la hora, asi que
+// "930" es 9:30 y "0930" tambien.
+//
+// pm/am: en reloj de 12 horas el campo solo acepta 1-12, y quien decide
+// si es de la mañana o de la tarde es el selector de al lado (peticion
+// de Koku: "que haya un selector de am y pm, asi mantenemos el bloque
+// con entrada de numeros unicamente"). El "value" que sale de aqui es
+// SIEMPRE de 24 horas -- el resto de la app trabaja solo con eso, el
+// formato de 12 vive unicamente en lo que se ve.
+function parseTimeFieldDigits(digits, { doce = false, pm = false } = {}) {
   if (digits.length === 0) return { formatted: '', complete: false, valid: false, value: null };
   const formatted = digits.length > 2 ? `${digits.slice(0, digits.length - 2)}:${digits.slice(-2)}` : digits;
   if (digits.length < 3) return { formatted, complete: false, valid: false, value: null };
   const h = Number(digits.slice(0, digits.length - 2));
   const mi = Number(digits.slice(-2));
-  const ok = h <= 23 && mi <= 59;
+  const ok = doce ? (h >= 1 && h <= 12 && mi <= 59) : (h <= 23 && mi <= 59);
+  if (!ok) return { formatted, complete: true, valid: false, value: null };
+  const h24 = doce ? hour12To24(h, pm) : h;
   return {
     formatted,
     complete: true,
-    valid: ok,
-    value: ok ? `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}` : null,
+    valid: true,
+    value: `${String(h24).padStart(2, '0')}:${String(mi).padStart(2, '0')}`,
   };
 }
 
+// Las dos conversiones entre el reloj de 24 y el de 12. Los unicos casos
+// que se escapan de "sumar o restar 12" son las 12 de la noche (0h se
+// escribe 12 AM) y las 12 del mediodia (12h se queda en 12 PM).
+function hour12To24(h12, pm) {
+  if (pm) return h12 === 12 ? 12 : h12 + 12;
+  return h12 === 12 ? 0 : h12;
+}
+
+function hour24To12(h24) {
+  const pm = h24 >= 12;
+  let h12 = h24 % 12;
+  if (h12 === 0) h12 = 12;
+  return { h12, pm };
+}
+
+// Campo de hora: se escribe con NUMEROS y nada mas (sin desplegables de
+// hora/minuto ni el selector nativo, que no sigue el tema -- ver la
+// regla de CLAUDE.md). Los dos ultimos digitos son los minutos, asi que
+// "930" ya es 9:30.
+//
+// Con el telefono en reloj de 12 horas aparece ademas un selector AM/PM
+// al lado (peticion de Koku: "si es 12h, que haya un selector de am y
+// pm, asi mantenemos el bloque con entrada de numeros unicamente"). El
+// campo pasa a aceptar 1-12 y de la mañana/tarde se encarga el selector.
+//
+// IMPORTANTE: hacia fuera este componente habla SIEMPRE en 24 horas
+// ("HH:MM"), tanto en getValue() como en setValue(). El reloj de 12 vive
+// solo en lo que se ve, asi que nada del resto de la app (guardar,
+// comparar, combineDateAndTime...) tuvo que cambiar.
 function createTimeField({ initialValue = '09:00' } = {}) {
-  let value = initialValue; // ultimo valor VALIDO conocido
+  let value = initialValue; // ultimo valor VALIDO conocido, en 24h
   let valid = true;
+  const doce = USES_12H_CLOCK;
+  let pm = false;
 
   const root = document.createElement('div');
   root.className = 'time-field';
@@ -2387,21 +2457,45 @@ function createTimeField({ initialValue = '09:00' } = {}) {
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'time-field-input';
-  input.placeholder = 'HH:MM';
+  input.placeholder = doce ? 'H:MM' : 'HH:MM';
   input.inputMode = 'numeric';
-  input.value = value;
 
-  // Autocompleta el ":" MIENTRAS SE ESCRIBE (no solo al perder el foco)
-  // y valida en tiempo real -- antes solo se normalizaba en "change"
-  // (al perder el foco), asi que si se guardaba con Ctrl+Intro con el
-  // foco todavia en este campo, form.requestSubmit() no dispara "change"
-  // por si solo y lo escrito se perdia en silencio, mandandose el valor
-  // VIEJO sin ningun aviso.
-  input.addEventListener('input', () => {
+  // El selector AM/PM: dos botones tipo interruptor. Solo existe en
+  // reloj de 12 -- en 24 horas no pinta nada y ni se crea.
+  const ampm = document.createElement('div');
+  ampm.className = 'time-field-ampm';
+  const btnAm = document.createElement('button');
+  const btnPm = document.createElement('button');
+  [btnAm, btnPm].forEach((b) => { b.type = 'button'; b.className = 'time-field-ampm-btn'; });
+  btnAm.textContent = 'AM';
+  btnPm.textContent = 'PM';
+
+  function pintarAmPm() {
+    btnAm.classList.toggle('is-active', !pm);
+    btnPm.classList.toggle('is-active', pm);
+    btnAm.setAttribute('aria-pressed', String(!pm));
+    btnPm.setAttribute('aria-pressed', String(pm));
+  }
+
+  // Lo que se ENSEÑA en el input a partir del valor de 24h guardado.
+  function pintarInput() {
+    if (!doce) {
+      input.value = value;
+      return;
+    }
+    const [h24, mi] = value.split(':').map(Number);
+    const { h12, pm: esPm } = hour24To12(h24);
+    pm = esPm;
+    input.value = `${h12}:${String(mi).padStart(2, '0')}`;
+    pintarAmPm();
+  }
+
+  // Relee lo escrito y actualiza el valor guardado. Se llama al teclear
+  // y tambien al tocar AM/PM, porque cambiar de mitad del dia cambia la
+  // hora real sin que se haya tocado ni un numero.
+  function releer() {
     const digits = input.value.replace(/\D/g, '').slice(0, 4);
-    const result = parseTimeFieldDigits(digits);
-    input.value = result.formatted;
-    input.setSelectionRange(input.value.length, input.value.length);
+    const result = parseTimeFieldDigits(digits, { doce, pm });
     if (result.complete && result.valid) {
       value = result.value;
       valid = true;
@@ -2411,6 +2505,19 @@ function createTimeField({ initialValue = '09:00' } = {}) {
       // hasta que se complete/corrija, para no guardar algo a medias.
       valid = false;
     }
+    return result;
+  }
+
+  // Autocompleta el ":" MIENTRAS SE ESCRIBE (no solo al perder el foco)
+  // y valida en tiempo real -- antes solo se normalizaba en "change"
+  // (al perder el foco), asi que si se guardaba con Ctrl+Intro con el
+  // foco todavia en este campo, form.requestSubmit() no dispara "change"
+  // por si solo y lo escrito se perdia en silencio, mandandose el valor
+  // VIEJO sin ningun aviso.
+  input.addEventListener('input', () => {
+    const result = releer();
+    input.value = result.formatted;
+    input.setSelectionRange(input.value.length, input.value.length);
     // Solo se pinta en rojo cuando ya hay info de sobra para saber que
     // esta MAL (3-4 digitos fuera de rango) -- con 0-2 digitos se sigue
     // escribiendo, no es un error todavia.
@@ -2418,8 +2525,7 @@ function createTimeField({ initialValue = '09:00' } = {}) {
   });
 
   input.addEventListener('blur', () => {
-    const digits = input.value.replace(/\D/g, '').slice(0, 4);
-    const result = parseTimeFieldDigits(digits);
+    const result = releer();
     if (!result.complete || !result.valid) {
       // Al perder el foco con algo a medias o invalido, se marca en
       // rojo de verdad (mientras se escribe 1-2 digitos no se marca,
@@ -2430,19 +2536,26 @@ function createTimeField({ initialValue = '09:00' } = {}) {
   });
 
   root.appendChild(input);
+  if (doce) {
+    btnAm.addEventListener('click', () => { pm = false; pintarAmPm(); releer(); });
+    btnPm.addEventListener('click', () => { pm = true; pintarAmPm(); releer(); });
+    ampm.append(btnAm, btnPm);
+    root.appendChild(ampm);
+  }
+  pintarInput();
 
   return {
     element: root,
-    // Devuelve el ultimo valor VALIDO conocido, o null si el campo esta
-    // ahora mismo en un estado invalido/incompleto -- nunca un valor
-    // inventado o desactualizado.
+    // Devuelve el ultimo valor VALIDO conocido (en 24h), o null si el
+    // campo esta ahora mismo en un estado invalido/incompleto -- nunca
+    // un valor inventado o desactualizado.
     getValue: () => (valid ? value : null),
     isValid: () => valid,
     setValue: (v) => {
       value = v;
       valid = true;
-      input.value = v;
       input.classList.remove('is-invalid');
+      pintarInput();
     },
   };
 }
@@ -7482,7 +7595,6 @@ document.getElementById('btn-close-extensions').addEventListener('click', closeE
 // null = "Todos los eventos"; si no, el id del grupo abierto.
 let groupsViewSelectedId = undefined; // undefined = todavia en la lista
 let groupsViewItems = [];
-let groupsEditMode = false;
 const groupsViewFilters = { type: 'all', done: 'all', q: '' };
 
 const groupsFilterTypeField = createSelectField({
@@ -7516,8 +7628,6 @@ async function openGroupsView() {
   document.getElementById('groups-view').classList.remove('hidden');
   setCurrentScreen('groups');
   showGroupsList();
-  groupsEditMode = false;
-  refreshGroupsEditModeButton();
   await refreshGroupsView();
 }
 
@@ -7563,22 +7673,12 @@ function buildGroupViewCard(id, name, color) {
   const label = document.createElement('span');
   label.textContent = name;
   btn.append(dot, label);
-  // En modo editar, tocar un grupo abre su ficha en vez de entrar
-  // dentro. "Todos los eventos" no es un grupo de verdad, asi que ahi no
-  // hay nada que editar y se queda apagado.
-  if (groupsEditMode) {
-    if (id === null) {
-      btn.disabled = true;
-    } else {
-      btn.classList.add('is-editing');
-      const lapiz = document.createElement('span');
-      lapiz.className = 'group-card-edit-mark';
-      lapiz.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
-      btn.appendChild(lapiz);
-      btn.addEventListener('click', () => openGroupModal(state.groups.find((g) => g.id === id)));
-    }
-    return btn;
-  }
+  // Aqui vivia un "modo editar" (un lapiz en la barra que convertia
+  // cada tarjeta en un acceso a su ficha). Se quito el 9/9/2026 al
+  // hacer las tarjetas deslizables: Koku pidio dejar UNA sola forma de
+  // editar, "asi no da pie a dudas ni nada". Ahora tocar siempre entra
+  // en el grupo, y editar/eliminar se saca deslizando.
+  //
   // En la cabecera del detalle cabe poco: "Todos los eventos" se queda
   // en "Todos" ahi (en la tarjeta si va el texto entero).
   btn.addEventListener('click', () => openGroupDetail(id, id === null ? 'Todos' : name));
@@ -7795,29 +7895,6 @@ async function refreshAfterGroupChange() {
 document.getElementById('btn-groups-add').addEventListener('click', () => openGroupModal(null));
 document.getElementById('btn-close-group').addEventListener('click', closeGroupModal);
 document.getElementById('btn-cancel-group').addEventListener('click', closeGroupModal);
-
-// Lapiz cuando no estas editando, tick cuando si -- sin esto no habia
-// forma clara de salir del modo editar (el mismo boton lo cierra, pero
-// no lo parecia).
-const GROUPS_EDIT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
-const GROUPS_DONE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6.5"/></svg>';
-
-function refreshGroupsEditModeButton() {
-  const btn = document.getElementById('btn-groups-edit-mode');
-  btn.innerHTML = groupsEditMode ? GROUPS_DONE_ICON : GROUPS_EDIT_ICON;
-  btn.classList.toggle('is-active', groupsEditMode);
-  btn.setAttribute('aria-label', groupsEditMode ? 'Listo' : 'Editar grupos');
-  btn.title = groupsEditMode ? 'Listo' : 'Editar grupos';
-  // Crear un grupo nuevo mientras editas no tiene mucho sentido, y
-  // ademas el "+" tapa al tick si estan los dos.
-  document.getElementById('btn-groups-add').classList.toggle('hidden', groupsEditMode);
-}
-
-document.getElementById('btn-groups-edit-mode').addEventListener('click', () => {
-  groupsEditMode = !groupsEditMode;
-  refreshGroupsEditModeButton();
-  renderGroupsViewList();
-});
 
 document.getElementById('group-form').addEventListener('submit', async (e) => {
   e.preventDefault();

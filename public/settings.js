@@ -70,9 +70,12 @@ function positionFixedPopover(anchorBtn, popover, { width = 248 } = {}) {
   popover.style.left = `${Math.max(8, left)}px`;
 
   // Los limites de verdad: la franja de pantalla donde SI se ve algo.
+  // El margen de 14px va ADEMAS del hueco del sistema, para que el
+  // popover no quede pegado justo debajo de la Dynamic Island (queda
+  // agobiado y parece cortado aunque no lo este).
   const { arriba, abajo } = safeAreaInsets();
-  const limiteArriba = arriba + 8;
-  const limiteAbajo = window.innerHeight - abajo - 8;
+  const limiteArriba = arriba + 14;
+  const limiteAbajo = window.innerHeight - abajo - 14;
 
   // Que nunca sea mas alto que esa franja. Si su contenido no cabe, se
   // desplaza por dentro en vez de salirse (a la paleta de color le pasa
@@ -723,7 +726,7 @@ async function applyTheme(theme, { persist = true } = {}) {
 // app esta abierta, ver el listener de matchMedia mas abajo); es un
 // ajuste de ESTE dispositivo, como el tema activo.
 // Solo hay boton para "Sistema" -- cambiar a claro/oscuro A MANO ya se
-// hace con el atajo ☀/☾ de la topbar (ver btn-quick-color-mode mas
+// hace con el atajo de sol/luna de la topbar (ver btn-quick-color-mode mas
 // abajo), que dispara setColorModePreference('light'/'dark') igual que
 // hacian los botones "Claro"/"Oscuro" que habia aqui antes. Este boton
 // sirve para volver a "seguir el sistema" despues de haber cambiado a
@@ -794,6 +797,17 @@ function setColorModePreference(mode) {
 // (#btn-quick-color-mode) y otra dentro de Configuracion > Estilo
 // (#settings-quick-color-mode, para movil, que ya no tiene topbar) --
 // ambas se refrescan y comportan igual.
+// Sol y luna como SVG, no como emoji (peticion de Koku: "que sea un
+// icono en todo caso"). Un emoji lo pinta el sistema con SU tipografia:
+// cambia de forma entre iPhone, Android y navegador, no hereda el color
+// del tema y suele salir mas gordo o mas pequeño que el texto de al
+// lado. Un SVG con currentColor se comporta como una letra mas y se
+// tiñe con el tema activo.
+const ICON_CLARO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const ICON_OSCURO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg>';
+// Circulo mitad y mitad: "este tema tiene pareja clara y oscura".
+const ICON_PAREJA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/></svg>';
+
 function refreshQuickColorModeButton() {
   const buttons = document.querySelectorAll('.quick-color-mode-btn');
   if (!buttons.length) return;
@@ -803,8 +817,9 @@ function refreshQuickColorModeButton() {
   buttons.forEach((btn) => {
     btn.classList.toggle('hidden', !hasInverse);
     if (!hasInverse) return;
-    btn.textContent = resolvedIsLight ? '☀' : '☾';
+    btn.innerHTML = resolvedIsLight ? ICON_CLARO : ICON_OSCURO;
     btn.title = `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}`;
+    btn.setAttribute('aria-label', btn.title);
   });
 }
 
@@ -908,7 +923,7 @@ function renderThemeLibrary() {
     // (incluida esta etiqueta) lo activa primero, igual que el resto.
     const resolvedIsLight = isLightColors(resolved);
     const pairBadge = theme.inverseColors
-      ? `<button type="button" data-action="toggle-variant" class="theme-pair-badge" title="${isActive ? `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}` : 'Fija este tema para poder cambiar de variante'}">${resolvedIsLight ? '☀ Claro' : '☾ Oscuro'}</button>`
+      ? `<button type="button" data-action="toggle-variant" class="theme-pair-badge" title="${isActive ? `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}` : 'Fija este tema para poder cambiar de variante'}">${resolvedIsLight ? ICON_CLARO : ICON_OSCURO}<span>${resolvedIsLight ? 'Claro' : 'Oscuro'}</span></button>`
       : '';
     card.innerHTML = `
       <div class="theme-card-top">

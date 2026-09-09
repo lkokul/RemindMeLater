@@ -3487,6 +3487,11 @@ body.gym-rest-push #settings-modal .settings-card {
   cursor: default;
 }
 .theme-pair-badge {
+  /* El sol/luna ya no es un emoji sino un SVG (ver ICON_CLARO en
+     settings.js), asi que necesita alinearse a mano con el texto. */
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   font-size: 0.72rem;
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
@@ -3496,6 +3501,10 @@ body.gym-rest-push #settings-modal .settings-card {
   vertical-align: middle;
 }
 .theme-pair-badge:hover { background: color-mix(in srgb, var(--accent) 15%, var(--surface)); }
+.theme-pair-badge svg { width: 13px; height: 13px; flex-shrink: 0; }
+/* El atajo de la barra superior: el SVG ocupa el hueco que antes tenia
+   el emoji, sin heredar su tamaño de fuente. */
+.quick-color-mode-btn svg { width: 18px; height: 18px; display: block; }
 .theme-color-side-switch { display: flex; gap: 0.4rem; margin: 0.4rem 0 0.8rem; }
 .theme-side-btn { font-size: 0.82rem; padding: 0.35rem 0.7rem; }
 .theme-side-btn.active {
@@ -3885,6 +3894,43 @@ body.gym-rest-push #settings-modal .settings-card {
   padding: 0.55rem 0.5rem; font-size: 0.9rem;
 }
 .time-field-input.is-invalid { border-color: var(--danger); }
+
+/* Selector AM/PM del campo de hora. Solo aparece si el TELEFONO esta en
+   reloj de 12 horas (ver createTimeField): asi el campo sigue siendo de
+   numeros y nada mas, y de la mañana/tarde se encarga esto -- que es
+   justo lo que pidio Koku.
+   Con el, el campo de hora necesita mas ancho que en 24h; el
+   min-width de abajo lo reserva para que no se aplaste contra la fecha
+   en una pantalla estrecha. */
+.time-field { display: flex; align-items: stretch; gap: 0.3rem; }
+.datetime-row .time-field:has(.time-field-ampm) { flex: 1.5; min-width: 110px; }
+.time-field-ampm {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+/* Dos botoncitos apilados en el alto del campo, en vez de uno al lado
+   del otro: asi ocupan menos ancho, que es lo que escasea en esa fila
+   (fecha + hora en el mismo renglon). */
+.time-field-ampm-btn {
+  padding: 0 0.4rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  flex: 1;
+  min-height: 0;
+  background: var(--surface-2);
+  color: color-mix(in srgb, var(--surface-2-text) 55%, var(--surface-2));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.time-field-ampm-btn.is-active {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
 .date-popover {
   /* min() con el ancho de ventana para que nunca se salga ni se aplaste
      en ventanas pequenas (era un ancho fijo, "se peteaba" en pantallas
@@ -4160,9 +4206,6 @@ body.gym-rest-push #settings-modal .settings-card {
 .groups-fab-secondary.is-active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 /* Grupo en modo editar: borde discontinuo y el lapiz al final, mismo
    tratamiento que las carpetas de Notas al editarlas. */
-.group-card.is-editing { outline: 1px dashed var(--accent); outline-offset: -1px; }
-.group-card-edit-mark { margin-left: auto; display: inline-flex; align-items: center; color: var(--accent); }
-.group-card-edit-mark svg { width: 16px; height: 16px; }
 .group-card:disabled { opacity: 0.4; }
 /* El hueco de abajo deja sitio para los botones flotantes y la barra
    inferior, que van fijos por encima de la lista. */

@@ -474,6 +474,26 @@ atributo se pone en el script de arranque de `index.html`, antes de
 pintar. Ventaja de que la regla sea global: una animación nueva nace ya
 obedeciendo al interruptor sin tener que acordarse de apuntarla.
 
+**Temas sembrados (9, todos con pareja clara/oscura)**: Predeterminado,
+Pastel, Neón, Océano, Bosque, Atardecer, Lavanda, Carbón y Arena. Los
+seis últimos se añadieron el 9/9/2026 a petición de Koku ("nombres
+genéricos pero descriptivos, para tener una buena variedad"), y de paso
+Pastel y Neón estrenaron la variante que les faltaba — antes solo
+Predeterminado tenía pareja.
+
+Cada paleta se validó con la fórmula WCAG real ANTES de escribirla, en
+los seis pares fondo/contraste que comprueba `sanitizeColors`, buscando
+4.5:1 en las superficies de leer y ≥3:1 en los acentos (que es lo que
+exige la app). CLAUDE.md ya avisaba de no dar un color por bueno solo
+porque lo parezca; el guion de validación está en el historial de esta
+ronda si hace falta añadir más temas.
+
+**Sol y luna son SVG, no emojis** (petición de Koku el 9/9/2026): un
+emoji lo pinta el sistema con SU tipografía, así que cambia de forma
+entre iPhone, Android y navegador, no hereda el color del tema y suele
+salir descolocado de tamaño. `ICON_CLARO`/`ICON_OSCURO`/`ICON_PAREJA` en
+`settings.js`, con `currentColor` para que se tiñan con el tema activo.
+
 **Temas de color privados fuera del sembrado**: "EINES" y "Registro"
 salían de guías de diseño privadas de Koku y ya NO viajan dentro de la
 app (ver la nota en `public/local-schema.js`). Quitarlos de `SEED_THEMES`
@@ -583,12 +603,23 @@ sale todo lo demás:
   `20:00 →`, `Todo el día` o `→ 14:00` según el tramo. Sin el segundo
   parámetro se comporta como siempre (rango completo).
 
-**Pendiente de decidir**: el ÚLTIMO día de un evento largo (el domingo
-del ejemplo) sale como bloque de 00:00 a la hora de fin. Ocupa casi toda
-la pantalla, y Koku dijo que no sabía cómo resolverlo. Se dejó así por
-ser lo honesto (se ve dónde acaba); la alternativa sería tratar como
-"todo el día" también los días que superen cierto porcentaje, perdiendo
-la hora de fin. **No cambiarlo sin preguntarle.**
+**El ÚLTIMO día también va arriba** (decidido por Koku el 9/9/2026:
+"me parece bien, que aparezca en la sección de día entero"). Un bloque
+de medianoche a las 14:00 se come casi toda la pantalla para decir algo
+que la etiqueta dice mejor. Su etiqueta lleva la hora de fin
+(`Viaje Mallorca · → 14:00`), no un "Todo el día" pelado.
+
+**Esto es SOLO cómo se pinta**: el evento sigue guardado con su hora de
+fin de verdad, NO se convierte en `allDay` en la base de datos. Lo pidió
+expresamente: "que se quede guardado que la hora es la que aparece
+puesta, que no se guarde sólo como día entero".
+
+El PRIMER día se queda como bloque a propósito: empezar a las 20:00 son
+cuatro horas de alto, no molesta, y ver dónde arranca dentro del día sí
+aporta. Caso raro conocido y no resuelto: un evento que empieza a las
+02:00 y sigue al día siguiente pinta 22 horas de bloque el primer día.
+No ha aparecido en la práctica; si molesta, la regla tendría que pasar a
+ser por porcentaje del día ocupado.
 
 ## Reloj de 12 o de 24 horas
 
@@ -603,11 +634,20 @@ los textos sigue siendo `es-ES` a pelo en toda la app; lo único que se
 toma prestado del sistema es esta decisión. `TIME_FORMATTER` pasa
 `hour12` explícito — sin eso, `es-ES` impone siempre 24h.
 
-**Pendiente**: el CAMPO donde se ESCRIBE la hora (`createTimeField`)
-sigue siendo de 4 dígitos en 24h. En 12h haría falta decidir cómo se
-teclea (¿un AM/PM al lado?, ¿se escribe "8:30 pm"?) y eso es diseño, así
-que hay que preguntárselo a Koku antes de tocarlo. Mientras tanto, lo
-que se MUESTRA ya respeta el sistema y lo que se ESCRIBE es 24h.
+**El campo donde se escribe la hora** (`createTimeField`) sigue siendo
+de números y nada más, también en 12h — Koku eligió esa vía: "que haya
+un selector de am y pm, así mantenemos el bloque con entrada de números
+únicamente". Con el teléfono en 12h aparecen dos botoncitos AM/PM
+apilados al lado del campo, y el campo pasa a aceptar 1-12.
+
+Lo importante de este componente: **hacia fuera habla SIEMPRE en 24
+horas** (`getValue()`/`setValue()` con "HH:MM"). El reloj de 12 vive
+solo en lo que se ve, así que nada del resto de la app (guardar,
+comparar, `combineDateAndTime`...) tuvo que cambiar. Las conversiones
+son `hour12To24()`/`hour24To12()`, y los dos únicos casos que se escapan
+de "sumar o restar 12" son las 12 de la noche (0h se escribe 12 AM) y
+las 12 del mediodía (12h se queda en 12 PM). Tocar AM/PM cambia la hora
+real sin tocar los números, por eso relee el valor.
 
 ## Deslizar filas para Editar / Eliminar
 
@@ -621,6 +661,14 @@ Dónde está puesto: carpetas y notas de Mi espacio, sesiones del
 historial del Gimnasio, y **tarjetas de grupo del calendario** (añadido
 el 9/9/2026). "Todos los eventos" queda fuera a propósito: no es un
 grupo de verdad.
+
+Al añadirlo en los grupos **se quitó el "modo editar"** que había ahí
+(un lápiz en la barra que convertía cada tarjeta en un acceso a su
+ficha): Koku pidió dejar UNA sola forma de editar, "así no da pie a
+dudas ni nada". Se fueron `groupsEditMode`, el botón
+`btn-groups-edit-mode` de index.html y las clases `.group-card.is-editing`
+/ `.group-card-edit-mark` de styles.css. Ahora tocar una tarjeta siempre
+entra en el grupo, y editar/eliminar se saca deslizando.
 
 Para ponerlo en un sitio nuevo: envolver la fila con esa función y
 añadir su selector a las reglas `.note-swipe-wrap > ...` de
@@ -647,7 +695,13 @@ Ahora se miden las franjas inútiles con `safeAreaInsets()` (un elemento
 de usar y tirar que pide `env(safe-area-inset-*)` como padding, porque
 desde JavaScript no hay forma de leerlas), se le pone al popover un
 `max-height` de la franja visible con `overflow-y: auto`, y solo entonces
-se decide si va debajo, encima o pegado arriba.
+se decide si va debajo, encima o pegado arriba. El margen es de 14px
+ADEMÁS del hueco del sistema: pegado justo debajo de la Dynamic Island
+queda agobiado y parece cortado aunque no lo esté.
+
+Afecta a TODOS los popovers por igual (color, icono, desplegable,
+fecha), así que el de crear un tema y el de un grupo se arreglan de una
+sola vez.
 
 ## Hora propuesta al crear un evento
 
@@ -835,6 +889,11 @@ la copia es la forma de pasar datos de un aparato a otro.
   pero NUNCA tocarla ni fusionarla — lo hará él.
 - **Idiomas**: selector español/inglés, apuntado hace mucho y
   explícitamente aplazado. No empezar sin que lo pida.
+- **Botones "?" por la app**: hay una lista de sitios candidatos en
+  `IDEAS-AYUDAS.md`, en la raíz del repo, pendiente de que Koku marque
+  cuáles quiere. **No hacer ninguno hasta que responda.** Ese documento
+  es de trabajo, no documentación del proyecto: cuando se decidan, se
+  hacen y se vacía.
 - **Guías de uso dentro de la Tienda**: en el apartado de Tienda de
   Configuración, que cada herramienta tenga su guía de uso (cómo va el
   editor de tablas, Grupos, etc.). Koku lo dejó apuntado a propósito

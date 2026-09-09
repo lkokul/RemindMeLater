@@ -316,13 +316,12 @@
         <div id="groups-list-panel">
           <div id="groups-view-list" class="groups-list"></div>
 
-          <!-- Lapiz (entrar en modo editar) y "+" (grupo nuevo), abajo a
-               la derecha, mismo sitio que el "+" de Notas. En modo editar,
-               tocar un grupo abre su ficha en vez de entrar dentro. -->
+          <!-- Solo "+" (grupo nuevo), abajo a la derecha, mismo sitio que
+               el "+" de Notas. Aqui habia ademas un lapiz que encendia un
+               "modo editar"; se quito el 9/9/2026 al hacer las tarjetas
+               deslizables, para que haya UNA sola forma de editar un
+               grupo y no dos que hagan dudar (peticion de Koku). -->
           <div class="mobile-fab-wrap groups-fab-wrap">
-            <button type="button" id="btn-groups-edit-mode" class="mobile-fab groups-fab-secondary" aria-label="Editar grupos" title="Editar grupos">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-            </button>
             <button type="button" id="btn-groups-add" class="mobile-fab" aria-label="Nuevo grupo" title="Nuevo grupo">+</button>
           </div>
         </div>
@@ -2425,7 +2424,7 @@
         <h4>Colores</h4>
         <p class="hint">Clica una tarjeta para usar ese tema en este dispositivo. Cada dispositivo puede llevar un tema distinto.</p>
 
-        <p class="hint">Si un tema tiene variante clara/oscura emparejada (◐), esto hace que siga el modo de tu ordenador automáticamente. Para cambiarlo a mano, usa el botón de al lado (en escritorio hay además un atajo igual en la barra superior).</p>
+        <p class="hint">Si un tema tiene variante clara/oscura emparejada (lo marca la etiqueta con el sol o la luna en su tarjeta), esto hace que siga el modo de tu ordenador automáticamente. Para cambiarlo a mano, usa el botón de al lado (en escritorio hay además un atajo igual en la barra superior).</p>
         <div class="color-mode-row">
           <div id="color-mode-options" class="color-mode-options"></div>
           <button type="button" id="settings-quick-color-mode" class="icon-btn quick-color-mode-btn hidden" aria-label="Cambiar entre claro y oscuro"></button>
