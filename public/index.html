@@ -851,6 +851,46 @@
 
   <!-- Terminar la serie en curso: Si / Pausar / Seguir, con el tiempo de
        la serie a la vista (ese tiempo se guarda y se ve en el historial). -->
+  <!-- Editar UN ejercicio del entreno y todo lo que hay dentro. Se llega
+       deslizando su tarjeta (peticion de Koku: "yo deslizo el ejercicio
+       entero para editar cualquier cosa del ejercicio... se hace un
+       cuadro de dialogo mas grande, asi es mas comodo"). La tarjeta del
+       entreno se queda solo para USAR: plegar, empezar serie y mover el
+       ejercicio arriba/abajo. -->
+  <div id="gym-exercise-edit-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-exercise-edit-card">
+      <div class="modal-head">
+        <h2 id="gym-exercise-edit-title">Editar ejercicio</h2>
+        <button type="button" id="btn-close-gym-exercise-edit" class="icon-btn" aria-label="Cerrar">✕</button>
+      </div>
+      <form id="gym-exercise-edit-form">
+        <div class="gym-exercise-edit-top">
+          <label class="gym-set-field">
+            <span>Descanso entre series (s)</span>
+            <input type="number" id="gym-exercise-edit-rest" inputmode="numeric" min="0" />
+          </label>
+          <label class="gym-set-field">
+            <span>RPE del ejercicio</span>
+            <input type="number" id="gym-exercise-edit-rpe" inputmode="decimal" step="0.5" min="1" max="10" placeholder="—" />
+          </label>
+        </div>
+        <label class="gym-set-field">
+          <span>Nota del ejercicio</span>
+          <input type="text" id="gym-exercise-edit-note" placeholder="Sensaciones, peso próximo..." />
+        </label>
+
+        <h3 class="gym-subheading">Series</h3>
+        <div id="gym-exercise-edit-sets" class="gym-exercise-edit-sets"></div>
+        <button type="button" id="btn-gym-exercise-edit-add-set" class="secondary-btn gym-add-set-btn">+ Serie</button>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-gym-exercise-edit" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="gym-set-end-modal" class="modal hidden">
     <div class="modal-card gym-modal gym-set-modal">
       <h2>¿Has acabado la serie?</h2>

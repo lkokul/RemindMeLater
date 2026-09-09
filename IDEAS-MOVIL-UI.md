@@ -194,10 +194,14 @@ el calendario.
   GUARDADOS son siempre los reales: el ajuste se aplica solo al pintar,
   así que cambiar el factor no reescribe historial. Contador de series
   al fallo en el resumen del entreno y en Consistencia.
-- ✅ **Retocar una serie ya guardada**: tocando su número en el entreno
-  (nota, "al fallo" y tramos, sin reiniciar nada), y en el modal de
-  editar una sesión del historial, donde los tramos también se añaden,
-  cambian y quitan.
+- ✅ **La tarjeta del entreno es para USARLA**: sin campos sueltos donde
+  escribir. Tocar sirve para plegar, empezar/terminar la serie y
+  deshacerla; **deslizarla** da Editar / Mover / Quitar. "Editar" abre un
+  diálogo grande con el ejercicio entero (descanso, RPE, nota y cada
+  serie con su peso, repes, nota, "al fallo" y sus tramos). "Mover" arma
+  el arrastre para colocar el ejercicio donde quieras, y se desarma solo
+  al soltar. En el historial, el modal de editar una sesión también deja
+  añadir, cambiar y quitar tramos.
 - ✅ **Al acabar el descanso** el botón "Empezar serie N" se pone grande
   y la mini-barra global pasa a arrancar la serie al tocarla; hay además
   un interruptor (apagado de fábrica) para que empiece sola.

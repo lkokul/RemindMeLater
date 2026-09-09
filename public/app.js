@@ -8389,7 +8389,7 @@ function renderGymRoutinesList() {
 // que medir (el caso de "Todos los eventos", que se desliza solo para
 // que salte su aviso). Sin esto, un contenedor de acciones vacio mide
 // cuatro pixeles y el gesto no se notaria.
-function wrapRowWithSwipeActions(row, { onEdit, onDelete, botones, anchoFijo } = {}) {
+function wrapRowWithSwipeActions(row, { onEdit, onDelete, botones, anchoFijo, bloqueadoSi } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'note-swipe-wrap';
 
@@ -8425,6 +8425,9 @@ function wrapRowWithSwipeActions(row, { onEdit, onDelete, botones, anchoFijo } =
     row.style.transform = '';
   };
   row.addEventListener('pointerdown', (e) => {
+    // Hay filas que a veces tienen otro gesto encima (el modo mover del
+    // entreno): mientras ese esta activo, deslizar no hace nada.
+    if (bloqueadoSi && bloqueadoSi()) { inicio = null; return; }
     inicio = { x: e.clientX, y: e.clientY };
     horizontal = false;
   });
@@ -10003,8 +10006,7 @@ function gymLiveTick() {
     setTimers.forEach((el) => { el.textContent = t; });
   }
   const endTimer = document.getElementById('gym-set-end-timer');
-  if (endTimer && gymSetEndModo === 'activa'
-      && !document.getElementById('gym-set-end-modal').classList.contains('hidden')) {
+  if (endTimer && !document.getElementById('gym-set-end-modal').classList.contains('hidden')) {
     endTimer.textContent = gymLiveFormatClock(gymActiveSetSeconds());
   }
 
@@ -10874,13 +10876,251 @@ function gymSetEndShowForm(show) {
     : '¿Has acabado la serie?';
 }
 
-// El dialogo "Datos de la serie" sirve para dos cosas: cerrar la serie
-// que acabas de hacer ('activa') y RETOCAR una ya guardada ('editar',
-// peticion de Koku). En modo editar no hay cronometro que ensenar, no se
-// toca el descanso ni las notificaciones, y guardar no vuelve a marcar
-// nada como hecho: solo cambia los datos.
-let gymSetEndModo = 'activa';
-let gymSetEndEditRef = null;
+// --- Mover un ejercicio arrastrandolo --------------------------------
+// Peticion de Koku, en vez de las flechas de subir/bajar que habia:
+// "deslizamos el ejercicio hasta la posicion que queramos... ponemos de
+// intermediario el boton mover; una vez sueltas tendrias que volver a
+// darle a mover para que vuelva a mover".
+//
+// O sea: el arrastre NO esta siempre activo (arrastrar sin mas es hacer
+// scroll por la lista). Se ARMA desde el boton "Mover" del deslizamiento
+// y se desarma solo al soltar. Mientras esta armado, el deslizamiento
+// lateral de esa tarjeta se aparta (bloqueadoSi, arriba), asi los dos
+// gestos nunca se pisan.
+let gymEjercicioEnMovimiento = null;
+
+function armarMovimientoDeEjercicio(exerciseId) {
+  gymEjercicioEnMovimiento = exerciseId;
+  renderGymLiveExercises();
+  // El aviso solo la primera vez: luego ya se sabe.
+  if (localStorage.getItem('gymMoverHintSeen') !== '1') {
+    localStorage.setItem('gymMoverHintSeen', '1');
+    showAppAlert('Arrastra el ejercicio arriba o abajo hasta donde lo quieras. Al soltarlo se queda ahí; para moverlo otra vez, vuelve a deslizar y darle a "Mover".');
+  }
+}
+
+// Se engancha a cada tarjeta armada dentro de renderGymLiveExercises.
+function habilitarArrastreDeEjercicio(envoltorio) {
+  let arrastre = null;
+
+  // La lista se mira EN CADA USO, no al enganchar: esto se llama
+  // mientras se construye la tarjeta, cuando todavia no esta metida en
+  // el DOM y su parentElement es null.
+  const hermanos = () => {
+    const lista = envoltorio.parentElement;
+    return lista ? [...lista.querySelectorAll('.note-swipe-wrap[data-exercise-id]')] : [];
+  };
+
+  envoltorio.addEventListener('pointerdown', (e) => {
+    // Los botones de dentro siguen funcionando (empezar serie, plegar...).
+    if (e.target.closest('button, input, textarea, select, a, label')) return;
+    const filas = hermanos();
+    const desde = filas.indexOf(envoltorio);
+    if (desde < 0) return;
+    arrastre = {
+      y: e.clientY,
+      desde,
+      alto: envoltorio.offsetHeight + 13, // + el hueco entre tarjetas
+      hasta: desde,
+    };
+    // Capturar el puntero mantiene el arrastre aunque el dedo se salga
+    // de la tarjeta. Puede lanzar si ese puntero ya no esta activo (pasa
+    // con gestos que el sistema corta a media), y una excepcion aqui
+    // dejaria el arrastre a medias: no es imprescindible, asi que si
+    // falla se sigue sin ella.
+    try { envoltorio.setPointerCapture(e.pointerId); } catch { /* da igual */ }
+    envoltorio.classList.add('arrastrando');
+  });
+
+  envoltorio.addEventListener('pointermove', (e) => {
+    if (!arrastre) return;
+    e.preventDefault();
+    const dy = e.clientY - arrastre.y;
+    envoltorio.style.transform = `translateY(${dy}px)`;
+    // A que posicion caeria si soltase ahora: cuantas tarjetas enteras
+    // ha recorrido, topado a los extremos de la lista.
+    const filas = hermanos();
+    const saltos = Math.round(dy / arrastre.alto);
+    const destino = Math.max(0, Math.min(filas.length - 1, arrastre.desde + saltos));
+    if (destino !== arrastre.hasta) {
+      arrastre.hasta = destino;
+      // Las tarjetas de en medio se apartan para que se vea el hueco.
+      filas.forEach((fila, i) => {
+        if (fila === envoltorio) return;
+        let corrimiento = 0;
+        if (arrastre.desde < destino && i > arrastre.desde && i <= destino) corrimiento = -arrastre.alto;
+        else if (arrastre.desde > destino && i >= destino && i < arrastre.desde) corrimiento = arrastre.alto;
+        fila.style.transform = corrimiento ? `translateY(${corrimiento}px)` : '';
+      });
+    }
+  });
+
+  const soltar = () => {
+    if (!arrastre) return;
+    const { desde, hasta } = arrastre;
+    arrastre = null;
+    envoltorio.classList.remove('arrastrando');
+    // El modo se desarma SIEMPRE al soltar, lo pidio asi Koku.
+    gymEjercicioEnMovimiento = null;
+    if (hasta !== desde && gymLiveSession) {
+      const arr = gymLiveSession.exercises;
+      const [movido] = arr.splice(desde, 1);
+      arr.splice(hasta, 0, movido);
+      gymLiveStore();
+    }
+    // Repintar borra de paso todos los transform en linea.
+    renderGymLiveExercises();
+  };
+  envoltorio.addEventListener('pointerup', soltar);
+  envoltorio.addEventListener('pointercancel', soltar);
+}
+
+// --- Editar un ejercicio del entreno, entero -------------------------
+// Se llega DESLIZANDO su tarjeta. Koku lo pidio asi: "yo deslizo el
+// ejercicio entero para editar cualquier cosa del ejercicio... se hace
+// un cuadro de dialogo mas grande, asi es mas comodo de editar el
+// ejercicio y todo lo que haya dentro". A cambio, la tarjeta del entreno
+// se queda SOLO para usarla (plegar, empezar serie y mover), sin ningun
+// campo suelto donde escribir.
+//
+// Se trabaja sobre una COPIA: cancelar descarta de verdad, y guardar es
+// lo unico que toca la sesion.
+let gymExerciseEditId = null;
+let gymExerciseEditDraft = null;
+
+function openGymExerciseEditModal(exerciseId) {
+  if (!gymLiveSession) return;
+  const ex = gymLiveSession.exercises.find((e) => e.exerciseId === exerciseId);
+  if (!ex) return;
+  gymExerciseEditId = exerciseId;
+  gymExerciseEditDraft = {
+    // El descanso es del EJERCICIO: se guarda replicado en cada serie,
+    // asi que se lee de la primera y al guardar se aplica a todas.
+    restSeconds: (ex.sets[0] && ex.sets[0].restSeconds) ?? '',
+    sets: ex.sets.map((set) => ({
+      ...set,
+      segments: (set.segments || []).map((seg) => ({ ...seg })),
+    })),
+  };
+  const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+  document.getElementById('gym-exercise-edit-title').textContent = exercise ? exercise.name : 'Editar ejercicio';
+  document.getElementById('gym-exercise-edit-rest').value = gymExerciseEditDraft.restSeconds;
+  document.getElementById('gym-exercise-edit-rpe').value = ex.rpe ?? '';
+  document.getElementById('gym-exercise-edit-note').value = ex.note ?? '';
+  renderGymExerciseEditSets();
+  document.getElementById('gym-exercise-edit-modal').classList.remove('hidden');
+}
+
+function renderGymExerciseEditSets() {
+  const cont = document.getElementById('gym-exercise-edit-sets');
+  cont.innerHTML = '';
+  const unit = getGymWeightUnitLabel();
+  const draft = gymExerciseEditDraft;
+  if (!draft) return;
+  if (draft.sets.length === 0) {
+    cont.innerHTML = '<p class="empty-hint">Este ejercicio se ha quedado sin series. Añade una, o cancela y quita el ejercicio.</p>';
+    return;
+  }
+  draft.sets.forEach((set, i) => {
+    const bloque = document.createElement('div');
+    bloque.className = 'gym-exercise-edit-set';
+    bloque.innerHTML = `
+      <div class="gym-set-segment-head">
+        <span class="gym-set-segment-tag">${i + 1}</span>
+        <span class="gym-set-segment-name">${set.side ? `Lado ${gymSideLabel(set.side)}` : 'Serie'}${set.done ? '' : ' · sin hacer'}</span>
+        <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar esta serie">✕</button>
+      </div>
+      <div class="gym-set-segment-fields">
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="number" inputmode="decimal" step="0.5" min="0" data-set-field="weightDisplay" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-set-field="reps" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
+      </div>
+      <label class="gym-set-segment-field"><span>Nota de la serie</span><input type="text" data-set-field="note" value="${escapeHtml(String(set.note ?? ''))}" /></label>
+      <div class="gym-set-segments" data-tramos-de="${i}"></div>
+      <div class="gym-set-extend-list gym-session-set-actions">
+        <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
+        <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
+        <button type="button" class="gym-set-extend-btn${set.failure ? ' is-on' : ''}" data-toggle-failure>${set.failure ? '✓ ' : ''}Al fallo</button>
+      </div>
+    `;
+    bloque.querySelectorAll('[data-set-field]').forEach((input) => {
+      input.addEventListener('input', () => { set[input.dataset.setField] = input.value; });
+    });
+    bloque.querySelector('[data-quitar-serie]').addEventListener('click', async () => {
+      const ok = await showAppConfirm('¿Quitar esta serie del ejercicio?', { okText: 'Quitar', danger: true });
+      if (!ok) return;
+      draft.sets.splice(i, 1);
+      renderGymExerciseEditSets();
+    });
+    bloque.querySelector('[data-toggle-failure]').addEventListener('click', () => {
+      set.failure = !set.failure;
+      renderGymExerciseEditSets();
+    });
+    const editor = bloque.querySelector('[data-tramos-de]');
+    if (!Array.isArray(set.segments)) set.segments = [];
+    const pintar = () => montarEditorDeTramos(editor, set.segments, {
+      pesoMadre: bloque.querySelector('[data-set-field="weightDisplay"]').value || '',
+      alQuitar: () => pintar(),
+    });
+    pintar();
+    bloque.querySelectorAll('[data-add-seg]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        set.segments.push({ kind: btn.dataset.addSeg, weightDisplay: '', reps: '', pauseSeconds: '' });
+        pintar();
+      });
+    });
+    cont.appendChild(bloque);
+  });
+}
+
+function closeGymExerciseEditModal() {
+  document.getElementById('gym-exercise-edit-modal').classList.add('hidden');
+  gymExerciseEditId = null;
+  gymExerciseEditDraft = null;
+}
+
+document.getElementById('btn-close-gym-exercise-edit').addEventListener('click', closeGymExerciseEditModal);
+document.getElementById('btn-cancel-gym-exercise-edit').addEventListener('click', closeGymExerciseEditModal);
+
+document.getElementById('btn-gym-exercise-edit-add-set').addEventListener('click', () => {
+  const draft = gymExerciseEditDraft;
+  if (!draft) return;
+  const ultima = draft.sets[draft.sets.length - 1];
+  const desde = draft.sets.length;
+  // Una serie mas: dos filas si el ejercicio cuenta los lados aparte.
+  draft.sets.push(...gymBuildSetsForExercise(gymExerciseEditId, 1, ultima ? ultima.restSeconds : draft.restSeconds));
+  const ex = gymLiveSession && gymLiveSession.exercises.find((e) => e.exerciseId === gymExerciseEditId);
+  if (ex && ex.firstSide === 'right') gymSetStartSide(draft, desde, 'right');
+  renderGymExerciseEditSets();
+});
+
+document.getElementById('gym-exercise-edit-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const ex = gymLiveSession && gymLiveSession.exercises.find((x) => x.exerciseId === gymExerciseEditId);
+  const draft = gymExerciseEditDraft;
+  if (!ex || !draft) { closeGymExerciseEditModal(); return; }
+  const rest = document.getElementById('gym-exercise-edit-rest').value;
+  ex.rpe = document.getElementById('gym-exercise-edit-rpe').value;
+  ex.note = document.getElementById('gym-exercise-edit-note').value;
+  // Los tramos se leen del DOM (la sugerencia gris solo existe ahi).
+  draft.sets.forEach((set, i) => {
+    const editor = document.querySelector(`#gym-exercise-edit-sets [data-tramos-de="${i}"]`);
+    set.segments = gymLeerTramosDe(editor);
+    set.restSeconds = rest;
+  });
+  // Si la serie EN CURSO era de este ejercicio y ha desaparecido al
+  // quitar series, se cancela: si no, quedaria un cronometro corriendo
+  // sobre una serie que ya no existe, y ningun otro ejercicio dejaria
+  // empezar (solo puede haber una serie a la vez).
+  const activa = gymLiveSession.activeSet;
+  if (activa && activa.exerciseId === ex.exerciseId && !draft.sets[activa.setIndex]) {
+    gymLiveSession.activeSet = null;
+  }
+  ex.sets = draft.sets;
+  gymLiveStore();
+  closeGymExerciseEditModal();
+  renderGymLiveExercises();
+  gymLiveTick();
+});
 
 // Rellena los campos del formulario a partir de una serie.
 function gymVolcarSerieEnFormulario(set, sugerencia) {
@@ -10898,65 +11138,9 @@ function gymVolcarSerieEnFormulario(set, sugerencia) {
   renderGymSetEndFailure();
 }
 
-// Retocar una serie YA guardada del entreno: se llega tocando su numero
-// en la fila. Aqui esta lo que no se puede arreglar escribiendo en la
-// propia fila -- la nota, el "al fallo" y sobre todo los tramos.
-function openGymSetEditModal(exIndex, setIndex) {
-  if (!gymLiveSession) return;
-  const ex = gymLiveSession.exercises[exIndex];
-  const set = ex && ex.sets[setIndex];
-  if (!set || !set.done) return;
-  gymSetEndModo = 'editar';
-  // Por ID y no por indice: con el dialogo abierto se puede quitar o
-  // reordenar un ejercicio (los botones ✕/↑/↓ de la tarjeta), y entonces
-  // el indice apuntaria a OTRO ejercicio -- la edicion se guardaria en la
-  // serie equivocada.
-  gymSetEndEditRef = { exerciseId: ex.exerciseId, setIndex };
-  const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
-  const lado = set.side ? ` · lado ${gymSideLabel(set.side)}` : '';
-  document.getElementById('gym-set-end-info').textContent =
-    `${exercise ? exercise.name : 'Ejercicio'} · Serie ${gymSetSerieNumber(ex, setIndex)}${lado}`;
-  gymVolcarSerieEnFormulario(set, null);
-  // Sin cronometro: esta serie ya termino.
-  document.getElementById('gym-set-end-timer').classList.add('hidden');
-  document.getElementById('btn-gym-set-end-save').textContent = 'Guardar cambios';
-  gymSetEndShowForm(true);
-  document.getElementById('gym-set-end-modal').classList.remove('hidden');
-}
-
-function gymGuardarEdicionDeSerie() {
-  const ref = gymSetEndEditRef;
-  const ex = ref && gymLiveSession
-    ? gymLiveSession.exercises.find((e) => e.exerciseId === ref.exerciseId)
-    : null;
-  const set = ex && ex.sets[ref.setIndex];
-  // Si el ejercicio ya no esta (se quito mientras el dialogo estaba
-  // abierto), no se escribe nada: se cierra y ya.
-  if (set) {
-    const wEl = document.getElementById('gym-set-end-weight');
-    const rEl = document.getElementById('gym-set-end-reps');
-    set.weightDisplay = wEl.value !== '' ? wEl.value : (wEl.placeholder || '');
-    set.reps = rEl.value !== '' ? rEl.value : (rEl.placeholder || '');
-    set.note = document.getElementById('gym-set-end-note').value;
-    set.segments = gymLeerTramosDelFormulario();
-    set.failure = gymSetEndFailure;
-    // Ojo con lo que NO se toca: done, durationSeconds, extraRest y el
-    // descanso en marcha. Retocar los datos de una serie no la vuelve a
-    // "hacer" ni reinicia nada del entreno.
-    if (ex.sets.every((x) => x.done)) gymCombineSetNotes(ex);
-  }
-  gymLiveStore();
-  closeGymSetEndModal();
-  renderGymLiveExercises();
-}
-
 function openGymSetEndModal() {
   const a = gymLiveSession && gymLiveSession.activeSet;
   if (!a) return;
-  gymSetEndModo = 'activa';
-  gymSetEndEditRef = null;
-  document.getElementById('gym-set-end-timer').classList.remove('hidden');
-  document.getElementById('btn-gym-set-end-save').textContent = 'Guardar serie';
   const ex = gymActiveSetExercise();
   const exercise = state.gymExercises.find((e) => e.id === a.exerciseId);
   const set = ex && ex.sets[a.setIndex];
@@ -11252,10 +11436,7 @@ function gymFinishActiveSet() {
   gymLiveTick();
 }
 
-document.getElementById('btn-gym-set-end-save').addEventListener('click', () => {
-  if (gymSetEndModo === 'editar') gymGuardarEdicionDeSerie();
-  else gymFinishActiveSet();
-});
+document.getElementById('btn-gym-set-end-save').addEventListener('click', gymFinishActiveSet);
 document.getElementById('btn-gym-set-end-continue').addEventListener('click', closeGymSetEndModal);
 document.getElementById('btn-gym-set-end-pause').addEventListener('click', () => {
   const a = gymLiveSession && gymLiveSession.activeSet;
@@ -11321,10 +11502,10 @@ function renderGymLiveExercises() {
         : '—';
       return `
         <div class="gym-live-set-row ${set.done ? 'done' : ''}">
-          <span class="gym-live-set-number${set.done ? ' is-editable' : ''}" ${set.done ? `data-live-set-edit="${setIndex}" role="button" tabindex="0" title="Tocar para retocar esta serie"` : ''}>${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymFailureChipHtml(set.failure)}${gymSegmentChipHtml(set)}</span>
+          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymFailureChipHtml(set.failure)}${gymSegmentChipHtml(set)}</span>
           <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
-          <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${unit}" data-live-field="weightDisplay" data-set="${setIndex}" value="${set.weightDisplay}" />
-          <input type="number" inputmode="numeric" min="0" placeholder="reps" data-live-field="reps" data-set="${setIndex}" value="${set.reps}" />
+          <span class="gym-live-set-value">${escapeHtml(String(set.weightDisplay || '—'))}</span>
+          <span class="gym-live-set-value">${escapeHtml(String(set.reps || '—'))}</span>
           <button type="button" class="gym-set-status${set.done ? ' done' : ''}" data-live-status="${setIndex}" aria-label="${set.done ? 'Deshacer esta serie' : 'Serie pendiente'}" title="${set.done ? 'Deshacer esta serie' : 'Pendiente'}">${set.done ? '✓' : ''}</button>
         </div>
       `;
@@ -11366,11 +11547,8 @@ function renderGymLiveExercises() {
       <div class="gym-live-exercise-header" data-live-toggle-collapse>
         <span class="gym-live-caret" aria-hidden="true">▾</span>
         <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
-        <button type="button" class="gym-live-rest-chip" data-live-rest-chip title="Descanso entre series de este ejercicio (tocar para cambiarlo)">${restSeconds ? gymFormatRestDisplay(restSeconds) : 'descanso'}</button>
+        <span class="gym-live-rest-chip is-static" title="Descanso entre series">${restSeconds ? gymFormatRestDisplay(restSeconds) : '—'}</span>
         <span class="gym-live-card-progress">${doneCount}/${ex.sets.length}</span>
-        <button type="button" class="icon-btn gym-live-card-btn" data-live-move-up aria-label="Subir ejercicio" ${exIndex === 0 ? 'disabled' : ''}>↑</button>
-        <button type="button" class="icon-btn gym-live-card-btn" data-live-move-down aria-label="Bajar ejercicio" ${exIndex === gymLiveSession.exercises.length - 1 ? 'disabled' : ''}>↓</button>
-        <button type="button" class="icon-btn gym-live-card-btn" data-live-remove-exercise aria-label="Quitar ejercicio">✕</button>
       </div>
       <div class="gym-live-card-body">
         ${exercise && exercise.notes ? `<p class="gym-live-fixed-note">${escapeHtml(exercise.notes)}</p>` : ''}
@@ -11382,13 +11560,7 @@ function renderGymLiveExercises() {
         </div>
         ${setsHtml}
         ${bigBtnHtml}
-        <div class="gym-live-card-footer">
-          <button type="button" class="secondary-btn gym-add-set-btn" data-live-add-set>+ Serie</button>
-          <label class="gym-live-exrpe">RPE
-            <input type="number" inputmode="decimal" step="0.5" min="1" max="10" placeholder="—" data-live-exrpe value="${ex.rpe}" />
-          </label>
-        </div>
-        <input type="text" class="gym-live-note" data-live-note placeholder="Nota (sensaciones, peso próximo...)" value="${escapeHtml(ex.note || '')}" />
+        ${ex.rpe || (ex.note && ex.note.trim()) ? `<p class="gym-live-card-meta">${ex.rpe ? `RPE ${escapeHtml(String(ex.rpe))}` : ''}${ex.rpe && ex.note && ex.note.trim() ? ' · ' : ''}${ex.note ? escapeHtml(ex.note) : ''}</p>` : ''}
       </div>
     `;
 
@@ -11400,69 +11572,10 @@ function renderGymLiveExercises() {
       gymLiveStore();
       card.classList.toggle('collapsed', ex.collapsed);
     });
-    // Chip de descanso: tocarlo lo convierte en un campo de segundos; al
-    // confirmar, el nuevo descanso se aplica a TODAS las series del
-    // ejercicio (es "el descanso de este ejercicio", no de una serie).
-    card.querySelector('[data-live-rest-chip]').addEventListener('click', (e) => {
-      e.stopPropagation();
-      const chip = e.currentTarget;
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.inputMode = 'numeric';
-      input.min = '0';
-      input.className = 'gym-live-rest-chip-input';
-      input.value = restSeconds || '';
-      input.placeholder = 's';
-      input.title = 'Segundos de descanso';
-      chip.replaceWith(input);
-      input.focus();
-      const commit = () => {
-        const value = input.value === '' ? '' : Math.max(0, Number(input.value));
-        ex.sets.forEach((s) => { s.restSeconds = value; });
-        gymLiveStore();
-        renderGymLiveExercises();
-      };
-      input.addEventListener('blur', commit);
-      input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); } });
-    });
-    card.querySelector('[data-live-move-up]').addEventListener('click', () => {
-      if (exIndex === 0) return;
-      const arr = gymLiveSession.exercises;
-      [arr[exIndex - 1], arr[exIndex]] = [arr[exIndex], arr[exIndex - 1]];
-      gymLiveStore();
-      renderGymLiveExercises();
-    });
-    card.querySelector('[data-live-move-down]').addEventListener('click', () => {
-      const arr = gymLiveSession.exercises;
-      if (exIndex >= arr.length - 1) return;
-      [arr[exIndex], arr[exIndex + 1]] = [arr[exIndex + 1], arr[exIndex]];
-      gymLiveStore();
-      renderGymLiveExercises();
-    });
 
-    card.querySelectorAll('[data-live-field]').forEach((input) => {
-      input.addEventListener('input', () => {
-        ex.sets[Number(input.dataset.set)][input.dataset.liveField] = input.value;
-        gymLiveStore();
-      });
-    });
-    card.querySelector('[data-live-exrpe]').addEventListener('input', (e) => {
-      ex.rpe = e.target.value;
-      gymLiveStore();
-    });
     // El ✓ de cada fila ya no es un control para MARCAR (eso lo hace el
     // boton grande): solo indica estado y sirve para DESHACER una serie
     // dada por buena por error.
-    // Tocar el numero de una serie ya guardada la reabre para retocarla
-    // (nota, "al fallo" y tramos -- el peso y las repes se pueden cambiar
-    // ya en la propia fila).
-    card.querySelectorAll('[data-live-set-edit]').forEach((el) => {
-      const abrir = () => openGymSetEditModal(exIndex, Number(el.dataset.liveSetEdit));
-      el.addEventListener('click', abrir);
-      el.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); }
-      });
-    });
     card.querySelectorAll('[data-live-status]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const setIndex = Number(btn.dataset.liveStatus);
@@ -11502,17 +11615,9 @@ function renderGymLiveExercises() {
         }
       });
     }
-    card.querySelector('[data-live-add-set]').addEventListener('click', () => {
-      const last = ex.sets[ex.sets.length - 1];
-      // Una serie mas: dos filas si el ejercicio cuenta los lados aparte,
-      // saliendo por el lado que se venga usando en este ejercicio.
-      const desde = ex.sets.length;
-      ex.sets.push(...gymBuildSetsForExercise(ex.exerciseId, 1, last ? last.restSeconds : ''));
-      if (ex.firstSide === 'right') gymSetStartSide(ex, desde, 'right');
-      gymLiveStore();
-      renderGymLiveExercises();
-    });
-    card.querySelector('[data-live-remove-exercise]').addEventListener('click', async () => {
+    // Quitar el ejercicio: ahora se llega DESLIZANDO la tarjeta (ver el
+    // envoltorio de abajo), no con una ✕ en la cabecera.
+    const quitarEjercicio = async () => {
       const ok = await showAppConfirm('¿Quitar este ejercicio del entrenamiento? Podrás recuperarlo con sus series desde "Ejercicios quitados", abajo del todo.', { okText: 'Quitar', danger: true });
       if (!ok) return;
       // No se pierde: va al pool de quitados de ESTA sesion, con sus
@@ -11527,13 +11632,30 @@ function renderGymLiveExercises() {
       gymLiveSession.exercises.splice(exIndex, 1);
       gymLiveStore();
       renderGymLiveExercises();
-    });
-    card.querySelector('[data-live-note]').addEventListener('input', (e) => {
-      ex.note = e.target.value;
-      gymLiveStore();
-    });
+    };
 
-    container.appendChild(card);
+    // La tarjeta se DESLIZA para editar o quitar el ejercicio (petición
+    // de Koku). Funciona bien justo porque la tarjeta ya no tiene ningún
+    // campo donde escribir: arrastrarla no pelea con meter el dedo en un
+    // input. Lo que queda a golpe de toque es solo usarla: plegar,
+    // empezar la serie y mover el ejercicio arriba/abajo.
+    const envoltorio = wrapRowWithSwipeActions(card, {
+      botones: [
+        ['Editar', 'secondary-btn', () => openGymExerciseEditModal(ex.exerciseId)],
+        ['Mover', 'secondary-btn', () => armarMovimientoDeEjercicio(ex.exerciseId)],
+        ['Quitar', 'danger-btn', quitarEjercicio],
+      ],
+      anchoFijo: 210,
+      // Con el modo mover armado, el deslizamiento lateral se aparta: el
+      // gesto que manda entonces es arrastrar la tarjeta arriba y abajo.
+      bloqueadoSi: () => gymEjercicioEnMovimiento !== null,
+    });
+    envoltorio.dataset.exerciseId = String(ex.exerciseId);
+    if (gymEjercicioEnMovimiento === ex.exerciseId) {
+      envoltorio.classList.add('esta-moviendose');
+      habilitarArrastreDeEjercicio(envoltorio);
+    }
+    container.appendChild(envoltorio);
   });
 
   // Ejercicios QUITADOS durante esta sesion: recuperables con sus series
@@ -11766,6 +11888,10 @@ document.getElementById('btn-gym-live-discard').addEventListener('click', async 
 
 // Terminar: convertir lo hecho en una sesion de verdad + resumen.
 document.getElementById('btn-gym-live-finish').addEventListener('click', async () => {
+  // Sin entreno en marcha no hay nada que terminar. No deberia pasar (el
+  // boton vive dentro de la pantalla del entreno, que solo se ve con una
+  // sesion abierta), pero sin esto la funcion revienta con un null.
+  if (!gymLiveSession) return;
   // Solo cuentan las series marcadas como hechas o con algun dato; las
   // filas vacias pre-creadas por el plan se ignoran sin molestar.
   const sets = [];

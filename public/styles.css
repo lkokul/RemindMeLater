@@ -2542,7 +2542,15 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 #gym-live-view .primary-btn { background: var(--gym-accent); color: var(--gym-accent-text); border-color: var(--gym-accent); }
 .gym-live-clock { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.05rem; margin-right: 0.4rem; }
 .gym-live-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem 8rem; display: flex; flex-direction: column; gap: 0.8rem; }
-.gym-live-exercises { display: flex; flex-direction: column; gap: 0.8rem; }
+.gym-live-exercises {
+  display: flex; flex-direction: column; gap: 0.8rem;
+  /* Hueco al final para que la ULTIMA tarjeta pueda subir por encima del
+     boton flotante de acciones. Sin esto, el "⋮" se come la esquina
+     derecha de la ultima tarjeta y tapa sus botones (lo vio Koku en el
+     iPhone: no podia darle a la ✕ del ultimo ejercicio). El alto del
+     boton (52px) mas su separacion del borde. */
+  padding-bottom: calc(52px + 1.5rem);
+}
 .gym-live-exercise-card {
   background: var(--surface-2);
   border-radius: var(--radius);
@@ -2832,12 +2840,74 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   color: var(--gym-accent-text);
 }
 
-/* El numero de una serie ya guardada se puede tocar para retocarla. */
-.gym-live-set-number.is-editable {
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 0.2rem;
+/* --- La tarjeta del entreno: solo para USARLA -------------------------
+   Peticion de Koku: sin campos sueltos donde escribir. Tocar sirve para
+   plegar, empezar la serie y poco mas; editar y quitar salen deslizando,
+   y mover se arma desde ahi. Como la tarjeta ya no tiene inputs, el
+   deslizamiento no pelea con meter el dedo en un campo. */
+.gym-live-set-value {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--surface-2-text);
+}
+.gym-live-set-row.done .gym-live-set-value { font-weight: 600; }
+/* El descanso pasa a ser un dato, no un boton. */
+.gym-live-rest-chip.is-static {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: color-mix(in srgb, var(--surface-2-text) 70%, var(--surface-2));
+  cursor: default;
+}
+/* RPE y nota del ejercicio, ya solo de lectura en la tarjeta. */
+.gym-live-card-meta {
+  margin: 0;
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}
+
+/* La tarjeta deslizable necesita su fondo propio para TAPAR los botones
+   que quedan debajo (ver CLAUDE.md: hacen falta las dos reglas). */
+.note-swipe-wrap > .gym-live-exercise-card {
+  position: relative;
+  background: var(--surface-2);
+  transition: transform 0.18s ease;
+}
+.note-swipe-wrap.is-dragging > .gym-live-exercise-card { transition: none; }
+
+/* Modo mover armado: la tarjeta se levanta y avisa de que ahora se
+   arrastra. Al soltar se desarma sola. */
+.note-swipe-wrap.esta-moviendose > .gym-live-exercise-card {
+  outline: 2px dashed var(--gym-accent);
+  outline-offset: 2px;
+  cursor: grab;
+}
+.note-swipe-wrap.esta-moviendose { touch-action: none; }
+.note-swipe-wrap.arrastrando {
+  z-index: 3;
+  position: relative;
+}
+.note-swipe-wrap.arrastrando > .gym-live-exercise-card {
+  cursor: grabbing;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+  transform: scale(1.02);
+}
+/* Las tarjetas que se apartan para dejar el hueco lo hacen con calma. */
+.note-swipe-wrap[data-exercise-id] { transition: transform 0.16s ease; }
+.note-swipe-wrap.arrastrando { transition: none; }
+
+/* --- El diálogo de editar un ejercicio entero ------------------------- */
+.gym-exercise-edit-card { max-width: 34rem; }
+.gym-exercise-edit-top { display: flex; gap: 0.5rem; }
+.gym-exercise-edit-top .gym-set-field { flex: 1; min-width: 0; }
+.gym-exercise-edit-sets { display: flex; flex-direction: column; gap: 0.7rem; }
+.gym-exercise-edit-set {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
 }
 
 /* --- "Te toca": el descanso acabo y queda serie pendiente -------------

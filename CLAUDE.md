@@ -998,29 +998,66 @@ el placeholder si `Number.isFinite()`.
 
 **Retocar una serie después** (petición de Koku: *"a lo mejor le he dado
 a acabar y se me ha olvidado darle a que he hecho alguna o le he dado mal
-al peso"*). El peso y las repes ya se podían corregir escribiendo en la
-propia fila; lo que no se alcanzaba era la nota, el "al fallo" y los
-tramos. Dos entradas, y las dos usan el MISMO editor
+al peso"*). Todo lo que se edita usa el MISMO editor de tramos
 (`montarEditorDeTramos()` / `gymLeerTramosDe()`, montables sobre
-cualquier contenedor — antes estaban atados al diálogo):
+cualquier contenedor):
 
-- **En el entreno**: tocar el NÚMERO de una serie ya hecha reabre
-  "Datos de la serie" en modo `'editar'`. Ese modo va directo al
-  formulario, sin cronómetro ni preguntas, y guardar **no toca** `done`,
-  la duración, el descanso ni las notificaciones: solo cambia los datos.
-  El modo vive en `gymSetEndModo`; `openGymSetEndModal()` lo devuelve
-  siempre a `'activa'`, que es lo que evita que el flujo normal herede
-  nada del anterior. La referencia a la serie que se edita se guarda por
-  **id de ejercicio**, no por índice: con el diálogo abierto se puede
-  quitar o reordenar un ejercicio desde su tarjeta, y un índice guardado
-  apuntaría entonces a OTRO ejercicio — la edición se escribiría en la
-  serie equivocada.
+- **En el entreno**: deslizando la tarjeta del ejercicio → "Editar" (ver
+  el bloque siguiente).
 - **En el historial**: en el modal de editar una sesión, cada serie tiene
   su editor de tramos (añadir, cambiar y quitar) y un botón "Al fallo".
   Ahí los tramos viven en unidades de PANTALLA (como `weightDisplay` de
   la serie) y se convierten a kg al guardar. Se leen del DOM y no del
   array, porque un tramo recién añadido puede estar confiando en la
   sugerencia gris y esa solo existe ahí.
+
+## La tarjeta del entreno: para USARLA, no para editarla
+
+Rediseño pedido por Koku el 9/9/2026, y el disparador fue un fallo real:
+el botón flotante de acciones (⋮) tapaba la ✕ del ÚLTIMO ejercicio y no
+se podía quitar. Eso se arregló aparte con un hueco al final de la lista
+(`padding-bottom` en `.gym-live-exercises`), pero de ahí salió el
+rediseño: *"yo deslizo el ejercicio entero para editar cualquier cosa
+del ejercicio... se hace un cuadro de diálogo más grande, así es más
+cómodo. Sin deslizar se puede comenzar serie, subir o bajar ejercicio y
+ya, todo el resto deslizando, editar o eliminar"*.
+
+**La tarjeta ya no tiene ni un campo donde escribir.** Peso, repes, RPE
+y nota se VEN, no se tocan; el descanso es un dato, no un chip pulsable.
+Lo que queda a golpe de toque: plegar/desplegar, empezar o terminar la
+serie, y el ✓ de deshacer. Eso tiene una consecuencia que hace que todo
+encaje: **sin inputs, la tarjeta se puede deslizar sin pelearse con
+nadie** — antes, arrastrarla habría chocado con meter el dedo en un
+campo.
+
+**Deslizarla da tres acciones**: Editar / Mover / Quitar.
+
+- **Editar** abre `#gym-exercise-edit-modal`, un diálogo grande con el
+  ejercicio ENTERO: descanso, RPE, nota, y cada serie con su peso,
+  repes, nota, "al fallo", sus tramos y un ✕ para quitarla, más
+  "+ Serie". Trabaja sobre una **copia** (`gymExerciseEditDraft`), así
+  que Cancelar descarta de verdad. Al guardar, si la serie EN CURSO era
+  de ese ejercicio y ha desaparecido al quitar series, se cancela — si
+  no, quedaría un cronómetro corriendo sobre una serie inexistente y
+  ningún otro ejercicio dejaría empezar.
+- **Mover** sustituye a las flechas ↑↓ que había en la cabecera. No es un
+  arrastre siempre activo (arrastrar sin más es hacer scroll): se ARMA
+  desde ese botón y se desarma **solo al soltar**, tal como lo pidió
+  (*"una vez sueltas tendrías que volver a darle a mover"*). Mientras
+  está armado, el deslizamiento lateral de esa tarjeta se aparta
+  (`bloqueadoSi` en `wrapRowWithSwipeActions`), así los dos gestos nunca
+  se pisan. Ver `armarMovimientoDeEjercicio()` y
+  `habilitarArrastreDeEjercicio()`.
+- **Quitar** es lo de siempre: va al pool de quitados, recuperable.
+
+Trampas que ya mordieron al construirlo:
+
+- `habilitarArrastreDeEjercicio()` se llama MIENTRAS se construye la
+  tarjeta, cuando todavía no está en el DOM: leer `parentElement` ahí da
+  `null`. La lista de hermanos se mira en cada uso, no al enganchar.
+- `setPointerCapture()` **lanza** si ese puntero ya no está activo (pasa
+  con gestos que el sistema corta a medias). Va en un `try/catch`: no es
+  imprescindible, y una excepción ahí dejaba el arrastre a medias.
 
 Con esto desapareció `gymSegmentLinesHtml()` (las sub-líneas de solo
 lectura del historial): ya no hacía falta, los tramos se ven en su
