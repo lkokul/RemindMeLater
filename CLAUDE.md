@@ -731,6 +731,38 @@ añadir su selector a las reglas `.note-swipe-wrap > ...` de
 `is-dragging`), con su fondo propio — la fila tiene que TAPAR los
 botones que quedan debajo.
 
+## El área segura no era solo de los popovers
+
+(9/9/2026, usando la app de verdad.) Los **modales** llegaban demasiado
+arriba y se metían bajo la Dynamic Island — se veía sobre todo en los
+altos, el de editar una sesión del historial y el de editar un ejercicio
+del entreno. `.modal` tenía `padding: 1rem` a secas y `.modal-card` un
+`max-height: 95vh` medido sobre la pantalla ENTERA.
+
+Ahora el padding de `.modal` suma `env(safe-area-inset-*)` arriba y
+abajo, y la tarjeta usa `max-height: 100%` — que como el modal es un flex
+de altura definida, se resuelve contra la franja que deja ese padding, no
+contra la pantalla. Un solo arreglo cubre todos los modales de la app.
+
+## Los interruptores llevaban el círculo descentrado
+
+Koku: *"los selectores no están centrados, mira todos los que haya en la
+app"*. El comentario del CSS presumía de números redondos (pista 2.4rem,
+círculo 1rem, hueco 0.2rem) pero **se olvidaba del borde**: al ser
+`position: absolute`, el círculo se coloca respecto a la caja de RELLENO,
+que mide 2px menos de ancho y de alto. Encendido, el hueco derecho
+quedaba en `0.2rem - 2px` (casi tocando) y abajo igual.
+
+Arreglado con `top: 50%` + `translateY(-50%)` (centrado que no depende
+del grosor del borde) y `translateX(calc(1rem - 2px))` al encender. De
+paso, la rayita del estado indeterminado de `.styled-checkbox` también
+iba con un `45%` a ojo.
+
+**Trampa al comprobarlo**: el círculo tiene `transition`, así que medir
+`getComputedStyle` justo después de cambiar el estado devuelve el valor
+de PARTIDA y parece que la regla no aplica. Hay que esperar a que termine
+la transición antes de medir.
+
 ## Popovers flotantes y el área segura
 
 `positionFixedPopover()` en `settings.js` ha roto dos veces, por motivos

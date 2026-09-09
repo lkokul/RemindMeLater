@@ -799,16 +799,22 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .checkbox-row input[type="checkbox"]::before {
   content: '';
   position: absolute;
-  /* Numeros redondos a proposito (pista 2.4rem, circulo 1rem, hueco
-     0.2rem): asi el hueco a la izquierda cuando esta apagado y el hueco
-     a la derecha cuando esta encendido salen EXACTAMENTE iguales
-     (2.4 - 0.2 - 1 = 1.2, que es justo lo que se desplaza abajo). */
-  top: 0.2rem;
+  /* Numeros redondos (pista 2.4rem, circulo 1rem, hueco 0.2rem) PERO
+     ojo con el borde: al ser position:absolute, el circulo se coloca
+     respecto a la caja de RELLENO, que mide 2px menos de ancho y de alto
+     que la pista por culpa del borde de 1px de cada lado. La cuenta
+     original se olvidaba de eso, asi que encendido el hueco derecho
+     quedaba en 0,2rem - 2px (el circulo casi tocando el borde) y el de
+     abajo igual: Koku lo vio como "los selectores no estan centrados".
+     Vertical: centrado de verdad con top 50% + translateY, que no
+     depende del grosor del borde. */
+  top: 50%;
   left: 0.2rem;
   width: 1rem;
   height: 1rem;
   border-radius: 50%;
   background: var(--surface-2-text);
+  transform: translateY(-50%);
   transition: transform 0.15s ease, background-color 0.15s ease;
 }
 .checkbox-row input[type="checkbox"]:checked {
@@ -816,7 +822,9 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   border-color: var(--accent);
 }
 .checkbox-row input[type="checkbox"]:checked::before {
-  transform: translateX(1rem);
+  /* 1rem - 2px: descontando el borde, los huecos de los dos lados salen
+     exactamente iguales (0,2rem). */
+  transform: translateY(-50%) translateX(calc(1rem - 2px));
   background: white;
 }
 .checkbox-row input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -862,10 +870,13 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .styled-checkbox:indeterminate::after {
   content: '';
   position: absolute;
-  top: 45%;
+  /* Centrado por translate y no con un 45% a ojo, mismo criterio que el
+     resto de marcas de la app. */
+  top: 50%;
   left: 20%;
   right: 20%;
   height: 2px;
+  transform: translateY(-50%);
   background: var(--accent-text);
 }
 .styled-checkbox:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -2910,6 +2921,9 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .gym-exercise-edit-top { display: flex; gap: 0.5rem; }
 .gym-exercise-edit-top .gym-set-field { flex: 1; min-width: 0; }
 .gym-exercise-edit-sets { display: flex; flex-direction: column; gap: 0.7rem; }
+/* "+ Serie" quedaba pegado a la ultima serie. */
+.gym-session-sets-list + .gym-add-set-btn,
+#gym-exercise-edit-sets + .gym-add-set-btn { margin-top: 0.8rem; }
 .gym-exercise-edit-set {
   display: flex;
   flex-direction: column;
@@ -3057,11 +3071,23 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 }
 .gym-set-segment-head { display: flex; align-items: center; gap: 0.4rem; }
 .gym-set-segment-name {
-  flex: 1;
   font-size: 0.82rem;
   font-weight: 600;
   color: color-mix(in srgb, var(--surface-2-text) 80%, var(--surface-2));
 }
+/* Lo que duro la serie, en la MISMA linea que su nombre: antes iba en un
+   renglon aparte y se comia mucho alto para tan poco (Koku: "estamos
+   ocupando mucho espacio vertical cuando todo cabe junto"). */
+.gym-set-head-dur {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--surface-2-text) 60%, var(--surface-2));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Con la duracion empujando a la derecha, la ✕ ya no necesita el hueco
+   elastico del nombre. */
+.gym-set-segment-head > .icon-btn { flex: 0 0 auto; }
 .gym-set-segment-fields { display: flex; gap: 0.4rem; }
 .gym-set-segment-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
 .gym-set-segment-field span {
@@ -3085,6 +3111,17 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   color: var(--gym-accent-text);
   background: var(--gym-accent);
 }
+/* Cada tipo de tramo con SU color, y los dos distintos del de la serie
+   (peticion de Koku). Son colores fijos y no variables del tema a
+   proposito: tienen que distinguirse entre si en cualquier tema, y el
+   acento del tema ya lo usa la propia serie. Comprobado con la formula
+   WCAG: ambar 5,02:1 y verde azulado 7,58:1 sobre su texto blanco. Y se
+   distinguen por partida triple -- el TONO va por el eje azul-amarillo,
+   que es el que conserva el daltonismo rojo-verde; el BRILLO se lleva
+   1,5:1 entre ellos, asi que tampoco se confunden en escala de grises; y
+   encima cada uno lleva su texto. */
+.gym-set-segment-tag.es-dropset { background: #B45309; color: #FFFFFF; }
+.gym-set-segment-tag.es-restpause { background: #115E59; color: #FFFFFF; }
 
 /* Estadistica que ocupa la fila entera (tiempo de trabajo del mes). */
 .gym-stat-wide { grid-column: 1 / -1; }
@@ -3860,7 +3897,11 @@ body.gym-rest-push #settings-modal .settings-card {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.6);
   display: flex; align-items: center; justify-content: center;
-  padding: 1rem;
+  /* El hueco del sistema ADEMAS del margen de siempre: con solo 1rem, un
+     modal alto (historial, editar ejercicio) se metia bajo la Dynamic
+     Island -- Koku: "el cuadro de historial llega hasta demasiado
+     arriba". Abajo, lo mismo con la barra de gestos. */
+  padding: calc(env(safe-area-inset-top, 0px) + 1rem) 1rem calc(env(safe-area-inset-bottom, 0px) + 1rem);
   z-index: 20;
 }
 .modal-card {
@@ -3873,7 +3914,10 @@ body.gym-rest-push #settings-modal .settings-card {
   /* 420px se quedaba corto para las dos columnas de fecha/hora (Inicio
      y Fin lado a lado) y forzaba una barra de scroll lateral. */
   max-width: 480px;
-  max-height: 95vh;
+  /* 100% y no 95vh: asi el tope es la franja que deja el padding de
+     arriba (el hueco del sistema incluido) en vez de la pantalla entera,
+     que es lo que hacia que se colara debajo de la Dynamic Island. */
+  max-height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   position: relative; /* para que .modal-close-x se posicione respecto a la tarjeta, no a toda la pantalla */

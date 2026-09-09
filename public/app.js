@@ -9949,6 +9949,17 @@ function gymFormatRestShort(totalSeconds) {
 // que alterna el contador tocandolo).
 // Tiempo de trabajo acumulado: en segundos si es poco, en minutos si ya
 // pasa del minuto ("45s", "6 min").
+// Lo que duro UNA serie, con los segundos a la vista: "45 s",
+// "1 min 3 s". Distinto de gymFormatWorkTime, que agrega meses enteros y
+// ahi los segundos sobran (peticion de Koku: "Duración: 1min 3s").
+function gymFormatSetDuration(totalSeconds) {
+  const n = Math.round(Number(totalSeconds) || 0);
+  if (n < 60) return `${n} s`;
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return s === 0 ? `${m} min` : `${m} min ${s} s`;
+}
+
 function gymFormatWorkTime(totalSeconds) {
   const n = Math.round(Number(totalSeconds) || 0);
   if (n < 60) return `${n}s`;
@@ -11032,6 +11043,7 @@ function renderGymExerciseEditSets() {
       <div class="gym-set-segment-head">
         <span class="gym-set-segment-tag">${i + 1}</span>
         <span class="gym-set-segment-name">${set.side ? `Lado ${gymSideLabel(set.side)}` : 'Serie'}${set.done ? '' : ' · sin hacer'}</span>
+        <span class="gym-set-head-dur" title="Lo que duró la serie">${set.durationSeconds ? `Duración: ${gymFormatSetDuration(set.durationSeconds)}` : ''}</span>
         <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar esta serie">✕</button>
       </div>
       <div class="gym-set-segment-fields">
@@ -11298,8 +11310,8 @@ function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
     // sigue estando, que es la que se usa si lo dejas en blanco.
     row.innerHTML = `
       <div class="gym-set-segment-head">
-        <span class="gym-set-segment-tag">${GYM_SEGMENT_LABELS[seg.kind]}</span>
-        <span class="gym-set-segment-name">${seg.kind === 'restpause' ? 'Rest-pause' : 'Dropset'}</span>
+        <span class="gym-set-segment-tag ${seg.kind === 'restpause' ? 'es-restpause' : 'es-dropset'}">${GYM_SEGMENT_LABELS[seg.kind]}</span>
+        <span class="gym-set-head-dur"></span>
         <button type="button" class="icon-btn" data-seg-remove aria-label="Quitar tramo">✕</button>
       </div>
       <div class="gym-set-segment-fields">
@@ -12426,15 +12438,17 @@ function renderGymSessionExercisesField() {
           <span class="gym-set-segment-tag">${setIndex + 1}</span>
           <span class="gym-set-segment-name">Serie${set.side ? ` · lado ${gymSideLabel(set.side)}` : ''}</span>
           ${set.setType === 'failure' ? `<span class="gym-set-failure-chip" title="Serie llevada al fallo">Fallo</span>` : ''}
+          <span class="gym-set-head-dur" title="Lo que duró la serie">${set.durationSeconds ? `Duración: ${gymFormatSetDuration(set.durationSeconds)}` : ''}</span>
           <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar serie">✕</button>
         </div>
-        ${set.durationSeconds || set.extraRestSeconds
-          ? `<div class="gym-live-set-chips">${set.durationSeconds ? `<span class="gym-set-dur-chip" title="Lo que duró la serie">${gymFormatWorkTime(set.durationSeconds)}</span>` : ''}${set.extraRestSeconds ? `<span class="gym-set-extra-chip" title="Descanso extra añadido durante el entreno">+${set.extraRestSeconds}s</span>` : ''}</div>`
-          : ''}
         <div class="gym-set-segment-fields">
           <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><input type="number" data-field="weight" min="0" step="0.5" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
           <label class="gym-set-segment-field"><span>Reps</span><input type="number" data-field="reps" min="0" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
-          <label class="gym-set-segment-field"><span>Descanso (s)</span><input type="number" data-field="restSeconds" min="0" value="${escapeHtml(String(set.restSeconds ?? ''))}" /></label>
+          <!-- El "+60s" va PEGADO al descanso, no a la duracion: es
+               descanso extra que se anadio con el boton +30s, y colgando
+               de la duracion parecia que la serie habia durado mas
+               (lo vio Koku). -->
+          <label class="gym-set-segment-field"><span>Descanso (s)${set.extraRestSeconds ? ` <span class="gym-set-extra-chip" title="Añadido con +30s durante el entreno">+${set.extraRestSeconds}</span>` : ''}</span><input type="number" data-field="restSeconds" min="0" value="${escapeHtml(String(set.restSeconds ?? ''))}" /></label>
         </div>
         ${set.notes ? `<p class="gym-live-card-meta">${escapeHtml(set.notes)}</p>` : ''}
         <div class="gym-set-segments" data-seg-editor="${exIndex}-${setIndex}"></div>
