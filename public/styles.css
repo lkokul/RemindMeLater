@@ -2808,18 +2808,36 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   background: var(--gym-accent);
 }
 
-/* Las sub-lineas de los tramos, debajo de su serie en el historial. */
-.gym-set-segment-lines {
+/* Los tramos y sus acciones debajo de cada serie del modal de editar
+   una sesion. Se sangran un poco para que se lea que cuelgan de ella. */
+.gym-session-set-extras {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
-  padding-left: 1.4rem;
-  margin-bottom: 0.25rem;
+  gap: 0.35rem;
+  padding-left: 0.8rem;
+  margin-bottom: 0.5rem;
+  border-left: 2px solid var(--border);
 }
-.gym-set-segment-line {
-  font-size: 0.75rem;
-  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
-  font-variant-numeric: tabular-nums;
+.gym-session-set-actions { flex-direction: row; flex-wrap: wrap; }
+.gym-session-set-actions .gym-set-extend-btn {
+  width: auto;
+  flex: 1 1 auto;
+  text-align: center;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+}
+/* Un boton de esa fila que esta ACTIVADO (el "Al fallo" de la serie). */
+.gym-set-extend-btn.is-on {
+  background: var(--gym-accent);
+  color: var(--gym-accent-text);
+}
+
+/* El numero de una serie ya guardada se puede tocar para retocarla. */
+.gym-live-set-number.is-editable {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.2rem;
 }
 
 /* --- "Te toca": el descanso acabo y queda serie pendiente -------------

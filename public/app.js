@@ -8617,20 +8617,6 @@ function gymSegmentChipHtml(set) {
   return `<span class="gym-set-segment-chip" title="Serie alargada: ${segs.length} tramo${segs.length === 1 ? '' : 's'} extra">${texto}${sufijo}</span>`;
 }
 
-// Las sub-lineas que se ven debajo de la serie en el historial:
-//   ↳ 45 kg × 6            (dropset)
-//   ↳ 15 s → 80 kg × 3     (rest-pause)
-function gymSegmentLinesHtml(set) {
-  const segs = gymSetSegments(set);
-  if (segs.length === 0) return '';
-  const unit = getGymWeightUnitLabel();
-  return `<div class="gym-set-segment-lines">${segs.map((seg) => {
-    const pausa = seg.kind === 'restpause' && seg.pauseSeconds ? `${seg.pauseSeconds} s → ` : '';
-    const peso = seg.weightKg != null ? `${gymWeightKgToDisplay(seg.weightKg)} ${unit}` : '—';
-    return `<span class="gym-set-segment-line">↳ ${escapeHtml(pausa)}${escapeHtml(peso)} × ${escapeHtml(String(seg.reps ?? '—'))}</span>`;
-  }).join('')}</div>`;
-}
-
 function renderGymSessionsList() {
   const list = document.getElementById('gym-sessions-list');
   list.innerHTML = '';
@@ -10017,7 +10003,8 @@ function gymLiveTick() {
     setTimers.forEach((el) => { el.textContent = t; });
   }
   const endTimer = document.getElementById('gym-set-end-timer');
-  if (endTimer && !document.getElementById('gym-set-end-modal').classList.contains('hidden')) {
+  if (endTimer && gymSetEndModo === 'activa'
+      && !document.getElementById('gym-set-end-modal').classList.contains('hidden')) {
     endTimer.textContent = gymLiveFormatClock(gymActiveSetSeconds());
   }
 
@@ -10887,9 +10874,81 @@ function gymSetEndShowForm(show) {
     : '¿Has acabado la serie?';
 }
 
+// El dialogo "Datos de la serie" sirve para dos cosas: cerrar la serie
+// que acabas de hacer ('activa') y RETOCAR una ya guardada ('editar',
+// peticion de Koku). En modo editar no hay cronometro que ensenar, no se
+// toca el descanso ni las notificaciones, y guardar no vuelve a marcar
+// nada como hecho: solo cambia los datos.
+let gymSetEndModo = 'activa';
+let gymSetEndEditRef = null;
+
+// Rellena los campos del formulario a partir de una serie.
+function gymVolcarSerieEnFormulario(set, sugerencia) {
+  const wEl = document.getElementById('gym-set-end-weight');
+  const rEl = document.getElementById('gym-set-end-reps');
+  document.querySelector('#gym-set-end-form .gym-set-field span').textContent = `Peso (${getGymWeightUnitLabel()})`;
+  wEl.value = set.weightDisplay || '';
+  rEl.value = set.reps || '';
+  wEl.placeholder = sugerencia && sugerencia.weightDisplay ? String(sugerencia.weightDisplay) : '';
+  rEl.placeholder = sugerencia && sugerencia.reps ? String(sugerencia.reps) : '';
+  document.getElementById('gym-set-end-note').value = set.note || '';
+  gymSetEndSegments = (set.segments || []).map((seg) => ({ ...seg }));
+  renderGymSetEndSegments();
+  gymSetEndFailure = !!set.failure;
+  renderGymSetEndFailure();
+}
+
+// Retocar una serie YA guardada del entreno: se llega tocando su numero
+// en la fila. Aqui esta lo que no se puede arreglar escribiendo en la
+// propia fila -- la nota, el "al fallo" y sobre todo los tramos.
+function openGymSetEditModal(exIndex, setIndex) {
+  if (!gymLiveSession) return;
+  const ex = gymLiveSession.exercises[exIndex];
+  const set = ex && ex.sets[setIndex];
+  if (!set || !set.done) return;
+  gymSetEndModo = 'editar';
+  gymSetEndEditRef = { exIndex, setIndex };
+  const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+  const lado = set.side ? ` · lado ${gymSideLabel(set.side)}` : '';
+  document.getElementById('gym-set-end-info').textContent =
+    `${exercise ? exercise.name : 'Ejercicio'} · Serie ${gymSetSerieNumber(ex, setIndex)}${lado}`;
+  gymVolcarSerieEnFormulario(set, null);
+  // Sin cronometro: esta serie ya termino.
+  document.getElementById('gym-set-end-timer').classList.add('hidden');
+  document.getElementById('btn-gym-set-end-save').textContent = 'Guardar cambios';
+  gymSetEndShowForm(true);
+  document.getElementById('gym-set-end-modal').classList.remove('hidden');
+}
+
+function gymGuardarEdicionDeSerie() {
+  const ref = gymSetEndEditRef;
+  const ex = ref && gymLiveSession && gymLiveSession.exercises[ref.exIndex];
+  const set = ex && ex.sets[ref.setIndex];
+  if (set) {
+    const wEl = document.getElementById('gym-set-end-weight');
+    const rEl = document.getElementById('gym-set-end-reps');
+    set.weightDisplay = wEl.value !== '' ? wEl.value : (wEl.placeholder || '');
+    set.reps = rEl.value !== '' ? rEl.value : (rEl.placeholder || '');
+    set.note = document.getElementById('gym-set-end-note').value;
+    set.segments = gymLeerTramosDelFormulario();
+    set.failure = gymSetEndFailure;
+    // Ojo con lo que NO se toca: done, durationSeconds, extraRest y el
+    // descanso en marcha. Retocar los datos de una serie no la vuelve a
+    // "hacer" ni reinicia nada del entreno.
+    if (ex.sets.every((x) => x.done)) gymCombineSetNotes(ex);
+  }
+  gymLiveStore();
+  closeGymSetEndModal();
+  renderGymLiveExercises();
+}
+
 function openGymSetEndModal() {
   const a = gymLiveSession && gymLiveSession.activeSet;
   if (!a) return;
+  gymSetEndModo = 'activa';
+  gymSetEndEditRef = null;
+  document.getElementById('gym-set-end-timer').classList.remove('hidden');
+  document.getElementById('btn-gym-set-end-save').textContent = 'Guardar serie';
   const ex = gymActiveSetExercise();
   const exercise = state.gymExercises.find((e) => e.id === a.exerciseId);
   const set = ex && ex.sets[a.setIndex];
@@ -11003,11 +11062,18 @@ function gymPesoMadreDeTramos() {
   return wEl.value !== '' ? wEl.value : (wEl.placeholder || '');
 }
 
-function renderGymSetEndSegments() {
-  const cont = document.getElementById('gym-set-end-segments');
+// El editor de tramos, montado sobre CUALQUIER contenedor. Se usa en
+// dos sitios (peticion de Koku de poder arreglarlos despues: "a lo mejor
+// le he dado a acabar y se me ha olvidado darle a que he hecho alguna o
+// le he dado mal al peso"):
+//   - el dialogo de fin de serie del entreno en vivo,
+//   - y cada serie del modal de editar una sesion del historial.
+// `segmentos` se modifica EN EL SITIO (es el array del sitio que lo
+// llama); `pesoMadre` es la sugerencia gris de partida, que en el
+// entreno sale del campo de peso y en el historial de la fila.
+function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
   cont.innerHTML = '';
   const unit = getGymWeightUnitLabel();
-  const pesoMadre = gymPesoMadreDeTramos();
   // El peso que se propone en cada tramo: en un rest-pause es SIEMPRE el
   // de la madre (es la definicion: misma carga tras la pausa), y en un
   // dropset el del tramo de arriba, porque un dropset encadenado va
@@ -11016,7 +11082,7 @@ function renderGymSetEndSegments() {
   // que es el patron que ya usa el resto del dialogo (campo vacio =
   // te vale la sugerencia).
   let pesoAnterior = pesoMadre;
-  gymSetEndSegments.forEach((seg, i) => {
+  segmentos.forEach((seg, i) => {
     const sugerencia = seg.kind === 'restpause' ? pesoMadre : pesoAnterior;
     const row = document.createElement('div');
     row.className = 'gym-set-segment-row';
@@ -11043,19 +11109,32 @@ function renderGymSetEndSegments() {
       input.addEventListener('input', () => { seg[input.dataset.segField] = input.value; });
     });
     row.querySelector('[data-seg-remove]').addEventListener('click', () => {
-      gymSetEndSegments.splice(i, 1);
-      renderGymSetEndSegments();
+      segmentos.splice(i, 1);
+      if (alQuitar) alQuitar();
+      else montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar });
     });
     cont.appendChild(row);
     pesoAnterior = (seg.weightDisplay !== '' && seg.weightDisplay != null) ? seg.weightDisplay : sugerencia;
   });
 }
 
+function renderGymSetEndSegments() {
+  montarEditorDeTramos(
+    document.getElementById('gym-set-end-segments'),
+    gymSetEndSegments,
+    { pesoMadre: gymPesoMadreDeTramos(), alQuitar: renderGymSetEndSegments },
+  );
+}
+
 // Lo escrito en los tramos, ya resuelto (campo vacio = la sugerencia
 // gris que se veia). Se lee del DOM y no del array porque la sugerencia
 // solo existe ahi, igual que pasa con el peso de la serie madre.
 function gymLeerTramosDelFormulario() {
-  const filas = [...document.querySelectorAll('#gym-set-end-segments .gym-set-segment-row')];
+  return gymLeerTramosDe(document.getElementById('gym-set-end-segments'));
+}
+
+function gymLeerTramosDe(cont) {
+  const filas = cont ? [...cont.querySelectorAll('.gym-set-segment-row')] : [];
   return filas.map((fila) => {
     const leer = (campo) => {
       const el = fila.querySelector(`[data-seg-field="${campo}"]`);
@@ -11105,20 +11184,9 @@ document.getElementById('btn-gym-set-end-done').addEventListener('click', () => 
   // cambiar de lado tambien conviene proponerlo (peticion de Koku).
   const hechasAntes = [...ex.sets.slice(0, a.setIndex)].reverse().filter((s) => s.done);
   const previa = hechasAntes.find((s) => s.side === set.side) || hechasAntes[0];
-  const wEl = document.getElementById('gym-set-end-weight');
-  const rEl = document.getElementById('gym-set-end-reps');
-  document.querySelector('#gym-set-end-form .gym-set-field span').textContent = `Peso (${getGymWeightUnitLabel()})`;
-  wEl.value = set.weightDisplay || '';
-  rEl.value = set.reps || '';
-  wEl.placeholder = previa && previa.weightDisplay ? String(previa.weightDisplay) : '';
-  rEl.placeholder = previa && previa.reps ? String(previa.reps) : '';
-  document.getElementById('gym-set-end-note').value = set.note || '';
-  // Los tramos de la serie: normalmente ninguno, pero si la serie se
-  // deshizo y se esta rehaciendo, se recupera lo que tuviera apuntado.
-  gymSetEndSegments = (set.segments || []).map((seg) => ({ ...seg }));
-  renderGymSetEndSegments();
-  gymSetEndFailure = !!set.failure;
-  renderGymSetEndFailure();
+  // Si la serie se deshizo y se esta rehaciendo, el volcado recupera de
+  // paso los tramos y el "al fallo" que tuviera apuntados.
+  gymVolcarSerieEnFormulario(set, previa);
   gymSetEndShowForm(true);
 });
 
@@ -11176,7 +11244,10 @@ function gymFinishActiveSet() {
   gymLiveTick();
 }
 
-document.getElementById('btn-gym-set-end-save').addEventListener('click', gymFinishActiveSet);
+document.getElementById('btn-gym-set-end-save').addEventListener('click', () => {
+  if (gymSetEndModo === 'editar') gymGuardarEdicionDeSerie();
+  else gymFinishActiveSet();
+});
 document.getElementById('btn-gym-set-end-continue').addEventListener('click', closeGymSetEndModal);
 document.getElementById('btn-gym-set-end-pause').addEventListener('click', () => {
   const a = gymLiveSession && gymLiveSession.activeSet;
@@ -11242,7 +11313,7 @@ function renderGymLiveExercises() {
         : '—';
       return `
         <div class="gym-live-set-row ${set.done ? 'done' : ''}">
-          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymFailureChipHtml(set.failure)}${gymSegmentChipHtml(set)}</span>
+          <span class="gym-live-set-number${set.done ? ' is-editable' : ''}" ${set.done ? `data-live-set-edit="${setIndex}" role="button" tabindex="0" title="Tocar para retocar esta serie"` : ''}>${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymFailureChipHtml(set.failure)}${gymSegmentChipHtml(set)}</span>
           <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
           <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${unit}" data-live-field="weightDisplay" data-set="${setIndex}" value="${set.weightDisplay}" />
           <input type="number" inputmode="numeric" min="0" placeholder="reps" data-live-field="reps" data-set="${setIndex}" value="${set.reps}" />
@@ -11374,6 +11445,16 @@ function renderGymLiveExercises() {
     // El ✓ de cada fila ya no es un control para MARCAR (eso lo hace el
     // boton grande): solo indica estado y sirve para DESHACER una serie
     // dada por buena por error.
+    // Tocar el numero de una serie ya guardada la reabre para retocarla
+    // (nota, "al fallo" y tramos -- el peso y las repes se pueden cambiar
+    // ya en la propia fila).
+    card.querySelectorAll('[data-live-set-edit]').forEach((el) => {
+      const abrir = () => openGymSetEditModal(exIndex, Number(el.dataset.liveSetEdit));
+      el.addEventListener('click', abrir);
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); }
+      });
+    });
     card.querySelectorAll('[data-live-status]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const setIndex = Number(btn.dataset.liveStatus);
@@ -12203,14 +12284,50 @@ function renderGymSessionExercisesField() {
         renderGymSessionExercisesField();
       });
       setsList.appendChild(setRow);
-      // Los tramos van en su propia linea debajo de la serie, no dentro
-      // de la rejilla de campos: son informacion, no algo que se edite
-      // aqui (se apuntan durante el entreno, que es cuando ocurren).
-      if (gymSetSegments(set).length > 0) {
-        const lines = document.createElement('div');
-        lines.innerHTML = gymSegmentLinesHtml(set);
-        setsList.appendChild(lines.firstElementChild);
-      }
+
+      // Los tramos, EDITABLES tambien aqui (peticion de Koku: "a lo mejor
+      // le he dado a acabar y se me ha olvidado darle a que he hecho
+      // alguna o le he dado mal al peso"). Mismo editor que el del
+      // entreno en vivo, montado sobre este contenedor.
+      const extras = document.createElement('div');
+      extras.className = 'gym-session-set-extras';
+      const editor = document.createElement('div');
+      editor.className = 'gym-set-segments';
+      editor.dataset.segEditor = `${exIndex}-${setIndex}`;
+      const pesoMadreDeLaFila = () => {
+        const el = setRow.querySelector('[data-field="weight"]');
+        return el && el.value !== '' ? el.value : '';
+      };
+      if (!Array.isArray(set.segments)) set.segments = [];
+      const pintarTramos = () => montarEditorDeTramos(editor, set.segments, {
+        pesoMadre: pesoMadreDeLaFila(),
+        alQuitar: () => { pintarTramos(); pintarAcciones(); },
+      });
+
+      const acciones = document.createElement('div');
+      acciones.className = 'gym-set-extend-list gym-session-set-actions';
+      const pintarAcciones = () => {
+        acciones.innerHTML = `
+          <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
+          <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
+          <button type="button" class="gym-set-extend-btn${set.setType === 'failure' ? ' is-on' : ''}" data-toggle-failure>${set.setType === 'failure' ? '✓ ' : ''}Al fallo</button>
+        `;
+        acciones.querySelectorAll('[data-add-seg]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            set.segments.push({ kind: btn.dataset.addSeg, weightDisplay: '', reps: '', pauseSeconds: '' });
+            pintarTramos();
+          });
+        });
+        acciones.querySelector('[data-toggle-failure]').addEventListener('click', () => {
+          set.setType = set.setType === 'failure' ? null : 'failure';
+          renderGymSessionExercisesField();
+        });
+      };
+      pintarTramos();
+      pintarAcciones();
+      extras.appendChild(editor);
+      extras.appendChild(acciones);
+      setsList.appendChild(extras);
     });
     block.appendChild(setsList);
 
@@ -12223,7 +12340,7 @@ function renderGymSessionExercisesField() {
       // (suele ser el mismo entre series seguidas) -- reps/peso se dejan
       // en blanco, varian serie a serie.
       const lastSet = exRow.sets[exRow.sets.length - 1];
-      exRow.sets.push({ reps: '', weightDisplay: '', restSeconds: lastSet ? lastSet.restSeconds : '', extraRestSeconds: null });
+      exRow.sets.push({ reps: '', weightDisplay: '', restSeconds: lastSet ? lastSet.restSeconds : '', extraRestSeconds: null, segments: [], setType: null });
       renderGymSessionExercisesField();
     });
     block.appendChild(addSetBtn);
@@ -12237,7 +12354,7 @@ document.getElementById('btn-add-gym-session-exercise').addEventListener('click'
     showAppAlert('Primero crea al menos un ejercicio desde la pestaña Plan.');
     return;
   }
-  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, rpe: '', sets: [{ reps: '', weightDisplay: '', restSeconds: '' }] });
+  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, rpe: '', sets: [{ reps: '', weightDisplay: '', restSeconds: '', segments: [], setType: null }] });
   renderGymSessionExercisesField();
 });
 
@@ -12277,7 +12394,14 @@ function openGymSessionModal(session) {
         // Los tramos de una serie alargada se arrastran tal cual (en kg,
         // como llegan): aqui solo se VEN, se editan en el entreno. Lo
         // importante es que editar una sesion a mano no los borre.
-        segments: (set.segments || []).map((seg) => ({ ...seg })),
+        // En unidades de PANTALLA, igual que weightDisplay de la serie:
+        // el editor de tramos trabaja siempre asi y convierte al guardar.
+        segments: (set.segments || []).map((seg) => ({
+          kind: seg.kind,
+          reps: seg.reps ?? '',
+          weightDisplay: seg.weightKg != null ? gymWeightKgToDisplay(seg.weightKg) : '',
+          pauseSeconds: seg.pauseSeconds ?? '',
+        })),
         // Y lo mismo con el tipo de serie ('failure', 'warmup'...): antes
         // no viajaba y editar una sesion a mano lo borraba sin avisar.
         setType: set.setType ?? null,
@@ -12308,8 +12432,8 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
   // decide el numero de serie (ver replaceSessionSets en
   // routes/gymSessions.js), asi que se manda tal cual esta en pantalla.
   const sets = [];
-  gymSessionModalExercises.forEach((exRow) => {
-    exRow.sets.forEach((set) => {
+  gymSessionModalExercises.forEach((exRow, exIndex) => {
+    exRow.sets.forEach((set, setIndex) => {
       sets.push({
         exerciseId: exRow.exerciseId,
         reps: set.reps,
@@ -12320,7 +12444,17 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         durationSeconds: set.durationSeconds ?? null,
         side: set.side ?? null,
         notes: set.notes ?? null,
-        segments: set.segments || [],
+        // Se leen del DOM y no del array: un tramo recien anadido puede
+        // tener el peso en blanco confiando en la sugerencia gris, y esa
+        // solo existe ahi (mismo criterio que en el entreno en vivo).
+        segments: gymLeerTramosDe(
+          document.querySelector(`#gym-session-exercises-field [data-seg-editor="${exIndex}-${setIndex}"]`),
+        ).map((seg) => ({
+          kind: seg.kind,
+          reps: seg.reps,
+          weightKg: gymWeightDisplayToKg(seg.weightDisplay),
+          pauseSeconds: seg.pauseSeconds,
+        })),
         setType: set.setType ?? null,
       });
     });

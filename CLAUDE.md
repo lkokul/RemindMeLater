@@ -996,10 +996,31 @@ el placeholder si `Number.isFinite()`.
   tramo es ahora un bloquecito con cabecera (tipo + ✕) y sus campos
   debajo. La sugerencia gris del peso sigue igual.
 
-**Lo que NO se hace a propósito**: los tramos no se editan desde el modal
-de "editar sesión" a mano — ahí solo se VEN (chip + sub-líneas) y se
-arrastran intactos al guardar, para que editar una sesión no los borre.
-Se apuntan durante el entreno, que es cuando ocurren.
+**Retocar una serie después** (petición de Koku: *"a lo mejor le he dado
+a acabar y se me ha olvidado darle a que he hecho alguna o le he dado mal
+al peso"*). El peso y las repes ya se podían corregir escribiendo en la
+propia fila; lo que no se alcanzaba era la nota, el "al fallo" y los
+tramos. Dos entradas, y las dos usan el MISMO editor
+(`montarEditorDeTramos()` / `gymLeerTramosDe()`, montables sobre
+cualquier contenedor — antes estaban atados al diálogo):
+
+- **En el entreno**: tocar el NÚMERO de una serie ya hecha reabre
+  "Datos de la serie" en modo `'editar'`. Ese modo va directo al
+  formulario, sin cronómetro ni preguntas, y guardar **no toca** `done`,
+  la duración, el descanso ni las notificaciones: solo cambia los datos.
+  El modo vive en `gymSetEndModo`; `openGymSetEndModal()` lo devuelve
+  siempre a `'activa'`, que es lo que evita que el flujo normal herede
+  nada del anterior.
+- **En el historial**: en el modal de editar una sesión, cada serie tiene
+  su editor de tramos (añadir, cambiar y quitar) y un botón "Al fallo".
+  Ahí los tramos viven en unidades de PANTALLA (como `weightDisplay` de
+  la serie) y se convierten a kg al guardar. Se leen del DOM y no del
+  array, porque un tramo recién añadido puede estar confiando en la
+  sugerencia gris y esa solo existe ahí.
+
+Con esto desapareció `gymSegmentLinesHtml()` (las sub-líneas de solo
+lectura del historial): ya no hacía falta, los tramos se ven en su
+editor.
 
 Verificado con 25 comprobaciones de Playwright, incluidas las raras:
 `segments` que no es un array, tramos nulos o con `kind` inventado,
