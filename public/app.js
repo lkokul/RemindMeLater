@@ -10907,7 +10907,11 @@ function openGymSetEditModal(exIndex, setIndex) {
   const set = ex && ex.sets[setIndex];
   if (!set || !set.done) return;
   gymSetEndModo = 'editar';
-  gymSetEndEditRef = { exIndex, setIndex };
+  // Por ID y no por indice: con el dialogo abierto se puede quitar o
+  // reordenar un ejercicio (los botones ✕/↑/↓ de la tarjeta), y entonces
+  // el indice apuntaria a OTRO ejercicio -- la edicion se guardaria en la
+  // serie equivocada.
+  gymSetEndEditRef = { exerciseId: ex.exerciseId, setIndex };
   const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
   const lado = set.side ? ` · lado ${gymSideLabel(set.side)}` : '';
   document.getElementById('gym-set-end-info').textContent =
@@ -10922,8 +10926,12 @@ function openGymSetEditModal(exIndex, setIndex) {
 
 function gymGuardarEdicionDeSerie() {
   const ref = gymSetEndEditRef;
-  const ex = ref && gymLiveSession && gymLiveSession.exercises[ref.exIndex];
+  const ex = ref && gymLiveSession
+    ? gymLiveSession.exercises.find((e) => e.exerciseId === ref.exerciseId)
+    : null;
   const set = ex && ex.sets[ref.setIndex];
+  // Si el ejercicio ya no esta (se quito mientras el dialogo estaba
+  // abierto), no se escribe nada: se cierra y ya.
   if (set) {
     const wEl = document.getElementById('gym-set-end-weight');
     const rEl = document.getElementById('gym-set-end-reps');

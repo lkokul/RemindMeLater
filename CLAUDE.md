@@ -1010,7 +1010,11 @@ cualquier contenedor — antes estaban atados al diálogo):
   la duración, el descanso ni las notificaciones: solo cambia los datos.
   El modo vive en `gymSetEndModo`; `openGymSetEndModal()` lo devuelve
   siempre a `'activa'`, que es lo que evita que el flujo normal herede
-  nada del anterior.
+  nada del anterior. La referencia a la serie que se edita se guarda por
+  **id de ejercicio**, no por índice: con el diálogo abierto se puede
+  quitar o reordenar un ejercicio desde su tarjeta, y un índice guardado
+  apuntaría entonces a OTRO ejercicio — la edición se escribiría en la
+  serie equivocada.
 - **En el historial**: en el modal de editar una sesión, cada serie tiene
   su editor de tramos (añadir, cambiar y quitar) y un botón "Al fallo".
   Ahí los tramos viven en unidades de PANTALLA (como `weightDisplay` de
