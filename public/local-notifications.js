@@ -116,6 +116,38 @@ document.getElementById('btn-permissions-later').addEventListener('click', () =>
   if (typeof refreshMobileTab === 'function') refreshMobileTab();
 });
 
+// Canal de Android para los recordatorios, con la VIBRACION activada.
+// Hace falta porque el canal por defecto del plugin no la activa
+// (comprobado en su codigo fuente: crea el canal sin enableVibration),
+// asi que los avisos llegaban sin vibrar. En Android 8+ el sonido y la
+// vibracion pertenecen al CANAL, no al aviso individual -- por eso se
+// crea uno propio una vez y cada aviso se manda por el. En iOS este
+// metodo no existe (los canales son cosa de Android): se salta.
+const REMINDERS_CHANNEL_ID = 'recordatorios';
+let remindersChannelReady = false;
+
+async function ensureRemindersChannel(plugin) {
+  if (remindersChannelReady) return true;
+  const cap = window.Capacitor;
+  if (!cap || typeof cap.getPlatform !== 'function' || cap.getPlatform() !== 'android') return false;
+  try {
+    await plugin.createChannel({
+      id: REMINDERS_CHANNEL_ID,
+      name: 'Recordatorios',
+      description: 'Avisos de eventos y tareas',
+      importance: 4, // alta: suena, vibra y asoma arriba de la pantalla
+      vibration: true,
+    });
+    remindersChannelReady = true;
+  } catch (err) {
+    // Si el canal no se pudo crear, mejor NO mandar los avisos por el
+    // (un aviso con un canal inexistente no se muestra): se cae al
+    // canal por defecto del plugin, que al menos llega aunque no vibre.
+    console.error('No se pudo crear el canal de recordatorios:', err);
+  }
+  return remindersChannelReady;
+}
+
 // Vuelve a programar TODOS los avisos futuros desde cero: primero
 // cancela lo que hubiera programado, luego programa lo que toca ahora.
 // Es a proposito "borrar y rehacer" en vez de ir tocando avisos uno a
@@ -145,6 +177,8 @@ async function syncScheduledReminders() {
     if (!activados) return;
     if (!(await ensureLocalNotificationPermissionSilently())) return;
 
+    const canalListo = await ensureRemindersChannel(plugin);
+
     const proximos = await api('/api/reminders/upcoming');
     const ahora = Date.now();
     const sonido = notificationSoundValue();
@@ -159,9 +193,16 @@ async function syncScheduledReminders() {
           body: r.title,
           schedule: { at: new Date(r.remindAt) },
         };
-        // Sin `sound`, iOS entrega la notificacion en silencio (ni suena
-        // ni vibra) -- ver notificationSoundValue() para los tres modos.
+        // Sin `sound`, en iOS el aviso llega EN SILENCIO TOTAL: ni suena
+        // ni vibra (alli la vibracion va pegada al sonido, y el plugin
+        // solo pone sonido si se le pasa uno). Cual de los tres valores
+        // toca lo decide notificationSoundValue() a partir de los dos
+        // interruptores de Configuracion (Sonido / Vibracion).
         if (sonido) aviso.sound = sonido;
+        // Android: alli el sonido y la vibracion los manda el CANAL, no
+        // este campo -- por eso se le engancha el canal propio si se
+        // pudo crear (ver ensureRemindersChannel arriba).
+        if (canalListo) aviso.channelId = REMINDERS_CHANNEL_ID;
         return aviso;
       });
     if (aProgramar.length > 0) await plugin.schedule({ notifications: aProgramar });

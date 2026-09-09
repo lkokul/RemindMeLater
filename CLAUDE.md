@@ -584,15 +584,56 @@ la copia es la forma de pasar datos de un aparato a otro.
   `enterMobileDayView`/`exitMobileDayView` (app.js), las keyframes
   `mobile-zoom-*` (styles.css), y el bloque "Animaciones" de
   index.html/settings.js.
-- **Compartir → RemindMeLater (fecha detectada → evento)**: aprobado
-  por Koku ("Sí, iOS y Android") como PRÓXIMA ronda grande, sin
-  empezar. Diseño hablado: extensión de compartir nativa (Swift en
-  iOS — hay precedente de pieza nativa en el widget de descanso de
-  gimnasio-movil —, intent-filter en Android) que abre la app con el
-  modal de evento prerrelleno con la fecha/hora detectadas en el texto
-  compartido (detección en español hecha por nosotros). El menú nativo
-  de "añadir a iCalendar" al tocar una fecha es privado de Apple —
-  imposible meterse ahí, se le explicó y lo aceptó.
+- **Compartir → RemindMeLater (fecha detectada → evento)** — la parte
+  de iOS + toda la detección YA CONSTRUIDA (ronda del 8/9/2026, en esta
+  rama):
+  - `public/share-import.js` (nuevo): `detectSpanishDateTime()`
+    (dd/mm(/aaaa), "el N de MES (de AAAA)", hoy/mañana/pasado mañana,
+    días de la semana, "viernes 12", horas "a las 21:30"/"9h"/"de la
+    tarde+12"; devuelve fecha+hora+título limpio) y
+    `openEventModalFromSharedText()` (modal de evento prerrelleno).
+    Verificado con 19 casos de Playwright. Se carga el ÚLTIMO en
+    index.html (usa cosas de app.js).
+  - iOS: extensión de compartir nativa `ios/App/CompartirExtension/`
+    (ShareViewController.swift sin UI propia: recoge texto/URL y abre
+    la app con `remindmelater://share?text=...` vía el truco de la
+    cadena de responders), target añadido A MANO al pbxproj copiando
+    el patrón del DescansoWidget de gimnasio-movil (que ya compila en
+    CI); esquema de URL en App/Info.plist; la URL llega a la web por
+    el plugin `@capacitor/app` (appUrlOpen + getLaunchUrl, con
+    anti-duplicado de 3s para el arranque en frío).
+  - **COMPILA BIEN** (build #34, iOS): confirmado en el log que el
+    target `CompartirExtension` se compiló, que el `.appex` se incrustó
+    en `App.app/PlugIns/` y que `ValidateEmbeddedBinary` pasó — el
+    pbxproj editado a mano funcionó a la primera.
+  - **PERO EN EL IPHONE REAL NO TERMINA DE FUNCIONAR** (probado por
+    Koku, build #34): dijo textualmente "lo de compartir no del todo.
+    Nada, era saber si podía funcionar, **déjalo apuntado y ya vemos
+    cómo podemos hacerlo en el futuro**". O sea: **NO seguir tocándolo
+    hasta que él lo retome**. No dio detalle de QUÉ falla exactamente
+    (¿no aparece en la hoja de compartir?, ¿aparece pero no abre la
+    app?, ¿abre pero sin datos?) — es lo PRIMERO que hay que
+    preguntarle cuando se retome, porque cada síntoma apunta a una
+    causa distinta:
+    - No aparece en la hoja → `NSExtensionActivationRule` del
+      Info.plist de la extensión.
+    - Aparece pero no abre la app → el truco de la cadena de
+      responders (`openURL:`) está cada vez más restringido por Apple;
+      la alternativa moderna sería un App Group compartido (la
+      extensión escribe el texto ahí y la app lo lee al abrirse) en
+      vez de pasar el dato por la URL.
+    - Abre sin datos → el esquema de URL o el `appUrlOpen`.
+  - **Pendiente aparte**: la parte de ANDROID (intent-filter +
+    forwarding nativo), aplazada a propósito hasta que Koku pueda
+    probar Android (aún sin keystore/Play Console).
+- **Vibración de los avisos — ARREGLADA (misma ronda)**: el plugin de
+  notificaciones solo pone sonido si se le pasa `sound` (comprobado en
+  su fuente), y sin sonido iOS entrega el aviso en silencio total (ni
+  vibra). Ahora cada aviso lleva `sound: 'default'` (iOS cae al sonido
+  del sistema al no existir ese archivo → suena y vibra) y en Android
+  un canal propio `recordatorios` con `vibration: true`
+  (`ensureRemindersChannel()` en local-notifications.js). Solo
+  comprobable de verdad en el iPhone de Koku.
 
 - **Comunicación escritorio↔móvil en la v1** (nota que Koku pidió dejar
   apuntada expresamente): cuando la app de escritorio (rama
