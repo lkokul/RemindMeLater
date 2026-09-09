@@ -488,10 +488,24 @@ Petición de Koku (9/9/2026): la app no rota a apaisado. Toda la interfaz
 está pensada mobile-first en vertical y en horizontal la barra de abajo,
 el calendario y las pantallas completas se quedan sin alto útil.
 
-- **iOS**: `ios/App/App/Info.plist` — `UISupportedInterfaceOrientations`
-  se queda solo con `UIInterfaceOrientationPortrait` (sin
-  `PortraitUpsideDown`: el iPhone no gira solo del revés). El iPad
-  (`~ipad`) sí admite además del revés, que en tablet es natural.
+- **iOS**: dos piezas, y hacen falta las dos.
+  - `ios/App/App/Info.plist` — `UISupportedInterfaceOrientations` (el
+    del iPhone) se queda solo con `UIInterfaceOrientationPortrait`. Pero
+    `UISupportedInterfaceOrientations~ipad` **tiene que seguir trayendo
+    las cuatro**: App Store Connect rechaza la subida con el error
+    **90474** si el bundle dice que vale para iPad y no las declara
+    todas (las exige para el multitarea de iPad). Pasó de verdad en la
+    build #39: compiló y exportó bien, y rebotó justo al subir. Ojo
+    también con los guiones dobles dentro de un comentario XML: son
+    ilegales y rompen el plist entero.
+  - `ios/App/App/BridgeViewController.swift` — `supportedInterfaceOrientations`
+    devuelve `.portrait` y `shouldAutorotate` es `false`. Esto es lo que
+    de verdad impide rotar, porque manda por encima de la lista del
+    Info.plist y vale para cualquier aparato, iPad incluido.
+  - La otra salida sería dejar la app solo para iPhone
+    (`TARGETED_DEVICE_FAMILY = "1"`), que quitaría el requisito de
+    Apple de un plumazo — pero eso es una decisión de producto, no un
+    arreglo de este error, y no se ha tomado.
 - **Android**: `android/app/src/main/AndroidManifest.xml` —
   `android:screenOrientation="portrait"` en la MainActivity. Ojo: NO se
   quita `orientation` de `configChanges`, que es lo que evita que
