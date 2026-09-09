@@ -11023,7 +11023,9 @@ function openGymExerciseEditModal(exerciseId) {
   document.getElementById('gym-exercise-edit-rpe').value = ex.rpe ?? '';
   document.getElementById('gym-exercise-edit-note').value = ex.note ?? '';
   renderGymExerciseEditSets();
-  document.getElementById('gym-exercise-edit-modal').classList.remove('hidden');
+  const modal = document.getElementById('gym-exercise-edit-modal');
+  delete modal.dataset.sucio;
+  modal.classList.remove('hidden');
 }
 
 function renderGymExerciseEditSets() {
@@ -11105,6 +11107,11 @@ function closeGymExerciseEditModal() {
 
 document.getElementById('btn-close-gym-exercise-edit').addEventListener('click', closeGymExerciseEditModal);
 document.getElementById('btn-cancel-gym-exercise-edit').addEventListener('click', closeGymExerciseEditModal);
+cerrarModalAlTocarFuera(
+  'gym-exercise-edit-modal',
+  closeGymExerciseEditModal,
+  () => document.getElementById('gym-exercise-edit-modal').dataset.sucio === '1',
+);
 
 document.getElementById('btn-gym-exercise-edit-add-set').addEventListener('click', () => {
   const draft = gymExerciseEditDraft;
@@ -12577,11 +12584,18 @@ function openGymSessionModal(session) {
   renderGymSessionExercisesField();
 
   document.getElementById('btn-delete-gym-session').classList.toggle('hidden', !session);
-  document.getElementById('gym-session-modal').classList.remove('hidden');
+  const modalSesion = document.getElementById('gym-session-modal');
+  delete modalSesion.dataset.sucio;
+  modalSesion.classList.remove('hidden');
 }
 function closeGymSessionModal() {
   document.getElementById('gym-session-modal').classList.add('hidden');
 }
+cerrarModalAlTocarFuera(
+  'gym-session-modal',
+  closeGymSessionModal,
+  () => document.getElementById('gym-session-modal').dataset.sucio === '1',
+);
 document.getElementById('btn-new-gym-session').addEventListener('click', () => openGymSessionModal(null));
 document.getElementById('btn-cancel-gym-session').addEventListener('click', closeGymSessionModal);
 document.getElementById('btn-close-gym-session').addEventListener('click', closeGymSessionModal);
@@ -16691,6 +16705,80 @@ function mobileNavSectionForScreen(screen) {
 // ABRIR una pantalla por cualquier otro camino -- sobre todo al arrancar
 // la app restaurando donde lo dejaste -- la barra se quedaba marcando
 // "Calendario" aunque estuvieras en otro sitio.
+// --- Cerrar un modal tocando FUERA de su tarjeta -----------------------
+// Peticion de Koku: "si pincho fuera de las areas de historial o de
+// editar ejercicio, que se cierre; a veces buscar la x o el cancelar
+// cuesta". Solo en ESOS DOS: son los unicos donde cerrar equivale a
+// cancelar, porque los dos trabajan sobre un borrador y no tocan nada
+// hasta que le das a Guardar. En el dialogo de fin de serie, por
+// ejemplo, seria un desastre -- ahi un toque fuera perderia los datos de
+// la serie recien hecha.
+//
+// Con cambios a medio escribir se pregunta antes: un roce en el fondo no
+// puede tirar cinco minutos de edicion.
+function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
+  const modal = document.getElementById(modalId);
+  if (!modal) return;
+  // Marcar "sucio": escribir en cualquier campo, o pulsar cualquier
+  // boton del modal que no sea el de cerrar/cancelar (anadir una serie,
+  // marcar al fallo, anadir un tramo...). El scroll no genera clicks
+  // sobre botones, asi que no cuenta.
+  modal.addEventListener('input', () => { modal.dataset.sucio = '1'; });
+  modal.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (btn && !btn.matches('[id^="btn-cancel"], [id^="btn-close"], [aria-label="Cerrar"]')) {
+      modal.dataset.sucio = '1';
+    }
+  });
+  modal.addEventListener('click', async (e) => {
+    // Solo el FONDO: un click dentro de la tarjeta llega aqui por
+    // burbujeo, pero con e.target apuntando a lo de dentro.
+    if (e.target !== modal) return;
+    // Si ya estamos preguntando, un segundo toque en el fondo NO abre otra
+    // pregunta encima (se quedarian dos apiladas y la de abajo colgada).
+    if (modal.dataset.preguntando === '1') return;
+    if (hayCambios && hayCambios()) {
+      modal.dataset.preguntando = '1';
+      let ok = false;
+      try {
+        ok = await showAppConfirm('Vas a cerrar sin guardar los cambios. ¿Seguro?', { okText: 'Cerrar sin guardar', danger: true });
+      } finally {
+        delete modal.dataset.preguntando;
+      }
+      if (!ok) return;
+      // Mientras se preguntaba, el modal puede haberse cerrado por otra via
+      // (guardar, Esc...). Si ya no esta, no hay nada que cerrar.
+      if (modal.classList.contains('hidden')) return;
+    }
+    delete modal.dataset.sucio;
+    cerrar();
+  });
+}
+
+// --- Version de la app ------------------------------------------------
+// Se escribe A MANO en cada ronda, junto al numero de package.json: la
+// app no tiene paso de compilacion que pueda inyectarlo, asi que este es
+// el unico sitio donde vive de cara al usuario. La fecha es la de la
+// subida (cuando se lanza la build), en formato ISO para poder darle el
+// formato del SISTEMA al pintarla -- Koku: "respetando el formato del
+// sistema por si tienen mm/dd/aa y no dd/mm/aa".
+const APP_VERSION = '0.36.3';
+const APP_VERSION_DATE = '2026-09-09';
+
+function renderAppVersionLine() {
+  const el = document.getElementById('app-version-line');
+  if (!el) return;
+  let fecha = APP_VERSION_DATE;
+  try {
+    // `undefined` a proposito: el idioma del DISPOSITIVO, no el de la
+    // app (mismo criterio que systemUses12hClock).
+    fecha = new Intl.DateTimeFormat(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' })
+      .format(new Date(`${APP_VERSION_DATE}T12:00:00`));
+  } catch { /* si Intl falla, se queda la ISO */ }
+  el.textContent = `v${APP_VERSION} · ${fecha}`;
+}
+renderAppVersionLine();
+
 function setCurrentScreen(screen) {
   localStorage.setItem('currentScreen', screen);
   refreshMobileNavActive(mobileNavSectionForScreen(screen));

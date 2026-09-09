@@ -1213,6 +1213,51 @@ eventos se queden hasta que él los quite. Y no pelea con la vigilancia de
 audio que calla la vibración: abrir la app ya la callaba, esto va en la
 misma dirección.
 
+## Cerrar tocando fuera, y la versión a la vista
+
+Dos peticiones pequeñas de Koku de la misma ronda.
+
+**Tocar fuera cierra** (`cerrarModalAlTocarFuera(modalId, cerrar, hayCambios)`
+en `app.js`): puesto de momento en los DOS diálogos grandes del Gimnasio,
+el del historial (`gym-session-modal`) y el de editar un ejercicio del
+entreno (`gym-exercise-edit-modal`), que son los que él nombró. Detalles
+que no son obvios:
+
+- **Solo el fondo**: `if (e.target !== modal) return`. Un toque dentro de
+  la tarjeta llega igualmente por burbujeo, pero con `e.target` apuntando
+  a lo de dentro.
+- **Si hay cambios sin guardar, pregunta** antes de tirarlos
+  (`showAppConfirm`, destructivo). "Hay cambios" se marca con
+  `dataset.sucio`: cualquier `input` dentro del modal, o pulsar cualquier
+  botón que NO sea el de cerrar/cancelar (añadir una serie, marcar al
+  fallo, quitar un tramo...). Hacer scroll no genera clicks sobre
+  botones, así que no cuenta — se comprobó.
+- **La marca se limpia AL ABRIR**, no al cerrar: cerrar con la ✕ o
+  guardando no pasa por este código, y si se limpiara solo ahí el modal
+  se reabriría creyéndose sucio y preguntaría sin motivo.
+- **`dataset.preguntando`**: dos toques seguidos en el fondo abrían dos
+  preguntas apiladas y la de abajo se quedaba colgada esperando una
+  respuesta que ya nadie iba a dar. Con la marca, el segundo toque no
+  hace nada. Y tras responder que sí se vuelve a mirar si el modal sigue
+  abierto, por si se cerró por otra vía mientras se preguntaba.
+
+**La versión** (`APP_VERSION` / `APP_VERSION_DATE` / `renderAppVersionLine()`
+en `app.js`, se ve en Configuración → Este dispositivo): se escribe **a
+mano** en cada ronda, junto al número de `package.json` — la app no tiene
+paso de compilación que pueda inyectarlo, así que este es el único sitio
+donde vive de cara al usuario. **Si subes la versión, tócala aquí
+también.** La fecha se formatea con `Intl.DateTimeFormat(undefined, ...)`
+para seguir el formato del SISTEMA (Koku: *"por si tienen mm/dd/aa y no
+dd/mm/aa"*), con la ISO como red de seguridad si Intl falla.
+
+**Los bloques de valores del historial** (Peso / Reps / Descanso) se
+descuadraban cuando la etiqueta del descanso llevaba el chip `+60` y
+pasaba a dos líneas: los tres campos son hermanos flex, y sin
+`align-items: stretch` en `.gym-set-segment-fields` + `justify-content:
+flex-end` en `.gym-set-segment-field`, el input del descanso bajaba solo.
+Ahora los tres arrancan y acaban a la misma altura (comprobado midiendo
+los rectángulos, no a ojo).
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de

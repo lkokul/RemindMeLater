@@ -341,6 +341,14 @@ el calendario.
 - ✅ **Interruptor de animaciones** (por dispositivo) que apaga TODO el
   movimiento de la app, no solo el del calendario: una única regla
   global de CSS, así una animación nueva nace ya obedeciéndolo.
+- ✅ **Tocar fuera cierra el diálogo** (`cerrarModalAlTocarFuera`), con
+  pregunta de por medio si hay cambios sin guardar. De momento en los
+  dos diálogos grandes del Gimnasio (historial y editar ejercicio del
+  entreno); el patrón está listo para ponerlo donde haga falta.
+- ✅ **La versión y su fecha, a la vista** en Configuración → Este
+  dispositivo, con la fecha en el formato del SISTEMA (hay gente con
+  mm/dd/aa). Se escribe a mano: la app no tiene paso de compilación que
+  la inyecte.
 - 💡 **Rediseño visual del visor de ESCRITORIO**: reestructurar cómo
   se ve la app en pantalla grande (más accesible, más rápida de usar)
   — estructura visual, no funcionamiento. ESTE es el proyecto que

@@ -3088,8 +3088,17 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 /* Con la duracion empujando a la derecha, la ✕ ya no necesita el hueco
    elastico del nombre. */
 .gym-set-segment-head > .icon-btn { flex: 0 0 auto; }
-.gym-set-segment-fields { display: flex; gap: 0.4rem; }
-.gym-set-segment-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+.gym-set-segment-fields { display: flex; gap: 0.4rem; align-items: stretch; }
+.gym-set-segment-field {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 0.15rem;
+  /* Los campos, pegados ABAJO de su columna. Asi, si una etiqueta se
+     parte en dos lineas (pasa con "Descanso (s) +60"), no descuadra: las
+     tres columnas miden lo mismo por el stretch de arriba y los tres
+     campos bajan juntos, en vez de quedarse uno mas abajo que los otros
+     dos (lo vio Koku en una captura). */
+  justify-content: flex-end;
+}
 .gym-set-segment-field span {
   font-size: 0.72rem;
   color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));

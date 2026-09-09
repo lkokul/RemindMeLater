@@ -1020,7 +1020,8 @@
         <h4>La columna "Anterior"</h4>
         <p>Muestra lo que hiciste en tu última sesión con ese ejercicio, en formato (descanso)peso×reps. Por ejemplo, (1:30)60×10 significa: 1 minuto y medio de descanso, 60 kg, 10 repeticiones. Tócala para copiar esos valores a la serie.</p>
         <h4>El descanso</h4>
-        <p>Al terminar una serie, el descanso del ejercicio empieza solo y aparece como barra arriba. El tiempo se ve en la pastilla junto al nombre del ejercicio, y tocándola lo cambias para esa sesión. Con +30s lo alargas (y ese extra queda apuntado en el historial de la serie), con ✕ lo saltas, y si deshaces la serie o empiezas ya la siguiente, se cancela.</p>
+        <p>Al terminar una serie, el descanso del ejercicio empieza solo y aparece como barra arriba. Con +30s lo alargas, con ✕ lo saltas, y si empiezas ya la siguiente serie se cancela.</p>
+        <p><b>Dónde aparece luego ese +30s:</b> el descanso corre <i>después</i> de una serie, así que el tiempo que le añadas queda apuntado en <b>esa</b> serie, junto a su campo de Descanso. Si alargas el descanso posterior a la última serie de un ejercicio — el que te separa del ejercicio siguiente — lo verás en esa última serie, no en la primera del siguiente.</p>
         <h4>El RPE</h4>
         <p>Es una medida del esfuerzo, del 1 al 10: 10 es que no podrías haber hecho ni una repetición más, 9 es que te quedaba una, 8 que te quedaban dos... Se apunta uno por ejercicio, en la casilla RPE junto a "+ Serie". Es opcional, pero ayuda a saber si un peso se te está quedando corto: a RPE 7 o menos, probablemente toca subir.</p>
         <h4>El menú de abajo a la derecha</h4>
@@ -2618,6 +2619,9 @@
           <button type="button" id="btn-backup-import" class="secondary-btn">Importar copia</button>
         </div>
         <input type="file" id="backup-import-input" accept="application/json,.json" class="hidden" />
+
+        <h4>Versión</h4>
+        <p id="app-version-line" class="hint"></p>
       </div>
 
 
