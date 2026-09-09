@@ -1509,6 +1509,34 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 .mobile-swipe-anim-left { animation-name: mobile-swipe-in-left; }
 .mobile-swipe-anim-right { animation-name: mobile-swipe-in-right; }
 
+/* La pantalla que se VA, viajando a la vez que entra la nueva.
+   Sin esto, la que se iba desaparecia de golpe y durante esos 280ms se
+   veia lo que hubiera DEBAJO mientras la nueva barria la pantalla:
+   "en el lateral donde dejo atras la vista se mueve rapido por detras y
+   marea un poco" (Koku). Con las dos moviendose en bloque, como la tira
+   de un carrusel, no hay ningun momento en que asome una tercera cosa.
+   Las dos van pegadas: la que entra esta al 100% cuando la que sale
+   esta al 0, asi que no llegan a solaparse. */
+@keyframes mobile-swipe-out-left {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+@keyframes mobile-swipe-out-right {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+.mobile-swipe-out-left,
+.mobile-swipe-out-right {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  animation-fill-mode: both;
+  will-change: transform;
+  /* Ya se esta yendo: que no se pueda tocar por error de camino. */
+  pointer-events: none;
+}
+.mobile-swipe-out-left { animation-name: mobile-swipe-out-left; }
+.mobile-swipe-out-right { animation-name: mobile-swipe-out-right; }
+
 /* Una pantalla desplazandose a lo ancho asoma por fuera del cuerpo de la
    pagina. Sin esto, durante esos 280ms el navegador cree que la pagina
    es mas ancha y deja arrastrarla de lado (o saca barra horizontal).

@@ -1597,11 +1597,50 @@ function playMobileSwipeTransition(el, direction) {
   if (!el || !areAnimationsEnabled()) return;
   const cls = `mobile-swipe-anim-${direction}`;
   el.classList.remove('mobile-swipe-anim-up', 'mobile-swipe-anim-down', 'mobile-swipe-anim-left', 'mobile-swipe-anim-right');
+  // Si esta misma capa estaba a mitad de IRSE y ahora vuelve a entrar
+  // (has deslizado dos veces seguidas muy rapido), se cancela lo suyo:
+  // si no, la limpieza de la salida la volveria a ocultar a media
+  // entrada. Ver playMobileSwipeOut.
+  el.classList.remove('mobile-swipe-out-left', 'mobile-swipe-out-right');
+  delete el.dataset.reocultarTrasSalir;
   void el.offsetWidth;
   el.classList.add(cls);
   const cleanup = () => el.classList.remove(cls);
   el.addEventListener('animationend', cleanup, { once: true });
   setTimeout(cleanup, 300);
+}
+
+// La otra mitad del carrusel: la pantalla que se VA, viajando al mismo
+// tiempo que entra la nueva.
+//
+// El detalle que lo complica: para cuando se llama a esto, la capa que
+// se va YA se ha ocultado (los botones de cerrar le ponen .hidden). Hay
+// que volver a enseñarla los 280ms del viaje y ocultarla otra vez al
+// acabar. Se hace quitando y reponiendo la clase .hidden en vez de
+// forzar un display por CSS, porque cada capa tiene el suyo (las
+// pantallas completas son flex, no block) y forzarlo las descuadraria.
+function playMobileSwipeOut(el, direction) {
+  if (!el || !areAnimationsEnabled()) return;
+  const cls = `mobile-swipe-out-${direction}`;
+  const estabaOculta = el.classList.contains('hidden');
+  if (estabaOculta) {
+    el.classList.remove('hidden');
+    el.dataset.reocultarTrasSalir = '1';
+  }
+  el.classList.remove('mobile-swipe-out-left', 'mobile-swipe-out-right');
+  void el.offsetWidth;
+  el.classList.add(cls);
+  const cleanup = () => {
+    el.classList.remove(cls);
+    // Solo se vuelve a ocultar si nadie ha cancelado la salida por el
+    // camino (ver playMobileSwipeTransition).
+    if (el.dataset.reocultarTrasSalir === '1') {
+      delete el.dataset.reocultarTrasSalir;
+      el.classList.add('hidden');
+    }
+  };
+  el.addEventListener('animationend', cleanup, { once: true });
+  setTimeout(cleanup, 400);
 }
 
 attachSwipe(document.getElementById('mobile-calendar-month-grid'), {
@@ -7394,9 +7433,26 @@ document.getElementById('btn-close-mobile-notes').addEventListener('click', clos
 // deja en el fondo del todo, sea cual sea la profundidad en la que
 // estuvieras -- Esc ya sabe deshacer una capa por pulsacion).
 // ---------------------------------------------------------------------
+// Marca de "esto lo esta cerrando la app, no tu dedo".
+//
+// closeAllMobileOverlays simula pulsaciones de Esc, y esa cascada acaba
+// CLICANDO los botones de volver de cada pantalla. Esos botones tienen
+// su propia animacion (ver animarAlPulsar al final del archivo), asi que
+// sin esta marca un cambio de pestaña lanzaba DOS animaciones que se
+// pisaban: la del boton dejaba la pantalla vieja a la vista para que se
+// fuera deslizando, y la del cambio de pestaña se la encontraba visible
+// y la trataba como la que ENTRA -- resultado, una pantalla que se
+// quedaba puesta encima para siempre. Paso de verdad.
+let cerrandoEnCascada = false;
+
 function closeAllMobileOverlays() {
-  for (let i = 0; i < 6; i++) {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  cerrandoEnCascada = true;
+  try {
+    for (let i = 0; i < 6; i++) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    }
+  } finally {
+    cerrandoEnCascada = false;
   }
 }
 
@@ -8110,24 +8166,30 @@ function gymWeightDisplayToKg(displayValue) {
 // del rediseno pueden tener texto libre, que se muestra tal cual.
 const GYM_MUSCLE_GROUPS = [
   { id: 'pecho', label: 'Pecho' },
-  // La espalda va en TRES, como pidio Koku: alta, media y dorsales.
-  // "Lumbar" es la de abajo y se queda como estaba, con su nombre de
-  // siempre.
+  // La espalda va en DOS mas la lumbar: espalda media y dorsales
+  // ("Lumbar" es la de abajo y se queda como estaba, con su nombre de
+  // siempre). El reparto de los ~870 ejercicios de la libreria sale del
+  // origen (free-exercise-db), que distingue "lats" de "middle back":
+  // lats -> dorsales, middle back -> espalda media (que son casi todo
+  // remos).
   //
-  // De donde sale el reparto de los ~870 ejercicios de la libreria: el
-  // origen (free-exercise-db) solo distingue "lats" y "middle back", asi
-  // que "lats" -> dorsales y "middle back" -> espalda media (que son
-  // casi todo remos, espalda media de manual). Espalda ALTA no existe
-  // como categoria alli, asi que se rescataron por nombre los pocos que
-  // de verdad trabajan la parte de arriba (romboides, remo alto,
-  // retraccion escapular) -- por eso sale con menos ejercicios que las
-  // otras dos. Si algun ejercicio esta en el sitio que no toca, se
-  // cambia a mano desde su ficha, sin tocar codigo.
-  { id: 'espalda_alta', label: 'Espalda alta' },
+  // Hubo un intento de tercera franja, "Espalda alta", que Koku deshizo
+  // el 9/9/2026: sus cuatro ejercicios se fusionaron con espalda media,
+  // y lo que de verdad hacia falta ahi era otra cosa -- el HOMBRO
+  // POSTERIOR, que es un hombro, no una espalda, y por eso vive abajo
+  // junto a "Hombros".
   { id: 'espalda_media', label: 'Espalda media' },
   { id: 'dorsales', label: 'Dorsales' },
   { id: 'lumbar', label: 'Lumbar' },
   { id: 'hombros', label: 'Hombros' },
+  // El deltoides posterior, separado del resto del hombro (peticion de
+  // Koku). En el diagrama se queda con el hombro de la figura de
+  // ESPALDA, que anatomicamente es justo eso; "Hombros" pasa a marcar
+  // solo la figura de frente. Nace SIN ejercicios asignados: la libreria
+  // original no lo distinguia, asi que el trabajo de hombro posterior
+  // (face pulls, aperturas invertidas...) sigue etiquetado como
+  // "hombros" hasta que se recoloque a mano desde la ficha de cada uno.
+  { id: 'hombro_posterior', label: 'Hombro posterior' },
   { id: 'trapecio', label: 'Trapecio' },
   { id: 'biceps', label: 'Bíceps' },
   { id: 'triceps', label: 'Tríceps' },
@@ -8135,7 +8197,13 @@ const GYM_MUSCLE_GROUPS = [
   { id: 'core', label: 'Core / Abdomen' },
   { id: 'gluteo', label: 'Glúteo' },
   { id: 'cuadriceps', label: 'Cuádriceps' },
-  { id: 'isquios', label: 'Isquiosurales' },
+  // "Isquiotibiales" y no "isquiosurales": el segundo es el termino de
+  // anatomia/fisioterapia y es mas preciso (el biceps femoral se inserta
+  // en el perone, no en la tibia), pero Koku pidio el de toda la vida,
+  // que es el que se busca al montar un dia. El id interno sigue siendo
+  // 'isquios', asi que esto no toca ni los ejercicios ya clasificados ni
+  // el diagrama.
+  { id: 'isquios', label: 'Isquiotibiales' },
   { id: 'aductores', label: 'Aductores' },
   { id: 'abductores', label: 'Abductores' },
   { id: 'gemelos', label: 'Gemelos' },
@@ -12084,19 +12152,19 @@ const GYM_BODYMAP_ZONES = [
     '447 217 477 217 472 383 477 647 383 532 353 409 311 366 391 332 438 272',
     '523 217 557 217 566 272 609 328 689 366 647 404 617 532 523 647 532 383',
   ] },
-  { g: 'hombros', tx: 1120, polys: ['294 370 230 391 174 443 183 536 243 494 272 464', '711 370 783 396 826 447 817 536 749 489 723 451'] },
-  // La mancha de la espalda, partida en TRES franjas (alta, media y
-  // dorsales) con dos cortes horizontales, a y=470 y a y=560. Los
-  // puntos de los cortes salen de interpolar sobre los bordes del
-  // poligono original, asi que las tres piezas encajan sin dejar hueco
-  // ni solaparse -- si se tocan estos numeros a ojo, se nota.
-  { g: 'espalda_alta', tx: 1120, polys: [
-    '311 387 287 470 349 470 336 413',
-    '689 387 712 470 652 470 664 417',
-  ] },
+  // El hombro de la figura de ESPALDA es el deltoides posterior, asi que
+  // es suyo y no de "hombros" (que se queda con la figura de frente).
+  { g: 'hombro_posterior', tx: 1120, polys: ['294 370 230 391 174 443 183 536 243 494 272 464', '711 370 783 396 826 447 817 536 749 489 723 451'] },
+  // La mancha de la espalda, partida en DOS franjas (media arriba,
+  // dorsales abajo) con un corte horizontal a y=560. Los puntos del
+  // corte salen de interpolar sobre los bordes del poligono original,
+  // asi que las dos piezas encajan sin dejar hueco ni solaparse -- si se
+  // tocan estos numeros a ojo, se nota. (Hubo un segundo corte a y=470
+  // para una franja "espalda alta"; Koku la deshizo y su trozo volvio a
+  // la media, que es esta.)
   { g: 'espalda_media', tx: 1120, polys: [
-    '287 470 281 489 285 553 287 560 383 560 366 540 349 470',
-    '712 470 719 494 715 560 621 560 634 545 652 470',
+    '311 387 281 489 285 553 287 560 383 560 366 540 336 413',
+    '689 387 719 494 715 560 621 560 634 545 664 417',
   ] },
   { g: 'dorsales', tx: 1120, polys: [
     '287 560 340 753 472 711 472 664 383 560',
@@ -15526,30 +15594,42 @@ function currentMobileTab() {
 // el calendario al cambiar de mes (playMobileSwipeTransition), aplicada
 // a la pantalla que queda a la vista. Asi el movimiento de la app es
 // uno solo y obedece al interruptor de Animaciones sin nada aparte.
-function animarCambioDePantalla(direccion) {
-  const capas = [
-    'settings-modal', 'gym-view', 'finanzas-view', 'lecturas-view',
-    'viajes-view', 'extensions-view', 'mobile-notes-view',
-  ];
-  for (const id of capas) {
+// Las pantallas completas que pueden estar por encima del calendario,
+// de la de mas arriba a la de mas abajo.
+const CAPAS_DE_PANTALLA = [
+  'settings-modal', 'gym-view', 'finanzas-view', 'lecturas-view',
+  'viajes-view', 'extensions-view', 'mobile-notes-view', 'note-editor-view',
+  'groups-view',
+];
+
+// Que pantalla se esta viendo AHORA MISMO. Se usa dos veces: para
+// animar la que entra, y para saber -- antes de navegar -- cual es la
+// que se va a ir.
+function capaDePantallaVisible() {
+  for (const id of CAPAS_DE_PANTALLA) {
     const el = document.getElementById(id);
-    if (el && !el.classList.contains('hidden')) {
-      playMobileSwipeTransition(el, direccion);
-      return;
-    }
+    if (el && !el.classList.contains('hidden')) return el;
   }
-  // La pantalla del calendario es el caso especial: se anima
-  // <main class="layout">, NO el #app entero.
-  //
-  // Motivo (lo vio Koku: "tambien se mueve la barra de apps, esa no
-  // quiero que se mueva, marea"): la barra de abajo vive DENTRO de #app,
-  // asi que animar #app se la llevaba por delante. Y no basta con que la
-  // barra sea position:fixed -- un transform en un antepasado hace que
-  // lo fixed pase a colocarse respecto a EL, o sea que viaja igual. La
-  // unica forma limpia es mover solo el contenido y dejar la barra
-  // fuera del elemento que se transforma.
-  const contenido = document.querySelector('main.layout');
-  if (contenido) playMobileSwipeTransition(contenido, direccion);
+  // Ninguna pantalla completa abierta: se ve el calendario, que es
+  // <main class="layout"> (NO #app: ahi dentro esta tambien la barra de
+  // abajo, que no debe moverse).
+  return document.querySelector('main.layout');
+}
+
+// capaSaliente: la pantalla que se estaba viendo ANTES de navegar. Con
+// ella, las dos viajan a la vez como la tira de un carrusel; sin ella,
+// solo entra la nueva (que es lo que toca cuando el cambio ocurre
+// DENTRO de una misma pantalla, como volver de una seccion de
+// Configuracion a su menu).
+function animarCambioDePantalla(direccion, capaSaliente) {
+  const entrante = capaDePantallaVisible();
+  if (capaSaliente && capaSaliente !== entrante) {
+    playMobileSwipeOut(capaSaliente, direccion);
+  }
+  if (entrante) {
+    playMobileSwipeTransition(entrante, direccion);
+    return;
+  }
 }
 
 // Cambiar de pestaña un paso. paso = +1 (deslizar a la izquierda,
@@ -15562,6 +15642,9 @@ function moverPestanaMovil(paso) {
   // que pasan todos los cambios de pestaña por gesto, en vez de meter
   // una linea dentro de cada open*/close* de las cuatro Apps.
   if (actual === 'extensions') ultimaHerramientaAbierta = appDeHerramientasAbierta();
+  // La pantalla que se va, apuntada ANTES de navegar: despues ya estara
+  // oculta y no habria forma de saber cual era.
+  const saliente = capaDePantallaVisible();
   const i = MOBILE_TAB_ORDER.indexOf(actual);
   const destino = MOBILE_TAB_ORDER[i + paso];
   // En los extremos (antes de Calendario, despues de Configuracion) no
@@ -15578,7 +15661,7 @@ function moverPestanaMovil(paso) {
   } else {
     goToMobileSection(destino);
   }
-  animarCambioDePantalla(paso > 0 ? 'left' : 'right');
+  animarCambioDePantalla(paso > 0 ? 'left' : 'right', saliente);
   return true;
 }
 
@@ -15616,10 +15699,14 @@ function moverSubPestana(paso) {
     if (i === -1) return false;
     const destino = botones[i + paso];
     if (!destino) return true; // hay barra, pero ya estas en el extremo
+    // El panel que se va, apuntado ANTES del clic (que es quien lo
+    // oculta): asi los dos viajan a la vez, igual que las pantallas.
+    const saliente = [...document.querySelectorAll(selPaneles)].find(estaVisibleDeVerdad);
     destino.click();
-    // El panel que acaba de quedar a la vista es el que entra deslizando.
     const panel = [...document.querySelectorAll(selPaneles)].find(estaVisibleDeVerdad);
-    if (panel) playMobileSwipeTransition(panel, paso > 0 ? 'left' : 'right');
+    const direccion = paso > 0 ? 'left' : 'right';
+    if (saliente && saliente !== panel) playMobileSwipeOut(saliente, direccion);
+    if (panel) playMobileSwipeTransition(panel, direccion);
     return true;
   }
   return false;
@@ -15674,13 +15761,26 @@ function volverUnPasoDentroDeLaPantalla() {
 //   (.my-space-close-btn) y el "← Calendario" de Grupos.
 // El listener solo AÑADE la animacion; lo que hace el boton de verdad
 // sigue en su propio sitio, sin tocar.
-[...VOLVER_UN_PASO, 'btn-close-groups'].forEach((id) => {
-  const btn = document.getElementById(id);
-  if (btn) btn.addEventListener('click', () => animarCambioDePantalla('right'));
-});
-document.querySelectorAll('.my-space-close-btn').forEach((btn) => {
-  btn.addEventListener('click', () => animarCambioDePantalla('right'));
-});
+function animarAlPulsar(btn) {
+  if (!btn) return;
+  // Dos listeners para el mismo clic, y el orden importa:
+  //  - en fase de CAPTURA (antes que nadie) se apunta que pantalla se
+  //    esta viendo, porque el propio boton la va a ocultar;
+  //  - en la fase normal, ya con la pantalla nueva puesta, se lanzan las
+  //    dos animaciones (la que entra y la que se va).
+  let saliente = null;
+  btn.addEventListener('click', () => { saliente = capaDePantallaVisible(); }, true);
+  btn.addEventListener('click', () => {
+    // Si a este boton lo esta pulsando la app para hacer sitio (ver
+    // closeAllMobileOverlays), la animacion la pone quien haya empezado
+    // el cambio, no este boton.
+    if (cerrandoEnCascada) return;
+    animarCambioDePantalla('right', saliente);
+  });
+}
+
+[...VOLVER_UN_PASO, 'btn-close-groups'].forEach((id) => animarAlPulsar(document.getElementById(id)));
+document.querySelectorAll('.my-space-close-btn').forEach(animarAlPulsar);
 
 // Pantallas donde el carril CENTRAL ya tiene dueño: alli el
 // deslizamiento horizontal por el centro ya significa algo (la vista

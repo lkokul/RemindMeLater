@@ -10008,9 +10008,9 @@
   "id": "Leverage_High_Row",
   "name": "Remo alto en máquina de palanca",
   "nameEn": "Leverage High Row",
-  "muscleGroup": "espalda_alta",
+  "muscleGroup": "espalda_media",
   "primaryMuscles": [
-   "espalda_alta"
+   "espalda_media"
   ],
   "secondaryMuscles": [],
   "equipment": "Máquina",
@@ -11085,9 +11085,9 @@
   "id": "Middle_Back_Shrug",
   "name": "Encogimiento de espalda media",
   "nameEn": "Middle Back Shrug",
-  "muscleGroup": "espalda_alta",
+  "muscleGroup": "espalda_media",
   "primaryMuscles": [
-   "espalda_alta"
+   "espalda_media"
   ],
   "secondaryMuscles": [],
   "equipment": "Mancuernas",
@@ -14300,9 +14300,9 @@
   "id": "Rhomboids-SMR",
   "name": "Romboides (rodillo)",
   "nameEn": "Rhomboids-SMR",
-  "muscleGroup": "espalda_alta",
+  "muscleGroup": "espalda_media",
   "primaryMuscles": [
-   "espalda_alta"
+   "espalda_media"
   ],
   "secondaryMuscles": [
    "trapecio"
@@ -19968,7 +19968,7 @@
   ],
   "secondaryMuscles": [
    "lumbar",
-   "espalda_alta"
+   "espalda_media"
   ],
   "equipment": null,
   "level": "principiante",
@@ -19984,9 +19984,9 @@
   "id": "Upper_Back_Stretch",
   "name": "Estiramiento de espalda alta",
   "nameEn": "Upper Back Stretch",
-  "muscleGroup": "espalda_alta",
+  "muscleGroup": "espalda_media",
   "primaryMuscles": [
-   "espalda_alta"
+   "espalda_media"
   ],
   "secondaryMuscles": [],
   "equipment": null,

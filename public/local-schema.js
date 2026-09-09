@@ -1540,6 +1540,30 @@ function applyLocalSchema(db) {
     }
   }
 
+  // Segundo acto de lo de la espalda: la build #42 llego a repartir unos
+  // pocos ejercicios a 'espalda_alta', y Koku deshizo esa franja el mismo
+  // dia ("cambialo a hombro posterior y fusionalo con media"). Los que
+  // se quedaron ahi vuelven a espalda media. Idempotente: cuando no
+  // queda ninguno, no hace nada.
+  const conEspaldaAlta = db
+    .prepare("SELECT id, secondary_muscles FROM gym_exercises WHERE muscle_group = 'espalda_alta' OR secondary_muscles LIKE '%\"espalda_alta\"%'")
+    .all();
+  if (conEspaldaAlta.length) {
+    const arreglar = db.prepare("UPDATE gym_exercises SET muscle_group = CASE WHEN muscle_group = 'espalda_alta' THEN 'espalda_media' ELSE muscle_group END, secondary_muscles = ? WHERE id = ?");
+    for (const ej of conEspaldaAlta) {
+      let secundarios = ej.secondary_muscles;
+      if (secundarios && secundarios.includes('"espalda_alta"')) {
+        try {
+          secundarios = JSON.stringify(JSON.parse(secundarios).map((m) => (m === 'espalda_alta' ? 'espalda_media' : m)));
+        } catch (err) {
+          // JSON roto de alguna version vieja: mejor dejarlo como esta
+          // que romper el arranque de la app entera por esto.
+        }
+      }
+      arreglar.run(secundarios, ej.id);
+    }
+  }
+
   const existingThemeNames = new Set(db.prepare('SELECT name FROM themes').all().map((t) => t.name));
   const seedTheme = db.prepare('INSERT INTO themes (name, colors, inverse_colors) VALUES (?, ?, ?)');
   for (const theme of SEED_THEMES) {

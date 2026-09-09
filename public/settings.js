@@ -882,7 +882,18 @@ function positionThemeForm() {
   if (editingThemeId) {
     const card = document.querySelector(`.theme-card[data-theme-id="${editingThemeId}"]`);
     if (card) {
-      card.insertAdjacentElement('afterend', form);
+      // OJO: DESPUES DEL ENVOLTORIO, no despues de la tarjeta.
+      //
+      // Desde que las tarjetas se deslizan, cada una vive dentro de un
+      // .note-swipe-wrap. Metiendo el formulario ahi dentro pasaba algo
+      // muy feo (lo vio Koku en una captura): ese envoltorio recorta lo
+      // que se sale (overflow:hidden) y sus botones de Editar/Exportar/
+      // Eliminar van pegados de ARRIBA A ABAJO (top:0 y bottom:0), asi
+      // que al crecer el envoltorio con el formulario dentro, los
+      // botones se estiraban a lo largo de toda la pantalla y salian
+      // por encima de los campos.
+      const contenedor = card.closest('.note-swipe-wrap') || card;
+      contenedor.insertAdjacentElement('afterend', form);
       return;
     }
   }

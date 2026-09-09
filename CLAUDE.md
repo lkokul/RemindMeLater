@@ -464,6 +464,28 @@ Detalles que costaron y conviene no deshacer:
   tablas del editor, entreno en vivo). Para algo nuevo, basta con
   ponerle `data-no-nav-swipe`.
 
+**Las DOS pantallas viajan a la vez** (arreglo del 9/9/2026). Antes solo
+se animaba la que entra: la que se iba desaparecía de golpe y durante
+esos 280ms se veía lo que hubiera DEBAJO mientras la nueva barría la
+pantalla. Koku: *"en el lateral donde dejo atrás la vista se mueve
+rápido por detrás y marea un poco"*. Ahora `playMobileSwipeOut()` mueve
+también la saliente, como la tira de un carrusel, y nunca asoma una
+tercera cosa.
+
+Dos detalles que costaron:
+
+- La capa que se va **ya está oculta** cuando toca animarla (su botón de
+  cerrar le puso `.hidden`). Se le quita y se le repone la clase, en vez
+  de forzar un `display` por CSS: cada capa tiene el suyo (las pantallas
+  completas son `flex`, no `block`) y forzarlo las descuadraría.
+- **`cerrandoEnCascada`**: `closeAllMobileOverlays()` simula pulsaciones
+  de Esc, y esa cascada acaba CLICANDO los botones de volver, que tienen
+  su propia animación. Sin la marca se lanzaban DOS animaciones que se
+  pisaban: la del botón dejaba la pantalla vieja a la vista para que se
+  fuera, y la del cambio de pestaña se la encontraba visible y la
+  trataba como la que ENTRA — resultado, una pantalla que se quedaba
+  puesta encima para siempre. Pasó de verdad.
+
 **Interruptor de animaciones** (Configuración > Este dispositivo): ya no
 es solo del calendario, apaga TODO el movimiento de la app. Funciona en
 dos mitades: una única regla global de `styles.css`
@@ -670,6 +692,17 @@ dudas ni nada". Se fueron `groupsEditMode`, el botón
 / `.group-card-edit-mark` de styles.css. Ahora tocar una tarjeta siempre
 entra en el grupo, y editar/eliminar se saca deslizando.
 
+**Trampa que ya mordió una vez**: el formulario de editar un tema se
+mueve en el DOM para aparecer justo debajo de la tarjeta que estás
+editando (`positionThemeForm`). Al hacer las tarjetas deslizables se
+colaba DENTRO del `.note-swipe-wrap`, y como ese envoltorio recorta lo
+que se sale y sus botones van pegados de arriba abajo (`top:0`,
+`bottom:0`), los botones se estiraban a lo largo de toda la pantalla
+por encima de los campos. Koku lo enseñó en una captura. La cura:
+insertar **después del envoltorio**, no después de la tarjeta
+(`card.closest('.note-swipe-wrap') || card`). Cuidado con esto si algún
+día se envuelve alguna otra fila que tenga algo insertándose al lado.
+
 Para ponerlo en un sitio nuevo: envolver la fila con esa función y
 añadir su selector a las reglas `.note-swipe-wrap > ...` de
 `styles.css` (hacen falta las dos: la del `transform` y la de
@@ -716,45 +749,53 @@ Verificado con Playwright congelando el reloj en las 24 horas × 6
 minutos × los dos caminos (288 casos), incluido el salto de las 23:30 a
 las 00:00 del día siguiente.
 
-## La espalda, en tres grupos musculares
+## La espalda: media, dorsales y lumbar (+ hombro posterior)
 
-Petición de Koku (9/9/2026): la espalda deja de ser un solo grupo y pasa
-a ser **Espalda alta**, **Espalda media** y **Dorsales**. **Lumbar** ya
-existía y se queda exactamente igual, con su nombre de siempre.
+Petición de Koku (9/9/2026). Ojo, esto tuvo **dos actos el mismo día** y
+lo que vale es el segundo:
 
-Tres piezas, y hacen falta las tres:
+1. Primero se partió la espalda en tres (alta, media, dorsales).
+2. Al verlo en el móvil, Koku deshizo la de arriba: *"lo que has llamado
+   espalda alta cámbialo a hombro posterior y fusiónalo con media"*.
 
-1. **La taxonomía** (`GYM_MUSCLE_GROUPS` en `app.js`): fuera `espalda`,
-   dentro `espalda_alta`, `espalda_media` y `dorsales`.
-2. **La librería empaquetada** (`public/gym-exercise-library.json`, los
-   ~870 ejercicios): se rehízo el reparto **desde el origen**
-   (free-exercise-db, descargado y cotejado por `id`, casan los 876).
-   Ese origen sí distinguía `lats` de `middle back`, que es justo la
-   información que nuestra traducción había aplanado en un solo
-   "espalda". `lats` → **dorsales** (38) y `middle back` → **espalda
-   media** (30, casi todo remos). **Espalda alta no existe como
-   categoría allí**, así que se rescataron por nombre los pocos que de
-   verdad trabajan la parte de arriba (romboides, remo alto, retracción
-   escapular): salen 4. Es poco a propósito — preferible que sea honesto
-   a repartirlos a ojo. Cualquier ejercicio mal colocado se cambia desde
-   su ficha, sin tocar código.
-3. **El diagrama** (`GYM_BODYMAP_ZONES`): la mancha de la espalda se
-   parte en tres franjas con dos cortes horizontales, a `y=470` y a
-   `y=560`. Los puntos de los cortes salen de **interpolar sobre los
-   bordes del polígono original**, así que las tres piezas encajan sin
-   dejar hueco ni solaparse — comprobado renderizando el SVG. Si se
-   tocan esos números a ojo, se nota enseguida.
+**Como está ahora**: `espalda_media`, `dorsales` y `lumbar` (esta última
+nunca se tocó, conserva su nombre de siempre), más un
+`hombro_posterior` que vive junto a `hombros`, no con las espaldas —
+porque es un hombro.
 
-**Migración de lo ya importado** (`local-schema.js`): los ejercicios que
-ya están en la base guardan `muscle_group = 'espalda'`, que ya no
-significa nada. **Reimportar la librería NO los arregla**: el import es
-idempotente por `library_id` y devuelve la fila existente sin tocarla (a
-propósito, para no pisar cambios hechos a mano). Por eso hay una
-migración que los recoloca, con una tabla de los 68 `library_id` que van
-a algo distinto de `dorsales` (que es el valor por defecto, y también el
-que reciben los ejercicios propios sin `library_id`). Toca tanto
-`muscle_group` como los `secondary_muscles` en JSON, y es idempotente:
-cuando ya no queda ningún `'espalda'`, no hace nada.
+El reparto de los ~870 ejercicios sale **del origen**
+(free-exercise-db, descargado y cotejado por `id`, casan los 876), que
+sí distinguía `lats` de `middle back`: `lats` → **dorsales** (38) y
+`middle back` → **espalda media** (34, casi todo remos).
+
+**`hombro_posterior` nace SIN ejercicios asignados**: la librería
+original no distinguía el deltoides posterior, así que ese trabajo
+(face pulls, aperturas invertidas...) sigue etiquetado como `hombros`
+hasta que se recoloque a mano desde la ficha de cada ejercicio. En el
+diagrama sí tiene sitio: se queda con el hombro de la figura de
+ESPALDA, que anatómicamente es justo eso, y `hombros` pasa a marcar solo
+la figura de frente.
+
+**El diagrama** (`GYM_BODYMAP_ZONES`): la mancha de la espalda se parte
+en dos franjas con un corte a `y=560`. Los puntos del corte salen de
+**interpolar sobre los bordes del polígono original**, así que las
+piezas encajan sin hueco ni solape — comprobado renderizando el SVG. Si
+se tocan esos números a ojo, se nota.
+
+**Dos migraciones en `local-schema.js`**, las dos idempotentes y las dos
+necesarias porque **reimportar la librería NO arregla nada** (el import
+es idempotente por `library_id` y devuelve la fila existente sin
+tocarla, a propósito, para no pisar cambios hechos a mano):
+
+- `'espalda'` → `dorsales` por defecto, con una tabla de los 68
+  `library_id` que van a otro sitio.
+- `'espalda_alta'` → `espalda_media`, para los pocos que la build #42
+  llegó a repartir antes de que Koku deshiciera esa franja.
+
+**Isquiotibiales, no isquiosurales** (decisión de Koku): el segundo es
+el término de anatomía y es más preciso (el bíceps femoral se inserta en
+el peroné, no en la tibia), pero el primero es el que se busca al montar
+un día. El id interno sigue siendo `isquios`.
 
 ## El día del Plan: dos entradas, no una
 
