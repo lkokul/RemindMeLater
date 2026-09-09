@@ -2404,6 +2404,12 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    quitar) y dentro del modal de sesion (select + quitar, las series
    propias van en .gym-session-sets-list debajo). */
 .gym-routine-exercises-field { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.5rem; }
+/* Flechas de subir/bajar de cada ejercicio del dia: dos botoncitos
+   apilados a la izquierda de la fila, para que ocupen el alto que ya
+   tiene el nombre en vez de robarle ancho. */
+.gym-routine-exercise-order { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; }
+.gym-routine-exercise-order .icon-btn { padding: 0.1rem 0.25rem; line-height: 0; }
+.gym-routine-exercise-order .icon-btn:disabled { opacity: 0.25; cursor: default; }
 .gym-routine-exercise-row { display: flex; align-items: center; gap: 0.4rem; }
 .gym-routine-exercise-row select { flex: 1; min-width: 0; }
 .gym-routine-exercise-row input { width: 4.5rem; }

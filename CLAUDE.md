@@ -756,6 +756,41 @@ que reciben los ejercicios propios sin `library_id`). Toca tanto
 `muscle_group` como los `secondary_muscles` en JSON, y es idempotente:
 cuando ya no queda ningún `'espalda'`, no hace nada.
 
+## El día del Plan: dos entradas, no una
+
+Petición de Koku (9/9/2026). El modal del día tiene DOS mitades y nunca
+se ven las dos a la vez (`openGymRoutineModal(routine, modo)`):
+
+- **El lápiz de la lista** abre la FICHA: nombre, color, icono y a qué
+  bloque pertenece. Ahí vive también "Eliminar el día".
+- **Tocar el día** abre solo sus EJERCICIOS, que es a lo que se entra el
+  90% de las veces. Sin "Eliminar", que ahí se confundiría con "quitar
+  este ejercicio".
+- Un día NUEVO se abre siempre en ficha: hasta que no tiene nombre no
+  hay a qué añadirle ejercicios.
+
+**Trampa con la que ya se tropezó**: el campo del nombre es `required`,
+y un campo obligatorio OCULTO no se puede enfocar — el navegador se
+niega a enviar el formulario entero con un "invalid form control is not
+focusable" y **sin decir nada por pantalla**. Por eso se le quita el
+`required` mientras está escondido. El valor sigue relleno y se manda
+igual, así que guardar desde la mitad de ejercicios no pierde el nombre
+ni el color (comprobado).
+
+**Orden de los ejercicios**: cada fila lleva dos flechas (subir/bajar) a
+la izquierda, apagadas en los extremos. Con flechas y no arrastrando a
+propósito: dentro de un modal que ya se desplaza, arrastrar una fila
+pelea con el scroll, y aquí hace falta colocar UNA cosa en su sitio, no
+reordenar una lista larga. Al mover se repinta la lista entera (como
+hace todo ese formulario) para que las flechas de los extremos se
+apaguen solas y los índices de los listeners vuelvan a cuadrar.
+
+**Descuido conocido, sin arreglar**: la fila de ejercicio usa un
+`<select>` NATIVO para elegir el ejercicio, que va contra la regla de no
+usar controles del navegador. Es código anterior a esa regla; cambiarlo
+por `createSelectField()` es un rato de trabajo aparte y no se ha hecho
+para no mezclarlo con esta ronda.
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de

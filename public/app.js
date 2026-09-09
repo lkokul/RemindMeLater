@@ -8283,14 +8283,23 @@ function renderGymRoutinesList() {
       <span class="color-dot" style="background-color: ${r.color}"></span>
       <span class="gym-list-item-name">${r.icon ? escapeHtml(r.icon) + ' ' : ''}${escapeHtml(r.name)} <span class="gym-list-item-muted">(${r.exercises.length} ejercicio${r.exercises.length === 1 ? '' : 's'})</span></span>
       <div class="gym-list-item-actions">
-        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar día">✎</button>
+        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar nombre, color y bloque">✎</button>
       </div>
     `;
+    // Dos entradas distintas al mismo dia, como pidio Koku: el lapiz
+    // para su FICHA (nombre, color, icono y bloque) y tocar la fila para
+    // sus EJERCICIOS, que es a lo que se entra el 90% de las veces.
+    row.addEventListener('click', () => {
+      openGymRoutineModal(state.gymRoutines.find((x) => x.id === r.id), 'ejercicios');
+    });
     list.appendChild(row);
   });
   list.querySelectorAll('[data-edit-gym-routine]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      openGymRoutineModal(state.gymRoutines.find((r) => r.id === Number(btn.dataset.editGymRoutine)));
+    btn.addEventListener('click', (e) => {
+      // Sin esto, el clic del lapiz sube tambien a la fila y abriria las
+      // dos mitades una encima de otra.
+      e.stopPropagation();
+      openGymRoutineModal(state.gymRoutines.find((r) => r.id === Number(btn.dataset.editGymRoutine)), 'ficha');
     });
   });
 }
@@ -11399,8 +11408,22 @@ function renderGymRoutineExercisesField() {
       const n = Number(seconds);
       return n > 0 ? `Descanso: ${gymLiveFormatClock(n)} min` : '';
     };
+    // Subir / bajar el ejercicio dentro del dia (peticion de Koku: "por
+    // si me equivoco y pongo un ejercicio antes, no tener que moverlo
+    // cada vez"). Con flechas y no arrastrando: dentro de un modal que
+    // ya se desplaza, arrastrar una fila pelea con el scroll, y aqui lo
+    // que hace falta es colocar una cosa en su sitio, no reordenar una
+    // lista larga. Las flechas de los extremos se quedan apagadas.
+    const flechaArriba = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+    const flechaAbajo = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>';
+    const esPrimero = index === 0;
+    const esUltimo = index === gymRoutineModalExercises.length - 1;
     rowEl.innerHTML = `
       <div class="gym-routine-exercise-name-row">
+        <div class="gym-routine-exercise-order">
+          <button type="button" class="icon-btn" data-field="subir" aria-label="Subir el ejercicio" title="Subir" ${esPrimero ? 'disabled' : ''}>${flechaArriba}</button>
+          <button type="button" class="icon-btn" data-field="bajar" aria-label="Bajar el ejercicio" title="Bajar" ${esUltimo ? 'disabled' : ''}>${flechaAbajo}</button>
+        </div>
         <select data-field="exerciseId">${gymExerciseOptionsHtml(row.exerciseId)}</select>
         <button type="button" class="icon-btn" data-field="toggleHidden" aria-label="${row.hidden ? 'Mostrar en los entrenos' : 'Ocultar de los entrenos'}" title="${row.hidden ? 'Oculto: los entrenos nuevos no lo cargan. Tocar para mostrarlo.' : 'Ocultar de los entrenos nuevos (sin borrarlo del día)'}">${eyeSvg}</button>
         <button type="button" class="icon-btn" data-field="remove" aria-label="Quitar ejercicio">✕</button>
@@ -11435,6 +11458,17 @@ function renderGymRoutineExercisesField() {
       gymRoutineModalExercises.splice(index, 1);
       renderGymRoutineExercisesField();
     });
+    // Intercambiar con el vecino. Se repinta la lista entera (como hace
+    // todo este formulario) en vez de mover nodos a mano: asi las
+    // flechas de los extremos se apagan/encienden solas y los indices de
+    // los listeners vuelven a cuadrar.
+    const mover = (destino) => {
+      const [fila] = gymRoutineModalExercises.splice(index, 1);
+      gymRoutineModalExercises.splice(destino, 0, fila);
+      renderGymRoutineExercisesField();
+    };
+    if (!esPrimero) rowEl.querySelector('[data-field="subir"]').addEventListener('click', () => mover(index - 1));
+    if (!esUltimo) rowEl.querySelector('[data-field="bajar"]').addEventListener('click', () => mover(index + 1));
     container.appendChild(rowEl);
   });
 }
@@ -11459,9 +11493,26 @@ const gymRoutineBlockField = createSelectField({
 });
 document.getElementById('gym-routine-block-field').appendChild(gymRoutineBlockField.element);
 
-function openGymRoutineModal(routine) {
+// modo: 'ficha' (nombre, color, icono y bloque) o 'ejercicios' (solo lo
+// que hay dentro del dia). Un dia NUEVO se abre siempre en 'ficha' --
+// hasta que no tiene nombre no hay a que anadirle ejercicios.
+function openGymRoutineModal(routine, modo = 'ficha') {
   ensureGymRoutineFieldsReady();
-  document.getElementById('gym-routine-modal-title').textContent = routine ? 'Editar día' : 'Nuevo día';
+  if (!routine) modo = 'ficha';
+  const soloEjercicios = modo === 'ejercicios';
+  document.getElementById('gym-routine-ficha').classList.toggle('hidden', soloEjercicios);
+  document.getElementById('gym-routine-ejercicios').classList.toggle('hidden', !soloEjercicios);
+  // OJO con el "required" del nombre: un campo obligatorio que esta
+  // OCULTO no se puede enfocar, y el navegador se niega a enviar el
+  // formulario entero con un "invalid form control is not focusable"
+  // -- sin decir nada por pantalla. Como en el modo ejercicios el
+  // nombre sigue relleno (se rellena igual mas abajo, solo que no se
+  // ve) y se manda tal cual, aqui basta con quitarle el required
+  // mientras esta escondido.
+  document.getElementById('gym-routine-name').required = !soloEjercicios;
+  document.getElementById('gym-routine-modal-title').textContent = routine
+    ? (soloEjercicios ? `Ejercicios de ${routine.name}` : 'Editar día')
+    : 'Nuevo día';
   document.getElementById('gym-routine-id').value = routine ? routine.id : '';
   document.getElementById('gym-routine-name').value = routine ? routine.name : '';
   gymRoutineColorField.setValue(routine ? routine.color : '#5b8cff');
@@ -11481,7 +11532,9 @@ function openGymRoutineModal(routine) {
       }))
     : [];
   renderGymRoutineExercisesField();
-  document.getElementById('btn-delete-gym-routine').classList.toggle('hidden', !routine);
+  // "Eliminar el dia" solo desde su ficha: en la mitad de ejercicios
+  // seria facil confundirlo con "quitar este ejercicio".
+  document.getElementById('btn-delete-gym-routine').classList.toggle('hidden', !routine || soloEjercicios);
   document.getElementById('gym-routine-modal').classList.remove('hidden');
 }
 function closeGymRoutineModal() {

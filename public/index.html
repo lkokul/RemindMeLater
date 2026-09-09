@@ -1048,16 +1048,24 @@
       <h2 id="gym-routine-modal-title">Nuevo día</h2>
       <form id="gym-routine-form">
         <input type="hidden" id="gym-routine-id" />
-        <div class="group-form-row">
-          <div id="gym-routine-icon-field"></div>
-          <input type="text" id="gym-routine-name" placeholder="Nombre del día (ej. Push 1)" required />
-          <div id="gym-routine-color-field"></div>
+        <!-- El modal tiene DOS mitades y nunca se ven las dos a la vez
+             (peticion de Koku): el lapiz de la lista abre la FICHA del
+             dia (nombre, color, icono y a que bloque pertenece) y tocar
+             el dia abre solo sus EJERCICIOS. Antes salia todo junto y
+             habia que buscar lo que venias a cambiar. Ver
+             openGymRoutineModal(routine, modo) en app.js. -->
+        <div id="gym-routine-ficha">
+          <div class="group-form-row">
+            <div id="gym-routine-icon-field"></div>
+            <input type="text" id="gym-routine-name" placeholder="Nombre del día (ej. Push 1)" required />
+            <div id="gym-routine-color-field"></div>
+          </div>
+          <div class="field-label-block">
+            <span class="field-label">Bloque</span>
+            <div id="gym-routine-block-field"></div>
+          </div>
         </div>
-        <div class="field-label-block">
-          <span class="field-label">Bloque</span>
-          <div id="gym-routine-block-field"></div>
-        </div>
-        <div class="field-label-block">
+        <div id="gym-routine-ejercicios" class="field-label-block">
           <span class="field-label">Ejercicios</span>
           <div id="gym-routine-exercises-field" class="gym-routine-exercises-field"></div>
           <button type="button" id="btn-add-gym-routine-exercise" class="secondary-btn">+ Anadir ejercicio</button>
