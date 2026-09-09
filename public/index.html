@@ -783,6 +783,18 @@
       </button>
       <div id="gym-set-start-exercise-list" class="gym-set-exercise-list hidden"></div>
       <p id="gym-set-start-info" class="gym-set-modal-info"></p>
+      <!-- Solo en ejercicios unilaterales contados por lado: con cual
+           empiezas (peticion de Koku: "hay veces que se comienza con el
+           lado derecho y otras el izquierdo"). A partir de ahi se van
+           alternando solos, y el lado elegido se queda como el de salida
+           de las siguientes series de ese ejercicio. -->
+      <div id="gym-set-start-sides" class="gym-set-side-choice hidden">
+        <span>¿Con qué lado empiezas?</span>
+        <div class="gym-set-side-buttons">
+          <button type="button" class="secondary-btn" data-start-side="left">Izquierdo</button>
+          <button type="button" class="secondary-btn" data-start-side="right">Derecho</button>
+        </div>
+      </div>
       <div class="gym-set-modal-actions">
         <button type="button" id="btn-gym-set-start-go" class="primary-btn gym-set-big-btn">Empezar</button>
         <button type="button" id="btn-gym-set-start-cancel" class="secondary-btn gym-set-big-btn">Cancelar</button>

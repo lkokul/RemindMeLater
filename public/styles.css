@@ -1968,9 +1968,22 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 .note-swipe-wrap > .gym-list-item {
   position: relative;
   background: var(--surface);
-  transition: transform 0.16s ease-out;
+  transition: transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
 }
 .note-swipe-wrap.is-open > .gym-list-item { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
+/* Mientras el dedo arrastra manda el transform en linea que escribe
+   wrapGymRowWithSwipe(): sin transicion, para que la fila vaya pegada al
+   dedo; al soltar vuelve el CSS de arriba y anima el ultimo tramo. */
+.note-swipe-wrap.is-dragging > .gym-list-item,
+.note-swipe-wrap.is-dragging > .note-item { transition: none; }
+/* Los botones asoman en vez de aparecer de golpe. */
+.note-swipe-wrap > .note-swipe-actions {
+  opacity: 0.55;
+  transition: opacity 0.22s ease-out;
+}
+.note-swipe-wrap.is-open > .note-swipe-actions,
+.note-swipe-wrap.is-dragging > .note-swipe-actions { opacity: 1; }
 
 /* Arrastrar y soltar notas/carpetas: la etiqueta que sigue al dedo, y el
    resalte de la carpeta (o del boton "Volver") sobre la que se suelta. */
@@ -2586,6 +2599,24 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .gym-set-field { display: flex; flex-direction: column; gap: 0.25rem; }
 .gym-set-field span { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 70%, var(--surface)); }
 .gym-set-field input { width: 100%; box-sizing: border-box; min-height: 2.6rem; font-size: 1rem; }
+
+/* Elegir con que lado se empieza la serie (solo unilaterales por lado). */
+.gym-set-side-choice {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: color-mix(in srgb, var(--surface-text) 70%, var(--surface));
+}
+.gym-set-side-buttons { display: flex; gap: 0.5rem; }
+.gym-set-side-buttons button { flex: 1; min-height: 2.6rem; font-size: 1rem; }
+.gym-set-side-buttons button.active {
+  background: var(--gym-accent);
+  border-color: var(--gym-accent);
+  color: var(--gym-accent-text);
+  font-weight: 600;
+}
 
 /* Lado (I/D) en ejercicios unilaterales contados por separado. */
 .gym-set-side-chip {
