@@ -182,9 +182,18 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
   servidor no hay a quién autenticar, todo es acceso local del dueño del
   dispositivo. El router local ignora a propósito los middlewares que
   traían las rutas portadas (`requireDeviceOrTrusted` y similares).
-- **Mobile-first**: CSS base es para móvil, `min-width: 860px` cambia a
-  layout de escritorio (calendario en grid + panel de recordatorios al
-  lado, todo dentro de `100vh` sin scroll de página).
+- **Solo móvil, a cualquier ancho** (cambiado el 10/9/2026): ya NO hay
+  ningún corte de anchura. Antes el CSS base era para móvil y a partir de
+  `min-width: 860px` se reorganizaba como visor de escritorio; eso se fue
+  entero de esta rama. El motivo no fue limpieza: Koku puso el móvil en la
+  tele y a esa anchura la app se quedaba **a medias** — seguía con su barra
+  de abajo pero perdía los accesos rápidos del calendario y los gestos de
+  navegación, o sea que parecía que se hubiera abierto "el visor de
+  escritorio". `isMobileLayout()` devuelve `true` siempre y
+  `tools/comprobar-widgets.py` falla si vuelve una media query de anchura,
+  si reaparecen `server/`/`electron/`, o si hay más de una
+  `isMobileLayout()` (había dos, y la primera estaba muerta sin que se
+  notara: en JavaScript gana la última declaración).
 - **Tareas**: son filas de `events` con `is_task = 1` (no una tabla
   aparte) — comparten título/grupo con los eventos normales, pero
   `start_at` es opcional (una tarea puede no tener fecha) y tienen su
@@ -199,10 +208,14 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
   - **Notas**: título + contenido con formato básico (Fase 4, completa:
     negrita/cursiva/listas en v0.21.0, tablas en v0.22.0, imágenes en
     v0.23.0 — ver bloque aparte más abajo). Se pueden ocultar (icono de
-    ojo, difuminadas en la lista) con una contraseña OPCIONAL y
-    COMPARTIDA para toda la app (no por nota individual) — no es cifrado
-    real, solo evita que se lea a primera vista
-    (`server/routes/notesSecurity.js`).
+    ojo, difuminadas en la lista). **En la app móvil NO hay contraseña**:
+    ocultar solo difumina, y con el teléfono desbloqueado no protege de
+    nada. La contraseña compartida se fue con el servidor y hay hasta una
+    migración que borra sus claves (`local-schema.js`, busca
+    `notes_hide_password_hash`). Lo que describía este párrafo antes es el
+    OTRO programa, el de escritorio (`server/routes/notesSecurity.js`).
+    Pendiente de decidir con Koku si se dice así en la pantalla o se hace
+    de verdad con Face ID — ver `PARA-KOKU-MAÑANA.md`, punto C2.
   - **Carpetas de notas**: sistema propio, separado de los Grupos del
     calendario — nombre + color (YA NO tienen icono propio, se quitó esa
     opción a propósito: el icono genérico de carpeta ya diferencia bien
@@ -2685,6 +2698,54 @@ normal.
   interruptor para pedirlo". Eso es una instrucción para el usuario.
 - **La casilla `sin_app_group`** del workflow de iOS: es de la
   compilación, no de la app. No se ve desde el teléfono.
+
+## Seguridad, privacidad y tipografía (10/9/2026, v0.48.0)
+
+Hay dos documentos con el detalle: **`SEGURIDAD-Y-PRIVACIDAD.md`** (qué
+era vulnerable y por qué, más el papeleo de las tiendas) e
+**`IDEAS-DISENO-IOS.md`** (por qué la app no se leía como una app de
+Apple). Lo que hay que tener presente al tocar código:
+
+- **El HTML de una nota se sanea DOS veces: al guardar y al PINTAR.** El
+  modelo era "sanear al escribir" y confiar al pintar, y eso tiene un
+  agujero real: importar una copia de seguridad sustituye el `.sqlite`
+  entero, así que sus filas nunca pasan por la ruta que sanea. Está
+  probado que así se ejecutaba código. `prepareAssetHtmlForDom()` llama
+  ahora a `window.sanearHtmlDeNota` (la MISMA función de
+  `routes-local/notes.js`, expuesta, no una copia). **Sanear va ANTES de
+  tocar los `src`**: al revés estaría trabajando sobre HTML en el que
+  todavía no se puede confiar.
+- **`escapeHtml()` escapa también las comillas.** `textContent` →
+  `innerHTML` solo cubre `< > &`, y la función se usa dentro de ~19
+  atributos entrecomillados. Si escribes uno nuevo, no hace falta que
+  pienses en cuál es cuál: la función ya vale para los dos casos.
+- **Hay una CSP** en `index.html`. Dos cosas que rompen si no te acuerdas:
+  `script-src` lleva `'wasm-unsafe-eval'` porque **sql.js es WebAssembly y
+  sin eso la app no arranca**, y **no puede haber ningún `<script>` en
+  línea ni ningún `on*=` en el HTML** (por eso el arranque vive en
+  `public/arranque.js`).
+- **La app no hace NI UNA petición de red.** Nada de CDN: lo que haga
+  falta se vendoriza dentro de `public/`, como sql.js. Se quitaron los
+  Google Fonts que quedaban (eran lo único que salía del teléfono) y
+  `--font-mono` usa la pila del sistema, que en iPhone es SF Mono.
+- **Ocho tokens de tipografía** (`--t-micro` … `--t-titulo-grande`), la
+  escala de iOS. Había 24 tamaños a ojo y el más usado era 13,6 px, que en
+  iOS es tamaño de pie de foto (el cuerpo son 17). **No metas un
+  `font-size` en rem**: el guion falla. Los tres que quedan en números son
+  unidades dentro de un SVG, no píxeles de pantalla.
+- **Toda regla `:hover` va dentro de `@media (hover: hover)`.** iOS aplica
+  el `:hover` al TOCAR y lo deja puesto hasta que tocas otra cosa, así que
+  una regla suelta deja el botón "pulsado" en el móvil. El guion falla si
+  se te escapa una.
+- `tools/comprobar-widgets.py` vigila todo lo anterior más los manifiestos
+  de privacidad de Apple, ATS, la copia automática de Android y los CDN.
+  **Lánzalo antes de pedir una build**: aquí no hay Xcode, y todo esto se
+  puede perder sin que la app deje de funcionar, que es justamente por lo
+  que hacía falta que algo chille.
+
+**Pendiente de que Koku decida**: `PARA-KOKU-MAÑANA.md` (ocho dudas de
+diseño, tres cosas que se salen de la filosofía de la app, y el papeleo de
+las dos tiendas). No empieces nada de ahí sin su respuesta.
 
 ## Estado actual
 
