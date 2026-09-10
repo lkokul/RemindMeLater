@@ -1534,12 +1534,15 @@ Grupo: `group.com.koku.remindmelater`.
 **El App Group es una capacidad de FIRMA, no solo código.** Los dos
 targets llevan su `.entitlements` declarándolo
 (`CODE_SIGN_ENTITLEMENTS` en las cuatro configuraciones), y el App ID de
-Apple tiene que tenerla dada de alta. El pipeline firma con
-`-allowProvisioningUpdates` y una clave de App Store Connect, así que
-Xcode PUEDE crearla solo — pero es justo el paso que más falla. **Si una
-build casca firmando, es esto**: se arregla dando de alta el grupo una
-vez en el portal de desarrollador (o abriendo el proyecto en Xcode con la
-cuenta y dejando que lo cree).
+Apple tiene que tenerla dada de alta A MANO. Aquí hubo una creencia
+equivocada que costó builds: el pipeline firma con
+`-allowProvisioningUpdates`, y de ahí se dio por hecho que Xcode se lo
+apañaría solo. **No es verdad**: esa bandera deja a Xcode crear
+PERFILES, no CAPACIDADES. Una capacidad que el App ID no tiene no se
+inventa desde un runner, y el error que da no lo dice.
+Está **hecho desde el 10/9/2026** (ver el bloque RESUELTO EN LA BUILD #55),
+así que no hay que repetirlo — pero si algún día aparece un target nuevo
+con su propio bundle ID, ese empieza otra vez sin capacidad.
 
 **Y falló de verdad, en silencio, en las builds #40–#52.** El widget se
 quedaba en "Abre la app" por muchas veces que Koku la abriera. La causa
@@ -1578,20 +1581,20 @@ Lo que hay ahora en `ios-testflight.yml`, y por qué:
   **"Sin buzón · falta el App Group"** es "la firma no trajo el grupo".
   Antes los dos se veían igual, y en el iPhone no hay consola donde mirar.
 
-**CONFIRMADO EN LA BUILD #54, y esto ahorra volver a averiguarlo**: la
-firma ad hoc **funciona**. El archivo sale con el App Group en los dos
-sitios, y el registro lo imprime:
+**RESUELTO EN LA BUILD #55 (10/9/2026). Esto era el problema de fondo de
+los widgets, y costó quince builds averiguarlo — merece la pena leerlo
+entero antes de tocar nada de firma.**
 
-```
-==== App.app ====
-com.apple.security.application-groups → group.com.koku.remindmelater
-OK: lleva el App Group
-==== DescansoWidget.appex ====
-OK: lleva el App Group
-```
+Hicieron falta las DOS mitades, y ninguna sirve sin la otra:
 
-**Lo que falla ahora es OTRA cosa, y es la segunda mitad del diagnóstico
-que las dos comprobaciones separaban a propósito**: exportar.
+1. **En el repositorio**: archivar con **firma ad hoc**, no con
+   `CODE_SIGNING_ALLOWED=NO`. Los entitlements se incrustan AL FIRMAR, así
+   que sin firma en el archivo no hay App Group que exportar. Confirmado
+   en la build #54: el `.xcarchive` ya salía con el grupo en el `.app` y
+   en el `.appex`.
+2. **En la cuenta de Apple**: dar de alta la **capacidad** App Groups en
+   los DOS App ID. Sin eso, el archivo pide un perfil con App Groups que
+   no existe y no se puede crear, y `-exportArchive` muere así:
 
 ```
 error: exportArchive Authentication failed
@@ -1599,28 +1602,58 @@ error: exportArchive No profiles for 'com.koku.remindmelater' were found
 error: exportArchive No profiles for 'com.koku.remindmelater.DescansoWidget' were found
 ```
 
-O sea: el archivo pide un perfil CON App Groups, ese perfil no existe, y
-Xcode no consigue crearlo. En la build #52 el mismo paso funcionaba
-porque el archivo iba sin entitlements y le valía un perfil pelado.
+**Ojo con ese "Authentication failed", que es la trampa cara**: NO
+significa que la clave de App Store Connect esté mal ni que le falte rol.
+La de Koku era Admin desde el principio. Apple lo escupe cuando no puede
+CREAR el perfil, sea cual sea el motivo, y despista hacia la clave. Lo
+que faltaba era la capacidad en el App ID. Si vuelve a salir, mirar
+primero el portal, no el secreto.
 
-**Esto ya no se arregla desde el repositorio.** Hace falta, una sola vez,
-en la cuenta de Apple de Koku:
+Lo que hizo Koku en developer.apple.com, una sola vez (queda hecho para
+siempre, no hay que repetirlo en cada build):
 
-1. developer.apple.com → Certificates, Identifiers & Profiles →
-   Identifiers → **+** → **App Groups** → crear
-   `group.com.koku.remindmelater`.
-2. En el App ID `com.koku.remindmelater`: activar la capacidad **App
-   Groups** y marcar ese grupo.
+1. Certificates, Identifiers & Profiles → Identifiers → **+** → **App
+   Groups** → crear `group.com.koku.remindmelater`.
+2. En el App ID `com.koku.remindmelater`: marcar la capacidad **App
+   Groups** → **Edit** → elegir ese grupo → **Save**.
 3. Lo mismo en `com.koku.remindmelater.DescansoWidget`.
-4. Y comprobar el ROL de la clave de App Store Connect: para crear
-   perfiles hace falta **App Manager** o **Admin**; una clave de
-   "Developer" no puede, y Apple lo reporta como "Authentication failed"
-   en vez de decir que faltan permisos — que es justo lo que despista.
 
-Mientras tanto, la casilla **"Compilar SIN el App Group"** del diálogo de
-Run workflow saca una build de TestFlight igual: los widgets saldrán
-vacíos ("Sin buzón · falta el App Group", que para eso está), pero todo
-lo demás se puede probar.
+Detalle que atasca al llegar: la lista de **Identifiers** tiene un filtro
+arriba a la derecha que se queda puesto en "App Groups" justo después de
+crear el grupo, y entonces los App ID no aparecen y parece que se han
+borrado. Hay que cambiarlo a **"App IDs"**.
+
+**El tercer App ID que sale en esa lista, `...CompartirExtension`, es un
+fósil** del Compartir→RemindMeLater que se aplazó el 9/9/2026. No lleva
+App Groups ni hace falta tocarlo, y **no se borra**: ese trabajo está
+aplazado, no cancelado (el código sigue en `calendario-notas-movil-UI`,
+commit `73cbdbc`), y Apple es tiquismiquis con reutilizar identificadores
+borrados.
+
+Así queda el registro de la build #55, que es lo que hay que ver para dar
+la firma por buena — ojo, **la comprobación que vale es la del `.ipa`**,
+no la del archivo:
+
+```
+==== Entitlements de la APP ====
+com.apple.security.application-groups → group.com.koku.remindmelater
+==== Entitlements del WIDGET ====
+com.apple.security.application-groups → group.com.koku.remindmelater
+OK: ipa/Payload/App.app lleva el App Group
+OK: ipa/Payload/App.app/PlugIns/DescansoWidget.appex lleva el App Group
+UPLOAD SUCCEEDED with no errors
+```
+
+**Las dos comprobaciones separadas se quedan.** Ya han pagado lo que
+costaron: sin ellas, la #54 habría parecido "sigue sin funcionar" en vez
+de decir "la firma ya está bien, lo que falta es el perfil", que es lo
+que llevó directo al portal de Apple. Si algún día vuelve a fallar, la
+primera acusa al repositorio y la segunda a la cuenta de Apple.
+
+La casilla **"Compilar SIN el App Group"** del diálogo de Run workflow
+también se queda, aunque ya no haga falta: es la salida de emergencia
+para sacar una build de TestFlight (con los widgets vacíos) si Apple da
+guerra y hay que probar otra cosa YA.
 
 ### Las piezas
 
@@ -1738,19 +1771,18 @@ toque en el widget (`remindmelater://gym-hoy`), así que hay **un solo
 camino de entrada** (SceneDelegate → `UserDefaults.standard` → el
 JavaScript) y funciona aunque el buzón no exista.
 
-**La hipótesis sobre el App Group, para el que retome esto**: el
-workflow **archiva SIN FIRMAR** (`CODE_SIGNING_ALLOWED=NO`, por el motivo
-documentado en el propio archivo) y los entitlements se incrustan AL
-FIRMAR. Es posible que el App Group no sobreviva a ese camino:
-`-exportArchive` re-firma, y si el producto archivado no traía
-entitlements, el resultado puede quedarse sin el grupo **sin dar ningún
-error**. Build verde, app instalada, y `UserDefaults(suiteName:)` a nil.
+**Aquella hipótesis era la buena, y ya está confirmada**: el workflow
+archivaba SIN FIRMAR (`CODE_SIGNING_ALLOWED=NO`) y los entitlements se
+incrustan AL FIRMAR, así que el App Group no llegaba al `.ipa` sin dar
+ningún error. Build verde, app instalada, y `UserDefaults(suiteName:)` a
+nil. Arreglado con firma ad hoc al archivar + la capacidad dada de alta
+en el portal de Apple — ver el bloque **RESUELTO EN LA BUILD #55** más
+arriba, que es donde vive el detalle.
 
-Por eso el workflow tiene ahora un paso que **abre el `.ipa` ya firmado,
-imprime los entitlements reales de la app y de la extensión, y tira la
-build si al widget le falta el grupo** — antes de subir nada a TestFlight.
-Convierte un fallo silencioso en uno ruidoso, y la próxima ejecución
-resuelve la duda de una vez.
+Del paso que se añadió para averiguarlo (abrir el `.ipa` ya firmado,
+imprimir los entitlements reales y tirar la build si al widget le falta
+el grupo) no hay que deshacer nada: se queda como red permanente, porque
+convierte un fallo silencioso en uno ruidoso ANTES de subir a TestFlight.
 
 **Red de seguridad en el widget**: la línea temporal pasó de `.never` a
 `.after(medianoche)`. Sigue sin refrescarse por horas (lo que pidió Koku),
@@ -1927,6 +1959,13 @@ normal.
 con `calendario-notas-movil-UI` ya fusionada). Todo lo de esta
 conversación vive ahí; ver el bloque "Dos ramas" más arriba. **`movil-ui`
 está al mismo nivel**, sin los avisos de diagnóstico.
+
+**Última build: #55 (10/9/2026, `desarrollador`, commit `87fa740`), la
+primera que sube a TestFlight con el App Group de verdad en el `.ipa`.**
+Los seis widgets van dentro. Pendiente de que Koku los pruebe en el
+iPhone: que aparezcan en la galería, que enseñen datos en vez de "Abre
+la app", y que tocarlos lleve a donde toca.
+
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 
 - **`movil-ui` ya NO se toca** salvo que Koku lo pida explícitamente:
