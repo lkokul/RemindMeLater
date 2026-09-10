@@ -30,8 +30,14 @@
       countsTowardBudget: !!row.counts_toward_budget,
       active: !!row.active,
       lastGeneratedPeriod: row.last_generated_period || null,
+      kind: row.kind || 'other',
     };
   }
+
+  // Las cuatro clases de gasto fijo. Se validan contra esta lista para que
+  // un valor inventado no acabe en la base y descuadre luego los totales
+  // por clase (un 'suscripcion' mal escrito no sumaria con 'subscription').
+  const KINDS = ['subscription', 'bill', 'loan', 'other'];
 
   function validateBody(body, existing) {
     const accountId = body.accountId !== undefined ? body.accountId : existing && existing.account_id;
@@ -96,9 +102,13 @@
     const countsTowardBudget =
       body.countsTowardBudget !== undefined ? (body.countsTowardBudget ? 1 : 0) : existing ? existing.counts_toward_budget : 1;
 
+    let kind = body.kind !== undefined ? body.kind : existing && existing.kind;
+    if (!KINDS.includes(kind)) kind = 'other';
+
     return {
       accountId,
       categoryId,
+      kind,
       amount: safeAmount,
       description: typeof body.description === 'string' && body.description.trim() ? body.description.trim() : (body.description === undefined && existing ? existing.description : null),
       frequency,
@@ -347,10 +357,25 @@
       const annualCost = row.frequency === 'monthly' ? row.amount * 12 : row.amount;
       return Object.assign(serialize(row), { monthlyCost, annualCost });
     });
+    // Ordenado por lo que cuesta AL AÑO, de mas a menos: "lo que mas me
+    // cuesta al año" suele ser la sorpresa, y casi nunca es lo que mas
+    // cuesta al mes (un seguro anual de 400 € pesa mas que dos
+    // suscripciones de 10 €).
     items.sort((a, b) => b.annualCost - a.annualCost);
+
+    // Totales por clase, para poder contestar a "¿cuanto me gasto al año
+    // en suscripciones?" sin que el alquiler entre en esa cifra.
+    const byKind = {};
+    for (const k of KINDS) byKind[k] = { monthly: 0, annual: 0, count: 0 };
+    for (const i of items) {
+      byKind[i.kind].monthly += i.monthlyCost;
+      byKind[i.kind].annual += i.annualCost;
+      byKind[i.kind].count += 1;
+    }
+
     const monthlyTotal = items.reduce((acc, i) => acc + i.monthlyCost, 0);
     const annualTotal = items.reduce((acc, i) => acc + i.annualCost, 0);
-    res.json({ monthlyTotal, annualTotal, items });
+    res.json({ monthlyTotal, annualTotal, byKind, items });
   });
 
   // GET /:id/history — cuanto ha costado ESTE gasto cada año.
@@ -391,7 +416,7 @@
 
     const info = db
       .prepare(
-        'INSERT INTO finanzas_recurring_expenses (account_id, category_id, amount, description, frequency, day_of_month, month_of_year, start_date, end_date, counts_toward_budget) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO finanzas_recurring_expenses (account_id, category_id, amount, description, frequency, day_of_month, month_of_year, start_date, end_date, counts_toward_budget, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       )
       .run(
         result.accountId,
@@ -403,7 +428,8 @@
         result.monthOfYear,
         result.startDate,
         result.endDate,
-        result.countsTowardBudget
+        result.countsTowardBudget,
+        result.kind
       );
 
     const row = db.prepare('SELECT * FROM finanzas_recurring_expenses WHERE id = ?').get(info.lastInsertRowid);
@@ -425,7 +451,7 @@
     const active = body.active !== undefined ? (body.active ? 1 : 0) : existing.active;
 
     db.prepare(
-      'UPDATE finanzas_recurring_expenses SET account_id = ?, category_id = ?, amount = ?, description = ?, frequency = ?, day_of_month = ?, month_of_year = ?, start_date = ?, end_date = ?, counts_toward_budget = ?, active = ? WHERE id = ?'
+      'UPDATE finanzas_recurring_expenses SET account_id = ?, category_id = ?, amount = ?, description = ?, frequency = ?, day_of_month = ?, month_of_year = ?, start_date = ?, end_date = ?, counts_toward_budget = ?, kind = ?, active = ? WHERE id = ?'
     ).run(
       result.accountId,
       result.categoryId,
@@ -437,6 +463,7 @@
       result.startDate,
       result.endDate,
       result.countsTowardBudget,
+      result.kind,
       active,
       req.params.id
     );

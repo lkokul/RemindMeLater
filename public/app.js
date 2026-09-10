@@ -9788,6 +9788,33 @@ const finanzasRecurringFrequencyField = createSelectField({
 });
 document.getElementById('finanzas-recurring-frequency-field').appendChild(finanzasRecurringFrequencyField.element);
 
+// Que clase de gasto fijo es. No sustituye a la categoria (esa es de Koku
+// y cambia): esto es lo que permite preguntar "¿cuanto me cuestan al año
+// las SUSCRIPCIONES?" sin que el alquiler se cuele en la cifra.
+const FINANZAS_KIND_OPTIONS = [
+  { value: 'subscription', label: 'Suscripción' },
+  { value: 'bill', label: 'Recibo' },
+  { value: 'loan', label: 'Préstamo' },
+  { value: 'other', label: 'Otro' },
+];
+const FINANZAS_KIND_LABELS = {
+  subscription: 'Suscripción',
+  bill: 'Recibo',
+  loan: 'Préstamo',
+  other: 'Otro',
+};
+// Los plurales de los chips y de la cabecera, que no son los de arriba.
+const FINANZAS_KIND_PLURALES = {
+  all: 'Tus gastos fijos',
+  subscription: 'Tus suscripciones',
+  bill: 'Tus recibos',
+  loan: 'Tus préstamos',
+  other: 'Otros gastos fijos',
+};
+
+const finanzasRecurringKindField = createSelectField({ options: FINANZAS_KIND_OPTIONS, initialValue: 'other' });
+document.getElementById('finanzas-recurring-kind-field').appendChild(finanzasRecurringKindField.element);
+
 const finanzasRecurringMonthField = createSelectField({ options: FINANZAS_MONTH_OPTIONS, initialValue: '01' });
 document.getElementById('finanzas-recurring-month-field').appendChild(finanzasRecurringMonthField.element);
 
@@ -9836,9 +9863,26 @@ document.getElementById('finanzas-savings-year-input').value = finanzasCurrentYe
 document.getElementById('finanzas-savings-range-from-year').value = finanzasCurrentYear;
 document.getElementById('finanzas-savings-range-to-year').value = finanzasCurrentYear;
 
+// El dinero, escrito como se escribe en español: punto para los miles y
+// coma para los decimales ("10.851,88 €", no "10851.88 €"). Antes era un
+// toFixed(2) a secas, que en cifras de cuatro digitos para arriba se lee
+// fatal. Solo se usa para PINTAR (ninguno de los 37 sitios que la llaman
+// vuelve a convertir el texto en numero), asi que cambiarla es seguro.
+const FINANZAS_MONEY_FORMATTER = new Intl.NumberFormat('es-ES', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  // useGrouping "always" a proposito: por defecto, el español NO separa
+  // los numeros de cuatro cifras (9600, pero 12.845), que es correcto al
+  // escribir pero queda desigual en una COLUMNA de importes -- "9600,00"
+  // encima de "12.845,66" parece un fallo. Los bancos de aqui escriben
+  // 9.600,00 € siempre, y eso es lo que se espera leer en una app de
+  // cuentas.
+  useGrouping: 'always',
+});
+
 function formatFinanzasAmount(n) {
   const num = Number(n) || 0;
-  return `${num.toFixed(2)} €`;
+  return `${FINANZAS_MONEY_FORMATTER.format(num)} €`;
 }
 
 function setupFinanzasIconColorFields() {
@@ -16165,23 +16209,73 @@ async function renderFinanzasFijosAnual({ recargar = true } = {}) {
   cont.appendChild(grupo);
 }
 
-// -- Vista 3: las plantillas --
-function renderFinanzasRecurringList() {
+// -- Vista 3: las plantillas, con lo que cuestan --
+let finanzasFijosKind = 'all';
+
+async function renderFinanzasRecurringList() {
   const cont = document.getElementById('finanzas-recurring-list');
+
+  // El resumen normaliza cada plantilla a mes y a año. Solo cuenta las
+  // ACTIVAS: lo que cuesta mantener lo que tienes contratado hoy, que es
+  // otra pregunta distinta del "cuanto hay en el año 2026" de la vista
+  // anual (esa si incluye lo que ya cancelaste pero pagaste).
+  const resumen = await api('/api/finanzas-recurring-expenses/summary');
+  const delTipo =
+    finanzasFijosKind === 'all'
+      ? { monthly: resumen.monthlyTotal, annual: resumen.annualTotal, count: resumen.items.length }
+      : resumen.byKind[finanzasFijosKind];
+
+  document.getElementById('finanzas-fijos-coste-label').textContent = FINANZAS_KIND_PLURALES[finanzasFijosKind];
+  document.getElementById('finanzas-fijos-coste-mes').textContent = `${formatFinanzasAmount(delTipo.monthly)}/mes`;
+  document.getElementById('finanzas-fijos-coste-anio').textContent =
+    delTipo.count === 0
+      ? 'Nada de este tipo todavía'
+      : `${formatFinanzasAmount(delTipo.annual)} al año · ${delTipo.count} ${delTipo.count === 1 ? 'activo' : 'activos'}`;
+
+  // La lista si enseña las pausadas (si no, desaparecerian de la app sin
+  // forma de reactivarlas), pero atenuadas y sin sumar en la cabecera.
+  const visibles =
+    finanzasFijosKind === 'all'
+      ? finanzasRecurringExpenses
+      : finanzasRecurringExpenses.filter((r) => (r.kind || 'other') === finanzasFijosKind);
+
   cont.innerHTML = '';
-  if (finanzasRecurringExpenses.length === 0) {
-    cont.appendChild(finanzasFijosVacioEl('Todavía no tienes gastos fijos. Crea uno con el botón de arriba.'));
+  if (visibles.length === 0) {
+    cont.appendChild(
+      finanzasFijosVacioEl(
+        finanzasFijosKind === 'all'
+          ? 'Todavía no tienes gastos fijos. Crea uno con el botón de arriba.'
+          : 'No tienes ningún gasto fijo de este tipo.'
+      )
+    );
     return;
   }
+
+  // Ordenadas por lo que cuestan AL AÑO: asi lo caro sale arriba aunque
+  // sea un pago anual suelto que en la lista de siempre quedaba enterrado.
+  const costes = new Map(resumen.items.map((i) => [i.id, i]));
+  const ordenadas = [...visibles].sort((a, b) => {
+    const ca = costes.get(a.id) ? costes.get(a.id).annualCost : -1;
+    const cb = costes.get(b.id) ? costes.get(b.id).annualCost : -1;
+    return cb - ca;
+  });
+
   const grupo = document.createElement('div');
   grupo.className = 'finanzas-group';
-  finanzasRecurringExpenses.forEach((r) => {
+  ordenadas.forEach((r) => {
     const cat = finanzasCategories.find((c) => c.id === Number(r.categoryId));
+    // La linea de debajo lleva la conversion: en una mensual se enseña lo
+    // que suma al año, y en una anual lo que supone al mes. Es la cifra
+    // que no se puede calcular de cabeza y la que permite comparar.
+    const equivalencia =
+      r.frequency === 'monthly'
+        ? `${formatFinanzasAmount(r.amount * 12)}/año`
+        : `${formatFinanzasAmount(r.amount / 12)}/mes`;
     const fila = finanzasFilaEl({
       icono: cat && cat.icon ? cat.icon : '📄',
       color: cat && cat.color ? cat.color : '',
       titulo: r.description || 'Gasto fijo sin nombre',
-      sub: `${finanzasRecurringFrequencyLabel(r)} · ${finanzasAccountName(r.accountId)}`,
+      sub: `${finanzasRecurringFrequencyLabel(r)} · ${equivalencia}`,
       importe: formatFinanzasAmount(r.amount),
       etiqueta: r.active ? '' : 'Pausado',
       etiquetaTono: 'pausado',
@@ -16212,7 +16306,7 @@ function switchFinanzasFijosVista(vista) {
 
 async function refreshFinanzasRecurringTab() {
   await loadFinanzasRecurring();
-  renderFinanzasRecurringList();
+  await renderFinanzasRecurringList();
   if (finanzasFijosVista === 'pendientes') await renderFinanzasFijosPendientes();
   else if (finanzasFijosVista === 'anual') await renderFinanzasFijosAnual();
 }
@@ -16228,6 +16322,12 @@ function openFinanzasRecurringModal(r) {
   document.getElementById('finanzas-recurring-description').value = r ? (r.description || '') : '';
   finanzasRecurringAccountField.setValue(r ? r.accountId : (finanzasAccounts[0] ? finanzasAccounts[0].id : ''));
   finanzasRecurringCategoryField.setValue(r && r.categoryId ? r.categoryId : '');
+  // Al crear una nueva se propone el tipo del filtro en el que estas: si
+  // estabas mirando "Suscripciones", lo normal es que la que vas a crear
+  // lo sea. Con el filtro en "Todos" se queda en "Otro".
+  finanzasRecurringKindField.setValue(
+    r ? r.kind || 'other' : finanzasFijosKind !== 'all' ? finanzasFijosKind : 'other'
+  );
   document.getElementById('finanzas-recurring-amount').value = r ? r.amount : '';
   finanzasRecurringFrequencyField.setValue(r ? r.frequency : 'monthly');
   document.getElementById('finanzas-recurring-day').value = r ? r.dayOfMonth : '';
@@ -16259,6 +16359,13 @@ document.querySelectorAll('[data-fijos-rango]').forEach((btn) => {
       b.setAttribute('aria-selected', activo ? 'true' : 'false');
     });
     renderFinanzasFijosPendientes();
+  });
+});
+document.querySelectorAll('[data-fijos-kind]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    finanzasFijosKind = btn.dataset.fijosKind;
+    document.querySelectorAll('[data-fijos-kind]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderFinanzasRecurringList();
   });
 });
 document.querySelectorAll('[data-fijos-estado]').forEach((btn) => {
@@ -16301,6 +16408,7 @@ document.getElementById('finanzas-recurring-form').addEventListener('submit', as
     startDate: toDateKey(finanzasRecurringStartField.getValue()),
     endDate: endDate ? toDateKey(endDate) : null,
     countsTowardBudget: document.getElementById('finanzas-recurring-counts').checked,
+    kind: finanzasRecurringKindField.getValue(),
   };
   try {
     if (id) {
@@ -16309,7 +16417,9 @@ document.getElementById('finanzas-recurring-form').addEventListener('submit', as
       await api('/api/finanzas-recurring-expenses', { method: 'POST', body: JSON.stringify(payload) });
     }
   } catch (err) {
-    alert(err.message);
+    // alert() del navegador bloquea la webview entera en el movil y no
+    // sigue el tema. Aviso propio, como el resto de la app.
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
     return;
   }
   closeFinanzasRecurringModal();
@@ -16456,8 +16566,12 @@ document.getElementById('btn-delete-finanzas-debt').addEventListener('click', as
 async function openFinanzasRecurringTransactionsModal(r) {
   finanzasFijosDetalle = r;
   document.getElementById('finanzas-recurring-transactions-title').textContent = r.description || 'Gasto fijo';
+  const equivalencia =
+    r.frequency === 'monthly'
+      ? `${formatFinanzasAmount(r.amount * 12)}/año`
+      : `${formatFinanzasAmount(r.amount / 12)}/mes`;
   document.getElementById('finanzas-recurring-detail-sub').textContent =
-    `${formatFinanzasAmount(r.amount)} · ${finanzasRecurringFrequencyLabel(r)} · ${finanzasAccountName(r.accountId)}${r.active ? '' : ' · Pausado'}`;
+    `${FINANZAS_KIND_LABELS[r.kind || 'other']} · ${formatFinanzasAmount(r.amount)} ${finanzasRecurringFrequencyLabel(r).toLowerCase()} · ${equivalencia} · ${finanzasAccountName(r.accountId)}${r.active ? '' : ' · Pausado'}`;
 
   const toggleBtn = document.getElementById('btn-finanzas-recurring-detail-toggle');
   toggleBtn.textContent = r.active ? 'Pausar' : 'Reanudar';

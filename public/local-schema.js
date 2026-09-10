@@ -912,6 +912,19 @@ function applyLocalSchema(db) {
     db.exec('ALTER TABLE finanzas_transactions ADD COLUMN recurring_expense_id INTEGER REFERENCES finanzas_recurring_expenses(id)');
   }
 
+  // kind: que CLASE de gasto fijo es -- 'subscription' (Netflix, Spotify),
+  // 'bill' (luz, agua, alquiler), 'loan' (prestamo, hipoteca) u 'other'.
+  //
+  // No es una categoria mas: las categorias son de Koku y cambian, y lo
+  // que hace falta aqui es poder contestar a "¿cuanto me gasto al año en
+  // SUSCRIPCIONES?" sin que el alquiler se cuele en esa cifra. Las
+  // plantillas de antes de esta columna quedan como 'other', que es la
+  // verdad (no se sabe lo que son) y no falsea ninguna suma.
+  const finanzasRecurringColumns = db.prepare('PRAGMA table_info(finanzas_recurring_expenses)').all().map((c) => c.name);
+  if (!finanzasRecurringColumns.includes('kind')) {
+    db.exec("ALTER TABLE finanzas_recurring_expenses ADD COLUMN kind TEXT NOT NULL DEFAULT 'other'");
+  }
+
   // savings_goal_min: objetivo MINIMO de ahorro mensual (sin maximo --
   // Koku dijo explicitamente que ahorrar de mas nunca es un problema).
   const finanzasSettingsColumns = db.prepare('PRAGMA table_info(finanzas_settings)').all().map((c) => c.name);
