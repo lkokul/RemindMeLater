@@ -27,17 +27,17 @@ const state = {
   openNotes: [],
   activeOpenNoteKey: null,
   specialDays: {}, // 'YYYY-MM-DD' -> 'holiday' | 'special', marcados a mano
-  pairingCodeExpiresAt: null,
   notifiedReminderIds: new Set(), // evita notificar el mismo recordatorio 2 veces
   remindersMode: 'upcoming', // 'upcoming' | 'day' — que se muestra en el panel de recordatorios
   remindersDayDate: null, // dia seleccionado cuando remindersMode === 'day'
-  upcomingReminders: [], // ultima lista de "proximos recordatorios" recibida del servidor
+  upcomingReminders: [], // ultima lista de "proximos recordatorios" calculada
   // Extension "Gimnasio" (ver #gym-view en index.html): ejercicios,
   // rutinas y sesiones registradas. Se cargan al abrir la vista, no al
   // arrancar la app (a diferencia de groups/events), ya que es una
   // seccion aparte que la mayoria de aperturas de la app ni siquiera
   // visita.
   gymExercises: [],
+  gymBlocks: [],
   gymRoutines: [],
   gymSessions: [],
   // Extension "Lecturas" (ver #lecturas-view en index.html): sagas y,
@@ -53,16 +53,6 @@ const state = {
   mobileCalendarDayDate: null,
 };
 
-// Registra el service worker (ver sw.js): junto con manifest.json, es lo
-// que hace que el navegador ofrezca "Instalar" (ordenador) o "Anadir a
-// pantalla de inicio" (movil) para RemindMeLater, como una app aparte con
-// su propio icono y sin la barra de direcciones — sin compilar nada.
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
-  });
-}
-
 const DEFAULT_EVENT_COLOR = '#5b8cff'; // el --accent de styles.css, para eventos sin grupo
 
 // ---------------------------------------------------------------------
@@ -77,9 +67,16 @@ const DEFAULT_EVENT_COLOR = '#5b8cff'; // el --accent de styles.css, para evento
 // DENTRO de manejadores de click, que no se disparan hasta que la persona
 // interactua — para entonces los dos archivos ya estan cargados, igual
 // que el resto de referencias cruzadas entre app.js y settings.js.
-function createSelectField({ options = [], initialValue = '', placeholder = '', onChange, scrollToValue } = {}) {
+// `searchable`: anade un buscador dentro del desplegable. Se pide donde
+// la lista puede crecer sin limite (los ejercicios del gimnasio, que son
+// los que crea la persona mas los ~870 de la libreria) -- peticion de
+// Koku: "si tengo muchos diferentes se hace un poco una odisea". No se
+// enfoca solo a proposito: en el movil abrir el teclado nada mas
+// desplegar tapa media lista, y muchas veces solo quieres mirar.
+function createSelectField({ options = [], initialValue = '', placeholder = '', onChange, scrollToValue, searchable = false } = {}) {
   let value = initialValue;
   let opts = options;
+  let busqueda = '';
 
   const root = document.createElement('div');
   root.className = 'select-field';
@@ -91,6 +88,45 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
   const popover = document.createElement('div');
   popover.className = 'select-popover hidden';
   document.body.appendChild(popover);
+
+  // El buscador y la lista son hermanos DENTRO del popover: renderOptions
+  // repinta solo la lista, asi que escribir no destruye el campo (ni
+  // pierde el foco ni el cursor a media palabra).
+  let campoBusqueda = null;
+  let listaOpciones = popover;
+  if (searchable) {
+    popover.classList.add('has-search');
+    const cabecera = document.createElement('div');
+    cabecera.className = 'select-popover-search';
+    campoBusqueda = document.createElement('input');
+    campoBusqueda.type = 'text';
+    campoBusqueda.placeholder = 'Buscar...';
+    campoBusqueda.autocomplete = 'off';
+    cabecera.appendChild(campoBusqueda);
+    popover.appendChild(cabecera);
+    listaOpciones = document.createElement('div');
+    listaOpciones.className = 'select-popover-list';
+    popover.appendChild(listaOpciones);
+    campoBusqueda.addEventListener('input', () => { busqueda = campoBusqueda.value; renderOptions(); });
+    // Enter dentro del buscador no debe enviar el formulario que haya
+    // alrededor (estos desplegables viven dentro de modales con <form>).
+    campoBusqueda.addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
+  }
+
+  // Sin tildes y en minusculas, para que "biceps" encuentre "Bíceps".
+  function normalizar(texto) {
+    return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+  function opcionesVisibles() {
+    if (!searchable || !busqueda.trim()) return opts;
+    // El .trim() importa: sin el, escribir solo espacios (el autocorrector
+    // del movil los mete con facilidad) buscaria " " y dejaria la lista
+    // vacia, como si no hubiera opciones.
+    const q = normalizar(busqueda).trim();
+    // `keywords` son palabras que NO se ven en la lista pero por las que
+    // si se puede buscar (el musculo de un ejercicio, por ejemplo).
+    return opts.filter((o) => normalizar(`${o.label} ${o.keywords || ''}`).includes(q));
+  }
 
   function findCurrent() {
     return opts.find((o) => String(o.value) === String(value));
@@ -109,8 +145,16 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
   }
 
   function renderOptions() {
-    popover.innerHTML = '';
-    opts.forEach((opt) => {
+    listaOpciones.innerHTML = '';
+    const visibles = opcionesVisibles();
+    if (visibles.length === 0) {
+      const vacio = document.createElement('p');
+      vacio.className = 'select-popover-empty';
+      vacio.textContent = 'Nada con ese nombre.';
+      listaOpciones.appendChild(vacio);
+      return;
+    }
+    visibles.forEach((opt) => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'select-option' + (String(opt.value) === String(value) ? ' active' : '');
@@ -119,11 +163,14 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
       item.addEventListener('click', () => {
         value = opt.value;
         renderTrigger();
-        renderOptions();
         popover.classList.add('hidden');
+        // El repintado va DESPUES de cerrar: si onChange rehace la lista
+        // (pasa en las filas de ejercicio), repintar antes seria trabajo
+        // tirado sobre un popover que ya no se ve.
+        renderOptions();
         if (onChange) onChange(value);
       });
-      popover.appendChild(item);
+      listaOpciones.appendChild(item);
     });
   }
 
@@ -133,6 +180,9 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
     closeAllPopovers(popover);
     popover.classList.toggle('hidden');
     if (willOpen) {
+      // Cada apertura empieza con la lista entera: un filtro heredado de
+      // la vez anterior parece que faltan ejercicios.
+      if (campoBusqueda) { busqueda = ''; campoBusqueda.value = ''; renderOptions(); }
       positionFixedPopover(trigger, popover, {
         width: Math.max(200, trigger.getBoundingClientRect().width),
       });
@@ -375,14 +425,18 @@ const STAR_OUTLINE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="
 // ---------------------------------------------------------------------
 let appConfirmResolve = null;
 let appConfirmCheckboxStorageKey = null;
-// opts.checkbox = { label, storageKey } (Fase 4 del rediseño movil,
-// usado por el aviso de borrar una carpeta con contenido en modo
-// Seleccionar de Notas): añade una fila con .styled-checkbox debajo del
-// mensaje -- si esta marcada al pulsar Aceptar, se guarda
-// localStorage[storageKey] = '1' (por dispositivo, mismo patron que el
-// resto de ajustes de este tipo en la app) ANTES de resolver la
-// promesa. Aditivo: no cambia nada para los usos existentes que no
-// pasan "checkbox".
+// Como quedo marcada la casilla del ultimo aviso, para los casos en que
+// es una ELECCION de verdad (y no un "no volver a mostrar" que se guarda
+// solo) -- p. ej. "eliminar tambien lo que hay dentro" al borrar una
+// carpeta. Se lee justo despues de que showAppConfirm() resuelva.
+let lastAppConfirmCheckbox = false;
+// opts.checkbox = { label, storageKey? }: añade una fila con
+// .styled-checkbox debajo del mensaje. Con "storageKey" es un "no volver
+// a mostrar" (si esta marcada al Aceptar se guarda
+// localStorage[storageKey] = '1', por dispositivo, mismo patron que el
+// resto de ajustes de este tipo); sin el, es una eleccion normal y el
+// que llama la lee en lastAppConfirmCheckbox nada mas resolverse.
+// Aditivo: no cambia nada para los usos que no pasan "checkbox".
 function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', danger = false, alertOnly = false, checkbox = null } = {}) {
   return new Promise((resolve) => {
     appConfirmResolve = resolve;
@@ -395,6 +449,7 @@ function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', 
     const checkboxRow = document.getElementById('app-confirm-checkbox-row');
     const checkboxInput = document.getElementById('app-confirm-checkbox');
     checkboxRow.classList.toggle('hidden', !checkbox);
+    lastAppConfirmCheckbox = false;
     if (checkbox) {
       document.getElementById('app-confirm-checkbox-label').textContent = checkbox.label;
       checkboxInput.checked = false;
@@ -402,12 +457,13 @@ function showAppConfirm(message, { okText = 'Aceptar', cancelText = 'Cancelar', 
     document.getElementById('app-confirm-modal').classList.remove('hidden');
   });
 }
-function showAppAlert(message, { okText = 'Aceptar' } = {}) {
-  return showAppConfirm(message, { okText, alertOnly: true });
+function showAppAlert(message, { okText = 'Aceptar', checkbox = null } = {}) {
+  return showAppConfirm(message, { okText, alertOnly: true, checkbox });
 }
 function closeAppConfirm(result) {
   document.getElementById('app-confirm-modal').classList.add('hidden');
-  if (result && appConfirmCheckboxStorageKey && document.getElementById('app-confirm-checkbox').checked) {
+  lastAppConfirmCheckbox = document.getElementById('app-confirm-checkbox').checked;
+  if (result && appConfirmCheckboxStorageKey && lastAppConfirmCheckbox) {
     localStorage.setItem(appConfirmCheckboxStorageKey, '1');
   }
   appConfirmCheckboxStorageKey = null;
@@ -438,7 +494,6 @@ function enableCtrlEnterSubmit(formId) {
 enableCtrlEnterSubmit('event-form');
 enableCtrlEnterSubmit('task-form');
 enableCtrlEnterSubmit('note-form');
-enableCtrlEnterSubmit('onboarding-form');
 
 // Bloqueo de scroll de fondo mientras haya un modal abierto -- todos los
 // ~27 modales de la app comparten la clase .modal (confirmado con
@@ -452,7 +507,13 @@ enableCtrlEnterSubmit('onboarding-form');
 // "rebote" del fondo).
 let modalScrollLockY = 0;
 function refreshModalScrollLock() {
-  const anyOpen = document.querySelector('.modal:not(.hidden)') !== null;
+  // Cuenta tanto un modal como una pantalla completa (.my-space-view):
+  // esas pantallas son position:fixed y traen su propio scroll dentro,
+  // pero la PAGINA de debajo (el calendario, mas alto que la ventana)
+  // se sigue pudiendo arrastrar por detras -- son los "dos scrolls" que
+  // se notaban al abrir una nota. Bloqueando el de la pagina mientras
+  // hay algo encima, solo queda el de dentro.
+  const anyOpen = document.querySelector('.modal:not(.hidden), .my-space-view:not(.hidden)') !== null;
   const isLocked = document.body.classList.contains('modal-open-lock');
   if (anyOpen && !isLocked) {
     modalScrollLockY = window.scrollY;
@@ -472,9 +533,14 @@ function refreshModalScrollLock() {
   const settingsModal = document.getElementById('settings-modal');
   const settingsOpen = settingsModal ? !settingsModal.classList.contains('hidden') : false;
   document.body.classList.toggle('settings-modal-open', settingsOpen);
+  // OJO: "hay un modal de verdad abierto" es DISTINTO de "hay algo
+  // encima". El bloqueo de scroll aplica a los dos, pero la barra
+  // inferior solo se aparta ante un modal (una ventana puntual); una
+  // pantalla completa la necesita para poder salir de ella.
+  document.body.classList.toggle('real-modal-open', document.querySelector('.modal:not(.hidden)') !== null);
 }
 const modalScrollLockObserver = new MutationObserver(refreshModalScrollLock);
-document.querySelectorAll('.modal').forEach((el) => modalScrollLockObserver.observe(el, { attributes: true, attributeFilter: ['class'] }));
+document.querySelectorAll('.modal, .my-space-view').forEach((el) => modalScrollLockObserver.observe(el, { attributes: true, attributeFilter: ['class'] }));
 
 // ---------------------------------------------------------------------
 // Selector de fecha con estilo propio: sustituye <input type="date"> (o
@@ -676,659 +742,133 @@ function createDateField({ initialValue = null, onChange, allowClear = false, pl
 }
 
 // ---------------------------------------------------------------------
-// Fase "multi-red": el ORIGEN de la app (de donde salen localStorage e
-// IndexedDB) queda fijo desde la primera vez que se instala/abre en cada
-// dispositivo -- no se puede ni se debe cambiar, o se "pierden" los datos
-// guardados (son de otro origen para el navegador). Pero el ORDENADOR al
-// que hay que mandar las peticiones sí puede cambiar (otra wifi, otro
-// ordenador) -- eso se guarda aparte, en 'serverBaseUrl', y se actualiza
-// escaneando el QR de Configuración → Dispositivos (ver
-// openScanServerModal() en settings.js). Sin ese ajuste, se usa el propio
-// origen de la pagina, que es lo que pasaba siempre antes de esto.
+// Imagenes y fotos: de una ruta del servidor a una URL blob:
 // ---------------------------------------------------------------------
-function getServerBaseUrl() {
-  return localStorage.getItem('serverBaseUrl') || window.location.origin;
+// El HTML de una nota sigue guardando exactamente lo mismo que antes
+// ("/api/notes/images/<uuid>.jpg"), y una foto de viaje sigue teniendo
+// la misma url en su fila. Lo que cambia es que ya no hay servidor que
+// responda a eso: los bytes estan en IndexedDB, asi que al MOSTRAR una
+// imagen se cambia su src por una URL blob: creada al vuelo. Se guarda
+// la ruta original en data-asset-src para poder devolverla tal cual al
+// guardar la nota -- si se guardara la URL blob:, el saneador la
+// rechazaria (solo acepta /api/notes/images/...) y ademas no valdria
+// nada en la proxima sesion.
+const ASSET_URL_PREFIXES = ['/api/notes/images/', '/api/viajes-entries/attachments/'];
+const assetBlobUrls = new Map();
+
+function isAssetPath(src) {
+  return typeof src === 'string' && ASSET_URL_PREFIXES.some((p) => src.startsWith(p));
 }
 
-// Fase "Archivos": el propio ordenador nunca guarda un token de
-// dispositivo (ver requireDeviceOrTrusted en server/auth.js -- llega por
-// loopback, no necesita emparejarse), asi que su ausencia es una forma
-// fiable de saber, en el propio cliente, si "somos el ordenador" o "somos
-// un movil emparejado". Se usa para mostrar/ocultar controles que el
-// servidor solo permite al ordenador (carpeta de Archivos, boton de
-// instalar una version nueva).
-function isTrustedDevice() {
-  return !localStorage.getItem('deviceToken');
-}
-
-// ---------------------------------------------------------------------
-// Capa de red: envuelve fetch para añadir el token del dispositivo (si
-// existe) y para reaccionar automaticamente si el servidor dice 401
-// (dispositivo no vinculado) mostrando la pantalla de emparejamiento.
-//
-// Fase "movil": si el fetch falla por RED de verdad (no hay quien
-// responda -- no confundir con un error normal del servidor, ESO sigue
-// lanzando el mismo error que siempre), y la ruta es una de las tablas
-// que se sincronizan (ver SYNC_TABLE_ROUTES/matchSyncRoute mas abajo), se sigue
-// funcionando con la copia local en IndexedDB (public/db-local.js) en
-// vez de romper la pantalla. Las demas rutas (temas, perfil,
-// dispositivos...) no tienen copia local todavia -- si fallan sin
-// conexion, se comportan igual que siempre (lanzan error).
-// ---------------------------------------------------------------------
-async function api(path, options = {}) {
-  const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
-  const token = localStorage.getItem('deviceToken');
-  if (token) headers['X-Device-Token'] = token;
-
-  const url = new URL(path, getServerBaseUrl());
-  const method = (options.method || 'GET').toUpperCase();
-  const route = matchSyncRoute(url.pathname);
-
-  let res;
+// Devuelve una URL blob: utilizable en un <img src>, o null si esos
+// bytes ya no estan (imagen de una nota antigua cuyo archivo se
+// perdio). Se cachean por ruta: crear una URL blob: nueva en cada
+// render iria dejando memoria sin liberar.
+async function resolveAssetUrl(path) {
+  if (!isAssetPath(path)) return path;
+  if (assetBlobUrls.has(path)) return assetBlobUrls.get(path);
+  const name = path.slice(path.lastIndexOf('/') + 1);
   try {
-    res = await fetch(url.toString(), Object.assign({}, options, { headers }));
-  } catch (networkErr) {
-    if (!route) throw networkErr;
-    return handleOfflineRequest(route, method, url, options);
-  }
-
-  if (res.status === 401) {
-    localStorage.removeItem('deviceToken');
-    showPairingScreen();
-    throw new Error('device_not_paired');
-  }
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.message || `Error ${res.status}`);
-  }
-
-  const data = res.status === 204 ? null : await res.json();
-
-  // Con exito de verdad, se guarda una copia en la copia local -- "cache
-  // de escritura": la proxima vez que falle la red, esto es lo que se
-  // vera. No se espera a que termine (no hace falta su resultado para
-  // nada mas), pero si falla por lo que sea no debe romper la llamada
-  // real, que ya tuvo exito.
-  if (route) cacheServerResponse(route, method, data).catch(() => {});
-
-  return data;
-}
-
-// ---------------------------------------------------------------------
-// Copia local + sincronizacion (fase "movil"). Ver
-// /root/.claude/plans/warm-sparking-beaver.md (o CLAUDE.md) para el
-// diseño completo -- resumen: cada dispositivo guarda su propia copia
-// de events/notes/groups/note_folders/special_days en IndexedDB
-// (public/db-local.js); cuando hay conexion con el ordenador, se traen
-// los cambios del servidor (pullChanges) y se mandan los pendientes de
-// aqui (pushOutbox). "El mas reciente gana" sin avisos ni fusiones —a
-// proposito, es una app de una sola persona.
-// ---------------------------------------------------------------------
-
-// A que almacen local corresponde cada ruta de la API, y como extraer
-// el id de la URL. matchSyncRoute() se llama en CADA peticion de api(),
-// asi que tiene que poder ejecutarse antes de que el resto de la app
-// (state, load*...) exista todavia -- por eso no depende de nada mas.
-const SYNC_TABLE_ROUTES = [
-  { table: 'events', store: 'events', collectionRe: /^\/api\/events$/, itemRe: /^\/api\/events\/(\d+)$/ },
-  { table: 'notes', store: 'notes', collectionRe: /^\/api\/notes$/, itemRe: /^\/api\/notes\/(\d+)$/ },
-  { table: 'groups', store: 'groups', collectionRe: /^\/api\/groups$/, itemRe: /^\/api\/groups\/(\d+)$/ },
-  { table: 'note_folders', store: 'noteFolders', collectionRe: /^\/api\/note-folders$/, itemRe: /^\/api\/note-folders\/(\d+)$/ },
-  { table: 'special_days', store: 'specialDays', collectionRe: /^\/api\/special-days$/, itemRe: /^\/api\/special-days\/([^/]+)$/ },
-  // Solo la BIBLIOTECA (/api/themes, /api/themes/:id) -- /api/themes/selection
-  // y /api/themes/selection/mine (que tema usa CADA dispositivo) no
-  // encajan en ninguno de los dos patrones de abajo a proposito, asi que
-  // se quedan fuera de la copia local (eso sigue siendo por dispositivo).
-  { table: 'themes', store: 'themes', collectionRe: /^\/api\/themes$/, itemRe: /^\/api\/themes\/(\d+)$/ },
-  // /api/viajes-trips/by-country/:code (usada por el mapa) no encaja en
-  // ninguno de los dos patrones a proposito, se queda fuera (siempre en
-  // vivo, no tiene sentido cachearla aparte de la lista general).
-  { table: 'viajes_trips', store: 'viajesTrips', collectionRe: /^\/api\/viajes-trips$/, itemRe: /^\/api\/viajes-trips\/(\d+)$/ },
-  // Los adjuntos (fotos/tickets) NO tienen ruta propia aqui -- viajan
-  // embebidos dentro de cada entrada (ver serializeEntry en el
-  // servidor), asi que /api/viajes-entries/:id/attachments (subir una
-  // foto) y /api/viajes-entries/attachments/... (servir/borrar/vincular
-  // una foto) quedan fuera a proposito: exigen conexion siempre, igual
-  // que subir una imagen a una nota.
-  { table: 'viajes_entries', store: 'viajesEntries', collectionRe: /^\/api\/viajes-entries$/, itemRe: /^\/api\/viajes-entries\/(\d+)$/ },
-];
-
-function matchSyncRoute(pathname) {
-  for (const r of SYNC_TABLE_ROUTES) {
-    if (r.collectionRe.test(pathname)) return { table: r.table, store: r.store, kind: 'collection' };
-    const m = pathname.match(r.itemRe);
-    if (m) return { table: r.table, store: r.store, kind: 'item', itemId: r.store === 'specialDays' ? m[1] : Number(m[1]) };
-  }
-  return null;
-}
-
-async function cacheServerResponse(route, method, data) {
-  if (route.kind === 'collection' && method === 'GET') {
-    await localReplaceAll(route.store, Array.isArray(data) ? data : []);
-    return;
-  }
-  if (method === 'DELETE') {
-    await localDelete(route.store, route.itemId);
-    return;
-  }
-  // special_days "borra por PUT" (type: null) en vez de un DELETE real.
-  if (route.store === 'specialDays' && data && data.type === null) {
-    await localDelete(route.store, data.date);
-    return;
-  }
-  if (data && typeof data === 'object') {
-    await localPut(route.store, data);
-  }
-}
-
-async function handleOfflineRequest(route, method, url, options) {
-  if (method === 'GET') return offlineRead(route, url);
-  return offlineWrite(route, method, url, options);
-}
-
-async function offlineRead(route, url) {
-  if (route.kind === 'item') {
-    const row = await localGet(route.store, route.itemId);
-    if (!row) throw new Error('No se pudo leer sin conexión (todavía no hay copia local de esto).');
-    return row;
-  }
-  let rows = await localGetAll(route.store);
-  if (route.store === 'events') {
-    const isTask = url.searchParams.get('isTask');
-    if (isTask !== null) {
-      const want = isTask === '1' || isTask === 'true';
-      rows = rows.filter((r) => !!r.isTask === want);
-    }
-    const from = url.searchParams.get('from');
-    const to = url.searchParams.get('to');
-    if (from && to) rows = rows.filter((r) => r.startAt && r.startAt >= from && r.startAt <= to);
-    rows.sort((a, b) => (a.startAt || '').localeCompare(b.startAt || ''));
-  } else if (route.store === 'notes') {
-    rows.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-  } else if (route.store === 'groups' || route.store === 'noteFolders') {
-    rows.sort((a, b) => (a.position || 0) - (b.position || 0));
-  } else if (route.store === 'themes') {
-    rows.sort((a, b) => (a.id || 0) - (b.id || 0));
-  } else if (route.store === 'viajesTrips') {
-    rows.sort((a, b) => (b.startDate || b.createdAt || '').localeCompare(a.startDate || a.createdAt || '') || (b.id || 0) - (a.id || 0));
-  } else if (route.store === 'viajesEntries') {
-    // GET /api/viajes-entries siempre exige ?tripId= (ver la ruta REST) --
-    // aqui se aplica el mismo filtro sobre la copia local.
-    const tripId = url.searchParams.get('tripId');
-    if (tripId) rows = rows.filter((r) => String(r.tripId) === String(tripId));
-    rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id || 0) - (a.id || 0));
-  }
-  return rows;
-}
-
-// Construye la fila "optimista" que se guarda en la copia local nada
-// mas escribir sin conexion, con la misma forma (camelCase) que
-// devolveria el servidor -- para que la pantalla se pinte igual que si
-// hubiera respondido de verdad. Cuando el campo referencia otra tabla
-// (groupId, folderId) y esa fila YA esta en la copia local, se rellenan
-// tambien nombre/color/icono para que se vea bien de inmediato; si no
-// se puede (por ejemplo, apunta a algo tambien creado sin conexion en
-// este mismo momento), se deja en blanco y se corrige solo al
-// sincronizar.
-async function buildOptimisticRecord(route, id, fields) {
-  const now = new Date().toISOString();
-  if (route.store === 'events') {
-    const group = fields.groupId != null ? await localGet('groups', fields.groupId) : null;
-    return {
-      id,
-      title: fields.title || '',
-      description: fields.description ?? null,
-      location: fields.location ?? null,
-      startAt: fields.startAt ?? null,
-      endAt: fields.endAt ?? null,
-      allDay: !!fields.allDay,
-      reminderMinutesBefore: fields.reminderMinutesBefore ?? null,
-      groupId: fields.groupId ?? null,
-      groupName: group ? group.name : null,
-      groupColor: group ? group.color : null,
-      groupIcon: group ? group.icon : null,
-      groupCompletedColor: group ? group.completedColor : null,
-      isTask: !!fields.isTask,
-      done: !!fields.done,
-      createdByName: null,
-      createdByPublicId: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'notes') {
-    const folder = fields.folderId != null ? await localGet('noteFolders', fields.folderId) : null;
-    // Fase 4: ya no se manda "title" desde el cliente (se deriva del
-    // cuerpo, ver deriveTitleFromBodyClient) -- la copia optimista local
-    // tiene que derivarlo de la misma forma, para que la nota se vea con
-    // un titulo correcto en el listado ANTES de que llegue la respuesta
-    // real del servidor. bodyFormat no se guardaba antes en el registro
-    // optimista (solo llegaba via cacheServerResponse tras un exito
-    // online) -- se añade aqui porque hace falta para derivar bien.
-    return {
-      id,
-      title: deriveTitleFromBodyClient(fields.body, fields.bodyFormat),
-      body: fields.body ?? null,
-      bodyFormat: fields.bodyFormat || 'text',
-      hidden: !!fields.hidden,
-      favorite: !!fields.favorite,
-      folderId: fields.folderId ?? null,
-      folderName: folder ? folder.name : null,
-      folderColor: folder ? folder.color : null,
-      folderIcon: folder ? folder.icon : null,
-      createdByName: null,
-      createdByPublicId: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'groups') {
-    return {
-      id,
-      name: fields.name || '',
-      color: fields.color || '#5b8cff',
-      icon: fields.icon ?? null,
-      position: fields.position ?? 0,
-      completedColor: fields.completedColor ?? null,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'noteFolders') {
-    return {
-      id,
-      name: fields.name || '',
-      color: fields.color || '#5b8cff',
-      icon: fields.icon ?? null,
-      position: fields.position ?? 0,
-      parentId: fields.parentId ?? null,
-      favorite: !!fields.favorite,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'themes') {
-    return {
-      id,
-      name: fields.name || '',
-      colors: fields.colors || {},
-      inverseColors: fields.inverseColors ?? null,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'viajesTrips') {
-    // Al EDITAR (PUT) sin conexion, "fields" es la fila ya existente en
-    // la copia local fusionada con lo nuevo (ver offlineWrite) -- asi
-    // que entryCount ya viene relleno con el valor real; al CREAR
-    // (POST) no hay fila previa, empieza en 0.
-    return {
-      id,
-      name: fields.name || '',
-      color: fields.color || '#5b8cff',
-      countries: Array.isArray(fields.countries) ? fields.countries : [],
-      startDate: fields.startDate ?? null,
-      endDate: fields.endDate ?? null,
-      description: fields.description ?? null,
-      entryCount: fields.entryCount ?? 0,
-      createdAt: now,
-      updatedAt: now,
-    };
-  }
-  if (route.store === 'viajesEntries') {
-    // Subir una foto exige conexion siempre (ver el comentario de
-    // SYNC_TABLE_ROUTES mas arriba), asi que "attachments" nunca se
-    // rellena aqui de cero -- pero al EDITAR (PUT) el texto de una
-    // entrada sin conexion, "fields" ya trae las fotos que tuviera de
-    // antes (fusionadas desde la copia local, ver offlineWrite), y hay
-    // que conservarlas en vez de vaciarlas.
-    return {
-      id,
-      tripId: fields.tripId ?? null,
-      date: fields.date || now.slice(0, 10),
-      content: fields.content ?? null,
-      attachments: Array.isArray(fields.attachments) ? fields.attachments : [],
-      createdAt: now,
-      updatedAt: now,
-    };
-  }
-  // specialDays
-  return { date: id, type: fields.type };
-}
-
-async function offlineWrite(route, method, url, options) {
-  const body = options.body ? JSON.parse(options.body) : {};
-  const localOpId = crypto.randomUUID();
-  const nowIso = new Date().toISOString();
-
-  if (route.store === 'specialDays') {
-    // No hay DELETE real para dias especiales: un PUT con type=null
-    // borra. rowId sale de la URL (la fecha), nunca es "nuevo".
-    const date = route.itemId;
-    if (body.type === null || body.type === undefined) {
-      await localDelete('specialDays', date);
-      await outboxAdd({ localOpId, table: 'special_days', rowId: date, tempId: null, op: 'delete', payload: null, clientUpdatedAt: nowIso });
-      return { date, type: null };
-    }
-    const record = { date, type: body.type };
-    await localPut('specialDays', record);
-    await outboxAdd({ localOpId, table: 'special_days', rowId: date, tempId: null, op: 'upsert', payload: { type: body.type }, clientUpdatedAt: nowIso });
-    return record;
-  }
-
-  if (method === 'POST') {
-    // Crear sin conexion: id temporal NEGATIVO (los ids reales que
-    // asigna el servidor siempre son positivos, asi que nunca puede
-    // haber choque), sustituido por el real en cuanto se sincronice de
-    // verdad (ver pushOutbox).
-    const tempId = -Date.now();
-    const record = await buildOptimisticRecord(route, tempId, body);
-    await localPut(route.store, record);
-    await outboxAdd({ localOpId, table: route.table, rowId: null, tempId, op: 'upsert', payload: body, clientUpdatedAt: nowIso });
-    return record;
-  }
-
-  if (method === 'PUT') {
-    const rowId = route.itemId;
-    const existing = (await localGet(route.store, rowId)) || {};
-    const merged = Object.assign({}, existing, body);
-    const record = await buildOptimisticRecord(route, rowId, merged);
-    await localPut(route.store, record);
-    await outboxAdd({ localOpId, table: route.table, rowId, tempId: null, op: 'upsert', payload: body, clientUpdatedAt: nowIso });
-    return record;
-  }
-
-  if (method === 'DELETE') {
-    const rowId = route.itemId;
-    await localDelete(route.store, rowId);
-    await outboxAdd({ localOpId, table: route.table, rowId, tempId: null, op: 'delete', payload: null, clientUpdatedAt: nowIso });
+    const row = await assetGet(name);
+    if (!row || !row.bytes) return null;
+    const url = URL.createObjectURL(new Blob([row.bytes], { type: row.type || 'application/octet-stream' }));
+    assetBlobUrls.set(path, url);
+    return url;
+  } catch {
     return null;
   }
-
-  throw new Error('No se pudo hacer eso sin conexión.');
 }
 
-// --- Motor de sincronizacion --------------------------------------
-
-let syncInProgress = false;
-
-function buildAuthHeaders() {
-  const headers = {};
-  const token = localStorage.getItem('deviceToken');
-  if (token) headers['X-Device-Token'] = token;
-  return headers;
+// Pone la URL blob: en un <img> concreto en cuanto este lista, sin
+// bloquear el render (estas listas se pintan de forma sincrona).
+function setAssetImageSrc(img, path) {
+  if (!isAssetPath(path)) { img.src = path; return; }
+  img.dataset.assetSrc = path;
+  resolveAssetUrl(path).then((url) => { if (url) img.src = url; });
 }
 
-const SYNC_STORE_BY_TABLE = {
-  events: 'events',
-  notes: 'notes',
-  groups: 'groups',
-  note_folders: 'noteFolders',
-  special_days: 'specialDays',
-  themes: 'themes',
-  viajes_trips: 'viajesTrips',
-  viajes_entries: 'viajesEntries',
-};
-
-async function applyRemoteChange(change) {
-  const store = SYNC_STORE_BY_TABLE[change.tableName];
-  if (!store) return;
-  if (change.op === 'delete') {
-    await localDelete(store, change.rowId);
-  } else if (change.payload) {
-    await localPut(store, change.payload);
-  }
+// Prepara el HTML de una nota ANTES de meterlo en el DOM: cambia
+// src="/api/..." por data-asset-src="/api/...". Sin esto, el navegador
+// pide esa ruta en cuanto aparece el <img> (y falla, porque no hay
+// servidor) antes de que hydrateAssetImages llegue a poner la URL
+// blob:. El saneador del backend garantiza que un <img> solo puede
+// llevar src y que empieza por /api/notes/images/, asi que este
+// reemplazo no puede tocar nada mas.
+function prepareAssetHtmlForDom(html) {
+  if (!html) return html;
+  return html.replace(/<img\s+src="(\/api\/notes\/images\/[^"]+)"/gi, '<img data-asset-src="$1"');
 }
 
-// Trae del servidor todo lo que haya cambiado desde el ultimo cursor
-// que recordamos (metaGet('syncCursor')), pagina a pagina, y lo aplica a
-// la copia local. Devuelve como fue: { ok:true } si todo bien, o
-// { ok:false, offline:true } si no se pudo ni conectar (lo normal y
-// esperado si el ordenador no esta cerca), o { ok:false, message } si
-// el ordenador SI respondio pero con un error de verdad -- eso ultimo
-// es lo que refreshSyncIndicator() ensena en rojo, para no dejarlo
-// pasar en silencio.
-async function pullChanges() {
-  let cursor = (await metaGet('syncCursor')) || 0;
-  let hasMore = true;
-  while (hasMore) {
-    let res;
+// Cambia el src de todas las imagenes de un trozo de HTML ya insertado
+// en el DOM (el cuerpo de una nota).
+function hydrateAssetImages(root) {
+  root.querySelectorAll('img').forEach((img) => {
+    const path = img.dataset.assetSrc || img.getAttribute('src');
+    if (isAssetPath(path)) setAssetImageSrc(img, path);
+  });
+}
+
+// Lo contrario: devuelve el HTML con las rutas originales, para
+// guardarlo. Se trabaja sobre el TEXTO, no clonando el DOM: poner el
+// src original en un <img> clonado -- aunque este suelto, sin insertar
+// -- hace que el navegador pida esa ruta igualmente (fallo real visto
+// al probar: una peticion 404 por cada guardado). El saneador del
+// backend solo deja "src" en un <img>, asi que quedarse solo con eso es
+// exactamente lo que se guardaria de todas formas.
+function serializeAssetImages(root) {
+  return root.innerHTML.replace(
+    /<img\b[^>]*\bdata-asset-src="([^"]+)"[^>]*>/gi,
+    (match, path) => `<img src="${path}">`,
+  );
+}
+
+// Convierte el `body` de una llamada a api() en lo que espera el
+// manejador local. Casi siempre es JSON (una cadena ya serializada por
+// quien llama), pero las subidas de imagen/foto mandan el File tal
+// cual -- en el servidor eso llegaba como un Buffer via express.raw(),
+// aqui llega como los bytes en un Uint8Array.
+async function toLocalRequestBody(body) {
+  if (body === undefined || body === null) return undefined;
+  if (typeof body === 'string') {
     try {
-      res = await fetch(new URL(`/api/sync/pull?since=${cursor}&limit=500`, getServerBaseUrl()), { headers: buildAuthHeaders() });
+      return JSON.parse(body);
     } catch {
-      return { ok: false, offline: true };
+      return body;
     }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, message: body.message || `Error del servidor al traer cambios (código ${res.status}).` };
-    }
-    const data = await res.json();
-    for (const change of data.changes) {
-      await applyRemoteChange(change);
-    }
-    cursor = data.nextCursor;
-    hasMore = data.hasMore;
   }
-  await metaSet('syncCursor', cursor);
-  await metaSet('lastSyncedAt', new Date().toISOString());
-  return { ok: true };
+  if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer());
+  return body;
 }
 
-// Manda los cambios pendientes de este dispositivo (cola _outbox), UNO A
-// UNO y en orden (ver outboxAll/seq en db-local.js) -- no en un solo
-// lote. Hace falta que sea uno a uno: el id REAL de algo creado sin
-// conexion (una carpeta, por ejemplo) solo se sabe cuando el servidor
-// responde a ESE cambio, asi que para poder corregir la referencia de
-// un cambio siguiente que apunte a ese id temporal (una nota creada
-// dentro de esa misma carpeta, sin conexion, en la misma sesion) hace
-// falta esperar esa respuesta antes de mandar el siguiente. Con pocos
-// cambios pendientes (lo normal para una persona) el coste de varias
-// idas y vueltas en vez de una sola no se nota.
-async function pushOutbox() {
-  const pending = await outboxAll();
-  if (!pending.length) return { ok: true };
+// El "servidor" ya no existe: api() despacha contra el router local
+// (public/local-api.js), que ejecuta las MISMAS rutas del backend de
+// siempre, portadas a public/routes-local/. Se mantiene async y con la
+// misma firma a proposito, para no tocar ninguno de los ~50 sitios que
+// la llaman ni las funciones load*() de la app.
+async function api(path, options = {}) {
+  await initLocalDatabase();
 
-  const tmpIdMap = new Map();
-  const remapId = (id) => (typeof id === 'number' && id < 0 && tmpIdMap.has(id) ? tmpIdMap.get(id) : id);
-  let rejectedCount = 0;
+  // La base de una URL relativa da igual (nada sale del dispositivo);
+  // se usa solo para separar la ruta de los parametros de consulta.
+  const url = new URL(path, 'http://local');
+  const method = (options.method || 'GET').toUpperCase();
+  const body = await toLocalRequestBody(options.body);
+  const { status, body: data } = await dispatchLocalRequest(
+    method,
+    url.pathname,
+    url.searchParams,
+    body,
+    options.headers || {},
+  );
 
-  for (const entry of pending) {
-    const payload = entry.payload ? Object.assign({}, entry.payload) : entry.payload;
-    if (payload) {
-      if ('groupId' in payload) payload.groupId = remapId(payload.groupId);
-      if ('folderId' in payload) payload.folderId = remapId(payload.folderId);
-      if ('parentId' in payload) payload.parentId = remapId(payload.parentId);
-      if ('tripId' in payload) payload.tripId = remapId(payload.tripId);
-    }
-    const change = {
-      clientOpId: entry.localOpId,
-      table: entry.table,
-      rowId: entry.rowId != null ? remapId(entry.rowId) : null,
-      op: entry.op,
-      payload,
-      clientUpdatedAt: entry.clientUpdatedAt,
-    };
-
-    let res;
-    try {
-      res = await fetch(new URL('/api/sync/push', getServerBaseUrl()), {
-        method: 'POST',
-        headers: Object.assign({ 'Content-Type': 'application/json' }, buildAuthHeaders()),
-        body: JSON.stringify({ changes: [change] }),
-      });
-    } catch {
-      return { ok: false, offline: true }; // se corto la conexion a media cola -- lo que queda se reintenta entero la proxima vez
-    }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, message: body.message || `Error del servidor al mandar cambios (código ${res.status}).` };
-    }
-    const { results } = await res.json();
-    const result = results[0];
-    const store = SYNC_STORE_BY_TABLE[entry.table];
-
-    if (result.status === 'applied' || result.status === 'superseded') {
-      if (entry.tempId != null && result.serverRowId != null) {
-        tmpIdMap.set(entry.tempId, result.serverRowId);
-        await localDelete(store, entry.tempId);
-      }
-      if (result.serverPayload) {
-        await localPut(store, result.serverPayload);
-      } else if (entry.op === 'delete') {
-        await localDelete(store, remapId(entry.rowId));
-      }
-    } else if (result.status === 'rejected') {
-      // No hay forma automatica de arreglar un dato invalido desde aqui,
-      // y no se quiere atascar la cola entera por un cambio malo -- se
-      // descarta, pero se cuenta para poder avisar de que algo se perdio
-      // (en vez de quedarse callado, ver computeSyncOutcome).
-      rejectedCount += 1;
-    }
-    await outboxRemove(entry.localOpId);
+  if (status >= 400) {
+    // Misma forma de error que antes (un Error con el mensaje que
+    // devuelve la ruta), para que los try/catch de siempre no cambien.
+    throw new Error((data && data.message) || `Error ${status}`);
   }
 
-  return rejectedCount > 0
-    ? { ok: true, message: `${rejectedCount} cambio${rejectedCount === 1 ? '' : 's'} sin conseguir mandar (datos no válidos) y se descartó.` }
-    : { ok: true };
+  return status === 204 ? null : data;
 }
-
-// Resultado de la ULTIMA vez que se intento sincronizar -- lo lee el
-// punto de la topbar (refreshSyncIndicator) y el texto de Configuracion
-// (refreshSyncStatusUI). No se guarda entre sesiones a proposito (si
-// recargas la pagina, se vuelve a calcular en el primer runSync() de
-// init() en vez de ensenar un estado quiza ya viejo).
-let lastSyncOutcome = { status: 'unknown', message: '' };
-
-// Decide el estado final combinando lo que paso en pushOutbox()/
-// pullChanges() (ver sus comentarios: cada uno devuelve si fue bien,
-// si fue por falta de conexion, o si hubo un error de verdad) con si
-// queda algo pendiente en la cola.
-async function computeSyncOutcome(pushResult, pullResult) {
-  if (pushResult.offline || pullResult.offline) {
-    lastSyncOutcome = { status: 'offline', message: 'Sin conexión con el ordenador ahora mismo.' };
-    return;
-  }
-  if (!pushResult.ok || !pullResult.ok) {
-    lastSyncOutcome = { status: 'error', message: (!pushResult.ok && pushResult.message) || (!pullResult.ok && pullResult.message) || 'Error al sincronizar.' };
-    return;
-  }
-  if (pushResult.message) {
-    // Se pudo conectar y sincronizar, pero algun cambio se rechazo por
-    // datos invalidos -- no es un fallo de conexion, pero tampoco es
-    // "todo perfecto", asi que se ensena igual que un error de verdad.
-    lastSyncOutcome = { status: 'error', message: pushResult.message };
-    return;
-  }
-  const pending = await outboxAll();
-  lastSyncOutcome = pending.length
-    ? { status: 'pending', message: `${pending.length} cambio${pending.length === 1 ? '' : 's'} pendiente${pending.length === 1 ? '' : 's'} de mandar.` }
-    : { status: 'synced', message: '' };
-}
-
-async function runSync() {
-  if (syncInProgress) return;
-  syncInProgress = true;
-  try {
-    const pushResult = await pushOutbox();
-    const pullResult = await pullChanges();
-    await computeSyncOutcome(pushResult, pullResult);
-  } catch (err) {
-    // Esto SI es inesperado de verdad (un error de programacion, no de
-    // conexion) -- pushOutbox/pullChanges ya capturan los fallos de red
-    // y de servidor por su cuenta, asi que si algo llega hasta aqui
-    // merece ensenarse, no quedarse callado.
-    lastSyncOutcome = { status: 'error', message: err.message || 'Error inesperado al sincronizar.' };
-  } finally {
-    syncInProgress = false;
-    refreshSyncStatusUI();
-    refreshSyncIndicator();
-  }
-}
-
-async function refreshSyncStatusUI() {
-  const statusEl = document.getElementById('sync-status');
-  if (!statusEl) return;
-  const lastSyncedAt = await metaGet('lastSyncedAt');
-  const baseText = lastSyncedAt
-    ? `Última sincronización: ${new Date(lastSyncedAt).toLocaleString()}`
-    : 'Todavía no se ha sincronizado en este dispositivo';
-  statusEl.textContent = lastSyncOutcome.message ? `${baseText} · ${lastSyncOutcome.message}` : baseText;
-}
-
-const SYNC_INDICATOR_LABELS = {
-  unknown: 'Sincronización: todavía sin comprobar',
-  synced: 'Sincronización: todo al día',
-  pending: 'Sincronización: hay cambios pendientes de mandar',
-  offline: 'Sincronización: sin conexión con el ordenador ahora mismo',
-  error: 'Sincronización: hubo un error',
-};
-
-function refreshSyncIndicator() {
-  const btn = document.getElementById('sync-indicator');
-  if (!btn) return;
-  btn.dataset.status = lastSyncOutcome.status;
-  const label = lastSyncOutcome.message
-    ? `${SYNC_INDICATOR_LABELS[lastSyncOutcome.status]} (${lastSyncOutcome.message})`
-    : SYNC_INDICATOR_LABELS[lastSyncOutcome.status];
-  btn.setAttribute('aria-label', label);
-  btn.title = label;
-}
-
-document.getElementById('btn-sync-now').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-sync-now');
-  btn.disabled = true;
-  await runSync();
-  btn.disabled = false;
-});
-
-// El punto de la topbar lleva directo a Apps > Archivos (donde
-// esta el detalle y el boton de "Sincronizar ahora" -- ver mas abajo),
-// no hace nada por si solo mas alla de eso.
-document.getElementById('sync-indicator').addEventListener('click', () => {
-  openArchivosView();
-});
-
-// Fase "Archivos": ya NO se sincroniza sola al volver la conexion --
-// solo cuando se pide a mano desde Apps > Archivos (ver
-// openArchivosView() y btn-sync-now mas abajo). Decision explicita de
-// Koku, confirmada dos veces: si no se abre ese apartado, los cambios de
-// este dispositivo no llegan al otro hasta que se dispare a mano.
-
-// ---------------------------------------------------------------------
-// Emparejamiento
-// ---------------------------------------------------------------------
-function showPairingScreen() {
-  document.getElementById('pairing-screen').classList.remove('hidden');
-  document.getElementById('app').classList.add('hidden');
-}
-
-function showApp() {
-  document.getElementById('pairing-screen').classList.add('hidden');
-  document.getElementById('app').classList.remove('hidden');
-}
-
-document.getElementById('pairing-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const code = document.getElementById('pairing-code').value.trim();
-  const name = document.getElementById('pairing-name').value.trim();
-  const errorEl = document.getElementById('pairing-error');
-  errorEl.classList.add('hidden');
-
-  try {
-    const res = await fetch('/api/devices/pair', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, name }),
-    });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.message || 'No se pudo vincular.');
-
-    localStorage.setItem('deviceToken', body.token);
-    showApp();
-    init();
-  } catch (err) {
-    errorEl.textContent = err.message;
-    errorEl.classList.remove('hidden');
-  }
-});
 
 // ---------------------------------------------------------------------
 // Utilidades de fecha
@@ -1336,7 +876,44 @@ document.getElementById('pairing-form').addEventListener('submit', async (e) => 
 const WEEKDAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 const MONTH_ONLY_FORMATTER = new Intl.DateTimeFormat('es-ES', { month: 'long' });
 const DAY_HEADING_FORMATTER = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
-const TIME_FORMATTER = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' });
+// ---------------------------------------------------------------------
+// Reloj de 12 o de 24 horas: se sigue al SISTEMA (peticion de Koku, que
+// lo tiene en 24h: "hay gente que lo tiene en 12h, con am y pm, tenlo en
+// cuenta"). No es un ajuste de la app a proposito -- si tu telefono
+// esta en 12h es porque asi lo lees tu, y tener que repetirlo aqui
+// sobra.
+//
+// Como se sabe: se le pregunta a Intl por el idioma del DISPOSITIVO
+// (undefined = el suyo, no el nuestro) y se mira si su reloj es de 12.
+// El idioma de los textos sigue siendo es-ES; lo unico que se toma
+// prestado del sistema es esta decision.
+function systemUses12hClock() {
+  try {
+    return new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hour12 === true;
+  } catch (err) {
+    return false; // ante la duda, 24h
+  }
+}
+
+const USES_12H_CLOCK = systemUses12hClock();
+
+// hour12 se pasa EXPLICITO: sin el, 'es-ES' impone siempre 24h y daria
+// igual como tenga el telefono quien mira la pantalla. Con reloj de 12,
+// la hora va sin el cero delante ('numeric'), que es como se escribe:
+// "9:00 a. m.", no "09:00 a. m.".
+const TIME_FORMATTER = new Intl.DateTimeFormat('es-ES', {
+  hour: USES_12H_CLOCK ? 'numeric' : '2-digit',
+  minute: '2-digit',
+  hour12: USES_12H_CLOCK,
+});
+
+// Una hora en punto suelta (0-23) con el formato del sistema, para las
+// etiquetas de la columna de horas de la vista diaria.
+function formatHourLabel(hour) {
+  const d = new Date();
+  d.setHours(hour, 0, 0, 0);
+  return TIME_FORMATTER.format(d);
+}
 
 // "Agosto 2026" en vez del "agosto de 2026" que da Intl por defecto en
 // español (con "de" en medio, y en minuscula) — quitamos el "de" y
@@ -1350,6 +927,62 @@ function startOfMonth(date) { return new Date(date.getFullYear(), date.getMonth(
 function endOfMonth(date) { return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59); }
 function toIsoDate(date) { return date.toISOString().slice(0, 10); }
 function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+
+// ---------------------------------------------------------------------
+// Eventos de VARIOS DIAS
+//
+// Un evento con fin en otro dia (un viaje del jueves 17 al domingo 20)
+// tiene que verse en LOS CUATRO dias, no solo el que empieza. Antes cada
+// vista filtraba por su cuenta con sameDay(inicio, dia), asi que el
+// evento desaparecia a partir del segundo dia -- lo vio Koku con un
+// "Viaje Mallorca". Estas dos funciones son ahora la unica fuente de
+// verdad de "¿este evento sale este dia?" y "¿como lo ocupa?", y las usan
+// todas las vistas (mes, año, tira de la semana y vista diaria).
+//
+// Ojo, hay dos mitades del arreglo y las dos hacen falta: esto es la de
+// pintar; la de PEDIR los datos esta en public/routes-local/events.js
+// (el filtro de rango pasa a ser de solape, si no el evento ni llega).
+// ---------------------------------------------------------------------
+
+// Principio y fin del dia local, para comparar sin liarse con las horas.
+function dayBounds(date) {
+  const inicio = new Date(date);
+  inicio.setHours(0, 0, 0, 0);
+  const fin = new Date(date);
+  fin.setHours(23, 59, 59, 999);
+  return { inicio, fin };
+}
+
+function eventOccursOnDay(ev, date) {
+  if (!ev || !ev.startAt) return false;
+  const start = new Date(ev.startAt);
+  // Sin fin, un evento vive solo en su dia (lo de siempre).
+  if (!ev.endAt) return sameDay(start, date);
+  const end = new Date(ev.endAt);
+  const { inicio, fin } = dayBounds(date);
+  return start <= fin && end >= inicio;
+}
+
+// Como ocupa el evento ESE dia concreto. Devuelve null si no lo toca.
+//  - 'unico'  : empieza y acaba el mismo dia (lo normal de siempre).
+//  - 'inicio' : empieza aqui y sigue mañana.
+//  - 'entero' : lo ocupa de punta a punta (ni empieza ni acaba aqui).
+//  - 'fin'    : viene de ayer y acaba aqui.
+// "entero" es el que Koku pidio tratar como TODO EL DIA: pintar un
+// bloque de 00:00 a 24:00 tapa la pantalla entera y no dice nada que no
+// diga una etiqueta arriba.
+function eventDaySpan(ev, date) {
+  if (!eventOccursOnDay(ev, date)) return null;
+  if (!ev.endAt) return 'unico';
+  const start = new Date(ev.startAt);
+  const end = new Date(ev.endAt);
+  const empiezaHoy = sameDay(start, date);
+  const acabaHoy = sameDay(end, date);
+  if (empiezaHoy && acabaHoy) return 'unico';
+  if (empiezaHoy) return 'inicio';
+  if (acabaHoy) return 'fin';
+  return 'entero';
+}
 
 // Como toIsoDate() pasa por toISOString() (que es UTC), un dia a horas
 // cercanas a medianoche podria "saltar" al dia de al lado segun la zona
@@ -1367,8 +1000,6 @@ async function loadMonth() {
   const from = toIsoDate(startOfMonth(state.viewDate));
   const to = toIsoDate(endOfMonth(state.viewDate));
   state.events = await api(`/api/events?from=${from}T00:00:00&to=${to}T23:59:59`);
-  document.getElementById('current-month-label').textContent = formatMonthYear(state.viewDate);
-  renderCalendarGrid();
   renderMobileCalendarMonthGrid();
   refreshMobileCalendarNavLabel();
 }
@@ -1381,18 +1012,6 @@ async function loadSpecialDays() {
   const rows = await api('/api/special-days');
   state.specialDays = {};
   rows.forEach((r) => { state.specialDays[r.date] = r.type; });
-}
-
-// Como se ven, en el calendario del mes, los dias con varios
-// eventos/tareas a la vez — preferencia de ESTE dispositivo, se cambia
-// desde Configuracion > Vista (ver refreshCalendarDensityOptions en
-// settings.js).
-const CALENDAR_DENSITY_MODE_IDS = ['limit', 'dots', 'tint'];
-const CALENDAR_DENSITY_LIMIT = 3; // cuantos chips completos se ven en modo "limite" antes del "+N mas"
-
-function getCalendarDensityMode() {
-  const stored = localStorage.getItem('calendarDayDensity');
-  return CALENDAR_DENSITY_MODE_IDS.includes(stored) ? stored : 'limit';
 }
 
 // Construye el chip de un evento normal (no tarea) para una celda del
@@ -1411,238 +1030,6 @@ function buildCalendarEventChip(ev) {
   return chip;
 }
 
-function renderCalendarGrid() {
-  const grid = document.getElementById('calendar-grid');
-  grid.innerHTML = '';
-
-  WEEKDAY_LABELS.forEach((label) => {
-    const el = document.createElement('div');
-    el.className = 'calendar-weekday-heading';
-    el.textContent = label;
-    grid.appendChild(el);
-  });
-
-  const first = startOfMonth(state.viewDate);
-  // getDay() da 0=domingo..6=sabado; queremos que la semana empiece en lunes.
-  const firstWeekday = (first.getDay() + 6) % 7;
-  const gridStart = new Date(first);
-  gridStart.setDate(gridStart.getDate() - firstWeekday);
-
-  const today = new Date();
-
-  for (let i = 0; i < 42; i++) {
-    const cellDate = new Date(gridStart);
-    cellDate.setDate(gridStart.getDate() + i);
-
-    const cell = document.createElement('div');
-    cell.className = 'calendar-cell';
-    if (cellDate.getMonth() !== state.viewDate.getMonth()) cell.classList.add('other-month');
-    if (sameDay(cellDate, today)) cell.classList.add('today');
-    // Dia que se esta viendo ahora mismo en el panel de recordatorios
-    // (clicado en el calendario, o navegado con las flechas del teclado
-    // o de "Mi espacio") — mismo aspecto que el hover, pero fijo en vez
-    // de necesitar el raton encima.
-    if (state.remindersMode === 'day' && state.remindersDayDate && sameDay(cellDate, state.remindersDayDate)) {
-      cell.classList.add('selected-day');
-    }
-
-    // Color de fondo de la celda: festivo/especial (marcados a mano) por
-    // encima de fin de semana (automatico, sabado/domingo); "hoy" no
-    // compite con esto porque se ve en el numero del dia, no en el fondo
-    // (ver .calendar-cell.today .calendar-cell-day en styles.css).
-    const dayType = state.specialDays[toDateKey(cellDate)];
-    if (dayType === 'holiday') cell.classList.add('holiday-day');
-    else if (dayType === 'special') cell.classList.add('special-day');
-    else if (cellDate.getDay() === 0 || cellDate.getDay() === 6) cell.classList.add('weekend-day');
-
-    const dayLabel = document.createElement('div');
-    dayLabel.className = 'calendar-cell-day';
-    dayLabel.textContent = cellDate.getDate();
-    cell.appendChild(dayLabel);
-
-    const dayEvents = state.events.filter((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate));
-    const densityMode = getCalendarDensityMode();
-
-    if (densityMode === 'tint') {
-      // Sin chips ni puntos: solo se marca el dia como "tiene algo", el
-      // detalle de verdad se ve al abrirlo (clicando la celda).
-      if (dayEvents.length > 0) cell.classList.add('has-content');
-    } else if (densityMode === 'dots') {
-      // Un punto de color por evento/tarea, sin texto — las tareas con el
-      // mismo criterio de borde-en-vez-de-relleno que ya usan sus chips.
-      if (dayEvents.length > 0) {
-        const dotsRow = document.createElement('div');
-        dotsRow.className = 'calendar-day-dots';
-        dayEvents.forEach((ev) => {
-          const dot = document.createElement('span');
-          dot.className = 'calendar-day-dot';
-          const color = ev.isTask
-            ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev))
-            : (ev.groupColor || DEFAULT_EVENT_COLOR);
-          if (ev.isTask) {
-            dot.classList.add('is-task');
-            dot.style.borderColor = color;
-          } else {
-            dot.style.backgroundColor = color;
-          }
-          dotsRow.appendChild(dot);
-        });
-        cell.appendChild(dotsRow);
-      }
-    } else {
-      // 'limit': como antes, pero con un tope de chips completos y un
-      // "+N mas" para el resto (en vez de que la celda se desborde con
-      // muchos eventos el mismo dia).
-      const visible = dayEvents.slice(0, CALENDAR_DENSITY_LIMIT);
-      const hiddenCount = dayEvents.length - visible.length;
-      visible.forEach((ev) => {
-        cell.appendChild(ev.isTask ? buildCalendarTaskChip(ev) : buildCalendarEventChip(ev));
-      });
-      if (hiddenCount > 0) {
-        const more = document.createElement('div');
-        more.className = 'calendar-more-chip';
-        more.textContent = `+${hiddenCount} más`;
-        more.addEventListener('click', (e) => {
-          e.stopPropagation();
-          showDayInReminders(cellDate);
-        });
-        cell.appendChild(more);
-      }
-    }
-
-    // Clicar en cualquier otro sitio de la celda (no un chip concreto)
-    // cambia el panel de recordatorios para mostrar TODOS los eventos de
-    // ese dia — los chips se quedan pequenos y no siempre caben todos.
-    cell.addEventListener('click', () => showDayInReminders(cellDate));
-
-    grid.appendChild(cell);
-  }
-}
-
-// ---------------------------------------------------------------------
-// Panel de recordatorios en modo "dia": clicar un dia del calendario NO
-// abre ninguna ventana — en su lugar, el panel de recordatorios (el de
-// al lado del calendario) cambia a mostrar los eventos de ese dia, con
-// opcion de anadir uno nuevo ya con esa fecha puesta y de marcarlo como
-// festivo o dia especial. "← Proximos" vuelve a la vista normal.
-// ---------------------------------------------------------------------
-async function showDayInReminders(date) {
-  state.remindersMode = 'day';
-  state.remindersDayDate = date;
-  renderCalendarGrid();
-  await renderRemindersPanel();
-}
-
-function showUpcomingReminders() {
-  state.remindersMode = 'upcoming';
-  state.remindersDayDate = null;
-  renderCalendarGrid();
-  renderRemindersPanel();
-}
-
-function updateDayMarkButtons(dateKey) {
-  const current = state.specialDays[dateKey];
-  document.getElementById('btn-day-mark-holiday').classList.toggle('active', current === 'holiday');
-  document.getElementById('btn-day-mark-special').classList.toggle('active', current === 'special');
-}
-
-async function setDayType(dateKey, type) {
-  const current = state.specialDays[dateKey];
-  const next = current === type ? null : type; // pulsar el mismo tipo otra vez lo quita
-  await api(`/api/special-days/${dateKey}`, { method: 'PUT', body: JSON.stringify({ type: next }) });
-  if (next) state.specialDays[dateKey] = next;
-  else delete state.specialDays[dateKey];
-  updateDayMarkButtons(dateKey);
-  renderCalendarGrid();
-}
-
-// Se piden los eventos de ESE dia directamente al servidor (en vez de
-// filtrar state.events, que solo tiene el mes que se esta viendo) para
-// que tambien funcione bien si clicas un dia "de otro mes" que asoma en
-// las esquinas de la cuadricula.
-async function renderDayReminders(date) {
-  const dateStr = toDateKey(date);
-  const list = document.getElementById('reminders-list');
-  list.innerHTML = '<p class="empty-hint">Cargando…</p>';
-
-  const dayEvents = await api(`/api/events?from=${dateStr}T00:00:00&to=${dateStr}T23:59:59`);
-
-  list.innerHTML = '';
-  if (dayEvents.length === 0) {
-    list.innerHTML = '<p class="empty-hint">No hay eventos este dia.</p>';
-    return;
-  }
-
-  dayEvents.forEach((ev) => {
-    if (ev.isTask) {
-      const row = buildTaskRow(ev);
-      if (row) list.appendChild(row);
-      return;
-    }
-    const groupLabel = ev.groupName ? `${ev.groupIcon ? ev.groupIcon + ' ' : ''}${ev.groupName}` : null;
-    const item = document.createElement('div');
-    item.className = 'agenda-item';
-    item.innerHTML = `
-      <span class="color-dot" style="background-color: ${ev.groupColor || DEFAULT_EVENT_COLOR}"></span>
-      <div class="agenda-time">${ev.allDay ? 'Todo el dia' : TIME_FORMATTER.format(new Date(ev.startAt))}</div>
-      <div>
-        <div class="agenda-title">${escapeHtml(ev.title)}</div>
-        ${groupLabel || ev.location ? `<div class="agenda-meta">${[groupLabel, ev.location].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
-      </div>
-    `;
-    item.addEventListener('click', () => openEventModal(ev));
-    list.appendChild(item);
-  });
-}
-
-async function renderRemindersPanel() {
-  const title = document.getElementById('reminders-panel-title');
-  const backBtn = document.getElementById('btn-reminders-back');
-  const dayActions = document.getElementById('reminders-day-actions');
-
-  if (state.remindersMode === 'day' && state.remindersDayDate) {
-    title.textContent = DAY_HEADING_FORMATTER.format(state.remindersDayDate);
-    backBtn.classList.remove('hidden');
-    dayActions.classList.remove('hidden');
-    updateDayMarkButtons(toDateKey(state.remindersDayDate));
-    remindersDayNavDateField.setValue(state.remindersDayDate);
-    await renderDayReminders(state.remindersDayDate);
-  } else {
-    title.textContent = 'Proximos recordatorios';
-    backBtn.classList.add('hidden');
-    dayActions.classList.add('hidden');
-    renderUpcomingRemindersList(state.upcomingReminders || []);
-  }
-}
-
-// Navegacion de dia dentro de "Mi espacio" (ver #reminders-day-nav en
-// index.html, oculta fuera de ahi). El campo de fecha se crea UNA vez
-// aqui mismo (igual que los campos de fecha de los modales) y vive
-// siempre dentro de .reminders-top-block, se mueva este donde se mueva.
-const remindersDayNavDateField = createDateField({
-  initialValue: new Date(),
-  onChange: (d) => { if (d) showDayInReminders(d); },
-});
-document.getElementById('reminders-day-nav-date-field').appendChild(remindersDayNavDateField.element);
-document.getElementById('btn-reminders-day-prev').addEventListener('click', () => shiftRemindersDay(-1));
-document.getElementById('btn-reminders-day-next').addEventListener('click', () => shiftRemindersDay(1));
-
-document.getElementById('btn-reminders-back').addEventListener('click', showUpcomingReminders);
-document.getElementById('btn-day-mark-holiday').addEventListener('click', () => {
-  if (state.remindersDayDate) setDayType(toDateKey(state.remindersDayDate), 'holiday');
-});
-document.getElementById('btn-day-mark-special').addEventListener('click', () => {
-  if (state.remindersDayDate) setDayType(toDateKey(state.remindersDayDate), 'special');
-});
-document.getElementById('btn-day-add-event').addEventListener('click', () => {
-  openEventModal(null, state.remindersDayDate);
-});
-
-// renderAgendaList() (la lista plana antigua de movil) se quito por
-// completo en la Fase 2 del rediseño movil -- sustituida por las vistas
-// de mes/año propias mas abajo (renderMobileCalendarMonthGrid() y
-// alrededores).
-
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
@@ -1652,25 +1039,6 @@ function escapeHtml(str) {
 // Las flechas del mes navegan por AÑO en vez de por mes mientras estas
 // en la vista anual (ver calendarViewMode mas abajo) -- mismo boton,
 // distinto salto, coherente con lo que se esta mirando.
-document.getElementById('nav-prev').addEventListener('click', () => {
-  if (calendarViewMode === 'year') {
-    state.viewDate = new Date(state.viewDate.getFullYear() - 1, state.viewDate.getMonth(), 1);
-    refreshCalendarYearGrid();
-    return;
-  }
-  state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() - 1, 1);
-  loadMonth();
-});
-document.getElementById('nav-next').addEventListener('click', () => {
-  if (calendarViewMode === 'year') {
-    state.viewDate = new Date(state.viewDate.getFullYear() + 1, state.viewDate.getMonth(), 1);
-    refreshCalendarYearGrid();
-    return;
-  }
-  state.viewDate = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() + 1, 1);
-  loadMonth();
-});
-
 // ---------------------------------------------------------------------
 // Vista anual (solo escritorio): las 12 miniaturas del año a la vez, en
 // vez del mes a mes de siempre -- pedido explicito de Koku, "ya que hay
@@ -1695,8 +1063,8 @@ async function loadYearViewEvents(year) {
 function isGestureBlockedByModal() {
   if (document.querySelector('.modal:not(.hidden)')) return true;
   const fullscreenIds = [
-    'my-space-view', 'extensions-view', 'gym-view', 'finanzas-view',
-    'lecturas-view', 'archivos-view', 'note-editor-view',
+    'extensions-view', 'gym-view', 'gym-live-view', 'finanzas-view',
+    'lecturas-view', 'note-editor-view',
   ];
   return fullscreenIds.some((id) => {
     const el = document.getElementById(id);
@@ -1709,164 +1077,95 @@ function enterMonthFromYear(month) {
   setCalendarViewMode('month');
 }
 
-function renderCalendarYearGrid() {
-  const container = document.getElementById('calendar-year-grid');
-  container.innerHTML = '';
-  const year = state.viewDate.getFullYear();
-  const today = new Date();
-
-  for (let month = 0; month < 12; month++) {
-    const monthDate = new Date(year, month, 1);
-    const tile = document.createElement('div');
-    tile.className = 'calendar-year-tile';
-
-    const heading = document.createElement('div');
-    heading.className = 'calendar-year-tile-heading';
-    const label = MONTH_ONLY_FORMATTER.format(monthDate);
-    heading.textContent = label.charAt(0).toUpperCase() + label.slice(1);
-    tile.appendChild(heading);
-
-    const grid = document.createElement('div');
-    grid.className = 'calendar-year-tile-grid';
-
-    // Igual que el mes grande: la semana empieza en lunes, y solo se
-    // pintan las semanas que hacen falta para ese mes (4 a 6 segun como
-    // caiga), sin filas de sobra vacias.
-    const first = startOfMonth(monthDate);
-    const last = endOfMonth(monthDate);
-    const firstWeekday = (first.getDay() + 6) % 7;
-    const lastWeekday = (last.getDay() + 6) % 7;
-    const gridStart = new Date(first);
-    gridStart.setDate(gridStart.getDate() - firstWeekday);
-    const totalDays = firstWeekday + last.getDate() + (6 - lastWeekday);
-
-    for (let i = 0; i < totalDays; i++) {
-      const cellDate = new Date(gridStart);
-      cellDate.setDate(gridStart.getDate() + i);
-
-      const cell = document.createElement('span');
-      cell.className = 'calendar-year-day';
-      cell.textContent = cellDate.getDate();
-      if (cellDate.getMonth() !== month) cell.classList.add('other-month');
-      if (sameDay(cellDate, today)) cell.classList.add('today');
-
-      const dayType = state.specialDays[toDateKey(cellDate)];
-      if (dayType === 'holiday') cell.classList.add('holiday-day');
-      else if (dayType === 'special') cell.classList.add('special-day');
-      else if (cellDate.getDay() === 0 || cellDate.getDay() === 6) cell.classList.add('weekend-day');
-
-      if (yearViewEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate))) {
-        cell.classList.add('has-content');
-      }
-
-      grid.appendChild(cell);
-    }
-    tile.appendChild(grid);
-
-    tile.addEventListener('click', () => enterMonthFromYear(month));
-    tile.addEventListener('wheel', (e) => {
-      if (isGestureBlockedByModal()) return;
-      if (e.deltaY >= 0) return; // solo hacia arriba = "entrar" en el mes
-      e.preventDefault();
-      enterMonthFromYear(month);
-    }, { passive: false });
-
-    container.appendChild(tile);
-  }
+// Interruptor de animaciones (Configuracion > Este dispositivo, por
+// dispositivo, encendido por defecto): con el apagado se salta TODO el
+// movimiento de la app -- no solo el del calendario. Pedido de Koku
+// para no gastar recursos cuando no se quieren.
+//
+// Funciona en DOS mitades, porque hay dos clases de animacion:
+//  1. Las de CSS (@keyframes y transition:) -- las apaga una unica
+//     regla global de styles.css que se activa con
+//     data-animations="off" en el <html>. Al ser una sola regla, una
+//     animacion NUEVA que se añada a la hoja de estilos el dia de
+//     mañana ya nace obedeciendo al interruptor sin tocar nada.
+//  2. Las que dispara el JavaScript a mano (poner una clase de
+//     animacion, esperar un timeout, etc.) -- esas preguntan por
+//     areAnimationsEnabled() antes de hacer nada.
+function areAnimationsEnabled() {
+  return localStorage.getItem('animationsEnabled') !== 'false';
 }
 
-async function refreshCalendarYearGrid() {
-  const year = state.viewDate.getFullYear();
-  document.getElementById('current-month-label').textContent = String(year);
-  await loadYearViewEvents(year);
-  renderCalendarYearGrid();
+// Pone/quita el atributo del <html> que dispara la regla global. El
+// script de arranque de index.html ya lo hace antes de pintar (para que
+// no se vea un trozo de animacion al abrir); esta funcion es la que usa
+// el interruptor de Configuracion para cambiarlo en caliente.
+function applyAnimationsPreference() {
+  if (areAnimationsEnabled()) delete document.documentElement.dataset.animations;
+  else document.documentElement.dataset.animations = 'off';
 }
 
-const CALENDAR_VIEW_ANIMATION_MS = 320;
-
-function playCalendarViewAnimation(el) {
-  el.classList.remove('calendar-view-entering');
-  // Forzar reflow para que la animacion se pueda relanzar si el modo se
-  // cambia varias veces seguidas muy rapido (si no, quitar y volver a
-  // poner la misma clase en el mismo "tick" no reinicia la animacion).
+// Animacion de zoom al cambiar de NIVEL del calendario (año <-> mes <->
+// dia) -- distinta de la de deslizar (playMobileSwipeTransition), que es
+// para moverse DENTRO del mismo nivel. "in" = bajar de nivel (meterse en
+// un mes/dia: la vista nueva crece desde pequeña, como acercandose);
+// "out" = subir de nivel (la vista nueva encoge desde grande, como
+// alejandose). BANCO DE PRUEBAS: Koku quiere verlo en el movil antes de
+// darlo por bueno -- es posible que se retire (ver CLAUDE.md).
+function playMobileZoomTransition(el, direction) {
+  if (!el || !areAnimationsEnabled()) return;
+  const cls = `mobile-zoom-anim-${direction}`;
+  el.classList.remove('mobile-zoom-anim-in', 'mobile-zoom-anim-out');
   void el.offsetWidth;
-  el.classList.add('calendar-view-entering');
-  setTimeout(() => el.classList.remove('calendar-view-entering'), CALENDAR_VIEW_ANIMATION_MS);
+  el.classList.add(cls);
+  const cleanup = () => el.classList.remove(cls);
+  el.addEventListener('animationend', cleanup, { once: true });
+  setTimeout(cleanup, 350);
 }
 
 async function setCalendarViewMode(mode) {
   if (mode === calendarViewMode) return;
   calendarViewMode = mode;
-  const monthEl = document.getElementById('calendar-grid');
-  const yearEl = document.getElementById('calendar-year-grid');
-  document.getElementById('btn-calendar-year-toggle').classList.toggle('active', mode === 'year');
-
-  if (mode === 'year') {
-    await refreshCalendarYearGrid();
-    monthEl.classList.add('hidden');
-    yearEl.classList.remove('hidden');
-    playCalendarViewAnimation(yearEl);
-  } else {
-    await loadMonth();
-    yearEl.classList.add('hidden');
-    monthEl.classList.remove('hidden');
-    playCalendarViewAnimation(monthEl);
-  }
-  // Movil (Fase 2 del rediseño movil): mismo `calendarViewMode` como
-  // fuente unica de verdad, para que si alguien redimensiona la ventana
-  // a media sesion la vista se mantenga coherente entre escritorio y
-  // movil. loadMonth() (llamado arriba en la rama "month") ya repinta
-  // #mobile-calendar-month-grid via renderMobileCalendarMonthGrid().
-  if (mode === 'year') {
-    await refreshMobileCalendarYearGrid();
-  }
+  if (mode === 'year') await refreshMobileCalendarYearGrid();
+  else await loadMonth();
   refreshMobileCalendarModeVisibility();
   refreshMobileCalendarNavLabel();
+  // Zoom segun el sentido del cambio: al año se SUBE de nivel (out), al
+  // mes se BAJA desde el año (in). La vista diaria tiene sus propias
+  // llamadas en enterMobileDayView()/exitMobileDayView().
+  if (mode === 'year') playMobileZoomTransition(document.getElementById('mobile-calendar-year-grid'), 'out');
+  else playMobileZoomTransition(document.getElementById('mobile-calendar-month-grid'), 'in');
 }
 
-document.getElementById('btn-calendar-year-toggle').addEventListener('click', () => {
-  setCalendarViewMode(calendarViewMode === 'year' ? 'month' : 'year');
-});
-
-// Rueda del raton hacia abajo sobre el mes = vista anual. Si el punto
-// donde estaba el raton es una celda que YA scrollea por su cuenta (un
-// dia con muchos eventos, ver .calendar-cell en styles.css), se deja
-// pasar el scroll normal de esa celda en vez de interceptarlo -- si no,
-// seria imposible leer un dia lleno sin cambiar de vista sin querer.
-document.getElementById('calendar-grid-wrap').addEventListener('wheel', (e) => {
-  if (calendarViewMode !== 'month') return;
-  if (e.deltaY <= 0) return;
-  if (isGestureBlockedByModal()) return;
-  const cell = e.target.closest('.calendar-cell');
-  if (cell && cell.scrollHeight > cell.clientHeight) return;
-  e.preventDefault();
-  setCalendarViewMode('year');
-}, { passive: false });
-
 // ---------------------------------------------------------------------
-// Calendario MOVIL (Fase 2 del rediseño movil, ver CLAUDE.md): vistas de
-// mes/año propias, en contenedores separados de escritorio (nunca
-// comparten nodo con calendar-grid-wrap.desktop-only -- se investigo a
-// fondo antes de construir esto: la vista anual de escritorio vivia
-// ANIDADA dentro de ese contenedor, asi que reutilizar el mismo DOM no
-// era viable sin romper el corte movil/escritorio). Comparten con
-// escritorio la LOGICA de datos (loadYearViewEvents, state.events) pero
-// el pintado es propio -- el calculo de fechas del mes SI se duplica a
-// proposito (buildMonthCellDates de aqui abajo, y el de
-// renderCalendarGrid mas arriba): son solo 6 lineas de aritmetica ya
-// verificadas, y evita tocar la funcion de escritorio que Koku ya usa a
-// diario.
+// Calendario: vistas de mes y de año, cada una con su propio contenedor
+// (se alternan con .hidden desde setCalendarViewMode). Los eventos del año
+// entero se piden de golpe una vez (loadYearViewEvents) y se cachean.
 // ---------------------------------------------------------------------
 
 // Gesto generico de swipe (Pointer Events -- funciona con dedo, raton o
 // lapiz con un unico mecanismo, sin depender de eventos "touch"
 // especificos). Solo detecta la DIRECCION al soltar, sin arrastre en
 // vivo -- suficiente para cambiar de mes/año/dia, no hace falta mas.
-function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preserveVerticalScroll = false } = {}) {
+// centerOnly: los callbacks HORIZONTALES (onLeft/onRight) solo se
+// disparan si el dedo empezo en el carril CENTRAL de la pantalla. Lo
+// pidio Koku para la vista diaria: alli deslizar de lado cambia de dia,
+// pero desde los BORDES tiene que cambiar de pestaña (ver el bloque
+// "GESTOS DE NAVEGACION" al final de este archivo). Los verticales no
+// se tocan: no compiten con nada.
+function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preserveVerticalScroll = false, centerOnly = false } = {}) {
   let startX = null;
   let startY = null;
   el.addEventListener('pointerdown', (e) => {
     if (isGestureBlockedByModal()) return;
+    // Un SEGUNDO dedo mientras habia un swipe empezado = es un pellizco
+    // (ver attachPinch), no un deslizamiento -- se cancela el swipe para
+    // que al levantar los dedos no se dispare un cambio de mes/dia por
+    // accidente ademas del cambio de nivel.
+    if (startX !== null) {
+      startX = null;
+      startY = null;
+      return;
+    }
     startX = e.clientX;
     startY = e.clientY;
     // Sin esto, si el dedo se sale del contenedor durante el arrastre (muy
@@ -1874,17 +1173,24 @@ function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preser
     // "pointerup" llega al elemento que haya debajo del dedo en ESE
     // momento, no a este -- y el gesto se queda "colgado" sin completarse.
     // setPointerCapture fuerza a que TODO el gesto (incluido el pointerup)
-    // siga llegando aqui pase lo que pase.
-    el.setPointerCapture(e.pointerId);
+    // siga llegando aqui pase lo que pase. (En try/catch: un pointerId
+    // que el navegador ya no reconoce como activo lanza excepcion, y eso
+    // no debe tumbar el resto del gesto.)
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* sin capture, el gesto normal sigue valiendo */ }
   });
   el.addEventListener('pointerup', (e) => {
     if (startX === null) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
+    const inicioX = startX;
     startX = null;
     startY = null;
     if (Math.abs(dx) > Math.abs(dy)) {
       if (Math.abs(dx) < threshold) return;
+      // Carril lateral con centerOnly: el gesto no es para esta vista,
+      // es para cambiar de pestaña -- se deja pasar sin hacer nada (de
+      // eso ya se encarga el detector global de navegacion).
+      if (centerOnly && isMobileEdgeZone(inicioX)) return;
       if (dx < 0 && onLeft) onLeft();
       else if (dx > 0 && onRight) onRight();
     } else {
@@ -1923,6 +1229,60 @@ function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preser
     } else if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
       e.preventDefault();
     }
+  }, { passive: false });
+}
+
+// Gesto de PELLIZCO (dos dedos juntandose) para SUBIR de nivel en el
+// calendario: dia -> mes, mes -> año. Solo hacia arriba a proposito
+// (decision de Koku): el pellizco inverso para bajar exigiria saber
+// DONDE se hace zoom (que mes, que dia), y bajar ya es solo tocar el
+// mes/dia -- no compensa la complejidad. Mismo mecanismo de Pointer
+// Events que attachSwipe (y que el zoom del mapa de Viajes): se apuntan
+// los punteros activos y, con dos a la vez, se compara la distancia
+// entre ellos con la del principio -- si encoge por debajo del umbral,
+// se dispara UNA vez por gesto. attachSwipe ya se cancela solo en
+// cuanto detecta el segundo dedo (ver su pointerdown), asi que un
+// pellizco nunca dispara ademas un cambio de mes/dia por accidente.
+function attachPinch(el, onPinchIn) {
+  const punteros = new Map();
+  let distanciaInicial = null;
+  let disparado = false;
+  const medir = () => {
+    const pts = [...punteros.values()];
+    return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  };
+  el.addEventListener('pointerdown', (e) => {
+    if (isGestureBlockedByModal()) return;
+    punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (punteros.size === 2) {
+      distanciaInicial = medir();
+      disparado = false;
+    }
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!punteros.has(e.pointerId)) return;
+    punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (punteros.size === 2 && distanciaInicial && !disparado) {
+      // 0.72: los dedos tienen que acercarse de verdad (a menos de 3/4
+      // de la distancia inicial) -- un roce accidental de dos dedos no
+      // llega a esto.
+      if (medir() < distanciaInicial * 0.72) {
+        disparado = true;
+        onPinchIn();
+      }
+    }
+  });
+  const soltar = (e) => {
+    punteros.delete(e.pointerId);
+    if (punteros.size < 2) distanciaInicial = null;
+  };
+  el.addEventListener('pointerup', soltar);
+  el.addEventListener('pointercancel', soltar);
+  // Con dos dedos en pantalla, que el navegador no intente su propio
+  // zoom/scroll nativo mientras dura el pellizco (mismo refuerzo de
+  // touchmove sin passive que ya usa attachSwipe).
+  el.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2) e.preventDefault();
   }, { passive: false });
 }
 
@@ -1966,7 +1326,7 @@ function buildYearTileCellDates(monthDate) {
 
 // Que grupos DISTINTOS estan representados un dia concreto -- no es que
 // un evento pertenezca a varios grupos (un evento/tarea siempre es de UN
-// grupo, ver events.group_id en server/db.js), es agregar varios
+// grupo, ver events.group_id en local-schema.js), es agregar varios
 // eventos/tareas de ESE dia que pueden ser de grupos distintos entre si.
 // Orden pedido por Koku: los de "todo el dia" primero, luego por hora de
 // inicio; un grupo que ya aparecio no se repite aunque tenga mas de un
@@ -1998,9 +1358,9 @@ function buildMobileDayGroupPill(groups) {
   return pill;
 }
 
-// Ajuste por dispositivo (localStorage, NO sincronizado -- mismo patron
-// que calendarDayDensity de escritorio, ver getCalendarDensityMode() mas
-// arriba): que tan "denso" se ve un dia con eventos en el mes movil.
+// Ajuste por dispositivo (localStorage, NO sincronizado): que tan
+// "denso" se ve un dia con eventos en el mes. Se elige en la propia
+// barra del calendario, no en Configuracion.
 const MOBILE_CALENDAR_MONTH_MODE_IDS = ['compact', 'stacked', 'listed'];
 function getMobileCalendarMonthMode() {
   const stored = localStorage.getItem('mobileCalendarMonthMode');
@@ -2010,11 +1370,26 @@ function getMobileCalendarMonthMode() {
 // "De que hora a que hora" para el modo Listado (mes) -- no existia un
 // formateador de RANGO en el proyecto, el resto de sitios solo muestran
 // la hora de inicio.
-function formatMobileEventTimeRange(ev) {
+// La hora que se ensena en un listado. Con "date" se sabe EN QUE DIA se
+// esta pintando, que hace falta para los eventos de varios dias: de un
+// viaje del jueves 20:00 al domingo 14:00, poner "20:00-14:00" los
+// cuatro dias no dice nada. Asi se ve de un vistazo si el evento
+// empieza, sigue o acaba ese dia:
+//   jueves  -> "20:00 →"   (empieza y sigue)
+//   viernes -> "Todo el día"
+//   sabado  -> "Todo el día"
+//   domingo -> "→ 14:00"   (viene de antes y acaba)
+// Sin "date" se comporta como siempre (rango completo), que es lo que
+// vale para una lista que no es de un dia concreto.
+function formatMobileEventTimeRange(ev, date) {
   if (ev.allDay) return 'Todo el día';
   const start = TIME_FORMATTER.format(new Date(ev.startAt));
   if (!ev.endAt) return start;
   const end = TIME_FORMATTER.format(new Date(ev.endAt));
+  const tramo = date ? eventDaySpan(ev, date) : 'unico';
+  if (tramo === 'entero') return 'Todo el día';
+  if (tramo === 'inicio') return `${start} →`;
+  if (tramo === 'fin') return `→ ${end}`;
   return end === start ? start : `${start}–${end}`;
 }
 
@@ -2046,7 +1421,7 @@ function renderMobileCalendarMonthGrid() {
     circle.textContent = cellDate.getDate();
     cell.appendChild(circle);
 
-    const dayEvents = state.events.filter((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate));
+    const dayEvents = state.events.filter((ev) => eventOccursOnDay(ev, cellDate));
     const groups = getDistinctGroupsForDay(dayEvents);
 
     if (groups.length > 0) {
@@ -2133,7 +1508,7 @@ async function renderMobileCalendarMonthList(date) {
     title.textContent = ev.title;
     const time = document.createElement('div');
     time.className = 'mobile-calendar-month-list-time';
-    time.textContent = formatMobileEventTimeRange(ev);
+    time.textContent = formatMobileEventTimeRange(ev, state.mobileCalendarListDate);
     row.append(bar, title, time);
     row.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
     container.appendChild(row);
@@ -2174,7 +1549,7 @@ function renderMobileCalendarYearGrid() {
       }
       cell.textContent = cellDate.getDate();
       if (sameDay(cellDate, today)) cell.classList.add('today');
-      if (yearViewEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate))) {
+      if (yearViewEvents.some((ev) => eventOccursOnDay(ev, cellDate))) {
         cell.classList.add('has-content');
       }
       grid.appendChild(cell);
@@ -2279,14 +1654,53 @@ document.getElementById('mobile-calendar-density-field').appendChild(mobileCalen
 // async y no se esperan aqui tampoco) -- es puramente cosmetico, sin
 // bloquear nada.
 function playMobileSwipeTransition(el, direction) {
-  if (!el) return;
+  if (!el || !areAnimationsEnabled()) return;
   const cls = `mobile-swipe-anim-${direction}`;
   el.classList.remove('mobile-swipe-anim-up', 'mobile-swipe-anim-down', 'mobile-swipe-anim-left', 'mobile-swipe-anim-right');
+  // Si esta misma capa estaba a mitad de IRSE y ahora vuelve a entrar
+  // (has deslizado dos veces seguidas muy rapido), se cancela lo suyo:
+  // si no, la limpieza de la salida la volveria a ocultar a media
+  // entrada. Ver playMobileSwipeOut.
+  el.classList.remove('mobile-swipe-out-left', 'mobile-swipe-out-right');
+  delete el.dataset.reocultarTrasSalir;
   void el.offsetWidth;
   el.classList.add(cls);
   const cleanup = () => el.classList.remove(cls);
   el.addEventListener('animationend', cleanup, { once: true });
   setTimeout(cleanup, 300);
+}
+
+// La otra mitad del carrusel: la pantalla que se VA, viajando al mismo
+// tiempo que entra la nueva.
+//
+// El detalle que lo complica: para cuando se llama a esto, la capa que
+// se va YA se ha ocultado (los botones de cerrar le ponen .hidden). Hay
+// que volver a enseñarla los 280ms del viaje y ocultarla otra vez al
+// acabar. Se hace quitando y reponiendo la clase .hidden en vez de
+// forzar un display por CSS, porque cada capa tiene el suyo (las
+// pantallas completas son flex, no block) y forzarlo las descuadraria.
+function playMobileSwipeOut(el, direction) {
+  if (!el || !areAnimationsEnabled()) return;
+  const cls = `mobile-swipe-out-${direction}`;
+  const estabaOculta = el.classList.contains('hidden');
+  if (estabaOculta) {
+    el.classList.remove('hidden');
+    el.dataset.reocultarTrasSalir = '1';
+  }
+  el.classList.remove('mobile-swipe-out-left', 'mobile-swipe-out-right');
+  void el.offsetWidth;
+  el.classList.add(cls);
+  const cleanup = () => {
+    el.classList.remove(cls);
+    // Solo se vuelve a ocultar si nadie ha cancelado la salida por el
+    // camino (ver playMobileSwipeTransition).
+    if (el.dataset.reocultarTrasSalir === '1') {
+      delete el.dataset.reocultarTrasSalir;
+      el.classList.add('hidden');
+    }
+  };
+  el.addEventListener('animationend', cleanup, { once: true });
+  setTimeout(cleanup, 400);
 }
 
 attachSwipe(document.getElementById('mobile-calendar-month-grid'), {
@@ -2314,6 +1728,12 @@ attachSwipe(document.getElementById('mobile-calendar-year-grid'), {
     refreshMobileCalendarNavLabel();
     playMobileSwipeTransition(document.getElementById('mobile-calendar-year-grid'), 'down');
   },
+});
+
+// Pellizco = subir de nivel: en el mes lleva al año. (En el año no hay
+// nada por encima, ahi no se engancha nada.)
+attachPinch(document.getElementById('mobile-calendar-month-grid'), () => {
+  if (calendarViewMode === 'month') setCalendarViewMode('year');
 });
 
 // ---------------------------------------------------------------------
@@ -2381,7 +1801,7 @@ async function renderMobileWeekStrip(viewingDate) {
 
     const dot = document.createElement('div');
     dot.className = 'week-strip-day-dot';
-    if (!weekEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), d))) dot.classList.add('is-empty');
+    if (!weekEvents.some((ev) => eventOccursOnDay(ev, d))) dot.classList.add('is-empty');
 
     cell.append(label, num, dot);
     cell.addEventListener('click', () => showMobileDay(d, { scrollToNow: true }));
@@ -2416,17 +1836,15 @@ function refreshMobileCurrentTimeLine(date) {
 }
 
 function scrollMobileHoursToTime(date, targetMinutes) {
-  // .mobile-hours-scroll tiene overflow-y:auto, pero en movil ".app"
-  // usa min-height (no height) a proposito, para que la pagina crezca
-  // con el contenido y se pueda hacer scroll normal con el dedo (ver el
-  // comentario junto a ".app" en styles.css) -- eso significa que este
-  // contenedor NUNCA llega a desbordar de verdad (su scrollHeight ==
-  // clientHeight siempre), asi que fijar su propio scrollTop no mueve
-  // nada. El que de verdad se desplaza es la PAGINA entera, asi que hay
-  // que calcular la posicion absoluta en la pagina y usar
-  // window.scrollTo() en su lugar.
+  // Desde que la vista diaria acota su propio alto (body.mobile-day-
+  // scroll-lock, ver styles.css), quien se desplaza de verdad es
+  // .mobile-hours-scroll, no la pagina -- antes era al reves y esto
+  // usaba window.scrollTo(). El grid es hijo directo de ese contenedor,
+  // que ademas es position:relative, asi que su offsetTop ya esta medido
+  // respecto a el.
   const grid = document.getElementById('mobile-hours-grid');
-  if (!grid) return;
+  const scroller = document.querySelector('.mobile-hours-scroll');
+  if (!grid || !scroller) return;
   // targetMinutes explicito (p. ej. la hora real de un evento clicado
   // desde el buscador global) tiene prioridad; si no se pasa, se sigue
   // el comportamiento de siempre ("ahora" si es hoy, 8:00 si no).
@@ -2434,10 +1852,9 @@ function scrollMobileHoursToTime(date, targetMinutes) {
     const now = new Date();
     targetMinutes = sameDay(date, now) ? (now.getHours() * 60 + now.getMinutes()) : 8 * 60;
   }
-  const gridTop = grid.getBoundingClientRect().top + window.scrollY;
   // Deja un par de horas de margen ANTES del objetivo, para que no quede
   // pegado justo al borde superior de la pantalla.
-  window.scrollTo(0, Math.max(0, gridTop + targetMinutes - 120));
+  scroller.scrollTop = Math.max(0, grid.offsetTop + targetMinutes - 120);
 }
 
 // Reparto de "carriles" simple y voraz para eventos con hora que se
@@ -2466,13 +1883,44 @@ async function renderMobileHoursView(date) {
   allDayRow.innerHTML = '';
   grid.innerHTML = '';
 
-  const allDayEvents = dayEvents.filter((ev) => ev.allDay);
+  // Arriba, en la fila de "todo el dia", van dos cosas: los eventos
+  // marcados como de todo el dia, y los de VARIOS DIAS en los dias que
+  // ocupan de punta a punta (el viernes y el sabado de un viaje que va
+  // del jueves al domingo). Peticion de Koku: "si ocupa el dia entero,
+  // que se marque como todo el dia esos dias, para no tapar toda la
+  // pantalla" -- y tiene razon, un bloque de 00:00 a 24:00 llena la
+  // vista sin decir nada que no diga ya esta etiqueta.
+  // Arriba van los que ocupan el dia entero Y TAMBIEN el ULTIMO dia de
+  // un evento largo (decision de Koku sobre el domingo de un viaje que
+  // empieza el jueves: "me parece bien, que aparezca en la seccion de
+  // dia entero"). Un bloque de medianoche a las 14:00 se come casi toda
+  // la pantalla para decir algo que la etiqueta dice mejor.
+  //
+  // OJO, esto es SOLO como se pinta: el evento sigue guardado con su
+  // hora de fin de verdad, no se convierte en "todo el dia" (lo pidio
+  // expresamente: "que se quede guardado que la hora es la que aparece
+  // puesta"). Por eso la etiqueta enseña "→ 14:00" y no un simple
+  // "Todo el dia": la hora sigue estando y se ve.
+  //
+  // El PRIMER dia se queda como bloque a proposito: empezar a las 20:00
+  // son cuatro horas de alto, no molesta, y ver donde arranca dentro
+  // del dia si aporta.
+  const allDayEvents = dayEvents.filter((ev) => {
+    if (ev.allDay) return true;
+    const tramo = eventDaySpan(ev, date);
+    return tramo === 'entero' || tramo === 'fin';
+  });
   allDayRow.classList.toggle('hidden', allDayEvents.length === 0);
   allDayEvents.forEach((ev) => {
     const chip = document.createElement('div');
     chip.className = 'mobile-day-allday-chip';
     chip.style.backgroundColor = ev.isTask ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev)) : (ev.groupColor || DEFAULT_EVENT_COLOR);
-    chip.textContent = ev.title;
+    // En el ultimo dia se añade la hora a la que acaba; en el resto, el
+    // titulo a secas (que ya se entiende como "todo el dia").
+    const tramo = eventDaySpan(ev, date);
+    chip.textContent = tramo === 'fin'
+      ? `${ev.title} · ${formatMobileEventTimeRange(ev, date)}`
+      : ev.title;
     chip.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
     allDayRow.appendChild(chip);
   });
@@ -2483,16 +1931,27 @@ async function renderMobileHoursView(date) {
     row.style.top = `${h * 60}px`;
     const label = document.createElement('div');
     label.className = 'mobile-hour-label';
-    label.textContent = `${String(h).padStart(2, '0')}:00`;
+    label.textContent = formatHourLabel(h);
     row.appendChild(label);
     grid.appendChild(row);
   }
 
   const timed = dayEvents
-    .filter((ev) => !ev.allDay && ev.startAt)
+    // Fuera los de todo el dia y los que ya se han puesto arriba por
+    // ocupar este dia entero (ver allDayEvents).
+    // Fuera los que ya se han puesto arriba (ver allDayEvents): los de
+    // todo el dia, los que ocupan este dia entero y el ultimo dia de un
+    // evento largo.
+    .filter((ev) => !ev.allDay && ev.startAt && !['entero', 'fin'].includes(eventDaySpan(ev, date)))
     .map((ev) => {
+      // El bloque se RECORTA a este dia: de un viaje que empieza el
+      // jueves a las 20:00 y acaba el domingo a las 14:00, el jueves se
+      // pinta de 20:00 a medianoche y el domingo de medianoche a las
+      // 14:00. Antes solo se recortaba el final; el principio daba por
+      // hecho que el evento empezaba hoy, asi que en el ultimo dia
+      // habria salido a la hora de INICIO del primero.
       const start = new Date(ev.startAt);
-      const startMin = start.getHours() * 60 + start.getMinutes();
+      const startMin = sameDay(start, date) ? start.getHours() * 60 + start.getMinutes() : 0;
       let endMin;
       if (ev.endAt) {
         const end = new Date(ev.endAt);
@@ -2535,11 +1994,19 @@ async function renderMobileHoursView(date) {
   refreshMobileCurrentTimeLine(date);
 }
 
-// --- "Listado" (dia): scroll bidireccional -- ventana inicial de ±3
-// dias, un IntersectionObserver en los centinelas de arriba/abajo la
-// amplia sola al acercarse a un extremo (sin libreria, mismo patron
-// "centinela" que se explico en el plan). -----------------------------
-let mobileDayListadoRange = null; // { from: Date, to: Date }
+// --- "Listado": UNA sola lista continua con TODOS los eventos, de
+// cualquier año (pedido de Koku: "que muestre todo, de todos los años,
+// un scroll infinito con todos los eventos"). Antes era una ventana de
+// ±3 dias alrededor del dia que estuvieras viendo, asi que al cambiar de
+// mes desaparecian los demas.
+//
+// Se piden TODOS los eventos de golpe (GET /api/events sin from/to, ya
+// ordenado por fecha) y se agrupan por dia una sola vez; lo que se
+// amplia al deslizar no es un rango de fechas sino cuantos de esos dias
+// se PINTAN -- asi da igual que entre dos eventos haya tres años de
+// hueco, no hay que recorrer dia a dia el calendario entero.
+let mobileListadoDays = null;    // [{ key, date, events[] }], solo dias CON algo
+let mobileListadoWindow = null;  // { start, end } indices dentro de mobileListadoDays
 let mobileDayListadoObserver = null;
 let mobileDayListadoBusy = false;
 // Si llega una peticion de expandir mientras ya hay otra en curso (pasa
@@ -2551,15 +2018,16 @@ let mobileDayListadoBusy = false;
 // mientras se queda "visible" sin mas), se apunta aqui para procesarla
 // en cuanto la actual termine, en vez de descartarla.
 let mobileDayListadoPending = new Set();
-const MOBILE_DAY_LISTADO_STEP_DAYS = 4;
-const MOBILE_DAY_LISTADO_MAX_SPAN_DAYS = 180; // red de seguridad, evita crecimiento sin limite
+// Cuantos dias-con-contenido se añaden cada vez que se llega a un
+// extremo. No hay tope: la lista puede acabar mostrandolo todo.
+const MOBILE_LISTADO_CHUNK = 20;
 
 function disconnectMobileDayListadoObserver() {
   if (mobileDayListadoObserver) { mobileDayListadoObserver.disconnect(); mobileDayListadoObserver = null; }
   mobileDayListadoPending.clear();
 }
 
-function buildMobileListadoRow(ev) {
+function buildMobileListadoRow(ev, date) {
   const row = document.createElement('div');
   row.className = 'mobile-calendar-month-list-row';
   const bar = document.createElement('div');
@@ -2570,68 +2038,71 @@ function buildMobileListadoRow(ev) {
   title.textContent = ev.title;
   const time = document.createElement('div');
   time.className = 'mobile-calendar-month-list-time';
-  time.textContent = formatMobileEventTimeRange(ev);
+  time.textContent = formatMobileEventTimeRange(ev, date);
   row.append(bar, title, time);
   row.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
   return row;
 }
 
-async function loadAndRenderMobileDayListado() {
-  const range = mobileDayListadoRange;
-  if (!range) return;
-  const fromStr = toDateKey(range.from);
-  const toStr = toDateKey(range.to);
-  const events = await api(`/api/events?from=${fromStr}T00:00:00&to=${toStr}T23:59:59`);
-  // Obsoleto si mientras se esperaba la respuesta se cambio de sub-vista,
-  // se salio de la vista diaria, o el rango volvio a cambiar (peticiones
-  // solapadas de dos expansiones seguidas).
-  if (getMobileDayViewMode() !== 'listado') return;
-  if (document.getElementById('mobile-calendar-day-view').classList.contains('hidden')) return;
-  if (mobileDayListadoRange !== range) return;
-
+// Trae TODOS los eventos con fecha y los agrupa por dia (solo los dias
+// que tienen algo). Se hace una vez por entrada en la vista; ampliar la
+// lista al deslizar ya no vuelve a pedir nada.
+async function loadMobileListadoDays() {
+  const events = await api('/api/events');
   const byDay = new Map();
   events.forEach((ev) => {
     if (!ev.startAt) return; // sin fecha no aparece aqui, igual que en el resto del calendario
-    const key = toDateKey(new Date(ev.startAt));
-    if (!byDay.has(key)) byDay.set(key, []);
-    byDay.get(key).push(ev);
+    // Un evento de varios dias se apunta en TODOS los que ocupa, no solo
+    // en el que empieza -- misma correccion que en el resto de vistas
+    // (ver eventOccursOnDay). El tope de 366 dias es una red de
+    // seguridad boba: si alguna vez se cuela un evento con un fin
+    // absurdo (un año 3000 por un dedazo), que no se coma la memoria
+    // generando un dia por cada jornada hasta entonces.
+    const inicio = new Date(ev.startAt);
+    const fin = ev.endAt ? new Date(ev.endAt) : inicio;
+    const dia = new Date(inicio);
+    dia.setHours(0, 0, 0, 0);
+    for (let n = 0; n <= 366 && dia <= fin; n++) {
+      const key = toDateKey(dia);
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key).push(ev);
+      dia.setDate(dia.getDate() + 1);
+    }
   });
+  mobileListadoDays = [...byDay.entries()]
+    .map(([key, evs]) => ({
+      key,
+      date: new Date(`${key}T00:00:00`),
+      events: evs.sort((a, b) => new Date(a.startAt) - new Date(b.startAt)),
+    }))
+    .sort((a, b) => a.date - b.date);
+}
 
+function renderMobileListadoWindow() {
   const content = document.getElementById('mobile-day-listado-content');
   content.innerHTML = '';
-  let cursor = new Date(range.from);
-  let anyRendered = false;
-  while (cursor <= range.to) {
-    const key = toDateKey(cursor);
-    const dayEvents = (byDay.get(key) || []).sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
-    // Un dia sin nada no pinta ningun bloque -- Koku no quiere ver
-    // "Nada este dia." repetido en cada fecha del rango. Los centinelas
-    // de scroll infinito no dependen de esto, siguen ahi igual.
-    if (dayEvents.length > 0) {
-      const block = document.createElement('div');
-      block.className = 'mobile-day-listado-block';
-      const heading = document.createElement('div');
-      heading.className = 'mobile-day-listado-block-heading';
-      heading.textContent = formatMobileListadoBlockHeading(cursor);
-      block.appendChild(heading);
-      dayEvents.forEach((ev) => block.appendChild(buildMobileListadoRow(ev)));
-      content.appendChild(block);
-      anyRendered = true;
-    }
-    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
-  }
-  if (!anyRendered) {
-    // Si TODO el rango cargado esta vacio, un unico aviso (no uno por
-    // dia) para que la vista no se quede en blanco sin explicacion.
+  if (!mobileListadoDays || mobileListadoDays.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'empty-hint';
-    empty.textContent = 'No hay nada en estos días.';
+    empty.textContent = 'Todavía no hay ningún evento ni tarea con fecha.';
     content.appendChild(empty);
+    return;
   }
+  const { start, end } = mobileListadoWindow;
+  mobileListadoDays.slice(start, end).forEach((day) => {
+    const block = document.createElement('div');
+    block.className = 'mobile-day-listado-block';
+    const heading = document.createElement('div');
+    heading.className = 'mobile-day-listado-block-heading';
+    heading.textContent = formatMobileListadoBlockHeading(day.date);
+    block.appendChild(heading);
+    day.events.forEach((ev) => block.appendChild(buildMobileListadoRow(ev, day.date)));
+    content.appendChild(block);
+  });
 }
 
 async function expandMobileDayListado(direction) {
-  if (!mobileDayListadoRange) return;
+  if (!mobileListadoDays || !mobileListadoWindow) return;
   if (mobileDayListadoBusy) { mobileDayListadoPending.add(direction); return; }
   mobileDayListadoBusy = true;
   try {
@@ -2641,26 +2112,25 @@ async function expandMobileDayListado(direction) {
     // nunca se pierde un aviso del observer por haber llegado a la vez
     // que otro ya en curso.
     while (true) {
-      const totalSpanDays = Math.round((mobileDayListadoRange.to - mobileDayListadoRange.from) / 86400000);
-      if (totalSpanDays >= MOBILE_DAY_LISTADO_MAX_SPAN_DAYS) { mobileDayListadoPending.clear(); break; }
-      // El scroll real ocurre en la PAGINA, no dentro de
-      // #mobile-day-listado-view (ver comentario de
-      // scrollMobileHoursToTime() sobre por que ".app" nunca llega a
-      // acotar la altura de sus hijos en movil) -- se mide con
-      // document.documentElement/window en vez del propio contenedor.
-      const prevDocHeight = document.documentElement.scrollHeight;
-      const prevScrollY = window.scrollY;
-      if (direction === 'back') {
-        mobileDayListadoRange.from = new Date(mobileDayListadoRange.from.getFullYear(), mobileDayListadoRange.from.getMonth(), mobileDayListadoRange.from.getDate() - MOBILE_DAY_LISTADO_STEP_DAYS);
-      } else {
-        mobileDayListadoRange.to = new Date(mobileDayListadoRange.to.getFullYear(), mobileDayListadoRange.to.getMonth(), mobileDayListadoRange.to.getDate() + MOBILE_DAY_LISTADO_STEP_DAYS);
-      }
-      await loadAndRenderMobileDayListado();
-      if (direction === 'back') {
-        // Compensa el scroll para que anteponer dias arriba no de un
-        // salto visual (el contenido nuevo empuja hacia abajo lo que ya
-        // se veia).
-        window.scrollTo(0, prevScrollY + (document.documentElement.scrollHeight - prevDocHeight));
+      const { start, end } = mobileListadoWindow;
+      const yaTodo = direction === 'back' ? start === 0 : end >= mobileListadoDays.length;
+      if (!yaTodo) {
+        // El scroll ocurre DENTRO de #mobile-day-listado-view (la vista
+        // acota su propio alto, ver body.mobile-day-scroll-lock en
+        // styles.css) -- se mide sobre el propio contenedor, no sobre la
+        // pagina.
+        const listado = document.getElementById('mobile-day-listado-view');
+        const prevDocHeight = listado.scrollHeight;
+        const prevScrollY = listado.scrollTop;
+        if (direction === 'back') mobileListadoWindow.start = Math.max(0, start - MOBILE_LISTADO_CHUNK);
+        else mobileListadoWindow.end = Math.min(mobileListadoDays.length, end + MOBILE_LISTADO_CHUNK);
+        renderMobileListadoWindow();
+        if (direction === 'back') {
+          // Compensa el scroll para que anteponer dias arriba no de un
+          // salto visual (el contenido nuevo empuja hacia abajo lo que ya
+          // se veia).
+          listado.scrollTop = prevScrollY + (listado.scrollHeight - prevDocHeight);
+        }
       }
       if (mobileDayListadoPending.size === 0) break;
       direction = mobileDayListadoPending.values().next().value;
@@ -2675,29 +2145,42 @@ function setupMobileDayListadoObserver() {
   disconnectMobileDayListadoObserver();
   const topSentinel = document.getElementById('mobile-day-listado-top-sentinel');
   const bottomSentinel = document.getElementById('mobile-day-listado-bottom-sentinel');
-  // root:null (en vez del div) -- observa contra el VIEWPORT real del
-  // navegador, que es lo que de verdad se desplaza en movil (ver el
-  // mismo comentario de scrollMobileHoursToTime()).
+  // root = el propio contenedor que se desplaza (ver
+  // body.mobile-day-scroll-lock en styles.css): desde que la vista
+  // diaria acota su alto, es el quien desborda, no la pagina.
   mobileDayListadoObserver = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (!entry.isIntersecting) return;
       if (entry.target === topSentinel) expandMobileDayListado('back');
       else if (entry.target === bottomSentinel) expandMobileDayListado('forward');
     });
-  }, { root: null, threshold: 0 });
+  }, { root: document.getElementById('mobile-day-listado-view'), threshold: 0 });
   mobileDayListadoObserver.observe(topSentinel);
   mobileDayListadoObserver.observe(bottomSentinel);
 }
 
+// centerDate solo decide por DONDE empieza la lista (lo mas cerca de hoy
+// o del dia que estuvieras mirando); la lista en si lo contiene todo.
 async function renderMobileDayListado(centerDate) {
-  mobileDayListadoRange = {
-    from: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() - 3),
-    to: new Date(centerDate.getFullYear(), centerDate.getMonth(), centerDate.getDate() + 3),
+  await loadMobileListadoDays();
+  // Obsoleto si mientras se cargaba se cambio de sub-vista o se salio.
+  if (getMobileDayViewMode() !== 'listado') return;
+  if (document.getElementById('mobile-calendar-day-view').classList.contains('hidden')) return;
+
+  const refKey = toDateKey(centerDate || new Date());
+  let idx = mobileListadoDays.findIndex((d) => d.key >= refKey);
+  if (idx === -1) idx = Math.max(0, mobileListadoDays.length - 1); // todo es pasado: al final
+  mobileListadoWindow = {
+    start: Math.max(0, idx - 5),
+    end: Math.min(mobileListadoDays.length, idx + MOBILE_LISTADO_CHUNK),
   };
-  // El scroll real es el de la PAGINA (ver scrollMobileHoursToTime()),
-  // asi que "empezar arriba del todo" es scrollear la ventana, no el div.
-  window.scrollTo(0, 0);
-  await loadAndRenderMobileDayListado();
+  renderMobileListadoWindow();
+  // Deja el dia de referencia arriba del todo, en vez del primero de los
+  // 5 anteriores que se cargan de contexto.
+  const listado = document.getElementById('mobile-day-listado-view');
+  const bloques = document.querySelectorAll('#mobile-day-listado-content .mobile-day-listado-block');
+  const objetivo = bloques[idx - mobileListadoWindow.start];
+  listado.scrollTop = objetivo ? Math.max(0, objetivo.offsetTop - 8) : 0;
   // El primer observe() de IntersectionObserver avisa de inmediato con
   // el estado actual -- si la ventana inicial (±3 dias) no llega a
   // desbordar la pantalla real, esa primera notificacion ya se encarga
@@ -2710,6 +2193,13 @@ async function renderMobileDayActiveSubView({ scrollToNow = false, targetMinutes
   const mode = getMobileDayViewMode();
   document.getElementById('mobile-day-hours-view').classList.toggle('hidden', mode !== 'hours');
   document.getElementById('mobile-day-listado-view').classList.toggle('hidden', mode !== 'listado');
+  // En "Listado" no hay un dia concreto que mirar: es una tira continua
+  // de dias con scroll infinito hacia los dos lados, y cada bloque ya
+  // lleva su propia fecha. Asi que la tira de dias de la semana y el
+  // titulo del dia sobran ahi (pedido de Koku: "que sea solo una
+  // pantalla de scroll infinito"). En "Vista por horas" se quedan, que
+  // ahi si estas viendo UN dia.
+  document.getElementById('mobile-calendar-day-view').classList.toggle('is-listado', mode === 'listado');
   stopMobileCurrentTimeLineTimer();
   if (mode === 'hours') {
     disconnectMobileDayListadoObserver();
@@ -2882,11 +2372,19 @@ function enterMobileDayView(date, { targetMinutes } = {}) {
   document.getElementById('mobile-calendar-month-toolbar').classList.add('hidden');
   document.querySelector('.mobile-calendar-view').classList.add('hidden');
   document.getElementById('mobile-calendar-day-view').classList.remove('hidden');
+  // Marca para el CSS: mientras se ve el dia, la pagina deja de crecer
+  // con el contenido y el desplazamiento pasa a ser SOLO el de la
+  // rejilla de horas / la lista de eventos, no el de la pantalla
+  // entera (pedido de Koku: "lo unico que se deberia deslizar es la
+  // pantalla de horas o de eventos"). Ver .mobile-day-scroll-lock.
+  document.body.classList.add('mobile-day-scroll-lock');
   if (targetMinutes === null) {
     showMobileDay(date, { scrollToNow: false });
   } else {
     showMobileDay(date, { scrollToNow: true, targetMinutes });
   }
+  // Bajar de nivel (meterse en el dia): zoom de entrada.
+  playMobileZoomTransition(document.getElementById('mobile-calendar-day-view'), 'in');
 }
 
 function exitMobileDayView() {
@@ -2895,6 +2393,9 @@ function exitMobileDayView() {
   document.getElementById('mobile-calendar-day-view').classList.add('hidden');
   document.getElementById('mobile-calendar-month-toolbar').classList.remove('hidden');
   document.querySelector('.mobile-calendar-view').classList.remove('hidden');
+  document.body.classList.remove('mobile-day-scroll-lock');
+  // Subir de nivel (dia -> mes): zoom de salida sobre la vista que vuelve.
+  playMobileZoomTransition(document.querySelector('.mobile-calendar-view'), 'out');
 }
 
 document.getElementById('btn-mobile-day-back-label').addEventListener('click', exitMobileDayView);
@@ -2920,8 +2421,14 @@ function playMobileDaySwipeAnimation(direction) {
   playMobileSwipeTransition(document.getElementById('mobile-day-hours-view'), direction);
   playMobileSwipeTransition(document.getElementById('mobile-day-listado-view'), direction);
 }
+// Pellizco en la vista diaria = subir al mes.
+attachPinch(document.getElementById('mobile-calendar-day-view'), exitMobileDayView);
 attachSwipe(document.getElementById('mobile-calendar-day-view'), {
   preserveVerticalScroll: true,
+  // Solo cambia de dia si el dedo empieza por el CENTRO: desde los
+  // bordes, el mismo gesto cambia de pestaña de la barra de abajo
+  // (peticion de Koku -- ver "GESTOS DE NAVEGACION" al final).
+  centerOnly: true,
   onLeft: () => {
     const d = state.mobileCalendarDayDate;
     showMobileDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1), { scrollToNow: true });
@@ -2953,7 +2460,7 @@ const REMINDER_OPTIONS = [
   { value: '60', label: '1 hora antes' },
   { value: '1440', label: '1 dia antes' },
 ];
-const eventReminderField = createSelectField({ options: REMINDER_OPTIONS, initialValue: '' });
+const eventReminderField = createSelectField({ options: REMINDER_OPTIONS, initialValue: '0' });
 document.getElementById('event-reminder-field').appendChild(eventReminderField.element);
 
 const eventGroupField = createSelectField({ options: [{ value: '', label: 'Sin grupo' }], initialValue: '' });
@@ -2981,24 +2488,67 @@ function toTimeInputValue(date) {
 // menos de 3 digitos todavia no hay suficiente informacion para saber
 // si es valido (se sigue escribiendo la hora), asi que no se marca
 // error todavia.
-function parseTimeFieldDigits(digits) {
+// Interpreta los digitos que se van tecleando en un campo de hora. Los
+// dos ultimos son SIEMPRE los minutos y lo de delante la hora, asi que
+// "930" es 9:30 y "0930" tambien.
+//
+// pm/am: en reloj de 12 horas el campo solo acepta 1-12, y quien decide
+// si es de la mañana o de la tarde es el selector de al lado (peticion
+// de Koku: "que haya un selector de am y pm, asi mantenemos el bloque
+// con entrada de numeros unicamente"). El "value" que sale de aqui es
+// SIEMPRE de 24 horas -- el resto de la app trabaja solo con eso, el
+// formato de 12 vive unicamente en lo que se ve.
+function parseTimeFieldDigits(digits, { doce = false, pm = false } = {}) {
   if (digits.length === 0) return { formatted: '', complete: false, valid: false, value: null };
   const formatted = digits.length > 2 ? `${digits.slice(0, digits.length - 2)}:${digits.slice(-2)}` : digits;
   if (digits.length < 3) return { formatted, complete: false, valid: false, value: null };
   const h = Number(digits.slice(0, digits.length - 2));
   const mi = Number(digits.slice(-2));
-  const ok = h <= 23 && mi <= 59;
+  const ok = doce ? (h >= 1 && h <= 12 && mi <= 59) : (h <= 23 && mi <= 59);
+  if (!ok) return { formatted, complete: true, valid: false, value: null };
+  const h24 = doce ? hour12To24(h, pm) : h;
   return {
     formatted,
     complete: true,
-    valid: ok,
-    value: ok ? `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}` : null,
+    valid: true,
+    value: `${String(h24).padStart(2, '0')}:${String(mi).padStart(2, '0')}`,
   };
 }
 
+// Las dos conversiones entre el reloj de 24 y el de 12. Los unicos casos
+// que se escapan de "sumar o restar 12" son las 12 de la noche (0h se
+// escribe 12 AM) y las 12 del mediodia (12h se queda en 12 PM).
+function hour12To24(h12, pm) {
+  if (pm) return h12 === 12 ? 12 : h12 + 12;
+  return h12 === 12 ? 0 : h12;
+}
+
+function hour24To12(h24) {
+  const pm = h24 >= 12;
+  let h12 = h24 % 12;
+  if (h12 === 0) h12 = 12;
+  return { h12, pm };
+}
+
+// Campo de hora: se escribe con NUMEROS y nada mas (sin desplegables de
+// hora/minuto ni el selector nativo, que no sigue el tema -- ver la
+// regla de CLAUDE.md). Los dos ultimos digitos son los minutos, asi que
+// "930" ya es 9:30.
+//
+// Con el telefono en reloj de 12 horas aparece ademas un selector AM/PM
+// al lado (peticion de Koku: "si es 12h, que haya un selector de am y
+// pm, asi mantenemos el bloque con entrada de numeros unicamente"). El
+// campo pasa a aceptar 1-12 y de la mañana/tarde se encarga el selector.
+//
+// IMPORTANTE: hacia fuera este componente habla SIEMPRE en 24 horas
+// ("HH:MM"), tanto en getValue() como en setValue(). El reloj de 12 vive
+// solo en lo que se ve, asi que nada del resto de la app (guardar,
+// comparar, combineDateAndTime...) tuvo que cambiar.
 function createTimeField({ initialValue = '09:00' } = {}) {
-  let value = initialValue; // ultimo valor VALIDO conocido
+  let value = initialValue; // ultimo valor VALIDO conocido, en 24h
   let valid = true;
+  const doce = USES_12H_CLOCK;
+  let pm = false;
 
   const root = document.createElement('div');
   root.className = 'time-field';
@@ -3006,21 +2556,45 @@ function createTimeField({ initialValue = '09:00' } = {}) {
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'time-field-input';
-  input.placeholder = 'HH:MM';
+  input.placeholder = doce ? 'H:MM' : 'HH:MM';
   input.inputMode = 'numeric';
-  input.value = value;
 
-  // Autocompleta el ":" MIENTRAS SE ESCRIBE (no solo al perder el foco)
-  // y valida en tiempo real -- antes solo se normalizaba en "change"
-  // (al perder el foco), asi que si se guardaba con Ctrl+Intro con el
-  // foco todavia en este campo, form.requestSubmit() no dispara "change"
-  // por si solo y lo escrito se perdia en silencio, mandandose el valor
-  // VIEJO sin ningun aviso.
-  input.addEventListener('input', () => {
+  // El selector AM/PM: dos botones tipo interruptor. Solo existe en
+  // reloj de 12 -- en 24 horas no pinta nada y ni se crea.
+  const ampm = document.createElement('div');
+  ampm.className = 'time-field-ampm';
+  const btnAm = document.createElement('button');
+  const btnPm = document.createElement('button');
+  [btnAm, btnPm].forEach((b) => { b.type = 'button'; b.className = 'time-field-ampm-btn'; });
+  btnAm.textContent = 'AM';
+  btnPm.textContent = 'PM';
+
+  function pintarAmPm() {
+    btnAm.classList.toggle('is-active', !pm);
+    btnPm.classList.toggle('is-active', pm);
+    btnAm.setAttribute('aria-pressed', String(!pm));
+    btnPm.setAttribute('aria-pressed', String(pm));
+  }
+
+  // Lo que se ENSEÑA en el input a partir del valor de 24h guardado.
+  function pintarInput() {
+    if (!doce) {
+      input.value = value;
+      return;
+    }
+    const [h24, mi] = value.split(':').map(Number);
+    const { h12, pm: esPm } = hour24To12(h24);
+    pm = esPm;
+    input.value = `${h12}:${String(mi).padStart(2, '0')}`;
+    pintarAmPm();
+  }
+
+  // Relee lo escrito y actualiza el valor guardado. Se llama al teclear
+  // y tambien al tocar AM/PM, porque cambiar de mitad del dia cambia la
+  // hora real sin que se haya tocado ni un numero.
+  function releer() {
     const digits = input.value.replace(/\D/g, '').slice(0, 4);
-    const result = parseTimeFieldDigits(digits);
-    input.value = result.formatted;
-    input.setSelectionRange(input.value.length, input.value.length);
+    const result = parseTimeFieldDigits(digits, { doce, pm });
     if (result.complete && result.valid) {
       value = result.value;
       valid = true;
@@ -3030,6 +2604,19 @@ function createTimeField({ initialValue = '09:00' } = {}) {
       // hasta que se complete/corrija, para no guardar algo a medias.
       valid = false;
     }
+    return result;
+  }
+
+  // Autocompleta el ":" MIENTRAS SE ESCRIBE (no solo al perder el foco)
+  // y valida en tiempo real -- antes solo se normalizaba en "change"
+  // (al perder el foco), asi que si se guardaba con Ctrl+Intro con el
+  // foco todavia en este campo, form.requestSubmit() no dispara "change"
+  // por si solo y lo escrito se perdia en silencio, mandandose el valor
+  // VIEJO sin ningun aviso.
+  input.addEventListener('input', () => {
+    const result = releer();
+    input.value = result.formatted;
+    input.setSelectionRange(input.value.length, input.value.length);
     // Solo se pinta en rojo cuando ya hay info de sobra para saber que
     // esta MAL (3-4 digitos fuera de rango) -- con 0-2 digitos se sigue
     // escribiendo, no es un error todavia.
@@ -3037,8 +2624,7 @@ function createTimeField({ initialValue = '09:00' } = {}) {
   });
 
   input.addEventListener('blur', () => {
-    const digits = input.value.replace(/\D/g, '').slice(0, 4);
-    const result = parseTimeFieldDigits(digits);
+    const result = releer();
     if (!result.complete || !result.valid) {
       // Al perder el foco con algo a medias o invalido, se marca en
       // rojo de verdad (mientras se escribe 1-2 digitos no se marca,
@@ -3049,19 +2635,26 @@ function createTimeField({ initialValue = '09:00' } = {}) {
   });
 
   root.appendChild(input);
+  if (doce) {
+    btnAm.addEventListener('click', () => { pm = false; pintarAmPm(); releer(); });
+    btnPm.addEventListener('click', () => { pm = true; pintarAmPm(); releer(); });
+    ampm.append(btnAm, btnPm);
+    root.appendChild(ampm);
+  }
+  pintarInput();
 
   return {
     element: root,
-    // Devuelve el ultimo valor VALIDO conocido, o null si el campo esta
-    // ahora mismo en un estado invalido/incompleto -- nunca un valor
-    // inventado o desactualizado.
+    // Devuelve el ultimo valor VALIDO conocido (en 24h), o null si el
+    // campo esta ahora mismo en un estado invalido/incompleto -- nunca
+    // un valor inventado o desactualizado.
     getValue: () => (valid ? value : null),
     isValid: () => valid,
     setValue: (v) => {
       value = v;
       valid = true;
-      input.value = v;
       input.classList.remove('is-invalid');
+      pintarInput();
     },
   };
 }
@@ -3080,14 +2673,19 @@ function combineDateAndTime(date, timeStr) {
 // :30 que de :00 de la hora siguiente), 6:50 -> 7:00, 6:00 se queda en
 // 6:00. Se usa para sugerir la hora de inicio de un evento nuevo en vez
 // de dejar "las 6:37" tal cual.
-function roundToNearestHalfHour(date) {
+// Hora en punto MAS CERCANA a la de ahora: a las 17:05 propone 17:00, y
+// a las 9:37 propone las 10:00 (con la hora de fin, que ya suma una
+// hora, quedan 17:00-18:00 y 10:00-11:00). Antes solo redondeaba hacia
+// abajo, asi que a las 9:37 proponia 9:00 -- por eso parecia que "unas
+// veces si y otras no": con los minutos por debajo de la media hora
+// coincidia con lo esperado, y por encima no.
+// Ojo: a partir de las 23:30 esto salta al dia siguiente a las 00:00, y
+// es lo correcto -- el campo de fecha se rellena desde esta misma fecha,
+// asi que la fecha propuesta pasa a ser manana sola.
+function roundToNearestHour(date) {
   const rounded = new Date(date);
-  rounded.setSeconds(0, 0);
-  const minutes = rounded.getMinutes();
-  const remainder = minutes % 30;
-  if (remainder !== 0) {
-    rounded.setMinutes(remainder < 15 ? minutes - remainder : minutes + (30 - remainder));
-  }
+  if (rounded.getMinutes() >= 30) rounded.setHours(rounded.getHours() + 1);
+  rounded.setMinutes(0, 0, 0);
   return rounded;
 }
 
@@ -3114,12 +2712,21 @@ function openEventModal(event, presetDate) {
   document.getElementById('event-title').value = event ? event.title : '';
   document.getElementById('event-all-day').checked = event ? event.allDay : false;
   refreshEventAllDayFields();
-  let defaultStart = new Date();
+  // Hora propuesta: SIEMPRE la hora en punto mas cercana a la de ahora,
+  // venga de donde venga el evento nuevo. La hora de fin se calcula mas
+  // abajo como inicio + 1h, asi que a las 7:59 sale 8:00-9:00.
+  //
+  // Antes, si el evento se creaba desde un DIA concreto (el "+" de la
+  // vista diaria), esta rama plantaba las 9:00 fijas -- daba igual la
+  // hora que fuera. Eso es lo que Koku vio a las 7:59: le proponia
+  // 9:00-10:00 en vez de 8:00-9:00. Ahora la fecha sale del dia que
+  // eligio y la HORA del reloj, que es lo que pidio ("que te marque la
+  // hora mas cercana de inicio y la final recomendada sea +1h de esa").
+  const ahora = roundToNearestHour(new Date());
+  let defaultStart = ahora;
   if (presetDate) {
     defaultStart = new Date(presetDate);
-    defaultStart.setHours(9, 0, 0, 0);
-  } else {
-    defaultStart = roundToNearestHalfHour(defaultStart);
+    defaultStart.setHours(ahora.getHours(), 0, 0, 0);
   }
   const startDate = event ? new Date(event.startAt) : defaultStart;
   eventStartDateField.setValue(startDate);
@@ -3146,9 +2753,15 @@ function openEventModal(event, presetDate) {
   // es el MISMO elemento reutilizado en cada apertura del modal — sin
   // esto, un evento nuevo heredaria el tamaño que dejaste en el anterior.
   descriptionEl.style.height = '';
-  eventReminderField.setValue(event && event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
-    ? String(event.reminderMinutesBefore)
-    : '');
+  // Uno NUEVO nace con "En el momento" puesto (pedido de Koku: crear un
+  // recordatorio y que no avise no tiene sentido como caso por defecto).
+  // Uno YA GUARDADO respeta lo que tenga, incluido "Sin recordatorio" si
+  // se quito a mano -- eso es una eleccion suya, no un valor por defecto.
+  eventReminderField.setValue(event
+    ? (event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
+      ? String(event.reminderMinutesBefore)
+      : '')
+    : '0');
   populateEventGroupSelect();
   eventGroupField.setValue(event && event.groupId ? String(event.groupId) : '');
   document.getElementById('btn-delete-event').classList.toggle('hidden', !event);
@@ -3168,7 +2781,6 @@ function closeEventModal() {
   document.getElementById('event-modal').classList.add('hidden');
 }
 
-document.getElementById('btn-new-event').addEventListener('click', () => openEventModal(null));
 document.getElementById('btn-cancel-event').addEventListener('click', closeEventModal);
 document.getElementById('btn-close-event').addEventListener('click', closeEventModal);
 
@@ -3251,49 +2863,23 @@ function populateEventGroupSelect() {
 // ---------------------------------------------------------------------
 // Recordatorios: panel + notificaciones del navegador
 // ---------------------------------------------------------------------
-function renderUpcomingRemindersList(upcoming) {
-  const now = new Date();
-  const list = document.getElementById('reminders-list');
-  list.innerHTML = '';
-
-  const future = upcoming.filter((r) => new Date(r.startAt) >= now).slice(0, 10);
-
-  if (future.length === 0) {
-    list.innerHTML = '<p class="empty-hint">No hay recordatorios proximos.</p>';
-  } else {
-    future.forEach((r) => {
-      const remindAt = new Date(r.remindAt);
-      const isDue = remindAt <= now;
-      const row = document.createElement('div');
-      row.className = 'reminder-item';
-      const iconPrefix = r.groupIcon ? `${escapeHtml(r.groupIcon)} ` : '';
-      row.innerHTML = `
-        <span><span class="color-dot" style="background-color: ${r.groupColor || DEFAULT_EVENT_COLOR}"></span> ${iconPrefix}${escapeHtml(r.title)}</span>
-        <span class="${isDue ? 'reminder-due' : ''}">${TIME_FORMATTER.format(new Date(r.startAt))}</span>
-      `;
-      list.appendChild(row);
-    });
-  }
-}
-
 async function loadReminders() {
   const upcoming = await api('/api/reminders/upcoming');
   const now = new Date();
   state.upcomingReminders = upcoming;
 
-  // El DOM de #reminders-list solo se toca si el panel esta mostrando
-  // "proximos" — si el usuario esta viendo un dia concreto, no lo pisamos.
-  if (state.remindersMode !== 'day') {
-    renderUpcomingRemindersList(upcoming);
-  }
+  // Cualquier cambio en eventos pasa por aqui, asi que es el sitio
+  // natural para reprogramar los avisos del sistema (los que suenan con
+  // la app cerrada) sin tener que acordarse en cada crear/editar/borrar.
+  syncScheduledReminders();
 
-  // Notificaciones del navegador: solo funcionan mientras esta pestana
-  // esta abierta. Es el aviso "en el movil"; el aviso de escritorio de
-  // verdad (aunque no tengas el navegador abierto) lo dispara el propio
-  // servidor (ver server/reminderChecker.js). Se activan desde la
-  // pestana "Este dispositivo" del panel de Configuracion (settings.js),
-  // no automaticamente: la mayoria de navegadores exigen que el permiso
-  // se pida como respuesta a un click, no solo al cargar la pagina.
+  // Aviso "en caliente", mientras la app esta ABIERTA. El aviso de
+  // verdad con la app cerrada lo programa el sistema operativo (ver
+  // syncScheduledReminders arriba) -- esto solo cubre el rato en que
+  // estas mirando la pantalla, donde un aviso programado no llegaria a
+  // verse. Se activan desde la pestana "Este dispositivo" del panel de
+  // Configuracion (settings.js), no automaticamente: los navegadores y
+  // el sistema exigen que el permiso se pida a raiz de un click.
   const notificationsEnabled = localStorage.getItem('notificationsEnabled') !== 'false';
   if (window.Notification && Notification.permission === 'granted' && notificationsEnabled) {
     upcoming.forEach((r) => {
@@ -3312,8 +2898,8 @@ async function loadReminders() {
 // bloque fijo del panel de recordatorios (#tasks-list en index.html)
 // ademas de en el calendario si tiene fecha (ver buildCalendarTaskChip,
 // llamada desde renderCalendarGrid mas arriba).
-// mutedTaskColor/getCompletedTasksDisplayMode viven en settings.js (se
-// carga despues de este archivo) — solo se usan aqui dentro de funciones
+// mutedTaskColor vive en settings.js (se carga despues de este
+// archivo) — solo se usa aqui dentro de funciones
 // que se EJECUTAN despues de que la pagina ha cargado del todo (nunca al
 // evaluar app.js en si), asi que para cuando se llaman de verdad ya
 // existen. Mismo patron que el resto de referencias cruzadas entre los
@@ -3360,9 +2946,6 @@ async function loadTasks() {
 }
 
 function buildTaskRow(task) {
-  const displayMode = typeof getCompletedTasksDisplayMode === 'function' ? getCompletedTasksDisplayMode() : 'strike';
-  if (task.done && displayMode === 'hide') return null;
-
   const row = document.createElement('div');
   row.className = 'task-item' + (task.done ? ' done' : '');
 
@@ -3410,9 +2993,8 @@ function renderTasksList() {
     return;
   }
 
-  // Pendientes primero (por fecha, las sin fecha al final), hechas
-  // despues (si se muestran, ver getCompletedTasksDisplayMode en
-  // settings.js — ajuste de Configuracion > Este dispositivo).
+  // Pendientes primero (por fecha, las sin fecha al final) y las hechas
+  // despues, tachadas.
   const byDate = (a, b) => {
     if (!a.startAt && !b.startAt) return 0;
     if (!a.startAt) return 1;
@@ -3422,18 +3004,7 @@ function renderTasksList() {
   const pending = state.tasks.filter((t) => !t.done).sort(byDate);
   const done = state.tasks.filter((t) => t.done).sort(byDate);
 
-  let rendered = 0;
-  [...pending, ...done].forEach((task) => {
-    const row = buildTaskRow(task);
-    if (row) {
-      container.appendChild(row);
-      rendered++;
-    }
-  });
-
-  if (rendered === 0) {
-    container.innerHTML = '<p class="empty-hint">No tienes tareas.</p>';
-  }
+  [...pending, ...done].forEach((task) => container.appendChild(buildTaskRow(task)));
 }
 
 async function toggleTaskDone(task) {
@@ -3441,8 +3012,7 @@ async function toggleTaskDone(task) {
   const idx = state.tasks.findIndex((t) => t.id === task.id);
   if (idx !== -1) state.tasks[idx] = updated;
   renderTasksList();
-  loadMonth(); // refleja el cambio en el calendario/agenda si la tarea tiene fecha
-  if (state.remindersMode === 'day') renderRemindersPanel();
+  loadMonth(); // refleja el cambio en el calendario si la tarea tiene fecha
 }
 
 function populateTaskGroupSelect() {
@@ -3476,7 +3046,6 @@ function closeTaskModal() {
   document.getElementById('task-modal').classList.add('hidden');
 }
 
-document.getElementById('btn-new-task').addEventListener('click', () => openTaskModal(null));
 document.getElementById('btn-cancel-task').addEventListener('click', closeTaskModal);
 document.getElementById('btn-close-task').addEventListener('click', closeTaskModal);
 
@@ -3569,10 +3138,10 @@ function buildNoteFolderPathLabel(folderId) {
 }
 
 // "mode" (Fase 4, solo tiene efecto viniendo de la vista movil -- ver
-// renderNotesViewInto): 'browse' (normal, como siempre funcionaba
-// desktop), 'select' (checkbox delante, la fila entera marca/desmarca
-// en vez de abrir/navegar) o 'editFolders' (solo afecta a
-// buildFolderRow: tap en la fila edita la carpeta en vez de entrar).
+// renderNotesViewInto): 'browse' (normal) o 'select' (checkbox delante,
+// la fila entera marca/desmarca en vez de abrir/navegar). Editar una
+// carpeta ya no es un modo aparte: vive en las acciones de deslizar/
+// mantener pulsado, junto a Mover y Eliminar.
 function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
   const row = document.createElement('div');
   row.className = 'note-item' + (note.hidden ? ' is-hidden' : '');
@@ -3620,11 +3189,30 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
   contentWrap.appendChild(content);
   row.appendChild(contentWrap);
 
+  // Abrir en SOLO LECTURA: el modo se elige aqui, al entrar, no dentro
+  // de la nota (pedido de Koku -- clic normal en la fila = editar, este
+  // boton = leer sin poder tocar nada; para cambiar de modo se sale al
+  // listado y se vuelve a entrar por el otro camino).
+  if (mode === 'browse' && !note.hidden) {
+    const readBtn = document.createElement('button');
+    readBtn.type = 'button';
+    readBtn.className = 'note-item-read-btn';
+    readBtn.setAttribute('aria-label', `Abrir "${note.title}" en solo lectura`);
+    readBtn.title = 'Abrir en solo lectura';
+    readBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg>';
+    readBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openNoteInEditor(note, { readMode: true });
+    });
+    row.appendChild(readBtn);
+  }
+
   row.appendChild(buildFavoriteStarBtn(note.favorite, (e) => {
     e.stopPropagation();
     toggleNoteFavorite(note);
   }));
 
+  attachNoteItemGestures(row, itemKey);
   row.addEventListener('click', () => {
     if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
     // Una nota oculta no se abre con un simple clic en la fila — solo el
@@ -3633,7 +3221,7 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
     if (note.hidden) return;
     openNoteInEditor(note);
   });
-  return row;
+  return mode === 'browse' ? wrapNoteRowWithSwipe(row, itemKey) : row;
 }
 
 // Carpeta con icono de ojo (Fase 3, navegacion tipo explorador de
@@ -3644,6 +3232,8 @@ function buildNoteRow(note, { showPath = false, mode = 'browse' } = {}) {
 function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
   const row = document.createElement('div');
   row.className = 'note-item note-folder-row';
+  // Marca de "aqui se puede soltar" para arrastrar y soltar.
+  row.dataset.folderId = String(folder.id);
 
   const itemKey = mobileNotesItemKey('folder', folder.id);
   if (mode === 'select') {
@@ -3680,30 +3270,19 @@ function buildFolderRow(folder, { showPath = false, mode = 'browse' } = {}) {
   }
   row.appendChild(contentWrap);
 
-  const editBtn = document.createElement('button');
-  editBtn.type = 'button';
-  editBtn.className = 'note-folder-chip-edit';
-  editBtn.textContent = '✎';
-  editBtn.setAttribute('aria-label', `Editar carpeta ${folder.name}`);
-  editBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    openNoteFolderModal(folder);
-  });
-  row.appendChild(editBtn);
-
   row.appendChild(buildFavoriteStarBtn(folder.favorite, (e) => {
     e.stopPropagation();
     toggleFolderFavorite(folder);
   }));
 
+  attachNoteItemGestures(row, itemKey);
   row.addEventListener('click', () => {
     if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
-    if (mode === 'editFolders') { openNoteFolderModal(folder); return; }
     state.currentNoteFolderId = folder.id;
     clearNoteSearch();
     renderNotesView();
   });
-  return row;
+  return mode === 'browse' ? wrapNoteRowWithSwipe(row, itemKey) : row;
 }
 
 // Boton de estrella compartido por filas de nota y de carpeta, y por el
@@ -3816,7 +3395,6 @@ function appendFavoriteSortedGroup(container, items, buildRowFn, { compareFn } =
 // del todo o no estara en el DOM segun la version de index.html que se
 // esté usando, de ahi el "if (!container) return" dentro de cada uno).
 const NOTES_VIEW_TARGETS = {
-  desktop: { containerId: 'notes-list', backBtnId: 'btn-note-folder-back' },
   mobile: { containerId: 'mobile-notes-list', backBtnId: 'btn-mobile-notes-back' },
 };
 
@@ -3829,6 +3407,9 @@ function renderNotesViewInto(target) {
   const cfg = NOTES_VIEW_TARGETS[target];
   const container = cfg && document.getElementById(cfg.containerId);
   if (!container) return;
+  // Al repintar, la fila que estuviera deslizada desaparece del DOM: sin
+  // esto la referencia se quedaria apuntando a un nodo ya suelto.
+  openSwipedNoteRow = null;
   container.innerHTML = '';
 
   const query = (state.noteSearchQuery || '').trim().toLowerCase();
@@ -3837,13 +3418,9 @@ function renderNotesViewInto(target) {
   const backBtn = document.getElementById(cfg.backBtnId);
   if (backBtn) backBtn.classList.toggle('hidden', state.currentNoteFolderId === null || searchWholeApp);
 
-  // "mode" (Seleccionar/Mover/editFolders) se comparte entre las dos
-  // plataformas -- un unico mecanismo para mover notas, ver
-  // btn-note-folder-select (escritorio) y el menu de 3 puntos (movil),
-  // ambos llaman a setMobileNotesMode(). Orden/galeria SI siguen siendo
-  // ajustes GLOBALES por dispositivo, solo con efecto en movil (no
-  // tienen equivalente en escritorio, que sigue funcionando igual que
-  // siempre en eso).
+  // "mode" (Seleccionar/Mover) lo pone el menu de 3 puntos de la
+  // vista de Notas (setMobileNotesMode). Orden y vista galeria/listado son
+  // ajustes por dispositivo, guardados en localStorage.
   const mode = mobileNotesMode;
   const sortOpts = target === 'mobile' ? { compareFn: compareMobileNotesItems } : {};
   const useGallery = target === 'mobile' && getMobileNotesViewMode() === 'gallery';
@@ -3862,6 +3439,19 @@ function renderNotesViewInto(target) {
     if (grid.children.length > 0) container.appendChild(grid);
   }
 
+  // En galeria las CARPETAS tambien son tarjetas: mezclarlas con la fila
+  // de listado dejaba dos formatos distintos en la misma pantalla.
+  function appendFolderGroup(items, showPath) {
+    if (!useGallery) {
+      appendFavoriteSortedGroup(container, items, (f) => buildFolderRow(f, { showPath, mode }));
+      return;
+    }
+    const grid = document.createElement('div');
+    grid.className = 'mobile-notes-gallery-grid';
+    appendFavoriteSortedGroup(grid, items, (f) => buildFolderGalleryCard(f, { mode }));
+    if (grid.children.length > 0) container.appendChild(grid);
+  }
+
   // En modo Mover solo tiene sentido navegar entre CARPETAS (elegir el
   // destino) -- las notas no pueden contener nada, se ocultan del todo
   // para no confundir con "¿tambien puedo moverlo aqui dentro?".
@@ -3872,7 +3462,7 @@ function renderNotesViewInto(target) {
       container.innerHTML = '<p class="empty-hint">Nada coincide con esa búsqueda.</p>';
       return;
     }
-    appendFavoriteSortedGroup(container, matchFolders, (f) => buildFolderRow(f, { showPath: true, mode }));
+    appendFolderGroup(matchFolders, true);
     appendNoteGroup(matchNotes, true);
     return;
   }
@@ -3890,7 +3480,7 @@ function renderNotesViewInto(target) {
     return;
   }
 
-  appendFavoriteSortedGroup(container, subfolders, (f) => buildFolderRow(f, { mode }));
+  appendFolderGroup(subfolders, false);
   appendNoteGroup(notesHere, false);
 }
 
@@ -3940,7 +3530,7 @@ function extractNoteThumbnailSrc(note) {
 function extractNoteTextPreview(note) {
   if (!note.body) return '';
   const div = document.createElement('div');
-  div.innerHTML = note.bodyFormat === 'html' ? note.body : legacyNoteBodyToHtml(note.body);
+  div.innerHTML = prepareAssetHtmlForDom(note.bodyFormat === 'html' ? note.body : legacyNoteBodyToHtml(note.body));
   return (div.textContent || '').trim().slice(0, 140);
 }
 
@@ -3975,11 +3565,13 @@ function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
   media.className = 'mobile-note-gallery-media';
   if (thumbSrc) {
     const img = document.createElement('img');
-    img.src = thumbSrc;
+    setAssetImageSrc(img, thumbSrc);
     img.alt = '';
     media.appendChild(img);
   } else {
-    media.style.background = note.folderColor || 'var(--surface-2)';
+    // Fondo neutro SIEMPRE (el de la tarjeta): pintarlo del color de la
+    // carpeta hacia que la galeria cambiara de color entera segun donde
+    // estuvieras, y el avance de texto encima se leia fatal.
     const preview = document.createElement('span');
     preview.className = 'mobile-note-gallery-preview-text';
     preview.textContent = extractNoteTextPreview(note);
@@ -3992,6 +3584,22 @@ function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
   title.textContent = note.title || 'Nota sin título';
   card.appendChild(title);
 
+  // Abrir en solo lectura: mismo boton que la fila del listado, que aqui
+  // faltaba (la galeria solo dejaba abrir para editar).
+  if (mode === 'browse' && !note.hidden) {
+    const readBtn = document.createElement('button');
+    readBtn.type = 'button';
+    readBtn.className = 'mobile-note-gallery-read-btn';
+    readBtn.setAttribute('aria-label', `Abrir "${note.title}" en solo lectura`);
+    readBtn.title = 'Abrir en solo lectura';
+    readBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg>';
+    readBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openNoteInEditor(note, { readMode: true });
+    });
+    card.appendChild(readBtn);
+  }
+
   card.appendChild(buildFavoriteStarBtn(note.favorite, (e) => {
     e.stopPropagation();
     toggleNoteFavorite(note);
@@ -4002,7 +3610,383 @@ function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
     if (note.hidden) return;
     openNoteInEditor(note);
   });
+  if (mode === 'browse') attachNoteItemGestures(card, itemKey);
   return card;
+}
+
+// Carpeta como TARJETA de galeria: en vista galeria las carpetas se
+// veian con la fila de listado de siempre, y quedaba una mezcla rara de
+// dos formatos. Misma tarjeta que una nota, con el icono de carpeta
+// grande sobre su color en vez de miniatura.
+function buildFolderGalleryCard(folder, { mode = 'browse' } = {}) {
+  const card = document.createElement('div');
+  card.className = 'mobile-note-gallery-card is-folder';
+  card.dataset.folderId = String(folder.id);
+  const itemKey = mobileNotesItemKey('folder', folder.id);
+
+  if (mode === 'select') {
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'styled-checkbox mobile-note-gallery-checkbox';
+    checkbox.checked = mobileNotesSelectedKeys.has(itemKey);
+    checkbox.addEventListener('click', (e) => e.stopPropagation());
+    checkbox.addEventListener('change', () => toggleMobileNotesSelection(itemKey));
+    card.appendChild(checkbox);
+  }
+
+  // Carpeta de CONTORNO, no pintada del todo: rellena de su color se
+  // veia como un bloque plano ("me gustaba la carpeta sólo el icono, el
+  // borde, sin estar pintada del todo, le daba más clase"). El color de
+  // la carpeta sigue siendo el del trazo, asi que se distingue igual.
+  const media = document.createElement('div');
+  media.className = 'mobile-note-gallery-media';
+  media.innerHTML = '<svg class="mobile-note-gallery-folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+  media.querySelector('svg').style.color = folder.color || 'var(--accent)';
+  card.appendChild(media);
+
+  const title = document.createElement('span');
+  title.className = 'mobile-note-gallery-title';
+  title.textContent = folder.name;
+  card.appendChild(title);
+
+  card.appendChild(buildFavoriteStarBtn(folder.favorite, (e) => {
+    e.stopPropagation();
+    toggleFolderFavorite(folder);
+  }));
+
+  card.addEventListener('click', () => {
+    if (mode === 'select') { toggleMobileNotesSelection(itemKey); return; }
+    state.currentNoteFolderId = folder.id;
+    clearNoteSearch();
+    renderNotesView();
+  });
+  if (mode === 'browse') attachNoteItemGestures(card, itemKey);
+  return card;
+}
+
+// ---------------------------------------------------------------------
+// Acciones rapidas de una nota/carpeta sin pasar por "Seleccionar":
+// deslizar la fila hacia la izquierda en el listado, o mantener pulsada
+// la tarjeta en galeria. Las dos abren lo mismo: Mover y Eliminar, que
+// reutilizan el modo Seleccionar de siempre con ese unico elemento
+// marcado (una sola forma de mover/borrar por dentro, ver la regla de
+// simplicidad en CLAUDE.md).
+// ---------------------------------------------------------------------
+function startNoteItemMove(itemKey) {
+  mobileNotesSelectedKeys.clear();
+  mobileNotesSelectedKeys.add(itemKey);
+  setMobileNotesMode('move');
+}
+
+// Borrar UNO desde sus acciones va directo, con su aviso y ya esta: antes
+// metia la vista entera en modo Seleccionar (checkboxes y barra incluidos)
+// para borrar un solo elemento, que es justo lo que Koku no queria.
+async function startNoteItemDelete(itemKey) {
+  const { item } = resolveMobileNotesItem(itemKey) || {};
+  const nombre = item ? getNoteListItemName(item) : 'esto';
+  const conContenido = mobileNotesDeletionIncludesFolderWithContent([itemKey]);
+  const ok = await showAppConfirm(
+    conContenido
+      ? `¿Eliminar "${nombre}"? Lo que hay dentro subirá un nivel, salvo que marques la casilla.`
+      : `¿Eliminar "${nombre}"?`,
+    {
+      okText: 'Eliminar',
+      danger: true,
+      checkbox: conContenido ? { label: 'Eliminar también lo que hay dentro' } : null,
+    }
+  );
+  if (!ok) return;
+  await deleteNoteItems([itemKey], conContenido && lastAppConfirmCheckbox);
+  renderNotesView();
+}
+
+// Editar SOLO tiene sentido en una carpeta (nombre y color) -- una nota
+// se edita abriendola sin mas. Sustituye al modo "Editar carpetas" del
+// menu de 3 puntos, que hacia justo esto pero obligando a entrar y salir
+// de un modo entero para tocar una sola carpeta.
+function startNoteItemEdit(itemKey) {
+  const { kind, item } = resolveMobileNotesItem(itemKey) || {};
+  if (kind === 'folder' && item) openNoteFolderModal(item);
+}
+
+function isNoteItemFolder(itemKey) {
+  return itemKey.startsWith('folder:');
+}
+
+const NOTE_ACTION_EDIT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+
+const NOTE_ACTION_MOVE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m12 11 3 3-3 3"/><path d="M9 14h6"/></svg>';
+const NOTE_ACTION_DELETE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+
+const noteItemActionMenu = document.createElement('div');
+noteItemActionMenu.className = 'note-item-action-menu hidden';
+document.body.appendChild(noteItemActionMenu);
+
+function openNoteItemActionMenu(anchorEl, itemKey) {
+  noteItemActionMenu.innerHTML = '';
+  const { item } = resolveMobileNotesItem(itemKey) || {};
+  if (item) {
+    const titulo = document.createElement('p');
+    titulo.className = 'note-item-action-title';
+    titulo.textContent = getNoteListItemName(item);
+    noteItemActionMenu.appendChild(titulo);
+  }
+  const acciones = [['Mover', NOTE_ACTION_MOVE_ICON, '', () => startNoteItemMove(itemKey)]];
+  if (isNoteItemFolder(itemKey)) {
+    acciones.push(['Editar', NOTE_ACTION_EDIT_ICON, '', () => startNoteItemEdit(itemKey)]);
+  }
+  acciones.push(['Eliminar', NOTE_ACTION_DELETE_ICON, 'is-danger', () => startNoteItemDelete(itemKey)]);
+  acciones.forEach(([texto, icono, extra, fn]) => {
+    const opt = document.createElement('button');
+    opt.type = 'button';
+    opt.className = `note-item-action-btn ${extra}`.trim();
+    opt.innerHTML = `${icono}<span>${texto}</span>`;
+    opt.addEventListener('click', () => {
+      noteItemActionMenu.classList.add('hidden');
+      fn();
+    });
+    noteItemActionMenu.appendChild(opt);
+  });
+  noteItemActionMenu.classList.remove('hidden');
+  positionFixedPopover(anchorEl, noteItemActionMenu, { width: 210 });
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (noteItemActionMenu.classList.contains('hidden')) return;
+  if (e.target.closest && e.target.closest('.note-item-action-menu')) return;
+  noteItemActionMenu.classList.add('hidden');
+});
+
+const NOTE_LONG_PRESS_MS = 450;
+const NOTE_DRAG_THRESHOLD_PX = 12;
+
+// ---------------------------------------------------------------------
+// Arrastrar y soltar para mover notas/carpetas: mantener pulsado LEVANTA
+// el elemento (o todos los marcados, si estas en modo Seleccionar y este
+// es uno de ellos). Si lo sueltas encima de una carpeta, se mueve ahi
+// dentro; encima del boton "Volver", sube un nivel. Si lo sueltas sin
+// haberte movido, lo que sale es el menu de Mover/Eliminar.
+// ---------------------------------------------------------------------
+let noteDrag = null; // { keys, ghost, target, targetEl }
+
+function noteDragKeysFor(itemKey) {
+  // Con varios marcados, arrastrar uno de ellos los mueve todos.
+  if ((mobileNotesMode === 'select' || mobileNotesMode === 'move')
+    && mobileNotesSelectedKeys.has(itemKey)) return [...mobileNotesSelectedKeys];
+  return [itemKey];
+}
+
+// No se puede meter una carpeta dentro de si misma ni de una hija suya
+// (el servidor lo rechazaria; aqui se evita antes para no dar un error).
+function isNoteFolderInside(folderId, possibleAncestorId) {
+  let actual = state.noteFolders.find((f) => f.id === folderId);
+  while (actual) {
+    if (actual.id === possibleAncestorId) return true;
+    actual = state.noteFolders.find((f) => f.id === actual.parentId);
+  }
+  return false;
+}
+
+function noteDropTargetAt(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!el || !el.closest) return null;
+  const volver = el.closest('#btn-mobile-notes-back');
+  if (volver && !volver.classList.contains('hidden')) {
+    const actual = state.noteFolders.find((f) => f.id === state.currentNoteFolderId);
+    return { el: volver, folderId: actual ? actual.parentId : null };
+  }
+  const fila = el.closest('.note-folder-row, .mobile-note-gallery-card.is-folder');
+  if (!fila || !fila.dataset.folderId) return null;
+  const folderId = Number(fila.dataset.folderId);
+  // Ni sobre si misma ni sobre una carpeta que este dentro de la que
+  // arrastras.
+  const invalido = noteDrag && noteDrag.keys.some((k) => {
+    const { kind, id } = resolveMobileNotesItem(k);
+    return kind === 'folder' && (id === folderId || isNoteFolderInside(folderId, id));
+  });
+  if (invalido) return null;
+  return { el: fila, folderId };
+}
+
+function setNoteDropTarget(destino) {
+  if (noteDrag.targetEl && noteDrag.targetEl !== (destino && destino.el)) {
+    noteDrag.targetEl.classList.remove('is-drop-target');
+  }
+  noteDrag.target = destino;
+  noteDrag.targetEl = destino ? destino.el : null;
+  if (noteDrag.targetEl) noteDrag.targetEl.classList.add('is-drop-target');
+}
+
+function startNoteDrag(el, itemKey, e) {
+  const keys = noteDragKeysFor(itemKey);
+  const ghost = document.createElement('div');
+  ghost.className = 'note-drag-ghost';
+  const { item } = resolveMobileNotesItem(keys[0]) || {};
+  ghost.textContent = keys.length > 1
+    ? `${keys.length} elementos`
+    : (item ? getNoteListItemName(item) : 'Moviendo…');
+  document.body.appendChild(ghost);
+  noteDrag = { keys, ghost, target: null, targetEl: null };
+  document.body.classList.add('note-dragging');
+  moveNoteDragGhost(e);
+}
+
+function moveNoteDragGhost(e) {
+  noteDrag.ghost.style.left = `${e.clientX}px`;
+  noteDrag.ghost.style.top = `${e.clientY}px`;
+}
+
+async function finishNoteDrag() {
+  if (!noteDrag) return;
+  const { keys, target } = noteDrag;
+  if (noteDrag.targetEl) noteDrag.targetEl.classList.remove('is-drop-target');
+  noteDrag.ghost.remove();
+  document.body.classList.remove('note-dragging');
+  noteDrag = null;
+  if (!target) return;
+  const ok = await moveNoteItemsTo(keys, target.folderId);
+  if (ok && mobileNotesMode !== 'browse') setMobileNotesMode('browse');
+  else if (ok) renderNotesView();
+}
+
+function attachNoteItemGestures(el, itemKey) {
+  let temporizador = null;
+  let inicio = null;
+  let levantado = false;
+  const cancelar = () => { clearTimeout(temporizador); temporizador = null; inicio = null; levantado = false; };
+
+  el.addEventListener('pointerdown', (e) => {
+    inicio = { x: e.clientX, y: e.clientY, id: e.pointerId, evento: e };
+    temporizador = setTimeout(() => {
+      temporizador = null;
+      levantado = true;
+      el.dataset.longPressed = '1';
+      if (el.setPointerCapture) el.setPointerCapture(inicio.id);
+    }, NOTE_LONG_PRESS_MS);
+  });
+
+  el.addEventListener('pointermove', (e) => {
+    if (!inicio) return;
+    const lejos = Math.abs(e.clientX - inicio.x) > NOTE_DRAG_THRESHOLD_PX
+      || Math.abs(e.clientY - inicio.y) > NOTE_DRAG_THRESHOLD_PX;
+    // Antes de que se cumpla la pulsacion larga, moverse es scroll o
+    // deslizar la fila: se descarta el gesto.
+    if (!levantado) { if (lejos) cancelar(); return; }
+    e.preventDefault();
+    if (!noteDrag) { if (!lejos) return; startNoteDrag(el, itemKey, e); }
+    moveNoteDragGhost(e);
+    setNoteDropTarget(noteDropTargetAt(e.clientX, e.clientY));
+  });
+
+  el.addEventListener('pointerup', (e) => {
+    const eraLevantado = levantado;
+    clearTimeout(temporizador); temporizador = null; inicio = null; levantado = false;
+    if (noteDrag) { finishNoteDrag(); return; }
+    // Pulsacion larga sin moverse: el menu de acciones.
+    if (eraLevantado) openNoteItemActionMenu(el, itemKey);
+  });
+  el.addEventListener('pointercancel', () => { cancelar(); if (noteDrag) finishNoteDrag(); });
+
+  // Tras una pulsacion larga NO se abre la nota: el click llega despues
+  // del pointerup, asi que se marca y se descarta ese unico click.
+  el.addEventListener('click', (e) => {
+    if (el.dataset.longPressed) {
+      delete el.dataset.longPressed;
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
+}
+
+// Solo una fila abierta a la vez -- abrir otra cierra la anterior.
+let openSwipedNoteRow = null;
+
+function closeSwipedNoteRow() {
+  if (!openSwipedNoteRow) return;
+  openSwipedNoteRow.classList.remove('is-open');
+  openSwipedNoteRow = null;
+}
+
+// Pinchar en cualquier otro sitio cierra la fila deslizada -- antes solo
+// se cerraba deslizandola de vuelta o pulsando una de sus acciones, asi
+// que se quedaba abierta "a medias" mientras tocabas otra cosa.
+document.addEventListener('pointerdown', (e) => {
+  if (!openSwipedNoteRow) return;
+  if (e.target.closest && e.target.closest('.note-swipe-wrap') === openSwipedNoteRow) return;
+  closeSwipedNoteRow();
+}, true);
+
+// Envuelve la fila para poder deslizarla: los dos botones viven DEBAJO,
+// y la fila se desplaza hacia la izquierda para descubrirlos.
+function wrapNoteRowWithSwipe(row, itemKey) {
+  const wrap = document.createElement('div');
+  wrap.className = 'note-swipe-wrap';
+
+  const acciones = document.createElement('div');
+  acciones.className = 'note-swipe-actions';
+  const lista = [['Mover', 'secondary-btn', () => startNoteItemMove(itemKey)]];
+  // "Editar" solo en carpetas (nombre y color) -- una nota se edita
+  // abriendola sin mas.
+  if (isNoteItemFolder(itemKey)) lista.push(['Editar', 'secondary-btn', () => startNoteItemEdit(itemKey)]);
+  lista.push(['Eliminar', 'danger-btn', () => startNoteItemDelete(itemKey)]);
+  lista.forEach(([texto, clase, fn]) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = clase;
+    btn.textContent = texto;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeSwipedNoteRow();
+      fn();
+    });
+    acciones.appendChild(btn);
+  });
+  wrap.appendChild(acciones);
+  wrap.appendChild(row);
+
+  let inicio = null;
+  let horizontal = false;
+  row.addEventListener('pointerdown', (e) => {
+    inicio = { x: e.clientX, y: e.clientY };
+    horizontal = false;
+  });
+  row.addEventListener('pointermove', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    const dy = e.clientY - inicio.y;
+    // En cuanto se ve que el gesto es horizontal, deja de ser scroll de
+    // la lista y pasa a ser "deslizar la fila".
+    if (!horizontal && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) horizontal = true;
+  });
+  row.addEventListener('pointerup', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    inicio = null;
+    // Si el gesto acabo siendo una pulsacion larga (menu o arrastre), no
+    // es un deslizamiento.
+    if (row.dataset.longPressed || noteDrag) return;
+    if (!horizontal) return;
+    if (dx < -40) {
+      if (openSwipedNoteRow !== wrap) closeSwipedNoteRow();
+      // Cuanto se desplaza la fila depende de cuantos botones haya (una
+      // carpeta tiene uno mas, "Editar"): se mide el ancho real en vez
+      // de dejar un valor fijo que se quedaria corto o largo.
+      wrap.style.setProperty('--swipe-actions-width', `${acciones.offsetWidth}px`);
+      wrap.classList.add('is-open');
+      openSwipedNoteRow = wrap;
+    } else if (dx > 20) {
+      closeSwipedNoteRow();
+    }
+    // Un deslizamiento no debe abrir la nota: se descarta ese click.
+    row.dataset.swiped = '1';
+  });
+  row.addEventListener('click', (e) => {
+    if (row.dataset.swiped) {
+      delete row.dataset.swiped;
+      if (wrap.classList.contains('is-open')) { e.stopPropagation(); e.preventDefault(); }
+    }
+  }, true);
+  return wrap;
 }
 
 // Estado compartido (state.noteSearchQuery/...) entre las dos vistas
@@ -4010,38 +3994,12 @@ function buildNoteGalleryCard(note, { mode = 'browse' } = {}) {
 // busqueda que exista en el DOM, no solo el de escritorio.
 function clearNoteSearch() {
   state.noteSearchQuery = '';
-  ['note-search-input', 'mobile-notes-search-input'].forEach((id) => {
+  ['mobile-notes-search-input'].forEach((id) => {
     const input = document.getElementById(id);
     if (input) input.value = '';
   });
 }
 
-document.getElementById('note-search-input').addEventListener('input', (e) => {
-  state.noteSearchQuery = e.target.value;
-  renderNotesView();
-});
-
-document.getElementById('note-search-scope-btn').addEventListener('click', () => {
-  state.noteSearchCurrentFolderOnly = !state.noteSearchCurrentFolderOnly;
-  document.getElementById('note-search-scope-btn').classList.toggle('is-active', state.noteSearchCurrentFolderOnly);
-  document.getElementById('note-search-scope-btn').setAttribute('aria-pressed', state.noteSearchCurrentFolderOnly ? 'true' : 'false');
-  renderNotesView();
-});
-
-document.getElementById('btn-note-folder-back').addEventListener('click', () => {
-  const current = state.noteFolders.find((f) => f.id === state.currentNoteFolderId);
-  state.currentNoteFolderId = current ? current.parentId : null;
-  clearNoteSearch();
-  renderNotesView();
-});
-
-// "Seleccionar" de escritorio -- mismo mecanismo Seleccionar/Mover que
-// ya existia solo en movil (mobileNotesMode compartido, ver
-// setMobileNotesMode mas abajo).
-document.getElementById('btn-note-folder-select').addEventListener('click', () => {
-  const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
-  setMobileNotesMode(selecting ? 'browse' : 'select');
-});
 
 // Equivalentes de la vista movil (#mobile-notes-view, Fase 4) -- misma
 // logica exacta que los de escritorio de arriba, apuntando a los ids
@@ -4072,7 +4030,7 @@ if (btnMobileNotesBack) {
 // (galeria-listado) / Ordenar. "mode" es el mismo concepto ya usado en
 // buildNoteRow/buildFolderRow/buildNoteGalleryCard mas arriba.
 // ---------------------------------------------------------------------
-let mobileNotesMode = 'browse'; // 'browse' | 'editFolders' | 'select' | 'move'
+let mobileNotesMode = 'browse'; // 'browse' | 'select' | 'move'
 const mobileNotesSelectedKeys = new Set(); // 'folder:<id>' / 'note:<id>'
 
 function mobileNotesItemKey(kind, id) {
@@ -4090,6 +4048,7 @@ function setMobileNotesMode(mode) {
   mobileNotesMode = mode;
   if (mode !== 'select' && mode !== 'move') mobileNotesSelectedKeys.clear();
   refreshMobileNotesActionBar();
+  refreshMobileNotesFab();
   renderNotesView();
 }
 
@@ -4100,7 +4059,6 @@ function setMobileNotesMode(mode) {
 // modo activo.
 const NOTES_ACTION_BAR_TARGETS = {
   mobile: { barId: 'mobile-notes-action-bar', leftId: 'btn-mobile-notes-action-left', rightId: 'btn-mobile-notes-action-right' },
-  desktop: { barId: 'note-folder-action-bar', leftId: 'btn-note-folder-action-left', rightId: 'btn-note-folder-action-right' },
 };
 
 // Sin seleccion propia (Eliminar/Mover deshabilitados con nada marcado),
@@ -4115,21 +4073,28 @@ function refreshMobileNotesActionBar() {
     const rightBtn = document.getElementById(rightId);
 
     if (mobileNotesMode === 'select') {
+      // Seleccionar sirve para BORRAR varios de una vez, y ya esta:
+      // mover se hace arrastrando (pedido explicito de Koku), asi que
+      // aqui el par es Eliminar / Cancelar.
       bar.classList.remove('hidden');
       leftBtn.textContent = 'Eliminar';
       leftBtn.className = 'danger-btn';
       leftBtn.disabled = mobileNotesSelectedKeys.size === 0;
       leftBtn.onclick = openMobileNotesDeleteModal;
-      rightBtn.textContent = 'Mover';
+      rightBtn.textContent = 'Cancelar';
       rightBtn.className = 'secondary-btn';
-      rightBtn.disabled = mobileNotesSelectedKeys.size === 0;
-      rightBtn.onclick = () => setMobileNotesMode('move');
+      rightBtn.disabled = false;
+      rightBtn.onclick = () => setMobileNotesMode('browse');
     } else if (mobileNotesMode === 'move') {
+      // Modo Mover: solo se llega aqui desde la accion "Mover" de una
+      // fila (deslizar / mantener pulsado). Cancelar vuelve a la
+      // navegacion normal, NO al modo Seleccionar -- volver ahi dejaba
+      // la vista con checkboxes puestos sin haberlos pedido.
       bar.classList.remove('hidden');
       leftBtn.textContent = 'Cancelar';
       leftBtn.className = 'secondary-btn';
       leftBtn.disabled = false;
-      leftBtn.onclick = () => setMobileNotesMode('select');
+      leftBtn.onclick = () => setMobileNotesMode('browse');
       rightBtn.textContent = 'Mover aquí';
       rightBtn.className = 'primary-btn';
       rightBtn.disabled = false;
@@ -4139,16 +4104,6 @@ function refreshMobileNotesActionBar() {
     }
   });
 
-  // Boton "Seleccionar" de escritorio: refleja si estamos en
-  // seleccion/mover (equivalente al item de menu "Seleccionar"/"Listo"
-  // que ya existe en movil).
-  const selectBtn = document.getElementById('btn-note-folder-select');
-  if (selectBtn) {
-    const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
-    selectBtn.textContent = selecting ? 'Listo' : 'Seleccionar';
-    selectBtn.classList.toggle('is-active', selecting);
-    selectBtn.setAttribute('aria-pressed', selecting ? 'true' : 'false');
-  }
 }
 
 function resolveMobileNotesItem(key) {
@@ -4209,28 +4164,40 @@ function closeMobileNotesDeleteModal() {
 document.getElementById('btn-close-mobile-notes-delete').addEventListener('click', closeMobileNotesDeleteModal);
 document.getElementById('btn-mobile-notes-delete-cancel').addEventListener('click', closeMobileNotesDeleteModal);
 
+// El borrado en si. Con "conContenido" a true, una carpeta arrastra todo
+// lo que tenga dentro (ver ?deleteContents=1 en routes-local/noteFolders.js);
+// sin el, lo de dentro sube UN nivel y no se pierde nada.
+async function deleteNoteItems(keys, conContenido) {
+  for (const key of keys) {
+    const { kind, id } = resolveMobileNotesItem(key);
+    if (kind === 'note') await api(`/api/notes/${id}`, { method: 'DELETE' });
+    else await api(`/api/note-folders/${id}${conContenido ? '?deleteContents=1' : ''}`, { method: 'DELETE' });
+  }
+  await Promise.all([loadNotes(), loadNoteFolders()]);
+}
+
+// Pregunta lo que haya que preguntar y borra. Devuelve false si se
+// cancela. Lo usa el modal de borrar varios.
+async function runNoteItemsDeletion(keys) {
+  const conContenido = mobileNotesDeletionIncludesFolderWithContent(keys);
+  if (conContenido) {
+    const proceed = await showAppConfirm(
+      'Lo que haya dentro de las carpetas que borres subirá un nivel, salvo que marques la casilla.',
+      { okText: 'Eliminar', danger: true, checkbox: { label: 'Eliminar también lo que hay dentro' } }
+    );
+    if (!proceed) return false;
+    await deleteNoteItems(keys, lastAppConfirmCheckbox);
+    return true;
+  }
+  await deleteNoteItems(keys, false);
+  return true;
+}
+
 document.getElementById('btn-mobile-notes-delete-confirm').addEventListener('click', async () => {
   const finalKeys = [...mobileNotesSelectedKeys].filter((k) => !mobileNotesDeleteExcluded.has(k));
   if (finalKeys.length === 0) { closeMobileNotesDeleteModal(); return; }
-
-  if (
-    mobileNotesDeletionIncludesFolderWithContent(finalKeys)
-    && localStorage.getItem('notesMobileHideFolderDeleteWarning') !== '1'
-  ) {
-    const proceed = await showAppConfirm(
-      'Las notas y subcarpetas que contenga cualquier carpeta seleccionada subirán de nivel, no se borrarán.',
-      { checkbox: { label: 'No volver a mostrar este aviso', storageKey: 'notesMobileHideFolderDeleteWarning' } }
-    );
-    if (!proceed) return;
-  }
-
+  if (!(await runNoteItemsDeletion(finalKeys))) return;
   closeMobileNotesDeleteModal();
-  for (const key of finalKeys) {
-    const { kind, id } = resolveMobileNotesItem(key);
-    if (kind === 'note') await api(`/api/notes/${id}`, { method: 'DELETE' });
-    else await api(`/api/note-folders/${id}`, { method: 'DELETE' });
-  }
-  await Promise.all([loadNotes(), loadNoteFolders()]);
   setMobileNotesMode('browse');
 });
 
@@ -4238,9 +4205,9 @@ document.getElementById('btn-mobile-notes-delete-confirm').addEventListener('cli
 // en la carpeta destino como si estuviera navegando normal, ver el
 // filtrado de "mode === 'move'" en renderNotesViewInto) -- "Mover aqui"
 // aplica state.currentNoteFolderId como destino de todo lo seleccionado.
-async function confirmMobileNotesMove() {
-  const destinationFolderId = state.currentNoteFolderId;
-  const keys = [...mobileNotesSelectedKeys];
+// Mueve una lista de elementos a una carpeta (o a la raiz, con null).
+// Lo comparten "Mover aquí" del modo Mover y el arrastrar y soltar.
+async function moveNoteItemsTo(keys, destinationFolderId) {
   try {
     for (const key of keys) {
       const { kind, id } = resolveMobileNotesItem(key);
@@ -4252,10 +4219,15 @@ async function confirmMobileNotesMove() {
     }
   } catch (err) {
     await showAppAlert(err.message || 'No se pudo mover.');
-    return;
+    return false;
   }
   await Promise.all([loadNotes(), loadNoteFolders()]);
-  setMobileNotesMode('browse');
+  return true;
+}
+
+async function confirmMobileNotesMove() {
+  const ok = await moveNoteItemsTo([...mobileNotesSelectedKeys], state.currentNoteFolderId);
+  if (ok) setMobileNotesMode('browse');
 }
 
 // ---------------------------------------------------------------------
@@ -4277,12 +4249,6 @@ function buildMobileNotesMenuPopover() {
     btn.addEventListener('click', onClick);
     popover.appendChild(btn);
   }
-
-  const editingFolders = mobileNotesMode === 'editFolders';
-  addOption(editingFolders ? 'Listo' : 'Editar carpetas', () => {
-    closeAllPopovers();
-    setMobileNotesMode(editingFolders ? 'browse' : 'editFolders');
-  }, editingFolders);
 
   const selecting = mobileNotesMode === 'select' || mobileNotesMode === 'move';
   addOption(selecting ? 'Listo' : 'Seleccionar', () => {
@@ -4352,7 +4318,6 @@ document.getElementById('note-favorite-btn').addEventListener('click', () => {
   noteModalFavorite = !noteModalFavorite;
   refreshNoteFavoriteBtn();
   captureActiveOpenNoteFromDom();
-  renderNoteSectionsPanel();
 });
 
 // ---------------------------------------------------------------------
@@ -4376,7 +4341,7 @@ function execNoteCommand(cmd) {
 // tabla -- ver mas abajo -- comparten la clase .note-editor-btn por el
 // aspecto visual, pero no tienen data-cmd ni pasan por execCommand).
 function refreshNoteEditorToolbar() {
-  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => {
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => {
     const active = document.queryCommandState(btn.dataset.cmd);
     btn.classList.toggle('is-active', !!active);
   });
@@ -4388,8 +4353,12 @@ function refreshNoteEditorToolbar() {
 // estado de la ULTIMA nota que se habia editado, en vez de apagados.
 // Tambien oculta el grupo +Fila/-Fila/+Col/-Col por la misma razon.
 function resetNoteEditorToolbar() {
-  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
-  document.getElementById('note-table-context-toolbar').classList.add('hidden');
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => btn.classList.remove('is-active'));
+  const corner = document.getElementById('note-table-corner');
+  if (corner) corner.classList.add('hidden');
+  const tableToolbar = document.getElementById('note-table-toolbar');
+  if (tableToolbar) tableToolbar.classList.add('hidden');
+  document.getElementById('note-body-toolbar').classList.remove('hidden');
   document.getElementById('note-paragraph-style-btn').disabled = false;
   document.getElementById('note-quote-toggle-btn').disabled = false;
   document.getElementById('note-quote-toggle-btn').classList.remove('is-active');
@@ -4398,10 +4367,9 @@ function resetNoteEditorToolbar() {
   document.getElementById('note-highlight-btn').disabled = false;
   document.getElementById('note-highlight-btn').classList.remove('is-active');
   cancelPendingNoteHighlight();
-  closeNoteFormatPopover();
 }
 
-document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').forEach((btn) => {
+document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd]').forEach((btn) => {
   // mousedown (no click) + preventDefault: si no, el navegador quita la
   // seleccion de texto del editor al pasar el foco al boton ANTES de que
   // se dispare el click, y execCommand ya no tendria sobre que aplicar
@@ -4409,153 +4377,6 @@ document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd]').for
   btn.addEventListener('mousedown', (e) => e.preventDefault());
   btn.addEventListener('click', () => execNoteCommand(btn.dataset.cmd));
 });
-
-// ---------------------------------------------------------------------
-// Panel de formato (boton "Formato" de la barra principal, ver
-// index.html): abre/cierra #note-format-popover, que contiene las 3
-// filas de controles de siempre. Deliberadamente NO es un popover
-// flotante (position:fixed) -- lo fue en una ronda anterior, pero
-// Koku reporto que "sigue tapando el texto" incluso tras cerrarlo solo
-// al escribir (ronda previa): con el editor pudiendo tener poca altura
-// (sobre todo en movil), un panel flotante encima del texto siempre lo
-// tapaba mientras estuviera abierto, sin importar si se estaba
-// escribiendo o no. Ahora vive DENTRO del flujo normal del documento,
-// como una fila mas de .note-editor-form (flex-column) justo entre la
-// barra principal y .note-editor-main -- al abrirse, .note-editor-main/
-// #note-body (flex:1; min-height:0) simplemente se encogen para dejarle
-// sitio, nunca se les superpone nada.
-//
-// A proposito NO pasa por closeAllPopovers()/el listener generico de
-// "click fuera cierra" de settings.js (ese mecanismo cerraria el panel
-// en cuanto se clica DENTRO de #note-body para seleccionar texto, justo
-// lo contrario de lo que hace falta) -- tiene su propio listener
-// dedicado, que solo cierra si el click cae fuera del propio panel, del
-// boton, del editor, o de cualquiera de sus popovers anidados (Aa/
-// resaltado/insertar tabla).
-// ---------------------------------------------------------------------
-const noteFormatPopover = document.getElementById('note-format-popover');
-const noteFormatBtn = document.getElementById('note-format-btn');
-
-// Posicion vertical (viewport) del cursor real dentro de #note-body --
-// null si no hay seleccion util (fuera del editor, o un rango colapsado
-// sin rects propios, p. ej. una linea vacia) para poder caer a un
-// respaldo mas simple en ese caso.
-function getNoteCaretViewportTop() {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return null;
-  const liveRange = sel.getRangeAt(0);
-  if (!NOTE_EDITOR_BODY.contains(liveRange.startContainer)) return null;
-  const range = liveRange.cloneRange();
-  range.collapse(true);
-  let rect = range.getClientRects()[0];
-  if (!rect || (rect.top === 0 && rect.bottom === 0)) {
-    rect = range.getBoundingClientRect();
-  }
-  if (!rect || (rect.top === 0 && rect.bottom === 0 && rect.height === 0)) {
-    // Rango colapsado sin rects propios (linea vacia, justo antes de un
-    // <br> suelto...) -- usar el propio elemento de la linea como
-    // referencia de respaldo.
-    let node = liveRange.startContainer;
-    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-    const line = node ? getNoteLineElement(node) : null;
-    rect = line ? line.getBoundingClientRect() : null;
-  }
-  return rect && !(rect.top === 0 && rect.bottom === 0) ? rect.top : null;
-}
-
-// Cambiar entre .hidden encoge/agranda #note-body al instante (flex
-// column, ver arriba) -- con el editor todavia enfocado justo cuando su
-// caja cambia de tamano, el navegador "revela" el elemento enfocado por
-// su cuenta, y ademas la caja en si pasa a tener otra altura, asi que
-// mantener el mismo scrollTop numerico de antes (primer intento, ya
-// descartado) NO garantiza que el cursor se quede en el mismo sitio en
-// pantalla -- reportado por Koku como "acorta la vista y baja el
-// principio, mueve todo hacia abajo". En vez de eso, se mide DONDE esta
-// el cursor en la pantalla antes de tocar nada, y despues del cambio de
-// layout (la propia lectura del rect ya fuerza un reflow real) se
-// calcula cuanto se desplazo y se compensa ese delta exacto sobre
-// #note-body.scrollTop -- funciona sin importar la causa exacta del
-// desplazamiento (encogido de la caja, "revelar enfocado" nativo...),
-// porque no depende de anticiparla, solo de comparar "donde estaba" vs
-// "donde esta" el cursor. Se reafirma una vez mas en el siguiente frame
-// por si el navegador revierte el valor al pintar de forma asincrona.
-// El listener de 'scroll' de mas abajo (cierra el panel si el usuario
-// desliza el contenido) tiene que distinguir un scroll REAL del propio
-// usuario de este ajuste PROGRAMATICO de scrollTop -- si no, abrir el
-// panel dispara su propia compensacion, que dispara un evento 'scroll',
-// que el listener interpretaria como "el usuario ha deslizado" y
-// cerraria el panel al instante, justo despues de abrirlo. El evento
-// 'scroll' del navegador no es sincrono con la asignacion de
-// scrollTop (puede tardar hasta el siguiente frame), asi que una
-// bandera sincrona no basta -- se usa una ventana de tiempo corta.
-let noteFormatScrollSuppressUntil = 0;
-
-function restoreNoteScrollAfter(fn) {
-  const caretTopBefore = getNoteCaretViewportTop();
-  const noteScrollBefore = NOTE_EDITOR_BODY.scrollTop; // respaldo si no hay caret valido
-  fn();
-  function reapply() {
-    const caretTopAfter = getNoteCaretViewportTop();
-    noteFormatScrollSuppressUntil = performance.now() + 150;
-    if (caretTopBefore != null && caretTopAfter != null) {
-      NOTE_EDITOR_BODY.scrollTop += (caretTopAfter - caretTopBefore);
-    } else {
-      NOTE_EDITOR_BODY.scrollTop = noteScrollBefore;
-    }
-  }
-  reapply();
-  requestAnimationFrame(reapply);
-}
-
-function closeNoteFormatPopover() {
-  restoreNoteScrollAfter(() => {
-    noteFormatPopover.classList.add('hidden');
-    noteFormatBtn.setAttribute('aria-expanded', 'false');
-  });
-}
-
-function openNoteFormatPopover() {
-  restoreNoteScrollAfter(() => {
-    noteFormatPopover.classList.remove('hidden');
-    noteFormatBtn.setAttribute('aria-expanded', 'true');
-  });
-}
-
-noteFormatBtn.addEventListener('mousedown', (e) => e.preventDefault());
-noteFormatBtn.addEventListener('click', () => {
-  if (noteFormatBtn.disabled) return;
-  if (noteFormatPopover.classList.contains('hidden')) openNoteFormatPopover();
-  else closeNoteFormatPopover();
-});
-
-document.addEventListener('click', (e) => {
-  if (noteFormatPopover.classList.contains('hidden')) return;
-  if (e.target.closest('.note-format-popover, #note-format-btn, .paragraph-style-popover, .highlight-color-popover, .table-insert-popover')) return;
-  // Dentro de #note-body distinguimos: si el clic ha dejado una
-  // seleccion de texto real (arrastrar para elegir que resaltar), el
-  // panel se queda abierto para poder aplicarle un formato. Un simple
-  // toque para colocar el cursor (seleccion colapsada, sin arrastre) ya
-  // no cuenta como "dentro" -- cierra el panel igual que cualquier otro
-  // sitio, para poder seguir escribiendo (bug real reportado: tocar la
-  // pantalla para escribir no cerraba nada, solo pulsar una tecla si lo
-  // hacia).
-  if (e.target.closest('#note-body')) {
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return;
-  }
-  closeNoteFormatPopover();
-});
-
-// Un gesto de scroll/swipe (arrastrar para desplazar el contenido de la
-// nota) nunca dispara un 'click' -- el listener de arriba no lo detecta,
-// asi que el panel se quedaba abierto aunque el usuario ya se hubiera
-// ido a leer/escribir mas abajo. Se cierra tambien con el primer scroll
-// real dentro de #note-body (una vez cerrado, el resto del mismo gesto
-// no hace nada mas, ya que closeNoteFormatPopover() es idempotente).
-NOTE_EDITOR_BODY.addEventListener('scroll', () => {
-  if (performance.now() < noteFormatScrollSuppressUntil) return; // scroll propio de abrir/cerrar el panel, no del usuario
-  if (!noteFormatPopover.classList.contains('hidden')) closeNoteFormatPopover();
-}, { passive: true });
 
 // ---------------------------------------------------------------------
 // Tablas dentro de una nota (Fase 4, sub-ronda de tablas): boton
@@ -4593,26 +4414,13 @@ function getCurrentTableCell() {
   return cell && NOTE_EDITOR_BODY.contains(cell) ? cell : null;
 }
 
-function refreshTableContextToolbar() {
-  const cell = getCurrentTableCell();
-  document.getElementById('note-table-context-toolbar').classList.toggle('hidden', !cell);
-  // El boton de grosor de borde refleja el estado de la tabla donde esta
-  // el cursor AHORA MISMO -- cada tabla lleva su propio grosor (atributo
-  // data-border en el <table>, ver toggleTableBorderThickness), no es un
-  // ajuste global del editor.
-  const borderBtn = document.getElementById('note-table-border-toggle');
-  if (borderBtn) {
-    const isThick = cell && cell.closest('table').getAttribute('data-border') === 'thick';
-    borderBtn.classList.toggle('is-active', !!isThick);
-  }
-}
-
-// Junta el refresco de negrita/cursiva/lista y el de la barra contextual
-// de tabla en una sola llamada -- se disparan siempre juntos, con el
-// mismo cambio de seleccion o tecla dentro del editor.
+// Junta el refresco de negrita/cursiva/lista y el del icono de tabla en
+// una sola llamada -- se disparan siempre juntos, con el mismo cambio de
+// seleccion o tecla dentro del editor.
 function refreshNoteEditorState() {
   refreshNoteEditorToolbar();
-  refreshTableContextToolbar();
+  closeTableToolbarIfCaretLeft();
+  refreshTableCornerButton();
   refreshNoteBlockButtons();
   refreshPendingNoteHighlightState();
   refreshNoteHighlightSwatchActiveState();
@@ -4707,16 +4515,18 @@ function isSelectionInsideNoteListItem() {
 // dentro de un bloque de codigo, igual que negrita/cursiva/listas.
 function refreshNoteBlockButtons() {
   const disabled = isSelectionInsideNoteListItem() || isCursorInCodeBlock();
-  const block = disabled ? null : getNoteBlockAncestor(window.getSelection().anchorNode);
+  // Los tres botones de bloque miran la seleccion ENTERA, no solo la
+  // linea del cursor (ver getNoteSelectionBlocks()). La cita se marca
+  // como activa solo si TODAS las lineas seleccionadas lo estan, que es
+  // justo cuando volver a pulsarla las apaga.
+  const indentBlocks = disabled ? [] : getNoteSelectionBlocks();
   document.getElementById('note-paragraph-style-btn').disabled = disabled;
   document.getElementById('note-quote-toggle-btn').disabled = disabled;
-  document.getElementById('note-quote-toggle-btn').classList.toggle('is-active', !!block && block.getAttribute('data-quote') === '1');
+  document.getElementById('note-quote-toggle-btn').classList.toggle(
+    'is-active',
+    indentBlocks.length > 0 && indentBlocks.every((b) => b.getAttribute('data-quote') === '1'),
+  );
 
-  // Sangria: si hay varias lineas seleccionadas, el boton se activa/
-  // desactiva mirando el conjunto (al menos una linea puede moverse en
-  // ese sentido), no solo la linea del cursor -- ver
-  // getNoteIndentSelectionBlocks() mas abajo.
-  const indentBlocks = disabled ? [] : getNoteIndentSelectionBlocks();
   const indents = indentBlocks.length
     ? indentBlocks.map((b) => Math.max(0, Math.min(NOTE_MAX_INDENT, parseInt(b.dataset.indent || '0', 10) || 0)))
     : [0];
@@ -4738,11 +4548,16 @@ function applyNoteParagraphStyle(styleName) {
   // defecto del navegador, que varia entre motores.
   const tagMap = { title: '<h1>', heading: '<h2>', subheading: '<h3>', body: '<div>', mono: '<div>' };
   document.execCommand('formatBlock', false, tagMap[styleName]);
-  const block = getNoteBlockAncestor(window.getSelection().anchorNode);
-  if (block) {
+  // Los bloques se recalculan DESPUES del formatBlock a proposito: ese
+  // comando sustituye cada elemento por uno nuevo con la etiqueta
+  // pedida, asi que cualquier referencia capturada antes apuntaria a
+  // nodos ya desenganchados. Y se recorren TODOS los de la seleccion,
+  // no solo el del cursor -- si no, seleccionar varias lineas y elegir
+  // "Monoespaciado" solo cambiaba la primera (reportado por Koku).
+  getNoteSelectionBlocks().forEach((block) => {
     if (styleName === 'mono') block.setAttribute('data-style', 'mono');
     else block.removeAttribute('data-style');
-  }
+  });
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4754,11 +4569,17 @@ function applyNoteParagraphStyle(styleName) {
 // cosas. Atributo manual data-quote="1", independiente del todo.
 function toggleNoteQuoteBlock() {
   if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return;
-  ensureNoteBlockWrapped();
-  const block = getNoteBlockAncestor(window.getSelection().anchorNode);
-  if (!block) return;
-  if (block.getAttribute('data-quote') === '1') block.removeAttribute('data-quote');
-  else block.setAttribute('data-quote', '1');
+  const blocks = getNoteSelectionBlocks({ ensureWrapped: true });
+  if (blocks.length === 0) return;
+  // Con varias lineas seleccionadas el boton funciona como un unico
+  // interruptor para todas: si YA estan todas en cita, se quita; si
+  // hay alguna que no, se pone en todas (es lo que se espera de un
+  // boton que se ve "encendido" o "apagado", no una mezcla).
+  const todasSonCita = blocks.every((b) => b.getAttribute('data-quote') === '1');
+  blocks.forEach((block) => {
+    if (todasSonCita) block.removeAttribute('data-quote');
+    else block.setAttribute('data-quote', '1');
+  });
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4780,45 +4601,43 @@ function applyNoteIndentDeltaToBlock(block, delta) {
 
 // Bloques (hijos directos de NOTE_EDITOR_BODY) que toca la seleccion
 // actual -- un solo elemento con el cursor sin seleccionar nada, o
-// todos los que la seleccion cruza si hay varias lineas marcadas.
-function getNoteIndentSelectionBlocks() {
+// todos los que la seleccion cruza si hay varias lineas marcadas. Lo
+// comparten las TRES acciones de bloque (sangria, cita y estilo de
+// parrafo): antes solo la sangria miraba la seleccion entera y las
+// otras dos actuaban unicamente sobre la linea del cursor, que es
+// justo lo que Koku reporto ("si selecciono varias lineas y le doy a
+// poner comentario, solo actua en la primera").
+//
+// ensureWrapped: envuelve la linea suelta antes de devolver los
+// bloques, para las acciones que necesitan un elemento real donde
+// colgar un atributo. Se hace con el mismo cuidado de siempre --
+// capturar los limites del Range ANTES de mover nada, porque un Range
+// no sigue al nodo que se mueve cuando su CONTENEDOR es justo ese nodo
+// (ver ensureNoteFirstLineWrapped).
+function getNoteSelectionBlocks({ ensureWrapped = false } = {}) {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return [];
-  const range = sel.getRangeAt(0);
   if (sel.isCollapsed) {
-    const block = getNoteBlockAncestor(sel.anchorNode);
+    if (ensureWrapped) ensureNoteBlockWrapped();
+    const block = getNoteBlockAncestor(window.getSelection().anchorNode);
     return block ? [block] : [];
   }
+  const live = sel.getRangeAt(0);
+  const startContainer = live.startContainer;
+  const startOffset = live.startOffset;
+  const endContainer = live.endContainer;
+  const endOffset = live.endOffset;
+  if (ensureWrapped) ensureNoteFirstLineWrapped();
+  const range = document.createRange();
+  range.setStart(startContainer, startOffset);
+  range.setEnd(endContainer, endOffset);
   return Array.from(NOTE_EDITOR_BODY.children).filter((el) => range.intersectsNode(el));
 }
 
 function applyNoteIndentDelta(delta) {
   if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return;
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return;
-  if (sel.isCollapsed) {
-    ensureNoteBlockWrapped();
-    const block = getNoteBlockAncestor(window.getSelection().anchorNode);
-    if (block) applyNoteIndentDeltaToBlock(block, delta);
-  } else {
-    // Mismo cuidado que wrapNoteHighlightRange: capturar el limite ANTES
-    // de envolver la primera linea suelta si la seleccion la incluye --
-    // el Range en curso no sigue al nodo que se mueve cuando su
-    // CONTENEDOR es justo ese nodo (ver el comentario de
-    // ensureNoteFirstLineWrapped).
-    const liveRange = sel.getRangeAt(0);
-    const startContainer = liveRange.startContainer;
-    const startOffset = liveRange.startOffset;
-    const endContainer = liveRange.endContainer;
-    const endOffset = liveRange.endOffset;
-    ensureNoteFirstLineWrapped();
-    const range = document.createRange();
-    range.setStart(startContainer, startOffset);
-    range.setEnd(endContainer, endOffset);
-    Array.from(NOTE_EDITOR_BODY.children)
-      .filter((el) => range.intersectsNode(el))
-      .forEach((block) => applyNoteIndentDeltaToBlock(block, delta));
-  }
+  getNoteSelectionBlocks({ ensureWrapped: true })
+    .forEach((block) => applyNoteIndentDeltaToBlock(block, delta));
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -4972,6 +4791,56 @@ function insertNodeOutsideNoteHighlight(range, node) {
   if (!enclosing.textContent) enclosing.remove();
 }
 
+// Un [data-highlight] sin texto dentro no se ve como "nada": el CSS de
+// resaltado le da padding y border-radius, asi que se pinta como una
+// cajita de color surgida de la nada -- los "resaltados fantasma" que
+// reporto Koku. Salen como residuo natural de partir spans (al quitar
+// el resaltado justo en un borde, o al pulsar Intro dentro de uno), asi
+// que en vez de perseguir cada caso se barren SIEMPRE despues de tocar
+// resaltados. El span semilla del modo pendiente se respeta a proposito
+// (lleva el caracter de ancho cero, y ademas es el que esta esperando
+// que se escriba dentro).
+function removeEmptyNoteHighlights() {
+  const sel = window.getSelection();
+  const caret = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+  let caretParent = null;
+  let caretIndex = -1;
+  NOTE_EDITOR_BODY.querySelectorAll('[data-highlight]').forEach((span) => {
+    if (span === pendingNoteHighlightSpan) return;
+    // El caracter de ancho cero (el que usa el modo "resaltar antes de
+    // escribir") no cuenta como texto: un span que solo tenga eso, y que
+    // ya no sea el pendiente, es un residuo igual que uno vacio del todo.
+    if (span.textContent.replace(/​/g, '') !== '') return;
+    // Si el cursor estaba justo dentro del span que se va a quitar, se
+    // apunta donde vivia para devolverlo ahi despues -- si no, el
+    // navegador lo manda a cualquier sitio y se pierde el punto de
+    // escritura mientras se borra.
+    if (caret && span.contains(caret.startContainer)) {
+      caretParent = span.parentNode;
+      caretIndex = Array.prototype.indexOf.call(span.parentNode.childNodes, span);
+    }
+    span.remove();
+  });
+  if (caretParent && caretIndex >= 0 && sel) {
+    const restored = document.createRange();
+    restored.setStart(caretParent, Math.min(caretIndex, caretParent.childNodes.length));
+    restored.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(restored);
+  }
+}
+
+// Crea el <span> con el que se envuelve un tramo. key=null significa
+// "sin resaltado": un span pelado, que luego clearNoteHighlight()
+// desenvuelve. Sirve para reutilizar TODO el troceo por lineas de
+// wrapNoteHighlightRange() tambien al QUITAR el resaltado, en vez de
+// tener dos recorridos distintos que puedan divergir.
+function createNoteHighlightSpan(key) {
+  const span = document.createElement('span');
+  if (key) span.setAttribute('data-highlight', key);
+  return span;
+}
+
 // Envuelve el contenido de "range" en uno o varios <span data-highlight>
 // -- si la seleccion cae ENTERA dentro de una sola linea, un solo span
 // (igual que antes de este arreglo). Si CRUZA varias lineas, un span
@@ -5016,8 +4885,7 @@ function wrapNoteHighlightRange(range, key) {
       innerRange.setStart(normStart.container, normStart.offset);
       innerRange.setEnd(normEnd.container, normEnd.offset);
     }
-    const span = document.createElement('span');
-    span.setAttribute('data-highlight', key);
+    const span = createNoteHighlightSpan(key);
     const fragment = innerRange.extractContents();
     stripNoteHighlightWrappers(fragment);
     span.appendChild(fragment);
@@ -5041,8 +4909,7 @@ function wrapNoteHighlightRange(range, key) {
   const startRange = document.createRange();
   startRange.setStart(normStart.container, normStart.offset);
   startRange.setEndAfter(startLine.lastChild || startLine);
-  const startSpan = document.createElement('span');
-  startSpan.setAttribute('data-highlight', key);
+  const startSpan = createNoteHighlightSpan(key);
   const startFragment = startRange.extractContents();
   stripNoteHighlightWrappers(startFragment);
   startSpan.appendChild(startFragment);
@@ -5053,8 +4920,7 @@ function wrapNoteHighlightRange(range, key) {
     const line = allLines[i];
     const lineRange = document.createRange();
     lineRange.selectNodeContents(line);
-    const span = document.createElement('span');
-    span.setAttribute('data-highlight', key);
+    const span = createNoteHighlightSpan(key);
     const lineFragment = lineRange.extractContents();
     stripNoteHighlightWrappers(lineFragment);
     span.appendChild(lineFragment);
@@ -5066,8 +4932,7 @@ function wrapNoteHighlightRange(range, key) {
   const endRange = document.createRange();
   endRange.setStartBefore(endLine.firstChild || endLine);
   endRange.setEnd(normEnd.container, normEnd.offset);
-  const endSpan = document.createElement('span');
-  endSpan.setAttribute('data-highlight', key);
+  const endSpan = createNoteHighlightSpan(key);
   const endFragment = endRange.extractContents();
   stripNoteHighlightWrappers(endFragment);
   endSpan.appendChild(endFragment);
@@ -5179,6 +5044,7 @@ function applyNoteHighlight(key) {
     newRange.setEndAfter(spans[spans.length - 1]);
     sel.addRange(newRange);
   }
+  removeEmptyNoteHighlights();
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -5241,10 +5107,29 @@ function clearNoteHighlight() {
     refreshNoteEditorState();
     return;
   }
+  // Antes esto quitaba el atributo del span ENTERO en cuanto la
+  // seleccion lo tocaba (range.intersectsNode). Bug real reportado por
+  // Koku: resaltar varias lineas y quitar el resaltado de UNA se lo
+  // quitaba a todas -- pasa siempre que un mismo span cubre mas de lo
+  // seleccionado (varias lineas separadas por <br>, o simplemente una
+  // frase de la que solo se selecciona una palabra). Ahora se reutiliza
+  // el mismo troceo que al PONER el resaltado, con key=null: se extrae
+  // exactamente el tramo seleccionado, se le quitan los resaltados que
+  // llevara dentro, y se reinserta FUERA del span original -- que asi
+  // queda partido en las mitades de antes y despues, cada una con su
+  // color intacto.
+  ensureNoteFirstLineWrapped();
   const range = sel.getRangeAt(0);
-  NOTE_EDITOR_BODY.querySelectorAll('[data-highlight]').forEach((el) => {
-    if (range.intersectsNode(el)) el.removeAttribute('data-highlight');
+  const spans = wrapNoteHighlightRange(range, null);
+  // Los spans pelados que deja el troceo no aportan nada (el texto ya
+  // no lleva resaltado): se desenvuelven y se unen los nodos de texto
+  // sueltos, para no ir dejando capas vacias en el HTML de la nota cada
+  // vez que se quita un resaltado.
+  spans.forEach((span) => {
+    if (span.parentNode) span.replaceWith(...span.childNodes);
   });
+  removeEmptyNoteHighlights();
+  NOTE_EDITOR_BODY.normalize();
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -5369,36 +5254,46 @@ document.getElementById('note-indent-btn').addEventListener('click', () => apply
 document.getElementById('note-outdent-btn').addEventListener('mousedown', (e) => e.preventDefault());
 document.getElementById('note-outdent-btn').addEventListener('click', () => applyNoteIndentDelta(-1));
 
+// Deshacer/rehacer del TEXTO. Es el deshacer propio del navegador sobre
+// el editor (lo mismo que Ctrl+Z), asi que cubre lo que se escribe y los
+// formatos que pasan por execCommand (negrita, cursiva, listas...). Los
+// cambios que la app hace a mano sobre el HTML -- resaltado, cita,
+// sangria y la estructura de una tabla -- no entran ahi: la estructura de
+// tabla tiene su propio par de botones en la barra de tabla.
+[['note-text-undo-btn', 'undo'], ['note-text-redo-btn', 'redo']].forEach(([id, cmd]) => {
+  const btn = document.getElementById(id);
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+  btn.addEventListener('click', () => {
+    NOTE_EDITOR_BODY.focus();
+    document.execCommand(cmd);
+    refreshNoteEditorState();
+  });
+});
+
 function clampTableSize(value) {
   const n = Math.round(Number(value));
   if (!Number.isFinite(n)) return 3;
   return Math.min(10, Math.max(1, n));
 }
 
-// Ancho/alto por defecto de una tabla nueva, en px -- antes la tabla se
-// autoajustaba sola (width:100% + table-layout automatico) al escribir,
-// ahora es "constante" desde que se inserta (table-layout:fixed, ver
-// styles.css) y se queda en estos valores hasta que se arrastre un borde
-// a mano (ver el bloque de redimensionado mas abajo).
-const DEFAULT_TABLE_COL_WIDTH = 120;
-const DEFAULT_TABLE_ROW_HEIGHT = 36;
-
+// La tabla NO lleva anchos ni altos fijos: se ajusta sola al texto que
+// tenga dentro (table-layout:auto en styles.css). Antes se insertaba con
+// un <colgroup> de anchos en px y un alto por fila, y habia un menu
+// "Tamaño" para tocarlos -- Koku lo quito a proposito ("que siempre se
+// ajuste al texto de dentro y ya está").
 function buildTableHtml(rows, cols) {
-  // <colgroup> con un <col> por columna: es lo que de verdad manda el
-  // ancho de cada columna con table-layout:fixed (los <td> por si solos
-  // no bastarian). El saneado del servidor (sanitizeNoteBody en
-  // routes/notes.js) valida el "style" de cada <col>/<tr> con una lista
-  // blanca MUY estricta (solo "width:Npx"/"height:Npx"), no cualquier CSS.
-  const colHtml = `<col style="width:${DEFAULT_TABLE_COL_WIDTH}px">`;
-  const colgroupHtml = `<colgroup>${colHtml.repeat(cols)}</colgroup>`;
   let rowsHtml = '';
   for (let r = 0; r < rows; r++) {
-    rowsHtml += `<tr style="height:${DEFAULT_TABLE_ROW_HEIGHT}px">${'<td><br></td>'.repeat(cols)}</tr>`;
+    rowsHtml += `<tr>${'<td><br></td>'.repeat(cols)}</tr>`;
   }
   // El <div><br></div> de despues da un sitio donde dejar el cursor tras
   // insertar la tabla -- sin el, si la tabla queda como ultimo elemento
   // del editor no habria forma de escribir nada debajo de ella.
-  return `<table>${colgroupHtml}<tbody>${rowsHtml}</tbody></table><div><br></div>`;
+  // data-just-inserted: marca temporal para poder localizar ESTA tabla
+  // justo despues de insertarla y meter el cursor dentro. Se quita en el
+  // acto, asi que nunca llega a guardarse en la nota (el saneador
+  // tampoco lo dejaria pasar).
+  return `<table data-just-inserted="1"><tbody>${rowsHtml}</tbody></table><div><br></div>`;
 }
 
 const tableInsertBtn = document.getElementById('note-table-insert-btn');
@@ -5424,7 +5319,7 @@ tableInsertBtn.addEventListener('click', () => {
   if (willOpen) saveNoteEditorSelection();
   closeAllPopovers(tableInsertPopover);
   tableInsertPopover.classList.toggle('hidden');
-  if (willOpen) positionFixedPopover(tableInsertBtn, tableInsertPopover, { width: 200 });
+  if (willOpen) positionFixedPopover(tableInsertBtn, tableInsertPopover, { width: 220 });
 });
 
 document.getElementById('table-insert-cancel').addEventListener('click', () => {
@@ -5437,6 +5332,26 @@ document.getElementById('table-insert-confirm').addEventListener('click', () => 
   tableInsertPopover.classList.add('hidden');
   restoreNoteEditorSelection();
   document.execCommand('insertHTML', false, buildTableHtml(rows, cols));
+  // El cursor se queda donde estaba antes de insertar, asi que la vista
+  // "se movia" a otro sitio en vez de llevarte a la tabla recien puesta
+  // (lo que reporto Koku). Se marca la tabla al construirla para poder
+  // encontrarla justo despues y dejar el cursor dentro de su primera
+  // celda -- se puede empezar a escribir en ella directamente.
+  const nueva = NOTE_EDITOR_BODY.querySelector('table[data-just-inserted]');
+  if (nueva) {
+    nueva.removeAttribute('data-just-inserted');
+    const primera = nueva.querySelector('td, th');
+    if (primera) {
+      const range = document.createRange();
+      range.setStart(primera, 0);
+      range.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      NOTE_EDITOR_BODY.focus();
+      primera.scrollIntoView({ block: 'nearest' });
+    }
+  }
   refreshNoteEditorState();
 });
 
@@ -5445,10 +5360,6 @@ function addTableRow() {
   if (!cell) return;
   const row = cell.parentElement;
   const newRow = document.createElement('tr');
-  // Misma altura por defecto que una fila nueva desde "Insertar tabla" --
-  // luego se puede arrastrar igual que cualquier otra (ver el
-  // redimensionado mas abajo).
-  newRow.style.height = `${DEFAULT_TABLE_ROW_HEIGHT}px`;
   Array.from(row.children).forEach((existingCell) => {
     const newCell = document.createElement(existingCell.tagName);
     newCell.innerHTML = '<br>';
@@ -5473,26 +5384,6 @@ function removeTableRow() {
   refreshNoteEditorState();
 }
 
-// El <colgroup> tiene que tener SIEMPRE un <col> por columna, en el
-// mismo orden -- si no, con table-layout:fixed el ancho de cada columna
-// dejaria de corresponder a la columna que toca en cuanto se anada o
-// quite una. Si por lo que sea la tabla no tiene colgroup (notas de
-// antes de esta ronda, guardadas sin el), se crea uno de cero con el
-// ancho por defecto para todas las columnas ya existentes.
-function ensureTableColgroup(table, colCount) {
-  let colgroup = table.querySelector('colgroup');
-  if (!colgroup) {
-    colgroup = document.createElement('colgroup');
-    table.insertBefore(colgroup, table.firstChild);
-    for (let i = 0; i < colCount; i++) {
-      const col = document.createElement('col');
-      col.style.width = `${DEFAULT_TABLE_COL_WIDTH}px`;
-      colgroup.appendChild(col);
-    }
-  }
-  return colgroup;
-}
-
 function addTableColumn() {
   const cell = getCurrentTableCell();
   if (!cell) return;
@@ -5506,12 +5397,6 @@ function addTableColumn() {
     newCell.innerHTML = '<br>';
     referenceCell.after(newCell);
   });
-  const colgroup = ensureTableColgroup(table, row.children.length);
-  const newCol = document.createElement('col');
-  newCol.style.width = `${DEFAULT_TABLE_COL_WIDTH}px`;
-  const referenceCol = colgroup.children[colIndex];
-  if (referenceCol) referenceCol.after(newCol);
-  else colgroup.appendChild(newCol);
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
@@ -5530,8 +5415,6 @@ function removeTableColumn() {
     table.querySelectorAll('tr').forEach((tr) => {
       if (tr.children[colIndex]) tr.children[colIndex].remove();
     });
-    const colgroup = table.querySelector('colgroup');
-    if (colgroup && colgroup.children[colIndex]) colgroup.children[colIndex].remove();
   }
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
@@ -5541,206 +5424,942 @@ function removeTableColumn() {
 // en el <table> (ausente = fino, el de siempre). El saneado del servidor
 // (sanitizeNoteBody en routes/notes.js) solo deja pasar ese atributo con
 // el valor EXACTO "thick", cualquier otra cosa se descarta.
-function toggleTableBorderThickness() {
+// Nivel de grosor del borde, por tabla (1 fino ... 4 muy grueso). Antes
+// era un simple "fino o grueso"; Koku lo queria estilo Excel, subiendo y
+// bajando de nivel.
+const TABLE_BORDER_LEVELS = ['1', '2', '3', '4'];
+
+// 4 grosores fijos, elegibles directamente (el 1 es el fino de siempre,
+// y es el que traen las tablas nuevas). Antes habia que ir dando a
+// "mas grueso"/"mas fino" hasta dar con el que se buscaba.
+//
+// Alcance: si hay celdas marcadas (modo "Marcar"), solo cambian ESAS; si
+// no hay ninguna, cambia la tabla entera. Las celdas guardan su propio
+// data-border, que manda sobre el de la tabla.
+function setTableBorder(nivel) {
+  const marcadas = getMarkedTableCells();
+  if (marcadas.length) {
+    // El nivel 1 se pone SIEMPRE de forma explicita, tambien en la
+    // celda: quitarle el atributo la dejaba heredando el grosor de la
+    // tabla, asi que sobre una tabla ya gruesa elegir "Fino" no hacia
+    // nada ("el borde fino no quiere ponerlo"). El saneado ya acepta
+    // data-border="1" en td/th igual que el resto de niveles.
+    marcadas.forEach((celda) => celda.setAttribute('data-border', nivel));
+    refreshNoteEditorState();
+    return;
+  }
   const cell = getCurrentTableCell();
   if (!cell) return;
   const table = cell.closest('table');
-  if (table.getAttribute('data-border') === 'thick') table.removeAttribute('data-border');
-  else table.setAttribute('data-border', 'thick');
+  // Al cambiar el grosor de la tabla entera se limpian los de cada celda:
+  // si no, las que se hubieran tocado antes se quedarian con el suyo y
+  // pareceria que el cambio "no ha hecho nada" en esa parte.
+  table.querySelectorAll('td[data-border], th[data-border]').forEach((c) => c.removeAttribute('data-border'));
+  if (nivel === TABLE_BORDER_LEVELS[0]) table.removeAttribute('data-border');
+  else table.setAttribute('data-border', nivel);
+  refreshNoteEditorState();
+}
+
+// ---------------------------------------------------------------------
+// Modo "Marcar": en vez de pelearse con la seleccion de texto de iOS
+// para elegir celdas, se toca cada casilla y se marca/desmarca. Lo usan
+// Agrupar, el grosor de borde y "Mover > Bloque".
+//
+// Mientras esta activo el editor queda en solo lectura: si no, cada
+// toque colocaria el cursor dentro de la celda en vez de marcarla.
+// ---------------------------------------------------------------------
+let tableMarkMode = null; // { table }
+
+function getMarkedTableCells() {
+  if (!tableMarkMode) return [];
+  return Array.from(tableMarkMode.table.querySelectorAll('td.is-marked, th.is-marked'));
+}
+
+function refreshTableMarkButton() {
+  const btn = document.getElementById('btn-note-table-mark');
+  if (!btn) return;
+  const n = getMarkedTableCells().length;
+  btn.textContent = tableMarkMode ? (n ? `Marcar (${n})` : 'Marcar…') : 'Marcar';
+  btn.classList.toggle('is-active', !!tableMarkMode);
+}
+
+function startTableMarkMode() {
+  const cell = getCurrentTableCell();
+  const table = cell ? cell.closest('table') : null;
+  if (!table) return;
+  stopTableManualMove();
+  tableMarkMode = { table };
+  table.classList.add('is-marking');
+  NOTE_EDITOR_BODY.setAttribute('contenteditable', 'false');
+  table.addEventListener('click', onTableMarkClick);
+  refreshTableMarkButton();
+}
+
+function stopTableMarkMode({ conservarMarcas = false } = {}) {
+  if (!tableMarkMode) return;
+  const { table } = tableMarkMode;
+  if (!conservarMarcas) table.querySelectorAll('.is-marked').forEach((c) => c.classList.remove('is-marked'));
+  table.classList.remove('is-marking');
+  table.removeEventListener('click', onTableMarkClick);
+  tableMarkMode = null;
+  if (!tableManualMove) NOTE_EDITOR_BODY.setAttribute('contenteditable', 'true');
+  refreshTableMarkButton();
+}
+
+function onTableMarkClick(e) {
+  const celda = e.target.closest && e.target.closest('td, th');
+  if (!celda || !tableMarkMode || !tableMarkMode.table.contains(celda)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  celda.classList.toggle('is-marked');
+  refreshTableMarkButton();
+}
+
+// ---------------------------------------------------------------------
+// Deshacer/rehacer de la ESTRUCTURA de la tabla (no del texto: eso lo
+// sigue llevando el propio sistema). Antes de cada accion se guarda una
+// foto de la tabla; si la accion la borra entera (quitar la ultima fila),
+// se guarda tambien una del contenido completo para poder recuperarla.
+// ---------------------------------------------------------------------
+const TABLE_HISTORY_MAX = 30;
+const tableHistory = { atras: [], adelante: [] };
+
+function captureTableState() {
+  const cell = getCurrentTableCell() || (tableMarkMode && tableMarkMode.table.querySelector('td, th'));
+  const table = (tableManualMove && tableManualMove.table)
+    || (tableMarkMode && tableMarkMode.table)
+    || (cell && cell.closest('table'));
+  if (!table) return null;
+  const tablas = Array.from(NOTE_EDITOR_BODY.querySelectorAll('table'));
+  return { indice: tablas.indexOf(table), tabla: table.outerHTML, cuerpo: NOTE_EDITOR_BODY.innerHTML };
+}
+
+function restoreTableState(estado) {
+  if (!estado) return;
+  const tablas = Array.from(NOTE_EDITOR_BODY.querySelectorAll('table'));
+  const table = tablas[estado.indice];
+  // Si la tabla ya no existe (la accion la borro entera) se recupera el
+  // contenido completo; si existe, solo se repone ella para no pisar el
+  // texto que se haya escrito despues en el resto de la nota.
+  if (table) table.outerHTML = estado.tabla;
+  else NOTE_EDITOR_BODY.innerHTML = estado.cuerpo;
+  const nueva = NOTE_EDITOR_BODY.querySelectorAll('table')[estado.indice];
+  if (nueva) {
+    const primera = nueva.querySelector('td, th');
+    if (primera) putCaretInCell(primera);
+  }
+  refreshNoteEditorState();
+  refreshTableHistoryButtons();
+}
+
+function refreshTableHistoryButtons() {
+  const undo = document.getElementById('btn-note-table-undo');
+  const redo = document.getElementById('btn-note-table-redo');
+  if (undo) undo.disabled = tableHistory.atras.length === 0;
+  if (redo) redo.disabled = tableHistory.adelante.length === 0;
+}
+
+function undoTableChange() {
+  if (!tableHistory.atras.length) return;
+  stopTableMarkMode();
+  stopTableManualMove();
+  const actual = captureTableState();
+  const estado = tableHistory.atras.pop();
+  if (actual) tableHistory.adelante.push(actual);
+  restoreTableState(estado);
+}
+
+function redoTableChange() {
+  if (!tableHistory.adelante.length) return;
+  stopTableMarkMode();
+  stopTableManualMove();
+  const actual = captureTableState();
+  const estado = tableHistory.adelante.pop();
+  if (actual) tableHistory.atras.push(actual);
+  restoreTableState(estado);
+}
+
+// Sube o baja la fila del cursor intercambiandola con su vecina.
+// `celdaDada` la usa el modo "mover a mano" (ver mas abajo): ahi el
+// editor esta bloqueado a proposito, asi que no hay cursor del que sacar
+// la celda ni tiene sentido devolverselo al terminar.
+function moveTableRow(delta, celdaDada) {
+  const cell = celdaDada || getCurrentTableCell();
+  if (!cell) return false;
+  const row = cell.parentElement;
+  const vecina = delta < 0 ? row.previousElementSibling : row.nextElementSibling;
+  if (!vecina) return false;
+  if (delta < 0) vecina.before(row);
+  else vecina.after(row);
+  if (!celdaDada) putCaretInCell(cell);
+  refreshNoteEditorState();
+  return true;
+}
+
+// Mueve la columna del cursor a izquierda o derecha: intercambia esa
+// celda con su vecina EN CADA FILA.
+function moveTableColumn(delta, celdaDada) {
+  const cell = celdaDada || getCurrentTableCell();
+  if (!cell) return false;
+  const row = cell.parentElement;
+  const colIndex = Array.from(row.children).indexOf(cell);
+  const destino = colIndex + delta;
+  const table = row.closest('table');
+  if (destino < 0 || destino >= row.children.length) return false;
+  table.querySelectorAll('tr').forEach((tr) => {
+    const a = tr.children[colIndex];
+    const b = tr.children[destino];
+    if (!a || !b) return;
+    if (delta < 0) b.before(a);
+    else b.after(a);
+  });
+  if (!celdaDada) putCaretInCell(cell);
+  refreshNoteEditorState();
+  return true;
+}
+
+// ---------------------------------------------------------------------
+// "Mover a mano": sustituye a los 4 botones de direccion que habia antes
+// (fila arriba/abajo, columna izquierda/derecha). Se activa desde el
+// menu Mover, y a partir de ahi ARRASTRAS con el dedo sobre la tabla:
+// arrastrar en vertical mueve la FILA que has cogido, en horizontal
+// mueve la COLUMNA. Se sale tocando fuera de la tabla.
+//
+// Mientras dura, el editor se pone en solo lectura: si no, el navegador
+// intenta seleccionar texto con el mismo arrastre y pelea con el gesto.
+// ---------------------------------------------------------------------
+let tableManualMove = null;
+
+// Aviso la primera vez: "mover a mano" no se adivina solo (Koku).
+const TABLE_MOVE_HINTS = {
+  line: 'Arrastra una casilla: hacia arriba o abajo mueve su FILA, hacia los lados mueve su COLUMNA. Se sale tocando fuera de la tabla.',
+  cell: 'Arrastra una casilla hacia la de al lado y las dos intercambian su contenido. Se sale tocando fuera de la tabla.',
+  block: 'Arrastra cualquiera de las casillas marcadas y el bloque entero se cambia por las de al lado. Se sale tocando fuera de la tabla.',
+};
+
+async function startTableManualMove(alcance = 'line') {
+  const cell = getCurrentTableCell() || (tableMarkMode && getMarkedTableCells()[0]);
+  if (!cell) return;
+  const table = cell.closest('table');
+  if (!table) return;
+  const marcadas = getMarkedTableCells();
+  if (alcance === 'block' && marcadas.length === 0) {
+    await showAppAlert('Marca antes las casillas que quieres mover (botón "Marcar" de la barra).');
+    return;
+  }
+  const clave = `tableMoveHintSeen_${alcance}`;
+  if (localStorage.getItem(clave) !== '1') {
+    await showAppAlert(TABLE_MOVE_HINTS[alcance], {
+      checkbox: { label: 'No volver a mostrar este aviso', storageKey: clave },
+    });
+  }
+  if (tableManualMove) stopTableManualMove();
+  // El bloque se mueve con las marcas puestas: hay que conservarlas.
+  if (alcance === 'block') stopTableMarkMode({ conservarMarcas: true });
+  else stopTableMarkMode();
+  tableManualMove = { table, arrastre: null, alcance, bloque: alcance === 'block' ? marcadas : [] };
+  table.classList.add('is-manual-move');
+  NOTE_EDITOR_BODY.setAttribute('contenteditable', 'false');
+  table.addEventListener('pointerdown', onTableManualMoveDown);
+  table.addEventListener('pointermove', onTableManualMoveMove);
+  table.addEventListener('pointerup', onTableManualMoveUp);
+  table.addEventListener('pointercancel', onTableManualMoveUp);
+}
+
+function stopTableManualMove() {
+  if (!tableManualMove) return;
+  const { table } = tableManualMove;
+  table.querySelectorAll('.is-marked').forEach((c) => c.classList.remove('is-marked'));
+  table.classList.remove('is-manual-move');
+  table.removeEventListener('pointerdown', onTableManualMoveDown);
+  table.removeEventListener('pointermove', onTableManualMoveMove);
+  table.removeEventListener('pointerup', onTableManualMoveUp);
+  table.removeEventListener('pointercancel', onTableManualMoveUp);
+  NOTE_EDITOR_BODY.setAttribute('contenteditable', 'true');
+  tableManualMove = null;
+}
+
+function onTableManualMoveDown(e) {
+  if (!tableManualMove) return;
+  const cell = e.target.closest && e.target.closest('td, th');
+  if (!cell) return;
+  e.preventDefault();
+  tableManualMove.arrastre = { cell, x: e.clientX, y: e.clientY };
+  // Sin capturar el puntero, sacar el dedo de la tabla a mitad de
+  // arrastre corta el gesto (mismo motivo que en attachSwipe).
+  if (e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId);
+}
+
+function onTableManualMoveMove(e) {
+  if (!tableManualMove || !tableManualMove.arrastre) return;
+  const arrastre = tableManualMove.arrastre;
+  const dx = e.clientX - arrastre.x;
+  const dy = e.clientY - arrastre.y;
+  const caja = arrastre.cell.getBoundingClientRect();
+  // Se mueve de una en una: cada vez que el dedo recorre una celda
+  // entera, se da un paso y se vuelve a tomar la referencia desde ahi.
+  const horizontal = Math.abs(dx) > Math.abs(dy);
+  if (horizontal ? Math.abs(dx) < caja.width : Math.abs(dy) < caja.height) return;
+  const paso = horizontal ? (dx > 0 ? 1 : -1) : (dy > 0 ? 1 : -1);
+  const dc = horizontal ? paso : 0;
+  const dr = horizontal ? 0 : paso;
+
+  let movido = false;
+  if (tableManualMove.alcance === 'cell') movido = swapTableCellWithNeighbour(arrastre.cell, dr, dc);
+  else if (tableManualMove.alcance === 'block') movido = moveTableBlock(tableManualMove.bloque, dr, dc);
+  else movido = horizontal ? moveTableColumn(paso, arrastre.cell) : moveTableRow(paso, arrastre.cell);
+
+  if (movido) { arrastre.x = e.clientX; arrastre.y = e.clientY; }
+}
+
+// Mover UNA casilla = intercambiar su contenido con el de la de al lado
+// (decision de Koku): sacarla de la fila y meterla en otro sitio dejaria
+// la tabla descuadrada, con una fila mas corta que las demas.
+function swapTableCellWithNeighbour(cell, dr, dc) {
+  const table = cell.closest('table');
+  const rejilla = buildTableGrid(table);
+  let r0 = -1; let c0 = -1;
+  rejilla.forEach((fila, r) => fila.forEach((celda, c) => {
+    if (celda === cell && r0 < 0) { r0 = r; c0 = c; }
+  }));
+  if (r0 < 0) return false;
+  const destino = rejilla[r0 + dr] && rejilla[r0 + dr][c0 + dc];
+  if (!destino || destino === cell) return false;
+  const suyo = destino.innerHTML;
+  destino.innerHTML = cell.innerHTML;
+  cell.innerHTML = suyo;
+  refreshNoteEditorState();
+  return true;
+}
+
+// Mover un BLOQUE de casillas marcadas: el bloque se intercambia con la
+// franja de casillas sobre la que pasa. Solo se mueve el CONTENIDO -- la
+// rejilla de la tabla se queda como esta, igual que al mover una casilla.
+function moveTableBlock(bloque, dr, dc) {
+  if (!bloque || bloque.length === 0) return false;
+  const table = bloque[0].closest('table');
+  const rejilla = buildTableGrid(table);
+  const pos = new Map();
+  rejilla.forEach((fila, r) => fila.forEach((celda, c) => {
+    if (!pos.has(celda)) pos.set(celda, { r, c });
+  }));
+
+  const seleccion = new Set(bloque);
+  const destinos = [];
+  for (const celda of bloque) {
+    const p = pos.get(celda);
+    if (!p) return false;
+    const destino = rejilla[p.r + dr] && rejilla[p.r + dr][p.c + dc];
+    if (!destino) return false; // el bloque se saldria de la tabla
+    destinos.push([celda, destino]);
+  }
+  // Alto/ancho del bloque en la direccion del movimiento, para saber a
+  // que casilla vuelve el contenido de las que se quedan por el camino.
+  const filas = new Set(bloque.map((c) => pos.get(c).r));
+  const cols = new Set(bloque.map((c) => pos.get(c).c));
+  const salto = dr !== 0 ? filas.size : cols.size;
+
+  const original = new Map();
+  table.querySelectorAll('td, th').forEach((c) => original.set(c, c.innerHTML));
+
+  destinos.forEach(([celda, destino]) => { destino.innerHTML = original.get(celda); });
+  // Las que el bloque ha pisado (y no estaban marcadas) pasan al hueco
+  // que deja el bloque por el otro lado.
+  destinos.forEach(([, destino]) => {
+    if (seleccion.has(destino)) return;
+    const p = pos.get(destino);
+    const vuelta = rejilla[p.r - dr * salto] && rejilla[p.r - dr * salto][p.c - dc * salto];
+    if (vuelta) vuelta.innerHTML = original.get(destino);
+  });
+  // La marca viaja con el bloque para poder seguir moviendolo.
+  bloque.forEach((c) => c.classList.remove('is-marked'));
+  const nuevos = destinos.map(([, destino]) => destino);
+  nuevos.forEach((c) => c.classList.add('is-marked'));
+  tableManualMove.bloque = nuevos;
+  refreshNoteEditorState();
+  return true;
+}
+
+function onTableManualMoveUp() {
+  if (tableManualMove) tableManualMove.arrastre = null;
+}
+
+// ---------------------------------------------------------------------
+// Combinar celdas (agrupar) -- ahora a partir de la SELECCION de verdad:
+// arrastras por encima de varias celdas como si seleccionaras texto y le
+// das a "Agrupar". Antes solo sabia juntar la celda del cursor con la de
+// su derecha, que es lo que Koku vio como "no funciona".
+//
+// Para saber que celda ocupa cada hueco hace falta una rejilla: con
+// colspan/rowspan de por medio, la posicion de una celda dentro de su
+// <tr> ya no coincide con su columna real.
+// ---------------------------------------------------------------------
+function buildTableGrid(table) {
+  const filas = Array.from(table.rows);
+  const rejilla = filas.map(() => []);
+  filas.forEach((fila, r) => {
+    let c = 0;
+    Array.from(fila.cells).forEach((celda) => {
+      while (rejilla[r][c]) c += 1;
+      const cs = parseInt(celda.getAttribute('colspan'), 10) || 1;
+      const rs = parseInt(celda.getAttribute('rowspan'), 10) || 1;
+      for (let i = 0; i < rs; i += 1) {
+        for (let j = 0; j < cs; j += 1) {
+          if (rejilla[r + i]) rejilla[r + i][c + j] = celda;
+        }
+      }
+      c += cs;
+    });
+  });
+  return rejilla;
+}
+
+// Las dos ESQUINAS de la seleccion: donde empieza y donde acaba. A
+// proposito no se cogen "todas las celdas que toca el rango": una
+// seleccion de texto de A a D incluye tambien lo que hay en medio en
+// orden de lectura (toda la primera fila), asi que arrastrar en diagonal
+// agruparia de mas. Con las dos esquinas sale el rectangulo que uno
+// espera al arrastrar.
+function getSelectionCornerCells() {
+  const cell = getCurrentTableCell();
+  const table = cell ? cell.closest('table') : null;
+  if (!table) return [];
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return [cell, cell];
+  const range = sel.getRangeAt(0);
+  const deNodo = (nodo) => {
+    const el = nodo.nodeType === Node.TEXT_NODE ? nodo.parentElement : nodo;
+    const celda = el && el.closest ? el.closest('td, th') : null;
+    return celda && table.contains(celda) ? celda : null;
+  };
+  return [deNodo(range.startContainer) || cell, deNodo(range.endContainer) || cell];
+}
+
+function mergeTableCell() {
+  // Con celdas marcadas manda esa marca; si no, se usan las dos esquinas
+  // de la seleccion de texto (util con raton, incomodo con el dedo).
+  const marcadas = getMarkedTableCells();
+  const esquinas = marcadas.length ? marcadas : getSelectionCornerCells();
+  if (!esquinas.length || !esquinas[0]) return;
+  const table = esquinas[0].closest('table');
+  const rejilla = buildTableGrid(table);
+
+  // Rectangulo entre las dos esquinas. Si las dos son la misma celda, se
+  // estira una columna a la derecha -- asi un toque simple sigue
+  // agrupando algo, sin obligar a seleccionar en un movil.
+  let r0 = Infinity; let r1 = -1; let c0 = Infinity; let c1 = -1;
+  rejilla.forEach((fila, r) => fila.forEach((celda, c) => {
+    if (!esquinas.includes(celda)) return;
+    r0 = Math.min(r0, r); r1 = Math.max(r1, r);
+    c0 = Math.min(c0, c); c1 = Math.max(c1, c);
+  }));
+  if (r1 < 0) return;
+  if (r0 === r1 && c0 === c1) {
+    if (c1 + 1 >= (rejilla[r0] || []).length) return;
+    c1 += 1;
+  }
+  // Una celda que asome fuera del rectangulo lo agranda hasta que cierra
+  // (si no, quedarian huecos imposibles de dibujar).
+  let creciendo = true;
+  while (creciendo) {
+    creciendo = false;
+    for (let r = r0; r <= r1; r += 1) {
+      for (let c = c0; c <= c1; c += 1) {
+        const celda = rejilla[r] && rejilla[r][c];
+        if (!celda) continue;
+        rejilla.forEach((fila, rr) => fila.forEach((otra, cc) => {
+          if (otra !== celda) return;
+          if (rr < r0) { r0 = rr; creciendo = true; }
+          if (rr > r1) { r1 = rr; creciendo = true; }
+          if (cc < c0) { c0 = cc; creciendo = true; }
+          if (cc > c1) { c1 = cc; creciendo = true; }
+        }));
+      }
+    }
+  }
+
+  const principal = rejilla[r0][c0];
+  const absorbidas = [];
+  for (let r = r0; r <= r1; r += 1) {
+    for (let c = c0; c <= c1; c += 1) {
+      const celda = rejilla[r] && rejilla[r][c];
+      if (celda && celda !== principal && !absorbidas.includes(celda)) absorbidas.push(celda);
+    }
+  }
+  // El contenido de las que se absorben no se pierde: se pega detras.
+  absorbidas.forEach((celda) => {
+    if (celda.textContent.trim()) principal.innerHTML = `${principal.innerHTML} ${celda.innerHTML}`;
+    celda.remove();
+  });
+  const ancho = c1 - c0 + 1;
+  const alto = r1 - r0 + 1;
+  if (ancho > 1) principal.setAttribute('colspan', String(ancho));
+  else principal.removeAttribute('colspan');
+  if (alto > 1) principal.setAttribute('rowspan', String(alto));
+  else principal.removeAttribute('rowspan');
+  putCaretInCell(principal);
+  refreshNoteEditorState();
+}
+
+function isMergedTableCell(cell) {
+  if (!cell) return false;
+  return (parseInt(cell.getAttribute('colspan'), 10) || 1) > 1
+    || (parseInt(cell.getAttribute('rowspan'), 10) || 1) > 1;
+}
+
+// Deshace una combinacion: devuelve la celda a un solo hueco y rellena
+// con celdas vacias los que habia ocupando.
+function splitTableCell() {
+  const cell = getMarkedTableCells().find((c) => isMergedTableCell(c)) || getCurrentTableCell();
+  if (!isMergedTableCell(cell)) return;
+  const table = cell.closest('table');
+  const filas = Array.from(table.rows);
+  const rejilla = buildTableGrid(table);
+  const ancho = parseInt(cell.getAttribute('colspan'), 10) || 1;
+  const alto = parseInt(cell.getAttribute('rowspan'), 10) || 1;
+
+  let r0 = -1; let c0 = -1;
+  rejilla.forEach((fila, r) => fila.forEach((celda, c) => {
+    if (celda === cell && r0 < 0) { r0 = r; c0 = c; }
+  }));
+  if (r0 < 0) return;
+
+  cell.removeAttribute('colspan');
+  cell.removeAttribute('rowspan');
+  for (let r = r0; r < r0 + alto; r += 1) {
+    const fila = filas[r];
+    if (!fila) continue;
+    for (let c = c0; c < c0 + ancho; c += 1) {
+      if (r === r0 && c === c0) continue;
+      const nueva = document.createElement(cell.tagName);
+      nueva.innerHTML = '<br>';
+      // Se inserta delante de la primera celda de ESA fila que empiece
+      // mas a la derecha; si no hay ninguna, al final.
+      let referencia = null;
+      for (let x = c + 1; x < rejilla[r].length; x += 1) {
+        const candidata = rejilla[r][x];
+        if (candidata && candidata !== cell && candidata.parentElement === fila) { referencia = candidata; break; }
+      }
+      if (referencia) fila.insertBefore(nueva, referencia);
+      else if (r === r0 && c === c0 + 1) cell.after(nueva);
+      else fila.appendChild(nueva);
+      rejilla[r][c] = nueva;
+    }
+  }
+  putCaretInCell(cell);
+  refreshNoteEditorState();
+}
+
+// Deja el cursor dentro de una celda concreta -- las funciones de mover
+// y combinar reordenan el DOM, y sin esto el cursor se quedaria colgado
+// donde estaba la celda antes.
+function putCaretInCell(cell) {
+  const range = document.createRange();
+  range.setStart(cell, 0);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  NOTE_EDITOR_BODY.focus();
+}
+
+// Insertar una fila encima o debajo de la del cursor.
+function insertTableRow(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const nueva = document.createElement('tr');
+  Array.from(row.children).forEach((existente) => {
+    const celda = document.createElement(existente.tagName);
+    celda.innerHTML = '<br>';
+    const span = existente.getAttribute('colspan');
+    if (span) celda.setAttribute('colspan', span);
+    nueva.appendChild(celda);
+  });
+  if (donde === 'above') row.before(nueva);
+  else row.after(nueva);
   NOTE_EDITOR_BODY.focus();
   refreshNoteEditorState();
 }
 
-[
-  ['note-table-add-row', addTableRow],
-  ['note-table-remove-row', removeTableRow],
-  ['note-table-add-col', addTableColumn],
-  ['note-table-remove-col', removeTableColumn],
-  ['note-table-border-toggle', toggleTableBorderThickness],
-].forEach(([id, handler]) => {
-  const btn = document.getElementById(id);
-  btn.addEventListener('mousedown', (e) => e.preventDefault());
-  btn.addEventListener('click', handler);
-});
+// Insertar una columna a un lado u otro de la del cursor.
+function insertTableColumn(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const colIndex = Array.from(row.children).indexOf(cell);
+  const table = row.closest('table');
+  table.querySelectorAll('tr').forEach((tr) => {
+    const referencia = tr.children[colIndex];
+    if (!referencia) return;
+    const nueva = document.createElement(referencia.tagName);
+    nueva.innerHTML = '<br>';
+    if (donde === 'left') referencia.before(nueva);
+    else referencia.after(nueva);
+  });
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
 
-// ---------------------------------------------------------------------
-// Redimensionar tablas a mano (estilo Excel): arrastrar el borde derecho
-// de una celda cambia el ancho de esa COLUMNA entera (el <col> del
-// colgroup); arrastrar el borde inferior cambia el alto de esa FILA
-// entera (el <tr>). Doble clic en un borde ajusta esa columna/fila al
-// contenido que tenga en ese momento. Nada de esto anade elementos
-// nuevos al HTML de la nota -- son listeners en NOTE_EDITOR_BODY que
-// detectan la cercania al borde de una celda por posicion del raton, sin
-// "tiradores" propios que el saneado del servidor tendria que aprender a
-// permitir.
-// ---------------------------------------------------------------------
-const TABLE_RESIZE_EDGE_PX = 5;
-const TABLE_MIN_COL_WIDTH = 40;
-const TABLE_MIN_ROW_HEIGHT = 24;
+// Insertar fila en un extremo de la tabla (no junto al cursor).
+function insertTableRowAtEdge(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const tbody = cell.closest('tbody') || cell.closest('table');
+  const referencia = donde === 'first' ? tbody.firstElementChild : tbody.lastElementChild;
+  if (!referencia) return;
+  const nueva = document.createElement('tr');
+  Array.from(referencia.children).forEach((existente) => {
+    const celda = document.createElement(existente.tagName);
+    celda.innerHTML = '<br>';
+    nueva.appendChild(celda);
+  });
+  if (donde === 'first') referencia.before(nueva);
+  else referencia.after(nueva);
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
 
-// { type: 'col'|'row', table, col|row, startX/startY, startWidth/startHeight }
-// mientras se esta arrastrando un borde; null el resto del tiempo.
-let tableResizeDrag = null;
+function insertTableColumnAtEdge(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const table = cell.closest('table');
+  table.querySelectorAll('tr').forEach((tr) => {
+    const nueva = document.createElement(tr.children[0] ? tr.children[0].tagName : 'td');
+    nueva.innerHTML = '<br>';
+    if (donde === 'first') tr.prepend(nueva);
+    else tr.appendChild(nueva);
+  });
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
 
-// Averigua si (clientX, clientY) esta cerca del borde derecho o inferior
-// de una celda de tabla dentro del editor, y de que tipo. null si no.
-function findTableResizeTarget(clientX, clientY) {
-  const el = document.elementFromPoint(clientX, clientY);
-  const cell = el ? el.closest('td, th') : null;
-  if (!cell || !NOTE_EDITOR_BODY.contains(cell)) return null;
-  const rect = cell.getBoundingClientRect();
+// Quitar la fila/columna de un extremo, no la del cursor.
+function removeTableRowAtEdge(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const table = cell.closest('table');
+  const tbody = cell.closest('tbody') || table;
+  if (tbody.children.length <= 1) { table.remove(); }
+  else (donde === 'first' ? tbody.firstElementChild : tbody.lastElementChild).remove();
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
 
-  // El borde de 1px entre dos celdas es "de las dos a la vez" -- segun
-  // redondeo, elementFromPoint a veces devuelve la celda de la izquierda/
-  // arriba y a veces la de la derecha/abajo para el MISMO pixel. Se
-  // comprueban los dos lados de la celda que haya devuelto, no solo el
-  // derecho/inferior, para no depender de cual haya tocado.
-  if (Math.abs(clientX - rect.left) <= TABLE_RESIZE_EDGE_PX && cell.previousElementSibling) {
-    return { type: 'col', cell: cell.previousElementSibling };
+function removeTableColumnAtEdge(donde) {
+  const cell = getCurrentTableCell();
+  if (!cell) return;
+  const table = cell.closest('table');
+  const columnas = cell.parentElement.children.length;
+  if (columnas <= 1) { table.remove(); }
+  else {
+    table.querySelectorAll('tr').forEach((tr) => {
+      const objetivo = donde === 'first' ? tr.firstElementChild : tr.lastElementChild;
+      if (objetivo) objetivo.remove();
+    });
   }
-  if (Math.abs(clientX - rect.right) <= TABLE_RESIZE_EDGE_PX) {
-    return { type: 'col', cell };
-  }
-  if (Math.abs(clientY - rect.top) <= TABLE_RESIZE_EDGE_PX) {
-    const row = cell.parentElement;
-    const prevRow = row.previousElementSibling;
-    if (prevRow) {
-      const colIndex = Array.from(row.children).indexOf(cell);
-      const prevCell = prevRow.children[colIndex] || prevRow.children[0];
-      if (prevCell) return { type: 'row', cell: prevCell };
+  NOTE_EDITOR_BODY.focus();
+  refreshNoteEditorState();
+}
+
+
+const NOTE_TABLE_COMMANDS = {
+  'row-above': () => insertTableRow('above'),
+  'row-below': () => insertTableRow('below'),
+  'row-first': () => insertTableRowAtEdge('first'),
+  'row-last': () => insertTableRowAtEdge('last'),
+  'row-remove': removeTableRow,
+  'row-remove-first': () => removeTableRowAtEdge('first'),
+  'row-remove-last': () => removeTableRowAtEdge('last'),
+  'col-left': () => insertTableColumn('left'),
+  'col-right': () => insertTableColumn('right'),
+  'col-first': () => insertTableColumnAtEdge('first'),
+  'col-last': () => insertTableColumnAtEdge('last'),
+  'col-remove': removeTableColumn,
+  'col-remove-first': () => removeTableColumnAtEdge('first'),
+  'col-remove-last': () => removeTableColumnAtEdge('last'),
+  'move-cell': () => startTableManualMove('cell'),
+  'move-line': () => startTableManualMove('line'),
+  'move-block': () => startTableManualMove('block'),
+  'border-1': () => setTableBorder('1'),
+  'border-2': () => setTableBorder('2'),
+  'border-3': () => setTableBorder('3'),
+  'border-4': () => setTableBorder('4'),
+  merge: mergeTableCell,
+  split: splitTableCell,
+};
+
+// Cada boton de la barra abre su lista de opciones, en vez de tener 20
+// botones sueltos en una fila que no se acaba nunca. Mismo popover que
+// el resto de la app (positionFixedPopover/closeAllPopovers).
+const NOTE_TABLE_MENUS = {
+  row: {
+    label: 'Fila',
+    opciones: [
+      ['row-above', 'Añadir arriba'],
+      ['row-below', 'Añadir debajo'],
+      ['row-first', 'Añadir al principio'],
+      ['row-last', 'Añadir al final'],
+      ['row-remove', 'Quitar esta'],
+      ['row-remove-first', 'Quitar la primera'],
+      ['row-remove-last', 'Quitar la última'],
+    ],
+  },
+  col: {
+    label: 'Columna',
+    opciones: [
+      ['col-left', 'Añadir a la izquierda'],
+      ['col-right', 'Añadir a la derecha'],
+      ['col-first', 'Añadir al principio'],
+      ['col-last', 'Añadir al final'],
+      ['col-remove', 'Quitar esta'],
+      ['col-remove-first', 'Quitar la primera'],
+      ['col-remove-last', 'Quitar la última'],
+    ],
+  },
+  move: {
+    label: 'Mover',
+    opciones: [
+      ['move-cell', 'Una casilla'],
+      ['move-line', 'Fila o columna'],
+      ['move-block', 'Casillas marcadas'],
+    ],
+  },
+  border: {
+    label: 'Borde',
+    // Con celdas marcadas el grosor solo cambia ahi; sin marcar nada,
+    // cambia la tabla entera (ver setTableBorder). Cada opcion lleva a la
+    // derecha una muestra de como se ve ese grosor.
+    opciones: () => TABLE_BORDER_LEVELS.map((nivel, i) => [
+      `border-${nivel}`,
+      ['Fino', 'Medio', 'Grueso', 'Muy grueso'][i],
+      `<span class="table-border-preview" style="border-bottom-width:${nivel}px"></span>`,
+    ]),
+  },
+  cells: {
+    label: 'Celdas',
+    // Lista calculada al abrir: "Separar" solo aparece si la celda de
+    // verdad esta agrupada -- ofrecerlo siempre llevaba a confusion.
+    opciones: () => {
+      const lista = [['merge', 'Agrupar las marcadas']];
+      const encendida = getMarkedTableCells().find((c) => isMergedTableCell(c)) || getCurrentTableCell();
+      if (isMergedTableCell(encendida)) lista.push(['split', 'Separar esta']);
+      return lista;
+    },
+  },
+};
+
+const tableMenuPopover = document.createElement('div');
+tableMenuPopover.className = 'select-popover table-menu-popover hidden';
+document.body.appendChild(tableMenuPopover);
+
+// Las acciones que solo ENTRAN en un modo (mover a mano) no cambian nada
+// todavia: no tiene sentido guardarlas en el historial.
+const TABLE_COMMANDS_WITHOUT_HISTORY = new Set(['move-cell', 'move-line', 'move-block']);
+
+function runTableCommand(nombre) {
+  const fn = NOTE_TABLE_COMMANDS[nombre];
+  if (!fn) return;
+  if (!TABLE_COMMANDS_WITHOUT_HISTORY.has(nombre)) {
+    const antes = captureTableState();
+    if (antes) {
+      tableHistory.atras.push(antes);
+      if (tableHistory.atras.length > TABLE_HISTORY_MAX) tableHistory.atras.shift();
+      tableHistory.adelante.length = 0;
+      refreshTableHistoryButtons();
     }
   }
-  if (Math.abs(clientY - rect.bottom) <= TABLE_RESIZE_EDGE_PX) {
-    return { type: 'row', cell };
+  const resultado = fn();
+  const despues = () => {
+    // Quitar la ultima fila o columna borra la tabla entera: si ya no
+    // queda ninguna, no tiene sentido seguir en la barra de tabla. En
+    // modo "mover a mano" no aplica: ahi no hay cursor a proposito.
+    if (!tableManualMove && !getCurrentTableCell()) setNoteTableToolbarOpen(false);
+  };
+  if (resultado && typeof resultado.then === 'function') resultado.then(despues);
+  else despues();
+}
+
+document.querySelectorAll('#note-table-toolbar [data-table-menu]').forEach((btn) => {
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = NOTE_TABLE_MENUS[btn.dataset.tableMenu];
+    const yaAbierto = !tableMenuPopover.classList.contains('hidden') && tableMenuPopover.dataset.menu === btn.dataset.tableMenu;
+    closeAllPopovers(tableMenuPopover);
+    if (yaAbierto) { tableMenuPopover.classList.add('hidden'); return; }
+    tableMenuPopover.dataset.menu = btn.dataset.tableMenu;
+    tableMenuPopover.innerHTML = '';
+    const opciones = typeof menu.opciones === 'function' ? menu.opciones() : menu.opciones;
+    opciones.forEach(([cmd, texto, muestra]) => {
+      const opt = document.createElement('button');
+      opt.type = 'button';
+      opt.className = 'select-option';
+      opt.textContent = texto;
+      // Tercer elemento opcional: una muestra a la derecha (lo usa el
+      // menu de Borde para enseñar como se ve cada grosor).
+      if (muestra) {
+        opt.classList.add('has-preview');
+        opt.insertAdjacentHTML('beforeend', muestra);
+      }
+      opt.addEventListener('mousedown', (ev) => ev.preventDefault());
+      opt.addEventListener('click', () => {
+        tableMenuPopover.classList.add('hidden');
+        runTableCommand(cmd);
+      });
+      tableMenuPopover.appendChild(opt);
+    });
+    tableMenuPopover.classList.remove('hidden');
+    positionFixedPopover(btn, tableMenuPopover, { width: 220 });
+  });
+});
+
+// ---------------------------------------------------------------------
+// Tablas: un solo icono en la ESQUINA de la tabla (la mas cercana a la
+// celda donde esta el cursor, de las 4 exteriores) que abre la barra de
+// tabla -- la de formato de texto se aparta mientras tanto. Es lo que
+// pidio Koku: "pincho la tabla, en la esquina mas cercana me muestra un
+// icono... la barra de formato cambia".
+//
+// El icono va en <body> con position:fixed y se recoloca a partir del
+// rectangulo real de la tabla, porque el editor tiene su propio scroll:
+// colgarlo del <table> obligaria a envolverla en un contenedor y a tocar
+// el HTML que se guarda en la nota.
+// ---------------------------------------------------------------------
+const tableCornerBtn = document.createElement('button');
+tableCornerBtn.type = 'button';
+tableCornerBtn.id = 'note-table-corner';
+tableCornerBtn.className = 'note-table-corner hidden';
+tableCornerBtn.setAttribute('aria-label', 'Modificar la tabla');
+tableCornerBtn.title = 'Modificar la tabla';
+tableCornerBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>';
+// mousedown preventDefault: sin esto el navegador quita el cursor de la
+// celda al pulsar, y para cuando llega el click ya no hay "celda actual".
+tableCornerBtn.addEventListener('mousedown', (e) => e.preventDefault());
+tableCornerBtn.addEventListener('click', () => setNoteTableToolbarOpen(true));
+document.body.appendChild(tableCornerBtn);
+
+// Alterna entre la barra de formato de texto y la de tabla.
+// Entrar/salir de la barra de tabla o de sus modos cambia el alto de la
+// barra y bloquea/desbloquea el editor -- y con eso el navegador reajusta
+// el scroll por su cuenta, dejando la tabla en otro sitio de la pantalla
+// ("me baja la vista y marea"). Se mide donde esta la tabla ANTES, se
+// hace el cambio, y se compensa la diferencia sobre el scroll del
+// editor. El segundo pase en requestAnimationFrame es por si el
+// navegador lo reajusta otra vez al pintar.
+function keepTableInPlace(fn) {
+  // Se ancla la CELDA donde esta el cursor, no el principio de la tabla:
+  // en una tabla mas alta que la pantalla, mantener quieta su primera
+  // fila mandaba la vista al principio de la tabla aunque estuvieras
+  // escribiendo en la ultima ("va al inicio de esta").
+  const cell = getCurrentTableCell()
+    || (tableMarkMode && tableMarkMode.table.querySelector('td, th'))
+    || (tableManualMove && tableManualMove.table.querySelector('td, th'));
+  const antes = cell ? cell.getBoundingClientRect().top : null;
+  fn();
+  if (antes === null || !NOTE_EDITOR_BODY.contains(cell)) return;
+  const ajustar = () => {
+    const despues = cell.getBoundingClientRect().top;
+    if (Math.abs(despues - antes) > 1) NOTE_EDITOR_BODY.scrollTop += despues - antes;
+  };
+  ajustar();
+  requestAnimationFrame(ajustar);
+}
+
+function setNoteTableToolbarOpen(open) {
+  keepTableInPlace(() => {
+    // Cerrar la barra de tabla sale tambien de los modos que bloquean el
+    // editor ("mover a mano" y "Marcar"): si no, se quedaria bloqueado sin
+    // nada que lo delate.
+    if (!open) { stopTableManualMove(); stopTableMarkMode(); }
+    if (open) { tableHistory.atras.length = 0; tableHistory.adelante.length = 0; refreshTableHistoryButtons(); }
+    document.getElementById('note-body-toolbar').classList.toggle('hidden', open);
+    document.getElementById('note-table-toolbar').classList.toggle('hidden', !open);
+    if (!open) NOTE_EDITOR_BODY.focus();
+    refreshTableCornerButton();
+  });
+}
+
+// Tocar fuera de la tabla sale de "mover a mano" y de "Marcar" -- mismo
+// criterio que la propia barra de tabla, que se cierra al sacar el
+// cursor de ella.
+document.addEventListener('pointerdown', (e) => {
+  const modo = tableManualMove || tableMarkMode;
+  if (!modo) return;
+  if (e.target.closest && e.target.closest('table') === modo.table) return;
+  if (e.target.closest && e.target.closest('#note-table-toolbar, .table-menu-popover, #app-confirm-modal')) return;
+  stopTableManualMove();
+  stopTableMarkMode();
+});
+
+document.getElementById('btn-note-table-mark').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('btn-note-table-mark').addEventListener('click', () => {
+  keepTableInPlace(() => {
+    if (tableMarkMode) stopTableMarkMode();
+    else startTableMarkMode();
+  });
+});
+document.getElementById('btn-note-table-undo').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('btn-note-table-undo').addEventListener('click', undoTableChange);
+document.getElementById('btn-note-table-redo').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('btn-note-table-redo').addEventListener('click', redoTableChange);
+refreshTableHistoryButtons();
+
+function isNoteTableToolbarOpen() {
+  return !document.getElementById('note-table-toolbar').classList.contains('hidden');
+}
+
+// Coloca (o esconde) el icono de esquina. Se llama en cada cambio de
+// seleccion dentro del editor y al hacer scroll del texto, que es cuando
+// la tabla se mueve por la pantalla.
+function refreshTableCornerButton() {
+  const box = document.getElementById('note-table-corner');
+  if (!box) return;
+  const cell = getCurrentTableCell();
+  const table = cell ? cell.closest('table') : null;
+  // Con la barra de tabla abierta el icono sobra (ya estas dentro), y en
+  // modo lectura no hay nada que modificar.
+  if (!table || isNoteTableToolbarOpen() || NOTE_EDITOR_BODY.getAttribute('contenteditable') === 'false') {
+    box.classList.add('hidden');
+    return;
   }
-  return null;
-}
-
-function tableColIndex(cell) {
-  return Array.from(cell.parentElement.children).indexOf(cell);
-}
-
-function tableColElement(table, colIndex) {
-  const colgroup = ensureTableColgroup(table, table.rows[0] ? table.rows[0].children.length : 0);
-  return colgroup.children[colIndex] || null;
-}
-
-// Cursor col-resize/row-resize solo cerca de un borde redimensionable --
-// se recalcula en cada movimiento del raton (sin arrastrar todavia).
-NOTE_EDITOR_BODY.addEventListener('mousemove', (e) => {
-  if (tableResizeDrag) return;
-  const target = findTableResizeTarget(e.clientX, e.clientY);
-  NOTE_EDITOR_BODY.style.cursor = target ? (target.type === 'col' ? 'col-resize' : 'row-resize') : '';
-});
-NOTE_EDITOR_BODY.addEventListener('mouseleave', () => {
-  if (!tableResizeDrag) NOTE_EDITOR_BODY.style.cursor = '';
-});
-
-NOTE_EDITOR_BODY.addEventListener('mousedown', (e) => {
-  const target = findTableResizeTarget(e.clientX, e.clientY);
-  if (!target) return;
-  // Evita que el navegador coloque el cursor de texto o empiece una
-  // seleccion al arrastrar un borde -- es un gesto de redimensionar, no
-  // de editar contenido.
-  e.preventDefault();
-  const table = target.cell.closest('table');
-  if (target.type === 'col') {
-    const col = tableColElement(table, tableColIndex(target.cell));
-    if (!col) return;
-    tableResizeDrag = { type: 'col', col, startX: e.clientX, startWidth: col.getBoundingClientRect().width };
-  } else {
-    const row = target.cell.parentElement;
-    tableResizeDrag = { type: 'row', row, startY: e.clientY, startHeight: row.getBoundingClientRect().height };
+  // SIEMPRE en la esquina superior derecha de la tabla, a caballo sobre
+  // ella. Antes saltaba a la esquina mas cercana al cursor, y con la
+  // tabla a medio salir de la pantalla acababa en un sitio distinto cada
+  // vez. Si esa esquina no se ve, el icono tampoco.
+  const rect = table.getBoundingClientRect();
+  const visible = NOTE_EDITOR_BODY.getBoundingClientRect();
+  const esquinaX = rect.right;
+  const esquinaY = rect.top;
+  const aLaVista = esquinaY >= visible.top && esquinaY <= visible.bottom
+    && esquinaX >= visible.left && esquinaX <= visible.right;
+  if (!aLaVista) {
+    box.classList.add('hidden');
+    return;
   }
-});
-
-document.addEventListener('mousemove', (e) => {
-  if (!tableResizeDrag) return;
-  if (tableResizeDrag.type === 'col') {
-    const delta = e.clientX - tableResizeDrag.startX;
-    const newWidth = Math.max(TABLE_MIN_COL_WIDTH, Math.round(tableResizeDrag.startWidth + delta));
-    tableResizeDrag.col.style.width = `${newWidth}px`;
-  } else {
-    const delta = e.clientY - tableResizeDrag.startY;
-    const newHeight = Math.max(TABLE_MIN_ROW_HEIGHT, Math.round(tableResizeDrag.startHeight + delta));
-    tableResizeDrag.row.style.height = `${newHeight}px`;
-  }
-});
-
-document.addEventListener('mouseup', () => {
-  if (!tableResizeDrag) return;
-  tableResizeDrag = null;
-  NOTE_EDITOR_BODY.style.cursor = '';
-});
-
-// Doble clic en un borde = ajustar esa columna/fila al contenido que
-// tenga en ese momento -- scrollWidth/scrollHeight reflejan el tamano
-// natural del contenido aunque table-layout:fixed este recortando la
-// celda visualmente en pantalla.
-// scrollWidth/scrollHeight de la celda tal cual NO sirven para medir su
-// tamano "natural": con la celda ya fija a un tamano grande (o igual a
-// las demas de su fila/columna), el contenido no desborda nada que
-// scrollWidth/scrollHeight puedan detectar -- simplemente devuelven el
-// tamano actual, no el minimo que necesitaria el contenido. Se mide con
-// un CLON fuera de pantalla, con "width"/"height" en auto (o el ancho
-// actual, para la altura) para que el navegador calcule el tamano de
-// verdad, y se descarta el clon despues.
-function measureTableCellNaturalWidth(cell) {
-  const clone = cell.cloneNode(true);
-  clone.style.position = 'absolute';
-  clone.style.visibility = 'hidden';
-  clone.style.left = '-9999px';
-  clone.style.top = '0';
-  clone.style.width = 'auto';
-  clone.style.whiteSpace = 'nowrap';
-  NOTE_EDITOR_BODY.appendChild(clone);
-  const width = clone.offsetWidth;
-  clone.remove();
-  return width;
+  box.classList.remove('hidden');
+  const tamano = box.offsetWidth || 28;
+  box.style.left = `${esquinaX - tamano / 2}px`;
+  box.style.top = `${esquinaY - tamano / 2}px`;
 }
 
-function measureTableCellNaturalHeight(cell, width) {
-  const clone = cell.cloneNode(true);
-  clone.style.position = 'absolute';
-  clone.style.visibility = 'hidden';
-  clone.style.left = '-9999px';
-  clone.style.top = '0';
-  clone.style.width = `${width}px`;
-  clone.style.height = 'auto';
-  NOTE_EDITOR_BODY.appendChild(clone);
-  const height = clone.offsetHeight;
-  clone.remove();
-  return height;
-}
+NOTE_EDITOR_BODY.addEventListener('scroll', refreshTableCornerButton);
 
-NOTE_EDITOR_BODY.addEventListener('dblclick', (e) => {
-  const target = findTableResizeTarget(e.clientX, e.clientY);
-  if (!target) return;
-  e.preventDefault();
-  const table = target.cell.closest('table');
-  if (target.type === 'col') {
-    const colIndex = tableColIndex(target.cell);
-    const col = tableColElement(table, colIndex);
-    if (!col) return;
-    const cellsInCol = Array.from(table.querySelectorAll('tr')).map((tr) => tr.children[colIndex]).filter(Boolean);
-    const natural = Math.max(TABLE_MIN_COL_WIDTH, ...cellsInCol.map((c) => measureTableCellNaturalWidth(c)));
-    col.style.width = `${natural}px`;
-  } else {
-    const row = target.cell.parentElement;
-    const cells = Array.from(row.children);
-    // La altura natural depende del ancho ACTUAL de cada celda (el texto
-    // hace mas o menos saltos de linea segun cuanto sitio tenga) -- se
-    // mide con el ancho que ya tiene ahora mismo, no en auto.
-    const natural = Math.max(TABLE_MIN_ROW_HEIGHT, ...cells.map((c) => measureTableCellNaturalHeight(c, c.getBoundingClientRect().width)));
-    row.style.height = `${natural}px`;
-  }
-});
+// No hay boton de "Listo": se sale de la barra de tabla en cuanto el
+// cursor deja de estar dentro de una tabla (tocando el texto de fuera,
+// por ejemplo). Pedido de Koku, que ese boton no lo veia claro.
+function closeTableToolbarIfCaretLeft() {
+  // En "mover a mano" y en "Marcar" no hay cursor (el editor esta
+  // bloqueado a proposito): ahi se sale tocando fuera, no por esto.
+  if (tableManualMove || tableMarkMode) return;
+  if (isNoteTableToolbarOpen() && !getCurrentTableCell()) setNoteTableToolbarOpen(false);
+}
 
 // ---------------------------------------------------------------------
 // Imagenes dentro de una nota (Fase 4, ultima sub-ronda): boton "Imagen"
 // que abre el selector de archivo nativo, y Ctrl+V para pegar una imagen
 // copiada (de una captura de pantalla, de otra web...) directamente
-// dentro del editor. Las dos vias acaban subiendo el archivo al servidor
+// dentro del editor. Las dos vias acaban guardando el archivo en el almacen
 // (routes/noteImages.js) y solo metiendo en el HTML de la nota el enlace
 // corto que devuelve -- la imagen entera NO se guarda como texto (base64)
 // dentro de la nota, eso se descarto a proposito hablandolo con Koku
@@ -5796,10 +6415,6 @@ noteImageFileInput.addEventListener('change', () => {
 // propio navegador ya le quita estilos raros al venir de fuera, el mismo
 // comportamiento por defecto de cualquier contenteditable).
 NOTE_EDITOR_BODY.addEventListener('paste', (e) => {
-  // Pegar tambien cuenta como "escribir" -- mismo criterio que el
-  // keydown de arriba, el panel de Formato no debe quedarse tapando el
-  // contenido que se acaba de pegar.
-  if (!noteFormatPopover.classList.contains('hidden')) closeNoteFormatPopover();
   const items = Array.from(e.clipboardData ? e.clipboardData.items : []);
   const imageItem = items.find((item) => item.type.startsWith('image/'));
   if (!imageItem) return;
@@ -6054,222 +6669,6 @@ function maybeHandleNoteFormatShortcut(e) {
   return false;
 }
 
-// ---------------------------------------------------------------------
-// Modo "vim" (opt-in, ajuste por dispositivo): subconjunto pequeno a
-// proposito -- NO es una replica de vim de verdad (sin registros con
-// nombre, macros, comandos ":", repetir con numeros...), es un punto de
-// partida para moverse y editar rapido sin soltar el teclado, ampliable
-// mas adelante segun lo que haga falta de verdad. A diferencia del vim
-// real, los botones de formato/tabla/imagen de la barra de estado siguen
-// funcionando en cualquiera de los dos modos (Koku lo pidio asi
-// explicitamente).
-// ---------------------------------------------------------------------
-function isVimModeEnabled() {
-  return localStorage.getItem('vimModeEnabled') === 'true';
-}
-
-// 'insert' | 'normal' | 'visual' -- SOLO importa si isVimModeEnabled().
-// Empieza siempre en 'insert' al abrir o cambiar de nota activa (ver
-// loadOpenNoteIntoDom), nunca se hereda de la nota anterior.
-let noteEditorVimSubMode = 'insert';
-
-const VIM_MODE_LABELS = { insert: 'INSERTAR', normal: 'NORMAL', visual: 'VISUAL' };
-// Orden en el que va rotando el indicativo al clicarlo (ver mas abajo).
-const VIM_MODE_CYCLE = ['insert', 'normal', 'visual'];
-
-function refreshVimIndicator() {
-  const indicator = document.getElementById('note-editor-vim-indicator');
-  const show = isVimModeEnabled() && NOTE_EDITOR_BODY.contentEditable !== 'false';
-  indicator.classList.toggle('hidden', !show);
-  if (!show) return;
-  indicator.textContent = VIM_MODE_LABELS[noteEditorVimSubMode] || VIM_MODE_LABELS.insert;
-}
-
-function setVimSubMode(mode) {
-  // Al SALIR de visual (a cualquier otro modo) se colapsa la seleccion
-  // en vez de dejarla como estaba -- entrar en Normal o Insertar con
-  // media pantalla todavia seleccionada seria confuso.
-  if (noteEditorVimSubMode === 'visual' && mode !== 'visual') {
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) sel.collapseToEnd();
-  }
-  noteEditorVimSubMode = mode;
-  refreshVimIndicator();
-}
-
-// Refleja el ajuste guardado (localStorage) en el aspecto del boton
-// desde que carga la pagina, no solo despues de tocarlo por primera vez.
-document.getElementById('note-editor-vim-toggle-btn').classList.toggle('is-active', isVimModeEnabled());
-
-document.getElementById('note-editor-vim-toggle-btn').addEventListener('click', () => {
-  const enabled = !isVimModeEnabled();
-  localStorage.setItem('vimModeEnabled', enabled ? 'true' : 'false');
-  document.getElementById('note-editor-vim-toggle-btn').classList.toggle('is-active', enabled);
-  setVimSubMode('insert');
-});
-
-// El indicativo (INSERTAR/NORMAL/VISUAL) es tambien un boton: clicarlo va
-// rotando entre los 3 modos, como alternativa al teclado (Esc/i/v) para
-// quien prefiera el raton. mousedown con preventDefault, igual que el
-// resto de botones de la barra de estado, para que clicarlo no le quite
-// el foco/seleccion al editor antes de que el click llegue a disparar.
-document.getElementById('note-editor-vim-indicator').addEventListener('mousedown', (e) => e.preventDefault());
-document.getElementById('note-editor-vim-indicator').addEventListener('click', () => {
-  if (!isVimModeEnabled()) return;
-  const next = VIM_MODE_CYCLE[(VIM_MODE_CYCLE.indexOf(noteEditorVimSubMode) + 1) % VIM_MODE_CYCLE.length];
-  if (next === 'visual') vimEnterVisualMode();
-  else setVimSubMode(next);
-  NOTE_EDITOR_BODY.focus();
-});
-
-// action: 'move' (mueve el cursor sin seleccionar, modo Normal) o
-// 'extend' (agranda la seleccion desde donde empezo, modo Visual).
-function vimMoveCaret(direction, granularity, action) {
-  const sel = window.getSelection();
-  if (sel) sel.modify(action || 'move', direction, granularity);
-}
-
-// Entrar en Visual: si el cursor esta colapsado (sin nada seleccionado
-// todavia), el primer 'extend' de Selection.modify() fija el ancla justo
-// ahi y empieza a agrandar desde ese punto -- no hace falta preparar nada
-// mas a mano.
-function vimEnterVisualMode() {
-  setVimSubMode('visual');
-}
-
-// Borra el bloque de texto (div/p/li) donde este el cursor -- SOLO fuera
-// de una tabla, para no borrar una celda entera (y liarla) sin querer.
-function vimDeleteCurrentLine() {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return;
-  const node = sel.getRangeAt(0).startContainer;
-  const containerEl = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
-  if (containerEl && containerEl.closest('td, th')) return;
-  // Selecciona la linea VISUAL entera (de "lineboundary" a
-  // "lineboundary") y la borra -- mas fiable que buscar un <div>/<p>/
-  // <li> en el DOM: la PRIMERA linea de una nota nueva es texto suelto
-  // colgando directamente de NOTE_EDITOR_BODY, sin ningun bloque que lo
-  // envuelva (eso solo aparece a partir del primer Intro que se pulsa
-  // en esa nota), asi que buscar closest('div, p, li') fallaba ahi.
-  sel.modify('move', 'left', 'lineboundary');
-  sel.modify('extend', 'right', 'lineboundary');
-  // Se lleva tambien el salto de linea de despues (si lo hay), para que
-  // las lineas de abajo suban un puesto en vez de dejar una linea vacia.
-  sel.modify('extend', 'right', 'character');
-  document.execCommand('delete', false, null);
-  refreshNoteEditorState();
-}
-
-const VIM_DD_TIMEOUT_MS = 600;
-let vimPendingD = false;
-let vimPendingDTimer = null;
-
-// Se llama SOLO cuando isVimModeEnabled() y estamos en modo Normal.
-// Por defecto CUALQUIER tecla se bloquea (preventDefault, no escribe
-// nada) salvo que este en la lista de comandos de abajo -- asi nunca se
-// escribe sin querer estando en Normal. Las combinaciones con Ctrl/Cmd/
-// Alt (copiar, pegar, deshacer del sistema...) se dejan pasar tal cual,
-// no forman parte de estos comandos.
-function handleVimNormalKeydown(e) {
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-  if (e.key === 'Escape') {
-    // Ya estamos en Normal -- no hace falta cambiar nada, pero SI hay
-    // que cortar la propagacion (ver el otro Escape mas arriba): si no,
-    // llega igual al atajo global de Escape de settings.js y cierra el
-    // editor entero.
-    e.preventDefault();
-    e.stopPropagation();
-    vimPendingD = false;
-    return;
-  }
-  const passthroughKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Tab'];
-  if (passthroughKeys.includes(e.key)) {
-    vimPendingD = false;
-    return;
-  }
-
-  e.preventDefault();
-  const key = e.key;
-  if (key !== 'd') vimPendingD = false;
-
-  switch (key) {
-    case 'h': vimMoveCaret('backward', 'character'); break;
-    case 'l': vimMoveCaret('forward', 'character'); break;
-    case 'j': vimMoveCaret('forward', 'line'); break;
-    case 'k': vimMoveCaret('backward', 'line'); break;
-    case 'w': vimMoveCaret('forward', 'word'); break;
-    case 'b': vimMoveCaret('backward', 'word'); break;
-    case '0': vimMoveCaret('left', 'lineboundary'); break;
-    case '$': vimMoveCaret('right', 'lineboundary'); break;
-    case 'i': setVimSubMode('insert'); break;
-    case 'a': vimMoveCaret('forward', 'character'); setVimSubMode('insert'); break;
-    case 'o':
-      vimMoveCaret('right', 'lineboundary');
-      document.execCommand('insertParagraph', false, null);
-      setVimSubMode('insert');
-      break;
-    case 'x': document.execCommand('forwardDelete', false, null); break;
-    case 'u': document.execCommand('undo', false, null); break;
-    case 'v': vimEnterVisualMode(); break;
-    case 'd':
-      if (vimPendingD) {
-        vimDeleteCurrentLine();
-        vimPendingD = false;
-      } else {
-        vimPendingD = true;
-        clearTimeout(vimPendingDTimer);
-        vimPendingDTimer = setTimeout(() => { vimPendingD = false; }, VIM_DD_TIMEOUT_MS);
-      }
-      break;
-    default:
-      break;
-  }
-  refreshNoteEditorState();
-}
-
-// Se llama SOLO en modo Visual. Las mismas teclas de movimiento que en
-// Normal, pero AGRANDANDO la seleccion en vez de solo mover el cursor
-// (action 'extend' en vez de 'move', ver vimMoveCaret). y/d actuan sobre
-// lo seleccionado y vuelven a Normal solas -- no hace falta pulsar nada
-// mas para salir. Subconjunto minimo a proposito: sin V (seleccion por
-// lineas) ni Ctrl+V (bloque rectangular), que aportan poco en una nota
-// normal frente a lo mucho mas grandes que son de construir bien.
-function handleVimVisualKeydown(e) {
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-  if (e.key === 'Escape') {
-    e.preventDefault();
-    e.stopPropagation();
-    setVimSubMode('normal'); // esto ya colapsa la seleccion (ver setVimSubMode)
-    return;
-  }
-  if (e.key === 'Tab') return;
-
-  e.preventDefault();
-  switch (e.key) {
-    case 'h': vimMoveCaret('backward', 'character', 'extend'); break;
-    case 'l': vimMoveCaret('forward', 'character', 'extend'); break;
-    case 'j': vimMoveCaret('forward', 'line', 'extend'); break;
-    case 'k': vimMoveCaret('backward', 'line', 'extend'); break;
-    case 'w': vimMoveCaret('forward', 'word', 'extend'); break;
-    case 'b': vimMoveCaret('backward', 'word', 'extend'); break;
-    case '0': vimMoveCaret('left', 'lineboundary', 'extend'); break;
-    case '$': vimMoveCaret('right', 'lineboundary', 'extend'); break;
-    case 'y':
-      document.execCommand('copy');
-      setVimSubMode('normal');
-      break;
-    case 'd':
-      document.execCommand('delete', false, null);
-      setVimSubMode('normal');
-      break;
-    default:
-      break;
-  }
-  refreshNoteEditorState();
-}
-
 // Partir el parrafo actual "a mano" (Range API, sin execCommand) cuando
 // la linea donde esta el cursor contiene algun resaltado -- sustituye
 // por completo al Intro NATIVO solo en ese caso. Motivo: el
@@ -6295,11 +6694,19 @@ function handleNoteHighlightAwareEnter() {
   const liveRange = sel.getRangeAt(0);
   if (!NOTE_EDITOR_BODY.contains(liveRange.startContainer)) return false;
 
-  // El resaltado "en vivo" (pendiente, ver beginPendingNoteHighlight) no
-  // debe continuar en el parrafo nuevo -- igual que antes, solo que
-  // ahora el propio cancelPendingNoteHighlight() ya deja el DOM listo
-  // (quita el span semilla vacio si no se llego a escribir nada real)
-  // antes de calcular donde partir.
+  // Color activo en el punto del cursor ANTES de tocar nada: puede venir
+  // del modo "resaltar antes de escribir" (pendiente) o de estar
+  // escribiendo dentro de un resaltado ya aplicado. Sea cual sea el
+  // origen, la linea nueva CONTINUA con ese mismo color -- decision de
+  // Koku, para que el rotulador se comporte igual que la cita, que ya
+  // seguia activa saltara las lineas que saltara. Para dejar de
+  // resaltar esta el boton "Ninguno", como en la cita esta su propio
+  // boton.
+  const colorQueContinua = getActiveNoteHighlightKey() || null;
+
+  // El span semilla del modo pendiente se retira ahora (si no se llego a
+  // escribir nada real dentro), para que no estorbe al partir la linea
+  // -- el color en si ya esta guardado en colorQueContinua.
   if (pendingNoteHighlightKey) cancelPendingNoteHighlight();
 
   // Releer la seleccion YA DESPUES de cancelar el resaltado pendiente
@@ -6315,7 +6722,11 @@ function handleNoteHighlightAwareEnter() {
   ensureNoteFirstLineWrapped();
   const line = getNoteLineElement(caretContainer);
   if (!line || !NOTE_LINE_TAGS.has(line.tagName) || line.tagName === 'LI') return false;
-  if (!line.querySelector('[data-highlight]')) return false;
+  // Una linea sin nada resaltado sigue usando el Intro nativo de
+  // siempre. La excepcion es tener el rotulador recien activado sin
+  // haber escrito todavia: ahi no hay ningun span en la linea, pero el
+  // color igual tiene que continuar abajo.
+  if (!line.querySelector('[data-highlight]') && !colorQueContinua) return false;
 
   const tailRange = document.createRange();
   tailRange.setStart(caretContainer, caretOffset);
@@ -6349,47 +6760,59 @@ function handleNoteHighlightAwareEnter() {
   sel2.removeAllRanges();
   sel2.addRange(newRange);
 
+  // Continuar el resaltado en la linea nueva. Si el corte cayo a mitad
+  // de un resaltado, la linea nueva YA empieza con ese span y basta con
+  // meter el cursor dentro; si el corte fue al final (lo normal al
+  // escribir y pulsar Intro), no hay nada resaltado todavia y se
+  // arranca el modo pendiente con el mismo color, que es exactamente lo
+  // que hace pulsar ese color a mano.
+  if (colorQueContinua) {
+    const primero = newLine.firstChild;
+    const yaResaltada = primero
+      && primero.nodeType === Node.ELEMENT_NODE
+      && primero.getAttribute('data-highlight') === colorQueContinua;
+    if (yaResaltada) {
+      const dentro = document.createRange();
+      dentro.setStart(primero, 0);
+      dentro.collapse(true);
+      sel2.removeAllRanges();
+      sel2.addRange(dentro);
+    } else {
+      beginPendingNoteHighlight(colorQueContinua);
+    }
+  }
+
   NOTE_EDITOR_BODY.dispatchEvent(new Event('input', { bubbles: true }));
   return true;
 }
 
+// Intro en una linea de cita VACIA: sale de la cita, en vez de añadir
+// otra linea citada debajo. Sin esto no habia forma de TERMINAR una cita
+// escribiendo: cada Intro heredaba el data-quote del parrafo anterior,
+// asi que se acumulaban lineas en blanco y la barra de la izquierda se
+// repetia una y otra vez (lo reporto Koku). Es lo mismo que hacen Notion
+// o Apple Notes: la linea vacia sale del bloque en vez de continuarlo.
+// Devuelve true si ha actuado (quien llama debe hacer preventDefault).
+function handleNoteQuoteEnterExit() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return false;
+  const line = getNoteBlockAncestor(sel.getRangeAt(0).startContainer);
+  if (!line || line.getAttribute('data-quote') !== '1') return false;
+  if (line.textContent.trim() !== '') return false;
+  line.removeAttribute('data-quote');
+  line.removeAttribute('data-indent');
+  NOTE_EDITOR_BODY.dispatchEvent(new Event('input', { bubbles: true }));
+  refreshNoteEditorState();
+  return true;
+}
+
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
-  // El panel "Formato" (Aa/negrita/listas/etc.) se queda abierto a
-  // proposito mientras se selecciona texto dentro de #note-body (ver el
-  // comentario junto a noteFormatPopover mas arriba) -- pero si el
-  // usuario empieza a escribir de verdad, el panel puede quedar tapando
-  // justo la linea donde esta escribiendo. Se cierra solo con cualquier
-  // tecla que produzca/borre contenido (letra, Intro, Backspace/Supr,
-  // Tab) sin modificador -- los atajos con Ctrl/Cmd (negrita, listas...)
-  // no cuentan como "escribir", el panel se queda abierto para ellos
-  // igual que al clicar el boton correspondiente.
-  if (!noteFormatPopover.classList.contains('hidden') && !e.ctrlKey && !e.metaKey && !e.altKey
-    && (e.key.length === 1 || e.key === 'Enter' || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Tab')) {
-    closeNoteFormatPopover();
-  }
-  if (isVimModeEnabled()) {
-    if (noteEditorVimSubMode === 'normal') {
-      handleVimNormalKeydown(e);
-      return;
-    }
-    if (noteEditorVimSubMode === 'visual') {
-      handleVimVisualKeydown(e);
-      return;
-    }
-    if (e.key === 'Escape') {
-      // stopPropagation es imprescindible: settings.js tiene un atajo
-      // GLOBAL de Escape (document, no solo aqui) que cierra el editor
-      // de notas entero -- sin cortar la propagacion, el Esc para entrar
-      // en modo Normal tambien burbujeaba hasta ese atajo y cerraba la
-      // nota (con el aviso de cambios sin guardar si tocaba), visto en
-      // pruebas.
-      e.preventDefault();
-      e.stopPropagation();
-      setVimSubMode('normal');
-      return;
-    }
-  }
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    if (handleNoteQuoteEnterExit()) {
+      e.preventDefault();
+      return;
+    }
     if (handleNoteHighlightAwareEnter()) {
       e.preventDefault();
       return;
@@ -6417,9 +6840,9 @@ function legacyNoteBodyToHtml(text) {
 // Fase 4 del rediseño movil: el titulo de una nota ya no se escribe a
 // mano (se quito el campo #note-title, ver el editor mas abajo), se
 // deriva SIEMPRE de la primera linea del cuerpo -- misma logica EXACTA
-// que deriveTitleFromBody en server/routes/notes.js, duplicada aqui a
+// que deriveTitleFromBody en routes-local/notes.js, duplicada aqui a
 // proposito porque este proyecto no tiene ningun mecanismo para
-// compartir codigo entre servidor y navegador sin meter un build nuevo.
+// compartir codigo entre las rutas y la interfaz sin meter un build nuevo.
 // Se usa tanto para la etiqueta de solo lectura del editor (en vivo,
 // sin esperar a guardar) como para la vista previa en las listas/
 // galeria de notas.
@@ -6544,7 +6967,7 @@ function noteEntrySnapshot(note) {
 function captureActiveOpenNoteFromDom() {
   const entry = findOpenNote(state.activeOpenNoteKey);
   if (!entry) return;
-  entry.bodyHtml = NOTE_EDITOR_BODY.innerHTML;
+  entry.bodyHtml = serializeAssetImages(NOTE_EDITOR_BODY);
   entry.title = deriveTitleFromBodyClient(entry.bodyHtml, 'html');
   // entry.folderId ya no se toca aqui -- el editor no tiene desplegable
   // de carpeta (quitado en esta ronda, ver CLAUDE.md/regla de
@@ -6572,46 +6995,24 @@ function refreshNoteTitlePreview(title) {
 // una etiqueta de solo lectura siempre, no hace falta desactivarla).
 function applyNoteEditorReadMode(readOnly) {
   NOTE_EDITOR_BODY.contentEditable = readOnly ? 'false' : 'true';
-  const modeBtn = document.getElementById('note-editor-read-mode-btn');
-  modeBtn.textContent = readOnly ? 'Editar' : 'Modo lectura';
-  modeBtn.setAttribute('aria-pressed', readOnly ? 'true' : 'false');
-  document.querySelectorAll('#note-format-popover .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
-  document.getElementById('note-format-btn').disabled = readOnly;
+  // En solo lectura la barra de formato entera sobra (no hay nada que
+  // formatear), asi que se oculta en vez de dejarla ahi desactivada --
+  // de paso el texto gana la pantalla que ocupaba.
+  document.getElementById('note-body-toolbar').classList.toggle('hidden', readOnly);
+  document.querySelectorAll('#note-body-toolbar .note-editor-btn[data-cmd], #note-table-insert-btn, #note-image-insert-btn').forEach((b) => { b.disabled = readOnly; });
   if (readOnly) {
-    document.getElementById('note-table-context-toolbar').classList.add('hidden');
-    document.getElementById('btn-delete-note').classList.add('hidden');
-    closeNoteFormatPopover();
-  }
-  document.querySelector('#note-form button[type="submit"]').classList.toggle('hidden', readOnly);
-  // El indicativo de modo vim (si esta activado) no tiene sentido en
-  // solo lectura -- refreshVimIndicator ya lo oculta solo mirando
-  // contentEditable, pero hay que llamarlo aqui para que se actualice en
-  // cuanto cambia el modo lectura, no solo al tocar algo del vim.
-  refreshVimIndicator();
+    }
 }
-
-document.getElementById('note-editor-read-mode-btn').addEventListener('click', () => {
-  const entry = findOpenNote(state.activeOpenNoteKey);
-  if (!entry) return;
-  entry.readMode = !entry.readMode;
-  // Antes de aplicar el modo lectura hay que dejar "Eliminar" en el
-  // estado que le toca segun si la nota tiene id (igual que hace
-  // loadOpenNoteIntoDom) -- applyNoteEditorReadMode solo AÑADE el
-  // ocultado cuando toca, nunca lo deshace por su cuenta.
-  document.getElementById('btn-delete-note').classList.toggle('hidden', !entry.id);
-  applyNoteEditorReadMode(entry.readMode);
-});
 
 function loadOpenNoteIntoDom(entry) {
   document.getElementById('note-id').value = entry.id || '';
   refreshNoteTitlePreview(entry.title);
-  NOTE_EDITOR_BODY.innerHTML = entry.bodyHtml;
+  NOTE_EDITOR_BODY.innerHTML = prepareAssetHtmlForDom(entry.bodyHtml);
+  hydrateAssetImages(NOTE_EDITOR_BODY);
   resetNoteEditorToolbar();
-  document.getElementById('btn-delete-note').classList.toggle('hidden', !entry.id);
   noteModalFavorite = entry.favorite;
   refreshNoteFavoriteBtn();
   applyNoteEditorReadMode(entry.readMode);
-  setVimSubMode('insert');
 }
 
 function switchActiveOpenNote(key) {
@@ -6621,7 +7022,6 @@ function switchActiveOpenNote(key) {
   if (!entry) return;
   state.activeOpenNoteKey = key;
   loadOpenNoteIntoDom(entry);
-  renderNoteSectionsPanel();
 }
 
 // Quita una nota de la lista de abiertas SIN preguntar nada (el aviso de
@@ -6638,6 +7038,15 @@ function removeOpenNoteAndAdvance(key) {
   } else {
     state.activeOpenNoteKey = null;
     document.getElementById('note-editor-view').classList.add('hidden');
+    stopNoteEditorViewportAnchor();
+    // El icono de esquina de tabla vive en <body> con position:fixed, no
+    // dentro del editor: al salir hay que esconderlo a mano o se queda
+    // flotando encima del listado de notas.
+    stopTableManualMove();
+    tableCornerBtn.classList.add('hidden');
+    tableMenuPopover.classList.add('hidden');
+    document.getElementById('note-table-toolbar').classList.add('hidden');
+    document.getElementById('note-body-toolbar').classList.remove('hidden');
     NOTE_EDITOR_BODY.innerHTML = '';
   }
 }
@@ -6651,34 +7060,233 @@ function closeOpenNote(key) {
   const entry = findOpenNote(key);
   if (!entry) return;
   if (key === state.activeOpenNoteKey) captureActiveOpenNoteFromDom();
-  if (isOpenNoteDirty(entry)) {
+  if (isMobileLayout()) {
+    // En movil hay autoguardado, asi que preguntar "¿cerrar sin
+    // guardar?" no tenia ningun sentido -- y encima el temporizador del
+    // autoguardado seguia vivo tras cerrar, asi que guardaba igual
+    // despues de haber dicho que no (justo lo que reporto Koku: "me
+    // dice de salir sin guardar, pero al entrar me lo ha guardado").
+    // Ahora se guarda lo que quede pendiente y se cierra sin preguntar
+    // nada.
+    flushMobileNoteAutosave(entry);
+  } else if (isOpenNoteDirty(entry)) {
     const label = entry.title || 'Nota sin título';
     if (!confirm(`"${label}" tiene cambios sin guardar. ¿Cerrar sin guardar?`)) return;
   }
   removeOpenNoteAndAdvance(key);
-  renderNoteSectionsPanel();
 }
 
 // "openNoteInEditor": si la nota (con id real) ya esta abierta, solo se
 // activa -- no se duplica en la lista de notas abiertas. Si no, se anade
 // como una entrada nueva y se activa.
-function openNoteInEditor(note) {
+// readMode: se decide AQUI, al abrir desde el listado (clic normal en la
+// fila = editar; el boton de "solo lectura" de la fila = leer). Dentro de
+// la nota ya no hay forma de alternar -- para cambiar de modo se sale y
+// se vuelve a entrar por el otro camino, tal y como lo pidio Koku.
+function openNoteInEditor(note, { readMode = false } = {}) {
   const existing = note ? state.openNotes.find((n) => n.id === note.id) : null;
   if (existing) {
     switchActiveOpenNote(existing.key);
+    existing.readMode = readMode;
+    applyNoteEditorReadMode(readMode);
   } else {
     if (state.activeOpenNoteKey) captureActiveOpenNoteFromDom();
     const entry = noteEntrySnapshot(note);
+    entry.readMode = readMode;
     state.openNotes.push(entry);
     state.activeOpenNoteKey = entry.key;
     loadOpenNoteIntoDom(entry);
   }
-  renderNoteSectionsPanel();
   document.getElementById('note-editor-view').classList.remove('hidden');
+  startNoteEditorViewportAnchor();
   // Ya no hay campo de titulo al que llevar el foco (Fase 4) -- el
   // cuerpo es el unico sitio donde se escribe de verdad.
   NOTE_EDITOR_BODY.focus();
 }
+
+// ---------------------------------------------------------------------
+// El editor, clavado al trozo de pantalla que de verdad se ve.
+//
+// Con el teclado abierto, el telefono NO encoge la ventana: la deja
+// igual de alta y tapa la parte de abajo. Una pantalla fija a inset:0
+// sigue midiendo la ventana ENTERA, asi que su mitad inferior queda
+// debajo del teclado -- y el sistema deja arrastrar toda la vista para
+// llegar a ella. Eso es el segundo scroll que se notaba: no era del
+// texto, era la vista entera moviendose.
+//
+// visualViewport es justo lo que dice cuanto se ve de verdad y donde
+// empieza: fijando ahi el alto y el desplazamiento del editor, no queda
+// nada fuera y no hay nada que arrastrar. La cabecera y la barra de
+// formato se quedan quietas todo el rato, que es lo que hacia falta para
+// poder tocar una tabla con calma.
+// ---------------------------------------------------------------------
+let noteEditorViewportAnchored = false;
+
+// Trae el CURSOR a la zona visible del editor -- se llama cuando el
+// teclado del movil cambia el alto disponible (abrirse/cerrarse): el
+// editor se encoge para no quedar debajo del teclado, pero nada movia el
+// contenido, asi que la linea/casilla donde estabas escribiendo se
+// quedaba tapada detras ("no tiene en cuenta el teclado del movil").
+function scrollNoteCaretIntoView() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  let node = sel.anchorNode;
+  if (!node || !NOTE_EDITOR_BODY.contains(node)) return;
+  const range = sel.getRangeAt(0).cloneRange();
+  range.collapse(true);
+  let rect = range.getClientRects()[0] || range.getBoundingClientRect();
+  if (!rect || (rect.top === 0 && rect.bottom === 0 && rect.height === 0)) {
+    // Un rango colapsado en una linea/casilla vacia no tiene caja: se usa
+    // la del elemento donde esta el cursor.
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    if (!node || !node.getBoundingClientRect) return;
+    rect = node.getBoundingClientRect();
+  }
+  const visible = NOTE_EDITOR_BODY.getBoundingClientRect();
+  const margen = 28; // un poco de aire, que el cursor no quede pegado al borde
+  if (rect.bottom > visible.bottom - margen) {
+    NOTE_EDITOR_BODY.scrollTop += rect.bottom - (visible.bottom - margen);
+  } else if (rect.top < visible.top + margen) {
+    NOTE_EDITOR_BODY.scrollTop -= (visible.top + margen) - rect.top;
+  }
+}
+
+// Alto del hueco visible la ultima vez -- solo cuando CAMBIA (el teclado
+// se abre o se cierra) se recoloca el cursor; los demas avisos de
+// visualViewport (scroll) no deben pelearse con el scroll del usuario.
+let lastNoteViewportHeight = null;
+
+function applyNoteEditorViewportAnchor() {
+  const view = document.getElementById('note-editor-view');
+  const vv = window.visualViewport;
+  if (!vv || view.classList.contains('hidden')) return;
+  // Si el sistema ha desplazado la PAGINA para dejar sitio al teclado,
+  // se devuelve a cero: con la pagina quieta ya no queda ese segundo
+  // scroll "general" que se podia arrastrar, y el editor se ajusta solo
+  // al hueco que de verdad se ve.
+  if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+  const cambioDeAlto = lastNoteViewportHeight !== null && Math.abs(lastNoteViewportHeight - vv.height) > 1;
+  lastNoteViewportHeight = vv.height;
+  view.style.height = `${vv.height}px`;
+  view.style.transform = `translateY(${vv.offsetTop}px)`;
+  // En el siguiente pintado el editor ya tiene su alto nuevo: es cuando
+  // se puede saber si el cursor quedo fuera y cuanto hay que moverse.
+  if (cambioDeAlto) requestAnimationFrame(scrollNoteCaretIntoView);
+}
+
+function startNoteEditorViewportAnchor() {
+  // Con el editor abierto, la PAGINA de debajo no se desplaza (misma
+  // idea que body.mobile-day-scroll-lock en la vista diaria): si puede
+  // desplazarse, el sistema la mueve al abrir el teclado y acabas con
+  // dos pantallas apiladas -- la cabecera del listado de notas asomando
+  // por encima de la del editor.
+  document.body.classList.add('note-editor-open');
+  applyNoteEditorViewportAnchor();
+  if (noteEditorViewportAnchored || !window.visualViewport) return;
+  noteEditorViewportAnchored = true;
+  window.visualViewport.addEventListener('resize', applyNoteEditorViewportAnchor);
+  window.visualViewport.addEventListener('scroll', applyNoteEditorViewportAnchor);
+}
+
+function stopNoteEditorViewportAnchor() {
+  document.body.classList.remove('note-editor-open');
+  lastNoteViewportHeight = null;
+  const view = document.getElementById('note-editor-view');
+  view.style.height = '';
+  view.style.transform = '';
+  if (!noteEditorViewportAnchored) return;
+  noteEditorViewportAnchored = false;
+  window.visualViewport.removeEventListener('resize', applyNoteEditorViewportAnchor);
+  window.visualViewport.removeEventListener('scroll', applyNoteEditorViewportAnchor);
+}
+
+// ---------------------------------------------------------------------
+// El teclado del movil y las pantallas completas
+// ---------------------------------------------------------------------
+// Mismo problema que ya se arreglo en el editor de notas, pero en TODAS
+// las demas pantallas completas (Gimnasio, Viajes, Finanzas, el listado
+// de Notas...). Lo vio Koku escribiendo en el buscador de ejercicios:
+// "me deja moverme todo hasta abajo y ver la barra de estado estando el
+// teclado en la pantalla".
+//
+// La causa es la de siempre: con el teclado abierto el telefono NO
+// encoge la ventana, la deja igual de alta y tapa la parte de abajo. Una
+// capa `position: fixed; inset: 0` (que es lo que son todas las
+// .my-space-view) sigue midiendo la ventana ENTERA, asi que su mitad
+// inferior queda debajo del teclado y el sistema deja arrastrar la vista
+// entera para llegar a ella -- arrastrando de paso la barra de estado a
+// la vista.
+//
+// La cura es la misma: mientras haya un campo de texto enfocado dentro
+// de una de esas capas, se le da el alto y el desplazamiento REALES que
+// dice visualViewport, y se deja la pagina quieta. Asi no queda nada
+// fuera y no hay nada que arrastrar.
+//
+// El editor de notas NO pasa por aqui: tiene su propio anclaje, que
+// ademas mueve el cursor para que no lo tape el teclado (start/
+// stopNoteEditorViewportAnchor). Dos anclajes sobre la misma capa se
+// pisarian.
+let capaAncladaAlTeclado = null;
+
+function aplicarAnclajeDeCapa() {
+  const vv = window.visualViewport;
+  if (!capaAncladaAlTeclado || !vv) return;
+  // Si el sistema ya ha desplazado la PAGINA para dejar sitio al
+  // teclado, se devuelve a cero: eso es justo el scroll "general" que se
+  // podia arrastrar hasta ver la barra de estado.
+  if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+  capaAncladaAlTeclado.style.height = `${vv.height}px`;
+  capaAncladaAlTeclado.style.transform = `translateY(${vv.offsetTop}px)`;
+}
+
+function empezarAnclajeDeCapa(capa) {
+  if (capaAncladaAlTeclado === capa) return;
+  soltarAnclajeDeCapa();
+  capaAncladaAlTeclado = capa;
+  document.body.classList.add('capa-anclada-al-teclado');
+  aplicarAnclajeDeCapa();
+  if (!window.visualViewport) return;
+  window.visualViewport.addEventListener('resize', aplicarAnclajeDeCapa);
+  window.visualViewport.addEventListener('scroll', aplicarAnclajeDeCapa);
+}
+
+function soltarAnclajeDeCapa() {
+  if (!capaAncladaAlTeclado) return;
+  // Se limpian los estilos EN LINEA que puso el anclaje: si se quedaran,
+  // la capa mantendria el alto del hueco con teclado y quedaria corta al
+  // cerrarlo.
+  capaAncladaAlTeclado.style.height = '';
+  capaAncladaAlTeclado.style.transform = '';
+  capaAncladaAlTeclado = null;
+  document.body.classList.remove('capa-anclada-al-teclado');
+  if (!window.visualViewport) return;
+  window.visualViewport.removeEventListener('resize', aplicarAnclajeDeCapa);
+  window.visualViewport.removeEventListener('scroll', aplicarAnclajeDeCapa);
+}
+
+// Solo los campos donde de verdad sale el teclado. Un boton o una
+// casilla no lo abren y no deben anclar nada.
+const CAMPOS_CON_TECLADO = 'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="color"]), textarea, [contenteditable="true"]';
+
+document.addEventListener('focusin', (e) => {
+  const campo = e.target.closest ? e.target.closest(CAMPOS_CON_TECLADO) : null;
+  if (!campo) return;
+  const capa = campo.closest('.my-space-view:not(.hidden):not(.note-editor-view)');
+  if (capa) empezarAnclajeDeCapa(capa);
+});
+
+document.addEventListener('focusout', (e) => {
+  const campo = e.target.closest ? e.target.closest(CAMPOS_CON_TECLADO) : null;
+  if (!campo) return;
+  // Al saltar de un campo a otro llega el focusout del primero ANTES que
+  // el focusin del segundo: sin esperar un ciclo, el anclaje se soltaria
+  // y volveria a ponerse en cada salto, dando un parpadeo.
+  setTimeout(() => {
+    const activo = document.activeElement;
+    if (activo && activo.closest && activo.closest(CAMPOS_CON_TECLADO)) return;
+    soltarAnclajeDeCapa();
+  }, 0);
+});
 
 // "Volver": cierra cada nota abierta una a una (mismo aviso de cambios
 // sin guardar que cerrar una sola desde el panel de Secciones). Si el
@@ -6692,186 +7300,6 @@ function closeNoteEditorView() {
   }
 }
 
-// ---------------------------------------------------------------------
-// Panel "Secciones": lista de notas abiertas a la vez. Cada fila tiene
-// un desplegable ("ver secciones de dentro" -- placeholder por ahora,
-// el editor no tiene todavia ningun concepto de titulos/encabezados
-// dentro del cuerpo de la nota, eso queda para una ronda futura), el
-// nombre (clic = activarla), un punto si tiene cambios sin guardar, y un
-// boton para cerrarla.
-// ---------------------------------------------------------------------
-
-function renderNoteSectionsPanel() {
-  const list = document.getElementById('note-sections-list');
-  if (!list) return;
-  list.innerHTML = '';
-  state.openNotes.forEach((entry) => {
-    const row = document.createElement('div');
-    row.className = 'note-open-item' + (entry.key === state.activeOpenNoteKey ? ' is-active' : '');
-
-    const expandBtn = document.createElement('button');
-    expandBtn.type = 'button';
-    expandBtn.className = 'note-open-item-expand-btn';
-    expandBtn.setAttribute('aria-label', entry.expanded ? 'Ocultar secciones' : 'Ver secciones');
-    expandBtn.textContent = entry.expanded ? '▾' : '▸';
-    expandBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      entry.expanded = !entry.expanded;
-      renderNoteSectionsPanel();
-    });
-    row.appendChild(expandBtn);
-
-    const nameBtn = document.createElement('button');
-    nameBtn.type = 'button';
-    nameBtn.className = 'note-open-item-name';
-    nameBtn.textContent = entry.title || 'Nota sin título';
-    nameBtn.addEventListener('click', () => switchActiveOpenNote(entry.key));
-    row.appendChild(nameBtn);
-
-    if (isOpenNoteDirty(entry)) {
-      const dot = document.createElement('span');
-      dot.className = 'note-open-item-dirty-dot';
-      dot.setAttribute('aria-label', 'Cambios sin guardar');
-      row.appendChild(dot);
-    }
-
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'note-open-item-close-btn';
-    closeBtn.setAttribute('aria-label', 'Cerrar nota');
-    closeBtn.textContent = '✕';
-    closeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeOpenNote(entry.key);
-    });
-    row.appendChild(closeBtn);
-
-    list.appendChild(row);
-
-    if (entry.expanded) {
-      const placeholder = document.createElement('div');
-      placeholder.className = 'note-open-item-sections-placeholder';
-      placeholder.textContent = 'Sin secciones todavía.';
-      list.appendChild(placeholder);
-    }
-  });
-}
-
-// ---------------------------------------------------------------------
-// Panel "Arbol": navegacion tipo arbol (plegable por carpeta) de TODAS
-// las carpetas/notas -- reutiliza state.noteFolders/state.notes, ya
-// cargados enteros de antes (loadNoteFolders/loadNotes), sin ninguna
-// llamada nueva a la API. El plegado de cada carpeta se guarda aparte
-// (noteTreeExpandedFolderIds, por id) para que sobreviva a que
-// state.noteFolders se recargue con objetos nuevos.
-// ---------------------------------------------------------------------
-const noteTreeExpandedFolderIds = new Set();
-
-function renderNoteTreeLevel(container, parentId, depth) {
-  const activeEntry = findOpenNote(state.activeOpenNoteKey);
-  const folders = state.noteFolders
-    .filter((f) => f.parentId === parentId)
-    .slice()
-    .sort(compareNoteListItems);
-  const notes = (state.notes || [])
-    .filter((n) => n.folderId === parentId)
-    .slice()
-    .sort(compareNoteListItems);
-
-  folders.forEach((folder) => {
-    const expanded = noteTreeExpandedFolderIds.has(folder.id);
-    const row = document.createElement('div');
-    row.className = 'note-tree-row note-tree-folder-row';
-    row.style.paddingLeft = `${0.4 + depth}rem`;
-
-    const toggle = document.createElement('span');
-    toggle.className = 'note-tree-toggle';
-    toggle.textContent = expanded ? '▾' : '▸';
-    row.appendChild(toggle);
-
-    const icon = document.createElement('span');
-    icon.className = 'note-tree-folder-icon';
-    icon.innerHTML = FOLDER_SVG;
-    row.appendChild(icon);
-
-    const name = document.createElement('span');
-    name.className = 'note-tree-item-name';
-    name.textContent = folder.name;
-    row.appendChild(name);
-
-    row.addEventListener('click', () => {
-      if (expanded) noteTreeExpandedFolderIds.delete(folder.id);
-      else noteTreeExpandedFolderIds.add(folder.id);
-      renderNoteTreePanel();
-    });
-    container.appendChild(row);
-    if (expanded) renderNoteTreeLevel(container, folder.id, depth + 1);
-  });
-
-  notes.forEach((note) => {
-    const row = document.createElement('div');
-    row.className = 'note-tree-row note-tree-note-row' + (activeEntry && activeEntry.id === note.id ? ' is-active' : '');
-    row.style.paddingLeft = `${0.4 + depth + 1}rem`;
-
-    const icon = document.createElement('span');
-    icon.className = 'note-tree-note-icon';
-    icon.innerHTML = NOTE_FILE_SVG;
-    row.appendChild(icon);
-
-    const name = document.createElement('span');
-    name.className = 'note-tree-item-name';
-    name.textContent = note.title;
-    row.appendChild(name);
-
-    row.addEventListener('click', () => openNoteInEditor(note));
-    container.appendChild(row);
-  });
-}
-
-function renderNoteTreePanel() {
-  const container = document.getElementById('note-tree-list');
-  if (!container) return;
-  container.innerHTML = '';
-  if (state.noteFolders.length === 0 && (state.notes || []).length === 0) {
-    container.innerHTML = '<p class="empty-hint">No hay notas todavía.</p>';
-    return;
-  }
-  renderNoteTreeLevel(container, null, 0);
-}
-
-document.getElementById('note-tree-new-btn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  openNoteInEditor(null);
-});
-
-// Solo uno de los dos paneles laterales (Arbol/Secciones) se ve a la vez
-// -- volver a clicar el que ya esta activo lo cierra sin abrir el otro.
-function setActiveNoteEditorPanel(panel) {
-  const treePanel = document.getElementById('note-tree-panel');
-  const sectionsPanel = document.getElementById('note-sections-panel');
-  const treeBtn = document.getElementById('note-editor-toggle-tree');
-  const sectionsBtn = document.getElementById('note-editor-toggle-sections');
-  treePanel.classList.toggle('hidden', panel !== 'tree');
-  sectionsPanel.classList.toggle('hidden', panel !== 'sections');
-  treeBtn.classList.toggle('is-active', panel === 'tree');
-  sectionsBtn.classList.toggle('is-active', panel === 'sections');
-  if (panel === 'tree') renderNoteTreePanel();
-}
-
-document.getElementById('note-editor-toggle-tree').addEventListener('click', () => {
-  const isOpen = !document.getElementById('note-tree-panel').classList.contains('hidden');
-  setActiveNoteEditorPanel(isOpen ? null : 'tree');
-});
-
-document.getElementById('note-editor-toggle-sections').addEventListener('click', () => {
-  const isOpen = !document.getElementById('note-sections-panel').classList.contains('hidden');
-  setActiveNoteEditorPanel(isOpen ? null : 'sections');
-});
-
-document.getElementById('btn-new-note').addEventListener('click', () => openNoteInEditor(null));
-// Atajo rapido en la topbar, junto a "+ Nuevo evento"/"+ Nueva tarea" --
-// abre directamente el editor, sin tener que entrar antes en Mi espacio.
-document.getElementById('btn-new-note-topbar').addEventListener('click', () => openNoteInEditor(null));
 document.getElementById('btn-close-note-editor').addEventListener('click', closeNoteEditorView);
 
 // El dot de "sin guardar" del panel de Secciones debe reflejar lo que se
@@ -6881,9 +7309,31 @@ document.getElementById('btn-close-note-editor').addEventListener('click', close
 // propio cuerpo dentro de captureActiveOpenNoteFromDom), no solo al
 // cambiar de nota o guardar.
 NOTE_EDITOR_BODY.addEventListener('input', () => {
+  // Borrar el texto de un resaltado a mano (seleccionar y Suprimir, o
+  // ir borrando letra a letra) deja el <span> vacio: sin texto dentro
+  // no hay nada que se pueda seleccionar ni borrar, pero el CSS le sigue
+  // pintando su padding/borde redondeado -- la "marca que se queda ahi"
+  // que reporto Koku. Se barren aqui, en cada cambio del contenido, y no
+  // solo despues de una accion de resaltado.
+  removeEmptyNoteHighlights();
   captureActiveOpenNoteFromDom();
-  renderNoteSectionsPanel();
   scheduleMobileNoteAutosave();
+  // Escribiendo cerca del borde de abajo (con el teclado ya abierto), el
+  // navegador no siempre acerca el cursor solo cuando el scroll es de un
+  // contenedor interno como este -- se comprueba en cada cambio. Si el
+  // cursor ya se ve, no hace nada.
+  scrollNoteCaretIntoView();
+});
+
+// Mientras el cursor esta dentro del texto de la nota, el teclado del
+// sistema esta abierto: se marca en <body> para que la barra inferior
+// (fija abajo del todo) se aparte -- si no, queda flotando justo encima
+// del teclado. Vuelve sola en cuanto el cursor sale del texto.
+NOTE_EDITOR_BODY.addEventListener('focus', () => {
+  document.body.classList.add('note-typing');
+});
+NOTE_EDITOR_BODY.addEventListener('blur', () => {
+  document.body.classList.remove('note-typing');
 });
 
 // Autoguardado -- SOLO en movil, pedido explicito de Koku (en
@@ -6893,15 +7343,34 @@ NOTE_EDITOR_BODY.addEventListener('input', () => {
 // guardado -- el dialogo de "cambios sin guardar" de closeOpenNote()
 // se queda como red de seguridad para el hueco de tiempo entre el
 // ultimo tecleo y que el debounce dispare.
+// "Estamos en el visor movil": mismo umbral que el CSS (860px), en un
+// unico sitio para que no se repita el matchMedia suelto por el
+// archivo.
+function isMobileLayout() {
+  return window.matchMedia('(max-width: 859px)').matches;
+}
+
 let mobileNoteAutosaveTimer = null;
 function scheduleMobileNoteAutosave() {
-  if (!window.matchMedia('(max-width: 859px)').matches) return;
+  if (!isMobileLayout()) return;
   clearTimeout(mobileNoteAutosaveTimer);
   mobileNoteAutosaveTimer = setTimeout(() => {
     const entry = findOpenNote(state.activeOpenNoteKey);
     if (!entry || entry.readMode) return;
     document.getElementById('note-form').requestSubmit();
   }, 1500);
+}
+
+// Guardar YA lo que estuviera esperando al debounce, y cancelar el
+// temporizador. Se llama al cerrar una nota en movil: sin cancelarlo,
+// el guardado pendiente se disparaba DESPUES de cerrar, sobre una nota
+// que ya no era la activa.
+function flushMobileNoteAutosave(entry) {
+  clearTimeout(mobileNoteAutosaveTimer);
+  mobileNoteAutosaveTimer = null;
+  if (!entry || entry.readMode) return;
+  if (!isOpenNoteDirty(entry)) return;
+  document.getElementById('note-form').requestSubmit();
 }
 
 document.getElementById('note-form').addEventListener('submit', async (e) => {
@@ -6922,9 +7391,16 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
   // la nota activa (es el unico <div contenteditable> que existe), asi
   // que NOTE_EDITOR_BODY en este momento es justo el contenido de "entry".
   const hasNoteContent = NOTE_EDITOR_BODY.textContent.trim() !== '' || NOTE_EDITOR_BODY.querySelector('img, table');
+  // Una nota NUEVA sin nada escrito no se guarda: abrir el editor y
+  // salirse sin escribir no debe dejar una "Nota sin título" vacia en el
+  // listado (el cierre en movil dispara este mismo submit via
+  // flushMobileNoteAutosave, que considera "con cambios" cualquier nota
+  // sin id). Una nota YA guardada que se vacia si se guarda vacia, eso
+  // es una edicion normal.
+  if (!entry.id && !hasNoteContent) return;
   const payload = {
-    // Fase 4: ya no se manda titulo, el servidor lo deriva del body
-    // (ver deriveTitleFromBody en server/routes/notes.js).
+    // Fase 4: ya no se manda titulo, la ruta lo deriva del body
+    // (ver deriveTitleFromBody en routes-local/notes.js).
     body: hasNoteContent ? entry.bodyHtml : null,
     bodyFormat: 'html',
     folderId: entry.folderId,
@@ -6948,19 +7424,6 @@ document.getElementById('note-form').addEventListener('submit', async (e) => {
   entry.savedFolderId = entry.folderId;
   entry.savedFavorite = entry.favorite;
   document.getElementById('note-id').value = entry.id;
-  document.getElementById('btn-delete-note').classList.remove('hidden');
-  renderNoteSectionsPanel();
-  await loadNotes();
-  renderNotesView();
-});
-
-document.getElementById('btn-delete-note').addEventListener('click', async () => {
-  const entry = findOpenNote(state.activeOpenNoteKey);
-  if (!entry || !entry.id) return;
-  if (!confirm('¿Eliminar esta nota?')) return;
-  await api(`/api/notes/${entry.id}`, { method: 'DELETE' });
-  removeOpenNoteAndAdvance(entry.key);
-  renderNoteSectionsPanel();
   await loadNotes();
   renderNotesView();
 });
@@ -7025,7 +7488,6 @@ function closeNoteFolderModal() {
   document.getElementById('note-folder-modal').classList.add('hidden');
 }
 
-document.getElementById('btn-new-note-folder').addEventListener('click', () => openNoteFolderModal(null));
 document.getElementById('btn-cancel-note-folder').addEventListener('click', closeNoteFolderModal);
 document.getElementById('btn-close-note-folder').addEventListener('click', closeNoteFolderModal);
 
@@ -7065,267 +7527,6 @@ document.getElementById('btn-delete-note-folder').addEventListener('click', asyn
 });
 
 // ---------------------------------------------------------------------
-// Atajos de teclado: lista fija de acciones que ofrece la app (no se
-// pueden inventar acciones nuevas), y para cada una el USUARIO decide que
-// tecla la dispara, desde Configuracion > Atajos de teclado (settings.js
-// dibuja esa lista; aqui solo esta el almacenamiento y quien los ejecuta
-// de verdad). Es una preferencia de ESTE dispositivo/navegador, por eso
-// vive en localStorage y no en el servidor.
-// ---------------------------------------------------------------------
-// Mueve el panel de recordatorios un dia adelante/atras: si ya estabas
-// viendo un dia concreto, se mueve desde ESE dia; si estabas en "Proximos",
-// arranca desde hoy. Reutiliza showDayInReminders, que ya cambia el panel
-// a modo "dia" y pide los eventos/tareas de esa fecha al servidor.
-function shiftRemindersDay(delta) {
-  const base = state.remindersMode === 'day' && state.remindersDayDate ? state.remindersDayDate : new Date();
-  const next = new Date(base);
-  next.setDate(next.getDate() + delta);
-  showDayInReminders(next);
-}
-
-const SHORTCUT_ACTIONS = [
-  { id: 'new-event', label: 'Nuevo evento', run: () => document.getElementById('btn-new-event').click() },
-  { id: 'open-settings', label: 'Abrir configuración', run: () => document.getElementById('btn-settings').click() },
-  { id: 'prev-month', label: 'Mes anterior', run: () => document.getElementById('nav-prev').click() },
-  { id: 'next-month', label: 'Mes siguiente', run: () => document.getElementById('nav-next').click() },
-  { id: 'prev-day', label: 'Día anterior', run: () => shiftRemindersDay(-1) },
-  { id: 'next-day', label: 'Día siguiente', run: () => shiftRemindersDay(1) },
-];
-// Atajos de fabrica: el usuario puede cambiarlos, quitarlos, o anadir mas
-// de una combinacion para la MISMA accion (ej. "n" Y "ctrl+shift+a" abren
-// las dos "Nuevo evento"). Un array vacio [] guardado explicitamente
-// significa "sin ningun atajo", distinto de "todavia no tocado" (que usa
-// estos por defecto).
-const DEFAULT_SHORTCUTS = { 'new-event': ['n'], 'prev-day': ['arrowleft'], 'next-day': ['arrowright'] };
-
-// Lee lo guardado y SIEMPRE devuelve arrays — si venia del formato viejo
-// (un string suelto por accion, de antes de que se pudiera tener mas de
-// una combinacion), lo envuelve en un array de un elemento sin perder lo
-// que ya tenias configurado.
-function getShortcutMap() {
-  let stored = {};
-  try {
-    stored = JSON.parse(localStorage.getItem('keyboardShortcuts') || '{}');
-  } catch (e) {
-    stored = {};
-  }
-  const map = {};
-  SHORTCUT_ACTIONS.forEach((a) => {
-    if (Object.prototype.hasOwnProperty.call(stored, a.id)) {
-      const value = stored[a.id];
-      map[a.id] = Array.isArray(value) ? value : (value ? [value] : []);
-    } else {
-      map[a.id] = DEFAULT_SHORTCUTS[a.id] ? [...DEFAULT_SHORTCUTS[a.id]] : [];
-    }
-  });
-  return map;
-}
-
-function saveShortcutMap(map) {
-  localStorage.setItem('keyboardShortcuts', JSON.stringify(map));
-}
-
-// Anade una combinacion nueva a una accion (no reemplaza las que ya
-// tuviera) — si esa combinacion ya la usaba OTRA accion, se la quita de
-// ahi primero para que no queden dos acciones peleandose por la misma
-// tecla.
-function addShortcut(actionId, combo) {
-  const map = getShortcutMap();
-  SHORTCUT_ACTIONS.forEach((a) => {
-    map[a.id] = map[a.id].filter((c) => c !== combo);
-  });
-  map[actionId].push(combo);
-  saveShortcutMap(map);
-}
-
-function removeShortcut(actionId, combo) {
-  const map = getShortcutMap();
-  map[actionId] = map[actionId].filter((c) => c !== combo);
-  saveShortcutMap(map);
-}
-
-// Convierte un evento de teclado en un identificador estable, ej.
-// "ctrl+shift+n". Devuelve null si lo unico que se ha pulsado es una
-// tecla modificadora sola (Ctrl, Alt...), porque eso no es un atajo
-// valido todavia — se sigue esperando la tecla "de verdad".
-function comboFromEvent(e) {
-  const raw = e.key;
-  if (['Control', 'Alt', 'Shift', 'Meta'].includes(raw)) return null;
-  const parts = [];
-  if (e.ctrlKey) parts.push('ctrl');
-  if (e.altKey) parts.push('alt');
-  if (e.shiftKey) parts.push('shift');
-  if (e.metaKey) parts.push('meta');
-  let key = raw === ' ' ? 'space' : raw.toLowerCase();
-  parts.push(key);
-  return parts.join('+');
-}
-
-const SHORTCUT_KEY_LABELS = {
-  ctrl: 'Ctrl', alt: 'Alt', shift: 'Mayús', meta: 'Cmd',
-  arrowleft: '←', arrowright: '→', arrowup: '↑', arrowdown: '↓',
-  escape: 'Esc', enter: 'Intro', space: 'Espacio', tab: 'Tab',
-};
-
-function displayCombo(combo) {
-  if (!combo) return '';
-  return combo
-    .split('+')
-    .map((part) => SHORTCUT_KEY_LABELS[part] || (part.length === 1 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)))
-    .join(' + ');
-}
-
-// Ejecuta la accion que corresponda al atajo pulsado. Se ignora mientras
-// se esta escribiendo en un campo (input/textarea/select), para no robar
-// letras normales como la "n" mientras rellenas un titulo de evento.
-document.addEventListener('keydown', (e) => {
-  const tag = (e.target.tagName || '').toLowerCase();
-  const isEditable = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
-  if (isEditable) return;
-
-  const combo = comboFromEvent(e);
-  if (!combo) return;
-
-  const map = getShortcutMap();
-  const action = SHORTCUT_ACTIONS.find((a) => map[a.id].includes(combo));
-  if (action) {
-    e.preventDefault();
-    action.run();
-  }
-});
-
-// ---------------------------------------------------------------------
-// Vista: un UNICO modo activo a la vez — Normal o Pantalla completa —
-// que se cambia desde Configuracion > Vista (ver refreshViewTab en
-// settings.js). Cambiar de una a otra deshace la anterior (sale de
-// pantalla completa) en vez de dejarlas acumularse.
-// (Hubo tambien un modo "Ventana flotante", quitado: en el navegador
-// window.open() no es fiable — muchos navegadores abren otra PESTANA en
-// vez de una ventana pequeña — y en Electron habria hecho falta
-// configurar setWindowOpenHandler a mano para controlar el tamaño de la
-// ventana nueva. No compensaba el esfuerzo para lo poco que se usaba.)
-// ---------------------------------------------------------------------
-function getViewMode() {
-  return localStorage.getItem('viewMode') || 'normal';
-}
-
-function setViewMode(mode) {
-  localStorage.setItem('viewMode', mode);
-  // En Electron, ademas de localStorage (que solo puede leer la propia
-  // pagina), se lo decimos tambien al proceso principal — asi puede saber
-  // que vista tocaba ANTES de crear la ventana la proxima vez, en vez de
-  // enterarse ya con la pagina cargada (ver electron/main.js).
-  if (window.electronAPI && window.electronAPI.saveViewMode) window.electronAPI.saveViewMode(mode);
-  document.getElementById('default-view-banner').classList.add('hidden');
-  if (typeof refreshViewTab === 'function') refreshViewTab();
-}
-
-// Aplica de verdad el cambio de modo: deshace lo que hubiera activo y
-// activa lo nuevo. Se llama tanto desde el boton en Configuracion como
-// desde el aviso que sale al cargar la pagina si la vista guardada no es
-// la normal (ver applyViewModePrompt).
-function applyViewMode(mode) {
-  if (window.electronAPI) {
-    // Dentro de la app de escritorio, la pantalla completa la controla la
-    // ventana nativa (proceso principal) en vez de la API de pantalla
-    // completa del navegador — por eso puede activarse sola al arrancar,
-    // sin el aviso de "hace falta un clic" (ver applyViewModePrompt).
-    window.electronAPI.setNativeFullscreen(mode === 'fullscreen');
-  } else if (mode !== 'fullscreen' && document.fullscreenElement) {
-    document.exitFullscreen();
-  }
-
-  if (!window.electronAPI && mode === 'fullscreen' && document.documentElement.requestFullscreen) {
-    document.documentElement.requestFullscreen().catch(() => {});
-  }
-  setViewMode(mode);
-}
-
-// Simetrico al 'fullscreenchange' del navegador (ver mas abajo), pero para
-// cuando Electron sale de pantalla completa nativa por su cuenta (Esc, el
-// propio control de la ventana...) — sin esto, Configuracion > Vista se
-// quedaria diciendo "Pantalla completa" aunque ya no lo estuviera.
-if (window.electronAPI && window.electronAPI.onNativeFullscreenChange) {
-  window.electronAPI.onNativeFullscreenChange((isFullscreen) => {
-    if (isClosingPage) return;
-    if (!isFullscreen && getViewMode() === 'fullscreen') {
-      setViewMode('normal');
-    }
-  });
-}
-
-// Si sales de pantalla completa con Esc o con el propio navegador (no con
-// nuestro control), el modo guardado tiene que volver a "normal" para que
-// no se quede desincronizado. OJO: cerrar la pestana/ventana estando en
-// pantalla completa TAMBIEN dispara este mismo evento (el navegador sale
-// de pantalla completa como parte de cerrarse), y sin este aviso eso
-// borraria "pantalla completa" de la preferencia guardada justo al
-// cerrar la app — pareceria que nunca se guarda. isClosingPage se marca
-// en cuanto empieza a cerrarse/recargarse la pagina, para distinguir ese
-// caso del Esc de verdad y no tocar la preferencia guardada entonces.
-let isClosingPage = false;
-window.addEventListener('pagehide', () => { isClosingPage = true; });
-window.addEventListener('beforeunload', () => { isClosingPage = true; });
-
-document.addEventListener('fullscreenchange', () => {
-  if (isClosingPage) return;
-  if (!document.fullscreenElement && getViewMode() === 'fullscreen') {
-    setViewMode('normal');
-  }
-});
-
-// Al cargar la pagina no podemos activar pantalla completa ni abrir la
-// ventana flotante solos (los navegadores exigen un clic del usuario para
-// eso), asi que si la vista guardada no es la normal mostramos un aviso
-// con un boton para activarla con un clic.
-function applyViewModePrompt() {
-  const mode = getViewMode();
-  const banner = document.getElementById('default-view-banner');
-
-  if (window.electronAPI && mode === 'fullscreen') {
-    // En Electron SI podemos activarla solos (ver applyViewMode), asi que
-    // ni falta el aviso.
-    window.electronAPI.setNativeFullscreen(true);
-    banner.classList.add('hidden');
-    return;
-  }
-
-  if (mode === 'normal' || (mode === 'fullscreen' && document.fullscreenElement)) {
-    banner.classList.add('hidden');
-    return;
-  }
-  const label = mode === 'fullscreen' ? 'pantalla completa' : 'ventana flotante';
-  document.getElementById('default-view-banner-text').textContent = `Tu vista guardada es ${label}.`;
-  document.getElementById('btn-apply-default-view').textContent = mode === 'fullscreen' ? 'Activar' : 'Abrir';
-  banner.dataset.pref = mode;
-  banner.classList.remove('hidden');
-}
-
-document.getElementById('btn-apply-default-view').addEventListener('click', () => {
-  const mode = document.getElementById('default-view-banner').dataset.pref;
-  applyViewMode(mode);
-});
-document.getElementById('btn-dismiss-default-view').addEventListener('click', () => {
-  document.getElementById('default-view-banner').classList.add('hidden');
-});
-
-// ---------------------------------------------------------------------
-// "Mi espacio" (Fase 1): hub con 3 columnas (Proximos / Tareas / Notas,
-// esta ultima vacia por ahora) en vez de los bloques apilados de
-// siempre. Como se accede a el es una preferencia de ESTE dispositivo
-// (localStorage), elegida en Configuracion > Vista > Mi espacio (ver
-// refreshMiEspacioModeOptions en settings.js):
-//   - "panel": el hub vive SIEMPRE dentro de #reminders-panel, al lado
-//     del calendario (sustituye a los 2 bloques apilados de siempre).
-//   - "topbar": el panel lateral se queda exactamente como esta hoy
-//     (Proximos arriba, Tareas fijo abajo); un boton nuevo en la topbar
-//     abre el hub a pantalla completa cuando lo necesites.
-// En los dos casos, los bloques #reminders-top-block/#reminders-tasks-block
-// de SIEMPRE se MUEVEN de sitio (Node.appendChild) en vez de duplicarse,
-// asi que su renderizado (loadReminders, renderTasksList...) no cambia
-// nada, solo cambia DONDE viven en el DOM.
-// ---------------------------------------------------------------------
-// ---------------------------------------------------------------------
 // Estilo de interaccion (Neon/Directo/Cristal, ver Configuracion > Estilo):
 // ajuste por dispositivo, independiente del tema de color -- solo cambia
 // como reaccionan los botones al pasar el raton y los interruptores al
@@ -7345,164 +7546,6 @@ function applyUiStyle() {
   document.documentElement.dataset.uiStyle = getUiStylePreference();
 }
 
-const MY_SPACE_MODE_IDS = ['topbar', 'panel'];
-
-function getMiEspacioMode() {
-  const stored = localStorage.getItem('miEspacioMode');
-  return MY_SPACE_MODE_IDS.includes(stored) ? stored : 'topbar';
-}
-
-// Deja los 2 bloques de siempre en su sitio clasico, uno debajo del otro
-// dentro de #reminders-panel — como si "Mi espacio" no existiera. Fuera
-// de Mi espacio no hace falta la navegacion de dia (ya estan el
-// calendario de al lado y los atajos de teclado) ni tiene sentido
-// arrancar siempre en el dia de hoy, asi que se vuelve al "Proximos" de
-// toda la vida.
-function restoreClassicRemindersPanel() {
-  // La colocacion de verdad de los 3 bloques (sueltos o dentro del slot
-  // agrupado) la hace applyRemindersPanelLayout() -- aqui solo se deja
-  // todo lo demas del panel clasico como siempre.
-  document.getElementById('reminders-day-nav').classList.add('hidden');
-  showUpcomingReminders();
-  applyRemindersPanelLayout();
-}
-
-// Coloca los 3 bloques dentro de las columnas del hub, alli donde el hub
-// este montado ahora mismo (dentro del panel lateral o dentro de la
-// pantalla completa de #my-space-view). Dentro de Mi espacio, Proximos
-// arranca siempre en el dia de hoy (en vez del listado general) con la
-// navegacion de dia visible arriba, porque en modo "boton" el calendario
-// de al lado no se ve mientras Mi espacio esta abierto.
-function moveRemindersIntoHub() {
-  document.getElementById('my-space-col-reminders').appendChild(document.getElementById('reminders-top-block'));
-  document.getElementById('my-space-col-tasks').appendChild(document.getElementById('reminders-tasks-block'));
-  document.getElementById('my-space-col-notes').appendChild(document.getElementById('reminders-notes-block'));
-  document.getElementById('reminders-day-nav').classList.remove('hidden');
-  showDayInReminders(new Date());
-  // Dentro del hub (3 columnas propias, cada una con su sitio) el ajuste
-  // de "agrupar con flechas" no pinta nada -- cada seccion vive siempre
-  // en su propia columna, visible entera.
-  document.getElementById('reminders-panel-switcher').classList.add('hidden');
-  document.getElementById('reminders-panel-grouped-slot').classList.add('hidden');
-  REMINDERS_PANEL_PAGES.forEach((p) => document.getElementById(p.blockId).classList.remove('hidden'));
-}
-
-// Panel lateral clasico (modo "topbar" de Mi espacio, ver mas abajo):
-// que secciones de Recordatorios/Tareas/Notas van MARCADAS. Si hay
-// alguna marcada Y alguna sin marcar, las dos "mitades" comparten un
-// unico hueco (#reminders-panel-grouped-slot): las MARCADAS se ven
-// juntas, apiladas, cada una con su scroll; la flecha cambia TODO el
-// hueco a las NO marcadas (tambien juntas) en vez de mostrar una sola
-// cada vez -- pedido explicito de Koku ("las seleccionadas aparecen
-// juntas... si le doy a la flecha toda la columna que se me cambie a la
-// que no esta seleccionada"). Preferencia de ESTE dispositivo
-// (localStorage, un array de ids de las marcadas), elegida con casillas
-// en Configuracion > Vista > "Panel lateral clasico" (ver
-// refreshRemindersPanelGroupedOptions en settings.js). Marcar TODAS o
-// NINGUNA no activa nada especial -- no habria "las otras" a las que
-// cambiar, asi que se trata como si no hubiera agrupacion (las 3
-// sueltas, siempre visibles, como si esto no existiera). En modo
-// "panel" de Mi espacio (hub de 3 columnas) este ajuste no pinta nada:
-// cada columna ya vive en su propio sitio fijo (ver moveRemindersIntoHub).
-//
-// REMINDERS_PANEL_PAGES esta pensado para poder crecer el dia que haya
-// una 4a seccion: toda la logica de abajo itera sobre el array entero,
-// sin ningun "3" fijo en el codigo.
-const REMINDERS_PANEL_PAGES = [
-  { id: 'reminders', label: 'Recordatorios', blockId: 'reminders-top-block' },
-  { id: 'tasks', label: 'Tareas', blockId: 'reminders-tasks-block' },
-  { id: 'notes', label: 'Notas', blockId: 'reminders-notes-block' },
-];
-// true = el hueco compartido muestra las MARCADAS ahora mismo; false =
-// muestra las NO marcadas. Se reinicia a true cada vez que cambia que
-// secciones estan marcadas (ver refreshRemindersPanelGroupedOptions en
-// settings.js), para no dejarte "atascado" viendo las otras tras tocar
-// el ajuste.
-let remindersPanelShowingChecked = true;
-
-function getRemindersGroupedSections() {
-  let stored;
-  try {
-    stored = JSON.parse(localStorage.getItem('remindersPanelGrouped') || '[]');
-  } catch {
-    stored = [];
-  }
-  if (!Array.isArray(stored)) return [];
-  const valid = stored.filter((id) => REMINDERS_PANEL_PAGES.some((p) => p.id === id));
-  return valid.length >= 1 && valid.length < REMINDERS_PANEL_PAGES.length ? valid : [];
-}
-
-// Recoloca cada bloque en su sitio (dentro del hueco compartido, o suelto
-// en el panel si no hay agrupacion activa) y decide que se ve. Se llama
-// al arrancar, al cambiar el ajuste, y cada vez que se le da a la
-// flecha (stepRemindersPanelPage).
-function applyRemindersPanelLayout() {
-  if (getMiEspacioMode() === 'panel') return; // este ajuste no aplica ahi, ver moveRemindersIntoHub
-
-  const panel = document.getElementById('reminders-panel');
-  const groupedSlot = document.getElementById('reminders-panel-grouped-slot');
-  const switcher = document.getElementById('reminders-panel-switcher');
-  const checked = getRemindersGroupedSections();
-
-  if (checked.length === 0) {
-    // Sin agrupacion activa: las 3 sueltas, apiladas, siempre visibles.
-    REMINDERS_PANEL_PAGES.forEach((p) => {
-      const block = document.getElementById(p.blockId);
-      panel.appendChild(block);
-      block.classList.remove('hidden');
-    });
-    groupedSlot.classList.add('hidden');
-    switcher.classList.add('hidden');
-    return;
-  }
-
-  // Con agrupacion activa, las 3 secciones (marcadas Y no marcadas) viven
-  // dentro del hueco compartido -- cual de las dos "mitades" se ve la
-  // decide remindersPanelShowingChecked.
-  panel.appendChild(groupedSlot);
-  REMINDERS_PANEL_PAGES.forEach((p) => groupedSlot.appendChild(document.getElementById(p.blockId)));
-
-  groupedSlot.classList.remove('hidden');
-  switcher.classList.remove('hidden');
-  const unchecked = REMINDERS_PANEL_PAGES.map((p) => p.id).filter((id) => !checked.includes(id));
-  const showing = remindersPanelShowingChecked ? checked : unchecked;
-  REMINDERS_PANEL_PAGES.forEach((p) => {
-    document.getElementById(p.blockId).classList.toggle('hidden', !showing.includes(p.id));
-  });
-  document.getElementById('reminders-panel-switch-label').textContent = showing
-    .map((id) => REMINDERS_PANEL_PAGES.find((p) => p.id === id).label)
-    .join(' + ');
-}
-
-function stepRemindersPanelPage() {
-  if (getRemindersGroupedSections().length === 0) return;
-  // Solo hay dos "mitades" -- prev/next hacen lo mismo, dan la vuelta a
-  // cual se ve, se mantienen los dos botones por simetria visual con el
-  // resto de la app.
-  remindersPanelShowingChecked = !remindersPanelShowingChecked;
-  applyRemindersPanelLayout();
-}
-
-document.getElementById('btn-panel-switch-prev').addEventListener('click', () => stepRemindersPanelPage());
-document.getElementById('btn-panel-switch-next').addEventListener('click', () => stepRemindersPanelPage());
-
-function collapseMySpaceExpandedColumn() {
-  delete document.getElementById('my-space-hub').dataset.expanded;
-  document.getElementById('my-space-back-btn').classList.add('hidden');
-}
-
-function closeMySpaceView() {
-  document.getElementById('my-space-view').classList.add('hidden');
-  collapseMySpaceExpandedColumn();
-  restoreClassicRemindersPanel();
-  setCurrentScreen('home');
-}
-
-function openMySpaceView() {
-  moveRemindersIntoHub();
-  document.getElementById('my-space-view').classList.remove('hidden');
-  setCurrentScreen('my-space');
-}
 
 // Vista de Notas movil (Fase 4 del rediseño movil) -- sustituye al
 // puente temporal que abria "Mi espacio" desde la barra inferior (ver
@@ -7528,92 +7571,6 @@ function closeMobileNotesView() {
 }
 document.getElementById('btn-close-mobile-notes').addEventListener('click', closeMobileNotesView);
 
-// Aplica el modo elegido: donde vive el hub, y si hace falta o no el
-// boton de la topbar. Se llama al arrancar y cada vez que cambias el
-// ajuste en Configuracion > Vista.
-function applyMiEspacioMode() {
-  const mode = getMiEspacioMode();
-  const panel = document.getElementById('reminders-panel');
-  const hub = document.getElementById('my-space-hub');
-
-  // Al cambiar de modo (o al arrancar) siempre se parte de cero: el hub
-  // cerrado y los bloques en su sitio clasico dentro del panel.
-  document.getElementById('my-space-view').classList.add('hidden');
-  collapseMySpaceExpandedColumn();
-  restoreClassicRemindersPanel();
-  panel.classList.remove('my-space-panel-mode');
-
-  // En modo "panel" el ancho del aside es fijo (640px, ver .my-space-panel-mode
-  // en styles.css) -- el arrastre no tendria ningun efecto ahi, asi que
-  // se oculta para no dejar un control muerto en pantalla.
-  const resizeHandle = document.getElementById('panel-resize-handle');
-  if (mode === 'panel') {
-    panel.appendChild(hub);
-    panel.classList.add('my-space-panel-mode');
-    moveRemindersIntoHub();
-    document.getElementById('btn-my-space').classList.add('hidden');
-    if (resizeHandle) resizeHandle.classList.add('hidden');
-  } else {
-    document.getElementById('my-space-view').appendChild(hub);
-    document.getElementById('btn-my-space').classList.remove('hidden');
-    if (resizeHandle) resizeHandle.classList.remove('hidden');
-  }
-}
-
-// Arrastre del divisor entre el calendario y el panel de recordatorios
-// (pedido explicito de Koku: "en este ordenador me gustaria hacer algo
-// mas ancho el espacio que ocupa la columna de recordatorios"). El ancho
-// se guarda en localStorage POR DISPOSITIVO (cada ordenador puede querer
-// uno distinto) y se aplica como variable CSS que .reminders-panel ya
-// lee (ver styles.css) -- clamp() en JS y en el propio CSS por partida
-// doble, para que nunca se pueda arrastrar a algo inservible.
-const PANEL_WIDTH_MIN = 240;
-const PANEL_WIDTH_MAX = 640;
-
-function applyStoredRemindersPanelWidth() {
-  const stored = Number(localStorage.getItem('remindersPanelWidth'));
-  if (stored && stored >= PANEL_WIDTH_MIN && stored <= PANEL_WIDTH_MAX) {
-    document.documentElement.style.setProperty('--reminders-panel-width', `${stored}px`);
-  }
-}
-applyStoredRemindersPanelWidth();
-
-(function setupPanelResizeHandle() {
-  const handle = document.getElementById('panel-resize-handle');
-  const panel = document.getElementById('reminders-panel');
-  if (!handle || !panel) return;
-
-  handle.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = panel.getBoundingClientRect().width;
-    handle.classList.add('is-dragging');
-    document.body.classList.add('is-resizing-panel');
-
-    function onMouseMove(ev) {
-      // El panel esta a la DERECHA del divisor: arrastrar hacia la
-      // izquierda (deltaX negativo) lo agranda, hacia la derecha lo
-      // encoge -- de ahi el signo invertido.
-      const deltaX = ev.clientX - startX;
-      const newWidth = Math.max(PANEL_WIDTH_MIN, Math.min(PANEL_WIDTH_MAX, startWidth - deltaX));
-      document.documentElement.style.setProperty('--reminders-panel-width', `${newWidth}px`);
-    }
-    function onMouseUp() {
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-      handle.classList.remove('is-dragging');
-      document.body.classList.remove('is-resizing-panel');
-      const finalWidth = panel.getBoundingClientRect().width;
-      localStorage.setItem('remindersPanelWidth', String(Math.round(finalWidth)));
-    }
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  });
-})();
-
-document.getElementById('btn-my-space').addEventListener('click', openMySpaceView);
-document.getElementById('btn-close-my-space').addEventListener('click', closeMySpaceView);
-
 // ---------------------------------------------------------------------
 // Navegacion movil (.mobile-nav + boton flotante "+", ver styles.css):
 // sustituye a la topbar en pantallas estrechas. No duplica logica de
@@ -7624,9 +7581,26 @@ document.getElementById('btn-close-my-space').addEventListener('click', closeMyS
 // deja en el fondo del todo, sea cual sea la profundidad en la que
 // estuvieras -- Esc ya sabe deshacer una capa por pulsacion).
 // ---------------------------------------------------------------------
+// Marca de "esto lo esta cerrando la app, no tu dedo".
+//
+// closeAllMobileOverlays simula pulsaciones de Esc, y esa cascada acaba
+// CLICANDO los botones de volver de cada pantalla. Esos botones tienen
+// su propia animacion (ver animarAlPulsar al final del archivo), asi que
+// sin esta marca un cambio de pestaña lanzaba DOS animaciones que se
+// pisaban: la del boton dejaba la pantalla vieja a la vista para que se
+// fuera deslizando, y la del cambio de pestaña se la encontraba visible
+// y la trataba como la que ENTRA -- resultado, una pantalla que se
+// quedaba puesta encima para siempre. Paso de verdad.
+let cerrandoEnCascada = false;
+
 function closeAllMobileOverlays() {
-  for (let i = 0; i < 6; i++) {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  cerrandoEnCascada = true;
+  try {
+    for (let i = 0; i < 6; i++) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    }
+  } finally {
+    cerrandoEnCascada = false;
   }
 }
 
@@ -7662,11 +7636,6 @@ const MOBILE_NAV_SLOT_APPS = {
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg>',
     open: () => openLecturasView(),
   },
-  archivos: {
-    label: 'Archivos',
-    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M12 18v-6M9 15l3-3 3 3"></path></svg>',
-    open: () => openArchivosView(),
-  },
   viajes: {
     label: 'Viajes',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>',
@@ -7690,7 +7659,7 @@ function applyMobileNavCustomization() {
 applyMobileNavCustomization();
 
 // Selector en Configuracion > Este dispositivo (ajuste por dispositivo,
-// localStorage, mismo criterio que miEspacioMode/completedTasksDisplay).
+// localStorage, mismo criterio que la unidad de peso de Gimnasio).
 const mobileNavSlotField = createSelectField({
   options: Object.entries(MOBILE_NAV_SLOT_APPS).map(([value, app]) => ({ value, label: app.label })),
   initialValue: getMobileNavNotesSlot(),
@@ -7708,8 +7677,8 @@ function goToMobileSection(section) {
   // App si Koku eligio otra en Configuracion -> Este dispositivo (ver
   // applyMobileNavCustomization() arriba).
   if (section === 'notes') MOBILE_NAV_SLOT_APPS[getMobileNavNotesSlot()].open();
-  else if (section === 'extensions') document.getElementById('btn-extensions').click();
-  else if (section === 'settings') document.getElementById('btn-settings').click();
+  else if (section === 'extensions') openExtensionsView();
+  else if (section === 'settings') openSettingsModal();
   refreshMobileNavActive(section);
 }
 
@@ -7767,6 +7736,18 @@ document.getElementById('btn-new-task-mobile-day').addEventListener('click', () 
 // antiguos botones de +carpeta/+nota de la barra superior, para dejarle
 // mas hueco al buscador. Mismas 2 acciones que ya llamaban esos botones
 // (openNoteFolderModal(null)/openNoteInEditor(null)), solo movidas aqui.
+const MOBILE_NOTES_FAB_ADD_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+
+// Seleccionando o moviendo, el "+" estorba: no tiene sentido crear nada
+// a medias de eso, y ademas chocaria con la barra de acciones que
+// aparece justo encima de la barra inferior.
+function refreshMobileNotesFab() {
+  const seleccionando = mobileNotesMode === 'select' || mobileNotesMode === 'move';
+  document.getElementById('mobile-notes-add-wrap').classList.toggle('hidden', seleccionando);
+  document.getElementById('btn-mobile-notes-add').innerHTML = MOBILE_NOTES_FAB_ADD_ICON;
+  if (seleccionando) toggleMobileCalendarAddMenu(false, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
+}
+
 document.getElementById('btn-mobile-notes-add').addEventListener('click', (e) => {
   e.stopPropagation();
   toggleMobileCalendarAddMenu(undefined, 'mobile-notes-add-menu', 'btn-mobile-notes-add');
@@ -7807,8 +7788,406 @@ function closeExtensionsView() {
   document.getElementById('extensions-view').classList.add('hidden');
   setCurrentScreen('home');
 }
-document.getElementById('btn-extensions').addEventListener('click', openExtensionsView);
 document.getElementById('btn-close-extensions').addEventListener('click', closeExtensionsView);
+
+// ---------------------------------------------------------------------
+// Pantalla de Grupos: dos niveles (lista de grupos -> lo que hay dentro
+// de uno). No duplica el alta/edicion/borrado de grupos, que ya vive en
+// Configuracion -> Grupos: el boton "Gestionar grupos" lleva ahi mismo,
+// para que solo haya UN sitio donde se editan.
+// ---------------------------------------------------------------------
+// null = "Todos los eventos"; si no, el id del grupo abierto.
+let groupsViewSelectedId = undefined; // undefined = todavia en la lista
+let groupsViewItems = [];
+const groupsViewFilters = { type: 'all', done: 'all', q: '' };
+
+const groupsFilterTypeField = createSelectField({
+  options: [
+    { value: 'all', label: 'Todo' },
+    { value: 'event', label: 'Recordatorios' },
+    { value: 'task', label: 'Tareas' },
+  ],
+  initialValue: 'all',
+  onChange: (v) => { groupsViewFilters.type = v; renderGroupsDetailList(); },
+});
+document.getElementById('groups-filter-type-field').appendChild(groupsFilterTypeField.element);
+
+const groupsFilterDoneField = createSelectField({
+  options: [
+    { value: 'all', label: 'Terminadas o no' },
+    { value: 'pending', label: 'Sin terminar' },
+    { value: 'done', label: 'Terminadas' },
+  ],
+  initialValue: 'all',
+  onChange: (v) => { groupsViewFilters.done = v; renderGroupsDetailList(); },
+});
+document.getElementById('groups-filter-done-field').appendChild(groupsFilterDoneField.element);
+
+document.getElementById('groups-search').addEventListener('input', (e) => {
+  groupsViewFilters.q = e.target.value;
+  renderGroupsDetailList();
+});
+
+async function openGroupsView() {
+  document.getElementById('groups-view').classList.remove('hidden');
+  setCurrentScreen('groups');
+  showGroupsList();
+  await refreshGroupsView();
+}
+
+// Recarga los grupos y repinta sus tarjetas. Lo llaman tanto la apertura
+// de la pantalla como cualquier alta/edicion/borrado desde su ficha.
+async function refreshGroupsView() {
+  await loadGroups();
+  renderGroupsViewList();
+}
+
+function closeGroupsView() {
+  document.getElementById('groups-view').classList.add('hidden');
+  setCurrentScreen('home');
+}
+
+// Nivel 1: las tarjetas de grupo.
+function showGroupsList() {
+  groupsViewSelectedId = undefined;
+  document.getElementById('groups-list-panel').classList.remove('hidden');
+  document.getElementById('groups-detail-panel').classList.add('hidden');
+  document.getElementById('btn-groups-back').classList.add('hidden');
+  document.getElementById('groups-view-title').textContent = 'Grupos';
+}
+
+function renderGroupsViewList() {
+  const box = document.getElementById('groups-view-list');
+  box.innerHTML = '';
+  // "Todos" primero: es el atajo para ver el conjunto sin tener que
+  // entrar grupo por grupo.
+  box.appendChild(buildGroupViewCard(null, 'Todos los eventos', 'var(--accent)'));
+  state.groups.forEach((g) => {
+    box.appendChild(buildGroupViewCard(g.id, g.name, g.color));
+  });
+}
+
+function buildGroupViewCard(id, name, color) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'group-card';
+  const dot = document.createElement('span');
+  dot.className = 'group-card-dot';
+  dot.style.background = color || 'var(--accent)';
+  const label = document.createElement('span');
+  label.textContent = name;
+  btn.append(dot, label);
+  // Aqui vivia un "modo editar" (un lapiz en la barra que convertia
+  // cada tarjeta en un acceso a su ficha). Se quito el 9/9/2026 al
+  // hacer las tarjetas deslizables: Koku pidio dejar UNA sola forma de
+  // editar, "asi no da pie a dudas ni nada". Ahora tocar siempre entra
+  // en el grupo, y editar/eliminar se saca deslizando.
+  //
+  // En la cabecera del detalle cabe poco: "Todos los eventos" se queda
+  // en "Todos" ahi (en la tarjeta si va el texto entero).
+  btn.addEventListener('click', () => openGroupDetail(id, id === null ? 'Todos' : name));
+
+  // Deslizar para Editar / Eliminar, igual que las carpetas y notas de
+  // Mi espacio y las sesiones del historial del Gimnasio (pedido de
+  // Koku).
+  if (id !== null) {
+    return wrapRowWithSwipeActions(btn, {
+      onEdit: () => openGroupModal(state.groups.find((g) => g.id === id)),
+      onDelete: () => deleteGroupById(id),
+    });
+  }
+
+  // "Todos los eventos" es el caso raro: no es un grupo de verdad, asi
+  // que no hay nada que editar ni que borrar. Pero dejarlo como la unica
+  // tarjeta que NO se mueve tampoco esta bien -- parece que la app se ha
+  // quedado colgada. Solucion pedida por Koku: que se deslice igual, sin
+  // botones, y que al hacerlo salga un aviso explicando por que, con la
+  // opcion de dejarlo fijo para que no vuelva a moverse.
+  if (todosLosEventosFijado()) {
+    btn.classList.add('is-locked');
+    btn.appendChild(iconoCandado());
+    return btn; // fijado: ni se mueve ni vuelve a preguntar
+  }
+  const wrap = wrapRowWithSwipeActions(btn, { botones: [], anchoFijo: 120 });
+  // El aviso sale al abrirse, no al empezar a arrastrar: si saltara a
+  // mitad del gesto cortaria el movimiento en seco.
+  btn.addEventListener('swipeabierto', async () => {
+    const fijar = await showAppConfirm(
+      '«Todos los eventos» no es un grupo de verdad: es el atajo para verlos todos juntos, así que no se puede editar ni eliminar.\n\n¿Quieres dejarlo fijo para que no se mueva? Aparecerá con un candado. Puedes volver a soltarlo desde aquí mismo.',
+      { okText: 'Dejarlo fijo', cancelText: 'Dejarlo como está' },
+    );
+    closeSwipedNoteRow();
+    if (!fijar) return; // sigue moviendose, y el aviso volvera a salir
+    localStorage.setItem('gruposTodosFijado', 'true');
+    renderGroupsViewList();
+  });
+  return wrap;
+}
+
+// "Todos los eventos" fijado: preferencia de ESTE dispositivo (como el
+// tema o la unidad de peso), no algo compartido -- es una mania de como
+// te gusta ver la lista, no un dato del calendario.
+function todosLosEventosFijado() {
+  return localStorage.getItem('gruposTodosFijado') === 'true';
+}
+
+function iconoCandado() {
+  const span = document.createElement('span');
+  span.className = 'group-card-lock';
+  span.title = 'Fijo: no se puede editar ni eliminar. Tócalo para soltarlo.';
+  span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>';
+  // Tocar el candado lo suelta, para no dejarlo fijo para siempre sin
+  // forma de volver atras.
+  span.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const soltar = await showAppConfirm(
+      '«Todos los eventos» está fijo ahora mismo. ¿Quieres soltarlo para que vuelva a moverse al deslizarlo?',
+      { okText: 'Soltarlo', cancelText: 'Dejarlo fijo' },
+    );
+    if (!soltar) return;
+    localStorage.removeItem('gruposTodosFijado');
+    renderGroupsViewList();
+  });
+  return span;
+}
+
+// Borrar un grupo con su confirmacion. Sale del boton "Eliminar" de la
+// ficha para poder usarse tambien desde el deslizamiento de la tarjeta,
+// sin tener que abrir la ficha antes.
+async function deleteGroupById(id) {
+  const grupo = state.groups.find((g) => String(g.id) === String(id));
+  const seguro = await showAppConfirm(
+    `¿Eliminar el grupo "${grupo ? grupo.name : ''}"? Los eventos que lo usen se quedarán sin grupo.`,
+  );
+  if (!seguro) return;
+  await api(`/api/groups/${id}`, { method: 'DELETE' });
+  await refreshAfterGroupChange();
+}
+
+// Nivel 2: todo lo que hay dentro de un grupo (o de todos).
+async function openGroupDetail(groupId, name) {
+  groupsViewSelectedId = groupId;
+  document.getElementById('groups-list-panel').classList.add('hidden');
+  document.getElementById('groups-detail-panel').classList.remove('hidden');
+  document.getElementById('btn-groups-back').classList.remove('hidden');
+  document.getElementById('groups-view-title').textContent = name;
+  // Se piden TODOS los eventos y tareas (sin rango de fechas): aqui la
+  // pregunta es "que hay en este grupo", no "que hay este mes".
+  groupsViewItems = await api('/api/events');
+  renderGroupsDetailList();
+}
+
+// Un mismo sitio para decidir que entra y que no, para que el buscador y
+// los dos filtros no se pisen entre ellos.
+function groupsDetailVisibleItems() {
+  const q = groupsViewFilters.q.trim().toLowerCase();
+  return groupsViewItems.filter((item) => {
+    if (groupsViewSelectedId !== null && item.groupId !== groupsViewSelectedId) return false;
+    if (groupsViewFilters.type === 'task' && !item.isTask) return false;
+    if (groupsViewFilters.type === 'event' && item.isTask) return false;
+    if (groupsViewFilters.done === 'done' && !item.done) return false;
+    if (groupsViewFilters.done === 'pending' && item.done) return false;
+    if (q && !(item.title || '').toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function renderGroupsDetailList() {
+  const box = document.getElementById('groups-detail-list');
+  box.innerHTML = '';
+  const items = groupsDetailVisibleItems();
+  if (items.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'hint';
+    empty.textContent = 'No hay nada que coincida.';
+    box.appendChild(empty);
+    return;
+  }
+  items.forEach((item) => box.appendChild(buildGroupDetailRow(item)));
+}
+
+const GROUP_ITEM_EVENT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M10.5 20a2 2 0 0 0 3 0"/></svg>';
+// El icono de tarea es una tablilla con lineas (tipo lista de tareas) a
+// proposito: el cuadrado con el check de antes se confundia con la propia
+// casilla de "hecha" que lleva cada fila justo al lado.
+const GROUP_ITEM_TASK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2.5" width="8" height="4" rx="1.2"/><path d="M8.5 4.5H6.5A1.5 1.5 0 0 0 5 6v13a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V6a1.5 1.5 0 0 0-1.5-1.5h-2"/><path d="M8.5 11.5h7"/><path d="M8.5 15.5h4.5"/></svg>';
+
+function buildGroupDetailRow(item) {
+  const row = document.createElement('div');
+  row.className = 'group-item-row';
+  if (item.done) row.classList.add('is-done');
+
+  const bar = document.createElement('span');
+  bar.className = 'group-item-bar';
+  bar.style.background = item.groupColor || 'var(--border)';
+  row.appendChild(bar);
+
+  // Tareas Y recordatorios se pueden marcar como hechos desde aqui: la
+  // columna "done" es de la fila del evento, la tenga o no marcada como
+  // tarea, asi que vale para los dos.
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.className = 'styled-checkbox';
+  check.checked = !!item.done;
+  check.addEventListener('click', (e) => e.stopPropagation());
+  check.addEventListener('change', async () => {
+    await toggleTaskDone(item);
+    item.done = !item.done;
+    renderGroupsDetailList();
+  });
+  row.appendChild(check);
+
+  // Icono propio por tipo: una campana para el recordatorio y un
+  // cuadro con un tick para la tarea. El texto de debajo lo sigue
+  // diciendo, pero de un vistazo se distinguen sin leer.
+  const tipo = document.createElement('span');
+  tipo.className = 'group-item-type';
+  tipo.innerHTML = item.isTask ? GROUP_ITEM_TASK_ICON : GROUP_ITEM_EVENT_ICON;
+  tipo.title = item.isTask ? 'Tarea' : 'Recordatorio';
+  row.appendChild(tipo);
+
+  const texts = document.createElement('div');
+  texts.className = 'group-item-texts';
+  const title = document.createElement('span');
+  title.className = 'group-item-title';
+  title.textContent = item.title;
+  const meta = document.createElement('span');
+  meta.className = 'group-item-meta';
+  meta.textContent = groupItemMetaText(item);
+  texts.append(title, meta);
+  row.appendChild(texts);
+
+  row.addEventListener('click', () => {
+    if (item.isTask) openTaskModal(item);
+    else openEventModal(item);
+  });
+  return row;
+}
+
+function groupItemMetaText(item) {
+  const partes = [item.isTask ? 'Tarea' : 'Recordatorio'];
+  if (item.groupName) partes.push(item.groupName);
+  if (item.startAt) {
+    const d = new Date(item.startAt);
+    partes.push(item.allDay ? formatMobileDayHeading(d) : `${formatMobileDayHeading(d)} · ${toTimeInputValue(d)}`);
+  } else if (item.isTask) {
+    partes.push('Sin fecha');
+  }
+  return partes.join(' · ');
+}
+
+// ---------------------------------------------------------------------
+// Ficha de un grupo (nombre, color, y el color con el que se ven sus
+// tareas al completarse). Antes esto vivia en Configuracion -> Grupos;
+// ahora la gestion es de este apartado, igual que cada herramienta
+// gestiona lo suyo por dentro.
+//
+// Los dos selectores de color se crean PEREZOSAMENTE, la primera vez que
+// se abre la ficha: createColorField vive en settings.js, que carga
+// DESPUES de app.js -- crearlos aqui a nivel de modulo daria
+// ReferenceError (mismo motivo por el que Finanzas hace lo mismo con los
+// suyos, ver setupFinanzasIconColorFields).
+// ---------------------------------------------------------------------
+let groupColorField = null;
+let groupCompletedColorField = null;
+// El color de "completada" sigue al del grupo (atenuado) mientras no se
+// toque a mano; en cuanto se elige uno explicito, deja de seguirle.
+let groupCompletedColorTouched = false;
+let suppressGroupCompletedTouch = false;
+
+function setupGroupColorFields() {
+  if (groupColorField) return;
+  groupCompletedColorField = createColorField({
+    initialValue: mutedTaskColor(DEFAULT_EVENT_COLOR),
+    onChange: () => { if (!suppressGroupCompletedTouch) groupCompletedColorTouched = true; },
+  });
+  document.getElementById('group-completed-color-field').appendChild(groupCompletedColorField.element);
+  groupColorField = createColorField({
+    initialValue: DEFAULT_EVENT_COLOR,
+    onChange: (nuevo) => {
+      if (!groupCompletedColorTouched) setGroupCompletedColorProgrammatically(mutedTaskColor(nuevo));
+    },
+  });
+  document.getElementById('group-color-field').appendChild(groupColorField.element);
+}
+
+// Cambia el color de completada SIN que cuente como que se ha tocado a
+// mano (carga inicial, o cargar el valor guardado de un grupo).
+function setGroupCompletedColorProgrammatically(hex) {
+  suppressGroupCompletedTouch = true;
+  groupCompletedColorField.setValue(hex);
+  suppressGroupCompletedTouch = false;
+}
+
+function openGroupModal(group) {
+  setupGroupColorFields();
+  document.getElementById('group-modal-title').textContent = group ? 'Editar grupo' : 'Nuevo grupo';
+  document.getElementById('group-id').value = group ? group.id : '';
+  document.getElementById('group-name').value = group ? group.name : '';
+  groupColorField.setValue(group ? group.color : DEFAULT_EVENT_COLOR);
+  // Si el grupo ya tiene un color de completada EXPLICITO se trata como
+  // "tocado", para que cambiar el color normal no se lo pise.
+  groupCompletedColorTouched = !!(group && group.completedColor);
+  setGroupCompletedColorProgrammatically(
+    (group && group.completedColor) || mutedTaskColor(group ? group.color : DEFAULT_EVENT_COLOR),
+  );
+  document.getElementById('btn-delete-group').classList.toggle('hidden', !group);
+  document.getElementById('group-modal').classList.remove('hidden');
+  document.getElementById('group-name').focus();
+}
+
+function closeGroupModal() {
+  document.getElementById('group-modal').classList.add('hidden');
+}
+
+// Todo lo que se ve del grupo (chips del calendario, recordatorios,
+// tareas) cambia con el: se recarga lo que lo pinta, no solo la lista.
+async function refreshAfterGroupChange() {
+  await refreshGroupsView();
+  loadMonth();
+  loadReminders();
+  loadTasks().then(renderTasksList);
+}
+
+document.getElementById('btn-groups-add').addEventListener('click', () => openGroupModal(null));
+document.getElementById('btn-close-group').addEventListener('click', closeGroupModal);
+document.getElementById('btn-cancel-group').addEventListener('click', closeGroupModal);
+
+document.getElementById('group-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('group-id').value;
+  const payload = {
+    name: document.getElementById('group-name').value,
+    color: groupColorField.getValue(),
+    completedColor: groupCompletedColorField.getValue(),
+  };
+  if (id) await api(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  else await api('/api/groups', { method: 'POST', body: JSON.stringify(payload) });
+  closeGroupModal();
+  await refreshAfterGroupChange();
+});
+
+document.getElementById('btn-delete-group').addEventListener('click', async () => {
+  const id = document.getElementById('group-id').value;
+  if (!id) return;
+  // Cerrar ANTES de preguntar seria raro (desaparece la ficha y luego
+  // sale el aviso), asi que se cierra despues, y solo si de verdad se
+  // borro -- si dices que no, te quedas donde estabas.
+  const habia = state.groups.length;
+  await deleteGroupById(id);
+  if (state.groups.length < habia) closeGroupModal();
+});
+
+document.getElementById('btn-close-groups').addEventListener('click', closeGroupsView);
+document.getElementById('btn-groups-back').addEventListener('click', () => {
+  showGroupsList();
+  renderGroupsViewList();
+});
+// Los dos accesos rapidos de la pantalla del calendario.
+document.getElementById('btn-calendar-quick-today').addEventListener('click', () => {
+  enterMobileDayView(new Date());
+});
+document.getElementById('btn-calendar-quick-groups').addEventListener('click', openGroupsView);
 
 // ---------------------------------------------------------------------
 // Extension "Gimnasio": registro de entrenamientos de verdad (ejercicios,
@@ -7822,11 +8201,13 @@ async function openGymView() {
   closeExtensionsView();
   document.getElementById('gym-view').classList.remove('hidden');
   setCurrentScreen('gym');
-  await Promise.all([loadGymExercises(), loadGymRoutines(), loadGymSessions()]);
+  await Promise.all([loadGymExercises(), loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
   renderGymExercisesList();
+  renderGymBlocksList();
   renderGymRoutinesList();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+  refreshGymLiveButtons();
 }
 function closeGymView() {
   document.getElementById('gym-view').classList.add('hidden');
@@ -7842,7 +8223,36 @@ function switchGymTab(tabName) {
   document.querySelectorAll('.gym-tab-panel').forEach((panel) => {
     panel.classList.toggle('hidden', panel.id !== `gym-tab-${tabName}`);
   });
+  // Las secciones de Progreso/Logros se calculan al entrar en su
+  // pestana, no en cada apertura del Gimnasio -- son funciones
+  // declaradas mas abajo, sin problema de orden porque esto solo corre
+  // dentro de un handler de click (ver la nota de TDZ en CLAUDE.md).
+  if (tabName === 'plan') openGymBlockDays(null);
+  if (tabName === 'progress') {
+    renderGymProgressSections();
+    // El aviso sobre los colores del mapa (que no significan "demasiado"
+    // ni "poco", solo cantidad relativa) se ensena SOLO la primera vez;
+    // el boton "?" de la seccion lo reabre cuando se quiera.
+    if (localStorage.getItem('gymProgressHelpSeen') !== '1') openGymProgressHelpModal();
+  }
+  if (tabName === 'achievements') renderGymAchievements();
 }
+
+// --- Aviso del mapa de musculos (pestana Progreso) --------------------
+function openGymProgressHelpModal() {
+  document.getElementById('gym-progress-help-dont-show').checked =
+    localStorage.getItem('gymProgressHelpSeen') === '1';
+  document.getElementById('gym-progress-help-modal').classList.remove('hidden');
+}
+function closeGymProgressHelpModal() {
+  localStorage.setItem(
+    'gymProgressHelpSeen',
+    document.getElementById('gym-progress-help-dont-show').checked ? '1' : '0'
+  );
+  document.getElementById('gym-progress-help-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-progress-help').addEventListener('click', openGymProgressHelpModal);
+document.getElementById('btn-close-gym-progress-help').addEventListener('click', closeGymProgressHelpModal);
 document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchGymTab(btn.dataset.gymTab));
 });
@@ -7850,8 +8260,19 @@ document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
 async function loadGymExercises() {
   state.gymExercises = await api('/api/gym-exercises');
 }
+async function loadGymBlocks() {
+  state.gymBlocks = await api('/api/gym-blocks');
+  // El widget de "que toca hoy" sale del ciclo del bloque activo, asi que
+  // se rehace su resumen cada vez que los bloques cambian. Es el embudo
+  // por el que pasa TODO lo que puede moverlo: terminar un entreno,
+  // tocar el ciclo, activar otro bloque.
+  actualizarResumenDelWidget();
+}
 async function loadGymRoutines() {
   state.gymRoutines = await api('/api/gym-routines');
+  // Los dias tambien: el nombre, el color y cuantos ejercicios tiene el
+  // dia de hoy salen de aqui, no del bloque.
+  actualizarResumenDelWidget();
 }
 async function loadGymSessions() {
   state.gymSessions = await api('/api/gym-sessions');
@@ -7867,7 +8288,7 @@ function formatGymDate(dateStr) {
 
 // Unidad de peso para Gimnasio (kg o libras): ajuste por dispositivo, no
 // compartido -- el dato en la base de datos SIEMPRE es weight_kg (ver
-// server/db.js), esto solo decide como se escribe/lee en pantalla. El
+// local-schema.js), esto solo decide como se escribe/lee en pantalla. El
 // toggle de verdad vive en Configuracion > Este dispositivo (ver
 // refreshGymWeightUnitOptions en settings.js); aqui solo la lectura y
 // las conversiones, que hacen falta ya en el modal de sesion mas abajo.
@@ -7890,55 +8311,540 @@ function gymWeightDisplayToKg(displayValue) {
   return getGymWeightUnit() === 'lb' ? num / KG_TO_LB : num;
 }
 
+// --- Taxonomia de grupos musculares (Fase 2 del rediseno) -------------
+// La UNICA fuente de verdad de los grupos musculares de toda la
+// extension: la usan el select del modal de ejercicio, los filtros de
+// la libreria, y (en fases posteriores) el volumen por musculo y el
+// mapa del cuerpo -- los `id` de aqui tienen que coincidir con los ids
+// de zona del SVG del cuerpo y con los `muscleGroup` que trae
+// gym-exercise-library.json (ver el generador en el historial de la
+// rama). Los ejercicios guardan el `id` en muscle_group; los de antes
+// del rediseno pueden tener texto libre, que se muestra tal cual.
+const GYM_MUSCLE_GROUPS = [
+  { id: 'pecho', label: 'Pecho' },
+  // La espalda va en DOS mas la lumbar: espalda media y dorsales
+  // ("Lumbar" es la de abajo y se queda como estaba, con su nombre de
+  // siempre). El reparto de los ~870 ejercicios de la libreria sale del
+  // origen (free-exercise-db), que distingue "lats" de "middle back":
+  // lats -> dorsales, middle back -> espalda media (que son casi todo
+  // remos).
+  //
+  // Hubo un intento de tercera franja, "Espalda alta", que Koku deshizo
+  // el 9/9/2026: sus cuatro ejercicios se fusionaron con espalda media,
+  // y lo que de verdad hacia falta ahi era otra cosa -- el HOMBRO
+  // POSTERIOR, que es un hombro, no una espalda, y por eso vive abajo
+  // junto a "Hombros".
+  { id: 'espalda_media', label: 'Espalda media' },
+  { id: 'dorsales', label: 'Dorsales' },
+  { id: 'lumbar', label: 'Lumbar' },
+  { id: 'hombros', label: 'Hombros' },
+  // El deltoides posterior, separado del resto del hombro (peticion de
+  // Koku). En el diagrama se queda con el hombro de la figura de
+  // ESPALDA, que anatomicamente es justo eso; "Hombros" pasa a marcar
+  // solo la figura de frente. Nace SIN ejercicios asignados: la libreria
+  // original no lo distinguia, asi que el trabajo de hombro posterior
+  // (face pulls, aperturas invertidas...) sigue etiquetado como
+  // "hombros" hasta que se recoloque a mano desde la ficha de cada uno.
+  { id: 'hombro_posterior', label: 'Hombro posterior' },
+  { id: 'trapecio', label: 'Trapecio' },
+  { id: 'biceps', label: 'Bíceps' },
+  { id: 'triceps', label: 'Tríceps' },
+  { id: 'antebrazo', label: 'Antebrazo' },
+  { id: 'core', label: 'Core / Abdomen' },
+  { id: 'gluteo', label: 'Glúteo' },
+  { id: 'cuadriceps', label: 'Cuádriceps' },
+  // "Isquiotibiales" y no "isquiosurales": el segundo es el termino de
+  // anatomia/fisioterapia y es mas preciso (el biceps femoral se inserta
+  // en el perone, no en la tibia), pero Koku pidio el de toda la vida,
+  // que es el que se busca al montar un dia. El id interno sigue siendo
+  // 'isquios', asi que esto no toca ni los ejercicios ya clasificados ni
+  // el diagrama.
+  { id: 'isquios', label: 'Isquiotibiales' },
+  { id: 'aductores', label: 'Aductores' },
+  { id: 'abductores', label: 'Abductores' },
+  { id: 'gemelos', label: 'Gemelos' },
+];
+// id de la taxonomia -> etiqueta bonita; cualquier otra cosa (texto
+// libre de antes del rediseno) se devuelve tal cual.
+function gymMuscleGroupLabel(value) {
+  if (!value) return '';
+  const group = GYM_MUSCLE_GROUPS.find((g) => g.id === value);
+  return group ? group.label : value;
+}
+
+// --- Libreria de ejercicios empaquetada (Fase 2) ----------------------
+// ~870 ejercicios de https://github.com/yuhonas/free-exercise-db
+// (dominio publico, licencia Unlicense), que a su vez nacio de
+// https://github.com/wrkout/exercises.json de Ollie Jennings (tambien
+// Unlicense). ¡Gracias a ambos! Los nombres/musculos/material estan
+// traducidos al español; las instrucciones se van traduciendo por
+// tandas. El JSON pesa ~840 KB, asi que NO se carga al arrancar la app:
+// fetch perezoso la primera vez que se abre el buscador, cacheado en
+// esta variable para el resto de la sesion (mismo patron que
+// loadViajesMap).
+let gymExerciseLibrary = null;
+async function loadGymExerciseLibrary() {
+  if (gymExerciseLibrary) return gymExerciseLibrary;
+  const resp = await fetch('gym-exercise-library.json');
+  if (!resp.ok) throw new Error('No se pudo cargar la librería de ejercicios.');
+  gymExerciseLibrary = await resp.json();
+  return gymExerciseLibrary;
+}
+
+// Lo que hay escrito en el buscador de TUS ejercicios. Vive en memoria a
+// proposito (no en localStorage): un filtro que sobrevive a cerrar la app
+// hace pensar que has perdido ejercicios.
+let gymExercisesFiltro = '';
+
+// Sin tildes y en minusculas, para que "biceps" encuentre "Bíceps".
+function gymNormalizarBusqueda(texto) {
+  return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function renderGymExercisesList() {
   const list = document.getElementById('gym-exercises-list');
   list.innerHTML = '';
+
+  // El buscador solo asoma cuando hay bastantes como para que estorbe
+  // buscarlos a ojo -- con cuatro ejercicios seria una fila desperdiciada.
+  // Se queda visible si hay algo escrito, para poder borrarlo.
+  const wrap = document.getElementById('gym-exercises-search-wrap');
+  const campo = document.getElementById('gym-exercises-search');
+  const merecePena = state.gymExercises.length >= 8 || gymExercisesFiltro.trim() !== '';
+  wrap.classList.toggle('hidden', !merecePena);
+  document.getElementById('btn-gym-exercises-search-clear').classList.toggle('hidden', gymExercisesFiltro === '');
+  // No se pisa lo que la persona esta escribiendo (el repintado puede
+  // venir de otra cosa, como guardar un ejercicio).
+  if (campo.value !== gymExercisesFiltro) campo.value = gymExercisesFiltro;
+
   if (state.gymExercises.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavía no tienes ejercicios. Se crean desde aquí o al añadirlos a una rutina/sesión.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes ejercicios. Añádelos desde la librería o crea uno a mano.</p>';
     return;
   }
-  state.gymExercises.forEach((ex) => {
+
+  // Busca por nombre Y por musculo: "pierna" saca todas las de pierna
+  // aunque ninguna se llame asi.
+  // El .trim() NO es cosmetico: sin el, escribir solo espacios (el
+  // autocorrector del movil los mete con facilidad) buscaba " " y dejaba
+  // la lista vacia, como si hubieras perdido los ejercicios. Encontrado
+  // forzando fallos.
+  const q = gymNormalizarBusqueda(gymExercisesFiltro).trim();
+  const visibles = q === ''
+    ? state.gymExercises
+    : state.gymExercises.filter((ex) => gymNormalizarBusqueda(
+        `${ex.name} ${gymMuscleGroupLabel(ex.muscleGroup) || ''} ${ex.equipment || ''}`
+      ).includes(q));
+
+  if (visibles.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Ningún ejercicio tuyo coincide con eso.</p>';
+    return;
+  }
+
+  visibles.forEach((ex) => {
+    // "unilateral" se ensena aqui para que se vea DONDE se configura (el
+    // lapiz de esta misma fila) -- Koku lo estuvo buscando en el dia.
+    const extras = [
+      gymMuscleGroupLabel(ex.muscleGroup),
+      ex.equipment,
+      ex.unilateral ? (ex.countSidesSeparately ? 'unilateral, por lados' : 'unilateral') : '',
+    ].filter(Boolean).join(' · ');
     const row = document.createElement('div');
-    row.className = 'gym-list-item';
+    row.className = 'gym-list-item gym-exercise-row';
     row.innerHTML = `
-      <span class="gym-list-item-name">${escapeHtml(ex.name)}${ex.muscleGroup ? ` <span class="gym-list-item-muted">(${escapeHtml(ex.muscleGroup)})</span>` : ''}</span>
+      <span class="gym-list-item-name">${escapeHtml(ex.name)}${extras ? ` <span class="gym-list-item-muted">(${escapeHtml(extras)})</span>` : ''}</span>
+    `;
+    // Deslizar en vez del lapiz (peticion de Koku: "por seguir un poco
+    // con la misma dinamica en todo, en vez de boton, hazlo deslizable").
+    // Mismo componente que las notas, las carpetas, las sesiones del
+    // historial y las tarjetas de grupo.
+    list.appendChild(wrapRowWithSwipeActions(row, {
+      onEdit: () => openGymExerciseModal(ex),
+      onDelete: () => borrarEjercicioDeLaLista(ex),
+    }));
+  });
+}
+
+// Borrar desde el deslizamiento. El servidor RECHAZA borrar un ejercicio
+// que ya tiene series apuntadas (has_history), asi que ese error se
+// cuenta con palabras en vez de soltar el codigo tal cual.
+async function borrarEjercicioDeLaLista(ex) {
+  const ok = await showAppConfirm(`¿Eliminar “${ex.name}”?`, { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  try {
+    await api(`/api/gym-exercises/${ex.id}`, { method: 'DELETE' });
+  } catch (err) {
+    showAppAlert(err && err.message ? err.message : 'No se ha podido eliminar el ejercicio.');
+    return;
+  }
+  await loadGymExercises();
+  renderGymExercisesList();
+}
+
+document.getElementById('gym-exercises-search').addEventListener('input', (e) => {
+  gymExercisesFiltro = e.target.value;
+  renderGymExercisesList();
+});
+document.getElementById('btn-gym-exercises-search-clear').addEventListener('click', () => {
+  gymExercisesFiltro = '';
+  renderGymExercisesList();
+  document.getElementById('gym-exercises-search').focus();
+});
+
+// --- Pestana "Plan": bloques y sus dias (rediseno de Gimnasio) --------
+// Dos niveles dentro de la misma pestana, tipo carpetas de Notas: la
+// lista de bloques, y al entrar en uno, sus dias (las filas de
+// gym_routines de siempre). gymCurrentBlockId dice donde estamos:
+// null = nivel de bloques.
+let gymCurrentBlockId = null;
+
+function renderGymBlocksList() {
+  const list = document.getElementById('gym-blocks-list');
+  list.innerHTML = '';
+  if (state.gymBlocks.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes bloques. Un bloque es una etapa de entrenamiento (ej. "Volumen Invierno") con sus días dentro.</p>';
+    return;
+  }
+  state.gymBlocks.forEach((b) => {
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-block-item';
+    row.dataset.openGymBlock = b.id;
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(b.name)}${b.isActive ? ' <span class="gym-block-active-badge">Activo</span>' : ''}
+        <span class="gym-list-item-muted">(${b.dayCount} día${b.dayCount === 1 ? '' : 's'})</span></span>
       <div class="gym-list-item-actions">
-        <button type="button" class="icon-btn" data-edit-gym-exercise="${ex.id}" aria-label="Editar ejercicio">✎</button>
+        ${b.isActive ? '' : `<button type="button" class="secondary-btn gym-block-activate-btn" data-activate-gym-block="${b.id}">Activar</button>`}
+        <button type="button" class="icon-btn" data-edit-gym-block="${b.id}" aria-label="Editar bloque">✎</button>
       </div>
     `;
+    // Toda la fila entra al bloque, salvo los botones de la derecha (que
+    // paran la propagacion) -- mismo patron que las filas de sesion.
+    row.addEventListener('click', () => openGymBlockDays(b.id));
     list.appendChild(row);
   });
-  list.querySelectorAll('[data-edit-gym-exercise]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      openGymExerciseModal(state.gymExercises.find((e) => e.id === Number(btn.dataset.editGymExercise)));
+  list.querySelectorAll('[data-activate-gym-block]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api(`/api/gym-blocks/${btn.dataset.activateGymBlock}/activate`, { method: 'POST' });
+      await loadGymBlocks();
+      renderGymBlocksList();
+    });
+  });
+  list.querySelectorAll('[data-edit-gym-block]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openGymBlockModal(state.gymBlocks.find((b) => b.id === Number(btn.dataset.editGymBlock)));
     });
   });
 }
 
+// Entra al nivel de dias de UN bloque (o vuelve al de bloques con null).
+function openGymBlockDays(blockId) {
+  gymCurrentBlockId = blockId || null;
+  document.getElementById('gym-blocks-level').classList.toggle('hidden', gymCurrentBlockId !== null);
+  document.getElementById('gym-block-days-level').classList.toggle('hidden', gymCurrentBlockId === null);
+  if (gymCurrentBlockId !== null) {
+    const block = state.gymBlocks.find((b) => b.id === gymCurrentBlockId);
+    document.getElementById('gym-block-days-title').textContent = block ? block.name : '';
+    renderGymRoutinesList();
+  }
+}
+document.getElementById('btn-gym-back-to-blocks').addEventListener('click', async () => {
+  // Al volver se recargan los bloques para que el contador de dias de
+  // cada tarjeta refleje lo que se acabe de crear/borrar dentro.
+  await loadGymBlocks();
+  renderGymBlocksList();
+  openGymBlockDays(null);
+});
+
 function renderGymRoutinesList() {
   const list = document.getElementById('gym-routines-list');
   list.innerHTML = '';
-  if (state.gymRoutines.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavía no tienes rutinas. Crea una arriba.</p>';
+  // Solo los dias del bloque abierto -- el filtrado se hace aqui en
+  // cliente (state.gymRoutines ya esta entero en memoria) en vez de
+  // repedir al backend con ?blockId, que existe para quien lo necesite.
+  const days = state.gymRoutines.filter((r) => r.blockId === gymCurrentBlockId);
+  if (days.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Este bloque todavía no tiene días. Crea uno arriba (ej. "Push 1").</p>';
     return;
   }
-  state.gymRoutines.forEach((r) => {
+  days.forEach((r) => {
     const row = document.createElement('div');
     row.className = 'gym-list-item';
     row.innerHTML = `
       <span class="color-dot" style="background-color: ${r.color}"></span>
       <span class="gym-list-item-name">${r.icon ? escapeHtml(r.icon) + ' ' : ''}${escapeHtml(r.name)} <span class="gym-list-item-muted">(${r.exercises.length} ejercicio${r.exercises.length === 1 ? '' : 's'})</span></span>
       <div class="gym-list-item-actions">
-        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar rutina">✎</button>
+        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar nombre, color y bloque">✎</button>
       </div>
     `;
+    // Dos entradas distintas al mismo dia, como pidio Koku: el lapiz
+    // para su FICHA (nombre, color, icono y bloque) y tocar la fila para
+    // sus EJERCICIOS, que es a lo que se entra el 90% de las veces.
+    row.addEventListener('click', () => {
+      openGymRoutineModal(state.gymRoutines.find((x) => x.id === r.id), 'ejercicios');
+    });
     list.appendChild(row);
   });
   list.querySelectorAll('[data-edit-gym-routine]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      openGymRoutineModal(state.gymRoutines.find((r) => r.id === Number(btn.dataset.editGymRoutine)));
+    btn.addEventListener('click', (e) => {
+      // Sin esto, el clic del lapiz sube tambien a la fila y abriria las
+      // dos mitades una encima de otra.
+      e.stopPropagation();
+      openGymRoutineModal(state.gymRoutines.find((r) => r.id === Number(btn.dataset.editGymRoutine)), 'ficha');
     });
   });
+}
+
+// Deslizar una fila hacia la izquierda para sacar Editar / Eliminar
+// ("como esta hecho en las notas", pedido de Koku). Nacio para el
+// historial del Gimnasio y ahora la usan tambien los grupos del
+// calendario, por eso el nombre generico -- si hace falta en un sitio
+// nuevo, basta con envolver la fila con esto.
+//
+// Reutiliza las mismas clases y el mismo estado de "solo una fila
+// abierta" (openSwipedNoteRow) que wrapNoteRowWithSwipe, para que abrir
+// una cierre la otra y el toque fuera las cierre todas.
+// botones: si se pasa, sustituye a la pareja Editar/Eliminar de siempre.
+// Cada entrada es [texto, clase, funcion]. Sirve para sitios que
+// necesitan otra combinacion -- los temas, por ejemplo, llevan tambien
+// "Exportar", y "Todos los eventos" no lleva ninguno.
+// anchoFijo: cuanto se desplaza la fila, en px, cuando NO hay botones
+// que medir (el caso de "Todos los eventos", que se desliza solo para
+// que salte su aviso). Sin esto, un contenedor de acciones vacio mide
+// cuatro pixeles y el gesto no se notaria.
+function wrapRowWithSwipeActions(row, { onEdit, onDelete, botones, anchoFijo, bloqueadoSi } = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'note-swipe-wrap';
+
+  const acciones = document.createElement('div');
+  acciones.className = 'note-swipe-actions';
+  const lista = botones || [['Editar', 'secondary-btn', onEdit], ['Eliminar', 'danger-btn', onDelete]];
+  lista.forEach(([texto, clase, fn]) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = clase;
+    btn.textContent = texto;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeSwipedNoteRow();
+      fn();
+    });
+    acciones.appendChild(btn);
+  });
+  wrap.appendChild(acciones);
+  wrap.appendChild(row);
+
+  // La fila SIGUE AL DEDO mientras deslizas y luego cae sola a su sitio
+  // (peticion de Koku: "dale animación al deslizar, para que se vea más
+  // fluido"). Mientras se arrastra se quita la transicion (clase
+  // is-dragging) y se escribe el transform a mano; al soltar se borra el
+  // transform en linea y manda otra vez el CSS, que anima el ultimo
+  // tramo.
+  const anchoAcciones = () => anchoFijo || acciones.offsetWidth || 152;
+  let inicio = null;
+  let horizontal = false;
+  const soltarArrastre = () => {
+    wrap.classList.remove('is-dragging');
+    row.style.transform = '';
+  };
+  row.addEventListener('pointerdown', (e) => {
+    // Hay filas que a veces tienen otro gesto encima (el modo mover del
+    // entreno): mientras ese esta activo, deslizar no hace nada.
+    if (bloqueadoSi && bloqueadoSi()) { inicio = null; return; }
+    inicio = { x: e.clientX, y: e.clientY };
+    horizontal = false;
+  });
+  row.addEventListener('pointermove', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    const dy = e.clientY - inicio.y;
+    if (!horizontal && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+      horizontal = true;
+      wrap.style.setProperty('--swipe-actions-width', `${anchoAcciones()}px`);
+      wrap.classList.add('is-dragging');
+    }
+    if (!horizontal) return;
+    const ancho = anchoAcciones();
+    const desde = wrap.classList.contains('is-open') ? -ancho : 0;
+    let x = desde + dx;
+    // Fuera de los topes cuesta mas tirar (goma), para que se note el
+    // limite sin bloquearse de golpe.
+    if (x > 0) x *= 0.3;
+    else if (x < -ancho) x = -ancho + (x + ancho) * 0.3;
+    row.style.transform = `translateX(${x}px)`;
+  });
+  row.addEventListener('pointerup', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    inicio = null;
+    if (!horizontal) return;
+    const ancho = anchoAcciones();
+    const desde = wrap.classList.contains('is-open') ? -ancho : 0;
+    const x = desde + dx;
+    soltarArrastre();
+    // Se queda donde estuviera mas cerca: pasada la mitad, abierta.
+    if (x < -ancho / 2) {
+      if (openSwipedNoteRow !== wrap) closeSwipedNoteRow();
+      wrap.style.setProperty('--swipe-actions-width', `${ancho}px`);
+      const yaEstaba = wrap.classList.contains('is-open');
+      wrap.classList.add('is-open');
+      openSwipedNoteRow = wrap;
+      // Aviso para quien quiera enterarse de que esta fila ACABA de
+      // abrirse (lo usa "Todos los eventos" para sacar su dialogo). Va
+      // aqui y no en el pointermove a proposito: si saltara a mitad del
+      // arrastre, cortaria el gesto en seco.
+      if (!yaEstaba) row.dispatchEvent(new CustomEvent('swipeabierto'));
+    } else if (wrap.classList.contains('is-open')) {
+      closeSwipedNoteRow();
+    }
+    // Un deslizamiento no debe abrir la sesion: se descarta ese click.
+    row.dataset.swiped = '1';
+  });
+  row.addEventListener('pointercancel', () => {
+    inicio = null;
+    horizontal = false;
+    soltarArrastre();
+  });
+  row.addEventListener('click', (e) => {
+    if (row.dataset.swiped) {
+      delete row.dataset.swiped;
+      if (wrap.classList.contains('is-open')) { e.stopPropagation(); e.preventDefault(); }
+    }
+  }, true);
+  return wrap;
+}
+
+// Borrar una sesion desde el deslizamiento (mismo aviso que el boton de
+// dentro del modal: aqui SI se pierde historial).
+async function deleteGymSessionById(id) {
+  const ok = await showAppConfirm('¿Eliminar esta sesión y todas sus series? Esto sí borra historial.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
+  await loadGymSessions();
+  renderGymSessionsList();
+  populateGymProgressExerciseSelect();
+}
+
+// --- Series alargadas: dropset y rest-pause ---------------------------
+// Un DROPSET es una serie que, al llegar al limite, sigue bajando el
+// peso; un REST-PAUSE es una serie que para unos segundos y sigue con el
+// MISMO peso. Los dos se apuntan DESPUES de la serie (peticion de Koku:
+// "hay veces que lo hago y otras que no, depende de la serie"), asi que
+// no son una configuracion del ejercicio sino algo que se anade en el
+// dialogo de "¿has acabado la serie?".
+//
+// Cada tramo extra viaja dentro de su serie madre, en `set.segments`
+// (ver serializeSets en routes-local/gymSessions.js). Las tres reglas
+// que decidio Koku, y de donde salen estas funciones:
+//   1. Una serie alargada cuenta como UNA serie, no como tres. Por eso
+//      los tramos van anidados y nunca sueltos en la lista.
+//   2. El VOLUMEN suma todos los tramos: es trabajo real, y si no
+//      sumara, la grafica bajaria justo el dia que mas aprietas.
+//   3. Cualquier tramo puede ser RECORD ("hay veces que la segunda sale
+//      mejor que la primera"), asi que los PRs miran serie y tramos por
+//      igual -- por eso existe gymSetConTramos().
+const GYM_SEGMENT_LABELS = { dropset: 'Drop', restpause: 'R-P' };
+
+// Serie llevada al fallo: se marca en el mismo dialogo de fin de serie y
+// se guarda en set_type = 'failure' (valor que el esquema ya tenia
+// reservado). Es una ETIQUETA, no cambia ningun calculo: al fallo o no,
+// las repeticiones y los kilos son los que son, y una serie al fallo es
+// justo la que MAS merece contar como record (a diferencia del
+// calentamiento, que sigue fuera de los PRs).
+const GYM_FAILURE_CHIP = '<span class="gym-set-failure-chip" title="Serie llevada al fallo">Fallo</span>';
+function gymFailureChipHtml(esAlFallo) {
+  return esAlFallo ? GYM_FAILURE_CHIP : '';
+}
+
+// CUANTO PESA DE MAS una serie al fallo en el volumen. Decision de Koku
+// ("para que se tenga en cuenta para las graficas, aunque haga dropset y
+// no haga las mismas repes que en la primera"): al final de una serie
+// exprimida mueves menos kilos pero el esfuerzo es mayor, y con el
+// volumen a pelo esa serie parecia PEOR que una floja.
+//
+// Aviso importante, porque es facil olvidarlo: no hay ninguna cifra
+// estandar para esto, es un numero elegido. Por eso
+//   1. los kg GUARDADOS son siempre los de verdad -- el factor se aplica
+//      solo al PINTAR, nunca al escribir en la base;
+//   2. es ajustable por dispositivo (Progreso > "Peso extra de una serie
+//      al fallo"), asi que cambiarlo no reescribe ningun historial: los
+//      mismos datos se vuelven a sumar con otro numero;
+//   3. x1 lo desactiva del todo y deja el volumen como los kg reales.
+// El factor se aplica a la serie ENTERA, tramos de dropset/rest-pause
+// incluidos: lo que se llevo al fallo fue la serie completa.
+// Por defecto x1,25: lo eligio Koku ya usando la app de verdad, y con un
+// criterio concreto de que es "al fallo" -- "tratar de hacer la
+// repeticion y no poder terminarla, no decir okey creo que no puedo una
+// mas, sino forzar esa otra mas y no conseguir sacarla".
+const GYM_FAILURE_FACTORS = [1, 1.1, 1.2, 1.25, 1.5];
+function getGymFailureFactor() {
+  const guardado = Number(localStorage.getItem('gymFailureFactor'));
+  return GYM_FAILURE_FACTORS.includes(guardado) ? guardado : 1.25;
+}
+// Volumen ya ajustado a partir de los kg REALES y de cuantos de esos kg
+// salieron de series al fallo. Lo usan por igual el cliente y lo que
+// llega agregado de las rutas (que devuelven las dos cifras aparte, en
+// kg de verdad, precisamente para poder hacer esta cuenta aqui).
+function gymVolumenAjustado(volumenKg, volumenAlFalloKg) {
+  return (Number(volumenKg) || 0) + (Number(volumenAlFalloKg) || 0) * (getGymFailureFactor() - 1);
+}
+
+function gymSetSegments(set) {
+  return set && Array.isArray(set.segments) ? set.segments.filter(Boolean) : [];
+}
+
+// Kilos REALES movidos por la serie entera (madre + tramos), sin
+// ajustar. Es lo que se guarda y lo que hay que usar para cualquier cosa
+// que quiera saber cuanto peso se movio de verdad.
+function gymSetVolumeRealKg(set) {
+  let total = (Number(set.reps) || 0) * (Number(set.weightKg) || 0);
+  for (const seg of gymSetSegments(set)) {
+    total += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
+  }
+  return total;
+}
+
+// ¿Esta serie se llevo al fallo? Los tramos heredan la marca de su madre
+// (llevan su propio set_type de 'dropset'/'restpause'), asi que la
+// pregunta siempre es por la serie, nunca por un tramo suelto.
+function gymSetEsAlFallo(set) {
+  return set.setType === 'failure' || set.failure === true;
+}
+
+// El volumen tal y como se PINTA: los kg reales, con el peso extra si la
+// serie fue al fallo. Lo usan el historial, el mapa de musculos, la
+// grafica semanal y los PRs, para que todos cuenten igual.
+function gymSetVolumeKg(set) {
+  const real = gymSetVolumeRealKg(set);
+  return gymSetEsAlFallo(set) ? gymVolumenAjustado(real, real) : real;
+}
+
+// La serie y sus tramos como una lista plana de "cosas con peso y
+// repeticiones", para lo que mira serie a serie (los PRs). Los tramos
+// heredan el ejercicio y el lado de su madre.
+function gymSetConTramos(set) {
+  const lista = [set];
+  for (const seg of gymSetSegments(set)) {
+    lista.push({
+      exerciseId: set.exerciseId,
+      exerciseName: set.exerciseName,
+      reps: seg.reps,
+      weightKg: seg.weightKg,
+      setType: seg.kind,
+      side: set.side || null,
+    });
+  }
+  return lista;
+}
+
+// Etiqueta corta para la fila de una serie alargada: "Drop x2", "R-P".
+function gymSegmentChipHtml(set) {
+  const segs = gymSetSegments(set);
+  if (segs.length === 0) return '';
+  const kinds = [...new Set(segs.map((seg) => (seg.kind === 'restpause' ? 'restpause' : 'dropset')))];
+  const texto = kinds.map((k) => GYM_SEGMENT_LABELS[k]).join('+');
+  const sufijo = segs.length > 1 ? ` ×${segs.length}` : '';
+  return `<span class="gym-set-segment-chip" title="Serie alargada: ${segs.length} tramo${segs.length === 1 ? '' : 's'} extra">${texto}${sufijo}</span>`;
 }
 
 function renderGymSessionsList() {
@@ -7948,22 +8854,59 @@ function renderGymSessionsList() {
     list.innerHTML = '<p class="empty-hint">Todavía no has registrado ninguna sesión.</p>';
     return;
   }
+  const unit = getGymWeightUnitLabel();
   state.gymSessions.forEach((s) => {
-    const exerciseNames = [...new Set(s.sets.map((set) => set.exerciseName))];
     const row = document.createElement('div');
     row.className = 'gym-list-item gym-session-item';
     row.dataset.editGymSession = s.id;
+
+    // Linea de datos rapidos: duracion (si la hay), y para entrenos de
+    // pesas tambien nº de series y volumen total.
+    const statBits = [];
+    if (s.durationSeconds) statBits.push(`${Math.max(1, Math.round(s.durationSeconds / 60))} min`);
+    if (s.type !== 'activity' && s.sets.length > 0) {
+      statBits.push(`${s.sets.length} serie${s.sets.length === 1 ? '' : 's'}`);
+      // Los tramos de una serie alargada suman kilos pero NO series:
+      // por eso el volumen usa gymSetVolumeKg y el conteo de arriba es
+      // sets.length a secas (los tramos van anidados, no en la lista).
+      const volumeKg = s.sets.reduce((acc, set) => acc + gymSetVolumeKg(set), 0);
+      if (volumeKg > 0) statBits.push(`${gymWeightKgToDisplay(volumeKg)} ${unit}`);
+      // Tiempo REAL de trabajo (suma de lo que duraron las series), solo
+      // si la sesion se registro con el boton de empezar/terminar serie.
+      const workSeconds = s.sets.reduce((acc, set) => acc + (set.durationSeconds || 0), 0);
+      if (workSeconds > 0) statBits.push(`${gymFormatWorkTime(workSeconds)} de trabajo`);
+    }
+
+    if (s.type === 'activity') {
+      row.innerHTML = `
+        <span class="gym-session-item-date">${formatGymDate(s.date)}</span>
+        <span class="gym-session-item-routine">${escapeHtml(s.activityName || 'Actividad')}</span>
+        <span class="gym-list-item-muted">${escapeHtml([gymActivityKindLabel(s.activityKind), ...statBits].join(' · '))}</span>
+      `;
+      row.addEventListener('click', () => openGymActivityModal(s));
+      list.appendChild(wrapRowWithSwipeActions(row, {
+        onEdit: () => openGymActivityModal(s),
+        onDelete: () => deleteGymSessionById(s.id),
+      }));
+      return;
+    }
+
+    const exerciseNames = [...new Set(s.sets.map((set) => set.exerciseName))];
     row.innerHTML = `
       <span class="gym-session-item-date">${formatGymDate(s.date)}</span>
       ${
         s.routineName
           ? `<span class="gym-session-item-routine"><span class="color-dot" style="background-color: ${s.routineColor}"></span>${s.routineIcon ? escapeHtml(s.routineIcon) + ' ' : ''}${escapeHtml(s.routineName)}</span>`
-          : '<span class="gym-session-item-routine gym-list-item-muted">Sesion libre</span>'
+          : '<span class="gym-session-item-routine gym-list-item-muted">Sesión libre</span>'
       }
+      ${statBits.length ? `<span class="gym-list-item-muted">${escapeHtml(statBits.join(' · '))}</span>` : ''}
       <span class="gym-list-item-muted">${exerciseNames.length ? exerciseNames.map(escapeHtml).join(', ') : 'Sin ejercicios'}</span>
     `;
     row.addEventListener('click', () => openGymSessionModal(s));
-    list.appendChild(row);
+    list.appendChild(wrapRowWithSwipeActions(row, {
+      onEdit: () => openGymSessionModal(s),
+      onDelete: () => deleteGymSessionById(s.id),
+    }));
   });
 }
 
@@ -8616,15 +9559,90 @@ function renderFinanzasAssetValuationChart(valuations) {
 }
 
 // --- Modal de ejercicio -------------------------------------------------
+// El grupo muscular ya no es texto libre: select con la taxonomia fija
+// (GYM_MUSCLE_GROUPS). Si se edita un ejercicio de antes del rediseno
+// cuyo valor no esta en la taxonomia, ese valor viejo se anade como
+// opcion extra para no perderlo sin querer al guardar.
+const gymExerciseMuscleField = createSelectField({
+  options: [{ value: '', label: 'Sin grupo' }],
+  initialValue: '',
+  placeholder: 'Sin grupo',
+});
+document.getElementById('gym-exercise-muscle-field').appendChild(gymExerciseMuscleField.element);
+
+// Musculos SECUNDARIOS del ejercicio (chips activables): cuentan en el
+// mapa de musculos a mitad de peso, igual que los de la libreria.
+let gymExerciseSecondarySel = new Set();
+function renderGymExerciseSecondaryChips() {
+  const container = document.getElementById('gym-exercise-secondary-field');
+  container.innerHTML = '';
+  GYM_MUSCLE_GROUPS.forEach((g) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'gym-secondary-chip' + (gymExerciseSecondarySel.has(g.id) ? ' active' : '');
+    chip.textContent = g.label;
+    chip.addEventListener('click', () => {
+      if (gymExerciseSecondarySel.has(g.id)) gymExerciseSecondarySel.delete(g.id);
+      else gymExerciseSecondarySel.add(g.id);
+      renderGymExerciseSecondaryChips();
+    });
+    container.appendChild(chip);
+  });
+}
+
+// Si el modal se abrio desde el buscador estando en "modo elegir" (el +
+// del entreno en vivo), el ejercicio recien creado se añade directo a la
+// sesion en curso al guardar.
+let gymExerciseAddToLivePending = false;
+
+// Lo de "contar cada lado por separado" y el descanso entre lados solo
+// pinta algo si el ejercicio es unilateral: se esconde si no lo es.
+function refreshGymUnilateralFields() {
+  const on = document.getElementById('gym-exercise-unilateral').checked;
+  document.getElementById('gym-exercise-unilateral-extra').classList.toggle('hidden', !on);
+}
+document.getElementById('gym-exercise-unilateral').addEventListener('change', refreshGymUnilateralFields);
+
+// "90" -> "Descanso: 1:30 min". El campo va en segundos y sin esto no se
+// nota (mismo apano que ya tenia la fila del dia).
+function refreshGymExerciseDefaultRestPreview() {
+  const n = Number(document.getElementById('gym-exercise-default-rest').value);
+  document.getElementById('gym-exercise-default-rest-preview').textContent =
+    n > 0 ? `Descanso: ${gymLiveFormatClock(n)} min` : '';
+}
+document.getElementById('gym-exercise-default-rest').addEventListener('input', refreshGymExerciseDefaultRestPreview);
+
 function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
   document.getElementById('gym-exercise-id').value = exercise ? exercise.id : '';
   document.getElementById('gym-exercise-name').value = exercise ? exercise.name : '';
-  document.getElementById('gym-exercise-muscle-group').value = exercise ? exercise.muscleGroup || '' : '';
+  document.getElementById('gym-exercise-equipment').value = exercise ? exercise.equipment || '' : '';
+  document.getElementById('gym-exercise-notes').value = exercise ? exercise.notes || '' : '';
+  document.getElementById('gym-exercise-unilateral').checked = !!(exercise && exercise.unilateral);
+  document.getElementById('gym-exercise-sides-separately').checked = !!(exercise && exercise.countSidesSeparately);
+  document.getElementById('gym-exercise-side-rest').value = exercise && exercise.sideRestSeconds != null ? exercise.sideRestSeconds : '';
+  document.getElementById('gym-exercise-default-sets').value = exercise && exercise.defaultSets != null ? exercise.defaultSets : '';
+  document.getElementById('gym-exercise-default-reps').value = exercise && exercise.defaultReps != null ? exercise.defaultReps : '';
+  document.getElementById('gym-exercise-default-rest').value = exercise && exercise.defaultRestSeconds != null ? exercise.defaultRestSeconds : '';
+  refreshGymExerciseDefaultRestPreview();
+  refreshGymUnilateralFields();
+  gymExerciseSecondarySel = new Set(exercise && Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : []);
+  renderGymExerciseSecondaryChips();
+  const options = [
+    { value: '', label: 'Sin grupo' },
+    ...GYM_MUSCLE_GROUPS.map((g) => ({ value: g.id, label: g.label })),
+  ];
+  const current = exercise ? exercise.muscleGroup || '' : '';
+  if (current && !GYM_MUSCLE_GROUPS.some((g) => g.id === current)) {
+    options.push({ value: current, label: `${current} (texto antiguo)` });
+  }
+  gymExerciseMuscleField.setOptions(options);
+  gymExerciseMuscleField.setValue(current);
   document.getElementById('btn-delete-gym-exercise').classList.toggle('hidden', !exercise);
   document.getElementById('gym-exercise-modal').classList.remove('hidden');
 }
 function closeGymExerciseModal() {
+  gymExerciseAddToLivePending = false;
   document.getElementById('gym-exercise-modal').classList.add('hidden');
 }
 document.getElementById('btn-new-gym-exercise').addEventListener('click', () => openGymExerciseModal(null));
@@ -8636,16 +9654,41 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
   const id = document.getElementById('gym-exercise-id').value;
   const payload = {
     name: document.getElementById('gym-exercise-name').value,
-    muscleGroup: document.getElementById('gym-exercise-muscle-group').value,
+    muscleGroup: gymExerciseMuscleField.getValue(),
+    equipment: document.getElementById('gym-exercise-equipment').value,
+    secondaryMuscles: [...gymExerciseSecondarySel],
+    notes: document.getElementById('gym-exercise-notes').value,
+    unilateral: document.getElementById('gym-exercise-unilateral').checked,
+    countSidesSeparately: document.getElementById('gym-exercise-sides-separately').checked,
+    sideRestSeconds: document.getElementById('gym-exercise-side-rest').value,
+    defaultSets: document.getElementById('gym-exercise-default-sets').value,
+    defaultReps: document.getElementById('gym-exercise-default-reps').value,
+    defaultRestSeconds: document.getElementById('gym-exercise-default-rest').value,
   };
+  // El flag se captura ANTES de cerrar: closeGymExerciseModal lo resetea.
+  const addToLive = !id && gymExerciseAddToLivePending;
+  let saved;
   if (id) {
-    await api(`/api/gym-exercises/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    saved = await api(`/api/gym-exercises/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   } else {
-    await api('/api/gym-exercises', { method: 'POST', body: JSON.stringify(payload) });
+    saved = await api('/api/gym-exercises', { method: 'POST', body: JSON.stringify(payload) });
   }
   closeGymExerciseModal();
   await loadGymExercises();
   renderGymExercisesList();
+  // Creado desde el buscador en modo elegir: directo al entreno en curso.
+  if (addToLive && gymLiveSession && saved && !gymLiveSession.exercises.some((x) => x.exerciseId === saved.id)) {
+    gymLiveSession.exercises.push({
+      exerciseId: saved.id,
+      note: '',
+      rpe: '',
+      collapsed: false,
+      sets: gymBuildSetsForExercise(saved.id, 1, ''),
+    });
+    gymLiveStore();
+    gymLivePrevSets.set(saved.id, await api(`/api/gym-sessions/last-sets/${saved.id}`));
+    renderGymLiveExercises();
+  }
 });
 
 document.getElementById('btn-delete-gym-exercise').addEventListener('click', async () => {
@@ -8653,7 +9696,7 @@ document.getElementById('btn-delete-gym-exercise').addEventListener('click', asy
   try {
     await api(`/api/gym-exercises/${id}`, { method: 'DELETE' });
   } catch (err) {
-    alert(err.message);
+    showAppAlert(err.message);
     return;
   }
   closeGymExerciseModal();
@@ -8661,7 +9704,2888 @@ document.getElementById('btn-delete-gym-exercise').addEventListener('click', asy
   renderGymExercisesList();
 });
 
-// --- Modal de rutina ------------------------------------------------------
+// --- Buscador de la libreria de ejercicios (Fase 2) --------------------
+// Ver el comentario de loadGymExerciseLibrary() arriba (origen del
+// dataset y creditos). El buscador filtra en cliente sobre el JSON
+// entero; para no pintar 870 filas de golpe se corta en 80 con un aviso
+// de "afina la busqueda".
+const gymLibraryMuscleField = createSelectField({
+  options: [{ value: '', label: 'Todos los músculos' }, ...GYM_MUSCLE_GROUPS.map((g) => ({ value: g.id, label: g.label }))],
+  initialValue: '',
+  onChange: () => renderGymLibraryList(),
+});
+document.getElementById('gym-library-muscle-field').appendChild(gymLibraryMuscleField.element);
+
+const gymLibraryEquipmentField = createSelectField({
+  options: [{ value: '', label: 'Todo el material' }],
+  initialValue: '',
+  onChange: () => renderGymLibraryList(),
+});
+document.getElementById('gym-library-equipment-field').appendChild(gymLibraryEquipmentField.element);
+
+// Busqueda sin acentos ni mayusculas ("prensa" encuentra "Prensa",
+// "bicep" encuentra "Bíceps"...).
+function gymNormalizeSearch(text) {
+  return String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function renderGymLibraryList() {
+  const list = document.getElementById('gym-library-list');
+  if (!gymExerciseLibrary) return;
+  const search = gymNormalizeSearch(document.getElementById('gym-library-search').value.trim());
+  const muscle = gymLibraryMuscleField.getValue();
+  const equipment = gymLibraryEquipmentField.getValue();
+
+  // Ejercicios ya importados, para marcarlos y no ofrecer importarlos otra vez.
+  const importedIds = new Set(state.gymExercises.map((ex) => ex.libraryId).filter(Boolean));
+
+  const matches = gymExerciseLibrary.filter((e) => {
+    if (muscle && e.muscleGroup !== muscle && !e.primaryMuscles.includes(muscle)) return false;
+    if (equipment && e.equipment !== equipment) return false;
+    if (search && !gymNormalizeSearch(e.name).includes(search) && !gymNormalizeSearch(e.nameEn).includes(search)) return false;
+    return true;
+  });
+
+  list.innerHTML = '';
+  const CAP = 80;
+  matches.slice(0, CAP).forEach((e) => {
+    const meta = [gymMuscleGroupLabel(e.muscleGroup), e.equipment, e.level].filter(Boolean).join(' · ');
+    const imported = importedIds.has(e.id);
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-library-item';
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(e.name)}${meta ? ` <span class="gym-list-item-muted">(${escapeHtml(meta)})</span>` : ''}</span>
+      <div class="gym-list-item-actions">
+        ${imported
+          ? '<span class="gym-library-imported">✓ Importado</span>'
+          : `<button type="button" class="secondary-btn gym-library-import-btn" data-import-gym-library="${escapeHtml(e.id)}">+ Importar</button>`}
+      </div>
+    `;
+    // La fila entera abre la ficha (o, en modo elegir, elige directamente);
+    // el boton de importar corta la propagacion.
+    row.addEventListener('click', () => {
+      if (gymLibraryPickCallback) {
+        const cb = gymLibraryPickCallback;
+        gymLibraryPickCallback = null;
+        closeGymLibraryModal();
+        cb(e);
+        return;
+      }
+      openGymLibraryDetail(e);
+    });
+    list.appendChild(row);
+  });
+  if (matches.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Ningún ejercicio coincide con la búsqueda.</p>';
+  } else if (matches.length > CAP) {
+    const hint = document.createElement('p');
+    hint.className = 'empty-hint';
+    hint.textContent = `Mostrando ${CAP} de ${matches.length} — afina la búsqueda para ver el resto.`;
+    list.appendChild(hint);
+  }
+  list.querySelectorAll('[data-import-gym-library]').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (gymLibraryPickCallback) {
+        const entry = gymExerciseLibrary.find((e) => e.id === btn.dataset.importGymLibrary);
+        const cb = gymLibraryPickCallback;
+        gymLibraryPickCallback = null;
+        closeGymLibraryModal();
+        if (entry) cb(entry);
+        return;
+      }
+      await importGymLibraryExercise(btn.dataset.importGymLibrary);
+      renderGymLibraryList();
+    });
+  });
+}
+
+// Importa un ejercicio de la libreria a gym_exercises. El backend es
+// idempotente por libraryId (reimportar devuelve el existente), asi que
+// llamar esto dos veces no duplica nada.
+async function importGymLibraryExercise(libraryId) {
+  const entry = gymExerciseLibrary.find((e) => e.id === libraryId);
+  if (!entry) return;
+  await api('/api/gym-exercises', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: entry.name,
+      muscleGroup: entry.muscleGroup,
+      equipment: entry.equipment,
+      libraryId: entry.id,
+      secondaryMuscles: entry.secondaryMuscles,
+    }),
+  });
+  await loadGymExercises();
+  renderGymExercisesList();
+}
+
+async function openGymLibraryModal() {
+  document.getElementById('gym-library-modal').classList.remove('hidden');
+  const list = document.getElementById('gym-library-list');
+  if (!gymExerciseLibrary) {
+    list.innerHTML = '<p class="empty-hint">Cargando librería…</p>';
+    try {
+      await loadGymExerciseLibrary();
+    } catch (err) {
+      list.innerHTML = '';
+      showAppAlert(err.message);
+      return;
+    }
+    // El filtro de material se construye con lo que de verdad hay en el
+    // dataset (y solo la primera vez, el JSON no cambia en caliente).
+    const equipments = [...new Set(gymExerciseLibrary.map((e) => e.equipment).filter(Boolean))].sort();
+    gymLibraryEquipmentField.setOptions([
+      { value: '', label: 'Todo el material' },
+      ...equipments.map((eq) => ({ value: eq, label: eq })),
+    ]);
+  }
+  renderGymLibraryList();
+}
+function closeGymLibraryModal() {
+  document.getElementById('gym-library-modal').classList.add('hidden');
+  // Si se cierra sin elegir estando en modo elegir, el callback se tira
+  // (cancelar la eleccion no debe dejar el modo pegado para despues).
+  gymLibraryPickCallback = null;
+}
+document.getElementById('btn-open-gym-library').addEventListener('click', openGymLibraryModal);
+document.getElementById('btn-close-gym-library').addEventListener('click', closeGymLibraryModal);
+document.getElementById('gym-library-search').addEventListener('input', () => renderGymLibraryList());
+
+// "+ Crear ejercicio propio" desde el buscador (peticion de Koku: la
+// libreria es una propuesta, no un limite). Si el buscador estaba en
+// modo elegir (el + del entreno en vivo), se recuerda con el flag para
+// que el ejercicio recien creado entre directo a la sesion al guardar.
+document.getElementById('btn-gym-library-new-custom').addEventListener('click', () => {
+  gymExerciseAddToLivePending = !!gymLibraryPickCallback;
+  closeGymLibraryModal();
+  openGymExerciseModal(null);
+});
+
+// --- Ficha de un ejercicio de la libreria ------------------------------
+let gymLibraryDetailEntry = null;
+function openGymLibraryDetail(entry) {
+  gymLibraryDetailEntry = entry;
+  document.getElementById('gym-library-detail-title').textContent = entry.name;
+  const meta = [
+    gymMuscleGroupLabel(entry.muscleGroup),
+    entry.secondaryMuscles.length ? `secundarios: ${entry.secondaryMuscles.map(gymMuscleGroupLabel).join(', ')}` : null,
+    entry.equipment,
+    entry.level,
+    entry.category,
+  ].filter(Boolean).join(' · ');
+  document.getElementById('gym-library-detail-meta').textContent = `${meta} · (${entry.nameEn})`;
+  const listEl = document.getElementById('gym-library-detail-instructions');
+  listEl.innerHTML = '';
+  if (entry.instructions.length === 0) {
+    listEl.innerHTML = '<p class="empty-hint">Este ejercicio no trae instrucciones.</p>';
+  } else {
+    entry.instructions.forEach((step) => {
+      const li = document.createElement('li');
+      li.textContent = step;
+      listEl.appendChild(li);
+    });
+  }
+  document.getElementById('gym-library-detail-modal').classList.remove('hidden');
+}
+function closeGymLibraryDetail() {
+  document.getElementById('gym-library-detail-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-gym-library-detail').addEventListener('click', closeGymLibraryDetail);
+document.getElementById('btn-close-gym-library-detail-2').addEventListener('click', closeGymLibraryDetail);
+document.getElementById('btn-import-gym-library-detail').addEventListener('click', async () => {
+  if (!gymLibraryDetailEntry) return;
+  await importGymLibraryExercise(gymLibraryDetailEntry.id);
+  closeGymLibraryDetail();
+  renderGymLibraryList();
+});
+
+// --- Actividad rapida (Fase 4 del rediseno) ---------------------------
+// Cardio/clases/deporte sin series: tipo + nombre + duracion + fecha.
+// Se guarda como una gym_session con type='activity' (misma tabla que
+// los entrenos, ver el comentario del esquema) para que heatmap/racha
+// tengan una sola fuente de "dias con actividad".
+const GYM_ACTIVITY_KINDS = [
+  { id: 'cardio', label: 'Cardio' },
+  { id: 'clase', label: 'Clase dirigida' },
+  { id: 'deporte', label: 'Deporte' },
+  { id: 'otro', label: 'Otro' },
+];
+function gymActivityKindLabel(kind) {
+  const found = GYM_ACTIVITY_KINDS.find((k) => k.id === kind);
+  return found ? found.label : 'Actividad';
+}
+const gymActivityKindField = createSelectField({
+  options: GYM_ACTIVITY_KINDS.map((k) => ({ value: k.id, label: k.label })),
+  initialValue: 'cardio',
+});
+document.getElementById('gym-activity-kind-field').appendChild(gymActivityKindField.element);
+const gymActivityDateField = createDateField({ initialValue: new Date() });
+document.getElementById('gym-activity-date-field').appendChild(gymActivityDateField.element);
+
+function openGymActivityModal(session) {
+  document.getElementById('gym-activity-modal-title').textContent = session ? 'Editar actividad' : 'Actividad rápida';
+  document.getElementById('gym-activity-id').value = session ? session.id : '';
+  document.getElementById('gym-activity-name').value = session ? session.activityName || '' : '';
+  document.getElementById('gym-activity-duration').value = session && session.durationSeconds ? Math.round(session.durationSeconds / 60) : '';
+  gymActivityKindField.setValue(session && session.activityKind ? session.activityKind : 'cardio');
+  gymActivityDateField.setValue(session ? new Date(`${session.date}T00:00:00`) : new Date());
+  document.getElementById('btn-delete-gym-activity').classList.toggle('hidden', !session);
+  document.getElementById('gym-activity-modal').classList.remove('hidden');
+}
+function closeGymActivityModal() {
+  document.getElementById('gym-activity-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-gym-activity').addEventListener('click', () => openGymActivityModal(null));
+document.getElementById('btn-cancel-gym-activity').addEventListener('click', closeGymActivityModal);
+document.getElementById('btn-close-gym-activity').addEventListener('click', closeGymActivityModal);
+
+document.getElementById('gym-activity-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('gym-activity-id').value;
+  const minutes = Number(document.getElementById('gym-activity-duration').value);
+  const payload = {
+    date: toDateKey(gymActivityDateField.getValue()),
+    type: 'activity',
+    activityKind: gymActivityKindField.getValue(),
+    activityName: document.getElementById('gym-activity-name').value,
+    durationSeconds: minutes > 0 ? minutes * 60 : null,
+  };
+  if (id) {
+    await api(`/api/gym-sessions/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/gym-sessions', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeGymActivityModal();
+  await loadGymSessions();
+  renderGymSessionsList();
+  checkGymAchievements();
+});
+
+document.getElementById('btn-delete-gym-activity').addEventListener('click', async () => {
+  const id = document.getElementById('gym-activity-id').value;
+  const ok = await showAppConfirm('¿Eliminar esta actividad?', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
+  closeGymActivityModal();
+  await loadGymSessions();
+  renderGymSessionsList();
+});
+
+// --- Modo entrenar en vivo (Fase 3 del rediseno) ----------------------
+// El estado del entrenamiento en curso vive en localStorage
+// (gymLiveSession) y se reescribe entero en CADA cambio -- asi una
+// recarga o un cierre de la app a mitad de entreno no pierde nada, y al
+// volver aparece el boton de "continuar". Solo al Terminar se convierte
+// en una sesion de verdad (POST /api/gym-sessions) y se limpia.
+//
+// Los tiempos (cronometro de sesion y descanso) se calculan SIEMPRE
+// desde timestamps guardados (startedAt / restUntil), nunca sumando
+// ticks: en iOS el JS se congela con la app en segundo plano y un
+// contador de ticks se quedaria atras al volver.
+let gymLiveSession = null;      // espejo en memoria de localStorage.gymLiveSession
+let gymLiveTicker = null;       // setInterval de 1s SOLO para repintar reloj/descanso
+let gymLivePrevSets = new Map();// exerciseId -> { date, sets } para la columna "Anterior"
+
+function gymLiveStore() {
+  localStorage.setItem('gymLiveSession', JSON.stringify(gymLiveSession));
+}
+function gymLiveReadStored() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('gymLiveSession'));
+    return parsed && typeof parsed === 'object' && parsed.startedAt ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+// Alterna el boton grande de "Empezar" y el banner de "continuar" segun
+// haya o no un entrenamiento a medias guardado.
+function refreshGymLiveButtons() {
+  const stored = gymLiveReadStored();
+  document.getElementById('btn-gym-live-resume').classList.toggle('hidden', !stored);
+  document.getElementById('btn-gym-live-start').classList.toggle('hidden', !!stored);
+  refreshGymLiveIndicators();
+}
+// Con un entrenamiento activo, el boton "Herramientas" de la nav y la
+// tarjeta de Gimnasio se marcan en el color de acento con un puntito,
+// para que se vea de un vistazo que hay un entreno en marcha.
+function refreshGymLiveIndicators() {
+  const active = !!gymLiveReadStored();
+  const navBtn = document.querySelector('[data-mobile-nav="extensions"]');
+  if (navBtn) navBtn.classList.toggle('gym-live-indicator', active);
+  const gymCard = document.getElementById('btn-open-gym');
+  if (gymCard) gymCard.classList.toggle('gym-live-indicator', active);
+}
+
+// -- Selector de "que toca hoy" (dias del bloque activo o sesion libre) --
+function openGymStartModal() {
+  const activeBlock = state.gymBlocks.find((b) => b.isActive);
+  const days = activeBlock ? state.gymRoutines.filter((r) => r.blockId === activeBlock.id) : [];
+  document.getElementById('gym-start-block-name').textContent = activeBlock
+    ? `Bloque activo: ${activeBlock.name}`
+    : 'No hay ningún bloque activo — puedes entrenar libre o crear un bloque en la pestaña Plan.';
+  const list = document.getElementById('gym-start-days');
+  list.innerHTML = '';
+
+  // Si el bloque usa ciclo, lo que toca hoy va PRIMERO y marcado. Aunque
+  // hoy toque descanso se sigue pudiendo elegir cualquier dia (decision
+  // de Koku: te avisa, pero no te lo impide).
+  const cicloHoy = gymCicloDeHoy();
+  const aviso = document.getElementById('gym-start-cycle-note');
+  if (cicloHoy) {
+    aviso.classList.remove('hidden');
+    aviso.textContent = cicloHoy.esDescanso
+      ? `Hoy toca descanso (día ${cicloHoy.position} de ${cicloHoy.length}). Puedes entrenar igualmente: al terminar te pregunto cómo sigo el ciclo.`
+      : `Tu ciclo dice que hoy toca “${cicloHoy.rutina.name}” (día ${cicloHoy.position} de ${cicloHoy.length}).`;
+  } else {
+    aviso.classList.add('hidden');
+    aviso.textContent = '';
+  }
+  const idDeHoy = cicloHoy && cicloHoy.rutina ? cicloHoy.rutina.id : null;
+  const ordenados = idDeHoy
+    ? [...days].sort((a, b) => (a.id === idDeHoy ? -1 : 0) - (b.id === idDeHoy ? -1 : 0))
+    : days;
+
+  ordenados.forEach((day) => {
+    const esDeHoy = day.id === idDeHoy;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gym-list-item gym-start-day-btn' + (esDeHoy ? ' es-de-hoy' : '');
+    btn.innerHTML = `
+      <span class="color-dot" style="background-color: ${day.color}"></span>
+      <span class="gym-list-item-name">${day.icon ? escapeHtml(day.icon) + ' ' : ''}${escapeHtml(day.name)}${esDeHoy ? ' <span class="gym-block-active-badge">Hoy</span>' : ''}</span>
+      <span class="gym-list-item-muted">${day.exercises.filter((ex) => !ex.hidden).length} ejercicio${day.exercises.filter((ex) => !ex.hidden).length === 1 ? '' : 's'}</span>
+    `;
+    btn.addEventListener('click', () => {
+      closeGymStartModal();
+      startGymLiveSession(day);
+    });
+    list.appendChild(btn);
+  });
+  if (days.length === 0 && activeBlock) {
+    list.innerHTML = '<p class="empty-hint">El bloque activo no tiene días todavía.</p>';
+  }
+  document.getElementById('gym-start-modal').classList.remove('hidden');
+}
+function closeGymStartModal() {
+  document.getElementById('gym-start-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-live-start').addEventListener('click', openGymStartModal);
+document.getElementById('btn-close-gym-start').addEventListener('click', closeGymStartModal);
+document.getElementById('btn-gym-start-free').addEventListener('click', () => {
+  closeGymStartModal();
+  startGymLiveSession(null);
+});
+document.getElementById('btn-gym-live-resume').addEventListener('click', () => {
+  gymLiveSession = gymLiveReadStored();
+  if (gymLiveSession) openGymLiveView();
+});
+
+// Arranca un entrenamiento nuevo: desde un dia del plan (pre-carga sus
+// ejercicios con tantas series como target_sets, solo con el descanso
+// sugerido -- reps y peso en blanco a proposito, como el modal manual) o
+// completamente libre.
+function startGymLiveSession(day) {
+  // Solo se pre-cargan los ejercicios VISIBLES del dia; los ocultos
+  // quedan en hiddenPool, recuperables desde "Ejercicios ocultos" en el
+  // propio entreno (peticion de Koku: aparcar un ejercicio sin borrarlo).
+  const visibles = day ? day.exercises.filter((ex) => !ex.hidden) : [];
+  gymLiveSession = {
+    startedAt: Date.now(),
+    routineId: day ? day.id : null,
+    routineName: day ? day.name : null,
+    restPreset: 90,
+    restUntil: null,
+    // Para no deslizar durante 40 minutos (Koku): todas las tarjetas
+    // nacen RECOGIDAS menos la primera; cada una se pliega/despliega
+    // tocando su cabecera, y hay botones de plegar/desplegar todo.
+    exercises: visibles.map((ex, i) => ({
+        exerciseId: ex.exerciseId,
+        note: '',
+        rpe: '',
+        collapsed: i > 0,
+        sets: gymBuildSetsForExercise(ex.exerciseId, ex.targetSets, ex.targetRestSeconds ?? ''),
+      })),
+    hiddenPool: day
+      ? day.exercises.filter((ex) => ex.hidden).map((ex) => ({
+          exerciseId: ex.exerciseId,
+          targetSets: ex.targetSets,
+          targetRestSeconds: ex.targetRestSeconds,
+        }))
+      : [],
+  };
+  gymLiveStore();
+  openGymLiveView();
+  // La ayuda se abre sola SOLO al iniciar un entrenamiento nuevo (aqui),
+  // no cada vez que se vuelve a el tras moverse por la app -- eso
+  // molestaba (feedback de Koku). Hasta que marque "no volver a
+  // mostrar"; el boton "?" la abre cuando quiera.
+  if (localStorage.getItem('gymLiveHelpSeen') !== '1') openGymHelpModal();
+}
+
+// La pantalla en la que estabas antes de entrar al entreno, para
+// devolver la barra de abajo a su sitio al salir. Se guarda aqui y no en
+// localStorage porque solo vale mientras el entreno esta a la vista.
+let pantallaAntesDelEntreno = null;
+
+async function openGymLiveView() {
+  // La barra de abajo tiene que marcar el Gimnasio mientras el entreno
+  // esta delante. Pasaba sobre todo entrando desde la mini-barra de
+  // descanso (Koku: "me lleva a la vista pero en la barra sigue
+  // marcando que estoy en calendario"): esa barra abre el entreno
+  // directamente, sin pasar por openGymView, que es quien avisaba.
+  if (document.getElementById('gym-live-view').classList.contains('hidden')) {
+    pantallaAntesDelEntreno = localStorage.getItem('currentScreen') || 'calendar';
+    setCurrentScreen('gym');
+  }
+  document.getElementById('gym-live-title').textContent = gymLiveSession.routineName || 'Sesión libre';
+  document.getElementById('gym-live-view').classList.remove('hidden');
+  renderGymLiveExercises();
+  // Columna "Anterior": se pide en paralelo para cada ejercicio y se
+  // repinta cuando llega (si no hay historial, la columna queda en "—").
+  gymLivePrevSets = new Map();
+  await Promise.all(gymLiveSession.exercises.map(async (ex) => {
+    const prev = await api(`/api/gym-sessions/last-sets/${ex.exerciseId}`);
+    gymLivePrevSets.set(ex.exerciseId, prev);
+  }));
+  renderGymLiveExercises();
+  if (gymLiveTicker) clearInterval(gymLiveTicker);
+  gymLiveTicker = setInterval(gymLiveTick, 1000);
+  refreshGymLivePauseUi();
+  gymLiveTick();
+}
+function closeGymLiveView() {
+  document.getElementById('gym-live-view').classList.add('hidden');
+  // Debajo del entreno sigue estando la pantalla desde la que entraste
+  // (el calendario, por ejemplo): la barra vuelve a marcarla.
+  if (pantallaAntesDelEntreno) {
+    setCurrentScreen(pantallaAntesDelEntreno);
+    pantallaAntesDelEntreno = null;
+  }
+  // El ticker NO se para: sigue moviendo la mini-barra de descanso
+  // global mientras te mueves por la app. Se para al terminar/descartar.
+  refreshGymLiveButtons();
+  gymLiveTick();
+}
+function gymLiveStopTicker() {
+  if (gymLiveTicker) { clearInterval(gymLiveTicker); gymLiveTicker = null; }
+  document.getElementById('gym-global-rest').classList.add('hidden');
+  document.body.classList.remove('gym-rest-push');
+  // Si quedaba un aviso de descanso programado (o su tarjeta en la
+  // pantalla de bloqueo, o la vigilancia de audio), ya no tienen
+  // sentido: el entreno se ha terminado o descartado.
+  gymCancelRestNotification();
+  gymEndRestLiveActivity();
+  gymCancelRestAudioWatch();
+}
+
+// Un tick por segundo mientras el overlay esta abierto: reloj de sesion
+// y cuenta atras del descanso, ambos derivados de timestamps.
+// "(2)" = 2 minutos justos de descanso, "(1:30)" = minuto y medio --
+// formato corto para la columna Anterior (peticion de Koku).
+function gymFormatRestShort(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return s === 0 ? `${m}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+// Un tiempo de descanso "para ensenar", respetando el formato elegido en
+// Configuracion (m:ss o segundos a secas -- mismo ajuste gymRestFormat
+// que alterna el contador tocandolo).
+// Tiempo de trabajo acumulado: en segundos si es poco, en minutos si ya
+// pasa del minuto ("45s", "6 min").
+// Lo que duro UNA serie, con los segundos a la vista: "45 s",
+// "1 min 3 s". Distinto de gymFormatWorkTime, que agrega meses enteros y
+// ahi los segundos sobran (peticion de Koku: "Duración: 1min 3s").
+function gymFormatSetDuration(totalSeconds) {
+  const n = Math.round(Number(totalSeconds) || 0);
+  if (n < 60) return `${n} s`;
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return s === 0 ? `${m} min` : `${m} min ${s} s`;
+}
+
+function gymFormatWorkTime(totalSeconds) {
+  const n = Math.round(Number(totalSeconds) || 0);
+  if (n < 60) return `${n}s`;
+  return `${Math.round(n / 60)} min`;
+}
+function gymFormatRestDisplay(totalSeconds) {
+  const n = Number(totalSeconds);
+  if (!n) return '';
+  return localStorage.getItem('gymRestFormat') === 'sec' ? `${n}s` : gymLiveFormatClock(n);
+}
+function gymLiveFormatClock(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+// Tiempo de sesion transcurrido DESCONTANDO las pausas: pausedMs acumula
+// las pausas ya cerradas, y pausedAt marca la pausa en curso (si la hay).
+// Todo con timestamps, como siempre -- sobrevive a recargas y al
+// congelado de iOS en segundo plano.
+function gymLiveElapsedSeconds() {
+  const pausedMs = (gymLiveSession.pausedMs || 0) +
+    (gymLiveSession.pausedAt ? Date.now() - gymLiveSession.pausedAt : 0);
+  return Math.max(0, Math.floor((Date.now() - gymLiveSession.startedAt - pausedMs) / 1000));
+}
+
+function gymLiveTick() {
+  if (!gymLiveSession) return;
+  // Red de seguridad: una serie en curso de un ejercicio que ya no esta
+  // en el entreno no puede quedarse ahi (bloquearia empezar cualquier
+  // otra). Normalmente lo limpia quien quita el ejercicio; esto cubre
+  // sesiones guardadas por versiones anteriores.
+  if (gymLiveSession.activeSet
+      && !gymLiveSession.exercises.some((e) => e.exerciseId === gymLiveSession.activeSet.exerciseId)) {
+    gymLiveSession.activeSet = null;
+    gymLiveStore();
+    renderGymLiveExercises();
+  }
+  const clock = document.getElementById('gym-live-clock');
+  clock.textContent = gymLiveFormatClock(gymLiveElapsedSeconds());
+  clock.classList.toggle('paused', !!gymLiveSession.pausedAt);
+
+  // Mientras corre un descanso, sondear cada 2s los +30s pendientes del
+  // boton de la pantalla de bloqueo. Hace falta ADEMAS de los eventos de
+  // volver a primer plano: al bajar la barra de notificaciones la app no
+  // llega a irse a segundo plano, asi que no hay ningun "resume" que
+  // dispare la recogida -- y los segundos se quedaban sin aplicar hasta
+  // que el tiempo normal acababa (bug que vio Koku). La llamada es
+  // baratisima (leer un contador) y solo corre durante el descanso.
+  if (gymLiveSession.restUntil && Date.now() - gymLastExtensionPoll > 2000) {
+    gymLastExtensionPoll = Date.now();
+    gymConsumeRestExtensionFromLockScreen();
+  }
+
+  // Cronometro de la serie en curso: se actualiza el texto en vez de
+  // repintar la tarjeta entera cada segundo.
+  const setTimers = document.querySelectorAll('[data-live-set-timer]');
+  if (setTimers.length > 0) {
+    const t = gymLiveFormatClock(gymActiveSetSeconds());
+    setTimers.forEach((el) => { el.textContent = t; });
+  }
+  const endTimer = document.getElementById('gym-set-end-timer');
+  if (endTimer && !document.getElementById('gym-set-end-modal').classList.contains('hidden')) {
+    endTimer.textContent = gymLiveFormatClock(gymActiveSetSeconds());
+  }
+
+  // Mini-barra global: cuando el entreno esta OCULTO y hay algo en
+  // marcha -- una serie corriendo o un descanso.
+  const liveHidden = document.getElementById('gym-live-view').classList.contains('hidden');
+  const globalBar = document.getElementById('gym-global-rest');
+  const globalLabel = document.getElementById('gym-global-rest-label');
+  if (liveHidden && gymLiveSession.activeSet) {
+    // Serie en curso: la barra ensena su cronometro (llena, sin cuenta
+    // atras) y tocarla vuelve al entreno para poder terminarla.
+    globalLabel.textContent = gymLiveSession.activeSet.pausedAt ? 'Serie en pausa' : 'Serie';
+    document.getElementById('gym-global-rest-remaining').textContent = gymLiveFormatClock(gymActiveSetSeconds());
+    document.getElementById('gym-global-rest-fill-base').style.width = '100%';
+    document.getElementById('gym-global-rest-fill-extra').style.width = '0%';
+    globalBar.classList.remove('hidden');
+    document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
+    document.body.classList.add('gym-rest-push');
+  } else if (liveHidden && gymIndiceDelEjercicioEnEspera() >= 0) {
+    // Descanso terminado y serie pendiente: la barra deja de ser una
+    // cuenta atras y pasa a ser el aviso de "te toca". Tocarla arranca
+    // la serie directamente, sin tener que volver antes al entreno.
+    const iEspera = gymIndiceDelEjercicioEnEspera();
+    const exEspera = gymLiveSession.exercises[iEspera];
+    globalLabel.textContent = `Empezar serie ${gymSetSerieNumber(exEspera, gymNextPendingSetIndex(exEspera))}`;
+    document.getElementById('gym-global-rest-remaining').textContent = '▶';
+    document.getElementById('gym-global-rest-fill-base').style.width = '100%';
+    document.getElementById('gym-global-rest-fill-extra').style.width = '0%';
+    globalBar.classList.add('is-ready');
+    globalBar.classList.remove('hidden');
+    document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
+    document.body.classList.add('gym-rest-push');
+  } else if (liveHidden && gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    globalBar.classList.remove('is-ready');
+    globalLabel.textContent = 'Descanso';
+    // floor y no ceil: la tarjeta de la pantalla de bloqueo redondea
+    // HACIA ABAJO (estilo reloj del sistema: un temporizador de 1:00
+    // ensena 0:59 nada mas empezar), y con ceil la app iba un segundo
+    // "por detras" (feedback de Koku). Mismo criterio en los dos sitios.
+    const gRemaining = Math.max(0, Math.floor((gymLiveSession.restUntil - Date.now()) / 1000));
+    document.getElementById('gym-global-rest-remaining').textContent =
+      localStorage.getItem('gymRestFormat') === 'sec' ? `${gRemaining}s` : gymLiveFormatClock(gRemaining);
+    const gBase = gymLiveSession.restBaseSeconds || gRemaining;
+    const gExtra = gymLiveSession.restExtraSeconds || 0;
+    const gPlanned = Math.max(1, gBase + gExtra);
+    const gBaseRemaining = Math.max(0, gRemaining - gExtra);
+    document.getElementById('gym-global-rest-fill-base').style.width = `${(gBaseRemaining / gPlanned) * 100}%`;
+    document.getElementById('gym-global-rest-fill-extra').style.width = `${((gRemaining - gBaseRemaining) / gPlanned) * 100}%`;
+    globalBar.classList.remove('hidden');
+    // Con la barra visible, la interfaz entera baja lo que mide la barra
+    // para que no tape nada (ver body.gym-rest-push en styles.css). La
+    // altura se mide DESPUES de mostrarla (oculta mediria 0), cada tick:
+    // es barata y asi se adapta si cambia (giro de pantalla, etc.).
+    document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
+    document.body.classList.add('gym-rest-push');
+  } else {
+    globalBar.classList.add('hidden');
+    globalBar.classList.remove('is-ready');
+    document.body.classList.remove('gym-rest-push');
+  }
+
+  const bar = document.getElementById('gym-live-rest-bar');
+  if (gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    // floor, como la tarjeta de bloqueo (ver el comentario de gRemaining).
+    const remaining = Math.max(0, Math.floor((gymLiveSession.restUntil - Date.now()) / 1000));
+    document.getElementById('gym-live-rest-remaining').textContent =
+      localStorage.getItem('gymRestFormat') === 'sec' ? `${remaining}s` : gymLiveFormatClock(remaining);
+    // Si la sesion en curso venia de una version sin restBaseSeconds, se
+    // rellena UNA vez con el restante actual y se guarda -- sin esto el
+    // total se recalculaba en cada tick y la barra se quedaba llena.
+    if (!gymLiveSession.restBaseSeconds) {
+      gymLiveSession.restBaseSeconds = remaining;
+      gymLiveStore();
+    }
+    // Barra: el descanso planificado son base + extra; el tramo base se
+    // vacia primero y el extra (los +30s) al final, en otro color.
+    const baseTotal = gymLiveSession.restBaseSeconds;
+    const extraTotal = gymLiveSession.restExtraSeconds || 0;
+    const planned = Math.max(1, baseTotal + extraTotal);
+    const baseRemaining = Math.max(0, remaining - extraTotal);
+    const extraRemaining = remaining - baseRemaining;
+    document.getElementById('gym-live-rest-fill-base').style.width = `${(baseRemaining / planned) * 100}%`;
+    document.getElementById('gym-live-rest-fill-extra').style.width = `${(extraRemaining / planned) * 100}%`;
+    bar.classList.remove('hidden');
+  } else {
+    if (gymLiveSession.restUntil && !gymRestExpiryPending) {
+      // OJO, orden importante (bug real): antes de dar el descanso por
+      // vencido hay que RECOGER los +30s que se hayan pulsado en la
+      // pantalla de bloqueo. Si no, al despertar la app (incluso cuando
+      // iOS la lanza en segundo plano para ejecutar el boton), este tick
+      // veia el restUntil viejo ya vencido, mataba la tarjeta y tiraba
+      // los segundos sin aplicarlos -- "es como si no lo hubiera hecho".
+      gymRestExpiryPending = true;
+      gymConsumeRestExtensionFromLockScreen().finally(() => {
+        gymRestExpiryPending = false;
+        if (gymLiveSession && gymLiveSession.restUntil && gymLiveSession.restUntil <= Date.now()) {
+          gymLiveSession.restUntil = null;
+          // Momento en que se acabo: enciende el aviso de "te toca" y,
+          // si esta puesto, arranca la siguiente serie sola.
+          gymLiveSession.restEndedAt = Date.now();
+          gymLiveStore();
+          // Ahora si: el descanso termino de verdad, fuera la tarjeta.
+          gymEndRestLiveActivity();
+          gymAvisarFinDeDescanso();
+          gymLiveTick();
+        }
+      });
+    }
+    bar.classList.add('hidden');
+  }
+}
+// --- Al acabar el descanso: que no se te pase la siguiente serie ------
+// Koku: "cada vez que acaba el tiempo de descanso se me olvida darle a
+// empezar serie". Dos cosas, y las dos a la vez (eligio las dos):
+//   1. SIEMPRE: el boton "Empezar serie N" del ejercicio cuyo descanso
+//      acaba de terminar se pone grande y llamativo, y la mini-barra
+//      global pasa a decir "Empezar serie N" (tocarla la arranca desde
+//      donde estes, sin tener que volver a mano al entreno).
+//   2. OPCIONAL (Configuracion > Notificaciones, apagado de fabrica):
+//      que la serie arranque SOLA. Solo si queda alguna pendiente --
+//      nunca inventa una serie extra, que es lo que hace gymStartSet
+//      cuando ya estan todas hechas.
+// El aviso se apaga solo en cuanto empieza una serie (gymStartSet limpia
+// restEndedAt), asi que no se queda encendido para siempre.
+
+// El ejercicio al que "le toca" ahora: el del descanso que acaba de
+// terminar. gymLiveSession.restSetRef ya apunta a la serie cuyo descanso
+// estaba corriendo, y NO se borra al vencer, asi que sigue sirviendo.
+function gymIndiceDelEjercicioEnEspera() {
+  if (!gymLiveSession || !gymLiveSession.restEndedAt || gymLiveSession.activeSet) return -1;
+  const ref = gymLiveSession.restSetRef;
+  if (!ref) return -1;
+  const i = gymLiveSession.exercises.findIndex((e) => e.exerciseId === ref.exerciseId);
+  if (i < 0) return -1;
+  // Sin serie pendiente no hay nada que anunciar (el ejercicio se acabo).
+  return gymNextPendingSetIndex(gymLiveSession.exercises[i]) >= 0 ? i : -1;
+}
+
+function gymAutoStartEnabled() {
+  return localStorage.getItem('gymAutoStartNextSet') === 'true';
+}
+
+// Se llama justo despues de dar el descanso por vencido.
+function gymAvisarFinDeDescanso() {
+  const i = gymIndiceDelEjercicioEnEspera();
+  if (i < 0) return;
+  if (gymAutoStartEnabled()) {
+    gymStartSet(i);
+    renderGymLiveExercises();
+    return;
+  }
+  renderGymLiveExercises();
+}
+
+// Evita encolar mil recogidas mientras la primera esta en camino.
+let gymRestExpiryPending = false;
+// Ultimo sondeo de +30s pendientes (ver gymLiveTick).
+let gymLastExtensionPoll = 0;
+
+document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () => {
+  if (gymLiveSession && gymLiveSession.restUntil) {
+    gymLiveSession.restUntil += 30000;
+    gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + 30;
+    // El extra se le apunta a la serie cuyo descanso esta corriendo, para
+    // que el historial pueda ensenar "Serie 1: +60s" (peticion de Koku).
+    const ref = gymLiveSession.restSetRef;
+    if (ref) {
+      const refEx = gymLiveSession.exercises.find((x) => x.exerciseId === ref.exerciseId);
+      const refSet = refEx && refEx.sets[ref.setIndex];
+      if (refSet) refSet.extraRest = (refSet.extraRest || 0) + 30;
+    }
+    gymLiveStore();
+    gymLiveTick();
+    // El aviso programado apuntaba al final antiguo: se reprograma.
+    gymScheduleRestNotification();
+    // Y la tarjeta de la pantalla de bloqueo pasa a contar hasta el
+    // nuevo final, igual que la vigilancia de audio.
+    gymUpdateRestLiveActivity();
+    gymUpdateRestAudioWatch();
+  }
+});
+// El tiempo restante se puede ver como m:ss o como segundos a secas
+// (peticion de Koku) -- se alterna tocandolo, y se recuerda por
+// dispositivo.
+document.getElementById('gym-live-rest-remaining').addEventListener('click', () => {
+  const next = localStorage.getItem('gymRestFormat') === 'sec' ? 'min' : 'sec';
+  localStorage.setItem('gymRestFormat', next);
+  gymLiveTick();
+});
+document.getElementById('btn-gym-live-rest-close').addEventListener('click', () => {
+  if (gymLiveSession) {
+    gymLiveSession.restUntil = null;
+    gymLiveStore();
+    gymLiveTick();
+    gymCancelRestNotification();
+    gymEndRestLiveActivity();
+    gymCancelRestAudioWatch();
+  }
+});
+
+// --- Aviso al terminar el descanso -------------------------------------
+// En la app instalada, al arrancar un descanso se PROGRAMA una
+// notificacion del sistema para el momento en que acaba (mismo mecanismo
+// que los recordatorios, ver local-notifications.js): suena/vibra segun
+// los ajustes del telefono aunque la pantalla este bloqueada o estes en
+// otra app, asi no hay que estar mirando el movil a ver cuanto queda.
+// En un navegador normal no hay plugin y esto no hace nada.
+//
+// El id es uno RESERVADO fijo: como siempre es el mismo, programar el
+// siguiente descanso sustituye al anterior sin acumular avisos, y
+// syncScheduledReminders() sabe que no debe cancelarlo al reprogramar
+// los recordatorios (ids >= 999999900 son internos, no eventos).
+const GYM_REST_NOTIFICATION_ID = 999999901;
+// Modo insistente (peticion de Koku: "una vibracion a veces no se nota,
+// si esta un rato si"): iOS no permite alargar la vibracion de una
+// notificacion ni sonar "como el temporizador del sistema" (eso son
+// alertas criticas, que requieren un permiso especial de Apple), asi que
+// el truco es repetir el aviso: 3 notificaciones seguidas separadas 2s
+// (ids 999999901/902/903, todos en el rango reservado). Se apaga en
+// Configuracion > Notificaciones.
+const GYM_REST_NOTIFICATION_IDS = [999999901, 999999902, 999999903];
+
+function gymRestNotifyEnabled() {
+  return localStorage.getItem('gymRestNotify') !== 'false';
+}
+function gymRestBurstEnabled() {
+  return localStorage.getItem('gymRestBurst') !== 'false';
+}
+
+// atMs: cuando debe saltar. Por defecto, el final del descanso en curso;
+// se puede pasar a mano para el boton de PROBAR el aviso de
+// Configuracion (que recorre exactamente este mismo camino).
+async function gymScheduleRestNotification(atMs = null) {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin || !gymRestNotifyEnabled()) return;
+  const cuando = atMs || (gymLiveSession && gymLiveSession.restUntil);
+  if (!cuando) return;
+  try {
+    if (!(await ensureLocalNotificationPermissionSilently())) return;
+    // Cancelar antes de programar: si habia avisos del descanso anterior
+    // aun pendientes, no deben sonar ademas de los nuevos.
+    await plugin.cancel({ notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })) });
+    // Sonido/vibracion/silencio segun el ajuste del dispositivo -- ver
+    // notificationSoundValue() en local-notifications.js.
+    const sonido = notificationSoundValue();
+    // UNA sola notificacion. La insistencia ya no se hace repitiendo
+    // avisos (a Koku le molestaba ver 3 notificaciones): ahora la pone la
+    // vibracion larga nativa de RestAudioWatcher, que puede repetir la
+    // vibracion del sistema sin notificar nada porque la app sigue
+    // despierta durante el descanso.
+    const aviso = {
+      id: GYM_REST_NOTIFICATION_ID,
+      title: 'Descanso terminado',
+      body: 'Siguiente serie.',
+      schedule: { at: new Date(cuando) },
+      threadIdentifier: 'gym-descanso',
+    };
+    if (sonido) aviso.sound = sonido;
+    await plugin.schedule({ notifications: [aviso] });
+  } catch (err) {
+    console.error('No se pudo programar el aviso de descanso:', err);
+  }
+}
+
+async function gymCancelRestNotification() {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.cancel({ notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })) });
+  } catch (err) {
+    console.error('No se pudo cancelar el aviso de descanso:', err);
+  }
+}
+
+// Al volver a la app, el aviso de "Descanso terminado" ya ha cumplido su
+// funcion: quitarlo del centro de notificaciones. Antes solo se quitaban
+// las repeticiones (902/903) y el principal (901) se quedaba puesto, asi
+// que habia que borrarlo A MANO cada vez -- lo pidio Koku: "si hay una
+// notificacion y entro en la app, que se borre".
+//
+// Se hace en el foreground, que cubre los dos casos de una vez: tocar el
+// aviso abre la app (y de paso iOS ya lo retira), y volver a la app por
+// tu cuenta lo limpia igual. Se limita a los avisos del DESCANSO (los
+// ids reservados): los recordatorios de eventos no se tocan, se quedan
+// hasta que los quites tu (decision de Koku frente a limpiarlo todo).
+//
+// Ojo: esto NO pelea con la vigilancia de audio que para la vibracion
+// (RestAudioWatcher sondea getDeliveredNotifications y se detiene cuando
+// el aviso desaparece). Abrir la app ya callaba la vibracion, asi que
+// quitar el aviso aqui va en la misma direccion.
+async function gymCleanupRestNotificationStack() {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin || typeof plugin.removeDeliveredNotifications !== 'function') return;
+  try {
+    await plugin.removeDeliveredNotifications({
+      notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })),
+    });
+  } catch (err) {
+    // Limpiar es cosmetico: si falla, no pasa nada.
+  }
+}
+
+// --- Live Activity del descanso (pantalla de bloqueo) ------------------
+// La cuenta atras EN VIVO en la pantalla de bloqueo y la isla dinamica
+// (peticion de Koku). Habla con el plugin nativo LiveActivityPlugin
+// (ios/App/App/LiveActivityPlugin.swift); el dibujo lo hace la extension
+// DescansoWidget. La gracia: la app solo manda las FECHAS de inicio y
+// fin -- la cuenta atras y la barra las mueve iOS solo, aunque la app
+// este congelada y el movil bloqueado. Requiere iOS 16.2; en moviles
+// anteriores (o en navegador) estas funciones no hacen nada.
+let gymLiveActivityPlugin = null;
+function getGymLiveActivityPlugin() {
+  if (gymLiveActivityPlugin) return gymLiveActivityPlugin;
+  const cap = window.Capacitor;
+  if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null;
+  if (window.capacitorExports && typeof window.capacitorExports.registerPlugin === 'function') {
+    gymLiveActivityPlugin = window.capacitorExports.registerPlugin('LiveActivity');
+  }
+  return gymLiveActivityPlugin;
+}
+
+// Colores del tema activo, para que la tarjeta de la pantalla de bloqueo
+// siga el estilo de la app entera (peticion de Koku): acento + fondo de
+// tarjeta (surface) + su texto emparejado.
+function gymThemeColorHex(varName, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback;
+}
+function gymCurrentAccentHex() {
+  return gymThemeColorHex('--accent', '#5b8cff');
+}
+// Mezcla dos colores hex (el equivalente JS del color-mix del CSS): es
+// EXACTAMENTE la formula del tramo extra de la barra de la app
+// (color-mix(in srgb, var(--accent) 45%, var(--surface-text))), para que
+// la tarjeta de la pantalla de bloqueo use el mismo color (peticion de
+// Koku: nada de naranja).
+function gymMixHex(hexA, hexB, weightA) {
+  const parse = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [a, b] = [parse(hexA), parse(hexB)];
+  return '#' + a.map((va, i) =>
+    Math.round(va * weightA + b[i] * (1 - weightA)).toString(16).padStart(2, '0')
+  ).join('');
+}
+
+// Fechas que necesita la tarjeta, derivadas del estado del descanso.
+function gymRestActivityParams() {
+  const totalSeconds = (gymLiveSession.restBaseSeconds || 0) + (gymLiveSession.restExtraSeconds || 0);
+  const accent = gymCurrentAccentHex();
+  const surfaceText = gymThemeColorHex('--surface-text', '#f2f2f7');
+  return {
+    startAt: totalSeconds > 0 ? gymLiveSession.restUntil - totalSeconds * 1000 : Date.now(),
+    endAt: gymLiveSession.restUntil,
+    dayName: gymLiveSession.routineName || 'Sesión libre',
+    extraSeconds: gymLiveSession.restExtraSeconds || 0,
+    accentHex: accent,
+    surfaceHex: gymThemeColorHex('--surface', '#1c1c27'),
+    surfaceTextHex: surfaceText,
+    // El color del tramo extra, calcado del de la barra de la app.
+    extraHex: gymMixHex(accent, surfaceText, 0.45),
+  };
+}
+
+// El +30s pulsado EN LA PANTALLA DE BLOQUEO (boton de la Live Activity,
+// iOS 17+): mientras el movil esta bloqueado el JS esta congelado, asi
+// que el intent nativo lo hace todo el (alargar la tarjeta y reprogramar
+// el aviso) y deja los segundos apuntados. Aqui se recogen al volver a
+// primer plano y se pone al dia el estado del JS: el temporizador de la
+// app, el total de extra y el "+Ns" de la serie en descanso.
+async function gymConsumeRestExtensionFromLockScreen() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin) return;
+  try {
+    const res = await plugin.consumeRestExtension();
+    const seconds = res && res.seconds ? Number(res.seconds) : 0;
+    if (seconds > 0 && gymLiveSession && gymLiveSession.restUntil) {
+      gymLiveSession.restUntil += seconds * 1000;
+      gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + seconds;
+      const ref = gymLiveSession.restSetRef;
+      if (ref) {
+        const refEx = gymLiveSession.exercises.find((x) => x.exerciseId === ref.exerciseId);
+        const refSet = refEx && refEx.sets[ref.setIndex];
+        if (refSet) refSet.extraRest = (refSet.extraRest || 0) + seconds;
+      }
+      gymLiveStore();
+      gymLiveTick();
+      // Con el entreno a la vista, repintar para que el "+Ns" de la serie
+      // se vea al momento (oculto, ya se repintara al abrirlo).
+      if (!document.getElementById('gym-live-view').classList.contains('hidden')) {
+        renderGymLiveExercises();
+      }
+      // Reafirma la tarjeta con el estado ya cuadrado (y la resucita si
+      // un despertar anterior la hubiera cerrado de mas).
+      gymUpdateRestLiveActivity();
+    }
+    // Tocar la tarjeta de la pantalla de bloqueo abre la app pidiendo ir
+    // al entreno (peticion de Koku): el SceneDelegate deja la marca y
+    // aqui se ejecuta la navegacion.
+    if (res && res.openGym && gymLiveSession) {
+      if (typeof closeSettingsModal === 'function') closeSettingsModal();
+      if (typeof openGymView === 'function') openGymView();
+      openGymLiveView();
+    }
+  } catch (err) {
+    console.error('No se pudo recoger el +30s de la pantalla de bloqueo:', err);
+  }
+}
+// Al volver la app a primer plano (desbloquear/cambiar de app) es cuando
+// puede haber +30s pendientes. Se escuchan LOS DOS eventos: el 'resume'
+// que dispara Capacitor suele llegar antes que visibilitychange, y con
+// ambos el tiempo tarda menos en reflejarse (Koku notaba ~3s de espera).
+// Recoger dos veces no duplica nada: la segunda lectura ya devuelve 0.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    gymConsumeRestExtensionFromLockScreen();
+    gymCleanupRestNotificationStack();
+    comprobarAperturaDesdeElWidget();
+  } else {
+    // Al irse la app a segundo plano se deja el resumen al dia: es el
+    // otro momento en que Koku pidio que se actualice el widget, ademas
+    // de al cambiar algo.
+    actualizarResumenDelWidget();
+  }
+});
+document.addEventListener('resume', () => {
+  gymConsumeRestExtensionFromLockScreen();
+  gymCleanupRestNotificationStack();
+  comprobarAperturaDesdeElWidget();
+});
+document.addEventListener('pause', () => { actualizarResumenDelWidget(); });
+
+async function gymStartRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    await plugin.startRest(gymRestActivityParams());
+  } catch (err) {
+    console.error('No se pudo iniciar la Live Activity del descanso:', err);
+  }
+}
+
+async function gymUpdateRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    const res = await plugin.updateRest(gymRestActivityParams());
+    // Si iOS ya habia soltado la tarjeta (p. ej. la app se relanzo),
+    // updated viene en false: se crea una nueva en su lugar.
+    if (!res || !res.updated) await plugin.startRest(gymRestActivityParams());
+  } catch (err) {
+    console.error('No se pudo actualizar la Live Activity del descanso:', err);
+  }
+}
+
+async function gymEndRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.endRest();
+  } catch (err) {
+    console.error('No se pudo cerrar la Live Activity del descanso:', err);
+  }
+}
+
+// --- Bajar la musica al acabar el descanso -----------------------------
+// (Peticion de Koku: "que baje un poco el volumen de la musica, no
+// quitarla".) El trabajo de verdad lo hace RestAudioWatcher en nativo
+// (audio ducking de iOS + la app despierta durante el descanso); aqui
+// solo se le avisa de cuando empieza/cambia/se cancela el descanso.
+// En navegador no hay plugin y no pasa nada.
+let gymRestAudioPlugin = null;
+function getGymRestAudioPlugin() {
+  if (gymRestAudioPlugin) return gymRestAudioPlugin;
+  const cap = window.Capacitor;
+  if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null;
+  if (window.capacitorExports && typeof window.capacitorExports.registerPlugin === 'function') {
+    gymRestAudioPlugin = window.capacitorExports.registerPlugin('RestAudio');
+  }
+  return gymRestAudioPlugin;
+}
+function gymRestDuckEnabled() {
+  return localStorage.getItem('gymRestDuck') !== 'false';
+}
+// La vigilancia hace falta si hay que bajar la musica O si hay que
+// vibrar largo al acabar: las dos cosas necesitan la app despierta.
+function gymRestWatchParams() {
+  return { duck: gymRestDuckEnabled(), vibrate: gymRestBurstEnabled() };
+}
+async function gymStartRestAudioWatch(endAtMs = null) {
+  const plugin = getGymRestAudioPlugin();
+  const flags = gymRestWatchParams();
+  const fin = endAtMs || (gymLiveSession && gymLiveSession.restUntil);
+  if (!plugin || (!flags.duck && !flags.vibrate) || !fin) return;
+  try {
+    await plugin.startWatch({ endAt: fin, ...flags });
+  } catch (err) {
+    console.error('No se pudo vigilar el audio del descanso:', err);
+  }
+}
+async function gymUpdateRestAudioWatch() {
+  const plugin = getGymRestAudioPlugin();
+  const flags = gymRestWatchParams();
+  if (!plugin || (!flags.duck && !flags.vibrate) || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    await plugin.updateWatch({ endAt: gymLiveSession.restUntil, ...flags });
+  } catch (err) {
+    console.error('No se pudo mover la vigilancia de audio:', err);
+  }
+}
+async function gymCancelRestAudioWatch() {
+  const plugin = getGymRestAudioPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.cancelWatch();
+  } catch (err) {
+    console.error('No se pudo cancelar la vigilancia de audio:', err);
+  }
+}
+
+// Tarjetas de ejercicio del entreno en vivo. Igual que el resto del
+// proyecto: se reconstruye el DOM entero en cada cambio estructural
+// (anadir/quitar series o ejercicios); los inputs escriben directo en
+// gymLiveSession y guardan en localStorage.
+// Las listas de ejercicios ocultos/quitados empiezan recogidas;
+// recordarlo en variables (no en la sesion guardada) basta -- es estado
+// de vista.
+let gymLiveHiddenPoolOpen = false;
+let gymLiveRemovedPoolOpen = false;
+
+// --- Serie EN CURSO (empezar/terminar con botones grandes) -------------
+// Sustituye a la casilla diminuta de cada fila (Koku: "si vas un poco
+// mareado costara verlo"). El ciclo es: boton grande de la tarjeta ->
+// dialogo "vas a empezar X, serie N" -> serie corriendo con cronometro ->
+// dialogo "¿has acabado?" con Si / Pausar / Seguir. De paso queda
+// registrado cuanto duro cada serie (set.durationSeconds), que se guarda
+// y se ensena en el historial y en Progreso.
+//
+// El estado vive en gymLiveSession.activeSet, asi que sobrevive a
+// recargas y al congelado de iOS igual que el resto (todo por
+// timestamps): { exerciseId, setIndex, startedAt, pausedMs, pausedAt }.
+
+// La serie que toca: la primera SIN HACER del ejercicio (con 4 series y
+// 2 hechas, la 3). -1 si ya estan todas.
+function gymNextPendingSetIndex(ex) {
+  return ex.sets.findIndex((s) => !s.done);
+}
+
+// --- Ejercicios UNILATERALES contados por lado ------------------------
+// Cuando un ejercicio es unilateral y se cuentan los lados por separado,
+// cada lado es una SERIE PROPIA (set.side = 'left'/'right'). Asi el ciclo
+// de empezar/terminar, el historial y el volumen funcionan sin casos
+// especiales: solo cambian las etiquetas y el descanso entre lados.
+function gymExerciseUsesSides(ex) {
+  const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+  return !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
+}
+// Numero de serie que le toca a un set (los dos lados comparten numero).
+function gymSetSerieNumber(ex, setIndex) {
+  if (!gymExerciseUsesSides(ex)) return setIndex + 1;
+  let n = 0;
+  for (let i = 0; i <= setIndex; i++) if (ex.sets[i].side !== 'right') n += 1;
+  return Math.max(1, n);
+}
+// Cuantas series (no lados) tiene el ejercicio.
+function gymSerieCount(ex) {
+  if (!gymExerciseUsesSides(ex)) return ex.sets.length;
+  return ex.sets.filter((s) => s.side !== 'right').length;
+}
+function gymSideLabel(side) {
+  if (side === 'left') return 'izquierdo';
+  if (side === 'right') return 'derecho';
+  return '';
+}
+// El otro lado de la MISMA serie (los dos comparten numero de serie).
+// -1 si el ejercicio no va por lados o si no encuentra pareja.
+function gymSidePartnerIndex(ex, setIndex) {
+  if (!gymExerciseUsesSides(ex) || !ex.sets[setIndex]) return -1;
+  const n = gymSetSerieNumber(ex, setIndex);
+  for (let i = 0; i < ex.sets.length; i++) {
+    if (i !== setIndex && gymSetSerieNumber(ex, i) === n) return i;
+  }
+  return -1;
+}
+// Cambia por cual de los dos lados se empieza esta serie: como los dos
+// lados son dos filas seguidas, basta con intercambiarles la etiqueta
+// (asi no se toca ni la numeracion ni nada de lo ya hecho). Solo tiene
+// sentido si la pareja sigue pendiente.
+function gymSetStartSide(ex, setIndex, side) {
+  const partner = gymSidePartnerIndex(ex, setIndex);
+  if (partner < 0 || ex.sets[partner].done) return false;
+  if (ex.sets[setIndex].side === side) return false;
+  ex.sets[setIndex].side = side;
+  ex.sets[partner].side = side === 'left' ? 'right' : 'left';
+  // Se recuerda para las siguientes series de este ejercicio en la
+  // sesion: si empiezas por la derecha, sigues empezando por la derecha
+  // hasta que lo cambies otra vez.
+  ex.firstSide = side;
+  return true;
+}
+// Pone TODAS las series pendientes de un ejercicio a salir por el mismo
+// lado (el que acabas de elegir): si has dicho que empiezas por la
+// derecha, se empieza por la derecha el resto del ejercicio, y desde ahi
+// se van alternando los lados solos. Se puede volver a cambiar en el
+// dialogo de cualquier serie.
+function gymApplyFirstSideToPending(ex, side) {
+  ex.sets.forEach((s, i) => {
+    if (s.done) return;
+    const pareja = gymSidePartnerIndex(ex, i);
+    if (pareja > i && !ex.sets[pareja].done) gymSetStartSide(ex, i, side);
+  });
+  ex.firstSide = side;
+}
+// Crea las series de un ejercicio: una fila por serie, o DOS (izquierda
+// y derecha) si el ejercicio cuenta los lados por separado.
+function gymBuildSetsForExercise(exerciseId, count, restSeconds) {
+  const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+  const sides = !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
+  const out = [];
+  for (let i = 0; i < Math.max(1, Number(count) || 1); i++) {
+    if (sides) {
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'left', note: '' });
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'right', note: '' });
+    } else {
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: null, note: '' });
+    }
+  }
+  return out;
+}
+
+// Junta las notas de las series en la nota del EJERCICIO de esta sesion
+// (peticion de Koku: que sirvan de referencia para el siguiente entreno,
+// donde se ensenan como "La última vez"). Es idempotente: la parte
+// generada se reescribe entera y lo que hubiera escrito a mano se
+// respeta delante.
+const GYM_SET_NOTES_TAG = 'Series — ';
+function gymCombineSetNotes(ex) {
+  const usesSides = gymExerciseUsesSides(ex);
+  const parts = [];
+  ex.sets.forEach((s, i) => {
+    if (!s.note || !String(s.note).trim()) return;
+    const lado = usesSides ? (s.side === 'left' ? ' I' : ' D') : '';
+    parts.push(`S${gymSetSerieNumber(ex, i)}${lado}: ${String(s.note).trim()}`);
+  });
+  const manual = String(ex.note || '').split(GYM_SET_NOTES_TAG)[0].trim();
+  ex.note = parts.length
+    ? `${manual ? `${manual} ` : ''}${GYM_SET_NOTES_TAG}${parts.join(' · ')}`
+    : manual;
+}
+
+// Segundos de la serie en curso, descontando las pausas.
+function gymActiveSetSeconds() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return 0;
+  const paused = (a.pausedMs || 0) + (a.pausedAt ? Date.now() - a.pausedAt : 0);
+  return Math.max(0, Math.floor((Date.now() - a.startedAt - paused) / 1000));
+}
+
+// Cancela la serie en curso si es de este ejercicio (se usa al quitar un
+// ejercicio del entreno). Sin esto la sesion se quedaba con una serie
+// "corriendo" de algo que ya no estaba en la lista.
+function gymDropActiveSetIfExercise(exerciseId) {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a || a.exerciseId !== exerciseId) return false;
+  gymLiveSession.activeSet = null;
+  return true;
+}
+
+// Ejercicio (del entreno) al que pertenece la serie en curso.
+function gymActiveSetExercise() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return null;
+  return gymLiveSession.exercises.find((e) => e.exerciseId === a.exerciseId) || null;
+}
+
+// --- Dialogo "empezar serie" ---
+// Indice (dentro de gymLiveSession.exercises) del ejercicio elegido.
+let gymSetStartTargetIndex = null;
+
+function openGymSetStartModal(exIndex) {
+  if (!gymLiveSession || gymLiveSession.activeSet) return;
+  gymSetStartTargetIndex = exIndex;
+  gymSetStartListOpen = false;
+  renderGymSetStartModal();
+  document.getElementById('gym-set-start-modal').classList.remove('hidden');
+}
+function closeGymSetStartModal() {
+  document.getElementById('gym-set-start-modal').classList.add('hidden');
+}
+
+// La lista de ejercicios del dia empieza recogida; se despliega tocando
+// el nombre (peticion de Koku: poder cambiar de ejercicio desde aqui).
+let gymSetStartListOpen = false;
+
+function renderGymSetStartModal() {
+  const ex = gymLiveSession.exercises[gymSetStartTargetIndex];
+  if (!ex) return;
+  const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+  document.getElementById('gym-set-start-exercise-name').textContent = exercise ? exercise.name : 'Ejercicio';
+  const idx = gymNextPendingSetIndex(ex);
+  const pendiente = idx >= 0 ? ex.sets[idx] : null;
+  const lado = pendiente && pendiente.side ? ` · lado ${gymSideLabel(pendiente.side)}` : '';
+  document.getElementById('gym-set-start-info').textContent = idx >= 0
+    ? `Serie ${gymSetSerieNumber(ex, idx)} de ${gymSerieCount(ex)}${lado}`
+    : `Serie ${gymSerieCount(ex) + 1} (extra)`;
+
+  // Elegir lado de salida: solo si el ejercicio va por lados y la serie
+  // que toca aun tiene su pareja pendiente (si ya hiciste el primer
+  // lado, el que queda es el otro y no hay nada que elegir).
+  const sides = document.getElementById('gym-set-start-sides');
+  const partner = idx >= 0 ? gymSidePartnerIndex(ex, idx) : -1;
+  const puedeElegir = partner >= 0 && !ex.sets[partner].done;
+  sides.classList.toggle('hidden', !puedeElegir);
+  if (puedeElegir) {
+    sides.querySelectorAll('[data-start-side]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.startSide === pendiente.side);
+    });
+  }
+
+  const picker = document.getElementById('gym-set-start-exercise');
+  picker.setAttribute('aria-expanded', gymSetStartListOpen ? 'true' : 'false');
+  const list = document.getElementById('gym-set-start-exercise-list');
+  list.classList.toggle('hidden', !gymSetStartListOpen);
+  list.innerHTML = '';
+  gymLiveSession.exercises.forEach((other, otherIndex) => {
+    const otherExercise = state.gymExercises.find((e) => e.id === other.exerciseId);
+    const hechas = other.sets.filter((s) => s.done).length;
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'gym-set-exercise-option' + (otherIndex === gymSetStartTargetIndex ? ' active' : '');
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(otherExercise ? otherExercise.name : 'Ejercicio')}</span>
+      <span class="gym-list-item-muted">${hechas}/${other.sets.length}</span>
+    `;
+    row.addEventListener('click', () => {
+      gymSetStartTargetIndex = otherIndex;
+      gymSetStartListOpen = false;
+      renderGymSetStartModal();
+    });
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('gym-set-start-exercise').addEventListener('click', () => {
+  gymSetStartListOpen = !gymSetStartListOpen;
+  renderGymSetStartModal();
+});
+document.getElementById('gym-set-start-sides').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-start-side]');
+  if (!btn) return;
+  const ex = gymLiveSession && gymLiveSession.exercises[gymSetStartTargetIndex];
+  if (!ex) return;
+  const idx = gymNextPendingSetIndex(ex);
+  if (idx < 0) return;
+  gymApplyFirstSideToPending(ex, btn.dataset.startSide);
+  gymLiveStore();
+  renderGymLiveExercises();
+  renderGymSetStartModal();
+});
+document.getElementById('btn-gym-set-start-cancel').addEventListener('click', closeGymSetStartModal);
+document.getElementById('btn-gym-set-start-go').addEventListener('click', () => {
+  gymStartSet(gymSetStartTargetIndex);
+  closeGymSetStartModal();
+});
+
+// Arranca la serie: apunta a la primera sin hacer y, si ya estaban todas,
+// añade una serie extra heredando el descanso de la anterior.
+function gymStartSet(exIndex, setIndexOverride = null) {
+  const ex = gymLiveSession && gymLiveSession.exercises[exIndex];
+  if (!ex || gymLiveSession.activeSet) return;
+  let idx = setIndexOverride !== null ? setIndexOverride : gymNextPendingSetIndex(ex);
+  if (idx < 0 || !ex.sets[idx]) {
+    // Serie extra: en un ejercicio por lados se añade el BLOQUE entero
+    // (izquierdo + derecho), no una fila suelta -- antes se colaba una
+    // serie sin lado y descuadraba la numeracion (lo vio Koku).
+    const last = ex.sets[ex.sets.length - 1];
+    const nuevas = gymBuildSetsForExercise(ex.exerciseId, 1, last ? last.restSeconds : '');
+    idx = ex.sets.length;
+    ex.sets.push(...nuevas);
+    // El bloque nuevo sale por el lado que hayas elegido antes en este
+    // ejercicio (gymSetStartSide lo apunta en ex.firstSide).
+    if (ex.firstSide === 'right') gymSetStartSide(ex, idx, 'right');
+  }
+  gymLiveSession.activeSet = {
+    exerciseId: ex.exerciseId,
+    setIndex: idx,
+    startedAt: Date.now(),
+    pausedMs: 0,
+    pausedAt: null,
+  };
+  // Ya has empezado: el aviso de "te toca" del fin de descanso sobra.
+  gymLiveSession.restEndedAt = null;
+  // Si estabas descansando, empezar la siguiente serie corta el descanso:
+  // ya estas entrenando otra vez.
+  if (gymLiveSession.restUntil) {
+    gymLiveSession.restUntil = null;
+    gymCancelRestNotification();
+    gymEndRestLiveActivity();
+    gymCancelRestAudioWatch();
+  }
+  // La tarjeta del ejercicio en marcha siempre desplegada.
+  ex.collapsed = false;
+  // Serie nueva, cuenta nueva: el silencio que deja cerrar el dialogo de
+  // la serie anterior no debe seguir vigente en esta.
+  gymTapSnoozeUntil = 0;
+  gymLiveStore();
+  renderGymLiveExercises();
+  gymLiveTick();
+}
+
+// --- Dialogo "¿has acabado la serie?" ---
+// Dos pasos: primero la pregunta (Si / Pausar / Seguir) y, al decir que
+// si, el formulario con peso, repeticiones y nota de ESA serie (peticion
+// de Koku). Nada se guarda hasta "Guardar serie".
+function gymSetEndShowForm(show) {
+  document.getElementById('gym-set-end-choices').classList.toggle('hidden', show);
+  document.getElementById('gym-set-end-form').classList.toggle('hidden', !show);
+  document.querySelector('#gym-set-end-modal h2').textContent = show
+    ? 'Datos de la serie'
+    : '¿Has acabado la serie?';
+}
+
+// --- Mover un ejercicio arrastrandolo --------------------------------
+// Peticion de Koku, en vez de las flechas de subir/bajar que habia:
+// "deslizamos el ejercicio hasta la posicion que queramos... ponemos de
+// intermediario el boton mover; una vez sueltas tendrias que volver a
+// darle a mover para que vuelva a mover".
+//
+// O sea: el arrastre NO esta siempre activo (arrastrar sin mas es hacer
+// scroll por la lista). Se ARMA desde el boton "Mover" del deslizamiento
+// y se desarma solo al soltar. Mientras esta armado, el deslizamiento
+// lateral de esa tarjeta se aparta (bloqueadoSi, arriba), asi los dos
+// gestos nunca se pisan.
+let gymEjercicioEnMovimiento = null;
+
+function armarMovimientoDeEjercicio(exerciseId) {
+  gymEjercicioEnMovimiento = exerciseId;
+  renderGymLiveExercises();
+  // El aviso solo la primera vez: luego ya se sabe.
+  if (localStorage.getItem('gymMoverHintSeen') !== '1') {
+    localStorage.setItem('gymMoverHintSeen', '1');
+    showAppAlert('Arrastra el ejercicio arriba o abajo hasta donde lo quieras. Al soltarlo se queda ahí; para moverlo otra vez, vuelve a deslizar y darle a "Mover".');
+  }
+}
+
+// Se engancha a cada tarjeta armada dentro de renderGymLiveExercises.
+function habilitarArrastreDeEjercicio(envoltorio) {
+  let arrastre = null;
+
+  // La lista se mira EN CADA USO, no al enganchar: esto se llama
+  // mientras se construye la tarjeta, cuando todavia no esta metida en
+  // el DOM y su parentElement es null.
+  const hermanos = () => {
+    const lista = envoltorio.parentElement;
+    return lista ? [...lista.querySelectorAll('.note-swipe-wrap[data-exercise-id]')] : [];
+  };
+
+  envoltorio.addEventListener('pointerdown', (e) => {
+    // Los botones de dentro siguen funcionando (empezar serie, plegar...).
+    if (e.target.closest('button, input, textarea, select, a, label')) return;
+    const filas = hermanos();
+    const desde = filas.indexOf(envoltorio);
+    if (desde < 0) return;
+    arrastre = {
+      y: e.clientY,
+      desde,
+      alto: envoltorio.offsetHeight + 13, // + el hueco entre tarjetas
+      hasta: desde,
+    };
+    // Capturar el puntero mantiene el arrastre aunque el dedo se salga
+    // de la tarjeta. Puede lanzar si ese puntero ya no esta activo (pasa
+    // con gestos que el sistema corta a media), y una excepcion aqui
+    // dejaria el arrastre a medias: no es imprescindible, asi que si
+    // falla se sigue sin ella.
+    try { envoltorio.setPointerCapture(e.pointerId); } catch { /* da igual */ }
+    envoltorio.classList.add('arrastrando');
+  });
+
+  envoltorio.addEventListener('pointermove', (e) => {
+    if (!arrastre) return;
+    e.preventDefault();
+    const dy = e.clientY - arrastre.y;
+    envoltorio.style.transform = `translateY(${dy}px)`;
+    // A que posicion caeria si soltase ahora: cuantas tarjetas enteras
+    // ha recorrido, topado a los extremos de la lista.
+    const filas = hermanos();
+    const saltos = Math.round(dy / arrastre.alto);
+    const destino = Math.max(0, Math.min(filas.length - 1, arrastre.desde + saltos));
+    if (destino !== arrastre.hasta) {
+      arrastre.hasta = destino;
+      // Las tarjetas de en medio se apartan para que se vea el hueco.
+      filas.forEach((fila, i) => {
+        if (fila === envoltorio) return;
+        let corrimiento = 0;
+        if (arrastre.desde < destino && i > arrastre.desde && i <= destino) corrimiento = -arrastre.alto;
+        else if (arrastre.desde > destino && i >= destino && i < arrastre.desde) corrimiento = arrastre.alto;
+        fila.style.transform = corrimiento ? `translateY(${corrimiento}px)` : '';
+      });
+    }
+  });
+
+  const soltar = () => {
+    if (!arrastre) return;
+    const { desde, hasta } = arrastre;
+    arrastre = null;
+    envoltorio.classList.remove('arrastrando');
+    // El modo se desarma SIEMPRE al soltar, lo pidio asi Koku.
+    gymEjercicioEnMovimiento = null;
+    if (hasta !== desde && gymLiveSession) {
+      const arr = gymLiveSession.exercises;
+      const [movido] = arr.splice(desde, 1);
+      arr.splice(hasta, 0, movido);
+      gymLiveStore();
+    }
+    // Repintar borra de paso todos los transform en linea.
+    renderGymLiveExercises();
+  };
+  envoltorio.addEventListener('pointerup', soltar);
+  envoltorio.addEventListener('pointercancel', soltar);
+}
+
+// --- Editar un ejercicio del entreno, entero -------------------------
+// Se llega DESLIZANDO su tarjeta. Koku lo pidio asi: "yo deslizo el
+// ejercicio entero para editar cualquier cosa del ejercicio... se hace
+// un cuadro de dialogo mas grande, asi es mas comodo de editar el
+// ejercicio y todo lo que haya dentro". A cambio, la tarjeta del entreno
+// se queda SOLO para usarla (plegar, empezar serie y mover), sin ningun
+// campo suelto donde escribir.
+//
+// Se trabaja sobre una COPIA: cancelar descarta de verdad, y guardar es
+// lo unico que toca la sesion.
+let gymExerciseEditId = null;
+let gymExerciseEditDraft = null;
+
+function openGymExerciseEditModal(exerciseId) {
+  if (!gymLiveSession) return;
+  const ex = gymLiveSession.exercises.find((e) => e.exerciseId === exerciseId);
+  if (!ex) return;
+  gymExerciseEditId = exerciseId;
+  gymExerciseEditDraft = {
+    // El descanso es del EJERCICIO: se guarda replicado en cada serie,
+    // asi que se lee de la primera y al guardar se aplica a todas.
+    restSeconds: (ex.sets[0] && ex.sets[0].restSeconds) ?? '',
+    sets: ex.sets.map((set) => ({
+      ...set,
+      segments: (set.segments || []).map((seg) => ({ ...seg })),
+    })),
+  };
+  const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+  document.getElementById('gym-exercise-edit-title').textContent = exercise ? exercise.name : 'Editar ejercicio';
+  document.getElementById('gym-exercise-edit-rest').value = gymExerciseEditDraft.restSeconds;
+  document.getElementById('gym-exercise-edit-rpe').value = ex.rpe ?? '';
+  document.getElementById('gym-exercise-edit-note').value = ex.note ?? '';
+  renderGymExerciseEditSets();
+  const modal = document.getElementById('gym-exercise-edit-modal');
+  delete modal.dataset.sucio;
+  modal.classList.remove('hidden');
+}
+
+function renderGymExerciseEditSets() {
+  const cont = document.getElementById('gym-exercise-edit-sets');
+  cont.innerHTML = '';
+  const unit = getGymWeightUnitLabel();
+  const draft = gymExerciseEditDraft;
+  if (!draft) return;
+  if (draft.sets.length === 0) {
+    cont.innerHTML = '<p class="empty-hint">Este ejercicio se ha quedado sin series. Añade una, o cancela y quita el ejercicio.</p>';
+    return;
+  }
+  draft.sets.forEach((set, i) => {
+    const bloque = document.createElement('div');
+    bloque.className = 'gym-exercise-edit-set';
+    bloque.innerHTML = `
+      <div class="gym-set-segment-head">
+        <span class="gym-set-segment-tag">${i + 1}</span>
+        <span class="gym-set-segment-name">${set.side ? `Lado ${gymSideLabel(set.side)}` : 'Serie'}${set.done ? '' : ' · sin hacer'}</span>
+        <span class="gym-set-head-dur" title="Lo que duró la serie">${set.durationSeconds ? `Duración: ${gymFormatSetDuration(set.durationSeconds)}` : ''}</span>
+        <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar esta serie">✕</button>
+      </div>
+      <div class="gym-set-segment-fields">
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="number" inputmode="decimal" step="0.5" min="0" data-set-field="weightDisplay" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-set-field="reps" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
+      </div>
+      <label class="gym-set-segment-field"><span>Nota de la serie</span><input type="text" data-set-field="note" value="${escapeHtml(String(set.note ?? ''))}" /></label>
+      <div class="gym-set-segments" data-tramos-de="${i}"></div>
+      <div class="gym-set-extend-list gym-session-set-actions">
+        <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
+        <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
+        <button type="button" class="gym-set-extend-btn${set.failure ? ' is-on' : ''}" data-toggle-failure>${set.failure ? '✓ ' : ''}Al fallo</button>
+        <button type="button" class="gym-set-extend-btn${set.done ? ' is-on' : ''}" data-toggle-done>${set.done ? '✓ Hecha' : 'Sin hacer'}</button>
+      </div>
+    `;
+    bloque.querySelectorAll('[data-set-field]').forEach((input) => {
+      input.addEventListener('input', () => { set[input.dataset.setField] = input.value; });
+    });
+    // Marcar/desmarcar la serie como hecha. Antes era el ✓ de la fila del
+    // entreno, que se quito: la columna no aportaba (ya se ve el "—"
+    // cuando no hay nada) y ahi no habia sitio.
+    bloque.querySelector('[data-toggle-done]').addEventListener('click', () => {
+      set.done = !set.done;
+      if (!set.done) { set.durationSeconds = null; set.extraRest = 0; }
+      renderGymExerciseEditSets();
+    });
+    bloque.querySelector('[data-quitar-serie]').addEventListener('click', async () => {
+      const ok = await showAppConfirm('¿Quitar esta serie del ejercicio?', { okText: 'Quitar', danger: true });
+      if (!ok) return;
+      draft.sets.splice(i, 1);
+      renderGymExerciseEditSets();
+    });
+    bloque.querySelector('[data-toggle-failure]').addEventListener('click', () => {
+      set.failure = !set.failure;
+      renderGymExerciseEditSets();
+    });
+    const editor = bloque.querySelector('[data-tramos-de]');
+    if (!Array.isArray(set.segments)) set.segments = [];
+    const pintar = () => montarEditorDeTramos(editor, set.segments, {
+      pesoMadre: bloque.querySelector('[data-set-field="weightDisplay"]').value || '',
+      alQuitar: () => pintar(),
+    });
+    pintar();
+    bloque.querySelectorAll('[data-add-seg]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        set.segments.push({ kind: btn.dataset.addSeg, weightDisplay: '', reps: '', pauseSeconds: '' });
+        pintar();
+      });
+    });
+    cont.appendChild(bloque);
+  });
+}
+
+function closeGymExerciseEditModal() {
+  document.getElementById('gym-exercise-edit-modal').classList.add('hidden');
+  gymExerciseEditId = null;
+  gymExerciseEditDraft = null;
+}
+
+document.getElementById('btn-close-gym-exercise-edit').addEventListener('click', closeGymExerciseEditModal);
+document.getElementById('btn-cancel-gym-exercise-edit').addEventListener('click', closeGymExerciseEditModal);
+cerrarModalAlTocarFuera(
+  'gym-exercise-edit-modal',
+  closeGymExerciseEditModal,
+  () => document.getElementById('gym-exercise-edit-modal').dataset.sucio === '1',
+);
+
+document.getElementById('btn-gym-exercise-edit-add-set').addEventListener('click', () => {
+  const draft = gymExerciseEditDraft;
+  if (!draft) return;
+  const ultima = draft.sets[draft.sets.length - 1];
+  const desde = draft.sets.length;
+  // Una serie mas: dos filas si el ejercicio cuenta los lados aparte.
+  draft.sets.push(...gymBuildSetsForExercise(gymExerciseEditId, 1, ultima ? ultima.restSeconds : draft.restSeconds));
+  const ex = gymLiveSession && gymLiveSession.exercises.find((e) => e.exerciseId === gymExerciseEditId);
+  if (ex && ex.firstSide === 'right') gymSetStartSide(draft, desde, 'right');
+  renderGymExerciseEditSets();
+});
+
+document.getElementById('gym-exercise-edit-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const ex = gymLiveSession && gymLiveSession.exercises.find((x) => x.exerciseId === gymExerciseEditId);
+  const draft = gymExerciseEditDraft;
+  if (!ex || !draft) { closeGymExerciseEditModal(); return; }
+  const rest = document.getElementById('gym-exercise-edit-rest').value;
+  ex.rpe = document.getElementById('gym-exercise-edit-rpe').value;
+  ex.note = document.getElementById('gym-exercise-edit-note').value;
+  // Los tramos se leen del DOM (la sugerencia gris solo existe ahi).
+  draft.sets.forEach((set, i) => {
+    const editor = document.querySelector(`#gym-exercise-edit-sets [data-tramos-de="${i}"]`);
+    set.segments = gymLeerTramosDe(editor);
+    set.restSeconds = rest;
+  });
+  // Si la serie EN CURSO era de este ejercicio y ha desaparecido al
+  // quitar series, se cancela: si no, quedaria un cronometro corriendo
+  // sobre una serie que ya no existe, y ningun otro ejercicio dejaria
+  // empezar (solo puede haber una serie a la vez).
+  const activa = gymLiveSession.activeSet;
+  if (activa && activa.exerciseId === ex.exerciseId && !draft.sets[activa.setIndex]) {
+    gymLiveSession.activeSet = null;
+  }
+  ex.sets = draft.sets;
+  gymLiveStore();
+  closeGymExerciseEditModal();
+  renderGymLiveExercises();
+  gymLiveTick();
+});
+
+// Rellena los campos del formulario a partir de una serie.
+function gymVolcarSerieEnFormulario(set, sugerencia) {
+  const wEl = document.getElementById('gym-set-end-weight');
+  const rEl = document.getElementById('gym-set-end-reps');
+  document.querySelector('#gym-set-end-form .gym-set-field span').textContent = `Peso (${getGymWeightUnitLabel()})`;
+  wEl.value = set.weightDisplay || '';
+  rEl.value = set.reps || '';
+  wEl.placeholder = sugerencia && sugerencia.weightDisplay ? String(sugerencia.weightDisplay) : '';
+  rEl.placeholder = sugerencia && sugerencia.reps ? String(sugerencia.reps) : '';
+  document.getElementById('gym-set-end-note').value = set.note || '';
+  gymSetEndSegments = (set.segments || []).map((seg) => ({ ...seg }));
+  renderGymSetEndSegments();
+  gymSetEndFailure = !!set.failure;
+  renderGymSetEndFailure();
+}
+
+function openGymSetEndModal() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const ex = gymActiveSetExercise();
+  const exercise = state.gymExercises.find((e) => e.id === a.exerciseId);
+  const set = ex && ex.sets[a.setIndex];
+  const lado = set && set.side ? ` · lado ${gymSideLabel(set.side)}` : '';
+  document.getElementById('gym-set-end-info').textContent =
+    `${exercise ? exercise.name : 'Ejercicio'} · Serie ${ex ? gymSetSerieNumber(ex, a.setIndex) : a.setIndex + 1}${lado}`;
+  document.getElementById('gym-set-end-timer').textContent = gymLiveFormatClock(gymActiveSetSeconds());
+  gymSetEndShowForm(false);
+  document.getElementById('gym-set-end-modal').classList.remove('hidden');
+}
+function closeGymSetEndModal() {
+  document.getElementById('gym-set-end-modal').classList.add('hidden');
+  // Si acabas de cerrarlo, el toque en la pantalla no lo vuelve a abrir
+  // de inmediato (ver gymHandleLiveTap mas abajo).
+  gymTapSnoozeUntil = Date.now() + GYM_TAP_SNOOZE_MS;
+}
+
+// --- Tocar la pantalla durante la serie abre el dialogo ----------------
+// Peticion de Koku: con la serie en marcha el movil suele estar en el
+// banco o en el bolsillo, asi que cuando lo vuelves a tocar lo normal es
+// que la serie haya acabado. Condiciones para que no moleste:
+//  - Solo con la app DELANTE. Mucha gente empieza la serie y se va a
+//    Spotify: al volver, ese primer toque NO cuenta (se pide un margen
+//    desde que la app vuelve a estar visible).
+//  - No antes de unos segundos desde que empezo la serie (si no, el
+//    propio toque de "Empezar" la daria por acabada).
+//  - Solo tocando "hueco" de la pantalla: si tocas un boton o un campo
+//    manda lo que hayas tocado, asi el boton de Terminar serie y el
+//    resto de la vista siguen funcionando exactamente igual.
+//  - Y solo un TOQUE, no un arrastre ni un scroll.
+const GYM_TAP_MIN_SET_SECONDS = 5;      // desde que empieza la serie
+const GYM_TAP_AFTER_FOREGROUND_MS = 1500; // desde que la app vuelve
+// Tras cerrar el dialogo se vuelve a contar lo MISMO que al empezar la
+// serie (peticion de Koku: "si le doy a seguir, que vuelva a contar 5s
+// desde el tiempo en el que este"), no un silencio largo aparte.
+const GYM_TAP_SNOOZE_MS = GYM_TAP_MIN_SET_SECONDS * 1000;
+const GYM_TAP_MAX_MOVE_PX = 12;
+const GYM_TAP_MAX_MS = 700;
+let gymTapSnoozeUntil = 0;
+let gymAppVisibleSince = Date.now();
+let gymTapStart = null;
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') gymAppVisibleSince = Date.now();
+});
+
+// ¿Toca abrir el dialogo con este toque?
+function gymTapShouldOpenEnd(target) {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a || a.pausedAt) return false;
+  if (document.visibilityState !== 'visible') return false;
+  if (Date.now() - gymAppVisibleSince < GYM_TAP_AFTER_FOREGROUND_MS) return false;
+  if (Date.now() < gymTapSnoozeUntil) return false;
+  if (gymActiveSetSeconds() < GYM_TAP_MIN_SET_SECONDS) return false;
+  // Con cualquier dialogo abierto (o el menu flotante desplegado) el
+  // toque es para eso, no para terminar la serie.
+  if (document.querySelector('.modal:not(.hidden)')) return false;
+  if (!target || !target.closest) return false;
+  // Controles de la vista: mandan ellos. Ademas de los de siempre hay
+  // que contar la cabecera de la tarjeta, que no es un <button> pero se
+  // pulsa para plegar/desplegar el ejercicio.
+  if (target.closest('button, input, textarea, select, a, label, [contenteditable], [role="button"], [data-live-toggle-collapse]')) return false;
+  return true;
+}
+
+(function registrarToqueDeSerie() {
+  const vista = document.getElementById('gym-live-view');
+  if (!vista) return;
+  vista.addEventListener('pointerdown', (e) => {
+    gymTapStart = { x: e.clientX, y: e.clientY, t: Date.now(), target: e.target };
+  });
+  vista.addEventListener('pointerup', (e) => {
+    const inicio = gymTapStart;
+    gymTapStart = null;
+    if (!inicio) return;
+    if (Date.now() - inicio.t > GYM_TAP_MAX_MS) return;
+    if (Math.abs(e.clientX - inicio.x) > GYM_TAP_MAX_MOVE_PX) return;
+    if (Math.abs(e.clientY - inicio.y) > GYM_TAP_MAX_MOVE_PX) return;
+    if (!gymTapShouldOpenEnd(inicio.target)) return;
+    openGymSetEndModal();
+  });
+  vista.addEventListener('pointercancel', () => { gymTapStart = null; });
+})();
+
+// --- "Llegué al fallo" dentro del dialogo de fin de serie -------------
+let gymSetEndFailure = false;
+
+function renderGymSetEndFailure() {
+  const btn = document.getElementById('btn-gym-set-end-failure');
+  btn.classList.toggle('is-on', gymSetEndFailure);
+  btn.setAttribute('aria-pressed', gymSetEndFailure ? 'true' : 'false');
+}
+
+document.getElementById('btn-gym-set-end-failure').addEventListener('click', () => {
+  gymSetEndFailure = !gymSetEndFailure;
+  renderGymSetEndFailure();
+});
+
+// --- Tramos de una serie alargada dentro del dialogo de fin de serie ---
+// Lo que se este escribiendo ahora mismo en la linea "¿Has alargado la
+// serie?". Se vacia al abrir el formulario y se vuelca en la serie al
+// guardar; mientras tanto vive solo aqui, porque hasta que no le das a
+// "Guardar serie" no hay nada que apuntar.
+let gymSetEndSegments = [];
+
+// El peso de la SERIE MADRE tal y como esta el formulario ahora: lo que
+// hayas escrito o, si lo dejaste en blanco, la sugerencia gris (misma
+// regla que usa gymFinishActiveSet para guardar la serie).
+function gymPesoMadreDeTramos() {
+  const wEl = document.getElementById('gym-set-end-weight');
+  return wEl.value !== '' ? wEl.value : (wEl.placeholder || '');
+}
+
+// El editor de tramos, montado sobre CUALQUIER contenedor. Se usa en
+// dos sitios (peticion de Koku de poder arreglarlos despues: "a lo mejor
+// le he dado a acabar y se me ha olvidado darle a que he hecho alguna o
+// le he dado mal al peso"):
+//   - el dialogo de fin de serie del entreno en vivo,
+//   - y cada serie del modal de editar una sesion del historial.
+// `segmentos` se modifica EN EL SITIO (es el array del sitio que lo
+// llama); `pesoMadre` es la sugerencia gris de partida, que en el
+// entreno sale del campo de peso y en el historial de la fila.
+function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
+  cont.innerHTML = '';
+  const unit = getGymWeightUnitLabel();
+  // El peso que se propone en cada tramo: en un rest-pause es SIEMPRE el
+  // de la madre (es la definicion: misma carga tras la pausa), y en un
+  // dropset el del tramo de arriba, porque un dropset encadenado va
+  // bajando desde el anterior. Koku pidio que el de la madre sea el
+  // valor por defecto pero se pueda cambiar: va como sugerencia gris,
+  // que es el patron que ya usa el resto del dialogo (campo vacio =
+  // te vale la sugerencia).
+  let pesoAnterior = pesoMadre;
+  segmentos.forEach((seg, i) => {
+    const sugerencia = seg.kind === 'restpause' ? pesoMadre : pesoAnterior;
+    const row = document.createElement('div');
+    row.className = 'gym-set-segment-row';
+    row.dataset.segKind = seg.kind;
+    // Cada campo lleva su etiqueta ENCIMA, no dentro como sugerencia:
+    // metidos los tres en una fila, "pausa s" se cortaba y no se leia
+    // la unidad (lo vio Koku en el iPhone). La sugerencia gris del peso
+    // sigue estando, que es la que se usa si lo dejas en blanco.
+    row.innerHTML = `
+      <div class="gym-set-segment-head">
+        <span class="gym-set-segment-tag ${seg.kind === 'restpause' ? 'es-restpause' : 'es-dropset'}">${GYM_SEGMENT_LABELS[seg.kind]}</span>
+        <span class="gym-set-head-dur"></span>
+        <button type="button" class="icon-btn" data-seg-remove aria-label="Quitar tramo">✕</button>
+      </div>
+      <div class="gym-set-segment-fields">
+        ${seg.kind === 'restpause'
+          ? `<label class="gym-set-segment-field"><span>Pausa (s)</span><input type="number" inputmode="numeric" min="0" data-seg-field="pauseSeconds" value="${escapeHtml(String(seg.pauseSeconds ?? ''))}" /></label>`
+          : ''}
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-seg-field="reps" value="${escapeHtml(String(seg.reps ?? ''))}" /></label>
+      </div>
+    `;
+    row.querySelectorAll('[data-seg-field]').forEach((input) => {
+      input.addEventListener('input', () => { seg[input.dataset.segField] = input.value; });
+    });
+    row.querySelector('[data-seg-remove]').addEventListener('click', () => {
+      segmentos.splice(i, 1);
+      if (alQuitar) alQuitar();
+      else montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar });
+    });
+    cont.appendChild(row);
+    pesoAnterior = (seg.weightDisplay !== '' && seg.weightDisplay != null) ? seg.weightDisplay : sugerencia;
+  });
+}
+
+function renderGymSetEndSegments() {
+  montarEditorDeTramos(
+    document.getElementById('gym-set-end-segments'),
+    gymSetEndSegments,
+    { pesoMadre: gymPesoMadreDeTramos(), alQuitar: renderGymSetEndSegments },
+  );
+}
+
+// Lo escrito en los tramos, ya resuelto (campo vacio = la sugerencia
+// gris que se veia). Se lee del DOM y no del array porque la sugerencia
+// solo existe ahi, igual que pasa con el peso de la serie madre.
+function gymLeerTramosDelFormulario() {
+  return gymLeerTramosDe(document.getElementById('gym-set-end-segments'));
+}
+
+function gymLeerTramosDe(cont) {
+  const filas = cont ? [...cont.querySelectorAll('.gym-set-segment-row')] : [];
+  return filas.map((fila) => {
+    const leer = (campo) => {
+      const el = fila.querySelector(`[data-seg-field="${campo}"]`);
+      if (!el) return '';
+      if (el.value !== '') return el.value;
+      // Campo vacio: vale la sugerencia gris, pero SOLO si de verdad es
+      // un numero. Hay placeholders que son texto ("reps", "pausa s") y
+      // colarlos aqui guardaria un NaN en la base de datos.
+      return Number.isFinite(Number(el.placeholder)) && el.placeholder !== '' ? el.placeholder : '';
+    };
+    const kind = fila.dataset.segKind === 'restpause' ? 'restpause' : 'dropset';
+    return {
+      kind,
+      weightDisplay: leer('weightDisplay'),
+      reps: leer('reps'),
+      pauseSeconds: kind === 'restpause' ? leer('pauseSeconds') : null,
+    };
+  // Un tramo sin repeticiones esta a medio escribir: no se guarda.
+  }).filter((seg) => Number(seg.reps) > 0);
+}
+
+document.querySelectorAll('[data-add-segment]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymSetEndSegments.push({ kind: btn.dataset.addSegment, weightDisplay: '', reps: '', pauseSeconds: '' });
+    renderGymSetEndSegments();
+    // El foco al ultimo campo que se acaba de crear, para poder escribir
+    // sin tener que apuntar con el dedo.
+    const ultimo = document.querySelector('#gym-set-end-segments .gym-set-segment-row:last-child input');
+    if (ultimo) ultimo.focus();
+  });
+});
+
+// "Si, terminada" -> pasa al formulario, con lo que ya hubiera escrito en
+// la fila y, si estaba vacio, lo de la ultima serie hecha del mismo
+// ejercicio y lado (asi normalmente solo hay que confirmar).
+document.getElementById('btn-gym-set-end-done').addEventListener('click', () => {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const ex = gymActiveSetExercise();
+  const set = ex && ex.sets[a.setIndex];
+  if (!set) return;
+  // La sugerencia va como PLACEHOLDER, en gris de ejemplo, no como valor
+  // escrito (peticion de Koku): si no tocas el campo, al guardar se usa
+  // igualmente ese valor. Se busca primero la ultima serie hecha del
+  // MISMO lado y, si no hay, la ultima de cualquier lado -- en un
+  // unilateral se suele mover el mismo peso con los dos, asi que al
+  // cambiar de lado tambien conviene proponerlo (peticion de Koku).
+  const hechasAntes = [...ex.sets.slice(0, a.setIndex)].reverse().filter((s) => s.done);
+  const previa = hechasAntes.find((s) => s.side === set.side) || hechasAntes[0];
+  // Si la serie se deshizo y se esta rehaciendo, el volcado recupera de
+  // paso los tramos y el "al fallo" que tuviera apuntados.
+  gymVolcarSerieEnFormulario(set, previa);
+  gymSetEndShowForm(true);
+});
+
+// "Guardar serie": vuelca peso/reps/nota, marca la serie con su duracion
+// y arranca el descanso -- el CORTO entre lados si acaba de hacerse el
+// lado izquierdo de un ejercicio contado por lados, el normal si no.
+function gymFinishActiveSet() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const ex = gymActiveSetExercise();
+  const set = ex && ex.sets[a.setIndex];
+  if (set) {
+    // Campo vacio = te vale la sugerencia gris, asi que se guarda esa.
+    const wEl = document.getElementById('gym-set-end-weight');
+    const rEl = document.getElementById('gym-set-end-reps');
+    set.weightDisplay = wEl.value !== '' ? wEl.value : (wEl.placeholder || '');
+    set.reps = rEl.value !== '' ? rEl.value : (rEl.placeholder || '');
+    set.note = document.getElementById('gym-set-end-note').value;
+    set.segments = gymLeerTramosDelFormulario();
+    set.failure = gymSetEndFailure;
+    set.done = true;
+    set.durationSeconds = gymActiveSetSeconds();
+    set.extraRest = 0;
+
+    const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+    // Descanso CORTO entre lados: cuando lo que acaba de hacerse es el
+    // primer lado de la serie, o sea que el otro lado sigue pendiente.
+    // Ojo: no vale mirar si es el izquierdo -- se puede empezar por el
+    // derecho (lo eliges en el dialogo), y entonces el corto va despues
+    // del derecho.
+    const pareja = gymSidePartnerIndex(ex, a.setIndex);
+    const entreLados = pareja >= 0 && !ex.sets[pareja].done
+      && exercise && Number(exercise.sideRestSeconds) > 0;
+    const seconds = entreLados
+      ? Number(exercise.sideRestSeconds)
+      : (Number(set.restSeconds) || gymLiveSession.restPreset);
+    gymLiveSession.restUntil = Date.now() + seconds * 1000;
+    gymLiveSession.restBaseSeconds = seconds;
+    gymLiveSession.restExtraSeconds = 0;
+    // A que serie pertenece el descanso en marcha: los +30s se le
+    // apuntan a ELLA, para poder ensenar "Serie 1: +60s" luego.
+    gymLiveSession.restSetRef = { exerciseId: ex.exerciseId, setIndex: a.setIndex };
+    gymScheduleRestNotification();
+    gymStartRestLiveActivity();
+    gymStartRestAudioWatch();
+
+    // Ejercicio terminado: las notas de sus series se combinan en la
+    // nota del ejercicio, que es la que se vera el proximo entreno.
+    if (ex.sets.every((s) => s.done)) gymCombineSetNotes(ex);
+  }
+  gymLiveSession.activeSet = null;
+  gymLiveStore();
+  closeGymSetEndModal();
+  renderGymLiveExercises();
+  gymLiveTick();
+}
+
+document.getElementById('btn-gym-set-end-save').addEventListener('click', gymFinishActiveSet);
+document.getElementById('btn-gym-set-end-continue').addEventListener('click', closeGymSetEndModal);
+document.getElementById('btn-gym-set-end-pause').addEventListener('click', () => {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  if (!a.pausedAt) a.pausedAt = Date.now();
+  gymLiveStore();
+  closeGymSetEndModal();
+  renderGymLiveExercises();
+  gymLiveTick();
+});
+
+function renderGymLiveExercises() {
+  const container = document.getElementById('gym-live-exercises');
+  container.innerHTML = '';
+  // El atajo de "lista vacia" solo aplica si TAMPOCO hay nada que
+  // recuperar (ni ocultos del dia ni quitados en esta sesion) -- si no,
+  // esas secciones de abajo no se pintarian nunca.
+  if (gymLiveSession.exercises.length === 0
+      && !(gymLiveSession.hiddenPool || []).length
+      && !(gymLiveSession.removedPool || []).length) {
+    container.innerHTML = '<p class="empty-hint">Añade ejercicios con el botón del menú de abajo a la derecha.</p>';
+    return;
+  }
+  const unit = getGymWeightUnitLabel();
+
+  // Plegar/desplegar todo (peticion de Koku: no deslizar 40 minutos).
+  if (gymLiveSession.exercises.length > 1) {
+    const toolsRow = document.createElement('div');
+    toolsRow.className = 'gym-live-cards-tools';
+    toolsRow.innerHTML = `
+      <button type="button" class="secondary-btn" data-live-expand-all>Desplegar todo</button>
+      <button type="button" class="secondary-btn" data-live-collapse-all>Recoger todo</button>
+    `;
+    toolsRow.querySelector('[data-live-expand-all]').addEventListener('click', () => {
+      gymLiveSession.exercises.forEach((ex) => { ex.collapsed = false; });
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    toolsRow.querySelector('[data-live-collapse-all]').addEventListener('click', () => {
+      gymLiveSession.exercises.forEach((ex) => { ex.collapsed = true; });
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    container.appendChild(toolsRow);
+  }
+
+  gymLiveSession.exercises.forEach((ex, exIndex) => {
+    const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+    const prev = gymLivePrevSets.get(ex.exerciseId);
+    // Sesiones guardadas por versiones anteriores: el RPE vivia por
+    // serie; se recupera el primero que hubiera como RPE del ejercicio.
+    if (ex.rpe === undefined) ex.rpe = (ex.sets.find((s) => s.rpe) || {}).rpe || '';
+    const card = document.createElement('div');
+    card.className = 'gym-live-exercise-card' + (ex.collapsed ? ' collapsed' : '');
+
+    const setsHtml = ex.sets.map((set, setIndex) => {
+      const prevSet = prev && prev.sets[setIndex];
+      // Si la ultima vez esa serie se alargo, se marca con un "+N" para
+      // saber que ese numero no salio de una serie normal.
+      const prevExtra = prevSet && gymSetSegments(prevSet).length;
+      const prevLabel = prevSet
+        ? `${prevSet.restSeconds ? `(${gymFormatRestShort(prevSet.restSeconds)})` : ''}${prevSet.weightKg !== null ? gymWeightKgToDisplay(prevSet.weightKg) : '—'}×${prevSet.reps ?? '—'}${prevExtra ? ` +${prevExtra}` : ''}`
+        : '—';
+      return `
+        <div class="gym-live-set-row ${set.done ? 'done' : ''}">
+          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}</span>
+          <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
+          <span class="gym-live-set-value">${escapeHtml(String(set.weightDisplay || '—'))}</span>
+          <span class="gym-live-set-value">${escapeHtml(String(set.reps || '—'))}</span>
+        </div>
+        ${set.extraRest || set.failure || gymSetSegments(set).length
+          ? `<div class="gym-live-set-chips">${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymFailureChipHtml(set.failure)}${gymSegmentChipHtml(set)}</div>`
+          : ''}
+      `;
+    }).join('');
+
+    // Boton GRANDE de empezar/terminar serie (sustituye a la casilla
+    // diminuta, peticion de Koku). Apunta siempre a la primera serie sin
+    // hacer del ejercicio; si ya estan todas, empieza una extra. Solo
+    // puede haber UNA serie en curso en todo el entreno.
+    const active = gymLiveSession.activeSet;
+    const activeHere = !!active && active.exerciseId === ex.exerciseId;
+    const pendingIdx = gymNextPendingSetIndex(ex);
+    let bigBtnHtml;
+    if (activeHere) {
+      const paused = !!active.pausedAt;
+      const activeSide = (ex.sets[active.setIndex] || {}).side;
+      const que = activeSide ? `lado ${gymSideLabel(activeSide)}` : 'serie';
+      bigBtnHtml = `
+        <button type="button" class="gym-set-big-btn gym-set-run-btn${paused ? ' paused' : ''}" data-live-set-action>
+          ${paused ? `▶ Reanudar ${que}` : `■ Terminar ${que}`} · <span data-live-set-timer>0:00</span>
+        </button>`;
+    } else {
+      const pendingSet = pendingIdx >= 0 ? ex.sets[pendingIdx] : null;
+      const label = pendingIdx >= 0
+        ? `▶ Empezar serie ${gymSetSerieNumber(ex, pendingIdx)} de ${gymSerieCount(ex)}${pendingSet && pendingSet.side ? ` · lado ${gymSideLabel(pendingSet.side)}` : ''}`
+        : '▶ Empezar serie extra';
+      // Con el descanso recien acabado, el boton de ESTE ejercicio se
+      // pone grande y llamativo: es el que se le olvidaba pulsar a Koku.
+      const leToca = gymIndiceDelEjercicioEnEspera() === exIndex;
+      bigBtnHtml = `
+        <button type="button" class="gym-set-big-btn gym-set-start-btn${leToca ? ' is-ready' : ''}" data-live-set-start ${active ? 'disabled' : ''}>
+          ${label}
+        </button>`;
+    }
+
+    const doneCount = ex.sets.filter((s) => s.done).length;
+    const restSeconds = Number(ex.sets[0] && ex.sets[0].restSeconds) || '';
+    card.innerHTML = `
+      <div class="gym-live-exercise-header" data-live-toggle-collapse>
+        <span class="gym-live-caret" aria-hidden="true">▾</span>
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <span class="gym-live-rest-chip is-static" title="Descanso entre series">${restSeconds ? gymFormatRestDisplay(restSeconds) : '—'}</span>
+        <span class="gym-live-card-progress">${doneCount}/${ex.sets.length}</span>
+      </div>
+      <div class="gym-live-card-body">
+        ${exercise && exercise.notes ? `<p class="gym-live-fixed-note">${escapeHtml(exercise.notes)}</p>` : ''}
+        ${prev && prev.note ? `<p class="gym-live-prev-note">La última vez: ${escapeHtml(prev.note)}</p>` : ''}
+        <div class="gym-live-set-row gym-live-set-head">
+          <span class="gym-live-set-number">#</span>
+          <span class="gym-live-set-prev">Anterior</span>
+          <span class="gym-live-set-value">${unit}</span>
+          <span class="gym-live-set-value">Reps</span>
+        </div>
+        ${setsHtml}
+        ${bigBtnHtml}
+        ${ex.rpe || (ex.note && ex.note.trim()) ? `<p class="gym-live-card-meta">${ex.rpe ? `RPE ${escapeHtml(String(ex.rpe))}` : ''}${ex.rpe && ex.note && ex.note.trim() ? ' · ' : ''}${ex.note ? escapeHtml(ex.note) : ''}</p>` : ''}
+      </div>
+    `;
+
+    // Tocar la cabecera pliega/despliega la tarjeta -- salvo que el toque
+    // caiga en un boton o input de la propia cabecera.
+    card.querySelector('[data-live-toggle-collapse]').addEventListener('click', (e) => {
+      if (e.target.closest('button, input')) return;
+      ex.collapsed = !ex.collapsed;
+      gymLiveStore();
+      card.classList.toggle('collapsed', ex.collapsed);
+    });
+
+    // Empezar serie: pasa por el dialogo de confirmacion (que ejercicio y
+    // que serie), con el nombre pulsable para cambiar de ejercicio.
+    const startBtn = card.querySelector('[data-live-set-start]');
+    if (startBtn) startBtn.addEventListener('click', () => openGymSetStartModal(exIndex));
+    // Terminar (o reanudar si estaba pausada) la serie en curso.
+    const actionBtn = card.querySelector('[data-live-set-action]');
+    if (actionBtn) {
+      actionBtn.addEventListener('click', () => {
+        const a = gymLiveSession.activeSet;
+        if (!a) return;
+        if (a.pausedAt) {
+          a.pausedMs = (a.pausedMs || 0) + (Date.now() - a.pausedAt);
+          a.pausedAt = null;
+          gymLiveStore();
+          renderGymLiveExercises();
+          gymLiveTick();
+        } else {
+          openGymSetEndModal();
+        }
+      });
+    }
+    // Quitar el ejercicio: ahora se llega DESLIZANDO la tarjeta (ver el
+    // envoltorio de abajo), no con una ✕ en la cabecera.
+    const quitarEjercicio = async () => {
+      const ok = await showAppConfirm('¿Quitar este ejercicio del entrenamiento? Podrás recuperarlo con sus series desde "Ejercicios quitados", abajo del todo.', { okText: 'Quitar', danger: true });
+      if (!ok) return;
+      // No se pierde: va al pool de quitados de ESTA sesion, con sus
+      // series tal cual estaban (peticion de Koku: poder recuperarlo).
+      if (!gymLiveSession.removedPool) gymLiveSession.removedPool = [];
+      // Si la serie en curso era de ESTE ejercicio, se cancela: si no, la
+      // sesion se quedaba con una serie corriendo de un ejercicio que ya
+      // no esta, el cronometro no paraba y ningun otro ejercicio dejaba
+      // empezar (solo puede haber una serie a la vez).
+      gymDropActiveSetIfExercise(gymLiveSession.exercises[exIndex].exerciseId);
+      gymLiveSession.removedPool.push(gymLiveSession.exercises[exIndex]);
+      gymLiveSession.exercises.splice(exIndex, 1);
+      gymLiveStore();
+      renderGymLiveExercises();
+    };
+
+    // La tarjeta se DESLIZA para editar o quitar el ejercicio (petición
+    // de Koku). Funciona bien justo porque la tarjeta ya no tiene ningún
+    // campo donde escribir: arrastrarla no pelea con meter el dedo en un
+    // input. Lo que queda a golpe de toque es solo usarla: plegar,
+    // empezar la serie y mover el ejercicio arriba/abajo.
+    const envoltorio = wrapRowWithSwipeActions(card, {
+      botones: [
+        ['Editar', 'secondary-btn', () => openGymExerciseEditModal(ex.exerciseId)],
+        ['Mover', 'secondary-btn', () => armarMovimientoDeEjercicio(ex.exerciseId)],
+        ['Quitar', 'danger-btn', quitarEjercicio],
+      ],
+      anchoFijo: 210,
+      // Con el modo mover armado, el deslizamiento lateral se aparta: el
+      // gesto que manda entonces es arrastrar la tarjeta arriba y abajo.
+      bloqueadoSi: () => gymEjercicioEnMovimiento !== null,
+    });
+    envoltorio.dataset.exerciseId = String(ex.exerciseId);
+    if (gymEjercicioEnMovimiento === ex.exerciseId) {
+      envoltorio.classList.add('esta-moviendose');
+      habilitarArrastreDeEjercicio(envoltorio);
+    }
+    container.appendChild(envoltorio);
+  });
+
+  // Ejercicios QUITADOS durante esta sesion: recuperables con sus series
+  // (peticion de Koku, "no es que me lo haya saltado, es un cambio").
+  const removed = gymLiveSession.removedPool || [];
+  if (removed.length > 0) {
+    const removedBox = document.createElement('div');
+    removedBox.className = 'gym-live-hidden-pool';
+    removedBox.innerHTML = `<button type="button" class="secondary-btn" data-live-toggle-removed>${gymLiveRemovedPoolOpen ? 'Ocultar' : 'Ver'} ejercicios quitados (${removed.length})</button><div class="gym-live-hidden-list ${gymLiveRemovedPoolOpen ? '' : 'hidden'}"></div>`;
+    removedBox.querySelector('[data-live-toggle-removed]').addEventListener('click', () => {
+      gymLiveRemovedPoolOpen = !gymLiveRemovedPoolOpen;
+      renderGymLiveExercises();
+    });
+    const removedList = removedBox.querySelector('.gym-live-hidden-list');
+    removed.forEach((r, removedIndex) => {
+      const exercise = state.gymExercises.find((e) => e.id === r.exerciseId);
+      const row = document.createElement('div');
+      row.className = 'gym-live-hidden-row';
+      row.innerHTML = `
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <button type="button" class="secondary-btn">Recuperar</button>
+      `;
+      row.querySelector('button').addEventListener('click', () => {
+        r.collapsed = false;
+        gymLiveSession.exercises.push(r);
+        gymLiveSession.removedPool.splice(removedIndex, 1);
+        gymLiveStore();
+        renderGymLiveExercises();
+      });
+      removedList.appendChild(row);
+    });
+    container.appendChild(removedBox);
+  }
+
+  // Ejercicios OCULTOS del dia: no estan en el entreno, pero se pueden
+  // recuperar para esta sesion concreta (peticion de Koku).
+  const pool = gymLiveSession.hiddenPool || [];
+  if (pool.length > 0) {
+    const poolBox = document.createElement('div');
+    poolBox.className = 'gym-live-hidden-pool';
+    poolBox.innerHTML = `<button type="button" class="secondary-btn" data-live-toggle-hidden>${gymLiveHiddenPoolOpen ? 'Ocultar' : 'Ver'} ejercicios ocultos (${pool.length})</button><div class="gym-live-hidden-list ${gymLiveHiddenPoolOpen ? '' : 'hidden'}"></div>`;
+    poolBox.querySelector('[data-live-toggle-hidden]').addEventListener('click', () => {
+      gymLiveHiddenPoolOpen = !gymLiveHiddenPoolOpen;
+      renderGymLiveExercises();
+    });
+    const listEl = poolBox.querySelector('.gym-live-hidden-list');
+    pool.forEach((p, poolIndex) => {
+      const exercise = state.gymExercises.find((e) => e.id === p.exerciseId);
+      const row = document.createElement('div');
+      row.className = 'gym-live-hidden-row';
+      row.innerHTML = `
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <button type="button" class="secondary-btn">+ Añadir a esta sesión</button>
+      `;
+      row.querySelector('button').addEventListener('click', async () => {
+        gymLiveSession.exercises.push({
+          exerciseId: p.exerciseId,
+          note: '',
+          rpe: '',
+          collapsed: false,
+          sets: gymBuildSetsForExercise(p.exerciseId, p.targetSets, p.targetRestSeconds ?? ''),
+        });
+        gymLiveSession.hiddenPool.splice(poolIndex, 1);
+        gymLiveStore();
+        if (!gymLivePrevSets.has(p.exerciseId)) {
+          gymLivePrevSets.set(p.exerciseId, await api(`/api/gym-sessions/last-sets/${p.exerciseId}`));
+        }
+        renderGymLiveExercises();
+      });
+      listEl.appendChild(row);
+    });
+    container.appendChild(poolBox);
+  }
+}
+
+// "+ Añadir ejercicio" en vivo: reutiliza el MISMO buscador de la
+// libreria de la Fase 2, pero en "modo elegir" -- si
+// gymLibraryPickCallback esta puesto, elegir un ejercicio (fila o boton)
+// llama al callback en vez del flujo normal de importar, y cierra el
+// buscador. Asi no hay que construir un segundo selector solo para el
+// entreno en vivo.
+let gymLibraryPickCallback = null;
+document.getElementById('btn-gym-live-add-exercise').addEventListener('click', () => {
+  gymLibraryPickCallback = async (libraryEntry) => {
+    // Importa (idempotente) y anade la tarjeta al entreno en curso.
+    await importGymLibraryExercise(libraryEntry.id);
+    const imported = state.gymExercises.find((e) => e.libraryId === libraryEntry.id);
+    if (!imported) return;
+    if (!gymLiveSession.exercises.some((e) => e.exerciseId === imported.id)) {
+      gymLiveSession.exercises.push({ exerciseId: imported.id, note: '', rpe: '', collapsed: false, sets: gymBuildSetsForExercise(imported.id, 1, '') });
+      gymLiveStore();
+      const prev = await api(`/api/gym-sessions/last-sets/${imported.id}`);
+      gymLivePrevSets.set(imported.id, prev);
+      renderGymLiveExercises();
+    }
+  };
+  openGymLibraryModal();
+});
+
+// --- Modal de ayuda del entrenamiento --------------------------------
+// Se abre SOLO la primera vez que entras a entrenar (y cada vez, hasta
+// que marques "no volver a mostrar"), y siempre a mano desde el boton
+// "?" flotante o tocando la cabecera RPE. El flag vive en localStorage
+// porque es una preferencia de ESTE dispositivo, como el resto.
+function openGymHelpModal() {
+  // El checkbox refleja lo guardado: si ya pediste no verlo mas y lo
+  // abres a mano, aparece marcado (y puedes desmarcarlo para que vuelva
+  // a salir solo).
+  document.getElementById('gym-help-dont-show').checked =
+    localStorage.getItem('gymLiveHelpSeen') === '1';
+  document.getElementById('gym-help-modal').classList.remove('hidden');
+}
+function closeGymHelpModal() {
+  localStorage.setItem(
+    'gymLiveHelpSeen',
+    document.getElementById('gym-help-dont-show').checked ? '1' : '0'
+  );
+  document.getElementById('gym-help-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-live-help').addEventListener('click', openGymHelpModal);
+document.getElementById('btn-close-gym-help').addEventListener('click', closeGymHelpModal);
+
+// Ocultar el entrenamiento sin descartarlo (el ▾ de la cabecera): vuelve
+// al Gimnasio con sus pestanas utilizables. El ticker sigue vivo.
+document.getElementById('btn-gym-live-header-hide').addEventListener('click', closeGymLiveView);
+
+// Pausar/reanudar el CRONOMETRO de la sesion (aclarado con Koku: la
+// pausa del menu congela el tiempo de sesion -- si te interrumpen, el
+// entreno no "engorda"). El descanso entre series NO se pausa: es tiempo
+// de reloj de pared. pausedMs/pausedAt, ver gymLiveElapsedSeconds().
+function gymToggleSessionPause() {
+  if (!gymLiveSession) return;
+  if (gymLiveSession.pausedAt) {
+    gymLiveSession.pausedMs = (gymLiveSession.pausedMs || 0) + (Date.now() - gymLiveSession.pausedAt);
+    gymLiveSession.pausedAt = null;
+  } else {
+    gymLiveSession.pausedAt = Date.now();
+  }
+  gymLiveStore();
+  refreshGymLivePauseUi();
+  gymLiveTick();
+}
+function refreshGymLivePauseUi() {
+  const paused = !!(gymLiveSession && gymLiveSession.pausedAt);
+  document.getElementById('btn-gym-live-pause').classList.toggle('is-paused', paused);
+  document.getElementById('btn-gym-live-pause').setAttribute('aria-label', paused ? 'Reanudar el cronómetro' : 'Pausar el cronómetro');
+}
+document.getElementById('btn-gym-live-pause').addEventListener('click', gymToggleSessionPause);
+
+// El menu flotante de acciones del entreno: el boton central abre/cierra
+// el abanico de 4 botones (dudas / pausar / terminar / descartar).
+// Cualquier accion lo cierra, y un toque fuera tambien.
+const GYM_LIVE_FAB = document.getElementById('gym-live-fab');
+function closeGymLiveFab() {
+  GYM_LIVE_FAB.classList.remove('open');
+  document.getElementById('btn-gym-live-menu').setAttribute('aria-expanded', 'false');
+}
+document.getElementById('btn-gym-live-menu').addEventListener('click', () => {
+  const abierto = GYM_LIVE_FAB.classList.toggle('open');
+  document.getElementById('btn-gym-live-menu').setAttribute('aria-expanded', abierto ? 'true' : 'false');
+});
+GYM_LIVE_FAB.querySelectorAll('.gym-live-fab-action').forEach((btn) => {
+  btn.addEventListener('click', closeGymLiveFab);
+});
+document.addEventListener('click', (e) => {
+  if (!GYM_LIVE_FAB.classList.contains('open')) return;
+  // Leccion aprendida (ver CLAUDE.md): si el nodo pulsado ya no esta en
+  // el documento (repintado en su propio manejador), closest() daria
+  // null y pareceria un "clic fuera" -- se ignora.
+  if (!document.contains(e.target)) return;
+  if (!e.target.closest('#gym-live-fab')) closeGymLiveFab();
+});
+
+// Con el entreno en vivo abierto, tocar la navegacion inferior del
+// movil no "funcionaba" (la nav cambiaba la pantalla POR DEBAJO del
+// overlay y no se veia nada). Ahora esconde el overlay primero: la
+// sesion sigue viva en localStorage y en Entrenar queda el boton de
+// "continuar". Listener en captura para adelantarse al de la nav.
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.mobile-nav')) return;
+  const live = document.getElementById('gym-live-view');
+  if (live && !live.classList.contains('hidden')) closeGymLiveView();
+}, true);
+
+// Tocar la mini-barra global de descanso vuelve al entrenamiento.
+// Configuracion es un modal que quedaria POR ENCIMA del entreno, asi que
+// se cierra primero (feedback de Koku: "desde configuracion no me lleva
+// al entrenamiento").
+document.getElementById('gym-global-rest').addEventListener('click', () => {
+  if (!gymLiveSession) return;
+  if (typeof closeSettingsModal === 'function') closeSettingsModal();
+  // En modo "te toca" (descanso acabado, serie pendiente) la barra
+  // arranca la serie ademas de llevarte al entreno: es justo el paso que
+  // se olvidaba.
+  const iEspera = gymIndiceDelEjercicioEnEspera();
+  openGymLiveView();
+  if (iEspera >= 0) {
+    gymStartSet(iEspera);
+    renderGymLiveExercises();
+    gymLiveTick();
+  }
+});
+
+// Al arrancar la app, si quedo una sesion en curso guardada se carga en
+// memoria (sin abrir el overlay): asi el indicador de la nav y la
+// mini-barra de descanso funcionan desde el primer momento.
+gymLiveSession = gymLiveReadStored();
+if (gymLiveSession) {
+  gymLiveTicker = setInterval(gymLiveTick, 1000);
+  // Por si la app se relanzo con +30s de la pantalla de bloqueo sin
+  // recoger (el visibilitychange no cubre el primer arranque).
+  gymConsumeRestExtensionFromLockScreen();
+  // Y si el relanzamiento pillo un descanso a medias, la vigilancia de
+  // audio (bajar la musica al acabar) se rearma con el final vigente.
+  if (gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    gymStartRestAudioWatch();
+  }
+}
+refreshGymLiveIndicators();
+
+// Descartar: tirar el entrenamiento en curso sin guardar nada.
+document.getElementById('btn-gym-live-discard').addEventListener('click', async () => {
+  const ok = await showAppConfirm('¿Descartar el entrenamiento? No se guardará nada de hoy.', { okText: 'Descartar', danger: true });
+  if (!ok) return;
+  localStorage.removeItem('gymLiveSession');
+  gymLiveSession = null;
+  gymLiveStopTicker();
+  closeGymLiveView();
+});
+
+// Terminar: convertir lo hecho en una sesion de verdad + resumen.
+document.getElementById('btn-gym-live-finish').addEventListener('click', async () => {
+  // Sin entreno en marcha no hay nada que terminar. No deberia pasar (el
+  // boton vive dentro de la pantalla del entreno, que solo se ve con una
+  // sesion abierta), pero sin esto la funcion revienta con un null.
+  if (!gymLiveSession) return;
+  // Solo cuentan las series marcadas como hechas o con algun dato; las
+  // filas vacias pre-creadas por el plan se ignoran sin molestar.
+  const sets = [];
+  const exerciseNotes = {};
+  const musclesTouched = new Set();
+  let volumeKg = 0;
+  let failureSets = 0;
+  for (const ex of gymLiveSession.exercises) {
+    if (ex.note && ex.note.trim()) exerciseNotes[ex.exerciseId] = ex.note.trim();
+    for (const set of ex.sets) {
+      if (!set.done && set.reps === '' && set.weightDisplay === '') continue;
+      const weightKg = gymWeightDisplayToKg(set.weightDisplay);
+      // Tramos de una serie alargada: el peso viaja en kg como el de la
+      // serie madre (la libra es solo de presentacion, ver el esquema).
+      const segments = (set.segments || []).map((seg) => ({
+        kind: seg.kind,
+        reps: seg.reps,
+        weightKg: gymWeightDisplayToKg(seg.weightDisplay),
+        pauseSeconds: seg.pauseSeconds,
+      })).filter((seg) => Number(seg.reps) > 0);
+      sets.push({
+        exerciseId: ex.exerciseId,
+        reps: set.reps,
+        weightKg,
+        segments,
+        setType: set.failure ? 'failure' : null,
+        restSeconds: set.restSeconds,
+        // El RPE es del EJERCICIO (peticion de Koku): se guarda replicado
+        // en cada serie para no cambiar el esquema de gym_sets.
+        rpe: ex.rpe,
+        extraRestSeconds: set.extraRest || null,
+        // Cuanto duro la serie (del boton "empezar" al "terminar").
+        durationSeconds: set.durationSeconds || null,
+        side: set.side || null,
+        notes: set.note || null,
+      });
+      let volumenDeLaSerie = (Number(set.reps) || 0) * (weightKg || 0);
+      for (const seg of segments) volumenDeLaSerie += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
+      if (set.failure) {
+        failureSets += 1;
+        volumenDeLaSerie = gymVolumenAjustado(volumenDeLaSerie, volumenDeLaSerie);
+      }
+      volumeKg += volumenDeLaSerie;
+      const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+      if (exercise && exercise.muscleGroup) musclesTouched.add(gymMuscleGroupLabel(exercise.muscleGroup));
+    }
+  }
+  if (sets.length === 0) {
+    const ok = await showAppConfirm('No has marcado ninguna serie. ¿Descartar el entrenamiento?', { okText: 'Descartar', danger: true });
+    if (!ok) return;
+    localStorage.removeItem('gymLiveSession');
+    gymLiveSession = null;
+    gymLiveStopTicker();
+    closeGymLiveView();
+    return;
+  }
+
+  const durationSeconds = gymLiveElapsedSeconds();
+  // Se guarda antes de vaciar gymLiveSession: mas abajo se pone a null y
+  // para entonces ya no habria de donde sacar que dia del plan se hizo.
+  const rutinaDelEntreno = gymLiveSession.routineId;
+  await api('/api/gym-sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      date: toDateKey(new Date()),
+      routineId: gymLiveSession.routineId,
+      sets,
+      startedAt: new Date(gymLiveSession.startedAt).toISOString(),
+      durationSeconds,
+      exerciseNotes,
+    }),
+  });
+
+  // Resumen: duracion, series, volumen (en la unidad del dispositivo) y
+  // grupos musculares tocados.
+  const minutes = Math.max(1, Math.round(durationSeconds / 60));
+  document.getElementById('gym-summary-duration').textContent = `${minutes} min`;
+  document.getElementById('gym-summary-sets').textContent = String(sets.length);
+  document.getElementById('gym-summary-volume').textContent = `${gymWeightKgToDisplay(volumeKg)} ${getGymWeightUnitLabel()}`;
+  document.getElementById('gym-summary-failure').textContent = String(failureSets);
+  document.getElementById('gym-summary-muscles').textContent = String(musclesTouched.size);
+  document.getElementById('gym-summary-muscle-list').textContent = [...musclesTouched].join(' · ');
+
+  localStorage.removeItem('gymLiveSession');
+  gymLiveSession = null;
+  gymLiveStopTicker();
+  closeGymLiveView();
+  document.getElementById('gym-live-summary-modal').classList.remove('hidden');
+
+  await loadGymSessions();
+  renderGymSessionsList();
+  populateGymProgressExerciseSelect();
+  // El ciclo del bloque avanza AQUI, tras guardar: si lo entrenado era
+  // lo que tocaba pasa solo, y si no, pregunta donde recolocarlo. Se
+  // hace despues del resumen para no meter un dialogo por delante del
+  // "ya has terminado".
+  await gymAvanzarCicloTrasEntrenar(rutinaDelEntreno);
+  // La celebracion de logros (si algo subio de nivel) queda ABIERTA
+  // detras del resumen: al cerrar el resumen aparece ella.
+  checkGymAchievements();
+});
+document.getElementById('btn-close-gym-summary').addEventListener('click', () => {
+  document.getElementById('gym-live-summary-modal').classList.add('hidden');
+});
+
+// --- El widget de "que toca hoy" -------------------------------------
+// El puente vive en widget-bridge.js, que se carga aparte: si no
+// estuviera (o en un navegador normal), estas llamadas no deben romper
+// nada de lo que las rodea, que es cargar el gimnasio.
+function actualizarResumenDelWidget() {
+  if (typeof actualizarWidgetDelDia === 'function') actualizarWidgetDelDia();
+}
+
+// Abrir la app desde el widget arranca el entreno de hoy. Se comprueba al
+// volver a primer plano, igual que el +30s de la pantalla de bloqueo: el
+// nativo deja una marca y aqui se consume UNA vez.
+async function comprobarAperturaDesdeElWidget() {
+  if (typeof widgetPideEmpezarHoy !== 'function') return;
+  let loPide = false;
+  try { loPide = await widgetPideEmpezarHoy(); } catch { return; }
+  if (!loPide) return;
+  // Con un entreno YA en marcha no se empieza otro encima: se abre el que
+  // hay. Perder un entreno a medias por tocar un widget seria muy caro.
+  if (gymLiveReadStored()) {
+    gymLiveSession = gymLiveReadStored();
+    goToMobileSection('extensions');
+    if (typeof openGymView === 'function') await openGymView();
+    openGymLiveView();
+    return;
+  }
+  // Los bloques y los dias pueden no estar cargados todavia (el widget
+  // puede abrir la app desde cero): se piden antes de mirar el ciclo.
+  await Promise.all([loadGymBlocks(), loadGymRoutines(), loadGymExercises()]);
+  const hoy = gymCicloDeHoy();
+  goToMobileSection('extensions');
+  if (typeof openGymView === 'function') await openGymView();
+  // Si hoy toca descanso (o no hay ciclo), se abre el selector en vez de
+  // arrancar algo a lo loco: el widget es un atajo, no una decision.
+  if (!hoy || hoy.esDescanso || !hoy.rutina) openGymStartModal();
+  else startGymLiveSession(hoy.rutina);
+}
+
+// --- "Hoy te toca": el ciclo visto desde fuera del Gimnasio -----------
+//
+// El ciclo del bloque ACTIVO se consulta al vuelo (decision de Koku: es
+// un aviso calculado, no una tarea guardada en la base). Asi siempre
+// esta al dia y cambiar el plan lo cambia solo, sin filas viejas por
+// ahi ni nada que regenerar.
+//
+// Devuelve null si no hay bloque activo o si ese bloque no usa ciclo.
+function gymCicloDeHoy() {
+  const bloque = state.gymBlocks.find((b) => b.isActive);
+  if (!bloque || !bloque.cycleEnabled || !bloque.cycleToday) return null;
+  const rutina = bloque.cycleToday.routineId
+    ? state.gymRoutines.find((r) => r.id === bloque.cycleToday.routineId) || null
+    : null;
+  // Una posicion que apunta a un dia BORRADO se trata como descanso, en
+  // vez de dejar el aviso a medias.
+  return {
+    bloque,
+    position: bloque.cycleToday.position,
+    length: bloque.cycleLength,
+    rutina,
+    esDescanso: bloque.cycleToday.isRest || !rutina,
+  };
+}
+
+// Cual es la posicion SIGUIENTE del ciclo (dando la vuelta al final).
+function gymCicloSiguientePosicion(bloque, desde) {
+  if (!bloque || !bloque.cycleDays || bloque.cycleDays.length === 0) return null;
+  const i = bloque.cycleDays.findIndex((d) => d.position === desde);
+  if (i === -1) return bloque.cycleDays[0].position;
+  return bloque.cycleDays[(i + 1) % bloque.cycleDays.length].position;
+}
+
+// NO hay aviso de "hoy toca X" en el CALENDARIO. Llego a existir (una
+// tira bajo la cabecera del dia) y Koku lo quito el 9/9/2026: "que te
+// muestre lo de que entrenamiento toca en el calendario realmente no me
+// aporta nada, era mas bien el que pudiera saber el widget que dia es y
+// asi saber a que dia esta enlazado cada entrenamiento". O sea que el
+// ciclo NO es para pintar el calendario: es para que el Gimnasio sepa
+// que ofrecerte y para alimentar el widget. Si vuelve a hacer falta,
+// gymCicloDeHoy() da todo lo necesario en una sola llamada.
+
+// Al terminar un entreno: mover el cursor del ciclo. Si lo entrenado era
+// lo que tocaba, avanza solo y en silencio (el caso normal). Si NO lo
+// era -- hoy tocaba descanso y has entrenado igual, o has hecho otro dia
+// --, se PREGUNTA donde recolocar el ciclo, que es lo que pidio Koku
+// para saber como sigue el aviso y el widget.
+async function gymAvanzarCicloTrasEntrenar(routineId) {
+  const hoy = gymCicloDeHoy();
+  if (!hoy) return;
+  const bloque = hoy.bloque;
+
+  const acertaste = !hoy.esDescanso && hoy.rutina && Number(routineId) === hoy.rutina.id;
+  if (acertaste) {
+    const siguiente = gymCicloSiguientePosicion(bloque, hoy.position);
+    if (siguiente !== null) {
+      await api(`/api/gym-blocks/${bloque.id}/cycle/position`, {
+        method: 'POST', body: JSON.stringify({ position: siguiente }),
+      });
+      await loadGymBlocks();
+    }
+    return;
+  }
+
+  // Fuera de plan. Si lo que has hecho ESTA en el ciclo, se puede
+  // recolocar detras de eso; si no (entreno libre o un dia que no esta
+  // en el ciclo), lo unico sensato es dejarlo como estaba.
+  const enElCiclo = routineId
+    ? (bloque.cycleDays || []).find((d) => d.routineId === Number(routineId))
+    : null;
+  const queTocaba = hoy.esDescanso ? 'descanso' : `“${hoy.rutina.name}”`;
+  if (!enElCiclo) {
+    // Dos redacciones: "no has hecho el dia que tocaba" y "hoy tocaba
+    // descansar y has entrenado igual" no son la misma frase.
+    await showAppAlert(hoy.esDescanso
+      ? 'Hoy tocaba descanso en tu ciclo y lo que has entrenado no es ninguno de sus días, así que el ciclo se queda donde estaba: mañana seguirá tocando este descanso.'
+      : `Hoy tocaba ${queTocaba} en tu ciclo y no lo has hecho, así que el ciclo se queda donde estaba: mañana te seguirá tocando ${queTocaba}.`);
+    return;
+  }
+
+  const nombreHecho = state.gymRoutines.find((r) => r.id === Number(routineId));
+  const siguienteAlHecho = gymCicloSiguientePosicion(bloque, enElCiclo.position);
+  const rutinaSiguiente = (bloque.cycleDays || []).find((d) => d.position === siguienteAlHecho);
+  const nombreSiguiente = rutinaSiguiente && rutinaSiguiente.routineId
+    ? (state.gymRoutines.find((r) => r.id === rutinaSiguiente.routineId) || {}).name || 'descanso'
+    : 'descanso';
+  const recolocar = await showAppConfirm(
+    `Hoy tocaba ${queTocaba}, pero has hecho “${nombreHecho ? nombreHecho.name : 'otro día'}”. ¿Recoloco el ciclo ahí? Mañana te tocaría ${nombreSiguiente === 'descanso' ? 'descanso' : `“${nombreSiguiente}”`}.`,
+    { okText: 'Recolocar', cancelText: 'Dejarlo como estaba' }
+  );
+  if (!recolocar) return;
+  await api(`/api/gym-blocks/${bloque.id}/cycle/position`, {
+    method: 'POST', body: JSON.stringify({ position: siguienteAlHecho }),
+  });
+  await loadGymBlocks();
+}
+
+// --- Ciclo de dias de un bloque ---------------------------------------
+//
+// Un bloque puede repetirse en ciclo: "dia 1 Empuje, dia 2 Tiron, dia 3
+// descanso, y vuelta a empezar". Se edita como una LISTA ordenada de
+// posiciones, cada una con un desplegable propio de la app (nunca un
+// <select> nativo, regla del proyecto) donde eliges un dia del bloque o
+// "Descanso".
+//
+// El borrador vive aparte del bloque guardado para que Cancelar de
+// verdad descarte, igual que el nombre.
+let gymCicloBloqueId = null;
+let gymCicloBorrador = [];
+// Por que posicion del ciclo vas HOY. Es parte del borrador como todo lo
+// demas: se elige aqui y se manda al guardar, no al vuelo.
+let gymCicloHoyBorrador = null;
+let gymCicloHoyField = null;
+// Los desplegables se guardan para poder leerlos, y se recrean enteros
+// en cada repintado (como el resto de listas de este formulario): asi
+// las flechas de los extremos se apagan solas y los indices de los
+// listeners vuelven a cuadrar.
+let gymCicloCampos = [];
+
+function gymCicloDiasDelBloque() {
+  if (!gymCicloBloqueId) return [];
+  return state.gymRoutines.filter((r) => r.blockId === gymCicloBloqueId);
+}
+
+function renderGymCicloEditor() {
+  const encendido = document.getElementById('gym-block-cycle-enabled').checked;
+  const wrap = document.getElementById('gym-block-cycle-wrap');
+  wrap.classList.toggle('hidden', !encendido || !gymCicloBloqueId);
+  const lista = document.getElementById('gym-block-cycle-list');
+  lista.innerHTML = '';
+  gymCicloCampos = [];
+  if (!encendido || !gymCicloBloqueId) return;
+
+  const dias = gymCicloDiasDelBloque();
+  const opciones = [
+    { value: '', label: 'Descanso' },
+    ...dias.map((d) => ({ value: String(d.id), label: d.name, color: d.color, icon: d.icon || '' })),
+  ];
+
+  gymCicloBorrador.forEach((pos, i) => {
+    const fila = document.createElement('div');
+    fila.className = 'gym-cycle-row';
+    fila.innerHTML = `
+      <span class="gym-cycle-row-num">Día ${i + 1}</span>
+      <div class="gym-cycle-row-field"></div>
+      <div class="gym-cycle-row-actions">
+        <button type="button" class="icon-btn" data-subir aria-label="Subir">↑</button>
+        <button type="button" class="icon-btn" data-bajar aria-label="Bajar">↓</button>
+        <button type="button" class="icon-btn" data-quitar aria-label="Quitar del ciclo">✕</button>
+      </div>
+    `;
+    const campo = createSelectField({
+      options: opciones,
+      initialValue: pos.routineId === null || pos.routineId === undefined ? '' : String(pos.routineId),
+      onChange: (v) => { pos.routineId = v === '' ? null : Number(v); actualizarResumenDelCiclo(); },
+    });
+    fila.querySelector('.gym-cycle-row-field').appendChild(campo.element);
+    gymCicloCampos.push(campo);
+    const subir = fila.querySelector('[data-subir]');
+    const bajar = fila.querySelector('[data-bajar]');
+    subir.disabled = i === 0;
+    bajar.disabled = i === gymCicloBorrador.length - 1;
+    subir.addEventListener('click', () => {
+      [gymCicloBorrador[i - 1], gymCicloBorrador[i]] = [gymCicloBorrador[i], gymCicloBorrador[i - 1]];
+      renderGymCicloEditor();
+    });
+    bajar.addEventListener('click', () => {
+      [gymCicloBorrador[i + 1], gymCicloBorrador[i]] = [gymCicloBorrador[i], gymCicloBorrador[i + 1]];
+      renderGymCicloEditor();
+    });
+    fila.querySelector('[data-quitar]').addEventListener('click', () => {
+      gymCicloBorrador.splice(i, 1);
+      renderGymCicloEditor();
+    });
+    lista.appendChild(fila);
+  });
+
+  if (gymCicloBorrador.length === 0) {
+    lista.innerHTML = '<p class="empty-hint">Todavía no has colocado ningún día. Añade tantos como dure tu ciclo.</p>';
+  }
+  actualizarResumenDelCiclo();
+  renderGymCicloHoyField(dias);
+}
+
+// El selector de "Hoy te toca". Se reconstruye entero en cada repintado,
+// como el resto de este formulario: las posiciones cambian al añadir,
+// quitar o mover filas, y las etiquetas tienen que seguirlas.
+function renderGymCicloHoyField(dias) {
+  const cont = document.getElementById('gym-block-cycle-hoy-field');
+  const etiqueta = document.querySelector('.gym-cycle-hoy-label');
+  if (!cont) return;
+  // Sin ciclo no hay nada por donde ir.
+  const hayCiclo = gymCicloBorrador.length > 0;
+  cont.classList.toggle('hidden', !hayCiclo);
+  if (etiqueta) etiqueta.classList.toggle('hidden', !hayCiclo);
+  const pista = cont.nextElementSibling;
+  if (pista && pista.classList.contains('hint')) pista.classList.toggle('hidden', !hayCiclo);
+  cont.innerHTML = '';
+  gymCicloHoyField = null;
+  if (!hayCiclo) return;
+
+  const opciones = gymCicloBorrador.map((pos, i) => {
+    const dia = pos.routineId == null ? null : dias.find((d) => d.id === pos.routineId);
+    return { value: String(i + 1), label: `Día ${i + 1} · ${dia ? dia.name : 'Descanso'}` };
+  });
+  // Si el ciclo se ha acortado por debajo de donde estabas, se vuelve al
+  // dia 1 en vez de dejar un valor que ya no existe.
+  if (!gymCicloHoyBorrador || gymCicloHoyBorrador > gymCicloBorrador.length) gymCicloHoyBorrador = 1;
+  gymCicloHoyField = createSelectField({
+    options: opciones,
+    initialValue: String(gymCicloHoyBorrador),
+    onChange: (v) => { gymCicloHoyBorrador = Number(v); },
+  });
+  cont.appendChild(gymCicloHoyField.element);
+}
+
+// Una linea en cristiano de lo que va a pasar, para no tener que
+// interpretar la lista de desplegables: "Ciclo de 3 días: Empuje ·
+// Tirón · Descanso".
+function actualizarResumenDelCiclo() {
+  const el = document.getElementById('gym-block-cycle-status');
+  if (!el) return;
+  if (gymCicloBorrador.length === 0) { el.textContent = ''; return; }
+  const dias = gymCicloDiasDelBloque();
+  const nombres = gymCicloBorrador.map((p) => {
+    if (p.routineId === null || p.routineId === undefined) return 'Descanso';
+    const d = dias.find((x) => x.id === p.routineId);
+    return d ? d.name : 'Descanso';
+  });
+  el.textContent = `Ciclo de ${gymCicloBorrador.length} día${gymCicloBorrador.length === 1 ? '' : 's'}: ${nombres.join(' · ')}`;
+}
+
+document.getElementById('gym-block-cycle-enabled').addEventListener('change', () => {
+  // Encenderlo con el ciclo vacio propone directamente una posicion por
+  // cada dia del bloque, que es lo que casi siempre se quiere.
+  if (document.getElementById('gym-block-cycle-enabled').checked && gymCicloBorrador.length === 0) {
+    gymCicloBorrador = gymCicloDiasDelBloque().map((d) => ({ routineId: d.id }));
+  }
+  renderGymCicloEditor();
+});
+document.getElementById('btn-gym-cycle-add').addEventListener('click', () => {
+  gymCicloBorrador.push({ routineId: null });
+  renderGymCicloEditor();
+});
+
+// --- Modal de bloque (rediseno de Gimnasio) ---------------------------
+// Un solo campo (el nombre), al estilo de la app de referencia. Activar
+// se hace desde la lista, no desde aqui.
+function openGymBlockModal(block) {
+  document.getElementById('gym-block-modal-title').textContent = block ? 'Editar bloque' : 'Nuevo bloque';
+  document.getElementById('gym-block-id').value = block ? block.id : '';
+  document.getElementById('gym-block-name').value = block ? block.name : '';
+  document.getElementById('btn-delete-gym-block').classList.toggle('hidden', !block);
+  // El ciclo se edita en el borrador gymCicloBorrador y solo se guarda al
+  // dar a Guardar, igual que el nombre: cancelar tiene que descartarlo.
+  gymCicloBloqueId = block ? block.id : null;
+  gymCicloBorrador = block && block.cycleDays ? block.cycleDays.map((d) => ({ routineId: d.routineId })) : [];
+  gymCicloHoyBorrador = block && block.cyclePosition ? block.cyclePosition : 1;
+  document.getElementById('gym-block-cycle-enabled').checked = !!(block && block.cycleEnabled);
+  // Un bloque que aun no existe no tiene dias que colocar en un ciclo:
+  // se esconde entero hasta que se guarde y se vuelva a abrir.
+  document.getElementById('gym-block-cycle-enabled').closest('.checkbox-row').classList.toggle('hidden', !block);
+  document.querySelector('#gym-block-modal .gym-cycle-heading').classList.toggle('hidden', !block);
+  renderGymCicloEditor();
+  document.getElementById('gym-block-modal').classList.remove('hidden');
+}
+function closeGymBlockModal() {
+  document.getElementById('gym-block-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-gym-block').addEventListener('click', () => openGymBlockModal(null));
+document.getElementById('btn-cancel-gym-block').addEventListener('click', closeGymBlockModal);
+document.getElementById('btn-close-gym-block').addEventListener('click', closeGymBlockModal);
+
+document.getElementById('gym-block-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('gym-block-id').value;
+  const payload = { name: document.getElementById('gym-block-name').value };
+  if (id) {
+    await api(`/api/gym-blocks/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    // El ciclo va en su propia llamada: es una lista entera que se
+    // reescribe, no un campo mas del bloque.
+    await api(`/api/gym-blocks/${id}/cycle`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled: document.getElementById('gym-block-cycle-enabled').checked,
+        days: gymCicloBorrador.map((p) => ({ routineId: p.routineId })),
+      }),
+    });
+    // Y por donde vas hoy, DESPUES de guardar el ciclo: la ruta rechaza
+    // una posicion que no exista, y las posiciones son las que acaban de
+    // guardarse. La fecha se pone a hoy sola, asi que un descanso elegido
+    // aqui se consume mañana, como cualquier otro.
+    if (gymCicloBorrador.length > 0) {
+      // Se recorta al rango de verdad ANTES de mandarla. Sin esto, una
+      // posicion imposible hacia que la ruta lanzara y el error se
+      // llevaba por delante TODO lo que viene despues -- el modal se
+      // quedaba abierto y la lista sin refrescar, aunque el ciclo si se
+      // hubiera guardado. Encontrado forzando fallos.
+      const posicion = Math.min(Math.max(1, Number(gymCicloHoyBorrador) || 1), gymCicloBorrador.length);
+      try {
+        await api(`/api/gym-blocks/${id}/cycle/position`, {
+          method: 'POST',
+          body: JSON.stringify({ position: posicion }),
+        });
+      } catch (err) {
+        // Que no se pueda mover el cursor no es motivo para no guardar el
+        // ciclo, que es lo importante: se avisa y se sigue.
+        showAppAlert('El ciclo se ha guardado, pero no se ha podido cambiar por dónde vas hoy.');
+      }
+    }
+  } else {
+    await api('/api/gym-blocks', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeGymBlockModal();
+  await loadGymBlocks();
+  renderGymBlocksList();
+});
+
+document.getElementById('btn-delete-gym-block').addEventListener('click', async () => {
+  const id = Number(document.getElementById('gym-block-id').value);
+  const block = state.gymBlocks.find((b) => b.id === id);
+  const dayCount = block ? block.dayCount : 0;
+  // Borrar un bloque se lleva sus dias (plantillas), aunque nunca el
+  // historial de sesiones -- se avisa con el confirm propio de la app,
+  // no con el del navegador (regla del proyecto).
+  const ok = await showAppConfirm(
+    dayCount > 0
+      ? `¿Eliminar este bloque y ${dayCount === 1 ? 'su día' : `sus ${dayCount} días`}? Las sesiones ya registradas no se pierden.`
+      : '¿Eliminar este bloque?',
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/gym-blocks/${id}`, { method: 'DELETE' });
+  closeGymBlockModal();
+  await Promise.all([loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
+  renderGymBlocksList();
+  renderGymSessionsList();
+});
+
+// --- Modal de dia (antes "rutina" -- ids gym-routine-* conservados) ---
 // El color/icono usan createColorField/createIconField (definidas en
 // settings.js, que se carga DESPUES de app.js) -- construirlas aqui
 // arriba, al analizar el archivo, fallaria (esas funciones todavia no
@@ -8684,15 +12608,22 @@ function ensureGymRoutineFieldsReady() {
   document.getElementById('gym-routine-icon-field').appendChild(gymRoutineIconField.element);
 }
 
-// Construye las opciones <option> de un <select> nativo con la
-// biblioteca de ejercicios -- se usa tanto en filas de rutina como de
-// sesion. Nativo a proposito (no el select-field a medida): estas filas
-// se repiten un numero variable de veces, y un <select> normal no
-// necesita gestionar su propio popover por cada copia.
-function gymExerciseOptionsHtml(selectedId) {
-  return state.gymExercises
-    .map((ex) => `<option value="${ex.id}" ${Number(selectedId) === ex.id ? 'selected' : ''}>${escapeHtml(ex.name)}</option>`)
-    .join('');
+// Las opciones para el selector PROPIO con buscador (createSelectField),
+// que sustituyo a los <select> nativos de estas filas.
+//
+// Se ve SOLO el nombre (peticion de Koku: "deja solo el nombre, el
+// musculo no hace falta que aparezca... ten en cuenta que muchos
+// ejercicios a veces ya llevan el musculo en el nombre" -- "Curl de
+// Biceps · Biceps" se leia repetido). Pero el musculo y el material
+// siguen viajando en `keywords`, que el buscador SI mira: escribir
+// "pierna" sigue sacando todas las de pierna aunque ninguna se llame
+// asi, sin ensuciar la lista.
+function gymExerciseSelectOptions() {
+  return state.gymExercises.map((ex) => ({
+    value: String(ex.id),
+    label: ex.name,
+    keywords: [gymMuscleGroupLabel(ex.muscleGroup) || '', ex.equipment || ''].filter(Boolean).join(' '),
+  }));
 }
 
 function renderGymRoutineExercisesField() {
@@ -8704,17 +12635,74 @@ function renderGymRoutineExercisesField() {
   }
   gymRoutineModalExercises.forEach((row, index) => {
     const rowEl = document.createElement('div');
-    rowEl.className = 'gym-routine-exercise-row';
+    rowEl.className = 'gym-routine-exercise-row gym-routine-exercise-stacked' + (row.hidden ? ' gym-exercise-hidden' : '');
+    // El ojo oculta el ejercicio SIN quitarlo del dia: los entrenos nuevos
+    // no lo pre-cargan, pero se puede recuperar durante la sesion desde
+    // "Ejercicios ocultos" (peticion de Koku: aparcar sin borrar).
+    const eyeSvg = row.hidden
+      ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.8 9.8 0 0 1 12 5c5 0 9 4.5 10 7-.4 1-1.3 2.4-2.6 3.7M6.6 6.6C4.1 8.1 2.5 10.4 2 12c1 2.5 5 7 10 7 1.5 0 2.9-.4 4.2-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>'
+      : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12c1-2.5 5-7 10-7s9 4.5 10 7c-1 2.5-5 7-10 7S3 14.5 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const restPreviewText = (seconds) => {
+      const n = Number(seconds);
+      return n > 0 ? `Descanso: ${gymLiveFormatClock(n)} min` : '';
+    };
+    // Subir / bajar el ejercicio dentro del dia (peticion de Koku: "por
+    // si me equivoco y pongo un ejercicio antes, no tener que moverlo
+    // cada vez"). Con flechas y no arrastrando: dentro de un modal que
+    // ya se desplaza, arrastrar una fila pelea con el scroll, y aqui lo
+    // que hace falta es colocar una cosa en su sitio, no reordenar una
+    // lista larga. Las flechas de los extremos se quedan apagadas.
+    const flechaArriba = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+    const flechaAbajo = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>';
+    const esPrimero = index === 0;
+    const esUltimo = index === gymRoutineModalExercises.length - 1;
     rowEl.innerHTML = `
-      <select data-field="exerciseId">${gymExerciseOptionsHtml(row.exerciseId)}</select>
-      <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
-      <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
-      <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" value="${row.targetRestSeconds ?? ''}" />
-      <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
+      <div class="gym-routine-exercise-name-row">
+        <div class="gym-routine-exercise-order">
+          <button type="button" class="icon-btn" data-field="subir" aria-label="Subir el ejercicio" title="Subir" ${esPrimero ? 'disabled' : ''}>${flechaArriba}</button>
+          <button type="button" class="icon-btn" data-field="bajar" aria-label="Bajar el ejercicio" title="Bajar" ${esUltimo ? 'disabled' : ''}>${flechaAbajo}</button>
+        </div>
+        <div class="gym-routine-exercise-picker"></div>
+        <button type="button" class="icon-btn" data-field="toggleHidden" aria-label="${row.hidden ? 'Mostrar en los entrenos' : 'Ocultar de los entrenos'}" title="${row.hidden ? 'Oculto: los entrenos nuevos no lo cargan. Tocar para mostrarlo.' : 'Ocultar de los entrenos nuevos (sin borrarlo del día)'}">${eyeSvg}</button>
+        <button type="button" class="icon-btn" data-field="remove" aria-label="Quitar ejercicio">✕</button>
+      </div>
+      <div class="gym-routine-exercise-targets-row">
+        <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
+        <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
+        <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" title="En segundos" value="${row.targetRestSeconds ?? ''}" />
+      </div>
+      <p class="hint gym-rest-preview">${restPreviewText(row.targetRestSeconds)}</p>
     `;
-    rowEl.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
-      gymRoutineModalExercises[index].exerciseId = Number(e.target.value);
+    // Selector propio CON BUSCADOR (peticion de Koku: con muchos
+    // ejercicios, un desplegable pelado es una odisea). Sustituye al
+    // <select> nativo que habia aqui, que ademas incumplia la regla del
+    // proyecto de no usar controles del navegador.
+    const picker = createSelectField({
+      options: gymExerciseSelectOptions(),
+      initialValue: row.exerciseId != null ? String(row.exerciseId) : '',
+      placeholder: 'Elige un ejercicio',
+      searchable: true,
+      onChange: (valor) => cambiarEjercicioDeLaFila(valor),
     });
+    rowEl.querySelector('.gym-routine-exercise-picker').appendChild(picker.element);
+    function cambiarEjercicioDeLaFila(valor) {
+      const anteriores = gymTargetsPorDefecto(gymRoutineModalExercises[index].exerciseId);
+      const nuevoId = Number(valor);
+      gymRoutineModalExercises[index].exerciseId = nuevoId;
+      // La fila pasa a ser OTRO ejercicio, asi que se traen sus valores
+      // por defecto -- pero solo en los campos que no hayas tocado tu.
+      // "No tocado" = vacio, o igual a lo que traia el ejercicio
+      // anterior. Asi cambiar de ejercicio no te borra un 4x8 que
+      // habias escrito a mano, y a la vez no te deja el descanso del
+      // ejercicio de antes puesto sin querer.
+      const nuevos = gymTargetsPorDefecto(nuevoId);
+      GYM_TARGET_FIELDS.forEach(({ enElDia }) => {
+        const actual = gymRoutineModalExercises[index][enElDia];
+        const sinTocar = actual === '' || actual == null || String(actual) === String(anteriores[enElDia]);
+        if (sinTocar) gymRoutineModalExercises[index][enElDia] = nuevos[enElDia];
+      });
+      renderGymRoutineExercisesField();
+    }
     rowEl.querySelector('[data-field="targetSets"]').addEventListener('input', (e) => {
       gymRoutineModalExercises[index].targetSets = e.target.value;
     });
@@ -8723,41 +12711,118 @@ function renderGymRoutineExercisesField() {
     });
     rowEl.querySelector('[data-field="targetRestSeconds"]').addEventListener('input', (e) => {
       gymRoutineModalExercises[index].targetRestSeconds = e.target.value;
+      // Vista previa en vivo del descanso ("90" -> "1:30 min"): el campo
+      // esta en segundos y no se notaba (feedback de Koku).
+      rowEl.querySelector('.gym-rest-preview').textContent = restPreviewText(e.target.value);
     });
-    rowEl.querySelector('button').addEventListener('click', () => {
+    rowEl.querySelector('[data-field="toggleHidden"]').addEventListener('click', () => {
+      gymRoutineModalExercises[index].hidden = !gymRoutineModalExercises[index].hidden;
+      renderGymRoutineExercisesField();
+    });
+    rowEl.querySelector('[data-field="remove"]').addEventListener('click', () => {
       gymRoutineModalExercises.splice(index, 1);
       renderGymRoutineExercisesField();
     });
+    // Intercambiar con el vecino. Se repinta la lista entera (como hace
+    // todo este formulario) en vez de mover nodos a mano: asi las
+    // flechas de los extremos se apagan/encienden solas y los indices de
+    // los listeners vuelven a cuadrar.
+    const mover = (destino) => {
+      const [fila] = gymRoutineModalExercises.splice(index, 1);
+      gymRoutineModalExercises.splice(destino, 0, fila);
+      renderGymRoutineExercisesField();
+    };
+    if (!esPrimero) rowEl.querySelector('[data-field="subir"]').addEventListener('click', () => mover(index - 1));
+    if (!esUltimo) rowEl.querySelector('[data-field="bajar"]').addEventListener('click', () => mover(index + 1));
     container.appendChild(rowEl);
   });
 }
 
+// Los tres campos del dia y de donde sale cada uno en la ficha del
+// ejercicio. En una sola lista para no repetir el trio por todas
+// partes.
+const GYM_TARGET_FIELDS = [
+  { enElDia: 'targetSets', porDefecto: 'defaultSets' },
+  { enElDia: 'targetReps', porDefecto: 'defaultReps' },
+  { enElDia: 'targetRestSeconds', porDefecto: 'defaultRestSeconds' },
+];
+
+// La configuracion por defecto de un ejercicio, lista para copiar en una
+// fila del dia. Lo que no tenga valor se queda vacio, como antes.
+function gymTargetsPorDefecto(exerciseId) {
+  const ej = state.gymExercises.find((x) => x.id === Number(exerciseId));
+  const fila = {};
+  GYM_TARGET_FIELDS.forEach(({ enElDia, porDefecto }) => {
+    fila[enElDia] = ej && ej[porDefecto] != null ? ej[porDefecto] : '';
+  });
+  return fila;
+}
+
 document.getElementById('btn-add-gym-routine-exercise').addEventListener('click', () => {
   if (state.gymExercises.length === 0) {
-    alert('Primero crea al menos un ejercicio en la lista de abajo.');
+    showAppAlert('Primero crea al menos un ejercicio (pestaña Plan, lista de abajo).');
     return;
   }
-  gymRoutineModalExercises.push({ exerciseId: state.gymExercises[0].id, targetSets: '', targetReps: '', targetRestSeconds: '' });
+  // Llega ya configurado con lo que suelas hacer con el (peticion de
+  // Koku): series, reps y descanso salen de la ficha del ejercicio.
+  const id = state.gymExercises[0].id;
+  gymRoutineModalExercises.push({ exerciseId: id, ...gymTargetsPorDefecto(id), hidden: false });
   renderGymRoutineExercisesField();
 });
 
-function openGymRoutineModal(routine) {
+// Selector de bloque del dia: createSelectField vive en este mismo
+// archivo, asi que se puede construir ya al analizarlo (igual que el de
+// rutina del modal de sesion, mas abajo). Las opciones se rellenan al
+// abrir el modal, que es cuando state.gymBlocks ya esta cargado.
+const gymRoutineBlockField = createSelectField({
+  options: [],
+  initialValue: '',
+  placeholder: 'Elige un bloque',
+});
+document.getElementById('gym-routine-block-field').appendChild(gymRoutineBlockField.element);
+
+// modo: 'ficha' (nombre, color, icono y bloque) o 'ejercicios' (solo lo
+// que hay dentro del dia). Un dia NUEVO se abre siempre en 'ficha' --
+// hasta que no tiene nombre no hay a que anadirle ejercicios.
+function openGymRoutineModal(routine, modo = 'ficha') {
   ensureGymRoutineFieldsReady();
-  document.getElementById('gym-routine-modal-title').textContent = routine ? 'Editar rutina' : 'Nueva rutina';
+  if (!routine) modo = 'ficha';
+  const soloEjercicios = modo === 'ejercicios';
+  document.getElementById('gym-routine-ficha').classList.toggle('hidden', soloEjercicios);
+  document.getElementById('gym-routine-ejercicios').classList.toggle('hidden', !soloEjercicios);
+  // OJO con el "required" del nombre: un campo obligatorio que esta
+  // OCULTO no se puede enfocar, y el navegador se niega a enviar el
+  // formulario entero con un "invalid form control is not focusable"
+  // -- sin decir nada por pantalla. Como en el modo ejercicios el
+  // nombre sigue relleno (se rellena igual mas abajo, solo que no se
+  // ve) y se manda tal cual, aqui basta con quitarle el required
+  // mientras esta escondido.
+  document.getElementById('gym-routine-name').required = !soloEjercicios;
+  document.getElementById('gym-routine-modal-title').textContent = routine
+    ? (soloEjercicios ? `Ejercicios de ${routine.name}` : 'Editar día')
+    : 'Nuevo día';
   document.getElementById('gym-routine-id').value = routine ? routine.id : '';
   document.getElementById('gym-routine-name').value = routine ? routine.name : '';
   gymRoutineColorField.setValue(routine ? routine.color : '#5b8cff');
   gymRoutineIconField.setValue(routine ? routine.icon || '' : '');
+  // El selector de bloque se repuebla en cada apertura; por defecto, el
+  // bloque cuyo listado esta abierto (o el del propio dia al editar).
+  gymRoutineBlockField.setOptions(state.gymBlocks.map((b) => ({ value: String(b.id), label: b.name })));
+  const defaultBlockId = routine ? routine.blockId : gymCurrentBlockId;
+  gymRoutineBlockField.setValue(defaultBlockId ? String(defaultBlockId) : '');
   gymRoutineModalExercises = routine
     ? routine.exercises.map((ex) => ({
         exerciseId: ex.exerciseId,
         targetSets: ex.targetSets ?? '',
         targetReps: ex.targetReps ?? '',
         targetRestSeconds: ex.targetRestSeconds ?? '',
+        hidden: !!ex.hidden,
       }))
     : [];
   renderGymRoutineExercisesField();
-  document.getElementById('btn-delete-gym-routine').classList.toggle('hidden', !routine);
+  // "Eliminar el dia" solo desde su ficha: en la mitad de ejercicios
+  // seria facil confundirlo con "quitar este ejercicio".
+  document.getElementById('btn-delete-gym-routine').classList.toggle('hidden', !routine || soloEjercicios);
   document.getElementById('gym-routine-modal').classList.remove('hidden');
 }
 function closeGymRoutineModal() {
@@ -8774,6 +12839,7 @@ document.getElementById('gym-routine-form').addEventListener('submit', async (e)
     name: document.getElementById('gym-routine-name').value,
     color: gymRoutineColorField.getValue(),
     icon: gymRoutineIconField.getValue(),
+    blockId: gymRoutineBlockField.getValue() ? Number(gymRoutineBlockField.getValue()) : null,
     exercises: gymRoutineModalExercises,
   };
   if (id) {
@@ -8782,16 +12848,22 @@ document.getElementById('gym-routine-form').addEventListener('submit', async (e)
     await api('/api/gym-routines', { method: 'POST', body: JSON.stringify(payload) });
   }
   closeGymRoutineModal();
-  await loadGymRoutines();
+  // Los bloques tambien se recargan: el contador de dias de la tarjeta
+  // cambia si el dia es nuevo o se ha movido de bloque.
+  await Promise.all([loadGymRoutines(), loadGymBlocks()]);
   renderGymRoutinesList();
+  renderGymBlocksList();
 });
 
 document.getElementById('btn-delete-gym-routine').addEventListener('click', async () => {
   const id = document.getElementById('gym-routine-id').value;
+  const ok = await showAppConfirm('¿Eliminar este día? Las sesiones ya registradas con él no se pierden.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
   await api(`/api/gym-routines/${id}`, { method: 'DELETE' });
   closeGymRoutineModal();
-  await Promise.all([loadGymRoutines(), loadGymSessions()]);
+  await Promise.all([loadGymRoutines(), loadGymBlocks(), loadGymSessions()]);
   renderGymRoutinesList();
+  renderGymBlocksList();
   renderGymSessionsList();
 });
 
@@ -8805,7 +12877,7 @@ const gymSessionDateField = createDateField({ initialValue: new Date() });
 document.getElementById('gym-session-date-field').appendChild(gymSessionDateField.element);
 
 const gymSessionRoutineField = createSelectField({
-  options: [{ value: '', label: 'Sesion libre (sin rutina)' }],
+  options: [{ value: '', label: 'Sesión libre (sin día)' }],
   initialValue: '',
   onChange: (routineId) => {
     if (!routineId) return;
@@ -8844,6 +12916,12 @@ document.getElementById('gym-session-routine-field').appendChild(gymSessionRouti
 // una a una.
 let gymSessionModalExercises = [];
 
+// Que ejercicios del modal de historial estan RECOGIDOS, por indice.
+// Peticion de Koku: "me gustaria que los ejercicios en historial tambien
+// tuvieran lo de desplegar y recoger, seria mas comodo a la hora de
+// modificar cosas". Se vacia al abrir el modal.
+let gymSessionExercisesCollapsed = new Set();
+
 function renderGymSessionExercisesField() {
   const container = document.getElementById('gym-session-exercises-field');
   container.innerHTML = '';
@@ -8855,17 +12933,47 @@ function renderGymSessionExercisesField() {
     const block = document.createElement('div');
     block.className = 'gym-session-exercise-block';
 
+    const recogido = gymSessionExercisesCollapsed.has(exIndex);
+    block.classList.toggle('collapsed', recogido);
+
     const header = document.createElement('div');
     header.className = 'gym-routine-exercise-row';
+    // El RPE es UNO por ejercicio (peticion de Koku), no por serie: vive
+    // aqui en la cabecera. Ademas, sacandolo de las filas de serie estas
+    // dejan de desbordarse en pantallas estrechas (el RPE se salia).
     header.innerHTML = `
-      <select data-field="exerciseId">${gymExerciseOptionsHtml(exRow.exerciseId)}</select>
+      <button type="button" class="icon-btn gym-session-caret" data-plegar aria-label="${recogido ? 'Desplegar' : 'Recoger'} ejercicio" aria-expanded="${recogido ? 'false' : 'true'}">▾</button>
+      <div class="gym-routine-exercise-picker"></div>
+      <span class="gym-list-item-muted gym-session-set-count">${exRow.sets.length}</span>
+      <input type="number" data-field="exRpe" placeholder="RPE" min="1" max="10" step="0.5" title="RPE del ejercicio" value="${exRow.rpe ?? ''}" />
       <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
     `;
-    header.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
-      gymSessionModalExercises[exIndex].exerciseId = Number(e.target.value);
+    header.querySelector('[data-plegar]').addEventListener('click', () => {
+      if (gymSessionExercisesCollapsed.has(exIndex)) gymSessionExercisesCollapsed.delete(exIndex);
+      else gymSessionExercisesCollapsed.add(exIndex);
+      renderGymSessionExercisesField();
     });
-    header.querySelector('button').addEventListener('click', () => {
+    // Mismo selector con buscador que en el dia del plan.
+    const pickerSesion = createSelectField({
+      options: gymExerciseSelectOptions(),
+      initialValue: exRow.exerciseId != null ? String(exRow.exerciseId) : '',
+      placeholder: 'Elige un ejercicio',
+      searchable: true,
+      onChange: (valor) => { gymSessionModalExercises[exIndex].exerciseId = Number(valor); },
+    });
+    header.querySelector('.gym-routine-exercise-picker').appendChild(pickerSesion.element);
+    header.querySelector('[data-field="exRpe"]').addEventListener('input', (e) => {
+      gymSessionModalExercises[exIndex].rpe = e.target.value;
+    });
+    header.querySelector('[aria-label="Quitar ejercicio"]').addEventListener('click', async () => {
+      // Quitar un ejercicio aqui borra sus series apuntadas: confirmacion
+      // (peticion de Koku, "seguro que quieres quitar...").
+      const ok = await showAppConfirm('¿Quitar este ejercicio de la sesión, con sus series apuntadas?', { okText: 'Quitar', danger: true });
+      if (!ok) return;
       gymSessionModalExercises.splice(exIndex, 1);
+      // Los indices se corren al quitar uno: se olvida que estaba
+      // recogido, si no el plegado se le quedaria al de al lado.
+      gymSessionExercisesCollapsed = new Set();
       renderGymSessionExercisesField();
     });
     block.appendChild(header);
@@ -8873,29 +12981,77 @@ function renderGymSessionExercisesField() {
     const setsList = document.createElement('div');
     setsList.className = 'gym-session-sets-list';
     exRow.sets.forEach((set, setIndex) => {
-      const setRow = document.createElement('div');
-      setRow.className = 'gym-session-set-row';
-      setRow.innerHTML = `
-        <span class="gym-session-set-number">Serie ${setIndex + 1}</span>
-        <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
-        <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
-        <input type="number" data-field="restSeconds" placeholder="Descanso (s)" min="0" value="${set.restSeconds ?? ''}" />
-        <button type="button" class="icon-btn" aria-label="Quitar serie">✕</button>
+      // Cada serie es un BLOQUE con el mismo formato que los tramos:
+      // cabecera arriba y campos con su etiqueta encima. Antes era una
+      // fila apretada con rotulos dentro de los campos y una ristra de
+      // chips en el numero, y se rompia: Koku vio "Serie 1 2 min R-P"
+      // partido en dos lineas y el "Drop" comiendose la casilla de las
+      // repeticiones. Aqui cada cosa tiene su sitio y su nombre.
+      const bloqueSerie = document.createElement('div');
+      bloqueSerie.className = 'gym-exercise-edit-set';
+      const unidad = getGymWeightUnitLabel();
+      // En la cabecera solo lo que NO se ve ya en otro sitio: el lado, lo
+      // que duro y el descanso extra. El "Drop"/"R-P" NO se repite -- se
+      // ve entero en su editor, justo debajo (peticion de Koku: "si tengo
+      // el menu para ver la dropset, no hace falta que me lo indiques en
+      // la serie, ya lo veo").
+      bloqueSerie.innerHTML = `
+        <div class="gym-set-segment-head">
+          <span class="gym-set-segment-tag">${setIndex + 1}</span>
+          <span class="gym-set-segment-name">Serie${set.side ? ` · lado ${gymSideLabel(set.side)}` : ''}</span>
+          ${set.setType === 'failure' ? `<span class="gym-set-failure-chip" title="Serie llevada al fallo">Fallo</span>` : ''}
+          <span class="gym-set-head-dur" title="Lo que duró la serie">${set.durationSeconds ? `Duración: ${gymFormatSetDuration(set.durationSeconds)}` : ''}</span>
+          <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar serie">✕</button>
+        </div>
+        <div class="gym-set-segment-fields">
+          <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><input type="number" data-field="weight" min="0" step="0.5" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
+          <label class="gym-set-segment-field"><span>Reps</span><input type="number" data-field="reps" min="0" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
+          <!-- El "+60s" va PEGADO al descanso, no a la duracion: es
+               descanso extra que se anadio con el boton +30s, y colgando
+               de la duracion parecia que la serie habia durado mas
+               (lo vio Koku). -->
+          <label class="gym-set-segment-field"><span>Descanso (s)${set.extraRestSeconds ? ` <span class="gym-set-extra-chip" title="Añadido con +30s durante el entreno">+${set.extraRestSeconds}</span>` : ''}</span><input type="number" data-field="restSeconds" min="0" value="${escapeHtml(String(set.restSeconds ?? ''))}" /></label>
+        </div>
+        ${set.notes ? `<p class="gym-live-card-meta">${escapeHtml(set.notes)}</p>` : ''}
+        <div class="gym-set-segments" data-seg-editor="${exIndex}-${setIndex}"></div>
+        <div class="gym-set-extend-list gym-session-set-actions"></div>
       `;
-      setRow.querySelector('[data-field="reps"]').addEventListener('input', (e) => {
-        set.reps = e.target.value;
-      });
-      setRow.querySelector('[data-field="weight"]').addEventListener('input', (e) => {
-        set.weightDisplay = e.target.value;
-      });
-      setRow.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => {
-        set.restSeconds = e.target.value;
-      });
-      setRow.querySelector('button').addEventListener('click', () => {
+      bloqueSerie.querySelector('[data-field="reps"]').addEventListener('input', (e) => { set.reps = e.target.value; });
+      bloqueSerie.querySelector('[data-field="weight"]').addEventListener('input', (e) => { set.weightDisplay = e.target.value; });
+      bloqueSerie.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => { set.restSeconds = e.target.value; });
+      bloqueSerie.querySelector('[data-quitar-serie]').addEventListener('click', () => {
         exRow.sets.splice(setIndex, 1);
         renderGymSessionExercisesField();
       });
-      setsList.appendChild(setRow);
+
+      // Los tramos, EDITABLES tambien aqui (peticion de Koku: "a lo mejor
+      // le he dado a acabar y se me ha olvidado darle a que he hecho
+      // alguna o le he dado mal al peso"). Mismo editor que el del
+      // entreno en vivo, montado sobre este contenedor.
+      const editor = bloqueSerie.querySelector('[data-seg-editor]');
+      const acciones = bloqueSerie.querySelector('.gym-session-set-actions');
+      if (!Array.isArray(set.segments)) set.segments = [];
+      const pintarTramos = () => montarEditorDeTramos(editor, set.segments, {
+        pesoMadre: bloqueSerie.querySelector('[data-field="weight"]').value || '',
+        alQuitar: () => pintarTramos(),
+      });
+      acciones.innerHTML = `
+        <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
+        <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
+        <button type="button" class="gym-set-extend-btn${set.setType === 'failure' ? ' is-on' : ''}" data-toggle-failure>${set.setType === 'failure' ? '✓ ' : ''}Al fallo</button>
+      `;
+      acciones.querySelectorAll('[data-add-seg]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          set.segments.push({ kind: btn.dataset.addSeg, weightDisplay: '', reps: '', pauseSeconds: '' });
+          pintarTramos();
+        });
+      });
+      acciones.querySelector('[data-toggle-failure]').addEventListener('click', () => {
+        set.setType = set.setType === 'failure' ? null : 'failure';
+        renderGymSessionExercisesField();
+      });
+      pintarTramos();
+      setsList.appendChild(bloqueSerie);
     });
     block.appendChild(setsList);
 
@@ -8908,7 +13064,7 @@ function renderGymSessionExercisesField() {
       // (suele ser el mismo entre series seguidas) -- reps/peso se dejan
       // en blanco, varian serie a serie.
       const lastSet = exRow.sets[exRow.sets.length - 1];
-      exRow.sets.push({ reps: '', weightDisplay: '', restSeconds: lastSet ? lastSet.restSeconds : '' });
+      exRow.sets.push({ reps: '', weightDisplay: '', restSeconds: lastSet ? lastSet.restSeconds : '', extraRestSeconds: null, segments: [], setType: null });
       renderGymSessionExercisesField();
     });
     block.appendChild(addSetBtn);
@@ -8919,10 +13075,10 @@ function renderGymSessionExercisesField() {
 
 document.getElementById('btn-add-gym-session-exercise').addEventListener('click', () => {
   if (state.gymExercises.length === 0) {
-    alert('Primero crea al menos un ejercicio desde la pestaña Rutinas.');
+    showAppAlert('Primero crea al menos un ejercicio desde la pestaña Plan.');
     return;
   }
-  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, sets: [{ reps: '', weightDisplay: '', restSeconds: '' }] });
+  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, rpe: '', sets: [{ reps: '', weightDisplay: '', restSeconds: '', segments: [], setType: null }] });
   renderGymSessionExercisesField();
 });
 
@@ -8933,7 +13089,7 @@ function openGymSessionModal(session) {
   document.getElementById('gym-session-notes').value = session ? session.notes || '' : '';
 
   gymSessionRoutineField.setOptions([
-    { value: '', label: 'Sesion libre (sin rutina)' },
+    { value: '', label: 'Sesión libre (sin día)' },
     ...state.gymRoutines.map((r) => ({ value: String(r.id), label: r.name, color: r.color, icon: r.icon })),
   ]);
   gymSessionRoutineField.setValue(session && session.routineId ? String(session.routineId) : '');
@@ -8942,26 +13098,59 @@ function openGymSessionModal(session) {
     // Reagrupa las series planas que devuelve el servidor (una fila por
     // serie) en un bloque por ejercicio, tal y como lo edita el modal.
     const byExercise = new Map();
+    // El RPE por ejercicio: el primero no vacio de sus series (todas
+    // llevan el mismo desde que el RPE es por ejercicio; las sesiones
+    // antiguas con RPEs distintos ensenan el primero).
+    const rpeByExercise = new Map();
     session.sets.forEach((set) => {
       if (!byExercise.has(set.exerciseId)) byExercise.set(set.exerciseId, []);
+      if (set.rpe != null && !rpeByExercise.has(set.exerciseId)) rpeByExercise.set(set.exerciseId, set.rpe);
       byExercise.get(set.exerciseId).push({
         reps: set.reps ?? '',
         weightDisplay: gymWeightKgToDisplay(set.weightKg),
         restSeconds: set.restSeconds ?? '',
+        extraRestSeconds: set.extraRestSeconds ?? null,
+        // Se arrastran tal cual: editar una sesion a mano no debe borrar
+        // lo que duraron sus series, su lado ni sus notas.
+        durationSeconds: set.durationSeconds ?? null,
+        side: set.side ?? null,
+        notes: set.notes ?? null,
+        // Los tramos de una serie alargada se arrastran tal cual (en kg,
+        // como llegan): aqui solo se VEN, se editan en el entreno. Lo
+        // importante es que editar una sesion a mano no los borre.
+        // En unidades de PANTALLA, igual que weightDisplay de la serie:
+        // el editor de tramos trabaja siempre asi y convierte al guardar.
+        segments: (set.segments || []).map((seg) => ({
+          kind: seg.kind,
+          reps: seg.reps ?? '',
+          weightDisplay: seg.weightKg != null ? gymWeightKgToDisplay(seg.weightKg) : '',
+          pauseSeconds: seg.pauseSeconds ?? '',
+        })),
+        // Y lo mismo con el tipo de serie ('failure', 'warmup'...): antes
+        // no viajaba y editar una sesion a mano lo borraba sin avisar.
+        setType: set.setType ?? null,
       });
     });
-    gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets }));
+    gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets, rpe: rpeByExercise.get(exerciseId) ?? '' }));
+    gymSessionExercisesCollapsed = new Set();
   } else {
     gymSessionModalExercises = [];
   }
   renderGymSessionExercisesField();
 
   document.getElementById('btn-delete-gym-session').classList.toggle('hidden', !session);
-  document.getElementById('gym-session-modal').classList.remove('hidden');
+  const modalSesion = document.getElementById('gym-session-modal');
+  delete modalSesion.dataset.sucio;
+  modalSesion.classList.remove('hidden');
 }
 function closeGymSessionModal() {
   document.getElementById('gym-session-modal').classList.add('hidden');
 }
+cerrarModalAlTocarFuera(
+  'gym-session-modal',
+  closeGymSessionModal,
+  () => document.getElementById('gym-session-modal').dataset.sucio === '1',
+);
 document.getElementById('btn-new-gym-session').addEventListener('click', () => openGymSessionModal(null));
 document.getElementById('btn-cancel-gym-session').addEventListener('click', closeGymSessionModal);
 document.getElementById('btn-close-gym-session').addEventListener('click', closeGymSessionModal);
@@ -8975,13 +13164,30 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
   // decide el numero de serie (ver replaceSessionSets en
   // routes/gymSessions.js), asi que se manda tal cual esta en pantalla.
   const sets = [];
-  gymSessionModalExercises.forEach((exRow) => {
-    exRow.sets.forEach((set) => {
+  gymSessionModalExercises.forEach((exRow, exIndex) => {
+    exRow.sets.forEach((set, setIndex) => {
       sets.push({
         exerciseId: exRow.exerciseId,
         reps: set.reps,
         weightKg: gymWeightDisplayToKg(set.weightDisplay),
+        rpe: exRow.rpe,
         restSeconds: set.restSeconds,
+        extraRestSeconds: set.extraRestSeconds ?? null,
+        durationSeconds: set.durationSeconds ?? null,
+        side: set.side ?? null,
+        notes: set.notes ?? null,
+        // Se leen del DOM y no del array: un tramo recien anadido puede
+        // tener el peso en blanco confiando en la sugerencia gris, y esa
+        // solo existe ahi (mismo criterio que en el entreno en vivo).
+        segments: gymLeerTramosDe(
+          document.querySelector(`#gym-session-exercises-field [data-seg-editor="${exIndex}-${setIndex}"]`),
+        ).map((seg) => ({
+          kind: seg.kind,
+          reps: seg.reps,
+          weightKg: gymWeightDisplayToKg(seg.weightDisplay),
+          pauseSeconds: seg.pauseSeconds,
+        })),
+        setType: set.setType ?? null,
       });
     });
   });
@@ -9000,15 +13206,675 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
   await loadGymSessions();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+  checkGymAchievements();
 });
 
 document.getElementById('btn-delete-gym-session').addEventListener('click', async () => {
   const id = document.getElementById('gym-session-id').value;
+  // Borrar una sesion SI pierde historial de verdad (sus series) -- de
+  // ahi el confirm, a diferencia de plantillas como bloques/dias.
+  const ok = await showAppConfirm('¿Eliminar esta sesión y todas sus series? Esto sí borra historial.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
   await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
   closeGymSessionModal();
   await loadGymSessions();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+});
+
+// --- Progreso avanzado (Fase 5 del rediseno) --------------------------
+// Consistencia (heatmap estilo GitHub + racha semanal con objetivo),
+// PRs por ejercicio (mejor peso + 1RM estimado con la formula de Epley)
+// y volumen semanal apilado por grupo muscular. Todo calculado en
+// cliente: el heatmap/racha desde GET /summary (ligero, sin series) y
+// PRs/volumen desde state.gymSessions, que ya esta cargado entero.
+
+// Lunes de la semana ISO de una fecha, como clave 'YYYY-MM-DD' -- las
+// semanas del objetivo/racha/volumen empiezan en lunes (es-ES).
+function gymWeekStartKey(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = (d.getDay() + 6) % 7; // lunes = 0 ... domingo = 6
+  d.setDate(d.getDate() - day);
+  return toDateKey(d);
+}
+
+// Objetivo de sesiones por semana: ajuste por dispositivo, como la
+// unidad de peso (no viaja con los datos).
+function getGymWeeklyGoal() {
+  const stored = Number(localStorage.getItem('gymWeeklyGoal'));
+  return stored >= 1 && stored <= 7 ? stored : 3;
+}
+const gymWeeklyGoalField = createSelectField({
+  options: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: String(n), label: `${n} ${n === 1 ? 'sesión' : 'sesiones'} / semana` })),
+  initialValue: String(getGymWeeklyGoal()),
+  onChange: (value) => {
+    localStorage.setItem('gymWeeklyGoal', value);
+    renderGymProgressSections();
+  },
+});
+document.getElementById('gym-weekly-goal-field').appendChild(gymWeeklyGoalField.element);
+
+// Cuanto pesa de mas una serie al fallo en el volumen. Ajuste por
+// dispositivo, como la unidad de peso y el objetivo semanal: no viaja
+// con los datos, y cambiarlo NO reescribe nada -- los kg guardados son
+// los reales y esto solo cambia como se suman al pintar.
+const gymFailureFactorField = createSelectField({
+  options: GYM_FAILURE_FACTORS.map((n) => ({
+    value: String(n),
+    label: n === 1 ? 'No contar de más (×1)' : `×${String(n).replace('.', ',')}`,
+  })),
+  initialValue: String(getGymFailureFactor()),
+  onChange: (value) => {
+    localStorage.setItem('gymFailureFactor', value);
+    renderGymProgressSections();
+    renderGymSessionsList();
+  },
+});
+document.getElementById('gym-failure-factor-field').appendChild(gymFailureFactorField.element);
+
+// Punto de entrada de toda la seccion: se llama al entrar en la pestana
+// Progreso (ver switchGymTab), no en cada apertura del Gimnasio.
+async function renderGymProgressSections() {
+  const summary = await api('/api/gym-sessions/summary');
+  renderGymConsistency(summary);
+  renderGymBodyMap();
+  renderGymPRs();
+  renderGymWeeklyVolume();
+}
+
+// La racha cuenta semanas SEGUIDAS cumpliendo el objetivo, empezando
+// por la semana pasada hacia atras; la semana en curso suma solo si ya
+// ha llegado al objetivo (que aun no lo haya hecho no rompe la racha).
+// Compartida entre la tarjeta de Consistencia y los logros.
+function gymComputeWeeklyStreak(sessionsByWeek, goal) {
+  const now = new Date();
+  let streak = (sessionsByWeek.get(gymWeekStartKey(now)) || 0) >= goal ? 1 : 0;
+  const probe = new Date(now);
+  probe.setDate(probe.getDate() - 7);
+  while ((sessionsByWeek.get(gymWeekStartKey(probe)) || 0) >= goal) {
+    streak += 1;
+    probe.setDate(probe.getDate() - 7);
+  }
+  return streak;
+}
+
+// Heatmap de consistencia: 26 semanas x 7 dias, intensidad = sesiones de
+// ese dia. UN solo tono (el morado del gym) de claro a oscuro -- un mapa
+// de magnitud siempre es un unico matiz escalonado, nunca varios colores.
+function renderGymConsistency(summary) {
+  const sessionsByDate = new Map();
+  for (const s of summary) {
+    sessionsByDate.set(s.date, (sessionsByDate.get(s.date) || 0) + 1);
+  }
+
+  // Estadisticas de arriba: dias entrenados, racha de semanas cumpliendo
+  // el objetivo, esta semana y este mes.
+  const goal = getGymWeeklyGoal();
+  const sessionsByWeek = new Map();
+  for (const s of summary) {
+    const week = gymWeekStartKey(new Date(`${s.date}T00:00:00`));
+    sessionsByWeek.set(week, (sessionsByWeek.get(week) || 0) + 1);
+  }
+  const now = new Date();
+  const thisWeekKey = gymWeekStartKey(now);
+  const thisWeekCount = sessionsByWeek.get(thisWeekKey) || 0;
+  const streak = gymComputeWeeklyStreak(sessionsByWeek, goal);
+  const monthPrefix = toDateKey(now).slice(0, 7);
+  const monthSessions = summary.filter((s) => s.date.startsWith(monthPrefix));
+  const monthCount = monthSessions.length;
+  // Tiempo REAL de trabajo del mes: suma de lo que duraron las series
+  // (solo cuenta lo registrado con el boton de empezar/terminar serie,
+  // asi que en sesiones apuntadas a mano sale 0 y no se ensena).
+  const monthWork = monthSessions.reduce((acc, s) => acc + (s.workSeconds || 0), 0);
+  // Series al fallo del mes: el "cuanto has apretado" al lado del
+  // "cuanto has entrenado" (peticion de Koku). Solo sale si hay alguna,
+  // para no ensenar un 0 permanente a quien no las marque.
+  const monthFailureSets = monthSessions.reduce((acc, s) => acc + (s.failureSetCount || 0), 0);
+
+  document.getElementById('gym-consistency-stats').innerHTML = `
+    <div class="gym-live-summary-grid gym-consistency-grid">
+      <div class="gym-live-summary-stat"><b>${sessionsByDate.size}</b><span>Días entrenados</span></div>
+      <div class="gym-live-summary-stat"><b>${streak}</b><span>Racha (semanas)</span></div>
+      <div class="gym-live-summary-stat"><b>${thisWeekCount}/${goal}</b><span>Esta semana</span></div>
+      <div class="gym-live-summary-stat"><b>${monthCount}</b><span>Este mes</span></div>
+      ${monthFailureSets > 0 ? `<div class="gym-live-summary-stat"><b>${monthFailureSets}</b><span>Series al fallo este mes</span></div>` : ''}
+      ${monthWork > 0 ? `<div class="gym-live-summary-stat gym-stat-wide"><b>${gymFormatWorkTime(monthWork)}</b><span>Tiempo de trabajo este mes</span></div>` : ''}
+    </div>
+  `;
+
+  // La rejilla: columnas = semanas (la actual a la derecha), filas =
+  // lunes a domingo. Celdas div con tooltip, no SVG (mas simple y el
+  // helper de tooltips funciona igual sobre cualquier elemento).
+  const WEEKS = 26;
+  const container = document.getElementById('gym-heatmap');
+  const firstMonday = new Date(`${thisWeekKey}T00:00:00`);
+  firstMonday.setDate(firstMonday.getDate() - (WEEKS - 1) * 7);
+  let cells = '';
+  for (let day = 0; day < 7; day++) {
+    for (let week = 0; week < WEEKS; week++) {
+      const cellDate = new Date(firstMonday);
+      cellDate.setDate(cellDate.getDate() + week * 7 + day);
+      if (cellDate > now) { cells += '<span class="gym-heatmap-cell future"></span>'; continue; }
+      const key = toDateKey(cellDate);
+      const count = sessionsByDate.get(key) || 0;
+      const level = count >= 2 ? 2 : count; // 0 / 1 / 2+
+      cells += `<span class="gym-heatmap-cell level-${level}" data-tooltip="${formatGymDate(key)}: ${count} sesión${count === 1 ? '' : 'es'}"></span>`;
+    }
+  }
+  container.innerHTML = `
+    <div class="gym-heatmap-grid" style="grid-template-columns: repeat(${WEEKS}, 1fr);">${cells}</div>
+    <div class="gym-heatmap-legend"><span class="gym-list-item-muted">Menos</span>
+      <span class="gym-heatmap-cell level-0"></span><span class="gym-heatmap-cell level-1"></span><span class="gym-heatmap-cell level-2"></span>
+      <span class="gym-list-item-muted">Más</span></div>
+  `;
+  attachFinanzasChartTooltips(container);
+}
+
+// --- Mapa de musculos (Fase 6 del rediseno, idea propia de Koku) ------
+// Dos siluetas dibujadas a medida (vista frontal y trasera) donde cada
+// zona es un grupo de GYM_MUSCLE_GROUPS y se colorea segun cuanto se ha
+// entrenado en la ventana elegida (7/30/90 dias), en series o volumen.
+// Los musculos SECUNDARIOS del ejercicio (si vino de la libreria)
+// puntuan a la mitad (x0.5) que el principal. El SVG se genera aqui
+// mismo (no es un archivo aparte) para poder usar las variables CSS del
+// tema en los rellenos; el dibujo es propio, sin assets de terceros.
+let gymMapWindowDays = 30;
+let gymMapMetric = 'series'; // 'series' | 'volume'
+document.querySelectorAll('[data-gym-map-window]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymMapWindowDays = Number(btn.dataset.gymMapWindow);
+    document.querySelectorAll('[data-gym-map-window]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderGymBodyMap();
+  });
+});
+document.querySelectorAll('[data-gym-map-metric]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymMapMetric = btn.dataset.gymMapMetric;
+    document.querySelectorAll('[data-gym-map-metric]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderGymBodyMap();
+  });
+});
+
+// Las zonas del cuerpo (v2): poligonos anatomicos por musculo portados
+// de react-body-highlighter (https://github.com/giavinh79/react-body-highlighter,
+// licencia MIT -- ¡gracias!), mucho mejor dibujados que las elipses de la
+// primera version. Cada entrada es un grupo de la taxonomia con sus
+// poligonos y a que figura pertenece (tx = desplazamiento horizontal:
+// 0 la frontal, 1120 la trasera). Los abductores no traen poligono en la
+// fuente, asi que sus dos parches de cadera externa son dibujo propio.
+const GYM_BODYMAP_ZONES = [
+  // -- figura FRONTAL --
+  { g: 'pecho', tx: 0, polys: ['518 416 510 551 580 580 678 555 706 473 620 416', '298 465 314 555 408 580 482 551 478 420 376 420'] },
+  { g: 'core', tx: 0, polys: [
+    '686 633 673 571 588 596 600 641 604 833 657 788 665 698',
+    '339 784 331 718 310 633 322 571 408 592 392 633 392 837',
+    '563 592 580 641 584 780 584 927 563 984 551 1041 514 1078 510 845 506 673 510 571',
+    '437 588 486 571 490 673 486 845 482 1073 445 1037 408 914 408 784 412 645',
+  ] },
+  { g: 'biceps', tx: 0, polys: ['167 682 180 714 229 661 290 539 278 494 204 559', '714 494 702 547 763 661 816 718 829 690 788 555'] },
+  { g: 'triceps', tx: 0, polys: ['694 555 694 616 759 727 776 702 755 673', '224 694 298 555 298 608 229 731'] },
+  { g: 'trapecio', tx: 0, polys: [
+    '555 237 506 335 506 392 616 400 706 449 694 367 633 351 584 306',
+    '290 449 302 371 363 351 412 302 445 245 490 339 486 392 380 396',
+  ] },
+  { g: 'hombros', tx: 0, polys: [
+    '784 531 796 478 792 412 759 380 710 363 722 429 714 473',
+    '282 473 212 531 200 478 204 408 245 371 286 371 269 433',
+  ] },
+  // (la fuente etiqueta esta zona interna del muslo como "abductors",
+  // pero anatomicamente es la de los ADUCTORES -- corregido aqui)
+  { g: 'aductores', tx: 0, polys: [
+    '527 1102 543 1249 600 1102 620 1000 649 943 600 927 567 1045',
+    '478 1106 449 1253 420 1159 404 1131 396 1073 380 1024 347 939 396 922 416 992 437 1053',
+  ] },
+  { g: 'cuadriceps', tx: 0, polys: [
+    '347 988 371 1082 371 1278 343 1371 310 1327 294 1200 282 1114 294 1008 322 947',
+    '633 1057 645 1000 669 947 702 1012 710 1118 682 1331 653 1376 624 1286 620 1114',
+    '388 1294 384 1122 412 1184 445 1294 429 1351 400 1461 363 1465 355 1400',
+    '596 1457 555 1290 608 1139 612 1302 641 1396 629 1465',
+    '327 1384 265 1457 257 1367 257 1273 269 1143 294 1335',
+    '718 1131 739 1241 739 1404 727 1457 665 1384 702 1335',
+  ] },
+  { g: 'antebrazo', tx: 0, polys: [
+    '61 886 102 751 147 702 163 743 192 735 45 976 0 1000',
+    '845 698 833 735 800 731 951 984 1000 1004 935 894 898 763',
+    '776 722 776 776 804 841 853 898 922 1012 947 996',
+    '69 1012 135 906 188 841 216 771 212 718 49 988',
+  ] },
+  // -- figura TRASERA --
+  { g: 'trapecio', tx: 1120, polys: [
+    '447 217 477 217 472 383 477 647 383 532 353 409 311 366 391 332 438 272',
+    '523 217 557 217 566 272 609 328 689 366 647 404 617 532 523 647 532 383',
+  ] },
+  // El hombro de la figura de ESPALDA es el deltoides posterior, asi que
+  // es suyo y no de "hombros" (que se queda con la figura de frente).
+  { g: 'hombro_posterior', tx: 1120, polys: ['294 370 230 391 174 443 183 536 243 494 272 464', '711 370 783 396 826 447 817 536 749 489 723 451'] },
+  // La mancha de la espalda, partida en DOS franjas (media arriba,
+  // dorsales abajo) con un corte horizontal a y=560. Los puntos del
+  // corte salen de interpolar sobre los bordes del poligono original,
+  // asi que las dos piezas encajan sin dejar hueco ni solaparse -- si se
+  // tocan estos numeros a ojo, se nota. (Hubo un segundo corte a y=470
+  // para una franja "espalda alta"; Koku la deshizo y su trozo volvio a
+  // la media, que es esta.)
+  { g: 'espalda_media', tx: 1120, polys: [
+    '311 387 281 489 285 553 287 560 383 560 366 540 336 413',
+    '689 387 719 494 715 560 621 560 634 545 664 417',
+  ] },
+  { g: 'dorsales', tx: 1120, polys: [
+    '287 560 340 753 472 711 472 664 383 560',
+    '715 560 660 753 528 711 528 664 621 560',
+  ] },
+  { g: 'triceps', tx: 1120, polys: [
+    '268 498 179 557 145 723 166 817 217 638 268 557',
+    '736 502 821 557 860 732 834 821 779 630 732 557',
+    '268 583 268 685 230 753 191 774 226 655',
+    '728 583 770 647 804 774 766 753 728 689',
+  ] },
+  { g: 'lumbar', tx: 1120, polys: ['477 728 345 770 353 834 494 1021 468 830', '523 728 655 770 647 834 506 1021 532 838'] },
+  { g: 'antebrazo', tx: 1120, polys: [
+    '864 757 911 834 932 940 1000 1064 962 1043 881 894 843 838',
+    '136 757 89 838 68 936 0 1064 38 1043 123 885 157 830',
+    '813 796 774 779 791 847 911 1038 932 1089 945 1047',
+    '187 796 221 779 209 843 94 1030 68 1085 51 1047',
+  ] },
+  { g: 'abductores', tx: 1120, polys: ['330 1070 288 1130 282 1230 316 1290 356 1180', '670 1070 712 1130 718 1230 684 1290 644 1180'] },
+  { g: 'gluteo', tx: 1120, polys: [
+    '447 996 302 1085 298 1187 315 1260 472 1213 494 1149',
+    '553 991 511 1145 523 1209 681 1260 698 1191 694 1085',
+  ] },
+  { g: 'aductores', tx: 1120, polys: [
+    '481 1230 447 1230 413 1255 451 1443 485 1357 489 1294',
+    '519 1226 557 1234 591 1260 549 1443 519 1362 511 1294',
+  ] },
+  { g: 'isquios', tx: 1120, polys: [
+    '289 1221 311 1294 366 1260 353 1353 345 1502 294 1583 289 1468 277 1413 272 1315',
+    '715 1217 694 1289 638 1260 655 1366 664 1502 711 1583 715 1477 728 1421 736 1319',
+    '387 1255 443 1460 404 1668 362 1528 370 1353',
+    '617 1255 634 1362 643 1532 600 1668 562 1464',
+  ] },
+  { g: 'gemelos', tx: 1120, polys: [
+    '294 1604 285 1672 247 1796 238 1928 255 1970 285 1932 298 1800 319 1711 319 1668',
+    '374 1651 353 1677 332 1719 311 1804 302 1919 340 2000 387 1906 391 1689',
+    '630 1651 613 1685 617 1906 664 1996 706 1919 689 1796 668 1702',
+    '706 1604 723 1685 757 1791 766 1928 745 1966 723 1936 706 1796 681 1681',
+    '285 1957 302 1957 336 2017 306 2200 285 2136 268 1983',
+    '698 1957 719 1957 736 1983 719 2132 702 2196 672 2021',
+  ] },
+];
+// Partes no interactivas que completan la silueta (cabeza y rodillas de
+// cada figura, del mismo dataset).
+const GYM_BODYMAP_SILHOUETTE = [
+  { tx: 0, polys: [
+    '424 29 400 118 420 196 461 233 498 253 547 224 576 192 592 102 571 24 498 0',
+    '339 1400 347 1433 355 1473 363 1510 351 1567 298 1567 273 1527 273 1473 302 1441',
+    '657 1400 722 1478 722 1522 698 1571 649 1567 629 1510',
+    '714 1604 735 1535 767 1612 796 1678 784 1878 796 1955 747 1955',
+    '249 1947 278 1649 282 1604 261 1543 249 1576 224 1616 208 1678 220 1882 208 1955',
+    '727 1951 698 1592 653 1584 641 1624 641 1653 657 1771',
+    '355 1584 359 1624 359 1669 351 1722 351 1767 322 1820 306 1873 269 1947 273 1878 282 1804 286 1755 290 1698 298 1641 302 1588',
+  ] },
+  { tx: 1120, polys: [
+    '506 0 460 9 409 55 404 128 451 200 557 200 591 136 596 47 557 13',
+    '345 1532 311 1591 336 1664 374 1626',
+    '664 1536 630 1630 668 1664 694 1591',
+  ] },
+];
+
+function renderGymBodyMap() {
+  const container = document.getElementById('gym-bodymap');
+  const since = new Date();
+  since.setDate(since.getDate() - gymMapWindowDays);
+  const sinceKey = toDateKey(since);
+
+  // Puntuacion por grupo: por cada serie de la ventana, 1 punto (o el
+  // volumen de la serie) al grupo principal del ejercicio, y la mitad a
+  // cada secundario. Tambien apuntamos los ejercicios con mas series de
+  // cada grupo para el detalle.
+  const score = new Map();
+  const exercisesByGroup = new Map();
+  const exerciseById = new Map(state.gymExercises.map((e) => [e.id, e]));
+  for (const session of state.gymSessions) {
+    if (session.date < sinceKey) continue;
+    for (const set of session.sets) {
+      const exercise = exerciseById.get(set.exerciseId);
+      if (!exercise) continue;
+      // En "volumen" cuentan todos los tramos; en "series" una serie
+      // alargada sigue siendo UNA serie (decision de Koku).
+      const amount = gymMapMetric === 'volume' ? gymSetVolumeKg(set) : 1;
+      if (amount <= 0) continue;
+      const primary = GYM_MUSCLE_GROUPS.some((g) => g.id === exercise.muscleGroup) ? exercise.muscleGroup : null;
+      if (primary) {
+        score.set(primary, (score.get(primary) || 0) + amount);
+        if (!exercisesByGroup.has(primary)) exercisesByGroup.set(primary, new Map());
+        const perEx = exercisesByGroup.get(primary);
+        perEx.set(exercise.name, (perEx.get(exercise.name) || 0) + 1);
+      }
+      for (const secondary of exercise.secondaryMuscles || []) {
+        if (secondary === primary) continue;
+        score.set(secondary, (score.get(secondary) || 0) + amount * 0.5);
+      }
+    }
+  }
+
+  const max = Math.max(...score.values(), 0);
+  const unit = getGymWeightUnitLabel();
+  const detailByGroup = new Map();
+  const zonesHtml = GYM_BODYMAP_ZONES.map((zone) => {
+    const value = score.get(zone.g) || 0;
+    // Intensidad continua sobre el acento del tema: de un 12% (entrenado
+    // poco) al acento pleno; 0 = gris base de la silueta.
+    const pct = max > 0 && value > 0 ? Math.round(12 + 78 * (value / max)) : 0;
+    const fill = pct === 0
+      ? 'color-mix(in srgb, var(--surface-2-text) 10%, var(--surface-2))'
+      : `color-mix(in srgb, var(--gym-accent) ${pct}%, var(--surface-2))`;
+    const label = gymMuscleGroupLabel(zone.g);
+    const topExercises = exercisesByGroup.has(zone.g)
+      ? [...exercisesByGroup.get(zone.g).entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name]) => name).join(', ')
+      : '';
+    const valueLabel = gymMapMetric === 'volume'
+      ? `${gymWeightKgToDisplay(value)} ${unit}`
+      : `${Math.round(value * 10) / 10} serie${value === 1 ? '' : 's'}`;
+    detailByGroup.set(zone.g, `${label}: ${valueLabel}${topExercises ? ` · ${topExercises}` : ''}`);
+    const polys = zone.polys.map((points) => `<polygon points="${points}" />`).join('');
+    return `<g style="fill: ${fill}" transform="translate(${zone.tx}, 0)" data-bodymap-group="${zone.g}">${polys}</g>`;
+  }).join('');
+  const silhouetteHtml = GYM_BODYMAP_SILHOUETTE.map((part) =>
+    `<g class="gym-bodymap-silhouette" transform="translate(${part.tx}, 0)">${part.polys.map((points) => `<polygon points="${points}" />`).join('')}</g>`
+  ).join('');
+
+  container.innerHTML = `
+    <svg class="gym-chart-svg gym-bodymap-svg" viewBox="0 0 2120 2210" role="img" aria-label="Mapa de músculos entrenados">
+      ${silhouetteHtml}
+      ${zonesHtml}
+      <text class="gym-chart-label gym-bodymap-caption" x="500" y="2140" text-anchor="middle">Frente</text>
+      <text class="gym-chart-label gym-bodymap-caption" x="1620" y="2140" text-anchor="middle">Espalda</text>
+    </svg>
+    <p id="gym-bodymap-info" class="gym-bodymap-info">Toca un músculo para ver su detalle.</p>
+    <p class="hint">Cuanto más intenso el color, más entrenado en los últimos ${gymMapWindowDays} días (los músculos secundarios de cada ejercicio puntúan la mitad).</p>
+  `;
+  // El detalle se muestra en una linea FIJA bajo el mapa (nada de
+  // tooltips flotantes: en el movil se quedaban pegados a la pantalla al
+  // hacer scroll -- feedback de Koku).
+  const info = document.getElementById('gym-bodymap-info');
+  container.querySelectorAll('[data-bodymap-group]').forEach((zoneEl) => {
+    const show = () => {
+      const group = zoneEl.dataset.bodymapGroup;
+      info.textContent = detailByGroup.get(group) || '';
+      // El resaltado se aplica a TODAS las zonas del mismo grupo (un
+      // musculo que sale en las dos vistas, como el triceps, se marca
+      // en ambas a la vez -- feedback de Koku).
+      container.querySelectorAll('[data-bodymap-group]').forEach((other) => {
+        other.classList.toggle('bodymap-active', other.dataset.bodymapGroup === group);
+      });
+    };
+    zoneEl.addEventListener('click', show);
+    zoneEl.addEventListener('mouseenter', show);
+  });
+}
+
+
+// 1RM estimado con la formula de Epley: peso x (1 + reps/30). Solo
+// series con 1-12 repeticiones (por encima de 12 la estimacion deja de
+// ser fiable) y sin las de calentamiento.
+function gymEpley1RM(weightKg, reps) {
+  return weightKg * (1 + reps / 30);
+}
+function renderGymPRs() {
+  const list = document.getElementById('gym-prs-list');
+  const byExercise = new Map(); // exerciseId -> { name, muscleGroup, bestWeightKg, best1RM, bestVolumeKg }
+  for (const session of state.gymSessions) {
+    const volumeByExercise = new Map();
+    for (const set of session.sets) {
+      if (set.setType === 'warmup') continue;
+      // Serie madre Y tramos: Koku pidio expresamente que cualquiera
+      // pueda ser record ("hay veces que la segunda sale mejor que la
+      // primera, sobre todo cuando empiezas y mejoras la tecnica").
+      for (const tramo of gymSetConTramos(set)) {
+        if (!byExercise.has(tramo.exerciseId)) {
+          byExercise.set(tramo.exerciseId, { name: tramo.exerciseName, bestWeightKg: 0, best1RM: 0, bestVolumeKg: 0 });
+        }
+        const pr = byExercise.get(tramo.exerciseId);
+        if (tramo.weightKg > pr.bestWeightKg) pr.bestWeightKg = tramo.weightKg;
+        if (tramo.weightKg > 0 && tramo.reps >= 1 && tramo.reps <= 12) {
+          const est = gymEpley1RM(tramo.weightKg, tramo.reps);
+          if (est > pr.best1RM) pr.best1RM = est;
+        }
+      }
+      volumeByExercise.set(set.exerciseId, (volumeByExercise.get(set.exerciseId) || 0) + gymSetVolumeKg(set));
+    }
+    for (const [exerciseId, volume] of volumeByExercise) {
+      const pr = byExercise.get(exerciseId);
+      if (pr && volume > pr.bestVolumeKg) pr.bestVolumeKg = volume;
+    }
+  }
+
+  const unit = getGymWeightUnitLabel();
+  const rows = [...byExercise.entries()]
+    .filter(([, pr]) => pr.bestWeightKg > 0)
+    .sort((a, b) => b[1].best1RM - a[1].best1RM);
+  list.innerHTML = '';
+  if (rows.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavía no hay récords: registra series con peso y aparecerán aquí.</p>';
+    return;
+  }
+  rows.forEach(([exerciseId, pr]) => {
+    const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+    const muscle = exercise ? gymMuscleGroupLabel(exercise.muscleGroup) : '';
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-pr-item';
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(pr.name)}${muscle ? ` <span class="gym-list-item-muted">(${escapeHtml(muscle)})</span>` : ''}</span>
+      <span class="gym-pr-stats">
+        <b>${gymWeightKgToDisplay(pr.bestWeightKg)} ${unit}</b>
+        <span class="gym-list-item-muted">1RM est. ${gymWeightKgToDisplay(pr.best1RM)} ${unit} · Vol. ${gymWeightKgToDisplay(pr.bestVolumeKg)} ${unit}</span>
+      </span>
+    `;
+    list.appendChild(row);
+  });
+}
+
+// Volumen semanal apilado por grupo muscular (ultimas 8 semanas). Los 5
+// grupos con mas volumen total llevan color propio de la paleta de abajo
+// y el resto se agrupa en "Otros" (gris) -- nunca 14 colores a la vez.
+// Paleta validada con el comprobador de daltonismo/contraste del skill
+// de dataviz (5 tonos, superficie oscura, todas las comprobaciones OK);
+// el color acompaña SIEMPRE al mismo grupo dentro de un render.
+const GYM_VIZ_PALETTE = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'];
+const GYM_VIZ_OTHER = '#8a8a93';
+function renderGymWeeklyVolume() {
+  const container = document.getElementById('gym-weekly-volume');
+  const WEEKS = 8;
+  const now = new Date();
+  const weekKeys = [];
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i * 7);
+    weekKeys.push(gymWeekStartKey(d));
+  }
+  const weekSet = new Set(weekKeys);
+
+  // volumen[semana][grupo] desde las series (grupo del ejercicio; los
+  // ejercicios viejos con texto libre o sin grupo caen en "Otros").
+  const muscleOf = new Map(state.gymExercises.map((e) => [e.id, GYM_MUSCLE_GROUPS.some((g) => g.id === e.muscleGroup) ? e.muscleGroup : null]));
+  const volume = new Map(weekKeys.map((w) => [w, new Map()]));
+  const totalByGroup = new Map();
+  for (const session of state.gymSessions) {
+    const week = gymWeekStartKey(new Date(`${session.date}T00:00:00`));
+    if (!weekSet.has(week)) continue;
+    for (const set of session.sets) {
+      const kg = gymSetVolumeKg(set);
+      if (kg <= 0) continue;
+      const group = muscleOf.get(set.exerciseId) || 'otros';
+      volume.get(week).set(group, (volume.get(week).get(group) || 0) + kg);
+      totalByGroup.set(group, (totalByGroup.get(group) || 0) + kg);
+    }
+  }
+
+  if (totalByGroup.size === 0) {
+    container.innerHTML = '<p class="empty-hint">Sin volumen registrado en las últimas 8 semanas.</p>';
+    return;
+  }
+
+  // Top 5 grupos por volumen total; el resto (y lo sin grupo) = "Otros".
+  const topGroups = [...totalByGroup.entries()]
+    .filter(([g]) => g !== 'otros')
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, GYM_VIZ_PALETTE.length)
+    .map(([g]) => g);
+  const colorOf = new Map(topGroups.map((g, i) => [g, GYM_VIZ_PALETTE[i]]));
+
+  const width = 600, height = 190, padding = 26, gap = 8;
+  const barWidth = (width - padding * 2 - gap * (WEEKS - 1)) / WEEKS;
+  const maxWeek = Math.max(1, ...weekKeys.map((w) => [...volume.get(w).values()].reduce((a, b) => a + b, 0)));
+  const unit = getGymWeightUnitLabel();
+
+  let bars = '';
+  weekKeys.forEach((week, i) => {
+    const x = padding + i * (barWidth + gap);
+    let y = height - padding;
+    const groups = [...volume.get(week).entries()];
+    // Otros al fondo de la pila, el resto en el orden fijo del top.
+    const ordered = [
+      ...topGroups.map((g) => [g, volume.get(week).get(g) || 0]),
+      ['otros', groups.filter(([g]) => !colorOf.has(g)).reduce((acc, [, v]) => acc + v, 0)],
+    ];
+    for (const [group, kg] of ordered) {
+      if (kg <= 0) continue;
+      const h = (kg / maxWeek) * (height - padding * 2);
+      y -= h;
+      const label = group === 'otros' ? 'Otros' : gymMuscleGroupLabel(group);
+      // Hueco de 2px entre segmentos: se pinta cada uno 2px mas corto.
+      bars += `<rect x="${x}" y="${y}" width="${barWidth}" height="${Math.max(0, h - 2)}" rx="2"
+        fill="${colorOf.get(group) || GYM_VIZ_OTHER}"
+        data-tooltip="Semana del ${formatGymDate(week)} · ${escapeHtml(label)}: ${gymWeightKgToDisplay(kg)} ${unit}"></rect>`;
+    }
+    const weekLabel = new Date(`${week}T00:00:00`).getDate();
+    bars += `<text class="gym-chart-label" x="${x + barWidth / 2}" y="${height - padding + 12}" text-anchor="middle">${weekLabel}</text>`;
+  });
+
+  const legend = [...topGroups.map((g) => ({ label: gymMuscleGroupLabel(g), color: colorOf.get(g) })), { label: 'Otros', color: GYM_VIZ_OTHER }]
+    .map((item) => `<span class="gym-viz-legend-item"><span class="color-dot" style="background-color: ${item.color}"></span>${escapeHtml(item.label)}</span>`)
+    .join('');
+
+  container.innerHTML = `
+    <svg class="gym-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Volumen semanal por grupo muscular">${bars}</svg>
+    <div class="gym-viz-legend">${legend}</div>
+    <p class="hint">Volumen = repeticiones × peso, apilado por grupo muscular. La etiqueta de cada barra es el día del lunes de esa semana.</p>
+  `;
+  attachFinanzasChartTooltips(container);
+}
+
+// --- Logros (Fase 7 del rediseno) -------------------------------------
+// Gamificacion sin estado en la base de datos: cada logro tiene NIVELES
+// (umbral creciente) y se evalua al vuelo contra el historial real, asi
+// que editar/borrar sesiones recalcula todo de forma coherente. Lo unico
+// que se guarda (por dispositivo) es hasta que nivel se ha CELEBRADO ya
+// cada logro, para no repetir la fiesta (localStorage.gymAchievementsSeen).
+const GYM_ACHIEVEMENTS = [
+  { id: 'sessions', name: 'Constancia', desc: 'Entrenamientos de pesas totales', levels: [1, 10, 25, 50, 100, 250], value: (s) => s.gymCount },
+  { id: 'streak', name: 'Racha', desc: 'Semanas seguidas cumpliendo tu objetivo', levels: [1, 4, 8, 16, 26, 52], value: (s) => s.streak },
+  { id: 'volume', name: 'Toneladas', desc: 'Volumen total acumulado (kg)', levels: [10000, 50000, 100000, 250000, 500000, 1000000], value: (s) => s.totalVolumeKg },
+  { id: 'activities', name: 'Todoterreno', desc: 'Actividades fuera de las pesas', levels: [1, 10, 25, 50, 100], value: (s) => s.activityCount },
+  { id: 'exercises', name: 'Repertorio', desc: 'Ejercicios distintos con series registradas', levels: [3, 10, 20, 40, 80], value: (s) => s.distinctExercises },
+  { id: 'months', name: 'Meses activos', desc: 'Meses con al menos una sesión', levels: [1, 3, 6, 12, 24], value: (s) => s.activeMonths },
+];
+
+// Junta en un objeto todas las cifras que consumen los logros.
+function gymComputeAchievementStats(summary) {
+  const goal = getGymWeeklyGoal();
+  const sessionsByWeek = new Map();
+  const months = new Set();
+  let gymCount = 0, activityCount = 0, totalVolumeKg = 0;
+  for (const s of summary) {
+    const week = gymWeekStartKey(new Date(`${s.date}T00:00:00`));
+    sessionsByWeek.set(week, (sessionsByWeek.get(week) || 0) + 1);
+    months.add(s.date.slice(0, 7));
+    if (s.type === 'activity') activityCount += 1; else gymCount += 1;
+    totalVolumeKg += gymVolumenAjustado(s.volumeKg, s.failureVolumeKg);
+  }
+  const distinct = new Set();
+  for (const session of state.gymSessions) {
+    for (const set of session.sets) distinct.add(set.exerciseId);
+  }
+  return {
+    gymCount,
+    activityCount,
+    totalVolumeKg,
+    streak: gymComputeWeeklyStreak(sessionsByWeek, goal),
+    distinctExercises: distinct.size,
+    activeMonths: months.size,
+  };
+}
+
+// Nivel alcanzado (0 = ninguno) y HTML de la tarjeta de un logro.
+function gymAchievementLevel(achievement, value) {
+  let level = 0;
+  for (const threshold of achievement.levels) {
+    if (value >= threshold) level += 1; else break;
+  }
+  return level;
+}
+function gymAchievementCardHtml(achievement, value) {
+  const level = gymAchievementLevel(achievement, value);
+  const maxed = level >= achievement.levels.length;
+  const nextThreshold = maxed ? achievement.levels[achievement.levels.length - 1] : achievement.levels[level];
+  // La barra mide LO MISMO que el texto de debajo ("1 / 10" = 10%). Antes
+  // media solo el tramo entre el nivel anterior y el siguiente, y al subir
+  // de nivel la barra se quedaba a cero aunque el texto dijera 1/10 --
+  // parecia rota (feedback de Koku).
+  const progress = maxed ? 1 : Math.min(1, value / nextThreshold);
+  const shownValue = Math.round(value * 10) / 10;
+  return `
+    <div class="gym-achievement-card ${level > 0 ? 'unlocked' : ''}">
+      <div class="gym-achievement-head">
+        <span class="gym-list-item-name">${escapeHtml(achievement.name)}
+          ${level > 0 ? `<span class="gym-block-active-badge">Nivel ${level}${maxed ? ' · MAX' : ''}</span>` : ''}
+        </span>
+      </div>
+      <span class="gym-list-item-muted">${escapeHtml(achievement.desc)}</span>
+      <div class="gym-achievement-bar"><div class="gym-achievement-bar-fill" style="width: ${Math.round(progress * 100)}%"></div></div>
+      <span class="gym-list-item-muted">${shownValue} / ${nextThreshold}${maxed ? ' (máximo alcanzado)' : ''}</span>
+    </div>
+  `;
+}
+
+async function renderGymAchievements() {
+  const summary = await api('/api/gym-sessions/summary');
+  const stats = gymComputeAchievementStats(summary);
+  document.getElementById('gym-achievements-list').innerHTML =
+    GYM_ACHIEVEMENTS.map((a) => gymAchievementCardHtml(a, a.value(stats))).join('');
+}
+
+// Tras guardar una sesion/actividad: si algun logro ha SUBIDO de nivel
+// respecto a lo ya celebrado, se ensena la celebracion una unica vez.
+function gymReadAchievementsSeen() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('gymAchievementsSeen'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+async function checkGymAchievements() {
+  const summary = await api('/api/gym-sessions/summary');
+  const stats = gymComputeAchievementStats(summary);
+  const seen = gymReadAchievementsSeen();
+  const leveledUp = [];
+  for (const achievement of GYM_ACHIEVEMENTS) {
+    const level = gymAchievementLevel(achievement, achievement.value(stats));
+    if (level > (seen[achievement.id] || 0)) {
+      leveledUp.push({ achievement, value: achievement.value(stats) });
+      seen[achievement.id] = level;
+    }
+  }
+  if (leveledUp.length === 0) return;
+  localStorage.setItem('gymAchievementsSeen', JSON.stringify(seen));
+  document.getElementById('gym-achievement-modal-list').innerHTML =
+    leveledUp.map(({ achievement, value }) => gymAchievementCardHtml(achievement, value)).join('');
+  document.getElementById('gym-achievement-modal').classList.remove('hidden');
+}
+document.getElementById('btn-close-gym-achievement').addEventListener('click', () => {
+  document.getElementById('gym-achievement-modal').classList.add('hidden');
 });
 
 // --- Progreso: grafica SVG a mano ---------------------------------------
@@ -9057,7 +13923,9 @@ async function renderGymProgressChart(exerciseId) {
   const unit = getGymWeightUnitLabel();
   const isVolume = gymProgressMetric === 'volume';
   const values = points.map((p) => {
-    const raw = isVolume ? p.volumeKg : p.maxWeightKg;
+    // El volumen de la grafica cuenta el peso extra de las series al
+    // fallo; el peso maximo no, que ese es el peso que de verdad movio.
+    const raw = isVolume ? gymVolumenAjustado(p.volumeKg, p.failureVolumeKg) : p.maxWeightKg;
     return gymWeightKgToDisplay(raw) || 0;
   });
   const maxValue = Math.max(...values, 1);
@@ -9078,8 +13946,15 @@ async function renderGymProgressChart(exerciseId) {
   // Koku no queria "la fecha por defecto" (mismo motivo por el que ya se
   // quito de la grafica de Evolucion mensual de Finanzas, ver el
   // comentario junto a attachFinanzasChartTooltips mas abajo).
+  // Dos circulos por punto: el que se VE (r=4) y uno transparente mucho
+  // mas grande que es el que se toca -- con el dedo, 4px de radio es
+  // imposible de acertar (por eso "no te deja pinchar el punto").
   const dots = coords
-    .map((c, i) => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="var(--accent)" data-tooltip="${escapeHtml(`${formatGymDate(points[i].date)}: ${values[i]} ${unit}`)}"></circle>`)
+    .map((c, i) => {
+      const texto = escapeHtml(`${formatGymDate(points[i].date)}: ${values[i]} ${unit}`);
+      return `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="var(--accent)" data-tooltip="${texto}"></circle>`
+        + `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="18" fill="transparent" data-tooltip="${texto}"></circle>`;
+    })
     .join('');
   // Solo se etiquetan la primera, la ultima, y todas si hay pocos puntos
   // -- con muchas sesiones, poner una fecha bajo cada punto se solapa.
@@ -9096,7 +13971,7 @@ async function renderGymProgressChart(exerciseId) {
       ${dots}
       ${labels}
     </svg>
-    <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso máximo'} por sesión, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Pasa el ratón por un punto para ver la fecha exacta.</p>
+    <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso máximo'} por sesión, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Toca un punto para ver la fecha exacta.</p>
   `;
   attachFinanzasChartTooltips(container.querySelector('svg'));
 }
@@ -9232,22 +14107,38 @@ function getFinanzasChartTooltip() {
 // barras ya renderizados no se reutilizan entre repintados (wrap.innerHTML
 // se reescribe entero cada vez), asi que no hace falta quitar listeners
 // viejos.
+// Ojo: esto nacio para el raton (mouseenter/mousemove/mouseleave) y en
+// el movil no habia forma de ver el dato -- Koku: "la grafica de volumen
+// total no te deja pinchar el punto". Ahora escucha TAMBIEN pointerdown,
+// que cubre dedo y raton por igual, y el aviso se va solo a los 2,5s o
+// al tocar en otro sitio.
+let gymChartTooltipTimer = null;
 function attachFinanzasChartTooltips(svgEl) {
   if (!svgEl) return;
   const tooltip = getFinanzasChartTooltip();
+  const mostrar = (el, x, y) => {
+    tooltip.textContent = el.dataset.tooltip;
+    tooltip.classList.remove('hidden');
+    // Pegado al borde derecho se saldria de la pantalla: se cambia de
+    // lado cuando no cabe.
+    const ancho = tooltip.offsetWidth || 160;
+    tooltip.style.left = `${x + 14 + ancho > window.innerWidth ? Math.max(8, x - 14 - ancho) : x + 14}px`;
+    tooltip.style.top = `${y + 14}px`;
+  };
+  const esconder = () => tooltip.classList.add('hidden');
   svgEl.querySelectorAll('[data-tooltip]').forEach((el) => {
-    el.addEventListener('mouseenter', () => {
-      tooltip.textContent = el.dataset.tooltip;
-      tooltip.classList.remove('hidden');
-    });
-    el.addEventListener('mousemove', (e) => {
-      tooltip.style.left = `${e.clientX + 14}px`;
-      tooltip.style.top = `${e.clientY + 14}px`;
-    });
-    el.addEventListener('mouseleave', () => {
-      tooltip.classList.add('hidden');
+    el.addEventListener('mouseenter', (e) => mostrar(el, e.clientX, e.clientY));
+    el.addEventListener('mousemove', (e) => mostrar(el, e.clientX, e.clientY));
+    el.addEventListener('mouseleave', esconder);
+    el.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      mostrar(el, e.clientX, e.clientY);
+      if (gymChartTooltipTimer) clearTimeout(gymChartTooltipTimer);
+      gymChartTooltipTimer = setTimeout(esconder, 2500);
     });
   });
+  // Tocar fuera lo quita al momento.
+  svgEl.addEventListener('pointerdown', esconder);
 }
 
 function renderFinanzasMonthlyTrendChart(data) {
@@ -9823,7 +14714,7 @@ document.getElementById('finanzas-recurring-form').addEventListener('submit', as
 });
 
 // -- Pestaña "Deudas": lo que Koku debe a alguien y lo que alguien le
-//    debe a el (ver comentario junto a finanzas_debts en server/db.js).
+//    debe a el (ver comentario junto a finanzas_debts en local-schema.js).
 //    Ligar una deuda a una cuenta es opcional -- si se liga, marcarla
 //    como pagada genera un movimiento real (ver routes/finanzasDebts.js).
 let finanzasDebts = [];
@@ -10292,551 +15183,6 @@ function closeFinanzasView() {
 }
 document.getElementById('btn-open-finanzas').addEventListener('click', openFinanzasView);
 document.getElementById('btn-close-finanzas').addEventListener('click', closeFinanzasView);
-
-// ---------------------------------------------------------------------
-// Extension "Archivos": mandar archivos sueltos (fotos, PDFs, documentos
-// -- no ligados a una nota) entre movil y ordenador. La "base de datos"
-// es la propia carpeta del sistema de ficheros (ver server/routes/archivos.js),
-// asi que no hay tabla ni copia local -- se lee la lista real cada vez
-// que se abre esta vista. Esta vista tambien reune ahora el control
-// MANUAL de la sincronizacion de datos (boton "Sincronizar ahora", que
-// antes vivia en Configuracion > Este dispositivo) y la comprobacion de
-// version nueva.
-// ---------------------------------------------------------------------
-function formatArchivoSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-// archivosCurrentPath: ruta que esta viendo AHORA el panel derecho
-// cuando es el ordenador (ver isTrustedDevice() mas abajo) -- null =
-// todavia no se ha navegado (o el dispositivo no puede navegar, ver
-// abajo), en cuyo caso las peticiones usan la carpeta configurada de
-// siempre. Distinta de archivosBrowsePath (esa es solo del widget de
-// "elegir carpeta por defecto" del <details> de arriba).
-let archivosCurrentPath = null;
-
-function archivosPathQueryParam() {
-  return archivosCurrentPath ? `?path=${encodeURIComponent(archivosCurrentPath)}` : '';
-}
-
-async function downloadArchivo(name) {
-  const token = localStorage.getItem('deviceToken');
-  const headers = {};
-  if (token) headers['X-Device-Token'] = token;
-  const url = new URL(`/api/archivos/${encodeURIComponent(name)}${archivosPathQueryParam()}`, getServerBaseUrl());
-  try {
-    const res = await fetch(url.toString(), { headers });
-    if (!res.ok) throw new Error(`Error ${res.status}`);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    // "Descarga normal" del navegador (no Web Share API) -- confirmado
-    // con Koku: un <a download> con un blob es lo mas sencillo y
-    // funciona igual en ordenador y movil.
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(blobUrl);
-  } catch (err) {
-    alert('No se pudo descargar el archivo: ' + err.message);
-  }
-}
-
-async function deleteArchivo(name) {
-  if (!confirm(`¿Borrar "${name}"?`)) return;
-  await api(`/api/archivos/${encodeURIComponent(name)}${archivosPathQueryParam()}`, { method: 'DELETE' });
-  archivosSelectedRemote.delete(name);
-  await refreshArchivosCurrentView();
-}
-
-// Diseño de dos paneles (ver comentario en index.html): el panel
-// derecho es la carpeta compartida de siempre, ahora con checkbox por
-// fila para elegir que archivo(s) traer con la flecha "<-" del medio
-// -- el boton "Borrar" se queda aparte (no es un movimiento entre
-// paneles, no tiene sentido colgarlo de la flecha).
-const archivosSelectedRemote = new Set();
-
-function updateArchivosReceiveButtonState() {
-  document.getElementById('btn-archivos-receive').disabled = archivosSelectedRemote.size === 0;
-}
-
-// Doble confirmacion de transferencias (ver server/archivosTransfers.js
-// para el porque completo): cada cuanto se pregunta por el estado de una
-// solicitud propia, o por solicitudes entrantes -- mas seguido que
-// checkForUpdate (15s) porque aqui hay alguien mirando la pantalla
-// esperando una respuesta en vivo, pero solo mientras la vista Archivos
-// esta abierta (no es un timer global de fondo).
-const ARCHIVOS_TRANSFER_POLL_MS = 3000;
-let archivosOutgoingRequestId = null; // solicitud propia pendiente de que la confirmen (solo movil)
-let archivosIncomingPollTimer = null; // vigilancia de solicitudes entrantes (solo ordenador)
-const archivosHandledIncomingIds = new Set(); // evita repetir el aviso de la misma solicitud entrante
-
-// Pinta la tabla de archivos -- compartida por el movil (siempre la
-// carpeta configurada, ver refreshArchivosList) y el ordenador (la
-// carpeta que se este navegando ahora mismo, ver loadArchivosNavPath).
-function renderArchivosFileTable(files) {
-  const tbody = document.getElementById('archivos-table-body');
-  const emptyHint = document.getElementById('archivos-empty-hint');
-  const validNames = new Set(files.map((f) => f.name));
-  for (const name of archivosSelectedRemote) {
-    if (!validNames.has(name)) archivosSelectedRemote.delete(name);
-  }
-  tbody.innerHTML = '';
-  emptyHint.classList.toggle('hidden', files.length > 0);
-  for (const file of files) {
-    const tr = document.createElement('tr');
-    const checkTd = document.createElement('td');
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'styled-checkbox';
-    checkbox.checked = archivosSelectedRemote.has(file.name);
-    checkbox.addEventListener('change', () => {
-      if (checkbox.checked) archivosSelectedRemote.add(file.name);
-      else archivosSelectedRemote.delete(file.name);
-      updateArchivosReceiveButtonState();
-    });
-    checkTd.appendChild(checkbox);
-    const nameTd = document.createElement('td');
-    nameTd.textContent = file.name;
-    const sizeTd = document.createElement('td');
-    sizeTd.textContent = formatArchivoSize(file.size);
-    const dateTd = document.createElement('td');
-    dateTd.textContent = new Date(file.modifiedAt).toLocaleString();
-    const actionsTd = document.createElement('td');
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'danger-btn';
-    deleteBtn.textContent = 'Borrar';
-    deleteBtn.addEventListener('click', () => deleteArchivo(file.name));
-    actionsTd.appendChild(deleteBtn);
-    tr.append(checkTd, nameTd, sizeTd, dateTd, actionsTd);
-    tbody.appendChild(tr);
-  }
-  updateArchivosReceiveButtonState();
-}
-
-// Movil (o cualquier dispositivo no de confianza): solo ve la carpeta
-// configurada, sin navegacion real -- comportamiento identico al de
-// siempre, los navegadores no dejan listar el almacenamiento propio del
-// dispositivo (ver comentario en index.html).
-async function refreshArchivosList() {
-  const files = await api('/api/archivos');
-  renderArchivosFileTable(files);
-}
-
-// Ordenador: navega de verdad por el disco entero (GET /browse, que ya
-// devuelve carpetas Y archivos) -- la carpeta configurada en "Carpeta de
-// destino" pasa a ser solo el punto de partida / atajo rapido
-// (btn-archivos-nav-default), no un limite.
-async function loadArchivosNavPath(targetPath) {
-  const qs = targetPath ? `?path=${encodeURIComponent(targetPath)}` : '';
-  const data = await api(`/api/archivos/browse${qs}`);
-  archivosCurrentPath = data.path;
-  document.getElementById('archivos-nav-path').textContent = data.path;
-  const upBtn = document.getElementById('btn-archivos-nav-up');
-  upBtn.disabled = !data.parent;
-  upBtn.dataset.parent = data.parent || '';
-  const foldersList = document.getElementById('archivos-nav-folders');
-  const foldersToggle = document.getElementById('btn-archivos-nav-folders-toggle');
-  foldersList.innerHTML = '';
-  data.folders.forEach((folder) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'archivos-browser-item';
-    btn.textContent = folder.name;
-    btn.addEventListener('click', () => {
-      closeArchivosFoldersDropdown(); // al navegar, se cierra el desplegable
-      loadArchivosNavPath(folder.path);
-    });
-    foldersList.appendChild(btn);
-  });
-  // Sin subcarpetas aqui, no tiene sentido mostrar un boton de
-  // desplegable vacio.
-  foldersToggle.classList.toggle('hidden', data.folders.length === 0);
-  closeArchivosFoldersDropdown();
-  renderArchivosFileTable(data.files);
-}
-
-// Desplegable de subcarpetas: mismo "molde" que los demas popovers de la
-// app (position:fixed + positionFixedPopover(), definida en settings.js
-// -- se llama desde aqui dentro de un handler, no al cargar la pagina,
-// asi que el orden de carga app.js/settings.js no da problemas, ver
-// CLAUDE.md). Se abre con hover O con el boton; un temporizador corto
-// evita que se cierre solo al pasar el raton del boton al desplegable
-// (hay un hueco de unos pixeles entre los dos).
-let archivosFoldersCloseTimer = null;
-function openArchivosFoldersDropdown() {
-  clearTimeout(archivosFoldersCloseTimer);
-  const dropdown = document.getElementById('archivos-nav-folders');
-  if (dropdown.children.length === 0) return; // sin subcarpetas, nada que mostrar
-  if (!dropdown.classList.contains('hidden')) return; // ya abierto
-  dropdown.classList.remove('hidden');
-  positionFixedPopover(document.getElementById('btn-archivos-nav-folders-toggle'), dropdown, { width: 240 });
-}
-function closeArchivosFoldersDropdown() {
-  clearTimeout(archivosFoldersCloseTimer);
-  document.getElementById('archivos-nav-folders').classList.add('hidden');
-}
-function scheduleCloseArchivosFoldersDropdown() {
-  clearTimeout(archivosFoldersCloseTimer);
-  archivosFoldersCloseTimer = setTimeout(closeArchivosFoldersDropdown, 150);
-}
-document.getElementById('archivos-nav-folders-wrap').addEventListener('mouseenter', openArchivosFoldersDropdown);
-document.getElementById('archivos-nav-folders-wrap').addEventListener('mouseleave', scheduleCloseArchivosFoldersDropdown);
-document.getElementById('archivos-nav-folders').addEventListener('mouseenter', () => clearTimeout(archivosFoldersCloseTimer));
-document.getElementById('archivos-nav-folders').addEventListener('mouseleave', scheduleCloseArchivosFoldersDropdown);
-document.getElementById('btn-archivos-nav-folders-toggle').addEventListener('click', () => {
-  if (document.getElementById('archivos-nav-folders').classList.contains('hidden')) openArchivosFoldersDropdown();
-  else closeArchivosFoldersDropdown();
-});
-// Clicar fuera cierra el desplegable si se habia abierto con el boton
-// (el hover ya se cierra solo al quitar el raton de encima).
-document.addEventListener('click', (e) => {
-  const wrap = document.getElementById('archivos-nav-folders-wrap');
-  if (wrap && !wrap.contains(e.target)) closeArchivosFoldersDropdown();
-});
-
-// Punto de entrada unico tras abrir la vista o tras cualquier mutacion
-// (subir/borrar/etc.) -- decide si tocan la navegacion real (ordenador)
-// o la lista simple de siempre (movil).
-async function refreshArchivosBrowsePanel() {
-  const navRow = document.getElementById('archivos-nav-row');
-  const navFoldersWrap = document.getElementById('archivos-nav-folders-wrap');
-  if (isTrustedDevice()) {
-    navRow.classList.remove('hidden');
-    navFoldersWrap.classList.remove('hidden');
-    const startPath = archivosCurrentPath || document.getElementById('archivos-folder-path').value || null;
-    await loadArchivosNavPath(startPath);
-  } else {
-    navRow.classList.add('hidden');
-    navFoldersWrap.classList.add('hidden');
-    await refreshArchivosList();
-  }
-}
-
-async function refreshArchivosCurrentView() {
-  if (isTrustedDevice() && archivosCurrentPath) {
-    await loadArchivosNavPath(archivosCurrentPath);
-  } else {
-    await refreshArchivosList();
-  }
-}
-
-document.getElementById('btn-archivos-nav-up').addEventListener('click', () => {
-  const parent = document.getElementById('btn-archivos-nav-up').dataset.parent;
-  if (parent) loadArchivosNavPath(parent);
-});
-document.getElementById('btn-archivos-nav-default').addEventListener('click', async () => {
-  const { folder } = await api('/api/archivos/folder');
-  await loadArchivosNavPath(folder);
-});
-
-// Panel izquierdo ("Este dispositivo"): NO es un explorador real (los
-// navegadores no dejan listar el almacenamiento del propio dispositivo,
-// ver comentario en index.html) -- es solo una lista de archivos ya
-// elegidos con el selector nativo, pendientes de mandar con "->".
-let archivosStagedFiles = [];
-
-function renderArchivosStagedList() {
-  const list = document.getElementById('archivos-staged-list');
-  const emptyHint = document.getElementById('archivos-staged-empty-hint');
-  list.innerHTML = '';
-  emptyHint.classList.toggle('hidden', archivosStagedFiles.length > 0);
-  archivosStagedFiles.forEach((file, index) => {
-    const row = document.createElement('div');
-    row.className = 'archivos-staged-item';
-    const nameSpan = document.createElement('span');
-    nameSpan.textContent = `${file.name} (${formatArchivoSize(file.size)})`;
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.className = 'archivos-staged-remove';
-    removeBtn.setAttribute('aria-label', 'Quitar de la lista');
-    removeBtn.textContent = '✕';
-    removeBtn.addEventListener('click', () => {
-      archivosStagedFiles.splice(index, 1);
-      renderArchivosStagedList();
-    });
-    row.append(nameSpan, removeBtn);
-    list.appendChild(row);
-  });
-  document.getElementById('btn-archivos-send').disabled = archivosStagedFiles.length === 0;
-}
-
-document.getElementById('btn-archivos-choose').addEventListener('click', () => {
-  document.getElementById('archivos-file-input').click();
-});
-document.getElementById('archivos-file-input').addEventListener('change', (e) => {
-  archivosStagedFiles.push(...Array.from(e.target.files || []));
-  e.target.value = '';
-  renderArchivosStagedList();
-});
-
-// Bucle de subida real (POST por archivo) -- separado del listener para
-// poder llamarlo tanto al instante (ordenador) como tras la confirmacion
-// del otro lado (movil, ver requestArchivosTransfer() mas abajo).
-async function sendArchivosFilesNow(files) {
-  for (const file of files) {
-    try {
-      await api(`/api/archivos${archivosPathQueryParam()}`, {
-        method: 'POST',
-        headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
-        body: file,
-      });
-    } catch (err) {
-      alert(`No se pudo subir "${file.name}": ${err.message}`);
-    }
-  }
-  await refreshArchivosCurrentView();
-}
-
-document.getElementById('btn-archivos-send').addEventListener('click', async () => {
-  if (archivosStagedFiles.length === 0) return;
-  const files = archivosStagedFiles;
-  // El ordenador copiando un archivo local a su propia carpeta
-  // compartida no tiene "otro dispositivo" al que pedirle permiso (ver
-  // server/archivosTransfers.js) -- sigue actuando al instante, sin
-  // fricción nueva. Solo un movil pasa por la confirmacion del otro lado.
-  if (isTrustedDevice()) {
-    archivosStagedFiles = [];
-    renderArchivosStagedList();
-    await sendArchivosFilesNow(files);
-    return;
-  }
-  const accepted = await requestArchivosTransfer('upload', files.map((f) => ({ name: f.name, size: f.size })));
-  if (accepted) {
-    archivosStagedFiles = [];
-    renderArchivosStagedList();
-    await sendArchivosFilesNow(files);
-  }
-});
-
-document.getElementById('btn-archivos-receive').addEventListener('click', async () => {
-  const names = Array.from(archivosSelectedRemote);
-  if (names.length === 0) return;
-  if (isTrustedDevice()) {
-    for (const name of names) await downloadArchivo(name);
-    return;
-  }
-  const accepted = await requestArchivosTransfer('download', names.map((name) => ({ name, size: 0 })));
-  if (accepted) {
-    for (const name of names) await downloadArchivo(name);
-  }
-});
-
-// Crea la solicitud, espera a que el ordenador conteste (polling cada
-// ARCHIVOS_TRANSFER_POLL_MS) y devuelve true/false segun si se acepto.
-// Solo la llaman los dos listeners de arriba cuando NO somos el
-// ordenador -- este nunca pasa por aqui.
-async function requestArchivosTransfer(direction, files) {
-  const btn = document.getElementById(direction === 'upload' ? 'btn-archivos-send' : 'btn-archivos-receive');
-  const statusEl = document.getElementById('archivos-transfer-status');
-  btn.disabled = true;
-  statusEl.textContent = 'Solicitud enviada al ordenador. Esperando que la confirmen allí...';
-  statusEl.classList.remove('hidden');
-  try {
-    const record = await api('/api/archivos/transfer-requests', {
-      method: 'POST',
-      body: JSON.stringify({ direction, files }),
-    });
-    archivosOutgoingRequestId = record.id;
-    const finalStatus = await waitForArchivosTransferResolution(record.id);
-    if (finalStatus === 'accepted') {
-      statusEl.textContent = 'Confirmado. Transfiriendo...';
-      return true;
-    }
-    if (finalStatus === 'rejected') {
-      alert('El ordenador rechazó la transferencia.');
-    } else {
-      alert('Nadie confirmó la transferencia a tiempo. Inténtalo de nuevo.');
-    }
-    return false;
-  } catch (err) {
-    alert('No se pudo solicitar la transferencia: ' + err.message);
-    return false;
-  } finally {
-    archivosOutgoingRequestId = null;
-    statusEl.classList.add('hidden');
-    updateArchivosReceiveButtonState();
-    document.getElementById('btn-archivos-send').disabled = archivosStagedFiles.length === 0;
-  }
-}
-
-function waitForArchivosTransferResolution(id) {
-  return new Promise((resolve) => {
-    const timer = setInterval(async () => {
-      try {
-        const record = await api(`/api/archivos/transfer-requests/${id}`);
-        if (record.status !== 'pending') {
-          clearInterval(timer);
-          resolve(record.status); // 'accepted' | 'rejected' | 'expired'
-        }
-      } catch (err) {
-        // 404 = ya se limpio (caducada hace rato): se trata como expirada.
-        clearInterval(timer);
-        resolve('expired');
-      }
-    }, ARCHIVOS_TRANSFER_POLL_MS);
-  });
-}
-
-// Vigilancia de solicitudes entrantes -- solo tiene sentido en el
-// ordenador (es el unico que puede aceptar/rechazar, ver requireTrusted
-// en routes/archivos.js), y solo mientras la vista Archivos esta abierta
-// (arranca/para en openArchivosView()/closeArchivosView()).
-function startArchivosIncomingWatcher() {
-  if (!isTrustedDevice() || archivosIncomingPollTimer) return;
-  archivosIncomingPollTimer = setInterval(checkArchivosIncomingRequests, ARCHIVOS_TRANSFER_POLL_MS);
-}
-function stopArchivosIncomingWatcher() {
-  if (archivosIncomingPollTimer) clearInterval(archivosIncomingPollTimer);
-  archivosIncomingPollTimer = null;
-}
-
-async function checkArchivosIncomingRequests() {
-  let pending;
-  try {
-    pending = await api('/api/archivos/transfer-requests');
-  } catch (err) {
-    return; // red caida un instante: se reintenta en el siguiente ciclo
-  }
-  for (const record of pending) {
-    if (archivosHandledIncomingIds.has(record.id)) continue;
-    archivosHandledIncomingIds.add(record.id);
-    await promptArchivosIncomingRequest(record);
-  }
-}
-
-async function promptArchivosIncomingRequest(record) {
-  const verb = record.direction === 'upload' ? 'mandarte' : 'descargar de tu carpeta compartida';
-  const list = record.files.map((f) => f.name).join(', ');
-  const accept = confirm(`El móvil quiere ${verb} ${record.files.length} archivo(s): ${list}\n\n¿Aceptar?`);
-  try {
-    await api(`/api/archivos/transfer-requests/${record.id}/${accept ? 'accept' : 'reject'}`, { method: 'POST' });
-  } catch (err) {
-    // Ya caduco o se resolvio de otra forma mientras se decidia: no pasa nada.
-  }
-  if (accept) {
-    // Si era una subida, el propio movil hace el POST real al ver
-    // 'accepted' en su propio polling (hasta ARCHIVOS_TRANSFER_POLL_MS
-    // de retraso) y LUEGO sube el archivo -- asi que un solo refresco
-    // rapido aqui podria llegar antes de que el archivo exista de
-    // verdad. Dos intentos escalonados (uno pronto, otro con margen de
-    // sobra sobre el peor caso del polling del movil) sin necesidad de
-    // inventar un tercer estado "completado" solo para esto.
-    setTimeout(() => refreshArchivosCurrentView().catch(() => {}), 2000);
-    setTimeout(() => refreshArchivosCurrentView().catch(() => {}), ARCHIVOS_TRANSFER_POLL_MS + 2000);
-  }
-}
-
-// Bloque "Carpeta de destino": solo editable/explorable desde el
-// ordenador (ver isTrustedDevice()) -- el servidor tambien lo protege por
-// su cuenta (PUT /folder y GET /browse son requireTrusted), esto solo
-// evita ensenar controles que en el movil fallarian igualmente.
-async function refreshArchivosFolderUI() {
-  const readonlyHint = document.getElementById('archivos-folder-readonly-hint');
-  const editableRow = document.getElementById('archivos-folder-row');
-  try {
-    const { folder } = await api('/api/archivos/folder');
-    if (isTrustedDevice()) {
-      editableRow.classList.remove('hidden');
-      readonlyHint.classList.add('hidden');
-      document.getElementById('archivos-folder-path').value = folder;
-    } else {
-      editableRow.classList.add('hidden');
-      readonlyHint.classList.remove('hidden');
-      readonlyHint.textContent = `Carpeta configurada en el ordenador: ${folder}`;
-    }
-  } catch (err) {
-    editableRow.classList.add('hidden');
-    readonlyHint.classList.add('hidden');
-  }
-}
-
-let archivosBrowsePath = null;
-
-async function loadArchivosBrowserPath(path) {
-  const qs = path ? `?path=${encodeURIComponent(path)}` : '';
-  const data = await api(`/api/archivos/browse${qs}`);
-  archivosBrowsePath = data.path;
-  document.getElementById('archivos-browser-current-path').textContent = data.path;
-  const list = document.getElementById('archivos-browser-list');
-  list.innerHTML = '';
-  const upBtn = document.getElementById('btn-archivos-browser-up');
-  upBtn.disabled = !data.parent;
-  upBtn.dataset.parent = data.parent || '';
-  for (const folder of data.folders) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'archivos-browser-item';
-    btn.textContent = folder.name;
-    btn.addEventListener('click', () => loadArchivosBrowserPath(folder.path));
-    list.appendChild(btn);
-  }
-}
-
-document.getElementById('btn-archivos-browse').addEventListener('click', async () => {
-  await loadArchivosBrowserPath(document.getElementById('archivos-folder-path').value || null);
-  document.getElementById('archivos-folder-browser').classList.remove('hidden');
-});
-document.getElementById('btn-archivos-browser-up').addEventListener('click', () => {
-  const parent = document.getElementById('btn-archivos-browser-up').dataset.parent;
-  if (parent) loadArchivosBrowserPath(parent);
-});
-document.getElementById('btn-archivos-browser-cancel').addEventListener('click', () => {
-  document.getElementById('archivos-folder-browser').classList.add('hidden');
-});
-document.getElementById('btn-archivos-browser-use').addEventListener('click', async () => {
-  try {
-    await api('/api/archivos/folder', { method: 'PUT', body: JSON.stringify({ folder: archivosBrowsePath }) });
-    document.getElementById('archivos-folder-path').value = archivosBrowsePath;
-    document.getElementById('archivos-folder-browser').classList.add('hidden');
-    // Saltar el panel principal a la carpeta que se acaba de fijar como
-    // nueva por defecto -- coherente con que "Carpeta por defecto" haga
-    // lo mismo.
-    await loadArchivosNavPath(archivosBrowsePath);
-  } catch (err) {
-    alert('No se pudo cambiar la carpeta: ' + err.message);
-  }
-});
-
-document.getElementById('btn-archivos-check-update').addEventListener('click', () => {
-  checkForNewRelease();
-});
-
-async function openArchivosView() {
-  closeExtensionsView();
-  document.getElementById('archivos-view').classList.remove('hidden');
-  setCurrentScreen('archivos');
-  document.getElementById('archivos-folder-browser').classList.add('hidden');
-  archivosStagedFiles = [];
-  renderArchivosStagedList();
-  archivosSelectedRemote.clear();
-  archivosCurrentPath = null;
-  archivosHandledIncomingIds.clear();
-  await Promise.all([refreshSyncStatusUI(), refreshArchivosFolderUI(), refreshVersionInfo()]);
-  await refreshArchivosBrowsePanel();
-  startArchivosIncomingWatcher();
-}
-function closeArchivosView() {
-  stopArchivosIncomingWatcher();
-  if (archivosOutgoingRequestId) {
-    const id = archivosOutgoingRequestId;
-    archivosOutgoingRequestId = null;
-    // Best-effort: si una aceptacion llegara tarde sobre una solicitud
-    // ya cancelada, el movil ya no la esta esperando (ver
-    // requestArchivosTransfer) -- evita un estado confuso si se vuelve
-    // a abrir Archivos mas tarde.
-    api(`/api/archivos/transfer-requests/${id}`, { method: 'DELETE' }).catch(() => {});
-  }
-  document.getElementById('archivos-view').classList.add('hidden');
-  openExtensionsView();
-}
-document.getElementById('btn-open-archivos').addEventListener('click', openArchivosView);
-document.getElementById('btn-close-archivos').addEventListener('click', closeArchivosView);
 
 // ---------------------------------------------------------------------
 // Extension "Viajes": mapa interactivo por paises (public/viajes-world-map.svg
@@ -11349,7 +15695,7 @@ function renderViajesAttachment(att) {
   const wrap = document.createElement('div');
   wrap.className = 'viajes-attachment';
   const img = document.createElement('img');
-  img.src = att.url;
+  setAssetImageSrc(img, att.url);
   img.alt = '';
   img.className = 'viajes-attachment-photo';
   wrap.appendChild(img);
@@ -11379,7 +15725,7 @@ function renderViajesMovement(mv) {
   wrap.className = 'viajes-attachment';
   if (mv.attachmentUrl) {
     const img = document.createElement('img');
-    img.src = mv.attachmentUrl;
+    setAssetImageSrc(img, mv.attachmentUrl);
     img.alt = '';
     img.className = 'viajes-attachment-photo';
     wrap.appendChild(img);
@@ -12246,12 +16592,13 @@ function renderLecturasItemsTable() {
   });
 }
 
+
 // --- Modal de item (con chips de generos) -------------------------------
 let lecturasItemGenres = [];
 
 // Generos ya usados en CUALQUIER saga (no solo la abierta ahora mismo)
 // -- se traen con GET /api/lecturas-items sin sagaId, que ya devuelve
-// todos los items de todas las sagas (ver server/routes/lecturasItems.js).
+// todos los items de todas las sagas (ver routes-local/lecturasItems.js).
 // Sin tabla ni endpoint nuevo: "la opcion de seleccion general" que
 // pidio Koku sale sola de los items ya guardados, combinada con
 // LECTURAS_PREDEFINED_GENRES para tener algo que elegir incluso antes de
@@ -12430,283 +16777,445 @@ document.getElementById('btn-delete-lecturas-item').addEventListener('click', as
 // contenido de dentro se oculta (ver .is-animating en styles.css) para
 // que no se vea el texto reajustandose a media animacion — 340ms es la
 // duracion de la transicion CSS (320ms) con un pelin de margen para que
-// de tiempo a que termine de verdad antes de destaparlo.
-const MY_SPACE_COLUMN_ANIMATION_MS = 340;
-let mySpaceAnimationTimer = null;
 
-function playMySpaceColumnAnimation() {
-  const hub = document.getElementById('my-space-hub');
-  hub.classList.add('is-animating');
-  clearTimeout(mySpaceAnimationTimer);
-  mySpaceAnimationTimer = setTimeout(() => hub.classList.remove('is-animating'), MY_SPACE_COLUMN_ANIMATION_MS);
+// =====================================================================
+// GESTOS DE NAVEGACION (solo movil)
+//
+// Idea general, pedida por Koku: moverse por la app deslizando el dedo,
+// no solo tocando botones. Hay DOS gestos horizontales que compiten por
+// el mismo dedo, asi que se reparten la pantalla en CARRILES:
+//
+//   |  lateral  |        centro         |  lateral  |
+//   |  cambiar  |   gesto propio de     |  cambiar  |
+//   | de PESTAÑA|   ESTA pantalla       | de PESTAÑA|
+//
+// - Carril LATERAL (los bordes izquierdo y derecho): cambia de pestaña
+//   de la barra de abajo, de una en una y en el orden en que se ven:
+//   Calendario -> Notas -> Herramientas -> Configuracion. Deslizar a la
+//   izquierda avanza, a la derecha retrocede.
+// - Carril CENTRAL: lo que tenga sentido DENTRO de la pantalla actual
+//   (cambiar de dia en el calendario, subir de carpeta en Notas, volver
+//   al menu de Configuracion, cambiar de pestaña dentro de Gimnasio...).
+//   Si en esa pantalla el centro no tiene nada que hacer, NO pasa nada:
+//   cambiar de pestaña es siempre cosa de los bordes, en cualquier
+//   pantalla. Asi un mismo deslizamiento por el centro nunca significa
+//   dos cosas distintas segun donde estes.
+//
+// Todo esto convive con los gestos que ya existian (deslizar vertical
+// para cambiar de mes/año, pellizcar para subir de nivel, deslizar una
+// fila de nota para sacar sus acciones): esos siguen igual, y este
+// modulo se aparta solo cuando toca (ver NAV_SWIPE_OPT_OUT y el trato
+// especial del mapa de Viajes).
+// =====================================================================
+
+// Orden de las pestañas, el MISMO que el de los botones de la barra de
+// abajo (ver .mobile-nav en index.html). Si algun dia se reordena la
+// barra, hay que reordenar esto a juego -- se deja como lista aparte y
+// no se lee del DOM porque el hueco central es configurable (puede
+// enseñar Notas u otra App) y el ORDEN de navegacion no debe depender
+// de que icono tenga puesto ahora mismo.
+const MOBILE_TAB_ORDER = ['calendar', 'notes', 'extensions', 'settings'];
+
+// Ancho del carril lateral: 22% del ancho de la pantalla a cada lado,
+// pero nunca menos de 56px (en un movil estrecho haria falta demasiada
+// punteria) ni mas de 120px (en una tablet se comeria media pantalla).
+function mobileEdgeRailWidth() {
+  return Math.min(Math.max(window.innerWidth * 0.22, 56), 120);
 }
 
-// Un solo listener en el hub entero (delegacion) en vez de uno por
-// columna: mas simple, y sigue funcionando igual aunque los bloques que
-// hay dentro se muevan de sitio. Ya no hay un boton dedicado para
-// expandir (ocupaba espacio vertical solo para eso) -- clicar la FILA
-// entera de cabecera (.reminders-panel-header, con la clase
-// my-space-col-expand-trigger -- antes solo el h2) la expande
-// directamente, pedido explicito de Koku.
-document.getElementById('my-space-hub').addEventListener('click', (e) => {
-  const trigger = e.target.closest('.my-space-col-expand-trigger');
-  if (!trigger) return;
-  // Si el clic fue sobre un boton propio dentro de la fila (ej.
-  // "Proximos →" en Recordatorios), ese boton ya tiene su propia accion
-  // -- no expandir tambien la columna a la vez.
-  if (e.target.closest('button')) return;
-  const col = trigger.closest('.my-space-col');
-  if (!col) return;
-  playMySpaceColumnAnimation();
-  document.getElementById('my-space-hub').dataset.expanded = col.dataset.col;
-  document.getElementById('my-space-back-btn').classList.remove('hidden');
-});
-document.getElementById('my-space-back-btn').addEventListener('click', () => {
-  playMySpaceColumnAnimation();
-  collapseMySpaceExpandedColumn();
-});
+function isMobileEdgeZone(x) {
+  const carril = mobileEdgeRailWidth();
+  return x <= carril || x >= window.innerWidth - carril;
+}
 
-applyMiEspacioMode();
-applyUiStyle();
+// Los gestos de navegacion son cosa del movil: en escritorio el
+// calendario y el panel conviven en pantalla y no hay barra de pestañas
+// que recorrer. 860px es el mismo corte que usa styles.css.
+function isMobileLayout() {
+  return window.innerWidth < 860;
+}
+
+// Un modal abierto se lleva TODA la atencion: mientras haya uno, ningun
+// gesto de navegacion. (Ojo: esto NO es isGestureBlockedByModal(), que
+// ademas bloquea con cualquier pantalla completa abierta -- eso vale
+// para los gestos del calendario, pero aqui hace falta justo lo
+// contrario: que el gesto siga funcionando DENTRO de Gimnasio, Notas o
+// Configuracion.)
+// "¿Se ve de verdad este elemento?". No vale mirar solo la clase
+// .hidden: hay trozos de la app (por ejemplo el dialogo de ayuda de
+// Progreso del Gimnasio) que se quedan SIN esa clase aunque no se vean,
+// porque quien los tapa es un padre suyo. Tampoco vale offsetParent a
+// secas: un elemento con position:fixed -- como son casi todos los
+// modales -- tiene offsetParent nulo aunque este perfectamente visible.
+// getClientRects() sale bien de los dos casos: devuelve 0 rectangulos si
+// el elemento (o cualquier padre) no se esta pintando, y al menos uno si
+// se ve, fixed o no.
+function estaVisibleDeVerdad(el) {
+  return !!el && el.getClientRects().length > 0;
+}
+
+function isNavGestureBlocked() {
+  // Ojo con el :not(#settings-modal): el panel de Configuracion usa la
+  // clase .modal como todos los dialogos, pero NO es un dialogo suelto
+  // -- es una de las cuatro pestañas de la barra de abajo, y tiene que
+  // dejarse navegar con gestos como las otras tres (deslizar para
+  // volver de una seccion a su menu, o para salirse a Herramientas).
+  return [...document.querySelectorAll('.modal:not(.hidden):not(#settings-modal)')]
+    .some(estaVisibleDeVerdad);
+}
+
+// Sitios donde arrastrar el dedo YA significa otra cosa, y donde este
+// modulo se aparta del todo para no pisarlo.
+const NAV_SWIPE_OPT_OUT = [
+  '.note-swipe-wrap',   // fila de nota: desliza para Editar/Mover/Eliminar
+  '#note-body table',   // tabla del editor: arrastrar es seleccionar celdas
+  '#gym-live-view',     // entreno en vivo: salirse sin querer seria feo
+  '[data-no-nav-swipe]', // escotilla generica para lo que venga despues
+].join(', ');
 
 // ---------------------------------------------------------------------
-// Aviso de nueva version disponible: /api/version devuelve el momento en
-// que arranco el proceso del servidor. npm run dev reinicia ese proceso
-// cada vez que tocamos un archivo de server/, asi que si ese valor
-// cambia respecto al que teniamos guardado, el servidor se ha
-// actualizado y avisamos para recargar en vez de dejar la pagina con
-// JS/HTML desincronizados con lo nuevo. Se puede desactivar desde
-// Configuracion > Este dispositivo (localStorage.updateCheckEnabled).
+// Que App estaba abierta dentro de Herramientas.
+//
+// Peticion de Koku: si estaba en Gimnasio y me voy a Notas, al volver
+// deslizando quiero entrar DIRECTO a Gimnasio, no al menu de
+// Herramientas. Para cambiar de App, el boton de Herramientas de la
+// barra de abajo (que siempre lleva al menu y borra este recuerdo).
+//
+// Es una variable normal en memoria a proposito, NO localStorage: al
+// cerrar la app se olvida sola, que es justo lo que pidio ("que al
+// cerrar la app se resetee eso para que no se quede abierta ninguna").
 // ---------------------------------------------------------------------
-let knownServerStartedAt = null;
+let ultimaHerramientaAbierta = null;
 
-async function checkForUpdate() {
-  if (localStorage.getItem('updateCheckEnabled') === 'false') return;
-  try {
-    const res = await fetch('/api/version');
-    if (!res.ok) return;
-    const { startedAt } = await res.json();
-    if (knownServerStartedAt === null) {
-      knownServerStartedAt = startedAt;
-      return;
+const HERRAMIENTAS_APPS = {
+  gym: { viewId: 'gym-view', open: () => openGymView() },
+  finanzas: { viewId: 'finanzas-view', open: () => openFinanzasView() },
+  lecturas: { viewId: 'lecturas-view', open: () => openLecturasView() },
+  viajes: { viewId: 'viajes-view', open: () => openViajesView() },
+};
+
+// Cual de las Apps de Herramientas esta abierta AHORA mismo (mirando el
+// DOM, que es la unica verdad: se puede haber abierto desde el menu,
+// desde el hueco de la barra o desde un gesto).
+function appDeHerramientasAbierta() {
+  for (const [id, app] of Object.entries(HERRAMIENTAS_APPS)) {
+    const el = document.getElementById(app.viewId);
+    if (el && !el.classList.contains('hidden')) return id;
+  }
+  return null;
+}
+
+// La pestaña en la que estamos = la que la barra de abajo pinta como
+// activa. Se usa el DOM en vez de una variable propia para que no haya
+// dos "verdades" que se puedan desincronizar: los botones de la barra,
+// los de cerrar de cada pantalla y estos gestos pasan todos por
+// refreshMobileNavActive().
+function currentMobileTab() {
+  const activo = document.querySelector('.mobile-nav-btn.active');
+  const tab = activo && activo.dataset.mobileNav;
+  return MOBILE_TAB_ORDER.includes(tab) ? tab : 'calendar';
+}
+
+// Animacion del cambio de pestaña: se reutiliza la MISMA que ya hacia
+// el calendario al cambiar de mes (playMobileSwipeTransition), aplicada
+// a la pantalla que queda a la vista. Asi el movimiento de la app es
+// uno solo y obedece al interruptor de Animaciones sin nada aparte.
+// Las pantallas completas que pueden estar por encima del calendario,
+// de la de mas arriba a la de mas abajo.
+const CAPAS_DE_PANTALLA = [
+  'settings-modal', 'gym-view', 'finanzas-view', 'lecturas-view',
+  'viajes-view', 'extensions-view', 'mobile-notes-view', 'note-editor-view',
+  'groups-view',
+];
+
+// Que pantalla se esta viendo AHORA MISMO. Se usa dos veces: para
+// animar la que entra, y para saber -- antes de navegar -- cual es la
+// que se va a ir.
+function capaDePantallaVisible() {
+  for (const id of CAPAS_DE_PANTALLA) {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains('hidden')) return el;
+  }
+  // Ninguna pantalla completa abierta: se ve el calendario, que es
+  // <main class="layout"> (NO #app: ahi dentro esta tambien la barra de
+  // abajo, que no debe moverse).
+  return document.querySelector('main.layout');
+}
+
+// capaSaliente: la pantalla que se estaba viendo ANTES de navegar. Con
+// ella, las dos viajan a la vez como la tira de un carrusel; sin ella,
+// solo entra la nueva (que es lo que toca cuando el cambio ocurre
+// DENTRO de una misma pantalla, como volver de una seccion de
+// Configuracion a su menu).
+function animarCambioDePantalla(direccion, capaSaliente) {
+  const entrante = capaDePantallaVisible();
+  if (capaSaliente && capaSaliente !== entrante) {
+    playMobileSwipeOut(capaSaliente, direccion);
+  }
+  if (entrante) {
+    playMobileSwipeTransition(entrante, direccion);
+    return;
+  }
+}
+
+// Cambiar de pestaña un paso. paso = +1 (deslizar a la izquierda,
+// avanzar) o -1 (deslizar a la derecha, retroceder).
+function moverPestanaMovil(paso) {
+  const actual = currentMobileTab();
+  // Justo ANTES de irse de Herramientas se apunta que App quedaba
+  // abierta, para poder volver directo a ella (ver la nota de
+  // ultimaHerramientaAbierta). Se hace aqui, en el unico sitio por el
+  // que pasan todos los cambios de pestaña por gesto, en vez de meter
+  // una linea dentro de cada open*/close* de las cuatro Apps.
+  if (actual === 'extensions') ultimaHerramientaAbierta = appDeHerramientasAbierta();
+  // La pantalla que se va, apuntada ANTES de navegar: despues ya estara
+  // oculta y no habria forma de saber cual era.
+  const saliente = capaDePantallaVisible();
+  const i = MOBILE_TAB_ORDER.indexOf(actual);
+  const destino = MOBILE_TAB_ORDER[i + paso];
+  // En los extremos (antes de Calendario, despues de Configuracion) no
+  // se da la vuelta a proposito: dar la vuelta desorienta, y ademas
+  // haria imposible saber por el gesto si estas al principio o al final.
+  if (!destino) return false;
+
+  // Herramientas con memoria: si habia una App abierta, se vuelve a
+  // ella directamente (ver ultimaHerramientaAbierta arriba).
+  if (destino === 'extensions' && ultimaHerramientaAbierta) {
+    closeAllMobileOverlays();
+    HERRAMIENTAS_APPS[ultimaHerramientaAbierta].open();
+    refreshMobileNavActive('extensions');
+  } else {
+    goToMobileSection(destino);
+  }
+  animarCambioDePantalla(paso > 0 ? 'left' : 'right', saliente);
+  return true;
+}
+
+// ---------------------------------------------------------------------
+// Carril CENTRAL: el gesto propio de cada pantalla.
+//
+// Devuelve true si ha hecho algo; false si en esta pantalla el centro no
+// tenia nada que hacer (y entonces quien llama deja que el gesto haga lo
+// mismo que el lateral, cambiar de pestaña).
+// ---------------------------------------------------------------------
+
+// Barras de sub-pestañas de las Apps. Generico a proposito: se busca la
+// primera barra VISIBLE y se mueve su boton activo un puesto. Una App
+// nueva con su propia barra solo tiene que añadir aqui su pareja de
+// selectores: la BARRA de botones y los PANELES que esos botones
+// enseñan.
+//
+// Hacen falta los dos porque la animacion de carrusel se le pone al
+// PANEL, no a la App entera: en un carrusel de verdad la barra de
+// pestañas se queda quieta y lo que viaja es el contenido. Animar la
+// vista completa haria que la propia barra se fuera de la pantalla, que
+// es justo lo que no se quiere.
+const MOBILE_SUBTAB_BARS = [
+  { barra: '.gym-tabs', paneles: '.gym-tab-panel' },
+  { barra: '.finanzas-tabs', paneles: '[data-finanzas-panel]' },
+  { barra: '.viajes-tabs', paneles: '[data-viajes-panel]' },
+];
+
+function moverSubPestana(paso) {
+  for (const { barra: selBarra, paneles: selPaneles } of MOBILE_SUBTAB_BARS) {
+    const barra = document.querySelector(selBarra);
+    if (!estaVisibleDeVerdad(barra)) continue;
+    const botones = [...barra.querySelectorAll('button')];
+    const i = botones.findIndex((b) => b.classList.contains('active'));
+    if (i === -1) return false;
+    const destino = botones[i + paso];
+    if (!destino) return true; // hay barra, pero ya estas en el extremo
+    // El panel que se va, apuntado ANTES del clic (que es quien lo
+    // oculta): asi los dos viajan a la vez, igual que las pantallas.
+    const saliente = [...document.querySelectorAll(selPaneles)].find(estaVisibleDeVerdad);
+    destino.click();
+    const panel = [...document.querySelectorAll(selPaneles)].find(estaVisibleDeVerdad);
+    const direccion = paso > 0 ? 'left' : 'right';
+    if (saliente && saliente !== panel) playMobileSwipeOut(saliente, direccion);
+    if (panel) playMobileSwipeTransition(panel, direccion);
+    return true;
+  }
+  return false;
+}
+
+// "Volver un paso" dentro de la pantalla actual. Cada entrada es un
+// boton de volver que YA existe en la app: el gesto no duplica logica,
+// solo pulsa el mismo boton (asi lo que hagan esos botones -- descartar
+// el borrador de un tema, limpiar la busqueda de Notas... -- pasa igual
+// deslizando que tocando). El orden importa: de la capa mas de dentro a
+// la mas de fuera.
+const VOLVER_UN_PASO = [
+  // Configuracion: de una seccion (Perfil, Vista, Este dispositivo...)
+  // al menu de Configuracion.
+  'btn-settings-back',
+  // Gimnasio: de los dias de un bloque a la lista de bloques.
+  'btn-gym-back-to-blocks',
+  // Lecturas: del detalle de una saga a la lista de sagas.
+  'btn-back-lecturas-sagas',
+  // Viajes: del detalle de un viaje a la lista de viajes.
+  'btn-back-viajes-trips',
+  // Grupos: del detalle de un grupo a la lista de grupos.
+  'btn-groups-back',
+  // Notas: subir un nivel de carpeta. Va el ULTIMO de la lista porque
+  // es el mas "de fuera" de todos. Peticion expresa de Koku: deslizar
+  // en Notas solo sirve para SALIR (subir), nunca para entrar -- entrar
+  // exige elegir en que carpeta, y ademas deslizar sobre una carpeta ya
+  // significa otra cosa (sacar Editar/Mover/Eliminar).
+  'btn-mobile-notes-back',
+];
+
+function volverUnPasoDentroDeLaPantalla() {
+  for (const id of VOLVER_UN_PASO) {
+    const btn = document.getElementById(id);
+    // Un boton de volver que no se ve = esa capa no esta abierta.
+    if (btn && !btn.classList.contains('hidden') && estaVisibleDeVerdad(btn)) {
+      // La animacion NO se lanza aqui: la lanza el propio boton (ver
+      // justo debajo), asi sale igual lo pulses o lo deslices -- que es
+      // lo que pidio Koku ("que el boton volver tambien haga esa
+      // animacion").
+      btn.click();
+      return true;
     }
-    if (startedAt !== knownServerStartedAt) {
-      document.getElementById('update-banner').classList.remove('hidden');
-    }
-  } catch (err) {
-    // Sin conexion justo ahora (por ejemplo, el servidor esta a mitad de
-    // reiniciarse): no pasa nada, lo volvemos a intentar en el siguiente
-    // ciclo en vez de mostrar un error.
   }
+  return false;
 }
 
-document.getElementById('btn-reload-update').addEventListener('click', () => location.reload());
-
-// ---------------------------------------------------------------------
-// Aviso de version nueva EN GITHUB (distinto del de arriba, que solo
-// detecta que el servidor que ya tenias abierto se reinicio por su
-// cuenta). Aqui se pregunta de verdad si hay algo mas nuevo que lo que
-// tienes instalado, aunque acabes de abrir la app. Solo el ordenador de
-// confianza puede usar esto (ver requireTrusted en
-// server/routes/update.js) — en un movil emparejado, /api/update/check
-// responde 403 y aqui simplemente no sale el aviso, sin error visible.
-// "No para esta version" se recuerda en localStorage (por dispositivo,
-// como el resto de preferencias de "Este dispositivo"): la siguiente
-// version SI que volvera a avisar.
-// ---------------------------------------------------------------------
-function compareVersions(a, b) {
-  const pa = String(a).split('.').map(Number);
-  const pb = String(b).split('.').map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const diff = (pa[i] || 0) - (pb[i] || 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
-
-// Info de version/commit en el menu principal de Configuracion (para "no
-// ir perdido" con que version corre este ordenador) -- ver
-// GET /api/update/info en server/routes/update.js. Es solo lectura,
-// no habla con GitHub (a diferencia de checkForNewRelease), asi que
-// funciona sin internet. En un movil emparejado (que no puede leer el
-// git de este ordenador) el 403 se ignora en silencio, igual que el
-// aviso de nueva version.
-const VERSION_INFO_DATE_FORMATTER = new Intl.DateTimeFormat('es-ES', {
-  day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
-});
-
-// Ademas del menu principal de Configuracion, este mismo bloque se
-// repite en Apps > Archivos (#archivos-version-info) -- Koku pidio
-// ver ahi tambien la version/commit, no solo en Configuracion.
-async function refreshVersionInfo() {
-  const boxes = [document.getElementById('settings-version-info'), document.getElementById('archivos-version-info')].filter(Boolean);
-  if (!boxes.length) return;
-  try {
-    const info = await api('/api/update/info');
-    const commitDate = info.commitDate ? VERSION_INFO_DATE_FORMATTER.format(new Date(info.commitDate)) : '';
-    const html = `
-      <div>Versión ${escapeHtml(info.version)} · rama <code>${escapeHtml(info.branch)}</code></div>
-      <div>Último commit: <code>${escapeHtml(info.commitHash)}</code> — ${escapeHtml(info.commitMessage)}</div>
-      ${commitDate ? `<div>${escapeHtml(commitDate)}</div>` : ''}
-    `;
-    boxes.forEach((box) => {
-      box.innerHTML = html;
-      box.classList.remove('hidden');
-    });
-  } catch (err) {
-    // Sin internet no importa (esto no hace fetch a GitHub), pero si
-    // fallase por cualquier otro motivo (git no disponible, movil
-    // emparejado sin permiso...) mejor no mostrar nada raro a medias.
-    boxes.forEach((box) => box.classList.add('hidden'));
-  }
-}
-
-let pendingReleaseVersion = null;
-
-// El estado de la comprobacion (comprobando/al dia/nueva version/error)
-// se ve integrado en el propio texto del boton "Comprobar ahora" de
-// Apps > Archivos, en vez de un mensaje aparte encima -- Koku lo
-// pidio explicitamente ("que no sea solo un mensaje"). data-check-status
-// controla el color (ver .archivos-check-btn en styles.css: rojo en error).
-function setArchivosCheckButtonState(status, text) {
-  const btn = document.getElementById('btn-archivos-check-update');
+// Los botones de volver/cerrar animan igual que el gesto. Se registran
+// aqui, todos juntos, en vez de uno a uno donde vive cada boton:
+// - los de VOLVER_UN_PASO (subir una capa dentro de la pantalla),
+// - los "← Home"/"← Herramientas" de las pantallas completas
+//   (.my-space-close-btn) y el "← Calendario" de Grupos.
+// El listener solo AÑADE la animacion; lo que hace el boton de verdad
+// sigue en su propio sitio, sin tocar.
+function animarAlPulsar(btn) {
   if (!btn) return;
-  btn.textContent = text;
-  btn.dataset.checkStatus = status;
-  btn.disabled = status === 'checking';
-}
-
-// Ademas del banner de siempre, esto tambien conduce el estado del boton
-// de Apps > Archivos (#btn-archivos-check-update) -- asi la
-// comprobacion automatica de aqui abajo y el boton manual de ahi dan el
-// mismo feedback. GET /api/update/check ya es requireDeviceOrTrusted (ver
-// server/routes/update.js), asi que esto tambien funciona en un movil
-// emparejado -- lo unico que sigue siendo solo del ordenador es
-// instalarla de verdad (POST /pull).
-async function checkForNewRelease() {
-  setArchivosCheckButtonState('checking', 'Comprobando…');
-  try {
-    const info = await api('/api/update/check');
-    if (!info || !info.remoteVersion) {
-      setArchivosCheckButtonState('error', 'No se pudo comprobar la versión.');
-      return;
-    }
-    if (compareVersions(info.remoteVersion, info.currentVersion) <= 0) {
-      setArchivosCheckButtonState('ok', `Tienes la última versión (v${info.currentVersion}).`);
-      return;
-    }
-    setArchivosCheckButtonState('ok', `Hay una versión nueva disponible (v${info.remoteVersion}).`);
-    if (localStorage.getItem('skippedUpdateVersion') === info.remoteVersion) return;
-
-    pendingReleaseVersion = info.remoteVersion;
-    document.getElementById('new-release-banner-text').textContent = `Hay una versión nueva disponible (v${info.remoteVersion}).`;
-    // Instalar de verdad (git pull) solo puede hacerlo el ordenador -- en
-    // el movil se sustituye el boton de instalar por un texto informativo.
-    const trusted = isTrustedDevice();
-    document.getElementById('btn-install-release').classList.toggle('hidden', !trusted);
-    document.getElementById('new-release-mobile-hint').classList.toggle('hidden', trusted);
-    document.getElementById('new-release-banner').classList.remove('hidden');
-  } catch (err) {
-    // Sin internet o git no configurado: no pasa nada, se vuelve a
-    // intentar mas tarde sin molestar con un error.
-    setArchivosCheckButtonState('error', 'No se pudo comprobar (sin conexión con el ordenador o con GitHub).');
-  }
-}
-
-document.getElementById('btn-skip-release').addEventListener('click', () => {
-  if (pendingReleaseVersion) localStorage.setItem('skippedUpdateVersion', pendingReleaseVersion);
-  document.getElementById('new-release-banner').classList.add('hidden');
-});
-document.getElementById('btn-dismiss-release').addEventListener('click', () => {
-  document.getElementById('new-release-banner').classList.add('hidden');
-});
-
-// Tras un "git pull" bueno, el codigo nuevo ya esta en el disco pero el
-// proceso que sigue corriendo (y la pagina que tienes abierta) todavia
-// tienen el viejo cargado en memoria — hay que reiniciar de verdad para
-// que se note. En Electron, la propia app se reinicia sola. En el
-// navegador (npm run dev), en cuanto "git pull" cambia archivos de
-// server/ el --watch reinicia el servidor solo — aqui solo hace falta
-// esperar a que vuelva a responder y recargar la pagina.
-function waitForServerRestartThenReload() {
-  const attempt = async () => {
-    try {
-      const res = await fetch('/api/version');
-      if (res.ok) {
-        location.reload();
-        return;
-      }
-    } catch (err) {
-      // sigue reiniciandose, se reintenta
-    }
-    setTimeout(attempt, 1000);
-  };
-  setTimeout(attempt, 2000);
-}
-
-document.getElementById('btn-install-release').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-install-release');
-  const originalLabel = btn.textContent;
-  btn.disabled = true;
-  document.getElementById('btn-skip-release').disabled = true;
-  btn.textContent = 'Actualizando…';
-
-  try {
-    await api('/api/update/pull', { method: 'POST' });
-    if (window.electronAPI && window.electronAPI.relaunchApp) {
-      btn.textContent = 'Reiniciando la app…';
-      window.electronAPI.relaunchApp();
-    } else {
-      btn.textContent = 'Reiniciando el servidor…';
-      waitForServerRestartThenReload();
-    }
-  } catch (err) {
-    alert('No se pudo actualizar: ' + err.message);
-    btn.disabled = false;
-    document.getElementById('btn-skip-release').disabled = false;
-    btn.textContent = originalLabel;
-  }
-});
-
-// ---------------------------------------------------------------------
-// Pantalla de bienvenida (primer arranque): ver el modal en index.html.
-// Se muestra una sola vez, en el dispositivo que abra la app primero
-// (el perfil es compartido por TODA la instalacion, no por dispositivo
-// -- ver user_profile en server/db.js), tanto al guardar como al pulsar
-// "Ahora no" se marca como vista para siempre (los dos llaman a PUT
-// /api/profile, que marca onboardingCompleted=true como efecto
-// secundario -- ver server/routes/profile.js).
-// ---------------------------------------------------------------------
-async function maybeShowOnboarding() {
-  const profile = await api('/api/profile');
-  if (profile.onboardingCompleted) return;
-  document.getElementById('onboarding-name').value = profile.name || '';
-  document.getElementById('onboarding-email').value = profile.email || '';
-  document.getElementById('onboarding-modal').classList.remove('hidden');
-}
-
-function closeOnboardingModal() {
-  document.getElementById('onboarding-modal').classList.add('hidden');
-}
-
-document.getElementById('onboarding-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  await api('/api/profile', {
-    method: 'PUT',
-    body: JSON.stringify({
-      name: document.getElementById('onboarding-name').value,
-      email: document.getElementById('onboarding-email').value,
-    }),
+  // Dos listeners para el mismo clic, y el orden importa:
+  //  - en fase de CAPTURA (antes que nadie) se apunta que pantalla se
+  //    esta viendo, porque el propio boton la va a ocultar;
+  //  - en la fase normal, ya con la pantalla nueva puesta, se lanzan las
+  //    dos animaciones (la que entra y la que se va).
+  let saliente = null;
+  btn.addEventListener('click', () => { saliente = capaDePantallaVisible(); }, true);
+  btn.addEventListener('click', () => {
+    // Si a este boton lo esta pulsando la app para hacer sitio (ver
+    // closeAllMobileOverlays), la animacion la pone quien haya empezado
+    // el cambio, no este boton.
+    if (cerrandoEnCascada) return;
+    animarCambioDePantalla('right', saliente);
   });
-  closeOnboardingModal();
+}
+
+[...VOLVER_UN_PASO, 'btn-close-groups'].forEach((id) => animarAlPulsar(document.getElementById(id)));
+document.querySelectorAll('.my-space-close-btn').forEach(animarAlPulsar);
+
+// Pantallas donde el carril CENTRAL ya tiene dueño: alli el
+// deslizamiento horizontal por el centro ya significa algo (la vista
+// diaria del calendario cambia de dia con attachSwipe, ver mas arriba),
+// asi que este modulo no se mete ni deja que el gesto caiga hacia el
+// cambio de pestaña -- si no, un mismo deslizamiento haria las dos
+// cosas a la vez. Los BORDES siguen cambiando de pestaña con
+// normalidad, que es justo el reparto que pidio Koku ("si deslizo en el
+// centro cambio de dia, si deslizo en el lateral a la pestaña de al
+// lado").
+const CENTRO_CON_DUENO = ['mobile-calendar-day-view'];
+
+function centroYaTieneDueno() {
+  return CENTRO_CON_DUENO.some((id) => estaVisibleDeVerdad(document.getElementById(id)));
+}
+
+// El gesto central, segun el sentido.
+function gestoCentral(paso) {
+  // Pantallas que ya usan el centro para lo suyo (la vista diaria): ahi
+  // este modulo no se mete.
+  if (centroYaTieneDueno()) return;
+  // Hacia la derecha (paso -1): primero intentar salir de una capa.
+  if (paso < 0 && volverUnPasoDentroDeLaPantalla()) return;
+  // Dentro de una App con sub-pestañas, el centro las recorre.
+  moverSubPestana(paso);
+}
+
+// ---------------------------------------------------------------------
+// El detector en si. Va en el <body> en fase de captura para enterarse
+// del gesto ANTES que nadie, pero sin cancelar nada: solo mira. Los
+// gestos que ya existian (deslizar la vista diaria, mover el mapa)
+// siguen recibiendo sus eventos igual.
+// ---------------------------------------------------------------------
+
+const NAV_SWIPE_UMBRAL = 60;      // px minimos de recorrido horizontal
+const NAV_SWIPE_MAX_VERTICAL = 0.8; // el gesto tiene que ser mas ancho que alto
+
+// El mapa de Viajes es el unico sitio con un trato aparte, y lo pidio
+// Koku tal cual: alli arrastrar YA sirve para mover el mapa, asi que la
+// diferencia la marca la VELOCIDAD -- un arrastre lento y pausado es
+// mover el mapa (y este modulo no se mete), uno rapido y decidido es
+// navegar. 0.55 px/ms es aproximadamente "media pantalla en un tercio de
+// segundo": un arrastre normal de mapa no llega ahi ni queriendo.
+const NAV_SWIPE_VELOCIDAD_MAPA = 0.55;
+
+let navSwipe = null;
+
+// El boton de Herramientas de la barra de abajo SIEMPRE lleva al menu
+// y borra el recuerdo: es justo el gesto de "quiero cambiar de App" que
+// describio Koku. (El listener que de verdad abre la vista ya esta
+// registrado mas arriba, sobre .mobile-nav-btn; este solo se suma.)
+document.querySelectorAll('.mobile-nav-btn[data-mobile-nav="extensions"]').forEach((btn) => {
+  btn.addEventListener('click', () => { ultimaHerramientaAbierta = null; });
 });
 
-document.getElementById('btn-onboarding-skip').addEventListener('click', async () => {
-  // Body vacio a proposito: no cambia nombre ni correo, solo marca la
-  // pantalla como vista (ver el comentario de PUT /api/profile).
-  await api('/api/profile', { method: 'PUT', body: JSON.stringify({}) });
-  closeOnboardingModal();
-});
+document.addEventListener('pointerdown', (e) => {
+  navSwipe = null;
+  if (!isMobileLayout() || isNavGestureBlocked()) return;
+  if (e.target.closest && e.target.closest(NAV_SWIPE_OPT_OUT)) return;
+  navSwipe = {
+    x: e.clientX,
+    y: e.clientY,
+    t: e.timeStamp,
+    // Si el gesto empieza dentro del mapa, se le exige velocidad.
+    enMapa: !!(e.target.closest && e.target.closest('#viajes-map-container')),
+  };
+}, true);
+
+document.addEventListener('pointerup', (e) => {
+  const inicio = navSwipe;
+  navSwipe = null;
+  if (!inicio || !isMobileLayout() || isNavGestureBlocked()) return;
+
+  const dx = e.clientX - inicio.x;
+  const dy = e.clientY - inicio.y;
+  if (Math.abs(dx) < NAV_SWIPE_UMBRAL) return;
+  if (Math.abs(dy) > Math.abs(dx) * NAV_SWIPE_MAX_VERTICAL) return;
+
+  if (inicio.enMapa) {
+    const ms = Math.max(e.timeStamp - inicio.t, 1);
+    if (Math.abs(dx) / ms < NAV_SWIPE_VELOCIDAD_MAPA) return; // arrastre de mapa
+  }
+
+  // paso: -1 = deslizar a la DERECHA (atras), +1 = a la IZQUIERDA
+  // (adelante). El dedo va hacia la derecha => dx positivo => atras.
+  const paso = dx > 0 ? -1 : 1;
+
+  // El carril se decide por DONDE EMPEZO el dedo, no por donde acaba:
+  // si se mirara el final, un gesto que arranca en el centro y termina
+  // cerca del borde cambiaria de significado a mitad de camino.
+  if (isMobileEdgeZone(inicio.x)) {
+    moverPestanaMovil(paso);
+    return;
+  }
+  // Centro: SOLO lo propio de la pantalla. Si ahi no hay nada que hacer,
+  // no pasa nada -- cambiar de pestaña es siempre cosa de los bordes.
+  //
+  // Antes el centro "caia" al cambio de pestaña cuando no tenia nada que
+  // hacer, para que ningun gesto se sintiera ignorado. Koku pidio
+  // quitarlo: "que el movimiento entre vistas, da igual que tenga o no
+  // movimiento intra-app, que sea por los laterales, como en calendario
+  // diario o gimnasio". Y es mejor asi: con la regla vieja, el mismo
+  // deslizamiento por el centro hacia una cosa u otra segun la pantalla
+  // en la que estuvieras, que es justo lo que confunde.
+  gestoCentral(paso);
+}, true);
+
+applyUiStyle();
+applyAnimationsPreference();
 
 // ---------------------------------------------------------------------
 // Arranque
@@ -12733,69 +17242,116 @@ document.getElementById('btn-onboarding-skip').addEventListener('click', async (
 // ("que se cancele, pero mantenme en la ventana"). Por dispositivo
 // (localStorage), no sincronizado entre movil/ordenador.
 // ---------------------------------------------------------------------
-function setCurrentScreen(screen) {
-  localStorage.setItem('currentScreen', screen);
+// Que boton de la barra de abajo le corresponde a cada pantalla. Las 4
+// extensiones se cuentan como "Herramientas" (es de donde se entra),
+// salvo la que este puesta en el hueco personalizable de la barra, que
+// entonces se enciende ella misma.
+function mobileNavSectionForScreen(screen) {
+  if (screen === 'mobile-notes') return 'notes';
+  if (screen === 'extensions') return 'extensions';
+  if (['gym', 'lecturas', 'finanzas', 'viajes'].includes(screen)) {
+    return getMobileNavNotesSlot() === screen ? 'notes' : 'extensions';
+  }
+  return 'calendar';
 }
 
-async function restoreCurrentScreen() {
-  const screen = localStorage.getItem('currentScreen');
-  if (!screen || screen === 'home') return;
-  if (screen === 'my-space') {
-    // En modo "panel" no existe una pantalla de Mi espacio aparte que
-    // restaurar -- el hub ya vive siempre junto al calendario.
-    if (getMiEspacioMode() === 'topbar') openMySpaceView();
-    return;
-  }
-  if (screen === 'mobile-notes') { openMobileNotesView(); return; }
-  if (screen === 'extensions') { openExtensionsView(); return; }
-  if (screen === 'gym') { await openGymView(); return; }
-  if (screen === 'lecturas') { openLecturasView(); return; }
-  if (screen === 'finanzas') { await openFinanzasView(); return; }
-  if (screen === 'archivos') { await openArchivosView(); return; }
-  if (screen === 'viajes') { await openViajesView(); return; }
+// Ademas de recordar la pantalla, deja encendido el boton que toca de la
+// barra de abajo. Va aqui (y no solo en goToMobileSection) porque al
+// ABRIR una pantalla por cualquier otro camino -- sobre todo al arrancar
+// la app restaurando donde lo dejaste -- la barra se quedaba marcando
+// "Calendario" aunque estuvieras en otro sitio.
+// --- Cerrar un modal tocando FUERA de su tarjeta -----------------------
+// Peticion de Koku: "si pincho fuera de las areas de historial o de
+// editar ejercicio, que se cierre; a veces buscar la x o el cancelar
+// cuesta". Solo en ESOS DOS: son los unicos donde cerrar equivale a
+// cancelar, porque los dos trabajan sobre un borrador y no tocan nada
+// hasta que le das a Guardar. En el dialogo de fin de serie, por
+// ejemplo, seria un desastre -- ahi un toque fuera perderia los datos de
+// la serie recien hecha.
+//
+// Con cambios a medio escribir se pregunta antes: un roce en el fondo no
+// puede tirar cinco minutos de edicion.
+function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
+  const modal = document.getElementById(modalId);
+  if (!modal) return;
+  // Marcar "sucio": escribir en cualquier campo, o pulsar cualquier
+  // boton del modal que no sea el de cerrar/cancelar (anadir una serie,
+  // marcar al fallo, anadir un tramo...). El scroll no genera clicks
+  // sobre botones, asi que no cuenta.
+  modal.addEventListener('input', () => { modal.dataset.sucio = '1'; });
+  modal.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (btn && !btn.matches('[id^="btn-cancel"], [id^="btn-close"], [aria-label="Cerrar"]')) {
+      modal.dataset.sucio = '1';
+    }
+  });
+  modal.addEventListener('click', async (e) => {
+    // Solo el FONDO: un click dentro de la tarjeta llega aqui por
+    // burbujeo, pero con e.target apuntando a lo de dentro.
+    if (e.target !== modal) return;
+    // Si ya estamos preguntando, un segundo toque en el fondo NO abre otra
+    // pregunta encima (se quedarian dos apiladas y la de abajo colgada).
+    if (modal.dataset.preguntando === '1') return;
+    if (hayCambios && hayCambios()) {
+      modal.dataset.preguntando = '1';
+      let ok = false;
+      try {
+        ok = await showAppConfirm('Vas a cerrar sin guardar los cambios. ¿Seguro?', { okText: 'Cerrar sin guardar', danger: true });
+      } finally {
+        delete modal.dataset.preguntando;
+      }
+      if (!ok) return;
+      // Mientras se preguntaba, el modal puede haberse cerrado por otra via
+      // (guardar, Esc...). Si ya no esta, no hay nada que cerrar.
+      if (modal.classList.contains('hidden')) return;
+    }
+    delete modal.dataset.sucio;
+    cerrar();
+  });
+}
+
+// --- Version de la app ------------------------------------------------
+// Se escribe A MANO en cada ronda, junto al numero de package.json: la
+// app no tiene paso de compilacion que pueda inyectarlo, asi que este es
+// el unico sitio donde vive de cara al usuario. La fecha es la de la
+// subida (cuando se lanza la build), en formato ISO para poder darle el
+// formato del SISTEMA al pintarla -- Koku: "respetando el formato del
+// sistema por si tienen mm/dd/aa y no dd/mm/aa".
+const APP_VERSION = '0.41.1';
+const APP_VERSION_DATE = '2026-09-10';
+
+function renderAppVersionLine() {
+  const el = document.getElementById('app-version-line');
+  if (!el) return;
+  let fecha = APP_VERSION_DATE;
+  try {
+    // `undefined` a proposito: el idioma del DISPOSITIVO, no el de la
+    // app (mismo criterio que systemUses12hClock).
+    fecha = new Intl.DateTimeFormat(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' })
+      .format(new Date(`${APP_VERSION_DATE}T12:00:00`));
+  } catch { /* si Intl falla, se queda la ISO */ }
+  el.textContent = `v${APP_VERSION} · ${fecha}`;
+}
+renderAppVersionLine();
+
+function setCurrentScreen(screen) {
+  localStorage.setItem('currentScreen', screen);
+  refreshMobileNavActive(mobileNavSectionForScreen(screen));
 }
 
 async function initStep(fn) {
   try {
     await fn();
   } catch (err) {
-    if (err.message !== 'device_not_paired') console.error(err);
+    console.error(err);
   }
 }
 
 async function init() {
-  // Lo PRIMERO de todo (antes incluso de cargar datos del calendario):
-  // si veniamos de una recarga dentro de una vista a pantalla completa,
-  // cubrir el calendario con esa vista cuanto antes -- showApp() ya dejo
-  // el calendario visible, así que cuanto mas tarde se llame a esto, mas
-  // se nota el "flashazo" del calendario antes de taparlo. Moverlo aqui
-  // (en vez de al final de init(), donde estaba antes) no depende de
-  // nada de lo que carga init() despues -- cada open*View() ya carga sus
-  // propios datos por su cuenta.
-  //
-  // OJO -- bug real encontrado al mover esto tan pronto: algunas vistas
-  // (Finanzas, via setupFinanzasIconColorFields) llaman en su apertura a
-  // funciones que viven en settings.js (createIconField/createColorField),
-  // que carga DESPUES de app.js (ver la nota de "Orden de declaracion"
-  // en CLAUDE.md) -- normalmente esto no es problema porque esas
-  // llamadas solo ocurren dentro de manejadores de eventos, que se
-  // disparan mucho despues de que TODOS los <script> ya han terminado
-  // de cargar. Pero al llamar a restoreCurrentScreen() de forma
-  // SINCRONA nada mas arrancar init() (que a su vez se invoca de forma
-  // sincrona al final de app.js), app.js seguia "en mitad de su propio
-  // <script>" cuando esto se ejecutaba -- settings.js ni siquiera habia
-  // empezado a cargar todavia, y createIconField no existia aun
-  // (ReferenceError). Un simple `await Promise.resolve()` NO basta para
-  // arreglarlo (los microtasks se vacian ENTRE cada <script> del
-  // documento, antes de pasar al siguiente) -- hace falta un macrotask
-  // de verdad (setTimeout) para que el navegador termine de
-  // parsear/ejecutar el resto de los <script> del documento (incluido
-  // settings.js entero) antes de continuar aqui. Sigue siendo
-  // practicamente instantaneo para quien lo ve, muy lejos de las 7
-  // llamadas de red secuenciales que había antes.
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await initStep(restoreCurrentScreen);
-  await initStep(maybeShowOnboarding);
+  // La app abre SIEMPRE en el calendario, sin importar donde se cerro
+  // (pedido explicito de Koku tras probarlo: reabrirla en Herramientas
+  // no era lo que esperaba). currentScreen se sigue guardando, pero solo
+  // para saber que boton de la barra de abajo encender mientras navegas.
   await initStep(loadGroups);
   await initStep(loadSpecialDays);
   await initStep(loadMonth);
@@ -12805,12 +17361,47 @@ async function init() {
   await initStep(loadNoteFolders);
   await initStep(loadNotes);
   renderNotesView();
-  refreshSyncStatusUI();
-  // Ya no hay ningun runSync() automatico que la ponga al dia sola (ver
-  // btn-sync-now en Apps > Archivos) -- sin esto, el punto de la
-  // topbar se quedaria sin titulo/aria-label hasta la primera vez que se
-  // sincronice a mano.
-  refreshSyncIndicator();
+
+  // Los gastos fijos ya no los genera un proceso encendido las 24h en el
+  // ordenador: se comprueba al abrir la app si toca generar el de este
+  // periodo (ver public/finanzas-recurring.js).
+  await initStep(generateDueRecurringExpenses);
+
+  // Permiso de avisos: se pide AQUI, al abrir la app, no escondido en
+  // Configuracion (pedido de Koku: "que no me tenga que ir hasta ahi la
+  // primera vez, no seria intuitivo"). Solo la primera vez -- si ya se
+  // pregunto una vez, no se vuelve a insistir nunca, se apaga o enciende
+  // desde Configuracion > Este dispositivo como cualquier otro ajuste.
+  await initStep(maybeAskNotificationPermissionOnStartup);
+
+  // Y los avisos de los recordatorios se (re)programan en el propio
+  // dispositivo, para que suenen aunque la app este cerrada (ver
+  // public/local-notifications.js).
+  await initStep(syncScheduledReminders);
+
+  // Recordatorio discreto de copia de seguridad si hace mucho de la
+  // ultima (ver public/backup.js) -- sin servidor, la copia es la unica
+  // red de seguridad de los datos.
+  await initStep(maybeShowBackupReminder);
+
+  // EL WIDGET SE ALIMENTA AL ARRANCAR, aunque no entres al Gimnasio.
+  //
+  // Esto faltaba y era un agujero de verdad: el resumen se rehacia desde
+  // loadGymBlocks()/loadGymRoutines(), y esas SOLO se llaman al abrir el
+  // Gimnasio (carga perezosa). O sea que alguien que abriera la app y se
+  // quedara en el calendario no le mandaba nada al widget nunca, y el
+  // widget se quedaba en "Abre la app" -- que es justo lo que le pasaba a
+  // Koku. Son dos consultas a una base que ya esta en memoria: barato.
+  await initStep(async () => {
+    await Promise.all([loadGymBlocks(), loadGymRoutines()]);
+  });
+
+  // Abrir la app TOCANDO EL WIDGET, con la app cerrada del todo: ni
+  // 'resume' ni 'visibilitychange' llegan a dispararse en ese caso (la
+  // app nace ya en primer plano), asi que la marca hay que mirarla
+  // tambien aqui. Va al final del arranque a proposito: si arranca un
+  // entreno, que sea con el calendario ya montado detras.
+  await initStep(comprobarAperturaDesdeElWidget);
 
   setInterval(loadReminders, 30 * 1000);
   // Igual que los recordatorios: si otro dispositivo vinculado anade o
@@ -12823,16 +17414,7 @@ async function init() {
   }), 30 * 1000);
 }
 
-// Si ya tenemos un token guardado (o somos el ordenador, que ni lo
-// necesita) intentamos cargar la app directamente; api() se encargara
-// de mostrar la pantalla de emparejamiento si el servidor nos rechaza.
-showApp();
+// Sin servidor no hay nada que vincular ni a quien preguntarle si esta
+// version es la ultima: la app arranca directamente en el calendario,
+// con su propia base de datos dentro del dispositivo.
 init();
-checkForUpdate();
-setInterval(checkForUpdate, 15 * 1000);
-checkForNewRelease();
-// Es una llamada a git fetch de verdad (no un simple ping), asi que se
-// repite mucho menos seguido que checkForUpdate — cada 6 horas basta para
-// enterarse el mismo dia sin martirizar la conexion.
-setInterval(checkForNewRelease, 6 * 60 * 60 * 1000);
-applyViewModePrompt();

@@ -29,17 +29,92 @@
 // hasta el (justo el bug que reporto Koku al anadir un icono a una
 // carpeta). Medir de verdad evita que esto se repita aunque el
 // contenido de un popover cambie en el futuro.
+// Cuanto ocupan las zonas del movil donde NO se puede pintar: arriba la
+// Dynamic Island / muesca / barra de estado, abajo la barrita de inicio.
+// El navegador solo las expone como env(safe-area-inset-*) desde CSS, no
+// hay forma de leerlas directamente desde JavaScript -- asi que se
+// miden con un elemento de usar y tirar que las pide como padding y
+// luego se le pregunta cuanto le ha quedado.
+function safeAreaInsets() {
+  const sonda = document.createElement('div');
+  sonda.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;top:0;left:0;'
+    + 'padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);';
+  document.body.appendChild(sonda);
+  const estilo = getComputedStyle(sonda);
+  const arriba = parseFloat(estilo.paddingTop) || 0;
+  const abajo = parseFloat(estilo.paddingBottom) || 0;
+  sonda.remove();
+  return { arriba, abajo };
+}
+
+// Coloca un popover flotante (color, icono, desplegable, fecha...) sin
+// que se salga de la pantalla.
+//
+// Historia de este codigo, para no repetir los mismos errores:
+//  1. Al principio estimaba la altura con un numero fijo. Se quedaba
+//     corta con el popover de iconos y lo dejaba fuera de la pantalla.
+//     Arreglado midiendo la altura REAL (offsetHeight), que se puede
+//     porque cuando se llama a esto el popover ya esta pintado.
+//  2. (9/9/2026) Koku enseño una captura del selector de color de un
+//     grupo: la mitad de arriba quedaba TAPADA por la Dynamic Island.
+//     El motivo: cuando no cabia debajo del boton, esto lo subia y lo
+//     topaba en 8px desde el borde de la PANTALLA -- pero los primeros
+//     ~60px de esa pantalla no se ven, los ocupa el sistema. Y si el
+//     popover es mas alto que el hueco util (la paleta de color son 32
+//     colores en cuatro grupos), ninguna posicion lo arregla: hace
+//     falta que se pueda desplazar por dentro.
 function positionFixedPopover(anchorBtn, popover, { width = 248 } = {}) {
   const rect = anchorBtn.getBoundingClientRect();
   let left = rect.left;
   if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
   popover.style.left = `${Math.max(8, left)}px`;
 
-  const actualHeight = popover.offsetHeight;
-  const top = rect.bottom + 6 + actualHeight > window.innerHeight
-    ? Math.max(8, rect.top - actualHeight - 6)
-    : rect.bottom + 6;
+  // Los limites de verdad: la franja de pantalla donde SI se ve algo.
+  // El margen de 14px va ADEMAS del hueco del sistema, para que el
+  // popover no quede pegado justo debajo de la Dynamic Island (queda
+  // agobiado y parece cortado aunque no lo este).
+  const { arriba, abajo } = safeAreaInsets();
+  const limiteArriba = arriba + 14;
+  const limiteAbajo = window.innerHeight - abajo - 14;
+
+  // Que nunca sea mas alto que esa franja. Si su contenido no cabe, se
+  // desplaza por dentro en vez de salirse (a la paleta de color le pasa
+  // en cuanto el movil no es muy alto).
+  popover.style.maxHeight = `${limiteAbajo - limiteArriba}px`;
+  popover.style.overflowY = 'auto';
+
+  const alto = popover.offsetHeight;
+  let top;
+  if (rect.bottom + 6 + alto <= limiteAbajo) {
+    top = rect.bottom + 6;                 // cabe debajo del boton
+  } else if (rect.top - 6 - alto >= limiteArriba) {
+    top = rect.top - alto - 6;             // cabe encima
+  } else {
+    top = limiteArriba;                    // no cabe: arriba del todo, con scroll
+  }
   popover.style.top = `${top}px`;
+}
+
+// La paleta son 32 colores mas el color a medida: flotando en un movil
+// ocupa media pantalla, tapa lo que estabas mirando y queda recargada
+// (Koku: "es un poco enfarragoso y la vista se ve sucia"). En movil se
+// abre a PANTALLA COMPLETA con su propia X; en escritorio, donde sobra
+// sitio y el raton hace comodo cerrar tocando fuera, sigue flotando
+// junto a su boton como siempre.
+const ANCHO_ESCRITORIO = 860; // el mismo corte que usa styles.css
+function abrirPopoverDeColor(anchorBtn, popover) {
+  const aPantallaCompleta = window.innerWidth < ANCHO_ESCRITORIO;
+  popover.classList.toggle('is-fullscreen', aPantallaCompleta);
+  if (aPantallaCompleta) {
+    // positionFixedPopover deja left/top/max-height en el atributo
+    // style, y eso ganaria a las reglas de pantalla completa. Se limpian.
+    popover.style.left = '';
+    popover.style.top = '';
+    popover.style.maxHeight = '';
+    popover.style.overflowY = '';
+    return;
+  }
+  positionFixedPopover(anchorBtn, popover);
 }
 
 function closeAllPopovers(except) {
@@ -81,6 +156,27 @@ function createColorField({ initialValue, onChange }) {
   const popover = document.createElement('div');
   popover.className = 'color-popover hidden';
   document.body.appendChild(popover);
+
+  // Cabecera con el titulo y la X. Solo se VE en modo pantalla completa
+  // (ver .color-popover.is-fullscreen en styles.css): flotando encima de
+  // su boton no hace falta, se cierra tocando fuera.
+  const header = document.createElement('div');
+  header.className = 'color-popover-header';
+  const headerTitle = document.createElement('span');
+  headerTitle.className = 'color-popover-title';
+  headerTitle.textContent = 'Elige un color';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'icon-btn color-popover-close';
+  closeBtn.setAttribute('aria-label', 'Cerrar');
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    popover.classList.add('hidden');
+  });
+  header.appendChild(headerTitle);
+  header.appendChild(closeBtn);
+  popover.appendChild(header);
 
   const nativeInput = document.createElement('input');
   nativeInput.type = 'color';
@@ -135,7 +231,7 @@ function createColorField({ initialValue, onChange }) {
     const willOpen = popover.classList.contains('hidden');
     closeAllPopovers(popover);
     popover.classList.toggle('hidden');
-    if (willOpen) positionFixedPopover(swatchBtn, popover);
+    if (willOpen) abrirPopoverDeColor(swatchBtn, popover);
   });
 
   root.appendChild(swatchBtn);
@@ -263,10 +359,13 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'groups', 'devices', 'mobile', 'shortcuts'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'notifications', 'store'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
+  // El "Volver" comparte fila con el titulo y solo se ve estando DENTRO
+  // de una seccion.
+  document.getElementById('btn-settings-back').classList.toggle('hidden', tab === null);
   SETTINGS_TABS.forEach((t) => {
     document.getElementById(`settings-tab-${t}`).classList.toggle('hidden', t !== tab);
   });
@@ -279,17 +378,15 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     if (tab === 'profile') refreshProfileTab();
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();
-    else if (tab === 'groups') refreshGroupsTab();
-    else if (tab === 'devices') refreshDevicesTab();
-    else if (tab === 'mobile') refreshMobileTab();
-    else if (tab === 'shortcuts') refreshShortcutsTab();
+    // refreshMobileTab refresca por id, asi que vale para las DOS
+    // secciones que reparte: Este dispositivo y Notificaciones.
+    else if (tab === 'mobile' || tab === 'notifications') refreshMobileTab();
   });
 });
 
 // ---------------------------------------------------------------------
-// Perfil: tu nickname (compartido entre todos tus dispositivos, como un
-// tema o un grupo) y tu id unico. El id se genera una vez en el servidor
-// y no cambia nunca aunque cambies el nombre; se ensena oculto por
+// Perfil: tu nickname y tu id unico. El id se genera una vez al crear
+// la fila y no cambia nunca aunque cambies el nombre; se ensena oculto por
 // defecto porque no aporta nada verlo siempre, con un interruptor local
 // (por dispositivo) para revelarlo si hace falta.
 // ---------------------------------------------------------------------
@@ -298,7 +395,6 @@ let currentProfile = null;
 async function refreshProfileTab() {
   currentProfile = await api('/api/profile');
   document.getElementById('profile-name').value = currentProfile.name || '';
-  document.getElementById('profile-email').value = currentProfile.email || '';
 
   const showId = localStorage.getItem('showUserId') === 'true';
   document.getElementById('profile-show-id').checked = showId;
@@ -326,14 +422,12 @@ let profileSavedFeedbackTimer = null;
 document.getElementById('profile-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = document.getElementById('profile-name').value;
-  const email = document.getElementById('profile-email').value;
   const btn = document.getElementById('profile-form').querySelector('button[type="submit"]');
   const originalLabel = btn.dataset.originalLabel || btn.textContent;
   btn.dataset.originalLabel = originalLabel;
 
-  currentProfile = await api('/api/profile', { method: 'PUT', body: JSON.stringify({ name, email }) });
+  currentProfile = await api('/api/profile', { method: 'PUT', body: JSON.stringify({ name }) });
   document.getElementById('profile-name').value = currentProfile.name || '';
-  document.getElementById('profile-email').value = currentProfile.email || '';
   updateProfileIdDisplay();
 
   // Retroalimentacion breve: el boton cambia a "Guardado ✓" un momento y
@@ -348,122 +442,15 @@ document.getElementById('profile-form').addEventListener('submit', async (e) => 
 });
 
 // ---------------------------------------------------------------------
-// Vista: Normal / Pantalla completa. Un solo modo activo a la vez
-// (aplicado de verdad por applyViewMode, en app.js); aqui solo se dibujan
-// los botones y cual esta resaltado como actual, igual que "En uso" en la
-// biblioteca de temas.
+// Vista: ajustes de como se ve el contenido (densidad del calendario y
+// orden de favoritos en Notas). Cada uno se guarda por dispositivo en
+// localStorage, no se comparte.
 // ---------------------------------------------------------------------
-const VIEW_MODES = [
-  { id: 'normal', label: 'Normal' },
-  { id: 'fullscreen', label: 'Pantalla completa' },
-];
-
 function refreshViewTab() {
-  const container = document.getElementById('view-mode-options');
-  container.innerHTML = '';
-  const current = getViewMode();
-
-  VIEW_MODES.forEach((vm) => {
-    const isActive = vm.id === current;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
-    btn.textContent = isActive ? `${vm.label} (actual)` : vm.label;
-    if (isActive) {
-      btn.disabled = true;
-    } else {
-      btn.addEventListener('click', () => applyViewMode(vm.id));
-    }
-    container.appendChild(btn);
-  });
-
-  const hint = document.getElementById('view-mode-hint');
-  hint.textContent = current === 'fullscreen' ? 'Pulsa Esc en cualquier momento para salir de pantalla completa.' : '';
-
-  refreshCalendarDensityOptions();
-  refreshMiEspacioModeOptions();
-  refreshRemindersPanelGroupedOptions();
   refreshFavoritesDisplayOptions();
 }
 
-// Como se accede a "Mi espacio" (Proximos + Tareas + Notas) — preferencia
-// de ESTE dispositivo (localStorage), leida por getMiEspacioMode() y
-// aplicada de verdad por applyMiEspacioMode() en app.js.
-const MY_SPACE_MODES = [
-  { id: 'topbar', label: 'Botón en la barra superior' },
-  { id: 'panel', label: 'Panel lateral' },
-];
-
-function refreshMiEspacioModeOptions() {
-  const container = document.getElementById('my-space-mode-options');
-  if (!container) return;
-  container.innerHTML = '';
-  const current = getMiEspacioMode();
-
-  MY_SPACE_MODES.forEach((mode) => {
-    const isActive = mode.id === current;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
-    btn.textContent = mode.label;
-    if (isActive) {
-      btn.disabled = true;
-    } else {
-      btn.addEventListener('click', () => {
-        localStorage.setItem('miEspacioMode', mode.id);
-        applyMiEspacioMode();
-        refreshMiEspacioModeOptions();
-      });
-    }
-    container.appendChild(btn);
-  });
-}
-
-// Panel lateral clasico (solo aplica en modo "topbar" de Mi espacio, ver
-// arriba): una casilla por seccion (Recordatorios/Tareas/Notas, ver
-// REMINDERS_PANEL_PAGES en app.js). Con alguna marcada y alguna sin
-// marcar, las marcadas se ven juntas en un hueco compartido y la flecha
-// cambia TODO el hueco a las no marcadas (tambien juntas) -- marcar
-// todas o ninguna deja las 3 sueltas, como si esto no existiera. Ver
-// applyRemindersPanelLayout()/getRemindersGroupedSections() en app.js.
-function refreshRemindersPanelGroupedOptions() {
-  const container = document.getElementById('reminders-panel-grouped-options');
-  if (!container) return;
-  container.innerHTML = '';
-
-  let stored;
-  try {
-    stored = JSON.parse(localStorage.getItem('remindersPanelGrouped') || '[]');
-  } catch {
-    stored = [];
-  }
-  if (!Array.isArray(stored)) stored = [];
-
-  REMINDERS_PANEL_PAGES.forEach((p) => {
-    const label = document.createElement('label');
-    label.className = 'checkbox-row';
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.checked = stored.includes(p.id);
-    checkbox.addEventListener('change', () => {
-      const next = checkbox.checked
-        ? [...stored.filter((id) => id !== p.id), p.id]
-        : stored.filter((id) => id !== p.id);
-      localStorage.setItem('remindersPanelGrouped', JSON.stringify(next));
-      // Vuelve a mostrar las marcadas (no las de antes de tocar el
-      // ajuste) -- si no, podrias quedarte viendo "las otras" con un
-      // significado distinto al que tenian antes del cambio.
-      remindersPanelShowingChecked = true;
-      applyRemindersPanelLayout();
-      refreshRemindersPanelGroupedOptions();
-    });
-    label.appendChild(checkbox);
-    label.appendChild(document.createTextNode(p.label));
-    container.appendChild(label);
-  });
-}
-
-// Favoritos en Mi espacio (carpetas y notas): "merged" (por defecto)
+// Favoritos en el listado de Notas (carpetas y notas): "merged" (por defecto)
 // ordena los favoritos primero sin cabeceras; "sections" separa con una
 // cabecera "Favoritos"/"Todo lo demas" (solo si hay algun favorito). Ver
 // getFavoritesDisplayMode()/appendFavoriteSortedGroup() en app.js.
@@ -497,45 +484,33 @@ function refreshFavoritesDisplayOptions() {
   });
 }
 
-// Como se ven, en el calendario del mes, los dias que tienen varios
-// eventos/tareas a la vez — preferencia de ESTE dispositivo (localStorage),
-// leida por getCalendarDensityMode() en app.js al dibujar la cuadricula.
-const CALENDAR_DENSITY_MODES = [
-  { id: 'limit', label: 'Limite + "+N más"' },
-  { id: 'dots', label: 'Puntos de color' },
-  { id: 'tint', label: 'Solo marcar el día' },
-];
-
-function refreshCalendarDensityOptions() {
-  const container = document.getElementById('calendar-density-options');
-  if (!container) return;
-  container.innerHTML = '';
-  const current = getCalendarDensityMode();
-
-  CALENDAR_DENSITY_MODES.forEach((mode) => {
-    const isActive = mode.id === current;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
-    btn.textContent = mode.label;
-    if (isActive) {
-      btn.disabled = true;
-    } else {
-      btn.addEventListener('click', () => {
-        localStorage.setItem('calendarDayDensity', mode.id);
-        refreshCalendarDensityOptions();
-        if (typeof renderCalendarGrid === 'function') renderCalendarGrid();
-      });
-    }
-    container.appendChild(btn);
-  });
-}
 
 // Salir de la pestana Estilo (volver al menu, o cerrar Configuracion del
-// todo) sin haber guardado descarta el borrador que hubiera a medias —
-// closeThemeForm() no hace nada raro si no habia ningun tema en edicion.
+// todo) GUARDA el borrador que hubiera a medias, en vez de descartarlo.
+//
+// Cambio pedido por Koku ("hay autoguardado en ese sentido no?, al
+// deslizar se deberia quedar el nuevo tema puesto"): ahora que se sale
+// de una seccion deslizando el dedo y no solo pulsando un boton, perder
+// lo editado por un gesto casi sin querer seria muy fastidioso. Ademas
+// deja el comportamiento coherente con lo que ya hacia switchThemeEdit()
+// (pasar a editar otro tema guarda el anterior solo, sin preguntar).
+//
+// closeThemeForm() sigue detras por si el guardado no aplica (no habia
+// ningun tema en edicion, o el borrador estaba limpio): no hace nada
+// raro en ese caso.
 document.querySelectorAll('[data-back]').forEach((btn) => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
+    if (themeDraftDirty) {
+      // Si el guardado falla (nombre vacio, por ejemplo), mejor no
+      // tragarse el error en silencio: se avisa y NO se sale, para que
+      // se pueda arreglar sin haber perdido nada.
+      try {
+        await saveCurrentThemeEdit();
+      } catch (err) {
+        showAppAlert('No se ha podido guardar el tema que estabas editando, así que la pantalla se queda abierta para que no pierdas los cambios.');
+        return;
+      }
+    }
     closeThemeForm();
     showSettingsScreen(null);
   });
@@ -545,18 +520,11 @@ function openSettingsModal() {
   document.getElementById('settings-modal').classList.remove('hidden');
   closeThemeForm();
   showSettingsScreen(null);
-  refreshQuitMenuItem();
-  refreshVersionInfo();
 }
 
-document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
-// Mismo panel, boton aparte: #my-space-view tapa la topbar (z-index por
-// encima), asi que el boton de Configuracion de siempre no se puede
-// clicar mientras Mi espacio esta abierto a pantalla completa. Este
-// boton vive dentro de la cabecera de Mi espacio para que Configuracion
-// se pueda abrir desde cualquier ventana.
-document.getElementById('btn-my-space-settings').addEventListener('click', openSettingsModal);
-// Mismo motivo que btn-my-space-settings: Apps y cada extension
+// Cada pantalla completa (.my-space-view) tapa a la de debajo, asi que
+// cada una lleva su propio boton de Configuracion en la cabecera.
+// Mismo motivo: Herramientas y cada extension
 // (Gimnasio/Lecturas/Finanzas/Archivos) son tambien .my-space-view a
 // pantalla completa que tapan la topbar -- cada una necesita su propio
 // boton de Configuracion.
@@ -564,16 +532,17 @@ document.getElementById('btn-extensions-settings').addEventListener('click', ope
 document.getElementById('btn-gym-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-lecturas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
-document.getElementById('btn-archivos-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
 // #mobile-notes-view (Fase 4) es tambien .my-space-view a pantalla
 // completa, mismo motivo que las de arriba.
 document.getElementById('btn-mobile-notes-settings').addEventListener('click', openSettingsModal);
-document.getElementById('btn-close-settings').addEventListener('click', () => {
+// Ya no hay boton de cerrar en la cabecera (la barra inferior sigue
+// visible con Configuracion abierta y es por donde se sale). Se queda
+// como funcion para que Esc y cualquier otro sitio cierren igual.
+function closeSettingsModal() {
   closeThemeForm();
   document.getElementById('settings-modal').classList.add('hidden');
-  clearInterval(pairingCountdownTimer);
-});
+}
 
 // ---------------------------------------------------------------------
 // Estilo: biblioteca de temas compartida + cual tengo activo YO
@@ -774,8 +743,7 @@ function applyThemeColors(colors) {
 
 // Aplica un tema a ESTE dispositivo: lo pinta, lo recuerda en localStorage
 // (para la proxima vez que se abra, y para el script del <head> que evita
-// el parpadeo) y, si procede, avisa al servidor de que este dispositivo
-// tiene ese tema activo (para que "copiar de otro dispositivo" funcione).
+// el parpadeo) y lo deja anotado en la base local como el tema activo.
 async function applyTheme(theme, { persist = true } = {}) {
   const colors = resolveThemeVariant(theme);
   applyThemeColors(colors);
@@ -801,7 +769,7 @@ async function applyTheme(theme, { persist = true } = {}) {
 // app esta abierta, ver el listener de matchMedia mas abajo); es un
 // ajuste de ESTE dispositivo, como el tema activo.
 // Solo hay boton para "Sistema" -- cambiar a claro/oscuro A MANO ya se
-// hace con el atajo ☀/☾ de la topbar (ver btn-quick-color-mode mas
+// hace con el atajo de sol/luna de la topbar (ver btn-quick-color-mode mas
 // abajo), que dispara setColorModePreference('light'/'dark') igual que
 // hacian los botones "Claro"/"Oscuro" que habia aqui antes. Este boton
 // sirve para volver a "seguir el sistema" despues de haber cambiado a
@@ -872,6 +840,17 @@ function setColorModePreference(mode) {
 // (#btn-quick-color-mode) y otra dentro de Configuracion > Estilo
 // (#settings-quick-color-mode, para movil, que ya no tiene topbar) --
 // ambas se refrescan y comportan igual.
+// Sol y luna como SVG, no como emoji (peticion de Koku: "que sea un
+// icono en todo caso"). Un emoji lo pinta el sistema con SU tipografia:
+// cambia de forma entre iPhone, Android y navegador, no hereda el color
+// del tema y suele salir mas gordo o mas pequeño que el texto de al
+// lado. Un SVG con currentColor se comporta como una letra mas y se
+// tiñe con el tema activo.
+const ICON_CLARO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const ICON_OSCURO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg>';
+// Circulo mitad y mitad: "este tema tiene pareja clara y oscura".
+const ICON_PAREJA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/></svg>';
+
 function refreshQuickColorModeButton() {
   const buttons = document.querySelectorAll('.quick-color-mode-btn');
   if (!buttons.length) return;
@@ -881,8 +860,9 @@ function refreshQuickColorModeButton() {
   buttons.forEach((btn) => {
     btn.classList.toggle('hidden', !hasInverse);
     if (!hasInverse) return;
-    btn.textContent = resolvedIsLight ? '☀' : '☾';
+    btn.innerHTML = resolvedIsLight ? ICON_CLARO : ICON_OSCURO;
     btn.title = `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}`;
+    btn.setAttribute('aria-label', btn.title);
   });
 }
 
@@ -945,7 +925,18 @@ function positionThemeForm() {
   if (editingThemeId) {
     const card = document.querySelector(`.theme-card[data-theme-id="${editingThemeId}"]`);
     if (card) {
-      card.insertAdjacentElement('afterend', form);
+      // OJO: DESPUES DEL ENVOLTORIO, no despues de la tarjeta.
+      //
+      // Desde que las tarjetas se deslizan, cada una vive dentro de un
+      // .note-swipe-wrap. Metiendo el formulario ahi dentro pasaba algo
+      // muy feo (lo vio Koku en una captura): ese envoltorio recorta lo
+      // que se sale (overflow:hidden) y sus botones de Editar/Exportar/
+      // Eliminar van pegados de ARRIBA A ABAJO (top:0 y bottom:0), asi
+      // que al crecer el envoltorio con el formulario dentro, los
+      // botones se estiraban a lo largo de toda la pantalla y salian
+      // por encima de los campos.
+      const contenedor = card.closest('.note-swipe-wrap') || card;
+      contenedor.insertAdjacentElement('afterend', form);
       return;
     }
   }
@@ -986,7 +977,7 @@ function renderThemeLibrary() {
     // (incluida esta etiqueta) lo activa primero, igual que el resto.
     const resolvedIsLight = isLightColors(resolved);
     const pairBadge = theme.inverseColors
-      ? `<button type="button" data-action="toggle-variant" class="theme-pair-badge" title="${isActive ? `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}` : 'Fija este tema para poder cambiar de variante'}">${resolvedIsLight ? '☀ Claro' : '☾ Oscuro'}</button>`
+      ? `<button type="button" data-action="toggle-variant" class="theme-pair-badge" title="${isActive ? `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}` : 'Fija este tema para poder cambiar de variante'}">${resolvedIsLight ? ICON_CLARO : ICON_OSCURO}<span>${resolvedIsLight ? 'Claro' : 'Oscuro'}</span></button>`
       : '';
     card.innerHTML = `
       <div class="theme-card-top">
@@ -999,10 +990,6 @@ function renderThemeLibrary() {
         ${activeBadge}
       </div>
       <div class="theme-card-name">${escapeHtml(theme.name)} ${pairBadge}</div>
-      <div class="theme-card-actions">
-        <button type="button" data-action="edit" class="secondary-btn">Editar</button>
-        <button type="button" data-action="export" class="secondary-btn">Exportar</button>
-      </div>
     `;
     // Clicar la tarjeta (fuera de sus botones, que paran la propagacion)
     // fija ese tema como el de este dispositivo — ya no hace falta un
@@ -1010,14 +997,6 @@ function renderThemeLibrary() {
     if (!isActive) {
       card.addEventListener('click', () => applyTheme(theme));
     }
-    card.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
-      e.stopPropagation();
-      switchThemeEdit(theme);
-    });
-    card.querySelector('[data-action="export"]').addEventListener('click', (e) => {
-      e.stopPropagation();
-      exportTheme(theme);
-    });
     const toggleBtn = card.querySelector('[data-action="toggle-variant"]');
     if (toggleBtn) {
       toggleBtn.addEventListener('click', (e) => {
@@ -1033,7 +1012,19 @@ function renderThemeLibrary() {
         setColorModePreference(resolvedIsLight ? 'dark' : 'light');
       });
     }
-    container.appendChild(card);
+    // Editar / Exportar / Eliminar se sacan DESLIZANDO la tarjeta, igual
+    // que las carpetas y notas de Mi espacio, las sesiones del historial
+    // del Gimnasio y las tarjetas de grupo (peticion de Koku). Antes
+    // "Editar" y "Exportar" eran dos botones siempre a la vista y
+    // "Eliminar" solo aparecia dentro de la ficha de edicion -- tres
+    // sitios distintos para tres acciones del mismo tema.
+    container.appendChild(wrapRowWithSwipeActions(card, {
+      botones: [
+        ['Editar', 'secondary-btn', () => switchThemeEdit(theme)],
+        ['Exportar', 'secondary-btn', () => exportTheme(theme)],
+        ['Eliminar', 'danger-btn', () => deleteThemeById(theme.id, theme.name)],
+      ],
+    }));
   });
 
   positionThemeForm();
@@ -1171,8 +1162,8 @@ function closeThemeForm() {
   positionThemeForm();
 }
 
-// Guarda de verdad (POST/PUT al servidor) lo que haya ahora mismo en el
-// formulario. La usa tanto el boton "Guardar cambios del tema" como el
+// Guarda de verdad (POST/PUT a la ruta de temas) lo que haya ahora mismo
+// en el formulario. La usa tanto el boton "Guardar cambios del tema" como el
 // salto automatico a editar otro tema, para no perder nada al cambiar de
 // tarjeta sin haber guardado antes.
 async function saveCurrentThemeEdit() {
@@ -1232,10 +1223,20 @@ document.getElementById('theme-form').addEventListener('submit', async (e) => {
   await saveCurrentThemeEdit();
 });
 
-document.getElementById('btn-delete-theme').addEventListener('click', async () => {
-  const id = document.getElementById('theme-id').value;
-  if (!id) return;
-  if (!confirm('¿Eliminar este tema? Los dispositivos que lo tuvieran activo se quedaran sin tema.')) return;
+// Borrar un tema con su confirmacion. Sale del boton "Eliminar" de la
+// ficha para poder usarse tambien desde el deslizamiento de la tarjeta,
+// sin tener que abrir la ficha antes.
+//
+// Ojo: antes esto usaba el confirm() del navegador. Es un dialogo del
+// sistema, no sigue el tema activo y ademas en la app instalada sale con
+// el nombre del sitio, asi que se cambia por showAppConfirm() como en el
+// resto de la app.
+async function deleteThemeById(id, nombre) {
+  if (!id) return false;
+  const seguro = await showAppConfirm(
+    `¿Eliminar el tema "${nombre || ''}"? Los dispositivos que lo tuvieran activo se quedarán sin tema.`,
+  );
+  if (!seguro) return false;
   await api(`/api/themes/${id}`, { method: 'DELETE' });
   document.getElementById('theme-form').classList.add('hidden');
   document.getElementById('btn-save-theme-changes').classList.add('hidden');
@@ -1243,6 +1244,12 @@ document.getElementById('btn-delete-theme').addEventListener('click', async () =
   themeDraftDirty = false;
   positionThemeForm();
   await refreshStyleTab();
+  return true;
+}
+
+document.getElementById('btn-delete-theme').addEventListener('click', () => {
+  const id = document.getElementById('theme-id').value;
+  deleteThemeById(id, document.getElementById('theme-name').value);
 });
 
 // --- Copiar estilo de otro dispositivo conectado ---
@@ -1327,7 +1334,7 @@ document.getElementById('theme-import-input').addEventListener('change', async (
   }
 });
 
-// Al cargar la app: averigua que tema tenemos activo segun el servidor
+// Al cargar la app: averigua que tema tenemos activo segun la base local
 // (que es la fuente de verdad) y lo aplica. Mientras tanto, el script del
 // <head> ya habra pintado lo que hubiera en cache para evitar parpadeos.
 async function syncActiveTheme() {
@@ -1348,440 +1355,196 @@ async function syncActiveTheme() {
 syncActiveTheme();
 
 // ---------------------------------------------------------------------
-// Grupos (gestion completa; el <select> del formulario de evento sigue
-// viviendo en app.js porque forma parte de ese modal)
+// Los grupos ya no se gestionan desde aqui: viven en su propio apartado
+// (Calendario -> Grupos), igual que cada herramienta gestiona lo suyo
+// por dentro. Todo su codigo se movio a app.js.
 // ---------------------------------------------------------------------
-const groupIconField = createIconField({ initialValue: '' });
-document.getElementById('group-icon-field').appendChild(groupIconField.element);
-
-// OJO orden: groupCompletedColorField se crea ANTES que groupColorField
-// porque el onChange de groupColorField la referencia — crearla antes evita
-// el bug de "variable declarada mas abajo leida por un callback que se
-// dispara al construir" documentado en CLAUDE.md (createColorField llama a
-// su onChange una vez de inmediato, al pintar el cuadradito inicial).
-// suppressGroupCompletedTouch evita que esas llamadas de INICIALIZACION (la
-// propia y la que dispara groupColorField al crearse, que la actualiza en
-// cascada) cuenten como "la persona ha tocado el selector a mano".
-let suppressGroupCompletedTouch = true;
-let groupCompletedColorTouched = false;
-const groupCompletedColorField = createColorField({
-  initialValue: mutedTaskColor(DEFAULT_EVENT_COLOR),
-  onChange: () => { if (!suppressGroupCompletedTouch) groupCompletedColorTouched = true; },
-});
-document.getElementById('group-completed-color-field').appendChild(groupCompletedColorField.element);
-
-const groupColorField = createColorField({
-  initialValue: DEFAULT_EVENT_COLOR,
-  // Si el color normal del grupo cambia y todavia no se ha tocado a mano
-  // el de "completada", seguimos su tono atenuado como sugerencia — en
-  // cuanto se toque el propio selector de completada, deja de seguirle.
-  onChange: (newColor) => {
-    if (!groupCompletedColorTouched) groupCompletedColorField.setValue(mutedTaskColor(newColor));
-  },
-});
-document.getElementById('group-color-field').appendChild(groupColorField.element);
-suppressGroupCompletedTouch = false;
-
-async function refreshGroupsTab() {
-  await loadGroups();
-  renderGroupsList();
-}
-
-// Cambia el color de "completada" SIN que cuente como que la persona lo ha
-// tocado a mano (carga inicial, reset del formulario, o cargar el valor
-// guardado de un grupo existente al editarlo) — solo un click real en su
-// selector marca groupCompletedColorTouched.
-function setGroupCompletedColorProgrammatically(hex) {
-  suppressGroupCompletedTouch = true;
-  groupCompletedColorField.setValue(hex);
-  suppressGroupCompletedTouch = false;
-}
-
-function resetGroupForm() {
-  document.getElementById('group-id').value = '';
-  document.getElementById('group-name').value = '';
-  groupIconField.setValue('');
-  groupColorField.setValue(DEFAULT_EVENT_COLOR);
-  groupCompletedColorTouched = false;
-  setGroupCompletedColorProgrammatically(mutedTaskColor(DEFAULT_EVENT_COLOR));
-  document.getElementById('btn-cancel-group').classList.add('hidden');
-}
-
-function renderGroupsList() {
-  const list = document.getElementById('groups-list');
-  list.innerHTML = '';
-  if (state.groups.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavía no tienes grupos. Crea uno arriba.</p>';
-    return;
-  }
-  state.groups.forEach((g) => {
-    const row = document.createElement('div');
-    row.className = 'group-item';
-    row.innerHTML = `
-      <span class="color-dot" style="background-color: ${g.color}"></span>
-      <span class="group-item-name">${g.icon ? escapeHtml(g.icon) + ' ' : ''}${escapeHtml(g.name)}</span>
-      <div class="group-item-actions">
-        <button type="button" class="secondary-btn" data-action="edit">Editar</button>
-        <button type="button" class="danger-btn" data-action="delete">Eliminar</button>
-      </div>
-    `;
-    row.querySelector('[data-action="edit"]').addEventListener('click', () => {
-      document.getElementById('group-id').value = g.id;
-      document.getElementById('group-name').value = g.name;
-      groupIconField.setValue(g.icon || '');
-      groupColorField.setValue(g.color);
-      // Si el grupo ya tiene un color de completada EXPLICITO, lo tratamos
-      // como "tocado" para que cambiar el color normal no se lo pise; si
-      // no, sigue el color normal como hasta ahora.
-      groupCompletedColorTouched = !!g.completedColor;
-      setGroupCompletedColorProgrammatically(g.completedColor || mutedTaskColor(g.color));
-      document.getElementById('btn-cancel-group').classList.remove('hidden');
-      document.getElementById('group-name').focus();
-    });
-    row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
-      if (!confirm(`¿Eliminar el grupo "${g.name}"? Los eventos que lo usen se quedaran sin grupo.`)) return;
-      await api(`/api/groups/${g.id}`, { method: 'DELETE' });
-      await refreshGroupsTab();
-      loadMonth();
-      loadReminders();
-      if (typeof loadTasks === 'function') loadTasks().then(renderTasksList);
-    });
-    list.appendChild(row);
-  });
-}
-
-document.getElementById('btn-cancel-group').addEventListener('click', resetGroupForm);
-
-document.getElementById('group-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const id = document.getElementById('group-id').value;
-  const payload = {
-    name: document.getElementById('group-name').value,
-    color: groupColorField.getValue(),
-    icon: groupIconField.getValue() || null,
-    completedColor: groupCompletedColorField.getValue(),
-  };
-
-  if (id) {
-    await api(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
-  } else {
-    await api('/api/groups', { method: 'POST', body: JSON.stringify(payload) });
-  }
-
-  resetGroupForm();
-  await refreshGroupsTab();
-  loadMonth();
-  loadReminders();
-  if (typeof loadTasks === 'function') loadTasks().then(renderTasksList);
-});
-
-// ---------------------------------------------------------------------
-// Dispositivos vinculados (gestion completa, movida aqui desde app.js)
-// ---------------------------------------------------------------------
-let pairingCountdownTimer = null;
-
-async function refreshDevicesTab() {
-  document.getElementById('pairing-code-display').classList.add('hidden');
-  try {
-    const devices = await api('/api/devices');
-    document.getElementById('devices-only-computer').classList.add('hidden');
-    document.getElementById('devices-management').classList.remove('hidden');
-    renderDevicesList(devices);
-    refreshNetworkQr();
-  } catch (err) {
-    // 403: este dispositivo no es el ordenador de confianza.
-    document.getElementById('devices-only-computer').classList.remove('hidden');
-    document.getElementById('devices-management').classList.add('hidden');
-  }
-}
-
-// QR con la IP de este ordenador en la red actual (ver getLanUrl() en
-// server/routes/devices.js) -- lo escanea un movil ya vinculado para saber
-// donde mandar los datos sin volver a emparejarse (ver
-// openScanServerModal() mas abajo).
-async function refreshNetworkQr() {
-  const img = document.getElementById('network-qr-image');
-  const urlText = document.getElementById('network-qr-url');
-  try {
-    const info = await api('/api/devices/network-info');
-    img.src = `/api/devices/network-qr.svg?_=${Date.now()}`;
-    img.classList.remove('hidden');
-    urlText.textContent = info.url;
-  } catch (err) {
-    img.classList.add('hidden');
-    urlText.textContent = 'No se ha detectado ninguna red activa.';
-  }
-}
-
-function renderDevicesList(devices) {
-  const list = document.getElementById('devices-list');
-  list.innerHTML = '';
-  if (devices.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Ningun dispositivo vinculado todavía.</p>';
-    return;
-  }
-  devices.forEach((d) => {
-    const row = document.createElement('div');
-    row.className = 'device-item';
-
-    const iconField = createIconField({
-      initialValue: d.icon || '',
-      // Se guarda solo al elegir uno nuevo (sin boton "Guardar" aparte),
-      // igual que "Usar" en los temas.
-      onChange: async (newIcon) => {
-        await api(`/api/devices/${d.id}`, { method: 'PATCH', body: JSON.stringify({ icon: newIcon || null }) });
-      },
-    });
-
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'device-item-name';
-    nameSpan.textContent = d.name;
-
-    const actions = document.createElement('div');
-    actions.className = 'device-item-actions';
-    actions.innerHTML = `
-      <button type="button" data-action="rename" class="secondary-btn">Editar</button>
-      <button type="button" data-action="revoke" class="danger-btn">Revocar</button>
-    `;
-
-    row.appendChild(iconField.element);
-    row.appendChild(nameSpan);
-    row.appendChild(actions);
-
-    actions.querySelector('[data-action="revoke"]').addEventListener('click', async () => {
-      await api(`/api/devices/${d.id}`, { method: 'DELETE' });
-      refreshDevicesTab();
-    });
-
-    actions.querySelector('[data-action="rename"]').addEventListener('click', () => {
-      nameSpan.replaceWith((() => {
-        const wrap = document.createElement('span');
-        wrap.style.display = 'flex';
-        wrap.style.flex = '1';
-        wrap.style.gap = '0.4rem';
-        wrap.innerHTML = `
-          <input type="text" class="device-rename-input" value="${escapeHtml(d.name)}" />
-          <button type="button" data-action="save" class="primary-btn">Guardar</button>
-          <button type="button" data-action="cancel" class="secondary-btn">Cancelar</button>
-        `;
-        const input = wrap.querySelector('input');
-        setTimeout(() => { input.focus(); input.select(); }, 0);
-
-        wrap.querySelector('[data-action="cancel"]').addEventListener('click', () => renderDevicesList(devices));
-
-        const save = async () => {
-          const newName = input.value.trim();
-          if (!newName) return;
-          await api(`/api/devices/${d.id}`, { method: 'PATCH', body: JSON.stringify({ name: newName }) });
-          refreshDevicesTab();
-        };
-        wrap.querySelector('[data-action="save"]').addEventListener('click', save);
-        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
-        return wrap;
-      })());
-      // Ocultamos los botones de accion mientras se edita el nombre.
-      actions.classList.add('hidden');
-    });
-
-    list.appendChild(row);
-  });
-}
-
-document.getElementById('btn-generate-code').addEventListener('click', async () => {
-  const { code, expiresAt } = await api('/api/devices/pairing-code', { method: 'POST' });
-  document.getElementById('pairing-code-value').textContent = code;
-  document.getElementById('pairing-code-display').classList.remove('hidden');
-
-  clearInterval(pairingCountdownTimer);
-  const update = () => {
-    const secondsLeft = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
-    document.getElementById('pairing-code-countdown').textContent =
-      secondsLeft > 0 ? `Caduca en ${secondsLeft}s` : 'Codigo caducado, genera otro.';
-    if (secondsLeft <= 0) clearInterval(pairingCountdownTimer);
-  };
-  update();
-  pairingCountdownTimer = setInterval(update, 1000);
-});
 
 // ---------------------------------------------------------------------
 // "Este dispositivo": ajustes locales, no compartidos con nadie mas
 // ---------------------------------------------------------------------
+// Dos mecanismos posibles, y el orden importa:
+//  1. El plugin nativo (app empaquetada con Capacitor): es el unico que
+//     hace sonar un aviso con la app CERRADA, asi que manda siempre que
+//     exista.
+//  2. La API de notificaciones del navegador: respaldo para cuando se
+//     usa desde un navegador normal, donde solo avisa con la pestana
+//     abierta.
+// Antes esto solo miraba (2) -- y resulta que WKWebView (el motor de la
+// app en el iPhone) NO implementa `Notification`, asi que el interruptor
+// se quedaba deshabilitado con un "este navegador no admite
+// notificaciones" y nunca llegaba a pedirle permiso al sistema. Por eso
+// iOS no mostraba ni el apartado de notificaciones de la app en sus
+// Ajustes: nunca se le habia pedido nada.
 function refreshMobileTab() {
   const checkbox = document.getElementById('setting-notifications');
   const status = document.getElementById('notifications-status');
-  const supported = 'Notification' in window;
+  const nativo = localNotificationsAvailable();
+  const webApi = 'Notification' in window;
   const enabledPref = localStorage.getItem('notificationsEnabled') !== 'false';
 
-  checkbox.disabled = !supported;
-  checkbox.checked = supported && enabledPref && Notification.permission === 'granted';
+  checkbox.disabled = !nativo && !webApi;
 
-  if (!supported) status.textContent = 'Este navegador no admite notificaciones.';
-  else if (Notification.permission === 'denied') status.textContent = 'Estan bloqueadas en el navegador; cambialo en los ajustes del sitio para activarlas.';
-  else status.textContent = '';
-
-  document.getElementById('setting-update-check').checked =
-    localStorage.getItem('updateCheckEnabled') !== 'false';
-
-  refreshCompletedTasksDisplayOptions();
-  refreshSyncStatusUI();
-  refreshGymWeightUnitOptions();
-  refreshScanServerStatus();
-}
-
-// ---------------------------------------------------------------------
-// "Escanear ordenador" (fase "multi-red"): un movil ya vinculado escanea
-// el QR que el ordenador muestra en Configuración → Dispositivos para
-// guardar su IP actual (localStorage.serverBaseUrl, ver getServerBaseUrl()
-// en app.js) sin tocar el origen de la propia app -- eso es lo que deja
-// los datos guardados intactos aunque cambie de wifi o de ordenador.
-// ---------------------------------------------------------------------
-let scanServerStream = null;
-let scanServerRafId = null;
-
-function refreshScanServerStatus() {
-  const el = document.getElementById('scan-server-status');
-  if (!el) return;
-  const override = localStorage.getItem('serverBaseUrl');
-  el.textContent = override
-    ? `Sincronizando con: ${override}`
-    : 'Usando la dirección con la que se abrió esta app.';
-}
-
-async function openScanServerModal() {
-  const modal = document.getElementById('scan-server-modal');
-  const video = document.getElementById('scan-server-video');
-  const modalStatus = document.getElementById('scan-server-modal-status');
-  modalStatus.textContent = '';
-  modal.classList.remove('hidden');
-
-  if (!window.jsQR) {
-    modalStatus.textContent = 'No se pudo cargar el lector de QR.';
-    return;
-  }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    modalStatus.textContent = 'Este navegador no permite usar la cámara aquí.';
-    return;
-  }
-
-  try {
-    scanServerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-  } catch (err) {
-    modalStatus.textContent = 'No se pudo acceder a la cámara: ' + err.message;
-    return;
-  }
-  video.srcObject = scanServerStream;
-  await video.play();
-
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-  const tick = () => {
-    if (!scanServerStream) return; // el modal se cerro entre un frame y el siguiente
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = window.jsQR(imageData.data, imageData.width, imageData.height);
-      if (code && code.data) {
-        handleScannedServerUrl(code.data);
-        return;
+  if (nativo) {
+    // El permiso del sistema se consulta en asincrono; hasta que
+    // conteste se muestra lo que dice la preferencia guardada.
+    checkbox.checked = enabledPref;
+    status.textContent = '';
+    ensureLocalNotificationPermissionSilently().then((concedido) => {
+      checkbox.checked = enabledPref && concedido;
+      if (enabledPref && !concedido) {
+        status.textContent = 'Falta el permiso del sistema: activa el interruptor para pedirlo, o dalo desde los ajustes del telefono.';
       }
-    }
-    scanServerRafId = requestAnimationFrame(tick);
-  };
-  scanServerRafId = requestAnimationFrame(tick);
-}
-
-function closeScanServerModal() {
-  document.getElementById('scan-server-modal').classList.add('hidden');
-  if (scanServerRafId) cancelAnimationFrame(scanServerRafId);
-  scanServerRafId = null;
-  if (scanServerStream) {
-    scanServerStream.getTracks().forEach((t) => t.stop());
-    scanServerStream = null;
-  }
-}
-
-function handleScannedServerUrl(text) {
-  let parsed;
-  try {
-    parsed = new URL(text);
-  } catch (err) {
-    document.getElementById('scan-server-modal-status').textContent = 'Ese código no tiene una dirección válida.';
-    return;
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    document.getElementById('scan-server-modal-status').textContent = 'Ese código no tiene una dirección válida.';
-    return;
+    });
+  } else if (!webApi) {
+    checkbox.checked = false;
+    status.textContent = 'Este navegador no admite notificaciones.';
+  } else {
+    checkbox.checked = enabledPref && Notification.permission === 'granted';
+    status.textContent = Notification.permission === 'denied'
+      ? 'Estan bloqueadas en el navegador; cambialo en los ajustes del sitio para activarlas.'
+      : '';
   }
 
-  localStorage.setItem('serverBaseUrl', parsed.origin);
-  closeScanServerModal();
-  refreshScanServerStatus();
-  document.getElementById('scan-server-status').textContent = `Conectando con ${parsed.origin}...`;
-  runSync().finally(refreshScanServerStatus);
+  // Aviso de fin de descanso del Gimnasio: solo tiene sentido en la app
+  // instalada (lo programa el plugin nativo; un navegador normal no
+  // puede avisar con la pestana cerrada). Activado por defecto.
+  const restNotify = document.getElementById('setting-gym-rest-notify');
+  restNotify.disabled = !nativo;
+  restNotify.checked = nativo && localStorage.getItem('gymRestNotify') !== 'false';
+  const restBurst = document.getElementById('setting-gym-rest-burst');
+  restBurst.disabled = !nativo;
+  restBurst.checked = nativo && localStorage.getItem('gymRestBurst') !== 'false';
+  const restDuck = document.getElementById('setting-gym-rest-duck');
+  restDuck.disabled = !nativo;
+  restDuck.checked = nativo && localStorage.getItem('gymRestDuck') !== 'false';
+  // Este NO se deshabilita fuera de la app instalada: no depende de
+  // ningun plugin, es solo lo que hace la pantalla del entreno cuando se
+  // acaba el descanso. Apagado de fabrica.
+  document.getElementById('setting-gym-auto-start').checked =
+    localStorage.getItem('gymAutoStartNextSet') === 'true';
+
+  // Sonido y vibracion de los avisos, como on-off separados (peticion
+  // de Koku). El matiz de iOS (con sonido, vibrar lo decide el sistema;
+  // "solo vibracion" usa el truco del sonido de silencio) vive en el
+  // dialogo del boton "?" -- ver notificationSoundValue() en
+  // local-notifications.js, que traduce estos dos toggles.
+  document.getElementById('setting-notif-sound').checked = localStorage.getItem('notifSound') !== 'false';
+  document.getElementById('setting-notif-vibrate').checked = localStorage.getItem('notifVibrate') !== 'false';
+
+  refreshGymTimeFormatOptions();
+  // Animaciones de TODA la app (zoom y deslizar del calendario, pero
+  // tambien transiciones de botones, listas, paneles...): encendidas por
+  // defecto -- ver areAnimationsEnabled()/applyAnimationsPreference() en
+  // app.js y la regla [data-animations="off"] de styles.css.
+  document.getElementById('setting-animations').checked = localStorage.getItem('animationsEnabled') !== 'false';
+
+  refreshGymWeightUnitOptions();
+  // La linea de "Ultima copia: ..." del bloque de copia de seguridad
+  // (ver backup.js, que se carga antes que este archivo).
+  refreshBackupStatusLine();
 }
 
-document.getElementById('btn-scan-server').addEventListener('click', openScanServerModal);
-document.getElementById('btn-close-scan-server').addEventListener('click', closeScanServerModal);
-
-// "Salir de la aplicacion": vive como accion directa en la lista principal
-// de Configuracion (no dentro de una sub-seccion), asi que se refresca al
-// abrir el panel entero (ver openSettingsModal), no al entrar en una
-// pestana concreta. window.electronAPI solo existe si esto corre dentro
-// de la app de escritorio (lo expone electron/preload.js) — en el
-// navegador normal (o desde el movil) el boton se queda oculto, porque
-// "salir" no significa nada ahi.
-function refreshQuitMenuItem() {
-  document.getElementById('btn-quit-app').classList.toggle('hidden', !window.electronAPI);
+// Sonido / vibracion: al cambiar cualquiera se reprograman los avisos ya
+// puestos (llevan el sonido "dentro" desde que se programan).
+async function onNotifAlertToggleChange() {
+  await syncScheduledReminders();
+  if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
 }
-
-document.getElementById('btn-quit-app').addEventListener('click', () => {
-  if (window.electronAPI) window.electronAPI.quitApp();
+document.getElementById('setting-notif-sound').addEventListener('change', (e) => {
+  localStorage.setItem('notifSound', e.target.checked ? 'true' : 'false');
+  onNotifAlertToggleChange();
+});
+document.getElementById('setting-notif-vibrate').addEventListener('change', (e) => {
+  localStorage.setItem('notifVibrate', e.target.checked ? 'true' : 'false');
+  onNotifAlertToggleChange();
 });
 
-// Tachar vs ocultar tareas completadas: preferencia de ESTE dispositivo
-// (como el modo de vista o el tema), no compartida — cada movil/ordenador
-// puede verlo a su manera. La lee renderTasksList() en app.js.
-const COMPLETED_TASKS_DISPLAY_MODES = [
-  { id: 'strike', label: 'Tachadas (siguen en la lista)' },
-  { id: 'hide', label: 'Ocultas' },
+// Un "?" POR OPCION (peticion de Koku: "cada apartado tiene su propio
+// boton con su texto"), en vez de un unico dialogo con todo.
+document.getElementById('btn-help-notif-reminders').addEventListener('click', () => {
+  showAppAlert('En la app instalada, los avisos de recordatorios los programa el propio teléfono: suenan aunque la app esté cerrada y sin que nada salga del dispositivo. Desde un navegador solo pueden avisar con la pestaña abierta.');
+});
+document.getElementById('btn-help-notif-rest').addEventListener('click', () => {
+  showAppAlert('Durante un entrenamiento del Gimnasio, cuando se acaba el descanso entre series llega una notificación aunque la pantalla esté bloqueada — así no hace falta estar mirando el móvil. Usa el mismo permiso que los recordatorios.');
+});
+document.getElementById('setting-gym-rest-burst').addEventListener('change', (e) => {
+  localStorage.setItem('gymRestBurst', e.target.checked ? 'true' : 'false');
+  // Si hay un descanso en marcha, se reprograma con el modo nuevo.
+  if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
+});
+document.getElementById('setting-gym-auto-start').addEventListener('change', (e) => {
+  localStorage.setItem('gymAutoStartNextSet', e.target.checked ? 'true' : 'false');
+});
+document.getElementById('btn-help-notif-autostart').addEventListener('click', () => {
+  showAppAlert('Al acabar el descanso, la siguiente serie empieza sola sin que tengas que darle a "Empezar serie" — solo si queda alguna serie pendiente de ese ejercicio. Ojo: el cronómetro de la serie arranca en ese momento, así que lo que tardes en volver a la máquina o colocar el peso cuenta como tiempo de serie. Apagado, el botón "Empezar serie" se pone grande al acabar el descanso y lo arrancas tú.');
+});
+document.getElementById('setting-gym-rest-duck').addEventListener('change', (e) => {
+  localStorage.setItem('gymRestDuck', e.target.checked ? 'true' : 'false');
+  // Si hay un descanso en marcha: encenderlo lo vigila ya; apagarlo
+  // suelta la vigilancia al momento.
+  if (e.target.checked) {
+    if (typeof gymStartRestAudioWatch === 'function') gymStartRestAudioWatch();
+  } else if (typeof gymCancelRestAudioWatch === 'function') {
+    gymCancelRestAudioWatch();
+  }
+});
+document.getElementById('btn-help-notif-duck').addEventListener('click', () => {
+  showAppAlert('Al acabar el descanso, la app baja unos segundos el volumen de lo que esté sonando (Spotify, Música...) y luego lo devuelve — como hace el GPS al hablar. No pausa ni corta nada.\n\nPara conseguirlo, durante el descanso la app se mantiene despierta en segundo plano (reproduce silencio a volumen cero); el gasto de batería es mínimo y solo dura lo que dura el descanso. Si iOS llegara a cerrar la app del todo, ese descanso no podría bajar la música (la notificación llega igual).');
+});
+document.getElementById('btn-help-notif-burst').addEventListener('click', () => {
+  showAppAlert('Al acabar el descanso, el móvil vibra varias veces seguidas (unos 10 segundos, como un aviso del sistema) para que se note aunque lo lleves en el bolsillo. Antes esto se hacía repitiendo la notificación tres veces; ahora la vibración la produce la propia app y solo llega UNA notificación.\n\nFormas de callarla que funcionan (probadas en iPhone): tocar un botón de volumen, desbloquear la pantalla, abrir la app, o quitar el aviso desde el centro de notificaciones.\n\nDos que NO funcionan, y no es un fallo de la app:\n\n• La pausa de los AirPods. Si hay música sonando, ese botón pertenece a quien está reproduciendo (Spotify, Música...), y iOS no se lo pasa a nadie más. Para enterarnos habría que quitarle a Spotify el mando — y entonces esa pulsación le pausaría la música, que es justo lo que no queremos.\n\n• Deslizar el aviso hacia arriba para quitarlo de la pantalla. Eso solo lo esconde: el aviso sigue estando en el centro de notificaciones, e iOS no avisa a la app de que lo has apartado. Quitarlo del centro de notificaciones sí funciona, porque ahí sí desaparece de verdad.\n\nTodo esto funciona porque durante el descanso la app se mantiene despierta (lo mismo que permite bajarte la música). Si iOS llegara a cerrarla del todo, ese descanso avisaría solo con la notificación normal.');
+});
+document.getElementById('btn-help-notif-sound').addEventListener('click', () => {
+  showAppAlert('Con el sonido activado, los avisos usan el sonido del sistema. Un detalle de iOS: cuando un aviso suena, vibrar o no lo decide el teléfono (Ajustes > Sonidos y vibraciones), no la app — por eso no existe la combinación "sonido sin vibración".');
+});
+document.getElementById('btn-help-notif-vibrate').addEventListener('click', () => {
+  showAppAlert('Con el sonido apagado y la vibración encendida, la app usa un truco: "reproduce" medio segundo de silencio, que es lo único que iOS acepta para disparar la vibración sin que se oiga nada. Con los dos apagados, el aviso llega solo en pantalla.\n\nImportante: que un aviso vibre o no lo decide al final el teléfono. Con el móvil en silencio (interruptor lateral), iOS solo vibra si tienes activado Ajustes > Sonidos y vibraciones > "Reproducir respuesta háptica en modo silencio" (y en modo timbre, su gemelo "en modo timbre"). Si eso está apagado, ninguna app puede hacer vibrar sus avisos.');
+});
+
+// Formato de tiempo del Gimnasio (descansos): minutos:segundos o
+// segundos a secas. El mismo ajuste que alterna el contador al tocarlo
+// (gymRestFormat) -- Koku pidio tenerlo tambien aqui, a la vista.
+const GYM_TIME_FORMAT_MODES = [
+  { id: 'min', label: 'Minutos y segundos (1:30)' },
+  { id: 'sec', label: 'Solo segundos (90s)' },
 ];
 
-function getCompletedTasksDisplayMode() {
-  return localStorage.getItem('completedTasksDisplay') || 'strike';
-}
-
-function refreshCompletedTasksDisplayOptions() {
-  const container = document.getElementById('completed-tasks-display-options');
+function refreshGymTimeFormatOptions() {
+  const container = document.getElementById('gym-time-format-options');
   if (!container) return;
   container.innerHTML = '';
-  const current = getCompletedTasksDisplayMode();
+  const current = localStorage.getItem('gymRestFormat') === 'sec' ? 'sec' : 'min';
 
-  COMPLETED_TASKS_DISPLAY_MODES.forEach((mode) => {
+  GYM_TIME_FORMAT_MODES.forEach((mode) => {
     const isActive = mode.id === current;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
-    // Aqui NO se anade "(actual)" al texto — el resaltado de color ya deja
-    // claro cual esta activa, y repetirlo con texto era redundante.
     btn.textContent = mode.label;
     if (isActive) {
       btn.disabled = true;
     } else {
       btn.addEventListener('click', () => {
-        localStorage.setItem('completedTasksDisplay', mode.id);
-        refreshCompletedTasksDisplayOptions();
-        if (typeof renderTasksList === 'function') renderTasksList();
+        localStorage.setItem('gymRestFormat', mode.id);
+        refreshGymTimeFormatOptions();
       });
     }
     container.appendChild(btn);
   });
 }
 
-// Unidad de peso de Gimnasio: preferencia de ESTE dispositivo, mismo
-// patron que arriba. getGymWeightUnit() (definida en app.js, que se
+document.getElementById('setting-animations').addEventListener('change', (e) => {
+  localStorage.setItem('animationsEnabled', e.target.checked ? 'true' : 'false');
+  // Aplicar en caliente: marca/desmarca el <html>, que es lo que
+  // enciende la regla global de styles.css que apaga TODAS las
+  // animaciones de la app (no solo las del calendario). Sin esto haria
+  // falta recargar para notar el cambio.
+  applyAnimationsPreference();
+});
+
+// Unidad de peso de Gimnasio: preferencia de ESTE dispositivo (como el
+// tema), no compartida. getGymWeightUnit() (definida en app.js, que se
 // carga antes que este archivo) es quien de verdad lee/usa el valor al
 // mostrar/guardar pesos -- aqui solo esta el interruptor visual.
 const GYM_WEIGHT_UNIT_MODES = [
@@ -1813,78 +1576,47 @@ function refreshGymWeightUnitOptions() {
   });
 }
 
-document.getElementById('setting-update-check').addEventListener('change', (e) => {
-  localStorage.setItem('updateCheckEnabled', e.target.checked ? 'true' : 'false');
-});
-
-// Convierte la clave publica VAPID (texto base64url que da el servidor)
-// al formato Uint8Array que pide pushManager.subscribe() -- conversion
-// estandar del protocolo Web Push, no hay atajo mas corto.
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
-  return outputArray;
-}
-
-// Suscribe ESTE dispositivo a notificaciones push de verdad (avisan con
-// la app cerrada del todo, ver public/sw.js y server/reminderChecker.js)
-// y manda la suscripcion resultante al servidor. Lanza si algo falla
-// (falta el correo de contacto en el perfil, el navegador no admite
-// push...) con un mensaje ya pensado para ensenarse tal cual.
-async function subscribeToPush() {
-  const registration = await navigator.serviceWorker.ready;
-  const { publicKey } = await api('/api/devices/push-public-key');
-  const subscription = await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(publicKey),
-  });
-  await api('/api/devices/push-subscription', { method: 'POST', body: JSON.stringify({ subscription }) });
-}
-
-async function unsubscribeFromPush() {
-  if (!('serviceWorker' in navigator)) return;
-  const registration = await navigator.serviceWorker.ready;
-  const subscription = await registration.pushManager.getSubscription();
-  if (subscription) await subscription.unsubscribe();
-  await api('/api/devices/push-subscription', { method: 'DELETE' }).catch(() => {});
-}
-
 document.getElementById('setting-notifications').addEventListener('change', async (e) => {
-  let pushErrorMessage = '';
-
   if (e.target.checked) {
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
+    // Se pide el permiso del mecanismo que de verdad se va a usar (ver
+    // refreshMobileTab): el del SISTEMA en la app empaquetada -- que es
+    // ademas la unica forma de que iOS/Android muestren el apartado de
+    // notificaciones de la app en sus ajustes --, y el del navegador
+    // cuando se usa desde un navegador normal.
+    const concedido = localNotificationsAvailable()
+      ? await ensureLocalNotificationPermission()
+      : ('Notification' in window && (await Notification.requestPermission()) === 'granted');
+    if (!concedido) {
       e.target.checked = false;
       refreshMobileTab();
       return;
     }
     localStorage.setItem('notificationsEnabled', 'true');
-
-    // El aviso push de verdad (con la app cerrada) solo tiene sentido en
-    // un movil emparejado -- el ordenador ya recibe su aviso directamente
-    // del propio servidor (node-notifier), sin pasar por Google/Apple.
-    const isPairedDevice = !!localStorage.getItem('deviceToken');
-    if (isPairedDevice && 'serviceWorker' in navigator && 'PushManager' in window) {
-      try {
-        await subscribeToPush();
-      } catch (err) {
-        pushErrorMessage = err.message || 'No se pudo activar el aviso push en este dispositivo.';
-      }
-    }
   } else {
     localStorage.setItem('notificationsEnabled', 'false');
-    if (localStorage.getItem('deviceToken')) await unsubscribeFromPush();
   }
-
-  // refreshMobileTab() pisa el texto de estado con el mensaje generico de
-  // siempre -- si hubo un fallo especifico del push, se ensena DESPUES,
-  // para que no se pierda.
+  // Programar o cancelar los avisos del sistema segun acabe de quedar
+  // el interruptor.
+  await syncScheduledReminders();
   refreshMobileTab();
-  if (pushErrorMessage) document.getElementById('notifications-status').textContent = pushErrorMessage;
+});
+
+// Aviso al terminar el descanso entre series (Gimnasio). Usa el mismo
+// permiso del sistema que los recordatorios: si aun no esta dado, se
+// pide aqui mismo al encenderlo.
+document.getElementById('setting-gym-rest-notify').addEventListener('change', async (e) => {
+  if (e.target.checked) {
+    const concedido = await ensureLocalNotificationPermission();
+    if (!concedido) {
+      e.target.checked = false;
+      return;
+    }
+    localStorage.setItem('gymRestNotify', 'true');
+  } else {
+    localStorage.setItem('gymRestNotify', 'false');
+    // Si habia un aviso ya programado para el descanso en curso, fuera.
+    if (typeof gymCancelRestNotification === 'function') gymCancelRestNotification();
+  }
 });
 
 // ---------------------------------------------------------------------
@@ -1894,100 +1626,6 @@ document.getElementById('setting-notifications').addEventListener('change', asyn
 // lista y el "modo grabacion" para capturar la siguiente tecla que
 // pulses. Cada accion puede tener VARIAS combinaciones a la vez (se
 // muestran como chips con una x cada una), no solo una.
-// ---------------------------------------------------------------------
-function startRecordingShortcut(actionId, addBtn) {
-  const originalText = addBtn.textContent;
-  addBtn.textContent = 'Pulsa una tecla…';
-  addBtn.classList.add('recording');
-  addBtn.disabled = true;
-
-  const handler = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (e.key === 'Escape') {
-      // Esc siempre cancela la grabacion (no se puede asignar Esc solo:
-      // ya tiene su propio significado fijo de "salir").
-      document.removeEventListener('keydown', handler, true);
-      renderShortcutsList();
-      return;
-    }
-
-    const combo = comboFromEvent(e);
-    if (!combo) return; // solo se ha soltado una tecla modificadora, seguimos esperando
-
-    addShortcut(actionId, combo);
-    document.removeEventListener('keydown', handler, true);
-    renderShortcutsList();
-  };
-
-  document.addEventListener('keydown', handler, true);
-}
-
-function renderShortcutsList() {
-  const container = document.getElementById('shortcuts-list');
-  container.innerHTML = '';
-  const map = getShortcutMap();
-
-  SHORTCUT_ACTIONS.forEach((action) => {
-    const row = document.createElement('div');
-    row.className = 'shortcut-row';
-
-    const label = document.createElement('span');
-    label.className = 'shortcut-label';
-    label.textContent = action.label;
-
-    const combos = document.createElement('div');
-    combos.className = 'shortcut-combos';
-
-    const activeCombos = map[action.id] || [];
-    if (activeCombos.length === 0) {
-      const hint = document.createElement('span');
-      hint.className = 'shortcut-empty-hint';
-      hint.textContent = 'Sin atajo';
-      combos.appendChild(hint);
-    } else {
-      activeCombos.forEach((combo) => {
-        const chip = document.createElement('span');
-        chip.className = 'shortcut-combo-chip';
-
-        const chipLabel = document.createElement('span');
-        chipLabel.textContent = displayCombo(combo);
-        chip.appendChild(chipLabel);
-
-        const removeBtn = document.createElement('button');
-        removeBtn.type = 'button';
-        removeBtn.className = 'shortcut-combo-remove';
-        removeBtn.textContent = '✕';
-        removeBtn.setAttribute('aria-label', `Quitar atajo ${displayCombo(combo)}`);
-        removeBtn.addEventListener('click', () => {
-          removeShortcut(action.id, combo);
-          renderShortcutsList();
-        });
-        chip.appendChild(removeBtn);
-
-        combos.appendChild(chip);
-      });
-    }
-
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'shortcut-add-btn';
-    addBtn.textContent = '+ Añadir';
-    addBtn.addEventListener('click', () => startRecordingShortcut(action.id, addBtn));
-    combos.appendChild(addBtn);
-
-    row.appendChild(label);
-    row.appendChild(combos);
-    container.appendChild(row);
-  });
-}
-
-function refreshShortcutsTab() {
-  renderShortcutsList();
-}
-
-
 // ---------------------------------------------------------------------
 // Esc: hace lo mismo que cerrar / clicar fuera, capa a capa — primero lo
 // que este mas "encima" (un popover), y solo al final el modal entero de
@@ -2040,12 +1678,6 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const scanServerModal = document.getElementById('scan-server-modal');
-  if (scanServerModal && !scanServerModal.classList.contains('hidden')) {
-    closeScanServerModal();
-    return;
-  }
-
   const openPopover = document.querySelector('.color-popover:not(.hidden), .icon-popover:not(.hidden), .select-popover:not(.hidden), .date-popover:not(.hidden)');
   if (openPopover) {
     closeAllPopovers();
@@ -2067,19 +1699,6 @@ document.addEventListener('keydown', (e) => {
   const taskModal = document.getElementById('task-modal');
   if (taskModal && !taskModal.classList.contains('hidden')) {
     closeTaskModal();
-    return;
-  }
-
-  // Panel de formato del editor de notas (#note-format-popover, boton
-  // "Formato") -- no esta en la lista generica de popovers de mas
-  // arriba (openPopover) a proposito, ver el comentario de
-  // #note-format-btn en app.js. Se comprueba antes que la vista del
-  // editor entero, para que Esc cierre primero el panel y solo en un
-  // segundo Esc cierre la nota. Reutiliza el propio click del boton
-  // (que ya sabe abrir/cerrar) en vez de duplicar esa logica aqui.
-  const noteFormatPopoverEl = document.getElementById('note-format-popover');
-  if (noteFormatPopoverEl && !noteFormatPopoverEl.classList.contains('hidden')) {
-    document.getElementById('note-format-btn').click();
     return;
   }
 
@@ -2157,17 +1776,6 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const mySpaceView = document.getElementById('my-space-view');
-  if (mySpaceView && !mySpaceView.classList.contains('hidden')) {
-    const hub = document.getElementById('my-space-hub');
-    if (hub && hub.dataset.expanded) {
-      document.getElementById('my-space-back-btn').click();
-    } else {
-      document.getElementById('btn-close-my-space').click();
-    }
-    return;
-  }
-
   // Apps: cada una es pantalla completa igual que "Mi espacio", asi
   // que Esc capa a capa igual -- PRIMERO cualquier modal de "añadir/editar"
   // abierto ENCIMA de la extension (se cierra sin guardar, te deja en la
@@ -2179,6 +1787,21 @@ document.addEventListener('keydown', (e) => {
   // de Koku: "el primer esc me saque de la ventana de añadir... luego ya
   // con el siguiente que me lleve a la ventana anterior").
   const gymModalIds = [
+    // Los dialogos de empezar/terminar serie son los mas "de encima"
+    // durante un entreno; Esc equivale a Cancelar / Seguir.
+    ['gym-set-start-modal', closeGymSetStartModal],
+    ['gym-set-end-modal', closeGymSetEndModal],
+    // La ayuda del entrenamiento despues: se abre encima de todo
+    // (incluso encima del entreno en vivo).
+    ['gym-help-modal', closeGymHelpModal],
+    ['gym-progress-help-modal', closeGymProgressHelpModal],
+    // La ficha de la libreria va ANTES que el buscador: se abre encima
+    // de el, y el primer Esc debe cerrar solo la ficha.
+    ['gym-library-detail-modal', closeGymLibraryDetail],
+    ['gym-library-modal', closeGymLibraryModal],
+    ['gym-start-modal', closeGymStartModal],
+    ['gym-activity-modal', closeGymActivityModal],
+    ['gym-block-modal', closeGymBlockModal],
     ['gym-exercise-modal', closeGymExerciseModal],
     ['gym-routine-modal', closeGymRoutineModal],
     ['gym-session-modal', closeGymSessionModal],
@@ -2190,8 +1813,40 @@ document.addEventListener('keydown', (e) => {
       return;
     }
   }
+  // El resumen de fin de entreno y la celebracion de logros se cierran
+  // con Esc como cualquier modal (la celebracion primero: se abre encima).
+  const gymAchievement = document.getElementById('gym-achievement-modal');
+  if (gymAchievement && !gymAchievement.classList.contains('hidden')) {
+    gymAchievement.classList.add('hidden');
+    return;
+  }
+  const gymSummary = document.getElementById('gym-live-summary-modal');
+  if (gymSummary && !gymSummary.classList.contains('hidden')) {
+    gymSummary.classList.add('hidden');
+    return;
+  }
+  // Con un entrenamiento EN VIVO abierto, Esc no hace nada a proposito:
+  // salir se hace solo con Terminar o Descartar (los dos con
+  // confirmacion/resumen) -- un Esc despistado no debe sacar del entreno.
+  // Excepcion: si el menu flotante de acciones esta desplegado, Esc lo
+  // recoge (es la capa de mas arriba).
+  const gymLive = document.getElementById('gym-live-view');
+  if (gymLive && !gymLive.classList.contains('hidden')) {
+    const gymFab = document.getElementById('gym-live-fab');
+    if (gymFab && gymFab.classList.contains('open') && typeof closeGymLiveFab === 'function') {
+      closeGymLiveFab();
+    }
+    return;
+  }
   const gymView = document.getElementById('gym-view');
   if (gymView && !gymView.classList.contains('hidden')) {
+    // Dentro del Plan, si estas viendo los dias de un bloque, el Esc
+    // primero sube al nivel de bloques (sub-navegacion, como Lecturas).
+    const daysLevel = document.getElementById('gym-block-days-level');
+    if (daysLevel && !daysLevel.classList.contains('hidden')) {
+      document.getElementById('btn-gym-back-to-blocks').click();
+      return;
+    }
     document.getElementById('btn-close-gym').click();
     return;
   }
@@ -2242,12 +1897,6 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const archivosView = document.getElementById('archivos-view');
-  if (archivosView && !archivosView.classList.contains('hidden')) {
-    document.getElementById('btn-close-archivos').click();
-    return;
-  }
-
   // Viajes tiene DOS capas de sub-navegacion, no una: el detalle de un
   // viaje dentro de la pestaña "Mis viajes", y las propias pestañas
   // Mapa/Mis viajes -- Esc SIEMPRE pasa por la pestaña Mapa antes de
@@ -2263,6 +1912,26 @@ document.addEventListener('keydown', (e) => {
       setViajesTab('mapa');
     } else {
       document.getElementById('btn-close-viajes').click();
+    }
+    return;
+  }
+
+  const groupModal = document.getElementById('group-modal');
+  if (groupModal && !groupModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-group').click();
+    return;
+  }
+
+  // Grupos tambien tiene dos capas: el detalle de un grupo dentro de la
+  // lista. Esc vuelve primero a la lista y solo despues sale al
+  // calendario, igual que Notas o Viajes.
+  const groupsView = document.getElementById('groups-view');
+  if (groupsView && !groupsView.classList.contains('hidden')) {
+    const detail = document.getElementById('groups-detail-panel');
+    if (detail && !detail.classList.contains('hidden')) {
+      document.getElementById('btn-groups-back').click();
+    } else {
+      document.getElementById('btn-close-groups').click();
     }
     return;
   }
@@ -2284,7 +1953,7 @@ document.addEventListener('keydown', (e) => {
     if (settingsMenu && settingsMenu.classList.contains('hidden')) {
       showSettingsScreen(null);
     } else {
-      document.getElementById('btn-close-settings').click();
+      closeSettingsModal();
     }
   }
 });

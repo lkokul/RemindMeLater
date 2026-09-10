@@ -2,7 +2,12 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<!-- viewport-fit=cover: sin esto, en la app empaquetada el contenido se
+     mete debajo del reloj/notch del iPhone y ademas env(safe-area-inset-*)
+     devuelve siempre 0, asi que no habia forma de apartarlo. Con cover, esas
+     variables ya traen el hueco real de cada dispositivo y el CSS lo reserva
+     (ver .app/.my-space-view en styles.css). -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>RemindMeLater</title>
 <link rel="stylesheet" href="styles.css" />
 
@@ -16,22 +21,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 
-<!-- Manifest PWA: permite "Instalar" (ordenador) o "Anadir a inicio"
-     (movil) para que RemindMeLater se abra como una app de verdad, en su
-     propia ventana/icono y sin la barra de direcciones del navegador —
-     sin necesidad de compilar nada aparte. -->
-<link rel="manifest" href="manifest.json" />
+<!-- El color de la barra de estado y el icono de la app los pone el
+     proyecto nativo (ios/ y android/), no la pagina. -->
 <meta name="theme-color" content="#0f1115" />
-<link rel="icon" href="icons/icon-192.png" />
-<link rel="apple-touch-icon" href="icons/icon-180.png" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="RemindMeLater" />
 <script>
   // Aplica el tema que este dispositivo tuviera guardado ANTES de que se
   // pinte nada, para no ver un parpadeo del tema oscuro por defecto y
   // luego el tuyo. settings.js hace despues la comprobacion "de verdad"
-  // contra el servidor; esto es solo para que la primera pintura ya
+  // desde la base local; esto es solo para que la primera pintura ya
   // salga con tus colores.
   (function () {
     try {
@@ -54,7 +51,7 @@
       // de contraste (formato viejo, con "text"/"textDim" globales), o de
       // una variante inversa a la que le falta algun dato, rellenamos con
       // el mismo patron de "heredar de la superficie mas parecida DE ESTE
-      // MISMO tema" que usa sanitizeColors() en el servidor — asi un tema
+      // MISMO tema" que usa sanitizeColors() en themes.js — asi un tema
       // incompleto no se queda con contraste del tema oscuro por defecto
       // aunque el resto sea claro.
       if (!colors.settingsMenuBg) colors.settingsMenuBg = colors.surface2;
@@ -80,84 +77,24 @@
     } catch (e) {
       document.documentElement.dataset.uiStyle = 'directo';
     }
+
+    // Interruptor de animaciones (Configuracion > Este dispositivo). Va
+    // AQUI, antes de pintar, por el mismo motivo que el tema: si se
+    // pusiera mas tarde, con el interruptor apagado se llegaria a ver un
+    // trozo de animacion antes de que el atributo llegase. Marca el
+    // <html> con data-animations="off" y de eso se encarga UNA regla
+    // global de styles.css que apaga TODAS las animaciones y
+    // transiciones de la app de golpe (ver applyAnimationsPreference()
+    // en app.js).
+    try {
+      if (localStorage.getItem('animationsEnabled') === 'false') {
+        document.documentElement.dataset.animations = 'off';
+      }
+    } catch (e) { /* sin localStorage, animaciones encendidas */ }
   })();
 </script>
 </head>
 <body>
-
-  <!-- Avisos discretos en la esquina, apilados (no un header grande):
-       nueva version del servidor, hay una version nueva en GitHub, y "tu
-       vista guardada no es la normal". Ver checkForUpdate(),
-       checkForNewRelease() y applyViewModePrompt() en app.js. -->
-  <div id="toast-stack" class="toast-stack">
-    <div id="update-banner" class="toast hidden">
-      <span>Nueva versión disponible.</span>
-      <button type="button" id="btn-reload-update">Recargar</button>
-    </div>
-
-    <!-- Distinto del de arriba: ese detecta que ESTE servidor ya
-         arrancado se ha reiniciado; este otro pregunta a GitHub si hay
-         una version mas nueva que la que tienes, aunque no hayas tocado
-         nada todavia. Se ve en cualquier dispositivo (GET /api/update/check
-         es requireDeviceOrTrusted, ver server/routes/update.js), pero
-         instalarla de verdad (git pull) solo puede hacerlo el ordenador --
-         en el movil el boton "Actualizar ahora" se sustituye por un texto
-         informativo (ver checkForNewRelease() en app.js). -->
-    <div id="new-release-banner" class="toast toast-release hidden">
-      <div class="toast-release-top">
-        <span id="new-release-banner-text"></span>
-        <button type="button" id="btn-dismiss-release" class="toast-dismiss" aria-label="Ahora no">✕</button>
-      </div>
-      <div class="toast-release-actions">
-        <button type="button" id="btn-skip-release" class="secondary-btn">No para esta</button>
-        <button type="button" id="btn-install-release" class="primary-btn">Actualizar ahora</button>
-        <span id="new-release-mobile-hint" class="hint hidden">Actualízala desde el ordenador.</span>
-      </div>
-    </div>
-
-    <div id="default-view-banner" class="toast hidden">
-      <span id="default-view-banner-text"></span>
-      <button type="button" id="btn-apply-default-view"></button>
-      <button type="button" id="btn-dismiss-default-view" class="toast-dismiss" aria-label="Ahora no">✕</button>
-    </div>
-  </div>
-
-  <!-- Pantalla de emparejamiento: se muestra solo si este dispositivo
-       (normalmente el movil) todavia no tiene token guardado o el servidor
-       lo rechaza. Ver app.js -> showPairingScreen(). -->
-  <div id="pairing-screen" class="pairing-screen hidden">
-    <div class="pairing-card">
-      <h1>RemindMeLater</h1>
-      <p>Este dispositivo todavía no esta vinculado a tu calendario.</p>
-      <p>En el ordenador, abre <strong>☰ Configuración → Dispositivos → Vincular nuevo dispositivo</strong> y escribe aquí el código de 6 dígitos que aparezca.</p>
-      <form id="pairing-form">
-        <label>
-          Codigo
-          <input type="text" id="pairing-code" inputmode="numeric" maxlength="6" placeholder="000000" required />
-        </label>
-        <label>
-          Nombre de este dispositivo
-          <input type="text" id="pairing-name" placeholder="Mi movil" required />
-        </label>
-        <button type="submit">Vincular</button>
-      </form>
-      <p id="pairing-error" class="error hidden"></p>
-    </div>
-  </div>
-
-  <!-- "Escanear ordenador": lee con la camara el QR de Configuración →
-       Dispositivos (en el ordenador) para saber a que IP mandar los datos
-       en la wifi de ahora, sin volver a vincular el dispositivo. Ver
-       openScanServerModal() en settings.js. -->
-  <div id="scan-server-modal" class="modal hidden">
-    <div class="modal-card">
-      <button type="button" id="btn-close-scan-server" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2>Escanear ordenador</h2>
-      <p class="hint">Apunta la cámara al QR que aparece en el ordenador (Configuración → Dispositivos).</p>
-      <video id="scan-server-video" class="scan-server-video" autoplay playsinline muted></video>
-      <p id="scan-server-modal-status" class="hint"></p>
-    </div>
-  </div>
 
   <!-- Confirmacion/aviso propio con el estilo de la app, para sustituir a
        confirm()/alert() nativos del navegador en flujos donde hace falta
@@ -182,52 +119,17 @@
     </div>
   </div>
 
-  <!-- App principal -->
-  <div id="app" class="app hidden">
-    <header class="topbar">
-      <div class="topbar-title">
-        <h1>RemindMeLater</h1>
-      </div>
-      <nav class="topbar-actions">
-        <button id="btn-new-event" class="primary-btn">+ Nuevo evento</button>
-        <button id="btn-new-task" class="primary-btn">+ Nueva tarea</button>
-        <button id="btn-new-note-topbar" class="primary-btn">+ Nota</button>
-        <!-- Atajo rapido para alternar claro/oscuro sin entrar en
-             Configuracion — solo se ve si el tema activo tiene variante
-             emparejada (si no, no hay a que alternar). Ver
-             refreshQuickColorModeButton() en settings.js; la forma
-             "oficial" de cambiarlo sigue estando en Configuracion > Estilo. -->
-        <button id="btn-quick-color-mode" class="icon-btn quick-color-mode-btn hidden" aria-label="Cambiar entre claro y oscuro"></button>
-        <!-- Solo se ve si Configuracion > Vista > Mi espacio esta en modo
-             "boton" (ver applyMiEspacioMode en app.js) — en modo "panel" no
-             hace falta, Mi espacio ya esta siempre visible al lado del
-             calendario. -->
-        <button id="btn-my-space" class="secondary-btn my-space-topbar-btn hidden" aria-label="Mi espacio">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4.5" height="16" rx="1"></rect><rect x="9.75" y="4" width="4.5" height="16" rx="1"></rect><rect x="16.5" y="4" width="4.5" height="16" rx="1"></rect></svg>
-          <span>Mi espacio</span>
-        </button>
-        <!-- Apps: futuras secciones aparte del calendario
-             (gimnasio, finanzas, lecturas...). A diferencia de Mi
-             espacio no tiene modo "panel", siempre es pantalla
-             completa, asi que este boton nunca se oculta. -->
-        <button id="btn-extensions" class="secondary-btn my-space-topbar-btn" aria-label="Apps">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-          <span>Apps</span>
-        </button>
-        <!-- Fase "movil": punto de color para ver de un vistazo si este
-             dispositivo esta sincronizado, sin tener que entrar en
-             Configuracion -- verde = todo al dia, amarillo = hay cambios
-             pendientes de mandar, gris = sin conexion con el ordenador
-             ahora mismo, rojo = fallo de verdad (no solo "sin conexion").
-             Clicarlo lleva directo a la seccion de sincronizacion. Ver
-             refreshSyncIndicator() en app.js. -->
-        <button type="button" id="sync-indicator" class="sync-indicator" aria-label="Estado de sincronización">
-          <span id="sync-indicator-dot" class="sync-indicator-dot"></span>
-        </button>
-        <button id="btn-settings" class="icon-btn" aria-label="Configuración">☰</button>
-      </nav>
-    </header>
+  <!-- Aviso discreto de copia de seguridad: aparece al abrir la app si
+       hace mas de ~30 dias de la ultima copia (o nunca se hizo una).
+       Tocarlo lleva a Configuracion > Este dispositivo; la X lo pospone
+       unos dias. Ver maybeShowBackupReminder() en backup.js. -->
+  <div id="backup-reminder-banner" class="backup-reminder-banner hidden">
+    <span id="backup-reminder-text"></span>
+    <button type="button" id="btn-backup-reminder-close" class="backup-reminder-close" aria-label="Posponer aviso">✕</button>
+  </div>
 
+  <!-- App principal -->
+  <div id="app" class="app">
     <!-- Navegacion movil: sustituye a la topbar en pantallas estrechas
          (ver .topbar/.mobile-nav en styles.css). Cada boton primero
          cierra cualquier vista/modal abierto (closeAllMobileOverlays en
@@ -235,6 +137,13 @@
          luego abre su seccion clicando el boton real correspondiente
          -- asi toda la logica de abrir/cerrar sigue viviendo en un solo
          sitio, esto solo la dispara desde otro botón. -->
+    <div id="gym-global-rest" class="gym-global-rest hidden" role="button" title="Volver al entrenamiento">
+      <span><span id="gym-global-rest-label">Descanso</span> <b id="gym-global-rest-remaining">0:00</b></span>
+      <div class="gym-global-rest-track">
+        <div id="gym-global-rest-fill-base" class="gym-live-rest-fill-base"></div>
+        <div id="gym-global-rest-fill-extra" class="gym-live-rest-fill-extra"></div>
+      </div>
+    </div>
     <nav class="mobile-nav" aria-label="Navegación principal">
       <button type="button" class="mobile-nav-btn active" data-mobile-nav="calendar" aria-label="Calendario">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
@@ -252,9 +161,9 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v5h5"></path><line x1="8" y1="12" x2="16" y2="12"></line><line x1="8" y1="16" x2="13" y2="16"></line></svg>
         <span>Notas</span>
       </button>
-      <button type="button" class="mobile-nav-btn" data-mobile-nav="extensions" aria-label="Apps">
+      <button type="button" class="mobile-nav-btn" data-mobile-nav="extensions" aria-label="Herramientas">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-        <span>Apps</span>
+        <span>Herramientas</span>
       </button>
       <button type="button" class="mobile-nav-btn" data-mobile-nav="settings" aria-label="Configuración">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
@@ -267,41 +176,11 @@
            (no en todo el ancho de la app, ni contando el panel de
            recordatorios de al lado). -->
       <div class="calendar-column">
-        <!-- Barra del mes de ESCRITORIO (flechas prev/next + vista anual con
-             boton/rueda del raton). En movil no se usa -- la navegacion de
-             mes/año es por gesto (swipe) y tiene su propia barra propia
-             mas abajo (.mobile-calendar-toolbar), ver Fase 2 del rediseño
-             movil en CLAUDE.md. -->
-        <nav class="month-nav-bar desktop-only">
-          <button id="nav-prev" class="icon-btn" aria-label="Mes anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
-          <span id="current-month-label" class="month-label"></span>
-          <button id="nav-next" class="icon-btn" aria-label="Mes siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
-          <!-- Vista anual (solo escritorio): alterna con la vista de mes.
-               Ademas de este boton de apoyo, tambien se puede con la
-               rueda del raton (hacia abajo sobre el mes = vista anual,
-               hacia arriba sobre un mes en la vista anual = entrar en
-               ese mes) -- ver el "wheel" en app.js. -->
-          <button type="button" id="btn-calendar-year-toggle" class="icon-btn" aria-label="Vista anual" title="Vista anual (o rueda del ratón hacia abajo sobre el mes)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-          </button>
-        </nav>
-
-        <!-- Vista de escritorio: cuadricula del mes, o las 12 en miniatura
-             si se activo la vista anual (CSS oculta las dos en movil). -->
-        <section id="calendar-grid-wrap" class="calendar-grid-wrap desktop-only">
-          <div id="calendar-grid" class="calendar-grid"></div>
-          <div id="calendar-year-grid" class="calendar-year-grid hidden"></div>
-        </section>
-
-        <!-- Calendario MOVIL (Fase 2 del rediseño movil): contenedor propio,
-             NUNCA comparte nodo con calendar-grid-wrap.desktop-only de
-             arriba (ver nota en CLAUDE.md sobre el hallazgo de que la vista
-             anual de escritorio vivia anidada ahi y no se podia reutilizar
-             sin mas). Barra superior sin flechas prev/next a proposito --
-             en movil el cambio de mes/año es por swipe vertical (ver
+        <!-- Calendario: barra superior sin flechas prev/next a proposito --
+             el cambio de mes/año es por swipe vertical (ver
              attachSwipe/setCalendarViewMode en app.js), pedido explicito
              de Koku. -->
-        <div id="mobile-calendar-month-toolbar" class="mobile-calendar-toolbar mobile-only">
+        <div id="mobile-calendar-month-toolbar" class="mobile-calendar-toolbar">
           <button type="button" id="btn-mobile-calendar-nav-label" class="mobile-calendar-nav-label"></button>
           <div class="mobile-calendar-toolbar-actions">
             <div id="mobile-calendar-density-field" class="mobile-calendar-density-field"></div>
@@ -326,7 +205,7 @@
           </div>
         </div>
 
-        <section class="mobile-calendar-view mobile-only">
+        <section class="mobile-calendar-view">
           <!-- Nombre del mes, centrado, debajo de la barra de arriba
                (año/densidad/buscar/+) -- pedido explicito de Koku, antes
                no se mostraba en ningun sitio en la vista mensual (solo
@@ -343,7 +222,7 @@
              barra superior que el mes (.mobile-calendar-toolbar), con su
              propia etiqueta "▲ {Mes}" para volver -- mismo patron que
              Koku pidio para mes->año, aplicado aqui a dia->mes. -->
-        <section id="mobile-calendar-day-view" class="mobile-calendar-day-view mobile-only hidden">
+        <section id="mobile-calendar-day-view" class="mobile-calendar-day-view hidden">
           <!-- Cabecera fija (position:sticky) -- el scroll de verdad es
                el de la PAGINA entera en movil (".app" solo pone un
                min-height, no un height fijo, para que el resto de la app
@@ -404,187 +283,60 @@
         </section>
       </div>
 
-      <!-- Arrastre para hacer mas ancho/fino el panel de recordatorios de
-           al lado (a costa del calendario) -- solo en escritorio, ver
-           .panel-resize-handle en styles.css y la logica de arrastre en
-           app.js. Oculto en modo "panel" de Mi espacio (ese ancho es
-           fijo, ver applyMiEspacioMode). -->
-      <div id="panel-resize-handle" class="panel-resize-handle desktop-only" role="separator" aria-orientation="vertical" aria-label="Redimensionar panel de recordatorios"></div>
-
-      <!-- Panel de recordatorios: arriba "Proximos" (o los eventos de un
-           dia concreto si has clicado uno en el calendario, ver
-           showDayInReminders en app.js), abajo un bloque fijo de "Tareas"
-           que se ve siempre a la vez, cada uno con su propio scroll
-           interno (ver .reminders-top-block/.reminders-tasks-block en
-           styles.css). -->
-      <!-- En movil este panel clasico ya NO se ve -- desde la Fase 2 del
-           rediseño movil, tareas/recordatorios se ven integrados en el
-           propio calendario movil (circulos/pildoras de grupo), y Notas
-           tiene su vista propia (Fase 4). Sigue intacto en escritorio,
-           donde es el panel de siempre al lado del calendario. -->
-      <aside id="reminders-panel" class="reminders-panel desktop-only">
-        <!-- Solo se usa en modo "boton" de Mi espacio (panel lateral
-             clasico): las secciones que marques en Configuracion > Vista
-             > "Agrupar con flechas" se meten AQUI DENTRO (una visible
-             cada vez, con flechas arriba para alternar entre ELLAS);
-             las que no marques se quedan sueltas, apiladas en su sitio
-             de siempre. Si marcas 0 o 1, este slot se queda vacio/oculto
-             (agrupar una sola cosa no cambia nada). Ver
-             applyRemindersPanelLayout() en app.js, que es quien mueve
-             los bloques (reminders-top-block etc.) dentro o fuera de
-             aqui segun el ajuste. -->
-        <div id="reminders-panel-grouped-slot" class="reminders-panel-grouped-slot reminders-panel-page hidden">
-          <div id="reminders-panel-switcher" class="reminders-panel-switcher hidden">
-            <button type="button" id="btn-panel-switch-prev" class="icon-btn" aria-label="Sección anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
-            <span id="reminders-panel-switch-label" class="reminders-panel-switch-label"></span>
-            <button type="button" id="btn-panel-switch-next" class="icon-btn" aria-label="Sección siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
-          </div>
-        </div>
-        <div id="reminders-top-block" class="reminders-top-block reminders-panel-page">
-          <div class="reminders-panel-header my-space-col-expand-trigger">
-            <h2 id="reminders-panel-title">Proximos recordatorios</h2>
-            <button type="button" id="btn-reminders-back" class="secondary-btn hidden">Próximos →</button>
-          </div>
-          <!-- Solo visible dentro de "Mi espacio" (ver applyMiEspacioMode
-               en app.js): fuera de ahi, para cambiar de dia ya estan el
-               calendario de al lado y los atajos de teclado, pero dentro
-               de Mi espacio (sobre todo en modo "boton", a pantalla
-               completa) el calendario no se ve, asi que hace falta un
-               control aqui mismo. -->
-          <div id="reminders-day-nav" class="reminders-day-nav hidden">
-            <button type="button" id="btn-reminders-day-prev" class="icon-btn" aria-label="Día anterior"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
-            <div id="reminders-day-nav-date-field"></div>
-            <button type="button" id="btn-reminders-day-next" class="icon-btn" aria-label="Día siguiente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
-          </div>
-          <div id="reminders-day-actions" class="reminders-day-actions hidden">
-            <button type="button" id="btn-day-mark-holiday" class="secondary-btn day-mark-btn">Festivo</button>
-            <button type="button" id="btn-day-mark-special" class="secondary-btn day-mark-btn">Especial</button>
-            <button type="button" id="btn-day-add-event" class="secondary-btn">+ Añadir evento</button>
-          </div>
-          <div id="reminders-list" class="reminders-list"></div>
-        </div>
-
-        <div id="reminders-tasks-block" class="reminders-tasks-block reminders-panel-page">
-          <div class="reminders-panel-header my-space-col-expand-trigger">
-            <h2>Tareas</h2>
-          </div>
-          <div id="tasks-list" class="reminders-list tasks-list"></div>
-        </div>
-      </aside>
     </main>
 
-    <!-- "Mi espacio" (Fase 1): hub de 3 columnas que reorganiza Proximos y
-         Tareas -- moviendo esos MISMOS bloques del panel lateral de
-         siempre (.reminders-top-block/.reminders-tasks-block), sin
-         duplicar su renderizado -- mas una columna de Notas (vacia por
-         ahora, la rellena la Fase 2). Segun el modo elegido en
-         Configuracion > Vista > Mi espacio, este hub vive DENTRO del
-         panel lateral (modo "panel", siempre visible junto al calendario)
-         o dentro de esta pantalla completa (modo "boton", se abre con
-         #btn-my-space). Ver applyMiEspacioMode() en app.js. -->
-    <div id="my-space-view" class="my-space-view hidden">
+    <!-- Dos accesos rapidos justo encima de la barra inferior, solo en la
+         pantalla del calendario: "Hoy" abre la vista diaria de hoy con la
+         sub-vista que tengas guardada (horas o listado), y "Grupos" abre
+         la pantalla de grupos. Flotan igual que la barra (position:fixed)
+         para caer siempre en el mismo sitio, sea cual sea la vista de
+         calendario que estes mirando. -->
+    <div id="calendar-quick-actions" class="calendar-quick-actions">
+      <button type="button" id="btn-calendar-quick-today" class="secondary-btn">Hoy</button>
+      <button type="button" id="btn-calendar-quick-groups" class="secondary-btn">Grupos</button>
+    </div>
+
+    <!-- Pantalla de Grupos: dos niveles, igual que Notas (lista ->
+         detalle). Arriba, un grupo por tarjeta mas "Todos los eventos";
+         dentro, todo lo que hay en ese grupo con buscador y filtros por
+         tipo (recordatorio/tarea) y por si esta terminada o no. Las
+         tareas se pueden tachar desde aqui; los recordatorios no (no
+         tienen ese concepto, son un aviso, no algo que se complete). -->
+    <div id="groups-view" class="my-space-view hidden">
       <div class="my-space-view-header">
-        <h2>Mi espacio</h2>
+        <h2 id="groups-view-title">Grupos</h2>
         <div class="my-space-view-header-actions">
-          <button type="button" id="btn-close-my-space" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
-          <!-- Configuracion tiene que poder abrirse desde CUALQUIER
-               ventana, y esta pantalla (fija, z-index por encima de la
-               topbar) tapa el boton de Configuracion de siempre -- por
-               eso hace falta uno propio aqui. Abre el mismo panel (ver
-               btn-my-space-settings en app.js/settings.js). Va el
-               ULTIMO (mas a la derecha) a proposito -- Configuracion
-               siempre a la derecha del todo, igual que en la topbar. -->
-          <button type="button" id="btn-my-space-settings" class="icon-btn" aria-label="Configuración">☰</button>
+          <button type="button" id="btn-groups-back" class="secondary-btn hidden">← Grupos</button>
+          <button type="button" id="btn-close-groups" class="secondary-btn">← Calendario</button>
         </div>
       </div>
-      <div id="my-space-hub" class="my-space-hub">
-        <!-- Comun a las 3 columnas: cuando una esta expandida (tapando a
-             las otras 2), este es el UNICO "Volver" que hace falta, fijo
-             arriba, igual que en Configuracion. -->
-        <button type="button" id="my-space-back-btn" class="my-space-back-btn hidden">← Volver</button>
 
-        <!-- Envoltorio SOLO para las 3 columnas (el Volver se queda
-             fuera, en su propia fila) -- en escritorio esto es una fila
-             flex con transicion en flex-grow/flex-basis, para que
-             expandir/colapsar una columna se vea como una animacion en
-             vez de un salto instantaneo. Ver la regla #my-space-hub[data-expanded]
-             en styles.css. -->
-        <!-- Las 3 columnas ya NO tienen un boton dedicado para expandir
-             (ocupaba espacio vertical solo para eso, ver CLAUDE.md/ronda
-             de pulido): clicar el TITULO (h2) de cada columna la expande,
-             la clase my-space-col-expand-trigger en cada h2 es lo que
-             delega ese clic (ver el listener en #my-space-hub, app.js). -->
-        <div class="my-space-cols-row">
-          <div class="my-space-col" data-col="reminders">
-            <div id="my-space-col-reminders" class="my-space-col-body"></div>
-          </div>
+      <div class="groups-body">
+        <!-- Nivel 1: los grupos -->
+        <div id="groups-list-panel">
+          <div id="groups-view-list" class="groups-list"></div>
 
-          <div class="my-space-col" data-col="tasks">
-            <div id="my-space-col-tasks" class="my-space-col-body"></div>
+          <!-- Solo "+" (grupo nuevo), abajo a la derecha, mismo sitio que
+               el "+" de Notas. Aqui habia ademas un lapiz que encendia un
+               "modo editar"; se quito el 9/9/2026 al hacer las tarjetas
+               deslizables, para que haya UNA sola forma de editar un
+               grupo y no dos que hagan dudar (peticion de Koku). -->
+          <div class="mobile-fab-wrap groups-fab-wrap">
+            <button type="button" id="btn-groups-add" class="mobile-fab" aria-label="Nuevo grupo" title="Nuevo grupo">+</button>
           </div>
+        </div>
 
-          <div class="my-space-col" data-col="notes">
-            <div id="my-space-col-notes" class="my-space-col-body">
-              <!-- Envuelto en un bloque movible (igual que
-                   reminders-top-block/reminders-tasks-block) para que
-                   tambien pueda vivir dentro del panel lateral clasico
-                   (modo "topbar" de Mi espacio) como 3er bloque, ver
-                   moveRemindersIntoHub/restoreClassicRemindersPanel en
-                   app.js. -->
-              <div id="reminders-notes-block" class="reminders-notes-block reminders-panel-page">
-                <div class="reminders-panel-header my-space-col-expand-trigger">
-                  <h2>Notas</h2>
-                </div>
-                <!-- Carpetas (Fase 3): navegacion tipo explorador de
-                     archivos -- estas en un "sitio" (la raiz, o dentro de
-                     una carpeta), #notes-list ensena las SUBcarpetas de
-                     ese sitio arriba y las notas de ese sitio debajo, todo
-                     en una sola lista. "Volver" solo se ve si no estas en
-                     la raiz. Solo organizacion, sin PIN (eso ya se
-                     resolvio por nota individual con "ocultar"). Ver
-                     renderNotesView en app.js. -->
-                <div id="note-folder-toolbar" class="note-folder-toolbar">
-                  <button type="button" id="btn-note-folder-back" class="secondary-btn hidden">← Volver</button>
-                  <div class="spacer"></div>
-                  <!-- "Seleccionar" (escritorio): mismo mecanismo de
-                       Seleccionar/Mover que ya existia solo en movil --
-                       ver mobileNotesMode/setMobileNotesMode en app.js
-                       (se comparte tal cual, sin duplicar logica). -->
-                  <button type="button" id="btn-note-folder-select" class="secondary-btn" aria-pressed="false">Seleccionar</button>
-                  <button type="button" id="btn-new-note-folder" class="note-folder-chip note-folder-chip-add" aria-label="Nueva carpeta">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
-                    <span>Carpeta</span>
-                  </button>
-                </div>
-                <!-- "+ Nota" debajo de Volver/+ Carpeta a proposito: es la
-                     accion menos frecuente de las dos (normalmente entras
-                     a leer/organizar, no a crear), asi que va debajo. -->
-                <button type="button" id="btn-new-note" class="secondary-btn note-add-btn">+ Nota</button>
-                <div class="note-search-row">
-                  <input type="text" id="note-search-input" placeholder="Buscar por nombre..." autocomplete="off" />
-                  <!-- Por defecto la busqueda mira TODA la app (con la
-                       ruta de carpeta debajo de cada resultado); este
-                       boton la restringe a la carpeta donde estas ahora
-                       mismo, sin ruta debajo porque ya sabes donde estas.
-                       Ver renderNotesView en app.js. -->
-                  <button type="button" id="note-search-scope-btn" class="note-search-scope-btn" aria-pressed="false" title="Restringir la busqueda a esta carpeta">Solo esta carpeta</button>
-                </div>
-                <div id="notes-list" class="reminders-list notes-list"></div>
-                <!-- Barra de accion Eliminar/Mover (escritorio): mismo
-                     patron/handlers que #mobile-notes-action-bar, ver
-                     refreshMobileNotesActionBar en app.js (generalizada
-                     a NOTES_VIEW_TARGETS.desktop). -->
-                <div id="note-folder-action-bar" class="mobile-notes-action-bar hidden">
-                  <button type="button" id="btn-note-folder-action-left" class="danger-btn"></button>
-                  <button type="button" id="btn-note-folder-action-right" class="secondary-btn"></button>
-                </div>
-              </div>
-            </div>
+        <!-- Nivel 2: lo que hay dentro de un grupo (o de todos) -->
+        <div id="groups-detail-panel" class="hidden">
+          <div class="groups-filters">
+            <input type="search" id="groups-search" placeholder="Buscar por título" aria-label="Buscar por título" />
+            <div id="groups-filter-type-field" class="groups-filter-field"></div>
+            <div id="groups-filter-done-field" class="groups-filter-field"></div>
           </div>
+          <div id="groups-detail-list" class="groups-detail-list"></div>
         </div>
       </div>
     </div>
-  </div>
 
   <!-- Notas (Fase 4 del rediseño movil): reemplaza al puente temporal
        que abria "Mi espacio" desde la barra inferior -- "Mi espacio"
@@ -592,10 +344,10 @@
        CLAUDE.md/decision 3 de esa ronda: tareas y recordatorios ya viven
        dentro del propio calendario movil, aqui solo quedan las notas.
        Mismo patron de pantalla completa (.my-space-view) que el resto,
-       pero SIEMPRE .mobile-only -- en escritorio las notas se siguen
+       pero SIEMPRE .-- en escritorio las notas se siguen
        viendo dentro de "Mi espacio"/el panel clasico, sin cambios. Ver
        openMobileNotesView/closeMobileNotesView en app.js. -->
-  <div id="mobile-notes-view" class="my-space-view mobile-only hidden">
+  <div id="mobile-notes-view" class="my-space-view hidden">
     <div class="my-space-view-header">
       <h2>Notas</h2>
       <div class="my-space-view-header-actions">
@@ -676,7 +428,7 @@
        mes y de la vista diaria (btn-mobile-calendar-search/
        btn-mobile-calendar-day-search). Mismo patron .my-space-view que
        el resto de pantallas completas de movil. -->
-  <div id="mobile-global-search" class="my-space-view mobile-only hidden">
+  <div id="mobile-global-search" class="my-space-view hidden">
     <div class="my-space-view-header">
       <h2>Buscar</h2>
       <div class="my-space-view-header-actions">
@@ -698,7 +450,7 @@
        openExtensionsView/closeExtensionsView en app.js. -->
   <div id="extensions-view" class="my-space-view hidden">
     <div class="my-space-view-header">
-      <h2>Apps</h2>
+      <h2>Herramientas</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-extensions" class="secondary-btn my-space-close-btn" aria-label="Volver al inicio">← Home</button>
         <!-- Configuracion tiene que poder abrirse desde CUALQUIER
@@ -723,47 +475,11 @@
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg></span>
           <span class="extensions-card-title">Lecturas</span>
         </button>
-        <button type="button" id="btn-open-archivos" class="extensions-card extensions-card-active">
-          <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M12 18v-6M9 15l3-3 3 3"></path></svg></span>
-          <span class="extensions-card-title">Archivos</span>
-        </button>
         <button type="button" id="btn-open-viajes" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></span>
           <span class="extensions-card-title">Viajes</span>
         </button>
       </div>
-    </div>
-  </div>
-
-  <!-- Pantalla de bienvenida: aparece UNA sola vez, la primera vez que se
-       abre la app en cualquier dispositivo (el perfil es compartido por
-       toda la instalacion, no por dispositivo -- ver user_profile en
-       server/db.js). Pide el nickname y, opcionalmente, un correo (solo
-       para el contacto tecnico obligatorio de las notificaciones push,
-       ver el hint de dentro). "Ahora no" tambien cierra el modal para
-       siempre (ver app.js maybeShowOnboarding) sin obligar a rellenar
-       nada. -->
-  <div id="onboarding-modal" class="modal hidden">
-    <div class="modal-card">
-      <h2>Bienvenido a RemindMeLater</h2>
-      <p class="hint">Un par de datos rapidos antes de empezar (puedes cambiarlos luego en Configuracion > Perfil).</p>
-      <form id="onboarding-form">
-        <label>
-          Nickname (opcional)
-          <input type="text" id="onboarding-name" placeholder="Tu nombre" maxlength="60" />
-        </label>
-        <p class="hint">Se ve igual en todos tus dispositivos, para saber quien creo cada evento o nota si usas el ordenador y el movil a la vez.</p>
-        <label>
-          Correo (opcional)
-          <input type="email" id="onboarding-email" placeholder="tucorreo@ejemplo.com" maxlength="200" />
-        </label>
-        <p class="hint">Solo se usaria como contacto tecnico obligatorio si más adelante activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie más.</p>
-        <div class="modal-actions">
-          <button type="button" id="btn-onboarding-skip" class="secondary-btn">Ahora no</button>
-          <div class="spacer"></div>
-          <button type="submit" class="primary-btn">Guardar</button>
-        </div>
-      </form>
     </div>
   </div>
 
@@ -779,35 +495,114 @@
     <div class="my-space-view-header">
       <h2>Gimnasio</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-gym" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-gym" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-gym-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
     <div class="gym-tabs">
-      <button type="button" class="gym-tab-btn active" data-gym-tab="sessions">Sesiones</button>
-      <button type="button" class="gym-tab-btn" data-gym-tab="routines">Rutinas</button>
+      <button type="button" class="gym-tab-btn active" data-gym-tab="sessions">Entrenar</button>
+      <button type="button" class="gym-tab-btn" data-gym-tab="plan">Plan</button>
       <button type="button" class="gym-tab-btn" data-gym-tab="progress">Progreso</button>
+      <button type="button" class="gym-tab-btn" data-gym-tab="achievements">Logros</button>
     </div>
     <div class="gym-tab-content">
-      <!-- Sesiones: historial + boton de nueva sesion. -->
+      <!-- Entrenar (Fase 3 del rediseno): el boton grande arranca un
+           entrenamiento EN VIVO (overlay #gym-live-view); si hay uno a
+           medias (localStorage.gymLiveSession) aparece el banner de
+           reanudar en su lugar. Debajo, el historial de sesiones de
+           siempre y el alta manual (para apuntar a posteriori). -->
       <div id="gym-tab-sessions" class="gym-tab-panel">
-        <button type="button" id="btn-new-gym-session" class="primary-btn gym-tab-action">+ Nueva sesion</button>
+        <button type="button" id="btn-gym-live-resume" class="primary-btn gym-live-start-btn hidden">Entrenamiento en curso — continuar</button>
+        <button type="button" id="btn-gym-live-start" class="primary-btn gym-live-start-btn">Empezar entrenamiento</button>
+        <div class="gym-exercises-actions">
+          <button type="button" id="btn-new-gym-activity" class="secondary-btn gym-tab-action">Actividad rápida</button>
+          <button type="button" id="btn-new-gym-session" class="secondary-btn gym-tab-action">+ Apuntar sesión a mano</button>
+        </div>
         <div id="gym-sessions-list" class="gym-list"></div>
       </div>
 
-      <!-- Rutinas: CRUD tipo grupos/carpetas, cada una con su lista de
-           ejercicios (con series/repeticiones orientativas). -->
-      <div id="gym-tab-routines" class="gym-tab-panel hidden">
-        <button type="button" id="btn-new-gym-routine" class="primary-btn gym-tab-action">+ Nueva rutina</button>
-        <div id="gym-routines-list" class="gym-list"></div>
-        <h3 class="gym-subheading">Ejercicios</h3>
-        <button type="button" id="btn-new-gym-exercise" class="secondary-btn gym-tab-action">+ Nuevo ejercicio</button>
-        <div id="gym-exercises-list" class="gym-list"></div>
+      <!-- Plan (rediseno): jerarquia Bloque -> Dias. La pestana tiene dos
+           "niveles" que se alternan mostrando/ocultando (drill-down tipo
+           carpetas de Notas): la lista de bloques, y dentro de un bloque
+           su lista de dias (las antiguas "rutinas"). Los ejercicios
+           sueltos siguen viviendo al nivel de bloques, debajo. -->
+      <div id="gym-tab-plan" class="gym-tab-panel hidden">
+        <div id="gym-blocks-level">
+          <button type="button" id="btn-new-gym-block" class="primary-btn gym-tab-action">+ Nuevo bloque</button>
+          <div id="gym-blocks-list" class="gym-list"></div>
+          <h3 class="gym-subheading">Ejercicios</h3>
+          <div class="gym-exercises-actions">
+            <button type="button" id="btn-open-gym-library" class="primary-btn gym-tab-action">Librería de ejercicios</button>
+            <button type="button" id="btn-new-gym-exercise" class="secondary-btn gym-tab-action">+ Nuevo ejercicio</button>
+          </div>
+          <!-- Buscador de TUS ejercicios (peticion de Koku: con muchos se
+               hace una odisea). Filtra por nombre y por musculo, y solo
+               aparece cuando de verdad hay unos cuantos. -->
+          <div id="gym-exercises-search-wrap" class="gym-exercises-search hidden">
+            <input type="text" id="gym-exercises-search" placeholder="Buscar por nombre o músculo..." autocomplete="off" />
+            <button type="button" id="btn-gym-exercises-search-clear" class="icon-btn hidden" aria-label="Limpiar la búsqueda">✕</button>
+          </div>
+          <div id="gym-exercises-list" class="gym-list"></div>
+        </div>
+        <div id="gym-block-days-level" class="hidden">
+          <div class="gym-block-days-header">
+            <button type="button" id="btn-gym-back-to-blocks" class="secondary-btn">← Bloques</button>
+            <h3 id="gym-block-days-title" class="gym-subheading"></h3>
+          </div>
+          <button type="button" id="btn-new-gym-routine" class="primary-btn gym-tab-action">+ Nuevo día</button>
+          <div id="gym-routines-list" class="gym-list"></div>
+        </div>
       </div>
 
-      <!-- Progreso: selector de ejercicio + grafica SVG a mano (peso
-           maximo/volumen por sesion), ver renderGymProgressChart en app.js. -->
+      <!-- Progreso (renovado en la Fase 5): consistencia (heatmap estilo
+           GitHub + racha semanal), records por ejercicio (PRs con 1RM
+           estimado), volumen semanal apilado por grupo muscular, y la
+           grafica por ejercicio de siempre al final. Todo SVG/DOM a mano
+           como el resto del proyecto, ver renderGymProgressSections en
+           app.js. -->
       <div id="gym-tab-progress" class="gym-tab-panel hidden">
+        <h3 class="gym-subheading">Consistencia</h3>
+        <div id="gym-consistency-stats" class="gym-consistency-stats"></div>
+        <div id="gym-heatmap" class="gym-heatmap"></div>
+        <div class="gym-weekly-goal-row">
+          <span class="field-label">Objetivo semanal (sesiones)</span>
+          <div id="gym-weekly-goal-field"></div>
+        </div>
+        <!-- Cuanto suma de mas una serie llevada al fallo en el volumen.
+             Es un numero INVENTADO (no hay una cifra estandar), por eso
+             se deja a mano en vez de cablearlo: si el x1,2 se te queda
+             corto o largo, lo cambias aqui sin tocar nada mas. Los kg
+             GUARDADOS son siempre los de verdad; esto es solo como se
+             cuentan al pintar. -->
+        <div class="gym-weekly-goal-row">
+          <span class="field-label">Peso extra de una serie al fallo</span>
+          <div id="gym-failure-factor-field"></div>
+        </div>
+
+        <div class="gym-subheading-row">
+          <h3 class="gym-subheading">Mapa de músculos</h3>
+          <button type="button" id="btn-gym-progress-help" class="icon-btn settings-help-btn" aria-label="Qué significan los colores del mapa">?</button>
+        </div>
+        <div class="gym-bodymap-controls">
+          <div class="gym-progress-metric-toggle">
+            <button type="button" class="view-mode-btn" data-gym-map-window="7">7 días</button>
+            <button type="button" class="view-mode-btn active" data-gym-map-window="30">30 días</button>
+            <button type="button" class="view-mode-btn" data-gym-map-window="90">90 días</button>
+          </div>
+          <div class="gym-progress-metric-toggle">
+            <button type="button" class="view-mode-btn active" data-gym-map-metric="series">Series</button>
+            <button type="button" class="view-mode-btn" data-gym-map-metric="volume">Volumen</button>
+          </div>
+        </div>
+        <div id="gym-bodymap" class="gym-bodymap"></div>
+
+        <h3 class="gym-subheading">Récords (PRs)</h3>
+        <div id="gym-prs-list" class="gym-list"></div>
+
+        <h3 class="gym-subheading">Volumen semanal por músculo</h3>
+        <div id="gym-weekly-volume" class="gym-weekly-volume"></div>
+
+        <h3 class="gym-subheading">Evolución por ejercicio</h3>
         <div class="field-label-block">
           <span class="field-label">Ejercicio</span>
           <div id="gym-progress-exercise-field"></div>
@@ -818,12 +613,21 @@
         </div>
         <div id="gym-progress-chart" class="gym-progress-chart"></div>
       </div>
+
+      <!-- Logros (Fase 7): gamificacion calculada AL VUELO desde el
+           historial (nada guardado en la base de datos -- editar o
+           borrar sesiones recalcula los logros de forma coherente).
+           Solo se persiste, por dispositivo, que celebraciones ya se
+           ensenaron (localStorage.gymAchievementsSeen). -->
+      <div id="gym-tab-achievements" class="gym-tab-panel hidden">
+        <div id="gym-achievements-list" class="gym-achievements-list"></div>
+      </div>
     </div>
   </div>
 
   <!-- Modal para crear / editar un ejercicio de Gimnasio -->
   <div id="gym-exercise-modal" class="modal hidden">
-    <div class="modal-card">
+    <div class="modal-card gym-modal">
       <button type="button" id="btn-close-gym-exercise" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2 id="gym-exercise-modal-title">Nuevo ejercicio</h2>
       <form id="gym-exercise-form">
@@ -832,10 +636,62 @@
           Nombre
           <input type="text" id="gym-exercise-name" required />
         </label>
+        <div class="field-label-block">
+          <span class="field-label">Grupo muscular (opcional)</span>
+          <div id="gym-exercise-muscle-field"></div>
+        </div>
+        <!-- Secundarios: chips activables. Cuentan en el mapa de musculos
+             a mitad de peso, igual que los de la libreria. -->
+        <div class="field-label-block">
+          <span class="field-label">Músculos secundarios (opcional)</span>
+          <div id="gym-exercise-secondary-field" class="gym-secondary-chips"></div>
+        </div>
         <label>
-          Grupo muscular (opcional)
-          <input type="text" id="gym-exercise-muscle-group" placeholder="Ej. Pierna" />
+          Material (opcional)
+          <input type="text" id="gym-exercise-equipment" placeholder="Ej. Barra, Mancuernas" />
         </label>
+        <!-- Como sueles hacer ESTE ejercicio (peticion de Koku): al
+             meterlo en un dia, estos tres llegan ya rellenos y no hay
+             que escribirlos otra vez. Son un punto de partida, no la
+             verdad: en cada dia se pueden cambiar, y cambiarlos aqui NO
+             toca los dias que ya lo tenian. -->
+        <div class="field-label-block">
+          <span class="field-label">Cómo lo sueles hacer (opcional)</span>
+          <div class="gym-routine-exercise-targets-row">
+            <input type="number" id="gym-exercise-default-sets" placeholder="Series" min="0" inputmode="numeric" />
+            <input type="number" id="gym-exercise-default-reps" placeholder="Reps" min="0" inputmode="numeric" />
+            <input type="number" id="gym-exercise-default-rest" placeholder="Descanso (s)" min="0" inputmode="numeric" title="En segundos" />
+          </div>
+          <p class="hint" id="gym-exercise-default-rest-preview"></p>
+          <p class="hint">Se copia como punto de partida cada vez que añadas este ejercicio a un día. Los días que ya lo tengan no cambian.</p>
+        </div>
+        <!-- Nota FIJA: acompana siempre al ejercicio (alturas de polea,
+             posicion del banco...), a diferencia de la nota de sesion,
+             que es de un dia concreto. Se ensena en la tarjeta del
+             entreno en vivo. -->
+        <label>
+          Nota fija (opcional)
+          <input type="text" id="gym-exercise-notes" placeholder="Ej. polea altura 3" />
+        </label>
+        <!-- Unilateral: un lado cada vez (mancuerna a una mano, prensa a
+             una pierna...). Si ademas se cuentan los lados por separado,
+             cada lado pasa a ser su propia serie en el entreno, con su
+             peso/reps, y entre lado y lado corre el descanso corto de
+             abajo. -->
+        <label class="checkbox-row">
+          <input type="checkbox" id="gym-exercise-unilateral" />
+          Ejercicio unilateral (un lado cada vez)
+        </label>
+        <div id="gym-exercise-unilateral-extra" class="gym-unilateral-extra hidden">
+          <label class="checkbox-row">
+            <input type="checkbox" id="gym-exercise-sides-separately" />
+            Contar cada lado por separado
+          </label>
+          <label>
+            Descanso entre lados (segundos)
+            <input type="number" id="gym-exercise-side-rest" min="0" inputmode="numeric" placeholder="Ej. 30" />
+          </label>
+        </div>
         <div class="modal-actions">
           <button type="button" id="btn-delete-gym-exercise" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
@@ -846,22 +702,506 @@
     </div>
   </div>
 
-  <!-- Modal para crear / editar una rutina de Gimnasio (nombre+icono+
-       color, mas su lista ORDENADA de ejercicios con series/repeticiones
-       orientativas -- ver #gym-routine-exercises-field, poblado desde
-       app.js con los mismos ejercicios de gym-exercises-list). -->
+  <!-- Actividad rapida (Fase 4): registrar cardio/clases/deporte sin
+       series -- tipo + nombre + duracion + fecha, y ya. Comparte tabla
+       con las sesiones (type='activity'), asi que cuenta para el heatmap
+       de consistencia y la racha de las fases siguientes. -->
+  <div id="gym-activity-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-activity" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-activity-modal-title">Actividad rápida</h2>
+      <form id="gym-activity-form">
+        <input type="hidden" id="gym-activity-id" />
+        <div class="field-label-block">
+          <span class="field-label">Tipo</span>
+          <div id="gym-activity-kind-field"></div>
+        </div>
+        <label>
+          Nombre
+          <input type="text" id="gym-activity-name" placeholder="Ej. Running 5K, Clase de GAP, Pádel..." required />
+        </label>
+        <label>
+          Duración (minutos)
+          <input type="number" id="gym-activity-duration" min="1" inputmode="numeric" placeholder="Ej. 45" />
+        </label>
+        <div class="field-label-block">
+          <span class="field-label">Fecha</span>
+          <div id="gym-activity-date-field"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-gym-activity" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-gym-activity" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Selector de dia al empezar a entrenar (Fase 3): los dias del
+       bloque ACTIVO como botones grandes + "sesion libre". -->
+  <div id="gym-start-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-start" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>¿Qué toca hoy?</h2>
+      <p id="gym-start-block-name" class="gym-list-item-muted"></p>
+      <!-- Que dice el ciclo del bloque, si lo usa. Avisa, pero nunca
+           impide elegir otro dia (decision de Koku). -->
+      <p id="gym-start-cycle-note" class="gym-cycle-note hidden"></p>
+      <div id="gym-start-days" class="gym-list"></div>
+      <button type="button" id="btn-gym-start-free" class="secondary-btn">Sesión libre (sin día)</button>
+    </div>
+  </div>
+
+  <!-- Overlay del entrenamiento EN VIVO (Fase 3): pantalla completa por
+       encima de la vista de Gimnasio. El estado vive en
+       localStorage.gymLiveSession hasta guardar (sobrevive a recargas y
+       cierres) y el cronometro/descanso se calculan SIEMPRE desde
+       timestamps, nunca contando ticks (iOS congela el JS en segundo
+       plano y un contador se quedaria atras). -->
+  <div id="gym-live-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2 id="gym-live-title">Entrenamiento</h2>
+      <!-- Solo el nombre del dia, el reloj y el ▾ de ocultar: el resto de
+           acciones vive en el menu flotante de abajo a la derecha
+           (peticion de Koku: con nombres largos aqui arriba no cabia
+           nada; el ▾ volvio porque lo echaba de menos para cambiar de
+           vista con el entreno activo). -->
+      <div class="my-space-view-header-actions">
+        <span id="gym-live-clock" class="gym-live-clock">0:00</span>
+        <button type="button" id="btn-gym-live-header-hide" class="icon-btn" aria-label="Ocultar entrenamiento (sigue en marcha)" title="Ocultar (sigue en marcha)">▾</button>
+      </div>
+    </div>
+    <!-- La barra de descanso vive AQUI arriba (donde antes estaban los
+         presets de 60/90/120/180, que se quitaron: el descanso ya sale
+         del apuntado en cada ejercicio del plan, con +30s para ampliar).
+         Oculta salvo durante un descanso. -->
+    <div id="gym-live-rest-bar" class="gym-live-rest-bar hidden">
+      <div class="gym-live-rest-info">
+        <span>Descanso: <b id="gym-live-rest-remaining" title="Tocar para cambiar entre m:ss y segundos">0:00</b></span>
+        <button type="button" id="btn-gym-live-rest-plus" class="secondary-btn">+30s</button>
+        <button type="button" id="btn-gym-live-rest-close" class="icon-btn" aria-label="Saltar descanso">✕</button>
+      </div>
+      <div class="gym-live-rest-track">
+        <div id="gym-live-rest-fill-base" class="gym-live-rest-fill-base"></div>
+        <div id="gym-live-rest-fill-extra" class="gym-live-rest-fill-extra"></div>
+      </div>
+    </div>
+    <div class="gym-live-content">
+      <!-- La explicacion del sistema ya no vive aqui como parrafo fijo: se
+           muestra en #gym-help-modal (la primera vez sola, y siempre desde
+           el boton de ayuda de abajo a la derecha). El "+ Añadir
+           ejercicio" tampoco: vive en el menu flotante (peticion de
+           Koku). -->
+      <div id="gym-live-exercises" class="gym-live-exercises"></div>
+    </div>
+    <!-- Menu flotante de acciones (abajo a la derecha): el boton central
+         despliega en abanico las 4 acciones del entreno -- dudas,
+         pausar/ocultar, terminar y descartar (idea de Koku, "que salgan
+         alrededor del boton, no listados"). Los ids son los mismos que
+         tenian los botones de la cabecera, asi que sus manejadores de
+         app.js no cambian. -->
+    <div id="gym-live-fab" class="gym-live-fab">
+      <button type="button" id="btn-gym-live-help" class="gym-live-fab-action gym-fab-pos-1" aria-label="Cómo funciona el entrenamiento" title="Dudas">?</button>
+      <!-- Pausa DEL CRONOMETRO (no oculta la pantalla; para eso esta el ▾
+           de la cabecera): congela el tiempo de sesion. Los dos iconos
+           conviven y el CSS ensena uno u otro segun .is-paused. -->
+      <button type="button" id="btn-gym-live-pause" class="gym-live-fab-action gym-fab-pos-2" aria-label="Pausar el cronómetro" title="Pausar/reanudar el cronómetro">
+        <svg class="gym-icon-pause" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg>
+        <svg class="gym-icon-play" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-add-exercise" class="gym-live-fab-action gym-fab-pos-3" aria-label="Añadir ejercicio al entrenamiento" title="Añadir ejercicio">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-finish" class="gym-live-fab-action gym-live-fab-primary gym-fab-pos-4" aria-label="Terminar y guardar el entrenamiento" title="Terminar">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4.5 12.5 9.5 17.5 19.5 6.5"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-discard" class="gym-live-fab-action gym-live-fab-danger gym-fab-pos-5" aria-label="Descartar el entrenamiento" title="Descartar">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3.5 6.5 20.5 6.5"/><path d="M8.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h4.4a1.3 1.3 0 0 1 1.3 1.3v1.7"/><path d="M5.5 6.5l1 13a1.3 1.3 0 0 0 1.3 1.2h8.4a1.3 1.3 0 0 0 1.3-1.2l1-13"/><line x1="10" y1="10.5" x2="10" y2="16.5"/><line x1="14" y1="10.5" x2="14" y2="16.5"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-menu" class="gym-live-fab-main" aria-label="Acciones del entrenamiento" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Empezar una serie: en vez de una casilla diminuta, el ciclo pasa
+       por dos dialogos con botones grandes (peticion de Koku: "si vas un
+       poco mareado cuesta ver la casilla"). Este confirma QUE ejercicio
+       y QUE serie se empieza; el nombre es pulsable y despliega la lista
+       de ejercicios del dia por si te has equivocado de tarjeta. La
+       serie que apunta es siempre la primera sin hacer. -->
+  <div id="gym-set-start-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-set-modal">
+      <h2>Empezar serie</h2>
+      <button type="button" id="gym-set-start-exercise" class="gym-set-exercise-picker" aria-expanded="false">
+        <span id="gym-set-start-exercise-name">Ejercicio</span>
+        <span class="gym-set-picker-caret" aria-hidden="true">▾</span>
+      </button>
+      <div id="gym-set-start-exercise-list" class="gym-set-exercise-list hidden"></div>
+      <p id="gym-set-start-info" class="gym-set-modal-info"></p>
+      <!-- Solo en ejercicios unilaterales contados por lado: con cual
+           empiezas (peticion de Koku: "hay veces que se comienza con el
+           lado derecho y otras el izquierdo"). A partir de ahi se van
+           alternando solos, y el lado elegido se queda como el de salida
+           de las siguientes series de ese ejercicio. -->
+      <div id="gym-set-start-sides" class="gym-set-side-choice hidden">
+        <span>¿Con qué lado empiezas?</span>
+        <div class="gym-set-side-buttons">
+          <button type="button" class="secondary-btn" data-start-side="left">Izquierdo</button>
+          <button type="button" class="secondary-btn" data-start-side="right">Derecho</button>
+        </div>
+      </div>
+      <div class="gym-set-modal-actions">
+        <button type="button" id="btn-gym-set-start-go" class="primary-btn gym-set-big-btn">Empezar</button>
+        <button type="button" id="btn-gym-set-start-cancel" class="secondary-btn gym-set-big-btn">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Terminar la serie en curso: Si / Pausar / Seguir, con el tiempo de
+       la serie a la vista (ese tiempo se guarda y se ve en el historial). -->
+  <!-- Editar UN ejercicio del entreno y todo lo que hay dentro. Se llega
+       deslizando su tarjeta (peticion de Koku: "yo deslizo el ejercicio
+       entero para editar cualquier cosa del ejercicio... se hace un
+       cuadro de dialogo mas grande, asi es mas comodo"). La tarjeta del
+       entreno se queda solo para USAR: plegar, empezar serie y mover el
+       ejercicio arriba/abajo. -->
+  <div id="gym-exercise-edit-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-exercise-edit-card">
+      <div class="modal-head">
+        <h2 id="gym-exercise-edit-title">Editar ejercicio</h2>
+        <button type="button" id="btn-close-gym-exercise-edit" class="icon-btn" aria-label="Cerrar">✕</button>
+      </div>
+      <form id="gym-exercise-edit-form">
+        <div class="gym-exercise-edit-top">
+          <label class="gym-set-field">
+            <span>Descanso entre series (s)</span>
+            <input type="number" id="gym-exercise-edit-rest" inputmode="numeric" min="0" />
+          </label>
+          <label class="gym-set-field">
+            <span>RPE del ejercicio</span>
+            <input type="number" id="gym-exercise-edit-rpe" inputmode="decimal" step="0.5" min="1" max="10" placeholder="—" />
+          </label>
+        </div>
+        <label class="gym-set-field">
+          <span>Nota del ejercicio</span>
+          <input type="text" id="gym-exercise-edit-note" placeholder="Sensaciones, peso próximo..." />
+        </label>
+
+        <h3 class="gym-subheading">Series</h3>
+        <div id="gym-exercise-edit-sets" class="gym-exercise-edit-sets"></div>
+        <button type="button" id="btn-gym-exercise-edit-add-set" class="secondary-btn gym-add-set-btn">+ Serie</button>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-gym-exercise-edit" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="gym-set-end-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-set-modal">
+      <h2>¿Has acabado la serie?</h2>
+      <p id="gym-set-end-info" class="gym-set-modal-info"></p>
+      <div id="gym-set-end-timer" class="gym-set-modal-timer">0:00</div>
+      <div class="gym-set-modal-actions" id="gym-set-end-choices">
+        <button type="button" id="btn-gym-set-end-done" class="primary-btn gym-set-big-btn">Sí, terminada</button>
+        <button type="button" id="btn-gym-set-end-pause" class="secondary-btn gym-set-big-btn">Pausar serie</button>
+        <button type="button" id="btn-gym-set-end-continue" class="secondary-btn gym-set-big-btn">Seguir</button>
+      </div>
+
+      <!-- Al decir que si, el mismo dialogo pasa a pedir los datos de la
+           serie recien hecha (peticion de Koku): peso, repeticiones y una
+           nota suya. Las notas de todas las series de un ejercicio se
+           combinan al acabarlo en la nota del ejercicio, que se ensena en
+           el entrenamiento siguiente. -->
+      <div id="gym-set-end-form" class="gym-set-end-form hidden">
+        <label class="gym-set-field">
+          <span>Peso</span>
+          <input type="number" id="gym-set-end-weight" inputmode="decimal" step="0.5" min="0" />
+        </label>
+        <label class="gym-set-field">
+          <span>Repeticiones</span>
+          <input type="number" id="gym-set-end-reps" inputmode="numeric" min="0" />
+        </label>
+        <label class="gym-set-field">
+          <span>Notas de la serie (opcional)</span>
+          <input type="text" id="gym-set-end-note" placeholder="Ej. se me fue el codo" />
+        </label>
+
+        <!-- Marcar que ESTA serie se llevo al fallo (peticion de Koku).
+             Es por serie, no por ejercicio: unas se llevan al fallo y
+             otras no. Boton propio con su marca, no un checkbox nativo
+             (regla de CLAUDE.md). Se guarda en set_type = 'failure', que
+             ya estaba reservado en el esquema. -->
+        <div class="gym-set-flags">
+          <button type="button" class="gym-set-flag-btn" id="btn-gym-set-end-failure" aria-pressed="false">
+            <!-- El check va en SVG y no dibujado con bordes girados: eso
+                 ultimo nunca queda centrado del todo (Koku: "el tick está
+                 un poco movido") porque el aspa no es simetrica. Mismo
+                 motivo por el que el sol y la luna son SVG. -->
+            <span class="gym-set-flag-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </span>
+            <span>Llegué al fallo</span>
+          </button>
+        </div>
+
+        <!-- Series alargadas (dropset / rest-pause). Va aqui, en una
+             linea discreta dentro del formulario que ya existia, y no en
+             una pantalla propia: la mayoria de las series no se alargan y
+             tienen que seguir guardandose de un solo toque. Se pregunta
+             DESPUES de la serie porque depende de la serie y del dia, no
+             es una configuracion fija del ejercicio (peticion de Koku). -->
+        <div class="gym-set-extend">
+          <span class="gym-set-extend-label">¿Has alargado la serie?</span>
+          <div class="gym-set-extend-list">
+            <button type="button" class="gym-set-extend-btn" data-add-segment="dropset" title="Bajaste el peso y seguiste">+ Dropset</button>
+            <button type="button" class="gym-set-extend-btn" data-add-segment="restpause" title="Paraste unos segundos y seguiste con el mismo peso">+ Rest-pause</button>
+          </div>
+        </div>
+        <div id="gym-set-end-segments" class="gym-set-segments"></div>
+
+        <div class="gym-set-modal-actions">
+          <button type="button" id="btn-gym-set-end-save" class="primary-btn gym-set-big-btn">Guardar serie</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Aviso sobre el mapa de musculos (pestana Progreso): se abre solo
+       la primera vez (localStorage.gymProgressHelpSeen) y desde el "?"
+       de la seccion. Mismo patron que la ayuda del entreno. -->
+  <div id="gym-progress-help-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <h2>Sobre el mapa de músculos</h2>
+      <p>Los colores del mapa no significan "demasiadas" ni "pocas" series: no es una valoración. Es solo una forma visual de ver cuánto has trabajado cada músculo en el periodo elegido — cuanto más intenso el color, más series (o volumen) lleva ese músculo comparado con el resto.</p>
+      <label class="app-confirm-checkbox-row">
+        <input type="checkbox" id="gym-progress-help-dont-show" class="styled-checkbox" />
+        <span>No volver a mostrar esto automáticamente</span>
+      </label>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-progress-help" class="primary-btn">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Primer arranque en el movil: iOS exige que muchas cosas (permiso de
+       notificaciones, Live Activities...) las conceda el usuario -- la app
+       no puede activarlas sola. Este dialogo lo explica de una vez y deja
+       elegir (peticion de Koku), en vez de pedir el permiso "a pelo" nada
+       mas abrir. Solo se ensena una vez (notificationsPermissionAsked). -->
+  <div id="permissions-modal" class="modal hidden">
+    <div class="modal-card gym-help-card">
+      <h2>Avisos de la app</h2>
+      <div class="gym-help-body">
+        <h4>Notificaciones</h4>
+        <p>Para avisarte de recordatorios y del fin del descanso entre series aunque la app esté cerrada, iOS necesita que le des permiso una vez. Si dices que no, la app funciona igual pero sin avisos (puedes cambiarlo luego en los Ajustes del teléfono).</p>
+        <h4>Cuenta atrás en la pantalla de bloqueo</h4>
+        <p>El temporizador de descanso del Gimnasio aparece en la pantalla de bloqueo automáticamente, sin permiso previo. Si no lo quieres, se desactiva en Ajustes &gt; RemindMeLater &gt; Actividades en directo.</p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="btn-permissions-later" class="secondary-btn">Ahora no</button>
+        <div class="spacer"></div>
+        <button type="button" id="btn-permissions-allow" class="primary-btn">Permitir avisos</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ayuda del modo entrenamiento: se abre SOLA la primera vez que se
+       entra a entrenar (localStorage.gymLiveHelpSeen) y siempre desde el
+       boton "?" de abajo a la derecha. Aqui vive tambien la explicacion
+       del RPE, que antes era un aviso aparte. -->
+  <div id="gym-help-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-help-card">
+      <h2>Cómo funciona el entrenamiento</h2>
+      <div class="gym-help-body">
+        <h4>Apuntar las series</h4>
+        <p>Cada ejercicio tiene su tabla: escribe el peso y las repeticiones de cada serie. Para registrarla usa el botón grande de la tarjeta: <b>Empezar serie</b> te confirma qué ejercicio y qué serie vas a hacer (siempre la primera sin hacer; y tocando el nombre puedes cambiar de ejercicio), y mientras la haces el botón se convierte en <b>Terminar serie</b> con el cronómetro. Al terminarla te pregunta si de verdad has acabado, con la opción de pausarla o seguir. El ✓ de cada fila solo indica el estado: tócalo si necesitas deshacer una serie. Al darle a Terminar el entrenamiento solo se guardan las series hechas o con datos.</p>
+        <h4>Los datos y las notas de cada serie</h4>
+        <p>Al confirmar que has acabado, la app te pide el peso, las repeticiones y una nota de esa serie (te propone lo de la serie anterior, así que normalmente solo hay que confirmar). Cuando terminas todas las series de un ejercicio, sus notas se juntan en la nota del ejercicio, y esa es la que verás como "La última vez" la próxima vez que lo entrenes.</p>
+        <h4>Ejercicios a un lado</h4>
+        <p>Si marcas un ejercicio como unilateral (en su ficha) y pides contar cada lado por separado, cada serie se divide en dos: primero el lado izquierdo y luego el derecho, cada uno con su peso y sus repeticiones. Entre lado y lado corre el descanso corto que le pongas en la ficha; el descanso normal del ejercicio queda para después del segundo lado.</p>
+        <h4>Cuánto dura cada serie</h4>
+        <p>Como la app sabe cuándo empiezas y cuándo acabas, guarda lo que duró cada serie. Lo ves en el historial junto a la serie, y en Progreso como tiempo de trabajo real del mes (que no es lo mismo que la duración del entrenamiento, donde entran los descansos).</p>
+        <h4>La columna "Anterior"</h4>
+        <p>Muestra lo que hiciste en tu última sesión con ese ejercicio, en formato (descanso)peso×reps. Por ejemplo, (1:30)60×10 significa: 1 minuto y medio de descanso, 60 kg, 10 repeticiones. Tócala para copiar esos valores a la serie.</p>
+        <h4>El descanso</h4>
+        <p>Al terminar una serie, el descanso del ejercicio empieza solo y aparece como barra arriba. Con +30s lo alargas, con ✕ lo saltas, y si empiezas ya la siguiente serie se cancela.</p>
+        <p><b>Dónde aparece luego ese +30s:</b> el descanso corre <i>después</i> de una serie, así que el tiempo que le añadas queda apuntado en <b>esa</b> serie, junto a su campo de Descanso. Si alargas el descanso posterior a la última serie de un ejercicio — el que te separa del ejercicio siguiente — lo verás en esa última serie, no en la primera del siguiente.</p>
+        <h4>El RPE</h4>
+        <p>Es una medida del esfuerzo, del 1 al 10: 10 es que no podrías haber hecho ni una repetición más, 9 es que te quedaba una, 8 que te quedaban dos... Se apunta uno por ejercicio, en la casilla RPE junto a "+ Serie". Es opcional, pero ayuda a saber si un peso se te está quedando corto: a RPE 7 o menos, probablemente toca subir.</p>
+        <h4>El menú de abajo a la derecha</h4>
+        <p>El botón flotante despliega las acciones del entrenamiento: esta ayuda, pausar el cronómetro (congela el tiempo de sesión si te interrumpen; el descanso entre series sigue corriendo), añadir un ejercicio, terminar y descartar.</p>
+        <h4>Moverte por la app sin perder el entreno</h4>
+        <p>Con el botón ▾ de arriba escondes esta pantalla y el entrenamiento sigue en marcha: puedes mirar otras pestañas del Gimnasio o cualquier otra parte de la app. Para volver, toca Reanudar en la pestaña Entrenar, o la barra de descanso que se queda arriba del todo mientras descansas.</p>
+        <h4>Si se acaba el descanso y no estás mirando</h4>
+        <p>Mientras descansas, la cuenta atrás aparece en vivo en la pantalla de bloqueo (y en la isla dinámica, en los iPhone que la tienen), con los colores de tu tema y su propio botón +30s para alargar el descanso sin desbloquear — el tiempo añadido se ve en otro color. Tocar la tarjeta te lleva directo al entrenamiento. Las primeras veces que uses el +30s con el móvil bloqueado, iOS pedirá confirmación ("Permitir"): es su medida de seguridad para botones en pantalla bloqueada, y con "Permitir siempre" deja de preguntar. Además, la app puede avisarte con una notificación justo cuando el descanso termina, y bajar unos segundos el volumen de tu música al acabar (como el GPS al hablar) — todo se configura en Configuración &gt; Notificaciones.</p>
+      </div>
+      <label class="app-confirm-checkbox-row gym-help-dont-show-row">
+        <input type="checkbox" id="gym-help-dont-show" class="styled-checkbox" />
+        <span>No volver a mostrar esto automáticamente</span>
+      </label>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-help" class="primary-btn">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Celebracion de logros nuevos (Fase 7): se abre tras guardar una
+       sesion/actividad si algun logro ha subido de nivel. -->
+  <div id="gym-achievement-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-live-summary-card">
+      <h2>Logro conseguido</h2>
+      <div id="gym-achievement-modal-list" class="gym-achievements-list"></div>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-achievement" class="primary-btn">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resumen al terminar el entrenamiento en vivo (Fase 3). -->
+  <div id="gym-live-summary-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-live-summary-card">
+      <h2>Entreno completado</h2>
+      <div class="gym-live-summary-grid">
+        <div class="gym-live-summary-stat"><b id="gym-summary-duration">—</b><span>Duración</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-sets">—</b><span>Series hechas</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-volume">—</b><span>Volumen total</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-failure">—</b><span>Series al fallo</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-muscles">—</b><span>Grupos musculares</span></div>
+      </div>
+      <p id="gym-summary-muscle-list" class="gym-list-item-muted"></p>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-summary" class="primary-btn">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Buscador de la libreria de ejercicios empaquetada (Fase 2 del
+       rediseno de Gimnasio): ~870 ejercicios de yuhonas/free-exercise-db
+       (dominio publico), cargados por fetch perezoso desde
+       gym-exercise-library.json al abrir esto por primera vez. Importar
+       uno lo copia a gym_exercises (idempotente por library_id). -->
+  <div id="gym-library-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-library-card">
+      <button type="button" id="btn-close-gym-library" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Librería de ejercicios</h2>
+      <input type="text" id="gym-library-search" placeholder="Buscar por nombre (español o inglés)..." autocomplete="off" />
+      <div class="gym-library-filters">
+        <div id="gym-library-muscle-field"></div>
+        <div id="gym-library-equipment-field"></div>
+      </div>
+      <!-- La libreria es solo una propuesta: si el ejercicio no esta, se
+           crea uno propio desde aqui mismo (peticion de Koku). Si el
+           buscador estaba en "modo elegir" (añadir al entreno en vivo),
+           el ejercicio recien creado se añade directo a la sesion. -->
+      <button type="button" id="btn-gym-library-new-custom" class="secondary-btn gym-tab-action">+ Crear ejercicio propio</button>
+      <div id="gym-library-list" class="gym-list gym-library-list"></div>
+    </div>
+  </div>
+
+  <!-- Ficha de un ejercicio de la libreria: datos + instrucciones +
+       boton de importar. Se abre encima del buscador. -->
+  <div id="gym-library-detail-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-library-detail" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-library-detail-title"></h2>
+      <p id="gym-library-detail-meta" class="gym-list-item-muted"></p>
+      <ol id="gym-library-detail-instructions" class="gym-library-instructions"></ol>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-library-detail-2" class="secondary-btn">Cerrar</button>
+        <button type="button" id="btn-import-gym-library-detail" class="primary-btn">Importar a mis ejercicios</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar un BLOQUE de entrenamiento (rediseno de
+       Gimnasio): solo pide el nombre, al estilo de la app de referencia
+       (flujos cortos de 1-2 campos). Activar/desactivar se hace desde la
+       propia lista de bloques, no desde aqui. -->
+  <div id="gym-block-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-block" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-block-modal-title">Nuevo bloque</h2>
+      <form id="gym-block-form">
+        <input type="hidden" id="gym-block-id" />
+        <label>
+          Nombre del bloque
+          <input type="text" id="gym-block-name" placeholder="Ej. Volumen Invierno" required />
+        </label>
+
+        <!-- Ciclo de dias: OPCIONAL. Apagado, el bloque es una simple
+             lista de dias que eliges a mano al entrenar (como siempre).
+             Encendido, la app sabe que toca hoy y lo enseña en el
+             calendario y al empezar a entrenar. -->
+        <h4 class="gym-cycle-heading">Ciclo de días</h4>
+        <label class="checkbox-row">
+          <input type="checkbox" id="gym-block-cycle-enabled" />
+          Repetir estos días en ciclo
+        </label>
+        <div id="gym-block-cycle-wrap" class="hidden">
+          <p class="hint">Coloca en orden lo que haces: cada posición es un día de entreno o un descanso. Al llegar al final vuelve a empezar.</p>
+          <div id="gym-block-cycle-list" class="gym-cycle-list"></div>
+          <button type="button" id="btn-gym-cycle-add" class="secondary-btn">+ Añadir día al ciclo</button>
+          <p id="gym-block-cycle-status" class="hint"></p>
+
+          <!-- Por donde vas AHORA MISMO. Sin esto, un ciclo recien creado
+               empieza siempre por el dia 1, aunque tu ya lleves media
+               vuelta hecha (lo pidio Koku: "hoy me tocaria hacer el primer
+               descanso, no el dia 1, como se puede corregir eso"). -->
+          <label class="gym-cycle-hoy-label">Hoy te toca</label>
+          <div id="gym-block-cycle-hoy-field"></div>
+          <p class="hint">Cámbialo si el ciclo se ha desajustado o si lo acabas de crear a mitad de la vuelta.</p>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-gym-block" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-gym-block" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar un dia de entrenamiento (antes "rutina" --
+       los ids gym-routine-* se conservan para no renombrar media app):
+       nombre+icono+color, bloque al que pertenece, mas su lista ORDENADA
+       de ejercicios con series/repeticiones orientativas -- ver
+       #gym-routine-exercises-field, poblado desde app.js con los mismos
+       ejercicios de gym-exercises-list. -->
   <div id="gym-routine-modal" class="modal hidden">
-    <div class="modal-card">
+    <div class="modal-card gym-modal">
       <button type="button" id="btn-close-gym-routine" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2 id="gym-routine-modal-title">Nueva rutina</h2>
+      <h2 id="gym-routine-modal-title">Nuevo día</h2>
       <form id="gym-routine-form">
         <input type="hidden" id="gym-routine-id" />
-        <div class="group-form-row">
-          <div id="gym-routine-icon-field"></div>
-          <input type="text" id="gym-routine-name" placeholder="Nombre de la rutina (ej. Dia de pierna)" required />
-          <div id="gym-routine-color-field"></div>
+        <!-- El modal tiene DOS mitades y nunca se ven las dos a la vez
+             (peticion de Koku): el lapiz de la lista abre la FICHA del
+             dia (nombre, color, icono y a que bloque pertenece) y tocar
+             el dia abre solo sus EJERCICIOS. Antes salia todo junto y
+             habia que buscar lo que venias a cambiar. Ver
+             openGymRoutineModal(routine, modo) en app.js. -->
+        <div id="gym-routine-ficha">
+          <div class="group-form-row">
+            <div id="gym-routine-icon-field"></div>
+            <input type="text" id="gym-routine-name" placeholder="Nombre del día (ej. Push 1)" required />
+            <div id="gym-routine-color-field"></div>
+          </div>
+          <div class="field-label-block">
+            <span class="field-label">Bloque</span>
+            <div id="gym-routine-block-field"></div>
+          </div>
         </div>
-        <div class="field-label-block">
+        <div id="gym-routine-ejercicios" class="field-label-block">
           <span class="field-label">Ejercicios</span>
           <div id="gym-routine-exercises-field" class="gym-routine-exercises-field"></div>
           <button type="button" id="btn-add-gym-routine-exercise" class="secondary-btn">+ Anadir ejercicio</button>
@@ -881,7 +1221,7 @@
        applyGymRoutineToSession en app.js) o sesion libre, y las series
        hechas por ejercicio. -->
   <div id="gym-session-modal" class="modal hidden">
-    <div class="modal-card">
+    <div class="modal-card gym-modal">
       <button type="button" id="btn-close-gym-session" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2 id="gym-session-modal-title">Nueva sesion</h2>
       <form id="gym-session-form">
@@ -891,7 +1231,7 @@
           <div id="gym-session-date-field"></div>
         </div>
         <div class="field-label-block">
-          <span class="field-label">Rutina (opcional)</span>
+          <span class="field-label">Día (opcional)</span>
           <div id="gym-session-routine-field"></div>
         </div>
         <div id="gym-session-exercises-field" class="gym-routine-exercises-field"></div>
@@ -920,7 +1260,7 @@
     <div class="my-space-view-header">
       <h2>Finanzas</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-finanzas" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-finanzas" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-finanzas-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1431,138 +1771,11 @@
     </div>
   </div>
 
-  <!-- Extension "Archivos": mandar archivos sueltos (fotos, PDFs,
-       documentos -- no ligados a una nota) entre el movil y el ordenador,
-       y el control MANUAL de la sincronizacion de datos (recordatorios,
-       notas, eventos, grupos, temas -- ver runSync() en app.js). Desde
-       la ronda "Archivos" ya no hay sincronizacion automatica de fondo:
-       el boton "Sincronizar ahora" que antes vivia en Configuracion >
-       Este dispositivo se ha movido aqui. El bloque de "Carpeta de
-       destino" solo se ve completo (editable + explorador) en el
-       ordenador -- en el movil solo se lee la ruta (GET /folder es
-       requireDeviceOrTrusted), pero cambiarla/explorar el disco sigue
-       siendo requireTrusted (ver server/routes/archivos.js). -->
-  <div id="archivos-view" class="my-space-view hidden">
-    <div class="my-space-view-header">
-      <h2>Archivos</h2>
-      <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-archivos" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
-        <button type="button" id="btn-archivos-settings" class="icon-btn" aria-label="Configuración">☰</button>
-      </div>
-    </div>
-
-    <div class="archivos-body">
-    <h3>Sincronización</h3>
-    <p class="hint">Recordatorios, tareas, notas, eventos y temas ya no se sincronizan solos de fondo -- pulsa este botón cuando quieras poner al día este dispositivo y el ordenador.</p>
-    <p id="sync-status" class="hint"></p>
-    <button type="button" id="btn-sync-now" class="secondary-btn">Sincronizar ahora</button>
-
-    <h3>Nueva versión</h3>
-    <!-- Info de version/commit -- mismo bloque que en Configuracion >
-         menu principal (ver #settings-version-info), solo visible en el
-         ordenador de confianza (GET /api/update/info sigue siendo
-         requireTrusted). El estado de la comprobacion (Comprobando/al
-         dia/error) ya no es un mensaje aparte -- vive en el propio texto
-         del boton, ver checkForNewRelease() en app.js. -->
-    <div id="archivos-version-info" class="settings-version-info hidden"></div>
-    <button type="button" id="btn-archivos-check-update" class="secondary-btn">Comprobar ahora</button>
-
-    <details class="archivos-manage-block">
-      <summary>Carpeta de destino</summary>
-      <p id="archivos-folder-readonly-hint" class="hint hidden"></p>
-      <div id="archivos-folder-row" class="archivos-folder-row hidden">
-        <input type="text" id="archivos-folder-path" readonly />
-        <button type="button" id="btn-archivos-browse" class="secondary-btn">Explorar…</button>
-      </div>
-      <div id="archivos-folder-browser" class="archivos-folder-browser hidden">
-        <p id="archivos-browser-current-path" class="hint"></p>
-        <div id="archivos-browser-list" class="archivos-browser-list"></div>
-        <div class="modal-actions">
-          <button type="button" id="btn-archivos-browser-up" class="secondary-btn">Subir un nivel</button>
-          <div class="spacer"></div>
-          <button type="button" id="btn-archivos-browser-cancel" class="secondary-btn">Cancelar</button>
-          <button type="button" id="btn-archivos-browser-use" class="primary-btn">Usar esta carpeta</button>
-        </div>
-      </div>
-    </details>
-
-    <h3>Transferir archivos</h3>
-    <!-- Diseño de dos paneles estilo TightVNC/TeamViewer, a peticion de
-         Koku -- ver renderArchivosStagedList()/refreshArchivosList() en
-         app.js. El panel izquierdo ("Este dispositivo") NO puede listar
-         de verdad el almacenamiento del movil (los navegadores no lo
-         permiten, es un limite de seguridad, no una eleccion de diseño):
-         solo se puede elegir archivos uno a uno con el selector nativo y
-         mandarlos -- por eso es una "lista de preparados para enviar",
-         no un explorador real. El panel derecho SI es real: la carpeta
-         compartida configurada arriba, igual en ordenador y movil. -->
-    <p class="hint-warning">Si vas a mandar o traer archivos fuera de tu wifi de siempre (una red pública, la del curro, un hotel...), mejor usa los datos móviles del teléfono en vez de esa wifi -- es mucho más difícil que alguien más los intercepte por el camino.</p>
-    <div class="archivos-transfer-grid">
-      <div class="archivos-transfer-panel">
-        <h4>Este dispositivo</h4>
-        <input type="file" id="archivos-file-input" multiple hidden />
-        <button type="button" id="btn-archivos-choose" class="secondary-btn">Elegir archivo(s)…</button>
-        <div id="archivos-staged-list" class="archivos-staged-list"></div>
-        <p id="archivos-staged-empty-hint" class="hint">Elige uno o varios archivos para mandarlos al ordenador.</p>
-      </div>
-      <div class="archivos-transfer-arrows">
-        <button type="button" id="btn-archivos-send" class="secondary-btn" disabled title="Enviar al ordenador">→</button>
-        <button type="button" id="btn-archivos-receive" class="secondary-btn" disabled title="Descargar a este dispositivo">←</button>
-      </div>
-      <div class="archivos-transfer-panel">
-        <h4>Carpeta compartida en el ordenador</h4>
-        <!-- Navegacion real del disco (solo ordenador, ver
-             isTrustedDevice() en app.js) -- la carpeta configurada
-             arriba en "Carpeta de destino" ahora es solo un atajo
-             rapido (btn-archivos-browser-default), no un limite: desde
-             aqui se puede navegar a cualquier carpeta del ordenador. En
-             movil este bloque se queda oculto y la tabla de abajo
-             sigue mostrando solo la carpeta configurada, sin cambios. -->
-        <div id="archivos-nav-row" class="archivos-nav-row hidden">
-          <button type="button" id="btn-archivos-nav-up" class="icon-btn" aria-label="Subir un nivel">↑</button>
-          <p id="archivos-nav-path" class="archivos-nav-path"></p>
-          <button type="button" id="btn-archivos-nav-default" class="secondary-btn">Carpeta por defecto</button>
-        </div>
-        <!-- Subcarpetas de la ruta actual: antes se veian SIEMPRE
-             desplegadas debajo de la ruta (ocupaban espacio aunque no
-             las estuvieras mirando) -- ahora es un desplegable que solo
-             se abre pasando el raton por encima o pulsando el boton,
-             con el mismo estilo que el resto de popovers de la app (ver
-             .archivos-nav-folders-dropdown en styles.css). -->
-        <div id="archivos-nav-folders-wrap" class="archivos-nav-folders-wrap hidden">
-          <button type="button" id="btn-archivos-nav-folders-toggle" class="secondary-btn archivos-nav-folders-toggle">Subcarpetas ▾</button>
-          <div id="archivos-nav-folders" class="archivos-browser-list archivos-nav-folders-dropdown hidden"></div>
-        </div>
-        <div class="archivos-table-wrap">
-          <table class="archivos-table" id="archivos-table">
-            <thead>
-              <tr><th></th><th>Nombre</th><th>Tamaño</th><th>Fecha</th><th></th></tr>
-            </thead>
-            <tbody id="archivos-table-body"></tbody>
-          </table>
-        </div>
-        <p id="archivos-empty-hint" class="hint hidden">No hay archivos todavía.</p>
-      </div>
-    </div>
-    <!-- Estado de "esperando confirmacion del otro dispositivo" -- solo
-         lo usa un movil (ver requestArchivosTransfer() en app.js), el
-         ordenador nunca pasa por aqui. -->
-    <p id="archivos-transfer-status" class="hint hidden"></p>
-    </div>
-  </div>
-
-  <!-- Extension "Viajes": mapa interactivo por paises (SVG en
-       public/viajes-world-map.svg -- fuente: raphaellepuschitz/SVG-World-Map
-       en GitHub, licencia MIT -- con <g id="XX"> en formato ISO 3166-1
-       alfa-2 en MAYUSCULAS, normalizado a minuscula en loadViajesMap();
-       nombres en español en viajesCountries.js) + bitacora de cada
-       viaje, que puede tocar VARIOS paises a la vez (ej. un interrail).
-       Ver openViajesView()/renderViajesMap() en app.js. -->
   <div id="viajes-view" class="my-space-view hidden">
     <div class="my-space-view-header">
       <h2>Viajes</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-viajes" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-viajes" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-viajes-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1751,7 +1964,7 @@
     <div class="my-space-view-header">
       <h2>Lecturas</h2>
       <div class="my-space-view-header-actions">
-        <button type="button" id="btn-close-lecturas" class="secondary-btn my-space-close-btn" aria-label="Volver a Apps">← Apps</button>
+        <button type="button" id="btn-close-lecturas" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-lecturas-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
@@ -1965,6 +2178,37 @@
     </div>
   </div>
 
+  <!-- Ficha de un grupo (nombre y color, mas el color con el que se ven
+       sus tareas al completarse). Se abre desde la pantalla de Grupos:
+       con el "+" para uno nuevo, o tocando un grupo en modo editar. -->
+  <div id="group-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-group" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="group-modal-title">Nuevo grupo</h2>
+      <form id="group-form">
+        <input type="hidden" id="group-id" />
+        <label>
+          Nombre
+          <input type="text" id="group-name" placeholder="Ej. Gimnasio" maxlength="60" required />
+        </label>
+        <label>
+          Color
+          <div id="group-color-field"></div>
+        </label>
+        <label>
+          Color de sus tareas al completarse
+          <div id="group-completed-color-field"></div>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-group" class="danger-btn hidden">Eliminar</button>
+          <span class="modal-actions-spacer"></span>
+          <button type="button" id="btn-cancel-group" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Modal para crear / editar tarea: aparte del de evento porque una
        tarea es mas simple (sin hora de fin, ubicacion, recordatorio ni
        "todo el dia") y la fecha es opcional (ver btn-new-task en app.js). -->
@@ -2015,7 +2259,7 @@
           <!-- Fase 4 del rediseño movil: ya no hay un campo de titulo
                editable -- el titulo se deriva SIEMPRE de la primera
                linea del cuerpo (ver deriveTitleFromBody en
-               server/routes/notes.js). Esto es solo una etiqueta de
+               routes-local/notes.js). Esto es solo una etiqueta de
                solo lectura que se recalcula en vivo mientras se
                escribe (ver refreshNoteTitlePreview en app.js), para
                que se vea que titulo va a quedar sin tener que guardar
@@ -2024,152 +2268,106 @@
           <button type="button" id="note-favorite-btn" class="favorite-star-btn" aria-label="Marcar como favorita" aria-pressed="false"></button>
         </div>
         <div class="note-editor-header-actions">
-          <!-- Ya no hay desplegable de carpeta aqui -- mover una nota se
-               hace desde "Seleccionar -> Mover" en el listado (mismo
-               mecanismo en escritorio y movil, ver #note-folder-toolbar
-               mas abajo y mobileNotesMode en app.js), no editando la
-               nota. -->
-          <button type="button" id="btn-delete-note" class="danger-btn hidden desktop-only">Eliminar</button>
-          <button type="submit" class="primary-btn desktop-only">Guardar</button>
         </div>
       </div>
+      <!-- Barra de formato: siempre a la vista (hubo una ronda con todo
+           esto colapsado tras un boton "Formato"; Koku pidio volver a
+           tenerlo desplegado). El modo lectura ya no se alterna desde
+           aqui: se elige al ABRIR la nota, desde su fila del listado --
+           en solo lectura esta barra entera se oculta. -->
+      <!-- UNA sola fila, que se desliza de lado cuando no cabe (pedido de
+           Koku: "me gustaria que los formatos fueran en una unica linea y
+           para ir viendolos tuviera que ir deslizando lateralmente"). Los
+           separadores solo agrupan visualmente: texto | parrafo | insertar. -->
       <div id="note-body-toolbar" class="note-editor-toolbar">
-        <!-- Barra principal reducida a 2 botones (ronda "barra colapsada
-             en Formato"): todo el resto de controles de formato vive
-             ahora en el popover #note-format-popover (mas abajo, fuera de
-             .note-editor-main, mismo criterio que los demas popovers
-             creados por JS -- position:fixed colgado de <body>). Barra
-             deslizable (overflow-x, sin flex-wrap) por si algun dia hay
-             mas botones aqui, aunque con 2 no hace falta scroll. -->
-        <button type="button" id="note-format-btn" class="note-editor-btn" aria-haspopup="true" aria-expanded="false">Formato</button>
-        <!-- Alterna entre editar (por defecto, como antes) y solo lectura,
-             por si solo quieres consultar la nota sin arriesgarte a
-             tocarla sin querer -- ver applyNoteEditorReadMode en app.js.
-             Es un ajuste POR NOTA ABIERTA (entry.readMode), no global del
-             editor: cada nota recuerda su propio modo mientras este
-             abierta. -->
-        <button type="button" id="note-editor-read-mode-btn" class="note-editor-btn" aria-pressed="false">Modo lectura</button>
+        <!-- Estilo de parrafo (Titulo/Encabezado/Subencabezado/Cuerpo/
+             Monoespaciado, estilo Notas de iPhone) -- abre un popover
+             con las 5 opciones, ver applyNoteParagraphStyle en app.js.
+             Se aplica al PARRAFO ENTERO donde este el cursor, no a una
+             seleccion de texto. -->
+        <!-- Deshacer/rehacer del TEXTO (los de la barra de tabla son de
+             su estructura: filas, columnas, celdas). Van los primeros
+             para tenerlos a mano sin desplazar la barra. -->
+        <button type="button" id="note-text-undo-btn" class="note-editor-btn note-editor-btn-icon" aria-label="Deshacer" title="Deshacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+        </button>
+        <button type="button" id="note-text-redo-btn" class="note-editor-btn note-editor-btn-icon" aria-label="Rehacer" title="Rehacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+        </button>
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
+        <button type="button" id="note-paragraph-style-btn" class="note-editor-btn" aria-label="Estilo de párrafo" title="Estilo de párrafo">Aa</button>
+        <button type="button" data-cmd="bold" class="note-editor-btn" aria-label="Negrita" title="Negrita"><b>N</b></button>
+        <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
+        <button type="button" data-cmd="underline" class="note-editor-btn" aria-label="Subrayado" title="Subrayado"><u>S</u></button>
+        <button type="button" data-cmd="strikeThrough" class="note-editor-btn" aria-label="Tachado" title="Tachado"><s>T</s></button>
+        <!-- Color de resaltado (fondo, tipo rotulador) -- ver
+             applyNoteHighlight/clearNoteHighlight en app.js. Formato EN
+             LINEA con una seleccion real; con el cursor sin seleccionar
+             nada activa el modo "resaltar lo que se escriba a partir de
+             ahora" (ver beginPendingNoteHighlight), reflejado con
+             .is-active en este mismo boton mientras esta pendiente. -->
+        <button type="button" id="note-highlight-btn" class="note-editor-btn" aria-label="Resaltar con color" title="Resaltar con color">&#9635;</button>
+
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
+
+        <!-- Listas: icono dibujado (rayas con viñeta / con numeros) en vez
+             de un glifo de texto -- es lo que usan Notion/Apple Notes/Word,
+             se reconoce de un vistazo y no depende de la fuente. -->
+        <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn note-editor-btn-icon" aria-label="Lista con viñetas" title="Lista con viñetas">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="4" cy="6" r="1.4" fill="currentColor" stroke="none"></circle><circle cx="4" cy="12" r="1.4" fill="currentColor" stroke="none"></circle><circle cx="4" cy="18" r="1.4" fill="currentColor" stroke="none"></circle><line x1="9" y1="6" x2="20" y2="6"></line><line x1="9" y1="12" x2="20" y2="12"></line><line x1="9" y1="18" x2="20" y2="18"></line></svg>
+        </button>
+        <button type="button" data-cmd="insertOrderedList" class="note-editor-btn note-editor-btn-icon" aria-label="Lista numerada" title="Lista numerada">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><text x="1" y="8.4" font-size="8" fill="currentColor" stroke="none">1</text><text x="1" y="14.9" font-size="8" fill="currentColor" stroke="none">2</text><text x="1" y="21.4" font-size="8" fill="currentColor" stroke="none">3</text><line x1="9" y1="6" x2="20" y2="6"></line><line x1="9" y1="12" x2="20" y2="12"></line><line x1="9" y1="18" x2="20" y2="18"></line></svg>
+        </button>
+        <!-- Sangria/quitar sangria y bloque de cita -- se aplican al
+             PARRAFO ENTERO, con un atributo propio (data-indent/
+             data-quote) en vez de execCommand('indent')/<blockquote>
+             nativos, para no chocar entre si -- ver applyNoteIndentDelta/
+             toggleNoteQuoteBlock en app.js. -->
+        <button type="button" id="note-outdent-btn" class="note-editor-btn" aria-label="Quitar sangría" title="Quitar sangría">&#8676;</button>
+        <button type="button" id="note-indent-btn" class="note-editor-btn" aria-label="Añadir sangría" title="Añadir sangría">&#8677;</button>
+        <button type="button" id="note-quote-toggle-btn" class="note-editor-btn" aria-label="Cita" title="Cita">&#10077;</button>
+
+        <span class="note-editor-toolbar-divider" aria-hidden="true"></span>
+
+        <button type="button" id="note-table-insert-btn" class="note-editor-btn" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
+        <button type="button" id="note-image-insert-btn" class="note-editor-btn" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
+        <!-- Bloque de codigo: fuente monoespaciada, SIN colorear por
+             lenguaje (para eso haria falta meter una libreria externa,
+             y de momento el frontend entero no tiene ninguna). Tambien
+             se puede escribir "```lenguaje" + Intro en una linea vacia,
+             estilo GitHub/Markdown -- ver maybeAutoStartCodeBlock en
+             app.js. Este boton inserta uno sin lenguaje asignado. -->
+        <button type="button" id="note-code-insert-btn" class="note-editor-btn" aria-label="Insertar bloque de código" title="Insertar bloque de código (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
+        <!-- Selector de archivo nativo, oculto -- lo abre el boton de
+             arriba con .click(). Tambien sirve para el Ctrl+V (ver
+             app.js), que reutiliza la misma subida. -->
+        <input type="file" id="note-image-file-input" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" />
+        <!-- Solo visible con el cursor dentro de una tabla (ver
+             refreshTableContextToolbar en app.js) -- actua siempre sobre
+             la fila/columna donde este el cursor en ese momento. -->
       </div>
-      <!-- Panel de formato (boton "Formato" de arriba): las mismas 3 filas
-           de siempre (formato en linea / estructura de parrafo / tabla-
-           imagen-codigo-vim), movidas AQUI tal cual -- mismos ids, mismo
-           wiring en app.js, solo cambia donde viven en el arbol. Vive
-           fuera de .note-editor-main a proposito (hermano de nivel
-           superior, igual que los demas popovers creados por JS) para que
-           su position:fixed no dependa de ningun contexto de apilamiento
-           de por medio. Deliberadamente NO esta en la lista generica de
-           closeAllPopovers()/"click fuera cierra" de settings.js -- tiene
-           que seguir abierto mientras se selecciona texto DENTRO de
-           #note-body, que tambien cuenta como "fuera" del popover para
-           ese mecanismo generico. Ver el wiring de #note-format-btn en
-           app.js para su propio cierre dedicado. -->
-      <div id="note-format-popover" class="note-format-popover hidden">
-        <div class="note-editor-toolbar-row">
-          <!-- Estilo de parrafo (Titulo/Encabezado/Subencabezado/Cuerpo/
-               Monoespaciado, estilo Notas de iPhone) -- abre un popover
-               con las 5 opciones, ver applyNoteParagraphStyle en app.js.
-               Se aplica al PARRAFO ENTERO donde este el cursor, no a una
-               seleccion de texto (por eso vive en la fila 1 igualmente,
-               es el unico control "de bloque" que va junto al de texto
-               por ser el mas usado). -->
-          <button type="button" id="note-paragraph-style-btn" class="note-editor-btn" aria-label="Estilo de párrafo" title="Estilo de párrafo">Aa</button>
-          <button type="button" data-cmd="bold" class="note-editor-btn" aria-label="Negrita" title="Negrita"><b>N</b></button>
-          <button type="button" data-cmd="italic" class="note-editor-btn" aria-label="Cursiva" title="Cursiva"><i>C</i></button>
-          <button type="button" data-cmd="underline" class="note-editor-btn" aria-label="Subrayado" title="Subrayado"><u>S</u></button>
-          <button type="button" data-cmd="strikeThrough" class="note-editor-btn" aria-label="Tachado" title="Tachado"><s>T</s></button>
-          <!-- Color de resaltado (fondo, tipo rotulador) -- ver
-               applyNoteHighlight/clearNoteHighlight en app.js. Formato EN
-               LINEA con una seleccion real; con el cursor sin seleccionar
-               nada activa el modo "resaltar lo que se escriba a partir de
-               ahora" (ver beginPendingNoteHighlight), reflejado con
-               .is-active en este mismo boton mientras esta pendiente. -->
-          <button type="button" id="note-highlight-btn" class="note-editor-btn" aria-label="Resaltar con color" title="Resaltar con color">&#9635;</button>
-        </div>
-        <div class="note-editor-toolbar-row">
-          <button type="button" data-cmd="insertUnorderedList" class="note-editor-btn" aria-label="Lista con viñetas" title="Lista con viñetas">&#8226;</button>
-          <button type="button" data-cmd="insertOrderedList" class="note-editor-btn" aria-label="Lista numerada" title="Lista numerada">1.</button>
-          <!-- Sangria/quitar sangria y bloque de cita -- se aplican al
-               PARRAFO ENTERO, con un atributo propio (data-indent/
-               data-quote) en vez de execCommand('indent')/<blockquote>
-               nativos, para no chocar entre si -- ver applyNoteIndentDelta/
-               toggleNoteQuoteBlock en app.js. -->
-          <button type="button" id="note-outdent-btn" class="note-editor-btn" aria-label="Quitar sangría" title="Quitar sangría">&#8676;</button>
-          <button type="button" id="note-indent-btn" class="note-editor-btn" aria-label="Añadir sangría" title="Añadir sangría">&#8677;</button>
-          <button type="button" id="note-quote-toggle-btn" class="note-editor-btn" aria-label="Cita" title="Cita">&#10077;</button>
-        </div>
-        <div class="note-editor-toolbar-row">
-          <button type="button" id="note-table-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar tabla" title="Insertar tabla">Tabla</button>
-          <button type="button" id="note-image-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar imagen" title="Insertar imagen">Imagen</button>
-          <!-- Bloque de codigo: fuente monoespaciada, SIN colorear por
-               lenguaje (para eso haria falta meter una libreria externa,
-               y de momento el frontend entero no tiene ninguna). Tambien
-               se puede escribir "```lenguaje" + Intro en una linea vacia,
-               estilo GitHub/Markdown -- ver maybeAutoStartCodeBlock en
-               app.js. Este boton inserta uno sin lenguaje asignado. -->
-          <button type="button" id="note-code-insert-btn" class="note-editor-btn desktop-only" aria-label="Insertar bloque de código" title="Insertar bloque de código (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
-          <!-- Selector de archivo nativo, oculto -- lo abre el boton de
-               arriba con .click(). Tambien sirve para el Ctrl+V (ver
-               app.js), que reutiliza la misma subida. -->
-          <input type="file" id="note-image-file-input" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" />
-          <!-- Solo visible con el cursor dentro de una tabla (ver
-               refreshTableContextToolbar en app.js) -- actua siempre sobre
-               la fila/columna donde este el cursor en ese momento. -->
-          <span id="note-table-context-toolbar" class="note-table-context-toolbar hidden">
-            <button type="button" id="note-table-add-row" class="note-editor-btn" aria-label="Añadir fila" title="Añadir fila">+Fila</button>
-            <button type="button" id="note-table-remove-row" class="note-editor-btn" aria-label="Eliminar fila" title="Eliminar fila">-Fila</button>
-            <button type="button" id="note-table-add-col" class="note-editor-btn" aria-label="Añadir columna" title="Añadir columna">+Col</button>
-            <button type="button" id="note-table-remove-col" class="note-editor-btn" aria-label="Eliminar columna" title="Eliminar columna">-Col</button>
-            <!-- Grosor fino/grueso, por tabla (atributo data-border en el
-                 <table>, ver toggleTableBorderThickness en app.js) -- se
-                 enciende igual que los botones de negrita/cursiva cuando
-                 la tabla actual ya esta en grueso. -->
-            <button type="button" id="note-table-border-toggle" class="note-editor-btn" aria-label="Alternar grosor de borde" title="Alternar borde fino/grueso">Borde</button>
-          </span>
-          <!-- Modo "vim" (opt-in, ajuste por dispositivo en localStorage,
-               ver isVimModeEnabled en app.js): Esc entra en modo Normal
-               (movimiento con h/j/k/l, w/b, x, dd, u -- sin escribir), v
-               entra en Visual (seleccionar con movimiento, y copia, d
-               borra), i/a/o vuelven a Insertar. El indicativo TAMBIEN es
-               un boton: clicarlo va rotando Insertar->Normal->Visual, para
-               quien prefiera el raton al teclado (Esc/i/v). Solo se ve si
-               el ajuste esta activado. -->
-          <button type="button" id="note-editor-vim-indicator" class="note-editor-vim-indicator hidden desktop-only">INSERTAR</button>
-          <button type="button" id="note-editor-vim-toggle-btn" class="note-editor-btn desktop-only" aria-pressed="false" title="Atajos de movimiento estilo vim (Esc = modo Normal, i/a/o = Insertar)">Vim</button>
-        </div>
+
+      <!-- Barra de TABLA: sustituye a la de formato mientras se esta
+           trasteando con una tabla (se entra tocando el icono que aparece
+           en su esquina, y se sale sacando el cursor de ella). Cinco
+           botones, cada uno con sus opciones dentro, para no tener 16
+           botones sueltos en una fila que no se acaba nunca. -->
+      <div id="note-table-toolbar" class="note-editor-toolbar hidden">
+        <button type="button" class="note-editor-btn" id="btn-note-table-mark">Marcar</button>
+        <button type="button" class="note-editor-btn" data-table-menu="row">Fila ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="col">Columna ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="move">Mover ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="border">Borde ▾</button>
+        <button type="button" class="note-editor-btn" data-table-menu="cells">Celdas ▾</button>
+        <button type="button" class="note-editor-btn note-editor-btn-icon" id="btn-note-table-undo" aria-label="Deshacer" title="Deshacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+        </button>
+        <button type="button" class="note-editor-btn note-editor-btn-icon" id="btn-note-table-redo" aria-label="Rehacer" title="Rehacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+        </button>
       </div>
       <div class="note-editor-main">
-        <!-- Rail izquierdo: dos botones independientes -- "Arbol" (navegar
-             carpetas/notas sin salir del editor) y "Secciones" (gestor de
-             notas abiertas a la vez, ver state.openNotes en app.js). Solo
-             uno de los dos paneles se ve a la vez (ver setActiveNoteEditorPanel
-             en app.js), volver a clicar el que esta activo lo cierra. -->
-        <div class="note-editor-rail desktop-only">
-          <button type="button" id="note-editor-toggle-tree" class="note-editor-rail-btn" aria-label="Arbol de notas" title="Arbol de carpetas y notas">Árbol</button>
-          <button type="button" id="note-editor-toggle-sections" class="note-editor-rail-btn" aria-label="Secciones" title="Secciones (notas abiertas)">Notas</button>
-        </div>
-        <!-- Arbol de carpetas/notas: navegacion tipo arbol (plegable por
-             carpeta), reutiliza state.noteFolders/state.notes (ya cargados
-             enteros, sin llamada nueva a la API). Clicar una nota la abre
-             en el editor (se anade a las notas abiertas si no lo estaba
-             ya, ver openNoteInEditor). -->
-        <div id="note-tree-panel" class="note-editor-side-panel hidden desktop-only">
-          <div class="note-editor-side-panel-header">
-            <span>Árbol de notas</span>
-            <button type="button" id="note-tree-new-btn" class="icon-btn" aria-label="Nueva nota" title="Nueva nota">+</button>
-          </div>
-          <div id="note-tree-list" class="note-tree-list"></div>
-        </div>
-        <!-- Lista de notas abiertas a la vez (como pestañas, pero sin
-             barra de pestañas visible -- se cambia de una a otra desde
-             aqui, ver switchActiveOpenNote en app.js). Cada nota tiene
-             un desplegable para "ver secciones de dentro": por ahora es
-             un simple placeholder, el editor todavia no tiene ningun
-             concepto de titulos/encabezados dentro del cuerpo de la
-             nota (queda para una ronda futura). -->
-        <div id="note-sections-panel" class="note-editor-side-panel hidden desktop-only">
-          <div class="note-editor-side-panel-header">Notas abiertas</div>
-          <div id="note-sections-list" class="note-sections-list"></div>
-        </div>
         <div class="note-editor-content-col">
           <div id="note-body" class="note-editor-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido de la nota"></div>
         </div>
@@ -2209,76 +2407,134 @@
        vez de un botón suelto por cada cosa. Ver settings.js. -->
   <div id="settings-modal" class="modal hidden">
     <div class="modal-card settings-card">
-      <!-- Cabecera FIJA (fuera de la zona con scroll): la x de cerrar
-           siempre visible aunque la seccion que estes mirando sea larga.
-           El "Volver" de cada seccion no vive aqui (es distinto por
-           pestana), va dentro de settings-card-body con position:sticky
-           para quedarse pegado arriba SOLO mientras haces scroll dentro
-           de esa seccion. -->
+      <!-- Cabecera FIJA (fuera de la zona con scroll). Ya no lleva boton
+           de cerrar: la barra inferior sigue visible con Configuracion
+           abierta, asi que se sale tocando cualquier otro apartado (y con
+           Esc en un teclado). El "Volver" de cada seccion no vive aqui
+           (es distinto por pestana), va dentro de settings-card-body con
+           position:sticky para quedarse pegado arriba SOLO mientras haces
+           scroll dentro de esa seccion. -->
       <div class="settings-card-header">
-        <button type="button" id="btn-close-settings" class="modal-close-x" aria-label="Cerrar">✕</button>
         <h2>Configuración</h2>
+        <!-- "Volver" vive AQUI, en la misma fila que el titulo, y no
+             dentro de cada seccion: ahi quedaba debajo del texto y, al
+             hacer scroll, se pegaba arriba tapando el contenido. -->
+        <button type="button" id="btn-settings-back" class="secondary-btn hidden" data-back>← Volver</button>
       </div>
 
       <div class="settings-card-body">
 
-      <!-- Menu: lista vertical, solo texto. Al pulsar una entra a esa
-           seccion a pantalla completa (ver showSettingsScreen en settings.js). -->
+      <!-- Menu en galeria (mismo aire que la vista de galeria de Notas):
+           una tarjeta con icono por apartado, en vez de una lista de
+           texto. Al pulsar una entra a esa seccion a pantalla completa
+           (ver showSettingsScreen en settings.js). -->
       <div id="settings-menu" class="settings-menu">
         <button type="button" class="settings-menu-item" data-tab="profile">
-          <span>Perfil</span><span class="settings-menu-item-arrow">›</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>
+          <span>Perfil</span>
         </button>
         <button type="button" class="settings-menu-item" data-tab="view">
-          <span>Vista</span><span class="settings-menu-item-arrow">›</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg>
+          <span>Vista</span>
         </button>
         <button type="button" class="settings-menu-item" data-tab="style">
-          <span>Estilo</span><span class="settings-menu-item-arrow">›</span>
-        </button>
-        <button type="button" class="settings-menu-item" data-tab="groups">
-          <span>Grupos</span><span class="settings-menu-item-arrow">›</span>
-        </button>
-        <button type="button" class="settings-menu-item" data-tab="devices">
-          <span>Dispositivos</span><span class="settings-menu-item-arrow">›</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.7-.9 1.4-1.8-.3-.9.3-1.7 1.2-1.7H17a4 4 0 0 0 4-4c0-5-4-10.5-9-10.5Z"/><circle cx="8" cy="11" r="1.1"/><circle cx="12" cy="8" r="1.1"/><circle cx="16" cy="11" r="1.1"/></svg>
+          <span>Estilo</span>
         </button>
         <button type="button" class="settings-menu-item" data-tab="mobile">
-          <span>Este dispositivo</span><span class="settings-menu-item-arrow">›</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
+          <span>Este dispositivo</span>
         </button>
-        <button type="button" class="settings-menu-item" data-tab="shortcuts">
-          <span>Atajos de teclado</span><span class="settings-menu-item-arrow">›</span>
+        <button type="button" class="settings-menu-item" data-tab="notifications">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M10.3 19a2 2 0 0 0 3.4 0"/></svg>
+          <span>Notificaciones</span>
         </button>
-        <!-- Accion directa (no navega a ningun sitio, por eso no lleva
-             flecha "›"), solo visible dentro de la app de escritorio —
-             ver refreshQuitMenuItem en settings.js. -->
-        <button type="button" id="btn-quit-app" class="settings-menu-item settings-menu-item-danger hidden">
-          <span>Salir de la aplicación</span>
+        <button type="button" class="settings-menu-item" data-tab="store">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16l-1.2 11a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
+          <span>Tienda</span>
         </button>
 
-        <!-- Info de version/commit -- solo lectura, no navega a ningun
-             sitio. DENTRO de settings-menu para que se oculte junto con
-             el resto de la lista al entrar en una seccion (ver
-             showSettingsScreen). Solo se ve en el ordenador de confianza
-             (mismo criterio que el aviso de nueva version, ver
-             requireTrusted en server/routes/update.js) -- un movil
-             emparejado no puede leer el git de este ordenador. Ver
-             refreshVersionInfo en app.js. -->
-        <div id="settings-version-info" class="settings-version-info hidden"></div>
+      </div>
+
+      <!-- --- Notificaciones (apartado propio, peticion de Koku: "van a
+           haber un par"). Cada opcion lleva SU boton "?" con su
+           explicacion como dialogo, en vez de parrafos siempre a la
+           vista. Los ids son los de siempre: refreshMobileTab() y los
+           listeners de settings.js siguen funcionando igual. --- -->
+      <div id="settings-tab-notifications" class="settings-tab-panel hidden">
+        <h3>Notificaciones</h3>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-notifications" />
+            Avisos de recordatorios
+          </label>
+          <button type="button" id="btn-help-notif-reminders" class="icon-btn settings-help-btn" aria-label="Qué son los avisos de recordatorios">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-gym-rest-notify" />
+            Aviso al terminar el descanso
+          </label>
+          <button type="button" id="btn-help-notif-rest" class="icon-btn settings-help-btn" aria-label="Qué es el aviso de fin de descanso">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-gym-rest-burst" />
+            Vibración larga al acabar el descanso
+          </label>
+          <button type="button" id="btn-help-notif-burst" class="icon-btn settings-help-btn" aria-label="Qué es la vibración larga">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-gym-rest-duck" />
+            Bajar la música al acabar el descanso
+          </label>
+          <button type="button" id="btn-help-notif-duck" class="icon-btn settings-help-btn" aria-label="Cómo funciona el bajar la música">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-gym-auto-start" />
+            Empezar la siguiente serie sola
+          </label>
+          <button type="button" id="btn-help-notif-autostart" class="icon-btn settings-help-btn" aria-label="Qué hace empezar la siguiente serie sola">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-notif-sound" />
+            Sonido
+          </label>
+          <button type="button" id="btn-help-notif-sound" class="icon-btn settings-help-btn" aria-label="Cómo funciona el sonido de los avisos">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-notif-vibrate" />
+            Vibración
+          </label>
+          <button type="button" id="btn-help-notif-vibrate" class="icon-btn settings-help-btn" aria-label="Cómo funciona la vibración de los avisos">?</button>
+        </div>
+        <p id="notifications-status" class="hint"></p>
+      </div>
+
+      <!-- --- Tienda (todavia sin mecanica: solo el hueco) --- -->
+      <div id="settings-tab-store" class="settings-tab-panel hidden">
+        <h3>Tienda</h3>
+        <p class="hint">
+          Aquí vivirán los módulos de Herramientas: los que ya tienes
+          vienen de serie, y más adelante se podrán añadir otros desde
+          aquí, con su propio buscador.
+        </p>
+        <p class="hint">Todavía no está construida — es solo el sitio donde va a ir.</p>
       </div>
 
       <!-- --- Perfil --- -->
       <div id="settings-tab-profile" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Perfil</h3>
-        <p class="hint">Tu nickname se ve igual en todos tus dispositivos, para que no haya lios de nombres si tienes varios enlazados. Aparece como "creado por" en las tareas que anadas.</p>
+        <p class="hint">Tu nickname aparece como "creado por" en los eventos y tareas que anadas.</p>
         <form id="profile-form">
           <label>
             Nickname
             <input type="text" id="profile-name" placeholder="Tu nombre" maxlength="60" />
           </label>
-          <label>
-            Correo (opcional)
-            <input type="email" id="profile-email" placeholder="tucorreo@ejemplo.com" maxlength="200" />
-          </label>
-          <p class="hint">Solo se usaria como contacto tecnico obligatorio si activas los avisos push del movil (el protocolo se llama VAPID) -- nunca se muestra en la app ni se comparte con nadie más, salvo con Google/Apple para ese uso puntual y solo si activas esos avisos.</p>
           <button type="submit" class="primary-btn">Guardar</button>
         </form>
 
@@ -2291,32 +2547,15 @@
 
       <!-- --- Vista --- -->
       <div id="settings-tab-view" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Vista</h3>
-        <p class="hint">Cambia entre la ventana normal y pantalla completa (sin las barras del navegador). Se aplica al momento.</p>
-        <div id="view-mode-options" class="view-mode-options"></div>
-        <p id="view-mode-hint" class="hint"></p>
 
-        <h4>Días con muchas cosas</h4>
-        <p class="hint">Cómo se ven, en el calendario del mes, los días que tienen varios eventos o tareas a la vez.</p>
-        <div id="calendar-density-options" class="view-mode-options"></div>
-
-        <h4>Mi espacio</h4>
-        <p class="hint">Cómo acceder a "Mi espacio" (Próximos, Tareas y Notas juntos). En el panel lateral se ve siempre al lado del calendario; con el botón se abre a pantalla completa cuando lo necesites.</p>
-        <div id="my-space-mode-options" class="view-mode-options"></div>
-
-        <h4>Panel lateral clásico</h4>
-        <p class="hint">Solo aplica cuando "Mi espacio" está en modo botón (arriba): cómo se reparten Recordatorios, Tareas y Notas en el panel de siempre, al lado del calendario. Marca las que quieras ver juntas, alternando con flechas (útil si la pantalla es pequeña); las que no marques se quedan cada una sola, siempre visible. Si no marcas ninguna (o solo una), las 3 se ven apiladas como siempre.</p>
-        <div id="reminders-panel-grouped-options" class="reminders-panel-grouped-options"></div>
-
-        <h4>Favoritos en Mi espacio</h4>
+        <h4>Favoritos en Notas</h4>
         <p class="hint">Cómo se ordenan las carpetas y notas favoritas (la estrella del listado) dentro de cada carpeta.</p>
         <div id="favorites-display-options" class="view-mode-options"></div>
       </div>
 
       <!-- --- Estilo --- -->
       <div id="settings-tab-style" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Estilo</h3>
 
         <h4>Estilo de interacción</h4>
@@ -2326,7 +2565,7 @@
         <h4>Colores</h4>
         <p class="hint">Clica una tarjeta para usar ese tema en este dispositivo. Cada dispositivo puede llevar un tema distinto.</p>
 
-        <p class="hint">Si un tema tiene variante clara/oscura emparejada (◐), esto hace que siga el modo de tu ordenador automáticamente. Para cambiarlo a mano, usa el botón de al lado (en escritorio hay además un atajo igual en la barra superior).</p>
+        <p class="hint">Si un tema tiene variante clara/oscura emparejada (lo marca la etiqueta con el sol o la luna en su tarjeta), esto hace que siga el modo de tu ordenador automáticamente. Para cambiarlo a mano, usa el botón de al lado (en escritorio hay además un atajo igual en la barra superior).</p>
         <div class="color-mode-row">
           <div id="color-mode-options" class="color-mode-options"></div>
           <button type="button" id="settings-quick-color-mode" class="icon-btn quick-color-mode-btn hidden" aria-label="Cambiar entre claro y oscuro"></button>
@@ -2375,117 +2614,101 @@
       </div>
 
       <!-- --- Grupos --- -->
-      <div id="settings-tab-groups" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
-        <h3>Grupos</h3>
-        <p class="hint">Un color y, si quieres, un simbolo o emoji al lado del nombre para diferenciarlos de un vistazo.</p>
-
-        <form id="group-form" class="group-form">
-          <input type="hidden" id="group-id" />
-          <div class="group-form-row">
-            <div id="group-icon-field"></div>
-            <input type="text" id="group-name" placeholder="Nombre del grupo (ej. Gimnasio)" required />
-            <div id="group-color-field"></div>
-          </div>
-          <div class="group-form-row group-form-row-completed">
-            <span class="hint">Color de las tareas de este grupo al completarse</span>
-            <div id="group-completed-color-field"></div>
-          </div>
-          <div class="group-form-actions">
-            <button type="button" id="btn-cancel-group" class="secondary-btn hidden">Cancelar</button>
-            <button type="submit" class="primary-btn">Guardar grupo</button>
-          </div>
-        </form>
-
-        <div id="groups-list" class="groups-list"></div>
-      </div>
-
-      <!-- --- Dispositivos --- -->
-      <div id="settings-tab-devices" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
-        <h3>Dispositivos</h3>
-        <div id="devices-only-computer" class="hidden">
-          <p class="hint">La gestion de dispositivos solo esta disponible desde el ordenador, por seguridad.</p>
-        </div>
-        <div id="devices-management">
-          <button id="btn-generate-code" class="primary-btn">Vincular nuevo dispositivo</button>
-          <div id="pairing-code-display" class="pairing-code-display hidden">
-            <p>Introduce este código en el otro dispositivo:</p>
-            <div id="pairing-code-value" class="code-value"></div>
-            <p id="pairing-code-countdown" class="hint"></p>
-          </div>
-          <h4>Vinculados</h4>
-          <div id="devices-list" class="devices-list"></div>
-
-          <!-- Fase "multi-red": un movil ya vinculado no necesita volver a
-               emparejarse al cambiar de wifi, solo saber la IP nueva de
-               este ordenador -- ver getServerBaseUrl() en app.js. -->
-          <h4>Este ordenador en esta red</h4>
-          <p class="hint">Desde un movil ya vinculado, entra en Configuración → Este dispositivo → "Escanear ordenador" y apunta a este código para que sepa a qué dirección mandar los datos en la wifi de ahora.</p>
-          <img id="network-qr-image" class="network-qr-image hidden" alt="Código QR con la dirección de este ordenador en la red actual" />
-          <p id="network-qr-url" class="hint"></p>
-        </div>
-      </div>
-
       <!-- --- Este dispositivo (ajustes locales, no compartidos) --- -->
       <div id="settings-tab-mobile" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
         <h3>Este dispositivo</h3>
         <p class="hint">Estos ajustes son solo para el dispositivo en el que estas viendo esto ahora mismo.</p>
+        <h4>Gimnasio: formato de tiempo</h4>
+        <div id="gym-time-format-options" class="view-mode-options"></div>
+
+        <h4>Animaciones</h4>
         <label class="checkbox-row">
-          <input type="checkbox" id="setting-notifications" />
-          Notificaciones del navegador para recordatorios
+          <input type="checkbox" id="setting-animations" />
+          Animaciones de la app
         </label>
-        <p id="notifications-status" class="hint"></p>
-
-        <label class="checkbox-row">
-          <input type="checkbox" id="setting-update-check" />
-          Avisarme cuando el servidor se actualice
-        </label>
-
-        <h4>Tareas completadas</h4>
-        <p class="hint">Como se ven, en este dispositivo, las tareas que ya has marcado como hechas.</p>
-        <div id="completed-tasks-display-options" class="view-mode-options"></div>
-
-        <!-- Fase "Archivos": el boton "Sincronizar ahora" vivia aqui, pero
-             se ha movido al apartado Apps > Archivos (junto con el
-             resto de acciones manuales de esa pantalla) -- ver
-             "Sincronizacion" en app.js. -->
-
-        <!-- Fase "multi-red": si cambias de wifi (o de ordenador), la IP de
-             antes deja de servir -- escanear el QR nuevo actualiza a dónde
-             se manda la sincronización sin perder lo ya guardado aquí ni
-             tener que volver a vincular este dispositivo. -->
-        <h4>Conectar con el ordenador en esta red</h4>
-        <p class="hint">Si cambias de wifi (o de ordenador), escanea el QR que aparece en el ordenador en Configuración → Dispositivos.</p>
-        <button type="button" id="btn-scan-server" class="secondary-btn">Escanear ordenador</button>
-        <p id="scan-server-status" class="hint"></p>
+        <p class="hint">Todo el movimiento de la app: el zoom al entrar y salir de un mes o un día, el deslizamiento al cambiar de mes o de pestaña, y las transiciones de botones, listas y paneles. Apagarlas ahorra recursos: todo pasa al instante, sin transición. Nada deja de funcionar, solo deja de moverse.</p>
 
         <h4>Gimnasio: unidad de peso</h4>
         <p class="hint">Solo cambia como se escriben/leen los pesos en este dispositivo -- por dentro siempre se guardan en kilogramos.</p>
         <div id="gym-weight-unit-options" class="view-mode-options"></div>
 
         <h4>Barra inferior (móvil)</h4>
-        <p class="hint">Qué App vive en el segundo hueco de la barra inferior, junto a Calendario/Apps/Configuración (que se quedan siempre fijos).</p>
+        <p class="hint">Qué herramienta vive en el segundo hueco de la barra inferior, junto a Calendario/Herramientas/Configuración (que se quedan siempre fijos).</p>
         <div id="mobile-nav-slot-field"></div>
+
+        <h4>Copia de seguridad</h4>
+        <p class="hint">Todos tus datos viven solo en este dispositivo: si borras la app sin una copia, se pierden. Exportar crea un único archivo con todo (calendario, notas, herramientas, fotos y ajustes) y lo manda por la hoja de compartir del sistema, para guardarlo donde quieras. Importar restaura ese archivo, sustituyendo lo que haya ahora.</p>
+        <p id="backup-status" class="hint"></p>
+        <div class="backup-actions">
+          <button type="button" id="btn-backup-export" class="primary-btn">Exportar copia</button>
+          <button type="button" id="btn-backup-import" class="secondary-btn">Importar copia</button>
+        </div>
+        <input type="file" id="backup-import-input" accept="application/json,.json" class="hidden" />
+
+        <h4>Versión</h4>
+        <p id="app-version-line" class="hint"></p>
       </div>
 
-      <!-- --- Atajos de teclado (ajuste local, no compartido) --- -->
-      <div id="settings-tab-shortcuts" class="settings-tab-panel hidden">
-        <button type="button" class="settings-back-btn" data-back>← Volver</button>
-        <h3>Atajos de teclado</h3>
-        <p class="hint">Pulsa "+ Añadir" y luego pulsa la tecla (o combinacion) que quieras usar. Puedes tener varias combinaciones para la misma accion; quita las que no quieras con la x.</p>
-        <div id="shortcuts-list" class="shortcuts-list"></div>
-      </div>
 
       </div>
     </div>
   </div>
 
   <script src="db-local.js"></script>
-  <script src="vendor/jsQR.js"></script>
+  <!-- El "servidor" vive ahora dentro de la propia app: SQLite compilado
+       a WebAssembly (vendor/sql-wasm.*), el esquema de siempre
+       (local-schema.js), un router minimo que imita a Express
+       (local-api.js) y las rutas del backend portadas tal cual
+       (routes-local/*.js). El orden importa: cada uno usa lo que
+       declara el anterior, y viajesTrips.js consume una global que
+       publica viajesEntries.js. -->
+  <!-- Runtime de Capacitor (MIT, copiado de node_modules/@capacitor/core).
+       Hace falta a mano porque este proyecto no tiene bundler: la app
+       nativa inyecta su "puente" con el sistema, pero ese puente NO crea
+       solo los plugins en Capacitor.Plugins -- eso lo hace registerPlugin,
+       que vive justo aqui. Sin este archivo, pedir permiso de avisos era
+       imposible desde la app empaquetada (ver local-notifications.js). -->
+  <script src="vendor/capacitor.js"></script>
+  <script src="vendor/sql-wasm.js"></script>
+  <script src="local-schema.js"></script>
+  <script src="local-db.js"></script>
+  <script src="local-api.js"></script>
+  <script src="routes-local/events.js"></script>
+  <script src="routes-local/finanzasAccounts.js"></script>
+  <script src="routes-local/finanzasAssets.js"></script>
+  <script src="routes-local/finanzasCategories.js"></script>
+  <script src="routes-local/finanzasDebts.js"></script>
+  <script src="routes-local/finanzasInvestments.js"></script>
+  <script src="routes-local/finanzasPortfolios.js"></script>
+  <script src="routes-local/finanzasRecurringExpenses.js"></script>
+  <script src="routes-local/finanzasSettings.js"></script>
+  <script src="routes-local/finanzasTransactions.js"></script>
+  <script src="routes-local/groups.js"></script>
+  <script src="routes-local/gymExercises.js"></script>
+  <script src="routes-local/gymBlocks.js"></script>
+  <script src="routes-local/gymRoutines.js"></script>
+  <script src="routes-local/gymSessions.js"></script>
+  <script src="routes-local/lecturasItems.js"></script>
+  <script src="routes-local/lecturasSagas.js"></script>
+  <script src="routes-local/noteFolders.js"></script>
+  <script src="routes-local/noteImages.js"></script>
+  <script src="routes-local/notes.js"></script>
+  <script src="routes-local/profile.js"></script>
+  <script src="routes-local/reminders.js"></script>
+  <script src="routes-local/specialDays.js"></script>
+  <script src="routes-local/themes.js"></script>
+  <script src="routes-local/viajesEntries.js"></script>
+  <script src="routes-local/viajesTrips.js"></script>
+  <script src="finanzas-recurring.js"></script>
+  <script src="local-notifications.js"></script>
+  <script src="widget-bridge.js"></script>
+  <script src="backup.js"></script>
   <script src="viajesCountries.js"></script>
   <script src="app.js"></script>
   <script src="settings.js"></script>
+  <!-- Compartir -> RemindMeLater: recibe el texto de la extension de
+       compartir nativa y abre el modal de evento prerrelleno. Va el
+       ULTIMO a proposito: usa openEventModal y los campos de hora que
+       declara app.js. -->
 </body>
 </html>

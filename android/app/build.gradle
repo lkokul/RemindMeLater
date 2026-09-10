@@ -7,8 +7,12 @@ android {
         applicationId "com.koku.remindmelater"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // El numero de version lo pone el workflow de GitHub Actions con
+        // -PappVersionCode=<numero de ejecucion> (Google Play exige que
+        // cada subida tenga un versionCode MAYOR que la anterior). Sin
+        // esas propiedades (compilar en local), se usa 1/"1.0".
+        versionCode (project.hasProperty('appVersionCode') ? project.property('appVersionCode').toInteger() : 1)
+        versionName (project.hasProperty('appVersionName') ? project.property('appVersionName') : "1.0")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +20,26 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Firma para Google Play. Los datos del keystore NUNCA viven en el
+    // repo: llegan como propiedades de Gradle (-P...) desde el workflow
+    // de GitHub Actions, que a su vez los saca de los Secrets del repo
+    // (ver ANDROID-PLAY.md). Si no vienen (compilar en local sin
+    // keystore), el bloque queda vacio y el .aab sale sin firmar.
+    signingConfigs {
+        release {
+            if (project.hasProperty('RELEASE_KEYSTORE_FILE')) {
+                storeFile file(project.property('RELEASE_KEYSTORE_FILE'))
+                storePassword project.property('RELEASE_KEYSTORE_PASSWORD')
+                keyAlias project.property('RELEASE_KEY_ALIAS')
+                keyPassword project.property('RELEASE_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (project.hasProperty('RELEASE_KEYSTORE_FILE')) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

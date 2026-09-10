@@ -16,7 +16,46 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
+		DE5CA25000000000000000B1 /* LiveActivityPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A4 /* LiveActivityPlugin.swift */; };
+		DE5CA25000000000000000B2 /* DescansoAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A5 /* DescansoAttributes.swift */; };
+		DE5CA25000000000000000B3 /* BridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A6 /* BridgeViewController.swift */; };
+		DE5CA25000000000000000B4 /* silencio.wav in Resources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A7 /* silencio.wav */; };
+		DE5CA25000000000000000B5 /* DescansoWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A2 /* DescansoWidgetBundle.swift */; };
+		DE5CA25000000000000000BE /* QueTocaHoyWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AC /* QueTocaHoyWidget.swift */; };
+		DE5CA25000000000000000BF /* WidgetBridgePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AD /* WidgetBridgePlugin.swift */; };
+		DE5CA25000000000000000B6 /* DescansoAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A5 /* DescansoAttributes.swift */; };
+		DE5CA25000000000000000B7 /* DescansoWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A1 /* DescansoWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DE5CA25000000000000000B8 /* ExtenderDescansoIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */; };
+		DE5CA25000000000000000B9 /* ExtenderDescansoIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */; };
+		DE5CA25000000000000000BA /* RestAudioWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A9 /* RestAudioWatcher.swift */; };
+		DE5CA25000000000000000BB /* RestAudioWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A9 /* RestAudioWatcher.swift */; };
+		DE5CA25000000000000000BD /* RestAlertStopper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AB /* RestAlertStopper.swift */; };
+		DE5CA25000000000000000BC /* RestAudioPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AA /* RestAudioPlugin.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		DE5CA25000000000000000D3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DE5CA25000000000000000D1;
+			remoteInfo = DescansoWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		DE5CA25000000000000000C4 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				DE5CA25000000000000000B7 /* DescansoWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
@@ -30,6 +69,21 @@
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		DE5CA25000000000000000A1 /* DescansoWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DescansoWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		DE5CA25000000000000000A2 /* DescansoWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DescansoWidgetBundle.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000AC /* QueTocaHoyWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueTocaHoyWidget.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000AD /* WidgetBridgePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetBridgePlugin.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000AE /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
+		DE5CA25000000000000000AF /* DescansoWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DescansoWidget.entitlements; sourceTree = "<group>"; };
+		DE5CA25000000000000000A3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		DE5CA25000000000000000A4 /* LiveActivityPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityPlugin.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000A5 /* DescansoAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DescansoAttributes.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000A6 /* BridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeViewController.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000A7 /* silencio.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = silencio.wav; sourceTree = "<group>"; };
+		DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtenderDescansoIntent.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000AB /* RestAlertStopper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAlertStopper.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000A9 /* RestAudioWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAudioWatcher.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000AA /* RestAudioPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAudioPlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -41,6 +95,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DE5CA25000000000000000C2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -49,6 +110,7 @@
 			children = (
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
+				DE5CA25000000000000000E1 /* DescansoWidget */,
 				504EC3051FED79650016851F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -57,16 +119,38 @@
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
+				DE5CA25000000000000000A1 /* DescansoWidget.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		DE5CA25000000000000000E1 /* DescansoWidget */ = {
+			isa = PBXGroup;
+			children = (
+				DE5CA25000000000000000A2 /* DescansoWidgetBundle.swift */,
+				DE5CA25000000000000000A3 /* Info.plist */,
+				DE5CA25000000000000000AC /* QueTocaHoyWidget.swift */,
+				DE5CA25000000000000000AF /* DescansoWidget.entitlements */,
+			);
+			path = DescansoWidget;
 			sourceTree = "<group>";
 		};
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
+				DE5CA25000000000000000AD /* WidgetBridgePlugin.swift */,
+				DE5CA25000000000000000AE /* App.entitlements */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
+				DE5CA25000000000000000A6 /* BridgeViewController.swift */,
+				DE5CA25000000000000000A4 /* LiveActivityPlugin.swift */,
+				DE5CA25000000000000000A5 /* DescansoAttributes.swift */,
+				DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */,
+				DE5CA25000000000000000A9 /* RestAudioWatcher.swift */,
+				DE5CA25000000000000000AA /* RestAudioPlugin.swift */,
+				DE5CA25000000000000000AB /* RestAlertStopper.swift */,
+				DE5CA25000000000000000A7 /* silencio.wav */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -87,10 +171,12 @@
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				DE5CA25000000000000000C4 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				DE5CA25000000000000000D2 /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -99,6 +185,23 @@
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
+		};
+		DE5CA25000000000000000D1 /* DescansoWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DE5CA25000000000000000F3 /* Build configuration list for PBXNativeTarget "DescansoWidget" */;
+			buildPhases = (
+				DE5CA25000000000000000C1 /* Sources */,
+				DE5CA25000000000000000C2 /* Frameworks */,
+				DE5CA25000000000000000C3 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DescansoWidget;
+			productName = DescansoWidget;
+			productReference = DE5CA25000000000000000A1 /* DescansoWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -112,6 +215,10 @@
 					504EC3031FED79650016851F = {
 						CreatedOnToolsVersion = 9.2;
 						LastSwiftMigration = 1100;
+						ProvisioningStyle = Automatic;
+					};
+					DE5CA25000000000000000D1 = {
+						CreatedOnToolsVersion = 15.0;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -133,6 +240,7 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				DE5CA25000000000000000D1 /* DescansoWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -148,6 +256,14 @@
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
+				DE5CA25000000000000000B4 /* silencio.wav in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DE5CA25000000000000000C3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -160,10 +276,38 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
+				DE5CA25000000000000000B1 /* LiveActivityPlugin.swift in Sources */,
+				DE5CA25000000000000000B2 /* DescansoAttributes.swift in Sources */,
+				DE5CA25000000000000000B3 /* BridgeViewController.swift in Sources */,
+				DE5CA25000000000000000BF /* WidgetBridgePlugin.swift in Sources */,
+				DE5CA25000000000000000B8 /* ExtenderDescansoIntent.swift in Sources */,
+				DE5CA25000000000000000BA /* RestAudioWatcher.swift in Sources */,
+				DE5CA25000000000000000BC /* RestAudioPlugin.swift in Sources */,
+				DE5CA25000000000000000BD /* RestAlertStopper.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DE5CA25000000000000000C1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DE5CA25000000000000000B5 /* DescansoWidgetBundle.swift in Sources */,
+				DE5CA25000000000000000BE /* QueTocaHoyWidget.swift in Sources */,
+				DE5CA25000000000000000B6 /* DescansoAttributes.swift in Sources */,
+				DE5CA25000000000000000B9 /* ExtenderDescansoIntent.swift in Sources */,
+				DE5CA25000000000000000BB /* RestAudioWatcher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		DE5CA25000000000000000D2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DE5CA25000000000000000D1 /* DescansoWidget */;
+			targetProxy = DE5CA25000000000000000D3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		504EC30B1FED79650016851F /* Main.storyboard */ = {
@@ -299,6 +443,7 @@
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
@@ -321,6 +466,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
@@ -333,6 +479,53 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.koku.remindmelater;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		DE5CA25000000000000000F1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = DescansoWidget/DescansoWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DescansoWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.koku.remindmelater.DescansoWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		DE5CA25000000000000000F2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = DescansoWidget/DescansoWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DescansoWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.koku.remindmelater.DescansoWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -355,6 +548,15 @@
 			buildConfigurations = (
 				504EC3171FED79650016851F /* Debug */,
 				504EC3181FED79650016851F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DE5CA25000000000000000F3 /* Build configuration list for PBXNativeTarget "DescansoWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DE5CA25000000000000000F1 /* Debug */,
+				DE5CA25000000000000000F2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
