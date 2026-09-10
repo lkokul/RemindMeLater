@@ -370,4 +370,19 @@
   });
 
   mountLocalRouter('/api/notes', router);
+
+  // El saneador se expone tambien para PINTAR, no solo para guardar.
+  //
+  // Por que hace falta: el modelo era "sanear al ESCRIBIR" y confiar al
+  // pintar (app.js hacia innerHTML = nota.body a pelo). Eso vale mientras
+  // la UNICA forma de meter una fila sea esta ruta, y hay una que no lo
+  // es: importar una copia de seguridad SUSTITUYE el archivo .sqlite
+  // entero (backup.js), asi que sus filas entran crudas sin pasar por
+  // aqui. Probado: un <img src=x onerror="..."> metido asi ejecutaba
+  // codigo al abrir la nota.
+  //
+  // Se expone la MISMA funcion en vez de escribir otra en app.js a
+  // proposito: dos saneadores acaban separandose, y el que se quede corto
+  // es el agujero. Aqui esta la lista blanca buena y ya probada.
+  window.sanearHtmlDeNota = sanitizeNoteBody;
 })();

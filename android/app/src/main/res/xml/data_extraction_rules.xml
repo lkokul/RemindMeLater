@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ sustituyo allowBackup/fullBackupContent por estas reglas.
+     Se declaran las dos cosas (el atributo antiguo Y este archivo) porque
+     Android usa una u otra segun la version del sistema, no las dos.
+
+     Aqui no se excluye "algo": se excluye TODO. Los datos de RemindMeLater
+     no salen del telefono, ni siquiera a la copia de Google ni al pasar de
+     un movil a otro. Quien quiera llevarselos usa la funcion de exportar de
+     la app, que es explicita. Ver SEGURIDAD-Y-PRIVACIDAD.md. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

@@ -20,6 +20,8 @@
 		DE5CA25000000000000000B2 /* DescansoAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A5 /* DescansoAttributes.swift */; };
 		DE5CA25000000000000000B3 /* BridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A6 /* BridgeViewController.swift */; };
 		DE5CA25000000000000000B4 /* silencio.wav in Resources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A7 /* silencio.wav */; };
+		DE5CA25000000000000000D5 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000D0 /* PrivacyInfo.xcprivacy */; };
+		DE5CA25000000000000000D6 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000D4 /* PrivacyInfo.xcprivacy */; };
 		DE5CA25000000000000000B5 /* DescansoWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A2 /* DescansoWidgetBundle.swift */; };
 		DE5CA25000000000000000BE /* QueTocaHoyWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AC /* QueTocaHoyWidget.swift */; };
 		DE5CA25000000000000000C7 /* ResumenDeLaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000C5 /* ResumenDeLaApp.swift */; };
@@ -90,6 +92,8 @@
 		DE5CA25000000000000000A5 /* DescansoAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DescansoAttributes.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A6 /* BridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeViewController.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A7 /* silencio.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = silencio.wav; sourceTree = "<group>"; };
+		DE5CA25000000000000000D0 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		DE5CA25000000000000000D4 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtenderDescansoIntent.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000C9 /* AbrirDesdeControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AbrirDesdeControl.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000AB /* RestAlertStopper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAlertStopper.swift; sourceTree = "<group>"; };
@@ -145,6 +149,7 @@
 				DE5CA25000000000000000C6 /* WidgetsDeLaApp.swift */,
 				DE5CA250000000000000010C /* WidgetsNuevos.swift */,
 				DE5CA250000000000000010A /* CuerpoDelWidget.swift */,
+				DE5CA25000000000000000D4 /* PrivacyInfo.xcprivacy */,
 				DE5CA25000000000000000AF /* DescansoWidget.entitlements */,
 			);
 			path = DescansoWidget;
@@ -171,6 +176,7 @@
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
+				DE5CA25000000000000000D0 /* PrivacyInfo.xcprivacy */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 			);
@@ -273,6 +279,7 @@
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
 				DE5CA25000000000000000B4 /* silencio.wav in Resources */,
+				DE5CA25000000000000000D5 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -280,6 +287,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DE5CA25000000000000000D6 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

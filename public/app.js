@@ -829,16 +829,32 @@ function setAssetImageSrc(img, path) {
   resolveAssetUrl(path).then((url) => { if (url) img.src = url; });
 }
 
-// Prepara el HTML de una nota ANTES de meterlo en el DOM: cambia
-// src="/api/..." por data-asset-src="/api/...". Sin esto, el navegador
-// pide esa ruta en cuanto aparece el <img> (y falla, porque no hay
-// servidor) antes de que hydrateAssetImages llegue a poner la URL
-// blob:. El saneador del backend garantiza que un <img> solo puede
-// llevar src y que empieza por /api/notes/images/, asi que este
-// reemplazo no puede tocar nada mas.
+// Prepara el HTML de una nota ANTES de meterlo en el DOM. Hace DOS cosas,
+// y el orden importa:
+//
+// 1. LO SANEA OTRA VEZ. Antes no se hacia: se confiaba en que la ruta que
+//    guarda la nota ya lo habia limpiado. Esa confianza tiene un agujero
+//    real: importar una copia de seguridad SUSTITUYE el archivo .sqlite
+//    entero (backup.js), asi que sus filas nunca pasan por la ruta que
+//    sanea. Probado: una nota con <img src=x onerror="..."> metida por esa
+//    via ejecutaba codigo al abrirla. La regla buena es sanear donde se
+//    USA el dato, no solo donde se recibe.
+//    Es la MISMA funcion de routes-local/notes.js (expuesta como
+//    window.sanearHtmlDeNota), no una copia: dos saneadores se separan con
+//    el tiempo y el que se quede corto es el agujero.
+// 2. Cambia src="/api/..." por data-asset-src="/api/...". Sin esto, el
+//    navegador pide esa ruta en cuanto aparece el <img> (y falla, porque
+//    no hay servidor) antes de que hydrateAssetImages llegue a poner la
+//    URL blob:. Va DESPUES de sanear, porque el saneador es quien
+//    garantiza que un <img> solo lleva src y que empieza por
+//    /api/notes/images/: al reves estaria trabajando sobre HTML en el que
+//    todavia no se puede confiar.
 function prepareAssetHtmlForDom(html) {
   if (!html) return html;
-  return html.replace(/<img\s+src="(\/api\/notes\/images\/[^"]+)"/gi, '<img data-asset-src="$1"');
+  const limpio = typeof window.sanearHtmlDeNota === 'function'
+    ? window.sanearHtmlDeNota(html)
+    : html;
+  return limpio.replace(/<img\s+src="(\/api\/notes\/images\/[^"]+)"/gi, '<img data-asset-src="$1"');
 }
 
 // Cambia el src de todas las imagenes de un trozo de HTML ya insertado
@@ -1072,10 +1088,20 @@ function buildCalendarEventChip(ev) {
   return chip;
 }
 
+// Escapa texto para meterlo en HTML. OJO CON LAS COMILLAS: textContent
+// -> innerHTML solo convierte < > &, NO las comillas -- y esta funcion se
+// usa tambien DENTRO de atributos entrecomillados (value="...",
+// data-algo="..."), donde una comilla suelta cierra el atributo y deja
+// escribir uno nuevo. Probado: una nota de serie con
+//   " autofocus onfocus="..."
+// se convertia en un onfocus de verdad que se ejecutaba solo. Por eso se
+// escapan las dos comillas a mano: asi la misma funcion vale para texto
+// entre etiquetas Y para atributos, sin tener que acordarse de cual es
+// cual en cada uno de los ~80 sitios que la llaman.
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
-  return div.innerHTML;
+  return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // Las flechas del mes navegan por AÑO en vez de por mes mientras estas

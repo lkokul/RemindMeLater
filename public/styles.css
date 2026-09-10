@@ -297,7 +297,11 @@ button {
    arriba en este archivo) ya es exactamente lo que pide la guia, sin
    brillo ni degradado encima. */
 :root[data-ui-style="registro"] {
-  --font-mono: 'Roboto Mono', 'Courier New', monospace;
+  /* La monoespaciada del SISTEMA: en iPhone/Mac es SF Mono, en Android
+     Roboto Mono (que ya viene instalada) y en Windows Consolas. Antes se
+     bajaba Roboto Mono de Google Fonts en cada arranque: era lo unico que
+     salia del telefono. Ver el comentario de index.html. */
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, 'Roboto Mono', Consolas, 'Courier New', monospace;
 }
 :root[data-ui-style="registro"] button:hover:not(:disabled) {
   border-color: var(--accent);

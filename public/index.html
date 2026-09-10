@@ -11,15 +11,20 @@
 <title>RemindMeLater</title>
 <link rel="stylesheet" href="styles.css" />
 
-<!-- Roboto Mono: SOLO la usa el estilo de interaccion "Registro" (ver
-     --font-mono dentro de :root[data-ui-style="registro"] en styles.css),
-     para las cabeceras de tabla y etiquetas mono/mayusculas que pide esa
-     guia. Cargarla aqui no afecta a los otros 3 estilos -- y si algun dia
-     no hay internet en el primer arranque, la propia pila de --font-mono
-     ya cae en 'Courier New'/monospace del sistema sin romper nada. -->
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<!-- AQUI NO SE CARGA NADA DE INTERNET, Y ES A PROPOSITO.
+     Antes habia tres <link> a Google Fonts (Roboto Mono, solo para el
+     estilo de interaccion "Registro"). Eran lo UNICO de toda la app que
+     salia del telefono: en cada arranque Google recibia la IP y el
+     User-Agent del dispositivo, lo que hacia falsa la frase "tus datos
+     nunca salen de tus dispositivos" y obligaba a declarar un tercero en
+     la ficha de privacidad de las dos tiendas.
+     Se fueron: la variable font-mono usa ahora la pila del sistema, que en
+     un iPhone es SF Mono, la monoespaciada de Apple, que ya viene en el
+     aparato, se ve mejor que Roboto Mono y no cuesta ni una peticion de
+     red. Ver SEGURIDAD-Y-PRIVACIDAD.md.
+     Si algun dia hiciera falta una tipografia que el sistema no trae, se
+     vendoriza el .woff2 dentro de public/ (mismo criterio que sql.js),
+     NUNCA desde un CDN. -->
 
 <!-- El color de la barra de estado y el icono de la app los pone el
      proyecto nativo (ios/ y android/), no la pagina. -->

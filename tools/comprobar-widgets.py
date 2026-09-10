@@ -334,6 +334,72 @@ try:
 except Exception as err:  # noqa: BLE001
     fallos.append(f'no se pudo comprobar el cuerpo del widget: {err}')
 
+# --- 6) manifiestos de privacidad y limpieza de red ------------------
+#
+# PrivacyInfo.xcprivacy es OBLIGATORIO desde el 1 de mayo de 2024 para
+# cualquier app que use "APIs de motivo requerido" (aqui, UserDefaults: el
+# buzon del App Group). Si falta, App Store Connect avisa por correo y
+# acaba rechazando la subida, pero TestFlight interno pasa igual: o sea que
+# se puede perder sin que nada chille durante meses. Esto lo impide.
+#
+# De paso se vigila que no vuelvan los restos del programa
+# cliente-servidor. La app no hace NINGUNA peticion de red, y si alguien
+# vuelve a meter una excepcion de ATS, la copia automatica de Android o un
+# CDN, se entera aqui y no en la revision de Apple.
+# Ver SEGURIDAD-Y-PRIVACIDAD.md.
+
+# Sin los comentarios: el propio Info.plist EXPLICA en un comentario por
+# que ya no lleva esas claves, y buscar el nombre a secas daba un falso
+# positivo contra ese mismo texto.
+def sin_comentarios_xml(txt):
+    return re.sub(r'<!--.*?-->', '', txt, flags=re.S)
+
+for ruta, target in (
+    ('ios/App/App/PrivacyInfo.xcprivacy', 'la app'),
+    ('ios/App/DescansoWidget/PrivacyInfo.xcprivacy', 'el widget'),
+):
+    if not os.path.exists(ruta):
+        fallos.append(f'falta el manifiesto de privacidad de {target} ({ruta})')
+        continue
+    manifiesto = leer(ruta)
+    if 'NSPrivacyAccessedAPICategoryUserDefaults' not in manifiesto:
+        fallos.append(f'el manifiesto de {target} no declara UserDefaults, que '
+                      'es la API de motivo requerido que usa el App Group')
+    if 'CA92.1' not in manifiesto:
+        fallos.append(f'el manifiesto de {target} no trae el motivo CA92.1')
+
+# Y que esten de verdad en una fase de Resources, no solo en el disco: un
+# archivo suelto en la carpeta no viaja dentro del .ipa.
+if s.count('PrivacyInfo.xcprivacy in Resources */,') != 2:
+    fallos.append('esperaba los DOS manifiestos de privacidad en fases de '
+                  'Resources (app y widget): si no, no viajan en el .ipa')
+
+plist_app = sin_comentarios_xml(leer('ios/App/App/Info.plist'))
+if 'NSAllowsArbitraryLoads' in plist_app:
+    fallos.append('vuelve a haber NSAllowsArbitraryLoads en el Info.plist: la '
+                  'app no habla con ningun servidor, esa excepcion solo suma '
+                  'superficie de ataque y preguntas en la revision')
+if 'NSLocalNetworkUsageDescription' in plist_app:
+    fallos.append('vuelve a haber NSLocalNetworkUsageDescription: describe una '
+                  'sincronizacion que esta app ya no hace')
+
+android = sin_comentarios_xml(leer('android/app/src/main/AndroidManifest.xml'))
+if 'android:allowBackup="true"' in android:
+    fallos.append('allowBackup vuelve a estar en true: eso sube la base de '
+                  'datos entera a la copia automatica de Google')
+if 'usesCleartextTraffic="true"' in android:
+    fallos.append('usesCleartextTraffic vuelve a estar en true')
+if not os.path.exists('android/app/src/main/res/xml/data_extraction_rules.xml'):
+    fallos.append('falta data_extraction_rules.xml (Android 12+ ignora '
+                  'allowBackup y mira este archivo)')
+
+indice = sin_comentarios_xml(leer('public/index.html'))
+for cdn in ('fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsdelivr.net',
+            'cdnjs.cloudflare.com', 'unpkg.com'):
+    if cdn in indice:
+        fallos.append(f'index.html vuelve a cargar algo de {cdn}: nada de CDN, '
+                      'se vendoriza dentro de public/ (criterio de sql.js)')
+
 # --- resultado -------------------------------------------------------
 if fallos:
     print('FALLOS:')

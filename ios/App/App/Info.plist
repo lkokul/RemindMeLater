@@ -35,13 +35,20 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-	</dict>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>RemindMeLater se conecta a tu ordenador por la red local (wifi) para sincronizar tu calendario, notas y tareas. Tus datos nunca salen de tus dispositivos.</string>
+	<!-- AQUI NO HAY NI NSAppTransportSecurity NI un texto de permiso de red
+	     local, Y ES A PROPOSITO. Los dos eran restos del programa
+	     cliente-servidor:
+	       * La excepcion de ATS permitia conectarse a cualquier sitio,
+	         incluso por HTTP sin cifrar, para hablar con el servidor del
+	         ordenador. Ya no hay servidor; lo unico que quedaba era
+	         superficie de ataque (si alguien lograra ejecutar codigo en la
+	         webview podria mandarse la base entera a cualquier parte) y una
+	         pregunta segura en la revision de la App Store.
+	       * El texto de red local describia una sincronizacion que la app ya
+	         no hace, o sea que le habria mentido al usuario en el dialogo de
+	         permiso. Sin la clave, iOS ni siquiera pide ese permiso.
+	     La app no hace NINGUNA peticion de red: no cargar nada de fuera es
+	     parte del diseño. Ver SEGURIDAD-Y-PRIVACIDAD.md. -->
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSSupportsLiveActivities</key>
