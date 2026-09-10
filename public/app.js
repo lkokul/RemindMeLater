@@ -17371,7 +17371,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.40.0';
+const APP_VERSION = '0.41.0';
 const APP_VERSION_DATE = '2026-09-10';
 
 function renderAppVersionLine() {
@@ -17437,6 +17437,18 @@ async function init() {
   // ultima (ver public/backup.js) -- sin servidor, la copia es la unica
   // red de seguridad de los datos.
   await initStep(maybeShowBackupReminder);
+
+  // EL WIDGET SE ALIMENTA AL ARRANCAR, aunque no entres al Gimnasio.
+  //
+  // Esto faltaba y era un agujero de verdad: el resumen se rehacia desde
+  // loadGymBlocks()/loadGymRoutines(), y esas SOLO se llaman al abrir el
+  // Gimnasio (carga perezosa). O sea que alguien que abriera la app y se
+  // quedara en el calendario no le mandaba nada al widget nunca, y el
+  // widget se quedaba en "Abre la app" -- que es justo lo que le pasaba a
+  // Koku. Son dos consultas a una base que ya esta en memoria: barato.
+  await initStep(async () => {
+    await Promise.all([loadGymBlocks(), loadGymRoutines()]);
+  });
 
   // Abrir la app TOCANDO EL WIDGET, con la app cerrada del todo: ni
   // 'resume' ni 'visibilitychange' llegan a dispararse en ese caso (la

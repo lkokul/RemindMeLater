@@ -1620,6 +1620,63 @@ parchearlo DESPUÉS de cargar y limpiar la caché perezosa de
 cree el App Group, que el widget aparezca en la galería, y que tocarlo
 arranque el entreno.
 
+### Lo que falló en la PRIMERA prueba real (build #51) y qué se hizo
+
+Koku puso el widget y le salió **"Abre la app"** — o sea, el widget no
+encontraba nada guardado. El toque SÍ abría la app y SÍ sabía que era día
+de descanso, así que la parte de datos y el enlace funcionaban: lo que no
+llegaba era el resumen. Y **el botón del centro de control no hacía
+absolutamente nada**.
+
+Tres cambios, y el orden importa porque el primero es el que de verdad
+enseña dónde está el problema:
+
+**1. Un diagnóstico visible, porque a ciegas no se arregla nada.** En el
+iPhone no hay consola. La cadena tiene tres eslabones (la app escribe / el
+buzón existe / el aviso llega) y no había forma de saber cuál se rompía.
+Ahora Configuración → Este dispositivo tiene una línea con el resultado
+del último aviso y un botón **"Actualizar el widget ahora"**
+(`estadoDelWidget()` en `widget-bridge.js`, `refreshWidgetStatus()` en
+`settings.js`). Distingue el caso importante: **`sin_grupo`** significa
+que `UserDefaults(suiteName:)` devolvió nil, o sea que el App Group no
+llegó en la firma — y eso es un problema de compilación, no de datos.
+Mismo patrón que la línea del aviso de fin de descanso.
+
+**2. Un agujero de verdad, encontrado buscando la causa.** El resumen se
+rehacía desde `loadGymBlocks()`/`loadGymRoutines()`, y esas **solo se
+llaman al abrir el Gimnasio** (carga perezosa). Quien abriera la app y se
+quedara en el calendario NO le mandaba nada al widget nunca. Ahora
+`init()` carga esos dos al arrancar: son dos consultas a una base que ya
+está en memoria.
+
+**3. El botón del centro de control ya no depende del App Group.** Tenía
+un `AppIntent` propio con `openAppWhenRun` que dejaba la marca en el buzón
+compartido — dos defectos: no abría la app, y dependía justo de lo que
+podía estar roto. Ahora usa **`OpenURLIntent`** con la MISMA URL que el
+toque en el widget (`remindmelater://gym-hoy`), así que hay **un solo
+camino de entrada** (SceneDelegate → `UserDefaults.standard` → el
+JavaScript) y funciona aunque el buzón no exista.
+
+**La hipótesis sobre el App Group, para el que retome esto**: el
+workflow **archiva SIN FIRMAR** (`CODE_SIGNING_ALLOWED=NO`, por el motivo
+documentado en el propio archivo) y los entitlements se incrustan AL
+FIRMAR. Es posible que el App Group no sobreviva a ese camino:
+`-exportArchive` re-firma, y si el producto archivado no traía
+entitlements, el resultado puede quedarse sin el grupo **sin dar ningún
+error**. Build verde, app instalada, y `UserDefaults(suiteName:)` a nil.
+
+Por eso el workflow tiene ahora un paso que **abre el `.ipa` ya firmado,
+imprime los entitlements reales de la app y de la extensión, y tira la
+build si al widget le falta el grupo** — antes de subir nada a TestFlight.
+Convierte un fallo silencioso en uno ruidoso, y la próxima ejecución
+resuelve la duda de una vez.
+
+**Red de seguridad en el widget**: la línea temporal pasó de `.never` a
+`.after(medianoche)`. Sigue sin refrescarse por horas (lo que pidió Koku),
+pero con `.never` a secas, si la app NUNCA consigue avisar el widget se
+queda congelado para siempre sin forma de recuperarse. Una relectura al
+día es prácticamente gratis.
+
 **ESTO ES SOLO DE iOS.** Android tiene su propio sistema de widgets
 (`AppWidgetProvider` + `RemoteViews`, nada que ver con WidgetKit) y no se
 ha tocado: sería un trabajo aparte, con su propio puente. La parte de

@@ -14,18 +14,24 @@ import AppIntents
 // resumen pequeño en JSON y esto lo lee. Ver WidgetBridgePlugin.swift en
 // el target de la app, y public/widget-bridge.js del lado JavaScript.
 //
-// NO SE REFRESCA SOLO POR HORAS (decisión de Koku): la política de la
-// línea temporal es .never y quien lo repinta es la app cuando cambia
-// algo (terminas un entreno, tocas el ciclo, cierras la app). Así el
-// consumo es cero y el widget siempre enseña lo último que hiciste.
+// NO SE REFRESCA POR HORAS (decisión de Koku): quien lo repinta es la app
+// cuando cambia algo (terminas un entreno, tocas el ciclo, cierras la
+// app). Solo hay una relectura al día como red de seguridad, por si la
+// app nunca consigue avisar — ver getTimeline.
 
 private let grupoDeLaApp = "group.com.koku.remindmelater"
 private let claveResumen = "resumenGimnasio"
-private let claveEmpezarHoy = "gymPendingStartToday"
 
 // Tocar el widget abre la app aquí. SceneDelegate recoge la URL y deja la
 // marca; el JavaScript la consume al despertar y arranca el entreno.
+// Lo usan LOS DOS caminos: el toque en el widget (.widgetURL) y el botón
+// del centro de control (OpenURLIntent), para que haya una sola entrada.
 private let abrirEntrenoDeHoyURL = URL(string: "remindmelater://gym-hoy")
+
+// La clave "gymPendingStartToday" ya NO se escribe desde aquí: el botón
+// del centro de control pasó a abrir la URL de arriba, así que la marca la
+// deja siempre SceneDelegate. El plugin de la app la sigue leyendo — si
+// algún día se toca, mirar WidgetBridgePlugin.swift antes.
 
 // ---------------------------------------------------------------------
 // El resumen que escribe la app
@@ -148,9 +154,20 @@ struct QueTocaProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<QueTocaEntry>) -> Void) {
-        // .never: no se repinta solo. Lo repinta la app al cambiar algo
-        // (WidgetCenter.reloadTimelines desde WidgetBridgePlugin).
-        completion(Timeline(entries: [QueTocaEntry(date: Date(), resumen: ResumenDelDia.leer())], policy: .never))
+        // Quien lo repinta de verdad es la app al cambiar algo
+        // (WidgetCenter.reloadTimelines desde WidgetBridgePlugin), tal como
+        // pidió Koku: sin refresco por horas.
+        //
+        // Pero .never a secas tiene un filo: si por lo que sea la app NUNCA
+        // consigue avisar, el widget se queda congelado para siempre y no
+        // hay forma de que se recupere solo. Una relectura al día es
+        // prácticamente gratis y sirve de red de seguridad.
+        let mañana = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date().addingTimeInterval(86400)
+        let medianoche = Calendar.current.startOfDay(for: mañana)
+        completion(Timeline(
+            entries: [QueTocaEntry(date: Date(), resumen: ResumenDelDia.leer())],
+            policy: .after(medianoche)
+        ))
     }
 }
 
@@ -333,24 +350,20 @@ struct QueTocaHoyWidget: Widget {
 #if compiler(>=6.0)
 
 @available(iOS 18.0, *)
-struct EmpezarEntrenoIntent: AppIntent {
-    static var title: LocalizedStringResource = "Empezar el entreno de hoy"
-    // Abre la app al pulsarlo. Como no llega ninguna URL por este camino,
-    // la marca se deja en el App Group y el JavaScript la recoge igual
-    // que la del toque en el widget (ver consumirApertura).
-    static var openAppWhenRun: Bool = true
-
-    func perform() async throws -> some IntentResult {
-        UserDefaults(suiteName: grupoDeLaApp)?.set(true, forKey: claveEmpezarHoy)
-        return .result()
-    }
-}
-
-@available(iOS 18.0, *)
 struct EmpezarEntrenoControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "com.koku.remindmelater.EmpezarEntreno") {
-            ControlWidgetButton(action: EmpezarEntrenoIntent()) {
+            // OpenURLIntent, el intent del SISTEMA, en vez de uno propio.
+            //
+            // Antes había aquí un AppIntent nuestro con openAppWhenRun que
+            // dejaba una marca en el App Group. Koku lo probó y NO ABRÍA NI
+            // HACÍA NADA, y además tenía un defecto de diseño: dependía de
+            // que el App Group funcionara, que es justo lo que puede
+            // fallar. Con esto el botón abre la MISMA URL que el toque en
+            // el widget, así que hay un único camino de entrada
+            // (SceneDelegate -> UserDefaults.standard -> el JavaScript) y
+            // el botón funciona aunque el buzón compartido no exista.
+            ControlWidgetButton(action: OpenURLIntent(abrirEntrenoDeHoyURL!)) {
                 Label("Entrenar", systemImage: "dumbbell.fill")
             }
         }

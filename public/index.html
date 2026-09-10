@@ -2655,6 +2655,16 @@
         </div>
         <input type="file" id="backup-import-input" accept="application/json,.json" class="hidden" />
 
+        <!-- Diagnostico del widget. En el iPhone no hay forma de ver la
+             consola, asi que el resultado del ultimo aviso al widget se
+             enseña aqui -- mismo patron que la linea del aviso de fin de
+             descanso. Solo aparece en la app empaquetada. -->
+        <div id="widget-status-block" class="hidden">
+          <h4>Widget "Qué toca hoy"</h4>
+          <p id="widget-status-line" class="hint"></p>
+          <button type="button" id="btn-widget-refresh" class="secondary-btn">Actualizar el widget ahora</button>
+        </div>
+
         <h4>Versión</h4>
         <p id="app-version-line" class="hint"></p>
       </div>

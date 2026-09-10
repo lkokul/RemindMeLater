@@ -121,6 +121,49 @@ jobs:
             -authenticationKeyID "$APPSTORE_KEY_ID" \
             -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID"
 
+      # COMPROBAR LOS ENTITLEMENTS DEL .ipa YA FIRMADO.
+      #
+      # Por que hace falta: se archiva SIN FIRMAR (CODE_SIGNING_ALLOWED=NO,
+      # ver el comentario del paso de archivar) y los entitlements se
+      # incrustan AL FIRMAR. Si el App Group no sobrevive a ese camino, no
+      # hay ningun error: la build sale verde, la app se instala, y
+      # UserDefaults(suiteName:) devuelve nil en el movil -- el widget se
+      # queda con "Abre la app" para siempre. Paso de verdad con la #51.
+      #
+      # Esto lo convierte en un fallo RUIDOSO: se imprimen los entitlements
+      # reales de la app y de la extension, y si al widget le falta el
+      # grupo se tira la build antes de subir nada a TestFlight.
+      - name: Comprobar que el App Group viajo en la firma
+        run: |
+          cd "$RUNNER_TEMP/export"
+          unzip -q App.ipa -d ipa
+          APP="ipa/Payload/App.app"
+          APPEX="$APP/PlugIns/DescansoWidget.appex"
+
+          echo "==== Entitlements de la APP ===="
+          codesign -d --entitlements :- "$APP" 2>/dev/null || true
+          echo "==== Entitlements del WIDGET ===="
+          codesign -d --entitlements :- "$APPEX" 2>/dev/null || true
+
+          falta=0
+          for objetivo in "$APP" "$APPEX"; do
+            if codesign -d --entitlements :- "$objetivo" 2>/dev/null | grep -q "group.com.koku.remindmelater"; then
+              echo "OK: $objetivo lleva el App Group"
+            else
+              echo "FALTA el App Group en $objetivo"
+              falta=1
+            fi
+          done
+
+          if [ "$falta" = "1" ]; then
+            echo ""
+            echo "El App Group NO ha sobrevivido a la firma."
+            echo "Sin el, la app y el widget no comparten buzon y el widget"
+            echo "se queda en blanco. Ver ANDROID-PENDIENTE.md no; ver el"
+            echo "bloque de Widgets en CLAUDE.md."
+            exit 1
+          fi
+
       # Subida con xcrun altool directamente, sin accion de terceros: usa
       # el MISMO mecanismo de autenticacion (clave de API en
       # ~/private_keys/AuthKey_<KEYID>.p8, donde altool la busca sola) que

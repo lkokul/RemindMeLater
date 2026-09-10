@@ -1453,6 +1453,9 @@ function refreshMobileTab() {
   // volumen, el mando del auricular o quitando la notificacion funciona.
   document.getElementById('btn-test-gym-rest-alert').disabled = !nativo;
   refreshGymRestAlertStatus();
+  // El diagnostico del widget se refresca al ENTRAR en el panel, que es
+  // cuando de verdad se va a leer.
+  refreshWidgetStatus();
 
   refreshGymTimeFormatOptions();
   // Animaciones de TODA la app (zoom y deslizar del calendario, pero
@@ -1552,6 +1555,56 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   const panel = document.getElementById('settings-tab-notifications');
   if (panel && !panel.classList.contains('hidden')) refreshGymRestAlertStatus();
+});
+
+// --- Diagnostico del widget "Que toca hoy" ---------------------------
+// En el iPhone no se puede ver la consola. Cuando el widget se quedo en
+// "Abre la app" no habia forma de saber en cual de los tres sitios se
+// rompia la cadena: la app no escribe / el buzon compartido no existe /
+// el aviso no llega. Esta linea lo dice.
+function refreshWidgetStatus() {
+  const bloque = document.getElementById('widget-status-block');
+  const linea = document.getElementById('widget-status-line');
+  if (!bloque || !linea) return;
+  // Fuera de la app empaquetada el widget no existe: no se enseña nada.
+  const cap = window.Capacitor;
+  const nativo = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+  bloque.classList.toggle('hidden', !nativo);
+  if (!nativo) return;
+
+  const estado = typeof estadoDelWidget === 'function' ? estadoDelWidget() : null;
+  if (!estado) {
+    linea.textContent = 'Todavía no se le ha mandado nada al widget en esta sesión.';
+    return;
+  }
+  const hora = new Date(estado.cuando).toLocaleTimeString();
+  if (estado.ok) {
+    const r = estado.resumen || {};
+    const que = !r.hayCiclo ? 'sin ciclo' : (r.esDescanso ? 'descanso' : (r.nombre || 'sin nombre'));
+    linea.textContent = `Actualizado a las ${hora}. Le has mandado: ${que}` +
+      (r.hayCiclo && r.total ? ` (día ${r.posicion} de ${r.total}).` : '.');
+    return;
+  }
+  // Los motivos, explicados: "sin_grupo" es EL importante, y significa que
+  // la app y el widget no comparten buzon (el App Group no llego en la
+  // firma). Sin eso no hay nada que hacer del lado del JavaScript.
+  const explicacion = estado.motivo === 'sin_grupo'
+    ? 'la app y el widget no comparten el buzón (App Group). Es un problema de la compilación, no de los datos.'
+    : (estado.motivo === 'sin_plugin' ? 'no se encontró el puente nativo.' : estado.motivo);
+  linea.textContent = `NO se pudo actualizar (${hora}): ${explicacion}`;
+}
+
+document.getElementById('btn-widget-refresh').addEventListener('click', async () => {
+  const linea = document.getElementById('widget-status-line');
+  if (linea) linea.textContent = 'Mandando...';
+  // Los bloques y los dias hacen falta para saber que toca hoy: si no se
+  // ha entrado nunca al Gimnasio en esta sesion, no estan cargados.
+  try {
+    if (typeof loadGymBlocks === 'function') await loadGymBlocks();
+    if (typeof loadGymRoutines === 'function') await loadGymRoutines();
+  } catch { /* si falla la carga, se manda lo que haya */ }
+  if (typeof actualizarWidgetDelDia === 'function') await actualizarWidgetDelDia();
+  refreshWidgetStatus();
 });
 
 document.getElementById('btn-test-gym-rest-alert').addEventListener('click', async () => {
