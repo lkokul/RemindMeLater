@@ -655,10 +655,22 @@
           <span class="field-label">Músculos secundarios (opcional)</span>
           <div id="gym-exercise-secondary-field" class="gym-secondary-chips"></div>
         </div>
-        <label>
-          Material (opcional)
-          <input type="text" id="gym-exercise-equipment" placeholder="Ej. Barra, Mancuernas" />
-        </label>
+
+        <!-- MATERIAL, de uno a varios (peticion de Koku). Los que ya
+             conoces salen como chips para ponerlos de un toque, y el
+             campo de abajo deja escribir uno nuevo -- que a partir de
+             entonces aparece como chip en TODOS los ejercicios, que es
+             justo lo que pidio ("ese material se añada a mi lista de
+             default, así puedo añadirlo rápido si se repite"). Ver
+             gymMaterialesConocidos() en app.js. -->
+        <div class="field-label-block">
+          <span class="field-label">Material (opcional)</span>
+          <div id="gym-exercise-equipment-chips" class="gym-secondary-chips"></div>
+          <div class="gym-material-add">
+            <input type="text" id="gym-exercise-equipment-new" placeholder="Añadir otro material" />
+            <button type="button" id="btn-gym-exercise-equipment-add" class="secondary-btn">Añadir</button>
+          </div>
+        </div>
         <!-- Como sueles hacer ESTE ejercicio (peticion de Koku): al
              meterlo en un dia, estos tres llegan ya rellenos y no hay
              que escribirlos otra vez. Son un punto de partida, no la
@@ -691,6 +703,15 @@
           <input type="checkbox" id="gym-exercise-unilateral" />
           Ejercicio unilateral (un lado cada vez)
         </label>
+        <!-- ASISTIDO: el peso que apuntas es la AYUDA que te quitas
+             (banda elastica, maquina de dominadas asistidas), asi que
+             va en negativo y progresar es que el numero SUBA. Ver el
+             bloque "EJERCICIOS ASISTIDOS" en app.js. -->
+        <label class="checkbox-row">
+          <input type="checkbox" id="gym-exercise-assisted" />
+          Ejercicio asistido (el peso es la ayuda, en negativo)
+        </label>
+        <p class="hint" id="gym-exercise-assisted-hint">Para dominadas con banda o máquina asistida: apunta −20 kg, luego −18… y al pasar de 0, peso añadido. No suma volumen, pero sí cuenta como serie.</p>
         <div id="gym-exercise-unilateral-extra" class="gym-unilateral-extra hidden">
           <label class="checkbox-row">
             <input type="checkbox" id="gym-exercise-sides-separately" />
@@ -939,7 +960,14 @@
                  rechaza dejando el campo vacio sin avisar. Ademas step="0.5"
                  daba por invalido un 16,3. Lo que se escribe lo normaliza
                  gymNormalizarPeso() al leerlo. -->
-            <input type="text" id="gym-set-end-weight" inputmode="decimal" />
+            <span class="gym-peso-con-signo">
+              <input type="text" id="gym-set-end-weight" inputmode="decimal" />
+              <!-- El ± solo se ve en los ejercicios ASISTIDOS: el teclado
+                   decimal del iPhone no tiene tecla menos, asi que sin
+                   esto no habria forma de escribir -20 en el movil. Lo
+                   ensena/esconde refreshGymSetEndSigno() en app.js. -->
+              <button type="button" id="btn-gym-set-end-signo" class="gym-signo-btn hidden" data-signo-peso aria-label="Cambiar el signo del peso" title="Cambiar entre ayuda (−) y peso añadido (+)">±</button>
+            </span>
         </label>
         <label class="gym-set-field">
           <span>Repeticiones</span>

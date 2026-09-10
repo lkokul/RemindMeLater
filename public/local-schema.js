@@ -179,6 +179,11 @@ function applyLocalSchema(db) {
       -- registra como su propia serie (gym_sets.side), y entre lado y
       -- lado corre un descanso corto propio (side_rest_seconds).
       unilateral INTEGER NOT NULL DEFAULT 0,
+      -- ASISTIDO: el peso apuntado es la AYUDA que te quitas (banda
+      -- elastica, maquina de dominadas asistidas), asi que va en
+      -- NEGATIVO y progresar es que suba: -20, -18, -12... y al pasar
+      -- de 0 sigue la misma escala con peso colgado (+5).
+      assisted INTEGER NOT NULL DEFAULT 0,
       count_sides_separately INTEGER NOT NULL DEFAULT 0,
       side_rest_seconds INTEGER,
       -- Configuracion POR DEFECTO del ejercicio (peticion de Koku): las
@@ -1692,6 +1697,16 @@ function applyLocalSchema(db) {
   // Fase 6 (mapa de musculos): grupos secundarios del ejercicio.
   if (!gymExerciseColumns.includes('secondary_muscles')) {
     db.exec('ALTER TABLE gym_exercises ADD COLUMN secondary_muscles TEXT');
+  }
+  // EJERCICIO ASISTIDO (peticion de Koku): dominadas con banda elastica,
+  // maquina de dominadas asistidas, fondos asistidos... En estos el peso
+  // que apuntas es la AYUDA, asi que va en NEGATIVO y progresar es que
+  // el numero SUBA: -20 kg, luego -18, luego -12... y cuando llegas a 0
+  // y lo pasas (+5 kg colgados), sigue siendo el mismo ejercicio con la
+  // misma escala. Tal cual lo describio: "simplemente es un ejercicio
+  // normal solo que la base no es 0 kg".
+  if (!gymExerciseColumns.includes('assisted')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN assisted INTEGER NOT NULL DEFAULT 0');
   }
   // Configuracion por defecto del ejercicio (series/reps/descanso). Se
   // quedan a NULL en lo que ya existe, que es justo lo que se quiere:

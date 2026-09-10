@@ -4929,3 +4929,26 @@ body.gym-rest-push #settings-modal .settings-card {
   font-size: 0.82rem;
   color: color-mix(in srgb, var(--surface-text) 68%, var(--surface));
 }
+
+/* Anadir un material escrito a mano en la ficha del ejercicio: campo +
+   boton en una fila, con el campo comiendose el hueco que sobra. */
+.gym-material-add { display: flex; gap: 0.5rem; margin-top: 0.45rem; }
+.gym-material-add input { flex: 1; min-width: 0; }
+.gym-material-add button { flex-shrink: 0; }
+
+/* El campo de peso con su boton de signo al lado (solo en ejercicios
+   asistidos). El teclado decimal del iPhone no trae tecla menos, asi que
+   este boton es la UNICA forma de escribir -20 en el movil. */
+.gym-peso-con-signo { display: flex; align-items: stretch; gap: 0.35rem; }
+.gym-peso-con-signo input { flex: 1; min-width: 0; }
+.gym-signo-btn {
+  flex-shrink: 0;
+  width: 2.2rem;
+  padding: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}

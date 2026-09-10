@@ -8871,17 +8871,120 @@ function gymNormalizarPeso(texto) {
   return `${limpio.slice(0, i).replace(/[.\s]/g, '')}.${limpio.slice(i + 1)}`;
 }
 
-function gymWeightDisplayToKg(displayValue) {
+// ---------------------------------------------------------------------
+// EJERCICIOS ASISTIDOS
+//
+// Peticion de Koku: dominadas con banda elastica, maquina de dominadas
+// asistidas, fondos asistidos... Ahi no anades peso, te QUITAS: "yo digo
+// asistido en -20 kg, la siguiente -18 kg... llegara un punto que te
+// dire 5 kg, entonces simplemente es un ejercicio normal solo que la
+// base no es 0 kg".
+//
+// Por eso NO es un campo aparte de "ayuda": es el mismo peso de siempre,
+// pero con signo. La escala es continua (-20 -> -18 -> 0 -> +5) y
+// progresar es que el numero SUBA. Se marca por EJERCICIO, en su ficha.
+//
+// Lo unico que cambia de verdad es el VOLUMEN: un asistido no suma kilos
+// movidos (ver el porque en routes-local/gymSessions.js). Las SERIES si
+// cuentan en todo lo demas -- racha, heatmap, mapa de musculos.
+function gymEjercicioEsAsistido(exerciseId) {
+  if (exerciseId === null || exerciseId === undefined) return false;
+  const ex = state.gymExercises.find((e) => e.id === Number(exerciseId));
+  return !!(ex && ex.assisted);
+}
+
+// exerciseId es opcional: sin el se comporta como siempre (nada de
+// negativos). Los cuatro sitios que leen un peso escrito a mano sí saben
+// de que ejercicio es, y se lo pasan.
+function gymWeightDisplayToKg(displayValue, exerciseId) {
   if (displayValue === '' || displayValue === null || displayValue === undefined) return null;
   const num = Number(gymNormalizarPeso(displayValue));
   if (!Number.isFinite(num)) return null;
-  // Un peso negativo no existe. Antes lo frenaba el min="0" del campo de
-  // numero; al pasar a texto ese freno se fue, asi que se para aqui. Se
-  // trata como "no apunte peso" (null), que es un estado que la app ya
-  // maneja en todas partes, en vez de guardar un -5 que luego restaria
-  // volumen en las graficas.
-  if (num < 0) return null;
+  // En un ejercicio NORMAL un peso negativo no existe. Antes lo frenaba
+  // el min="0" del campo de numero; al pasar a texto ese freno se fue,
+  // asi que se para aqui. Se trata como "no apunte peso" (null), que es
+  // un estado que la app ya maneja, en vez de guardar un -5 que luego
+  // restaria volumen en las graficas.
+  //
+  // En uno ASISTIDO el negativo es justo el dato, asi que pasa.
+  if (num < 0 && !gymEjercicioEsAsistido(exerciseId)) return null;
   return getGymWeightUnit() === 'lb' ? num / KG_TO_LB : num;
+}
+
+// EL BOTON DE SIGNO (±) DE LOS EJERCICIOS ASISTIDOS.
+//
+// Hace falta por una razon muy concreta: el teclado DECIMAL del iPhone
+// (inputmode="decimal", que es el que usan todos los campos de peso
+// desde que se admiten los 16,3 kg) NO TIENE TECLA MENOS. Sin este
+// boton, en el movil seria imposible escribir -20.
+//
+// Es un boton y no volver al teclado completo a proposito: el teclado
+// completo obliga a buscar el numero entre las letras en cada serie, y
+// el signo se cambia una vez por ejercicio, no en cada tecla. Mismo
+// criterio que los botones AM/PM del reloj de 12 horas.
+//
+// Solo se pinta en los ejercicios marcados como asistidos: en el resto
+// un peso negativo no significa nada y el boton solo estorbaria.
+function gymBotonDeSignoHtml(asistido) {
+  if (!asistido) return '';
+  return '<button type="button" class="gym-signo-btn" data-signo-peso aria-label="Cambiar el signo del peso" title="Cambiar entre ayuda (−) y peso añadido (+)">±</button>';
+}
+
+// Un unico listener para todos: los campos de peso se repintan
+// constantemente (cada cambio de serie rehace su fila), asi que
+// engancharlo a cada boton al crearlo seria enganchar y desenganchar
+// cientos de veces. Delegado en el documento se pone una sola vez.
+document.addEventListener('click', (e) => {
+  const boton = e.target.closest('[data-signo-peso]');
+  if (!boton) return;
+  const campo = boton.parentElement && boton.parentElement.querySelector('input');
+  if (!campo) return;
+  const texto = String(campo.value || '').trim();
+  // Con el campo vacio, el signo arranca el numero: escribes "-" y
+  // luego tecleas 20. Es lo que se espera al tocarlo antes de escribir.
+  if (texto === '' || texto === '-') campo.value = texto === '-' ? '' : '-';
+  else campo.value = texto.startsWith('-') ? texto.slice(1) : `-${texto}`;
+  // Un 'input' de mentira para que lo oiga quien este escuchando el
+  // campo (el editor de series guarda segun se escribe).
+  campo.dispatchEvent(new Event('input', { bubbles: true }));
+  campo.focus();
+});
+
+// EL MATERIAL, DE UNO A VARIOS (peticion de Koku: "que me permita añadir
+// varios materiales, no sólo 1", y que lo que escriba se guarde para
+// reutilizarlo). Viaja siempre como lista; esto lo tolera todo (lista,
+// texto suelto, texto con comas, nada) porque en la base puede quedar
+// cualquiera de esas formas de versiones anteriores.
+function gymMaterialLista(valor) {
+  if (Array.isArray(valor)) return valor.map((x) => String(x || '').trim()).filter(Boolean);
+  if (!valor) return [];
+  return String(valor).split(',').map((x) => x.trim()).filter(Boolean);
+}
+
+function gymMaterialTexto(valor) {
+  return gymMaterialLista(valor).join(' · ');
+}
+
+// La lista que se ofrece al elegir material: unos cuantos de fabrica
+// (para que un usuario nuevo no mire un hueco vacio) mas TODOS los que
+// ya hayas usado en cualquier ejercicio, que es lo que pidio -- escribes
+// uno nuevo y a partir de ahi lo tienes a un toque en los demas.
+const GYM_MATERIAL_POR_DEFECTO = [
+  'Barra', 'Mancuernas', 'Máquina', 'Polea', 'Peso corporal',
+  'Banda elástica', 'Kettlebell', 'Banco', 'Disco', 'Barra Z',
+  'TRX', 'Balón medicinal', 'Colchoneta', 'Cinta', 'Otro',
+];
+
+function gymMaterialesConocidos() {
+  const vistos = new Map(); // en minusculas -> como se escribio la 1a vez
+  const anadir = (m) => {
+    const t = String(m || '').trim();
+    if (t === '') return;
+    if (!vistos.has(t.toLowerCase())) vistos.set(t.toLowerCase(), t);
+  };
+  GYM_MATERIAL_POR_DEFECTO.forEach(anadir);
+  (state.gymExercises || []).forEach((ex) => gymMaterialLista(ex.equipment).forEach(anadir));
+  return [...vistos.values()];
 }
 
 // --- Taxonomia de grupos musculares (Fase 2 del rediseno) -------------
@@ -8974,6 +9077,30 @@ function gymNormalizarBusqueda(texto) {
   return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+// TODO lo que se puede escribir para encontrar un ejercicio: su nombre,
+// el musculo principal, LOS SECUNDARIOS y sus materiales.
+//
+// Los secundarios los pidio Koku al decir "hay veces que músculo
+// principal no hay uno solo, tenlo en cuenta también": un remo lleva
+// dorsales de principal y biceps de secundario, y hasta ahora escribir
+// "biceps" no lo sacaba. El material igual, ahora que puede haber varios.
+//
+// Un unico sitio para las tres listas que buscan ejercicios (la de la
+// pestana Plan, la del buscador de la libreria y las opciones de los
+// desplegables), para que las tres encuentren exactamente lo mismo.
+function gymTextoBuscableDeEjercicio(ex) {
+  if (!ex) return '';
+  const secundarios = (Array.isArray(ex.secondaryMuscles) ? ex.secondaryMuscles : [])
+    .map((id) => gymMuscleGroupLabel(id))
+    .filter(Boolean);
+  return [
+    ex.name,
+    gymMuscleGroupLabel(ex.muscleGroup),
+    ...secundarios,
+    ...gymMaterialLista(ex.equipment),
+  ].filter(Boolean).join(' ');
+}
+
 function renderGymExercisesList() {
   const list = document.getElementById('gym-exercises-list');
   list.innerHTML = '';
@@ -9005,7 +9132,7 @@ function renderGymExercisesList() {
   const visibles = q === ''
     ? state.gymExercises
     : state.gymExercises.filter((ex) => gymNormalizarBusqueda(
-        `${ex.name} ${gymMuscleGroupLabel(ex.muscleGroup) || ''} ${ex.equipment || ''}`
+        gymTextoBuscableDeEjercicio(ex)
       ).includes(q));
 
   if (visibles.length === 0) {
@@ -9370,6 +9497,12 @@ function gymSetSegments(set) {
 // ajustar. Es lo que se guarda y lo que hay que usar para cualquier cosa
 // que quiera saber cuanto peso se movio de verdad.
 function gymSetVolumeRealKg(set) {
+  // Un ejercicio ASISTIDO no suma kilos movidos: su peso es la ayuda que
+  // te quitas y va en negativo, asi que sumarlo restaria del total. Ver
+  // el bloque "EJERCICIOS ASISTIDOS" mas arriba. La misma regla esta en
+  // el SQL de /summary y /progress, para que cliente y base cuenten
+  // igual.
+  if (gymEjercicioEsAsistido(set.exerciseId)) return 0;
   let total = (Number(set.reps) || 0) * (Number(set.weightKg) || 0);
   for (const seg of gymSetSegments(set)) {
     total += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
@@ -10185,13 +10318,78 @@ function refreshGymExerciseDefaultRestPreview() {
 }
 document.getElementById('gym-exercise-default-rest').addEventListener('input', refreshGymExerciseDefaultRestPreview);
 
+// LOS CHIPS DE MATERIAL. Mismo patron visual que los musculos
+// secundarios, pero con una diferencia: aqui la lista no es fija, crece
+// con lo que escribas. Un material nuevo se guarda en su ejercicio y a
+// partir de ahi gymMaterialesConocidos() lo saca como chip en todos los
+// demas -- que es lo que pidio Koku ("así puedo añadirlo rápido si se
+// repite en el resto de ejercicios").
+//
+// El orden es: primero los que lleva ESTE ejercicio (para verlos de un
+// vistazo), y detras el resto de los conocidos.
+let gymExerciseMaterialSel = [];
+
+function renderGymExerciseMaterialChips() {
+  const cont = document.getElementById('gym-exercise-equipment-chips');
+  if (!cont) return;
+  cont.innerHTML = '';
+  const puestos = gymExerciseMaterialSel.map((m) => m.toLowerCase());
+  const conocidos = gymMaterialesConocidos();
+  // Lo que lleve el ejercicio y no este entre los conocidos (por
+  // ejemplo, si se borro de todos los demas) tiene que salir igual: si
+  // no, se perderia al guardar sin haberlo tocado nadie.
+  const todos = [
+    ...gymExerciseMaterialSel,
+    ...conocidos.filter((m) => !puestos.includes(m.toLowerCase())),
+  ];
+  todos.forEach((material) => {
+    const activo = puestos.includes(material.toLowerCase());
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'gym-secondary-chip' + (activo ? ' active' : '');
+    chip.textContent = material;
+    chip.addEventListener('click', () => {
+      gymExerciseMaterialSel = activo
+        ? gymExerciseMaterialSel.filter((m) => m.toLowerCase() !== material.toLowerCase())
+        : [...gymExerciseMaterialSel, material];
+      renderGymExerciseMaterialChips();
+    });
+    cont.appendChild(chip);
+  });
+}
+
+function gymAnadirMaterialEscrito() {
+  const campo = document.getElementById('gym-exercise-equipment-new');
+  const texto = campo.value.trim();
+  if (texto === '') return;
+  // Sin repetidos y sin distinguir mayusculas: escribir "barra" teniendo
+  // ya "Barra" no crea un segundo material casi igual.
+  if (!gymExerciseMaterialSel.some((m) => m.toLowerCase() === texto.toLowerCase())) {
+    gymExerciseMaterialSel.push(texto);
+  }
+  campo.value = '';
+  renderGymExerciseMaterialChips();
+}
+
+document.getElementById('btn-gym-exercise-equipment-add').addEventListener('click', gymAnadirMaterialEscrito);
+// Intro en ese campo anade el material, NO envia el formulario entero
+// (que guardaria el ejercicio a medio escribir).
+document.getElementById('gym-exercise-equipment-new').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  gymAnadirMaterialEscrito();
+});
+
 function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
   document.getElementById('gym-exercise-id').value = exercise ? exercise.id : '';
   document.getElementById('gym-exercise-name').value = exercise ? exercise.name : '';
-  document.getElementById('gym-exercise-equipment').value = exercise ? exercise.equipment || '' : '';
+  gymExerciseMaterialSel = gymMaterialLista(exercise ? exercise.equipment : null);
+  document.getElementById('gym-exercise-equipment-new').value = '';
+  renderGymExerciseMaterialChips();
   document.getElementById('gym-exercise-notes').value = exercise ? exercise.notes || '' : '';
   document.getElementById('gym-exercise-unilateral').checked = !!(exercise && exercise.unilateral);
+  document.getElementById('gym-exercise-assisted').checked = !!(exercise && exercise.assisted);
   document.getElementById('gym-exercise-sides-separately').checked = !!(exercise && exercise.countSidesSeparately);
   document.getElementById('gym-exercise-side-rest').value = exercise && exercise.sideRestSeconds != null ? exercise.sideRestSeconds : '';
   document.getElementById('gym-exercise-default-sets').value = exercise && exercise.defaultSets != null ? exercise.defaultSets : '';
@@ -10228,10 +10426,11 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
   const payload = {
     name: document.getElementById('gym-exercise-name').value,
     muscleGroup: gymExerciseMuscleField.getValue(),
-    equipment: document.getElementById('gym-exercise-equipment').value,
+    equipment: [...gymExerciseMaterialSel],
     secondaryMuscles: [...gymExerciseSecondarySel],
     notes: document.getElementById('gym-exercise-notes').value,
     unilateral: document.getElementById('gym-exercise-unilateral').checked,
+    assisted: document.getElementById('gym-exercise-assisted').checked,
     countSidesSeparately: document.getElementById('gym-exercise-sides-separately').checked,
     sideRestSeconds: document.getElementById('gym-exercise-side-rest').value,
     defaultSets: document.getElementById('gym-exercise-default-sets').value,
@@ -10335,7 +10534,7 @@ function renderGymLibraryMine() {
   const mios = state.gymExercises.filter((ex) => {
     if (yaEnElEntreno.has(ex.id)) return false;
     if (!search) return true;
-    const texto = [ex.name, gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' ');
+    const texto = gymTextoBuscableDeEjercicio(ex);
     return gymNormalizeSearch(texto).includes(search);
   });
 
@@ -10345,7 +10544,7 @@ function renderGymLibraryMine() {
     return;
   }
   mios.slice(0, 40).forEach((ex) => {
-    const meta = [gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' · ');
+    const meta = [gymMuscleGroupLabel(ex.muscleGroup), gymMaterialTexto(ex.equipment)].filter(Boolean).join(' · ');
     const row = document.createElement('div');
     row.className = 'gym-list-item';
     row.innerHTML = `
@@ -12032,7 +12231,7 @@ function renderGymExerciseEditSets() {
         <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar esta serie">✕</button>
       </div>
       <div class="gym-set-segment-fields">
-        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="text" inputmode="decimal" data-set-field="weightDisplay" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><span class="gym-peso-con-signo"><input type="text" inputmode="decimal" data-set-field="weightDisplay" value="${escapeHtml(String(set.weightDisplay ?? ''))}" />${gymBotonDeSignoHtml(gymEjercicioEsAsistido(ex.exerciseId))}</span></label>
         <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-set-field="reps" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
       </div>
       <label class="gym-set-segment-field"><span>Nota de la serie</span><input type="text" data-set-field="note" value="${escapeHtml(String(set.note ?? ''))}" /></label>
@@ -12076,6 +12275,7 @@ function renderGymExerciseEditSets() {
     const pintar = () => montarEditorDeTramos(editor, set.segments, {
       pesoMadre: gymNormalizarPeso(bloque.querySelector('[data-set-field="weightDisplay"]').value) || '',
       alQuitar: () => pintar(),
+      exerciseId: ex.exerciseId,
     });
     pintar();
     bloque.querySelectorAll('[data-add-seg]').forEach((btn) => {
@@ -12153,6 +12353,12 @@ function gymVolcarSerieEnFormulario(set, sugerencia) {
   wEl.placeholder = sugerencia && sugerencia.weightDisplay ? String(sugerencia.weightDisplay) : '';
   rEl.placeholder = sugerencia && sugerencia.reps ? String(sugerencia.reps) : '';
   document.getElementById('gym-set-end-note').value = set.note || '';
+  // El ± solo en los asistidos (ver gymBotonDeSignoHtml): en el resto un
+  // peso negativo no significa nada y el boton solo estorbaria.
+  document.getElementById('btn-gym-set-end-signo').classList.toggle(
+    'hidden',
+    !gymEjercicioEsAsistido(gymLiveSession && gymLiveSession.activeSet ? gymLiveSession.activeSet.exerciseId : null),
+  );
   gymSetEndSegments = (set.segments || []).map((seg) => ({ ...seg }));
   renderGymSetEndSegments();
   gymSetEndFailure = !!set.failure;
@@ -12284,7 +12490,10 @@ function gymPesoMadreDeTramos() {
 // `segmentos` se modifica EN EL SITIO (es el array del sitio que lo
 // llama); `pesoMadre` es la sugerencia gris de partida, que en el
 // entreno sale del campo de peso y en el historial de la fila.
-function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
+function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar, exerciseId } = {}) {
+  // Los tramos son del MISMO ejercicio que su serie madre, asi que
+  // heredan lo de "asistido" (y con ello el boton de signo).
+  const asistidoDelEditor = gymEjercicioEsAsistido(exerciseId);
   cont.innerHTML = '';
   const unit = getGymWeightUnitLabel();
   // El peso que se propone en cada tramo: en un rest-pause es SIEMPRE el
@@ -12314,7 +12523,7 @@ function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
         ${seg.kind === 'restpause'
           ? `<label class="gym-set-segment-field"><span>Pausa (s)</span><input type="number" inputmode="numeric" min="0" data-seg-field="pauseSeconds" value="${escapeHtml(String(seg.pauseSeconds ?? ''))}" /></label>`
           : ''}
-        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="text" inputmode="decimal" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><span class="gym-peso-con-signo"><input type="text" inputmode="decimal" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" />${gymBotonDeSignoHtml(asistidoDelEditor)}</span></label>
         <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-seg-field="reps" value="${escapeHtml(String(seg.reps ?? ''))}" /></label>
       </div>
     `;
@@ -12324,7 +12533,7 @@ function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
     row.querySelector('[data-seg-remove]').addEventListener('click', () => {
       segmentos.splice(i, 1);
       if (alQuitar) alQuitar();
-      else montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar });
+      else montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar, exerciseId });
     });
     cont.appendChild(row);
     pesoAnterior = (seg.weightDisplay !== '' && seg.weightDisplay != null) ? seg.weightDisplay : sugerencia;
@@ -12335,7 +12544,13 @@ function renderGymSetEndSegments() {
   montarEditorDeTramos(
     document.getElementById('gym-set-end-segments'),
     gymSetEndSegments,
-    { pesoMadre: gymPesoMadreDeTramos(), alQuitar: renderGymSetEndSegments },
+    {
+      pesoMadre: gymPesoMadreDeTramos(),
+      alQuitar: renderGymSetEndSegments,
+      exerciseId: gymLiveSession && gymLiveSession.activeSet
+        ? gymLiveSession.activeSet.exerciseId
+        : null,
+    },
   );
 }
 
@@ -12904,13 +13119,13 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
     if (ex.note && ex.note.trim()) exerciseNotes[ex.exerciseId] = ex.note.trim();
     for (const set of ex.sets) {
       if (!set.done && set.reps === '' && set.weightDisplay === '') continue;
-      const weightKg = gymWeightDisplayToKg(set.weightDisplay);
+      const weightKg = gymWeightDisplayToKg(set.weightDisplay, ex.exerciseId);
       // Tramos de una serie alargada: el peso viaja en kg como el de la
       // serie madre (la libra es solo de presentacion, ver el esquema).
       const segments = (set.segments || []).map((seg) => ({
         kind: seg.kind,
         reps: seg.reps,
-        weightKg: gymWeightDisplayToKg(seg.weightDisplay),
+        weightKg: gymWeightDisplayToKg(seg.weightDisplay, ex.exerciseId),
         pauseSeconds: seg.pauseSeconds,
       })).filter((seg) => Number(seg.reps) > 0);
       sets.push({
@@ -13467,7 +13682,7 @@ function gymExerciseSelectOptions() {
   return state.gymExercises.map((ex) => ({
     value: String(ex.id),
     label: ex.name,
-    keywords: [gymMuscleGroupLabel(ex.muscleGroup) || '', ex.equipment || ''].filter(Boolean).join(' '),
+    keywords: gymTextoBuscableDeEjercicio(ex),
   }));
 }
 
@@ -13901,7 +14116,7 @@ function renderGymSessionExercisesField() {
           <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar serie">✕</button>
         </div>
         <div class="gym-set-segment-fields">
-          <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><input type="text" inputmode="decimal" data-field="weight" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
+          <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><span class="gym-peso-con-signo"><input type="text" inputmode="decimal" data-field="weight" value="${escapeHtml(String(set.weightDisplay ?? ''))}" />${gymBotonDeSignoHtml(gymEjercicioEsAsistido(exRow.exerciseId))}</span></label>
           <label class="gym-set-segment-field"><span>Reps</span><input type="number" data-field="reps" min="0" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
           <!-- El "+60s" va PEGADO al descanso, no a la duracion: es
                descanso extra que se anadio con el boton +30s, y colgando
@@ -13931,6 +14146,7 @@ function renderGymSessionExercisesField() {
       const pintarTramos = () => montarEditorDeTramos(editor, set.segments, {
         pesoMadre: gymNormalizarPeso(bloqueSerie.querySelector('[data-field="weight"]').value) || '',
         alQuitar: () => pintarTramos(),
+        exerciseId: exRow.exerciseId,
       });
       // El LADO, solo en los ejercicios que se cuentan por lados. Aqui
       // faltaba del todo: apuntando una sesion a mano no habia forma de
@@ -14113,7 +14329,7 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
       sets.push({
         exerciseId: exRow.exerciseId,
         reps: set.reps,
-        weightKg: gymWeightDisplayToKg(set.weightDisplay),
+        weightKg: gymWeightDisplayToKg(set.weightDisplay, exRow.exerciseId),
         rpe: exRow.rpe,
         restSeconds: set.restSeconds,
         extraRestSeconds: set.extraRestSeconds ?? null,
@@ -14128,7 +14344,7 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         ).map((seg) => ({
           kind: seg.kind,
           reps: seg.reps,
-          weightKg: gymWeightDisplayToKg(seg.weightDisplay),
+          weightKg: gymWeightDisplayToKg(seg.weightDisplay, exRow.exerciseId),
           pauseSeconds: seg.pauseSeconds,
         })),
         setType: set.setType ?? null,
@@ -14575,12 +14791,28 @@ function renderGymPRs() {
       // primera, sobre todo cuando empiezas y mejoras la tecnica").
       for (const tramo of gymSetConTramos(set)) {
         if (!byExercise.has(tramo.exerciseId)) {
-          byExercise.set(tramo.exerciseId, { name: tramo.exerciseName, bestWeightKg: 0, best1RM: 0, bestVolumeKg: 0 });
+          // En un ASISTIDO el mejor peso puede ser negativo (-12 kg es
+          // mejor que -20), asi que el punto de partida no puede ser 0:
+          // con 0 nunca lo superaria nada. null = "todavia no hay".
+          byExercise.set(tramo.exerciseId, {
+            name: tramo.exerciseName,
+            asistido: gymEjercicioEsAsistido(tramo.exerciseId),
+            bestWeightKg: null,
+            best1RM: 0,
+            bestVolumeKg: 0,
+          });
         }
         const pr = byExercise.get(tramo.exerciseId);
-        if (tramo.weightKg > pr.bestWeightKg) pr.bestWeightKg = tramo.weightKg;
-        if (tramo.weightKg > 0 && tramo.reps >= 1 && tramo.reps <= 12) {
-          const est = gymEpley1RM(tramo.weightKg, tramo.reps);
+        const peso = Number(tramo.weightKg);
+        if (Number.isFinite(peso) && (pr.bestWeightKg === null || peso > pr.bestWeightKg)) {
+          pr.bestWeightKg = peso;
+        }
+        // El 1RM de Epley NO tiene sentido en un asistido: la formula
+        // parte de "peso que levantas", y ahi el numero es la ayuda que
+        // te quitan, no una carga. Se queda sin 1RM en vez de inventarse
+        // uno.
+        if (!pr.asistido && peso > 0 && tramo.reps >= 1 && tramo.reps <= 12) {
+          const est = gymEpley1RM(peso, tramo.reps);
           if (est > pr.best1RM) pr.best1RM = est;
         }
       }
@@ -14594,7 +14826,10 @@ function renderGymPRs() {
 
   const unit = getGymWeightUnitLabel();
   const rows = [...byExercise.entries()]
-    .filter(([, pr]) => pr.bestWeightKg > 0)
+    // Un asistido entra aunque su mejor peso sea negativo -- ahi -12 kg
+    // es un record de verdad. Lo que se descarta es "no hay ni un peso
+    // apuntado" (bestWeightKg null) y los normales que sigan a 0.
+    .filter(([, pr]) => pr.bestWeightKg !== null && (pr.asistido || pr.bestWeightKg > 0))
     .sort((a, b) => b[1].best1RM - a[1].best1RM);
   list.innerHTML = '';
   if (rows.length === 0) {
