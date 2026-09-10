@@ -9670,6 +9670,7 @@ const finanzasAccountTypeField = createSelectField({
     { value: 'Ahorro', label: 'Ahorro' },
     { value: 'Inversión', label: 'Inversión' },
     { value: 'Efectivo', label: 'Efectivo' },
+    { value: 'De terceros', label: 'De terceros' },
     { value: 'Otro', label: 'Otro' },
   ],
   initialValue: '',
@@ -9930,6 +9931,24 @@ const FINANZAS_MONEY_FORMATTER = new Intl.NumberFormat('es-ES', {
   // cuentas.
   useGrouping: 'always',
 });
+
+// ¿Se cuenta el dinero de terceros en los numeros del Resumen?
+//
+// Por defecto NO: la paga de sus padres y la gasolina que le pagan no son
+// dinero suyo, y contarlos inflaria el ahorro y las graficas. El
+// interruptor es para cuando quiere verlo todo junto.
+//
+// Va en localStorage y no en la base porque es una preferencia de VISTA,
+// como la densidad del calendario o el orden de las notas.
+function finanzasIncluyeTerceros() {
+  return localStorage.getItem('finanzasIncluirTerceros') === 'true';
+}
+
+// El "?includeThirdParty=1" que hay que pegarle a las consultas de
+// resumen, o cadena vacia.
+function finanzasTercerosQS(separador) {
+  return finanzasIncluyeTerceros() ? `${separador}includeThirdParty=1` : '';
+}
 
 function formatFinanzasAmount(n) {
   const num = Number(n) || 0;
@@ -15394,9 +15413,27 @@ function renderFinanzasAccountsSummary() {
     wrap.innerHTML = '<p class="empty-hint">Todavía no tienes cuentas. Crealas en la pestaña Movimientos.</p>';
     return;
   }
+  // El bloque del dinero de terceros solo aparece si de verdad hay alguna
+  // cuenta de ese tipo: a quien no lo use, no le sale un interruptor de
+  // algo que no tiene.
+  const esAjena = (a) => String(a.type || '').toLowerCase() === 'de terceros';
+  const ajenas = finanzasAccounts.filter(esAjena);
+  const fila = document.getElementById('finanzas-terceros-row');
+  const hint = document.getElementById('finanzas-terceros-hint');
+  fila.classList.toggle('hidden', ajenas.length === 0);
+  hint.classList.toggle('hidden', ajenas.length === 0);
+  if (ajenas.length > 0) {
+    document.getElementById('finanzas-incluir-terceros').checked = finanzasIncluyeTerceros();
+    const total = ajenas.reduce((acc, a) => acc + a.balance, 0);
+    hint.textContent = finanzasIncluyeTerceros()
+      ? `Ahora mismo los números de abajo SÍ incluyen ${formatFinanzasAmount(total)} que no son tuyos.`
+      : `Te quedan ${formatFinanzasAmount(total)} de dinero de terceros. No cuenta en tu ahorro ni en las gráficas, pero sus gastos se siguen registrando.`;
+  }
+
   finanzasAccounts.forEach((a) => {
     const card = document.createElement('div');
     card.className = 'finanzas-account-card';
+    if (esAjena(a)) card.classList.add('finanzas-account-card-ajena');
     card.innerHTML = `
       <span class="finanzas-account-card-name">${a.icon ? escapeHtml(a.icon) + ' ' : ''}${escapeHtml(a.name)}${a.type ? ` <span class="finanzas-account-type-badge">${escapeHtml(a.type)}</span>` : ''}</span>
       <span class="finanzas-account-card-balance${a.balance < 0 ? ' negative' : ''}">${formatFinanzasAmount(a.balance)}</span>
@@ -15521,7 +15558,7 @@ function renderFinanzasMonthlyTrendChart(data) {
 async function renderFinanzasSavingsMonthly() {
   const month = finanzasSavingsMonthField.getValue();
   const year = document.getElementById('finanzas-savings-year-input').value || finanzasCurrentYear;
-  const summary = await api(`/api/finanzas-transactions/summary/month?month=${year}-${month}`);
+  const summary = await api(`/api/finanzas-transactions/summary/month?month=${year}-${month}${finanzasTercerosQS('&')}`);
   const statusWrap = document.getElementById('finanzas-savings-status');
   const goal = summary.savingsGoalMin;
   let statusHtml = `<span class="finanzas-savings-status-text">Ese mes ahorraste ${formatFinanzasAmount(summary.savings)}.</span>`;
@@ -15564,7 +15601,7 @@ document.getElementById('btn-finanzas-savings-range-view').addEventListener('cli
   const tbody = document.getElementById('finanzas-savings-history-tbody');
   let rows;
   try {
-    rows = await api(`/api/finanzas-transactions/summary/range?from=${fromYear}-${fromMonth}&to=${toYear}-${toMonth}`);
+    rows = await api(`/api/finanzas-transactions/summary/range?from=${fromYear}-${fromMonth}&to=${toYear}-${toMonth}${finanzasTercerosQS('&')}`);
   } catch (err) {
     alert(err.message);
     return;
@@ -15584,11 +15621,16 @@ document.getElementById('btn-finanzas-savings-range-view').addEventListener('cli
   });
 });
 
+document.getElementById('finanzas-incluir-terceros').addEventListener('change', async (e) => {
+  localStorage.setItem('finanzasIncluirTerceros', e.target.checked ? 'true' : 'false');
+  await renderFinanzasResumenTab();
+});
+
 async function renderFinanzasResumenTab() {
   renderFinanzasAccountsSummary();
   const [summary, trend] = await Promise.all([
-    api('/api/finanzas-transactions/summary/month'),
-    api('/api/finanzas-transactions/summary/monthly-trend'),
+    api(`/api/finanzas-transactions/summary/month${finanzasTercerosQS('?')}`),
+    api(`/api/finanzas-transactions/summary/monthly-trend${finanzasTercerosQS('?')}`),
   ]);
   renderFinanzasMonthlyTrendChart(trend);
 

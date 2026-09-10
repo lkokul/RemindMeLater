@@ -1342,6 +1342,15 @@
     <div class="finanzas-tab-panel" data-finanzas-panel="resumen">
       <h3>Saldo por cuenta</h3>
       <div id="finanzas-accounts-summary" class="finanzas-accounts-summary"></div>
+      <!-- Dinero de terceros: lo que hay en cuentas de tipo "De terceros"
+           (la paga de sus padres, la gasolina que le pagan) no cuenta en
+           el ahorro, el limite ni las graficas. Este interruptor es para
+           verlo todo junto cuando le apetezca. -->
+      <label class="checkbox-row" id="finanzas-terceros-row">
+        <input type="checkbox" id="finanzas-incluir-terceros" />
+        Incluir el dinero de terceros en estos números
+      </label>
+      <p class="hint" id="finanzas-terceros-hint"></p>
 
       <h3>Límite mensual de gasto</h3>
       <div class="finanzas-budget-row">

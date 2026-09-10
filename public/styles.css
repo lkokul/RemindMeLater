@@ -5165,3 +5165,10 @@ body.gym-rest-push #settings-modal .settings-card {
   margin: -0.6rem 0 1rem;
   color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
 }
+
+/* Cuenta de dinero que no es tuyo: se distingue con una franja lateral en
+   vez de con otro color de fondo, para que se lea como "esta es distinta"
+   sin romper la fila de tarjetas ni pelearse con el tema. */
+.finanzas-account-card-ajena {
+  border-left: 3px solid color-mix(in srgb, var(--accent) 60%, var(--border));
+}
