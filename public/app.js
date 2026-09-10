@@ -15542,60 +15542,390 @@ function finanzasRecurringFrequencyLabel(r) {
   return `Anual (${FINANZAS_MONTH_NAMES[r.monthOfYear - 1]} ${r.dayOfMonth})`;
 }
 
-function renderFinanzasRecurringList() {
-  const tbody = document.getElementById('finanzas-recurring-tbody');
-  tbody.innerHTML = '';
-  if (finanzasRecurringExpenses.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-hint">Todavía no tienes gastos fijos. Crea uno arriba.</td></tr>';
+// =====================================================================
+// Gastos fijos: tres vistas sobre la MISMA informacion (fases 1-2 del
+// plan de IDEAS-FINANZAS.md).
+//
+//   - "Qué queda": lo que falta por pagar esta semana / este mes / este
+//     año. Contesta a la pregunta que antes no se podia contestar.
+//   - "Año": los doce meses con su total, y el desglose al tocar uno.
+//   - "Plantillas": el mantenimiento de siempre, en filas en vez de en
+//     una tabla de 7 columnas.
+//
+// Las dos primeras se alimentan de /forecast, que CALCULA las
+// ocurrencias de cada plantilla y no guarda nada (ver el comentario
+// largo en routes-local/finanzasRecurringExpenses.js).
+// =====================================================================
+
+// Estado de la pestaña. Son preferencias de VISTA, no datos: viven en
+// memoria y se pierden al salir, igual que el resto de alternadores de
+// la app (no van ni a la base ni a localStorage).
+let finanzasFijosVista = 'pendientes';
+let finanzasFijosRango = 'mes';
+let finanzasFijosEstado = 'pending';
+let finanzasFijosYear = new Date().getFullYear();
+const finanzasFijosMesesAbiertos = new Set();
+let finanzasFijosDetalle = null;
+
+function finanzasFijosISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// De "semana/mes/anio" a las dos fechas que entiende /forecast.
+//
+// Se usan periodos NATURALES (la semana de lunes a domingo, el mes del 1
+// al ultimo dia, el año del 1 de enero al 31 de diciembre) y no "los
+// proximos 7/30/365 dias": cuando alguien pregunta "¿que me queda este
+// mes?" se refiere al mes del calendario, no a una ventana movil.
+function finanzasFijosRangoFechas(rango) {
+  const hoy = new Date();
+  if (rango === 'semana') {
+    const dia = hoy.getDay(); // 0 = domingo en JavaScript
+    const desplazamientoALunes = dia === 0 ? -6 : 1 - dia;
+    const lunes = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + desplazamientoALunes);
+    const domingo = new Date(lunes.getFullYear(), lunes.getMonth(), lunes.getDate() + 6);
+    return { from: finanzasFijosISO(lunes), to: finanzasFijosISO(domingo), etiqueta: 'esta semana' };
+  }
+  if (rango === 'anio') {
+    return { from: `${hoy.getFullYear()}-01-01`, to: `${hoy.getFullYear()}-12-31`, etiqueta: 'este año' };
+  }
+  const primero = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  const ultimo = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+  return { from: finanzasFijosISO(primero), to: finanzasFijosISO(ultimo), etiqueta: 'este mes' };
+}
+
+// Fecha corta para las filas: "15 mar" (el año solo cuando no es el
+// actual, para no repetirlo doce veces en una lista del mismo año).
+function finanzasFijosFechaCorta(iso) {
+  const [y, m, d] = iso.split('-');
+  const mes = FINANZAS_MONTH_NAMES[Number(m) - 1] || '';
+  const corto = mes.slice(0, 3).toLowerCase();
+  const anioActual = String(new Date().getFullYear());
+  return y === anioActual ? `${Number(d)} ${corto}` : `${Number(d)} ${corto} ${y}`;
+}
+
+// Una fila del estilo nuevo: icono redondo + titulo/subtitulo + importe a
+// la derecha. Sustituye a las filas de tabla en todo lo que se toca aqui.
+// Se construye con createElement (no con innerHTML) porque el texto sale
+// de lo que escribe el usuario: asi no hay forma de que una descripcion
+// con "<" rompa nada.
+function finanzasFilaEl({ icono, color, titulo, sub, importe, etiqueta, etiquetaTono, alPulsar }) {
+  const fila = document.createElement(alPulsar ? 'button' : 'div');
+  if (alPulsar) fila.type = 'button';
+  fila.className = 'finanzas-row';
+  if (alPulsar) {
+    fila.classList.add('finanzas-row-tappable');
+    fila.addEventListener('click', alPulsar);
+  }
+
+  const ico = document.createElement('span');
+  ico.className = 'finanzas-row-icon';
+  if (color) ico.style.background = color;
+  ico.textContent = icono || '•';
+  fila.appendChild(ico);
+
+  const main = document.createElement('span');
+  main.className = 'finanzas-row-main';
+  const t = document.createElement('span');
+  t.className = 'finanzas-row-title';
+  t.textContent = titulo;
+  main.appendChild(t);
+  if (sub) {
+    const s = document.createElement('span');
+    s.className = 'finanzas-row-sub';
+    s.textContent = sub;
+    main.appendChild(s);
+  }
+  fila.appendChild(main);
+
+  const der = document.createElement('span');
+  der.className = 'finanzas-row-right';
+  if (importe !== undefined && importe !== null) {
+    const imp = document.createElement('span');
+    imp.className = 'finanzas-row-amount';
+    imp.textContent = importe;
+    der.appendChild(imp);
+  }
+  if (etiqueta) {
+    const badge = document.createElement('span');
+    badge.className = `finanzas-row-badge${etiquetaTono ? ' finanzas-row-badge-' + etiquetaTono : ''}`;
+    badge.textContent = etiqueta;
+    der.appendChild(badge);
+  }
+  fila.appendChild(der);
+  return fila;
+}
+
+function finanzasFijosCabeceraEl(texto, importe) {
+  const cab = document.createElement('div');
+  cab.className = 'finanzas-group-heading';
+  const t = document.createElement('span');
+  t.textContent = texto;
+  cab.appendChild(t);
+  if (importe) {
+    const i = document.createElement('span');
+    i.className = 'finanzas-group-heading-amount';
+    i.textContent = importe;
+    cab.appendChild(i);
+  }
+  return cab;
+}
+
+function finanzasFijosVacioEl(texto) {
+  const p = document.createElement('p');
+  p.className = 'empty-hint';
+  p.textContent = texto;
+  return p;
+}
+
+// La fila de una ocurrencia (un cobro concreto de una plantilla).
+// Las etiquetas de los tres estados. "Sin registrar" (en vez de
+// "pendiente" o "atrasado") es a proposito: de un cobro viejo sin
+// movimiento la app NO sabe si se pago o no -- solo sabe que no le consta.
+// Decir "pendiente" seria afirmar una deuda que probablemente no existe.
+const FINANZAS_FIJOS_ESTADOS = {
+  paid: { texto: 'Pagado', tono: 'ok' },
+  pending: { texto: 'Pendiente', tono: 'pendiente' },
+  overdue: { texto: 'Sin registrar', tono: 'pausado' },
+};
+
+function finanzasFijosOcurrenciaEl(o) {
+  const cat = finanzasCategories.find((c) => c.id === Number(o.categoryId));
+  const estado = FINANZAS_FIJOS_ESTADOS[o.status] || FINANZAS_FIJOS_ESTADOS.pending;
+  return finanzasFilaEl({
+    icono: cat && cat.icon ? cat.icon : '📄',
+    color: cat && cat.color ? cat.color : '',
+    titulo: o.description || 'Gasto fijo sin nombre',
+    sub: `${finanzasFijosFechaCorta(o.date)} · ${finanzasAccountName(o.accountId)}`,
+    importe: formatFinanzasAmount(o.amount),
+    etiqueta: estado.texto,
+    etiquetaTono: estado.tono,
+  });
+}
+
+// -- Vista 1: qué queda por pagar --
+async function renderFinanzasFijosPendientes() {
+  const lista = document.getElementById('finanzas-fijos-lista');
+  const { from, to, etiqueta } = finanzasFijosRangoFechas(finanzasFijosRango);
+  lista.innerHTML = '';
+  lista.appendChild(finanzasFijosVacioEl('Calculando…'));
+
+  const data = await api(`/api/finanzas-recurring-expenses/forecast?from=${from}&to=${to}`);
+  const todas = data.occurrences;
+  // El chip "Pendiente" enseña TODO lo que sigue sin pagarse, tanto lo que
+  // aun no ha llegado como lo que no consta -- son las dos formas de "esto
+  // no esta pagado", y separarlas en dos filtros obligaria a mirar en dos
+  // sitios para saber que te queda. La etiqueta de cada fila ya distingue.
+  const visibles =
+    finanzasFijosEstado === 'all'
+      ? todas
+      : finanzasFijosEstado === 'paid'
+        ? todas.filter((o) => o.status === 'paid')
+        : todas.filter((o) => o.status !== 'paid');
+
+  const titulos = {
+    pending: `Te queda por pagar ${etiqueta}`,
+    paid: `Ya has pagado ${etiqueta}`,
+    all: `Gastos fijos de ${etiqueta}`,
+  };
+  const importes = {
+    pending: data.totals.unpaid,
+    paid: data.totals.paid,
+    all: data.totals.all,
+  };
+  document.getElementById('finanzas-fijos-hero-label').textContent = titulos[finanzasFijosEstado];
+  document.getElementById('finanzas-fijos-hero-amount').textContent = formatFinanzasAmount(importes[finanzasFijosEstado]);
+
+  const sinRegistrar = todas.filter((o) => o.status === 'overdue').length;
+  let sub = '';
+  if (visibles.length === 0) {
+    sub = 'Nada por aquí';
+  } else {
+    sub = `${visibles.length} ${visibles.length === 1 ? 'pago' : 'pagos'} · de ${finanzasFijosFechaCorta(from)} a ${finanzasFijosFechaCorta(to)}`;
+    if (sinRegistrar > 0 && finanzasFijosEstado !== 'paid') {
+      sub += ` · ${sinRegistrar} sin registrar`;
+    }
+  }
+  document.getElementById('finanzas-fijos-hero-sub').textContent = sub;
+
+  lista.innerHTML = '';
+  if (visibles.length === 0) {
+    lista.appendChild(
+      finanzasFijosVacioEl(
+        finanzasFijosEstado === 'pending'
+          ? `No te queda ningún gasto fijo por pagar ${etiqueta}.`
+          : `No hay gastos fijos ${finanzasFijosEstado === 'paid' ? 'pagados' : ''} ${etiqueta}.`
+      )
+    );
     return;
   }
-  finanzasRecurringExpenses.forEach((r) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${escapeHtml(r.description || '—')}</td>
-      <td>${escapeHtml(finanzasAccountName(r.accountId))}</td>
-      <td>${escapeHtml(finanzasCategoryName(r.categoryId))}</td>
-      <td>${formatFinanzasAmount(r.amount)}</td>
-      <td>${finanzasRecurringFrequencyLabel(r)}</td>
-      <td>${r.active ? 'Activo' : 'Pausado'}${r.endDate ? ` (hasta ${r.endDate})` : ''}</td>
-      <td></td>
-    `;
-    const actionsTd = tr.lastElementChild;
-    const historyBtn = document.createElement('button');
-    historyBtn.type = 'button';
-    historyBtn.className = 'secondary-btn';
-    historyBtn.textContent = 'Ver generados';
-    historyBtn.addEventListener('click', () => openFinanzasRecurringTransactionsModal(r));
-    const toggleBtn = document.createElement('button');
-    toggleBtn.type = 'button';
-    toggleBtn.className = 'secondary-btn';
-    toggleBtn.textContent = r.active ? 'Pausar' : 'Reanudar';
-    toggleBtn.addEventListener('click', async () => {
-      await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'PUT', body: JSON.stringify({ active: !r.active }) });
-      await refreshFinanzasRecurringTab();
+
+  // En el rango de un año se agrupa por mes (si no, son decenas de filas
+  // seguidas sin ninguna referencia); en semana y mes, lista corrida.
+  if (finanzasFijosRango === 'anio') {
+    const porMes = new Map();
+    visibles.forEach((o) => {
+      const clave = o.date.slice(0, 7);
+      if (!porMes.has(clave)) porMes.set(clave, []);
+      porMes.get(clave).push(o);
     });
-    const editBtn = document.createElement('button');
-    editBtn.type = 'button';
-    editBtn.className = 'secondary-btn';
-    editBtn.textContent = 'Editar';
-    editBtn.addEventListener('click', () => openFinanzasRecurringModal(r));
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'danger-btn';
-    deleteBtn.textContent = 'Eliminar';
-    deleteBtn.addEventListener('click', async () => {
-      if (!confirm(`¿Eliminar el gasto fijo "${r.description || 'sin nombre'}"? Los movimientos ya generados se quedan, solo se deja de generar más.`)) return;
-      await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'DELETE' });
-      await refreshFinanzasRecurringTab();
+    [...porMes.keys()].sort().forEach((clave) => {
+      const delMes = porMes.get(clave);
+      const total = delMes.reduce((acc, o) => acc + o.amount, 0);
+      lista.appendChild(finanzasFijosCabeceraEl(FINANZAS_MONTH_NAMES[Number(clave.slice(5, 7)) - 1], formatFinanzasAmount(total)));
+      const grupo = document.createElement('div');
+      grupo.className = 'finanzas-group';
+      delMes.forEach((o) => grupo.appendChild(finanzasFijosOcurrenciaEl(o)));
+      lista.appendChild(grupo);
     });
-    actionsTd.append(historyBtn, toggleBtn, editBtn, deleteBtn);
-    tbody.appendChild(tr);
+    return;
+  }
+
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  visibles.forEach((o) => grupo.appendChild(finanzasFijosOcurrenciaEl(o)));
+  lista.appendChild(grupo);
+}
+
+// Lo ultimo que devolvio /forecast para la vista anual, con el año al que
+// corresponde. Abrir y cerrar un mes NO cambia los datos, solo lo que se
+// enseña: sin esta cache, cada toque volvia a calcular el año entero (con
+// 125 plantillas eso son 1.333 ocurrencias recalculadas para nada, y en un
+// telefono se nota).
+let finanzasFijosDatosAnual = null;
+
+// -- Vista 2: el año entero, mes a mes --
+async function renderFinanzasFijosAnual({ recargar = true } = {}) {
+  const cont = document.getElementById('finanzas-fijos-meses');
+  document.getElementById('finanzas-fijos-year-label').textContent = String(finanzasFijosYear);
+
+  const sirveLaCache =
+    !recargar && finanzasFijosDatosAnual && finanzasFijosDatosAnual.year === finanzasFijosYear;
+
+  if (!sirveLaCache) {
+    cont.innerHTML = '';
+    cont.appendChild(finanzasFijosVacioEl('Calculando…'));
+  }
+
+  const data = sirveLaCache
+    ? finanzasFijosDatosAnual.data
+    : await api(`/api/finanzas-recurring-expenses/forecast?from=${finanzasFijosYear}-01-01&to=${finanzasFijosYear}-12-31`);
+  finanzasFijosDatosAnual = { year: finanzasFijosYear, data };
+
+  document.getElementById('finanzas-fijos-year-total').textContent = formatFinanzasAmount(data.totals.all);
+  document.getElementById('finanzas-fijos-year-sub').textContent =
+    data.occurrences.length === 0
+      ? 'Sin gastos fijos en este año'
+      : data.totals.unpaid > 0
+        ? `${formatFinanzasAmount(data.totals.paid)} pagados · ${formatFinanzasAmount(data.totals.unpaid)} por pagar`
+        : 'Todo pagado';
+
+  const porMes = new Map();
+  data.occurrences.forEach((o) => {
+    const idx = Number(o.date.slice(5, 7)) - 1;
+    if (!porMes.has(idx)) porMes.set(idx, []);
+    porMes.get(idx).push(o);
   });
+
+  cont.innerHTML = '';
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+
+  // Se pintan los DOCE meses aunque esten vacios: la gracia de esta
+  // pantalla es poder recorrer el año de un vistazo y ver donde estan los
+  // meses caros, y para eso los huecos tambien dicen algo.
+  for (let i = 0; i < 12; i += 1) {
+    const delMes = porMes.get(i) || [];
+    const total = delMes.reduce((acc, o) => acc + o.amount, 0);
+    const hayPrevisto = delMes.some((o) => o.status === 'pending');
+    const haySinRegistrar = delMes.some((o) => o.status === 'overdue');
+    const abierto = finanzasFijosMesesAbiertos.has(i);
+
+    // Un mes con cobros que aun no han llegado es "Previsto" (la cifra
+    // puede cambiar); uno pasado del que no consta el pago, "Sin
+    // registrar". Si esta todo pagado no lleva etiqueta: el silencio ya
+    // dice que ese mes esta cerrado.
+    const fila = finanzasFilaEl({
+      icono: abierto ? '▾' : '▸',
+      titulo: FINANZAS_MONTH_NAMES[i],
+      sub: delMes.length === 0 ? 'Sin gastos fijos' : `${delMes.length} ${delMes.length === 1 ? 'pago' : 'pagos'}`,
+      importe: delMes.length === 0 ? '—' : formatFinanzasAmount(total),
+      etiqueta: hayPrevisto ? 'Previsto' : haySinRegistrar ? 'Sin registrar' : '',
+      etiquetaTono: hayPrevisto ? 'pendiente' : 'pausado',
+      alPulsar:
+        delMes.length === 0
+          ? null
+          : () => {
+              if (finanzasFijosMesesAbiertos.has(i)) finanzasFijosMesesAbiertos.delete(i);
+              else finanzasFijosMesesAbiertos.add(i);
+              // Sin recargar: los datos del año son los mismos, solo cambia
+              // que este mes se vea desplegado o no.
+              renderFinanzasFijosAnual({ recargar: false });
+            },
+    });
+    if (delMes.length === 0) fila.classList.add('finanzas-row-muted');
+    grupo.appendChild(fila);
+
+    if (abierto && delMes.length > 0) {
+      const desglose = document.createElement('div');
+      desglose.className = 'finanzas-subgroup';
+      delMes.forEach((o) => desglose.appendChild(finanzasFijosOcurrenciaEl(o)));
+      grupo.appendChild(desglose);
+    }
+  }
+  cont.appendChild(grupo);
+}
+
+// -- Vista 3: las plantillas --
+function renderFinanzasRecurringList() {
+  const cont = document.getElementById('finanzas-recurring-list');
+  cont.innerHTML = '';
+  if (finanzasRecurringExpenses.length === 0) {
+    cont.appendChild(finanzasFijosVacioEl('Todavía no tienes gastos fijos. Crea uno con el botón de arriba.'));
+    return;
+  }
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  finanzasRecurringExpenses.forEach((r) => {
+    const cat = finanzasCategories.find((c) => c.id === Number(r.categoryId));
+    const fila = finanzasFilaEl({
+      icono: cat && cat.icon ? cat.icon : '📄',
+      color: cat && cat.color ? cat.color : '',
+      titulo: r.description || 'Gasto fijo sin nombre',
+      sub: `${finanzasRecurringFrequencyLabel(r)} · ${finanzasAccountName(r.accountId)}`,
+      importe: formatFinanzasAmount(r.amount),
+      etiqueta: r.active ? '' : 'Pausado',
+      etiquetaTono: 'pausado',
+      alPulsar: () => openFinanzasRecurringTransactionsModal(r),
+    });
+    if (!r.active) fila.classList.add('finanzas-row-muted');
+    grupo.appendChild(fila);
+  });
+  cont.appendChild(grupo);
+}
+
+// Cambiar de vista dentro de la pestaña. Cada vista se pinta solo cuando
+// se entra en ella: /forecast recalcula, y no tiene sentido calcular tres
+// pantallas para enseñar una.
+function switchFinanzasFijosVista(vista) {
+  finanzasFijosVista = vista;
+  document.querySelectorAll('[data-fijos-vista]').forEach((btn) => {
+    const activo = btn.dataset.fijosVista === vista;
+    btn.classList.toggle('active', activo);
+    btn.setAttribute('aria-selected', activo ? 'true' : 'false');
+  });
+  document.querySelectorAll('[data-fijos-panel]').forEach((panel) => {
+    panel.classList.toggle('hidden', panel.dataset.fijosPanel !== vista);
+  });
+  if (vista === 'pendientes') renderFinanzasFijosPendientes();
+  else if (vista === 'anual') renderFinanzasFijosAnual();
 }
 
 async function refreshFinanzasRecurringTab() {
   await loadFinanzasRecurring();
   renderFinanzasRecurringList();
+  if (finanzasFijosVista === 'pendientes') await renderFinanzasFijosPendientes();
+  else if (finanzasFijosVista === 'anual') await renderFinanzasFijosAnual();
 }
 
 function refreshFinanzasRecurringFrequencyFields() {
@@ -15623,6 +15953,46 @@ function closeFinanzasRecurringModal() {
   document.getElementById('finanzas-recurring-modal').classList.add('hidden');
 }
 document.getElementById('btn-new-finanzas-recurring').addEventListener('click', () => openFinanzasRecurringModal(null));
+
+// -- Botones de la pestaña de gastos fijos --
+// (Se registran al cargar, pero solo se EJECUTAN al tocarlos, asi que
+//  pueden apoyarse en funciones declaradas mas abajo sin problema -- ver
+//  la nota de la zona muerta temporal en CLAUDE.md.)
+document.querySelectorAll('[data-fijos-vista]').forEach((btn) => {
+  btn.addEventListener('click', () => switchFinanzasFijosVista(btn.dataset.fijosVista));
+});
+document.querySelectorAll('[data-fijos-rango]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    finanzasFijosRango = btn.dataset.fijosRango;
+    document.querySelectorAll('[data-fijos-rango]').forEach((b) => {
+      const activo = b === btn;
+      b.classList.toggle('active', activo);
+      b.setAttribute('aria-selected', activo ? 'true' : 'false');
+    });
+    renderFinanzasFijosPendientes();
+  });
+});
+document.querySelectorAll('[data-fijos-estado]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    finanzasFijosEstado = btn.dataset.fijosEstado;
+    document.querySelectorAll('[data-fijos-estado]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderFinanzasFijosPendientes();
+  });
+});
+document.getElementById('btn-finanzas-fijos-year-prev').addEventListener('click', () => {
+  // Topes de cordura: sin ellos se puede acabar en el año 200 a base de
+  // toques, calculando doce meses de nada cada vez.
+  if (finanzasFijosYear <= 2000) return;
+  finanzasFijosYear -= 1;
+  finanzasFijosMesesAbiertos.clear();
+  renderFinanzasFijosAnual();
+});
+document.getElementById('btn-finanzas-fijos-year-next').addEventListener('click', () => {
+  if (finanzasFijosYear >= 2100) return;
+  finanzasFijosYear += 1;
+  finanzasFijosMesesAbiertos.clear();
+  renderFinanzasFijosAnual();
+});
 document.getElementById('btn-cancel-finanzas-recurring').addEventListener('click', closeFinanzasRecurringModal);
 document.getElementById('btn-close-finanzas-recurring').addEventListener('click', closeFinanzasRecurringModal);
 
@@ -15788,27 +16158,135 @@ document.getElementById('btn-delete-finanzas-debt').addEventListener('click', as
   renderFinanzasResumenTab();
 });
 
-// Movimientos ya generados por una plantilla concreta -- reutiliza el
-// filtro recurringExpenseId ya soportado por GET /api/finanzas-transactions.
+// Ficha de un gasto fijo: cuanto ha costado cada año, sus movimientos
+// generados y las acciones. Antes esto era solo la lista de generados.
+//
+// La evolucion por año NO hace falta guardarla en ningun sitio: cada
+// movimiento generado lleva su recurring_expense_id, asi que agrupar por
+// año es una consulta (ver GET /:id/history).
 async function openFinanzasRecurringTransactionsModal(r) {
-  document.getElementById('finanzas-recurring-transactions-title').textContent = `Movimientos generados — ${r.description || 'gasto fijo'}`;
-  const tbody = document.getElementById('finanzas-recurring-transactions-tbody');
-  tbody.innerHTML = '<tr><td colspan="2" class="empty-hint">Cargando…</td></tr>';
+  finanzasFijosDetalle = r;
+  document.getElementById('finanzas-recurring-transactions-title').textContent = r.description || 'Gasto fijo';
+  document.getElementById('finanzas-recurring-detail-sub').textContent =
+    `${formatFinanzasAmount(r.amount)} · ${finanzasRecurringFrequencyLabel(r)} · ${finanzasAccountName(r.accountId)}${r.active ? '' : ' · Pausado'}`;
+
+  const toggleBtn = document.getElementById('btn-finanzas-recurring-detail-toggle');
+  toggleBtn.textContent = r.active ? 'Pausar' : 'Reanudar';
+
+  const histCont = document.getElementById('finanzas-recurring-history');
+  const listaCont = document.getElementById('finanzas-recurring-transactions-list');
+  histCont.innerHTML = '';
+  listaCont.innerHTML = '';
+  histCont.appendChild(finanzasFijosVacioEl('Cargando…'));
   document.getElementById('finanzas-recurring-transactions-modal').classList.remove('hidden');
-  const transactions = await api(`/api/finanzas-transactions?recurringExpenseId=${r.id}`);
-  tbody.innerHTML = '';
+
+  const [historia, transactions] = await Promise.all([
+    api(`/api/finanzas-recurring-expenses/${r.id}/history`),
+    api(`/api/finanzas-transactions?recurringExpenseId=${r.id}`),
+  ]);
+
+  // -- Evolucion por año --
+  histCont.innerHTML = '';
+  if (historia.years.length === 0) {
+    histCont.appendChild(finanzasFijosVacioEl('Todavía no se ha generado ningún pago, así que no hay histórico.'));
+  } else {
+    const grupo = document.createElement('div');
+    grupo.className = 'finanzas-group';
+    // Se recorre de mas nuevo a mas viejo y se compara cada año con el
+    // SIGUIENTE de la lista (el anterior en el tiempo), que es justo la
+    // frase que uno quiere leer: "te ha subido un 19%".
+    historia.years.forEach((y, i) => {
+      const anterior = historia.years[i + 1];
+      let sub = `${y.count} ${y.count === 1 ? 'pago' : 'pagos'}`;
+      if (anterior && anterior.total > 0) {
+        // Con el MISMO numero de pagos se comparan los totales. Si no
+        // coinciden (tipico del año en curso, que va a medias) se compara
+        // el coste POR PAGO -- si no, un año de 9 meses frente a uno de 12
+        // sale "un 17% mas barato" cuando en realidad te ha SUBIDO el
+        // precio. Salio probandolo con Netflix: 8,99 -> 9,99 -> 10,99 y la
+        // ficha decia que bajaba.
+        const mismoNumeroDePagos = y.count === anterior.count;
+        const actual = mismoNumeroDePagos ? y.total : y.total / y.count;
+        const previo = mismoNumeroDePagos ? anterior.total : anterior.total / anterior.count;
+        const variacion = ((actual - previo) / previo) * 100;
+        if (Math.abs(variacion) >= 0.5) {
+          sub += ` · ${variacion > 0 ? '+' : '−'}${Math.abs(variacion).toFixed(0)}%${mismoNumeroDePagos ? '' : ' por pago'} frente a ${anterior.year}`;
+        }
+      }
+      grupo.appendChild(
+        finanzasFilaEl({
+          icono: '📅',
+          titulo: y.year,
+          sub,
+          importe: formatFinanzasAmount(y.total),
+        })
+      );
+    });
+    histCont.appendChild(grupo);
+    // Un año a medias no se compara con uno entero sin decirlo.
+    const esteAnio = String(new Date().getFullYear());
+    if (historia.years.some((y) => y.year === esteAnio)) {
+      const nota = document.createElement('p');
+      nota.className = 'hint';
+      nota.textContent = 'El año en curso va a medias: todavía le quedan pagos por generar, así que no se compara de tú a tú con un año entero.';
+      histCont.appendChild(nota);
+    }
+  }
+
+  // -- Movimientos generados --
   if (transactions.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="2" class="empty-hint">Todavía no se ha generado ninguno.</td></tr>';
+    listaCont.appendChild(finanzasFijosVacioEl('Todavía no se ha generado ninguno.'));
     return;
   }
+  const grupoMov = document.createElement('div');
+  grupoMov.className = 'finanzas-group';
   transactions.forEach((t) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${t.date}</td><td>${formatFinanzasAmount(t.amount)}</td>`;
-    tbody.appendChild(tr);
+    grupoMov.appendChild(
+      finanzasFilaEl({
+        icono: '✓',
+        titulo: finanzasFijosFechaCorta(t.date),
+        importe: formatFinanzasAmount(t.amount),
+      })
+    );
   });
+  listaCont.appendChild(grupoMov);
 }
-document.getElementById('btn-close-finanzas-recurring-transactions').addEventListener('click', () => {
+
+function closeFinanzasRecurringDetail() {
   document.getElementById('finanzas-recurring-transactions-modal').classList.add('hidden');
+  finanzasFijosDetalle = null;
+}
+document.getElementById('btn-close-finanzas-recurring-transactions').addEventListener('click', closeFinanzasRecurringDetail);
+
+document.getElementById('btn-finanzas-recurring-detail-edit').addEventListener('click', () => {
+  const r = finanzasFijosDetalle;
+  if (!r) return;
+  closeFinanzasRecurringDetail();
+  openFinanzasRecurringModal(r);
+});
+
+document.getElementById('btn-finanzas-recurring-detail-toggle').addEventListener('click', async () => {
+  const r = finanzasFijosDetalle;
+  if (!r) return;
+  await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'PUT', body: JSON.stringify({ active: !r.active }) });
+  closeFinanzasRecurringDetail();
+  await refreshFinanzasRecurringTab();
+});
+
+document.getElementById('btn-finanzas-recurring-detail-delete').addEventListener('click', async () => {
+  const r = finanzasFijosDetalle;
+  if (!r) return;
+  // Antes esto usaba confirm() del navegador, que en el movil bloquea la
+  // webview entera y encima no sigue el tema. Aviso propio, como manda la
+  // regla de la casa.
+  const ok = await showAppConfirm(
+    `¿Eliminar el gasto fijo "${r.description || 'sin nombre'}"?\n\nLos movimientos ya generados se quedan (son reales), pero pierden el enlace con la plantilla: dejarás de ver su evolución por años.`,
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'DELETE' });
+  closeFinanzasRecurringDetail();
+  await refreshFinanzasRecurringTab();
 });
 
 // -- Pestaña Inversiones: tabla de compra/venta/dividendos + resumen por

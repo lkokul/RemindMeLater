@@ -4929,3 +4929,205 @@ body.gym-rest-push #settings-modal .settings-card {
   font-size: 0.82rem;
   color: color-mix(in srgb, var(--surface-text) 68%, var(--surface));
 }
+
+/* =====================================================================
+   Gastos fijos: el lenguaje visual nuevo de Finanzas (fases 1-2 de
+   IDEAS-FINANZAS.md).
+
+   La idea, en corto: fuera las tablas, y jerarquia por TAMAÑO y PESO en
+   vez de por color. Una cifra grande manda en la pantalla, las etiquetas
+   van en gris, y el color solo aparece con intencion (el acento en lo que
+   se toca, el rojo en un importe negativo). Las listas son bloques
+   redondeados con separadores que empiezan DESPUES del icono, no de borde
+   a borde -- el detalle que distingue una lista cuidada de una tabla
+   disfrazada.
+   ===================================================================== */
+
+/* Selector segmentado (Qué queda / Año / Plantillas, y Semana / Mes /
+   Año dentro de la primera). Una sola pieza redondeada con el botón
+   activo relleno, en vez de botones sueltos. */
+.finanzas-segmented {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 0.9rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.finanzas-segmented-sub { margin-bottom: 0.7rem; }
+.finanzas-segmented-btn {
+  flex: 1;
+  padding: 0.45rem 0.5rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: color-mix(in srgb, var(--surface-2-text) 70%, var(--surface-2));
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.finanzas-segmented-btn.active {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: reduce) {
+  .finanzas-segmented-btn { transition: none; }
+}
+
+/* La cifra protagonista. Es lo unico grande de la pantalla a proposito:
+   si todo grita, no se entiende nada. */
+.finanzas-hero {
+  padding: 1.1rem 0.2rem 1.2rem;
+  text-align: center;
+}
+.finanzas-hero-label {
+  font-size: 0.85rem;
+  color: color-mix(in srgb, var(--bg-text) 62%, var(--bg));
+}
+.finanzas-hero-amount {
+  font-size: 2.4rem;
+  font-weight: 650;
+  line-height: 1.15;
+  margin-top: 0.15rem;
+  /* Cifras de ancho fijo: sin esto los importes bailan de una fila a
+     otra y la columna de la derecha parece torcida. */
+  font-variant-numeric: tabular-nums;
+}
+.finanzas-hero-sub {
+  font-size: 0.82rem;
+  margin-top: 0.3rem;
+  color: color-mix(in srgb, var(--bg-text) 55%, var(--bg));
+}
+
+/* Chips de filtro (Pendiente / Pagado / Todo). */
+.finanzas-chips { display: flex; gap: 0.4rem; margin-bottom: 0.9rem; flex-wrap: wrap; }
+.finanzas-chip {
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: color-mix(in srgb, var(--surface-text) 75%, var(--surface));
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.finanzas-chip.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  color: var(--surface-text);
+  font-weight: 600;
+}
+
+/* Lista agrupada: el bloque redondeado que agrupa filas. */
+.finanzas-group-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.finanzas-group {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.finanzas-group-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.9rem 0.2rem 0.35rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--bg-text) 55%, var(--bg));
+}
+.finanzas-group-heading-amount { font-variant-numeric: tabular-nums; letter-spacing: 0; }
+
+/* La fila. Puede ser <div> (solo lectura) o <button> (tocable), por eso
+   se resetean apariencia y alineacion a mano. */
+.finanzas-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  background: transparent;
+  border: none;
+  color: var(--surface-text);
+  text-align: left;
+  font: inherit;
+}
+/* Separador que arranca despues del icono, no de borde a borde. */
+.finanzas-row + .finanzas-row {
+  border-top: 1px solid var(--border);
+  background-clip: padding-box;
+}
+.finanzas-row-tappable { cursor: pointer; }
+.finanzas-row-tappable:active { background: var(--surface-2); }
+.finanzas-row-muted { opacity: 0.55; }
+.finanzas-row-icon {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-2);
+  font-size: 1rem;
+}
+.finanzas-row-main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; gap: 0.1rem; }
+.finanzas-row-title {
+  font-size: 0.98rem;
+  font-weight: 550;
+  /* Un nombre largo se corta con puntos suspensivos en vez de empujar el
+     importe fuera de la pantalla. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.finanzas-row-sub {
+  font-size: 0.8rem;
+  color: color-mix(in srgb, var(--surface-text) 58%, var(--surface));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.finanzas-row-right { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem; }
+.finanzas-row-amount { font-size: 1rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.finanzas-row-badge {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: color-mix(in srgb, var(--surface-2-text) 70%, var(--surface-2));
+}
+.finanzas-row-badge-ok {
+  background: color-mix(in srgb, #35c759 22%, var(--surface));
+  color: color-mix(in srgb, #35c759 75%, var(--surface-text));
+}
+.finanzas-row-badge-pendiente {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 80%, var(--surface-text));
+}
+.finanzas-row-badge-pausado {
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface));
+  color: color-mix(in srgb, var(--danger) 80%, var(--surface-text));
+}
+
+/* Desglose de un mes dentro de la vista anual: mismas filas, hundidas
+   sobre un fondo distinto para que se lea como "lo de dentro de". */
+.finanzas-subgroup { background: var(--surface-2); border-top: 1px solid var(--border); }
+.finanzas-subgroup .finanzas-row { padding-left: 1.6rem; }
+.finanzas-subgroup .finanzas-row-icon { width: 26px; height: 26px; font-size: 0.85rem; }
+
+/* Navegador de año (‹ 2026 ›). */
+.finanzas-year-nav { display: flex; align-items: center; justify-content: center; gap: 1rem; }
+.finanzas-year-label { font-size: 1.05rem; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 4ch; text-align: center; }
+
+/* Ficha de un gasto fijo. */
+.finanzas-detail-sub {
+  font-size: 0.85rem;
+  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
+  margin-bottom: 1rem;
+}
+.finanzas-detail-heading { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1.1rem 0 0.4rem; color: color-mix(in srgb, var(--surface-text) 55%, var(--surface)); }
+.finanzas-detail-actions { display: flex; gap: 0.5rem; margin-top: 1.2rem; flex-wrap: wrap; }
+.finanzas-detail-actions button { flex: 1 1 auto; }

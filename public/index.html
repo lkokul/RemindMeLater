@@ -1426,16 +1426,61 @@
          cada vez que toca (ver server/finanzasRecurringChecker.js) y se
          pueden editar sin afectar a lo ya generado (ej. subir el precio
          de Netflix sin borrar y volver a crear el gasto). -->
+    <!-- Pestaña "Gastos fijos", rehecha para movil (fase 1-2 del plan de
+         IDEAS-FINANZAS.md). Antes era UNA tabla de 7 columnas; ahora son
+         tres vistas de la misma informacion:
+           - Qué queda: lo que falta por pagar en la semana/mes/año.
+           - Año: los 12 meses con su total, y el desglose al tocar uno.
+           - Plantillas: el mantenimiento de siempre, en filas.
+         Las dos primeras salen de /api/finanzas-recurring-expenses/forecast,
+         que CALCULA las ocurrencias y no guarda nada. -->
     <div class="finanzas-tab-panel hidden" data-finanzas-panel="gastos-fijos">
-      <p class="hint">Cada plantilla genera su propio movimiento real solo cuando toca (mensual o anual) -- edítala aquí si cambia el importe, sin tener que borrar y crear una nueva.</p>
-      <button type="button" id="btn-new-finanzas-recurring" class="primary-btn">+ Gasto fijo</button>
-      <div class="finanzas-table-wrap">
-        <table class="finanzas-table">
-          <thead>
-            <tr><th>Descripción</th><th>Cuenta</th><th>Categoría</th><th>Importe</th><th>Frecuencia</th><th>Estado</th><th></th></tr>
-          </thead>
-          <tbody id="finanzas-recurring-tbody"></tbody>
-        </table>
+      <div class="finanzas-segmented" role="tablist" aria-label="Vistas de gastos fijos">
+        <button type="button" class="finanzas-segmented-btn active" data-fijos-vista="pendientes" role="tab" aria-selected="true">Qué queda</button>
+        <button type="button" class="finanzas-segmented-btn" data-fijos-vista="anual" role="tab" aria-selected="false">Año</button>
+        <button type="button" class="finanzas-segmented-btn" data-fijos-vista="plantillas" role="tab" aria-selected="false">Plantillas</button>
+      </div>
+
+      <!-- Vista 1: qué me queda por pagar -->
+      <div data-fijos-panel="pendientes">
+        <div class="finanzas-segmented finanzas-segmented-sub" role="tablist" aria-label="Periodo">
+          <button type="button" class="finanzas-segmented-btn" data-fijos-rango="semana" role="tab" aria-selected="false">Semana</button>
+          <button type="button" class="finanzas-segmented-btn active" data-fijos-rango="mes" role="tab" aria-selected="true">Mes</button>
+          <button type="button" class="finanzas-segmented-btn" data-fijos-rango="anio" role="tab" aria-selected="false">Año</button>
+        </div>
+        <div class="finanzas-hero">
+          <div class="finanzas-hero-label" id="finanzas-fijos-hero-label">Te queda por pagar este mes</div>
+          <div class="finanzas-hero-amount" id="finanzas-fijos-hero-amount">0,00 €</div>
+          <div class="finanzas-hero-sub" id="finanzas-fijos-hero-sub"></div>
+        </div>
+        <div class="finanzas-chips" id="finanzas-fijos-estado-chips">
+          <button type="button" class="finanzas-chip active" data-fijos-estado="pending">Pendiente</button>
+          <button type="button" class="finanzas-chip" data-fijos-estado="paid">Pagado</button>
+          <button type="button" class="finanzas-chip" data-fijos-estado="all">Todo</button>
+        </div>
+        <div id="finanzas-fijos-lista" class="finanzas-group-list"></div>
+      </div>
+
+      <!-- Vista 2: el año entero, mes a mes -->
+      <div data-fijos-panel="anual" class="hidden">
+        <div class="finanzas-year-nav">
+          <button type="button" id="btn-finanzas-fijos-year-prev" class="icon-btn" aria-label="Año anterior">‹</button>
+          <span id="finanzas-fijos-year-label" class="finanzas-year-label">2026</span>
+          <button type="button" id="btn-finanzas-fijos-year-next" class="icon-btn" aria-label="Año siguiente">›</button>
+        </div>
+        <div class="finanzas-hero">
+          <div class="finanzas-hero-label">Total del año</div>
+          <div class="finanzas-hero-amount" id="finanzas-fijos-year-total">0,00 €</div>
+          <div class="finanzas-hero-sub" id="finanzas-fijos-year-sub"></div>
+        </div>
+        <div id="finanzas-fijos-meses" class="finanzas-group-list"></div>
+      </div>
+
+      <!-- Vista 3: las plantillas (el CRUD de siempre, en filas) -->
+      <div data-fijos-panel="plantillas" class="hidden">
+        <p class="hint">Cada plantilla genera su propio movimiento real solo cuando toca (mensual o anual) -- edítala aquí si cambia el importe, sin tener que borrar y crear una nueva.</p>
+        <button type="button" id="btn-new-finanzas-recurring" class="primary-btn">+ Gasto fijo</button>
+        <div id="finanzas-recurring-list" class="finanzas-group-list"></div>
       </div>
     </div>
 
@@ -1662,15 +1707,27 @@
   </div>
 
   <!-- Movimientos ya generados por una plantilla de gasto fijo -->
+  <!-- Ficha de un gasto fijo. Antes era solo "movimientos generados" (una
+       tabla de dos columnas); ahora es la pantalla de detalle: cuanto te
+       ha costado CADA AÑO (lo que Koku pidio el 10/9/2026: "este año me
+       ha costado tanto, el año pasado esto"), el historico de movimientos
+       y las acciones. -->
   <div id="finanzas-recurring-transactions-modal" class="modal hidden">
     <div class="modal-card">
       <button type="button" id="btn-close-finanzas-recurring-transactions" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2 id="finanzas-recurring-transactions-title">Movimientos generados</h2>
-      <div class="finanzas-table-wrap">
-        <table class="finanzas-table">
-          <thead><tr><th>Fecha</th><th>Importe</th></tr></thead>
-          <tbody id="finanzas-recurring-transactions-tbody"></tbody>
-        </table>
+      <h2 id="finanzas-recurring-transactions-title">Gasto fijo</h2>
+      <div id="finanzas-recurring-detail-sub" class="finanzas-detail-sub"></div>
+
+      <h3 class="finanzas-detail-heading">Lo que te ha costado cada año</h3>
+      <div id="finanzas-recurring-history" class="finanzas-group-list"></div>
+
+      <h3 class="finanzas-detail-heading">Movimientos generados</h3>
+      <div id="finanzas-recurring-transactions-list" class="finanzas-group-list"></div>
+
+      <div class="finanzas-detail-actions">
+        <button type="button" id="btn-finanzas-recurring-detail-edit" class="secondary-btn">Editar</button>
+        <button type="button" id="btn-finanzas-recurring-detail-toggle" class="secondary-btn">Pausar</button>
+        <button type="button" id="btn-finanzas-recurring-detail-delete" class="danger-btn">Eliminar</button>
       </div>
     </div>
   </div>
