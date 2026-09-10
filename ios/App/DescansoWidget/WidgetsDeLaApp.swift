@@ -746,18 +746,21 @@ struct VistaViajes: View {
 // iOS 18) trae Swift 6, así que esa condición es la forma de preguntar
 // "¿tengo el SDK nuevo?" desde el propio código.
 //
-// Todos usan OpenURLIntent, el intent del SISTEMA, en vez de uno propio:
-// así el botón abre la MISMA URL que el toque en el widget y hay un único
-// camino de entrada (SceneDelegate -> UserDefaults -> el JavaScript). Un
-// AppIntent propio que dejara la marca en el App Group dependería de que
-// el buzón funcione, que es justo lo que puede fallar.
+// Todos ejecutan un AppIntent NUESTRO (ver AbrirDesdeControl.swift), no
+// un OpenURLIntent directo. No es un capricho: desde un control, iOS NO
+// abre esquemas de URL propios -- el botón se queda mudo, sin ningún
+// error, aunque en el simulador funcione. El intent abre la app y ES ÉL,
+// ya dentro, quien abre la URL de siempre, así que el camino de entrada
+// sigue siendo único (SceneDelegate -> UserDefaults -> el JavaScript).
+// Ese archivo se compila en la app Y aquí: si vive solo en la extensión,
+// iOS no tiene a quién ejecutarlo y el botón vuelve a no hacer nada.
 #if compiler(>=6.0)
 
 @available(iOS 18.0, *)
 struct AbrirHoyControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "com.koku.remindmelater.AbrirHoy") {
-            ControlWidgetButton(action: OpenURLIntent(DestinoDeWidget.hoy.url!)) {
+            ControlWidgetButton(action: AbrirHoyIntent()) {
                 Label("Hoy", systemImage: "calendar")
             }
         }
@@ -770,7 +773,7 @@ struct AbrirHoyControl: ControlWidget {
 struct NuevoEventoControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "com.koku.remindmelater.NuevoEvento") {
-            ControlWidgetButton(action: OpenURLIntent(DestinoDeWidget.nuevoEvento.url!)) {
+            ControlWidgetButton(action: NuevoEventoIntent()) {
                 Label("Nuevo evento", systemImage: "calendar.badge.plus")
             }
         }
@@ -783,7 +786,7 @@ struct NuevoEventoControl: ControlWidget {
 struct NuevaNotaControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "com.koku.remindmelater.NuevaNota") {
-            ControlWidgetButton(action: OpenURLIntent(DestinoDeWidget.nuevaNota.url!)) {
+            ControlWidgetButton(action: NuevaNotaIntent()) {
                 Label("Nueva nota", systemImage: "square.and.pencil")
             }
         }
@@ -796,7 +799,7 @@ struct NuevaNotaControl: ControlWidget {
 struct VerTareasControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "com.koku.remindmelater.VerTareas") {
-            ControlWidgetButton(action: OpenURLIntent(DestinoDeWidget.tareas.url!)) {
+            ControlWidgetButton(action: AbrirTareasIntent()) {
                 Label("Tareas", systemImage: "checklist")
             }
         }

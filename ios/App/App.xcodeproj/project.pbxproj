@@ -28,6 +28,8 @@
 		DE5CA25000000000000000B6 /* DescansoAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A5 /* DescansoAttributes.swift */; };
 		DE5CA25000000000000000B7 /* DescansoWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A1 /* DescansoWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DE5CA25000000000000000B8 /* ExtenderDescansoIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */; };
+		DE5CA25000000000000000CA /* AbrirDesdeControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000C9 /* AbrirDesdeControl.swift */; };
+		DE5CA25000000000000000CB /* AbrirDesdeControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000C9 /* AbrirDesdeControl.swift */; };
 		DE5CA25000000000000000B9 /* ExtenderDescansoIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */; };
 		DE5CA25000000000000000BA /* RestAudioWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A9 /* RestAudioWatcher.swift */; };
 		DE5CA25000000000000000BB /* RestAudioWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A9 /* RestAudioWatcher.swift */; };
@@ -85,6 +87,7 @@
 		DE5CA25000000000000000A6 /* BridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeViewController.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A7 /* silencio.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = silencio.wav; sourceTree = "<group>"; };
 		DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtenderDescansoIntent.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000C9 /* AbrirDesdeControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AbrirDesdeControl.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000AB /* RestAlertStopper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAlertStopper.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A9 /* RestAudioWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAudioWatcher.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000AA /* RestAudioPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestAudioPlugin.swift; sourceTree = "<group>"; };
@@ -153,6 +156,7 @@
 				DE5CA25000000000000000A4 /* LiveActivityPlugin.swift */,
 				DE5CA25000000000000000A5 /* DescansoAttributes.swift */,
 				DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */,
+				DE5CA25000000000000000C9 /* AbrirDesdeControl.swift */,
 				DE5CA25000000000000000A9 /* RestAudioWatcher.swift */,
 				DE5CA25000000000000000AA /* RestAudioPlugin.swift */,
 				DE5CA25000000000000000AB /* RestAlertStopper.swift */,
@@ -287,6 +291,7 @@
 				DE5CA25000000000000000B3 /* BridgeViewController.swift in Sources */,
 				DE5CA25000000000000000BF /* WidgetBridgePlugin.swift in Sources */,
 				DE5CA25000000000000000B8 /* ExtenderDescansoIntent.swift in Sources */,
+				DE5CA25000000000000000CA /* AbrirDesdeControl.swift in Sources */,
 				DE5CA25000000000000000BA /* RestAudioWatcher.swift in Sources */,
 				DE5CA25000000000000000BC /* RestAudioPlugin.swift in Sources */,
 				DE5CA25000000000000000BD /* RestAlertStopper.swift in Sources */,
@@ -303,6 +308,7 @@
 				DE5CA25000000000000000C8 /* WidgetsDeLaApp.swift in Sources */,
 				DE5CA25000000000000000B6 /* DescansoAttributes.swift in Sources */,
 				DE5CA25000000000000000B9 /* ExtenderDescansoIntent.swift in Sources */,
+				DE5CA25000000000000000CB /* AbrirDesdeControl.swift in Sources */,
 				DE5CA25000000000000000BB /* RestAudioWatcher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

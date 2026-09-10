@@ -80,8 +80,11 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
     // porque hay dos caminos distintos:
     //  - Tocar el widget (inicio o bloqueo) abre remindmelater://gym-hoy,
     //    y SceneDelegate deja la marca en UserDefaults.standard.
-    //  - El botón del centro de control ejecuta un AppIntent que NO manda
-    //    ninguna URL, así que deja la marca en el App Group.
+    //  - El botón del centro de control ejecuta un AppIntent nuestro
+    //    (AbrirDesdeControl.swift) que abre ESA MISMA URL desde dentro de
+    //    la app, así que acaba también en SceneDelegate. Tuvo que ser así
+    //    porque iOS no abre esquemas propios directamente desde un
+    //    control: el botón se quedaba mudo.
     // Se consumen las dos (se ponen a false) para que no vuelva a saltar
     // en la siguiente vuelta a primer plano.
     @objc func consumirApertura(_ call: CAPPluginCall) {

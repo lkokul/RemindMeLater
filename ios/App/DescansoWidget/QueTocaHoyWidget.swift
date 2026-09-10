@@ -26,8 +26,9 @@ import AppIntents
 
 // Tocar el widget abre la app aquí. SceneDelegate recoge la URL y deja la
 // marca; el JavaScript la consume al despertar y arranca el entreno.
-// Lo usan LOS DOS caminos: el toque en el widget (.widgetURL) y el botón
-// del centro de control (OpenURLIntent), para que haya una sola entrada.
+// Lo usan LOS DOS caminos: el toque en el widget (.widgetURL) y, a través
+// de EmpezarEntrenoDeHoyIntent, el botón del centro de control -- para que
+// haya una sola entrada.
 private let abrirEntrenoDeHoyURL = URL(string: "remindmelater://gym-hoy")
 
 // La clave "gymPendingStartToday" ya NO se escribe desde aquí: el botón
@@ -382,17 +383,24 @@ struct QueTocaHoyWidget: Widget {
 struct EmpezarEntrenoControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "com.koku.remindmelater.EmpezarEntreno") {
-            // OpenURLIntent, el intent del SISTEMA, en vez de uno propio.
+            // Un AppIntent NUESTRO (ver AbrirDesdeControl.swift), no un
+            // OpenURLIntent directo. Este botón ha fallado dos veces en el
+            // iPhone de Koku, con dos causas distintas:
             //
-            // Antes había aquí un AppIntent nuestro con openAppWhenRun que
-            // dejaba una marca en el App Group. Koku lo probó y NO ABRÍA NI
-            // HACÍA NADA, y además tenía un defecto de diseño: dependía de
-            // que el App Group funcionara, que es justo lo que puede
-            // fallar. Con esto el botón abre la MISMA URL que el toque en
-            // el widget, así que hay un único camino de entrada
-            // (SceneDelegate -> UserDefaults.standard -> el JavaScript) y
-            // el botón funciona aunque el buzón compartido no exista.
-            ControlWidgetButton(action: OpenURLIntent(abrirEntrenoDeHoyURL!)) {
+            // 1. Un AppIntent que dejaba la marca en el App Group: no
+            //    abría la app, y dependía justo del buzón, que entonces
+            //    estaba roto.
+            // 2. OpenURLIntent con la URL de siempre: tampoco hacía nada.
+            //    Desde un control, iOS NO abre esquemas de URL propios --
+            //    solo universal links, que piden un dominio web que esta
+            //    app no tiene. En el simulador sí funciona, que es lo que
+            //    lo hace tan difícil de ver.
+            //
+            // Lo que queda: el intent abre la app y ES ÉL, ya dentro,
+            // quien abre esta misma URL. Un solo camino de entrada
+            // (SceneDelegate -> UserDefaults.standard -> el JavaScript),
+            // igual que el toque en el widget.
+            ControlWidgetButton(action: EmpezarEntrenoDeHoyIntent()) {
                 Label("Entrenar", systemImage: "dumbbell.fill")
             }
         }

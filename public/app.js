@@ -17430,7 +17430,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.42.1';
+const APP_VERSION = '0.42.2';
 const APP_VERSION_DATE = '2026-09-10';
 
 function renderAppVersionLine() {
@@ -17515,6 +17515,21 @@ async function init() {
   // tambien aqui. Va al final del arranque a proposito: si arranca un
   // entreno, que sea con el calendario ya montado detras.
   await initStep(comprobarAperturaDesdeElWidget);
+
+  // Y una segunda pasada un momento despues, por los BOTONES DEL CENTRO
+  // DE CONTROL. Esos no abren la app con una URL sin mas: ejecutan un
+  // AppIntent nuestro (ver ios/App/App/AbrirDesdeControl.swift), y ese
+  // intent corre en el proceso de la app SIN un orden garantizado
+  // respecto a este arranque -- puede dejar la marca justo despues de que
+  // la miremos aqui. Si eso pasa y la app ya esta en primer plano, no
+  // llega ningun 'resume' ni 'visibilitychange' que la recoja, y el boton
+  // pareceria no hacer nada.
+  //
+  // Dos relecturas separadas y no un bucle: la marca se consume EN
+  // NATIVO, asi que una lectura sin marca no hace absolutamente nada y
+  // dos toques al mismo destino son imposibles.
+  setTimeout(comprobarAperturaDesdeElWidget, 600);
+  setTimeout(comprobarAperturaDesdeElWidget, 2000);
 
   setInterval(loadReminders, 30 * 1000);
   // Igual que los recordatorios: si otro dispositivo vinculado anade o
