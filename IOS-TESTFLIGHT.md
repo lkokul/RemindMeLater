@@ -116,9 +116,21 @@ no son obvias:
    ningún dispositivo registrado -- justo el caso de un pipeline sin
    Mac ni iPhone conectado. Imponerle la identidad de distribución
    tampoco vale (la rechaza por "conflicting provisioning settings").
-   La solución es archivar **sin firmar** (`CODE_SIGNING_ALLOWED=NO`) y
-   dejar toda la firma para `-exportArchive`, que pide un perfil de App
-   Store -- y ese sí se crea sin dispositivos.
+   La solución es archivar **sin pedir perfil** y dejar la firma de
+   verdad para `-exportArchive`, que pide un perfil de App Store -- y
+   ese sí se crea sin dispositivos.
+
+   **Matiz que costó doce builds y hay que respetar**: "sin pedir
+   perfil" no es lo mismo que "sin firmar". Durante un tiempo se
+   archivaba con `CODE_SIGNING_ALLOWED=NO`, y eso se salta también el
+   paso que incrusta los **entitlements** en el binario. El archivo
+   salía sin ellos, `-exportArchive` no tenía forma de saber que la app
+   necesitaba el App Group, y firmaba con lo mínimo -- sin un solo
+   error. El widget "Qué toca hoy" se quedaba en blanco en el iPhone y
+   no había ninguna pista de por qué. Ahora se archiva **firmando ad
+   hoc** (`CODE_SIGN_IDENTITY=-`, que no necesita ni certificado ni
+   perfil pero sí incrusta los entitlements) y el workflow comprueba el
+   App Group dos veces: en el `.xcarchive` y en el `.ipa` ya firmado.
 2. **La subida se hace con `xcrun altool`**, no con la acción
    `apple-actions/upload-testflight-build`, cuyo parámetro de issuer se
    llama `issuer-id` (no `api-issuer-id`) y fallaba con un 401 al
@@ -128,3 +140,13 @@ no son obvias:
 
 Si algún día falla, el registro (log) de la ejecución en la pestaña
 Actions dice exactamente en qué paso -- copia el error y lo miramos.
+
+**Si falla en "Comprobar que el App Group viajó en la firma"** (el paso
+de después de exportar), lo que falta está en el portal de Apple, no en
+el código: el App ID `com.koku.remindmelater` (y el del widget) tiene que
+tener dada de alta la capacidad **App Groups**, con el grupo
+`group.com.koku.remindmelater` creado. Se hace una sola vez en
+[developer.apple.com](https://developer.apple.com/account/resources/identifiers/list)
+→ Identifiers. Mientras tanto, el diálogo de "Run workflow" tiene una
+casilla **"Compilar SIN el App Group"** para poder seguir sacando builds
+de prueba (el widget saldrá vacío, todo lo demás funciona igual).

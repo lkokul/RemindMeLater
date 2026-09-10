@@ -99,6 +99,20 @@ extension ResumenDelDia: Decodable {
               let datos = texto.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(ResumenDelDia.self, from: datos)
     }
+
+    // ¿EXISTE SIQUIERA EL BUZÓN COMPARTIDO?
+    //
+    // UserDefaults(suiteName:) devuelve nil cuando el App Group no viajó
+    // en la firma, y ese caso se veía EXACTAMENTE igual que "la app
+    // todavía no ha escrito nada": el widget decía "Abre la app" y por
+    // mucho que la abrieras no cambiaba nunca. Pasó de verdad (build #51)
+    // y costó dar con ello porque en el iPhone no hay consola.
+    //
+    // Distinguirlo aquí hace que la propia pantalla del widget diga cuál
+    // de los dos problemas es, sin necesitar ni cable ni Xcode.
+    static func hayBuzon() -> Bool {
+        return UserDefaults(suiteName: grupoDeLaApp) != nil
+    }
 }
 
 // "#rrggbb" -> Color, igual que en la Live Activity: el color viaja en el
@@ -137,6 +151,9 @@ private extension View {
 struct QueTocaEntry: TimelineEntry {
     let date: Date
     let resumen: ResumenDelDia?
+    // true = ni siquiera hay App Group, o sea que no es que falten datos:
+    // es que la app y el widget no comparten buzón. Ver hayBuzon().
+    var sinBuzon: Bool = false
 }
 
 struct QueTocaProvider: TimelineProvider {
@@ -150,7 +167,11 @@ struct QueTocaProvider: TimelineProvider {
         // El tipo va explícito porque en un ternario con nil Swift no
         // tiene de dónde deducirlo.
         let deRespaldo: ResumenDelDia? = context.isPreview ? ResumenDelDia.ejemplo : nil
-        completion(QueTocaEntry(date: Date(), resumen: ResumenDelDia.leer() ?? deRespaldo))
+        completion(QueTocaEntry(
+            date: Date(),
+            resumen: ResumenDelDia.leer() ?? deRespaldo,
+            sinBuzon: !ResumenDelDia.hayBuzon()
+        ))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<QueTocaEntry>) -> Void) {
@@ -165,7 +186,11 @@ struct QueTocaProvider: TimelineProvider {
         let mañana = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date().addingTimeInterval(86400)
         let medianoche = Calendar.current.startOfDay(for: mañana)
         completion(Timeline(
-            entries: [QueTocaEntry(date: Date(), resumen: ResumenDelDia.leer())],
+            entries: [QueTocaEntry(
+                date: Date(),
+                resumen: ResumenDelDia.leer(),
+                sinBuzon: !ResumenDelDia.hayBuzon()
+            )],
             policy: .after(medianoche)
         ))
     }
@@ -192,12 +217,14 @@ struct QueTocaHoyView: View {
     private var resumen: ResumenDelDia? { entry.resumen }
     private var acento: Color { Color(hex: resumen?.color ?? "#5b8cff") }
     private var titulo: String {
-        guard let r = resumen else { return "Abre la app" }
+        guard let r = resumen else { return entry.sinBuzon ? "Sin buzón" : "Abre la app" }
         if !r.hayCiclo { return "Sin ciclo" }
         return r.esDescanso ? "Descanso" : r.nombre
     }
     private var subtitulo: String {
-        guard let r = resumen else { return "para preparar el widget" }
+        guard let r = resumen else {
+            return entry.sinBuzon ? "falta el App Group" : "para preparar el widget"
+        }
         if !r.hayCiclo { return "Elige tu día al entrenar" }
         if r.total > 0 { return "Día \(r.posicion) de \(r.total)" }
         return ""

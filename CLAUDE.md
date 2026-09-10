@@ -1541,6 +1541,43 @@ build casca firmando, es esto**: se arregla dando de alta el grupo una
 vez en el portal de desarrollador (o abriendo el proyecto en Xcode con la
 cuenta y dejando que lo cree).
 
+**Y falló de verdad, en silencio, en las builds #40–#52.** El widget se
+quedaba en "Abre la app" por muchas veces que Koku la abriera. La causa
+estaba en el workflow, no en el código: se archivaba con
+`CODE_SIGNING_ALLOWED=NO`, y **los entitlements se incrustan al FIRMAR**.
+Sin firma en el archivo no había entitlements que incrustar, así que
+`-exportArchive` no tenía forma de saber que hacía falta un perfil con
+App Groups: pedía uno pelado y firmaba con lo único que trae de serie
+(`application-identifier`, `team-identifier`, `get-task-allow`,
+`beta-reports-active`). Resultado: `UserDefaults(suiteName:)` devolvía
+nil en el iPhone y no había ni un error en ninguna parte.
+
+Lo que hay ahora en `ios-testflight.yml`, y por qué:
+
+- **Se archiva firmando ad hoc** (`CODE_SIGN_IDENTITY=-` +
+  `CODE_SIGN_STYLE=Manual` + `AD_HOC_CODE_SIGNING_ALLOWED=YES` +
+  `CODE_SIGNING_REQUIRED=NO`, sin perfil): firma que no necesita ni
+  certificado ni perfil, pero que SÍ incrusta los entitlements. Con eso el
+  archivo ya lleva el App Group y `-exportArchive` sabe qué perfil pedir.
+  **No se puede archivar con firma automática de verdad**: Xcode pide
+  entonces un perfil de DESARROLLO y Apple se niega a crearlo si el equipo
+  no tiene dispositivos registrados, que es el caso de un runner.
+- **Dos comprobaciones, a propósito, no una**: una sobre el `.xcarchive`
+  (antes de exportar) y otra sobre el `.ipa` ya firmado. Si falla la
+  primera, el problema es la firma ad hoc; si pasa la primera y falla la
+  segunda, el problema es el PERFIL, o sea la capacidad en el portal de
+  Apple. Sin separarlas, lo caro no es el fallo: es no saber cuál de los
+  dos es.
+- **Casilla `sin_app_group` en el diálogo de Run workflow**: vuelve al
+  archivo sin firmar de antes y se salta las dos comprobaciones. Es la
+  salida de emergencia para poder seguir sacando builds de TestFlight
+  (el widget saldrá vacío) si el portal de Apple da guerra y hace falta
+  probar cualquier otra cosa YA.
+- **El widget distingue los dos casos en pantalla**
+  (`ResumenDelDia.hayBuzon()`): "Abre la app" es "aún no hay datos";
+  **"Sin buzón · falta el App Group"** es "la firma no trajo el grupo".
+  Antes los dos se veían igual, y en el iPhone no hay consola donde mirar.
+
 ### Las piezas
 
 - **`public/widget-bridge.js`** — arma el resumen y se lo pasa al plugin.

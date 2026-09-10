@@ -21,6 +21,11 @@ on:
         description: 'Nombre descriptivo para este build (opcional)'
         required: false
         type: string
+      sin_app_group:
+        description: 'Compilar SIN el App Group (el widget de "Que toca hoy" saldra vacio, pero la build sube igual)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build-and-upload:
@@ -55,16 +60,56 @@ jobs:
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # Se archiva SIN FIRMAR a proposito, y la firma se hace entera
-          # en el paso de exportar. Motivo: la firma automatica de Xcode,
-          # al archivar, siempre pide un perfil de DESARROLLO -- y Apple
-          # se niega a crear uno si el equipo no tiene ningun dispositivo
+          # AQUI NO SE PIDE NINGUN PERFIL, PERO SI SE FIRMA.
+          #
+          # Por que no se pide perfil: la firma automatica de Xcode, al
+          # archivar, siempre pide un perfil de DESARROLLO -- y Apple se
+          # niega a crear uno si el equipo no tiene ningun dispositivo
           # registrado ("Your team has no devices..."), que es justo el
           # caso de un pipeline sin Mac ni iPhone conectado. Imponerle la
           # identidad de distribucion tampoco vale: con estilo automatico
-          # Xcode la rechaza ("conflicting provisioning settings"). En
-          # cambio el perfil de App Store que pide -exportArchive SI se
-          # crea sin dispositivos, asi que ahi es donde se firma.
+          # Xcode la rechaza ("conflicting provisioning settings"). El
+          # perfil de App Store que pide -exportArchive SI se crea sin
+          # dispositivos, asi que la firma DE VERDAD sigue estando ahi.
+          #
+          # Por que aun asi se firma aqui (CODE_SIGN_IDENTITY="-", firma
+          # "ad hoc", que no necesita ni perfil ni certificado): los
+          # ENTITLEMENTS se incrustan en el binario al firmar. Con
+          # CODE_SIGNING_ALLOWED=NO, como estaba antes, Xcode se saltaba
+          # ese paso entero y el archivo salia SIN entitlements; entonces
+          # -exportArchive, al no ver ninguno, pedia un perfil "pelado" y
+          # firmaba con lo unico que trae de serie (application-identifier,
+          # team-identifier, get-task-allow). Resultado: el App Group
+          # desaparecia sin un solo error, UserDefaults(suiteName:) devolvia
+          # nil en el iPhone y el widget se quedaba en "Abre la app" para
+          # siempre. Comprobado leyendo los entitlements del .ipa de la
+          # build #52.
+          #
+          # Firmando ad hoc, el archivo YA lleva el App Group, y entonces
+          # -exportArchive sabe que hace falta un perfil que lo incluya:
+          # con -allowProvisioningUpdates lo da de alta el solo, y si no
+          # pudiera, falla diciendolo en vez de callarse.
+          #
+          # La casilla "sin_app_group" del dialogo de Run workflow es la
+          # salida de emergencia: vuelve al archivo sin firmar de antes,
+          # o sea sin App Group, para poder seguir sacando builds de
+          # TestFlight aunque el widget se quede vacio. Solo tiene sentido
+          # si el paso de exportar casca pidiendo la capacidad y hace falta
+          # una build YA para probar cualquier otra cosa.
+          if [ "${{ inputs.sin_app_group }}" = "true" ]; then
+            echo "AVISO: compilando SIN App Group (el widget saldra vacio)."
+            FIRMA=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
+          else
+            FIRMA=(
+              CODE_SIGN_STYLE=Manual
+              CODE_SIGN_IDENTITY=-
+              AD_HOC_CODE_SIGNING_ALLOWED=YES
+              CODE_SIGNING_ALLOWED=YES
+              CODE_SIGNING_REQUIRED=NO
+              PROVISIONING_PROFILE_SPECIFIER=
+            )
+          fi
+
           xcodebuild archive \
             -project ios/App/App.xcodeproj \
             -scheme App \
@@ -72,8 +117,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/App.xcarchive" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
+            "${FIRMA[@]}" \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
 
       # La Live Activity solo funciona si la extension DescansoWidget viaja
@@ -87,6 +131,36 @@ jobs:
           echo "Contenido de PlugIns:"
           ls -la "$PLUGINS" || true
           test -d "$PLUGINS/DescansoWidget.appex"
+
+      # El App Group tiene que estar YA en el archivo, antes de exportar.
+      # Si falla aqui, el problema es la firma ad hoc del paso anterior;
+      # si pasa aqui y falla despues, el problema es el perfil de App
+      # Store (o sea, la capacidad dada de alta en el portal de Apple).
+      # Separar los dos casos ahorra la parte mas cara de este lio, que es
+      # no saber cual de los dos es.
+      - name: Comprobar el App Group en el archivo (antes de exportar)
+        if: ${{ inputs.sin_app_group != true }}
+        run: |
+          APP="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+          APPEX="$APP/PlugIns/DescansoWidget.appex"
+          falta=0
+          for objetivo in "$APP" "$APPEX"; do
+            echo "==== $objetivo ===="
+            codesign -d --entitlements :- "$objetivo" 2>/dev/null || true
+            echo ""
+            if codesign -d --entitlements :- "$objetivo" 2>/dev/null | grep -q "group.com.koku.remindmelater"; then
+              echo "OK: lleva el App Group"
+            else
+              echo "FALTA el App Group"
+              falta=1
+            fi
+          done
+          if [ "$falta" = "1" ]; then
+            echo ""
+            echo "El archivo se ha generado sin el App Group: la firma ad hoc"
+            echo "del paso anterior no ha incrustado los entitlements."
+            exit 1
+          fi
 
       - name: Generar ExportOptions.plist
         env:
@@ -123,17 +197,18 @@ jobs:
 
       # COMPROBAR LOS ENTITLEMENTS DEL .ipa YA FIRMADO.
       #
-      # Por que hace falta: se archiva SIN FIRMAR (CODE_SIGNING_ALLOWED=NO,
-      # ver el comentario del paso de archivar) y los entitlements se
-      # incrustan AL FIRMAR. Si el App Group no sobrevive a ese camino, no
-      # hay ningun error: la build sale verde, la app se instala, y
-      # UserDefaults(suiteName:) devuelve nil en el movil -- el widget se
-      # queda con "Abre la app" para siempre. Paso de verdad con la #51.
+      # Por que hace falta: -exportArchive VUELVE A FIRMAR todo con el
+      # perfil de App Store, asi que puede perder por el camino lo que el
+      # archivo si traia. Y cuando eso pasa no hay ningun error: la build
+      # sale verde, la app se instala, y UserDefaults(suiteName:) devuelve
+      # nil en el movil -- el widget se queda con "Abre la app" para
+      # siempre. Paso de verdad en las builds #51 y #52.
       #
       # Esto lo convierte en un fallo RUIDOSO: se imprimen los entitlements
       # reales de la app y de la extension, y si al widget le falta el
       # grupo se tira la build antes de subir nada a TestFlight.
       - name: Comprobar que el App Group viajo en la firma
+        if: ${{ inputs.sin_app_group != true }}
         run: |
           cd "$RUNNER_TEMP/export"
           unzip -q App.ipa -d ipa
@@ -157,10 +232,13 @@ jobs:
 
           if [ "$falta" = "1" ]; then
             echo ""
-            echo "El App Group NO ha sobrevivido a la firma."
-            echo "Sin el, la app y el widget no comparten buzon y el widget"
-            echo "se queda en blanco. Ver ANDROID-PENDIENTE.md no; ver el"
-            echo "bloque de Widgets en CLAUDE.md."
+            echo "El App Group NO ha sobrevivido a exportar."
+            echo "Como si estaba en el archivo, lo que falla es el PERFIL de"
+            echo "App Store: el App ID de Apple no tiene dada de alta la"
+            echo "capacidad App Groups, o el grupo group.com.koku.remindmelater"
+            echo "no existe todavia. Se da de alta una sola vez en"
+            echo "developer.apple.com (Certificates, Identifiers & Profiles)."
+            echo "Ver el bloque de Widgets en CLAUDE.md."
             exit 1
           fi
 
