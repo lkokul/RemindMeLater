@@ -29,8 +29,8 @@ let claveResumen = "resumenApp"
 // El patrón es siempre `(try? c.decode(...)) ?? porDefecto`, y no
 // decodeIfPresent, para que una clave que falte Y una que venga con el
 // tipo cambiado caigan las dos en el valor por defecto.
-private func texto(_ c: KeyedDecodingContainer<ResumenDeLaApp.CodingKeys>,
-                   _ k: ResumenDeLaApp.CodingKeys, _ porDefecto: String = "") -> String {
+private func leerTexto(_ c: KeyedDecodingContainer<ResumenDeLaApp.CodingKeys>,
+                       _ k: ResumenDeLaApp.CodingKeys, _ porDefecto: String = "") -> String {
     (try? c.decode(String.self, forKey: k)) ?? porDefecto
 }
 
@@ -67,14 +67,14 @@ struct ResumenDeLaApp: Decodable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         actualizado = (try? c.decode(Double.self, forKey: .actualizado)) ?? 0
-        acento = texto(c, .acento, "#5b8cff")
-        fondo = texto(c, .fondo, "")
-        self.texto = texto(c, .texto, "")
-        estiloWidget = texto(c, .estiloWidget, "app")
-        fondoClaro = texto(c, .fondoClaro, "")
-        textoClaro = texto(c, .textoClaro, "")
-        fondoOscuro = texto(c, .fondoOscuro, "")
-        textoOscuro = texto(c, .textoOscuro, "")
+        acento = leerTexto(c, .acento, "#5b8cff")
+        fondo = leerTexto(c, .fondo, "")
+        self.texto = leerTexto(c, .texto, "")
+        estiloWidget = leerTexto(c, .estiloWidget, "app")
+        fondoClaro = leerTexto(c, .fondoClaro, "")
+        textoClaro = leerTexto(c, .textoClaro, "")
+        fondoOscuro = leerTexto(c, .fondoOscuro, "")
+        textoOscuro = leerTexto(c, .textoOscuro, "")
         // Cada sección por separado: que Finanzas venga rota no puede
         // dejar sin datos al calendario.
         hoy = try? c.decode(SeccionHoy.self, forKey: .hoy)

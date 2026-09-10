@@ -190,6 +190,122 @@ faltan = sorted(k for k in claves_swift if k not in puente)
 if faltan:
     fallos.append(f'claves que Swift lee y el JavaScript no escribe: {faltan}')
 
+# --- 3) nombres que se tapan entre si --------------------------------
+#
+# Esto tumbo la build #57 y no lo pillaba nada. En ResumenDeLaApp.swift
+# habia una funcion de ARCHIVO llamada `texto(...)` (el ayudante que
+# decodifica una cadena) y al struct se le anadio una PROPIEDAD tambien
+# llamada `texto`. Dentro del struct, el nombre corto se resuelve a la
+# propiedad, no a la funcion, asi que las ocho llamadas `texto(c, ...)`
+# dejaron de compilar:
+#
+#   error: use of 'texto' refers to instance method rather than global
+#          function 'texto' in module 'DescansoWidget'
+#
+# Ojo: en QueTocaHoyWidget.swift el mismo ayudante NO da problema porque
+# alli es una funcion LOCAL declarada dentro del init, y esas si ganan a
+# la propiedad. Por eso la regla mira solo las funciones de archivo.
+SWIFT = ([f'ios/App/DescansoWidget/{f}' for f in swift_widget]
+         + [f'ios/App/App/{f}' for f in sorted(os.listdir('ios/App/App'))
+            if f.endswith('.swift')])
+for ruta in sorted(SWIFT):
+    txt = leer(ruta)
+    # Funciones declaradas al ras del archivo (sin sangria).
+    funcs = set(re.findall(r'^(?:private |internal |public |fileprivate )*func (\w+)\(', txt, re.M))
+    if not funcs:
+        continue
+    # Propiedades almacenadas de cualquier tipo del mismo archivo (con
+    # sangria, que es lo que las distingue de una variable de archivo).
+    props = set(re.findall(r'^\s+(?:var|let) (\w+)\s*[:=]', txt, re.M))
+    choque = sorted(funcs & props)
+    if choque:
+        fallos.append(
+            f'{ruta}: {choque} es a la vez funcion de archivo y propiedad; '
+            'dentro del tipo gana la propiedad y las llamadas no compilan '
+            '(renombra la funcion, p. ej. leerTexto)')
+
+# --- 4) equilibrio de llaves en el Swift ------------------------------
+#
+# Aqui no hay Xcode, asi que un parentesis o una llave de menos no se
+# descubre hasta que falla la compilacion en el runner -- y eso son 15
+# minutos y una build gastada. Este recorrido va caracter a caracter
+# llevando la cuenta de lo que un regex NO sabe llevar:
+#
+# - los comentarios de bloque de Swift ANIDAN (/* /* */ */),
+# - las cadenas admiten interpolacion \(...) con parentesis dentro,
+#   comillas dentro y hasta otra cadena dentro,
+# - y las cadenas de tres comillas se comen todo lo demas.
+#
+# Sin esto, un `\(n == 1 ? "" : "s")` se traga medio archivo.
+def equilibrio(txt):
+    pila = []          # llaves/parentesis/corchetes abiertos
+    interp = []        # profundidad de parentesis de cada \( abierta
+    i, n = 0, len(txt)
+    comentario = 0     # nivel de /* anidado
+    cadena = None      # None, '"' o '"""'
+    linea = 1
+    while i < n:
+        c = txt[i]
+        if c == '\n':
+            linea += 1
+        if comentario:
+            if txt.startswith('/*', i):
+                comentario += 1; i += 2; continue
+            if txt.startswith('*/', i):
+                comentario -= 1; i += 2; continue
+            i += 1; continue
+        if cadena:
+            if c == '\\':
+                # \( abre interpolacion: se vuelve a codigo hasta cerrarla
+                if txt.startswith('\\(', i):
+                    interp.append(len(pila))
+                    pila.append(('(', linea))
+                    cadena = None
+                    i += 2; continue
+                i += 2; continue   # cualquier otro escape
+            if cadena == '"""' and txt.startswith('"""', i):
+                cadena = None; i += 3; continue
+            if cadena == '"' and c == '"':
+                cadena = None; i += 1; continue
+            i += 1; continue
+        # --- codigo normal ---
+        if txt.startswith('//', i):
+            j = txt.find('\n', i)
+            i = n if j < 0 else j; continue
+        if txt.startswith('/*', i):
+            comentario = 1; i += 2; continue
+        if txt.startswith('"""', i):
+            cadena = '"""'; i += 3; continue
+        if c == '"':
+            cadena = '"'; i += 1; continue
+        if c in '([{':
+            pila.append((c, linea)); i += 1; continue
+        if c in ')]}':
+            if not pila:
+                return f'linea {linea}: sobra un "{c}"'
+            abierto, donde = pila.pop()
+            if abierto != {')': '(', ']': '[', '}': '{'}[c]:
+                return f'linea {linea}: "{c}" cierra un "{abierto}" abierto en la linea {donde}'
+            # Se cerro el parentesis de una interpolacion: vuelve la cadena
+            if interp and len(pila) == interp[-1]:
+                interp.pop()
+                cadena = '"'
+            i += 1; continue
+        i += 1
+    if pila:
+        abierto, donde = pila[-1]
+        return f'se queda sin cerrar un "{abierto}" abierto en la linea {donde}'
+    if comentario:
+        return 'se queda un /* sin cerrar'
+    if cadena:
+        return 'se queda una cadena sin cerrar'
+    return None
+
+for ruta in sorted(SWIFT):
+    mal = equilibrio(leer(ruta))
+    if mal:
+        fallos.append(f'{ruta}: {mal}')
+
 # --- resultado -------------------------------------------------------
 if fallos:
     print('FALLOS:')

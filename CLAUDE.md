@@ -1707,7 +1707,9 @@ guerra y hay que probar otra cosa YA.
 **El Swift no se puede compilar aquí** (contenedor Linux, sin Xcode). Lo
 que sí se hizo:
 
-- Un analizador propio de Swift (`scratchpad/swiftcheck.py`) que recorre
+- Un analizador propio de Swift (hoy dentro de
+  `tools/comprobar-widgets.py`; nació en un scratchpad y se perdió con
+  aquella sesión, ver el bloque de la build #57) que recorre
   los archivos carácter a carácter llevando la cuenta de comentarios (los
   de bloque **anidan** en Swift), cadenas y su interpolación `\(...)`.
   Un regex normal se traga medio archivo en cuanto hay un
@@ -1859,7 +1861,7 @@ compara el guion de comprobación (ver más abajo).
   `esDeHoy` lo detecta y el widget lo dice, en vez de enseñar datos de
   antesdeayer como si fueran de hoy.
 
-### El guion de comprobación (`scratchpad/comprobar.py`)
+### El guion de comprobación (`tools/comprobar-widgets.py`)
 
 Aquí no hay Xcode, así que hay dos cosas que ningún compilador va a
 pillar y que un guion sí:
@@ -2200,6 +2202,37 @@ modal. Ahora la marca se pone un ciclo DESPUÉS de crear el campo
 que nunca llegue al DOM se queda sin marcar y no se barre nunca, que es
 lo prudente: mejor dejar basura que tirar un campo vivo.
 
+## Por qué no compiló la build #57: un nombre que tapaba a otro
+
+`ResumenDeLaApp.swift` tenía desde el principio una función de ARCHIVO
+llamada `texto(...)` — el ayudante que saca una cadena del JSON con su
+valor por defecto. Al añadir el selector de tema de los widgets, al
+struct le entró una PROPIEDAD también llamada `texto` (el color del
+texto). Dentro del tipo, el nombre corto se resuelve a la propiedad, no
+a la función, así que las ocho llamadas dejaron de compilar de golpe:
+
+```
+error: use of 'texto' refers to instance method rather than global
+       function 'texto' in module 'DescansoWidget'
+```
+
+La función pasa a llamarse `leerTexto`. **Lo que despista de este fallo**
+es que `QueTocaHoyWidget.swift` hace exactamente lo mismo y sí compila:
+allí el ayudante es una función LOCAL declarada DENTRO del `init`, y esas
+sí ganan a la propiedad. Solo las de archivo pierden.
+
+`tools/comprobar-widgets.py` lo detecta ahora (probado rompiéndolo a
+propósito), y de paso recupera el **analizador estructural de Swift** que
+vivía en un scratchpad y se perdió con la sesión: recorre los archivos
+carácter a carácter llevando la cuenta de llaves, paréntesis, cadenas
+(incluidas las de tres comillas y la interpolación `\(...)`) y
+comentarios de bloque, que en Swift ANIDAN. Un `\(n == 1 ? "" : "s")` se
+traga medio archivo si se intenta con un regex.
+
+**Lanzar `python3 tools/comprobar-widgets.py` antes de pedir una build**
+sigue siendo lo más barato que hay: aquí no hay Xcode, y cada vuelta al
+runner son ~15 minutos y una compilación gastada de la cuota de Koku.
+
 ## Dos ramas: `desarrollador` y `movil-ui`
 
 Decisión de Koku (10/9/2026), después de que el widget se quedara en
@@ -2297,8 +2330,11 @@ propios ejercicios en el "+" del entreno (que era la causa real de lo de
 los unilaterales), la fuga de popovers, y **Configuración > Widgets** con
 las tres combinaciones de tema/estilo.
 
-**NINGUNA de las dos tiene build todavía.** La última subida a TestFlight
-es la #56 (v0.43.0), que es la que Koku probó.
+**La build #57 (v0.45.0) NO llegó a TestFlight: no compiló**, por el
+choque de nombres que cuenta el bloque "Por qué no compiló la build #57"
+más arriba. Ya está arreglado en la rama; falta lanzar la siguiente.
+La última subida a TestFlight sigue siendo la #56 (v0.43.0), que es la
+que Koku probó.
 
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 
