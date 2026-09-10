@@ -9955,6 +9955,9 @@ function formatFinanzasAmount(n) {
   return `${FINANZAS_MONEY_FORMATTER.format(num)} €`;
 }
 
+let finanzasGoalIconField = null;
+let finanzasGoalColorField = null;
+
 function setupFinanzasIconColorFields() {
   if (finanzasIconColorFieldsReady) return;
   finanzasIconColorFieldsReady = true;
@@ -9971,6 +9974,11 @@ function setupFinanzasIconColorFields() {
 
   finanzasPortfolioColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
   document.getElementById('finanzas-portfolio-color-field').appendChild(finanzasPortfolioColorField.element);
+
+  finanzasGoalIconField = createIconField({ initialValue: '' });
+  document.getElementById('finanzas-goal-icon-field').appendChild(finanzasGoalIconField.element);
+  finanzasGoalColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
+  document.getElementById('finanzas-goal-color-field').appendChild(finanzasGoalColorField.element);
 }
 
 async function loadFinanzasAccounts() {
@@ -15406,6 +15414,21 @@ document.getElementById('finanzas-category-form').addEventListener('submit', asy
 
 // -- Pestaña Resumen: saldo por cuenta, progreso del limite mensual, y
 //    desglose del gasto de este mes por categoria. --
+// Lo que cada cuenta tiene RESERVADO por objetivos sin cumplir. Se pide
+// aparte y se guarda aqui para que renderFinanzasAccountsSummary pueda
+// seguir siendo sincrona (la llaman varios sitios).
+let finanzasReservadoPorCuenta = {};
+
+async function loadFinanzasReservado() {
+  try {
+    finanzasReservadoPorCuenta = await api('/api/finanzas-goals/reserved-by-account');
+  } catch (err) {
+    // Sin esto la cuenta simplemente no enseña la linea de reservado; no
+    // es motivo para dejar el Resumen sin pintar.
+    finanzasReservadoPorCuenta = {};
+  }
+}
+
 function renderFinanzasAccountsSummary() {
   const wrap = document.getElementById('finanzas-accounts-summary');
   wrap.innerHTML = '';
@@ -15438,6 +15461,24 @@ function renderFinanzasAccountsSummary() {
       <span class="finanzas-account-card-name">${a.icon ? escapeHtml(a.icon) + ' ' : ''}${escapeHtml(a.name)}${a.type ? ` <span class="finanzas-account-type-badge">${escapeHtml(a.type)}</span>` : ''}</span>
       <span class="finanzas-account-card-balance${a.balance < 0 ? ' negative' : ''}">${formatFinanzasAmount(a.balance)}</span>
     `;
+
+    // Si hay objetivos apuntando a esta cuenta, se enseña el desglose: el
+    // saldo de arriba SIGUE siendo el de verdad (el dinero no se ha movido
+    // a ningun sitio), y debajo se dice cuanto esta hablado y cuanto queda
+    // libre. Es el sentido entero de los sobres.
+    const reservado = finanzasReservadoPorCuenta[a.id] || 0;
+    if (reservado > 0) {
+      const detalle = document.createElement('span');
+      detalle.className = 'finanzas-account-card-reserved';
+      const disponible = a.balance - reservado;
+      detalle.textContent =
+        disponible < 0
+          ? `${formatFinanzasAmount(reservado)} reservados — más de lo que tienes`
+          : `${formatFinanzasAmount(disponible)} libres · ${formatFinanzasAmount(reservado)} reservados`;
+      if (disponible < 0) detalle.classList.add('finanzas-account-card-reserved-alerta');
+      card.appendChild(detalle);
+    }
+
     wrap.appendChild(card);
   });
 }
@@ -15627,6 +15668,13 @@ document.getElementById('finanzas-incluir-terceros').addEventListener('change', 
 });
 
 async function renderFinanzasResumenTab() {
+  // Se recargan las cuentas ANTES de pintar sus saldos. Antes se pintaban
+  // desde la copia en memoria, y cualquier camino que moviera dinero sin
+  // acordarse de refrescarla dejaba un saldo VIEJO en pantalla -- se vio
+  // al gastar un objetivo: la cuenta seguia diciendo 1.900 € cuando ya
+  // eran 649,45 €. En una app de cuentas, una cifra caducada es de lo
+  // peor que puede salir, y recargar aqui cuesta una consulta local.
+  await Promise.all([loadFinanzasAccounts(), loadFinanzasReservado()]);
   renderFinanzasAccountsSummary();
   const [summary, trend] = await Promise.all([
     api(`/api/finanzas-transactions/summary/month${finanzasTercerosQS('?')}`),
@@ -17080,6 +17128,279 @@ document.getElementById('finanzas-investment-form').addEventListener('submit', a
 });
 
 // =====================================================================
+// Objetivos de ahorro: sobres virtuales sobre una cuenta.
+//
+// "Coche, 5.000 €" y vas apartando. El dinero NO se mueve: la cuenta
+// sigue con su saldo y el objetivo solo reserva una parte. Lo que hace
+// util esto no es la barra de progreso, es el cruce con lo que la app ya
+// sabe: con meta y fecha te dice cuanto tendrias que apartar al mes, y si
+// a tu ritmo real de ahorro llegas o no.
+// =====================================================================
+
+let finanzasGoals = [];
+let finanzasGoalDetalle = null;
+let finanzasGoalRitmo = null;
+
+const finanzasGoalAccountField = createSelectField({
+  options: [{ value: '', label: 'Sin cuenta' }],
+  initialValue: '',
+});
+document.getElementById('finanzas-goal-account-field').appendChild(finanzasGoalAccountField.element);
+
+const finanzasGoalDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('finanzas-goal-date-field').appendChild(finanzasGoalDateField.element);
+
+async function loadFinanzasGoals() {
+  const [lista, ritmo] = await Promise.all([api('/api/finanzas-goals'), api('/api/finanzas-goals/pace')]);
+  finanzasGoals = lista;
+  finanzasGoalRitmo = ritmo;
+}
+
+// "Te faltan 3.200 € en 10 meses -> 320 €/mes", y si con lo que ahorras de
+// media no llegas, se dice. Avisa, no impide nada: es su dinero.
+function finanzasGoalTextoRitmo(g) {
+  if (g.completedAt) return 'Objetivo cumplido.';
+  if (g.remaining <= 0) return '¡Ya lo tienes! Puedes gastarlo cuando quieras.';
+  if (!g.perMonthNeeded) {
+    return g.targetDate
+      ? `La fecha ya pasó y aún te faltan ${formatFinanzasAmount(g.remaining)}.`
+      : `Te faltan ${formatFinanzasAmount(g.remaining)}. Ponle fecha y te digo cuánto apartar al mes.`;
+  }
+  let texto = `Te faltan ${formatFinanzasAmount(g.remaining)} en ${g.monthsLeft} ${g.monthsLeft === 1 ? 'mes' : 'meses'}: ${formatFinanzasAmount(g.perMonthNeeded)} al mes.`;
+  const medio = finanzasGoalRitmo ? finanzasGoalRitmo.averageMonthlySavings : 0;
+  if (medio > 0) {
+    if (medio < g.perMonthNeeded) {
+      const mesesReales = Math.ceil(g.remaining / medio);
+      const llegada = new Date();
+      llegada.setMonth(llegada.getMonth() + mesesReales);
+      texto += ` Ahorras ${formatFinanzasAmount(medio)} al mes de media, así que a este ritmo llegarías en ${FINANZAS_MONTH_NAMES[llegada.getMonth()].toLowerCase()} de ${llegada.getFullYear()}.`;
+    } else {
+      texto += ` Ahorras ${formatFinanzasAmount(medio)} al mes de media, así que vas sobrado.`;
+    }
+  }
+  return texto;
+}
+
+function renderFinanzasGoalsList() {
+  const cont = document.getElementById('finanzas-goals-list');
+  cont.innerHTML = '';
+  if (finanzasGoals.length === 0) {
+    cont.appendChild(finanzasFijosVacioEl('Todavía no tienes objetivos. Crea uno con el botón de arriba.'));
+    return;
+  }
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  finanzasGoals.forEach((g) => {
+    const fila = finanzasFilaEl({
+      icono: g.icon || '🎯',
+      color: g.color || '',
+      titulo: g.name,
+      sub: `${formatFinanzasAmount(g.reserved)} de ${formatFinanzasAmount(g.targetAmount)}${g.targetDate ? ` · para ${finanzasFijosFechaCorta(g.targetDate)}` : ''}`,
+      importe: `${Math.round(g.progress * 100)}%`,
+      etiqueta: g.completedAt ? 'Cumplido' : '',
+      etiquetaTono: 'ok',
+      alPulsar: () => openFinanzasGoalDetail(g),
+    });
+    if (g.completedAt) fila.classList.add('finanzas-row-muted');
+    grupo.appendChild(fila);
+
+    // Barra de progreso bajo cada objetivo: es lo que se mira de un
+    // vistazo, y en una lista de sobres el porcentaje suelto se queda
+    // corto para comparar unos con otros.
+    const barra = document.createElement('div');
+    barra.className = 'finanzas-goal-bar';
+    const relleno = document.createElement('div');
+    relleno.className = 'finanzas-goal-bar-fill';
+    relleno.style.width = `${Math.round(g.progress * 100)}%`;
+    if (g.color) relleno.style.background = g.color;
+    barra.appendChild(relleno);
+    grupo.appendChild(barra);
+  });
+  cont.appendChild(grupo);
+}
+
+async function refreshFinanzasGoalsTab() {
+  await loadFinanzasGoals();
+  renderFinanzasGoalsList();
+}
+
+function openFinanzasGoalModal(g) {
+  setupFinanzasIconColorFields();
+  document.getElementById('finanzas-goal-modal-title').textContent = g ? 'Editar objetivo' : 'Nuevo objetivo';
+  document.getElementById('finanzas-goal-id').value = g ? g.id : '';
+  document.getElementById('finanzas-goal-name').value = g ? g.name : '';
+  document.getElementById('finanzas-goal-target').value = g ? g.targetAmount : '';
+  finanzasGoalIconField.setValue(g && g.icon ? g.icon : '');
+  finanzasGoalColorField.setValue(g && g.color ? g.color : DEFAULT_EVENT_COLOR);
+  finanzasGoalAccountField.setOptions([
+    { value: '', label: 'Sin cuenta' },
+    ...finanzasAccounts.map((a) => ({ value: String(a.id), label: `${a.icon ? a.icon + ' ' : ''}${a.name}` })),
+  ]);
+  finanzasGoalAccountField.setValue(g && g.accountId ? String(g.accountId) : '');
+  finanzasGoalDateField.setValue(g && g.targetDate ? new Date(`${g.targetDate}T12:00:00`) : null);
+  document.getElementById('finanzas-goal-modal').classList.remove('hidden');
+}
+function closeFinanzasGoalModal() {
+  document.getElementById('finanzas-goal-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-new-finanzas-goal').addEventListener('click', () => openFinanzasGoalModal(null));
+document.getElementById('btn-close-finanzas-goal').addEventListener('click', closeFinanzasGoalModal);
+document.getElementById('btn-cancel-finanzas-goal').addEventListener('click', closeFinanzasGoalModal);
+
+document.getElementById('finanzas-goal-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('finanzas-goal-id').value;
+  const fecha = finanzasGoalDateField.getValue();
+  const payload = {
+    name: document.getElementById('finanzas-goal-name').value,
+    targetAmount: document.getElementById('finanzas-goal-target').value,
+    icon: finanzasGoalIconField.getValue() || null,
+    color: finanzasGoalColorField.getValue() || null,
+    accountId: finanzasGoalAccountField.getValue() ? Number(finanzasGoalAccountField.getValue()) : null,
+    targetDate: fecha ? toDateKey(fecha) : null,
+  };
+  try {
+    if (id) await api(`/api/finanzas-goals/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    else await api('/api/finanzas-goals', { method: 'POST', body: JSON.stringify(payload) });
+  } catch (err) {
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  closeFinanzasGoalModal();
+  await refreshFinanzasGoalsTab();
+  await renderFinanzasResumenTab();
+});
+
+async function openFinanzasGoalDetail(g) {
+  finanzasGoalDetalle = g;
+  document.getElementById('finanzas-goal-detail-title').textContent = `${g.icon ? g.icon + ' ' : ''}${g.name}`;
+  document.getElementById('finanzas-goal-detail-sub').textContent =
+    `${formatFinanzasAmount(g.reserved)} apartados de ${formatFinanzasAmount(g.targetAmount)}${g.accountId ? ` · en ${finanzasAccountName(g.accountId)}` : ''}`;
+  document.getElementById('finanzas-goal-detail-pace').textContent = finanzasGoalTextoRitmo(g);
+
+  const prog = document.getElementById('finanzas-goal-detail-progress');
+  prog.innerHTML = '';
+  const barra = document.createElement('div');
+  barra.className = 'finanzas-goal-bar';
+  const relleno = document.createElement('div');
+  relleno.className = 'finanzas-goal-bar-fill';
+  relleno.style.width = `${Math.round(g.progress * 100)}%`;
+  if (g.color) relleno.style.background = g.color;
+  barra.appendChild(relleno);
+  prog.appendChild(barra);
+
+  document.getElementById('finanzas-goal-move-amount').value = '';
+  document.getElementById('btn-finanzas-goal-spend').classList.toggle('hidden', g.reserved <= 0);
+
+  const cont = document.getElementById('finanzas-goal-contributions');
+  cont.innerHTML = '';
+  cont.appendChild(finanzasFijosVacioEl('Cargando…'));
+  document.getElementById('finanzas-goal-detail-modal').classList.remove('hidden');
+
+  const movimientos = await api(`/api/finanzas-goals/${g.id}/contributions`);
+  cont.innerHTML = '';
+  if (movimientos.length === 0) {
+    cont.appendChild(finanzasFijosVacioEl('Todavía no has apartado nada.'));
+    return;
+  }
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  movimientos.forEach((m) => {
+    grupo.appendChild(
+      finanzasFilaEl({
+        icono: m.amount >= 0 ? '↑' : '↓',
+        titulo: m.notes || (m.amount >= 0 ? 'Apartado' : 'Sacado'),
+        sub: finanzasFijosFechaCorta(m.date),
+        importe: `${m.amount >= 0 ? '+' : '−'}${formatFinanzasAmount(Math.abs(m.amount))}`,
+      })
+    );
+  });
+  cont.appendChild(grupo);
+}
+
+function closeFinanzasGoalDetail() {
+  document.getElementById('finanzas-goal-detail-modal').classList.add('hidden');
+  finanzasGoalDetalle = null;
+}
+document.getElementById('btn-close-finanzas-goal-detail').addEventListener('click', closeFinanzasGoalDetail);
+
+// Apartar / sacar. El mismo campo para las dos cosas: el signo lo pone el
+// boton, no el usuario (escribir "-200" es justo el tipo de detalle que se
+// olvida y acaba sumando cuando queria restar).
+async function finanzasGoalMover(signo) {
+  const g = finanzasGoalDetalle;
+  if (!g) return;
+  const campo = document.getElementById('finanzas-goal-move-amount');
+  const importe = Number(campo.value);
+  if (!Number.isFinite(importe) || importe <= 0) {
+    await showAppConfirm('Escribe cuánto quieres mover, en positivo.', { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  try {
+    await api(`/api/finanzas-goals/${g.id}/contributions`, {
+      method: 'POST',
+      body: JSON.stringify({ amount: signo * importe }),
+    });
+  } catch (err) {
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  await refreshFinanzasGoalsTab();
+  const actualizado = finanzasGoals.find((x) => x.id === g.id);
+  if (actualizado) await openFinanzasGoalDetail(actualizado);
+  await renderFinanzasResumenTab();
+}
+document.getElementById('btn-finanzas-goal-add').addEventListener('click', () => finanzasGoalMover(1));
+document.getElementById('btn-finanzas-goal-take').addEventListener('click', () => finanzasGoalMover(-1));
+
+document.getElementById('btn-finanzas-goal-edit').addEventListener('click', () => {
+  const g = finanzasGoalDetalle;
+  closeFinanzasGoalDetail();
+  if (g) openFinanzasGoalModal(g);
+});
+
+document.getElementById('btn-finanzas-goal-delete').addEventListener('click', async () => {
+  const g = finanzasGoalDetalle;
+  if (!g) return;
+  const ok = await showAppConfirm(
+    `¿Eliminar el objetivo "${g.name}"?\n\nNo se toca tu dinero: apartar era solo una reserva, así que el saldo de tu cuenta no cambia. Lo que se pierde es el historial de este objetivo.`,
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/finanzas-goals/${g.id}`, { method: 'DELETE' });
+  closeFinanzasGoalDetail();
+  await refreshFinanzasGoalsTab();
+  await renderFinanzasResumenTab();
+});
+
+// Gastar el objetivo: el gasto REAL y el vaciado del sobre, de una vez.
+document.getElementById('btn-finanzas-goal-spend').addEventListener('click', async () => {
+  const g = finanzasGoalDetalle;
+  if (!g) return;
+  if (!g.accountId) {
+    await showAppConfirm('Este objetivo no está atado a ninguna cuenta, así que no sé de dónde sale el dinero. Edítalo y elige una.', { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  const ok = await showAppConfirm(
+    `¿Gastar ${formatFinanzasAmount(g.reserved)} de "${g.name}"?\n\nSe apunta el gasto de verdad en ${finanzasAccountName(g.accountId)} y el objetivo queda vacío y dado por cumplido.`,
+    { okText: 'Gastarlo' }
+  );
+  if (!ok) return;
+  try {
+    await api(`/api/finanzas-goals/${g.id}/spend`, { method: 'POST', body: JSON.stringify({}) });
+  } catch (err) {
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  closeFinanzasGoalDetail();
+  await refreshFinanzasGoalsTab();
+  await refreshFinanzasTransactionsTab();
+  await refreshFinanzasAccountsAndCategories();
+  await renderFinanzasResumenTab();
+});
+
+// =====================================================================
 // Navegacion de Finanzas: un INICIO de tarjetas y pantallas debajo.
 //
 // Antes eran cinco pestañas en una fila. No escalaba: con Objetivos,
@@ -17094,6 +17415,7 @@ const FINANZAS_SECCIONES = {
   resumen: 'Este mes',
   movimientos: 'Movimientos',
   'gastos-fijos': 'Gastos fijos',
+  objetivos: 'Objetivos',
   inversiones: 'Inversiones',
   deudas: 'Deudas',
 };
@@ -17239,6 +17561,22 @@ async function renderFinanzasInicio() {
     );
   }
 
+  const sinCumplir = finanzasGoals.filter((g) => !g.completedAt);
+  if (sinCumplir.length > 0) {
+    const apartado = sinCumplir.reduce((acc, g) => acc + g.reserved, 0);
+    const meta = sinCumplir.reduce((acc, g) => acc + g.targetAmount, 0);
+    const proximo = sinCumplir.slice().sort((a, b) => b.progress - a.progress)[0];
+    cont.appendChild(
+      finanzasTarjetaEl({
+        icono: '🎯',
+        titulo: 'Objetivos',
+        cifra: formatFinanzasAmount(apartado),
+        detalle: `de ${formatFinanzasAmount(meta)} · ${proximo.name} va por el ${Math.round(proximo.progress * 100)}%`,
+        destino: 'objetivos',
+      })
+    );
+  }
+
   cont.appendChild(
     finanzasTarjetaEl({
       icono: '🧾',
@@ -17295,7 +17633,7 @@ async function openFinanzasView() {
   // vista para no arrastrar una seleccion vieja de la sesion anterior.
   finanzasAssetTreeSelectedIds = new Set(finanzasAssets.map((a) => a.id));
   renderFinanzasAssetTree();
-  await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasRecurringTab(), refreshFinanzasInvestmentsTab(), refreshFinanzasDebtsTab()]);
+  await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasRecurringTab(), refreshFinanzasInvestmentsTab(), refreshFinanzasDebtsTab(), refreshFinanzasGoalsTab()]);
   // Y se repintan las tarjetas ahora que los datos estan cargados: la
   // primera pasada de arriba se hizo con las cuentas todavia vacias.
   await renderFinanzasInicio();

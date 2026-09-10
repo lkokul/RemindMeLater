@@ -1546,6 +1546,15 @@
       </div>
     </div>
 
+    <!-- Objetivos de ahorro: SOBRES virtuales sobre una cuenta. El dinero
+         no se mueve; el objetivo solo reserva parte del saldo, y por eso
+         la cuenta pasa a enseñar saldo / reservado / disponible. -->
+    <div class="finanzas-tab-panel hidden" data-finanzas-panel="objetivos">
+      <p class="hint">Apartar dinero para un objetivo no lo mueve de sitio: sigue en tu cuenta, solo queda reservado para esto.</p>
+      <button type="button" id="btn-new-finanzas-goal" class="primary-btn">+ Objetivo</button>
+      <div id="finanzas-goals-list" class="finanzas-group-list"></div>
+    </div>
+
     <!-- Pestaña Inversiones: registro manual de compra/venta/dividendos +
          resumen de ganancia/perdida REALIZADA por activo (ver nota en
          CLAUDE.md: nada de cotizaciones en vivo). -->
@@ -1735,6 +1744,55 @@
   </div>
 
   <!-- Modal de plantilla de gasto fijo (pestaña "Gastos fijos") -->
+  <div id="finanzas-goal-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-finanzas-goal" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="finanzas-goal-modal-title">Nuevo objetivo</h2>
+      <form id="finanzas-goal-form">
+        <input type="hidden" id="finanzas-goal-id" />
+        <label>Nombre<input type="text" id="finanzas-goal-name" placeholder="Ej. Coche" required /></label>
+        <label>Cantidad a la que quieres llegar<input type="number" id="finanzas-goal-target" step="0.01" min="0.01" required /></label>
+        <div class="form-row">
+          <label>Icono<div id="finanzas-goal-icon-field"></div></label>
+          <label>Color<div id="finanzas-goal-color-field"></div></label>
+        </div>
+        <label>Cuenta donde está el dinero<div id="finanzas-goal-account-field"></div></label>
+        <label>¿Para cuándo? (opcional)<div id="finanzas-goal-date-field"></div></label>
+        <p class="hint">Con una fecha, la app te dice cuánto tendrías que apartar al mes y si llegas a ese ritmo.</p>
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-finanzas-goal" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="finanzas-goal-detail-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-finanzas-goal-detail" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="finanzas-goal-detail-title">Objetivo</h2>
+      <div id="finanzas-goal-detail-sub" class="finanzas-detail-sub"></div>
+      <div id="finanzas-goal-detail-progress" class="finanzas-budget-progress"></div>
+      <div id="finanzas-goal-detail-pace" class="finanzas-detail-avisos"></div>
+
+      <h3 class="finanzas-detail-heading">Apartar o sacar</h3>
+      <div class="finanzas-goal-move-row">
+        <input type="number" id="finanzas-goal-move-amount" step="0.01" placeholder="Importe" />
+        <button type="button" id="btn-finanzas-goal-add" class="primary-btn">Apartar</button>
+        <button type="button" id="btn-finanzas-goal-take" class="secondary-btn">Sacar</button>
+      </div>
+
+      <h3 class="finanzas-detail-heading">Movimientos del objetivo</h3>
+      <div id="finanzas-goal-contributions" class="finanzas-group-list"></div>
+
+      <div class="finanzas-detail-actions">
+        <button type="button" id="btn-finanzas-goal-spend" class="primary-btn">Gastar el objetivo</button>
+        <button type="button" id="btn-finanzas-goal-edit" class="secondary-btn">Editar</button>
+        <button type="button" id="btn-finanzas-goal-delete" class="danger-btn">Eliminar</button>
+      </div>
+    </div>
+  </div>
+
   <div id="finanzas-recurring-modal" class="modal hidden">
     <div class="modal-card">
       <button type="button" id="btn-close-finanzas-recurring" class="modal-close-x" aria-label="Cerrar">✕</button>
@@ -2905,6 +2963,7 @@
   <script src="routes-local/finanzasAssets.js"></script>
   <script src="routes-local/finanzasCategories.js"></script>
   <script src="routes-local/finanzasDebts.js"></script>
+  <script src="routes-local/finanzasGoals.js"></script>
   <script src="routes-local/finanzasInvestments.js"></script>
   <script src="routes-local/finanzasPortfolios.js"></script>
   <script src="routes-local/finanzasRecurringExpenses.js"></script>

@@ -5222,3 +5222,33 @@ body.gym-rest-push #settings-modal .settings-card {
   font-size: 0.95rem;
   cursor: pointer;
 }
+
+/* Barra de progreso de un objetivo de ahorro. Va DEBAJO de su fila, de
+   lado a lado, para poder comparar unos objetivos con otros de un vistazo
+   (el porcentaje suelto obliga a leer numero a numero). */
+.finanzas-goal-bar {
+  height: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.finanzas-goal-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .finanzas-goal-bar-fill { transition: none; }
+}
+/* Apartar / sacar: campo ancho y los dos botones a su lado. */
+.finanzas-goal-move-row { display: flex; gap: 0.4rem; align-items: stretch; }
+.finanzas-goal-move-row input { flex: 1; min-width: 0; }
+.finanzas-goal-move-row button { flex-shrink: 0; }
+
+/* Desglose de una cuenta con objetivos: "1.200 € libres · 800 reservados".
+   El saldo grande de arriba sigue siendo el de verdad -- esto solo dice
+   cuanto de ese dinero ya esta hablado. */
+.finanzas-account-card-reserved {
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--surface-text) 55%, var(--surface));
+}
+.finanzas-account-card-reserved-alerta { color: var(--danger); }
