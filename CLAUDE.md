@@ -2317,17 +2317,43 @@ Bloque "FÓRMULAS EN LAS NOTAS" en `app.js`. Cuatro decisiones:
    regla, una frase normal como "el total = 100 euros" se leería como la
    fórmula "= 100" y se le pegaría un "→ 100" detrás.
 
-Se dispara de tres formas: el botón **`=`** de la barra del editor (la
-**única que existe en el móvil**: el teclado del iPhone no tiene tecla
-Tab), **Intro** con el cursor justo al final de una cuenta, y **Tab**
-igual en escritorio. El botón calcula la del cursor; si el cursor no
-está dentro de ninguna, calcula TODAS las de la nota, que de paso sirve
-de "recalcular la nota entera".
+**Calcular es SIEMPRE una decisión suya**, y esto lo preguntó él antes
+de verlo: *"si quiero escribir un texto con un =, para que sólo haga la
+fórmula cuando quiero"*. Escribir `=` no dispara nada; el texto se queda
+tal cual hasta que lo pides. Dos formas de pedirlo:
 
-Detalles: coma o punto decimal (`1.234,5` se lee bien, misma convención
-que `gymNormalizarPeso`), símbolos de moneda ignorados (`120€*1,21`),
-`%` como sufijo = dividir entre 100, y **dentro de un bloque de código
-no se calcula nada** (ahí el texto es literal).
+- el botón **`=`** de la barra del editor, **la única que existe en el
+  móvil** (el teclado del iPhone no tiene tecla Tab);
+- **Tab** con el cursor justo al final de una cuenta, en escritorio. Tab
+  no escribe texto nunca, así que no se puede colar en mitad de una
+  frase.
+
+**Intro NO calcula, y es a propósito.** Lo hacía, y se quitó en cuanto
+Koku dijo lo de arriba: una línea que acabara en una cuenta válida se
+calculaba sola al pulsar Intro para seguir escribiendo, que es
+exactamente la sorpresa que no quiere. Si algún día la pide, es una
+condición en el `keydown` del editor.
+
+El botón calcula la del cursor; si el cursor no está dentro de ninguna,
+calcula TODAS las de la nota, que de paso sirve de "recalcular la nota
+entera".
+
+**Dinero: dos decimales y redondeo** (petición suya). Si la cuenta lleva
+un símbolo de moneda, el resultado sale con dos decimales exactos y
+redondeando lo que sobre: `=100€/3 → 33,33`, `=10€*2 → 20,00`. Un precio
+con seis decimales no es un precio, y "10,5" en dinero se lee mal.
+
+La detección **no es una lista a mano**: es `\p{Sc}`, la categoría de
+Unicode "Symbol, currency". Koku nombró los seis de su teclado
+(`€ $ £ ¥ ₩ ₽`) y dijo "no sé si hayan más" — los hay (`₹ ₺ ₪ ₫`...), y
+así no hay lista que mantener. Ojo: es solo cómo se ESCRIBE el
+resultado; el número de dentro sigue siendo el exacto, así que encadenar
+cuentas no acumula error de redondeo.
+
+Resto de detalles: coma o punto decimal (`1.234,5` se lee bien, misma
+convención que `gymNormalizarPeso`), `%` como sufijo = dividir entre
+100, y **dentro de un bloque de código no se calcula nada** (ahí el
+texto es literal).
 
 ### Gimnasio: el ejercicio oculto se colaba en la sesión a mano
 

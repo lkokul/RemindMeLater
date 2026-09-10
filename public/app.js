@@ -6654,11 +6654,15 @@ document.getElementById('note-code-insert-btn').addEventListener('click', () => 
 //    regla, una frase normal como "el total = 100 euros" se leeria como
 //    la formula "= 100" y se le pegaria un "→ 100" detras.
 //
-// Se dispara de tres formas, y las tres hacen lo mismo:
+// CALCULAR ES SIEMPRE UNA DECISION TUYA. Escribir "=" no hace nada; el
+// texto se queda tal cual hasta que lo pides. Koku: "si quiero escribir
+// un texto con un =, para que solo haga la formula cuando quiero". Dos
+// formas de pedirlo, y las dos hacen lo mismo:
 //  - el boton "=" de la barra del editor (la unica que existe en el
 //    movil: el teclado del iPhone no tiene tecla Tab),
-//  - Intro con el cursor justo al final de una formula,
 //  - Tab con el cursor justo al final de una formula (escritorio).
+// Intro NO calcula: se probo y se quito, porque una linea acabada en una
+// cuenta se calculaba sola al pulsar Intro para seguir escribiendo.
 // ---------------------------------------------------------------------
 
 // Una formula dentro de un texto: "=" + cuenta + (opcional) el "→ 41"
@@ -6666,8 +6670,13 @@ document.getElementById('note-code-insert-btn').addEventListener('click', () => 
 // un digito, un ")" o un "%", para no tragarse los espacios de despues.
 // La flecha NO esta en la lista de caracteres permitidos, y por eso el
 // resultado viejo no se confunde con parte de la cuenta.
-const RE_NOTE_FORMULA = /=[\s0-9+\-*/^().,%€$£¥]*[0-9)%](?:\s*→\s*-?[\d.,]+)?/g;
+const RE_NOTE_FORMULA = /=[\s0-9+\-*/^().,%\p{Sc}]*[0-9)%](?:\s*→\s*-?[\d.,]+)?/gu;
 const RE_NOTE_FORMULA_OPERADOR = /[+\-*/^%]/;
+// Cualquier símbolo de moneda, no una lista a mano. `\p{Sc}` es la
+// categoría de Unicode "Symbol, currency": entran € $ £ ¥ ₩ ₽ y también
+// ₹ ₺ ₪ ₫... Koku listó los seis del teclado inglés internacional y dijo
+// "no sé si hayan más" -- los hay, y así no hay que mantener la lista.
+const RE_NOTE_MONEDA = /\p{Sc}/u;
 
 // "1.234,5" -> 1234.5 y "12,5" -> 12.5. Misma convencion que
 // gymNormalizarPeso: si hay coma, la coma manda y los puntos son
@@ -6705,7 +6714,7 @@ function analizarExpresionDeNota(texto) {
   let i = 0;
   const s = texto;
   const saltarHueco = () => {
-    while (i < s.length && /[\s€$£¥]/.test(s[i])) i++;
+    while (i < s.length && (/\s/.test(s[i]) || RE_NOTE_MONEDA.test(s[i]))) i++;
   };
   const primario = () => {
     saltarHueco();
@@ -6788,6 +6797,20 @@ function analizarExpresionDeNota(texto) {
 // en una division.
 const NOTE_FORMULA_FORMATTER = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 6 });
 
+// SI LA CUENTA LLEVA UN SIMBOLO DE MONEDA, el resultado va a DOS
+// decimales exactos, redondeando lo que sobre (peticion de Koku). Un
+// precio con seis decimales no es un precio; y "10,5" en dinero se lee
+// mal, tiene que ser "10,50". Intl redondea al formatear, asi que
+// 145,199 sale 145,20 sin tener que hacer la cuenta a mano.
+//
+// Ojo, esto es SOLO como se ESCRIBE el resultado: el numero de dentro
+// sigue siendo el exacto, asi que encadenar cuentas no va acumulando
+// error de redondeo.
+const NOTE_MONEY_FORMATTER = new Intl.NumberFormat('es-ES', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 // Reescribe UNA formula ya encontrada. Devuelve el texto nuevo, o null si
 // no hay nada que calcular (sin operador, o cuenta invalida).
 function recalcularFormulaDeNota(trozo) {
@@ -6796,7 +6819,8 @@ function recalcularFormulaDeNota(trozo) {
   if (!RE_NOTE_FORMULA_OPERADOR.test(cuenta)) return null;
   const valor = evaluarExpresionDeNota(cuenta);
   if (valor === null) return null;
-  return `=${cuenta.replace(/\s+$/, '')} → ${NOTE_FORMULA_FORMATTER.format(valor)}`;
+  const formato = RE_NOTE_MONEDA.test(cuenta) ? NOTE_MONEY_FORMATTER : NOTE_FORMULA_FORMATTER;
+  return `=${cuenta.replace(/\s+$/, '')} → ${formato.format(valor)}`;
 }
 
 // Un bloque de codigo es texto literal: ahi no se calcula nada.
@@ -6866,9 +6890,8 @@ function calcularTodasLasFormulasDeNota() {
 }
 
 // ¿El cursor esta JUSTO al final de una formula? Es la condicion para que
-// Intro/Tab calculen en vez de hacer lo suyo de siempre: asi solo se
-// meten cuando esta clarisimo que es lo que quieres, y en cualquier otro
-// sitio del texto Intro sigue siendo Intro.
+// Tab calcule en vez de hacer lo suyo de siempre (indentar un item de
+// lista): asi solo se mete cuando esta clarisimo que es lo que quieres.
 function cursorAlFinalDeUnaFormula() {
   const enc = formulaEnElCursorDeNota();
   if (!enc) return false;
@@ -7133,11 +7156,17 @@ function handleNoteQuoteEnterExit() {
 }
 
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
-  // Intro / Tab con el cursor justo al final de una cuenta la CALCULAN
-  // en vez de hacer lo suyo. Va lo primero porque la condicion es muy
-  // estrecha (tiene que haber una formula valida acabando exactamente
-  // ahi), asi que no le puede quitar el turno a nada por accidente.
-  if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+  // Tab con el cursor justo al final de una cuenta la CALCULA en vez de
+  // hacer lo suyo. Solo Tab, y solo en escritorio: es una tecla que
+  // nunca escribe texto, asi que no puede colarse en mitad de una frase.
+  //
+  // INTRO NO CALCULA, a proposito. Lo hacia y se quito en cuanto Koku
+  // dijo lo que le preocupaba: "si quiero escribir un texto con un =,
+  // para que solo haga la formula cuando quiero". Una linea que acabara
+  // en una cuenta valida se calculaba sola al pulsar Intro para seguir
+  // escribiendo, que es exactamente la sorpresa que no quiere. Calcular
+  // es SIEMPRE una decision suya: el boton "=" de la barra (o Tab).
+  if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     if (cursorAlFinalDeUnaFormula() && calcularFormulaEnElCursor()) {
       e.preventDefault();
       refreshNoteEditorState();
@@ -18235,7 +18264,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.46.0';
+const APP_VERSION = '0.46.1';
 const APP_VERSION_DATE = '2026-09-10';
 
 function renderAppVersionLine() {
