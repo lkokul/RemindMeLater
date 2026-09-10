@@ -1578,6 +1578,50 @@ Lo que hay ahora en `ios-testflight.yml`, y por qué:
   **"Sin buzón · falta el App Group"** es "la firma no trajo el grupo".
   Antes los dos se veían igual, y en el iPhone no hay consola donde mirar.
 
+**CONFIRMADO EN LA BUILD #54, y esto ahorra volver a averiguarlo**: la
+firma ad hoc **funciona**. El archivo sale con el App Group en los dos
+sitios, y el registro lo imprime:
+
+```
+==== App.app ====
+com.apple.security.application-groups → group.com.koku.remindmelater
+OK: lleva el App Group
+==== DescansoWidget.appex ====
+OK: lleva el App Group
+```
+
+**Lo que falla ahora es OTRA cosa, y es la segunda mitad del diagnóstico
+que las dos comprobaciones separaban a propósito**: exportar.
+
+```
+error: exportArchive Authentication failed
+error: exportArchive No profiles for 'com.koku.remindmelater' were found
+error: exportArchive No profiles for 'com.koku.remindmelater.DescansoWidget' were found
+```
+
+O sea: el archivo pide un perfil CON App Groups, ese perfil no existe, y
+Xcode no consigue crearlo. En la build #52 el mismo paso funcionaba
+porque el archivo iba sin entitlements y le valía un perfil pelado.
+
+**Esto ya no se arregla desde el repositorio.** Hace falta, una sola vez,
+en la cuenta de Apple de Koku:
+
+1. developer.apple.com → Certificates, Identifiers & Profiles →
+   Identifiers → **+** → **App Groups** → crear
+   `group.com.koku.remindmelater`.
+2. En el App ID `com.koku.remindmelater`: activar la capacidad **App
+   Groups** y marcar ese grupo.
+3. Lo mismo en `com.koku.remindmelater.DescansoWidget`.
+4. Y comprobar el ROL de la clave de App Store Connect: para crear
+   perfiles hace falta **App Manager** o **Admin**; una clave de
+   "Developer" no puede, y Apple lo reporta como "Authentication failed"
+   en vez de decir que faltan permisos — que es justo lo que despista.
+
+Mientras tanto, la casilla **"Compilar SIN el App Group"** del diálogo de
+Run workflow saca una build de TestFlight igual: los widgets saldrán
+vacíos ("Sin buzón · falta el App Group", que para eso está), pero todo
+lo demás se puede probar.
+
 ### Las piezas
 
 - **`public/widget-bridge.js`** — arma el resumen y se lo pasa al plugin.
