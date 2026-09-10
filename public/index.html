@@ -1152,6 +1152,14 @@
           <div id="gym-block-cycle-list" class="gym-cycle-list"></div>
           <button type="button" id="btn-gym-cycle-add" class="secondary-btn">+ Añadir día al ciclo</button>
           <p id="gym-block-cycle-status" class="hint"></p>
+
+          <!-- Por donde vas AHORA MISMO. Sin esto, un ciclo recien creado
+               empieza siempre por el dia 1, aunque tu ya lleves media
+               vuelta hecha (lo pidio Koku: "hoy me tocaria hacer el primer
+               descanso, no el dia 1, como se puede corregir eso"). -->
+          <label class="gym-cycle-hoy-label">Hoy te toca</label>
+          <div id="gym-block-cycle-hoy-field"></div>
+          <p class="hint">Cámbialo si el ciclo se ha desajustado o si lo acabas de crear a mitad de la vuelta.</p>
         </div>
 
         <div class="modal-actions">

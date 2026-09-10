@@ -1405,6 +1405,115 @@ En el móvil eso pasa con facilidad (el autocorrector mete espacios) y
 parecería que has perdido los ejercicios. Va con `.trim()`. La versión
 del popover ya lo hacía bien; a la de la lista se le escapó.
 
+## El teclado del móvil y las pantallas completas
+
+Koku, escribiendo en el buscador de ejercicios: *"me deja moverme todo
+hasta abajo y ver la barra de estado estando el teclado en la pantalla"*.
+
+Es **el mismo problema que ya se arregló en el editor de notas**, y por
+la misma causa: con el teclado abierto el teléfono NO encoge la ventana,
+la deja igual de alta y tapa la parte de abajo. Una capa
+`position: fixed; inset: 0` — que es lo que son TODAS las
+`.my-space-view` (Gimnasio, Notas, Viajes, Finanzas, Lecturas, Grupos,
+el buscador global) — sigue midiendo la ventana ENTERA, así que su mitad
+inferior queda debajo del teclado y el sistema deja arrastrar la vista
+entera para llegar a ella, arrastrando de paso la barra de estado a la
+vista.
+
+En vez de repetir el arreglo de las notas capa por capa, ahora hay **un
+solo anclaje genérico** (`empezarAnclajeDeCapa` / `soltarAnclajeDeCapa`
+en `app.js`), enganchado a `focusin`/`focusout` del documento: en cuanto
+enfocas un campo de texto dentro de una `.my-space-view` visible, esa
+capa recibe el alto y el desplazamiento REALES que dice `visualViewport`
+y la página se deja quieta. Ventaja: **una pantalla nueva con un campo
+de texto nace ya arreglada**, sin acordarse de nada.
+
+Detalles que importan:
+
+- **El editor de notas queda FUERA a propósito**
+  (`:not(.note-editor-view)` en el selector): tiene su propio anclaje,
+  que además mueve el cursor para que no lo tape el teclado. Dos
+  anclajes sobre la misma capa se pisarían.
+- **Solo los campos que abren teclado**: un checkbox, un radio o un
+  botón no lo abren y no deben anclar nada (`CAMPOS_CON_TECLADO`).
+- **Un campo dentro de un MODAL no ancla la capa de detrás**: el modal
+  es su propia capa fija, con su propio bloqueo de scroll.
+- **El `focusout` espera un ciclo** (`setTimeout(…, 0)`): al saltar de un
+  campo a otro llega el focusout del primero ANTES que el focusin del
+  segundo, y sin esa espera el anclaje se soltaba y volvía a ponerse en
+  cada salto, dando un parpadeo.
+- **Se limpian los estilos en línea al soltar**: si se quedaran, la capa
+  mantendría el alto del hueco con teclado y quedaría corta al cerrarlo.
+  Comprobado cerrando la pantalla con el campo aún enfocado.
+
+## Deslizar también los ejercicios (y el buscador dentro del desplegable)
+
+Koku: *"por seguir un poco con la misma dinámica en todo, en vez de
+botón, hazlo deslizable"*. Las filas de tu lista de ejercicios perdieron
+el lápiz y se envuelven con `wrapRowWithSwipeActions` como todo lo demás
+(notas, carpetas, sesiones del historial, tarjetas de grupo). Editar y
+Eliminar salen deslizando.
+
+`.gym-list-item` ya estaba en las DOS reglas necesarias de `styles.css`
+(el `transform` en `is-open` y el `transition: none` en `is-dragging`),
+porque las sesiones del historial ya lo usaban — no hizo falta CSS nuevo.
+La prueba comprueba el `transform` de verdad y que el botón quede
+DESTAPADO con `elementFromPoint`, no la clase `is-open` (la trampa que ya
+mordió una vez).
+
+**Borrar desde ahí respeta la regla del servidor**: un ejercicio con
+series ya apuntadas no se puede borrar (`has_history`), y ese error se
+cuenta con palabras en vez de soltar el código.
+
+**El desplegable enseña SOLO el nombre.** Llevaba el músculo pegado
+(`Curl martillo · Bíceps`) y Koku lo quitó: *"deja sólo el nombre, el
+músculo no hace falta que aparezca... ten en cuenta que muchos
+ejercicios a veces ya llevan el músculo en el nombre"* — "Curl de Bíceps
+· Bíceps" se leía repetido. Pero el músculo y el material **siguen
+viajando en `keywords`**, un campo de opción que el buscador SÍ mira y
+la lista NO enseña: escribir "pierna" sigue sacando todas las de pierna.
+
+**La barra del buscador parecía descuadrada** hacia la derecha. Medido en
+el navegador salía simétrico (7px y 7px), así que no era el margen: era
+**la barra de desplazamiento corriendo pegada al campo**. Ahora quien se
+desplaza es la LISTA y no el popover entero
+(`.select-popover.has-search { overflow: hidden !important }` — el
+`!important` es porque `positionFixedPopover()` pone `overflow-y: auto`
+en LÍNEA), así que la barra va solo al lado de las opciones. De paso la
+cabecera queda de verdad fuera del scroll y ya no necesita
+`position: sticky`.
+
+## "Hoy te toca": por dónde vas en el ciclo
+
+El agujero que encontró Koku usándolo: *"yo ahora para el bloque creado
+tengo 3 días, descanso, 2 días, descanso. Hoy me tocaría hacer el primer
+descanso, no el día 1... ¿cómo se puede corregir eso?"*. Un ciclo recién
+creado empieza SIEMPRE por el día 1, aunque tú ya lleves media vuelta
+hecha, y no había forma de decírselo.
+
+Ahora la ficha del bloque tiene un **"Hoy te toca"**
+(`renderGymCicloHoyField`) con las posiciones del ciclo por su nombre
+("Día 4 · Descanso"). La ruta ya existía (`POST /:id/cycle/position`);
+lo que faltaba era la pantalla.
+
+- Es parte del **borrador**, como el resto del ciclo: se elige aquí y se
+  manda al guardar, no al vuelo. Cancelar lo descarta.
+- Se manda **después** del `PUT /cycle`: la ruta rechaza una posición
+  que no exista, y las posiciones válidas son las que acaban de
+  guardarse.
+- La fecha se pone a hoy sola, así que un descanso elegido aquí **se
+  consume mañana**, como cualquier otro.
+- Si acortas el ciclo por debajo de donde estabas, vuelve al día 1 en vez
+  de dejar un valor que ya no existe.
+
+**Bug encontrado forzando fallos**: con una posición imposible metida a
+mano, la ruta lanzaba y el error se llevaba por delante TODO lo que
+venía después del `await` — el modal se quedaba abierto y la lista sin
+refrescar, aunque el ciclo sí se hubiera guardado. Ahora la posición se
+recorta al rango ANTES de mandarla y la llamada va en `try/catch`: que no
+se pueda mover el cursor nunca impide guardar el ciclo, que es lo
+importante.
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de

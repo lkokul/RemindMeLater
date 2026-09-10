@@ -119,8 +119,13 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
   }
   function opcionesVisibles() {
     if (!searchable || !busqueda.trim()) return opts;
-    const q = normalizar(busqueda);
-    return opts.filter((o) => normalizar(o.label).includes(q));
+    // El .trim() importa: sin el, escribir solo espacios (el autocorrector
+    // del movil los mete con facilidad) buscaria " " y dejaria la lista
+    // vacia, como si no hubiera opciones.
+    const q = normalizar(busqueda).trim();
+    // `keywords` son palabras que NO se ven en la lista pero por las que
+    // si se puede buscar (el musculo de un ejercicio, por ejemplo).
+    return opts.filter((o) => normalizar(`${o.label} ${o.keywords || ''}`).includes(q));
   }
 
   function findCurrent() {
@@ -7195,6 +7200,94 @@ function stopNoteEditorViewportAnchor() {
   window.visualViewport.removeEventListener('scroll', applyNoteEditorViewportAnchor);
 }
 
+// ---------------------------------------------------------------------
+// El teclado del movil y las pantallas completas
+// ---------------------------------------------------------------------
+// Mismo problema que ya se arreglo en el editor de notas, pero en TODAS
+// las demas pantallas completas (Gimnasio, Viajes, Finanzas, el listado
+// de Notas...). Lo vio Koku escribiendo en el buscador de ejercicios:
+// "me deja moverme todo hasta abajo y ver la barra de estado estando el
+// teclado en la pantalla".
+//
+// La causa es la de siempre: con el teclado abierto el telefono NO
+// encoge la ventana, la deja igual de alta y tapa la parte de abajo. Una
+// capa `position: fixed; inset: 0` (que es lo que son todas las
+// .my-space-view) sigue midiendo la ventana ENTERA, asi que su mitad
+// inferior queda debajo del teclado y el sistema deja arrastrar la vista
+// entera para llegar a ella -- arrastrando de paso la barra de estado a
+// la vista.
+//
+// La cura es la misma: mientras haya un campo de texto enfocado dentro
+// de una de esas capas, se le da el alto y el desplazamiento REALES que
+// dice visualViewport, y se deja la pagina quieta. Asi no queda nada
+// fuera y no hay nada que arrastrar.
+//
+// El editor de notas NO pasa por aqui: tiene su propio anclaje, que
+// ademas mueve el cursor para que no lo tape el teclado (start/
+// stopNoteEditorViewportAnchor). Dos anclajes sobre la misma capa se
+// pisarian.
+let capaAncladaAlTeclado = null;
+
+function aplicarAnclajeDeCapa() {
+  const vv = window.visualViewport;
+  if (!capaAncladaAlTeclado || !vv) return;
+  // Si el sistema ya ha desplazado la PAGINA para dejar sitio al
+  // teclado, se devuelve a cero: eso es justo el scroll "general" que se
+  // podia arrastrar hasta ver la barra de estado.
+  if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+  capaAncladaAlTeclado.style.height = `${vv.height}px`;
+  capaAncladaAlTeclado.style.transform = `translateY(${vv.offsetTop}px)`;
+}
+
+function empezarAnclajeDeCapa(capa) {
+  if (capaAncladaAlTeclado === capa) return;
+  soltarAnclajeDeCapa();
+  capaAncladaAlTeclado = capa;
+  document.body.classList.add('capa-anclada-al-teclado');
+  aplicarAnclajeDeCapa();
+  if (!window.visualViewport) return;
+  window.visualViewport.addEventListener('resize', aplicarAnclajeDeCapa);
+  window.visualViewport.addEventListener('scroll', aplicarAnclajeDeCapa);
+}
+
+function soltarAnclajeDeCapa() {
+  if (!capaAncladaAlTeclado) return;
+  // Se limpian los estilos EN LINEA que puso el anclaje: si se quedaran,
+  // la capa mantendria el alto del hueco con teclado y quedaria corta al
+  // cerrarlo.
+  capaAncladaAlTeclado.style.height = '';
+  capaAncladaAlTeclado.style.transform = '';
+  capaAncladaAlTeclado = null;
+  document.body.classList.remove('capa-anclada-al-teclado');
+  if (!window.visualViewport) return;
+  window.visualViewport.removeEventListener('resize', aplicarAnclajeDeCapa);
+  window.visualViewport.removeEventListener('scroll', aplicarAnclajeDeCapa);
+}
+
+// Solo los campos donde de verdad sale el teclado. Un boton o una
+// casilla no lo abren y no deben anclar nada.
+const CAMPOS_CON_TECLADO = 'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="color"]), textarea, [contenteditable="true"]';
+
+document.addEventListener('focusin', (e) => {
+  const campo = e.target.closest ? e.target.closest(CAMPOS_CON_TECLADO) : null;
+  if (!campo) return;
+  const capa = campo.closest('.my-space-view:not(.hidden):not(.note-editor-view)');
+  if (capa) empezarAnclajeDeCapa(capa);
+});
+
+document.addEventListener('focusout', (e) => {
+  const campo = e.target.closest ? e.target.closest(CAMPOS_CON_TECLADO) : null;
+  if (!campo) return;
+  // Al saltar de un campo a otro llega el focusout del primero ANTES que
+  // el focusin del segundo: sin esperar un ciclo, el anclaje se soltaria
+  // y volveria a ponerse en cada salto, dando un parpadeo.
+  setTimeout(() => {
+    const activo = document.activeElement;
+    if (activo && activo.closest && activo.closest(CAMPOS_CON_TECLADO)) return;
+    soltarAnclajeDeCapa();
+  }, 0);
+});
+
 // "Volver": cierra cada nota abierta una a una (mismo aviso de cambios
 // sin guardar que cerrar una sola desde el panel de Secciones). Si el
 // usuario cancela el cierre de alguna, la vista se queda abierta con las
@@ -8348,20 +8441,35 @@ function renderGymExercisesList() {
       ex.unilateral ? (ex.countSidesSeparately ? 'unilateral, por lados' : 'unilateral') : '',
     ].filter(Boolean).join(' · ');
     const row = document.createElement('div');
-    row.className = 'gym-list-item';
+    row.className = 'gym-list-item gym-exercise-row';
     row.innerHTML = `
       <span class="gym-list-item-name">${escapeHtml(ex.name)}${extras ? ` <span class="gym-list-item-muted">(${escapeHtml(extras)})</span>` : ''}</span>
-      <div class="gym-list-item-actions">
-        <button type="button" class="icon-btn" data-edit-gym-exercise="${ex.id}" aria-label="Editar ejercicio">✎</button>
-      </div>
     `;
-    list.appendChild(row);
+    // Deslizar en vez del lapiz (peticion de Koku: "por seguir un poco
+    // con la misma dinamica en todo, en vez de boton, hazlo deslizable").
+    // Mismo componente que las notas, las carpetas, las sesiones del
+    // historial y las tarjetas de grupo.
+    list.appendChild(wrapRowWithSwipeActions(row, {
+      onEdit: () => openGymExerciseModal(ex),
+      onDelete: () => borrarEjercicioDeLaLista(ex),
+    }));
   });
-  list.querySelectorAll('[data-edit-gym-exercise]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      openGymExerciseModal(state.gymExercises.find((e) => e.id === Number(btn.dataset.editGymExercise)));
-    });
-  });
+}
+
+// Borrar desde el deslizamiento. El servidor RECHAZA borrar un ejercicio
+// que ya tiene series apuntadas (has_history), asi que ese error se
+// cuenta con palabras en vez de soltar el codigo tal cual.
+async function borrarEjercicioDeLaLista(ex) {
+  const ok = await showAppConfirm(`¿Eliminar “${ex.name}”?`, { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  try {
+    await api(`/api/gym-exercises/${ex.id}`, { method: 'DELETE' });
+  } catch (err) {
+    showAppAlert(err && err.message ? err.message : 'No se ha podido eliminar el ejercicio.');
+    return;
+  }
+  await loadGymExercises();
+  renderGymExercisesList();
 }
 
 document.getElementById('gym-exercises-search').addEventListener('input', (e) => {
@@ -12248,6 +12356,10 @@ async function gymAvanzarCicloTrasEntrenar(routineId) {
 // verdad descarte, igual que el nombre.
 let gymCicloBloqueId = null;
 let gymCicloBorrador = [];
+// Por que posicion del ciclo vas HOY. Es parte del borrador como todo lo
+// demas: se elige aqui y se manda al guardar, no al vuelo.
+let gymCicloHoyBorrador = null;
+let gymCicloHoyField = null;
 // Los desplegables se guardan para poder leerlos, y se recrean enteros
 // en cada repintado (como el resto de listas de este formulario): asi
 // las flechas de los extremos se apagan solas y los indices de los
@@ -12316,6 +12428,39 @@ function renderGymCicloEditor() {
     lista.innerHTML = '<p class="empty-hint">Todavía no has colocado ningún día. Añade tantos como dure tu ciclo.</p>';
   }
   actualizarResumenDelCiclo();
+  renderGymCicloHoyField(dias);
+}
+
+// El selector de "Hoy te toca". Se reconstruye entero en cada repintado,
+// como el resto de este formulario: las posiciones cambian al añadir,
+// quitar o mover filas, y las etiquetas tienen que seguirlas.
+function renderGymCicloHoyField(dias) {
+  const cont = document.getElementById('gym-block-cycle-hoy-field');
+  const etiqueta = document.querySelector('.gym-cycle-hoy-label');
+  if (!cont) return;
+  // Sin ciclo no hay nada por donde ir.
+  const hayCiclo = gymCicloBorrador.length > 0;
+  cont.classList.toggle('hidden', !hayCiclo);
+  if (etiqueta) etiqueta.classList.toggle('hidden', !hayCiclo);
+  const pista = cont.nextElementSibling;
+  if (pista && pista.classList.contains('hint')) pista.classList.toggle('hidden', !hayCiclo);
+  cont.innerHTML = '';
+  gymCicloHoyField = null;
+  if (!hayCiclo) return;
+
+  const opciones = gymCicloBorrador.map((pos, i) => {
+    const dia = pos.routineId == null ? null : dias.find((d) => d.id === pos.routineId);
+    return { value: String(i + 1), label: `Día ${i + 1} · ${dia ? dia.name : 'Descanso'}` };
+  });
+  // Si el ciclo se ha acortado por debajo de donde estabas, se vuelve al
+  // dia 1 en vez de dejar un valor que ya no existe.
+  if (!gymCicloHoyBorrador || gymCicloHoyBorrador > gymCicloBorrador.length) gymCicloHoyBorrador = 1;
+  gymCicloHoyField = createSelectField({
+    options: opciones,
+    initialValue: String(gymCicloHoyBorrador),
+    onChange: (v) => { gymCicloHoyBorrador = Number(v); },
+  });
+  cont.appendChild(gymCicloHoyField.element);
 }
 
 // Una linea en cristiano de lo que va a pasar, para no tener que
@@ -12359,6 +12504,7 @@ function openGymBlockModal(block) {
   // dar a Guardar, igual que el nombre: cancelar tiene que descartarlo.
   gymCicloBloqueId = block ? block.id : null;
   gymCicloBorrador = block && block.cycleDays ? block.cycleDays.map((d) => ({ routineId: d.routineId })) : [];
+  gymCicloHoyBorrador = block && block.cyclePosition ? block.cyclePosition : 1;
   document.getElementById('gym-block-cycle-enabled').checked = !!(block && block.cycleEnabled);
   // Un bloque que aun no existe no tiene dias que colocar en un ciclo:
   // se esconde entero hasta que se guarde y se vuelva a abrir.
@@ -12389,6 +12535,28 @@ document.getElementById('gym-block-form').addEventListener('submit', async (e) =
         days: gymCicloBorrador.map((p) => ({ routineId: p.routineId })),
       }),
     });
+    // Y por donde vas hoy, DESPUES de guardar el ciclo: la ruta rechaza
+    // una posicion que no exista, y las posiciones son las que acaban de
+    // guardarse. La fecha se pone a hoy sola, asi que un descanso elegido
+    // aqui se consume mañana, como cualquier otro.
+    if (gymCicloBorrador.length > 0) {
+      // Se recorta al rango de verdad ANTES de mandarla. Sin esto, una
+      // posicion imposible hacia que la ruta lanzara y el error se
+      // llevaba por delante TODO lo que viene despues -- el modal se
+      // quedaba abierto y la lista sin refrescar, aunque el ciclo si se
+      // hubiera guardado. Encontrado forzando fallos.
+      const posicion = Math.min(Math.max(1, Number(gymCicloHoyBorrador) || 1), gymCicloBorrador.length);
+      try {
+        await api(`/api/gym-blocks/${id}/cycle/position`, {
+          method: 'POST',
+          body: JSON.stringify({ position: posicion }),
+        });
+      } catch (err) {
+        // Que no se pueda mover el cursor no es motivo para no guardar el
+        // ciclo, que es lo importante: se avisa y se sigue.
+        showAppAlert('El ciclo se ha guardado, pero no se ha podido cambiar por dónde vas hoy.');
+      }
+    }
   } else {
     await api('/api/gym-blocks', { method: 'POST', body: JSON.stringify(payload) });
   }
@@ -12442,14 +12610,20 @@ function ensureGymRoutineFieldsReady() {
 }
 
 // Las opciones para el selector PROPIO con buscador (createSelectField),
-// que sustituyo a los <select> nativos de estas filas. Lleva el grupo
-// muscular en el nombre: con la libreria importada hay ejercicios que se
-// llaman casi igual y asi se distinguen de un vistazo, ademas de poder
-// buscar por musculo ("pierna") y no solo por nombre.
+// que sustituyo a los <select> nativos de estas filas.
+//
+// Se ve SOLO el nombre (peticion de Koku: "deja solo el nombre, el
+// musculo no hace falta que aparezca... ten en cuenta que muchos
+// ejercicios a veces ya llevan el musculo en el nombre" -- "Curl de
+// Biceps · Biceps" se leia repetido). Pero el musculo y el material
+// siguen viajando en `keywords`, que el buscador SI mira: escribir
+// "pierna" sigue sacando todas las de pierna aunque ninguna se llame
+// asi, sin ensuciar la lista.
 function gymExerciseSelectOptions() {
   return state.gymExercises.map((ex) => ({
     value: String(ex.id),
-    label: ex.muscleGroup ? `${ex.name} · ${gymMuscleGroupLabel(ex.muscleGroup)}` : ex.name,
+    label: ex.name,
+    keywords: [gymMuscleGroupLabel(ex.muscleGroup) || '', ex.equipment || ''].filter(Boolean).join(' '),
   }));
 }
 
@@ -17144,8 +17318,8 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.38.0';
-const APP_VERSION_DATE = '2026-09-09';
+const APP_VERSION = '0.39.0';
+const APP_VERSION_DATE = '2026-09-10';
 
 function renderAppVersionLine() {
   const el = document.getElementById('app-version-line');

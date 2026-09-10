@@ -922,7 +922,8 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    viendo dos pantallas apiladas (la cabecera del listado de notas
    asomando por encima de la del editor). La clase la pone y quita
    start/stopNoteEditorViewportAnchor() en app.js. */
-body.mobile-day-scroll-lock, body.note-editor-open { overflow: hidden; }
+body.mobile-day-scroll-lock, body.note-editor-open,
+body.capa-anclada-al-teclado { overflow: hidden; }
 body.note-editor-open .app,
 body.mobile-day-scroll-lock .app {
   height: 100vh;
@@ -4813,18 +4814,29 @@ body.gym-rest-push #settings-modal .settings-card {
 /* La cabecera se queda pegada arriba mientras la lista se desplaza: con
    ~870 ejercicios, tener que volver al principio para reescribir seria
    justo el problema que esto viene a arreglar. */
-/* Con buscador, el relleno pasa a la lista: si se quedara en el popover,
-   por ese hueco de arriba se verian pasar las opciones por detras de la
-   cabecera pegada. */
-.select-popover.has-search { padding: 0; gap: 0; }
+/* Con buscador, quien se desplaza es la LISTA, no el popover entero.
+   Asi la barra de desplazamiento va solo al lado de las opciones y no
+   corre pegada al campo de buscar, que es lo que hacia que la barra
+   pareciera descuadrada hacia la derecha (lo vio Koku en el iPhone).
+   De paso la cabecera queda de verdad fuera del scroll y no hace falta
+   `position: sticky` para nada.
+   El max-height/overflow-y que pone positionFixedPopover() en LINEA
+   sigue mandando sobre el popover, y por eso hay un !important aqui:
+   sin el, el popover volveria a desplazarse el tambien. */
+.select-popover.has-search {
+  padding: 0;
+  gap: 0;
+  overflow: hidden !important;
+}
 .select-popover.has-search .select-popover-list {
   display: flex; flex-direction: column; gap: 0.15rem;
   padding: 0.4rem;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .select-popover-search {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  flex: 0 0 auto;
   padding: 0.4rem;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -4840,3 +4852,6 @@ body.gym-rest-push #settings-modal .settings-card {
   font-size: 0.82rem;
   opacity: 0.75;
 }
+
+/* "Hoy te toca" del ciclo: su etiqueta separada del boton de añadir. */
+.gym-cycle-hoy-label { display: block; margin: 0.8rem 0 0.3rem; font-size: 0.82rem; font-weight: 600; }

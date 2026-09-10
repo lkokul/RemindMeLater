@@ -182,7 +182,10 @@ el calendario.
 - ✅ **Buscar ejercicios**: campo de búsqueda sobre tu lista de
   ejercicios (por nombre, músculo o material, sin tildes, y solo visible
   a partir de 8) y buscador dentro de los desplegables donde eliges
-  ejercicio, tanto en el día del plan como al editar una sesión.
+  ejercicio, tanto en el día del plan como al editar una sesión. El
+  desplegable enseña solo el nombre, pero sigue buscando por músculo.
+- ✅ **Las filas de ejercicio se deslizan** (Editar / Eliminar), como
+  todo lo demás en la app: fuera el lápiz.
 - ✅ **La espalda, repartida**: espalda media, dorsales y lumbar, más un
   hombro posterior que vive junto a hombros. Repartido desde el origen
   de la librería, no a ojo.
@@ -213,7 +216,8 @@ el calendario.
   app, en vez de tener que quitarlo a mano del centro de notificaciones.
 - ✅ **Ciclo de días del bloque** (opcional): colocas en orden lo que
   haces — "día 1 Empuje, día 2 Tirón, día 3 descanso" — y la app sabe
-  qué toca hoy. El ciclo avanza **por entrenos hechos**, no por
+  qué toca hoy. Un **"Hoy te toca"** en la misma ficha deja decirle por
+  dónde vas, para cuando lo creas a mitad de vuelta o se desajusta. El ciclo avanza **por entrenos hechos**, no por
   calendario (si te saltas un día, al siguiente te sigue tocando lo
   mismo); solo los descansos se consumen al pasar el día. Al empezar a
   entrenar, el día que toca va primero y marcado. Si hoy toca descanso
@@ -351,7 +355,9 @@ el calendario.
   checkbox opcional de "no volver a mostrar").
 - ✅ **Patrones establecidos**: popovers medidos con altura real (no
   estimada) y respetando el área segura del móvil (Dynamic Island y
-  barra de gestos), "build once" para no fugar popovers, bloqueo de
+  barra de gestos), **anclaje al teclado** para que ninguna pantalla
+  completa se pueda arrastrar hasta ver la barra de estado (genérico:
+  una pantalla nueva con un campo de texto nace ya arreglada), "build once" para no fugar popovers, bloqueo de
   scroll de fondo con cualquier modal abierto, Esc capa a capa en toda
   la app, mantener la vista al recargar (sin restaurar formularios a
   medias), Ctrl+Intro guarda en los modales.
