@@ -1,5 +1,17 @@
 # Seguridad y privacidad de RemindMeLater (móvil)
 
+> **ESTADO: los diez arreglos del plan ya están hechos** (tanda del
+> 10/9/2026, v0.48.0). Este documento se deja como está —con los
+> hallazgos redactados en presente— porque explica **por qué** cada cosa
+> era un problema, y eso es lo que hay que leer antes de volver a
+> tocarla. Lo que cambia es que ahora hay red: los puntos 2.3 a 2.7 los
+> vigila `tools/comprobar-widgets.py`, así que si alguno vuelve a
+> aparecer, el guion lo dice ANTES de compilar.
+>
+> Lo único que sigue pendiente es el papeleo de la sección 5 (la política
+> de privacidad y las fichas de las dos tiendas), que es trabajo de Koku,
+> y las dos decisiones abiertas de §2.8 y §4 (Face ID, copia cifrada).
+
 Estudio hecho el 10/9/2026 sobre la rama `desarrollador`, v0.47.0.
 Todo lo que dice este documento se ha **comprobado ejecutando la app**,
 no leyendo el código y suponiendo. Donde pone "probado" es que hay un
@@ -571,3 +583,41 @@ Del 1 al 5 son **cinco arreglos de minutos** que quitan de en medio los
 dos problemas reales y hacen verdad la frase "tus datos no salen de tu
 dispositivo". Con eso hecho, la app pasa de "segura por accidente" a
 "segura a propósito".
+
+---
+
+## 7. Lo que se hizo (tanda del 10/9/2026, v0.48.0)
+
+Los diez puntos de código, hechos y probados. Lo que falta es solo el
+papeleo de la sección 5.
+
+| # | Qué se hizo | Dónde |
+|---|---|---|
+| 1 | `escapeHtml()` escapa también `"` y `'` | `app.js` |
+| 2 | El HTML de la nota se sanea también **al pintar**, con la misma función de la ruta (`window.sanearHtmlDeNota`) | `routes-local/notes.js`, `app.js` |
+| 3 | Fuera Google Fonts; la mono es la del sistema (SF Mono en iPhone) | `index.html`, `styles.css` |
+| 4 | Fuera la excepción de ATS y el texto de permiso de red local | `ios/App/App/Info.plist` |
+| 5 | `allowBackup="false"` + `data_extraction_rules.xml` que excluye todo; fuera `usesCleartextTraffic` | `AndroidManifest.xml` |
+| 6 | `PrivacyInfo.xcprivacy` en los dos targets, con `CA92.1`, y metidos en sus fases de Resources | `ios/`, `project.pbxproj` |
+| 7 | **CSP estricta**, y el `<script>` en línea del arranque movido a `arranque.js` para que no haga falta `unsafe-inline` | `index.html`, `arranque.js` |
+| 8 | 15 comprobaciones nuevas en el guion, todas probadas rompiéndolas a propósito | `tools/comprobar-widgets.py` |
+
+**Lo que la CSP consigue, medido**: un `<script>` inyectado a mano no se
+ejecuta; un `fetch()` a un servidor externo se bloquea; una imagen-baliza
+externa se bloquea. Y con la app en uso normal (las ocho pantallas), cero
+violaciones.
+
+**Auditoría que se hizo de paso**: se revisaron TODAS las asignaciones a
+`innerHTML` de `app.js` y `settings.js` buscando texto de usuario que no
+pasara por `escapeHtml`. Solo saltó una (`app.label` en la barra de
+abajo), y es un falso positivo: sale de una tabla fija y la clave de
+`localStorage` se valida contra ella antes de usarla.
+
+**Y se forzaron errores**: un `localStorage` envenenado con doce claves
+manipuladas (HTML, JSON roto, 50.000 caracteres, SQL, travesía de
+directorios) — la app arranca igual, cae a los valores por defecto y no
+ejecuta nada; y catorce variantes raras de HTML hostil (mayúsculas,
+tabuladores, barras, etiquetas anidadas, byte nulo, `../../`) — todas
+neutralizadas, ninguna excepción.
+
+**Total: 220 comprobaciones automáticas en verde** (13 guiones).

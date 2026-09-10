@@ -394,6 +394,32 @@ if not os.path.exists('android/app/src/main/res/xml/data_extraction_rules.xml'):
                   'allowBackup y mira este archivo)')
 
 indice = sin_comentarios_xml(leer('public/index.html'))
+
+# La CSP es la red que salva cuando el saneador falla. Si alguien la quita
+# o la relaja, la app sigue funcionando exactamente igual -- por eso se
+# puede perder sin que nadie se entere, y por eso se comprueba aqui.
+if 'Content-Security-Policy' not in indice:
+    fallos.append('index.html se ha quedado sin Content-Security-Policy')
+else:
+    csp = re.search(r'Content-Security-Policy"\s+content="([^"]+)"', indice)
+    csp = csp.group(1) if csp else ''
+    if "script-src 'self' 'wasm-unsafe-eval'" not in csp:
+        fallos.append("la CSP tiene que llevar script-src 'self' 'wasm-unsafe-eval' "
+                      '(sin wasm-unsafe-eval sql.js no arranca; con unsafe-inline '
+                      'la CSP deja de servir para nada)')
+    if "'unsafe-inline'" in csp.split('style-src')[0]:
+        fallos.append("la CSP lleva 'unsafe-inline' en script-src: eso deja pasar "
+                      'justo lo que la CSP existe para parar (onerror=, onfocus=...)')
+    if "connect-src 'self'" not in csp:
+        fallos.append("la CSP tiene que llevar connect-src 'self': es lo que impide "
+                      'que un codigo inyectado se mande la base a un servidor')
+# Con esa CSP, un <script> en linea NO se ejecuta: el arranque tiene que
+# seguir viviendo en arranque.js.
+if re.search(r'<script>\s*\n', indice):
+    fallos.append('index.html vuelve a tener un <script> en linea: la CSP lo '
+                  'bloquearia en silencio (el arranque va en arranque.js)')
+if re.search(r'<[a-z]+[^>]*\son[a-z]+\s*=', indice):
+    fallos.append('index.html tiene un manejador on*= en linea: la CSP lo bloquea')
 for cdn in ('fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsdelivr.net',
             'cdnjs.cloudflare.com', 'unpkg.com'):
     if cdn in indice:
