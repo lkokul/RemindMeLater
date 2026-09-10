@@ -12271,14 +12271,52 @@ function actualizarResumenDelWidget() {
   if (typeof actualizarWidgetDelDia === 'function') actualizarWidgetDelDia();
 }
 
-// Abrir la app desde el widget arranca el entreno de hoy. Se comprueba al
-// volver a primer plano, igual que el +30s de la pantalla de bloqueo: el
-// nativo deja una marca y aqui se consume UNA vez.
+// Abrir la app desde un widget lleva a lo que ese widget enseña. Se
+// comprueba al volver a primer plano, igual que el +30s de la pantalla de
+// bloqueo: el nativo deja una marca con el destino y aqui se consume UNA
+// vez.
+//
+// El destino llega como texto ('hoy', 'tareas', ...) y NO se interpreta
+// en Swift a proposito: asi anadir un widget nuevo se hace entero desde
+// aqui, sin recompilar nada nativo.
 async function comprobarAperturaDesdeElWidget() {
-  if (typeof widgetPideEmpezarHoy !== 'function') return;
-  let loPide = false;
-  try { loPide = await widgetPideEmpezarHoy(); } catch { return; }
-  if (!loPide) return;
+  if (typeof widgetPideAbrir !== 'function') return;
+  let destino = '';
+  try { destino = await widgetPideAbrir(); } catch { return; }
+  if (!destino) return;
+
+  if (destino === 'gym-hoy') { await abrirEntrenoDeHoyDesdeWidget(); return; }
+
+  // Las Apps (Finanzas, Lecturas, Viajes) viven dentro del hub de Apps:
+  // hay que abrir ese primero o la pantalla se queda debajo.
+  const apps = {
+    finanzas: () => openFinanzasView(),
+    lecturas: () => openLecturasView(),
+    viajes: () => openViajesView(),
+  };
+  if (apps[destino]) {
+    goToMobileSection('extensions');
+    await apps[destino]();
+    return;
+  }
+
+  if (destino === 'tareas') { await abrirTareasDesdeWidget(); return; }
+
+  // Los tres que se quedan en el calendario. 'hoy' entra ademas en la
+  // vista del dia, que es donde de verdad se ve la agenda de hoy.
+  goToMobileSection('calendar');
+  if (destino === 'hoy') {
+    if (typeof enterMobileDayView === 'function') enterMobileDayView(new Date());
+  } else if (destino === 'nuevo-evento') {
+    openEventModal(null);
+  } else if (destino === 'nueva-nota') {
+    openMobileNotesView();
+    openNoteInEditor(null);
+  }
+}
+
+// El widget del Gimnasio: arrancar el entreno que toca hoy.
+async function abrirEntrenoDeHoyDesdeWidget() {
   // Con un entreno YA en marcha no se empieza otro encima: se abre el que
   // hay. Perder un entreno a medias por tocar un widget seria muy caro.
   if (gymLiveReadStored()) {
@@ -12298,6 +12336,27 @@ async function comprobarAperturaDesdeElWidget() {
   // arrancar algo a lo loco: el widget es un atajo, no una decision.
   if (!hoy || hoy.esDescanso || !hoy.rutina) openGymStartModal();
   else startGymLiveSession(hoy.rutina);
+}
+
+// El widget de Tareas. En movil NO hay un "Mi espacio" donde vivan las
+// tareas (ver CLAUDE.md: se quito a proposito, las tareas viven dentro
+// del propio calendario), asi que el sitio donde se ven todas juntas y
+// se pueden tachar es Grupos > "Todos los eventos" con los filtros
+// puestos en tareas pendientes. Eso es justo lo que enseña el widget.
+async function abrirTareasDesdeWidget() {
+  goToMobileSection('calendar');
+  if (typeof openGroupsView !== 'function') return;
+  await openGroupsView();
+  groupsViewFilters.type = 'task';
+  groupsViewFilters.done = 'pending';
+  // Los desplegables tienen que ENSEÑAR el filtro que se acaba de poner:
+  // si no, dirian "Todo" mientras la lista esta filtrada, y parece que
+  // faltan cosas.
+  try {
+    groupsFilterTypeField.setValue('task');
+    groupsFilterDoneField.setValue('pending');
+  } catch { /* si el componente cambia, el filtro sigue aplicado igual */ }
+  await openGroupDetail(null, 'Todos los eventos');
 }
 
 // --- "Hoy te toca": el ciclo visto desde fuera del Gimnasio -----------
@@ -17371,7 +17430,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.41.1';
+const APP_VERSION = '0.42.0';
 const APP_VERSION_DATE = '2026-09-10';
 
 function renderAppVersionLine() {

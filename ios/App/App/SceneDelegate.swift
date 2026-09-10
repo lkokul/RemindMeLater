@@ -20,6 +20,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         if nuestras.contains(where: { $0.url.host == "gym-hoy" }) {
             UserDefaults.standard.set(true, forKey: "gymPendingStartToday")
         }
+        // Los widgets nuevos (Hoy, Tareas, Finanzas, Lecturas, Viajes) y
+        // los botones del centro de control. Aqui no se interpreta nada:
+        // se guarda el host tal cual y el JavaScript decide a donde
+        // llevar -- asi anadir un destino no obliga a tocar Swift.
+        let destinos = ["hoy", "tareas", "finanzas", "lecturas", "viajes",
+                        "nuevo-evento", "nueva-nota"]
+        if let url = nuestras.first(where: { destinos.contains($0.url.host ?? "") }) {
+            UserDefaults.standard.set(url.host ?? "", forKey: "widgetPendingDestino")
+        }
     }
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {

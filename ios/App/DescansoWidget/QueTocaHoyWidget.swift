@@ -19,8 +19,10 @@ import AppIntents
 // app). Solo hay una relectura al día como red de seguridad, por si la
 // app nunca consigue avisar — ver getTimeline.
 
-private let grupoDeLaApp = "group.com.koku.remindmelater"
-private let claveResumen = "resumenGimnasio"
+// El App Group y la clave del buzón viven en ResumenDeLaApp.swift, que
+// es el modelo que comparten TODOS los widgets. Antes estaban repetidas
+// aquí, y con cinco widgets eso son cinco sitios donde una letra distinta
+// deja el widget en blanco sin un solo error.
 
 // Tocar el widget abre la app aquí. SceneDelegate recoge la URL y deja la
 // marca; el JavaScript la consume al despertar y arranca el entreno.

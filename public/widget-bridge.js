@@ -1,4 +1,10 @@
-// widget-bridge.js — lo que la app le cuenta al widget de iOS.
+// widget-bridge.js — lo que la app le cuenta a los widgets de iOS.
+//
+// SON CINCO WIDGETS y UN SOLO resumen: Gimnasio ("Qué toca hoy"),
+// Calendario ("Hoy"), Tareas, Finanzas y Lecturas/Viajes. Se manda todo
+// junto en un único JSON a propósito -- son unos pocos cientos de bytes,
+// y partirlo en cinco claves obligaría a cinco escrituras, cinco avisos
+// a iOS y cinco sitios donde equivocarse con el nombre de la clave.
 //
 // EL PROBLEMA QUE RESUELVE: un widget no puede leer la base de datos.
 // Nuestra base es SQLite compilado a WebAssembly y vive dentro de la
@@ -42,19 +48,56 @@ function getWidgetBridgePlugin() {
   return widgetBridgePlugin;
 }
 
-// El resumen que se manda. Sale de gymCicloDeHoy() (app.js), que es la
-// MISMA fuente que usa la app para decidir qué ofrecerte al entrenar --
-// así el widget nunca puede decir una cosa distinta de la pantalla.
+// El resumen que se manda. Cada sección sale de la MISMA fuente que usa
+// la pantalla correspondiente, para que el widget no pueda decir una cosa
+// distinta de lo que ves al abrir la app.
+//
+// Es ASÍNCRONA porque las secciones nuevas preguntan a la base (`api()`),
+// que es el mismo router local de siempre. La del Gimnasio no: esa sale
+// de gymCicloDeHoy(), que trabaja sobre lo ya cargado en memoria.
 //
 // Los colores viajan en hexadecimal porque el widget no tiene acceso a
 // las variables CSS del tema: es SwiftUI, no la webview.
-function construirResumenDelDia() {
+async function construirResumenDelDia() {
+  const resumen = {
+    // Cuándo se escribió. El widget lo enseña cuando los datos son de
+    // otro día, que es la forma honesta de decir "esto puede estar
+    // viejo" en vez de fingir que está al día.
+    actualizado: Date.now(),
+    acento: gymAcentoParaElWidget(),
+    ...seccionGimnasio(),
+  };
+
+  // Cada sección va en su propio try: que Finanzas falle no puede dejar
+  // sin datos al calendario. Si una revienta, se queda fuera del JSON y
+  // su widget enseña su texto de "sin datos" -- que es justo lo que hay.
+  const secciones = [
+    ['hoy', seccionHoy],
+    ['tareas', seccionTareas],
+    ['finanzas', seccionFinanzas],
+    ['lecturas', seccionLecturas],
+    ['viajes', seccionViajes],
+  ];
+  for (const [clave, construir] of secciones) {
+    try {
+      const valor = await construir();
+      if (valor) resumen[clave] = valor;
+    } catch {
+      /* esa sección se queda sin datos, el resto sigue */
+    }
+  }
+  return resumen;
+}
+
+// --- Gimnasio: qué toca hoy según el ciclo del bloque activo ----------
+function seccionGimnasio() {
   const vacio = {
     hayCiclo: false, esDescanso: false, nombre: '', bloque: '',
     color: '#5b8cff', icono: '', posicion: 0, total: 0, ejercicios: 0,
   };
   if (typeof gymCicloDeHoy !== 'function') return vacio;
-  const hoy = gymCicloDeHoy();
+  let hoy = null;
+  try { hoy = gymCicloDeHoy(); } catch { return vacio; }
   if (!hoy) return vacio;
 
   // Cuántos ejercicios tiene el día (solo los visibles: los ocultos no se
@@ -75,6 +118,175 @@ function construirResumenDelDia() {
     total: Number(hoy.length) || 0,
     ejercicios,
   };
+}
+
+// La fecha de HOY en local, no en UTC. Con toISOString(), a las 00:30 en
+// España el día todavía sería el anterior y el widget enseñaría lo de
+// ayer durante media hora -- el mismo cuidado que hoyISO() del ciclo.
+function widgetHoyISO() {
+  const d = new Date();
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mes}-${dia}`;
+}
+
+// "2026-09-10T14:30" -> "14:30", respetando el reloj de 12h del sistema
+// si el teléfono lo tiene así (systemUses12hClock vive en app.js).
+function widgetHora(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    const doce = typeof systemUses12hClock === 'function' ? systemUses12hClock() : false;
+    return new Intl.DateTimeFormat('es-ES', {
+      hour: '2-digit', minute: '2-digit', hour12: doce,
+    }).format(d);
+  } catch {
+    return iso.slice(11, 16);
+  }
+}
+
+// Cuántos elementos caben de verdad en un widget. Mandar más es peso
+// muerto en el buzón: en el mediano entran 3 líneas y en el pequeño 2.
+const WIDGET_MAX_FILAS = 4;
+
+// --- Calendario: lo de hoy -------------------------------------------
+async function seccionHoy() {
+  const hoy = widgetHoyISO();
+  // El rango del día entero. La ruta filtra por SOLAPE, así que un evento
+  // de varios días que viene de ayer también sale -- que es lo correcto.
+  const filas = await api(`/api/events?from=${hoy}T00:00&to=${hoy}T23:59`);
+  if (!Array.isArray(filas)) return null;
+
+  const eventos = filas.filter((ev) => !ev.isTask);
+  const tareas = filas.filter((ev) => ev.isTask && !ev.done);
+
+  return {
+    eventos: eventos.slice(0, WIDGET_MAX_FILAS).map((ev) => ({
+      titulo: String(ev.title || ''),
+      hora: ev.allDay ? '' : widgetHora(ev.startAt),
+      color: ev.groupColor || gymAcentoParaElWidget(),
+      todoElDia: !!ev.allDay,
+    })),
+    total: eventos.length,
+    tareas: tareas.length,
+  };
+}
+
+// --- Tareas pendientes -----------------------------------------------
+async function seccionTareas() {
+  const filas = await api('/api/events?isTask=1');
+  if (!Array.isArray(filas)) return null;
+
+  const hoy = widgetHoyISO();
+  const pendientes = filas.filter((t) => !t.done);
+  // Con fecha primero y por fecha; las que no tienen, al final. Es el
+  // mismo orden que en Mi espacio: una tarea sin fecha no urge.
+  const ordenadas = pendientes.slice().sort((a, b) => {
+    if (!a.startAt && !b.startAt) return 0;
+    if (!a.startAt) return 1;
+    if (!b.startAt) return -1;
+    return a.startAt < b.startAt ? -1 : (a.startAt > b.startAt ? 1 : 0);
+  });
+
+  const vencidas = pendientes.filter((t) => t.startAt && t.startAt.slice(0, 10) < hoy).length;
+
+  return {
+    lista: ordenadas.slice(0, WIDGET_MAX_FILAS).map((t) => ({
+      titulo: String(t.title || ''),
+      cuando: t.startAt ? t.startAt.slice(0, 10) : '',
+      color: t.groupColor || gymAcentoParaElWidget(),
+      vencida: !!(t.startAt && t.startAt.slice(0, 10) < hoy),
+      hoy: !!(t.startAt && t.startAt.slice(0, 10) === hoy),
+    })),
+    total: pendientes.length,
+    vencidas,
+  };
+}
+
+// --- Finanzas: lo gastado este mes contra el límite -------------------
+async function seccionFinanzas() {
+  const mes = widgetHoyISO().slice(0, 7);
+  const r = await api(`/api/finanzas-transactions/summary/month?month=${mes}`);
+  if (!r) return null;
+  return {
+    gastado: Number(r.totalExpense) || 0,
+    limite: r.monthlyBudgetLimit == null ? 0 : Number(r.monthlyBudgetLimit) || 0,
+    ahorro: Number(r.savings) || 0,
+    objetivo: r.savingsGoalMin == null ? 0 : Number(r.savingsGoalMin) || 0,
+    // Días que quedan de mes, para que el widget pueda decir "te quedan
+    // X € para Y días" en vez de un número suelto sin contexto.
+    diasRestantes: diasQueQuedanDelMes(),
+  };
+}
+
+function diasQueQuedanDelMes() {
+  const d = new Date();
+  // El día 0 del mes SIGUIENTE es el último de este.
+  const ultimo = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  return Math.max(0, ultimo - d.getDate());
+}
+
+// --- Lecturas: lo que tienes empezado --------------------------------
+async function seccionLecturas() {
+  const filas = await api('/api/lecturas-items');
+  if (!Array.isArray(filas)) return null;
+  const enCurso = filas.filter((it) => it.status === 'in_progress');
+  return {
+    lista: enCurso.slice(0, WIDGET_MAX_FILAS).map((it) => ({
+      titulo: String(it.title || ''),
+      tipo: String(it.type || ''),
+      // "cap. 34 / 120" si hay progreso, y nada si no lo hay: un "0/0"
+      // ocupa sitio para no decir nada.
+      progreso: progresoDeLectura(it),
+    })),
+    total: enCurso.length,
+  };
+}
+
+function progresoDeLectura(item) {
+  const actual = Number(item.progressCurrent);
+  if (!Number.isFinite(actual) || actual <= 0) return '';
+  const total = Number(item.progressTotal);
+  const unidad = item.progressUnit ? String(item.progressUnit) : '';
+  const cifras = Number.isFinite(total) && total > 0 ? `${actual}/${total}` : String(actual);
+  return unidad ? `${cifras} ${unidad}` : cifras;
+}
+
+// --- Viajes: el que está en marcha, o el siguiente --------------------
+async function seccionViajes() {
+  const filas = await api('/api/viajes-trips');
+  if (!Array.isArray(filas)) return null;
+  const hoy = widgetHoyISO();
+
+  // En marcha gana sobre futuro: si estás DE viaje, eso es lo que quieres
+  // ver, no el siguiente.
+  const enCurso = filas.find((t) => t.startDate && t.startDate <= hoy && (t.endDate || t.startDate) >= hoy);
+  const futuros = filas
+    .filter((t) => t.startDate && t.startDate > hoy)
+    .sort((a, b) => (a.startDate < b.startDate ? -1 : 1));
+  const viaje = enCurso || futuros[0];
+  if (!viaje) return { nombre: '', dias: 0, enCurso: false, color: '' };
+
+  return {
+    nombre: String(viaje.name || ''),
+    // Días que faltan para empezar (0 si ya está en marcha).
+    dias: enCurso ? 0 : diasHasta(viaje.startDate),
+    enCurso: !!enCurso,
+    color: viaje.color || gymAcentoParaElWidget(),
+  };
+}
+
+// Días naturales entre hoy y una fecha ISO. Se cuenta a MEDIANOCHE de los
+// dos días, no de ahora mismo: si no, un viaje que empieza mañana a las
+// 09:00 diría "0 días" a partir de las 09:01 de hoy.
+function diasHasta(iso) {
+  if (!iso) return 0;
+  const hoy = new Date();
+  const cero = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  const partes = iso.split('-').map(Number);
+  const destino = new Date(partes[0], (partes[1] || 1) - 1, partes[2] || 1);
+  return Math.max(0, Math.round((destino - cero) / 86400000));
 }
 
 // El acento del tema activo, para cuando el día no tiene color propio.
@@ -107,7 +319,7 @@ async function actualizarWidgetDelDia() {
     ultimoAvisoAlWidget = { ok: false, motivo: 'sin_plugin', cuando: Date.now() };
     return ultimoAvisoAlWidget;
   }
-  const resumen = construirResumenDelDia();
+  const resumen = await construirResumenDelDia();
   try {
     const res = await plugin.guardarResumen({ json: JSON.stringify(resumen) });
     // El plugin responde {guardado:false, motivo:'sin_grupo'} cuando
@@ -131,16 +343,25 @@ async function actualizarWidgetDelDia() {
   return ultimoAvisoAlWidget;
 }
 
-// ¿Se ha abierto la app desde el widget (o desde el botón del centro de
-// control)? Devuelve true UNA sola vez por apertura: el nativo consume la
-// marca al leerla.
-async function widgetPideEmpezarHoy() {
+// ¿Se ha abierto la app desde un widget (o desde un botón del centro de
+// control)? Devuelve el DESTINO una sola vez por apertura: el nativo
+// consume la marca al leerla, así no vuelve a saltar en cada vuelta a
+// primer plano.
+//
+// Antes esto era un booleano ("¿empezar el entreno de hoy?") porque solo
+// había un widget. Con cinco hace falta saber CUÁL, así que ahora viaja
+// el nombre del destino y el booleano de antes es el caso `gym-hoy`.
+async function widgetPideAbrir() {
   const plugin = getWidgetBridgePlugin();
-  if (!plugin) return false;
+  if (!plugin) return '';
   try {
     const res = await plugin.consumirApertura();
-    return !!(res && res.empezarHoy);
+    if (!res) return '';
+    // Compatibilidad con la respuesta vieja del plugin, por si la parte
+    // nativa fuera anterior a esta ronda: {empezarHoy:true} sin destino.
+    if (!res.destino && res.empezarHoy) return 'gym-hoy';
+    return res.destino ? String(res.destino) : '';
   } catch {
-    return false;
+    return '';
   }
 }

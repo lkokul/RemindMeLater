@@ -23,13 +23,24 @@ struct DescansoWidgetBundle: WidgetBundle {
         // El widget de "que toca hoy" (inicio + bloqueo), ver
         // QueTocaHoyWidget.swift.
         QueTocaHoyWidget()
-        // Y el boton del centro de control, solo si se compila con el SDK
-        // de iOS 18 o posterior: ControlWidget no existe antes y con un
-        // Xcode viejo esto no compilaria. Ver la misma condicion en
-        // QueTocaHoyWidget.swift.
+        // Los otros cuatro, todos leyendo el MISMO resumen del buzon
+        // compartido -- ver ResumenDeLaApp.swift y WidgetsDeLaApp.swift.
+        HoyWidget()
+        TareasWidget()
+        FinanzasWidget()
+        LecturasWidget()
+        ViajesWidget()
+        // Y los botones del centro de control, solo si se compila con el
+        // SDK de iOS 18 o posterior: ControlWidget no existe antes y con
+        // un Xcode viejo esto no compilaria. Ver la misma condicion en
+        // WidgetsDeLaApp.swift.
         #if compiler(>=6.0)
         if #available(iOS 18.0, *) {
             EmpezarEntrenoControl()
+            AbrirHoyControl()
+            NuevoEventoControl()
+            NuevaNotaControl()
+            VerTareasControl()
         }
         #endif
     }

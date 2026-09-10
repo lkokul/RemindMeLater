@@ -35,8 +35,22 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
     // compartir un archivo entre los dos targets complica el proyecto de
     // Xcode más de lo que ahorra.
     private static let grupo = "group.com.koku.remindmelater"
-    private static let claveResumen = "resumenGimnasio"
+    private static let claveResumen = "resumenApp"
     private static let claveEmpezarHoy = "gymPendingStartToday"
+    // Dónde deja SceneDelegate el destino cuando abres la app desde
+    // cualquiera de los widgets nuevos. Es una cadena y no un booleano
+    // por widget: con cinco widgets y cuatro botones de centro de
+    // control, una marca por cada uno serían nueve claves que consumir.
+    private static let claveDestino = "widgetPendingDestino"
+
+    // Los "kind" de TODOS los widgets. Tienen que coincidir carácter a
+    // carácter con los `static let kind` de cada Widget: si uno no
+    // coincide, la app cree que lo refresca y ese widget se queda con lo
+    // de antes hasta que iOS decida repintarlo por su cuenta.
+    private static let kinds = [
+        "QueTocaHoyWidget", "HoyWidget", "TareasWidget",
+        "FinanzasWidget", "LecturasWidget", "ViajesWidget",
+    ]
 
     // Guarda el resumen y pide a iOS que repinte el widget. El JSON llega
     // ya montado desde JavaScript: aquí no se interpreta, solo se guarda
@@ -53,9 +67,12 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         defaults.set(json, forKey: Self.claveResumen)
-        // ofKind: y no reloadAllTimelines() para no despertar también la
-        // Live Activity del descanso, que no tiene nada que ver con esto.
-        WidgetCenter.shared.reloadTimelines(ofKind: "QueTocaHoyWidget")
+        // Uno por uno y no reloadAllTimelines() para no despertar también
+        // la Live Activity del descanso, que no tiene nada que ver con
+        // esto y está en la misma extensión.
+        for kind in Self.kinds {
+            WidgetCenter.shared.reloadTimelines(ofKind: kind)
+        }
         call.resolve(["guardado": true])
     }
 
@@ -69,19 +86,39 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
     // en la siguiente vuelta a primer plano.
     @objc func consumirApertura(_ call: CAPPluginCall) {
         var empezarHoy = false
+        var destino = ""
 
         let propios = UserDefaults.standard
         if propios.bool(forKey: Self.claveEmpezarHoy) {
             empezarHoy = true
             propios.set(false, forKey: Self.claveEmpezarHoy)
         }
-
-        if let compartidos = UserDefaults(suiteName: Self.grupo),
-           compartidos.bool(forKey: Self.claveEmpezarHoy) {
-            empezarHoy = true
-            compartidos.set(false, forKey: Self.claveEmpezarHoy)
+        if let d = propios.string(forKey: Self.claveDestino), !d.isEmpty {
+            destino = d
+            propios.removeObject(forKey: Self.claveDestino)
         }
 
-        call.resolve(["empezarHoy": empezarHoy])
+        // El App Group se sigue mirando aunque hoy ya nadie escriba ahí:
+        // los botones del centro de control pasaron a abrir una URL (así
+        // funcionan aunque el buzón esté roto), pero una marca dejada por
+        // una versión anterior seguiría ahí esperando, y consumirla es
+        // más barato que dejarla colgada para siempre.
+        if let compartidos = UserDefaults(suiteName: Self.grupo) {
+            if compartidos.bool(forKey: Self.claveEmpezarHoy) {
+                empezarHoy = true
+                compartidos.set(false, forKey: Self.claveEmpezarHoy)
+            }
+            if let d = compartidos.string(forKey: Self.claveDestino), !d.isEmpty {
+                if destino.isEmpty { destino = d }
+                compartidos.removeObject(forKey: Self.claveDestino)
+            }
+        }
+
+        // "gym-hoy" gana si están las dos marcas: arrancar un entreno es
+        // más específico que abrir una pantalla, y quien tocó el widget
+        // del Gimnasio quiere entrenar.
+        if empezarHoy { destino = "gym-hoy" }
+
+        call.resolve(["empezarHoy": empezarHoy, "destino": destino])
     }
 }

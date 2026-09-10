@@ -1720,6 +1720,90 @@ ha tocado: sería un trabajo aparte, con su propio puente. La parte de
 JavaScript (`widget-bridge.js`) sí serviría igual — lo que cambia es todo
 lo nativo.
 
+## Los otros cinco widgets (Hoy, Tareas, Finanzas, Lecturas, Viajes)
+
+Segunda tanda, elegida por Koku el 10/9/2026 (los cuatro que ofrecí, más
+el del Gimnasio que ya había): **inicio + bloqueo + centro de control**.
+
+**Un solo resumen para los seis widgets**, no uno por widget. Son unos
+cientos de bytes; partirlo obligaría a seis escrituras, seis avisos a iOS
+y seis nombres de clave donde equivocarse — y equivocarse en un nombre no
+da ningún error, deja el widget en blanco para siempre (ya pasó).
+
+Por eso la clave del buzón pasó de `resumenGimnasio` a **`resumenApp`**.
+Está en `ResumenDeLaApp.swift` y en `WidgetBridgePlugin.swift`, y las
+compara el guion de comprobación (ver más abajo).
+
+### Las piezas
+
+- **`public/widget-bridge.js`** — `construirResumenDelDia()` es ahora
+  **asíncrona** y arma las cinco secciones. Cada una va **en su propio
+  `try`**: que Finanzas falle no puede dejar sin datos al calendario; esa
+  sección se queda fuera del JSON y su widget enseña su "sin datos".
+- **`ios/App/DescansoWidget/ResumenDeLaApp.swift`** (nuevo) — el modelo
+  que leen todos, con el App Group, la clave, `Color(hexDeLaApp:)`,
+  `fondoDeWidgetApp()`, `importeCorto()` y `cuantoFalta()`.
+- **`ios/App/DescansoWidget/WidgetsDeLaApp.swift`** (nuevo) — los cinco
+  widgets, un `TimelineProvider` común y los cuatro botones del centro de
+  control.
+- `DescansoWidgetBundle.swift` los registra; `WidgetBridgePlugin.swift`
+  refresca los seis `kind`; `SceneDelegate.swift` marca el destino.
+
+### Decisiones que conviene no deshacer
+
+- **El destino viaja como TEXTO y Swift no lo interpreta.** SceneDelegate
+  guarda el `host` de la URL tal cual (`widgetPendingDestino`) y el
+  JavaScript decide a dónde llevar. Así **añadir un widget nuevo se hace
+  entero desde JavaScript**, sin recompilar nada nativo.
+- **Los botones del centro de control usan `OpenURLIntent`**, el intent
+  del sistema, no uno propio. Un AppIntent propio que dejara la marca en
+  el App Group dependería justo de lo que puede estar roto — y ya estuvo
+  roto. Con la URL hay **un solo camino de entrada** para el toque y para
+  el botón.
+- **El widget de Tareas lleva a Grupos, no a "Mi espacio".** En móvil no
+  hay hub de Mi espacio (se quitó a propósito: las tareas viven dentro
+  del calendario). El único sitio donde se ven todas juntas y se pueden
+  tachar es **Grupos > "Todos los eventos" con el filtro en tareas
+  pendientes**, y eso es exactamente lo que hace `abrirTareasDesdeWidget()`.
+  Además **pone los desplegables a juego**: si la lista está filtrada y
+  el desplegable dice "Todo", parece que faltan cosas.
+- **Se manda un máximo de 4 filas por sección** (`WIDGET_MAX_FILAS`), no
+  la lista entera: en el mediano caben 3 líneas. El `total` sí es el de
+  verdad, que es lo que permite escribir "+12 más".
+- **`widgetHoyISO()` usa la fecha LOCAL**, no `toISOString()`: a las
+  00:30 en España el UTC todavía es el día anterior y el widget enseñaría
+  lo de ayer durante media hora. Mismo cuidado que `hoyISO()` del ciclo.
+- **`diasHasta()` cuenta de medianoche a medianoche**, no desde ahora: si
+  no, un viaje que empieza mañana a las 09:00 diría "0 días" a partir de
+  las 09:01 de hoy.
+- **Un viaje EN MARCHA gana al siguiente**: si estás de viaje, eso es lo
+  que quieres ver.
+- **El aviso "sin actualizar"**: el resumen solo se reescribe cuando la
+  app se abre, así que tras un par de días sin abrirla estaría viejo.
+  `esDeHoy` lo detecta y el widget lo dice, en vez de enseñar datos de
+  antesdeayer como si fueran de hoy.
+
+### El guion de comprobación (`scratchpad/comprobar.py`)
+
+Aquí no hay Xcode, así que hay dos cosas que ningún compilador va a
+pillar y que un guion sí:
+
+1. **El `pbxproj`**: llaves, secciones Begin/End, ids usados pero no
+   definidos, ids DEFINIDOS dos veces, y que los cuatro `.swift` del
+   widget estén en la fase de Sources. **La comprobación de ids
+   duplicados ya sirvió de algo**: al añadir los archivos nuevos elegí
+   dos ids que ya estaban cogidos, y un id repetido en un pbxproj no da
+   un error legible — deja el proyecto medio roto y Xcode se queja de
+   otra cosa.
+2. **Las constantes que viajan entre JavaScript y Swift**: el App Group
+   (y que esté en los dos `.entitlements`), la clave del buzón, los
+   `kind` declarados contra los que refresca el plugin, que cada Widget
+   esté registrado en el bundle, que los destinos del enum, los de
+   SceneDelegate y los que atiende `app.js` sean los mismos, y que toda
+   clave del JSON que Swift lee la escriba el JavaScript.
+
+Si algún día se añade un widget, lo barato es lanzarlo antes de compilar.
+
 ## Dos ramas: `desarrollador` y `movil-ui`
 
 Decisión de Koku (10/9/2026), después de que el widget se quedara en
@@ -1760,10 +1844,12 @@ se descartó era ponerlos detrás de un interruptor y tener una sola rama.
    `refreshGymRestAlertStatus()` y su listener de `visibilitychange`.
 3. **El botón "Probar el aviso (10 s)"** — `#btn-test-gym-rest-alert`,
    su listener y su "?" (`#btn-help-notif-test`).
-4. **El "Sin buzón · falta el App Group" del widget** —
+4. **El "Sin buzón · falta el App Group" de los widgets** —
    `ResumenDelDia.hayBuzon()` y el campo `sinBuzon` de `QueTocaEntry` en
-   `QueTocaHoyWidget.swift`. En `movil-ui` el respaldo vuelve a ser
-   "Abre la app" a secas.
+   `QueTocaHoyWidget.swift`, y sus gemelos `ResumenDeLaApp.hayBuzon()` /
+   `EntradaDeLaApp.sinBuzon` / `VacioDeWidget(sinBuzon:)` en los cinco
+   widgets nuevos. En `movil-ui` el respaldo vuelve a ser "Abre la app" a
+   secas.
 
 **Y con ellos se va el código que solo existía para alimentarlos**, que
 si se queda es peso muerto: `gymTestRestAlert()`, `GYM_REST_STOP_LABELS`,
