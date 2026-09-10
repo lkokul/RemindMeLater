@@ -26,8 +26,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // llevar -- asi anadir un destino no obliga a tocar Swift.
         let destinos = ["hoy", "tareas", "finanzas", "lecturas", "viajes",
                         "nuevo-evento", "nueva-nota"]
-        if let url = nuestras.first(where: { destinos.contains($0.url.host ?? "") }) {
-            UserDefaults.standard.set(url.host ?? "", forKey: "widgetPendingDestino")
+        if let contexto = nuestras.first(where: { destinos.contains($0.url.host ?? "") }) {
+            UserDefaults.standard.set(contexto.url.host ?? "", forKey: "widgetPendingDestino")
         }
     }
 
