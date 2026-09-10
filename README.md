@@ -6,7 +6,7 @@ nunca. No hay servidor, ni cuenta, ni nube, ni nada que emparejar: se
 abre y funciona. Por dentro es SQLite de verdad (compilado a
 WebAssembly), con las mismas consultas de siempre, guardado en el
 almacenamiento del propio dispositivo. Ademas del calendario, la app
-tiene un hub de "Herramientas" (Gimnasio, Entretenimiento, Finanzas y Viajes — ver mas
+tiene un hub de "Herramientas" (Gimnasio, Lecturas, Finanzas y Viajes — ver mas
 abajo).
 
 > **Nota sobre este repositorio.** Esta rama es **solo la app de
@@ -174,15 +174,46 @@ antes):
 Desde el botón "Herramientas" de la barra inferior se accede a secciones aparte del calendario, cada una
 a pantalla completa y sin afectar a nada de lo de arriba:
 
-- **Gimnasio**: registro de entrenamientos. Una biblioteca de
-  ejercicios y de rutinas reutilizables (con icono y color propios); una
-  sesión puede partir de una rutina guardada (auto-rellena los
-  ejercicios esperados) o ser completamente libre. Cada serie de un
-  ejercicio se apunta con repeticiones y peso — elegible en kg o libras,
-  por dispositivo (el dato se guarda siempre en kg, la conversión es
-  solo de presentación). Una pestaña de progreso muestra una gráfica
-  (peso máximo o volumen levantado) por ejercicio a lo largo del tiempo.
-- **Entretenimiento**: historial de entretenimiento — mangas, cómics, libros,
+- **Gimnasio**: registro de entrenamientos, organizado en bloques
+  (etapas con nombre, ej. "Volumen Invierno", con un único bloque activo
+  a la vez) que contienen días de entrenamiento reutilizables (con icono
+  y color propios); una sesión puede partir de un día guardado
+  (auto-rellena los ejercicios esperados) o ser completamente libre.
+  Cada serie de un ejercicio se apunta con repeticiones y peso —
+  elegible en kg o libras, por dispositivo (el dato se guarda siempre en
+  kg, la conversión es solo de presentación). Una pestaña de progreso
+  muestra una gráfica (peso máximo o volumen levantado) por ejercicio a
+  lo largo del tiempo. Incluye además una **librería de ~870 ejercicios**
+  buscable y filtrable por grupo muscular y material, con instrucciones
+  paso a paso, de la que se importa a tus ejercicios lo que uses. Los
+  datos de esa librería vienen de
+  [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (de
+  yuhonas), que a su vez nació de
+  [exercises.json](https://github.com/wrkout/exercises.json) (de Ollie
+  Jennings) — ambos de dominio público (Unlicense), ¡gracias a los dos!
+  Los nombres están traducidos al español dentro de la propia app.
+  Al terminar una serie durante el entrenamiento puedes apuntar que la
+  **alargaste**: un *dropset* (bajas el peso y sigues) o un *rest-pause*
+  (paras unos segundos y sigues con el mismo peso), con tantos tramos
+  como hagas. Una serie alargada sigue contando como **una serie** para
+  la racha y el objetivo semanal, pero **sus kilos sí suman** al volumen
+  y cualquiera de sus tramos puede marcar un récord.
+  Un bloque puede además repetirse en un **ciclo de días** opcional:
+  colocas en orden lo que haces ("día 1 Empuje, día 2 Tirón, día 3
+  descanso") y al empezar a entrenar la app te ofrece primero el que
+  toca. El ciclo avanza **según lo que entrenas de verdad**, no según el
+  calendario: si te saltas un día, al siguiente te sigue tocando lo
+  mismo — solo los descansos se consumen solos al pasar el día. Y si un
+  día de descanso te apetece entrenar, puedes: te avisa y, al terminar,
+  te pregunta cómo continuar el ciclo.
+  Tanto tu lista de ejercicios como los desplegables donde eliges uno
+  llevan **buscador** (por nombre, músculo o material), para que tener
+  muchos no sea un problema.
+  En iOS hay además un **widget "Qué toca hoy"** con el entrenamiento del
+  día: en la pantalla de inicio, en la de bloqueo y como botón del centro
+  de control. Tocarlo abre la app y arranca ese entreno; si hoy toca
+  descanso, te deja elegir.
+- **Lecturas**: historial de entretenimiento — mangas, cómics, libros,
   series, animes y películas juntos — agrupado en sagas (obligatorias:
   incluso algo suelto es una saga de un único elemento, y una misma saga
   puede mezclar tipos distintos, ej. las temporadas de una serie y los
@@ -287,7 +318,11 @@ sistema operativo**: suena a su hora aunque la app este cerrada del todo,
 sin servidor y sin que nada salga del dispositivo.
 
 Los avisos se reprograman solos cada vez que creas, editas o borras algo,
-asi que nunca suena un aviso de algo que ya no existe.
+asi que nunca suena un aviso de algo que ya no existe. Cada aviso llega
+**con sonido y vibracion**, como cualquier notificacion normal del
+sistema (en Android, la app crea su propio canal "Recordatorios" — desde
+los ajustes del sistema se puede afinar como suena, igual que con
+cualquier otra app).
 
 ## Datos personales
 

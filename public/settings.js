@@ -29,17 +29,92 @@
 // hasta el (justo el bug que reporto Koku al anadir un icono a una
 // carpeta). Medir de verdad evita que esto se repita aunque el
 // contenido de un popover cambie en el futuro.
+// Cuanto ocupan las zonas del movil donde NO se puede pintar: arriba la
+// Dynamic Island / muesca / barra de estado, abajo la barrita de inicio.
+// El navegador solo las expone como env(safe-area-inset-*) desde CSS, no
+// hay forma de leerlas directamente desde JavaScript -- asi que se
+// miden con un elemento de usar y tirar que las pide como padding y
+// luego se le pregunta cuanto le ha quedado.
+function safeAreaInsets() {
+  const sonda = document.createElement('div');
+  sonda.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;top:0;left:0;'
+    + 'padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);';
+  document.body.appendChild(sonda);
+  const estilo = getComputedStyle(sonda);
+  const arriba = parseFloat(estilo.paddingTop) || 0;
+  const abajo = parseFloat(estilo.paddingBottom) || 0;
+  sonda.remove();
+  return { arriba, abajo };
+}
+
+// Coloca un popover flotante (color, icono, desplegable, fecha...) sin
+// que se salga de la pantalla.
+//
+// Historia de este codigo, para no repetir los mismos errores:
+//  1. Al principio estimaba la altura con un numero fijo. Se quedaba
+//     corta con el popover de iconos y lo dejaba fuera de la pantalla.
+//     Arreglado midiendo la altura REAL (offsetHeight), que se puede
+//     porque cuando se llama a esto el popover ya esta pintado.
+//  2. (9/9/2026) Koku enseño una captura del selector de color de un
+//     grupo: la mitad de arriba quedaba TAPADA por la Dynamic Island.
+//     El motivo: cuando no cabia debajo del boton, esto lo subia y lo
+//     topaba en 8px desde el borde de la PANTALLA -- pero los primeros
+//     ~60px de esa pantalla no se ven, los ocupa el sistema. Y si el
+//     popover es mas alto que el hueco util (la paleta de color son 32
+//     colores en cuatro grupos), ninguna posicion lo arregla: hace
+//     falta que se pueda desplazar por dentro.
 function positionFixedPopover(anchorBtn, popover, { width = 248 } = {}) {
   const rect = anchorBtn.getBoundingClientRect();
   let left = rect.left;
   if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
   popover.style.left = `${Math.max(8, left)}px`;
 
-  const actualHeight = popover.offsetHeight;
-  const top = rect.bottom + 6 + actualHeight > window.innerHeight
-    ? Math.max(8, rect.top - actualHeight - 6)
-    : rect.bottom + 6;
+  // Los limites de verdad: la franja de pantalla donde SI se ve algo.
+  // El margen de 14px va ADEMAS del hueco del sistema, para que el
+  // popover no quede pegado justo debajo de la Dynamic Island (queda
+  // agobiado y parece cortado aunque no lo este).
+  const { arriba, abajo } = safeAreaInsets();
+  const limiteArriba = arriba + 14;
+  const limiteAbajo = window.innerHeight - abajo - 14;
+
+  // Que nunca sea mas alto que esa franja. Si su contenido no cabe, se
+  // desplaza por dentro en vez de salirse (a la paleta de color le pasa
+  // en cuanto el movil no es muy alto).
+  popover.style.maxHeight = `${limiteAbajo - limiteArriba}px`;
+  popover.style.overflowY = 'auto';
+
+  const alto = popover.offsetHeight;
+  let top;
+  if (rect.bottom + 6 + alto <= limiteAbajo) {
+    top = rect.bottom + 6;                 // cabe debajo del boton
+  } else if (rect.top - 6 - alto >= limiteArriba) {
+    top = rect.top - alto - 6;             // cabe encima
+  } else {
+    top = limiteArriba;                    // no cabe: arriba del todo, con scroll
+  }
   popover.style.top = `${top}px`;
+}
+
+// La paleta son 32 colores mas el color a medida: flotando en un movil
+// ocupa media pantalla, tapa lo que estabas mirando y queda recargada
+// (Koku: "es un poco enfarragoso y la vista se ve sucia"). En movil se
+// abre a PANTALLA COMPLETA con su propia X; en escritorio, donde sobra
+// sitio y el raton hace comodo cerrar tocando fuera, sigue flotando
+// junto a su boton como siempre.
+const ANCHO_ESCRITORIO = 860; // el mismo corte que usa styles.css
+function abrirPopoverDeColor(anchorBtn, popover) {
+  const aPantallaCompleta = window.innerWidth < ANCHO_ESCRITORIO;
+  popover.classList.toggle('is-fullscreen', aPantallaCompleta);
+  if (aPantallaCompleta) {
+    // positionFixedPopover deja left/top/max-height en el atributo
+    // style, y eso ganaria a las reglas de pantalla completa. Se limpian.
+    popover.style.left = '';
+    popover.style.top = '';
+    popover.style.maxHeight = '';
+    popover.style.overflowY = '';
+    return;
+  }
+  positionFixedPopover(anchorBtn, popover);
 }
 
 function closeAllPopovers(except) {
@@ -81,6 +156,27 @@ function createColorField({ initialValue, onChange }) {
   const popover = document.createElement('div');
   popover.className = 'color-popover hidden';
   document.body.appendChild(popover);
+
+  // Cabecera con el titulo y la X. Solo se VE en modo pantalla completa
+  // (ver .color-popover.is-fullscreen en styles.css): flotando encima de
+  // su boton no hace falta, se cierra tocando fuera.
+  const header = document.createElement('div');
+  header.className = 'color-popover-header';
+  const headerTitle = document.createElement('span');
+  headerTitle.className = 'color-popover-title';
+  headerTitle.textContent = 'Elige un color';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'icon-btn color-popover-close';
+  closeBtn.setAttribute('aria-label', 'Cerrar');
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    popover.classList.add('hidden');
+  });
+  header.appendChild(headerTitle);
+  header.appendChild(closeBtn);
+  popover.appendChild(header);
 
   const nativeInput = document.createElement('input');
   nativeInput.type = 'color';
@@ -135,7 +231,7 @@ function createColorField({ initialValue, onChange }) {
     const willOpen = popover.classList.contains('hidden');
     closeAllPopovers(popover);
     popover.classList.toggle('hidden');
-    if (willOpen) positionFixedPopover(swatchBtn, popover);
+    if (willOpen) abrirPopoverDeColor(swatchBtn, popover);
   });
 
   root.appendChild(swatchBtn);
@@ -263,7 +359,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'store'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'widgets', 'notifications', 'store'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -282,7 +378,10 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     if (tab === 'profile') refreshProfileTab();
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();
-    else if (tab === 'mobile') refreshMobileTab();
+    // refreshMobileTab refresca por id, asi que vale para las DOS
+    // secciones que reparte: Este dispositivo y Notificaciones.
+    else if (tab === 'mobile' || tab === 'notifications') refreshMobileTab();
+    else if (tab === 'widgets') refreshWidgetStyleOptions();
   });
 });
 
@@ -387,11 +486,138 @@ function refreshFavoritesDisplayOptions() {
 }
 
 
+// ---------------------------------------------------------------------
+// Widgets: como se pintan en la pantalla de inicio
+// ---------------------------------------------------------------------
+// Peticion de Koku tras ver los widgets con los colores de la app y el
+// sistema en oscuro. Son TRES combinaciones y las tres tienen sentido,
+// asi que en vez de elegir yo una, se eligen:
+//
+//  - "app": los colores del tema tal y como lo tienes puesto AHORA en la
+//    app. Si tu tema es claro, el widget es claro aunque el movil este en
+//    oscuro.
+//  - "sistema": lo que hace iOS por defecto (y lo que hacia la app antes)
+//    -- el material gris translucido, claro u oscuro segun el movil.
+//  - "mixto": tu paleta, pero eligiendo la variante clara u oscura segun
+//    como este el MOVIL en cada momento. Solo cambia algo si tu tema
+//    tiene pareja clara/oscura; si no la tiene, se comporta como "app" y
+//    la pista de debajo lo dice.
+//
+// Es un ajuste de ESTE telefono (localStorage): los widgets viven en su
+// pantalla de inicio, no en la base de datos.
+const WIDGET_STYLE_OPTIONS = [
+  { id: 'app', label: 'Tema y estilo de la app',
+    pista: 'El widget usa los colores del tema que tengas puesto en la app, sea cual sea el modo del móvil.' },
+  { id: 'sistema', label: 'Tema y estilo del móvil',
+    pista: 'El widget se pinta como los demás de iOS: gris translúcido, claro u oscuro según el móvil.' },
+  { id: 'mixto', label: 'Tema del móvil, estilo de la app',
+    pista: 'El widget usa tu paleta, pero elige la variante clara u oscura según cómo esté el móvil.' },
+];
+
+function getWidgetStyle() {
+  const v = localStorage.getItem('widgetEstilo');
+  return WIDGET_STYLE_OPTIONS.some((o) => o.id === v) ? v : 'app';
+}
+
+function refreshWidgetStyleOptions() {
+  const container = document.getElementById('widget-style-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getWidgetStyle();
+
+  WIDGET_STYLE_OPTIONS.forEach((opt) => {
+    const isActive = opt.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = opt.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('widgetEstilo', opt.id);
+        // El estilo viaja DENTRO del resumen, asi que hay que reescribirlo
+        // para que el widget se entere. Sin esto no cambiaria nada hasta
+        // la proxima vez que la app tocara algo.
+        if (typeof actualizarResumenDelWidget === 'function') actualizarResumenDelWidget();
+        refreshWidgetStyleOptions();
+      });
+    }
+    container.appendChild(btn);
+  });
+
+  const hint = document.getElementById('widget-style-hint');
+  if (!hint) return;
+  const opt = WIDGET_STYLE_OPTIONS.find((o) => o.id === current);
+  let texto = opt ? opt.pista : '';
+  // Con un tema SIN pareja, "mixto" no puede hacer nada: mejor decirlo que
+  // dejar a Koku mirando un widget que no cambia.
+  if (current === 'mixto' && !temaActivoTienePareja()) {
+    texto += ' Tu tema no tiene variante clara/oscura, así que ahora mismo se ve igual que "Tema y estilo de la app".';
+  }
+  hint.textContent = texto;
+}
+
+function temaActivoTienePareja() {
+  const activo = themeLibrary.find((x) => x.id === Number(localStorage.getItem('activeThemeId')));
+  return !!(activo && activo.inverseColors);
+}
+
+// Las DOS paletas del tema activo (la clara y la oscura), para el modo
+// "mixto": el widget necesita las dos para poder elegir segun el movil,
+// porque el widget se repinta con la app CERRADA y no puede preguntarle.
+// Si el tema no tiene pareja, las dos son la misma.
+function paletasDelTemaParaElWidget() {
+  const activo = themeLibrary.find((x) => x.id === Number(localStorage.getItem('activeThemeId')));
+  const par = (c) => ({ fondo: (c && c.surface) || '', texto: (c && c.surfaceText) || '' });
+  if (!activo) return { claro: par(null), oscuro: par(null) };
+  if (!activo.inverseColors) {
+    const uno = par(activo.colors);
+    return { claro: uno, oscuro: uno };
+  }
+  const principalEsClaro = isLightColors(activo.colors);
+  return {
+    claro: par(principalEsClaro ? activo.colors : activo.inverseColors),
+    oscuro: par(principalEsClaro ? activo.inverseColors : activo.colors),
+  };
+}
+
+document.getElementById('btn-help-widget-style').addEventListener('click', () => {
+  showAppAlert(
+    'Los widgets se pintan con la app cerrada, así que no pueden preguntarle nada: se llevan los colores puestos.\n\n' +
+    '• Tema y estilo de la app: siempre tu tema. Si el tuyo es claro y el móvil está en oscuro, el widget se verá claro entre los demás.\n\n' +
+    '• Tema y estilo del móvil: como cualquier otro widget de iOS. Es lo que menos canta, pero no se parece a tu app.\n\n' +
+    '• Tema del móvil, estilo de la app: tu paleta, pero con la variante clara u oscura según el móvil. Necesita que tu tema tenga pareja clara/oscura.'
+  );
+});
+
+
 // Salir de la pestana Estilo (volver al menu, o cerrar Configuracion del
-// todo) sin haber guardado descarta el borrador que hubiera a medias —
-// closeThemeForm() no hace nada raro si no habia ningun tema en edicion.
+// todo) GUARDA el borrador que hubiera a medias, en vez de descartarlo.
+//
+// Cambio pedido por Koku ("hay autoguardado en ese sentido no?, al
+// deslizar se deberia quedar el nuevo tema puesto"): ahora que se sale
+// de una seccion deslizando el dedo y no solo pulsando un boton, perder
+// lo editado por un gesto casi sin querer seria muy fastidioso. Ademas
+// deja el comportamiento coherente con lo que ya hacia switchThemeEdit()
+// (pasar a editar otro tema guarda el anterior solo, sin preguntar).
+//
+// closeThemeForm() sigue detras por si el guardado no aplica (no habia
+// ningun tema en edicion, o el borrador estaba limpio): no hace nada
+// raro en ese caso.
 document.querySelectorAll('[data-back]').forEach((btn) => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
+    if (themeDraftDirty) {
+      // Si el guardado falla (nombre vacio, por ejemplo), mejor no
+      // tragarse el error en silencio: se avisa y NO se sale, para que
+      // se pueda arreglar sin haber perdido nada.
+      try {
+        await saveCurrentThemeEdit();
+      } catch (err) {
+        showAppAlert('No se ha podido guardar el tema que estabas editando, así que la pantalla se queda abierta para que no pierdas los cambios.');
+        return;
+      }
+    }
     closeThemeForm();
     showSettingsScreen(null);
   });
@@ -650,7 +876,7 @@ async function applyTheme(theme, { persist = true } = {}) {
 // app esta abierta, ver el listener de matchMedia mas abajo); es un
 // ajuste de ESTE dispositivo, como el tema activo.
 // Solo hay boton para "Sistema" -- cambiar a claro/oscuro A MANO ya se
-// hace con el atajo ☀/☾ de la topbar (ver btn-quick-color-mode mas
+// hace con el atajo de sol/luna de la topbar (ver btn-quick-color-mode mas
 // abajo), que dispara setColorModePreference('light'/'dark') igual que
 // hacian los botones "Claro"/"Oscuro" que habia aqui antes. Este boton
 // sirve para volver a "seguir el sistema" despues de haber cambiado a
@@ -721,6 +947,17 @@ function setColorModePreference(mode) {
 // (#btn-quick-color-mode) y otra dentro de Configuracion > Estilo
 // (#settings-quick-color-mode, para movil, que ya no tiene topbar) --
 // ambas se refrescan y comportan igual.
+// Sol y luna como SVG, no como emoji (peticion de Koku: "que sea un
+// icono en todo caso"). Un emoji lo pinta el sistema con SU tipografia:
+// cambia de forma entre iPhone, Android y navegador, no hereda el color
+// del tema y suele salir mas gordo o mas pequeño que el texto de al
+// lado. Un SVG con currentColor se comporta como una letra mas y se
+// tiñe con el tema activo.
+const ICON_CLARO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const ICON_OSCURO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg>';
+// Circulo mitad y mitad: "este tema tiene pareja clara y oscura".
+const ICON_PAREJA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/></svg>';
+
 function refreshQuickColorModeButton() {
   const buttons = document.querySelectorAll('.quick-color-mode-btn');
   if (!buttons.length) return;
@@ -730,8 +967,9 @@ function refreshQuickColorModeButton() {
   buttons.forEach((btn) => {
     btn.classList.toggle('hidden', !hasInverse);
     if (!hasInverse) return;
-    btn.textContent = resolvedIsLight ? '☀' : '☾';
+    btn.innerHTML = resolvedIsLight ? ICON_CLARO : ICON_OSCURO;
     btn.title = `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}`;
+    btn.setAttribute('aria-label', btn.title);
   });
 }
 
@@ -794,7 +1032,18 @@ function positionThemeForm() {
   if (editingThemeId) {
     const card = document.querySelector(`.theme-card[data-theme-id="${editingThemeId}"]`);
     if (card) {
-      card.insertAdjacentElement('afterend', form);
+      // OJO: DESPUES DEL ENVOLTORIO, no despues de la tarjeta.
+      //
+      // Desde que las tarjetas se deslizan, cada una vive dentro de un
+      // .note-swipe-wrap. Metiendo el formulario ahi dentro pasaba algo
+      // muy feo (lo vio Koku en una captura): ese envoltorio recorta lo
+      // que se sale (overflow:hidden) y sus botones de Editar/Exportar/
+      // Eliminar van pegados de ARRIBA A ABAJO (top:0 y bottom:0), asi
+      // que al crecer el envoltorio con el formulario dentro, los
+      // botones se estiraban a lo largo de toda la pantalla y salian
+      // por encima de los campos.
+      const contenedor = card.closest('.note-swipe-wrap') || card;
+      contenedor.insertAdjacentElement('afterend', form);
       return;
     }
   }
@@ -835,7 +1084,7 @@ function renderThemeLibrary() {
     // (incluida esta etiqueta) lo activa primero, igual que el resto.
     const resolvedIsLight = isLightColors(resolved);
     const pairBadge = theme.inverseColors
-      ? `<button type="button" data-action="toggle-variant" class="theme-pair-badge" title="${isActive ? `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}` : 'Fija este tema para poder cambiar de variante'}">${resolvedIsLight ? '☀ Claro' : '☾ Oscuro'}</button>`
+      ? `<button type="button" data-action="toggle-variant" class="theme-pair-badge" title="${isActive ? `Cambiar a ${resolvedIsLight ? 'oscuro' : 'claro'}` : 'Fija este tema para poder cambiar de variante'}">${resolvedIsLight ? ICON_CLARO : ICON_OSCURO}<span>${resolvedIsLight ? 'Claro' : 'Oscuro'}</span></button>`
       : '';
     card.innerHTML = `
       <div class="theme-card-top">
@@ -848,10 +1097,6 @@ function renderThemeLibrary() {
         ${activeBadge}
       </div>
       <div class="theme-card-name">${escapeHtml(theme.name)} ${pairBadge}</div>
-      <div class="theme-card-actions">
-        <button type="button" data-action="edit" class="secondary-btn">Editar</button>
-        <button type="button" data-action="export" class="secondary-btn">Exportar</button>
-      </div>
     `;
     // Clicar la tarjeta (fuera de sus botones, que paran la propagacion)
     // fija ese tema como el de este dispositivo — ya no hace falta un
@@ -859,14 +1104,6 @@ function renderThemeLibrary() {
     if (!isActive) {
       card.addEventListener('click', () => applyTheme(theme));
     }
-    card.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
-      e.stopPropagation();
-      switchThemeEdit(theme);
-    });
-    card.querySelector('[data-action="export"]').addEventListener('click', (e) => {
-      e.stopPropagation();
-      exportTheme(theme);
-    });
     const toggleBtn = card.querySelector('[data-action="toggle-variant"]');
     if (toggleBtn) {
       toggleBtn.addEventListener('click', (e) => {
@@ -882,7 +1119,19 @@ function renderThemeLibrary() {
         setColorModePreference(resolvedIsLight ? 'dark' : 'light');
       });
     }
-    container.appendChild(card);
+    // Editar / Exportar / Eliminar se sacan DESLIZANDO la tarjeta, igual
+    // que las carpetas y notas de Mi espacio, las sesiones del historial
+    // del Gimnasio y las tarjetas de grupo (peticion de Koku). Antes
+    // "Editar" y "Exportar" eran dos botones siempre a la vista y
+    // "Eliminar" solo aparecia dentro de la ficha de edicion -- tres
+    // sitios distintos para tres acciones del mismo tema.
+    container.appendChild(wrapRowWithSwipeActions(card, {
+      botones: [
+        ['Editar', 'secondary-btn', () => switchThemeEdit(theme)],
+        ['Exportar', 'secondary-btn', () => exportTheme(theme)],
+        ['Eliminar', 'danger-btn', () => deleteThemeById(theme.id, theme.name)],
+      ],
+    }));
   });
 
   positionThemeForm();
@@ -1081,10 +1330,20 @@ document.getElementById('theme-form').addEventListener('submit', async (e) => {
   await saveCurrentThemeEdit();
 });
 
-document.getElementById('btn-delete-theme').addEventListener('click', async () => {
-  const id = document.getElementById('theme-id').value;
-  if (!id) return;
-  if (!confirm('¿Eliminar este tema? Los dispositivos que lo tuvieran activo se quedaran sin tema.')) return;
+// Borrar un tema con su confirmacion. Sale del boton "Eliminar" de la
+// ficha para poder usarse tambien desde el deslizamiento de la tarjeta,
+// sin tener que abrir la ficha antes.
+//
+// Ojo: antes esto usaba el confirm() del navegador. Es un dialogo del
+// sistema, no sigue el tema activo y ademas en la app instalada sale con
+// el nombre del sitio, asi que se cambia por showAppConfirm() como en el
+// resto de la app.
+async function deleteThemeById(id, nombre) {
+  if (!id) return false;
+  const seguro = await showAppConfirm(
+    `¿Eliminar el tema "${nombre || ''}"? Los dispositivos que lo tuvieran activo se quedarán sin tema.`,
+  );
+  if (!seguro) return false;
   await api(`/api/themes/${id}`, { method: 'DELETE' });
   document.getElementById('theme-form').classList.add('hidden');
   document.getElementById('btn-save-theme-changes').classList.add('hidden');
@@ -1092,6 +1351,12 @@ document.getElementById('btn-delete-theme').addEventListener('click', async () =
   themeDraftDirty = false;
   positionThemeForm();
   await refreshStyleTab();
+  return true;
+}
+
+document.getElementById('btn-delete-theme').addEventListener('click', () => {
+  const id = document.getElementById('theme-id').value;
+  deleteThemeById(id, document.getElementById('theme-name').value);
 });
 
 // --- Copiar estilo de otro dispositivo conectado ---
@@ -1248,11 +1513,272 @@ function refreshMobileTab() {
       : '';
   }
 
+  // Aviso de fin de descanso del Gimnasio: solo tiene sentido en la app
+  // instalada (lo programa el plugin nativo; un navegador normal no
+  // puede avisar con la pestana cerrada). Activado por defecto.
+  const restNotify = document.getElementById('setting-gym-rest-notify');
+  restNotify.disabled = !nativo;
+  restNotify.checked = nativo && localStorage.getItem('gymRestNotify') !== 'false';
+  const restBurst = document.getElementById('setting-gym-rest-burst');
+  restBurst.disabled = !nativo;
+  restBurst.checked = nativo && localStorage.getItem('gymRestBurst') !== 'false';
+  const restDuck = document.getElementById('setting-gym-rest-duck');
+  restDuck.disabled = !nativo;
+  restDuck.checked = nativo && localStorage.getItem('gymRestDuck') !== 'false';
+  // Este NO se deshabilita fuera de la app instalada: no depende de
+  // ningun plugin, es solo lo que hace la pantalla del entreno cuando se
+  // acaba el descanso. Apagado de fabrica.
+  document.getElementById('setting-gym-auto-start').checked =
+    localStorage.getItem('gymAutoStartNextSet') === 'true';
+
+  // Sonido y vibracion de los avisos, como on-off separados (peticion
+  // de Koku). El matiz de iOS (con sonido, vibrar lo decide el sistema;
+  // "solo vibracion" usa el truco del sonido de silencio) vive en el
+  // dialogo del boton "?" -- ver notificationSoundValue() en
+  // local-notifications.js, que traduce estos dos toggles.
+  document.getElementById('setting-notif-sound').checked = localStorage.getItem('notifSound') !== 'false';
+  document.getElementById('setting-notif-vibrate').checked = localStorage.getItem('notifVibrate') !== 'false';
+
+  // Estado de la Live Activity (cuenta atras en la pantalla de bloqueo):
+  // en el iPhone no hay consola que mirar, asi que el resultado del
+  // ultimo intento se ensena aqui para poder diagnosticar.
+  const laStatus = document.getElementById('gym-live-activity-status');
+  if (!nativo) {
+    laStatus.textContent = '';
+  } else {
+    const last = localStorage.getItem('gymLiveActivityStatus');
+    laStatus.textContent = last
+      ? (last === 'ok'
+          ? 'Cuenta atrás en pantalla de bloqueo: funcionando.'
+          : `Cuenta atrás en pantalla de bloqueo: ${last}`)
+      : 'Cuenta atrás en pantalla de bloqueo: sin datos todavía (marca una serie en un entreno).';
+  }
+
+  // Y lo mismo con la vibracion larga del fin de descanso: se ensena
+  // QUE corto el ultimo aviso (lo apunta la parte nativa), que es la
+  // unica forma de saber desde el propio movil si callarla con el
+  // volumen, el mando del auricular o quitando la notificacion funciona.
+  document.getElementById('btn-test-gym-rest-alert').disabled = !nativo;
+  refreshGymRestAlertStatus();
+  // El diagnostico del widget se refresca al ENTRAR en el panel, que es
+  // cuando de verdad se va a leer.
+  refreshWidgetStatus();
+
+  refreshGymTimeFormatOptions();
+  // Animaciones de TODA la app (zoom y deslizar del calendario, pero
+  // tambien transiciones de botones, listas, paneles...): encendidas por
+  // defecto -- ver areAnimationsEnabled()/applyAnimationsPreference() en
+  // app.js y la regla [data-animations="off"] de styles.css.
+  document.getElementById('setting-animations').checked = localStorage.getItem('animationsEnabled') !== 'false';
+
   refreshGymWeightUnitOptions();
   // La linea de "Ultima copia: ..." del bloque de copia de seguridad
   // (ver backup.js, que se carga antes que este archivo).
   refreshBackupStatusLine();
 }
+
+// Sonido / vibracion: al cambiar cualquiera se reprograman los avisos ya
+// puestos (llevan el sonido "dentro" desde que se programan).
+async function onNotifAlertToggleChange() {
+  await syncScheduledReminders();
+  if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
+}
+document.getElementById('setting-notif-sound').addEventListener('change', (e) => {
+  localStorage.setItem('notifSound', e.target.checked ? 'true' : 'false');
+  onNotifAlertToggleChange();
+});
+document.getElementById('setting-notif-vibrate').addEventListener('change', (e) => {
+  localStorage.setItem('notifVibrate', e.target.checked ? 'true' : 'false');
+  onNotifAlertToggleChange();
+});
+
+// Un "?" POR OPCION (peticion de Koku: "cada apartado tiene su propio
+// boton con su texto"), en vez de un unico dialogo con todo.
+document.getElementById('btn-help-notif-reminders').addEventListener('click', () => {
+  showAppAlert('En la app instalada, los avisos de recordatorios los programa el propio teléfono: suenan aunque la app esté cerrada y sin que nada salga del dispositivo. Desde un navegador solo pueden avisar con la pestaña abierta.');
+});
+document.getElementById('btn-help-notif-rest').addEventListener('click', () => {
+  showAppAlert('Durante un entrenamiento del Gimnasio, cuando se acaba el descanso entre series llega una notificación aunque la pantalla esté bloqueada — así no hace falta estar mirando el móvil. Usa el mismo permiso que los recordatorios.');
+});
+document.getElementById('setting-gym-rest-burst').addEventListener('change', (e) => {
+  localStorage.setItem('gymRestBurst', e.target.checked ? 'true' : 'false');
+  // Si hay un descanso en marcha, se reprograma con el modo nuevo.
+  if (typeof gymScheduleRestNotification === 'function') gymScheduleRestNotification();
+});
+document.getElementById('setting-gym-auto-start').addEventListener('change', (e) => {
+  localStorage.setItem('gymAutoStartNextSet', e.target.checked ? 'true' : 'false');
+});
+document.getElementById('btn-help-notif-autostart').addEventListener('click', () => {
+  showAppAlert('Al acabar el descanso, la siguiente serie empieza sola sin que tengas que darle a "Empezar serie" — solo si queda alguna serie pendiente de ese ejercicio. Ojo: el cronómetro de la serie arranca en ese momento, así que lo que tardes en volver a la máquina o colocar el peso cuenta como tiempo de serie. Apagado, el botón "Empezar serie" se pone grande al acabar el descanso y lo arrancas tú.');
+});
+document.getElementById('setting-gym-rest-duck').addEventListener('change', (e) => {
+  localStorage.setItem('gymRestDuck', e.target.checked ? 'true' : 'false');
+  // Si hay un descanso en marcha: encenderlo lo vigila ya; apagarlo
+  // suelta la vigilancia al momento.
+  if (e.target.checked) {
+    if (typeof gymStartRestAudioWatch === 'function') gymStartRestAudioWatch();
+  } else if (typeof gymCancelRestAudioWatch === 'function') {
+    gymCancelRestAudioWatch();
+  }
+});
+document.getElementById('btn-help-notif-duck').addEventListener('click', () => {
+  showAppAlert('Al acabar el descanso, la app baja unos segundos el volumen de lo que esté sonando (Spotify, Música...) y luego lo devuelve — como hace el GPS al hablar. No pausa ni corta nada.\n\nPara conseguirlo, durante el descanso la app se mantiene despierta en segundo plano (reproduce silencio a volumen cero); el gasto de batería es mínimo y solo dura lo que dura el descanso. Si iOS llegara a cerrar la app del todo, ese descanso no podría bajar la música (la notificación llega igual).');
+});
+document.getElementById('btn-help-notif-burst').addEventListener('click', () => {
+  showAppAlert('Al acabar el descanso, el móvil vibra varias veces seguidas (unos 10 segundos, como un aviso del sistema) para que se note aunque lo lleves en el bolsillo. Antes esto se hacía repitiendo la notificación tres veces; ahora la vibración la produce la propia app y solo llega UNA notificación.\n\nFormas de callarla que funcionan (probadas en iPhone): tocar un botón de volumen, desbloquear la pantalla, abrir la app, o quitar el aviso desde el centro de notificaciones.\n\nDos que NO funcionan, y no es un fallo de la app:\n\n• La pausa de los AirPods. Si hay música sonando, ese botón pertenece a quien está reproduciendo (Spotify, Música...), y iOS no se lo pasa a nadie más. Para enterarnos habría que quitarle a Spotify el mando — y entonces esa pulsación le pausaría la música, que es justo lo que no queremos.\n\n• Deslizar el aviso hacia arriba para quitarlo de la pantalla. Eso solo lo esconde: el aviso sigue estando en el centro de notificaciones, e iOS no avisa a la app de que lo has apartado. Quitarlo del centro de notificaciones sí funciona, porque ahí sí desaparece de verdad.\n\nTodo esto funciona porque durante el descanso la app se mantiene despierta (lo mismo que permite bajarte la música). Si iOS llegara a cerrarla del todo, ese descanso avisaría solo con la notificación normal.');
+});
+document.getElementById('btn-help-notif-test').addEventListener('click', () => {
+  showAppAlert('Lanza el aviso de fin de descanso dentro de 10 segundos, con los mismos ajustes de arriba y sin tener que empezar un entrenamiento. Da tiempo a bloquear el móvil (y a poner música, si quieres probar que baja de volumen).\n\nCuando vibre, prueba a callarlo: tocando un botón de volumen, desbloqueando la pantalla, abriendo la app o quitando el aviso desde el centro de notificaciones. La línea de abajo dice qué lo paró y a los cuántos segundos, y se actualiza sola al volver a esta pantalla.');
+});
+// Rellena la linea de "asi acabo el ultimo aviso".
+//
+// ANTES esto vivia suelto dentro de refreshMobileTab(), o sea que solo
+// se leia al ENTRAR en la seccion -- y ese es justo el momento en que
+// todavia no hay nada que contar. El recorrido real es: entras aqui,
+// pulsas "Probar el aviso", bloqueas el movil, lo callas como sea, lo
+// desbloqueas... y la pantalla sigue siendo la MISMA que se pinto antes
+// de la prueba, asi que la linea se quedaba con el texto viejo ("Aviso
+// lanzado: salta en 10 segundos") y parecia que el diagnostico no
+// existia. Por eso ahora es una funcion aparte a la que se llama
+// tambien al volver a primer plano y al terminar la prueba.
+function refreshGymRestAlertStatus() {
+  const alertStatus = document.getElementById('gym-rest-alert-status');
+  if (!alertStatus) return;
+  // localNotificationsAvailable(): "¿estamos en la app instalada?" -- en
+  // un navegador normal no hay parte nativa que pueda apuntar nada.
+  if (!localNotificationsAvailable() || typeof gymRestAlertLastStatus !== 'function') {
+    alertStatus.textContent = '';
+    return;
+  }
+  gymRestAlertLastStatus().then((info) => {
+    alertStatus.textContent = gymFormatRestAlertStatus(info);
+  });
+}
+
+// Al volver a primer plano (desbloquear el movil, volver desde otra app)
+// se vuelve a leer el diagnostico, pero SOLO si la seccion de
+// Notificaciones esta a la vista -- si no, seria trabajo para nada.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  const panel = document.getElementById('settings-tab-notifications');
+  if (panel && !panel.classList.contains('hidden')) refreshGymRestAlertStatus();
+});
+
+// --- Diagnostico del widget "Que toca hoy" ---------------------------
+// En el iPhone no se puede ver la consola. Cuando el widget se quedo en
+// "Abre la app" no habia forma de saber en cual de los tres sitios se
+// rompia la cadena: la app no escribe / el buzon compartido no existe /
+// el aviso no llega. Esta linea lo dice.
+function refreshWidgetStatus() {
+  const bloque = document.getElementById('widget-status-block');
+  const linea = document.getElementById('widget-status-line');
+  if (!bloque || !linea) return;
+  // Fuera de la app empaquetada el widget no existe: no se enseña nada.
+  const cap = window.Capacitor;
+  const nativo = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+  bloque.classList.toggle('hidden', !nativo);
+  if (!nativo) return;
+
+  const estado = typeof estadoDelWidget === 'function' ? estadoDelWidget() : null;
+  if (!estado) {
+    linea.textContent = 'Todavía no se le ha mandado nada al widget en esta sesión.';
+    return;
+  }
+  const hora = new Date(estado.cuando).toLocaleTimeString();
+  if (estado.ok) {
+    const r = estado.resumen || {};
+    const que = !r.hayCiclo ? 'sin ciclo' : (r.esDescanso ? 'descanso' : (r.nombre || 'sin nombre'));
+    linea.textContent = `Actualizado a las ${hora}. Le has mandado: ${que}` +
+      (r.hayCiclo && r.total ? ` (día ${r.posicion} de ${r.total}).` : '.');
+    return;
+  }
+  // Los motivos, explicados: "sin_grupo" es EL importante, y significa que
+  // la app y el widget no comparten buzon (el App Group no llego en la
+  // firma). Sin eso no hay nada que hacer del lado del JavaScript.
+  const explicacion = estado.motivo === 'sin_grupo'
+    ? 'la app y el widget no comparten el buzón (App Group). Es un problema de la compilación, no de los datos.'
+    : (estado.motivo === 'sin_plugin' ? 'no se encontró el puente nativo.' : estado.motivo);
+  linea.textContent = `NO se pudo actualizar (${hora}): ${explicacion}`;
+}
+
+document.getElementById('btn-widget-refresh').addEventListener('click', async () => {
+  const linea = document.getElementById('widget-status-line');
+  if (linea) linea.textContent = 'Mandando...';
+  // Los bloques y los dias hacen falta para saber que toca hoy: si no se
+  // ha entrado nunca al Gimnasio en esta sesion, no estan cargados.
+  try {
+    if (typeof loadGymBlocks === 'function') await loadGymBlocks();
+    if (typeof loadGymRoutines === 'function') await loadGymRoutines();
+  } catch { /* si falla la carga, se manda lo que haya */ }
+  if (typeof actualizarWidgetDelDia === 'function') await actualizarWidgetDelDia();
+  refreshWidgetStatus();
+});
+
+document.getElementById('btn-test-gym-rest-alert').addEventListener('click', async () => {
+  const status = document.getElementById('gym-rest-alert-status');
+  if (typeof gymLiveSession !== 'undefined' && gymLiveSession && gymLiveSession.restUntil) {
+    showAppAlert('Ahora mismo hay un descanso en marcha; espera a que acabe para probar el aviso (si no, se pisarían el uno al otro).');
+    return;
+  }
+  try {
+    await gymTestRestAlert(10);
+    status.textContent = 'Aviso lanzado: salta en 10 segundos. Bloquea el móvil y prueba a callarlo.';
+    // 10s hasta que salta + los ~10s que dura la vibracion + un margen:
+    // si para entonces sigues en esta pantalla (por ejemplo lo callaste
+    // sin bloquear el movil, asi que no hubo vuelta a primer plano que
+    // dispare el listener de arriba), la linea se actualiza sola.
+    setTimeout(refreshGymRestAlertStatus, 23000);
+  } catch (err) {
+    status.textContent = 'No se pudo lanzar el aviso de prueba.';
+  }
+});
+document.getElementById('btn-help-notif-sound').addEventListener('click', () => {
+  showAppAlert('Con el sonido activado, los avisos usan el sonido del sistema. Un detalle de iOS: cuando un aviso suena, vibrar o no lo decide el teléfono (Ajustes > Sonidos y vibraciones), no la app — por eso no existe la combinación "sonido sin vibración".');
+});
+document.getElementById('btn-help-notif-vibrate').addEventListener('click', () => {
+  showAppAlert('Con el sonido apagado y la vibración encendida, la app usa un truco: "reproduce" medio segundo de silencio, que es lo único que iOS acepta para disparar la vibración sin que se oiga nada. Con los dos apagados, el aviso llega solo en pantalla.\n\nImportante: que un aviso vibre o no lo decide al final el teléfono. Con el móvil en silencio (interruptor lateral), iOS solo vibra si tienes activado Ajustes > Sonidos y vibraciones > "Reproducir respuesta háptica en modo silencio" (y en modo timbre, su gemelo "en modo timbre"). Si eso está apagado, ninguna app puede hacer vibrar sus avisos.');
+});
+
+// Formato de tiempo del Gimnasio (descansos): minutos:segundos o
+// segundos a secas. El mismo ajuste que alterna el contador al tocarlo
+// (gymRestFormat) -- Koku pidio tenerlo tambien aqui, a la vista.
+const GYM_TIME_FORMAT_MODES = [
+  { id: 'min', label: 'Minutos y segundos (1:30)' },
+  { id: 'sec', label: 'Solo segundos (90s)' },
+];
+
+function refreshGymTimeFormatOptions() {
+  const container = document.getElementById('gym-time-format-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = localStorage.getItem('gymRestFormat') === 'sec' ? 'sec' : 'min';
+
+  GYM_TIME_FORMAT_MODES.forEach((mode) => {
+    const isActive = mode.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = mode.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('gymRestFormat', mode.id);
+        refreshGymTimeFormatOptions();
+      });
+    }
+    container.appendChild(btn);
+  });
+}
+
+document.getElementById('setting-animations').addEventListener('change', (e) => {
+  localStorage.setItem('animationsEnabled', e.target.checked ? 'true' : 'false');
+  // Aplicar en caliente: marca/desmarca el <html>, que es lo que
+  // enciende la regla global de styles.css que apaga TODAS las
+  // animaciones de la app (no solo las del calendario). Sin esto haria
+  // falta recargar para notar el cambio.
+  applyAnimationsPreference();
+});
 
 // Unidad de peso de Gimnasio: preferencia de ESTE dispositivo (como el
 // tema), no compartida. getGymWeightUnit() (definida en app.js, que se
@@ -1310,6 +1836,24 @@ document.getElementById('setting-notifications').addEventListener('change', asyn
   // el interruptor.
   await syncScheduledReminders();
   refreshMobileTab();
+});
+
+// Aviso al terminar el descanso entre series (Gimnasio). Usa el mismo
+// permiso del sistema que los recordatorios: si aun no esta dado, se
+// pide aqui mismo al encenderlo.
+document.getElementById('setting-gym-rest-notify').addEventListener('change', async (e) => {
+  if (e.target.checked) {
+    const concedido = await ensureLocalNotificationPermission();
+    if (!concedido) {
+      e.target.checked = false;
+      return;
+    }
+    localStorage.setItem('gymRestNotify', 'true');
+  } else {
+    localStorage.setItem('gymRestNotify', 'false');
+    // Si habia un aviso ya programado para el descanso en curso, fuera.
+    if (typeof gymCancelRestNotification === 'function') gymCancelRestNotification();
+  }
 });
 
 // ---------------------------------------------------------------------
@@ -1480,6 +2024,21 @@ document.addEventListener('keydown', (e) => {
   // de Koku: "el primer esc me saque de la ventana de añadir... luego ya
   // con el siguiente que me lleve a la ventana anterior").
   const gymModalIds = [
+    // Los dialogos de empezar/terminar serie son los mas "de encima"
+    // durante un entreno; Esc equivale a Cancelar / Seguir.
+    ['gym-set-start-modal', closeGymSetStartModal],
+    ['gym-set-end-modal', closeGymSetEndModal],
+    // La ayuda del entrenamiento despues: se abre encima de todo
+    // (incluso encima del entreno en vivo).
+    ['gym-help-modal', closeGymHelpModal],
+    ['gym-progress-help-modal', closeGymProgressHelpModal],
+    // La ficha de la libreria va ANTES que el buscador: se abre encima
+    // de el, y el primer Esc debe cerrar solo la ficha.
+    ['gym-library-detail-modal', closeGymLibraryDetail],
+    ['gym-library-modal', closeGymLibraryModal],
+    ['gym-start-modal', closeGymStartModal],
+    ['gym-activity-modal', closeGymActivityModal],
+    ['gym-block-modal', closeGymBlockModal],
     ['gym-exercise-modal', closeGymExerciseModal],
     ['gym-routine-modal', closeGymRoutineModal],
     ['gym-session-modal', closeGymSessionModal],
@@ -1491,8 +2050,40 @@ document.addEventListener('keydown', (e) => {
       return;
     }
   }
+  // El resumen de fin de entreno y la celebracion de logros se cierran
+  // con Esc como cualquier modal (la celebracion primero: se abre encima).
+  const gymAchievement = document.getElementById('gym-achievement-modal');
+  if (gymAchievement && !gymAchievement.classList.contains('hidden')) {
+    gymAchievement.classList.add('hidden');
+    return;
+  }
+  const gymSummary = document.getElementById('gym-live-summary-modal');
+  if (gymSummary && !gymSummary.classList.contains('hidden')) {
+    gymSummary.classList.add('hidden');
+    return;
+  }
+  // Con un entrenamiento EN VIVO abierto, Esc no hace nada a proposito:
+  // salir se hace solo con Terminar o Descartar (los dos con
+  // confirmacion/resumen) -- un Esc despistado no debe sacar del entreno.
+  // Excepcion: si el menu flotante de acciones esta desplegado, Esc lo
+  // recoge (es la capa de mas arriba).
+  const gymLive = document.getElementById('gym-live-view');
+  if (gymLive && !gymLive.classList.contains('hidden')) {
+    const gymFab = document.getElementById('gym-live-fab');
+    if (gymFab && gymFab.classList.contains('open') && typeof closeGymLiveFab === 'function') {
+      closeGymLiveFab();
+    }
+    return;
+  }
   const gymView = document.getElementById('gym-view');
   if (gymView && !gymView.classList.contains('hidden')) {
+    // Dentro del Plan, si estas viendo los dias de un bloque, el Esc
+    // primero sube al nivel de bloques (sub-navegacion, como Lecturas).
+    const daysLevel = document.getElementById('gym-block-days-level');
+    if (daysLevel && !daysLevel.classList.contains('hidden')) {
+      document.getElementById('btn-gym-back-to-blocks').click();
+      return;
+    }
     document.getElementById('btn-close-gym').click();
     return;
   }

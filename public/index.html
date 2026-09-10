@@ -77,6 +77,20 @@
     } catch (e) {
       document.documentElement.dataset.uiStyle = 'directo';
     }
+
+    // Interruptor de animaciones (Configuracion > Este dispositivo). Va
+    // AQUI, antes de pintar, por el mismo motivo que el tema: si se
+    // pusiera mas tarde, con el interruptor apagado se llegaria a ver un
+    // trozo de animacion antes de que el atributo llegase. Marca el
+    // <html> con data-animations="off" y de eso se encarga UNA regla
+    // global de styles.css que apaga TODAS las animaciones y
+    // transiciones de la app de golpe (ver applyAnimationsPreference()
+    // en app.js).
+    try {
+      if (localStorage.getItem('animationsEnabled') === 'false') {
+        document.documentElement.dataset.animations = 'off';
+      }
+    } catch (e) { /* sin localStorage, animaciones encendidas */ }
   })();
 </script>
 </head>
@@ -123,6 +137,13 @@
          luego abre su seccion clicando el boton real correspondiente
          -- asi toda la logica de abrir/cerrar sigue viviendo en un solo
          sitio, esto solo la dispara desde otro botón. -->
+    <div id="gym-global-rest" class="gym-global-rest hidden" role="button" title="Volver al entrenamiento">
+      <span><span id="gym-global-rest-label">Descanso</span> <b id="gym-global-rest-remaining">0:00</b></span>
+      <div class="gym-global-rest-track">
+        <div id="gym-global-rest-fill-base" class="gym-live-rest-fill-base"></div>
+        <div id="gym-global-rest-fill-extra" class="gym-live-rest-fill-extra"></div>
+      </div>
+    </div>
     <nav class="mobile-nav" aria-label="Navegación principal">
       <button type="button" class="mobile-nav-btn active" data-mobile-nav="calendar" aria-label="Calendario">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
@@ -295,13 +316,12 @@
         <div id="groups-list-panel">
           <div id="groups-view-list" class="groups-list"></div>
 
-          <!-- Lapiz (entrar en modo editar) y "+" (grupo nuevo), abajo a
-               la derecha, mismo sitio que el "+" de Notas. En modo editar,
-               tocar un grupo abre su ficha en vez de entrar dentro. -->
+          <!-- Solo "+" (grupo nuevo), abajo a la derecha, mismo sitio que
+               el "+" de Notas. Aqui habia ademas un lapiz que encendia un
+               "modo editar"; se quito el 9/9/2026 al hacer las tarjetas
+               deslizables, para que haya UNA sola forma de editar un
+               grupo y no dos que hagan dudar (peticion de Koku). -->
           <div class="mobile-fab-wrap groups-fab-wrap">
-            <button type="button" id="btn-groups-edit-mode" class="mobile-fab groups-fab-secondary" aria-label="Editar grupos" title="Editar grupos">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-            </button>
             <button type="button" id="btn-groups-add" class="mobile-fab" aria-label="Nuevo grupo" title="Nuevo grupo">+</button>
           </div>
         </div>
@@ -443,6 +463,15 @@
     <div class="extensions-hub">
       <p class="extensions-intro">Secciones nuevas aparte del calendario.</p>
       <div class="extensions-grid">
+        <!-- Notas tambien vive aqui (peticion de Koku): el 2o hueco de la
+             barra de abajo se puede cambiar por otra App, y quien lo
+             cambiara se quedaba SIN NINGUNA forma de llegar a Notas.
+             Mismo SVG que el de la barra (MOBILE_NAV_SLOT_APPS en
+             app.js), para que se reconozca en los dos sitios. -->
+        <button type="button" id="btn-open-notes" class="extensions-card extensions-card-active">
+          <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v5h5"></path><line x1="8" y1="12" x2="16" y2="12"></line><line x1="8" y1="16" x2="13" y2="16"></line></svg></span>
+          <span class="extensions-card-title">Notas</span>
+        </button>
         <button type="button" id="btn-open-gym" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="3" height="6" rx="1"></rect><rect x="19" y="9" width="3" height="6" rx="1"></rect><line x1="5" y1="12" x2="19" y2="12"></line><rect x="6.5" y="7" width="2" height="10" rx="1"></rect><rect x="15.5" y="7" width="2" height="10" rx="1"></rect></svg></span>
           <span class="extensions-card-title">Gimnasio</span>
@@ -480,30 +509,109 @@
       </div>
     </div>
     <div class="gym-tabs">
-      <button type="button" class="gym-tab-btn active" data-gym-tab="sessions">Sesiones</button>
-      <button type="button" class="gym-tab-btn" data-gym-tab="routines">Rutinas</button>
+      <button type="button" class="gym-tab-btn active" data-gym-tab="sessions">Entrenar</button>
+      <button type="button" class="gym-tab-btn" data-gym-tab="plan">Plan</button>
       <button type="button" class="gym-tab-btn" data-gym-tab="progress">Progreso</button>
+      <button type="button" class="gym-tab-btn" data-gym-tab="achievements">Logros</button>
     </div>
     <div class="gym-tab-content">
-      <!-- Sesiones: historial + boton de nueva sesion. -->
+      <!-- Entrenar (Fase 3 del rediseno): el boton grande arranca un
+           entrenamiento EN VIVO (overlay #gym-live-view); si hay uno a
+           medias (localStorage.gymLiveSession) aparece el banner de
+           reanudar en su lugar. Debajo, el historial de sesiones de
+           siempre y el alta manual (para apuntar a posteriori). -->
       <div id="gym-tab-sessions" class="gym-tab-panel">
-        <button type="button" id="btn-new-gym-session" class="primary-btn gym-tab-action">+ Nueva sesion</button>
+        <button type="button" id="btn-gym-live-resume" class="primary-btn gym-live-start-btn hidden">Entrenamiento en curso — continuar</button>
+        <button type="button" id="btn-gym-live-start" class="primary-btn gym-live-start-btn">Empezar entrenamiento</button>
+        <div class="gym-exercises-actions">
+          <button type="button" id="btn-new-gym-activity" class="secondary-btn gym-tab-action">Actividad rápida</button>
+          <button type="button" id="btn-new-gym-session" class="secondary-btn gym-tab-action">+ Apuntar sesión a mano</button>
+        </div>
         <div id="gym-sessions-list" class="gym-list"></div>
       </div>
 
-      <!-- Rutinas: CRUD tipo grupos/carpetas, cada una con su lista de
-           ejercicios (con series/repeticiones orientativas). -->
-      <div id="gym-tab-routines" class="gym-tab-panel hidden">
-        <button type="button" id="btn-new-gym-routine" class="primary-btn gym-tab-action">+ Nueva rutina</button>
-        <div id="gym-routines-list" class="gym-list"></div>
-        <h3 class="gym-subheading">Ejercicios</h3>
-        <button type="button" id="btn-new-gym-exercise" class="secondary-btn gym-tab-action">+ Nuevo ejercicio</button>
-        <div id="gym-exercises-list" class="gym-list"></div>
+      <!-- Plan (rediseno): jerarquia Bloque -> Dias. La pestana tiene dos
+           "niveles" que se alternan mostrando/ocultando (drill-down tipo
+           carpetas de Notas): la lista de bloques, y dentro de un bloque
+           su lista de dias (las antiguas "rutinas"). Los ejercicios
+           sueltos siguen viviendo al nivel de bloques, debajo. -->
+      <div id="gym-tab-plan" class="gym-tab-panel hidden">
+        <div id="gym-blocks-level">
+          <button type="button" id="btn-new-gym-block" class="primary-btn gym-tab-action">+ Nuevo bloque</button>
+          <div id="gym-blocks-list" class="gym-list"></div>
+          <h3 class="gym-subheading">Ejercicios</h3>
+          <div class="gym-exercises-actions">
+            <button type="button" id="btn-open-gym-library" class="primary-btn gym-tab-action">Librería de ejercicios</button>
+            <button type="button" id="btn-new-gym-exercise" class="secondary-btn gym-tab-action">+ Nuevo ejercicio</button>
+          </div>
+          <!-- Buscador de TUS ejercicios (peticion de Koku: con muchos se
+               hace una odisea). Filtra por nombre y por musculo, y solo
+               aparece cuando de verdad hay unos cuantos. -->
+          <div id="gym-exercises-search-wrap" class="gym-exercises-search hidden">
+            <input type="text" id="gym-exercises-search" placeholder="Buscar por nombre o músculo..." autocomplete="off" />
+            <button type="button" id="btn-gym-exercises-search-clear" class="icon-btn hidden" aria-label="Limpiar la búsqueda">✕</button>
+          </div>
+          <div id="gym-exercises-list" class="gym-list"></div>
+        </div>
+        <div id="gym-block-days-level" class="hidden">
+          <div class="gym-block-days-header">
+            <button type="button" id="btn-gym-back-to-blocks" class="secondary-btn">← Bloques</button>
+            <h3 id="gym-block-days-title" class="gym-subheading"></h3>
+          </div>
+          <button type="button" id="btn-new-gym-routine" class="primary-btn gym-tab-action">+ Nuevo día</button>
+          <div id="gym-routines-list" class="gym-list"></div>
+        </div>
       </div>
 
-      <!-- Progreso: selector de ejercicio + grafica SVG a mano (peso
-           maximo/volumen por sesion), ver renderGymProgressChart en app.js. -->
+      <!-- Progreso (renovado en la Fase 5): consistencia (heatmap estilo
+           GitHub + racha semanal), records por ejercicio (PRs con 1RM
+           estimado), volumen semanal apilado por grupo muscular, y la
+           grafica por ejercicio de siempre al final. Todo SVG/DOM a mano
+           como el resto del proyecto, ver renderGymProgressSections en
+           app.js. -->
       <div id="gym-tab-progress" class="gym-tab-panel hidden">
+        <h3 class="gym-subheading">Consistencia</h3>
+        <div id="gym-consistency-stats" class="gym-consistency-stats"></div>
+        <div id="gym-heatmap" class="gym-heatmap"></div>
+        <div class="gym-weekly-goal-row">
+          <span class="field-label">Objetivo semanal (sesiones)</span>
+          <div id="gym-weekly-goal-field"></div>
+        </div>
+        <!-- Cuanto suma de mas una serie llevada al fallo en el volumen.
+             Es un numero INVENTADO (no hay una cifra estandar), por eso
+             se deja a mano en vez de cablearlo: si el x1,2 se te queda
+             corto o largo, lo cambias aqui sin tocar nada mas. Los kg
+             GUARDADOS son siempre los de verdad; esto es solo como se
+             cuentan al pintar. -->
+        <div class="gym-weekly-goal-row">
+          <span class="field-label">Peso extra de una serie al fallo</span>
+          <div id="gym-failure-factor-field"></div>
+        </div>
+
+        <div class="gym-subheading-row">
+          <h3 class="gym-subheading">Mapa de músculos</h3>
+          <button type="button" id="btn-gym-progress-help" class="icon-btn settings-help-btn" aria-label="Qué significan los colores del mapa">?</button>
+        </div>
+        <div class="gym-bodymap-controls">
+          <div class="gym-progress-metric-toggle">
+            <button type="button" class="view-mode-btn" data-gym-map-window="7">7 días</button>
+            <button type="button" class="view-mode-btn active" data-gym-map-window="30">30 días</button>
+            <button type="button" class="view-mode-btn" data-gym-map-window="90">90 días</button>
+          </div>
+          <div class="gym-progress-metric-toggle">
+            <button type="button" class="view-mode-btn active" data-gym-map-metric="series">Series</button>
+            <button type="button" class="view-mode-btn" data-gym-map-metric="volume">Volumen</button>
+          </div>
+        </div>
+        <div id="gym-bodymap" class="gym-bodymap"></div>
+
+        <h3 class="gym-subheading">Récords (PRs)</h3>
+        <div id="gym-prs-list" class="gym-list"></div>
+
+        <h3 class="gym-subheading">Volumen semanal por músculo</h3>
+        <div id="gym-weekly-volume" class="gym-weekly-volume"></div>
+
+        <h3 class="gym-subheading">Evolución por ejercicio</h3>
         <div class="field-label-block">
           <span class="field-label">Ejercicio</span>
           <div id="gym-progress-exercise-field"></div>
@@ -514,12 +622,21 @@
         </div>
         <div id="gym-progress-chart" class="gym-progress-chart"></div>
       </div>
+
+      <!-- Logros (Fase 7): gamificacion calculada AL VUELO desde el
+           historial (nada guardado en la base de datos -- editar o
+           borrar sesiones recalcula los logros de forma coherente).
+           Solo se persiste, por dispositivo, que celebraciones ya se
+           ensenaron (localStorage.gymAchievementsSeen). -->
+      <div id="gym-tab-achievements" class="gym-tab-panel hidden">
+        <div id="gym-achievements-list" class="gym-achievements-list"></div>
+      </div>
     </div>
   </div>
 
   <!-- Modal para crear / editar un ejercicio de Gimnasio -->
   <div id="gym-exercise-modal" class="modal hidden">
-    <div class="modal-card">
+    <div class="modal-card gym-modal">
       <button type="button" id="btn-close-gym-exercise" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2 id="gym-exercise-modal-title">Nuevo ejercicio</h2>
       <form id="gym-exercise-form">
@@ -528,10 +645,62 @@
           Nombre
           <input type="text" id="gym-exercise-name" required />
         </label>
+        <div class="field-label-block">
+          <span class="field-label">Grupo muscular (opcional)</span>
+          <div id="gym-exercise-muscle-field"></div>
+        </div>
+        <!-- Secundarios: chips activables. Cuentan en el mapa de musculos
+             a mitad de peso, igual que los de la libreria. -->
+        <div class="field-label-block">
+          <span class="field-label">Músculos secundarios (opcional)</span>
+          <div id="gym-exercise-secondary-field" class="gym-secondary-chips"></div>
+        </div>
         <label>
-          Grupo muscular (opcional)
-          <input type="text" id="gym-exercise-muscle-group" placeholder="Ej. Pierna" />
+          Material (opcional)
+          <input type="text" id="gym-exercise-equipment" placeholder="Ej. Barra, Mancuernas" />
         </label>
+        <!-- Como sueles hacer ESTE ejercicio (peticion de Koku): al
+             meterlo en un dia, estos tres llegan ya rellenos y no hay
+             que escribirlos otra vez. Son un punto de partida, no la
+             verdad: en cada dia se pueden cambiar, y cambiarlos aqui NO
+             toca los dias que ya lo tenian. -->
+        <div class="field-label-block">
+          <span class="field-label">Cómo lo sueles hacer (opcional)</span>
+          <div class="gym-routine-exercise-targets-row">
+            <input type="number" id="gym-exercise-default-sets" placeholder="Series" min="0" inputmode="numeric" />
+            <input type="number" id="gym-exercise-default-reps" placeholder="Reps" min="0" inputmode="numeric" />
+            <input type="number" id="gym-exercise-default-rest" placeholder="Descanso (s)" min="0" inputmode="numeric" title="En segundos" />
+          </div>
+          <p class="hint" id="gym-exercise-default-rest-preview"></p>
+          <p class="hint">Se copia como punto de partida cada vez que añadas este ejercicio a un día. Los días que ya lo tengan no cambian.</p>
+        </div>
+        <!-- Nota FIJA: acompana siempre al ejercicio (alturas de polea,
+             posicion del banco...), a diferencia de la nota de sesion,
+             que es de un dia concreto. Se ensena en la tarjeta del
+             entreno en vivo. -->
+        <label>
+          Nota fija (opcional)
+          <input type="text" id="gym-exercise-notes" placeholder="Ej. polea altura 3" />
+        </label>
+        <!-- Unilateral: un lado cada vez (mancuerna a una mano, prensa a
+             una pierna...). Si ademas se cuentan los lados por separado,
+             cada lado pasa a ser su propia serie en el entreno, con su
+             peso/reps, y entre lado y lado corre el descanso corto de
+             abajo. -->
+        <label class="checkbox-row">
+          <input type="checkbox" id="gym-exercise-unilateral" />
+          Ejercicio unilateral (un lado cada vez)
+        </label>
+        <div id="gym-exercise-unilateral-extra" class="gym-unilateral-extra hidden">
+          <label class="checkbox-row">
+            <input type="checkbox" id="gym-exercise-sides-separately" />
+            Contar cada lado por separado
+          </label>
+          <label>
+            Descanso entre lados (segundos)
+            <input type="number" id="gym-exercise-side-rest" min="0" inputmode="numeric" placeholder="Ej. 30" />
+          </label>
+        </div>
         <div class="modal-actions">
           <button type="button" id="btn-delete-gym-exercise" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
@@ -542,22 +711,534 @@
     </div>
   </div>
 
-  <!-- Modal para crear / editar una rutina de Gimnasio (nombre+icono+
-       color, mas su lista ORDENADA de ejercicios con series/repeticiones
-       orientativas -- ver #gym-routine-exercises-field, poblado desde
-       app.js con los mismos ejercicios de gym-exercises-list). -->
+  <!-- Actividad rapida (Fase 4): registrar cardio/clases/deporte sin
+       series -- tipo + nombre + duracion + fecha, y ya. Comparte tabla
+       con las sesiones (type='activity'), asi que cuenta para el heatmap
+       de consistencia y la racha de las fases siguientes. -->
+  <div id="gym-activity-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-activity" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-activity-modal-title">Actividad rápida</h2>
+      <form id="gym-activity-form">
+        <input type="hidden" id="gym-activity-id" />
+        <div class="field-label-block">
+          <span class="field-label">Tipo</span>
+          <div id="gym-activity-kind-field"></div>
+        </div>
+        <label>
+          Nombre
+          <input type="text" id="gym-activity-name" placeholder="Ej. Running 5K, Clase de GAP, Pádel..." required />
+        </label>
+        <label>
+          Duración (minutos)
+          <input type="number" id="gym-activity-duration" min="1" inputmode="numeric" placeholder="Ej. 45" />
+        </label>
+        <div class="field-label-block">
+          <span class="field-label">Fecha</span>
+          <div id="gym-activity-date-field"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-gym-activity" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-gym-activity" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Selector de dia al empezar a entrenar (Fase 3): los dias del
+       bloque ACTIVO como botones grandes + "sesion libre". -->
+  <div id="gym-start-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-start" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>¿Qué toca hoy?</h2>
+      <p id="gym-start-block-name" class="gym-list-item-muted"></p>
+      <!-- Que dice el ciclo del bloque, si lo usa. Avisa, pero nunca
+           impide elegir otro dia (decision de Koku). -->
+      <p id="gym-start-cycle-note" class="gym-cycle-note hidden"></p>
+      <div id="gym-start-days" class="gym-list"></div>
+      <button type="button" id="btn-gym-start-free" class="secondary-btn">Sesión libre (sin día)</button>
+    </div>
+  </div>
+
+  <!-- Overlay del entrenamiento EN VIVO (Fase 3): pantalla completa por
+       encima de la vista de Gimnasio. El estado vive en
+       localStorage.gymLiveSession hasta guardar (sobrevive a recargas y
+       cierres) y el cronometro/descanso se calculan SIEMPRE desde
+       timestamps, nunca contando ticks (iOS congela el JS en segundo
+       plano y un contador se quedaria atras). -->
+  <div id="gym-live-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2 id="gym-live-title">Entrenamiento</h2>
+      <!-- Solo el nombre del dia, el reloj y el ▾ de ocultar: el resto de
+           acciones vive en el menu flotante de abajo a la derecha
+           (peticion de Koku: con nombres largos aqui arriba no cabia
+           nada; el ▾ volvio porque lo echaba de menos para cambiar de
+           vista con el entreno activo). -->
+      <div class="my-space-view-header-actions">
+        <span id="gym-live-clock" class="gym-live-clock">0:00</span>
+        <button type="button" id="btn-gym-live-header-hide" class="icon-btn" aria-label="Ocultar entrenamiento (sigue en marcha)" title="Ocultar (sigue en marcha)">▾</button>
+      </div>
+    </div>
+    <!-- La barra de descanso vive AQUI arriba (donde antes estaban los
+         presets de 60/90/120/180, que se quitaron: el descanso ya sale
+         del apuntado en cada ejercicio del plan, con +30s para ampliar).
+         Oculta salvo durante un descanso. -->
+    <div id="gym-live-rest-bar" class="gym-live-rest-bar hidden">
+      <div class="gym-live-rest-info">
+        <span>Descanso: <b id="gym-live-rest-remaining" title="Tocar para cambiar entre m:ss y segundos">0:00</b></span>
+        <button type="button" id="btn-gym-live-rest-plus" class="secondary-btn">+30s</button>
+        <button type="button" id="btn-gym-live-rest-close" class="icon-btn" aria-label="Saltar descanso">✕</button>
+      </div>
+      <div class="gym-live-rest-track">
+        <div id="gym-live-rest-fill-base" class="gym-live-rest-fill-base"></div>
+        <div id="gym-live-rest-fill-extra" class="gym-live-rest-fill-extra"></div>
+      </div>
+    </div>
+    <div class="gym-live-content">
+      <!-- La explicacion del sistema ya no vive aqui como parrafo fijo: se
+           muestra en #gym-help-modal (la primera vez sola, y siempre desde
+           el boton de ayuda de abajo a la derecha). El "+ Añadir
+           ejercicio" tampoco: vive en el menu flotante (peticion de
+           Koku). -->
+      <div id="gym-live-exercises" class="gym-live-exercises"></div>
+    </div>
+    <!-- Menu flotante de acciones (abajo a la derecha): el boton central
+         despliega en abanico las 4 acciones del entreno -- dudas,
+         pausar/ocultar, terminar y descartar (idea de Koku, "que salgan
+         alrededor del boton, no listados"). Los ids son los mismos que
+         tenian los botones de la cabecera, asi que sus manejadores de
+         app.js no cambian. -->
+    <div id="gym-live-fab" class="gym-live-fab">
+      <button type="button" id="btn-gym-live-help" class="gym-live-fab-action gym-fab-pos-1" aria-label="Cómo funciona el entrenamiento" title="Dudas">?</button>
+      <!-- Pausa DEL CRONOMETRO (no oculta la pantalla; para eso esta el ▾
+           de la cabecera): congela el tiempo de sesion. Los dos iconos
+           conviven y el CSS ensena uno u otro segun .is-paused. -->
+      <button type="button" id="btn-gym-live-pause" class="gym-live-fab-action gym-fab-pos-2" aria-label="Pausar el cronómetro" title="Pausar/reanudar el cronómetro">
+        <svg class="gym-icon-pause" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg>
+        <svg class="gym-icon-play" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-add-exercise" class="gym-live-fab-action gym-fab-pos-3" aria-label="Añadir ejercicio al entrenamiento" title="Añadir ejercicio">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-finish" class="gym-live-fab-action gym-live-fab-primary gym-fab-pos-4" aria-label="Terminar y guardar el entrenamiento" title="Terminar">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4.5 12.5 9.5 17.5 19.5 6.5"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-discard" class="gym-live-fab-action gym-live-fab-danger gym-fab-pos-5" aria-label="Descartar el entrenamiento" title="Descartar">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3.5 6.5 20.5 6.5"/><path d="M8.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h4.4a1.3 1.3 0 0 1 1.3 1.3v1.7"/><path d="M5.5 6.5l1 13a1.3 1.3 0 0 0 1.3 1.2h8.4a1.3 1.3 0 0 0 1.3-1.2l1-13"/><line x1="10" y1="10.5" x2="10" y2="16.5"/><line x1="14" y1="10.5" x2="14" y2="16.5"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-menu" class="gym-live-fab-main" aria-label="Acciones del entrenamiento" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Empezar una serie: en vez de una casilla diminuta, el ciclo pasa
+       por dos dialogos con botones grandes (peticion de Koku: "si vas un
+       poco mareado cuesta ver la casilla"). Este confirma QUE ejercicio
+       y QUE serie se empieza; el nombre es pulsable y despliega la lista
+       de ejercicios del dia por si te has equivocado de tarjeta. La
+       serie que apunta es siempre la primera sin hacer. -->
+  <div id="gym-set-start-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-set-modal">
+      <h2>Empezar serie</h2>
+      <button type="button" id="gym-set-start-exercise" class="gym-set-exercise-picker" aria-expanded="false">
+        <span id="gym-set-start-exercise-name">Ejercicio</span>
+        <span class="gym-set-picker-caret" aria-hidden="true">▾</span>
+      </button>
+      <div id="gym-set-start-exercise-list" class="gym-set-exercise-list hidden"></div>
+      <p id="gym-set-start-info" class="gym-set-modal-info"></p>
+      <!-- Solo en ejercicios unilaterales contados por lado: con cual
+           empiezas (peticion de Koku: "hay veces que se comienza con el
+           lado derecho y otras el izquierdo"). A partir de ahi se van
+           alternando solos, y el lado elegido se queda como el de salida
+           de las siguientes series de ese ejercicio. -->
+      <div id="gym-set-start-sides" class="gym-set-side-choice hidden">
+        <span>¿Con qué lado empiezas?</span>
+        <div class="gym-set-side-buttons">
+          <button type="button" class="secondary-btn" data-start-side="left">Izquierdo</button>
+          <button type="button" class="secondary-btn" data-start-side="right">Derecho</button>
+        </div>
+      </div>
+      <div class="gym-set-modal-actions">
+        <button type="button" id="btn-gym-set-start-go" class="primary-btn gym-set-big-btn">Empezar</button>
+        <button type="button" id="btn-gym-set-start-cancel" class="secondary-btn gym-set-big-btn">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Terminar la serie en curso: Si / Pausar / Seguir, con el tiempo de
+       la serie a la vista (ese tiempo se guarda y se ve en el historial). -->
+  <!-- Editar UN ejercicio del entreno y todo lo que hay dentro. Se llega
+       deslizando su tarjeta (peticion de Koku: "yo deslizo el ejercicio
+       entero para editar cualquier cosa del ejercicio... se hace un
+       cuadro de dialogo mas grande, asi es mas comodo"). La tarjeta del
+       entreno se queda solo para USAR: plegar, empezar serie y mover el
+       ejercicio arriba/abajo. -->
+  <div id="gym-exercise-edit-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-exercise-edit-card">
+      <!-- La ✕ va SUELTA y con .modal-close-x, como en los otros 30
+           modales de la app: esa clase la coloca en absoluto arriba a la
+           derecha de la tarjeta. Antes iba dentro de un .modal-head con
+           .icon-btn, y .modal-head NO EXISTE en styles.css -- era la
+           unica vez que se usaba en todo el proyecto. Sin regla, el div
+           se pintaba en bloque: el titulo en una linea y la ✕ debajo, a
+           la izquierda. Koku lo enseño en una captura. -->
+      <button type="button" id="btn-close-gym-exercise-edit" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-exercise-edit-title">Editar ejercicio</h2>
+      <form id="gym-exercise-edit-form">
+        <div class="gym-exercise-edit-top">
+          <label class="gym-set-field">
+            <span>Descanso entre series (s)</span>
+            <input type="number" id="gym-exercise-edit-rest" inputmode="numeric" min="0" />
+          </label>
+          <label class="gym-set-field">
+            <span>RPE del ejercicio</span>
+            <input type="number" id="gym-exercise-edit-rpe" inputmode="decimal" step="0.5" min="1" max="10" placeholder="—" />
+          </label>
+        </div>
+        <label class="gym-set-field">
+          <span>Nota del ejercicio</span>
+          <input type="text" id="gym-exercise-edit-note" placeholder="Sensaciones, peso próximo..." />
+        </label>
+
+        <h3 class="gym-subheading">Series</h3>
+        <div id="gym-exercise-edit-sets" class="gym-exercise-edit-sets"></div>
+        <button type="button" id="btn-gym-exercise-edit-add-set" class="secondary-btn gym-add-set-btn">+ Serie</button>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-gym-exercise-edit" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="gym-set-end-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-set-modal">
+      <h2>¿Has acabado la serie?</h2>
+      <p id="gym-set-end-info" class="gym-set-modal-info"></p>
+      <div id="gym-set-end-timer" class="gym-set-modal-timer">0:00</div>
+      <div class="gym-set-modal-actions" id="gym-set-end-choices">
+        <button type="button" id="btn-gym-set-end-done" class="primary-btn gym-set-big-btn">Sí, terminada</button>
+        <button type="button" id="btn-gym-set-end-pause" class="secondary-btn gym-set-big-btn">Pausar serie</button>
+        <button type="button" id="btn-gym-set-end-continue" class="secondary-btn gym-set-big-btn">Seguir</button>
+      </div>
+
+      <!-- Al decir que si, el mismo dialogo pasa a pedir los datos de la
+           serie recien hecha (peticion de Koku): peso, repeticiones y una
+           nota suya. Las notas de todas las series de un ejercicio se
+           combinan al acabarlo en la nota del ejercicio, que se ensena en
+           el entrenamiento siguiente. -->
+      <div id="gym-set-end-form" class="gym-set-end-form hidden">
+        <label class="gym-set-field">
+          <span>Peso</span>
+          <!-- De TEXTO y no type="number": con el telefono en español la tecla
+                 decimal del teclado numerico es una COMA, y type="number" la
+                 rechaza dejando el campo vacio sin avisar. Ademas step="0.5"
+                 daba por invalido un 16,3. Lo que se escribe lo normaliza
+                 gymNormalizarPeso() al leerlo. -->
+            <input type="text" id="gym-set-end-weight" inputmode="decimal" />
+        </label>
+        <label class="gym-set-field">
+          <span>Repeticiones</span>
+          <input type="number" id="gym-set-end-reps" inputmode="numeric" min="0" />
+        </label>
+        <label class="gym-set-field">
+          <span>Notas de la serie (opcional)</span>
+          <input type="text" id="gym-set-end-note" placeholder="Ej. se me fue el codo" />
+        </label>
+
+        <!-- Marcar que ESTA serie se llevo al fallo (peticion de Koku).
+             Es por serie, no por ejercicio: unas se llevan al fallo y
+             otras no. Boton propio con su marca, no un checkbox nativo
+             (regla de CLAUDE.md). Se guarda en set_type = 'failure', que
+             ya estaba reservado en el esquema. -->
+        <div class="gym-set-flags">
+          <button type="button" class="gym-set-flag-btn" id="btn-gym-set-end-failure" aria-pressed="false">
+            <!-- El check va en SVG y no dibujado con bordes girados: eso
+                 ultimo nunca queda centrado del todo (Koku: "el tick está
+                 un poco movido") porque el aspa no es simetrica. Mismo
+                 motivo por el que el sol y la luna son SVG. -->
+            <span class="gym-set-flag-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </span>
+            <span>Llegué al fallo</span>
+          </button>
+        </div>
+
+        <!-- Series alargadas (dropset / rest-pause). Va aqui, en una
+             linea discreta dentro del formulario que ya existia, y no en
+             una pantalla propia: la mayoria de las series no se alargan y
+             tienen que seguir guardandose de un solo toque. Se pregunta
+             DESPUES de la serie porque depende de la serie y del dia, no
+             es una configuracion fija del ejercicio (peticion de Koku). -->
+        <div class="gym-set-extend">
+          <span class="gym-set-extend-label">¿Has alargado la serie?</span>
+          <div class="gym-set-extend-list">
+            <button type="button" class="gym-set-extend-btn" data-add-segment="dropset" title="Bajaste el peso y seguiste">+ Dropset</button>
+            <button type="button" class="gym-set-extend-btn" data-add-segment="restpause" title="Paraste unos segundos y seguiste con el mismo peso">+ Rest-pause</button>
+          </div>
+        </div>
+        <div id="gym-set-end-segments" class="gym-set-segments"></div>
+
+        <div class="gym-set-modal-actions">
+          <button type="button" id="btn-gym-set-end-save" class="primary-btn gym-set-big-btn">Guardar serie</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Aviso sobre el mapa de musculos (pestana Progreso): se abre solo
+       la primera vez (localStorage.gymProgressHelpSeen) y desde el "?"
+       de la seccion. Mismo patron que la ayuda del entreno. -->
+  <div id="gym-progress-help-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <h2>Sobre el mapa de músculos</h2>
+      <p>Los colores del mapa no significan "demasiadas" ni "pocas" series: no es una valoración. Es solo una forma visual de ver cuánto has trabajado cada músculo en el periodo elegido — cuanto más intenso el color, más series (o volumen) lleva ese músculo comparado con el resto.</p>
+      <label class="app-confirm-checkbox-row">
+        <input type="checkbox" id="gym-progress-help-dont-show" class="styled-checkbox" />
+        <span>No volver a mostrar esto automáticamente</span>
+      </label>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-progress-help" class="primary-btn">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Primer arranque en el movil: iOS exige que muchas cosas (permiso de
+       notificaciones, Live Activities...) las conceda el usuario -- la app
+       no puede activarlas sola. Este dialogo lo explica de una vez y deja
+       elegir (peticion de Koku), en vez de pedir el permiso "a pelo" nada
+       mas abrir. Solo se ensena una vez (notificationsPermissionAsked). -->
+  <div id="permissions-modal" class="modal hidden">
+    <div class="modal-card gym-help-card">
+      <h2>Avisos de la app</h2>
+      <div class="gym-help-body">
+        <h4>Notificaciones</h4>
+        <p>Para avisarte de recordatorios y del fin del descanso entre series aunque la app esté cerrada, iOS necesita que le des permiso una vez. Si dices que no, la app funciona igual pero sin avisos (puedes cambiarlo luego en los Ajustes del teléfono).</p>
+        <h4>Cuenta atrás en la pantalla de bloqueo</h4>
+        <p>El temporizador de descanso del Gimnasio aparece en la pantalla de bloqueo automáticamente, sin permiso previo. Si no lo quieres, se desactiva en Ajustes &gt; RemindMeLater &gt; Actividades en directo.</p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="btn-permissions-later" class="secondary-btn">Ahora no</button>
+        <div class="spacer"></div>
+        <button type="button" id="btn-permissions-allow" class="primary-btn">Permitir avisos</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ayuda del modo entrenamiento: se abre SOLA la primera vez que se
+       entra a entrenar (localStorage.gymLiveHelpSeen) y siempre desde el
+       boton "?" de abajo a la derecha. Aqui vive tambien la explicacion
+       del RPE, que antes era un aviso aparte. -->
+  <div id="gym-help-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-help-card">
+      <h2>Cómo funciona el entrenamiento</h2>
+      <div class="gym-help-body">
+        <h4>Apuntar las series</h4>
+        <p>Cada ejercicio tiene su tabla: escribe el peso y las repeticiones de cada serie. Para registrarla usa el botón grande de la tarjeta: <b>Empezar serie</b> te confirma qué ejercicio y qué serie vas a hacer (siempre la primera sin hacer; y tocando el nombre puedes cambiar de ejercicio), y mientras la haces el botón se convierte en <b>Terminar serie</b> con el cronómetro. Al terminarla te pregunta si de verdad has acabado, con la opción de pausarla o seguir. El ✓ de cada fila solo indica el estado: tócalo si necesitas deshacer una serie. Al darle a Terminar el entrenamiento solo se guardan las series hechas o con datos.</p>
+        <h4>Los datos y las notas de cada serie</h4>
+        <p>Al confirmar que has acabado, la app te pide el peso, las repeticiones y una nota de esa serie (te propone lo de la serie anterior, así que normalmente solo hay que confirmar). Cuando terminas todas las series de un ejercicio, sus notas se juntan en la nota del ejercicio, y esa es la que verás como "La última vez" la próxima vez que lo entrenes.</p>
+        <h4>Ejercicios a un lado</h4>
+        <p>Si marcas un ejercicio como unilateral (en su ficha) y pides contar cada lado por separado, cada serie se divide en dos: primero el lado izquierdo y luego el derecho, cada uno con su peso y sus repeticiones. Entre lado y lado corre el descanso corto que le pongas en la ficha; el descanso normal del ejercicio queda para después del segundo lado.</p>
+        <h4>Cuánto dura cada serie</h4>
+        <p>Como la app sabe cuándo empiezas y cuándo acabas, guarda lo que duró cada serie. Lo ves en el historial junto a la serie, y en Progreso como tiempo de trabajo real del mes (que no es lo mismo que la duración del entrenamiento, donde entran los descansos).</p>
+        <h4>La columna "Anterior"</h4>
+        <p>Muestra lo que hiciste en tu última sesión con ese ejercicio, en formato (descanso)peso×reps. Por ejemplo, (1:30)60×10 significa: 1 minuto y medio de descanso, 60 kg, 10 repeticiones. Tócala para copiar esos valores a la serie.</p>
+        <h4>El descanso</h4>
+        <p>Al terminar una serie, el descanso del ejercicio empieza solo y aparece como barra arriba. Con +30s lo alargas, con ✕ lo saltas, y si empiezas ya la siguiente serie se cancela.</p>
+        <p><b>Dónde aparece luego ese +30s:</b> el descanso corre <i>después</i> de una serie, así que el tiempo que le añadas queda apuntado en <b>esa</b> serie, junto a su campo de Descanso. Si alargas el descanso posterior a la última serie de un ejercicio — el que te separa del ejercicio siguiente — lo verás en esa última serie, no en la primera del siguiente.</p>
+        <h4>El RPE</h4>
+        <p>Es una medida del esfuerzo, del 1 al 10: 10 es que no podrías haber hecho ni una repetición más, 9 es que te quedaba una, 8 que te quedaban dos... Se apunta uno por ejercicio, en la casilla RPE junto a "+ Serie". Es opcional, pero ayuda a saber si un peso se te está quedando corto: a RPE 7 o menos, probablemente toca subir.</p>
+        <h4>El menú de abajo a la derecha</h4>
+        <p>El botón flotante despliega las acciones del entrenamiento: esta ayuda, pausar el cronómetro (congela el tiempo de sesión si te interrumpen; el descanso entre series sigue corriendo), añadir un ejercicio, terminar y descartar.</p>
+        <h4>Moverte por la app sin perder el entreno</h4>
+        <p>Con el botón ▾ de arriba escondes esta pantalla y el entrenamiento sigue en marcha: puedes mirar otras pestañas del Gimnasio o cualquier otra parte de la app. Para volver, toca Reanudar en la pestaña Entrenar, o la barra de descanso que se queda arriba del todo mientras descansas.</p>
+        <h4>Si se acaba el descanso y no estás mirando</h4>
+        <p>Mientras descansas, la cuenta atrás aparece en vivo en la pantalla de bloqueo (y en la isla dinámica, en los iPhone que la tienen), con los colores de tu tema y su propio botón +30s para alargar el descanso sin desbloquear — el tiempo añadido se ve en otro color. Tocar la tarjeta te lleva directo al entrenamiento. Las primeras veces que uses el +30s con el móvil bloqueado, iOS pedirá confirmación ("Permitir"): es su medida de seguridad para botones en pantalla bloqueada, y con "Permitir siempre" deja de preguntar. Además, la app puede avisarte con una notificación justo cuando el descanso termina, y bajar unos segundos el volumen de tu música al acabar (como el GPS al hablar) — todo se configura en Configuración &gt; Notificaciones.</p>
+      </div>
+      <label class="app-confirm-checkbox-row gym-help-dont-show-row">
+        <input type="checkbox" id="gym-help-dont-show" class="styled-checkbox" />
+        <span>No volver a mostrar esto automáticamente</span>
+      </label>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-help" class="primary-btn">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Celebracion de logros nuevos (Fase 7): se abre tras guardar una
+       sesion/actividad si algun logro ha subido de nivel. -->
+  <div id="gym-achievement-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-live-summary-card">
+      <h2>Logro conseguido</h2>
+      <div id="gym-achievement-modal-list" class="gym-achievements-list"></div>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-achievement" class="primary-btn">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resumen al terminar el entrenamiento en vivo (Fase 3). -->
+  <div id="gym-live-summary-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-live-summary-card">
+      <h2>Entreno completado</h2>
+      <div class="gym-live-summary-grid">
+        <div class="gym-live-summary-stat"><b id="gym-summary-duration">—</b><span>Duración</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-sets">—</b><span>Series hechas</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-volume">—</b><span>Volumen total</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-failure">—</b><span>Series al fallo</span></div>
+        <div class="gym-live-summary-stat"><b id="gym-summary-muscles">—</b><span>Grupos musculares</span></div>
+      </div>
+      <p id="gym-summary-muscle-list" class="gym-list-item-muted"></p>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-summary" class="primary-btn">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Buscador de la libreria de ejercicios empaquetada (Fase 2 del
+       rediseno de Gimnasio): ~870 ejercicios de yuhonas/free-exercise-db
+       (dominio publico), cargados por fetch perezoso desde
+       gym-exercise-library.json al abrir esto por primera vez. Importar
+       uno lo copia a gym_exercises (idempotente por library_id). -->
+  <div id="gym-library-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-library-card">
+      <button type="button" id="btn-close-gym-library" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Librería de ejercicios</h2>
+      <input type="text" id="gym-library-search" placeholder="Buscar por nombre (español o inglés)..." autocomplete="off" />
+      <div class="gym-library-filters">
+        <div id="gym-library-muscle-field"></div>
+        <div id="gym-library-equipment-field"></div>
+      </div>
+      <!-- La libreria es solo una propuesta: si el ejercicio no esta, se
+           crea uno propio desde aqui mismo (peticion de Koku). Si el
+           buscador estaba en "modo elegir" (añadir al entreno en vivo),
+           el ejercicio recien creado se añade directo a la sesion. -->
+      <button type="button" id="btn-gym-library-new-custom" class="secondary-btn gym-tab-action">+ Crear ejercicio propio</button>
+      <!-- TUS ejercicios, los primeros. Antes este buscador solo ofrecia
+           la libreria de ~870, asi que dentro de un entreno NO habia forma
+           de anadir un ejercicio creado por ti: o lo volvias a crear, o
+           nada. Y de rebote, lo que anadias venia de la libreria (que no
+           marca unilaterales), asi que nunca preguntaba por el lado --
+           que es como lo vio Koku. Solo se ensena en "modo elegir" (desde
+           un entreno): abriendo la libreria desde la pestana Plan lo que
+           quieres es importar, y ahi tus ejercicios ya los tienes al lado. -->
+      <div id="gym-library-mine-block" class="hidden">
+        <h3 class="gym-library-section">Tus ejercicios</h3>
+        <div id="gym-library-mine" class="gym-list"></div>
+      </div>
+      <h3 id="gym-library-section-lib" class="gym-library-section hidden">De la librería</h3>
+      <div id="gym-library-list" class="gym-list gym-library-list"></div>
+    </div>
+  </div>
+
+  <!-- Ficha de un ejercicio de la libreria: datos + instrucciones +
+       boton de importar. Se abre encima del buscador. -->
+  <div id="gym-library-detail-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-library-detail" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-library-detail-title"></h2>
+      <p id="gym-library-detail-meta" class="gym-list-item-muted"></p>
+      <ol id="gym-library-detail-instructions" class="gym-library-instructions"></ol>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="btn-close-gym-library-detail-2" class="secondary-btn">Cerrar</button>
+        <button type="button" id="btn-import-gym-library-detail" class="primary-btn">Importar a mis ejercicios</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar un BLOQUE de entrenamiento (rediseno de
+       Gimnasio): solo pide el nombre, al estilo de la app de referencia
+       (flujos cortos de 1-2 campos). Activar/desactivar se hace desde la
+       propia lista de bloques, no desde aqui. -->
+  <div id="gym-block-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-block" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-block-modal-title">Nuevo bloque</h2>
+      <form id="gym-block-form">
+        <input type="hidden" id="gym-block-id" />
+        <label>
+          Nombre del bloque
+          <input type="text" id="gym-block-name" placeholder="Ej. Volumen Invierno" required />
+        </label>
+
+        <!-- Ciclo de dias: OPCIONAL. Apagado, el bloque es una simple
+             lista de dias que eliges a mano al entrenar (como siempre).
+             Encendido, la app sabe que toca hoy y lo enseña en el
+             calendario y al empezar a entrenar. -->
+        <h4 class="gym-cycle-heading">Ciclo de días</h4>
+        <label class="checkbox-row">
+          <input type="checkbox" id="gym-block-cycle-enabled" />
+          Repetir estos días en ciclo
+        </label>
+        <div id="gym-block-cycle-wrap" class="hidden">
+          <p class="hint">Coloca en orden lo que haces: cada posición es un día de entreno o un descanso. Al llegar al final vuelve a empezar.</p>
+          <div id="gym-block-cycle-list" class="gym-cycle-list"></div>
+          <button type="button" id="btn-gym-cycle-add" class="secondary-btn">+ Añadir día al ciclo</button>
+          <p id="gym-block-cycle-status" class="hint"></p>
+
+          <!-- Por donde vas AHORA MISMO. Sin esto, un ciclo recien creado
+               empieza siempre por el dia 1, aunque tu ya lleves media
+               vuelta hecha (lo pidio Koku: "hoy me tocaria hacer el primer
+               descanso, no el dia 1, como se puede corregir eso"). -->
+          <label class="gym-cycle-hoy-label">Hoy te toca</label>
+          <div id="gym-block-cycle-hoy-field"></div>
+          <p class="hint">Cámbialo si el ciclo se ha desajustado o si lo acabas de crear a mitad de la vuelta.</p>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-gym-block" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-gym-block" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para crear / editar un dia de entrenamiento (antes "rutina" --
+       los ids gym-routine-* se conservan para no renombrar media app):
+       nombre+icono+color, bloque al que pertenece, mas su lista ORDENADA
+       de ejercicios con series/repeticiones orientativas -- ver
+       #gym-routine-exercises-field, poblado desde app.js con los mismos
+       ejercicios de gym-exercises-list. -->
   <div id="gym-routine-modal" class="modal hidden">
-    <div class="modal-card">
+    <div class="modal-card gym-modal">
       <button type="button" id="btn-close-gym-routine" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2 id="gym-routine-modal-title">Nueva rutina</h2>
+      <h2 id="gym-routine-modal-title">Nuevo día</h2>
+      <!-- Cuanto suele llevarte este dia, calculado con tu media por
+           EJERCICIO (ver gymEstimarDuracionDeDia en app.js). Fuera del
+           <form> a proposito: es un dato, no un campo. Se ve en las dos
+           mitades del modal porque en las dos vale saberlo. -->
+      <p id="gym-routine-estimate" class="gym-routine-estimate hidden"></p>
       <form id="gym-routine-form">
         <input type="hidden" id="gym-routine-id" />
-        <div class="group-form-row">
-          <div id="gym-routine-icon-field"></div>
-          <input type="text" id="gym-routine-name" placeholder="Nombre de la rutina (ej. Dia de pierna)" required />
-          <div id="gym-routine-color-field"></div>
+        <!-- El modal tiene DOS mitades y nunca se ven las dos a la vez
+             (peticion de Koku): el lapiz de la lista abre la FICHA del
+             dia (nombre, color, icono y a que bloque pertenece) y tocar
+             el dia abre solo sus EJERCICIOS. Antes salia todo junto y
+             habia que buscar lo que venias a cambiar. Ver
+             openGymRoutineModal(routine, modo) en app.js. -->
+        <div id="gym-routine-ficha">
+          <div class="group-form-row">
+            <div id="gym-routine-icon-field"></div>
+            <input type="text" id="gym-routine-name" placeholder="Nombre del día (ej. Push 1)" required />
+            <div id="gym-routine-color-field"></div>
+          </div>
+          <div class="field-label-block">
+            <span class="field-label">Bloque</span>
+            <div id="gym-routine-block-field"></div>
+          </div>
         </div>
-        <div class="field-label-block">
+        <div id="gym-routine-ejercicios" class="field-label-block">
           <span class="field-label">Ejercicios</span>
           <div id="gym-routine-exercises-field" class="gym-routine-exercises-field"></div>
           <button type="button" id="btn-add-gym-routine-exercise" class="secondary-btn">+ Anadir ejercicio</button>
@@ -577,7 +1258,7 @@
        applyGymRoutineToSession en app.js) o sesion libre, y las series
        hechas por ejercicio. -->
   <div id="gym-session-modal" class="modal hidden">
-    <div class="modal-card">
+    <div class="modal-card gym-modal">
       <button type="button" id="btn-close-gym-session" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2 id="gym-session-modal-title">Nueva sesion</h2>
       <form id="gym-session-form">
@@ -587,7 +1268,7 @@
           <div id="gym-session-date-field"></div>
         </div>
         <div class="field-label-block">
-          <span class="field-label">Rutina (opcional)</span>
+          <span class="field-label">Día (opcional)</span>
           <div id="gym-session-routine-field"></div>
         </div>
         <div id="gym-session-exercises-field" class="gym-routine-exercises-field"></div>
@@ -1695,6 +2376,13 @@
              estilo GitHub/Markdown -- ver maybeAutoStartCodeBlock en
              app.js. Este boton inserta uno sin lenguaje asignado. -->
         <button type="button" id="note-code-insert-btn" class="note-editor-btn" aria-label="Insertar bloque de código" title="Insertar bloque de código (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
+        <!-- Calcular la cuenta que tenga el cursor (o todas las de la
+             nota si no hay ninguna debajo del cursor). Escribes =12*3+5
+             y pasa a ser "=12*3+5 → 41", dentro o fuera de una tabla.
+             En el movil ESTE BOTON es la unica forma de dispararlo: el
+             teclado del iPhone no tiene tecla Tab. Ver "FÓRMULAS EN LAS
+             NOTAS" en app.js. -->
+        <button type="button" id="note-formula-btn" class="note-editor-btn" aria-label="Calcular la fórmula" title="Calcular la fórmula que tenga el cursor (escribe =12*3+5). Escribir &quot;=&quot; por sí solo no calcula nada.">=</button>
         <!-- Selector de archivo nativo, oculto -- lo abre el boton de
              arriba con .click(). Tambien sirve para el Ctrl+V (ver
              app.js), que reutiliza la misma subida. -->
@@ -1801,11 +2489,103 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
           <span>Este dispositivo</span>
         </button>
+        <button type="button" class="settings-menu-item" data-tab="widgets">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>
+          <span>Widgets</span>
+        </button>
+        <button type="button" class="settings-menu-item" data-tab="notifications">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M10.3 19a2 2 0 0 0 3.4 0"/></svg>
+          <span>Notificaciones</span>
+        </button>
         <button type="button" class="settings-menu-item" data-tab="store">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16l-1.2 11a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
           <span>Tienda</span>
         </button>
 
+      </div>
+
+      <!-- --- Widgets (apartado propio, peticion de Koku). Es de ESTE
+           telefono: los widgets viven en su pantalla de inicio, no en la
+           base de datos. Botones y no un desplegable, siguiendo el mismo
+           patron que "Favoritos" de la pestaña Vista (.view-mode-btn):
+           con tres opciones cortas se ven las tres de un vistazo. --- -->
+      <div id="settings-tab-widgets" class="settings-tab-panel hidden">
+        <h3>Widgets</h3>
+        <div class="settings-toggle-help-row">
+          <p class="field-label-block">Cómo se ven en la pantalla de inicio</p>
+          <button type="button" id="btn-help-widget-style" class="icon-btn settings-help-btn" aria-label="Qué cambia cada opción">?</button>
+        </div>
+        <div id="widget-style-options" class="view-mode-options"></div>
+        <p id="widget-style-hint" class="settings-hint"></p>
+      </div>
+
+      <!-- --- Notificaciones (apartado propio, peticion de Koku: "van a
+           haber un par"). Cada opcion lleva SU boton "?" con su
+           explicacion como dialogo, en vez de parrafos siempre a la
+           vista. Los ids son los de siempre: refreshMobileTab() y los
+           listeners de settings.js siguen funcionando igual. --- -->
+      <div id="settings-tab-notifications" class="settings-tab-panel hidden">
+        <h3>Notificaciones</h3>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-notifications" />
+            Avisos de recordatorios
+          </label>
+          <button type="button" id="btn-help-notif-reminders" class="icon-btn settings-help-btn" aria-label="Qué son los avisos de recordatorios">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-gym-rest-notify" />
+            Aviso al terminar el descanso
+          </label>
+          <button type="button" id="btn-help-notif-rest" class="icon-btn settings-help-btn" aria-label="Qué es el aviso de fin de descanso">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-gym-rest-burst" />
+            Vibración larga al acabar el descanso
+          </label>
+          <button type="button" id="btn-help-notif-burst" class="icon-btn settings-help-btn" aria-label="Qué es la vibración larga">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-gym-rest-duck" />
+            Bajar la música al acabar el descanso
+          </label>
+          <button type="button" id="btn-help-notif-duck" class="icon-btn settings-help-btn" aria-label="Cómo funciona el bajar la música">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-gym-auto-start" />
+            Empezar la siguiente serie sola
+          </label>
+          <button type="button" id="btn-help-notif-autostart" class="icon-btn settings-help-btn" aria-label="Qué hace empezar la siguiente serie sola">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-notif-sound" />
+            Sonido
+          </label>
+          <button type="button" id="btn-help-notif-sound" class="icon-btn settings-help-btn" aria-label="Cómo funciona el sonido de los avisos">?</button>
+        </div>
+        <div class="settings-toggle-help-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="setting-notif-vibrate" />
+            Vibración
+          </label>
+          <button type="button" id="btn-help-notif-vibrate" class="icon-btn settings-help-btn" aria-label="Cómo funciona la vibración de los avisos">?</button>
+        </div>
+        <!-- Probar el aviso de fin de descanso sin montar un entreno:
+             salta a los 10 segundos, con los mismos ajustes de arriba,
+             y debajo se ensena QUE lo paro (en el movil no hay consola
+             que mirar, esto es el unico diagnostico posible). -->
+        <div class="settings-toggle-help-row">
+          <button type="button" id="btn-test-gym-rest-alert" class="secondary-btn">Probar el aviso (10 s)</button>
+          <button type="button" id="btn-help-notif-test" class="icon-btn settings-help-btn" aria-label="Para qué sirve probar el aviso">?</button>
+        </div>
+        <p id="notifications-status" class="hint"></p>
+        <p id="gym-live-activity-status" class="hint"></p>
+        <p id="gym-rest-alert-status" class="hint"></p>
       </div>
 
       <!-- --- Tienda (todavia sin mecanica: solo el hueco) --- -->
@@ -1858,7 +2638,7 @@
         <h4>Colores</h4>
         <p class="hint">Clica una tarjeta para usar ese tema en este dispositivo. Cada dispositivo puede llevar un tema distinto.</p>
 
-        <p class="hint">Si un tema tiene variante clara/oscura emparejada (◐), esto hace que siga el modo de tu ordenador automáticamente. Para cambiarlo a mano, usa el botón de al lado (en escritorio hay además un atajo igual en la barra superior).</p>
+        <p class="hint">Si un tema tiene variante clara/oscura emparejada (lo marca la etiqueta con el sol o la luna en su tarjeta), esto hace que siga el modo de tu ordenador automáticamente. Para cambiarlo a mano, usa el botón de al lado (en escritorio hay además un atajo igual en la barra superior).</p>
         <div class="color-mode-row">
           <div id="color-mode-options" class="color-mode-options"></div>
           <button type="button" id="settings-quick-color-mode" class="icon-btn quick-color-mode-btn hidden" aria-label="Cambiar entre claro y oscuro"></button>
@@ -1911,12 +2691,15 @@
       <div id="settings-tab-mobile" class="settings-tab-panel hidden">
         <h3>Este dispositivo</h3>
         <p class="hint">Estos ajustes son solo para el dispositivo en el que estas viendo esto ahora mismo.</p>
+        <h4>Gimnasio: formato de tiempo</h4>
+        <div id="gym-time-format-options" class="view-mode-options"></div>
+
+        <h4>Animaciones</h4>
         <label class="checkbox-row">
-          <input type="checkbox" id="setting-notifications" />
-          Avisos de recordatorios
+          <input type="checkbox" id="setting-animations" />
+          Animaciones de la app
         </label>
-        <p class="hint">En la app instalada, el aviso lo programa el propio telefono: suena aunque la app este cerrada, sin que nada salga del dispositivo. Desde un navegador solo puede avisar con la pestana abierta.</p>
-        <p id="notifications-status" class="hint"></p>
+        <p class="hint">Todo el movimiento de la app: el zoom al entrar y salir de un mes o un día, el deslizamiento al cambiar de mes o de pestaña, y las transiciones de botones, listas y paneles. Apagarlas ahorra recursos: todo pasa al instante, sin transición. Nada deja de funcionar, solo deja de moverse.</p>
 
         <h4>Gimnasio: unidad de peso</h4>
         <p class="hint">Solo cambia como se escriben/leen los pesos en este dispositivo -- por dentro siempre se guardan en kilogramos.</p>
@@ -1934,6 +2717,19 @@
           <button type="button" id="btn-backup-import" class="secondary-btn">Importar copia</button>
         </div>
         <input type="file" id="backup-import-input" accept="application/json,.json" class="hidden" />
+
+        <!-- Diagnostico del widget. En el iPhone no hay forma de ver la
+             consola, asi que el resultado del ultimo aviso al widget se
+             enseña aqui -- mismo patron que la linea del aviso de fin de
+             descanso. Solo aparece en la app empaquetada. -->
+        <div id="widget-status-block" class="hidden">
+          <h4>Widget "Qué toca hoy"</h4>
+          <p id="widget-status-line" class="hint"></p>
+          <button type="button" id="btn-widget-refresh" class="secondary-btn">Actualizar el widget ahora</button>
+        </div>
+
+        <h4>Versión</h4>
+        <p id="app-version-line" class="hint"></p>
       </div>
 
 
@@ -1972,6 +2768,7 @@
   <script src="routes-local/finanzasTransactions.js"></script>
   <script src="routes-local/groups.js"></script>
   <script src="routes-local/gymExercises.js"></script>
+  <script src="routes-local/gymBlocks.js"></script>
   <script src="routes-local/gymRoutines.js"></script>
   <script src="routes-local/gymSessions.js"></script>
   <script src="routes-local/entretenimientoItems.js"></script>
@@ -1987,9 +2784,14 @@
   <script src="routes-local/viajesTrips.js"></script>
   <script src="finanzas-recurring.js"></script>
   <script src="local-notifications.js"></script>
+  <script src="widget-bridge.js"></script>
   <script src="backup.js"></script>
   <script src="viajesCountries.js"></script>
   <script src="app.js"></script>
   <script src="settings.js"></script>
+  <!-- Compartir -> RemindMeLater: recibe el texto de la extension de
+       compartir nativa y abre el modal de evento prerrelleno. Va el
+       ULTIMO a proposito: usa openEventModal y los campos de hora que
+       declara app.js. -->
 </body>
 </html>

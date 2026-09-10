@@ -172,21 +172,106 @@ function applyLocalSchema(db) {
     -- entrenamientos, con prefijo "gym_" para no chocar con nada de lo de
     -- arriba. Borrado en cascada A MANO en routes/, no con ON DELETE
     -- CASCADE de SQL -- mismo patron que groups/note_folders.
+    --
+    -- OJO (rediseno de Gimnasio, rama gimnasio-movil): a partir de aqui
+    -- las tablas gym_* DIVERGEN de server/db.js (la copia del programa de
+    -- escritorio). gym_blocks y las columnas nuevas de las otras tablas
+    -- gym_* existen SOLO en esta version; cuando algun dia se fusionen
+    -- las dos lineas habra que decidir que se lleva cada lado.
     CREATE TABLE IF NOT EXISTS gym_exercises (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      muscle_group TEXT,          -- opcional, texto libre (ej. "Pierna")
+      -- Grupo muscular: los ejercicios nuevos guardan un id de la
+      -- taxonomia fija (GYM_MUSCLE_GROUPS en app.js, ej. "pecho"); los
+      -- de antes del rediseno pueden traer texto libre (ej. "Pierna"),
+      -- que se muestra tal cual hasta que se reediten.
+      muscle_group TEXT,
+      -- Si el ejercicio se importo de la libreria empaquetada
+      -- (gym-exercise-library.json), aqui va su id de alli (slug tipo
+      -- "Barbell_Squat") -- sirve para no importar dos veces el mismo.
+      library_id TEXT,
+      equipment TEXT,             -- opcional (ej. "Barra", "Mancuernas")
+      -- Grupos musculares SECUNDARIOS (JSON array de ids de la
+      -- taxonomia, ej. '["hombros","triceps"]') -- los rellena el import
+      -- de la libreria y los usa el mapa de musculos (ponderados a 0.5).
+      secondary_muscles TEXT,
+      -- Nota FIJA del ejercicio ("polea altura 3", "banco posicion 2"):
+      -- acompana siempre al ejercicio, a diferencia de la nota de sesion
+      -- (exercise_notes en gym_sessions, que es de UNA sesion concreta).
+      notes TEXT,
+      -- Unilateral (un lado cada vez: mancuerna a una mano, prensa a una
+      -- pierna...). Si ademas count_sides_separately = 1, cada lado se
+      -- registra como su propia serie (gym_sets.side), y entre lado y
+      -- lado corre un descanso corto propio (side_rest_seconds).
+      unilateral INTEGER NOT NULL DEFAULT 0,
+      count_sides_separately INTEGER NOT NULL DEFAULT 0,
+      side_rest_seconds INTEGER,
+      -- Configuracion POR DEFECTO del ejercicio (peticion de Koku): las
+      -- series, repeticiones y descanso que sueles hacer con el. Al
+      -- meterlo en un dia, esos tres campos llegan ya rellenos y no hay
+      -- que escribirlos otra vez.
+      --
+      -- Ojo, son un PUNTO DE PARTIDA, no la verdad: lo que manda en un
+      -- dia concreto sigue siendo lo que hay en gym_routine_exercises,
+      -- que se puede cambiar ahi (5x5 el lunes y 3x12 el jueves con el
+      -- mismo ejercicio). Y cambiar esto NO toca los dias que ya lo
+      -- tenian metido -- decision de Koku, para que editar un ejercicio
+      -- nunca te cambie un plan por sorpresa.
+      default_sets INTEGER,
+      default_reps INTEGER,
+      default_rest_seconds INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- Rutinas reutilizables (ej. "Dia de pierna"), mismo patron
-    -- icono+color+posicion que groups/note_folders.
+    -- Bloques de entrenamiento (rediseno de Gimnasio): una "etapa" con
+    -- nombre propio (ej. "Volumen Invierno") que agrupa varios dias de
+    -- entrenamiento (los gym_routines de abajo). Solo UN bloque puede
+    -- estar activo a la vez (is_active = 1) -- es el que se ofrece al
+    -- empezar a entrenar. El borrado en cascada de sus dias se hace a
+    -- mano en routes-local/gymBlocks.js, como en todo el proyecto.
+    -- cycle_*: el "ciclo de dias" OPCIONAL del bloque (ver
+    -- gym_block_cycle_days). cycle_position es la posicion del ciclo que
+    -- toca AHORA y cycle_position_date el dia en que se le asigno ese
+    -- turno: el ciclo avanza al ENTRENAR (no con el calendario), pero un
+    -- descanso se consume solo al pasar el dia, y para eso hace falta
+    -- saber desde cuando lleva puesto.
+    CREATE TABLE IF NOT EXISTS gym_blocks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 0,
+      cycle_enabled INTEGER NOT NULL DEFAULT 0,
+      cycle_position INTEGER,
+      cycle_position_date TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Las posiciones del ciclo de un bloque: "dia 1 = Empuje, dia 2 =
+    -- Tiron, dia 3 = descanso". routine_id a NULL es un DESCANSO, que es
+    -- una posicion de verdad y no un hueco. Se usa una tabla aparte (y no
+    -- un campo en gym_routines) para que un mismo dia de entreno pueda
+    -- repetirse en varias posiciones del ciclo.
+    CREATE TABLE IF NOT EXISTS gym_block_cycle_days (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      block_id INTEGER NOT NULL REFERENCES gym_blocks(id),
+      position INTEGER NOT NULL,
+      routine_id INTEGER REFERENCES gym_routines(id)
+    );
+
+    -- Dias de entrenamiento reutilizables (ej. "Push 1", "Dia de pierna"),
+    -- mismo patron icono+color+posicion que groups/note_folders. La tabla
+    -- se sigue llamando gym_routines por compatibilidad con los datos ya
+    -- guardados, pero en la interfaz del rediseno son los "dias" de un
+    -- bloque (block_id). block_id puede ser NULL solo de forma transitoria:
+    -- la migracion de mas abajo recoloca cualquier huerfano en el bloque
+    -- "General".
     CREATE TABLE IF NOT EXISTS gym_routines (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       icon TEXT,
       color TEXT NOT NULL DEFAULT '#5b8cff',
       position INTEGER NOT NULL DEFAULT 0,
+      block_id INTEGER REFERENCES gym_blocks(id),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -204,7 +289,12 @@ function applyLocalSchema(db) {
       -- dentro de la rutina -- solo una sugerencia, igual que target_sets/
       -- target_reps; se copia como punto de partida a cada serie al crear
       -- una sesion desde esta rutina, y se puede cambiar libremente ahi.
-      target_rest_seconds INTEGER
+      target_rest_seconds INTEGER,
+      -- Oculto: el ejercicio sigue EN el dia (no se ha borrado), pero un
+      -- entrenamiento nuevo no lo pre-carga -- para "aparcar" un ejercicio
+      -- mientras se prueba otro (peticion de Koku). En el entreno en vivo
+      -- se puede recuperar desde "Ejercicios ocultos".
+      hidden INTEGER NOT NULL DEFAULT 0
     );
 
     -- Una sesion real en una fecha. routine_id es opcional: NULL = sesion
@@ -214,6 +304,26 @@ function applyLocalSchema(db) {
       date TEXT NOT NULL,                             -- YYYY-MM-DD
       routine_id INTEGER REFERENCES gym_routines(id),
       notes TEXT,
+      -- Fase 3 (modo entrenar en vivo): cuando la sesion se registro
+      -- entrenando en directo, aqui quedan la hora de inicio (ISO) y la
+      -- duracion total en segundos; NULL en sesiones apuntadas a mano.
+      started_at TEXT,
+      duration_seconds INTEGER,
+      -- Nota libre POR EJERCICIO de esa sesion ("subir peso la proxima",
+      -- "molestia en el hombro"...): JSON {exerciseId: "texto"}. Es un
+      -- dato puramente de presentacion, por eso va como JSON en una
+      -- columna en vez de montar una tabla y rutas nuevas solo para esto.
+      exercise_notes TEXT,
+      -- Fase 4 (actividad rapida): una fila de gym_sessions puede ser un
+      -- entrenamiento de pesas de siempre (type = 'gym', con sus series
+      -- en gym_sets) o una actividad suelta sin series -- cardio, clase,
+      -- deporte (type = 'activity', con activity_kind + activity_name y
+      -- la duracion en duration_seconds). Comparte tabla a proposito:
+      -- heatmap, racha y logros necesitan UNA sola fuente de "dias con
+      -- actividad".
+      type TEXT NOT NULL DEFAULT 'gym',
+      activity_kind TEXT,
+      activity_name TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -232,6 +342,33 @@ function applyLocalSchema(db) {
       -- target_rest_seconds de la rutina al auto-rellenar la sesion (ver
       -- app.js), pero se guarda por serie porque se puede editar suelto.
       rest_seconds INTEGER,
+      -- Fase 3: esfuerzo percibido de la serie (RPE, 1-10 con decimales,
+      -- opcional) y tipo de serie (NULL = normal; 'warmup'/'dropset'/
+      -- 'failure' reservados -- el calculo de PRs excluye warmup).
+      rpe REAL,
+      set_type TEXT,
+      -- Segundos de descanso EXTRA anadidos con +30s durante el descanso
+      -- de esta serie (rest_seconds guarda el planificado). Se ensena en
+      -- el historial como "Serie 1: +60s" (peticion de Koku).
+      extra_rest_seconds INTEGER,
+      -- Cuanto DURO la serie en si (del boton "empezar serie" al
+      -- "terminar serie" del entreno en vivo, descontando pausas). NULL
+      -- en series apuntadas a mano o de versiones anteriores.
+      duration_seconds INTEGER,
+      -- Lado del cuerpo en ejercicios unilaterales contados por separado:
+      -- 'left' / 'right' (NULL = serie normal, a dos lados).
+      side TEXT,
+      -- Nota de ESTA serie ("se me fue el codo"): al acabar el ejercicio
+      -- se combinan todas en la nota del ejercicio de la sesion.
+      notes TEXT,
+      -- Series alargadas: un TRAMO de dropset o de rest-pause es una
+      -- fila propia colgada de su serie madre (parent_set_id), con su
+      -- orden (segment_index) y, en rest-pause, los segundos que se
+      -- paro antes de hacerlo (pause_seconds). set_type dice cual es.
+      -- Contar series = parent_set_id IS NULL; contar kilos = todas.
+      parent_set_id INTEGER REFERENCES gym_sets(id),
+      segment_index INTEGER,
+      pause_seconds INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -998,6 +1135,25 @@ function applyLocalSchema(db) {
         dayHoliday: '#fbdfe0',
         daySpecial: '#e4e0fb',
       },
+      inverseColors: {
+        bg: '#231a20',
+        bgText: '#f6e6ef',
+        surface: '#2d222a',
+        surfaceText: '#f6e6ef',
+        surface2: '#3a2c36',
+        surface2Text: '#f6e6ef',
+        border: '#4d3b47',
+        accent: '#f2a6c6',
+        accentText: '#2b1a22',
+        danger: '#e8909a',
+        settingsMenuBg: '#3a2c36',
+        settingsMenuText: '#f6e6ef',
+        dayToday: '#f2a6c6',
+        dayTodayText: '#2b1a22',
+        dayWeekend: '#31252d',
+        dayHoliday: '#3d2224',
+        daySpecial: '#2a2440',
+      },
     },
     {
       name: 'Neón',
@@ -1020,92 +1176,291 @@ function applyLocalSchema(db) {
         dayHoliday: '#2a1020',
         daySpecial: '#10202a',
       },
-    },
-    // "EINES": panel tecnico oscuro con acento naranja, sacado de una guia de
-    // diseño (sistema-de-estilos.md/estilos-panel-oscuro.css) que Koku trajo
-    // de otra herramienta ya construida. Mapeo: --bg->bg, --panel->surface,
-    // --panel-2->surface2/settingsMenuBg (fondo "hundido" de inputs), --line
-    // ->border, --accent->accent (con accentText oscuro, tal cual pide el
-    // .btn-primary del original: fondo solido + texto oscuro, no blanco).
-    // dayWeekend usa el tono --grid de la cuadricula de fondo; dayHoliday y
-    // daySpecial son --danger/--info del original mezclados oscuros con bg,
-    // ya que ese sistema no define esos dos casos (son propios de este
-    // calendario, no de la guia original).
-    {
-      name: 'EINES',
-      colors: {
-        bg: '#12181f',
-        bgText: '#e7edf2',
-        surface: '#1a222b',
-        surfaceText: '#e7edf2',
-        surface2: '#20303a',
-        surface2Text: '#e7edf2',
-        border: '#2c3947',
-        accent: '#ff8a3d',
-        accentText: '#1a0f05',
-        danger: '#e24b4a',
-        settingsMenuBg: '#20303a',
-        settingsMenuText: '#e7edf2',
-        dayToday: '#ff8a3d',
-        dayTodayText: '#1a0f05',
-        dayWeekend: '#233240',
-        dayHoliday: '#2e1a1a',
-        daySpecial: '#16232e',
+      inverseColors: {
+        bg: '#f4f4fb',
+        bgText: '#14142a',
+        surface: '#ffffff',
+        surfaceText: '#14142a',
+        surface2: '#e9e9f7',
+        surface2Text: '#14142a',
+        border: '#d3d3ec',
+        accent: '#0090a0',
+        accentText: '#ffffff',
+        danger: '#c4145a',
+        settingsMenuBg: '#e9e9f7',
+        settingsMenuText: '#14142a',
+        dayToday: '#0090a0',
+        dayTodayText: '#ffffff',
+        dayWeekend: '#eaeaf7',
+        dayHoliday: '#fbe6ee',
+        daySpecial: '#e4f2f6',
       },
     },
-
-    // "Registro": panel tecnico con acento verde, sacado de otra guia de
-    // diseño (misma pareja de archivos sistema-de-estilos.md/
-    // estilos-panel-oscuro.css, pero de un proyecto distinto -- el "Report
-    // Generator" de Koku) que esta vez SI trae variante clara Y oscura de
-    // verdad, a diferencia de EINES (solo oscuro) -- por eso aqui si hay
-    // inverseColors. Mismo mapeo que EINES: --bg->bg, --panel->surface,
-    // --panel-2->surface2/settingsMenuBg, --line->border, --accent->accent
-    // (accentText oscuro en el oscuro, blanco en el claro, tal cual definia
-    // --accent-text en cada variante del original). dayWeekend usa --grid;
-    // dayHoliday/daySpecial son --danger/--info del original mezclados con
-    // el bg de cada variante (ese sistema tampoco define esos dos casos).
+    // "Océano": azules profundos, el mas "de noche" de los frios. Con pareja clara y
+    // oscura, asi que sigue el modo del sistema si lo tienes puesto.
     {
-      name: 'Registro',
+      name: 'Océano',
       colors: {
-        bg: '#101813',
-        bgText: '#e7f2ec',
-        surface: '#17211b',
-        surfaceText: '#e7f2ec',
-        surface2: '#1e2b23',
-        surface2Text: '#e7f2ec',
-        border: '#2b3d33',
-        accent: '#3ddc84',
-        accentText: '#08150f',
-        danger: '#e24b4a',
-        settingsMenuBg: '#1e2b23',
-        settingsMenuText: '#e7f2ec',
-        dayToday: '#3ddc84',
-        dayTodayText: '#08150f',
-        dayWeekend: '#22322a',
-        dayHoliday: '#2c1a1a',
-        daySpecial: '#16212f',
+        bg: '#0b1622',
+        bgText: '#e2edf7',
+        surface: '#12202f',
+        surfaceText: '#e2edf7',
+        surface2: '#1a2c3e',
+        surface2Text: '#e2edf7',
+        border: '#263c52',
+        accent: '#3fa9f5',
+        accentText: '#04121d',
+        danger: '#ff6b6b',
+        settingsMenuBg: '#1a2c3e',
+        settingsMenuText: '#e2edf7',
+        dayToday: '#3fa9f5',
+        dayTodayText: '#04121d',
+        dayWeekend: '#132435',
+        dayHoliday: '#33201f',
+        daySpecial: '#1b2647',
       },
       inverseColors: {
-        bg: '#f4f8f5',
-        bgText: '#16211c',
+        bg: '#f2f7fc',
+        bgText: '#0e2233',
         surface: '#ffffff',
-        surfaceText: '#16211c',
-        surface2: '#eef4f0',
-        surface2Text: '#16211c',
-        border: '#d5e2da',
-        accent: '#1f9d5c',
+        surfaceText: '#0e2233',
+        surface2: '#e6eff7',
+        surface2Text: '#0e2233',
+        border: '#cfe0ee',
+        accent: '#0a6fb5',
         accentText: '#ffffff',
-        danger: '#c0392b',
-        settingsMenuBg: '#eef4f0',
-        settingsMenuText: '#16211c',
-        dayToday: '#1f9d5c',
+        danger: '#c62828',
+        settingsMenuBg: '#e6eff7',
+        settingsMenuText: '#0e2233',
+        dayToday: '#0a6fb5',
         dayTodayText: '#ffffff',
-        dayWeekend: '#e3ede7',
+        dayWeekend: '#e4eff8',
         dayHoliday: '#fbeaea',
-        daySpecial: '#e8eff8',
+        daySpecial: '#e7ecfa',
       },
     },
+    // "Bosque": verdes apagados, descansa la vista. Con pareja clara y
+    // oscura, asi que sigue el modo del sistema si lo tienes puesto.
+    {
+      name: 'Bosque',
+      colors: {
+        bg: '#0d1712',
+        bgText: '#e4f0e7',
+        surface: '#14211b',
+        surfaceText: '#e4f0e7',
+        surface2: '#1c2c24',
+        surface2Text: '#e4f0e7',
+        border: '#294034',
+        accent: '#4caf7d',
+        accentText: '#06150e',
+        danger: '#ef6b5e',
+        settingsMenuBg: '#1c2c24',
+        settingsMenuText: '#e4f0e7',
+        dayToday: '#4caf7d',
+        dayTodayText: '#06150e',
+        dayWeekend: '#152520',
+        dayHoliday: '#2c1c1a',
+        daySpecial: '#1a2438',
+      },
+      inverseColors: {
+        bg: '#f3f8f4',
+        bgText: '#12251b',
+        surface: '#ffffff',
+        surfaceText: '#12251b',
+        surface2: '#e7f1ea',
+        surface2Text: '#12251b',
+        border: '#d2e3d7',
+        accent: '#1f7a4d',
+        accentText: '#ffffff',
+        danger: '#c0392b',
+        settingsMenuBg: '#e7f1ea',
+        settingsMenuText: '#12251b',
+        dayToday: '#1f7a4d',
+        dayTodayText: '#ffffff',
+        dayWeekend: '#e6f1e9',
+        dayHoliday: '#fbeaea',
+        daySpecial: '#e8ecf7',
+      },
+    },
+    // "Atardecer": naranjas y ambar calidos. Con pareja clara y
+    // oscura, asi que sigue el modo del sistema si lo tienes puesto.
+    {
+      name: 'Atardecer',
+      colors: {
+        bg: '#1a1210',
+        bgText: '#f5e7de',
+        surface: '#241814',
+        surfaceText: '#f5e7de',
+        surface2: '#31211b',
+        surface2Text: '#f5e7de',
+        border: '#453026',
+        accent: '#ff8a45',
+        accentText: '#1c0d05',
+        danger: '#e0574f',
+        settingsMenuBg: '#31211b',
+        settingsMenuText: '#f5e7de',
+        dayToday: '#ff8a45',
+        dayTodayText: '#1c0d05',
+        dayWeekend: '#291b16',
+        dayHoliday: '#3a1e1c',
+        daySpecial: '#241a33',
+      },
+      inverseColors: {
+        bg: '#fdf6f1',
+        bgText: '#2b1a12',
+        surface: '#ffffff',
+        surfaceText: '#2b1a12',
+        surface2: '#f8ece3',
+        surface2Text: '#2b1a12',
+        border: '#eddacb',
+        accent: '#c05215',
+        accentText: '#ffffff',
+        danger: '#c0392b',
+        settingsMenuBg: '#f8ece3',
+        settingsMenuText: '#2b1a12',
+        dayToday: '#c05215',
+        dayTodayText: '#ffffff',
+        dayWeekend: '#faeade',
+        dayHoliday: '#fbe6e4',
+        daySpecial: '#f0e8f7',
+      },
+    },
+    // "Lavanda": morados suaves. Con pareja clara y
+    // oscura, asi que sigue el modo del sistema si lo tienes puesto.
+    {
+      name: 'Lavanda',
+      colors: {
+        bg: '#14111f',
+        bgText: '#e9e5f6',
+        surface: '#1d1930',
+        surfaceText: '#e9e5f6',
+        surface2: '#26213e',
+        surface2Text: '#e9e5f6',
+        border: '#3a3358',
+        accent: '#9b7dff',
+        accentText: '#0d0819',
+        danger: '#f2678c',
+        settingsMenuBg: '#26213e',
+        settingsMenuText: '#e9e5f6',
+        dayToday: '#9b7dff',
+        dayTodayText: '#0d0819',
+        dayWeekend: '#1f1a33',
+        dayHoliday: '#33192a',
+        daySpecial: '#1a2540',
+      },
+      inverseColors: {
+        bg: '#f7f5fd',
+        bgText: '#1e1930',
+        surface: '#ffffff',
+        surfaceText: '#1e1930',
+        surface2: '#efeafa',
+        surface2Text: '#1e1930',
+        border: '#ded5f1',
+        accent: '#6b46d6',
+        accentText: '#ffffff',
+        danger: '#c2185b',
+        settingsMenuBg: '#efeafa',
+        settingsMenuText: '#1e1930',
+        dayToday: '#6b46d6',
+        dayTodayText: '#ffffff',
+        dayWeekend: '#efeafa',
+        dayHoliday: '#fbe7ef',
+        daySpecial: '#e6ecfa',
+      },
+    },
+    // "Carbón": grises neutros sin color, el de mas contraste. Con pareja clara y
+    // oscura, asi que sigue el modo del sistema si lo tienes puesto.
+    {
+      name: 'Carbón',
+      colors: {
+        bg: '#111111',
+        bgText: '#ededed',
+        surface: '#1b1b1b',
+        surfaceText: '#ededed',
+        surface2: '#242424',
+        surface2Text: '#ededed',
+        border: '#343434',
+        accent: '#c8c8c8',
+        accentText: '#141414',
+        danger: '#ff6b6b',
+        settingsMenuBg: '#242424',
+        settingsMenuText: '#ededed',
+        dayToday: '#c8c8c8',
+        dayTodayText: '#141414',
+        dayWeekend: '#1e1e1e',
+        dayHoliday: '#2f1c1c',
+        daySpecial: '#1c2333',
+      },
+      inverseColors: {
+        bg: '#f6f6f6',
+        bgText: '#1a1a1a',
+        surface: '#ffffff',
+        surfaceText: '#1a1a1a',
+        surface2: '#ececec',
+        surface2Text: '#1a1a1a',
+        border: '#d6d6d6',
+        accent: '#3d3d3d',
+        accentText: '#ffffff',
+        danger: '#c62828',
+        settingsMenuBg: '#ececec',
+        settingsMenuText: '#1a1a1a',
+        dayToday: '#3d3d3d',
+        dayTodayText: '#ffffff',
+        dayWeekend: '#eeeeee',
+        dayHoliday: '#fbeaea',
+        daySpecial: '#e9edf6',
+      },
+    },
+    // "Arena": tierras y dorado, calido pero sobrio. Con pareja clara y
+    // oscura, asi que sigue el modo del sistema si lo tienes puesto.
+    {
+      name: 'Arena',
+      colors: {
+        bg: '#17140f',
+        bgText: '#f0e8da',
+        surface: '#211c15',
+        surfaceText: '#f0e8da',
+        surface2: '#2c261d',
+        surface2Text: '#f0e8da',
+        border: '#40382b',
+        accent: '#d8a54a',
+        accentText: '#1a1208',
+        danger: '#e0654f',
+        settingsMenuBg: '#2c261d',
+        settingsMenuText: '#f0e8da',
+        dayToday: '#d8a54a',
+        dayTodayText: '#1a1208',
+        dayWeekend: '#241f17',
+        dayHoliday: '#33201c',
+        daySpecial: '#1e2233',
+      },
+      inverseColors: {
+        bg: '#faf7f0',
+        bgText: '#241d12',
+        surface: '#ffffff',
+        surfaceText: '#241d12',
+        surface2: '#f2ece0',
+        surface2Text: '#241d12',
+        border: '#e0d6c2',
+        accent: '#8a6420',
+        accentText: '#ffffff',
+        danger: '#c0392b',
+        settingsMenuBg: '#f2ece0',
+        settingsMenuText: '#241d12',
+        dayToday: '#8a6420',
+        dayTodayText: '#ffffff',
+        dayWeekend: '#f4eee1',
+        dayHoliday: '#fbe9e4',
+        daySpecial: '#eaecf6',
+      },
+    },
+    // NOTA: aqui vivian dos temas mas ("EINES" y "Registro") sacados de
+    // guias de diseño privadas de Koku. Se quitaron del sembrado a
+    // proposito: no deben viajar dentro de la app para todo el mundo.
+    // Ojo, quitarlos de esta lista NO los borra de una base de datos que
+    // ya los tenga -- el sembrado de abajo solo inserta un tema si NO
+    // existe ya uno con ese nombre, asi que en el movil de Koku siguen
+    // intactos y su copia de seguridad los restaura tal cual.
   ];
 
   // ---------------------------------------------------------------------
@@ -1144,6 +1499,142 @@ function applyLocalSchema(db) {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // La espalda pasa de UN grupo muscular a TRES (peticion de Koku el
+  // 9/9/2026): espalda alta, espalda media y dorsales. "lumbar" no se
+  // toca, esa ya existia y se queda igual.
+  //
+  // Los ejercicios que ya estan importados en la base guardan
+  // muscle_group = 'espalda', que a partir de ahora no significa nada.
+  // Reimportar la libreria NO los arregla: el import es idempotente por
+  // library_id y devuelve la fila que ya hay sin tocarla (a proposito,
+  // para no pisar los cambios que hayas hecho a mano). Asi que hay que
+  // recolocarlos aqui.
+  //
+  // El reparto se calculo a partir del origen de la libreria
+  // (free-exercise-db), que si distinguia "lats" de "middle back". Como
+  // la INMENSA mayoria de los "lats" son dorsales, el valor por defecto
+  // es ese y aqui solo se listan los que van a otro sitio -- 68 ids en
+  // vez de los 100 y pico que habria que listar al reves.
+  //
+  // Es idempotente: cuando ya no queda ningun 'espalda' no hace nada.
+  const ejerciciosConEspaldaVieja = db
+    .prepare("SELECT id, library_id, secondary_muscles FROM gym_exercises WHERE muscle_group = 'espalda' OR secondary_muscles LIKE '%\"espalda\"%'")
+    .all();
+  if (ejerciciosConEspaldaVieja.length) {
+    const ESPALDA_NO_DORSAL = {
+    'Alternating_Kettlebell_Row': 'espalda_media',
+    'Alternating_Renegade_Row': 'espalda_media',
+    'Anti-Gravity_Press': 'espalda_media',
+    'Atlas_Stones': 'espalda_media',
+    'Axle_Deadlift': 'espalda_media',
+    'Back_Flyes_-_With_Bands': 'espalda_media',
+    'Band_Pull_Apart': 'espalda_media',
+    'Barbell_Shrug_Behind_The_Back': 'espalda_media',
+    'Bent_Over_Barbell_Row': 'espalda_media',
+    'Bent_Over_Low-Pulley_Side_Lateral': 'espalda_media',
+    'Bent_Over_One-Arm_Long_Bar_Row': 'espalda_media',
+    'Bent_Over_Two-Arm_Long_Bar_Row': 'espalda_media',
+    'Bent_Over_Two-Dumbbell_Row': 'espalda_media',
+    'Bent_Over_Two-Dumbbell_Row_With_Palms_In': 'espalda_media',
+    'Bodyweight_Mid_Row': 'espalda_media',
+    'Cable_Rope_Rear-Delt_Rows': 'espalda_media',
+    'Cable_Seated_Lateral_Raise': 'espalda_media',
+    'Cat_Stretch': 'espalda_media',
+    'Childs_Pose': 'espalda_media',
+    'Clean_Deadlift': 'espalda_media',
+    'Clean_and_Press': 'espalda_media',
+    'Deadlift_with_Bands': 'espalda_media',
+    'Deadlift_with_Chains': 'espalda_media',
+    'Deficit_Deadlift': 'espalda_media',
+    'Dumbbell_Incline_Row': 'espalda_media',
+    'Dumbbell_Lying_One-Arm_Rear_Lateral_Raise': 'espalda_media',
+    'Dynamic_Chest_Stretch': 'espalda_media',
+    'Face_Pull': 'espalda_media',
+    'Incline_Bench_Pull': 'espalda_media',
+    'Inverted_Row': 'espalda_media',
+    'Inverted_Row_with_Straps': 'espalda_media',
+    'Keg_Load': 'espalda_media',
+    'Kettlebell_Halo': 'espalda_media',
+    'Kettlebell_Halo_With_Overhead_Extension': 'espalda_media',
+    'Leverage_High_Row': 'espalda_alta',
+    'Log_Lift': 'espalda_media',
+    'Low_Pulley_Row_To_Neck': 'espalda_media',
+    'Lying_Cambered_Barbell_Row': 'espalda_media',
+    'Lying_T-Bar_Row': 'espalda_media',
+    'Middle_Back_Shrug': 'espalda_alta',
+    'Middle_Back_Stretch': 'espalda_media',
+    'Mixed_Grip_Chin': 'espalda_media',
+    'One-Arm_Dumbbell_Row': 'espalda_media',
+    'One-Arm_Kettlebell_Row': 'espalda_media',
+    'One-Arm_Long_Bar_Row': 'espalda_media',
+    'One_Arm_Chin-Up': 'espalda_media',
+    'Power_Clean': 'espalda_media',
+    'Reverse_Grip_Bent-Over_Rows': 'espalda_media',
+    'Rhomboids-SMR': 'espalda_alta',
+    'Rowing_Stationary': 'espalda_media',
+    'Sandbag_Load': 'espalda_media',
+    'Seated_Cable_Rows': 'espalda_media',
+    'Seated_One-arm_Cable_Pulley_Rows': 'espalda_media',
+    'Sled_Overhead_Backward_Walk': 'espalda_media',
+    'Sled_Row': 'espalda_media',
+    'Smith_Machine_Bent_Over_Row': 'espalda_media',
+    'Smith_Machine_Upright_Row': 'espalda_media',
+    'Spinal_Stretch': 'espalda_media',
+    'Straight_Bar_Bench_Mid_Rows': 'espalda_media',
+    'Sumo_Deadlift': 'espalda_media',
+    'Sumo_Deadlift_with_Bands': 'espalda_media',
+    'Sumo_Deadlift_with_Chains': 'espalda_media',
+    'Suspended_Row': 'espalda_media',
+    'T-Bar_Row_with_Handle': 'espalda_media',
+    'Two-Arm_Kettlebell_Row': 'espalda_media',
+    'Upper_Back-Leg_Grab': 'espalda_alta',
+    'Upper_Back_Stretch': 'espalda_alta',
+    'Weighted_Ball_Hyperextension': 'espalda_media',
+    };
+    const actualizarEspalda = db.prepare('UPDATE gym_exercises SET muscle_group = ?, secondary_muscles = ? WHERE id = ?');
+    for (const ej of ejerciciosConEspaldaVieja) {
+      const destino = ESPALDA_NO_DORSAL[ej.library_id] || 'dorsales';
+      const fila = db.prepare('SELECT muscle_group FROM gym_exercises WHERE id = ?').get(ej.id);
+      const grupo = fila.muscle_group === 'espalda' ? destino : fila.muscle_group;
+      let secundarios = ej.secondary_muscles;
+      if (secundarios && secundarios.includes('"espalda"')) {
+        try {
+          const lista = JSON.parse(secundarios).map((m) => (m === 'espalda' ? destino : m));
+          secundarios = JSON.stringify(lista);
+        } catch (err) {
+          // JSON roto de alguna version vieja: mejor dejarlo como esta
+          // que romper el arranque de la app entera por esto.
+        }
+      }
+      actualizarEspalda.run(grupo, secundarios, ej.id);
+    }
+  }
+
+  // Segundo acto de lo de la espalda: la build #42 llego a repartir unos
+  // pocos ejercicios a 'espalda_alta', y Koku deshizo esa franja el mismo
+  // dia ("cambialo a hombro posterior y fusionalo con media"). Los que
+  // se quedaron ahi vuelven a espalda media. Idempotente: cuando no
+  // queda ninguno, no hace nada.
+  const conEspaldaAlta = db
+    .prepare("SELECT id, secondary_muscles FROM gym_exercises WHERE muscle_group = 'espalda_alta' OR secondary_muscles LIKE '%\"espalda_alta\"%'")
+    .all();
+  if (conEspaldaAlta.length) {
+    const arreglar = db.prepare("UPDATE gym_exercises SET muscle_group = CASE WHEN muscle_group = 'espalda_alta' THEN 'espalda_media' ELSE muscle_group END, secondary_muscles = ? WHERE id = ?");
+    for (const ej of conEspaldaAlta) {
+      let secundarios = ej.secondary_muscles;
+      if (secundarios && secundarios.includes('"espalda_alta"')) {
+        try {
+          secundarios = JSON.stringify(JSON.parse(secundarios).map((m) => (m === 'espalda_alta' ? 'espalda_media' : m)));
+        } catch (err) {
+          // JSON roto de alguna version vieja: mejor dejarlo como esta
+          // que romper el arranque de la app entera por esto.
+        }
+      }
+      arreglar.run(secundarios, ej.id);
+    }
+  }
+
   const existingThemeNames = new Set(db.prepare('SELECT name FROM themes').all().map((t) => t.name));
   const seedTheme = db.prepare('INSERT INTO themes (name, colors, inverse_colors) VALUES (?, ?, ?)');
   for (const theme of SEED_THEMES) {
@@ -1159,6 +1650,9 @@ function applyLocalSchema(db) {
   const gymRoutineExerciseColumns = db.prepare('PRAGMA table_info(gym_routine_exercises)').all().map((c) => c.name);
   if (!gymRoutineExerciseColumns.includes('target_rest_seconds')) {
     db.exec('ALTER TABLE gym_routine_exercises ADD COLUMN target_rest_seconds INTEGER');
+  }
+  if (!gymRoutineExerciseColumns.includes('hidden')) {
+    db.exec('ALTER TABLE gym_routine_exercises ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
   }
   const gymSetColumns = db.prepare('PRAGMA table_info(gym_sets)').all().map((c) => c.name);
   if (!gymSetColumns.includes('rest_seconds')) {
@@ -1232,6 +1726,157 @@ function applyLocalSchema(db) {
       ALTER TABLE entretenimiento_items_nuevo RENAME TO entretenimiento_items;
     `);
     db.exec('PRAGMA foreign_keys = ON');
+  }
+
+  // ---- Migraciones del rediseno de Gimnasio (SOLO en esta linea movil,
+  // ---- diverge de server/db.js -- ver el comentario junto a gym_blocks).
+  // Fase 1: bloques de entrenamiento. La tabla gym_blocks ya la crea el
+  // CREATE TABLE IF NOT EXISTS de arriba en instalaciones nuevas; aqui va
+  // lo que una base YA EXISTENTE necesita ademas:
+  //
+  // 1) La columna block_id en gym_routines (los "dias").
+  const gymRoutineColumns = db.prepare('PRAGMA table_info(gym_routines)').all().map((c) => c.name);
+  if (!gymRoutineColumns.includes('block_id')) {
+    db.exec('ALTER TABLE gym_routines ADD COLUMN block_id INTEGER REFERENCES gym_blocks(id)');
+  }
+  // 2) Recolocar en un bloque "General" cualquier dia que quedara suelto
+  //    (los datos de antes del rediseno, o un huerfano de un borrado a
+  //    medias). Es idempotente: si no hay huerfanos no hace nada, y el
+  //    bloque "General" solo se crea si de verdad hace falta (se reutiliza
+  //    si ya existe uno con ese nombre).
+  const orphanRoutines = db.prepare('SELECT COUNT(*) AS n FROM gym_routines WHERE block_id IS NULL').get();
+  if (orphanRoutines && orphanRoutines.n > 0) {
+    let general = db.prepare("SELECT id FROM gym_blocks WHERE name = 'General' ORDER BY id ASC").get();
+    if (!general) {
+      // Nace activo solo si todavia no hay ningun otro bloque activo, para
+      // no robarle el estado a uno que el usuario ya hubiera activado.
+      const activeCount = db.prepare('SELECT COUNT(*) AS n FROM gym_blocks WHERE is_active = 1').get();
+      const positionRow = db.prepare('SELECT COUNT(*) AS n FROM gym_blocks').get();
+      db.prepare('INSERT INTO gym_blocks (name, position, is_active) VALUES (?, ?, ?)')
+        .run('General', positionRow.n, activeCount.n > 0 ? 0 : 1);
+      general = db.prepare("SELECT id FROM gym_blocks WHERE name = 'General' ORDER BY id ASC").get();
+    }
+    db.prepare('UPDATE gym_routines SET block_id = ? WHERE block_id IS NULL').run(general.id);
+  }
+  // 2 bis) El ciclo de dias del bloque (opcional). La tabla
+  //    gym_block_cycle_days ya la crea el CREATE TABLE IF NOT EXISTS de
+  //    arriba; aqui van solo las columnas que le faltan a una base vieja.
+  //    Todo queda apagado (cycle_enabled = 0) hasta que se configure, asi
+  //    que quien no lo use no nota ningun cambio.
+  const gymBlockColumns = db.prepare('PRAGMA table_info(gym_blocks)').all().map((c) => c.name);
+  if (!gymBlockColumns.includes('cycle_enabled')) {
+    db.exec('ALTER TABLE gym_blocks ADD COLUMN cycle_enabled INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!gymBlockColumns.includes('cycle_position')) {
+    db.exec('ALTER TABLE gym_blocks ADD COLUMN cycle_position INTEGER');
+  }
+  if (!gymBlockColumns.includes('cycle_position_date')) {
+    db.exec('ALTER TABLE gym_blocks ADD COLUMN cycle_position_date TEXT');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gym_cycle_block ON gym_block_cycle_days(block_id)');
+
+  // 3) Indices para las consultas de progreso/heatmap que vienen en fases
+  //    posteriores (baratos y seguros de crear ya).
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sets_session ON gym_sets(session_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sets_exercise ON gym_sets(exercise_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gym_sessions_date ON gym_sessions(date)');
+  // Fase 2: libreria de ejercicios -- columnas nuevas de gym_exercises
+  // (library_id para el import idempotente, equipment para mostrar el
+  // material del ejercicio).
+  const gymExerciseColumns = db.prepare('PRAGMA table_info(gym_exercises)').all().map((c) => c.name);
+  if (!gymExerciseColumns.includes('library_id')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN library_id TEXT');
+  }
+  if (!gymExerciseColumns.includes('equipment')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN equipment TEXT');
+  }
+  // Fase 6 (mapa de musculos): grupos secundarios del ejercicio.
+  if (!gymExerciseColumns.includes('secondary_muscles')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN secondary_muscles TEXT');
+  }
+  // Configuracion por defecto del ejercicio (series/reps/descanso). Se
+  // quedan a NULL en lo que ya existe, que es justo lo que se quiere:
+  // hasta que no las rellenes, un ejercicio se comporta como siempre.
+  if (!gymExerciseColumns.includes('default_sets')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN default_sets INTEGER');
+  }
+  if (!gymExerciseColumns.includes('default_reps')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN default_reps INTEGER');
+  }
+  if (!gymExerciseColumns.includes('default_rest_seconds')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN default_rest_seconds INTEGER');
+  }
+  if (!gymExerciseColumns.includes('notes')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN notes TEXT');
+  }
+  if (!gymExerciseColumns.includes('unilateral')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN unilateral INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!gymExerciseColumns.includes('count_sides_separately')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN count_sides_separately INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!gymExerciseColumns.includes('side_rest_seconds')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN side_rest_seconds INTEGER');
+  }
+  // Fase 3: modo entrenar en vivo -- RPE y tipo de serie en gym_sets,
+  // hora de inicio/duracion/notas por ejercicio en gym_sessions.
+  const gymSetColumns2 = db.prepare('PRAGMA table_info(gym_sets)').all().map((c) => c.name);
+  if (!gymSetColumns2.includes('rpe')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN rpe REAL');
+  }
+  if (!gymSetColumns2.includes('set_type')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN set_type TEXT');
+  }
+  if (!gymSetColumns2.includes('extra_rest_seconds')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN extra_rest_seconds INTEGER');
+  }
+  if (!gymSetColumns2.includes('duration_seconds')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN duration_seconds INTEGER');
+  }
+  if (!gymSetColumns2.includes('side')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN side TEXT');
+  }
+  if (!gymSetColumns2.includes('notes')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN notes TEXT');
+  }
+  // Series alargadas (dropset y rest-pause): cada TRAMO extra es una
+  // fila propia de gym_sets colgada de su serie madre, igual que cada
+  // lado de un unilateral es una serie propia -- asi el volumen sale
+  // solo con el SUM de siempre y no hace falta ningun caso especial.
+  //   parent_set_id  NULL = serie normal; si no, el id de su madre.
+  //   segment_index  1, 2, 3... el orden del tramo dentro de la serie.
+  //   pause_seconds  solo en rest-pause: lo que se paro antes del tramo.
+  // Contar SERIES es entonces "parent_set_id IS NULL" (un dropset de
+  // tres bajadas es UNA serie, decision de Koku), mientras que contar
+  // KILOS suma todas las filas.
+  if (!gymSetColumns2.includes('parent_set_id')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN parent_set_id INTEGER');
+  }
+  if (!gymSetColumns2.includes('segment_index')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN segment_index INTEGER');
+  }
+  if (!gymSetColumns2.includes('pause_seconds')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN pause_seconds INTEGER');
+  }
+  const gymSessionColumns = db.prepare('PRAGMA table_info(gym_sessions)').all().map((c) => c.name);
+  if (!gymSessionColumns.includes('started_at')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN started_at TEXT');
+  }
+  if (!gymSessionColumns.includes('duration_seconds')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN duration_seconds INTEGER');
+  }
+  if (!gymSessionColumns.includes('exercise_notes')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN exercise_notes TEXT');
+  }
+  // Fase 4: actividad rapida (cardio/clases/deporte sin series).
+  if (!gymSessionColumns.includes('type')) {
+    db.exec("ALTER TABLE gym_sessions ADD COLUMN type TEXT NOT NULL DEFAULT 'gym'");
+  }
+  if (!gymSessionColumns.includes('activity_kind')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN activity_kind TEXT');
+  }
+  if (!gymSessionColumns.includes('activity_name')) {
+    db.exec('ALTER TABLE gym_sessions ADD COLUMN activity_name TEXT');
   }
 
 }

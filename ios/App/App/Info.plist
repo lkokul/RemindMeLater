@@ -20,6 +20,17 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.koku.remindmelater</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>remindmelater</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
@@ -33,6 +44,17 @@
 	<string>RemindMeLater se conecta a tu ordenador por la red local (wifi) para sincronizar tu calendario, notas y tareas. Tus datos nunca salen de tus dispositivos.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<!-- Modo de fondo "audio": mantiene la app despierta MIENTRAS suena el
+	     silencio a volumen 0 del descanso (RestAudioWatcher), que es lo que
+	     permite bajar la musica justo al acabar aunque el movil este
+	     bloqueado. Fuera del descanso no hay nada sonando y la app se
+	     suspende con normalidad. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -60,12 +82,30 @@
 	<array>
 		<string>armv7</string>
 	</array>
+	<!-- SOLO VERTICAL en el iPhone (peticion de Koku). Toda la interfaz
+	     esta pensada mobile-first en vertical: en apaisado la barra de
+	     abajo, el calendario y las pantallas completas se quedan sin
+	     alto util. Se deja UIInterfaceOrientationPortrait a secas, sin
+	     PortraitUpsideDown, porque el iPhone no gira solo del reves.
+	     Aqui SI se puede recortar la lista (el iPhone no tiene el
+	     requisito de multitarea del iPad); ojo con la de abajo. -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- OJO, NO recortar esta lista: App Store Connect RECHAZA la subida
+	     (error 90474) si el bundle dice que vale para iPad y no declara
+	     las cuatro orientaciones, porque las exige para el multitarea de
+	     iPad. Ya paso una vez: la build #39 compilo y exporto bien, y
+	     reboto justo al subir.
+	     Que la app no rote de verdad se resuelve en codigo, no aqui: ver
+	     supportedInterfaceOrientations en BridgeViewController.swift,
+	     que manda por encima de esta lista.
+	     (La otra salida seria dejar la app solo para iPhone, con
+	     TARGETED_DEVICE_FAMILY = "1", pero eso es una decision de
+	     producto distinta, no un arreglo de este error.)
+	     Ojo tambien con los guiones dobles: dentro de un comentario XML
+	     son ilegales y rompen el plist entero. -->
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

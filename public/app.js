@@ -37,6 +37,7 @@ const state = {
   // seccion aparte que la mayoria de aperturas de la app ni siquiera
   // visita.
   gymExercises: [],
+  gymBlocks: [],
   gymRoutines: [],
   gymSessions: [],
   // Extension "Entretenimiento" (ver #entretenimiento-view en index.html): sagas y,
@@ -66,9 +67,52 @@ const DEFAULT_EVENT_COLOR = '#5b8cff'; // el --accent de styles.css, para evento
 // DENTRO de manejadores de click, que no se disparan hasta que la persona
 // interactua — para entonces los dos archivos ya estan cargados, igual
 // que el resto de referencias cruzadas entre app.js y settings.js.
-function createSelectField({ options = [], initialValue = '', placeholder = '', onChange, scrollToValue } = {}) {
+// `searchable`: anade un buscador dentro del desplegable. Se pide donde
+// la lista puede crecer sin limite (los ejercicios del gimnasio, que son
+// los que crea la persona mas los ~870 de la libreria) -- peticion de
+// Koku: "si tengo muchos diferentes se hace un poco una odisea". No se
+// enfoca solo a proposito: en el movil abrir el teclado nada mas
+// desplegar tapa media lista, y muchas veces solo quieres mirar.
+// Los popovers de los desplegables viven en el <body>, no dentro de su
+// campo (si no, un modal con overflow los recortaria). El problema es que
+// cuando el campo se repinta -- y las listas de ejercicios se repintan en
+// cada cambio -- el campo viejo se va del DOM pero SU popover se queda en
+// el body para siempre. Midiendolo salian 56 sueltos despues de un rato
+// normal en el modal de una sesion, cada uno con su listener global.
+//
+// No rompia nada visible, pero es basura que crece sola. Se limpia al
+// crear un campo nuevo (amortizado, sin tener que acordarse en ningun
+// sitio): se tira el popover cuyo dueño YA ESTUVO en el documento y ya no
+// esta. Lo de "ya estuvo" importa: un campo recien creado todavia no se
+// ha insertado, y sin esa marca se barreria a si mismo.
+function limpiarPopoversSueltos() {
+  document.querySelectorAll('.select-popover').forEach((pop) => {
+    const dueno = pop.duenoDelPopover;
+    if (!dueno || !pop.estuvoEnElDom) return;
+    if (!document.body.contains(dueno)) pop.remove();
+  });
+}
+
+// La marca de "este campo llegó a estar en pantalla" se pone un ciclo
+// DESPUÉS de crearlo, no dentro del barrido.
+//
+// Primer intento fallido, apuntado para no repetirlo: el barrido marcaba
+// al pasar por encima, así que un campo creado y destruido ENTRE dos
+// barridos no se marcaba nunca y se quedaba para siempre. Justo el caso
+// normal (abrir el modal, cerrarlo, abrirlo otra vez). Medido: seguía
+// creciendo de uno en uno.
+//
+// Un ciclo basta porque quien crea un campo lo mete en el DOM acto
+// seguido. Si alguien no lo metiera, se queda sin marcar y no se barre
+// nunca -- que es lo prudente: mejor dejar basura que tirar un campo vivo.
+function marcarPopoverCuandoSeUse(popover, root) {
+  setTimeout(() => { popover.estuvoEnElDom = document.body.contains(root); }, 0);
+}
+
+function createSelectField({ options = [], initialValue = '', placeholder = '', onChange, scrollToValue, searchable = false } = {}) {
   let value = initialValue;
   let opts = options;
+  let busqueda = '';
 
   const root = document.createElement('div');
   root.className = 'select-field';
@@ -79,7 +123,49 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
 
   const popover = document.createElement('div');
   popover.className = 'select-popover hidden';
+  popover.duenoDelPopover = root;
+  limpiarPopoversSueltos();
   document.body.appendChild(popover);
+  marcarPopoverCuandoSeUse(popover, root);
+
+  // El buscador y la lista son hermanos DENTRO del popover: renderOptions
+  // repinta solo la lista, asi que escribir no destruye el campo (ni
+  // pierde el foco ni el cursor a media palabra).
+  let campoBusqueda = null;
+  let listaOpciones = popover;
+  if (searchable) {
+    popover.classList.add('has-search');
+    const cabecera = document.createElement('div');
+    cabecera.className = 'select-popover-search';
+    campoBusqueda = document.createElement('input');
+    campoBusqueda.type = 'text';
+    campoBusqueda.placeholder = 'Buscar...';
+    campoBusqueda.autocomplete = 'off';
+    cabecera.appendChild(campoBusqueda);
+    popover.appendChild(cabecera);
+    listaOpciones = document.createElement('div');
+    listaOpciones.className = 'select-popover-list';
+    popover.appendChild(listaOpciones);
+    campoBusqueda.addEventListener('input', () => { busqueda = campoBusqueda.value; renderOptions(); });
+    // Enter dentro del buscador no debe enviar el formulario que haya
+    // alrededor (estos desplegables viven dentro de modales con <form>).
+    campoBusqueda.addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
+  }
+
+  // Sin tildes y en minusculas, para que "biceps" encuentre "Bíceps".
+  function normalizar(texto) {
+    return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+  function opcionesVisibles() {
+    if (!searchable || !busqueda.trim()) return opts;
+    // El .trim() importa: sin el, escribir solo espacios (el autocorrector
+    // del movil los mete con facilidad) buscaria " " y dejaria la lista
+    // vacia, como si no hubiera opciones.
+    const q = normalizar(busqueda).trim();
+    // `keywords` son palabras que NO se ven en la lista pero por las que
+    // si se puede buscar (el musculo de un ejercicio, por ejemplo).
+    return opts.filter((o) => normalizar(`${o.label} ${o.keywords || ''}`).includes(q));
+  }
 
   function findCurrent() {
     return opts.find((o) => String(o.value) === String(value));
@@ -98,8 +184,16 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
   }
 
   function renderOptions() {
-    popover.innerHTML = '';
-    opts.forEach((opt) => {
+    listaOpciones.innerHTML = '';
+    const visibles = opcionesVisibles();
+    if (visibles.length === 0) {
+      const vacio = document.createElement('p');
+      vacio.className = 'select-popover-empty';
+      vacio.textContent = 'Nada con ese nombre.';
+      listaOpciones.appendChild(vacio);
+      return;
+    }
+    visibles.forEach((opt) => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'select-option' + (String(opt.value) === String(value) ? ' active' : '');
@@ -108,11 +202,14 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
       item.addEventListener('click', () => {
         value = opt.value;
         renderTrigger();
-        renderOptions();
         popover.classList.add('hidden');
+        // El repintado va DESPUES de cerrar: si onChange rehace la lista
+        // (pasa en las filas de ejercicio), repintar antes seria trabajo
+        // tirado sobre un popover que ya no se ve.
+        renderOptions();
         if (onChange) onChange(value);
       });
-      popover.appendChild(item);
+      listaOpciones.appendChild(item);
     });
   }
 
@@ -122,6 +219,9 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
     closeAllPopovers(popover);
     popover.classList.toggle('hidden');
     if (willOpen) {
+      // Cada apertura empieza con la lista entera: un filtro heredado de
+      // la vez anterior parece que faltan ejercicios.
+      if (campoBusqueda) { busqueda = ''; campoBusqueda.value = ''; renderOptions(); }
       positionFixedPopover(trigger, popover, {
         width: Math.max(200, trigger.getBoundingClientRect().width),
       });
@@ -181,7 +281,10 @@ function createMultiSelectField({ options = [], initialValues = [], placeholder 
 
   const popover = document.createElement('div');
   popover.className = 'select-popover hidden';
+  popover.duenoDelPopover = root;
+  limpiarPopoversSueltos();
   document.body.appendChild(popover);
+  marcarPopoverCuandoSeUse(popover, root);
 
   function findLabel(value) {
     const opt = opts.find((o) => String(o.value) === String(value));
@@ -815,7 +918,44 @@ async function api(path, options = {}) {
 const WEEKDAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 const MONTH_ONLY_FORMATTER = new Intl.DateTimeFormat('es-ES', { month: 'long' });
 const DAY_HEADING_FORMATTER = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
-const TIME_FORMATTER = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' });
+// ---------------------------------------------------------------------
+// Reloj de 12 o de 24 horas: se sigue al SISTEMA (peticion de Koku, que
+// lo tiene en 24h: "hay gente que lo tiene en 12h, con am y pm, tenlo en
+// cuenta"). No es un ajuste de la app a proposito -- si tu telefono
+// esta en 12h es porque asi lo lees tu, y tener que repetirlo aqui
+// sobra.
+//
+// Como se sabe: se le pregunta a Intl por el idioma del DISPOSITIVO
+// (undefined = el suyo, no el nuestro) y se mira si su reloj es de 12.
+// El idioma de los textos sigue siendo es-ES; lo unico que se toma
+// prestado del sistema es esta decision.
+function systemUses12hClock() {
+  try {
+    return new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hour12 === true;
+  } catch (err) {
+    return false; // ante la duda, 24h
+  }
+}
+
+const USES_12H_CLOCK = systemUses12hClock();
+
+// hour12 se pasa EXPLICITO: sin el, 'es-ES' impone siempre 24h y daria
+// igual como tenga el telefono quien mira la pantalla. Con reloj de 12,
+// la hora va sin el cero delante ('numeric'), que es como se escribe:
+// "9:00 a. m.", no "09:00 a. m.".
+const TIME_FORMATTER = new Intl.DateTimeFormat('es-ES', {
+  hour: USES_12H_CLOCK ? 'numeric' : '2-digit',
+  minute: '2-digit',
+  hour12: USES_12H_CLOCK,
+});
+
+// Una hora en punto suelta (0-23) con el formato del sistema, para las
+// etiquetas de la columna de horas de la vista diaria.
+function formatHourLabel(hour) {
+  const d = new Date();
+  d.setHours(hour, 0, 0, 0);
+  return TIME_FORMATTER.format(d);
+}
 
 // "Agosto 2026" en vez del "agosto de 2026" que da Intl por defecto en
 // español (con "de" en medio, y en minuscula) — quitamos el "de" y
@@ -829,6 +969,62 @@ function startOfMonth(date) { return new Date(date.getFullYear(), date.getMonth(
 function endOfMonth(date) { return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59); }
 function toIsoDate(date) { return date.toISOString().slice(0, 10); }
 function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+
+// ---------------------------------------------------------------------
+// Eventos de VARIOS DIAS
+//
+// Un evento con fin en otro dia (un viaje del jueves 17 al domingo 20)
+// tiene que verse en LOS CUATRO dias, no solo el que empieza. Antes cada
+// vista filtraba por su cuenta con sameDay(inicio, dia), asi que el
+// evento desaparecia a partir del segundo dia -- lo vio Koku con un
+// "Viaje Mallorca". Estas dos funciones son ahora la unica fuente de
+// verdad de "¿este evento sale este dia?" y "¿como lo ocupa?", y las usan
+// todas las vistas (mes, año, tira de la semana y vista diaria).
+//
+// Ojo, hay dos mitades del arreglo y las dos hacen falta: esto es la de
+// pintar; la de PEDIR los datos esta en public/routes-local/events.js
+// (el filtro de rango pasa a ser de solape, si no el evento ni llega).
+// ---------------------------------------------------------------------
+
+// Principio y fin del dia local, para comparar sin liarse con las horas.
+function dayBounds(date) {
+  const inicio = new Date(date);
+  inicio.setHours(0, 0, 0, 0);
+  const fin = new Date(date);
+  fin.setHours(23, 59, 59, 999);
+  return { inicio, fin };
+}
+
+function eventOccursOnDay(ev, date) {
+  if (!ev || !ev.startAt) return false;
+  const start = new Date(ev.startAt);
+  // Sin fin, un evento vive solo en su dia (lo de siempre).
+  if (!ev.endAt) return sameDay(start, date);
+  const end = new Date(ev.endAt);
+  const { inicio, fin } = dayBounds(date);
+  return start <= fin && end >= inicio;
+}
+
+// Como ocupa el evento ESE dia concreto. Devuelve null si no lo toca.
+//  - 'unico'  : empieza y acaba el mismo dia (lo normal de siempre).
+//  - 'inicio' : empieza aqui y sigue mañana.
+//  - 'entero' : lo ocupa de punta a punta (ni empieza ni acaba aqui).
+//  - 'fin'    : viene de ayer y acaba aqui.
+// "entero" es el que Koku pidio tratar como TODO EL DIA: pintar un
+// bloque de 00:00 a 24:00 tapa la pantalla entera y no dice nada que no
+// diga una etiqueta arriba.
+function eventDaySpan(ev, date) {
+  if (!eventOccursOnDay(ev, date)) return null;
+  if (!ev.endAt) return 'unico';
+  const start = new Date(ev.startAt);
+  const end = new Date(ev.endAt);
+  const empiezaHoy = sameDay(start, date);
+  const acabaHoy = sameDay(end, date);
+  if (empiezaHoy && acabaHoy) return 'unico';
+  if (empiezaHoy) return 'inicio';
+  if (acabaHoy) return 'fin';
+  return 'entero';
+}
 
 // Como toIsoDate() pasa por toISOString() (que es UTC), un dia a horas
 // cercanas a medianoche podria "saltar" al dia de al lado segun la zona
@@ -909,7 +1105,7 @@ async function loadYearViewEvents(year) {
 function isGestureBlockedByModal() {
   if (document.querySelector('.modal:not(.hidden)')) return true;
   const fullscreenIds = [
-    'extensions-view', 'gym-view', 'finanzas-view',
+    'extensions-view', 'gym-view', 'gym-live-view', 'finanzas-view',
     'entretenimiento-view', 'note-editor-view',
   ];
   return fullscreenIds.some((id) => {
@@ -923,16 +1119,49 @@ function enterMonthFromYear(month) {
   setCalendarViewMode('month');
 }
 
-const CALENDAR_VIEW_ANIMATION_MS = 320;
+// Interruptor de animaciones (Configuracion > Este dispositivo, por
+// dispositivo, encendido por defecto): con el apagado se salta TODO el
+// movimiento de la app -- no solo el del calendario. Pedido de Koku
+// para no gastar recursos cuando no se quieren.
+//
+// Funciona en DOS mitades, porque hay dos clases de animacion:
+//  1. Las de CSS (@keyframes y transition:) -- las apaga una unica
+//     regla global de styles.css que se activa con
+//     data-animations="off" en el <html>. Al ser una sola regla, una
+//     animacion NUEVA que se añada a la hoja de estilos el dia de
+//     mañana ya nace obedeciendo al interruptor sin tocar nada.
+//  2. Las que dispara el JavaScript a mano (poner una clase de
+//     animacion, esperar un timeout, etc.) -- esas preguntan por
+//     areAnimationsEnabled() antes de hacer nada.
+function areAnimationsEnabled() {
+  return localStorage.getItem('animationsEnabled') !== 'false';
+}
 
-function playCalendarViewAnimation(el) {
-  el.classList.remove('calendar-view-entering');
-  // Forzar reflow para que la animacion se pueda relanzar si el modo se
-  // cambia varias veces seguidas muy rapido (si no, quitar y volver a
-  // poner la misma clase en el mismo "tick" no reinicia la animacion).
+// Pone/quita el atributo del <html> que dispara la regla global. El
+// script de arranque de index.html ya lo hace antes de pintar (para que
+// no se vea un trozo de animacion al abrir); esta funcion es la que usa
+// el interruptor de Configuracion para cambiarlo en caliente.
+function applyAnimationsPreference() {
+  if (areAnimationsEnabled()) delete document.documentElement.dataset.animations;
+  else document.documentElement.dataset.animations = 'off';
+}
+
+// Animacion de zoom al cambiar de NIVEL del calendario (año <-> mes <->
+// dia) -- distinta de la de deslizar (playMobileSwipeTransition), que es
+// para moverse DENTRO del mismo nivel. "in" = bajar de nivel (meterse en
+// un mes/dia: la vista nueva crece desde pequeña, como acercandose);
+// "out" = subir de nivel (la vista nueva encoge desde grande, como
+// alejandose). BANCO DE PRUEBAS: Koku quiere verlo en el movil antes de
+// darlo por bueno -- es posible que se retire (ver CLAUDE.md).
+function playMobileZoomTransition(el, direction) {
+  if (!el || !areAnimationsEnabled()) return;
+  const cls = `mobile-zoom-anim-${direction}`;
+  el.classList.remove('mobile-zoom-anim-in', 'mobile-zoom-anim-out');
   void el.offsetWidth;
-  el.classList.add('calendar-view-entering');
-  setTimeout(() => el.classList.remove('calendar-view-entering'), CALENDAR_VIEW_ANIMATION_MS);
+  el.classList.add(cls);
+  const cleanup = () => el.classList.remove(cls);
+  el.addEventListener('animationend', cleanup, { once: true });
+  setTimeout(cleanup, 350);
 }
 
 async function setCalendarViewMode(mode) {
@@ -942,6 +1171,11 @@ async function setCalendarViewMode(mode) {
   else await loadMonth();
   refreshMobileCalendarModeVisibility();
   refreshMobileCalendarNavLabel();
+  // Zoom segun el sentido del cambio: al año se SUBE de nivel (out), al
+  // mes se BAJA desde el año (in). La vista diaria tiene sus propias
+  // llamadas en enterMobileDayView()/exitMobileDayView().
+  if (mode === 'year') playMobileZoomTransition(document.getElementById('mobile-calendar-year-grid'), 'out');
+  else playMobileZoomTransition(document.getElementById('mobile-calendar-month-grid'), 'in');
 }
 
 // ---------------------------------------------------------------------
@@ -954,11 +1188,26 @@ async function setCalendarViewMode(mode) {
 // lapiz con un unico mecanismo, sin depender de eventos "touch"
 // especificos). Solo detecta la DIRECCION al soltar, sin arrastre en
 // vivo -- suficiente para cambiar de mes/año/dia, no hace falta mas.
-function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preserveVerticalScroll = false } = {}) {
+// centerOnly: los callbacks HORIZONTALES (onLeft/onRight) solo se
+// disparan si el dedo empezo en el carril CENTRAL de la pantalla. Lo
+// pidio Koku para la vista diaria: alli deslizar de lado cambia de dia,
+// pero desde los BORDES tiene que cambiar de pestaña (ver el bloque
+// "GESTOS DE NAVEGACION" al final de este archivo). Los verticales no
+// se tocan: no compiten con nada.
+function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preserveVerticalScroll = false, centerOnly = false } = {}) {
   let startX = null;
   let startY = null;
   el.addEventListener('pointerdown', (e) => {
     if (isGestureBlockedByModal()) return;
+    // Un SEGUNDO dedo mientras habia un swipe empezado = es un pellizco
+    // (ver attachPinch), no un deslizamiento -- se cancela el swipe para
+    // que al levantar los dedos no se dispare un cambio de mes/dia por
+    // accidente ademas del cambio de nivel.
+    if (startX !== null) {
+      startX = null;
+      startY = null;
+      return;
+    }
     startX = e.clientX;
     startY = e.clientY;
     // Sin esto, si el dedo se sale del contenedor durante el arrastre (muy
@@ -966,17 +1215,24 @@ function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preser
     // "pointerup" llega al elemento que haya debajo del dedo en ESE
     // momento, no a este -- y el gesto se queda "colgado" sin completarse.
     // setPointerCapture fuerza a que TODO el gesto (incluido el pointerup)
-    // siga llegando aqui pase lo que pase.
-    el.setPointerCapture(e.pointerId);
+    // siga llegando aqui pase lo que pase. (En try/catch: un pointerId
+    // que el navegador ya no reconoce como activo lanza excepcion, y eso
+    // no debe tumbar el resto del gesto.)
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* sin capture, el gesto normal sigue valiendo */ }
   });
   el.addEventListener('pointerup', (e) => {
     if (startX === null) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
+    const inicioX = startX;
     startX = null;
     startY = null;
     if (Math.abs(dx) > Math.abs(dy)) {
       if (Math.abs(dx) < threshold) return;
+      // Carril lateral con centerOnly: el gesto no es para esta vista,
+      // es para cambiar de pestaña -- se deja pasar sin hacer nada (de
+      // eso ya se encarga el detector global de navegacion).
+      if (centerOnly && isMobileEdgeZone(inicioX)) return;
       if (dx < 0 && onLeft) onLeft();
       else if (dx > 0 && onRight) onRight();
     } else {
@@ -1015,6 +1271,60 @@ function attachSwipe(el, { onUp, onDown, onLeft, onRight, threshold = 40, preser
     } else if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
       e.preventDefault();
     }
+  }, { passive: false });
+}
+
+// Gesto de PELLIZCO (dos dedos juntandose) para SUBIR de nivel en el
+// calendario: dia -> mes, mes -> año. Solo hacia arriba a proposito
+// (decision de Koku): el pellizco inverso para bajar exigiria saber
+// DONDE se hace zoom (que mes, que dia), y bajar ya es solo tocar el
+// mes/dia -- no compensa la complejidad. Mismo mecanismo de Pointer
+// Events que attachSwipe (y que el zoom del mapa de Viajes): se apuntan
+// los punteros activos y, con dos a la vez, se compara la distancia
+// entre ellos con la del principio -- si encoge por debajo del umbral,
+// se dispara UNA vez por gesto. attachSwipe ya se cancela solo en
+// cuanto detecta el segundo dedo (ver su pointerdown), asi que un
+// pellizco nunca dispara ademas un cambio de mes/dia por accidente.
+function attachPinch(el, onPinchIn) {
+  const punteros = new Map();
+  let distanciaInicial = null;
+  let disparado = false;
+  const medir = () => {
+    const pts = [...punteros.values()];
+    return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  };
+  el.addEventListener('pointerdown', (e) => {
+    if (isGestureBlockedByModal()) return;
+    punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (punteros.size === 2) {
+      distanciaInicial = medir();
+      disparado = false;
+    }
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!punteros.has(e.pointerId)) return;
+    punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (punteros.size === 2 && distanciaInicial && !disparado) {
+      // 0.72: los dedos tienen que acercarse de verdad (a menos de 3/4
+      // de la distancia inicial) -- un roce accidental de dos dedos no
+      // llega a esto.
+      if (medir() < distanciaInicial * 0.72) {
+        disparado = true;
+        onPinchIn();
+      }
+    }
+  });
+  const soltar = (e) => {
+    punteros.delete(e.pointerId);
+    if (punteros.size < 2) distanciaInicial = null;
+  };
+  el.addEventListener('pointerup', soltar);
+  el.addEventListener('pointercancel', soltar);
+  // Con dos dedos en pantalla, que el navegador no intente su propio
+  // zoom/scroll nativo mientras dura el pellizco (mismo refuerzo de
+  // touchmove sin passive que ya usa attachSwipe).
+  el.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2) e.preventDefault();
   }, { passive: false });
 }
 
@@ -1102,11 +1412,26 @@ function getMobileCalendarMonthMode() {
 // "De que hora a que hora" para el modo Listado (mes) -- no existia un
 // formateador de RANGO en el proyecto, el resto de sitios solo muestran
 // la hora de inicio.
-function formatMobileEventTimeRange(ev) {
+// La hora que se ensena en un listado. Con "date" se sabe EN QUE DIA se
+// esta pintando, que hace falta para los eventos de varios dias: de un
+// viaje del jueves 20:00 al domingo 14:00, poner "20:00-14:00" los
+// cuatro dias no dice nada. Asi se ve de un vistazo si el evento
+// empieza, sigue o acaba ese dia:
+//   jueves  -> "20:00 →"   (empieza y sigue)
+//   viernes -> "Todo el día"
+//   sabado  -> "Todo el día"
+//   domingo -> "→ 14:00"   (viene de antes y acaba)
+// Sin "date" se comporta como siempre (rango completo), que es lo que
+// vale para una lista que no es de un dia concreto.
+function formatMobileEventTimeRange(ev, date) {
   if (ev.allDay) return 'Todo el día';
   const start = TIME_FORMATTER.format(new Date(ev.startAt));
   if (!ev.endAt) return start;
   const end = TIME_FORMATTER.format(new Date(ev.endAt));
+  const tramo = date ? eventDaySpan(ev, date) : 'unico';
+  if (tramo === 'entero') return 'Todo el día';
+  if (tramo === 'inicio') return `${start} →`;
+  if (tramo === 'fin') return `→ ${end}`;
   return end === start ? start : `${start}–${end}`;
 }
 
@@ -1138,7 +1463,7 @@ function renderMobileCalendarMonthGrid() {
     circle.textContent = cellDate.getDate();
     cell.appendChild(circle);
 
-    const dayEvents = state.events.filter((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate));
+    const dayEvents = state.events.filter((ev) => eventOccursOnDay(ev, cellDate));
     const groups = getDistinctGroupsForDay(dayEvents);
 
     if (groups.length > 0) {
@@ -1225,7 +1550,7 @@ async function renderMobileCalendarMonthList(date) {
     title.textContent = ev.title;
     const time = document.createElement('div');
     time.className = 'mobile-calendar-month-list-time';
-    time.textContent = formatMobileEventTimeRange(ev);
+    time.textContent = formatMobileEventTimeRange(ev, state.mobileCalendarListDate);
     row.append(bar, title, time);
     row.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
     container.appendChild(row);
@@ -1266,7 +1591,7 @@ function renderMobileCalendarYearGrid() {
       }
       cell.textContent = cellDate.getDate();
       if (sameDay(cellDate, today)) cell.classList.add('today');
-      if (yearViewEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), cellDate))) {
+      if (yearViewEvents.some((ev) => eventOccursOnDay(ev, cellDate))) {
         cell.classList.add('has-content');
       }
       grid.appendChild(cell);
@@ -1371,14 +1696,53 @@ document.getElementById('mobile-calendar-density-field').appendChild(mobileCalen
 // async y no se esperan aqui tampoco) -- es puramente cosmetico, sin
 // bloquear nada.
 function playMobileSwipeTransition(el, direction) {
-  if (!el) return;
+  if (!el || !areAnimationsEnabled()) return;
   const cls = `mobile-swipe-anim-${direction}`;
   el.classList.remove('mobile-swipe-anim-up', 'mobile-swipe-anim-down', 'mobile-swipe-anim-left', 'mobile-swipe-anim-right');
+  // Si esta misma capa estaba a mitad de IRSE y ahora vuelve a entrar
+  // (has deslizado dos veces seguidas muy rapido), se cancela lo suyo:
+  // si no, la limpieza de la salida la volveria a ocultar a media
+  // entrada. Ver playMobileSwipeOut.
+  el.classList.remove('mobile-swipe-out-left', 'mobile-swipe-out-right');
+  delete el.dataset.reocultarTrasSalir;
   void el.offsetWidth;
   el.classList.add(cls);
   const cleanup = () => el.classList.remove(cls);
   el.addEventListener('animationend', cleanup, { once: true });
   setTimeout(cleanup, 300);
+}
+
+// La otra mitad del carrusel: la pantalla que se VA, viajando al mismo
+// tiempo que entra la nueva.
+//
+// El detalle que lo complica: para cuando se llama a esto, la capa que
+// se va YA se ha ocultado (los botones de cerrar le ponen .hidden). Hay
+// que volver a enseñarla los 280ms del viaje y ocultarla otra vez al
+// acabar. Se hace quitando y reponiendo la clase .hidden en vez de
+// forzar un display por CSS, porque cada capa tiene el suyo (las
+// pantallas completas son flex, no block) y forzarlo las descuadraria.
+function playMobileSwipeOut(el, direction) {
+  if (!el || !areAnimationsEnabled()) return;
+  const cls = `mobile-swipe-out-${direction}`;
+  const estabaOculta = el.classList.contains('hidden');
+  if (estabaOculta) {
+    el.classList.remove('hidden');
+    el.dataset.reocultarTrasSalir = '1';
+  }
+  el.classList.remove('mobile-swipe-out-left', 'mobile-swipe-out-right');
+  void el.offsetWidth;
+  el.classList.add(cls);
+  const cleanup = () => {
+    el.classList.remove(cls);
+    // Solo se vuelve a ocultar si nadie ha cancelado la salida por el
+    // camino (ver playMobileSwipeTransition).
+    if (el.dataset.reocultarTrasSalir === '1') {
+      delete el.dataset.reocultarTrasSalir;
+      el.classList.add('hidden');
+    }
+  };
+  el.addEventListener('animationend', cleanup, { once: true });
+  setTimeout(cleanup, 400);
 }
 
 attachSwipe(document.getElementById('mobile-calendar-month-grid'), {
@@ -1406,6 +1770,12 @@ attachSwipe(document.getElementById('mobile-calendar-year-grid'), {
     refreshMobileCalendarNavLabel();
     playMobileSwipeTransition(document.getElementById('mobile-calendar-year-grid'), 'down');
   },
+});
+
+// Pellizco = subir de nivel: en el mes lleva al año. (En el año no hay
+// nada por encima, ahi no se engancha nada.)
+attachPinch(document.getElementById('mobile-calendar-month-grid'), () => {
+  if (calendarViewMode === 'month') setCalendarViewMode('year');
 });
 
 // ---------------------------------------------------------------------
@@ -1473,7 +1843,7 @@ async function renderMobileWeekStrip(viewingDate) {
 
     const dot = document.createElement('div');
     dot.className = 'week-strip-day-dot';
-    if (!weekEvents.some((ev) => ev.startAt && sameDay(new Date(ev.startAt), d))) dot.classList.add('is-empty');
+    if (!weekEvents.some((ev) => eventOccursOnDay(ev, d))) dot.classList.add('is-empty');
 
     cell.append(label, num, dot);
     cell.addEventListener('click', () => showMobileDay(d, { scrollToNow: true }));
@@ -1555,13 +1925,44 @@ async function renderMobileHoursView(date) {
   allDayRow.innerHTML = '';
   grid.innerHTML = '';
 
-  const allDayEvents = dayEvents.filter((ev) => ev.allDay);
+  // Arriba, en la fila de "todo el dia", van dos cosas: los eventos
+  // marcados como de todo el dia, y los de VARIOS DIAS en los dias que
+  // ocupan de punta a punta (el viernes y el sabado de un viaje que va
+  // del jueves al domingo). Peticion de Koku: "si ocupa el dia entero,
+  // que se marque como todo el dia esos dias, para no tapar toda la
+  // pantalla" -- y tiene razon, un bloque de 00:00 a 24:00 llena la
+  // vista sin decir nada que no diga ya esta etiqueta.
+  // Arriba van los que ocupan el dia entero Y TAMBIEN el ULTIMO dia de
+  // un evento largo (decision de Koku sobre el domingo de un viaje que
+  // empieza el jueves: "me parece bien, que aparezca en la seccion de
+  // dia entero"). Un bloque de medianoche a las 14:00 se come casi toda
+  // la pantalla para decir algo que la etiqueta dice mejor.
+  //
+  // OJO, esto es SOLO como se pinta: el evento sigue guardado con su
+  // hora de fin de verdad, no se convierte en "todo el dia" (lo pidio
+  // expresamente: "que se quede guardado que la hora es la que aparece
+  // puesta"). Por eso la etiqueta enseña "→ 14:00" y no un simple
+  // "Todo el dia": la hora sigue estando y se ve.
+  //
+  // El PRIMER dia se queda como bloque a proposito: empezar a las 20:00
+  // son cuatro horas de alto, no molesta, y ver donde arranca dentro
+  // del dia si aporta.
+  const allDayEvents = dayEvents.filter((ev) => {
+    if (ev.allDay) return true;
+    const tramo = eventDaySpan(ev, date);
+    return tramo === 'entero' || tramo === 'fin';
+  });
   allDayRow.classList.toggle('hidden', allDayEvents.length === 0);
   allDayEvents.forEach((ev) => {
     const chip = document.createElement('div');
     chip.className = 'mobile-day-allday-chip';
     chip.style.backgroundColor = ev.isTask ? (ev.done ? taskCompletedColor(ev) : taskPendingColor(ev)) : (ev.groupColor || DEFAULT_EVENT_COLOR);
-    chip.textContent = ev.title;
+    // En el ultimo dia se añade la hora a la que acaba; en el resto, el
+    // titulo a secas (que ya se entiende como "todo el dia").
+    const tramo = eventDaySpan(ev, date);
+    chip.textContent = tramo === 'fin'
+      ? `${ev.title} · ${formatMobileEventTimeRange(ev, date)}`
+      : ev.title;
     chip.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
     allDayRow.appendChild(chip);
   });
@@ -1572,16 +1973,27 @@ async function renderMobileHoursView(date) {
     row.style.top = `${h * 60}px`;
     const label = document.createElement('div');
     label.className = 'mobile-hour-label';
-    label.textContent = `${String(h).padStart(2, '0')}:00`;
+    label.textContent = formatHourLabel(h);
     row.appendChild(label);
     grid.appendChild(row);
   }
 
   const timed = dayEvents
-    .filter((ev) => !ev.allDay && ev.startAt)
+    // Fuera los de todo el dia y los que ya se han puesto arriba por
+    // ocupar este dia entero (ver allDayEvents).
+    // Fuera los que ya se han puesto arriba (ver allDayEvents): los de
+    // todo el dia, los que ocupan este dia entero y el ultimo dia de un
+    // evento largo.
+    .filter((ev) => !ev.allDay && ev.startAt && !['entero', 'fin'].includes(eventDaySpan(ev, date)))
     .map((ev) => {
+      // El bloque se RECORTA a este dia: de un viaje que empieza el
+      // jueves a las 20:00 y acaba el domingo a las 14:00, el jueves se
+      // pinta de 20:00 a medianoche y el domingo de medianoche a las
+      // 14:00. Antes solo se recortaba el final; el principio daba por
+      // hecho que el evento empezaba hoy, asi que en el ultimo dia
+      // habria salido a la hora de INICIO del primero.
       const start = new Date(ev.startAt);
-      const startMin = start.getHours() * 60 + start.getMinutes();
+      const startMin = sameDay(start, date) ? start.getHours() * 60 + start.getMinutes() : 0;
       let endMin;
       if (ev.endAt) {
         const end = new Date(ev.endAt);
@@ -1657,7 +2069,7 @@ function disconnectMobileDayListadoObserver() {
   mobileDayListadoPending.clear();
 }
 
-function buildMobileListadoRow(ev) {
+function buildMobileListadoRow(ev, date) {
   const row = document.createElement('div');
   row.className = 'mobile-calendar-month-list-row';
   const bar = document.createElement('div');
@@ -1668,7 +2080,7 @@ function buildMobileListadoRow(ev) {
   title.textContent = ev.title;
   const time = document.createElement('div');
   time.className = 'mobile-calendar-month-list-time';
-  time.textContent = formatMobileEventTimeRange(ev);
+  time.textContent = formatMobileEventTimeRange(ev, date);
   row.append(bar, title, time);
   row.addEventListener('click', () => (ev.isTask ? openTaskModal(ev) : openEventModal(ev)));
   return row;
@@ -1682,9 +2094,22 @@ async function loadMobileListadoDays() {
   const byDay = new Map();
   events.forEach((ev) => {
     if (!ev.startAt) return; // sin fecha no aparece aqui, igual que en el resto del calendario
-    const key = toDateKey(new Date(ev.startAt));
-    if (!byDay.has(key)) byDay.set(key, []);
-    byDay.get(key).push(ev);
+    // Un evento de varios dias se apunta en TODOS los que ocupa, no solo
+    // en el que empieza -- misma correccion que en el resto de vistas
+    // (ver eventOccursOnDay). El tope de 366 dias es una red de
+    // seguridad boba: si alguna vez se cuela un evento con un fin
+    // absurdo (un año 3000 por un dedazo), que no se coma la memoria
+    // generando un dia por cada jornada hasta entonces.
+    const inicio = new Date(ev.startAt);
+    const fin = ev.endAt ? new Date(ev.endAt) : inicio;
+    const dia = new Date(inicio);
+    dia.setHours(0, 0, 0, 0);
+    for (let n = 0; n <= 366 && dia <= fin; n++) {
+      const key = toDateKey(dia);
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key).push(ev);
+      dia.setDate(dia.getDate() + 1);
+    }
   });
   mobileListadoDays = [...byDay.entries()]
     .map(([key, evs]) => ({
@@ -1713,7 +2138,7 @@ function renderMobileListadoWindow() {
     heading.className = 'mobile-day-listado-block-heading';
     heading.textContent = formatMobileListadoBlockHeading(day.date);
     block.appendChild(heading);
-    day.events.forEach((ev) => block.appendChild(buildMobileListadoRow(ev)));
+    day.events.forEach((ev) => block.appendChild(buildMobileListadoRow(ev, day.date)));
     content.appendChild(block);
   });
 }
@@ -2000,6 +2425,8 @@ function enterMobileDayView(date, { targetMinutes } = {}) {
   } else {
     showMobileDay(date, { scrollToNow: true, targetMinutes });
   }
+  // Bajar de nivel (meterse en el dia): zoom de entrada.
+  playMobileZoomTransition(document.getElementById('mobile-calendar-day-view'), 'in');
 }
 
 function exitMobileDayView() {
@@ -2009,6 +2436,8 @@ function exitMobileDayView() {
   document.getElementById('mobile-calendar-month-toolbar').classList.remove('hidden');
   document.querySelector('.mobile-calendar-view').classList.remove('hidden');
   document.body.classList.remove('mobile-day-scroll-lock');
+  // Subir de nivel (dia -> mes): zoom de salida sobre la vista que vuelve.
+  playMobileZoomTransition(document.querySelector('.mobile-calendar-view'), 'out');
 }
 
 document.getElementById('btn-mobile-day-back-label').addEventListener('click', exitMobileDayView);
@@ -2034,8 +2463,14 @@ function playMobileDaySwipeAnimation(direction) {
   playMobileSwipeTransition(document.getElementById('mobile-day-hours-view'), direction);
   playMobileSwipeTransition(document.getElementById('mobile-day-listado-view'), direction);
 }
+// Pellizco en la vista diaria = subir al mes.
+attachPinch(document.getElementById('mobile-calendar-day-view'), exitMobileDayView);
 attachSwipe(document.getElementById('mobile-calendar-day-view'), {
   preserveVerticalScroll: true,
+  // Solo cambia de dia si el dedo empieza por el CENTRO: desde los
+  // bordes, el mismo gesto cambia de pestaña de la barra de abajo
+  // (peticion de Koku -- ver "GESTOS DE NAVEGACION" al final).
+  centerOnly: true,
   onLeft: () => {
     const d = state.mobileCalendarDayDate;
     showMobileDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1), { scrollToNow: true });
@@ -2059,15 +2494,27 @@ refreshMobileCalendarModeVisibility();
 // ---------------------------------------------------------------------
 // Modal de evento (crear / editar / borrar)
 // ---------------------------------------------------------------------
+// Con cuanta antelacion avisar. Los cuatro ultimos (de 2 dias a 2
+// semanas) los pidio Koku para lo que se prepara con tiempo: un viaje,
+// una renovacion, un cumpleaños. El tope son 2 semanas porque el mismo
+// lo puso ahi ("hasta 2 semanas antes, eso es suficiente").
+//
+// El valor son MINUTOS y viaja tal cual hasta la base y hasta el aviso
+// del sistema; no hay ningun tope escondido en medio, asi que anadir un
+// valor nuevo a esta lista es todo lo que hace falta.
 const REMINDER_OPTIONS = [
   { value: '', label: 'Sin recordatorio' },
   { value: '0', label: 'En el momento' },
   { value: '10', label: '10 minutos antes' },
   { value: '30', label: '30 minutos antes' },
   { value: '60', label: '1 hora antes' },
-  { value: '1440', label: '1 dia antes' },
+  { value: '1440', label: '1 día antes' },
+  { value: '2880', label: '2 días antes' },
+  { value: '4320', label: '3 días antes' },
+  { value: '10080', label: '1 semana antes' },
+  { value: '20160', label: '2 semanas antes' },
 ];
-const eventReminderField = createSelectField({ options: REMINDER_OPTIONS, initialValue: '' });
+const eventReminderField = createSelectField({ options: REMINDER_OPTIONS, initialValue: '0' });
 document.getElementById('event-reminder-field').appendChild(eventReminderField.element);
 
 const eventGroupField = createSelectField({ options: [{ value: '', label: 'Sin grupo' }], initialValue: '' });
@@ -2095,24 +2542,67 @@ function toTimeInputValue(date) {
 // menos de 3 digitos todavia no hay suficiente informacion para saber
 // si es valido (se sigue escribiendo la hora), asi que no se marca
 // error todavia.
-function parseTimeFieldDigits(digits) {
+// Interpreta los digitos que se van tecleando en un campo de hora. Los
+// dos ultimos son SIEMPRE los minutos y lo de delante la hora, asi que
+// "930" es 9:30 y "0930" tambien.
+//
+// pm/am: en reloj de 12 horas el campo solo acepta 1-12, y quien decide
+// si es de la mañana o de la tarde es el selector de al lado (peticion
+// de Koku: "que haya un selector de am y pm, asi mantenemos el bloque
+// con entrada de numeros unicamente"). El "value" que sale de aqui es
+// SIEMPRE de 24 horas -- el resto de la app trabaja solo con eso, el
+// formato de 12 vive unicamente en lo que se ve.
+function parseTimeFieldDigits(digits, { doce = false, pm = false } = {}) {
   if (digits.length === 0) return { formatted: '', complete: false, valid: false, value: null };
   const formatted = digits.length > 2 ? `${digits.slice(0, digits.length - 2)}:${digits.slice(-2)}` : digits;
   if (digits.length < 3) return { formatted, complete: false, valid: false, value: null };
   const h = Number(digits.slice(0, digits.length - 2));
   const mi = Number(digits.slice(-2));
-  const ok = h <= 23 && mi <= 59;
+  const ok = doce ? (h >= 1 && h <= 12 && mi <= 59) : (h <= 23 && mi <= 59);
+  if (!ok) return { formatted, complete: true, valid: false, value: null };
+  const h24 = doce ? hour12To24(h, pm) : h;
   return {
     formatted,
     complete: true,
-    valid: ok,
-    value: ok ? `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}` : null,
+    valid: true,
+    value: `${String(h24).padStart(2, '0')}:${String(mi).padStart(2, '0')}`,
   };
 }
 
+// Las dos conversiones entre el reloj de 24 y el de 12. Los unicos casos
+// que se escapan de "sumar o restar 12" son las 12 de la noche (0h se
+// escribe 12 AM) y las 12 del mediodia (12h se queda en 12 PM).
+function hour12To24(h12, pm) {
+  if (pm) return h12 === 12 ? 12 : h12 + 12;
+  return h12 === 12 ? 0 : h12;
+}
+
+function hour24To12(h24) {
+  const pm = h24 >= 12;
+  let h12 = h24 % 12;
+  if (h12 === 0) h12 = 12;
+  return { h12, pm };
+}
+
+// Campo de hora: se escribe con NUMEROS y nada mas (sin desplegables de
+// hora/minuto ni el selector nativo, que no sigue el tema -- ver la
+// regla de CLAUDE.md). Los dos ultimos digitos son los minutos, asi que
+// "930" ya es 9:30.
+//
+// Con el telefono en reloj de 12 horas aparece ademas un selector AM/PM
+// al lado (peticion de Koku: "si es 12h, que haya un selector de am y
+// pm, asi mantenemos el bloque con entrada de numeros unicamente"). El
+// campo pasa a aceptar 1-12 y de la mañana/tarde se encarga el selector.
+//
+// IMPORTANTE: hacia fuera este componente habla SIEMPRE en 24 horas
+// ("HH:MM"), tanto en getValue() como en setValue(). El reloj de 12 vive
+// solo en lo que se ve, asi que nada del resto de la app (guardar,
+// comparar, combineDateAndTime...) tuvo que cambiar.
 function createTimeField({ initialValue = '09:00' } = {}) {
-  let value = initialValue; // ultimo valor VALIDO conocido
+  let value = initialValue; // ultimo valor VALIDO conocido, en 24h
   let valid = true;
+  const doce = USES_12H_CLOCK;
+  let pm = false;
 
   const root = document.createElement('div');
   root.className = 'time-field';
@@ -2120,21 +2610,45 @@ function createTimeField({ initialValue = '09:00' } = {}) {
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'time-field-input';
-  input.placeholder = 'HH:MM';
+  input.placeholder = doce ? 'H:MM' : 'HH:MM';
   input.inputMode = 'numeric';
-  input.value = value;
 
-  // Autocompleta el ":" MIENTRAS SE ESCRIBE (no solo al perder el foco)
-  // y valida en tiempo real -- antes solo se normalizaba en "change"
-  // (al perder el foco), asi que si se guardaba con Ctrl+Intro con el
-  // foco todavia en este campo, form.requestSubmit() no dispara "change"
-  // por si solo y lo escrito se perdia en silencio, mandandose el valor
-  // VIEJO sin ningun aviso.
-  input.addEventListener('input', () => {
+  // El selector AM/PM: dos botones tipo interruptor. Solo existe en
+  // reloj de 12 -- en 24 horas no pinta nada y ni se crea.
+  const ampm = document.createElement('div');
+  ampm.className = 'time-field-ampm';
+  const btnAm = document.createElement('button');
+  const btnPm = document.createElement('button');
+  [btnAm, btnPm].forEach((b) => { b.type = 'button'; b.className = 'time-field-ampm-btn'; });
+  btnAm.textContent = 'AM';
+  btnPm.textContent = 'PM';
+
+  function pintarAmPm() {
+    btnAm.classList.toggle('is-active', !pm);
+    btnPm.classList.toggle('is-active', pm);
+    btnAm.setAttribute('aria-pressed', String(!pm));
+    btnPm.setAttribute('aria-pressed', String(pm));
+  }
+
+  // Lo que se ENSEÑA en el input a partir del valor de 24h guardado.
+  function pintarInput() {
+    if (!doce) {
+      input.value = value;
+      return;
+    }
+    const [h24, mi] = value.split(':').map(Number);
+    const { h12, pm: esPm } = hour24To12(h24);
+    pm = esPm;
+    input.value = `${h12}:${String(mi).padStart(2, '0')}`;
+    pintarAmPm();
+  }
+
+  // Relee lo escrito y actualiza el valor guardado. Se llama al teclear
+  // y tambien al tocar AM/PM, porque cambiar de mitad del dia cambia la
+  // hora real sin que se haya tocado ni un numero.
+  function releer() {
     const digits = input.value.replace(/\D/g, '').slice(0, 4);
-    const result = parseTimeFieldDigits(digits);
-    input.value = result.formatted;
-    input.setSelectionRange(input.value.length, input.value.length);
+    const result = parseTimeFieldDigits(digits, { doce, pm });
     if (result.complete && result.valid) {
       value = result.value;
       valid = true;
@@ -2144,6 +2658,19 @@ function createTimeField({ initialValue = '09:00' } = {}) {
       // hasta que se complete/corrija, para no guardar algo a medias.
       valid = false;
     }
+    return result;
+  }
+
+  // Autocompleta el ":" MIENTRAS SE ESCRIBE (no solo al perder el foco)
+  // y valida en tiempo real -- antes solo se normalizaba en "change"
+  // (al perder el foco), asi que si se guardaba con Ctrl+Intro con el
+  // foco todavia en este campo, form.requestSubmit() no dispara "change"
+  // por si solo y lo escrito se perdia en silencio, mandandose el valor
+  // VIEJO sin ningun aviso.
+  input.addEventListener('input', () => {
+    const result = releer();
+    input.value = result.formatted;
+    input.setSelectionRange(input.value.length, input.value.length);
     // Solo se pinta en rojo cuando ya hay info de sobra para saber que
     // esta MAL (3-4 digitos fuera de rango) -- con 0-2 digitos se sigue
     // escribiendo, no es un error todavia.
@@ -2151,8 +2678,7 @@ function createTimeField({ initialValue = '09:00' } = {}) {
   });
 
   input.addEventListener('blur', () => {
-    const digits = input.value.replace(/\D/g, '').slice(0, 4);
-    const result = parseTimeFieldDigits(digits);
+    const result = releer();
     if (!result.complete || !result.valid) {
       // Al perder el foco con algo a medias o invalido, se marca en
       // rojo de verdad (mientras se escribe 1-2 digitos no se marca,
@@ -2163,19 +2689,26 @@ function createTimeField({ initialValue = '09:00' } = {}) {
   });
 
   root.appendChild(input);
+  if (doce) {
+    btnAm.addEventListener('click', () => { pm = false; pintarAmPm(); releer(); });
+    btnPm.addEventListener('click', () => { pm = true; pintarAmPm(); releer(); });
+    ampm.append(btnAm, btnPm);
+    root.appendChild(ampm);
+  }
+  pintarInput();
 
   return {
     element: root,
-    // Devuelve el ultimo valor VALIDO conocido, o null si el campo esta
-    // ahora mismo en un estado invalido/incompleto -- nunca un valor
-    // inventado o desactualizado.
+    // Devuelve el ultimo valor VALIDO conocido (en 24h), o null si el
+    // campo esta ahora mismo en un estado invalido/incompleto -- nunca
+    // un valor inventado o desactualizado.
     getValue: () => (valid ? value : null),
     isValid: () => valid,
     setValue: (v) => {
       value = v;
       valid = true;
-      input.value = v;
       input.classList.remove('is-invalid');
+      pintarInput();
     },
   };
 }
@@ -2194,12 +2727,18 @@ function combineDateAndTime(date, timeStr) {
 // :30 que de :00 de la hora siguiente), 6:50 -> 7:00, 6:00 se queda en
 // 6:00. Se usa para sugerir la hora de inicio de un evento nuevo en vez
 // de dejar "las 6:37" tal cual.
-// Hora en punto de AHORA, hacia abajo: a las 17:17 propone 17:00 (y con
-// la hora de fin, que ya suma una hora, queda 17:00-18:00). Antes
-// redondeaba a la media hora mas cercana, asi que a las 17:17 proponia
-// 17:30-18:30 -- Koku pidio explicitamente lo primero.
-function roundDownToHour(date) {
+// Hora en punto MAS CERCANA a la de ahora: a las 17:05 propone 17:00, y
+// a las 9:37 propone las 10:00 (con la hora de fin, que ya suma una
+// hora, quedan 17:00-18:00 y 10:00-11:00). Antes solo redondeaba hacia
+// abajo, asi que a las 9:37 proponia 9:00 -- por eso parecia que "unas
+// veces si y otras no": con los minutos por debajo de la media hora
+// coincidia con lo esperado, y por encima no.
+// Ojo: a partir de las 23:30 esto salta al dia siguiente a las 00:00, y
+// es lo correcto -- el campo de fecha se rellena desde esta misma fecha,
+// asi que la fecha propuesta pasa a ser manana sola.
+function roundToNearestHour(date) {
   const rounded = new Date(date);
+  if (rounded.getMinutes() >= 30) rounded.setHours(rounded.getHours() + 1);
   rounded.setMinutes(0, 0, 0);
   return rounded;
 }
@@ -2227,12 +2766,21 @@ function openEventModal(event, presetDate) {
   document.getElementById('event-title').value = event ? event.title : '';
   document.getElementById('event-all-day').checked = event ? event.allDay : false;
   refreshEventAllDayFields();
-  let defaultStart = new Date();
+  // Hora propuesta: SIEMPRE la hora en punto mas cercana a la de ahora,
+  // venga de donde venga el evento nuevo. La hora de fin se calcula mas
+  // abajo como inicio + 1h, asi que a las 7:59 sale 8:00-9:00.
+  //
+  // Antes, si el evento se creaba desde un DIA concreto (el "+" de la
+  // vista diaria), esta rama plantaba las 9:00 fijas -- daba igual la
+  // hora que fuera. Eso es lo que Koku vio a las 7:59: le proponia
+  // 9:00-10:00 en vez de 8:00-9:00. Ahora la fecha sale del dia que
+  // eligio y la HORA del reloj, que es lo que pidio ("que te marque la
+  // hora mas cercana de inicio y la final recomendada sea +1h de esa").
+  const ahora = roundToNearestHour(new Date());
+  let defaultStart = ahora;
   if (presetDate) {
     defaultStart = new Date(presetDate);
-    defaultStart.setHours(9, 0, 0, 0);
-  } else {
-    defaultStart = roundDownToHour(defaultStart);
+    defaultStart.setHours(ahora.getHours(), 0, 0, 0);
   }
   const startDate = event ? new Date(event.startAt) : defaultStart;
   eventStartDateField.setValue(startDate);
@@ -2259,9 +2807,15 @@ function openEventModal(event, presetDate) {
   // es el MISMO elemento reutilizado en cada apertura del modal — sin
   // esto, un evento nuevo heredaria el tamaño que dejaste en el anterior.
   descriptionEl.style.height = '';
-  eventReminderField.setValue(event && event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
-    ? String(event.reminderMinutesBefore)
-    : '');
+  // Uno NUEVO nace con "En el momento" puesto (pedido de Koku: crear un
+  // recordatorio y que no avise no tiene sentido como caso por defecto).
+  // Uno YA GUARDADO respeta lo que tenga, incluido "Sin recordatorio" si
+  // se quito a mano -- eso es una eleccion suya, no un valor por defecto.
+  eventReminderField.setValue(event
+    ? (event.reminderMinutesBefore !== null && event.reminderMinutesBefore !== undefined
+      ? String(event.reminderMinutesBefore)
+      : '')
+    : '0');
   populateEventGroupSelect();
   eventGroupField.setValue(event && event.groupId ? String(event.groupId) : '');
   document.getElementById('btn-delete-event').classList.toggle('hidden', !event);
@@ -6069,6 +6623,300 @@ document.getElementById('note-code-insert-btn').addEventListener('click', () => 
   refreshNoteEditorState();
 });
 
+
+// ---------------------------------------------------------------------
+// FÓRMULAS EN LAS NOTAS
+//
+// Peticion de Koku: "me gustaria que en notas hubiera una especie de
+// formulas, tanto dentro como fuera de las tablas". De las tres formas
+// que se le ofrecieron eligio la de CALCULOS SUELTOS, SIN REFERENCIAS:
+// escribes =12*3+5 en cualquier sitio (un parrafo o una celda de tabla)
+// y te da el resultado. NO sabe de celdas (=B2*C2) ni se recalcula solo
+// si cambias otra casilla -- eso era la opcion de hoja de calculo, y la
+// descarto.
+//
+// Cuatro decisiones de como esta hecho:
+//
+// 1. El resultado se escribe DETRAS, no en lugar de la formula:
+//    "=12*3+5" pasa a ser "=12*3+5 → 41". Asi se sigue viendo la cuenta
+//    (que es media gracia de tenerla en una nota) y, sobre todo, se
+//    puede corregir un numero y volver a calcular: al recalcular se tira
+//    el "→ ..." viejo y se pone el nuevo.
+// 2. Es TEXTO PLANO, sin ninguna etiqueta nueva. El saneador del cuerpo
+//    de la nota (sanitizeNoteBody) trabaja con una lista blanca de
+//    etiquetas, asi que una etiqueta propia habria que darla de alta ahi
+//    y en el import/export; el texto pasa por todo eso sin tocar nada.
+// 3. NUNCA se usa eval(). El analizador esta escrito a mano (descenso
+//    recursivo, ~40 lineas) y solo entiende numeros y + - * / ^ ( ) %.
+//    Meter eval() en algo que se guarda y se vuelve a abrir es abrir la
+//    puerta a que un texto cualquiera ejecute codigo.
+// 4. Hace falta un OPERADOR para que algo cuente como formula. Sin esa
+//    regla, una frase normal como "el total = 100 euros" se leeria como
+//    la formula "= 100" y se le pegaria un "→ 100" detras.
+//
+// CALCULAR ES SIEMPRE UNA DECISION TUYA. Escribir "=" no hace nada; el
+// texto se queda tal cual hasta que lo pides. Koku: "si quiero escribir
+// un texto con un =, para que solo haga la formula cuando quiero". Dos
+// formas de pedirlo, y las dos hacen lo mismo:
+//  - el boton "=" de la barra del editor (la unica que existe en el
+//    movil: el teclado del iPhone no tiene tecla Tab),
+//  - Tab con el cursor justo al final de una formula (escritorio).
+// Intro NO calcula: se probo y se quito, porque una linea acabada en una
+// cuenta se calculaba sola al pulsar Intro para seguir escribiendo.
+// ---------------------------------------------------------------------
+
+// Una formula dentro de un texto: "=" + cuenta + (opcional) el "→ 41"
+// de un calculo anterior. El ultimo caracter de la cuenta tiene que ser
+// un digito, un ")" o un "%", para no tragarse los espacios de despues.
+// La flecha NO esta en la lista de caracteres permitidos, y por eso el
+// resultado viejo no se confunde con parte de la cuenta.
+const RE_NOTE_FORMULA = /=[\s0-9+\-*/^().,%\p{Sc}]*[0-9)%](?:\s*→\s*-?[\d.,]+)?/gu;
+const RE_NOTE_FORMULA_OPERADOR = /[+\-*/^%]/;
+// Cualquier símbolo de moneda, no una lista a mano. `\p{Sc}` es la
+// categoría de Unicode "Symbol, currency": entran € $ £ ¥ ₩ ₽ y también
+// ₹ ₺ ₪ ₫... Koku listó los seis del teclado inglés internacional y dijo
+// "no sé si hayan más" -- los hay, y así no hay que mantener la lista.
+const RE_NOTE_MONEDA = /\p{Sc}/u;
+
+// "1.234,5" -> 1234.5 y "12,5" -> 12.5. Misma convencion que
+// gymNormalizarPeso: si hay coma, la coma manda y los puntos son
+// separadores de millar; si no hay coma, el punto es el decimal.
+function numeroDeNotaANumero(bruto) {
+  const limpio = bruto.includes(',')
+    ? bruto.replace(/\./g, '').replace(',', '.')
+    : bruto;
+  const n = Number(limpio);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Analizador de descenso recursivo. Devuelve un numero, o null si la
+// cuenta no se entiende (y entonces la formula se queda tal cual, sin
+// resultado: mas vale no escribir nada que escribir una mentira).
+//
+//   expr   := term (('+'|'-') term)*
+//   term   := factor (('*'|'/') factor)*
+//   factor := unario ('^' factor)?        <- la potencia asocia a la derecha
+//   unario := ('-'|'+')? primario
+//   primario := numero '%'? | '(' expr ')' '%'?
+function evaluarExpresionDeNota(texto) {
+  try {
+    return analizarExpresionDeNota(texto);
+  } catch {
+    // Una cuenta con MUCHOS parentesis anidados agota la pila (el
+    // analizador es recursivo). Es un caso absurdo, pero un texto
+    // cualquiera puede acabar en una nota: mejor "no se entiende" que
+    // una excepcion que se lleve por delante el guardado de la nota.
+    return null;
+  }
+}
+
+function analizarExpresionDeNota(texto) {
+  let i = 0;
+  const s = texto;
+  const saltarHueco = () => {
+    while (i < s.length && (/\s/.test(s[i]) || RE_NOTE_MONEDA.test(s[i]))) i++;
+  };
+  const primario = () => {
+    saltarHueco();
+    let valor;
+    if (s[i] === '(') {
+      i++;
+      valor = expr();
+      saltarHueco();
+      if (s[i] !== ')') return null;
+      i++;
+    } else {
+      const inicio = i;
+      while (i < s.length && /[\d.,]/.test(s[i])) i++;
+      if (i === inicio) return null;
+      valor = numeroDeNotaANumero(s.slice(inicio, i));
+    }
+    if (valor === null) return null;
+    saltarHueco();
+    // "%" pegado detras = dividir entre 100 (20% -> 0.2). Se deja como
+    // sufijo y no como "el 20% de lo de al lado" a proposito: eso ultimo
+    // significa una cosa en "120+20%" y otra en "120*20%", y adivinar
+    // cual quieres es justo lo que no debe hacer una calculadora.
+    while (s[i] === '%') { valor /= 100; i++; saltarHueco(); }
+    return valor;
+  };
+  const unario = () => {
+    saltarHueco();
+    if (s[i] === '-') { i++; const v = unario(); return v === null ? null : -v; }
+    if (s[i] === '+') { i++; return unario(); }
+    return primario();
+  };
+  const factor = () => {
+    const base = unario();
+    if (base === null) return null;
+    saltarHueco();
+    if (s[i] === '^') {
+      i++;
+      const exp = factor();
+      if (exp === null) return null;
+      return base ** exp;
+    }
+    return base;
+  };
+  const term = () => {
+    let valor = factor();
+    if (valor === null) return null;
+    for (;;) {
+      saltarHueco();
+      const op = s[i];
+      if (op !== '*' && op !== '/') return valor;
+      i++;
+      const otro = factor();
+      if (otro === null) return null;
+      if (op === '/' && otro === 0) return null; // dividir entre cero no es un resultado
+      valor = op === '*' ? valor * otro : valor / otro;
+    }
+  };
+  const expr = () => {
+    let valor = term();
+    if (valor === null) return null;
+    for (;;) {
+      saltarHueco();
+      const op = s[i];
+      if (op !== '+' && op !== '-') return valor;
+      i++;
+      const otro = term();
+      if (otro === null) return null;
+      valor = op === '+' ? valor + otro : valor - otro;
+    }
+  };
+  const resultado = expr();
+  saltarHueco();
+  // Sobra texto sin analizar -> la cuenta no era valida entera.
+  if (i !== s.length) return null;
+  return resultado !== null && Number.isFinite(resultado) ? resultado : null;
+}
+
+// El resultado, en el formato de numeros de aqui (coma decimal, punto de
+// millar). Seis decimales de tope: mas es ruido, y menos se queda corto
+// en una division.
+const NOTE_FORMULA_FORMATTER = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 6 });
+
+// SI LA CUENTA LLEVA UN SIMBOLO DE MONEDA, el resultado va a DOS
+// decimales exactos, redondeando lo que sobre (peticion de Koku). Un
+// precio con seis decimales no es un precio; y "10,5" en dinero se lee
+// mal, tiene que ser "10,50". Intl redondea al formatear, asi que
+// 145,199 sale 145,20 sin tener que hacer la cuenta a mano.
+//
+// Ojo, esto es SOLO como se ESCRIBE el resultado: el numero de dentro
+// sigue siendo el exacto, asi que encadenar cuentas no va acumulando
+// error de redondeo.
+const NOTE_MONEY_FORMATTER = new Intl.NumberFormat('es-ES', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+// Reescribe UNA formula ya encontrada. Devuelve el texto nuevo, o null si
+// no hay nada que calcular (sin operador, o cuenta invalida).
+function recalcularFormulaDeNota(trozo) {
+  // Fuera el "→ ..." de un calculo anterior, si lo hubiera.
+  const cuenta = trozo.replace(/\s*→\s*-?[\d.,]+\s*$/, '').replace(/^=/, '');
+  if (!RE_NOTE_FORMULA_OPERADOR.test(cuenta)) return null;
+  const valor = evaluarExpresionDeNota(cuenta);
+  if (valor === null) return null;
+  const formato = RE_NOTE_MONEDA.test(cuenta) ? NOTE_MONEY_FORMATTER : NOTE_FORMULA_FORMATTER;
+  return `=${cuenta.replace(/\s+$/, '')} → ${formato.format(valor)}`;
+}
+
+// Un bloque de codigo es texto literal: ahi no se calcula nada.
+function estaDentroDeCodigo(nodo) {
+  for (let el = nodo.parentElement; el && el !== NOTE_EDITOR_BODY; el = el.parentElement) {
+    if (el.tagName === 'PRE' || el.tagName === 'CODE') return true;
+  }
+  return false;
+}
+
+// La formula que contiene (o toca) el cursor, si la hay.
+function formulaEnElCursorDeNota() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const nodo = sel.focusNode;
+  if (!nodo || nodo.nodeType !== Node.TEXT_NODE) return null;
+  if (!NOTE_EDITOR_BODY.contains(nodo) || estaDentroDeCodigo(nodo)) return null;
+  const offset = sel.focusOffset;
+  RE_NOTE_FORMULA.lastIndex = 0;
+  let m;
+  while ((m = RE_NOTE_FORMULA.exec(nodo.nodeValue)) !== null) {
+    if (offset >= m.index && offset <= m.index + m[0].length) {
+      return { nodo, indice: m.index, largo: m[0].length, trozo: m[0] };
+    }
+  }
+  return null;
+}
+
+// Calcula la del cursor y deja el cursor detras del resultado. true si
+// de verdad calculo algo.
+function calcularFormulaEnElCursor() {
+  const enc = formulaEnElCursorDeNota();
+  if (!enc) return false;
+  const nuevo = recalcularFormulaDeNota(enc.trozo);
+  if (nuevo === null) return false;
+  const txt = enc.nodo.nodeValue;
+  enc.nodo.nodeValue = txt.slice(0, enc.indice) + nuevo + txt.slice(enc.indice + enc.largo);
+  const sel = window.getSelection();
+  const range = document.createRange();
+  range.setStart(enc.nodo, enc.indice + nuevo.length);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  return true;
+}
+
+// Todas las de la nota. Es lo que hace el boton cuando el cursor no esta
+// dentro de ninguna: sirve de "recalcular la nota entera" despues de
+// cambiar varios numeros.
+function calcularTodasLasFormulasDeNota() {
+  const walker = document.createTreeWalker(NOTE_EDITOR_BODY, NodeFilter.SHOW_TEXT);
+  const nodos = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!estaDentroDeCodigo(n)) nodos.push(n);
+  }
+  let cuantas = 0;
+  nodos.forEach((n) => {
+    const nuevo = n.nodeValue.replace(RE_NOTE_FORMULA, (trozo) => {
+      const calc = recalcularFormulaDeNota(trozo);
+      if (calc === null) return trozo;
+      cuantas += 1;
+      return calc;
+    });
+    if (nuevo !== n.nodeValue) n.nodeValue = nuevo;
+  });
+  return cuantas;
+}
+
+// ¿El cursor esta JUSTO al final de una formula? Es la condicion para que
+// Tab calcule en vez de hacer lo suyo de siempre (indentar un item de
+// lista): asi solo se mete cuando esta clarisimo que es lo que quieres.
+function cursorAlFinalDeUnaFormula() {
+  const enc = formulaEnElCursorDeNota();
+  if (!enc) return false;
+  const sel = window.getSelection();
+  if (sel.focusOffset !== enc.indice + enc.largo) return false;
+  return recalcularFormulaDeNota(enc.trozo) !== null;
+}
+
+document.getElementById('note-formula-btn').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('note-formula-btn').addEventListener('click', () => {
+  // Mismo patron que Tabla/Codigo: si el editor perdio el foco al tocar
+  // el boton, se recupera la seleccion guardada.
+  saveNoteEditorSelection();
+  restoreNoteEditorSelection();
+  if (calcularFormulaEnElCursor()) {
+    refreshNoteEditorState();
+    return;
+  }
+  const cuantas = calcularTodasLasFormulasDeNota();
+  if (cuantas === 0) {
+    mostrarAvisoFlotante('Escribe una cuenta con "=" (por ejemplo =12*3+5) y vuelve a tocar este botón.');
+  }
+  refreshNoteEditorState();
+});
+
 // El estado encendido/apagado de cada boton (y si toca ensenar la barra
 // contextual de tabla) depende de donde este el cursor ahora mismo, asi
 // que se recalcula en cualquier cambio de seleccion o de tecla dentro del
@@ -6308,6 +7156,23 @@ function handleNoteQuoteEnterExit() {
 }
 
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
+  // Tab con el cursor justo al final de una cuenta la CALCULA en vez de
+  // hacer lo suyo. Solo Tab, y solo en escritorio: es una tecla que
+  // nunca escribe texto, asi que no puede colarse en mitad de una frase.
+  //
+  // INTRO NO CALCULA, a proposito. Lo hacia y se quito en cuanto Koku
+  // dijo lo que le preocupaba: "si quiero escribir un texto con un =,
+  // para que solo haga la formula cuando quiero". Una linea que acabara
+  // en una cuenta valida se calculaba sola al pulsar Intro para seguir
+  // escribiendo, que es exactamente la sorpresa que no quiere. Calcular
+  // es SIEMPRE una decision suya: el boton "=" de la barra (o Tab).
+  if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    if (cursorAlFinalDeUnaFormula() && calcularFormulaEnElCursor()) {
+      e.preventDefault();
+      refreshNoteEditorState();
+      return;
+    }
+  }
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     if (handleNoteQuoteEnterExit()) {
       e.preventDefault();
@@ -6700,6 +7565,94 @@ function stopNoteEditorViewportAnchor() {
   window.visualViewport.removeEventListener('scroll', applyNoteEditorViewportAnchor);
 }
 
+// ---------------------------------------------------------------------
+// El teclado del movil y las pantallas completas
+// ---------------------------------------------------------------------
+// Mismo problema que ya se arreglo en el editor de notas, pero en TODAS
+// las demas pantallas completas (Gimnasio, Viajes, Finanzas, el listado
+// de Notas...). Lo vio Koku escribiendo en el buscador de ejercicios:
+// "me deja moverme todo hasta abajo y ver la barra de estado estando el
+// teclado en la pantalla".
+//
+// La causa es la de siempre: con el teclado abierto el telefono NO
+// encoge la ventana, la deja igual de alta y tapa la parte de abajo. Una
+// capa `position: fixed; inset: 0` (que es lo que son todas las
+// .my-space-view) sigue midiendo la ventana ENTERA, asi que su mitad
+// inferior queda debajo del teclado y el sistema deja arrastrar la vista
+// entera para llegar a ella -- arrastrando de paso la barra de estado a
+// la vista.
+//
+// La cura es la misma: mientras haya un campo de texto enfocado dentro
+// de una de esas capas, se le da el alto y el desplazamiento REALES que
+// dice visualViewport, y se deja la pagina quieta. Asi no queda nada
+// fuera y no hay nada que arrastrar.
+//
+// El editor de notas NO pasa por aqui: tiene su propio anclaje, que
+// ademas mueve el cursor para que no lo tape el teclado (start/
+// stopNoteEditorViewportAnchor). Dos anclajes sobre la misma capa se
+// pisarian.
+let capaAncladaAlTeclado = null;
+
+function aplicarAnclajeDeCapa() {
+  const vv = window.visualViewport;
+  if (!capaAncladaAlTeclado || !vv) return;
+  // Si el sistema ya ha desplazado la PAGINA para dejar sitio al
+  // teclado, se devuelve a cero: eso es justo el scroll "general" que se
+  // podia arrastrar hasta ver la barra de estado.
+  if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+  capaAncladaAlTeclado.style.height = `${vv.height}px`;
+  capaAncladaAlTeclado.style.transform = `translateY(${vv.offsetTop}px)`;
+}
+
+function empezarAnclajeDeCapa(capa) {
+  if (capaAncladaAlTeclado === capa) return;
+  soltarAnclajeDeCapa();
+  capaAncladaAlTeclado = capa;
+  document.body.classList.add('capa-anclada-al-teclado');
+  aplicarAnclajeDeCapa();
+  if (!window.visualViewport) return;
+  window.visualViewport.addEventListener('resize', aplicarAnclajeDeCapa);
+  window.visualViewport.addEventListener('scroll', aplicarAnclajeDeCapa);
+}
+
+function soltarAnclajeDeCapa() {
+  if (!capaAncladaAlTeclado) return;
+  // Se limpian los estilos EN LINEA que puso el anclaje: si se quedaran,
+  // la capa mantendria el alto del hueco con teclado y quedaria corta al
+  // cerrarlo.
+  capaAncladaAlTeclado.style.height = '';
+  capaAncladaAlTeclado.style.transform = '';
+  capaAncladaAlTeclado = null;
+  document.body.classList.remove('capa-anclada-al-teclado');
+  if (!window.visualViewport) return;
+  window.visualViewport.removeEventListener('resize', aplicarAnclajeDeCapa);
+  window.visualViewport.removeEventListener('scroll', aplicarAnclajeDeCapa);
+}
+
+// Solo los campos donde de verdad sale el teclado. Un boton o una
+// casilla no lo abren y no deben anclar nada.
+const CAMPOS_CON_TECLADO = 'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="color"]), textarea, [contenteditable="true"]';
+
+document.addEventListener('focusin', (e) => {
+  const campo = e.target.closest ? e.target.closest(CAMPOS_CON_TECLADO) : null;
+  if (!campo) return;
+  const capa = campo.closest('.my-space-view:not(.hidden):not(.note-editor-view)');
+  if (capa) empezarAnclajeDeCapa(capa);
+});
+
+document.addEventListener('focusout', (e) => {
+  const campo = e.target.closest ? e.target.closest(CAMPOS_CON_TECLADO) : null;
+  if (!campo) return;
+  // Al saltar de un campo a otro llega el focusout del primero ANTES que
+  // el focusin del segundo: sin esperar un ciclo, el anclaje se soltaria
+  // y volveria a ponerse en cada salto, dando un parpadeo.
+  setTimeout(() => {
+    const activo = document.activeElement;
+    if (activo && activo.closest && activo.closest(CAMPOS_CON_TECLADO)) return;
+    soltarAnclajeDeCapa();
+  }, 0);
+});
+
 // "Volver": cierra cada nota abierta una a una (mismo aviso de cambios
 // sin guardar que cerrar una sola desde el panel de Secciones). Si el
 // usuario cancela el cierre de alguna, la vista se queda abierta con las
@@ -6972,9 +7925,26 @@ function openMobileNotesView() {
   renderNotesView('mobile');
 }
 
+// Notas se puede abrir desde DOS sitios: el hueco de la barra de abajo y
+// la tarjeta de Herramientas. Al cerrarla hay que volver por donde
+// viniste, igual que hacen Gimnasio/Finanzas/Lecturas/Viajes. Variable
+// en memoria y no localStorage: solo vale mientras la vista esta abierta.
+//
+// Ojo, en MOVIL el boton "← Home" de la cabecera esta oculto a proposito
+// (styles.css: en estas pantallas quien hace de "volver" es la barra de
+// abajo, y un boton mas seria una fila desperdiciada). O sea que en el
+// telefono esto solo se nota en la cascada de Esc que dispara la propia
+// barra -- igual que en Gimnasio, que hace exactamente lo mismo.
+let notasAbiertasDesdeHerramientas = false;
+
 function closeMobileNotesView() {
   document.getElementById('mobile-notes-view').classList.add('hidden');
-  setCurrentScreen('home');
+  if (notasAbiertasDesdeHerramientas) {
+    notasAbiertasDesdeHerramientas = false;
+    openExtensionsView();
+  } else {
+    setCurrentScreen('home');
+  }
   // No dejar el modo Seleccionar/Mover/Editar carpetas "colgado" para la
   // proxima vez que se abra esta vista.
   mobileNotesMode = 'browse';
@@ -6982,6 +7952,15 @@ function closeMobileNotesView() {
   refreshMobileNotesActionBar();
 }
 document.getElementById('btn-close-mobile-notes').addEventListener('click', closeMobileNotesView);
+
+// La tarjeta de Notas del hub de Herramientas. Va aqui y no junto a las
+// demas tarjetas porque openMobileNotesView vive en este bloque; el
+// patron es el mismo que el de Gimnasio (cerrar el hub, abrir la App).
+document.getElementById('btn-open-notes').addEventListener('click', () => {
+  closeExtensionsView();
+  notasAbiertasDesdeHerramientas = true;
+  openMobileNotesView();
+});
 
 // ---------------------------------------------------------------------
 // Navegacion movil (.mobile-nav + boton flotante "+", ver styles.css):
@@ -6993,9 +7972,26 @@ document.getElementById('btn-close-mobile-notes').addEventListener('click', clos
 // deja en el fondo del todo, sea cual sea la profundidad en la que
 // estuvieras -- Esc ya sabe deshacer una capa por pulsacion).
 // ---------------------------------------------------------------------
+// Marca de "esto lo esta cerrando la app, no tu dedo".
+//
+// closeAllMobileOverlays simula pulsaciones de Esc, y esa cascada acaba
+// CLICANDO los botones de volver de cada pantalla. Esos botones tienen
+// su propia animacion (ver animarAlPulsar al final del archivo), asi que
+// sin esta marca un cambio de pestaña lanzaba DOS animaciones que se
+// pisaban: la del boton dejaba la pantalla vieja a la vista para que se
+// fuera deslizando, y la del cambio de pestaña se la encontraba visible
+// y la trataba como la que ENTRA -- resultado, una pantalla que se
+// quedaba puesta encima para siempre. Paso de verdad.
+let cerrandoEnCascada = false;
+
 function closeAllMobileOverlays() {
-  for (let i = 0; i < 6; i++) {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  cerrandoEnCascada = true;
+  try {
+    for (let i = 0; i < 6; i++) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    }
+  } finally {
+    cerrandoEnCascada = false;
   }
 }
 
@@ -7194,7 +8190,6 @@ document.getElementById('btn-close-extensions').addEventListener('click', closeE
 // null = "Todos los eventos"; si no, el id del grupo abierto.
 let groupsViewSelectedId = undefined; // undefined = todavia en la lista
 let groupsViewItems = [];
-let groupsEditMode = false;
 const groupsViewFilters = { type: 'all', done: 'all', q: '' };
 
 const groupsFilterTypeField = createSelectField({
@@ -7228,8 +8223,6 @@ async function openGroupsView() {
   document.getElementById('groups-view').classList.remove('hidden');
   setCurrentScreen('groups');
   showGroupsList();
-  groupsEditMode = false;
-  refreshGroupsEditModeButton();
   await refreshGroupsView();
 }
 
@@ -7275,26 +8268,91 @@ function buildGroupViewCard(id, name, color) {
   const label = document.createElement('span');
   label.textContent = name;
   btn.append(dot, label);
-  // En modo editar, tocar un grupo abre su ficha en vez de entrar
-  // dentro. "Todos los eventos" no es un grupo de verdad, asi que ahi no
-  // hay nada que editar y se queda apagado.
-  if (groupsEditMode) {
-    if (id === null) {
-      btn.disabled = true;
-    } else {
-      btn.classList.add('is-editing');
-      const lapiz = document.createElement('span');
-      lapiz.className = 'group-card-edit-mark';
-      lapiz.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
-      btn.appendChild(lapiz);
-      btn.addEventListener('click', () => openGroupModal(state.groups.find((g) => g.id === id)));
-    }
-    return btn;
-  }
+  // Aqui vivia un "modo editar" (un lapiz en la barra que convertia
+  // cada tarjeta en un acceso a su ficha). Se quito el 9/9/2026 al
+  // hacer las tarjetas deslizables: Koku pidio dejar UNA sola forma de
+  // editar, "asi no da pie a dudas ni nada". Ahora tocar siempre entra
+  // en el grupo, y editar/eliminar se saca deslizando.
+  //
   // En la cabecera del detalle cabe poco: "Todos los eventos" se queda
   // en "Todos" ahi (en la tarjeta si va el texto entero).
   btn.addEventListener('click', () => openGroupDetail(id, id === null ? 'Todos' : name));
-  return btn;
+
+  // Deslizar para Editar / Eliminar, igual que las carpetas y notas de
+  // Mi espacio y las sesiones del historial del Gimnasio (pedido de
+  // Koku).
+  if (id !== null) {
+    return wrapRowWithSwipeActions(btn, {
+      onEdit: () => openGroupModal(state.groups.find((g) => g.id === id)),
+      onDelete: () => deleteGroupById(id),
+    });
+  }
+
+  // "Todos los eventos" es el caso raro: no es un grupo de verdad, asi
+  // que no hay nada que editar ni que borrar. Pero dejarlo como la unica
+  // tarjeta que NO se mueve tampoco esta bien -- parece que la app se ha
+  // quedado colgada. Solucion pedida por Koku: que se deslice igual, sin
+  // botones, y que al hacerlo salga un aviso explicando por que, con la
+  // opcion de dejarlo fijo para que no vuelva a moverse.
+  if (todosLosEventosFijado()) {
+    btn.classList.add('is-locked');
+    btn.appendChild(iconoCandado());
+    return btn; // fijado: ni se mueve ni vuelve a preguntar
+  }
+  const wrap = wrapRowWithSwipeActions(btn, { botones: [], anchoFijo: 120 });
+  // El aviso sale al abrirse, no al empezar a arrastrar: si saltara a
+  // mitad del gesto cortaria el movimiento en seco.
+  btn.addEventListener('swipeabierto', async () => {
+    const fijar = await showAppConfirm(
+      '«Todos los eventos» no es un grupo de verdad: es el atajo para verlos todos juntos, así que no se puede editar ni eliminar.\n\n¿Quieres dejarlo fijo para que no se mueva? Aparecerá con un candado. Puedes volver a soltarlo desde aquí mismo.',
+      { okText: 'Dejarlo fijo', cancelText: 'Dejarlo como está' },
+    );
+    closeSwipedNoteRow();
+    if (!fijar) return; // sigue moviendose, y el aviso volvera a salir
+    localStorage.setItem('gruposTodosFijado', 'true');
+    renderGroupsViewList();
+  });
+  return wrap;
+}
+
+// "Todos los eventos" fijado: preferencia de ESTE dispositivo (como el
+// tema o la unidad de peso), no algo compartido -- es una mania de como
+// te gusta ver la lista, no un dato del calendario.
+function todosLosEventosFijado() {
+  return localStorage.getItem('gruposTodosFijado') === 'true';
+}
+
+function iconoCandado() {
+  const span = document.createElement('span');
+  span.className = 'group-card-lock';
+  span.title = 'Fijo: no se puede editar ni eliminar. Tócalo para soltarlo.';
+  span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>';
+  // Tocar el candado lo suelta, para no dejarlo fijo para siempre sin
+  // forma de volver atras.
+  span.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const soltar = await showAppConfirm(
+      '«Todos los eventos» está fijo ahora mismo. ¿Quieres soltarlo para que vuelva a moverse al deslizarlo?',
+      { okText: 'Soltarlo', cancelText: 'Dejarlo fijo' },
+    );
+    if (!soltar) return;
+    localStorage.removeItem('gruposTodosFijado');
+    renderGroupsViewList();
+  });
+  return span;
+}
+
+// Borrar un grupo con su confirmacion. Sale del boton "Eliminar" de la
+// ficha para poder usarse tambien desde el deslizamiento de la tarjeta,
+// sin tener que abrir la ficha antes.
+async function deleteGroupById(id) {
+  const grupo = state.groups.find((g) => String(g.id) === String(id));
+  const seguro = await showAppConfirm(
+    `¿Eliminar el grupo "${grupo ? grupo.name : ''}"? Los eventos que lo usen se quedarán sin grupo.`,
+  );
+  if (!seguro) return;
+  await api(`/api/groups/${id}`, { method: 'DELETE' });
+  await refreshAfterGroupChange();
 }
 
 // Nivel 2: todo lo que hay dentro de un grupo (o de todos).
@@ -7486,29 +8544,6 @@ document.getElementById('btn-groups-add').addEventListener('click', () => openGr
 document.getElementById('btn-close-group').addEventListener('click', closeGroupModal);
 document.getElementById('btn-cancel-group').addEventListener('click', closeGroupModal);
 
-// Lapiz cuando no estas editando, tick cuando si -- sin esto no habia
-// forma clara de salir del modo editar (el mismo boton lo cierra, pero
-// no lo parecia).
-const GROUPS_EDIT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
-const GROUPS_DONE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6.5"/></svg>';
-
-function refreshGroupsEditModeButton() {
-  const btn = document.getElementById('btn-groups-edit-mode');
-  btn.innerHTML = groupsEditMode ? GROUPS_DONE_ICON : GROUPS_EDIT_ICON;
-  btn.classList.toggle('is-active', groupsEditMode);
-  btn.setAttribute('aria-label', groupsEditMode ? 'Listo' : 'Editar grupos');
-  btn.title = groupsEditMode ? 'Listo' : 'Editar grupos';
-  // Crear un grupo nuevo mientras editas no tiene mucho sentido, y
-  // ademas el "+" tapa al tick si estan los dos.
-  document.getElementById('btn-groups-add').classList.toggle('hidden', groupsEditMode);
-}
-
-document.getElementById('btn-groups-edit-mode').addEventListener('click', () => {
-  groupsEditMode = !groupsEditMode;
-  refreshGroupsEditModeButton();
-  renderGroupsViewList();
-});
-
 document.getElementById('group-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('group-id').value;
@@ -7526,14 +8561,12 @@ document.getElementById('group-form').addEventListener('submit', async (e) => {
 document.getElementById('btn-delete-group').addEventListener('click', async () => {
   const id = document.getElementById('group-id').value;
   if (!id) return;
-  const grupo = state.groups.find((g) => String(g.id) === String(id));
-  const seguro = await showAppConfirm(
-    `¿Eliminar el grupo "${grupo ? grupo.name : ''}"? Los eventos que lo usen se quedarán sin grupo.`,
-  );
-  if (!seguro) return;
-  await api(`/api/groups/${id}`, { method: 'DELETE' });
-  closeGroupModal();
-  await refreshAfterGroupChange();
+  // Cerrar ANTES de preguntar seria raro (desaparece la ficha y luego
+  // sale el aviso), asi que se cierra despues, y solo si de verdad se
+  // borro -- si dices que no, te quedas donde estabas.
+  const habia = state.groups.length;
+  await deleteGroupById(id);
+  if (state.groups.length < habia) closeGroupModal();
 });
 
 document.getElementById('btn-close-groups').addEventListener('click', closeGroupsView);
@@ -7542,8 +8575,36 @@ document.getElementById('btn-groups-back').addEventListener('click', () => {
   renderGroupsViewList();
 });
 // Los dos accesos rapidos de la pantalla del calendario.
-document.getElementById('btn-calendar-quick-today').addEventListener('click', () => {
-  enterMobileDayView(new Date());
+//
+// "Hoy" no es solo "abre el dia de hoy": tambien tiene que recolocar los
+// NIVELES DE ENCIMA. Antes solo abria la vista diaria y dejaba
+// state.viewDate donde estuviera, asi que si venias de mirar mayo de
+// 2016 y pulsabas Hoy, al salir del dia (pellizco o "Volver") aparecia
+// mayo de 2016 otra vez, y encima de ese, 2016. Koku: "yo quiero que...
+// al hacer zoom out me lleve a septiembre y a 2026".
+//
+// Por eso se mueve el mes a hoy ANTES de entrar en el dia, y si estabas
+// en la vista anual se vuelve al mes: los tres niveles (dia -> mes ->
+// año) tienen que hablar de la misma fecha.
+document.getElementById('btn-calendar-quick-today').addEventListener('click', async () => {
+  const hoy = new Date();
+  const otroMes = state.viewDate.getFullYear() !== hoy.getFullYear()
+    || state.viewDate.getMonth() !== hoy.getMonth();
+  state.viewDate = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  if (calendarViewMode !== 'month') {
+    // A mano y no con setCalendarViewMode(): esa reproduce su propia
+    // animacion de cambio de nivel, y aqui la que se tiene que ver es la
+    // de ENTRAR en el dia, que llega un instante despues. Dos a la vez se
+    // pisan (ya paso con los gestos, ver CLAUDE.md).
+    calendarViewMode = 'month';
+    await loadMonth();
+    refreshMobileCalendarModeVisibility();
+    refreshMobileCalendarNavLabel();
+  } else if (otroMes) {
+    await loadMonth();
+    refreshMobileCalendarNavLabel();
+  }
+  enterMobileDayView(hoy);
 });
 document.getElementById('btn-calendar-quick-groups').addEventListener('click', openGroupsView);
 
@@ -7559,11 +8620,13 @@ async function openGymView() {
   closeExtensionsView();
   document.getElementById('gym-view').classList.remove('hidden');
   setCurrentScreen('gym');
-  await Promise.all([loadGymExercises(), loadGymRoutines(), loadGymSessions()]);
+  await Promise.all([loadGymExercises(), loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
   renderGymExercisesList();
+  renderGymBlocksList();
   renderGymRoutinesList();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+  refreshGymLiveButtons();
 }
 function closeGymView() {
   document.getElementById('gym-view').classList.add('hidden');
@@ -7579,7 +8642,36 @@ function switchGymTab(tabName) {
   document.querySelectorAll('.gym-tab-panel').forEach((panel) => {
     panel.classList.toggle('hidden', panel.id !== `gym-tab-${tabName}`);
   });
+  // Las secciones de Progreso/Logros se calculan al entrar en su
+  // pestana, no en cada apertura del Gimnasio -- son funciones
+  // declaradas mas abajo, sin problema de orden porque esto solo corre
+  // dentro de un handler de click (ver la nota de TDZ en CLAUDE.md).
+  if (tabName === 'plan') openGymBlockDays(null);
+  if (tabName === 'progress') {
+    renderGymProgressSections();
+    // El aviso sobre los colores del mapa (que no significan "demasiado"
+    // ni "poco", solo cantidad relativa) se ensena SOLO la primera vez;
+    // el boton "?" de la seccion lo reabre cuando se quiera.
+    if (localStorage.getItem('gymProgressHelpSeen') !== '1') openGymProgressHelpModal();
+  }
+  if (tabName === 'achievements') renderGymAchievements();
 }
+
+// --- Aviso del mapa de musculos (pestana Progreso) --------------------
+function openGymProgressHelpModal() {
+  document.getElementById('gym-progress-help-dont-show').checked =
+    localStorage.getItem('gymProgressHelpSeen') === '1';
+  document.getElementById('gym-progress-help-modal').classList.remove('hidden');
+}
+function closeGymProgressHelpModal() {
+  localStorage.setItem(
+    'gymProgressHelpSeen',
+    document.getElementById('gym-progress-help-dont-show').checked ? '1' : '0'
+  );
+  document.getElementById('gym-progress-help-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-progress-help').addEventListener('click', openGymProgressHelpModal);
+document.getElementById('btn-close-gym-progress-help').addEventListener('click', closeGymProgressHelpModal);
 document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => switchGymTab(btn.dataset.gymTab));
 });
@@ -7587,11 +8679,146 @@ document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
 async function loadGymExercises() {
   state.gymExercises = await api('/api/gym-exercises');
 }
+async function loadGymBlocks() {
+  state.gymBlocks = await api('/api/gym-blocks');
+  // El widget de "que toca hoy" sale del ciclo del bloque activo, asi que
+  // se rehace su resumen cada vez que los bloques cambian. Es el embudo
+  // por el que pasa TODO lo que puede moverlo: terminar un entreno,
+  // tocar el ciclo, activar otro bloque.
+  actualizarResumenDelWidget();
+}
 async function loadGymRoutines() {
   state.gymRoutines = await api('/api/gym-routines');
+  // Los dias tambien: el nombre, el color y cuantos ejercicios tiene el
+  // dia de hoy salen de aqui, no del bloque.
+  actualizarResumenDelWidget();
 }
 async function loadGymSessions() {
   state.gymSessions = await api('/api/gym-sessions');
+  // Las medias de tiempo salen de las series de esas sesiones, asi que
+  // se rehacen aqui: es el embudo por el que pasa todo lo que las puede
+  // mover (terminar un entreno, editar una sesion a mano, borrarla).
+  await loadGymSetTimes();
+}
+
+// ---------------------------------------------------------------------
+// CUANTO VA A DURAR ESTE ENTRENO
+//
+// Peticion de Koku: "se puede aproximar un entrenamiento solo contando
+// los tiempos de descanso. Ahora que estamos contabilizando el tiempo
+// que se tarda en hacer una serie, se podria empezar a sacar una media
+// de cuanto se tarda en hacer una serie, conforme hayan mas entrenes con
+// ese ejercicio mas fiable sera la media".
+//
+// Tres decisiones suyas, no cambiarlas sin volver a preguntarle:
+//
+// 1. La media es POR EJERCICIO, no por rutina ("asi si hago una nueva
+//    rutina no depende del computo de la rutina sino que ya tengo la
+//    media por ejercicio"). Un dia recien montado con ejercicios que ya
+//    has hecho tiene estimacion desde el primer momento.
+// 2. Lo que se ensena es el tiempo del ENTRENO ENTERO, nunca el de cada
+//    ejercicio por separado ("tiempo del entrene no del ejercicio").
+// 3. Sin historial NO SE INVENTA NADA: los ejercicios que no has hecho
+//    nunca se quedan fuera de la suma y se dice cuantos son. Por eso el
+//    texto empieza por "Al menos": lo que sale es un suelo, no una
+//    prediccion.
+// ---------------------------------------------------------------------
+let gymSetTimes = null; // Map exerciseId -> { avgSetSeconds, avgRestSeconds }
+
+async function loadGymSetTimes() {
+  const filas = await api('/api/gym-sessions/set-times');
+  gymSetTimes = new Map(filas.map((f) => [f.exerciseId, f]));
+}
+
+// Devuelve { segundos, conDatos, sinDatos } para un dia del plan, o null
+// si no hay ni un ejercicio con historial (entonces no se ensena nada:
+// un "al menos 0 min" no dice nada).
+//
+// El descanso sale del propio dia si lo tiene fijado (es lo que vas a
+// descansar HOY), y si no, de tu media historica en ese ejercicio. Se
+// cuenta un descanso por serie menos el ultimo de todos: al acabar la
+// ultima serie del entreno ya no descansas, te vas.
+function gymEstimarDuracionDeDia(day) {
+  if (!day || !gymSetTimes) return null;
+  const visibles = (day.exercises || []).filter((ex) => !ex.hidden);
+  let segundos = 0;
+  let conDatos = 0;
+  let sinDatos = 0;
+  let ultimoDescanso = 0;
+  visibles.forEach((ex) => {
+    const media = gymSetTimes.get(ex.exerciseId);
+    if (!media || !media.avgSetSeconds) { sinDatos += 1; return; }
+    // Cuantas series de VERDAD: en un unilateral contado por lados, cada
+    // lado es una serie propia, igual que al entrenar.
+    const nSeries = gymBuildSetsForExercise(
+      ex.exerciseId,
+      ex.targetSets && ex.targetSets > 0 ? ex.targetSets : 1,
+      null
+    ).length;
+    const descanso = ex.targetRestSeconds > 0
+      ? ex.targetRestSeconds
+      : (media.avgRestSeconds || 0);
+    segundos += nSeries * media.avgSetSeconds + nSeries * descanso;
+    ultimoDescanso = descanso;
+    conDatos += 1;
+  });
+  if (conDatos === 0) return null;
+  return { segundos: Math.max(0, segundos - ultimoDescanso), conDatos, sinDatos };
+}
+
+// Aviso flotante de usar y tirar: aparece arriba, se lee y se va solo.
+// Se pone aqui (y no en el Gimnasio) porque no tiene nada de gimnasio:
+// el primero que lo usa es el del tiempo estimado, pero sirve para
+// cualquier "entérate de esto y sigue".
+//
+// Solo hay UNO a la vez: si llega otro mientras el anterior sigue
+// puesto, el viejo se va sin ceremonia. Dos pastillas apiladas taparian
+// la mitad de la pantalla.
+let avisoFlotanteActual = null;
+function mostrarAvisoFlotante(texto, { duracionMs = 4200 } = {}) {
+  if (!texto) return;
+  if (avisoFlotanteActual) avisoFlotanteActual.remove();
+  const el = document.createElement('div');
+  el.className = 'app-toast';
+  el.setAttribute('role', 'status');
+  el.textContent = texto;
+  document.body.appendChild(el);
+  avisoFlotanteActual = el;
+  const irse = () => {
+    if (avisoFlotanteActual !== el) return;
+    el.classList.add('is-leaving');
+    // Con las animaciones apagadas el 'animationend' llega igual (la
+    // regla global las deja en 0.01ms en vez de quitarlas, ver
+    // CLAUDE.md), asi que no hace falta un caso aparte. El setTimeout es
+    // solo la red por si no llegara.
+    const quitar = () => {
+      el.remove();
+      if (avisoFlotanteActual === el) avisoFlotanteActual = null;
+    };
+    el.addEventListener('animationend', quitar, { once: true });
+    setTimeout(quitar, 600);
+  };
+  setTimeout(irse, duracionMs);
+}
+
+// "1 h 12 min" / "48 min" / "3 min". Nunca segundos: en una estimacion
+// de media hora, decir "48 min 20 s" finge una precision que no hay.
+function gymFormatDuracionAproximada(segundos) {
+  const min = Math.max(1, Math.round(segundos / 60));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const resto = min % 60;
+  return resto === 0 ? `${h} h` : `${h} h ${resto} min`;
+}
+
+// El texto completo, ya con el aviso de los que no cuentan. null si no
+// hay nada que decir.
+function gymTextoDeDuracion(day) {
+  const est = gymEstimarDuracionDeDia(day);
+  if (!est) return null;
+  const base = `Al menos ~${gymFormatDuracionAproximada(est.segundos)}`;
+  if (est.sinDatos === 0) return base;
+  return `${base} (${est.sinDatos} ejercicio${est.sinDatos === 1 ? '' : 's'} sin datos todavía)`;
 }
 
 // 'YYYY-MM-DD' -> "15 ago 2026", para el historial de sesiones. No hay
@@ -7620,62 +8847,577 @@ function gymWeightKgToDisplay(weightKg) {
   const value = getGymWeightUnit() === 'lb' ? weightKg * KG_TO_LB : weightKg;
   return Math.round(value * 100) / 100;
 }
+// El peso tal y como se ESCRIBE, normalizado a como lo entiende
+// JavaScript. Koku: "No me deja poner 16,3kg".
+//
+// Eran dos cosas a la vez, y las dos hacian falta:
+//
+// 1. Los campos eran <input type="number"> con step="0.5". Un 16,3 no es
+//    multiplo de 0,5, asi que el navegador lo daba por invalido -- y
+//    ademas, con el telefono en español la tecla decimal del teclado
+//    numerico es una COMA, que type="number" rechaza de plano: el campo
+//    se queda vacio sin decir nada. Ahora son de texto con teclado
+//    decimal, que acepta las dos formas.
+// 2. Number('16,3') es NaN. Por eso se normaliza aqui, en UN solo sitio
+//    por el que pasa todo lo que se lee de esos campos.
+//
+// Se cambia solo la ULTIMA coma, no todas: "1.234,5" (miles con punto)
+// se lee bien, y un "16,3" suelto tambien.
+function gymNormalizarPeso(texto) {
+  if (texto === null || texto === undefined) return '';
+  const limpio = String(texto).trim();
+  if (!limpio.includes(',')) return limpio;
+  const i = limpio.lastIndexOf(',');
+  return `${limpio.slice(0, i).replace(/[.\s]/g, '')}.${limpio.slice(i + 1)}`;
+}
+
 function gymWeightDisplayToKg(displayValue) {
   if (displayValue === '' || displayValue === null || displayValue === undefined) return null;
-  const num = Number(displayValue);
-  if (Number.isNaN(num)) return null;
+  const num = Number(gymNormalizarPeso(displayValue));
+  if (!Number.isFinite(num)) return null;
+  // Un peso negativo no existe. Antes lo frenaba el min="0" del campo de
+  // numero; al pasar a texto ese freno se fue, asi que se para aqui. Se
+  // trata como "no apunte peso" (null), que es un estado que la app ya
+  // maneja en todas partes, en vez de guardar un -5 que luego restaria
+  // volumen en las graficas.
+  if (num < 0) return null;
   return getGymWeightUnit() === 'lb' ? num / KG_TO_LB : num;
+}
+
+// --- Taxonomia de grupos musculares (Fase 2 del rediseno) -------------
+// La UNICA fuente de verdad de los grupos musculares de toda la
+// extension: la usan el select del modal de ejercicio, los filtros de
+// la libreria, y (en fases posteriores) el volumen por musculo y el
+// mapa del cuerpo -- los `id` de aqui tienen que coincidir con los ids
+// de zona del SVG del cuerpo y con los `muscleGroup` que trae
+// gym-exercise-library.json (ver el generador en el historial de la
+// rama). Los ejercicios guardan el `id` en muscle_group; los de antes
+// del rediseno pueden tener texto libre, que se muestra tal cual.
+const GYM_MUSCLE_GROUPS = [
+  { id: 'pecho', label: 'Pecho' },
+  // La espalda va en DOS mas la lumbar: espalda media y dorsales
+  // ("Lumbar" es la de abajo y se queda como estaba, con su nombre de
+  // siempre). El reparto de los ~870 ejercicios de la libreria sale del
+  // origen (free-exercise-db), que distingue "lats" de "middle back":
+  // lats -> dorsales, middle back -> espalda media (que son casi todo
+  // remos).
+  //
+  // Hubo un intento de tercera franja, "Espalda alta", que Koku deshizo
+  // el 9/9/2026: sus cuatro ejercicios se fusionaron con espalda media,
+  // y lo que de verdad hacia falta ahi era otra cosa -- el HOMBRO
+  // POSTERIOR, que es un hombro, no una espalda, y por eso vive abajo
+  // junto a "Hombros".
+  { id: 'espalda_media', label: 'Espalda media' },
+  { id: 'dorsales', label: 'Dorsales' },
+  { id: 'lumbar', label: 'Lumbar' },
+  { id: 'hombros', label: 'Hombros' },
+  // El deltoides posterior, separado del resto del hombro (peticion de
+  // Koku). En el diagrama se queda con el hombro de la figura de
+  // ESPALDA, que anatomicamente es justo eso; "Hombros" pasa a marcar
+  // solo la figura de frente. Nace SIN ejercicios asignados: la libreria
+  // original no lo distinguia, asi que el trabajo de hombro posterior
+  // (face pulls, aperturas invertidas...) sigue etiquetado como
+  // "hombros" hasta que se recoloque a mano desde la ficha de cada uno.
+  { id: 'hombro_posterior', label: 'Hombro posterior' },
+  { id: 'trapecio', label: 'Trapecio' },
+  { id: 'biceps', label: 'Bíceps' },
+  { id: 'triceps', label: 'Tríceps' },
+  { id: 'antebrazo', label: 'Antebrazo' },
+  { id: 'core', label: 'Core / Abdomen' },
+  { id: 'gluteo', label: 'Glúteo' },
+  { id: 'cuadriceps', label: 'Cuádriceps' },
+  // "Isquiotibiales" y no "isquiosurales": el segundo es el termino de
+  // anatomia/fisioterapia y es mas preciso (el biceps femoral se inserta
+  // en el perone, no en la tibia), pero Koku pidio el de toda la vida,
+  // que es el que se busca al montar un dia. El id interno sigue siendo
+  // 'isquios', asi que esto no toca ni los ejercicios ya clasificados ni
+  // el diagrama.
+  { id: 'isquios', label: 'Isquiotibiales' },
+  { id: 'aductores', label: 'Aductores' },
+  { id: 'abductores', label: 'Abductores' },
+  { id: 'gemelos', label: 'Gemelos' },
+];
+// id de la taxonomia -> etiqueta bonita; cualquier otra cosa (texto
+// libre de antes del rediseno) se devuelve tal cual.
+function gymMuscleGroupLabel(value) {
+  if (!value) return '';
+  const group = GYM_MUSCLE_GROUPS.find((g) => g.id === value);
+  return group ? group.label : value;
+}
+
+// --- Libreria de ejercicios empaquetada (Fase 2) ----------------------
+// ~870 ejercicios de https://github.com/yuhonas/free-exercise-db
+// (dominio publico, licencia Unlicense), que a su vez nacio de
+// https://github.com/wrkout/exercises.json de Ollie Jennings (tambien
+// Unlicense). ¡Gracias a ambos! Los nombres/musculos/material estan
+// traducidos al español; las instrucciones se van traduciendo por
+// tandas. El JSON pesa ~840 KB, asi que NO se carga al arrancar la app:
+// fetch perezoso la primera vez que se abre el buscador, cacheado en
+// esta variable para el resto de la sesion (mismo patron que
+// loadViajesMap).
+let gymExerciseLibrary = null;
+async function loadGymExerciseLibrary() {
+  if (gymExerciseLibrary) return gymExerciseLibrary;
+  const resp = await fetch('gym-exercise-library.json');
+  if (!resp.ok) throw new Error('No se pudo cargar la librería de ejercicios.');
+  gymExerciseLibrary = await resp.json();
+  return gymExerciseLibrary;
+}
+
+// Lo que hay escrito en el buscador de TUS ejercicios. Vive en memoria a
+// proposito (no en localStorage): un filtro que sobrevive a cerrar la app
+// hace pensar que has perdido ejercicios.
+let gymExercisesFiltro = '';
+
+// Sin tildes y en minusculas, para que "biceps" encuentre "Bíceps".
+function gymNormalizarBusqueda(texto) {
+  return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 function renderGymExercisesList() {
   const list = document.getElementById('gym-exercises-list');
   list.innerHTML = '';
+
+  // El buscador solo asoma cuando hay bastantes como para que estorbe
+  // buscarlos a ojo -- con cuatro ejercicios seria una fila desperdiciada.
+  // Se queda visible si hay algo escrito, para poder borrarlo.
+  const wrap = document.getElementById('gym-exercises-search-wrap');
+  const campo = document.getElementById('gym-exercises-search');
+  const merecePena = state.gymExercises.length >= 8 || gymExercisesFiltro.trim() !== '';
+  wrap.classList.toggle('hidden', !merecePena);
+  document.getElementById('btn-gym-exercises-search-clear').classList.toggle('hidden', gymExercisesFiltro === '');
+  // No se pisa lo que la persona esta escribiendo (el repintado puede
+  // venir de otra cosa, como guardar un ejercicio).
+  if (campo.value !== gymExercisesFiltro) campo.value = gymExercisesFiltro;
+
   if (state.gymExercises.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavía no tienes ejercicios. Se crean desde aquí o al añadirlos a una rutina/sesión.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes ejercicios. Añádelos desde la librería o crea uno a mano.</p>';
     return;
   }
-  state.gymExercises.forEach((ex) => {
+
+  // Busca por nombre Y por musculo: "pierna" saca todas las de pierna
+  // aunque ninguna se llame asi.
+  // El .trim() NO es cosmetico: sin el, escribir solo espacios (el
+  // autocorrector del movil los mete con facilidad) buscaba " " y dejaba
+  // la lista vacia, como si hubieras perdido los ejercicios. Encontrado
+  // forzando fallos.
+  const q = gymNormalizarBusqueda(gymExercisesFiltro).trim();
+  const visibles = q === ''
+    ? state.gymExercises
+    : state.gymExercises.filter((ex) => gymNormalizarBusqueda(
+        `${ex.name} ${gymMuscleGroupLabel(ex.muscleGroup) || ''} ${ex.equipment || ''}`
+      ).includes(q));
+
+  if (visibles.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Ningún ejercicio tuyo coincide con eso.</p>';
+    return;
+  }
+
+  visibles.forEach((ex) => {
+    // "unilateral" se ensena aqui para que se vea DONDE se configura (el
+    // lapiz de esta misma fila) -- Koku lo estuvo buscando en el dia.
+    const extras = [
+      gymMuscleGroupLabel(ex.muscleGroup),
+      ex.equipment,
+      ex.unilateral ? (ex.countSidesSeparately ? 'unilateral, por lados' : 'unilateral') : '',
+    ].filter(Boolean).join(' · ');
     const row = document.createElement('div');
-    row.className = 'gym-list-item';
+    row.className = 'gym-list-item gym-exercise-row';
     row.innerHTML = `
-      <span class="gym-list-item-name">${escapeHtml(ex.name)}${ex.muscleGroup ? ` <span class="gym-list-item-muted">(${escapeHtml(ex.muscleGroup)})</span>` : ''}</span>
+      <span class="gym-list-item-name">${escapeHtml(ex.name)}${extras ? ` <span class="gym-list-item-muted">(${escapeHtml(extras)})</span>` : ''}</span>
+    `;
+    // Deslizar en vez del lapiz (peticion de Koku: "por seguir un poco
+    // con la misma dinamica en todo, en vez de boton, hazlo deslizable").
+    // Mismo componente que las notas, las carpetas, las sesiones del
+    // historial y las tarjetas de grupo.
+    list.appendChild(wrapRowWithSwipeActions(row, {
+      onEdit: () => openGymExerciseModal(ex),
+      onDelete: () => borrarEjercicioDeLaLista(ex),
+    }));
+  });
+}
+
+// Borrar desde el deslizamiento. El servidor RECHAZA borrar un ejercicio
+// que ya tiene series apuntadas (has_history), asi que ese error se
+// cuenta con palabras en vez de soltar el codigo tal cual.
+async function borrarEjercicioDeLaLista(ex) {
+  const ok = await showAppConfirm(`¿Eliminar “${ex.name}”?`, { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  try {
+    await api(`/api/gym-exercises/${ex.id}`, { method: 'DELETE' });
+  } catch (err) {
+    showAppAlert(err && err.message ? err.message : 'No se ha podido eliminar el ejercicio.');
+    return;
+  }
+  await loadGymExercises();
+  renderGymExercisesList();
+}
+
+document.getElementById('gym-exercises-search').addEventListener('input', (e) => {
+  gymExercisesFiltro = e.target.value;
+  renderGymExercisesList();
+});
+document.getElementById('btn-gym-exercises-search-clear').addEventListener('click', () => {
+  gymExercisesFiltro = '';
+  renderGymExercisesList();
+  document.getElementById('gym-exercises-search').focus();
+});
+
+// --- Pestana "Plan": bloques y sus dias (rediseno de Gimnasio) --------
+// Dos niveles dentro de la misma pestana, tipo carpetas de Notas: la
+// lista de bloques, y al entrar en uno, sus dias (las filas de
+// gym_routines de siempre). gymCurrentBlockId dice donde estamos:
+// null = nivel de bloques.
+let gymCurrentBlockId = null;
+
+function renderGymBlocksList() {
+  const list = document.getElementById('gym-blocks-list');
+  list.innerHTML = '';
+  if (state.gymBlocks.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavía no tienes bloques. Un bloque es una etapa de entrenamiento (ej. "Volumen Invierno") con sus días dentro.</p>';
+    return;
+  }
+  state.gymBlocks.forEach((b) => {
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-block-item';
+    row.dataset.openGymBlock = b.id;
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(b.name)}${b.isActive ? ' <span class="gym-block-active-badge">Activo</span>' : ''}
+        <span class="gym-list-item-muted">(${b.dayCount} día${b.dayCount === 1 ? '' : 's'})</span></span>
       <div class="gym-list-item-actions">
-        <button type="button" class="icon-btn" data-edit-gym-exercise="${ex.id}" aria-label="Editar ejercicio">✎</button>
+        ${b.isActive ? '' : `<button type="button" class="secondary-btn gym-block-activate-btn" data-activate-gym-block="${b.id}">Activar</button>`}
+        <button type="button" class="icon-btn" data-edit-gym-block="${b.id}" aria-label="Editar bloque">✎</button>
       </div>
     `;
+    // Toda la fila entra al bloque, salvo los botones de la derecha (que
+    // paran la propagacion) -- mismo patron que las filas de sesion.
+    row.addEventListener('click', () => openGymBlockDays(b.id));
     list.appendChild(row);
   });
-  list.querySelectorAll('[data-edit-gym-exercise]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      openGymExerciseModal(state.gymExercises.find((e) => e.id === Number(btn.dataset.editGymExercise)));
+  list.querySelectorAll('[data-activate-gym-block]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api(`/api/gym-blocks/${btn.dataset.activateGymBlock}/activate`, { method: 'POST' });
+      await loadGymBlocks();
+      renderGymBlocksList();
+    });
+  });
+  list.querySelectorAll('[data-edit-gym-block]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openGymBlockModal(state.gymBlocks.find((b) => b.id === Number(btn.dataset.editGymBlock)));
     });
   });
 }
 
+// Entra al nivel de dias de UN bloque (o vuelve al de bloques con null).
+function openGymBlockDays(blockId) {
+  gymCurrentBlockId = blockId || null;
+  document.getElementById('gym-blocks-level').classList.toggle('hidden', gymCurrentBlockId !== null);
+  document.getElementById('gym-block-days-level').classList.toggle('hidden', gymCurrentBlockId === null);
+  if (gymCurrentBlockId !== null) {
+    const block = state.gymBlocks.find((b) => b.id === gymCurrentBlockId);
+    document.getElementById('gym-block-days-title').textContent = block ? block.name : '';
+    renderGymRoutinesList();
+  }
+}
+document.getElementById('btn-gym-back-to-blocks').addEventListener('click', async () => {
+  // Al volver se recargan los bloques para que el contador de dias de
+  // cada tarjeta refleje lo que se acabe de crear/borrar dentro.
+  await loadGymBlocks();
+  renderGymBlocksList();
+  openGymBlockDays(null);
+});
+
 function renderGymRoutinesList() {
   const list = document.getElementById('gym-routines-list');
   list.innerHTML = '';
-  if (state.gymRoutines.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavía no tienes rutinas. Crea una arriba.</p>';
+  // Solo los dias del bloque abierto -- el filtrado se hace aqui en
+  // cliente (state.gymRoutines ya esta entero en memoria) en vez de
+  // repedir al backend con ?blockId, que existe para quien lo necesite.
+  const days = state.gymRoutines.filter((r) => r.blockId === gymCurrentBlockId);
+  if (days.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Este bloque todavía no tiene días. Crea uno arriba (ej. "Push 1").</p>';
     return;
   }
-  state.gymRoutines.forEach((r) => {
+  days.forEach((r) => {
     const row = document.createElement('div');
     row.className = 'gym-list-item';
     row.innerHTML = `
       <span class="color-dot" style="background-color: ${r.color}"></span>
       <span class="gym-list-item-name">${r.icon ? escapeHtml(r.icon) + ' ' : ''}${escapeHtml(r.name)} <span class="gym-list-item-muted">(${r.exercises.length} ejercicio${r.exercises.length === 1 ? '' : 's'})</span></span>
       <div class="gym-list-item-actions">
-        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar rutina">✎</button>
+        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar nombre, color y bloque">✎</button>
       </div>
     `;
+    // Dos entradas distintas al mismo dia, como pidio Koku: el lapiz
+    // para su FICHA (nombre, color, icono y bloque) y tocar la fila para
+    // sus EJERCICIOS, que es a lo que se entra el 90% de las veces.
+    row.addEventListener('click', () => {
+      openGymRoutineModal(state.gymRoutines.find((x) => x.id === r.id), 'ejercicios');
+    });
     list.appendChild(row);
   });
   list.querySelectorAll('[data-edit-gym-routine]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      openGymRoutineModal(state.gymRoutines.find((r) => r.id === Number(btn.dataset.editGymRoutine)));
+    btn.addEventListener('click', (e) => {
+      // Sin esto, el clic del lapiz sube tambien a la fila y abriria las
+      // dos mitades una encima de otra.
+      e.stopPropagation();
+      openGymRoutineModal(state.gymRoutines.find((r) => r.id === Number(btn.dataset.editGymRoutine)), 'ficha');
     });
   });
+}
+
+// Deslizar una fila hacia la izquierda para sacar Editar / Eliminar
+// ("como esta hecho en las notas", pedido de Koku). Nacio para el
+// historial del Gimnasio y ahora la usan tambien los grupos del
+// calendario, por eso el nombre generico -- si hace falta en un sitio
+// nuevo, basta con envolver la fila con esto.
+//
+// Reutiliza las mismas clases y el mismo estado de "solo una fila
+// abierta" (openSwipedNoteRow) que wrapNoteRowWithSwipe, para que abrir
+// una cierre la otra y el toque fuera las cierre todas.
+// botones: si se pasa, sustituye a la pareja Editar/Eliminar de siempre.
+// Cada entrada es [texto, clase, funcion]. Sirve para sitios que
+// necesitan otra combinacion -- los temas, por ejemplo, llevan tambien
+// "Exportar", y "Todos los eventos" no lleva ninguno.
+// anchoFijo: cuanto se desplaza la fila, en px, cuando NO hay botones
+// que medir (el caso de "Todos los eventos", que se desliza solo para
+// que salte su aviso). Sin esto, un contenedor de acciones vacio mide
+// cuatro pixeles y el gesto no se notaria.
+function wrapRowWithSwipeActions(row, { onEdit, onDelete, botones, anchoFijo, bloqueadoSi } = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'note-swipe-wrap';
+
+  const acciones = document.createElement('div');
+  acciones.className = 'note-swipe-actions';
+  const lista = botones || [['Editar', 'secondary-btn', onEdit], ['Eliminar', 'danger-btn', onDelete]];
+  lista.forEach(([texto, clase, fn]) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = clase;
+    btn.textContent = texto;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeSwipedNoteRow();
+      fn();
+    });
+    acciones.appendChild(btn);
+  });
+  wrap.appendChild(acciones);
+  wrap.appendChild(row);
+
+  // La fila SIGUE AL DEDO mientras deslizas y luego cae sola a su sitio
+  // (peticion de Koku: "dale animación al deslizar, para que se vea más
+  // fluido"). Mientras se arrastra se quita la transicion (clase
+  // is-dragging) y se escribe el transform a mano; al soltar se borra el
+  // transform en linea y manda otra vez el CSS, que anima el ultimo
+  // tramo.
+  const anchoAcciones = () => anchoFijo || acciones.offsetWidth || 152;
+  let inicio = null;
+  let horizontal = false;
+  const soltarArrastre = () => {
+    wrap.classList.remove('is-dragging');
+    row.style.transform = '';
+  };
+  row.addEventListener('pointerdown', (e) => {
+    // Hay filas que a veces tienen otro gesto encima (el modo mover del
+    // entreno): mientras ese esta activo, deslizar no hace nada.
+    if (bloqueadoSi && bloqueadoSi()) { inicio = null; return; }
+    inicio = { x: e.clientX, y: e.clientY };
+    horizontal = false;
+  });
+  row.addEventListener('pointermove', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    const dy = e.clientY - inicio.y;
+    if (!horizontal && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+      horizontal = true;
+      wrap.style.setProperty('--swipe-actions-width', `${anchoAcciones()}px`);
+      wrap.classList.add('is-dragging');
+    }
+    if (!horizontal) return;
+    const ancho = anchoAcciones();
+    const desde = wrap.classList.contains('is-open') ? -ancho : 0;
+    let x = desde + dx;
+    // Fuera de los topes cuesta mas tirar (goma), para que se note el
+    // limite sin bloquearse de golpe.
+    if (x > 0) x *= 0.3;
+    else if (x < -ancho) x = -ancho + (x + ancho) * 0.3;
+    row.style.transform = `translateX(${x}px)`;
+  });
+  row.addEventListener('pointerup', (e) => {
+    if (!inicio) return;
+    const dx = e.clientX - inicio.x;
+    inicio = null;
+    if (!horizontal) return;
+    const ancho = anchoAcciones();
+    const desde = wrap.classList.contains('is-open') ? -ancho : 0;
+    const x = desde + dx;
+    soltarArrastre();
+    // Se queda donde estuviera mas cerca: pasada la mitad, abierta.
+    if (x < -ancho / 2) {
+      if (openSwipedNoteRow !== wrap) closeSwipedNoteRow();
+      wrap.style.setProperty('--swipe-actions-width', `${ancho}px`);
+      const yaEstaba = wrap.classList.contains('is-open');
+      wrap.classList.add('is-open');
+      openSwipedNoteRow = wrap;
+      // Aviso para quien quiera enterarse de que esta fila ACABA de
+      // abrirse (lo usa "Todos los eventos" para sacar su dialogo). Va
+      // aqui y no en el pointermove a proposito: si saltara a mitad del
+      // arrastre, cortaria el gesto en seco.
+      if (!yaEstaba) row.dispatchEvent(new CustomEvent('swipeabierto'));
+    } else if (wrap.classList.contains('is-open')) {
+      closeSwipedNoteRow();
+    }
+    // Un deslizamiento no debe abrir la sesion: se descarta ese click.
+    row.dataset.swiped = '1';
+  });
+  row.addEventListener('pointercancel', () => {
+    inicio = null;
+    horizontal = false;
+    soltarArrastre();
+  });
+  row.addEventListener('click', (e) => {
+    if (row.dataset.swiped) {
+      delete row.dataset.swiped;
+      if (wrap.classList.contains('is-open')) { e.stopPropagation(); e.preventDefault(); }
+    }
+  }, true);
+  return wrap;
+}
+
+// Borrar una sesion desde el deslizamiento (mismo aviso que el boton de
+// dentro del modal: aqui SI se pierde historial).
+async function deleteGymSessionById(id) {
+  const ok = await showAppConfirm('¿Eliminar esta sesión y todas sus series? Esto sí borra historial.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
+  await loadGymSessions();
+  renderGymSessionsList();
+  populateGymProgressExerciseSelect();
+}
+
+// --- Series alargadas: dropset y rest-pause ---------------------------
+// Un DROPSET es una serie que, al llegar al limite, sigue bajando el
+// peso; un REST-PAUSE es una serie que para unos segundos y sigue con el
+// MISMO peso. Los dos se apuntan DESPUES de la serie (peticion de Koku:
+// "hay veces que lo hago y otras que no, depende de la serie"), asi que
+// no son una configuracion del ejercicio sino algo que se anade en el
+// dialogo de "¿has acabado la serie?".
+//
+// Cada tramo extra viaja dentro de su serie madre, en `set.segments`
+// (ver serializeSets en routes-local/gymSessions.js). Las tres reglas
+// que decidio Koku, y de donde salen estas funciones:
+//   1. Una serie alargada cuenta como UNA serie, no como tres. Por eso
+//      los tramos van anidados y nunca sueltos en la lista.
+//   2. El VOLUMEN suma todos los tramos: es trabajo real, y si no
+//      sumara, la grafica bajaria justo el dia que mas aprietas.
+//   3. Cualquier tramo puede ser RECORD ("hay veces que la segunda sale
+//      mejor que la primera"), asi que los PRs miran serie y tramos por
+//      igual -- por eso existe gymSetConTramos().
+const GYM_SEGMENT_LABELS = { dropset: 'Drop', restpause: 'R-P' };
+
+// Serie llevada al fallo: se marca en el mismo dialogo de fin de serie y
+// se guarda en set_type = 'failure' (valor que el esquema ya tenia
+// reservado). Es una ETIQUETA, no cambia ningun calculo: al fallo o no,
+// las repeticiones y los kilos son los que son, y una serie al fallo es
+// justo la que MAS merece contar como record (a diferencia del
+// calentamiento, que sigue fuera de los PRs).
+const GYM_FAILURE_CHIP = '<span class="gym-set-failure-chip" title="Serie llevada al fallo">Fallo</span>';
+function gymFailureChipHtml(esAlFallo) {
+  return esAlFallo ? GYM_FAILURE_CHIP : '';
+}
+
+// CUANTO PESA DE MAS una serie al fallo en el volumen. Decision de Koku
+// ("para que se tenga en cuenta para las graficas, aunque haga dropset y
+// no haga las mismas repes que en la primera"): al final de una serie
+// exprimida mueves menos kilos pero el esfuerzo es mayor, y con el
+// volumen a pelo esa serie parecia PEOR que una floja.
+//
+// Aviso importante, porque es facil olvidarlo: no hay ninguna cifra
+// estandar para esto, es un numero elegido. Por eso
+//   1. los kg GUARDADOS son siempre los de verdad -- el factor se aplica
+//      solo al PINTAR, nunca al escribir en la base;
+//   2. es ajustable por dispositivo (Progreso > "Peso extra de una serie
+//      al fallo"), asi que cambiarlo no reescribe ningun historial: los
+//      mismos datos se vuelven a sumar con otro numero;
+//   3. x1 lo desactiva del todo y deja el volumen como los kg reales.
+// El factor se aplica a la serie ENTERA, tramos de dropset/rest-pause
+// incluidos: lo que se llevo al fallo fue la serie completa.
+// Por defecto x1,25: lo eligio Koku ya usando la app de verdad, y con un
+// criterio concreto de que es "al fallo" -- "tratar de hacer la
+// repeticion y no poder terminarla, no decir okey creo que no puedo una
+// mas, sino forzar esa otra mas y no conseguir sacarla".
+const GYM_FAILURE_FACTORS = [1, 1.1, 1.2, 1.25, 1.5];
+function getGymFailureFactor() {
+  const guardado = Number(localStorage.getItem('gymFailureFactor'));
+  return GYM_FAILURE_FACTORS.includes(guardado) ? guardado : 1.25;
+}
+// Volumen ya ajustado a partir de los kg REALES y de cuantos de esos kg
+// salieron de series al fallo. Lo usan por igual el cliente y lo que
+// llega agregado de las rutas (que devuelven las dos cifras aparte, en
+// kg de verdad, precisamente para poder hacer esta cuenta aqui).
+function gymVolumenAjustado(volumenKg, volumenAlFalloKg) {
+  return (Number(volumenKg) || 0) + (Number(volumenAlFalloKg) || 0) * (getGymFailureFactor() - 1);
+}
+
+function gymSetSegments(set) {
+  return set && Array.isArray(set.segments) ? set.segments.filter(Boolean) : [];
+}
+
+// Kilos REALES movidos por la serie entera (madre + tramos), sin
+// ajustar. Es lo que se guarda y lo que hay que usar para cualquier cosa
+// que quiera saber cuanto peso se movio de verdad.
+function gymSetVolumeRealKg(set) {
+  let total = (Number(set.reps) || 0) * (Number(set.weightKg) || 0);
+  for (const seg of gymSetSegments(set)) {
+    total += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
+  }
+  return total;
+}
+
+// ¿Esta serie se llevo al fallo? Los tramos heredan la marca de su madre
+// (llevan su propio set_type de 'dropset'/'restpause'), asi que la
+// pregunta siempre es por la serie, nunca por un tramo suelto.
+function gymSetEsAlFallo(set) {
+  return set.setType === 'failure' || set.failure === true;
+}
+
+// El volumen tal y como se PINTA: los kg reales, con el peso extra si la
+// serie fue al fallo. Lo usan el historial, el mapa de musculos, la
+// grafica semanal y los PRs, para que todos cuenten igual.
+function gymSetVolumeKg(set) {
+  const real = gymSetVolumeRealKg(set);
+  return gymSetEsAlFallo(set) ? gymVolumenAjustado(real, real) : real;
+}
+
+// La serie y sus tramos como una lista plana de "cosas con peso y
+// repeticiones", para lo que mira serie a serie (los PRs). Los tramos
+// heredan el ejercicio y el lado de su madre.
+function gymSetConTramos(set) {
+  const lista = [set];
+  for (const seg of gymSetSegments(set)) {
+    lista.push({
+      exerciseId: set.exerciseId,
+      exerciseName: set.exerciseName,
+      reps: seg.reps,
+      weightKg: seg.weightKg,
+      setType: seg.kind,
+      side: set.side || null,
+    });
+  }
+  return lista;
+}
+
+// Etiqueta corta para la fila de una serie alargada: "Drop x2", "R-P".
+function gymSegmentChipHtml(set) {
+  const segs = gymSetSegments(set);
+  if (segs.length === 0) return '';
+  const kinds = [...new Set(segs.map((seg) => (seg.kind === 'restpause' ? 'restpause' : 'dropset')))];
+  const texto = kinds.map((k) => GYM_SEGMENT_LABELS[k]).join('+');
+  const sufijo = segs.length > 1 ? ` ×${segs.length}` : '';
+  return `<span class="gym-set-segment-chip" title="Serie alargada: ${segs.length} tramo${segs.length === 1 ? '' : 's'} extra">${texto}${sufijo}</span>`;
 }
 
 function renderGymSessionsList() {
@@ -7685,22 +9427,59 @@ function renderGymSessionsList() {
     list.innerHTML = '<p class="empty-hint">Todavía no has registrado ninguna sesión.</p>';
     return;
   }
+  const unit = getGymWeightUnitLabel();
   state.gymSessions.forEach((s) => {
-    const exerciseNames = [...new Set(s.sets.map((set) => set.exerciseName))];
     const row = document.createElement('div');
     row.className = 'gym-list-item gym-session-item';
     row.dataset.editGymSession = s.id;
+
+    // Linea de datos rapidos: duracion (si la hay), y para entrenos de
+    // pesas tambien nº de series y volumen total.
+    const statBits = [];
+    if (s.durationSeconds) statBits.push(`${Math.max(1, Math.round(s.durationSeconds / 60))} min`);
+    if (s.type !== 'activity' && s.sets.length > 0) {
+      statBits.push(`${s.sets.length} serie${s.sets.length === 1 ? '' : 's'}`);
+      // Los tramos de una serie alargada suman kilos pero NO series:
+      // por eso el volumen usa gymSetVolumeKg y el conteo de arriba es
+      // sets.length a secas (los tramos van anidados, no en la lista).
+      const volumeKg = s.sets.reduce((acc, set) => acc + gymSetVolumeKg(set), 0);
+      if (volumeKg > 0) statBits.push(`${gymWeightKgToDisplay(volumeKg)} ${unit}`);
+      // Tiempo REAL de trabajo (suma de lo que duraron las series), solo
+      // si la sesion se registro con el boton de empezar/terminar serie.
+      const workSeconds = s.sets.reduce((acc, set) => acc + (set.durationSeconds || 0), 0);
+      if (workSeconds > 0) statBits.push(`${gymFormatWorkTime(workSeconds)} de trabajo`);
+    }
+
+    if (s.type === 'activity') {
+      row.innerHTML = `
+        <span class="gym-session-item-date">${formatGymDate(s.date)}</span>
+        <span class="gym-session-item-routine">${escapeHtml(s.activityName || 'Actividad')}</span>
+        <span class="gym-list-item-muted">${escapeHtml([gymActivityKindLabel(s.activityKind), ...statBits].join(' · '))}</span>
+      `;
+      row.addEventListener('click', () => openGymActivityModal(s));
+      list.appendChild(wrapRowWithSwipeActions(row, {
+        onEdit: () => openGymActivityModal(s),
+        onDelete: () => deleteGymSessionById(s.id),
+      }));
+      return;
+    }
+
+    const exerciseNames = [...new Set(s.sets.map((set) => set.exerciseName))];
     row.innerHTML = `
       <span class="gym-session-item-date">${formatGymDate(s.date)}</span>
       ${
         s.routineName
           ? `<span class="gym-session-item-routine"><span class="color-dot" style="background-color: ${s.routineColor}"></span>${s.routineIcon ? escapeHtml(s.routineIcon) + ' ' : ''}${escapeHtml(s.routineName)}</span>`
-          : '<span class="gym-session-item-routine gym-list-item-muted">Sesion libre</span>'
+          : '<span class="gym-session-item-routine gym-list-item-muted">Sesión libre</span>'
       }
+      ${statBits.length ? `<span class="gym-list-item-muted">${escapeHtml(statBits.join(' · '))}</span>` : ''}
       <span class="gym-list-item-muted">${exerciseNames.length ? exerciseNames.map(escapeHtml).join(', ') : 'Sin ejercicios'}</span>
     `;
     row.addEventListener('click', () => openGymSessionModal(s));
-    list.appendChild(row);
+    list.appendChild(wrapRowWithSwipeActions(row, {
+      onEdit: () => openGymSessionModal(s),
+      onDelete: () => deleteGymSessionById(s.id),
+    }));
   });
 }
 
@@ -8353,15 +10132,90 @@ function renderFinanzasAssetValuationChart(valuations) {
 }
 
 // --- Modal de ejercicio -------------------------------------------------
+// El grupo muscular ya no es texto libre: select con la taxonomia fija
+// (GYM_MUSCLE_GROUPS). Si se edita un ejercicio de antes del rediseno
+// cuyo valor no esta en la taxonomia, ese valor viejo se anade como
+// opcion extra para no perderlo sin querer al guardar.
+const gymExerciseMuscleField = createSelectField({
+  options: [{ value: '', label: 'Sin grupo' }],
+  initialValue: '',
+  placeholder: 'Sin grupo',
+});
+document.getElementById('gym-exercise-muscle-field').appendChild(gymExerciseMuscleField.element);
+
+// Musculos SECUNDARIOS del ejercicio (chips activables): cuentan en el
+// mapa de musculos a mitad de peso, igual que los de la libreria.
+let gymExerciseSecondarySel = new Set();
+function renderGymExerciseSecondaryChips() {
+  const container = document.getElementById('gym-exercise-secondary-field');
+  container.innerHTML = '';
+  GYM_MUSCLE_GROUPS.forEach((g) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'gym-secondary-chip' + (gymExerciseSecondarySel.has(g.id) ? ' active' : '');
+    chip.textContent = g.label;
+    chip.addEventListener('click', () => {
+      if (gymExerciseSecondarySel.has(g.id)) gymExerciseSecondarySel.delete(g.id);
+      else gymExerciseSecondarySel.add(g.id);
+      renderGymExerciseSecondaryChips();
+    });
+    container.appendChild(chip);
+  });
+}
+
+// Si el modal se abrio desde el buscador estando en "modo elegir" (el +
+// del entreno en vivo), el ejercicio recien creado se añade directo a la
+// sesion en curso al guardar.
+let gymExerciseAddToLivePending = false;
+
+// Lo de "contar cada lado por separado" y el descanso entre lados solo
+// pinta algo si el ejercicio es unilateral: se esconde si no lo es.
+function refreshGymUnilateralFields() {
+  const on = document.getElementById('gym-exercise-unilateral').checked;
+  document.getElementById('gym-exercise-unilateral-extra').classList.toggle('hidden', !on);
+}
+document.getElementById('gym-exercise-unilateral').addEventListener('change', refreshGymUnilateralFields);
+
+// "90" -> "Descanso: 1:30 min". El campo va en segundos y sin esto no se
+// nota (mismo apano que ya tenia la fila del dia).
+function refreshGymExerciseDefaultRestPreview() {
+  const n = Number(document.getElementById('gym-exercise-default-rest').value);
+  document.getElementById('gym-exercise-default-rest-preview').textContent =
+    n > 0 ? `Descanso: ${gymLiveFormatClock(n)} min` : '';
+}
+document.getElementById('gym-exercise-default-rest').addEventListener('input', refreshGymExerciseDefaultRestPreview);
+
 function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
   document.getElementById('gym-exercise-id').value = exercise ? exercise.id : '';
   document.getElementById('gym-exercise-name').value = exercise ? exercise.name : '';
-  document.getElementById('gym-exercise-muscle-group').value = exercise ? exercise.muscleGroup || '' : '';
+  document.getElementById('gym-exercise-equipment').value = exercise ? exercise.equipment || '' : '';
+  document.getElementById('gym-exercise-notes').value = exercise ? exercise.notes || '' : '';
+  document.getElementById('gym-exercise-unilateral').checked = !!(exercise && exercise.unilateral);
+  document.getElementById('gym-exercise-sides-separately').checked = !!(exercise && exercise.countSidesSeparately);
+  document.getElementById('gym-exercise-side-rest').value = exercise && exercise.sideRestSeconds != null ? exercise.sideRestSeconds : '';
+  document.getElementById('gym-exercise-default-sets').value = exercise && exercise.defaultSets != null ? exercise.defaultSets : '';
+  document.getElementById('gym-exercise-default-reps').value = exercise && exercise.defaultReps != null ? exercise.defaultReps : '';
+  document.getElementById('gym-exercise-default-rest').value = exercise && exercise.defaultRestSeconds != null ? exercise.defaultRestSeconds : '';
+  refreshGymExerciseDefaultRestPreview();
+  refreshGymUnilateralFields();
+  gymExerciseSecondarySel = new Set(exercise && Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : []);
+  renderGymExerciseSecondaryChips();
+  const options = [
+    { value: '', label: 'Sin grupo' },
+    ...GYM_MUSCLE_GROUPS.map((g) => ({ value: g.id, label: g.label })),
+  ];
+  const current = exercise ? exercise.muscleGroup || '' : '';
+  if (current && !GYM_MUSCLE_GROUPS.some((g) => g.id === current)) {
+    options.push({ value: current, label: `${current} (texto antiguo)` });
+  }
+  gymExerciseMuscleField.setOptions(options);
+  gymExerciseMuscleField.setValue(current);
   document.getElementById('btn-delete-gym-exercise').classList.toggle('hidden', !exercise);
   document.getElementById('gym-exercise-modal').classList.remove('hidden');
 }
 function closeGymExerciseModal() {
+  gymExerciseAddToLivePending = false;
   document.getElementById('gym-exercise-modal').classList.add('hidden');
 }
 document.getElementById('btn-new-gym-exercise').addEventListener('click', () => openGymExerciseModal(null));
@@ -8373,16 +10227,41 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
   const id = document.getElementById('gym-exercise-id').value;
   const payload = {
     name: document.getElementById('gym-exercise-name').value,
-    muscleGroup: document.getElementById('gym-exercise-muscle-group').value,
+    muscleGroup: gymExerciseMuscleField.getValue(),
+    equipment: document.getElementById('gym-exercise-equipment').value,
+    secondaryMuscles: [...gymExerciseSecondarySel],
+    notes: document.getElementById('gym-exercise-notes').value,
+    unilateral: document.getElementById('gym-exercise-unilateral').checked,
+    countSidesSeparately: document.getElementById('gym-exercise-sides-separately').checked,
+    sideRestSeconds: document.getElementById('gym-exercise-side-rest').value,
+    defaultSets: document.getElementById('gym-exercise-default-sets').value,
+    defaultReps: document.getElementById('gym-exercise-default-reps').value,
+    defaultRestSeconds: document.getElementById('gym-exercise-default-rest').value,
   };
+  // El flag se captura ANTES de cerrar: closeGymExerciseModal lo resetea.
+  const addToLive = !id && gymExerciseAddToLivePending;
+  let saved;
   if (id) {
-    await api(`/api/gym-exercises/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    saved = await api(`/api/gym-exercises/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   } else {
-    await api('/api/gym-exercises', { method: 'POST', body: JSON.stringify(payload) });
+    saved = await api('/api/gym-exercises', { method: 'POST', body: JSON.stringify(payload) });
   }
   closeGymExerciseModal();
   await loadGymExercises();
   renderGymExercisesList();
+  // Creado desde el buscador en modo elegir: directo al entreno en curso.
+  if (addToLive && gymLiveSession && saved && !gymLiveSession.exercises.some((x) => x.exerciseId === saved.id)) {
+    gymLiveSession.exercises.push({
+      exerciseId: saved.id,
+      note: '',
+      rpe: '',
+      collapsed: false,
+      sets: gymBuildSetsForExercise(saved.id, 1, ''),
+    });
+    gymLiveStore();
+    gymLivePrevSets.set(saved.id, await api(`/api/gym-sessions/last-sets/${saved.id}`));
+    renderGymLiveExercises();
+  }
 });
 
 document.getElementById('btn-delete-gym-exercise').addEventListener('click', async () => {
@@ -8390,7 +10269,7 @@ document.getElementById('btn-delete-gym-exercise').addEventListener('click', asy
   try {
     await api(`/api/gym-exercises/${id}`, { method: 'DELETE' });
   } catch (err) {
-    alert(err.message);
+    showAppAlert(err.message);
     return;
   }
   closeGymExerciseModal();
@@ -8398,7 +10277,3160 @@ document.getElementById('btn-delete-gym-exercise').addEventListener('click', asy
   renderGymExercisesList();
 });
 
-// --- Modal de rutina ------------------------------------------------------
+// --- Buscador de la libreria de ejercicios (Fase 2) --------------------
+// Ver el comentario de loadGymExerciseLibrary() arriba (origen del
+// dataset y creditos). El buscador filtra en cliente sobre el JSON
+// entero; para no pintar 870 filas de golpe se corta en 80 con un aviso
+// de "afina la busqueda".
+const gymLibraryMuscleField = createSelectField({
+  options: [{ value: '', label: 'Todos los músculos' }, ...GYM_MUSCLE_GROUPS.map((g) => ({ value: g.id, label: g.label }))],
+  initialValue: '',
+  onChange: () => renderGymLibraryList(),
+});
+document.getElementById('gym-library-muscle-field').appendChild(gymLibraryMuscleField.element);
+
+const gymLibraryEquipmentField = createSelectField({
+  options: [{ value: '', label: 'Todo el material' }],
+  initialValue: '',
+  onChange: () => renderGymLibraryList(),
+});
+document.getElementById('gym-library-equipment-field').appendChild(gymLibraryEquipmentField.element);
+
+// Busqueda sin acentos ni mayusculas ("prensa" encuentra "Prensa",
+// "bicep" encuentra "Bíceps"...).
+function gymNormalizeSearch(text) {
+  return String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// Cuando el buscador de ejercicios esta en "modo elegir" (abierto desde
+// un entreno para anadir uno), aqui vive lo que hay que hacer con el
+// elegido. Se declara AQUI y no junto a su listener, varios miles de
+// lineas mas abajo: renderGymLibraryMine() la lee, y una variable `let`
+// leida antes de su declaracion revienta el archivo entero -- la trampa
+// de la zona muerta temporal que ya mordio una vez en settings.js.
+let gymLibraryPickCallback = null;
+
+// TUS ejercicios dentro del buscador, y solo en "modo elegir" (o sea,
+// abriendolo desde un entreno para anadir uno).
+//
+// El agujero que tapa esto: el "+" del entreno abria SOLO la libreria, asi
+// que un ejercicio creado por ti no habia manera de anadirlo sin volver a
+// crearlo. Y como lo que si podias anadir venia de la libreria, y la
+// libreria no marca unilaterales, nunca te preguntaba por el lado. Los dos
+// sintomas, una sola causa.
+function renderGymLibraryMine() {
+  const bloque = document.getElementById('gym-library-mine-block');
+  const list = document.getElementById('gym-library-mine');
+  const cabeceraLib = document.getElementById('gym-library-section-lib');
+  const eligiendo = !!gymLibraryPickCallback;
+  bloque.classList.toggle('hidden', !eligiendo);
+  cabeceraLib.classList.toggle('hidden', !eligiendo);
+  if (!eligiendo) return;
+
+  const search = gymNormalizeSearch(document.getElementById('gym-library-search').value.trim());
+  // Se filtra por nombre, musculo y material, igual que el buscador de la
+  // pestana Plan: escribir "pierna" saca las de pierna aunque no se llamen
+  // asi. Los que YA estan en el entreno no se ofrecen.
+  const yaEnElEntreno = new Set((gymLiveSession ? gymLiveSession.exercises : []).map((e) => e.exerciseId));
+  const mios = state.gymExercises.filter((ex) => {
+    if (yaEnElEntreno.has(ex.id)) return false;
+    if (!search) return true;
+    const texto = [ex.name, gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' ');
+    return gymNormalizeSearch(texto).includes(search);
+  });
+
+  list.innerHTML = '';
+  if (mios.length === 0) {
+    list.innerHTML = `<p class="empty-hint">${search ? 'Ninguno de los tuyos coincide.' : 'Todavía no tienes ejercicios propios.'}</p>`;
+    return;
+  }
+  mios.slice(0, 40).forEach((ex) => {
+    const meta = [gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' · ');
+    const row = document.createElement('div');
+    row.className = 'gym-list-item';
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(ex.name)}${meta ? ` <span class="gym-list-item-muted">(${escapeHtml(meta)})</span>` : ''}</span>
+      <div class="gym-list-item-actions"><button type="button" class="secondary-btn">Añadir</button></div>
+    `;
+    const anadir = () => gymAnadirEjercicioAlEntreno(ex.id);
+    row.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); anadir(); });
+    row.addEventListener('click', anadir);
+    list.appendChild(row);
+  });
+}
+
+// Meter un ejercicio YA EXISTENTE en el entreno en curso. Es lo mismo que
+// hacian por su cuenta el callback de la libreria y el de "crear
+// ejercicio propio", puesto en un solo sitio: gymBuildSetsForExercise es
+// quien decide si son una serie o dos (izquierda y derecha), asi que
+// cualquier camino que pase por aqui respeta los unilaterales.
+async function gymAnadirEjercicioAlEntreno(exerciseId) {
+  if (!gymLiveSession) return;
+  if (gymLiveSession.exercises.some((e) => e.exerciseId === exerciseId)) return;
+  gymLiveSession.exercises.push({
+    exerciseId,
+    note: '',
+    rpe: '',
+    collapsed: false,
+    sets: gymBuildSetsForExercise(exerciseId, 1, ''),
+  });
+  gymLiveStore();
+  try {
+    gymLivePrevSets.set(exerciseId, await api(`/api/gym-sessions/last-sets/${exerciseId}`));
+  } catch { /* sin "la ultima vez" se sigue igual */ }
+  renderGymLiveExercises();
+  closeGymLibraryModal();
+  gymLibraryPickCallback = null;
+}
+
+function renderGymLibraryList() {
+  renderGymLibraryMine();
+  const list = document.getElementById('gym-library-list');
+  if (!gymExerciseLibrary) return;
+  const search = gymNormalizeSearch(document.getElementById('gym-library-search').value.trim());
+  const muscle = gymLibraryMuscleField.getValue();
+  const equipment = gymLibraryEquipmentField.getValue();
+
+  // Ejercicios ya importados, para marcarlos y no ofrecer importarlos otra vez.
+  const importedIds = new Set(state.gymExercises.map((ex) => ex.libraryId).filter(Boolean));
+
+  const matches = gymExerciseLibrary.filter((e) => {
+    if (muscle && e.muscleGroup !== muscle && !e.primaryMuscles.includes(muscle)) return false;
+    if (equipment && e.equipment !== equipment) return false;
+    if (search && !gymNormalizeSearch(e.name).includes(search) && !gymNormalizeSearch(e.nameEn).includes(search)) return false;
+    return true;
+  });
+
+  list.innerHTML = '';
+  const CAP = 80;
+  matches.slice(0, CAP).forEach((e) => {
+    const meta = [gymMuscleGroupLabel(e.muscleGroup), e.equipment, e.level].filter(Boolean).join(' · ');
+    const imported = importedIds.has(e.id);
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-library-item';
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(e.name)}${meta ? ` <span class="gym-list-item-muted">(${escapeHtml(meta)})</span>` : ''}</span>
+      <div class="gym-list-item-actions">
+        ${imported
+          ? '<span class="gym-library-imported">✓ Importado</span>'
+          : `<button type="button" class="secondary-btn gym-library-import-btn" data-import-gym-library="${escapeHtml(e.id)}">+ Importar</button>`}
+      </div>
+    `;
+    // La fila entera abre la ficha (o, en modo elegir, elige directamente);
+    // el boton de importar corta la propagacion.
+    row.addEventListener('click', () => {
+      if (gymLibraryPickCallback) {
+        const cb = gymLibraryPickCallback;
+        gymLibraryPickCallback = null;
+        closeGymLibraryModal();
+        cb(e);
+        return;
+      }
+      openGymLibraryDetail(e);
+    });
+    list.appendChild(row);
+  });
+  if (matches.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Ningún ejercicio coincide con la búsqueda.</p>';
+  } else if (matches.length > CAP) {
+    const hint = document.createElement('p');
+    hint.className = 'empty-hint';
+    hint.textContent = `Mostrando ${CAP} de ${matches.length} — afina la búsqueda para ver el resto.`;
+    list.appendChild(hint);
+  }
+  list.querySelectorAll('[data-import-gym-library]').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (gymLibraryPickCallback) {
+        const entry = gymExerciseLibrary.find((e) => e.id === btn.dataset.importGymLibrary);
+        const cb = gymLibraryPickCallback;
+        gymLibraryPickCallback = null;
+        closeGymLibraryModal();
+        if (entry) cb(entry);
+        return;
+      }
+      await importGymLibraryExercise(btn.dataset.importGymLibrary);
+      renderGymLibraryList();
+    });
+  });
+}
+
+// Importa un ejercicio de la libreria a gym_exercises. El backend es
+// idempotente por libraryId (reimportar devuelve el existente), asi que
+// llamar esto dos veces no duplica nada.
+async function importGymLibraryExercise(libraryId) {
+  const entry = gymExerciseLibrary.find((e) => e.id === libraryId);
+  if (!entry) return;
+  await api('/api/gym-exercises', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: entry.name,
+      muscleGroup: entry.muscleGroup,
+      equipment: entry.equipment,
+      libraryId: entry.id,
+      secondaryMuscles: entry.secondaryMuscles,
+    }),
+  });
+  await loadGymExercises();
+  renderGymExercisesList();
+}
+
+async function openGymLibraryModal() {
+  document.getElementById('gym-library-modal').classList.remove('hidden');
+  const list = document.getElementById('gym-library-list');
+  if (!gymExerciseLibrary) {
+    list.innerHTML = '<p class="empty-hint">Cargando librería…</p>';
+    try {
+      await loadGymExerciseLibrary();
+    } catch (err) {
+      list.innerHTML = '';
+      showAppAlert(err.message);
+      return;
+    }
+    // El filtro de material se construye con lo que de verdad hay en el
+    // dataset (y solo la primera vez, el JSON no cambia en caliente).
+    const equipments = [...new Set(gymExerciseLibrary.map((e) => e.equipment).filter(Boolean))].sort();
+    gymLibraryEquipmentField.setOptions([
+      { value: '', label: 'Todo el material' },
+      ...equipments.map((eq) => ({ value: eq, label: eq })),
+    ]);
+  }
+  renderGymLibraryList();
+}
+function closeGymLibraryModal() {
+  document.getElementById('gym-library-modal').classList.add('hidden');
+  // Si se cierra sin elegir estando en modo elegir, el callback se tira
+  // (cancelar la eleccion no debe dejar el modo pegado para despues).
+  gymLibraryPickCallback = null;
+}
+document.getElementById('btn-open-gym-library').addEventListener('click', openGymLibraryModal);
+document.getElementById('btn-close-gym-library').addEventListener('click', closeGymLibraryModal);
+document.getElementById('gym-library-search').addEventListener('input', () => renderGymLibraryList());
+
+// "+ Crear ejercicio propio" desde el buscador (peticion de Koku: la
+// libreria es una propuesta, no un limite). Si el buscador estaba en
+// modo elegir (el + del entreno en vivo), se recuerda con el flag para
+// que el ejercicio recien creado entre directo a la sesion al guardar.
+document.getElementById('btn-gym-library-new-custom').addEventListener('click', () => {
+  gymExerciseAddToLivePending = !!gymLibraryPickCallback;
+  closeGymLibraryModal();
+  openGymExerciseModal(null);
+});
+
+// --- Ficha de un ejercicio de la libreria ------------------------------
+let gymLibraryDetailEntry = null;
+function openGymLibraryDetail(entry) {
+  gymLibraryDetailEntry = entry;
+  document.getElementById('gym-library-detail-title').textContent = entry.name;
+  const meta = [
+    gymMuscleGroupLabel(entry.muscleGroup),
+    entry.secondaryMuscles.length ? `secundarios: ${entry.secondaryMuscles.map(gymMuscleGroupLabel).join(', ')}` : null,
+    entry.equipment,
+    entry.level,
+    entry.category,
+  ].filter(Boolean).join(' · ');
+  document.getElementById('gym-library-detail-meta').textContent = `${meta} · (${entry.nameEn})`;
+  const listEl = document.getElementById('gym-library-detail-instructions');
+  listEl.innerHTML = '';
+  if (entry.instructions.length === 0) {
+    listEl.innerHTML = '<p class="empty-hint">Este ejercicio no trae instrucciones.</p>';
+  } else {
+    entry.instructions.forEach((step) => {
+      const li = document.createElement('li');
+      li.textContent = step;
+      listEl.appendChild(li);
+    });
+  }
+  document.getElementById('gym-library-detail-modal').classList.remove('hidden');
+}
+function closeGymLibraryDetail() {
+  document.getElementById('gym-library-detail-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-gym-library-detail').addEventListener('click', closeGymLibraryDetail);
+document.getElementById('btn-close-gym-library-detail-2').addEventListener('click', closeGymLibraryDetail);
+document.getElementById('btn-import-gym-library-detail').addEventListener('click', async () => {
+  if (!gymLibraryDetailEntry) return;
+  await importGymLibraryExercise(gymLibraryDetailEntry.id);
+  closeGymLibraryDetail();
+  renderGymLibraryList();
+});
+
+// --- Actividad rapida (Fase 4 del rediseno) ---------------------------
+// Cardio/clases/deporte sin series: tipo + nombre + duracion + fecha.
+// Se guarda como una gym_session con type='activity' (misma tabla que
+// los entrenos, ver el comentario del esquema) para que heatmap/racha
+// tengan una sola fuente de "dias con actividad".
+const GYM_ACTIVITY_KINDS = [
+  { id: 'cardio', label: 'Cardio' },
+  { id: 'clase', label: 'Clase dirigida' },
+  { id: 'deporte', label: 'Deporte' },
+  { id: 'otro', label: 'Otro' },
+];
+function gymActivityKindLabel(kind) {
+  const found = GYM_ACTIVITY_KINDS.find((k) => k.id === kind);
+  return found ? found.label : 'Actividad';
+}
+const gymActivityKindField = createSelectField({
+  options: GYM_ACTIVITY_KINDS.map((k) => ({ value: k.id, label: k.label })),
+  initialValue: 'cardio',
+});
+document.getElementById('gym-activity-kind-field').appendChild(gymActivityKindField.element);
+const gymActivityDateField = createDateField({ initialValue: new Date() });
+document.getElementById('gym-activity-date-field').appendChild(gymActivityDateField.element);
+
+function openGymActivityModal(session) {
+  document.getElementById('gym-activity-modal-title').textContent = session ? 'Editar actividad' : 'Actividad rápida';
+  document.getElementById('gym-activity-id').value = session ? session.id : '';
+  document.getElementById('gym-activity-name').value = session ? session.activityName || '' : '';
+  document.getElementById('gym-activity-duration').value = session && session.durationSeconds ? Math.round(session.durationSeconds / 60) : '';
+  gymActivityKindField.setValue(session && session.activityKind ? session.activityKind : 'cardio');
+  gymActivityDateField.setValue(session ? new Date(`${session.date}T00:00:00`) : new Date());
+  document.getElementById('btn-delete-gym-activity').classList.toggle('hidden', !session);
+  document.getElementById('gym-activity-modal').classList.remove('hidden');
+}
+function closeGymActivityModal() {
+  document.getElementById('gym-activity-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-gym-activity').addEventListener('click', () => openGymActivityModal(null));
+document.getElementById('btn-cancel-gym-activity').addEventListener('click', closeGymActivityModal);
+document.getElementById('btn-close-gym-activity').addEventListener('click', closeGymActivityModal);
+
+document.getElementById('gym-activity-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('gym-activity-id').value;
+  const minutes = Number(document.getElementById('gym-activity-duration').value);
+  const payload = {
+    date: toDateKey(gymActivityDateField.getValue()),
+    type: 'activity',
+    activityKind: gymActivityKindField.getValue(),
+    activityName: document.getElementById('gym-activity-name').value,
+    durationSeconds: minutes > 0 ? minutes * 60 : null,
+  };
+  if (id) {
+    await api(`/api/gym-sessions/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/gym-sessions', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeGymActivityModal();
+  await loadGymSessions();
+  renderGymSessionsList();
+  checkGymAchievements();
+});
+
+document.getElementById('btn-delete-gym-activity').addEventListener('click', async () => {
+  const id = document.getElementById('gym-activity-id').value;
+  const ok = await showAppConfirm('¿Eliminar esta actividad?', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
+  closeGymActivityModal();
+  await loadGymSessions();
+  renderGymSessionsList();
+});
+
+// --- Modo entrenar en vivo (Fase 3 del rediseno) ----------------------
+// El estado del entrenamiento en curso vive en localStorage
+// (gymLiveSession) y se reescribe entero en CADA cambio -- asi una
+// recarga o un cierre de la app a mitad de entreno no pierde nada, y al
+// volver aparece el boton de "continuar". Solo al Terminar se convierte
+// en una sesion de verdad (POST /api/gym-sessions) y se limpia.
+//
+// Los tiempos (cronometro de sesion y descanso) se calculan SIEMPRE
+// desde timestamps guardados (startedAt / restUntil), nunca sumando
+// ticks: en iOS el JS se congela con la app en segundo plano y un
+// contador de ticks se quedaria atras al volver.
+let gymLiveSession = null;      // espejo en memoria de localStorage.gymLiveSession
+let gymLiveTicker = null;       // setInterval de 1s SOLO para repintar reloj/descanso
+let gymLivePrevSets = new Map();// exerciseId -> { date, sets } para la columna "Anterior"
+
+function gymLiveStore() {
+  localStorage.setItem('gymLiveSession', JSON.stringify(gymLiveSession));
+}
+function gymLiveReadStored() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('gymLiveSession'));
+    return parsed && typeof parsed === 'object' && parsed.startedAt ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+// Alterna el boton grande de "Empezar" y el banner de "continuar" segun
+// haya o no un entrenamiento a medias guardado.
+function refreshGymLiveButtons() {
+  const stored = gymLiveReadStored();
+  document.getElementById('btn-gym-live-resume').classList.toggle('hidden', !stored);
+  document.getElementById('btn-gym-live-start').classList.toggle('hidden', !!stored);
+  refreshGymLiveIndicators();
+}
+// Con un entrenamiento activo, el boton "Herramientas" de la nav y la
+// tarjeta de Gimnasio se marcan en el color de acento con un puntito,
+// para que se vea de un vistazo que hay un entreno en marcha.
+function refreshGymLiveIndicators() {
+  const active = !!gymLiveReadStored();
+  const navBtn = document.querySelector('[data-mobile-nav="extensions"]');
+  if (navBtn) navBtn.classList.toggle('gym-live-indicator', active);
+  const gymCard = document.getElementById('btn-open-gym');
+  if (gymCard) gymCard.classList.toggle('gym-live-indicator', active);
+}
+
+// -- Selector de "que toca hoy" (dias del bloque activo o sesion libre) --
+function openGymStartModal() {
+  const activeBlock = state.gymBlocks.find((b) => b.isActive);
+  const days = activeBlock ? state.gymRoutines.filter((r) => r.blockId === activeBlock.id) : [];
+  document.getElementById('gym-start-block-name').textContent = activeBlock
+    ? `Bloque activo: ${activeBlock.name}`
+    : 'No hay ningún bloque activo — puedes entrenar libre o crear un bloque en la pestaña Plan.';
+  const list = document.getElementById('gym-start-days');
+  list.innerHTML = '';
+
+  // Si el bloque usa ciclo, lo que toca hoy va PRIMERO y marcado. Aunque
+  // hoy toque descanso se sigue pudiendo elegir cualquier dia (decision
+  // de Koku: te avisa, pero no te lo impide).
+  const cicloHoy = gymCicloDeHoy();
+  const aviso = document.getElementById('gym-start-cycle-note');
+  if (cicloHoy) {
+    aviso.classList.remove('hidden');
+    aviso.textContent = cicloHoy.esDescanso
+      ? `Hoy toca descanso (día ${cicloHoy.position} de ${cicloHoy.length}). Puedes entrenar igualmente: al terminar te pregunto cómo sigo el ciclo.`
+      : `Tu ciclo dice que hoy toca “${cicloHoy.rutina.name}” (día ${cicloHoy.position} de ${cicloHoy.length}).`;
+  } else {
+    aviso.classList.add('hidden');
+    aviso.textContent = '';
+  }
+  const idDeHoy = cicloHoy && cicloHoy.rutina ? cicloHoy.rutina.id : null;
+  const ordenados = idDeHoy
+    ? [...days].sort((a, b) => (a.id === idDeHoy ? -1 : 0) - (b.id === idDeHoy ? -1 : 0))
+    : days;
+
+  ordenados.forEach((day) => {
+    const esDeHoy = day.id === idDeHoy;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gym-list-item gym-start-day-btn' + (esDeHoy ? ' es-de-hoy' : '');
+    btn.innerHTML = `
+      <span class="color-dot" style="background-color: ${day.color}"></span>
+      <span class="gym-list-item-name">${day.icon ? escapeHtml(day.icon) + ' ' : ''}${escapeHtml(day.name)}${esDeHoy ? ' <span class="gym-block-active-badge">Hoy</span>' : ''}</span>
+      <span class="gym-list-item-muted">${day.exercises.filter((ex) => !ex.hidden).length} ejercicio${day.exercises.filter((ex) => !ex.hidden).length === 1 ? '' : 's'}</span>
+    `;
+    btn.addEventListener('click', () => {
+      closeGymStartModal();
+      startGymLiveSession(day);
+    });
+    list.appendChild(btn);
+  });
+  if (days.length === 0 && activeBlock) {
+    list.innerHTML = '<p class="empty-hint">El bloque activo no tiene días todavía.</p>';
+  }
+  document.getElementById('gym-start-modal').classList.remove('hidden');
+}
+function closeGymStartModal() {
+  document.getElementById('gym-start-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-live-start').addEventListener('click', openGymStartModal);
+document.getElementById('btn-close-gym-start').addEventListener('click', closeGymStartModal);
+document.getElementById('btn-gym-start-free').addEventListener('click', () => {
+  closeGymStartModal();
+  startGymLiveSession(null);
+});
+document.getElementById('btn-gym-live-resume').addEventListener('click', () => {
+  gymLiveSession = gymLiveReadStored();
+  if (gymLiveSession) openGymLiveView();
+});
+
+// Arranca un entrenamiento nuevo: desde un dia del plan (pre-carga sus
+// ejercicios con tantas series como target_sets, solo con el descanso
+// sugerido -- reps y peso en blanco a proposito, como el modal manual) o
+// completamente libre.
+function startGymLiveSession(day) {
+  // Solo se pre-cargan los ejercicios VISIBLES del dia; los ocultos
+  // quedan en hiddenPool, recuperables desde "Ejercicios ocultos" en el
+  // propio entreno (peticion de Koku: aparcar un ejercicio sin borrarlo).
+  const visibles = day ? day.exercises.filter((ex) => !ex.hidden) : [];
+  gymLiveSession = {
+    startedAt: Date.now(),
+    routineId: day ? day.id : null,
+    routineName: day ? day.name : null,
+    restPreset: 90,
+    restUntil: null,
+    // Para no deslizar durante 40 minutos (Koku): todas las tarjetas
+    // nacen RECOGIDAS menos la primera; cada una se pliega/despliega
+    // tocando su cabecera, y hay botones de plegar/desplegar todo.
+    exercises: visibles.map((ex, i) => ({
+        exerciseId: ex.exerciseId,
+        note: '',
+        rpe: '',
+        collapsed: i > 0,
+        sets: gymBuildSetsForExercise(ex.exerciseId, ex.targetSets, ex.targetRestSeconds ?? ''),
+      })),
+    hiddenPool: day
+      ? day.exercises.filter((ex) => ex.hidden).map((ex) => ({
+          exerciseId: ex.exerciseId,
+          targetSets: ex.targetSets,
+          targetRestSeconds: ex.targetRestSeconds,
+        }))
+      : [],
+  };
+  gymLiveStore();
+  openGymLiveView();
+  // La ayuda se abre sola SOLO al iniciar un entrenamiento nuevo (aqui),
+  // no cada vez que se vuelve a el tras moverse por la app -- eso
+  // molestaba (feedback de Koku). Hasta que marque "no volver a
+  // mostrar"; el boton "?" la abre cuando quiera.
+  if (localStorage.getItem('gymLiveHelpSeen') !== '1') openGymHelpModal();
+  // Cuanto suele llevarte este dia, como aviso que se va solo. Va al
+  // final y sin esperar a nada (peticion de Koku: "un texto arriba que
+  // se va y diga algo de tiempo estimado"): si las medias todavia no
+  // estan cargadas se piden aqui, y si tampoco hay nada que decir el
+  // aviso sencillamente no sale.
+  if (day) gymAvisarDeLaDuracion(day);
+}
+
+// Las medias se cargan al abrir el Gimnasio, pero al entreno se puede
+// llegar sin pasar por ahi (el widget, la mini-barra de descanso). Esto
+// las pide si faltan y luego enseña el aviso; si falla, no pasa nada:
+// el aviso es un extra, no puede estropear el arranque de un entreno.
+async function gymAvisarDeLaDuracion(day) {
+  try {
+    if (!gymSetTimes) await loadGymSetTimes();
+    mostrarAvisoFlotante(gymTextoDeDuracion(day));
+  } catch (err) {
+    console.error('No se pudo estimar la duración del entreno:', err);
+  }
+}
+
+// La pantalla en la que estabas antes de entrar al entreno, para
+// devolver la barra de abajo a su sitio al salir. Se guarda aqui y no en
+// localStorage porque solo vale mientras el entreno esta a la vista.
+let pantallaAntesDelEntreno = null;
+
+async function openGymLiveView() {
+  // La barra de abajo tiene que marcar el Gimnasio mientras el entreno
+  // esta delante. Pasaba sobre todo entrando desde la mini-barra de
+  // descanso (Koku: "me lleva a la vista pero en la barra sigue
+  // marcando que estoy en calendario"): esa barra abre el entreno
+  // directamente, sin pasar por openGymView, que es quien avisaba.
+  if (document.getElementById('gym-live-view').classList.contains('hidden')) {
+    pantallaAntesDelEntreno = localStorage.getItem('currentScreen') || 'calendar';
+    setCurrentScreen('gym');
+  }
+  document.getElementById('gym-live-title').textContent = gymLiveSession.routineName || 'Sesión libre';
+  document.getElementById('gym-live-view').classList.remove('hidden');
+  renderGymLiveExercises();
+  // Columna "Anterior": se pide en paralelo para cada ejercicio y se
+  // repinta cuando llega (si no hay historial, la columna queda en "—").
+  gymLivePrevSets = new Map();
+  await Promise.all(gymLiveSession.exercises.map(async (ex) => {
+    const prev = await api(`/api/gym-sessions/last-sets/${ex.exerciseId}`);
+    gymLivePrevSets.set(ex.exerciseId, prev);
+  }));
+  renderGymLiveExercises();
+  if (gymLiveTicker) clearInterval(gymLiveTicker);
+  gymLiveTicker = setInterval(gymLiveTick, 1000);
+  refreshGymLivePauseUi();
+  gymLiveTick();
+}
+function closeGymLiveView() {
+  document.getElementById('gym-live-view').classList.add('hidden');
+  // Debajo del entreno sigue estando la pantalla desde la que entraste
+  // (el calendario, por ejemplo): la barra vuelve a marcarla.
+  if (pantallaAntesDelEntreno) {
+    setCurrentScreen(pantallaAntesDelEntreno);
+    pantallaAntesDelEntreno = null;
+  }
+  // El ticker NO se para: sigue moviendo la mini-barra de descanso
+  // global mientras te mueves por la app. Se para al terminar/descartar.
+  refreshGymLiveButtons();
+  gymLiveTick();
+}
+function gymLiveStopTicker() {
+  if (gymLiveTicker) { clearInterval(gymLiveTicker); gymLiveTicker = null; }
+  document.getElementById('gym-global-rest').classList.add('hidden');
+  document.body.classList.remove('gym-rest-push');
+  // Si quedaba un aviso de descanso programado (o su tarjeta en la
+  // pantalla de bloqueo, o la vigilancia de audio), ya no tienen
+  // sentido: el entreno se ha terminado o descartado.
+  gymCancelRestNotification();
+  gymEndRestLiveActivity();
+  gymCancelRestAudioWatch();
+}
+
+// Un tick por segundo mientras el overlay esta abierto: reloj de sesion
+// y cuenta atras del descanso, ambos derivados de timestamps.
+// "(2)" = 2 minutos justos de descanso, "(1:30)" = minuto y medio --
+// formato corto para la columna Anterior (peticion de Koku).
+function gymFormatRestShort(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return s === 0 ? `${m}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+// Un tiempo de descanso "para ensenar", respetando el formato elegido en
+// Configuracion (m:ss o segundos a secas -- mismo ajuste gymRestFormat
+// que alterna el contador tocandolo).
+// Tiempo de trabajo acumulado: en segundos si es poco, en minutos si ya
+// pasa del minuto ("45s", "6 min").
+// Lo que duro UNA serie, con los segundos a la vista: "45 s",
+// "1 min 3 s". Distinto de gymFormatWorkTime, que agrega meses enteros y
+// ahi los segundos sobran (peticion de Koku: "Duración: 1min 3s").
+function gymFormatSetDuration(totalSeconds) {
+  const n = Math.round(Number(totalSeconds) || 0);
+  if (n < 60) return `${n} s`;
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return s === 0 ? `${m} min` : `${m} min ${s} s`;
+}
+
+function gymFormatWorkTime(totalSeconds) {
+  const n = Math.round(Number(totalSeconds) || 0);
+  if (n < 60) return `${n}s`;
+  return `${Math.round(n / 60)} min`;
+}
+function gymFormatRestDisplay(totalSeconds) {
+  const n = Number(totalSeconds);
+  if (!n) return '';
+  return localStorage.getItem('gymRestFormat') === 'sec' ? `${n}s` : gymLiveFormatClock(n);
+}
+function gymLiveFormatClock(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+// Tiempo de sesion transcurrido DESCONTANDO las pausas: pausedMs acumula
+// las pausas ya cerradas, y pausedAt marca la pausa en curso (si la hay).
+// Todo con timestamps, como siempre -- sobrevive a recargas y al
+// congelado de iOS en segundo plano.
+function gymLiveElapsedSeconds() {
+  const pausedMs = (gymLiveSession.pausedMs || 0) +
+    (gymLiveSession.pausedAt ? Date.now() - gymLiveSession.pausedAt : 0);
+  return Math.max(0, Math.floor((Date.now() - gymLiveSession.startedAt - pausedMs) / 1000));
+}
+
+function gymLiveTick() {
+  if (!gymLiveSession) return;
+  // Red de seguridad: una serie en curso de un ejercicio que ya no esta
+  // en el entreno no puede quedarse ahi (bloquearia empezar cualquier
+  // otra). Normalmente lo limpia quien quita el ejercicio; esto cubre
+  // sesiones guardadas por versiones anteriores.
+  if (gymLiveSession.activeSet
+      && !gymLiveSession.exercises.some((e) => e.exerciseId === gymLiveSession.activeSet.exerciseId)) {
+    gymLiveSession.activeSet = null;
+    gymLiveStore();
+    renderGymLiveExercises();
+  }
+  const clock = document.getElementById('gym-live-clock');
+  clock.textContent = gymLiveFormatClock(gymLiveElapsedSeconds());
+  clock.classList.toggle('paused', !!gymLiveSession.pausedAt);
+
+  // Mientras corre un descanso, sondear cada 2s los +30s pendientes del
+  // boton de la pantalla de bloqueo. Hace falta ADEMAS de los eventos de
+  // volver a primer plano: al bajar la barra de notificaciones la app no
+  // llega a irse a segundo plano, asi que no hay ningun "resume" que
+  // dispare la recogida -- y los segundos se quedaban sin aplicar hasta
+  // que el tiempo normal acababa (bug que vio Koku). La llamada es
+  // baratisima (leer un contador) y solo corre durante el descanso.
+  if (gymLiveSession.restUntil && Date.now() - gymLastExtensionPoll > 2000) {
+    gymLastExtensionPoll = Date.now();
+    gymConsumeRestExtensionFromLockScreen();
+  }
+
+  // Cronometro de la serie en curso: se actualiza el texto en vez de
+  // repintar la tarjeta entera cada segundo.
+  const setTimers = document.querySelectorAll('[data-live-set-timer]');
+  if (setTimers.length > 0) {
+    const t = gymLiveFormatClock(gymActiveSetSeconds());
+    setTimers.forEach((el) => { el.textContent = t; });
+  }
+  const endTimer = document.getElementById('gym-set-end-timer');
+  if (endTimer && !document.getElementById('gym-set-end-modal').classList.contains('hidden')) {
+    endTimer.textContent = gymLiveFormatClock(gymActiveSetSeconds());
+  }
+
+  // Mini-barra global: cuando el entreno esta OCULTO y hay algo en
+  // marcha -- una serie corriendo o un descanso.
+  const liveHidden = document.getElementById('gym-live-view').classList.contains('hidden');
+  const globalBar = document.getElementById('gym-global-rest');
+  const globalLabel = document.getElementById('gym-global-rest-label');
+  if (liveHidden && gymLiveSession.activeSet) {
+    // Serie en curso: la barra ensena su cronometro (llena, sin cuenta
+    // atras) y tocarla vuelve al entreno para poder terminarla.
+    globalLabel.textContent = gymLiveSession.activeSet.pausedAt ? 'Serie en pausa' : 'Serie';
+    document.getElementById('gym-global-rest-remaining').textContent = gymLiveFormatClock(gymActiveSetSeconds());
+    document.getElementById('gym-global-rest-fill-base').style.width = '100%';
+    document.getElementById('gym-global-rest-fill-extra').style.width = '0%';
+    globalBar.classList.remove('hidden');
+    document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
+    document.body.classList.add('gym-rest-push');
+  } else if (liveHidden && gymIndiceDelEjercicioEnEspera() >= 0) {
+    // Descanso terminado y serie pendiente: la barra deja de ser una
+    // cuenta atras y pasa a ser el aviso de "te toca". Tocarla arranca
+    // la serie directamente, sin tener que volver antes al entreno.
+    const iEspera = gymIndiceDelEjercicioEnEspera();
+    const exEspera = gymLiveSession.exercises[iEspera];
+    globalLabel.textContent = `Empezar serie ${gymSetSerieNumber(exEspera, gymNextPendingSetIndex(exEspera))}`;
+    document.getElementById('gym-global-rest-remaining').textContent = '▶';
+    document.getElementById('gym-global-rest-fill-base').style.width = '100%';
+    document.getElementById('gym-global-rest-fill-extra').style.width = '0%';
+    globalBar.classList.add('is-ready');
+    globalBar.classList.remove('hidden');
+    document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
+    document.body.classList.add('gym-rest-push');
+  } else if (liveHidden && gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    globalBar.classList.remove('is-ready');
+    globalLabel.textContent = 'Descanso';
+    // floor y no ceil: la tarjeta de la pantalla de bloqueo redondea
+    // HACIA ABAJO (estilo reloj del sistema: un temporizador de 1:00
+    // ensena 0:59 nada mas empezar), y con ceil la app iba un segundo
+    // "por detras" (feedback de Koku). Mismo criterio en los dos sitios.
+    const gRemaining = Math.max(0, Math.floor((gymLiveSession.restUntil - Date.now()) / 1000));
+    document.getElementById('gym-global-rest-remaining').textContent =
+      localStorage.getItem('gymRestFormat') === 'sec' ? `${gRemaining}s` : gymLiveFormatClock(gRemaining);
+    const gBase = gymLiveSession.restBaseSeconds || gRemaining;
+    const gExtra = gymLiveSession.restExtraSeconds || 0;
+    const gPlanned = Math.max(1, gBase + gExtra);
+    const gBaseRemaining = Math.max(0, gRemaining - gExtra);
+    document.getElementById('gym-global-rest-fill-base').style.width = `${(gBaseRemaining / gPlanned) * 100}%`;
+    document.getElementById('gym-global-rest-fill-extra').style.width = `${((gRemaining - gBaseRemaining) / gPlanned) * 100}%`;
+    globalBar.classList.remove('hidden');
+    // Con la barra visible, la interfaz entera baja lo que mide la barra
+    // para que no tape nada (ver body.gym-rest-push en styles.css). La
+    // altura se mide DESPUES de mostrarla (oculta mediria 0), cada tick:
+    // es barata y asi se adapta si cambia (giro de pantalla, etc.).
+    document.documentElement.style.setProperty('--gym-rest-offset', `${globalBar.offsetHeight}px`);
+    document.body.classList.add('gym-rest-push');
+  } else {
+    globalBar.classList.add('hidden');
+    globalBar.classList.remove('is-ready');
+    document.body.classList.remove('gym-rest-push');
+  }
+
+  const bar = document.getElementById('gym-live-rest-bar');
+  if (gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    // floor, como la tarjeta de bloqueo (ver el comentario de gRemaining).
+    const remaining = Math.max(0, Math.floor((gymLiveSession.restUntil - Date.now()) / 1000));
+    document.getElementById('gym-live-rest-remaining').textContent =
+      localStorage.getItem('gymRestFormat') === 'sec' ? `${remaining}s` : gymLiveFormatClock(remaining);
+    // Si la sesion en curso venia de una version sin restBaseSeconds, se
+    // rellena UNA vez con el restante actual y se guarda -- sin esto el
+    // total se recalculaba en cada tick y la barra se quedaba llena.
+    if (!gymLiveSession.restBaseSeconds) {
+      gymLiveSession.restBaseSeconds = remaining;
+      gymLiveStore();
+    }
+    // Barra: el descanso planificado son base + extra; el tramo base se
+    // vacia primero y el extra (los +30s) al final, en otro color.
+    const baseTotal = gymLiveSession.restBaseSeconds;
+    const extraTotal = gymLiveSession.restExtraSeconds || 0;
+    const planned = Math.max(1, baseTotal + extraTotal);
+    const baseRemaining = Math.max(0, remaining - extraTotal);
+    const extraRemaining = remaining - baseRemaining;
+    document.getElementById('gym-live-rest-fill-base').style.width = `${(baseRemaining / planned) * 100}%`;
+    document.getElementById('gym-live-rest-fill-extra').style.width = `${(extraRemaining / planned) * 100}%`;
+    bar.classList.remove('hidden');
+  } else {
+    if (gymLiveSession.restUntil && !gymRestExpiryPending) {
+      // OJO, orden importante (bug real): antes de dar el descanso por
+      // vencido hay que RECOGER los +30s que se hayan pulsado en la
+      // pantalla de bloqueo. Si no, al despertar la app (incluso cuando
+      // iOS la lanza en segundo plano para ejecutar el boton), este tick
+      // veia el restUntil viejo ya vencido, mataba la tarjeta y tiraba
+      // los segundos sin aplicarlos -- "es como si no lo hubiera hecho".
+      gymRestExpiryPending = true;
+      gymConsumeRestExtensionFromLockScreen().finally(() => {
+        gymRestExpiryPending = false;
+        if (gymLiveSession && gymLiveSession.restUntil && gymLiveSession.restUntil <= Date.now()) {
+          gymLiveSession.restUntil = null;
+          // Momento en que se acabo: enciende el aviso de "te toca" y,
+          // si esta puesto, arranca la siguiente serie sola.
+          gymLiveSession.restEndedAt = Date.now();
+          gymLiveStore();
+          // Ahora si: el descanso termino de verdad, fuera la tarjeta.
+          gymEndRestLiveActivity();
+          gymAvisarFinDeDescanso();
+          gymLiveTick();
+        }
+      });
+    }
+    bar.classList.add('hidden');
+  }
+}
+// --- Al acabar el descanso: que no se te pase la siguiente serie ------
+// Koku: "cada vez que acaba el tiempo de descanso se me olvida darle a
+// empezar serie". Dos cosas, y las dos a la vez (eligio las dos):
+//   1. SIEMPRE: el boton "Empezar serie N" del ejercicio cuyo descanso
+//      acaba de terminar se pone grande y llamativo, y la mini-barra
+//      global pasa a decir "Empezar serie N" (tocarla la arranca desde
+//      donde estes, sin tener que volver a mano al entreno).
+//   2. OPCIONAL (Configuracion > Notificaciones, apagado de fabrica):
+//      que la serie arranque SOLA. Solo si queda alguna pendiente --
+//      nunca inventa una serie extra, que es lo que hace gymStartSet
+//      cuando ya estan todas hechas.
+// El aviso se apaga solo en cuanto empieza una serie (gymStartSet limpia
+// restEndedAt), asi que no se queda encendido para siempre.
+
+// El ejercicio al que "le toca" ahora: el del descanso que acaba de
+// terminar. gymLiveSession.restSetRef ya apunta a la serie cuyo descanso
+// estaba corriendo, y NO se borra al vencer, asi que sigue sirviendo.
+function gymIndiceDelEjercicioEnEspera() {
+  if (!gymLiveSession || !gymLiveSession.restEndedAt || gymLiveSession.activeSet) return -1;
+  const ref = gymLiveSession.restSetRef;
+  if (!ref) return -1;
+  const i = gymLiveSession.exercises.findIndex((e) => e.exerciseId === ref.exerciseId);
+  if (i < 0) return -1;
+  // Sin serie pendiente no hay nada que anunciar (el ejercicio se acabo).
+  return gymNextPendingSetIndex(gymLiveSession.exercises[i]) >= 0 ? i : -1;
+}
+
+function gymAutoStartEnabled() {
+  return localStorage.getItem('gymAutoStartNextSet') === 'true';
+}
+
+// Se llama justo despues de dar el descanso por vencido.
+function gymAvisarFinDeDescanso() {
+  const i = gymIndiceDelEjercicioEnEspera();
+  if (i < 0) return;
+  if (gymAutoStartEnabled()) {
+    gymStartSet(i);
+    renderGymLiveExercises();
+    return;
+  }
+  renderGymLiveExercises();
+}
+
+// Evita encolar mil recogidas mientras la primera esta en camino.
+let gymRestExpiryPending = false;
+// Ultimo sondeo de +30s pendientes (ver gymLiveTick).
+let gymLastExtensionPoll = 0;
+
+document.getElementById('btn-gym-live-rest-plus').addEventListener('click', () => {
+  if (gymLiveSession && gymLiveSession.restUntil) {
+    gymLiveSession.restUntil += 30000;
+    gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + 30;
+    // El extra se le apunta a la serie cuyo descanso esta corriendo, para
+    // que el historial pueda ensenar "Serie 1: +60s" (peticion de Koku).
+    const ref = gymLiveSession.restSetRef;
+    if (ref) {
+      const refEx = gymLiveSession.exercises.find((x) => x.exerciseId === ref.exerciseId);
+      const refSet = refEx && refEx.sets[ref.setIndex];
+      if (refSet) refSet.extraRest = (refSet.extraRest || 0) + 30;
+    }
+    gymLiveStore();
+    gymLiveTick();
+    // El aviso programado apuntaba al final antiguo: se reprograma.
+    gymScheduleRestNotification();
+    // Y la tarjeta de la pantalla de bloqueo pasa a contar hasta el
+    // nuevo final, igual que la vigilancia de audio.
+    gymUpdateRestLiveActivity();
+    gymUpdateRestAudioWatch();
+  }
+});
+// El tiempo restante se puede ver como m:ss o como segundos a secas
+// (peticion de Koku) -- se alterna tocandolo, y se recuerda por
+// dispositivo.
+document.getElementById('gym-live-rest-remaining').addEventListener('click', () => {
+  const next = localStorage.getItem('gymRestFormat') === 'sec' ? 'min' : 'sec';
+  localStorage.setItem('gymRestFormat', next);
+  gymLiveTick();
+});
+document.getElementById('btn-gym-live-rest-close').addEventListener('click', () => {
+  if (gymLiveSession) {
+    gymLiveSession.restUntil = null;
+    gymLiveStore();
+    gymLiveTick();
+    gymCancelRestNotification();
+    gymEndRestLiveActivity();
+    gymCancelRestAudioWatch();
+  }
+});
+
+// --- Aviso al terminar el descanso -------------------------------------
+// En la app instalada, al arrancar un descanso se PROGRAMA una
+// notificacion del sistema para el momento en que acaba (mismo mecanismo
+// que los recordatorios, ver local-notifications.js): suena/vibra segun
+// los ajustes del telefono aunque la pantalla este bloqueada o estes en
+// otra app, asi no hay que estar mirando el movil a ver cuanto queda.
+// En un navegador normal no hay plugin y esto no hace nada.
+//
+// El id es uno RESERVADO fijo: como siempre es el mismo, programar el
+// siguiente descanso sustituye al anterior sin acumular avisos, y
+// syncScheduledReminders() sabe que no debe cancelarlo al reprogramar
+// los recordatorios (ids >= 999999900 son internos, no eventos).
+const GYM_REST_NOTIFICATION_ID = 999999901;
+// Modo insistente (peticion de Koku: "una vibracion a veces no se nota,
+// si esta un rato si"): iOS no permite alargar la vibracion de una
+// notificacion ni sonar "como el temporizador del sistema" (eso son
+// alertas criticas, que requieren un permiso especial de Apple), asi que
+// el truco es repetir el aviso: 3 notificaciones seguidas separadas 2s
+// (ids 999999901/902/903, todos en el rango reservado). Se apaga en
+// Configuracion > Notificaciones.
+const GYM_REST_NOTIFICATION_IDS = [999999901, 999999902, 999999903];
+
+function gymRestNotifyEnabled() {
+  return localStorage.getItem('gymRestNotify') !== 'false';
+}
+function gymRestBurstEnabled() {
+  return localStorage.getItem('gymRestBurst') !== 'false';
+}
+
+// atMs: cuando debe saltar. Por defecto, el final del descanso en curso;
+// se puede pasar a mano para el boton de PROBAR el aviso de
+// Configuracion (que recorre exactamente este mismo camino).
+async function gymScheduleRestNotification(atMs = null) {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin || !gymRestNotifyEnabled()) return;
+  const cuando = atMs || (gymLiveSession && gymLiveSession.restUntil);
+  if (!cuando) return;
+  try {
+    if (!(await ensureLocalNotificationPermissionSilently())) return;
+    // Cancelar antes de programar: si habia avisos del descanso anterior
+    // aun pendientes, no deben sonar ademas de los nuevos.
+    await plugin.cancel({ notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })) });
+    // Sonido/vibracion/silencio segun el ajuste del dispositivo -- ver
+    // notificationSoundValue() en local-notifications.js.
+    const sonido = notificationSoundValue();
+    // UNA sola notificacion. La insistencia ya no se hace repitiendo
+    // avisos (a Koku le molestaba ver 3 notificaciones): ahora la pone la
+    // vibracion larga nativa de RestAudioWatcher, que puede repetir la
+    // vibracion del sistema sin notificar nada porque la app sigue
+    // despierta durante el descanso.
+    const aviso = {
+      id: GYM_REST_NOTIFICATION_ID,
+      title: 'Descanso terminado',
+      body: 'Siguiente serie.',
+      schedule: { at: new Date(cuando) },
+      threadIdentifier: 'gym-descanso',
+    };
+    if (sonido) aviso.sound = sonido;
+    await plugin.schedule({ notifications: [aviso] });
+  } catch (err) {
+    console.error('No se pudo programar el aviso de descanso:', err);
+  }
+}
+
+async function gymCancelRestNotification() {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.cancel({ notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })) });
+  } catch (err) {
+    console.error('No se pudo cancelar el aviso de descanso:', err);
+  }
+}
+
+// Al volver a la app, el aviso de "Descanso terminado" ya ha cumplido su
+// funcion: quitarlo del centro de notificaciones. Antes solo se quitaban
+// las repeticiones (902/903) y el principal (901) se quedaba puesto, asi
+// que habia que borrarlo A MANO cada vez -- lo pidio Koku: "si hay una
+// notificacion y entro en la app, que se borre".
+//
+// Se hace en el foreground, que cubre los dos casos de una vez: tocar el
+// aviso abre la app (y de paso iOS ya lo retira), y volver a la app por
+// tu cuenta lo limpia igual. Se limita a los avisos del DESCANSO (los
+// ids reservados): los recordatorios de eventos no se tocan, se quedan
+// hasta que los quites tu (decision de Koku frente a limpiarlo todo).
+//
+// Ojo: esto NO pelea con la vigilancia de audio que para la vibracion
+// (RestAudioWatcher sondea getDeliveredNotifications y se detiene cuando
+// el aviso desaparece). Abrir la app ya callaba la vibracion, asi que
+// quitar el aviso aqui va en la misma direccion.
+async function gymCleanupRestNotificationStack() {
+  if (typeof getLocalNotificationsPlugin !== 'function') return;
+  const plugin = getLocalNotificationsPlugin();
+  if (!plugin || typeof plugin.removeDeliveredNotifications !== 'function') return;
+  try {
+    await plugin.removeDeliveredNotifications({
+      notifications: GYM_REST_NOTIFICATION_IDS.map((id) => ({ id })),
+    });
+  } catch (err) {
+    // Limpiar es cosmetico: si falla, no pasa nada.
+  }
+}
+
+// --- Live Activity del descanso (pantalla de bloqueo) ------------------
+// La cuenta atras EN VIVO en la pantalla de bloqueo y la isla dinamica
+// (peticion de Koku). Habla con el plugin nativo LiveActivityPlugin
+// (ios/App/App/LiveActivityPlugin.swift); el dibujo lo hace la extension
+// DescansoWidget. La gracia: la app solo manda las FECHAS de inicio y
+// fin -- la cuenta atras y la barra las mueve iOS solo, aunque la app
+// este congelada y el movil bloqueado. Requiere iOS 16.2; en moviles
+// anteriores (o en navegador) estas funciones no hacen nada.
+let gymLiveActivityPlugin = null;
+function getGymLiveActivityPlugin() {
+  if (gymLiveActivityPlugin) return gymLiveActivityPlugin;
+  const cap = window.Capacitor;
+  if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null;
+  if (window.capacitorExports && typeof window.capacitorExports.registerPlugin === 'function') {
+    gymLiveActivityPlugin = window.capacitorExports.registerPlugin('LiveActivity');
+  }
+  return gymLiveActivityPlugin;
+}
+
+// Colores del tema activo, para que la tarjeta de la pantalla de bloqueo
+// siga el estilo de la app entera (peticion de Koku): acento + fondo de
+// tarjeta (surface) + su texto emparejado.
+function gymThemeColorHex(varName, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback;
+}
+function gymCurrentAccentHex() {
+  return gymThemeColorHex('--accent', '#5b8cff');
+}
+// Mezcla dos colores hex (el equivalente JS del color-mix del CSS): es
+// EXACTAMENTE la formula del tramo extra de la barra de la app
+// (color-mix(in srgb, var(--accent) 45%, var(--surface-text))), para que
+// la tarjeta de la pantalla de bloqueo use el mismo color (peticion de
+// Koku: nada de naranja).
+function gymMixHex(hexA, hexB, weightA) {
+  const parse = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [a, b] = [parse(hexA), parse(hexB)];
+  return '#' + a.map((va, i) =>
+    Math.round(va * weightA + b[i] * (1 - weightA)).toString(16).padStart(2, '0')
+  ).join('');
+}
+
+// Fechas que necesita la tarjeta, derivadas del estado del descanso.
+function gymRestActivityParams() {
+  const totalSeconds = (gymLiveSession.restBaseSeconds || 0) + (gymLiveSession.restExtraSeconds || 0);
+  const accent = gymCurrentAccentHex();
+  const surfaceText = gymThemeColorHex('--surface-text', '#f2f2f7');
+  return {
+    startAt: totalSeconds > 0 ? gymLiveSession.restUntil - totalSeconds * 1000 : Date.now(),
+    endAt: gymLiveSession.restUntil,
+    dayName: gymLiveSession.routineName || 'Sesión libre',
+    extraSeconds: gymLiveSession.restExtraSeconds || 0,
+    accentHex: accent,
+    surfaceHex: gymThemeColorHex('--surface', '#1c1c27'),
+    surfaceTextHex: surfaceText,
+    // El color del tramo extra, calcado del de la barra de la app.
+    extraHex: gymMixHex(accent, surfaceText, 0.45),
+  };
+}
+
+// El +30s pulsado EN LA PANTALLA DE BLOQUEO (boton de la Live Activity,
+// iOS 17+): mientras el movil esta bloqueado el JS esta congelado, asi
+// que el intent nativo lo hace todo el (alargar la tarjeta y reprogramar
+// el aviso) y deja los segundos apuntados. Aqui se recogen al volver a
+// primer plano y se pone al dia el estado del JS: el temporizador de la
+// app, el total de extra y el "+Ns" de la serie en descanso.
+async function gymConsumeRestExtensionFromLockScreen() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin) return;
+  try {
+    const res = await plugin.consumeRestExtension();
+    const seconds = res && res.seconds ? Number(res.seconds) : 0;
+    if (seconds > 0 && gymLiveSession && gymLiveSession.restUntil) {
+      gymLiveSession.restUntil += seconds * 1000;
+      gymLiveSession.restExtraSeconds = (gymLiveSession.restExtraSeconds || 0) + seconds;
+      const ref = gymLiveSession.restSetRef;
+      if (ref) {
+        const refEx = gymLiveSession.exercises.find((x) => x.exerciseId === ref.exerciseId);
+        const refSet = refEx && refEx.sets[ref.setIndex];
+        if (refSet) refSet.extraRest = (refSet.extraRest || 0) + seconds;
+      }
+      gymLiveStore();
+      gymLiveTick();
+      // Con el entreno a la vista, repintar para que el "+Ns" de la serie
+      // se vea al momento (oculto, ya se repintara al abrirlo).
+      if (!document.getElementById('gym-live-view').classList.contains('hidden')) {
+        renderGymLiveExercises();
+      }
+      // Reafirma la tarjeta con el estado ya cuadrado (y la resucita si
+      // un despertar anterior la hubiera cerrado de mas).
+      gymUpdateRestLiveActivity();
+    }
+    // Tocar la tarjeta de la pantalla de bloqueo abre la app pidiendo ir
+    // al entreno (peticion de Koku): el SceneDelegate deja la marca y
+    // aqui se ejecuta la navegacion.
+    if (res && res.openGym && gymLiveSession) {
+      if (typeof closeSettingsModal === 'function') closeSettingsModal();
+      if (typeof openGymView === 'function') openGymView();
+      openGymLiveView();
+    }
+  } catch (err) {
+    console.error('No se pudo recoger el +30s de la pantalla de bloqueo:', err);
+  }
+}
+// Al volver la app a primer plano (desbloquear/cambiar de app) es cuando
+// puede haber +30s pendientes. Se escuchan LOS DOS eventos: el 'resume'
+// que dispara Capacitor suele llegar antes que visibilitychange, y con
+// ambos el tiempo tarda menos en reflejarse (Koku notaba ~3s de espera).
+// Recoger dos veces no duplica nada: la segunda lectura ya devuelve 0.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    gymConsumeRestExtensionFromLockScreen();
+    gymCleanupRestNotificationStack();
+    comprobarAperturaDesdeElWidget();
+  } else {
+    // Al irse la app a segundo plano se deja el resumen al dia: es el
+    // otro momento en que Koku pidio que se actualice el widget, ademas
+    // de al cambiar algo.
+    actualizarResumenDelWidget();
+  }
+});
+document.addEventListener('resume', () => {
+  gymConsumeRestExtensionFromLockScreen();
+  gymCleanupRestNotificationStack();
+  comprobarAperturaDesdeElWidget();
+});
+document.addEventListener('pause', () => { actualizarResumenDelWidget(); });
+
+async function gymStartRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    const res = await plugin.startRest(gymRestActivityParams());
+    // Diagnostico visible en Configuracion > Este dispositivo: como no
+    // hay forma de ver la consola en el iPhone, el resultado del ultimo
+    // intento se guarda y se ensena alli (Koku reporto que la tarjeta no
+    // aparecia y no habia manera de saber por que).
+    localStorage.setItem('gymLiveActivityStatus', res && res.started
+      ? 'ok'
+      : `no: ${res && res.error ? res.error : 'el sistema no lo permite (¿iOS < 16.2, o desactivado en Ajustes?)'}`);
+  } catch (err) {
+    localStorage.setItem('gymLiveActivityStatus', `error: ${err && err.message ? err.message : err}`);
+    console.error('No se pudo iniciar la Live Activity del descanso:', err);
+  }
+}
+
+async function gymUpdateRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    const res = await plugin.updateRest(gymRestActivityParams());
+    // Si iOS ya habia soltado la tarjeta (p. ej. la app se relanzo),
+    // updated viene en false: se crea una nueva en su lugar.
+    if (!res || !res.updated) await plugin.startRest(gymRestActivityParams());
+  } catch (err) {
+    console.error('No se pudo actualizar la Live Activity del descanso:', err);
+  }
+}
+
+async function gymEndRestLiveActivity() {
+  const plugin = getGymLiveActivityPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.endRest();
+  } catch (err) {
+    console.error('No se pudo cerrar la Live Activity del descanso:', err);
+  }
+}
+
+// --- Bajar la musica al acabar el descanso -----------------------------
+// (Peticion de Koku: "que baje un poco el volumen de la musica, no
+// quitarla".) El trabajo de verdad lo hace RestAudioWatcher en nativo
+// (audio ducking de iOS + la app despierta durante el descanso); aqui
+// solo se le avisa de cuando empieza/cambia/se cancela el descanso.
+// En navegador no hay plugin y no pasa nada.
+let gymRestAudioPlugin = null;
+function getGymRestAudioPlugin() {
+  if (gymRestAudioPlugin) return gymRestAudioPlugin;
+  const cap = window.Capacitor;
+  if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null;
+  if (window.capacitorExports && typeof window.capacitorExports.registerPlugin === 'function') {
+    gymRestAudioPlugin = window.capacitorExports.registerPlugin('RestAudio');
+  }
+  return gymRestAudioPlugin;
+}
+function gymRestDuckEnabled() {
+  return localStorage.getItem('gymRestDuck') !== 'false';
+}
+// La vigilancia hace falta si hay que bajar la musica O si hay que
+// vibrar largo al acabar: las dos cosas necesitan la app despierta.
+function gymRestWatchParams() {
+  return { duck: gymRestDuckEnabled(), vibrate: gymRestBurstEnabled() };
+}
+async function gymStartRestAudioWatch(endAtMs = null) {
+  const plugin = getGymRestAudioPlugin();
+  const flags = gymRestWatchParams();
+  const fin = endAtMs || (gymLiveSession && gymLiveSession.restUntil);
+  if (!plugin || (!flags.duck && !flags.vibrate) || !fin) return;
+  try {
+    await plugin.startWatch({ endAt: fin, ...flags });
+  } catch (err) {
+    console.error('No se pudo vigilar el audio del descanso:', err);
+  }
+}
+async function gymUpdateRestAudioWatch() {
+  const plugin = getGymRestAudioPlugin();
+  const flags = gymRestWatchParams();
+  if (!plugin || (!flags.duck && !flags.vibrate) || !gymLiveSession || !gymLiveSession.restUntil) return;
+  try {
+    await plugin.updateWatch({ endAt: gymLiveSession.restUntil, ...flags });
+  } catch (err) {
+    console.error('No se pudo mover la vigilancia de audio:', err);
+  }
+}
+// --- Probar el aviso de fin de descanso -------------------------------
+// En el movil no hay consola ni forma de ver que pasa por dentro, y
+// montar un entreno entero para comprobar si la vibracion se calla es
+// una locura. Este atajo recorre EXACTAMENTE el mismo camino que un
+// descanso de verdad (misma notificacion, misma vigilancia de audio con
+// los mismos ajustes), solo que a los 10 segundos: da tiempo a bloquear
+// el movil y probar a callarlo como quieras.
+async function gymTestRestAlert(delaySeconds = 10) {
+  const fin = Date.now() + delaySeconds * 1000;
+  await gymScheduleRestNotification(fin);
+  await gymStartRestAudioWatch(fin);
+  return fin;
+}
+
+// Como acabo el ultimo aviso, segun lo que apunto la parte nativa.
+const GYM_REST_STOP_LABELS = {
+  app: 'al abrir la app',
+  desbloqueo: 'al desbloquear el móvil',
+  volumen: 'con un botón de volumen',
+  'audio-secundario': 'al pausar la música',
+  'ruta-audio': 'al cambiar la salida de audio',
+  interrupcion: 'por una interrupción de audio',
+  mando: 'con el mando del auricular',
+  banner: 'al quitar la notificación de la pantalla',
+  fin: 'no lo paró nada, terminó solo',
+  cancelado: 'se cortó al empezar otra serie o terminar el entreno',
+};
+async function gymRestAlertLastStatus() {
+  const plugin = getGymRestAudioPlugin();
+  if (!plugin || typeof plugin.getStatus !== 'function') return null;
+  try {
+    const info = await plugin.getStatus();
+    return info && info.stoppedBy ? info : null;
+  } catch (err) {
+    return null;
+  }
+}
+function gymFormatRestAlertStatus(info) {
+  if (!info) return 'Vibración del descanso: sin datos todavía (prueba el aviso).';
+  const como = GYM_REST_STOP_LABELS[info.stoppedBy] || info.stoppedBy;
+  const seg = Number(info.afterSeconds || 0).toFixed(1).replace('.', ',');
+  const pulsos = Number(info.pulses || 0);
+  const banner = info.bannerSeen ? '' : ' · la notificación no llegó a verse en pantalla';
+  return `Último aviso: se paró ${como}, a los ${seg} s (${pulsos} vibraciones)${banner}.`;
+}
+
+async function gymCancelRestAudioWatch() {
+  const plugin = getGymRestAudioPlugin();
+  if (!plugin) return;
+  try {
+    await plugin.cancelWatch();
+  } catch (err) {
+    console.error('No se pudo cancelar la vigilancia de audio:', err);
+  }
+}
+
+// Tarjetas de ejercicio del entreno en vivo. Igual que el resto del
+// proyecto: se reconstruye el DOM entero en cada cambio estructural
+// (anadir/quitar series o ejercicios); los inputs escriben directo en
+// gymLiveSession y guardan en localStorage.
+// Las listas de ejercicios ocultos/quitados empiezan recogidas;
+// recordarlo en variables (no en la sesion guardada) basta -- es estado
+// de vista.
+let gymLiveHiddenPoolOpen = false;
+let gymLiveRemovedPoolOpen = false;
+
+// --- Serie EN CURSO (empezar/terminar con botones grandes) -------------
+// Sustituye a la casilla diminuta de cada fila (Koku: "si vas un poco
+// mareado costara verlo"). El ciclo es: boton grande de la tarjeta ->
+// dialogo "vas a empezar X, serie N" -> serie corriendo con cronometro ->
+// dialogo "¿has acabado?" con Si / Pausar / Seguir. De paso queda
+// registrado cuanto duro cada serie (set.durationSeconds), que se guarda
+// y se ensena en el historial y en Progreso.
+//
+// El estado vive en gymLiveSession.activeSet, asi que sobrevive a
+// recargas y al congelado de iOS igual que el resto (todo por
+// timestamps): { exerciseId, setIndex, startedAt, pausedMs, pausedAt }.
+
+// La serie que toca: la primera SIN HACER del ejercicio (con 4 series y
+// 2 hechas, la 3). -1 si ya estan todas.
+function gymNextPendingSetIndex(ex) {
+  return ex.sets.findIndex((s) => !s.done);
+}
+
+// --- Ejercicios UNILATERALES contados por lado ------------------------
+// Cuando un ejercicio es unilateral y se cuentan los lados por separado,
+// cada lado es una SERIE PROPIA (set.side = 'left'/'right'). Asi el ciclo
+// de empezar/terminar, el historial y el volumen funcionan sin casos
+// especiales: solo cambian las etiquetas y el descanso entre lados.
+function gymExerciseUsesSides(ex) {
+  const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+  return !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
+}
+// Numero de serie que le toca a un set (los dos lados comparten numero).
+function gymSetSerieNumber(ex, setIndex) {
+  if (!gymExerciseUsesSides(ex)) return setIndex + 1;
+  let n = 0;
+  for (let i = 0; i <= setIndex; i++) if (ex.sets[i].side !== 'right') n += 1;
+  return Math.max(1, n);
+}
+// Cuantas series (no lados) tiene el ejercicio.
+function gymSerieCount(ex) {
+  if (!gymExerciseUsesSides(ex)) return ex.sets.length;
+  return ex.sets.filter((s) => s.side !== 'right').length;
+}
+function gymSideLabel(side) {
+  if (side === 'left') return 'izquierdo';
+  if (side === 'right') return 'derecho';
+  return '';
+}
+// El otro lado de la MISMA serie (los dos comparten numero de serie).
+// -1 si el ejercicio no va por lados o si no encuentra pareja.
+function gymSidePartnerIndex(ex, setIndex) {
+  if (!gymExerciseUsesSides(ex) || !ex.sets[setIndex]) return -1;
+  const n = gymSetSerieNumber(ex, setIndex);
+  for (let i = 0; i < ex.sets.length; i++) {
+    if (i !== setIndex && gymSetSerieNumber(ex, i) === n) return i;
+  }
+  return -1;
+}
+// Cambia por cual de los dos lados se empieza esta serie: como los dos
+// lados son dos filas seguidas, basta con intercambiarles la etiqueta
+// (asi no se toca ni la numeracion ni nada de lo ya hecho). Solo tiene
+// sentido si la pareja sigue pendiente.
+function gymSetStartSide(ex, setIndex, side) {
+  const partner = gymSidePartnerIndex(ex, setIndex);
+  if (partner < 0 || ex.sets[partner].done) return false;
+  if (ex.sets[setIndex].side === side) return false;
+  ex.sets[setIndex].side = side;
+  ex.sets[partner].side = side === 'left' ? 'right' : 'left';
+  // Se recuerda para las siguientes series de este ejercicio en la
+  // sesion: si empiezas por la derecha, sigues empezando por la derecha
+  // hasta que lo cambies otra vez.
+  ex.firstSide = side;
+  return true;
+}
+// Pone TODAS las series pendientes de un ejercicio a salir por el mismo
+// lado (el que acabas de elegir): si has dicho que empiezas por la
+// derecha, se empieza por la derecha el resto del ejercicio, y desde ahi
+// se van alternando los lados solos. Se puede volver a cambiar en el
+// dialogo de cualquier serie.
+function gymApplyFirstSideToPending(ex, side) {
+  ex.sets.forEach((s, i) => {
+    if (s.done) return;
+    const pareja = gymSidePartnerIndex(ex, i);
+    if (pareja > i && !ex.sets[pareja].done) gymSetStartSide(ex, i, side);
+  });
+  ex.firstSide = side;
+}
+// Crea las series de un ejercicio: una fila por serie, o DOS (izquierda
+// y derecha) si el ejercicio cuenta los lados por separado.
+function gymBuildSetsForExercise(exerciseId, count, restSeconds) {
+  const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+  const sides = !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
+  const out = [];
+  for (let i = 0; i < Math.max(1, Number(count) || 1); i++) {
+    if (sides) {
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'left', note: '' });
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'right', note: '' });
+    } else {
+      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: null, note: '' });
+    }
+  }
+  return out;
+}
+
+// Junta las notas de las series en la nota del EJERCICIO de esta sesion
+// (peticion de Koku: que sirvan de referencia para el siguiente entreno,
+// donde se ensenan como "La última vez"). Es idempotente: la parte
+// generada se reescribe entera y lo que hubiera escrito a mano se
+// respeta delante.
+const GYM_SET_NOTES_TAG = 'Series — ';
+function gymCombineSetNotes(ex) {
+  const usesSides = gymExerciseUsesSides(ex);
+  const parts = [];
+  ex.sets.forEach((s, i) => {
+    if (!s.note || !String(s.note).trim()) return;
+    const lado = usesSides ? (s.side === 'left' ? ' I' : ' D') : '';
+    parts.push(`S${gymSetSerieNumber(ex, i)}${lado}: ${String(s.note).trim()}`);
+  });
+  const manual = String(ex.note || '').split(GYM_SET_NOTES_TAG)[0].trim();
+  ex.note = parts.length
+    ? `${manual ? `${manual} ` : ''}${GYM_SET_NOTES_TAG}${parts.join(' · ')}`
+    : manual;
+}
+
+// Segundos de la serie en curso, descontando las pausas.
+function gymActiveSetSeconds() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return 0;
+  const paused = (a.pausedMs || 0) + (a.pausedAt ? Date.now() - a.pausedAt : 0);
+  return Math.max(0, Math.floor((Date.now() - a.startedAt - paused) / 1000));
+}
+
+// Cancela la serie en curso si es de este ejercicio (se usa al quitar un
+// ejercicio del entreno). Sin esto la sesion se quedaba con una serie
+// "corriendo" de algo que ya no estaba en la lista.
+function gymDropActiveSetIfExercise(exerciseId) {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a || a.exerciseId !== exerciseId) return false;
+  gymLiveSession.activeSet = null;
+  return true;
+}
+
+// Ejercicio (del entreno) al que pertenece la serie en curso.
+function gymActiveSetExercise() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return null;
+  return gymLiveSession.exercises.find((e) => e.exerciseId === a.exerciseId) || null;
+}
+
+// --- Dialogo "empezar serie" ---
+// Indice (dentro de gymLiveSession.exercises) del ejercicio elegido.
+let gymSetStartTargetIndex = null;
+
+function openGymSetStartModal(exIndex) {
+  if (!gymLiveSession || gymLiveSession.activeSet) return;
+  gymSetStartTargetIndex = exIndex;
+  gymSetStartListOpen = false;
+  renderGymSetStartModal();
+  document.getElementById('gym-set-start-modal').classList.remove('hidden');
+}
+function closeGymSetStartModal() {
+  document.getElementById('gym-set-start-modal').classList.add('hidden');
+}
+
+// La lista de ejercicios del dia empieza recogida; se despliega tocando
+// el nombre (peticion de Koku: poder cambiar de ejercicio desde aqui).
+let gymSetStartListOpen = false;
+
+function renderGymSetStartModal() {
+  const ex = gymLiveSession.exercises[gymSetStartTargetIndex];
+  if (!ex) return;
+  const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+  document.getElementById('gym-set-start-exercise-name').textContent = exercise ? exercise.name : 'Ejercicio';
+  const idx = gymNextPendingSetIndex(ex);
+  const pendiente = idx >= 0 ? ex.sets[idx] : null;
+  const lado = pendiente && pendiente.side ? ` · lado ${gymSideLabel(pendiente.side)}` : '';
+  document.getElementById('gym-set-start-info').textContent = idx >= 0
+    ? `Serie ${gymSetSerieNumber(ex, idx)} de ${gymSerieCount(ex)}${lado}`
+    : `Serie ${gymSerieCount(ex) + 1} (extra)`;
+
+  // Elegir lado de salida: solo si el ejercicio va por lados y la serie
+  // que toca aun tiene su pareja pendiente (si ya hiciste el primer
+  // lado, el que queda es el otro y no hay nada que elegir).
+  const sides = document.getElementById('gym-set-start-sides');
+  const partner = idx >= 0 ? gymSidePartnerIndex(ex, idx) : -1;
+  const puedeElegir = partner >= 0 && !ex.sets[partner].done;
+  sides.classList.toggle('hidden', !puedeElegir);
+  if (puedeElegir) {
+    sides.querySelectorAll('[data-start-side]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.startSide === pendiente.side);
+    });
+  }
+
+  const picker = document.getElementById('gym-set-start-exercise');
+  picker.setAttribute('aria-expanded', gymSetStartListOpen ? 'true' : 'false');
+  const list = document.getElementById('gym-set-start-exercise-list');
+  list.classList.toggle('hidden', !gymSetStartListOpen);
+  list.innerHTML = '';
+  gymLiveSession.exercises.forEach((other, otherIndex) => {
+    const otherExercise = state.gymExercises.find((e) => e.id === other.exerciseId);
+    const hechas = other.sets.filter((s) => s.done).length;
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'gym-set-exercise-option' + (otherIndex === gymSetStartTargetIndex ? ' active' : '');
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(otherExercise ? otherExercise.name : 'Ejercicio')}</span>
+      <span class="gym-list-item-muted">${hechas}/${other.sets.length}</span>
+    `;
+    row.addEventListener('click', () => {
+      gymSetStartTargetIndex = otherIndex;
+      gymSetStartListOpen = false;
+      renderGymSetStartModal();
+    });
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('gym-set-start-exercise').addEventListener('click', () => {
+  gymSetStartListOpen = !gymSetStartListOpen;
+  renderGymSetStartModal();
+});
+document.getElementById('gym-set-start-sides').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-start-side]');
+  if (!btn) return;
+  const ex = gymLiveSession && gymLiveSession.exercises[gymSetStartTargetIndex];
+  if (!ex) return;
+  const idx = gymNextPendingSetIndex(ex);
+  if (idx < 0) return;
+  gymApplyFirstSideToPending(ex, btn.dataset.startSide);
+  gymLiveStore();
+  renderGymLiveExercises();
+  renderGymSetStartModal();
+});
+document.getElementById('btn-gym-set-start-cancel').addEventListener('click', closeGymSetStartModal);
+document.getElementById('btn-gym-set-start-go').addEventListener('click', () => {
+  gymStartSet(gymSetStartTargetIndex);
+  closeGymSetStartModal();
+});
+
+// Arranca la serie: apunta a la primera sin hacer y, si ya estaban todas,
+// añade una serie extra heredando el descanso de la anterior.
+function gymStartSet(exIndex, setIndexOverride = null) {
+  const ex = gymLiveSession && gymLiveSession.exercises[exIndex];
+  if (!ex || gymLiveSession.activeSet) return;
+  let idx = setIndexOverride !== null ? setIndexOverride : gymNextPendingSetIndex(ex);
+  if (idx < 0 || !ex.sets[idx]) {
+    // Serie extra: en un ejercicio por lados se añade el BLOQUE entero
+    // (izquierdo + derecho), no una fila suelta -- antes se colaba una
+    // serie sin lado y descuadraba la numeracion (lo vio Koku).
+    const last = ex.sets[ex.sets.length - 1];
+    const nuevas = gymBuildSetsForExercise(ex.exerciseId, 1, last ? last.restSeconds : '');
+    idx = ex.sets.length;
+    ex.sets.push(...nuevas);
+    // El bloque nuevo sale por el lado que hayas elegido antes en este
+    // ejercicio (gymSetStartSide lo apunta en ex.firstSide).
+    if (ex.firstSide === 'right') gymSetStartSide(ex, idx, 'right');
+  }
+  gymLiveSession.activeSet = {
+    exerciseId: ex.exerciseId,
+    setIndex: idx,
+    startedAt: Date.now(),
+    pausedMs: 0,
+    pausedAt: null,
+  };
+  // Ya has empezado: el aviso de "te toca" del fin de descanso sobra.
+  gymLiveSession.restEndedAt = null;
+  // Si estabas descansando, empezar la siguiente serie corta el descanso:
+  // ya estas entrenando otra vez.
+  if (gymLiveSession.restUntil) {
+    gymLiveSession.restUntil = null;
+    gymCancelRestNotification();
+    gymEndRestLiveActivity();
+    gymCancelRestAudioWatch();
+  }
+  // La tarjeta del ejercicio en marcha siempre desplegada.
+  ex.collapsed = false;
+  // Serie nueva, cuenta nueva: el silencio que deja cerrar el dialogo de
+  // la serie anterior no debe seguir vigente en esta.
+  gymTapSnoozeUntil = 0;
+  gymLiveStore();
+  renderGymLiveExercises();
+  gymLiveTick();
+}
+
+// --- Dialogo "¿has acabado la serie?" ---
+// Dos pasos: primero la pregunta (Si / Pausar / Seguir) y, al decir que
+// si, el formulario con peso, repeticiones y nota de ESA serie (peticion
+// de Koku). Nada se guarda hasta "Guardar serie".
+function gymSetEndShowForm(show) {
+  document.getElementById('gym-set-end-choices').classList.toggle('hidden', show);
+  document.getElementById('gym-set-end-form').classList.toggle('hidden', !show);
+  document.querySelector('#gym-set-end-modal h2').textContent = show
+    ? 'Datos de la serie'
+    : '¿Has acabado la serie?';
+}
+
+// --- Mover un ejercicio arrastrandolo --------------------------------
+// Peticion de Koku, en vez de las flechas de subir/bajar que habia:
+// "deslizamos el ejercicio hasta la posicion que queramos... ponemos de
+// intermediario el boton mover; una vez sueltas tendrias que volver a
+// darle a mover para que vuelva a mover".
+//
+// O sea: el arrastre NO esta siempre activo (arrastrar sin mas es hacer
+// scroll por la lista). Se ARMA desde el boton "Mover" del deslizamiento
+// y se desarma solo al soltar. Mientras esta armado, el deslizamiento
+// lateral de esa tarjeta se aparta (bloqueadoSi, arriba), asi los dos
+// gestos nunca se pisan.
+let gymEjercicioEnMovimiento = null;
+
+function armarMovimientoDeEjercicio(exerciseId) {
+  gymEjercicioEnMovimiento = exerciseId;
+  renderGymLiveExercises();
+  // El aviso solo la primera vez: luego ya se sabe.
+  if (localStorage.getItem('gymMoverHintSeen') !== '1') {
+    localStorage.setItem('gymMoverHintSeen', '1');
+    showAppAlert('Arrastra el ejercicio arriba o abajo hasta donde lo quieras. Al soltarlo se queda ahí; para moverlo otra vez, vuelve a deslizar y darle a "Mover".');
+  }
+}
+
+// Se engancha a cada tarjeta armada dentro de renderGymLiveExercises.
+function habilitarArrastreDeEjercicio(envoltorio) {
+  let arrastre = null;
+
+  // La lista se mira EN CADA USO, no al enganchar: esto se llama
+  // mientras se construye la tarjeta, cuando todavia no esta metida en
+  // el DOM y su parentElement es null.
+  const hermanos = () => {
+    const lista = envoltorio.parentElement;
+    return lista ? [...lista.querySelectorAll('.note-swipe-wrap[data-exercise-id]')] : [];
+  };
+
+  // Repinta la tarjeta que se arrastra y aparta las de en medio. Vive
+  // fuera del listener porque la llaman DOS: el dedo al moverse, y el
+  // auto-desplazamiento (que mueve la lista aunque el dedo este quieto).
+  const recolocar = () => {
+    if (!arrastre) return;
+    // El desplazamiento de la LISTA se suma al del dedo. Sin esto, al
+    // desplazarse la lista la tarjeta se iria con ella y se despegaria
+    // del dedo, ademas de contar mal a que hueco cae.
+    const rodado = arrastre.scroller ? arrastre.scroller.scrollTop - arrastre.scrollAlEmpezar : 0;
+    const dy = arrastre.ultimaY - arrastre.y + rodado;
+    envoltorio.style.transform = `translateY(${dy}px)`;
+    // A que posicion caeria si soltase ahora: cuantas tarjetas enteras
+    // ha recorrido, topado a los extremos de la lista.
+    const filas = hermanos();
+    const saltos = Math.round(dy / arrastre.alto);
+    const destino = Math.max(0, Math.min(filas.length - 1, arrastre.desde + saltos));
+    if (destino !== arrastre.hasta) {
+      arrastre.hasta = destino;
+      // Las tarjetas de en medio se apartan para que se vea el hueco.
+      filas.forEach((fila, i) => {
+        if (fila === envoltorio) return;
+        let corrimiento = 0;
+        if (arrastre.desde < destino && i > arrastre.desde && i <= destino) corrimiento = -arrastre.alto;
+        else if (arrastre.desde > destino && i >= destino && i < arrastre.desde) corrimiento = arrastre.alto;
+        fila.style.transform = corrimiento ? `translateY(${corrimiento}px)` : '';
+      });
+    }
+  };
+
+  // AUTO-DESPLAZAMIENTO al llegar a los bordes (peticion de Koku: "si
+  // tengo muchos ejercicios me gustaria que si subo mucho el ejercicio
+  // desplazara la vista hasta donde parara"). Con la lista llena, el
+  // ejercicio de abajo no podia llegar arriba del todo: el dedo topaba
+  // con el borde de la pantalla antes que la tarjeta con su destino.
+  //
+  // Va en un bucle de fotogramas y no en el pointermove: con el dedo
+  // PARADO en el borde no llega ni un pointermove, y es justo cuando
+  // tiene que seguir desplazandose.
+  const ZONA_BORDE = 80;      // px desde el borde donde empieza a moverse
+  const VELOCIDAD_MAX = 14;   // px por fotograma pegado al borde del todo
+  const rodar = () => {
+    if (!arrastre) return;
+    const sc = arrastre.scroller;
+    if (sc) {
+      const caja = sc.getBoundingClientRect();
+      let paso = 0;
+      // Cuanto mas cerca del borde, mas rapido -- asi se puede afinar
+      // cerca del sitio sin que se dispare.
+      if (arrastre.ultimaY < caja.top + ZONA_BORDE) {
+        paso = -VELOCIDAD_MAX * Math.min(1, (caja.top + ZONA_BORDE - arrastre.ultimaY) / ZONA_BORDE);
+      } else if (arrastre.ultimaY > caja.bottom - ZONA_BORDE) {
+        paso = VELOCIDAD_MAX * Math.min(1, (arrastre.ultimaY - (caja.bottom - ZONA_BORDE)) / ZONA_BORDE);
+      }
+      if (paso) {
+        const antes = sc.scrollTop;
+        sc.scrollTop = antes + paso;
+        // Solo se recoloca si de verdad se ha movido: al llegar al tope
+        // scrollTop deja de cambiar y no hay nada que repintar.
+        if (sc.scrollTop !== antes) recolocar();
+      }
+    }
+    arrastre.fotograma = requestAnimationFrame(rodar);
+  };
+
+  envoltorio.addEventListener('pointerdown', (e) => {
+    // Los botones de dentro siguen funcionando (empezar serie, plegar...).
+    if (e.target.closest('button, input, textarea, select, a, label')) return;
+    const filas = hermanos();
+    const desde = filas.indexOf(envoltorio);
+    if (desde < 0) return;
+    // Quien se desplaza es .gym-live-content, no la lista: la lista crece
+    // con su contenido y el scroll lo lleva el contenedor de arriba.
+    const scroller = envoltorio.closest('.gym-live-content');
+    arrastre = {
+      y: e.clientY,
+      ultimaY: e.clientY,
+      desde,
+      alto: envoltorio.offsetHeight + 13, // + el hueco entre tarjetas
+      hasta: desde,
+      scroller,
+      scrollAlEmpezar: scroller ? scroller.scrollTop : 0,
+      fotograma: 0,
+    };
+    // Capturar el puntero mantiene el arrastre aunque el dedo se salga
+    // de la tarjeta. Puede lanzar si ese puntero ya no esta activo (pasa
+    // con gestos que el sistema corta a media), y una excepcion aqui
+    // dejaria el arrastre a medias: no es imprescindible, asi que si
+    // falla se sigue sin ella.
+    try { envoltorio.setPointerCapture(e.pointerId); } catch { /* da igual */ }
+    envoltorio.classList.add('arrastrando');
+    arrastre.fotograma = requestAnimationFrame(rodar);
+  });
+
+  envoltorio.addEventListener('pointermove', (e) => {
+    if (!arrastre) return;
+    e.preventDefault();
+    arrastre.ultimaY = e.clientY;
+    recolocar();
+  });
+
+  const soltar = () => {
+    if (!arrastre) return;
+    const { desde, hasta } = arrastre;
+    if (arrastre.fotograma) cancelAnimationFrame(arrastre.fotograma);
+    arrastre = null;
+    envoltorio.classList.remove('arrastrando');
+    // El modo se desarma SIEMPRE al soltar, lo pidio asi Koku.
+    gymEjercicioEnMovimiento = null;
+    if (hasta !== desde && gymLiveSession) {
+      const arr = gymLiveSession.exercises;
+      const [movido] = arr.splice(desde, 1);
+      arr.splice(hasta, 0, movido);
+      gymLiveStore();
+    }
+    // Repintar borra de paso todos los transform en linea.
+    renderGymLiveExercises();
+  };
+  envoltorio.addEventListener('pointerup', soltar);
+  envoltorio.addEventListener('pointercancel', soltar);
+}
+
+// --- Editar un ejercicio del entreno, entero -------------------------
+// Se llega DESLIZANDO su tarjeta. Koku lo pidio asi: "yo deslizo el
+// ejercicio entero para editar cualquier cosa del ejercicio... se hace
+// un cuadro de dialogo mas grande, asi es mas comodo de editar el
+// ejercicio y todo lo que haya dentro". A cambio, la tarjeta del entreno
+// se queda SOLO para usarla (plegar, empezar serie y mover), sin ningun
+// campo suelto donde escribir.
+//
+// Se trabaja sobre una COPIA: cancelar descarta de verdad, y guardar es
+// lo unico que toca la sesion.
+let gymExerciseEditId = null;
+let gymExerciseEditDraft = null;
+
+function openGymExerciseEditModal(exerciseId) {
+  if (!gymLiveSession) return;
+  const ex = gymLiveSession.exercises.find((e) => e.exerciseId === exerciseId);
+  if (!ex) return;
+  gymExerciseEditId = exerciseId;
+  gymExerciseEditDraft = {
+    // El descanso es del EJERCICIO: se guarda replicado en cada serie,
+    // asi que se lee de la primera y al guardar se aplica a todas.
+    restSeconds: (ex.sets[0] && ex.sets[0].restSeconds) ?? '',
+    sets: ex.sets.map((set) => ({
+      ...set,
+      segments: (set.segments || []).map((seg) => ({ ...seg })),
+    })),
+  };
+  const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+  document.getElementById('gym-exercise-edit-title').textContent = exercise ? exercise.name : 'Editar ejercicio';
+  document.getElementById('gym-exercise-edit-rest').value = gymExerciseEditDraft.restSeconds;
+  document.getElementById('gym-exercise-edit-rpe').value = ex.rpe ?? '';
+  document.getElementById('gym-exercise-edit-note').value = ex.note ?? '';
+  renderGymExerciseEditSets();
+  const modal = document.getElementById('gym-exercise-edit-modal');
+  delete modal.dataset.sucio;
+  modal.classList.remove('hidden');
+}
+
+function renderGymExerciseEditSets() {
+  const cont = document.getElementById('gym-exercise-edit-sets');
+  cont.innerHTML = '';
+  const unit = getGymWeightUnitLabel();
+  const draft = gymExerciseEditDraft;
+  if (!draft) return;
+  if (draft.sets.length === 0) {
+    cont.innerHTML = '<p class="empty-hint">Este ejercicio se ha quedado sin series. Añade una, o cancela y quita el ejercicio.</p>';
+    return;
+  }
+  draft.sets.forEach((set, i) => {
+    const bloque = document.createElement('div');
+    bloque.className = 'gym-exercise-edit-set';
+    bloque.innerHTML = `
+      <div class="gym-set-segment-head">
+        <span class="gym-set-segment-tag">${i + 1}</span>
+        <span class="gym-set-segment-name">${set.side ? `Lado ${gymSideLabel(set.side)}` : 'Serie'}${set.done ? '' : ' · sin hacer'}</span>
+        <span class="gym-set-head-dur" title="Lo que duró la serie">${set.durationSeconds ? `Duración: ${gymFormatSetDuration(set.durationSeconds)}` : ''}</span>
+        <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar esta serie">✕</button>
+      </div>
+      <div class="gym-set-segment-fields">
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="text" inputmode="decimal" data-set-field="weightDisplay" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-set-field="reps" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
+      </div>
+      <label class="gym-set-segment-field"><span>Nota de la serie</span><input type="text" data-set-field="note" value="${escapeHtml(String(set.note ?? ''))}" /></label>
+      <div class="gym-set-segments" data-tramos-de="${i}"></div>
+      <div class="gym-set-extend-list gym-session-set-actions">
+        <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
+        <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
+        <button type="button" class="gym-set-extend-btn${set.failure ? ' is-on' : ''}" data-toggle-failure>${set.failure ? '✓ ' : ''}Al fallo</button>
+        <button type="button" class="gym-set-extend-btn${set.done ? ' is-on' : ''}" data-toggle-done>${set.done ? '✓ Hecha' : 'Sin hacer'}</button>
+      </div>
+    `;
+    bloque.querySelectorAll('[data-set-field]').forEach((input) => {
+      input.addEventListener('input', () => {
+        // El peso se guarda ya normalizado (la coma a punto): asi lo que
+        // queda en gymLiveSession se puede leer con Number() en todos los
+        // sitios que lo usan de sugerencia gris, sin acordarse de nada.
+        const campo = input.dataset.setField;
+        set[campo] = campo === 'weightDisplay' ? gymNormalizarPeso(input.value) : input.value;
+      });
+    });
+    // Marcar/desmarcar la serie como hecha. Antes era el ✓ de la fila del
+    // entreno, que se quito: la columna no aportaba (ya se ve el "—"
+    // cuando no hay nada) y ahi no habia sitio.
+    bloque.querySelector('[data-toggle-done]').addEventListener('click', () => {
+      set.done = !set.done;
+      if (!set.done) { set.durationSeconds = null; set.extraRest = 0; }
+      renderGymExerciseEditSets();
+    });
+    bloque.querySelector('[data-quitar-serie]').addEventListener('click', async () => {
+      const ok = await showAppConfirm('¿Quitar esta serie del ejercicio?', { okText: 'Quitar', danger: true });
+      if (!ok) return;
+      draft.sets.splice(i, 1);
+      renderGymExerciseEditSets();
+    });
+    bloque.querySelector('[data-toggle-failure]').addEventListener('click', () => {
+      set.failure = !set.failure;
+      renderGymExerciseEditSets();
+    });
+    const editor = bloque.querySelector('[data-tramos-de]');
+    if (!Array.isArray(set.segments)) set.segments = [];
+    const pintar = () => montarEditorDeTramos(editor, set.segments, {
+      pesoMadre: gymNormalizarPeso(bloque.querySelector('[data-set-field="weightDisplay"]').value) || '',
+      alQuitar: () => pintar(),
+    });
+    pintar();
+    bloque.querySelectorAll('[data-add-seg]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        set.segments.push({ kind: btn.dataset.addSeg, weightDisplay: '', reps: '', pauseSeconds: '' });
+        pintar();
+      });
+    });
+    cont.appendChild(bloque);
+  });
+}
+
+function closeGymExerciseEditModal() {
+  document.getElementById('gym-exercise-edit-modal').classList.add('hidden');
+  gymExerciseEditId = null;
+  gymExerciseEditDraft = null;
+}
+
+document.getElementById('btn-close-gym-exercise-edit').addEventListener('click', closeGymExerciseEditModal);
+document.getElementById('btn-cancel-gym-exercise-edit').addEventListener('click', closeGymExerciseEditModal);
+cerrarModalAlTocarFuera(
+  'gym-exercise-edit-modal',
+  closeGymExerciseEditModal,
+  () => document.getElementById('gym-exercise-edit-modal').dataset.sucio === '1',
+);
+
+document.getElementById('btn-gym-exercise-edit-add-set').addEventListener('click', () => {
+  const draft = gymExerciseEditDraft;
+  if (!draft) return;
+  const ultima = draft.sets[draft.sets.length - 1];
+  const desde = draft.sets.length;
+  // Una serie mas: dos filas si el ejercicio cuenta los lados aparte.
+  draft.sets.push(...gymBuildSetsForExercise(gymExerciseEditId, 1, ultima ? ultima.restSeconds : draft.restSeconds));
+  const ex = gymLiveSession && gymLiveSession.exercises.find((e) => e.exerciseId === gymExerciseEditId);
+  if (ex && ex.firstSide === 'right') gymSetStartSide(draft, desde, 'right');
+  renderGymExerciseEditSets();
+});
+
+document.getElementById('gym-exercise-edit-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const ex = gymLiveSession && gymLiveSession.exercises.find((x) => x.exerciseId === gymExerciseEditId);
+  const draft = gymExerciseEditDraft;
+  if (!ex || !draft) { closeGymExerciseEditModal(); return; }
+  const rest = document.getElementById('gym-exercise-edit-rest').value;
+  ex.rpe = document.getElementById('gym-exercise-edit-rpe').value;
+  ex.note = document.getElementById('gym-exercise-edit-note').value;
+  // Los tramos se leen del DOM (la sugerencia gris solo existe ahi).
+  draft.sets.forEach((set, i) => {
+    const editor = document.querySelector(`#gym-exercise-edit-sets [data-tramos-de="${i}"]`);
+    set.segments = gymLeerTramosDe(editor);
+    set.restSeconds = rest;
+  });
+  // Si la serie EN CURSO era de este ejercicio y ha desaparecido al
+  // quitar series, se cancela: si no, quedaria un cronometro corriendo
+  // sobre una serie que ya no existe, y ningun otro ejercicio dejaria
+  // empezar (solo puede haber una serie a la vez).
+  const activa = gymLiveSession.activeSet;
+  if (activa && activa.exerciseId === ex.exerciseId && !draft.sets[activa.setIndex]) {
+    gymLiveSession.activeSet = null;
+  }
+  ex.sets = draft.sets;
+  gymLiveStore();
+  closeGymExerciseEditModal();
+  renderGymLiveExercises();
+  gymLiveTick();
+});
+
+// Rellena los campos del formulario a partir de una serie.
+function gymVolcarSerieEnFormulario(set, sugerencia) {
+  const wEl = document.getElementById('gym-set-end-weight');
+  const rEl = document.getElementById('gym-set-end-reps');
+  document.querySelector('#gym-set-end-form .gym-set-field span').textContent = `Peso (${getGymWeightUnitLabel()})`;
+  wEl.value = set.weightDisplay || '';
+  rEl.value = set.reps || '';
+  wEl.placeholder = sugerencia && sugerencia.weightDisplay ? String(sugerencia.weightDisplay) : '';
+  rEl.placeholder = sugerencia && sugerencia.reps ? String(sugerencia.reps) : '';
+  document.getElementById('gym-set-end-note').value = set.note || '';
+  gymSetEndSegments = (set.segments || []).map((seg) => ({ ...seg }));
+  renderGymSetEndSegments();
+  gymSetEndFailure = !!set.failure;
+  renderGymSetEndFailure();
+}
+
+function openGymSetEndModal() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const ex = gymActiveSetExercise();
+  const exercise = state.gymExercises.find((e) => e.id === a.exerciseId);
+  const set = ex && ex.sets[a.setIndex];
+  const lado = set && set.side ? ` · lado ${gymSideLabel(set.side)}` : '';
+  document.getElementById('gym-set-end-info').textContent =
+    `${exercise ? exercise.name : 'Ejercicio'} · Serie ${ex ? gymSetSerieNumber(ex, a.setIndex) : a.setIndex + 1}${lado}`;
+  document.getElementById('gym-set-end-timer').textContent = gymLiveFormatClock(gymActiveSetSeconds());
+  gymSetEndShowForm(false);
+  document.getElementById('gym-set-end-modal').classList.remove('hidden');
+}
+function closeGymSetEndModal() {
+  document.getElementById('gym-set-end-modal').classList.add('hidden');
+  // Si acabas de cerrarlo, el toque en la pantalla no lo vuelve a abrir
+  // de inmediato (ver gymHandleLiveTap mas abajo).
+  gymTapSnoozeUntil = Date.now() + GYM_TAP_SNOOZE_MS;
+}
+
+// --- Tocar la pantalla durante la serie abre el dialogo ----------------
+// Peticion de Koku: con la serie en marcha el movil suele estar en el
+// banco o en el bolsillo, asi que cuando lo vuelves a tocar lo normal es
+// que la serie haya acabado. Condiciones para que no moleste:
+//  - Solo con la app DELANTE. Mucha gente empieza la serie y se va a
+//    Spotify: al volver, ese primer toque NO cuenta (se pide un margen
+//    desde que la app vuelve a estar visible).
+//  - No antes de unos segundos desde que empezo la serie (si no, el
+//    propio toque de "Empezar" la daria por acabada).
+//  - Solo tocando "hueco" de la pantalla: si tocas un boton o un campo
+//    manda lo que hayas tocado, asi el boton de Terminar serie y el
+//    resto de la vista siguen funcionando exactamente igual.
+//  - Y solo un TOQUE, no un arrastre ni un scroll.
+const GYM_TAP_MIN_SET_SECONDS = 5;      // desde que empieza la serie
+const GYM_TAP_AFTER_FOREGROUND_MS = 1500; // desde que la app vuelve
+// Tras cerrar el dialogo se vuelve a contar lo MISMO que al empezar la
+// serie (peticion de Koku: "si le doy a seguir, que vuelva a contar 5s
+// desde el tiempo en el que este"), no un silencio largo aparte.
+const GYM_TAP_SNOOZE_MS = GYM_TAP_MIN_SET_SECONDS * 1000;
+const GYM_TAP_MAX_MOVE_PX = 12;
+const GYM_TAP_MAX_MS = 700;
+let gymTapSnoozeUntil = 0;
+let gymAppVisibleSince = Date.now();
+let gymTapStart = null;
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') gymAppVisibleSince = Date.now();
+});
+
+// ¿Toca abrir el dialogo con este toque?
+function gymTapShouldOpenEnd(target) {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a || a.pausedAt) return false;
+  if (document.visibilityState !== 'visible') return false;
+  if (Date.now() - gymAppVisibleSince < GYM_TAP_AFTER_FOREGROUND_MS) return false;
+  if (Date.now() < gymTapSnoozeUntil) return false;
+  if (gymActiveSetSeconds() < GYM_TAP_MIN_SET_SECONDS) return false;
+  // Con cualquier dialogo abierto (o el menu flotante desplegado) el
+  // toque es para eso, no para terminar la serie.
+  if (document.querySelector('.modal:not(.hidden)')) return false;
+  if (!target || !target.closest) return false;
+  // Controles de la vista: mandan ellos. Ademas de los de siempre hay
+  // que contar la cabecera de la tarjeta, que no es un <button> pero se
+  // pulsa para plegar/desplegar el ejercicio.
+  if (target.closest('button, input, textarea, select, a, label, [contenteditable], [role="button"], [data-live-toggle-collapse]')) return false;
+  return true;
+}
+
+(function registrarToqueDeSerie() {
+  const vista = document.getElementById('gym-live-view');
+  if (!vista) return;
+  vista.addEventListener('pointerdown', (e) => {
+    gymTapStart = { x: e.clientX, y: e.clientY, t: Date.now(), target: e.target };
+  });
+  vista.addEventListener('pointerup', (e) => {
+    const inicio = gymTapStart;
+    gymTapStart = null;
+    if (!inicio) return;
+    if (Date.now() - inicio.t > GYM_TAP_MAX_MS) return;
+    if (Math.abs(e.clientX - inicio.x) > GYM_TAP_MAX_MOVE_PX) return;
+    if (Math.abs(e.clientY - inicio.y) > GYM_TAP_MAX_MOVE_PX) return;
+    if (!gymTapShouldOpenEnd(inicio.target)) return;
+    openGymSetEndModal();
+  });
+  vista.addEventListener('pointercancel', () => { gymTapStart = null; });
+})();
+
+// --- "Llegué al fallo" dentro del dialogo de fin de serie -------------
+let gymSetEndFailure = false;
+
+function renderGymSetEndFailure() {
+  const btn = document.getElementById('btn-gym-set-end-failure');
+  btn.classList.toggle('is-on', gymSetEndFailure);
+  btn.setAttribute('aria-pressed', gymSetEndFailure ? 'true' : 'false');
+}
+
+document.getElementById('btn-gym-set-end-failure').addEventListener('click', () => {
+  gymSetEndFailure = !gymSetEndFailure;
+  renderGymSetEndFailure();
+});
+
+// --- Tramos de una serie alargada dentro del dialogo de fin de serie ---
+// Lo que se este escribiendo ahora mismo en la linea "¿Has alargado la
+// serie?". Se vacia al abrir el formulario y se vuelca en la serie al
+// guardar; mientras tanto vive solo aqui, porque hasta que no le das a
+// "Guardar serie" no hay nada que apuntar.
+let gymSetEndSegments = [];
+
+// El peso de la SERIE MADRE tal y como esta el formulario ahora: lo que
+// hayas escrito o, si lo dejaste en blanco, la sugerencia gris (misma
+// regla que usa gymFinishActiveSet para guardar la serie).
+function gymPesoMadreDeTramos() {
+  const wEl = document.getElementById('gym-set-end-weight');
+  return gymNormalizarPeso(wEl.value !== '' ? wEl.value : (wEl.placeholder || ''));
+}
+
+// El editor de tramos, montado sobre CUALQUIER contenedor. Se usa en
+// dos sitios (peticion de Koku de poder arreglarlos despues: "a lo mejor
+// le he dado a acabar y se me ha olvidado darle a que he hecho alguna o
+// le he dado mal al peso"):
+//   - el dialogo de fin de serie del entreno en vivo,
+//   - y cada serie del modal de editar una sesion del historial.
+// `segmentos` se modifica EN EL SITIO (es el array del sitio que lo
+// llama); `pesoMadre` es la sugerencia gris de partida, que en el
+// entreno sale del campo de peso y en el historial de la fila.
+function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
+  cont.innerHTML = '';
+  const unit = getGymWeightUnitLabel();
+  // El peso que se propone en cada tramo: en un rest-pause es SIEMPRE el
+  // de la madre (es la definicion: misma carga tras la pausa), y en un
+  // dropset el del tramo de arriba, porque un dropset encadenado va
+  // bajando desde el anterior. Koku pidio que el de la madre sea el
+  // valor por defecto pero se pueda cambiar: va como sugerencia gris,
+  // que es el patron que ya usa el resto del dialogo (campo vacio =
+  // te vale la sugerencia).
+  let pesoAnterior = pesoMadre;
+  segmentos.forEach((seg, i) => {
+    const sugerencia = seg.kind === 'restpause' ? pesoMadre : pesoAnterior;
+    const row = document.createElement('div');
+    row.className = 'gym-set-segment-row';
+    row.dataset.segKind = seg.kind;
+    // Cada campo lleva su etiqueta ENCIMA, no dentro como sugerencia:
+    // metidos los tres en una fila, "pausa s" se cortaba y no se leia
+    // la unidad (lo vio Koku en el iPhone). La sugerencia gris del peso
+    // sigue estando, que es la que se usa si lo dejas en blanco.
+    row.innerHTML = `
+      <div class="gym-set-segment-head">
+        <span class="gym-set-segment-tag ${seg.kind === 'restpause' ? 'es-restpause' : 'es-dropset'}">${GYM_SEGMENT_LABELS[seg.kind]}</span>
+        <span class="gym-set-head-dur"></span>
+        <button type="button" class="icon-btn" data-seg-remove aria-label="Quitar tramo">✕</button>
+      </div>
+      <div class="gym-set-segment-fields">
+        ${seg.kind === 'restpause'
+          ? `<label class="gym-set-segment-field"><span>Pausa (s)</span><input type="number" inputmode="numeric" min="0" data-seg-field="pauseSeconds" value="${escapeHtml(String(seg.pauseSeconds ?? ''))}" /></label>`
+          : ''}
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="text" inputmode="decimal" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-seg-field="reps" value="${escapeHtml(String(seg.reps ?? ''))}" /></label>
+      </div>
+    `;
+    row.querySelectorAll('[data-seg-field]').forEach((input) => {
+      input.addEventListener('input', () => { seg[input.dataset.segField] = input.value; });
+    });
+    row.querySelector('[data-seg-remove]').addEventListener('click', () => {
+      segmentos.splice(i, 1);
+      if (alQuitar) alQuitar();
+      else montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar });
+    });
+    cont.appendChild(row);
+    pesoAnterior = (seg.weightDisplay !== '' && seg.weightDisplay != null) ? seg.weightDisplay : sugerencia;
+  });
+}
+
+function renderGymSetEndSegments() {
+  montarEditorDeTramos(
+    document.getElementById('gym-set-end-segments'),
+    gymSetEndSegments,
+    { pesoMadre: gymPesoMadreDeTramos(), alQuitar: renderGymSetEndSegments },
+  );
+}
+
+// Lo escrito en los tramos, ya resuelto (campo vacio = la sugerencia
+// gris que se veia). Se lee del DOM y no del array porque la sugerencia
+// solo existe ahi, igual que pasa con el peso de la serie madre.
+function gymLeerTramosDelFormulario() {
+  return gymLeerTramosDe(document.getElementById('gym-set-end-segments'));
+}
+
+function gymLeerTramosDe(cont) {
+  const filas = cont ? [...cont.querySelectorAll('.gym-set-segment-row')] : [];
+  return filas.map((fila) => {
+    const leer = (campo) => {
+      const el = fila.querySelector(`[data-seg-field="${campo}"]`);
+      if (!el) return '';
+      // El peso puede venir escrito con coma; el resto son enteros.
+      const norm = (v) => (campo === 'weightDisplay' ? gymNormalizarPeso(v) : v);
+      if (el.value !== '') return norm(el.value);
+      // Campo vacio: vale la sugerencia gris, pero SOLO si de verdad es
+      // un numero. Hay placeholders que son texto ("reps", "pausa s") y
+      // colarlos aqui guardaria un NaN en la base de datos.
+      const sug = norm(el.placeholder);
+      return Number.isFinite(Number(sug)) && sug !== '' ? sug : '';
+    };
+    const kind = fila.dataset.segKind === 'restpause' ? 'restpause' : 'dropset';
+    return {
+      kind,
+      weightDisplay: leer('weightDisplay'),
+      reps: leer('reps'),
+      pauseSeconds: kind === 'restpause' ? leer('pauseSeconds') : null,
+    };
+  // Un tramo sin repeticiones esta a medio escribir: no se guarda.
+  }).filter((seg) => Number(seg.reps) > 0);
+}
+
+document.querySelectorAll('[data-add-segment]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymSetEndSegments.push({ kind: btn.dataset.addSegment, weightDisplay: '', reps: '', pauseSeconds: '' });
+    renderGymSetEndSegments();
+    // El foco al ultimo campo que se acaba de crear, para poder escribir
+    // sin tener que apuntar con el dedo.
+    const ultimo = document.querySelector('#gym-set-end-segments .gym-set-segment-row:last-child input');
+    if (ultimo) ultimo.focus();
+  });
+});
+
+// "Si, terminada" -> pasa al formulario, con lo que ya hubiera escrito en
+// la fila y, si estaba vacio, lo de la ultima serie hecha del mismo
+// ejercicio y lado (asi normalmente solo hay que confirmar).
+document.getElementById('btn-gym-set-end-done').addEventListener('click', () => {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const ex = gymActiveSetExercise();
+  const set = ex && ex.sets[a.setIndex];
+  if (!set) return;
+  // La sugerencia va como PLACEHOLDER, en gris de ejemplo, no como valor
+  // escrito (peticion de Koku): si no tocas el campo, al guardar se usa
+  // igualmente ese valor. Se busca primero la ultima serie hecha del
+  // MISMO lado y, si no hay, la ultima de cualquier lado -- en un
+  // unilateral se suele mover el mismo peso con los dos, asi que al
+  // cambiar de lado tambien conviene proponerlo (peticion de Koku).
+  const hechasAntes = [...ex.sets.slice(0, a.setIndex)].reverse().filter((s) => s.done);
+  const previa = hechasAntes.find((s) => s.side === set.side) || hechasAntes[0];
+  // Si la serie se deshizo y se esta rehaciendo, el volcado recupera de
+  // paso los tramos y el "al fallo" que tuviera apuntados.
+  gymVolcarSerieEnFormulario(set, previa);
+  gymSetEndShowForm(true);
+});
+
+// "Guardar serie": vuelca peso/reps/nota, marca la serie con su duracion
+// y arranca el descanso -- el CORTO entre lados si acaba de hacerse el
+// lado izquierdo de un ejercicio contado por lados, el normal si no.
+function gymFinishActiveSet() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  const ex = gymActiveSetExercise();
+  const set = ex && ex.sets[a.setIndex];
+  if (set) {
+    // Campo vacio = te vale la sugerencia gris, asi que se guarda esa.
+    const wEl = document.getElementById('gym-set-end-weight');
+    const rEl = document.getElementById('gym-set-end-reps');
+    set.weightDisplay = gymNormalizarPeso(wEl.value !== '' ? wEl.value : (wEl.placeholder || ''));
+    set.reps = rEl.value !== '' ? rEl.value : (rEl.placeholder || '');
+    set.note = document.getElementById('gym-set-end-note').value;
+    set.segments = gymLeerTramosDelFormulario();
+    set.failure = gymSetEndFailure;
+    set.done = true;
+    set.durationSeconds = gymActiveSetSeconds();
+    set.extraRest = 0;
+
+    const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+    // Descanso CORTO entre lados: cuando lo que acaba de hacerse es el
+    // primer lado de la serie, o sea que el otro lado sigue pendiente.
+    // Ojo: no vale mirar si es el izquierdo -- se puede empezar por el
+    // derecho (lo eliges en el dialogo), y entonces el corto va despues
+    // del derecho.
+    const pareja = gymSidePartnerIndex(ex, a.setIndex);
+    const entreLados = pareja >= 0 && !ex.sets[pareja].done
+      && exercise && Number(exercise.sideRestSeconds) > 0;
+    const seconds = entreLados
+      ? Number(exercise.sideRestSeconds)
+      : (Number(set.restSeconds) || gymLiveSession.restPreset);
+    gymLiveSession.restUntil = Date.now() + seconds * 1000;
+    gymLiveSession.restBaseSeconds = seconds;
+    gymLiveSession.restExtraSeconds = 0;
+    // A que serie pertenece el descanso en marcha: los +30s se le
+    // apuntan a ELLA, para poder ensenar "Serie 1: +60s" luego.
+    gymLiveSession.restSetRef = { exerciseId: ex.exerciseId, setIndex: a.setIndex };
+    gymScheduleRestNotification();
+    gymStartRestLiveActivity();
+    gymStartRestAudioWatch();
+
+    // Ejercicio terminado: las notas de sus series se combinan en la
+    // nota del ejercicio, que es la que se vera el proximo entreno.
+    if (ex.sets.every((s) => s.done)) gymCombineSetNotes(ex);
+  }
+  gymLiveSession.activeSet = null;
+  gymLiveStore();
+  closeGymSetEndModal();
+  renderGymLiveExercises();
+  gymLiveTick();
+}
+
+document.getElementById('btn-gym-set-end-save').addEventListener('click', gymFinishActiveSet);
+document.getElementById('btn-gym-set-end-continue').addEventListener('click', closeGymSetEndModal);
+document.getElementById('btn-gym-set-end-pause').addEventListener('click', () => {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return;
+  if (!a.pausedAt) a.pausedAt = Date.now();
+  gymLiveStore();
+  closeGymSetEndModal();
+  renderGymLiveExercises();
+  gymLiveTick();
+});
+
+function renderGymLiveExercises() {
+  const container = document.getElementById('gym-live-exercises');
+  container.innerHTML = '';
+  // El atajo de "lista vacia" solo aplica si TAMPOCO hay nada que
+  // recuperar (ni ocultos del dia ni quitados en esta sesion) -- si no,
+  // esas secciones de abajo no se pintarian nunca.
+  if (gymLiveSession.exercises.length === 0
+      && !(gymLiveSession.hiddenPool || []).length
+      && !(gymLiveSession.removedPool || []).length) {
+    container.innerHTML = '<p class="empty-hint">Añade ejercicios con el botón del menú de abajo a la derecha.</p>';
+    return;
+  }
+  const unit = getGymWeightUnitLabel();
+
+  // Plegar/desplegar todo (peticion de Koku: no deslizar 40 minutos).
+  if (gymLiveSession.exercises.length > 1) {
+    const toolsRow = document.createElement('div');
+    toolsRow.className = 'gym-live-cards-tools';
+    toolsRow.innerHTML = `
+      <button type="button" class="secondary-btn" data-live-expand-all>Desplegar todo</button>
+      <button type="button" class="secondary-btn" data-live-collapse-all>Recoger todo</button>
+    `;
+    toolsRow.querySelector('[data-live-expand-all]').addEventListener('click', () => {
+      gymLiveSession.exercises.forEach((ex) => { ex.collapsed = false; });
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    toolsRow.querySelector('[data-live-collapse-all]').addEventListener('click', () => {
+      gymLiveSession.exercises.forEach((ex) => { ex.collapsed = true; });
+      gymLiveStore();
+      renderGymLiveExercises();
+    });
+    container.appendChild(toolsRow);
+  }
+
+  gymLiveSession.exercises.forEach((ex, exIndex) => {
+    const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+    const prev = gymLivePrevSets.get(ex.exerciseId);
+    // Sesiones guardadas por versiones anteriores: el RPE vivia por
+    // serie; se recupera el primero que hubiera como RPE del ejercicio.
+    if (ex.rpe === undefined) ex.rpe = (ex.sets.find((s) => s.rpe) || {}).rpe || '';
+    const card = document.createElement('div');
+    card.className = 'gym-live-exercise-card' + (ex.collapsed ? ' collapsed' : '');
+
+    const setsHtml = ex.sets.map((set, setIndex) => {
+      const prevSet = prev && prev.sets[setIndex];
+      // Si la ultima vez esa serie se alargo, se marca con un "+N" para
+      // saber que ese numero no salio de una serie normal.
+      const prevExtra = prevSet && gymSetSegments(prevSet).length;
+      const prevLabel = prevSet
+        ? `${prevSet.restSeconds ? `(${gymFormatRestShort(prevSet.restSeconds)})` : ''}${prevSet.weightKg !== null ? gymWeightKgToDisplay(prevSet.weightKg) : '—'}×${prevSet.reps ?? '—'}${prevExtra ? ` +${prevExtra}` : ''}`
+        : '—';
+      return `
+        <div class="gym-live-set-row ${set.done ? 'done' : ''}">
+          <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}</span>
+          <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
+          <span class="gym-live-set-value">${escapeHtml(String(set.weightDisplay || '—'))}</span>
+          <span class="gym-live-set-value">${escapeHtml(String(set.reps || '—'))}</span>
+        </div>
+        ${set.extraRest || set.failure || gymSetSegments(set).length
+          ? `<div class="gym-live-set-chips">${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymFailureChipHtml(set.failure)}${gymSegmentChipHtml(set)}</div>`
+          : ''}
+      `;
+    }).join('');
+
+    // Boton GRANDE de empezar/terminar serie (sustituye a la casilla
+    // diminuta, peticion de Koku). Apunta siempre a la primera serie sin
+    // hacer del ejercicio; si ya estan todas, empieza una extra. Solo
+    // puede haber UNA serie en curso en todo el entreno.
+    const active = gymLiveSession.activeSet;
+    const activeHere = !!active && active.exerciseId === ex.exerciseId;
+    const pendingIdx = gymNextPendingSetIndex(ex);
+    let bigBtnHtml;
+    if (activeHere) {
+      const paused = !!active.pausedAt;
+      const activeSide = (ex.sets[active.setIndex] || {}).side;
+      const que = activeSide ? `lado ${gymSideLabel(activeSide)}` : 'serie';
+      bigBtnHtml = `
+        <button type="button" class="gym-set-big-btn gym-set-run-btn${paused ? ' paused' : ''}" data-live-set-action>
+          ${paused ? `▶ Reanudar ${que}` : `■ Terminar ${que}`} · <span data-live-set-timer>0:00</span>
+        </button>`;
+    } else {
+      const pendingSet = pendingIdx >= 0 ? ex.sets[pendingIdx] : null;
+      const label = pendingIdx >= 0
+        ? `▶ Empezar serie ${gymSetSerieNumber(ex, pendingIdx)} de ${gymSerieCount(ex)}${pendingSet && pendingSet.side ? ` · lado ${gymSideLabel(pendingSet.side)}` : ''}`
+        : '▶ Empezar serie extra';
+      // Con el descanso recien acabado, el boton de ESTE ejercicio se
+      // pone grande y llamativo: es el que se le olvidaba pulsar a Koku.
+      const leToca = gymIndiceDelEjercicioEnEspera() === exIndex;
+      bigBtnHtml = `
+        <button type="button" class="gym-set-big-btn gym-set-start-btn${leToca ? ' is-ready' : ''}" data-live-set-start ${active ? 'disabled' : ''}>
+          ${label}
+        </button>`;
+    }
+
+    const doneCount = ex.sets.filter((s) => s.done).length;
+    const restSeconds = Number(ex.sets[0] && ex.sets[0].restSeconds) || '';
+    card.innerHTML = `
+      <div class="gym-live-exercise-header" data-live-toggle-collapse>
+        <span class="gym-live-caret" aria-hidden="true">▾</span>
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <span class="gym-live-rest-chip is-static" title="Descanso entre series">${restSeconds ? gymFormatRestDisplay(restSeconds) : '—'}</span>
+        <span class="gym-live-card-progress">${doneCount}/${ex.sets.length}</span>
+      </div>
+      <div class="gym-live-card-body">
+        ${exercise && exercise.notes ? `<p class="gym-live-fixed-note">${escapeHtml(exercise.notes)}</p>` : ''}
+        ${prev && prev.note ? `<p class="gym-live-prev-note">La última vez: ${escapeHtml(prev.note)}</p>` : ''}
+        <div class="gym-live-set-row gym-live-set-head">
+          <span class="gym-live-set-number">#</span>
+          <span class="gym-live-set-prev">Anterior</span>
+          <span class="gym-live-set-value">${unit}</span>
+          <span class="gym-live-set-value">Reps</span>
+        </div>
+        ${setsHtml}
+        ${bigBtnHtml}
+        ${ex.rpe || (ex.note && ex.note.trim()) ? `<p class="gym-live-card-meta">${ex.rpe ? `RPE ${escapeHtml(String(ex.rpe))}` : ''}${ex.rpe && ex.note && ex.note.trim() ? ' · ' : ''}${ex.note ? escapeHtml(ex.note) : ''}</p>` : ''}
+      </div>
+    `;
+
+    // Tocar la cabecera pliega/despliega la tarjeta -- salvo que el toque
+    // caiga en un boton o input de la propia cabecera.
+    card.querySelector('[data-live-toggle-collapse]').addEventListener('click', (e) => {
+      if (e.target.closest('button, input')) return;
+      ex.collapsed = !ex.collapsed;
+      gymLiveStore();
+      card.classList.toggle('collapsed', ex.collapsed);
+    });
+
+    // Empezar serie: pasa por el dialogo de confirmacion (que ejercicio y
+    // que serie), con el nombre pulsable para cambiar de ejercicio.
+    const startBtn = card.querySelector('[data-live-set-start]');
+    if (startBtn) startBtn.addEventListener('click', () => openGymSetStartModal(exIndex));
+    // Terminar (o reanudar si estaba pausada) la serie en curso.
+    const actionBtn = card.querySelector('[data-live-set-action]');
+    if (actionBtn) {
+      actionBtn.addEventListener('click', () => {
+        const a = gymLiveSession.activeSet;
+        if (!a) return;
+        if (a.pausedAt) {
+          a.pausedMs = (a.pausedMs || 0) + (Date.now() - a.pausedAt);
+          a.pausedAt = null;
+          gymLiveStore();
+          renderGymLiveExercises();
+          gymLiveTick();
+        } else {
+          openGymSetEndModal();
+        }
+      });
+    }
+    // Quitar el ejercicio: ahora se llega DESLIZANDO la tarjeta (ver el
+    // envoltorio de abajo), no con una ✕ en la cabecera.
+    const quitarEjercicio = async () => {
+      const ok = await showAppConfirm('¿Quitar este ejercicio del entrenamiento? Podrás recuperarlo con sus series desde "Ejercicios quitados", abajo del todo.', { okText: 'Quitar', danger: true });
+      if (!ok) return;
+      // No se pierde: va al pool de quitados de ESTA sesion, con sus
+      // series tal cual estaban (peticion de Koku: poder recuperarlo).
+      if (!gymLiveSession.removedPool) gymLiveSession.removedPool = [];
+      // Si la serie en curso era de ESTE ejercicio, se cancela: si no, la
+      // sesion se quedaba con una serie corriendo de un ejercicio que ya
+      // no esta, el cronometro no paraba y ningun otro ejercicio dejaba
+      // empezar (solo puede haber una serie a la vez).
+      gymDropActiveSetIfExercise(gymLiveSession.exercises[exIndex].exerciseId);
+      gymLiveSession.removedPool.push(gymLiveSession.exercises[exIndex]);
+      gymLiveSession.exercises.splice(exIndex, 1);
+      gymLiveStore();
+      renderGymLiveExercises();
+    };
+
+    // La tarjeta se DESLIZA para editar o quitar el ejercicio (petición
+    // de Koku). Funciona bien justo porque la tarjeta ya no tiene ningún
+    // campo donde escribir: arrastrarla no pelea con meter el dedo en un
+    // input. Lo que queda a golpe de toque es solo usarla: plegar,
+    // empezar la serie y mover el ejercicio arriba/abajo.
+    const envoltorio = wrapRowWithSwipeActions(card, {
+      botones: [
+        ['Editar', 'secondary-btn', () => openGymExerciseEditModal(ex.exerciseId)],
+        ['Mover', 'secondary-btn', () => armarMovimientoDeEjercicio(ex.exerciseId)],
+        ['Quitar', 'danger-btn', quitarEjercicio],
+      ],
+      anchoFijo: 210,
+      // Con el modo mover armado, el deslizamiento lateral se aparta: el
+      // gesto que manda entonces es arrastrar la tarjeta arriba y abajo.
+      bloqueadoSi: () => gymEjercicioEnMovimiento !== null,
+    });
+    envoltorio.dataset.exerciseId = String(ex.exerciseId);
+    if (gymEjercicioEnMovimiento === ex.exerciseId) {
+      envoltorio.classList.add('esta-moviendose');
+      habilitarArrastreDeEjercicio(envoltorio);
+    }
+    container.appendChild(envoltorio);
+  });
+
+  // Ejercicios QUITADOS durante esta sesion: recuperables con sus series
+  // (peticion de Koku, "no es que me lo haya saltado, es un cambio").
+  const removed = gymLiveSession.removedPool || [];
+  if (removed.length > 0) {
+    const removedBox = document.createElement('div');
+    removedBox.className = 'gym-live-hidden-pool';
+    removedBox.innerHTML = `<button type="button" class="secondary-btn" data-live-toggle-removed>${gymLiveRemovedPoolOpen ? 'Ocultar' : 'Ver'} ejercicios quitados (${removed.length})</button><div class="gym-live-hidden-list ${gymLiveRemovedPoolOpen ? '' : 'hidden'}"></div>`;
+    removedBox.querySelector('[data-live-toggle-removed]').addEventListener('click', () => {
+      gymLiveRemovedPoolOpen = !gymLiveRemovedPoolOpen;
+      renderGymLiveExercises();
+    });
+    const removedList = removedBox.querySelector('.gym-live-hidden-list');
+    removed.forEach((r, removedIndex) => {
+      const exercise = state.gymExercises.find((e) => e.id === r.exerciseId);
+      const row = document.createElement('div');
+      row.className = 'gym-live-hidden-row';
+      row.innerHTML = `
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <button type="button" class="secondary-btn">Recuperar</button>
+      `;
+      row.querySelector('button').addEventListener('click', () => {
+        r.collapsed = false;
+        gymLiveSession.exercises.push(r);
+        gymLiveSession.removedPool.splice(removedIndex, 1);
+        gymLiveStore();
+        renderGymLiveExercises();
+      });
+      removedList.appendChild(row);
+    });
+    container.appendChild(removedBox);
+  }
+
+  // Ejercicios OCULTOS del dia: no estan en el entreno, pero se pueden
+  // recuperar para esta sesion concreta (peticion de Koku).
+  const pool = gymLiveSession.hiddenPool || [];
+  if (pool.length > 0) {
+    const poolBox = document.createElement('div');
+    poolBox.className = 'gym-live-hidden-pool';
+    poolBox.innerHTML = `<button type="button" class="secondary-btn" data-live-toggle-hidden>${gymLiveHiddenPoolOpen ? 'Ocultar' : 'Ver'} ejercicios ocultos (${pool.length})</button><div class="gym-live-hidden-list ${gymLiveHiddenPoolOpen ? '' : 'hidden'}"></div>`;
+    poolBox.querySelector('[data-live-toggle-hidden]').addEventListener('click', () => {
+      gymLiveHiddenPoolOpen = !gymLiveHiddenPoolOpen;
+      renderGymLiveExercises();
+    });
+    const listEl = poolBox.querySelector('.gym-live-hidden-list');
+    pool.forEach((p, poolIndex) => {
+      const exercise = state.gymExercises.find((e) => e.id === p.exerciseId);
+      const row = document.createElement('div');
+      row.className = 'gym-live-hidden-row';
+      row.innerHTML = `
+        <span class="gym-list-item-name">${escapeHtml(exercise ? exercise.name : 'Ejercicio')}</span>
+        <button type="button" class="secondary-btn">+ Añadir a esta sesión</button>
+      `;
+      row.querySelector('button').addEventListener('click', async () => {
+        gymLiveSession.exercises.push({
+          exerciseId: p.exerciseId,
+          note: '',
+          rpe: '',
+          collapsed: false,
+          sets: gymBuildSetsForExercise(p.exerciseId, p.targetSets, p.targetRestSeconds ?? ''),
+        });
+        gymLiveSession.hiddenPool.splice(poolIndex, 1);
+        gymLiveStore();
+        if (!gymLivePrevSets.has(p.exerciseId)) {
+          gymLivePrevSets.set(p.exerciseId, await api(`/api/gym-sessions/last-sets/${p.exerciseId}`));
+        }
+        renderGymLiveExercises();
+      });
+      listEl.appendChild(row);
+    });
+    container.appendChild(poolBox);
+  }
+}
+
+// "+ Añadir ejercicio" en vivo: reutiliza el MISMO buscador de la
+// libreria de la Fase 2, pero en "modo elegir" -- si
+// gymLibraryPickCallback esta puesto, elegir un ejercicio (fila o boton)
+// llama al callback en vez del flujo normal de importar, y cierra el
+// buscador. Asi no hay que construir un segundo selector solo para el
+// entreno en vivo.
+document.getElementById('btn-gym-live-add-exercise').addEventListener('click', () => {
+  gymLibraryPickCallback = async (libraryEntry) => {
+    // Importa (idempotente) y anade la tarjeta al entreno en curso, por
+    // el MISMO sitio que "Tus ejercicios": asi las series se construyen
+    // igual (y los unilaterales nacen con sus dos lados).
+    await importGymLibraryExercise(libraryEntry.id);
+    const imported = state.gymExercises.find((e) => e.libraryId === libraryEntry.id);
+    if (!imported) return;
+    await gymAnadirEjercicioAlEntreno(imported.id);
+  };
+  openGymLibraryModal();
+});
+
+// --- Modal de ayuda del entrenamiento --------------------------------
+// Se abre SOLO la primera vez que entras a entrenar (y cada vez, hasta
+// que marques "no volver a mostrar"), y siempre a mano desde el boton
+// "?" flotante o tocando la cabecera RPE. El flag vive en localStorage
+// porque es una preferencia de ESTE dispositivo, como el resto.
+function openGymHelpModal() {
+  // El checkbox refleja lo guardado: si ya pediste no verlo mas y lo
+  // abres a mano, aparece marcado (y puedes desmarcarlo para que vuelva
+  // a salir solo).
+  document.getElementById('gym-help-dont-show').checked =
+    localStorage.getItem('gymLiveHelpSeen') === '1';
+  document.getElementById('gym-help-modal').classList.remove('hidden');
+}
+function closeGymHelpModal() {
+  localStorage.setItem(
+    'gymLiveHelpSeen',
+    document.getElementById('gym-help-dont-show').checked ? '1' : '0'
+  );
+  document.getElementById('gym-help-modal').classList.add('hidden');
+}
+document.getElementById('btn-gym-live-help').addEventListener('click', openGymHelpModal);
+document.getElementById('btn-close-gym-help').addEventListener('click', closeGymHelpModal);
+
+// Ocultar el entrenamiento sin descartarlo (el ▾ de la cabecera): vuelve
+// al Gimnasio con sus pestanas utilizables. El ticker sigue vivo.
+document.getElementById('btn-gym-live-header-hide').addEventListener('click', closeGymLiveView);
+
+// Pausar/reanudar el CRONOMETRO de la sesion (aclarado con Koku: la
+// pausa del menu congela el tiempo de sesion -- si te interrumpen, el
+// entreno no "engorda"). El descanso entre series NO se pausa: es tiempo
+// de reloj de pared. pausedMs/pausedAt, ver gymLiveElapsedSeconds().
+function gymToggleSessionPause() {
+  if (!gymLiveSession) return;
+  if (gymLiveSession.pausedAt) {
+    gymLiveSession.pausedMs = (gymLiveSession.pausedMs || 0) + (Date.now() - gymLiveSession.pausedAt);
+    gymLiveSession.pausedAt = null;
+  } else {
+    gymLiveSession.pausedAt = Date.now();
+  }
+  gymLiveStore();
+  refreshGymLivePauseUi();
+  gymLiveTick();
+}
+function refreshGymLivePauseUi() {
+  const paused = !!(gymLiveSession && gymLiveSession.pausedAt);
+  document.getElementById('btn-gym-live-pause').classList.toggle('is-paused', paused);
+  document.getElementById('btn-gym-live-pause').setAttribute('aria-label', paused ? 'Reanudar el cronómetro' : 'Pausar el cronómetro');
+}
+document.getElementById('btn-gym-live-pause').addEventListener('click', gymToggleSessionPause);
+
+// El menu flotante de acciones del entreno: el boton central abre/cierra
+// el abanico de 4 botones (dudas / pausar / terminar / descartar).
+// Cualquier accion lo cierra, y un toque fuera tambien.
+const GYM_LIVE_FAB = document.getElementById('gym-live-fab');
+function closeGymLiveFab() {
+  GYM_LIVE_FAB.classList.remove('open');
+  document.getElementById('btn-gym-live-menu').setAttribute('aria-expanded', 'false');
+}
+document.getElementById('btn-gym-live-menu').addEventListener('click', () => {
+  const abierto = GYM_LIVE_FAB.classList.toggle('open');
+  document.getElementById('btn-gym-live-menu').setAttribute('aria-expanded', abierto ? 'true' : 'false');
+});
+GYM_LIVE_FAB.querySelectorAll('.gym-live-fab-action').forEach((btn) => {
+  btn.addEventListener('click', closeGymLiveFab);
+});
+document.addEventListener('click', (e) => {
+  if (!GYM_LIVE_FAB.classList.contains('open')) return;
+  // Leccion aprendida (ver CLAUDE.md): si el nodo pulsado ya no esta en
+  // el documento (repintado en su propio manejador), closest() daria
+  // null y pareceria un "clic fuera" -- se ignora.
+  if (!document.contains(e.target)) return;
+  if (!e.target.closest('#gym-live-fab')) closeGymLiveFab();
+});
+
+// Con el entreno en vivo abierto, tocar la navegacion inferior del
+// movil no "funcionaba" (la nav cambiaba la pantalla POR DEBAJO del
+// overlay y no se veia nada). Ahora esconde el overlay primero: la
+// sesion sigue viva en localStorage y en Entrenar queda el boton de
+// "continuar". Listener en captura para adelantarse al de la nav.
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.mobile-nav')) return;
+  const live = document.getElementById('gym-live-view');
+  if (live && !live.classList.contains('hidden')) closeGymLiveView();
+}, true);
+
+// Tocar la mini-barra global de descanso vuelve al entrenamiento.
+// Configuracion es un modal que quedaria POR ENCIMA del entreno, asi que
+// se cierra primero (feedback de Koku: "desde configuracion no me lleva
+// al entrenamiento").
+document.getElementById('gym-global-rest').addEventListener('click', () => {
+  if (!gymLiveSession) return;
+  if (typeof closeSettingsModal === 'function') closeSettingsModal();
+  // En modo "te toca" (descanso acabado, serie pendiente) la barra
+  // arranca la serie ademas de llevarte al entreno: es justo el paso que
+  // se olvidaba.
+  const iEspera = gymIndiceDelEjercicioEnEspera();
+  openGymLiveView();
+  if (iEspera >= 0) {
+    gymStartSet(iEspera);
+    renderGymLiveExercises();
+    gymLiveTick();
+  }
+});
+
+// Al arrancar la app, si quedo una sesion en curso guardada se carga en
+// memoria (sin abrir el overlay): asi el indicador de la nav y la
+// mini-barra de descanso funcionan desde el primer momento.
+gymLiveSession = gymLiveReadStored();
+if (gymLiveSession) {
+  gymLiveTicker = setInterval(gymLiveTick, 1000);
+  // Por si la app se relanzo con +30s de la pantalla de bloqueo sin
+  // recoger (el visibilitychange no cubre el primer arranque).
+  gymConsumeRestExtensionFromLockScreen();
+  // Y si el relanzamiento pillo un descanso a medias, la vigilancia de
+  // audio (bajar la musica al acabar) se rearma con el final vigente.
+  if (gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
+    gymStartRestAudioWatch();
+  }
+}
+refreshGymLiveIndicators();
+
+// Descartar: tirar el entrenamiento en curso sin guardar nada.
+document.getElementById('btn-gym-live-discard').addEventListener('click', async () => {
+  const ok = await showAppConfirm('¿Descartar el entrenamiento? No se guardará nada de hoy.', { okText: 'Descartar', danger: true });
+  if (!ok) return;
+  localStorage.removeItem('gymLiveSession');
+  gymLiveSession = null;
+  gymLiveStopTicker();
+  closeGymLiveView();
+});
+
+// Terminar: convertir lo hecho en una sesion de verdad + resumen.
+document.getElementById('btn-gym-live-finish').addEventListener('click', async () => {
+  // Sin entreno en marcha no hay nada que terminar. No deberia pasar (el
+  // boton vive dentro de la pantalla del entreno, que solo se ve con una
+  // sesion abierta), pero sin esto la funcion revienta con un null.
+  if (!gymLiveSession) return;
+  // Solo cuentan las series marcadas como hechas o con algun dato; las
+  // filas vacias pre-creadas por el plan se ignoran sin molestar.
+  const sets = [];
+  const exerciseNotes = {};
+  const musclesTouched = new Set();
+  let volumeKg = 0;
+  let failureSets = 0;
+  for (const ex of gymLiveSession.exercises) {
+    if (ex.note && ex.note.trim()) exerciseNotes[ex.exerciseId] = ex.note.trim();
+    for (const set of ex.sets) {
+      if (!set.done && set.reps === '' && set.weightDisplay === '') continue;
+      const weightKg = gymWeightDisplayToKg(set.weightDisplay);
+      // Tramos de una serie alargada: el peso viaja en kg como el de la
+      // serie madre (la libra es solo de presentacion, ver el esquema).
+      const segments = (set.segments || []).map((seg) => ({
+        kind: seg.kind,
+        reps: seg.reps,
+        weightKg: gymWeightDisplayToKg(seg.weightDisplay),
+        pauseSeconds: seg.pauseSeconds,
+      })).filter((seg) => Number(seg.reps) > 0);
+      sets.push({
+        exerciseId: ex.exerciseId,
+        reps: set.reps,
+        weightKg,
+        segments,
+        setType: set.failure ? 'failure' : null,
+        restSeconds: set.restSeconds,
+        // El RPE es del EJERCICIO (peticion de Koku): se guarda replicado
+        // en cada serie para no cambiar el esquema de gym_sets.
+        rpe: ex.rpe,
+        extraRestSeconds: set.extraRest || null,
+        // Cuanto duro la serie (del boton "empezar" al "terminar").
+        durationSeconds: set.durationSeconds || null,
+        side: set.side || null,
+        notes: set.note || null,
+      });
+      let volumenDeLaSerie = (Number(set.reps) || 0) * (weightKg || 0);
+      for (const seg of segments) volumenDeLaSerie += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
+      if (set.failure) {
+        failureSets += 1;
+        volumenDeLaSerie = gymVolumenAjustado(volumenDeLaSerie, volumenDeLaSerie);
+      }
+      volumeKg += volumenDeLaSerie;
+      const exercise = state.gymExercises.find((e) => e.id === ex.exerciseId);
+      if (exercise && exercise.muscleGroup) musclesTouched.add(gymMuscleGroupLabel(exercise.muscleGroup));
+    }
+  }
+  if (sets.length === 0) {
+    const ok = await showAppConfirm('No has marcado ninguna serie. ¿Descartar el entrenamiento?', { okText: 'Descartar', danger: true });
+    if (!ok) return;
+    localStorage.removeItem('gymLiveSession');
+    gymLiveSession = null;
+    gymLiveStopTicker();
+    closeGymLiveView();
+    return;
+  }
+
+  const durationSeconds = gymLiveElapsedSeconds();
+  // Se guarda antes de vaciar gymLiveSession: mas abajo se pone a null y
+  // para entonces ya no habria de donde sacar que dia del plan se hizo.
+  const rutinaDelEntreno = gymLiveSession.routineId;
+  await api('/api/gym-sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      date: toDateKey(new Date()),
+      routineId: gymLiveSession.routineId,
+      sets,
+      startedAt: new Date(gymLiveSession.startedAt).toISOString(),
+      durationSeconds,
+      exerciseNotes,
+    }),
+  });
+
+  // Resumen: duracion, series, volumen (en la unidad del dispositivo) y
+  // grupos musculares tocados.
+  const minutes = Math.max(1, Math.round(durationSeconds / 60));
+  document.getElementById('gym-summary-duration').textContent = `${minutes} min`;
+  document.getElementById('gym-summary-sets').textContent = String(sets.length);
+  document.getElementById('gym-summary-volume').textContent = `${gymWeightKgToDisplay(volumeKg)} ${getGymWeightUnitLabel()}`;
+  document.getElementById('gym-summary-failure').textContent = String(failureSets);
+  document.getElementById('gym-summary-muscles').textContent = String(musclesTouched.size);
+  document.getElementById('gym-summary-muscle-list').textContent = [...musclesTouched].join(' · ');
+
+  localStorage.removeItem('gymLiveSession');
+  gymLiveSession = null;
+  gymLiveStopTicker();
+  closeGymLiveView();
+  document.getElementById('gym-live-summary-modal').classList.remove('hidden');
+
+  await loadGymSessions();
+  renderGymSessionsList();
+  populateGymProgressExerciseSelect();
+  // El ciclo del bloque avanza AQUI, tras guardar: si lo entrenado era
+  // lo que tocaba pasa solo, y si no, pregunta donde recolocarlo. Se
+  // hace despues del resumen para no meter un dialogo por delante del
+  // "ya has terminado".
+  await gymAvanzarCicloTrasEntrenar(rutinaDelEntreno);
+  // La celebracion de logros (si algo subio de nivel) queda ABIERTA
+  // detras del resumen: al cerrar el resumen aparece ella.
+  checkGymAchievements();
+});
+document.getElementById('btn-close-gym-summary').addEventListener('click', () => {
+  document.getElementById('gym-live-summary-modal').classList.add('hidden');
+});
+
+// --- El widget de "que toca hoy" -------------------------------------
+// El puente vive en widget-bridge.js, que se carga aparte: si no
+// estuviera (o en un navegador normal), estas llamadas no deben romper
+// nada de lo que las rodea, que es cargar el gimnasio.
+function actualizarResumenDelWidget() {
+  if (typeof actualizarWidgetDelDia === 'function') actualizarWidgetDelDia();
+}
+
+// Abrir la app desde un widget lleva a lo que ese widget enseña. Se
+// comprueba al volver a primer plano, igual que el +30s de la pantalla de
+// bloqueo: el nativo deja una marca con el destino y aqui se consume UNA
+// vez.
+//
+// El destino llega como texto ('tareas', 'finanzas', ...) y NO se interpreta
+// en Swift a proposito: asi anadir un widget nuevo se hace entero desde
+// aqui, sin recompilar nada nativo.
+async function comprobarAperturaDesdeElWidget() {
+  if (typeof widgetPideAbrir !== 'function') return;
+  let destino = '';
+  try { destino = await widgetPideAbrir(); } catch { return; }
+  if (!destino) return;
+
+  if (destino === 'gym-hoy') { await abrirEntrenoDeHoyDesdeWidget(); return; }
+
+  // Las Apps (Finanzas, Lecturas, Viajes) viven dentro del hub de Apps:
+  // hay que abrir ese primero o la pantalla se queda debajo.
+  const apps = {
+    finanzas: () => openFinanzasView(),
+    lecturas: () => openEntretenimientoView(),
+    viajes: () => openViajesView(),
+  };
+  if (apps[destino]) {
+    goToMobileSection('extensions');
+    await apps[destino]();
+    return;
+  }
+
+  if (destino === 'tareas') { await abrirTareasDesdeWidget(); return; }
+
+  // Los dos que se quedan en el calendario.
+  goToMobileSection('calendar');
+  if (destino === 'nuevo-evento') {
+    openEventModal(null);
+  } else if (destino === 'nueva-nota') {
+    openMobileNotesView();
+    openNoteInEditor(null);
+  }
+}
+
+// El widget del Gimnasio: arrancar el entreno que toca hoy.
+async function abrirEntrenoDeHoyDesdeWidget() {
+  // Con un entreno YA en marcha no se empieza otro encima: se abre el que
+  // hay. Perder un entreno a medias por tocar un widget seria muy caro.
+  if (gymLiveReadStored()) {
+    gymLiveSession = gymLiveReadStored();
+    goToMobileSection('extensions');
+    if (typeof openGymView === 'function') await openGymView();
+    openGymLiveView();
+    return;
+  }
+  // Los bloques y los dias pueden no estar cargados todavia (el widget
+  // puede abrir la app desde cero): se piden antes de mirar el ciclo.
+  await Promise.all([loadGymBlocks(), loadGymRoutines(), loadGymExercises()]);
+  const hoy = gymCicloDeHoy();
+  goToMobileSection('extensions');
+  if (typeof openGymView === 'function') await openGymView();
+  // Si hoy toca descanso (o no hay ciclo), se abre el selector en vez de
+  // arrancar algo a lo loco: el widget es un atajo, no una decision.
+  if (!hoy || hoy.esDescanso || !hoy.rutina) openGymStartModal();
+  else startGymLiveSession(hoy.rutina);
+}
+
+// El widget de Tareas. En movil NO hay un "Mi espacio" donde vivan las
+// tareas (ver CLAUDE.md: se quito a proposito, las tareas viven dentro
+// del propio calendario), asi que el sitio donde se ven todas juntas y
+// se pueden tachar es Grupos > "Todos los eventos" con los filtros
+// puestos en tareas pendientes. Eso es justo lo que enseña el widget.
+async function abrirTareasDesdeWidget() {
+  goToMobileSection('calendar');
+  if (typeof openGroupsView !== 'function') return;
+  await openGroupsView();
+  groupsViewFilters.type = 'task';
+  groupsViewFilters.done = 'pending';
+  // Los desplegables tienen que ENSEÑAR el filtro que se acaba de poner:
+  // si no, dirian "Todo" mientras la lista esta filtrada, y parece que
+  // faltan cosas.
+  try {
+    groupsFilterTypeField.setValue('task');
+    groupsFilterDoneField.setValue('pending');
+  } catch { /* si el componente cambia, el filtro sigue aplicado igual */ }
+  await openGroupDetail(null, 'Todos los eventos');
+}
+
+// --- "Hoy te toca": el ciclo visto desde fuera del Gimnasio -----------
+//
+// El ciclo del bloque ACTIVO se consulta al vuelo (decision de Koku: es
+// un aviso calculado, no una tarea guardada en la base). Asi siempre
+// esta al dia y cambiar el plan lo cambia solo, sin filas viejas por
+// ahi ni nada que regenerar.
+//
+// Devuelve null si no hay bloque activo o si ese bloque no usa ciclo.
+function gymCicloDeHoy() {
+  const bloque = state.gymBlocks.find((b) => b.isActive);
+  if (!bloque || !bloque.cycleEnabled || !bloque.cycleToday) return null;
+  const rutina = bloque.cycleToday.routineId
+    ? state.gymRoutines.find((r) => r.id === bloque.cycleToday.routineId) || null
+    : null;
+  // Una posicion que apunta a un dia BORRADO se trata como descanso, en
+  // vez de dejar el aviso a medias.
+  return {
+    bloque,
+    position: bloque.cycleToday.position,
+    length: bloque.cycleLength,
+    rutina,
+    esDescanso: bloque.cycleToday.isRest || !rutina,
+  };
+}
+
+// Cual es la posicion SIGUIENTE del ciclo (dando la vuelta al final).
+function gymCicloSiguientePosicion(bloque, desde) {
+  if (!bloque || !bloque.cycleDays || bloque.cycleDays.length === 0) return null;
+  const i = bloque.cycleDays.findIndex((d) => d.position === desde);
+  if (i === -1) return bloque.cycleDays[0].position;
+  return bloque.cycleDays[(i + 1) % bloque.cycleDays.length].position;
+}
+
+// NO hay aviso de "hoy toca X" en el CALENDARIO. Llego a existir (una
+// tira bajo la cabecera del dia) y Koku lo quito el 9/9/2026: "que te
+// muestre lo de que entrenamiento toca en el calendario realmente no me
+// aporta nada, era mas bien el que pudiera saber el widget que dia es y
+// asi saber a que dia esta enlazado cada entrenamiento". O sea que el
+// ciclo NO es para pintar el calendario: es para que el Gimnasio sepa
+// que ofrecerte y para alimentar el widget. Si vuelve a hacer falta,
+// gymCicloDeHoy() da todo lo necesario en una sola llamada.
+
+// Al terminar un entreno: mover el cursor del ciclo. Si lo entrenado era
+// lo que tocaba, avanza solo y en silencio (el caso normal). Si NO lo
+// era -- hoy tocaba descanso y has entrenado igual, o has hecho otro dia
+// --, se PREGUNTA donde recolocar el ciclo, que es lo que pidio Koku
+// para saber como sigue el aviso y el widget.
+async function gymAvanzarCicloTrasEntrenar(routineId) {
+  const hoy = gymCicloDeHoy();
+  if (!hoy) return;
+  const bloque = hoy.bloque;
+
+  const acertaste = !hoy.esDescanso && hoy.rutina && Number(routineId) === hoy.rutina.id;
+  if (acertaste) {
+    const siguiente = gymCicloSiguientePosicion(bloque, hoy.position);
+    if (siguiente !== null) {
+      await api(`/api/gym-blocks/${bloque.id}/cycle/position`, {
+        method: 'POST', body: JSON.stringify({ position: siguiente }),
+      });
+      await loadGymBlocks();
+    }
+    return;
+  }
+
+  // Fuera de plan. Si lo que has hecho ESTA en el ciclo, se puede
+  // recolocar detras de eso; si no (entreno libre o un dia que no esta
+  // en el ciclo), lo unico sensato es dejarlo como estaba.
+  const enElCiclo = routineId
+    ? (bloque.cycleDays || []).find((d) => d.routineId === Number(routineId))
+    : null;
+  const queTocaba = hoy.esDescanso ? 'descanso' : `“${hoy.rutina.name}”`;
+  if (!enElCiclo) {
+    // Dos redacciones: "no has hecho el dia que tocaba" y "hoy tocaba
+    // descansar y has entrenado igual" no son la misma frase.
+    await showAppAlert(hoy.esDescanso
+      ? 'Hoy tocaba descanso en tu ciclo y lo que has entrenado no es ninguno de sus días, así que el ciclo se queda donde estaba: mañana seguirá tocando este descanso.'
+      : `Hoy tocaba ${queTocaba} en tu ciclo y no lo has hecho, así que el ciclo se queda donde estaba: mañana te seguirá tocando ${queTocaba}.`);
+    return;
+  }
+
+  const nombreHecho = state.gymRoutines.find((r) => r.id === Number(routineId));
+  const siguienteAlHecho = gymCicloSiguientePosicion(bloque, enElCiclo.position);
+  const rutinaSiguiente = (bloque.cycleDays || []).find((d) => d.position === siguienteAlHecho);
+  const nombreSiguiente = rutinaSiguiente && rutinaSiguiente.routineId
+    ? (state.gymRoutines.find((r) => r.id === rutinaSiguiente.routineId) || {}).name || 'descanso'
+    : 'descanso';
+  const recolocar = await showAppConfirm(
+    `Hoy tocaba ${queTocaba}, pero has hecho “${nombreHecho ? nombreHecho.name : 'otro día'}”. ¿Recoloco el ciclo ahí? Mañana te tocaría ${nombreSiguiente === 'descanso' ? 'descanso' : `“${nombreSiguiente}”`}.`,
+    { okText: 'Recolocar', cancelText: 'Dejarlo como estaba' }
+  );
+  if (!recolocar) return;
+  await api(`/api/gym-blocks/${bloque.id}/cycle/position`, {
+    method: 'POST', body: JSON.stringify({ position: siguienteAlHecho }),
+  });
+  await loadGymBlocks();
+}
+
+// --- Ciclo de dias de un bloque ---------------------------------------
+//
+// Un bloque puede repetirse en ciclo: "dia 1 Empuje, dia 2 Tiron, dia 3
+// descanso, y vuelta a empezar". Se edita como una LISTA ordenada de
+// posiciones, cada una con un desplegable propio de la app (nunca un
+// <select> nativo, regla del proyecto) donde eliges un dia del bloque o
+// "Descanso".
+//
+// El borrador vive aparte del bloque guardado para que Cancelar de
+// verdad descarte, igual que el nombre.
+let gymCicloBloqueId = null;
+let gymCicloBorrador = [];
+// Por que posicion del ciclo vas HOY. Es parte del borrador como todo lo
+// demas: se elige aqui y se manda al guardar, no al vuelo.
+let gymCicloHoyBorrador = null;
+let gymCicloHoyField = null;
+// Los desplegables se guardan para poder leerlos, y se recrean enteros
+// en cada repintado (como el resto de listas de este formulario): asi
+// las flechas de los extremos se apagan solas y los indices de los
+// listeners vuelven a cuadrar.
+let gymCicloCampos = [];
+
+function gymCicloDiasDelBloque() {
+  if (!gymCicloBloqueId) return [];
+  return state.gymRoutines.filter((r) => r.blockId === gymCicloBloqueId);
+}
+
+function renderGymCicloEditor() {
+  const encendido = document.getElementById('gym-block-cycle-enabled').checked;
+  const wrap = document.getElementById('gym-block-cycle-wrap');
+  wrap.classList.toggle('hidden', !encendido || !gymCicloBloqueId);
+  const lista = document.getElementById('gym-block-cycle-list');
+  lista.innerHTML = '';
+  gymCicloCampos = [];
+  if (!encendido || !gymCicloBloqueId) return;
+
+  const dias = gymCicloDiasDelBloque();
+  const opciones = [
+    { value: '', label: 'Descanso' },
+    ...dias.map((d) => ({ value: String(d.id), label: d.name, color: d.color, icon: d.icon || '' })),
+  ];
+
+  gymCicloBorrador.forEach((pos, i) => {
+    const fila = document.createElement('div');
+    fila.className = 'gym-cycle-row';
+    fila.innerHTML = `
+      <span class="gym-cycle-row-num">Día ${i + 1}</span>
+      <div class="gym-cycle-row-field"></div>
+      <div class="gym-cycle-row-actions">
+        <button type="button" class="icon-btn" data-subir aria-label="Subir">↑</button>
+        <button type="button" class="icon-btn" data-bajar aria-label="Bajar">↓</button>
+        <button type="button" class="icon-btn" data-quitar aria-label="Quitar del ciclo">✕</button>
+      </div>
+    `;
+    const campo = createSelectField({
+      options: opciones,
+      initialValue: pos.routineId === null || pos.routineId === undefined ? '' : String(pos.routineId),
+      onChange: (v) => { pos.routineId = v === '' ? null : Number(v); actualizarResumenDelCiclo(); },
+    });
+    fila.querySelector('.gym-cycle-row-field').appendChild(campo.element);
+    gymCicloCampos.push(campo);
+    const subir = fila.querySelector('[data-subir]');
+    const bajar = fila.querySelector('[data-bajar]');
+    subir.disabled = i === 0;
+    bajar.disabled = i === gymCicloBorrador.length - 1;
+    subir.addEventListener('click', () => {
+      [gymCicloBorrador[i - 1], gymCicloBorrador[i]] = [gymCicloBorrador[i], gymCicloBorrador[i - 1]];
+      renderGymCicloEditor();
+    });
+    bajar.addEventListener('click', () => {
+      [gymCicloBorrador[i + 1], gymCicloBorrador[i]] = [gymCicloBorrador[i], gymCicloBorrador[i + 1]];
+      renderGymCicloEditor();
+    });
+    fila.querySelector('[data-quitar]').addEventListener('click', () => {
+      gymCicloBorrador.splice(i, 1);
+      renderGymCicloEditor();
+    });
+    lista.appendChild(fila);
+  });
+
+  if (gymCicloBorrador.length === 0) {
+    lista.innerHTML = '<p class="empty-hint">Todavía no has colocado ningún día. Añade tantos como dure tu ciclo.</p>';
+  }
+  actualizarResumenDelCiclo();
+  renderGymCicloHoyField(dias);
+}
+
+// El selector de "Hoy te toca". Se reconstruye entero en cada repintado,
+// como el resto de este formulario: las posiciones cambian al añadir,
+// quitar o mover filas, y las etiquetas tienen que seguirlas.
+function renderGymCicloHoyField(dias) {
+  const cont = document.getElementById('gym-block-cycle-hoy-field');
+  const etiqueta = document.querySelector('.gym-cycle-hoy-label');
+  if (!cont) return;
+  // Sin ciclo no hay nada por donde ir.
+  const hayCiclo = gymCicloBorrador.length > 0;
+  cont.classList.toggle('hidden', !hayCiclo);
+  if (etiqueta) etiqueta.classList.toggle('hidden', !hayCiclo);
+  const pista = cont.nextElementSibling;
+  if (pista && pista.classList.contains('hint')) pista.classList.toggle('hidden', !hayCiclo);
+  cont.innerHTML = '';
+  gymCicloHoyField = null;
+  if (!hayCiclo) return;
+
+  const opciones = gymCicloBorrador.map((pos, i) => {
+    const dia = pos.routineId == null ? null : dias.find((d) => d.id === pos.routineId);
+    return { value: String(i + 1), label: `Día ${i + 1} · ${dia ? dia.name : 'Descanso'}` };
+  });
+  // Si el ciclo se ha acortado por debajo de donde estabas, se vuelve al
+  // dia 1 en vez de dejar un valor que ya no existe.
+  if (!gymCicloHoyBorrador || gymCicloHoyBorrador > gymCicloBorrador.length) gymCicloHoyBorrador = 1;
+  gymCicloHoyField = createSelectField({
+    options: opciones,
+    initialValue: String(gymCicloHoyBorrador),
+    onChange: (v) => { gymCicloHoyBorrador = Number(v); },
+  });
+  cont.appendChild(gymCicloHoyField.element);
+}
+
+// Una linea en cristiano de lo que va a pasar, para no tener que
+// interpretar la lista de desplegables: "Ciclo de 3 días: Empuje ·
+// Tirón · Descanso".
+function actualizarResumenDelCiclo() {
+  const el = document.getElementById('gym-block-cycle-status');
+  if (!el) return;
+  if (gymCicloBorrador.length === 0) { el.textContent = ''; return; }
+  const dias = gymCicloDiasDelBloque();
+  const nombres = gymCicloBorrador.map((p) => {
+    if (p.routineId === null || p.routineId === undefined) return 'Descanso';
+    const d = dias.find((x) => x.id === p.routineId);
+    return d ? d.name : 'Descanso';
+  });
+  el.textContent = `Ciclo de ${gymCicloBorrador.length} día${gymCicloBorrador.length === 1 ? '' : 's'}: ${nombres.join(' · ')}`;
+}
+
+document.getElementById('gym-block-cycle-enabled').addEventListener('change', () => {
+  // Encenderlo con el ciclo vacio propone directamente una posicion por
+  // cada dia del bloque, que es lo que casi siempre se quiere.
+  if (document.getElementById('gym-block-cycle-enabled').checked && gymCicloBorrador.length === 0) {
+    gymCicloBorrador = gymCicloDiasDelBloque().map((d) => ({ routineId: d.id }));
+  }
+  renderGymCicloEditor();
+});
+document.getElementById('btn-gym-cycle-add').addEventListener('click', () => {
+  gymCicloBorrador.push({ routineId: null });
+  renderGymCicloEditor();
+});
+
+// --- Modal de bloque (rediseno de Gimnasio) ---------------------------
+// Un solo campo (el nombre), al estilo de la app de referencia. Activar
+// se hace desde la lista, no desde aqui.
+function openGymBlockModal(block) {
+  document.getElementById('gym-block-modal-title').textContent = block ? 'Editar bloque' : 'Nuevo bloque';
+  document.getElementById('gym-block-id').value = block ? block.id : '';
+  document.getElementById('gym-block-name').value = block ? block.name : '';
+  document.getElementById('btn-delete-gym-block').classList.toggle('hidden', !block);
+  // El ciclo se edita en el borrador gymCicloBorrador y solo se guarda al
+  // dar a Guardar, igual que el nombre: cancelar tiene que descartarlo.
+  gymCicloBloqueId = block ? block.id : null;
+  gymCicloBorrador = block && block.cycleDays ? block.cycleDays.map((d) => ({ routineId: d.routineId })) : [];
+  gymCicloHoyBorrador = block && block.cyclePosition ? block.cyclePosition : 1;
+  document.getElementById('gym-block-cycle-enabled').checked = !!(block && block.cycleEnabled);
+  // Un bloque que aun no existe no tiene dias que colocar en un ciclo:
+  // se esconde entero hasta que se guarde y se vuelva a abrir.
+  document.getElementById('gym-block-cycle-enabled').closest('.checkbox-row').classList.toggle('hidden', !block);
+  document.querySelector('#gym-block-modal .gym-cycle-heading').classList.toggle('hidden', !block);
+  renderGymCicloEditor();
+  document.getElementById('gym-block-modal').classList.remove('hidden');
+}
+function closeGymBlockModal() {
+  document.getElementById('gym-block-modal').classList.add('hidden');
+}
+document.getElementById('btn-new-gym-block').addEventListener('click', () => openGymBlockModal(null));
+document.getElementById('btn-cancel-gym-block').addEventListener('click', closeGymBlockModal);
+document.getElementById('btn-close-gym-block').addEventListener('click', closeGymBlockModal);
+
+document.getElementById('gym-block-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('gym-block-id').value;
+  const payload = { name: document.getElementById('gym-block-name').value };
+  if (id) {
+    await api(`/api/gym-blocks/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    // El ciclo va en su propia llamada: es una lista entera que se
+    // reescribe, no un campo mas del bloque.
+    await api(`/api/gym-blocks/${id}/cycle`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled: document.getElementById('gym-block-cycle-enabled').checked,
+        days: gymCicloBorrador.map((p) => ({ routineId: p.routineId })),
+      }),
+    });
+    // Y por donde vas hoy, DESPUES de guardar el ciclo: la ruta rechaza
+    // una posicion que no exista, y las posiciones son las que acaban de
+    // guardarse. La fecha se pone a hoy sola, asi que un descanso elegido
+    // aqui se consume mañana, como cualquier otro.
+    if (gymCicloBorrador.length > 0) {
+      // Se recorta al rango de verdad ANTES de mandarla. Sin esto, una
+      // posicion imposible hacia que la ruta lanzara y el error se
+      // llevaba por delante TODO lo que viene despues -- el modal se
+      // quedaba abierto y la lista sin refrescar, aunque el ciclo si se
+      // hubiera guardado. Encontrado forzando fallos.
+      const posicion = Math.min(Math.max(1, Number(gymCicloHoyBorrador) || 1), gymCicloBorrador.length);
+      try {
+        await api(`/api/gym-blocks/${id}/cycle/position`, {
+          method: 'POST',
+          body: JSON.stringify({ position: posicion }),
+        });
+      } catch (err) {
+        // Que no se pueda mover el cursor no es motivo para no guardar el
+        // ciclo, que es lo importante: se avisa y se sigue.
+        showAppAlert('El ciclo se ha guardado, pero no se ha podido cambiar por dónde vas hoy.');
+      }
+    }
+  } else {
+    await api('/api/gym-blocks', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeGymBlockModal();
+  await loadGymBlocks();
+  renderGymBlocksList();
+});
+
+document.getElementById('btn-delete-gym-block').addEventListener('click', async () => {
+  const id = Number(document.getElementById('gym-block-id').value);
+  const block = state.gymBlocks.find((b) => b.id === id);
+  const dayCount = block ? block.dayCount : 0;
+  // Borrar un bloque se lleva sus dias (plantillas), aunque nunca el
+  // historial de sesiones -- se avisa con el confirm propio de la app,
+  // no con el del navegador (regla del proyecto).
+  const ok = await showAppConfirm(
+    dayCount > 0
+      ? `¿Eliminar este bloque y ${dayCount === 1 ? 'su día' : `sus ${dayCount} días`}? Las sesiones ya registradas no se pierden.`
+      : '¿Eliminar este bloque?',
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/gym-blocks/${id}`, { method: 'DELETE' });
+  closeGymBlockModal();
+  await Promise.all([loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
+  renderGymBlocksList();
+  renderGymSessionsList();
+});
+
+// --- Modal de dia (antes "rutina" -- ids gym-routine-* conservados) ---
 // El color/icono usan createColorField/createIconField (definidas en
 // settings.js, que se carga DESPUES de app.js) -- construirlas aqui
 // arriba, al analizar el archivo, fallaria (esas funciones todavia no
@@ -8421,15 +13453,22 @@ function ensureGymRoutineFieldsReady() {
   document.getElementById('gym-routine-icon-field').appendChild(gymRoutineIconField.element);
 }
 
-// Construye las opciones <option> de un <select> nativo con la
-// biblioteca de ejercicios -- se usa tanto en filas de rutina como de
-// sesion. Nativo a proposito (no el select-field a medida): estas filas
-// se repiten un numero variable de veces, y un <select> normal no
-// necesita gestionar su propio popover por cada copia.
-function gymExerciseOptionsHtml(selectedId) {
-  return state.gymExercises
-    .map((ex) => `<option value="${ex.id}" ${Number(selectedId) === ex.id ? 'selected' : ''}>${escapeHtml(ex.name)}</option>`)
-    .join('');
+// Las opciones para el selector PROPIO con buscador (createSelectField),
+// que sustituyo a los <select> nativos de estas filas.
+//
+// Se ve SOLO el nombre (peticion de Koku: "deja solo el nombre, el
+// musculo no hace falta que aparezca... ten en cuenta que muchos
+// ejercicios a veces ya llevan el musculo en el nombre" -- "Curl de
+// Biceps · Biceps" se leia repetido). Pero el musculo y el material
+// siguen viajando en `keywords`, que el buscador SI mira: escribir
+// "pierna" sigue sacando todas las de pierna aunque ninguna se llame
+// asi, sin ensuciar la lista.
+function gymExerciseSelectOptions() {
+  return state.gymExercises.map((ex) => ({
+    value: String(ex.id),
+    label: ex.name,
+    keywords: [gymMuscleGroupLabel(ex.muscleGroup) || '', ex.equipment || ''].filter(Boolean).join(' '),
+  }));
 }
 
 function renderGymRoutineExercisesField() {
@@ -8441,17 +13480,74 @@ function renderGymRoutineExercisesField() {
   }
   gymRoutineModalExercises.forEach((row, index) => {
     const rowEl = document.createElement('div');
-    rowEl.className = 'gym-routine-exercise-row';
+    rowEl.className = 'gym-routine-exercise-row gym-routine-exercise-stacked' + (row.hidden ? ' gym-exercise-hidden' : '');
+    // El ojo oculta el ejercicio SIN quitarlo del dia: los entrenos nuevos
+    // no lo pre-cargan, pero se puede recuperar durante la sesion desde
+    // "Ejercicios ocultos" (peticion de Koku: aparcar sin borrar).
+    const eyeSvg = row.hidden
+      ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.8 9.8 0 0 1 12 5c5 0 9 4.5 10 7-.4 1-1.3 2.4-2.6 3.7M6.6 6.6C4.1 8.1 2.5 10.4 2 12c1 2.5 5 7 10 7 1.5 0 2.9-.4 4.2-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>'
+      : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12c1-2.5 5-7 10-7s9 4.5 10 7c-1 2.5-5 7-10 7S3 14.5 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const restPreviewText = (seconds) => {
+      const n = Number(seconds);
+      return n > 0 ? `Descanso: ${gymLiveFormatClock(n)} min` : '';
+    };
+    // Subir / bajar el ejercicio dentro del dia (peticion de Koku: "por
+    // si me equivoco y pongo un ejercicio antes, no tener que moverlo
+    // cada vez"). Con flechas y no arrastrando: dentro de un modal que
+    // ya se desplaza, arrastrar una fila pelea con el scroll, y aqui lo
+    // que hace falta es colocar una cosa en su sitio, no reordenar una
+    // lista larga. Las flechas de los extremos se quedan apagadas.
+    const flechaArriba = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+    const flechaAbajo = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>';
+    const esPrimero = index === 0;
+    const esUltimo = index === gymRoutineModalExercises.length - 1;
     rowEl.innerHTML = `
-      <select data-field="exerciseId">${gymExerciseOptionsHtml(row.exerciseId)}</select>
-      <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
-      <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
-      <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" value="${row.targetRestSeconds ?? ''}" />
-      <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
+      <div class="gym-routine-exercise-name-row">
+        <div class="gym-routine-exercise-order">
+          <button type="button" class="icon-btn" data-field="subir" aria-label="Subir el ejercicio" title="Subir" ${esPrimero ? 'disabled' : ''}>${flechaArriba}</button>
+          <button type="button" class="icon-btn" data-field="bajar" aria-label="Bajar el ejercicio" title="Bajar" ${esUltimo ? 'disabled' : ''}>${flechaAbajo}</button>
+        </div>
+        <div class="gym-routine-exercise-picker"></div>
+        <button type="button" class="icon-btn" data-field="toggleHidden" aria-label="${row.hidden ? 'Mostrar en los entrenos' : 'Ocultar de los entrenos'}" title="${row.hidden ? 'Oculto: los entrenos nuevos no lo cargan. Tocar para mostrarlo.' : 'Ocultar de los entrenos nuevos (sin borrarlo del día)'}">${eyeSvg}</button>
+        <button type="button" class="icon-btn" data-field="remove" aria-label="Quitar ejercicio">✕</button>
+      </div>
+      <div class="gym-routine-exercise-targets-row">
+        <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
+        <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
+        <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" title="En segundos" value="${row.targetRestSeconds ?? ''}" />
+      </div>
+      <p class="hint gym-rest-preview">${restPreviewText(row.targetRestSeconds)}</p>
     `;
-    rowEl.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
-      gymRoutineModalExercises[index].exerciseId = Number(e.target.value);
+    // Selector propio CON BUSCADOR (peticion de Koku: con muchos
+    // ejercicios, un desplegable pelado es una odisea). Sustituye al
+    // <select> nativo que habia aqui, que ademas incumplia la regla del
+    // proyecto de no usar controles del navegador.
+    const picker = createSelectField({
+      options: gymExerciseSelectOptions(),
+      initialValue: row.exerciseId != null ? String(row.exerciseId) : '',
+      placeholder: 'Elige un ejercicio',
+      searchable: true,
+      onChange: (valor) => cambiarEjercicioDeLaFila(valor),
     });
+    rowEl.querySelector('.gym-routine-exercise-picker').appendChild(picker.element);
+    function cambiarEjercicioDeLaFila(valor) {
+      const anteriores = gymTargetsPorDefecto(gymRoutineModalExercises[index].exerciseId);
+      const nuevoId = Number(valor);
+      gymRoutineModalExercises[index].exerciseId = nuevoId;
+      // La fila pasa a ser OTRO ejercicio, asi que se traen sus valores
+      // por defecto -- pero solo en los campos que no hayas tocado tu.
+      // "No tocado" = vacio, o igual a lo que traia el ejercicio
+      // anterior. Asi cambiar de ejercicio no te borra un 4x8 que
+      // habias escrito a mano, y a la vez no te deja el descanso del
+      // ejercicio de antes puesto sin querer.
+      const nuevos = gymTargetsPorDefecto(nuevoId);
+      GYM_TARGET_FIELDS.forEach(({ enElDia }) => {
+        const actual = gymRoutineModalExercises[index][enElDia];
+        const sinTocar = actual === '' || actual == null || String(actual) === String(anteriores[enElDia]);
+        if (sinTocar) gymRoutineModalExercises[index][enElDia] = nuevos[enElDia];
+      });
+      renderGymRoutineExercisesField();
+    }
     rowEl.querySelector('[data-field="targetSets"]').addEventListener('input', (e) => {
       gymRoutineModalExercises[index].targetSets = e.target.value;
     });
@@ -8460,41 +13556,130 @@ function renderGymRoutineExercisesField() {
     });
     rowEl.querySelector('[data-field="targetRestSeconds"]').addEventListener('input', (e) => {
       gymRoutineModalExercises[index].targetRestSeconds = e.target.value;
+      // Vista previa en vivo del descanso ("90" -> "1:30 min"): el campo
+      // esta en segundos y no se notaba (feedback de Koku).
+      rowEl.querySelector('.gym-rest-preview').textContent = restPreviewText(e.target.value);
     });
-    rowEl.querySelector('button').addEventListener('click', () => {
+    rowEl.querySelector('[data-field="toggleHidden"]').addEventListener('click', () => {
+      gymRoutineModalExercises[index].hidden = !gymRoutineModalExercises[index].hidden;
+      renderGymRoutineExercisesField();
+    });
+    rowEl.querySelector('[data-field="remove"]').addEventListener('click', () => {
       gymRoutineModalExercises.splice(index, 1);
       renderGymRoutineExercisesField();
     });
+    // Intercambiar con el vecino. Se repinta la lista entera (como hace
+    // todo este formulario) en vez de mover nodos a mano: asi las
+    // flechas de los extremos se apagan/encienden solas y los indices de
+    // los listeners vuelven a cuadrar.
+    const mover = (destino) => {
+      const [fila] = gymRoutineModalExercises.splice(index, 1);
+      gymRoutineModalExercises.splice(destino, 0, fila);
+      renderGymRoutineExercisesField();
+    };
+    if (!esPrimero) rowEl.querySelector('[data-field="subir"]').addEventListener('click', () => mover(index - 1));
+    if (!esUltimo) rowEl.querySelector('[data-field="bajar"]').addEventListener('click', () => mover(index + 1));
     container.appendChild(rowEl);
   });
 }
 
+// Los tres campos del dia y de donde sale cada uno en la ficha del
+// ejercicio. En una sola lista para no repetir el trio por todas
+// partes.
+const GYM_TARGET_FIELDS = [
+  { enElDia: 'targetSets', porDefecto: 'defaultSets' },
+  { enElDia: 'targetReps', porDefecto: 'defaultReps' },
+  { enElDia: 'targetRestSeconds', porDefecto: 'defaultRestSeconds' },
+];
+
+// La configuracion por defecto de un ejercicio, lista para copiar en una
+// fila del dia. Lo que no tenga valor se queda vacio, como antes.
+function gymTargetsPorDefecto(exerciseId) {
+  const ej = state.gymExercises.find((x) => x.id === Number(exerciseId));
+  const fila = {};
+  GYM_TARGET_FIELDS.forEach(({ enElDia, porDefecto }) => {
+    fila[enElDia] = ej && ej[porDefecto] != null ? ej[porDefecto] : '';
+  });
+  return fila;
+}
+
 document.getElementById('btn-add-gym-routine-exercise').addEventListener('click', () => {
   if (state.gymExercises.length === 0) {
-    alert('Primero crea al menos un ejercicio en la lista de abajo.');
+    showAppAlert('Primero crea al menos un ejercicio (pestaña Plan, lista de abajo).');
     return;
   }
-  gymRoutineModalExercises.push({ exerciseId: state.gymExercises[0].id, targetSets: '', targetReps: '', targetRestSeconds: '' });
+  // Llega ya configurado con lo que suelas hacer con el (peticion de
+  // Koku): series, reps y descanso salen de la ficha del ejercicio.
+  const id = state.gymExercises[0].id;
+  gymRoutineModalExercises.push({ exerciseId: id, ...gymTargetsPorDefecto(id), hidden: false });
   renderGymRoutineExercisesField();
 });
 
-function openGymRoutineModal(routine) {
+// Selector de bloque del dia: createSelectField vive en este mismo
+// archivo, asi que se puede construir ya al analizarlo (igual que el de
+// rutina del modal de sesion, mas abajo). Las opciones se rellenan al
+// abrir el modal, que es cuando state.gymBlocks ya esta cargado.
+const gymRoutineBlockField = createSelectField({
+  options: [],
+  initialValue: '',
+  placeholder: 'Elige un bloque',
+});
+document.getElementById('gym-routine-block-field').appendChild(gymRoutineBlockField.element);
+
+// modo: 'ficha' (nombre, color, icono y bloque) o 'ejercicios' (solo lo
+// que hay dentro del dia). Un dia NUEVO se abre siempre en 'ficha' --
+// hasta que no tiene nombre no hay a que anadirle ejercicios.
+// La linea de "al menos ~48 min" de la ficha de un dia. Se pinta con lo
+// que hay guardado, no con el borrador que se este editando: hasta que
+// no guardas, la duracion sigue siendo la del dia tal y como esta.
+// En un dia NUEVO no hay nada que estimar.
+function renderGymRoutineEstimate(routine) {
+  const el = document.getElementById('gym-routine-estimate');
+  const texto = routine ? gymTextoDeDuracion(routine) : null;
+  el.textContent = texto || '';
+  el.classList.toggle('hidden', !texto);
+}
+
+function openGymRoutineModal(routine, modo = 'ficha') {
   ensureGymRoutineFieldsReady();
-  document.getElementById('gym-routine-modal-title').textContent = routine ? 'Editar rutina' : 'Nueva rutina';
+  if (!routine) modo = 'ficha';
+  const soloEjercicios = modo === 'ejercicios';
+  document.getElementById('gym-routine-ficha').classList.toggle('hidden', soloEjercicios);
+  document.getElementById('gym-routine-ejercicios').classList.toggle('hidden', !soloEjercicios);
+  // OJO con el "required" del nombre: un campo obligatorio que esta
+  // OCULTO no se puede enfocar, y el navegador se niega a enviar el
+  // formulario entero con un "invalid form control is not focusable"
+  // -- sin decir nada por pantalla. Como en el modo ejercicios el
+  // nombre sigue relleno (se rellena igual mas abajo, solo que no se
+  // ve) y se manda tal cual, aqui basta con quitarle el required
+  // mientras esta escondido.
+  document.getElementById('gym-routine-name').required = !soloEjercicios;
+  document.getElementById('gym-routine-modal-title').textContent = routine
+    ? (soloEjercicios ? `Ejercicios de ${routine.name}` : 'Editar día')
+    : 'Nuevo día';
   document.getElementById('gym-routine-id').value = routine ? routine.id : '';
   document.getElementById('gym-routine-name').value = routine ? routine.name : '';
   gymRoutineColorField.setValue(routine ? routine.color : '#5b8cff');
   gymRoutineIconField.setValue(routine ? routine.icon || '' : '');
+  // El selector de bloque se repuebla en cada apertura; por defecto, el
+  // bloque cuyo listado esta abierto (o el del propio dia al editar).
+  gymRoutineBlockField.setOptions(state.gymBlocks.map((b) => ({ value: String(b.id), label: b.name })));
+  const defaultBlockId = routine ? routine.blockId : gymCurrentBlockId;
+  gymRoutineBlockField.setValue(defaultBlockId ? String(defaultBlockId) : '');
   gymRoutineModalExercises = routine
     ? routine.exercises.map((ex) => ({
         exerciseId: ex.exerciseId,
         targetSets: ex.targetSets ?? '',
         targetReps: ex.targetReps ?? '',
         targetRestSeconds: ex.targetRestSeconds ?? '',
+        hidden: !!ex.hidden,
       }))
     : [];
   renderGymRoutineExercisesField();
-  document.getElementById('btn-delete-gym-routine').classList.toggle('hidden', !routine);
+  renderGymRoutineEstimate(routine);
+  // "Eliminar el dia" solo desde su ficha: en la mitad de ejercicios
+  // seria facil confundirlo con "quitar este ejercicio".
+  document.getElementById('btn-delete-gym-routine').classList.toggle('hidden', !routine || soloEjercicios);
   document.getElementById('gym-routine-modal').classList.remove('hidden');
 }
 function closeGymRoutineModal() {
@@ -8511,6 +13696,7 @@ document.getElementById('gym-routine-form').addEventListener('submit', async (e)
     name: document.getElementById('gym-routine-name').value,
     color: gymRoutineColorField.getValue(),
     icon: gymRoutineIconField.getValue(),
+    blockId: gymRoutineBlockField.getValue() ? Number(gymRoutineBlockField.getValue()) : null,
     exercises: gymRoutineModalExercises,
   };
   if (id) {
@@ -8519,16 +13705,22 @@ document.getElementById('gym-routine-form').addEventListener('submit', async (e)
     await api('/api/gym-routines', { method: 'POST', body: JSON.stringify(payload) });
   }
   closeGymRoutineModal();
-  await loadGymRoutines();
+  // Los bloques tambien se recargan: el contador de dias de la tarjeta
+  // cambia si el dia es nuevo o se ha movido de bloque.
+  await Promise.all([loadGymRoutines(), loadGymBlocks()]);
   renderGymRoutinesList();
+  renderGymBlocksList();
 });
 
 document.getElementById('btn-delete-gym-routine').addEventListener('click', async () => {
   const id = document.getElementById('gym-routine-id').value;
+  const ok = await showAppConfirm('¿Eliminar este día? Las sesiones ya registradas con él no se pierden.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
   await api(`/api/gym-routines/${id}`, { method: 'DELETE' });
   closeGymRoutineModal();
-  await Promise.all([loadGymRoutines(), loadGymSessions()]);
+  await Promise.all([loadGymRoutines(), loadGymBlocks(), loadGymSessions()]);
   renderGymRoutinesList();
+  renderGymBlocksList();
   renderGymSessionsList();
 });
 
@@ -8542,7 +13734,7 @@ const gymSessionDateField = createDateField({ initialValue: new Date() });
 document.getElementById('gym-session-date-field').appendChild(gymSessionDateField.element);
 
 const gymSessionRoutineField = createSelectField({
-  options: [{ value: '', label: 'Sesion libre (sin rutina)' }],
+  options: [{ value: '', label: 'Sesión libre (sin día)' }],
   initialValue: '',
   onChange: (routineId) => {
     if (!routineId) return;
@@ -8558,7 +13750,14 @@ const gymSessionRoutineField = createSelectField({
       // pidio explicitamente que las repeticiones se dejen en blanco
       // ("con eso iremos mas tarde"), y el peso tampoco tiene de donde
       // salir (la rutina no guarda ningun peso orientativo).
-      gymSessionModalExercises = routine.exercises.map((ex) => {
+      // Los ejercicios OCULTOS del dia (el ojo tachado de la ficha) no
+      // entran, igual que no entran al empezar un entreno en vivo
+      // (startGymLiveSession). Este era el unico sitio que se los
+      // colaba: Koku, apuntando una sesion a mano, "si tengo un
+      // ejercicio en oculto en la rutina, me lo sigue poniendo, no
+      // quiero que lo ponga". Si lo quieres esa vez, esta el
+      // "+ Ejercicio" de aqui abajo.
+      gymSessionModalExercises = routine.exercises.filter((ex) => !ex.hidden).map((ex) => {
         const setsCount = ex.targetSets && ex.targetSets > 0 ? ex.targetSets : 1;
         return {
           exerciseId: ex.exerciseId,
@@ -8581,6 +13780,12 @@ document.getElementById('gym-session-routine-field').appendChild(gymSessionRouti
 // una a una.
 let gymSessionModalExercises = [];
 
+// Que ejercicios del modal de historial estan RECOGIDOS, por indice.
+// Peticion de Koku: "me gustaria que los ejercicios en historial tambien
+// tuvieran lo de desplegar y recoger, seria mas comodo a la hora de
+// modificar cosas". Se vacia al abrir el modal.
+let gymSessionExercisesCollapsed = new Set();
+
 function renderGymSessionExercisesField() {
   const container = document.getElementById('gym-session-exercises-field');
   container.innerHTML = '';
@@ -8592,17 +13797,80 @@ function renderGymSessionExercisesField() {
     const block = document.createElement('div');
     block.className = 'gym-session-exercise-block';
 
+    const recogido = gymSessionExercisesCollapsed.has(exIndex);
+    block.classList.toggle('collapsed', recogido);
+
     const header = document.createElement('div');
     header.className = 'gym-routine-exercise-row';
+    // El RPE es UNO por ejercicio (peticion de Koku), no por serie: vive
+    // aqui en la cabecera. Ademas, sacandolo de las filas de serie estas
+    // dejan de desbordarse en pantallas estrechas (el RPE se salia).
     header.innerHTML = `
-      <select data-field="exerciseId">${gymExerciseOptionsHtml(exRow.exerciseId)}</select>
+      <button type="button" class="icon-btn gym-session-caret" data-plegar aria-label="${recogido ? 'Desplegar' : 'Recoger'} ejercicio" aria-expanded="${recogido ? 'false' : 'true'}">▾</button>
+      <div class="gym-routine-exercise-picker"></div>
+      <span class="gym-list-item-muted gym-session-set-count">${exRow.sets.length}</span>
+      <input type="number" data-field="exRpe" placeholder="RPE" min="1" max="10" step="0.5" title="RPE del ejercicio" value="${exRow.rpe ?? ''}" />
       <button type="button" class="icon-btn" aria-label="Quitar ejercicio">✕</button>
     `;
-    header.querySelector('[data-field="exerciseId"]').addEventListener('change', (e) => {
-      gymSessionModalExercises[exIndex].exerciseId = Number(e.target.value);
+    header.querySelector('[data-plegar]').addEventListener('click', () => {
+      if (gymSessionExercisesCollapsed.has(exIndex)) gymSessionExercisesCollapsed.delete(exIndex);
+      else gymSessionExercisesCollapsed.add(exIndex);
+      renderGymSessionExercisesField();
     });
-    header.querySelector('button').addEventListener('click', () => {
+    // Mismo selector con buscador que en el dia del plan.
+    const pickerSesion = createSelectField({
+      options: gymExerciseSelectOptions(),
+      initialValue: exRow.exerciseId != null ? String(exRow.exerciseId) : '',
+      placeholder: 'Elige un ejercicio',
+      searchable: true,
+      onChange: (valor) => {
+        const fila = gymSessionModalExercises[exIndex];
+        const antesPorLados = gymExerciseUsesSides(fila);
+        fila.exerciseId = Number(valor);
+        const ahoraPorLados = gymExerciseUsesSides(fila);
+        if (ahoraPorLados !== antesPorLados) {
+          // Al pasar a un ejercicio POR LADOS, las series que estan en
+          // blanco se parten en dos (izquierda y derecha), igual que las
+          // crea el entreno en vivo. Sin esto te quedaba UNA serie sin
+          // lado y dos botones sin marcar, y parecia que la app no
+          // distinguia los lados -- que es justo como lo vio Koku: cuando
+          // anades un ejercicio se elige el primero de la lista (normal) y
+          // solo despues lo cambias al tuyo.
+          //
+          // SOLO las que estan en blanco. Si ya habias escrito peso o
+          // repes, se quedan como estan y los botones de lado te dejan
+          // arreglarlo a mano: cambiar de ejercicio no puede duplicarte ni
+          // tocarte lo que ya habias apuntado.
+          if (ahoraPorLados) {
+            const partidas = [];
+            fila.sets.forEach((s) => {
+              const enBlanco = !String(s.reps ?? '').trim() && !String(s.weightDisplay ?? '').trim();
+              if (enBlanco && !s.side) {
+                partidas.push({ ...s, side: 'left', segments: [] });
+                partidas.push({ ...s, side: 'right', segments: [] });
+              } else {
+                partidas.push(s);
+              }
+            });
+            fila.sets = partidas;
+          }
+          renderGymSessionExercisesField();
+        }
+      },
+    });
+    header.querySelector('.gym-routine-exercise-picker').appendChild(pickerSesion.element);
+    header.querySelector('[data-field="exRpe"]').addEventListener('input', (e) => {
+      gymSessionModalExercises[exIndex].rpe = e.target.value;
+    });
+    header.querySelector('[aria-label="Quitar ejercicio"]').addEventListener('click', async () => {
+      // Quitar un ejercicio aqui borra sus series apuntadas: confirmacion
+      // (peticion de Koku, "seguro que quieres quitar...").
+      const ok = await showAppConfirm('¿Quitar este ejercicio de la sesión, con sus series apuntadas?', { okText: 'Quitar', danger: true });
+      if (!ok) return;
       gymSessionModalExercises.splice(exIndex, 1);
+      // Los indices se corren al quitar uno: se olvida que estaba
+      // recogido, si no el plegado se le quedaria al de al lado.
+      gymSessionExercisesCollapsed = new Set();
       renderGymSessionExercisesField();
     });
     block.appendChild(header);
@@ -8610,29 +13878,102 @@ function renderGymSessionExercisesField() {
     const setsList = document.createElement('div');
     setsList.className = 'gym-session-sets-list';
     exRow.sets.forEach((set, setIndex) => {
-      const setRow = document.createElement('div');
-      setRow.className = 'gym-session-set-row';
-      setRow.innerHTML = `
-        <span class="gym-session-set-number">Serie ${setIndex + 1}</span>
-        <input type="number" data-field="reps" placeholder="Reps" min="0" value="${set.reps ?? ''}" />
-        <input type="number" data-field="weight" placeholder="Peso (${getGymWeightUnitLabel()})" min="0" step="0.5" value="${set.weightDisplay ?? ''}" />
-        <input type="number" data-field="restSeconds" placeholder="Descanso (s)" min="0" value="${set.restSeconds ?? ''}" />
-        <button type="button" class="icon-btn" aria-label="Quitar serie">✕</button>
+      // Cada serie es un BLOQUE con el mismo formato que los tramos:
+      // cabecera arriba y campos con su etiqueta encima. Antes era una
+      // fila apretada con rotulos dentro de los campos y una ristra de
+      // chips en el numero, y se rompia: Koku vio "Serie 1 2 min R-P"
+      // partido en dos lineas y el "Drop" comiendose la casilla de las
+      // repeticiones. Aqui cada cosa tiene su sitio y su nombre.
+      const bloqueSerie = document.createElement('div');
+      bloqueSerie.className = 'gym-exercise-edit-set';
+      const unidad = getGymWeightUnitLabel();
+      // En la cabecera solo lo que NO se ve ya en otro sitio: el lado, lo
+      // que duro y el descanso extra. El "Drop"/"R-P" NO se repite -- se
+      // ve entero en su editor, justo debajo (peticion de Koku: "si tengo
+      // el menu para ver la dropset, no hace falta que me lo indiques en
+      // la serie, ya lo veo").
+      bloqueSerie.innerHTML = `
+        <div class="gym-set-segment-head">
+          <span class="gym-set-segment-tag">${gymSetSerieNumber(exRow, setIndex)}</span>
+          <span class="gym-set-segment-name">Serie${set.side ? ` · lado ${gymSideLabel(set.side)}` : ''}</span>
+          ${set.setType === 'failure' ? `<span class="gym-set-failure-chip" title="Serie llevada al fallo">Fallo</span>` : ''}
+          <span class="gym-set-head-dur" title="Lo que duró la serie">${set.durationSeconds ? `Duración: ${gymFormatSetDuration(set.durationSeconds)}` : ''}</span>
+          <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar serie">✕</button>
+        </div>
+        <div class="gym-set-segment-fields">
+          <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><input type="text" inputmode="decimal" data-field="weight" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
+          <label class="gym-set-segment-field"><span>Reps</span><input type="number" data-field="reps" min="0" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
+          <!-- El "+60s" va PEGADO al descanso, no a la duracion: es
+               descanso extra que se anadio con el boton +30s, y colgando
+               de la duracion parecia que la serie habia durado mas
+               (lo vio Koku). -->
+          <label class="gym-set-segment-field"><span>Descanso (s)${set.extraRestSeconds ? ` <span class="gym-set-extra-chip" title="Añadido con +30s durante el entreno">+${set.extraRestSeconds}</span>` : ''}</span><input type="number" data-field="restSeconds" min="0" value="${escapeHtml(String(set.restSeconds ?? ''))}" /></label>
+        </div>
+        ${set.notes ? `<p class="gym-live-card-meta">${escapeHtml(set.notes)}</p>` : ''}
+        <div class="gym-set-segments" data-seg-editor="${exIndex}-${setIndex}"></div>
+        <div class="gym-set-extend-list gym-session-set-actions"></div>
       `;
-      setRow.querySelector('[data-field="reps"]').addEventListener('input', (e) => {
-        set.reps = e.target.value;
-      });
-      setRow.querySelector('[data-field="weight"]').addEventListener('input', (e) => {
-        set.weightDisplay = e.target.value;
-      });
-      setRow.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => {
-        set.restSeconds = e.target.value;
-      });
-      setRow.querySelector('button').addEventListener('click', () => {
+      bloqueSerie.querySelector('[data-field="reps"]').addEventListener('input', (e) => { set.reps = e.target.value; });
+      bloqueSerie.querySelector('[data-field="weight"]').addEventListener('input', (e) => { set.weightDisplay = gymNormalizarPeso(e.target.value); });
+      bloqueSerie.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => { set.restSeconds = e.target.value; });
+      bloqueSerie.querySelector('[data-quitar-serie]').addEventListener('click', () => {
         exRow.sets.splice(setIndex, 1);
         renderGymSessionExercisesField();
       });
-      setsList.appendChild(setRow);
+
+      // Los tramos, EDITABLES tambien aqui (peticion de Koku: "a lo mejor
+      // le he dado a acabar y se me ha olvidado darle a que he hecho
+      // alguna o le he dado mal al peso"). Mismo editor que el del
+      // entreno en vivo, montado sobre este contenedor.
+      const editor = bloqueSerie.querySelector('[data-seg-editor]');
+      const acciones = bloqueSerie.querySelector('.gym-session-set-actions');
+      if (!Array.isArray(set.segments)) set.segments = [];
+      const pintarTramos = () => montarEditorDeTramos(editor, set.segments, {
+        pesoMadre: gymNormalizarPeso(bloqueSerie.querySelector('[data-field="weight"]').value) || '',
+        alQuitar: () => pintarTramos(),
+      });
+      // El LADO, solo en los ejercicios que se cuentan por lados. Aqui
+      // faltaba del todo: apuntando una sesion a mano no habia forma de
+      // decir cual era el izquierdo y cual el derecho, asi que un
+      // unilateral quedaba como cuatro series sueltas iguales. Toda la
+      // logica ya existia para el entreno en vivo (gymExerciseUsesSides,
+      // gymSetSerieNumber, gymBuildSetsForExercise): lo unico que faltaba
+      // era usarla tambien aqui.
+      //
+      // Botones y no un <select>: la regla de la app es no usar controles
+      // nativos, y ademas con dos opciones un desplegable es peor que dos
+      // botones que ya se ven.
+      const porLados = gymExerciseUsesSides(exRow);
+      acciones.innerHTML = `
+        ${porLados ? `
+        <div class="gym-set-side-picker" role="group" aria-label="Lado de la serie">
+          <button type="button" class="gym-set-extend-btn${set.side === 'left' ? ' is-on' : ''}" data-lado="left">Izquierdo</button>
+          <button type="button" class="gym-set-extend-btn${set.side === 'right' ? ' is-on' : ''}" data-lado="right">Derecho</button>
+        </div>` : ''}
+        <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
+        <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
+        <button type="button" class="gym-set-extend-btn${set.setType === 'failure' ? ' is-on' : ''}" data-toggle-failure>${set.setType === 'failure' ? '✓ ' : ''}Al fallo</button>
+      `;
+      acciones.querySelectorAll('[data-lado]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          // Volver a pulsar el lado que ya esta puesto lo QUITA: asi se
+          // puede deshacer sin tener que borrar la serie.
+          set.side = set.side === btn.dataset.lado ? null : btn.dataset.lado;
+          renderGymSessionExercisesField();
+        });
+      });
+      acciones.querySelectorAll('[data-add-seg]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          set.segments.push({ kind: btn.dataset.addSeg, weightDisplay: '', reps: '', pauseSeconds: '' });
+          pintarTramos();
+        });
+      });
+      acciones.querySelector('[data-toggle-failure]').addEventListener('click', () => {
+        set.setType = set.setType === 'failure' ? null : 'failure';
+        renderGymSessionExercisesField();
+      });
+      pintarTramos();
+      setsList.appendChild(bloqueSerie);
     });
     block.appendChild(setsList);
 
@@ -8645,7 +13986,18 @@ function renderGymSessionExercisesField() {
       // (suele ser el mismo entre series seguidas) -- reps/peso se dejan
       // en blanco, varian serie a serie.
       const lastSet = exRow.sets[exRow.sets.length - 1];
-      exRow.sets.push({ reps: '', weightDisplay: '', restSeconds: lastSet ? lastSet.restSeconds : '' });
+      const descanso = lastSet ? lastSet.restSeconds : '';
+      const base = { reps: '', weightDisplay: '', restSeconds: descanso, extraRestSeconds: null, segments: [], setType: null };
+      if (gymExerciseUsesSides(exRow)) {
+        // Una serie de un ejercicio por lados son DOS filas, izquierda y
+        // derecha, igual que las crea el entreno en vivo
+        // (gymBuildSetsForExercise). Anadir una sola dejaria la serie
+        // coja y el numero de series descuadrado.
+        exRow.sets.push({ ...base, side: 'left', segments: [] });
+        exRow.sets.push({ ...base, side: 'right', segments: [] });
+      } else {
+        exRow.sets.push({ ...base, side: null });
+      }
       renderGymSessionExercisesField();
     });
     block.appendChild(addSetBtn);
@@ -8656,10 +14008,21 @@ function renderGymSessionExercisesField() {
 
 document.getElementById('btn-add-gym-session-exercise').addEventListener('click', () => {
   if (state.gymExercises.length === 0) {
-    alert('Primero crea al menos un ejercicio desde la pestaña Rutinas.');
+    showAppAlert('Primero crea al menos un ejercicio desde la pestaña Plan.');
     return;
   }
-  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, sets: [{ reps: '', weightDisplay: '', restSeconds: '' }] });
+  const primero = state.gymExercises[0];
+  const nuevo = { exerciseId: primero.id, rpe: '', sets: [] };
+  // Mismo criterio que "+ Serie": si el ejercicio va por lados, la
+  // primera serie ya nace con sus dos filas.
+  const base = { reps: '', weightDisplay: '', restSeconds: '', segments: [], setType: null };
+  if (gymExerciseUsesSides(nuevo)) {
+    nuevo.sets.push({ ...base, side: 'left', segments: [] });
+    nuevo.sets.push({ ...base, side: 'right', segments: [] });
+  } else {
+    nuevo.sets.push({ ...base, side: null });
+  }
+  gymSessionModalExercises.push(nuevo);
   renderGymSessionExercisesField();
 });
 
@@ -8670,7 +14033,7 @@ function openGymSessionModal(session) {
   document.getElementById('gym-session-notes').value = session ? session.notes || '' : '';
 
   gymSessionRoutineField.setOptions([
-    { value: '', label: 'Sesion libre (sin rutina)' },
+    { value: '', label: 'Sesión libre (sin día)' },
     ...state.gymRoutines.map((r) => ({ value: String(r.id), label: r.name, color: r.color, icon: r.icon })),
   ]);
   gymSessionRoutineField.setValue(session && session.routineId ? String(session.routineId) : '');
@@ -8679,26 +14042,59 @@ function openGymSessionModal(session) {
     // Reagrupa las series planas que devuelve el servidor (una fila por
     // serie) en un bloque por ejercicio, tal y como lo edita el modal.
     const byExercise = new Map();
+    // El RPE por ejercicio: el primero no vacio de sus series (todas
+    // llevan el mismo desde que el RPE es por ejercicio; las sesiones
+    // antiguas con RPEs distintos ensenan el primero).
+    const rpeByExercise = new Map();
     session.sets.forEach((set) => {
       if (!byExercise.has(set.exerciseId)) byExercise.set(set.exerciseId, []);
+      if (set.rpe != null && !rpeByExercise.has(set.exerciseId)) rpeByExercise.set(set.exerciseId, set.rpe);
       byExercise.get(set.exerciseId).push({
         reps: set.reps ?? '',
         weightDisplay: gymWeightKgToDisplay(set.weightKg),
         restSeconds: set.restSeconds ?? '',
+        extraRestSeconds: set.extraRestSeconds ?? null,
+        // Se arrastran tal cual: editar una sesion a mano no debe borrar
+        // lo que duraron sus series, su lado ni sus notas.
+        durationSeconds: set.durationSeconds ?? null,
+        side: set.side ?? null,
+        notes: set.notes ?? null,
+        // Los tramos de una serie alargada se arrastran tal cual (en kg,
+        // como llegan): aqui solo se VEN, se editan en el entreno. Lo
+        // importante es que editar una sesion a mano no los borre.
+        // En unidades de PANTALLA, igual que weightDisplay de la serie:
+        // el editor de tramos trabaja siempre asi y convierte al guardar.
+        segments: (set.segments || []).map((seg) => ({
+          kind: seg.kind,
+          reps: seg.reps ?? '',
+          weightDisplay: seg.weightKg != null ? gymWeightKgToDisplay(seg.weightKg) : '',
+          pauseSeconds: seg.pauseSeconds ?? '',
+        })),
+        // Y lo mismo con el tipo de serie ('failure', 'warmup'...): antes
+        // no viajaba y editar una sesion a mano lo borraba sin avisar.
+        setType: set.setType ?? null,
       });
     });
-    gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets }));
+    gymSessionModalExercises = [...byExercise.entries()].map(([exerciseId, sets]) => ({ exerciseId, sets, rpe: rpeByExercise.get(exerciseId) ?? '' }));
+    gymSessionExercisesCollapsed = new Set();
   } else {
     gymSessionModalExercises = [];
   }
   renderGymSessionExercisesField();
 
   document.getElementById('btn-delete-gym-session').classList.toggle('hidden', !session);
-  document.getElementById('gym-session-modal').classList.remove('hidden');
+  const modalSesion = document.getElementById('gym-session-modal');
+  delete modalSesion.dataset.sucio;
+  modalSesion.classList.remove('hidden');
 }
 function closeGymSessionModal() {
   document.getElementById('gym-session-modal').classList.add('hidden');
 }
+cerrarModalAlTocarFuera(
+  'gym-session-modal',
+  closeGymSessionModal,
+  () => document.getElementById('gym-session-modal').dataset.sucio === '1',
+);
 document.getElementById('btn-new-gym-session').addEventListener('click', () => openGymSessionModal(null));
 document.getElementById('btn-cancel-gym-session').addEventListener('click', closeGymSessionModal);
 document.getElementById('btn-close-gym-session').addEventListener('click', closeGymSessionModal);
@@ -8712,13 +14108,30 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
   // decide el numero de serie (ver replaceSessionSets en
   // routes/gymSessions.js), asi que se manda tal cual esta en pantalla.
   const sets = [];
-  gymSessionModalExercises.forEach((exRow) => {
-    exRow.sets.forEach((set) => {
+  gymSessionModalExercises.forEach((exRow, exIndex) => {
+    exRow.sets.forEach((set, setIndex) => {
       sets.push({
         exerciseId: exRow.exerciseId,
         reps: set.reps,
         weightKg: gymWeightDisplayToKg(set.weightDisplay),
+        rpe: exRow.rpe,
         restSeconds: set.restSeconds,
+        extraRestSeconds: set.extraRestSeconds ?? null,
+        durationSeconds: set.durationSeconds ?? null,
+        side: set.side ?? null,
+        notes: set.notes ?? null,
+        // Se leen del DOM y no del array: un tramo recien anadido puede
+        // tener el peso en blanco confiando en la sugerencia gris, y esa
+        // solo existe ahi (mismo criterio que en el entreno en vivo).
+        segments: gymLeerTramosDe(
+          document.querySelector(`#gym-session-exercises-field [data-seg-editor="${exIndex}-${setIndex}"]`),
+        ).map((seg) => ({
+          kind: seg.kind,
+          reps: seg.reps,
+          weightKg: gymWeightDisplayToKg(seg.weightDisplay),
+          pauseSeconds: seg.pauseSeconds,
+        })),
+        setType: set.setType ?? null,
       });
     });
   });
@@ -8737,15 +14150,675 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
   await loadGymSessions();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+  checkGymAchievements();
 });
 
 document.getElementById('btn-delete-gym-session').addEventListener('click', async () => {
   const id = document.getElementById('gym-session-id').value;
+  // Borrar una sesion SI pierde historial de verdad (sus series) -- de
+  // ahi el confirm, a diferencia de plantillas como bloques/dias.
+  const ok = await showAppConfirm('¿Eliminar esta sesión y todas sus series? Esto sí borra historial.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
   await api(`/api/gym-sessions/${id}`, { method: 'DELETE' });
   closeGymSessionModal();
   await loadGymSessions();
   renderGymSessionsList();
   populateGymProgressExerciseSelect();
+});
+
+// --- Progreso avanzado (Fase 5 del rediseno) --------------------------
+// Consistencia (heatmap estilo GitHub + racha semanal con objetivo),
+// PRs por ejercicio (mejor peso + 1RM estimado con la formula de Epley)
+// y volumen semanal apilado por grupo muscular. Todo calculado en
+// cliente: el heatmap/racha desde GET /summary (ligero, sin series) y
+// PRs/volumen desde state.gymSessions, que ya esta cargado entero.
+
+// Lunes de la semana ISO de una fecha, como clave 'YYYY-MM-DD' -- las
+// semanas del objetivo/racha/volumen empiezan en lunes (es-ES).
+function gymWeekStartKey(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = (d.getDay() + 6) % 7; // lunes = 0 ... domingo = 6
+  d.setDate(d.getDate() - day);
+  return toDateKey(d);
+}
+
+// Objetivo de sesiones por semana: ajuste por dispositivo, como la
+// unidad de peso (no viaja con los datos).
+function getGymWeeklyGoal() {
+  const stored = Number(localStorage.getItem('gymWeeklyGoal'));
+  return stored >= 1 && stored <= 7 ? stored : 3;
+}
+const gymWeeklyGoalField = createSelectField({
+  options: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: String(n), label: `${n} ${n === 1 ? 'sesión' : 'sesiones'} / semana` })),
+  initialValue: String(getGymWeeklyGoal()),
+  onChange: (value) => {
+    localStorage.setItem('gymWeeklyGoal', value);
+    renderGymProgressSections();
+  },
+});
+document.getElementById('gym-weekly-goal-field').appendChild(gymWeeklyGoalField.element);
+
+// Cuanto pesa de mas una serie al fallo en el volumen. Ajuste por
+// dispositivo, como la unidad de peso y el objetivo semanal: no viaja
+// con los datos, y cambiarlo NO reescribe nada -- los kg guardados son
+// los reales y esto solo cambia como se suman al pintar.
+const gymFailureFactorField = createSelectField({
+  options: GYM_FAILURE_FACTORS.map((n) => ({
+    value: String(n),
+    label: n === 1 ? 'No contar de más (×1)' : `×${String(n).replace('.', ',')}`,
+  })),
+  initialValue: String(getGymFailureFactor()),
+  onChange: (value) => {
+    localStorage.setItem('gymFailureFactor', value);
+    renderGymProgressSections();
+    renderGymSessionsList();
+  },
+});
+document.getElementById('gym-failure-factor-field').appendChild(gymFailureFactorField.element);
+
+// Punto de entrada de toda la seccion: se llama al entrar en la pestana
+// Progreso (ver switchGymTab), no en cada apertura del Gimnasio.
+async function renderGymProgressSections() {
+  const summary = await api('/api/gym-sessions/summary');
+  renderGymConsistency(summary);
+  renderGymBodyMap();
+  renderGymPRs();
+  renderGymWeeklyVolume();
+}
+
+// La racha cuenta semanas SEGUIDAS cumpliendo el objetivo, empezando
+// por la semana pasada hacia atras; la semana en curso suma solo si ya
+// ha llegado al objetivo (que aun no lo haya hecho no rompe la racha).
+// Compartida entre la tarjeta de Consistencia y los logros.
+function gymComputeWeeklyStreak(sessionsByWeek, goal) {
+  const now = new Date();
+  let streak = (sessionsByWeek.get(gymWeekStartKey(now)) || 0) >= goal ? 1 : 0;
+  const probe = new Date(now);
+  probe.setDate(probe.getDate() - 7);
+  while ((sessionsByWeek.get(gymWeekStartKey(probe)) || 0) >= goal) {
+    streak += 1;
+    probe.setDate(probe.getDate() - 7);
+  }
+  return streak;
+}
+
+// Heatmap de consistencia: 26 semanas x 7 dias, intensidad = sesiones de
+// ese dia. UN solo tono (el morado del gym) de claro a oscuro -- un mapa
+// de magnitud siempre es un unico matiz escalonado, nunca varios colores.
+function renderGymConsistency(summary) {
+  const sessionsByDate = new Map();
+  for (const s of summary) {
+    sessionsByDate.set(s.date, (sessionsByDate.get(s.date) || 0) + 1);
+  }
+
+  // Estadisticas de arriba: dias entrenados, racha de semanas cumpliendo
+  // el objetivo, esta semana y este mes.
+  const goal = getGymWeeklyGoal();
+  const sessionsByWeek = new Map();
+  for (const s of summary) {
+    const week = gymWeekStartKey(new Date(`${s.date}T00:00:00`));
+    sessionsByWeek.set(week, (sessionsByWeek.get(week) || 0) + 1);
+  }
+  const now = new Date();
+  const thisWeekKey = gymWeekStartKey(now);
+  const thisWeekCount = sessionsByWeek.get(thisWeekKey) || 0;
+  const streak = gymComputeWeeklyStreak(sessionsByWeek, goal);
+  const monthPrefix = toDateKey(now).slice(0, 7);
+  const monthSessions = summary.filter((s) => s.date.startsWith(monthPrefix));
+  const monthCount = monthSessions.length;
+  // Tiempo REAL de trabajo del mes: suma de lo que duraron las series
+  // (solo cuenta lo registrado con el boton de empezar/terminar serie,
+  // asi que en sesiones apuntadas a mano sale 0 y no se ensena).
+  const monthWork = monthSessions.reduce((acc, s) => acc + (s.workSeconds || 0), 0);
+  // Series al fallo del mes: el "cuanto has apretado" al lado del
+  // "cuanto has entrenado" (peticion de Koku). Solo sale si hay alguna,
+  // para no ensenar un 0 permanente a quien no las marque.
+  const monthFailureSets = monthSessions.reduce((acc, s) => acc + (s.failureSetCount || 0), 0);
+
+  document.getElementById('gym-consistency-stats').innerHTML = `
+    <div class="gym-live-summary-grid gym-consistency-grid">
+      <div class="gym-live-summary-stat"><b>${sessionsByDate.size}</b><span>Días entrenados</span></div>
+      <div class="gym-live-summary-stat"><b>${streak}</b><span>Racha (semanas)</span></div>
+      <div class="gym-live-summary-stat"><b>${thisWeekCount}/${goal}</b><span>Esta semana</span></div>
+      <div class="gym-live-summary-stat"><b>${monthCount}</b><span>Este mes</span></div>
+      ${monthFailureSets > 0 ? `<div class="gym-live-summary-stat"><b>${monthFailureSets}</b><span>Series al fallo este mes</span></div>` : ''}
+      ${monthWork > 0 ? `<div class="gym-live-summary-stat gym-stat-wide"><b>${gymFormatWorkTime(monthWork)}</b><span>Tiempo de trabajo este mes</span></div>` : ''}
+    </div>
+  `;
+
+  // La rejilla: columnas = semanas (la actual a la derecha), filas =
+  // lunes a domingo. Celdas div con tooltip, no SVG (mas simple y el
+  // helper de tooltips funciona igual sobre cualquier elemento).
+  const WEEKS = 26;
+  const container = document.getElementById('gym-heatmap');
+  const firstMonday = new Date(`${thisWeekKey}T00:00:00`);
+  firstMonday.setDate(firstMonday.getDate() - (WEEKS - 1) * 7);
+  let cells = '';
+  for (let day = 0; day < 7; day++) {
+    for (let week = 0; week < WEEKS; week++) {
+      const cellDate = new Date(firstMonday);
+      cellDate.setDate(cellDate.getDate() + week * 7 + day);
+      if (cellDate > now) { cells += '<span class="gym-heatmap-cell future"></span>'; continue; }
+      const key = toDateKey(cellDate);
+      const count = sessionsByDate.get(key) || 0;
+      const level = count >= 2 ? 2 : count; // 0 / 1 / 2+
+      cells += `<span class="gym-heatmap-cell level-${level}" data-tooltip="${formatGymDate(key)}: ${count} sesión${count === 1 ? '' : 'es'}"></span>`;
+    }
+  }
+  container.innerHTML = `
+    <div class="gym-heatmap-grid" style="grid-template-columns: repeat(${WEEKS}, 1fr);">${cells}</div>
+    <div class="gym-heatmap-legend"><span class="gym-list-item-muted">Menos</span>
+      <span class="gym-heatmap-cell level-0"></span><span class="gym-heatmap-cell level-1"></span><span class="gym-heatmap-cell level-2"></span>
+      <span class="gym-list-item-muted">Más</span></div>
+  `;
+  attachFinanzasChartTooltips(container);
+}
+
+// --- Mapa de musculos (Fase 6 del rediseno, idea propia de Koku) ------
+// Dos siluetas dibujadas a medida (vista frontal y trasera) donde cada
+// zona es un grupo de GYM_MUSCLE_GROUPS y se colorea segun cuanto se ha
+// entrenado en la ventana elegida (7/30/90 dias), en series o volumen.
+// Los musculos SECUNDARIOS del ejercicio (si vino de la libreria)
+// puntuan a la mitad (x0.5) que el principal. El SVG se genera aqui
+// mismo (no es un archivo aparte) para poder usar las variables CSS del
+// tema en los rellenos; el dibujo es propio, sin assets de terceros.
+let gymMapWindowDays = 30;
+let gymMapMetric = 'series'; // 'series' | 'volume'
+document.querySelectorAll('[data-gym-map-window]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymMapWindowDays = Number(btn.dataset.gymMapWindow);
+    document.querySelectorAll('[data-gym-map-window]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderGymBodyMap();
+  });
+});
+document.querySelectorAll('[data-gym-map-metric]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    gymMapMetric = btn.dataset.gymMapMetric;
+    document.querySelectorAll('[data-gym-map-metric]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderGymBodyMap();
+  });
+});
+
+// Las zonas del cuerpo (v2): poligonos anatomicos por musculo portados
+// de react-body-highlighter (https://github.com/giavinh79/react-body-highlighter,
+// licencia MIT -- ¡gracias!), mucho mejor dibujados que las elipses de la
+// primera version. Cada entrada es un grupo de la taxonomia con sus
+// poligonos y a que figura pertenece (tx = desplazamiento horizontal:
+// 0 la frontal, 1120 la trasera). Los abductores no traen poligono en la
+// fuente, asi que sus dos parches de cadera externa son dibujo propio.
+const GYM_BODYMAP_ZONES = [
+  // -- figura FRONTAL --
+  { g: 'pecho', tx: 0, polys: ['518 416 510 551 580 580 678 555 706 473 620 416', '298 465 314 555 408 580 482 551 478 420 376 420'] },
+  { g: 'core', tx: 0, polys: [
+    '686 633 673 571 588 596 600 641 604 833 657 788 665 698',
+    '339 784 331 718 310 633 322 571 408 592 392 633 392 837',
+    '563 592 580 641 584 780 584 927 563 984 551 1041 514 1078 510 845 506 673 510 571',
+    '437 588 486 571 490 673 486 845 482 1073 445 1037 408 914 408 784 412 645',
+  ] },
+  { g: 'biceps', tx: 0, polys: ['167 682 180 714 229 661 290 539 278 494 204 559', '714 494 702 547 763 661 816 718 829 690 788 555'] },
+  { g: 'triceps', tx: 0, polys: ['694 555 694 616 759 727 776 702 755 673', '224 694 298 555 298 608 229 731'] },
+  { g: 'trapecio', tx: 0, polys: [
+    '555 237 506 335 506 392 616 400 706 449 694 367 633 351 584 306',
+    '290 449 302 371 363 351 412 302 445 245 490 339 486 392 380 396',
+  ] },
+  { g: 'hombros', tx: 0, polys: [
+    '784 531 796 478 792 412 759 380 710 363 722 429 714 473',
+    '282 473 212 531 200 478 204 408 245 371 286 371 269 433',
+  ] },
+  // (la fuente etiqueta esta zona interna del muslo como "abductors",
+  // pero anatomicamente es la de los ADUCTORES -- corregido aqui)
+  { g: 'aductores', tx: 0, polys: [
+    '527 1102 543 1249 600 1102 620 1000 649 943 600 927 567 1045',
+    '478 1106 449 1253 420 1159 404 1131 396 1073 380 1024 347 939 396 922 416 992 437 1053',
+  ] },
+  { g: 'cuadriceps', tx: 0, polys: [
+    '347 988 371 1082 371 1278 343 1371 310 1327 294 1200 282 1114 294 1008 322 947',
+    '633 1057 645 1000 669 947 702 1012 710 1118 682 1331 653 1376 624 1286 620 1114',
+    '388 1294 384 1122 412 1184 445 1294 429 1351 400 1461 363 1465 355 1400',
+    '596 1457 555 1290 608 1139 612 1302 641 1396 629 1465',
+    '327 1384 265 1457 257 1367 257 1273 269 1143 294 1335',
+    '718 1131 739 1241 739 1404 727 1457 665 1384 702 1335',
+  ] },
+  { g: 'antebrazo', tx: 0, polys: [
+    '61 886 102 751 147 702 163 743 192 735 45 976 0 1000',
+    '845 698 833 735 800 731 951 984 1000 1004 935 894 898 763',
+    '776 722 776 776 804 841 853 898 922 1012 947 996',
+    '69 1012 135 906 188 841 216 771 212 718 49 988',
+  ] },
+  // -- figura TRASERA --
+  { g: 'trapecio', tx: 1120, polys: [
+    '447 217 477 217 472 383 477 647 383 532 353 409 311 366 391 332 438 272',
+    '523 217 557 217 566 272 609 328 689 366 647 404 617 532 523 647 532 383',
+  ] },
+  // El hombro de la figura de ESPALDA es el deltoides posterior, asi que
+  // es suyo y no de "hombros" (que se queda con la figura de frente).
+  { g: 'hombro_posterior', tx: 1120, polys: ['294 370 230 391 174 443 183 536 243 494 272 464', '711 370 783 396 826 447 817 536 749 489 723 451'] },
+  // La mancha de la espalda, partida en DOS franjas (media arriba,
+  // dorsales abajo) con un corte horizontal a y=560. Los puntos del
+  // corte salen de interpolar sobre los bordes del poligono original,
+  // asi que las dos piezas encajan sin dejar hueco ni solaparse -- si se
+  // tocan estos numeros a ojo, se nota. (Hubo un segundo corte a y=470
+  // para una franja "espalda alta"; Koku la deshizo y su trozo volvio a
+  // la media, que es esta.)
+  { g: 'espalda_media', tx: 1120, polys: [
+    '311 387 281 489 285 553 287 560 383 560 366 540 336 413',
+    '689 387 719 494 715 560 621 560 634 545 664 417',
+  ] },
+  { g: 'dorsales', tx: 1120, polys: [
+    '287 560 340 753 472 711 472 664 383 560',
+    '715 560 660 753 528 711 528 664 621 560',
+  ] },
+  { g: 'triceps', tx: 1120, polys: [
+    '268 498 179 557 145 723 166 817 217 638 268 557',
+    '736 502 821 557 860 732 834 821 779 630 732 557',
+    '268 583 268 685 230 753 191 774 226 655',
+    '728 583 770 647 804 774 766 753 728 689',
+  ] },
+  { g: 'lumbar', tx: 1120, polys: ['477 728 345 770 353 834 494 1021 468 830', '523 728 655 770 647 834 506 1021 532 838'] },
+  { g: 'antebrazo', tx: 1120, polys: [
+    '864 757 911 834 932 940 1000 1064 962 1043 881 894 843 838',
+    '136 757 89 838 68 936 0 1064 38 1043 123 885 157 830',
+    '813 796 774 779 791 847 911 1038 932 1089 945 1047',
+    '187 796 221 779 209 843 94 1030 68 1085 51 1047',
+  ] },
+  { g: 'abductores', tx: 1120, polys: ['330 1070 288 1130 282 1230 316 1290 356 1180', '670 1070 712 1130 718 1230 684 1290 644 1180'] },
+  { g: 'gluteo', tx: 1120, polys: [
+    '447 996 302 1085 298 1187 315 1260 472 1213 494 1149',
+    '553 991 511 1145 523 1209 681 1260 698 1191 694 1085',
+  ] },
+  { g: 'aductores', tx: 1120, polys: [
+    '481 1230 447 1230 413 1255 451 1443 485 1357 489 1294',
+    '519 1226 557 1234 591 1260 549 1443 519 1362 511 1294',
+  ] },
+  { g: 'isquios', tx: 1120, polys: [
+    '289 1221 311 1294 366 1260 353 1353 345 1502 294 1583 289 1468 277 1413 272 1315',
+    '715 1217 694 1289 638 1260 655 1366 664 1502 711 1583 715 1477 728 1421 736 1319',
+    '387 1255 443 1460 404 1668 362 1528 370 1353',
+    '617 1255 634 1362 643 1532 600 1668 562 1464',
+  ] },
+  { g: 'gemelos', tx: 1120, polys: [
+    '294 1604 285 1672 247 1796 238 1928 255 1970 285 1932 298 1800 319 1711 319 1668',
+    '374 1651 353 1677 332 1719 311 1804 302 1919 340 2000 387 1906 391 1689',
+    '630 1651 613 1685 617 1906 664 1996 706 1919 689 1796 668 1702',
+    '706 1604 723 1685 757 1791 766 1928 745 1966 723 1936 706 1796 681 1681',
+    '285 1957 302 1957 336 2017 306 2200 285 2136 268 1983',
+    '698 1957 719 1957 736 1983 719 2132 702 2196 672 2021',
+  ] },
+];
+// Partes no interactivas que completan la silueta (cabeza y rodillas de
+// cada figura, del mismo dataset).
+const GYM_BODYMAP_SILHOUETTE = [
+  { tx: 0, polys: [
+    '424 29 400 118 420 196 461 233 498 253 547 224 576 192 592 102 571 24 498 0',
+    '339 1400 347 1433 355 1473 363 1510 351 1567 298 1567 273 1527 273 1473 302 1441',
+    '657 1400 722 1478 722 1522 698 1571 649 1567 629 1510',
+    '714 1604 735 1535 767 1612 796 1678 784 1878 796 1955 747 1955',
+    '249 1947 278 1649 282 1604 261 1543 249 1576 224 1616 208 1678 220 1882 208 1955',
+    '727 1951 698 1592 653 1584 641 1624 641 1653 657 1771',
+    '355 1584 359 1624 359 1669 351 1722 351 1767 322 1820 306 1873 269 1947 273 1878 282 1804 286 1755 290 1698 298 1641 302 1588',
+  ] },
+  { tx: 1120, polys: [
+    '506 0 460 9 409 55 404 128 451 200 557 200 591 136 596 47 557 13',
+    '345 1532 311 1591 336 1664 374 1626',
+    '664 1536 630 1630 668 1664 694 1591',
+  ] },
+];
+
+function renderGymBodyMap() {
+  const container = document.getElementById('gym-bodymap');
+  const since = new Date();
+  since.setDate(since.getDate() - gymMapWindowDays);
+  const sinceKey = toDateKey(since);
+
+  // Puntuacion por grupo: por cada serie de la ventana, 1 punto (o el
+  // volumen de la serie) al grupo principal del ejercicio, y la mitad a
+  // cada secundario. Tambien apuntamos los ejercicios con mas series de
+  // cada grupo para el detalle.
+  const score = new Map();
+  const exercisesByGroup = new Map();
+  const exerciseById = new Map(state.gymExercises.map((e) => [e.id, e]));
+  for (const session of state.gymSessions) {
+    if (session.date < sinceKey) continue;
+    for (const set of session.sets) {
+      const exercise = exerciseById.get(set.exerciseId);
+      if (!exercise) continue;
+      // En "volumen" cuentan todos los tramos; en "series" una serie
+      // alargada sigue siendo UNA serie (decision de Koku).
+      const amount = gymMapMetric === 'volume' ? gymSetVolumeKg(set) : 1;
+      if (amount <= 0) continue;
+      const primary = GYM_MUSCLE_GROUPS.some((g) => g.id === exercise.muscleGroup) ? exercise.muscleGroup : null;
+      if (primary) {
+        score.set(primary, (score.get(primary) || 0) + amount);
+        if (!exercisesByGroup.has(primary)) exercisesByGroup.set(primary, new Map());
+        const perEx = exercisesByGroup.get(primary);
+        perEx.set(exercise.name, (perEx.get(exercise.name) || 0) + 1);
+      }
+      for (const secondary of exercise.secondaryMuscles || []) {
+        if (secondary === primary) continue;
+        score.set(secondary, (score.get(secondary) || 0) + amount * 0.5);
+      }
+    }
+  }
+
+  const max = Math.max(...score.values(), 0);
+  const unit = getGymWeightUnitLabel();
+  const detailByGroup = new Map();
+  const zonesHtml = GYM_BODYMAP_ZONES.map((zone) => {
+    const value = score.get(zone.g) || 0;
+    // Intensidad continua sobre el acento del tema: de un 12% (entrenado
+    // poco) al acento pleno; 0 = gris base de la silueta.
+    const pct = max > 0 && value > 0 ? Math.round(12 + 78 * (value / max)) : 0;
+    const fill = pct === 0
+      ? 'color-mix(in srgb, var(--surface-2-text) 10%, var(--surface-2))'
+      : `color-mix(in srgb, var(--gym-accent) ${pct}%, var(--surface-2))`;
+    const label = gymMuscleGroupLabel(zone.g);
+    const topExercises = exercisesByGroup.has(zone.g)
+      ? [...exercisesByGroup.get(zone.g).entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name]) => name).join(', ')
+      : '';
+    const valueLabel = gymMapMetric === 'volume'
+      ? `${gymWeightKgToDisplay(value)} ${unit}`
+      : `${Math.round(value * 10) / 10} serie${value === 1 ? '' : 's'}`;
+    detailByGroup.set(zone.g, `${label}: ${valueLabel}${topExercises ? ` · ${topExercises}` : ''}`);
+    const polys = zone.polys.map((points) => `<polygon points="${points}" />`).join('');
+    return `<g style="fill: ${fill}" transform="translate(${zone.tx}, 0)" data-bodymap-group="${zone.g}">${polys}</g>`;
+  }).join('');
+  const silhouetteHtml = GYM_BODYMAP_SILHOUETTE.map((part) =>
+    `<g class="gym-bodymap-silhouette" transform="translate(${part.tx}, 0)">${part.polys.map((points) => `<polygon points="${points}" />`).join('')}</g>`
+  ).join('');
+
+  container.innerHTML = `
+    <svg class="gym-chart-svg gym-bodymap-svg" viewBox="0 0 2120 2210" role="img" aria-label="Mapa de músculos entrenados">
+      ${silhouetteHtml}
+      ${zonesHtml}
+      <text class="gym-chart-label gym-bodymap-caption" x="500" y="2140" text-anchor="middle">Frente</text>
+      <text class="gym-chart-label gym-bodymap-caption" x="1620" y="2140" text-anchor="middle">Espalda</text>
+    </svg>
+    <p id="gym-bodymap-info" class="gym-bodymap-info">Toca un músculo para ver su detalle.</p>
+    <p class="hint">Cuanto más intenso el color, más entrenado en los últimos ${gymMapWindowDays} días (los músculos secundarios de cada ejercicio puntúan la mitad).</p>
+  `;
+  // El detalle se muestra en una linea FIJA bajo el mapa (nada de
+  // tooltips flotantes: en el movil se quedaban pegados a la pantalla al
+  // hacer scroll -- feedback de Koku).
+  const info = document.getElementById('gym-bodymap-info');
+  container.querySelectorAll('[data-bodymap-group]').forEach((zoneEl) => {
+    const show = () => {
+      const group = zoneEl.dataset.bodymapGroup;
+      info.textContent = detailByGroup.get(group) || '';
+      // El resaltado se aplica a TODAS las zonas del mismo grupo (un
+      // musculo que sale en las dos vistas, como el triceps, se marca
+      // en ambas a la vez -- feedback de Koku).
+      container.querySelectorAll('[data-bodymap-group]').forEach((other) => {
+        other.classList.toggle('bodymap-active', other.dataset.bodymapGroup === group);
+      });
+    };
+    zoneEl.addEventListener('click', show);
+    zoneEl.addEventListener('mouseenter', show);
+  });
+}
+
+
+// 1RM estimado con la formula de Epley: peso x (1 + reps/30). Solo
+// series con 1-12 repeticiones (por encima de 12 la estimacion deja de
+// ser fiable) y sin las de calentamiento.
+function gymEpley1RM(weightKg, reps) {
+  return weightKg * (1 + reps / 30);
+}
+function renderGymPRs() {
+  const list = document.getElementById('gym-prs-list');
+  const byExercise = new Map(); // exerciseId -> { name, muscleGroup, bestWeightKg, best1RM, bestVolumeKg }
+  for (const session of state.gymSessions) {
+    const volumeByExercise = new Map();
+    for (const set of session.sets) {
+      if (set.setType === 'warmup') continue;
+      // Serie madre Y tramos: Koku pidio expresamente que cualquiera
+      // pueda ser record ("hay veces que la segunda sale mejor que la
+      // primera, sobre todo cuando empiezas y mejoras la tecnica").
+      for (const tramo of gymSetConTramos(set)) {
+        if (!byExercise.has(tramo.exerciseId)) {
+          byExercise.set(tramo.exerciseId, { name: tramo.exerciseName, bestWeightKg: 0, best1RM: 0, bestVolumeKg: 0 });
+        }
+        const pr = byExercise.get(tramo.exerciseId);
+        if (tramo.weightKg > pr.bestWeightKg) pr.bestWeightKg = tramo.weightKg;
+        if (tramo.weightKg > 0 && tramo.reps >= 1 && tramo.reps <= 12) {
+          const est = gymEpley1RM(tramo.weightKg, tramo.reps);
+          if (est > pr.best1RM) pr.best1RM = est;
+        }
+      }
+      volumeByExercise.set(set.exerciseId, (volumeByExercise.get(set.exerciseId) || 0) + gymSetVolumeKg(set));
+    }
+    for (const [exerciseId, volume] of volumeByExercise) {
+      const pr = byExercise.get(exerciseId);
+      if (pr && volume > pr.bestVolumeKg) pr.bestVolumeKg = volume;
+    }
+  }
+
+  const unit = getGymWeightUnitLabel();
+  const rows = [...byExercise.entries()]
+    .filter(([, pr]) => pr.bestWeightKg > 0)
+    .sort((a, b) => b[1].best1RM - a[1].best1RM);
+  list.innerHTML = '';
+  if (rows.length === 0) {
+    list.innerHTML = '<p class="empty-hint">Todavía no hay récords: registra series con peso y aparecerán aquí.</p>';
+    return;
+  }
+  rows.forEach(([exerciseId, pr]) => {
+    const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+    const muscle = exercise ? gymMuscleGroupLabel(exercise.muscleGroup) : '';
+    const row = document.createElement('div');
+    row.className = 'gym-list-item gym-pr-item';
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(pr.name)}${muscle ? ` <span class="gym-list-item-muted">(${escapeHtml(muscle)})</span>` : ''}</span>
+      <span class="gym-pr-stats">
+        <b>${gymWeightKgToDisplay(pr.bestWeightKg)} ${unit}</b>
+        <span class="gym-list-item-muted">1RM est. ${gymWeightKgToDisplay(pr.best1RM)} ${unit} · Vol. ${gymWeightKgToDisplay(pr.bestVolumeKg)} ${unit}</span>
+      </span>
+    `;
+    list.appendChild(row);
+  });
+}
+
+// Volumen semanal apilado por grupo muscular (ultimas 8 semanas). Los 5
+// grupos con mas volumen total llevan color propio de la paleta de abajo
+// y el resto se agrupa en "Otros" (gris) -- nunca 14 colores a la vez.
+// Paleta validada con el comprobador de daltonismo/contraste del skill
+// de dataviz (5 tonos, superficie oscura, todas las comprobaciones OK);
+// el color acompaña SIEMPRE al mismo grupo dentro de un render.
+const GYM_VIZ_PALETTE = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'];
+const GYM_VIZ_OTHER = '#8a8a93';
+function renderGymWeeklyVolume() {
+  const container = document.getElementById('gym-weekly-volume');
+  const WEEKS = 8;
+  const now = new Date();
+  const weekKeys = [];
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i * 7);
+    weekKeys.push(gymWeekStartKey(d));
+  }
+  const weekSet = new Set(weekKeys);
+
+  // volumen[semana][grupo] desde las series (grupo del ejercicio; los
+  // ejercicios viejos con texto libre o sin grupo caen en "Otros").
+  const muscleOf = new Map(state.gymExercises.map((e) => [e.id, GYM_MUSCLE_GROUPS.some((g) => g.id === e.muscleGroup) ? e.muscleGroup : null]));
+  const volume = new Map(weekKeys.map((w) => [w, new Map()]));
+  const totalByGroup = new Map();
+  for (const session of state.gymSessions) {
+    const week = gymWeekStartKey(new Date(`${session.date}T00:00:00`));
+    if (!weekSet.has(week)) continue;
+    for (const set of session.sets) {
+      const kg = gymSetVolumeKg(set);
+      if (kg <= 0) continue;
+      const group = muscleOf.get(set.exerciseId) || 'otros';
+      volume.get(week).set(group, (volume.get(week).get(group) || 0) + kg);
+      totalByGroup.set(group, (totalByGroup.get(group) || 0) + kg);
+    }
+  }
+
+  if (totalByGroup.size === 0) {
+    container.innerHTML = '<p class="empty-hint">Sin volumen registrado en las últimas 8 semanas.</p>';
+    return;
+  }
+
+  // Top 5 grupos por volumen total; el resto (y lo sin grupo) = "Otros".
+  const topGroups = [...totalByGroup.entries()]
+    .filter(([g]) => g !== 'otros')
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, GYM_VIZ_PALETTE.length)
+    .map(([g]) => g);
+  const colorOf = new Map(topGroups.map((g, i) => [g, GYM_VIZ_PALETTE[i]]));
+
+  const width = 600, height = 190, padding = 26, gap = 8;
+  const barWidth = (width - padding * 2 - gap * (WEEKS - 1)) / WEEKS;
+  const maxWeek = Math.max(1, ...weekKeys.map((w) => [...volume.get(w).values()].reduce((a, b) => a + b, 0)));
+  const unit = getGymWeightUnitLabel();
+
+  let bars = '';
+  weekKeys.forEach((week, i) => {
+    const x = padding + i * (barWidth + gap);
+    let y = height - padding;
+    const groups = [...volume.get(week).entries()];
+    // Otros al fondo de la pila, el resto en el orden fijo del top.
+    const ordered = [
+      ...topGroups.map((g) => [g, volume.get(week).get(g) || 0]),
+      ['otros', groups.filter(([g]) => !colorOf.has(g)).reduce((acc, [, v]) => acc + v, 0)],
+    ];
+    for (const [group, kg] of ordered) {
+      if (kg <= 0) continue;
+      const h = (kg / maxWeek) * (height - padding * 2);
+      y -= h;
+      const label = group === 'otros' ? 'Otros' : gymMuscleGroupLabel(group);
+      // Hueco de 2px entre segmentos: se pinta cada uno 2px mas corto.
+      bars += `<rect x="${x}" y="${y}" width="${barWidth}" height="${Math.max(0, h - 2)}" rx="2"
+        fill="${colorOf.get(group) || GYM_VIZ_OTHER}"
+        data-tooltip="Semana del ${formatGymDate(week)} · ${escapeHtml(label)}: ${gymWeightKgToDisplay(kg)} ${unit}"></rect>`;
+    }
+    const weekLabel = new Date(`${week}T00:00:00`).getDate();
+    bars += `<text class="gym-chart-label" x="${x + barWidth / 2}" y="${height - padding + 12}" text-anchor="middle">${weekLabel}</text>`;
+  });
+
+  const legend = [...topGroups.map((g) => ({ label: gymMuscleGroupLabel(g), color: colorOf.get(g) })), { label: 'Otros', color: GYM_VIZ_OTHER }]
+    .map((item) => `<span class="gym-viz-legend-item"><span class="color-dot" style="background-color: ${item.color}"></span>${escapeHtml(item.label)}</span>`)
+    .join('');
+
+  container.innerHTML = `
+    <svg class="gym-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Volumen semanal por grupo muscular">${bars}</svg>
+    <div class="gym-viz-legend">${legend}</div>
+    <p class="hint">Volumen = repeticiones × peso, apilado por grupo muscular. La etiqueta de cada barra es el día del lunes de esa semana.</p>
+  `;
+  attachFinanzasChartTooltips(container);
+}
+
+// --- Logros (Fase 7 del rediseno) -------------------------------------
+// Gamificacion sin estado en la base de datos: cada logro tiene NIVELES
+// (umbral creciente) y se evalua al vuelo contra el historial real, asi
+// que editar/borrar sesiones recalcula todo de forma coherente. Lo unico
+// que se guarda (por dispositivo) es hasta que nivel se ha CELEBRADO ya
+// cada logro, para no repetir la fiesta (localStorage.gymAchievementsSeen).
+const GYM_ACHIEVEMENTS = [
+  { id: 'sessions', name: 'Constancia', desc: 'Entrenamientos de pesas totales', levels: [1, 10, 25, 50, 100, 250], value: (s) => s.gymCount },
+  { id: 'streak', name: 'Racha', desc: 'Semanas seguidas cumpliendo tu objetivo', levels: [1, 4, 8, 16, 26, 52], value: (s) => s.streak },
+  { id: 'volume', name: 'Toneladas', desc: 'Volumen total acumulado (kg)', levels: [10000, 50000, 100000, 250000, 500000, 1000000], value: (s) => s.totalVolumeKg },
+  { id: 'activities', name: 'Todoterreno', desc: 'Actividades fuera de las pesas', levels: [1, 10, 25, 50, 100], value: (s) => s.activityCount },
+  { id: 'exercises', name: 'Repertorio', desc: 'Ejercicios distintos con series registradas', levels: [3, 10, 20, 40, 80], value: (s) => s.distinctExercises },
+  { id: 'months', name: 'Meses activos', desc: 'Meses con al menos una sesión', levels: [1, 3, 6, 12, 24], value: (s) => s.activeMonths },
+];
+
+// Junta en un objeto todas las cifras que consumen los logros.
+function gymComputeAchievementStats(summary) {
+  const goal = getGymWeeklyGoal();
+  const sessionsByWeek = new Map();
+  const months = new Set();
+  let gymCount = 0, activityCount = 0, totalVolumeKg = 0;
+  for (const s of summary) {
+    const week = gymWeekStartKey(new Date(`${s.date}T00:00:00`));
+    sessionsByWeek.set(week, (sessionsByWeek.get(week) || 0) + 1);
+    months.add(s.date.slice(0, 7));
+    if (s.type === 'activity') activityCount += 1; else gymCount += 1;
+    totalVolumeKg += gymVolumenAjustado(s.volumeKg, s.failureVolumeKg);
+  }
+  const distinct = new Set();
+  for (const session of state.gymSessions) {
+    for (const set of session.sets) distinct.add(set.exerciseId);
+  }
+  return {
+    gymCount,
+    activityCount,
+    totalVolumeKg,
+    streak: gymComputeWeeklyStreak(sessionsByWeek, goal),
+    distinctExercises: distinct.size,
+    activeMonths: months.size,
+  };
+}
+
+// Nivel alcanzado (0 = ninguno) y HTML de la tarjeta de un logro.
+function gymAchievementLevel(achievement, value) {
+  let level = 0;
+  for (const threshold of achievement.levels) {
+    if (value >= threshold) level += 1; else break;
+  }
+  return level;
+}
+function gymAchievementCardHtml(achievement, value) {
+  const level = gymAchievementLevel(achievement, value);
+  const maxed = level >= achievement.levels.length;
+  const nextThreshold = maxed ? achievement.levels[achievement.levels.length - 1] : achievement.levels[level];
+  // La barra mide LO MISMO que el texto de debajo ("1 / 10" = 10%). Antes
+  // media solo el tramo entre el nivel anterior y el siguiente, y al subir
+  // de nivel la barra se quedaba a cero aunque el texto dijera 1/10 --
+  // parecia rota (feedback de Koku).
+  const progress = maxed ? 1 : Math.min(1, value / nextThreshold);
+  const shownValue = Math.round(value * 10) / 10;
+  return `
+    <div class="gym-achievement-card ${level > 0 ? 'unlocked' : ''}">
+      <div class="gym-achievement-head">
+        <span class="gym-list-item-name">${escapeHtml(achievement.name)}
+          ${level > 0 ? `<span class="gym-block-active-badge">Nivel ${level}${maxed ? ' · MAX' : ''}</span>` : ''}
+        </span>
+      </div>
+      <span class="gym-list-item-muted">${escapeHtml(achievement.desc)}</span>
+      <div class="gym-achievement-bar"><div class="gym-achievement-bar-fill" style="width: ${Math.round(progress * 100)}%"></div></div>
+      <span class="gym-list-item-muted">${shownValue} / ${nextThreshold}${maxed ? ' (máximo alcanzado)' : ''}</span>
+    </div>
+  `;
+}
+
+async function renderGymAchievements() {
+  const summary = await api('/api/gym-sessions/summary');
+  const stats = gymComputeAchievementStats(summary);
+  document.getElementById('gym-achievements-list').innerHTML =
+    GYM_ACHIEVEMENTS.map((a) => gymAchievementCardHtml(a, a.value(stats))).join('');
+}
+
+// Tras guardar una sesion/actividad: si algun logro ha SUBIDO de nivel
+// respecto a lo ya celebrado, se ensena la celebracion una unica vez.
+function gymReadAchievementsSeen() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('gymAchievementsSeen'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+async function checkGymAchievements() {
+  const summary = await api('/api/gym-sessions/summary');
+  const stats = gymComputeAchievementStats(summary);
+  const seen = gymReadAchievementsSeen();
+  const leveledUp = [];
+  for (const achievement of GYM_ACHIEVEMENTS) {
+    const level = gymAchievementLevel(achievement, achievement.value(stats));
+    if (level > (seen[achievement.id] || 0)) {
+      leveledUp.push({ achievement, value: achievement.value(stats) });
+      seen[achievement.id] = level;
+    }
+  }
+  if (leveledUp.length === 0) return;
+  localStorage.setItem('gymAchievementsSeen', JSON.stringify(seen));
+  document.getElementById('gym-achievement-modal-list').innerHTML =
+    leveledUp.map(({ achievement, value }) => gymAchievementCardHtml(achievement, value)).join('');
+  document.getElementById('gym-achievement-modal').classList.remove('hidden');
+}
+document.getElementById('btn-close-gym-achievement').addEventListener('click', () => {
+  document.getElementById('gym-achievement-modal').classList.add('hidden');
 });
 
 // --- Progreso: grafica SVG a mano ---------------------------------------
@@ -8794,7 +14867,9 @@ async function renderGymProgressChart(exerciseId) {
   const unit = getGymWeightUnitLabel();
   const isVolume = gymProgressMetric === 'volume';
   const values = points.map((p) => {
-    const raw = isVolume ? p.volumeKg : p.maxWeightKg;
+    // El volumen de la grafica cuenta el peso extra de las series al
+    // fallo; el peso maximo no, que ese es el peso que de verdad movio.
+    const raw = isVolume ? gymVolumenAjustado(p.volumeKg, p.failureVolumeKg) : p.maxWeightKg;
     return gymWeightKgToDisplay(raw) || 0;
   });
   const maxValue = Math.max(...values, 1);
@@ -8815,8 +14890,15 @@ async function renderGymProgressChart(exerciseId) {
   // Koku no queria "la fecha por defecto" (mismo motivo por el que ya se
   // quito de la grafica de Evolucion mensual de Finanzas, ver el
   // comentario junto a attachFinanzasChartTooltips mas abajo).
+  // Dos circulos por punto: el que se VE (r=4) y uno transparente mucho
+  // mas grande que es el que se toca -- con el dedo, 4px de radio es
+  // imposible de acertar (por eso "no te deja pinchar el punto").
   const dots = coords
-    .map((c, i) => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="var(--accent)" data-tooltip="${escapeHtml(`${formatGymDate(points[i].date)}: ${values[i]} ${unit}`)}"></circle>`)
+    .map((c, i) => {
+      const texto = escapeHtml(`${formatGymDate(points[i].date)}: ${values[i]} ${unit}`);
+      return `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="var(--accent)" data-tooltip="${texto}"></circle>`
+        + `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="18" fill="transparent" data-tooltip="${texto}"></circle>`;
+    })
     .join('');
   // Solo se etiquetan la primera, la ultima, y todas si hay pocos puntos
   // -- con muchas sesiones, poner una fecha bajo cada punto se solapa.
@@ -8833,7 +14915,7 @@ async function renderGymProgressChart(exerciseId) {
       ${dots}
       ${labels}
     </svg>
-    <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso máximo'} por sesión, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Pasa el ratón por un punto para ver la fecha exacta.</p>
+    <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso máximo'} por sesión, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Toca un punto para ver la fecha exacta.</p>
   `;
   attachFinanzasChartTooltips(container.querySelector('svg'));
 }
@@ -8969,22 +15051,38 @@ function getFinanzasChartTooltip() {
 // barras ya renderizados no se reutilizan entre repintados (wrap.innerHTML
 // se reescribe entero cada vez), asi que no hace falta quitar listeners
 // viejos.
+// Ojo: esto nacio para el raton (mouseenter/mousemove/mouseleave) y en
+// el movil no habia forma de ver el dato -- Koku: "la grafica de volumen
+// total no te deja pinchar el punto". Ahora escucha TAMBIEN pointerdown,
+// que cubre dedo y raton por igual, y el aviso se va solo a los 2,5s o
+// al tocar en otro sitio.
+let gymChartTooltipTimer = null;
 function attachFinanzasChartTooltips(svgEl) {
   if (!svgEl) return;
   const tooltip = getFinanzasChartTooltip();
+  const mostrar = (el, x, y) => {
+    tooltip.textContent = el.dataset.tooltip;
+    tooltip.classList.remove('hidden');
+    // Pegado al borde derecho se saldria de la pantalla: se cambia de
+    // lado cuando no cabe.
+    const ancho = tooltip.offsetWidth || 160;
+    tooltip.style.left = `${x + 14 + ancho > window.innerWidth ? Math.max(8, x - 14 - ancho) : x + 14}px`;
+    tooltip.style.top = `${y + 14}px`;
+  };
+  const esconder = () => tooltip.classList.add('hidden');
   svgEl.querySelectorAll('[data-tooltip]').forEach((el) => {
-    el.addEventListener('mouseenter', () => {
-      tooltip.textContent = el.dataset.tooltip;
-      tooltip.classList.remove('hidden');
-    });
-    el.addEventListener('mousemove', (e) => {
-      tooltip.style.left = `${e.clientX + 14}px`;
-      tooltip.style.top = `${e.clientY + 14}px`;
-    });
-    el.addEventListener('mouseleave', () => {
-      tooltip.classList.add('hidden');
+    el.addEventListener('mouseenter', (e) => mostrar(el, e.clientX, e.clientY));
+    el.addEventListener('mousemove', (e) => mostrar(el, e.clientX, e.clientY));
+    el.addEventListener('mouseleave', esconder);
+    el.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      mostrar(el, e.clientX, e.clientY);
+      if (gymChartTooltipTimer) clearTimeout(gymChartTooltipTimer);
+      gymChartTooltipTimer = setTimeout(esconder, 2500);
     });
   });
+  // Tocar fuera lo quita al momento.
+  svgEl.addEventListener('pointerdown', esconder);
 }
 
 function renderFinanzasMonthlyTrendChart(data) {
@@ -10124,7 +16222,10 @@ function createCountryPickerField({ initialValues = [] } = {}) {
 
   const popover = document.createElement('div');
   popover.className = 'select-popover hidden';
+  popover.duenoDelPopover = root;
+  limpiarPopoversSueltos();
   document.body.appendChild(popover);
+  marcarPopoverCuandoSeUse(popover, root);
 
   function renderChips() {
     chipsRow.innerHTML = '';
@@ -11655,7 +17756,444 @@ document.getElementById('btn-delete-entretenimiento-item').addEventListener('cli
 // que no se vea el texto reajustandose a media animacion — 340ms es la
 // duracion de la transicion CSS (320ms) con un pelin de margen para que
 
+// =====================================================================
+// GESTOS DE NAVEGACION (solo movil)
+//
+// Idea general, pedida por Koku: moverse por la app deslizando el dedo,
+// no solo tocando botones. Hay DOS gestos horizontales que compiten por
+// el mismo dedo, asi que se reparten la pantalla en CARRILES:
+//
+//   |  lateral  |        centro         |  lateral  |
+//   |  cambiar  |   gesto propio de     |  cambiar  |
+//   | de PESTAÑA|   ESTA pantalla       | de PESTAÑA|
+//
+// - Carril LATERAL (los bordes izquierdo y derecho): cambia de pestaña
+//   de la barra de abajo, de una en una y en el orden en que se ven:
+//   Calendario -> Notas -> Herramientas -> Configuracion. Deslizar a la
+//   izquierda avanza, a la derecha retrocede.
+// - Carril CENTRAL: lo que tenga sentido DENTRO de la pantalla actual
+//   (cambiar de dia en el calendario, subir de carpeta en Notas, volver
+//   al menu de Configuracion, cambiar de pestaña dentro de Gimnasio...).
+//   Si en esa pantalla el centro no tiene nada que hacer, NO pasa nada:
+//   cambiar de pestaña es siempre cosa de los bordes, en cualquier
+//   pantalla. Asi un mismo deslizamiento por el centro nunca significa
+//   dos cosas distintas segun donde estes.
+//
+// Todo esto convive con los gestos que ya existian (deslizar vertical
+// para cambiar de mes/año, pellizcar para subir de nivel, deslizar una
+// fila de nota para sacar sus acciones): esos siguen igual, y este
+// modulo se aparta solo cuando toca (ver NAV_SWIPE_OPT_OUT y el trato
+// especial del mapa de Viajes).
+// =====================================================================
+
+// Orden de las pestañas, el MISMO que el de los botones de la barra de
+// abajo (ver .mobile-nav en index.html). Si algun dia se reordena la
+// barra, hay que reordenar esto a juego -- se deja como lista aparte y
+// no se lee del DOM porque el hueco central es configurable (puede
+// enseñar Notas u otra App) y el ORDEN de navegacion no debe depender
+// de que icono tenga puesto ahora mismo.
+const MOBILE_TAB_ORDER = ['calendar', 'notes', 'extensions', 'settings'];
+
+// Ancho del carril lateral: 22% del ancho de la pantalla a cada lado,
+// pero nunca menos de 56px (en un movil estrecho haria falta demasiada
+// punteria) ni mas de 120px (en una tablet se comeria media pantalla).
+function mobileEdgeRailWidth() {
+  return Math.min(Math.max(window.innerWidth * 0.22, 56), 120);
+}
+
+function isMobileEdgeZone(x) {
+  const carril = mobileEdgeRailWidth();
+  return x <= carril || x >= window.innerWidth - carril;
+}
+
+// Los gestos de navegacion son cosa del movil: en escritorio el
+// calendario y el panel conviven en pantalla y no hay barra de pestañas
+// que recorrer. 860px es el mismo corte que usa styles.css.
+function isMobileLayout() {
+  return window.innerWidth < 860;
+}
+
+// Un modal abierto se lleva TODA la atencion: mientras haya uno, ningun
+// gesto de navegacion. (Ojo: esto NO es isGestureBlockedByModal(), que
+// ademas bloquea con cualquier pantalla completa abierta -- eso vale
+// para los gestos del calendario, pero aqui hace falta justo lo
+// contrario: que el gesto siga funcionando DENTRO de Gimnasio, Notas o
+// Configuracion.)
+// "¿Se ve de verdad este elemento?". No vale mirar solo la clase
+// .hidden: hay trozos de la app (por ejemplo el dialogo de ayuda de
+// Progreso del Gimnasio) que se quedan SIN esa clase aunque no se vean,
+// porque quien los tapa es un padre suyo. Tampoco vale offsetParent a
+// secas: un elemento con position:fixed -- como son casi todos los
+// modales -- tiene offsetParent nulo aunque este perfectamente visible.
+// getClientRects() sale bien de los dos casos: devuelve 0 rectangulos si
+// el elemento (o cualquier padre) no se esta pintando, y al menos uno si
+// se ve, fixed o no.
+function estaVisibleDeVerdad(el) {
+  return !!el && el.getClientRects().length > 0;
+}
+
+function isNavGestureBlocked() {
+  // Ojo con el :not(#settings-modal): el panel de Configuracion usa la
+  // clase .modal como todos los dialogos, pero NO es un dialogo suelto
+  // -- es una de las cuatro pestañas de la barra de abajo, y tiene que
+  // dejarse navegar con gestos como las otras tres (deslizar para
+  // volver de una seccion a su menu, o para salirse a Herramientas).
+  return [...document.querySelectorAll('.modal:not(.hidden):not(#settings-modal)')]
+    .some(estaVisibleDeVerdad);
+}
+
+// Sitios donde arrastrar el dedo YA significa otra cosa, y donde este
+// modulo se aparta del todo para no pisarlo.
+const NAV_SWIPE_OPT_OUT = [
+  '.note-swipe-wrap',   // fila de nota: desliza para Editar/Mover/Eliminar
+  '#note-body table',   // tabla del editor: arrastrar es seleccionar celdas
+  '#gym-live-view',     // entreno en vivo: salirse sin querer seria feo
+  '[data-no-nav-swipe]', // escotilla generica para lo que venga despues
+].join(', ');
+
+// ---------------------------------------------------------------------
+// Que App estaba abierta dentro de Herramientas.
+//
+// Peticion de Koku: si estaba en Gimnasio y me voy a Notas, al volver
+// deslizando quiero entrar DIRECTO a Gimnasio, no al menu de
+// Herramientas. Para cambiar de App, el boton de Herramientas de la
+// barra de abajo (que siempre lleva al menu y borra este recuerdo).
+//
+// Es una variable normal en memoria a proposito, NO localStorage: al
+// cerrar la app se olvida sola, que es justo lo que pidio ("que al
+// cerrar la app se resetee eso para que no se quede abierta ninguna").
+// ---------------------------------------------------------------------
+let ultimaHerramientaAbierta = null;
+
+const HERRAMIENTAS_APPS = {
+  gym: { viewId: 'gym-view', open: () => openGymView() },
+  finanzas: { viewId: 'finanzas-view', open: () => openFinanzasView() },
+  lecturas: { viewId: 'entretenimiento-view', open: () => openEntretenimientoView() },
+  viajes: { viewId: 'viajes-view', open: () => openViajesView() },
+};
+
+// Cual de las Apps de Herramientas esta abierta AHORA mismo (mirando el
+// DOM, que es la unica verdad: se puede haber abierto desde el menu,
+// desde el hueco de la barra o desde un gesto).
+function appDeHerramientasAbierta() {
+  for (const [id, app] of Object.entries(HERRAMIENTAS_APPS)) {
+    const el = document.getElementById(app.viewId);
+    if (el && !el.classList.contains('hidden')) return id;
+  }
+  return null;
+}
+
+// La pestaña en la que estamos = la que la barra de abajo pinta como
+// activa. Se usa el DOM en vez de una variable propia para que no haya
+// dos "verdades" que se puedan desincronizar: los botones de la barra,
+// los de cerrar de cada pantalla y estos gestos pasan todos por
+// refreshMobileNavActive().
+function currentMobileTab() {
+  const activo = document.querySelector('.mobile-nav-btn.active');
+  const tab = activo && activo.dataset.mobileNav;
+  return MOBILE_TAB_ORDER.includes(tab) ? tab : 'calendar';
+}
+
+// Animacion del cambio de pestaña: se reutiliza la MISMA que ya hacia
+// el calendario al cambiar de mes (playMobileSwipeTransition), aplicada
+// a la pantalla que queda a la vista. Asi el movimiento de la app es
+// uno solo y obedece al interruptor de Animaciones sin nada aparte.
+// Las pantallas completas que pueden estar por encima del calendario,
+// de la de mas arriba a la de mas abajo.
+const CAPAS_DE_PANTALLA = [
+  'settings-modal', 'gym-view', 'finanzas-view', 'entretenimiento-view',
+  'viajes-view', 'extensions-view', 'mobile-notes-view', 'note-editor-view',
+  'groups-view',
+];
+
+// Que pantalla se esta viendo AHORA MISMO. Se usa dos veces: para
+// animar la que entra, y para saber -- antes de navegar -- cual es la
+// que se va a ir.
+function capaDePantallaVisible() {
+  for (const id of CAPAS_DE_PANTALLA) {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains('hidden')) return el;
+  }
+  // Ninguna pantalla completa abierta: se ve el calendario, que es
+  // <main class="layout"> (NO #app: ahi dentro esta tambien la barra de
+  // abajo, que no debe moverse).
+  return document.querySelector('main.layout');
+}
+
+// capaSaliente: la pantalla que se estaba viendo ANTES de navegar. Con
+// ella, las dos viajan a la vez como la tira de un carrusel; sin ella,
+// solo entra la nueva (que es lo que toca cuando el cambio ocurre
+// DENTRO de una misma pantalla, como volver de una seccion de
+// Configuracion a su menu).
+function animarCambioDePantalla(direccion, capaSaliente) {
+  const entrante = capaDePantallaVisible();
+  if (capaSaliente && capaSaliente !== entrante) {
+    playMobileSwipeOut(capaSaliente, direccion);
+  }
+  if (entrante) {
+    playMobileSwipeTransition(entrante, direccion);
+    return;
+  }
+}
+
+// Cambiar de pestaña un paso. paso = +1 (deslizar a la izquierda,
+// avanzar) o -1 (deslizar a la derecha, retroceder).
+function moverPestanaMovil(paso) {
+  const actual = currentMobileTab();
+  // Justo ANTES de irse de Herramientas se apunta que App quedaba
+  // abierta, para poder volver directo a ella (ver la nota de
+  // ultimaHerramientaAbierta). Se hace aqui, en el unico sitio por el
+  // que pasan todos los cambios de pestaña por gesto, en vez de meter
+  // una linea dentro de cada open*/close* de las cuatro Apps.
+  if (actual === 'extensions') ultimaHerramientaAbierta = appDeHerramientasAbierta();
+  // La pantalla que se va, apuntada ANTES de navegar: despues ya estara
+  // oculta y no habria forma de saber cual era.
+  const saliente = capaDePantallaVisible();
+  const i = MOBILE_TAB_ORDER.indexOf(actual);
+  const destino = MOBILE_TAB_ORDER[i + paso];
+  // En los extremos (antes de Calendario, despues de Configuracion) no
+  // se da la vuelta a proposito: dar la vuelta desorienta, y ademas
+  // haria imposible saber por el gesto si estas al principio o al final.
+  if (!destino) return false;
+
+  // Herramientas con memoria: si habia una App abierta, se vuelve a
+  // ella directamente (ver ultimaHerramientaAbierta arriba).
+  if (destino === 'extensions' && ultimaHerramientaAbierta) {
+    closeAllMobileOverlays();
+    HERRAMIENTAS_APPS[ultimaHerramientaAbierta].open();
+    refreshMobileNavActive('extensions');
+  } else {
+    goToMobileSection(destino);
+  }
+  animarCambioDePantalla(paso > 0 ? 'left' : 'right', saliente);
+  return true;
+}
+
+// ---------------------------------------------------------------------
+// Carril CENTRAL: el gesto propio de cada pantalla.
+//
+// Devuelve true si ha hecho algo; false si en esta pantalla el centro no
+// tenia nada que hacer (y entonces quien llama deja que el gesto haga lo
+// mismo que el lateral, cambiar de pestaña).
+// ---------------------------------------------------------------------
+
+// Barras de sub-pestañas de las Apps. Generico a proposito: se busca la
+// primera barra VISIBLE y se mueve su boton activo un puesto. Una App
+// nueva con su propia barra solo tiene que añadir aqui su pareja de
+// selectores: la BARRA de botones y los PANELES que esos botones
+// enseñan.
+//
+// Hacen falta los dos porque la animacion de carrusel se le pone al
+// PANEL, no a la App entera: en un carrusel de verdad la barra de
+// pestañas se queda quieta y lo que viaja es el contenido. Animar la
+// vista completa haria que la propia barra se fuera de la pantalla, que
+// es justo lo que no se quiere.
+const MOBILE_SUBTAB_BARS = [
+  { barra: '.gym-tabs', paneles: '.gym-tab-panel' },
+  { barra: '.finanzas-tabs', paneles: '[data-finanzas-panel]' },
+  { barra: '.viajes-tabs', paneles: '[data-viajes-panel]' },
+];
+
+function moverSubPestana(paso) {
+  for (const { barra: selBarra, paneles: selPaneles } of MOBILE_SUBTAB_BARS) {
+    const barra = document.querySelector(selBarra);
+    if (!estaVisibleDeVerdad(barra)) continue;
+    const botones = [...barra.querySelectorAll('button')];
+    const i = botones.findIndex((b) => b.classList.contains('active'));
+    if (i === -1) return false;
+    const destino = botones[i + paso];
+    if (!destino) return true; // hay barra, pero ya estas en el extremo
+    // El panel que se va, apuntado ANTES del clic (que es quien lo
+    // oculta): asi los dos viajan a la vez, igual que las pantallas.
+    const saliente = [...document.querySelectorAll(selPaneles)].find(estaVisibleDeVerdad);
+    destino.click();
+    const panel = [...document.querySelectorAll(selPaneles)].find(estaVisibleDeVerdad);
+    const direccion = paso > 0 ? 'left' : 'right';
+    if (saliente && saliente !== panel) playMobileSwipeOut(saliente, direccion);
+    if (panel) playMobileSwipeTransition(panel, direccion);
+    return true;
+  }
+  return false;
+}
+
+// "Volver un paso" dentro de la pantalla actual. Cada entrada es un
+// boton de volver que YA existe en la app: el gesto no duplica logica,
+// solo pulsa el mismo boton (asi lo que hagan esos botones -- descartar
+// el borrador de un tema, limpiar la busqueda de Notas... -- pasa igual
+// deslizando que tocando). El orden importa: de la capa mas de dentro a
+// la mas de fuera.
+const VOLVER_UN_PASO = [
+  // Configuracion: de una seccion (Perfil, Vista, Este dispositivo...)
+  // al menu de Configuracion.
+  'btn-settings-back',
+  // Gimnasio: de los dias de un bloque a la lista de bloques.
+  'btn-gym-back-to-blocks',
+  // Lecturas: del detalle de una saga a la lista de sagas.
+  'btn-back-entretenimiento-sagas',
+  // Viajes: del detalle de un viaje a la lista de viajes.
+  'btn-back-viajes-trips',
+  // Grupos: del detalle de un grupo a la lista de grupos.
+  'btn-groups-back',
+  // Notas: subir un nivel de carpeta. Va el ULTIMO de la lista porque
+  // es el mas "de fuera" de todos. Peticion expresa de Koku: deslizar
+  // en Notas solo sirve para SALIR (subir), nunca para entrar -- entrar
+  // exige elegir en que carpeta, y ademas deslizar sobre una carpeta ya
+  // significa otra cosa (sacar Editar/Mover/Eliminar).
+  'btn-mobile-notes-back',
+];
+
+function volverUnPasoDentroDeLaPantalla() {
+  for (const id of VOLVER_UN_PASO) {
+    const btn = document.getElementById(id);
+    // Un boton de volver que no se ve = esa capa no esta abierta.
+    if (btn && !btn.classList.contains('hidden') && estaVisibleDeVerdad(btn)) {
+      // La animacion NO se lanza aqui: la lanza el propio boton (ver
+      // justo debajo), asi sale igual lo pulses o lo deslices -- que es
+      // lo que pidio Koku ("que el boton volver tambien haga esa
+      // animacion").
+      btn.click();
+      return true;
+    }
+  }
+  return false;
+}
+
+// Los botones de volver/cerrar animan igual que el gesto. Se registran
+// aqui, todos juntos, en vez de uno a uno donde vive cada boton:
+// - los de VOLVER_UN_PASO (subir una capa dentro de la pantalla),
+// - los "← Home"/"← Herramientas" de las pantallas completas
+//   (.my-space-close-btn) y el "← Calendario" de Grupos.
+// El listener solo AÑADE la animacion; lo que hace el boton de verdad
+// sigue en su propio sitio, sin tocar.
+function animarAlPulsar(btn) {
+  if (!btn) return;
+  // Dos listeners para el mismo clic, y el orden importa:
+  //  - en fase de CAPTURA (antes que nadie) se apunta que pantalla se
+  //    esta viendo, porque el propio boton la va a ocultar;
+  //  - en la fase normal, ya con la pantalla nueva puesta, se lanzan las
+  //    dos animaciones (la que entra y la que se va).
+  let saliente = null;
+  btn.addEventListener('click', () => { saliente = capaDePantallaVisible(); }, true);
+  btn.addEventListener('click', () => {
+    // Si a este boton lo esta pulsando la app para hacer sitio (ver
+    // closeAllMobileOverlays), la animacion la pone quien haya empezado
+    // el cambio, no este boton.
+    if (cerrandoEnCascada) return;
+    animarCambioDePantalla('right', saliente);
+  });
+}
+
+[...VOLVER_UN_PASO, 'btn-close-groups'].forEach((id) => animarAlPulsar(document.getElementById(id)));
+document.querySelectorAll('.my-space-close-btn').forEach(animarAlPulsar);
+
+// Pantallas donde el carril CENTRAL ya tiene dueño: alli el
+// deslizamiento horizontal por el centro ya significa algo (la vista
+// diaria del calendario cambia de dia con attachSwipe, ver mas arriba),
+// asi que este modulo no se mete ni deja que el gesto caiga hacia el
+// cambio de pestaña -- si no, un mismo deslizamiento haria las dos
+// cosas a la vez. Los BORDES siguen cambiando de pestaña con
+// normalidad, que es justo el reparto que pidio Koku ("si deslizo en el
+// centro cambio de dia, si deslizo en el lateral a la pestaña de al
+// lado").
+const CENTRO_CON_DUENO = ['mobile-calendar-day-view'];
+
+function centroYaTieneDueno() {
+  return CENTRO_CON_DUENO.some((id) => estaVisibleDeVerdad(document.getElementById(id)));
+}
+
+// El gesto central, segun el sentido.
+function gestoCentral(paso) {
+  // Pantallas que ya usan el centro para lo suyo (la vista diaria): ahi
+  // este modulo no se mete.
+  if (centroYaTieneDueno()) return;
+  // Hacia la derecha (paso -1): primero intentar salir de una capa.
+  if (paso < 0 && volverUnPasoDentroDeLaPantalla()) return;
+  // Dentro de una App con sub-pestañas, el centro las recorre.
+  moverSubPestana(paso);
+}
+
+// ---------------------------------------------------------------------
+// El detector en si. Va en el <body> en fase de captura para enterarse
+// del gesto ANTES que nadie, pero sin cancelar nada: solo mira. Los
+// gestos que ya existian (deslizar la vista diaria, mover el mapa)
+// siguen recibiendo sus eventos igual.
+// ---------------------------------------------------------------------
+
+const NAV_SWIPE_UMBRAL = 60;      // px minimos de recorrido horizontal
+const NAV_SWIPE_MAX_VERTICAL = 0.8; // el gesto tiene que ser mas ancho que alto
+
+// El mapa de Viajes es el unico sitio con un trato aparte, y lo pidio
+// Koku tal cual: alli arrastrar YA sirve para mover el mapa, asi que la
+// diferencia la marca la VELOCIDAD -- un arrastre lento y pausado es
+// mover el mapa (y este modulo no se mete), uno rapido y decidido es
+// navegar. 0.55 px/ms es aproximadamente "media pantalla en un tercio de
+// segundo": un arrastre normal de mapa no llega ahi ni queriendo.
+const NAV_SWIPE_VELOCIDAD_MAPA = 0.55;
+
+let navSwipe = null;
+
+// El boton de Herramientas de la barra de abajo SIEMPRE lleva al menu
+// y borra el recuerdo: es justo el gesto de "quiero cambiar de App" que
+// describio Koku. (El listener que de verdad abre la vista ya esta
+// registrado mas arriba, sobre .mobile-nav-btn; este solo se suma.)
+document.querySelectorAll('.mobile-nav-btn[data-mobile-nav="extensions"]').forEach((btn) => {
+  btn.addEventListener('click', () => { ultimaHerramientaAbierta = null; });
+});
+
+document.addEventListener('pointerdown', (e) => {
+  navSwipe = null;
+  if (!isMobileLayout() || isNavGestureBlocked()) return;
+  if (e.target.closest && e.target.closest(NAV_SWIPE_OPT_OUT)) return;
+  navSwipe = {
+    x: e.clientX,
+    y: e.clientY,
+    t: e.timeStamp,
+    // Si el gesto empieza dentro del mapa, se le exige velocidad.
+    enMapa: !!(e.target.closest && e.target.closest('#viajes-map-container')),
+  };
+}, true);
+
+document.addEventListener('pointerup', (e) => {
+  const inicio = navSwipe;
+  navSwipe = null;
+  if (!inicio || !isMobileLayout() || isNavGestureBlocked()) return;
+
+  const dx = e.clientX - inicio.x;
+  const dy = e.clientY - inicio.y;
+  if (Math.abs(dx) < NAV_SWIPE_UMBRAL) return;
+  if (Math.abs(dy) > Math.abs(dx) * NAV_SWIPE_MAX_VERTICAL) return;
+
+  if (inicio.enMapa) {
+    const ms = Math.max(e.timeStamp - inicio.t, 1);
+    if (Math.abs(dx) / ms < NAV_SWIPE_VELOCIDAD_MAPA) return; // arrastre de mapa
+  }
+
+  // paso: -1 = deslizar a la DERECHA (atras), +1 = a la IZQUIERDA
+  // (adelante). El dedo va hacia la derecha => dx positivo => atras.
+  const paso = dx > 0 ? -1 : 1;
+
+  // El carril se decide por DONDE EMPEZO el dedo, no por donde acaba:
+  // si se mirara el final, un gesto que arranca en el centro y termina
+  // cerca del borde cambiaria de significado a mitad de camino.
+  if (isMobileEdgeZone(inicio.x)) {
+    moverPestanaMovil(paso);
+    return;
+  }
+  // Centro: SOLO lo propio de la pantalla. Si ahi no hay nada que hacer,
+  // no pasa nada -- cambiar de pestaña es siempre cosa de los bordes.
+  //
+  // Antes el centro "caia" al cambio de pestaña cuando no tenia nada que
+  // hacer, para que ningun gesto se sintiera ignorado. Koku pidio
+  // quitarlo: "que el movimiento entre vistas, da igual que tenga o no
+  // movimiento intra-app, que sea por los laterales, como en calendario
+  // diario o gimnasio". Y es mejor asi: con la regla vieja, el mismo
+  // deslizamiento por el centro hacia una cosa u otra segun la pantalla
+  // en la que estuvieras, que es justo lo que confunde.
+  gestoCentral(paso);
+}, true);
+
 applyUiStyle();
+applyAnimationsPreference();
 
 // ---------------------------------------------------------------------
 // Arranque
@@ -11700,6 +18238,80 @@ function mobileNavSectionForScreen(screen) {
 // ABRIR una pantalla por cualquier otro camino -- sobre todo al arrancar
 // la app restaurando donde lo dejaste -- la barra se quedaba marcando
 // "Calendario" aunque estuvieras en otro sitio.
+// --- Cerrar un modal tocando FUERA de su tarjeta -----------------------
+// Peticion de Koku: "si pincho fuera de las areas de historial o de
+// editar ejercicio, que se cierre; a veces buscar la x o el cancelar
+// cuesta". Solo en ESOS DOS: son los unicos donde cerrar equivale a
+// cancelar, porque los dos trabajan sobre un borrador y no tocan nada
+// hasta que le das a Guardar. En el dialogo de fin de serie, por
+// ejemplo, seria un desastre -- ahi un toque fuera perderia los datos de
+// la serie recien hecha.
+//
+// Con cambios a medio escribir se pregunta antes: un roce en el fondo no
+// puede tirar cinco minutos de edicion.
+function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
+  const modal = document.getElementById(modalId);
+  if (!modal) return;
+  // Marcar "sucio": escribir en cualquier campo, o pulsar cualquier
+  // boton del modal que no sea el de cerrar/cancelar (anadir una serie,
+  // marcar al fallo, anadir un tramo...). El scroll no genera clicks
+  // sobre botones, asi que no cuenta.
+  modal.addEventListener('input', () => { modal.dataset.sucio = '1'; });
+  modal.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (btn && !btn.matches('[id^="btn-cancel"], [id^="btn-close"], [aria-label="Cerrar"]')) {
+      modal.dataset.sucio = '1';
+    }
+  });
+  modal.addEventListener('click', async (e) => {
+    // Solo el FONDO: un click dentro de la tarjeta llega aqui por
+    // burbujeo, pero con e.target apuntando a lo de dentro.
+    if (e.target !== modal) return;
+    // Si ya estamos preguntando, un segundo toque en el fondo NO abre otra
+    // pregunta encima (se quedarian dos apiladas y la de abajo colgada).
+    if (modal.dataset.preguntando === '1') return;
+    if (hayCambios && hayCambios()) {
+      modal.dataset.preguntando = '1';
+      let ok = false;
+      try {
+        ok = await showAppConfirm('Vas a cerrar sin guardar los cambios. ¿Seguro?', { okText: 'Cerrar sin guardar', danger: true });
+      } finally {
+        delete modal.dataset.preguntando;
+      }
+      if (!ok) return;
+      // Mientras se preguntaba, el modal puede haberse cerrado por otra via
+      // (guardar, Esc...). Si ya no esta, no hay nada que cerrar.
+      if (modal.classList.contains('hidden')) return;
+    }
+    delete modal.dataset.sucio;
+    cerrar();
+  });
+}
+
+// --- Version de la app ------------------------------------------------
+// Se escribe A MANO en cada ronda, junto al numero de package.json: la
+// app no tiene paso de compilacion que pueda inyectarlo, asi que este es
+// el unico sitio donde vive de cara al usuario. La fecha es la de la
+// subida (cuando se lanza la build), en formato ISO para poder darle el
+// formato del SISTEMA al pintarla -- Koku: "respetando el formato del
+// sistema por si tienen mm/dd/aa y no dd/mm/aa".
+const APP_VERSION = '0.46.1';
+const APP_VERSION_DATE = '2026-09-10';
+
+function renderAppVersionLine() {
+  const el = document.getElementById('app-version-line');
+  if (!el) return;
+  let fecha = APP_VERSION_DATE;
+  try {
+    // `undefined` a proposito: el idioma del DISPOSITIVO, no el de la
+    // app (mismo criterio que systemUses12hClock).
+    fecha = new Intl.DateTimeFormat(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' })
+      .format(new Date(`${APP_VERSION_DATE}T12:00:00`));
+  } catch { /* si Intl falla, se queda la ISO */ }
+  el.textContent = `v${APP_VERSION} · ${fecha}`;
+}
+renderAppVersionLine();
+
 function setCurrentScreen(screen) {
   localStorage.setItem('currentScreen', screen);
   refreshMobileNavActive(mobileNavSectionForScreen(screen));
@@ -11749,6 +18361,47 @@ async function init() {
   // ultima (ver public/backup.js) -- sin servidor, la copia es la unica
   // red de seguridad de los datos.
   await initStep(maybeShowBackupReminder);
+
+  // EL WIDGET SE ALIMENTA AL ARRANCAR, aunque no entres al Gimnasio.
+  //
+  // Esto faltaba y era un agujero de verdad: el resumen se rehacia desde
+  // loadGymBlocks()/loadGymRoutines(), y esas SOLO se llaman al abrir el
+  // Gimnasio (carga perezosa). O sea que alguien que abriera la app y se
+  // quedara en el calendario no le mandaba nada al widget nunca, y el
+  // widget se quedaba en "Abre la app" -- que es justo lo que le pasaba a
+  // Koku. Son dos consultas a una base que ya esta en memoria: barato.
+  await initStep(async () => {
+    await Promise.all([loadGymBlocks(), loadGymRoutines()]);
+  });
+
+  // Abrir la app TOCANDO EL WIDGET, con la app cerrada del todo: ni
+  // 'resume' ni 'visibilitychange' llegan a dispararse en ese caso (la
+  // app nace ya en primer plano), asi que la marca hay que mirarla
+  // tambien aqui. Va al final del arranque a proposito: si arranca un
+  // entreno, que sea con el calendario ya montado detras.
+  await initStep(comprobarAperturaDesdeElWidget);
+
+  // Y una segunda pasada un momento despues, por los BOTONES DEL CENTRO
+  // DE CONTROL. Esos no abren la app con una URL sin mas: ejecutan un
+  // AppIntent nuestro (ver ios/App/App/AbrirDesdeControl.swift), y ese
+  // intent corre en el proceso de la app SIN un orden garantizado
+  // respecto a este arranque -- puede dejar la marca justo despues de que
+  // la miremos aqui. Si eso pasa y la app ya esta en primer plano, no
+  // llega ningun 'resume' ni 'visibilitychange' que la recoja, y el boton
+  // pareceria no hacer nada.
+  //
+  // Dos relecturas separadas y no un bucle: la marca se consume EN
+  // NATIVO, asi que una lectura sin marca no hace absolutamente nada y
+  // dos toques al mismo destino son imposibles.
+  setTimeout(comprobarAperturaDesdeElWidget, 600);
+  setTimeout(comprobarAperturaDesdeElWidget, 2000);
+  // Y el aviso del nativo para el caso que NO cubre nada de lo de
+  // arriba: tocar un boton del centro de control con la app ya delante.
+  // Ahi no hay ni 'resume' ni 'visibilitychange' que valgan -- ver
+  // escucharAvisosDelWidget() en widget-bridge.js.
+  if (typeof escucharAvisosDelWidget === 'function') {
+    escucharAvisosDelWidget(comprobarAperturaDesdeElWidget);
+  }
 
   setInterval(loadReminders, 30 * 1000);
   // Igual que los recordatorios: si otro dispositivo vinculado anade o
