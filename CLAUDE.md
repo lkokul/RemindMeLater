@@ -2812,6 +2812,51 @@ manual + recordatorio de ~30 días, y TODO dentro del archivo incluidas
 las fotos. Sigue sin haber sincronización en vivo entre dispositivos —
 la copia es la forma de pasar datos de un aparato a otro.
 
+## Finanzas: rama `finanzas-movil` (10-11/9/2026)
+
+Toda la ronda de Finanzas vive en la rama `finanzas-movil`, con su
+ideario completo en `IDEAS-FINANZAS.md` (decisiones, diagnóstico y
+backlog). Resumen de lo que cambió, que es bastante:
+
+- **Fuera las cinco pestañas.** Finanzas tiene ahora un INICIO de
+  tarjetas tipo la app Salud: cada tarjeta resume una cifra y abre su
+  pantalla. Añadir una sección es añadir una tarjeta. Esc funciona capa
+  a capa (sección → inicio → salir).
+- **Previsión de gastos fijos**: `/api/finanzas-recurring-expenses/
+  forecast?from&to` calcula las ocurrencias de cada plantilla y **NO
+  guarda nada** (regla de la casa). De ahí salen "qué me queda por
+  pagar" (semana/mes/año) y el año mes a mes con desglose.
+  Tres estados, no dos: pagado / pendiente / **sin registrar** (un cobro
+  viejo sin movimiento no está pendiente — es que no consta, porque el
+  generador nunca rellena hacia atrás).
+- **Suscripciones**: columna `kind` en las plantillas (Suscripción /
+  Recibo / Préstamo / Otro) y todo normalizado a coste mensual y anual.
+  Más la evolución por años de cada gasto, que sale gratis de
+  `recurring_expense_id`. Ojo con comparar años: si el número de pagos
+  no coincide se compara el coste POR PAGO (si no, un año a medias
+  parece más barato cuando en realidad ha subido).
+- **Avisos de pago**: `reminder_offsets` (días de antelación, hasta 5
+  por gasto). **El cupo de notificaciones del móvil está repartido a
+  mano en `local-notifications.js`**: iOS solo guarda ~64 pendientes por
+  app y a partir de ahí deja de avisar EN SILENCIO. Manda el calendario,
+  los pagos ocupan lo que sobre, y Configuración enseña "41 de 60".
+  Si tocas esa función, no te cargues el reparto.
+- **Dinero de terceros**: tipo de cuenta "De terceros" (la paga de sus
+  padres). Queda fuera de ahorro, límite mensual, desglose y gráficas
+  salvo `?includeThirdParty=1`. La comparación es insensible a
+  mayúsculas a propósito.
+- **Objetivos de ahorro** (`finanzas_goals` + `finanzas_goal_
+  contributions`, `routes-local/finanzasGoals.js`): SOBRES virtuales, el
+  dinero no se mueve. La cuenta enseña "libres / reservados". "Gastar el
+  objetivo" crea el gasto real Y vacía el sobre en la misma operación.
+- **El dinero se escribe en español** (`formatFinanzasAmount` con Intl):
+  "10.851,88 €". Con `useGrouping: 'always'` a propósito.
+
+Cosas que se arreglaron por el camino y conviene no reintroducir: el
+`confirm()`/`alert()` del navegador en esta pestaña (bloquean la webview
+en el móvil), y pintar los saldos del Resumen desde la copia en memoria
+sin recargarla (dejaba cifras caducadas después de mover dinero).
+
 ## Pendiente / próximos pasos declarados
 
 - **BANCO DE PRUEBAS — animaciones de zoom del calendario (ronda del

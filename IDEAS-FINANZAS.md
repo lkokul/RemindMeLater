@@ -411,26 +411,40 @@ No es redondear esquinas. Es esto:
 
 ---
 
-## 7. Plan de fases
+## 7. Plan de fases — TODAS HECHAS (10-11/9/2026)
 
-En este orden, por decisión de Koku (la previsión primero porque de ahí
-salen casi todas las peticiones nuevas):
+Las seis tandas del plan están construidas, probadas en un navegador
+real y subidas a `finanzas-movil`:
 
-1. **Motor de previsión** — ocurrencias calculadas de las plantillas,
-   con estado pagado/pendiente. Sin interfaz todavía.
-2. **Pantalla de previsión** — "qué me queda por pagar"
-   (semana/mes/año, pendiente/pagado/todo) y la lista anual con
-   desglose por mes.
-3. **Suscripciones + evolución histórica** — coste normalizado
-   mensual/anual, ranking por coste anual, y el histórico por año de
-   cada gasto fijo.
-4. **Avisos múltiples por pago programado**, con el presupuesto de 64
-   notificaciones bien administrado.
-5. **Rediseño del inicio** (tarjetas tipo Salud) y el lenguaje visual
-   nuevo aplicado a lo que ya existe.
-6. **Objetivos con nombre** (sobres virtuales).
-7. **Dinero de terceros** (tipo de cuenta nuevo + exclusiones + su
-   pantalla).
+1. ✅ **Motor de previsión** (`dccbd7c`) — `/forecast` calcula las
+   ocurrencias de cada plantilla sin guardar nada, con estado
+   pagado / pendiente / **sin registrar** (este tercer estado salió de
+   probarlo: un cobro viejo sin movimiento no está "pendiente", es que
+   no consta).
+2. ✅ **Pantalla de previsión** (`dccbd7c`) — "Qué queda"
+   (semana/mes/año) y el año mes a mes con desglose al tocar.
+3. ✅ **Suscripciones + evolución histórica** (`804fa2f`) — coste
+   normalizado a mes y año, filtro por tipo, y en la ficha de cada
+   gasto lo que ha costado cada año con su variación.
+4. ✅ **Avisos múltiples** (`c67fb26`) — hasta cinco antelaciones por
+   pago (del mismo día a tres meses) y el cupo de 64 notificaciones de
+   iOS repartido, con contador visible en Configuración.
+5. ✅ **Rediseño del inicio** (`daa4a7e`) — fuera las cinco pestañas,
+   inicio de tarjetas tipo Salud, y Esc capa a capa.
+6. ✅ **Objetivos con nombre** (`7b6dfda`) — sobres virtuales, con el
+   ritmo real cruzado contra lo que de verdad ahorra.
+7. ✅ **Dinero de terceros** (`dfe1d20`) — tipo de cuenta nuevo, fuera
+   de ahorro, límite y gráficas, con interruptor para verlo todo junto.
+
+### Lo que queda pendiente de la conversación
+
+- **Probarlo en el iPhone**: nada de esto se ha visto en el móvil de
+  verdad todavía. Los avisos de pago, en particular, solo se pueden
+  confirmar ahí (en el navegador no hay plugin de notificaciones; se
+  verificó con uno simulado).
+- **El atajo de gasto rápido** (widget / pantalla de bloqueo / centro
+  de control), que Koku dejó explícitamente "para otra tanda".
+- **El resto del backlog** de la sección 8.
 
 ---
 
