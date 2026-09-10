@@ -83,6 +83,15 @@ async function construirResumenDelDia() {
     // como hacía antes.
     fondo: colorDelTemaParaElWidget('--surface', ''),
     texto: colorDelTemaParaElWidget('--surface-text', ''),
+    // Cuál de las tres combinaciones quiere Koku (Configuración >
+    // Widgets): 'app', 'sistema' o 'mixto'. Va DENTRO del resumen y no en
+    // un ajuste nativo aparte, para que cambiarlo no obligue a tocar
+    // Swift ni a que el widget lea dos sitios.
+    estiloWidget: estiloDeWidgetElegido(),
+    // Las dos paletas de la pareja clara/oscura, para el modo 'mixto': el
+    // widget se repinta con la app CERRADA, así que no puede preguntar
+    // cuál toca -- se lleva las dos y elige él según el móvil.
+    ...paletasParaElWidget(),
     ...seccionGimnasio(),
   };
 
@@ -392,6 +401,33 @@ function gymAcentoParaElWidget() {
 // puesto (o la función no existe), se cae al valor de respaldo -- y el
 // widget, al ver un color vacío o raro, se pinta con el material del
 // sistema como hacía antes.
+// El estilo elegido en Configuración > Widgets. Vive en settings.js, que
+// se carga DESPUÉS que este archivo -- por eso se mira la función en cada
+// llamada en vez de guardarla: para cuando esto se ejecuta (al mandar un
+// resumen, siempre desde un handler) ya está definida.
+function estiloDeWidgetElegido() {
+  try {
+    if (typeof getWidgetStyle === 'function') return getWidgetStyle();
+  } catch { /* si settings.js no está listo, el de fábrica */ }
+  return 'app';
+}
+
+function paletasParaElWidget() {
+  const vacio = { fondoClaro: '', textoClaro: '', fondoOscuro: '', textoOscuro: '' };
+  try {
+    if (typeof paletasDelTemaParaElWidget !== 'function') return vacio;
+    const p = paletasDelTemaParaElWidget();
+    return {
+      fondoClaro: p.claro.fondo || '',
+      textoClaro: p.claro.texto || '',
+      fondoOscuro: p.oscuro.fondo || '',
+      textoOscuro: p.oscuro.texto || '',
+    };
+  } catch {
+    return vacio;
+  }
+}
+
 function colorDelTemaParaElWidget(variable, porDefecto) {
   try {
     if (typeof gymThemeColorHex === 'function') return gymThemeColorHex(variable, porDefecto);

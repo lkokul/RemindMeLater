@@ -275,7 +275,7 @@ struct VistaHoy: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .marcaDeAgua("calendar", acento)
-        .fondoDeWidgetApp(entry.resumen?.fondo ?? "", entry.resumen?.texto ?? "")
+        .fondoDeWidgetApp(entry.resumen.estiloDeWidget)
         .widgetURL(DestinoDeWidget.hoy.url)
     }
 
@@ -422,7 +422,7 @@ struct VistaTareas: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .marcaDeAgua("checklist", acento)
-        .fondoDeWidgetApp(entry.resumen?.fondo ?? "", entry.resumen?.texto ?? "")
+        .fondoDeWidgetApp(entry.resumen.estiloDeWidget)
         .widgetURL(DestinoDeWidget.tareas.url)
     }
 
@@ -554,7 +554,7 @@ struct VistaFinanzas: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .marcaDeAgua("eurosign.circle", acento)
-        .fondoDeWidgetApp(entry.resumen?.fondo ?? "", entry.resumen?.texto ?? "")
+        .fondoDeWidgetApp(entry.resumen.estiloDeWidget)
         .widgetURL(DestinoDeWidget.finanzas.url)
     }
 
@@ -670,7 +670,7 @@ struct VistaLecturas: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .marcaDeAgua("books.vertical.fill", acento)
-        .fondoDeWidgetApp(entry.resumen?.fondo ?? "", entry.resumen?.texto ?? "")
+        .fondoDeWidgetApp(entry.resumen.estiloDeWidget)
         .widgetURL(DestinoDeWidget.lecturas.url)
     }
 }
@@ -787,7 +787,7 @@ struct VistaViajes: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .marcaDeAgua("airplane", acento)
-        .fondoDeWidgetApp(entry.resumen?.fondo ?? "", entry.resumen?.texto ?? "")
+        .fondoDeWidgetApp(entry.resumen.estiloDeWidget)
         .widgetURL(DestinoDeWidget.viajes.url)
     }
 }

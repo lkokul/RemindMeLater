@@ -3872,6 +3872,13 @@ body.gym-rest-push #settings-modal .settings-card {
 
 /* --- Vista (Normal / Pantalla completa / Ventana flotante) --- */
 .view-mode-options { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
+/* La linea de debajo del selector de estilo de los widgets: explica en
+   una frase que hace la opcion elegida, sin gastar un dialogo. */
+.settings-hint {
+  margin-top: 0.7rem;
+  font-size: 0.85rem;
+  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
+}
 
 .view-mode-btn { text-align: left; }
 .view-mode-btn.active {

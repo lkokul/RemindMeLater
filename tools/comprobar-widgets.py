@@ -169,15 +169,26 @@ for d in sorted(destinos_swift):
         fallos.append(f"el destino '{d}' no lo atiende app.js")
 
 # Las claves del JSON: las que escribe el JS vs las que lee Swift.
+#
+# Se miran TODAS las lineas "case" de CADA enum CodingKeys, y en los DOS
+# modelos (el resumen general y el del Gimnasio, que tiene el suyo). La
+# version anterior de esto solo cogia la PRIMERA linea case de cada enum y
+# solo miraba un archivo: al partir un enum en dos lineas dejo de ver
+# cinco claves nuevas sin decir nada, que es justo el fallo que este
+# guion existe para pillar.
 claves_swift = set()
-for m in re.finditer(r'enum CodingKeys: String, CodingKey \{ case ([^}]+)\}', modelo):
-    claves_swift |= {c.strip() for c in m.group(1).split(',') if c.strip()}
-m = re.search(r'enum CodingKeys: String, CodingKey \{\n\s+case ([^\n]+)\n', modelo)
-if m:
-    claves_swift |= {c.strip() for c in m.group(1).split(',')}
-faltan = [k for k in claves_swift if k not in puente]
+for texto_swift in (modelo, gym):
+    for bloque in re.finditer(r'enum CodingKeys: String, CodingKey \{(.*?)\}', texto_swift, re.S):
+        for linea in re.findall(r'case ([^\n]+)', bloque.group(1)):
+            for c in linea.split(','):
+                # "case fondo = "bg"" -> la clave del JSON es la de la
+                # derecha; sin "=" es el propio nombre.
+                c = c.split('=')[-1].strip().strip('"')
+                if c:
+                    claves_swift.add(c)
+faltan = sorted(k for k in claves_swift if k not in puente)
 if faltan:
-    fallos.append(f'claves que Swift lee y el JavaScript no escribe: {sorted(faltan)}')
+    fallos.append(f'claves que Swift lee y el JavaScript no escribe: {faltan}')
 
 # --- resultado -------------------------------------------------------
 if fallos:

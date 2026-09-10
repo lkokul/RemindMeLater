@@ -359,7 +359,7 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'notifications', 'store'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'widgets', 'notifications', 'store'];
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -381,6 +381,7 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
     // refreshMobileTab refresca por id, asi que vale para las DOS
     // secciones que reparte: Este dispositivo y Notificaciones.
     else if (tab === 'mobile' || tab === 'notifications') refreshMobileTab();
+    else if (tab === 'widgets') refreshWidgetStyleOptions();
   });
 });
 
@@ -483,6 +484,112 @@ function refreshFavoritesDisplayOptions() {
     container.appendChild(btn);
   });
 }
+
+
+// ---------------------------------------------------------------------
+// Widgets: como se pintan en la pantalla de inicio
+// ---------------------------------------------------------------------
+// Peticion de Koku tras ver los widgets con los colores de la app y el
+// sistema en oscuro. Son TRES combinaciones y las tres tienen sentido,
+// asi que en vez de elegir yo una, se eligen:
+//
+//  - "app": los colores del tema tal y como lo tienes puesto AHORA en la
+//    app. Si tu tema es claro, el widget es claro aunque el movil este en
+//    oscuro.
+//  - "sistema": lo que hace iOS por defecto (y lo que hacia la app antes)
+//    -- el material gris translucido, claro u oscuro segun el movil.
+//  - "mixto": tu paleta, pero eligiendo la variante clara u oscura segun
+//    como este el MOVIL en cada momento. Solo cambia algo si tu tema
+//    tiene pareja clara/oscura; si no la tiene, se comporta como "app" y
+//    la pista de debajo lo dice.
+//
+// Es un ajuste de ESTE telefono (localStorage): los widgets viven en su
+// pantalla de inicio, no en la base de datos.
+const WIDGET_STYLE_OPTIONS = [
+  { id: 'app', label: 'Tema y estilo de la app',
+    pista: 'El widget usa los colores del tema que tengas puesto en la app, sea cual sea el modo del móvil.' },
+  { id: 'sistema', label: 'Tema y estilo del móvil',
+    pista: 'El widget se pinta como los demás de iOS: gris translúcido, claro u oscuro según el móvil.' },
+  { id: 'mixto', label: 'Tema del móvil, estilo de la app',
+    pista: 'El widget usa tu paleta, pero elige la variante clara u oscura según cómo esté el móvil.' },
+];
+
+function getWidgetStyle() {
+  const v = localStorage.getItem('widgetEstilo');
+  return WIDGET_STYLE_OPTIONS.some((o) => o.id === v) ? v : 'app';
+}
+
+function refreshWidgetStyleOptions() {
+  const container = document.getElementById('widget-style-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getWidgetStyle();
+
+  WIDGET_STYLE_OPTIONS.forEach((opt) => {
+    const isActive = opt.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = opt.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('widgetEstilo', opt.id);
+        // El estilo viaja DENTRO del resumen, asi que hay que reescribirlo
+        // para que el widget se entere. Sin esto no cambiaria nada hasta
+        // la proxima vez que la app tocara algo.
+        if (typeof actualizarResumenDelWidget === 'function') actualizarResumenDelWidget();
+        refreshWidgetStyleOptions();
+      });
+    }
+    container.appendChild(btn);
+  });
+
+  const hint = document.getElementById('widget-style-hint');
+  if (!hint) return;
+  const opt = WIDGET_STYLE_OPTIONS.find((o) => o.id === current);
+  let texto = opt ? opt.pista : '';
+  // Con un tema SIN pareja, "mixto" no puede hacer nada: mejor decirlo que
+  // dejar a Koku mirando un widget que no cambia.
+  if (current === 'mixto' && !temaActivoTienePareja()) {
+    texto += ' Tu tema no tiene variante clara/oscura, así que ahora mismo se ve igual que "Tema y estilo de la app".';
+  }
+  hint.textContent = texto;
+}
+
+function temaActivoTienePareja() {
+  const activo = themeLibrary.find((x) => x.id === Number(localStorage.getItem('activeThemeId')));
+  return !!(activo && activo.inverseColors);
+}
+
+// Las DOS paletas del tema activo (la clara y la oscura), para el modo
+// "mixto": el widget necesita las dos para poder elegir segun el movil,
+// porque el widget se repinta con la app CERRADA y no puede preguntarle.
+// Si el tema no tiene pareja, las dos son la misma.
+function paletasDelTemaParaElWidget() {
+  const activo = themeLibrary.find((x) => x.id === Number(localStorage.getItem('activeThemeId')));
+  const par = (c) => ({ fondo: (c && c.surface) || '', texto: (c && c.surfaceText) || '' });
+  if (!activo) return { claro: par(null), oscuro: par(null) };
+  if (!activo.inverseColors) {
+    const uno = par(activo.colors);
+    return { claro: uno, oscuro: uno };
+  }
+  const principalEsClaro = isLightColors(activo.colors);
+  return {
+    claro: par(principalEsClaro ? activo.colors : activo.inverseColors),
+    oscuro: par(principalEsClaro ? activo.inverseColors : activo.colors),
+  };
+}
+
+document.getElementById('btn-help-widget-style').addEventListener('click', () => {
+  showAppAlert(
+    'Los widgets se pintan con la app cerrada, así que no pueden preguntarle nada: se llevan los colores puestos.\n\n' +
+    '• Tema y estilo de la app: siempre tu tema. Si el tuyo es claro y el móvil está en oscuro, el widget se verá claro entre los demás.\n\n' +
+    '• Tema y estilo del móvil: como cualquier otro widget de iOS. Es lo que menos canta, pero no se parece a tu app.\n\n' +
+    '• Tema del móvil, estilo de la app: tu paleta, pero con la variante clara u oscura según el móvil. Necesita que tu tema tenga pareja clara/oscura.'
+  );
+});
 
 
 // Salir de la pestana Estilo (volver al menu, o cerrar Configuracion del

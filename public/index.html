@@ -2468,6 +2468,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
           <span>Este dispositivo</span>
         </button>
+        <button type="button" class="settings-menu-item" data-tab="widgets">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>
+          <span>Widgets</span>
+        </button>
         <button type="button" class="settings-menu-item" data-tab="notifications">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M10.3 19a2 2 0 0 0 3.4 0"/></svg>
           <span>Notificaciones</span>
@@ -2477,6 +2481,21 @@
           <span>Tienda</span>
         </button>
 
+      </div>
+
+      <!-- --- Widgets (apartado propio, peticion de Koku). Es de ESTE
+           telefono: los widgets viven en su pantalla de inicio, no en la
+           base de datos. Botones y no un desplegable, siguiendo el mismo
+           patron que "Favoritos" de la pestaña Vista (.view-mode-btn):
+           con tres opciones cortas se ven las tres de un vistazo. --- -->
+      <div id="settings-tab-widgets" class="settings-tab-panel hidden">
+        <h3>Widgets</h3>
+        <div class="settings-toggle-help-row">
+          <p class="field-label-block">Cómo se ven en la pantalla de inicio</p>
+          <button type="button" id="btn-help-widget-style" class="icon-btn settings-help-btn" aria-label="Qué cambia cada opción">?</button>
+        </div>
+        <div id="widget-style-options" class="view-mode-options"></div>
+        <p id="widget-style-hint" class="settings-hint"></p>
       </div>
 
       <!-- --- Notificaciones (apartado propio, peticion de Koku: "van a

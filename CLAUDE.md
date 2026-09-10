@@ -2114,20 +2114,40 @@ tocan, porque cambiar de ejercicio no puede duplicarte lo apuntado.
 cerrados. Cada campo crea el suyo. Para pinchar una opción de verdad hay
 que buscar **el popover que NO tiene la clase `hidden`**.
 
-### Los widgets siguen el tema de la app
+### Configuración > Widgets: las tres combinaciones
 
 Koku: *"no sigue demasiado el tema de la app, antes estaba en claro, pero
 el sistema está en modo oscuro"*. Con `.fill.tertiary` el widget seguía
 el modo claro/oscuro del SISTEMA, que es lo normal en iOS pero aquí
-choca. Se le ofrecieron tres opciones y eligió que sigan el tema.
+choca. Primero se pasó a los colores de la app a secas, y al verlo Koku
+pidió que se pudiera elegir: **"un apartado en configuración que sea
+Widgets, con un selector con 3 opciones"**.
 
-El resumen lleva ahora `fondo` y `texto` (`--surface` y `--surface-text`,
-no `--bg`: un widget es una TARJETA, y en la app las tarjetas son
-surface; además cada fondo lleva su contraste emparejado, así que los dos
-siempre se leen bien juntos). `fondoDeWidgetApp(fondo, texto)` los pinta.
+Las tres, todas con sentido, por eso no se elige una por él:
 
-Dos detalles que importan:
+- **`app`** (de fábrica) — los colores del tema tal y como esté puesto en
+  la app. Si tu tema es claro, el widget es claro aunque el móvil esté en
+  oscuro.
+- **`sistema`** — el material de iOS de siempre, claro u oscuro según el
+  móvil. Es lo que había antes de todo esto.
+- **`mixto`** — tu paleta, pero eligiendo su variante clara u oscura
+  según el móvil. **Funciona porque los temas de esta app ya vienen
+  emparejados** (`inverseColors`), así que no hay que inventarse nada.
 
+**Lo que hace que "mixto" sea posible**: el widget se repinta con la app
+CERRADA, así que no puede preguntarle qué modo hay. Se lleva **las dos
+paletas** en el resumen (`fondoClaro`/`textoClaro`/`fondoOscuro`/
+`textoOscuro`, de `paletasDelTemaParaElWidget()` en `settings.js`) y
+elige él al pintar, con `@Environment(\.colorScheme)`. Por eso
+`FondoDeWidget` es un **ViewModifier de verdad** y no un `func` suelto:
+ese entorno solo se puede leer desde dentro de una vista.
+
+Detalles que importan:
+
+- **El resumen lleva `--surface` y `--surface-text`, no `--bg`**: un
+  widget es una TARJETA, y en la app las tarjetas son surface. Además
+  cada fondo lleva su contraste emparejado, así que los dos siempre se
+  leen bien juntos, sea cual sea el tema.
 - **El texto se pone con `.foregroundStyle` en la RAÍZ**: los
   `.secondary` de dentro son estilos JERÁRQUICOS y se derivan solos de
   ese color, en vez de quedarse con el gris del sistema. Un solo sitio
@@ -2135,11 +2155,29 @@ Dos detalles que importan:
 - **De respaldo va la cadena VACÍA, no un blanco o un negro.** Si el tema
   no estuviera listo, mandar un blanco fijo dejaría el widget blanco al
   lado de una app oscura — peor que no hacer nada. Con el hueco vacío se
-  vuelve al material del sistema, que es lo que había antes.
+  vuelve al material del sistema.
+- **Con un tema SIN pareja, "mixto" no puede hacer nada**, así que la
+  pista de debajo del selector lo dice con todas las letras en vez de
+  dejar a Koku mirando un widget que no cambia.
+- **Elegir una opción reescribe el resumen al momento**
+  (`actualizarResumenDelWidget()`): el estilo viaja DENTRO del resumen,
+  así que sin eso no se vería el cambio hasta la próxima vez que la app
+  tocara algo.
+- **Botones y no un desplegable** (mismo patrón `.view-mode-btn` que
+  "Favoritos"): con tres opciones cortas se ven las tres de un vistazo, y
+  de paso se respeta la regla de no usar controles nativos.
 
 Esto es solo para la pantalla de INICIO: las vistas de bloqueo no llaman
 a `fondoDeWidgetApp`, porque ahí iOS pinta en monocromo y meterle colores
 solo quita legibilidad.
+
+**Y el comprobador tenía un agujero, encontrado al añadir esto.** Los
+cinco campos nuevos no aparecían en su cuenta de claves: el guion cogía
+solo la **primera línea `case`** de cada `enum CodingKeys` y miraba solo
+UNO de los dos modelos. O sea que llevaba sin comprobar de verdad justo
+lo que existe para comprobar. Ahora recorre todas las líneas de todos los
+enums de los dos archivos, y pasó de ver 31 claves a 44. Probado quitando
+una clave del JavaScript a propósito.
 
 ### Los popovers de los desplegables se acumulaban en el `<body>`
 
@@ -2252,11 +2290,15 @@ intento de arreglo del centro de control, el relleno de los seis widgets,
 y cuatro cosas del Gimnasio (la ✕ del modal, la altura de Descanso/RPE,
 los unilaterales en una sesión a mano, y el peso con decimales).
 
-**v0.44.0** es lo que salió de probar la #56 — ver el bloque "Lo que salió
-de probar la build #56" más arriba: el centro de control al TERCER intento
-(los dos anteriores fallaban por causas distintas), tus propios ejercicios
-en el "+" del entreno (que era la causa real de lo de los unilaterales),
-los widgets siguiendo el tema de la app, y la fuga de popovers.
+**v0.44.0 y v0.45.0** son lo que salió de probar la #56 — ver el bloque
+"Lo que salió de probar la build #56" más arriba: el centro de control al
+TERCER intento (los dos anteriores fallaban por causas distintas), tus
+propios ejercicios en el "+" del entreno (que era la causa real de lo de
+los unilaterales), la fuga de popovers, y **Configuración > Widgets** con
+las tres combinaciones de tema/estilo.
+
+**NINGUNA de las dos tiene build todavía.** La última subida a TestFlight
+es la #56 (v0.43.0), que es la que Koku probó.
 
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 

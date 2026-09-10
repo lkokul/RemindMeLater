@@ -53,9 +53,15 @@ struct ResumenDelDia {
     // número: el mediano los enseña en la mitad derecha, que antes se
     // quedaba vacía en cuanto el día no tenía botón de "Empezar".
     var listaEjercicios: [String] = []
-    // Los colores del tema de la app, iguales que en ResumenDeLaApp.
+    // Los colores y el estilo del widget, iguales que en ResumenDeLaApp
+    // (los dos modelos leen el MISMO JSON, cada uno lo que le interesa).
     var fondo: String = ""
     var texto: String = ""
+    var estiloWidget: String = "app"
+    var fondoClaro: String = ""
+    var textoClaro: String = ""
+    var fondoOscuro: String = ""
+    var textoOscuro: String = ""
 
     // Lo que viene DESPUÉS en el ciclo. Se llama "siguiente" y no
     // "mañana" a propósito: el ciclo avanza por entrenos hechos, no por
@@ -82,6 +88,7 @@ extension ResumenDelDia: Decodable {
     enum CodingKeys: String, CodingKey {
         case hayCiclo, esDescanso, nombre, bloque, color, icono, posicion, total, ejercicios
         case listaEjercicios, siguiente, fondo, texto
+        case estiloWidget, fondoClaro, textoClaro, fondoOscuro, textoOscuro
     }
 
     init(from decoder: Decoder) throws {
@@ -111,6 +118,11 @@ extension ResumenDelDia: Decodable {
         siguiente = texto(.siguiente, "")
         fondo = texto(.fondo, "")
         self.texto = texto(.texto, "")
+        estiloWidget = texto(.estiloWidget, "app")
+        fondoClaro = texto(.fondoClaro, "")
+        textoClaro = texto(.textoClaro, "")
+        fondoOscuro = texto(.fondoOscuro, "")
+        textoOscuro = texto(.textoOscuro, "")
     }
 
     // nil si todavía no hay nada guardado (app recién instalada, o el App
@@ -157,12 +169,21 @@ private extension Color {
 // containerBackground es OBLIGATORIO desde iOS 17 (sin él, el widget sale
 // con el fondo en blanco o directamente no se dibuja), pero no existe
 // antes. Este envoltorio evita repetir el #available en cada vista.
-// Aquí solo se delega en fondoDeWidgetApp (ResumenDeLaApp.swift), que es
-// donde vive el detalle de por qué se pintan los colores del tema.
+// El del Gimnasio tiene su propio modelo, así que solo traduce sus campos
+// a la estructura común y delega. El detalle de las tres combinaciones
+// vive en ResumenDeLaApp.swift, en un solo sitio.
+extension ResumenDelDia {
+    var estiloDeWidget: EstiloDeWidget {
+        EstiloDeWidget(estilo: estiloWidget, fondo: fondo, texto: texto,
+                       fondoClaro: fondoClaro, textoClaro: textoClaro,
+                       fondoOscuro: fondoOscuro, textoOscuro: textoOscuro)
+    }
+}
+
 private extension View {
-    @ViewBuilder
-    func fondoDeWidget(_ fondoHex: String = "", _ textoHex: String = "") -> some View {
-        self.fondoDeWidgetApp(fondoHex, textoHex)
+    func fondoDeWidget(_ resumen: ResumenDelDia?) -> some View {
+        // Sin resumen todavía: el material del sistema, que es lo neutro.
+        self.fondoDeWidgetApp(resumen?.estiloDeWidget ?? EstiloDeWidget(estilo: "sistema"))
     }
 }
 
@@ -277,7 +298,7 @@ struct QueTocaHoyView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .marcaDeAgua("dumbbell.fill", acento)
-        .fondoDeWidget(resumen?.fondo ?? "", resumen?.texto ?? "")
+        .fondoDeWidget(resumen)
         .widgetURL(abrirEntrenoDeHoyURL)
     }
 
@@ -355,7 +376,7 @@ struct QueTocaHoyView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .marcaDeAgua("dumbbell.fill", acento)
-        .fondoDeWidget(resumen?.fondo ?? "", resumen?.texto ?? "")
+        .fondoDeWidget(resumen)
         .widgetURL(abrirEntrenoDeHoyURL)
     }
 

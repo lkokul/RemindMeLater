@@ -42,6 +42,17 @@ struct ResumenDeLaApp: Decodable {
     // se pinta con el material del sistema, como hacía antes.
     var fondo: String = ""
     var texto: String = ""
+    // Cuál de las tres combinaciones eligió Koku en Configuración >
+    // Widgets: "app", "sistema" o "mixto". Vacío o desconocido = "app",
+    // que es lo de fábrica.
+    var estiloWidget: String = "app"
+    // Las DOS paletas de la pareja clara/oscura del tema, para "mixto".
+    // Si el tema no tiene pareja las dos son iguales, y entonces "mixto"
+    // se ve exactamente igual que "app" (la app ya lo avisa por escrito).
+    var fondoClaro: String = ""
+    var textoClaro: String = ""
+    var fondoOscuro: String = ""
+    var textoOscuro: String = ""
     var hoy: SeccionHoy?
     var tareas: SeccionTareas?
     var finanzas: SeccionFinanzas?
@@ -50,6 +61,7 @@ struct ResumenDeLaApp: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case actualizado, acento, fondo, texto, hoy, tareas, finanzas, lecturas, viajes
+        case estiloWidget, fondoClaro, textoClaro, fondoOscuro, textoOscuro
     }
 
     init(from decoder: Decoder) throws {
@@ -58,6 +70,11 @@ struct ResumenDeLaApp: Decodable {
         acento = texto(c, .acento, "#5b8cff")
         fondo = texto(c, .fondo, "")
         self.texto = texto(c, .texto, "")
+        estiloWidget = texto(c, .estiloWidget, "app")
+        fondoClaro = texto(c, .fondoClaro, "")
+        textoClaro = texto(c, .textoClaro, "")
+        fondoOscuro = texto(c, .fondoOscuro, "")
+        textoOscuro = texto(c, .textoOscuro, "")
         // Cada sección por separado: que Finanzas venga rota no puede
         // dejar sin datos al calendario.
         hoy = try? c.decode(SeccionHoy.self, forKey: .hoy)
@@ -316,21 +333,102 @@ extension Color {
 // Esto es SOLO para la pantalla de inicio. En la de bloqueo iOS pinta todo
 // en monocromo y con su propio tratamiento, y meterle colores ahí solo
 // quita legibilidad -- por eso las vistas de bloqueo no llaman a esto.
-extension View {
-    @ViewBuilder
-    func fondoDeWidgetApp(_ fondoHex: String = "", _ textoHex: String = "") -> some View {
+// Las TRES combinaciones que eligió Koku (Configuración > Widgets). Se
+// resuelven aquí, en un ViewModifier de verdad y no en un `func` suelto,
+// porque "mixto" necesita `@Environment(\.colorScheme)` -- o sea, saber
+// cómo está el MÓVIL en el momento de pintar, que es algo que solo se
+// puede leer desde dentro de una vista.
+//
+//  - app     → los colores del tema tal y como está puesto en la app.
+//  - sistema → el material de iOS de siempre. Es lo que había antes.
+//  - mixto   → la paleta de la app, pero eligiendo su variante clara u
+//              oscura según el móvil. Si el tema no tiene pareja, las dos
+//              paletas llegan iguales y se ve como "app" (la app lo avisa).
+//
+// El TEXTO se pone con `.foregroundStyle` en la RAÍZ: los `.secondary` de
+// dentro son estilos JERÁRQUICOS y se derivan solos de ese color, en vez
+// de quedarse con el gris del sistema. Un solo sitio tiñe el widget entero.
+//
+// Y si los colores llegan vacíos -- un resumen escrito por una versión
+// anterior de la app -- se cae al material del sistema. Mandar un blanco
+// fijo dejaría el widget blanco al lado de una app oscura, peor que no
+// hacer nada.
+// Los siete datos del estilo, juntos. Struct y no una tupla larga porque
+// la comparten los DOS modelos (el resumen general y el del Gimnasio, que
+// tiene el suyo propio) y una tupla de siete no hay quien la lea.
+struct EstiloDeWidget {
+    var estilo: String = "app"
+    var fondo: String = ""
+    var texto: String = ""
+    var fondoClaro: String = ""
+    var textoClaro: String = ""
+    var fondoOscuro: String = ""
+    var textoOscuro: String = ""
+}
+
+struct FondoDeWidget: ViewModifier {
+    @Environment(\.colorScheme) private var esquema
+    let estilo: EstiloDeWidget
+
+    private var elegidos: (fondo: String, texto: String) {
+        switch estilo.estilo {
+        case "sistema":
+            return ("", "")
+        case "mixto":
+            let oscuro = esquema == .dark
+            let f = oscuro ? estilo.fondoOscuro : estilo.fondoClaro
+            let x = oscuro ? estilo.textoOscuro : estilo.textoClaro
+            // Sin pareja guardada se usa la paleta normal, que es lo que
+            // hay: quedarse en blanco sería peor.
+            return f.isEmpty || x.isEmpty ? (estilo.fondo, estilo.texto) : (f, x)
+        default:
+            return (estilo.fondo, estilo.texto)
+        }
+    }
+
+    func body(content: Content) -> some View {
+        let (fondoHex, textoHex) = elegidos
         let conTema = !fondoHex.isEmpty && !textoHex.isEmpty
         if #available(iOS 17.0, *) {
             if conTema {
-                self
+                content
                     .foregroundStyle(Color(hexDeLaApp: textoHex))
                     .containerBackground(Color(hexDeLaApp: fondoHex), for: .widget)
             } else {
-                self.containerBackground(.fill.tertiary, for: .widget)
+                content.containerBackground(.fill.tertiary, for: .widget)
             }
         } else {
-            self.padding()
+            content.padding()
         }
+    }
+}
+
+extension View {
+    // containerBackground es OBLIGATORIO desde iOS 17 (sin él el widget
+    // sale en blanco o no se dibuja), pero no existe antes: el
+    // #available vive dentro del modifier.
+    //
+    // Esto es SOLO para la pantalla de INICIO. En la de bloqueo iOS pinta
+    // todo en monocromo con su propio tratamiento, y meterle colores ahí
+    // solo quita legibilidad -- por eso las vistas de bloqueo no llaman
+    // a esto.
+    func fondoDeWidgetApp(_ estilo: EstiloDeWidget) -> some View {
+        modifier(FondoDeWidget(estilo: estilo))
+    }
+}
+
+extension ResumenDeLaApp {
+    var estiloDeWidget: EstiloDeWidget {
+        EstiloDeWidget(estilo: estiloWidget, fondo: fondo, texto: texto,
+                       fondoClaro: fondoClaro, textoClaro: textoClaro,
+                       fondoOscuro: fondoOscuro, textoOscuro: textoOscuro)
+    }
+}
+
+// Sin resumen todavía: el material del sistema, que es lo neutro.
+extension Optional where Wrapped == ResumenDeLaApp {
+    var estiloDeWidget: EstiloDeWidget {
+        self?.estiloDeWidget ?? EstiloDeWidget(estilo: "sistema")
     }
 }
 
