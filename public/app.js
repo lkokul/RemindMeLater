@@ -13230,6 +13230,11 @@ function actualizarResumenDelWidget() {
 // en Swift a proposito: asi anadir un widget nuevo se hace entero desde
 // aqui, sin recompilar nada nativo.
 async function comprobarAperturaDesdeElWidget() {
+  // Lo primero: aplicar lo que se toco en un widget con la app cerrada
+  // (marcar una tarea como hecha). Va aqui porque los momentos son
+  // exactamente los mismos -- arrancar y volver a primer plano -- y asi
+  // no hay dos sitios que acordarse de mantener.
+  await aplicarAccionesDelWidgetYRefrescar();
   if (typeof widgetPideAbrir !== 'function') return;
   let destino = '';
   try { destino = await widgetPideAbrir(); } catch { return; }
@@ -13259,6 +13264,30 @@ async function comprobarAperturaDesdeElWidget() {
   } else if (destino === 'nueva-nota') {
     openMobileNotesView();
     openNoteInEditor(null);
+  }
+}
+
+// Aplica lo que se toco en el widget y, si de verdad cambio algo,
+// repinta lo que lo enseña y reescribe el resumen del widget -- si no,
+// la app seguiria mostrando la tarea pendiente que acabas de tachar.
+async function aplicarAccionesDelWidgetYRefrescar() {
+  if (typeof aplicarAccionesPendientesDelWidget !== 'function') return;
+  let hechas = 0;
+  try {
+    hechas = await aplicarAccionesPendientesDelWidget();
+  } catch (err) {
+    console.error('No se pudieron aplicar las acciones del widget:', err);
+    return;
+  }
+  if (hechas === 0) return;
+  try {
+    await loadReminders();
+    await loadTasks();
+    renderTasksList();
+    if (typeof loadMonth === 'function') await loadMonth();
+    actualizarResumenDelWidget();
+  } catch (err) {
+    console.error('No se pudo refrescar tras aplicar el widget:', err);
   }
 }
 
