@@ -2447,6 +2447,173 @@ Finanzas, Lecturas y Viajes.
 Si algún día vuelve, lo que hay que rehacer está todo en el commit de
 esta ronda — y el resumen ya no lleva peso muerto mientras tanto.
 
+## Cinco widgets más (11/9/2026)
+
+Segunda tanda grande, pedida por Koku. Aquí van los CINCO que no
+necesitan mecanismo nuevo; los dos configurables y el experimento de
+Live Activity se quedaron para la ronda siguiente a propósito (ver
+"Lo que falta de los widgets" al final de este bloque).
+
+- **Calendario del mes** (mediano y grande): el mes que se está
+  viviendo, con hasta tres puntos de color por día y el día de hoy
+  marcado. Tocarlo lleva a la **vista mensual** y para ahí — Koku:
+  *"no hace falta que te lleve a la vista diaria del día pinchado, con
+  que te lleve a la vista mensual sobra"*.
+- **Consistencia** (grande): las cifras ARRIBA y el mapa de 26 semanas
+  DEBAJO. Ese orden lo pidió él al verlo descrito al revés (*"creo que
+  queda mejor"*).
+- **Mapa de entrenos** y **Números del gimnasio**: el heatmap solo y las
+  cifras solas, cada uno en su widget (*"haz 2 widgets más, uno de sólo
+  el heatmap y otro de sólo el texto"*).
+- **Mapa de músculos**: el cuerpo de la pestaña Progreso.
+
+**Qué cifras y por qué.** En el grande caben CUATRO cómodas: racha, esta
+semana, este mes y tiempo de trabajo. La que se queda fuera es "días
+entrenados" en total, porque solo sube y nunca dice cómo vas — se lo
+propuse así y lo aceptó. En el widget de solo cifras están las CINCO,
+que para eso existe.
+
+### Dos decisiones de arquitectura que conviene entender
+
+**El mapa de consistencia viaja como texto, no como matriz.** Son 7
+cadenas de 26 caracteres (una fila por día de la semana), donde cada
+carácter es `0` sin entrenar, `1` una sesión, `2` dos o más y `9`
+"ese día aún no ha llegado". Son 182 celdas: un array de objetos
+multiplicaría por veinte el tamaño del buzón para decir lo mismo.
+
+**La geometría del cuerpo vive en el Swift, no en el buzón.** Los
+polígonos de las siluetas son ~6 KB que NO cambian nunca; lo que cambia
+con cada entreno es la intensidad de cada músculo (un número de 0 a 1).
+Así que las coordenadas están duplicadas en
+`ios/App/DescansoWidget/CuerpoDelWidget.swift` y solo viajan las
+intensidades.
+
+El precio de duplicar es que las copias se separan, y eso está tapado:
+ese archivo **se genera** con `tools/generar-cuerpo-swift.py` a partir
+de `GYM_BODYMAP_ZONES`/`GYM_BODYMAP_SILHOUETTE` de `app.js`, y
+`tools/comprobar-widgets.py` lo vuelve a generar y **falla si no
+coincide**. O sea que tocar el mapa de la app y olvidarse del widget da
+un error ruidoso antes de compilar, no un cuerpo mal dibujado en el
+teléfono. Probado rompiéndolo a propósito.
+
+Los dos dibujos (mapa y cuerpo) van en un **`Canvas`**, no con vistas
+sueltas: son 182 cuadraditos y 70 polígonos, y WidgetKit tiene un
+presupuesto de vistas por widget.
+
+**`gymPuntuacionPorMusculo()`** se separó de `renderGymBodyMap()` para
+que la pantalla y el widget cuenten IGUAL. Si cada uno hiciera su
+cuenta, podrían pintar manchas distintas del mismo entreno.
+
+### La cola de "marcado en el widget"
+
+Koku pidió marcar una tarea como hecha sin entrar en la app. El límite
+es duro y conviene tenerlo claro: **un widget no puede tocar la base de
+datos** (es SQLite dentro de la webview; el widget es código nativo que
+corre con la app cerrada). Lo máximo que puede hacer es dejar una nota
+en el buzón compartido.
+
+Se le ofrecieron tres caminos y eligió el optimista: el botón tacha la
+fila al momento en el widget y apunta la acción; `aplicarAccionesPendientesDelWidget()`
+la recoge y la aplica de verdad **al abrir la app**. Sabe el precio: si
+tarda días en abrirla, la tarea sigue pendiente por dentro todo ese rato.
+
+Solo se entiende UNA acción (`hecho`) a propósito: cuantas menos cosas
+pueda pedir un widget sin la app delante, menos formas hay de que la
+base acabe diciendo algo que nadie pidió.
+
+### Lo que falta de los widgets (ronda siguiente)
+
+No está hecho, y no por olvido:
+
+- **Gráfica de un ejercicio** y **agenda filtrable por grupo**, los dos
+  CONFIGURABLES (elegir el ejercicio o el grupo dejando pulsado el
+  widget). **La mitad de JavaScript ya está hecha y probada**: el
+  resumen ya lleva `ejercicios`, `grupos` y `agenda`. Lo que falta es el
+  Swift, y es un mecanismo NUEVO — `AppIntentConfiguration` +
+  `AppEntity` + `EntityQuery` + botones interactivos.
+- El **experimento de Live Activity permanente** en la pantalla de
+  bloqueo.
+
+Se dejaron fuera de esta build a propósito: son tres mecanismos nativos
+nuevos a la vez, aquí no hay Xcode para compilar, y un fallo de
+compilación habría impedido validar también los cinco que sí están.
+
+**Dato importante para cuando se retomen**: los ajustes de un widget
+configurable se pintan en el proceso de la EXTENSIÓN, con la app
+cerrada. O sea que la lista entre la que se elige tiene que estar YA en
+el buzón — no hay forma de preguntarle a la app en ese momento. Por eso
+el resumen manda los 24 ejercicios más recientes con sus 12 últimos
+puntos, y los grupos, aunque el widget solo use uno.
+
+## Gimnasio: asistidos y material (11/9/2026)
+
+**Ejercicios asistidos.** Dominadas con banda, máquina asistida, fondos
+asistidos. Koku lo describió mejor que ninguna especificación: *"yo digo
+asistido en -20kg, la siguiente -18kg... llegará un punto que te diré
+5kg, entonces simplemente es un ejercicio normal sólo que la base no es
+0kg"*.
+
+Por eso NO es un campo aparte de "ayuda": es el mismo peso de siempre
+con signo, y la escala es continua (−20 → −18 → 0 → +5). Se marca por
+EJERCICIO, en su ficha (`assisted` en `gym_exercises`).
+
+Lo único que cambia de verdad es el **volumen**: un asistido no suma
+kilos movidos, porque su peso es la ayuda y sumarlo restaría del total.
+Lo que de verdad mueves es tu cuerpo menos la banda, y el peso corporal
+no lo sabemos — se le ofreció guardarlo y dijo que no (*"el peso
+corporal te da igual"*). Las **series sí cuentan** en todo lo demás:
+racha, heatmap, mapa de músculos, objetivo semanal.
+
+La regla está en el SQL de `/summary` y `/progress` **y** en el cliente
+(`gymSetVolumeRealKg`), para que base y pantalla cuenten igual. En
+récords un asistido entra con su mejor peso aunque sea negativo (−12 es
+mejor que −20) y se queda **sin 1RM de Epley**: esa fórmula parte de
+"peso que levantas", y aquí el número es lo que te quitan.
+
+**El botón ±, que no es un adorno**: el teclado DECIMAL del iPhone no
+tiene tecla menos, así que sin él sería imposible escribir −20 en el
+móvil. Sale solo en los asistidos, en los cuatro sitios donde se escribe
+un peso. Mismo criterio que los botones AM/PM del reloj de 12 horas.
+
+**Material de uno a varios.** Chips con los conocidos (15 de fábrica más
+todos los que hayas usado) y un campo para escribir uno nuevo, que a
+partir de entonces sale como chip en todos los ejercicios — *"así puedo
+añadirlo rápido si se repite en el resto de ejercicios"*.
+
+Se queda en la MISMA columna `equipment`, ahora con JSON dentro, en vez
+de una tabla aparte: mismo criterio que los géneros de Entretenimiento.
+Lo de antes se sigue leyendo — un texto suelto es lista de uno, y uno
+con comas (`"Barra, Mancuernas"`, justo lo que sugería el placeholder
+viejo) se parte por comas.
+
+**Buscar por músculo secundario.** Koku: *"hay veces que músculo
+principal no hay uno solo, tenlo en cuenta también"*. Un remo lleva
+dorsales de principal y bíceps de secundario, y escribir "biceps" no lo
+sacaba. `gymTextoBuscableDeEjercicio()` junta nombre + principal +
+secundarios + materiales, y la usan los TRES sitios que buscan
+ejercicios.
+
+## Lo que iOS NO deja hacer (preguntado por Koku, 11/9/2026)
+
+Para no volver a plantearlo cada pocas rondas:
+
+- **No hay widgets grandes en la pantalla de bloqueo.** WidgetKit solo
+  ofrece ahí las familias `accessoryCircular`, `accessoryRectangular` y
+  `accessoryInline`: todas pequeñas y pintadas en monocromo. Apps como
+  Widgy o Lock Launcher usan EXACTAMENTE esas — lo que parece un widget
+  grande es un `accessoryRectangular` con una imagen dentro, con el
+  mismo tamaño y las mismas limitaciones.
+- **Una Live Activity sí ocupa una tarjeta grande ahí**, pero está
+  pensada para algo EN CURSO: iOS la mata a las ~8 horas activa (12 en
+  el centro de notificaciones) y para renovarla hace falta que la app
+  corra. Sin servidor no hay "push to start", así que la renovación
+  depende de abrir la app o de un refresco en segundo plano que iOS
+  concede cuando quiere, no cuando se le pide.
+- **StandBy no tiene vista propia**: reutiliza los widgets
+  `systemSmall` que ya tengas y las Live Activities. No hay API que
+  programar, solo que los pequeños se vean bien apaisados.
+
+
 ## Dos ramas: `desarrollador` y `movil-ui`
 
 Decisión de Koku (10/9/2026), después de que el widget se quedara en
@@ -2552,10 +2719,16 @@ más arriba.
 "funciona todo, perfecto". Lo único que falló fueron los botones del
 centro de control con la app en primer plano — arreglado en la v0.46.0.
 
-**v0.46.0** es lo que salió de probar la #58 — ver el bloque "Lo que
-salió de probar la build #58" más arriba. **Sin build todavía**: Koku
-pidió expresamente no lanzar Actions en esa ronda, y dijo que para la
-siguiente traía ideas de widgets.
+**v0.46.0 y v0.46.1** son lo que salió de probar la #58 — ver el bloque
+"Lo que salió de probar la build #58" más arriba. No se lanzó build en
+esa ronda: Koku pidió expresamente no lanzar Actions.
+
+**v0.47.0** (11/9/2026) es la ronda de los widgets nuevos y del
+Gimnasio: cinco widgets más, ejercicios asistidos y material múltiple.
+Ver los dos bloques de arriba. **Las ramas de móvil están todas al día
+con `desarrollador`** (Koku va a trabajar viajes, finanzas y
+entretenimiento por separado); ojo con `entretenimiento-movil`, que
+necesitó resolver el renombrado Lecturas→Entretenimiento a mano.
 
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 

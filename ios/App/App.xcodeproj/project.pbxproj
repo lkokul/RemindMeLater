@@ -24,6 +24,8 @@
 		DE5CA25000000000000000BE /* QueTocaHoyWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AC /* QueTocaHoyWidget.swift */; };
 		DE5CA25000000000000000C7 /* ResumenDeLaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000C5 /* ResumenDeLaApp.swift */; };
 		DE5CA25000000000000000C8 /* WidgetsDeLaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000C6 /* WidgetsDeLaApp.swift */; };
+		DE5CA250000000000000010D /* WidgetsNuevos.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA250000000000000010C /* WidgetsNuevos.swift */; };
+		DE5CA250000000000000010B /* CuerpoDelWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA250000000000000010A /* CuerpoDelWidget.swift */; };
 		DE5CA25000000000000000BF /* WidgetBridgePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AD /* WidgetBridgePlugin.swift */; };
 		DE5CA25000000000000000B6 /* DescansoAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A5 /* DescansoAttributes.swift */; };
 		DE5CA25000000000000000B7 /* DescansoWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A1 /* DescansoWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -78,6 +80,8 @@
 		DE5CA25000000000000000AC /* QueTocaHoyWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueTocaHoyWidget.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000C5 /* ResumenDeLaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumenDeLaApp.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000C6 /* WidgetsDeLaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetsDeLaApp.swift; sourceTree = "<group>"; };
+		DE5CA250000000000000010C /* WidgetsNuevos.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetsNuevos.swift; sourceTree = "<group>"; };
+		DE5CA250000000000000010A /* CuerpoDelWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CuerpoDelWidget.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000AD /* WidgetBridgePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetBridgePlugin.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000AE /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		DE5CA25000000000000000AF /* DescansoWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DescansoWidget.entitlements; sourceTree = "<group>"; };
@@ -139,6 +143,8 @@
 				DE5CA25000000000000000AC /* QueTocaHoyWidget.swift */,
 				DE5CA25000000000000000C5 /* ResumenDeLaApp.swift */,
 				DE5CA25000000000000000C6 /* WidgetsDeLaApp.swift */,
+				DE5CA250000000000000010C /* WidgetsNuevos.swift */,
+				DE5CA250000000000000010A /* CuerpoDelWidget.swift */,
 				DE5CA25000000000000000AF /* DescansoWidget.entitlements */,
 			);
 			path = DescansoWidget;
@@ -306,6 +312,8 @@
 				DE5CA25000000000000000BE /* QueTocaHoyWidget.swift in Sources */,
 				DE5CA25000000000000000C7 /* ResumenDeLaApp.swift in Sources */,
 				DE5CA25000000000000000C8 /* WidgetsDeLaApp.swift in Sources */,
+				DE5CA250000000000000010D /* WidgetsNuevos.swift in Sources */,
+				DE5CA250000000000000010B /* CuerpoDelWidget.swift in Sources */,
 				DE5CA25000000000000000B6 /* DescansoAttributes.swift in Sources */,
 				DE5CA25000000000000000B9 /* ExtenderDescansoIntent.swift in Sources */,
 				DE5CA25000000000000000CB /* AbrirDesdeControl.swift in Sources */,

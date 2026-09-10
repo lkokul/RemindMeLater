@@ -106,6 +106,7 @@ async function construirResumenDelDia() {
     ['calendario', seccionCalendario],
     ['consistencia', seccionConsistencia],
     ['ejercicios', seccionEjercicios],
+    ['musculos', () => seccionMusculos()],
     ['grupos', seccionGrupos],
     ['agenda', seccionAgenda],
     ['tareas', seccionTareas],
@@ -454,6 +455,40 @@ async function seccionGrupos() {
     nombre: String(g.name || ''),
     color: g.color || '',
   }));
+}
+
+// --- El mapa de músculos, para su widget ------------------------------
+//
+// Koku: "un widget grande de gimnasio... que te muestre el cuerpo que hay
+// en el apartado de progreso".
+//
+// Lo que viaja son SOLO las intensidades (un número de 0 a 1 por grupo
+// muscular). Los polígonos del cuerpo NO: son geometría fija de 6 KB que
+// no cambia nunca, así que viven en el Swift y no se mandan 24 veces al
+// día. Que las dos copias no se separen lo vigila
+// tools/comprobar-widgets.py, que compara las coordenadas de app.js con
+// las del Swift y falla si difieren.
+//
+// La cuenta es la MISMA que la del mapa de la app (una serie da 1 punto
+// -- o su volumen -- al músculo principal y medio a cada secundario),
+// con la misma ventana de días que tengas elegida ahí.
+function seccionMusculos() {
+  if (typeof gymPuntuacionPorMusculo !== 'function') return null;
+  const { puntos, max, ventanaDias, metrica } = gymPuntuacionPorMusculo();
+  if (!puntos || puntos.size === 0 || max <= 0) return null;
+  const zonas = {};
+  for (const [grupo, valor] of puntos) {
+    // 0..1 con dos decimales: más precisión no se distingue en una
+    // mancha de color, y alarga el buzón para nada.
+    zonas[grupo] = Math.round((valor / max) * 100) / 100;
+  }
+  return {
+    zonas,
+    ventanaDias,
+    // 'series' o 'volume': el widget lo dice debajo, para que se sepa qué
+    // está mirando sin abrir la app.
+    metrica,
+  };
 }
 
 // --- Agenda: recordatorios Y tareas, para el widget configurable ------

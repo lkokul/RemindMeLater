@@ -13257,8 +13257,18 @@ async function comprobarAperturaDesdeElWidget() {
 
   if (destino === 'tareas') { await abrirTareasDesdeWidget(); return; }
 
-  // Los dos que se quedan en el calendario.
+  // El Gimnasio vive dentro del hub de Apps, como las otras tres.
+  if (destino === 'gimnasio') {
+    goToMobileSection('extensions');
+    if (typeof openGymView === 'function') await openGymView();
+    return;
+  }
+
+  // 'calendario' es el widget del mes: lleva al calendario y punto, sin
+  // meterse en el dia (Koku: "no hace falta que te lleve a la vista
+  // diaria del día pinchado, con que te lleve a la vista mensual sobra").
   goToMobileSection('calendar');
+  if (destino === 'calendario') return;
   if (destino === 'nuevo-evento') {
     openEventModal(null);
   } else if (destino === 'nueva-nota') {
@@ -14709,22 +14719,27 @@ const GYM_BODYMAP_SILHOUETTE = [
   ] },
 ];
 
-function renderGymBodyMap() {
-  const container = document.getElementById('gym-bodymap');
+// LA PUNTUACION POR MUSCULO, separada de su dibujo.
+//
+// Por cada serie de la ventana: 1 punto (o el volumen de la serie) al
+// grupo principal del ejercicio, y la mitad a cada secundario. Devuelve
+// tambien el maximo, que es contra lo que se normaliza la intensidad.
+//
+// Vive aparte porque la usan DOS cosas: el mapa de la pantalla y el
+// resumen que se le manda al widget del cuerpo (ver seccionMusculos en
+// widget-bridge.js). Si cada uno hiciera su cuenta, el widget y la app
+// podrian pintar manchas distintas del mismo entreno.
+function gymPuntuacionPorMusculo() {
   const since = new Date();
   since.setDate(since.getDate() - gymMapWindowDays);
   const sinceKey = toDateKey(since);
 
-  // Puntuacion por grupo: por cada serie de la ventana, 1 punto (o el
-  // volumen de la serie) al grupo principal del ejercicio, y la mitad a
-  // cada secundario. Tambien apuntamos los ejercicios con mas series de
-  // cada grupo para el detalle.
-  const score = new Map();
+  const puntos = new Map();
   const exercisesByGroup = new Map();
-  const exerciseById = new Map(state.gymExercises.map((e) => [e.id, e]));
-  for (const session of state.gymSessions) {
+  const exerciseById = new Map((state.gymExercises || []).map((e) => [e.id, e]));
+  for (const session of (state.gymSessions || [])) {
     if (session.date < sinceKey) continue;
-    for (const set of session.sets) {
+    for (const set of (session.sets || [])) {
       const exercise = exerciseById.get(set.exerciseId);
       if (!exercise) continue;
       // En "volumen" cuentan todos los tramos; en "series" una serie
@@ -14733,19 +14748,29 @@ function renderGymBodyMap() {
       if (amount <= 0) continue;
       const primary = GYM_MUSCLE_GROUPS.some((g) => g.id === exercise.muscleGroup) ? exercise.muscleGroup : null;
       if (primary) {
-        score.set(primary, (score.get(primary) || 0) + amount);
+        puntos.set(primary, (puntos.get(primary) || 0) + amount);
         if (!exercisesByGroup.has(primary)) exercisesByGroup.set(primary, new Map());
         const perEx = exercisesByGroup.get(primary);
         perEx.set(exercise.name, (perEx.get(exercise.name) || 0) + 1);
       }
       for (const secondary of exercise.secondaryMuscles || []) {
         if (secondary === primary) continue;
-        score.set(secondary, (score.get(secondary) || 0) + amount * 0.5);
+        puntos.set(secondary, (puntos.get(secondary) || 0) + amount * 0.5);
       }
     }
   }
+  return {
+    puntos,
+    exercisesByGroup,
+    max: Math.max(...puntos.values(), 0),
+    ventanaDias: gymMapWindowDays,
+    metrica: gymMapMetric,
+  };
+}
 
-  const max = Math.max(...score.values(), 0);
+function renderGymBodyMap() {
+  const container = document.getElementById('gym-bodymap');
+  const { puntos: score, exercisesByGroup, max } = gymPuntuacionPorMusculo();
   const unit = getGymWeightUnitLabel();
   const detailByGroup = new Map();
   const zonesHtml = GYM_BODYMAP_ZONES.map((zone) => {
@@ -18528,8 +18553,8 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.46.1';
-const APP_VERSION_DATE = '2026-09-10';
+const APP_VERSION = '0.47.0';
+const APP_VERSION_DATE = '2026-09-11';
 
 function renderAppVersionLine() {
   const el = document.getElementById('app-version-line');
