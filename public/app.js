@@ -10703,16 +10703,8 @@ async function gymStartRestLiveActivity() {
   const plugin = getGymLiveActivityPlugin();
   if (!plugin || !gymLiveSession || !gymLiveSession.restUntil) return;
   try {
-    const res = await plugin.startRest(gymRestActivityParams());
-    // Diagnostico visible en Configuracion > Este dispositivo: como no
-    // hay forma de ver la consola en el iPhone, el resultado del ultimo
-    // intento se guarda y se ensena alli (Koku reporto que la tarjeta no
-    // aparecia y no habia manera de saber por que).
-    localStorage.setItem('gymLiveActivityStatus', res && res.started
-      ? 'ok'
-      : `no: ${res && res.error ? res.error : 'el sistema no lo permite (¿iOS < 16.2, o desactivado en Ajustes?)'}`);
+    await plugin.startRest(gymRestActivityParams());
   } catch (err) {
-    localStorage.setItem('gymLiveActivityStatus', `error: ${err && err.message ? err.message : err}`);
     console.error('No se pudo iniciar la Live Activity del descanso:', err);
   }
 }
@@ -10785,52 +10777,6 @@ async function gymUpdateRestAudioWatch() {
     console.error('No se pudo mover la vigilancia de audio:', err);
   }
 }
-// --- Probar el aviso de fin de descanso -------------------------------
-// En el movil no hay consola ni forma de ver que pasa por dentro, y
-// montar un entreno entero para comprobar si la vibracion se calla es
-// una locura. Este atajo recorre EXACTAMENTE el mismo camino que un
-// descanso de verdad (misma notificacion, misma vigilancia de audio con
-// los mismos ajustes), solo que a los 10 segundos: da tiempo a bloquear
-// el movil y probar a callarlo como quieras.
-async function gymTestRestAlert(delaySeconds = 10) {
-  const fin = Date.now() + delaySeconds * 1000;
-  await gymScheduleRestNotification(fin);
-  await gymStartRestAudioWatch(fin);
-  return fin;
-}
-
-// Como acabo el ultimo aviso, segun lo que apunto la parte nativa.
-const GYM_REST_STOP_LABELS = {
-  app: 'al abrir la app',
-  desbloqueo: 'al desbloquear el móvil',
-  volumen: 'con un botón de volumen',
-  'audio-secundario': 'al pausar la música',
-  'ruta-audio': 'al cambiar la salida de audio',
-  interrupcion: 'por una interrupción de audio',
-  mando: 'con el mando del auricular',
-  banner: 'al quitar la notificación de la pantalla',
-  fin: 'no lo paró nada, terminó solo',
-  cancelado: 'se cortó al empezar otra serie o terminar el entreno',
-};
-async function gymRestAlertLastStatus() {
-  const plugin = getGymRestAudioPlugin();
-  if (!plugin || typeof plugin.getStatus !== 'function') return null;
-  try {
-    const info = await plugin.getStatus();
-    return info && info.stoppedBy ? info : null;
-  } catch (err) {
-    return null;
-  }
-}
-function gymFormatRestAlertStatus(info) {
-  if (!info) return 'Vibración del descanso: sin datos todavía (prueba el aviso).';
-  const como = GYM_REST_STOP_LABELS[info.stoppedBy] || info.stoppedBy;
-  const seg = Number(info.afterSeconds || 0).toFixed(1).replace('.', ',');
-  const pulsos = Number(info.pulses || 0);
-  const banner = info.bannerSeen ? '' : ' · la notificación no llegó a verse en pantalla';
-  return `Último aviso: se paró ${como}, a los ${seg} s (${pulsos} vibraciones)${banner}.`;
-}
-
 async function gymCancelRestAudioWatch() {
   const plugin = getGymRestAudioPlugin();
   if (!plugin) return;

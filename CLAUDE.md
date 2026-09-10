@@ -1736,10 +1736,16 @@ desarrollador, donde aparezcan estos mensajes para debuguear y tal"*.
 - La regla de Actions no cambia: **no se lanza ninguna build sin que
   Koku lo pida en ESA ronda**, ni siquiera en `desarrollador`.
 
-**Hoy no hay nada que quitar de `movil-ui`**: está 41 commits por detrás
-y todo esto nació después. Comprobado — no tiene ni el bloque del widget,
-ni las líneas de diagnóstico, ni un solo `console.log`. La lista de abajo
-es para el DÍA DEL MERGE, no trabajo pendiente.
+**Las dos van al día** (10/9/2026): Koku pidió no dejar `movil-ui`
+atrasada, así que se le pasaron los 42 commits que le faltaban y se le
+quitaron los avisos ahí mismo. O sea que **ahora sí son "la misma app
+menos la depuración"**, y no "una vieja y otra nueva".
+
+**El precio de que sea así, y hay que tenerlo presente**: cada ronda
+futura son DOS pasos, no uno — se trabaja en `desarrollador`, y al
+pasarla a `movil-ui` hay que volver a quitar lo de abajo. Un merge a
+secas se los llevaría de vuelta. Si algún día cansa, la alternativa que
+se descartó era ponerlos detrás de un interruptor y tener una sola rama.
 
 ### Qué se queda fuera de `movil-ui` (los cuatro, confirmados por Koku)
 
@@ -1758,6 +1764,14 @@ es para el DÍA DEL MERGE, no trabajo pendiente.
    `ResumenDelDia.hayBuzon()` y el campo `sinBuzon` de `QueTocaEntry` en
    `QueTocaHoyWidget.swift`. En `movil-ui` el respaldo vuelve a ser
    "Abre la app" a secas.
+
+**Y con ellos se va el código que solo existía para alimentarlos**, que
+si se queda es peso muerto: `gymTestRestAlert()`, `GYM_REST_STOP_LABELS`,
+`gymRestAlertLastStatus()` y `gymFormatRestAlertStatus()` en `app.js`;
+los dos `localStorage.setItem('gymLiveActivityStatus', ...)` de
+`gymStartRestLiveActivity()`; y `estadoDelWidget()`/`ultimoAvisoAlWidget`
+de `widget-bridge.js` (ahí `actualizarWidgetDelDia()` se queda, pero
+adelgaza: ya no tiene que apuntar cómo fue).
 
 **Y la de la Live Activity va con ellas** (`#gym-live-activity-status`,
 "Cuenta atrás en pantalla de bloqueo: ..."): no se le preguntó una por
@@ -1781,7 +1795,8 @@ normal.
 **Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde
 `claude/mobile-viewer-config-b59uf1`, que a su vez salía de `movil-ui`
 con `calendario-notas-movil-UI` ya fusionada). Todo lo de esta
-conversación vive ahí; ver el bloque "Dos ramas" más arriba.
+conversación vive ahí; ver el bloque "Dos ramas" más arriba. **`movil-ui`
+está al mismo nivel**, sin los avisos de diagnóstico.
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 
 - **`movil-ui` ya NO se toca** salvo que Koku lo pida explícitamente:

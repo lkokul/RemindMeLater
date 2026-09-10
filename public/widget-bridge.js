@@ -86,49 +86,18 @@ function gymAcentoParaElWidget() {
   return '#5b8cff';
 }
 
-// Cómo fue el último intento de avisar al widget. Existe porque en el
-// iPhone NO HAY FORMA DE VER LA CONSOLA: cuando el widget se quedó en
-// "Abre la app" no había manera de saber si la app no escribía, si el
-// buzón compartido no existía, o si el aviso no llegaba. Se enseña en
-// Configuración → Este dispositivo, igual que ya se hace con el aviso de
-// fin de descanso (`gym-rest-alert-status`).
-let ultimoAvisoAlWidget = null;
-
-function estadoDelWidget() {
-  return ultimoAvisoAlWidget;
-}
-
 // Manda el resumen. Silenciosa a propósito: que el widget no se entere no
-// es motivo para molestar a nadie ni para romper el flujo que la llamó.
-// Lo único que hace es dejar apuntado cómo fue.
+// es motivo para molestar a nadie ni para romper el flujo que la llamó,
+// que puede ser cualquier cosa (abrir la app, guardar un entreno...).
 async function actualizarWidgetDelDia() {
   const plugin = getWidgetBridgePlugin();
-  if (!plugin) {
-    ultimoAvisoAlWidget = { ok: false, motivo: 'sin_plugin', cuando: Date.now() };
-    return ultimoAvisoAlWidget;
-  }
-  const resumen = construirResumenDelDia();
+  if (!plugin) return;
   try {
-    const res = await plugin.guardarResumen({ json: JSON.stringify(resumen) });
-    // El plugin responde {guardado:false, motivo:'sin_grupo'} cuando
-    // UserDefaults(suiteName:) devuelve nil, que es lo que pasa si el App
-    // Group no viajó en la firma. Esa distinción es justo la que hacía
-    // falta y no se veía.
-    ultimoAvisoAlWidget = {
-      ok: !!(res && res.guardado),
-      motivo: res && res.motivo ? res.motivo : (res && res.guardado ? 'ok' : 'sin_respuesta'),
-      cuando: Date.now(),
-      resumen,
-    };
+    await plugin.guardarResumen({ json: JSON.stringify(construirResumenDelDia()) });
   } catch (err) {
-    ultimoAvisoAlWidget = {
-      ok: false,
-      motivo: 'error: ' + (err && err.message ? err.message : 'desconocido'),
-      cuando: Date.now(),
-      resumen,
-    };
+    // A propósito no se enseña nada: el widget es un extra, y un fallo
+    // aquí no debe interrumpir lo que estuvieras haciendo.
   }
-  return ultimoAvisoAlWidget;
 }
 
 // ¿Se ha abierto la app desde el widget (o desde el botón del centro de
