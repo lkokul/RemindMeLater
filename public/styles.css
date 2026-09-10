@@ -9,6 +9,33 @@
    Si algun dia hay que adaptarse a una pantalla ancha, se hace de una
    pieza y a proposito, no heredando medio visor de otro programa. */
 
+/* ---------------------------------------------------------------------
+   TODAS las reglas :hover de este archivo van dentro de
+   @media (hover: hover). Explicacion, porque es importante y ya habia
+   mordido una vez (ver el comentario del estilo Neon mas abajo):
+
+   iOS aplica los estilos de :hover al TOCAR un elemento y los deja
+   PUESTOS hasta que tocas otra cosa. Con el raton eso no pasa: apartas el
+   raton y se va. En un telefono no hay donde apartarlo.
+
+   Se veia asi: tocabas una pestaña de la barra de abajo y se quedaba con
+   un rectangulo de fondo relleno, como un boton pulsado -- que ademas es
+   justo lo que una barra de pestañas de iOS no hace nunca (ahi solo se
+   tiñe el icono y la etiqueta). Y pasaba en CUALQUIER boton de la app.
+
+   (hover: hover) es "este aparato tiene un puntero que puede posarse
+   encima": verdadero con raton, falso en una pantalla tactil. Asi el
+   efecto sigue existiendo entero en el ordenador y desaparece en el
+   movil, sin tener que elegir entre las dos cosas.
+
+   Lo que SI se nota al tocar sigue intacto: :active tiene sus propias
+   reglas en cada estilo de interaccion, y esas no se han tocado.
+
+   Si añades una regla :hover nueva, METELA DENTRO de un
+   @media (hover: hover) -- tools/comprobar-widgets.py falla si no.
+   --------------------------------------------------------------------- */
+
+
 :root {
   --bg: #0f1115;
   --bg-text: #e8eaed;
@@ -27,6 +54,37 @@
   --day-weekend: #1a1d27;
   --day-holiday: #3a2020;
   --day-special: #2a1f3a;
+  /* ------------------------------------------------------------------
+     ESCALA TIPOGRAFICA
+     ------------------------------------------------------------------
+     Antes habia 24 tamaños de letra distintos en este archivo, elegidos
+     a ojo pantalla por pantalla, y el mas usado con diferencia era
+     0.85rem = 13,6 px... que en iOS es tamaño de PIE DE FOTO. El cuerpo
+     de texto del sistema son 17 px. O sea que la app entera estaba
+     escrita en tamaño de nota al pie, y esa es la razon numero uno de
+     que no se leyera como una app de Apple: las apps del sistema son
+     grandes y aireadas, y caben menos cosas en pantalla A PROPOSITO.
+
+     Ahora son ocho tokens, calcados de la escala de iOS (Caption,
+     Footnote, Subhead, Body, Title 3, Title 2, Title 1, Large Title).
+     Los 24 valores viejos se repartieron por cercania.
+
+     Van en px y no en rem a proposito: rem depende del tamaño de letra
+     raiz del navegador, y aqui el numero tiene que ser el mismo que el
+     del sistema para que la app "rime" con el resto del telefono.
+
+     Si necesitas un tamaño nuevo, usa uno de estos. Si de verdad ninguno
+     vale, es señal de que la jerarquia de esa pantalla no esta clara.
+     ------------------------------------------------------------------ */
+  --t-micro: 11px;
+  --t-pie: 13px;
+  --t-secundario: 15px;
+  --t-cuerpo: 17px;
+  --t-titulo-3: 20px;
+  --t-titulo: 22px;
+  --t-titulo-2: 28px;
+  --t-titulo-grande: 34px;
+
   --radius: 14px;
   --radius-sm: 8px;
 }
@@ -90,6 +148,10 @@ body.settings-modal-open .mobile-nav { display: flex; }
 
 body {
   margin: 0;
+  /* 17 px es el cuerpo de texto del sistema en iOS. Lo hereda todo lo que
+     no declara un tamaño propio, que es la mayor parte del texto de la
+     app: antes heredaba los 16 px del navegador. */
+  font-size: var(--t-cuerpo);
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--bg-text);
@@ -199,35 +261,45 @@ button {
   button { transition: none; }
 }
 
-/* ---------------------------------------------------------------------
-   Estilo de interaccion (Configuracion > Estilo > Estilo de interaccion):
-   ajuste por dispositivo, INDEPENDIENTE del tema de color -- usa los
-   mismos var(--accent)/var(--danger) del tema activo, solo cambia como
-   reaccionan los botones al pasar el raton y como se marca un
-   interruptor encendido. Se aplica como atributo en <html>
-   (document.documentElement.dataset.uiStyle, ver applyUiStyle en app.js)
-   ANTES de pintar nada, asi que siempre hay uno puesto -- "directo" es
-   el que sale si nunca has entrado a elegir otro.
-   --------------------------------------------------------------------- */
-:root[data-ui-style="directo"] button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+@media (hover: hover) {
+  /* ---------------------------------------------------------------------
+     Estilo de interaccion (Configuracion > Estilo > Estilo de interaccion):
+     ajuste por dispositivo, INDEPENDIENTE del tema de color -- usa los
+     mismos var(--accent)/var(--danger) del tema activo, solo cambia como
+     reaccionan los botones al pasar el raton y como se marca un
+     interruptor encendido. Se aplica como atributo en <html>
+     (document.documentElement.dataset.uiStyle, ver applyUiStyle en app.js)
+     ANTES de pintar nada, asi que siempre hay uno puesto -- "directo" es
+     el que sale si nunca has entrado a elegir otro.
+     --------------------------------------------------------------------- */
+  :root[data-ui-style="directo"] button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  }
 }
-:root[data-ui-style="directo"] .primary-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, white 12%, var(--accent));
+@media (hover: hover) {
+  :root[data-ui-style="directo"] .primary-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, white 12%, var(--accent));
+  }
 }
-:root[data-ui-style="directo"] .danger-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 16%, var(--surface-2));
+@media (hover: hover) {
+  :root[data-ui-style="directo"] .danger-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 16%, var(--surface-2));
+  }
 }
 :root[data-ui-style="directo"] button:active:not(:disabled) { transform: scale(0.97); }
 
-:root[data-ui-style="neon"] button:hover:not(:disabled):not(.mobile-nav-btn) {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent);
+@media (hover: hover) {
+  :root[data-ui-style="neon"] button:hover:not(:disabled):not(.mobile-nav-btn) {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
 }
-:root[data-ui-style="neon"] .danger-btn:hover:not(:disabled) {
-  border-color: var(--danger);
-  box-shadow: 0 0 0 1px var(--danger), 0 0 12px color-mix(in srgb, var(--danger) 55%, transparent);
+@media (hover: hover) {
+  :root[data-ui-style="neon"] .danger-btn:hover:not(:disabled) {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 1px var(--danger), 0 0 12px color-mix(in srgb, var(--danger) 55%, transparent);
+  }
 }
 :root[data-ui-style="neon"] .primary-btn {
   box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
@@ -235,30 +307,32 @@ button {
 :root[data-ui-style="neon"] .checkbox-row input[type="checkbox"]:checked {
   box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent);
 }
-/* .mobile-nav-btn necesita su propio anillo Neon (en vez de heredar el
-   de "button:hover" de arriba, que sale HACIA FUERA del boton): en
-   movil el :hover se queda "pegado" tras tocar hasta el siguiente
-   toque, y como .mobile-nav-btn ocupa toda la altura interior de
-   .mobile-nav (que tiene overflow:hidden para recortar las esquinas a
-   su radio), la parte de arriba/abajo del anillo saliente se recortaba
-   ahi, dejando visibles solo los lados -- justo lo que reporto Koku.
-   Un box-shadow INSET nunca sale de los limites del propio boton, asi
-   que no hay nada que recortar.
-   BUG REAL encontrado despues (Koku seguia viendo solo el lateral tras
-   la primera pasada de este fix): la regla generica de arriba
-   ("button:hover:not(:disabled)") TAMBIEN alcanzaba a .mobile-nav-btn
-   por ser un <button> normal, y con especificidad mayor
-   ((0,4,1) vs (0,4,0) de las reglas de aqui abajo) -- mientras el
-   :hover "pegado" seguia activo A LA VEZ que .active/:active, la
-   cascada resolvia el box-shadow a favor de la regla generica (NO
-   inset), que overflow:hidden SI recorta. En cuanto se tocaba otro
-   boton (el :hover pegado se soltaba), dejaba de haber conflicto y el
-   inset se veia entero -- de ahi "cualquier accion hace que salga el
-   resto". Arreglado excluyendo .mobile-nav-btn de esa regla generica
-   (":not(.mobile-nav-btn)" arriba), no solo añadiendo esta de aqui. */
-:root[data-ui-style="neon"] .mobile-nav-btn.active,
-:root[data-ui-style="neon"] .mobile-nav-btn:active {
-  box-shadow: inset 0 0 0 1px var(--accent), inset 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
+@media (hover: hover) {
+  /* .mobile-nav-btn necesita su propio anillo Neon (en vez de heredar el
+     de "button:hover" de arriba, que sale HACIA FUERA del boton): en
+     movil el :hover se queda "pegado" tras tocar hasta el siguiente
+     toque, y como .mobile-nav-btn ocupa toda la altura interior de
+     .mobile-nav (que tiene overflow:hidden para recortar las esquinas a
+     su radio), la parte de arriba/abajo del anillo saliente se recortaba
+     ahi, dejando visibles solo los lados -- justo lo que reporto Koku.
+     Un box-shadow INSET nunca sale de los limites del propio boton, asi
+     que no hay nada que recortar.
+     BUG REAL encontrado despues (Koku seguia viendo solo el lateral tras
+     la primera pasada de este fix): la regla generica de arriba
+     ("button:hover:not(:disabled)") TAMBIEN alcanzaba a .mobile-nav-btn
+     por ser un <button> normal, y con especificidad mayor
+     ((0,4,1) vs (0,4,0) de las reglas de aqui abajo) -- mientras el
+     :hover "pegado" seguia activo A LA VEZ que .active/:active, la
+     cascada resolvia el box-shadow a favor de la regla generica (NO
+     inset), que overflow:hidden SI recorta. En cuanto se tocaba otro
+     boton (el :hover pegado se soltaba), dejaba de haber conflicto y el
+     inset se veia entero -- de ahi "cualquier accion hace que salga el
+     resto". Arreglado excluyendo .mobile-nav-btn de esa regla generica
+     (":not(.mobile-nav-btn)" arriba), no solo añadiendo esta de aqui. */
+  :root[data-ui-style="neon"] .mobile-nav-btn.active,
+  :root[data-ui-style="neon"] .mobile-nav-btn:active {
+    box-shadow: inset 0 0 0 1px var(--accent), inset 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
 }
 /* .mobile-nav-btn tiene esquinas rectas (border-radius:0), pero el
    primero/ultimo boton de la fila queda pegado a una esquina REDONDEADA
@@ -273,15 +347,19 @@ button {
 .mobile-nav-btn:first-child { border-top-left-radius: 17px; border-bottom-left-radius: 17px; }
 .mobile-nav-btn:last-child { border-top-right-radius: 17px; border-bottom-right-radius: 17px; }
 
-:root[data-ui-style="cristal"] button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--surface-2-text) 12%, var(--surface-2));
-  border-color: color-mix(in srgb, var(--surface-2-text) 30%, var(--border));
+@media (hover: hover) {
+  :root[data-ui-style="cristal"] button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--surface-2-text) 12%, var(--surface-2));
+    border-color: color-mix(in srgb, var(--surface-2-text) 30%, var(--border));
+  }
 }
 :root[data-ui-style="cristal"] .primary-btn {
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #8c6eff));
   border-color: transparent;
 }
-:root[data-ui-style="cristal"] .primary-btn:hover:not(:disabled) { filter: brightness(1.12); }
+@media (hover: hover) {
+  :root[data-ui-style="cristal"] .primary-btn:hover:not(:disabled) { filter: brightness(1.12); }
+}
 :root[data-ui-style="cristal"] .checkbox-row input[type="checkbox"]:checked {
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #8c6eff));
 }
@@ -308,16 +386,22 @@ button {
      salia del telefono. Ver el comentario de index.html. */
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, 'Roboto Mono', Consolas, 'Courier New', monospace;
 }
-:root[data-ui-style="registro"] button:hover:not(:disabled) {
-  border-color: var(--accent);
+@media (hover: hover) {
+  :root[data-ui-style="registro"] button:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
 }
-:root[data-ui-style="registro"] .primary-btn:hover:not(:disabled) {
-  filter: brightness(1.08);
+@media (hover: hover) {
+  :root[data-ui-style="registro"] .primary-btn:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
 }
-:root[data-ui-style="registro"] .danger-btn:hover:not(:disabled) {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
+@media (hover: hover) {
+  :root[data-ui-style="registro"] .danger-btn:hover:not(:disabled) {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+  }
 }
 :root[data-ui-style="registro"] button:active:not(:disabled) { transform: scale(0.97); }
 
@@ -355,7 +439,7 @@ textarea { resize: vertical; }
    dentro, y eso tambien apagaria el campo) sino mezclando el color de
    contraste con su propio fondo — sigue siendo 100% opaco, solo mas
    parecido al fondo. */
-label { display: block; font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); margin-bottom: 0.75rem; }
+label { display: block; font-size: var(--t-secundario); color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); margin-bottom: 0.75rem; }
 /* El "div" cubre los componentes propios (fecha/color/icono/select/
    selector de pais) -- todos crean un <div> como raiz dentro del
    <label>, y sin esto se quedaban pegados al texto de la etiqueta
@@ -365,7 +449,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 /* Igual que <label> (mismo tamano/color/margen) pero para envolver un
    selector con estilo propio (.select-field) en vez de un <input>/<select>
    nativo — ver createSelectField en app.js. */
-.field-label-block { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); margin-bottom: 0.75rem; }
+.field-label-block { font-size: var(--t-secundario); color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); margin-bottom: 0.75rem; }
 .field-label { display: block; margin-bottom: 0.3rem; }
 
 /* Editor de notas a pantalla completa (sustituye al modal pequeno de
@@ -384,7 +468,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .note-editor-title-preview {
   flex: 1;
   min-width: 0;
-  font-size: 1.1rem;
+  font-size: var(--t-titulo-3);
   font-weight: 600;
   /* line-height fijo y padding vertical simetrico: sin esto la caja del
      texto era mas alta que la de la estrella y los dos quedaban a
@@ -409,7 +493,9 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
    sobre surface/surface-2 -- la estrella necesita su propio contraste
    aqui, igual que ya existe uno para dentro de .modal-card. */
 .note-editor-view .favorite-star-btn { color: color-mix(in srgb, var(--bg-text) 45%, var(--bg)); }
-.note-editor-view .favorite-star-btn:hover { color: var(--bg-text); }
+@media (hover: hover) {
+  .note-editor-view .favorite-star-btn:hover { color: var(--bg-text); }
+}
 .note-editor-view .favorite-star-btn.is-favorite { color: var(--accent); }
 .note-editor-header-actions { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
 
@@ -461,7 +547,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   align-items: center;
   justify-content: center;
   padding: 0.3rem 0.6rem;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   line-height: 1;
 }
 /* Botones cuyo contenido es un icono dibujado (listas): el SVG manda el
@@ -510,9 +596,9 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 
 /* Estilos de parrafo (Titulo/Encabezado/Subencabezado/Monoespaciado),
    estilo Notas de iPhone -- ver applyNoteParagraphStyle en app.js. */
-.note-editor-body h1 { font-size: 1.6rem; font-weight: 700; margin: 0.3rem 0; }
-.note-editor-body h2 { font-size: 1.3rem; font-weight: 700; margin: 0.25rem 0; }
-.note-editor-body h3 { font-size: 1.1rem; font-weight: 600; margin: 0.2rem 0; }
+.note-editor-body h1 { font-size: var(--t-titulo-2); font-weight: 700; margin: 0.3rem 0; }
+.note-editor-body h2 { font-size: var(--t-titulo); font-weight: 700; margin: 0.25rem 0; }
+.note-editor-body h3 { font-size: var(--t-titulo-3); font-weight: 600; margin: 0.2rem 0; }
 /* Pila de fuentes PROPIA, autocontenida -- a proposito NO usa
    var(--font-mono), que solo existe dentro del estilo de interaccion
    "Registro" (ver el comentario junto a esa variable un poco mas
@@ -572,7 +658,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 }
 .note-editor-body pre code {
   font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   color: var(--surface-2-text);
   white-space: pre-wrap;
   word-break: break-word;
@@ -582,7 +668,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   position: absolute;
   top: 0.3rem;
   right: 0.6rem;
-  font-size: 0.68rem;
+  font-size: var(--t-micro);
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--surface-2-text) 55%, var(--surface-2));
@@ -725,7 +811,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
 .table-insert-actions button {
   flex: 1;
   padding: 0.5rem 0.4rem;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   white-space: nowrap;
 }
 
@@ -744,10 +830,12 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   background: transparent; border: none; border-radius: calc(var(--radius) - 4px);
   padding: 0.45rem 0.6rem; color: var(--surface-text); cursor: pointer;
 }
-.paragraph-style-option:hover { background: var(--surface-2); }
-.paragraph-style-option[data-style="title"] { font-size: 1.3rem; font-weight: 700; }
-.paragraph-style-option[data-style="heading"] { font-size: 1.1rem; font-weight: 700; }
-.paragraph-style-option[data-style="subheading"] { font-size: 1rem; font-weight: 600; }
+@media (hover: hover) {
+  .paragraph-style-option:hover { background: var(--surface-2); }
+}
+.paragraph-style-option[data-style="title"] { font-size: var(--t-titulo); font-weight: 700; }
+.paragraph-style-option[data-style="heading"] { font-size: var(--t-titulo-3); font-weight: 700; }
+.paragraph-style-option[data-style="subheading"] { font-size: var(--t-cuerpo); font-weight: 600; }
 .paragraph-style-option[data-style="mono"] { font-family: ui-monospace, 'SF Mono', 'Courier New', monospace; }
 
 /* Popover de color de resaltado (boton cuadrado junto a subrayado/
@@ -873,7 +961,7 @@ label input, label textarea, label select, label > div { margin-top: 0.3rem; }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   color: var(--accent-text);
 }
 .styled-checkbox:indeterminate::after {
@@ -1002,7 +1090,17 @@ body.mobile-day-scroll-lock .app {
   padding-bottom: env(safe-area-inset-bottom, 0px);
   z-index: 70;
   display: flex;
-  background: var(--surface);
+  /* TRANSLUCIDA, como las barras de iOS: deja intuir el contenido que pasa
+     por debajo en vez de taparlo con un bloque opaco. Es lo que da la
+     sensacion de capas del sistema, y hasta ahora la app no tenia ni una
+     superficie asi (backdrop-filter aparecia cero veces en todo el CSS).
+     El color-mix se hace contra `transparent`, asi que sigue siendo el
+     color del tema activo, solo que al 78%. El -webkit- hace falta para
+     el WKWebView de iOS. Si el navegador no soporta backdrop-filter, se
+     ve el color al 78% sin desenfoque: mas claro, pero nunca roto. */
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
   color: var(--surface-text);
   border-top: 1px solid var(--border);
   border-radius: 18px 18px 0 0;
@@ -1022,7 +1120,7 @@ body.mobile-day-scroll-lock .app {
   border: none;
   border-radius: 0;
   color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
-  font-size: 0.68rem;
+  font-size: var(--t-micro);
 }
 .mobile-nav-btn svg { width: 20px; height: 20px; }
 .mobile-nav-btn.active { color: var(--accent); }
@@ -1110,7 +1208,7 @@ body.mobile-day-scroll-lock .app {
   border: none;
   border-radius: 999px;
   font-weight: 700;
-  font-size: 1.05rem;
+  font-size: var(--t-cuerpo);
   padding: 0.35rem 0.8rem;
 }
 .mobile-calendar-toolbar-actions { display: flex; align-items: center; gap: 0.2rem; }
@@ -1124,7 +1222,7 @@ body.mobile-day-scroll-lock .app {
 .mobile-day-view-mode-field .select-field-trigger {
   width: auto;
   padding: 0.45rem 0.55rem;
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
   white-space: nowrap;
 }
 /* Selector de densidad del mes (compacto/apilado/listado) -- mismo
@@ -1136,7 +1234,7 @@ body.mobile-day-scroll-lock .app {
 .mobile-calendar-density-field .select-field-trigger {
   width: auto;
   padding: 0.45rem 0.55rem;
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
   white-space: nowrap;
 }
 .mobile-add-menu {
@@ -1223,7 +1321,7 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 .mobile-calendar-month-name {
   text-align: center;
   font-weight: 700;
-  font-size: 1.3rem;
+  font-size: var(--t-titulo);
   margin: 0;
 }
 
@@ -1257,7 +1355,7 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 .mobile-calendar-view.is-listed .mobile-calendar-month-list { flex: 1; min-height: 0; }
 .mobile-calendar-weekday-heading {
   text-align: center;
-  font-size: 0.68rem;
+  font-size: var(--t-micro);
   color: color-mix(in srgb, var(--bg-text) 60%, var(--bg));
   padding-bottom: 0.2rem;
 }
@@ -1286,7 +1384,7 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.8rem;
+  font-size: var(--t-secundario);
   color: var(--bg-text);
 }
 .mobile-calendar-day-cell.weekend-day .mobile-calendar-day-circle { background: var(--day-weekend); }
@@ -1325,7 +1423,7 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 }
 .mobile-day-group-bar { width: 85%; height: 5px; border-radius: 999px; }
 .mobile-day-group-more {
-  font-size: 0.58rem;
+  font-size: var(--t-micro);
   color: color-mix(in srgb, var(--bg-text) 65%, var(--bg));
 }
 
@@ -1353,7 +1451,7 @@ body.real-modal-open .calendar-quick-actions { display: none; }
 .mobile-calendar-month-list-bar { width: 4px; border-radius: 999px; flex-shrink: 0; }
 .mobile-calendar-month-list-title { flex: 1; font-weight: 600; align-self: center; }
 .mobile-calendar-month-list-time {
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
   white-space: nowrap;
   align-self: center;
@@ -1394,7 +1492,7 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   cursor: pointer;
 }
 .mobile-calendar-year-tile-heading {
-  font-size: 0.72rem;
+  font-size: var(--t-pie);
   font-weight: 700;
   text-align: center;
   color: var(--surface-text);
@@ -1410,7 +1508,7 @@ body.real-modal-open .calendar-quick-actions { display: none; }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.58rem;
+  font-size: var(--t-micro);
   color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
   border-radius: 50%;
   aspect-ratio: 1;
@@ -1637,7 +1735,7 @@ body {
    padding lateral -- aqui ya lo pone .mobile-day-sticky-header, asi que
    se anula para no duplicar el hueco. */
 .mobile-day-sticky-header .mobile-calendar-toolbar { padding-left: 0; padding-right: 0; }
-.mobile-calendar-day-heading { font-weight: 700; font-size: 1.1rem; margin: 0.2rem 0 0; text-align: center; }
+.mobile-calendar-day-heading { font-weight: 700; font-size: var(--t-titulo-3); margin: 0.2rem 0 0; text-align: center; }
 
 /* --- Tira de dias de la semana --- */
 .mobile-week-strip { padding-top: 0.2rem; }
@@ -1667,7 +1765,7 @@ body {
   cursor: pointer;
 }
 .week-strip-day-label {
-  font-size: 0.62rem;
+  font-size: var(--t-micro);
   color: color-mix(in srgb, var(--bg-text) 60%, var(--bg));
 }
 .week-strip-day-num {
@@ -1677,7 +1775,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
   color: var(--bg-text);
 }
 /* Dia que se ESTA VIENDO y ademas es hoy: maxima intensidad. */
@@ -1698,7 +1796,7 @@ body {
 .mobile-day-allday-chip {
   border-radius: var(--radius-sm);
   padding: 0.3rem 0.6rem;
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
   font-weight: 600;
   color: var(--accent-text);
 }
@@ -1715,7 +1813,7 @@ body {
   position: absolute;
   top: -0.6em;
   left: 0;
-  font-size: 0.68rem;
+  font-size: var(--t-micro);
   color: color-mix(in srgb, var(--bg-text) 55%, var(--bg));
   background: var(--bg);
   padding-right: 0.3rem;
@@ -1726,7 +1824,7 @@ body {
   right: 0.3rem;
   border-radius: var(--radius-sm);
   padding: 2px 6px;
-  font-size: 0.72rem;
+  font-size: var(--t-pie);
   overflow: hidden;
   line-height: 1.25;
   cursor: pointer;
@@ -1756,7 +1854,7 @@ body {
   position: absolute;
   left: 0;
   top: -0.7em;
-  font-size: 0.68rem;
+  font-size: var(--t-micro);
   font-weight: 700;
   color: var(--accent);
   background: var(--bg);
@@ -1769,7 +1867,7 @@ body {
 .mobile-day-listado-view { flex: 1; min-height: 0; overflow-y: auto; }
 .mobile-day-listado-block { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.8rem; }
 .mobile-day-listado-block-heading {
-  font-size: 0.8rem;
+  font-size: var(--t-secundario);
   font-weight: 700;
   color: color-mix(in srgb, var(--bg-text) 75%, var(--bg));
   text-transform: capitalize;
@@ -1794,7 +1892,7 @@ body {
 .calendar-event-chip {
   background: var(--accent);
   color: var(--accent-text);
-  font-size: 0.72rem;
+  font-size: var(--t-pie);
   padding: 0.15rem 0.4rem;
   border-radius: var(--radius-sm);
   white-space: nowrap;
@@ -1810,7 +1908,7 @@ body {
   background: transparent;
   border: 1.5px solid var(--accent);
   color: var(--surface-text);
-  font-size: 0.72rem;
+  font-size: var(--t-pie);
   padding: 0.1rem 0.4rem;
   border-radius: var(--radius-sm);
   white-space: nowrap;
@@ -1840,11 +1938,11 @@ body {
   gap: 0.5rem;
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--border);
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
 }
 .reminder-item:last-child { border-bottom: none; }
 
-.empty-hint { color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); font-size: 0.85rem; }
+.empty-hint { color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); font-size: var(--t-secundario); }
 
 /* Vista de Notas movil (#mobile-notes-view, Fase 4 del rediseño movil) --
    mismo #mobile-notes-list que reutiliza .reminders-list.notes-list de
@@ -1870,7 +1968,7 @@ body {
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 0.9rem;
+  font-size: var(--t-cuerpo);
   padding: 0.15rem 0 0.15rem 0.3rem;
 }
 /* Fila combinada de busqueda+acciones en #mobile-notes-view -- la
@@ -1915,7 +2013,7 @@ body {
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 0.9rem;
+  font-size: var(--t-cuerpo);
   padding: 0.15rem 0 0.15rem 0.3rem;
 }
 .mobile-global-search-results { padding: 0 1rem; max-height: none; }
@@ -1939,7 +2037,7 @@ body {
 .mobile-search-result-meta {
   flex-shrink: 0;
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
 }
 /* Mismo lenguaje visual que los chips del calendario: relleno solido
    para un evento, solo borde para una tarea (calendar-event-chip/
@@ -1997,7 +2095,7 @@ body {
 }
 .mobile-note-gallery-media img { width: 100%; height: 100%; object-fit: cover; }
 .mobile-note-gallery-preview-text {
-  font-size: 0.72rem;
+  font-size: var(--t-pie);
   line-height: 1.3;
   /* Antes rgba(0,0,0,0.65) fijo -- pensado para un fondo claro, casi
      invisible sobre --surface-2 en el tema oscuro por defecto (negro
@@ -2011,7 +2109,7 @@ body {
 }
 .mobile-note-gallery-title {
   padding: 0.4rem 0.5rem;
-  font-size: 0.8rem;
+  font-size: var(--t-secundario);
   font-weight: 600;
   color: var(--surface-2-text);
   overflow: hidden;
@@ -2085,7 +2183,7 @@ body {
   padding: 0.2rem;
 }
 .note-swipe-actions button {
-  font-size: 0.8rem;
+  font-size: var(--t-secundario);
   padding: 0 0.7rem;
   border-radius: var(--radius);
 }
@@ -2154,7 +2252,7 @@ body {
   background: var(--accent);
   color: var(--accent-text);
   border-radius: 999px;
-  font-size: 0.8rem;
+  font-size: var(--t-secundario);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -2195,7 +2293,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .note-item-action-title {
   margin: 0;
   padding: 0.35rem 0.6rem 0.45rem;
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   font-weight: 600;
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
   overflow: hidden;
@@ -2213,11 +2311,13 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   border: none;
   border-radius: 12px;
   color: var(--surface-text);
-  font-size: 0.9rem;
+  font-size: var(--t-cuerpo);
   text-align: left;
 }
 .note-item-action-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
-.note-item-action-btn:hover { background: var(--surface-2); }
+@media (hover: hover) {
+  .note-item-action-btn:hover { background: var(--surface-2); }
+}
 .note-item-action-btn.is-danger { color: var(--danger); }
 
 /* Barra de acciones (Eliminar/Mover, Cancelar/"Mover aqui"). Va FIJA
@@ -2249,7 +2349,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   background: transparent;
   border-color: transparent;
   color: color-mix(in srgb, var(--bg-text) 70%, var(--bg));
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
   text-align: left;
   padding-left: 0;
   opacity: 1;
@@ -2273,7 +2373,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--surface-2-text);
-  font-size: 0.88rem;
+  font-size: var(--t-secundario);
   cursor: pointer;
 }
 .mobile-notes-delete-item.is-excluded {
@@ -2282,7 +2382,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 }
 .mobile-notes-delete-item-icon { flex-shrink: 0; color: inherit; }
 .note-list-section-heading {
-  font-size: 0.72rem;
+  font-size: var(--t-pie);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2298,7 +2398,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   gap: 0.2rem 0.6rem;
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--border);
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
 }
 .task-item:last-child { border-bottom: none; }
 .task-item-checkbox {
@@ -2322,12 +2422,12 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.75rem;
+  font-size: var(--t-pie);
   color: var(--accent-text);
 }
 .task-item-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-item.done .task-item-title { text-decoration: line-through; opacity: 0.6; }
-.task-item-date { font-size: 0.75rem; flex-shrink: 0; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); }
+.task-item-date { font-size: var(--t-pie); flex-shrink: 0; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); }
 
 /* --- "Mi espacio" (Fase 1): hub de 3 columnas (Proximos/Tareas/Notas).
    Segun el modo elegido en Configuracion > Vista, este hub (#my-space-hub)
@@ -2359,10 +2459,15 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
      y los botones quedan pegados a ella. */
   padding: 0.9rem 1.2rem 0.6rem;
   border-bottom: 1px solid var(--border);
+  /* Misma translucidez que la barra de abajo: las dos son "cromo" del
+     sistema, no contenido, y conviene que se lean como la misma capa. */
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
 }
 .my-space-view-header h2 { margin: 0; }
 .my-space-view-header-actions { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; }
-.my-space-close-btn { font-size: 0.85rem; padding: 0.45rem 0.7rem; }
+.my-space-close-btn { font-size: var(--t-secundario); padding: 0.45rem 0.7rem; }
 
 /* Extensiones (placeholder): reutiliza .my-space-view/.my-space-view-header
    para el overlay y la cabecera -- solo hace falta la rejilla de tarjetas
@@ -2398,7 +2503,9 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   opacity: 1;
   cursor: pointer;
 }
-.extensions-card-active:hover { border-color: var(--accent); }
+@media (hover: hover) {
+  .extensions-card-active:hover { border-color: var(--accent); }
+}
 
 /* Extension "Gimnasio": pestañas simples (Sesiones/Rutinas/Progreso),
    reutilizando .view-mode-btn para el estilo activo/inactivo en vez de
@@ -2411,19 +2518,19 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   background: var(--surface);
   color: var(--surface-text);
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
 }
 .gym-tab-btn.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .gym-tab-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem 7rem; }
 .gym-tab-panel { display: flex; flex-direction: column; gap: 0.6rem; }
 .gym-tab-action { align-self: flex-start; }
-.gym-subheading { margin: 1.2rem 0 0; font-size: 0.95rem; }
+.gym-subheading { margin: 1.2rem 0 0; font-size: var(--t-cuerpo); }
 
 .gym-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .gym-list-item {
   display: flex; align-items: center; gap: 0.6rem;
   background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
 }
 .gym-list-item-name {
   flex: 1;
@@ -2436,7 +2543,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .gym-list-item-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
 .gym-session-item { flex-direction: column; align-items: flex-start; gap: 0.2rem; cursor: pointer; }
 .gym-session-item-date { font-weight: 600; }
-.gym-session-item-routine { display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; }
+.gym-session-item-routine { display: flex; align-items: center; gap: 0.3rem; font-size: var(--t-secundario); }
 
 /* Filas de ejercicio dentro del modal de rutina (select + series/reps +
    quitar) y dentro del modal de sesion (select + quitar, las series
@@ -2470,9 +2577,9 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   gap: 0.4rem;
   align-items: center;
 }
-.gym-session-set-number { font-size: 0.78rem; }
+.gym-session-set-number { font-size: var(--t-pie); }
 .gym-session-set-row input { width: 100%; min-width: 0; box-sizing: border-box; }
-.gym-add-set-btn { align-self: flex-start; font-size: 0.8rem; padding: 0.35rem 0.6rem; }
+.gym-add-set-btn { align-self: flex-start; font-size: var(--t-secundario); padding: 0.35rem 0.6rem; }
 
 .gym-progress-metric-toggle { display: flex; gap: 0.4rem; }
 .gym-progress-chart { margin-top: 0.5rem; }
@@ -2509,7 +2616,9 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 /* Tarjetas de bloque (pestana Plan): mas altas que una fila normal y
    clicables enteras (drill-down a los dias del bloque). */
 .gym-block-item { cursor: pointer; padding: 0.8rem 0.9rem; }
-.gym-block-item:hover { border-color: var(--gym-accent); }
+@media (hover: hover) {
+  .gym-block-item:hover { border-color: var(--gym-accent); }
+}
 .gym-block-item { border: 1px solid transparent; }
 .gym-block-active-badge {
   display: inline-block;
@@ -2517,13 +2626,13 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   border-radius: 999px;
   background: var(--gym-accent-soft);
   color: var(--gym-accent);
-  font-size: 0.7rem;
+  font-size: var(--t-micro);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   vertical-align: middle;
 }
-.gym-block-activate-btn { font-size: 0.75rem; padding: 0.3rem 0.55rem; }
+.gym-block-activate-btn { font-size: var(--t-pie); padding: 0.3rem 0.55rem; }
 
 /* Buscador de la libreria de ejercicios (Fase 2): tarjeta mas ancha y
    alta que un modal normal (lista larga), filtros en fila, y lista con
@@ -2534,10 +2643,12 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .gym-library-filters > div { flex: 1; min-width: 0; }
 .gym-library-list { max-height: 50vh; overflow-y: auto; }
 .gym-library-item { cursor: pointer; }
-.gym-library-item:hover { outline: 1px solid var(--gym-accent); }
-.gym-library-import-btn { font-size: 0.75rem; padding: 0.3rem 0.55rem; flex-shrink: 0; }
-.gym-library-imported { font-size: 0.75rem; color: var(--gym-accent); flex-shrink: 0; }
-.gym-library-instructions { margin: 0.6rem 0 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.85rem; }
+@media (hover: hover) {
+  .gym-library-item:hover { outline: 1px solid var(--gym-accent); }
+}
+.gym-library-import-btn { font-size: var(--t-pie); padding: 0.3rem 0.55rem; flex-shrink: 0; }
+.gym-library-imported { font-size: var(--t-pie); color: var(--gym-accent); flex-shrink: 0; }
+.gym-library-instructions { margin: 0.6rem 0 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: var(--t-secundario); }
 .gym-exercises-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 /* Modo entrenar en vivo (Fase 3): overlay a pantalla completa con las
@@ -2550,7 +2661,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   z-index: 16; /* por encima de #gym-view (15), debajo de los modales (20) */
 }
 #gym-live-view .primary-btn { background: var(--gym-accent); color: var(--gym-accent-text); border-color: var(--gym-accent); }
-.gym-live-clock { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.05rem; margin-right: 0.4rem; }
+.gym-live-clock { font-variant-numeric: tabular-nums; font-weight: 700; font-size: var(--t-cuerpo); margin-right: 0.4rem; }
 .gym-live-content { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.2rem 8rem; display: flex; flex-direction: column; gap: 0.8rem; }
 .gym-live-exercises {
   display: flex; flex-direction: column; gap: 0.8rem;
@@ -2582,21 +2693,21 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   grid-template-columns: 2rem minmax(3.5rem, 1fr) 4.6rem 4.2rem;
   gap: 0.4rem;
   align-items: center;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
 }
 .gym-live-set-row input[type="number"] { width: 100%; min-width: 0; }
-.gym-live-set-head { color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); font-size: 0.75rem; }
+.gym-live-set-head { color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); font-size: var(--t-pie); }
 .gym-live-set-number { font-variant-numeric: tabular-nums; }
-.gym-live-set-prev { font-size: 0.78rem; color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gym-live-set-prev { font-size: var(--t-pie); color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gym-live-set-row.done .gym-live-set-number,
 .gym-live-set-row.done .gym-live-set-prev { color: var(--gym-accent); }
-.gym-live-note { margin-top: 0.2rem; font-size: 0.82rem; }
-.gym-live-start-btn { font-size: 1rem; padding: 0.8rem 1.1rem; align-self: stretch; }
+.gym-live-note { margin-top: 0.2rem; font-size: var(--t-secundario); }
+.gym-live-start-btn { font-size: var(--t-cuerpo); padding: 0.8rem 1.1rem; align-self: stretch; }
 
 /* Tarjetas plegables del entreno (peticion de Koku: no deslizar 40
    minutos): tocar la cabecera pliega/despliega; plegada solo se ve la
    cabecera con el progreso X/N. El caret gira para indicar el estado. */
-.gym-live-caret { flex-shrink: 0; font-size: 0.8rem; transition: transform 0.15s ease; }
+.gym-live-caret { flex-shrink: 0; font-size: var(--t-secundario); transition: transform 0.15s ease; }
 .gym-live-exercise-card.collapsed .gym-live-caret { transform: rotate(-90deg); }
 .gym-live-exercise-card.collapsed .gym-live-card-body { display: none; }
 .gym-live-card-body { display: flex; flex-direction: column; gap: 0.45rem; }
@@ -2614,13 +2725,13 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 }
 .gym-live-card-progress {
   flex-shrink: 0;
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   font-variant-numeric: tabular-nums;
   color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
 }
 .gym-live-card-btn { padding: 0.2rem 0.35rem; flex-shrink: 0; }
 .gym-live-cards-tools { display: flex; gap: 0.5rem; }
-.gym-live-cards-tools .secondary-btn { font-size: 0.8rem; padding: 0.35rem 0.6rem; }
+.gym-live-cards-tools .secondary-btn { font-size: var(--t-secundario); padding: 0.35rem 0.6rem; }
 
 /* Chip del descanso del ejercicio: se ve el tiempo formateado y tocarlo
    lo convierte en un campo de segundos (se aplica a todas las series). */
@@ -2630,30 +2741,30 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   color: var(--gym-accent);
   background: transparent;
   border-radius: 999px;
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   padding: 0.15rem 0.55rem;
   font-variant-numeric: tabular-nums;
 }
-.gym-live-rest-chip-input { width: 4rem; flex-shrink: 0; font-size: 0.85rem; }
+.gym-live-rest-chip-input { width: 4rem; flex-shrink: 0; font-size: var(--t-secundario); }
 
 /* Pie de tarjeta: + Serie a la izquierda, RPE del ejercicio a la derecha
    (el RPE es por ejercicio, no por serie -- peticion de Koku). */
 .gym-live-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-.gym-live-exrpe { display: flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; }
+.gym-live-exrpe { display: flex; align-items: center; gap: 0.35rem; font-size: var(--t-secundario); }
 .gym-live-exrpe input { width: 3.6rem; }
 
 /* "+60s": descanso extra anadido con +30s, tanto en el entreno como en
    el historial de la sesion. */
 .gym-set-extra-chip {
   margin-left: 0.25rem;
-  font-size: 0.68rem;
+  font-size: var(--t-micro);
   color: var(--gym-accent);
   font-variant-numeric: tabular-nums;
 }
 
 /* Ejercicios ocultos del dia, recuperables durante la sesion. */
 .gym-live-hidden-pool { display: flex; flex-direction: column; gap: 0.5rem; }
-.gym-live-hidden-pool > .secondary-btn { align-self: flex-start; font-size: 0.8rem; padding: 0.35rem 0.6rem; }
+.gym-live-hidden-pool > .secondary-btn { align-self: flex-start; font-size: var(--t-secundario); padding: 0.35rem 0.6rem; }
 .gym-live-hidden-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .gym-live-hidden-row {
   display: flex;
@@ -2664,7 +2775,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   border-radius: var(--radius);
   padding: 0.5rem 0.7rem;
 }
-.gym-live-hidden-row .secondary-btn { font-size: 0.78rem; padding: 0.3rem 0.5rem; flex-shrink: 0; }
+.gym-live-hidden-row .secondary-btn { font-size: var(--t-pie); padding: 0.3rem 0.5rem; flex-shrink: 0; }
 
 /* Boton grande: el de la tarjeta y los de los dos dialogos comparten
    tamano (alto de sobra para acertar sin mirar). */
@@ -2673,7 +2784,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   width: 100%;
   min-height: 3rem;
   border-radius: var(--radius);
-  font-size: 1rem;
+  font-size: var(--t-cuerpo);
   font-weight: 600;
   padding: 0.7rem 0.9rem;
 }
@@ -2696,7 +2807,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .gym-set-modal { text-align: center; }
 .gym-set-modal-info { margin: 0.2rem 0 0; color: color-mix(in srgb, var(--surface-text) 70%, var(--surface)); }
 .gym-set-modal-timer {
-  font-size: 2.4rem;
+  font-size: var(--t-titulo-grande);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   margin: 0.4rem 0 0.2rem;
@@ -2716,11 +2827,11 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--surface-2-text);
-  font-size: 1.05rem;
+  font-size: var(--t-cuerpo);
   font-weight: 600;
   padding: 0.5rem 0.8rem;
 }
-.gym-set-picker-caret { font-size: 0.8rem; opacity: 0.7; }
+.gym-set-picker-caret { font-size: var(--t-secundario); opacity: 0.7; }
 .gym-set-exercise-picker[aria-expanded="true"] .gym-set-picker-caret { transform: rotate(180deg); }
 .gym-set-exercise-list {
   display: flex;
@@ -2757,8 +2868,8 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    dialogo de terminar: campos apilados con su texto encima. */
 .gym-set-end-form { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.6rem; text-align: left; }
 .gym-set-field { display: flex; flex-direction: column; gap: 0.25rem; }
-.gym-set-field span { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 70%, var(--surface)); }
-.gym-set-field input { width: 100%; box-sizing: border-box; min-height: 2.6rem; font-size: 1rem; }
+.gym-set-field span { font-size: var(--t-secundario); color: color-mix(in srgb, var(--surface-text) 70%, var(--surface)); }
+.gym-set-field input { width: 100%; box-sizing: border-box; min-height: 2.6rem; font-size: var(--t-cuerpo); }
 
 /* Elegir con que lado se empieza la serie (solo unilaterales por lado). */
 .gym-set-side-choice {
@@ -2766,11 +2877,11 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   color: color-mix(in srgb, var(--surface-text) 70%, var(--surface));
 }
 .gym-set-side-buttons { display: flex; gap: 0.5rem; }
-.gym-set-side-buttons button { flex: 1; min-height: 2.6rem; font-size: 1rem; }
+.gym-set-side-buttons button { flex: 1; min-height: 2.6rem; font-size: var(--t-cuerpo); }
 .gym-set-side-buttons button.active {
   background: var(--gym-accent);
   border-color: var(--gym-accent);
@@ -2781,7 +2892,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 /* Lado (I/D) en ejercicios unilaterales contados por separado. */
 .gym-set-side-chip {
   margin-left: 0.2rem;
-  font-size: 0.68rem;
+  font-size: var(--t-micro);
   font-weight: 700;
   color: var(--gym-accent);
 }
@@ -2790,14 +2901,14 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 /* Nota que quedo del mismo ejercicio la ULTIMA vez. */
 .gym-live-prev-note {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
 }
 
 /* Cuanto duro una serie, en el historial (junto al "+60s" del descanso). */
 .gym-set-dur-chip {
   margin-left: 0.25rem;
-  font-size: 0.68rem;
+  font-size: var(--t-micro);
   color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
   font-variant-numeric: tabular-nums;
 }
@@ -2808,7 +2919,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   margin-left: 0.25rem;
   padding: 0 0.28rem;
   border-radius: 0.35rem;
-  font-size: 0.62rem;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--gym-accent-text);
@@ -2831,7 +2942,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   flex: 1 1 auto;
   text-align: center;
   padding: 0.3rem 0.5rem;
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
 }
 /* Un boton de esa fila que esta ACTIVADO (el "Al fallo" de la serie). */
 .gym-set-extend-btn.is-on {
@@ -2860,7 +2971,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 /* RPE y nota del ejercicio, ya solo de lectura en la tarjeta. */
 .gym-live-card-meta {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
 }
 
@@ -2983,7 +3094,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   color: var(--surface-2-text);
   border-radius: var(--radius-sm);
   padding: 0.5rem 0.7rem;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   text-align: left;
   cursor: pointer;
 }
@@ -3031,7 +3142,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   margin-left: 0.25rem;
   padding: 0 0.28rem;
   border-radius: 0.35rem;
-  font-size: 0.62rem;
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--gym-accent);
@@ -3047,7 +3158,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .gym-set-extend-label {
   display: block;
   margin-bottom: 0.4rem;
-  font-size: 0.8rem;
+  font-size: var(--t-secundario);
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
 }
 .gym-set-extend-list { display: flex; flex-direction: column; gap: 0.35rem; }
@@ -3055,7 +3166,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    (las tuyas y las de la libreria). */
 .gym-library-section {
   margin: 0.9rem 0 0.35rem;
-  font-size: 0.8rem;
+  font-size: var(--t-secundario);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
@@ -3073,7 +3184,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   color: var(--gym-accent);
   border-radius: var(--radius-sm);
   padding: 0.5rem 0.7rem;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   font-weight: 600;
   text-align: left;
   cursor: pointer;
@@ -3095,7 +3206,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 }
 .gym-set-segment-head { display: flex; align-items: center; gap: 0.4rem; }
 .gym-set-segment-name {
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
   font-weight: 600;
   color: color-mix(in srgb, var(--surface-2-text) 80%, var(--surface-2));
 }
@@ -3104,7 +3215,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    ocupando mucho espacio vertical cuando todo cabe junto"). */
 .gym-set-head-dur {
   margin-left: auto;
-  font-size: 0.75rem;
+  font-size: var(--t-pie);
   color: color-mix(in srgb, var(--surface-2-text) 60%, var(--surface-2));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -3124,7 +3235,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   justify-content: flex-end;
 }
 .gym-set-segment-field span {
-  font-size: 0.72rem;
+  font-size: var(--t-pie);
   color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
 }
 .gym-set-segment-field input {
@@ -3139,7 +3250,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   padding: 0.15rem 0.3rem;
   border-radius: 0.35rem;
   text-align: center;
-  font-size: 0.68rem;
+  font-size: var(--t-micro);
   font-weight: 700;
   color: var(--gym-accent-text);
   background: var(--gym-accent);
@@ -3163,7 +3274,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    pequena y con el acento, para localizarla de un vistazo. */
 .gym-live-fixed-note {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   color: var(--gym-accent);
 }
 
@@ -3174,7 +3285,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   background: transparent;
   color: var(--surface-text);
   border-radius: 999px;
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   padding: 0.25rem 0.6rem;
 }
 .gym-secondary-chip.active {
@@ -3207,7 +3318,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   padding: 0;
   border-radius: 50%;
   border: 1px solid var(--border);
-  font-size: 0.8rem;
+  font-size: var(--t-secundario);
   font-weight: 700;
   line-height: 1;
   display: inline-flex;
@@ -3226,7 +3337,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   background: color-mix(in srgb, var(--gym-accent) 22%, var(--surface));
   border: 1px solid var(--gym-accent);
   border-radius: var(--radius);
-  font-size: 0.95rem;
+  font-size: var(--t-cuerpo);
   flex-shrink: 0;
 }
 .gym-live-rest-info { display: flex; align-items: center; gap: 0.7rem; }
@@ -3254,8 +3365,8 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   padding: 0.8rem;
   display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
 }
-.gym-live-summary-stat b { font-size: 1.25rem; }
-.gym-live-summary-stat span { font-size: 0.75rem; color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); }
+.gym-live-summary-stat b { font-size: var(--t-titulo); }
+.gym-live-summary-stat span { font-size: var(--t-pie); color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); }
 #gym-summary-muscle-list { text-align: center; }
 
 /* Progreso avanzado (Fase 5): heatmap de consistencia, PRs y volumen
@@ -3273,14 +3384,14 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 .gym-heatmap-cell.level-1 { background: color-mix(in srgb, var(--gym-accent) 45%, var(--surface-2)); }
 .gym-heatmap-cell.level-2 { background: var(--gym-accent); }
 .gym-heatmap-cell.future { background: transparent; }
-.gym-heatmap-legend { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.4rem; font-size: 0.75rem; }
+.gym-heatmap-legend { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.4rem; font-size: var(--t-pie); }
 .gym-heatmap-legend .gym-heatmap-cell { width: 0.7rem; min-width: 0.7rem; flex: none; aspect-ratio: 1; }
 .gym-weekly-goal-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .gym-weekly-goal-row > div { min-width: 12rem; }
 .gym-pr-item { justify-content: space-between; }
 .gym-pr-stats { display: flex; flex-direction: column; align-items: flex-end; gap: 0.1rem; flex-shrink: 0; }
-.gym-pr-stats b { font-size: 0.95rem; }
-.gym-viz-legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.4rem; font-size: 0.78rem; }
+.gym-pr-stats b { font-size: var(--t-cuerpo); }
+.gym-viz-legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.4rem; font-size: var(--t-pie); }
 .gym-viz-legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
 
 /* Logros (Fase 7): tarjetas con nivel y barra de progreso al siguiente. */
@@ -3291,11 +3402,11 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   padding: 0.8rem;
   display: flex; flex-direction: column; gap: 0.35rem;
   opacity: 0.75;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
 }
 .gym-achievement-card.unlocked { opacity: 1; border: 1px solid color-mix(in srgb, var(--gym-accent) 45%, transparent); }
 .gym-achievement-head { display: flex; align-items: center; gap: 0.5rem; }
-.gym-achievement-icon { font-size: 1.3rem; }
+.gym-achievement-icon { font-size: var(--t-titulo); }
 .gym-achievement-bar { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--surface-2-text) 12%, var(--surface-2)); overflow: hidden; }
 .gym-achievement-bar-fill { height: 100%; border-radius: 999px; background: var(--gym-accent); }
 
@@ -3314,7 +3425,7 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   padding: calc(0.45rem + env(safe-area-inset-top, 0px)) 1rem 0.5rem;
   background: color-mix(in srgb, var(--accent) 25%, var(--surface));
   border-bottom: 1px solid var(--accent);
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   cursor: pointer;
 }
 .gym-global-rest b { font-variant-numeric: tabular-nums; }
@@ -3386,7 +3497,7 @@ body.gym-rest-push #settings-modal .settings-card {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.15rem;
+  font-size: var(--t-titulo-3);
   font-weight: 700;
   line-height: 1;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
@@ -3448,7 +3559,7 @@ body.gym-rest-push #settings-modal .settings-card {
 }
 .gym-help-body h4 { margin: 0.7rem 0 0.15rem; color: var(--gym-accent); }
 .gym-help-body h4:first-child { margin-top: 0; }
-.gym-help-body p { margin: 0; font-size: 0.9rem; line-height: 1.45; }
+.gym-help-body p { margin: 0; font-size: var(--t-cuerpo); line-height: 1.45; }
 
 /* Indicador de entreno activo: el boton "Herramientas" de la nav y la
    tarjeta de Gimnasio se tiñen del acento con un puntito de aviso. */
@@ -3489,7 +3600,7 @@ body.gym-rest-push #settings-modal .settings-card {
 .gym-bodymap-svg .gym-bodymap-silhouette polygon { stroke: var(--bg); }
 .gym-bodymap-svg .bodymap-active polygon { stroke: var(--gym-accent); stroke-width: 8; }
 .gym-bodymap-caption { font-size: 52px; }
-.gym-bodymap-info { text-align: center; min-height: 2.4em; font-size: 0.82rem; color: color-mix(in srgb, var(--bg-text) 70%, var(--bg)); margin: 0.3rem 0 0; }
+.gym-bodymap-info { text-align: center; min-height: 2.4em; font-size: var(--t-secundario); color: color-mix(in srgb, var(--bg-text) 70%, var(--bg)); margin: 0.3rem 0 0; }
 
 /* Cabecera del nivel de dias (boton volver + nombre del bloque). */
 .gym-block-days-header { display: flex; align-items: center; gap: 0.6rem; }
@@ -3536,12 +3647,12 @@ body.gym-rest-push #settings-modal .settings-card {
   min-width: 160px;
 }
 .finanzas-account-card-name { font-weight: 600; }
-.finanzas-account-card-balance { font-size: 1.1rem; }
+.finanzas-account-card-balance { font-size: var(--t-titulo-3); }
 .finanzas-account-card-balance.negative { color: #e63946; }
 /* Etiqueta "tipo de cuenta" (Corriente/Ahorro/Inversion/...): puramente
    informativa, no filtra nada -- ver finanzas-account-type en app.js. */
 .finanzas-account-type-badge {
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   font-weight: 400;
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
@@ -3553,11 +3664,11 @@ body.gym-rest-push #settings-modal .settings-card {
    mismo criterio visual que el bloque de limite mensual, pero en verde
    cuando se cumple el objetivo en vez de en rojo al superarlo -- aqui
    "mas" siempre es bueno. */
-.finanzas-savings-status-text { font-size: 0.85rem; color: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
+.finanzas-savings-status-text { font-size: var(--t-secundario); color: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
 .finanzas-savings-status-text.met { color: #43aa8b; font-weight: 600; }
 .finanzas-savings-status-text.not-met { color: #e63946; }
 .finanzas-savings-warning {
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   padding: 0.5rem 0.7rem;
   border-radius: var(--radius);
   background: color-mix(in srgb, #e63946 15%, var(--surface));
@@ -3576,7 +3687,7 @@ body.gym-rest-push #settings-modal .settings-card {
 }
 .finanzas-budget-progress-fill { height: 100%; background: var(--accent); }
 .finanzas-budget-progress-fill.over-budget { background: #e63946; }
-.finanzas-budget-progress-text { font-size: 0.85rem; color: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
+.finanzas-budget-progress-text { font-size: var(--t-secundario); color: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
 
 .finanzas-category-breakdown-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .finanzas-category-breakdown-row { display: flex; align-items: center; gap: 0.5rem; }
@@ -3630,7 +3741,7 @@ body.gym-rest-push #settings-modal .settings-card {
 .finanzas-trend-chart-svg { width: 100%; max-width: 480px; height: auto; display: block; }
 .finanzas-trend-chart-axis { stroke: var(--border); stroke-width: 1; }
 .finanzas-trend-chart-label { font-size: 8px; fill: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
-.finanzas-trend-chart-legend { display: flex; gap: 1rem; margin-top: 0.4rem; font-size: 0.85rem; color: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
+.finanzas-trend-chart-legend { display: flex; gap: 1rem; margin-top: 0.4rem; font-size: var(--t-secundario); color: color-mix(in srgb, var(--bg-text) 65%, var(--bg)); }
 .finanzas-trend-legend-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 999px; margin-right: 0.3rem; }
 
 /* Tooltip real (sigue al raton) para las graficas de Finanzas -- ver
@@ -3646,7 +3757,7 @@ body.gym-rest-push #settings-modal .settings-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.3rem 0.55rem;
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   white-space: nowrap;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
@@ -3669,7 +3780,7 @@ body.gym-rest-push #settings-modal .settings-card {
 }
 .finanzas-asset-tree-row {
   display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0;
-  cursor: pointer; font-size: 0.9rem;
+  cursor: pointer; font-size: var(--t-cuerpo);
 }
 .finanzas-asset-tree-portfolio { font-weight: 600; }
 
@@ -3698,7 +3809,7 @@ body.gym-rest-push #settings-modal .settings-card {
 .finanzas-savings-month-field { flex: 1 1 140px; max-width: 160px; }
 .finanzas-savings-month-field .select-field { width: 100%; }
 .finanzas-savings-year-input { width: 5rem; }
-.finanzas-savings-status { font-size: 0.9rem; }
+.finanzas-savings-status { font-size: var(--t-cuerpo); }
 .finanzas-savings-range-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
 
 /* Extension "Lecturas": jerarquia de 2 tablas (sagas -> items de una
@@ -3708,7 +3819,7 @@ body.gym-rest-push #settings-modal .settings-card {
 .lecturas-panel { padding: 1rem 1.2rem; overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.6rem; }
 .gym-tab-action { align-self: flex-start; }
 .lecturas-table-wrap { overflow-x: auto; }
-.lecturas-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.lecturas-table { width: 100%; border-collapse: collapse; font-size: var(--t-secundario); }
 .lecturas-table th {
   text-align: left; padding: 0.5rem 0.6rem; font-weight: 600;
   border-bottom: 1px solid var(--border);
@@ -3717,11 +3828,13 @@ body.gym-rest-push #settings-modal .settings-card {
 }
 .lecturas-table td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .lecturas-table tbody tr { cursor: pointer; }
-.lecturas-table tbody tr:hover { background: var(--surface-2); }
+@media (hover: hover) {
+  .lecturas-table tbody tr:hover { background: var(--surface-2); }
+}
 .lecturas-saga-detail-header { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
 .lecturas-saga-detail-header h3 { margin: 0; }
 .lecturas-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
-.lecturas-filters input { font-size: 0.82rem; padding: 0.35rem 0.5rem; width: 6.5rem; flex: 0 1 auto; }
+.lecturas-filters input { font-size: var(--t-secundario); padding: 0.35rem 0.5rem; width: 6.5rem; flex: 0 1 auto; }
 /* Tipo/Estado/Genero (createSelectField, ver app.js) con un ancho base
    consistente en vez de ajustarse al texto de la opcion elegida -- asi
    los 4 controles del filtro caben en una fila en una pantalla normal
@@ -3729,25 +3842,25 @@ body.gym-rest-push #settings-modal .settings-card {
    pudiendo apilarse en movil gracias al flex-wrap de .lecturas-filters. */
 .lecturas-filter-field { flex: 1 1 160px; min-width: 140px; }
 .lecturas-filter-field .select-field { width: 100%; }
-.lecturas-filter-field .select-field-trigger { font-size: 0.82rem; padding: 0.4rem 0.6rem; }
+.lecturas-filter-field .select-field-trigger { font-size: var(--t-secundario); padding: 0.4rem 0.6rem; }
 .lecturas-status-badge {
-  font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 999px;
+  font-size: var(--t-pie); padding: 0.15rem 0.5rem; border-radius: 999px;
   background: var(--surface-2); color: var(--surface-2-text); white-space: nowrap;
 }
 /* Insignia "Prestado" junto al titulo, en la tabla de items (ver
    renderLecturasItemsTable en app.js) -- tono ambar para que llame la
    atencion sin ser tan fuerte como un error. */
 .lecturas-loaned-badge {
-  font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 999px;
+  font-size: var(--t-pie); padding: 0.15rem 0.5rem; border-radius: 999px;
   background: #f5b40033; color: #a97600; white-space: nowrap;
 }
 .lecturas-genre-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .lecturas-genre-chip {
   display: inline-flex; align-items: center; gap: 0.3rem;
   background: var(--surface-2); color: var(--surface-2-text);
-  border-radius: 999px; padding: 0.15rem 0.5rem; font-size: 0.78rem;
+  border-radius: 999px; padding: 0.15rem 0.5rem; font-size: var(--t-pie);
 }
-.lecturas-genre-chip button { border: none; background: none; color: inherit; cursor: pointer; padding: 0; font-size: 0.85rem; line-height: 1; }
+.lecturas-genre-chip button { border: none; background: none; color: inherit; cursor: pointer; padding: 0; font-size: var(--t-secundario); line-height: 1; }
 .lecturas-genre-input-row { display: flex; gap: 0.4rem; margin-top: 0.4rem; }
 .lecturas-genre-input-row input { flex: 1; }
 /* Sugerencias clicables (predefinidas + ya usadas en cualquier saga, ver
@@ -3758,9 +3871,11 @@ body.gym-rest-push #settings-modal .settings-card {
 .lecturas-genre-suggestion-chip {
   background: transparent; color: color-mix(in srgb, var(--surface-text) 75%, var(--surface));
   border: 1px dashed var(--border); border-radius: 999px;
-  padding: 0.15rem 0.5rem; font-size: 0.76rem; cursor: pointer;
+  padding: 0.15rem 0.5rem; font-size: var(--t-pie); cursor: pointer;
 }
-.lecturas-genre-suggestion-chip:hover { border-color: var(--accent); color: var(--accent); }
+@media (hover: hover) {
+  .lecturas-genre-suggestion-chip:hover { border-color: var(--accent); color: var(--accent); }
+}
 /* Rating: slider + numero en la misma fila, ver #lecturas-item-rating-range
    en app.js/index.html. */
 .lecturas-rating-field { display: flex; align-items: center; gap: 0.6rem; }
@@ -3778,7 +3893,7 @@ body.gym-rest-push #settings-modal .settings-card {
   gap: 0.4rem;
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--border);
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   cursor: pointer;
   /* Igual que en las tarjetas de galeria: el nombre de una fila es algo
      que se toca, no que se copia -- sin esto, mantener pulsado (que aqui
@@ -3821,7 +3936,9 @@ body.gym-rest-push #settings-modal .settings-card {
   align-items: center;
   justify-content: center;
 }
-.note-item-eye-btn:hover { color: var(--surface-2-text); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+@media (hover: hover) {
+  .note-item-eye-btn:hover { color: var(--surface-2-text); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+}
 .note-item.is-hidden .note-item-eye-btn { color: var(--accent); }
 .note-item-content-wrap { position: relative; flex: 1; min-width: 0; }
 .note-item-content { display: flex; flex-direction: column; gap: 0.15rem; }
@@ -3830,7 +3947,7 @@ body.gym-rest-push #settings-modal .settings-card {
    donde vive cada resultado ya que no estan agrupados por carpeta. */
 .note-item-path {
   display: block;
-  font-size: 0.72rem;
+  font-size: var(--t-pie);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3854,19 +3971,23 @@ body.gym-rest-push #settings-modal .settings-card {
   align-items: center;
   justify-content: center;
 }
-.favorite-star-btn:hover { color: var(--surface-2-text); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+@media (hover: hover) {
+  .favorite-star-btn:hover { color: var(--surface-2-text); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+}
 .favorite-star-btn.is-favorite { color: var(--accent); }
 /* Dentro de los modales (fondo surface, no surface-2) el contraste por
    defecto usa surface-text en vez de surface-2-text. */
 .modal-card .favorite-star-btn { color: color-mix(in srgb, var(--surface-text) 45%, var(--surface)); }
-.modal-card .favorite-star-btn:hover { color: var(--surface-text); }
+@media (hover: hover) {
+  .modal-card .favorite-star-btn:hover { color: var(--surface-text); }
+}
 .modal-card .favorite-star-btn.is-favorite { color: var(--accent); }
 
 /* Fila de subcarpeta dentro de la lista de Notas: icono/color + nombre,
    igual de alta que una fila de nota para que la lista se vea uniforme
    (carpetas arriba, notas debajo). */
 .note-folder-row { align-items: center; }
-.note-folder-row-icon { flex-shrink: 0; display: flex; align-items: center; font-size: 1rem; }
+.note-folder-row-icon { flex-shrink: 0; display: flex; align-items: center; font-size: var(--t-cuerpo); }
 
 /* --- Vista (Normal / Pantalla completa / Ventana flotante) --- */
 .view-mode-options { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
@@ -3874,7 +3995,7 @@ body.gym-rest-push #settings-modal .settings-card {
    una frase que hace la opcion elegida, sin gastar un dialogo. */
 .settings-hint {
   margin-top: 0.7rem;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
 }
 
@@ -3890,7 +4011,7 @@ body.gym-rest-push #settings-modal .settings-card {
 /* --- Modo de color (Sistema / Claro / Oscuro) y variante inversa de un tema --- */
 .color-mode-options { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .color-mode-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
-.color-mode-btn { font-size: 0.85rem; padding: 0.4rem 0.7rem; }
+.color-mode-btn { font-size: var(--t-secundario); padding: 0.4rem 0.7rem; }
 .color-mode-btn.active {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
   border-color: var(--accent);
@@ -3903,7 +4024,7 @@ body.gym-rest-push #settings-modal .settings-card {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.72rem;
+  font-size: var(--t-pie);
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
   background: var(--surface);
@@ -3911,13 +4032,15 @@ body.gym-rest-push #settings-modal .settings-card {
   color: var(--accent);
   vertical-align: middle;
 }
-.theme-pair-badge:hover { background: color-mix(in srgb, var(--accent) 15%, var(--surface)); }
+@media (hover: hover) {
+  .theme-pair-badge:hover { background: color-mix(in srgb, var(--accent) 15%, var(--surface)); }
+}
 .theme-pair-badge svg { width: 13px; height: 13px; flex-shrink: 0; }
 /* El atajo de la barra superior: el SVG ocupa el hueco que antes tenia
    el emoji, sin heredar su tamaño de fuente. */
 .quick-color-mode-btn svg { width: 18px; height: 18px; display: block; }
 .theme-color-side-switch { display: flex; gap: 0.4rem; margin: 0.4rem 0 0.8rem; }
-.theme-side-btn { font-size: 0.82rem; padding: 0.35rem 0.7rem; }
+.theme-side-btn { font-size: var(--t-secundario); padding: 0.35rem 0.7rem; }
 .theme-side-btn.active {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
   border-color: var(--accent);
@@ -3935,7 +4058,12 @@ body.gym-rest-push #settings-modal .settings-card {
 /* --- Modales --- */
 .modal {
   position: fixed; inset: 0;
-  background: rgba(0,0,0,0.6);
+  /* El fondo oscurece Y desenfoca lo de detras, como una hoja modal de
+     iOS: se sigue viendo de donde vienes, pero sin que compita con el
+     dialogo. Solo con el negro al 60% quedaba plano. */
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   display: flex; align-items: center; justify-content: center;
   /* El hueco del sistema ADEMAS del margen de siempre: con solo 1rem, un
      modal alto (historial, editar ejercicio) se metia bajo la Dynamic
@@ -3973,7 +4101,7 @@ body.gym-rest-push #settings-modal .settings-card {
   align-items: center;
   gap: 0.5rem;
   margin-top: 0.8rem;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   cursor: pointer;
 }
 /* Este modal puede abrirse ENCIMA de otro modal ya abierto (p. ej. el
@@ -4069,10 +4197,12 @@ body.gym-rest-push #settings-modal .settings-card {
 .modal-close-x {
   position: absolute; top: 0.8rem; right: 0.8rem;
   width: 2rem; height: 2rem; padding: 0; border-radius: 50%;
-  background: transparent; border-color: transparent; font-size: 1rem;
+  background: transparent; border-color: transparent; font-size: var(--t-cuerpo);
   display: flex; align-items: center; justify-content: center;
 }
-.modal-close-x:hover { background: var(--surface-2); }
+@media (hover: hover) {
+  .modal-close-x:hover { background: var(--surface-2); }
+}
 
 /* --- Panel de Configuracion: galeria de apartados + pantalla por seccion ---
    Tarjeta con icono por apartado (mismo aire que la vista de galeria de
@@ -4086,7 +4216,7 @@ body.gym-rest-push #settings-modal .settings-card {
 .settings-menu-item {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 0.5rem;
-  width: 100%; text-align: center; font-size: 0.9rem;
+  width: 100%; text-align: center; font-size: var(--t-cuerpo);
   background: var(--settings-menu-bg); border-color: var(--border);
   color: var(--settings-menu-text);
   padding: 1.1rem 0.6rem;
@@ -4094,8 +4224,8 @@ body.gym-rest-push #settings-modal .settings-card {
 }
 .settings-menu-item svg { width: 30px; height: 30px; color: var(--accent); }
 
-.settings-tab-panel h3 { margin: 0 0 0.6rem; font-size: 1rem; }
-.settings-tab-panel h4 { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); text-transform: uppercase; letter-spacing: 0.03em; margin: 1rem 0 0.4rem; }
+.settings-tab-panel h3 { margin: 0 0 0.6rem; font-size: var(--t-cuerpo); }
+.settings-tab-panel h4 { font-size: var(--t-secundario); color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); text-transform: uppercase; letter-spacing: 0.03em; margin: 1rem 0 0.4rem; }
 .settings-subactions { display: flex; gap: 0.5rem; margin: 0.8rem 0; }
 
 #btn-save-theme-changes { margin: 0.8rem 0; width: 100%; }
@@ -4108,7 +4238,9 @@ body.gym-rest-push #settings-modal .settings-card {
   padding: 0.6rem 0.8rem;
   cursor: pointer;
 }
-.theme-card:hover { border-color: var(--accent); }
+@media (hover: hover) {
+  .theme-card:hover { border-color: var(--accent); }
+}
 .theme-card.active {
   border-color: var(--accent);
   border-width: 2px;
@@ -4117,7 +4249,7 @@ body.gym-rest-push #settings-modal .settings-card {
 }
 .theme-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; }
 .theme-active-badge {
-  font-size: 0.7rem;
+  font-size: var(--t-micro);
   font-weight: 600;
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
@@ -4128,11 +4260,11 @@ body.gym-rest-push #settings-modal .settings-card {
 }
 .theme-card-preview { display: flex; gap: 0.3rem; margin-bottom: 0.3rem; }
 .theme-card-preview .color-dot { width: 1.1rem; height: 1.1rem; }
-.theme-card-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem; }
+.theme-card-name { font-weight: 600; font-size: var(--t-cuerpo); margin-bottom: 0.5rem; }
 
 .theme-form { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 1rem; }
 .theme-color-grid { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.6rem 0 1rem; }
-.theme-color-item { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; font-size: 0.85rem; }
+.theme-color-item { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; font-size: var(--t-secundario); }
 /* El color de contraste de un fondo va justo debajo de ese fondo, algo
    indentado y mas tenue, para que se lea como "esta es la pareja de la
    fila de arriba" en vez de un color mas de la lista. */
@@ -4140,7 +4272,7 @@ body.gym-rest-push #settings-modal .settings-card {
   margin-left: 1.2rem;
   padding-left: 0.6rem;
   border-left: 2px solid var(--border);
-  font-size: 0.8rem;
+  font-size: var(--t-secundario);
   opacity: 0.85;
 }
 
@@ -4148,11 +4280,11 @@ body.gym-rest-push #settings-modal .settings-card {
 .theme-copy-item {
   display: flex; align-items: center; gap: 0.6rem;
   background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
 }
 .theme-copy-label { flex: 1; }
-.error { color: var(--danger); font-size: 0.85rem; }
-.hint { color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); font-size: 0.85rem; }
+.error { color: var(--danger); font-size: var(--t-secundario); }
+.hint { color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); font-size: var(--t-secundario); }
 
 /* --- Grupos: nombre + color, tipo listas de Recordatorios --- */
 .group-form-row { display: flex; gap: 0.5rem; align-items: stretch; margin-bottom: 0.5rem; }
@@ -4167,11 +4299,11 @@ body.gym-rest-push #settings-modal .settings-card {
 .group-item {
   display: flex; align-items: center; gap: 0.6rem;
   background: var(--surface-2); border-radius: var(--radius); padding: 0.5rem 0.7rem;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
 }
 .group-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-item-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
-.group-item-actions button { padding: 0.35rem 0.6rem; font-size: 0.8rem; }
+.group-item-actions button { padding: 0.35rem 0.6rem; font-size: var(--t-secundario); }
 
 .color-dot {
   width: 0.8rem; height: 0.8rem; border-radius: 50%; flex-shrink: 0;
@@ -4202,7 +4334,7 @@ body.gym-rest-push #settings-modal .settings-card {
 .color-native-input { width: 100%; height: 2.2rem; padding: 0.15rem; cursor: pointer; }
 .palette-section { margin-bottom: 0.7rem; }
 .palette-section:last-child { margin-bottom: 0; }
-.palette-section-heading { font-size: 0.72rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
+.palette-section-heading { font-size: var(--t-pie); color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
 /* En tabla (4 columnas x 2 filas para las 8 de cada paleta) en vez de una
    sola fila larga, como pidio Koku: se lee mejor de un vistazo. */
 .palette-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.35rem; }
@@ -4210,11 +4342,13 @@ body.gym-rest-push #settings-modal .settings-card {
   width: 100%; aspect-ratio: 1; padding: 0; border-radius: var(--radius-sm);
   border: 1px solid rgba(255,255,255,0.15); cursor: pointer;
 }
-.palette-swatch:hover { transform: scale(1.1); }
+@media (hover: hover) {
+  .palette-swatch:hover { transform: scale(1.1); }
+}
 
 /* Cabecera del selector de color: solo pinta en pantalla completa. */
 .color-popover-header { display: none; }
-.color-popover-title { font-size: 1rem; font-weight: 600; }
+.color-popover-title { font-size: var(--t-cuerpo); font-weight: 600; }
 
 /* --- Selector de color a PANTALLA COMPLETA (movil) ---------------------
    Peticion de Koku: flotando encima del boton tapaba media pantalla y
@@ -4240,7 +4374,7 @@ body.gym-rest-push #settings-modal .settings-card {
   gap: 0.5rem; margin-bottom: 1rem;
 }
 .color-popover.is-fullscreen .palette-section { margin-bottom: 1.4rem; }
-.color-popover.is-fullscreen .palette-section-heading { font-size: 0.8rem; margin-bottom: 0.6rem; }
+.color-popover.is-fullscreen .palette-section-heading { font-size: var(--t-secundario); margin-bottom: 0.6rem; }
 .color-popover.is-fullscreen .palette-grid { gap: 0.7rem; }
 .color-popover.is-fullscreen .color-native-input { height: 3rem; }
 
@@ -4251,10 +4385,10 @@ body.gym-rest-push #settings-modal .settings-card {
   width: 100%; display: flex; align-items: center; gap: 0.4rem;
   background: var(--surface-2); color: var(--surface-2-text);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 0.55rem 0.7rem; font-size: 0.9rem; text-align: left; cursor: pointer;
+  padding: 0.55rem 0.7rem; font-size: var(--t-cuerpo); text-align: left; cursor: pointer;
 }
 .select-field-trigger::after {
-  content: '▾'; margin-left: auto; flex-shrink: 0; opacity: 0.6; font-size: 0.75rem;
+  content: '▾'; margin-left: auto; flex-shrink: 0; opacity: 0.6; font-size: var(--t-pie);
 }
 .select-field-trigger.select-field-placeholder { opacity: 0.65; }
 .select-popover {
@@ -4267,15 +4401,17 @@ body.gym-rest-push #settings-modal .settings-card {
 .select-option {
   display: flex; align-items: center; gap: 0.4rem;
   background: transparent; border: none; border-radius: var(--radius-sm);
-  padding: 0.5rem 0.6rem; font-size: 0.88rem; text-align: left; cursor: pointer;
+  padding: 0.5rem 0.6rem; font-size: var(--t-secundario); text-align: left; cursor: pointer;
   color: var(--surface-text);
 }
-.select-option:hover { background: var(--surface-2); }
+@media (hover: hover) {
+  .select-option:hover { background: var(--surface-2); }
+}
 .select-option.active { background: color-mix(in srgb, var(--accent) 18%, var(--surface-2)); font-weight: 600; }
 /* Mensaje "sin resultados" dentro de un popover de busqueda (ver
    createCountryPickerField en app.js) -- mismo padding que .select-option
    pero sin hover/cursor, no es clicable. */
-.select-option-empty { padding: 0.5rem 0.6rem; font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); }
+.select-option-empty { padding: 0.5rem 0.6rem; font-size: var(--t-secundario); color: color-mix(in srgb, var(--surface-text) 65%, var(--surface)); }
 
 /* Version "elegir varios" de .select-field (createMultiSelectField en
    app.js): mismo boton+popover, pero con una fila de chips removibles
@@ -4287,11 +4423,11 @@ body.gym-rest-push #settings-modal .settings-card {
 .multi-select-chip {
   display: inline-flex; align-items: center; gap: 0.3rem;
   padding: 0.15rem 0.5rem; border-radius: 999px;
-  background: var(--accent); color: var(--accent-text); font-size: 0.78rem;
+  background: var(--accent); color: var(--accent-text); font-size: var(--t-pie);
 }
 .multi-select-chip button {
   border: none; background: none; color: inherit; cursor: pointer;
-  font-size: 0.85rem; padding: 0; line-height: 1;
+  font-size: var(--t-secundario); padding: 0; line-height: 1;
 }
 /* Marca de "elegido" dentro del popover -- espacio reservado siempre
    (aunque este vacio) para que el texto de todas las opciones quede
@@ -4313,7 +4449,7 @@ body.gym-rest-push #settings-modal .settings-card {
 .date-field-text {
   flex: 1; min-width: 0; border: none; background: transparent;
   color: var(--surface-2-text); border-radius: 0;
-  padding: 0.55rem 0.5rem; font-size: 0.9rem;
+  padding: 0.55rem 0.5rem; font-size: var(--t-cuerpo);
   /* Red de seguridad: si aun asi no cupiera entero, que se corte con
      puntos suspensivos en vez de a medias sin avisar. */
   text-overflow: ellipsis;
@@ -4324,7 +4460,9 @@ body.gym-rest-push #settings-modal .settings-card {
   padding: 0 0.45rem; cursor: pointer; border-radius: 0; opacity: 0.75;
   display: flex; align-items: center; justify-content: center;
 }
-.date-field-icon-btn:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 15%, transparent); }
+@media (hover: hover) {
+  .date-field-icon-btn:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 15%, transparent); }
+}
 .datetime-row { display: flex; gap: 0.4rem; align-items: stretch; margin-top: 0.3rem; }
 /* La fecha necesita mas hueco que la hora ("14/08/2026" o "Sin fecha" es
    mas largo que "00:00") — sin este reparto, "Sin fecha" se partia en dos
@@ -4339,7 +4477,7 @@ body.gym-rest-push #settings-modal .settings-card {
   width: 100%; text-align: center;
   background: var(--surface-2); color: var(--surface-2-text);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 0.55rem 0.5rem; font-size: 0.9rem;
+  padding: 0.55rem 0.5rem; font-size: var(--t-cuerpo);
 }
 .time-field-input.is-invalid { border-color: var(--danger); }
 
@@ -4363,7 +4501,7 @@ body.gym-rest-push #settings-modal .settings-card {
    (fecha + hora en el mismo renglon). */
 .time-field-ampm-btn {
   padding: 0 0.4rem;
-  font-size: 0.62rem;
+  font-size: var(--t-micro);
   font-weight: 600;
   letter-spacing: 0.03em;
   line-height: 1;
@@ -4390,7 +4528,7 @@ body.gym-rest-push #settings-modal .settings-card {
 }
 .date-popover-nav {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 0.4rem; font-size: 0.8rem; font-weight: 600;
+  margin-bottom: 0.4rem; font-size: var(--t-secundario); font-weight: 600;
 }
 /* Antes tenia un ancho/alto fijo pensado para el caracter "←"/"→" a
    0.75rem — al pasar a un SVG de 16px, ese hueco fijo (con el padding
@@ -4401,7 +4539,7 @@ body.gym-rest-push #settings-modal .settings-card {
 .date-popover-month-label { text-align: center; flex: 1; }
 .date-popover-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .date-popover-weekday {
-  text-align: center; font-size: 0.65rem; padding-bottom: 0.2rem;
+  text-align: center; font-size: var(--t-micro); padding-bottom: 0.2rem;
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
 }
 /* Alto FIJO en vez de aspect-ratio: dentro de un grid, aspect-ratio puede
@@ -4411,11 +4549,13 @@ body.gym-rest-push #settings-modal .settings-card {
 .date-popover-day {
   height: 1.9rem; width: 100%; border-radius: var(--radius-sm);
   background: var(--surface-2); color: var(--surface-2-text);
-  border: 1px solid transparent; font-size: 0.75rem; cursor: pointer;
+  border: 1px solid transparent; font-size: var(--t-pie); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   padding: 0;
 }
-.date-popover-day:hover { border-color: var(--accent); }
+@media (hover: hover) {
+  .date-popover-day:hover { border-color: var(--accent); }
+}
 .date-popover-day.other-month { opacity: 0.35; }
 .date-popover-day.today { border-color: var(--accent); font-weight: 700; }
 .date-popover-day.selected { background: var(--accent); color: var(--accent-text); }
@@ -4425,7 +4565,7 @@ body.gym-rest-push #settings-modal .settings-card {
 .icon-field { position: relative; display: inline-block; }
 .icon-swatch-btn {
   width: 2.4rem; height: 2.4rem; padding: 0; border-radius: var(--radius);
-  border: 2px solid var(--border); cursor: pointer; font-size: 1.2rem;
+  border: 2px solid var(--border); cursor: pointer; font-size: var(--t-titulo-3);
   display: flex; align-items: center; justify-content: center;
   background: var(--surface-2);
 }
@@ -4439,9 +4579,11 @@ body.gym-rest-push #settings-modal .settings-card {
 .icon-grid-btn {
   width: 100%; aspect-ratio: 1; padding: 0; border-radius: var(--radius-sm);
   background: var(--surface-2); border: 1px solid var(--border); cursor: pointer;
-  font-size: 1.1rem; display: flex; align-items: center; justify-content: center;
+  font-size: var(--t-titulo-3); display: flex; align-items: center; justify-content: center;
 }
-.icon-grid-btn:hover { border-color: var(--accent); }
+@media (hover: hover) {
+  .icon-grid-btn:hover { border-color: var(--accent); }
+}
 .icon-custom-row { display: flex; gap: 0.4rem; margin-top: 0.3rem; }
 .icon-custom-row input { flex: 1; }
 
@@ -4479,7 +4621,7 @@ body.gym-rest-push #settings-modal .settings-card {
 .viajes-map-svg-wrap { width: 100%; }
 .viajes-map-container svg { width: 100%; height: auto; max-height: 70vh; display: block; }
 .viajes-map-zoom-controls { position: absolute; top: 0.6rem; right: 0.6rem; display: flex; flex-direction: column; gap: 0.3rem; z-index: 2; }
-.viajes-map-zoom-controls .icon-btn { line-height: 1; font-size: 1rem; }
+.viajes-map-zoom-controls .icon-btn { line-height: 1; font-size: var(--t-cuerpo); }
 /* El oceano/fondo del SVG trae blanco fijo (fill="#FFFFFF") -- se
    sustituye por el fondo de la propia app para que no desentone con
    temas oscuros. */
@@ -4499,18 +4641,22 @@ body.gym-rest-push #settings-modal .settings-card {
   fill: var(--surface-2); stroke: var(--border); stroke-width: 0.5;
   cursor: pointer; transition: fill 0.15s ease;
 }
-.viajes-map-country:hover,
-.viajes-map-country:hover path,
-.viajes-map-country:hover circle,
-.viajes-map-country:hover polygon { fill: color-mix(in srgb, var(--accent) 45%, var(--surface-2)); }
+@media (hover: hover) {
+  .viajes-map-country:hover,
+  .viajes-map-country:hover path,
+  .viajes-map-country:hover circle,
+  .viajes-map-country:hover polygon { fill: color-mix(in srgb, var(--accent) 45%, var(--surface-2)); }
+}
 .viajes-map-country-visited,
 .viajes-map-country-visited path,
 .viajes-map-country-visited circle,
 .viajes-map-country-visited polygon { fill: var(--accent); }
-.viajes-map-country-visited:hover,
-.viajes-map-country-visited:hover path,
-.viajes-map-country-visited:hover circle,
-.viajes-map-country-visited:hover polygon { fill: color-mix(in srgb, var(--accent) 80%, black); }
+@media (hover: hover) {
+  .viajes-map-country-visited:hover,
+  .viajes-map-country-visited:hover path,
+  .viajes-map-country-visited:hover circle,
+  .viajes-map-country-visited:hover polygon { fill: color-mix(in srgb, var(--accent) 80%, black); }
+}
 /* Taiwán (unico pais sin contorno real en este mapa, ver
    addViajesMapMicroStateMarkers() en app.js) -- borde algo mas grueso
    que un pais normal para que el punto no desaparezca a zoom 1x. */
@@ -4527,10 +4673,10 @@ body.gym-rest-push #settings-modal .settings-card {
 .viajes-filter-field { flex: 0 1 190px; min-width: 140px; }
 .viajes-filter-field .select-field,
 .viajes-filter-field .multi-select-field { width: 100%; }
-.viajes-filter-field .select-field-trigger { font-size: 0.82rem; padding: 0.4rem 0.6rem; }
+.viajes-filter-field .select-field-trigger { font-size: var(--t-secundario); padding: 0.4rem 0.6rem; }
 .viajes-filter-multi-country {
   flex: 0 0 auto;
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
   /* La regla global "label { margin-bottom: 0.75rem }" (pensada para
      apilar campos verticalmente en formularios) se cuela aqui tambien,
      ya que este checkbox tambien es un <label> -- dentro de esta fila
@@ -4543,7 +4689,7 @@ body.gym-rest-push #settings-modal .settings-card {
 /* Mismo tamaño que el resto de la barra (input de año antes, ahora
    select-field) -- sin esto se veia "descuadrado" en altura, mas grande
    que sus vecinos. */
-.viajes-filters .secondary-btn { font-size: 0.82rem; padding: 0.4rem 0.7rem; }
+.viajes-filters .secondary-btn { font-size: var(--t-secundario); padding: 0.4rem 0.7rem; }
 
 /* Tarjetas de viaje -- reutilizadas tanto en la lista principal como en
    el modal de "viajes en este pais" (ver renderViajesTripCards). El
@@ -4560,9 +4706,11 @@ body.gym-rest-push #settings-modal .settings-card {
   border-radius: var(--radius); background: var(--surface); color: var(--surface-text);
   cursor: pointer; font: inherit;
 }
-.viajes-trip-card:hover { background: var(--surface-2); }
+@media (hover: hover) {
+  .viajes-trip-card:hover { background: var(--surface-2); }
+}
 .viajes-trip-card-name { font-weight: 600; }
-.viajes-trip-card-countries { font-size: 0.85rem; color: color-mix(in srgb, var(--surface-text) 70%, var(--surface)); }
+.viajes-trip-card-countries { font-size: var(--t-secundario); color: color-mix(in srgb, var(--surface-text) 70%, var(--surface)); }
 
 .viajes-trip-detail-header { display: flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0; }
 .viajes-trip-detail-header h3 { margin: 0; flex-shrink: 0; }
@@ -4582,7 +4730,7 @@ body.gym-rest-push #settings-modal .settings-card {
   width: 140px; height: 100px; object-fit: cover; border-radius: var(--radius);
   border: 1px solid var(--border);
 }
-.viajes-attachment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; font-size: 0.78rem; }
+.viajes-attachment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; font-size: var(--t-pie); }
 .viajes-attachment-linked { color: var(--accent); }
 /* Mismos tonos que .finanzas-amount-expense/-income, para que un
    movimiento de Viajes se lea igual que en Finanzas. */
@@ -4606,11 +4754,11 @@ body.gym-rest-push #settings-modal .settings-card {
 .country-picker-chip {
   display: inline-flex; align-items: center; gap: 0.3rem;
   padding: 0.15rem 0.5rem; border-radius: 999px;
-  background: var(--accent); color: var(--accent-text); font-size: 0.82rem;
+  background: var(--accent); color: var(--accent-text); font-size: var(--t-secundario);
 }
 .country-picker-chip button {
   border: none; background: none; color: inherit; cursor: pointer;
-  font-size: 0.85rem; padding: 0; line-height: 1;
+  font-size: var(--t-secundario); padding: 0; line-height: 1;
 }
 .country-picker-input {
   border: none; background: transparent; color: var(--surface-2-text);
@@ -4734,8 +4882,8 @@ body.gym-rest-push #settings-modal .settings-card {
 .group-item-type { flex-shrink: 0; display: inline-flex; align-items: center; color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2)); }
 .group-item-type svg { width: 17px; height: 17px; }
 .group-item-texts { display: flex; flex-direction: column; min-width: 0; }
-.group-item-title { font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.group-item-meta { font-size: 0.78rem; color: color-mix(in srgb, var(--surface-2-text) 60%, var(--surface-2)); }
+.group-item-title { font-size: var(--t-cuerpo); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-item-meta { font-size: var(--t-pie); color: color-mix(in srgb, var(--surface-2-text) 60%, var(--surface-2)); }
 /* Tarea ya hecha: tachada y atenuada (los recordatorios nunca llegan
    aqui, no tienen "terminada"). */
 .group-item-row.is-done .group-item-title { text-decoration: line-through; }
@@ -4744,7 +4892,7 @@ body.gym-rest-push #settings-modal .settings-card {
    recorta en una sola linea para no empujar los botones de volver ni
    comerse tres renglones de cabecera. */
 #groups-view-title {
-  font-size: 1.15rem;
+  font-size: var(--t-titulo-3);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4778,14 +4926,14 @@ body.gym-rest-push #settings-modal .settings-card {
   border: 1px solid var(--border);
   border-radius: 999px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
 }
 .backup-reminder-banner span { cursor: pointer; }
 .backup-reminder-close {
   background: transparent;
   border: none;
   padding: 0.1rem 0.35rem;
-  font-size: 0.85rem;
+  font-size: var(--t-secundario);
   color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
   border-radius: 999px;
   flex-shrink: 0;
@@ -4812,7 +4960,7 @@ body.gym-rest-push #settings-modal .settings-card {
 .gym-cycle-row-num {
   flex: 0 0 auto;
   min-width: 3.4rem;
-  font-size: 0.78rem;
+  font-size: var(--t-pie);
   font-weight: 600;
   color: var(--surface-2-text);
   opacity: 0.75;
@@ -4829,7 +4977,7 @@ body.gym-rest-push #settings-modal .settings-card {
   border-radius: 0.6rem;
   background: var(--gym-accent-soft);
   color: var(--surface-text);
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
   line-height: 1.35;
 }
 /* El dia que toca hoy, resaltado en la lista de dias. */
@@ -4879,12 +5027,12 @@ body.gym-rest-push #settings-modal .settings-card {
 .select-popover-empty {
   margin: 0;
   padding: 0.6rem 0.7rem;
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
   opacity: 0.75;
 }
 
 /* "Hoy te toca" del ciclo: su etiqueta separada del boton de añadir. */
-.gym-cycle-hoy-label { display: block; margin: 0.8rem 0 0.3rem; font-size: 0.82rem; font-weight: 600; }
+.gym-cycle-hoy-label { display: block; margin: 0.8rem 0 0.3rem; font-size: var(--t-secundario); font-weight: 600; }
 
 /* --- Aviso flotante de usar y tirar (mostrarAvisoFlotante en app.js) --
    Una pastilla arriba del todo que aparece, se lee y se va sola. Misma
@@ -4906,7 +5054,7 @@ body.gym-rest-push #settings-modal .settings-card {
   border: 1px solid var(--border);
   border-radius: 999px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
   text-align: center;
   pointer-events: none;
   animation: app-toast-in 0.22s ease-out;
@@ -4924,7 +5072,7 @@ body.gym-rest-push #settings-modal .settings-card {
 /* La estimacion de duracion en la ficha de un dia del plan. */
 .gym-routine-estimate {
   margin: 0 0 0.6rem;
-  font-size: 0.82rem;
+  font-size: var(--t-secundario);
   color: color-mix(in srgb, var(--surface-text) 68%, var(--surface));
 }
 
@@ -4943,10 +5091,11 @@ body.gym-rest-push #settings-modal .settings-card {
   flex-shrink: 0;
   width: 2.2rem;
   padding: 0;
-  font-size: 1rem;
+  font-size: var(--t-cuerpo);
   font-weight: 600;
   background: var(--surface-2);
   color: var(--surface-2-text);
   border: 1px solid var(--border);
   border-radius: 0.5rem;
 }
+

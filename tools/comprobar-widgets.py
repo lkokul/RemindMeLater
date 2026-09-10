@@ -453,6 +453,36 @@ if app_js.count('function isMobileLayout') != 1:
                   'ultima declaracion, asi que la otra queda muerta sin avisar '
                   '(ya paso una vez)')
 
+# --- 8) el :hover no puede quedarse fuera de (hover: hover) ----------
+#
+# iOS aplica los estilos de :hover al TOCAR y los deja puestos hasta que
+# tocas otra cosa: una regla :hover suelta hace que un boton se quede
+# "pulsado" en el movil. Ya pasaba con la barra de abajo. Aqui se
+# comprueba que TODA regla :hover vive dentro de @media (hover: hover).
+css_crudo = sin_comentarios_css(leer('public/styles.css'))
+abiertos = []
+sueltas = []
+for k, ch in enumerate(css_crudo):
+    if ch == '{':
+        anterior = css_crudo[max(0, k - 60):k]
+        abiertos.append('hover' if re.search(r'@media\s*\(hover:\s*hover\)\s*$', anterior) else 'otro')
+    elif ch == '}':
+        if abiertos:
+            abiertos.pop()
+    elif css_crudo.startswith(':hover', k) and 'hover' not in abiertos:
+        sueltas.append(css_crudo[max(0, k - 70):k + 6].replace('\n', ' ').strip()[-70:])
+if sueltas:
+    fallos.append(f'{len(sueltas)} regla(s) :hover fuera de @media (hover: hover) -- '
+                  f'en el movil se quedan pegadas al tocar. La primera: {sueltas[0]}')
+
+# Y que la escala tipografica no se salte por la calle de en medio.
+if 'font-size: var(--t-' not in css_crudo:
+    fallos.append('styles.css ya no usa los tokens de la escala tipografica')
+sueltos = re.findall(r'font-size:\s*[0-9.]+rem', css_crudo)
+if sueltos:
+    fallos.append(f'{len(sueltos)} font-size en rem fuera de la escala: usa uno de '
+                  f'los ocho tokens (--t-micro ... --t-titulo-grande). Ej: {sueltos[0]}')
+
 # --- resultado -------------------------------------------------------
 if fallos:
     print('FALLOS:')
