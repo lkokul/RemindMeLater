@@ -168,163 +168,306 @@ Dos tablas de 6 columnas ("Debo yo" y "Me deben") una detrás de otra.
 
 ---
 
-## 4. Plan propuesto para `finanzas-movil`
+## 4. Decisiones tomadas (ronda del 10/9/2026)
 
-La idea rectora: **no reordenar lo de escritorio, sino repensar cada
-pantalla como si Finanzas hubiera nacido en el teléfono** — que es lo
-que se hizo con el calendario y con las notas. Los datos y las rutas no
-se tocan; todo el trabajo es de interfaz.
+Koku revisó las propuestas y cerró las tres decisiones que bloqueaban
+todo lo demás:
 
-### Patrones móviles que ya existen en la rama y hay que reutilizar
+1. **La navegación deja de ser pestañas**: Finanzas pasa a tener un
+   inicio de tarjetas tipo la app Salud de iPhone (detalle en la
+   sección 6).
+2. **El dinero de terceros es un TIPO DE CUENTA nuevo**, no una marca
+   por movimiento ni una cartera (detalle en 5.5).
+3. **Se empieza por la previsión de gastos fijos**, porque de esa única
+   pieza salen cuatro de las cinco cosas que pidió.
 
-- **`.mobile-nav`** — la barra inferior de navegación (Calendario /
-  Notas / Herramientas). Su hueco central es configurable desde
-  Configuración → Este dispositivo (`mobileNavNotesSlot`): **Finanzas
-  puede vivir ahí como acceso directo**, sin pasar por el hub de
-  Herramientas.
-- **`.mobile-fab` / `.mobile-fab-wrap`** — botón flotante para la acción
-  principal, con `.mobile-add-menu` cuando hay varias acciones. Gimnasio
-  llegó a tener cinco posiciones distintas de FAB según el contexto.
-- **Tarjetas en vez de tablas** — el patrón `.gym-list-item` /
-  `.gym-library-card`: cada fila es una tarjeta legible de un vistazo.
-- **Gestos** — deslizar horizontal/vertical con animación
-  (`.mobile-swipe-anim-*`), y deslizar sobre un elemento de lista para
-  editar/borrar (ya se hizo en Notas).
-- **Sin controles nativos, nunca** — `createSelectField`,
-  `createDateField`, `createTimeField`, `createMultiSelectField`,
-  `.styled-checkbox`, y `showAppConfirm`/`showAppAlert` en vez de
-  `confirm()`/`alert()`. Esta regla es innegociable en todo el proyecto.
-- **Gráficas SVG a mano**, sin librerías, con tooltip propio adaptado a
-  toque (no a hover del ratón — esto hay que rehacerlo sí o sí).
+Además, una pieza nueva que salió en esa conversación y que no estaba
+en el plan original: **el seguimiento histórico de cada gasto fijo**
+(cuánto costaba este gasto el año pasado, y el anterior). Ver 5.2.
 
-### Fase 1 — Navegación y esqueleto
-
-- Sustituir la fila de cinco pestañas por una navegación que quepa:
-  pestañas deslizables con indicador, o un menú de secciones. Sospecho
-  que lo mejor es **reducir de cinco secciones a tres o cuatro**
-  moviendo la gestión (cuentas, categorías, carteras, activos) fuera de
-  las pestañas de datos, a un apartado de "Ajustes de Finanzas" detrás
-  del botón ☰ que ya existe en la cabecera.
-- FAB único con menú contextual: la acción principal cambia según la
-  sección en la que estés (+ Movimiento, + Gasto fijo, + Inversión,
-  + Deuda).
-- Deslizar horizontal para cambiar de sección, como en el calendario.
-
-### Fase 2 — Resumen convertido en un panel de verdad
-
-Que la primera pantalla responda de un vistazo a "¿cómo voy este mes?":
-
-- Cabecera grande con el saldo total y el mes actual, con flechas o
-  deslizamiento para moverse de mes.
-- Anillo o barra de límite mensual como elemento principal, no como una
-  fila más.
-- El objetivo de ahorro como una segunda tarjeta con su estado
-  (cumplido / no cumplido), sin el campo de edición a la vista — se
-  edita tocándolo.
-- Desglose por categoría como lista de barras táctiles, no como tabla.
-- Las cuentas, en tarjetas deslizables horizontalmente.
-- La gráfica de 6 meses, al final, con tooltip por toque.
-
-### Fase 3 — Movimientos como lista de tarjetas
-
-- Cada movimiento, una tarjeta: icono y color de la categoría, concepto,
-  cuenta e importe con signo y color. Agrupadas por día, con el total
-  del día en la cabecera de cada grupo.
-- Deslizar una tarjeta para editar o borrar.
-- Los cinco filtros, recogidos en una hoja de filtros que se abre desde
-  un botón, con chips ✕ visibles de lo que hay filtrado (el patrón que
-  ya usa Viajes).
-- Cuentas y categorías salen de aquí: se van a "Ajustes de Finanzas".
-
-### Fase 4 — Gastos fijos, Inversiones y Deudas
-
-- **Gastos fijos**: tarjetas con la próxima fecha de cobro destacada y
-  un aviso de los que caen esta semana.
-- **Inversiones**: separar en dos niveles. Un resumen por activo
-  (tarjetas con ganancia/pérdida en verde/rojo) y, tocando un activo,
-  su detalle con movimientos y gráfica de precio. La lista plana de
-  movimientos deja de ser la pantalla principal. El árbol de carteras se
-  convierte en navegación por niveles (como las carpetas de notas), no
-  en un árbol de casillas al lado de una gráfica.
-- **Deudas**: dos listas con cabecera, tarjetas con la persona y el
-  importe grandes.
-
-### Fase 5 — Formularios y hojas
-
-- Convertir los modales en hojas que suben desde abajo, con el foco
-  puesto en no pelearse con el teclado (el problema del "cursor esquiva
-  el teclado" ya se resolvió una vez en el editor de notas — se
-  reaprovecha).
-- Teclado numérico para importes y validación con aviso propio, nunca
-  guardar algo inventado (el precedente es el campo de hora inteligente
-  del calendario).
+El estilo visual que quiere Koku, en sus palabras: *"todo va bastante
+Apple-ish, me gusta su estilo, limpio, sencillo, pulcro, que sea fácil
+y no maree demasiado"*.
 
 ---
 
-## 5. Ideas de producto: "que Finanzas sea realmente útil"
+## 5. Las piezas nuevas, una por una
 
-Esto viene del ideario de `movil-ui`, donde quedó apuntado como
-💡 pendiente: *"Repensar Finanzas entera: Koku quiere que sea realmente
-útil, no una tontería con 4 cosas — investigar qué tiene una app de
-finanzas personales seria antes de diseñar más"*.
+### 5.1 Previsión de gastos fijos (la pieza base)
 
-Ninguna de estas está encargada. Se apuntan para decidirlas antes de
-diseñar más pantallas, porque algunas cambian la estructura de la app:
+**El problema de hoy**: una plantilla de gasto fijo solo genera el
+movimiento real cuando llega la fecha, y **nunca mira hacia delante**.
+Por eso no hay forma de contestar a "¿qué me queda por pagar este mes?".
 
-- **Presupuesto por categoría**, no solo un límite global: "150 € de
-  comida al mes" con su propio aviso al acercarse.
-- **Traspasos entre cuentas** — hoy no existen; mover dinero de
+**La solución**: poder preguntar *"dame las ocurrencias de esta
+plantilla entre estas dos fechas"*, calculadas al vuelo y **nunca
+guardadas** — coherente con la regla de la casa (valores calculados, no
+almacenados) y, sobre todo, evita llenar la base de movimientos
+fantasma que habría que ir limpiando cada vez que se edita una
+plantilla.
+
+Cada ocurrencia prevista sale con su estado:
+
+- **Pagado** — ya existe la transacción generada de ese periodo (se
+  reconoce por `recurring_expense_id` + la clave de periodo `YYYY-MM`
+  para los mensuales o `YYYY` para los anuales, que es exactamente lo
+  que ya usa `last_generated_period`).
+- **Pendiente** — todavía no ha llegado su fecha, o ha llegado y aún no
+  se ha abierto la app.
+
+De esa pieza salen tres pantallas:
+
+- **"Qué me queda por pagar"**, con selector Semana / Mes / Año y un
+  interruptor Pendiente / Pagado / Todo (lo pidió explícitamente: no
+  solo filtrar lo que queda, también ver lo que hay).
+- **La lista anual**, tal cual la describió:
+  ```
+  2026                              2.847 €
+    Enero      200 €
+    Febrero    300 €
+    ...
+  ```
+  Tocas un mes y se abre el desglose (alquiler 100 €, luz 50 €…). Los
+  meses **pasados enseñan lo que se pagó de verdad** y los **futuros lo
+  previsto**, marcados distinto — porque no tienen por qué coincidir.
+  Efecto secundario útil: los meses caros (el del seguro anual) saltan
+  a la vista solos.
+- **Marcar pagado antes de tiempo**, que genera ya el movimiento real.
+
+### 5.2 Suscripciones y evolución del coste
+
+Nada de entidad nueva: son los gastos fijos que ya existen, con un
+**tipo** (Suscripción / Recibo / Préstamo / Otro).
+
+Lo que hace útil la pantalla es **normalizar todo a mensual y anual**,
+que es justo lo que hoy no se puede comparar: Netflix 10 €/mes = 120
+€/año, seguro del coche 400 €/año = 33 €/mes. Cabecera con las dos
+cifras grandes y la lista ordenada por coste anual descendente ("lo que
+más me cuesta al año" suele ser una sorpresa).
+
+**Evolución histórica por gasto** (pieza que Koku considera importante,
+añadida el 10/9/2026): para cada gasto fijo, cuánto ha costado cada
+año.
+
+```
+Netflix
+  2026    143 €    (11 meses)
+  2025    120 €
+  2024    108 €
+```
+
+Es de las pocas cosas que **no hay que construir desde cero**: las
+transacciones generadas guardan `recurring_expense_id`, así que basta
+con agrupar por año lo ya pagado. Con eso se puede decir además *"te ha
+subido un 19% desde 2024"*, que es la frase que uno quiere leer.
+
+Matices a tener en cuenta:
+
+- Un año a medias no se compara con uno entero sin avisar (por eso el
+  "(11 meses)"): o se marca, o se compara el coste medio mensual.
+- Borrar una plantilla deja sus transacciones huérfanas (pone
+  `recurring_expense_id = NULL`, comportamiento pedido por Koku en su
+  día) — así que el histórico de un gasto borrado se pierde. Es
+  aceptable, pero conviene avisarlo al borrar.
+- Pausar una suscripción sin borrarla, para no perder el historial.
+
+### 5.3 Avisos de pagos programados
+
+Varios avisos por plantilla, con desfases a elegir: mismo día, 1/2/3
+días, 1 semana, 15 días, 1/2/3 meses antes, más la hora. Con un valor
+por defecto configurable, para no repetirlo en cada gasto.
+
+**El límite que hay que respetar sí o sí**: iOS solo permite unas **64
+notificaciones locales pendientes por app**, y esas 64 se comparten con
+los recordatorios del calendario. Con 20 gastos fijos × 3 avisos ya son
+60 y el calendario se queda mudo sin que nadie sepa por qué. Reglas que
+salen de ahí:
+
+- Programar solo un **horizonte** (los próximos 2-3 meses) y
+  reprogramar al abrir la app — que es exactamente lo que ya hace
+  `loadReminders()` con su "cancelar todo y rehacer".
+- Un **contador visible en Configuración**: "41 de 64 avisos en uso".
+- Los avisos del calendario tienen prioridad sobre los de Finanzas si
+  hay que recortar.
+
+Extra que encaja solo: notificación con acción **"Ya lo he pagado"**,
+sin abrir la app.
+
+### 5.4 Objetivos con nombre (Coche, 5.000 €)
+
+**Sobres virtuales, no cuentas.** Un objetivo tiene nombre, icono,
+color, importe meta y fecha opcional, y reserva dinero de una cuenta
+que tú eliges — pero **el dinero no se mueve**:
+
+```
+Cuenta corriente
+  saldo 3.200 €  ·  reservado 1.500 €  ·  disponible 1.700 €
+```
+
+Se hace así porque en la vida real todo está en la misma cuenta:
+obligar a crear una cuenta por objetivo sería contabilidad falsa y
+chocaría con la regla de que el saldo SIEMPRE se calcula.
+
+Lo que lo hace útil no es la barra de progreso, es el cruce con lo que
+la app ya sabe: con meta y fecha puede decir *"te faltan 3.200 € en 10
+meses → 320 €/mes"* y contrastarlo con el ahorro real medio (ese
+cálculo ya existe: es el del aviso de "objetivo poco realista") →
+*"a tu ritmo actual llegas en marzo de 2028, no en junio"*.
+
+Dos detalles para que no se descuadre:
+
+- **"Gastar del objetivo"** crea el gasto real y vacía el sobre de una
+  vez.
+- El **objetivo mensual de ahorro que ya existe se queda**: son cosas
+  distintas (uno es una regla de conducta, el otro un destino), y la
+  suma de aportes mensuales a los objetivos es justo lo que dice si esa
+  regla es realista.
+
+### 5.5 Dinero de terceros
+
+El caso real: los padres de Koku le dan una paga y le pagan la
+gasolina. Quiere **seguir cuánto se deja en gasolina** sin que ese
+dinero cuente como suyo en ahorros ni en gráficas.
+
+**Decidido: un tipo de cuenta nuevo, "De terceros"**, junto a los que
+ya hay (Corriente / Ahorro / Inversión / Efectivo / Otro). La paga
+entra como ingreso en esa cuenta, la gasolina sale de ella, y **todo lo
+de ese tipo queda fuera por defecto** de ahorro, patrimonio, límite
+mensual y gráficas — con su propia pantalla y sus estadísticas
+("gasolina: 80 €/mes de media").
+
+Por qué así y no de las otras dos formas que se barajaron:
+
+- **No como cartera**: en esta app "cartera" es un concepto de
+  inversiones, y además no excluiría nada de las gráficas, que es
+  precisamente lo que se busca.
+- **No como marca por movimiento**: obligaría a acordarse de marcarlo
+  cada vez. Con la cuenta, eliges cuenta y ya está — y de paso contesta
+  gratis a *"¿cuánto me queda de la paga este mes?"*, que hoy no se
+  puede saber.
+
+Con un interruptor **"incluir dinero de terceros"** en las gráficas
+para cuando se quiera ver todo junto.
+
+El caso mixto (un gasto tuyo que te devuelven a medias) sí pediría
+marca por movimiento, pero eso es otro problema — gastos compartidos —
+y queda para más adelante.
+
+---
+
+## 6. La interfaz: inicio tipo "Salud"
+
+El problema de fondo no son las tablas: son **cinco pestañas en una
+fila** a las que hay que sumar Objetivos, Suscripciones y Previsión.
+Con pestañas no escala.
+
+**Finanzas pasa a funcionar como la app Salud**: una pantalla de inicio
+que es una columna de tarjetas; cada tarjeta resume una cifra y se toca
+para entrar a su pantalla completa. Añadir una sección nueva mañana =
+añadir una tarjeta, no rediseñar la navegación otra vez.
+
+- **Inicio**: cifra grande arriba (saldo total, o "te queda este mes"),
+  y debajo las tarjetas — Este mes (límite + barra), Próximos pagos
+  (los 3 siguientes con fecha), Objetivos, Suscripciones (X €/mes · Y
+  €/año), Cuentas (fila deslizable), Inversiones, Deudas, De terceros.
+  El orden de las tarjetas, configurable más adelante.
+- **Dos destinos abajo en vez de cinco pestañas**: Resumen ·
+  Movimientos, más el **botón flotante** para apuntar un gasto — que es
+  lo que de verdad se hace veinte veces al mes desde el teléfono.
+- **La gestión sale del camino diario**: cuentas, categorías, carteras
+  y activos, detrás del ☰ que ya existe en la cabecera. Hoy comparten
+  pestaña con los movimientos y son la mitad del ruido.
+
+### Qué significa "Apple-ish" en concreto
+
+No es redondear esquinas. Es esto:
+
+- **Jerarquía por tamaño y peso, no por color**: la cifra protagonista
+  enorme y el resto en gris. Color solo con intención — verde/rojo
+  únicamente en el importe, el acento del tema solo en lo que se toca.
+- **Listas agrupadas**: bloques redondeados, separadores finos que
+  empiezan DESPUÉS del icono, no de borde a borde.
+- **Fila, nunca tabla**: icono con el color de la categoría + concepto
+  arriba + cuenta/fecha en gris debajo + importe a la derecha.
+  Movimientos agrupados por día con el total del día en su cabecera.
+- **Números tabulares** (`font-variant-numeric: tabular-nums`) para que
+  los importes queden en columna perfecta. Detalle diminuto, y es justo
+  lo que separa "pulcro" de "casero".
+- **Título grande que encoge al hacer scroll**.
+- **Hojas que suben desde abajo** con Cancelar / Guardar arriba, en vez
+  de formularios con los botones al final.
+- **Deslizar la fila para editar/borrar** — ya existe (`.note-swipe-wrap`
+  de Notas), se reaprovecha tal cual.
+- **Menos densidad**: si algo cabe justo, sobra.
+
+### Limpieza acordada
+
+- Las dos tablas del histórico de ahorro → listas.
+- El árbol de casillas de Inversiones pegado a la gráfica → navegación
+  por carteras, como las carpetas de Notas.
+- Los formularios en línea de categorías → hoja.
+- Los botones "+ Cuenta / + Movimiento / + Gasto fijo" sueltos encima
+  de cada bloque → el botón flotante.
+
+---
+
+## 7. Plan de fases
+
+En este orden, por decisión de Koku (la previsión primero porque de ahí
+salen casi todas las peticiones nuevas):
+
+1. **Motor de previsión** — ocurrencias calculadas de las plantillas,
+   con estado pagado/pendiente. Sin interfaz todavía.
+2. **Pantalla de previsión** — "qué me queda por pagar"
+   (semana/mes/año, pendiente/pagado/todo) y la lista anual con
+   desglose por mes.
+3. **Suscripciones + evolución histórica** — coste normalizado
+   mensual/anual, ranking por coste anual, y el histórico por año de
+   cada gasto fijo.
+4. **Avisos múltiples por pago programado**, con el presupuesto de 64
+   notificaciones bien administrado.
+5. **Rediseño del inicio** (tarjetas tipo Salud) y el lenguaje visual
+   nuevo aplicado a lo que ya existe.
+6. **Objetivos con nombre** (sobres virtuales).
+7. **Dinero de terceros** (tipo de cuenta nuevo + exclusiones + su
+   pantalla).
+
+---
+
+## 8. Backlog (hablado, no empezado)
+
+- **Apuntar un gasto rápido desde fuera de la app** (Koku, 10/9/2026):
+  atajo, widget y/o botón en la pantalla de bloqueo o el centro de
+  control. Lo ideal sería poder elegir cuenta e importe ahí mismo; si
+  eso resulta demasiado para un widget, que al menos **abra la app
+  directamente en "añadir gasto"**. Hay terreno ganado: los widgets y
+  el centro de control ya funcionan (v0.40–v0.45), incluido un widget
+  de Finanzas.
+- **Presupuesto por categoría** ("150 € de comida al mes") con su
+  propio aviso.
+- **Traspasos entre cuentas** — hoy no existen: mover dinero de
   Corriente a Ahorro obliga a inventarse un gasto y un ingreso.
-- **Previsión de fin de mes**: con los gastos fijos ya conocidos y lo
-  gastado hasta hoy, decir cuánto va a quedar. Es de las cosas que más
-  diferencian una app útil de un registro contable.
-- **Objetivos de ahorro con nombre** ("viaje a Japón", "cambiar el
-  portátil") con progreso propio, en vez de un único objetivo mensual
-  abstracto. Enlaza natural con la herramienta de Viajes.
-- **Movimientos divididos** entre varias categorías (la compra del
-  súper que lleva comida y droguería).
-- **Etiquetas libres** además de la categoría, para cortes transversales
-  ("regalos de Navidad", "obras de casa").
-- **Repetir un movimiento anterior** de un toque — lo más frecuente en
-  móvil es apuntar el café de todos los días.
-- **Patrimonio neto**: cuentas + inversiones − deudas, con su evolución.
-  Hoy las tres piezas existen pero no se suman en ningún sitio.
-- **Widget / acceso rápido para apuntar un gasto** sin abrir la app
-  entera. (Ojo: los widgets de iPhone de verdad exigen frameworks
-  nativos y quedaron anotados como proyecto aparte; pero un acceso
-  directo dentro de la app sí es viable ya.)
-- **Comparación con el mes anterior** en el resumen: "vas un 12% por
-  encima de lo normal en Ocio".
+- **Previsión de fin de mes**: con los gastos fijos conocidos y lo
+  gastado hasta hoy, cuánto va a quedar.
+- **Movimientos divididos** entre varias categorías (la compra que
+  lleva comida y droguería).
+- **Etiquetas libres** además de la categoría ("regalos de Navidad",
+  "obras de casa").
+- **Repetir un movimiento anterior** de un toque.
+- **Patrimonio neto**: cuentas + inversiones − deudas y su evolución.
+  Las tres piezas existen pero no se suman en ningún sitio.
+- **Comparación con el mes anterior**: "vas un 12% por encima de lo
+  normal en Ocio".
+- **Gastos compartidos** (lo que te devuelven a medias), que es el
+  caso mixto del dinero de terceros.
 
-Ideas que se han descartado explícitamente y conviene no reabrir sin
-motivo: **APIs de cotización en vivo** para inversiones (decisión
-tomada: todo manual) y cualquier cosa que implique servicio en la nube o
-cuenta de usuario (la app es local-first por diseño).
+Descartado a propósito, no reabrir sin motivo: **APIs de cotización en
+vivo** (todo manual, decisión tomada) y cualquier cosa con servicio en
+la nube o cuenta de usuario (la app es local-first por diseño).
 
 ---
 
-## 6. Decisiones abiertas (para Koku)
-
-1. **¿Cuántas secciones?** ¿Se acepta bajar de cinco pestañas a tres o
-   cuatro, moviendo cuentas/categorías/carteras a un apartado de
-   ajustes? Es el cambio con más impacto en toda la navegación.
-2. **¿Finanzas en la barra inferior?** El hueco central es
-   configurable. ¿Se deja como está (entrando por Herramientas) o
-   Finanzas pasa a ser candidata a ocupar ese hueco?
-3. **¿El rediseño se queda en móvil o vuelve a escritorio?** Varias de
-   las ideas de la sección 5 son de datos, no de interfaz: si se
-   construyen, tiene sentido que estén en las dos ramas. Conviene
-   decidir antes de empezar, para no portar dos veces.
-4. **¿Primero la interfaz o primero las funciones?** El plan de arriba
-   es todo interfaz. Meter presupuestos por categoría o traspasos antes
-   cambiaría lo que hay que dibujar.
-5. **Orden de las fases**: el plan va Resumen → Movimientos → el resto.
-   Si lo que más usa Koku es apuntar gastos sobre la marcha, quizá
-   convenga empezar por Movimientos y el FAB.
-
----
-
-## 7. Reglas de trabajo que aplican en esta rama
+## 9. Reglas de trabajo que aplican en esta rama
 
 Heredadas de `movil-ui`, donde ya estaban acordadas:
 
