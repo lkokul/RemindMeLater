@@ -1323,23 +1323,32 @@
        en app.js). -->
   <div id="finanzas-view" class="my-space-view hidden">
     <div class="my-space-view-header">
-      <h2>Finanzas</h2>
+      <h2 id="finanzas-view-title">Finanzas</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-finanzas" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-finanzas-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
-    <div class="finanzas-tabs">
-      <button type="button" class="finanzas-tab-btn active" data-finanzas-tab="resumen">Resumen</button>
-      <button type="button" class="finanzas-tab-btn" data-finanzas-tab="movimientos">Movimientos</button>
-      <button type="button" class="finanzas-tab-btn" data-finanzas-tab="gastos-fijos">Gastos fijos</button>
-      <button type="button" class="finanzas-tab-btn" data-finanzas-tab="inversiones">Inversiones</button>
-      <button type="button" class="finanzas-tab-btn" data-finanzas-tab="deudas">Deudas</button>
+    <!-- La fila de cinco pestañas se fue (decision del 10/9/2026). No
+         escalaba: ya habia cinco y venian Objetivos, Suscripciones y
+         Prevision. En su lugar, un INICIO de tarjetas tipo la app Salud:
+         cada tarjeta resume una cifra y se toca para entrar en su
+         pantalla. Añadir una seccion mañana es añadir una tarjeta, no
+         redisenar la navegacion otra vez. -->
+    <button type="button" id="btn-finanzas-back" class="finanzas-back-btn hidden">‹ Finanzas</button>
+
+    <div class="finanzas-tab-panel" data-finanzas-panel="inicio">
+      <div class="finanzas-hero">
+        <div class="finanzas-hero-label">Tienes en total</div>
+        <div class="finanzas-hero-amount" id="finanzas-inicio-total">—</div>
+        <div class="finanzas-hero-sub" id="finanzas-inicio-sub"></div>
+      </div>
+      <div id="finanzas-inicio-tarjetas" class="finanzas-cards"></div>
     </div>
 
     <!-- Pestaña Resumen: saldo de cada cuenta, progreso del limite mensual
          de gasto, y desglose del gasto de este mes por categoria. -->
-    <div class="finanzas-tab-panel" data-finanzas-panel="resumen">
+    <div class="finanzas-tab-panel hidden" data-finanzas-panel="resumen">
       <h3>Saldo por cuenta</h3>
       <div id="finanzas-accounts-summary" class="finanzas-accounts-summary"></div>
       <!-- Dinero de terceros: lo que hay en cuentas de tipo "De terceros"

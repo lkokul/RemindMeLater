@@ -17079,25 +17079,211 @@ document.getElementById('finanzas-investment-form').addEventListener('submit', a
   renderFinanzasResumenTab();
 });
 
-// -- Pestañas + apertura/cierre de toda la vista --
+// =====================================================================
+// Navegacion de Finanzas: un INICIO de tarjetas y pantallas debajo.
+//
+// Antes eran cinco pestañas en una fila. No escalaba: con Objetivos,
+// Suscripciones y Prevision se iba a ocho, y ocho pestañas no caben en el
+// ancho de un telefono. Ahora funciona como la app Salud -- una columna de
+// tarjetas, cada una con su cifra, y al tocarla se abre su pantalla con
+// una vuelta atras. Una seccion nueva es una tarjeta mas.
+// =====================================================================
+
+const FINANZAS_SECCIONES = {
+  inicio: 'Finanzas',
+  resumen: 'Este mes',
+  movimientos: 'Movimientos',
+  'gastos-fijos': 'Gastos fijos',
+  inversiones: 'Inversiones',
+  deudas: 'Deudas',
+};
+
 function switchFinanzasTab(tabName) {
-  document.querySelectorAll('.finanzas-tab-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.finanzasTab === tabName);
-  });
+  const enInicio = tabName === 'inicio';
   document.querySelectorAll('.finanzas-tab-panel').forEach((panel) => {
     panel.classList.toggle('hidden', panel.dataset.finanzasPanel !== tabName);
   });
+  // El titulo de arriba dice donde estas, que es lo que sustituye a la
+  // pestaña marcada de antes.
+  document.getElementById('finanzas-view-title').textContent = FINANZAS_SECCIONES[tabName] || 'Finanzas';
+  document.getElementById('btn-finanzas-back').classList.toggle('hidden', enInicio);
+  // El boton de salir a Herramientas solo tiene sentido en el inicio: desde
+  // dentro de una seccion, lo que uno quiere es volver A FINANZAS.
+  document.getElementById('btn-close-finanzas').classList.toggle('hidden', !enInicio);
+  if (enInicio) renderFinanzasInicio();
 }
-document.querySelectorAll('.finanzas-tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => switchFinanzasTab(btn.dataset.finanzasTab));
-});
+
+document.getElementById('btn-finanzas-back').addEventListener('click', () => switchFinanzasTab('inicio'));
+
+// -- Las tarjetas del inicio --
+//
+// Cada una se construye con lo que ya sabe la app; si algo falla, la
+// tarjeta se queda sin cifra pero la pantalla sigue en pie (una seccion
+// rota no puede llevarse por delante el resto del inicio).
+function finanzasTarjetaEl({ icono, titulo, cifra, detalle, destino, alPulsar }) {
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'finanzas-card';
+  card.addEventListener('click', alPulsar || (() => switchFinanzasTab(destino)));
+
+  const cab = document.createElement('span');
+  cab.className = 'finanzas-card-head';
+  const ico = document.createElement('span');
+  ico.className = 'finanzas-card-icon';
+  ico.textContent = icono;
+  const tit = document.createElement('span');
+  tit.className = 'finanzas-card-title';
+  tit.textContent = titulo;
+  const flecha = document.createElement('span');
+  flecha.className = 'finanzas-card-chevron';
+  flecha.textContent = '›';
+  cab.append(ico, tit, flecha);
+  card.appendChild(cab);
+
+  const c = document.createElement('span');
+  c.className = 'finanzas-card-amount';
+  c.textContent = cifra;
+  card.appendChild(c);
+
+  if (detalle) {
+    const d = document.createElement('span');
+    d.className = 'finanzas-card-detail';
+    d.textContent = detalle;
+    card.appendChild(d);
+  }
+  return card;
+}
+
+async function renderFinanzasInicio() {
+  const cont = document.getElementById('finanzas-inicio-tarjetas');
+  const esAjena = (a) => String(a.type || '').toLowerCase() === 'de terceros';
+
+  // El total de arriba es TU dinero: las cuentas de terceros no suman
+  // (salvo que el interruptor del Resumen diga lo contrario).
+  const cuentas = finanzasAccounts.filter((a) => finanzasIncluyeTerceros() || !esAjena(a));
+  const total = cuentas.reduce((acc, a) => acc + a.balance, 0);
+  document.getElementById('finanzas-inicio-total').textContent = formatFinanzasAmount(total);
+  document.getElementById('finanzas-inicio-sub').textContent =
+    cuentas.length === 0
+      ? 'Todavía no tienes cuentas'
+      : `${cuentas.length} ${cuentas.length === 1 ? 'cuenta' : 'cuentas'}`;
+
+  const mes = `${finanzasCurrentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const primero = `${mes}-01`;
+  const ultimoDia = new Date(finanzasCurrentYear, new Date().getMonth() + 1, 0).getDate();
+  const ultimo = `${mes}-${String(ultimoDia).padStart(2, '0')}`;
+
+  // Todo lo que necesitan las tarjetas, de una vez. allSettled y no all:
+  // que Deudas falle no puede dejar el inicio en blanco.
+  const [resumen, prevision, suscripciones, deudas] = await Promise.allSettled([
+    api(`/api/finanzas-transactions/summary/month?month=${mes}${finanzasTercerosQS('&')}`),
+    api(`/api/finanzas-recurring-expenses/forecast?from=${primero}&to=${ultimo}`),
+    api('/api/finanzas-recurring-expenses/summary'),
+    api('/api/finanzas-debts'),
+  ]);
+  const dato = (r) => (r.status === 'fulfilled' ? r.value : null);
+
+  cont.innerHTML = '';
+
+  const m = dato(resumen);
+  if (m) {
+    const limite = m.monthlyBudgetLimit;
+    cont.appendChild(
+      finanzasTarjetaEl({
+        icono: '📊',
+        titulo: 'Este mes',
+        cifra: formatFinanzasAmount(m.totalExpenseAll),
+        detalle: limite
+          ? `de ${formatFinanzasAmount(limite)} de límite · ahorras ${formatFinanzasAmount(m.savings)}`
+          : `gastado · ahorras ${formatFinanzasAmount(m.savings)}`,
+        destino: 'resumen',
+      })
+    );
+  }
+
+  const p = dato(prevision);
+  if (p) {
+    const pendientes = p.occurrences.filter((o) => o.status !== 'paid');
+    cont.appendChild(
+      finanzasTarjetaEl({
+        icono: '📅',
+        titulo: 'Próximos pagos',
+        cifra: formatFinanzasAmount(p.totals.unpaid),
+        detalle:
+          pendientes.length === 0
+            ? 'No te queda nada por pagar este mes'
+            : `${pendientes.length} ${pendientes.length === 1 ? 'pago' : 'pagos'} · el siguiente, ${finanzasFijosFechaCorta(pendientes[0].date)}`,
+        alPulsar: () => {
+          switchFinanzasTab('gastos-fijos');
+          switchFinanzasFijosVista('pendientes');
+        },
+      })
+    );
+  }
+
+  const s = dato(suscripciones);
+  if (s && s.byKind.subscription.count > 0) {
+    cont.appendChild(
+      finanzasTarjetaEl({
+        icono: '📺',
+        titulo: 'Suscripciones',
+        cifra: `${formatFinanzasAmount(s.byKind.subscription.monthly)}/mes`,
+        detalle: `${formatFinanzasAmount(s.byKind.subscription.annual)} al año · ${s.byKind.subscription.count} ${s.byKind.subscription.count === 1 ? 'activa' : 'activas'}`,
+        alPulsar: () => {
+          switchFinanzasTab('gastos-fijos');
+          switchFinanzasFijosVista('plantillas');
+          const chip = document.querySelector('[data-fijos-kind="subscription"]');
+          if (chip) chip.click();
+        },
+      })
+    );
+  }
+
+  cont.appendChild(
+    finanzasTarjetaEl({
+      icono: '🧾',
+      titulo: 'Movimientos',
+      cifra: 'Ver todos',
+      detalle: 'Gastos e ingresos, con sus filtros',
+      destino: 'movimientos',
+    })
+  );
+
+  const d = dato(deudas);
+  if (d && d.length > 0) {
+    const pendientes = d.filter((x) => !x.paid);
+    const meDeben = pendientes.filter((x) => x.direction === 'owed_to_me').reduce((a, x) => a + x.amount, 0);
+    const debo = pendientes.filter((x) => x.direction !== 'owed_to_me').reduce((a, x) => a + x.amount, 0);
+    cont.appendChild(
+      finanzasTarjetaEl({
+        icono: '🤝',
+        titulo: 'Deudas',
+        cifra: formatFinanzasAmount(meDeben - debo),
+        detalle: `te deben ${formatFinanzasAmount(meDeben)} · debes ${formatFinanzasAmount(debo)}`,
+        destino: 'deudas',
+      })
+    );
+  }
+
+  cont.appendChild(
+    finanzasTarjetaEl({
+      icono: '📈',
+      titulo: 'Inversiones',
+      cifra: 'Ver cartera',
+      detalle: 'Compras, ventas y dividendos',
+      destino: 'inversiones',
+    })
+  );
+}
 
 async function openFinanzasView() {
   setupFinanzasIconColorFields();
   closeExtensionsView();
   document.getElementById('finanzas-view').classList.remove('hidden');
   setCurrentScreen('finanzas');
-  switchFinanzasTab('resumen');
+  // Se entra siempre por el inicio (y no por donde se saliera la ultima
+  // vez): al abrir Finanzas lo que uno quiere ver es el panorama.
+  switchFinanzasTab('inicio');
   await refreshFinanzasAccountsAndCategories();
   await loadFinanzasPortfolios();
   await loadFinanzasAssets();
@@ -17110,6 +17296,9 @@ async function openFinanzasView() {
   finanzasAssetTreeSelectedIds = new Set(finanzasAssets.map((a) => a.id));
   renderFinanzasAssetTree();
   await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasRecurringTab(), refreshFinanzasInvestmentsTab(), refreshFinanzasDebtsTab()]);
+  // Y se repintan las tarjetas ahora que los datos estan cargados: la
+  // primera pasada de arriba se hizo con las cuentas todavia vacias.
+  await renderFinanzasInicio();
 }
 function closeFinanzasView() {
   document.getElementById('finanzas-view').classList.add('hidden');

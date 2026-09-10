@@ -5172,3 +5172,53 @@ body.gym-rest-push #settings-modal .settings-card {
 .finanzas-account-card-ajena {
   border-left: 3px solid color-mix(in srgb, var(--accent) 60%, var(--border));
 }
+
+/* --- Inicio de Finanzas: tarjetas tipo la app Salud --- */
+.finanzas-cards { display: flex; flex-direction: column; gap: 0.6rem; }
+.finanzas-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.9rem 1rem;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--surface-text);
+  font: inherit;
+  cursor: pointer;
+}
+.finanzas-card:active { background: var(--surface-2); }
+.finanzas-card-head { display: flex; align-items: center; gap: 0.5rem; }
+.finanzas-card-icon { font-size: 0.95rem; }
+.finanzas-card-title {
+  flex: 1;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
+}
+.finanzas-card-chevron {
+  font-size: 1.1rem;
+  color: color-mix(in srgb, var(--surface-text) 45%, var(--surface));
+}
+.finanzas-card-amount { font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.finanzas-card-detail {
+  font-size: 0.8rem;
+  color: color-mix(in srgb, var(--surface-text) 58%, var(--surface));
+}
+
+/* Vuelta atras desde una seccion al inicio. Va pegada arriba a la
+   izquierda, como el "‹ Atras" de iOS. */
+.finanzas-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-bottom: 0.8rem;
+  padding: 0.3rem 0.1rem;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 0.95rem;
+  cursor: pointer;
+}

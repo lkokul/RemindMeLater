@@ -2137,6 +2137,16 @@ document.addEventListener('keydown', (e) => {
   }
   const finanzasView = document.getElementById('finanzas-view');
   if (finanzasView && !finanzasView.classList.contains('hidden')) {
+    // Capa a capa, igual que Configuracion: si estas DENTRO de una
+    // seccion de Finanzas (Movimientos, Gastos fijos...), Esc te devuelve
+    // a su inicio de tarjetas; solo desde el inicio sale a Herramientas.
+    // Antes esto cerraba Finanzas entera de un golpe, que con la
+    // navegacion nueva seria perder el sitio sin querer.
+    const atras = document.getElementById('btn-finanzas-back');
+    if (atras && !atras.classList.contains('hidden')) {
+      atras.click();
+      return;
+    }
     document.getElementById('btn-close-finanzas').click();
     return;
   }
