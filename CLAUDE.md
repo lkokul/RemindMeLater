@@ -1880,6 +1880,163 @@ pillar y que un guion sí:
 
 Si algún día se añade un widget, lo barato es lanzarlo antes de compilar.
 
+## Los widgets se veían vacíos, y el centro de control no hacía nada
+
+Ronda del 10/9/2026, toda de cosas que Koku vio con el teléfono en la
+mano tras la build #55.
+
+### El botón del centro de control (arreglado a la segunda)
+
+Koku: *"El panel de control no funciona, se crea el botón, pero no hace
+nada"*. **Desde un control de iOS, el sistema NO abre esquemas de URL
+propios** (los `remindmelater://` de esta app): solo universal links, que
+piden un dominio web con su archivo de asociación, y esta app no tiene
+ni servidor ni dominio. El botón se queda mudo sin dar ningún error, y
+**en el simulador sí funciona** — por eso es tan difícil de ver desde
+aquí. Está en los foros de Apple (hilos 762479, 762586, 763692).
+
+Eso explica de paso el intento ANTERIOR: era un AppIntent que dejaba la
+marca en el App Group, y su fallo se le achacó al App Group (que
+entonces sí estaba roto). Eran dos fallos distintos tapándose el uno al
+otro.
+
+**Lo que funciona** (`ios/App/App/AbrirDesdeControl.swift`): el botón
+ejecuta un AppIntent NUESTRO con `openAppWhenRun`, iOS abre la app, y es
+ese intent — ya dentro — quien devuelve `OpenURLIntent` con la URL de
+siempre. Desde dentro de la app el esquema propio sí vale, así que el
+camino de entrada sigue siendo único (SceneDelegate → UserDefaults → el
+JavaScript), igual que el toque en el widget.
+
+**Y la pieza que decide si funciona o no, que no es nada evidente: el
+intent tiene que estar compilado en LA APP Y EN LA EXTENSIÓN.** Si vive
+solo en la extensión (lo natural, porque es la que pinta el botón), iOS
+no encuentra a quién ejecutarlo en el proceso de la app y el botón vuelve
+a no hacer nada, otra vez sin ningún error. Por eso ese archivo aparece
+DOS veces en el `project.pbxproj`, igual que `ExtenderDescansoIntent.swift`.
+
+Dos cosas pensadas y descartadas a propósito:
+
+- **Dejar la marca también en el intent** (cinturón y tirantes): serían
+  dos escritores de la misma marca, y si el JavaScript leyera entre las
+  dos escrituras navegaría DOS veces. En "nuevo evento" eso es abrir el
+  formulario otra vez y perder lo escrito.
+- **Fiarse solo de la comprobación del arranque**: el intent corre en el
+  proceso de la app SIN un orden garantizado respecto a `init()`, así que
+  puede dejar la marca justo después de que la miremos. Hay dos
+  relecturas (600 ms y 2 s); la marca se consume EN NATIVO, así que una
+  relectura sin marca no hace nada.
+
+**`tools/comprobar-widgets.py`** (antes vivía en un scratchpad que no
+sobrevive a la sesión, así que la instrucción de lanzarlo antes de
+compilar no se podía cumplir) tiene dos comprobaciones nuevas para este
+fallo exacto: que los archivos con intents de control estén en LAS DOS
+fases de Sources, y que ningún `ControlWidgetButton` use `OpenURLIntent`
+directamente. Las dos se probaron rompiendo el proyecto a propósito.
+
+### Rellenar los widgets
+
+Koku, con el mediano del Gimnasio en un día de descanso: *"lo veo algo
+vacío, se podría poner alguna cosa... No sólo para ese, para el resto
+también"*. Eligió tres de las cuatro que se le ofrecieron (dijo que no a
+una tira con las posiciones del ciclo):
+
+1. **Marca de agua** (`MarcaDeAgua` en `ResumenDeLaApp.swift`): el icono
+   de cada widget, grande y al 12% de opacidad en el color del acento,
+   saliéndose por la esquina de abajo a la derecha. Va de FONDO, así que
+   no empuja nada, y **solo en la pantalla de inicio**: en la de bloqueo
+   iOS pinta en monocromo y una marca de agua se come la poca
+   legibilidad que queda.
+2. **Más contenido**: Hoy y Lecturas pasan de 3 a 4 filas en el mediano
+   (el resumen ya mandaba 4, se estaban tirando), y el del Gimnasio
+   estrena la mitad derecha con **los ejercicios del día**
+   (`listaEjercicios` en el resumen) debajo del botón Empezar.
+3. **Pie de contexto**: "Siguiente: Tirón" en el Gimnasio, "+3 más · 2
+   vencidas" en Tareas, "12 días de mes · 25 €/día" en Finanzas (un
+   reparto calculado, no un dato nuevo), "Dura 7 días" en Viajes.
+
+**El pie del Gimnasio dice "Siguiente" y NO "Mañana"**, a propósito: el
+ciclo avanza por entrenos hechos, no por calendario, así que prometer una
+fecha sería mentira en cuanto te saltes un día.
+
+**Bug encontrado forzando fallos, no en el uso normal**: un viaje YA
+EMPEZADO decía que duraba menos de lo que dura. `diasHasta()` recorta a 0
+los días negativos (para no decir "faltan -3 días") y se estaba usando
+para medir una duración: un viaje empezado hace 2 días y con 3 por
+delante decía 4 en vez de 6. Ahora hay un `diasEntre()` aparte, CON
+signo, y `diasHasta()` se apoya en él. Si algún día hace falta medir otra
+duración, es ese el que se usa.
+
+### Tres cosas del Gimnasio que se vieron de paso
+
+- **La ✕ del modal de editar un ejercicio** salía debajo del título y a
+  la izquierda. Ese modal era **el único de la app** que usaba una clase
+  (`.modal-head`) que **no existe en `styles.css`** — nunca se llegó a
+  escribir, y se usaba una sola vez en todo el proyecto. Sin regla, el
+  div se pinta en bloque. Ahora usa `.modal-close-x`, como los otros 30
+  botones de cerrar.
+- **Descanso y RPE no quedaban a la misma altura**: "Descanso entre
+  series (s)" ocupa dos líneas y "RPE del ejercicio" una, así que los
+  campos arrancaban descuadrados. Es EXACTAMENTE el mismo arreglo que ya
+  se hizo en `.gym-set-segment-fields` (`align-items: stretch` +
+  `justify-content: flex-end`), en otro sitio. Si aparece una tercera
+  pareja de campos con rótulos de distinto largo, ya se sabe la cura.
+- **Los unilaterales en una sesión apuntada A MANO** no distinguían
+  izquierda de derecha. Aquí no faltaba lógica: `gymExerciseUsesSides()`,
+  `gymSetSerieNumber()` y el reparto por lados ya existían para el
+  entreno en vivo — **el editor a mano simplemente no los usaba**. Ahora,
+  si el ejercicio va por lados, cada serie tiene dos botones
+  Izquierdo/Derecho (botones y no un `<select>`, por la regla de la app),
+  "+ Serie" añade **las dos filas** de golpe, y los dos lados comparten
+  número de serie. Volver a pulsar el lado ya puesto lo quita.
+
+### Mover un ejercicio con la lista llena
+
+Koku: *"si tengo muchos ejercicios me gustaría que si subo mucho el
+ejercicio desplazara la vista hasta donde parara"*. Con la lista llena,
+el ejercicio de abajo no podía llegar arriba: el dedo topaba con el borde
+de la pantalla antes que la tarjeta con su destino.
+
+Ahora `habilitarArrastreDeEjercicio()` desplaza `.gym-live-content` al
+acercarse a un borde, más rápido cuanto más cerca. Dos detalles que no
+son obvios:
+
+- **Va en un bucle de fotogramas y NO en el `pointermove`**: con el dedo
+  PARADO en el borde no llega ni un evento, y es justo cuando tiene que
+  seguir moviéndose.
+- **El desplazamiento de la lista se SUMA al del dedo** (`recolocar()`):
+  si no, al moverse la lista la tarjeta se iría con ella, se despegaría
+  del dedo y contaría mal a qué hueco cae.
+
+El bucle se cancela al soltar; hay una comprobación de que la vista se
+queda quieta después, porque un `requestAnimationFrame` olvidado ahí no
+daría ningún error, solo se comería la batería.
+
+### El peso, con decimales
+
+Koku: *"No me deja poner 16,3kg"*. Eran **dos cosas a la vez** y hacían
+falta las dos:
+
+1. Los campos eran `<input type="number">` con `step="0.5"`. Un 16,3 no
+   es múltiplo de 0,5, así que el navegador lo daba por inválido.
+2. Con el teléfono en español, **la tecla decimal del teclado numérico es
+   una COMA**, y `type="number"` la rechaza de plano: el campo se queda
+   vacío sin decir nada.
+
+Los cuatro campos de peso pasan a `type="text" inputmode="decimal"`, y
+todo lo que se lee de ellos pasa por **`gymNormalizarPeso()`**, que
+cambia la última coma por un punto (la última, no todas: así "1.234,5"
+también se lee bien). Lo que se guarda en `weightDisplay` ya va
+normalizado, para que la sugerencia gris de la serie siguiente se pueda
+leer con `Number()` sin acordarse de nada.
+
+**Y una red que antes ponía el navegador**: al pasar a texto se fue el
+`min="0"`, así que `gymWeightDisplayToKg()` descarta ahora los negativos
+(los trata como "no apunté peso"). Sin eso, un -5 restaría volumen en las
+gráficas.
+
+El RPE y la nota de Lecturas se quedan con `step="0.5"`: ahí el medio
+punto es lo correcto.
+
 ## Dos ramas: `desarrollador` y `movil-ui`
 
 Decisión de Koku (10/9/2026), después de que el widget se quedara en
@@ -1960,11 +2117,15 @@ con `calendario-notas-movil-UI` ya fusionada). Todo lo de esta
 conversación vive ahí; ver el bloque "Dos ramas" más arriba. **`movil-ui`
 está al mismo nivel**, sin los avisos de diagnóstico.
 
-**Última build: #55 (10/9/2026, `desarrollador`, commit `87fa740`), la
-primera que sube a TestFlight con el App Group de verdad en el `.ipa`.**
-Los seis widgets van dentro. Pendiente de que Koku los pruebe en el
-iPhone: que aparezcan en la galería, que enseñen datos en vez de "Abre
-la app", y que tocarlos lleve a donde toca.
+**Build #55 (10/9/2026)**: la primera que sube a TestFlight con el App
+Group de verdad en el `.ipa`. Koku la probó y los seis widgets se ven y
+llevan a donde tienen que llevar; lo único que no funcionaba eran los
+botones del centro de control (ver el bloque de arriba).
+
+**v0.43.0** recoge todo lo que salió de probar esa build: el arreglo del
+centro de control, el relleno de los seis widgets, y cuatro cosas del
+Gimnasio (la ✕ del modal, la altura de Descanso/RPE, los unilaterales en
+una sesión a mano, y el peso con decimales).
 
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 

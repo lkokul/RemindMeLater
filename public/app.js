@@ -8304,10 +8304,40 @@ function gymWeightKgToDisplay(weightKg) {
   const value = getGymWeightUnit() === 'lb' ? weightKg * KG_TO_LB : weightKg;
   return Math.round(value * 100) / 100;
 }
+// El peso tal y como se ESCRIBE, normalizado a como lo entiende
+// JavaScript. Koku: "No me deja poner 16,3kg".
+//
+// Eran dos cosas a la vez, y las dos hacian falta:
+//
+// 1. Los campos eran <input type="number"> con step="0.5". Un 16,3 no es
+//    multiplo de 0,5, asi que el navegador lo daba por invalido -- y
+//    ademas, con el telefono en español la tecla decimal del teclado
+//    numerico es una COMA, que type="number" rechaza de plano: el campo
+//    se queda vacio sin decir nada. Ahora son de texto con teclado
+//    decimal, que acepta las dos formas.
+// 2. Number('16,3') es NaN. Por eso se normaliza aqui, en UN solo sitio
+//    por el que pasa todo lo que se lee de esos campos.
+//
+// Se cambia solo la ULTIMA coma, no todas: "1.234,5" (miles con punto)
+// se lee bien, y un "16,3" suelto tambien.
+function gymNormalizarPeso(texto) {
+  if (texto === null || texto === undefined) return '';
+  const limpio = String(texto).trim();
+  if (!limpio.includes(',')) return limpio;
+  const i = limpio.lastIndexOf(',');
+  return `${limpio.slice(0, i).replace(/[.\s]/g, '')}.${limpio.slice(i + 1)}`;
+}
+
 function gymWeightDisplayToKg(displayValue) {
   if (displayValue === '' || displayValue === null || displayValue === undefined) return null;
-  const num = Number(displayValue);
-  if (Number.isNaN(num)) return null;
+  const num = Number(gymNormalizarPeso(displayValue));
+  if (!Number.isFinite(num)) return null;
+  // Un peso negativo no existe. Antes lo frenaba el min="0" del campo de
+  // numero; al pasar a texto ese freno se fue, asi que se para aqui. Se
+  // trata como "no apunte peso" (null), que es un estado que la app ya
+  // maneja en todas partes, en vez de guardar un -5 que luego restaria
+  // volumen en las graficas.
+  if (num < 0) return null;
   return getGymWeightUnit() === 'lb' ? num / KG_TO_LB : num;
 }
 
@@ -11178,31 +11208,16 @@ function habilitarArrastreDeEjercicio(envoltorio) {
     return lista ? [...lista.querySelectorAll('.note-swipe-wrap[data-exercise-id]')] : [];
   };
 
-  envoltorio.addEventListener('pointerdown', (e) => {
-    // Los botones de dentro siguen funcionando (empezar serie, plegar...).
-    if (e.target.closest('button, input, textarea, select, a, label')) return;
-    const filas = hermanos();
-    const desde = filas.indexOf(envoltorio);
-    if (desde < 0) return;
-    arrastre = {
-      y: e.clientY,
-      desde,
-      alto: envoltorio.offsetHeight + 13, // + el hueco entre tarjetas
-      hasta: desde,
-    };
-    // Capturar el puntero mantiene el arrastre aunque el dedo se salga
-    // de la tarjeta. Puede lanzar si ese puntero ya no esta activo (pasa
-    // con gestos que el sistema corta a media), y una excepcion aqui
-    // dejaria el arrastre a medias: no es imprescindible, asi que si
-    // falla se sigue sin ella.
-    try { envoltorio.setPointerCapture(e.pointerId); } catch { /* da igual */ }
-    envoltorio.classList.add('arrastrando');
-  });
-
-  envoltorio.addEventListener('pointermove', (e) => {
+  // Repinta la tarjeta que se arrastra y aparta las de en medio. Vive
+  // fuera del listener porque la llaman DOS: el dedo al moverse, y el
+  // auto-desplazamiento (que mueve la lista aunque el dedo este quieto).
+  const recolocar = () => {
     if (!arrastre) return;
-    e.preventDefault();
-    const dy = e.clientY - arrastre.y;
+    // El desplazamiento de la LISTA se suma al del dedo. Sin esto, al
+    // desplazarse la lista la tarjeta se iria con ella y se despegaria
+    // del dedo, ademas de contar mal a que hueco cae.
+    const rodado = arrastre.scroller ? arrastre.scroller.scrollTop - arrastre.scrollAlEmpezar : 0;
+    const dy = arrastre.ultimaY - arrastre.y + rodado;
     envoltorio.style.transform = `translateY(${dy}px)`;
     // A que posicion caeria si soltase ahora: cuantas tarjetas enteras
     // ha recorrido, topado a los extremos de la lista.
@@ -11220,11 +11235,83 @@ function habilitarArrastreDeEjercicio(envoltorio) {
         fila.style.transform = corrimiento ? `translateY(${corrimiento}px)` : '';
       });
     }
+  };
+
+  // AUTO-DESPLAZAMIENTO al llegar a los bordes (peticion de Koku: "si
+  // tengo muchos ejercicios me gustaria que si subo mucho el ejercicio
+  // desplazara la vista hasta donde parara"). Con la lista llena, el
+  // ejercicio de abajo no podia llegar arriba del todo: el dedo topaba
+  // con el borde de la pantalla antes que la tarjeta con su destino.
+  //
+  // Va en un bucle de fotogramas y no en el pointermove: con el dedo
+  // PARADO en el borde no llega ni un pointermove, y es justo cuando
+  // tiene que seguir desplazandose.
+  const ZONA_BORDE = 80;      // px desde el borde donde empieza a moverse
+  const VELOCIDAD_MAX = 14;   // px por fotograma pegado al borde del todo
+  const rodar = () => {
+    if (!arrastre) return;
+    const sc = arrastre.scroller;
+    if (sc) {
+      const caja = sc.getBoundingClientRect();
+      let paso = 0;
+      // Cuanto mas cerca del borde, mas rapido -- asi se puede afinar
+      // cerca del sitio sin que se dispare.
+      if (arrastre.ultimaY < caja.top + ZONA_BORDE) {
+        paso = -VELOCIDAD_MAX * Math.min(1, (caja.top + ZONA_BORDE - arrastre.ultimaY) / ZONA_BORDE);
+      } else if (arrastre.ultimaY > caja.bottom - ZONA_BORDE) {
+        paso = VELOCIDAD_MAX * Math.min(1, (arrastre.ultimaY - (caja.bottom - ZONA_BORDE)) / ZONA_BORDE);
+      }
+      if (paso) {
+        const antes = sc.scrollTop;
+        sc.scrollTop = antes + paso;
+        // Solo se recoloca si de verdad se ha movido: al llegar al tope
+        // scrollTop deja de cambiar y no hay nada que repintar.
+        if (sc.scrollTop !== antes) recolocar();
+      }
+    }
+    arrastre.fotograma = requestAnimationFrame(rodar);
+  };
+
+  envoltorio.addEventListener('pointerdown', (e) => {
+    // Los botones de dentro siguen funcionando (empezar serie, plegar...).
+    if (e.target.closest('button, input, textarea, select, a, label')) return;
+    const filas = hermanos();
+    const desde = filas.indexOf(envoltorio);
+    if (desde < 0) return;
+    // Quien se desplaza es .gym-live-content, no la lista: la lista crece
+    // con su contenido y el scroll lo lleva el contenedor de arriba.
+    const scroller = envoltorio.closest('.gym-live-content');
+    arrastre = {
+      y: e.clientY,
+      ultimaY: e.clientY,
+      desde,
+      alto: envoltorio.offsetHeight + 13, // + el hueco entre tarjetas
+      hasta: desde,
+      scroller,
+      scrollAlEmpezar: scroller ? scroller.scrollTop : 0,
+      fotograma: 0,
+    };
+    // Capturar el puntero mantiene el arrastre aunque el dedo se salga
+    // de la tarjeta. Puede lanzar si ese puntero ya no esta activo (pasa
+    // con gestos que el sistema corta a media), y una excepcion aqui
+    // dejaria el arrastre a medias: no es imprescindible, asi que si
+    // falla se sigue sin ella.
+    try { envoltorio.setPointerCapture(e.pointerId); } catch { /* da igual */ }
+    envoltorio.classList.add('arrastrando');
+    arrastre.fotograma = requestAnimationFrame(rodar);
+  });
+
+  envoltorio.addEventListener('pointermove', (e) => {
+    if (!arrastre) return;
+    e.preventDefault();
+    arrastre.ultimaY = e.clientY;
+    recolocar();
   });
 
   const soltar = () => {
     if (!arrastre) return;
     const { desde, hasta } = arrastre;
+    if (arrastre.fotograma) cancelAnimationFrame(arrastre.fotograma);
     arrastre = null;
     envoltorio.classList.remove('arrastrando');
     // El modo se desarma SIEMPRE al soltar, lo pidio asi Koku.
@@ -11301,7 +11388,7 @@ function renderGymExerciseEditSets() {
         <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar esta serie">✕</button>
       </div>
       <div class="gym-set-segment-fields">
-        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="number" inputmode="decimal" step="0.5" min="0" data-set-field="weightDisplay" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="text" inputmode="decimal" data-set-field="weightDisplay" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
         <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-set-field="reps" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
       </div>
       <label class="gym-set-segment-field"><span>Nota de la serie</span><input type="text" data-set-field="note" value="${escapeHtml(String(set.note ?? ''))}" /></label>
@@ -11314,7 +11401,13 @@ function renderGymExerciseEditSets() {
       </div>
     `;
     bloque.querySelectorAll('[data-set-field]').forEach((input) => {
-      input.addEventListener('input', () => { set[input.dataset.setField] = input.value; });
+      input.addEventListener('input', () => {
+        // El peso se guarda ya normalizado (la coma a punto): asi lo que
+        // queda en gymLiveSession se puede leer con Number() en todos los
+        // sitios que lo usan de sugerencia gris, sin acordarse de nada.
+        const campo = input.dataset.setField;
+        set[campo] = campo === 'weightDisplay' ? gymNormalizarPeso(input.value) : input.value;
+      });
     });
     // Marcar/desmarcar la serie como hecha. Antes era el ✓ de la fila del
     // entreno, que se quito: la columna no aportaba (ya se ve el "—"
@@ -11337,7 +11430,7 @@ function renderGymExerciseEditSets() {
     const editor = bloque.querySelector('[data-tramos-de]');
     if (!Array.isArray(set.segments)) set.segments = [];
     const pintar = () => montarEditorDeTramos(editor, set.segments, {
-      pesoMadre: bloque.querySelector('[data-set-field="weightDisplay"]').value || '',
+      pesoMadre: gymNormalizarPeso(bloque.querySelector('[data-set-field="weightDisplay"]').value) || '',
       alQuitar: () => pintar(),
     });
     pintar();
@@ -11535,7 +11628,7 @@ let gymSetEndSegments = [];
 // regla que usa gymFinishActiveSet para guardar la serie).
 function gymPesoMadreDeTramos() {
   const wEl = document.getElementById('gym-set-end-weight');
-  return wEl.value !== '' ? wEl.value : (wEl.placeholder || '');
+  return gymNormalizarPeso(wEl.value !== '' ? wEl.value : (wEl.placeholder || ''));
 }
 
 // El editor de tramos, montado sobre CUALQUIER contenedor. Se usa en
@@ -11577,7 +11670,7 @@ function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
         ${seg.kind === 'restpause'
           ? `<label class="gym-set-segment-field"><span>Pausa (s)</span><input type="number" inputmode="numeric" min="0" data-seg-field="pauseSeconds" value="${escapeHtml(String(seg.pauseSeconds ?? ''))}" /></label>`
           : ''}
-        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="text" inputmode="decimal" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" /></label>
         <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-seg-field="reps" value="${escapeHtml(String(seg.reps ?? ''))}" /></label>
       </div>
     `;
@@ -11615,11 +11708,14 @@ function gymLeerTramosDe(cont) {
     const leer = (campo) => {
       const el = fila.querySelector(`[data-seg-field="${campo}"]`);
       if (!el) return '';
-      if (el.value !== '') return el.value;
+      // El peso puede venir escrito con coma; el resto son enteros.
+      const norm = (v) => (campo === 'weightDisplay' ? gymNormalizarPeso(v) : v);
+      if (el.value !== '') return norm(el.value);
       // Campo vacio: vale la sugerencia gris, pero SOLO si de verdad es
       // un numero. Hay placeholders que son texto ("reps", "pausa s") y
       // colarlos aqui guardaria un NaN en la base de datos.
-      return Number.isFinite(Number(el.placeholder)) && el.placeholder !== '' ? el.placeholder : '';
+      const sug = norm(el.placeholder);
+      return Number.isFinite(Number(sug)) && sug !== '' ? sug : '';
     };
     const kind = fila.dataset.segKind === 'restpause' ? 'restpause' : 'dropset';
     return {
@@ -11678,7 +11774,7 @@ function gymFinishActiveSet() {
     // Campo vacio = te vale la sugerencia gris, asi que se guarda esa.
     const wEl = document.getElementById('gym-set-end-weight');
     const rEl = document.getElementById('gym-set-end-reps');
-    set.weightDisplay = wEl.value !== '' ? wEl.value : (wEl.placeholder || '');
+    set.weightDisplay = gymNormalizarPeso(wEl.value !== '' ? wEl.value : (wEl.placeholder || ''));
     set.reps = rEl.value !== '' ? rEl.value : (rEl.placeholder || '');
     set.note = document.getElementById('gym-set-end-note').value;
     set.segments = gymLeerTramosDelFormulario();
@@ -13072,7 +13168,17 @@ function renderGymSessionExercisesField() {
       initialValue: exRow.exerciseId != null ? String(exRow.exerciseId) : '',
       placeholder: 'Elige un ejercicio',
       searchable: true,
-      onChange: (valor) => { gymSessionModalExercises[exIndex].exerciseId = Number(valor); },
+      onChange: (valor) => {
+        const fila = gymSessionModalExercises[exIndex];
+        const antesPorLados = gymExerciseUsesSides(fila);
+        fila.exerciseId = Number(valor);
+        // Solo se repinta si cambia el TIPO de ejercicio (de normal a por
+        // lados o al reves): es cuando aparecen o sobran los botones de
+        // lado. Repintar en cada cambio movería el foco sin motivo.
+        // Las series ya escritas NO se tocan: cambiar de ejercicio no
+        // puede borrarte lo que llevabas apuntado.
+        if (gymExerciseUsesSides(fila) !== antesPorLados) renderGymSessionExercisesField();
+      },
     });
     header.querySelector('.gym-routine-exercise-picker').appendChild(pickerSesion.element);
     header.querySelector('[data-field="exRpe"]').addEventListener('input', (e) => {
@@ -13110,14 +13216,14 @@ function renderGymSessionExercisesField() {
       // la serie, ya lo veo").
       bloqueSerie.innerHTML = `
         <div class="gym-set-segment-head">
-          <span class="gym-set-segment-tag">${setIndex + 1}</span>
+          <span class="gym-set-segment-tag">${gymSetSerieNumber(exRow, setIndex)}</span>
           <span class="gym-set-segment-name">Serie${set.side ? ` · lado ${gymSideLabel(set.side)}` : ''}</span>
           ${set.setType === 'failure' ? `<span class="gym-set-failure-chip" title="Serie llevada al fallo">Fallo</span>` : ''}
           <span class="gym-set-head-dur" title="Lo que duró la serie">${set.durationSeconds ? `Duración: ${gymFormatSetDuration(set.durationSeconds)}` : ''}</span>
           <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar serie">✕</button>
         </div>
         <div class="gym-set-segment-fields">
-          <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><input type="number" data-field="weight" min="0" step="0.5" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
+          <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><input type="text" inputmode="decimal" data-field="weight" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
           <label class="gym-set-segment-field"><span>Reps</span><input type="number" data-field="reps" min="0" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
           <!-- El "+60s" va PEGADO al descanso, no a la duracion: es
                descanso extra que se anadio con el boton +30s, y colgando
@@ -13130,7 +13236,7 @@ function renderGymSessionExercisesField() {
         <div class="gym-set-extend-list gym-session-set-actions"></div>
       `;
       bloqueSerie.querySelector('[data-field="reps"]').addEventListener('input', (e) => { set.reps = e.target.value; });
-      bloqueSerie.querySelector('[data-field="weight"]').addEventListener('input', (e) => { set.weightDisplay = e.target.value; });
+      bloqueSerie.querySelector('[data-field="weight"]').addEventListener('input', (e) => { set.weightDisplay = gymNormalizarPeso(e.target.value); });
       bloqueSerie.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => { set.restSeconds = e.target.value; });
       bloqueSerie.querySelector('[data-quitar-serie]').addEventListener('click', () => {
         exRow.sets.splice(setIndex, 1);
@@ -13145,14 +13251,39 @@ function renderGymSessionExercisesField() {
       const acciones = bloqueSerie.querySelector('.gym-session-set-actions');
       if (!Array.isArray(set.segments)) set.segments = [];
       const pintarTramos = () => montarEditorDeTramos(editor, set.segments, {
-        pesoMadre: bloqueSerie.querySelector('[data-field="weight"]').value || '',
+        pesoMadre: gymNormalizarPeso(bloqueSerie.querySelector('[data-field="weight"]').value) || '',
         alQuitar: () => pintarTramos(),
       });
+      // El LADO, solo en los ejercicios que se cuentan por lados. Aqui
+      // faltaba del todo: apuntando una sesion a mano no habia forma de
+      // decir cual era el izquierdo y cual el derecho, asi que un
+      // unilateral quedaba como cuatro series sueltas iguales. Toda la
+      // logica ya existia para el entreno en vivo (gymExerciseUsesSides,
+      // gymSetSerieNumber, gymBuildSetsForExercise): lo unico que faltaba
+      // era usarla tambien aqui.
+      //
+      // Botones y no un <select>: la regla de la app es no usar controles
+      // nativos, y ademas con dos opciones un desplegable es peor que dos
+      // botones que ya se ven.
+      const porLados = gymExerciseUsesSides(exRow);
       acciones.innerHTML = `
+        ${porLados ? `
+        <div class="gym-set-side-picker" role="group" aria-label="Lado de la serie">
+          <button type="button" class="gym-set-extend-btn${set.side === 'left' ? ' is-on' : ''}" data-lado="left">Izquierdo</button>
+          <button type="button" class="gym-set-extend-btn${set.side === 'right' ? ' is-on' : ''}" data-lado="right">Derecho</button>
+        </div>` : ''}
         <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
         <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
         <button type="button" class="gym-set-extend-btn${set.setType === 'failure' ? ' is-on' : ''}" data-toggle-failure>${set.setType === 'failure' ? '✓ ' : ''}Al fallo</button>
       `;
+      acciones.querySelectorAll('[data-lado]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          // Volver a pulsar el lado que ya esta puesto lo QUITA: asi se
+          // puede deshacer sin tener que borrar la serie.
+          set.side = set.side === btn.dataset.lado ? null : btn.dataset.lado;
+          renderGymSessionExercisesField();
+        });
+      });
       acciones.querySelectorAll('[data-add-seg]').forEach((btn) => {
         btn.addEventListener('click', () => {
           set.segments.push({ kind: btn.dataset.addSeg, weightDisplay: '', reps: '', pauseSeconds: '' });
@@ -13177,7 +13308,18 @@ function renderGymSessionExercisesField() {
       // (suele ser el mismo entre series seguidas) -- reps/peso se dejan
       // en blanco, varian serie a serie.
       const lastSet = exRow.sets[exRow.sets.length - 1];
-      exRow.sets.push({ reps: '', weightDisplay: '', restSeconds: lastSet ? lastSet.restSeconds : '', extraRestSeconds: null, segments: [], setType: null });
+      const descanso = lastSet ? lastSet.restSeconds : '';
+      const base = { reps: '', weightDisplay: '', restSeconds: descanso, extraRestSeconds: null, segments: [], setType: null };
+      if (gymExerciseUsesSides(exRow)) {
+        // Una serie de un ejercicio por lados son DOS filas, izquierda y
+        // derecha, igual que las crea el entreno en vivo
+        // (gymBuildSetsForExercise). Anadir una sola dejaria la serie
+        // coja y el numero de series descuadrado.
+        exRow.sets.push({ ...base, side: 'left', segments: [] });
+        exRow.sets.push({ ...base, side: 'right', segments: [] });
+      } else {
+        exRow.sets.push({ ...base, side: null });
+      }
       renderGymSessionExercisesField();
     });
     block.appendChild(addSetBtn);
@@ -13191,7 +13333,18 @@ document.getElementById('btn-add-gym-session-exercise').addEventListener('click'
     showAppAlert('Primero crea al menos un ejercicio desde la pestaña Plan.');
     return;
   }
-  gymSessionModalExercises.push({ exerciseId: state.gymExercises[0].id, rpe: '', sets: [{ reps: '', weightDisplay: '', restSeconds: '', segments: [], setType: null }] });
+  const primero = state.gymExercises[0];
+  const nuevo = { exerciseId: primero.id, rpe: '', sets: [] };
+  // Mismo criterio que "+ Serie": si el ejercicio va por lados, la
+  // primera serie ya nace con sus dos filas.
+  const base = { reps: '', weightDisplay: '', restSeconds: '', segments: [], setType: null };
+  if (gymExerciseUsesSides(nuevo)) {
+    nuevo.sets.push({ ...base, side: 'left', segments: [] });
+    nuevo.sets.push({ ...base, side: 'right', segments: [] });
+  } else {
+    nuevo.sets.push({ ...base, side: null });
+  }
+  gymSessionModalExercises.push(nuevo);
   renderGymSessionExercisesField();
 });
 
@@ -17430,7 +17583,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.42.2';
+const APP_VERSION = '0.43.0';
 const APP_VERSION_DATE = '2026-09-10';
 
 function renderAppVersionLine() {

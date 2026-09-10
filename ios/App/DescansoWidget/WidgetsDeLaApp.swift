@@ -81,15 +81,18 @@ extension ResumenDeLaApp {
             eventos: [
                 FilaDeEvento(titulo: "Dentista", hora: "10:30", color: "#5b8cff", todoElDia: false),
                 FilaDeEvento(titulo: "Comida con Ana", hora: "14:00", color: "#f0883e", todoElDia: false),
+                FilaDeEvento(titulo: "Gimnasio", hora: "19:00", color: "#a371f7", todoElDia: false),
             ],
-            total: 2, tareas: 3
+            total: 4, tareas: 3
         )
         r.tareas = SeccionTareas(
             lista: [
                 FilaDeTarea(titulo: "Llamar al banco", cuando: "", color: "#f85149", vencida: true, hoy: false),
                 FilaDeTarea(titulo: "Comprar pan", cuando: "", color: "#5b8cff", vencida: false, hoy: true),
+                FilaDeTarea(titulo: "Renovar el DNI", cuando: "", color: "#3fb950", vencida: false, hoy: false),
+                FilaDeTarea(titulo: "Devolver el libro", cuando: "", color: "#f0883e", vencida: false, hoy: false),
             ],
-            total: 5, vencidas: 1
+            total: 7, vencidas: 1
         )
         r.finanzas = SeccionFinanzas(gastado: 420, limite: 700, ahorro: 180, objetivo: 200, diasRestantes: 12)
         r.lecturas = SeccionLecturas(
@@ -99,7 +102,8 @@ extension ResumenDeLaApp {
             ],
             total: 2
         )
-        r.viajes = SeccionViajes(nombre: "Japón", dias: 24, enCurso: false, color: "#a371f7")
+        r.viajes = SeccionViajes(nombre: "Japón", dias: 24, enCurso: false, color: "#a371f7",
+                                 duracion: 14, restantes: 0)
         return r
     }
 }
@@ -201,7 +205,7 @@ struct VistaHoy: View {
         case .accessoryRectangular:
             rectangular
         case .systemMedium:
-            deInicio(maxFilas: 3)
+            deInicio(maxFilas: 4)
         default:
             deInicio(maxFilas: 2)
         }
@@ -270,6 +274,7 @@ struct VistaHoy: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .marcaDeAgua("calendar", acento)
         .fondoDeWidgetApp()
         .widgetURL(DestinoDeWidget.hoy.url)
     }
@@ -405,15 +410,29 @@ struct VistaTareas: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if let s = seccion, s.total > maxFilas {
-                    Text("+\(s.total - maxFilas) más")
-                        .font(.caption2).foregroundStyle(.secondary)
+                // El pie dice siempre algo: cuántas quedan sin enseñar y,
+                // si las hay, cuántas están vencidas. Un widget que se
+                // corta sin avisar hace pensar que eso es todo lo que
+                // tienes pendiente.
+                if !pieDeTareas(maxFilas: maxFilas).isEmpty {
+                    Text(pieDeTareas(maxFilas: maxFilas))
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .marcaDeAgua("checklist", acento)
         .fondoDeWidgetApp()
         .widgetURL(DestinoDeWidget.tareas.url)
+    }
+
+    private func pieDeTareas(maxFilas: Int) -> String {
+        guard let s = seccion else { return "" }
+        var trozos: [String] = []
+        let extra = s.total - maxFilas
+        if extra > 0 { trozos.append("+\(extra) más") }
+        if s.vencidas > 0 { trozos.append("\(s.vencidas) vencida\(s.vencidas == 1 ? "" : "s")") }
+        return trozos.joined(separator: " · ")
     }
 }
 
@@ -525,17 +544,30 @@ struct VistaFinanzas: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                if s.diasRestantes > 0 {
-                    Text("\(s.diasRestantes) día\(s.diasRestantes == 1 ? "" : "s") de mes")
-                        .font(.caption2).foregroundStyle(.secondary)
+                if !pieDelMes(s).isEmpty {
+                    Text(pieDelMes(s))
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             } else {
                 VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tus gastos")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .marcaDeAgua("eurosign.circle", acento)
         .fondoDeWidgetApp()
         .widgetURL(DestinoDeWidget.finanzas.url)
+    }
+
+    // El pie del mes. Lo interesante no es "quedan 12 días" ni "quedan
+    // 300 €" por separado, sino el reparto: cuánto puedes gastar al día
+    // sin pasarte. Sale de datos que YA viajan, no hace falta mandar nada
+    // nuevo.
+    private func pieDelMes(_ s: SeccionFinanzas) -> String {
+        guard s.diasRestantes > 0 else { return "Último día del mes" }
+        let dias = "\(s.diasRestantes) día\(s.diasRestantes == 1 ? "" : "s") de mes"
+        guard s.hayLimite, !s.pasado, s.restante > 0 else { return dias }
+        let porDia = s.restante / Double(s.diasRestantes)
+        return "\(dias) · \(importeCorto(porDia))/día"
     }
 }
 
@@ -597,7 +629,7 @@ struct VistaLecturas: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .widgetURL(DestinoDeWidget.lecturas.url)
         case .systemMedium:
-            deInicio(maxFilas: 3)
+            deInicio(maxFilas: 4)
         default:
             deInicio(maxFilas: 2)
         }
@@ -605,7 +637,11 @@ struct VistaLecturas: View {
 
     private func deInicio(maxFilas: Int) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            RotuloDeWidget(texto: "LEYENDO", color: acento)
+            HStack {
+                RotuloDeWidget(texto: "LEYENDO", color: acento)
+                Spacer(minLength: 0)
+                AvisoDeViejo(resumen: entry.resumen)
+            }
             if seccion == nil {
                 VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tus lecturas")
             } else if lista.isEmpty {
@@ -624,13 +660,16 @@ struct VistaLecturas: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if let s = seccion, s.total > maxFilas {
-                    Text("+\(s.total - maxFilas) más")
-                        .font(.caption2).foregroundStyle(.secondary)
+                if let s = seccion {
+                    Text(s.total > maxFilas
+                         ? "+\(s.total - maxFilas) más empezado\(s.total - maxFilas == 1 ? "" : "s")"
+                         : "\(s.total) empezado\(s.total == 1 ? "" : "s")")
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .marcaDeAgua("books.vertical.fill", acento)
         .fondoDeWidgetApp()
         .widgetURL(DestinoDeWidget.lecturas.url)
     }
@@ -720,7 +759,17 @@ struct VistaViajes: View {
                     .font(.title3).fontWeight(.bold)
                     .minimumScaleFactor(0.6).lineLimit(2)
                 if s.enCurso {
-                    Text("en marcha").font(.caption).foregroundStyle(acento)
+                    // Estando DENTRO del viaje, "faltan 0 días" no dice
+                    // nada: lo que quieres saber es cuánto te queda.
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        if s.restantes > 0 {
+                            Text("\(s.restantes)").font(.title2).fontWeight(.heavy).foregroundStyle(acento)
+                            Text(s.restantes == 1 ? "día por delante" : "días por delante")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text("Último día").font(.caption).foregroundStyle(acento)
+                        }
+                    }
                 } else {
                     // El número grande y la palabra pequeña: de un vistazo
                     // lo que importa es cuántos días faltan.
@@ -729,9 +778,15 @@ struct VistaViajes: View {
                         Text(s.dias == 1 ? "día" : "días").font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                Spacer(minLength: 0)
+                if s.duracion > 0 {
+                    Text("Dura \(s.duracion) día\(s.duracion == 1 ? "" : "s")")
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .marcaDeAgua("airplane", acento)
         .fondoDeWidgetApp()
         .widgetURL(DestinoDeWidget.viajes.url)
     }

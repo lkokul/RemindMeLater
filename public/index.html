@@ -869,10 +869,15 @@
        ejercicio arriba/abajo. -->
   <div id="gym-exercise-edit-modal" class="modal hidden">
     <div class="modal-card gym-modal gym-exercise-edit-card">
-      <div class="modal-head">
-        <h2 id="gym-exercise-edit-title">Editar ejercicio</h2>
-        <button type="button" id="btn-close-gym-exercise-edit" class="icon-btn" aria-label="Cerrar">✕</button>
-      </div>
+      <!-- La ✕ va SUELTA y con .modal-close-x, como en los otros 30
+           modales de la app: esa clase la coloca en absoluto arriba a la
+           derecha de la tarjeta. Antes iba dentro de un .modal-head con
+           .icon-btn, y .modal-head NO EXISTE en styles.css -- era la
+           unica vez que se usaba en todo el proyecto. Sin regla, el div
+           se pintaba en bloque: el titulo en una linea y la ✕ debajo, a
+           la izquierda. Koku lo enseño en una captura. -->
+      <button type="button" id="btn-close-gym-exercise-edit" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-exercise-edit-title">Editar ejercicio</h2>
       <form id="gym-exercise-edit-form">
         <div class="gym-exercise-edit-top">
           <label class="gym-set-field">
@@ -920,7 +925,12 @@
       <div id="gym-set-end-form" class="gym-set-end-form hidden">
         <label class="gym-set-field">
           <span>Peso</span>
-          <input type="number" id="gym-set-end-weight" inputmode="decimal" step="0.5" min="0" />
+          <!-- De TEXTO y no type="number": con el telefono en español la tecla
+                 decimal del teclado numerico es una COMA, y type="number" la
+                 rechaza dejando el campo vacio sin avisar. Ademas step="0.5"
+                 daba por invalido un 16,3. Lo que se escribe lo normaliza
+                 gymNormalizarPeso() al leerlo. -->
+            <input type="text" id="gym-set-end-weight" inputmode="decimal" />
         </label>
         <label class="gym-set-field">
           <span>Repeticiones</span>

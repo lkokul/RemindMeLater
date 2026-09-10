@@ -94,6 +94,7 @@ function seccionGimnasio() {
   const vacio = {
     hayCiclo: false, esDescanso: false, nombre: '', bloque: '',
     color: '#5b8cff', icono: '', posicion: 0, total: 0, ejercicios: 0,
+    listaEjercicios: [], siguiente: '',
   };
   if (typeof gymCicloDeHoy !== 'function') return vacio;
   let hoy = null;
@@ -103,9 +104,39 @@ function seccionGimnasio() {
   // Cuántos ejercicios tiene el día (solo los visibles: los ocultos no se
   // pre-cargan al entrenar, así que contarlos engañaría).
   let ejercicios = 0;
+  let listaEjercicios = [];
   if (hoy.rutina && Array.isArray(hoy.rutina.exercises)) {
-    ejercicios = hoy.rutina.exercises.filter((ex) => !ex.hidden).length;
+    const visibles = hoy.rutina.exercises.filter((ex) => !ex.hidden);
+    ejercicios = visibles.length;
+    // Los NOMBRES de los primeros, para que el widget mediano no se quede
+    // con media tarjeta vacía. Se manda el mismo tope que el resto de
+    // secciones: más filas no caben, y el buzón no es sitio para peso
+    // muerto.
+    listaEjercicios = visibles
+      .slice(0, WIDGET_MAX_FILAS)
+      .map((ex) => String(ex.name || ''))
+      .filter((n) => n !== '');
   }
+
+  // Qué viene DESPUÉS en el ciclo. Ojo con el nombre: no es "mañana".
+  // El ciclo avanza por ENTRENOS HECHOS, no por calendario (salvo los
+  // descansos, que se consumen al pasar el día), así que lo honesto es
+  // decir "siguiente" y no prometer una fecha que no se cumple si te
+  // saltas un día.
+  let siguiente = '';
+  try {
+    if (typeof gymCicloSiguientePosicion === 'function' && hoy.bloque) {
+      const pos = gymCicloSiguientePosicion(hoy.bloque, hoy.position);
+      const dias = Array.isArray(hoy.bloque.cycleDays) ? hoy.bloque.cycleDays : [];
+      const dia = dias.find((d) => d.position === pos);
+      if (dia) {
+        const rut = dia.routineId
+          ? state.gymRoutines.find((r) => r.id === dia.routineId)
+          : null;
+        siguiente = rut ? String(rut.name || '') : 'Descanso';
+      }
+    }
+  } catch { /* sin "siguiente" el widget simplemente no lo enseña */ }
 
   return {
     hayCiclo: true,
@@ -117,6 +148,8 @@ function seccionGimnasio() {
     posicion: Number(hoy.position) || 0,
     total: Number(hoy.length) || 0,
     ejercicios,
+    listaEjercicios,
+    siguiente,
   };
 }
 
@@ -268,25 +301,67 @@ async function seccionViajes() {
   const viaje = enCurso || futuros[0];
   if (!viaje) return { nombre: '', dias: 0, enCurso: false, color: '' };
 
+  // Cuánto dura, en días naturales contando los dos extremos: un viaje
+  // que empieza y acaba el mismo día dura 1, no 0.
+  //
+  // Se mide entre las DOS fechas del viaje, no restando dos diasHasta():
+  // diasHasta() recorta a 0 los días negativos (para no decir "faltan -3
+  // días"), así que en un viaje YA EMPEZADO el inicio contaba como 0 y la
+  // duración salía corta. Con un viaje empezado hace 2 días y 3 por
+  // delante decía 4 en vez de 6. Lo pilló el forzado, no el uso normal.
+  const fin = viaje.endDate || viaje.startDate;
+  const duracion = Math.max(1, diasEntre(viaje.startDate, fin) + 1);
+  // Y cuántos le quedan si ya estás dentro, que es lo que quieres saber
+  // estando de viaje (los días que faltan para empezar ya no dicen nada).
+  const restantes = enCurso ? Math.max(0, diasHasta(fin)) : 0;
+
   return {
     nombre: String(viaje.name || ''),
     // Días que faltan para empezar (0 si ya está en marcha).
     dias: enCurso ? 0 : diasHasta(viaje.startDate),
     enCurso: !!enCurso,
     color: viaje.color || gymAcentoParaElWidget(),
+    duracion,
+    restantes,
   };
 }
 
 // Días naturales entre hoy y una fecha ISO. Se cuenta a MEDIANOCHE de los
 // dos días, no de ahora mismo: si no, un viaje que empieza mañana a las
 // 09:00 diría "0 días" a partir de las 09:01 de hoy.
+//
+// RECORTA A 0 lo que ya pasó, a propósito: "faltan -3 días" no significa
+// nada de cara al usuario. Por eso NO sirve para medir duraciones -- para
+// eso está diasEntre(), justo debajo.
 function diasHasta(iso) {
   if (!iso) return 0;
-  const hoy = new Date();
-  const cero = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  const partes = iso.split('-').map(Number);
-  const destino = new Date(partes[0], (partes[1] || 1) - 1, partes[2] || 1);
-  return Math.max(0, Math.round((destino - cero) / 86400000));
+  return Math.max(0, diasEntre(fechaLocalISO(new Date()), iso));
+}
+
+// Días entre dos fechas ISO, con signo. Sin recortar: esto sí puede ser
+// negativo, y es lo que hace falta para medir cuánto dura algo que ya
+// empezó.
+function diasEntre(desdeISO, hastaISO) {
+  const a = fechaDeISO(desdeISO);
+  const b = fechaDeISO(hastaISO);
+  if (!a || !b) return 0;
+  return Math.round((b - a) / 86400000);
+}
+
+// "2026-09-20" -> Date local a medianoche. A mano y no new Date(iso),
+// porque el constructor interpreta una fecha suelta como UTC y en España
+// eso la deja en el día anterior a las 02:00.
+function fechaDeISO(iso) {
+  if (!iso) return null;
+  const partes = String(iso).slice(0, 10).split('-').map(Number);
+  if (partes.length < 3 || partes.some((n) => !Number.isFinite(n))) return null;
+  return new Date(partes[0], partes[1] - 1, partes[2]);
+}
+
+function fechaLocalISO(d) {
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mes}-${dia}`;
 }
 
 // El acento del tema activo, para cuando el día no tiene color propio.

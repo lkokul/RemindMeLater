@@ -239,17 +239,26 @@ struct SeccionViajes: Decodable {
     var dias: Int = 0
     var enCurso: Bool = false
     var color: String = ""
+    // Cuánto dura el viaje entero, y cuántos días le quedan si ya estás
+    // dentro. Estando de viaje, "faltan 0 días" no dice nada; "te quedan
+    // 3" sí.
+    var duracion: Int = 0
+    var restantes: Int = 0
 
-    enum CodingKeys: String, CodingKey { case nombre, dias, enCurso, color }
+    enum CodingKeys: String, CodingKey { case nombre, dias, enCurso, color, duracion, restantes }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         nombre = (try? c.decode(String.self, forKey: .nombre)) ?? ""
         dias = (try? c.decode(Int.self, forKey: .dias)) ?? 0
         enCurso = (try? c.decode(Bool.self, forKey: .enCurso)) ?? false
         color = (try? c.decode(String.self, forKey: .color)) ?? ""
+        duracion = (try? c.decode(Int.self, forKey: .duracion)) ?? 0
+        restantes = (try? c.decode(Int.self, forKey: .restantes)) ?? 0
     }
-    init(nombre: String, dias: Int, enCurso: Bool, color: String) {
+    init(nombre: String, dias: Int, enCurso: Bool, color: String,
+         duracion: Int = 0, restantes: Int = 0) {
         self.nombre = nombre; self.dias = dias; self.enCurso = enCurso; self.color = color
+        self.duracion = duracion; self.restantes = restantes
     }
 }
 
@@ -287,6 +296,51 @@ extension View {
         } else {
             self.padding()
         }
+    }
+}
+
+// LA MARCA DE AGUA: el icono de cada widget, grande y muy tenue, en la
+// esquina de abajo a la derecha.
+//
+// Koku, viendo el mediano del Gimnasio en un día de descanso: "lo veo
+// algo vacío, se podría poner alguna cosa... No sólo para ese, para el
+// resto también". Ese hueco existe de verdad -- en un día de entreno lo
+// tapa el botón "Empezar", y en cuanto no hay botón queda medio widget
+// en blanco.
+//
+// Cuatro decisiones, para que no se deshagan sin querer:
+//
+// - Va de FONDO (.background), no dentro del VStack: así no empuja ni
+//   recorta nada de lo que ya había, y si algún día el contenido crece
+//   hasta llenar el widget la marca simplemente queda detrás.
+// - Opacidad muy baja y el color del ACENTO, no gris: tiene que leerse
+//   como una textura del tema, no como un icono que se pueda tocar. Con
+//   más opacidad compite con el texto, y en un widget de 4 líneas eso se
+//   nota enseguida.
+// - Se sale por la esquina a propósito (el offset positivo): un icono
+//   entero y centrado parece un elemento más; cortado, es fondo. WidgetKit
+//   recorta al borde redondeado, así que no se desborda.
+// - SOLO en la pantalla de INICIO. En la de bloqueo iOS pinta todo en
+//   monocromo y con muy poco contraste; una marca de agua ahí se come la
+//   poca legibilidad que queda.
+struct MarcaDeAgua: ViewModifier {
+    let simbolo: String
+    let color: Color
+    func body(content: Content) -> some View {
+        content.background(alignment: .bottomTrailing) {
+            Image(systemName: simbolo)
+                .font(.system(size: 84, weight: .semibold))
+                .foregroundStyle(color.opacity(0.12))
+                .offset(x: 16, y: 12)
+                // Es decoración: para VoiceOver no existe.
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+extension View {
+    func marcaDeAgua(_ simbolo: String, _ color: Color) -> some View {
+        modifier(MarcaDeAgua(simbolo: simbolo, color: color))
     }
 }
 

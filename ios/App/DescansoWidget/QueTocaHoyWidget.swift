@@ -49,10 +49,21 @@ struct ResumenDelDia {
     var posicion: Int
     var total: Int
     var ejercicios: Int
+    // Los nombres de los primeros ejercicios del día. Van APARTE del
+    // número: el mediano los enseña en la mitad derecha, que antes se
+    // quedaba vacía en cuanto el día no tenía botón de "Empezar".
+    var listaEjercicios: [String] = []
+    // Lo que viene DESPUÉS en el ciclo. Se llama "siguiente" y no
+    // "mañana" a propósito: el ciclo avanza por entrenos hechos, no por
+    // calendario, así que prometer una fecha sería mentir en cuanto te
+    // saltes un día.
+    var siguiente: String = ""
 
     static let ejemplo = ResumenDelDia(
         hayCiclo: true, esDescanso: false, nombre: "Empuje", bloque: "Volumen",
-        color: "#5b8cff", icono: "", posicion: 1, total: 3, ejercicios: 6
+        color: "#5b8cff", icono: "", posicion: 1, total: 3, ejercicios: 6,
+        listaEjercicios: ["Press banca", "Press militar", "Fondos", "Elevaciones"],
+        siguiente: "Tirón"
     )
 }
 
@@ -66,6 +77,7 @@ struct ResumenDelDia {
 extension ResumenDelDia: Decodable {
     enum CodingKeys: String, CodingKey {
         case hayCiclo, esDescanso, nombre, bloque, color, icono, posicion, total, ejercicios
+        case listaEjercicios, siguiente
     }
 
     init(from decoder: Decoder) throws {
@@ -91,6 +103,8 @@ extension ResumenDelDia: Decodable {
         posicion = numero(.posicion, 0)
         total = numero(.total, 0)
         ejercicios = numero(.ejercicios, 0)
+        listaEjercicios = (try? c.decode([String].self, forKey: .listaEjercicios)) ?? []
+        siguiente = texto(.siguiente, "")
     }
 
     // nil si todavía no hay nada guardado (app recién instalada, o el App
@@ -258,6 +272,7 @@ struct QueTocaHoyView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .marcaDeAgua("dumbbell.fill", acento)
         .fondoDeWidget()
         .widgetURL(abrirEntrenoDeHoyURL)
     }
@@ -288,17 +303,54 @@ struct QueTocaHoyView: View {
                         Text("\(r.ejercicios) ejercicios").font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                Spacer(minLength: 0)
+                // El pie de contexto: qué viene DESPUÉS en el ciclo.
+                // Cuidado con el nombre -- no es "mañana": el ciclo avanza
+                // por entrenos hechos, no por calendario, así que poner
+                // una fecha sería mentir en cuanto te saltes un día.
+                if let r = resumen, r.hayCiclo, !r.siguiente.isEmpty {
+                    Text("Siguiente: \(r.siguiente)")
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Spacer(minLength: 0)
+            // LA MITAD DERECHA. Antes aquí solo había el botón "Empezar",
+            // así que en un día de DESCANSO quedaba medio widget en
+            // blanco -- que es exactamente lo que Koku enseñó en una
+            // captura. Ahora:
+            //  - día de entreno: el botón y debajo los ejercicios que
+            //    toca, que es lo que de verdad quieres saber antes de ir;
+            //  - día de descanso: no se inventa nada, y el hueco lo llena
+            //    la marca de agua.
             if let r = resumen, r.hayCiclo, !r.esDescanso {
-                Text("Empezar")
-                    .font(.caption).fontWeight(.semibold)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(acento, in: Capsule())
-                    .foregroundStyle(.white)
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("Empezar")
+                        .font(.caption).fontWeight(.semibold)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(acento, in: Capsule())
+                        .foregroundStyle(.white)
+                    if !r.listaEjercicios.isEmpty {
+                        VStack(alignment: .trailing, spacing: 1) {
+                            ForEach(Array(r.listaEjercicios.prefix(3).enumerated()), id: \.offset) { _, nombre in
+                                Text(nombre)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            if r.ejercicios > 3 {
+                                Text("+\(r.ejercicios - 3) más")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(acento)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: 130, alignment: .trailing)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .marcaDeAgua("dumbbell.fill", acento)
         .fondoDeWidget()
         .widgetURL(abrirEntrenoDeHoyURL)
     }

@@ -2919,8 +2919,18 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
 
 /* --- El diálogo de editar un ejercicio entero ------------------------- */
 .gym-exercise-edit-card { max-width: 34rem; }
-.gym-exercise-edit-top { display: flex; gap: 0.5rem; }
-.gym-exercise-edit-top .gym-set-field { flex: 1; min-width: 0; }
+/* Descanso y RPE, uno al lado del otro. El "align-items: stretch" y el
+   "justify-content: flex-end" NO sobran: "Descanso entre series (s)" es
+   un rotulo largo que en el movil se parte en DOS lineas, y "RPE del
+   ejercicio" cabe en una. Sin esto los dos campos arrancan arriba y el
+   del RPE queda flotando media linea mas alto que el otro -- Koku lo
+   enseño en una captura. Con esto los dos bloques miden lo mismo y los
+   INPUTS quedan alineados por abajo, que es lo que se mira.
+   Es exactamente el mismo arreglo que ya se hizo en
+   .gym-set-segment-fields cuando el rotulo del descanso se iba a dos
+   lineas por el chip "+60". */
+.gym-exercise-edit-top { display: flex; gap: 0.5rem; align-items: stretch; }
+.gym-exercise-edit-top .gym-set-field { flex: 1; min-width: 0; justify-content: flex-end; }
 .gym-exercise-edit-sets { display: flex; flex-direction: column; gap: 0.7rem; }
 /* "+ Serie" quedaba pegado a la ultima serie. */
 .gym-session-sets-list + .gym-add-set-btn,
@@ -3043,6 +3053,12 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
 }
 .gym-set-extend-list { display: flex; flex-direction: column; gap: 0.35rem; }
+/* El lado (Izquierdo/Derecho) de una serie de un ejercicio unilateral.
+   Los dos botones van EN UNA FILA y no apilados como el resto de la
+   lista: son las dos mitades de una misma eleccion, y uno debajo del
+   otro se leerian como dos acciones sueltas. */
+.gym-set-side-picker { display: flex; gap: 0.35rem; }
+.gym-set-side-picker .gym-set-extend-btn { flex: 1; min-width: 0; }
 .gym-set-extend-btn {
   width: 100%;
   border: 1px solid var(--gym-accent);
