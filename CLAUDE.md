@@ -1789,6 +1789,26 @@ la copia es la forma de pasar datos de un aparato a otro.
   NUNCA ejecutado — a Koku le quedan los preparativos de
   `ANDROID-PLAY.md` (keystore + 4 secretos + cuenta de Play Console) y
   lanzarlo él cuando quiera.
+  **`ANDROID-PENDIENTE.md`** (raíz del repo, 10/9/2026) tiene la
+  auditoría completa de lo que falta y lo que hay que probar. Lo más
+  importante de esa lista, para no volver a averiguarlo:
+  - El **icono y el splash son los de Capacitor por defecto** (la X
+    azul), no los de la app. El de iOS sí es el bueno.
+  - **El botón/gesto ATRÁS no está manejado**: cierra la app en vez de
+    retroceder. `@capacitor/app` ya está instalado y
+    `closeAllMobileOverlays()` ya hace la cascada de Esc — es
+    engancharlos.
+  - **`LiveActivity`, `RestAudio` y `WidgetBridge` no existen en
+    Android** y se registran igual (solo miran `isNativePlatform()`,
+    que allí es true): cada llamada responde "not implemented" y deja
+    ruido en consola. No rompe nada (todo va en `try/catch`), pero lo
+    limpio sería mirar `getPlatform() === 'ios'`.
+  - **Ajustes visibles que allí no hacen nada**: vibración larga, bajar
+    la música, y el botón de probar el aviso.
+  - El workflow genera un `.aab`, que **no se puede instalar a mano**:
+    para probar sin pasar por Play hay que añadir `assembleRelease`.
+  - `versionName` es `1.0.<run_number>`, no la versión real del
+    `package.json`.
 - **Fusionar `movil-ui` con `escritorio`**: móvil y escritorio son dos
   programas independientes que hoy comparten `public/`. Cuando toque
   fusionar habrá conflictos ahí; Koku dijo que preguntará qué falta en
