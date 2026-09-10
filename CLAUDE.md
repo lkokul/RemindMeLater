@@ -1514,6 +1514,118 @@ recorta al rango ANTES de mandarla y la llamada va en `try/catch`: que no
 se pueda mover el cursor nunca impide guardar el ciclo, que es lo
 importante.
 
+## Widgets de iOS: el primero, "Qué toca hoy"
+
+Primera tanda de widgets, elegida por Koku: **solo el del Gimnasio**, en
+**pantalla de inicio + pantalla de bloqueo + centro de control**, y
+**sin refresco por horas** (lo repinta la app cuando cambia algo).
+
+### Lo que hay que entender antes de tocar nada
+
+**Un widget NO puede leer la base de datos.** La base es SQLite
+compilado a WebAssembly y vive dentro de la webview, en IndexedDB; el
+widget es código nativo aparte que iOS ejecuta con la app cerrada. No
+hay forma de que llegue hasta ahí.
+
+La única vía es un **App Group**: un buzón compartido entre la app y la
+extensión. La app deja un resumen pequeño en JSON y el widget lo lee.
+Grupo: `group.com.koku.remindmelater`.
+
+**El App Group es una capacidad de FIRMA, no solo código.** Los dos
+targets llevan su `.entitlements` declarándolo
+(`CODE_SIGN_ENTITLEMENTS` en las cuatro configuraciones), y el App ID de
+Apple tiene que tenerla dada de alta. El pipeline firma con
+`-allowProvisioningUpdates` y una clave de App Store Connect, así que
+Xcode PUEDE crearla solo — pero es justo el paso que más falla. **Si una
+build casca firmando, es esto**: se arregla dando de alta el grupo una
+vez en el portal de desarrollador (o abriendo el proyecto en Xcode con la
+cuenta y dejando que lo cree).
+
+### Las piezas
+
+- **`public/widget-bridge.js`** — arma el resumen y se lo pasa al plugin.
+  Mismo patrón perezoso que `local-notifications.js`: en un navegador
+  normal no hay plugin y todo es no-op.
+- **`ios/App/App/WidgetBridgePlugin.swift`** — plugin local (registrado a
+  mano en `BridgeViewController`, como `LiveActivityPlugin`). Dos
+  métodos: `guardarResumen` (escribe y llama a
+  `WidgetCenter.reloadTimelines`) y `consumirApertura`.
+- **`ios/App/DescansoWidget/QueTocaHoyWidget.swift`** — el widget. Va en
+  la extensión que YA existía (la de la Live Activity del descanso), no
+  en un target nuevo: eso ahorra la parte más frágil del proyecto de
+  Xcode.
+- Los `.entitlements` de los dos targets.
+
+### Decisiones y trampas
+
+- **El JSON no se interpreta en el plugin**: llega montado desde
+  JavaScript y solo se guarda. Así añadir un campo al resumen no obliga a
+  tocar nada nativo.
+- **El decodificador del widget se escribe A MANO** con `try? decode` y
+  valores por defecto. El sintetizado de Swift **no usa los valores por
+  defecto cuando falta una clave: falla**. Y el resumen guardado
+  sobrevive a las actualizaciones, así que uno viejo sin campos nuevos
+  dejaría el widget en blanco.
+- **El `kind` tiene que coincidir carácter a carácter** entre
+  `QueTocaHoyWidget.kind` y el `reloadTimelines(ofKind:)` del plugin. Si
+  no, la app cree que lo refresca y el widget se queda con lo de antes.
+- **Dos caminos de apertura, dos marcas**: tocar el widget abre
+  `remindmelater://gym-hoy` y `SceneDelegate` deja la marca en
+  `UserDefaults.standard`; el botón del centro de control ejecuta un
+  `AppIntent` que **no manda ninguna URL**, así que deja la marca en el
+  App Group. `consumirApertura` mira los dos sitios.
+  Ojo: `gym-live` (la tarjeta del descanso) y `gym-hoy` (el widget) son
+  cosas distintas — una reanuda algo en curso y la otra arranca algo.
+- **Con un entreno ya en marcha, el widget lo ABRE, no empieza otro.**
+  Perder un entreno a medias por tocar un widget sería carísimo.
+- **Si hoy toca descanso, abre el selector** en vez de arrancar nada: el
+  widget es un atajo, no una decisión.
+- **Arranque en frío**: al abrir la app desde cero tocando el widget no
+  se disparan ni `resume` ni `visibilitychange`, así que la marca se mira
+  TAMBIÉN al final de `init()`.
+- **`#if compiler(>=6.0)` alrededor del botón del centro de control**:
+  `ControlWidget` no EXISTE en el SDK de iOS 17 y anteriores, así que con
+  un Xcode viejo no es que no se ejecute — es que no compila.
+  `@available` no basta para eso.
+
+### Cómo se ha verificado (y qué NO)
+
+**El Swift no se puede compilar aquí** (contenedor Linux, sin Xcode). Lo
+que sí se hizo:
+
+- Un analizador propio de Swift (`scratchpad/swiftcheck.py`) que recorre
+  los archivos carácter a carácter llevando la cuenta de comentarios (los
+  de bloque **anidan** en Swift), cadenas y su interpolación `\(...)`.
+  Un regex normal se traga medio archivo en cuanto hay un
+  `\(n == 1 ? "" : "s")`.
+- Un comprobador del `pbxproj` (llaves, secciones, ids usados pero no
+  definidos, ids duplicados) porque ahí no hay `plutil` en Linux.
+- Comprobación cruzada de que las constantes compartidas, el `kind`, el
+  App Group de los entitlements y las claves del JSON coinciden entre el
+  JavaScript y el Swift.
+- 10 comprobaciones de Playwright del lado JS **fingiendo el plugin
+  nativo**, más 9 de forzado (el plugin lanzando, sin App Group, la
+  apertura consumida dos veces, un día del ciclo borrado, sin bloques,
+  nombres con comillas y emojis, 50 llamadas seguidas, y que el resumen
+  no lleve nada personal de más).
+
+Trampa del banco de pruebas, apuntada por si se repite: **fingir
+`window.Capacitor` con `addInitScript` NO funciona** — el runtime de
+Capacitor que trae la propia página lo redefine al arrancar. Hay que
+parchearlo DESPUÉS de cargar y limpiar la caché perezosa de
+`widget-bridge.js` (`widgetBridgePlugin = null; widgetBridgeNoDisponible
+= false`).
+
+**Lo que solo se puede confirmar en el iPhone**: que compile, que Apple
+cree el App Group, que el widget aparezca en la galería, y que tocarlo
+arranque el entreno.
+
+**ESTO ES SOLO DE iOS.** Android tiene su propio sistema de widgets
+(`AppWidgetProvider` + `RemoteViews`, nada que ver con WidgetKit) y no se
+ha tocado: sería un trabajo aparte, con su propio puente. La parte de
+JavaScript (`widget-bridge.js`) sí serviría igual — lo que cambia es todo
+lo nativo.
+
 ## Estado actual
 
 **Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de

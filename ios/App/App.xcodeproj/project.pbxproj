@@ -21,6 +21,8 @@
 		DE5CA25000000000000000B3 /* BridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A6 /* BridgeViewController.swift */; };
 		DE5CA25000000000000000B4 /* silencio.wav in Resources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A7 /* silencio.wav */; };
 		DE5CA25000000000000000B5 /* DescansoWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A2 /* DescansoWidgetBundle.swift */; };
+		DE5CA25000000000000000BE /* QueTocaHoyWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AC /* QueTocaHoyWidget.swift */; };
+		DE5CA25000000000000000BF /* WidgetBridgePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000AD /* WidgetBridgePlugin.swift */; };
 		DE5CA25000000000000000B6 /* DescansoAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A5 /* DescansoAttributes.swift */; };
 		DE5CA25000000000000000B7 /* DescansoWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A1 /* DescansoWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DE5CA25000000000000000B8 /* ExtenderDescansoIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5CA25000000000000000A8 /* ExtenderDescansoIntent.swift */; };
@@ -69,6 +71,10 @@
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		DE5CA25000000000000000A1 /* DescansoWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DescansoWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		DE5CA25000000000000000A2 /* DescansoWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DescansoWidgetBundle.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000AC /* QueTocaHoyWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueTocaHoyWidget.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000AD /* WidgetBridgePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetBridgePlugin.swift; sourceTree = "<group>"; };
+		DE5CA25000000000000000AE /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
+		DE5CA25000000000000000AF /* DescansoWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DescansoWidget.entitlements; sourceTree = "<group>"; };
 		DE5CA25000000000000000A3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		DE5CA25000000000000000A4 /* LiveActivityPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityPlugin.swift; sourceTree = "<group>"; };
 		DE5CA25000000000000000A5 /* DescansoAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DescansoAttributes.swift; sourceTree = "<group>"; };
@@ -123,6 +129,8 @@
 			children = (
 				DE5CA25000000000000000A2 /* DescansoWidgetBundle.swift */,
 				DE5CA25000000000000000A3 /* Info.plist */,
+				DE5CA25000000000000000AC /* QueTocaHoyWidget.swift */,
+				DE5CA25000000000000000AF /* DescansoWidget.entitlements */,
 			);
 			path = DescansoWidget;
 			sourceTree = "<group>";
@@ -131,6 +139,8 @@
 			isa = PBXGroup;
 			children = (
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
+				DE5CA25000000000000000AD /* WidgetBridgePlugin.swift */,
+				DE5CA25000000000000000AE /* App.entitlements */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				DE5CA25000000000000000A6 /* BridgeViewController.swift */,
@@ -269,6 +279,7 @@
 				DE5CA25000000000000000B1 /* LiveActivityPlugin.swift in Sources */,
 				DE5CA25000000000000000B2 /* DescansoAttributes.swift in Sources */,
 				DE5CA25000000000000000B3 /* BridgeViewController.swift in Sources */,
+				DE5CA25000000000000000BF /* WidgetBridgePlugin.swift in Sources */,
 				DE5CA25000000000000000B8 /* ExtenderDescansoIntent.swift in Sources */,
 				DE5CA25000000000000000BA /* RestAudioWatcher.swift in Sources */,
 				DE5CA25000000000000000BC /* RestAudioPlugin.swift in Sources */,
@@ -281,6 +292,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DE5CA25000000000000000B5 /* DescansoWidgetBundle.swift in Sources */,
+				DE5CA25000000000000000BE /* QueTocaHoyWidget.swift in Sources */,
 				DE5CA25000000000000000B6 /* DescansoAttributes.swift in Sources */,
 				DE5CA25000000000000000B9 /* ExtenderDescansoIntent.swift in Sources */,
 				DE5CA25000000000000000BB /* RestAudioWatcher.swift in Sources */,
@@ -431,6 +443,7 @@
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
@@ -453,6 +466,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
@@ -473,6 +487,7 @@
 		DE5CA25000000000000000F1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = DescansoWidget/DescansoWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -496,6 +511,7 @@
 		DE5CA25000000000000000F2 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = DescansoWidget/DescansoWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;

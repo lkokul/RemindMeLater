@@ -9,8 +9,17 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     // CFBundleURLTypes en Info.plist). Aqui solo se deja una marca; el JS
     // la recoge en consumeRestExtension() y navega al entrenamiento.
     private func marcarAperturaDesdeActividad(_ contexts: Set<UIOpenURLContext>) {
-        guard contexts.contains(where: { $0.url.scheme == "remindmelater" && $0.url.host == "gym-live" }) else { return }
-        UserDefaults.standard.set(true, forKey: "gymPendingOpenFromActivity")
+        let nuestras = contexts.filter { $0.url.scheme == "remindmelater" }
+        // gym-live: la tarjeta del descanso -> volver al entreno EN CURSO.
+        if nuestras.contains(where: { $0.url.host == "gym-live" }) {
+            UserDefaults.standard.set(true, forKey: "gymPendingOpenFromActivity")
+        }
+        // gym-hoy: el widget "Que toca hoy" -> EMPEZAR el entreno de hoy.
+        // Son dos cosas distintas y por eso dos marcas: una reanuda algo
+        // que ya estaba pasando y la otra arranca algo nuevo.
+        if nuestras.contains(where: { $0.url.host == "gym-hoy" }) {
+            UserDefaults.standard.set(true, forKey: "gymPendingStartToday")
+        }
     }
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {

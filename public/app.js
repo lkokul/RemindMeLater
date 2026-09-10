@@ -8262,9 +8262,17 @@ async function loadGymExercises() {
 }
 async function loadGymBlocks() {
   state.gymBlocks = await api('/api/gym-blocks');
+  // El widget de "que toca hoy" sale del ciclo del bloque activo, asi que
+  // se rehace su resumen cada vez que los bloques cambian. Es el embudo
+  // por el que pasa TODO lo que puede moverlo: terminar un entreno,
+  // tocar el ciclo, activar otro bloque.
+  actualizarResumenDelWidget();
 }
 async function loadGymRoutines() {
   state.gymRoutines = await api('/api/gym-routines');
+  // Los dias tambien: el nombre, el color y cuantos ejercicios tiene el
+  // dia de hoy salen de aqui, no del bloque.
+  actualizarResumenDelWidget();
 }
 async function loadGymSessions() {
   state.gymSessions = await api('/api/gym-sessions');
@@ -10676,12 +10684,20 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     gymConsumeRestExtensionFromLockScreen();
     gymCleanupRestNotificationStack();
+    comprobarAperturaDesdeElWidget();
+  } else {
+    // Al irse la app a segundo plano se deja el resumen al dia: es el
+    // otro momento en que Koku pidio que se actualice el widget, ademas
+    // de al cambiar algo.
+    actualizarResumenDelWidget();
   }
 });
 document.addEventListener('resume', () => {
   gymConsumeRestExtensionFromLockScreen();
   gymCleanupRestNotificationStack();
+  comprobarAperturaDesdeElWidget();
 });
+document.addEventListener('pause', () => { actualizarResumenDelWidget(); });
 
 async function gymStartRestLiveActivity() {
   const plugin = getGymLiveActivityPlugin();
@@ -12246,6 +12262,43 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
 document.getElementById('btn-close-gym-summary').addEventListener('click', () => {
   document.getElementById('gym-live-summary-modal').classList.add('hidden');
 });
+
+// --- El widget de "que toca hoy" -------------------------------------
+// El puente vive en widget-bridge.js, que se carga aparte: si no
+// estuviera (o en un navegador normal), estas llamadas no deben romper
+// nada de lo que las rodea, que es cargar el gimnasio.
+function actualizarResumenDelWidget() {
+  if (typeof actualizarWidgetDelDia === 'function') actualizarWidgetDelDia();
+}
+
+// Abrir la app desde el widget arranca el entreno de hoy. Se comprueba al
+// volver a primer plano, igual que el +30s de la pantalla de bloqueo: el
+// nativo deja una marca y aqui se consume UNA vez.
+async function comprobarAperturaDesdeElWidget() {
+  if (typeof widgetPideEmpezarHoy !== 'function') return;
+  let loPide = false;
+  try { loPide = await widgetPideEmpezarHoy(); } catch { return; }
+  if (!loPide) return;
+  // Con un entreno YA en marcha no se empieza otro encima: se abre el que
+  // hay. Perder un entreno a medias por tocar un widget seria muy caro.
+  if (gymLiveReadStored()) {
+    gymLiveSession = gymLiveReadStored();
+    goToMobileSection('extensions');
+    if (typeof openGymView === 'function') await openGymView();
+    openGymLiveView();
+    return;
+  }
+  // Los bloques y los dias pueden no estar cargados todavia (el widget
+  // puede abrir la app desde cero): se piden antes de mirar el ciclo.
+  await Promise.all([loadGymBlocks(), loadGymRoutines(), loadGymExercises()]);
+  const hoy = gymCicloDeHoy();
+  goToMobileSection('extensions');
+  if (typeof openGymView === 'function') await openGymView();
+  // Si hoy toca descanso (o no hay ciclo), se abre el selector en vez de
+  // arrancar algo a lo loco: el widget es un atajo, no una decision.
+  if (!hoy || hoy.esDescanso || !hoy.rutina) openGymStartModal();
+  else startGymLiveSession(hoy.rutina);
+}
 
 // --- "Hoy te toca": el ciclo visto desde fuera del Gimnasio -----------
 //
@@ -17318,7 +17371,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.39.0';
+const APP_VERSION = '0.40.0';
 const APP_VERSION_DATE = '2026-09-10';
 
 function renderAppVersionLine() {
@@ -17384,6 +17437,13 @@ async function init() {
   // ultima (ver public/backup.js) -- sin servidor, la copia es la unica
   // red de seguridad de los datos.
   await initStep(maybeShowBackupReminder);
+
+  // Abrir la app TOCANDO EL WIDGET, con la app cerrada del todo: ni
+  // 'resume' ni 'visibilitychange' llegan a dispararse en ese caso (la
+  // app nace ya en primer plano), asi que la marca hay que mirarla
+  // tambien aqui. Va al final del arranque a proposito: si arranca un
+  // entreno, que sea con el calendario ya montado detras.
+  await initStep(comprobarAperturaDesdeElWidget);
 
   setInterval(loadReminders, 30 * 1000);
   // Igual que los recordatorios: si otro dispositivo vinculado anade o

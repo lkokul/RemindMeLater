@@ -209,6 +209,10 @@ a pantalla completa y sin afectar a nada de lo de arriba:
   Tanto tu lista de ejercicios como los desplegables donde eliges uno
   llevan **buscador** (por nombre, músculo o material), para que tener
   muchos no sea un problema.
+  En iOS hay además un **widget "Qué toca hoy"** con el entrenamiento del
+  día: en la pantalla de inicio, en la de bloqueo y como botón del centro
+  de control. Tocarlo abre la app y arranca ese entreno; si hoy toca
+  descanso, te deja elegir.
 - **Lecturas**: historial de entretenimiento — mangas, cómics, libros,
   series, animes y películas juntos — agrupado en sagas (obligatorias:
   incluso algo suelto es una saga de un único elemento, y una misma saga

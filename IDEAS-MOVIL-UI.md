@@ -225,10 +225,16 @@ el calendario.
   recolocar el ciclo. **En el calendario no se enseña nada** — se probó
   y Koku lo quitó: el ciclo es para el Gimnasio y para el widget, no
   para pintar el mes.
-- 💡 **Widget de "qué toca hoy"**: es el destino real del ciclo. El
-  modelo ya está pensado para alimentarlo (una lectura da el día, su id
-  para arrancarlo y en qué posición del ciclo estás); la parte nativa
-  está sin empezar.
+- ✅ **Widget de "qué toca hoy"** (iOS): el día que te toca según el
+  ciclo, en la pantalla de inicio (pequeño y mediano), en la de bloqueo
+  (círculo, rectángulo y línea) y como botón del centro de control.
+  Tocarlo arranca ese entreno. Un widget no puede leer la base de datos
+  (SQLite en WebAssembly dentro de la webview), así que la app le deja un
+  resumen en un App Group compartido y lo repinta cuando cambia algo —
+  sin refresco por horas, cero consumo.
+- 💡 **Más widgets**: calendario ("lo que viene"), racha y objetivo del
+  gimnasio, y acceso rápido a notas. Propuestos y aparcados: Koku eligió
+  empezar solo por el del gimnasio.
 - 💡 Traducir a tandas las instrucciones de la librería (siguen en
   inglés). Koku tiene además una rama propia `gimnasio-movil` con su
   propio rediseño, sin fusionar.
