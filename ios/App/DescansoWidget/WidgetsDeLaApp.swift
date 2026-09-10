@@ -24,6 +24,9 @@ import AppIntents
 // botón del centro de control y sección del resumen.)
 enum DestinoDeWidget: String {
     case tareas, finanzas, lecturas, viajes
+    // De la tanda del 11/9/2026: el calendario del mes y los cuatro
+    // widgets del Gimnasio, que llevan todos a su pantalla.
+    case calendario, gimnasio
     case nuevoEvento = "nuevo-evento"
     case nuevaNota = "nueva-nota"
 
@@ -80,6 +83,42 @@ extension ResumenDeLaApp {
     static var deEjemplo: ResumenDeLaApp {
         var r = ResumenDeLaApp()
         r.actualizado = Date().timeIntervalSince1970 * 1000
+        // El calendario de la galeria: un mes cualquiera con eventos
+        // repartidos, para que se entienda de un vistazo que ensena.
+        r.calendario = SeccionCalendario(
+            anio: 2026, mes: 9, nombreMes: "septiembre",
+            primerDiaSemana: 1, diasDelMes: 30, diaDeHoy: 11,
+            dias: [
+                DiaDelCalendario(dia: 3, colores: ["#5b8cff"], total: 1),
+                DiaDelCalendario(dia: 8, colores: ["#f0883e", "#3fb950"], total: 3),
+                DiaDelCalendario(dia: 11, colores: ["#a371f7"], total: 2),
+                DiaDelCalendario(dia: 17, colores: ["#5b8cff", "#f85149"], total: 2),
+                DiaDelCalendario(dia: 24, colores: ["#3fb950"], total: 1),
+            ]
+        )
+        // Un mapa creible: mas lleno hacia la derecha (las semanas
+        // recientes) y con los ultimos dias todavia por venir.
+        r.consistencia = SeccionConsistencia(
+            diasEntrenados: 84, racha: 6, estaSemana: 3, objetivoSemanal: 4,
+            esteMes: 11, trabajoDelMes: "5 h 40 min", trabajoDelMesSegundos: 20400,
+            mapa: [
+                "00101101011010110101101101",
+                "01001011010110110110101101",
+                "00110100101101011011011010",
+                "01010110110101101101101109",
+                "00101011011011010110110119",
+                "01001101011010110101101199",
+                "00010010100100101001010199",
+            ]
+        )
+        r.musculos = SeccionMusculos(
+            zonas: [
+                "pecho": 1.0, "dorsales": 0.8, "cuadriceps": 0.6,
+                "hombros": 0.45, "biceps": 0.35, "triceps": 0.3,
+                "core": 0.5, "gluteos": 0.4,
+            ],
+            ventanaDias: 30, metrica: "series"
+        )
         r.tareas = SeccionTareas(
             lista: [
                 FilaDeTarea(titulo: "Llamar al banco", cuando: "", color: "#f85149", vencida: true, hoy: false),

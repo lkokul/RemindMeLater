@@ -214,7 +214,16 @@
         SELECT s.id, s.date, s.type, s.activity_kind, s.activity_name, s.duration_seconds, s.routine_id,
                COUNT(CASE WHEN st.parent_set_id IS NULL THEN st.id END) as set_count,
                COUNT(CASE WHEN st.parent_set_id IS NULL AND st.set_type = 'failure' THEN st.id END) as failure_set_count,
-               SUM(COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0)) as volume_kg,
+               -- Los ejercicios ASISTIDOS quedan FUERA del volumen: ahi el
+               -- peso apuntado es la ayuda que te quitas y va en negativo,
+               -- asi que sumarlo restaria kilos de la cuenta general. Lo
+               -- que de verdad mueves en una dominada asistida es tu
+               -- cuerpo menos la banda, y el peso corporal no lo sabemos
+               -- (Koku: "el peso corporal te da igual"). Las SERIES si
+               -- cuentan: para la racha, el heatmap y el mapa de musculos
+               -- una dominada asistida es una serie como cualquier otra.
+               SUM(CASE WHEN COALESCE(ge.assisted, 0) = 1 THEN 0
+                        ELSE COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) END) as volume_kg,
                -- Cuantos de esos kg salieron de una serie llevada al
                -- fallo. Se devuelve APARTE y en kg de verdad: el peso
                -- extra lo aplica el cliente al pintar (es un ajuste de
@@ -223,11 +232,13 @@
                -- lleva 'failure' en su propio set_type -- lo hereda de su
                -- madre, de ahi el COALESCE con el padre.
                SUM(CASE WHEN COALESCE(p.set_type, st.set_type) = 'failure'
+                             AND COALESCE(ge.assisted, 0) = 0
                         THEN COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) ELSE 0 END) as failure_volume_kg,
                SUM(COALESCE(st.duration_seconds, 0)) as work_seconds
         FROM gym_sessions s
         LEFT JOIN gym_sets st ON st.session_id = s.id
         LEFT JOIN gym_sets p ON p.id = st.parent_set_id
+        LEFT JOIN gym_exercises ge ON ge.id = st.exercise_id
         GROUP BY s.id
         ORDER BY s.date DESC, s.id DESC
       `)
@@ -400,15 +411,19 @@
     const rows = db
       .prepare(`
         SELECT s.date, MAX(st.weight_kg) as max_weight_kg,
-               SUM(COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0)) as volume_kg,
+               -- Un ejercicio asistido no suma volumen (ver /summary).
+               SUM(CASE WHEN COALESCE(ge.assisted, 0) = 1 THEN 0
+                        ELSE COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) END) as volume_kg,
                -- Igual que en /summary: los kg que salieron de series al
                -- fallo, aparte y sin ajustar (ver alli el porque).
                SUM(CASE WHEN COALESCE(p.set_type, st.set_type) = 'failure'
+                             AND COALESCE(ge.assisted, 0) = 0
                         THEN COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) ELSE 0 END) as failure_volume_kg,
                COUNT(CASE WHEN st.parent_set_id IS NULL AND st.set_type = 'failure' THEN st.id END) as failure_set_count
         FROM gym_sets st
         JOIN gym_sessions s ON s.id = st.session_id
         LEFT JOIN gym_sets p ON p.id = st.parent_set_id
+        LEFT JOIN gym_exercises ge ON ge.id = st.exercise_id
         WHERE st.exercise_id = ?
         GROUP BY s.id
         ORDER BY s.date ASC, s.id ASC

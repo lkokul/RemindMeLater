@@ -53,6 +53,10 @@ struct ResumenDeLaApp: Decodable {
     var textoClaro: String = ""
     var fondoOscuro: String = ""
     var textoOscuro: String = ""
+    // Los widgets de la tanda del 11/9/2026.
+    var calendario: SeccionCalendario?
+    var consistencia: SeccionConsistencia?
+    var musculos: SeccionMusculos?
     var tareas: SeccionTareas?
     var finanzas: SeccionFinanzas?
     var lecturas: SeccionLecturas?
@@ -60,6 +64,7 @@ struct ResumenDeLaApp: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case actualizado, acento, fondo, texto, tareas, finanzas, lecturas, viajes
+        case calendario, consistencia, musculos
         case estiloWidget, fondoClaro, textoClaro, fondoOscuro, textoOscuro
     }
 
@@ -76,6 +81,9 @@ struct ResumenDeLaApp: Decodable {
         textoOscuro = leerTexto(c, .textoOscuro, "")
         // Cada sección por separado: que Finanzas venga rota no puede
         // dejar sin datos al calendario.
+        calendario = try? c.decode(SeccionCalendario.self, forKey: .calendario)
+        consistencia = try? c.decode(SeccionConsistencia.self, forKey: .consistencia)
+        musculos = try? c.decode(SeccionMusculos.self, forKey: .musculos)
         tareas = try? c.decode(SeccionTareas.self, forKey: .tareas)
         finanzas = try? c.decode(SeccionFinanzas.self, forKey: .finanzas)
         lecturas = try? c.decode(SeccionLecturas.self, forKey: .lecturas)
@@ -118,6 +126,126 @@ struct ResumenDeLaApp: Decodable {
 // ---------------------------------------------------------------------
 // Las secciones
 // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// El calendario del mes
+// ---------------------------------------------------------------------
+struct DiaDelCalendario: Decodable {
+    var dia: Int = 0
+    var colores: [String] = []
+    var total: Int = 0
+
+    enum CodingKeys: String, CodingKey { case dia, colores, total }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        dia = (try? c.decode(Int.self, forKey: .dia)) ?? 0
+        colores = (try? c.decode([String].self, forKey: .colores)) ?? []
+        total = (try? c.decode(Int.self, forKey: .total)) ?? 0
+    }
+    init(dia: Int, colores: [String], total: Int) {
+        self.dia = dia; self.colores = colores; self.total = total
+    }
+}
+
+struct SeccionCalendario: Decodable {
+    var anio: Int = 0
+    var mes: Int = 0
+    var nombreMes: String = ""
+    // En que columna cae el dia 1 con la semana empezando en LUNES
+    // (0 = lunes ... 6 = domingo). Lo calcula el JavaScript porque alli
+    // ya se sabe como pinta la app la semana; aqui solo se coloca.
+    var primerDiaSemana: Int = 0
+    var diasDelMes: Int = 30
+    var diaDeHoy: Int = 0
+    var dias: [DiaDelCalendario] = []
+
+    enum CodingKeys: String, CodingKey {
+        case anio, mes, nombreMes, primerDiaSemana, diasDelMes, diaDeHoy, dias
+    }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        anio = (try? c.decode(Int.self, forKey: .anio)) ?? 0
+        mes = (try? c.decode(Int.self, forKey: .mes)) ?? 0
+        nombreMes = (try? c.decode(String.self, forKey: .nombreMes)) ?? ""
+        primerDiaSemana = (try? c.decode(Int.self, forKey: .primerDiaSemana)) ?? 0
+        diasDelMes = (try? c.decode(Int.self, forKey: .diasDelMes)) ?? 30
+        diaDeHoy = (try? c.decode(Int.self, forKey: .diaDeHoy)) ?? 0
+        dias = (try? c.decode([DiaDelCalendario].self, forKey: .dias)) ?? []
+    }
+    init(anio: Int, mes: Int, nombreMes: String, primerDiaSemana: Int, diasDelMes: Int, diaDeHoy: Int, dias: [DiaDelCalendario]) {
+        self.anio = anio; self.mes = mes; self.nombreMes = nombreMes
+        self.primerDiaSemana = primerDiaSemana; self.diasDelMes = diasDelMes
+        self.diaDeHoy = diaDeHoy; self.dias = dias
+    }
+
+    // Lo de un dia concreto, o nada. Una busqueda lineal sobre 31 dias
+    // como mucho: montar un diccionario para eso costaria mas.
+    func delDia(_ n: Int) -> DiaDelCalendario? {
+        dias.first(where: { $0.dia == n })
+    }
+}
+
+// ---------------------------------------------------------------------
+// Consistencia del Gimnasio
+// ---------------------------------------------------------------------
+struct SeccionConsistencia: Decodable {
+    var diasEntrenados: Int = 0
+    var racha: Int = 0
+    var estaSemana: Int = 0
+    var objetivoSemanal: Int = 0
+    var esteMes: Int = 0
+    var trabajoDelMes: String = ""
+    var trabajoDelMesSegundos: Int = 0
+    // 7 cadenas (lunes a domingo) de 26 caracteres (semanas, la de ahora
+    // a la derecha). Cada caracter: 0 sin entrenar, 1 una sesion, 2 dos o
+    // mas, 9 todavia no ha llegado ese dia.
+    var mapa: [String] = []
+
+    enum CodingKeys: String, CodingKey {
+        case diasEntrenados, racha, estaSemana, objetivoSemanal, esteMes
+        case trabajoDelMes, trabajoDelMesSegundos, mapa
+    }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        diasEntrenados = (try? c.decode(Int.self, forKey: .diasEntrenados)) ?? 0
+        racha = (try? c.decode(Int.self, forKey: .racha)) ?? 0
+        estaSemana = (try? c.decode(Int.self, forKey: .estaSemana)) ?? 0
+        objetivoSemanal = (try? c.decode(Int.self, forKey: .objetivoSemanal)) ?? 0
+        esteMes = (try? c.decode(Int.self, forKey: .esteMes)) ?? 0
+        trabajoDelMes = (try? c.decode(String.self, forKey: .trabajoDelMes)) ?? ""
+        trabajoDelMesSegundos = (try? c.decode(Int.self, forKey: .trabajoDelMesSegundos)) ?? 0
+        mapa = (try? c.decode([String].self, forKey: .mapa)) ?? []
+    }
+    init(diasEntrenados: Int, racha: Int, estaSemana: Int, objetivoSemanal: Int,
+         esteMes: Int, trabajoDelMes: String, trabajoDelMesSegundos: Int, mapa: [String]) {
+        self.diasEntrenados = diasEntrenados; self.racha = racha
+        self.estaSemana = estaSemana; self.objetivoSemanal = objetivoSemanal
+        self.esteMes = esteMes; self.trabajoDelMes = trabajoDelMes
+        self.trabajoDelMesSegundos = trabajoDelMesSegundos; self.mapa = mapa
+    }
+}
+
+// ---------------------------------------------------------------------
+// El mapa de musculos
+// ---------------------------------------------------------------------
+struct SeccionMusculos: Decodable {
+    // id del grupo muscular -> intensidad de 0 a 1. Solo vienen los que
+    // tienen algo; el resto se pintan como silueta apagada.
+    var zonas: [String: Double] = [:]
+    var ventanaDias: Int = 30
+    var metrica: String = "series"
+
+    enum CodingKeys: String, CodingKey { case zonas, ventanaDias, metrica }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        zonas = (try? c.decode([String: Double].self, forKey: .zonas)) ?? [:]
+        ventanaDias = (try? c.decode(Int.self, forKey: .ventanaDias)) ?? 30
+        metrica = (try? c.decode(String.self, forKey: .metrica)) ?? "series"
+    }
+    init(zonas: [String: Double], ventanaDias: Int, metrica: String) {
+        self.zonas = zonas; self.ventanaDias = ventanaDias; self.metrica = metrica
+    }
+}
+
 struct FilaDeTarea: Decodable {
     var titulo: String = ""
     var cuando: String = ""

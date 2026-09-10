@@ -29,13 +29,19 @@
       name: row.name,
       muscleGroup: row.muscle_group || null,
       libraryId: row.library_id || null,
-      equipment: row.equipment || null,
+      // El material viaja SIEMPRE como lista, aunque en la base pueda
+      // haber texto suelto de antes (ver leerMaterial).
+      equipment: leerMaterial(row.equipment),
       secondaryMuscles: secondary,
       // Nota FIJA del ejercicio ("polea altura 3"): a diferencia de la
       // nota de sesion (que vive en cada sesion), esta acompana siempre
       // al ejercicio -- peticion de Koku para apuntar posiciones/alturas.
       notes: row.notes || null,
       unilateral: !!row.unilateral,
+      // Ejercicio ASISTIDO: el peso que apuntas es la ayuda que te
+      // quitas (banda elastica, maquina asistida), asi que va en
+      // negativo y progresar es que el numero suba.
+      assisted: !!row.assisted,
       countSidesSeparately: !!row.count_sides_separately,
       sideRestSeconds: row.side_rest_seconds,
       // Configuracion por defecto: series/reps/descanso que sueles hacer
@@ -44,6 +50,43 @@
       defaultReps: row.default_reps,
       defaultRestSeconds: row.default_rest_seconds,
     };
+  }
+
+  // EL MATERIAL, DE UNO A VARIOS.
+  //
+  // Peticion de Koku: poder poner mas de un material, y que lo que
+  // escriba se guarde para reutilizarlo en otros ejercicios. Se queda en
+  // la MISMA columna `equipment` (TEXT), ahora con un JSON array dentro,
+  // en vez de una tabla aparte -- mismo criterio que los generos de
+  // Entretenimiento, y evita una migracion de tablas.
+  //
+  // Lo de antes sigue leyendose: un texto suelto ("Barra") se convierte
+  // en lista de uno, y uno con comas ("Barra, Mancuernas" -- justo lo
+  // que sugeria el placeholder del campo viejo) se parte por comas. Asi
+  // nadie pierde lo que ya tenia escrito y no hace falta tocar la base.
+  function leerMaterial(bruto) {
+    if (!bruto) return [];
+    const texto = String(bruto).trim();
+    if (texto === '') return [];
+    if (texto.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(texto);
+        if (Array.isArray(parsed)) return parsed.map((x) => String(x).trim()).filter(Boolean);
+      } catch { /* no era JSON: se lee como texto suelto */ }
+    }
+    return texto.split(',').map((x) => x.trim()).filter(Boolean);
+  }
+
+  // Al guardar siempre se escribe JSON (o NULL si no hay nada), sin
+  // repetidos y respetando el orden en que se anadieron.
+  function escribirMaterial(valor) {
+    const lista = Array.isArray(valor) ? valor : leerMaterial(valor);
+    const limpia = [];
+    for (const item of lista) {
+      const t = String(item || '').trim();
+      if (t !== '' && !limpia.some((x) => x.toLowerCase() === t.toLowerCase())) limpia.push(t);
+    }
+    return limpia.length > 0 ? JSON.stringify(limpia) : null;
   }
 
   // "" y undefined significan "sin valor" y tienen que llegar a la base
@@ -65,7 +108,7 @@
   });
 
   router.post('/', (req, res) => {
-    const { name, muscleGroup, libraryId, equipment, secondaryMuscles, notes, unilateral, countSidesSeparately, sideRestSeconds, defaultSets, defaultReps, defaultRestSeconds } = req.body || {};
+    const { name, muscleGroup, libraryId, equipment, secondaryMuscles, notes, unilateral, assisted, countSidesSeparately, sideRestSeconds, defaultSets, defaultReps, defaultRestSeconds } = req.body || {};
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'invalid_request', message: 'El ejercicio necesita un nombre.' });
     }
@@ -79,15 +122,16 @@
     }
 
     const info = db
-      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment, secondary_muscles, notes, unilateral, count_sides_separately, side_rest_seconds, default_sets, default_reps, default_rest_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment, secondary_muscles, notes, unilateral, assisted, count_sides_separately, side_rest_seconds, default_sets, default_reps, default_rest_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         name.trim(),
         muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null,
         libraryId ? String(libraryId) : null,
-        equipment && equipment.trim() ? equipment.trim() : null,
+        escribirMaterial(equipment),
         stringifySecondary(secondaryMuscles),
         notes && notes.trim() ? notes.trim() : null,
         unilateral ? 1 : 0,
+        assisted ? 1 : 0,
         unilateral && countSidesSeparately ? 1 : 0,
         numeroONulo(sideRestSeconds),
         numeroONulo(defaultSets),
@@ -105,15 +149,16 @@
 
     // library_id no se toca desde el PUT a proposito: es la marca de "de
     // donde salio", editar el ejercicio no cambia su origen.
-    const { name, muscleGroup, equipment, secondaryMuscles, notes, unilateral, countSidesSeparately, sideRestSeconds, defaultSets, defaultReps, defaultRestSeconds } = req.body || {};
+    const { name, muscleGroup, equipment, secondaryMuscles, notes, unilateral, assisted, countSidesSeparately, sideRestSeconds, defaultSets, defaultReps, defaultRestSeconds } = req.body || {};
     const nextUnilateral = unilateral === undefined ? existing.unilateral : (unilateral ? 1 : 0);
-    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ?, equipment = ?, secondary_muscles = ?, notes = ?, unilateral = ?, count_sides_separately = ?, side_rest_seconds = ?, default_sets = ?, default_reps = ?, default_rest_seconds = ? WHERE id = ?').run(
+    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ?, equipment = ?, secondary_muscles = ?, notes = ?, unilateral = ?, assisted = ?, count_sides_separately = ?, side_rest_seconds = ?, default_sets = ?, default_reps = ?, default_rest_seconds = ? WHERE id = ?').run(
       name !== undefined && name.trim() ? name.trim() : existing.name,
       muscleGroup === undefined ? existing.muscle_group : (muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null),
-      equipment === undefined ? existing.equipment : (equipment && equipment.trim() ? equipment.trim() : null),
+      equipment === undefined ? existing.equipment : escribirMaterial(equipment),
       secondaryMuscles === undefined ? existing.secondary_muscles : stringifySecondary(secondaryMuscles),
       notes === undefined ? existing.notes : (notes && notes.trim() ? notes.trim() : null),
       nextUnilateral,
+      assisted === undefined ? existing.assisted : (assisted ? 1 : 0),
       // Contar lados por separado solo tiene sentido si es unilateral.
       nextUnilateral && (countSidesSeparately === undefined ? existing.count_sides_separately : (countSidesSeparately ? 1 : 0)) ? 1 : 0,
       sideRestSeconds === undefined ? existing.side_rest_seconds : numeroONulo(sideRestSeconds),

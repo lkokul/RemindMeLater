@@ -9,7 +9,7 @@
    NO hay ningun error: la app cree que refresca y el widget se queda con
    lo de antes, o se queda en blanco para siempre. Paso de verdad.
 """
-import re, sys, io, json
+import re, sys, io, json, os
 
 fallos = []
 
@@ -102,6 +102,14 @@ modelo = leer('ios/App/DescansoWidget/ResumenDeLaApp.swift')
 plugin = leer('ios/App/App/WidgetBridgePlugin.swift')
 widgets = leer('ios/App/DescansoWidget/WidgetsDeLaApp.swift')
 gym = leer('ios/App/DescansoWidget/QueTocaHoyWidget.swift')
+# Los widgets de la tanda del 11/9/2026 (calendario, consistencia, mapa,
+# cifras, musculos). Se suman a `widgets` para que TODAS las
+# comprobaciones de abajo -- kinds, registro en el bundle, claves del
+# JSON -- los cubran igual que a los demas. La primera vez que se anadio
+# este archivo sin hacer esto, el guion dio por bueno un bundle al que le
+# faltaban cinco widgets.
+nuevos = leer('ios/App/DescansoWidget/WidgetsNuevos.swift')
+widgets = widgets + '\n' + nuevos
 bundle = leer('ios/App/DescansoWidget/DescansoWidgetBundle.swift')
 escena = leer('ios/App/App/SceneDelegate.swift')
 puente = leer('public/widget-bridge.js')
@@ -305,6 +313,26 @@ for ruta in sorted(SWIFT):
     mal = equilibrio(leer(ruta))
     if mal:
         fallos.append(f'{ruta}: {mal}')
+
+# --- 5) el cuerpo del widget no puede separarse del de la app ---------
+#
+# CuerpoDelWidget.swift son las MISMAS coordenadas que GYM_BODYMAP_ZONES
+# y GYM_BODYMAP_SILHOUETTE de app.js, generadas por
+# tools/generar-cuerpo-swift.py. Estan duplicadas a proposito (son 6 KB
+# de geometria fija que no tiene sentido mandar por el buzon 24 veces al
+# dia), y el precio de duplicar es que se separan. Esto lo impide: se
+# vuelve a generar y se compara.
+import subprocess
+try:
+    r = subprocess.run(
+        [sys.executable, os.path.join('tools', 'generar-cuerpo-swift.py'), '--comprobar'],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        fallos.append('el cuerpo del widget no coincide con el de app.js: '
+                      + (r.stdout.strip() or r.stderr.strip()))
+except Exception as err:  # noqa: BLE001
+    fallos.append(f'no se pudo comprobar el cuerpo del widget: {err}')
 
 # --- resultado -------------------------------------------------------
 if fallos:
