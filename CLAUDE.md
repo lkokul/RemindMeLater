@@ -1720,11 +1720,68 @@ ha tocado: sería un trabajo aparte, con su propio puente. La parte de
 JavaScript (`widget-bridge.js`) sí serviría igual — lo que cambia es todo
 lo nativo.
 
+## Dos ramas: `desarrollador` y `movil-ui`
+
+Decisión de Koku (10/9/2026), después de que el widget se quedara en
+blanco sin forma de saber por qué desde el propio iPhone: *"dejemos este
+para cosas de desarrollador, luego en el apartado real le quitamos estos
+avisos... a partir de ahora vamos a subir todo en una rama llamada
+desarrollador, donde aparezcan estos mensajes para debuguear y tal"*.
+
+- **`desarrollador`** es donde se trabaja y **desde donde se lanzan las
+  builds**, hasta que él diga lo contrario. Lleva los avisos de
+  diagnóstico dentro.
+- **`movil-ui`** sigue siendo la rama "de verdad", y los avisos de
+  diagnóstico NO viajan ahí.
+- La regla de Actions no cambia: **no se lanza ninguna build sin que
+  Koku lo pida en ESA ronda**, ni siquiera en `desarrollador`.
+
+**Hoy no hay nada que quitar de `movil-ui`**: está 41 commits por detrás
+y todo esto nació después. Comprobado — no tiene ni el bloque del widget,
+ni las líneas de diagnóstico, ni un solo `console.log`. La lista de abajo
+es para el DÍA DEL MERGE, no trabajo pendiente.
+
+### Qué se queda fuera de `movil-ui` (los cuatro, confirmados por Koku)
+
+1. **El bloque del widget** — Configuración → Este dispositivo.
+   `#widget-status-block` / `#widget-status-line` / `#btn-widget-refresh`
+   en `index.html`; `refreshWidgetStatus()` y el listener de
+   `btn-widget-refresh` en `settings.js` (y su llamada dentro de
+   `refreshMobileTab()`); `estadoDelWidget()` y `ultimoAvisoAlWidget` en
+   `widget-bridge.js`. Ojo: `actualizarWidgetDelDia()` SE QUEDA — el
+   widget lo necesita; lo que sobra es lo que ENSEÑA el resultado.
+2. **La línea del aviso de fin de descanso** — `#gym-rest-alert-status`,
+   `refreshGymRestAlertStatus()` y su listener de `visibilitychange`.
+3. **El botón "Probar el aviso (10 s)"** — `#btn-test-gym-rest-alert`,
+   su listener y su "?" (`#btn-help-notif-test`).
+4. **El "Sin buzón · falta el App Group" del widget** —
+   `ResumenDelDia.hayBuzon()` y el campo `sinBuzon` de `QueTocaEntry` en
+   `QueTocaHoyWidget.swift`. En `movil-ui` el respaldo vuelve a ser
+   "Abre la app" a secas.
+
+**Y la de la Live Activity va con ellas** (`#gym-live-activity-status`,
+"Cuenta atrás en pantalla de bloqueo: ..."): no se le preguntó una por
+una, pero es exactamente el mismo patrón que la 2 — nació del mismo
+problema (en el iPhone no hay consola) y se lee igual de raro en una app
+normal.
+
+### Qué SÍ se queda en `movil-ui`
+
+- **La línea de versión** (`v0.41.1 · 10/9/2026`, `renderAppVersionLine()`).
+  Koku la dejó dentro a propósito: sirve para saber qué versión tienes
+  cuando algo falla, y verla es normal en cualquier app.
+- **`#notifications-status`**, que a pesar de estar en el mismo sitio NO
+  es un diagnóstico: dice "Falta el permiso del sistema: activa el
+  interruptor para pedirlo". Eso es una instrucción para el usuario.
+- **La casilla `sin_app_group`** del workflow de iOS: es de la
+  compilación, no de la app. No se ve desde el teléfono.
+
 ## Estado actual
 
-**Rama de trabajo: `calendario-notas-movil-UI`** (esta conversación de
-configuración del visor móvil trabaja en `claude/mobile-viewer-config-b59uf1`,
-creada desde `movil-ui` y con `calendario-notas-movil-UI` ya fusionada).
+**Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde
+`claude/mobile-viewer-config-b59uf1`, que a su vez salía de `movil-ui`
+con `calendario-notas-movil-UI` ya fusionada). Todo lo de esta
+conversación vive ahí; ver el bloque "Dos ramas" más arriba.
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 
 - **`movil-ui` ya NO se toca** salvo que Koku lo pida explícitamente:
