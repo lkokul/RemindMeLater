@@ -9815,6 +9815,57 @@ const FINANZAS_KIND_PLURALES = {
 const finanzasRecurringKindField = createSelectField({ options: FINANZAS_KIND_OPTIONS, initialValue: 'other' });
 document.getElementById('finanzas-recurring-kind-field').appendChild(finanzasRecurringKindField.element);
 
+// -- Avisos de un gasto fijo (cuantos dias antes) --
+//
+// Se pueden marcar varios. El tope de 5 es el mismo que valida la ruta:
+// cada aviso ocupa un hueco del cupo de notificaciones del sistema.
+const FINANZAS_MAX_AVISOS = 5;
+const FINANZAS_AVISO_ETIQUETAS = {
+  0: 'el mismo día',
+  1: '1 día antes',
+  2: '2 días antes',
+  7: '1 semana antes',
+  15: '15 días antes',
+  30: '1 mes antes',
+  60: '2 meses antes',
+  90: '3 meses antes',
+};
+const finanzasRecurringAvisos = new Set();
+
+function renderFinanzasRecurringAvisos() {
+  document.querySelectorAll('[data-aviso-dias]').forEach((btn) => {
+    btn.classList.toggle('active', finanzasRecurringAvisos.has(Number(btn.dataset.avisoDias)));
+  });
+  const hint = document.getElementById('finanzas-recurring-reminders-hint');
+  if (finanzasRecurringAvisos.size === 0) {
+    hint.textContent = 'Sin avisos.';
+    return;
+  }
+  const orden = [...finanzasRecurringAvisos].sort((a, b) => b - a);
+  hint.textContent = `Te avisará ${orden.map((d) => FINANZAS_AVISO_ETIQUETAS[d] || `${d} días antes`).join(', ')}.`;
+}
+
+document.querySelectorAll('[data-aviso-dias]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const dias = Number(btn.dataset.avisoDias);
+    if (finanzasRecurringAvisos.has(dias)) {
+      finanzasRecurringAvisos.delete(dias);
+    } else {
+      if (finanzasRecurringAvisos.size >= FINANZAS_MAX_AVISOS) {
+        // Se avisa en vez de ignorar el toque en silencio: si no, parece
+        // que el boton esta roto.
+        await showAppConfirm(
+          `Como mucho ${FINANZAS_MAX_AVISOS} avisos por gasto. Cada aviso ocupa un hueco de los que el móvil reserva para toda la app (unos 64, compartidos con los recordatorios del calendario), así que conviene no gastarlos de más.`,
+          { okText: 'Vale', alertOnly: true }
+        );
+        return;
+      }
+      finanzasRecurringAvisos.add(dias);
+    }
+    renderFinanzasRecurringAvisos();
+  });
+});
+
 const finanzasRecurringMonthField = createSelectField({ options: FINANZAS_MONTH_OPTIONS, initialValue: '01' });
 document.getElementById('finanzas-recurring-month-field').appendChild(finanzasRecurringMonthField.element);
 
@@ -16277,7 +16328,7 @@ async function renderFinanzasRecurringList() {
       titulo: r.description || 'Gasto fijo sin nombre',
       sub: `${finanzasRecurringFrequencyLabel(r)} · ${equivalencia}`,
       importe: formatFinanzasAmount(r.amount),
-      etiqueta: r.active ? '' : 'Pausado',
+      etiqueta: r.active ? (r.reminderOffsets && r.reminderOffsets.length ? '🔔' : '') : 'Pausado',
       etiquetaTono: 'pausado',
       alPulsar: () => openFinanzasRecurringTransactionsModal(r),
     });
@@ -16328,6 +16379,9 @@ function openFinanzasRecurringModal(r) {
   finanzasRecurringKindField.setValue(
     r ? r.kind || 'other' : finanzasFijosKind !== 'all' ? finanzasFijosKind : 'other'
   );
+  finanzasRecurringAvisos.clear();
+  (r && r.reminderOffsets ? r.reminderOffsets : []).forEach((d) => finanzasRecurringAvisos.add(Number(d)));
+  renderFinanzasRecurringAvisos();
   document.getElementById('finanzas-recurring-amount').value = r ? r.amount : '';
   finanzasRecurringFrequencyField.setValue(r ? r.frequency : 'monthly');
   document.getElementById('finanzas-recurring-day').value = r ? r.dayOfMonth : '';
@@ -16409,6 +16463,7 @@ document.getElementById('finanzas-recurring-form').addEventListener('submit', as
     endDate: endDate ? toDateKey(endDate) : null,
     countsTowardBudget: document.getElementById('finanzas-recurring-counts').checked,
     kind: finanzasRecurringKindField.getValue(),
+    reminderOffsets: [...finanzasRecurringAvisos],
   };
   try {
     if (id) {
@@ -16424,6 +16479,10 @@ document.getElementById('finanzas-recurring-form').addEventListener('submit', as
   }
   closeFinanzasRecurringModal();
   await refreshFinanzasRecurringTab();
+  // Cambiar un gasto puede cambiar sus avisos (o su fecha), asi que se
+  // rehace la programacion del sistema. Es el mismo "cancelar y rehacer"
+  // que ya usa el calendario: nunca queda un aviso huerfano.
+  if (typeof syncScheduledReminders === 'function') syncScheduledReminders();
 });
 
 // -- Pestaña "Deudas": lo que Koku debe a alguien y lo que alguien le
@@ -16575,6 +16634,14 @@ async function openFinanzasRecurringTransactionsModal(r) {
 
   const toggleBtn = document.getElementById('btn-finanzas-recurring-detail-toggle');
   toggleBtn.textContent = r.active ? 'Pausar' : 'Reanudar';
+
+  // Los avisos, en palabras. Si no hay ninguno se dice, para que no
+  // parezca que la app avisa cuando no lo hace.
+  const avisos = (r.reminderOffsets || []).slice().sort((a, b) => b - a);
+  const avisosEl = document.getElementById('finanzas-recurring-detail-avisos');
+  avisosEl.textContent = avisos.length === 0
+    ? 'Sin avisos de pago.'
+    : `Te avisa ${avisos.map((d) => FINANZAS_AVISO_ETIQUETAS[d] || `${d} días antes`).join(', ')}.`;
 
   const histCont = document.getElementById('finanzas-recurring-history');
   const listaCont = document.getElementById('finanzas-recurring-transactions-list');

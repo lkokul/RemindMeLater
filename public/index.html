@@ -1743,6 +1743,24 @@
           <input type="checkbox" id="finanzas-recurring-counts" checked />
           Cuenta para el límite mensual
         </label>
+        <!-- Avisos: se pueden marcar varios (hasta 5). El tope no es
+             capricho -- cada aviso ocupa un hueco del cupo del sistema,
+             que iOS limita a unas 64 por app y que se comparte con el
+             calendario. -->
+        <div class="finanzas-avisos-campo">
+          <span class="finanzas-avisos-label">Avisarme antes del pago</span>
+          <div class="finanzas-chips" id="finanzas-recurring-reminders">
+            <button type="button" class="finanzas-chip" data-aviso-dias="0">El mismo día</button>
+            <button type="button" class="finanzas-chip" data-aviso-dias="1">1 día antes</button>
+            <button type="button" class="finanzas-chip" data-aviso-dias="2">2 días</button>
+            <button type="button" class="finanzas-chip" data-aviso-dias="7">1 semana</button>
+            <button type="button" class="finanzas-chip" data-aviso-dias="15">15 días</button>
+            <button type="button" class="finanzas-chip" data-aviso-dias="30">1 mes</button>
+            <button type="button" class="finanzas-chip" data-aviso-dias="60">2 meses</button>
+            <button type="button" class="finanzas-chip" data-aviso-dias="90">3 meses</button>
+          </div>
+          <p class="hint" id="finanzas-recurring-reminders-hint">Sin avisos.</p>
+        </div>
         <div class="modal-actions">
           <button type="button" id="btn-cancel-finanzas-recurring" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
@@ -1762,6 +1780,7 @@
       <button type="button" id="btn-close-finanzas-recurring-transactions" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2 id="finanzas-recurring-transactions-title">Gasto fijo</h2>
       <div id="finanzas-recurring-detail-sub" class="finanzas-detail-sub"></div>
+      <div id="finanzas-recurring-detail-avisos" class="finanzas-detail-avisos"></div>
 
       <h3 class="finanzas-detail-heading">Lo que te ha costado cada año</h3>
       <div id="finanzas-recurring-history" class="finanzas-group-list"></div>
@@ -2635,6 +2654,11 @@
           </label>
           <button type="button" id="btn-help-notif-reminders" class="icon-btn settings-help-btn" aria-label="Qué son los avisos de recordatorios">?</button>
         </div>
+        <!-- Cuantos avisos hay programados de los que caben. El movil solo
+             guarda unos 64 avisos pendientes por app, y cuando se pasa
+             deja de avisar EN SILENCIO: sin este contador no habria forma
+             de entender por que dejaron de sonar. -->
+        <p id="setting-avisos-cupo" class="hint"></p>
         <div class="settings-toggle-help-row">
           <label class="checkbox-row">
             <input type="checkbox" id="setting-gym-rest-notify" />

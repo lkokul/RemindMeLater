@@ -5153,3 +5153,15 @@ body.gym-rest-push #settings-modal .settings-card {
   border: 1px solid var(--border);
   border-radius: 0.5rem;
 }
+
+/* Campo de avisos del formulario de gasto fijo: los chips ya vienen de
+   .finanzas-chips, esto solo le da la etiqueta y el aire de un campo mas
+   del formulario. */
+.finanzas-avisos-campo { margin: 0.9rem 0 0.2rem; }
+.finanzas-avisos-label { display: block; margin-bottom: 0.45rem; font-size: 0.9rem; }
+.finanzas-avisos-campo .finanzas-chips { margin-bottom: 0.35rem; }
+.finanzas-detail-avisos {
+  font-size: 0.82rem;
+  margin: -0.6rem 0 1rem;
+  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
+}

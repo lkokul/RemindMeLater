@@ -1483,7 +1483,36 @@ syncActiveTheme();
 // notificaciones" y nunca llegaba a pedirle permiso al sistema. Por eso
 // iOS no mostraba ni el apartado de notificaciones de la app en sus
 // Ajustes: nunca se le habia pedido nada.
+// Cuantos avisos hay programados de los que caben, en palabras.
+//
+// Existe porque quedarse sin cupo es INVISIBLE: el movil guarda unas 64
+// notificaciones pendientes por app y a partir de ahi deja de avisar sin
+// decir nada. Con gastos fijos que pueden traer hasta cinco avisos cada
+// uno, es facil llegar sin enterarse.
+function refreshAvisosCupo() {
+  const el = document.getElementById('setting-avisos-cupo');
+  if (!el) return;
+  const estado = typeof estadoDeLosAvisos === 'function' ? estadoDeLosAvisos() : null;
+  if (!estado) {
+    el.textContent = '';
+    return;
+  }
+  const usados = estado.calendario + estado.pagos;
+  let texto = `Tienes ${usados} de ${estado.cupo} avisos programados (${estado.calendario} del calendario y ${estado.pagos} de gastos fijos).`;
+
+  // El consejo tiene que apuntar a QUIEN esta llenando el cupo. Decir
+  // "quita avisos de gastos fijos" cuando el que no cabe es el calendario
+  // (y los gastos fijos ya estan a cero) es peor que no decir nada.
+  if (estado.calendarioFueraDeCupo > 0) {
+    texto += ` Se han quedado fuera ${estado.calendarioFueraDeCupo} recordatorios del calendario, así que los gastos fijos no tienen hueco ahora mismo. Suenan los más próximos; los demás entrarán según vayan pasando.`;
+  } else if (estado.pagosFueraDeCupo > 0) {
+    texto += ` No caben ${estado.pagosFueraDeCupo} avisos de gastos fijos más. Se quedan los más próximos; si quieres que entren otros, quita alguna antelación de las que tengas puestas.`;
+  }
+  el.textContent = texto;
+}
+
 function refreshMobileTab() {
+  refreshAvisosCupo();
   const checkbox = document.getElementById('setting-notifications');
   const status = document.getElementById('notifications-status');
   const nativo = localNotificationsAvailable();

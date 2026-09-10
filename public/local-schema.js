@@ -925,9 +925,35 @@ function applyLocalSchema(db) {
     db.exec("ALTER TABLE finanzas_recurring_expenses ADD COLUMN kind TEXT NOT NULL DEFAULT 'other'");
   }
 
+  // reminder_offsets: cuantos DIAS antes avisar de este pago, como lista
+  // separada por comas ("0,2,30" = el mismo dia, dos dias antes y un mes
+  // antes). Vacio = sin avisos.
+  //
+  // Se guarda como texto y no en una tabla aparte a proposito: son como
+  // mucho cinco numeros por plantilla, y una tabla obligaria a un borrado
+  // en cascada a mano mas (la regla de la casa es que no hay ON DELETE
+  // CASCADE) a cambio de nada.
+  //
+  // En DIAS aunque la interfaz diga "1 mes": para un aviso de cortesia,
+  // 30 dias y "un mes" son lo mismo, y en dias la cuenta no depende de en
+  // que mes caiga (un "mes antes" del 31 de marzo seria el 28 de febrero,
+  // que no es lo que nadie espera leer).
+  if (!finanzasRecurringColumns.includes('reminder_offsets')) {
+    db.exec("ALTER TABLE finanzas_recurring_expenses ADD COLUMN reminder_offsets TEXT NOT NULL DEFAULT ''");
+  }
+
   // savings_goal_min: objetivo MINIMO de ahorro mensual (sin maximo --
   // Koku dijo explicitamente que ahorrar de mas nunca es un problema).
   const finanzasSettingsColumns = db.prepare('PRAGMA table_info(finanzas_settings)').all().map((c) => c.name);
+
+  // A que hora del dia suenan los avisos de los pagos fijos. Una sola para
+  // todos (y no una por aviso): nadie quiere elegir hora cinco veces por
+  // cada gasto, y un aviso de "esto se paga en dos dias" no depende de la
+  // hora exacta. Por defecto las 9 de la mañana.
+  if (!finanzasSettingsColumns.includes('reminder_hour')) {
+    db.exec('ALTER TABLE finanzas_settings ADD COLUMN reminder_hour INTEGER NOT NULL DEFAULT 9');
+  }
+
   if (!finanzasSettingsColumns.includes('savings_goal_min')) {
     db.exec('ALTER TABLE finanzas_settings ADD COLUMN savings_goal_min REAL');
   }

@@ -31,6 +31,7 @@
       active: !!row.active,
       lastGeneratedPeriod: row.last_generated_period || null,
       kind: row.kind || 'other',
+      reminderOffsets: parseOffsets(row.reminder_offsets),
     };
   }
 
@@ -38,6 +39,37 @@
   // un valor inventado no acabe en la base y descuadre luego los totales
   // por clase (un 'suscripcion' mal escrito no sumaria con 'subscription').
   const KINDS = ['subscription', 'bill', 'loan', 'other'];
+
+  // Cuantos avisos se dejan poner por gasto. El tope no es capricho: cada
+  // aviso ocupa un hueco del presupuesto de notificaciones del sistema
+  // (iOS deja ~64 pendientes por app, compartidas con el calendario), asi
+  // que veinte gastos con cinco avisos cada uno ya se lo comen entero.
+  const MAX_AVISOS_POR_GASTO = 5;
+  // Tres meses es el maximo que pidio Koku ("para gastos anuales viene
+  // bien saberlo con antelacion").
+  const MAX_DIAS_DE_AVISO = 90;
+
+  // "0,2,30" -> [0, 2, 30], tirando lo que no sea un numero de dias
+  // valido, quitando repetidos y ordenando de mas lejos a mas cerca.
+  function parseOffsets(value) {
+    if (typeof value === 'string' && value.trim() === '') return [];
+    const lista = Array.isArray(value) ? value : String(value == null ? '' : value).split(',');
+    const limpios = [];
+    for (const bruto of lista) {
+      const n = Number(String(bruto).trim());
+      if (!Number.isInteger(n) || n < 0 || n > MAX_DIAS_DE_AVISO) continue;
+      if (!limpios.includes(n)) limpios.push(n);
+    }
+    // Si se piden mas de los que caben, se quedan los MAS CERCANOS al
+    // pago. Al reves (que era como estaba primero) se tiraban "el mismo
+    // dia" y "un dia antes" para conservar "tres meses antes", justo al
+    // contrario de lo que sirve: el aviso de tres meses es un lujo, el de
+    // la vispera es el que evita el olvido.
+    const cercanosPrimero = limpios.sort((a, b) => a - b).slice(0, MAX_AVISOS_POR_GASTO);
+    // Se devuelven de mas lejano a mas cercano, que es como se leen ("te
+    // avisara 1 mes antes, 1 semana antes y el mismo dia").
+    return cercanosPrimero.sort((a, b) => b - a);
+  }
 
   function validateBody(body, existing) {
     const accountId = body.accountId !== undefined ? body.accountId : existing && existing.account_id;
@@ -105,10 +137,15 @@
     let kind = body.kind !== undefined ? body.kind : existing && existing.kind;
     if (!KINDS.includes(kind)) kind = 'other';
 
+    const reminderOffsets = parseOffsets(
+      body.reminderOffsets !== undefined ? body.reminderOffsets : existing && existing.reminder_offsets
+    );
+
     return {
       accountId,
       categoryId,
       kind,
+      reminderOffsets: reminderOffsets.join(','),
       amount: safeAmount,
       description: typeof body.description === 'string' && body.description.trim() ? body.description.trim() : (body.description === undefined && existing ? existing.description : null),
       frequency,
@@ -378,6 +415,81 @@
     res.json({ monthlyTotal, annualTotal, byKind, items });
   });
 
+  // GET /upcoming-reminders — los avisos de pago que habria que programar
+  // en el sistema, ya calculados y ordenados por cuando suenan.
+  //
+  // Quien los programa de verdad es local-notifications.js; aqui solo se
+  // decide QUE avisos tocan. Dos reglas que importan:
+  //
+  //  - De cada pareja (gasto, antelacion) se manda solo el aviso MAS
+  //    PROXIMO, no todos los del año. Cuando ese suene, la app ya se habra
+  //    abierto y reprogramara el siguiente -- es el mismo "borrar y
+  //    rehacer" que usa el calendario. Programar los doce de golpe solo
+  //    serviria para agotar el cupo del sistema.
+  //  - Un cobro que YA se genero no avisa: el dinero ya ha salido.
+  router.get('/upcoming-reminders', (req, res) => {
+    const ahora = new Date();
+    const hoy = `${ahora.getFullYear()}-${pad2(ahora.getMonth() + 1)}-${pad2(ahora.getDate())}`;
+
+    const ajustes = db.prepare('SELECT reminder_hour FROM finanzas_settings WHERE id = 1').get();
+    const hora = ajustes && Number.isInteger(ajustes.reminder_hour) ? ajustes.reminder_hour : 9;
+
+    // Se mira hasta 120 dias adelante: con la antelacion maxima de 90
+    // dias, un pago que caiga mas alla de esa ventana no puede tener
+    // todavia ningun aviso que suene ahora.
+    const limite = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + 120);
+    const hasta = `${limite.getFullYear()}-${pad2(limite.getMonth() + 1)}-${pad2(limite.getDate())}`;
+
+    const templates = db.prepare('SELECT * FROM finanzas_recurring_expenses WHERE active = 1').all();
+    const avisos = [];
+
+    for (const template of templates) {
+      const offsets = parseOffsets(template.reminder_offsets);
+      if (offsets.length === 0) continue;
+
+      const pagadas = new Set(
+        db
+          .prepare('SELECT date FROM finanzas_transactions WHERE recurring_expense_id = ?')
+          .all(template.id)
+          .map((t) => periodKeyForDate(template.frequency, t.date))
+      );
+
+      // El aviso mas proximo de cada antelacion.
+      const mejorPorOffset = new Map();
+      for (const date of occurrenceDates(template, hoy, hasta)) {
+        if (pagadas.has(periodKeyForDate(template.frequency, date))) continue;
+
+        const [y, m, d] = date.split('-').map(Number);
+        for (let i = 0; i < offsets.length; i += 1) {
+          const dias = offsets[i];
+          const cuando = new Date(y, m - 1, d - dias, hora, 0, 0, 0);
+          if (cuando.getTime() <= ahora.getTime()) continue;
+          const previo = mejorPorOffset.get(i);
+          if (previo && previo.at <= cuando.getTime()) continue;
+          mejorPorOffset.set(i, {
+            // Espacio de ids propio (800.000.000+) para no chocar con los
+            // de los eventos del calendario, que son ids de fila y empiezan
+            // en 1. Queda por debajo de 999.999.900, que es la frontera de
+            // los avisos internos de la app -- asi estos SI entran en el
+            // "cancelar y rehacer" de syncScheduledReminders, que es justo
+            // lo que hace falta para que no quede ninguno huerfano.
+            id: 800000000 + template.id * 10 + i,
+            at: cuando.getTime(),
+            templateId: template.id,
+            description: template.description || 'Gasto fijo',
+            amount: template.amount,
+            date,
+            daysBefore: dias,
+          });
+        }
+      }
+      avisos.push(...mejorPorOffset.values());
+    }
+
+    avisos.sort((a, b) => a.at - b.at);
+    res.json(avisos);
+  });
+
   // GET /:id/history — cuanto ha costado ESTE gasto cada año.
   //
   // Sale gratis de los movimientos ya generados, que guardan
@@ -416,7 +528,7 @@
 
     const info = db
       .prepare(
-        'INSERT INTO finanzas_recurring_expenses (account_id, category_id, amount, description, frequency, day_of_month, month_of_year, start_date, end_date, counts_toward_budget, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO finanzas_recurring_expenses (account_id, category_id, amount, description, frequency, day_of_month, month_of_year, start_date, end_date, counts_toward_budget, kind, reminder_offsets) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       )
       .run(
         result.accountId,
@@ -429,7 +541,8 @@
         result.startDate,
         result.endDate,
         result.countsTowardBudget,
-        result.kind
+        result.kind,
+        result.reminderOffsets
       );
 
     const row = db.prepare('SELECT * FROM finanzas_recurring_expenses WHERE id = ?').get(info.lastInsertRowid);
@@ -451,7 +564,7 @@
     const active = body.active !== undefined ? (body.active ? 1 : 0) : existing.active;
 
     db.prepare(
-      'UPDATE finanzas_recurring_expenses SET account_id = ?, category_id = ?, amount = ?, description = ?, frequency = ?, day_of_month = ?, month_of_year = ?, start_date = ?, end_date = ?, counts_toward_budget = ?, kind = ?, active = ? WHERE id = ?'
+      'UPDATE finanzas_recurring_expenses SET account_id = ?, category_id = ?, amount = ?, description = ?, frequency = ?, day_of_month = ?, month_of_year = ?, start_date = ?, end_date = ?, counts_toward_budget = ?, kind = ?, reminder_offsets = ?, active = ? WHERE id = ?'
     ).run(
       result.accountId,
       result.categoryId,
@@ -464,6 +577,7 @@
       result.endDate,
       result.countsTowardBudget,
       result.kind,
+      result.reminderOffsets,
       active,
       req.params.id
     );
