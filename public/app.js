@@ -1108,7 +1108,7 @@ function escapeHtml(str) {
 // en la vista anual (ver calendarViewMode mas abajo) -- mismo boton,
 // distinto salto, coherente con lo que se esta mirando.
 // ---------------------------------------------------------------------
-// Vista anual (solo escritorio): las 12 miniaturas del año a la vez, en
+// Vista anual: las 12 miniaturas del año a la vez, en
 // vez del mes a mes de siempre -- pedido explicito de Koku, "ya que hay
 // mas espacio [en el ordenador] creo que seria visible". Se alterna con
 // gestos de la rueda del raton (hacia abajo sobre el mes = vista anual;
@@ -7734,12 +7734,12 @@ NOTE_EDITOR_BODY.addEventListener('blur', () => {
 // guardado -- el dialogo de "cambios sin guardar" de closeOpenNote()
 // se queda como red de seguridad para el hueco de tiempo entre el
 // ultimo tecleo y que el debounce dispare.
-// "Estamos en el visor movil": mismo umbral que el CSS (860px), en un
-// unico sitio para que no se repita el matchMedia suelto por el
-// archivo.
-function isMobileLayout() {
-  return window.matchMedia('(max-width: 859px)').matches;
-}
+// (Aqui habia una SEGUNDA definicion de isMobileLayout(), con
+// matchMedia('(max-width: 859px)'). Estaba muerta sin que se notara: mas
+// abajo en este mismo archivo hay otra funcion con el mismo nombre, y en
+// JavaScript la ultima declaracion gana, asi que esta nunca llegaba a
+// ejecutarse. Se quito al retirar el corte de escritorio; la buena, y
+// unica, esta en el bloque de GESTOS DE NAVEGACION al final del archivo.)
 
 let mobileNoteAutosaveTimer = null;
 function scheduleMobileNoteAutosave() {
@@ -18090,11 +18090,26 @@ function isMobileEdgeZone(x) {
   return x <= carril || x >= window.innerWidth - carril;
 }
 
-// Los gestos de navegacion son cosa del movil: en escritorio el
-// calendario y el panel conviven en pantalla y no hay barra de pestañas
-// que recorrer. 860px es el mismo corte que usa styles.css.
+// SIEMPRE es el visor movil, a cualquier ancho.
+//
+// Antes esto era `window.innerWidth < 860`, el mismo corte que usaba
+// styles.css, para no meter los gestos de navegacion en el visor de
+// escritorio. En ESTA rama ya no hay visor de escritorio (ni server/ ni
+// electron/ ni topbar ni panel lateral: eso vive en la rama
+// `escritorio`), asi que no hay a que cambiar.
+//
+// Y ese corte daba un fallo de verdad, no era solo codigo muerto: Koku
+// puso el movil en la tele y a esa anchura la app se quedaba a medias --
+// seguia con su barra de abajo pero PERDIA los accesos rapidos del
+// calendario y dejaba de responder a los gestos, o sea que parecia que
+// se hubiera abierto "el visor de escritorio". La app es la misma a
+// cualquier ancho: si un dia se estira, se estira entera.
+//
+// Se deja como funcion (en vez de quitar las llamadas) a proposito: los
+// sitios que la llaman siguen leyendose igual, y si algun dia hiciera
+// falta distinguir de nuevo, se distingue AQUI y en un solo sitio.
 function isMobileLayout() {
-  return window.innerWidth < 860;
+  return true;
 }
 
 // Un modal abierto se lleva TODA la atencion: mientras haya uno, ningun

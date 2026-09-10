@@ -1,8 +1,13 @@
-/* styles.css — mobile-first: las reglas base son para movil (columna
-   unica, listas grandes y tactiles). La media query de abajo re-organiza
-   todo para pantallas anchas (ordenador): cuadricula de mes + barra
-   lateral. Esto es lo que hace que la MISMA app sirva para las "2 vistas"
-   sin duplicar codigo. */
+/* styles.css — SOLO la app movil, a cualquier ancho.
+   Aqui no hay ninguna media query de anchura, y es a proposito. Antes si:
+   las reglas base eran para movil y a partir de 860px se reorganizaba
+   todo como visor de escritorio (cuadricula de mes + barra lateral). Ese
+   visor ya no vive en esta rama -- esta en la rama `escritorio`, que Koku
+   lleva por su cuenta -- y el corte que quedaba daba un fallo real: con
+   el movil puesto en una tele, la app se estiraba y se quedaba a medias,
+   perdiendo los accesos rapidos del calendario y los gestos.
+   Si algun dia hay que adaptarse a una pantalla ancha, se hace de una
+   pieza y a proposito, no heredando medio visor de otro programa. */
 
 :root {
   --bg: #0f1115;
@@ -959,25 +964,12 @@ body.mobile-day-scroll-lock .app {
   padding-bottom: calc(8rem + env(safe-area-inset-bottom, 0px));
 }
 
-/* --- Topbar --- */
-/* En movil no se ve (ver .mobile-nav mas abajo, y la barra propia del
-   calendario movil, .mobile-calendar-toolbar, mas abajo tambien): la
-   barra de navegacion de abajo + la barra del calendario sustituyen a
-   todos estos botones. Vuelve en el media query de escritorio de mas
-   abajo. */
-.topbar {
-  display: none;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.9rem 1rem;
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  background: var(--bg);
-  z-index: 5;
-}
+/* La topbar de escritorio ya no existe: ni su marcado en index.html ni
+   sus reglas aqui. En esta rama solo vive la app movil, donde navegar es
+   la barra de abajo (.mobile-nav) mas la barra propia del calendario
+   (.mobile-calendar-toolbar). La regla que habia aqui era .topbar {
+   display: none } y un media query que la devolvia a partir de 860px:
+   las dos cosas se fueron juntas. */
 
 /* ---------------------------------------------------------------------
    Navegacion movil: sustituye a la topbar de escritorio (titulo +
@@ -1212,11 +1204,13 @@ body.mobile-day-scroll-lock .app {
 .calendar-quick-actions button { flex: 1; }
 /* Con un modal abierto se aparta igual que la barra de abajo. */
 body.real-modal-open .calendar-quick-actions { display: none; }
-/* En escritorio no hay barra inferior contra la que apoyarse -- estos
-   accesos son propios del visor movil. */
-@media (min-width: 860px) {
-  .calendar-quick-actions { display: none; }
-}
+/* Antes habia aqui un @media (min-width: 860px) que los escondia "en
+   escritorio". Se fue: en ESTA rama solo vive la app movil, asi que no
+   hay un "escritorio" al que cambiar. Era ademas la causa de un fallo
+   real -- Koku puso el movil en la tele y la app se estiro perdiendo
+   estos dos botones y los gestos de navegacion: parecia que se hubiera
+   abierto "el visor de escritorio". Ahora la interfaz es la misma a
+   cualquier ancho. Ver el bloque de isMobileLayout() en app.js. */
 
 .mobile-calendar-view {
   display: flex;

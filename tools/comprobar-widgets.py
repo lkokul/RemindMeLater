@@ -351,6 +351,9 @@ except Exception as err:  # noqa: BLE001
 # Sin los comentarios: el propio Info.plist EXPLICA en un comentario por
 # que ya no lleva esas claves, y buscar el nombre a secas daba un falso
 # positivo contra ese mismo texto.
+def sin_comentarios_css(txt):
+    return re.sub(r'/\*.*?\*/', '', txt, flags=re.S)
+
 def sin_comentarios_xml(txt):
     return re.sub(r'<!--.*?-->', '', txt, flags=re.S)
 
@@ -425,6 +428,30 @@ for cdn in ('fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsdelivr.net',
     if cdn in indice:
         fallos.append(f'index.html vuelve a cargar algo de {cdn}: nada de CDN, '
                       'se vendoriza dentro de public/ (criterio de sql.js)')
+
+# --- 7) en esta rama SOLO vive la app movil --------------------------
+#
+# El visor de escritorio (server/, electron/, la topbar, el panel lateral)
+# vive en la rama `escritorio`. Aqui no, y el resto que quedaba -- un corte
+# de 860px en el CSS y en el JS -- no era codigo muerto inofensivo: con el
+# movil puesto en una tele la app se estiraba y se quedaba a medias,
+# perdiendo los accesos rapidos del calendario y los gestos de navegacion.
+# Un merge desde otra rama lo devolveria sin que nadie se diera cuenta.
+css = leer('public/styles.css')
+if re.search(r'@media[^{]*min-width', sin_comentarios_css(css)):
+    fallos.append('vuelve a haber una media query de anchura en styles.css: '
+                  'en esta rama la app es la misma a cualquier ancho (el visor '
+                  'de escritorio vive en la rama escritorio)')
+for carpeta in ('server', 'electron'):
+    if os.path.isdir(carpeta):
+        fallos.append(f'ha vuelto la carpeta {carpeta}/: es el programa de '
+                      'escritorio, y esta rama es solo la app movil')
+
+app_js = leer('public/app.js')
+if app_js.count('function isMobileLayout') != 1:
+    fallos.append('hay mas de una isMobileLayout(): en JavaScript gana la '
+                  'ultima declaracion, asi que la otra queda muerta sin avisar '
+                  '(ya paso una vez)')
 
 # --- resultado -------------------------------------------------------
 if fallos:

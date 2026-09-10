@@ -97,24 +97,23 @@ function positionFixedPopover(anchorBtn, popover, { width = 248 } = {}) {
 
 // La paleta son 32 colores mas el color a medida: flotando en un movil
 // ocupa media pantalla, tapa lo que estabas mirando y queda recargada
-// (Koku: "es un poco enfarragoso y la vista se ve sucia"). En movil se
-// abre a PANTALLA COMPLETA con su propia X; en escritorio, donde sobra
-// sitio y el raton hace comodo cerrar tocando fuera, sigue flotando
-// junto a su boton como siempre.
-const ANCHO_ESCRITORIO = 860; // el mismo corte que usa styles.css
+// (Koku: "es un poco enfarragoso y la vista se ve sucia"). Se abre SIEMPRE
+// a pantalla completa, con su propia X.
+//
+// Antes esto miraba si el ancho llegaba a 860px para dejarlo flotando "en
+// escritorio". Ese corte se fue con el resto del visor de escritorio, que
+// ya no vive en esta rama: la app es la misma a cualquier ancho, y con el
+// movil puesto en una tele el popover flotante era justo una de las cosas
+// que cambiaban solas de aspecto.
 function abrirPopoverDeColor(anchorBtn, popover) {
-  const aPantallaCompleta = window.innerWidth < ANCHO_ESCRITORIO;
-  popover.classList.toggle('is-fullscreen', aPantallaCompleta);
-  if (aPantallaCompleta) {
-    // positionFixedPopover deja left/top/max-height en el atributo
-    // style, y eso ganaria a las reglas de pantalla completa. Se limpian.
-    popover.style.left = '';
-    popover.style.top = '';
-    popover.style.maxHeight = '';
-    popover.style.overflowY = '';
-    return;
-  }
-  positionFixedPopover(anchorBtn, popover);
+  popover.classList.add('is-fullscreen');
+  // positionFixedPopover deja left/top/max-height en el atributo style, y
+  // eso ganaria a las reglas de pantalla completa. Se limpian por si este
+  // mismo popover se abrio antes por otra via.
+  popover.style.left = '';
+  popover.style.top = '';
+  popover.style.maxHeight = '';
+  popover.style.overflowY = '';
 }
 
 function closeAllPopovers(except) {
