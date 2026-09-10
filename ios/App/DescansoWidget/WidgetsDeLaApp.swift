@@ -2,8 +2,8 @@ import WidgetKit
 import SwiftUI
 import AppIntents
 
-// Los cuatro widgets nuevos: Hoy (calendario), Tareas, Finanzas,
-// Lecturas y Viajes. El del Gimnasio ("Qué toca hoy") vive aparte, en
+// Los widgets nuevos: Tareas, Finanzas, Lecturas y Viajes. El del
+// Gimnasio ("Qué toca hoy") vive aparte, en
 // QueTocaHoyWidget.swift, porque tiene su propia lógica de ciclo.
 //
 // Todos leen el MISMO resumen (ver ResumenDeLaApp.swift) y comparten
@@ -19,8 +19,11 @@ import AppIntents
 // A dónde lleva cada widget. Son los mismos esquemas que ya usaba
 // `remindmelater://gym-live` y `gym-hoy`: SceneDelegate recoge la URL y
 // deja una marca, y el JavaScript la consume al despertar.
+// (Hubo un destino "hoy", del widget del calendario. Koku lo quitó tras
+// probarlo: "el widget de hoy no es necesario". Se fue entero -- widget,
+// botón del centro de control y sección del resumen.)
 enum DestinoDeWidget: String {
-    case hoy, tareas, finanzas, lecturas, viajes
+    case tareas, finanzas, lecturas, viajes
     case nuevoEvento = "nuevo-evento"
     case nuevaNota = "nueva-nota"
 
@@ -77,14 +80,6 @@ extension ResumenDeLaApp {
     static var deEjemplo: ResumenDeLaApp {
         var r = ResumenDeLaApp()
         r.actualizado = Date().timeIntervalSince1970 * 1000
-        r.hoy = SeccionHoy(
-            eventos: [
-                FilaDeEvento(titulo: "Dentista", hora: "10:30", color: "#5b8cff", todoElDia: false),
-                FilaDeEvento(titulo: "Comida con Ana", hora: "14:00", color: "#f0883e", todoElDia: false),
-                FilaDeEvento(titulo: "Gimnasio", hora: "19:00", color: "#a371f7", todoElDia: false),
-            ],
-            total: 4, tareas: 3
-        )
         r.tareas = SeccionTareas(
             lista: [
                 FilaDeTarea(titulo: "Llamar al banco", cuando: "", color: "#f85149", vencida: true, hoy: false),
@@ -159,160 +154,7 @@ struct AvisoDeViejo: View {
 }
 
 // ---------------------------------------------------------------------
-// 1. Calendario · Hoy
-// ---------------------------------------------------------------------
-struct HoyWidget: Widget {
-    static let kind = "HoyWidget"
-
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: Self.kind, provider: ProveedorDeLaApp()) { entry in
-            VistaHoy(entry: entry)
-        }
-        .configurationDisplayName("Hoy")
-        .description("Los eventos y tareas que tienes hoy.")
-        .supportedFamilies([
-            .systemSmall, .systemMedium,
-            .accessoryCircular, .accessoryRectangular, .accessoryInline,
-        ])
-    }
-}
-
-struct VistaHoy: View {
-    @Environment(\.widgetFamily) private var familia
-    let entry: EntradaDeLaApp
-
-    private var seccion: SeccionHoy? { entry.resumen?.hoy }
-    private var acento: Color { Color(hexDeLaApp: entry.resumen?.acento ?? "") }
-    private var eventos: [FilaDeEvento] { seccion?.eventos ?? [] }
-    private var tareas: Int { seccion?.tareas ?? 0 }
-
-    // El resumen en una línea, que es lo que cabe en la pantalla de
-    // bloqueo: "2 eventos · 3 tareas".
-    private var enUnaLinea: String {
-        guard let s = seccion else { return entry.sinBuzon ? "Sin buzón" : "Abre la app" }
-        var trozos: [String] = []
-        if s.total > 0 { trozos.append("\(s.total) evento\(s.total == 1 ? "" : "s")") }
-        if s.tareas > 0 { trozos.append("\(s.tareas) tarea\(s.tareas == 1 ? "" : "s")") }
-        return trozos.isEmpty ? "Día libre" : trozos.joined(separator: " · ")
-    }
-
-    var body: some View {
-        switch familia {
-        case .accessoryInline:
-            Text(enUnaLinea).widgetURL(DestinoDeWidget.hoy.url)
-        case .accessoryCircular:
-            circular
-        case .accessoryRectangular:
-            rectangular
-        case .systemMedium:
-            deInicio(maxFilas: 4)
-        default:
-            deInicio(maxFilas: 2)
-        }
-    }
-
-    private var circular: some View {
-        ZStack {
-            AccessoryWidgetBackground()
-            VStack(spacing: -2) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 13, weight: .semibold))
-                Text("\((seccion?.total ?? 0) + tareas)")
-                    .font(.system(size: 15, weight: .bold))
-            }
-        }
-        .widgetURL(DestinoDeWidget.hoy.url)
-    }
-
-    private var rectangular: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text("Hoy").font(.caption2).fontWeight(.semibold).widgetAccentable()
-            if let primero = eventos.first {
-                Text(primero.hora.isEmpty ? primero.titulo : "\(primero.hora) \(primero.titulo)")
-                    .font(.headline).lineLimit(1).minimumScaleFactor(0.7)
-            } else {
-                Text(enUnaLinea).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
-            }
-            if eventos.count > 1 || tareas > 0 {
-                Text(enUnaLinea).font(.caption2).lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .widgetURL(DestinoDeWidget.hoy.url)
-    }
-
-    private func deInicio(maxFilas: Int) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                RotuloDeWidget(texto: "HOY", color: acento)
-                Spacer(minLength: 0)
-                AvisoDeViejo(resumen: entry.resumen)
-            }
-            if seccion == nil {
-                VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tu día")
-            } else if eventos.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(tareas > 0 ? "Sin eventos" : "Día libre")
-                        .font(.headline)
-                    if tareas > 0 {
-                        Text("\(tareas) tarea\(tareas == 1 ? "" : "s") pendiente\(tareas == 1 ? "" : "s")")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(eventos.prefix(maxFilas).enumerated()), id: \.offset) { _, ev in
-                        FilaEventoView(evento: ev)
-                    }
-                }
-                Spacer(minLength: 0)
-                if eventos.count > maxFilas || tareas > 0 {
-                    Text(pieDelDia(maxFilas: maxFilas))
-                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .marcaDeAgua("calendar", acento)
-        .fondoDeWidgetApp(entry.resumen.estiloDeWidget)
-        .widgetURL(DestinoDeWidget.hoy.url)
-    }
-
-    private func pieDelDia(maxFilas: Int) -> String {
-        var trozos: [String] = []
-        let extra = (seccion?.total ?? 0) - maxFilas
-        if extra > 0 { trozos.append("+\(extra) más") }
-        if tareas > 0 { trozos.append("\(tareas) tarea\(tareas == 1 ? "" : "s")") }
-        return trozos.joined(separator: " · ")
-    }
-}
-
-// Una fila de evento: la pastilla de color del grupo, la hora y el
-// título. La pastilla es lo que deja reconocer el grupo de un vistazo,
-// igual que en el calendario.
-struct FilaEventoView: View {
-    let evento: FilaDeEvento
-    var body: some View {
-        HStack(spacing: 6) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color(hexDeLaApp: evento.color))
-                .frame(width: 3, height: 14)
-            if !evento.hora.isEmpty {
-                Text(evento.hora)
-                    .font(.caption2).fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-            }
-            Text(evento.titulo)
-                .font(.caption)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-    }
-}
-
-// ---------------------------------------------------------------------
-// 2. Tareas pendientes
+// 1. Tareas pendientes
 // ---------------------------------------------------------------------
 struct TareasWidget: Widget {
     static let kind = "TareasWidget"
@@ -437,7 +279,7 @@ struct VistaTareas: View {
 }
 
 // ---------------------------------------------------------------------
-// 3. Finanzas · este mes
+// 2. Finanzas · este mes
 // ---------------------------------------------------------------------
 struct FinanzasWidget: Widget {
     static let kind = "FinanzasWidget"
@@ -572,7 +414,7 @@ struct VistaFinanzas: View {
 }
 
 // ---------------------------------------------------------------------
-// 4. Lecturas · lo que tienes empezado
+// 3. Lecturas · lo que tienes empezado
 // ---------------------------------------------------------------------
 struct LecturasWidget: Widget {
     static let kind = "LecturasWidget"
@@ -676,7 +518,7 @@ struct VistaLecturas: View {
 }
 
 // ---------------------------------------------------------------------
-// 5. Viajes · el próximo (o el que está en marcha)
+// 4. Viajes · el próximo (o el que está en marcha)
 // ---------------------------------------------------------------------
 struct ViajesWidget: Widget {
     static let kind = "ViajesWidget"
@@ -810,19 +652,6 @@ struct VistaViajes: View {
 // Ese archivo se compila en la app Y aquí: si vive solo en la extensión,
 // iOS no tiene a quién ejecutarlo y el botón vuelve a no hacer nada.
 #if compiler(>=6.0)
-
-@available(iOS 18.0, *)
-struct AbrirHoyControl: ControlWidget {
-    var body: some ControlWidgetConfiguration {
-        StaticControlConfiguration(kind: "com.koku.remindmelater.AbrirHoy") {
-            ControlWidgetButton(action: AbrirHoyIntent()) {
-                Label("Hoy", systemImage: "calendar")
-            }
-        }
-        .displayName("Hoy")
-        .description("Abre RemindMeLater en el día de hoy.")
-    }
-}
 
 @available(iOS 18.0, *)
 struct NuevoEventoControl: ControlWidget {

@@ -463,6 +463,15 @@
     <div class="extensions-hub">
       <p class="extensions-intro">Secciones nuevas aparte del calendario.</p>
       <div class="extensions-grid">
+        <!-- Notas tambien vive aqui (peticion de Koku): el 2o hueco de la
+             barra de abajo se puede cambiar por otra App, y quien lo
+             cambiara se quedaba SIN NINGUNA forma de llegar a Notas.
+             Mismo SVG que el de la barra (MOBILE_NAV_SLOT_APPS en
+             app.js), para que se reconozca en los dos sitios. -->
+        <button type="button" id="btn-open-notes" class="extensions-card extensions-card-active">
+          <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v5h5"></path><line x1="8" y1="12" x2="16" y2="12"></line><line x1="8" y1="16" x2="13" y2="16"></line></svg></span>
+          <span class="extensions-card-title">Notas</span>
+        </button>
         <button type="button" id="btn-open-gym" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="3" height="6" rx="1"></rect><rect x="19" y="9" width="3" height="6" rx="1"></rect><line x1="5" y1="12" x2="19" y2="12"></line><rect x="6.5" y="7" width="2" height="10" rx="1"></rect><rect x="15.5" y="7" width="2" height="10" rx="1"></rect></svg></span>
           <span class="extensions-card-title">Gimnasio</span>
@@ -1205,6 +1214,11 @@
     <div class="modal-card gym-modal">
       <button type="button" id="btn-close-gym-routine" class="modal-close-x" aria-label="Cerrar">✕</button>
       <h2 id="gym-routine-modal-title">Nuevo día</h2>
+      <!-- Cuanto suele llevarte este dia, calculado con tu media por
+           EJERCICIO (ver gymEstimarDuracionDeDia en app.js). Fuera del
+           <form> a proposito: es un dato, no un campo. Se ve en las dos
+           mitades del modal porque en las dos vale saberlo. -->
+      <p id="gym-routine-estimate" class="gym-routine-estimate hidden"></p>
       <form id="gym-routine-form">
         <input type="hidden" id="gym-routine-id" />
         <!-- El modal tiene DOS mitades y nunca se ven las dos a la vez
@@ -2362,6 +2376,13 @@
              estilo GitHub/Markdown -- ver maybeAutoStartCodeBlock en
              app.js. Este boton inserta uno sin lenguaje asignado. -->
         <button type="button" id="note-code-insert-btn" class="note-editor-btn" aria-label="Insertar bloque de código" title="Insertar bloque de código (o escribe &#96;&#96;&#96;lenguaje + Intro)">Código</button>
+        <!-- Calcular la cuenta que tenga el cursor (o todas las de la
+             nota si no hay ninguna debajo del cursor). Escribes =12*3+5
+             y pasa a ser "=12*3+5 → 41", dentro o fuera de una tabla.
+             En el movil ESTE BOTON es la unica forma de dispararlo: el
+             teclado del iPhone no tiene tecla Tab. Ver "FÓRMULAS EN LAS
+             NOTAS" en app.js. -->
+        <button type="button" id="note-formula-btn" class="note-editor-btn" aria-label="Calcular la fórmula" title="Calcular la fórmula (escribe =12*3+5)">=</button>
         <!-- Selector de archivo nativo, oculto -- lo abre el boton de
              arriba con .click(). Tambien sirve para el Ctrl+V (ver
              app.js), que reutiliza la misma subida. -->

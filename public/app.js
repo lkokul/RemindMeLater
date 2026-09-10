@@ -2494,13 +2494,25 @@ refreshMobileCalendarModeVisibility();
 // ---------------------------------------------------------------------
 // Modal de evento (crear / editar / borrar)
 // ---------------------------------------------------------------------
+// Con cuanta antelacion avisar. Los cuatro ultimos (de 2 dias a 2
+// semanas) los pidio Koku para lo que se prepara con tiempo: un viaje,
+// una renovacion, un cumpleaños. El tope son 2 semanas porque el mismo
+// lo puso ahi ("hasta 2 semanas antes, eso es suficiente").
+//
+// El valor son MINUTOS y viaja tal cual hasta la base y hasta el aviso
+// del sistema; no hay ningun tope escondido en medio, asi que anadir un
+// valor nuevo a esta lista es todo lo que hace falta.
 const REMINDER_OPTIONS = [
   { value: '', label: 'Sin recordatorio' },
   { value: '0', label: 'En el momento' },
   { value: '10', label: '10 minutos antes' },
   { value: '30', label: '30 minutos antes' },
   { value: '60', label: '1 hora antes' },
-  { value: '1440', label: '1 dia antes' },
+  { value: '1440', label: '1 día antes' },
+  { value: '2880', label: '2 días antes' },
+  { value: '4320', label: '3 días antes' },
+  { value: '10080', label: '1 semana antes' },
+  { value: '20160', label: '2 semanas antes' },
 ];
 const eventReminderField = createSelectField({ options: REMINDER_OPTIONS, initialValue: '0' });
 document.getElementById('event-reminder-field').appendChild(eventReminderField.element);
@@ -6611,6 +6623,277 @@ document.getElementById('note-code-insert-btn').addEventListener('click', () => 
   refreshNoteEditorState();
 });
 
+
+// ---------------------------------------------------------------------
+// FÓRMULAS EN LAS NOTAS
+//
+// Peticion de Koku: "me gustaria que en notas hubiera una especie de
+// formulas, tanto dentro como fuera de las tablas". De las tres formas
+// que se le ofrecieron eligio la de CALCULOS SUELTOS, SIN REFERENCIAS:
+// escribes =12*3+5 en cualquier sitio (un parrafo o una celda de tabla)
+// y te da el resultado. NO sabe de celdas (=B2*C2) ni se recalcula solo
+// si cambias otra casilla -- eso era la opcion de hoja de calculo, y la
+// descarto.
+//
+// Cuatro decisiones de como esta hecho:
+//
+// 1. El resultado se escribe DETRAS, no en lugar de la formula:
+//    "=12*3+5" pasa a ser "=12*3+5 → 41". Asi se sigue viendo la cuenta
+//    (que es media gracia de tenerla en una nota) y, sobre todo, se
+//    puede corregir un numero y volver a calcular: al recalcular se tira
+//    el "→ ..." viejo y se pone el nuevo.
+// 2. Es TEXTO PLANO, sin ninguna etiqueta nueva. El saneador del cuerpo
+//    de la nota (sanitizeNoteBody) trabaja con una lista blanca de
+//    etiquetas, asi que una etiqueta propia habria que darla de alta ahi
+//    y en el import/export; el texto pasa por todo eso sin tocar nada.
+// 3. NUNCA se usa eval(). El analizador esta escrito a mano (descenso
+//    recursivo, ~40 lineas) y solo entiende numeros y + - * / ^ ( ) %.
+//    Meter eval() en algo que se guarda y se vuelve a abrir es abrir la
+//    puerta a que un texto cualquiera ejecute codigo.
+// 4. Hace falta un OPERADOR para que algo cuente como formula. Sin esa
+//    regla, una frase normal como "el total = 100 euros" se leeria como
+//    la formula "= 100" y se le pegaria un "→ 100" detras.
+//
+// Se dispara de tres formas, y las tres hacen lo mismo:
+//  - el boton "=" de la barra del editor (la unica que existe en el
+//    movil: el teclado del iPhone no tiene tecla Tab),
+//  - Intro con el cursor justo al final de una formula,
+//  - Tab con el cursor justo al final de una formula (escritorio).
+// ---------------------------------------------------------------------
+
+// Una formula dentro de un texto: "=" + cuenta + (opcional) el "→ 41"
+// de un calculo anterior. El ultimo caracter de la cuenta tiene que ser
+// un digito, un ")" o un "%", para no tragarse los espacios de despues.
+// La flecha NO esta en la lista de caracteres permitidos, y por eso el
+// resultado viejo no se confunde con parte de la cuenta.
+const RE_NOTE_FORMULA = /=[\s0-9+\-*/^().,%€$£¥]*[0-9)%](?:\s*→\s*-?[\d.,]+)?/g;
+const RE_NOTE_FORMULA_OPERADOR = /[+\-*/^%]/;
+
+// "1.234,5" -> 1234.5 y "12,5" -> 12.5. Misma convencion que
+// gymNormalizarPeso: si hay coma, la coma manda y los puntos son
+// separadores de millar; si no hay coma, el punto es el decimal.
+function numeroDeNotaANumero(bruto) {
+  const limpio = bruto.includes(',')
+    ? bruto.replace(/\./g, '').replace(',', '.')
+    : bruto;
+  const n = Number(limpio);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Analizador de descenso recursivo. Devuelve un numero, o null si la
+// cuenta no se entiende (y entonces la formula se queda tal cual, sin
+// resultado: mas vale no escribir nada que escribir una mentira).
+//
+//   expr   := term (('+'|'-') term)*
+//   term   := factor (('*'|'/') factor)*
+//   factor := unario ('^' factor)?        <- la potencia asocia a la derecha
+//   unario := ('-'|'+')? primario
+//   primario := numero '%'? | '(' expr ')' '%'?
+function evaluarExpresionDeNota(texto) {
+  try {
+    return analizarExpresionDeNota(texto);
+  } catch {
+    // Una cuenta con MUCHOS parentesis anidados agota la pila (el
+    // analizador es recursivo). Es un caso absurdo, pero un texto
+    // cualquiera puede acabar en una nota: mejor "no se entiende" que
+    // una excepcion que se lleve por delante el guardado de la nota.
+    return null;
+  }
+}
+
+function analizarExpresionDeNota(texto) {
+  let i = 0;
+  const s = texto;
+  const saltarHueco = () => {
+    while (i < s.length && /[\s€$£¥]/.test(s[i])) i++;
+  };
+  const primario = () => {
+    saltarHueco();
+    let valor;
+    if (s[i] === '(') {
+      i++;
+      valor = expr();
+      saltarHueco();
+      if (s[i] !== ')') return null;
+      i++;
+    } else {
+      const inicio = i;
+      while (i < s.length && /[\d.,]/.test(s[i])) i++;
+      if (i === inicio) return null;
+      valor = numeroDeNotaANumero(s.slice(inicio, i));
+    }
+    if (valor === null) return null;
+    saltarHueco();
+    // "%" pegado detras = dividir entre 100 (20% -> 0.2). Se deja como
+    // sufijo y no como "el 20% de lo de al lado" a proposito: eso ultimo
+    // significa una cosa en "120+20%" y otra en "120*20%", y adivinar
+    // cual quieres es justo lo que no debe hacer una calculadora.
+    while (s[i] === '%') { valor /= 100; i++; saltarHueco(); }
+    return valor;
+  };
+  const unario = () => {
+    saltarHueco();
+    if (s[i] === '-') { i++; const v = unario(); return v === null ? null : -v; }
+    if (s[i] === '+') { i++; return unario(); }
+    return primario();
+  };
+  const factor = () => {
+    const base = unario();
+    if (base === null) return null;
+    saltarHueco();
+    if (s[i] === '^') {
+      i++;
+      const exp = factor();
+      if (exp === null) return null;
+      return base ** exp;
+    }
+    return base;
+  };
+  const term = () => {
+    let valor = factor();
+    if (valor === null) return null;
+    for (;;) {
+      saltarHueco();
+      const op = s[i];
+      if (op !== '*' && op !== '/') return valor;
+      i++;
+      const otro = factor();
+      if (otro === null) return null;
+      if (op === '/' && otro === 0) return null; // dividir entre cero no es un resultado
+      valor = op === '*' ? valor * otro : valor / otro;
+    }
+  };
+  const expr = () => {
+    let valor = term();
+    if (valor === null) return null;
+    for (;;) {
+      saltarHueco();
+      const op = s[i];
+      if (op !== '+' && op !== '-') return valor;
+      i++;
+      const otro = term();
+      if (otro === null) return null;
+      valor = op === '+' ? valor + otro : valor - otro;
+    }
+  };
+  const resultado = expr();
+  saltarHueco();
+  // Sobra texto sin analizar -> la cuenta no era valida entera.
+  if (i !== s.length) return null;
+  return resultado !== null && Number.isFinite(resultado) ? resultado : null;
+}
+
+// El resultado, en el formato de numeros de aqui (coma decimal, punto de
+// millar). Seis decimales de tope: mas es ruido, y menos se queda corto
+// en una division.
+const NOTE_FORMULA_FORMATTER = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 6 });
+
+// Reescribe UNA formula ya encontrada. Devuelve el texto nuevo, o null si
+// no hay nada que calcular (sin operador, o cuenta invalida).
+function recalcularFormulaDeNota(trozo) {
+  // Fuera el "→ ..." de un calculo anterior, si lo hubiera.
+  const cuenta = trozo.replace(/\s*→\s*-?[\d.,]+\s*$/, '').replace(/^=/, '');
+  if (!RE_NOTE_FORMULA_OPERADOR.test(cuenta)) return null;
+  const valor = evaluarExpresionDeNota(cuenta);
+  if (valor === null) return null;
+  return `=${cuenta.replace(/\s+$/, '')} → ${NOTE_FORMULA_FORMATTER.format(valor)}`;
+}
+
+// Un bloque de codigo es texto literal: ahi no se calcula nada.
+function estaDentroDeCodigo(nodo) {
+  for (let el = nodo.parentElement; el && el !== NOTE_EDITOR_BODY; el = el.parentElement) {
+    if (el.tagName === 'PRE' || el.tagName === 'CODE') return true;
+  }
+  return false;
+}
+
+// La formula que contiene (o toca) el cursor, si la hay.
+function formulaEnElCursorDeNota() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const nodo = sel.focusNode;
+  if (!nodo || nodo.nodeType !== Node.TEXT_NODE) return null;
+  if (!NOTE_EDITOR_BODY.contains(nodo) || estaDentroDeCodigo(nodo)) return null;
+  const offset = sel.focusOffset;
+  RE_NOTE_FORMULA.lastIndex = 0;
+  let m;
+  while ((m = RE_NOTE_FORMULA.exec(nodo.nodeValue)) !== null) {
+    if (offset >= m.index && offset <= m.index + m[0].length) {
+      return { nodo, indice: m.index, largo: m[0].length, trozo: m[0] };
+    }
+  }
+  return null;
+}
+
+// Calcula la del cursor y deja el cursor detras del resultado. true si
+// de verdad calculo algo.
+function calcularFormulaEnElCursor() {
+  const enc = formulaEnElCursorDeNota();
+  if (!enc) return false;
+  const nuevo = recalcularFormulaDeNota(enc.trozo);
+  if (nuevo === null) return false;
+  const txt = enc.nodo.nodeValue;
+  enc.nodo.nodeValue = txt.slice(0, enc.indice) + nuevo + txt.slice(enc.indice + enc.largo);
+  const sel = window.getSelection();
+  const range = document.createRange();
+  range.setStart(enc.nodo, enc.indice + nuevo.length);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  return true;
+}
+
+// Todas las de la nota. Es lo que hace el boton cuando el cursor no esta
+// dentro de ninguna: sirve de "recalcular la nota entera" despues de
+// cambiar varios numeros.
+function calcularTodasLasFormulasDeNota() {
+  const walker = document.createTreeWalker(NOTE_EDITOR_BODY, NodeFilter.SHOW_TEXT);
+  const nodos = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!estaDentroDeCodigo(n)) nodos.push(n);
+  }
+  let cuantas = 0;
+  nodos.forEach((n) => {
+    const nuevo = n.nodeValue.replace(RE_NOTE_FORMULA, (trozo) => {
+      const calc = recalcularFormulaDeNota(trozo);
+      if (calc === null) return trozo;
+      cuantas += 1;
+      return calc;
+    });
+    if (nuevo !== n.nodeValue) n.nodeValue = nuevo;
+  });
+  return cuantas;
+}
+
+// ¿El cursor esta JUSTO al final de una formula? Es la condicion para que
+// Intro/Tab calculen en vez de hacer lo suyo de siempre: asi solo se
+// meten cuando esta clarisimo que es lo que quieres, y en cualquier otro
+// sitio del texto Intro sigue siendo Intro.
+function cursorAlFinalDeUnaFormula() {
+  const enc = formulaEnElCursorDeNota();
+  if (!enc) return false;
+  const sel = window.getSelection();
+  if (sel.focusOffset !== enc.indice + enc.largo) return false;
+  return recalcularFormulaDeNota(enc.trozo) !== null;
+}
+
+document.getElementById('note-formula-btn').addEventListener('mousedown', (e) => e.preventDefault());
+document.getElementById('note-formula-btn').addEventListener('click', () => {
+  // Mismo patron que Tabla/Codigo: si el editor perdio el foco al tocar
+  // el boton, se recupera la seleccion guardada.
+  saveNoteEditorSelection();
+  restoreNoteEditorSelection();
+  if (calcularFormulaEnElCursor()) {
+    refreshNoteEditorState();
+    return;
+  }
+  const cuantas = calcularTodasLasFormulasDeNota();
+  if (cuantas === 0) {
+    mostrarAvisoFlotante('Escribe una cuenta con "=" (por ejemplo =12*3+5) y vuelve a tocar este botón.');
+  }
+  refreshNoteEditorState();
+});
+
 // El estado encendido/apagado de cada boton (y si toca ensenar la barra
 // contextual de tabla) depende de donde este el cursor ahora mismo, asi
 // que se recalcula en cualquier cambio de seleccion o de tecla dentro del
@@ -6850,6 +7133,17 @@ function handleNoteQuoteEnterExit() {
 }
 
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
+  // Intro / Tab con el cursor justo al final de una cuenta la CALCULAN
+  // en vez de hacer lo suyo. Va lo primero porque la condicion es muy
+  // estrecha (tiene que haber una formula valida acabando exactamente
+  // ahi), asi que no le puede quitar el turno a nada por accidente.
+  if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    if (cursorAlFinalDeUnaFormula() && calcularFormulaEnElCursor()) {
+      e.preventDefault();
+      refreshNoteEditorState();
+      return;
+    }
+  }
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     if (handleNoteQuoteEnterExit()) {
       e.preventDefault();
@@ -7602,9 +7896,26 @@ function openMobileNotesView() {
   renderNotesView('mobile');
 }
 
+// Notas se puede abrir desde DOS sitios: el hueco de la barra de abajo y
+// la tarjeta de Herramientas. Al cerrarla hay que volver por donde
+// viniste, igual que hacen Gimnasio/Finanzas/Lecturas/Viajes. Variable
+// en memoria y no localStorage: solo vale mientras la vista esta abierta.
+//
+// Ojo, en MOVIL el boton "← Home" de la cabecera esta oculto a proposito
+// (styles.css: en estas pantallas quien hace de "volver" es la barra de
+// abajo, y un boton mas seria una fila desperdiciada). O sea que en el
+// telefono esto solo se nota en la cascada de Esc que dispara la propia
+// barra -- igual que en Gimnasio, que hace exactamente lo mismo.
+let notasAbiertasDesdeHerramientas = false;
+
 function closeMobileNotesView() {
   document.getElementById('mobile-notes-view').classList.add('hidden');
-  setCurrentScreen('home');
+  if (notasAbiertasDesdeHerramientas) {
+    notasAbiertasDesdeHerramientas = false;
+    openExtensionsView();
+  } else {
+    setCurrentScreen('home');
+  }
   // No dejar el modo Seleccionar/Mover/Editar carpetas "colgado" para la
   // proxima vez que se abra esta vista.
   mobileNotesMode = 'browse';
@@ -7612,6 +7923,15 @@ function closeMobileNotesView() {
   refreshMobileNotesActionBar();
 }
 document.getElementById('btn-close-mobile-notes').addEventListener('click', closeMobileNotesView);
+
+// La tarjeta de Notas del hub de Herramientas. Va aqui y no junto a las
+// demas tarjetas porque openMobileNotesView vive en este bloque; el
+// patron es el mismo que el de Gimnasio (cerrar el hub, abrir la App).
+document.getElementById('btn-open-notes').addEventListener('click', () => {
+  closeExtensionsView();
+  notasAbiertasDesdeHerramientas = true;
+  openMobileNotesView();
+});
 
 // ---------------------------------------------------------------------
 // Navegacion movil (.mobile-nav + boton flotante "+", ver styles.css):
@@ -8226,8 +8546,36 @@ document.getElementById('btn-groups-back').addEventListener('click', () => {
   renderGroupsViewList();
 });
 // Los dos accesos rapidos de la pantalla del calendario.
-document.getElementById('btn-calendar-quick-today').addEventListener('click', () => {
-  enterMobileDayView(new Date());
+//
+// "Hoy" no es solo "abre el dia de hoy": tambien tiene que recolocar los
+// NIVELES DE ENCIMA. Antes solo abria la vista diaria y dejaba
+// state.viewDate donde estuviera, asi que si venias de mirar mayo de
+// 2016 y pulsabas Hoy, al salir del dia (pellizco o "Volver") aparecia
+// mayo de 2016 otra vez, y encima de ese, 2016. Koku: "yo quiero que...
+// al hacer zoom out me lleve a septiembre y a 2026".
+//
+// Por eso se mueve el mes a hoy ANTES de entrar en el dia, y si estabas
+// en la vista anual se vuelve al mes: los tres niveles (dia -> mes ->
+// año) tienen que hablar de la misma fecha.
+document.getElementById('btn-calendar-quick-today').addEventListener('click', async () => {
+  const hoy = new Date();
+  const otroMes = state.viewDate.getFullYear() !== hoy.getFullYear()
+    || state.viewDate.getMonth() !== hoy.getMonth();
+  state.viewDate = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  if (calendarViewMode !== 'month') {
+    // A mano y no con setCalendarViewMode(): esa reproduce su propia
+    // animacion de cambio de nivel, y aqui la que se tiene que ver es la
+    // de ENTRAR en el dia, que llega un instante despues. Dos a la vez se
+    // pisan (ya paso con los gestos, ver CLAUDE.md).
+    calendarViewMode = 'month';
+    await loadMonth();
+    refreshMobileCalendarModeVisibility();
+    refreshMobileCalendarNavLabel();
+  } else if (otroMes) {
+    await loadMonth();
+    refreshMobileCalendarNavLabel();
+  }
+  enterMobileDayView(hoy);
 });
 document.getElementById('btn-calendar-quick-groups').addEventListener('click', openGroupsView);
 
@@ -8318,6 +8666,130 @@ async function loadGymRoutines() {
 }
 async function loadGymSessions() {
   state.gymSessions = await api('/api/gym-sessions');
+  // Las medias de tiempo salen de las series de esas sesiones, asi que
+  // se rehacen aqui: es el embudo por el que pasa todo lo que las puede
+  // mover (terminar un entreno, editar una sesion a mano, borrarla).
+  await loadGymSetTimes();
+}
+
+// ---------------------------------------------------------------------
+// CUANTO VA A DURAR ESTE ENTRENO
+//
+// Peticion de Koku: "se puede aproximar un entrenamiento solo contando
+// los tiempos de descanso. Ahora que estamos contabilizando el tiempo
+// que se tarda en hacer una serie, se podria empezar a sacar una media
+// de cuanto se tarda en hacer una serie, conforme hayan mas entrenes con
+// ese ejercicio mas fiable sera la media".
+//
+// Tres decisiones suyas, no cambiarlas sin volver a preguntarle:
+//
+// 1. La media es POR EJERCICIO, no por rutina ("asi si hago una nueva
+//    rutina no depende del computo de la rutina sino que ya tengo la
+//    media por ejercicio"). Un dia recien montado con ejercicios que ya
+//    has hecho tiene estimacion desde el primer momento.
+// 2. Lo que se ensena es el tiempo del ENTRENO ENTERO, nunca el de cada
+//    ejercicio por separado ("tiempo del entrene no del ejercicio").
+// 3. Sin historial NO SE INVENTA NADA: los ejercicios que no has hecho
+//    nunca se quedan fuera de la suma y se dice cuantos son. Por eso el
+//    texto empieza por "Al menos": lo que sale es un suelo, no una
+//    prediccion.
+// ---------------------------------------------------------------------
+let gymSetTimes = null; // Map exerciseId -> { avgSetSeconds, avgRestSeconds }
+
+async function loadGymSetTimes() {
+  const filas = await api('/api/gym-sessions/set-times');
+  gymSetTimes = new Map(filas.map((f) => [f.exerciseId, f]));
+}
+
+// Devuelve { segundos, conDatos, sinDatos } para un dia del plan, o null
+// si no hay ni un ejercicio con historial (entonces no se ensena nada:
+// un "al menos 0 min" no dice nada).
+//
+// El descanso sale del propio dia si lo tiene fijado (es lo que vas a
+// descansar HOY), y si no, de tu media historica en ese ejercicio. Se
+// cuenta un descanso por serie menos el ultimo de todos: al acabar la
+// ultima serie del entreno ya no descansas, te vas.
+function gymEstimarDuracionDeDia(day) {
+  if (!day || !gymSetTimes) return null;
+  const visibles = (day.exercises || []).filter((ex) => !ex.hidden);
+  let segundos = 0;
+  let conDatos = 0;
+  let sinDatos = 0;
+  let ultimoDescanso = 0;
+  visibles.forEach((ex) => {
+    const media = gymSetTimes.get(ex.exerciseId);
+    if (!media || !media.avgSetSeconds) { sinDatos += 1; return; }
+    // Cuantas series de VERDAD: en un unilateral contado por lados, cada
+    // lado es una serie propia, igual que al entrenar.
+    const nSeries = gymBuildSetsForExercise(
+      ex.exerciseId,
+      ex.targetSets && ex.targetSets > 0 ? ex.targetSets : 1,
+      null
+    ).length;
+    const descanso = ex.targetRestSeconds > 0
+      ? ex.targetRestSeconds
+      : (media.avgRestSeconds || 0);
+    segundos += nSeries * media.avgSetSeconds + nSeries * descanso;
+    ultimoDescanso = descanso;
+    conDatos += 1;
+  });
+  if (conDatos === 0) return null;
+  return { segundos: Math.max(0, segundos - ultimoDescanso), conDatos, sinDatos };
+}
+
+// Aviso flotante de usar y tirar: aparece arriba, se lee y se va solo.
+// Se pone aqui (y no en el Gimnasio) porque no tiene nada de gimnasio:
+// el primero que lo usa es el del tiempo estimado, pero sirve para
+// cualquier "entérate de esto y sigue".
+//
+// Solo hay UNO a la vez: si llega otro mientras el anterior sigue
+// puesto, el viejo se va sin ceremonia. Dos pastillas apiladas taparian
+// la mitad de la pantalla.
+let avisoFlotanteActual = null;
+function mostrarAvisoFlotante(texto, { duracionMs = 4200 } = {}) {
+  if (!texto) return;
+  if (avisoFlotanteActual) avisoFlotanteActual.remove();
+  const el = document.createElement('div');
+  el.className = 'app-toast';
+  el.setAttribute('role', 'status');
+  el.textContent = texto;
+  document.body.appendChild(el);
+  avisoFlotanteActual = el;
+  const irse = () => {
+    if (avisoFlotanteActual !== el) return;
+    el.classList.add('is-leaving');
+    // Con las animaciones apagadas el 'animationend' llega igual (la
+    // regla global las deja en 0.01ms en vez de quitarlas, ver
+    // CLAUDE.md), asi que no hace falta un caso aparte. El setTimeout es
+    // solo la red por si no llegara.
+    const quitar = () => {
+      el.remove();
+      if (avisoFlotanteActual === el) avisoFlotanteActual = null;
+    };
+    el.addEventListener('animationend', quitar, { once: true });
+    setTimeout(quitar, 600);
+  };
+  setTimeout(irse, duracionMs);
+}
+
+// "1 h 12 min" / "48 min" / "3 min". Nunca segundos: en una estimacion
+// de media hora, decir "48 min 20 s" finge una precision que no hay.
+function gymFormatDuracionAproximada(segundos) {
+  const min = Math.max(1, Math.round(segundos / 60));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const resto = min % 60;
+  return resto === 0 ? `${h} h` : `${h} h ${resto} min`;
+}
+
+// El texto completo, ya con el aviso de los que no cuentan. null si no
+// hay nada que decir.
+function gymTextoDeDuracion(day) {
+  const est = gymEstimarDuracionDeDia(day);
+  if (!est) return null;
+  const base = `Al menos ~${gymFormatDuracionAproximada(est.segundos)}`;
+  if (est.sinDatos === 0) return base;
+  return `${base} (${est.sinDatos} ejercicio${est.sinDatos === 1 ? '' : 's'} sin datos todavía)`;
 }
 
 // 'YYYY-MM-DD' -> "15 ago 2026", para el historial de sesiones. No hay
@@ -10275,6 +10747,25 @@ function startGymLiveSession(day) {
   // molestaba (feedback de Koku). Hasta que marque "no volver a
   // mostrar"; el boton "?" la abre cuando quiera.
   if (localStorage.getItem('gymLiveHelpSeen') !== '1') openGymHelpModal();
+  // Cuanto suele llevarte este dia, como aviso que se va solo. Va al
+  // final y sin esperar a nada (peticion de Koku: "un texto arriba que
+  // se va y diga algo de tiempo estimado"): si las medias todavia no
+  // estan cargadas se piden aqui, y si tampoco hay nada que decir el
+  // aviso sencillamente no sale.
+  if (day) gymAvisarDeLaDuracion(day);
+}
+
+// Las medias se cargan al abrir el Gimnasio, pero al entreno se puede
+// llegar sin pasar por ahi (el widget, la mini-barra de descanso). Esto
+// las pide si faltan y luego enseña el aviso; si falla, no pasa nada:
+// el aviso es un extra, no puede estropear el arranque de un entreno.
+async function gymAvisarDeLaDuracion(day) {
+  try {
+    if (!gymSetTimes) await loadGymSetTimes();
+    mostrarAvisoFlotante(gymTextoDeDuracion(day));
+  } catch (err) {
+    console.error('No se pudo estimar la duración del entreno:', err);
+  }
 }
 
 // La pantalla en la que estabas antes de entrar al entreno, para
@@ -12491,7 +12982,7 @@ function actualizarResumenDelWidget() {
 // bloqueo: el nativo deja una marca con el destino y aqui se consume UNA
 // vez.
 //
-// El destino llega como texto ('hoy', 'tareas', ...) y NO se interpreta
+// El destino llega como texto ('tareas', 'finanzas', ...) y NO se interpreta
 // en Swift a proposito: asi anadir un widget nuevo se hace entero desde
 // aqui, sin recompilar nada nativo.
 async function comprobarAperturaDesdeElWidget() {
@@ -12517,12 +13008,9 @@ async function comprobarAperturaDesdeElWidget() {
 
   if (destino === 'tareas') { await abrirTareasDesdeWidget(); return; }
 
-  // Los tres que se quedan en el calendario. 'hoy' entra ademas en la
-  // vista del dia, que es donde de verdad se ve la agenda de hoy.
+  // Los dos que se quedan en el calendario.
   goToMobileSection('calendar');
-  if (destino === 'hoy') {
-    if (typeof enterMobileDayView === 'function') enterMobileDayView(new Date());
-  } else if (destino === 'nuevo-evento') {
+  if (destino === 'nuevo-evento') {
     openEventModal(null);
   } else if (destino === 'nueva-nota') {
     openMobileNotesView();
@@ -13112,6 +13600,17 @@ document.getElementById('gym-routine-block-field').appendChild(gymRoutineBlockFi
 // modo: 'ficha' (nombre, color, icono y bloque) o 'ejercicios' (solo lo
 // que hay dentro del dia). Un dia NUEVO se abre siempre en 'ficha' --
 // hasta que no tiene nombre no hay a que anadirle ejercicios.
+// La linea de "al menos ~48 min" de la ficha de un dia. Se pinta con lo
+// que hay guardado, no con el borrador que se este editando: hasta que
+// no guardas, la duracion sigue siendo la del dia tal y como esta.
+// En un dia NUEVO no hay nada que estimar.
+function renderGymRoutineEstimate(routine) {
+  const el = document.getElementById('gym-routine-estimate');
+  const texto = routine ? gymTextoDeDuracion(routine) : null;
+  el.textContent = texto || '';
+  el.classList.toggle('hidden', !texto);
+}
+
 function openGymRoutineModal(routine, modo = 'ficha') {
   ensureGymRoutineFieldsReady();
   if (!routine) modo = 'ficha';
@@ -13148,6 +13647,7 @@ function openGymRoutineModal(routine, modo = 'ficha') {
       }))
     : [];
   renderGymRoutineExercisesField();
+  renderGymRoutineEstimate(routine);
   // "Eliminar el dia" solo desde su ficha: en la mitad de ejercicios
   // seria facil confundirlo con "quitar este ejercicio".
   document.getElementById('btn-delete-gym-routine').classList.toggle('hidden', !routine || soloEjercicios);
@@ -13221,7 +13721,14 @@ const gymSessionRoutineField = createSelectField({
       // pidio explicitamente que las repeticiones se dejen en blanco
       // ("con eso iremos mas tarde"), y el peso tampoco tiene de donde
       // salir (la rutina no guarda ningun peso orientativo).
-      gymSessionModalExercises = routine.exercises.map((ex) => {
+      // Los ejercicios OCULTOS del dia (el ojo tachado de la ficha) no
+      // entran, igual que no entran al empezar un entreno en vivo
+      // (startGymLiveSession). Este era el unico sitio que se los
+      // colaba: Koku, apuntando una sesion a mano, "si tengo un
+      // ejercicio en oculto en la rutina, me lo sigue poniendo, no
+      // quiero que lo ponga". Si lo quieres esa vez, esta el
+      // "+ Ejercicio" de aqui abajo.
+      gymSessionModalExercises = routine.exercises.filter((ex) => !ex.hidden).map((ex) => {
         const setsCount = ex.targetSets && ex.targetSets > 0 ? ex.targetSets : 1;
         return {
           exerciseId: ex.exerciseId,
@@ -17728,7 +18235,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.45.0';
+const APP_VERSION = '0.46.0';
 const APP_VERSION_DATE = '2026-09-10';
 
 function renderAppVersionLine() {
@@ -17828,6 +18335,13 @@ async function init() {
   // dos toques al mismo destino son imposibles.
   setTimeout(comprobarAperturaDesdeElWidget, 600);
   setTimeout(comprobarAperturaDesdeElWidget, 2000);
+  // Y el aviso del nativo para el caso que NO cubre nada de lo de
+  // arriba: tocar un boton del centro de control con la app ya delante.
+  // Ahi no hay ni 'resume' ni 'visibilitychange' que valgan -- ver
+  // escucharAvisosDelWidget() en widget-bridge.js.
+  if (typeof escucharAvisosDelWidget === 'function') {
+    escucharAvisosDelWidget(comprobarAperturaDesdeElWidget);
+  }
 
   setInterval(loadReminders, 30 * 1000);
   // Igual que los recordatorios: si otro dispositivo vinculado anade o

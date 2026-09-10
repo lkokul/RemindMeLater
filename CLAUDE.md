@@ -1800,6 +1800,10 @@ lo nativo.
 
 ## Los otros cinco widgets (Hoy, Tareas, Finanzas, Lecturas, Viajes)
 
+**Nota de la ronda de la build #58: el de "Hoy" YA NO EXISTE** (Koku lo
+quitó tras probarlo). Lo que sigue cuenta cómo se hicieron los cinco;
+para lo que se fue con él, ver el bloque de la build #58 más abajo.
+
 Segunda tanda, elegida por Koku el 10/9/2026 (los cuatro que ofrecí, más
 el del Gimnasio que ya había): **inicio + bloqueo + centro de control**.
 
@@ -2233,6 +2237,190 @@ traga medio archivo si se intenta con un regex.
 sigue siendo lo más barato que hay: aquí no hay Xcode, y cada vuelta al
 runner son ~15 minutos y una compilación gastada de la cuota de Koku.
 
+## Lo que salió de probar la build #58
+
+Koku: "funciona todo, perfecto". Lo que sigue son cosas nuevas y un
+puñado de arreglos que vio usándola.
+
+### El centro de control, con la app YA DELANTE
+
+Koku: *"me gustaría saber si los botones del panel de control sólo
+funcionan cuando la app está cerrada o en segundo plano. Porque si no,
+cuando está en primer plano no funcionan correctamente"*. Tenía razón, y
+faltaba justo eso.
+
+**La causa**: con la app ya delante, abrir el centro de control NO la
+manda a segundo plano — la deja "inactiva", con la cortinilla encima. Al
+cerrarse esa cortinilla la webview no recibe ni `resume` ni
+`visibilitychange`, que eran los dos únicos momentos en los que el
+JavaScript iba a mirar si había una marca pendiente. El botón sí
+escribía el destino; simplemente no lo leía nadie hasta la próxima vez
+que salieras y volvieras a entrar en la app.
+
+**El arreglo**: `WidgetBridgePlugin` se suscribe a
+`UIApplication.didBecomeActiveNotification` — que SÍ llega en esa
+transición inactivo→activo — y manda un evento `revisarApertura` al
+JavaScript. `escucharAvisosDelWidget()` en `widget-bridge.js` lo escucha
+y llama a `comprobarAperturaDesdeElWidget()`, el mismo de siempre: sigue
+habiendo UN solo sitio que navega.
+
+Se comprueba **dos veces**, al momento y a los 600 ms: el intent del
+botón corre en el proceso de la EXTENSIÓN, sin ningún orden garantizado
+respecto a ese aviso, así que puede escribir la marca un pelín después.
+Una comprobación de más es gratis — el nativo consume la marca al
+leerla, y sin marca es un no-op.
+
+### Notas, también en Herramientas
+
+Koku: *"si yo quito la app de notas y pongo gimnasio, ya no tengo acceso
+a esa app"*. El 2º hueco de la barra de abajo se puede cambiar por otra
+App (Configuración → Este dispositivo), y quien lo cambiara se quedaba
+sin NINGUNA forma de llegar a Notas.
+
+Ahora Notas tiene su tarjeta en el hub de Herramientas, la primera.
+`notasAbiertasDesdeHerramientas` (variable en memoria, no localStorage)
+hace que al cerrarla vuelvas al hub y no a Home, igual que
+Gimnasio/Finanzas/Lecturas/Viajes.
+
+**Ojo con una cosa que parece un olvido y no lo es**: en móvil el botón
+"← Home" de la cabecera de esa vista está OCULTO por CSS, igual que el
+de las otras cuatro Apps — ahí quien hace de "volver" es la barra de
+abajo. Se probó a enseñarlo solo en este caso y se descartó: rompía el
+patrón de las otras cuatro pantallas por un botón que la barra ya
+cubre.
+
+### Fórmulas en las notas
+
+Petición de Koku. De las tres formas que se le ofrecieron eligió
+**cálculos sueltos, SIN referencias**: escribes `=12*3+5` en cualquier
+sitio —un párrafo o una celda de tabla— y te da el resultado. NO sabe de
+celdas (`=B2*C2`) ni se recalcula solo al cambiar otra casilla; eso era
+la opción de hoja de cálculo, y la descartó.
+
+Bloque "FÓRMULAS EN LAS NOTAS" en `app.js`. Cuatro decisiones:
+
+1. **El resultado va DETRÁS, no en lugar de la cuenta**: `=12*3+5` pasa a
+   `=12*3+5 → 41`. Así se sigue viendo la cuenta (media gracia de
+   tenerla en una nota) y se puede corregir un número y recalcular: al
+   recalcular se tira el `→ ...` viejo y se pone el nuevo. Es
+   idempotente, calcular tres veces no acumula nada.
+2. **Es TEXTO PLANO**, sin ninguna etiqueta nueva. `sanitizeNoteBody()`
+   trabaja con lista blanca de etiquetas, así que una etiqueta propia
+   habría que darla de alta ahí, en el import y en el export; el texto
+   pasa por todo eso sin tocar nada. Comprobado guardando y releyendo.
+3. **Nunca `eval()`.** El analizador está escrito a mano (descenso
+   recursivo) y solo entiende números y `+ - * / ^ ( ) %`. Va envuelto
+   en `try/catch` porque una cuenta con miles de paréntesis anidados
+   agota la pila, y eso no puede llevarse por delante el guardado de la
+   nota.
+4. **Hace falta un OPERADOR** para que algo cuente como fórmula. Sin esa
+   regla, una frase normal como "el total = 100 euros" se leería como la
+   fórmula "= 100" y se le pegaría un "→ 100" detrás.
+
+Se dispara de tres formas: el botón **`=`** de la barra del editor (la
+**única que existe en el móvil**: el teclado del iPhone no tiene tecla
+Tab), **Intro** con el cursor justo al final de una cuenta, y **Tab**
+igual en escritorio. El botón calcula la del cursor; si el cursor no
+está dentro de ninguna, calcula TODAS las de la nota, que de paso sirve
+de "recalcular la nota entera".
+
+Detalles: coma o punto decimal (`1.234,5` se lee bien, misma convención
+que `gymNormalizarPeso`), símbolos de moneda ignorados (`120€*1,21`),
+`%` como sufijo = dividir entre 100, y **dentro de un bloque de código
+no se calcula nada** (ahí el texto es literal).
+
+### Gimnasio: el ejercicio oculto se colaba en la sesión a mano
+
+Koku: *"si tengo un ejercicio en oculto en la rutina, me lo sigue
+poniendo"*. El entreno en vivo ya lo filtraba (`startGymLiveSession`);
+lo que no filtraba era la **plantilla del modal de "Nueva sesión"**, que
+hacía `routine.exercises.map(...)` a pelo. Ese era el único sitio que
+se los colaba.
+
+### Cuánto va a durar el entreno
+
+Petición de Koku: *"se puede aproximar un entrenamiento solo contando
+los tiempos de descanso. Ahora que estamos contabilizando el tiempo que
+se tarda en hacer una serie, se podría empezar a sacar una media"*.
+
+La columna `gym_sets.duration_seconds` ya existía desde el modo de
+entrenar en vivo; lo que faltaba era leerla. Ruta nueva
+`GET /api/gym-sessions/set-times`: por ejercicio, la media de lo que
+dura una serie y la media de lo que descansas después
+(`rest_seconds + extra_rest_seconds`). Solo series madre
+(`parent_set_id IS NULL`): un tramo de dropset comparte el descanso de
+su madre y su duración ya va dentro. El calentamiento SÍ cuenta, a
+diferencia de los PRs — calentar también ocupa tiempo en el gimnasio.
+
+**Las tres decisiones que tomó Koku**, no cambiarlas sin volver a
+preguntarle:
+
+1. **La media es POR EJERCICIO, no por rutina**: *"así si hago una nueva
+   rutina no depende del cómputo de la rutina sino que ya tengo la media
+   por ejercicio"*. Un día recién montado con ejercicios que ya has
+   hecho tiene estimación desde el primer momento.
+2. **Se enseña el tiempo del ENTRENO ENTERO, nunca el de cada
+   ejercicio**: *"tiempo del entrene no del ejercicio"*.
+3. **Sin historial NO se inventa nada** (eligió "solo contar lo que
+   sé"): los ejercicios que no has hecho nunca se quedan fuera de la
+   suma y se dice cuántos son. Por eso el texto empieza por **"Al
+   menos"** — lo que sale es un suelo, no una predicción.
+
+Dónde se ve, también elegido por él: en la **ficha del día** (pestaña
+Plan, `#gym-routine-estimate`) y como **aviso flotante al empezar** el
+entreno, que se va solo. En "¿Qué toca hoy?" NO, y en el entreno tampoco
+("te quedan ~22 min") — dijo que no a las dos.
+
+El descanso sale del propio día si lo tiene fijado (es lo que vas a
+descansar HOY) y si no, de tu media histórica en ese ejercicio. Se
+cuenta un descanso por serie **menos el último de todos**: al acabar la
+última serie del entreno ya no descansas, te vas. Y las series se
+cuentan con `gymBuildSetsForExercise()`, así que un unilateral por lados
+cuenta el doble, igual que al entrenar.
+
+**Aviso flotante genérico**: `mostrarAvisoFlotante(texto)` en `app.js`
+(clase `.app-toast`). Solo hay uno a la vez, no es tocable y no tiene ✕
+a propósito — si hay que hacer algo con él, no es un aviso, es un
+diálogo. Va por encima de los modales y del entreno (z-index 21), donde
+el aviso de la copia de seguridad se queda debajo (19).
+
+### Recordatorios con más antelación
+
+`REMINDER_OPTIONS` gana 2 días, 3 días, 1 semana y 2 semanas antes. El
+tope son 2 semanas porque lo puso él ("eso es suficiente"). El valor son
+MINUTOS y viaja tal cual hasta la base y hasta el aviso del sistema: no
+hay ningún tope escondido en medio, así que añadir un valor a esa lista
+es todo lo que hace falta.
+
+### El botón "Hoy" no recolocaba los niveles de encima
+
+Koku: *"si estaba mirando el 12 de mayo de 2016, le doy a hoy... al
+hacer zoom out me lleve a septiembre y a 2026"*.
+
+`btn-calendar-quick-today` solo abría la vista diaria y dejaba
+`state.viewDate` donde estuviera, así que al salir del día aparecía mayo
+de 2016 otra vez, y encima de ese, 2016. Ahora mueve el mes a hoy ANTES
+de entrar en el día, y si estabas en la vista anual vuelve al mes: los
+tres niveles (día → mes → año) tienen que hablar de la misma fecha.
+
+El cambio de modo se hace **a mano y no con `setCalendarViewMode()`**:
+esa reproduce su propia animación de cambio de nivel, y aquí la que se
+tiene que ver es la de ENTRAR en el día, que llega un instante después.
+Dos animaciones a la vez se pisan (ya pasó con los gestos).
+
+### Fuera el widget de "Hoy"
+
+Koku: *"el widget de hoy no es necesario, lo puedes quitar"*. Se fue
+entero: el `HoyWidget` y su `VistaHoy`, `FilaEventoView`, el botón
+`AbrirHoyControl` con su `AbrirHoyIntent`, el destino `hoy` del enum y
+de SceneDelegate, la sección `hoy` del resumen (`SeccionHoy`,
+`FilaDeEvento`, `seccionHoy()` en el JavaScript) y `widgetHora()`, que
+ya no la usaba nadie. Quedan **cinco widgets**: Gimnasio, Tareas,
+Finanzas, Lecturas y Viajes.
+
+Si algún día vuelve, lo que hay que rehacer está todo en el commit de
+esta ronda — y el resumen ya no lleva peso muerto mientras tanto.
+
 ## Dos ramas: `desarrollador` y `movil-ui`
 
 Decisión de Koku (10/9/2026), después de que el widget se quedara en
@@ -2332,9 +2520,16 @@ las tres combinaciones de tema/estilo.
 
 **La build #57 (v0.45.0) NO llegó a TestFlight: no compiló**, por el
 choque de nombres que cuenta el bloque "Por qué no compiló la build #57"
-más arriba. Ya está arreglado en la rama; falta lanzar la siguiente.
-La última subida a TestFlight sigue siendo la #56 (v0.43.0), que es la
-que Koku probó.
+más arriba.
+
+**Build #58 (10/9/2026)**: la v0.45.0 ya compilando. Koku la probó:
+"funciona todo, perfecto". Lo único que falló fueron los botones del
+centro de control con la app en primer plano — arreglado en la v0.46.0.
+
+**v0.46.0** es lo que salió de probar la #58 — ver el bloque "Lo que
+salió de probar la build #58" más arriba. **Sin build todavía**: Koku
+pidió expresamente no lanzar Actions en esa ronda, y dijo que para la
+siguiente traía ideas de widgets.
 
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 

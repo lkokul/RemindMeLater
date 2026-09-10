@@ -23,9 +23,8 @@ struct DescansoWidgetBundle: WidgetBundle {
         // El widget de "que toca hoy" (inicio + bloqueo), ver
         // QueTocaHoyWidget.swift.
         QueTocaHoyWidget()
-        // Los otros cuatro, todos leyendo el MISMO resumen del buzon
+        // Los otros, todos leyendo el MISMO resumen del buzon
         // compartido -- ver ResumenDeLaApp.swift y WidgetsDeLaApp.swift.
-        HoyWidget()
         TareasWidget()
         FinanzasWidget()
         LecturasWidget()
@@ -37,7 +36,6 @@ struct DescansoWidgetBundle: WidgetBundle {
         #if compiler(>=6.0)
         if #available(iOS 18.0, *) {
             EmpezarEntrenoControl()
-            AbrirHoyControl()
             NuevoEventoControl()
             NuevaNotaControl()
             VerTareasControl()

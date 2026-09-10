@@ -104,18 +104,6 @@ struct EmpezarEntrenoDeHoyIntent: AppIntent {
 }
 
 @available(iOS 18.0, *)
-struct AbrirHoyIntent: AppIntent {
-    static var title: LocalizedStringResource = "Ver el día de hoy"
-    static var openAppWhenRun = true
-    static var isDiscoverable = true
-
-    func perform() async throws -> some IntentResult {
-        apuntarDestinoDeControl("hoy")
-        return .result()
-    }
-}
-
-@available(iOS 18.0, *)
 struct AbrirTareasIntent: AppIntent {
     static var title: LocalizedStringResource = "Ver mis tareas pendientes"
     static var openAppWhenRun = true

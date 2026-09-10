@@ -24,7 +24,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // los botones del centro de control. Aqui no se interpreta nada:
         // se guarda el host tal cual y el JavaScript decide a donde
         // llevar -- asi anadir un destino no obliga a tocar Swift.
-        let destinos = ["hoy", "tareas", "finanzas", "lecturas", "viajes",
+        let destinos = ["tareas", "finanzas", "lecturas", "viajes",
                         "nuevo-evento", "nueva-nota"]
         if let contexto = nuestras.first(where: { destinos.contains($0.url.host ?? "") }) {
             UserDefaults.standard.set(contexto.url.host ?? "", forKey: "widgetPendingDestino")

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Capacitor
 import WidgetKit
 
@@ -48,9 +49,43 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
     // coincide, la app cree que lo refresca y ese widget se queda con lo
     // de antes hasta que iOS decida repintarlo por su cuenta.
     private static let kinds = [
-        "QueTocaHoyWidget", "HoyWidget", "TareasWidget",
+        "QueTocaHoyWidget", "TareasWidget",
         "FinanzasWidget", "LecturasWidget", "ViajesWidget",
     ]
+
+    // AVISAR AL JAVASCRIPT DE QUE VUELVE A HABER QUE MIRAR EL BUZÓN.
+    //
+    // El agujero que encontró Koku: "me gustaría saber si los botones del
+    // panel de control sólo funcionan cuando la app está cerrada o en
+    // segundo plano. Porque si no, cuando está en primer plano no
+    // funcionan correctamente". Y tenía razón, y la causa es esta:
+    //
+    // Con la app YA DELANTE, abrir el centro de control no la manda a
+    // segundo plano -- solo la deja "inactiva" con la cortinilla encima.
+    // Al cerrarse esa cortinilla no llega NI `resume` NI
+    // `visibilitychange` a la webview, que son los dos únicos avisos que
+    // tenía el JavaScript para ir a mirar si hay una marca pendiente. O
+    // sea que el botón sí escribía el destino, pero nadie iba a leerlo
+    // hasta la siguiente vez que salieras y volvieras a entrar en la app.
+    //
+    // `didBecomeActiveNotification` SÍ llega en ese caso (es justo la
+    // transición inactivo -> activo), así que es la señal que faltaba.
+    // Se manda como evento del plugin y el JavaScript lo escucha; no se
+    // consume nada aquí, solo se avisa -- quien decide sigue siendo
+    // comprobarAperturaDesdeElWidget() en app.js, para que haya un único
+    // sitio que navegue.
+    override public func load() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(laAppVuelveAEstarActiva),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func laAppVuelveAEstarActiva() {
+        notifyListeners("revisarApertura", data: [:])
+    }
 
     // Guarda el resumen y pide a iOS que repinte el widget. El JSON llega
     // ya montado desde JavaScript: aquí no se interpreta, solo se guarda
@@ -81,10 +116,12 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
     //  - Tocar el widget (inicio o bloqueo) abre remindmelater://gym-hoy,
     //    y SceneDelegate deja la marca en UserDefaults.standard.
     //  - El botón del centro de control ejecuta un AppIntent nuestro
-    //    (AbrirDesdeControl.swift) que abre ESA MISMA URL desde dentro de
-    //    la app, así que acaba también en SceneDelegate. Tuvo que ser así
-    //    porque iOS no abre esquemas propios directamente desde un
-    //    control: el botón se quedaba mudo.
+    //    (AbrirDesdeControl.swift) que apunta el destino a mano en LOS
+    //    DOS almacenes -- el suyo y el App Group -- porque ese intent
+    //    corre en el proceso de la EXTENSIÓN, y el UserDefaults.standard
+    //    de la extensión no es el de la app. El App Group es el único
+    //    terreno común de los dos. (Tercer intento; los dos anteriores,
+    //    y por qué fallaron, están en CLAUDE.md.)
     // Se consumen las dos (se ponen a false) para que no vuelva a saltar
     // en la siguiente vuelta a primer plano.
     @objc func consumirApertura(_ call: CAPPluginCall) {
@@ -101,11 +138,10 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
             propios.removeObject(forKey: Self.claveDestino)
         }
 
-        // El App Group se sigue mirando aunque hoy ya nadie escriba ahí:
-        // los botones del centro de control pasaron a abrir una URL (así
-        // funcionan aunque el buzón esté roto), pero una marca dejada por
-        // una versión anterior seguiría ahí esperando, y consumirla es
-        // más barato que dejarla colgada para siempre.
+        // El App Group: es POR AQUÍ por donde llega de verdad el botón
+        // del centro de control (ver arriba). Se consume igual que el
+        // propio, y con el mismo cuidado: la marca se borra en cuanto se
+        // lee, para que no vuelva a saltar en la siguiente vuelta.
         if let compartidos = UserDefaults(suiteName: Self.grupo) {
             if compartidos.bool(forKey: Self.claveEmpezarHoy) {
                 empezarHoy = true

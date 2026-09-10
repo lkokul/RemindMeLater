@@ -4887,3 +4887,45 @@ body.gym-rest-push #settings-modal .settings-card {
 
 /* "Hoy te toca" del ciclo: su etiqueta separada del boton de añadir. */
 .gym-cycle-hoy-label { display: block; margin: 0.8rem 0 0.3rem; font-size: 0.82rem; font-weight: 600; }
+
+/* --- Aviso flotante de usar y tirar (mostrarAvisoFlotante en app.js) --
+   Una pastilla arriba del todo que aparece, se lee y se va sola. Misma
+   forma que el aviso de la copia de seguridad, pero por ENCIMA de los
+   modales y del entreno en vivo (z-index 16): se usa justo al arrancar
+   un entreno, y ahi el aviso de la copia queda debajo. No es tocable ni
+   tiene X a proposito: si hay que hacer algo con el, no es un aviso de
+   estos, es un dialogo. */
+.app-toast {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 0.6rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 21;
+  max-width: calc(100vw - 1.2rem);
+  padding: 0.5rem 0.9rem;
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  font-size: 0.82rem;
+  text-align: center;
+  pointer-events: none;
+  animation: app-toast-in 0.22s ease-out;
+}
+.app-toast.is-leaving { animation: app-toast-out 0.28s ease-in forwards; }
+@keyframes app-toast-in {
+  from { opacity: 0; transform: translate(-50%, -0.6rem); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes app-toast-out {
+  from { opacity: 1; transform: translate(-50%, 0); }
+  to { opacity: 0; transform: translate(-50%, -0.6rem); }
+}
+
+/* La estimacion de duracion en la ficha de un dia del plan. */
+.gym-routine-estimate {
+  margin: 0 0 0.6rem;
+  font-size: 0.82rem;
+  color: color-mix(in srgb, var(--surface-text) 68%, var(--surface));
+}

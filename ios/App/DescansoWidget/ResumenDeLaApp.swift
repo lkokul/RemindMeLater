@@ -53,14 +53,13 @@ struct ResumenDeLaApp: Decodable {
     var textoClaro: String = ""
     var fondoOscuro: String = ""
     var textoOscuro: String = ""
-    var hoy: SeccionHoy?
     var tareas: SeccionTareas?
     var finanzas: SeccionFinanzas?
     var lecturas: SeccionLecturas?
     var viajes: SeccionViajes?
 
     enum CodingKeys: String, CodingKey {
-        case actualizado, acento, fondo, texto, hoy, tareas, finanzas, lecturas, viajes
+        case actualizado, acento, fondo, texto, tareas, finanzas, lecturas, viajes
         case estiloWidget, fondoClaro, textoClaro, fondoOscuro, textoOscuro
     }
 
@@ -77,7 +76,6 @@ struct ResumenDeLaApp: Decodable {
         textoOscuro = leerTexto(c, .textoOscuro, "")
         // Cada sección por separado: que Finanzas venga rota no puede
         // dejar sin datos al calendario.
-        hoy = try? c.decode(SeccionHoy.self, forKey: .hoy)
         tareas = try? c.decode(SeccionTareas.self, forKey: .tareas)
         finanzas = try? c.decode(SeccionFinanzas.self, forKey: .finanzas)
         lecturas = try? c.decode(SeccionLecturas.self, forKey: .lecturas)
@@ -120,42 +118,6 @@ struct ResumenDeLaApp: Decodable {
 // ---------------------------------------------------------------------
 // Las secciones
 // ---------------------------------------------------------------------
-struct FilaDeEvento: Decodable {
-    var titulo: String = ""
-    var hora: String = ""
-    var color: String = ""
-    var todoElDia: Bool = false
-
-    enum CodingKeys: String, CodingKey { case titulo, hora, color, todoElDia }
-    init(from d: Decoder) throws {
-        let c = try d.container(keyedBy: CodingKeys.self)
-        titulo = (try? c.decode(String.self, forKey: .titulo)) ?? ""
-        hora = (try? c.decode(String.self, forKey: .hora)) ?? ""
-        color = (try? c.decode(String.self, forKey: .color)) ?? ""
-        todoElDia = (try? c.decode(Bool.self, forKey: .todoElDia)) ?? false
-    }
-    init(titulo: String, hora: String, color: String, todoElDia: Bool) {
-        self.titulo = titulo; self.hora = hora; self.color = color; self.todoElDia = todoElDia
-    }
-}
-
-struct SeccionHoy: Decodable {
-    var eventos: [FilaDeEvento] = []
-    var total: Int = 0
-    var tareas: Int = 0
-
-    enum CodingKeys: String, CodingKey { case eventos, total, tareas }
-    init(from d: Decoder) throws {
-        let c = try d.container(keyedBy: CodingKeys.self)
-        eventos = (try? c.decode([FilaDeEvento].self, forKey: .eventos)) ?? []
-        total = (try? c.decode(Int.self, forKey: .total)) ?? 0
-        tareas = (try? c.decode(Int.self, forKey: .tareas)) ?? 0
-    }
-    init(eventos: [FilaDeEvento], total: Int, tareas: Int) {
-        self.eventos = eventos; self.total = total; self.tareas = tareas
-    }
-}
-
 struct FilaDeTarea: Decodable {
     var titulo: String = ""
     var cuando: String = ""

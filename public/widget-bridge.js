@@ -1,10 +1,14 @@
 // widget-bridge.js — lo que la app le cuenta a los widgets de iOS.
 //
 // SON CINCO WIDGETS y UN SOLO resumen: Gimnasio ("Qué toca hoy"),
-// Calendario ("Hoy"), Tareas, Finanzas y Lecturas/Viajes. Se manda todo
-// junto en un único JSON a propósito -- son unos pocos cientos de bytes,
-// y partirlo en cinco claves obligaría a cinco escrituras, cinco avisos
-// a iOS y cinco sitios donde equivocarse con el nombre de la clave.
+// Tareas, Finanzas, Lecturas y Viajes. Se manda todo junto en un único
+// JSON a propósito -- son unos pocos cientos de bytes, y partirlo en
+// cinco claves obligaría a cinco escrituras, cinco avisos a iOS y cinco
+// sitios donde equivocarse con el nombre de la clave.
+//
+// (Hubo un sexto, el del Calendario. Koku lo quitó tras probarlo: "el
+// widget de hoy no es necesario". Se fue entero, también su sección de
+// aquí y su botón del centro de control.)
 //
 // EL PROBLEMA QUE RESUELVE: un widget no puede leer la base de datos.
 // Nuestra base es SQLite compilado a WebAssembly y vive dentro de la
@@ -99,7 +103,6 @@ async function construirResumenDelDia() {
   // sin datos al calendario. Si una revienta, se queda fuera del JSON y
   // su widget enseña su texto de "sin datos" -- que es justo lo que hay.
   const secciones = [
-    ['hoy', seccionHoy],
     ['tareas', seccionTareas],
     ['finanzas', seccionFinanzas],
     ['lecturas', seccionLecturas],
@@ -190,49 +193,11 @@ function widgetHoyISO() {
   return `${d.getFullYear()}-${mes}-${dia}`;
 }
 
-// "2026-09-10T14:30" -> "14:30", respetando el reloj de 12h del sistema
-// si el teléfono lo tiene así (systemUses12hClock vive en app.js).
-function widgetHora(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  try {
-    const doce = typeof systemUses12hClock === 'function' ? systemUses12hClock() : false;
-    return new Intl.DateTimeFormat('es-ES', {
-      hour: '2-digit', minute: '2-digit', hour12: doce,
-    }).format(d);
-  } catch {
-    return iso.slice(11, 16);
-  }
-}
-
 // Cuántos elementos caben de verdad en un widget. Mandar más es peso
 // muerto en el buzón: en el mediano entran 3 líneas y en el pequeño 2.
 const WIDGET_MAX_FILAS = 4;
 
 // --- Calendario: lo de hoy -------------------------------------------
-async function seccionHoy() {
-  const hoy = widgetHoyISO();
-  // El rango del día entero. La ruta filtra por SOLAPE, así que un evento
-  // de varios días que viene de ayer también sale -- que es lo correcto.
-  const filas = await api(`/api/events?from=${hoy}T00:00&to=${hoy}T23:59`);
-  if (!Array.isArray(filas)) return null;
-
-  const eventos = filas.filter((ev) => !ev.isTask);
-  const tareas = filas.filter((ev) => ev.isTask && !ev.done);
-
-  return {
-    eventos: eventos.slice(0, WIDGET_MAX_FILAS).map((ev) => ({
-      titulo: String(ev.title || ''),
-      hora: ev.allDay ? '' : widgetHora(ev.startAt),
-      color: ev.groupColor || gymAcentoParaElWidget(),
-      todoElDia: !!ev.allDay,
-    })),
-    total: eventos.length,
-    tareas: tareas.length,
-  };
-}
-
 // --- Tareas pendientes -----------------------------------------------
 async function seccionTareas() {
   const filas = await api('/api/events?isTask=1');
@@ -500,5 +465,40 @@ async function widgetPideAbrir() {
     return res.destino ? String(res.destino) : '';
   } catch {
     return '';
+  }
+}
+
+// EL AVISO QUE FALTABA: "vuelve a mirar el buzón".
+//
+// Koku, tras la build #58: "me gustaría saber si los botones del panel de
+// control sólo funcionan cuando la app está cerrada o en segundo plano.
+// Porque si no, cuando está en primer plano no funcionan correctamente".
+//
+// Y así era. Con la app YA DELANTE, abrir el centro de control no la
+// manda a segundo plano: la deja "inactiva" con la cortinilla encima. Al
+// cerrarse esa cortinilla la webview NO recibe ni `resume` ni
+// `visibilitychange`, que eran los dos únicos momentos en que el
+// JavaScript iba a mirar si había una marca pendiente. El botón sí
+// escribía el destino; simplemente no lo leía nadie hasta la próxima vez
+// que salieras y volvieras a entrar.
+//
+// Ahora el plugin nativo avisa con `didBecomeActiveNotification`, que sí
+// llega en esa transición (ver WidgetBridgePlugin.swift).
+//
+// Se comprueba DOS veces: al momento y otra vez a los 600 ms. El intent
+// del botón corre en el proceso de la EXTENSIÓN, sin ningún orden
+// garantizado respecto a este aviso, así que puede escribir la marca un
+// pelín después. Una comprobación de más no hace nada: el nativo consume
+// la marca al leerla, y sin marca esto es un no-op.
+function escucharAvisosDelWidget(alRevisar) {
+  const plugin = getWidgetBridgePlugin();
+  if (!plugin || typeof plugin.addListener !== 'function') return;
+  try {
+    plugin.addListener('revisarApertura', () => {
+      alRevisar();
+      setTimeout(alRevisar, 600);
+    });
+  } catch (err) {
+    console.error('No se pudo escuchar los avisos del widget:', err);
   }
 }

@@ -267,6 +267,49 @@
     })));
   });
 
+  // MEDIA DE TIEMPO POR EJERCICIO, para estimar cuanto va a durar un
+  // entreno antes de empezarlo (peticion de Koku).
+  //
+  // La media se saca POR EJERCICIO y no por rutina, tal como lo pidio:
+  // "asi si hago una nueva rutina no depende del computo de la rutina
+  // sino que ya tengo la media por ejercicio". Un dia nuevo montado con
+  // ejercicios que ya has hecho tiene estimacion desde el primer
+  // momento, sin haberlo entrenado nunca.
+  //
+  // Dos medias por ejercicio, porque un entreno son las dos cosas:
+  //  - lo que tardas en HACER la serie (duration_seconds, que solo
+  //    existe desde que hay boton de empezar/terminar serie), y
+  //  - lo que descansas despues (rest_seconds + el +30s que anadieras).
+  //
+  // Solo cuentan las series MADRE (parent_set_id IS NULL): un tramo de
+  // dropset comparte el descanso de su madre y su duracion ya va dentro.
+  // El calentamiento SI cuenta, a diferencia de los PRs: calentar
+  // tambien ocupa tiempo real en el gimnasio.
+  router.get('/set-times', (req, res) => {
+    const rows = db
+      .prepare(`
+        SELECT st.exercise_id,
+               COUNT(st.duration_seconds) as duration_samples,
+               AVG(st.duration_seconds) as avg_duration,
+               COUNT(st.rest_seconds) as rest_samples,
+               AVG(COALESCE(st.rest_seconds, 0) + COALESCE(st.extra_rest_seconds, 0)) as avg_rest
+        FROM gym_sets st
+        WHERE st.parent_set_id IS NULL
+        GROUP BY st.exercise_id
+      `)
+      .all();
+    res.json(rows.map((r) => ({
+      exerciseId: r.exercise_id,
+      // null y no 0 cuando no hay ni una muestra: "no lo se" y "tarda
+      // cero" son cosas distintas, y el cliente tiene que poder
+      // distinguirlas para decir "2 ejercicios sin datos todavia".
+      avgSetSeconds: r.duration_samples > 0 ? Math.round(r.avg_duration) : null,
+      avgRestSeconds: r.rest_samples > 0 ? Math.round(r.avg_rest) : null,
+      setSamples: r.duration_samples || 0,
+      restSamples: r.rest_samples || 0,
+    })));
+  });
+
   router.post('/', (req, res) => {
     const { date, routineId, notes, sets, startedAt, durationSeconds, exerciseNotes, type, activityKind, activityName } = req.body || {};
     if (!DATE_RE.test(date || '')) {
