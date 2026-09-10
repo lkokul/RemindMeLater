@@ -53,6 +53,10 @@ struct ResumenDelDia {
     // número: el mediano los enseña en la mitad derecha, que antes se
     // quedaba vacía en cuanto el día no tenía botón de "Empezar".
     var listaEjercicios: [String] = []
+    // Los colores del tema de la app, iguales que en ResumenDeLaApp.
+    var fondo: String = ""
+    var texto: String = ""
+
     // Lo que viene DESPUÉS en el ciclo. Se llama "siguiente" y no
     // "mañana" a propósito: el ciclo avanza por entrenos hechos, no por
     // calendario, así que prometer una fecha sería mentir en cuanto te
@@ -77,7 +81,7 @@ struct ResumenDelDia {
 extension ResumenDelDia: Decodable {
     enum CodingKeys: String, CodingKey {
         case hayCiclo, esDescanso, nombre, bloque, color, icono, posicion, total, ejercicios
-        case listaEjercicios, siguiente
+        case listaEjercicios, siguiente, fondo, texto
     }
 
     init(from decoder: Decoder) throws {
@@ -105,6 +109,8 @@ extension ResumenDelDia: Decodable {
         ejercicios = numero(.ejercicios, 0)
         listaEjercicios = (try? c.decode([String].self, forKey: .listaEjercicios)) ?? []
         siguiente = texto(.siguiente, "")
+        fondo = texto(.fondo, "")
+        self.texto = texto(.texto, "")
     }
 
     // nil si todavía no hay nada guardado (app recién instalada, o el App
@@ -151,14 +157,12 @@ private extension Color {
 // containerBackground es OBLIGATORIO desde iOS 17 (sin él, el widget sale
 // con el fondo en blanco o directamente no se dibuja), pero no existe
 // antes. Este envoltorio evita repetir el #available en cada vista.
+// Aquí solo se delega en fondoDeWidgetApp (ResumenDeLaApp.swift), que es
+// donde vive el detalle de por qué se pintan los colores del tema.
 private extension View {
     @ViewBuilder
-    func fondoDeWidget() -> some View {
-        if #available(iOS 17.0, *) {
-            self.containerBackground(.fill.tertiary, for: .widget)
-        } else {
-            self.padding()
-        }
+    func fondoDeWidget(_ fondoHex: String = "", _ textoHex: String = "") -> some View {
+        self.fondoDeWidgetApp(fondoHex, textoHex)
     }
 }
 
@@ -273,7 +277,7 @@ struct QueTocaHoyView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .marcaDeAgua("dumbbell.fill", acento)
-        .fondoDeWidget()
+        .fondoDeWidget(resumen?.fondo ?? "", resumen?.texto ?? "")
         .widgetURL(abrirEntrenoDeHoyURL)
     }
 
@@ -351,7 +355,7 @@ struct QueTocaHoyView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .marcaDeAgua("dumbbell.fill", acento)
-        .fondoDeWidget()
+        .fondoDeWidget(resumen?.fondo ?? "", resumen?.texto ?? "")
         .widgetURL(abrirEntrenoDeHoyURL)
     }
 

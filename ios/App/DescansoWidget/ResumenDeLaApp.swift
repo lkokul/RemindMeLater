@@ -37,6 +37,11 @@ private func texto(_ c: KeyedDecodingContainer<ResumenDeLaApp.CodingKeys>,
 struct ResumenDeLaApp: Decodable {
     var actualizado: Double = 0
     var acento: String = "#5b8cff"
+    // Los colores del TEMA de la app (--surface y --surface-text). Vacíos
+    // en un resumen escrito por una versión anterior: entonces el widget
+    // se pinta con el material del sistema, como hacía antes.
+    var fondo: String = ""
+    var texto: String = ""
     var hoy: SeccionHoy?
     var tareas: SeccionTareas?
     var finanzas: SeccionFinanzas?
@@ -44,13 +49,15 @@ struct ResumenDeLaApp: Decodable {
     var viajes: SeccionViajes?
 
     enum CodingKeys: String, CodingKey {
-        case actualizado, acento, hoy, tareas, finanzas, lecturas, viajes
+        case actualizado, acento, fondo, texto, hoy, tareas, finanzas, lecturas, viajes
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         actualizado = (try? c.decode(Double.self, forKey: .actualizado)) ?? 0
         acento = texto(c, .acento, "#5b8cff")
+        fondo = texto(c, .fondo, "")
+        self.texto = texto(c, .texto, "")
         // Cada sección por separado: que Finanzas venga rota no puede
         // dejar sin datos al calendario.
         hoy = try? c.decode(SeccionHoy.self, forKey: .hoy)
@@ -288,11 +295,39 @@ extension Color {
 // containerBackground es OBLIGATORIO desde iOS 17 (sin él, el widget sale
 // con el fondo en blanco o directamente no se dibuja), pero no existe
 // antes. Este envoltorio evita repetir el #available en cada vista.
+//
+// Y ADEMÁS pinta el widget con los colores del TEMA de la app (petición
+// de Koku: *"no sigue demasiado el tema de la app, antes estaba en claro,
+// pero el sistema está en modo oscuro"*). Con `.fill.tertiary` a secas el
+// widget seguía el modo claro/oscuro del SISTEMA, que es lo que hacen casi
+// todos los widgets de iOS, pero aquí choca: la app puede estar en un tema
+// claro y el widget salir oscuro al lado.
+//
+// Los dos colores viajan en el resumen (`fondo` y `texto`, sacados de
+// --surface y --surface-text). Si no llegan -- un resumen viejo, escrito
+// por una versión anterior de la app -- se cae al material del sistema de
+// siempre, que es exactamente lo que había antes.
+//
+// El texto se pone con `.foregroundStyle` en la RAÍZ a propósito: los
+// `.secondary` de dentro son estilos JERÁRQUICOS, así que se derivan solos
+// de ese color en vez de quedarse con el gris del sistema. Un solo sitio
+// tiñe el widget entero.
+//
+// Esto es SOLO para la pantalla de inicio. En la de bloqueo iOS pinta todo
+// en monocromo y con su propio tratamiento, y meterle colores ahí solo
+// quita legibilidad -- por eso las vistas de bloqueo no llaman a esto.
 extension View {
     @ViewBuilder
-    func fondoDeWidgetApp() -> some View {
+    func fondoDeWidgetApp(_ fondoHex: String = "", _ textoHex: String = "") -> some View {
+        let conTema = !fondoHex.isEmpty && !textoHex.isEmpty
         if #available(iOS 17.0, *) {
-            self.containerBackground(.fill.tertiary, for: .widget)
+            if conTema {
+                self
+                    .foregroundStyle(Color(hexDeLaApp: textoHex))
+                    .containerBackground(Color(hexDeLaApp: fondoHex), for: .widget)
+            } else {
+                self.containerBackground(.fill.tertiary, for: .widget)
+            }
         } else {
             self.padding()
         }

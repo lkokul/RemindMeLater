@@ -3053,6 +3053,15 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
 }
 .gym-set-extend-list { display: flex; flex-direction: column; gap: 0.35rem; }
+/* Cabeceras del buscador de ejercicios cuando ensena las dos listas
+   (las tuyas y las de la libreria). */
+.gym-library-section {
+  margin: 0.9rem 0 0.35rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
+}
 /* El lado (Izquierdo/Derecho) de una serie de un ejercicio unilateral.
    Los dos botones van EN UNA FILA y no apilados como el resto de la
    lista: son las dos mitades de una misma eleccion, y uno debajo del

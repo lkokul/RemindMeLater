@@ -65,6 +65,24 @@ async function construirResumenDelDia() {
     // viejo" en vez de fingir que está al día.
     actualizado: Date.now(),
     acento: gymAcentoParaElWidget(),
+    // Los colores del TEMA para que el widget no vaya por libre.
+    // Koku: "no sigue demasiado el tema de la app, antes estaba en claro,
+    // pero el sistema está en modo oscuro". Sin esto el widget seguía el
+    // modo claro/oscuro del SISTEMA y podía salir oscuro al lado de una
+    // app en claro.
+    //
+    // Se manda --surface y su texto emparejado, no --bg: un widget es una
+    // TARJETA, y en la app las tarjetas son surface. Cada fondo de la app
+    // lleva su color de contraste emparejado, así que estos dos siempre se
+    // leen bien juntos, sea cual sea el tema.
+    //
+    // De respaldo va la CADENA VACÍA, no un blanco o un negro: si el tema
+    // todavía no está puesto, mandar un blanco fijo dejaría el widget
+    // blanco al lado de una app oscura, que es PEOR que no hacer nada.
+    // Con el hueco vacío el widget se pinta con el material del sistema,
+    // como hacía antes.
+    fondo: colorDelTemaParaElWidget('--surface', ''),
+    texto: colorDelTemaParaElWidget('--surface-text', ''),
     ...seccionGimnasio(),
   };
 
@@ -367,10 +385,18 @@ function fechaLocalISO(d) {
 // El acento del tema activo, para cuando el día no tiene color propio.
 // gymThemeColorHex ya existe en app.js (lo usa la Live Activity).
 function gymAcentoParaElWidget() {
+  return colorDelTemaParaElWidget('--accent', '#5b8cff');
+}
+
+// Cualquier color del tema, en hexadecimal. Si el tema todavía no está
+// puesto (o la función no existe), se cae al valor de respaldo -- y el
+// widget, al ver un color vacío o raro, se pinta con el material del
+// sistema como hacía antes.
+function colorDelTemaParaElWidget(variable, porDefecto) {
   try {
-    if (typeof gymThemeColorHex === 'function') return gymThemeColorHex('--accent', '#5b8cff');
-  } catch { /* si el tema no está listo, el azul de siempre */ }
-  return '#5b8cff';
+    if (typeof gymThemeColorHex === 'function') return gymThemeColorHex(variable, porDefecto);
+  } catch { /* si el tema no está listo, el de respaldo */ }
+  return porDefecto;
 }
 
 // Cómo fue el último intento de avisar al widget. Existe porque en el

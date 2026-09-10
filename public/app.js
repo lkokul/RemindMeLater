@@ -73,6 +73,42 @@ const DEFAULT_EVENT_COLOR = '#5b8cff'; // el --accent de styles.css, para evento
 // Koku: "si tengo muchos diferentes se hace un poco una odisea". No se
 // enfoca solo a proposito: en el movil abrir el teclado nada mas
 // desplegar tapa media lista, y muchas veces solo quieres mirar.
+// Los popovers de los desplegables viven en el <body>, no dentro de su
+// campo (si no, un modal con overflow los recortaria). El problema es que
+// cuando el campo se repinta -- y las listas de ejercicios se repintan en
+// cada cambio -- el campo viejo se va del DOM pero SU popover se queda en
+// el body para siempre. Midiendolo salian 56 sueltos despues de un rato
+// normal en el modal de una sesion, cada uno con su listener global.
+//
+// No rompia nada visible, pero es basura que crece sola. Se limpia al
+// crear un campo nuevo (amortizado, sin tener que acordarse en ningun
+// sitio): se tira el popover cuyo dueño YA ESTUVO en el documento y ya no
+// esta. Lo de "ya estuvo" importa: un campo recien creado todavia no se
+// ha insertado, y sin esa marca se barreria a si mismo.
+function limpiarPopoversSueltos() {
+  document.querySelectorAll('.select-popover').forEach((pop) => {
+    const dueno = pop.duenoDelPopover;
+    if (!dueno || !pop.estuvoEnElDom) return;
+    if (!document.body.contains(dueno)) pop.remove();
+  });
+}
+
+// La marca de "este campo llegó a estar en pantalla" se pone un ciclo
+// DESPUÉS de crearlo, no dentro del barrido.
+//
+// Primer intento fallido, apuntado para no repetirlo: el barrido marcaba
+// al pasar por encima, así que un campo creado y destruido ENTRE dos
+// barridos no se marcaba nunca y se quedaba para siempre. Justo el caso
+// normal (abrir el modal, cerrarlo, abrirlo otra vez). Medido: seguía
+// creciendo de uno en uno.
+//
+// Un ciclo basta porque quien crea un campo lo mete en el DOM acto
+// seguido. Si alguien no lo metiera, se queda sin marcar y no se barre
+// nunca -- que es lo prudente: mejor dejar basura que tirar un campo vivo.
+function marcarPopoverCuandoSeUse(popover, root) {
+  setTimeout(() => { popover.estuvoEnElDom = document.body.contains(root); }, 0);
+}
+
 function createSelectField({ options = [], initialValue = '', placeholder = '', onChange, scrollToValue, searchable = false } = {}) {
   let value = initialValue;
   let opts = options;
@@ -87,7 +123,10 @@ function createSelectField({ options = [], initialValue = '', placeholder = '', 
 
   const popover = document.createElement('div');
   popover.className = 'select-popover hidden';
+  popover.duenoDelPopover = root;
+  limpiarPopoversSueltos();
   document.body.appendChild(popover);
+  marcarPopoverCuandoSeUse(popover, root);
 
   // El buscador y la lista son hermanos DENTRO del popover: renderOptions
   // repinta solo la lista, asi que escribir no destruye el campo (ni
@@ -242,7 +281,10 @@ function createMultiSelectField({ options = [], initialValues = [], placeholder 
 
   const popover = document.createElement('div');
   popover.className = 'select-popover hidden';
+  popover.duenoDelPopover = root;
+  limpiarPopoversSueltos();
   document.body.appendChild(popover);
+  marcarPopoverCuandoSeUse(popover, root);
 
   function findLabel(value) {
     const opt = opts.find((o) => String(o.value) === String(value));
@@ -9759,7 +9801,89 @@ function gymNormalizeSearch(text) {
   return String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
+// Cuando el buscador de ejercicios esta en "modo elegir" (abierto desde
+// un entreno para anadir uno), aqui vive lo que hay que hacer con el
+// elegido. Se declara AQUI y no junto a su listener, varios miles de
+// lineas mas abajo: renderGymLibraryMine() la lee, y una variable `let`
+// leida antes de su declaracion revienta el archivo entero -- la trampa
+// de la zona muerta temporal que ya mordio una vez en settings.js.
+let gymLibraryPickCallback = null;
+
+// TUS ejercicios dentro del buscador, y solo en "modo elegir" (o sea,
+// abriendolo desde un entreno para anadir uno).
+//
+// El agujero que tapa esto: el "+" del entreno abria SOLO la libreria, asi
+// que un ejercicio creado por ti no habia manera de anadirlo sin volver a
+// crearlo. Y como lo que si podias anadir venia de la libreria, y la
+// libreria no marca unilaterales, nunca te preguntaba por el lado. Los dos
+// sintomas, una sola causa.
+function renderGymLibraryMine() {
+  const bloque = document.getElementById('gym-library-mine-block');
+  const list = document.getElementById('gym-library-mine');
+  const cabeceraLib = document.getElementById('gym-library-section-lib');
+  const eligiendo = !!gymLibraryPickCallback;
+  bloque.classList.toggle('hidden', !eligiendo);
+  cabeceraLib.classList.toggle('hidden', !eligiendo);
+  if (!eligiendo) return;
+
+  const search = gymNormalizeSearch(document.getElementById('gym-library-search').value.trim());
+  // Se filtra por nombre, musculo y material, igual que el buscador de la
+  // pestana Plan: escribir "pierna" saca las de pierna aunque no se llamen
+  // asi. Los que YA estan en el entreno no se ofrecen.
+  const yaEnElEntreno = new Set((gymLiveSession ? gymLiveSession.exercises : []).map((e) => e.exerciseId));
+  const mios = state.gymExercises.filter((ex) => {
+    if (yaEnElEntreno.has(ex.id)) return false;
+    if (!search) return true;
+    const texto = [ex.name, gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' ');
+    return gymNormalizeSearch(texto).includes(search);
+  });
+
+  list.innerHTML = '';
+  if (mios.length === 0) {
+    list.innerHTML = `<p class="empty-hint">${search ? 'Ninguno de los tuyos coincide.' : 'Todavía no tienes ejercicios propios.'}</p>`;
+    return;
+  }
+  mios.slice(0, 40).forEach((ex) => {
+    const meta = [gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' · ');
+    const row = document.createElement('div');
+    row.className = 'gym-list-item';
+    row.innerHTML = `
+      <span class="gym-list-item-name">${escapeHtml(ex.name)}${meta ? ` <span class="gym-list-item-muted">(${escapeHtml(meta)})</span>` : ''}</span>
+      <div class="gym-list-item-actions"><button type="button" class="secondary-btn">Añadir</button></div>
+    `;
+    const anadir = () => gymAnadirEjercicioAlEntreno(ex.id);
+    row.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); anadir(); });
+    row.addEventListener('click', anadir);
+    list.appendChild(row);
+  });
+}
+
+// Meter un ejercicio YA EXISTENTE en el entreno en curso. Es lo mismo que
+// hacian por su cuenta el callback de la libreria y el de "crear
+// ejercicio propio", puesto en un solo sitio: gymBuildSetsForExercise es
+// quien decide si son una serie o dos (izquierda y derecha), asi que
+// cualquier camino que pase por aqui respeta los unilaterales.
+async function gymAnadirEjercicioAlEntreno(exerciseId) {
+  if (!gymLiveSession) return;
+  if (gymLiveSession.exercises.some((e) => e.exerciseId === exerciseId)) return;
+  gymLiveSession.exercises.push({
+    exerciseId,
+    note: '',
+    rpe: '',
+    collapsed: false,
+    sets: gymBuildSetsForExercise(exerciseId, 1, ''),
+  });
+  gymLiveStore();
+  try {
+    gymLivePrevSets.set(exerciseId, await api(`/api/gym-sessions/last-sets/${exerciseId}`));
+  } catch { /* sin "la ultima vez" se sigue igual */ }
+  renderGymLiveExercises();
+  closeGymLibraryModal();
+  gymLibraryPickCallback = null;
+}
+
 function renderGymLibraryList() {
+  renderGymLibraryMine();
   const list = document.getElementById('gym-library-list');
   if (!gymExerciseLibrary) return;
   const search = gymNormalizeSearch(document.getElementById('gym-library-search').value.trim());
@@ -12099,20 +12223,15 @@ function renderGymLiveExercises() {
 // llama al callback en vez del flujo normal de importar, y cierra el
 // buscador. Asi no hay que construir un segundo selector solo para el
 // entreno en vivo.
-let gymLibraryPickCallback = null;
 document.getElementById('btn-gym-live-add-exercise').addEventListener('click', () => {
   gymLibraryPickCallback = async (libraryEntry) => {
-    // Importa (idempotente) y anade la tarjeta al entreno en curso.
+    // Importa (idempotente) y anade la tarjeta al entreno en curso, por
+    // el MISMO sitio que "Tus ejercicios": asi las series se construyen
+    // igual (y los unilaterales nacen con sus dos lados).
     await importGymLibraryExercise(libraryEntry.id);
     const imported = state.gymExercises.find((e) => e.libraryId === libraryEntry.id);
     if (!imported) return;
-    if (!gymLiveSession.exercises.some((e) => e.exerciseId === imported.id)) {
-      gymLiveSession.exercises.push({ exerciseId: imported.id, note: '', rpe: '', collapsed: false, sets: gymBuildSetsForExercise(imported.id, 1, '') });
-      gymLiveStore();
-      const prev = await api(`/api/gym-sessions/last-sets/${imported.id}`);
-      gymLivePrevSets.set(imported.id, prev);
-      renderGymLiveExercises();
-    }
+    await gymAnadirEjercicioAlEntreno(imported.id);
   };
   openGymLibraryModal();
 });
@@ -13172,12 +13291,35 @@ function renderGymSessionExercisesField() {
         const fila = gymSessionModalExercises[exIndex];
         const antesPorLados = gymExerciseUsesSides(fila);
         fila.exerciseId = Number(valor);
-        // Solo se repinta si cambia el TIPO de ejercicio (de normal a por
-        // lados o al reves): es cuando aparecen o sobran los botones de
-        // lado. Repintar en cada cambio movería el foco sin motivo.
-        // Las series ya escritas NO se tocan: cambiar de ejercicio no
-        // puede borrarte lo que llevabas apuntado.
-        if (gymExerciseUsesSides(fila) !== antesPorLados) renderGymSessionExercisesField();
+        const ahoraPorLados = gymExerciseUsesSides(fila);
+        if (ahoraPorLados !== antesPorLados) {
+          // Al pasar a un ejercicio POR LADOS, las series que estan en
+          // blanco se parten en dos (izquierda y derecha), igual que las
+          // crea el entreno en vivo. Sin esto te quedaba UNA serie sin
+          // lado y dos botones sin marcar, y parecia que la app no
+          // distinguia los lados -- que es justo como lo vio Koku: cuando
+          // anades un ejercicio se elige el primero de la lista (normal) y
+          // solo despues lo cambias al tuyo.
+          //
+          // SOLO las que estan en blanco. Si ya habias escrito peso o
+          // repes, se quedan como estan y los botones de lado te dejan
+          // arreglarlo a mano: cambiar de ejercicio no puede duplicarte ni
+          // tocarte lo que ya habias apuntado.
+          if (ahoraPorLados) {
+            const partidas = [];
+            fila.sets.forEach((s) => {
+              const enBlanco = !String(s.reps ?? '').trim() && !String(s.weightDisplay ?? '').trim();
+              if (enBlanco && !s.side) {
+                partidas.push({ ...s, side: 'left', segments: [] });
+                partidas.push({ ...s, side: 'right', segments: [] });
+              } else {
+                partidas.push(s);
+              }
+            });
+            fila.sets = partidas;
+          }
+          renderGymSessionExercisesField();
+        }
       },
     });
     header.querySelector('.gym-routine-exercise-picker').appendChild(pickerSesion.element);
@@ -15513,7 +15655,10 @@ function createCountryPickerField({ initialValues = [] } = {}) {
 
   const popover = document.createElement('div');
   popover.className = 'select-popover hidden';
+  popover.duenoDelPopover = root;
+  limpiarPopoversSueltos();
   document.body.appendChild(popover);
+  marcarPopoverCuandoSeUse(popover, root);
 
   function renderChips() {
     chipsRow.innerHTML = '';
@@ -17583,7 +17728,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.43.0';
+const APP_VERSION = '0.44.0';
 const APP_VERSION_DATE = '2026-09-10';
 
 function renderAppVersionLine() {

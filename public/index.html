@@ -1113,6 +1113,19 @@
            buscador estaba en "modo elegir" (añadir al entreno en vivo),
            el ejercicio recien creado se añade directo a la sesion. -->
       <button type="button" id="btn-gym-library-new-custom" class="secondary-btn gym-tab-action">+ Crear ejercicio propio</button>
+      <!-- TUS ejercicios, los primeros. Antes este buscador solo ofrecia
+           la libreria de ~870, asi que dentro de un entreno NO habia forma
+           de anadir un ejercicio creado por ti: o lo volvias a crear, o
+           nada. Y de rebote, lo que anadias venia de la libreria (que no
+           marca unilaterales), asi que nunca preguntaba por el lado --
+           que es como lo vio Koku. Solo se ensena en "modo elegir" (desde
+           un entreno): abriendo la libreria desde la pestana Plan lo que
+           quieres es importar, y ahi tus ejercicios ya los tienes al lado. -->
+      <div id="gym-library-mine-block" class="hidden">
+        <h3 class="gym-library-section">Tus ejercicios</h3>
+        <div id="gym-library-mine" class="gym-list"></div>
+      </div>
+      <h3 id="gym-library-section-lib" class="gym-library-section hidden">De la librería</h3>
       <div id="gym-library-list" class="gym-list gym-library-list"></div>
     </div>
   </div>

@@ -73,6 +73,27 @@ for texto in (io.open('ios/App/DescansoWidget/WidgetsDeLaApp.swift', encoding='u
         fallos.append('ControlWidgetButton con OpenURLIntent: iOS NO abre '
                       'esquemas propios desde un control, el boton se queda mudo')
 
+# El App Group esta escrito DOS veces a proposito (AbrirDesdeControl.swift
+# se compila tambien en la app, y no puede importar el de la extension).
+# Si las dos cadenas dejan de coincidir, el boton del centro de control
+# escribe en un buzon que la app no mira -- que es exactamente el fallo
+# que costo la build #56, y no da ningun error.
+control = io.open('ios/App/App/AbrirDesdeControl.swift', encoding='utf-8').read()
+m = re.search(r'let grupoDeLaAppParaControl = "([^"]+)"', control)
+if not m:
+    fallos.append('AbrirDesdeControl.swift: falta grupoDeLaAppParaControl')
+else:
+    m2 = re.search(r'let grupoDeLaApp = "([^"]+)"',
+                   io.open('ios/App/DescansoWidget/ResumenDeLaApp.swift', encoding='utf-8').read())
+    if not m2 or m.group(1) != m2.group(1):
+        fallos.append(f'El App Group de AbrirDesdeControl ({m.group(1)}) no coincide con el del widget')
+
+# Y las claves de la marca tienen que ser las MISMAS que consume el plugin.
+plugin_txt = io.open('ios/App/App/WidgetBridgePlugin.swift', encoding='utf-8').read()
+for clave in re.findall(r'forKey: "([^"]+)"', control):
+    if f'"{clave}"' not in plugin_txt:
+        fallos.append(f'AbrirDesdeControl escribe "{clave}" y el plugin no la consume')
+
 # --- 2) constantes compartidas ---------------------------------------
 def leer(ruta):
     return io.open(ruta, encoding='utf-8').read()

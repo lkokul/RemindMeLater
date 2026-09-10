@@ -43,20 +43,47 @@ import AppIntents
 // `@available` no basta para eso, hace falta la condición de compilación.
 #if compiler(>=6.0)
 
-// La URL que abrirá la app. Aquí NO se escribe ninguna marca: de eso se
-// encarga SceneDelegate cuando le llega la URL, igual que con el toque en
-// el widget.
+// Deja apuntado a dónde hay que ir. Y NO devuelve ninguna URL: la app la
+// abre `openAppWhenRun`, que ya funciona.
 //
-// Se probó a dejarla también aquí (cinturón y tirantes) y se descartó a
-// propósito: serían DOS escritores de la misma marca, y si el JavaScript
-// llegara a leerla entre una escritura y la otra la consumiría, navegaría,
-// y la segunda escritura le haría navegar OTRA VEZ. En "nuevo evento" eso
-// es abrir el formulario dos veces y perder lo que hubieras escrito. Un
-// solo escritor no tiene ese problema.
+// TERCER INTENTO, y este viene de una pista que dio el propio Koku sin
+// buscarla. En el intento anterior el botón SÍ abría la app pero no
+// llevaba a ningún sitio, y a la vez **en Atajos no aparecía ni uno de
+// estos cinco intents** pese a llevar `isDiscoverable = true`. Eso
+// segundo es lo que lo explica todo: si iOS no los ve registrados en la
+// APP, es que `perform()` no está corriendo en el proceso de la app --
+// corre en el de la EXTENSIÓN. Y `UserDefaults.standard` de la extensión
+// NO es el de la app: son dos cajones distintos. La marca se escribía,
+// sí, pero en un sitio que la app no mira nunca.
+//
+// Por eso ahora se escribe en LOS DOS SITIOS: en el propio
+// `UserDefaults.standard` (que vale si de verdad corre en la app) y en el
+// **App Group**, que es el único terreno común de los dos procesos y que
+// desde la build #55 sabemos que funciona. `consumirApertura` del plugin
+// ya miraba los dos, así que del lado del JavaScript no cambia nada.
+//
+// Y se quita el `OpenURLIntent` que devolvía antes: sin él hay un ÚNICO
+// escritor de la marca. Con él, si la URL llegaba a SceneDelegate, este
+// la escribía otra vez y el JavaScript podía navegar DOS veces -- en
+// "nuevo evento" eso es abrir el formulario de nuevo y perder lo escrito.
 @available(iOS 18.0, *)
-private func aperturaDeControl(_ destino: String) -> OpenURLIntent {
-    OpenURLIntent(URL(string: "remindmelater://\(destino)")!)
+private func apuntarDestinoDeControl(_ destino: String) {
+    // "gym-hoy" tiene su propia marca porque no es "abrir una pantalla",
+    // es "arrancar el entreno de hoy" -- ver WidgetBridgePlugin.
+    let clave = destino == "gym-hoy" ? "gymPendingStartToday" : "widgetPendingDestino"
+    let valor: Any = destino == "gym-hoy" ? true : destino
+
+    UserDefaults.standard.set(valor, forKey: clave)
+    // El buzón compartido: es el que de verdad cruza de la extensión a la
+    // app. Si no existiera (App Group mal firmado), esto es un no-op y no
+    // rompe nada.
+    UserDefaults(suiteName: grupoDeLaAppParaControl)?.set(valor, forKey: clave)
 }
+
+// Repetido a propósito y no importado de ResumenDeLaApp.swift: ese
+// archivo vive solo en la extensión, y este tiene que compilar TAMBIÉN en
+// la app. Son dos targets, no uno.
+let grupoDeLaAppParaControl = "group.com.koku.remindmelater"
 
 // Los cinco son iguales salvo el título y el destino. Se escriben uno a
 // uno, sin factorizar en un protocolo con un perform() por defecto, a
@@ -70,8 +97,9 @@ struct EmpezarEntrenoDeHoyIntent: AppIntent {
     static var openAppWhenRun = true
     static var isDiscoverable = true
 
-    func perform() async throws -> some IntentResult & OpensIntent {
-        .result(opensIntent: aperturaDeControl("gym-hoy"))
+    func perform() async throws -> some IntentResult {
+        apuntarDestinoDeControl("gym-hoy")
+        return .result()
     }
 }
 
@@ -81,8 +109,9 @@ struct AbrirHoyIntent: AppIntent {
     static var openAppWhenRun = true
     static var isDiscoverable = true
 
-    func perform() async throws -> some IntentResult & OpensIntent {
-        .result(opensIntent: aperturaDeControl("hoy"))
+    func perform() async throws -> some IntentResult {
+        apuntarDestinoDeControl("hoy")
+        return .result()
     }
 }
 
@@ -92,8 +121,9 @@ struct AbrirTareasIntent: AppIntent {
     static var openAppWhenRun = true
     static var isDiscoverable = true
 
-    func perform() async throws -> some IntentResult & OpensIntent {
-        .result(opensIntent: aperturaDeControl("tareas"))
+    func perform() async throws -> some IntentResult {
+        apuntarDestinoDeControl("tareas")
+        return .result()
     }
 }
 
@@ -103,8 +133,9 @@ struct NuevoEventoIntent: AppIntent {
     static var openAppWhenRun = true
     static var isDiscoverable = true
 
-    func perform() async throws -> some IntentResult & OpensIntent {
-        .result(opensIntent: aperturaDeControl("nuevo-evento"))
+    func perform() async throws -> some IntentResult {
+        apuntarDestinoDeControl("nuevo-evento")
+        return .result()
     }
 }
 
@@ -114,8 +145,9 @@ struct NuevaNotaIntent: AppIntent {
     static var openAppWhenRun = true
     static var isDiscoverable = true
 
-    func perform() async throws -> some IntentResult & OpensIntent {
-        .result(opensIntent: aperturaDeControl("nueva-nota"))
+    func perform() async throws -> some IntentResult {
+        apuntarDestinoDeControl("nueva-nota")
+        return .result()
     }
 }
 

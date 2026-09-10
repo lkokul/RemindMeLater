@@ -2037,6 +2037,131 @@ gráficas.
 El RPE y la nota de Lecturas se quedan con `step="0.5"`: ahí el medio
 punto es lo correcto.
 
+## Lo que salió de probar la build #56
+
+### El centro de control, al tercer intento (y la pista la dio Koku sin querer)
+
+Síntoma: *"Los botones del panel de control abren la app, pero no hacen
+nada más"*. Y, en el mismo mensaje: *"En shortcuts no aparece nada de
+remindmelater"*.
+
+**Ese segundo dato es el que lo explica todo.** Los cinco intents llevan
+`isDiscoverable = true`: si iOS no los enseña en Atajos, es que **no los
+ve registrados en la APP**. Y si no están registrados en la app,
+`perform()` no corre en el proceso de la app: corre en el de la
+EXTENSIÓN. `UserDefaults.standard` de la extensión NO es el de la app
+— son dos cajones distintos. La marca se escribía, sí, pero donde la app
+no mira nunca.
+
+Por eso ahora `apuntarDestinoDeControl()` escribe en LOS DOS SITIOS: en
+`UserDefaults.standard` (por si de verdad corre en la app) y en el **App
+Group**, que es el único terreno común de los dos procesos.
+`consumirApertura` del plugin ya miraba los dos, así que del lado del
+JavaScript no cambió nada.
+
+Y **se quitó el `OpenURLIntent`** que devolvía antes: `openAppWhenRun` ya
+abre la app (probado), y sin la URL hay un ÚNICO escritor de la marca.
+Con ella, si llegaba a SceneDelegate, este la escribía otra vez y el
+JavaScript podía navegar DOS veces — en "nuevo evento" eso es abrir el
+formulario de nuevo y perder lo escrito.
+
+Los tres intentos, para no volver atrás a ninguno:
+
+1. AppIntent propio dejando la marca en el App Group → no abría la app,
+   y dependía justo de lo que entonces estaba roto (el App Group).
+2. `OpenURLIntent` directo en el `ControlWidgetButton` → **desde un
+   control, iOS no abre esquemas de URL propios**, solo universal links.
+   Mudo, sin ningún error, y en el simulador funcionando.
+3. AppIntent con `openAppWhenRun` que apunta el destino en los dos
+   almacenes. El que está puesto.
+
+`tools/comprobar-widgets.py` comprueba ahora que el App Group escrito en
+`AbrirDesdeControl.swift` (que está a mano, porque ese archivo se compila
+también en la app y no puede importar el de la extensión) coincide con el
+del widget, y que las claves que escribe las consuma el plugin.
+
+### "Los ejercicios individuales no los pone bien": una causa, dos síntomas
+
+Koku, sobre los ejercicios que **él mismo había creado y marcado** como
+unilaterales por lados. La causa no estaba donde parecía:
+
+**El "+" del entreno abría SOLO la librería.** Tus propios ejercicios no
+salían ahí, así que dentro de un entreno no había forma de añadir uno
+creado por ti: o lo volvías a crear, o nada. Y como lo que sí podías
+añadir venía de la librería — que no marca unilaterales —, nunca
+preguntaba por el lado. Los dos síntomas salían de ahí.
+
+Ahora el buscador tiene una sección **"Tus ejercicios"** arriba, y solo
+en "modo elegir" (abierto desde un entreno): abriéndolo desde la pestaña
+Plan lo que quieres es importar, y ahí tus ejercicios ya los tienes al
+lado. Filtra por nombre, músculo y material, esconde los que ya están en
+el entreno, y **todos los caminos de añadir pasan ahora por
+`gymAnadirEjercicioAlEntreno()`** — que llama a
+`gymBuildSetsForExercise()`, o sea que los unilaterales nacen con sus dos
+lados vengan de donde vengan.
+
+**Y en el modal de "Nueva sesión" (que SÍ funcionaba, ojo)**: al añadir
+un ejercicio la app elige el primero de la lista, que suele ser normal, y
+tú lo cambias al tuyo después. Los botones de lado aparecían, pero la
+serie que ya había seguía siendo UNA sin lado, y eso se lee como "no
+distingue". Ahora al cambiar a un ejercicio por lados las series **en
+blanco** se parten en dos; las que ya tengan peso o repes escritas NO se
+tocan, porque cambiar de ejercicio no puede duplicarte lo apuntado.
+
+**Aviso sobre cómo se comprobó**, que costó un rato: la primera prueba
+"reproducía" un fallo que no existía porque buscaba las opciones en un
+`.select-popover` cualquiera del `<body>` — y hay decenas, casi todos
+cerrados. Cada campo crea el suyo. Para pinchar una opción de verdad hay
+que buscar **el popover que NO tiene la clase `hidden`**.
+
+### Los widgets siguen el tema de la app
+
+Koku: *"no sigue demasiado el tema de la app, antes estaba en claro, pero
+el sistema está en modo oscuro"*. Con `.fill.tertiary` el widget seguía
+el modo claro/oscuro del SISTEMA, que es lo normal en iOS pero aquí
+choca. Se le ofrecieron tres opciones y eligió que sigan el tema.
+
+El resumen lleva ahora `fondo` y `texto` (`--surface` y `--surface-text`,
+no `--bg`: un widget es una TARJETA, y en la app las tarjetas son
+surface; además cada fondo lleva su contraste emparejado, así que los dos
+siempre se leen bien juntos). `fondoDeWidgetApp(fondo, texto)` los pinta.
+
+Dos detalles que importan:
+
+- **El texto se pone con `.foregroundStyle` en la RAÍZ**: los
+  `.secondary` de dentro son estilos JERÁRQUICOS y se derivan solos de
+  ese color, en vez de quedarse con el gris del sistema. Un solo sitio
+  tiñe el widget entero.
+- **De respaldo va la cadena VACÍA, no un blanco o un negro.** Si el tema
+  no estuviera listo, mandar un blanco fijo dejaría el widget blanco al
+  lado de una app oscura — peor que no hacer nada. Con el hueco vacío se
+  vuelve al material del sistema, que es lo que había antes.
+
+Esto es solo para la pantalla de INICIO: las vistas de bloqueo no llaman
+a `fondoDeWidgetApp`, porque ahí iOS pinta en monocromo y meterle colores
+solo quita legibilidad.
+
+### Los popovers de los desplegables se acumulaban en el `<body>`
+
+Encontrado de rebote mientras se investigaba lo de arriba: **56 sueltos**
+tras un rato normal en el modal de una sesión.
+
+Los popovers viven en el `<body>` y no dentro de su campo (si no, un
+modal con overflow los recortaría). Cuando el campo se repinta — y las
+listas de ejercicios se repintan en cada cambio — el campo viejo se va
+del DOM pero su popover se queda ahí para siempre, cada uno con su
+listener global. No rompía nada visible, pero crecía solo.
+
+`limpiarPopoversSueltos()` los barre al crear un campo nuevo (amortizado,
+sin tener que acordarse en ningún sitio). **Primer intento fallido, para
+no repetirlo**: el barrido marcaba "este ya estuvo en pantalla" al pasar
+por encima, así que un campo creado y destruido ENTRE dos barridos no se
+marcaba nunca y no se barría — justo el caso normal de abrir y cerrar un
+modal. Ahora la marca se pone un ciclo DESPUÉS de crear el campo
+(`marcarPopoverCuandoSeUse`), que es cuando ya está insertado. Un campo
+que nunca llegue al DOM se queda sin marcar y no se barre nunca, que es
+lo prudente: mejor dejar basura que tirar un campo vivo.
+
 ## Dos ramas: `desarrollador` y `movil-ui`
 
 Decisión de Koku (10/9/2026), después de que el widget se quedara en
@@ -2122,10 +2247,16 @@ Group de verdad en el `.ipa`. Koku la probó y los seis widgets se ven y
 llevan a donde tienen que llevar; lo único que no funcionaba eran los
 botones del centro de control (ver el bloque de arriba).
 
-**v0.43.0** recoge todo lo que salió de probar esa build: el arreglo del
-centro de control, el relleno de los seis widgets, y cuatro cosas del
-Gimnasio (la ✕ del modal, la altura de Descanso/RPE, los unilaterales en
-una sesión a mano, y el peso con decimales).
+**v0.43.0** (build #56) recogió lo que salió de probar la #55: un primer
+intento de arreglo del centro de control, el relleno de los seis widgets,
+y cuatro cosas del Gimnasio (la ✕ del modal, la altura de Descanso/RPE,
+los unilaterales en una sesión a mano, y el peso con decimales).
+
+**v0.44.0** es lo que salió de probar la #56 — ver el bloque "Lo que salió
+de probar la build #56" más arriba: el centro de control al TERCER intento
+(los dos anteriores fallaban por causas distintas), tus propios ejercicios
+en el "+" del entreno (que era la causa real de lo de los unilaterales),
+los widgets siguiendo el tema de la app, y la fuga de popovers.
 
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 
