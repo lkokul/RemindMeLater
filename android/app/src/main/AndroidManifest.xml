@@ -7,9 +7,18 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
 
+        <!-- SOLO VERTICAL (peticion de Koku, igual que en iOS via
+             Info.plist). "portrait" bloquea la rotacion aunque el
+             telefono tenga el giro automatico encendido. Se deja
+             "orientation" dentro de configChanges: no sobra, es lo que
+             evita que Android reinicie la Activity entera (y con ella
+             la webview) si algo llegara a provocar un cambio de
+             configuracion de este tipo. -->
         <activity
+            android:screenOrientation="portrait"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
             android:label="@string/title_activity_main"

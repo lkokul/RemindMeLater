@@ -1,0 +1,489 @@
+import WidgetKit
+import SwiftUI
+import AppIntents
+
+// Widget "Qué toca hoy": el día del ciclo del bloque activo del Gimnasio,
+// en la pantalla de inicio, en la de bloqueo y como botón del centro de
+// control.
+//
+// LO PRIMERO QUE HAY QUE ENTENDER: un widget NO puede leer la base de
+// datos de la app. La base es SQLite compilado a WebAssembly y vive
+// dentro de la webview, en IndexedDB; esto es un proceso nativo aparte
+// que iOS ejecuta cuando la app ni siquiera está abierta. La única forma
+// de pasarle datos es un buzón compartido (App Group): la app deja ahí un
+// resumen pequeño en JSON y esto lo lee. Ver WidgetBridgePlugin.swift en
+// el target de la app, y public/widget-bridge.js del lado JavaScript.
+//
+// NO SE REFRESCA POR HORAS (decisión de Koku): quien lo repinta es la app
+// cuando cambia algo (terminas un entreno, tocas el ciclo, cierras la
+// app). Solo hay una relectura al día como red de seguridad, por si la
+// app nunca consigue avisar — ver getTimeline.
+
+// El App Group y la clave del buzón viven en ResumenDeLaApp.swift, que
+// es el modelo que comparten TODOS los widgets. Antes estaban repetidas
+// aquí, y con cinco widgets eso son cinco sitios donde una letra distinta
+// deja el widget en blanco sin un solo error.
+
+// Tocar el widget abre la app aquí. SceneDelegate recoge la URL y deja la
+// marca; el JavaScript la consume al despertar y arranca el entreno.
+// Lo usan LOS DOS caminos: el toque en el widget (.widgetURL) y, a través
+// de EmpezarEntrenoDeHoyIntent, el botón del centro de control -- para que
+// haya una sola entrada.
+private let abrirEntrenoDeHoyURL = URL(string: "remindmelater://gym-hoy")
+
+// La clave "gymPendingStartToday" ya NO se escribe desde aquí: el botón
+// del centro de control pasó a abrir la URL de arriba, así que la marca la
+// deja siempre SceneDelegate. El plugin de la app la sigue leyendo — si
+// algún día se toca, mirar WidgetBridgePlugin.swift antes.
+
+// ---------------------------------------------------------------------
+// El resumen que escribe la app
+// ---------------------------------------------------------------------
+struct ResumenDelDia {
+    var hayCiclo: Bool
+    var esDescanso: Bool
+    var nombre: String
+    var bloque: String
+    var color: String
+    var icono: String
+    var posicion: Int
+    var total: Int
+    var ejercicios: Int
+    // Los nombres de los primeros ejercicios del día. Van APARTE del
+    // número: el mediano los enseña en la mitad derecha, que antes se
+    // quedaba vacía en cuanto el día no tenía botón de "Empezar".
+    var listaEjercicios: [String] = []
+    // Los colores y el estilo del widget, iguales que en ResumenDeLaApp
+    // (los dos modelos leen el MISMO JSON, cada uno lo que le interesa).
+    var fondo: String = ""
+    var texto: String = ""
+    var estiloWidget: String = "app"
+    var fondoClaro: String = ""
+    var textoClaro: String = ""
+    var fondoOscuro: String = ""
+    var textoOscuro: String = ""
+
+    // Lo que viene DESPUÉS en el ciclo. Se llama "siguiente" y no
+    // "mañana" a propósito: el ciclo avanza por entrenos hechos, no por
+    // calendario, así que prometer una fecha sería mentir en cuanto te
+    // saltes un día.
+    var siguiente: String = ""
+
+    static let ejemplo = ResumenDelDia(
+        hayCiclo: true, esDescanso: false, nombre: "Empuje", bloque: "Volumen",
+        color: "#5b8cff", icono: "", posicion: 1, total: 3, ejercicios: 6,
+        listaEjercicios: ["Press banca", "Press militar", "Fondos", "Elevaciones"],
+        siguiente: "Tirón"
+    )
+}
+
+// El decodificador se escribe A MANO con decodeIfPresent, no se deja
+// sintetizar. Motivo: el decodificador automático de Swift NO usa los
+// valores por defecto cuando falta una clave, falla. Y aquí quien
+// escribe el JSON es una versión de la app que puede ser MÁS VIEJA que
+// este widget (se actualizan juntos, pero el resumen guardado sobrevive
+// a la actualización). Con esto, un resumen antiguo sin campos nuevos se
+// lee igual en vez de dejar el widget en blanco.
+extension ResumenDelDia: Decodable {
+    enum CodingKeys: String, CodingKey {
+        case hayCiclo, esDescanso, nombre, bloque, color, icono, posicion, total, ejercicios
+        case listaEjercicios, siguiente, fondo, texto
+        case estiloWidget, fondoClaro, textoClaro, fondoOscuro, textoOscuro
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // decode + try? en vez de decodeIfPresent: así una clave que falte
+        // Y una que venga con el tipo cambiado caen las dos en el valor por
+        // defecto, en vez de reventar el resumen entero por un campo.
+        func texto(_ k: CodingKeys, _ porDefecto: String) -> String {
+            (try? c.decode(String.self, forKey: k)) ?? porDefecto
+        }
+        func numero(_ k: CodingKeys, _ porDefecto: Int) -> Int {
+            (try? c.decode(Int.self, forKey: k)) ?? porDefecto
+        }
+        func siNo(_ k: CodingKeys, _ porDefecto: Bool) -> Bool {
+            (try? c.decode(Bool.self, forKey: k)) ?? porDefecto
+        }
+        hayCiclo = siNo(.hayCiclo, false)
+        esDescanso = siNo(.esDescanso, false)
+        nombre = texto(.nombre, "")
+        bloque = texto(.bloque, "")
+        color = texto(.color, "#5b8cff")
+        icono = texto(.icono, "")
+        posicion = numero(.posicion, 0)
+        total = numero(.total, 0)
+        ejercicios = numero(.ejercicios, 0)
+        listaEjercicios = (try? c.decode([String].self, forKey: .listaEjercicios)) ?? []
+        siguiente = texto(.siguiente, "")
+        fondo = texto(.fondo, "")
+        self.texto = texto(.texto, "")
+        estiloWidget = texto(.estiloWidget, "app")
+        fondoClaro = texto(.fondoClaro, "")
+        textoClaro = texto(.textoClaro, "")
+        fondoOscuro = texto(.fondoOscuro, "")
+        textoOscuro = texto(.textoOscuro, "")
+    }
+
+    // nil si todavía no hay nada guardado (app recién instalada, o el App
+    // Group no está disponible). Las vistas lo tratan con su propio texto,
+    // no se quedan en blanco.
+    static func leer() -> ResumenDelDia? {
+        guard let defaults = UserDefaults(suiteName: grupoDeLaApp),
+              let texto = defaults.string(forKey: claveResumen),
+              let datos = texto.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(ResumenDelDia.self, from: datos)
+    }
+
+    // ¿EXISTE SIQUIERA EL BUZÓN COMPARTIDO?
+    //
+    // UserDefaults(suiteName:) devuelve nil cuando el App Group no viajó
+    // en la firma, y ese caso se veía EXACTAMENTE igual que "la app
+    // todavía no ha escrito nada": el widget decía "Abre la app" y por
+    // mucho que la abrieras no cambiaba nunca. Pasó de verdad (build #51)
+    // y costó dar con ello porque en el iPhone no hay consola.
+    //
+    // Distinguirlo aquí hace que la propia pantalla del widget diga cuál
+    // de los dos problemas es, sin necesitar ni cable ni Xcode.
+    static func hayBuzon() -> Bool {
+        return UserDefaults(suiteName: grupoDeLaApp) != nil
+    }
+}
+
+// "#rrggbb" -> Color, igual que en la Live Activity: el color viaja en el
+// resumen para que el widget siga el tema de la app.
+private extension Color {
+    init(hex: String) {
+        var limpio = hex
+        if limpio.hasPrefix("#") { limpio.removeFirst() }
+        var valor: UInt64 = 0
+        Scanner(string: limpio).scanHexInt64(&valor)
+        self.init(
+            red: Double((valor >> 16) & 0xFF) / 255,
+            green: Double((valor >> 8) & 0xFF) / 255,
+            blue: Double(valor & 0xFF) / 255
+        )
+    }
+}
+
+// containerBackground es OBLIGATORIO desde iOS 17 (sin él, el widget sale
+// con el fondo en blanco o directamente no se dibuja), pero no existe
+// antes. Este envoltorio evita repetir el #available en cada vista.
+// El del Gimnasio tiene su propio modelo, así que solo traduce sus campos
+// a la estructura común y delega. El detalle de las tres combinaciones
+// vive en ResumenDeLaApp.swift, en un solo sitio.
+extension ResumenDelDia {
+    var estiloDeWidget: EstiloDeWidget {
+        EstiloDeWidget(estilo: estiloWidget, fondo: fondo, texto: texto,
+                       fondoClaro: fondoClaro, textoClaro: textoClaro,
+                       fondoOscuro: fondoOscuro, textoOscuro: textoOscuro)
+    }
+}
+
+private extension View {
+    func fondoDeWidget(_ resumen: ResumenDelDia?) -> some View {
+        // Sin resumen todavía: el material del sistema, que es lo neutro.
+        self.fondoDeWidgetApp(resumen?.estiloDeWidget ?? EstiloDeWidget(estilo: "sistema"))
+    }
+}
+
+// ---------------------------------------------------------------------
+// La línea temporal
+// ---------------------------------------------------------------------
+struct QueTocaEntry: TimelineEntry {
+    let date: Date
+    let resumen: ResumenDelDia?
+    // true = ni siquiera hay App Group, o sea que no es que falten datos:
+    // es que la app y el widget no comparten buzón. Ver hayBuzon().
+    var sinBuzon: Bool = false
+}
+
+struct QueTocaProvider: TimelineProvider {
+    func placeholder(in context: Context) -> QueTocaEntry {
+        QueTocaEntry(date: Date(), resumen: .ejemplo)
+    }
+
+    func getSnapshot(in context: Context, completion: @escaping (QueTocaEntry) -> Void) {
+        // En la galería de widgets (isPreview) se enseña el ejemplo aunque
+        // no haya nada guardado: un hueco vacío ahí no dice qué hace.
+        // El tipo va explícito porque en un ternario con nil Swift no
+        // tiene de dónde deducirlo.
+        let deRespaldo: ResumenDelDia? = context.isPreview ? ResumenDelDia.ejemplo : nil
+        completion(QueTocaEntry(
+            date: Date(),
+            resumen: ResumenDelDia.leer() ?? deRespaldo,
+            sinBuzon: !ResumenDelDia.hayBuzon()
+        ))
+    }
+
+    func getTimeline(in context: Context, completion: @escaping (Timeline<QueTocaEntry>) -> Void) {
+        // Quien lo repinta de verdad es la app al cambiar algo
+        // (WidgetCenter.reloadTimelines desde WidgetBridgePlugin), tal como
+        // pidió Koku: sin refresco por horas.
+        //
+        // Pero .never a secas tiene un filo: si por lo que sea la app NUNCA
+        // consigue avisar, el widget se queda congelado para siempre y no
+        // hay forma de que se recupere solo. Una relectura al día es
+        // prácticamente gratis y sirve de red de seguridad.
+        let mañana = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date().addingTimeInterval(86400)
+        let medianoche = Calendar.current.startOfDay(for: mañana)
+        completion(Timeline(
+            entries: [QueTocaEntry(
+                date: Date(),
+                resumen: ResumenDelDia.leer(),
+                sinBuzon: !ResumenDelDia.hayBuzon()
+            )],
+            policy: .after(medianoche)
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------
+// Las vistas, una por familia
+// ---------------------------------------------------------------------
+struct QueTocaHoyView: View {
+    @Environment(\.widgetFamily) private var familia
+    let entry: QueTocaEntry
+
+    var body: some View {
+        switch familia {
+        case .accessoryInline:    inline
+        case .accessoryCircular:  circular
+        case .accessoryRectangular: rectangular
+        case .systemMedium:       mediano
+        default:                  pequeno
+        }
+    }
+
+    // --- Lo que se enseña, en un sitio para no repetirlo ---
+    private var resumen: ResumenDelDia? { entry.resumen }
+    private var acento: Color { Color(hex: resumen?.color ?? "#5b8cff") }
+    private var titulo: String {
+        guard let r = resumen else { return entry.sinBuzon ? "Sin buzón" : "Abre la app" }
+        if !r.hayCiclo { return "Sin ciclo" }
+        return r.esDescanso ? "Descanso" : r.nombre
+    }
+    private var subtitulo: String {
+        guard let r = resumen else {
+            return entry.sinBuzon ? "falta el App Group" : "para preparar el widget"
+        }
+        if !r.hayCiclo { return "Elige tu día al entrenar" }
+        if r.total > 0 { return "Día \(r.posicion) de \(r.total)" }
+        return ""
+    }
+
+    // --- Pantalla de inicio, pequeño ---
+    private var pequeno: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("HOY")
+                .font(.caption2).fontWeight(.heavy)
+                .foregroundStyle(acento)
+            Spacer(minLength: 0)
+            Text(titulo)
+                .font(.title3).fontWeight(.bold)
+                .minimumScaleFactor(0.6)
+                .lineLimit(2)
+            if !subtitulo.isEmpty {
+                Text(subtitulo)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if let r = resumen, r.hayCiclo, !r.esDescanso, r.ejercicios > 0 {
+                Text("\(r.ejercicios) ejercicio\(r.ejercicios == 1 ? "" : "s")")
+                    .font(.caption2)
+                    .foregroundStyle(acento)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .marcaDeAgua("dumbbell.fill", acento)
+        .fondoDeWidget(resumen)
+        .widgetURL(abrirEntrenoDeHoyURL)
+    }
+
+    // --- Pantalla de inicio, mediano ---
+    private var mediano: some View {
+        HStack(spacing: 14) {
+            // La barra de color a la izquierda es el color del día, igual
+            // que en la lista de días de la app.
+            RoundedRectangle(cornerRadius: 3)
+                .fill(acento)
+                .frame(width: 5)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(resumen?.bloque.isEmpty == false ? resumen!.bloque : "Gimnasio")
+                    .font(.caption2).fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(titulo)
+                    .font(.title2).fontWeight(.bold)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    if !subtitulo.isEmpty {
+                        Text(subtitulo).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let r = resumen, r.hayCiclo, !r.esDescanso, r.ejercicios > 0 {
+                        Text("·").font(.caption).foregroundStyle(.secondary)
+                        Text("\(r.ejercicios) ejercicios").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+                // El pie de contexto: qué viene DESPUÉS en el ciclo.
+                // Cuidado con el nombre -- no es "mañana": el ciclo avanza
+                // por entrenos hechos, no por calendario, así que poner
+                // una fecha sería mentir en cuanto te saltes un día.
+                if let r = resumen, r.hayCiclo, !r.siguiente.isEmpty {
+                    Text("Siguiente: \(r.siguiente)")
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            // LA MITAD DERECHA. Antes aquí solo había el botón "Empezar",
+            // así que en un día de DESCANSO quedaba medio widget en
+            // blanco -- que es exactamente lo que Koku enseñó en una
+            // captura. Ahora:
+            //  - día de entreno: el botón y debajo los ejercicios que
+            //    toca, que es lo que de verdad quieres saber antes de ir;
+            //  - día de descanso: no se inventa nada, y el hueco lo llena
+            //    la marca de agua.
+            if let r = resumen, r.hayCiclo, !r.esDescanso {
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("Empezar")
+                        .font(.caption).fontWeight(.semibold)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(acento, in: Capsule())
+                        .foregroundStyle(.white)
+                    if !r.listaEjercicios.isEmpty {
+                        VStack(alignment: .trailing, spacing: 1) {
+                            ForEach(Array(r.listaEjercicios.prefix(3).enumerated()), id: \.offset) { _, nombre in
+                                Text(nombre)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            if r.ejercicios > 3 {
+                                Text("+\(r.ejercicios - 3) más")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(acento)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: 130, alignment: .trailing)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .marcaDeAgua("dumbbell.fill", acento)
+        .fondoDeWidget(resumen)
+        .widgetURL(abrirEntrenoDeHoyURL)
+    }
+
+    // --- Bloqueo: una línea junto a la hora ---
+    private var inline: some View {
+        // En inline solo cabe texto plano y iOS lo tiñe él: nada de
+        // colores ni fuentes propias aquí.
+        Text(subtitulo.isEmpty ? titulo : "\(titulo) · \(subtitulo)")
+            .widgetURL(abrirEntrenoDeHoyURL)
+    }
+
+    // --- Bloqueo: el círculo ---
+    private var circular: some View {
+        ZStack {
+            AccessoryWidgetBackground()
+            VStack(spacing: 0) {
+                Image(systemName: (resumen?.esDescanso ?? false) ? "moon.zzz.fill" : "dumbbell.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                if let r = resumen, r.hayCiclo, r.total > 0 {
+                    Text("\(r.posicion)/\(r.total)")
+                        .font(.system(size: 10, weight: .medium))
+                }
+            }
+        }
+        .widgetURL(abrirEntrenoDeHoyURL)
+    }
+
+    // --- Bloqueo: el rectángulo ---
+    private var rectangular: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("Hoy")
+                .font(.caption2).fontWeight(.semibold)
+                .widgetAccentable()
+            Text(titulo)
+                .font(.headline)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            if !subtitulo.isEmpty {
+                Text(subtitulo).font(.caption2).lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .widgetURL(abrirEntrenoDeHoyURL)
+    }
+}
+
+struct QueTocaHoyWidget: Widget {
+    // El "kind" tiene que ser EXACTAMENTE el mismo que usa
+    // WidgetCenter.reloadTimelines(ofKind:) en WidgetBridgePlugin.swift:
+    // si no coinciden, la app cree que lo refresca y el widget se queda
+    // con lo de antes hasta que iOS decida repintarlo por su cuenta.
+    static let kind = "QueTocaHoyWidget"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: Self.kind, provider: QueTocaProvider()) { entry in
+            QueTocaHoyView(entry: entry)
+        }
+        .configurationDisplayName("Qué toca hoy")
+        .description("El entrenamiento que te toca hoy según tu ciclo. Tócalo para empezarlo.")
+        // Las accessory* son las de la pantalla de bloqueo. No llevan
+        // #available porque este target ya exige iOS 16.2 (lo pide la Live
+        // Activity del descanso), y ahí existen todas.
+        .supportedFamilies([
+            .systemSmall, .systemMedium,
+            .accessoryCircular, .accessoryRectangular, .accessoryInline,
+        ])
+    }
+}
+
+// ---------------------------------------------------------------------
+// El botón del centro de control (iOS 18)
+// ---------------------------------------------------------------------
+// #if compiler(>=6.0) y no solo @available: ControlWidget no EXISTE en el
+// SDK de iOS 17 y anteriores, así que con un Xcode viejo esto no es que
+// no se ejecute -- es que no compila. Xcode 16 (el primero con el SDK de
+// iOS 18) trae Swift 6, así que esa condición es la forma de preguntar
+// "¿tengo el SDK nuevo?" desde el propio código.
+#if compiler(>=6.0)
+
+@available(iOS 18.0, *)
+struct EmpezarEntrenoControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "com.koku.remindmelater.EmpezarEntreno") {
+            // Un AppIntent NUESTRO (ver AbrirDesdeControl.swift), no un
+            // OpenURLIntent directo. Este botón ha fallado dos veces en el
+            // iPhone de Koku, con dos causas distintas:
+            //
+            // 1. Un AppIntent que dejaba la marca en el App Group: no
+            //    abría la app, y dependía justo del buzón, que entonces
+            //    estaba roto.
+            // 2. OpenURLIntent con la URL de siempre: tampoco hacía nada.
+            //    Desde un control, iOS NO abre esquemas de URL propios --
+            //    solo universal links, que piden un dominio web que esta
+            //    app no tiene. En el simulador sí funciona, que es lo que
+            //    lo hace tan difícil de ver.
+            //
+            // Lo que queda: el intent abre la app y ES ÉL, ya dentro,
+            // quien abre esta misma URL. Un solo camino de entrada
+            // (SceneDelegate -> UserDefaults.standard -> el JavaScript),
+            // igual que el toque en el widget.
+            ControlWidgetButton(action: EmpezarEntrenoDeHoyIntent()) {
+                Label("Entrenar", systemImage: "dumbbell.fill")
+            }
+        }
+        .displayName("Entrenar hoy")
+        .description("Abre RemindMeLater en el entrenamiento que te toca hoy.")
+    }
+}
+
+#endif

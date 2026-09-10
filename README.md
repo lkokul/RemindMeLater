@@ -1,69 +1,40 @@
 # RemindMeLater
 
-Calendario, recordatorios, tareas y notas local-first: los datos viven en
-tus propios dispositivos, nunca en una nube de terceros. El ordenador
-guarda todo en SQLite (`data/remindmelater.db`, ignorado por git — o en
-la carpeta de datos de la app si usas la version de escritorio); el
-movil, una vez vinculado, guarda tambien su propia copia y sincroniza los
-cambios en los dos sentidos con el ordenador cuando pulsas "Sincronizar
-ahora" (manual, sin ningun disparador automatico de fondo), sin depender
-de ningun servidor intermedio en internet (ver "Instalar como app" mas
-abajo). Ademas del calendario, la app tiene un hub de "Extensiones"
-(Gimnasio, Lecturas, Finanzas y Archivos — ver mas abajo).
+Calendario, recordatorios, tareas y notas local-first: **todos los datos
+viven dentro de la propia app**, en tu dispositivo, y no salen de ahi
+nunca. No hay servidor, ni cuenta, ni nube, ni nada que emparejar: se
+abre y funciona. Por dentro es SQLite de verdad (compilado a
+WebAssembly), con las mismas consultas de siempre, guardado en el
+almacenamiento del propio dispositivo. Ademas del calendario, la app
+tiene un hub de "Herramientas" (Gimnasio, Lecturas, Finanzas y Viajes — ver mas
+abajo).
+
+> **Nota sobre este repositorio.** Esta rama es **solo la app de
+> movil**. La version de escritorio (servidor Express + Electron) es
+> otro programa, y vive en su propia rama (`escritorio`) con su propio
+> ciclo de desarrollo. Aqui no queda nada de ella.
 
 ## Arrancar
 
+Para probar cambios rapido durante el desarrollo vale cualquier servidor
+de archivos estaticos apuntando a `public/` (la app de verdad es la
+nativa, ver "Compilarla para el movil" mas abajo):
+
 ```bash
-npm install
-npm start
+npx http-server public -p 8080
 ```
 
-**Si estoy haciendo cambios en el codigo del servidor (`server/`)** usa
-`npm run dev` en su lugar: reinicia solo cada vez que se guarda un cambio,
-sin que tengas que pararlo y arrancarlo a mano. Los cambios en `public/`
-(la interfaz) no necesitan ni eso — con recargar la pagina en el
-navegador ya se ven.
+Los cambios en `public/` se ven con recargar la pagina, sin compilar
+nada.
 
-La terminal muestra dos (o tres) direcciones:
+Para verla como app de verdad en el movil, ver "App nativa de movil"
+mas abajo.
 
-- `http://localhost:3000` — para abrir en el navegador del propio ordenador.
-- `http://<tu-ip-local>:3000` — para abrir desde el movil, **estando en la
-  misma red wifi que el ordenador**.
-- `http://remindmelater.local:3000` — mismo destino que la anterior, pero
-  con un nombre en vez de una IP (mDNS/Bonjour). En Safari (iPhone) hace
-  falta escribir el `http://` delante a mano, si no lo trata como una
-  busqueda en vez de una direccion.
-
-Deja el servidor corriendo mientras quieras que el calendario este
-disponible (tambien para que los recordatorios de escritorio funcionen).
-
-## Vincular el movil
-
-Por seguridad, ningun dispositivo puede leer ni escribir tus datos hasta
-que lo autorizas explicitamente desde el ordenador:
-
-1. En el ordenador, abre la app y pulsa ⚙ **Configuración** → pestaña
-   **Dispositivos** → **Vincular nuevo dispositivo**. Aparece un codigo de
-   6 digitos, valido 30 segundos, de un solo uso (y bloqueado unos minutos
-   tras varios intentos fallidos seguidos, para que sea impracticable
-   intentar adivinarlo).
-2. En el movil, abre la direccion de arriba. Como todavia no esta
-   vinculado, vera una pantalla pidiendo ese codigo.
-3. Escribe el codigo y un nombre para el dispositivo (ej. "iPhone de
-   Koku"). A partir de ahi, ese movil queda autorizado permanentemente
-   (hasta que lo revoques).
-
-Puedes ver, renombrar (con icono/emoji) y revocar dispositivos vinculados
-en cualquier momento desde esa misma pestana, en el ordenador (no
-funciona desde el movil, a proposito). El propio ordenador donde corre el
-servidor esta autorizado siempre, sin codigo (se reconoce por ser
-`localhost`).
-
-**Navegación en el móvil**: en pantallas estrechas, la barra superior de
-escritorio (título + botones sueltos) se sustituye por una barra fija
-abajo con 4 accesos directos (Calendario, Mi espacio, Extensiones,
-Configuración) y un botón flotante "+" que despliega los accesos de
-crear evento, tarea o nota. En escritorio no cambia nada.
+**Navegación**: una barra fija abajo con 4 accesos (Calendario, Notas,
+Herramientas, Configuración) y un botón
+flotante "+" para crear. El segundo hueco es configurable desde
+Configuración → Este dispositivo: puedes poner ahí cualquiera de las
+herramientas en vez de Notas.
 
 ## Configuración
 
@@ -80,57 +51,35 @@ con varias pestanas:
     "Registro" (estética de panel técnico: tipografía monoespaciada en
     tablas y etiquetas, sin gradientes ni sombras). No cambia ningún
     color del tema, solo el comportamiento.
-  - **Colores**: una biblioteca de temas compartida entre todos tus
-    dispositivos. Cada dispositivo elige por su cuenta cual tema
-    mostrar. Cada tema define un color por cada superficie real de la
+  - **Colores**: una biblioteca de temas. Cada tema define un color por cada superficie real de la
     interfaz (fondo, tarjetas, menu de Configuración, dia de hoy, color de
     acento...) **con su propio color de texto emparejado**, para que cada
     superficie garantice su propia legibilidad — hay una red de seguridad
     que fuerza texto blanco o negro si el contraste guardado es demasiado
     bajo. Un tema puede tener ademas una variante clara/oscura emparejada
     (`inverseColors`): si la tiene, aparece un boton de sol/luna rapido en
-    la barra superior para alternar sin entrar en Configuración; y si
+    la barra del calendario para alternar sin entrar en Configuración; y si
     eliges "Sistema" como modo de color (por dispositivo), la app cambia
     sola entre ambas en cuanto el sistema operativo cambia de claro a
     oscuro (o al reves), sin recargar la pagina. Los colores se eligen con
     un selector nativo o con paletas predefinidas (Pastel, Vivos, Claros,
     Oscuros). Los temas se pueden exportar/importar como archivo `.json`,
-    para pasarlos entre dispositivos que no pueden emparejarse
-    directamente entre si (ej. dos moviles). Al editar un tema los cambios
+    que es la unica forma de pasar uno de un dispositivo a otro. Al
+    editar un tema los cambios
     se ven en vivo en toda la app; no hay boton de guardar por tema, es un
     flujo continuo (cambiar a editar otro tema guarda el anterior solo,
     cerrar sin guardar descarta los cambios).
-- **Perfil**: tu nickname (se ve igual en todos tus dispositivos
-  vinculados) y tu correo (opcional, solo se usa como contacto tecnico
-  para las notificaciones push del movil — ver "Datos personales" mas
-  abajo). Tambien es donde se pide la primera vez que se abre la app.
+- **Perfil**: tu nickname, que aparece como "creado por" en los eventos
+  y tareas que anadas. Tambien es donde se pide la primera vez que se
+  abre la app.
 - **Grupos**: listas de recordatorios y tareas con color, al estilo de
   Recordatorios de iPhone. Cada grupo puede tener tambien un icono y un
   color especial para cuando una tarea de ese grupo se marca como hecha
   (si no lo pones, se calcula automaticamente atenuando el color normal).
-- **Dispositivos**: emparejar, renombrar y revocar. Tambien muestra el QR
-  para reconectar un movil ya vinculado en otra red (ver "Instalar como
-  app" mas abajo).
-- **Atajos**: cada accion (nuevo evento, abrir Configuración, mes/dia
-  anterior o siguiente...) se puede asignar a la combinacion de teclas
-  que quieras, por dispositivo. Por defecto: `N` nuevo evento, `←`/`→`
-  dia anterior/siguiente.
 - **Este dispositivo**: ajustes que no se comparten con nadie mas, como
-  las notificaciones del navegador, el modo de vista (ver abajo), como se
-  ven las tareas completadas (tachadas u ocultas), y como se ven los
-  eventos en dias muy llenos del calendario.
-
-## Vista de pantalla completa
-
-Desde Configuración → Este dispositivo puedes activar **Pantalla
-completa** para que la app ocupe toda la pantalla, sin barra del
-navegador ni barra de tareas — pensado para dejarla siempre visible en un
-monitor o tablet dedicado. En la app de escritorio (ver mas abajo) la
-ventana se abre directamente en ese modo la siguiente vez que la
-arrancas. En el navegador normal, por una restriccion de los propios
-navegadores (no dejan activar pantalla completa sin un clic tuyo), al
-cargar la pagina se muestra un aviso con un boton "Activar" en vez de
-activarse sola.
+  los avisos de recordatorios, como se ven las tareas completadas
+  (tachadas u ocultas), y que apartado vive en el hueco personalizable
+  de la barra de abajo.
 
 ## Mi espacio (notas y tareas)
 
@@ -220,21 +169,50 @@ antes):
   el raton al teclado. Los botones de formato/tabla/imagen funcionan
   igual en cualquier modo (a diferencia del vim real).
 
-## Extensiones
+## Herramientas
 
-Desde el botón "Extensiones" de la barra superior (o la sección
-"Extensiones" de la navegación móvil) se accede a secciones aparte del
-calendario, cada una a pantalla completa y sin afectar a nada de lo de
-arriba:
+Desde el botón "Herramientas" de la barra inferior se accede a secciones aparte del calendario, cada una
+a pantalla completa y sin afectar a nada de lo de arriba:
 
-- **Gimnasio**: registro de entrenamientos. Una biblioteca de
-  ejercicios y de rutinas reutilizables (con icono y color propios); una
-  sesión puede partir de una rutina guardada (auto-rellena los
-  ejercicios esperados) o ser completamente libre. Cada serie de un
-  ejercicio se apunta con repeticiones y peso — elegible en kg o libras,
-  por dispositivo (el dato se guarda siempre en kg, la conversión es
-  solo de presentación). Una pestaña de progreso muestra una gráfica
-  (peso máximo o volumen levantado) por ejercicio a lo largo del tiempo.
+- **Gimnasio**: registro de entrenamientos, organizado en bloques
+  (etapas con nombre, ej. "Volumen Invierno", con un único bloque activo
+  a la vez) que contienen días de entrenamiento reutilizables (con icono
+  y color propios); una sesión puede partir de un día guardado
+  (auto-rellena los ejercicios esperados) o ser completamente libre.
+  Cada serie de un ejercicio se apunta con repeticiones y peso —
+  elegible en kg o libras, por dispositivo (el dato se guarda siempre en
+  kg, la conversión es solo de presentación). Una pestaña de progreso
+  muestra una gráfica (peso máximo o volumen levantado) por ejercicio a
+  lo largo del tiempo. Incluye además una **librería de ~870 ejercicios**
+  buscable y filtrable por grupo muscular y material, con instrucciones
+  paso a paso, de la que se importa a tus ejercicios lo que uses. Los
+  datos de esa librería vienen de
+  [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (de
+  yuhonas), que a su vez nació de
+  [exercises.json](https://github.com/wrkout/exercises.json) (de Ollie
+  Jennings) — ambos de dominio público (Unlicense), ¡gracias a los dos!
+  Los nombres están traducidos al español dentro de la propia app.
+  Al terminar una serie durante el entrenamiento puedes apuntar que la
+  **alargaste**: un *dropset* (bajas el peso y sigues) o un *rest-pause*
+  (paras unos segundos y sigues con el mismo peso), con tantos tramos
+  como hagas. Una serie alargada sigue contando como **una serie** para
+  la racha y el objetivo semanal, pero **sus kilos sí suman** al volumen
+  y cualquiera de sus tramos puede marcar un récord.
+  Un bloque puede además repetirse en un **ciclo de días** opcional:
+  colocas en orden lo que haces ("día 1 Empuje, día 2 Tirón, día 3
+  descanso") y al empezar a entrenar la app te ofrece primero el que
+  toca. El ciclo avanza **según lo que entrenas de verdad**, no según el
+  calendario: si te saltas un día, al siguiente te sigue tocando lo
+  mismo — solo los descansos se consumen solos al pasar el día. Y si un
+  día de descanso te apetece entrenar, puedes: te avisa y, al terminar,
+  te pregunta cómo continuar el ciclo.
+  Tanto tu lista de ejercicios como los desplegables donde eliges uno
+  llevan **buscador** (por nombre, músculo o material), para que tener
+  muchos no sea un problema.
+  En iOS hay además un **widget "Qué toca hoy"** con el entrenamiento del
+  día: en la pantalla de inicio, en la de bloqueo y como botón del centro
+  de control. Tocarlo abre la app y arranca ese entreno; si hoy toca
+  descanso, te deja elegir.
 - **Lecturas**: historial de entretenimiento — mangas, cómics, libros,
   series, animes y películas juntos — agrupado en sagas (obligatorias:
   incluso algo suelto es una saga de un único elemento, y una misma saga
@@ -275,127 +253,106 @@ arriba:
   concreto (no solo el actual) y otra con el histórico de ahorro en un
   rango de fechas. Una gráfica compara ingresos y gastos mes a mes de los
   últimos 6 meses.
-- **Archivos**: mandar archivos sueltos (fotos, PDFs, documentos — sin
-  ligarlos a ninguna nota) entre el móvil y el ordenador, con dos paneles
-  uno junto al otro (como un cliente de escritorio remoto): el tuyo
-  (elige uno o varios con el selector de siempre — un navegador no puede
-  listar el almacenamiento propio del dispositivo, así que no hay
-  explorador real de ese lado) y la carpeta compartida del ordenador, con
-  flechas para mandar/traer. Desde el ordenador puedes además navegar
-  cualquier carpeta del disco (no solo la configurada por defecto, que
-  queda como un atajo rápido). Cuando quien inicia un envío o una
-  descarga es el móvil, la persona delante del ordenador tiene que
-  confirmarlo antes de que se mueva nada de verdad — el ordenador
-  copiando algo suyo a su propia carpeta compartida sigue siendo
-  instantáneo, sin este paso. Este apartado es también donde vive ahora
-  el botón para sincronizar el resto de datos manualmente (ver "Instalar
-  como app" más abajo) y el de comprobar si hay una versión nueva de la
-  app (instalarla de verdad sigue siendo solo desde el ordenador).
 
-## App de escritorio (Electron)
+## App nativa de movil (iOS y Android)
 
-Ademas de correr como servidor web, la app se puede empaquetar como
-programa de escritorio para Windows (`npm run electron` para probarla sin
-empaquetar, `npm run dist` para generar un instalador `.exe`). Es la
-misma app por dentro (mismo servidor, mismo emparejamiento de moviles,
-mismo mDNS) metida en una ventana nativa, con extras propios de
-escritorio: comprobar actualizaciones y actualizar desde dentro de la
-app (con `git pull` y reinicio automatico), y recordar si la ventana
-debe abrirse en pantalla completa.
+La app se empaqueta como app nativa de verdad con
+[Capacitor](https://capacitorjs.com/): la misma interfaz web de siempre,
+sin reescribir nada, metida en una carcasa nativa con su propio icono en
+la pantalla de inicio.
 
-## Instalar como app (PWA)
+Al no haber servidor, la app **lleva todo dentro**: su codigo y sus
+datos. Abre siempre, sin wifi, sin ordenador encendido y sin
+configuracion inicial de ningun tipo.
 
-Tanto en el navegador del ordenador como en el del movil, la app se puede
-"instalar" (Añadir a pantalla de inicio / Instalar app) para que se abra
-como una app independiente, con su propio icono, en vez de una pestaña
-del navegador.
+- Los proyectos nativos viven en `android/` e `ios/`, generados por
+  Capacitor y comiteados al repo. `npm run cap:sync` copia la version
+  actual de `public/` a los dos; `npm run cap:android` y
+  `npm run cap:ios` los abren en Android Studio / Xcode.
+- Para compilar y firmar la app de iOS **sin tener un Mac**, hay un
+  workflow de GitHub Actions listo (`.github/workflows/ios-testflight.yml`,
+  disparo manual desde la pestaña Actions) que compila en un runner de
+  macOS, firma con una clave de API de App Store Connect y sube el
+  resultado a TestFlight. Los pasos de configuracion (cuenta de
+  desarrollador, secretos, como instalarla en el iPhone) estan en
+  [`IOS-TESTFLIGHT.md`](IOS-TESTFLIGHT.md).
+- Para Android hay otro workflow equivalente
+  (`.github/workflows/android-play.yml`, tambien manual) que compila un
+  `.aab` **firmado para Google Play** y lo deja como artefacto
+  descargable, listo para subir a la Play Console (pruebas internas).
+  Los preparativos (keystore, secretos, cuenta de Play Console) estan
+  en [`ANDROID-PLAY.md`](ANDROID-PLAY.md).
 
-Un movil ya vinculado guarda ademas su propia copia de los datos
-(eventos, tareas, notas con sus carpetas...) en el propio navegador:
-puedes seguir viendo, creando y editando cosas sin conexion al ordenador.
-La sincronizacion entre movil y ordenador es **manual**: entra en
-Extensiones → Archivos y pulsa "Sincronizar ahora" cuando quieras poner
-al dia los dos lados (si hay un conflicto de verdad, gana el cambio mas
-reciente) — a proposito no hay ningun disparador automatico de fondo. Un
-punto de color en la barra superior indica el estado del ULTIMO intento:
-verde = todo sincronizado, amarillo = hay cambios pendientes de mandar,
-gris = sin conexion con el ordenador la ultima vez que se intento, rojo
-= hubo un error de verdad — y clicarlo te lleva directo a Archivos. No
-hay ningun servidor intermedio en internet — la sincronizacion solo pasa
-por tu propia wifi local.
+## Tus datos y la copia de seguridad
 
-Si el movil cambia de wifi, o el ordenador cambia de direccion en la
-misma red, un movil YA vinculado no pierde sus datos ni tiene que volver
-a emparejarse: en el ordenador, Configuración → Dispositivos muestra un
-codigo QR con la direccion actual; en el movil, Configuración → Este
-dispositivo → "Escanear ordenador" lo lee con la camara y actualiza a
-donde mandar los datos. Solo cambia adonde se conecta, nunca de donde
-lee su copia local guardada — por eso no hace falta volver a vincularlo.
+**Cada dispositivo tiene sus propios datos, y no se hablan entre ellos.**
+Lo que crees en el movil no aparece en el ordenador ni al reves — no hay
+sincronizacion de ningun tipo. Y como todo vive dentro de la app,
+**desinstalarla borra todo**... salvo que tengas una copia de seguridad.
+
+En Configuración → Este dispositivo → **Copia de seguridad**:
+
+- **Exportar copia** crea un unico archivo `.json` con TODO (calendario,
+  tareas, notas con sus imagenes, todas las herramientas, fotos de
+  viajes y ajustes) y abre la hoja de compartir del sistema para
+  guardarlo donde quieras: en Archivos, iCloud/Drive, mandartelo por
+  mensaje... Desde un navegador normal, se descarga sin mas.
+- **Importar copia** restaura ese archivo, **sustituyendo** todo lo que
+  haya en la app en ese momento (avisa antes, no se puede deshacer).
+  Una copia hecha con una version anterior de la app se importa igual:
+  la base de datos se pone al dia sola al arrancar.
+- La copia es **manual**: si pasa mas de un mes sin hacer ninguna, un
+  aviso discreto al abrir la app lo recuerda (se puede posponer con la
+  ✕; tocarlo lleva directo al boton de exportar).
+
+Importar la copia de un dispositivo en otro tambien vale como forma de
+**pasar todos los datos de un aparato a otro** (por ejemplo, al cambiar
+de movil).
 
 ## Recordatorios
 
 Cada evento o tarea con fecha puede tener un recordatorio (en el momento,
-10 min, 30 min, 1 hora o 1 dia antes). Cuando toca, dispara:
+10 min, 30 min, 1 hora o 1 dia antes). Al activar las notificaciones en
+Configuración → Este dispositivo, la app **programa el aviso en el propio
+sistema operativo**: suena a su hora aunque la app este cerrada del todo,
+sin servidor y sin que nada salga del dispositivo.
 
-- una notificacion del navegador si tienes la pestana abierta (movil u
-  ordenador, si las activaste en Configuración → Este dispositivo),
-- una notificacion del sistema operativo en el ordenador donde corre el
-  servidor (funciona aunque no tengas el navegador abierto, mientras el
-  servidor este encendido), y
-- en el movil, ademas, un **aviso push de verdad** si activaste las
-  notificaciones (Configuración → Este dispositivo): llega aunque tengas
-  la app completamente cerrada. Hace falta rellenar un correo de
-  contacto en Configuración → Perfil la primera vez (ver "Datos
-  personales" mas abajo) — es un requisito tecnico del protocolo usado
-  (Web Push/VAPID), nunca se muestra ni se usa para nada mas. En iPhone,
-  ademas, la app tiene que estar "Añadida a pantalla de inicio" (no vale
-  con Safari normal, sin instalar), por una restriccion de Apple.
+Los avisos se reprograman solos cada vez que creas, editas o borras algo,
+asi que nunca suena un aviso de algo que ya no existe. Cada aviso llega
+**con sonido y vibracion**, como cualquier notificacion normal del
+sistema (en Android, la app crea su propio canal "Recordatorios" — desde
+los ajustes del sistema se puede afinar como suena, igual que con
+cualquier otra app).
 
 ## Datos personales
 
-La primera vez que se abre la app (desde cualquier dispositivo) aparece
-una pantalla de bienvenida pidiendo dos datos, los dos **opcionales**:
+La primera vez que se abre la app aparece una pantalla de bienvenida
+pidiendo **un solo dato, opcional**: un nickname, que aparece como
+"creado por" en los eventos y tareas que anadas. Se puede cambiar o
+dejar vacio en cualquier momento desde Configuración → Perfil.
 
-- **Nickname**: se ve igual en todos tus dispositivos vinculados, y
-  aparece como "creado por" en los eventos y notas que añadas — solo
-  sirve para diferenciar quien creo que si usas varios dispositivos.
-- **Correo**: no se usa para nada dentro de la app ni se muestra en
-  ningun sitio. Su unico proposito es servir de contacto tecnico
-  obligatorio del protocolo Web Push (VAPID) al mandar notificaciones
-  push al movil — lo exige el propio estandar, pensado para que
-  Google/Apple puedan avisar al operador del servidor si hay demasiados
-  fallos de entrega. Sin correo, sencillamente no se pueden activar las
-  notificaciones push (el resto de la app funciona igual). Se puede
-  rellenar, cambiar o dejar vacio en cualquier momento desde
-  Configuración → Perfil.
-
-Ningun dato sale de tus propios dispositivos, salvo — si activas las
-notificaciones push — el aviso en si (cifrado de extremo a extremo por
-el propio protocolo) y el correo de contacto de arriba, que tienen que
-pasar obligatoriamente por los servidores de Google (Android/Chrome) o
-Apple (iPhone/Safari): es la unica forma en que el sistema operativo del
-movil puede despertar la app estando cerrada del todo, no hay manera de
-evitarlo. Ni Google ni Apple pueden leer el contenido del aviso (titulo
-del recordatorio incluido), solo mueven bytes cifrados. La
-sincronizacion normal entre tus dispositivos (eventos, notas, tareas...)
-nunca pasa por ahi: es directa, por tu propia wifi local.
+No se pide nada mas, y **ningun dato sale del dispositivo**: no hay
+cuenta, ni servidor, ni servicio de terceros de por medio. Ni siquiera
+los avisos, que los programa el propio sistema operativo (a diferencia
+de las notificaciones push, que obligarian a pasar por Google o Apple).
 
 ## Lo que queda fuera, de momento
 
 - El formato de las notas es basico (negrita, cursiva, listas, tablas,
   imagenes) — sin tablas con celdas combinadas, sin cambiar el tamano de
   una imagen ya insertada, sin encabezados/titulos.
+- Cada dispositivo tiene sus propios datos: no hay sincronizacion en
+  vivo entre aparatos (la copia de seguridad permite pasarlos a mano,
+  pero no mantenerlos al dia solos).
 - Si quitas una imagen de una nota editandola (sin borrar la nota
-  entera), el archivo se queda huerfano en el disco — solo se limpia al
-  borrar la nota completa.
+  entera), sus bytes se quedan huerfanos — solo se limpian al borrar la
+  nota completa.
 - No hay forma de mover una carpeta de notas ya creada a otra carpeta
   distinta (si se puede mover una nota entre carpetas desde su propio
   editor).
 - Widgets de pantalla de inicio o accesos en el Centro de Control
-  (iPhone) no son viables como app web: harian falta frameworks nativos
-  (WidgetKit/ControlKit) o un envoltorio tipo Capacitor — queda anotado
-  como posible proyecto aparte, no en desarrollo.
-- La app de escritorio (Electron) solo genera instalador para Windows.
+  (iPhone) harian falta frameworks nativos propios (WidgetKit/ControlKit)
+  — queda anotado como posible proyecto aparte, no en desarrollo.
 - Redimensionar tablas de notas es solo con raton (arrastrar bordes) —
   no hay equivalente tactil todavia en movil.
 - El modo "vim" del editor de notas es un subconjunto pequeño a

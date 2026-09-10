@@ -5,8 +5,27 @@ name: iOS TestFlight
 # defecto, el dialogo "Run workflow" de la pestaña Actions ya trae un
 # desplegable nativo para elegir CUALQUIER rama, sin necesitar nada mas
 # aqui para poder compilar builds de prueba desde otras ramas.
+#
+# El input "descripcion" es opcional y solo cambia el NOMBRE con el que
+# el run aparece en la lista de Actions (run-name), para distinguir a
+# simple vista que se estaba compilando ("rediseno gimnasio fase 7"...)
+# en vez de un "iOS TestFlight #12" generico. OJO: el dialogo de Run
+# workflow lee los inputs del archivo de la RAMA elegida en el
+# desplegable, asi que este campo solo aparece al lanzar desde ramas
+# que ya llevan esta version del archivo.
+run-name: ${{ inputs.descripcion || github.workflow }}
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      descripcion:
+        description: 'Nombre descriptivo para este build (opcional)'
+        required: false
+        type: string
+      sin_app_group:
+        description: 'Compilar SIN el App Group (el widget de "Que toca hoy" saldra vacio, pero la build sube igual)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build-and-upload:
@@ -41,17 +60,107 @@ jobs:
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # AQUI NO SE PIDE NINGUN PERFIL, PERO SI SE FIRMA.
+          #
+          # Por que no se pide perfil: la firma automatica de Xcode, al
+          # archivar, siempre pide un perfil de DESARROLLO -- y Apple se
+          # niega a crear uno si el equipo no tiene ningun dispositivo
+          # registrado ("Your team has no devices..."), que es justo el
+          # caso de un pipeline sin Mac ni iPhone conectado. Imponerle la
+          # identidad de distribucion tampoco vale: con estilo automatico
+          # Xcode la rechaza ("conflicting provisioning settings"). El
+          # perfil de App Store que pide -exportArchive SI se crea sin
+          # dispositivos, asi que la firma DE VERDAD sigue estando ahi.
+          #
+          # Por que aun asi se firma aqui (CODE_SIGN_IDENTITY="-", firma
+          # "ad hoc", que no necesita ni perfil ni certificado): los
+          # ENTITLEMENTS se incrustan en el binario al firmar. Con
+          # CODE_SIGNING_ALLOWED=NO, como estaba antes, Xcode se saltaba
+          # ese paso entero y el archivo salia SIN entitlements; entonces
+          # -exportArchive, al no ver ninguno, pedia un perfil "pelado" y
+          # firmaba con lo unico que trae de serie (application-identifier,
+          # team-identifier, get-task-allow). Resultado: el App Group
+          # desaparecia sin un solo error, UserDefaults(suiteName:) devolvia
+          # nil en el iPhone y el widget se quedaba en "Abre la app" para
+          # siempre. Comprobado leyendo los entitlements del .ipa de la
+          # build #52.
+          #
+          # Firmando ad hoc, el archivo YA lleva el App Group, y entonces
+          # -exportArchive sabe que hace falta un perfil que lo incluya:
+          # con -allowProvisioningUpdates lo da de alta el solo, y si no
+          # pudiera, falla diciendolo en vez de callarse.
+          #
+          # La casilla "sin_app_group" del dialogo de Run workflow es la
+          # salida de emergencia: vuelve al archivo sin firmar de antes,
+          # o sea sin App Group, para poder seguir sacando builds de
+          # TestFlight aunque el widget se quede vacio. Solo tiene sentido
+          # si el paso de exportar casca pidiendo la capacidad y hace falta
+          # una build YA para probar cualquier otra cosa.
+          if [ "${{ inputs.sin_app_group }}" = "true" ]; then
+            echo "AVISO: compilando SIN App Group (el widget saldra vacio)."
+            FIRMA=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
+          else
+            FIRMA=(
+              CODE_SIGN_STYLE=Manual
+              CODE_SIGN_IDENTITY=-
+              AD_HOC_CODE_SIGNING_ALLOWED=YES
+              CODE_SIGNING_ALLOWED=YES
+              CODE_SIGNING_REQUIRED=NO
+              PROVISIONING_PROFILE_SPECIFIER=
+            )
+          fi
+
           xcodebuild archive \
             -project ios/App/App.xcodeproj \
             -scheme App \
             -configuration Release \
+            -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/App.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8 \
-            -authenticationKeyID "$APPSTORE_KEY_ID" \
-            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            "${FIRMA[@]}" \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+
+      # La Live Activity solo funciona si la extension DescansoWidget viaja
+      # DENTRO de la app (App.app/PlugIns/DescansoWidget.appex). Este paso
+      # lo comprueba y tira el build si falta -- sin el, un fallo de
+      # embedding pasa en silencio y la tarjeta simplemente "no sale" en el
+      # movil, sin ninguna pista de por que.
+      - name: Comprobar que el widget va dentro de la app
+        run: |
+          PLUGINS="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app/PlugIns"
+          echo "Contenido de PlugIns:"
+          ls -la "$PLUGINS" || true
+          test -d "$PLUGINS/DescansoWidget.appex"
+
+      # El App Group tiene que estar YA en el archivo, antes de exportar.
+      # Si falla aqui, el problema es la firma ad hoc del paso anterior;
+      # si pasa aqui y falla despues, el problema es el perfil de App
+      # Store (o sea, la capacidad dada de alta en el portal de Apple).
+      # Separar los dos casos ahorra la parte mas cara de este lio, que es
+      # no saber cual de los dos es.
+      - name: Comprobar el App Group en el archivo (antes de exportar)
+        if: ${{ inputs.sin_app_group != true }}
+        run: |
+          APP="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+          APPEX="$APP/PlugIns/DescansoWidget.appex"
+          falta=0
+          for objetivo in "$APP" "$APPEX"; do
+            echo "==== $objetivo ===="
+            codesign -d --entitlements :- "$objetivo" 2>/dev/null || true
+            echo ""
+            if codesign -d --entitlements :- "$objetivo" 2>/dev/null | grep -q "group.com.koku.remindmelater"; then
+              echo "OK: lleva el App Group"
+            else
+              echo "FALTA el App Group"
+              falta=1
+            fi
+          done
+          if [ "$falta" = "1" ]; then
+            echo ""
+            echo "El archivo se ha generado sin el App Group: la firma ad hoc"
+            echo "del paso anterior no ha incrustado los entitlements."
+            exit 1
+          fi
 
       - name: Generar ExportOptions.plist
         env:
@@ -86,10 +195,67 @@ jobs:
             -authenticationKeyID "$APPSTORE_KEY_ID" \
             -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID"
 
+      # COMPROBAR LOS ENTITLEMENTS DEL .ipa YA FIRMADO.
+      #
+      # Por que hace falta: -exportArchive VUELVE A FIRMAR todo con el
+      # perfil de App Store, asi que puede perder por el camino lo que el
+      # archivo si traia. Y cuando eso pasa no hay ningun error: la build
+      # sale verde, la app se instala, y UserDefaults(suiteName:) devuelve
+      # nil en el movil -- el widget se queda con "Abre la app" para
+      # siempre. Paso de verdad en las builds #51 y #52.
+      #
+      # Esto lo convierte en un fallo RUIDOSO: se imprimen los entitlements
+      # reales de la app y de la extension, y si al widget le falta el
+      # grupo se tira la build antes de subir nada a TestFlight.
+      - name: Comprobar que el App Group viajo en la firma
+        if: ${{ inputs.sin_app_group != true }}
+        run: |
+          cd "$RUNNER_TEMP/export"
+          unzip -q App.ipa -d ipa
+          APP="ipa/Payload/App.app"
+          APPEX="$APP/PlugIns/DescansoWidget.appex"
+
+          echo "==== Entitlements de la APP ===="
+          codesign -d --entitlements :- "$APP" 2>/dev/null || true
+          echo "==== Entitlements del WIDGET ===="
+          codesign -d --entitlements :- "$APPEX" 2>/dev/null || true
+
+          falta=0
+          for objetivo in "$APP" "$APPEX"; do
+            if codesign -d --entitlements :- "$objetivo" 2>/dev/null | grep -q "group.com.koku.remindmelater"; then
+              echo "OK: $objetivo lleva el App Group"
+            else
+              echo "FALTA el App Group en $objetivo"
+              falta=1
+            fi
+          done
+
+          if [ "$falta" = "1" ]; then
+            echo ""
+            echo "El App Group NO ha sobrevivido a exportar."
+            echo "Como si estaba en el archivo, lo que falla es el PERFIL de"
+            echo "App Store: el App ID de Apple no tiene dada de alta la"
+            echo "capacidad App Groups, o el grupo group.com.koku.remindmelater"
+            echo "no existe todavia. Se da de alta una sola vez en"
+            echo "developer.apple.com (Certificates, Identifiers & Profiles)."
+            echo "Ver el bloque de Widgets en CLAUDE.md."
+            exit 1
+          fi
+
+      # Subida con xcrun altool directamente, sin accion de terceros: usa
+      # el MISMO mecanismo de autenticacion (clave de API en
+      # ~/private_keys/AuthKey_<KEYID>.p8, donde altool la busca sola) que
+      # ya funciona en los pasos de archivar y exportar de arriba. La
+      # accion apple-actions/upload-testflight-build@v1 fallaba con un 401
+      # porque su parametro de issuer se llama "issuer-id", no
+      # "api-issuer-id" -- se le estaba pasando vacio.
       - name: Subir a TestFlight
-        uses: apple-actions/upload-testflight-build@v1
-        with:
-          app-path: ${{ runner.temp }}/export/App.ipa
-          api-key-id: ${{ secrets.APPSTORE_KEY_ID }}
-          api-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
-          api-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          xcrun altool --upload-app \
+            -f "$RUNNER_TEMP/export/App.ipa" \
+            -t ios \
+            --apiKey "$APPSTORE_KEY_ID" \
+            --apiIssuer "$APPSTORE_ISSUER_ID"
