@@ -3665,7 +3665,12 @@ body.gym-rest-push #settings-modal .settings-card {
   cursor: pointer;
 }
 .finanzas-tab-btn.active { color: var(--bg-text); border-bottom-color: var(--accent); font-weight: 600; }
-.finanzas-tab-panel { flex: 1; min-height: 0; padding: 1rem 1.2rem; overflow-y: auto; }
+/* El 7rem de abajo NO es decoracion: la barra de apps flota fija encima
+   de esta pantalla, asi que sin ese hueco la ultima fila se queda 35 px
+   por DEBAJO de la barra y no hay forma de verla ni de tocarla, ni
+   deslizando hasta el fondo. Es el mismo colchon que ya reservaba
+   .gym-tab-content; Finanzas se habia quedado sin el. */
+.finanzas-tab-panel { flex: 1; min-height: 0; padding: 1rem 1.2rem 7rem; overflow-y: auto; }
 
 .finanzas-accounts-summary { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-bottom: 1rem; }
 .finanzas-account-card {

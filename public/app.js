@@ -10509,6 +10509,13 @@ function finanzasTercerosQS(separador) {
   return finanzasIncluyeTerceros() ? `${separador}includeThirdParty=1` : '';
 }
 
+// Un porcentaje escrito como se escribe aqui: "9,7%", con coma. Sin
+// esto salia "+9.7%" justo al lado de "1.700,00 €", con dos convenios
+// distintos en la misma linea.
+function formatFinanzasPorcentaje(n) {
+  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 }).format(Math.abs(Number(n) || 0));
+}
+
 function formatFinanzasAmount(n) {
   const num = Number(n) || 0;
   return `${FINANZAS_MONEY_FORMATTER.format(num)} €`;
@@ -18068,7 +18075,7 @@ async function openFinanzasRecurringTransactionsModal(r) {
         const previo = mismoNumeroDePagos ? anterior.total : anterior.total / anterior.count;
         const variacion = ((actual - previo) / previo) * 100;
         if (Math.abs(variacion) >= 0.5) {
-          sub += ` · ${variacion > 0 ? '+' : '−'}${Math.abs(variacion).toFixed(0)}%${mismoNumeroDePagos ? '' : ' por pago'} frente a ${anterior.year}`;
+          sub += ` · ${variacion > 0 ? '+' : '−'}${formatFinanzasPorcentaje(Math.round(variacion))}%${mismoNumeroDePagos ? '' : ' por pago'} frente a ${anterior.year}`;
         }
       }
       grupo.appendChild(
@@ -20617,6 +20624,8 @@ const NAV_SWIPE_OPT_OUT = [
   '.note-swipe-wrap',   // fila de nota: desliza para Editar/Mover/Eliminar
   '#note-body table',   // tabla del editor: arrastrar es seleccionar celdas
   '#gym-live-view',     // entreno en vivo: salirse sin querer seria feo
+  '.finanzas-table-wrap', // tablas anchas: arrastrar ahi es mirar columnas,
+                          // no volver atras
   '[data-no-nav-swipe]', // escotilla generica para lo que venga despues
 ].join(', ');
 
@@ -20759,7 +20768,6 @@ function moverPestanaMovil(paso) {
 // es justo lo que no se quiere.
 const MOBILE_SUBTAB_BARS = [
   { barra: '.gym-tabs', paneles: '.gym-tab-panel' },
-  { barra: '.finanzas-tabs', paneles: '[data-finanzas-panel]' },
   { barra: '.viajes-tabs', paneles: '[data-viajes-panel]' },
 ];
 
@@ -20803,6 +20811,9 @@ const VOLVER_UN_PASO = [
   'btn-back-viajes-trips',
   // Grupos: del detalle de un grupo a la lista de grupos.
   'btn-groups-back',
+  // Finanzas: de una seccion (Movimientos, Gastos fijos, Objetivos...)
+  // a su inicio, el de la lista de secciones.
+  'btn-finanzas-back',
   // Notas: subir un nivel de carpeta. Va el ULTIMO de la lista porque
   // es el mas "de fuera" de todos. Peticion expresa de Koku: deslizar
   // en Notas solo sirve para SALIR (subir), nunca para entrar -- entrar
@@ -20871,12 +20882,36 @@ function centroYaTieneDueno() {
 }
 
 // El gesto central, segun el sentido.
+// Deslizar hacia la derecha desde el INICIO de Finanzas sale a
+// Herramientas. Es el segundo paso del gesto que pidio Koku: "si deslizo
+// desde el centro me lleve del apartado interior al primero, y si lo
+// vuelvo a hacer que me lleve a la base app".
+//
+// Solo Finanzas de momento, a proposito: las demas Apps (Gimnasio,
+// Lecturas, Viajes) no se tocan sin que lo pida: alli el centro todavia
+// no significa "salir" y cambiarselo de golpe seria justo lo que confunde.
+function salirDeFinanzasDeslizando() {
+  const vista = document.getElementById('finanzas-view');
+  if (!vista || vista.classList.contains('hidden')) return false;
+  // Si el boton de volver se ve, es que estas DENTRO de una seccion: de
+  // eso ya se ha encargado volverUnPasoDentroDeLaPantalla() antes.
+  const atras = document.getElementById('btn-finanzas-back');
+  if (atras && !atras.classList.contains('hidden')) return false;
+  const salir = document.getElementById('btn-close-finanzas');
+  if (!salir) return false;
+  salir.click();
+  return true;
+}
+
 function gestoCentral(paso) {
   // Pantallas que ya usan el centro para lo suyo (la vista diaria): ahi
   // este modulo no se mete.
   if (centroYaTieneDueno()) return;
   // Hacia la derecha (paso -1): primero intentar salir de una capa.
   if (paso < 0 && volverUnPasoDentroDeLaPantalla()) return;
+  // Y si ya estabas en el inicio de Finanzas, el siguiente deslizamiento
+  // sale de la App entera.
+  if (paso < 0 && salirDeFinanzasDeslizando()) return;
   // Dentro de una App con sub-pestañas, el centro las recorre.
   moverSubPestana(paso);
 }
