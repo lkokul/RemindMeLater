@@ -1347,18 +1347,6 @@
       <p class="hint">El objetivo es un único ajuste global (no cambia según el mes que mires abajo).</p>
       <div id="finanzas-savings-warning" class="finanzas-savings-warning hidden"></div>
 
-      <!-- Salario: la entrada estable de ingresos. No es una cifra suelta,
-           es una LISTA con la fecha desde la que se cobra cada importe --
-           asi una subida no borra lo que ganabas antes y se ve la
-           evolucion. En NETO: es lo unico comparable con lo que de verdad
-           entra en Movimientos. -->
-      <h3>Salario</h3>
-      <div class="finanzas-budget-row">
-        <input type="number" id="finanzas-salary-input" step="0.01" min="0" placeholder="Sin salario fijo" />
-        <button type="button" id="btn-save-finanzas-salary" class="secondary-btn">Guardar</button>
-      </div>
-      <p class="hint" id="finanzas-salary-hint">Si tienes una entrada estable de ingresos (una nómina), ponla aquí en neto.</p>
-      <button type="button" id="btn-finanzas-salary-history" class="secondary-btn hidden">Ver evolución</button>
 
       <!-- Vista mensual (por defecto el mes actual, con flechas para
            moverse de uno en uno) frente a vista historica (un rango de
@@ -1728,44 +1716,6 @@
   </div>
 
   <!-- Modal de plantilla de gasto fijo (pestaña "Gastos fijos") -->
-  <!-- Al cambiar el importe del salario hay TRES cosas distintas que
-       puedes querer decir, y confundirlas estropea el historico. Por eso
-       se pregunta en vez de suponer. -->
-  <div id="finanzas-salary-scope-modal" class="modal hidden">
-    <div class="modal-card">
-      <button type="button" id="btn-close-finanzas-salary-scope" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2>¿Qué ha pasado con tu salario?</h2>
-      <p class="hint" id="finanzas-salary-scope-sub"></p>
-      <div class="finanzas-salary-opciones">
-        <button type="button" class="finanzas-salary-opcion" data-salary-scope="nuevo">
-          <span class="finanzas-salary-opcion-titulo">Me lo han subido (o bajado)</span>
-          <span class="finanzas-salary-opcion-sub">Guarda el nuevo importe desde una fecha y deja el anterior en el histórico. Es lo normal.</span>
-        </button>
-        <button type="button" class="finanzas-salary-opcion" data-salary-scope="ultimo">
-          <span class="finanzas-salary-opcion-titulo">Me equivoqué al apuntar el último</span>
-          <span class="finanzas-salary-opcion-sub">Corrige el último que guardaste, sin añadir uno nuevo.</span>
-        </button>
-        <button type="button" class="finanzas-salary-opcion" data-salary-scope="todos">
-          <span class="finanzas-salary-opcion-titulo">Estaba mal desde siempre</span>
-          <span class="finanzas-salary-opcion-sub">Pone este importe en TODOS los guardados. Te quedas sin evolución: úsalo solo si nunca cobraste otra cosa.</span>
-        </button>
-      </div>
-      <div id="finanzas-salary-fecha-bloque">
-        <label>Desde cuándo cobras esto<div id="finanzas-salary-date-field"></div></label>
-      </div>
-    </div>
-  </div>
-
-  <div id="finanzas-salary-history-modal" class="modal hidden">
-    <div class="modal-card">
-      <button type="button" id="btn-close-finanzas-salary-history" class="modal-close-x" aria-label="Cerrar">✕</button>
-      <h2>Evolución del salario</h2>
-      <div id="finanzas-salary-history-sub" class="finanzas-detail-sub"></div>
-      <div id="finanzas-salary-history-list" class="finanzas-group-list"></div>
-      <p class="hint">Toca uno para corregirlo o borrarlo.</p>
-    </div>
-  </div>
-
   <div id="finanzas-goal-modal" class="modal hidden">
     <div class="modal-card">
       <button type="button" id="btn-close-finanzas-goal" class="modal-close-x" aria-label="Cerrar">✕</button>
@@ -3002,7 +2952,6 @@
   <script src="routes-local/finanzasCategories.js"></script>
   <script src="routes-local/finanzasDebts.js"></script>
   <script src="routes-local/finanzasGoals.js"></script>
-  <script src="routes-local/finanzasSalaries.js"></script>
   <script src="routes-local/finanzasInvestments.js"></script>
   <script src="routes-local/finanzasPortfolios.js"></script>
   <script src="routes-local/finanzasRecurringExpenses.js"></script>

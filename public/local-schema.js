@@ -912,30 +912,6 @@ function applyLocalSchema(db) {
     db.exec('ALTER TABLE finanzas_transactions ADD COLUMN recurring_expense_id INTEGER REFERENCES finanzas_recurring_expenses(id)');
   }
 
-  // -- Salario: la entrada estable de ingresos, con su historia --
-  //
-  // No es un ajuste de una sola cifra a proposito: es una LISTA de
-  // salarios, cada uno con la fecha desde la que se cobra. Asi una subida
-  // no borra lo que ganabas antes, y se puede ver la evolucion en el
-  // tiempo (que es justo lo que pidio Koku).
-  //
-  // El importe es NETO (lo que llega a la cuenta). Se eligio el neto y no
-  // el bruto porque es el unico que se puede comparar con lo que de
-  // verdad entra en Movimientos.
-  //
-  // "El salario de hoy" no se guarda en ningun sitio: es el registro con
-  // la fecha mas reciente que no sea futura -- otro valor calculado, como
-  // el saldo de una cuenta.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS finanzas_salaries (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      amount REAL NOT NULL,
-      start_date TEXT NOT NULL,
-      notes TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
-
   // -- Objetivos de ahorro ("Coche, 5.000 €") --
   //
   // Son SOBRES VIRTUALES, no cuentas. El dinero NO se mueve a ningun
