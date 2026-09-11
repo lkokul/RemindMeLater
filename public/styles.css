@@ -5327,41 +5327,6 @@ body.gym-rest-push #settings-modal .settings-card {
   border-left: 3px solid color-mix(in srgb, var(--accent) 60%, var(--border));
 }
 
-/* --- Inicio de Finanzas: tarjetas tipo la app Salud --- */
-.finanzas-cards { display: flex; flex-direction: column; gap: 0.6rem; }
-.finanzas-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  width: 100%;
-  padding: 0.9rem 1rem;
-  text-align: left;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--surface-text);
-  font: inherit;
-  cursor: pointer;
-}
-.finanzas-card:active { background: var(--surface-2); }
-.finanzas-card-head { display: flex; align-items: center; gap: 0.5rem; }
-.finanzas-card-icon { font-size: var(--t-cuerpo); }
-.finanzas-card-title {
-  flex: 1;
-  font-size: var(--t-secundario);
-  font-weight: 500;
-  color: color-mix(in srgb, var(--surface-text) 65%, var(--surface));
-}
-.finanzas-card-chevron {
-  font-size: var(--t-titulo-3);
-  color: color-mix(in srgb, var(--surface-text) 45%, var(--surface));
-}
-.finanzas-card-amount { font-size: var(--t-titulo-2); font-weight: 600; font-variant-numeric: tabular-nums; }
-.finanzas-card-detail {
-  font-size: var(--t-secundario);
-  color: color-mix(in srgb, var(--surface-text) 58%, var(--surface));
-}
-
 /* Vuelta atras desde una seccion al inicio. Va pegada arriba a la
    izquierda, como el "‹ Atras" de iOS. */
 .finanzas-back-btn {
@@ -5445,3 +5410,31 @@ body.gym-rest-push #settings-modal .settings-card {
   border-radius: var(--radius-sm);
   padding: 0 0.25em;
 }
+
+/* Flecha de las filas que NAVEGAN a otra pantalla (las del inicio). Solo
+   la llevan esas: las filas que se despliegan en el sitio (los meses del
+   año) ya dicen lo suyo con el triangulo de la izquierda, y ponerles
+   flecha aqui seria prometer un viaje que no hacen. */
+.finanzas-row-chevron {
+  font-size: 1.15rem;
+  line-height: 1;
+  color: color-mix(in srgb, var(--surface-text) 40%, var(--surface));
+}
+.finanzas-row-navegable .finanzas-row-right {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* En el inicio, el subtitulo EXPLICA para que sirve la seccion, asi que
+   ahi no se corta con puntos suspensivos: se deja pasar a dos lineas. En
+   las demas listas si se corta, porque ahi el subtitulo es un dato
+   (fecha, cuenta) y lo que importa es que no empuje al importe. */
+.finanzas-row-navegable .finanzas-row-sub {
+  white-space: normal;
+  overflow: visible;
+  line-height: 1.3;
+}
+.finanzas-row-navegable { align-items: flex-start; }
+.finanzas-row-navegable .finanzas-row-icon,
+.finanzas-row-navegable .finanzas-row-right { margin-top: 0.1rem; }

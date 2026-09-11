@@ -16401,7 +16401,7 @@ function finanzasFijosFechaCorta(iso) {
 // Se construye con createElement (no con innerHTML) porque el texto sale
 // de lo que escribe el usuario: asi no hay forma de que una descripcion
 // con "<" rompa nada.
-function finanzasFilaEl({ icono, color, titulo, sub, importe, etiqueta, etiquetaTono, alPulsar }) {
+function finanzasFilaEl({ icono, color, titulo, sub, importe, etiqueta, etiquetaTono, alPulsar, flecha }) {
   const fila = document.createElement(alPulsar ? 'button' : 'div');
   if (alPulsar) fila.type = 'button';
   fila.className = 'finanzas-row';
@@ -16443,6 +16443,13 @@ function finanzasFilaEl({ icono, color, titulo, sub, importe, etiqueta, etiqueta
     badge.className = `finanzas-row-badge${etiquetaTono ? ' finanzas-row-badge-' + etiquetaTono : ''}`;
     badge.textContent = etiqueta;
     der.appendChild(badge);
+  }
+  if (flecha) {
+    fila.classList.add('finanzas-row-navegable');
+    const f = document.createElement('span');
+    f.className = 'finanzas-row-chevron';
+    f.textContent = '›';
+    der.appendChild(f);
   }
   fila.appendChild(der);
   return fila;
@@ -17755,45 +17762,6 @@ function switchFinanzasTab(tabName) {
 
 document.getElementById('btn-finanzas-back').addEventListener('click', () => switchFinanzasTab('inicio'));
 
-// -- Las tarjetas del inicio --
-//
-// Cada una se construye con lo que ya sabe la app; si algo falla, la
-// tarjeta se queda sin cifra pero la pantalla sigue en pie (una seccion
-// rota no puede llevarse por delante el resto del inicio).
-function finanzasTarjetaEl({ icono, titulo, cifra, detalle, destino, alPulsar }) {
-  const card = document.createElement('button');
-  card.type = 'button';
-  card.className = 'finanzas-card';
-  card.addEventListener('click', alPulsar || (() => switchFinanzasTab(destino)));
-
-  const cab = document.createElement('span');
-  cab.className = 'finanzas-card-head';
-  const ico = document.createElement('span');
-  ico.className = 'finanzas-card-icon';
-  ico.textContent = icono;
-  const tit = document.createElement('span');
-  tit.className = 'finanzas-card-title';
-  tit.textContent = titulo;
-  const flecha = document.createElement('span');
-  flecha.className = 'finanzas-card-chevron';
-  flecha.textContent = '›';
-  cab.append(ico, tit, flecha);
-  card.appendChild(cab);
-
-  const c = document.createElement('span');
-  c.className = 'finanzas-card-amount';
-  c.textContent = cifra;
-  card.appendChild(c);
-
-  if (detalle) {
-    const d = document.createElement('span');
-    d.className = 'finanzas-card-detail';
-    d.textContent = detalle;
-    card.appendChild(d);
-  }
-  return card;
-}
-
 async function renderFinanzasInicio() {
   const cont = document.getElementById('finanzas-inicio-tarjetas');
   const esAjena = (a) => String(a.type || '').toLowerCase() === 'de terceros';
@@ -17825,111 +17793,120 @@ async function renderFinanzasInicio() {
 
   cont.innerHTML = '';
 
+  // TODAS las secciones se pintan SIEMPRE, tengan datos o no.
+  //
+  // Antes solo aparecian las que tenian algo que decir, y con la base
+  // vacia eso dejaba secciones INALCANZABLES: sin objetivos no habia
+  // tarjeta de Objetivos, y sin otra puerta no habia forma de crear el
+  // primero. Lo mismo con Deudas. Y Gastos fijos solo se abria tocando
+  // "Proximos pagos", que ademas decia "no te queda nada por pagar" --
+  // nadie iba a adivinar que ahi dentro se crean. Un apartado vacio tiene
+  // que poder abrirse: es la unica forma de empezar a usarlo.
+  //
+  // Y van como FILAS, no como tarjetas grandes: siete tarjetas de cifra
+  // enorme no caben en una pantalla, y "Ver todos" ocupaba el tamaño de
+  // un importe sin ser un importe. Asi entra todo de una vez y se lee de
+  // un vistazo cuales tienen algo.
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  const fila = (opciones) => grupo.appendChild(finanzasFilaEl({ ...opciones, flecha: true }));
+
   const m = dato(resumen);
-  if (m) {
-    const limite = m.monthlyBudgetLimit;
-    cont.appendChild(
-      finanzasTarjetaEl({
-        icono: '📊',
-        titulo: 'Este mes',
-        cifra: formatFinanzasAmount(m.totalExpenseAll),
-        detalle: limite
-          ? `de ${formatFinanzasAmount(limite)} de límite · ahorras ${formatFinanzasAmount(m.savings)}`
-          : `gastado · ahorras ${formatFinanzasAmount(m.savings)}`,
-        destino: 'resumen',
-      })
-    );
-  }
+  fila({
+    icono: '📊',
+    titulo: 'Este mes',
+    sub: m
+      ? m.monthlyBudgetLimit
+        ? `de ${formatFinanzasAmount(m.monthlyBudgetLimit)} de límite · ahorras ${formatFinanzasAmount(m.savings)}`
+        : `gastado · ahorras ${formatFinanzasAmount(m.savings)}`
+      : 'Cuentas, límite y en qué se te va',
+    importe: m ? formatFinanzasAmount(m.totalExpenseAll) : '',
+    alPulsar: () => switchFinanzasTab('resumen'),
+  });
 
   const p = dato(prevision);
-  if (p) {
-    const pendientes = p.occurrences.filter((o) => o.status !== 'paid');
-    cont.appendChild(
-      finanzasTarjetaEl({
-        icono: '📅',
-        titulo: 'Próximos pagos',
-        cifra: formatFinanzasAmount(p.totals.unpaid),
-        detalle:
-          pendientes.length === 0
-            ? 'No te queda nada por pagar este mes'
-            : `${pendientes.length} ${pendientes.length === 1 ? 'pago' : 'pagos'} · el siguiente, ${finanzasFijosFechaCorta(pendientes[0].date)}`,
-        alPulsar: () => {
-          switchFinanzasTab('gastos-fijos');
-          switchFinanzasFijosVista('pendientes');
-        },
-      })
-    );
-  }
-
   const s = dato(suscripciones);
-  if (s && s.byKind.subscription.count > 0) {
-    cont.appendChild(
-      finanzasTarjetaEl({
-        icono: '📺',
-        titulo: 'Suscripciones',
-        cifra: `${formatFinanzasAmount(s.byKind.subscription.monthly)}/mes`,
-        detalle: `${formatFinanzasAmount(s.byKind.subscription.annual)} al año · ${s.byKind.subscription.count} ${s.byKind.subscription.count === 1 ? 'activa' : 'activas'}`,
-        alPulsar: () => {
-          switchFinanzasTab('gastos-fijos');
-          switchFinanzasFijosVista('plantillas');
-          const chip = document.querySelector('[data-fijos-kind="subscription"]');
-          if (chip) chip.click();
-        },
-      })
-    );
-  }
+  const pendientes = p ? p.occurrences.filter((o) => o.status !== 'paid') : [];
+  const cuantasPlantillas = s ? s.items.length : 0;
+  fila({
+    icono: '📅',
+    titulo: 'Gastos fijos',
+    sub:
+      cuantasPlantillas === 0
+        ? 'Alquiler, recibos… aún no tienes ninguno'
+        : pendientes.length === 0
+          ? `${cuantasPlantillas} ${cuantasPlantillas === 1 ? 'gasto' : 'gastos'} · nada pendiente este mes`
+          : `${pendientes.length} por pagar · el siguiente, ${finanzasFijosFechaCorta(pendientes[0].date)}`,
+    importe: p && p.totals.unpaid > 0 ? formatFinanzasAmount(p.totals.unpaid) : '',
+    alPulsar: () => {
+      switchFinanzasTab('gastos-fijos');
+      // Con la lista vacia se entra por Plantillas, que es donde se crean;
+      // con gastos ya puestos, por lo que queda por pagar.
+      switchFinanzasFijosVista(cuantasPlantillas === 0 ? 'plantillas' : 'pendientes');
+    },
+  });
+
+  const subs = s ? s.byKind.subscription : null;
+  fila({
+    icono: '📺',
+    titulo: 'Suscripciones',
+    sub:
+      subs && subs.count > 0
+        ? `${formatFinanzasAmount(subs.annual)} al año · ${subs.count} ${subs.count === 1 ? 'activa' : 'activas'}`
+        : 'Marca un gasto fijo como suscripción y saldrá aquí',
+    importe: subs && subs.count > 0 ? `${formatFinanzasAmount(subs.monthly)}/mes` : '',
+    alPulsar: () => {
+      switchFinanzasTab('gastos-fijos');
+      switchFinanzasFijosVista('plantillas');
+      const chip = document.querySelector('[data-fijos-kind="subscription"]');
+      if (chip) chip.click();
+    },
+  });
 
   const sinCumplir = finanzasGoals.filter((g) => !g.completedAt);
-  if (sinCumplir.length > 0) {
-    const apartado = sinCumplir.reduce((acc, g) => acc + g.reserved, 0);
-    const meta = sinCumplir.reduce((acc, g) => acc + g.targetAmount, 0);
-    const proximo = sinCumplir.slice().sort((a, b) => b.progress - a.progress)[0];
-    cont.appendChild(
-      finanzasTarjetaEl({
-        icono: '🎯',
-        titulo: 'Objetivos',
-        cifra: formatFinanzasAmount(apartado),
-        detalle: `de ${formatFinanzasAmount(meta)} · ${proximo.name} va por el ${Math.round(proximo.progress * 100)}%`,
-        destino: 'objetivos',
-      })
-    );
-  }
+  const apartado = sinCumplir.reduce((acc, g) => acc + g.reserved, 0);
+  const meta = sinCumplir.reduce((acc, g) => acc + g.targetAmount, 0);
+  fila({
+    icono: '🎯',
+    titulo: 'Objetivos',
+    sub:
+      sinCumplir.length > 0
+        ? `de ${formatFinanzasAmount(meta)} · ${sinCumplir.length} ${sinCumplir.length === 1 ? 'objetivo' : 'objetivos'}`
+        : 'Apartar dinero para algo concreto: un coche, un viaje…',
+    importe: sinCumplir.length > 0 ? formatFinanzasAmount(apartado) : '',
+    alPulsar: () => switchFinanzasTab('objetivos'),
+  });
 
-  cont.appendChild(
-    finanzasTarjetaEl({
-      icono: '🧾',
-      titulo: 'Movimientos',
-      cifra: 'Ver todos',
-      detalle: 'Gastos e ingresos, con sus filtros',
-      destino: 'movimientos',
-    })
-  );
+  fila({
+    icono: '🧾',
+    titulo: 'Movimientos',
+    sub: 'Apuntar gastos e ingresos. También tus cuentas',
+    alPulsar: () => switchFinanzasTab('movimientos'),
+  });
 
-  const d = dato(deudas);
-  if (d && d.length > 0) {
-    const pendientes = d.filter((x) => !x.paid);
-    const meDeben = pendientes.filter((x) => x.direction === 'owed_to_me').reduce((a, x) => a + x.amount, 0);
-    const debo = pendientes.filter((x) => x.direction !== 'owed_to_me').reduce((a, x) => a + x.amount, 0);
-    cont.appendChild(
-      finanzasTarjetaEl({
-        icono: '🤝',
-        titulo: 'Deudas',
-        cifra: formatFinanzasAmount(meDeben - debo),
-        detalle: `te deben ${formatFinanzasAmount(meDeben)} · debes ${formatFinanzasAmount(debo)}`,
-        destino: 'deudas',
-      })
-    );
-  }
+  const d = dato(deudas) || [];
+  const sinPagar = d.filter((x) => !x.paid);
+  const meDeben = sinPagar.filter((x) => x.direction === 'owed_to_me').reduce((a, x) => a + x.amount, 0);
+  const debo = sinPagar.filter((x) => x.direction !== 'owed_to_me').reduce((a, x) => a + x.amount, 0);
+  fila({
+    icono: '🤝',
+    titulo: 'Deudas',
+    sub:
+      sinPagar.length > 0
+        ? `te deben ${formatFinanzasAmount(meDeben)} · debes ${formatFinanzasAmount(debo)}`
+        : 'Lo que te deben y lo que debes',
+    importe: sinPagar.length > 0 ? formatFinanzasAmount(meDeben - debo) : '',
+    alPulsar: () => switchFinanzasTab('deudas'),
+  });
 
-  cont.appendChild(
-    finanzasTarjetaEl({
-      icono: '📈',
-      titulo: 'Inversiones',
-      cifra: 'Ver cartera',
-      detalle: 'Compras, ventas y dividendos',
-      destino: 'inversiones',
-    })
-  );
+  fila({
+    icono: '📈',
+    titulo: 'Inversiones',
+    sub: 'Compras, ventas y dividendos, a mano',
+    alPulsar: () => switchFinanzasTab('inversiones'),
+  });
+
+  cont.appendChild(grupo);
 }
 
 async function openFinanzasView() {
