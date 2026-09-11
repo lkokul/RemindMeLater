@@ -201,7 +201,23 @@
       // ya en negrita) -- asi que las 7 etiquetas en linea admiten el mismo
       // data-highlight restringido, no solo "span".
       if (lower === 'span' || lower === 'b' || lower === 'strong' || lower === 'i' || lower === 'em' || lower === 'u' || lower === 's' || lower === 'strike') {
+        // UNA FORMULA FIJADA. Es lo unico de toda la nota que se guarda
+        // con una CLASE, y por eso conviene entender lo estrecho que es el
+        // permiso: se acepta `class` solo si vale EXACTAMENTE
+        // "note-formula". No es una lista de clases permitidas ni un
+        // patron: es una comparacion con una cadena. Nada de estilos en
+        // linea, nada de data-*, ningun dato del usuario dentro de un
+        // atributo. Lo unico que hace esa clase es pintar el texto con el
+        // color de acento (ver .note-formula en styles.css).
+        //
+        // Y lo importante: la clase del FANTASMA (la vista previa en gris
+        // mientras escribes) NO esta aqui, asi que aunque por un fallo
+        // llegara a guardarse, el saneador la tira. La vista previa no es
+        // contenido y no puede acabar dentro de una nota.
+        const claseMatch = attrs.match(/\sclass\s*=\s*"([^"]*)"/i);
+        const esFormula = lower === 'span' && claseMatch && claseMatch[1] === 'note-formula';
         const hlMatch = attrs.match(/\sdata-highlight\s*=\s*"([^"]*)"/i);
+        if (esFormula) return '<span class="note-formula">';
         return hlMatch && NOTE_HIGHLIGHT_KEYS.has(hlMatch[1]) ? `<${lower} data-highlight="${hlMatch[1]}">` : `<${lower}>`;
       }
       if (lower === 'p' || lower === 'div' || lower === 'h1' || lower === 'h2' || lower === 'h3') {

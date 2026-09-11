@@ -6691,12 +6691,18 @@ document.getElementById('note-code-insert-btn').addEventListener('click', () => 
 // cuenta se calculaba sola al pulsar Intro para seguir escribiendo.
 // ---------------------------------------------------------------------
 
-// Una formula dentro de un texto: "=" + cuenta + (opcional) el "→ 41"
-// de un calculo anterior. El ultimo caracter de la cuenta tiene que ser
-// un digito, un ")" o un "%", para no tragarse los espacios de despues.
-// La flecha NO esta en la lista de caracteres permitidos, y por eso el
-// resultado viejo no se confunde con parte de la cuenta.
-const RE_NOTE_FORMULA = /=[\s0-9+\-*/^().,%\p{Sc}]*[0-9)%](?:\s*→\s*-?[\d.,]+)?/gu;
+// UNA CUENTA, escrita al reves de como estaba antes: primero la cuenta y
+// el "=" AL FINAL. `12+1 =`.
+//
+// Lo pidio Koku asi tras probar la version anterior (que era `=12+1` y
+// dejaba `=12+1 → 13`): "lo que tendria mas sentido es poder poner
+// 12+1 = y ahora asi que te ponga el 13 detras".
+//
+// La cuenta tiene que EMPEZAR por un numero (o un parentesis o una
+// moneda) y acabar en numero/parentesis/%, y tiene que llevar al menos un
+// operador -- sin esa ultima regla, una frase normal como "el total = 100
+// euros" se leeria como una cuenta.
+const RE_NOTE_CUENTA = /(?:^|[^\w=→])((?:[0-9(]|\p{Sc})[\s0-9+\-*/^().,%\p{Sc}]*[0-9)%])\s*=(?!=)/gu;
 const RE_NOTE_FORMULA_OPERADOR = /[+\-*/^%]/;
 // Cualquier símbolo de moneda, no una lista a mano. `\p{Sc}` es la
 // categoría de Unicode "Symbol, currency": entran € $ £ ¥ ₩ ₽ y también
@@ -6837,18 +6843,6 @@ const NOTE_MONEY_FORMATTER = new Intl.NumberFormat('es-ES', {
   maximumFractionDigits: 2,
 });
 
-// Reescribe UNA formula ya encontrada. Devuelve el texto nuevo, o null si
-// no hay nada que calcular (sin operador, o cuenta invalida).
-function recalcularFormulaDeNota(trozo) {
-  // Fuera el "→ ..." de un calculo anterior, si lo hubiera.
-  const cuenta = trozo.replace(/\s*→\s*-?[\d.,]+\s*$/, '').replace(/^=/, '');
-  if (!RE_NOTE_FORMULA_OPERADOR.test(cuenta)) return null;
-  const valor = evaluarExpresionDeNota(cuenta);
-  if (valor === null) return null;
-  const formato = RE_NOTE_MONEDA.test(cuenta) ? NOTE_MONEY_FORMATTER : NOTE_FORMULA_FORMATTER;
-  return `=${cuenta.replace(/\s+$/, '')} → ${formato.format(valor)}`;
-}
-
 // Un bloque de codigo es texto literal: ahi no se calcula nada.
 function estaDentroDeCodigo(nodo) {
   for (let el = nodo.parentElement; el && el !== NOTE_EDITOR_BODY; el = el.parentElement) {
@@ -6857,91 +6851,224 @@ function estaDentroDeCodigo(nodo) {
   return false;
 }
 
-// La formula que contiene (o toca) el cursor, si la hay.
-function formulaEnElCursorDeNota() {
+// El resultado, ya escrito. Con simbolo de moneda, dos decimales y
+// redondeo (peticion suya: un precio con seis decimales no es un precio).
+function textoDelResultadoDeNota(cuenta, valor) {
+  const formato = RE_NOTE_MONEDA.test(cuenta) ? NOTE_MONEY_FORMATTER : NOTE_FORMULA_FORMATTER;
+  return formato.format(valor);
+}
+
+// ---------------------------------------------------------------------
+// LA VISTA PREVIA ("el fantasma")
+// ---------------------------------------------------------------------
+//
+// Koku: "quiero que de primeras se autocomplete, si yo le doy a la
+// pantalla, que se quite y me deje escribir; para guardar la formula y
+// diga ah vale esto es calculado, le he de dar al intro".
+//
+// O sea tres estados:
+//   1. escribes `12+1 =`   -> aparece un 13 en gris detras (el fantasma)
+//   2. tocas la pantalla   -> el fantasma se va y sigues escribiendo
+//   3. pulsas Intro        -> se queda fijo y marcado como calculado
+//
+// El fantasma es un <span contenteditable="false"> que se mete en el DOM
+// y se quita entero. NUNCA se guarda: se borra antes de serializar la
+// nota (ver quitarFantasmaDeFormula, llamada desde el submit) y tampoco
+// sobrevive a perder el foco. Por eso lleva su propia clase y no se
+// parece a nada mas del editor.
+const CLASE_FANTASMA = 'note-formula-ghost';
+const CLASE_FORMULA = 'note-formula';
+
+function quitarFantasmaDeFormula() {
+  if (!NOTE_EDITOR_BODY) return;
+  NOTE_EDITOR_BODY.querySelectorAll(`.${CLASE_FANTASMA}`).forEach((el) => el.remove());
+}
+
+// La cuenta que acaba JUSTO donde esta el cursor. Devuelve null si el
+// cursor no esta pegado al "=" -- asi el fantasma solo aparece mientras
+// acabas de escribirla, no cada vez que pasas por encima de una vieja.
+function cuentaJustoAntesDelCursor() {
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return null;
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
   const nodo = sel.focusNode;
   if (!nodo || nodo.nodeType !== Node.TEXT_NODE) return null;
   if (!NOTE_EDITOR_BODY.contains(nodo) || estaDentroDeCodigo(nodo)) return null;
-  const offset = sel.focusOffset;
-  RE_NOTE_FORMULA.lastIndex = 0;
-  let m;
-  while ((m = RE_NOTE_FORMULA.exec(nodo.nodeValue)) !== null) {
-    if (offset >= m.index && offset <= m.index + m[0].length) {
-      return { nodo, indice: m.index, largo: m[0].length, trozo: m[0] };
-    }
+  // Dentro de una formula YA calculada no se vuelve a sugerir nada.
+  for (let el = nodo.parentElement; el && el !== NOTE_EDITOR_BODY; el = el.parentElement) {
+    if (el.classList && el.classList.contains(CLASE_FORMULA)) return null;
   }
-  return null;
+  const hasta = nodo.nodeValue.slice(0, sel.focusOffset);
+  RE_NOTE_CUENTA.lastIndex = 0;
+  let m;
+  let ultima = null;
+  while ((m = RE_NOTE_CUENTA.exec(hasta)) !== null) ultima = m;
+  if (!ultima) return null;
+  // Tiene que acabar justo en el cursor: si hay algo escrito despues del
+  // "=", ya no estas acabando esa cuenta.
+  if (ultima.index + ultima[0].length !== hasta.length) return null;
+  const cuenta = ultima[1];
+  if (!RE_NOTE_FORMULA_OPERADOR.test(cuenta)) return null;
+  const valor = evaluarExpresionDeNota(cuenta);
+  if (valor === null) return null;
+  return { nodo, cuenta, valor, texto: textoDelResultadoDeNota(cuenta, valor) };
 }
 
-// Calcula la del cursor y deja el cursor detras del resultado. true si
-// de verdad calculo algo.
-function calcularFormulaEnElCursor() {
-  const enc = formulaEnElCursorDeNota();
-  if (!enc) return false;
-  const nuevo = recalcularFormulaDeNota(enc.trozo);
-  if (nuevo === null) return false;
-  const txt = enc.nodo.nodeValue;
-  enc.nodo.nodeValue = txt.slice(0, enc.indice) + nuevo + txt.slice(enc.indice + enc.largo);
+// Repinta el fantasma segun donde este el cursor. Se llama en cada
+// pulsacion y en cada cambio de seleccion, asi que lo primero que hace es
+// quitar el anterior: es mas barato y mas fiable rehacerlo que intentar
+// moverlo.
+function refrescarFantasmaDeFormula() {
+  quitarFantasmaDeFormula();
+  const enc = cuentaJustoAntesDelCursor();
+  if (!enc) return;
   const sel = window.getSelection();
+  const range = sel.getRangeAt(0).cloneRange();
+  const fantasma = document.createElement('span');
+  fantasma.className = CLASE_FANTASMA;
+  fantasma.contentEditable = 'false';
+  fantasma.textContent = ` ${enc.texto}`;
+  range.collapse(true);
+  range.insertNode(fantasma);
+  // El cursor tiene que quedarse DELANTE del fantasma, donde estaba: si
+  // se queda detras, la siguiente tecla escribe al otro lado del
+  // resultado. insertNode lo empuja, asi que se recoloca a mano.
+  const vuelta = document.createRange();
+  vuelta.setStart(enc.nodo, sel.focusOffset);
+  vuelta.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(vuelta);
+}
+
+// Intro con un fantasma delante: se fija. El resultado pasa a ser texto
+// de verdad, y la cuenta entera se envuelve para que se vea que es
+// calculada.
+function fijarFormulaEnElCursor() {
+  const enc = cuentaJustoAntesDelCursor();
+  if (!enc) return false;
+  quitarFantasmaDeFormula();
+  const txt = enc.nodo.nodeValue;
+  const sel = window.getSelection();
+  const corte = sel.focusOffset;
+  // Donde empieza la cuenta dentro del nodo de texto.
+  const inicio = corte - (txt.slice(0, corte).length - txt.slice(0, corte).lastIndexOf(enc.cuenta));
+  const desde = txt.slice(0, corte).lastIndexOf(enc.cuenta);
+  if (desde < 0) return false;
+
+  const antes = document.createTextNode(txt.slice(0, desde));
+  // Un ESPACIO detras si no habia nada. No es cosmetica: sin el, el nodo
+  // de texto que sigue a la formula queda vacio, y en un contenteditable
+  // poner el cursor al principio de un nodo vacio que va justo despues de
+  // un <span> es ambiguo -- el navegador mete lo que escribas DENTRO del
+  // span. Y como cuentaJustoAntesDelCursor() se niega a sugerir nada
+  // dentro de una formula ya fijada, la SEGUNDA cuenta de la misma linea
+  // no se calculaba nunca. Paso de verdad al probarlo:
+  // "2*3 = 6 y 4*5 =" se quedaba sin resultado.
+  // Con un caracter de verdad delante, el cursor tiene donde agarrarse y
+  // lo que escribes va fuera del span. Ademas un espacio ahi es lo que
+  // querrias igualmente: vas a seguir escribiendo.
+  const resto = txt.slice(corte);
+  const despues = document.createTextNode(resto === '' ? ' ' : resto);
+  const marca = document.createElement('span');
+  marca.className = CLASE_FORMULA;
+  // ATOMICA (contenteditable="false"), y esto NO es un detalle.
+  //
+  // Sin ello, escribir justo detras de la formula mete el texto DENTRO del
+  // span: el navegador hereda el formato del elemento en linea de al lado.
+  // Medido: tras fijar "2*3 = 6", teclear " y 4*5 =" daba
+  // <span class="note-formula">2*3 = 6y 4*5 =</span>, o sea que la segunda
+  // cuenta se comia el espacio y quedaba dentro de la primera formula, sin
+  // calcularse nunca.
+  //
+  // Con contenteditable="false" el span es un bloque indivisible: el
+  // cursor no entra y lo que escribas va fuera. Para cambiar una formula
+  // se toca (ver el listener de mas abajo), que ademas es lo que pidio
+  // Koku -- "si pincho en el 13 que me muestre cual es la formula".
+  marca.contentEditable = 'false';
+  marca.textContent = `${enc.cuenta.trim()} = ${enc.texto}`;
+
+  const padre = enc.nodo.parentNode;
+  padre.insertBefore(antes, enc.nodo);
+  padre.insertBefore(marca, enc.nodo);
+  padre.insertBefore(despues, enc.nodo);
+  padre.removeChild(enc.nodo);
+
+  // El cursor, justo DETRAS de la formula fijada (y detras del espacio
+  // que se acaba de poner, si se puso), para poder seguir escribiendo sin
+  // que lo siguiente se meta dentro de la marca.
   const range = document.createRange();
-  range.setStart(enc.nodo, enc.indice + nuevo.length);
+  range.setStart(despues, resto === '' ? 1 : 0);
   range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
   return true;
 }
 
-// Todas las de la nota. Es lo que hace el boton cuando el cursor no esta
-// dentro de ninguna: sirve de "recalcular la nota entera" despues de
-// cambiar varios numeros.
-function calcularTodasLasFormulasDeNota() {
-  const walker = document.createTreeWalker(NOTE_EDITOR_BODY, NodeFilter.SHOW_TEXT);
-  const nodos = [];
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    if (!estaDentroDeCodigo(n)) nodos.push(n);
-  }
-  let cuantas = 0;
-  nodos.forEach((n) => {
-    const nuevo = n.nodeValue.replace(RE_NOTE_FORMULA, (trozo) => {
-      const calc = recalcularFormulaDeNota(trozo);
-      if (calc === null) return trozo;
-      cuantas += 1;
-      return calc;
-    });
-    if (nuevo !== n.nodeValue) n.nodeValue = nuevo;
+// ¿Hay ahora mismo un fantasma en pantalla? Es la condicion para que
+// Intro fije en vez de hacer su salto de linea de siempre.
+function hayFantasmaDeFormula() {
+  return !!(NOTE_EDITOR_BODY && NOTE_EDITOR_BODY.querySelector(`.${CLASE_FANTASMA}`));
+}
+
+// Las formulas fijadas son contenteditable="false", pero ESO NO SE GUARDA
+// (el saneador solo deja la clase, ningun otro atributo). Asi que al abrir
+// una nota hay que volver a ponerselo, o serian texto normal y volveria el
+// problema de que lo que escribes al lado se meta dentro.
+function prepararFormulasDeNota(root) {
+  if (!root) return;
+  root.querySelectorAll(`.${CLASE_FORMULA}`).forEach((el) => {
+    el.contentEditable = 'false';
   });
-  return cuantas;
 }
 
-// ¿El cursor esta JUSTO al final de una formula? Es la condicion para que
-// Tab calcule en vez de hacer lo suyo de siempre (indentar un item de
-// lista): asi solo se mete cuando esta clarisimo que es lo que quieres.
-function cursorAlFinalDeUnaFormula() {
-  const enc = formulaEnElCursorDeNota();
-  if (!enc) return false;
-  const sel = window.getSelection();
-  if (sel.focusOffset !== enc.indice + enc.largo) return false;
-  return recalcularFormulaDeNota(enc.trozo) !== null;
+// Tocar una formula fijada la DESHACE: vuelve a ser la cuenta editable
+// ("2*3 =") con el cursor al final, asi que el resultado reaparece en gris
+// al momento y otro Intro la vuelve a fijar. Es la respuesta a "si pincho
+// en el 13 que me muestre cual es la formula": no hace falta un globo
+// aparte, la cuenta ES el contenido.
+if (NOTE_EDITOR_BODY) {
+  NOTE_EDITOR_BODY.addEventListener('click', (e) => {
+    const marca = e.target && e.target.closest && e.target.closest(`.${CLASE_FORMULA}`);
+    if (!marca || !NOTE_EDITOR_BODY.contains(marca)) return;
+    // Solo la cuenta, sin el "= resultado" que se le pego al fijarla.
+    const cuenta = marca.textContent.replace(/\s*=\s*[^=]*$/, '').trim();
+    const texto = document.createTextNode(`${cuenta} =`);
+    marca.parentNode.replaceChild(texto, marca);
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.setStart(texto, texto.nodeValue.length);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    refrescarFantasmaDeFormula();
+  });
 }
 
-document.getElementById('note-formula-btn').addEventListener('mousedown', (e) => e.preventDefault());
-document.getElementById('note-formula-btn').addEventListener('click', () => {
-  // Mismo patron que Tabla/Codigo: si el editor perdio el foco al tocar
-  // el boton, se recupera la seleccion guardada.
-  saveNoteEditorSelection();
-  restoreNoteEditorSelection();
-  if (calcularFormulaEnElCursor()) {
-    refreshNoteEditorState();
-    return;
-  }
-  const cuantas = calcularTodasLasFormulasDeNota();
-  if (cuantas === 0) {
-    mostrarAvisoFlotante('Escribe una cuenta con "=" (por ejemplo =12*3+5) y vuelve a tocar este botón.');
-  }
-  refreshNoteEditorState();
-});
+// LA VISTA PREVIA DE LA FORMULA, enganchada a escribir y a tocar.
+//
+// Dos eventos y nada mas, que es lo que pidio Koku:
+//   input          -> acabas de escribir; si lo ultimo es "12+1 =",
+//                     aparece el resultado en gris detras.
+//   pointerdown    -> tocas la pantalla; se va y sigues escribiendo.
+//
+// Va en 'pointerdown' y NO en 'click' ni en 'selectionchange': con click
+// el fantasma se quitaria DESPUES de que el navegador ya haya colocado el
+// cursor (y si el toque cae encima del propio fantasma, el cursor se
+// queda en un nodo que acaba de desaparecer). Y selectionchange se
+// dispara tambien al escribir, asi que borraria el fantasma en el mismo
+// momento de ponerlo.
+if (NOTE_EDITOR_BODY) {
+  NOTE_EDITOR_BODY.addEventListener('input', () => {
+    refrescarFantasmaDeFormula();
+  });
+  NOTE_EDITOR_BODY.addEventListener('pointerdown', () => {
+    quitarFantasmaDeFormula();
+  });
+  // Al salir del editor tampoco puede quedarse: no es contenido, es una
+  // sugerencia. Si se quedara, el autoguardado la escribiria en la nota.
+  NOTE_EDITOR_BODY.addEventListener('blur', () => {
+    quitarFantasmaDeFormula();
+  });
+}
 
 // El estado encendido/apagado de cada boton (y si toca ensenar la barra
 // contextual de tabla) depende de donde este el cursor ahora mismo, asi
@@ -7182,22 +7309,31 @@ function handleNoteQuoteEnterExit() {
 }
 
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
-  // Tab con el cursor justo al final de una cuenta la CALCULA en vez de
-  // hacer lo suyo. Solo Tab, y solo en escritorio: es una tecla que
-  // nunca escribe texto, asi que no puede colarse en mitad de una frase.
+  // INTRO FIJA LA FORMULA -- pero SOLO si hay una vista previa delante.
   //
-  // INTRO NO CALCULA, a proposito. Lo hacia y se quito en cuanto Koku
-  // dijo lo que le preocupaba: "si quiero escribir un texto con un =,
-  // para que solo haga la formula cuando quiero". Una linea que acabara
-  // en una cuenta valida se calculaba sola al pulsar Intro para seguir
-  // escribiendo, que es exactamente la sorpresa que no quiere. Calcular
-  // es SIEMPRE una decision suya: el boton "=" de la barra (o Tab).
-  if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-    if (cursorAlFinalDeUnaFormula() && calcularFormulaEnElCursor()) {
+  // Esto invierte la decision anterior ("Intro NO calcula"), y lo pidio
+  // Koku al rediseñar las formulas: "para guardar la formula y diga ah
+  // vale esto es calculado, le he de dar al intro".
+  //
+  // Lo que hacia peligrosa la version de antes era que Intro calculaba
+  // CUALQUIER linea que acabara en una cuenta valida, aunque tu solo
+  // quisieras bajar de linea. Ahora la condicion es mucho mas estrecha:
+  // solo si en ese momento se esta viendo el resultado en gris, o sea si
+  // acabas de escribir "12+1 =" y el cursor sigue ahi. En cualquier otro
+  // sitio Intro baja de linea como siempre. Y si la vista previa te
+  // estorba, tocar la pantalla la quita (ver el listener de seleccion).
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && hayFantasmaDeFormula()) {
+    if (fijarFormulaEnElCursor()) {
       e.preventDefault();
       refreshNoteEditorState();
       return;
     }
+  }
+  if (e.key === 'Escape' && hayFantasmaDeFormula()) {
+    // Escape tambien la descarta, para quien tenga teclado.
+    quitarFantasmaDeFormula();
+    e.preventDefault();
+    return;
   }
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     if (handleNoteQuoteEnterExit()) {
@@ -7399,6 +7535,7 @@ function loadOpenNoteIntoDom(entry) {
   document.getElementById('note-id').value = entry.id || '';
   refreshNoteTitlePreview(entry.title);
   NOTE_EDITOR_BODY.innerHTML = prepareAssetHtmlForDom(entry.bodyHtml);
+  prepararFormulasDeNota(NOTE_EDITOR_BODY);
   hydrateAssetImages(NOTE_EDITOR_BODY);
   resetNoteEditorToolbar();
   noteModalFavorite = entry.favorite;
@@ -8827,8 +8964,29 @@ function mostrarAvisoFlotante(texto, { duracionMs = 4200 } = {}) {
   setTimeout(irse, duracionMs);
 }
 
-// "1 h 12 min" / "48 min" / "3 min". Nunca segundos: en una estimacion
-// de media hora, decir "48 min 20 s" finge una precision que no hay.
+// "12 min 4 s" / "1 h 12 min 4 s". Con segundos, que es como lo pidio
+// Koku para la linea del entreno ("12min 4s y au").
+//
+// Ojo: lleva segundos porque el numero SALE de segundos de verdad (la
+// media de lo que te dura cada serie y cada descanso, de tu propio
+// historial), no de un redondeo. Aun asi sigue siendo una estimacion, y
+// por eso el texto que la envuelve empieza por "Al menos ~".
+function gymFormatDuracionConSegundos(segundos) {
+  const total = Math.max(0, Math.round(Number(segundos) || 0));
+  const h = Math.floor(total / 3600);
+  const min = Math.floor((total % 3600) / 60);
+  const seg = total % 60;
+  const trozos = [];
+  if (h > 0) trozos.push(`${h} h`);
+  if (min > 0) trozos.push(`${min} min`);
+  // Los segundos se enseñan siempre que no haya horas: con una hora por
+  // delante, los segundos ya no dicen nada.
+  if (h === 0) trozos.push(`${seg} s`);
+  return trozos.join(' ');
+}
+
+// "1 h 12 min" / "48 min" / "3 min". Sin segundos: la usa el aviso
+// flotante y la ficha del dia, donde la cifra se lee de pasada.
 function gymFormatDuracionAproximada(segundos) {
   const min = Math.max(1, Math.round(segundos / 60));
   if (min < 60) return `${min} min`;
@@ -8845,6 +9003,50 @@ function gymTextoDeDuracion(day) {
   const base = `Al menos ~${gymFormatDuracionAproximada(est.segundos)}`;
   if (est.sinDatos === 0) return base;
   return `${base} (${est.sinDatos} ejercicio${est.sinDatos === 1 ? '' : 's'} sin datos todavía)`;
+}
+
+// La linea fija de ARRIBA DEL TODO del entreno en curso. Peticion de
+// Koku tras ver el aviso flotante: "pon arriba de la primera serie un
+// mensaje que ponga un tiempo estimado en base a los ultimos entrenes o
+// algo asi: 12min 4s".
+//
+// Es la MISMA cuenta que el aviso flotante (gymEstimarDuracionDeDia: tu
+// media por ejercicio, sacada de gym_sets.duration_seconds y de los
+// descansos), solo que con segundos y sin irse sola. El aviso flotante se
+// queda: uno avisa al empezar y la otra esta ahi cuando la buscas.
+// Se calcula sobre el ENTRENO EN CURSO y no sobre el dia del plan, que es
+// lo que mira gymEstimarDuracionDeDia: dentro del entreno puedes anadir o
+// quitar ejercicios y series, y la linea tiene que reflejar lo que de
+// verdad te queda por delante, no lo que decia el plan al empezar.
+function gymTextoDeDuracionDelEntreno() {
+  if (!gymLiveSession || !gymSetTimes) return null;
+  let segundos = 0;
+  let conDatos = 0;
+  let sinDatos = 0;
+  let ultimoDescanso = 0;
+  for (const ex of (gymLiveSession.exercises || [])) {
+    const media = gymSetTimes.get(ex.exerciseId);
+    if (!media || !media.avgSetSeconds) { sinDatos += 1; continue; }
+    const series = (ex.sets || []).length;
+    if (series === 0) continue;
+    // El descanso del propio entreno si lo tiene puesto (es lo que vas a
+    // descansar HOY); si no, tu media historica en ese ejercicio.
+    const primero = (ex.sets || [])[0] || {};
+    const descanso = Number(primero.restSeconds) > 0
+      ? Number(primero.restSeconds)
+      : (media.avgRestSeconds || 0);
+    segundos += series * media.avgSetSeconds + series * descanso;
+    ultimoDescanso = descanso;
+    conDatos += 1;
+  }
+  if (conDatos === 0) return null;
+  // Un descanso menos: al acabar la ultima serie del entreno ya no
+  // descansas, te vas.
+  segundos = Math.max(0, segundos - ultimoDescanso);
+  if (!segundos) return null;
+  const base = `Al menos ~${gymFormatDuracionConSegundos(segundos)}`;
+  if (sinDatos === 0) return base;
+  return `${base} · ${sinDatos} sin datos`;
 }
 
 // 'YYYY-MM-DD' -> "15 ago 2026", para el historial de sesiones. No hay
@@ -8898,42 +9100,57 @@ function gymNormalizarPeso(texto) {
 }
 
 // ---------------------------------------------------------------------
-// EJERCICIOS ASISTIDOS
+// PESO NEGATIVO (ayuda): dominadas con banda, maquina asistida, fondos
+// ---------------------------------------------------------------------
 //
-// Peticion de Koku: dominadas con banda elastica, maquina de dominadas
-// asistidas, fondos asistidos... Ahi no anades peso, te QUITAS: "yo digo
-// asistido en -20 kg, la siguiente -18 kg... llegara un punto que te
-// dire 5 kg, entonces simplemente es un ejercicio normal solo que la
-// base no es 0 kg".
+// Peticion de Koku: "yo digo asistido en -20 kg, la siguiente -18 kg...
+// llegara un punto que te dire 5 kg, entonces simplemente es un ejercicio
+// normal solo que la base no es 0 kg".
 //
-// Por eso NO es un campo aparte de "ayuda": es el mismo peso de siempre,
-// pero con signo. La escala es continua (-20 -> -18 -> 0 -> +5) y
-// progresar es que el numero SUBA. Se marca por EJERCICIO, en su ficha.
+// LA PRIMERA VERSION DE ESTO ESTABA MAL Y EL LO VIO ANTES DE PROBARLA.
+// Habia una casilla "ejercicio asistido" por EJERCICIO, y de ella
+// dependian tres cosas: si se admitia el signo, si el volumen contaba, y
+// si habia 1RM. Su critica, que es correcta: "puede ser un ejercicio que
+// empiece quitandome peso y luego comience a ponerle peso... una vez ya
+// no necesite una reduccion de peso y lo desactive, el programa,
+// historial y grafica va a romperse por todos lados". Y es verdad:
+// apagar la casilla RECALCULABA HACIA ATRAS el volumen de todo el
+// historial de ese ejercicio, porque la regla miraba el ejercicio, no la
+// serie. Un dato que cambia de valor segun un interruptor de hoy no es un
+// dato.
 //
-// Lo unico que cambia de verdad es el VOLUMEN: un asistido no suma kilos
-// movidos (ver el porque en routes-local/gymSessions.js). Las SERIES si
-// cuentan en todo lo demas -- racha, heatmap, mapa de musculos.
-function gymEjercicioEsAsistido(exerciseId) {
-  if (exerciseId === null || exerciseId === undefined) return false;
-  const ex = state.gymExercises.find((e) => e.id === Number(exerciseId));
-  return !!(ex && ex.assisted);
+// COMO ESTA AHORA, que es lo que pidio ("me permita poner un - delante,
+// ya esta"): no hay casilla ninguna. El signo se admite SIEMPRE, en
+// cualquier ejercicio, y cada decision se toma POR SERIE mirando el signo
+// de SU peso:
+//
+//   peso < 0  -> es ayuda. No suma kilos movidos (sumarlos restaria del
+//                total) y no tiene 1RM de Epley (esa formula parte de
+//                "peso que levantas", y aqui el numero es lo que te
+//                quitan). La serie SI cuenta para racha, heatmap, mapa de
+//                musculos y objetivo semanal: la hiciste.
+//   peso >= 0 -> lo de siempre.
+//
+// La ventaja de decidirlo por serie es justo la que el pedia: el mismo
+// ejercicio puede pasar de -20 a +5 con el tiempo y cada serie conserva
+// para siempre como se conto. Nada se recalcula hacia atras nunca.
+//
+// En la grafica de progreso el peso se pinta tal cual, negativos
+// incluidos: subir de -20 a -18 a +5 es una linea que sube, que es
+// exactamente lo que se quiere ver.
+function gymEsPesoDeAyuda(pesoKg) {
+  const n = Number(pesoKg);
+  return Number.isFinite(n) && n < 0;
 }
 
-// exerciseId es opcional: sin el se comporta como siempre (nada de
-// negativos). Los cuatro sitios que leen un peso escrito a mano sí saben
-// de que ejercicio es, y se lo pasan.
-function gymWeightDisplayToKg(displayValue, exerciseId) {
+// El segundo parametro ya no se usa (antes era el exerciseId, para mirar
+// si el ejercicio estaba marcado como asistido). Se deja en la firma
+// porque lo pasan cuatro sitios y quitarlo de todos no aporta nada: los
+// negativos ahora valen siempre.
+function gymWeightDisplayToKg(displayValue) {
   if (displayValue === '' || displayValue === null || displayValue === undefined) return null;
   const num = Number(gymNormalizarPeso(displayValue));
   if (!Number.isFinite(num)) return null;
-  // En un ejercicio NORMAL un peso negativo no existe. Antes lo frenaba
-  // el min="0" del campo de numero; al pasar a texto ese freno se fue,
-  // asi que se para aqui. Se trata como "no apunte peso" (null), que es
-  // un estado que la app ya maneja, en vez de guardar un -5 que luego
-  // restaria volumen en las graficas.
-  //
-  // En uno ASISTIDO el negativo es justo el dato, asi que pasa.
-  if (num < 0 && !gymEjercicioEsAsistido(exerciseId)) return null;
   return getGymWeightUnit() === 'lb' ? num / KG_TO_LB : num;
 }
 
@@ -8949,10 +9166,11 @@ function gymWeightDisplayToKg(displayValue, exerciseId) {
 // el signo se cambia una vez por ejercicio, no en cada tecla. Mismo
 // criterio que los botones AM/PM del reloj de 12 horas.
 //
-// Solo se pinta en los ejercicios marcados como asistidos: en el resto
-// un peso negativo no significa nada y el boton solo estorbaria.
-function gymBotonDeSignoHtml(asistido) {
-  if (!asistido) return '';
+// Se pinta SIEMPRE, en todos los ejercicios. Antes solo salia en los
+// marcados como asistidos, y esa marca se ha ido (ver el bloque de
+// arriba): cualquier ejercicio puede necesitar ayuda un dia y peso
+// anadido otro, y decidirlo de antemano era justo el problema.
+function gymBotonDeSignoHtml() {
   return '<button type="button" class="gym-signo-btn" data-signo-peso aria-label="Cambiar el signo del peso" title="Cambiar entre ayuda (−) y peso añadido (+)">±</button>';
 }
 
@@ -9523,15 +9741,18 @@ function gymSetSegments(set) {
 // ajustar. Es lo que se guarda y lo que hay que usar para cualquier cosa
 // que quiera saber cuanto peso se movio de verdad.
 function gymSetVolumeRealKg(set) {
-  // Un ejercicio ASISTIDO no suma kilos movidos: su peso es la ayuda que
-  // te quitas y va en negativo, asi que sumarlo restaria del total. Ver
-  // el bloque "EJERCICIOS ASISTIDOS" mas arriba. La misma regla esta en
-  // el SQL de /summary y /progress, para que cliente y base cuenten
-  // igual.
-  if (gymEjercicioEsAsistido(set.exerciseId)) return 0;
-  let total = (Number(set.reps) || 0) * (Number(set.weightKg) || 0);
+  // Un peso NEGATIVO es ayuda, no kilos movidos: sumarlo restaria del
+  // total. Se mira el signo de CADA serie y de CADA tramo, no una marca
+  // del ejercicio -- ver el bloque "PESO NEGATIVO (ayuda)" mas arriba: con
+  // una marca por ejercicio, apagarla recalculaba hacia atras todo el
+  // historial. La misma regla esta en el SQL de /summary y /progress, para
+  // que cliente y base cuenten igual.
+  const suma = (reps, peso) => (gymEsPesoDeAyuda(peso)
+    ? 0
+    : (Number(reps) || 0) * (Number(peso) || 0));
+  let total = suma(set.reps, set.weightKg);
   for (const seg of gymSetSegments(set)) {
-    total += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
+    total += suma(seg.reps, seg.weightKg);
   }
   return total;
 }
@@ -10415,7 +10636,6 @@ function openGymExerciseModal(exercise) {
   renderGymExerciseMaterialChips();
   document.getElementById('gym-exercise-notes').value = exercise ? exercise.notes || '' : '';
   document.getElementById('gym-exercise-unilateral').checked = !!(exercise && exercise.unilateral);
-  document.getElementById('gym-exercise-assisted').checked = !!(exercise && exercise.assisted);
   document.getElementById('gym-exercise-sides-separately').checked = !!(exercise && exercise.countSidesSeparately);
   document.getElementById('gym-exercise-side-rest').value = exercise && exercise.sideRestSeconds != null ? exercise.sideRestSeconds : '';
   document.getElementById('gym-exercise-default-sets').value = exercise && exercise.defaultSets != null ? exercise.defaultSets : '';
@@ -10456,7 +10676,6 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
     secondaryMuscles: [...gymExerciseSecondarySel],
     notes: document.getElementById('gym-exercise-notes').value,
     unilateral: document.getElementById('gym-exercise-unilateral').checked,
-    assisted: document.getElementById('gym-exercise-assisted').checked,
     countSidesSeparately: document.getElementById('gym-exercise-sides-separately').checked,
     sideRestSeconds: document.getElementById('gym-exercise-side-rest').value,
     defaultSets: document.getElementById('gym-exercise-default-sets').value,
@@ -12257,7 +12476,7 @@ function renderGymExerciseEditSets() {
         <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar esta serie">✕</button>
       </div>
       <div class="gym-set-segment-fields">
-        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><span class="gym-peso-con-signo"><input type="text" inputmode="decimal" data-set-field="weightDisplay" value="${escapeHtml(String(set.weightDisplay ?? ''))}" />${gymBotonDeSignoHtml(gymEjercicioEsAsistido(ex.exerciseId))}</span></label>
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><span class="gym-peso-con-signo"><input type="text" inputmode="decimal" data-set-field="weightDisplay" value="${escapeHtml(String(set.weightDisplay ?? ''))}" />${gymBotonDeSignoHtml()}</span></label>
         <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-set-field="reps" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
       </div>
       <label class="gym-set-segment-field"><span>Nota de la serie</span><input type="text" data-set-field="note" value="${escapeHtml(String(set.note ?? ''))}" /></label>
@@ -12379,12 +12598,11 @@ function gymVolcarSerieEnFormulario(set, sugerencia) {
   wEl.placeholder = sugerencia && sugerencia.weightDisplay ? String(sugerencia.weightDisplay) : '';
   rEl.placeholder = sugerencia && sugerencia.reps ? String(sugerencia.reps) : '';
   document.getElementById('gym-set-end-note').value = set.note || '';
-  // El ± solo en los asistidos (ver gymBotonDeSignoHtml): en el resto un
-  // peso negativo no significa nada y el boton solo estorbaria.
-  document.getElementById('btn-gym-set-end-signo').classList.toggle(
-    'hidden',
-    !gymEjercicioEsAsistido(gymLiveSession && gymLiveSession.activeSet ? gymLiveSession.activeSet.exerciseId : null),
-  );
+  // El ± va SIEMPRE. El teclado decimal del iPhone no tiene tecla menos,
+  // asi que sin el boton seria imposible escribir un -20 en el movil; y
+  // cualquier ejercicio puede necesitar ayuda un dia (ver el bloque
+  // "PESO NEGATIVO (ayuda)").
+  document.getElementById('btn-gym-set-end-signo').classList.remove('hidden');
   gymSetEndSegments = (set.segments || []).map((seg) => ({ ...seg }));
   renderGymSetEndSegments();
   gymSetEndFailure = !!set.failure;
@@ -12518,8 +12736,9 @@ function gymPesoMadreDeTramos() {
 // entreno sale del campo de peso y en el historial de la fila.
 function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar, exerciseId } = {}) {
   // Los tramos son del MISMO ejercicio que su serie madre, asi que
-  // heredan lo de "asistido" (y con ello el boton de signo).
-  const asistidoDelEditor = gymEjercicioEsAsistido(exerciseId);
+  // (Antes aqui se miraba si el ejercicio estaba marcado como asistido,
+  // para decidir si pintar el boton de signo. Esa marca se fue: el signo
+  // se admite siempre, en todos los ejercicios.)
   cont.innerHTML = '';
   const unit = getGymWeightUnitLabel();
   // El peso que se propone en cada tramo: en un rest-pause es SIEMPRE el
@@ -12549,7 +12768,7 @@ function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar, exerciseId
         ${seg.kind === 'restpause'
           ? `<label class="gym-set-segment-field"><span>Pausa (s)</span><input type="number" inputmode="numeric" min="0" data-seg-field="pauseSeconds" value="${escapeHtml(String(seg.pauseSeconds ?? ''))}" /></label>`
           : ''}
-        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><span class="gym-peso-con-signo"><input type="text" inputmode="decimal" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" />${gymBotonDeSignoHtml(asistidoDelEditor)}</span></label>
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><span class="gym-peso-con-signo"><input type="text" inputmode="decimal" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" />${gymBotonDeSignoHtml()}</span></label>
         <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-seg-field="reps" value="${escapeHtml(String(seg.reps ?? ''))}" /></label>
       </div>
     `;
@@ -12716,6 +12935,17 @@ document.getElementById('btn-gym-set-end-pause').addEventListener('click', () =>
 function renderGymLiveExercises() {
   const container = document.getElementById('gym-live-exercises');
   container.innerHTML = '';
+  // Tiempo estimado, arriba del todo y fijo (peticion de Koku: "pon
+  // arriba de la primera serie un mensaje que ponga un tiempo estimado en
+  // base a los ultimos entrenes"). Se repinta con la lista, asi que si
+  // anades o quitas un ejercicio la cifra se actualiza sola.
+  const estimado = gymTextoDeDuracionDelEntreno();
+  if (estimado) {
+    const linea = document.createElement('p');
+    linea.className = 'gym-live-estimate';
+    linea.textContent = estimado;
+    container.appendChild(linea);
+  }
   // El atajo de "lista vacia" solo aplica si TAMPOCO hay nada que
   // recuperar (ni ocultos del dia ni quitados en esta sesion) -- si no,
   // esas secciones de abajo no se pintarian nunca.
@@ -14181,7 +14411,7 @@ function renderGymSessionExercisesField() {
           <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar serie">✕</button>
         </div>
         <div class="gym-set-segment-fields">
-          <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><span class="gym-peso-con-signo"><input type="text" inputmode="decimal" data-field="weight" value="${escapeHtml(String(set.weightDisplay ?? ''))}" />${gymBotonDeSignoHtml(gymEjercicioEsAsistido(exRow.exerciseId))}</span></label>
+          <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><span class="gym-peso-con-signo"><input type="text" inputmode="decimal" data-field="weight" value="${escapeHtml(String(set.weightDisplay ?? ''))}" />${gymBotonDeSignoHtml()}</span></label>
           <label class="gym-set-segment-field"><span>Reps</span><input type="number" data-field="reps" min="0" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
           <!-- El "+60s" va PEGADO al descanso, no a la duracion: es
                descanso extra que se anadio con el boton +30s, y colgando
@@ -14871,12 +15101,11 @@ function renderGymPRs() {
       // primera, sobre todo cuando empiezas y mejoras la tecnica").
       for (const tramo of gymSetConTramos(set)) {
         if (!byExercise.has(tramo.exerciseId)) {
-          // En un ASISTIDO el mejor peso puede ser negativo (-12 kg es
-          // mejor que -20), asi que el punto de partida no puede ser 0:
-          // con 0 nunca lo superaria nada. null = "todavia no hay".
+          // El mejor peso puede ser NEGATIVO (-12 kg de ayuda es mejor que
+          // -20), asi que el punto de partida no puede ser 0: con 0 nunca
+          // lo superaria nada. null = "todavia no hay".
           byExercise.set(tramo.exerciseId, {
             name: tramo.exerciseName,
-            asistido: gymEjercicioEsAsistido(tramo.exerciseId),
             bestWeightKg: null,
             best1RM: 0,
             bestVolumeKg: 0,
@@ -14887,11 +15116,13 @@ function renderGymPRs() {
         if (Number.isFinite(peso) && (pr.bestWeightKg === null || peso > pr.bestWeightKg)) {
           pr.bestWeightKg = peso;
         }
-        // El 1RM de Epley NO tiene sentido en un asistido: la formula
-        // parte de "peso que levantas", y ahi el numero es la ayuda que
-        // te quitan, no una carga. Se queda sin 1RM en vez de inventarse
-        // uno.
-        if (!pr.asistido && peso > 0 && tramo.reps >= 1 && tramo.reps <= 12) {
+        // El 1RM de Epley NO tiene sentido con un peso de AYUDA: la
+        // formula parte de "peso que levantas", y ahi el numero es lo que
+        // te quitan, no una carga. Se mira el signo de ESTA serie (no una
+        // marca del ejercicio), asi que el mismo ejercicio puede no tener
+        // 1RM mientras vas con banda y tenerlo en cuanto pasas a positivo,
+        // sin que nada se recalcule hacia atras.
+        if (peso > 0 && tramo.reps >= 1 && tramo.reps <= 12) {
           const est = gymEpley1RM(peso, tramo.reps);
           if (est > pr.best1RM) pr.best1RM = est;
         }
@@ -14906,10 +15137,10 @@ function renderGymPRs() {
 
   const unit = getGymWeightUnitLabel();
   const rows = [...byExercise.entries()]
-    // Un asistido entra aunque su mejor peso sea negativo -- ahi -12 kg
+    // Un peso de ayuda entra aunque sea negativo -- ahi -12 kg
     // es un record de verdad. Lo que se descarta es "no hay ni un peso
     // apuntado" (bestWeightKg null) y los normales que sigan a 0.
-    .filter(([, pr]) => pr.bestWeightKg !== null && (pr.asistido || pr.bestWeightKg > 0))
+    .filter(([, pr]) => pr.bestWeightKg !== null)
     .sort((a, b) => b[1].best1RM - a[1].best1RM);
   list.innerHTML = '';
   if (rows.length === 0) {
@@ -18594,8 +18825,8 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.48.0';
-const APP_VERSION_DATE = '2026-09-10';
+const APP_VERSION = '0.49.0';
+const APP_VERSION_DATE = '2026-09-11';
 
 function renderAppVersionLine() {
   const el = document.getElementById('app-version-line');

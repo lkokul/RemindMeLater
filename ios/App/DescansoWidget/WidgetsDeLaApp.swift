@@ -285,7 +285,14 @@ struct VistaTareas: View {
                             Text(t.titulo)
                                 .font(.caption)
                                 .lineLimit(1)
-                                .foregroundStyle(t.vencida ? Color.red : Color.primary)
+                                // Color.primary NO: es el color del SISTEMA y pisa
+                                // el .foregroundStyle que fondoDeWidgetApp pone en la
+                                // raiz con el color del tema. Con el tema claro y el
+                                // movil en oscuro, el texto se volvia invisible (le
+                                // paso a los numeros del widget del calendario).
+                                // Sin el, hereda el color del tema, que es el
+                                // contraste emparejado del fondo.
+                                .foregroundStyle(t.vencida ? AnyShapeStyle(Color.red) : AnyShapeStyle(.foreground))
                             Spacer(minLength: 0)
                         }
                     }

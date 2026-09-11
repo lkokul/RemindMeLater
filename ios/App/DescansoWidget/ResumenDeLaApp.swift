@@ -37,6 +37,8 @@ private func leerTexto(_ c: KeyedDecodingContainer<ResumenDeLaApp.CodingKeys>,
 struct ResumenDeLaApp: Decodable {
     var actualizado: Double = 0
     var acento: String = "#5b8cff"
+    // El contraste emparejado del acento, para el texto que va ENCIMA de el.
+    var acentoTexto: String = "#ffffff"
     // Los colores del TEMA de la app (--surface y --surface-text). Vacíos
     // en un resumen escrito por una versión anterior: entonces el widget
     // se pinta con el material del sistema, como hacía antes.
@@ -63,7 +65,7 @@ struct ResumenDeLaApp: Decodable {
     var viajes: SeccionViajes?
 
     enum CodingKeys: String, CodingKey {
-        case actualizado, acento, fondo, texto, tareas, finanzas, lecturas, viajes
+        case actualizado, acento, acentoTexto, fondo, texto, tareas, finanzas, lecturas, viajes
         case calendario, consistencia, musculos
         case estiloWidget, fondoClaro, textoClaro, fondoOscuro, textoOscuro
     }
@@ -72,6 +74,7 @@ struct ResumenDeLaApp: Decodable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         actualizado = (try? c.decode(Double.self, forKey: .actualizado)) ?? 0
         acento = leerTexto(c, .acento, "#5b8cff")
+        acentoTexto = leerTexto(c, .acentoTexto, "#ffffff")
         fondo = leerTexto(c, .fondo, "")
         self.texto = leerTexto(c, .texto, "")
         estiloWidget = leerTexto(c, .estiloWidget, "app")

@@ -676,15 +676,13 @@
           <input type="checkbox" id="gym-exercise-unilateral" />
           Ejercicio unilateral (un lado cada vez)
         </label>
-        <!-- ASISTIDO: el peso que apuntas es la AYUDA que te quitas
-             (banda elastica, maquina de dominadas asistidas), asi que
-             va en negativo y progresar es que el numero SUBA. Ver el
-             bloque "EJERCICIOS ASISTIDOS" en app.js. -->
-        <label class="checkbox-row">
-          <input type="checkbox" id="gym-exercise-assisted" />
-          Ejercicio asistido (el peso es la ayuda, en negativo)
-        </label>
-        <p class="hint" id="gym-exercise-assisted-hint">Para dominadas con banda o máquina asistida: apunta −20 kg, luego −18… y al pasar de 0, peso añadido. No suma volumen, pero sí cuenta como serie.</p>
+        <!-- AQUI HABIA una casilla "ejercicio asistido", y se quito a
+             proposito. Koku vio el problema antes de probarla: si la
+             ayuda depende de una marca del EJERCICIO, el dia que pases de
+             -20 a +5 y la apagues, el volumen de todo el historial se
+             recalcula hacia atras. Ahora el signo se admite siempre y
+             cada serie se cuenta por SU signo. Ver el bloque "PESO
+             NEGATIVO (ayuda)" en app.js. -->
         <div id="gym-exercise-unilateral-extra" class="gym-unilateral-extra hidden">
           <label class="checkbox-row">
             <input type="checkbox" id="gym-exercise-sides-separately" />
@@ -2383,7 +2381,12 @@
              En el movil ESTE BOTON es la unica forma de dispararlo: el
              teclado del iPhone no tiene tecla Tab. Ver "FÓRMULAS EN LAS
              NOTAS" en app.js. -->
-        <button type="button" id="note-formula-btn" class="note-editor-btn" aria-label="Calcular la fórmula" title="Calcular la fórmula que tenga el cursor (escribe =12*3+5). Escribir &quot;=&quot; por sí solo no calcula nada.">=</button>
+        <!-- AQUI HABIA un boton "=" para calcular. Se fue el 11/9/2026:
+             Koku pidio que la formula se autocomplete sola mientras
+             escribes ("en vez de ponerme un boton para ello"). Ahora
+             escribes 12+1 = y el resultado aparece solo en gris; Intro lo
+             fija, y tocar la pantalla lo descarta. Ver el bloque de
+             formulas en app.js. -->
         <!-- Selector de archivo nativo, oculto -- lo abre el boton de
              arriba con .click(). Tambien sirve para el Ctrl+V (ver
              app.js), que reutiliza la misma subida. -->

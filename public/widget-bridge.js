@@ -69,6 +69,12 @@ async function construirResumenDelDia() {
     // viejo" en vez de fingir que está al día.
     actualizado: Date.now(),
     acento: gymAcentoParaElWidget(),
+    // El contraste emparejado del acento (--accent-text). Hace falta para
+    // el texto que va ENCIMA del acento -- el numero del dia de hoy en el
+    // widget del calendario. Blanco fijo no vale: hay temas con acentos
+    // claros donde se pierde. Es la misma pareja que ya garantiza que se
+    // lea el texto de los botones de la app.
+    acentoTexto: colorDelTemaParaElWidget('--accent-text', '#ffffff'),
     // Los colores del TEMA para que el widget no vaya por libre.
     // Koku: "no sigue demasiado el tema de la app, antes estaba en claro,
     // pero el sistema está en modo oscuro". Sin esto el widget seguía el
@@ -436,7 +442,6 @@ async function seccionEjercicios() {
       // Un ASISTIDO se pinta igual, pero conviene que el widget lo sepa:
       // ahí los pesos son negativos y "mejor" es más arriba igual, pero
       // el texto de la unidad cambia ("ayuda").
-      asistido: !!ex.assisted,
       puntos,
     });
   }

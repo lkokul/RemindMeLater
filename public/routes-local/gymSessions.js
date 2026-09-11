@@ -222,7 +222,11 @@
                -- (Koku: "el peso corporal te da igual"). Las SERIES si
                -- cuentan: para la racha, el heatmap y el mapa de musculos
                -- una dominada asistida es una serie como cualquier otra.
-               SUM(CASE WHEN COALESCE(ge.assisted, 0) = 1 THEN 0
+               -- Se mira el SIGNO DE ESTA SERIE, no una marca del
+               -- ejercicio: con una marca, apagarla recalculaba hacia
+               -- atras todo el historial. Ver el bloque "PESO NEGATIVO
+               -- (ayuda)" en app.js.
+               SUM(CASE WHEN COALESCE(st.weight_kg, 0) < 0 THEN 0
                         ELSE COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) END) as volume_kg,
                -- Cuantos de esos kg salieron de una serie llevada al
                -- fallo. Se devuelve APARTE y en kg de verdad: el peso
@@ -232,13 +236,12 @@
                -- lleva 'failure' en su propio set_type -- lo hereda de su
                -- madre, de ahi el COALESCE con el padre.
                SUM(CASE WHEN COALESCE(p.set_type, st.set_type) = 'failure'
-                             AND COALESCE(ge.assisted, 0) = 0
+                             AND COALESCE(st.weight_kg, 0) >= 0
                         THEN COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) ELSE 0 END) as failure_volume_kg,
                SUM(COALESCE(st.duration_seconds, 0)) as work_seconds
         FROM gym_sessions s
         LEFT JOIN gym_sets st ON st.session_id = s.id
         LEFT JOIN gym_sets p ON p.id = st.parent_set_id
-        LEFT JOIN gym_exercises ge ON ge.id = st.exercise_id
         GROUP BY s.id
         ORDER BY s.date DESC, s.id DESC
       `)
@@ -411,19 +414,18 @@
     const rows = db
       .prepare(`
         SELECT s.date, MAX(st.weight_kg) as max_weight_kg,
-               -- Un ejercicio asistido no suma volumen (ver /summary).
-               SUM(CASE WHEN COALESCE(ge.assisted, 0) = 1 THEN 0
+               -- Una serie con peso negativo no suma volumen (ver /summary).
+               SUM(CASE WHEN COALESCE(st.weight_kg, 0) < 0 THEN 0
                         ELSE COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) END) as volume_kg,
                -- Igual que en /summary: los kg que salieron de series al
                -- fallo, aparte y sin ajustar (ver alli el porque).
                SUM(CASE WHEN COALESCE(p.set_type, st.set_type) = 'failure'
-                             AND COALESCE(ge.assisted, 0) = 0
+                             AND COALESCE(st.weight_kg, 0) >= 0
                         THEN COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) ELSE 0 END) as failure_volume_kg,
                COUNT(CASE WHEN st.parent_set_id IS NULL AND st.set_type = 'failure' THEN st.id END) as failure_set_count
         FROM gym_sets st
         JOIN gym_sessions s ON s.id = st.session_id
         LEFT JOIN gym_sets p ON p.id = st.parent_set_id
-        LEFT JOIN gym_exercises ge ON ge.id = st.exercise_id
         WHERE st.exercise_id = ?
         GROUP BY s.id
         ORDER BY s.date ASC, s.id ASC

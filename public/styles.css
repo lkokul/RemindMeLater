@@ -5099,3 +5099,42 @@ body.gym-rest-push #settings-modal .settings-card {
   border-radius: 0.5rem;
 }
 
+
+/* La estimacion de duracion, arriba del todo del entreno en curso. Es un
+   dato de apoyo, no un titulo: va discreta, en el color secundario, para
+   que no compita con las tarjetas de los ejercicios. */
+.gym-live-estimate {
+  margin: 0 0 0.6rem;
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--bg-text) 62%, var(--bg));
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------
+   FORMULAS EN LAS NOTAS
+   ---------------------------------------------------------------------
+   Koku: "me gustaria que se marcara de alguna forma en el texto que es
+   especial... un color diferente mas brillante que resalte y digas rapido
+   formula y no texto plano".
+
+   Dos estados distintos a proposito:
+   - .note-formula-ghost -> la VISTA PREVIA mientras escribes. En gris y
+     apagada, para que se lea como una sugerencia y no como texto tuyo.
+     No es contenido: no se guarda nunca (ver el saneador).
+   - .note-formula -> la formula YA FIJADA. Lleva el color de acento del
+     tema y un fondo teñido, como una pastilla. Se distingue de un
+     vistazo del texto de alrededor, que es lo que pedia.
+   --------------------------------------------------------------------- */
+.note-formula-ghost {
+  color: color-mix(in srgb, var(--bg-text) 45%, var(--bg));
+  font-style: italic;
+  user-select: none;
+  pointer-events: none;
+}
+.note-formula {
+  color: var(--accent);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 0 0.25em;
+}

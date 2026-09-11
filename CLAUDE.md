@@ -92,6 +92,23 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
   en una sesión de Claude Code local (terminal en el propio ordenador de
   Koku), prueba a pushear el tag tú mismo primero — solo hace falta el
   workaround manual si de verdad da 403 en ESTA sesión en concreto.
+- **AVISAR cuando un cambio se salga del guion** (regla nueva, 11/9/2026,
+  pedida por Koku con estas palabras: *"si hay algún cambio que creas que
+  se sale de lo que es Apple-ish o que necesita modificar el tema de
+  avisos para reglas y tal me avisas"*). Dos casos, y hay que decírselo
+  **en la respuesta**, no enterrarlo en un commit:
+  1. **Algo que se aleja del estilo de Apple**: un patrón que no existe en
+     iOS, un control inventado, una pantalla que rompe la jerarquía del
+     resto. Aunque funcione bien.
+  2. **Algo que toca las reglas de seguridad o privacidad**: ampliar la
+     lista blanca del saneador de notas, relajar la CSP, pedir un permiso
+     nuevo del sistema, añadir cualquier cosa que salga del dispositivo, o
+     cambiar lo que hay que declarar en las tiendas.
+  Precedente de por qué hace falta: las fórmulas de notas se diseñaron
+  primero como TEXTO PLANO justo para no tocar el saneador, y al pedir
+  Koku que se vieran resaltadas hubo que darle de alta una etiqueta
+  (`<span class="note-formula">`). Eso es exactamente lo que hay que
+  contarle antes de que lo descubra él.
 - **Nunca usar controles nativos del navegador para checkbox, `<select>`,
   fecha, ni nada similar (ronda de retoques de Carteras/Archivos, tras
   ver capturas de checkboxes cuadrados grises sin estilo)** — siempre el
@@ -2746,6 +2763,71 @@ Apple). Lo que hay que tener presente al tocar código:
 **Pendiente de que Koku decida**: `PARA-KOKU-MAÑANA.md` (ocho dudas de
 diseño, tres cosas que se salen de la filosofía de la app, y el papeleo de
 las dos tiendas). No empieces nada de ahí sin su respuesta.
+
+## Fórmulas en las notas: el diseño BUENO (11/9/2026)
+
+**Esto sustituye por completo al diseño anterior** (el del botón `=` y la
+sintaxis `=12+1 → 13`). Si lees una descripción con flechas `→` o con un
+botón en la barra, es la vieja.
+
+Koku, tras probarla: *"lo que tendría más sentido es poder poner 12+1 = y
+ahora así que te ponga el 13 detrás. En vez de ponerme un botón para ello,
+quiero que de primeras se autocomplete; si yo le doy a la pantalla, que se
+quite y me deje escribir; para 'guardar' la fórmula y diga ah vale esto es
+calculado, le he de dar al intro"*.
+
+**Los tres estados**, que es todo lo que hay que entender:
+
+1. Escribes `12+1 =` → aparece un **13 en gris** detrás (el *fantasma*).
+2. **Tocas la pantalla** → el fantasma se va y sigues escribiendo. Nada
+   se ha calculado.
+3. **Intro** → se fija: queda `12+1 = 13` marcado con el color de acento.
+
+Y **tocar una fórmula fijada la vuelve a abrir** como cuenta editable, con
+el resultado reapareciendo en gris al momento. Eso responde a lo que pidió
+(*"si pincho en el 13 que me muestre cuál es la fórmula"*) sin inventar un
+globo aparte: la cuenta ES el contenido.
+
+### Lo que hay que saber antes de tocarlo
+
+- **Intro SÍ calcula ahora**, y eso invierte una decisión anterior. Pero
+  solo **cuando hay un fantasma delante**, o sea justo después de escribir
+  `12+1 =`. En cualquier otro sitio Intro baja de línea como siempre. Lo
+  que hacía peligrosa la versión de antes era que calculaba cualquier
+  línea acabada en una cuenta válida.
+- **La fórmula fijada es `contenteditable="false"`, y NO es un capricho.**
+  Sin eso, escribir justo detrás mete el texto DENTRO del span: el
+  navegador hereda el formato del elemento en línea de al lado. Medido:
+  tras fijar `2*3 = 6`, teclear ` y 4*5 =` daba
+  `<span class="note-formula">2*3 = 6y 4*5 =</span>` y la segunda cuenta
+  no se calculaba nunca.
+- **Ese `contenteditable` NO se guarda** (el saneador solo deja la clase),
+  así que al abrir una nota hay que reponerlo: `prepararFormulasDeNota()`,
+  llamada justo después del `innerHTML` del editor. Si se te olvida,
+  vuelve el problema de arriba.
+- **Al fijar se mete un ESPACIO detrás** si no había nada. Sin él, el
+  cursor se queda al principio de un nodo vacío pegado al span y el
+  navegador vuelve a meter lo que escribas dentro.
+- **El fantasma NUNCA se guarda**, y hay tres redes: se quita al escribir,
+  al tocar y al perder el foco; y su clase **no está en la lista blanca**
+  del saneador, así que aunque llegara a colarse, se cae al guardar.
+  Probado.
+
+### Lo que se amplió en el saneador, y por qué es estrecho
+
+Para que una fórmula se vea distinta hacía falta **una etiqueta**, y el
+diseño anterior era texto plano justo para no tocar esto. Se le avisó.
+
+Lo que se permite es lo mínimo: `<span>` conserva `class` **solo si vale
+exactamente `note-formula`**. No es un patrón ni una lista: es una
+comparación con una cadena. Nada de estilos en línea, nada de `data-*`,
+**ningún dato del usuario dentro de un atributo**. Lo único que hace esa
+clase es teñir el texto con el acento.
+
+Probado con siete variantes hostiles: clase compuesta
+(`note-formula otra-cosa`), clase parecida (`note-formulaX`), con `style`,
+con `onclick`, con otra clase, y la del fantasma. **Las seis se caen**; la
+única que sobrevive es la buena.
 
 ## Estado actual
 

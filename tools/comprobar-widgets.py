@@ -483,6 +483,34 @@ if sueltos:
     fallos.append(f'{len(sueltos)} font-size en rem fuera de la escala: usa uno de '
                   f'los ocho tokens (--t-micro ... --t-titulo-grande). Ej: {sueltos[0]}')
 
+# --- 9) nada de colores del SISTEMA dentro de los widgets ------------
+#
+# fondoDeWidgetApp pone el color del tema con .foregroundStyle en la RAIZ,
+# y todo lo de dentro lo hereda. Un Color.primary/.white/.black escrito a
+# mano PISA esa herencia con el color del SISTEMA, que no tiene nada que
+# ver con el tema de la app.
+#
+# Paso de verdad: con el tema de la app en claro (fondo blanco) y el movil
+# en modo oscuro, Color.primary es BLANCO, asi que los numeros de los dias
+# del widget del calendario se volvieron invisibles. Solo se veia el
+# circulo del dia de hoy. Lo mismo le pasaba al widget de Tareas.
+#
+# Lo que SI vale: .foreground (hereda), .secondary y .tertiary (son
+# jerarquicos, se derivan del color de la raiz), Color.red para un aviso, y
+# los colores que vienen del propio resumen (Color(hexDeLaApp:)).
+for archivo, texto in (('WidgetsNuevos.swift', widgets),
+                       ('QueTocaHoyWidget.swift', gym)):
+    for linea in texto.split('\n'):
+        limpia = linea.split('//')[0]
+        if 'foregroundStyle' not in limpia and 'foregroundColor' not in limpia:
+            continue
+        for malo in ('Color.primary', 'Color.white', 'Color.black'):
+            if malo in limpia:
+                fallos.append(f'{archivo}: {malo} en un foregroundStyle pisa el color '
+                              f'del tema que pone la raiz (con tema claro y movil en '
+                              f'oscuro el texto se vuelve invisible). Usa .foreground, '
+                              f'.secondary, o un color del resumen. Linea: {limpia.strip()[:70]}')
+
 # --- resultado -------------------------------------------------------
 if fallos:
     print('FALLOS:')

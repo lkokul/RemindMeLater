@@ -1,5 +1,13 @@
 # Lo que necesito que decidas
 
+> **Al día del 11/9/2026.** Koku ya contestó a una parte: **B1 sigue
+> pendiente**, **C1 sigue pendiente**, y **D1 está resuelto** (nombre y
+> correo dados, política escrita en `docs/privacidad.md`). Las fórmulas
+> (que no estaban en esta lista) se rediseñaron enteras a petición suya
+> — ver el bloque de fórmulas en `CLAUDE.md`.
+>
+> Lo que queda por decidir está marcado con **PENDIENTE** abajo.
+
 Documento de trabajo (como `IDEAS-AYUDAS.md`): **nada de lo que hay aquí
 está hecho**. Son las decisiones que no he tomado por mi cuenta porque
 cambian cómo se ve o cómo se comporta la app, y eso lo decides tú.
@@ -32,7 +40,7 @@ tocar, y cuatro erratas.
 
 ## B. Dudas de diseño
 
-### B1. El azul de fábrica no llega al mínimo de contraste
+### B1. PENDIENTE — El azul de fábrica no llega al mínimo de contraste
 
 Medido: texto blanco sobre `#5b8cff` da **3,16:1**, y para texto el
 mínimo (WCAG AA) es **4,5:1**. Es el botón más importante de la app.
@@ -177,7 +185,7 @@ el texto de permiso que prometía una sincronización que no existe).
 
 Queda esto, que no puedo decidir yo:
 
-### C1. La copia de seguridad va sin cifrar
+### C1. PENDIENTE — La copia de seguridad va sin cifrar
 
 El `.json` que exportas lleva **la base de datos entera en base64**.
 Quien tenga ese archivo lo tiene todo: finanzas, notas, gimnasio. Si lo
@@ -225,7 +233,7 @@ tienes tus finanzas ahí.
 Esto es lo que hace falta **antes de publicar**, y es trabajo tuyo (yo
 puedo escribir los textos). Ninguno es opcional.
 
-### D1. Política de privacidad en una URL pública — OBLIGATORIA
+### D1. ~~Política de privacidad~~ — HECHA, te falta publicarla
 
 Las dos tiendas la exigen, aunque la app no recoja nada. Tiene que ser
 accesible sin registro.
@@ -235,10 +243,14 @@ accesible sin registro.
 `https://lkokul.github.io/RemindMeLater/privacidad`. Gratis y versionado
 con el código.
 
-**Si quieres, te la escribo entera** — solo necesito de ti dos cosas:
-- **con qué nombre firmas** (tu nombre real o un alias/marca), y
-- **un correo de contacto** (es obligatorio en las dos tiendas). Puede
-  ser uno creado para esto.
+**Ya está escrita**, en `docs/privacidad.md`, con tus datos:
+Marco Robert Valverde y mrobe2503+remindmelaterincidents@gmail.com.
+
+**Lo que te toca a ti** (dos minutos, en la web de GitHub):
+Settings → Pages → Source: *Deploy from a branch* → Branch: la que
+publiques → carpeta `/docs` → Save. Te queda en
+`https://lkokul.github.io/RemindMeLater/privacidad`. Esa es la URL que
+va en las dos tiendas.
 
 Contenido: responsable + contacto; que todos los datos se guardan solo en
 el dispositivo y tú no tienes acceso ni recibes copia; que no hay

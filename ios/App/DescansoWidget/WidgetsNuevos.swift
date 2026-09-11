@@ -120,6 +120,16 @@ struct VistaCalendario: View {
     private var seccion: SeccionCalendario? { entry.resumen?.calendario }
     private var acento: Color { Color(hexDeLaApp: entry.resumen?.acento ?? "") }
 
+    // El texto que va ENCIMA del circulo del acento (el dia de hoy). Blanco
+    // fijo no vale: hay temas con acentos claros, y ahi se pierde igual. Se
+    // usa el contraste emparejado que el propio tema define para el acento
+    // (--accent-text), que es la misma pareja que garantiza la legibilidad en
+    // los botones de la app. Si no llegara, blanco como red de seguridad.
+    private var colorSobreElAcento: Color {
+        let hex = entry.resumen?.acentoTexto ?? ""
+        return hex.isEmpty ? Color.white : Color(hexDeLaApp: hex)
+    }
+
     // Lunes primero, como el calendario de la app.
     private let cabeceras = ["L", "M", "X", "J", "V", "S", "D"]
 
@@ -179,7 +189,20 @@ struct VistaCalendario: View {
             Text("\(n)")
                 .font(.system(size: familia == .systemLarge ? 12 : 10,
                               weight: esHoy ? .bold : .regular))
-                .foregroundStyle(esHoy ? Color.white : Color.primary)
+                // OJO: aqui NO puede ir Color.primary. Ese es el color del
+                // SISTEMA, no el del tema, y pisa el .foregroundStyle que
+                // fondoDeWidgetApp pone en la RAIZ. Con el tema de la app en
+                // claro (fondo blanco) y el movil en modo oscuro,
+                // Color.primary es BLANCO: los numeros de los dias se
+                // volvian invisibles sobre el fondo blanco del widget.
+                // Koku lo vio asi, con solo el circulo azul de hoy visible.
+                //
+                // Sin foregroundStyle, el numero HEREDA el color de la raiz,
+                // que es --surface-text del tema: el contraste emparejado del
+                // fondo, o sea legible siempre sea cual sea el tema.
+                // Lo mismo vale para las cabeceras L M X J V S D, que usan
+                // .secondary (jerarquico) y por eso SI se veian.
+                .foregroundStyle(esHoy ? AnyShapeStyle(colorSobreElAcento) : AnyShapeStyle(.foreground))
                 .frame(width: 17, height: 17)
                 .background(
                     Circle().fill(esHoy ? acento : Color.clear)

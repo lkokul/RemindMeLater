@@ -1698,13 +1698,20 @@ function applyLocalSchema(db) {
   if (!gymExerciseColumns.includes('secondary_muscles')) {
     db.exec('ALTER TABLE gym_exercises ADD COLUMN secondary_muscles TEXT');
   }
-  // EJERCICIO ASISTIDO (peticion de Koku): dominadas con banda elastica,
-  // maquina de dominadas asistidas, fondos asistidos... En estos el peso
-  // que apuntas es la AYUDA, asi que va en NEGATIVO y progresar es que
-  // el numero SUBA: -20 kg, luego -18, luego -12... y cuando llegas a 0
-  // y lo pasas (+5 kg colgados), sigue siendo el mismo ejercicio con la
-  // misma escala. Tal cual lo describio: "simplemente es un ejercicio
-  // normal solo que la base no es 0 kg".
+  // FOSIL. La columna 'assisted' se sigue creando y migrando, pero YA NO
+  // LA LEE NADIE: la casilla "ejercicio asistido" se quito el 11/9/2026.
+  //
+  // Por que se fue: hacia que el volumen de un ejercicio dependiera de una
+  // marca de HOY, asi que apagarla recalculaba hacia atras todo el
+  // historial. Koku lo vio antes de probarla ("una vez ya no necesite una
+  // reduccion de peso y lo desactive, el programa, historial y grafica va
+  // a romperse por todos lados"). Ahora el peso negativo se admite siempre
+  // y cada serie se cuenta por SU signo -- ver el bloque "PESO NEGATIVO
+  // (ayuda)" en app.js.
+  //
+  // La columna se queda en vez de borrarse: quitarla de una base que ya la
+  // tiene obliga a reconstruir la tabla entera (SQLite no siempre permite
+  // DROP COLUMN), y un entero a 0 que nadie lee no molesta a nadie.
   if (!gymExerciseColumns.includes('assisted')) {
     db.exec('ALTER TABLE gym_exercises ADD COLUMN assisted INTEGER NOT NULL DEFAULT 0');
   }
