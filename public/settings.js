@@ -358,7 +358,93 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'widgets', 'notifications', 'store'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'widgets', 'notifications', 'store', 'novedades'];
+
+// ---------------------------------------------------------------------
+// NOVEDADES: las notas de cada version
+// ---------------------------------------------------------------------
+//
+// Peticion de Koku (11/9/2026): un apartado de notas de version "para
+// todos, en la version de usuario tambien", con lo nuevo y los parches.
+//
+// El contenido vive en public/notas-version.js y se escribe a mano en
+// cada ronda. Lo de "a revisar" viene de public/desarrollador.js, un
+// archivo que NO viaja a la rama de usuario -- asi que ahi no es que se
+// esconda, es que no existe (ver CLAUDE.md).
+// El argumento existe para poder probarla con datos rotos sin tocar la
+// global; en la app siempre se llama sin el.
+function renderReleaseNotes(fuente) {
+  const cont = document.getElementById('release-notes-list');
+  if (!cont) return;
+  cont.innerHTML = '';
+  const crudo = fuente !== undefined
+    ? fuente
+    : (typeof APP_RELEASE_NOTES !== 'undefined' ? APP_RELEASE_NOTES : []);
+  // Se descarta lo que no sea una entrada con version: una nota sin
+  // numero no se puede colocar en ningun sitio, y pintarla dejaria una
+  // tarjeta con la cabecera vacia.
+  const notas = (Array.isArray(crudo) ? crudo : []).filter((n) => n && n.version);
+  if (notas.length === 0) {
+    cont.innerHTML = '<p class="empty-hint">Todavía no hay notas de versión.</p>';
+    return;
+  }
+  const revisar = window.APP_NOTAS_REVISAR || {};
+  notas.forEach((nota) => {
+    const bloque = document.createElement('section');
+    bloque.className = 'release-note';
+
+    const cab = document.createElement('div');
+    cab.className = 'release-note-head';
+    const version = document.createElement('span');
+    version.className = 'release-note-version';
+    version.textContent = `v${nota.version}`;
+    cab.appendChild(version);
+    const fecha = document.createElement('span');
+    fecha.className = 'release-note-date';
+    fecha.textContent = formatReleaseDate(nota.fecha);
+    cab.appendChild(fecha);
+    bloque.appendChild(cab);
+
+    // Tres listas con el mismo molde. La de "revisar" solo existe en la
+    // rama de desarrollador, y solo para las versiones que tengan algo.
+    const grupos = [
+      ['Nuevo', nota.nuevo, 'es-nuevo'],
+      ['Arreglado', nota.parches, 'es-parche'],
+      ['A revisar', revisar[nota.version], 'es-revisar'],
+    ];
+    grupos.forEach(([titulo, lista, clase]) => {
+      if (!Array.isArray(lista) || lista.length === 0) return;
+      const h = document.createElement('p');
+      h.className = `release-note-kind ${clase}`;
+      h.textContent = titulo;
+      bloque.appendChild(h);
+      const ul = document.createElement('ul');
+      ul.className = 'release-note-items';
+      lista.forEach((texto) => {
+        const li = document.createElement('li');
+        // textContent y no innerHTML: estas notas las escribo yo, pero
+        // no hay ningun motivo para dejar que puedan meter etiquetas.
+        li.textContent = texto;
+        ul.appendChild(li);
+      });
+      bloque.appendChild(ul);
+    });
+    cont.appendChild(bloque);
+  });
+}
+
+// La fecha, con el formato del SISTEMA (Koku: "por si tienen mm/dd/aa y
+// no dd/mm/aa"), con la ISO como red de seguridad si Intl falla. Mismo
+// criterio que la linea de version.
+function formatReleaseDate(iso) {
+  if (!iso) return '';
+  try {
+    return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+      .format(new Date(`${iso}T12:00:00`));
+  } catch {
+    return iso;
+  }
+}
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
@@ -379,6 +465,7 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
   btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
     showSettingsScreen(tab);
+    if (tab === 'novedades') renderReleaseNotes();
     if (tab === 'profile') refreshProfileTab();
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();

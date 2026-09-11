@@ -2681,7 +2681,24 @@ pasarla a `movil-ui` hay que volver a quitar lo de abajo. Un merge a
 secas se los llevaría de vuelta. Si algún día cansa, la alternativa que
 se descartó era ponerlos detrás de un interruptor y tener una sola rama.
 
-### Qué se queda fuera de `movil-ui` (los cuatro, confirmados por Koku)
+### Qué se queda fuera de `movil-ui`
+
+**LO PRIMERO, porque simplifica todo lo demás: `public/desarrollador.js`
+y su `<script>` de `index.html`.** Ese archivo (11/9/2026) es ahora el
+sitio donde va lo que solo existe en esta rama. Trae dos cosas:
+
+- `window.APP_MODO_DESARROLLADOR = true`, la marca de "esto es una build
+  de desarrollo". Es lo que hace que la línea de versión enseñe también
+  el **número de build** (`v0.52.0 · 11/9/2026 · build 63`).
+- `window.APP_NOTAS_REVISAR`, las **cosas a revisar** de cada versión,
+  que salen bajo sus notas en Configuración → Novedades.
+
+Quitar el archivo y su `<script>` basta: sin él no hay build en la línea
+de versión ni bloque "A revisar", y **no es que se escondan — es que no
+están**. Lo que se añada de aquí en adelante, mejor que viva ahí.
+
+**Lo de antes sigue repartido y hay que quitarlo a mano** (los cuatro,
+confirmados por Koku):
 
 1. **El bloque del widget** — Configuración → Este dispositivo.
    `#widget-status-block` / `#widget-status-line` / `#btn-widget-refresh`
@@ -3007,6 +3024,105 @@ Dos cosas que llevarse de aquí:
   prueba miente. Hay que acotar al contenedor
   (`#gym-live-exercises .note-swipe-wrap`).
 
+## Gimnasio: los retoques del 11/9/2026
+
+Cuatro cosas sueltas que pidió Koku probando la build #62.
+
+- **El ± va DELANTE del campo de peso** (*"creo que se entiende mejor"*).
+  Y tiene sentido: lo que hace es poner el signo al PRINCIPIO del número,
+  así que estando a la izquierda el botón está justo donde va a aparecer
+  el "−". Son cuatro sitios; el listener no depende del orden (busca el
+  input dentro del mismo envoltorio, no "el hermano siguiente").
+- **Un "− 30 s" para deshacer el "+30 s"**. Antes los +30 que pulsabas
+  durante el descanso se quedaban apuntados para siempre y el chip "+60"
+  era de solo lectura. Está en los DOS editores de series (el del entreno
+  y el del historial). Resta de 30 en 30 y no borra el total de golpe, a
+  propósito: es el espejo exacto del botón que lo sumó.
+- **Cortar el descanso guarda lo que de verdad descansaste.** Si empiezas
+  la siguiente serie antes de que venza el cronómetro,
+  `gymApuntarDescansoReal()` apunta los segundos reales. **Va en un campo
+  APARTE (`restActualSeconds`) y no pisando `set.restSeconds`**, y eso no
+  es un capricho: `restSeconds` es también el descanso PROGRAMADO, y de
+  él tira `gymBuildSetsForExercise()` para la serie extra que se añade al
+  final — pisándolo, cortar un descanso te metía el descanso corto en la
+  siguiente serie. Si ya había vencido, no se toca nada. Y si TOCAS el
+  descanso en el editor del ejercicio, tu número manda y se olvida el
+  real. Importa porque de ahí sale la media que alimenta el **tiempo
+  estimado**: guardando siempre el programado, la estimación se iría
+  hacia arriba en cuanto cortes descansos.
+- **Las filas de ejercicio del día se deslizan** (Editar / Mover /
+  Quitar), como las tarjetas del entreno — *"misma mecánica, menos
+  ruido"*. Se fueron las flechas de subir/bajar.
+
+**Por qué ahora sí se puede arrastrar, si CLAUDE.md decía lo contrario.**
+La nota vieja era correcta: la fila llevaba TRES campos y un desplegable,
+así que meter el dedo en un campo peleaba con el gesto, y arrastrar
+siempre peleaba con el scroll del modal. Las dos cosas se arreglan a la
+vez con este reparto, que es el mismo del entreno: **la fila se queda de
+solo lectura** (enseña "4 × 8 · descanso 1:30" y ya) y **el arrastre no
+está siempre activo, se ARMA desde "Mover"** y se desarma al soltar. Lo
+que se escribe vive en `#gym-routine-exercise-modal`.
+
+El **ojo de aparcar SE QUEDA en la fila**: aparcar no es editar, es usar
+la lista — el mismo criterio que deja "Activar" en la fila de un bloque.
+
+`habilitarArrastreDeEjercicio()` y `armarMovimientoDeEjercicio()` se
+generalizaron con opciones (`scrollerSelector`, `alSoltar`, `repintar`)
+para que sirvan en los dos sitios. Antes solo sabían de `gymLiveSession`
+y de `.gym-live-content`.
+
+## La App del acceso rápido no se repite en Herramientas
+
+Petición de Koku: *"si pongo una app como acceso rápido: notas,
+gimnasio... que no aparezca en la parte de herramientas directamente.
+Sino creo que marea un poco"*.
+
+`applyMobileNavCustomization()` recorre **todas** las tarjetas del hub y
+esconde solo la de la App que esté en la barra — recorrerlas todas, y no
+esconder una y ya, es lo que hace que cambiar de App vuelva a enseñar la
+anterior sin acordarse de nada.
+
+**Ojo al escribir pruebas**: de fábrica la barra lleva Notas, así que
+**la tarjeta "Notas" del hub nace escondida**. Una prueba que entre a
+Notas pulsando esa tarjeta con un click de verdad se queda esperando para
+siempre (pasó). Se entra por la barra; y para probar el camino del hub,
+se cambia el ajuste a otra App primero.
+
+Y sigue sin haber forma de perder el acceso a nada: si la barra lleva
+Notas, la tarjeta sobra; si lleva otra cosa, la tarjeta vuelve.
+
+## Notas de versión (Configuración → Novedades) — 11/9/2026
+
+Petición de Koku: *"un apartado de notas de versión o desarrollador.
+Esto para todos, en la versión de usuario también"*.
+
+- **`public/notas-version.js`** — `APP_RELEASE_NOTES`, la lista que se
+  ve. **Se escribe A MANO en cada ronda**, igual que `APP_VERSION`: no
+  hay paso de compilación que pueda generarla. Lo nuevo va arriba.
+  Cada entrada lleva `version`, `fecha` (ISO), `nuevo` y `parches`.
+- **Lo de "a revisar" NO vive ahí**: va en `public/desarrollador.js`,
+  que no viaja a la rama de usuario (ver el bloque de las dos ramas).
+- `renderReleaseNotes(fuente)` en `settings.js`. El argumento existe solo
+  para poder probarla con datos rotos sin tocar la global; la app la
+  llama siempre sin él. Descarta las entradas sin `version` (una nota sin
+  número no se puede colocar) y pinta con `textContent`, nunca
+  `innerHTML`: las notas las escribo yo, pero no hay motivo para dejar
+  que puedan meter etiquetas.
+
+**El número de build** sale de `public/build-info.js`. En el repositorio
+está a `null` a propósito, y lo reescribe el workflow justo **antes de
+`cap sync`** (ese paso es el que copia `public/` dentro del proyecto de
+iOS, así que escribirlo después no llegaría a la app). Es el MISMO
+`GITHUB_RUN_NUMBER` que se usa como `CURRENT_PROJECT_VERSION`, o sea el
+número que se ve en TestFlight.
+
+Hacen falta **las dos cosas** para que la build se enseñe: el archivo de
+desarrollador Y un número de verdad. Sirviendo `public/` como estático no
+hay compilación detrás, así que la línea se queda como siempre.
+
+**Pendiente, y lo está pensando él**: que la Tienda enseñe por
+herramienta lo actualizado o parcheado. No empezarlo hasta que lo pida.
+
 ## Estado actual
 
 **Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde
@@ -3070,6 +3186,11 @@ desde `showSettingsScreen()`.
 **v0.51.0** (11/9/2026) trae **duplicar** (notas, carpetas, bloques, días
 y ejercicios) y el arreglo del "Editar" del entreno, que llevaba roto
 desde la #59. Ver los dos bloques de arriba.
+
+**v0.52.0** son los retoques del Gimnasio (el ±, el −30 s, el descanso
+real y las filas del día deslizables), la App del acceso rápido que ya no
+se repite en Herramientas, y el apartado **Novedades** con el número de
+build. Ver sus tres bloques.
 
 **v0.50.0** trae el inicio de Finanzas rehecho, de `finanzas-movil`
 (commit de Koku). El merge fue **fast-forward**: él ya había traído

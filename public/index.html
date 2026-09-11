@@ -938,12 +938,16 @@
                  daba por invalido un 16,3. Lo que se escribe lo normaliza
                  gymNormalizarPeso() al leerlo. -->
             <span class="gym-peso-con-signo">
-              <input type="text" id="gym-set-end-weight" inputmode="decimal" />
-              <!-- El ± solo se ve en los ejercicios ASISTIDOS: el teclado
-                   decimal del iPhone no tiene tecla menos, asi que sin
-                   esto no habria forma de escribir -20 en el movil. Lo
-                   ensena/esconde refreshGymSetEndSigno() en app.js. -->
+              <!-- El ± va DELANTE del campo (peticion de Koku, "creo que
+                   se entiende mejor"): lo que hace es poner el signo al
+                   PRINCIPIO del numero, asi que el boton queda justo
+                   donde va a aparecer el "-". Hace falta porque el
+                   teclado decimal del iPhone no tiene tecla menos, y sin
+                   el seria imposible escribir un -20 en el movil. Nace
+                   oculto y lo ensena openGymSetEndModal(): cualquier
+                   ejercicio puede necesitar ayuda un dia. -->
               <button type="button" id="btn-gym-set-end-signo" class="gym-signo-btn hidden" data-signo-peso aria-label="Cambiar el signo del peso" title="Cambiar entre ayuda (−) y peso añadido (+)">±</button>
+              <input type="text" id="gym-set-end-weight" inputmode="decimal" />
             </span>
         </label>
         <label class="gym-set-field">
@@ -1252,6 +1256,42 @@
           <button type="button" id="btn-delete-gym-routine" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
           <button type="button" id="btn-cancel-gym-routine" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Editar UN ejercicio del dia. Peticion de Koku: las filas del dia
+       pasan a deslizarse como las tarjetas del entreno ("misma mecanica,
+       menos ruido"), asi que se quedan de solo lectura y todo lo que se
+       escribe vive aqui. Mismo reparto que en el entreno: la fila es
+       para USARLA, el dialogo para editarla. -->
+  <div id="gym-routine-exercise-modal" class="modal hidden">
+    <div class="modal-card gym-modal">
+      <button type="button" id="btn-close-gym-routine-exercise" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Ejercicio del día</h2>
+      <form id="gym-routine-exercise-form">
+        <div class="field-label-block">
+          <span class="field-label">Ejercicio</span>
+          <div id="gym-routine-exercise-picker-field"></div>
+        </div>
+        <div class="gym-set-segment-fields">
+          <label class="gym-set-segment-field"><span>Series</span><input type="number" id="gym-routine-exercise-sets" inputmode="numeric" min="0" /></label>
+          <label class="gym-set-segment-field"><span>Reps</span><input type="number" id="gym-routine-exercise-reps" inputmode="numeric" min="0" /></label>
+          <label class="gym-set-segment-field"><span>Descanso (s)</span><input type="number" id="gym-routine-exercise-rest" inputmode="numeric" min="0" /></label>
+        </div>
+        <p class="hint" id="gym-routine-exercise-rest-preview"></p>
+        <!-- Aparcar sin borrar: el ejercicio sigue EN el dia, pero un
+             entreno nuevo no lo pre-carga. Interruptor propio de la app
+             (.checkbox-row), nunca un checkbox nativo. -->
+        <label class="checkbox-row">
+          <input type="checkbox" id="gym-routine-exercise-hidden" />
+          <span>Aparcado (los entrenos nuevos no lo cargan)</span>
+        </label>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-gym-routine-exercise" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
@@ -2680,7 +2720,23 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16l-1.2 11a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
           <span>Tienda</span>
         </button>
+        <button type="button" class="settings-menu-item" data-tab="novedades">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3.2"/></svg>
+          <span>Novedades</span>
+        </button>
 
+      </div>
+
+      <!-- --- Novedades: las notas de cada version (peticion de Koku,
+           11/9/2026). El contenido vive en public/notas-version.js, que
+           se escribe a mano en cada ronda; lo pinta renderReleaseNotes()
+           en settings.js. En la rama de DESARROLLADOR sale ademas, bajo
+           cada version, lo que hay "a revisar" (public/desarrollador.js,
+           un archivo que no viaja a la rama de usuario). --- -->
+      <div id="settings-tab-novedades" class="settings-tab-panel hidden">
+        <h3>Novedades</h3>
+        <p class="hint">Lo que ha cambiado en cada versión de la app.</p>
+        <div id="release-notes-list"></div>
       </div>
 
       <!-- --- Widgets (apartado propio, peticion de Koku). Es de ESTE
@@ -2932,6 +2988,15 @@
     </div>
   </div>
 
+  <!-- El numero de compilacion (lo rellena el workflow) y las notas de
+       version. Van ANTES que app.js porque los lee al pintar. -->
+  <script src="build-info.js"></script>
+  <script src="notas-version.js"></script>
+  <!-- SOLO EN LA RAMA DE DESARROLLADOR: este <script> y su archivo se
+       quitan al fusionar en movil-ui (ver CLAUDE.md). Trae la marca de
+       "esto es una build de desarrollo" y las cosas a revisar de cada
+       version. -->
+  <script src="desarrollador.js"></script>
   <script src="db-local.js"></script>
   <!-- El "servidor" vive ahora dentro de la propia app: SQLite compilado
        a WebAssembly (vendor/sql-wasm.*), el esquema de siempre
