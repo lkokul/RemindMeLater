@@ -4213,6 +4213,14 @@ body.gym-rest-push #settings-modal .settings-card {
   gap: 0.6rem;
   margin-top: 0.8rem;
 }
+/* La version, al pie del menu de Configuracion. Centrada y discreta, como
+   el "iOS 18.1" del final de Ajustes > General > Informacion: esta ahi
+   para cuando la buscas, no para leerla. */
+.settings-version-line {
+  margin-top: 1.4rem;
+  text-align: center;
+  font-size: var(--t-micro);
+}
 .settings-menu-item {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 0.5rem;

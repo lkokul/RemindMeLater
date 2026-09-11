@@ -362,6 +362,11 @@ const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'widgets', 'notific
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
+  // La version vive al final del menu, asi que aparece y desaparece con
+  // el. Dentro de una seccion no pinta nada, y ademas quedaria colgando
+  // debajo del contenido de esa seccion.
+  const linea = document.getElementById('app-version-line');
+  if (linea) linea.classList.toggle('hidden', tab !== null);
   // El "Volver" comparte fila con el titulo y solo se ve estando DENTRO
   // de una seccion.
   document.getElementById('btn-settings-back').classList.toggle('hidden', tab === null);

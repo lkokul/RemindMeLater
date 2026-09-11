@@ -2906,10 +2906,21 @@
           <button type="button" id="btn-widget-refresh" class="secondary-btn">Actualizar el widget ahora</button>
         </div>
 
-        <h4>Versión</h4>
-        <p id="app-version-line" class="hint"></p>
       </div>
 
+      <!-- LA VERSION, al final de Configuracion y no dentro de "Este
+           dispositivo" (lo pidio Koku el 11/9/2026). Va aqui, la ultima
+           de todo el cuerpo, y NO dentro de #settings-menu: ese es una
+           rejilla de tarjetas y una linea de texto dentro se colocaria
+           como una tarjeta mas. Como las secciones estan ocultas
+           mientras se ve el menu, en pantalla queda justo debajo de las
+           tarjetas, que es donde se busca.
+
+           Se esconde y se enseña junto con el menu desde
+           showSettingsScreen (settings.js): dentro de una seccion no
+           pinta nada y ademas quedaria colgando al final de esa
+           seccion. -->
+      <p id="app-version-line" class="hint settings-version-line"></p>
 
       </div>
     </div>

@@ -1271,8 +1271,10 @@ que no son obvios:
   abierto, por si se cerró por otra vía mientras se preguntaba.
 
 **La versión** (`APP_VERSION` / `APP_VERSION_DATE` / `renderAppVersionLine()`
-en `app.js`, se ve en Configuración → Este dispositivo): se escribe **a
-mano** en cada ronda, junto al número de `package.json` — la app no tiene
+en `app.js`, **al final de Configuración**, debajo de las tarjetas del
+menú — se movió ahí el 11/9/2026, antes estaba dentro de "Este
+dispositivo"): se escribe **a mano** en cada ronda, junto al número de
+`package.json` — la app no tiene
 paso de compilación que pueda inyectarlo, así que este es el único sitio
 donde vive de cara al usuario. **Si subes la versión, tócala aquí
 también.** La fecha se formatea con `Intl.DateTimeFormat(undefined, ...)`
@@ -2717,7 +2719,8 @@ normal.
 
 - **La línea de versión** (`v0.41.1 · 10/9/2026`, `renderAppVersionLine()`).
   Koku la dejó dentro a propósito: sirve para saber qué versión tienes
-  cuando algo falla, y verla es normal en cualquier app.
+  cuando algo falla, y verla es normal en cualquier app. Desde el
+  11/9/2026 vive al FINAL de Configuración, no en "Este dispositivo".
 - **`#notifications-status`**, que a pesar de estar en el mismo sitio NO
   es un diagnóstico: dice "Falta el permiso del sistema: activa el
   interruptor para pedirlo". Eso es una instrucción para el usuario.
@@ -2934,6 +2937,13 @@ de `finanzas-movil`. **Build #60 en verde y subida a TestFlight.**
 **v0.49.1** es lo que salió de probar la #60: Intro no fijaba la fórmula
 en Safari (ver "Por qué Intro no funcionaba en el iPhone" más arriba) y
 el tiempo estimado se quedó en `Tiempo estimado: 12 min 4 s` a secas.
+**Build #61 en verde y subida a TestFlight.**
+
+**v0.49.2** mueve la línea de versión al final de Configuración (la pidió
+ahí Koku al probar la #61). Va la última de `settings-card-body`, fuera
+de `#settings-menu` — ese es una rejilla de tarjetas y una línea de texto
+dentro se colocaría como una tarjeta más —, y se esconde con el menú
+desde `showSettingsScreen()`.
 
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 
