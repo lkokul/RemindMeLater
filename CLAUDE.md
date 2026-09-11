@@ -3228,6 +3228,98 @@ forzando errores, un `startedAt` que no fuera un número pintaba
 `NaN:NaN`, y de ahí no se sale solo. Validar en la puerta de entrada lo
 arregla para todos los que leen el estado.
 
+## Los dos lados son LA MISMA serie (11/9/2026)
+
+Koku, haciendo extensión de tríceps en polea a un brazo: *"me ha contado
+D I D, I D I, en vez de hacer 3 series con cada brazo me ha hecho 2
+series... alterando tiempos de descanso etc"*. Luego lo corrigió con más
+precisión: *"me ha hecho 3 series, en la primera D I D, en la segunda I
+D, en la tercera I"*.
+
+**La causa**: `gymSetSerieNumber()` contaba los IZQUIERDOS
+(`if (ex.sets[i].side !== 'right') n += 1;`), dando por hecho que el lado
+izquierdo siempre va primero. Pero **por cuál empiezas se elige en el
+diálogo**, y empezando por el derecho las seis filas `D I D I D I`
+quedaban numeradas `1 1 1 2 2 3` — exactamente lo que él describió.
+
+Y no era sólo un número mal puesto: el **descanso corto entre lados** se
+decide con `gymSidePartnerIndex()`, que sale de esa misma numeración. Con
+tres filas creyéndose la misma serie, la pareja apuntaba a cualquier
+sitio y el descanso caía donde no tocaba. De ahí lo de "alterando tiempos
+de descanso".
+
+**Cómo se cuenta ahora**: se emparejan **dos filas seguidas de lados
+distintos**, sin dar por hecho cuál va primero. La fila que cierra una
+pareja no sube el contador; cualquier otra sí. Empieces por donde
+empieces, sale `1 1 2 2 3 3`.
+
+**Hacían falta las DOS mitades**, y con una sola parecía arreglado:
+
+1. **La pantalla** (`gymSetSerieNumber` en `app.js`). `gymSerieCount()`
+   se saca ahora del número de serie de la ÚLTIMA fila, en vez de contar
+   por su cuenta: contar los izquierdos aparte era justo lo que fallaba,
+   y así las dos funciones no pueden separarse.
+2. **El guardado** (`replaceSessionSets` en
+   `routes-local/gymSessions.js`). Numeraba una serie por FILA, así que
+   el historial guardaba seis series donde había tres. Lleva la misma
+   regla escrita igual a propósito: si contaran distinto, el entreno
+   diría "serie 3 de 3" y el historial apuntaría 6.
+
+**Lo que NO se tocó, y conviene saberlo**: el `set_count` de `/summary`
+(racha, heatmap, mapa de músculos, objetivo semanal) **sigue contando
+cada lado como una serie**. Eso es la decisión de los unilaterales de su
+día ("cada lado es una SERIE PROPIA, así el historial y el volumen no
+necesitan casos especiales") y cambiarlo reescribiría hacia atrás todos
+esos números. Está apuntado en las notas de revisar de la v0.54.0.
+
+Tampoco hay migración: las sesiones ya guardadas conservan su numeración
+vieja. Sólo cambia cómo se LEE el historial, ningún total.
+
+## Series parciales: el tercer tipo de tramo
+
+Petición de Koku (11/9/2026): *"poder apuntar parciales, donde se apuntan
+dropsets y rest-pause, ahí poder poner series parciales"*.
+
+No es un concepto nuevo, es un tramo más — o sea, una fila de `gym_sets`
+colgada de su serie madre por `parent_set_id`, con `set_type =
+'parciales'`. Entra en el volumen y puede ser récord igual que los otros
+dos, que es la decisión 2 del bloque de series alargadas.
+
+Los tres, y en qué se diferencian AL APUNTARLOS:
+
+| tramo | qué es | peso que propone | pausa |
+|---|---|---|---|
+| `dropset` | bajas el peso y sigues | el del tramo de arriba | no |
+| `restpause` | paras unos segundos y sigues | el de la madre | sí |
+| `parciales` | sigues a recorrido corto | el de la madre | no |
+
+Lo único propio de las parciales es la sugerencia de peso: una parcial se
+hace con la MISMA carga, lo que se acorta es el recorrido — así que
+propone el de la madre, no el del tramo de arriba como en un dropset
+encadenado.
+
+**Dónde se toca si aparece un cuarto tipo**: `GYM_SEGMENT_KINDS` +
+`gymSegmentKind()` + `GYM_SEGMENT_LABELS` en `app.js`,
+`VALID_SEGMENT_KINDS` / `VALID_SET_TYPES` / `KINDS_DE_TRAMO` en
+`routes-local/gymSessions.js`, un botón en los tres sitios donde se
+apuntan (el diálogo de fin de serie en `index.html`, el modal de editar
+un ejercicio del entreno y el de editar una sesión del historial) y una
+regla `.gym-set-segment-tag.es-<tipo>` en `styles.css`. La etiqueta
+`es-parciales` es `#5B21B6`, contraste 8,98:1 con el blanco — medido con
+la fórmula WCAG, no a ojo.
+
+## El reloj del entreno pasa a horas
+
+Koku: *"que el tiempo de entrene se muestre en hh/mm/ss, no en mm/ss, que
+creo que es más fácil 1:30:15 que 90:15"*.
+
+Va en `gymLiveFormatClock()`, que es el formateador común, pero **las
+horas sólo salen al pasar de los 60 minutos**. Eso no es pereza: esa
+misma función pinta también los descansos, la cuenta atrás de la serie y
+el cronómetro suelto, y un descanso de minuto y medio como "0:01:30" se
+lee peor que "1:30". Así cada uno queda como toca sin tener dos
+formateadores que puedan separarse con el tiempo.
+
 ## Estado actual
 
 **Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde

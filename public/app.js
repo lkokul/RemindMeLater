@@ -9979,7 +9979,27 @@ async function deleteGymSessionById(id) {
 //   3. Cualquier tramo puede ser RECORD ("hay veces que la segunda sale
 //      mejor que la primera"), asi que los PRs miran serie y tramos por
 //      igual -- por eso existe gymSetConTramos().
-const GYM_SEGMENT_LABELS = { dropset: 'Drop', restpause: 'R-P' };
+const GYM_SEGMENT_LABELS = { dropset: 'Drop', restpause: 'R-P', parciales: 'Parc' };
+// LOS TRES TIPOS DE TRAMO, y en que se diferencian al apuntarlos:
+//
+//   dropset    bajas el peso y sigues        -> peso propio, sin pausa
+//   restpause  paras unos segundos y sigues  -> pausa + el peso de la madre
+//   parciales  sigues a recorrido corto      -> el peso de la madre, sin pausa
+//
+// Las PARCIALES las pidio Koku el 11/9/2026 ("poder apuntar parciales,
+// donde se apuntan dropsets y rest-pause"). Son un tramo mas, no un
+// concepto nuevo: repeticiones de verdad con su peso, hechas cuando ya
+// no salen completas. Por eso entran en el volumen y en los records
+// igual que los otros dos -- si no contaran, la grafica bajaria justo el
+// dia que mas aprietas, que es la decision 2 de este bloque.
+//
+// Lo unico propio suyo: el peso que se propone es el de la MADRE (una
+// parcial se hace con la misma carga, lo que se acorta es el recorrido),
+// no el del tramo de arriba como en un dropset encadenado.
+const GYM_SEGMENT_KINDS = ['dropset', 'restpause', 'parciales'];
+function gymSegmentKind(kind) {
+  return GYM_SEGMENT_KINDS.includes(kind) ? kind : 'dropset';
+}
 
 // Serie llevada al fallo: se marca en el mismo dialogo de fin de serie y
 // se guarda en set_type = 'failure' (valor que el esquema ya tenia
@@ -10086,7 +10106,7 @@ function gymSetConTramos(set) {
 function gymSegmentChipHtml(set) {
   const segs = gymSetSegments(set);
   if (segs.length === 0) return '';
-  const kinds = [...new Set(segs.map((seg) => (seg.kind === 'restpause' ? 'restpause' : 'dropset')))];
+  const kinds = [...new Set(segs.map((seg) => gymSegmentKind(seg.kind)))];
   const texto = kinds.map((k) => GYM_SEGMENT_LABELS[k]).join('+');
   const sufijo = segs.length > 1 ? ` ×${segs.length}` : '';
   return `<span class="gym-set-segment-chip" title="Serie alargada: ${segs.length} tramo${segs.length === 1 ? '' : 's'} extra">${texto}${sufijo}</span>`;
@@ -11813,9 +11833,20 @@ function gymFormatRestDisplay(totalSeconds) {
   if (!n) return '';
   return localStorage.getItem('gymRestFormat') === 'sec' ? `${n}s` : gymLiveFormatClock(n);
 }
+// El reloj de toda la vida, pero CON HORAS EN CUANTO LAS HAY (peticion
+// de Koku el 11/9/2026): "1:30:15 es mas facil de leer que 90:15".
+//
+// Las horas solo aparecen al pasar de los 60 minutos, a proposito: si
+// salieran siempre, un descanso de minuto y medio seria "0:01:30" en vez
+// de "1:30", y esta misma funcion pinta TAMBIEN los descansos, la cuenta
+// atras de la serie y el cronometro suelto. Asi cada uno se lee como
+// toca sin tener dos formateadores que puedan separarse.
 function gymLiveFormatClock(totalSeconds) {
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
+  const total = Math.max(0, Math.round(Number(totalSeconds) || 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 // Tiempo de sesion transcurrido DESCONTANDO las pausas: pausedMs acumula
@@ -12486,16 +12517,55 @@ function gymExerciseUsesSides(ex) {
   return !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
 }
 // Numero de serie que le toca a un set (los dos lados comparten numero).
+// EL NUMERO DE SERIE DE UNA FILA, en un ejercicio contado por lados.
+//
+// BUG QUE ARREGLA (lo vio Koku el 11/9/2026 haciendo extension de triceps
+// en polea): "me ha contado D I D, I D I, en vez de hacer 3 series con
+// cada brazo me ha hecho 2 series... alterando tiempos de descanso etc".
+//
+// La version vieja contaba cuantos lados "no derechos" llevaba, o sea que
+// DABA POR HECHO QUE EL IZQUIERDO VA PRIMERO. Empezando por la derecha
+// (que se puede elegir en el dialogo, y es justo lo que hizo el) salia:
+//
+//   D I D I D I  ->  1 1 1 2 2 3      <- tres filas en la "serie 1"
+//
+// ...porque el primer derecho no sumaba y el izquierdo siguiente abria la
+// serie 1 otra vez. De ahi las parejas mal emparejadas, y con ellas los
+// descansos: el descanso CORTO entre lados se decide por "¿queda el otro
+// lado pendiente?", asi que con la pareja equivocada se aplicaba donde no
+// tocaba.
+//
+// Ahora se empareja SIN mirar cual es el izquierdo: se recorre la lista y
+// cada fila abre serie nueva salvo que cierre la que quedo abierta justo
+// antes con el OTRO lado. Asi da igual por donde empieces.
+//
+// Aguanta ademas listas mal formadas (alguien borro una fila suelta en el
+// editor del historial): dos lados iguales seguidos son dos series
+// distintas, no una pareja imposible.
 function gymSetSerieNumber(ex, setIndex) {
   if (!gymExerciseUsesSides(ex)) return setIndex + 1;
   let n = 0;
-  for (let i = 0; i <= setIndex; i++) if (ex.sets[i].side !== 'right') n += 1;
+  let abierta = false;
+  for (let i = 0; i <= setIndex; i++) {
+    const lado = ex.sets[i] ? ex.sets[i].side : null;
+    const anterior = i > 0 && ex.sets[i - 1] ? ex.sets[i - 1].side : null;
+    if (abierta && lado && anterior && lado !== anterior) {
+      // Esta fila CIERRA la pareja de la anterior: misma serie.
+      abierta = false;
+    } else {
+      n += 1;
+      abierta = !!lado;
+    }
+  }
   return Math.max(1, n);
 }
-// Cuantas series (no lados) tiene el ejercicio.
+// Cuantas series (no lados) tiene el ejercicio. Se saca del numero de
+// serie de la ULTIMA fila, para que no pueda separarse de la funcion de
+// arriba: contar los izquierdos por su cuenta era lo que fallaba.
 function gymSerieCount(ex) {
   if (!gymExerciseUsesSides(ex)) return ex.sets.length;
-  return ex.sets.filter((s) => s.side !== 'right').length;
+  if (!ex.sets.length) return 0;
+  return gymSetSerieNumber(ex, ex.sets.length - 1);
 }
 function gymSideLabel(side) {
   if (side === 'left') return 'izquierdo';
@@ -13360,6 +13430,7 @@ function renderGymExerciseEditSets() {
       <div class="gym-set-extend-list gym-session-set-actions">
         <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
         <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
+        <button type="button" class="gym-set-extend-btn" data-add-seg="parciales">+ Parciales</button>
         <button type="button" class="gym-set-extend-btn${set.failure ? ' is-on' : ''}" data-toggle-failure>${set.failure ? '✓ ' : ''}Al fallo</button>
         <button type="button" class="gym-set-extend-btn${set.done ? ' is-on' : ''}" data-toggle-done>${set.done ? '✓ Hecha' : 'Sin hacer'}</button>
         ${gymBotonQuitarExtraHtml(set.extraRest)}
@@ -13677,22 +13748,25 @@ function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
   // te vale la sugerencia).
   let pesoAnterior = pesoMadre;
   segmentos.forEach((seg, i) => {
-    const sugerencia = seg.kind === 'restpause' ? pesoMadre : pesoAnterior;
+    const tipo = gymSegmentKind(seg.kind);
+    // Rest-pause y parciales se hacen con el peso de la MADRE; solo el
+    // dropset encadenado va bajando desde el tramo de arriba.
+    const sugerencia = tipo === 'dropset' ? pesoAnterior : pesoMadre;
     const row = document.createElement('div');
     row.className = 'gym-set-segment-row';
-    row.dataset.segKind = seg.kind;
+    row.dataset.segKind = tipo;
     // Cada campo lleva su etiqueta ENCIMA, no dentro como sugerencia:
     // metidos los tres en una fila, "pausa s" se cortaba y no se leia
     // la unidad (lo vio Koku en el iPhone). La sugerencia gris del peso
     // sigue estando, que es la que se usa si lo dejas en blanco.
     row.innerHTML = `
       <div class="gym-set-segment-head">
-        <span class="gym-set-segment-tag ${seg.kind === 'restpause' ? 'es-restpause' : 'es-dropset'}">${GYM_SEGMENT_LABELS[seg.kind]}</span>
+        <span class="gym-set-segment-tag es-${tipo}">${GYM_SEGMENT_LABELS[tipo]}</span>
         <span class="gym-set-head-dur"></span>
         <button type="button" class="icon-btn" data-seg-remove aria-label="Quitar tramo">✕</button>
       </div>
       <div class="gym-set-segment-fields">
-        ${seg.kind === 'restpause'
+        ${tipo === 'restpause'
           ? `<label class="gym-set-segment-field"><span>Pausa (s)</span><input type="number" inputmode="numeric" min="0" data-seg-field="pauseSeconds" value="${escapeHtml(String(seg.pauseSeconds ?? ''))}" /></label>`
           : ''}
         <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><span class="gym-peso-con-signo">${gymBotonDeSignoHtml()}<input type="text" inputmode="decimal" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" /></span></label>
@@ -13745,7 +13819,7 @@ function gymLeerTramosDe(cont) {
       const sug = norm(el.placeholder);
       return Number.isFinite(Number(sug)) && sug !== '' ? sug : '';
     };
-    const kind = fila.dataset.segKind === 'restpause' ? 'restpause' : 'dropset';
+    const kind = gymSegmentKind(fila.dataset.segKind);
     return {
       kind,
       weightDisplay: leer('weightDisplay'),
@@ -15522,6 +15596,7 @@ function renderGymSessionExercisesField() {
         </div>` : ''}
         <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
         <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
+        <button type="button" class="gym-set-extend-btn" data-add-seg="parciales">+ Parciales</button>
         <button type="button" class="gym-set-extend-btn${set.setType === 'failure' ? ' is-on' : ''}" data-toggle-failure>${set.setType === 'failure' ? '✓ ' : ''}Al fallo</button>
       `;
       acciones.querySelectorAll('[data-lado]').forEach((btn) => {
@@ -20989,7 +21064,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.53.0';
+const APP_VERSION = '0.54.0';
 const APP_VERSION_DATE = '2026-09-11';
 
 function renderAppVersionLine() {

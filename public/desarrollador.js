@@ -17,6 +17,12 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.54.0': [
+    'El emparejado de lados se hace por "dos filas seguidas de lados distintos". Si alguna vez se pudiera apuntar un ejercicio a lados haciendo TODO un lado y luego todo el otro (D D D I I I), la cuenta saldría rara (1 2 3 3 4 5). No pasa en el flujo normal, pero es el único hueco conocido.',
+    'Las sesiones YA GUARDADAS con la numeración vieja (1..6 en vez de 1,1,2,2,3,3) no se tocan: no hay migración. Habría que decidir si merece la pena una, sabiendo que sólo cambia cómo se LEE el historial, no ningún total.',
+    'El contador de series de Progreso (racha, heatmap, objetivo semanal) sigue contando cada lado como una serie. Es lo que se decidió en su día, pero ahora que los números de serie sí emparejan, conviene confirmar que es lo que quieres.',
+    'Las parciales llevan el peso de la madre por defecto. Si en la práctica las haces con menos peso, se cambia la sugerencia en una línea.',
+  ],
   '0.53.0': [
     'El cronómetro de una serie por tiempo NO avisa al llegar al objetivo (solo se marca en pantalla). Si al usarlo de verdad hace falta que vibre, hay que decidirlo aparte: toca el mismo canal que el aviso de fin de descanso.',
     'El temporizador suelto tampoco suena al vencer, por lo mismo.',

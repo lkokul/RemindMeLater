@@ -21,6 +21,11 @@
   // madre, pero hacia el cliente se devuelven ANIDADOS en ella
   // (`segments`): asi `sets.length` sigue siendo el numero de series de
   // verdad y nadie tiene que acordarse de filtrar.
+  // Los tipos de TRAMO que se leen de vuelta tal cual. Cualquier otra
+  // cosa (un set_type de la serie madre, o basura) se lee como 'dropset',
+  // que es el tramo por defecto.
+  const KINDS_DE_TRAMO = ['dropset', 'restpause', 'parciales'];
+
   function serializeSets(sessionId) {
     const rows = db
       .prepare(`
@@ -68,7 +73,7 @@
       const parent = byId.get(r.parent_set_id);
       if (!parent) continue;
       parent.segments.push({
-        kind: r.set_type === 'restpause' ? 'restpause' : 'dropset',
+        kind: KINDS_DE_TRAMO.includes(r.set_type) ? r.set_type : 'dropset',
         segmentIndex: r.segment_index,
         reps: r.reps,
         weightKg: r.weight_kg,
@@ -129,6 +134,18 @@
   // veces aparece ese exerciseId ANTES en la lista (1a serie, 2a serie...
   // de ESE ejercicio dentro de la sesion) -- asi el cliente solo manda
   // las series en el orden en que se hicieron, sin tener que numerarlas.
+  //
+  // UN UNILATERAL NO CUENTA DOBLE. En un ejercicio por lados, cada lado
+  // llega como una fila propia (asi el volumen y el historial no
+  // necesitan casos especiales), pero los DOS lados son LA MISMA serie:
+  // 3 series a dos lados son 6 filas numeradas 1,1,2,2,3,3, no 1..6.
+  // La regla es la misma que la de la pantalla (gymSetSerieNumber en
+  // app.js) y esta escrita igual A PROPOSITO: si contaran distinto, el
+  // entreno diria "serie 3 de 3" y el historial guardaria 6.
+  //
+  // Se emparejan DOS FILAS SEGUIDAS DE LADOS DISTINTOS, sin dar por hecho
+  // cual va primero -- ese era justo el fallo: se contaban los izquierdos
+  // y quien empezara por el derecho veia "D I D / I D / I".
   function replaceSessionSets(sessionId, sets) {
     db.prepare('DELETE FROM gym_sets WHERE session_id = ?').run(sessionId);
     if (!Array.isArray(sets)) return;
@@ -136,18 +153,38 @@
     const insert = db.prepare(
       'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds, duration_seconds, measure, measure_seconds, side, notes, parent_set_id, segment_index, pause_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    const VALID_SET_TYPES = ['warmup', 'dropset', 'restpause', 'failure'];
+    // 'parciales' es el tercer tipo de TRAMO (Koku, 11/9/2026): seguir a
+    // recorrido corto cuando ya no salen repeticiones completas. Entra en
+    // esta lista porque un tramo guarda su tipo en set_type, igual que
+    // 'dropset' y 'restpause'.
+    const VALID_SET_TYPES = ['warmup', 'dropset', 'restpause', 'failure', 'parciales'];
+    const VALID_SEGMENT_KINDS = ['dropset', 'restpause', 'parciales'];
     // Como se midio la serie. 'reps' se guarda como NULL para que una
     // serie normal siga siendo indistinguible de las de antes de esto.
     const VALID_MEASURES = ['tiempo', 'reps_en_tiempo'];
     const VALID_SIDES = ['left', 'right'];
+    // Por ejercicio: cuantas series van, si la ultima quedo ABIERTA
+    // (esperando el otro lado) y de que lado era la fila anterior.
     const countByExercise = new Map();
+    const estadoDeLados = new Map();
+    function numeroDeSerie(exerciseId, lado) {
+      const previo = countByExercise.get(exerciseId) || 0;
+      const est = estadoDeLados.get(exerciseId) || { abierta: false, anterior: null };
+      if (est.abierta && lado && est.anterior && lado !== est.anterior) {
+        // Esta fila CIERRA la pareja de la anterior: misma serie.
+        estadoDeLados.set(exerciseId, { abierta: false, anterior: lado });
+        return Math.max(1, previo);
+      }
+      estadoDeLados.set(exerciseId, { abierta: !!lado, anterior: lado });
+      countByExercise.set(exerciseId, previo + 1);
+      return previo + 1;
+    }
     const numeroONulo = (v) => (v !== undefined && v !== null && v !== '' ? Number(v) : null);
     sets.forEach((s) => {
       const exerciseId = Number(s && s.exerciseId);
       if (!exerciseId) return; // entrada invalida, se ignora en vez de romper el resto
-      const setNumber = (countByExercise.get(exerciseId) || 0) + 1;
-      countByExercise.set(exerciseId, setNumber);
+      const lado = VALID_SIDES.includes(s.side) ? s.side : null;
+      const setNumber = numeroDeSerie(exerciseId, lado);
       const info = insert.run(
         sessionId,
         exerciseId,
@@ -164,7 +201,7 @@
         // una de repeticiones se tiran, para que no quede un dato
         // colgado que luego alguien sume sin querer.
         VALID_MEASURES.includes(s.measure) ? numeroONulo(s.measureSeconds) : null,
-        VALID_SIDES.includes(s.side) ? s.side : null,
+        lado,
         s.notes && String(s.notes).trim() ? String(s.notes).trim() : null,
         null, // parent_set_id: esta es la serie madre
         null,
@@ -180,7 +217,7 @@
       let segmentIndex = 0;
       s.segments.forEach((seg) => {
         if (!seg) return;
-        const kind = seg.kind === 'restpause' ? 'restpause' : 'dropset';
+        const kind = VALID_SEGMENT_KINDS.includes(seg.kind) ? seg.kind : 'dropset';
         const reps = numeroONulo(seg.reps);
         const weightKg = numeroONulo(seg.weightKg);
         // UN TRAMO SIGUE SIENDO DE REPETICIONES, siempre. Un dropset de
@@ -530,7 +567,7 @@
       const parent = byId.get(r.parent_set_id);
       if (!parent) continue;
       parent.segments.push({
-        kind: r.set_type === 'restpause' ? 'restpause' : 'dropset',
+        kind: KINDS_DE_TRAMO.includes(r.set_type) ? r.set_type : 'dropset',
         segmentIndex: r.segment_index,
         reps: r.reps,
         weightKg: r.weight_kg,

@@ -19,6 +19,18 @@
 // es que se esconda por CSS: es que no está.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.54.0',
+    fecha: '2026-09-11',
+    nuevo: [
+      'Series parciales. Donde ya se apuntaban dropsets y rest-pause hay ahora un tercer tipo: seguir a recorrido corto cuando ya no salen repeticiones completas. Cuentan en el volumen y pueden ser récord, igual que los otros dos.',
+      'El reloj del entreno pasa a horas en cuanto las hay: 1:30:15 en vez de 90:15. Los descansos y la cuenta atrás de la serie siguen en minutos y segundos, que es como se leen mejor.',
+    ],
+    parches: [
+      'Los ejercicios por lados contaban mal las series si empezabas por el derecho: hacías tres series con cada brazo y la app apuntaba "derecho izquierdo derecho / izquierdo derecho / izquierdo". Ahora los dos lados son siempre la misma serie, empieces por donde empieces, y el descanso corto cae donde toca.',
+      'El historial guardaba esas mismas series numeradas de una en una (seis en vez de tres). Las sesiones nuevas ya se guardan bien.',
+    ],
+  },
+  {
     version: '0.53.0',
     fecha: '2026-09-11',
     nuevo: [

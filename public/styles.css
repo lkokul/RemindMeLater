@@ -3279,6 +3279,10 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
    encima cada uno lleva su texto. */
 .gym-set-segment-tag.es-dropset { background: #B45309; color: #FFFFFF; }
 .gym-set-segment-tag.es-restpause { background: #115E59; color: #FFFFFF; }
+/* Parciales: un morado oscuro propio, para que los tres tipos de tramo se
+   distingan de un vistazo. Contraste con el blanco 8,98:1 (WCAG), muy por
+   encima del 4.5:1 que pide la app -- comprobado, no a ojo. */
+.gym-set-segment-tag.es-parciales { background: #5B21B6; color: #FFFFFF; }
 
 /* Estadistica que ocupa la fila entera (tiempo de trabajo del mes). */
 .gym-stat-wide { grid-column: 1 / -1; }
