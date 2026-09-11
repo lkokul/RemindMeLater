@@ -2182,10 +2182,23 @@ body {
   align-items: stretch;
   padding: 0.2rem;
 }
+/* TOPE DE ANCHO, para que la fila nunca se vaya entera de la pantalla.
+   Medido de verdad al anadir "Duplicar": con CUATRO acciones y el tamano
+   de antes ocupaban 308 px de los 320 de un iPhone SE, o sea que la fila
+   desaparecia y ya no sabias sobre QUE estabas actuando.
+
+   La cura de fondo fue dejar el deslizamiento en TRES acciones como
+   mucho (ver wrapNoteRowWithSwipe), que ademas es lo que hace iOS. Este
+   tope se queda como red por si algun dia se anade una cuarta: antes de
+   comerse la fila, los botones se encogen. */
+.note-swipe-actions { max-width: 76%; }
 .note-swipe-actions button {
   font-size: var(--t-secundario);
   padding: 0 0.7rem;
   border-radius: var(--radius);
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
 }
 .note-swipe-wrap > .note-item {
   position: relative;

@@ -86,6 +86,84 @@
     res.status(201).json(serialized);
   });
 
+  // -------------------------------------------------------------------
+  // DUPLICAR UNA CARPETA
+  // -------------------------------------------------------------------
+  //
+  // Con ?withContents=1 se lleva lo de dentro (notas y subcarpetas, hasta
+  // el fondo); sin el, la copia es una carpeta VACIA con el mismo nombre
+  // y color. Es la misma casilla que ya existe al BORRAR ("Eliminar
+  // tambien lo que hay dentro"), y Koku pidio expresamente ese paralelo.
+  //
+  // SOLO SE RENOMBRA LA CARPETA QUE DUPLICAS. Lo de dentro conserva su
+  // nombre: lo que se duplico fue la carpeta, no cada nota. Si no, una
+  // carpeta con 40 notas saldria con 40 titulos acabados en "_copia".
+
+  // Inserta una carpeta nueva y devuelve su fila. Comparte el calculo de
+  // `position` con el POST normal para que las copias no se amontonen
+  // todas en el mismo sitio de la lista.
+  function insertarCarpeta({ name, color, icon, parentId, favorite }) {
+    const { count } = db.prepare('SELECT COUNT(*) as count FROM note_folders').get();
+    const info = db
+      .prepare("INSERT INTO note_folders (name, color, icon, position, parent_id, favorite, updated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))")
+      .run(name, color, icon ?? null, count, parentId ?? null, favorite ? 1 : 0);
+    return db.prepare('SELECT * FROM note_folders WHERE id = ?').get(info.lastInsertRowid);
+  }
+
+  // Copia recursivamente lo que hay DENTRO de origenId a destinoId.
+  //
+  // El limite de profundidad no es por miedo a un bucle (resolveParentId y
+  // wouldCreateCycle ya impiden que una carpeta sea su propia antepasada),
+  // sino por si una base importada de una copia de seguridad viejísima
+  // trajera un ciclo: mejor parar que colgar la app para siempre.
+  function copiarContenido(origenId, destinoId, profundidad) {
+    if (profundidad > 40) return;
+    db.prepare('SELECT id FROM notes WHERE folder_id = ?').all(origenId).forEach((n) => {
+      // duplicarNotaLocal (lo expone routes-local/notes.js) y no un INSERT
+      // a mano: es lo unico que estrena los uuid de las imagenes, y sin eso
+      // borrar una de las dos notas se llevaria las fotos de la otra.
+      if (typeof window.duplicarNotaLocal === 'function') {
+        window.duplicarNotaLocal({ id: n.id, folderId: destinoId, renombrar: false });
+      }
+    });
+    db.prepare('SELECT * FROM note_folders WHERE parent_id = ?').all(origenId).forEach((sub) => {
+      const copia = insertarCarpeta({
+        name: sub.name,
+        color: sub.color,
+        icon: sub.icon,
+        parentId: destinoId,
+        favorite: sub.favorite,
+      });
+      db.recordSyncChange('note_folders', copia.id, 'upsert', serialize(copia), null);
+      copiarContenido(sub.id, copia.id, profundidad + 1);
+    });
+  }
+
+  router.post('/:id/duplicate', (req, res) => {
+    const original = db.prepare('SELECT * FROM note_folders WHERE id = ?').get(req.params.id);
+    if (!original) return res.status(404).json({ error: 'not_found' });
+
+    // Los nombres con los que no puede chocar son los de sus HERMANAS, o
+    // sea las carpetas del mismo nivel -- no las de toda la app.
+    const hermanas = original.parent_id === null
+      ? db.prepare('SELECT name FROM note_folders WHERE parent_id IS NULL').all()
+      : db.prepare('SELECT name FROM note_folders WHERE parent_id = ?').all(original.parent_id);
+
+    const copia = insertarCarpeta({
+      name: nombreDeCopia(original.name, hermanas.map((h) => h.name)),
+      color: original.color,
+      icon: original.icon,
+      parentId: original.parent_id,
+      favorite: original.favorite,
+    });
+
+    if (req.query.withContents === '1') copiarContenido(original.id, copia.id, 0);
+
+    const serialized = serialize(copia);
+    db.recordSyncChange('note_folders', copia.id, 'upsert', serialized, req.device ? req.device.id : null);
+    res.status(201).json(serialized);
+  });
+
   router.put('/:id', (req, res) => {
     const existing = db.prepare('SELECT * FROM note_folders WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'not_found' });

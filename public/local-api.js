@@ -154,3 +154,42 @@ async function dispatchLocalRequest(method, pathname, searchParams, body, header
 
   return { status: 404, body: { error: 'not_found', message: `Ruta desconocida: ${method} ${pathname}` } };
 }
+
+// ---------------------------------------------------------------------
+// EL NOMBRE DE UNA COPIA
+// ---------------------------------------------------------------------
+//
+// Lo comparten las cinco rutas que duplican (notas, carpetas, bloques,
+// dias y ejercicios), asi que vive aqui, con el resto de la fonataneria
+// comun, en vez de repetido cinco veces. Es global a proposito: cada
+// archivo de routes-local/ va en su propio IIFE y no puede importar nada.
+//
+// La regla la eligio Koku: la primera copia es "Empuje_copia" y a partir
+// de ahi se NUMERA -- "Empuje_copia 2", "Empuje_copia 3"... En vez de
+// encadenar sufijos ("Empuje_copia_copia_copia"), que a la cuarta vez no
+// cabe en la fila.
+//
+// Por eso, duplicar una copia no vuelve a pegar "_copia": se le quita el
+// sufijo que ya trae para averiguar el nombre RAIZ y se busca el primer
+// hueco libre a partir de ahi. O sea que duplicar "Empuje_copia" da
+// "Empuje_copia 2", no "Empuje_copia_copia".
+//
+// `existentes` son los nombres con los que NO puede chocar (los de su
+// misma carpeta, su mismo bloque...). La comparacion NO distingue
+// mayusculas: tener "Empuje_copia" y "empuje_copia" a la vez seria
+// confuso aunque para SQLite sean distintos.
+const RE_SUFIJO_DE_COPIA = /_copia(?: (\d+))?$/;
+
+function nombreDeCopia(base, existentes) {
+  const raiz = String(base == null ? '' : base).replace(RE_SUFIJO_DE_COPIA, '');
+  const tomados = new Set((existentes || []).map((n) => String(n == null ? '' : n).trim().toLowerCase()));
+  const candidato = (n) => (n === 1 ? `${raiz}_copia` : `${raiz}_copia ${n}`);
+  // El tope no es por miedo a un bucle infinito (cada vuelta descarta un
+  // nombre), es para no quedarse colgado si alguien tiene miles: a partir
+  // de ahi se devuelve el ultimo probado aunque choque, que es mejor que
+  // no responder.
+  for (let n = 1; n <= 9999; n++) {
+    if (!tomados.has(candidato(n).trim().toLowerCase())) return candidato(n);
+  }
+  return candidato(9999);
+}

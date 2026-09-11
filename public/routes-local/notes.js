@@ -373,6 +373,161 @@
     res.json(serialized);
   });
 
+  // -------------------------------------------------------------------
+  // DUPLICAR UNA NOTA
+  // -------------------------------------------------------------------
+  //
+  // LAS IMAGENES SE COPIAN, NO SE COMPARTEN, y esto no es un detalle: es
+  // lo unico que impide una perdida de datos de verdad.
+  //
+  // El cuerpo de una nota guarda rutas tipo
+  // "/api/notes/images/<uuid>.<ext>", y los bytes viven aparte, en el
+  // almacen noteAssets de IndexedDB. Si la copia se quedara con las
+  // MISMAS rutas, las dos notas apuntarian a los mismos bytes -- y al
+  // borrar cualquiera de las dos, deleteImagesInBody (justo arriba) se
+  // llevaria esos bytes por delante, dejando a la OTRA nota con las
+  // fotos rotas y sin forma de recuperarlas.
+  //
+  // Asi que cada imagen estrena uuid. El nombre nuevo se calcula aqui
+  // mismo (sincrono, que es lo que necesita el cuerpo de la nota) y los
+  // bytes se copian en segundo plano, sin esperar -- igual que el
+  // borrado, que tambien es best-effort. Si esa copia fallara, la nota
+  // NUEVA se quedaria con una imagen rota; la original no se toca, que
+  // es lo importante.
+  function duplicateImagesInBody(body) {
+    if (!body) return body;
+    return body.replace(/\/api\/notes\/images\/([a-zA-Z0-9._-]+)/g, (_todo, nombre) => {
+      const punto = nombre.lastIndexOf('.');
+      const ext = punto > 0 ? nombre.slice(punto) : '';
+      const nuevo = `${crypto.randomUUID()}${ext}`;
+      assetGet(nombre)
+        .then((fila) => (fila ? assetPut(nuevo, fila.bytes, fila.type) : null))
+        .catch(() => {});
+      return `/api/notes/images/${nuevo}`;
+    });
+  }
+
+  // Le pone el sufijo de copia a la PRIMERA LINEA del cuerpo.
+  //
+  // En esta app el titulo de una nota NO es un campo: se deriva de su
+  // primera linea (ver deriveTitleFromBody arriba). Asi que "llamar a la
+  // copia nombre_copia" significa, por fuerza, tocar esa primera linea.
+  // Es lo unico que hace que las dos se distingan en el listado.
+  //
+  // Va JUSTO ANTES del primer salto de bloque, o sea dentro de la etiqueta
+  // que envuelve esa linea -- si se pusiera detras, el sufijo caeria en la
+  // segunda linea y el titulo no cambiaria.
+  //
+  // Y lo primero que hace es QUITAR el sufijo que ya hubiera. Sin eso,
+  // duplicar una copia daba "Lista_copia_copia 3" (pasado de verdad al
+  // probarlo): el nombre nuevo ya viene calculado desde la raiz, asi que
+  // pegarselo a un nombre que todavia lleva el suyo lo cuenta dos veces.
+  //
+  // El "rabo" son las etiquetas de cierre en linea con las que pueda
+  // acabar la primera linea (un titulo en negrita acaba en "</b>"): hay
+  // que apartarlas para tocar el TEXTO, y reponerlas despues.
+  function anadirSufijoAlTitulo(body, format, sufijo) {
+    if (!body) return sufijo ? (format === 'html' ? `<div>${sufijo}</div>` : sufijo) : body;
+    const reescribir = (linea) => {
+      const rabo = (linea.match(/(?:<\/[a-zA-Z0-9]+>)*$/) || [''])[0];
+      const texto = linea.slice(0, linea.length - rabo.length);
+      return `${texto.replace(RE_SUFIJO_DE_COPIA, '')}${sufijo}${rabo}`;
+    };
+    if (format !== 'html') {
+      const salto = body.indexOf('\n');
+      const corte = salto === -1 ? body.length : salto;
+      return `${reescribir(body.slice(0, corte))}${body.slice(corte)}`;
+    }
+    const corte = findFirstLineBreakIndex(body);
+    return `${reescribir(body.slice(0, corte))}${body.slice(corte)}`;
+  }
+
+  // El duplicado de UNA nota, separado de la ruta porque lo necesita
+  // tambien la copia de una carpeta entera (routes-local/noteFolders.js),
+  // que va metiendo las notas de dentro en la carpeta nueva. Se expone
+  // como global al final del archivo, igual que sanearHtmlDeNota: cada
+  // archivo de routes-local va en su IIFE y no puede importar nada.
+  //
+  // Devuelve la nota ya serializada, o null si el original no existe.
+  function duplicarNota({ id, folderId, renombrar = true }) {
+    const original = db.prepare('SELECT * FROM notes WHERE id = ?').get(id);
+    if (!original) return null;
+
+    // La copia nace en la MISMA carpeta que el original: duplicar es
+    // duplicar, no mover. Si se quiere en otro sitio, se arrastra despues.
+    // Salvo que quien llame diga otra cosa (la copia de una carpeta).
+    const destino = folderId === undefined ? original.folder_id : resolveFolderId(folderId);
+
+    // Solo se renombra cuando se duplica LA NOTA. Copiando una carpeta
+    // entera, las notas de dentro conservan su nombre: lo que se duplico
+    // fue la carpeta, no cada nota.
+    let sufijo = '';
+    if (renombrar) {
+      const hermanas = destino === null
+        ? db.prepare('SELECT title FROM notes WHERE folder_id IS NULL').all()
+        : db.prepare('SELECT title FROM notes WHERE folder_id = ?').all(destino);
+      // nombreDeCopia devuelve el nombre ENTERO, pero aqui solo se puede
+      // tocar el FINAL de la primera linea: el resto puede llevar formato
+      // (un titulo en negrita, por ejemplo) y reescribirlo lo perderia.
+      // Asi que se calcula la parte que sobra respecto a la RAIZ, y
+      // anadirSufijoAlTitulo se encarga de quitar el sufijo viejo.
+      const raiz = (original.title || '').replace(RE_SUFIJO_DE_COPIA, '');
+      sufijo = nombreDeCopia(original.title || '', hermanas.map((h) => h.title)).slice(raiz.length);
+    }
+
+    const format = original.body_format === 'html' ? 'html' : 'text';
+    const cuerpo = anadirSufijoAlTitulo(duplicateImagesInBody(original.body), format, sufijo);
+    const profile = db.prepare('SELECT * FROM user_profile WHERE id = 1').get();
+
+    const info = db
+      .prepare('INSERT INTO notes (title, body, body_format, folder_id, favorite, hidden, created_by_name, created_by_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(
+        tituloDeLaCopia(cuerpo, format, sufijo),
+        cuerpo,
+        format,
+        destino,
+        original.favorite ? 1 : 0,
+        // Una copia de una nota oculta nace OCULTA: destaparla sola seria
+        // justo lo contrario de lo que se pidio al ocultarla.
+        original.hidden ? 1 : 0,
+        profile && profile.name ? profile.name : null,
+        profile ? profile.public_id : null
+      );
+
+    const row = db.prepare(`${SELECT_WITH_FOLDER} WHERE n.id = ?`).get(info.lastInsertRowid);
+    const serialized = serialize(row);
+    db.recordSyncChange('notes', row.id, 'upsert', serialized, null);
+    return serialized;
+  }
+
+  // El titulo de la copia, HACIENDOLE SITIO al sufijo.
+  //
+  // Fallo encontrado forzando errores, no en el uso normal: un titulo de
+  // 600 caracteres se recorta a 200 (deriveTitleFromBody), y con el
+  // recorte se iba justo el "_copia" del final -- o sea que la copia
+  // aparecia en la lista con EXACTAMENTE el mismo nombre que el
+  // original y no habia forma de distinguirlas.
+  //
+  // El cuerpo NO se toca (eso seria destruir texto del usuario): lo que
+  // se recorta un poco mas es el TITULO, que es solo lo que se enseña en
+  // el listado. Al abrir la nota, su primera linea sigue entera.
+  function tituloDeLaCopia(body, format, sufijo) {
+    const titulo = deriveTitleFromBody(body, format);
+    if (!sufijo || titulo.endsWith(sufijo)) return titulo;
+    return titulo.slice(0, Math.max(0, 200 - sufijo.length)) + sufijo;
+  }
+
+  router.post('/:id/duplicate', (req, res) => {
+    const cuerpo = req.body || {};
+    const copia = duplicarNota({
+      id: req.params.id,
+      folderId: Object.prototype.hasOwnProperty.call(cuerpo, 'folderId') ? cuerpo.folderId : undefined,
+      renombrar: cuerpo.renombrar !== false,
+    });
+    if (!copia) return res.status(404).json({ error: 'not_found' });
+    res.status(201).json(copia);
+  });
+
   router.delete('/:id', (req, res) => {
     // Se lee el body ANTES de borrar la fila para poder limpiar del disco
     // las imagenes que tuviera -- si no, se quedarian huerfanas para
@@ -401,4 +556,11 @@
   // proposito: dos saneadores acaban separandose, y el que se quede corto
   // es el agujero. Aqui esta la lista blanca buena y ya probada.
   window.sanearHtmlDeNota = sanitizeNoteBody;
+
+  // Duplicar una nota se expone igual, y por el mismo motivo: lo necesita
+  // la copia de una carpeta entera (routes-local/noteFolders.js), y tener
+  // DOS copiadores de notas acabaria con uno de los dos olvidandose de
+  // estrenar los uuid de las imagenes -- que es justo lo que evita que
+  // borrar una nota rompa las fotos de la otra.
+  window.duplicarNotaLocal = duplicarNota;
 })();

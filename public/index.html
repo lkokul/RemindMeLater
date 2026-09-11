@@ -355,8 +355,14 @@
          Eliminar/Mover (modo Seleccionar) y Cancelar/"Mover aquí" (modo
          Mover) -- texto/color/handler se rellenan en JS segun el modo
          activo, ver refreshMobileNotesActionBar en app.js. -->
+    <!-- Tres huecos: el del MEDIO solo se usa en el modo Seleccionar
+         ("Duplicar"), y en el modo Mover se esconde -- ahi los botones
+         son solo Cancelar / "Mover aqui". Se esconde con .hidden en vez
+         de vaciarlo: un boton vacio seguiria ocupando su tercio de la
+         barra y dejaria un hueco raro en medio. -->
     <div id="mobile-notes-action-bar" class="mobile-notes-action-bar hidden">
       <button type="button" id="btn-mobile-notes-action-left" class="danger-btn"></button>
+      <button type="button" id="btn-mobile-notes-action-mid" class="secondary-btn hidden"></button>
       <button type="button" id="btn-mobile-notes-action-right" class="secondary-btn"></button>
     </div>
 

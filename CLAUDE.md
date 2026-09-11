@@ -2885,6 +2885,128 @@ Probado con siete variantes hostiles: clase compuesta
 con `onclick`, con otra clase, y la del fantasma. **Las seis se caen**; la
 única que sobrevive es la buena.
 
+## Duplicar (copias) — 11/9/2026
+
+Petición de Koku: poder copiar una nota, una carpeta (con o sin lo de
+dentro, "como cuando se eliminaba seleccionando"), y en Gimnasio usar
+bloques, días y ejercicios **como plantillas**.
+
+**Las cuatro decisiones que tomó él**, no cambiarlas sin volver a
+preguntarle:
+
+1. **Duplicar vive en los dos sitios de Notas**: al deslizar una fila y
+   en el modo Seleccionar (para varias de golpe).
+2. **Bloques y días pierden el lápiz ✎** y pasan a deslizarse como todo
+   lo demás. Es la misma decisión que tomó con las tarjetas de grupo en
+   su día ("así no da pie a dudas ni nada").
+3. **Las carpetas preguntan, el gimnasio no.** Una carpeta con algo
+   dentro saca la casilla "Copiar también lo que hay dentro"; un bloque
+   o un día se llevan lo suyo siempre, porque un bloque sin días no
+   sirve de plantilla.
+4. **Los nombres se NUMERAN**: `Empuje_copia`, `Empuje_copia 2`,
+   `Empuje_copia 3`... y no `Empuje_copia_copia`, que a la cuarta vez no
+   cabe en la fila.
+
+### Las piezas
+
+- **`nombreDeCopia(base, existentes)`** en `public/local-api.js`, global
+  y compartida por las cinco rutas (cada archivo de `routes-local/` va en
+  su IIFE y no puede importar nada). Le QUITA a la base el sufijo que ya
+  traiga para sacar la raíz, así que duplicar una copia da
+  `X_copia 2` y no `X_copia_copia`. Compara sin distinguir mayúsculas.
+- **Cinco rutas `POST .../:id/duplicate`**: notas, carpetas
+  (`?withContents=1`), bloques, días y ejercicios.
+- `window.duplicarNotaLocal` y `window.duplicarDiaDeGimnasio` se exponen
+  como globales porque los necesitan la copia de una carpeta y la de un
+  bloque, respectivamente. Tener DOS copiadores acabaría con uno de los
+  dos olvidándose de algo.
+
+### Lo que hay que entender antes de tocarlo
+
+- **LAS IMÁGENES DE UNA NOTA SE COPIAN, NO SE COMPARTEN.** Es lo único
+  que impide una pérdida de datos de verdad: el cuerpo guarda rutas
+  `/api/notes/images/<uuid>.<ext>` y los bytes viven en `noteAssets`. Si
+  la copia se quedara con las mismas rutas, borrar CUALQUIERA de las dos
+  notas se llevaría esos bytes (`deleteImagesInBody`) y dejaría a la
+  otra con las fotos rotas. `duplicateImagesInBody()` le da un uuid
+  nuevo a cada imagen (síncrono, que es lo que necesita el cuerpo) y
+  copia los bytes en segundo plano, como el borrado.
+- **El título de una nota NO es un campo**: se deriva de su primera
+  línea. Así que llamar a la copia `X_copia` obliga, por fuerza, a tocar
+  esa primera línea. `anadirSufijoAlTitulo()` aparta las etiquetas de
+  cierre en línea (un título en negrita acaba en `</b>`), QUITA el
+  sufijo que ya hubiera y pone el nuevo. Sin ese "quita", duplicar una
+  copia daba `Lista_copia_copia 3` — pasó de verdad.
+- **Y el título se recorta haciéndole sitio al sufijo**
+  (`tituloDeLaCopia`). Encontrado forzando errores: con una primera línea
+  de 600 caracteres, el recorte a 200 se comía el `_copia` y la copia
+  salía en la lista con EL MISMO nombre que el original. Se recorta el
+  título, nunca el cuerpo: eso sería destruir texto del usuario.
+- **Solo se renombra lo que duplicas.** Las notas de dentro de una
+  carpeta copiada, y los días de dentro de un bloque copiado, conservan
+  su nombre. Si no, una carpeta con 40 notas saldría con 40 títulos
+  acabados en `_copia`.
+- **El ciclo de un bloque se REMAPEA.** `gym_block_cycle_days` apunta a
+  días por su id, así que copiarlo tal cual dejaría el ciclo del bloque
+  NUEVO apuntando a los días del VIEJO — y editar un día del original
+  cambiaría lo que te toca en la copia. Un `NULL` (que es un DESCANSO, no
+  un hueco) se queda como está.
+- **La copia de un bloque nace INACTIVA**, siempre: solo puede haber uno
+  activo, y duplicar una plantilla no es decir "quiero entrenar esto".
+- **Un ejercicio copiado no hereda el historial y pierde su
+  `library_id`.** Lo segundo importa: ese id es la marca de "vino de la
+  librería empaquetada" y es lo que hace idempotente reimportarla; con
+  dos filas compartiéndolo, el import devolvería una cualquiera.
+
+### Tres acciones como mucho al deslizar
+
+Al añadir "Duplicar", una carpeta tenía cuatro (Mover/Editar/Duplicar/
+Eliminar) y **medidas ocupaban 308 px de los 320 de un iPhone SE**: la
+fila se iba entera de la pantalla y dejabas de ver sobre QUÉ estabas
+actuando. iOS tampoco pasa de tres, por lo mismo.
+
+El que sale del deslizamiento es **"Mover"**, que es el que más caminos
+alternativos tiene: sigue en el menú de mantener pulsado
+(`openNoteItemActionMenu`, que es una lista vertical y no compite por el
+ancho) y sobre todo se hace ARRASTRANDO la fila, que es el gesto que
+pidió Koku para mover. Duplicar, en cambio, no tendría otra puerta.
+
+Queda además `.note-swipe-actions { max-width: 76% }` como red por si
+algún día se añade una cuarta: antes de comerse la fila, los botones se
+encogen.
+
+## Por qué "Editar" no hacía nada en el entreno (arreglado el 11/9/2026)
+
+Koku: *"no me deja editar los ejercicios en una serie"*. Deslizar la
+tarjeta de un ejercicio del entreno en vivo y pulsar **Editar** no hacía
+absolutamente nada. **Llevaba roto desde la v0.47.0 (build #59).**
+
+`montarEditorDeTramos` recibía un `exerciseId` que servía para mirar si el
+ejercicio estaba marcado como ASISTIDO y decidir si pintaba el botón de
+signo. Esa marca se fue en la v0.49.0 (el signo se admite siempre), así
+que el parámetro quedó muerto — pero uno de los sitios que lo pasaba,
+`renderGymExerciseEditSets()`, lo sacaba de una variable `ex` **que en esa
+función no existe**. `ReferenceError`.
+
+**Y no se veía porque saltaba dentro de un manejador de clic**: la
+excepción se perdía y el modal simplemente no se abría, sin ningún aviso.
+El arreglo es quitar el parámetro de la función y de sus tres llamadas.
+
+Dos cosas que llevarse de aquí:
+
+- **Cuando un parámetro deja de usarse, se quita TAMBIÉN de quien lo
+  pasa.** Dejarlo "por si acaso" mantiene vivas referencias que ya no
+  apuntan a nada.
+- Ese camino no lo probaba nadie. Ahora sí (`entreno-editar.mjs`, 21
+  comprobaciones): pulsa con el ratón de verdad y mira que el modal **se
+  vea**, no solo que pierda la clase `hidden`. Comprobado que la prueba
+  pilla el fallo: deshaciendo el arreglo se ponen 5 en rojo.
+- **Trampa al escribir pruebas de deslizamiento**: hay
+  `.note-swipe-wrap` en otras vistas OCULTAS de la app, así que
+  `document.querySelector('.note-swipe-wrap')` devuelve el de Notas y la
+  prueba miente. Hay que acotar al contenedor
+  (`#gym-live-exercises .note-swipe-wrap`).
+
 ## Estado actual
 
 **Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde
@@ -2944,6 +3066,10 @@ ahí Koku al probar la #61). Va la última de `settings-card-body`, fuera
 de `#settings-menu` — ese es una rejilla de tarjetas y una línea de texto
 dentro se colocaría como una tarjeta más —, y se esconde con el menú
 desde `showSettingsScreen()`.
+
+**v0.51.0** (11/9/2026) trae **duplicar** (notas, carpetas, bloques, días
+y ejercicios) y el arreglo del "Editar" del entreno, que llevaba roto
+desde la #59. Ver los dos bloques de arriba.
 
 **v0.50.0** trae el inicio de Finanzas rehecho, de `finanzas-movil`
 (commit de Koku). El merge fue **fast-forward**: él ya había traído

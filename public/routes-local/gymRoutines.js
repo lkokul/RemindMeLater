@@ -129,6 +129,58 @@
     res.status(201).json(serialize(row));
   });
 
+  // -------------------------------------------------------------------
+  // DUPLICAR UN DIA
+  // -------------------------------------------------------------------
+  //
+  // Se lleva SIEMPRE sus ejercicios, sin preguntar: un dia sin ejercicios
+  // no sirve de plantilla, que es justo para lo que Koku lo pidio.
+  //
+  // Solo se renombra EL DIA. Los ejercicios de dentro no se tocan -- son
+  // referencias a tu lista de ejercicios (gym_routine_exercises guarda un
+  // exercise_id), no copias: duplicar "Empuje" no te deja con dos "Press
+  // banca" en la lista.
+  //
+  // La copia cae en el MISMO bloque que el original. Si la quieres en
+  // otro, se cambia luego desde su ficha, que ya tiene el selector.
+  // `renombrar` a false lo usa la copia de un BLOQUE entero: ahi lo que
+  // se duplico es el bloque, asi que sus dias conservan su nombre.
+  function duplicarDia(id, blockIdDestino, renombrar = true) {
+    const original = db.prepare('SELECT * FROM gym_routines WHERE id = ?').get(id);
+    if (!original) return null;
+    const destino = blockIdDestino === undefined ? original.block_id : resolveBlockId(blockIdDestino);
+
+    // Los nombres con los que no puede chocar son los del MISMO bloque,
+    // que es lo unico que ves junto en una lista.
+    const hermanos = destino === null
+      ? db.prepare('SELECT name FROM gym_routines WHERE block_id IS NULL').all()
+      : db.prepare('SELECT name FROM gym_routines WHERE block_id = ?').all(destino);
+
+    const nombre = renombrar ? nombreDeCopia(original.name, hermanos.map((h) => h.name)) : original.name;
+    const { count } = db.prepare('SELECT COUNT(*) as count FROM gym_routines').get();
+    const info = db
+      .prepare('INSERT INTO gym_routines (name, icon, color, position, block_id) VALUES (?, ?, ?, ?, ?)')
+      .run(nombre, original.icon, original.color, count, destino);
+
+    // Los ejercicios se copian con TODO: orden, series/repeticiones/
+    // descanso orientativos y la marca de oculto. Un ejercicio aparcado
+    // sigue aparcado en la copia.
+    db.prepare(`
+      INSERT INTO gym_routine_exercises (routine_id, exercise_id, position, target_sets, target_reps, target_rest_seconds, hidden)
+      SELECT ?, exercise_id, position, target_sets, target_reps, target_rest_seconds, hidden
+      FROM gym_routine_exercises WHERE routine_id = ?
+      ORDER BY position ASC, id ASC
+    `).run(info.lastInsertRowid, id);
+
+    return db.prepare('SELECT * FROM gym_routines WHERE id = ?').get(info.lastInsertRowid);
+  }
+
+  router.post('/:id/duplicate', (req, res) => {
+    const copia = duplicarDia(req.params.id, undefined);
+    if (!copia) return res.status(404).json({ error: 'not_found' });
+    res.status(201).json(serialize(copia));
+  });
+
   router.put('/:id', (req, res) => {
     const existing = db.prepare('SELECT * FROM gym_routines WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'not_found' });
@@ -167,5 +219,10 @@
   });
 
   mountLocalRouter('/api/gym-routines', router);
+
+  // Lo necesita la copia de un BLOQUE entero (routes-local/gymBlocks.js),
+  // que duplica todos sus dias. Mismo patron que duplicarNotaLocal: cada
+  // archivo va en su IIFE y no puede importar nada.
+  window.duplicarDiaDeGimnasio = duplicarDia;
 
 })();

@@ -3764,7 +3764,7 @@ function startNoteItemMove(itemKey) {
 async function startNoteItemDelete(itemKey) {
   const { item } = resolveMobileNotesItem(itemKey) || {};
   const nombre = item ? getNoteListItemName(item) : 'esto';
-  const conContenido = mobileNotesDeletionIncludesFolderWithContent([itemKey]);
+  const conContenido = notasMarcadasConCarpetaLlena([itemKey]);
   const ok = await showAppConfirm(
     conContenido
       ? `¿Eliminar "${nombre}"? Lo que hay dentro subirá un nivel, salvo que marques la casilla.`
@@ -3789,6 +3789,41 @@ function startNoteItemEdit(itemKey) {
   if (kind === 'folder' && item) openNoteFolderModal(item);
 }
 
+// DUPLICAR uno, desde sus acciones al deslizar.
+//
+// Una carpeta con algo dentro pregunta con la MISMA casilla que al
+// borrar ("Copiar también lo que hay dentro"), que es el paralelo que
+// pidió Koku. Una carpeta vacía y una nota no preguntan nada: no hay
+// nada que decidir, y un diálogo con una sola respuesta posible es un
+// toque de más.
+async function startNoteItemDuplicate(itemKey) {
+  const { kind, id, item } = resolveMobileNotesItem(itemKey) || {};
+  if (!item) return;
+  let conContenido = false;
+  if (kind === 'folder' && notasMarcadasConCarpetaLlena([itemKey])) {
+    const ok = await showAppConfirm(
+      `¿Duplicar "${getNoteListItemName(item)}"?`,
+      { okText: 'Duplicar', checkbox: { label: 'Copiar también lo que hay dentro' } }
+    );
+    if (!ok) return;
+    conContenido = lastAppConfirmCheckbox;
+  }
+  await duplicateNoteItems([itemKey], conContenido);
+  renderNotesView();
+}
+
+// El duplicado en si, compartido por el deslizamiento y el modo
+// Seleccionar. "conContenido" solo afecta a las carpetas; una nota se
+// copia entera siempre.
+async function duplicateNoteItems(keys, conContenido) {
+  for (const key of keys) {
+    const { kind, id } = resolveMobileNotesItem(key);
+    if (kind === 'note') await api(`/api/notes/${id}/duplicate`, { method: 'POST' });
+    else await api(`/api/note-folders/${id}/duplicate${conContenido ? '?withContents=1' : ''}`, { method: 'POST' });
+  }
+  await Promise.all([loadNotes(), loadNoteFolders()]);
+}
+
 function isNoteItemFolder(itemKey) {
   return itemKey.startsWith('folder:');
 }
@@ -3796,6 +3831,9 @@ function isNoteItemFolder(itemKey) {
 const NOTE_ACTION_EDIT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 
 const NOTE_ACTION_MOVE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m12 11 3 3-3 3"/><path d="M9 14h6"/></svg>';
+// Dos hojas superpuestas, el icono de "copiar" de toda la vida. Mismo
+// trazo y mismo viewBox que los otros tres, para que la lista no baile.
+const NOTE_ACTION_DUPLICATE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 const NOTE_ACTION_DELETE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
 
 const noteItemActionMenu = document.createElement('div');
@@ -3811,10 +3849,14 @@ function openNoteItemActionMenu(anchorEl, itemKey) {
     titulo.textContent = getNoteListItemName(item);
     noteItemActionMenu.appendChild(titulo);
   }
+  // Aqui SI caben todas: es una lista vertical, no compite por el ancho
+  // como el deslizamiento (que se queda en tres). Por eso "Mover" vive
+  // ahora aqui y no alli.
   const acciones = [['Mover', NOTE_ACTION_MOVE_ICON, '', () => startNoteItemMove(itemKey)]];
   if (isNoteItemFolder(itemKey)) {
     acciones.push(['Editar', NOTE_ACTION_EDIT_ICON, '', () => startNoteItemEdit(itemKey)]);
   }
+  acciones.push(['Duplicar', NOTE_ACTION_DUPLICATE_ICON, '', () => startNoteItemDuplicate(itemKey)]);
   acciones.push(['Eliminar', NOTE_ACTION_DELETE_ICON, 'is-danger', () => startNoteItemDelete(itemKey)]);
   acciones.forEach(([texto, icono, extra, fn]) => {
     const opt = document.createElement('button');
@@ -4004,10 +4046,22 @@ function wrapNoteRowWithSwipe(row, itemKey) {
 
   const acciones = document.createElement('div');
   acciones.className = 'note-swipe-actions';
-  const lista = [['Mover', 'secondary-btn', () => startNoteItemMove(itemKey)]];
+  // TRES ACCIONES COMO MUCHO, y el limite no es estetico: es de ancho.
+  //
+  // Al anadir "Duplicar" habia cuatro en una carpeta (Mover/Editar/
+  // Duplicar/Eliminar) y medidas ocupaban 308 px de los 320 de un iPhone
+  // SE: la fila se iba entera de la pantalla y dejabas de ver sobre QUE
+  // estabas actuando. iOS tampoco pasa de tres por el mismo motivo.
+  //
+  // El que sale es "Mover", que es el que tiene mas caminos alternativos:
+  // sigue en el menu de mantener pulsado (ver openNoteItemActionMenu) y
+  // sobre todo se hace ARRASTRANDO la fila, que es el gesto que pidio
+  // Koku para mover. Duplicar, en cambio, no tendria otra puerta.
+  const lista = [];
   // "Editar" solo en carpetas (nombre y color) -- una nota se edita
   // abriendola sin mas.
   if (isNoteItemFolder(itemKey)) lista.push(['Editar', 'secondary-btn', () => startNoteItemEdit(itemKey)]);
+  lista.push(['Duplicar', 'secondary-btn', () => startNoteItemDuplicate(itemKey)]);
   lista.push(['Eliminar', 'danger-btn', () => startNoteItemDelete(itemKey)]);
   lista.forEach(([texto, clase, fn]) => {
     const btn = document.createElement('button');
@@ -4138,7 +4192,12 @@ function setMobileNotesMode(mode) {
 // NOTES_VIEW_TARGETS), rellenados con el mismo texto/handler segun el
 // modo activo.
 const NOTES_ACTION_BAR_TARGETS = {
-  mobile: { barId: 'mobile-notes-action-bar', leftId: 'btn-mobile-notes-action-left', rightId: 'btn-mobile-notes-action-right' },
+  mobile: {
+    barId: 'mobile-notes-action-bar',
+    leftId: 'btn-mobile-notes-action-left',
+    midId: 'btn-mobile-notes-action-mid',
+    rightId: 'btn-mobile-notes-action-right',
+  },
 };
 
 // Sin seleccion propia (Eliminar/Mover deshabilitados con nada marcado),
@@ -4146,21 +4205,32 @@ const NOTES_ACTION_BAR_TARGETS = {
 // par de botones reutilizado para los dos casos en vez de 2 barras
 // distintas, replicado en las dos plataformas.
 function refreshMobileNotesActionBar() {
-  Object.values(NOTES_ACTION_BAR_TARGETS).forEach(({ barId, leftId, rightId }) => {
+  Object.values(NOTES_ACTION_BAR_TARGETS).forEach(({ barId, leftId, midId, rightId }) => {
     const bar = document.getElementById(barId);
     if (!bar) return;
     const leftBtn = document.getElementById(leftId);
+    const midBtn = document.getElementById(midId);
     const rightBtn = document.getElementById(rightId);
+    // El del medio solo existe en el modo Seleccionar; el resto de modos
+    // lo apagan aqui, para no tener que acordarse en cada rama.
+    if (midBtn) { midBtn.classList.add('hidden'); midBtn.onclick = null; }
 
     if (mobileNotesMode === 'select') {
-      // Seleccionar sirve para BORRAR varios de una vez, y ya esta:
-      // mover se hace arrastrando (pedido explicito de Koku), asi que
-      // aqui el par es Eliminar / Cancelar.
+      // Seleccionar sirve para hacer algo con VARIOS de una vez: borrarlos
+      // o duplicarlos. Mover no esta aqui porque se hace arrastrando
+      // (pedido explicito de Koku).
       bar.classList.remove('hidden');
       leftBtn.textContent = 'Eliminar';
       leftBtn.className = 'danger-btn';
       leftBtn.disabled = mobileNotesSelectedKeys.size === 0;
       leftBtn.onclick = openMobileNotesDeleteModal;
+      if (midBtn) {
+        midBtn.classList.remove('hidden');
+        midBtn.textContent = 'Duplicar';
+        midBtn.className = 'secondary-btn';
+        midBtn.disabled = mobileNotesSelectedKeys.size === 0;
+        midBtn.onclick = duplicarSeleccionDeNotas;
+      }
       rightBtn.textContent = 'Cancelar';
       rightBtn.className = 'secondary-btn';
       rightBtn.disabled = false;
@@ -4186,6 +4256,34 @@ function refreshMobileNotesActionBar() {
 
 }
 
+// Duplicar TODO lo marcado en el modo Seleccionar.
+//
+// Se pregunta UNA sola vez, no una por carpeta: si entre lo marcado hay
+// alguna carpeta con algo dentro, la casilla decide para todas. Es el
+// mismo trato que ya da el borrado en bloque, y encadenar cinco dialogos
+// para cinco carpetas seria insufrible.
+async function duplicarSeleccionDeNotas() {
+  const keys = [...mobileNotesSelectedKeys];
+  if (keys.length === 0) return;
+  let conContenido = false;
+  if (notasMarcadasConCarpetaLlena(keys)) {
+    const ok = await showAppConfirm(
+      keys.length === 1
+        ? '¿Duplicar lo seleccionado?'
+        : `¿Duplicar los ${keys.length} elementos seleccionados?`,
+      { okText: 'Duplicar', checkbox: { label: 'Copiar también lo que hay dentro' } }
+    );
+    if (!ok) return;
+    conContenido = lastAppConfirmCheckbox;
+  }
+  await duplicateNoteItems(keys, conContenido);
+  // Se sale del modo Seleccionar, igual que al borrar: lo marcado ya no
+  // dice nada util una vez hecha la copia, y quedarse con los checkboxes
+  // puestos sobre una lista que acaba de cambiar confunde.
+  setMobileNotesMode('browse');
+  renderNotesView();
+}
+
 function resolveMobileNotesItem(key) {
   const [kind, idStr] = key.split(':');
   const id = Number(idStr);
@@ -4193,11 +4291,17 @@ function resolveMobileNotesItem(key) {
   return { kind, id, item: state.noteFolders.find((f) => f.id === id) };
 }
 
-// El aviso de "esto tiene contenido dentro" solo hace falta si la
-// seleccion final (ya descontando lo excluido en el modal) incluye una
-// CARPETA con notas o subcarpetas -- se calcula con lo que ya hay en
-// memoria (state.noteFolders/state.notes), sin pedir nada al servidor.
-function mobileNotesDeletionIncludesFolderWithContent(keys) {
+// ¿Hay entre lo marcado alguna CARPETA con notas o subcarpetas dentro?
+//
+// Es lo que decide si hace falta preguntar "¿y lo de dentro?" -- lo usan
+// tanto el borrado (donde lo de dentro sube un nivel salvo que marques la
+// casilla) como el duplicado (donde la copia sale vacia salvo que la
+// marques). Se calcula con lo que ya hay en memoria
+// (state.noteFolders/state.notes), sin pedir nada al motor local.
+//
+// Se llamaba mobileNotesDeletionIncludes...: se renombro al empezar a
+// usarla tambien para duplicar, que ya no es "deletion".
+function notasMarcadasConCarpetaLlena(keys) {
   return keys.some((key) => {
     const { kind, id } = resolveMobileNotesItem(key);
     if (kind !== 'folder') return false;
@@ -4259,7 +4363,7 @@ async function deleteNoteItems(keys, conContenido) {
 // Pregunta lo que haya que preguntar y borra. Devuelve false si se
 // cancela. Lo usa el modal de borrar varios.
 async function runNoteItemsDeletion(keys) {
-  const conContenido = mobileNotesDeletionIncludesFolderWithContent(keys);
+  const conContenido = notasMarcadasConCarpetaLlena(keys);
   if (conContenido) {
     const proceed = await showAppConfirm(
       'Lo que haya dentro de las carpetas que borres subirá un nivel, salvo que marques la casilla.',
@@ -9463,10 +9567,26 @@ function renderGymExercisesList() {
     // Mismo componente que las notas, las carpetas, las sesiones del
     // historial y las tarjetas de grupo.
     list.appendChild(wrapRowWithSwipeActions(row, {
-      onEdit: () => openGymExerciseModal(ex),
-      onDelete: () => borrarEjercicioDeLaLista(ex),
+      botones: [
+        ['Editar', 'secondary-btn', () => openGymExerciseModal(ex)],
+        ['Duplicar', 'secondary-btn', () => duplicarEjercicioDeLaLista(ex)],
+        ['Eliminar', 'danger-btn', () => borrarEjercicioDeLaLista(ex)],
+      ],
     }));
   });
+}
+
+// Duplicar un ejercicio: la misma ficha (musculo, secundarios, material,
+// nota fija, unilateral y la configuracion por defecto) pero SIN
+// historial -- es un ejercicio nuevo, no ha hecho nada todavia.
+//
+// Para lo que sirve: "hago press banca con mancuernas y quiero el mismo
+// pero con barra". Se duplica y se cambia el material, en vez de volver
+// a rellenarlo todo desde cero.
+async function duplicarEjercicioDeLaLista(ex) {
+  await api(`/api/gym-exercises/${ex.id}/duplicate`, { method: 'POST' });
+  await loadGymExercises();
+  renderGymExercisesList();
 }
 
 // Borrar desde el deslizamiento. El servidor RECHAZA borrar un ejercicio
@@ -9513,18 +9633,32 @@ function renderGymBlocksList() {
     const row = document.createElement('div');
     row.className = 'gym-list-item gym-block-item';
     row.dataset.openGymBlock = b.id;
+    // EL LAPIZ SE FUE: editar, duplicar y eliminar salen DESLIZANDO, como
+    // en las notas, las carpetas, los ejercicios, las sesiones del
+    // historial y las tarjetas de grupo. Es la misma decision que tomo
+    // Koku en su dia con los grupos ("asi no da pie a dudas ni nada"):
+    // una sola forma de operar sobre una fila en toda la app.
+    //
+    // "Activar" SE QUEDA en la fila a proposito: no es una accion de
+    // edicion, es el estado del bloque, y tenerlo a un toque es justo lo
+    // que se quiere de una lista de bloques.
     row.innerHTML = `
       <span class="gym-list-item-name">${escapeHtml(b.name)}${b.isActive ? ' <span class="gym-block-active-badge">Activo</span>' : ''}
         <span class="gym-list-item-muted">(${b.dayCount} día${b.dayCount === 1 ? '' : 's'})</span></span>
       <div class="gym-list-item-actions">
         ${b.isActive ? '' : `<button type="button" class="secondary-btn gym-block-activate-btn" data-activate-gym-block="${b.id}">Activar</button>`}
-        <button type="button" class="icon-btn" data-edit-gym-block="${b.id}" aria-label="Editar bloque">✎</button>
       </div>
     `;
     // Toda la fila entra al bloque, salvo los botones de la derecha (que
     // paran la propagacion) -- mismo patron que las filas de sesion.
     row.addEventListener('click', () => openGymBlockDays(b.id));
-    list.appendChild(row);
+    list.appendChild(wrapRowWithSwipeActions(row, {
+      botones: [
+        ['Editar', 'secondary-btn', () => openGymBlockModal(b)],
+        ['Duplicar', 'secondary-btn', () => duplicarBloqueDeGimnasio(b)],
+        ['Eliminar', 'danger-btn', () => borrarBloqueDeGimnasio(b)],
+      ],
+    }));
   });
   list.querySelectorAll('[data-activate-gym-block]').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
@@ -9534,12 +9668,34 @@ function renderGymBlocksList() {
       renderGymBlocksList();
     });
   });
-  list.querySelectorAll('[data-edit-gym-block]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openGymBlockModal(state.gymBlocks.find((b) => b.id === Number(btn.dataset.editGymBlock)));
-    });
-  });
+}
+
+// Duplicar un bloque se lleva SIEMPRE sus dias, sus ejercicios y su
+// ciclo, sin preguntar: un bloque sin dias no sirve de plantilla, que es
+// justo para lo que Koku lo pidio. La copia nace inactiva.
+async function duplicarBloqueDeGimnasio(block) {
+  await api(`/api/gym-blocks/${block.id}/duplicate`, { method: 'POST' });
+  await Promise.all([loadGymBlocks(), loadGymRoutines()]);
+  renderGymBlocksList();
+}
+
+// El mismo borrado que ya vivia dentro de la ficha, sacado aqui para que
+// lo compartan el deslizamiento y el boton del modal -- y para que el
+// aviso (cuantos dias se lleva por delante) sea el mismo por los dos
+// caminos.
+async function borrarBloqueDeGimnasio(block) {
+  const dayCount = block ? block.dayCount : 0;
+  const ok = await showAppConfirm(
+    dayCount > 0
+      ? `¿Eliminar este bloque y ${dayCount === 1 ? 'su día' : `sus ${dayCount} días`}? Las sesiones ya registradas no se pierden.`
+      : '¿Eliminar este bloque?',
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/gym-blocks/${block.id}`, { method: 'DELETE' });
+  await Promise.all([loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
+  renderGymBlocksList();
+  renderGymSessionsList();
 }
 
 // Entra al nivel de dias de UN bloque (o vuelve al de bloques con null).
@@ -9575,29 +9731,50 @@ function renderGymRoutinesList() {
   days.forEach((r) => {
     const row = document.createElement('div');
     row.className = 'gym-list-item';
+    // EL LAPIZ SE FUE, igual que en los bloques: editar / duplicar /
+    // eliminar salen DESLIZANDO, como en el resto de la app.
+    //
+    // Las dos entradas al dia siguen siendo dos, que es lo que pidio
+    // Koku, solo que ahora por gestos distintos: TOCAR la fila abre sus
+    // EJERCICIOS (a lo que se entra el 90% de las veces) y DESLIZAR ->
+    // "Editar" abre su FICHA (nombre, color, icono y bloque).
     row.innerHTML = `
       <span class="color-dot" style="background-color: ${r.color}"></span>
       <span class="gym-list-item-name">${r.icon ? escapeHtml(r.icon) + ' ' : ''}${escapeHtml(r.name)} <span class="gym-list-item-muted">(${r.exercises.length} ejercicio${r.exercises.length === 1 ? '' : 's'})</span></span>
-      <div class="gym-list-item-actions">
-        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar nombre, color y bloque">✎</button>
-      </div>
     `;
-    // Dos entradas distintas al mismo dia, como pidio Koku: el lapiz
-    // para su FICHA (nombre, color, icono y bloque) y tocar la fila para
-    // sus EJERCICIOS, que es a lo que se entra el 90% de las veces.
     row.addEventListener('click', () => {
       openGymRoutineModal(state.gymRoutines.find((x) => x.id === r.id), 'ejercicios');
     });
-    list.appendChild(row);
+    list.appendChild(wrapRowWithSwipeActions(row, {
+      botones: [
+        ['Editar', 'secondary-btn', () => openGymRoutineModal(state.gymRoutines.find((x) => x.id === r.id), 'ficha')],
+        ['Duplicar', 'secondary-btn', () => duplicarDiaDelPlan(r)],
+        ['Eliminar', 'danger-btn', () => borrarDiaDelPlan(r)],
+      ],
+    }));
   });
-  list.querySelectorAll('[data-edit-gym-routine]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      // Sin esto, el clic del lapiz sube tambien a la fila y abriria las
-      // dos mitades una encima de otra.
-      e.stopPropagation();
-      openGymRoutineModal(state.gymRoutines.find((r) => r.id === Number(btn.dataset.editGymRoutine)), 'ficha');
-    });
-  });
+}
+
+// Duplicar un dia se lleva SIEMPRE sus ejercicios (con su orden, sus
+// series/repeticiones/descanso y la marca de oculto). La copia cae en el
+// MISMO bloque; si la quieres en otro, se cambia desde su ficha.
+async function duplicarDiaDelPlan(routine) {
+  await api(`/api/gym-routines/${routine.id}/duplicate`, { method: 'POST' });
+  await Promise.all([loadGymRoutines(), loadGymBlocks()]);
+  renderGymRoutinesList();
+  renderGymBlocksList();
+}
+
+// El mismo borrado que el boton de la ficha, compartido para que el aviso
+// no se separe por un camino o por el otro.
+async function borrarDiaDelPlan(routine) {
+  const ok = await showAppConfirm('¿Eliminar este día? Las sesiones ya registradas con él no se pierden.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  await api(`/api/gym-routines/${routine.id}`, { method: 'DELETE' });
+  await Promise.all([loadGymRoutines(), loadGymBlocks(), loadGymSessions()]);
+  renderGymRoutinesList();
+  renderGymBlocksList();
+  renderGymSessionsList();
 }
 
 // Deslizar una fila hacia la izquierda para sacar Editar / Eliminar
@@ -12703,7 +12880,6 @@ function renderGymExerciseEditSets() {
     const pintar = () => montarEditorDeTramos(editor, set.segments, {
       pesoMadre: gymNormalizarPeso(bloque.querySelector('[data-set-field="weightDisplay"]').value) || '',
       alQuitar: () => pintar(),
-      exerciseId: ex.exerciseId,
     });
     pintar();
     bloque.querySelectorAll('[data-add-seg]').forEach((btn) => {
@@ -12917,11 +13093,25 @@ function gymPesoMadreDeTramos() {
 // `segmentos` se modifica EN EL SITIO (es el array del sitio que lo
 // llama); `pesoMadre` es la sugerencia gris de partida, que en el
 // entreno sale del campo de peso y en el historial de la fila.
-function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar, exerciseId } = {}) {
-  // Los tramos son del MISMO ejercicio que su serie madre, asi que
-  // (Antes aqui se miraba si el ejercicio estaba marcado como asistido,
-  // para decidir si pintar el boton de signo. Esa marca se fue: el signo
-  // se admite siempre, en todos los ejercicios.)
+// OJO CON EL TERCER ARGUMENTO: ya NO lleva exerciseId, y quitarlo fue el
+// arreglo de un fallo que Koku vio en el iPhone ("no me deja editar los
+// ejercicios en una serie").
+//
+// Lo que pasaba: en su dia este editor recibia el exerciseId para mirar si
+// el ejercicio estaba marcado como ASISTIDO y decidir si pintaba el boton
+// de signo. Esa marca se fue en la v0.49.0 (el signo se admite siempre, en
+// todos los ejercicios), asi que el parametro quedo muerto -- pero uno de
+// los sitios que lo pasaba, renderGymExerciseEditSets(), lo sacaba de una
+// variable `ex` que en ESA funcion no existe. ReferenceError.
+//
+// Y no se veia porque saltaba dentro de un manejador de clic: la excepcion
+// se perdia y el modal simplemente no se abria, sin ningun aviso. Llevaba
+// roto desde la v0.47.0 (build #59).
+//
+// Moraleja para la proxima: cuando un parametro deja de usarse, se quita
+// TAMBIEN de quien lo pasa. Dejarlo "por si acaso" mantiene vivas
+// referencias que ya no apuntan a nada.
+function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
   cont.innerHTML = '';
   const unit = getGymWeightUnitLabel();
   // El peso que se propone en cada tramo: en un rest-pause es SIEMPRE el
@@ -12961,7 +13151,7 @@ function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar, exerciseId
     row.querySelector('[data-seg-remove]').addEventListener('click', () => {
       segmentos.splice(i, 1);
       if (alQuitar) alQuitar();
-      else montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar, exerciseId });
+      else montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar });
     });
     cont.appendChild(row);
     pesoAnterior = (seg.weightDisplay !== '' && seg.weightDisplay != null) ? seg.weightDisplay : sugerencia;
@@ -12975,9 +13165,6 @@ function renderGymSetEndSegments() {
     {
       pesoMadre: gymPesoMadreDeTramos(),
       alQuitar: renderGymSetEndSegments,
-      exerciseId: gymLiveSession && gymLiveSession.activeSet
-        ? gymLiveSession.activeSet.exerciseId
-        : null,
     },
   );
 }
@@ -14105,22 +14292,14 @@ document.getElementById('gym-block-form').addEventListener('submit', async (e) =
 document.getElementById('btn-delete-gym-block').addEventListener('click', async () => {
   const id = Number(document.getElementById('gym-block-id').value);
   const block = state.gymBlocks.find((b) => b.id === id);
-  const dayCount = block ? block.dayCount : 0;
-  // Borrar un bloque se lleva sus dias (plantillas), aunque nunca el
-  // historial de sesiones -- se avisa con el confirm propio de la app,
-  // no con el del navegador (regla del proyecto).
-  const ok = await showAppConfirm(
-    dayCount > 0
-      ? `¿Eliminar este bloque y ${dayCount === 1 ? 'su día' : `sus ${dayCount} días`}? Las sesiones ya registradas no se pierden.`
-      : '¿Eliminar este bloque?',
-    { okText: 'Eliminar', danger: true }
-  );
-  if (!ok) return;
-  await api(`/api/gym-blocks/${id}`, { method: 'DELETE' });
-  closeGymBlockModal();
-  await Promise.all([loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
-  renderGymBlocksList();
-  renderGymSessionsList();
+  if (!block) return;
+  // El mismo borrado que el del deslizamiento, con el mismo aviso: una
+  // sola funcion para que los dos caminos no se separen nunca.
+  const habia = state.gymBlocks.length;
+  await borrarBloqueDeGimnasio(block);
+  // Solo se cierra la ficha si de verdad se borro (si dijo que no, se
+  // queda donde estaba).
+  if (state.gymBlocks.length < habia) closeGymBlockModal();
 });
 
 // --- Modal de dia (antes "rutina" -- ids gym-routine-* conservados) ---
@@ -14406,15 +14585,12 @@ document.getElementById('gym-routine-form').addEventListener('submit', async (e)
 });
 
 document.getElementById('btn-delete-gym-routine').addEventListener('click', async () => {
-  const id = document.getElementById('gym-routine-id').value;
-  const ok = await showAppConfirm('¿Eliminar este día? Las sesiones ya registradas con él no se pierden.', { okText: 'Eliminar', danger: true });
-  if (!ok) return;
-  await api(`/api/gym-routines/${id}`, { method: 'DELETE' });
-  closeGymRoutineModal();
-  await Promise.all([loadGymRoutines(), loadGymBlocks(), loadGymSessions()]);
-  renderGymRoutinesList();
-  renderGymBlocksList();
-  renderGymSessionsList();
+  const id = Number(document.getElementById('gym-routine-id').value);
+  const routine = state.gymRoutines.find((r) => r.id === id);
+  if (!routine) return;
+  const habia = state.gymRoutines.length;
+  await borrarDiaDelPlan(routine);
+  if (state.gymRoutines.length < habia) closeGymRoutineModal();
 });
 
 // --- Modal de sesion --------------------------------------------------
@@ -14624,7 +14800,6 @@ function renderGymSessionExercisesField() {
       const pintarTramos = () => montarEditorDeTramos(editor, set.segments, {
         pesoMadre: gymNormalizarPeso(bloqueSerie.querySelector('[data-field="weight"]').value) || '',
         alQuitar: () => pintarTramos(),
-        exerciseId: exRow.exerciseId,
       });
       // El LADO, solo en los ejercicios que se cuentan por lados. Aqui
       // faltaba del todo: apuntando una sesion a mano no habia forma de
@@ -20091,7 +20266,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.50.0';
+const APP_VERSION = '0.51.0';
 const APP_VERSION_DATE = '2026-09-11';
 
 function renderAppVersionLine() {

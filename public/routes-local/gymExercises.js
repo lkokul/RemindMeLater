@@ -143,6 +143,51 @@
     res.status(201).json(serialize(row));
   });
 
+  // -------------------------------------------------------------------
+  // DUPLICAR UN EJERCICIO
+  // -------------------------------------------------------------------
+  //
+  // Para lo que sirve: "hago press banca con mancuernas y quiero el mismo
+  // pero con barra" -- se duplica y se cambia el material, en vez de
+  // volver a rellenar musculo, secundarios, unilateral y la configuracion
+  // por defecto desde cero.
+  //
+  // Lo que NO se copia, y son las dos cosas importantes:
+  //
+  // 1. EL HISTORIAL. Las series apuntadas (gym_sets) van por exercise_id,
+  //    asi que la copia nace sin ninguna: es un ejercicio nuevo, no ha
+  //    hecho nada todavia. Copiarlas inflaria tus graficas y tus records
+  //    con peso que no levantaste.
+  // 2. library_id, que se pone a NULL. Es la marca de "este vino de la
+  //    libreria empaquetada" y sirve para que reimportarla sea
+  //    idempotente (ver el POST de arriba): si la copia se lo quedara,
+  //    habria DOS filas con el mismo library_id y el import devolveria
+  //    una cualquiera de las dos.
+  //
+  // Y no aparece en ningun dia: gym_routine_exercises no se toca. Es una
+  // ficha nueva en tu lista, lista para meterla donde quieras.
+  router.post('/:id/duplicate', (req, res) => {
+    const original = db.prepare('SELECT * FROM gym_exercises WHERE id = ?').get(req.params.id);
+    if (!original) return res.status(404).json({ error: 'not_found' });
+
+    const nombres = db.prepare('SELECT name FROM gym_exercises').all().map((e) => e.name);
+    const info = db
+      .prepare(`
+        INSERT INTO gym_exercises
+          (name, muscle_group, library_id, equipment, secondary_muscles, notes,
+           unilateral, assisted, count_sides_separately, side_rest_seconds,
+           default_sets, default_reps, default_rest_seconds)
+        SELECT ?, muscle_group, NULL, equipment, secondary_muscles, notes,
+               unilateral, assisted, count_sides_separately, side_rest_seconds,
+               default_sets, default_reps, default_rest_seconds
+        FROM gym_exercises WHERE id = ?
+      `)
+      .run(nombreDeCopia(original.name, nombres), original.id);
+
+    const row = db.prepare('SELECT * FROM gym_exercises WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json(serialize(row));
+  });
+
   router.put('/:id', (req, res) => {
     const existing = db.prepare('SELECT * FROM gym_exercises WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'not_found' });
