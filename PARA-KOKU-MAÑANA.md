@@ -179,9 +179,12 @@ propuesta con capturas antes de tocar nada?**
 Lo dijiste tú: *"tema de emojis no sé, si tú lo dices okey, miro y te
 digo"*. Aquí está el detalle para que mires con datos.
 
-**Dónde**: las siete tarjetas del inicio de Finanzas — 📊 Este mes,
-📅 Próximos pagos, 📺 Suscripciones, 🎯 Objetivos, 🧾 Movimientos,
-🤝 Deudas y 📈 Inversiones (`finanzasTarjetaEl` en `app.js`).
+**Dónde**: las siete FILAS del inicio de Finanzas — 📊 Este mes,
+📅 Gastos fijos, 📺 Suscripciones, 🎯 Objetivos, 🧾 Movimientos,
+🤝 Deudas y 📈 Inversiones. (Al pasar el inicio de tarjetas a filas el
+11/9/2026 se fue `finanzasTarjetaEl`, pero los emojis viajaron con él:
+ahora los pinta `finanzasFilaEl` en el `<span class="finanzas-row-icon">`.
+O sea que esta duda sigue viva igual, solo cambió el envoltorio.)
 
 **Por qué lo saqué**: es exactamente el mismo motivo por el que el
 9/9/2026 cambiaste el sol y la luna de la topbar de emoji a SVG, y esas
@@ -212,7 +215,9 @@ en Gimnasio, Viajes y Entretenimiento, porque ahora mismo Finanzas es la
 - **(a) Dejarlos.** Cero trabajo. Finanzas queda distinta del resto.
 - **(b) Pasarlos a SVG** como los del resto de la app, con
   `currentColor` para que sigan el tema. Son siete iconos; una ronda
-  corta. Es lo que yo haría.
+  corta. Es lo que yo haría. Y ahora es más barato que antes: la fila ya
+  acepta un `color` para pintar el fondo del icono, así que el hueco está
+  hecho.
 - **(c) Usarlos en TODAS las secciones** y asumirlo como estilo propio de
   la app. También es coherente, solo que se aleja del look de Apple que
   buscas.

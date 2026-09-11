@@ -2945,6 +2945,29 @@ de `#settings-menu` — ese es una rejilla de tarjetas y una línea de texto
 dentro se colocaría como una tarjeta más —, y se esconde con el menú
 desde `showSettingsScreen()`.
 
+**v0.50.0** trae el inicio de Finanzas rehecho, de `finanzas-movil`
+(commit de Koku). El merge fue **fast-forward**: él ya había traído
+`desarrollador` a su rama, así que no hubo ni un conflicto.
+
+Dos fallos suyos que arregla, y los dos vienen de probarlo con la base
+casi vacía:
+
+1. **Había secciones inalcanzables.** Las tarjetas sin datos no se
+   pintaban, así que sin objetivos no había tarjeta de Objetivos — y sin
+   otra puerta, no había forma de crear el primero. Ahora se pintan
+   **siempre las siete**, y la vacía explica para qué sirve en vez de
+   esconderse. **Regla que conviene generalizar**: un apartado vacío
+   tiene que poder abrirse, es la única forma de empezar a usarlo.
+2. **Eran demasiado grandes** (*"es demasiado grande y engorroso"*).
+   Pasan de tarjetas a **filas**, de ~1000 px a 566, con las siete de un
+   vistazo. Se fue `finanzasTarjetaEl` y su CSS.
+
+Lo único que hubo que acomodar a las reglas de esta rama: un
+`font-size: 1.15rem` en `.finanzas-row-chevron`, que ahora es
+`var(--t-titulo-3)` (20 px, el tamaño al que iOS pinta el chevron de una
+fila de Ajustes). **Los emojis siguen ahí**, ahora en
+`finanzasFilaEl`: ver la duda B9 de `PARA-KOKU-MAÑANA.md`.
+
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 
 - **`movil-ui` ya NO se toca** salvo que Koku lo pida explícitamente:

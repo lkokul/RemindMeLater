@@ -5416,7 +5416,11 @@ body.gym-rest-push #settings-modal .settings-card {
    año) ya dicen lo suyo con el triangulo de la izquierda, y ponerles
    flecha aqui seria prometer un viaje que no hacen. */
 .finanzas-row-chevron {
-  font-size: 1.15rem;
+  /* --t-titulo-3 (20px) y no un rem a ojo: la escala tipografica de la
+     v0.48.0 es obligatoria y el guion de comprobacion falla si aparece un
+     font-size en rem. 20px es ademas el tamano al que iOS pinta el
+     chevron de una fila de Ajustes. */
+  font-size: var(--t-titulo-3);
   line-height: 1;
   color: color-mix(in srgb, var(--surface-text) 40%, var(--surface));
 }
