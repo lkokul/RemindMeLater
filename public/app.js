@@ -6879,9 +6879,38 @@ function textoDelResultadoDeNota(cuenta, valor) {
 const CLASE_FANTASMA = 'note-formula-ghost';
 const CLASE_FORMULA = 'note-formula';
 
+// LO QUE SE ESTA SUGIRIENDO AHORA MISMO, recordado aparte del cursor.
+//
+// Esto NO es una optimizacion: es lo que hace que Intro funcione en el
+// iPhone. El fallo que vio Koku ("aparece el resultado, pero le doy al
+// intro y se va igualmente") sale de que Intro volvia a deducir la cuenta
+// MIRANDO DONDE ESTA EL CURSOR, y en Safari el cursor no se queda donde
+// Chrome lo deja: al meter el fantasma en medio, el navegador parte el
+// nodo de texto y la seleccion viva se va al trozo NUEVO (offset 0), asi
+// que la cuenta "que acaba justo antes del cursor" ya no existia y Intro
+// se limitaba a bajar de linea, borrando la sugerencia por el camino.
+//
+// Con la cuenta apuntada aqui en el momento de sugerirla, fijarla no
+// depende de donde haya dejado el cursor el navegador.
+let formulaPendiente = null;
+
 function quitarFantasmaDeFormula() {
+  formulaPendiente = null;
   if (!NOTE_EDITOR_BODY) return;
   NOTE_EDITOR_BODY.querySelectorAll(`.${CLASE_FANTASMA}`).forEach((el) => el.remove());
+}
+
+// Lo apuntado, pero solo si sigue valiendo: el nodo tiene que seguir en el
+// editor y su texto tiene que seguir acabando en el "=" de esa cuenta. Si
+// no, se devuelve null y se vuelve al camino de siempre (mirar el cursor).
+function formulaPendienteValida() {
+  if (!formulaPendiente || !NOTE_EDITOR_BODY) return null;
+  const { nodo, cuenta, texto } = formulaPendiente;
+  if (!nodo || !NOTE_EDITOR_BODY.contains(nodo)) return null;
+  const txt = nodo.nodeValue || '';
+  if (!/=\s*$/.test(txt)) return null;
+  if (txt.lastIndexOf(cuenta) < 0) return null;
+  return { nodo, cuenta, texto, corte: txt.length };
 }
 
 // La cuenta que acaba JUSTO donde esta el cursor. Devuelve null si el
@@ -6910,7 +6939,7 @@ function cuentaJustoAntesDelCursor() {
   if (!RE_NOTE_FORMULA_OPERADOR.test(cuenta)) return null;
   const valor = evaluarExpresionDeNota(cuenta);
   if (valor === null) return null;
-  return { nodo, cuenta, valor, texto: textoDelResultadoDeNota(cuenta, valor) };
+  return { nodo, cuenta, valor, corte: sel.focusOffset, texto: textoDelResultadoDeNota(cuenta, valor) };
 }
 
 // Repinta el fantasma segun donde este el cursor. Se llama en cada
@@ -6932,25 +6961,35 @@ function refrescarFantasmaDeFormula() {
   // El cursor tiene que quedarse DELANTE del fantasma, donde estaba: si
   // se queda detras, la siguiente tecla escribe al otro lado del
   // resultado. insertNode lo empuja, asi que se recoloca a mano.
+  //
+  // Y se recoloca al FINAL del nodo (enc.nodo.nodeValue.length), NO
+  // leyendo sel.focusOffset: insertNode acaba de partir ese nodo de texto
+  // en dos, y donde deja la seleccion viva cada navegador es cosa suya --
+  // Safari la manda al trozo nuevo con offset 0, y entonces
+  // vuelta.setStart(enc.nodo, 0) plantaba el cursor al PRINCIPIO de la
+  // cuenta. Tras la particion, enc.nodo es exactamente el texto que habia
+  // antes del cursor, asi que su final ES el sitio, en cualquier
+  // navegador.
   const vuelta = document.createRange();
-  vuelta.setStart(enc.nodo, sel.focusOffset);
+  vuelta.setStart(enc.nodo, enc.nodo.nodeValue.length);
   vuelta.collapse(true);
   sel.removeAllRanges();
   sel.addRange(vuelta);
+  formulaPendiente = { nodo: enc.nodo, cuenta: enc.cuenta, texto: enc.texto };
 }
 
 // Intro con un fantasma delante: se fija. El resultado pasa a ser texto
 // de verdad, y la cuenta entera se envuelve para que se vea que es
 // calculada.
 function fijarFormulaEnElCursor() {
-  const enc = cuentaJustoAntesDelCursor();
+  // Lo apuntado al sugerir manda; el cursor es solo el plan B (por si se
+  // fija una cuenta que no venia de una sugerencia recien puesta).
+  const enc = formulaPendienteValida() || cuentaJustoAntesDelCursor();
   if (!enc) return false;
   quitarFantasmaDeFormula();
   const txt = enc.nodo.nodeValue;
-  const sel = window.getSelection();
-  const corte = sel.focusOffset;
+  const corte = enc.corte;
   // Donde empieza la cuenta dentro del nodo de texto.
-  const inicio = corte - (txt.slice(0, corte).length - txt.slice(0, corte).lastIndexOf(enc.cuenta));
   const desde = txt.slice(0, corte).lastIndexOf(enc.cuenta);
   if (desde < 0) return false;
 
@@ -6995,6 +7034,7 @@ function fijarFormulaEnElCursor() {
   // El cursor, justo DETRAS de la formula fijada (y detras del espacio
   // que se acaba de poner, si se puso), para poder seguir escribiendo sin
   // que lo siguiente se meta dentro de la marca.
+  const sel = window.getSelection();
   const range = document.createRange();
   range.setStart(despues, resto === '' ? 1 : 0);
   range.collapse(true);
@@ -7059,6 +7099,24 @@ if (NOTE_EDITOR_BODY) {
 if (NOTE_EDITOR_BODY) {
   NOTE_EDITOR_BODY.addEventListener('input', () => {
     refrescarFantasmaDeFormula();
+  });
+  // LA SEGUNDA RED PARA INTRO, y hace falta de verdad en el movil.
+  //
+  // El teclado de iOS no siempre manda un keydown con key === 'Enter'
+  // (con el texto predictivo por medio llega como 'Unidentified'), pero
+  // 'beforeinput' SI llega siempre, y con inputType diciendo exactamente
+  // que se va a insertar un salto de linea. Asi que el mismo gesto se
+  // atiende por los dos lados.
+  //
+  // No se duplica el trabajo: cuando el keydown ya lo ha atendido, hace
+  // preventDefault y este evento ni se dispara.
+  NOTE_EDITOR_BODY.addEventListener('beforeinput', (e) => {
+    if (e.inputType !== 'insertParagraph' && e.inputType !== 'insertLineBreak') return;
+    if (!hayFantasmaDeFormula()) return;
+    if (fijarFormulaEnElCursor()) {
+      e.preventDefault();
+      refreshNoteEditorState();
+    }
   });
   NOTE_EDITOR_BODY.addEventListener('pointerdown', () => {
     quitarFantasmaDeFormula();
@@ -8882,9 +8940,16 @@ async function loadGymSessions() {
 // 2. Lo que se ensena es el tiempo del ENTRENO ENTERO, nunca el de cada
 //    ejercicio por separado ("tiempo del entrene no del ejercicio").
 // 3. Sin historial NO SE INVENTA NADA: los ejercicios que no has hecho
-//    nunca se quedan fuera de la suma y se dice cuantos son. Por eso el
-//    texto empieza por "Al menos": lo que sale es un suelo, no una
-//    prediccion.
+//    nunca se quedan FUERA de la suma. O sea que la cifra es un suelo, no
+//    una prediccion.
+//
+// EL TEXTO ES SOLO "Tiempo estimado: 12 min 4 s", a secas. Lo pidio Koku
+// asi tras verlo con explicaciones pegadas ("pon solo tiempo estimado:
+// estimacion, ya luego pones en la ayuda de entrenamiento como funciona,
+// como saca el valor y tal"). O sea que el "de donde sale este numero"
+// -- que es la media de TUS series y descansos por ejercicio, y que los
+// ejercicios sin historial no cuentan -- va en la seccion de ayuda del
+// Gimnasio cuando se haga (ver IDEAS-AYUDAS.md), no colgando de la cifra.
 // ---------------------------------------------------------------------
 let gymSetTimes = null; // Map exerciseId -> { avgSetSeconds, avgRestSeconds }
 
@@ -8969,8 +9034,8 @@ function mostrarAvisoFlotante(texto, { duracionMs = 4200 } = {}) {
 //
 // Ojo: lleva segundos porque el numero SALE de segundos de verdad (la
 // media de lo que te dura cada serie y cada descanso, de tu propio
-// historial), no de un redondeo. Aun asi sigue siendo una estimacion, y
-// por eso el texto que la envuelve empieza por "Al menos ~".
+// historial), no de un redondeo. Aun asi sigue siendo una estimacion: lo
+// dice el rotulo que la acompaña ("Tiempo estimado:").
 function gymFormatDuracionConSegundos(segundos) {
   const total = Math.max(0, Math.round(Number(segundos) || 0));
   const h = Math.floor(total / 3600);
@@ -9000,9 +9065,7 @@ function gymFormatDuracionAproximada(segundos) {
 function gymTextoDeDuracion(day) {
   const est = gymEstimarDuracionDeDia(day);
   if (!est) return null;
-  const base = `Al menos ~${gymFormatDuracionAproximada(est.segundos)}`;
-  if (est.sinDatos === 0) return base;
-  return `${base} (${est.sinDatos} ejercicio${est.sinDatos === 1 ? '' : 's'} sin datos todavía)`;
+  return `Tiempo estimado: ${gymFormatDuracionAproximada(est.segundos)}`;
 }
 
 // La linea fija de ARRIBA DEL TODO del entreno en curso. Peticion de
@@ -9044,9 +9107,7 @@ function gymTextoDeDuracionDelEntreno() {
   // descansas, te vas.
   segundos = Math.max(0, segundos - ultimoDescanso);
   if (!segundos) return null;
-  const base = `Al menos ~${gymFormatDuracionConSegundos(segundos)}`;
-  if (sinDatos === 0) return base;
-  return `${base} · ${sinDatos} sin datos`;
+  return `Tiempo estimado: ${gymFormatDuracionConSegundos(segundos)}`;
 }
 
 // 'YYYY-MM-DD' -> "15 ago 2026", para el historial de sesiones. No hay
@@ -20053,7 +20114,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.49.0';
+const APP_VERSION = '0.49.1';
 const APP_VERSION_DATE = '2026-09-11';
 
 function renderAppVersionLine() {

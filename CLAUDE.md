@@ -2419,8 +2419,16 @@ preguntarle:
    ejercicio**: *"tiempo del entrene no del ejercicio"*.
 3. **Sin historial NO se inventa nada** (eligió "solo contar lo que
    sé"): los ejercicios que no has hecho nunca se quedan fuera de la
-   suma y se dice cuántos son. Por eso el texto empieza por **"Al
-   menos"** — lo que sale es un suelo, no una predicción.
+   suma. O sea que la cifra es un suelo, no una predicción.
+
+**El texto es solo `Tiempo estimado: 12 min 4 s`, a secas** (cambiado el
+11/9/2026). Antes decía "Al menos ~48 min (1 ejercicio sin datos
+todavía)", y Koku lo recortó al verlo: *"pon sólo tiempo estimado:
+estimación, ya luego pones en la ayuda de entrenamiento cómo funciona,
+cómo saca el valor y tal"*. O sea que el "de dónde sale este número" no
+cuelga de la cifra: va en la sección de ayuda del Gimnasio cuando se
+haga, y está ya redactado en `IDEAS-AYUDAS.md` (punto 5 bis) esperando a
+que él dé luz verde a esa tanda de ayudas.
 
 Dónde se ve, también elegido por él: en la **ficha del día** (pestaña
 Plan, `#gym-routine-estimate`) y como **aviso flotante al empezar** el
@@ -2813,6 +2821,51 @@ globo aparte: la cuenta ES el contenido.
   del saneador, así que aunque llegara a colarse, se cae al guardar.
   Probado.
 
+### Por qué Intro no funcionaba en el iPhone (arreglado en la v0.49.1)
+
+Koku, probando la build #60: *"cuando hago una fórmula aparece el
+resultado, pero le doy al intro y se va igualmente"*. En Chrome iba
+perfecto, y ahí está la trampa: **era un fallo SOLO de Safari**, y la
+causa no tiene nada que ver con las fórmulas.
+
+Al meter el fantasma en medio de un nodo de texto, `range.insertNode()`
+**parte ese nodo en dos**. Dónde deja el navegador la selección VIVA
+después de esa partición es cosa suya: Chrome la deja donde estaba,
+Safari la manda al trozo NUEVO con offset 0. El código leía
+`sel.focusOffset` justo después de insertar y lo usaba para recolocar el
+cursor — o sea que en Safari plantaba el cursor **al principio** de la
+cuenta. Luego Intro volvía a deducir la cuenta mirando dónde estaba el
+cursor, no encontraba nada, no hacía `preventDefault`, y lo único que
+pasaba era un salto de línea que de paso borraba la sugerencia. Exacto lo
+que se veía.
+
+Dos arreglos, y conviene entender que son independientes:
+
+1. **El cursor se recoloca al FINAL del nodo**
+   (`enc.nodo.nodeValue.length`), no en un offset prestado de la
+   selección. Tras la partición ese nodo es exactamente el texto que
+   había antes del cursor, así que su final ES el sitio, en cualquier
+   navegador.
+2. **Fijar ya no depende del cursor.** Al sugerir se apunta la cuenta en
+   `formulaPendiente` (nodo, cuenta y resultado), y `Intro` usa eso;
+   mirar el cursor es solo el plan B. `formulaPendienteValida()` lo
+   descarta si el nodo ya no está en el editor o su texto ha dejado de
+   acabar en `=`.
+
+Y una **tercera red que hace falta igual**: el teclado de iOS no siempre
+manda un `keydown` con `key === 'Enter'` (con el texto predictivo por
+medio llega como `'Unidentified'`), pero **`beforeinput` sí llega
+siempre**, con `inputType` diciendo `insertParagraph`. El mismo gesto se
+atiende por los dos lados; no se duplica porque cuando el `keydown` ya lo
+ha atendido hace `preventDefault` y el otro evento ni se dispara.
+
+**Cómo se probó sin un iPhone**: `formulas-safari.mjs` REPRODUCE lo que
+hace Safari moviendo el cursor a mano (al principio de la cuenta y detrás
+del fantasma) antes de pulsar Intro, y dispara un `beforeinput` a pelo
+para el caso del teclado predictivo. Se comprobó que la prueba de verdad
+pilla el fallo: deshaciendo el arreglo, 4 comprobaciones se ponen rojas.
+Si algún día se toca esto, lánzala.
+
 ### Lo que se amplió en el saneador, y por qué es estrecho
 
 Para que una fórmula se vea distinta hacía falta **una etiqueta**, y el
@@ -2872,6 +2925,15 @@ Ver los dos bloques de arriba. **Las ramas de móvil están todas al día
 con `desarrollador`** (Koku va a trabajar viajes, finanzas y
 entretenimiento por separado); ojo con `entretenimiento-movil`, que
 necesitó resolver el renombrado Lecturas→Entretenimiento a mano.
+
+**v0.48.0 y v0.49.0** (11/9/2026) son la ronda de seguridad, privacidad y
+tipografía (ver su bloque más arriba), el rediseño de las fórmulas, el
+peso de ayuda por signo, el arreglo del widget de calendario y la fusión
+de `finanzas-movil`. **Build #60 en verde y subida a TestFlight.**
+
+**v0.49.1** es lo que salió de probar la #60: Intro no fijaba la fórmula
+en Safari (ver "Por qué Intro no funcionaba en el iPhone" más arriba) y
+el tiempo estimado se quedó en `Tiempo estimado: 12 min 4 s` a secas.
 
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 

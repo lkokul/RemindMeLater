@@ -33,6 +33,23 @@ músculos de Progreso).
 - [ ] **5. Gestos del calendario** — deslizar en vertical cambia de
   mes/año (en el año va invertido a propósito, lo pediste así) y
   pellizcar sube de nivel.
+- [x] **5 bis. El tiempo estimado del entreno** — PEDIDO POR TI en la
+  ronda del 11/9/2026: *"pon sólo tiempo estimado: estimación, ya luego
+  pones en la ayuda de entrenamiento cómo funciona, cómo saca el valor y
+  tal"*. La línea del entreno ya dice solo `Tiempo estimado: 12 min 4 s`,
+  y lo que se sacó de ahí tiene que acabar en esta ayuda:
+  - El número sale de **tu propio historial**, no de una tabla: la media
+    de lo que te dura cada serie de **ese ejercicio** (se cronometra
+    desde que le das a empezar) más la media de lo que descansas después.
+  - Es **por ejercicio y no por rutina**, así un día recién montado ya
+    tiene estimación desde el primer momento si los ejercicios los has
+    hecho antes.
+  - Si el día tiene el descanso fijado, manda ese (es lo que vas a
+    descansar hoy); si no, tu media.
+  - Se cuenta **un descanso menos**: al acabar la última serie ya no
+    descansas, te vas.
+  - Los ejercicios que **no has hecho nunca no se suman**, así que la
+    cifra es un suelo: cuantos más entrenos, más se afina.
 
 ## Los que dudo — dime sí o no
 

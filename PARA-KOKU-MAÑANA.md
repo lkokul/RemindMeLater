@@ -174,6 +174,52 @@ para LA acción principal.
 Esto cambia bastante el aspecto de varias pantallas. **¿Te lanzo una
 propuesta con capturas antes de tocar nada?**
 
+### B9. Los iconos de las tarjetas de Finanzas son emojis
+
+Lo dijiste tú: *"tema de emojis no sé, si tú lo dices okey, miro y te
+digo"*. Aquí está el detalle para que mires con datos.
+
+**Dónde**: las siete tarjetas del inicio de Finanzas — 📊 Este mes,
+📅 Próximos pagos, 📺 Suscripciones, 🎯 Objetivos, 🧾 Movimientos,
+🤝 Deudas y 📈 Inversiones (`finanzasTarjetaEl` en `app.js`).
+
+**Por qué lo saqué**: es exactamente el mismo motivo por el que el
+9/9/2026 cambiaste el sol y la luna de la topbar de emoji a SVG, y esas
+tres razones siguen valiendo igual aquí:
+
+1. **Cambian de forma** según el aparato: el 📊 de un iPhone no es el de
+   un Android ni el de un navegador. El emoji lo pinta el SISTEMA con su
+   propia tipografía, no tú.
+2. **No heredan el color del tema.** Un icono SVG con `currentColor` se
+   tiñe con el acento que tengas puesto; un emoji siempre sale con sus
+   colores de fábrica, y en un tema oscuro o de baja saturación canta.
+3. **Se descuadran de tamaño** respecto al texto de al lado, porque el
+   sistema los dibuja con su propia métrica.
+
+Y un cuarto que aquí pesa más que en la topbar: **Apple no usa emojis
+como iconos de interfaz en ninguna de sus apps**. Salud, Calendario,
+Bolsa y Recordatorios usan SF Symbols. Un emoji en una tarjeta se lee
+como contenido escrito por el usuario, no como parte de la app.
+
+**Qué hay del otro lado**: los emojis no cuestan nada, se leen rápido,
+tienen color de serie, y esto es TU app. Si te gustan, es una decisión
+legítima — solo que entonces conviene ser consistente y usarlos también
+en Gimnasio, Viajes y Entretenimiento, porque ahora mismo Finanzas es la
+única sección que los usa.
+
+**Tres salidas**, y no hace falta decidir hoy:
+
+- **(a) Dejarlos.** Cero trabajo. Finanzas queda distinta del resto.
+- **(b) Pasarlos a SVG** como los del resto de la app, con
+  `currentColor` para que sigan el tema. Son siete iconos; una ronda
+  corta. Es lo que yo haría.
+- **(c) Usarlos en TODAS las secciones** y asumirlo como estilo propio de
+  la app. También es coherente, solo que se aleja del look de Apple que
+  buscas.
+
+No he tocado nada: es diseño de tu rama de Finanzas, no un fallo del
+merge.
+
 ---
 
 ## C. Cosas que se salen de la filosofía de la app
