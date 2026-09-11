@@ -3529,11 +3529,24 @@ body.gym-rest-push #settings-modal .settings-card {
 /* Posiciones del abanico, ahora con 5 botones (entro "+ ejercicio"):
    radio 130px para que los contiguos queden a ~51px de centro a centro
    (con radio menor, los de 44px se tocaban). 1 arriba, 5 a la izquierda. */
+/* El abanico del menu del entreno: SEIS acciones repartidas por un
+   cuarto de circunferencia de 130 px (18 grados entre cada una). Al
+   entrar el cronometro pasaron de cinco a seis y hubo que recalcularlas
+   todas -- los numeros salen de (-R·cos θ, -R·sin θ) con θ de 90 a 0,
+   no están puestos a ojo. */
 .gym-live-fab.open .gym-fab-pos-1 { transform: translate(0, -130px); }
-.gym-live-fab.open .gym-fab-pos-2 { transform: translate(-50px, -120px); }
-.gym-live-fab.open .gym-fab-pos-3 { transform: translate(-92px, -92px); }
-.gym-live-fab.open .gym-fab-pos-4 { transform: translate(-120px, -50px); }
-.gym-live-fab.open .gym-fab-pos-5 { transform: translate(-130px, 0); }
+.gym-live-fab.open .gym-fab-pos-2 { transform: translate(-40px, -124px); }
+.gym-live-fab.open .gym-fab-pos-3 { transform: translate(-76px, -105px); }
+.gym-live-fab.open .gym-fab-pos-4 { transform: translate(-105px, -76px); }
+.gym-live-fab.open .gym-fab-pos-5 { transform: translate(-124px, -40px); }
+.gym-live-fab.open .gym-fab-pos-6 { transform: translate(-130px, 0); }
+/* El boton del cronometro, marcado mientras sigue contando con el
+   dialogo cerrado. Es lo unico que avisa de que hay algo en marcha: el
+   cronometro no toca la mini-barra del descanso a proposito. */
+.gym-live-fab-action.esta-contando {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 /* Boton de pausa del cronometro: ensena pausa o play segun el estado. */
 #btn-gym-live-pause .gym-icon-play { display: none; }
@@ -5343,6 +5356,36 @@ body.gym-rest-push #settings-modal .settings-card {
 /* El campo de peso con su boton de signo al lado (solo en ejercicios
    asistidos). El teclado decimal del iPhone no trae tecla menos, asi que
    este boton es la UNICA forma de escribir -20 en el movil. */
+/* El cronometro de una serie POR TIEMPO al llegar al objetivo. Es lo que
+   sustituye aqui al aviso del descanso: estas mirando la pantalla o el
+   reloj, asi que no hace falta vibrar ni sonar. Solo el color y un latido
+   (que obedece al interruptor de Animaciones, gratis, por la regla
+   global de :root[data-animations="off"] *). */
+.gym-live-set-timer.objetivo-cumplido,
+[data-live-set-timer].objetivo-cumplido {
+  color: var(--accent);
+  font-weight: 700;
+  animation: gym-objetivo-latido 1s ease-in-out infinite;
+}
+@keyframes gym-objetivo-latido {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* El cronometro suelto: los dos campos del temporizador en una fila, y
+   la cifra grande centrada. */
+.gym-crono-objetivo { display: flex; gap: 0.5rem; margin: 0.6rem 0; }
+.gym-crono-objetivo .gym-set-segment-field { flex: 1; }
+.gym-crono-display { font-variant-numeric: tabular-nums; }
+/* Al llegar a cero solo se MARCA, no suena ni vibra: el aviso que tiene
+   que oirse con la app cerrada es el del fin de descanso, y dos avisos
+   compitiendo se pisan. */
+.gym-crono-display.vencido {
+  color: var(--accent);
+  animation: gym-objetivo-latido 1s ease-in-out infinite;
+}
+.gym-crono-display.paused { opacity: 0.55; }
+
 .gym-peso-con-signo { display: flex; align-items: stretch; gap: 0.35rem; }
 .gym-peso-con-signo input { flex: 1; min-width: 0; }
 .gym-signo-btn {

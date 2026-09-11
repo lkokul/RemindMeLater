@@ -49,7 +49,27 @@
       defaultSets: row.default_sets,
       defaultReps: row.default_reps,
       defaultRestSeconds: row.default_rest_seconds,
+      // COMO SE MIDE: 'reps' (lo de siempre), 'tiempo' (isometrico) o
+      // 'reps_en_tiempo'. Se normaliza aqui para que el cliente nunca
+      // tenga que mirar si es null.
+      measure: normalizarMedicion(row.measure),
+      defaultSeconds: row.default_seconds,
     };
+  }
+
+  // LAS TRES FORMAS DE MEDIR UN EJERCICIO (peticion de Koku, 11/9/2026).
+  //
+  //   'reps'            -- repeticiones y peso, lo de siempre.
+  //   'tiempo'          -- isometrico: aguantas N segundos.
+  //   'reps_en_tiempo'  -- repeticiones dentro de una ventana.
+  //
+  // Cualquier otra cosa (null, un valor inventado, un numero) cae en
+  // 'reps': es el comportamiento de toda la vida, asi que es el unico
+  // respaldo que no sorprende a nadie.
+  const MEDICIONES = new Set(['reps', 'tiempo', 'reps_en_tiempo']);
+  function normalizarMedicion(valor) {
+    const v = String(valor || '').trim();
+    return MEDICIONES.has(v) ? v : 'reps';
   }
 
   // EL MATERIAL, DE UNO A VARIOS.
@@ -108,7 +128,7 @@
   });
 
   router.post('/', (req, res) => {
-    const { name, muscleGroup, libraryId, equipment, secondaryMuscles, notes, unilateral, assisted, countSidesSeparately, sideRestSeconds, defaultSets, defaultReps, defaultRestSeconds } = req.body || {};
+    const { name, muscleGroup, libraryId, equipment, secondaryMuscles, notes, unilateral, assisted, countSidesSeparately, sideRestSeconds, defaultSets, defaultReps, defaultRestSeconds, measure, defaultSeconds } = req.body || {};
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'invalid_request', message: 'El ejercicio necesita un nombre.' });
     }
@@ -122,7 +142,7 @@
     }
 
     const info = db
-      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment, secondary_muscles, notes, unilateral, assisted, count_sides_separately, side_rest_seconds, default_sets, default_reps, default_rest_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO gym_exercises (name, muscle_group, library_id, equipment, secondary_muscles, notes, unilateral, assisted, count_sides_separately, side_rest_seconds, default_sets, default_reps, default_rest_seconds, measure, default_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         name.trim(),
         muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null,
@@ -136,7 +156,9 @@
         numeroONulo(sideRestSeconds),
         numeroONulo(defaultSets),
         numeroONulo(defaultReps),
-        numeroONulo(defaultRestSeconds)
+        numeroONulo(defaultRestSeconds),
+        normalizarMedicion(measure),
+        numeroONulo(defaultSeconds)
       );
 
     const row = db.prepare('SELECT * FROM gym_exercises WHERE id = ?').get(info.lastInsertRowid);
@@ -176,10 +198,10 @@
         INSERT INTO gym_exercises
           (name, muscle_group, library_id, equipment, secondary_muscles, notes,
            unilateral, assisted, count_sides_separately, side_rest_seconds,
-           default_sets, default_reps, default_rest_seconds)
+           default_sets, default_reps, default_rest_seconds, measure, default_seconds)
         SELECT ?, muscle_group, NULL, equipment, secondary_muscles, notes,
                unilateral, assisted, count_sides_separately, side_rest_seconds,
-               default_sets, default_reps, default_rest_seconds
+               default_sets, default_reps, default_rest_seconds, measure, default_seconds
         FROM gym_exercises WHERE id = ?
       `)
       .run(nombreDeCopia(original.name, nombres), original.id);
@@ -194,9 +216,9 @@
 
     // library_id no se toca desde el PUT a proposito: es la marca de "de
     // donde salio", editar el ejercicio no cambia su origen.
-    const { name, muscleGroup, equipment, secondaryMuscles, notes, unilateral, assisted, countSidesSeparately, sideRestSeconds, defaultSets, defaultReps, defaultRestSeconds } = req.body || {};
+    const { name, muscleGroup, equipment, secondaryMuscles, notes, unilateral, assisted, countSidesSeparately, sideRestSeconds, defaultSets, defaultReps, defaultRestSeconds, measure, defaultSeconds } = req.body || {};
     const nextUnilateral = unilateral === undefined ? existing.unilateral : (unilateral ? 1 : 0);
-    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ?, equipment = ?, secondary_muscles = ?, notes = ?, unilateral = ?, assisted = ?, count_sides_separately = ?, side_rest_seconds = ?, default_sets = ?, default_reps = ?, default_rest_seconds = ? WHERE id = ?').run(
+    db.prepare('UPDATE gym_exercises SET name = ?, muscle_group = ?, equipment = ?, secondary_muscles = ?, notes = ?, unilateral = ?, assisted = ?, count_sides_separately = ?, side_rest_seconds = ?, default_sets = ?, default_reps = ?, default_rest_seconds = ?, measure = ?, default_seconds = ? WHERE id = ?').run(
       name !== undefined && name.trim() ? name.trim() : existing.name,
       muscleGroup === undefined ? existing.muscle_group : (muscleGroup && muscleGroup.trim() ? muscleGroup.trim() : null),
       equipment === undefined ? existing.equipment : escribirMaterial(equipment),
@@ -214,6 +236,13 @@
       defaultSets === undefined ? existing.default_sets : numeroONulo(defaultSets),
       defaultReps === undefined ? existing.default_reps : numeroONulo(defaultReps),
       defaultRestSeconds === undefined ? existing.default_rest_seconds : numeroONulo(defaultRestSeconds),
+      // COMO SE MIDE. Cambiarlo tampoco toca nada hacia atras: cada serie
+      // ya apuntada guarda SU propia medicion (ver gym_sets.measure), asi
+      // que un historial de repeticiones sigue leyendose como
+      // repeticiones aunque el ejercicio pase a medirse en segundos.
+      // Es justo lo que le faltaba a la marca 'assisted'.
+      measure === undefined ? normalizarMedicion(existing.measure) : normalizarMedicion(measure),
+      defaultSeconds === undefined ? existing.default_seconds : numeroONulo(defaultSeconds),
       req.params.id
     );
 

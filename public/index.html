@@ -650,16 +650,36 @@
             <button type="button" id="btn-gym-exercise-equipment-add" class="secondary-btn">Añadir</button>
           </div>
         </div>
+        <!-- COMO SE MIDE este ejercicio (peticion de Koku, 11/9/2026:
+             "poder hacer ejercicios temporizados, aguantar ejercicios
+             isometricos, poder hacer ejercicios de repeticiones en x
+             tiempo"). Va en la FICHA porque una plancha siempre se mide
+             en segundos: se dice una vez y todos sus dias y series ya
+             salen con el campo correcto.
+
+             Cambiarlo NO reescribe el historial: cada serie guarda su
+             propia medicion. Es lo que le faltaba a la vieja marca de
+             "asistido". -->
+        <div class="field-label-block">
+          <span class="field-label">Cómo se mide</span>
+          <div id="gym-exercise-measure-field"></div>
+          <p class="hint" id="gym-exercise-measure-hint"></p>
+        </div>
         <!-- Como sueles hacer ESTE ejercicio (peticion de Koku): al
-             meterlo en un dia, estos tres llegan ya rellenos y no hay
-             que escribirlos otra vez. Son un punto de partida, no la
+             meterlo en un dia, estos llegan ya rellenos y no hay que
+             escribirlos otra vez. Son un punto de partida, no la
              verdad: en cada dia se pueden cambiar, y cambiarlos aqui NO
              toca los dias que ya lo tenian. -->
         <div class="field-label-block">
           <span class="field-label">Cómo lo sueles hacer (opcional)</span>
           <div class="gym-routine-exercise-targets-row">
             <input type="number" id="gym-exercise-default-sets" placeholder="Series" min="0" inputmode="numeric" />
+            <!-- Reps y Segundos se turnan segun la medicion: en un
+                 isometrico no hay repeticiones que poner, y en uno de
+                 repeticiones normales los segundos no pintan nada.
+                 Lo decide aplicarMedicionEnFichaDeEjercicio() en app.js. -->
             <input type="number" id="gym-exercise-default-reps" placeholder="Reps" min="0" inputmode="numeric" />
+            <input type="number" id="gym-exercise-default-seconds" placeholder="Segundos" min="0" inputmode="numeric" title="El objetivo por defecto, en segundos" />
             <input type="number" id="gym-exercise-default-rest" placeholder="Descanso (s)" min="0" inputmode="numeric" title="En segundos" />
           </div>
           <p class="hint" id="gym-exercise-default-rest-preview"></p>
@@ -817,13 +837,19 @@
         <svg class="gym-icon-pause" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg>
         <svg class="gym-icon-play" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>
       </button>
-      <button type="button" id="btn-gym-live-add-exercise" class="gym-live-fab-action gym-fab-pos-3" aria-label="Añadir ejercicio al entrenamiento" title="Añadir ejercicio">
+      <!-- CRONOMETRO SUELTO (peticion de Koku): solo cronometra, no se
+           guarda en ningun sitio. "Es para tener una herramienta rapida
+           en el mismo ecosistema". Sigue corriendo aunque lo cierres. -->
+      <button type="button" id="btn-gym-live-crono" class="gym-live-fab-action gym-fab-pos-3" aria-label="Cronómetro" title="Cronómetro / temporizador">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/><path d="M19 6l1.5-1.5"/></svg>
+      </button>
+      <button type="button" id="btn-gym-live-add-exercise" class="gym-live-fab-action gym-fab-pos-4" aria-label="Añadir ejercicio al entrenamiento" title="Añadir ejercicio">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </button>
-      <button type="button" id="btn-gym-live-finish" class="gym-live-fab-action gym-live-fab-primary gym-fab-pos-4" aria-label="Terminar y guardar el entrenamiento" title="Terminar">
+      <button type="button" id="btn-gym-live-finish" class="gym-live-fab-action gym-live-fab-primary gym-fab-pos-5" aria-label="Terminar y guardar el entrenamiento" title="Terminar">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4.5 12.5 9.5 17.5 19.5 6.5"/></svg>
       </button>
-      <button type="button" id="btn-gym-live-discard" class="gym-live-fab-action gym-live-fab-danger gym-fab-pos-5" aria-label="Descartar el entrenamiento" title="Descartar">
+      <button type="button" id="btn-gym-live-discard" class="gym-live-fab-action gym-live-fab-danger gym-fab-pos-6" aria-label="Descartar el entrenamiento" title="Descartar">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3.5 6.5 20.5 6.5"/><path d="M8.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h4.4a1.3 1.3 0 0 1 1.3 1.3v1.7"/><path d="M5.5 6.5l1 13a1.3 1.3 0 0 0 1.3 1.2h8.4a1.3 1.3 0 0 0 1.3-1.2l1-13"/><line x1="10" y1="10.5" x2="10" y2="16.5"/><line x1="14" y1="10.5" x2="14" y2="16.5"/></svg>
       </button>
       <button type="button" id="btn-gym-live-menu" class="gym-live-fab-main" aria-label="Acciones del entrenamiento" aria-expanded="false">
@@ -913,6 +939,41 @@
     </div>
   </div>
 
+  <!-- CRONOMETRO / TEMPORIZADOR SUELTO.
+       Peticion de Koku (11/9/2026): "un cronometro, cuando le doy, que
+       abra un cronometro y ya esta, no hace nada, solo cronometrar, que
+       puedas pausarlo, reiniciarlo y ya... si lo abro y no lo pauso y lo
+       cierro que siga corriendo... no necesito que se contabilice en el
+       historial me da igual, es para tener una herramienta rapida en el
+       mismo ecosistema. Que pueda ser temporizador tambien".
+
+       Deliberadamente NO toca la sesion: no crea series, no suma tiempo
+       de trabajo y no aparece en el historial. -->
+  <div id="gym-crono-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-set-modal">
+      <button type="button" id="btn-close-gym-crono" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="gym-crono-titulo">Cronómetro</h2>
+      <!-- Los dos modos, con el mismo patron de botones que "Favoritos" o
+           "Widgets": con dos opciones cortas se ven las dos de un vistazo
+           y no hace falta un desplegable. -->
+      <div class="view-mode-row" id="gym-crono-modos">
+        <button type="button" class="view-mode-btn is-active" data-crono-modo="arriba">Cronómetro</button>
+        <button type="button" class="view-mode-btn" data-crono-modo="atras">Temporizador</button>
+      </div>
+      <!-- Solo en modo temporizador: desde cuanto cuenta atras. -->
+      <div class="gym-crono-objetivo hidden" id="gym-crono-objetivo">
+        <label class="gym-set-segment-field"><span>Minutos</span><input type="number" id="gym-crono-min" inputmode="numeric" min="0" value="1" /></label>
+        <label class="gym-set-segment-field"><span>Segundos</span><input type="number" id="gym-crono-seg" inputmode="numeric" min="0" max="59" value="0" /></label>
+      </div>
+      <div id="gym-crono-display" class="gym-set-modal-timer gym-crono-display">0:00</div>
+      <p class="hint" id="gym-crono-pista"></p>
+      <div class="gym-set-modal-actions">
+        <button type="button" id="btn-gym-crono-toggle" class="primary-btn gym-set-big-btn">Empezar</button>
+        <button type="button" id="btn-gym-crono-reset" class="secondary-btn gym-set-big-btn">Reiniciar</button>
+      </div>
+    </div>
+  </div>
+
   <div id="gym-set-end-modal" class="modal hidden">
     <div class="modal-card gym-modal gym-set-modal">
       <h2>¿Has acabado la serie?</h2>
@@ -950,9 +1011,17 @@
               <input type="text" id="gym-set-end-weight" inputmode="decimal" />
             </span>
         </label>
-        <label class="gym-set-field">
+        <label class="gym-set-field" id="gym-set-end-reps-field">
           <span>Repeticiones</span>
           <input type="number" id="gym-set-end-reps" inputmode="numeric" min="0" />
+        </label>
+        <!-- Los SEGUNDOS de una serie por tiempo. Llega relleno con lo
+             que marco el cronometro, pero se puede corregir a mano (te
+             despistaste al parar, lo apuntas despues...). Solo se ve en
+             los ejercicios por tiempo, lo decide gymVolcarSerieEnFormulario(). -->
+        <label class="gym-set-field hidden" id="gym-set-end-seconds-field">
+          <span id="gym-set-end-seconds-label">Segundos</span>
+          <input type="number" id="gym-set-end-seconds" inputmode="numeric" min="0" />
         </label>
         <label class="gym-set-field">
           <span>Notas de la serie (opcional)</span>
@@ -1278,7 +1347,11 @@
         </div>
         <div class="gym-set-segment-fields">
           <label class="gym-set-segment-field"><span>Series</span><input type="number" id="gym-routine-exercise-sets" inputmode="numeric" min="0" /></label>
-          <label class="gym-set-segment-field"><span>Reps</span><input type="number" id="gym-routine-exercise-reps" inputmode="numeric" min="0" /></label>
+          <label class="gym-set-segment-field" id="gym-routine-exercise-reps-field"><span>Reps</span><input type="number" id="gym-routine-exercise-reps" inputmode="numeric" min="0" /></label>
+          <!-- Solo en los ejercicios por tiempo. Lo enseña/esconde
+               aplicarMedicionEnElDia() segun como se mida el ejercicio
+               que este elegido arriba. -->
+          <label class="gym-set-segment-field hidden" id="gym-routine-exercise-seconds-field"><span>Segundos</span><input type="number" id="gym-routine-exercise-seconds" inputmode="numeric" min="0" /></label>
           <label class="gym-set-segment-field"><span>Descanso (s)</span><input type="number" id="gym-routine-exercise-rest" inputmode="numeric" min="0" /></label>
         </div>
         <p class="hint" id="gym-routine-exercise-rest-preview"></p>

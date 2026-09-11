@@ -1,6 +1,6 @@
 {
   "name": "remindmelater",
-  "version": "0.52.0",
+  "version": "0.53.0",
   "private": true,
   "description": "Calendario, recordatorios, tareas y notas. App movil sin servidor: todo vive dentro del propio telefono.",
   "scripts": {

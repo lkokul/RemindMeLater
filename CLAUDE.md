@@ -3123,6 +3123,111 @@ hay compilación detrás, así que la línea se queda como siempre.
 **Pendiente, y lo está pensando él**: que la Tienda enseñe por
 herramienta lo actualizado o parcheado. No empezarlo hasta que lo pida.
 
+## Ejercicios por tiempo (11/9/2026)
+
+Petición de Koku: *"poder hacer ejercicios temporizados. Aguantar
+ejercicios isométricos. Poder hacer ejercicios de repeticiones en x
+tiempo"*.
+
+**Las cuatro decisiones que tomó él**, no cambiarlas sin volver a
+preguntarle:
+
+1. **Se marca en la FICHA del ejercicio.** Una plancha siempre se mide en
+   segundos, así que lo sabe el ejercicio y no hay que decirlo en cada
+   serie.
+2. **El cronómetro depende del tipo**: con objetivo cuenta ATRÁS, sin
+   objetivo cuenta hacia ARRIBA.
+3. **Tiempo bajo tensión va APARTE del volumen**, en su propio contador.
+   Descartó meterlo dentro. Y el peso se puede poner igual ("por lo
+   general es sin peso, pero que exista la posibilidad").
+4. **"Reps en un tiempo" cubre las dos variantes**, con peso opcional.
+
+### El modelo
+
+`gym_exercises.measure`, tres valores: `'reps'` (o NULL, lo de siempre),
+`'tiempo'` (isométrico) y `'reps_en_tiempo'`. Más `default_seconds`,
+`gym_routine_exercises.target_seconds`, y en la serie
+`gym_sets.measure` + `gym_sets.measure_seconds`.
+
+**CADA SERIE GUARDA SU PROPIA `measure`, y eso es lo importante**: así
+cambiar un ejercicio de reps a tiempo (o al revés) NO reescribe hacia
+atrás lo que ya habías apuntado. Es exactamente la lección de la marca
+`assisted`, que hacía justo eso y por eso se fue.
+
+**`measure_seconds` NO es `duration_seconds`**, aunque en un isométrico
+cronometrado coincidan: `duration_seconds` es "cuánto tardó la serie del
+botón de empezar al de terminar" (existe también en una serie normal y es
+NULL si la apuntaste a mano); `measure_seconds` es EL DATO de la serie, y
+se puede escribir a mano sin haber cronometrado nada.
+
+### El sub-modo sale de qué objetivo rellenes
+
+No hay ningún interruptor extra que entender:
+
+| medición | con segundos objetivo | sin objetivo |
+|---|---|---|
+| `tiempo` | cuenta atrás hasta 0 | cuenta hacia arriba (aguanta lo que puedas) |
+| `reps_en_tiempo` | cuenta atrás y apuntas las reps (AMRAP) | cuenta hacia arriba y se mide lo que tardas |
+
+Y **se guardan siempre las dos cosas** (reps y segundos), así que los dos
+récords existen sin tener que elegir uno.
+
+### Volumen: la regla no es "por tiempo no suma"
+
+Es que **un isométrico NO TIENE repeticiones**, así que `kg × reps` da
+cero solo, sin ninguna regla especial — ni con 10 kg encima. Pero **20
+flexiones con 5 kg en 27 s SÍ son 100 kg movidos de verdad**, y suman.
+
+El tiempo bajo tensión va en su propio contador (`tensionSeconds` en
+`/summary` y `/progress`), y se enseña en Consistencia. Va aparte porque
+son unidades distintas: un minuto de plancha con 10 kg daría 600 metido
+en el volumen, y 600 ahí no son 600 kg — un día de planchas parecería un
+día de sentadillas.
+
+### Lo que falta (apuntado en `desarrollador.js`)
+
+- El cronómetro de la serie **no avisa** al llegar al objetivo, solo se
+  marca en pantalla. Sonar o vibrar sería pisarse con el aviso de fin de
+  descanso, que es el que de verdad tiene que oírse con la app cerrada.
+  Si hace falta, es una decisión aparte porque toca notificaciones.
+- Los récords por tiempo (mejor aguante) no se pintan todavía: la ruta ya
+  devuelve `maxSeconds`.
+- El tiempo estimado no usa aún el objetivo de las series por tiempo, que
+  se sabe de antemano y lo afinaría.
+
+## El cronómetro suelto del entreno
+
+Petición de Koku: *"un cronómetro, cuando le doy, que abra un cronómetro
+y ya está, no hace nada, sólo cronometrar... si lo abro y no lo pauso y
+lo cierro que siga corriendo... es para tener una herramienta rápida en
+el mismo ecosistema. Que pueda ser temporizador también"*.
+
+Está en el menú de tres puntos del entreno, que pasa de cinco acciones a
+seis (las posiciones del abanico se recalcularon: salen de
+`(-R·cos θ, -R·sin θ)` repartiendo 90° entre seis, no están puestas a
+ojo).
+
+**Tres cosas que NO hace, y es a propósito:**
+
+1. **No toca la sesión.** No crea series, no suma al tiempo de trabajo y
+   no sale en el historial. Es una herramienta, no un registro — lo dijo
+   él: *"no necesito que se contabilice en el historial me da igual"*.
+2. **No avisa al llegar a cero** en modo temporizador: solo se marca en
+   pantalla, igual que el cronómetro de una serie por tiempo.
+3. **No se para al cerrar el diálogo.** El botón del menú se queda
+   marcado mientras cuenta, que es lo único que avisa de que sigue vivo.
+
+El estado va en `localStorage` (`gymCrono`) y no en memoria, así que
+sobrevive a recargar la app. **El tiempo se calcula siempre de marcas de
+reloj**, nunca de un contador que se va sumando: en iOS el JavaScript de
+fondo se congela y un contador se quedaría corto justo al salir de la
+app — la misma razón por la que el entreno ya funciona así.
+
+**Se sanea al LEER de localStorage**, y no es paranoia: encontrado
+forzando errores, un `startedAt` que no fuera un número pintaba
+`NaN:NaN`, y de ahí no se sale solo. Validar en la puerta de entrada lo
+arregla para todos los que leen el estado.
+
 ## Estado actual
 
 **Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde
@@ -3186,6 +3291,10 @@ desde `showSettingsScreen()`.
 **v0.51.0** (11/9/2026) trae **duplicar** (notas, carpetas, bloques, días
 y ejercicios) y el arreglo del "Editar" del entreno, que llevaba roto
 desde la #59. Ver los dos bloques de arriba.
+
+**v0.53.0** trae los **ejercicios por tiempo** (isométricos y "reps en X
+tiempo") y el **cronómetro suelto** del menú del entreno. Ver sus dos
+bloques.
 
 **v0.52.0** son los retoques del Gimnasio (el ±, el −30 s, el descanso
 real y las filas del día deslizables), la App del acceso rápido que ya no

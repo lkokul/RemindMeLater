@@ -35,7 +35,7 @@
   function serializeExerciseList(routineId) {
     return db
       .prepare(`
-        SELECT gre.id, gre.exercise_id, gre.position, gre.target_sets, gre.target_reps, gre.target_rest_seconds, gre.hidden, ge.name, ge.muscle_group
+        SELECT gre.id, gre.exercise_id, gre.position, gre.target_sets, gre.target_reps, gre.target_rest_seconds, gre.target_seconds, gre.hidden, ge.name, ge.muscle_group, ge.measure
         FROM gym_routine_exercises gre
         JOIN gym_exercises ge ON ge.id = gre.exercise_id
         WHERE gre.routine_id = ?
@@ -50,6 +50,13 @@
         targetSets: r.target_sets,
         targetReps: r.target_reps,
         targetRestSeconds: r.target_rest_seconds,
+        // Los segundos ORIENTATIVOS de un ejercicio por tiempo. En un
+        // ejercicio de repeticiones normal se quedan a null y nadie los
+        // mira.
+        targetSeconds: r.target_seconds,
+        // Como se mide el ejercicio, para que el dia sepa que campo
+        // enseñar sin tener que ir a buscar el ejercicio aparte.
+        measure: r.measure || 'reps',
         hidden: !!r.hidden,
       }));
   }
@@ -84,7 +91,7 @@
     if (!Array.isArray(exercises)) return;
 
     const insert = db.prepare(
-      'INSERT INTO gym_routine_exercises (routine_id, exercise_id, position, target_sets, target_reps, target_rest_seconds, hidden) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO gym_routine_exercises (routine_id, exercise_id, position, target_sets, target_reps, target_rest_seconds, target_seconds, hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
     exercises.forEach((ex, index) => {
       const exerciseId = Number(ex && ex.exerciseId);
@@ -96,6 +103,7 @@
         ex.targetSets !== undefined && ex.targetSets !== null && ex.targetSets !== '' ? Number(ex.targetSets) : null,
         ex.targetReps !== undefined && ex.targetReps !== null && ex.targetReps !== '' ? Number(ex.targetReps) : null,
         ex.targetRestSeconds !== undefined && ex.targetRestSeconds !== null && ex.targetRestSeconds !== '' ? Number(ex.targetRestSeconds) : null,
+        ex.targetSeconds !== undefined && ex.targetSeconds !== null && ex.targetSeconds !== '' ? Number(ex.targetSeconds) : null,
         ex.hidden ? 1 : 0
       );
     });
@@ -166,8 +174,8 @@
     // descanso orientativos y la marca de oculto. Un ejercicio aparcado
     // sigue aparcado en la copia.
     db.prepare(`
-      INSERT INTO gym_routine_exercises (routine_id, exercise_id, position, target_sets, target_reps, target_rest_seconds, hidden)
-      SELECT ?, exercise_id, position, target_sets, target_reps, target_rest_seconds, hidden
+      INSERT INTO gym_routine_exercises (routine_id, exercise_id, position, target_sets, target_reps, target_rest_seconds, target_seconds, hidden)
+      SELECT ?, exercise_id, position, target_sets, target_reps, target_rest_seconds, target_seconds, hidden
       FROM gym_routine_exercises WHERE routine_id = ?
       ORDER BY position ASC, id ASC
     `).run(info.lastInsertRowid, id);

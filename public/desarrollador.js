@@ -17,6 +17,12 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.53.0': [
+    'El cronómetro de una serie por tiempo NO avisa al llegar al objetivo (solo se marca en pantalla). Si al usarlo de verdad hace falta que vibre, hay que decidirlo aparte: toca el mismo canal que el aviso de fin de descanso.',
+    'El temporizador suelto tampoco suena al vencer, por lo mismo.',
+    'Los récords de un ejercicio por tiempo (mejor aguante) todavía no salen en la pestaña de PRs: la ruta ya devuelve maxSeconds, falta pintarlo.',
+    'El tiempo estimado del entreno no usa todavía el objetivo de las series por tiempo, que se sabe de antemano y lo afinaría.',
+  ],
   '0.52.0': [
     'Duplicar una carpeta con muchas notas dentro: comprobar que no tarda un mundo con una biblioteca de verdad.',
     'Las filas del día ya no tienen campos: ver si se echa de menos poder escribir las series sin abrir el diálogo.',

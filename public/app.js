@@ -10937,6 +10937,67 @@ const gymExerciseMuscleField = createSelectField({
 });
 document.getElementById('gym-exercise-muscle-field').appendChild(gymExerciseMuscleField.element);
 
+// ---------------------------------------------------------------------
+// COMO SE MIDE UN EJERCICIO
+// ---------------------------------------------------------------------
+//
+// Peticion de Koku (11/9/2026): "poder hacer ejercicios temporizados.
+// Aguantar ejercicios isometricos. Poder hacer ejercicios de
+// repeticiones en x tiempo".
+//
+// Tres formas, y la eligio el: va en la FICHA del ejercicio, porque una
+// plancha siempre se mide en segundos. Se dice una vez y todos sus dias
+// y series ya salen con el campo correcto.
+//
+// EL SUB-MODO NO ES UN AJUSTE MAS: sale de QUE OBJETIVO rellenes.
+//
+//   'tiempo' con segundos objetivo    -> el cronometro cuenta ATRAS
+//   'tiempo' sin segundos             -> cuenta hacia ARRIBA (aguanta lo
+//                                        que puedas)
+//   'reps_en_tiempo' con segundos     -> cuenta atras y al acabar te
+//                                        pregunta cuantas hiciste (AMRAP)
+//   'reps_en_tiempo' con reps         -> cuenta hacia arriba y lo que se
+//                                        mide es el TIEMPO que tardaste
+//
+// Asi se cubren las dos variantes que pidio sin un interruptor extra que
+// haya que entender. Y se guardan SIEMPRE las dos cosas (reps y
+// segundos), asi que los dos records existen sin tener que elegir.
+const GYM_MEDICIONES = [
+  { value: 'reps', label: 'Repeticiones', hint: 'Lo de siempre: repeticiones y peso.' },
+  { value: 'tiempo', label: 'Tiempo (aguantar)', hint: 'Isométrico: se aguanta. Con segundos objetivo el cronómetro cuenta atrás; déjalos vacíos para aguantar lo que puedas.' },
+  { value: 'reps_en_tiempo', label: 'Reps en un tiempo', hint: 'Pon los segundos y se cuenta atrás (apuntas cuántas hiciste), o pon las reps y se mide lo que tardas.' },
+];
+
+function gymMedicionDe(exercise) {
+  const v = exercise && exercise.measure;
+  return GYM_MEDICIONES.some((m) => m.value === v) ? v : 'reps';
+}
+function gymEsPorTiempo(measure) {
+  return measure === 'tiempo' || measure === 'reps_en_tiempo';
+}
+
+const gymExerciseMeasureField = createSelectField({
+  options: GYM_MEDICIONES.map((m) => ({ value: m.value, label: m.label })),
+  initialValue: 'reps',
+  onChange: () => aplicarMedicionEnFichaDeEjercicio(),
+});
+document.getElementById('gym-exercise-measure-field').appendChild(gymExerciseMeasureField.element);
+
+// Enseña/esconde los campos de "cómo lo sueles hacer" segun la medicion,
+// y explica debajo que hace cada una. En un isometrico no hay
+// repeticiones que poner, y en uno de repeticiones los segundos no
+// pintan nada: dejar los dos campos siempre puestos invita a rellenar el
+// que no toca.
+function aplicarMedicionEnFichaDeEjercicio() {
+  const medicion = gymExerciseMeasureField.getValue() || 'reps';
+  const reps = document.getElementById('gym-exercise-default-reps');
+  const segundos = document.getElementById('gym-exercise-default-seconds');
+  reps.classList.toggle('hidden', medicion === 'tiempo');
+  segundos.classList.toggle('hidden', medicion === 'reps');
+  const meta = GYM_MEDICIONES.find((m) => m.value === medicion);
+  document.getElementById('gym-exercise-measure-hint').textContent = meta ? meta.hint : '';
+}
+
 // Musculos SECUNDARIOS del ejercicio (chips activables): cuentan en el
 // mapa de musculos a mitad de peso, igual que los de la libreria.
 let gymExerciseSecondarySel = new Set();
@@ -11054,7 +11115,10 @@ function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-side-rest').value = exercise && exercise.sideRestSeconds != null ? exercise.sideRestSeconds : '';
   document.getElementById('gym-exercise-default-sets').value = exercise && exercise.defaultSets != null ? exercise.defaultSets : '';
   document.getElementById('gym-exercise-default-reps').value = exercise && exercise.defaultReps != null ? exercise.defaultReps : '';
+  document.getElementById('gym-exercise-default-seconds').value = exercise && exercise.defaultSeconds != null ? exercise.defaultSeconds : '';
   document.getElementById('gym-exercise-default-rest').value = exercise && exercise.defaultRestSeconds != null ? exercise.defaultRestSeconds : '';
+  gymExerciseMeasureField.setValue(gymMedicionDe(exercise));
+  aplicarMedicionEnFichaDeEjercicio();
   refreshGymExerciseDefaultRestPreview();
   refreshGymUnilateralFields();
   gymExerciseSecondarySel = new Set(exercise && Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : []);
@@ -11095,6 +11159,8 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
     defaultSets: document.getElementById('gym-exercise-default-sets').value,
     defaultReps: document.getElementById('gym-exercise-default-reps').value,
     defaultRestSeconds: document.getElementById('gym-exercise-default-rest').value,
+    measure: gymExerciseMeasureField.getValue() || 'reps',
+    defaultSeconds: document.getElementById('gym-exercise-default-seconds').value,
   };
   // El flag se captura ANTES de cerrar: closeGymExerciseModal lo resetea.
   const addToLive = !id && gymExerciseAddToLivePending;
@@ -11617,13 +11683,14 @@ function startGymLiveSession(day) {
         note: '',
         rpe: '',
         collapsed: i > 0,
-        sets: gymBuildSetsForExercise(ex.exerciseId, ex.targetSets, ex.targetRestSeconds ?? ''),
+        sets: gymBuildSetsForExercise(ex.exerciseId, ex.targetSets, ex.targetRestSeconds ?? '', ex.targetSeconds ?? ''),
       })),
     hiddenPool: day
       ? day.exercises.filter((ex) => ex.hidden).map((ex) => ({
           exerciseId: ex.exerciseId,
           targetSets: ex.targetSets,
           targetRestSeconds: ex.targetRestSeconds,
+          targetSeconds: ex.targetSeconds,
         }))
       : [],
   };
@@ -11791,14 +11858,22 @@ function gymLiveTick() {
 
   // Cronometro de la serie en curso: se actualiza el texto en vez de
   // repintar la tarjeta entera cada segundo.
+  const enCurso = gymSerieEnCurso();
   const setTimers = document.querySelectorAll('[data-live-set-timer]');
   if (setTimers.length > 0) {
-    const t = gymLiveFormatClock(gymActiveSetSeconds());
-    setTimers.forEach((el) => { el.textContent = t; });
+    const t = gymTextoDelCronometroDeSerie(enCurso && enCurso.set);
+    const cumplido = !!(enCurso && gymObjetivoCumplido(enCurso.set));
+    setTimers.forEach((el) => {
+      el.textContent = t;
+      // Al llegar a cero el cronometro se marca, que es lo que sustituye
+      // aqui al aviso del descanso: estas mirando la pantalla o el reloj,
+      // no hace falta vibrar.
+      el.classList.toggle('objetivo-cumplido', cumplido);
+    });
   }
   const endTimer = document.getElementById('gym-set-end-timer');
   if (endTimer && !document.getElementById('gym-set-end-modal').classList.contains('hidden')) {
-    endTimer.textContent = gymLiveFormatClock(gymActiveSetSeconds());
+    endTimer.textContent = gymTextoDelCronometroDeSerie(enCurso && enCurso.set);
   }
 
   // Mini-barra global: cuando el entreno esta OCULTO y hay algo en
@@ -12468,16 +12543,41 @@ function gymApplyFirstSideToPending(ex, side) {
 }
 // Crea las series de un ejercicio: una fila por serie, o DOS (izquierda
 // y derecha) si el ejercicio cuenta los lados por separado.
-function gymBuildSetsForExercise(exerciseId, count, restSeconds) {
+// El cuarto argumento son los segundos OBJETIVO, para los ejercicios por
+// tiempo. La serie nace sabiendo COMO se mide y que objetivo tiene, que
+// es lo que luego decide si el cronometro cuenta atras o hacia arriba.
+//
+// La medicion se copia del ejercicio AL CREAR la serie y se queda ahi:
+// cambiar el ejercicio a mitad de entreno no reescribe las series que ya
+// llevabas hechas.
+function gymBuildSetsForExercise(exerciseId, count, restSeconds, targetSeconds = '') {
   const exercise = state.gymExercises.find((e) => e.id === exerciseId);
   const sides = !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
+  const measure = gymMedicionDe(exercise);
+  const objetivo = targetSeconds !== '' && targetSeconds != null
+    ? targetSeconds
+    : (exercise && exercise.defaultSeconds != null ? exercise.defaultSeconds : '');
+  const base = () => ({
+    reps: '',
+    weightDisplay: '',
+    done: false,
+    restSeconds,
+    side: null,
+    note: '',
+    measure,
+    // Lo que se apunto de verdad (aguante o ventana). Vacio hasta que se
+    // haga la serie.
+    measureSeconds: '',
+    // Y lo que toca hacer. Solo en los ejercicios por tiempo.
+    targetSeconds: gymEsPorTiempo(measure) ? objetivo : '',
+  });
   const out = [];
   for (let i = 0; i < Math.max(1, Number(count) || 1); i++) {
     if (sides) {
-      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'left', note: '' });
-      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'right', note: '' });
+      out.push({ ...base(), side: 'left' });
+      out.push({ ...base(), side: 'right' });
     } else {
-      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: null, note: '' });
+      out.push(base());
     }
   }
   return out;
@@ -12509,6 +12609,312 @@ function gymActiveSetSeconds() {
   if (!a) return 0;
   const paused = (a.pausedMs || 0) + (a.pausedAt ? Date.now() - a.pausedAt : 0);
   return Math.max(0, Math.floor((Date.now() - a.startedAt - paused) / 1000));
+}
+
+// ---------------------------------------------------------------------
+// EL CRONOMETRO DE UNA SERIE POR TIEMPO
+// ---------------------------------------------------------------------
+//
+// Koku eligio que dependa del tipo: un isometrico con objetivo cuenta
+// ATRAS (y avisa al llegar a cero, como el descanso), y un "aguanta lo
+// que puedas" cuenta hacia ARRIBA.
+//
+// No hace falta ningun ajuste para elegir: lo decide si la serie tiene
+// segundos objetivo o no. Si los tiene, hay una meta a la que llegar y
+// contar atras es lo util; si no, la meta ES lo que aguantes.
+
+// COMO SE LEE UNA SERIE POR TIEMPO, en una linea.
+//
+// Se usa en la tarjeta del entreno, en "la ultima vez" y en el historial,
+// para que las tres digan lo mismo y no haya tres formatos distintos del
+// mismo dato.
+//
+//   isometrico              -> "45 s"
+//   reps en un tiempo       -> "22 en 30 s"
+//   sin datos todavia       -> "—"
+function gymTextoDeSegundosDeSerie(set) {
+  if (!set) return '—';
+  const seg = Number(set.measureSeconds ?? set.measure_seconds);
+  const tiene = Number.isFinite(seg) && seg > 0;
+  if (set.measure === 'reps_en_tiempo') {
+    const reps = set.reps;
+    if (reps && tiene) return `${reps} en ${seg} s`;
+    if (tiene) return `${seg} s`;
+    return reps ? String(reps) : '—';
+  }
+  return tiene ? `${seg} s` : '—';
+}
+
+// El resumen de una serie para "la ultima vez" y el historial: en
+// repeticiones es el "60×10" de siempre, y en las de tiempo lo de arriba.
+// Con { kg: true } lleva el peso delante, que es como se enseña en el
+// entreno.
+function gymResumenDeSerie(set, { kg = false } = {}) {
+  if (!set) return '—';
+  const peso = set.weightKg !== null && set.weightKg !== undefined ? gymWeightKgToDisplay(set.weightKg) : null;
+  if (gymEsPorTiempo(set.measure)) {
+    const texto = gymTextoDeSegundosDeSerie(set);
+    // El peso solo si de verdad lo hubo: la mayoria de los isometricos
+    // van sin nada encima, y un "0×45 s" no dice nada.
+    return kg && peso ? `${peso} ${texto}` : texto;
+  }
+  return `${kg ? (peso ?? '—') : (peso ?? '—')}×${set.reps ?? '—'}`;
+}
+
+// ---------------------------------------------------------------------
+// CRONOMETRO / TEMPORIZADOR SUELTO
+// ---------------------------------------------------------------------
+//
+// Peticion de Koku (11/9/2026): "un cronometro, cuando le doy, que abra
+// un cronometro y ya esta, no hace nada, solo cronometrar, que puedas
+// pausarlo, reiniciarlo y ya... si lo abro y no lo pauso y lo cierro que
+// siga corriendo... no necesito que se contabilice en el historial me da
+// igual, es para tener una herramienta rapida en el mismo ecosistema.
+// Que pueda ser temporizador tambien".
+//
+// TRES COSAS QUE NO HACE, Y ES A PROPOSITO:
+//
+//  1. No toca la sesion. No crea series, no suma al tiempo de trabajo y
+//     no sale en el historial. Es una herramienta, no un registro.
+//  2. No avisa al llegar a cero en modo temporizador: solo se marca en
+//     pantalla. Sonar o vibrar seria pisarse con el aviso de fin de
+//     descanso, que es el que de verdad tiene que oirse con la app
+//     cerrada. (Si algun dia hace falta, es una decision aparte: toca
+//     notificaciones.)
+//  3. No se para al cerrar el dialogo, que es justo lo que pidio.
+//
+// El estado se guarda en localStorage y NO en memoria: asi sobrevive a
+// recargar la app, igual que el entreno. Y el tiempo se calcula SIEMPRE
+// de marcas de reloj (startedAt/pausedMs), nunca de un contador que se
+// va sumando -- en iOS el JavaScript de fondo se congela, y un contador
+// se quedaria corto justo cuando se sale de la app (la misma razon por
+// la que el entreno ya funciona asi).
+const GYM_CRONO_KEY = 'gymCrono';
+let gymCrono = null;
+let gymCronoLatido = null;
+
+function gymCronoCargar() {
+  let crudo = null;
+  try {
+    const texto = localStorage.getItem(GYM_CRONO_KEY);
+    crudo = texto ? JSON.parse(texto) : null;
+  } catch { crudo = null; }
+  if (!crudo || typeof crudo !== 'object' || Array.isArray(crudo)) { gymCrono = null; return; }
+  // SE SANEA AL LEER, y no es paranoia: encontrado forzando errores, un
+  // startedAt que no fuera un numero (basura en localStorage, una copia
+  // de seguridad vieja, otra version de la app) hacia que el cronometro
+  // pintara "NaN:NaN" -- Date.now() menos un texto da NaN, y de ahi no
+  // se sale solo. Validar en la puerta de entrada lo arregla de una vez
+  // para todos los que leen el estado.
+  const numeroOCero = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const numeroONulo = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
+  gymCrono = {
+    modo: crudo.modo === 'atras' ? 'atras' : 'arriba',
+    startedAt: numeroONulo(crudo.startedAt),
+    pausedMs: Math.max(0, numeroOCero(crudo.pausedMs)),
+    pausedAt: numeroONulo(crudo.pausedAt),
+    objetivo: Math.max(1, numeroOCero(crudo.objetivo) || 60),
+  };
+}
+function gymCronoGuardar() {
+  try {
+    if (gymCrono) localStorage.setItem(GYM_CRONO_KEY, JSON.stringify(gymCrono));
+    else localStorage.removeItem(GYM_CRONO_KEY);
+  } catch { /* sin sitio: el cronometro sigue vivo en memoria */ }
+}
+gymCronoCargar();
+
+// Los segundos que lleva corriendo, descontando lo que estuvo pausado.
+function gymCronoSegundos() {
+  if (!gymCrono || !gymCrono.startedAt) return 0;
+  const pausado = (gymCrono.pausedMs || 0) + (gymCrono.pausedAt ? Date.now() - gymCrono.pausedAt : 0);
+  return Math.max(0, Math.floor((Date.now() - gymCrono.startedAt - pausado) / 1000));
+}
+function gymCronoEnMarcha() {
+  return !!(gymCrono && gymCrono.startedAt && !gymCrono.pausedAt);
+}
+// En temporizador, lo que QUEDA; en cronometro, lo que lleva. Al llegar a
+// cero se queda en cero y no sigue a negativo.
+function gymCronoRestante() {
+  if (!gymCrono) return 0;
+  if (gymCrono.modo !== 'atras') return gymCronoSegundos();
+  return Math.max(0, (Number(gymCrono.objetivo) || 0) - gymCronoSegundos());
+}
+function gymCronoVencido() {
+  return !!(gymCrono && gymCrono.modo === 'atras' && gymCrono.startedAt && gymCronoRestante() <= 0);
+}
+
+function gymCronoModoActual() {
+  return gymCrono && gymCrono.modo === 'atras' ? 'atras' : 'arriba';
+}
+
+// El objetivo escrito en los dos campos, en segundos. Minimo 1: un
+// temporizador de cero segundos no es un temporizador.
+function gymCronoObjetivoEscrito() {
+  const min = Number(document.getElementById('gym-crono-min').value) || 0;
+  const seg = Number(document.getElementById('gym-crono-seg').value) || 0;
+  return Math.max(1, Math.floor(min) * 60 + Math.floor(seg));
+}
+
+function renderGymCrono() {
+  const modal = document.getElementById('gym-crono-modal');
+  if (!modal) return;
+  const modo = gymCronoModoActual();
+  modal.querySelectorAll('[data-crono-modo]').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.cronoModo === modo);
+  });
+  document.getElementById('gym-crono-titulo').textContent = modo === 'atras' ? 'Temporizador' : 'Cronómetro';
+  // Los campos del objetivo solo en temporizador, y bloqueados mientras
+  // corre: cambiar de cuanto cuenta atras a mitad de cuenta no significa
+  // nada claro.
+  const objetivo = document.getElementById('gym-crono-objetivo');
+  objetivo.classList.toggle('hidden', modo !== 'atras');
+  const corriendo = !!(gymCrono && gymCrono.startedAt);
+  objetivo.querySelectorAll('input').forEach((i) => { i.disabled = corriendo; });
+
+  const display = document.getElementById('gym-crono-display');
+  display.textContent = gymLiveFormatClock(corriendo ? gymCronoRestante() : (modo === 'atras' ? gymCronoObjetivoEscrito() : 0));
+  display.classList.toggle('vencido', gymCronoVencido());
+  display.classList.toggle('paused', !!(gymCrono && gymCrono.pausedAt));
+
+  const toggle = document.getElementById('btn-gym-crono-toggle');
+  toggle.textContent = !corriendo ? 'Empezar' : (gymCrono.pausedAt ? 'Reanudar' : 'Pausar');
+  document.getElementById('btn-gym-crono-reset').disabled = !corriendo;
+  document.getElementById('gym-crono-pista').textContent = gymCronoVencido()
+    ? 'Se acabó el tiempo.'
+    : (corriendo ? 'Puedes cerrar esto: sigue contando.' : '');
+  // El boton del menu se marca mientras hay algo en marcha, para que se
+  // note que sigue contando aunque el dialogo este cerrado.
+  const botonFab = document.getElementById('btn-gym-live-crono');
+  if (botonFab) botonFab.classList.toggle('esta-contando', corriendo && !gymCrono.pausedAt);
+}
+
+// Un latido propio mientras el dialogo esta abierto. No se reaprovecha el
+// del entreno a proposito: este cronometro tiene que funcionar aunque no
+// haya ningun entrenamiento en marcha.
+function gymCronoArrancarLatido() {
+  if (gymCronoLatido) return;
+  gymCronoLatido = setInterval(renderGymCrono, 250);
+}
+function gymCronoPararLatido() {
+  if (!gymCronoLatido) return;
+  clearInterval(gymCronoLatido);
+  gymCronoLatido = null;
+}
+
+function abrirGymCrono() {
+  if (!gymCrono) gymCrono = { modo: 'arriba', startedAt: null, pausedMs: 0, pausedAt: null, objetivo: 60 };
+  if (gymCrono.modo === 'atras' && gymCrono.objetivo) {
+    document.getElementById('gym-crono-min').value = Math.floor(gymCrono.objetivo / 60);
+    document.getElementById('gym-crono-seg').value = gymCrono.objetivo % 60;
+  }
+  document.getElementById('gym-crono-modal').classList.remove('hidden');
+  renderGymCrono();
+  gymCronoArrancarLatido();
+}
+function cerrarGymCrono() {
+  document.getElementById('gym-crono-modal').classList.add('hidden');
+  gymCronoPararLatido();
+  // NO se para el cronometro: cerrar es cerrar la ventana, no parar el
+  // reloj. Lo pidio asi explicitamente.
+  renderGymCrono();
+}
+
+document.getElementById('btn-gym-live-crono').addEventListener('click', () => {
+  closeGymLiveFab();
+  abrirGymCrono();
+});
+document.getElementById('btn-close-gym-crono').addEventListener('click', cerrarGymCrono);
+cerrarModalAlTocarFuera('gym-crono-modal', cerrarGymCrono);
+
+document.querySelectorAll('#gym-crono-modos [data-crono-modo]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    // Cambiar de modo REINICIA: un cronometro a mitad no se puede
+    // convertir en una cuenta atras sin inventarse desde cuando.
+    gymCrono = { modo: btn.dataset.cronoModo, startedAt: null, pausedMs: 0, pausedAt: null, objetivo: gymCrono ? gymCrono.objetivo : 60 };
+    gymCronoGuardar();
+    renderGymCrono();
+  });
+});
+
+document.getElementById('btn-gym-crono-toggle').addEventListener('click', () => {
+  if (!gymCrono) gymCrono = { modo: 'arriba', startedAt: null, pausedMs: 0, pausedAt: null, objetivo: 60 };
+  if (!gymCrono.startedAt) {
+    if (gymCrono.modo === 'atras') gymCrono.objetivo = gymCronoObjetivoEscrito();
+    gymCrono.startedAt = Date.now();
+    gymCrono.pausedMs = 0;
+    gymCrono.pausedAt = null;
+  } else if (gymCrono.pausedAt) {
+    gymCrono.pausedMs = (gymCrono.pausedMs || 0) + (Date.now() - gymCrono.pausedAt);
+    gymCrono.pausedAt = null;
+  } else {
+    gymCrono.pausedAt = Date.now();
+  }
+  gymCronoGuardar();
+  renderGymCrono();
+});
+
+document.getElementById('btn-gym-crono-reset').addEventListener('click', () => {
+  if (!gymCrono) return;
+  gymCrono = { modo: gymCrono.modo, startedAt: null, pausedMs: 0, pausedAt: null, objetivo: gymCrono.objetivo };
+  gymCronoGuardar();
+  renderGymCrono();
+});
+
+['gym-crono-min', 'gym-crono-seg'].forEach((id) => {
+  document.getElementById(id).addEventListener('input', renderGymCrono);
+});
+
+// Al arrancar la app, por si se dejo uno corriendo: solo se refresca la
+// marca del boton, sin abrir nada.
+renderGymCrono();
+
+// La serie que esta corriendo ahora mismo, o null.
+function gymSerieEnCurso() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return null;
+  const ex = gymLiveSession.exercises.find((e) => e.exerciseId === a.exerciseId);
+  const set = ex && ex.sets[a.setIndex];
+  return set ? { ex, set } : null;
+}
+
+// Los segundos objetivo de una serie, o 0 si no tiene (no es por tiempo,
+// o es de las de "aguanta lo que puedas").
+function gymObjetivoDeLaSerie(set) {
+  if (!set || !gymEsPorTiempo(set.measure)) return 0;
+  const n = Number(set.targetSeconds);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+// ¿Esta serie cuenta atras? Solo si es por tiempo Y tiene objetivo.
+function gymSerieCuentaAtras(set) {
+  return gymObjetivoDeLaSerie(set) > 0;
+}
+
+// Lo que enseña el cronometro de la serie: hacia arriba lo de siempre,
+// y hacia atras lo que queda. Al llegar a cero se queda en "0:00" y NO
+// sigue en negativo: lo que pasa a partir de ahi es que te has pasado del
+// objetivo, y eso ya lo dice el aviso.
+function gymTextoDelCronometroDeSerie(set) {
+  const corridos = gymActiveSetSeconds();
+  const objetivo = gymObjetivoDeLaSerie(set);
+  if (!objetivo) return gymLiveFormatClock(corridos);
+  return gymLiveFormatClock(Math.max(0, objetivo - corridos));
+}
+
+// ¿Ya se llego al objetivo? Lo usa el aviso de "ya puedes parar".
+function gymObjetivoCumplido(set) {
+  const objetivo = gymObjetivoDeLaSerie(set);
+  return objetivo > 0 && gymActiveSetSeconds() >= objetivo;
+}
+
+// Los segundos que se apuntan al terminar una serie por tiempo.
+//
+// Es SIEMPRE lo que marco el cronometro, no el objetivo: si la plancha
+// era de 45 s y aguantaste 38, lo que se guarda son 38. El objetivo es lo
+// que te propusiste, no lo que hiciste.
+function gymSegundosDeLaSerie() {
+  return gymActiveSetSeconds();
 }
 
 // Cancela la serie en curso si es de este ejercicio (se usa al quitar un
@@ -12656,7 +13062,7 @@ function gymStartSet(exIndex, setIndexOverride = null) {
     // (izquierdo + derecho), no una fila suelta -- antes se colaba una
     // serie sin lado y descuadraba la numeracion (lo vio Koku).
     const last = ex.sets[ex.sets.length - 1];
-    const nuevas = gymBuildSetsForExercise(ex.exerciseId, 1, last ? last.restSeconds : '');
+    const nuevas = gymBuildSetsForExercise(ex.exerciseId, 1, last ? last.restSeconds : '', last ? last.targetSeconds : '');
     idx = ex.sets.length;
     ex.sets.push(...nuevas);
     // El bloque nuevo sale por el lado que hayas elegido antes en este
@@ -13028,7 +13434,7 @@ document.getElementById('btn-gym-exercise-edit-add-set').addEventListener('click
   const ultima = draft.sets[draft.sets.length - 1];
   const desde = draft.sets.length;
   // Una serie mas: dos filas si el ejercicio cuenta los lados aparte.
-  draft.sets.push(...gymBuildSetsForExercise(gymExerciseEditId, 1, ultima ? ultima.restSeconds : draft.restSeconds));
+  draft.sets.push(...gymBuildSetsForExercise(gymExerciseEditId, 1, ultima ? ultima.restSeconds : draft.restSeconds, ultima ? ultima.targetSeconds : ''));
   const ex = gymLiveSession && gymLiveSession.exercises.find((e) => e.exerciseId === gymExerciseEditId);
   if (ex && ex.firstSide === 'right') gymSetStartSide(draft, desde, 'right');
   renderGymExerciseEditSets();
@@ -13079,6 +13485,32 @@ function gymVolcarSerieEnFormulario(set, sugerencia) {
   wEl.placeholder = sugerencia && sugerencia.weightDisplay ? String(sugerencia.weightDisplay) : '';
   rEl.placeholder = sugerencia && sugerencia.reps ? String(sugerencia.reps) : '';
   document.getElementById('gym-set-end-note').value = set.note || '';
+
+  // LOS CAMPOS SE TURNAN SEGUN COMO SE MIDA LA SERIE.
+  //
+  //   'tiempo'          -- solo segundos (un isometrico no tiene reps).
+  //   'reps_en_tiempo'  -- los DOS: cuantas hiciste y en cuanto tiempo.
+  //   'reps'            -- solo repeticiones, como siempre.
+  //
+  // El peso se queda SIEMPRE, en las tres: una plancha con disco encima
+  // o un chaleco lastrado son cosa normal ("por lo general es sin peso,
+  // pero que exista la posibilidad").
+  const medicion = gymEsPorTiempo(set.measure) ? set.measure : 'reps';
+  document.getElementById('gym-set-end-reps-field').classList.toggle('hidden', medicion === 'tiempo');
+  document.getElementById('gym-set-end-seconds-field').classList.toggle('hidden', medicion === 'reps');
+  const segEl = document.getElementById('gym-set-end-seconds');
+  if (gymEsPorTiempo(medicion)) {
+    // Llega relleno con lo que marco el cronometro, y se puede corregir:
+    // igual paraste tarde, o lo estas apuntando despues. Si la serie ya
+    // traia un valor (se esta reabriendo el dialogo), manda ese.
+    segEl.value = set.measureSeconds !== '' && set.measureSeconds != null
+      ? set.measureSeconds
+      : gymSegundosDeLaSerie();
+    const objetivo = gymObjetivoDeLaSerie(set);
+    document.getElementById('gym-set-end-seconds-label').textContent =
+      objetivo > 0 ? `Segundos (objetivo: ${objetivo})` : 'Segundos aguantados';
+  }
+
   // El ± va SIEMPRE. El teclado decimal del iPhone no tiene tecla menos,
   // asi que sin el boton seria imposible escribir un -20 en el movil; y
   // cualquier ejercicio puede necesitar ayuda un dia (ver el bloque
@@ -13373,6 +13805,16 @@ function gymFinishActiveSet() {
     set.weightDisplay = gymNormalizarPeso(wEl.value !== '' ? wEl.value : (wEl.placeholder || ''));
     set.reps = rEl.value !== '' ? rEl.value : (rEl.placeholder || '');
     set.note = document.getElementById('gym-set-end-note').value;
+    // Los segundos de una serie por tiempo: lo escrito, y si no lo que
+    // marco el cronometro. En una serie de repeticiones normales se
+    // limpian, para no dejar un dato colgado que luego alguien sume.
+    if (gymEsPorTiempo(set.measure)) {
+      const segEl = document.getElementById('gym-set-end-seconds');
+      const escrito = segEl.value !== '' ? Number(segEl.value) : NaN;
+      set.measureSeconds = Number.isFinite(escrito) && escrito >= 0 ? escrito : gymSegundosDeLaSerie();
+    } else {
+      set.measureSeconds = '';
+    }
     set.segments = gymLeerTramosDelFormulario();
     set.failure = gymSetEndFailure;
     set.done = true;
@@ -13485,14 +13927,21 @@ function renderGymLiveExercises() {
       // saber que ese numero no salio de una serie normal.
       const prevExtra = prevSet && gymSetSegments(prevSet).length;
       const prevLabel = prevSet
-        ? `${prevSet.restSeconds ? `(${gymFormatRestShort(prevSet.restSeconds)})` : ''}${prevSet.weightKg !== null ? gymWeightKgToDisplay(prevSet.weightKg) : '—'}×${prevSet.reps ?? '—'}${prevExtra ? ` +${prevExtra}` : ''}`
+        ? `${prevSet.restSeconds ? `(${gymFormatRestShort(prevSet.restSeconds)})` : ''}${gymResumenDeSerie(prevSet, { kg: true })}${prevExtra ? ` +${prevExtra}` : ''}`
         : '—';
+      // La segunda columna de valores cambia con la medicion: en un
+      // ejercicio de repeticiones enseña las reps, y en uno por tiempo
+      // los segundos. En "reps en un tiempo" van los dos ("22 en 30 s"),
+      // que es justo lo que quieres ver de un vistazo.
+      const valorDerecha = gymEsPorTiempo(set.measure)
+        ? gymTextoDeSegundosDeSerie(set)
+        : String(set.reps || '—');
       return `
         <div class="gym-live-set-row ${set.done ? 'done' : ''}">
           <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}</span>
           <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
           <span class="gym-live-set-value">${escapeHtml(String(set.weightDisplay || '—'))}</span>
-          <span class="gym-live-set-value">${escapeHtml(String(set.reps || '—'))}</span>
+          <span class="gym-live-set-value">${escapeHtml(valorDerecha)}</span>
         </div>
         ${set.extraRest || set.failure || gymSetSegments(set).length
           ? `<div class="gym-live-set-chips">${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymFailureChipHtml(set.failure)}${gymSegmentChipHtml(set)}</div>`
@@ -13685,7 +14134,7 @@ function renderGymLiveExercises() {
           note: '',
           rpe: '',
           collapsed: false,
-          sets: gymBuildSetsForExercise(p.exerciseId, p.targetSets, p.targetRestSeconds ?? ''),
+          sets: gymBuildSetsForExercise(p.exerciseId, p.targetSets, p.targetRestSeconds ?? '', p.targetSeconds ?? ''),
         });
         gymLiveSession.hiddenPool.splice(poolIndex, 1);
         gymLiveStore();
@@ -13890,6 +14339,10 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
         // en cada serie para no cambiar el esquema de gym_sets.
         rpe: ex.rpe,
         extraRestSeconds: set.extraRest || null,
+        // Como se midio ESTA serie y cuantos segundos dio. En una de
+        // repeticiones van a null y la fila queda igual que siempre.
+        measure: gymEsPorTiempo(set.measure) ? set.measure : null,
+        measureSeconds: gymEsPorTiempo(set.measure) && set.measureSeconds !== '' ? set.measureSeconds : null,
         // Cuanto duro la serie (del boton "empezar" al "terminar").
         durationSeconds: set.durationSeconds || null,
         side: set.side || null,
@@ -14489,9 +14942,18 @@ function renderGymRoutineExercisesField() {
     // descanso 1:30". Si no tiene nada puesto se dice, en vez de dejar
     // una linea vacia que parece un error.
     const trozos = [];
-    if (row.targetSets && row.targetReps) trozos.push(`${row.targetSets} × ${row.targetReps}`);
+    // En un ejercicio POR TIEMPO lo que va detras del "×" son segundos,
+    // no repeticiones: "3 × 45 s". Y si no tiene objetivo, se dice que es
+    // de aguantar lo que puedas, que es informacion de verdad y no un
+    // hueco vacio.
+    const porTiempo = gymEsPorTiempo(gymMedicionDe(ej));
+    const objetivo = porTiempo && Number(row.targetSeconds) > 0 ? `${row.targetSeconds} s` : null;
+    if (row.targetSets && objetivo) trozos.push(`${row.targetSets} × ${objetivo}`);
+    else if (row.targetSets && row.targetReps) trozos.push(`${row.targetSets} × ${row.targetReps}`);
     else if (row.targetSets) trozos.push(`${row.targetSets} series`);
+    else if (objetivo) trozos.push(objetivo);
     else if (row.targetReps) trozos.push(`${row.targetReps} reps`);
+    if (porTiempo && !objetivo) trozos.push('lo que aguantes');
     if (Number(row.targetRestSeconds) > 0) trozos.push(`descanso ${gymLiveFormatClock(Number(row.targetRestSeconds))}`);
     rowEl.innerHTML = `
       <span class="gym-list-item-name">${escapeHtml(ej ? ej.name : 'Ejercicio')}
@@ -14563,6 +15025,31 @@ function renderGymRoutineExercisesField() {
 let gymEjercicioDelDiaIndice = null;
 let gymEjercicioDelDiaPicker = null;
 
+// De cada campo del trio (ahora cuarteto) al input del dialogo. En una
+// sola lista para que anadir uno nuevo sea anadirlo aqui y en
+// GYM_TARGET_FIELDS, y nada mas.
+const GYM_CAMPOS_DEL_DIALOGO_DEL_DIA = {
+  targetSets: 'gym-routine-exercise-sets',
+  targetReps: 'gym-routine-exercise-reps',
+  targetSeconds: 'gym-routine-exercise-seconds',
+  targetRestSeconds: 'gym-routine-exercise-rest',
+};
+
+// Reps y Segundos se turnan segun como se mida el ejercicio ELEGIDO en
+// el desplegable de arriba (no el que hubiera antes): en un isometrico no
+// hay repeticiones que poner.
+//
+// En "reps en un tiempo" se enseñan LOS DOS, y a proposito: ahi es donde
+// eliges cual de las dos variantes haces. Si pones los segundos, el
+// cronometro cuenta atras y apuntas las reps; si pones las reps, cuenta
+// hacia arriba y lo que se mide es lo que tardas.
+function aplicarMedicionEnElDia(exerciseId) {
+  const ej = state.gymExercises.find((x) => x.id === Number(exerciseId));
+  const medicion = gymMedicionDe(ej);
+  document.getElementById('gym-routine-exercise-reps-field').classList.toggle('hidden', medicion === 'tiempo');
+  document.getElementById('gym-routine-exercise-seconds-field').classList.toggle('hidden', medicion === 'reps');
+}
+
 function abrirEjercicioDelDia(index) {
   const fila = gymRoutineModalExercises[index];
   if (!fila) return;
@@ -14583,7 +15070,9 @@ function abrirEjercicioDelDia(index) {
   campo.appendChild(gymEjercicioDelDiaPicker.element);
   document.getElementById('gym-routine-exercise-sets').value = fila.targetSets ?? '';
   document.getElementById('gym-routine-exercise-reps').value = fila.targetReps ?? '';
+  document.getElementById('gym-routine-exercise-seconds').value = fila.targetSeconds ?? '';
   document.getElementById('gym-routine-exercise-rest').value = fila.targetRestSeconds ?? '';
+  aplicarMedicionEnElDia(fila.exerciseId);
   document.getElementById('gym-routine-exercise-hidden').checked = !!fila.hidden;
   refrescarVistaPreviaDelDescanso();
   document.getElementById('gym-routine-exercise-modal').classList.remove('hidden');
@@ -14610,17 +15099,16 @@ function cerrarEjercicioDelDia() {
 function cambiarEjercicioDelDia(index, valor) {
   const anteriores = gymTargetsPorDefecto(gymRoutineModalExercises[index].exerciseId);
   const nuevos = gymTargetsPorDefecto(Number(valor));
-  const campos = {
-    targetSets: 'gym-routine-exercise-sets',
-    targetReps: 'gym-routine-exercise-reps',
-    targetRestSeconds: 'gym-routine-exercise-rest',
-  };
+  const campos = GYM_CAMPOS_DEL_DIALOGO_DEL_DIA;
   GYM_TARGET_FIELDS.forEach(({ enElDia }) => {
     const input = document.getElementById(campos[enElDia]);
     const actual = input.value;
     const sinTocar = actual === '' || actual == null || String(actual) === String(anteriores[enElDia]);
     if (sinTocar) input.value = nuevos[enElDia] ?? '';
   });
+  // El ejercicio nuevo puede medirse distinto que el de antes, asi que
+  // los campos que se ven tienen que cambiar con el.
+  aplicarMedicionEnElDia(valor);
   refrescarVistaPreviaDelDescanso();
 }
 
@@ -14635,6 +15123,7 @@ document.getElementById('gym-routine-exercise-form').addEventListener('submit', 
   if (elegido) fila.exerciseId = Number(elegido);
   fila.targetSets = document.getElementById('gym-routine-exercise-sets').value;
   fila.targetReps = document.getElementById('gym-routine-exercise-reps').value;
+  fila.targetSeconds = document.getElementById('gym-routine-exercise-seconds').value;
   fila.targetRestSeconds = document.getElementById('gym-routine-exercise-rest').value;
   fila.hidden = document.getElementById('gym-routine-exercise-hidden').checked;
   cerrarEjercicioDelDia();
@@ -14647,6 +15136,10 @@ document.getElementById('gym-routine-exercise-form').addEventListener('submit', 
 const GYM_TARGET_FIELDS = [
   { enElDia: 'targetSets', porDefecto: 'defaultSets' },
   { enElDia: 'targetReps', porDefecto: 'defaultReps' },
+  // Los segundos viajan igual que los otros tres: del ejercicio al dia,
+  // y del dia a la serie. En un ejercicio de repeticiones se quedan
+  // vacios y no los mira nadie.
+  { enElDia: 'targetSeconds', porDefecto: 'defaultSeconds' },
   { enElDia: 'targetRestSeconds', porDefecto: 'defaultRestSeconds' },
 ];
 
@@ -14729,6 +15222,7 @@ function openGymRoutineModal(routine, modo = 'ficha') {
         exerciseId: ex.exerciseId,
         targetSets: ex.targetSets ?? '',
         targetReps: ex.targetReps ?? '',
+        targetSeconds: ex.targetSeconds ?? '',
         targetRestSeconds: ex.targetRestSeconds ?? '',
         hidden: !!ex.hidden,
       }))
@@ -14883,6 +15377,12 @@ function renderGymSessionExercisesField() {
         const antesPorLados = gymExerciseUsesSides(fila);
         fila.exerciseId = Number(valor);
         const ahoraPorLados = gymExerciseUsesSides(fila);
+        // Cambiar de ejercicio puede cambiar COMO SE MIDE (de reps a
+        // tiempo o al reves). Se aplica a las series de esta fila, que es
+        // lo que decide que campos se ven; los datos ya escritos no se
+        // tiran, para no perder lo apuntado por un cambio de ejercicio.
+        const medicionNueva = gymMedicionDe(state.gymExercises.find((x) => x.id === fila.exerciseId));
+        fila.sets.forEach((sx) => { sx.measure = medicionNueva; });
         if (ahoraPorLados !== antesPorLados) {
           // Al pasar a un ejercicio POR LADOS, las series que estan en
           // blanco se parten en dos (izquierda y derecha), igual que las
@@ -14957,7 +15457,11 @@ function renderGymSessionExercisesField() {
         </div>
         <div class="gym-set-segment-fields">
           <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><span class="gym-peso-con-signo">${gymBotonDeSignoHtml()}<input type="text" inputmode="decimal" data-field="weight" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></span></label>
-          <label class="gym-set-segment-field"><span>Reps</span><input type="number" data-field="reps" min="0" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
+          ${set.measure === 'tiempo' ? '' : `<label class="gym-set-segment-field"><span>Reps</span><input type="number" data-field="reps" min="0" value="${escapeHtml(String(set.reps ?? ''))}" /></label>`}
+          <!-- Los segundos de una serie por tiempo. Se turnan con Reps
+               igual que en el resto de la app: en un isometrico no hay
+               repeticiones, y en "reps en un tiempo" se ven las dos. -->
+          ${gymEsPorTiempo(set.measure) ? `<label class="gym-set-segment-field"><span>Segundos</span><input type="number" data-field="measureSeconds" min="0" value="${escapeHtml(String(set.measureSeconds ?? ''))}" /></label>` : ''}
           <!-- El "+60s" va PEGADO al descanso, no a la duracion: es
                descanso extra que se anadio con el boton +30s, y colgando
                de la duracion parecia que la serie habia durado mas
@@ -14969,7 +15473,12 @@ function renderGymSessionExercisesField() {
         <div class="gym-set-segments" data-seg-editor="${exIndex}-${setIndex}"></div>
         <div class="gym-set-extend-list gym-session-set-actions"></div>
       `;
-      bloqueSerie.querySelector('[data-field="reps"]').addEventListener('input', (e) => { set.reps = e.target.value; });
+      // El campo de reps no existe en un isometrico, asi que se engancha
+      // solo si esta; lo mismo con el de segundos.
+      const repsEl = bloqueSerie.querySelector('[data-field="reps"]');
+      if (repsEl) repsEl.addEventListener('input', (e) => { set.reps = e.target.value; });
+      const segEl = bloqueSerie.querySelector('[data-field="measureSeconds"]');
+      if (segEl) segEl.addEventListener('input', (e) => { set.measureSeconds = e.target.value; });
       bloqueSerie.querySelector('[data-field="weight"]').addEventListener('input', (e) => { set.weightDisplay = gymNormalizarPeso(e.target.value); });
       bloqueSerie.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => { set.restSeconds = e.target.value; });
       const quitarExtraSesion = bloqueSerie.querySelector('[data-quitar-extra]');
@@ -15048,7 +15557,11 @@ function renderGymSessionExercisesField() {
       // en blanco, varian serie a serie.
       const lastSet = exRow.sets[exRow.sets.length - 1];
       const descanso = lastSet ? lastSet.restSeconds : '';
-      const base = { reps: '', weightDisplay: '', restSeconds: descanso, extraRestSeconds: null, segments: [], setType: null };
+      // La medicion sale del EJERCICIO de la fila, no de la serie
+      // anterior: si te has equivocado de ejercicio y lo cambias, la
+      // serie nueva ya nace midiendose como toca.
+      const medicion = gymMedicionDe(state.gymExercises.find((x) => x.id === Number(exRow.exerciseId)));
+      const base = { reps: '', weightDisplay: '', restSeconds: descanso, extraRestSeconds: null, segments: [], setType: null, measure: medicion, measureSeconds: '' };
       if (gymExerciseUsesSides(exRow)) {
         // Una serie de un ejercicio por lados son DOS filas, izquierda y
         // derecha, igual que las crea el entreno en vivo
@@ -15076,7 +15589,7 @@ document.getElementById('btn-add-gym-session-exercise').addEventListener('click'
   const nuevo = { exerciseId: primero.id, rpe: '', sets: [] };
   // Mismo criterio que "+ Serie": si el ejercicio va por lados, la
   // primera serie ya nace con sus dos filas.
-  const base = { reps: '', weightDisplay: '', restSeconds: '', segments: [], setType: null };
+  const base = { reps: '', weightDisplay: '', restSeconds: '', segments: [], setType: null, measure: gymMedicionDe(primero), measureSeconds: '' };
   if (gymExerciseUsesSides(nuevo)) {
     nuevo.sets.push({ ...base, side: 'left', segments: [] });
     nuevo.sets.push({ ...base, side: 'right', segments: [] });
@@ -15118,6 +15631,11 @@ function openGymSessionModal(session) {
         // Se arrastran tal cual: editar una sesion a mano no debe borrar
         // lo que duraron sus series, su lado ni sus notas.
         durationSeconds: set.durationSeconds ?? null,
+        // Como se midio, y sus segundos. Se arrastran igual que lo
+        // demas: editar una sesion a mano no puede convertir una plancha
+        // de 45 s en una serie de cero repeticiones.
+        measure: set.measure || 'reps',
+        measureSeconds: set.measureSeconds ?? '',
         side: set.side ?? null,
         notes: set.notes ?? null,
         // Los tramos de una serie alargada se arrastran tal cual (en kg,
@@ -15179,6 +15697,8 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         restSeconds: set.restSeconds,
         extraRestSeconds: set.extraRestSeconds ?? null,
         durationSeconds: set.durationSeconds ?? null,
+        measure: gymEsPorTiempo(set.measure) ? set.measure : null,
+        measureSeconds: gymEsPorTiempo(set.measure) && set.measureSeconds !== '' ? set.measureSeconds : null,
         side: set.side ?? null,
         notes: set.notes ?? null,
         // Se leen del DOM y no del array: un tramo recien anadido puede
@@ -15331,6 +15851,16 @@ function renderGymConsistency(summary) {
   // (solo cuenta lo registrado con el boton de empezar/terminar serie,
   // asi que en sesiones apuntadas a mano sale 0 y no se ensena).
   const monthWork = monthSessions.reduce((acc, s) => acc + (s.workSeconds || 0), 0);
+  // TIEMPO BAJO TENSION: los segundos de los ejercicios que se miden en
+  // tiempo (planchas, isometricos, "reps en X segundos").
+  //
+  // Va APARTE del volumen y no dentro, que es lo que eligio Koku de las
+  // tres opciones: un minuto de plancha con 10 kg daria 600 metido en el
+  // volumen, y 600 ahi no son 600 kg. Son unidades distintas.
+  //
+  // Solo sale si de verdad hay algo que contar: en un mes sin ningun
+  // ejercicio por tiempo, una cifra a cero seria ruido.
+  const monthTension = monthSessions.reduce((acc, s) => acc + (s.tensionSeconds || 0), 0);
   // Series al fallo del mes: el "cuanto has apretado" al lado del
   // "cuanto has entrenado" (peticion de Koku). Solo sale si hay alguna,
   // para no ensenar un 0 permanente a quien no las marque.
@@ -15344,6 +15874,7 @@ function renderGymConsistency(summary) {
       <div class="gym-live-summary-stat"><b>${monthCount}</b><span>Este mes</span></div>
       ${monthFailureSets > 0 ? `<div class="gym-live-summary-stat"><b>${monthFailureSets}</b><span>Series al fallo este mes</span></div>` : ''}
       ${monthWork > 0 ? `<div class="gym-live-summary-stat gym-stat-wide"><b>${gymFormatWorkTime(monthWork)}</b><span>Tiempo de trabajo este mes</span></div>` : ''}
+      ${monthTension > 0 ? `<div class="gym-live-summary-stat gym-stat-wide"><b>${gymFormatWorkTime(monthTension)}</b><span>Tiempo bajo tensión este mes</span></div>` : ''}
     </div>
   `;
 
@@ -20458,7 +20989,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.52.0';
+const APP_VERSION = '0.53.0';
 const APP_VERSION_DATE = '2026-09-11';
 
 function renderAppVersionLine() {

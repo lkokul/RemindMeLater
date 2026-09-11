@@ -19,6 +19,18 @@
 // es que se esconda por CSS: es que no está.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.53.0',
+    fecha: '2026-09-11',
+    nuevo: [
+      'Ejercicios por tiempo. En la ficha de cada ejercicio eliges cómo se mide: repeticiones (lo de siempre), tiempo (isométricos: planchas, hollow holds) o repeticiones dentro de un tiempo.',
+      'El cronómetro de la serie se adapta: si le pones segundos objetivo cuenta atrás y se marca al llegar a cero; si lo dejas vacío cuenta hacia arriba, para aguantar lo que puedas.',
+      'Puedes ponerles peso igual (una plancha lastrada, un chaleco), aunque lo normal sea sin.',
+      '"Tiempo bajo tensión" en Progreso, con sus propios segundos. Va aparte del volumen a propósito: un minuto de plancha no son kilos movidos.',
+      'Cronómetro y temporizador sueltos en el menú del entreno. Solo cuentan: empezar, pausar y reiniciar. Si los cierras siguen corriendo, y no se guardan en el historial.',
+    ],
+    parches: [],
+  },
+  {
     version: '0.52.0',
     fecha: '2026-09-11',
     nuevo: [

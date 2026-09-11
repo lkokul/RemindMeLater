@@ -1878,4 +1878,58 @@ function applyLocalSchema(db) {
     db.exec('ALTER TABLE gym_sessions ADD COLUMN activity_name TEXT');
   }
 
+  // -------------------------------------------------------------------
+  // EJERCICIOS POR TIEMPO (11/9/2026)
+  // -------------------------------------------------------------------
+  //
+  // Peticion de Koku: "poder hacer ejercicios temporizados. Aguantar
+  // ejercicios isometricos. Poder hacer ejercicios de repeticiones en x
+  // tiempo".
+  //
+  // COMO SE MIDE UN EJERCICIO ('measure'), tres valores:
+  //   NULL / 'reps'      -- lo de siempre: repeticiones y peso.
+  //   'tiempo'           -- isometrico: se aguanta N segundos.
+  //   'reps_en_tiempo'   -- repeticiones dentro de una ventana de tiempo.
+  //
+  // Se marca en la FICHA del ejercicio (decision de Koku): una plancha
+  // siempre se mide en segundos, asi que lo natural es que lo sepa el
+  // ejercicio y no haya que decirlo en cada serie.
+  //
+  // PERO CADA SERIE GUARDA SU PROPIA 'measure', y eso es lo importante:
+  // asi cambiar un ejercicio de reps a tiempo (o al reves) NO reescribe
+  // hacia atras lo que ya habias apuntado. Es la leccion de la marca
+  // 'assisted' de mas arriba, que hacia justo eso y por eso se fue.
+  const gymExerciseColumns3 = db.prepare('PRAGMA table_info(gym_exercises)').all().map((c) => c.name);
+  if (!gymExerciseColumns3.includes('measure')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN measure TEXT');
+  }
+  // Los segundos por defecto del ejercicio, al lado de default_sets /
+  // default_reps / default_rest_seconds. Mismo trato: a NULL en lo que ya
+  // existe, asi que hasta que no lo rellenes nada cambia.
+  if (!gymExerciseColumns3.includes('default_seconds')) {
+    db.exec('ALTER TABLE gym_exercises ADD COLUMN default_seconds INTEGER');
+  }
+
+  // Los segundos ORIENTATIVOS de un ejercicio dentro de un dia, al lado
+  // de target_sets / target_reps / target_rest_seconds.
+  const gymRoutineExerciseColumns2 = db.prepare('PRAGMA table_info(gym_routine_exercises)').all().map((c) => c.name);
+  if (!gymRoutineExerciseColumns2.includes('target_seconds')) {
+    db.exec('ALTER TABLE gym_routine_exercises ADD COLUMN target_seconds INTEGER');
+  }
+
+  // Y en la serie: como se midio ESTA serie, y cuantos segundos dio.
+  //
+  // measure_seconds NO es lo mismo que duration_seconds, aunque en un
+  // isometrico cronometrado coincidan: duration_seconds es "cuanto tardo
+  // la serie del boton de empezar al de terminar" (existe tambien en una
+  // serie de reps normal, y es NULL si la apuntaste a mano), mientras que
+  // measure_seconds es EL DATO de la serie -- el aguante, o la ventana --
+  // y se puede escribir a mano sin haber cronometrado nada.
+  const gymSetColumns3 = db.prepare('PRAGMA table_info(gym_sets)').all().map((c) => c.name);
+  if (!gymSetColumns3.includes('measure')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN measure TEXT');
+  }
+  if (!gymSetColumns3.includes('measure_seconds')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN measure_seconds INTEGER');
+  }
 }
