@@ -10258,6 +10258,13 @@ function finanzasTercerosQS(separador) {
   return finanzasIncluyeTerceros() ? `${separador}includeThirdParty=1` : '';
 }
 
+// Un porcentaje escrito como se escribe aqui: "9,7%", con coma. Sin
+// esto salia "+9.7%" justo al lado de "1.700,00 €", con dos convenios
+// distintos en la misma linea.
+function formatFinanzasPorcentaje(n) {
+  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 }).format(Math.abs(Number(n) || 0));
+}
+
 function formatFinanzasAmount(n) {
   const num = Number(n) || 0;
   return `${FINANZAS_MONEY_FORMATTER.format(num)} €`;
@@ -15992,7 +15999,8 @@ async function renderFinanzasResumenTab() {
   // al gastar un objetivo: la cuenta seguia diciendo 1.900 € cuando ya
   // eran 649,45 €. En una app de cuentas, una cifra caducada es de lo
   // peor que puede salir, y recargar aqui cuesta una consulta local.
-  await Promise.all([loadFinanzasAccounts(), loadFinanzasReservado()]);
+  await Promise.all([loadFinanzasAccounts(), loadFinanzasReservado(), loadFinanzasSalarios()]);
+  renderFinanzasSalario();
   renderFinanzasAccountsSummary();
   const [summary, trend] = await Promise.all([
     api(`/api/finanzas-transactions/summary/month${finanzasTercerosQS('?')}`),
@@ -17095,7 +17103,7 @@ async function openFinanzasRecurringTransactionsModal(r) {
         const previo = mismoNumeroDePagos ? anterior.total : anterior.total / anterior.count;
         const variacion = ((actual - previo) / previo) * 100;
         if (Math.abs(variacion) >= 0.5) {
-          sub += ` · ${variacion > 0 ? '+' : '−'}${Math.abs(variacion).toFixed(0)}%${mismoNumeroDePagos ? '' : ' por pago'} frente a ${anterior.year}`;
+          sub += ` · ${variacion > 0 ? '+' : '−'}${formatFinanzasPorcentaje(Math.round(variacion))}%${mismoNumeroDePagos ? '' : ' por pago'} frente a ${anterior.year}`;
         }
       }
       grupo.appendChild(
@@ -17450,6 +17458,232 @@ document.getElementById('finanzas-investment-form').addEventListener('submit', a
   await refreshFinanzasInvestmentsTab();
   await refreshFinanzasAccountsAndCategories();
   renderFinanzasResumenTab();
+});
+
+// =====================================================================
+// Salario: la entrada estable de ingresos, con su historia.
+//
+// No es una cifra suelta: es una LISTA de "desde esta fecha cobro esto".
+// Asi una subida no borra lo de antes y se ve la evolucion en el tiempo.
+// En NETO, que es lo unico comparable con lo que de verdad entra.
+//
+// Lo delicado no es guardar el numero: es que cambiarlo puede significar
+// TRES cosas distintas, y confundirlas estropea el historico para
+// siempre. Por eso se pregunta (ver finanzasSalaryPreguntarAlcance).
+// =====================================================================
+
+let finanzasSalarios = { current: null, history: [] };
+
+const finanzasSalaryDateField = createDateField({ initialValue: new Date() });
+document.getElementById('finanzas-salary-date-field').appendChild(finanzasSalaryDateField.element);
+
+async function loadFinanzasSalarios() {
+  try {
+    finanzasSalarios = await api('/api/finanzas-salaries');
+  } catch (err) {
+    finanzasSalarios = { current: null, history: [] };
+  }
+}
+
+function renderFinanzasSalario() {
+  const input = document.getElementById('finanzas-salary-input');
+  const hint = document.getElementById('finanzas-salary-hint');
+  const btnHistoria = document.getElementById('btn-finanzas-salary-history');
+  const actual = finanzasSalarios.current;
+
+  // Solo se reescribe el campo si no lo estas editando: si no, borraria
+  // lo que estas tecleando cada vez que se repinta el Resumen.
+  if (document.activeElement !== input) {
+    input.value = actual ? actual.amount : '';
+  }
+
+  btnHistoria.classList.toggle('hidden', finanzasSalarios.history.length === 0);
+
+  if (!actual) {
+    hint.textContent = 'Si tienes una entrada estable de ingresos (una nómina), ponla aquí en neto.';
+    return;
+  }
+  let texto = `Cobras ${formatFinanzasAmount(actual.amount)} netos desde ${finanzasFijosFechaCorta(actual.startDate)}.`;
+  if (finanzasSalarios.history.length > 1) {
+    texto += ` ${finanzasSalarios.history.length} importes guardados.`;
+  }
+  hint.textContent = texto;
+}
+
+// La pregunta de las tres opciones. Devuelve 'nuevo' | 'ultimo' | 'todos'
+// o null si se cierra sin elegir.
+function finanzasSalaryPreguntarAlcance(nuevoImporte) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('finanzas-salary-scope-modal');
+    const actual = finanzasSalarios.current;
+    document.getElementById('finanzas-salary-scope-sub').textContent = actual
+      ? `Tenías ${formatFinanzasAmount(actual.amount)} y has puesto ${formatFinanzasAmount(nuevoImporte)}.`
+      : `Vas a guardar ${formatFinanzasAmount(nuevoImporte)}.`;
+
+    // La fecha solo pinta algo en "me lo han subido": corregir un importe
+    // mal apuntado no cambia desde cuando lo cobras.
+    finanzasSalaryDateField.setValue(new Date());
+
+    let resuelto = false;
+    const terminar = (valor) => {
+      if (resuelto) return;
+      resuelto = true;
+      modal.classList.add('hidden');
+      opciones.forEach((b) => b.removeEventListener('click', alElegir));
+      cerrar.removeEventListener('click', alCerrar);
+      resolve(valor);
+    };
+    const alElegir = (e) => terminar(e.currentTarget.dataset.salaryScope);
+    const alCerrar = () => terminar(null);
+
+    const opciones = [...modal.querySelectorAll('[data-salary-scope]')];
+    const cerrar = document.getElementById('btn-close-finanzas-salary-scope');
+    opciones.forEach((b) => b.addEventListener('click', alElegir));
+    cerrar.addEventListener('click', alCerrar);
+
+    modal.classList.remove('hidden');
+  });
+}
+
+document.getElementById('btn-save-finanzas-salary').addEventListener('click', async () => {
+  const input = document.getElementById('finanzas-salary-input');
+  const bruto = input.value.trim();
+
+  // Vaciar el campo no borra nada: borrar un salario se hace desde el
+  // historico, donde se ve cual te estas cargando.
+  if (bruto === '') {
+    await showAppConfirm(
+      finanzasSalarios.history.length === 0
+        ? 'Escribe tu salario neto para guardarlo.'
+        : 'Para quitar un salario, ábrelo en "Ver evolución" y bórralo desde ahí: así ves cuál estás quitando.',
+      { okText: 'Vale', alertOnly: true }
+    );
+    return;
+  }
+
+  const importe = Number(bruto);
+  if (!Number.isFinite(importe) || importe <= 0) {
+    await showAppConfirm('El salario tiene que ser un número mayor que 0.', { okText: 'Vale', alertOnly: true });
+    return;
+  }
+
+  // El primero no pregunta nada: no hay historia que estropear todavia.
+  if (finanzasSalarios.history.length === 0) {
+    await api('/api/finanzas-salaries', { method: 'POST', body: JSON.stringify({ amount: importe }) });
+    await refreshFinanzasSalario();
+    return;
+  }
+
+  // Si no ha cambiado, no hay nada que preguntar.
+  if (finanzasSalarios.current && Math.abs(finanzasSalarios.current.amount - importe) < 0.005) {
+    await showAppConfirm('Ese es el salario que ya tenías guardado.', { okText: 'Vale', alertOnly: true });
+    return;
+  }
+
+  const alcance = await finanzasSalaryPreguntarAlcance(importe);
+  if (!alcance) {
+    renderFinanzasSalario(); // deshace lo tecleado
+    return;
+  }
+
+  try {
+    if (alcance === 'nuevo') {
+      const fecha = finanzasSalaryDateField.getValue();
+      await api('/api/finanzas-salaries', {
+        method: 'POST',
+        body: JSON.stringify({ amount: importe, startDate: fecha ? toDateKey(fecha) : undefined }),
+      });
+    } else if (alcance === 'ultimo') {
+      const ultimo = finanzasSalarios.history[0];
+      await api(`/api/finanzas-salaries/${ultimo.id}`, { method: 'PUT', body: JSON.stringify({ amount: importe }) });
+    } else if (alcance === 'todos') {
+      const ok = await showAppConfirm(
+        `Vas a poner ${formatFinanzasAmount(importe)} en los ${finanzasSalarios.history.length} salarios guardados.\n\nTe quedarás sin evolución: la app dejará de saber que alguna vez cobraste otra cosa. ¿Seguro?`,
+        { okText: 'Sí, corregir todos', danger: true }
+      );
+      if (!ok) {
+        renderFinanzasSalario();
+        return;
+      }
+      await api('/api/finanzas-salaries/all/amount', { method: 'PUT', body: JSON.stringify({ amount: importe }) });
+    }
+  } catch (err) {
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  await refreshFinanzasSalario();
+});
+
+async function refreshFinanzasSalario() {
+  await loadFinanzasSalarios();
+  renderFinanzasSalario();
+}
+
+// -- La evolucion --
+function renderFinanzasSalaryHistory() {
+  const cont = document.getElementById('finanzas-salary-history-list');
+  const sub = document.getElementById('finanzas-salary-history-sub');
+  const historia = finanzasSalarios.history;
+  cont.innerHTML = '';
+
+  if (historia.length === 0) {
+    sub.textContent = '';
+    cont.appendChild(finanzasFijosVacioEl('Todavía no has guardado ningún salario.'));
+    return;
+  }
+
+  // De lo mas viejo a lo mas nuevo para la frase de cabecera: "has pasado
+  // de X a Y" solo tiene sentido en ese orden.
+  const primero = historia[historia.length - 1];
+  const ultimo = historia[0];
+  if (historia.length > 1 && primero.amount > 0) {
+    const dif = ultimo.amount - primero.amount;
+    const pct = Math.round((dif / primero.amount) * 1000) / 10;
+    sub.textContent = `Has pasado de ${formatFinanzasAmount(primero.amount)} a ${formatFinanzasAmount(ultimo.amount)}: ${dif >= 0 ? '+' : '−'}${formatFinanzasAmount(Math.abs(dif))} (${dif >= 0 ? '+' : '−'}${formatFinanzasPorcentaje(pct)}%) desde ${finanzasFijosFechaCorta(primero.startDate)}.`;
+  } else {
+    sub.textContent = `Un único salario guardado, desde ${finanzasFijosFechaCorta(primero.startDate)}.`;
+  }
+
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  historia.forEach((s) => {
+    const subida = s.change && s.change.diferencia > 0;
+    const bajada = s.change && s.change.diferencia < 0;
+    grupo.appendChild(
+      finanzasFilaEl({
+        icono: subida ? '↑' : bajada ? '↓' : '💶',
+        titulo: formatFinanzasAmount(s.amount),
+        sub: s.change
+          ? `desde ${finanzasFijosFechaCorta(s.startDate)} · ${subida ? '+' : '−'}${formatFinanzasAmount(Math.abs(s.change.diferencia))} (${subida ? '+' : '−'}${formatFinanzasPorcentaje(s.change.porcentaje)}%)`
+          : `desde ${finanzasFijosFechaCorta(s.startDate)} · el primero que guardaste`,
+        etiqueta: finanzasSalarios.current && finanzasSalarios.current.id === s.id ? 'Actual' : '',
+        etiquetaTono: 'ok',
+        alPulsar: () => editarSalarioGuardado(s),
+      })
+    );
+  });
+  cont.appendChild(grupo);
+}
+
+// Corregir o borrar UN salario del historico -- es el "quiero modificar x
+// salarios guardados anteriores" que pidio Koku.
+async function editarSalarioGuardado(s) {
+  const ok = await showAppConfirm(
+    `${formatFinanzasAmount(s.amount)} desde ${finanzasFijosFechaCorta(s.startDate)}.\n\n¿Qué quieres hacer con este?`,
+    { okText: 'Borrarlo', cancelText: 'Dejarlo', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/finanzas-salaries/${s.id}`, { method: 'DELETE' });
+  await refreshFinanzasSalario();
+  renderFinanzasSalaryHistory();
+}
+
+document.getElementById('btn-finanzas-salary-history').addEventListener('click', () => {
+  renderFinanzasSalaryHistory();
+  document.getElementById('finanzas-salary-history-modal').classList.remove('hidden');
+});
+document.getElementById('btn-close-finanzas-salary-history').addEventListener('click', () => {
+  document.getElementById('finanzas-salary-history-modal').classList.add('hidden');
 });
 
 // =====================================================================

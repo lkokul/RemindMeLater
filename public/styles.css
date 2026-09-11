@@ -5443,3 +5443,29 @@ body.gym-rest-push #settings-modal .settings-card {
 .finanzas-row-navegable { align-items: flex-start; }
 .finanzas-row-navegable .finanzas-row-icon,
 .finanzas-row-navegable .finanzas-row-right { margin-top: 0.1rem; }
+
+/* Las tres opciones de "que ha pasado con tu salario". Botones grandes y
+   con explicacion debajo a proposito: la diferencia entre ellas no es
+   obvia, y elegir mal estropea el historico para siempre. */
+.finanzas-salary-opciones { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.8rem 0; }
+.finanzas-salary-opcion {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--surface-text);
+  font: inherit;
+  cursor: pointer;
+}
+.finanzas-salary-opcion:active { background: var(--surface-2); }
+.finanzas-salary-opcion-titulo { font-weight: 600; }
+.finanzas-salary-opcion-sub {
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--surface-text) 62%, var(--surface));
+}
