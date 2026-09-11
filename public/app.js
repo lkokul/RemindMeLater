@@ -10512,8 +10512,20 @@ function finanzasTercerosQS(separador) {
 // Un porcentaje escrito como se escribe aqui: "9,7%", con coma. Sin
 // esto salia "+9.7%" justo al lado de "1.700,00 €", con dos convenios
 // distintos en la misma linea.
+// Y agrupando los miles como el dinero (useGrouping 'always'): un gasto
+// que pasa de 1 a 20 euros es un +1900%, y por defecto el español no
+// separa los numeros de cuatro cifras, asi que ese mismo numero saldria
+// "1900%" al lado de un "1.900,00 €". Es el mismo motivo que ya tiene
+// escrito FINANZAS_MONEY_FORMATTER, aplicado aqui.
+const FINANZAS_PCT_FORMATTER = new Intl.NumberFormat('es-ES', {
+  maximumFractionDigits: 1,
+  useGrouping: 'always',
+});
 function formatFinanzasPorcentaje(n) {
-  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 }).format(Math.abs(Number(n) || 0));
+  const num = Number(n);
+  // Un valor imposible (texto, null, infinito) se lee como 0 en vez de
+  // dejar un "NaN%" o un "∞%" en pantalla.
+  return FINANZAS_PCT_FORMATTER.format(Number.isFinite(num) ? Math.abs(num) : 0);
 }
 
 function formatFinanzasAmount(n) {
@@ -21099,7 +21111,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.54.0';
+const APP_VERSION = '0.55.0';
 const APP_VERSION_DATE = '2026-09-11';
 
 function renderAppVersionLine() {

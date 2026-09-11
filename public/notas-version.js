@@ -19,6 +19,18 @@
 // es que se esconda por CSS: es que no está.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.55.0',
+    fecha: '2026-09-11',
+    nuevo: [
+      'En Finanzas, deslizar hacia la derecha desde el inicio de la sección ya sale a Herramientas. Antes el gesto solo servía para volver de una sección a su inicio y ahí se quedaba.',
+    ],
+    parches: [
+      'La última fila de una lista de Finanzas quedaba debajo de la barra de abajo y no había forma de verla ni de tocarla, ni bajando del todo.',
+      'Arrastrar sobre una tabla ancha de Finanzas te sacaba de la pantalla en vez de dejarte mirar las columnas.',
+      'Los porcentajes de Finanzas salían con punto decimal ("+9.7%") al lado de importes con coma ("1.700,00 €").',
+    ],
+  },
+  {
     version: '0.54.0',
     fecha: '2026-09-11',
     nuevo: [

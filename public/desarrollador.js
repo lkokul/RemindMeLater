@@ -17,6 +17,11 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.55.0': [
+    'Merge de finanzas-movil. Los dos commits del "apartado de salario" los deshizo el tercero, así que de esa idea no queda nada en la app: si la quieres, hay que rehacerla.',
+    'El colchón de abajo de Finanzas son 7rem fijos. Si algún día la barra de apps cambia de alto, este número y el de .gym-tab-content hay que tocarlos a la vez.',
+    'Deslizar para salir de la App entera SOLO está en Finanzas. En Gimnasio, Entretenimiento y Viajes el segundo gesto todavía no hace nada — decidir si se generaliza.',
+  ],
   '0.54.0': [
     'El emparejado de lados se hace por "dos filas seguidas de lados distintos". Si alguna vez se pudiera apuntar un ejercicio a lados haciendo TODO un lado y luego todo el otro (D D D I I I), la cuenta saldría rara (1 2 3 3 4 5). No pasa en el flujo normal, pero es el único hueco conocido.',
     'Las sesiones YA GUARDADAS con la numeración vieja (1..6 en vez de 1,1,2,2,3,3) no se tocan: no hay migración. Habría que decidir si merece la pena una, sabiendo que sólo cambia cómo se LEE el historial, no ningún total.',

@@ -3320,6 +3320,51 @@ el cronómetro suelto, y un descanso de minuto y medio como "0:01:30" se
 lee peor que "1:30". Así cada uno queda como toca sin tener dos
 formateadores que puedan separarse con el tiempo.
 
+## Salir de una App deslizando (por ahora solo Finanzas)
+
+De la rama `finanzas-movil`, 11/9/2026. Koku: *"si deslizo desde el
+centro me lleve del apartado interior al primero, y si lo vuelvo a hacer
+que me lleve a la base app"*.
+
+O sea que el gesto central hacia la derecha tiene ahora **dos pasos** en
+Finanzas: de una sección a su inicio, y del inicio a Herramientas
+(`salirDeFinanzasDeslizando()` en `app.js`). Cómo sabe en cuál está: si
+el botón `btn-finanzas-back` se ve, estás DENTRO de una sección y de eso
+ya se encargó `volverUnPasoDentroDeLaPantalla()` antes.
+
+**Solo Finanzas, a propósito.** En Gimnasio, Entretenimiento y Viajes el
+centro todavía no significa "salir", y cambiárselo de golpe es justo lo
+que confunde. Si algún día se generaliza, el patrón ya está escrito.
+
+De paso, `.finanzas-tabs` salió de `MOBILE_SUBTAB_BARS`, y es correcto:
+esa barra **ya no existe en el DOM** desde que el inicio de Finanzas pasó
+a filas. Y `.finanzas-table-wrap` entró en `NAV_SWIPE_OPT_OUT`, porque
+arrastrar sobre una tabla ancha es mirar columnas, no volver atrás.
+
+**El colchón de abajo**: `.finanzas-tab-panel` reserva `7rem` al final.
+No es decoración — la barra de apps flota FIJA encima de esa pantalla,
+así que sin ese hueco la última fila se queda ~35 px por DEBAJO de la
+barra y no hay forma de verla ni de tocarla, ni bajando del todo. Es el
+mismo colchón que ya reservaba `.gym-tab-content`; Finanzas se había
+quedado sin él. **Si la barra cambia de alto, los dos números van
+juntos.**
+
+**Trampa al probar esto**, apuntada porque me mordió: no vale medir el
+CENTRO del último hijo del panel. El de Movimientos es un contenedor de
+1683 px (la tabla entera), así que su centro cae fuera de la pantalla y
+la prueba dice "está tapado" cuando no lo está. Hay que probar el punto
+justo encima del FINAL del contenido, con el panel ya desplazado al
+fondo, y comprobar con `elementFromPoint` que lo que hay ahí sigue
+estando DENTRO del panel.
+
+**Los porcentajes se escriben como el dinero** (`formatFinanzasPorcentaje`
+/ `FINANZAS_PCT_FORMATTER`): con coma decimal y agrupando los miles con
+`useGrouping: 'always'`. Lo segundo se añadió al fusionar: un gasto que
+pasa de 1 a 20 € es un +1900%, y por defecto el español no separa los
+números de cuatro cifras, así que salía "1900%" al lado de un
+"1.900,00 €". Es el mismo motivo que ya tenía escrito
+`FINANZAS_MONEY_FORMATTER`.
+
 ## Estado actual
 
 **Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde
