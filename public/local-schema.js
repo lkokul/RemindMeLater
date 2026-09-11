@@ -912,9 +912,87 @@ function applyLocalSchema(db) {
     db.exec('ALTER TABLE finanzas_transactions ADD COLUMN recurring_expense_id INTEGER REFERENCES finanzas_recurring_expenses(id)');
   }
 
+  // -- Objetivos de ahorro ("Coche, 5.000 €") --
+  //
+  // Son SOBRES VIRTUALES, no cuentas. El dinero NO se mueve a ningun
+  // sitio: la cuenta sigue teniendo su saldo y el objetivo solo RESERVA
+  // una parte, asi que la cuenta pasa a enseñar "saldo / reservado /
+  // disponible". Se hace asi porque en la vida real todo esta en la misma
+  // cuenta: obligar a crear una cuenta por objetivo seria contabilidad
+  // falsa, y chocaria con la regla de que el saldo SIEMPRE se calcula.
+  //
+  // account_id es opcional: un objetivo puede no estar atado a ninguna
+  // cuenta (es solo una meta). Si lo esta, su reserva se descuenta del
+  // disponible de esa cuenta.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS finanzas_goals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      icon TEXT,
+      color TEXT,
+      target_amount REAL NOT NULL,
+      target_date TEXT,
+      account_id INTEGER REFERENCES finanzas_accounts(id),
+      completed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Cada vez que apartas (o sacas) dinero del sobre. El importe puede
+    -- ser NEGATIVO: sacar del objetivo es una linea mas del historial, no
+    -- un borrado -- asi nunca se pierde lo que paso.
+    CREATE TABLE IF NOT EXISTS finanzas_goal_contributions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      goal_id INTEGER NOT NULL REFERENCES finanzas_goals(id),
+      amount REAL NOT NULL,
+      date TEXT NOT NULL,
+      notes TEXT,
+      transaction_id INTEGER REFERENCES finanzas_transactions(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  // kind: que CLASE de gasto fijo es -- 'subscription' (Netflix, Spotify),
+  // 'bill' (luz, agua, alquiler), 'loan' (prestamo, hipoteca) u 'other'.
+  //
+  // No es una categoria mas: las categorias son de Koku y cambian, y lo
+  // que hace falta aqui es poder contestar a "¿cuanto me gasto al año en
+  // SUSCRIPCIONES?" sin que el alquiler se cuele en esa cifra. Las
+  // plantillas de antes de esta columna quedan como 'other', que es la
+  // verdad (no se sabe lo que son) y no falsea ninguna suma.
+  const finanzasRecurringColumns = db.prepare('PRAGMA table_info(finanzas_recurring_expenses)').all().map((c) => c.name);
+  if (!finanzasRecurringColumns.includes('kind')) {
+    db.exec("ALTER TABLE finanzas_recurring_expenses ADD COLUMN kind TEXT NOT NULL DEFAULT 'other'");
+  }
+
+  // reminder_offsets: cuantos DIAS antes avisar de este pago, como lista
+  // separada por comas ("0,2,30" = el mismo dia, dos dias antes y un mes
+  // antes). Vacio = sin avisos.
+  //
+  // Se guarda como texto y no en una tabla aparte a proposito: son como
+  // mucho cinco numeros por plantilla, y una tabla obligaria a un borrado
+  // en cascada a mano mas (la regla de la casa es que no hay ON DELETE
+  // CASCADE) a cambio de nada.
+  //
+  // En DIAS aunque la interfaz diga "1 mes": para un aviso de cortesia,
+  // 30 dias y "un mes" son lo mismo, y en dias la cuenta no depende de en
+  // que mes caiga (un "mes antes" del 31 de marzo seria el 28 de febrero,
+  // que no es lo que nadie espera leer).
+  if (!finanzasRecurringColumns.includes('reminder_offsets')) {
+    db.exec("ALTER TABLE finanzas_recurring_expenses ADD COLUMN reminder_offsets TEXT NOT NULL DEFAULT ''");
+  }
+
   // savings_goal_min: objetivo MINIMO de ahorro mensual (sin maximo --
   // Koku dijo explicitamente que ahorrar de mas nunca es un problema).
   const finanzasSettingsColumns = db.prepare('PRAGMA table_info(finanzas_settings)').all().map((c) => c.name);
+
+  // A que hora del dia suenan los avisos de los pagos fijos. Una sola para
+  // todos (y no una por aviso): nadie quiere elegir hora cinco veces por
+  // cada gasto, y un aviso de "esto se paga en dos dias" no depende de la
+  // hora exacta. Por defecto las 9 de la mañana.
+  if (!finanzasSettingsColumns.includes('reminder_hour')) {
+    db.exec('ALTER TABLE finanzas_settings ADD COLUMN reminder_hour INTEGER NOT NULL DEFAULT 9');
+  }
+
   if (!finanzasSettingsColumns.includes('savings_goal_min')) {
     db.exec('ALTER TABLE finanzas_settings ADD COLUMN savings_goal_min REAL');
   }

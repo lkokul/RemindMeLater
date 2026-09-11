@@ -12,6 +12,38 @@
 
   const router = createLocalRouter();
 
+  // ---------------------------------------------------------------------
+  // DINERO DE TERCEROS
+  //
+  // Una cuenta de tipo "De terceros" guarda dinero que NO es de Koku: la
+  // paga de sus padres, la gasolina que le pagan ellos. El quiere seguir
+  // cuanto se deja en gasolina, pero ese dinero no puede contar como suyo
+  // ni en el ahorro ni en las graficas -- si contara, un mes con paga
+  // pareceria un mes de ingresos altos y el ahorro saldria inflado.
+  //
+  // Por eso TODAS las cuentas de la casa (limite mensual, ahorro, desglose
+  // por categoria y graficas) excluyen esas cuentas por defecto. Con
+  // ?includeThirdParty=1 se incluyen, que es el interruptor de "verlo todo
+  // junto".
+  //
+  // Se hace por TIPO DE CUENTA y no con una marca por movimiento a
+  // proposito: asi no hay que acordarse de marcar nada -- eliges la cuenta
+  // y ya esta -- y de paso queda contestada la pregunta "cuanto me queda
+  // de la paga este mes", que antes no se podia saber.
+  // LOWER() y no una comparacion exacta: el tipo de cuenta es texto libre
+  // (el desplegable propone "De terceros", pero una copia de seguridad
+  // vieja o un retoque a mano pueden traer "de terceros"). Con la
+  // comparacion exacta, esa cuenta volvia a contar como dinero propio y
+  // el ahorro salia inflado sin que nada lo delatara.
+  const SOLO_MI_DINERO =
+    "account_id NOT IN (SELECT id FROM finanzas_accounts WHERE LOWER(type) = 'de terceros')";
+
+  // Devuelve el "AND ..." que hay que pegar a una consulta, o cadena vacia
+  // si quien pregunta quiere verlo todo.
+  function filtroDeTerceros(req) {
+    return req.query.includeThirdParty === '1' ? '' : ` AND ${SOLO_MI_DINERO}`;
+  }
+
   function serialize(row) {
     return {
       id: row.id,
@@ -171,8 +203,10 @@
     const month = req.query.month && /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : new Date().toISOString().slice(0, 7);
     const prefix = `${month}-`;
 
+    const soloMio = filtroDeTerceros(req);
+
     const { total: expenseTotal } = db
-      .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'expense' AND counts_toward_budget = 1 AND date LIKE ?")
+      .prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'expense' AND counts_toward_budget = 1 AND date LIKE ?${soloMio}`)
       .get(`${prefix}%`);
     // Compras de inversion marcadas "cuenta para el limite mensual" (ver
     // finanzas_investment_transactions.counts_toward_budget) tambien suman
@@ -180,17 +214,17 @@
     // no a totalExpenseAll/savings mas abajo (Koku no pidio cambiar el
     // calculo del ahorro real, solo el del limite mensual).
     const { total: investmentBudgetTotal } = db
-      .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_investment_transactions WHERE type = 'buy' AND counts_toward_budget = 1 AND date LIKE ?")
+      .prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_investment_transactions WHERE type = 'buy' AND counts_toward_budget = 1 AND date LIKE ?${soloMio}`)
       .get(`${prefix}%`);
     const totalExpense = expenseTotal + investmentBudgetTotal;
     const { total: totalIncome } = db
-      .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'income' AND date LIKE ?")
+      .prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'income' AND date LIKE ?${soloMio}`)
       .get(`${prefix}%`);
     // A diferencia de totalExpense (solo lo que cuenta para el limite),
     // esto es TODO lo gastado el mes -- el ahorro real (savings, mas abajo)
     // tiene que salir de dinero de verdad, no del subconjunto del limite.
     const { total: totalExpenseAll } = db
-      .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'expense' AND date LIKE ?")
+      .prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'expense' AND date LIKE ?${soloMio}`)
       .get(`${prefix}%`);
 
     const byCategory = db
@@ -199,7 +233,7 @@
                 COALESCE(SUM(t.amount), 0) as total
          FROM finanzas_transactions t
          JOIN finanzas_categories c ON c.id = t.category_id
-         WHERE t.type = 'expense' AND t.counts_toward_budget = 1 AND t.date LIKE ?
+         WHERE t.type = 'expense' AND t.counts_toward_budget = 1 AND t.date LIKE ?${soloMio.replace('account_id', 't.account_id')}
          GROUP BY c.id
          ORDER BY total DESC`
       )
@@ -207,7 +241,7 @@
 
     const uncategorized = db
       .prepare(
-        "SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'expense' AND counts_toward_budget = 1 AND category_id IS NULL AND date LIKE ?"
+        `SELECT COALESCE(SUM(amount), 0) as total FROM finanzas_transactions WHERE type = 'expense' AND counts_toward_budget = 1 AND category_id IS NULL AND date LIKE ?${soloMio}`
       )
       .get(`${prefix}%`).total;
 
@@ -266,7 +300,7 @@
       .prepare(
         `SELECT substr(date, 1, 7) as month, type, SUM(amount) as total
          FROM finanzas_transactions
-         WHERE date >= ? AND date < ?
+         WHERE date >= ? AND date < ?${filtroDeTerceros(req)}
          GROUP BY substr(date, 1, 7), type`
       )
       .all(`${monthKeys[0]}-01`, `${monthKeys[monthKeys.length - 1]}-32`);
@@ -318,7 +352,7 @@
       .prepare(
         `SELECT substr(date, 1, 7) as month, type, SUM(amount) as total
          FROM finanzas_transactions
-         WHERE date >= ?
+         WHERE date >= ?${filtroDeTerceros(req)}
          GROUP BY month, type`
       )
       .all(`${months[0]}-01`);

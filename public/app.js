@@ -9917,6 +9917,7 @@ const finanzasAccountTypeField = createSelectField({
     { value: 'Ahorro', label: 'Ahorro' },
     { value: 'Inversión', label: 'Inversión' },
     { value: 'Efectivo', label: 'Efectivo' },
+    { value: 'De terceros', label: 'De terceros' },
     { value: 'Otro', label: 'Otro' },
   ],
   initialValue: '',
@@ -10035,6 +10036,84 @@ const finanzasRecurringFrequencyField = createSelectField({
 });
 document.getElementById('finanzas-recurring-frequency-field').appendChild(finanzasRecurringFrequencyField.element);
 
+// Que clase de gasto fijo es. No sustituye a la categoria (esa es de Koku
+// y cambia): esto es lo que permite preguntar "¿cuanto me cuestan al año
+// las SUSCRIPCIONES?" sin que el alquiler se cuele en la cifra.
+const FINANZAS_KIND_OPTIONS = [
+  { value: 'subscription', label: 'Suscripción' },
+  { value: 'bill', label: 'Recibo' },
+  { value: 'loan', label: 'Préstamo' },
+  { value: 'other', label: 'Otro' },
+];
+const FINANZAS_KIND_LABELS = {
+  subscription: 'Suscripción',
+  bill: 'Recibo',
+  loan: 'Préstamo',
+  other: 'Otro',
+};
+// Los plurales de los chips y de la cabecera, que no son los de arriba.
+const FINANZAS_KIND_PLURALES = {
+  all: 'Tus gastos fijos',
+  subscription: 'Tus suscripciones',
+  bill: 'Tus recibos',
+  loan: 'Tus préstamos',
+  other: 'Otros gastos fijos',
+};
+
+const finanzasRecurringKindField = createSelectField({ options: FINANZAS_KIND_OPTIONS, initialValue: 'other' });
+document.getElementById('finanzas-recurring-kind-field').appendChild(finanzasRecurringKindField.element);
+
+// -- Avisos de un gasto fijo (cuantos dias antes) --
+//
+// Se pueden marcar varios. El tope de 5 es el mismo que valida la ruta:
+// cada aviso ocupa un hueco del cupo de notificaciones del sistema.
+const FINANZAS_MAX_AVISOS = 5;
+const FINANZAS_AVISO_ETIQUETAS = {
+  0: 'el mismo día',
+  1: '1 día antes',
+  2: '2 días antes',
+  7: '1 semana antes',
+  15: '15 días antes',
+  30: '1 mes antes',
+  60: '2 meses antes',
+  90: '3 meses antes',
+};
+const finanzasRecurringAvisos = new Set();
+
+function renderFinanzasRecurringAvisos() {
+  document.querySelectorAll('[data-aviso-dias]').forEach((btn) => {
+    btn.classList.toggle('active', finanzasRecurringAvisos.has(Number(btn.dataset.avisoDias)));
+  });
+  const hint = document.getElementById('finanzas-recurring-reminders-hint');
+  if (finanzasRecurringAvisos.size === 0) {
+    hint.textContent = 'Sin avisos.';
+    return;
+  }
+  const orden = [...finanzasRecurringAvisos].sort((a, b) => b - a);
+  hint.textContent = `Te avisará ${orden.map((d) => FINANZAS_AVISO_ETIQUETAS[d] || `${d} días antes`).join(', ')}.`;
+}
+
+document.querySelectorAll('[data-aviso-dias]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const dias = Number(btn.dataset.avisoDias);
+    if (finanzasRecurringAvisos.has(dias)) {
+      finanzasRecurringAvisos.delete(dias);
+    } else {
+      if (finanzasRecurringAvisos.size >= FINANZAS_MAX_AVISOS) {
+        // Se avisa en vez de ignorar el toque en silencio: si no, parece
+        // que el boton esta roto.
+        await showAppConfirm(
+          `Como mucho ${FINANZAS_MAX_AVISOS} avisos por gasto. Cada aviso ocupa un hueco de los que el móvil reserva para toda la app (unos 64, compartidos con los recordatorios del calendario), así que conviene no gastarlos de más.`,
+          { okText: 'Vale', alertOnly: true }
+        );
+        return;
+      }
+      finanzasRecurringAvisos.add(dias);
+    }
+    renderFinanzasRecurringAvisos();
+  });
+});
+
 const finanzasRecurringMonthField = createSelectField({ options: FINANZAS_MONTH_OPTIONS, initialValue: '01' });
 document.getElementById('finanzas-recurring-month-field').appendChild(finanzasRecurringMonthField.element);
 
@@ -10083,10 +10162,48 @@ document.getElementById('finanzas-savings-year-input').value = finanzasCurrentYe
 document.getElementById('finanzas-savings-range-from-year').value = finanzasCurrentYear;
 document.getElementById('finanzas-savings-range-to-year').value = finanzasCurrentYear;
 
+// El dinero, escrito como se escribe en español: punto para los miles y
+// coma para los decimales ("10.851,88 €", no "10851.88 €"). Antes era un
+// toFixed(2) a secas, que en cifras de cuatro digitos para arriba se lee
+// fatal. Solo se usa para PINTAR (ninguno de los 37 sitios que la llaman
+// vuelve a convertir el texto en numero), asi que cambiarla es seguro.
+const FINANZAS_MONEY_FORMATTER = new Intl.NumberFormat('es-ES', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  // useGrouping "always" a proposito: por defecto, el español NO separa
+  // los numeros de cuatro cifras (9600, pero 12.845), que es correcto al
+  // escribir pero queda desigual en una COLUMNA de importes -- "9600,00"
+  // encima de "12.845,66" parece un fallo. Los bancos de aqui escriben
+  // 9.600,00 € siempre, y eso es lo que se espera leer en una app de
+  // cuentas.
+  useGrouping: 'always',
+});
+
+// ¿Se cuenta el dinero de terceros en los numeros del Resumen?
+//
+// Por defecto NO: la paga de sus padres y la gasolina que le pagan no son
+// dinero suyo, y contarlos inflaria el ahorro y las graficas. El
+// interruptor es para cuando quiere verlo todo junto.
+//
+// Va en localStorage y no en la base porque es una preferencia de VISTA,
+// como la densidad del calendario o el orden de las notas.
+function finanzasIncluyeTerceros() {
+  return localStorage.getItem('finanzasIncluirTerceros') === 'true';
+}
+
+// El "?includeThirdParty=1" que hay que pegarle a las consultas de
+// resumen, o cadena vacia.
+function finanzasTercerosQS(separador) {
+  return finanzasIncluyeTerceros() ? `${separador}includeThirdParty=1` : '';
+}
+
 function formatFinanzasAmount(n) {
   const num = Number(n) || 0;
-  return `${num.toFixed(2)} €`;
+  return `${FINANZAS_MONEY_FORMATTER.format(num)} €`;
 }
+
+let finanzasGoalIconField = null;
+let finanzasGoalColorField = null;
 
 function setupFinanzasIconColorFields() {
   if (finanzasIconColorFieldsReady) return;
@@ -10104,6 +10221,11 @@ function setupFinanzasIconColorFields() {
 
   finanzasPortfolioColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
   document.getElementById('finanzas-portfolio-color-field').appendChild(finanzasPortfolioColorField.element);
+
+  finanzasGoalIconField = createIconField({ initialValue: '' });
+  document.getElementById('finanzas-goal-icon-field').appendChild(finanzasGoalIconField.element);
+  finanzasGoalColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
+  document.getElementById('finanzas-goal-color-field').appendChild(finanzasGoalColorField.element);
 }
 
 async function loadFinanzasAccounts() {
@@ -15549,6 +15671,21 @@ document.getElementById('finanzas-category-form').addEventListener('submit', asy
 
 // -- Pestaña Resumen: saldo por cuenta, progreso del limite mensual, y
 //    desglose del gasto de este mes por categoria. --
+// Lo que cada cuenta tiene RESERVADO por objetivos sin cumplir. Se pide
+// aparte y se guarda aqui para que renderFinanzasAccountsSummary pueda
+// seguir siendo sincrona (la llaman varios sitios).
+let finanzasReservadoPorCuenta = {};
+
+async function loadFinanzasReservado() {
+  try {
+    finanzasReservadoPorCuenta = await api('/api/finanzas-goals/reserved-by-account');
+  } catch (err) {
+    // Sin esto la cuenta simplemente no enseña la linea de reservado; no
+    // es motivo para dejar el Resumen sin pintar.
+    finanzasReservadoPorCuenta = {};
+  }
+}
+
 function renderFinanzasAccountsSummary() {
   const wrap = document.getElementById('finanzas-accounts-summary');
   wrap.innerHTML = '';
@@ -15556,13 +15693,49 @@ function renderFinanzasAccountsSummary() {
     wrap.innerHTML = '<p class="empty-hint">Todavía no tienes cuentas. Crealas en la pestaña Movimientos.</p>';
     return;
   }
+  // El bloque del dinero de terceros solo aparece si de verdad hay alguna
+  // cuenta de ese tipo: a quien no lo use, no le sale un interruptor de
+  // algo que no tiene.
+  const esAjena = (a) => String(a.type || '').toLowerCase() === 'de terceros';
+  const ajenas = finanzasAccounts.filter(esAjena);
+  const fila = document.getElementById('finanzas-terceros-row');
+  const hint = document.getElementById('finanzas-terceros-hint');
+  fila.classList.toggle('hidden', ajenas.length === 0);
+  hint.classList.toggle('hidden', ajenas.length === 0);
+  if (ajenas.length > 0) {
+    document.getElementById('finanzas-incluir-terceros').checked = finanzasIncluyeTerceros();
+    const total = ajenas.reduce((acc, a) => acc + a.balance, 0);
+    hint.textContent = finanzasIncluyeTerceros()
+      ? `Ahora mismo los números de abajo SÍ incluyen ${formatFinanzasAmount(total)} que no son tuyos.`
+      : `Te quedan ${formatFinanzasAmount(total)} de dinero de terceros. No cuenta en tu ahorro ni en las gráficas, pero sus gastos se siguen registrando.`;
+  }
+
   finanzasAccounts.forEach((a) => {
     const card = document.createElement('div');
     card.className = 'finanzas-account-card';
+    if (esAjena(a)) card.classList.add('finanzas-account-card-ajena');
     card.innerHTML = `
       <span class="finanzas-account-card-name">${a.icon ? escapeHtml(a.icon) + ' ' : ''}${escapeHtml(a.name)}${a.type ? ` <span class="finanzas-account-type-badge">${escapeHtml(a.type)}</span>` : ''}</span>
       <span class="finanzas-account-card-balance${a.balance < 0 ? ' negative' : ''}">${formatFinanzasAmount(a.balance)}</span>
     `;
+
+    // Si hay objetivos apuntando a esta cuenta, se enseña el desglose: el
+    // saldo de arriba SIGUE siendo el de verdad (el dinero no se ha movido
+    // a ningun sitio), y debajo se dice cuanto esta hablado y cuanto queda
+    // libre. Es el sentido entero de los sobres.
+    const reservado = finanzasReservadoPorCuenta[a.id] || 0;
+    if (reservado > 0) {
+      const detalle = document.createElement('span');
+      detalle.className = 'finanzas-account-card-reserved';
+      const disponible = a.balance - reservado;
+      detalle.textContent =
+        disponible < 0
+          ? `${formatFinanzasAmount(reservado)} reservados — más de lo que tienes`
+          : `${formatFinanzasAmount(disponible)} libres · ${formatFinanzasAmount(reservado)} reservados`;
+      if (disponible < 0) detalle.classList.add('finanzas-account-card-reserved-alerta');
+      card.appendChild(detalle);
+    }
+
     wrap.appendChild(card);
   });
 }
@@ -15683,7 +15856,7 @@ function renderFinanzasMonthlyTrendChart(data) {
 async function renderFinanzasSavingsMonthly() {
   const month = finanzasSavingsMonthField.getValue();
   const year = document.getElementById('finanzas-savings-year-input').value || finanzasCurrentYear;
-  const summary = await api(`/api/finanzas-transactions/summary/month?month=${year}-${month}`);
+  const summary = await api(`/api/finanzas-transactions/summary/month?month=${year}-${month}${finanzasTercerosQS('&')}`);
   const statusWrap = document.getElementById('finanzas-savings-status');
   const goal = summary.savingsGoalMin;
   let statusHtml = `<span class="finanzas-savings-status-text">Ese mes ahorraste ${formatFinanzasAmount(summary.savings)}.</span>`;
@@ -15726,7 +15899,7 @@ document.getElementById('btn-finanzas-savings-range-view').addEventListener('cli
   const tbody = document.getElementById('finanzas-savings-history-tbody');
   let rows;
   try {
-    rows = await api(`/api/finanzas-transactions/summary/range?from=${fromYear}-${fromMonth}&to=${toYear}-${toMonth}`);
+    rows = await api(`/api/finanzas-transactions/summary/range?from=${fromYear}-${fromMonth}&to=${toYear}-${toMonth}${finanzasTercerosQS('&')}`);
   } catch (err) {
     alert(err.message);
     return;
@@ -15746,11 +15919,23 @@ document.getElementById('btn-finanzas-savings-range-view').addEventListener('cli
   });
 });
 
+document.getElementById('finanzas-incluir-terceros').addEventListener('change', async (e) => {
+  localStorage.setItem('finanzasIncluirTerceros', e.target.checked ? 'true' : 'false');
+  await renderFinanzasResumenTab();
+});
+
 async function renderFinanzasResumenTab() {
+  // Se recargan las cuentas ANTES de pintar sus saldos. Antes se pintaban
+  // desde la copia en memoria, y cualquier camino que moviera dinero sin
+  // acordarse de refrescarla dejaba un saldo VIEJO en pantalla -- se vio
+  // al gastar un objetivo: la cuenta seguia diciendo 1.900 € cuando ya
+  // eran 649,45 €. En una app de cuentas, una cifra caducada es de lo
+  // peor que puede salir, y recargar aqui cuesta una consulta local.
+  await Promise.all([loadFinanzasAccounts(), loadFinanzasReservado()]);
   renderFinanzasAccountsSummary();
   const [summary, trend] = await Promise.all([
-    api('/api/finanzas-transactions/summary/month'),
-    api('/api/finanzas-transactions/summary/monthly-trend'),
+    api(`/api/finanzas-transactions/summary/month${finanzasTercerosQS('?')}`),
+    api(`/api/finanzas-transactions/summary/monthly-trend${finanzasTercerosQS('?')}`),
   ]);
   renderFinanzasMonthlyTrendChart(trend);
 
@@ -16088,60 +16273,440 @@ function finanzasRecurringFrequencyLabel(r) {
   return `Anual (${FINANZAS_MONTH_NAMES[r.monthOfYear - 1]} ${r.dayOfMonth})`;
 }
 
-function renderFinanzasRecurringList() {
-  const tbody = document.getElementById('finanzas-recurring-tbody');
-  tbody.innerHTML = '';
-  if (finanzasRecurringExpenses.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-hint">Todavía no tienes gastos fijos. Crea uno arriba.</td></tr>';
+// =====================================================================
+// Gastos fijos: tres vistas sobre la MISMA informacion (fases 1-2 del
+// plan de IDEAS-FINANZAS.md).
+//
+//   - "Qué queda": lo que falta por pagar esta semana / este mes / este
+//     año. Contesta a la pregunta que antes no se podia contestar.
+//   - "Año": los doce meses con su total, y el desglose al tocar uno.
+//   - "Plantillas": el mantenimiento de siempre, en filas en vez de en
+//     una tabla de 7 columnas.
+//
+// Las dos primeras se alimentan de /forecast, que CALCULA las
+// ocurrencias de cada plantilla y no guarda nada (ver el comentario
+// largo en routes-local/finanzasRecurringExpenses.js).
+// =====================================================================
+
+// Estado de la pestaña. Son preferencias de VISTA, no datos: viven en
+// memoria y se pierden al salir, igual que el resto de alternadores de
+// la app (no van ni a la base ni a localStorage).
+let finanzasFijosVista = 'pendientes';
+let finanzasFijosRango = 'mes';
+let finanzasFijosEstado = 'pending';
+let finanzasFijosYear = new Date().getFullYear();
+const finanzasFijosMesesAbiertos = new Set();
+let finanzasFijosDetalle = null;
+
+function finanzasFijosISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// De "semana/mes/anio" a las dos fechas que entiende /forecast.
+//
+// Se usan periodos NATURALES (la semana de lunes a domingo, el mes del 1
+// al ultimo dia, el año del 1 de enero al 31 de diciembre) y no "los
+// proximos 7/30/365 dias": cuando alguien pregunta "¿que me queda este
+// mes?" se refiere al mes del calendario, no a una ventana movil.
+function finanzasFijosRangoFechas(rango) {
+  const hoy = new Date();
+  if (rango === 'semana') {
+    const dia = hoy.getDay(); // 0 = domingo en JavaScript
+    const desplazamientoALunes = dia === 0 ? -6 : 1 - dia;
+    const lunes = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + desplazamientoALunes);
+    const domingo = new Date(lunes.getFullYear(), lunes.getMonth(), lunes.getDate() + 6);
+    return { from: finanzasFijosISO(lunes), to: finanzasFijosISO(domingo), etiqueta: 'esta semana' };
+  }
+  if (rango === 'anio') {
+    return { from: `${hoy.getFullYear()}-01-01`, to: `${hoy.getFullYear()}-12-31`, etiqueta: 'este año' };
+  }
+  const primero = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  const ultimo = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+  return { from: finanzasFijosISO(primero), to: finanzasFijosISO(ultimo), etiqueta: 'este mes' };
+}
+
+// Fecha corta para las filas: "15 mar" (el año solo cuando no es el
+// actual, para no repetirlo doce veces en una lista del mismo año).
+function finanzasFijosFechaCorta(iso) {
+  const [y, m, d] = iso.split('-');
+  const mes = FINANZAS_MONTH_NAMES[Number(m) - 1] || '';
+  const corto = mes.slice(0, 3).toLowerCase();
+  const anioActual = String(new Date().getFullYear());
+  return y === anioActual ? `${Number(d)} ${corto}` : `${Number(d)} ${corto} ${y}`;
+}
+
+// Una fila del estilo nuevo: icono redondo + titulo/subtitulo + importe a
+// la derecha. Sustituye a las filas de tabla en todo lo que se toca aqui.
+// Se construye con createElement (no con innerHTML) porque el texto sale
+// de lo que escribe el usuario: asi no hay forma de que una descripcion
+// con "<" rompa nada.
+function finanzasFilaEl({ icono, color, titulo, sub, importe, etiqueta, etiquetaTono, alPulsar }) {
+  const fila = document.createElement(alPulsar ? 'button' : 'div');
+  if (alPulsar) fila.type = 'button';
+  fila.className = 'finanzas-row';
+  if (alPulsar) {
+    fila.classList.add('finanzas-row-tappable');
+    fila.addEventListener('click', alPulsar);
+  }
+
+  const ico = document.createElement('span');
+  ico.className = 'finanzas-row-icon';
+  if (color) ico.style.background = color;
+  ico.textContent = icono || '•';
+  fila.appendChild(ico);
+
+  const main = document.createElement('span');
+  main.className = 'finanzas-row-main';
+  const t = document.createElement('span');
+  t.className = 'finanzas-row-title';
+  t.textContent = titulo;
+  main.appendChild(t);
+  if (sub) {
+    const s = document.createElement('span');
+    s.className = 'finanzas-row-sub';
+    s.textContent = sub;
+    main.appendChild(s);
+  }
+  fila.appendChild(main);
+
+  const der = document.createElement('span');
+  der.className = 'finanzas-row-right';
+  if (importe !== undefined && importe !== null) {
+    const imp = document.createElement('span');
+    imp.className = 'finanzas-row-amount';
+    imp.textContent = importe;
+    der.appendChild(imp);
+  }
+  if (etiqueta) {
+    const badge = document.createElement('span');
+    badge.className = `finanzas-row-badge${etiquetaTono ? ' finanzas-row-badge-' + etiquetaTono : ''}`;
+    badge.textContent = etiqueta;
+    der.appendChild(badge);
+  }
+  fila.appendChild(der);
+  return fila;
+}
+
+function finanzasFijosCabeceraEl(texto, importe) {
+  const cab = document.createElement('div');
+  cab.className = 'finanzas-group-heading';
+  const t = document.createElement('span');
+  t.textContent = texto;
+  cab.appendChild(t);
+  if (importe) {
+    const i = document.createElement('span');
+    i.className = 'finanzas-group-heading-amount';
+    i.textContent = importe;
+    cab.appendChild(i);
+  }
+  return cab;
+}
+
+function finanzasFijosVacioEl(texto) {
+  const p = document.createElement('p');
+  p.className = 'empty-hint';
+  p.textContent = texto;
+  return p;
+}
+
+// La fila de una ocurrencia (un cobro concreto de una plantilla).
+// Las etiquetas de los tres estados. "Sin registrar" (en vez de
+// "pendiente" o "atrasado") es a proposito: de un cobro viejo sin
+// movimiento la app NO sabe si se pago o no -- solo sabe que no le consta.
+// Decir "pendiente" seria afirmar una deuda que probablemente no existe.
+const FINANZAS_FIJOS_ESTADOS = {
+  paid: { texto: 'Pagado', tono: 'ok' },
+  pending: { texto: 'Pendiente', tono: 'pendiente' },
+  overdue: { texto: 'Sin registrar', tono: 'pausado' },
+};
+
+function finanzasFijosOcurrenciaEl(o) {
+  const cat = finanzasCategories.find((c) => c.id === Number(o.categoryId));
+  const estado = FINANZAS_FIJOS_ESTADOS[o.status] || FINANZAS_FIJOS_ESTADOS.pending;
+  return finanzasFilaEl({
+    icono: cat && cat.icon ? cat.icon : '📄',
+    color: cat && cat.color ? cat.color : '',
+    titulo: o.description || 'Gasto fijo sin nombre',
+    sub: `${finanzasFijosFechaCorta(o.date)} · ${finanzasAccountName(o.accountId)}`,
+    importe: formatFinanzasAmount(o.amount),
+    etiqueta: estado.texto,
+    etiquetaTono: estado.tono,
+  });
+}
+
+// -- Vista 1: qué queda por pagar --
+async function renderFinanzasFijosPendientes() {
+  const lista = document.getElementById('finanzas-fijos-lista');
+  const { from, to, etiqueta } = finanzasFijosRangoFechas(finanzasFijosRango);
+  lista.innerHTML = '';
+  lista.appendChild(finanzasFijosVacioEl('Calculando…'));
+
+  const data = await api(`/api/finanzas-recurring-expenses/forecast?from=${from}&to=${to}`);
+  const todas = data.occurrences;
+  // El chip "Pendiente" enseña TODO lo que sigue sin pagarse, tanto lo que
+  // aun no ha llegado como lo que no consta -- son las dos formas de "esto
+  // no esta pagado", y separarlas en dos filtros obligaria a mirar en dos
+  // sitios para saber que te queda. La etiqueta de cada fila ya distingue.
+  const visibles =
+    finanzasFijosEstado === 'all'
+      ? todas
+      : finanzasFijosEstado === 'paid'
+        ? todas.filter((o) => o.status === 'paid')
+        : todas.filter((o) => o.status !== 'paid');
+
+  const titulos = {
+    pending: `Te queda por pagar ${etiqueta}`,
+    paid: `Ya has pagado ${etiqueta}`,
+    all: `Gastos fijos de ${etiqueta}`,
+  };
+  const importes = {
+    pending: data.totals.unpaid,
+    paid: data.totals.paid,
+    all: data.totals.all,
+  };
+  document.getElementById('finanzas-fijos-hero-label').textContent = titulos[finanzasFijosEstado];
+  document.getElementById('finanzas-fijos-hero-amount').textContent = formatFinanzasAmount(importes[finanzasFijosEstado]);
+
+  const sinRegistrar = todas.filter((o) => o.status === 'overdue').length;
+  let sub = '';
+  if (visibles.length === 0) {
+    sub = 'Nada por aquí';
+  } else {
+    sub = `${visibles.length} ${visibles.length === 1 ? 'pago' : 'pagos'} · de ${finanzasFijosFechaCorta(from)} a ${finanzasFijosFechaCorta(to)}`;
+    if (sinRegistrar > 0 && finanzasFijosEstado !== 'paid') {
+      sub += ` · ${sinRegistrar} sin registrar`;
+    }
+  }
+  document.getElementById('finanzas-fijos-hero-sub').textContent = sub;
+
+  lista.innerHTML = '';
+  if (visibles.length === 0) {
+    lista.appendChild(
+      finanzasFijosVacioEl(
+        finanzasFijosEstado === 'pending'
+          ? `No te queda ningún gasto fijo por pagar ${etiqueta}.`
+          : `No hay gastos fijos ${finanzasFijosEstado === 'paid' ? 'pagados' : ''} ${etiqueta}.`
+      )
+    );
     return;
   }
-  finanzasRecurringExpenses.forEach((r) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${escapeHtml(r.description || '—')}</td>
-      <td>${escapeHtml(finanzasAccountName(r.accountId))}</td>
-      <td>${escapeHtml(finanzasCategoryName(r.categoryId))}</td>
-      <td>${formatFinanzasAmount(r.amount)}</td>
-      <td>${finanzasRecurringFrequencyLabel(r)}</td>
-      <td>${r.active ? 'Activo' : 'Pausado'}${r.endDate ? ` (hasta ${r.endDate})` : ''}</td>
-      <td></td>
-    `;
-    const actionsTd = tr.lastElementChild;
-    const historyBtn = document.createElement('button');
-    historyBtn.type = 'button';
-    historyBtn.className = 'secondary-btn';
-    historyBtn.textContent = 'Ver generados';
-    historyBtn.addEventListener('click', () => openFinanzasRecurringTransactionsModal(r));
-    const toggleBtn = document.createElement('button');
-    toggleBtn.type = 'button';
-    toggleBtn.className = 'secondary-btn';
-    toggleBtn.textContent = r.active ? 'Pausar' : 'Reanudar';
-    toggleBtn.addEventListener('click', async () => {
-      await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'PUT', body: JSON.stringify({ active: !r.active }) });
-      await refreshFinanzasRecurringTab();
+
+  // En el rango de un año se agrupa por mes (si no, son decenas de filas
+  // seguidas sin ninguna referencia); en semana y mes, lista corrida.
+  if (finanzasFijosRango === 'anio') {
+    const porMes = new Map();
+    visibles.forEach((o) => {
+      const clave = o.date.slice(0, 7);
+      if (!porMes.has(clave)) porMes.set(clave, []);
+      porMes.get(clave).push(o);
     });
-    const editBtn = document.createElement('button');
-    editBtn.type = 'button';
-    editBtn.className = 'secondary-btn';
-    editBtn.textContent = 'Editar';
-    editBtn.addEventListener('click', () => openFinanzasRecurringModal(r));
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'danger-btn';
-    deleteBtn.textContent = 'Eliminar';
-    deleteBtn.addEventListener('click', async () => {
-      if (!confirm(`¿Eliminar el gasto fijo "${r.description || 'sin nombre'}"? Los movimientos ya generados se quedan, solo se deja de generar más.`)) return;
-      await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'DELETE' });
-      await refreshFinanzasRecurringTab();
+    [...porMes.keys()].sort().forEach((clave) => {
+      const delMes = porMes.get(clave);
+      const total = delMes.reduce((acc, o) => acc + o.amount, 0);
+      lista.appendChild(finanzasFijosCabeceraEl(FINANZAS_MONTH_NAMES[Number(clave.slice(5, 7)) - 1], formatFinanzasAmount(total)));
+      const grupo = document.createElement('div');
+      grupo.className = 'finanzas-group';
+      delMes.forEach((o) => grupo.appendChild(finanzasFijosOcurrenciaEl(o)));
+      lista.appendChild(grupo);
     });
-    actionsTd.append(historyBtn, toggleBtn, editBtn, deleteBtn);
-    tbody.appendChild(tr);
+    return;
+  }
+
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  visibles.forEach((o) => grupo.appendChild(finanzasFijosOcurrenciaEl(o)));
+  lista.appendChild(grupo);
+}
+
+// Lo ultimo que devolvio /forecast para la vista anual, con el año al que
+// corresponde. Abrir y cerrar un mes NO cambia los datos, solo lo que se
+// enseña: sin esta cache, cada toque volvia a calcular el año entero (con
+// 125 plantillas eso son 1.333 ocurrencias recalculadas para nada, y en un
+// telefono se nota).
+let finanzasFijosDatosAnual = null;
+
+// -- Vista 2: el año entero, mes a mes --
+async function renderFinanzasFijosAnual({ recargar = true } = {}) {
+  const cont = document.getElementById('finanzas-fijos-meses');
+  document.getElementById('finanzas-fijos-year-label').textContent = String(finanzasFijosYear);
+
+  const sirveLaCache =
+    !recargar && finanzasFijosDatosAnual && finanzasFijosDatosAnual.year === finanzasFijosYear;
+
+  if (!sirveLaCache) {
+    cont.innerHTML = '';
+    cont.appendChild(finanzasFijosVacioEl('Calculando…'));
+  }
+
+  const data = sirveLaCache
+    ? finanzasFijosDatosAnual.data
+    : await api(`/api/finanzas-recurring-expenses/forecast?from=${finanzasFijosYear}-01-01&to=${finanzasFijosYear}-12-31`);
+  finanzasFijosDatosAnual = { year: finanzasFijosYear, data };
+
+  document.getElementById('finanzas-fijos-year-total').textContent = formatFinanzasAmount(data.totals.all);
+  document.getElementById('finanzas-fijos-year-sub').textContent =
+    data.occurrences.length === 0
+      ? 'Sin gastos fijos en este año'
+      : data.totals.unpaid > 0
+        ? `${formatFinanzasAmount(data.totals.paid)} pagados · ${formatFinanzasAmount(data.totals.unpaid)} por pagar`
+        : 'Todo pagado';
+
+  const porMes = new Map();
+  data.occurrences.forEach((o) => {
+    const idx = Number(o.date.slice(5, 7)) - 1;
+    if (!porMes.has(idx)) porMes.set(idx, []);
+    porMes.get(idx).push(o);
   });
+
+  cont.innerHTML = '';
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+
+  // Se pintan los DOCE meses aunque esten vacios: la gracia de esta
+  // pantalla es poder recorrer el año de un vistazo y ver donde estan los
+  // meses caros, y para eso los huecos tambien dicen algo.
+  for (let i = 0; i < 12; i += 1) {
+    const delMes = porMes.get(i) || [];
+    const total = delMes.reduce((acc, o) => acc + o.amount, 0);
+    const hayPrevisto = delMes.some((o) => o.status === 'pending');
+    const haySinRegistrar = delMes.some((o) => o.status === 'overdue');
+    const abierto = finanzasFijosMesesAbiertos.has(i);
+
+    // Un mes con cobros que aun no han llegado es "Previsto" (la cifra
+    // puede cambiar); uno pasado del que no consta el pago, "Sin
+    // registrar". Si esta todo pagado no lleva etiqueta: el silencio ya
+    // dice que ese mes esta cerrado.
+    const fila = finanzasFilaEl({
+      icono: abierto ? '▾' : '▸',
+      titulo: FINANZAS_MONTH_NAMES[i],
+      sub: delMes.length === 0 ? 'Sin gastos fijos' : `${delMes.length} ${delMes.length === 1 ? 'pago' : 'pagos'}`,
+      importe: delMes.length === 0 ? '—' : formatFinanzasAmount(total),
+      etiqueta: hayPrevisto ? 'Previsto' : haySinRegistrar ? 'Sin registrar' : '',
+      etiquetaTono: hayPrevisto ? 'pendiente' : 'pausado',
+      alPulsar:
+        delMes.length === 0
+          ? null
+          : () => {
+              if (finanzasFijosMesesAbiertos.has(i)) finanzasFijosMesesAbiertos.delete(i);
+              else finanzasFijosMesesAbiertos.add(i);
+              // Sin recargar: los datos del año son los mismos, solo cambia
+              // que este mes se vea desplegado o no.
+              renderFinanzasFijosAnual({ recargar: false });
+            },
+    });
+    if (delMes.length === 0) fila.classList.add('finanzas-row-muted');
+    grupo.appendChild(fila);
+
+    if (abierto && delMes.length > 0) {
+      const desglose = document.createElement('div');
+      desglose.className = 'finanzas-subgroup';
+      delMes.forEach((o) => desglose.appendChild(finanzasFijosOcurrenciaEl(o)));
+      grupo.appendChild(desglose);
+    }
+  }
+  cont.appendChild(grupo);
+}
+
+// -- Vista 3: las plantillas, con lo que cuestan --
+let finanzasFijosKind = 'all';
+
+async function renderFinanzasRecurringList() {
+  const cont = document.getElementById('finanzas-recurring-list');
+
+  // El resumen normaliza cada plantilla a mes y a año. Solo cuenta las
+  // ACTIVAS: lo que cuesta mantener lo que tienes contratado hoy, que es
+  // otra pregunta distinta del "cuanto hay en el año 2026" de la vista
+  // anual (esa si incluye lo que ya cancelaste pero pagaste).
+  const resumen = await api('/api/finanzas-recurring-expenses/summary');
+  const delTipo =
+    finanzasFijosKind === 'all'
+      ? { monthly: resumen.monthlyTotal, annual: resumen.annualTotal, count: resumen.items.length }
+      : resumen.byKind[finanzasFijosKind];
+
+  document.getElementById('finanzas-fijos-coste-label').textContent = FINANZAS_KIND_PLURALES[finanzasFijosKind];
+  document.getElementById('finanzas-fijos-coste-mes').textContent = `${formatFinanzasAmount(delTipo.monthly)}/mes`;
+  document.getElementById('finanzas-fijos-coste-anio').textContent =
+    delTipo.count === 0
+      ? 'Nada de este tipo todavía'
+      : `${formatFinanzasAmount(delTipo.annual)} al año · ${delTipo.count} ${delTipo.count === 1 ? 'activo' : 'activos'}`;
+
+  // La lista si enseña las pausadas (si no, desaparecerian de la app sin
+  // forma de reactivarlas), pero atenuadas y sin sumar en la cabecera.
+  const visibles =
+    finanzasFijosKind === 'all'
+      ? finanzasRecurringExpenses
+      : finanzasRecurringExpenses.filter((r) => (r.kind || 'other') === finanzasFijosKind);
+
+  cont.innerHTML = '';
+  if (visibles.length === 0) {
+    cont.appendChild(
+      finanzasFijosVacioEl(
+        finanzasFijosKind === 'all'
+          ? 'Todavía no tienes gastos fijos. Crea uno con el botón de arriba.'
+          : 'No tienes ningún gasto fijo de este tipo.'
+      )
+    );
+    return;
+  }
+
+  // Ordenadas por lo que cuestan AL AÑO: asi lo caro sale arriba aunque
+  // sea un pago anual suelto que en la lista de siempre quedaba enterrado.
+  const costes = new Map(resumen.items.map((i) => [i.id, i]));
+  const ordenadas = [...visibles].sort((a, b) => {
+    const ca = costes.get(a.id) ? costes.get(a.id).annualCost : -1;
+    const cb = costes.get(b.id) ? costes.get(b.id).annualCost : -1;
+    return cb - ca;
+  });
+
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  ordenadas.forEach((r) => {
+    const cat = finanzasCategories.find((c) => c.id === Number(r.categoryId));
+    // La linea de debajo lleva la conversion: en una mensual se enseña lo
+    // que suma al año, y en una anual lo que supone al mes. Es la cifra
+    // que no se puede calcular de cabeza y la que permite comparar.
+    const equivalencia =
+      r.frequency === 'monthly'
+        ? `${formatFinanzasAmount(r.amount * 12)}/año`
+        : `${formatFinanzasAmount(r.amount / 12)}/mes`;
+    const fila = finanzasFilaEl({
+      icono: cat && cat.icon ? cat.icon : '📄',
+      color: cat && cat.color ? cat.color : '',
+      titulo: r.description || 'Gasto fijo sin nombre',
+      sub: `${finanzasRecurringFrequencyLabel(r)} · ${equivalencia}`,
+      importe: formatFinanzasAmount(r.amount),
+      etiqueta: r.active ? (r.reminderOffsets && r.reminderOffsets.length ? '🔔' : '') : 'Pausado',
+      etiquetaTono: 'pausado',
+      alPulsar: () => openFinanzasRecurringTransactionsModal(r),
+    });
+    if (!r.active) fila.classList.add('finanzas-row-muted');
+    grupo.appendChild(fila);
+  });
+  cont.appendChild(grupo);
+}
+
+// Cambiar de vista dentro de la pestaña. Cada vista se pinta solo cuando
+// se entra en ella: /forecast recalcula, y no tiene sentido calcular tres
+// pantallas para enseñar una.
+function switchFinanzasFijosVista(vista) {
+  finanzasFijosVista = vista;
+  document.querySelectorAll('[data-fijos-vista]').forEach((btn) => {
+    const activo = btn.dataset.fijosVista === vista;
+    btn.classList.toggle('active', activo);
+    btn.setAttribute('aria-selected', activo ? 'true' : 'false');
+  });
+  document.querySelectorAll('[data-fijos-panel]').forEach((panel) => {
+    panel.classList.toggle('hidden', panel.dataset.fijosPanel !== vista);
+  });
+  if (vista === 'pendientes') renderFinanzasFijosPendientes();
+  else if (vista === 'anual') renderFinanzasFijosAnual();
 }
 
 async function refreshFinanzasRecurringTab() {
   await loadFinanzasRecurring();
-  renderFinanzasRecurringList();
+  await renderFinanzasRecurringList();
+  if (finanzasFijosVista === 'pendientes') await renderFinanzasFijosPendientes();
+  else if (finanzasFijosVista === 'anual') await renderFinanzasFijosAnual();
 }
 
 function refreshFinanzasRecurringFrequencyFields() {
@@ -16155,6 +16720,15 @@ function openFinanzasRecurringModal(r) {
   document.getElementById('finanzas-recurring-description').value = r ? (r.description || '') : '';
   finanzasRecurringAccountField.setValue(r ? r.accountId : (finanzasAccounts[0] ? finanzasAccounts[0].id : ''));
   finanzasRecurringCategoryField.setValue(r && r.categoryId ? r.categoryId : '');
+  // Al crear una nueva se propone el tipo del filtro en el que estas: si
+  // estabas mirando "Suscripciones", lo normal es que la que vas a crear
+  // lo sea. Con el filtro en "Todos" se queda en "Otro".
+  finanzasRecurringKindField.setValue(
+    r ? r.kind || 'other' : finanzasFijosKind !== 'all' ? finanzasFijosKind : 'other'
+  );
+  finanzasRecurringAvisos.clear();
+  (r && r.reminderOffsets ? r.reminderOffsets : []).forEach((d) => finanzasRecurringAvisos.add(Number(d)));
+  renderFinanzasRecurringAvisos();
   document.getElementById('finanzas-recurring-amount').value = r ? r.amount : '';
   finanzasRecurringFrequencyField.setValue(r ? r.frequency : 'monthly');
   document.getElementById('finanzas-recurring-day').value = r ? r.dayOfMonth : '';
@@ -16169,6 +16743,53 @@ function closeFinanzasRecurringModal() {
   document.getElementById('finanzas-recurring-modal').classList.add('hidden');
 }
 document.getElementById('btn-new-finanzas-recurring').addEventListener('click', () => openFinanzasRecurringModal(null));
+
+// -- Botones de la pestaña de gastos fijos --
+// (Se registran al cargar, pero solo se EJECUTAN al tocarlos, asi que
+//  pueden apoyarse en funciones declaradas mas abajo sin problema -- ver
+//  la nota de la zona muerta temporal en CLAUDE.md.)
+document.querySelectorAll('[data-fijos-vista]').forEach((btn) => {
+  btn.addEventListener('click', () => switchFinanzasFijosVista(btn.dataset.fijosVista));
+});
+document.querySelectorAll('[data-fijos-rango]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    finanzasFijosRango = btn.dataset.fijosRango;
+    document.querySelectorAll('[data-fijos-rango]').forEach((b) => {
+      const activo = b === btn;
+      b.classList.toggle('active', activo);
+      b.setAttribute('aria-selected', activo ? 'true' : 'false');
+    });
+    renderFinanzasFijosPendientes();
+  });
+});
+document.querySelectorAll('[data-fijos-kind]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    finanzasFijosKind = btn.dataset.fijosKind;
+    document.querySelectorAll('[data-fijos-kind]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderFinanzasRecurringList();
+  });
+});
+document.querySelectorAll('[data-fijos-estado]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    finanzasFijosEstado = btn.dataset.fijosEstado;
+    document.querySelectorAll('[data-fijos-estado]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderFinanzasFijosPendientes();
+  });
+});
+document.getElementById('btn-finanzas-fijos-year-prev').addEventListener('click', () => {
+  // Topes de cordura: sin ellos se puede acabar en el año 200 a base de
+  // toques, calculando doce meses de nada cada vez.
+  if (finanzasFijosYear <= 2000) return;
+  finanzasFijosYear -= 1;
+  finanzasFijosMesesAbiertos.clear();
+  renderFinanzasFijosAnual();
+});
+document.getElementById('btn-finanzas-fijos-year-next').addEventListener('click', () => {
+  if (finanzasFijosYear >= 2100) return;
+  finanzasFijosYear += 1;
+  finanzasFijosMesesAbiertos.clear();
+  renderFinanzasFijosAnual();
+});
 document.getElementById('btn-cancel-finanzas-recurring').addEventListener('click', closeFinanzasRecurringModal);
 document.getElementById('btn-close-finanzas-recurring').addEventListener('click', closeFinanzasRecurringModal);
 
@@ -16188,6 +16809,8 @@ document.getElementById('finanzas-recurring-form').addEventListener('submit', as
     startDate: toDateKey(finanzasRecurringStartField.getValue()),
     endDate: endDate ? toDateKey(endDate) : null,
     countsTowardBudget: document.getElementById('finanzas-recurring-counts').checked,
+    kind: finanzasRecurringKindField.getValue(),
+    reminderOffsets: [...finanzasRecurringAvisos],
   };
   try {
     if (id) {
@@ -16196,11 +16819,17 @@ document.getElementById('finanzas-recurring-form').addEventListener('submit', as
       await api('/api/finanzas-recurring-expenses', { method: 'POST', body: JSON.stringify(payload) });
     }
   } catch (err) {
-    alert(err.message);
+    // alert() del navegador bloquea la webview entera en el movil y no
+    // sigue el tema. Aviso propio, como el resto de la app.
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
     return;
   }
   closeFinanzasRecurringModal();
   await refreshFinanzasRecurringTab();
+  // Cambiar un gasto puede cambiar sus avisos (o su fecha), asi que se
+  // rehace la programacion del sistema. Es el mismo "cancelar y rehacer"
+  // que ya usa el calendario: nunca queda un aviso huerfano.
+  if (typeof syncScheduledReminders === 'function') syncScheduledReminders();
 });
 
 // -- Pestaña "Deudas": lo que Koku debe a alguien y lo que alguien le
@@ -16334,27 +16963,147 @@ document.getElementById('btn-delete-finanzas-debt').addEventListener('click', as
   renderFinanzasResumenTab();
 });
 
-// Movimientos ya generados por una plantilla concreta -- reutiliza el
-// filtro recurringExpenseId ya soportado por GET /api/finanzas-transactions.
+// Ficha de un gasto fijo: cuanto ha costado cada año, sus movimientos
+// generados y las acciones. Antes esto era solo la lista de generados.
+//
+// La evolucion por año NO hace falta guardarla en ningun sitio: cada
+// movimiento generado lleva su recurring_expense_id, asi que agrupar por
+// año es una consulta (ver GET /:id/history).
 async function openFinanzasRecurringTransactionsModal(r) {
-  document.getElementById('finanzas-recurring-transactions-title').textContent = `Movimientos generados — ${r.description || 'gasto fijo'}`;
-  const tbody = document.getElementById('finanzas-recurring-transactions-tbody');
-  tbody.innerHTML = '<tr><td colspan="2" class="empty-hint">Cargando…</td></tr>';
+  finanzasFijosDetalle = r;
+  document.getElementById('finanzas-recurring-transactions-title').textContent = r.description || 'Gasto fijo';
+  const equivalencia =
+    r.frequency === 'monthly'
+      ? `${formatFinanzasAmount(r.amount * 12)}/año`
+      : `${formatFinanzasAmount(r.amount / 12)}/mes`;
+  document.getElementById('finanzas-recurring-detail-sub').textContent =
+    `${FINANZAS_KIND_LABELS[r.kind || 'other']} · ${formatFinanzasAmount(r.amount)} ${finanzasRecurringFrequencyLabel(r).toLowerCase()} · ${equivalencia} · ${finanzasAccountName(r.accountId)}${r.active ? '' : ' · Pausado'}`;
+
+  const toggleBtn = document.getElementById('btn-finanzas-recurring-detail-toggle');
+  toggleBtn.textContent = r.active ? 'Pausar' : 'Reanudar';
+
+  // Los avisos, en palabras. Si no hay ninguno se dice, para que no
+  // parezca que la app avisa cuando no lo hace.
+  const avisos = (r.reminderOffsets || []).slice().sort((a, b) => b - a);
+  const avisosEl = document.getElementById('finanzas-recurring-detail-avisos');
+  avisosEl.textContent = avisos.length === 0
+    ? 'Sin avisos de pago.'
+    : `Te avisa ${avisos.map((d) => FINANZAS_AVISO_ETIQUETAS[d] || `${d} días antes`).join(', ')}.`;
+
+  const histCont = document.getElementById('finanzas-recurring-history');
+  const listaCont = document.getElementById('finanzas-recurring-transactions-list');
+  histCont.innerHTML = '';
+  listaCont.innerHTML = '';
+  histCont.appendChild(finanzasFijosVacioEl('Cargando…'));
   document.getElementById('finanzas-recurring-transactions-modal').classList.remove('hidden');
-  const transactions = await api(`/api/finanzas-transactions?recurringExpenseId=${r.id}`);
-  tbody.innerHTML = '';
+
+  const [historia, transactions] = await Promise.all([
+    api(`/api/finanzas-recurring-expenses/${r.id}/history`),
+    api(`/api/finanzas-transactions?recurringExpenseId=${r.id}`),
+  ]);
+
+  // -- Evolucion por año --
+  histCont.innerHTML = '';
+  if (historia.years.length === 0) {
+    histCont.appendChild(finanzasFijosVacioEl('Todavía no se ha generado ningún pago, así que no hay histórico.'));
+  } else {
+    const grupo = document.createElement('div');
+    grupo.className = 'finanzas-group';
+    // Se recorre de mas nuevo a mas viejo y se compara cada año con el
+    // SIGUIENTE de la lista (el anterior en el tiempo), que es justo la
+    // frase que uno quiere leer: "te ha subido un 19%".
+    historia.years.forEach((y, i) => {
+      const anterior = historia.years[i + 1];
+      let sub = `${y.count} ${y.count === 1 ? 'pago' : 'pagos'}`;
+      if (anterior && anterior.total > 0) {
+        // Con el MISMO numero de pagos se comparan los totales. Si no
+        // coinciden (tipico del año en curso, que va a medias) se compara
+        // el coste POR PAGO -- si no, un año de 9 meses frente a uno de 12
+        // sale "un 17% mas barato" cuando en realidad te ha SUBIDO el
+        // precio. Salio probandolo con Netflix: 8,99 -> 9,99 -> 10,99 y la
+        // ficha decia que bajaba.
+        const mismoNumeroDePagos = y.count === anterior.count;
+        const actual = mismoNumeroDePagos ? y.total : y.total / y.count;
+        const previo = mismoNumeroDePagos ? anterior.total : anterior.total / anterior.count;
+        const variacion = ((actual - previo) / previo) * 100;
+        if (Math.abs(variacion) >= 0.5) {
+          sub += ` · ${variacion > 0 ? '+' : '−'}${Math.abs(variacion).toFixed(0)}%${mismoNumeroDePagos ? '' : ' por pago'} frente a ${anterior.year}`;
+        }
+      }
+      grupo.appendChild(
+        finanzasFilaEl({
+          icono: '📅',
+          titulo: y.year,
+          sub,
+          importe: formatFinanzasAmount(y.total),
+        })
+      );
+    });
+    histCont.appendChild(grupo);
+    // Un año a medias no se compara con uno entero sin decirlo.
+    const esteAnio = String(new Date().getFullYear());
+    if (historia.years.some((y) => y.year === esteAnio)) {
+      const nota = document.createElement('p');
+      nota.className = 'hint';
+      nota.textContent = 'El año en curso va a medias: todavía le quedan pagos por generar, así que no se compara de tú a tú con un año entero.';
+      histCont.appendChild(nota);
+    }
+  }
+
+  // -- Movimientos generados --
   if (transactions.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="2" class="empty-hint">Todavía no se ha generado ninguno.</td></tr>';
+    listaCont.appendChild(finanzasFijosVacioEl('Todavía no se ha generado ninguno.'));
     return;
   }
+  const grupoMov = document.createElement('div');
+  grupoMov.className = 'finanzas-group';
   transactions.forEach((t) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${t.date}</td><td>${formatFinanzasAmount(t.amount)}</td>`;
-    tbody.appendChild(tr);
+    grupoMov.appendChild(
+      finanzasFilaEl({
+        icono: '✓',
+        titulo: finanzasFijosFechaCorta(t.date),
+        importe: formatFinanzasAmount(t.amount),
+      })
+    );
   });
+  listaCont.appendChild(grupoMov);
 }
-document.getElementById('btn-close-finanzas-recurring-transactions').addEventListener('click', () => {
+
+function closeFinanzasRecurringDetail() {
   document.getElementById('finanzas-recurring-transactions-modal').classList.add('hidden');
+  finanzasFijosDetalle = null;
+}
+document.getElementById('btn-close-finanzas-recurring-transactions').addEventListener('click', closeFinanzasRecurringDetail);
+
+document.getElementById('btn-finanzas-recurring-detail-edit').addEventListener('click', () => {
+  const r = finanzasFijosDetalle;
+  if (!r) return;
+  closeFinanzasRecurringDetail();
+  openFinanzasRecurringModal(r);
+});
+
+document.getElementById('btn-finanzas-recurring-detail-toggle').addEventListener('click', async () => {
+  const r = finanzasFijosDetalle;
+  if (!r) return;
+  await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'PUT', body: JSON.stringify({ active: !r.active }) });
+  closeFinanzasRecurringDetail();
+  await refreshFinanzasRecurringTab();
+});
+
+document.getElementById('btn-finanzas-recurring-detail-delete').addEventListener('click', async () => {
+  const r = finanzasFijosDetalle;
+  if (!r) return;
+  // Antes esto usaba confirm() del navegador, que en el movil bloquea la
+  // webview entera y encima no sigue el tema. Aviso propio, como manda la
+  // regla de la casa.
+  const ok = await showAppConfirm(
+    `¿Eliminar el gasto fijo "${r.description || 'sin nombre'}"?\n\nLos movimientos ya generados se quedan (son reales), pero pierden el enlace con la plantilla: dejarás de ver su evolución por años.`,
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'DELETE' });
+  closeFinanzasRecurringDetail();
+  await refreshFinanzasRecurringTab();
 });
 
 // -- Pestaña Inversiones: tabla de compra/venta/dividendos + resumen por
@@ -16635,25 +17384,501 @@ document.getElementById('finanzas-investment-form').addEventListener('submit', a
   renderFinanzasResumenTab();
 });
 
-// -- Pestañas + apertura/cierre de toda la vista --
-function switchFinanzasTab(tabName) {
-  document.querySelectorAll('.finanzas-tab-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.finanzasTab === tabName);
+// =====================================================================
+// Objetivos de ahorro: sobres virtuales sobre una cuenta.
+//
+// "Coche, 5.000 €" y vas apartando. El dinero NO se mueve: la cuenta
+// sigue con su saldo y el objetivo solo reserva una parte. Lo que hace
+// util esto no es la barra de progreso, es el cruce con lo que la app ya
+// sabe: con meta y fecha te dice cuanto tendrias que apartar al mes, y si
+// a tu ritmo real de ahorro llegas o no.
+// =====================================================================
+
+let finanzasGoals = [];
+let finanzasGoalDetalle = null;
+let finanzasGoalRitmo = null;
+
+const finanzasGoalAccountField = createSelectField({
+  options: [{ value: '', label: 'Sin cuenta' }],
+  initialValue: '',
+});
+document.getElementById('finanzas-goal-account-field').appendChild(finanzasGoalAccountField.element);
+
+const finanzasGoalDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('finanzas-goal-date-field').appendChild(finanzasGoalDateField.element);
+
+async function loadFinanzasGoals() {
+  const [lista, ritmo] = await Promise.all([api('/api/finanzas-goals'), api('/api/finanzas-goals/pace')]);
+  finanzasGoals = lista;
+  finanzasGoalRitmo = ritmo;
+}
+
+// "Te faltan 3.200 € en 10 meses -> 320 €/mes", y si con lo que ahorras de
+// media no llegas, se dice. Avisa, no impide nada: es su dinero.
+function finanzasGoalTextoRitmo(g) {
+  if (g.completedAt) return 'Objetivo cumplido.';
+  if (g.remaining <= 0) return '¡Ya lo tienes! Puedes gastarlo cuando quieras.';
+  if (!g.perMonthNeeded) {
+    return g.targetDate
+      ? `La fecha ya pasó y aún te faltan ${formatFinanzasAmount(g.remaining)}.`
+      : `Te faltan ${formatFinanzasAmount(g.remaining)}. Ponle fecha y te digo cuánto apartar al mes.`;
+  }
+  let texto = `Te faltan ${formatFinanzasAmount(g.remaining)} en ${g.monthsLeft} ${g.monthsLeft === 1 ? 'mes' : 'meses'}: ${formatFinanzasAmount(g.perMonthNeeded)} al mes.`;
+  const medio = finanzasGoalRitmo ? finanzasGoalRitmo.averageMonthlySavings : 0;
+  if (medio > 0) {
+    if (medio < g.perMonthNeeded) {
+      const mesesReales = Math.ceil(g.remaining / medio);
+      const llegada = new Date();
+      llegada.setMonth(llegada.getMonth() + mesesReales);
+      texto += ` Ahorras ${formatFinanzasAmount(medio)} al mes de media, así que a este ritmo llegarías en ${FINANZAS_MONTH_NAMES[llegada.getMonth()].toLowerCase()} de ${llegada.getFullYear()}.`;
+    } else {
+      texto += ` Ahorras ${formatFinanzasAmount(medio)} al mes de media, así que vas sobrado.`;
+    }
+  }
+  return texto;
+}
+
+function renderFinanzasGoalsList() {
+  const cont = document.getElementById('finanzas-goals-list');
+  cont.innerHTML = '';
+  if (finanzasGoals.length === 0) {
+    cont.appendChild(finanzasFijosVacioEl('Todavía no tienes objetivos. Crea uno con el botón de arriba.'));
+    return;
+  }
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  finanzasGoals.forEach((g) => {
+    const fila = finanzasFilaEl({
+      icono: g.icon || '🎯',
+      color: g.color || '',
+      titulo: g.name,
+      sub: `${formatFinanzasAmount(g.reserved)} de ${formatFinanzasAmount(g.targetAmount)}${g.targetDate ? ` · para ${finanzasFijosFechaCorta(g.targetDate)}` : ''}`,
+      importe: `${Math.round(g.progress * 100)}%`,
+      etiqueta: g.completedAt ? 'Cumplido' : '',
+      etiquetaTono: 'ok',
+      alPulsar: () => openFinanzasGoalDetail(g),
+    });
+    if (g.completedAt) fila.classList.add('finanzas-row-muted');
+    grupo.appendChild(fila);
+
+    // Barra de progreso bajo cada objetivo: es lo que se mira de un
+    // vistazo, y en una lista de sobres el porcentaje suelto se queda
+    // corto para comparar unos con otros.
+    const barra = document.createElement('div');
+    barra.className = 'finanzas-goal-bar';
+    const relleno = document.createElement('div');
+    relleno.className = 'finanzas-goal-bar-fill';
+    relleno.style.width = `${Math.round(g.progress * 100)}%`;
+    if (g.color) relleno.style.background = g.color;
+    barra.appendChild(relleno);
+    grupo.appendChild(barra);
   });
+  cont.appendChild(grupo);
+}
+
+async function refreshFinanzasGoalsTab() {
+  await loadFinanzasGoals();
+  renderFinanzasGoalsList();
+}
+
+function openFinanzasGoalModal(g) {
+  setupFinanzasIconColorFields();
+  document.getElementById('finanzas-goal-modal-title').textContent = g ? 'Editar objetivo' : 'Nuevo objetivo';
+  document.getElementById('finanzas-goal-id').value = g ? g.id : '';
+  document.getElementById('finanzas-goal-name').value = g ? g.name : '';
+  document.getElementById('finanzas-goal-target').value = g ? g.targetAmount : '';
+  finanzasGoalIconField.setValue(g && g.icon ? g.icon : '');
+  finanzasGoalColorField.setValue(g && g.color ? g.color : DEFAULT_EVENT_COLOR);
+  finanzasGoalAccountField.setOptions([
+    { value: '', label: 'Sin cuenta' },
+    ...finanzasAccounts.map((a) => ({ value: String(a.id), label: `${a.icon ? a.icon + ' ' : ''}${a.name}` })),
+  ]);
+  finanzasGoalAccountField.setValue(g && g.accountId ? String(g.accountId) : '');
+  finanzasGoalDateField.setValue(g && g.targetDate ? new Date(`${g.targetDate}T12:00:00`) : null);
+  document.getElementById('finanzas-goal-modal').classList.remove('hidden');
+}
+function closeFinanzasGoalModal() {
+  document.getElementById('finanzas-goal-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-new-finanzas-goal').addEventListener('click', () => openFinanzasGoalModal(null));
+document.getElementById('btn-close-finanzas-goal').addEventListener('click', closeFinanzasGoalModal);
+document.getElementById('btn-cancel-finanzas-goal').addEventListener('click', closeFinanzasGoalModal);
+
+document.getElementById('finanzas-goal-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('finanzas-goal-id').value;
+  const fecha = finanzasGoalDateField.getValue();
+  const payload = {
+    name: document.getElementById('finanzas-goal-name').value,
+    targetAmount: document.getElementById('finanzas-goal-target').value,
+    icon: finanzasGoalIconField.getValue() || null,
+    color: finanzasGoalColorField.getValue() || null,
+    accountId: finanzasGoalAccountField.getValue() ? Number(finanzasGoalAccountField.getValue()) : null,
+    targetDate: fecha ? toDateKey(fecha) : null,
+  };
+  try {
+    if (id) await api(`/api/finanzas-goals/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    else await api('/api/finanzas-goals', { method: 'POST', body: JSON.stringify(payload) });
+  } catch (err) {
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  closeFinanzasGoalModal();
+  await refreshFinanzasGoalsTab();
+  await renderFinanzasResumenTab();
+});
+
+async function openFinanzasGoalDetail(g) {
+  finanzasGoalDetalle = g;
+  document.getElementById('finanzas-goal-detail-title').textContent = `${g.icon ? g.icon + ' ' : ''}${g.name}`;
+  document.getElementById('finanzas-goal-detail-sub').textContent =
+    `${formatFinanzasAmount(g.reserved)} apartados de ${formatFinanzasAmount(g.targetAmount)}${g.accountId ? ` · en ${finanzasAccountName(g.accountId)}` : ''}`;
+  document.getElementById('finanzas-goal-detail-pace').textContent = finanzasGoalTextoRitmo(g);
+
+  const prog = document.getElementById('finanzas-goal-detail-progress');
+  prog.innerHTML = '';
+  const barra = document.createElement('div');
+  barra.className = 'finanzas-goal-bar';
+  const relleno = document.createElement('div');
+  relleno.className = 'finanzas-goal-bar-fill';
+  relleno.style.width = `${Math.round(g.progress * 100)}%`;
+  if (g.color) relleno.style.background = g.color;
+  barra.appendChild(relleno);
+  prog.appendChild(barra);
+
+  document.getElementById('finanzas-goal-move-amount').value = '';
+  document.getElementById('btn-finanzas-goal-spend').classList.toggle('hidden', g.reserved <= 0);
+
+  const cont = document.getElementById('finanzas-goal-contributions');
+  cont.innerHTML = '';
+  cont.appendChild(finanzasFijosVacioEl('Cargando…'));
+  document.getElementById('finanzas-goal-detail-modal').classList.remove('hidden');
+
+  const movimientos = await api(`/api/finanzas-goals/${g.id}/contributions`);
+  cont.innerHTML = '';
+  if (movimientos.length === 0) {
+    cont.appendChild(finanzasFijosVacioEl('Todavía no has apartado nada.'));
+    return;
+  }
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  movimientos.forEach((m) => {
+    grupo.appendChild(
+      finanzasFilaEl({
+        icono: m.amount >= 0 ? '↑' : '↓',
+        titulo: m.notes || (m.amount >= 0 ? 'Apartado' : 'Sacado'),
+        sub: finanzasFijosFechaCorta(m.date),
+        importe: `${m.amount >= 0 ? '+' : '−'}${formatFinanzasAmount(Math.abs(m.amount))}`,
+      })
+    );
+  });
+  cont.appendChild(grupo);
+}
+
+function closeFinanzasGoalDetail() {
+  document.getElementById('finanzas-goal-detail-modal').classList.add('hidden');
+  finanzasGoalDetalle = null;
+}
+document.getElementById('btn-close-finanzas-goal-detail').addEventListener('click', closeFinanzasGoalDetail);
+
+// Apartar / sacar. El mismo campo para las dos cosas: el signo lo pone el
+// boton, no el usuario (escribir "-200" es justo el tipo de detalle que se
+// olvida y acaba sumando cuando queria restar).
+async function finanzasGoalMover(signo) {
+  const g = finanzasGoalDetalle;
+  if (!g) return;
+  const campo = document.getElementById('finanzas-goal-move-amount');
+  const importe = Number(campo.value);
+  if (!Number.isFinite(importe) || importe <= 0) {
+    await showAppConfirm('Escribe cuánto quieres mover, en positivo.', { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  try {
+    await api(`/api/finanzas-goals/${g.id}/contributions`, {
+      method: 'POST',
+      body: JSON.stringify({ amount: signo * importe }),
+    });
+  } catch (err) {
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  await refreshFinanzasGoalsTab();
+  const actualizado = finanzasGoals.find((x) => x.id === g.id);
+  if (actualizado) await openFinanzasGoalDetail(actualizado);
+  await renderFinanzasResumenTab();
+}
+document.getElementById('btn-finanzas-goal-add').addEventListener('click', () => finanzasGoalMover(1));
+document.getElementById('btn-finanzas-goal-take').addEventListener('click', () => finanzasGoalMover(-1));
+
+document.getElementById('btn-finanzas-goal-edit').addEventListener('click', () => {
+  const g = finanzasGoalDetalle;
+  closeFinanzasGoalDetail();
+  if (g) openFinanzasGoalModal(g);
+});
+
+document.getElementById('btn-finanzas-goal-delete').addEventListener('click', async () => {
+  const g = finanzasGoalDetalle;
+  if (!g) return;
+  const ok = await showAppConfirm(
+    `¿Eliminar el objetivo "${g.name}"?\n\nNo se toca tu dinero: apartar era solo una reserva, así que el saldo de tu cuenta no cambia. Lo que se pierde es el historial de este objetivo.`,
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/finanzas-goals/${g.id}`, { method: 'DELETE' });
+  closeFinanzasGoalDetail();
+  await refreshFinanzasGoalsTab();
+  await renderFinanzasResumenTab();
+});
+
+// Gastar el objetivo: el gasto REAL y el vaciado del sobre, de una vez.
+document.getElementById('btn-finanzas-goal-spend').addEventListener('click', async () => {
+  const g = finanzasGoalDetalle;
+  if (!g) return;
+  if (!g.accountId) {
+    await showAppConfirm('Este objetivo no está atado a ninguna cuenta, así que no sé de dónde sale el dinero. Edítalo y elige una.', { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  const ok = await showAppConfirm(
+    `¿Gastar ${formatFinanzasAmount(g.reserved)} de "${g.name}"?\n\nSe apunta el gasto de verdad en ${finanzasAccountName(g.accountId)} y el objetivo queda vacío y dado por cumplido.`,
+    { okText: 'Gastarlo' }
+  );
+  if (!ok) return;
+  try {
+    await api(`/api/finanzas-goals/${g.id}/spend`, { method: 'POST', body: JSON.stringify({}) });
+  } catch (err) {
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  closeFinanzasGoalDetail();
+  await refreshFinanzasGoalsTab();
+  await refreshFinanzasTransactionsTab();
+  await refreshFinanzasAccountsAndCategories();
+  await renderFinanzasResumenTab();
+});
+
+// =====================================================================
+// Navegacion de Finanzas: un INICIO de tarjetas y pantallas debajo.
+//
+// Antes eran cinco pestañas en una fila. No escalaba: con Objetivos,
+// Suscripciones y Prevision se iba a ocho, y ocho pestañas no caben en el
+// ancho de un telefono. Ahora funciona como la app Salud -- una columna de
+// tarjetas, cada una con su cifra, y al tocarla se abre su pantalla con
+// una vuelta atras. Una seccion nueva es una tarjeta mas.
+// =====================================================================
+
+const FINANZAS_SECCIONES = {
+  inicio: 'Finanzas',
+  resumen: 'Este mes',
+  movimientos: 'Movimientos',
+  'gastos-fijos': 'Gastos fijos',
+  objetivos: 'Objetivos',
+  inversiones: 'Inversiones',
+  deudas: 'Deudas',
+};
+
+function switchFinanzasTab(tabName) {
+  const enInicio = tabName === 'inicio';
   document.querySelectorAll('.finanzas-tab-panel').forEach((panel) => {
     panel.classList.toggle('hidden', panel.dataset.finanzasPanel !== tabName);
   });
+  // El titulo de arriba dice donde estas, que es lo que sustituye a la
+  // pestaña marcada de antes.
+  document.getElementById('finanzas-view-title').textContent = FINANZAS_SECCIONES[tabName] || 'Finanzas';
+  document.getElementById('btn-finanzas-back').classList.toggle('hidden', enInicio);
+  // El boton de salir a Herramientas solo tiene sentido en el inicio: desde
+  // dentro de una seccion, lo que uno quiere es volver A FINANZAS.
+  document.getElementById('btn-close-finanzas').classList.toggle('hidden', !enInicio);
+  if (enInicio) renderFinanzasInicio();
 }
-document.querySelectorAll('.finanzas-tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => switchFinanzasTab(btn.dataset.finanzasTab));
-});
+
+document.getElementById('btn-finanzas-back').addEventListener('click', () => switchFinanzasTab('inicio'));
+
+// -- Las tarjetas del inicio --
+//
+// Cada una se construye con lo que ya sabe la app; si algo falla, la
+// tarjeta se queda sin cifra pero la pantalla sigue en pie (una seccion
+// rota no puede llevarse por delante el resto del inicio).
+function finanzasTarjetaEl({ icono, titulo, cifra, detalle, destino, alPulsar }) {
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'finanzas-card';
+  card.addEventListener('click', alPulsar || (() => switchFinanzasTab(destino)));
+
+  const cab = document.createElement('span');
+  cab.className = 'finanzas-card-head';
+  const ico = document.createElement('span');
+  ico.className = 'finanzas-card-icon';
+  ico.textContent = icono;
+  const tit = document.createElement('span');
+  tit.className = 'finanzas-card-title';
+  tit.textContent = titulo;
+  const flecha = document.createElement('span');
+  flecha.className = 'finanzas-card-chevron';
+  flecha.textContent = '›';
+  cab.append(ico, tit, flecha);
+  card.appendChild(cab);
+
+  const c = document.createElement('span');
+  c.className = 'finanzas-card-amount';
+  c.textContent = cifra;
+  card.appendChild(c);
+
+  if (detalle) {
+    const d = document.createElement('span');
+    d.className = 'finanzas-card-detail';
+    d.textContent = detalle;
+    card.appendChild(d);
+  }
+  return card;
+}
+
+async function renderFinanzasInicio() {
+  const cont = document.getElementById('finanzas-inicio-tarjetas');
+  const esAjena = (a) => String(a.type || '').toLowerCase() === 'de terceros';
+
+  // El total de arriba es TU dinero: las cuentas de terceros no suman
+  // (salvo que el interruptor del Resumen diga lo contrario).
+  const cuentas = finanzasAccounts.filter((a) => finanzasIncluyeTerceros() || !esAjena(a));
+  const total = cuentas.reduce((acc, a) => acc + a.balance, 0);
+  document.getElementById('finanzas-inicio-total').textContent = formatFinanzasAmount(total);
+  document.getElementById('finanzas-inicio-sub').textContent =
+    cuentas.length === 0
+      ? 'Todavía no tienes cuentas'
+      : `${cuentas.length} ${cuentas.length === 1 ? 'cuenta' : 'cuentas'}`;
+
+  const mes = `${finanzasCurrentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const primero = `${mes}-01`;
+  const ultimoDia = new Date(finanzasCurrentYear, new Date().getMonth() + 1, 0).getDate();
+  const ultimo = `${mes}-${String(ultimoDia).padStart(2, '0')}`;
+
+  // Todo lo que necesitan las tarjetas, de una vez. allSettled y no all:
+  // que Deudas falle no puede dejar el inicio en blanco.
+  const [resumen, prevision, suscripciones, deudas] = await Promise.allSettled([
+    api(`/api/finanzas-transactions/summary/month?month=${mes}${finanzasTercerosQS('&')}`),
+    api(`/api/finanzas-recurring-expenses/forecast?from=${primero}&to=${ultimo}`),
+    api('/api/finanzas-recurring-expenses/summary'),
+    api('/api/finanzas-debts'),
+  ]);
+  const dato = (r) => (r.status === 'fulfilled' ? r.value : null);
+
+  cont.innerHTML = '';
+
+  const m = dato(resumen);
+  if (m) {
+    const limite = m.monthlyBudgetLimit;
+    cont.appendChild(
+      finanzasTarjetaEl({
+        icono: '📊',
+        titulo: 'Este mes',
+        cifra: formatFinanzasAmount(m.totalExpenseAll),
+        detalle: limite
+          ? `de ${formatFinanzasAmount(limite)} de límite · ahorras ${formatFinanzasAmount(m.savings)}`
+          : `gastado · ahorras ${formatFinanzasAmount(m.savings)}`,
+        destino: 'resumen',
+      })
+    );
+  }
+
+  const p = dato(prevision);
+  if (p) {
+    const pendientes = p.occurrences.filter((o) => o.status !== 'paid');
+    cont.appendChild(
+      finanzasTarjetaEl({
+        icono: '📅',
+        titulo: 'Próximos pagos',
+        cifra: formatFinanzasAmount(p.totals.unpaid),
+        detalle:
+          pendientes.length === 0
+            ? 'No te queda nada por pagar este mes'
+            : `${pendientes.length} ${pendientes.length === 1 ? 'pago' : 'pagos'} · el siguiente, ${finanzasFijosFechaCorta(pendientes[0].date)}`,
+        alPulsar: () => {
+          switchFinanzasTab('gastos-fijos');
+          switchFinanzasFijosVista('pendientes');
+        },
+      })
+    );
+  }
+
+  const s = dato(suscripciones);
+  if (s && s.byKind.subscription.count > 0) {
+    cont.appendChild(
+      finanzasTarjetaEl({
+        icono: '📺',
+        titulo: 'Suscripciones',
+        cifra: `${formatFinanzasAmount(s.byKind.subscription.monthly)}/mes`,
+        detalle: `${formatFinanzasAmount(s.byKind.subscription.annual)} al año · ${s.byKind.subscription.count} ${s.byKind.subscription.count === 1 ? 'activa' : 'activas'}`,
+        alPulsar: () => {
+          switchFinanzasTab('gastos-fijos');
+          switchFinanzasFijosVista('plantillas');
+          const chip = document.querySelector('[data-fijos-kind="subscription"]');
+          if (chip) chip.click();
+        },
+      })
+    );
+  }
+
+  const sinCumplir = finanzasGoals.filter((g) => !g.completedAt);
+  if (sinCumplir.length > 0) {
+    const apartado = sinCumplir.reduce((acc, g) => acc + g.reserved, 0);
+    const meta = sinCumplir.reduce((acc, g) => acc + g.targetAmount, 0);
+    const proximo = sinCumplir.slice().sort((a, b) => b.progress - a.progress)[0];
+    cont.appendChild(
+      finanzasTarjetaEl({
+        icono: '🎯',
+        titulo: 'Objetivos',
+        cifra: formatFinanzasAmount(apartado),
+        detalle: `de ${formatFinanzasAmount(meta)} · ${proximo.name} va por el ${Math.round(proximo.progress * 100)}%`,
+        destino: 'objetivos',
+      })
+    );
+  }
+
+  cont.appendChild(
+    finanzasTarjetaEl({
+      icono: '🧾',
+      titulo: 'Movimientos',
+      cifra: 'Ver todos',
+      detalle: 'Gastos e ingresos, con sus filtros',
+      destino: 'movimientos',
+    })
+  );
+
+  const d = dato(deudas);
+  if (d && d.length > 0) {
+    const pendientes = d.filter((x) => !x.paid);
+    const meDeben = pendientes.filter((x) => x.direction === 'owed_to_me').reduce((a, x) => a + x.amount, 0);
+    const debo = pendientes.filter((x) => x.direction !== 'owed_to_me').reduce((a, x) => a + x.amount, 0);
+    cont.appendChild(
+      finanzasTarjetaEl({
+        icono: '🤝',
+        titulo: 'Deudas',
+        cifra: formatFinanzasAmount(meDeben - debo),
+        detalle: `te deben ${formatFinanzasAmount(meDeben)} · debes ${formatFinanzasAmount(debo)}`,
+        destino: 'deudas',
+      })
+    );
+  }
+
+  cont.appendChild(
+    finanzasTarjetaEl({
+      icono: '📈',
+      titulo: 'Inversiones',
+      cifra: 'Ver cartera',
+      detalle: 'Compras, ventas y dividendos',
+      destino: 'inversiones',
+    })
+  );
+}
 
 async function openFinanzasView() {
   setupFinanzasIconColorFields();
   closeExtensionsView();
   document.getElementById('finanzas-view').classList.remove('hidden');
   setCurrentScreen('finanzas');
-  switchFinanzasTab('resumen');
+  // Se entra siempre por el inicio (y no por donde se saliera la ultima
+  // vez): al abrir Finanzas lo que uno quiere ver es el panorama.
+  switchFinanzasTab('inicio');
   await refreshFinanzasAccountsAndCategories();
   await loadFinanzasPortfolios();
   await loadFinanzasAssets();
@@ -16665,7 +17890,10 @@ async function openFinanzasView() {
   // vista para no arrastrar una seleccion vieja de la sesion anterior.
   finanzasAssetTreeSelectedIds = new Set(finanzasAssets.map((a) => a.id));
   renderFinanzasAssetTree();
-  await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasRecurringTab(), refreshFinanzasInvestmentsTab(), refreshFinanzasDebtsTab()]);
+  await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasRecurringTab(), refreshFinanzasInvestmentsTab(), refreshFinanzasDebtsTab(), refreshFinanzasGoalsTab()]);
+  // Y se repintan las tarjetas ahora que los datos estan cargados: la
+  // primera pasada de arriba se hizo con las cuentas todavia vacias.
+  await renderFinanzasInicio();
 }
 function closeFinanzasView() {
   document.getElementById('finanzas-view').classList.add('hidden');

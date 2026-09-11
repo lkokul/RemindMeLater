@@ -154,6 +154,16 @@ async function ensureRemindersChannel(plugin) {
 // uno -- asi no hay forma de que quede un aviso huerfano de un evento
 // que se borro o se movio de hora, que es justo el tipo de fallo que
 // nadie ve hasta que suena un aviso de algo que ya no existe.
+// Como quedo el ultimo reparto del cupo de avisos. Existe para que
+// Configuracion pueda enseñar "usas 41 de 60": sin esto, quedarse sin
+// cupo es invisible (el sistema simplemente deja de avisar) y no habria
+// forma de entender por que dejaron de sonar los recordatorios.
+let ultimoRepartoDeAvisos = null;
+
+function estadoDeLosAvisos() {
+  return ultimoRepartoDeAvisos;
+}
+
 async function syncScheduledReminders() {
   const plugin = getLocalNotificationsPlugin();
   if (!plugin) return;
@@ -182,8 +192,50 @@ async function syncScheduledReminders() {
     const proximos = await api('/api/reminders/upcoming');
     const ahora = Date.now();
     const sonido = notificationSoundValue();
-    const aProgramar = proximos
-      .filter((r) => new Date(r.remindAt).getTime() > ahora)
+    const avisosDelCalendario = proximos.filter((r) => new Date(r.remindAt).getTime() > ahora);
+
+    // -- El cupo del sistema --
+    //
+    // iOS solo guarda unas 64 notificaciones locales PENDIENTES por app, y
+    // cuando se pasa, las de mas se pierden EN SILENCIO. Ese cupo lo
+    // comparten el calendario y los gastos fijos, asi que con veinte gastos
+    // y tres avisos cada uno ya no sonaria ningun recordatorio, y no habria
+    // forma de saber por que.
+    //
+    // Por eso: primero el calendario (son citas con hora, lo mas
+    // sensible), luego los pagos, y lo que no quepa se queda fuera A
+    // SABIENDAS -- el numero se guarda y Configuracion lo enseña.
+    const CUPO = 60; // 64 del sistema menos margen para los avisos internos
+
+    // El calendario tambien se corta. Antes no lo hacia nadie: con mas
+    // recordatorios que cupo, iOS aceptaba unos cuantos y tiraba el resto
+    // SIN decir cual, asi que cuales sonaban era cosa del azar. Cortando
+    // aqui se queda con los MAS PROXIMOS (la lista viene ordenada por
+    // cuando suenan), que es una regla que al menos se puede explicar.
+    const delCalendario = avisosDelCalendario.slice(0, CUPO);
+    const huecosParaPagos = Math.max(0, CUPO - delCalendario.length);
+
+    let avisosDePagos = [];
+    let pagosCalculados = 0;
+    try {
+      const pagos = await api('/api/finanzas-recurring-expenses/upcoming-reminders');
+      pagosCalculados = pagos.length;
+      avisosDePagos = pagos.slice(0, huecosParaPagos);
+    } catch (err) {
+      // Que Finanzas falle no puede dejar sin avisos al calendario.
+      console.error('No se pudieron calcular los avisos de los gastos fijos:', err);
+    }
+
+    ultimoRepartoDeAvisos = {
+      calendario: delCalendario.length,
+      calendarioFueraDeCupo: Math.max(0, avisosDelCalendario.length - delCalendario.length),
+      pagos: avisosDePagos.length,
+      pagosFueraDeCupo: Math.max(0, pagosCalculados - avisosDePagos.length),
+      cupo: CUPO,
+      cuando: Date.now(),
+    };
+
+    const aProgramar = delCalendario
       .map((r) => {
         const aviso = {
           // El id del evento vale como id del aviso: es un entero unico y
@@ -205,6 +257,26 @@ async function syncScheduledReminders() {
         if (canalListo) aviso.channelId = REMINDERS_CHANNEL_ID;
         return aviso;
       });
+
+    // Los avisos de los pagos fijos, con el mismo sonido y canal.
+    for (const p of avisosDePagos) {
+      const cuando =
+        p.daysBefore === 0
+          ? 'hoy'
+          : p.daysBefore === 1
+            ? 'mañana'
+            : `en ${p.daysBefore} días`;
+      const aviso = {
+        id: p.id,
+        title: 'Pago fijo',
+        body: `${p.description}: ${formatFinanzasAmount(p.amount)} ${cuando}`,
+        schedule: { at: new Date(p.at) },
+      };
+      if (sonido) aviso.sound = sonido;
+      if (canalListo) aviso.channelId = REMINDERS_CHANNEL_ID;
+      aProgramar.push(aviso);
+    }
+
     if (aProgramar.length > 0) await plugin.schedule({ notifications: aProgramar });
   } catch (err) {
     // Que falle programar un aviso nunca debe romper lo que el usuario

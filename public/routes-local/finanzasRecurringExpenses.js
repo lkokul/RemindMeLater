@@ -30,7 +30,45 @@
       countsTowardBudget: !!row.counts_toward_budget,
       active: !!row.active,
       lastGeneratedPeriod: row.last_generated_period || null,
+      kind: row.kind || 'other',
+      reminderOffsets: parseOffsets(row.reminder_offsets),
     };
+  }
+
+  // Las cuatro clases de gasto fijo. Se validan contra esta lista para que
+  // un valor inventado no acabe en la base y descuadre luego los totales
+  // por clase (un 'suscripcion' mal escrito no sumaria con 'subscription').
+  const KINDS = ['subscription', 'bill', 'loan', 'other'];
+
+  // Cuantos avisos se dejan poner por gasto. El tope no es capricho: cada
+  // aviso ocupa un hueco del presupuesto de notificaciones del sistema
+  // (iOS deja ~64 pendientes por app, compartidas con el calendario), asi
+  // que veinte gastos con cinco avisos cada uno ya se lo comen entero.
+  const MAX_AVISOS_POR_GASTO = 5;
+  // Tres meses es el maximo que pidio Koku ("para gastos anuales viene
+  // bien saberlo con antelacion").
+  const MAX_DIAS_DE_AVISO = 90;
+
+  // "0,2,30" -> [0, 2, 30], tirando lo que no sea un numero de dias
+  // valido, quitando repetidos y ordenando de mas lejos a mas cerca.
+  function parseOffsets(value) {
+    if (typeof value === 'string' && value.trim() === '') return [];
+    const lista = Array.isArray(value) ? value : String(value == null ? '' : value).split(',');
+    const limpios = [];
+    for (const bruto of lista) {
+      const n = Number(String(bruto).trim());
+      if (!Number.isInteger(n) || n < 0 || n > MAX_DIAS_DE_AVISO) continue;
+      if (!limpios.includes(n)) limpios.push(n);
+    }
+    // Si se piden mas de los que caben, se quedan los MAS CERCANOS al
+    // pago. Al reves (que era como estaba primero) se tiraban "el mismo
+    // dia" y "un dia antes" para conservar "tres meses antes", justo al
+    // contrario de lo que sirve: el aviso de tres meses es un lujo, el de
+    // la vispera es el que evita el olvido.
+    const cercanosPrimero = limpios.sort((a, b) => a - b).slice(0, MAX_AVISOS_POR_GASTO);
+    // Se devuelven de mas lejano a mas cercano, que es como se leen ("te
+    // avisara 1 mes antes, 1 semana antes y el mismo dia").
+    return cercanosPrimero.sort((a, b) => b - a);
   }
 
   function validateBody(body, existing) {
@@ -46,9 +84,17 @@
     if (frequency !== 'monthly' && frequency !== 'annual') {
       return { error: 'La frecuencia tiene que ser "monthly" o "annual".' };
     }
-    const safeAmount = Number(amount);
-    if (!Number.isFinite(safeAmount) || safeAmount <= 0) {
+    // El dinero se guarda a dos decimales. Sin redondear aqui se colaba un
+    // gasto de 0,001 € que la pantalla enseñaba como "0,00 €" (una fila
+    // fantasma de un importe que no existe) y que ademas ensuciaba los
+    // totales con decimales invisibles.
+    const rawAmount = Number(amount);
+    if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
       return { error: 'El importe tiene que ser un numero mayor que 0.' };
+    }
+    const safeAmount = Math.round(rawAmount * 100) / 100;
+    if (safeAmount <= 0) {
+      return { error: 'El importe es demasiado pequeño: el minimo es 0,01 €.' };
     }
     const safeDayOfMonth = Number(dayOfMonth);
     if (!Number.isInteger(safeDayOfMonth) || safeDayOfMonth < 1 || safeDayOfMonth > 31) {
@@ -88,9 +134,18 @@
     const countsTowardBudget =
       body.countsTowardBudget !== undefined ? (body.countsTowardBudget ? 1 : 0) : existing ? existing.counts_toward_budget : 1;
 
+    let kind = body.kind !== undefined ? body.kind : existing && existing.kind;
+    if (!KINDS.includes(kind)) kind = 'other';
+
+    const reminderOffsets = parseOffsets(
+      body.reminderOffsets !== undefined ? body.reminderOffsets : existing && existing.reminder_offsets
+    );
+
     return {
       accountId,
       categoryId,
+      kind,
+      reminderOffsets: reminderOffsets.join(','),
       amount: safeAmount,
       description: typeof body.description === 'string' && body.description.trim() ? body.description.trim() : (body.description === undefined && existing ? existing.description : null),
       frequency,
@@ -107,6 +162,363 @@
     res.json(rows.map(serialize));
   });
 
+  // ---------------------------------------------------------------------
+  // PREVISION de gastos fijos
+  //
+  // Hasta ahora una plantilla solo existia "hacia atras": el generador
+  // (finanzas-recurring.js) crea la transaccion real cuando llega la
+  // fecha, y nadie sabia mirar hacia DELANTE. Por eso no habia forma de
+  // contestar a "cuanto me queda por pagar este mes".
+  //
+  // Estas rutas calculan esas ocurrencias futuras AL VUELO y NO GUARDAN
+  // NADA. Es a proposito, por dos motivos:
+  //  1. Es la regla de la casa (los saldos, los titulos de nota y los
+  //     arboles de carpetas tambien se calculan, nunca se guardan): lo
+  //     calculado no se puede desincronizar de la realidad.
+  //  2. Si se guardaran movimientos "previstos", cada vez que editaras
+  //     una plantilla habria que salir a buscarlos y limpiarlos, y
+  //     cualquier fallo dejaria basura en tus cuentas de verdad.
+  // ---------------------------------------------------------------------
+
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  // Ultimo dia real del mes (28/29 en febrero, 30 en abril...). Misma
+  // funcion que usa el generador: hace falta para "clampar" el dia 31 en
+  // un mes que no lo tiene.
+  function daysInMonth(year, month) {
+    return new Date(year, month, 0).getDate();
+  }
+
+  // La clave que identifica un PERIODO de una plantilla: 'YYYY-MM' para
+  // las mensuales y 'YYYY' para las anuales. Es exactamente la misma que
+  // el generador guarda en last_generated_period, y por eso sirve para
+  // emparejar "lo previsto" con "lo que ya se pago".
+  function periodKeyForDate(frequency, date) {
+    return frequency === 'monthly' ? date.slice(0, 7) : date.slice(0, 4);
+  }
+
+  // Todas las veces que una plantilla toca entre dos fechas (incluidas).
+  //
+  // Ojo con los limites: se recorre MES a MES (o año a año) desde el mes
+  // de "from" hasta el de "to", y la comprobacion fina se hace despues
+  // sobre la fecha exacta -- porque el dia de cobro puede caer antes de
+  // "from" dentro del primer mes, o despues de "to" dentro del ultimo.
+  function occurrenceDates(template, from, to) {
+    const dates = [];
+    const startDate = template.start_date;
+    const endDate = template.end_date || null;
+
+    // Tope de seguridad: sin esto, un rango absurdo (año 1900 al 2999)
+    // daria un bucle larguisimo dentro de la propia app.
+    const MAX_ITERACIONES = 1200;
+
+    if (template.frequency === 'monthly') {
+      let year = Number(from.slice(0, 4));
+      let month = Number(from.slice(5, 7));
+      const lastYear = Number(to.slice(0, 4));
+      const lastMonth = Number(to.slice(5, 7));
+      let vueltas = 0;
+      while ((year < lastYear || (year === lastYear && month <= lastMonth)) && vueltas < MAX_ITERACIONES) {
+        vueltas += 1;
+        const day = Math.min(template.day_of_month, daysInMonth(year, month));
+        const date = `${year}-${pad2(month)}-${pad2(day)}`;
+        if (date >= from && date <= to && date >= startDate && (!endDate || date <= endDate)) {
+          dates.push(date);
+        }
+        month += 1;
+        if (month > 12) { month = 1; year += 1; }
+      }
+      return dates;
+    }
+
+    if (template.frequency === 'annual' && template.month_of_year) {
+      const lastYear = Number(to.slice(0, 4));
+      let vueltas = 0;
+      for (let year = Number(from.slice(0, 4)); year <= lastYear && vueltas < MAX_ITERACIONES; year += 1) {
+        vueltas += 1;
+        const month = template.month_of_year;
+        const day = Math.min(template.day_of_month, daysInMonth(year, month));
+        const date = `${year}-${pad2(month)}-${pad2(day)}`;
+        if (date >= from && date <= to && date >= startDate && (!endDate || date <= endDate)) {
+          dates.push(date);
+        }
+      }
+      return dates;
+    }
+
+    // Plantilla anual sin mes: dato invalido, no deberia existir. Mismo
+    // criterio que el generador -- se ignora en vez de inventarse un mes.
+    return [];
+  }
+
+  // No basta con que TENGA la forma YYYY-MM-DD: "2026-99-99" la cumple.
+  // Se construye la fecha y se comprueba que vuelve igual, que es la forma
+  // barata de descartar meses 13, dias 31 en abril y 29 de febrero de un
+  // año que no es bisiesto.
+  function isValidDate(value) {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const [y, m, d] = value.split('-').map(Number);
+    if (m < 1 || m > 12 || d < 1) return false;
+    return d <= daysInMonth(y, m);
+  }
+
+  // GET /forecast?from=YYYY-MM-DD&to=YYYY-MM-DD
+  //
+  // Declarada ANTES que las rutas con /:id a proposito (misma precaucion
+  // que /summary/by-asset en finanzasInvestments.js): si algun dia se
+  // añade un GET /:id, "forecast" no debe colarse como si fuera un id.
+  router.get('/forecast', (req, res) => {
+    const from = req.query.from;
+    const to = req.query.to;
+    if (!isValidDate(from) || !isValidDate(to)) {
+      return res.status(400).json({ error: 'invalid_request', message: 'Hacen falta "from" y "to" con formato YYYY-MM-DD.' });
+    }
+    if (to < from) {
+      return res.status(400).json({ error: 'invalid_request', message: 'La fecha final no puede ser anterior a la inicial.' });
+    }
+    // Un rango disparatado (del año 1900 al 2999) chocaba contra el tope
+    // de vueltas de occurrenceDates() y devolvia una lista CORTADA sin
+    // decirlo -- o sea, un total que parecia bueno y no lo era. Mejor
+    // negarse: cualquier pantalla real pide como mucho un año.
+    if (Number(to.slice(0, 4)) - Number(from.slice(0, 4)) > 50) {
+      return res.status(400).json({ error: 'invalid_request', message: 'El rango no puede pasar de 50 años.' });
+    }
+
+    const templates = db.prepare('SELECT * FROM finanzas_recurring_expenses').all();
+    const occurrences = [];
+
+    // "Hoy" para separar lo que todavia no ha llegado de lo que ya paso.
+    const ahora = new Date();
+    const hoy = `${ahora.getFullYear()}-${pad2(ahora.getMonth() + 1)}-${pad2(ahora.getDate())}`;
+
+    for (const template of templates) {
+      // Lo que YA se pago de esta plantilla, indexado por periodo. Se
+      // pide una vez por plantilla (no una por ocurrencia) para no
+      // lanzar decenas de consultas por pantalla.
+      const pagadas = db
+        .prepare('SELECT id, amount, date FROM finanzas_transactions WHERE recurring_expense_id = ?')
+        .all(template.id);
+      const porPeriodo = new Map();
+      for (const t of pagadas) {
+        const clave = periodKeyForDate(template.frequency, t.date);
+        const previo = porPeriodo.get(clave);
+        if (previo) {
+          // Dos movimientos en el mismo periodo no deberia pasar (el
+          // generador se protege con last_generated_period), pero si
+          // pasara, se suman en vez de enseñar solo uno y mentir en el
+          // total.
+          previo.amount += t.amount;
+          if (t.date < previo.date) previo.date = t.date;
+        } else {
+          porPeriodo.set(clave, { id: t.id, amount: t.amount, date: t.date });
+        }
+      }
+
+      for (const date of occurrenceDates(template, from, to)) {
+        const clave = periodKeyForDate(template.frequency, date);
+        const pagada = porPeriodo.get(clave) || null;
+
+        // Una plantilla pausada (o desactivada sola al pasar su ultimo
+        // pago) NO proyecta cobros FUTUROS: si la cancelaste, ese dinero
+        // ya no va a salir de tu cuenta.
+        //
+        // Pero lo PASADO si cuenta. Esto salio de probarlo: un gimnasio de
+        // enero a junio desaparecia entero del año al desactivarse la
+        // plantilla, y el total anual pasaba de 10.851,88 a 10.671,88 sin
+        // que nada lo explicara. Un total que se come 180 € en silencio es
+        // peor que no tener total.
+        if (!template.active && !pagada && date >= hoy) continue;
+
+        occurrences.push({
+          templateId: template.id,
+          description: template.description || null,
+          accountId: template.account_id,
+          categoryId: template.category_id || null,
+          frequency: template.frequency,
+          countsTowardBudget: !!template.counts_toward_budget,
+          periodKey: clave,
+          // Si esta pagada mandamos la fecha y el importe REALES (pueden
+          // no coincidir con la plantilla: subir el precio de Netflix no
+          // toca lo ya cobrado). Si no, lo previsto.
+          date: pagada ? pagada.date : date,
+          plannedDate: date,
+          amount: pagada ? pagada.amount : template.amount,
+          plannedAmount: template.amount,
+          // Tres estados, no dos. La diferencia importa y salio de probarlo
+          // con datos de verdad: un cobro de enero que hoy (septiembre) no
+          // tiene movimiento NO esta "pendiente" -- es que nunca se
+          // registro, porque la plantilla se creo despues o porque la app
+          // no se abrio ese mes (el generador solo hace el periodo en
+          // curso, nunca rellena hacia atras). Llamarlo "pendiente" seria
+          // decirle a Koku que debe un alquiler que ya pago.
+          status: pagada ? 'paid' : date < hoy ? 'overdue' : 'pending',
+          transactionId: pagada ? pagada.id : null,
+        });
+      }
+    }
+
+    occurrences.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.templateId - b.templateId));
+
+    let paid = 0;
+    let pending = 0;
+    let overdue = 0;
+    for (const o of occurrences) {
+      if (o.status === 'paid') paid += o.amount;
+      else if (o.status === 'overdue') overdue += o.amount;
+      else pending += o.amount;
+    }
+
+    res.json({
+      from,
+      to,
+      occurrences,
+      // "unpaid" es la suma de lo que sigue debiendose por cualquiera de
+      // los dos motivos -- es la cifra que contesta a "¿cuanto me queda?",
+      // y se manda ya sumada para que la pantalla no tenga que decidirlo.
+      totals: { paid, pending, overdue, unpaid: pending + overdue, all: paid + pending + overdue },
+    });
+  });
+
+  // GET /summary — lo que cuestan TODOS los gastos fijos activos,
+  // normalizado a mes y a año.
+  //
+  // Normalizar es justo lo que hoy no se puede hacer a ojo: Netflix a
+  // 10 €/mes son 120 €/año, y un seguro de 400 €/año son 33 €/mes. Sin
+  // llevarlos a la misma unidad no hay forma de saber cual te cuesta mas.
+  router.get('/summary', (req, res) => {
+    const rows = db.prepare('SELECT * FROM finanzas_recurring_expenses WHERE active = 1').all();
+    const items = rows.map((row) => {
+      const monthlyCost = row.frequency === 'monthly' ? row.amount : row.amount / 12;
+      const annualCost = row.frequency === 'monthly' ? row.amount * 12 : row.amount;
+      return Object.assign(serialize(row), { monthlyCost, annualCost });
+    });
+    // Ordenado por lo que cuesta AL AÑO, de mas a menos: "lo que mas me
+    // cuesta al año" suele ser la sorpresa, y casi nunca es lo que mas
+    // cuesta al mes (un seguro anual de 400 € pesa mas que dos
+    // suscripciones de 10 €).
+    items.sort((a, b) => b.annualCost - a.annualCost);
+
+    // Totales por clase, para poder contestar a "¿cuanto me gasto al año
+    // en suscripciones?" sin que el alquiler entre en esa cifra.
+    const byKind = {};
+    for (const k of KINDS) byKind[k] = { monthly: 0, annual: 0, count: 0 };
+    for (const i of items) {
+      byKind[i.kind].monthly += i.monthlyCost;
+      byKind[i.kind].annual += i.annualCost;
+      byKind[i.kind].count += 1;
+    }
+
+    const monthlyTotal = items.reduce((acc, i) => acc + i.monthlyCost, 0);
+    const annualTotal = items.reduce((acc, i) => acc + i.annualCost, 0);
+    res.json({ monthlyTotal, annualTotal, byKind, items });
+  });
+
+  // GET /upcoming-reminders — los avisos de pago que habria que programar
+  // en el sistema, ya calculados y ordenados por cuando suenan.
+  //
+  // Quien los programa de verdad es local-notifications.js; aqui solo se
+  // decide QUE avisos tocan. Dos reglas que importan:
+  //
+  //  - De cada pareja (gasto, antelacion) se manda solo el aviso MAS
+  //    PROXIMO, no todos los del año. Cuando ese suene, la app ya se habra
+  //    abierto y reprogramara el siguiente -- es el mismo "borrar y
+  //    rehacer" que usa el calendario. Programar los doce de golpe solo
+  //    serviria para agotar el cupo del sistema.
+  //  - Un cobro que YA se genero no avisa: el dinero ya ha salido.
+  router.get('/upcoming-reminders', (req, res) => {
+    const ahora = new Date();
+    const hoy = `${ahora.getFullYear()}-${pad2(ahora.getMonth() + 1)}-${pad2(ahora.getDate())}`;
+
+    const ajustes = db.prepare('SELECT reminder_hour FROM finanzas_settings WHERE id = 1').get();
+    const hora = ajustes && Number.isInteger(ajustes.reminder_hour) ? ajustes.reminder_hour : 9;
+
+    // Se mira hasta 120 dias adelante: con la antelacion maxima de 90
+    // dias, un pago que caiga mas alla de esa ventana no puede tener
+    // todavia ningun aviso que suene ahora.
+    const limite = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + 120);
+    const hasta = `${limite.getFullYear()}-${pad2(limite.getMonth() + 1)}-${pad2(limite.getDate())}`;
+
+    const templates = db.prepare('SELECT * FROM finanzas_recurring_expenses WHERE active = 1').all();
+    const avisos = [];
+
+    for (const template of templates) {
+      const offsets = parseOffsets(template.reminder_offsets);
+      if (offsets.length === 0) continue;
+
+      const pagadas = new Set(
+        db
+          .prepare('SELECT date FROM finanzas_transactions WHERE recurring_expense_id = ?')
+          .all(template.id)
+          .map((t) => periodKeyForDate(template.frequency, t.date))
+      );
+
+      // El aviso mas proximo de cada antelacion.
+      const mejorPorOffset = new Map();
+      for (const date of occurrenceDates(template, hoy, hasta)) {
+        if (pagadas.has(periodKeyForDate(template.frequency, date))) continue;
+
+        const [y, m, d] = date.split('-').map(Number);
+        for (let i = 0; i < offsets.length; i += 1) {
+          const dias = offsets[i];
+          const cuando = new Date(y, m - 1, d - dias, hora, 0, 0, 0);
+          if (cuando.getTime() <= ahora.getTime()) continue;
+          const previo = mejorPorOffset.get(i);
+          if (previo && previo.at <= cuando.getTime()) continue;
+          mejorPorOffset.set(i, {
+            // Espacio de ids propio (800.000.000+) para no chocar con los
+            // de los eventos del calendario, que son ids de fila y empiezan
+            // en 1. Queda por debajo de 999.999.900, que es la frontera de
+            // los avisos internos de la app -- asi estos SI entran en el
+            // "cancelar y rehacer" de syncScheduledReminders, que es justo
+            // lo que hace falta para que no quede ninguno huerfano.
+            id: 800000000 + template.id * 10 + i,
+            at: cuando.getTime(),
+            templateId: template.id,
+            description: template.description || 'Gasto fijo',
+            amount: template.amount,
+            date,
+            daysBefore: dias,
+          });
+        }
+      }
+      avisos.push(...mejorPorOffset.values());
+    }
+
+    avisos.sort((a, b) => a.at - b.at);
+    res.json(avisos);
+  });
+
+  // GET /:id/history — cuanto ha costado ESTE gasto cada año.
+  //
+  // Sale gratis de los movimientos ya generados, que guardan
+  // recurring_expense_id. "count" importa para no comparar peras con
+  // manzanas: un año a medias (11 meses) no se compara con uno entero
+  // sin decirlo.
+  router.get('/:id/history', (req, res) => {
+    const existing = db.prepare('SELECT * FROM finanzas_recurring_expenses WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+
+    const years = db
+      .prepare(
+        `SELECT substr(date, 1, 4) AS year, SUM(amount) AS total, COUNT(*) AS count
+         FROM finanzas_transactions
+         WHERE recurring_expense_id = ?
+         GROUP BY substr(date, 1, 4)
+         ORDER BY year DESC`
+      )
+      .all(req.params.id);
+
+    res.json({
+      templateId: existing.id,
+      description: existing.description || null,
+      frequency: existing.frequency,
+      currentAmount: existing.amount,
+      years: years.map((y) => ({ year: y.year, total: y.total, count: y.count })),
+    });
+  });
+
   router.post('/', (req, res) => {
     const body = req.body || {};
     const result = validateBody(body, null);
@@ -116,7 +528,7 @@
 
     const info = db
       .prepare(
-        'INSERT INTO finanzas_recurring_expenses (account_id, category_id, amount, description, frequency, day_of_month, month_of_year, start_date, end_date, counts_toward_budget) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO finanzas_recurring_expenses (account_id, category_id, amount, description, frequency, day_of_month, month_of_year, start_date, end_date, counts_toward_budget, kind, reminder_offsets) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       )
       .run(
         result.accountId,
@@ -128,7 +540,9 @@
         result.monthOfYear,
         result.startDate,
         result.endDate,
-        result.countsTowardBudget
+        result.countsTowardBudget,
+        result.kind,
+        result.reminderOffsets
       );
 
     const row = db.prepare('SELECT * FROM finanzas_recurring_expenses WHERE id = ?').get(info.lastInsertRowid);
@@ -150,7 +564,7 @@
     const active = body.active !== undefined ? (body.active ? 1 : 0) : existing.active;
 
     db.prepare(
-      'UPDATE finanzas_recurring_expenses SET account_id = ?, category_id = ?, amount = ?, description = ?, frequency = ?, day_of_month = ?, month_of_year = ?, start_date = ?, end_date = ?, counts_toward_budget = ?, active = ? WHERE id = ?'
+      'UPDATE finanzas_recurring_expenses SET account_id = ?, category_id = ?, amount = ?, description = ?, frequency = ?, day_of_month = ?, month_of_year = ?, start_date = ?, end_date = ?, counts_toward_budget = ?, kind = ?, reminder_offsets = ?, active = ? WHERE id = ?'
     ).run(
       result.accountId,
       result.categoryId,
@@ -162,6 +576,8 @@
       result.startDate,
       result.endDate,
       result.countsTowardBudget,
+      result.kind,
+      result.reminderOffsets,
       active,
       req.params.id
     );
