@@ -1132,7 +1132,7 @@ function isGestureBlockedByModal() {
   if (document.querySelector('.modal:not(.hidden)')) return true;
   const fullscreenIds = [
     'extensions-view', 'gym-view', 'gym-live-view', 'finanzas-view',
-    'lecturas-view', 'note-editor-view',
+    'lecturas-view', 'recetas-view', 'note-editor-view',
   ];
   return fullscreenIds.some((id) => {
     const el = document.getElementById(id);
@@ -8352,6 +8352,11 @@ const MOBILE_NAV_SLOT_APPS = {
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg>',
     open: () => openLecturasView(),
   },
+  recetas: {
+    label: 'Recetas',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v7a3 3 0 0 0 3 3v8"></path><line x1="7" y1="3" x2="7" y2="9"></line><path d="M17 3c-1.7 0-3 2.2-3 5s1.3 4 3 4v9"></path></svg>',
+    open: () => openRecetasView(),
+  },
   viajes: {
     label: 'Viajes',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>',
@@ -8371,6 +8376,7 @@ const MOBILE_NAV_SLOT_CARD_IDS = {
   gym: 'btn-open-gym',
   finanzas: 'btn-open-finanzas',
   lecturas: 'btn-open-lecturas',
+  recetas: 'btn-open-recetas',
   viajes: 'btn-open-viajes',
 };
 
@@ -17507,6 +17513,9 @@ const ICONOS_DE_FILA = {
   reloj: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>',
   tabla: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><rect x="9" y="2" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>',
   tendencia: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg>',
+  cazuela: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h16v4a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5Z"/><line x1="2" y1="10" x2="4" y2="10"/><line x1="20" y1="10" x2="22" y2="10"/><path d="M9 7c0-1.2 1-1.6 1-2.6"/><path d="M13 7c0-1.2 1-1.6 1-2.6"/></svg>',
+  carrito: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h7.1a2 2 0 0 0 2-1.5L20 7H6"/><circle cx="10" cy="19.5" r="1.3"/><circle cx="17" cy="19.5" r="1.3"/></svg>',
+  cesta: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9h18l-1.6 9a2 2 0 0 1-2 1.7H6.6a2 2 0 0 1-2-1.7Z"/><path d="M8.5 9 11 3.5"/><path d="M15.5 9 13 3.5"/></svg>',
   trofeo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v4.5a5 5 0 0 1-10 0Z"/><path d="M7 6H4.5v1A3.5 3.5 0 0 0 8 10.5"/><path d="M17 6h2.5v1A3.5 3.5 0 0 1 16 10.5"/><path d="M12 13.5V18"/><path d="M8.5 21h7"/></svg>',
 };
 
@@ -20688,6 +20697,1689 @@ document.getElementById('btn-delete-lecturas-item').addEventListener('click', as
 // duracion de la transicion CSS (320ms) con un pelin de margen para que
 
 // =====================================================================
+// APP "RECETAS": platos, ingredientes y la compra
+// =====================================================================
+//
+// Se navega como Finanzas y Gimnasio: un INICIO con las secciones como
+// filas y una vuelta atras. Cinco secciones (Recetas, La compra,
+// Ingredientes, Compras anteriores) mas la ficha de una receta, que es
+// una pantalla propia porque tiene foto y pasos y no cabe en un modal.
+//
+// LO QUE HAY QUE ENTENDER ANTES DE TOCAR NADA:
+//
+//  1. UN INGREDIENTE ES UNA FICHA, NO TEXTO. Vive en el catalogo
+//     (recetas_ingredientes) y lo comparten todas las recetas que lo
+//     usan. Es lo que hace posible que la compra sume "300 g + 200 g de
+//     pollo" en una linea, y lo que manana dejara colgarle un precio.
+//     Ver routes-local/recetasIngredientes.js.
+//  2. LA RECETA SE GUARDA CON SUS RACIONES BASE, nunca escalada.
+//     Escalar es algo que pides al mirarla ("esta es para 2, la quiero
+//     para 4") y se calcula al vuelo con una regla de tres.
+//  3. LA COMPRA SE DERIVA DE LAS RECETAS QUE LE METES. La ruta rehace
+//     sola las cantidades cuando anades, quitas o reescalas una receta;
+//     lo que pones a mano y lo que tachas no se toca nunca.
+// =====================================================================
+
+const RECETAS_SECCIONES = {
+  inicio: 'Recetas',
+  recetas: 'Mis recetas',
+  receta: 'Receta',
+  compra: 'La compra',
+  ingredientes: 'Ingredientes',
+  historial: 'Compras anteriores',
+};
+
+const RECETAS_DIFICULTADES = { facil: 'Fácil', media: 'Media', dificil: 'Difícil' };
+const RECETAS_TIPOS = {
+  desayuno: 'Desayuno',
+  entrante: 'Entrante',
+  principal: 'Principal',
+  guarnicion: 'Guarnición',
+  postre: 'Postre',
+  snack: 'Snack',
+  bebida: 'Bebida',
+};
+
+// El PASILLO del super. Existe para una sola cosa: agrupar la lista de
+// la compra por donde se coge cada cosa, en vez de por el orden en que
+// la fuiste llenando. No es una lista cerrada de la que no se pueda
+// salir -- "Otros" recoge lo que no encaje.
+const RECETAS_CATEGORIAS = [
+  'Fruta y verdura', 'Carnicería', 'Pescadería', 'Charcutería', 'Lácteos y huevos',
+  'Panadería', 'Despensa', 'Congelados', 'Bebidas', 'Limpieza y hogar', 'Otros',
+];
+
+// Cuanto tiempo es, escrito como se dice. Las horas solo aparecen al
+// pasar de 60 minutos: "1 h 20" se lee mejor que "80 min", pero "0 h 40"
+// se lee peor que "40 min". Mismo criterio que el reloj del entreno.
+function recetaFormatearTiempo(minutos) {
+  const n = Number(minutos);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 60) return `${n} min`;
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
+// Los numeros se escriben en español (coma decimal), igual que el dinero
+// de Finanzas. Y como mucho dos decimales: escalar por 4/3 saca colas
+// infinitas (66,66666666 g) que no dicen nada.
+const RECETA_NUM_FORMATTER = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 });
+
+function recetaFormatearCantidad(cantidad) {
+  if (cantidad === null || cantidad === undefined || cantidad === '') return '';
+  const n = Number(cantidad);
+  if (!Number.isFinite(n)) return '';
+  return RECETA_NUM_FORMATTER.format(n);
+}
+
+// "200 g de Pollo", ya escalado. La unidad puede no existir (2 huevos) y
+// la cantidad tampoco (sal al gusto): las tres combinaciones se leen
+// bien sin casos especiales repartidos por la pantalla.
+function recetaTextoDeCantidad(cantidad, unidad) {
+  const c = recetaFormatearCantidad(cantidad);
+  const u = unidad ? String(unidad) : '';
+  if (!c && !u) return '';
+  if (!c) return u;
+  return u ? `${c} ${u}` : c;
+}
+
+// La regla de tres. Se aisla en una funcion porque la usan la ficha (al
+// mirar la receta) y la ruta de la compra (al sumar): si cada una
+// hiciera su cuenta, podrian decir cantidades distintas del mismo plato.
+function recetaEscalar(cantidad, racionesBase, racionesQuiere) {
+  if (cantidad === null || cantidad === undefined) return null;
+  const base = Number(racionesBase) > 0 ? Number(racionesBase) : 1;
+  const quiere = Number(racionesQuiere) > 0 ? Number(racionesQuiere) : base;
+  return Math.round((Number(cantidad) * quiere / base) * 100) / 100;
+}
+
+// El numero que se escribe en un campo de cantidad, ya normalizado: la
+// tecla decimal del teclado español es una COMA, y Number(",5") es NaN.
+// Misma cura que gymNormalizarPeso, y por el mismo motivo.
+function recetaNormalizarNumero(texto) {
+  if (texto === null || texto === undefined) return null;
+  const t = String(texto).trim();
+  if (!t) return null;
+  // La ULTIMA coma, no todas: asi "1.234,5" tambien se lee bien.
+  const i = t.lastIndexOf(',');
+  const limpio = i === -1 ? t : `${t.slice(0, i).replace(/[.,]/g, '')}.${t.slice(i + 1)}`;
+  const n = Number(limpio);
+  return Number.isFinite(n) ? n : null;
+}
+
+// ---------------------------------------------------------------------
+// Estado de la App. Todo en memoria: se recarga al abrirla.
+// ---------------------------------------------------------------------
+let recetasCarpetas = [];
+let recetasCarpetaActual = null;   // null = raiz
+let recetasBusqueda = '';
+let recetasFiltroEtiqueta = '';
+let recetasIngredientes = [];
+let recetaAbierta = null;          // la receta de la ficha, entera
+let recetaRacionesVistas = null;   // para cuantas raciones se esta mirando
+let recetaCompra = null;           // la lista viva, ya serializada
+let recetasEtiquetasConocidas = [];
+
+// Borradores del modal de receta. Se trabaja sobre copias para que
+// Cancelar descarte de verdad, igual que el editor de temas.
+let recetaLineasBorrador = [];
+let recetaEtiquetasBorrador = [];
+let recetaFotoBorrador = null;
+
+// ---------------------------------------------------------------------
+// Navegacion entre secciones
+// ---------------------------------------------------------------------
+function switchRecetasPanel(panel) {
+  const enInicio = panel === 'inicio';
+  document.querySelectorAll('.recetas-panel').forEach((p) => {
+    p.classList.toggle('hidden', p.dataset.recetasPanel !== panel);
+  });
+  // El titulo de arriba dice donde estas: es lo que sustituye a la
+  // pestaña marcada de una barra.
+  document.getElementById('recetas-view-title').textContent =
+    panel === 'receta' && recetaAbierta ? recetaAbierta.name : (RECETAS_SECCIONES[panel] || 'Recetas');
+  document.getElementById('btn-recetas-back').classList.toggle('hidden', enInicio);
+  // Salir a Herramientas solo tiene sentido desde el inicio: desde
+  // dentro de una seccion, lo que uno quiere es volver A RECETAS.
+  document.getElementById('btn-close-recetas').classList.toggle('hidden', !enInicio);
+  if (enInicio) renderRecetasInicio();
+}
+
+document.getElementById('btn-recetas-back').addEventListener('click', () => {
+  // La ficha de una receta vuelve a la LISTA, no al inicio: se entro
+  // desde ahi, y volver dos niveles de golpe pierde la carpeta en la que
+  // estabas. Mismo criterio que los dias dentro de un bloque del
+  // Gimnasio.
+  if (recetaAbierta) {
+    recetaAbierta = null;
+    recetaRacionesVistas = null;
+    switchRecetasPanel('recetas');
+    renderRecetasLista();
+    return;
+  }
+  switchRecetasPanel('inicio');
+});
+
+async function renderRecetasInicio() {
+  const cont = document.getElementById('recetas-inicio-filas');
+
+  // allSettled y no all: que falle la compra no puede dejar el inicio en
+  // blanco, que es la unica puerta a las demas secciones.
+  const [recetas, compra, ingredientes, historial] = await Promise.allSettled([
+    api('/api/recetas'),
+    api('/api/recetas-compra/viva'),
+    api('/api/recetas-ingredientes'),
+    api('/api/recetas-compra/historial'),
+  ]);
+  const dato = (r) => (r.status === 'fulfilled' ? r.value : null);
+
+  const lista = dato(recetas) || [];
+  const laCompra = dato(compra);
+  const ings = dato(ingredientes) || [];
+  const compras = dato(historial) || [];
+
+  document.getElementById('recetas-inicio-total').textContent =
+    lista.length === 0 ? '—' : `${lista.length}`;
+  document.getElementById('recetas-inicio-sub').textContent =
+    lista.length === 0
+      ? 'Todavía no tienes ninguna receta'
+      : `${lista.length === 1 ? 'receta' : 'recetas'} · ${ings.length} ${ings.length === 1 ? 'ingrediente' : 'ingredientes'}`;
+
+  cont.innerHTML = '';
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  const fila = (o) => grupo.appendChild(filaDeLista({ ...o, flecha: true }));
+
+  // TODAS las secciones se pintan siempre, tengan datos o no. Un
+  // apartado vacio tiene que poder abrirse: es la unica forma de empezar
+  // a usarlo (lo aprendio Finanzas a base de secciones inalcanzables).
+  fila({
+    icono: 'cazuela',
+    titulo: 'Mis recetas',
+    sub: lista.length === 0 ? 'Apunta tu primer plato' : 'Carpetas, etiquetas y buscador',
+    importe: lista.length ? String(lista.length) : '',
+    alPulsar: () => { switchRecetasPanel('recetas'); renderRecetasLista(); },
+  });
+
+  const pendientes = laCompra ? laCompra.pendientes : 0;
+  fila({
+    icono: 'carrito',
+    titulo: 'La compra',
+    sub: !laCompra || laCompra.lineas.length === 0
+      ? 'Mete una receta y se llena sola'
+      : pendientes === 0
+        ? 'Todo tachado'
+        : `${pendientes} por comprar · ${laCompra.recetas.length} ${laCompra.recetas.length === 1 ? 'receta' : 'recetas'}`,
+    importe: pendientes ? String(pendientes) : '',
+    alPulsar: () => { switchRecetasPanel('compra'); renderRecetaCompra(); },
+  });
+
+  fila({
+    icono: 'cesta',
+    titulo: 'Ingredientes',
+    sub: ings.length === 0 ? 'Se van creando solos al escribir recetas' : 'Unidad habitual y en qué pasillo está cada cosa',
+    importe: ings.length ? String(ings.length) : '',
+    alPulsar: () => { switchRecetasPanel('ingredientes'); renderRecetaIngredientes(); },
+  });
+
+  fila({
+    icono: 'reloj',
+    titulo: 'Compras anteriores',
+    sub: compras.length === 0 ? 'Aquí se guardan al darle a «Compra hecha»' : `La última, ${recetaFechaCorta(compras[0].cerradaAt)}`,
+    importe: compras.length ? String(compras.length) : '',
+    alPulsar: () => { switchRecetasPanel('historial'); renderRecetaHistorial(); },
+  });
+
+  cont.appendChild(grupo);
+}
+
+// Fecha corta, con el formato del SISTEMA (Koku: "por si tienen mm/dd/aa
+// y no dd/mm/aa"). Mismo criterio que la linea de version.
+function recetaFechaCorta(iso) {
+  if (!iso) return '';
+  const d = new Date(String(iso).replace(' ', 'T') + (String(iso).includes('Z') ? '' : 'Z'));
+  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10);
+  try {
+    return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(d);
+  } catch {
+    return String(iso).slice(0, 10);
+  }
+}
+
+async function openRecetasView() {
+  prepararCamposDeRecetas();
+  closeExtensionsView();
+  document.getElementById('recetas-view').classList.remove('hidden');
+  setCurrentScreen('recetas');
+  // Se entra siempre por el inicio y no por donde se saliera la ultima
+  // vez: los paneles guardan su clase `hidden` entre aperturas, asi que
+  // sin esto la App se abriria en la ultima seccion y con la flecha de
+  // volver puesta.
+  recetaAbierta = null;
+  switchRecetasPanel('inicio');
+  await Promise.allSettled([loadRecetasCarpetas(), loadRecetasIngredientes(), loadRecetasEtiquetas()]);
+  await renderRecetasInicio();
+}
+
+function closeRecetasView() {
+  document.getElementById('recetas-view').classList.add('hidden');
+  openExtensionsView();
+}
+document.getElementById('btn-open-recetas').addEventListener('click', openRecetasView);
+document.getElementById('btn-close-recetas').addEventListener('click', closeRecetasView);
+
+// ---------------------------------------------------------------------
+// Cargas basicas
+// ---------------------------------------------------------------------
+async function loadRecetasCarpetas() {
+  try { recetasCarpetas = await api('/api/recetas-carpetas'); } catch { recetasCarpetas = []; }
+}
+
+async function loadRecetasIngredientes() {
+  try { recetasIngredientes = await api('/api/recetas-ingredientes'); } catch { recetasIngredientes = []; }
+}
+
+async function loadRecetasEtiquetas() {
+  try { recetasEtiquetasConocidas = await api('/api/recetas/etiquetas'); } catch { recetasEtiquetasConocidas = []; }
+}
+
+// ---------------------------------------------------------------------
+// EL EXPLORADOR: carpetas arriba, recetas debajo. Igual que Notas.
+// ---------------------------------------------------------------------
+function recetasSubcarpetasDe(parentId) {
+  return recetasCarpetas.filter((c) => (c.parentId ?? null) === (parentId ?? null));
+}
+
+function recetasRutaDe(carpetaId) {
+  const trozos = [];
+  let actual = carpetaId;
+  const vistos = new Set();
+  while (actual !== null && actual !== undefined && !vistos.has(actual)) {
+    vistos.add(actual);
+    const c = recetasCarpetas.find((x) => x.id === actual);
+    if (!c) break;
+    trozos.unshift(c.name);
+    actual = c.parentId;
+  }
+  return trozos;
+}
+
+async function renderRecetasLista() {
+  const cont = document.getElementById('recetas-lista');
+  cont.innerHTML = '';
+
+  const ruta = recetasRutaDe(recetasCarpetaActual);
+  document.getElementById('recetas-ruta').textContent = ruta.length ? ruta.join(' › ') : 'Todas';
+  document.getElementById('btn-recetas-subir-carpeta').classList.toggle('hidden', recetasCarpetaActual === null);
+
+  renderRecetasFiltroEtiquetas();
+
+  // El buscador filtra SOLO dentro de la carpeta donde estas, igual que
+  // el de Notas: buscar en toda la app desde dentro de una carpeta
+  // desorienta mas de lo que ayuda.
+  let recetas = [];
+  try {
+    const qs = new URLSearchParams();
+    qs.set('folderId', recetasCarpetaActual === null ? 'root' : String(recetasCarpetaActual));
+    if (recetasBusqueda) qs.set('q', recetasBusqueda);
+    if (recetasFiltroEtiqueta) qs.set('etiqueta', recetasFiltroEtiqueta);
+    recetas = await api(`/api/recetas?${qs.toString()}`);
+  } catch { recetas = []; }
+
+  const texto = recetasBusqueda.trim().toLowerCase();
+  const subcarpetas = recetasSubcarpetasDe(recetasCarpetaActual)
+    .filter((c) => !texto || c.name.toLowerCase().includes(texto));
+
+  if (subcarpetas.length === 0 && recetas.length === 0) {
+    const vacio = document.createElement('p');
+    vacio.className = 'hint';
+    vacio.textContent = recetasBusqueda || recetasFiltroEtiqueta
+      ? 'Aquí no hay nada que se llame así.'
+      : 'Esta carpeta está vacía. Crea tu primera receta abajo.';
+    cont.appendChild(vacio);
+    return;
+  }
+
+  // Las carpetas SIEMPRE primero, como grupo -- mismo criterio que Notas.
+  subcarpetas.forEach((c) => cont.appendChild(recetaFilaDeCarpeta(c)));
+  recetas.forEach((r) => cont.appendChild(recetaFilaDeReceta(r)));
+}
+
+function recetaFilaDeCarpeta(carpeta) {
+  const fila = document.createElement('div');
+  fila.className = 'gym-list-item receta-fila';
+  fila.innerHTML = `
+    <span class="receta-fila-icono" style="color:${escapeHtml(carpeta.color || '#5b8cff')}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    </span>
+    <span class="gym-list-item-name">${escapeHtml(carpeta.name)}</span>
+    <span class="finanzas-row-chevron">›</span>
+  `;
+  fila.addEventListener('click', () => {
+    recetasCarpetaActual = carpeta.id;
+    renderRecetasLista();
+  });
+
+  return wrapRowWithSwipeActions(fila, {
+    botones: [
+      ['Editar', 'secondary-btn', () => openRecetaCarpetaModal(carpeta)],
+      ['Duplicar', 'secondary-btn', () => duplicarCarpetaDeRecetas(carpeta)],
+      ['Eliminar', 'danger-btn', () => borrarCarpetaDeRecetas(carpeta)],
+    ],
+  });
+}
+
+function recetaFilaDeReceta(receta) {
+  const fila = document.createElement('div');
+  fila.className = 'gym-list-item receta-fila';
+
+  const foto = document.createElement('span');
+  foto.className = 'receta-fila-foto';
+  if (receta.foto) {
+    const img = document.createElement('img');
+    img.alt = '';
+    setAssetImageSrc(img, receta.foto);
+    foto.appendChild(img);
+  } else {
+    foto.classList.add('receta-fila-foto-vacia');
+    // El icono de la App en gris, no un hueco vacio. Va por innerHTML
+    // porque es una constante mia (ICONOS_DE_FILA), nunca un dato
+    // guardado -- misma regla que pintarIconoDeFila.
+    foto.innerHTML = ICONOS_DE_FILA.cazuela;
+  }
+  fila.appendChild(foto);
+
+  const main = document.createElement('span');
+  main.className = 'gym-list-item-name';
+  const nombre = document.createElement('span');
+  nombre.className = 'receta-fila-nombre';
+  nombre.textContent = receta.name;
+  main.appendChild(nombre);
+
+  const detalles = [];
+  if (receta.tiempoTotal) detalles.push(recetaFormatearTiempo(receta.tiempoTotal));
+  detalles.push(`${recetaFormatearCantidad(receta.raciones)} ${Number(receta.raciones) === 1 ? 'ración' : 'raciones'}`);
+  if (receta.numIngredientes) detalles.push(`${receta.numIngredientes} ${receta.numIngredientes === 1 ? 'ingrediente' : 'ingredientes'}`);
+  const sub = document.createElement('span');
+  sub.className = 'gym-list-item-muted receta-fila-sub';
+  sub.textContent = detalles.join(' · ');
+  main.appendChild(sub);
+  fila.appendChild(main);
+
+  const chevron = document.createElement('span');
+  chevron.className = 'finanzas-row-chevron';
+  chevron.textContent = '›';
+  fila.appendChild(chevron);
+
+  fila.addEventListener('click', () => abrirFichaDeReceta(receta.id));
+
+  return wrapRowWithSwipeActions(fila, {
+    botones: [
+      ['Editar', 'secondary-btn', () => abrirModalDeReceta(receta.id)],
+      ['Duplicar', 'secondary-btn', () => duplicarUnaReceta(receta)],
+      ['Eliminar', 'danger-btn', () => borrarUnaReceta(receta)],
+    ],
+  });
+}
+
+function renderRecetasFiltroEtiquetas() {
+  const cont = document.getElementById('recetas-filtro-etiquetas');
+  cont.innerHTML = '';
+  if (recetasEtiquetasConocidas.length === 0) return;
+  const chip = (texto, valor) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `receta-etiqueta-chip${recetasFiltroEtiqueta === valor ? ' activa' : ''}`;
+    b.textContent = texto;
+    b.addEventListener('click', () => {
+      // Volver a tocar la que ya esta puesta la quita: no hace falta un
+      // boton "quitar filtro" aparte.
+      recetasFiltroEtiqueta = recetasFiltroEtiqueta === valor ? '' : valor;
+      renderRecetasLista();
+    });
+    cont.appendChild(b);
+  };
+  recetasEtiquetasConocidas.forEach((e) => chip(e, e));
+}
+
+document.getElementById('btn-recetas-subir-carpeta').addEventListener('click', () => {
+  const actual = recetasCarpetas.find((c) => c.id === recetasCarpetaActual);
+  recetasCarpetaActual = actual ? (actual.parentId ?? null) : null;
+  renderRecetasLista();
+});
+
+document.getElementById('recetas-buscador').addEventListener('input', (e) => {
+  recetasBusqueda = e.target.value;
+  renderRecetasLista();
+});
+
+document.getElementById('btn-nueva-receta').addEventListener('click', () => abrirModalDeReceta(null));
+document.getElementById('btn-nueva-carpeta-receta').addEventListener('click', () => openRecetaCarpetaModal(null));
+
+// ---------------------------------------------------------------------
+// LA FICHA: la pantalla de cocinar
+// ---------------------------------------------------------------------
+async function abrirFichaDeReceta(id) {
+  try {
+    recetaAbierta = await api(`/api/recetas/${id}`);
+  } catch {
+    mostrarAvisoFlotante('No se pudo abrir la receta.');
+    return;
+  }
+  recetaRacionesVistas = recetaAbierta.raciones;
+  switchRecetasPanel('receta');
+  renderRecetaFicha();
+}
+
+function renderRecetaFicha() {
+  const cont = document.getElementById('receta-ficha');
+  cont.innerHTML = '';
+  const r = recetaAbierta;
+  if (!r) return;
+
+  if (r.foto) {
+    const marco = document.createElement('div');
+    marco.className = 'receta-ficha-foto';
+    const img = document.createElement('img');
+    img.alt = '';
+    setAssetImageSrc(img, r.foto);
+    marco.appendChild(img);
+    cont.appendChild(marco);
+  }
+
+  // Los datos de cabecera, como chips: caben en una linea o dos y se
+  // leen de un vistazo mientras cocinas.
+  const chips = document.createElement('div');
+  chips.className = 'receta-ficha-chips';
+  const chip = (texto) => {
+    if (!texto) return;
+    const s = document.createElement('span');
+    s.className = 'receta-chip';
+    s.textContent = texto;
+    chips.appendChild(s);
+  };
+  if (r.tiempoPrep) chip(`Preparar: ${recetaFormatearTiempo(r.tiempoPrep)}`);
+  if (r.tiempoCoccion) chip(`Cocción: ${recetaFormatearTiempo(r.tiempoCoccion)}`);
+  if (r.tiempoTotal && r.tiempoPrep && r.tiempoCoccion) chip(`En total: ${recetaFormatearTiempo(r.tiempoTotal)}`);
+  if (r.dificultad) chip(RECETAS_DIFICULTADES[r.dificultad] || '');
+  if (r.tipo) chip(RECETAS_TIPOS[r.tipo] || '');
+  r.etiquetas.forEach((e) => chip(e));
+  if (chips.children.length) cont.appendChild(chips);
+
+  // --- El escalador de raciones -------------------------------------
+  //
+  // Lo pidio Koku tal cual: "la receta guardada es para 2, tú le puedes
+  // decir que la quieres para 4 y te pone directamente las cantidades;
+  // si dijera 1, que me divida a la mitad". Lo que se guarda sigue
+  // siendo la receta para 2 -- esto solo cambia lo que se ENSEÑA.
+  const escalador = document.createElement('div');
+  escalador.className = 'receta-escalador';
+  const menos = document.createElement('button');
+  menos.type = 'button';
+  menos.className = 'receta-escalador-btn';
+  menos.textContent = '−';
+  const campo = document.createElement('input');
+  campo.type = 'text';
+  campo.inputMode = 'decimal';
+  campo.className = 'receta-escalador-campo';
+  campo.value = recetaFormatearCantidad(recetaRacionesVistas);
+  const mas = document.createElement('button');
+  mas.type = 'button';
+  mas.className = 'receta-escalador-btn';
+  mas.textContent = '+';
+  const etiqueta = document.createElement('span');
+  etiqueta.className = 'receta-escalador-label';
+
+  function ponerRaciones(n) {
+    // Nunca cero ni negativo: son el divisor de la regla de tres.
+    const limpio = Math.max(0.25, Math.min(999, n));
+    recetaRacionesVistas = Math.round(limpio * 100) / 100;
+    renderRecetaFicha();
+  }
+  menos.addEventListener('click', () => ponerRaciones((Number(recetaRacionesVistas) || 1) - 1));
+  mas.addEventListener('click', () => ponerRaciones((Number(recetaRacionesVistas) || 1) + 1));
+  campo.addEventListener('change', () => {
+    const n = recetaNormalizarNumero(campo.value);
+    if (n === null || n <= 0) { campo.value = recetaFormatearCantidad(recetaRacionesVistas); return; }
+    ponerRaciones(n);
+  });
+  etiqueta.textContent = Number(recetaRacionesVistas) === 1 ? 'ración' : 'raciones';
+  escalador.appendChild(menos);
+  escalador.appendChild(campo);
+  escalador.appendChild(etiqueta);
+  escalador.appendChild(mas);
+  cont.appendChild(escalador);
+
+  // Solo cuando de verdad estas mirando otra cantidad: decir "la receta
+  // es para 2" estando en 2 es ruido.
+  if (Number(recetaRacionesVistas) !== Number(r.raciones)) {
+    const aviso = document.createElement('button');
+    aviso.type = 'button';
+    aviso.className = 'receta-escalador-reset';
+    aviso.textContent = `Escalada · la receta está apuntada para ${recetaFormatearCantidad(r.raciones)}. Volver`;
+    aviso.addEventListener('click', () => ponerRaciones(Number(r.raciones)));
+    cont.appendChild(aviso);
+  }
+
+  // --- Ingredientes --------------------------------------------------
+  const h3 = document.createElement('h3');
+  h3.textContent = 'Ingredientes';
+  cont.appendChild(h3);
+
+  if (r.ingredientes.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = 'Esta receta todavía no tiene ingredientes. Edítala para añadirlos.';
+    cont.appendChild(p);
+  } else {
+    const lista = document.createElement('div');
+    lista.className = 'receta-ficha-ingredientes';
+    r.ingredientes.forEach((l) => {
+      const fila = document.createElement('div');
+      fila.className = 'receta-ficha-ingrediente';
+      const cant = document.createElement('span');
+      cant.className = 'receta-ficha-cantidad';
+      cant.textContent = recetaTextoDeCantidad(recetaEscalar(l.cantidad, r.raciones, recetaRacionesVistas), l.unidad);
+      const nom = document.createElement('span');
+      nom.className = 'receta-ficha-nombre';
+      nom.textContent = l.nombre + (l.nota ? ` · ${l.nota}` : '') + (l.opcional ? ' · opcional' : '');
+      fila.appendChild(cant);
+      fila.appendChild(nom);
+      lista.appendChild(fila);
+    });
+    cont.appendChild(lista);
+  }
+
+  const aLaCompra = document.createElement('button');
+  aLaCompra.type = 'button';
+  aLaCompra.className = 'primary-btn receta-ficha-compra';
+  aLaCompra.textContent = 'Añadir a la compra';
+  aLaCompra.addEventListener('click', anadirRecetaAbiertaALaCompra);
+  cont.appendChild(aLaCompra);
+
+  // --- Pasos ---------------------------------------------------------
+  if (r.pasos) {
+    const h = document.createElement('h3');
+    h.textContent = 'Cómo se hace';
+    cont.appendChild(h);
+    const pasos = document.createElement('div');
+    pasos.className = 'receta-ficha-pasos';
+    // Se SANEA otra vez al pintar, no solo al guardar. La regla buena es
+    // sanear donde se USA el dato: importar una copia de seguridad
+    // sustituye el .sqlite entero, asi que sus filas nunca pasaron por la
+    // ruta que sanea. Y va antes de tocar los src, por lo mismo que en
+    // las notas.
+    pasos.innerHTML = prepareAssetHtmlForDom(r.pasos);
+    hydrateAssetImages(pasos);
+    cont.appendChild(pasos);
+  }
+
+  if (r.notas) {
+    const h = document.createElement('h3');
+    h.textContent = 'Notas';
+    cont.appendChild(h);
+    const p = document.createElement('p');
+    p.className = 'receta-ficha-notas';
+    p.textContent = r.notas;
+    cont.appendChild(p);
+  }
+
+  const acciones = document.createElement('div');
+  acciones.className = 'recetas-acciones-pie';
+  const editar = document.createElement('button');
+  editar.type = 'button';
+  editar.className = 'secondary-btn';
+  editar.textContent = 'Editar receta';
+  editar.addEventListener('click', () => abrirModalDeReceta(r.id));
+  acciones.appendChild(editar);
+  cont.appendChild(acciones);
+}
+
+async function anadirRecetaAbiertaALaCompra() {
+  if (!recetaAbierta) return;
+  try {
+    recetaCompra = await api('/api/recetas-compra/recetas', {
+      method: 'POST',
+      body: JSON.stringify({ recetaId: recetaAbierta.id, raciones: recetaRacionesVistas }),
+    });
+    const cuantas = recetaFormatearCantidad(recetaRacionesVistas);
+    mostrarAvisoFlotante(`«${recetaAbierta.name}» para ${cuantas} en la compra.`);
+  } catch (err) {
+    mostrarAvisoFlotante(`No se pudo añadir: ${err.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------
+// MODAL DE RECETA
+// ---------------------------------------------------------------------
+// Los campos propios (desplegables, color) se crean UNA vez, y no al
+// cargar el script: createColorField vive en settings.js, que se carga
+// DESPUES de app.js. Mismo patron que setupFinanzasIconColorFields.
+let recetaCarpetaField = null;
+let recetaDificultadField = null;
+let recetaTipoField = null;
+let recetaIngredienteCategoriaField = null;
+let recetaCarpetaColorField = null;
+let recetaCarpetaColor = '#5b8cff';
+
+function prepararCamposDeRecetas() {
+  if (recetaDificultadField) return;
+
+  recetaDificultadField = createSelectField({
+    options: [{ value: '', label: 'Sin decir' }, ...Object.entries(RECETAS_DIFICULTADES).map(([value, label]) => ({ value, label }))],
+    initialValue: '',
+  });
+  document.getElementById('receta-dificultad-field').appendChild(recetaDificultadField.element);
+
+  recetaTipoField = createSelectField({
+    options: [{ value: '', label: 'Sin decir' }, ...Object.entries(RECETAS_TIPOS).map(([value, label]) => ({ value, label }))],
+    initialValue: '',
+  });
+  document.getElementById('receta-tipo-field').appendChild(recetaTipoField.element);
+
+  recetaCarpetaField = createSelectField({ options: [{ value: '', label: 'Sin carpeta' }], initialValue: '', searchable: true });
+  document.getElementById('receta-carpeta-field').appendChild(recetaCarpetaField.element);
+
+  recetaIngredienteCategoriaField = createSelectField({
+    options: [{ value: '', label: 'Sin decir' }, ...RECETAS_CATEGORIAS.map((c) => ({ value: c, label: c }))],
+    initialValue: '',
+  });
+  document.getElementById('receta-ingrediente-categoria-field').appendChild(recetaIngredienteCategoriaField.element);
+
+  recetaCarpetaColorField = createColorField({
+    initialValue: recetaCarpetaColor,
+    onChange: (v) => { recetaCarpetaColor = v; },
+  });
+  document.getElementById('receta-carpeta-color-field').appendChild(recetaCarpetaColorField.element);
+}
+
+// La ruta completa de cada carpeta ("Vegana › Cenas"), no solo su
+// nombre: con carpetas anidadas, dos "Cenas" en sitios distintos serian
+// indistinguibles en el desplegable.
+function opcionesDeCarpetaDeRecetas() {
+  return [
+    { value: '', label: 'Sin carpeta' },
+    ...recetasCarpetas.map((c) => ({ value: String(c.id), label: recetasRutaDe(c.id).join(' › ') })),
+  ];
+}
+
+async function abrirModalDeReceta(id) {
+  prepararCamposDeRecetas();
+  await loadRecetasCarpetas();
+  recetaCarpetaField.setOptions(opcionesDeCarpetaDeRecetas());
+
+  let receta = null;
+  if (id) {
+    try { receta = await api(`/api/recetas/${id}`); } catch { receta = null; }
+    if (!receta) { mostrarAvisoFlotante('Esa receta ya no existe.'); return; }
+  }
+
+  document.getElementById('receta-modal-title').textContent = receta ? 'Editar receta' : 'Nueva receta';
+  document.getElementById('receta-id').value = receta ? receta.id : '';
+  document.getElementById('receta-nombre').value = receta ? receta.name : '';
+  document.getElementById('receta-raciones').value = receta ? recetaFormatearCantidad(receta.raciones) : '2';
+  document.getElementById('receta-tiempo-prep').value = receta && receta.tiempoPrep ? receta.tiempoPrep : '';
+  document.getElementById('receta-tiempo-coccion').value = receta && receta.tiempoCoccion ? receta.tiempoCoccion : '';
+  document.getElementById('receta-notas').value = receta ? receta.notas || '' : '';
+  recetaDificultadField.setValue(receta && receta.dificultad ? receta.dificultad : '');
+  recetaTipoField.setValue(receta && receta.tipo ? receta.tipo : '');
+  // Una receta nueva nace en la carpeta en la que estas: es donde la
+  // esperas, y si no, habria que moverla a mano cada vez.
+  recetaCarpetaField.setValue(receta
+    ? (receta.folderId ? String(receta.folderId) : '')
+    : (recetasCarpetaActual ? String(recetasCarpetaActual) : ''));
+
+  recetaFotoBorrador = receta ? receta.foto : null;
+  recetaEtiquetasBorrador = receta ? [...receta.etiquetas] : [];
+  recetaLineasBorrador = receta
+    ? receta.ingredientes.map((l) => ({
+        ingredienteId: l.ingredienteId,
+        nombre: l.nombre,
+        cantidad: l.cantidad,
+        unidad: l.unidad,
+        nota: l.nota,
+        opcional: l.opcional,
+      }))
+    : [];
+
+  const editor = document.getElementById('receta-pasos');
+  editor.innerHTML = receta && receta.pasos ? prepareAssetHtmlForDom(receta.pasos) : '';
+  hydrateAssetImages(editor);
+
+  document.getElementById('btn-delete-receta').classList.toggle('hidden', !receta);
+  renderRecetaFotoPreview();
+  renderRecetaEtiquetas();
+  renderRecetaLineas();
+  document.getElementById('receta-modal').classList.remove('hidden');
+}
+
+function cerrarModalDeReceta() {
+  document.getElementById('receta-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-receta').addEventListener('click', cerrarModalDeReceta);
+document.getElementById('btn-cancel-receta').addEventListener('click', cerrarModalDeReceta);
+
+// --- La foto ----------------------------------------------------------
+function renderRecetaFotoPreview() {
+  const cont = document.getElementById('receta-foto-preview');
+  cont.innerHTML = '';
+  document.getElementById('btn-receta-foto-quitar').classList.toggle('hidden', !recetaFotoBorrador);
+  if (!recetaFotoBorrador) {
+    cont.classList.add('receta-foto-vacia');
+    cont.textContent = 'Sin foto';
+    return;
+  }
+  cont.classList.remove('receta-foto-vacia');
+  const img = document.createElement('img');
+  img.alt = '';
+  setAssetImageSrc(img, recetaFotoBorrador);
+  cont.appendChild(img);
+}
+
+document.getElementById('btn-receta-foto').addEventListener('click', () => {
+  document.getElementById('receta-foto-input').click();
+});
+document.getElementById('receta-foto-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const btn = document.getElementById('btn-receta-foto');
+  const antes = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Subiendo…';
+  try {
+    // Se sube al MISMO almacen que las imagenes de una nota: los bytes
+    // van a IndexedDB y aqui solo se guarda la ruta corta. Un plato con
+    // foto en base64 dentro de la base la hincharia y haria lento cada
+    // volcado, exactamente igual que pasaba con las notas.
+    recetaFotoBorrador = await uploadNoteImage(file);
+    renderRecetaFotoPreview();
+  } catch (err) {
+    mostrarAvisoFlotante(`No se pudo subir la foto: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = antes;
+  }
+});
+document.getElementById('btn-receta-foto-quitar').addEventListener('click', () => {
+  recetaFotoBorrador = null;
+  renderRecetaFotoPreview();
+});
+
+// --- Etiquetas --------------------------------------------------------
+function renderRecetaEtiquetas() {
+  const cont = document.getElementById('receta-etiquetas-field');
+  cont.innerHTML = `
+    <div class="lecturas-genre-chips" id="receta-etiquetas-chips"></div>
+    <div class="lecturas-genre-input-row">
+      <input type="text" id="receta-etiqueta-input" placeholder="Escribe una etiqueta y pulsa Intro" />
+      <button type="button" id="btn-receta-anadir-etiqueta" class="secondary-btn">+</button>
+    </div>
+    <div class="lecturas-genre-suggestions-row" id="receta-etiquetas-sugerencias"></div>
+  `;
+
+  const chips = document.getElementById('receta-etiquetas-chips');
+  recetaEtiquetasBorrador.forEach((e, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'lecturas-genre-chip';
+    chip.textContent = e;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.textContent = '✕';
+    x.addEventListener('click', () => {
+      recetaEtiquetasBorrador.splice(i, 1);
+      renderRecetaEtiquetas();
+    });
+    chip.appendChild(x);
+    chips.appendChild(chip);
+  });
+
+  const sugerencias = document.getElementById('receta-etiquetas-sugerencias');
+  const puestas = new Set(recetaEtiquetasBorrador.map((e) => e.toLowerCase()));
+  recetasEtiquetasConocidas.filter((e) => !puestas.has(e.toLowerCase())).forEach((e) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'lecturas-genre-suggestion-chip';
+    b.textContent = `+ ${e}`;
+    b.addEventListener('click', () => {
+      recetaEtiquetasBorrador.push(e);
+      renderRecetaEtiquetas();
+    });
+    sugerencias.appendChild(b);
+  });
+
+  const input = document.getElementById('receta-etiqueta-input');
+  const anadir = () => {
+    const v = input.value.trim();
+    if (!v) return;
+    if (!recetaEtiquetasBorrador.some((e) => e.toLowerCase() === v.toLowerCase())) {
+      recetaEtiquetasBorrador.push(v);
+    }
+    input.value = '';
+    renderRecetaEtiquetas();
+  };
+  input.addEventListener('keydown', (e) => {
+    // Intro dentro de un <form> lo ENVIARIA: aqui solo anade la
+    // etiqueta, que es lo que espera quien la esta escribiendo.
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); anadir(); }
+  });
+  document.getElementById('btn-receta-anadir-etiqueta').addEventListener('click', anadir);
+}
+
+// --- Las lineas de ingredientes ---------------------------------------
+function renderRecetaLineas() {
+  const cont = document.getElementById('receta-lineas');
+  cont.innerHTML = '';
+
+  if (recetaLineasBorrador.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = 'Sin ingredientes todavía.';
+    cont.appendChild(p);
+  }
+
+  recetaLineasBorrador.forEach((linea, i) => {
+    const fila = document.createElement('div');
+    fila.className = 'receta-linea';
+
+    // El ingrediente se elige con un buscador propio (ver
+    // abrirSelectorDeIngrediente): con muchos hace falta buscar, y
+    // ademas tiene que poder CREAR el que escribas.
+    const elegir = document.createElement('button');
+    elegir.type = 'button';
+    elegir.className = 'receta-linea-ingrediente';
+    elegir.textContent = linea.nombre || 'Elegir ingrediente';
+    elegir.addEventListener('click', () => {
+      abrirSelectorDeIngrediente((ing) => {
+        linea.ingredienteId = ing.id;
+        linea.nombre = ing.name;
+        // La unidad habitual del ingrediente SOLO rellena el hueco si
+        // esta vacio: si ya escribiste "dientes", cambiar de ingrediente
+        // no puede borrartelo.
+        if (!linea.unidad && ing.unidad) linea.unidad = ing.unidad;
+        renderRecetaLineas();
+      });
+    });
+    fila.appendChild(elegir);
+
+    const campos = document.createElement('div');
+    campos.className = 'receta-linea-campos';
+
+    const cant = document.createElement('input');
+    cant.type = 'text';
+    cant.inputMode = 'decimal';
+    cant.className = 'receta-campo-corto';
+    cant.placeholder = 'Cant.';
+    cant.value = recetaFormatearCantidad(linea.cantidad);
+    cant.addEventListener('input', () => { linea.cantidad = recetaNormalizarNumero(cant.value); });
+    campos.appendChild(cant);
+
+    const uni = document.createElement('input');
+    uni.type = 'text';
+    uni.className = 'receta-campo-corto';
+    uni.placeholder = 'Unidad';
+    uni.maxLength = 16;
+    uni.value = linea.unidad || '';
+    uni.addEventListener('input', () => { linea.unidad = uni.value; });
+    campos.appendChild(uni);
+
+    const nota = document.createElement('input');
+    nota.type = 'text';
+    nota.className = 'receta-campo-nota';
+    nota.placeholder = 'picado, en rodajas…';
+    nota.maxLength = 120;
+    nota.value = linea.nota || '';
+    nota.addEventListener('input', () => { linea.nota = nota.value; });
+    campos.appendChild(nota);
+
+    const quitar = document.createElement('button');
+    quitar.type = 'button';
+    quitar.className = 'receta-linea-quitar';
+    quitar.setAttribute('aria-label', 'Quitar este ingrediente');
+    quitar.textContent = '✕';
+    quitar.addEventListener('click', () => {
+      recetaLineasBorrador.splice(i, 1);
+      renderRecetaLineas();
+    });
+    campos.appendChild(quitar);
+
+    fila.appendChild(campos);
+
+    // "Opcional" con la casilla propia de la app (.styled-checkbox), no
+    // la nativa ni el interruptor de pastilla: esto es "marca uno de una
+    // lista", no un ajuste de encender/apagar.
+    const opc = document.createElement('label');
+    opc.className = 'receta-linea-opcional';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.className = 'styled-checkbox';
+    chk.checked = !!linea.opcional;
+    chk.addEventListener('change', () => { linea.opcional = chk.checked; });
+    opc.appendChild(chk);
+    opc.appendChild(document.createTextNode(' Opcional'));
+    fila.appendChild(opc);
+
+    cont.appendChild(fila);
+  });
+}
+
+document.getElementById('btn-receta-anadir-linea').addEventListener('click', () => {
+  // Se abre el selector DIRECTAMENTE en vez de crear una fila vacia: una
+  // linea sin ingrediente no sirve de nada y habria que acordarse de
+  // limpiarla al guardar.
+  abrirSelectorDeIngrediente((ing) => {
+    recetaLineasBorrador.push({
+      ingredienteId: ing.id,
+      nombre: ing.name,
+      cantidad: null,
+      unidad: ing.unidad || '',
+      nota: '',
+      opcional: false,
+    });
+    renderRecetaLineas();
+  });
+});
+
+// --- El selector de ingrediente ---------------------------------------
+let recetaSelectorCallback = null;
+
+function abrirSelectorDeIngrediente(alElegir) {
+  recetaSelectorCallback = alElegir;
+  const buscador = document.getElementById('receta-ingrediente-picker-buscador');
+  // Cada apertura empieza con la lista entera: un filtro heredado de la
+  // vez anterior parece que faltan ingredientes.
+  buscador.value = '';
+  renderSelectorDeIngredientes();
+  document.getElementById('receta-ingrediente-picker-modal').classList.remove('hidden');
+}
+
+function cerrarSelectorDeIngrediente() {
+  document.getElementById('receta-ingrediente-picker-modal').classList.add('hidden');
+  recetaSelectorCallback = null;
+}
+document.getElementById('btn-close-receta-ingrediente-picker').addEventListener('click', cerrarSelectorDeIngrediente);
+
+function renderSelectorDeIngredientes() {
+  const cont = document.getElementById('receta-ingrediente-picker-lista');
+  const texto = document.getElementById('receta-ingrediente-picker-buscador').value.trim();
+  cont.innerHTML = '';
+
+  const t = texto.toLowerCase();
+  const encontrados = recetasIngredientes.filter((i) =>
+    !t || i.name.toLowerCase().includes(t) || (i.categoria || '').toLowerCase().includes(t));
+
+  // "Crear «xxx»" solo si de verdad no existe ya con ese nombre exacto:
+  // ofrecer crear algo que ya tienes es la forma mas facil de acabar con
+  // dos fichas del mismo ingrediente, que es justo lo que el catalogo
+  // viene a evitar.
+  const exacto = recetasIngredientes.some((i) => i.name.trim().toLowerCase() === t);
+  if (texto && !exacto) {
+    const crear = document.createElement('button');
+    crear.type = 'button';
+    crear.className = 'receta-picker-item receta-picker-crear';
+    crear.textContent = `+ Crear «${texto}»`;
+    crear.addEventListener('click', async () => {
+      try {
+        const ing = await api('/api/recetas-ingredientes/resolve', {
+          method: 'POST',
+          body: JSON.stringify({ name: texto }),
+        });
+        await loadRecetasIngredientes();
+        const cb = recetaSelectorCallback;
+        cerrarSelectorDeIngrediente();
+        if (cb) cb(ing);
+      } catch (err) {
+        mostrarAvisoFlotante(`No se pudo crear: ${err.message}`);
+      }
+    });
+    cont.appendChild(crear);
+  }
+
+  encontrados.forEach((ing) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'receta-picker-item';
+    const nombre = document.createElement('span');
+    nombre.textContent = ing.name;
+    b.appendChild(nombre);
+    const detalle = [ing.unidad, ing.categoria].filter(Boolean).join(' · ');
+    if (detalle) {
+      const d = document.createElement('span');
+      d.className = 'receta-picker-detalle';
+      d.textContent = detalle;
+      b.appendChild(d);
+    }
+    b.addEventListener('click', () => {
+      const cb = recetaSelectorCallback;
+      cerrarSelectorDeIngrediente();
+      if (cb) cb(ing);
+    });
+    cont.appendChild(b);
+  });
+
+  if (cont.children.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = 'Escribe el nombre para crear tu primer ingrediente.';
+    cont.appendChild(p);
+  }
+}
+document.getElementById('receta-ingrediente-picker-buscador').addEventListener('input', renderSelectorDeIngredientes);
+document.getElementById('receta-ingrediente-picker-buscador').addEventListener('keydown', (e) => {
+  // Este buscador vive dentro de un modal que NO es un <form>, pero
+  // Intro aqui tiene que elegir lo primero de la lista, no recargar.
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const primero = document.querySelector('#receta-ingrediente-picker-lista .receta-picker-item');
+  if (primero) primero.click();
+});
+
+// --- Los pasos --------------------------------------------------------
+// Barra corta a proposito: negrita, cursiva, las dos listas y una foto.
+// document.execCommand esta obsoleto segun MDN pero sigue funcionando en
+// Chrome/Edge/Safari, y es lo que ya usa el editor de notas -- escribir a
+// mano la logica de negrita y listas sobre el DOM no compensa.
+document.querySelectorAll('[data-receta-cmd]').forEach((btn) => {
+  btn.addEventListener('mousedown', (e) => {
+    // mousedown y no click: al hacer click el editor ya ha perdido el
+    // foco y la orden se aplicaria sobre nada.
+    e.preventDefault();
+    document.execCommand(btn.dataset.recetaCmd, false, null);
+  });
+});
+
+document.getElementById('btn-receta-paso-imagen').addEventListener('click', () => {
+  document.getElementById('receta-paso-imagen-input').click();
+});
+document.getElementById('receta-paso-imagen-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const url = await uploadNoteImage(file);
+    const editor = document.getElementById('receta-pasos');
+    editor.focus();
+    document.execCommand('insertHTML', false, `<img src="${url}">`);
+  } catch (err) {
+    mostrarAvisoFlotante(`No se pudo subir la foto: ${err.message}`);
+  }
+});
+
+// --- Guardar ----------------------------------------------------------
+document.getElementById('receta-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('receta-id').value;
+  const editor = document.getElementById('receta-pasos');
+
+  const cuerpo = {
+    name: document.getElementById('receta-nombre').value.trim(),
+    folderId: recetaCarpetaField.getValue() || null,
+    foto: recetaFotoBorrador,
+    raciones: recetaNormalizarNumero(document.getElementById('receta-raciones').value) ?? 2,
+    tiempoPrep: recetaNormalizarNumero(document.getElementById('receta-tiempo-prep').value),
+    tiempoCoccion: recetaNormalizarNumero(document.getElementById('receta-tiempo-coccion').value),
+    dificultad: recetaDificultadField.getValue() || null,
+    tipo: recetaTipoField.getValue() || null,
+    etiquetas: recetaEtiquetasBorrador,
+    // Las rutas originales, no las URL blob: -- si se guardara el blob,
+    // el saneador lo rechazaria y ademas no valdria nada en la proxima
+    // sesion. Mismo cuidado que al guardar una nota.
+    pasos: recetaPasosVacios(editor) ? null : serializeAssetImages(editor),
+    notas: document.getElementById('receta-notas').value.trim() || null,
+    ingredientes: recetaLineasBorrador.filter((l) => l.ingredienteId),
+  };
+
+  try {
+    if (id) {
+      await api(`/api/recetas/${id}`, { method: 'PUT', body: JSON.stringify(cuerpo) });
+    } else {
+      await api('/api/recetas', { method: 'POST', body: JSON.stringify(cuerpo) });
+    }
+  } catch (err) {
+    mostrarAvisoFlotante(`No se pudo guardar: ${err.message}`);
+    return;
+  }
+
+  cerrarModalDeReceta();
+  await loadRecetasEtiquetas();
+  // Si venias de la ficha, se recarga para que se vea lo que acabas de
+  // cambiar sin tener que salir y volver a entrar.
+  if (recetaAbierta && String(recetaAbierta.id) === String(id)) {
+    await abrirFichaDeReceta(id);
+  } else {
+    await renderRecetasLista();
+  }
+});
+
+// "¿Esta vacio el editor?" no es lo mismo que "¿tiene texto?": unos
+// pasos que sean SOLO una foto no tienen texto, y guardarlos como vacios
+// perderia la foto. Es exactamente el fallo que ya mordio una vez en las
+// notas.
+function recetaPasosVacios(editor) {
+  return editor.textContent.trim() === '' && !editor.querySelector('img');
+}
+
+document.getElementById('btn-delete-receta').addEventListener('click', async () => {
+  const id = document.getElementById('receta-id').value;
+  if (!id) return;
+  const nombre = document.getElementById('receta-nombre').value.trim();
+  const ok = await showAppConfirm(`¿Eliminar «${nombre}»? También se borrará su foto.`, { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  try { await api(`/api/recetas/${id}`, { method: 'DELETE' }); } catch (err) {
+    mostrarAvisoFlotante(`No se pudo eliminar: ${err.message}`);
+    return;
+  }
+  cerrarModalDeReceta();
+  recetaAbierta = null;
+  switchRecetasPanel('recetas');
+  await renderRecetasLista();
+});
+
+async function duplicarUnaReceta(receta) {
+  try {
+    await api(`/api/recetas/${receta.id}/duplicate`, { method: 'POST' });
+    await renderRecetasLista();
+  } catch (err) {
+    mostrarAvisoFlotante(`No se pudo duplicar: ${err.message}`);
+  }
+}
+
+async function borrarUnaReceta(receta) {
+  const ok = await showAppConfirm(`¿Eliminar «${receta.name}»? También se borrará su foto.`, { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  try { await api(`/api/recetas/${receta.id}`, { method: 'DELETE' }); } catch (err) {
+    mostrarAvisoFlotante(`No se pudo eliminar: ${err.message}`);
+    return;
+  }
+  await renderRecetasLista();
+}
+
+// ---------------------------------------------------------------------
+// CARPETAS
+// ---------------------------------------------------------------------
+function openRecetaCarpetaModal(carpeta) {
+  prepararCamposDeRecetas();
+  document.getElementById('receta-carpeta-modal-title').textContent = carpeta ? 'Editar carpeta' : 'Nueva carpeta';
+  document.getElementById('receta-carpeta-id').value = carpeta ? carpeta.id : '';
+  document.getElementById('receta-carpeta-nombre').value = carpeta ? carpeta.name : '';
+  recetaCarpetaColor = carpeta ? carpeta.color : '#5b8cff';
+  recetaCarpetaColorField.setValue(recetaCarpetaColor);
+  document.getElementById('receta-carpeta-modal').classList.remove('hidden');
+}
+
+function cerrarRecetaCarpetaModal() {
+  document.getElementById('receta-carpeta-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-receta-carpeta').addEventListener('click', cerrarRecetaCarpetaModal);
+document.getElementById('btn-cancel-receta-carpeta').addEventListener('click', cerrarRecetaCarpetaModal);
+
+document.getElementById('receta-carpeta-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('receta-carpeta-id').value;
+  const cuerpo = {
+    name: document.getElementById('receta-carpeta-nombre').value.trim(),
+    color: recetaCarpetaColor,
+  };
+  // Una carpeta nueva nace DENTRO de la que estas mirando; editar una
+  // existente no la mueve (parentId no viaja).
+  if (!id) cuerpo.parentId = recetasCarpetaActual;
+  try {
+    if (id) await api(`/api/recetas-carpetas/${id}`, { method: 'PUT', body: JSON.stringify(cuerpo) });
+    else await api('/api/recetas-carpetas', { method: 'POST', body: JSON.stringify(cuerpo) });
+  } catch (err) {
+    mostrarAvisoFlotante(`No se pudo guardar: ${err.message}`);
+    return;
+  }
+  cerrarRecetaCarpetaModal();
+  await loadRecetasCarpetas();
+  await renderRecetasLista();
+});
+
+async function duplicarCarpetaDeRecetas(carpeta) {
+  const tieneDentro = recetasSubcarpetasDe(carpeta.id).length > 0
+    || (await api(`/api/recetas?folderId=${carpeta.id}`).catch(() => [])).length > 0;
+  let conContenido = false;
+  if (tieneDentro) {
+    // Mismo paralelo que al BORRAR: la casilla pregunta por lo de
+    // dentro en vez de decidirlo por ti.
+    const ok = await showAppConfirm(`¿Duplicar la carpeta «${carpeta.name}»?`, {
+      okText: 'Duplicar',
+      checkbox: { label: 'Copiar también lo que hay dentro' },
+    });
+    if (!ok) return;
+    // La casilla no viene en el resultado: showAppConfirm resuelve con
+    // true/false y deja lo marcado en lastAppConfirmCheckbox, que hay
+    // que leer JUSTO despues. Es como lo hacen los borrados de Notas.
+    conContenido = lastAppConfirmCheckbox;
+  }
+  try {
+    await api(`/api/recetas-carpetas/${carpeta.id}/duplicate${conContenido ? '?withContents=1' : ''}`, { method: 'POST' });
+  } catch (err) {
+    mostrarAvisoFlotante(`No se pudo duplicar: ${err.message}`);
+    return;
+  }
+  await loadRecetasCarpetas();
+  await renderRecetasLista();
+}
+
+async function borrarCarpetaDeRecetas(carpeta) {
+  const ok = await showAppConfirm(
+    `¿Eliminar la carpeta «${carpeta.name}»? Lo que haya dentro sube un nivel.`,
+    { okText: 'Eliminar', danger: true, checkbox: { label: 'Eliminar también lo que hay dentro' } },
+  );
+  if (!ok) return;
+  const conContenido = lastAppConfirmCheckbox;
+  try {
+    await api(`/api/recetas-carpetas/${carpeta.id}${conContenido ? '?deleteContents=1' : ''}`, { method: 'DELETE' });
+  } catch (err) {
+    mostrarAvisoFlotante(`No se pudo eliminar: ${err.message}`);
+    return;
+  }
+  await loadRecetasCarpetas();
+  await renderRecetasLista();
+}
+
+// ---------------------------------------------------------------------
+// EL CATALOGO DE INGREDIENTES
+// ---------------------------------------------------------------------
+async function renderRecetaIngredientes() {
+  await loadRecetasIngredientes();
+  const cont = document.getElementById('receta-ingredientes-lista');
+  const texto = document.getElementById('receta-ingredientes-buscador').value.trim().toLowerCase();
+  cont.innerHTML = '';
+
+  const lista = recetasIngredientes.filter((i) =>
+    !texto || i.name.toLowerCase().includes(texto) || (i.categoria || '').toLowerCase().includes(texto));
+
+  if (lista.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = texto ? 'Ninguno se llama así.' : 'Todavía no hay ingredientes. Se crean solos al escribir una receta.';
+    cont.appendChild(p);
+    return;
+  }
+
+  lista.forEach((ing) => {
+    const fila = document.createElement('div');
+    fila.className = 'gym-list-item receta-fila';
+    const main = document.createElement('span');
+    main.className = 'gym-list-item-name';
+    const n = document.createElement('span');
+    n.textContent = ing.name;
+    main.appendChild(n);
+    const detalle = [ing.unidad, ing.categoria, ing.usos ? `${ing.usos} ${ing.usos === 1 ? 'receta' : 'recetas'}` : 'sin usar']
+      .filter(Boolean).join(' · ');
+    const sub = document.createElement('span');
+    sub.className = 'gym-list-item-muted receta-fila-sub';
+    sub.textContent = detalle;
+    main.appendChild(sub);
+    fila.appendChild(main);
+    fila.addEventListener('click', () => openRecetaIngredienteModal(ing));
+
+    cont.appendChild(wrapRowWithSwipeActions(fila, {
+      onEdit: () => openRecetaIngredienteModal(ing),
+      onDelete: () => borrarIngrediente(ing),
+    }));
+  });
+}
+
+document.getElementById('receta-ingredientes-buscador').addEventListener('input', renderRecetaIngredientes);
+document.getElementById('btn-nuevo-ingrediente').addEventListener('click', () => openRecetaIngredienteModal(null));
+
+function openRecetaIngredienteModal(ing) {
+  prepararCamposDeRecetas();
+  document.getElementById('receta-ingrediente-modal-title').textContent = ing ? 'Editar ingrediente' : 'Nuevo ingrediente';
+  document.getElementById('receta-ingrediente-id').value = ing ? ing.id : '';
+  document.getElementById('receta-ingrediente-nombre').value = ing ? ing.name : '';
+  document.getElementById('receta-ingrediente-unidad').value = ing ? ing.unidad || '' : '';
+  document.getElementById('receta-ingrediente-notas').value = ing ? ing.notas || '' : '';
+  recetaIngredienteCategoriaField.setValue(ing && ing.categoria ? ing.categoria : '');
+  document.getElementById('btn-delete-receta-ingrediente').classList.toggle('hidden', !ing);
+  document.getElementById('receta-ingrediente-modal').classList.remove('hidden');
+}
+
+function cerrarRecetaIngredienteModal() {
+  document.getElementById('receta-ingrediente-modal').classList.add('hidden');
+}
+document.getElementById('btn-close-receta-ingrediente').addEventListener('click', cerrarRecetaIngredienteModal);
+document.getElementById('btn-cancel-receta-ingrediente').addEventListener('click', cerrarRecetaIngredienteModal);
+
+document.getElementById('receta-ingrediente-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('receta-ingrediente-id').value;
+  const cuerpo = {
+    name: document.getElementById('receta-ingrediente-nombre').value.trim(),
+    unidad: document.getElementById('receta-ingrediente-unidad').value.trim(),
+    categoria: recetaIngredienteCategoriaField.getValue(),
+    notas: document.getElementById('receta-ingrediente-notas').value.trim(),
+  };
+  try {
+    if (id) await api(`/api/recetas-ingredientes/${id}`, { method: 'PUT', body: JSON.stringify(cuerpo) });
+    else await api('/api/recetas-ingredientes', { method: 'POST', body: JSON.stringify(cuerpo) });
+  } catch (err) {
+    // El error de nombre repetido se cuenta con palabras, que es lo que
+    // la ruta manda ("Ya tienes un ingrediente que se llama..."), en vez
+    // de soltar el codigo.
+    mostrarAvisoFlotante(err.message);
+    return;
+  }
+  cerrarRecetaIngredienteModal();
+  await renderRecetaIngredientes();
+});
+
+document.getElementById('btn-delete-receta-ingrediente').addEventListener('click', async () => {
+  const id = document.getElementById('receta-ingrediente-id').value;
+  if (!id) return;
+  const ing = recetasIngredientes.find((i) => String(i.id) === String(id));
+  cerrarRecetaIngredienteModal();
+  if (ing) await borrarIngrediente(ing);
+});
+
+async function borrarIngrediente(ing) {
+  const ok = await showAppConfirm(`¿Eliminar «${ing.name}» del catálogo?`, { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  try {
+    await api(`/api/recetas-ingredientes/${ing.id}`, { method: 'DELETE' });
+  } catch (err) {
+    mostrarAvisoFlotante(err.message);
+    return;
+  }
+  await renderRecetaIngredientes();
+}
+
+// ---------------------------------------------------------------------
+// LA COMPRA
+// ---------------------------------------------------------------------
+async function renderRecetaCompra() {
+  try {
+    recetaCompra = await api('/api/recetas-compra/viva');
+  } catch {
+    recetaCompra = null;
+  }
+  renderRecetaCompraRecetas();
+  renderRecetaCompraLineas();
+}
+
+function renderRecetaCompraRecetas() {
+  const cont = document.getElementById('receta-compra-recetas');
+  cont.innerHTML = '';
+  if (!recetaCompra || recetaCompra.recetas.length === 0) return;
+
+  const titulo = document.createElement('h3');
+  titulo.textContent = 'De estas recetas';
+  cont.appendChild(titulo);
+
+  recetaCompra.recetas.forEach((r) => {
+    const fila = document.createElement('div');
+    fila.className = 'receta-compra-receta';
+    const n = document.createElement('span');
+    n.className = 'receta-compra-receta-nombre';
+    // Una receta borrada deja aqui su nombre copiado: la lista sigue
+    // sabiendo explicar de donde salio cada cantidad.
+    n.textContent = r.recetaId ? r.nombre : `${r.nombre} (borrada)`;
+    fila.appendChild(n);
+
+    const raciones = document.createElement('span');
+    raciones.className = 'receta-compra-receta-raciones';
+    raciones.textContent = `${recetaFormatearCantidad(r.raciones)} ${Number(r.raciones) === 1 ? 'ración' : 'raciones'}`;
+    fila.appendChild(raciones);
+
+    const quitar = document.createElement('button');
+    quitar.type = 'button';
+    quitar.className = 'receta-linea-quitar';
+    quitar.setAttribute('aria-label', `Quitar ${r.nombre} de la compra`);
+    quitar.textContent = '✕';
+    quitar.addEventListener('click', async () => {
+      try {
+        recetaCompra = await api(`/api/recetas-compra/recetas/${r.id}`, { method: 'DELETE' });
+        renderRecetaCompraRecetas();
+        renderRecetaCompraLineas();
+      } catch (err) {
+        mostrarAvisoFlotante(`No se pudo quitar: ${err.message}`);
+      }
+    });
+    fila.appendChild(quitar);
+    cont.appendChild(fila);
+  });
+}
+
+function renderRecetaCompraLineas() {
+  const cont = document.getElementById('receta-compra-lista');
+  cont.innerHTML = '';
+  if (!recetaCompra || recetaCompra.lineas.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = 'La lista está vacía. Abre una receta y dale a «Añadir a la compra», o escribe algo aquí arriba.';
+    cont.appendChild(p);
+    return;
+  }
+
+  // Agrupado por PASILLO del super, que es el orden en que de verdad se
+  // recorre una tienda. Lo que no tenga pasillo va al final, junto.
+  const grupos = new Map();
+  recetaCompra.lineas.forEach((l) => {
+    const k = l.categoria || 'Sin clasificar';
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(l);
+  });
+  const orden = [...RECETAS_CATEGORIAS, 'Sin clasificar'];
+  const claves = Array.from(grupos.keys()).sort((a, b) => {
+    const ia = orden.indexOf(a);
+    const ib = orden.indexOf(b);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+
+  claves.forEach((k) => {
+    const cab = document.createElement('div');
+    cab.className = 'finanzas-group-heading';
+    const t = document.createElement('span');
+    t.textContent = k;
+    cab.appendChild(t);
+    cont.appendChild(cab);
+
+    grupos.get(k).forEach((l) => cont.appendChild(recetaFilaDeCompra(l)));
+  });
+}
+
+function recetaFilaDeCompra(linea) {
+  const fila = document.createElement('label');
+  fila.className = `receta-compra-linea${linea.comprado ? ' comprada' : ''}`;
+
+  const chk = document.createElement('input');
+  chk.type = 'checkbox';
+  chk.className = 'styled-checkbox';
+  chk.checked = linea.comprado;
+  chk.addEventListener('change', async () => {
+    try {
+      await api(`/api/recetas-compra/lineas/${linea.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ comprado: chk.checked }),
+      });
+      linea.comprado = chk.checked;
+      fila.classList.toggle('comprada', chk.checked);
+    } catch (err) {
+      chk.checked = !chk.checked;
+      mostrarAvisoFlotante(`No se pudo marcar: ${err.message}`);
+    }
+  });
+  fila.appendChild(chk);
+
+  const main = document.createElement('span');
+  main.className = 'receta-compra-linea-main';
+  const n = document.createElement('span');
+  n.className = 'receta-compra-linea-nombre';
+  n.textContent = linea.nombre;
+  main.appendChild(n);
+  const cant = recetaTextoDeCantidad(linea.cantidad, linea.unidad);
+  if (cant) {
+    const c = document.createElement('span');
+    c.className = 'receta-compra-linea-cantidad';
+    c.textContent = cant;
+    main.appendChild(c);
+  }
+  fila.appendChild(main);
+
+  const quitar = document.createElement('button');
+  quitar.type = 'button';
+  quitar.className = 'receta-linea-quitar';
+  quitar.setAttribute('aria-label', `Quitar ${linea.nombre}`);
+  quitar.textContent = '✕';
+  quitar.addEventListener('click', async (e) => {
+    // La fila es un <label>: sin esto, tocar la ✕ marcaria ademas la
+    // casilla, porque el click del label se la pasa a su input.
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await api(`/api/recetas-compra/lineas/${linea.id}`, { method: 'DELETE' });
+      await renderRecetaCompra();
+    } catch (err) {
+      mostrarAvisoFlotante(`No se pudo quitar: ${err.message}`);
+    }
+  });
+  fila.appendChild(quitar);
+  return fila;
+}
+
+document.getElementById('btn-receta-compra-anadir').addEventListener('click', async () => {
+  const texto = document.getElementById('receta-compra-nuevo-texto').value.trim();
+  if (!texto) return;
+  const cantidad = recetaNormalizarNumero(document.getElementById('receta-compra-nueva-cantidad').value);
+  const unidad = document.getElementById('receta-compra-nueva-unidad').value.trim();
+
+  // Si lo que escribes ES un ingrediente del catalogo, se junta con lo
+  // que ya pidan las recetas en vez de crear una linea repetida al lado.
+  const ing = recetasIngredientes.find((i) => i.name.trim().toLowerCase() === texto.toLowerCase());
+  try {
+    recetaCompra = await api('/api/recetas-compra/lineas', {
+      method: 'POST',
+      body: JSON.stringify(ing
+        ? { ingredienteId: ing.id, cantidad, unidad }
+        : { texto, cantidad, unidad }),
+    });
+  } catch (err) {
+    mostrarAvisoFlotante(`No se pudo añadir: ${err.message}`);
+    return;
+  }
+  document.getElementById('receta-compra-nuevo-texto').value = '';
+  document.getElementById('receta-compra-nueva-cantidad').value = '';
+  document.getElementById('receta-compra-nueva-unidad').value = '';
+  renderRecetaCompraLineas();
+});
+
+document.getElementById('receta-compra-nuevo-texto').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  document.getElementById('btn-receta-compra-anadir').click();
+});
+
+document.getElementById('btn-receta-compra-cerrar').addEventListener('click', async () => {
+  const ok = await showAppConfirm('¿Dar la compra por hecha? La lista se guarda en «Compras anteriores» y empiezas otra vacía.', { okText: 'Compra hecha' });
+  if (!ok) return;
+  try {
+    recetaCompra = await api('/api/recetas-compra/cerrar', { method: 'POST', body: JSON.stringify({}) });
+    mostrarAvisoFlotante('Guardada en «Compras anteriores».');
+  } catch (err) {
+    mostrarAvisoFlotante(err.message);
+    return;
+  }
+  renderRecetaCompraRecetas();
+  renderRecetaCompraLineas();
+});
+
+document.getElementById('btn-receta-compra-vaciar').addEventListener('click', async () => {
+  const ok = await showAppConfirm('¿Vaciar la lista entera? No se guarda en el historial.', { okText: 'Vaciar', danger: true });
+  if (!ok) return;
+  try {
+    recetaCompra = await api('/api/recetas-compra/vaciar', { method: 'POST', body: JSON.stringify({}) });
+  } catch (err) {
+    mostrarAvisoFlotante(`No se pudo vaciar: ${err.message}`);
+    return;
+  }
+  renderRecetaCompraRecetas();
+  renderRecetaCompraLineas();
+});
+
+// ---------------------------------------------------------------------
+// COMPRAS ANTERIORES
+// ---------------------------------------------------------------------
+async function renderRecetaHistorial() {
+  const cont = document.getElementById('receta-historial-lista');
+  const detalle = document.getElementById('receta-historial-detalle');
+  cont.innerHTML = '';
+  detalle.innerHTML = '';
+
+  let compras = [];
+  try { compras = await api('/api/recetas-compra/historial'); } catch { compras = []; }
+
+  if (compras.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = 'Aquí se guardan las listas al darle a «Compra hecha».';
+    cont.appendChild(p);
+    return;
+  }
+
+  compras.forEach((c) => {
+    const fila = document.createElement('div');
+    fila.className = 'gym-list-item receta-fila';
+    const main = document.createElement('span');
+    main.className = 'gym-list-item-name';
+    const n = document.createElement('span');
+    n.textContent = c.nombre || recetaFechaCorta(c.cerradaAt);
+    main.appendChild(n);
+    const sub = document.createElement('span');
+    sub.className = 'gym-list-item-muted receta-fila-sub';
+    sub.textContent = `${c.numLineas} ${c.numLineas === 1 ? 'cosa' : 'cosas'} · ${c.numRecetas} ${c.numRecetas === 1 ? 'receta' : 'recetas'}`;
+    main.appendChild(sub);
+    fila.appendChild(main);
+    fila.addEventListener('click', () => abrirCompraDelHistorial(c.id));
+    cont.appendChild(fila);
+  });
+}
+
+async function abrirCompraDelHistorial(id) {
+  const detalle = document.getElementById('receta-historial-detalle');
+  detalle.innerHTML = '';
+  let compra = null;
+  try { compra = await api(`/api/recetas-compra/${id}`); } catch { compra = null; }
+  if (!compra) return;
+
+  const cab = document.createElement('div');
+  cab.className = 'finanzas-group-heading';
+  const t = document.createElement('span');
+  t.textContent = compra.nombre || recetaFechaCorta(compra.cerradaAt);
+  cab.appendChild(t);
+  detalle.appendChild(cab);
+
+  compra.lineas.forEach((l) => {
+    const fila = document.createElement('div');
+    fila.className = `receta-compra-linea${l.comprado ? ' comprada' : ''}`;
+    const main = document.createElement('span');
+    main.className = 'receta-compra-linea-main';
+    const n = document.createElement('span');
+    n.className = 'receta-compra-linea-nombre';
+    n.textContent = l.nombre;
+    main.appendChild(n);
+    const cant = recetaTextoDeCantidad(l.cantidad, l.unidad);
+    if (cant) {
+      const c = document.createElement('span');
+      c.className = 'receta-compra-linea-cantidad';
+      c.textContent = cant;
+      main.appendChild(c);
+    }
+    fila.appendChild(main);
+    detalle.appendChild(fila);
+  });
+}
+
+// Ctrl+Intro guarda, igual que en los modales de nota, evento y tarea.
+enableCtrlEnterSubmit('receta-form');
+enableCtrlEnterSubmit('receta-carpeta-form');
+enableCtrlEnterSubmit('receta-ingrediente-form');
+
+
+// =====================================================================
 // GESTOS DE NAVEGACION (solo movil)
 //
 // Idea general, pedida por Koku: moverse por la app deslizando el dedo,
@@ -20817,6 +22509,7 @@ const HERRAMIENTAS_APPS = {
   gym: { viewId: 'gym-view', open: () => openGymView() },
   finanzas: { viewId: 'finanzas-view', open: () => openFinanzasView() },
   lecturas: { viewId: 'lecturas-view', open: () => openLecturasView() },
+  recetas: { viewId: 'recetas-view', open: () => openRecetasView() },
   viajes: { viewId: 'viajes-view', open: () => openViajesView() },
 };
 
@@ -20850,7 +22543,7 @@ function currentMobileTab() {
 // de la de mas arriba a la de mas abajo.
 const CAPAS_DE_PANTALLA = [
   'settings-modal', 'gym-view', 'finanzas-view', 'lecturas-view',
-  'viajes-view', 'extensions-view', 'mobile-notes-view', 'note-editor-view',
+  'recetas-view', 'viajes-view', 'extensions-view', 'mobile-notes-view', 'note-editor-view',
   'groups-view',
 ];
 
@@ -20991,6 +22684,10 @@ const VOLVER_UN_PASO = [
   // Finanzas: de una seccion (Movimientos, Gastos fijos, Objetivos...)
   // a su inicio, el de la lista de secciones.
   'btn-finanzas-back',
+  // Recetas: de una seccion (Mis recetas, La compra...) o de la ficha de
+  // una receta a su inicio. Su propio listener decide cual de las dos
+  // cosas suelta -- desde la ficha vuelve a la LISTA, no al inicio.
+  'btn-recetas-back',
   // Notas: subir un nivel de carpeta. Va el ULTIMO de la lista porque
   // es el mas "de fuera" de todos. Peticion expresa de Koku: deslizar
   // en Notas solo sirve para SALIR (subir), nunca para entrar -- entrar
@@ -21208,7 +22905,7 @@ applyAnimationsPreference();
 function mobileNavSectionForScreen(screen) {
   if (screen === 'mobile-notes') return 'notes';
   if (screen === 'extensions') return 'extensions';
-  if (['gym', 'lecturas', 'finanzas', 'viajes'].includes(screen)) {
+  if (['gym', 'lecturas', 'finanzas', 'viajes', 'recetas'].includes(screen)) {
     return getMobileNavNotesSlot() === screen ? 'notes' : 'extensions';
   }
   return 'calendar';
@@ -21276,8 +22973,8 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.56.0';
-const APP_VERSION_DATE = '2026-09-13';
+const APP_VERSION = '0.59.0';
+const APP_VERSION_DATE = '2026-09-14';
 
 function renderAppVersionLine() {
   const el = document.getElementById('app-version-line');

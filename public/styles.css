@@ -5587,3 +5587,381 @@ body.gym-rest-push #settings-modal .settings-card {
 .finanzas-row-navegable { align-items: flex-start; }
 .finanzas-row-navegable .finanzas-row-icon,
 .finanzas-row-navegable .finanzas-row-right { margin-top: 0.1rem; }
+
+/* =====================================================================
+   App "RECETAS"
+   =====================================================================
+   Se apoya a proposito en lo que ya existe: las filas de seccion del
+   inicio son .finanzas-row (filaDeLista), las filas de la lista son
+   .gym-list-item -- que ya esta en las TRES reglas que hacen falta para
+   deslizar (el transform abierto, el de is-dragging y el fondo propio),
+   asi que no hace falta CSS de deslizamiento nuevo. Aqui solo va lo que
+   es de verdad de esta App. */
+
+.recetas-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  overflow-y: auto;
+  flex: 1;
+  /* El mismo colchon que .gym-tab-content y .finanzas-tab-panel: la
+     barra de Apps flota FIJA encima de esta pantalla, asi que sin este
+     hueco la ultima fila se queda por debajo de la barra y no hay forma
+     de verla ni de tocarla, ni bajando del todo. Si la barra cambia de
+     alto, los tres numeros van juntos. */
+  padding-bottom: 7rem;
+}
+
+.recetas-toolbar { display: flex; gap: 0.5rem; }
+.recetas-toolbar input { flex: 1; }
+
+.recetas-filtro-etiquetas { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.receta-etiqueta-chip {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: var(--t-pie);
+  cursor: pointer;
+}
+.receta-etiqueta-chip.activa {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.recetas-ruta-row { display: flex; align-items: center; gap: 0.5rem; }
+.recetas-ruta {
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--bg-text) 65%, var(--bg));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recetas-lista { display: flex; flex-direction: column; gap: 0.4rem; }
+
+.recetas-acciones-pie { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.recetas-acciones-pie button { flex: 1; }
+
+/* --- Una fila de la lista (carpeta, receta o ingrediente) ----------- */
+.receta-fila { cursor: pointer; gap: 0.6rem; }
+.receta-fila .gym-list-item-name {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  /* -webkit-line-clamp de .gym-list-item-name recortaria estas dos
+     lineas a una y media; aqui el nombre y el detalle son dos lineas
+     enteras a proposito. */
+  -webkit-line-clamp: unset;
+}
+.receta-fila-nombre { font-weight: 600; }
+.receta-fila-sub { font-size: var(--t-pie); }
+
+.receta-fila-icono { display: flex; width: 1.5rem; height: 1.5rem; flex-shrink: 0; }
+.receta-fila-icono svg { width: 100%; height: 100%; }
+
+/* La foto de la fila es un cuadrado fijo: con alturas distintas por
+   fila, la lista se lee como una escalera. */
+.receta-fila-foto {
+  width: 3rem;
+  height: 3rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+.receta-fila-foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Sin foto va el icono de la App en gris, no un recuadro de puntos:
+   una lista entera de recuadros vacios se lee como si algo se hubiera
+   roto. El hueco se queda igual para que las filas no bailen. */
+.receta-fila-foto-vacia {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+}
+.receta-fila-foto-vacia svg {
+  width: 1.4rem;
+  height: 1.4rem;
+  color: color-mix(in srgb, var(--surface-2-text) 35%, var(--surface-2));
+}
+
+/* --- La ficha: la pantalla de cocinar ------------------------------ */
+.receta-ficha { display: flex; flex-direction: column; gap: 0.7rem; }
+.receta-ficha-foto {
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-2);
+  /* Relacion fija para que la pantalla no pegue un salto cuando la foto
+     acaba de cargar (el src llega por una URL blob:, un momento despues
+     de pintar). max-width por la regla de las cajas con aspect-ratio. */
+  aspect-ratio: 16 / 10;
+  max-width: 100%;
+}
+.receta-ficha-foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.receta-ficha-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.receta-chip {
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: var(--t-pie);
+}
+
+/* El escalador de raciones: − [4] raciones + */
+.receta-escalador {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.7rem;
+}
+.receta-escalador-btn {
+  width: 2.4rem;
+  height: 2.4rem;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--surface-text);
+  border-radius: var(--radius-sm);
+  font-size: var(--t-titulo-3);
+  line-height: 1;
+  cursor: pointer;
+}
+.receta-escalador-campo {
+  width: 4rem;
+  text-align: center;
+  font-size: var(--t-titulo-3);
+  font-weight: 600;
+}
+.receta-escalador-label { flex: 1; font-size: var(--t-secundario); }
+.receta-escalador-reset {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: var(--t-pie);
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.receta-ficha-ingredientes { display: flex; flex-direction: column; gap: 0.3rem; }
+.receta-ficha-ingrediente {
+  display: flex;
+  gap: 0.6rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.6rem;
+  font-size: var(--t-secundario);
+}
+/* La cantidad en su propia columna, alineada a la derecha: asi todas
+   caen bajo la misma linea y se leen de un barrido, aunque una diga
+   "1,5 kg" y la siguiente "2". */
+.receta-ficha-cantidad {
+  min-width: 5.5rem;
+  text-align: right;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.receta-ficha-nombre { flex: 1; }
+.receta-ficha-compra { width: 100%; }
+
+.receta-ficha-pasos { font-size: var(--t-cuerpo); line-height: 1.5; }
+.receta-ficha-pasos img { max-width: 100%; border-radius: var(--radius-sm); }
+.receta-ficha-pasos ul, .receta-ficha-pasos ol { padding-left: 1.2rem; }
+.receta-ficha-notas {
+  font-size: var(--t-secundario);
+  color: color-mix(in srgb, var(--bg-text) 75%, var(--bg));
+  white-space: pre-wrap;
+}
+
+/* --- El modal de receta -------------------------------------------- */
+.receta-modal-card { max-width: 40rem; }
+
+.receta-foto-row { display: flex; gap: 0.6rem; align-items: flex-start; }
+.receta-foto-preview {
+  width: 6rem;
+  height: 6rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.receta-foto-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.receta-foto-preview.receta-foto-vacia {
+  border: 1px dashed var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--surface-2-text) 60%, var(--surface-2));
+}
+.receta-foto-botones { display: flex; flex-direction: column; gap: 0.4rem; }
+
+/* --- Las lineas de ingrediente -------------------------------------- */
+.receta-lineas { display: flex; flex-direction: column; gap: 0.5rem; }
+.receta-linea {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem;
+}
+/* El nombre ocupa su propia linea y los numeros la de abajo: metidos
+   todos en una fila, en un telefono el nombre se queda en "Curl m…" y
+   deja de decir cual es. */
+.receta-linea-ingrediente {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--surface-text);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  font-size: var(--t-secundario);
+  font-weight: 600;
+  cursor: pointer;
+}
+.receta-linea-campos { display: flex; gap: 0.35rem; align-items: center; }
+.receta-campo-corto { width: 4.5rem; flex-shrink: 0; }
+.receta-campo-nota { flex: 1; min-width: 0; }
+.receta-linea-quitar {
+  width: 2.2rem;
+  height: 2.2rem;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--danger);
+  font-size: var(--t-cuerpo);
+  line-height: 1;
+  cursor: pointer;
+}
+.receta-linea-opcional {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--t-pie);
+  cursor: pointer;
+}
+
+/* --- La barra de los pasos ------------------------------------------ */
+.receta-pasos-toolbar { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.receta-pasos-btn {
+  min-width: 2.2rem;
+  height: 2.2rem;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  border-radius: var(--radius-sm);
+  font-size: var(--t-secundario);
+  cursor: pointer;
+}
+.receta-pasos-editor {
+  min-height: 8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--surface-text);
+  padding: 0.6rem;
+  font-size: var(--t-cuerpo);
+  line-height: 1.5;
+  overflow-y: auto;
+}
+.receta-pasos-editor img { max-width: 100%; border-radius: var(--radius-sm); }
+.receta-pasos-editor ul, .receta-pasos-editor ol { padding-left: 1.2rem; }
+
+/* --- El selector de ingrediente ------------------------------------- */
+.receta-picker-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 55vh;
+  overflow-y: auto;
+  margin-top: 0.5rem;
+}
+.receta-picker-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  border: none;
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  font-size: var(--t-secundario);
+  cursor: pointer;
+}
+.receta-picker-crear { background: color-mix(in srgb, var(--accent) 18%, var(--surface-2)); font-weight: 600; }
+.receta-picker-detalle {
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+  flex-shrink: 0;
+}
+
+/* --- La compra ------------------------------------------------------ */
+.receta-compra-recetas { display: flex; flex-direction: column; gap: 0.3rem; }
+.receta-compra-receta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.6rem;
+  font-size: var(--t-secundario);
+}
+.receta-compra-receta-nombre { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.receta-compra-receta-raciones {
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+  flex-shrink: 0;
+}
+
+.receta-compra-anadir { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+/* El texto, su propia linea entera. Los tres en fila dejaban el
+   placeholder en "Anadir algo a mano (p" y la unidad cortada -- se vio
+   en una captura, no en un assert. */
+.receta-compra-anadir > input:first-child { flex: 1 1 100%; min-width: 0; }
+/* La cantidad y la unidad se reparten la segunda linea a partes
+   iguales (con el ancho fijo de .receta-campo-corto, "Unidad" se
+   quedaba en "Unidac"), y el "+" ocupa solo lo suyo. */
+.receta-compra-anadir > input:not(:first-child) { flex: 1 1 0; width: auto; min-width: 0; }
+.receta-compra-anadir > button { flex: 0 0 3rem; }
+
+.receta-compra-lista { display: flex; flex-direction: column; gap: 0.25rem; }
+.receta-compra-linea {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.6rem;
+  font-size: var(--t-secundario);
+  cursor: pointer;
+}
+/* Tachado Y apagado: solo tachar deja la linea pesando lo mismo que las
+   que aun faltan, que es lo que de verdad se viene a mirar. */
+.receta-compra-linea.comprada { opacity: 0.5; }
+.receta-compra-linea.comprada .receta-compra-linea-nombre { text-decoration: line-through; }
+.receta-compra-linea-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.receta-compra-linea-nombre { overflow-wrap: break-word; }
+.receta-compra-linea-cantidad {
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}
+
+/* El :hover SIEMPRE dentro de (hover: hover): en iOS se aplica al TOCAR
+   y se queda puesto hasta que tocas otra cosa, asi que una regla suelta
+   deja el boton "pulsado" en el telefono. */
+@media (hover: hover) {
+  .receta-etiqueta-chip:hover,
+  .receta-picker-item:hover,
+  .receta-linea-ingrediente:hover,
+  .receta-pasos-btn:hover,
+  .receta-escalador-btn:hover { filter: brightness(1.08); }
+}

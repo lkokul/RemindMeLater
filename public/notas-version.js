@@ -19,6 +19,18 @@
 // es que se esconda por CSS: es que no está.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.59.0',
+    fecha: '2026-09-14',
+    nuevo: [
+      'Apartado nuevo: Recetas. Apunta un plato con su foto, sus tiempos, para cuánta gente es y cómo se hace, y organízalo en carpetas (Vegana, Postres…) y con etiquetas.',
+      'Los ingredientes son fichas: "Pollo" existe una sola vez y lo comparten todas tus recetas. Así la lista de la compra suma "300 g + 200 g de pollo" en una línea en vez de repetirla.',
+      'Escala una receta al vuelo: está apuntada para 2 y la quieres para 4, y las cantidades se ajustan solas. Para 1, se parten por la mitad. La receta se queda como estaba: lo que cambia es lo que ves.',
+      'La lista de la compra se llena sola: abre una receta, dale a "Añadir a la compra" y ahí están sus ingredientes, agrupados por el pasillo del súper. Quitar la receta los quita; lo que añadiste tú a mano se queda.',
+      'Al darle a "Compra hecha" la lista se guarda con su fecha en "Compras anteriores" y empiezas otra vacía.',
+    ],
+    parches: [],
+  },
+  {
     version: '0.56.0',
     fecha: '2026-09-13',
     nuevo: [

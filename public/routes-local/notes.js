@@ -563,4 +563,11 @@
   // estrenar los uuid de las imagenes -- que es justo lo que evita que
   // borrar una nota rompa las fotos de la otra.
   window.duplicarNotaLocal = duplicarNota;
+
+  // Y estrenar los uuid de las imagenes de un trozo de HTML, por lo
+  // mismo: los pasos de una receta (routes-local/recetas.js) tambien
+  // pueden llevar fotos dentro, y si la copia se quedara con las mismas
+  // rutas, borrar cualquiera de las dos se llevaria los bytes de la
+  // otra.
+  window.duplicarImagenesDeHtml = duplicateImagesInBody;
 })();

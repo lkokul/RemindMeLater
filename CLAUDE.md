@@ -3487,6 +3487,130 @@ esa rama se cierre, se renombra de una vez.
    antes de imprimir ningún FALLO — contando con `grep -c FALLO` eso son
    cero. Va con `?.` y un `'SIN-SVG'`, y se cuenta por código de salida.
 
+## La App "Recetas" (14/9/2026, rama `recetas-movil-ui`)
+
+Petición de Koku: *"apuntar recetas, platos etc. Poder hacerme listas de
+la compra tipo quiero carne empanada, qué necesito"*, más *"apuntarme
+recetas, tiempos, nombre y foto para la receta. Algún tipo de
+clasificador tipo por carpetas"*. Lo de enganchar precios con Finanzas y
+tareas lo dejó dicho **para después**: *"por ahora lo básico"*.
+
+Se navega como Finanzas y Gimnasio: un INICIO con las secciones como
+filas (Mis recetas / La compra / Ingredientes / Compras anteriores) y una
+vuelta atrás, no una barra de pestañas.
+
+### Las cuatro decisiones que tomó él
+
+No cambiarlas sin volver a preguntarle:
+
+1. **Un ingrediente es una FICHA, no texto.** Se le ofrecieron las tres
+   formas (texto libre / cantidad+unidad escritos a mano / catálogo
+   reutilizable) y eligió el catálogo sabiendo lo que cuesta más ahora.
+   Es LA decisión que no se puede cambiar barata después: sin ficha
+   propia no hay a qué colgarle un precio, ni de qué sacar una
+   evolución, ni forma de sumar "300 g + 200 g de pollo" en una línea.
+2. **Carpetas Y etiquetas.** Las carpetas dicen dónde vive una receta
+   (anidadas, como en Notas); las etiquetas, lo que se cruza — una
+   receta puede ser vegana Y rápida Y de cena a la vez.
+3. **La compra es una lista viva que se archiva al cerrarla.** Se usa
+   como una lista de siempre, pero al darle a "Compra hecha" se guarda
+   con su fecha y nace otra vacía. De ahí saldrá el "cuánto me costó" el
+   día que se enganche con Finanzas.
+4. **Escalar raciones**, con sus palabras: *"la receta guardada es para
+   2, tú le puedes decir que la quieres para 4 y te pone directamente
+   las cantidades; si dijera 1, que me divida a la mitad"*. Y sabiendo
+   lo que NO hace: *"obviamente no se puede comprar 246 g de pollo"* —
+   la app da la cantidad exacta, comprar el paquete que haya es cosa
+   tuya.
+
+Los campos de una receta los eligió él también: pasos con formato,
+raciones, preparación y cocción por separado, dificultad y tipo de plato.
+
+### El modelo (7 tablas en `local-schema.js`)
+
+- `recetas_carpetas` — hermana de `note_folders`: anidadas, con
+  detección de ciclos, y borrar una NUNCA borra lo de dentro (sube un
+  nivel). Sin icono por carpeta, igual que las de Notas.
+- `recetas_ingredientes` — el catálogo. `unidad` es la habitual (solo
+  rellena el hueco al meterlo en una receta) y `categoria` es el
+  **pasillo del súper**, que existe para una sola cosa: agrupar la lista
+  de la compra por dónde se coge cada cosa.
+- `recetas` — `raciones` es la BASE y **nunca se guarda escalada**; los
+  `pasos` son HTML saneado con el MISMO saneador de las notas; las
+  `etiquetas` son un array JSON de texto libre (mismo criterio que los
+  géneros de Entretenimiento).
+- `recetas_lineas` — qué ingrediente y cuánto. **La unidad va en la
+  LÍNEA**, no en el ingrediente: el mismo ajo se mide en dientes aquí y
+  en gramos allá. `cantidad` puede ser NULL ("sal al gusto"): no escala
+  ni suma, pero aparece.
+- `recetas_compras` / `recetas_compra_recetas` / `recetas_compra_lineas`.
+
+**La compra se DERIVA de las recetas que le metes**, y por eso cada
+línea lleva la cantidad partida en dos columnas: `cantidad_recetas` la
+calcula la ruta y `cantidad_manual` es lo que pusiste tú. Se enseña la
+suma. Con una sola columna, quitar una receta te borraría lo que
+añadiste a mano, o recalcular pisaría tu número.
+
+**Una línea es (INGREDIENTE, UNIDAD).** 200 g de pollo y 2 ud de pollo no
+se pueden sumar sin inventarse una equivalencia, así que son dos líneas.
+Es feo y es correcto.
+
+**Efecto que conviene conocer**: una línea que borres a mano VUELVE si
+después tocas las recetas, porque entonces la lista se rehace a partir
+de ellas. Es la consecuencia de que se derive en vez de ser una copia
+suelta — y es lo que hace que meter una receta SUME en vez de duplicar
+líneas.
+
+### Cosas que costaron
+
+- **`openSettingsModal` no existe al cargar `app.js`.** El botón de
+  Configuración de Recetas se enganchaba ahí y daba un `ReferenceError`
+  AL CARGAR, que se llevaba por delante el resto del archivo (la app se
+  quedaba a medias sin decir nada). Va en `settings.js`, con los de las
+  otras cinco Apps. Es exactamente la trampa de orden que ya estaba
+  apuntada en este archivo; cayó igual.
+- **`showAppConfirm` resuelve con `true`/`false`**, no con un objeto: lo
+  que marcaste en la casilla se lee en `lastAppConfirmCheckbox` JUSTO
+  después. Igual que los borrados de Notas.
+- **La foto de una receta NO se comparte al duplicar.** Cada copia
+  estrena uuid (`duplicarFoto`), porque compartiendo la ruta, borrar
+  cualquiera de las dos se llevaría los bytes y dejaría a la otra con la
+  foto rota. Lo mismo con las fotos de dentro de los pasos, que usan
+  `window.duplicarImagenesDeHtml` — expuesto desde `routes-local/notes.js`
+  para no tener dos copiadores.
+- **Los pasos se sanean DOS veces**, al guardar y al pintar, como el
+  cuerpo de una nota: importar una copia de seguridad sustituye el
+  `.sqlite` entero y sus filas nunca pasan por la ruta que sanea.
+- **"¿Está vacío el editor de pasos?" no es "¿tiene texto?"**: unos
+  pasos que sean SOLO una foto no tienen texto, y guardarlos como vacíos
+  perdería la foto (`recetaPasosVacios` mira también `img`). Es el mismo
+  fallo que ya mordió en las notas.
+- **Dos cosas las vio una CAPTURA, no un assert**: la fila de "añadir
+  algo a mano" no cabía en una línea (el placeholder se quedaba en
+  "Añadir algo a mano (p" y la unidad en "Unidac"), y el hueco de la
+  receta sin foto era un recuadro de puntos que hacía que la lista
+  pareciera rota. Las 51 comprobaciones estaban todas en verde.
+
+### Lo que NO se ha hecho, y no por olvido
+
+Todo lo que Koku dejó dicho "para luego", que es donde sigue:
+
+- **Precios y Finanzas**: apuntarle el precio a cada ingrediente, ver su
+  evolución, calcular cuánto va a costar la compra y sacar el precio
+  medio de un plato. El catálogo está hecho justo para que esto sea
+  posible; falta la tabla de precios y las pantallas.
+- **Tareas**: "quiero hacer esta receta" → la compra como una lista de
+  tareas que se tachan desde el calendario.
+- **Recetas en la Tienda**: esta rama sale de `movil-ui` (v0.56.0), que
+  todavía no tiene la Tienda — esa llegó en la v0.58.0, en
+  `desarrollador`. Al fusionar habrá que darla de alta en
+  `APPS_DE_LA_TIENDA`, en `BACKUP_TABLAS_POR_APP` (las 7 tablas) y
+  escribirle su manual.
+- **El número de versión (v0.59.0) puede chocar.** `retos-movil-ui` sale
+  del mismo sitio y se está trabajando en paralelo; ya pasó una vez que
+  dos ramas eligieron la v0.57.0 a la vez. Si choca, se renumera al
+  fusionar.
+
 ## Estado actual
 
 **Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde

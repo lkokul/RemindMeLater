@@ -654,6 +654,154 @@ function applyLocalSchema(db) {
       finanzas_transaction_id INTEGER REFERENCES finanzas_transactions(id),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- =================================================================
+    -- App "Recetas": platos apuntados, sus ingredientes y la compra.
+    -- =================================================================
+    --
+    -- LA DECISION DE FONDO, y la unica que no se puede cambiar barata
+    -- despues: un ingrediente NO es texto escrito dentro de la receta,
+    -- es una FICHA PROPIA (recetas_ingredientes) que muchas recetas
+    -- usan. Se eligio asi sabiendo lo que viene detras (apuntarle el
+    -- precio a cada cosa, ver como evoluciona, sacar el precio medio de
+    -- un plato): con el nombre escrito a mano en cada receta, "Pollo" y
+    -- "pollo " serian dos cosas distintas y no habria a que colgarle un
+    -- precio. Ademas es lo que deja que la lista de la compra sume
+    -- "300 g + 200 g de pollo" en una sola linea en vez de repetirla.
+    CREATE TABLE IF NOT EXISTS recetas_carpetas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#5b8cff',
+      position INTEGER NOT NULL DEFAULT 0,
+      -- NULL = carpeta de nivel raiz. Mismo sistema que note_folders:
+      -- se anidan, con deteccion de ciclos en la ruta, y borrar una
+      -- NUNCA borra su contenido (sube un nivel).
+      parent_id INTEGER REFERENCES recetas_carpetas(id),
+      favorite INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- El catalogo. Un ingrediente existe UNA vez y lo comparten todas
+    -- las recetas que lo usan. "unidad" es la que sueles usar con el
+    -- (g, ml, ud...) y solo sirve de valor por defecto al meterlo en
+    -- una receta: cada linea guarda la suya, porque el mismo ajo se
+    -- mide en dientes en un sitio y en gramos en otro.
+    -- "categoria" es el PASILLO del super (Carniceria, Verdura...), y
+    -- existe para una sola cosa: agrupar la lista de la compra por
+    -- donde se coge, en vez de en el orden en que la fuiste llenando.
+    CREATE TABLE IF NOT EXISTS recetas_ingredientes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      unidad TEXT,
+      categoria TEXT,
+      notas TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Una receta. "raciones" es la BASE con la que esta apuntada, y es
+    -- lo que hace posible escalarla: si esta guardada para 2 y la
+    -- quieres para 4, cada cantidad se multiplica por 4/2. Se guarda
+    -- siempre la base, nunca la escalada -- la escala es algo que pides
+    -- al mirarla, no un cambio en la receta.
+    -- "pasos" es HTML, el mismo que las notas y saneado con el MISMO
+    -- saneador (window.sanearHtmlDeNota), asi que admite negrita,
+    -- listas e imagenes de paso y nada mas.
+    -- "etiquetas" es un array JSON de texto libre (vegana, rapida,
+    -- cena...), mismo criterio que los generos de Lecturas: las
+    -- carpetas dicen DONDE vive una receta, las etiquetas lo que se
+    -- cruza. Sin tabla N:M, que para una coleccion personal sobra.
+    CREATE TABLE IF NOT EXISTS recetas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      folder_id INTEGER REFERENCES recetas_carpetas(id),
+      -- La misma ruta corta que una imagen de nota
+      -- (/api/notes/images/<uuid>.<ext>): los bytes viven en el almacen
+      -- noteAssets de IndexedDB, fuera de esta base, que si no se
+      -- hincharia y haria lento cada volcado.
+      foto TEXT,
+      raciones REAL NOT NULL DEFAULT 2,
+      tiempo_prep INTEGER,
+      tiempo_coccion INTEGER,
+      dificultad TEXT,
+      tipo TEXT,
+      etiquetas TEXT,
+      pasos TEXT,
+      notas TEXT,
+      favorite INTEGER NOT NULL DEFAULT 0,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Que ingrediente y cuanto lleva una receta. La unidad va en la
+    -- LINEA y no en el ingrediente por lo de arriba (dientes de ajo vs
+    -- gramos de ajo). "cantidad" puede ser NULL: hay ingredientes que
+    -- de verdad no llevan numero ("sal al gusto"), y esos no escalan ni
+    -- se suman, solo aparecen.
+    CREATE TABLE IF NOT EXISTS recetas_lineas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      receta_id INTEGER NOT NULL REFERENCES recetas(id),
+      ingrediente_id INTEGER NOT NULL REFERENCES recetas_ingredientes(id),
+      cantidad REAL,
+      unidad TEXT,
+      nota TEXT,
+      opcional INTEGER NOT NULL DEFAULT 0,
+      position INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- LA COMPRA. Hay como mucho UNA viva a la vez; al darle a "Compra
+    -- hecha" se archiva con su fecha y nace otra vacia. Asi se usa como
+    -- una lista de siempre (lo simple) pero queda el historial, que es
+    -- lo que despues deja decir cuanto costo la compra de tal semana.
+    CREATE TABLE IF NOT EXISTS recetas_compras (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      estado TEXT NOT NULL DEFAULT 'viva' CHECK (estado IN ('viva','archivada')),
+      nombre TEXT,
+      cerrada_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Que recetas has metido en esta compra, y para cuantas raciones.
+    -- Se guarda tambien el NOMBRE copiado: si borras la receta, la
+    -- lista sigue sabiendo explicar de donde salio cada cosa en vez de
+    -- quedarse con cantidades sin motivo.
+    CREATE TABLE IF NOT EXISTS recetas_compra_recetas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      compra_id INTEGER NOT NULL REFERENCES recetas_compras(id),
+      receta_id INTEGER REFERENCES recetas(id),
+      nombre TEXT NOT NULL,
+      raciones REAL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Cada linea de la lista, que es lo que se tacha en el super.
+    --
+    -- Las cantidades van en DOS columnas a proposito: "cantidad_recetas"
+    -- la calcula la app sumando lo que piden las recetas metidas, y
+    -- "cantidad_manual" es lo que has anadido tu a mano. Se ensena la
+    -- suma. Si fueran una sola, quitar una receta de la lista te
+    -- borraria de paso lo que hubieras puesto tu, o al reves: recalcular
+    -- pisaria tu numero. Con dos, cada mitad manda en lo suyo.
+    --
+    -- Una linea se identifica por (ingrediente, unidad): 200 g de pollo
+    -- y 2 ud de pollo NO se pueden sumar, asi que son dos lineas. Con
+    -- ingrediente_id a NULL es una linea suelta escrita a mano (papel de
+    -- horno, bolsas), que no viene de ninguna receta.
+    CREATE TABLE IF NOT EXISTS recetas_compra_lineas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      compra_id INTEGER NOT NULL REFERENCES recetas_compras(id),
+      ingrediente_id INTEGER REFERENCES recetas_ingredientes(id),
+      texto TEXT,
+      unidad TEXT,
+      cantidad_recetas REAL,
+      cantidad_manual REAL,
+      comprado INTEGER NOT NULL DEFAULT 0,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Migracion sencilla: group_id y active_theme_id se anadieron despues de
