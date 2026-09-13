@@ -51,6 +51,8 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
     private static let kinds = [
         "QueTocaHoyWidget", "TareasWidget",
         "FinanzasWidget", "LecturasWidget", "ViajesWidget",
+        "CalendarioWidget", "ConsistenciaWidget", "HeatmapWidget",
+        "EstadisticasWidget", "MusculosWidget",
     ]
 
     // AVISAR AL JAVASCRIPT DE QUE VUELVE A HABER QUE MIRAR EL BUZÓN.

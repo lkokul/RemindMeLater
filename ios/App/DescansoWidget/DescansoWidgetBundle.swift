@@ -29,6 +29,13 @@ struct DescansoWidgetBundle: WidgetBundle {
         FinanzasWidget()
         LecturasWidget()
         ViajesWidget()
+        // La tanda del 11/9/2026: el calendario del mes y los cuatro del
+        // Gimnasio (ver WidgetsNuevos.swift).
+        CalendarioWidget()
+        ConsistenciaWidget()
+        HeatmapWidget()
+        EstadisticasWidget()
+        MusculosWidget()
         // Y los botones del centro de control, solo si se compila con el
         // SDK de iOS 18 o posterior: ControlWidget no existe antes y con
         // un Xcode viejo esto no compilaria. Ver la misma condicion en

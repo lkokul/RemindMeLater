@@ -21,10 +21,15 @@
   // madre, pero hacia el cliente se devuelven ANIDADOS en ella
   // (`segments`): asi `sets.length` sigue siendo el numero de series de
   // verdad y nadie tiene que acordarse de filtrar.
+  // Los tipos de TRAMO que se leen de vuelta tal cual. Cualquier otra
+  // cosa (un set_type de la serie madre, o basura) se lee como 'dropset',
+  // que es el tramo por defecto.
+  const KINDS_DE_TRAMO = ['dropset', 'restpause', 'parciales'];
+
   function serializeSets(sessionId) {
     const rows = db
       .prepare(`
-        SELECT gs.id, gs.parent_set_id, gs.segment_index, gs.pause_seconds, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, gs.extra_rest_seconds, gs.duration_seconds, gs.side, gs.notes, ge.name
+        SELECT gs.id, gs.parent_set_id, gs.segment_index, gs.pause_seconds, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, gs.extra_rest_seconds, gs.duration_seconds, gs.measure, gs.measure_seconds, gs.side, gs.notes, ge.name
         FROM gym_sets gs
         JOIN gym_exercises ge ON ge.id = gs.exercise_id
         WHERE gs.session_id = ?
@@ -47,6 +52,12 @@
         setType: r.set_type,
         extraRestSeconds: r.extra_rest_seconds,
         durationSeconds: r.duration_seconds,
+        // COMO SE MIDIO ESTA SERIE, guardado en la propia serie y no
+        // leido del ejercicio: asi cambiar un ejercicio de repeticiones a
+        // tiempo no reescribe hacia atras lo que ya habias apuntado.
+        // Null en todo lo de antes, que se lee como 'reps'.
+        measure: r.measure || 'reps',
+        measureSeconds: r.measure_seconds,
         side: r.side || null,
         notes: r.notes || null,
         segments: [],
@@ -62,7 +73,7 @@
       const parent = byId.get(r.parent_set_id);
       if (!parent) continue;
       parent.segments.push({
-        kind: r.set_type === 'restpause' ? 'restpause' : 'dropset',
+        kind: KINDS_DE_TRAMO.includes(r.set_type) ? r.set_type : 'dropset',
         segmentIndex: r.segment_index,
         reps: r.reps,
         weightKg: r.weight_kg,
@@ -123,22 +134,57 @@
   // veces aparece ese exerciseId ANTES en la lista (1a serie, 2a serie...
   // de ESE ejercicio dentro de la sesion) -- asi el cliente solo manda
   // las series en el orden en que se hicieron, sin tener que numerarlas.
+  //
+  // UN UNILATERAL NO CUENTA DOBLE. En un ejercicio por lados, cada lado
+  // llega como una fila propia (asi el volumen y el historial no
+  // necesitan casos especiales), pero los DOS lados son LA MISMA serie:
+  // 3 series a dos lados son 6 filas numeradas 1,1,2,2,3,3, no 1..6.
+  // La regla es la misma que la de la pantalla (gymSetSerieNumber en
+  // app.js) y esta escrita igual A PROPOSITO: si contaran distinto, el
+  // entreno diria "serie 3 de 3" y el historial guardaria 6.
+  //
+  // Se emparejan DOS FILAS SEGUIDAS DE LADOS DISTINTOS, sin dar por hecho
+  // cual va primero -- ese era justo el fallo: se contaban los izquierdos
+  // y quien empezara por el derecho veia "D I D / I D / I".
   function replaceSessionSets(sessionId, sets) {
     db.prepare('DELETE FROM gym_sets WHERE session_id = ?').run(sessionId);
     if (!Array.isArray(sets)) return;
 
     const insert = db.prepare(
-      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds, duration_seconds, side, notes, parent_set_id, segment_index, pause_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds, duration_seconds, measure, measure_seconds, side, notes, parent_set_id, segment_index, pause_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    const VALID_SET_TYPES = ['warmup', 'dropset', 'restpause', 'failure'];
+    // 'parciales' es el tercer tipo de TRAMO (Koku, 11/9/2026): seguir a
+    // recorrido corto cuando ya no salen repeticiones completas. Entra en
+    // esta lista porque un tramo guarda su tipo en set_type, igual que
+    // 'dropset' y 'restpause'.
+    const VALID_SET_TYPES = ['warmup', 'dropset', 'restpause', 'failure', 'parciales'];
+    const VALID_SEGMENT_KINDS = ['dropset', 'restpause', 'parciales'];
+    // Como se midio la serie. 'reps' se guarda como NULL para que una
+    // serie normal siga siendo indistinguible de las de antes de esto.
+    const VALID_MEASURES = ['tiempo', 'reps_en_tiempo'];
     const VALID_SIDES = ['left', 'right'];
+    // Por ejercicio: cuantas series van, si la ultima quedo ABIERTA
+    // (esperando el otro lado) y de que lado era la fila anterior.
     const countByExercise = new Map();
+    const estadoDeLados = new Map();
+    function numeroDeSerie(exerciseId, lado) {
+      const previo = countByExercise.get(exerciseId) || 0;
+      const est = estadoDeLados.get(exerciseId) || { abierta: false, anterior: null };
+      if (est.abierta && lado && est.anterior && lado !== est.anterior) {
+        // Esta fila CIERRA la pareja de la anterior: misma serie.
+        estadoDeLados.set(exerciseId, { abierta: false, anterior: lado });
+        return Math.max(1, previo);
+      }
+      estadoDeLados.set(exerciseId, { abierta: !!lado, anterior: lado });
+      countByExercise.set(exerciseId, previo + 1);
+      return previo + 1;
+    }
     const numeroONulo = (v) => (v !== undefined && v !== null && v !== '' ? Number(v) : null);
     sets.forEach((s) => {
       const exerciseId = Number(s && s.exerciseId);
       if (!exerciseId) return; // entrada invalida, se ignora en vez de romper el resto
-      const setNumber = (countByExercise.get(exerciseId) || 0) + 1;
-      countByExercise.set(exerciseId, setNumber);
+      const lado = VALID_SIDES.includes(s.side) ? s.side : null;
+      const setNumber = numeroDeSerie(exerciseId, lado);
       const info = insert.run(
         sessionId,
         exerciseId,
@@ -150,7 +196,12 @@
         VALID_SET_TYPES.includes(s.setType) ? s.setType : null,
         s.extraRestSeconds !== undefined && s.extraRestSeconds !== null && s.extraRestSeconds !== '' && Number(s.extraRestSeconds) > 0 ? Number(s.extraRestSeconds) : null,
         s.durationSeconds !== undefined && s.durationSeconds !== null && s.durationSeconds !== '' && Number(s.durationSeconds) > 0 ? Number(s.durationSeconds) : null,
-        VALID_SIDES.includes(s.side) ? s.side : null,
+        VALID_MEASURES.includes(s.measure) ? s.measure : null,
+        // Los segundos SOLO tienen sentido en una serie por tiempo: en
+        // una de repeticiones se tiran, para que no quede un dato
+        // colgado que luego alguien sume sin querer.
+        VALID_MEASURES.includes(s.measure) ? numeroONulo(s.measureSeconds) : null,
+        lado,
         s.notes && String(s.notes).trim() ? String(s.notes).trim() : null,
         null, // parent_set_id: esta es la serie madre
         null,
@@ -166,11 +217,13 @@
       let segmentIndex = 0;
       s.segments.forEach((seg) => {
         if (!seg) return;
-        const kind = seg.kind === 'restpause' ? 'restpause' : 'dropset';
+        const kind = VALID_SEGMENT_KINDS.includes(seg.kind) ? seg.kind : 'dropset';
         const reps = numeroONulo(seg.reps);
         const weightKg = numeroONulo(seg.weightKg);
-        // Un tramo sin repeticiones no aporta nada y solo ensuciaria el
-        // historial: se descarta.
+        // UN TRAMO SIGUE SIENDO DE REPETICIONES, siempre. Un dropset de
+        // una plancha no existe: lo que alargarias es el aguante, y eso
+        // ya es la serie en si. Asi que un tramo sin repeticiones no
+        // aporta nada y solo ensuciaria el historial: se descarta.
         if (!reps) return;
         segmentIndex += 1;
         insert.run(
@@ -184,6 +237,8 @@
           kind,
           null,
           null,
+          null, // measure: un tramo siempre es de repeticiones
+          null, // measure_seconds
           VALID_SIDES.includes(s.side) ? s.side : null,
           null,
           info.lastInsertRowid,
@@ -214,7 +269,20 @@
         SELECT s.id, s.date, s.type, s.activity_kind, s.activity_name, s.duration_seconds, s.routine_id,
                COUNT(CASE WHEN st.parent_set_id IS NULL THEN st.id END) as set_count,
                COUNT(CASE WHEN st.parent_set_id IS NULL AND st.set_type = 'failure' THEN st.id END) as failure_set_count,
-               SUM(COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0)) as volume_kg,
+               -- Los ejercicios ASISTIDOS quedan FUERA del volumen: ahi el
+               -- peso apuntado es la ayuda que te quitas y va en negativo,
+               -- asi que sumarlo restaria kilos de la cuenta general. Lo
+               -- que de verdad mueves en una dominada asistida es tu
+               -- cuerpo menos la banda, y el peso corporal no lo sabemos
+               -- (Koku: "el peso corporal te da igual"). Las SERIES si
+               -- cuentan: para la racha, el heatmap y el mapa de musculos
+               -- una dominada asistida es una serie como cualquier otra.
+               -- Se mira el SIGNO DE ESTA SERIE, no una marca del
+               -- ejercicio: con una marca, apagarla recalculaba hacia
+               -- atras todo el historial. Ver el bloque "PESO NEGATIVO
+               -- (ayuda)" en app.js.
+               SUM(CASE WHEN COALESCE(st.weight_kg, 0) < 0 THEN 0
+                        ELSE COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) END) as volume_kg,
                -- Cuantos de esos kg salieron de una serie llevada al
                -- fallo. Se devuelve APARTE y en kg de verdad: el peso
                -- extra lo aplica el cliente al pintar (es un ajuste de
@@ -223,8 +291,24 @@
                -- lleva 'failure' en su propio set_type -- lo hereda de su
                -- madre, de ahi el COALESCE con el padre.
                SUM(CASE WHEN COALESCE(p.set_type, st.set_type) = 'failure'
+                             AND COALESCE(st.weight_kg, 0) >= 0
                         THEN COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) ELSE 0 END) as failure_volume_kg,
-               SUM(COALESCE(st.duration_seconds, 0)) as work_seconds
+               SUM(COALESCE(st.duration_seconds, 0)) as work_seconds,
+               -- TIEMPO BAJO TENSION: los segundos de las series que se
+               -- miden en TIEMPO (una plancha, 30 s de flexiones).
+               --
+               -- Va en un contador APARTE y no dentro del volumen, que es
+               -- lo que eligio Koku de las tres opciones. El motivo: un
+               -- minuto de plancha con 10 kg daria 600 metido en el
+               -- volumen, y 600 ahi no son 600 kg -- un dia de planchas
+               -- parecerian un dia de sentadillas. Son unidades
+               -- distintas y se enseñan por separado.
+               --
+               -- Se mira st.measure (lo que guardo LA SERIE), no el
+               -- ejercicio: cambiar un ejercicio de reps a tiempo no
+               -- puede reescribir lo que ya estaba apuntado.
+               SUM(CASE WHEN st.measure IN ('tiempo', 'reps_en_tiempo')
+                        THEN COALESCE(st.measure_seconds, 0) ELSE 0 END) as tension_seconds
         FROM gym_sessions s
         LEFT JOIN gym_sets st ON st.session_id = s.id
         LEFT JOIN gym_sets p ON p.id = st.parent_set_id
@@ -263,6 +347,10 @@
       // Tiempo real de trabajo: suma de lo que duraron las series (solo
       // las registradas con el boton de empezar/terminar serie).
       workSeconds: r.work_seconds || 0,
+      // Segundos de las series que se miden en tiempo. Aparte del
+      // volumen a proposito: son unidades distintas (ver el comentario
+      // del SQL de arriba).
+      tensionSeconds: r.tension_seconds || 0,
       muscleGroups: musclesBySession.get(r.id) || [],
     })));
   });
@@ -400,12 +488,24 @@
     const rows = db
       .prepare(`
         SELECT s.date, MAX(st.weight_kg) as max_weight_kg,
-               SUM(COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0)) as volume_kg,
+               -- Una serie con peso negativo no suma volumen (ver /summary).
+               SUM(CASE WHEN COALESCE(st.weight_kg, 0) < 0 THEN 0
+                        ELSE COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) END) as volume_kg,
                -- Igual que en /summary: los kg que salieron de series al
                -- fallo, aparte y sin ajustar (ver alli el porque).
                SUM(CASE WHEN COALESCE(p.set_type, st.set_type) = 'failure'
+                             AND COALESCE(st.weight_kg, 0) >= 0
                         THEN COALESCE(st.reps, 0) * COALESCE(st.weight_kg, 0) ELSE 0 END) as failure_volume_kg,
-               COUNT(CASE WHEN st.parent_set_id IS NULL AND st.set_type = 'failure' THEN st.id END) as failure_set_count
+               COUNT(CASE WHEN st.parent_set_id IS NULL AND st.set_type = 'failure' THEN st.id END) as failure_set_count,
+               -- Para un ejercicio POR TIEMPO, la grafica de progreso no
+               -- puede ser de volumen (no hay kilos que sumar): lo que
+               -- progresa es el AGUANTE. Se devuelven los dos, el mejor
+               -- de la sesion y el total, y el cliente elige cual pintar
+               -- segun como se mida el ejercicio.
+               MAX(CASE WHEN st.measure IN ('tiempo', 'reps_en_tiempo')
+                        THEN COALESCE(st.measure_seconds, 0) ELSE 0 END) as max_seconds,
+               SUM(CASE WHEN st.measure IN ('tiempo', 'reps_en_tiempo')
+                        THEN COALESCE(st.measure_seconds, 0) ELSE 0 END) as tension_seconds
         FROM gym_sets st
         JOIN gym_sessions s ON s.id = st.session_id
         LEFT JOIN gym_sets p ON p.id = st.parent_set_id
@@ -422,6 +522,8 @@
         volumeKg: r.volume_kg,
         failureVolumeKg: r.failure_volume_kg || 0,
         failureSetCount: r.failure_set_count || 0,
+        maxSeconds: r.max_seconds || 0,
+        tensionSeconds: r.tension_seconds || 0,
       }))
     );
   });
@@ -444,7 +546,7 @@
     if (!last) return res.json({ date: null, sets: [], note: null });
 
     const rows = db
-      .prepare('SELECT id, parent_set_id, segment_index, pause_seconds, set_type, set_number, reps, weight_kg, rpe, rest_seconds, side FROM gym_sets WHERE session_id = ? AND exercise_id = ? ORDER BY id ASC')
+      .prepare('SELECT id, parent_set_id, segment_index, pause_seconds, set_type, set_number, reps, weight_kg, rpe, rest_seconds, measure, measure_seconds, side FROM gym_sets WHERE session_id = ? AND exercise_id = ? ORDER BY id ASC')
       .all(last.id, req.params.exerciseId);
     // Mismo anidado que serializeSets: los tramos van dentro de su
     // madre, para que la columna "Anterior" del entreno en vivo siga
@@ -453,7 +555,10 @@
     const byId = new Map();
     for (const r of rows) {
       if (r.parent_set_id) continue;
-      const set = { setNumber: r.set_number, reps: r.reps, weightKg: r.weight_kg, rpe: r.rpe, restSeconds: r.rest_seconds, side: r.side || null, segments: [] };
+      // measure/measureSeconds viajan tambien en "la vez anterior": en un
+      // ejercicio por tiempo, lo que quieres ver al lado de la serie es
+      // cuanto aguantaste la ultima vez, no unas repeticiones vacias.
+      const set = { setNumber: r.set_number, reps: r.reps, weightKg: r.weight_kg, rpe: r.rpe, restSeconds: r.rest_seconds, measure: r.measure || 'reps', measureSeconds: r.measure_seconds, side: r.side || null, segments: [] };
       byId.set(r.id, set);
       sets.push(set);
     }
@@ -462,7 +567,7 @@
       const parent = byId.get(r.parent_set_id);
       if (!parent) continue;
       parent.segments.push({
-        kind: r.set_type === 'restpause' ? 'restpause' : 'dropset',
+        kind: KINDS_DE_TRAMO.includes(r.set_type) ? r.set_type : 'dropset',
         segmentIndex: r.segment_index,
         reps: r.reps,
         weightKg: r.weight_kg,

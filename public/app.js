@@ -829,16 +829,32 @@ function setAssetImageSrc(img, path) {
   resolveAssetUrl(path).then((url) => { if (url) img.src = url; });
 }
 
-// Prepara el HTML de una nota ANTES de meterlo en el DOM: cambia
-// src="/api/..." por data-asset-src="/api/...". Sin esto, el navegador
-// pide esa ruta en cuanto aparece el <img> (y falla, porque no hay
-// servidor) antes de que hydrateAssetImages llegue a poner la URL
-// blob:. El saneador del backend garantiza que un <img> solo puede
-// llevar src y que empieza por /api/notes/images/, asi que este
-// reemplazo no puede tocar nada mas.
+// Prepara el HTML de una nota ANTES de meterlo en el DOM. Hace DOS cosas,
+// y el orden importa:
+//
+// 1. LO SANEA OTRA VEZ. Antes no se hacia: se confiaba en que la ruta que
+//    guarda la nota ya lo habia limpiado. Esa confianza tiene un agujero
+//    real: importar una copia de seguridad SUSTITUYE el archivo .sqlite
+//    entero (backup.js), asi que sus filas nunca pasan por la ruta que
+//    sanea. Probado: una nota con <img src=x onerror="..."> metida por esa
+//    via ejecutaba codigo al abrirla. La regla buena es sanear donde se
+//    USA el dato, no solo donde se recibe.
+//    Es la MISMA funcion de routes-local/notes.js (expuesta como
+//    window.sanearHtmlDeNota), no una copia: dos saneadores se separan con
+//    el tiempo y el que se quede corto es el agujero.
+// 2. Cambia src="/api/..." por data-asset-src="/api/...". Sin esto, el
+//    navegador pide esa ruta en cuanto aparece el <img> (y falla, porque
+//    no hay servidor) antes de que hydrateAssetImages llegue a poner la
+//    URL blob:. Va DESPUES de sanear, porque el saneador es quien
+//    garantiza que un <img> solo lleva src y que empieza por
+//    /api/notes/images/: al reves estaria trabajando sobre HTML en el que
+//    todavia no se puede confiar.
 function prepareAssetHtmlForDom(html) {
   if (!html) return html;
-  return html.replace(/<img\s+src="(\/api\/notes\/images\/[^"]+)"/gi, '<img data-asset-src="$1"');
+  const limpio = typeof window.sanearHtmlDeNota === 'function'
+    ? window.sanearHtmlDeNota(html)
+    : html;
+  return limpio.replace(/<img\s+src="(\/api\/notes\/images\/[^"]+)"/gi, '<img data-asset-src="$1"');
 }
 
 // Cambia el src de todas las imagenes de un trozo de HTML ya insertado
@@ -1072,17 +1088,27 @@ function buildCalendarEventChip(ev) {
   return chip;
 }
 
+// Escapa texto para meterlo en HTML. OJO CON LAS COMILLAS: textContent
+// -> innerHTML solo convierte < > &, NO las comillas -- y esta funcion se
+// usa tambien DENTRO de atributos entrecomillados (value="...",
+// data-algo="..."), donde una comilla suelta cierra el atributo y deja
+// escribir uno nuevo. Probado: una nota de serie con
+//   " autofocus onfocus="..."
+// se convertia en un onfocus de verdad que se ejecutaba solo. Por eso se
+// escapan las dos comillas a mano: asi la misma funcion vale para texto
+// entre etiquetas Y para atributos, sin tener que acordarse de cual es
+// cual en cada uno de los ~80 sitios que la llaman.
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
-  return div.innerHTML;
+  return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // Las flechas del mes navegan por AÑO en vez de por mes mientras estas
 // en la vista anual (ver calendarViewMode mas abajo) -- mismo boton,
 // distinto salto, coherente con lo que se esta mirando.
 // ---------------------------------------------------------------------
-// Vista anual (solo escritorio): las 12 miniaturas del año a la vez, en
+// Vista anual: las 12 miniaturas del año a la vez, en
 // vez del mes a mes de siempre -- pedido explicito de Koku, "ya que hay
 // mas espacio [en el ordenador] creo que seria visible". Se alterna con
 // gestos de la rueda del raton (hacia abajo sobre el mes = vista anual;
@@ -3738,7 +3764,7 @@ function startNoteItemMove(itemKey) {
 async function startNoteItemDelete(itemKey) {
   const { item } = resolveMobileNotesItem(itemKey) || {};
   const nombre = item ? getNoteListItemName(item) : 'esto';
-  const conContenido = mobileNotesDeletionIncludesFolderWithContent([itemKey]);
+  const conContenido = notasMarcadasConCarpetaLlena([itemKey]);
   const ok = await showAppConfirm(
     conContenido
       ? `¿Eliminar "${nombre}"? Lo que hay dentro subirá un nivel, salvo que marques la casilla.`
@@ -3763,6 +3789,41 @@ function startNoteItemEdit(itemKey) {
   if (kind === 'folder' && item) openNoteFolderModal(item);
 }
 
+// DUPLICAR uno, desde sus acciones al deslizar.
+//
+// Una carpeta con algo dentro pregunta con la MISMA casilla que al
+// borrar ("Copiar también lo que hay dentro"), que es el paralelo que
+// pidió Koku. Una carpeta vacía y una nota no preguntan nada: no hay
+// nada que decidir, y un diálogo con una sola respuesta posible es un
+// toque de más.
+async function startNoteItemDuplicate(itemKey) {
+  const { kind, id, item } = resolveMobileNotesItem(itemKey) || {};
+  if (!item) return;
+  let conContenido = false;
+  if (kind === 'folder' && notasMarcadasConCarpetaLlena([itemKey])) {
+    const ok = await showAppConfirm(
+      `¿Duplicar "${getNoteListItemName(item)}"?`,
+      { okText: 'Duplicar', checkbox: { label: 'Copiar también lo que hay dentro' } }
+    );
+    if (!ok) return;
+    conContenido = lastAppConfirmCheckbox;
+  }
+  await duplicateNoteItems([itemKey], conContenido);
+  renderNotesView();
+}
+
+// El duplicado en si, compartido por el deslizamiento y el modo
+// Seleccionar. "conContenido" solo afecta a las carpetas; una nota se
+// copia entera siempre.
+async function duplicateNoteItems(keys, conContenido) {
+  for (const key of keys) {
+    const { kind, id } = resolveMobileNotesItem(key);
+    if (kind === 'note') await api(`/api/notes/${id}/duplicate`, { method: 'POST' });
+    else await api(`/api/note-folders/${id}/duplicate${conContenido ? '?withContents=1' : ''}`, { method: 'POST' });
+  }
+  await Promise.all([loadNotes(), loadNoteFolders()]);
+}
+
 function isNoteItemFolder(itemKey) {
   return itemKey.startsWith('folder:');
 }
@@ -3770,6 +3831,9 @@ function isNoteItemFolder(itemKey) {
 const NOTE_ACTION_EDIT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 
 const NOTE_ACTION_MOVE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m12 11 3 3-3 3"/><path d="M9 14h6"/></svg>';
+// Dos hojas superpuestas, el icono de "copiar" de toda la vida. Mismo
+// trazo y mismo viewBox que los otros tres, para que la lista no baile.
+const NOTE_ACTION_DUPLICATE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 const NOTE_ACTION_DELETE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
 
 const noteItemActionMenu = document.createElement('div');
@@ -3785,10 +3849,14 @@ function openNoteItemActionMenu(anchorEl, itemKey) {
     titulo.textContent = getNoteListItemName(item);
     noteItemActionMenu.appendChild(titulo);
   }
+  // Aqui SI caben todas: es una lista vertical, no compite por el ancho
+  // como el deslizamiento (que se queda en tres). Por eso "Mover" vive
+  // ahora aqui y no alli.
   const acciones = [['Mover', NOTE_ACTION_MOVE_ICON, '', () => startNoteItemMove(itemKey)]];
   if (isNoteItemFolder(itemKey)) {
     acciones.push(['Editar', NOTE_ACTION_EDIT_ICON, '', () => startNoteItemEdit(itemKey)]);
   }
+  acciones.push(['Duplicar', NOTE_ACTION_DUPLICATE_ICON, '', () => startNoteItemDuplicate(itemKey)]);
   acciones.push(['Eliminar', NOTE_ACTION_DELETE_ICON, 'is-danger', () => startNoteItemDelete(itemKey)]);
   acciones.forEach(([texto, icono, extra, fn]) => {
     const opt = document.createElement('button');
@@ -3978,10 +4046,22 @@ function wrapNoteRowWithSwipe(row, itemKey) {
 
   const acciones = document.createElement('div');
   acciones.className = 'note-swipe-actions';
-  const lista = [['Mover', 'secondary-btn', () => startNoteItemMove(itemKey)]];
+  // TRES ACCIONES COMO MUCHO, y el limite no es estetico: es de ancho.
+  //
+  // Al anadir "Duplicar" habia cuatro en una carpeta (Mover/Editar/
+  // Duplicar/Eliminar) y medidas ocupaban 308 px de los 320 de un iPhone
+  // SE: la fila se iba entera de la pantalla y dejabas de ver sobre QUE
+  // estabas actuando. iOS tampoco pasa de tres por el mismo motivo.
+  //
+  // El que sale es "Mover", que es el que tiene mas caminos alternativos:
+  // sigue en el menu de mantener pulsado (ver openNoteItemActionMenu) y
+  // sobre todo se hace ARRASTRANDO la fila, que es el gesto que pidio
+  // Koku para mover. Duplicar, en cambio, no tendria otra puerta.
+  const lista = [];
   // "Editar" solo en carpetas (nombre y color) -- una nota se edita
   // abriendola sin mas.
   if (isNoteItemFolder(itemKey)) lista.push(['Editar', 'secondary-btn', () => startNoteItemEdit(itemKey)]);
+  lista.push(['Duplicar', 'secondary-btn', () => startNoteItemDuplicate(itemKey)]);
   lista.push(['Eliminar', 'danger-btn', () => startNoteItemDelete(itemKey)]);
   lista.forEach(([texto, clase, fn]) => {
     const btn = document.createElement('button');
@@ -4112,7 +4192,12 @@ function setMobileNotesMode(mode) {
 // NOTES_VIEW_TARGETS), rellenados con el mismo texto/handler segun el
 // modo activo.
 const NOTES_ACTION_BAR_TARGETS = {
-  mobile: { barId: 'mobile-notes-action-bar', leftId: 'btn-mobile-notes-action-left', rightId: 'btn-mobile-notes-action-right' },
+  mobile: {
+    barId: 'mobile-notes-action-bar',
+    leftId: 'btn-mobile-notes-action-left',
+    midId: 'btn-mobile-notes-action-mid',
+    rightId: 'btn-mobile-notes-action-right',
+  },
 };
 
 // Sin seleccion propia (Eliminar/Mover deshabilitados con nada marcado),
@@ -4120,21 +4205,32 @@ const NOTES_ACTION_BAR_TARGETS = {
 // par de botones reutilizado para los dos casos en vez de 2 barras
 // distintas, replicado en las dos plataformas.
 function refreshMobileNotesActionBar() {
-  Object.values(NOTES_ACTION_BAR_TARGETS).forEach(({ barId, leftId, rightId }) => {
+  Object.values(NOTES_ACTION_BAR_TARGETS).forEach(({ barId, leftId, midId, rightId }) => {
     const bar = document.getElementById(barId);
     if (!bar) return;
     const leftBtn = document.getElementById(leftId);
+    const midBtn = document.getElementById(midId);
     const rightBtn = document.getElementById(rightId);
+    // El del medio solo existe en el modo Seleccionar; el resto de modos
+    // lo apagan aqui, para no tener que acordarse en cada rama.
+    if (midBtn) { midBtn.classList.add('hidden'); midBtn.onclick = null; }
 
     if (mobileNotesMode === 'select') {
-      // Seleccionar sirve para BORRAR varios de una vez, y ya esta:
-      // mover se hace arrastrando (pedido explicito de Koku), asi que
-      // aqui el par es Eliminar / Cancelar.
+      // Seleccionar sirve para hacer algo con VARIOS de una vez: borrarlos
+      // o duplicarlos. Mover no esta aqui porque se hace arrastrando
+      // (pedido explicito de Koku).
       bar.classList.remove('hidden');
       leftBtn.textContent = 'Eliminar';
       leftBtn.className = 'danger-btn';
       leftBtn.disabled = mobileNotesSelectedKeys.size === 0;
       leftBtn.onclick = openMobileNotesDeleteModal;
+      if (midBtn) {
+        midBtn.classList.remove('hidden');
+        midBtn.textContent = 'Duplicar';
+        midBtn.className = 'secondary-btn';
+        midBtn.disabled = mobileNotesSelectedKeys.size === 0;
+        midBtn.onclick = duplicarSeleccionDeNotas;
+      }
       rightBtn.textContent = 'Cancelar';
       rightBtn.className = 'secondary-btn';
       rightBtn.disabled = false;
@@ -4160,6 +4256,34 @@ function refreshMobileNotesActionBar() {
 
 }
 
+// Duplicar TODO lo marcado en el modo Seleccionar.
+//
+// Se pregunta UNA sola vez, no una por carpeta: si entre lo marcado hay
+// alguna carpeta con algo dentro, la casilla decide para todas. Es el
+// mismo trato que ya da el borrado en bloque, y encadenar cinco dialogos
+// para cinco carpetas seria insufrible.
+async function duplicarSeleccionDeNotas() {
+  const keys = [...mobileNotesSelectedKeys];
+  if (keys.length === 0) return;
+  let conContenido = false;
+  if (notasMarcadasConCarpetaLlena(keys)) {
+    const ok = await showAppConfirm(
+      keys.length === 1
+        ? '¿Duplicar lo seleccionado?'
+        : `¿Duplicar los ${keys.length} elementos seleccionados?`,
+      { okText: 'Duplicar', checkbox: { label: 'Copiar también lo que hay dentro' } }
+    );
+    if (!ok) return;
+    conContenido = lastAppConfirmCheckbox;
+  }
+  await duplicateNoteItems(keys, conContenido);
+  // Se sale del modo Seleccionar, igual que al borrar: lo marcado ya no
+  // dice nada util una vez hecha la copia, y quedarse con los checkboxes
+  // puestos sobre una lista que acaba de cambiar confunde.
+  setMobileNotesMode('browse');
+  renderNotesView();
+}
+
 function resolveMobileNotesItem(key) {
   const [kind, idStr] = key.split(':');
   const id = Number(idStr);
@@ -4167,11 +4291,17 @@ function resolveMobileNotesItem(key) {
   return { kind, id, item: state.noteFolders.find((f) => f.id === id) };
 }
 
-// El aviso de "esto tiene contenido dentro" solo hace falta si la
-// seleccion final (ya descontando lo excluido en el modal) incluye una
-// CARPETA con notas o subcarpetas -- se calcula con lo que ya hay en
-// memoria (state.noteFolders/state.notes), sin pedir nada al servidor.
-function mobileNotesDeletionIncludesFolderWithContent(keys) {
+// ¿Hay entre lo marcado alguna CARPETA con notas o subcarpetas dentro?
+//
+// Es lo que decide si hace falta preguntar "¿y lo de dentro?" -- lo usan
+// tanto el borrado (donde lo de dentro sube un nivel salvo que marques la
+// casilla) como el duplicado (donde la copia sale vacia salvo que la
+// marques). Se calcula con lo que ya hay en memoria
+// (state.noteFolders/state.notes), sin pedir nada al motor local.
+//
+// Se llamaba mobileNotesDeletionIncludes...: se renombro al empezar a
+// usarla tambien para duplicar, que ya no es "deletion".
+function notasMarcadasConCarpetaLlena(keys) {
   return keys.some((key) => {
     const { kind, id } = resolveMobileNotesItem(key);
     if (kind !== 'folder') return false;
@@ -4233,7 +4363,7 @@ async function deleteNoteItems(keys, conContenido) {
 // Pregunta lo que haya que preguntar y borra. Devuelve false si se
 // cancela. Lo usa el modal de borrar varios.
 async function runNoteItemsDeletion(keys) {
-  const conContenido = mobileNotesDeletionIncludesFolderWithContent(keys);
+  const conContenido = notasMarcadasConCarpetaLlena(keys);
   if (conContenido) {
     const proceed = await showAppConfirm(
       'Lo que haya dentro de las carpetas que borres subirá un nivel, salvo que marques la casilla.',
@@ -6665,12 +6795,18 @@ document.getElementById('note-code-insert-btn').addEventListener('click', () => 
 // cuenta se calculaba sola al pulsar Intro para seguir escribiendo.
 // ---------------------------------------------------------------------
 
-// Una formula dentro de un texto: "=" + cuenta + (opcional) el "→ 41"
-// de un calculo anterior. El ultimo caracter de la cuenta tiene que ser
-// un digito, un ")" o un "%", para no tragarse los espacios de despues.
-// La flecha NO esta en la lista de caracteres permitidos, y por eso el
-// resultado viejo no se confunde con parte de la cuenta.
-const RE_NOTE_FORMULA = /=[\s0-9+\-*/^().,%\p{Sc}]*[0-9)%](?:\s*→\s*-?[\d.,]+)?/gu;
+// UNA CUENTA, escrita al reves de como estaba antes: primero la cuenta y
+// el "=" AL FINAL. `12+1 =`.
+//
+// Lo pidio Koku asi tras probar la version anterior (que era `=12+1` y
+// dejaba `=12+1 → 13`): "lo que tendria mas sentido es poder poner
+// 12+1 = y ahora asi que te ponga el 13 detras".
+//
+// La cuenta tiene que EMPEZAR por un numero (o un parentesis o una
+// moneda) y acabar en numero/parentesis/%, y tiene que llevar al menos un
+// operador -- sin esa ultima regla, una frase normal como "el total = 100
+// euros" se leeria como una cuenta.
+const RE_NOTE_CUENTA = /(?:^|[^\w=→])((?:[0-9(]|\p{Sc})[\s0-9+\-*/^().,%\p{Sc}]*[0-9)%])\s*=(?!=)/gu;
 const RE_NOTE_FORMULA_OPERADOR = /[+\-*/^%]/;
 // Cualquier símbolo de moneda, no una lista a mano. `\p{Sc}` es la
 // categoría de Unicode "Symbol, currency": entran € $ £ ¥ ₩ ₽ y también
@@ -6811,18 +6947,6 @@ const NOTE_MONEY_FORMATTER = new Intl.NumberFormat('es-ES', {
   maximumFractionDigits: 2,
 });
 
-// Reescribe UNA formula ya encontrada. Devuelve el texto nuevo, o null si
-// no hay nada que calcular (sin operador, o cuenta invalida).
-function recalcularFormulaDeNota(trozo) {
-  // Fuera el "→ ..." de un calculo anterior, si lo hubiera.
-  const cuenta = trozo.replace(/\s*→\s*-?[\d.,]+\s*$/, '').replace(/^=/, '');
-  if (!RE_NOTE_FORMULA_OPERADOR.test(cuenta)) return null;
-  const valor = evaluarExpresionDeNota(cuenta);
-  if (valor === null) return null;
-  const formato = RE_NOTE_MONEDA.test(cuenta) ? NOTE_MONEY_FORMATTER : NOTE_FORMULA_FORMATTER;
-  return `=${cuenta.replace(/\s+$/, '')} → ${formato.format(valor)}`;
-}
-
 // Un bloque de codigo es texto literal: ahi no se calcula nada.
 function estaDentroDeCodigo(nodo) {
   for (let el = nodo.parentElement; el && el !== NOTE_EDITOR_BODY; el = el.parentElement) {
@@ -6831,91 +6955,282 @@ function estaDentroDeCodigo(nodo) {
   return false;
 }
 
-// La formula que contiene (o toca) el cursor, si la hay.
-function formulaEnElCursorDeNota() {
+// El resultado, ya escrito. Con simbolo de moneda, dos decimales y
+// redondeo (peticion suya: un precio con seis decimales no es un precio).
+function textoDelResultadoDeNota(cuenta, valor) {
+  const formato = RE_NOTE_MONEDA.test(cuenta) ? NOTE_MONEY_FORMATTER : NOTE_FORMULA_FORMATTER;
+  return formato.format(valor);
+}
+
+// ---------------------------------------------------------------------
+// LA VISTA PREVIA ("el fantasma")
+// ---------------------------------------------------------------------
+//
+// Koku: "quiero que de primeras se autocomplete, si yo le doy a la
+// pantalla, que se quite y me deje escribir; para guardar la formula y
+// diga ah vale esto es calculado, le he de dar al intro".
+//
+// O sea tres estados:
+//   1. escribes `12+1 =`   -> aparece un 13 en gris detras (el fantasma)
+//   2. tocas la pantalla   -> el fantasma se va y sigues escribiendo
+//   3. pulsas Intro        -> se queda fijo y marcado como calculado
+//
+// El fantasma es un <span contenteditable="false"> que se mete en el DOM
+// y se quita entero. NUNCA se guarda: se borra antes de serializar la
+// nota (ver quitarFantasmaDeFormula, llamada desde el submit) y tampoco
+// sobrevive a perder el foco. Por eso lleva su propia clase y no se
+// parece a nada mas del editor.
+const CLASE_FANTASMA = 'note-formula-ghost';
+const CLASE_FORMULA = 'note-formula';
+
+// LO QUE SE ESTA SUGIRIENDO AHORA MISMO, recordado aparte del cursor.
+//
+// Esto NO es una optimizacion: es lo que hace que Intro funcione en el
+// iPhone. El fallo que vio Koku ("aparece el resultado, pero le doy al
+// intro y se va igualmente") sale de que Intro volvia a deducir la cuenta
+// MIRANDO DONDE ESTA EL CURSOR, y en Safari el cursor no se queda donde
+// Chrome lo deja: al meter el fantasma en medio, el navegador parte el
+// nodo de texto y la seleccion viva se va al trozo NUEVO (offset 0), asi
+// que la cuenta "que acaba justo antes del cursor" ya no existia y Intro
+// se limitaba a bajar de linea, borrando la sugerencia por el camino.
+//
+// Con la cuenta apuntada aqui en el momento de sugerirla, fijarla no
+// depende de donde haya dejado el cursor el navegador.
+let formulaPendiente = null;
+
+function quitarFantasmaDeFormula() {
+  formulaPendiente = null;
+  if (!NOTE_EDITOR_BODY) return;
+  NOTE_EDITOR_BODY.querySelectorAll(`.${CLASE_FANTASMA}`).forEach((el) => el.remove());
+}
+
+// Lo apuntado, pero solo si sigue valiendo: el nodo tiene que seguir en el
+// editor y su texto tiene que seguir acabando en el "=" de esa cuenta. Si
+// no, se devuelve null y se vuelve al camino de siempre (mirar el cursor).
+function formulaPendienteValida() {
+  if (!formulaPendiente || !NOTE_EDITOR_BODY) return null;
+  const { nodo, cuenta, texto } = formulaPendiente;
+  if (!nodo || !NOTE_EDITOR_BODY.contains(nodo)) return null;
+  const txt = nodo.nodeValue || '';
+  if (!/=\s*$/.test(txt)) return null;
+  if (txt.lastIndexOf(cuenta) < 0) return null;
+  return { nodo, cuenta, texto, corte: txt.length };
+}
+
+// La cuenta que acaba JUSTO donde esta el cursor. Devuelve null si el
+// cursor no esta pegado al "=" -- asi el fantasma solo aparece mientras
+// acabas de escribirla, no cada vez que pasas por encima de una vieja.
+function cuentaJustoAntesDelCursor() {
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return null;
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
   const nodo = sel.focusNode;
   if (!nodo || nodo.nodeType !== Node.TEXT_NODE) return null;
   if (!NOTE_EDITOR_BODY.contains(nodo) || estaDentroDeCodigo(nodo)) return null;
-  const offset = sel.focusOffset;
-  RE_NOTE_FORMULA.lastIndex = 0;
-  let m;
-  while ((m = RE_NOTE_FORMULA.exec(nodo.nodeValue)) !== null) {
-    if (offset >= m.index && offset <= m.index + m[0].length) {
-      return { nodo, indice: m.index, largo: m[0].length, trozo: m[0] };
-    }
+  // Dentro de una formula YA calculada no se vuelve a sugerir nada.
+  for (let el = nodo.parentElement; el && el !== NOTE_EDITOR_BODY; el = el.parentElement) {
+    if (el.classList && el.classList.contains(CLASE_FORMULA)) return null;
   }
-  return null;
+  const hasta = nodo.nodeValue.slice(0, sel.focusOffset);
+  RE_NOTE_CUENTA.lastIndex = 0;
+  let m;
+  let ultima = null;
+  while ((m = RE_NOTE_CUENTA.exec(hasta)) !== null) ultima = m;
+  if (!ultima) return null;
+  // Tiene que acabar justo en el cursor: si hay algo escrito despues del
+  // "=", ya no estas acabando esa cuenta.
+  if (ultima.index + ultima[0].length !== hasta.length) return null;
+  const cuenta = ultima[1];
+  if (!RE_NOTE_FORMULA_OPERADOR.test(cuenta)) return null;
+  const valor = evaluarExpresionDeNota(cuenta);
+  if (valor === null) return null;
+  return { nodo, cuenta, valor, corte: sel.focusOffset, texto: textoDelResultadoDeNota(cuenta, valor) };
 }
 
-// Calcula la del cursor y deja el cursor detras del resultado. true si
-// de verdad calculo algo.
-function calcularFormulaEnElCursor() {
-  const enc = formulaEnElCursorDeNota();
+// Repinta el fantasma segun donde este el cursor. Se llama en cada
+// pulsacion y en cada cambio de seleccion, asi que lo primero que hace es
+// quitar el anterior: es mas barato y mas fiable rehacerlo que intentar
+// moverlo.
+function refrescarFantasmaDeFormula() {
+  quitarFantasmaDeFormula();
+  const enc = cuentaJustoAntesDelCursor();
+  if (!enc) return;
+  const sel = window.getSelection();
+  const range = sel.getRangeAt(0).cloneRange();
+  const fantasma = document.createElement('span');
+  fantasma.className = CLASE_FANTASMA;
+  fantasma.contentEditable = 'false';
+  fantasma.textContent = ` ${enc.texto}`;
+  range.collapse(true);
+  range.insertNode(fantasma);
+  // El cursor tiene que quedarse DELANTE del fantasma, donde estaba: si
+  // se queda detras, la siguiente tecla escribe al otro lado del
+  // resultado. insertNode lo empuja, asi que se recoloca a mano.
+  //
+  // Y se recoloca al FINAL del nodo (enc.nodo.nodeValue.length), NO
+  // leyendo sel.focusOffset: insertNode acaba de partir ese nodo de texto
+  // en dos, y donde deja la seleccion viva cada navegador es cosa suya --
+  // Safari la manda al trozo nuevo con offset 0, y entonces
+  // vuelta.setStart(enc.nodo, 0) plantaba el cursor al PRINCIPIO de la
+  // cuenta. Tras la particion, enc.nodo es exactamente el texto que habia
+  // antes del cursor, asi que su final ES el sitio, en cualquier
+  // navegador.
+  const vuelta = document.createRange();
+  vuelta.setStart(enc.nodo, enc.nodo.nodeValue.length);
+  vuelta.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(vuelta);
+  formulaPendiente = { nodo: enc.nodo, cuenta: enc.cuenta, texto: enc.texto };
+}
+
+// Intro con un fantasma delante: se fija. El resultado pasa a ser texto
+// de verdad, y la cuenta entera se envuelve para que se vea que es
+// calculada.
+function fijarFormulaEnElCursor() {
+  // Lo apuntado al sugerir manda; el cursor es solo el plan B (por si se
+  // fija una cuenta que no venia de una sugerencia recien puesta).
+  const enc = formulaPendienteValida() || cuentaJustoAntesDelCursor();
   if (!enc) return false;
-  const nuevo = recalcularFormulaDeNota(enc.trozo);
-  if (nuevo === null) return false;
+  quitarFantasmaDeFormula();
   const txt = enc.nodo.nodeValue;
-  enc.nodo.nodeValue = txt.slice(0, enc.indice) + nuevo + txt.slice(enc.indice + enc.largo);
+  const corte = enc.corte;
+  // Donde empieza la cuenta dentro del nodo de texto.
+  const desde = txt.slice(0, corte).lastIndexOf(enc.cuenta);
+  if (desde < 0) return false;
+
+  const antes = document.createTextNode(txt.slice(0, desde));
+  // Un ESPACIO detras si no habia nada. No es cosmetica: sin el, el nodo
+  // de texto que sigue a la formula queda vacio, y en un contenteditable
+  // poner el cursor al principio de un nodo vacio que va justo despues de
+  // un <span> es ambiguo -- el navegador mete lo que escribas DENTRO del
+  // span. Y como cuentaJustoAntesDelCursor() se niega a sugerir nada
+  // dentro de una formula ya fijada, la SEGUNDA cuenta de la misma linea
+  // no se calculaba nunca. Paso de verdad al probarlo:
+  // "2*3 = 6 y 4*5 =" se quedaba sin resultado.
+  // Con un caracter de verdad delante, el cursor tiene donde agarrarse y
+  // lo que escribes va fuera del span. Ademas un espacio ahi es lo que
+  // querrias igualmente: vas a seguir escribiendo.
+  const resto = txt.slice(corte);
+  const despues = document.createTextNode(resto === '' ? ' ' : resto);
+  const marca = document.createElement('span');
+  marca.className = CLASE_FORMULA;
+  // ATOMICA (contenteditable="false"), y esto NO es un detalle.
+  //
+  // Sin ello, escribir justo detras de la formula mete el texto DENTRO del
+  // span: el navegador hereda el formato del elemento en linea de al lado.
+  // Medido: tras fijar "2*3 = 6", teclear " y 4*5 =" daba
+  // <span class="note-formula">2*3 = 6y 4*5 =</span>, o sea que la segunda
+  // cuenta se comia el espacio y quedaba dentro de la primera formula, sin
+  // calcularse nunca.
+  //
+  // Con contenteditable="false" el span es un bloque indivisible: el
+  // cursor no entra y lo que escribas va fuera. Para cambiar una formula
+  // se toca (ver el listener de mas abajo), que ademas es lo que pidio
+  // Koku -- "si pincho en el 13 que me muestre cual es la formula".
+  marca.contentEditable = 'false';
+  marca.textContent = `${enc.cuenta.trim()} = ${enc.texto}`;
+
+  const padre = enc.nodo.parentNode;
+  padre.insertBefore(antes, enc.nodo);
+  padre.insertBefore(marca, enc.nodo);
+  padre.insertBefore(despues, enc.nodo);
+  padre.removeChild(enc.nodo);
+
+  // El cursor, justo DETRAS de la formula fijada (y detras del espacio
+  // que se acaba de poner, si se puso), para poder seguir escribiendo sin
+  // que lo siguiente se meta dentro de la marca.
   const sel = window.getSelection();
   const range = document.createRange();
-  range.setStart(enc.nodo, enc.indice + nuevo.length);
+  range.setStart(despues, resto === '' ? 1 : 0);
   range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
   return true;
 }
 
-// Todas las de la nota. Es lo que hace el boton cuando el cursor no esta
-// dentro de ninguna: sirve de "recalcular la nota entera" despues de
-// cambiar varios numeros.
-function calcularTodasLasFormulasDeNota() {
-  const walker = document.createTreeWalker(NOTE_EDITOR_BODY, NodeFilter.SHOW_TEXT);
-  const nodos = [];
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    if (!estaDentroDeCodigo(n)) nodos.push(n);
-  }
-  let cuantas = 0;
-  nodos.forEach((n) => {
-    const nuevo = n.nodeValue.replace(RE_NOTE_FORMULA, (trozo) => {
-      const calc = recalcularFormulaDeNota(trozo);
-      if (calc === null) return trozo;
-      cuantas += 1;
-      return calc;
-    });
-    if (nuevo !== n.nodeValue) n.nodeValue = nuevo;
+// ¿Hay ahora mismo un fantasma en pantalla? Es la condicion para que
+// Intro fije en vez de hacer su salto de linea de siempre.
+function hayFantasmaDeFormula() {
+  return !!(NOTE_EDITOR_BODY && NOTE_EDITOR_BODY.querySelector(`.${CLASE_FANTASMA}`));
+}
+
+// Las formulas fijadas son contenteditable="false", pero ESO NO SE GUARDA
+// (el saneador solo deja la clase, ningun otro atributo). Asi que al abrir
+// una nota hay que volver a ponerselo, o serian texto normal y volveria el
+// problema de que lo que escribes al lado se meta dentro.
+function prepararFormulasDeNota(root) {
+  if (!root) return;
+  root.querySelectorAll(`.${CLASE_FORMULA}`).forEach((el) => {
+    el.contentEditable = 'false';
   });
-  return cuantas;
 }
 
-// ¿El cursor esta JUSTO al final de una formula? Es la condicion para que
-// Tab calcule en vez de hacer lo suyo de siempre (indentar un item de
-// lista): asi solo se mete cuando esta clarisimo que es lo que quieres.
-function cursorAlFinalDeUnaFormula() {
-  const enc = formulaEnElCursorDeNota();
-  if (!enc) return false;
-  const sel = window.getSelection();
-  if (sel.focusOffset !== enc.indice + enc.largo) return false;
-  return recalcularFormulaDeNota(enc.trozo) !== null;
+// Tocar una formula fijada la DESHACE: vuelve a ser la cuenta editable
+// ("2*3 =") con el cursor al final, asi que el resultado reaparece en gris
+// al momento y otro Intro la vuelve a fijar. Es la respuesta a "si pincho
+// en el 13 que me muestre cual es la formula": no hace falta un globo
+// aparte, la cuenta ES el contenido.
+if (NOTE_EDITOR_BODY) {
+  NOTE_EDITOR_BODY.addEventListener('click', (e) => {
+    const marca = e.target && e.target.closest && e.target.closest(`.${CLASE_FORMULA}`);
+    if (!marca || !NOTE_EDITOR_BODY.contains(marca)) return;
+    // Solo la cuenta, sin el "= resultado" que se le pego al fijarla.
+    const cuenta = marca.textContent.replace(/\s*=\s*[^=]*$/, '').trim();
+    const texto = document.createTextNode(`${cuenta} =`);
+    marca.parentNode.replaceChild(texto, marca);
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.setStart(texto, texto.nodeValue.length);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    refrescarFantasmaDeFormula();
+  });
 }
 
-document.getElementById('note-formula-btn').addEventListener('mousedown', (e) => e.preventDefault());
-document.getElementById('note-formula-btn').addEventListener('click', () => {
-  // Mismo patron que Tabla/Codigo: si el editor perdio el foco al tocar
-  // el boton, se recupera la seleccion guardada.
-  saveNoteEditorSelection();
-  restoreNoteEditorSelection();
-  if (calcularFormulaEnElCursor()) {
-    refreshNoteEditorState();
-    return;
-  }
-  const cuantas = calcularTodasLasFormulasDeNota();
-  if (cuantas === 0) {
-    mostrarAvisoFlotante('Escribe una cuenta con "=" (por ejemplo =12*3+5) y vuelve a tocar este botón.');
-  }
-  refreshNoteEditorState();
-});
+// LA VISTA PREVIA DE LA FORMULA, enganchada a escribir y a tocar.
+//
+// Dos eventos y nada mas, que es lo que pidio Koku:
+//   input          -> acabas de escribir; si lo ultimo es "12+1 =",
+//                     aparece el resultado en gris detras.
+//   pointerdown    -> tocas la pantalla; se va y sigues escribiendo.
+//
+// Va en 'pointerdown' y NO en 'click' ni en 'selectionchange': con click
+// el fantasma se quitaria DESPUES de que el navegador ya haya colocado el
+// cursor (y si el toque cae encima del propio fantasma, el cursor se
+// queda en un nodo que acaba de desaparecer). Y selectionchange se
+// dispara tambien al escribir, asi que borraria el fantasma en el mismo
+// momento de ponerlo.
+if (NOTE_EDITOR_BODY) {
+  NOTE_EDITOR_BODY.addEventListener('input', () => {
+    refrescarFantasmaDeFormula();
+  });
+  // LA SEGUNDA RED PARA INTRO, y hace falta de verdad en el movil.
+  //
+  // El teclado de iOS no siempre manda un keydown con key === 'Enter'
+  // (con el texto predictivo por medio llega como 'Unidentified'), pero
+  // 'beforeinput' SI llega siempre, y con inputType diciendo exactamente
+  // que se va a insertar un salto de linea. Asi que el mismo gesto se
+  // atiende por los dos lados.
+  //
+  // No se duplica el trabajo: cuando el keydown ya lo ha atendido, hace
+  // preventDefault y este evento ni se dispara.
+  NOTE_EDITOR_BODY.addEventListener('beforeinput', (e) => {
+    if (e.inputType !== 'insertParagraph' && e.inputType !== 'insertLineBreak') return;
+    if (!hayFantasmaDeFormula()) return;
+    if (fijarFormulaEnElCursor()) {
+      e.preventDefault();
+      refreshNoteEditorState();
+    }
+  });
+  NOTE_EDITOR_BODY.addEventListener('pointerdown', () => {
+    quitarFantasmaDeFormula();
+  });
+  // Al salir del editor tampoco puede quedarse: no es contenido, es una
+  // sugerencia. Si se quedara, el autoguardado la escribiria en la nota.
+  NOTE_EDITOR_BODY.addEventListener('blur', () => {
+    quitarFantasmaDeFormula();
+  });
+}
 
 // El estado encendido/apagado de cada boton (y si toca ensenar la barra
 // contextual de tabla) depende de donde este el cursor ahora mismo, asi
@@ -7156,22 +7471,31 @@ function handleNoteQuoteEnterExit() {
 }
 
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
-  // Tab con el cursor justo al final de una cuenta la CALCULA en vez de
-  // hacer lo suyo. Solo Tab, y solo en escritorio: es una tecla que
-  // nunca escribe texto, asi que no puede colarse en mitad de una frase.
+  // INTRO FIJA LA FORMULA -- pero SOLO si hay una vista previa delante.
   //
-  // INTRO NO CALCULA, a proposito. Lo hacia y se quito en cuanto Koku
-  // dijo lo que le preocupaba: "si quiero escribir un texto con un =,
-  // para que solo haga la formula cuando quiero". Una linea que acabara
-  // en una cuenta valida se calculaba sola al pulsar Intro para seguir
-  // escribiendo, que es exactamente la sorpresa que no quiere. Calcular
-  // es SIEMPRE una decision suya: el boton "=" de la barra (o Tab).
-  if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-    if (cursorAlFinalDeUnaFormula() && calcularFormulaEnElCursor()) {
+  // Esto invierte la decision anterior ("Intro NO calcula"), y lo pidio
+  // Koku al rediseñar las formulas: "para guardar la formula y diga ah
+  // vale esto es calculado, le he de dar al intro".
+  //
+  // Lo que hacia peligrosa la version de antes era que Intro calculaba
+  // CUALQUIER linea que acabara en una cuenta valida, aunque tu solo
+  // quisieras bajar de linea. Ahora la condicion es mucho mas estrecha:
+  // solo si en ese momento se esta viendo el resultado en gris, o sea si
+  // acabas de escribir "12+1 =" y el cursor sigue ahi. En cualquier otro
+  // sitio Intro baja de linea como siempre. Y si la vista previa te
+  // estorba, tocar la pantalla la quita (ver el listener de seleccion).
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && hayFantasmaDeFormula()) {
+    if (fijarFormulaEnElCursor()) {
       e.preventDefault();
       refreshNoteEditorState();
       return;
     }
+  }
+  if (e.key === 'Escape' && hayFantasmaDeFormula()) {
+    // Escape tambien la descarta, para quien tenga teclado.
+    quitarFantasmaDeFormula();
+    e.preventDefault();
+    return;
   }
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     if (handleNoteQuoteEnterExit()) {
@@ -7373,6 +7697,7 @@ function loadOpenNoteIntoDom(entry) {
   document.getElementById('note-id').value = entry.id || '';
   refreshNoteTitlePreview(entry.title);
   NOTE_EDITOR_BODY.innerHTML = prepareAssetHtmlForDom(entry.bodyHtml);
+  prepararFormulasDeNota(NOTE_EDITOR_BODY);
   hydrateAssetImages(NOTE_EDITOR_BODY);
   resetNoteEditorToolbar();
   noteModalFavorite = entry.favorite;
@@ -7708,12 +8033,12 @@ NOTE_EDITOR_BODY.addEventListener('blur', () => {
 // guardado -- el dialogo de "cambios sin guardar" de closeOpenNote()
 // se queda como red de seguridad para el hueco de tiempo entre el
 // ultimo tecleo y que el debounce dispare.
-// "Estamos en el visor movil": mismo umbral que el CSS (860px), en un
-// unico sitio para que no se repita el matchMedia suelto por el
-// archivo.
-function isMobileLayout() {
-  return window.matchMedia('(max-width: 859px)').matches;
-}
+// (Aqui habia una SEGUNDA definicion de isMobileLayout(), con
+// matchMedia('(max-width: 859px)'). Estaba muerta sin que se notara: mas
+// abajo en este mismo archivo hay otra funcion con el mismo nombre, y en
+// JavaScript la ultima declaracion gana, asi que esta nunca llegaba a
+// ejecutarse. Se quito al retirar el corte de escritorio; la buena, y
+// unica, esta en el bloque de GESTOS DE NAVEGACION al final del archivo.)
 
 let mobileNoteAutosaveTimer = null;
 function scheduleMobileNoteAutosave() {
@@ -8039,6 +8364,22 @@ function getMobileNavNotesSlot() {
   return MOBILE_NAV_SLOT_APPS[stored] ? stored : 'notes';
 }
 
+// La App que ocupa el 2o hueco de la barra y su tarjeta en Herramientas:
+// los ids de las tarjetas del hub siguen el mismo nombre que la clave.
+const MOBILE_NAV_SLOT_CARD_IDS = {
+  notes: 'btn-open-notes',
+  gym: 'btn-open-gym',
+  finanzas: 'btn-open-finanzas',
+  // En esta rama la App se llama Entretenimiento: la clave tiene que
+  // cuadrar con MOBILE_NAV_SLOT_APPS y el id con el boton que existe de
+  // verdad. Llego con el merge de desarrollador, donde todavia es
+  // "lecturas", y sin esto la tarjeta NO se escondia de Herramientas al
+  // ponerla en la barra -- o sea, salia dos veces, justo lo que se
+  // arreglo en la v0.52.0.
+  entretenimiento: 'btn-open-entretenimiento',
+  viajes: 'btn-open-viajes',
+};
+
 function applyMobileNavCustomization() {
   const slot = getMobileNavNotesSlot();
   const app = MOBILE_NAV_SLOT_APPS[slot];
@@ -8046,6 +8387,17 @@ function applyMobileNavCustomization() {
   if (!btn) return;
   btn.setAttribute('aria-label', app.label);
   btn.innerHTML = `${app.icon}<span>${app.label}</span>`;
+  // LA QUE ESTA EN LA BARRA SE QUITA DE HERRAMIENTAS (peticion de Koku:
+  // "si pongo una app como acceso rapido... que no aparezca en la parte
+  // de herramientas directamente, sino creo que marea un poco").
+  //
+  // Se recorren TODAS y se esconde solo la del hueco, en vez de esconder
+  // una y ya: asi cambiar de App vuelve a enseñar la anterior sin que
+  // haya que acordarse de nada.
+  Object.entries(MOBILE_NAV_SLOT_CARD_IDS).forEach(([clave, id]) => {
+    const tarjeta = document.getElementById(id);
+    if (tarjeta) tarjeta.classList.toggle('hidden', clave === slot);
+  });
 }
 applyMobileNavCustomization();
 
@@ -8621,6 +8973,11 @@ async function openGymView() {
   document.getElementById('gym-view').classList.remove('hidden');
   setCurrentScreen('gym');
   await Promise.all([loadGymExercises(), loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
+  // Siempre se entra por el INICIO. Los paneles guardan su clase `hidden`
+  // entre aperturas, asi que sin esto el Gimnasio se abriria en la ultima
+  // seccion donde estuviste y con la flecha de volver puesta. Va DESPUES
+  // de cargar los datos porque el inicio los usa para sus subtitulos.
+  switchGymTab('inicio');
   renderGymExercisesList();
   renderGymBlocksList();
   renderGymRoutinesList();
@@ -8635,13 +8992,41 @@ function closeGymView() {
 document.getElementById('btn-open-gym').addEventListener('click', openGymView);
 document.getElementById('btn-close-gym').addEventListener('click', closeGymView);
 
+// =====================================================================
+// Navegacion del Gimnasio: un INICIO de filas y las secciones debajo.
+//
+// Peticion de Koku (13/9/2026): "que en vez que este en la seccion de
+// arriba que pongamos tipo la de finanzas, que es los 4 botones y luego
+// entras a la seccion". Antes eran cuatro pestanas en una fila fija.
+//
+// Es el mismo patron que Finanzas, con UNA diferencia deliberada: aqui el
+// hueco de arriba no es una cifra pasiva, lleva el boton de EMPEZAR
+// ENTRENAMIENTO. Se le ofrecieron las tres opciones y eligio esta -- el
+// motivo es que empezar a entrenar es lo que se hace casi cada dia, y
+// enterrarlo dentro de una seccion lo volveria dos toques diarios.
+// =====================================================================
+
+const GYM_SECCIONES = {
+  inicio: 'Gimnasio',
+  sessions: 'Historial',
+  plan: 'Plan',
+  progress: 'Progreso',
+  achievements: 'Logros',
+};
+
 function switchGymTab(tabName) {
-  document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.gymTab === tabName);
-  });
+  const enInicio = tabName === 'inicio';
   document.querySelectorAll('.gym-tab-panel').forEach((panel) => {
     panel.classList.toggle('hidden', panel.id !== `gym-tab-${tabName}`);
   });
+  // El titulo de arriba dice donde estas: es lo que sustituye a la
+  // pestana marcada de antes.
+  document.getElementById('gym-view-title').textContent = GYM_SECCIONES[tabName] || 'Gimnasio';
+  document.getElementById('btn-gym-back').classList.toggle('hidden', enInicio);
+  // Salir a Herramientas solo tiene sentido desde el inicio: dentro de una
+  // seccion, lo que uno quiere es volver AL GIMNASIO.
+  document.getElementById('btn-close-gym').classList.toggle('hidden', !enInicio);
+  if (enInicio) renderGymInicio();
   // Las secciones de Progreso/Logros se calculan al entrar en su
   // pestana, no en cada apertura del Gimnasio -- son funciones
   // declaradas mas abajo, sin problema de orden porque esto solo corre
@@ -8655,6 +9040,112 @@ function switchGymTab(tabName) {
     if (localStorage.getItem('gymProgressHelpSeen') !== '1') openGymProgressHelpModal();
   }
   if (tabName === 'achievements') renderGymAchievements();
+}
+
+document.getElementById('btn-gym-back').addEventListener('click', () => switchGymTab('inicio'));
+
+// El inicio: la cifra de arriba y las cuatro filas.
+//
+// UNA sola llamada a /summary para las dos cosas. Da la semana y la racha
+// del hero, y de paso cuantos logros llevas empezados -- pedir el mismo
+// resumen dos veces para dos numeros de la misma pantalla seria tonto.
+// Va en try/catch: que falle el resumen no puede dejarte sin las filas,
+// que son la unica forma de entrar a las secciones.
+async function renderGymInicio() {
+  const cont = document.getElementById('gym-inicio-filas');
+  const objetivo = getGymWeeklyGoal();
+  let semana = null;
+  let logrosEmpezados = null;
+  try {
+    const summary = await api('/api/gym-sessions/summary');
+    semana = gymResumenDeLaSemana(summary, objetivo);
+    logrosEmpezados = gymLogrosEmpezados(summary);
+  } catch {
+    // Sin resumen, el hero se queda con el guion de partida.
+  }
+
+  const elSemana = document.getElementById('gym-inicio-semana');
+  const elRacha = document.getElementById('gym-inicio-racha');
+  elSemana.textContent = semana ? `${semana.estaSemana}/${objetivo}` : '—';
+  elRacha.textContent = !semana
+    ? ''
+    : semana.racha > 0
+      ? `Racha de ${semana.racha} ${semana.racha === 1 ? 'semana' : 'semanas'}`
+      : semana.estaSemana >= objetivo
+        ? 'Objetivo cumplido'
+        : `Te ${objetivo - semana.estaSemana === 1 ? 'queda' : 'quedan'} ${objetivo - semana.estaSemana} para el objetivo`;
+
+  cont.innerHTML = '';
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  const fila = (opciones) => grupo.appendChild(filaDeLista({ ...opciones, flecha: true }));
+
+  // Historial. La cifra es de state, que ya esta cargado al abrir el
+  // Gimnasio: no cuesta una peticion mas.
+  const sesiones = state.gymSessions.length;
+  fila({
+    icono: 'reloj',
+    titulo: 'Historial',
+    sub: sesiones === 0
+      ? 'Lo que ya has hecho, y apuntar a mano'
+      : 'Sesiones, actividades y apuntes a mano',
+    importe: sesiones > 0 ? String(sesiones) : '',
+    alPulsar: () => switchGymTab('sessions'),
+  });
+
+  const bloques = state.gymBlocks.length;
+  const dias = state.gymRoutines.length;
+  const ejercicios = state.gymExercises.length;
+  fila({
+    icono: 'tabla',
+    titulo: 'Plan',
+    sub: bloques === 0
+      ? 'Bloques, días de entreno y tus ejercicios'
+      : `${bloques} ${bloques === 1 ? 'bloque' : 'bloques'} · ${dias} ${dias === 1 ? 'día' : 'días'} · ${ejercicios} ${ejercicios === 1 ? 'ejercicio' : 'ejercicios'}`,
+    alPulsar: () => switchGymTab('plan'),
+  });
+
+  fila({
+    icono: 'tendencia',
+    titulo: 'Progreso',
+    sub: 'Consistencia, mapa de músculos, récords y gráficas',
+    alPulsar: () => switchGymTab('progress'),
+  });
+
+  fila({
+    icono: 'trofeo',
+    titulo: 'Logros',
+    sub: logrosEmpezados === null
+      ? 'Lo que vas desbloqueando'
+      : `${logrosEmpezados} de ${GYM_ACHIEVEMENTS.length} empezados`,
+    alPulsar: () => switchGymTab('achievements'),
+  });
+
+  cont.appendChild(grupo);
+}
+
+// Esta semana y la racha, EN UN SOLO SITIO. Lo usan el hero del inicio y
+// las cifras de Consistencia, para que no puedan decir cosas distintas
+// del mismo entreno -- mismo motivo por el que gymPuntuacionPorMusculo()
+// se separo de renderGymBodyMap() cuando aparecio el widget.
+function gymResumenDeLaSemana(summary, objetivo = getGymWeeklyGoal()) {
+  const sessionsByWeek = new Map();
+  for (const s of summary) {
+    const week = gymWeekStartKey(new Date(`${s.date}T00:00:00`));
+    sessionsByWeek.set(week, (sessionsByWeek.get(week) || 0) + 1);
+  }
+  return {
+    sessionsByWeek,
+    estaSemana: sessionsByWeek.get(gymWeekStartKey(new Date())) || 0,
+    racha: gymComputeWeeklyStreak(sessionsByWeek, objetivo),
+  };
+}
+
+// Cuantos logros tienen ya algun nivel. Se apoya en las mismas funciones
+// que la pestana de Logros, asi que no puede contar distinto que ella.
+function gymLogrosEmpezados(summary) {
+  const stats = gymComputeAchievementStats(summary);
+  return GYM_ACHIEVEMENTS.filter((a) => gymAchievementLevel(a, a.value(stats)) > 0).length;
 }
 
 // --- Aviso del mapa de musculos (pestana Progreso) --------------------
@@ -8672,9 +9163,6 @@ function closeGymProgressHelpModal() {
 }
 document.getElementById('btn-gym-progress-help').addEventListener('click', openGymProgressHelpModal);
 document.getElementById('btn-close-gym-progress-help').addEventListener('click', closeGymProgressHelpModal);
-document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => switchGymTab(btn.dataset.gymTab));
-});
 
 async function loadGymExercises() {
   state.gymExercises = await api('/api/gym-exercises');
@@ -8719,9 +9207,16 @@ async function loadGymSessions() {
 // 2. Lo que se ensena es el tiempo del ENTRENO ENTERO, nunca el de cada
 //    ejercicio por separado ("tiempo del entrene no del ejercicio").
 // 3. Sin historial NO SE INVENTA NADA: los ejercicios que no has hecho
-//    nunca se quedan fuera de la suma y se dice cuantos son. Por eso el
-//    texto empieza por "Al menos": lo que sale es un suelo, no una
-//    prediccion.
+//    nunca se quedan FUERA de la suma. O sea que la cifra es un suelo, no
+//    una prediccion.
+//
+// EL TEXTO ES SOLO "Tiempo estimado: 12 min 4 s", a secas. Lo pidio Koku
+// asi tras verlo con explicaciones pegadas ("pon solo tiempo estimado:
+// estimacion, ya luego pones en la ayuda de entrenamiento como funciona,
+// como saca el valor y tal"). O sea que el "de donde sale este numero"
+// -- que es la media de TUS series y descansos por ejercicio, y que los
+// ejercicios sin historial no cuentan -- va en la seccion de ayuda del
+// Gimnasio cuando se haga (ver IDEAS-AYUDAS.md), no colgando de la cifra.
 // ---------------------------------------------------------------------
 let gymSetTimes = null; // Map exerciseId -> { avgSetSeconds, avgRestSeconds }
 
@@ -8801,8 +9296,29 @@ function mostrarAvisoFlotante(texto, { duracionMs = 4200 } = {}) {
   setTimeout(irse, duracionMs);
 }
 
-// "1 h 12 min" / "48 min" / "3 min". Nunca segundos: en una estimacion
-// de media hora, decir "48 min 20 s" finge una precision que no hay.
+// "12 min 4 s" / "1 h 12 min 4 s". Con segundos, que es como lo pidio
+// Koku para la linea del entreno ("12min 4s y au").
+//
+// Ojo: lleva segundos porque el numero SALE de segundos de verdad (la
+// media de lo que te dura cada serie y cada descanso, de tu propio
+// historial), no de un redondeo. Aun asi sigue siendo una estimacion: lo
+// dice el rotulo que la acompaña ("Tiempo estimado:").
+function gymFormatDuracionConSegundos(segundos) {
+  const total = Math.max(0, Math.round(Number(segundos) || 0));
+  const h = Math.floor(total / 3600);
+  const min = Math.floor((total % 3600) / 60);
+  const seg = total % 60;
+  const trozos = [];
+  if (h > 0) trozos.push(`${h} h`);
+  if (min > 0) trozos.push(`${min} min`);
+  // Los segundos se enseñan siempre que no haya horas: con una hora por
+  // delante, los segundos ya no dicen nada.
+  if (h === 0) trozos.push(`${seg} s`);
+  return trozos.join(' ');
+}
+
+// "1 h 12 min" / "48 min" / "3 min". Sin segundos: la usa el aviso
+// flotante y la ficha del dia, donde la cifra se lee de pasada.
 function gymFormatDuracionAproximada(segundos) {
   const min = Math.max(1, Math.round(segundos / 60));
   if (min < 60) return `${min} min`;
@@ -8816,9 +9332,49 @@ function gymFormatDuracionAproximada(segundos) {
 function gymTextoDeDuracion(day) {
   const est = gymEstimarDuracionDeDia(day);
   if (!est) return null;
-  const base = `Al menos ~${gymFormatDuracionAproximada(est.segundos)}`;
-  if (est.sinDatos === 0) return base;
-  return `${base} (${est.sinDatos} ejercicio${est.sinDatos === 1 ? '' : 's'} sin datos todavía)`;
+  return `Tiempo estimado: ${gymFormatDuracionAproximada(est.segundos)}`;
+}
+
+// La linea fija de ARRIBA DEL TODO del entreno en curso. Peticion de
+// Koku tras ver el aviso flotante: "pon arriba de la primera serie un
+// mensaje que ponga un tiempo estimado en base a los ultimos entrenes o
+// algo asi: 12min 4s".
+//
+// Es la MISMA cuenta que el aviso flotante (gymEstimarDuracionDeDia: tu
+// media por ejercicio, sacada de gym_sets.duration_seconds y de los
+// descansos), solo que con segundos y sin irse sola. El aviso flotante se
+// queda: uno avisa al empezar y la otra esta ahi cuando la buscas.
+// Se calcula sobre el ENTRENO EN CURSO y no sobre el dia del plan, que es
+// lo que mira gymEstimarDuracionDeDia: dentro del entreno puedes anadir o
+// quitar ejercicios y series, y la linea tiene que reflejar lo que de
+// verdad te queda por delante, no lo que decia el plan al empezar.
+function gymTextoDeDuracionDelEntreno() {
+  if (!gymLiveSession || !gymSetTimes) return null;
+  let segundos = 0;
+  let conDatos = 0;
+  let sinDatos = 0;
+  let ultimoDescanso = 0;
+  for (const ex of (gymLiveSession.exercises || [])) {
+    const media = gymSetTimes.get(ex.exerciseId);
+    if (!media || !media.avgSetSeconds) { sinDatos += 1; continue; }
+    const series = (ex.sets || []).length;
+    if (series === 0) continue;
+    // El descanso del propio entreno si lo tiene puesto (es lo que vas a
+    // descansar HOY); si no, tu media historica en ese ejercicio.
+    const primero = (ex.sets || [])[0] || {};
+    const descanso = Number(primero.restSeconds) > 0
+      ? Number(primero.restSeconds)
+      : (media.avgRestSeconds || 0);
+    segundos += series * media.avgSetSeconds + series * descanso;
+    ultimoDescanso = descanso;
+    conDatos += 1;
+  }
+  if (conDatos === 0) return null;
+  // Un descanso menos: al acabar la ultima serie del entreno ya no
+  // descansas, te vas.
+  segundos = Math.max(0, segundos - ultimoDescanso);
+  if (!segundos) return null;
+  return `Tiempo estimado: ${gymFormatDuracionConSegundos(segundos)}`;
 }
 
 // 'YYYY-MM-DD' -> "15 ago 2026", para el historial de sesiones. No hay
@@ -8871,17 +9427,169 @@ function gymNormalizarPeso(texto) {
   return `${limpio.slice(0, i).replace(/[.\s]/g, '')}.${limpio.slice(i + 1)}`;
 }
 
+// ---------------------------------------------------------------------
+// PESO NEGATIVO (ayuda): dominadas con banda, maquina asistida, fondos
+// ---------------------------------------------------------------------
+//
+// Peticion de Koku: "yo digo asistido en -20 kg, la siguiente -18 kg...
+// llegara un punto que te dire 5 kg, entonces simplemente es un ejercicio
+// normal solo que la base no es 0 kg".
+//
+// LA PRIMERA VERSION DE ESTO ESTABA MAL Y EL LO VIO ANTES DE PROBARLA.
+// Habia una casilla "ejercicio asistido" por EJERCICIO, y de ella
+// dependian tres cosas: si se admitia el signo, si el volumen contaba, y
+// si habia 1RM. Su critica, que es correcta: "puede ser un ejercicio que
+// empiece quitandome peso y luego comience a ponerle peso... una vez ya
+// no necesite una reduccion de peso y lo desactive, el programa,
+// historial y grafica va a romperse por todos lados". Y es verdad:
+// apagar la casilla RECALCULABA HACIA ATRAS el volumen de todo el
+// historial de ese ejercicio, porque la regla miraba el ejercicio, no la
+// serie. Un dato que cambia de valor segun un interruptor de hoy no es un
+// dato.
+//
+// COMO ESTA AHORA, que es lo que pidio ("me permita poner un - delante,
+// ya esta"): no hay casilla ninguna. El signo se admite SIEMPRE, en
+// cualquier ejercicio, y cada decision se toma POR SERIE mirando el signo
+// de SU peso:
+//
+//   peso < 0  -> es ayuda. No suma kilos movidos (sumarlos restaria del
+//                total) y no tiene 1RM de Epley (esa formula parte de
+//                "peso que levantas", y aqui el numero es lo que te
+//                quitan). La serie SI cuenta para racha, heatmap, mapa de
+//                musculos y objetivo semanal: la hiciste.
+//   peso >= 0 -> lo de siempre.
+//
+// La ventaja de decidirlo por serie es justo la que el pedia: el mismo
+// ejercicio puede pasar de -20 a +5 con el tiempo y cada serie conserva
+// para siempre como se conto. Nada se recalcula hacia atras nunca.
+//
+// En la grafica de progreso el peso se pinta tal cual, negativos
+// incluidos: subir de -20 a -18 a +5 es una linea que sube, que es
+// exactamente lo que se quiere ver.
+function gymEsPesoDeAyuda(pesoKg) {
+  const n = Number(pesoKg);
+  return Number.isFinite(n) && n < 0;
+}
+
+// El segundo parametro ya no se usa (antes era el exerciseId, para mirar
+// si el ejercicio estaba marcado como asistido). Se deja en la firma
+// porque lo pasan cuatro sitios y quitarlo de todos no aporta nada: los
+// negativos ahora valen siempre.
 function gymWeightDisplayToKg(displayValue) {
   if (displayValue === '' || displayValue === null || displayValue === undefined) return null;
   const num = Number(gymNormalizarPeso(displayValue));
   if (!Number.isFinite(num)) return null;
-  // Un peso negativo no existe. Antes lo frenaba el min="0" del campo de
-  // numero; al pasar a texto ese freno se fue, asi que se para aqui. Se
-  // trata como "no apunte peso" (null), que es un estado que la app ya
-  // maneja en todas partes, en vez de guardar un -5 que luego restaria
-  // volumen en las graficas.
-  if (num < 0) return null;
   return getGymWeightUnit() === 'lb' ? num / KG_TO_LB : num;
+}
+
+// EL BOTON DE SIGNO (±) DE LOS EJERCICIOS ASISTIDOS.
+//
+// Hace falta por una razon muy concreta: el teclado DECIMAL del iPhone
+// (inputmode="decimal", que es el que usan todos los campos de peso
+// desde que se admiten los 16,3 kg) NO TIENE TECLA MENOS. Sin este
+// boton, en el movil seria imposible escribir -20.
+//
+// Es un boton y no volver al teclado completo a proposito: el teclado
+// completo obliga a buscar el numero entre las letras en cada serie, y
+// el signo se cambia una vez por ejercicio, no en cada tecla. Mismo
+// criterio que los botones AM/PM del reloj de 12 horas.
+//
+// Se pinta SIEMPRE, en todos los ejercicios. Antes solo salia en los
+// marcados como asistidos, y esa marca se ha ido (ver el bloque de
+// arriba): cualquier ejercicio puede necesitar ayuda un dia y peso
+// anadido otro, y decidirlo de antemano era justo el problema.
+// El ± va DELANTE del campo, no detras (peticion de Koku: "creo que se
+// entiende mejor"). Y tiene sentido: lo que hace es poner el signo al
+// PRINCIPIO del numero, asi que estando a la izquierda el boton esta
+// justo donde va a aparecer el "-".
+//
+// El listener de mas abajo no depende del orden: busca el input dentro
+// del mismo envoltorio, no "el hermano siguiente".
+// EL "-30 s" QUE DESHACE EL "+30 s".
+//
+// Peticion de Koku: "que en gimnasio me deje en editar la serie decirle
+// si el +30 le he dado o no cuenta, quitarlo vamos". Hasta ahora los
+// +30s que pulsabas durante el descanso se quedaban apuntados en la
+// serie para siempre y el chip "+60" era de solo lectura.
+//
+// Resta de 30 en 30 y no borra el total de golpe, a proposito: es el
+// espejo exacto del boton que lo sumo. Si te pasaste tres veces, lo
+// pulsas tres veces. Y nunca baja de cero.
+//
+// Solo sale si HAY extra que quitar: un boton que no hace nada es ruido.
+function gymBotonQuitarExtraHtml(extra) {
+  const n = Number(extra) || 0;
+  if (n <= 0) return '';
+  return `<button type="button" class="gym-set-extend-btn" data-quitar-extra title="Quitar 30 s del descanso extra (llevas +${n} s)">− 30 s</button>`;
+}
+
+function gymQuitarTreintaSegundos(extra) {
+  const n = Math.max(0, (Number(extra) || 0) - 30);
+  // Por debajo de 30 se queda en cero en vez de dejar un "+10" raro: el
+  // extra siempre se sumo de 30 en 30, asi que un resto no puede venir
+  // de ahi.
+  return n < 30 ? 0 : n;
+}
+
+function gymBotonDeSignoHtml() {
+  return '<button type="button" class="gym-signo-btn" data-signo-peso aria-label="Cambiar el signo del peso" title="Cambiar entre ayuda (−) y peso añadido (+)">±</button>';
+}
+
+// Un unico listener para todos: los campos de peso se repintan
+// constantemente (cada cambio de serie rehace su fila), asi que
+// engancharlo a cada boton al crearlo seria enganchar y desenganchar
+// cientos de veces. Delegado en el documento se pone una sola vez.
+document.addEventListener('click', (e) => {
+  const boton = e.target.closest('[data-signo-peso]');
+  if (!boton) return;
+  const campo = boton.parentElement && boton.parentElement.querySelector('input');
+  if (!campo) return;
+  const texto = String(campo.value || '').trim();
+  // Con el campo vacio, el signo arranca el numero: escribes "-" y
+  // luego tecleas 20. Es lo que se espera al tocarlo antes de escribir.
+  if (texto === '' || texto === '-') campo.value = texto === '-' ? '' : '-';
+  else campo.value = texto.startsWith('-') ? texto.slice(1) : `-${texto}`;
+  // Un 'input' de mentira para que lo oiga quien este escuchando el
+  // campo (el editor de series guarda segun se escribe).
+  campo.dispatchEvent(new Event('input', { bubbles: true }));
+  campo.focus();
+});
+
+// EL MATERIAL, DE UNO A VARIOS (peticion de Koku: "que me permita añadir
+// varios materiales, no sólo 1", y que lo que escriba se guarde para
+// reutilizarlo). Viaja siempre como lista; esto lo tolera todo (lista,
+// texto suelto, texto con comas, nada) porque en la base puede quedar
+// cualquiera de esas formas de versiones anteriores.
+function gymMaterialLista(valor) {
+  if (Array.isArray(valor)) return valor.map((x) => String(x || '').trim()).filter(Boolean);
+  if (!valor) return [];
+  return String(valor).split(',').map((x) => x.trim()).filter(Boolean);
+}
+
+function gymMaterialTexto(valor) {
+  return gymMaterialLista(valor).join(' · ');
+}
+
+// La lista que se ofrece al elegir material: unos cuantos de fabrica
+// (para que un usuario nuevo no mire un hueco vacio) mas TODOS los que
+// ya hayas usado en cualquier ejercicio, que es lo que pidio -- escribes
+// uno nuevo y a partir de ahi lo tienes a un toque en los demas.
+const GYM_MATERIAL_POR_DEFECTO = [
+  'Barra', 'Mancuernas', 'Máquina', 'Polea', 'Peso corporal',
+  'Banda elástica', 'Kettlebell', 'Banco', 'Disco', 'Barra Z',
+  'TRX', 'Balón medicinal', 'Colchoneta', 'Cinta', 'Otro',
+];
+
+function gymMaterialesConocidos() {
+  const vistos = new Map(); // en minusculas -> como se escribio la 1a vez
+  const anadir = (m) => {
+    const t = String(m || '').trim();
+    if (t === '') return;
+    if (!vistos.has(t.toLowerCase())) vistos.set(t.toLowerCase(), t);
+  };
+  GYM_MATERIAL_POR_DEFECTO.forEach(anadir);
+  (state.gymExercises || []).forEach((ex) => gymMaterialLista(ex.equipment).forEach(anadir));
+  return [...vistos.values()];
 }
 
 // --- Taxonomia de grupos musculares (Fase 2 del rediseno) -------------
@@ -8974,6 +9682,30 @@ function gymNormalizarBusqueda(texto) {
   return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+// TODO lo que se puede escribir para encontrar un ejercicio: su nombre,
+// el musculo principal, LOS SECUNDARIOS y sus materiales.
+//
+// Los secundarios los pidio Koku al decir "hay veces que músculo
+// principal no hay uno solo, tenlo en cuenta también": un remo lleva
+// dorsales de principal y biceps de secundario, y hasta ahora escribir
+// "biceps" no lo sacaba. El material igual, ahora que puede haber varios.
+//
+// Un unico sitio para las tres listas que buscan ejercicios (la de la
+// pestana Plan, la del buscador de la libreria y las opciones de los
+// desplegables), para que las tres encuentren exactamente lo mismo.
+function gymTextoBuscableDeEjercicio(ex) {
+  if (!ex) return '';
+  const secundarios = (Array.isArray(ex.secondaryMuscles) ? ex.secondaryMuscles : [])
+    .map((id) => gymMuscleGroupLabel(id))
+    .filter(Boolean);
+  return [
+    ex.name,
+    gymMuscleGroupLabel(ex.muscleGroup),
+    ...secundarios,
+    ...gymMaterialLista(ex.equipment),
+  ].filter(Boolean).join(' ');
+}
+
 function renderGymExercisesList() {
   const list = document.getElementById('gym-exercises-list');
   list.innerHTML = '';
@@ -9005,7 +9737,7 @@ function renderGymExercisesList() {
   const visibles = q === ''
     ? state.gymExercises
     : state.gymExercises.filter((ex) => gymNormalizarBusqueda(
-        `${ex.name} ${gymMuscleGroupLabel(ex.muscleGroup) || ''} ${ex.equipment || ''}`
+        gymTextoBuscableDeEjercicio(ex)
       ).includes(q));
 
   if (visibles.length === 0) {
@@ -9031,10 +9763,26 @@ function renderGymExercisesList() {
     // Mismo componente que las notas, las carpetas, las sesiones del
     // historial y las tarjetas de grupo.
     list.appendChild(wrapRowWithSwipeActions(row, {
-      onEdit: () => openGymExerciseModal(ex),
-      onDelete: () => borrarEjercicioDeLaLista(ex),
+      botones: [
+        ['Editar', 'secondary-btn', () => openGymExerciseModal(ex)],
+        ['Duplicar', 'secondary-btn', () => duplicarEjercicioDeLaLista(ex)],
+        ['Eliminar', 'danger-btn', () => borrarEjercicioDeLaLista(ex)],
+      ],
     }));
   });
+}
+
+// Duplicar un ejercicio: la misma ficha (musculo, secundarios, material,
+// nota fija, unilateral y la configuracion por defecto) pero SIN
+// historial -- es un ejercicio nuevo, no ha hecho nada todavia.
+//
+// Para lo que sirve: "hago press banca con mancuernas y quiero el mismo
+// pero con barra". Se duplica y se cambia el material, en vez de volver
+// a rellenarlo todo desde cero.
+async function duplicarEjercicioDeLaLista(ex) {
+  await api(`/api/gym-exercises/${ex.id}/duplicate`, { method: 'POST' });
+  await loadGymExercises();
+  renderGymExercisesList();
 }
 
 // Borrar desde el deslizamiento. El servidor RECHAZA borrar un ejercicio
@@ -9081,18 +9829,32 @@ function renderGymBlocksList() {
     const row = document.createElement('div');
     row.className = 'gym-list-item gym-block-item';
     row.dataset.openGymBlock = b.id;
+    // EL LAPIZ SE FUE: editar, duplicar y eliminar salen DESLIZANDO, como
+    // en las notas, las carpetas, los ejercicios, las sesiones del
+    // historial y las tarjetas de grupo. Es la misma decision que tomo
+    // Koku en su dia con los grupos ("asi no da pie a dudas ni nada"):
+    // una sola forma de operar sobre una fila en toda la app.
+    //
+    // "Activar" SE QUEDA en la fila a proposito: no es una accion de
+    // edicion, es el estado del bloque, y tenerlo a un toque es justo lo
+    // que se quiere de una lista de bloques.
     row.innerHTML = `
       <span class="gym-list-item-name">${escapeHtml(b.name)}${b.isActive ? ' <span class="gym-block-active-badge">Activo</span>' : ''}
         <span class="gym-list-item-muted">(${b.dayCount} día${b.dayCount === 1 ? '' : 's'})</span></span>
       <div class="gym-list-item-actions">
         ${b.isActive ? '' : `<button type="button" class="secondary-btn gym-block-activate-btn" data-activate-gym-block="${b.id}">Activar</button>`}
-        <button type="button" class="icon-btn" data-edit-gym-block="${b.id}" aria-label="Editar bloque">✎</button>
       </div>
     `;
     // Toda la fila entra al bloque, salvo los botones de la derecha (que
     // paran la propagacion) -- mismo patron que las filas de sesion.
     row.addEventListener('click', () => openGymBlockDays(b.id));
-    list.appendChild(row);
+    list.appendChild(wrapRowWithSwipeActions(row, {
+      botones: [
+        ['Editar', 'secondary-btn', () => openGymBlockModal(b)],
+        ['Duplicar', 'secondary-btn', () => duplicarBloqueDeGimnasio(b)],
+        ['Eliminar', 'danger-btn', () => borrarBloqueDeGimnasio(b)],
+      ],
+    }));
   });
   list.querySelectorAll('[data-activate-gym-block]').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
@@ -9102,12 +9864,34 @@ function renderGymBlocksList() {
       renderGymBlocksList();
     });
   });
-  list.querySelectorAll('[data-edit-gym-block]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openGymBlockModal(state.gymBlocks.find((b) => b.id === Number(btn.dataset.editGymBlock)));
-    });
-  });
+}
+
+// Duplicar un bloque se lleva SIEMPRE sus dias, sus ejercicios y su
+// ciclo, sin preguntar: un bloque sin dias no sirve de plantilla, que es
+// justo para lo que Koku lo pidio. La copia nace inactiva.
+async function duplicarBloqueDeGimnasio(block) {
+  await api(`/api/gym-blocks/${block.id}/duplicate`, { method: 'POST' });
+  await Promise.all([loadGymBlocks(), loadGymRoutines()]);
+  renderGymBlocksList();
+}
+
+// El mismo borrado que ya vivia dentro de la ficha, sacado aqui para que
+// lo compartan el deslizamiento y el boton del modal -- y para que el
+// aviso (cuantos dias se lleva por delante) sea el mismo por los dos
+// caminos.
+async function borrarBloqueDeGimnasio(block) {
+  const dayCount = block ? block.dayCount : 0;
+  const ok = await showAppConfirm(
+    dayCount > 0
+      ? `¿Eliminar este bloque y ${dayCount === 1 ? 'su día' : `sus ${dayCount} días`}? Las sesiones ya registradas no se pierden.`
+      : '¿Eliminar este bloque?',
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/gym-blocks/${block.id}`, { method: 'DELETE' });
+  await Promise.all([loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
+  renderGymBlocksList();
+  renderGymSessionsList();
 }
 
 // Entra al nivel de dias de UN bloque (o vuelve al de bloques con null).
@@ -9143,29 +9927,50 @@ function renderGymRoutinesList() {
   days.forEach((r) => {
     const row = document.createElement('div');
     row.className = 'gym-list-item';
+    // EL LAPIZ SE FUE, igual que en los bloques: editar / duplicar /
+    // eliminar salen DESLIZANDO, como en el resto de la app.
+    //
+    // Las dos entradas al dia siguen siendo dos, que es lo que pidio
+    // Koku, solo que ahora por gestos distintos: TOCAR la fila abre sus
+    // EJERCICIOS (a lo que se entra el 90% de las veces) y DESLIZAR ->
+    // "Editar" abre su FICHA (nombre, color, icono y bloque).
     row.innerHTML = `
       <span class="color-dot" style="background-color: ${r.color}"></span>
       <span class="gym-list-item-name">${r.icon ? escapeHtml(r.icon) + ' ' : ''}${escapeHtml(r.name)} <span class="gym-list-item-muted">(${r.exercises.length} ejercicio${r.exercises.length === 1 ? '' : 's'})</span></span>
-      <div class="gym-list-item-actions">
-        <button type="button" class="icon-btn" data-edit-gym-routine="${r.id}" aria-label="Editar nombre, color y bloque">✎</button>
-      </div>
     `;
-    // Dos entradas distintas al mismo dia, como pidio Koku: el lapiz
-    // para su FICHA (nombre, color, icono y bloque) y tocar la fila para
-    // sus EJERCICIOS, que es a lo que se entra el 90% de las veces.
     row.addEventListener('click', () => {
       openGymRoutineModal(state.gymRoutines.find((x) => x.id === r.id), 'ejercicios');
     });
-    list.appendChild(row);
+    list.appendChild(wrapRowWithSwipeActions(row, {
+      botones: [
+        ['Editar', 'secondary-btn', () => openGymRoutineModal(state.gymRoutines.find((x) => x.id === r.id), 'ficha')],
+        ['Duplicar', 'secondary-btn', () => duplicarDiaDelPlan(r)],
+        ['Eliminar', 'danger-btn', () => borrarDiaDelPlan(r)],
+      ],
+    }));
   });
-  list.querySelectorAll('[data-edit-gym-routine]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      // Sin esto, el clic del lapiz sube tambien a la fila y abriria las
-      // dos mitades una encima de otra.
-      e.stopPropagation();
-      openGymRoutineModal(state.gymRoutines.find((r) => r.id === Number(btn.dataset.editGymRoutine)), 'ficha');
-    });
-  });
+}
+
+// Duplicar un dia se lleva SIEMPRE sus ejercicios (con su orden, sus
+// series/repeticiones/descanso y la marca de oculto). La copia cae en el
+// MISMO bloque; si la quieres en otro, se cambia desde su ficha.
+async function duplicarDiaDelPlan(routine) {
+  await api(`/api/gym-routines/${routine.id}/duplicate`, { method: 'POST' });
+  await Promise.all([loadGymRoutines(), loadGymBlocks()]);
+  renderGymRoutinesList();
+  renderGymBlocksList();
+}
+
+// El mismo borrado que el boton de la ficha, compartido para que el aviso
+// no se separe por un camino o por el otro.
+async function borrarDiaDelPlan(routine) {
+  const ok = await showAppConfirm('¿Eliminar este día? Las sesiones ya registradas con él no se pierden.', { okText: 'Eliminar', danger: true });
+  if (!ok) return;
+  await api(`/api/gym-routines/${routine.id}`, { method: 'DELETE' });
+  await Promise.all([loadGymRoutines(), loadGymBlocks(), loadGymSessions()]);
+  renderGymRoutinesList();
+  renderGymBlocksList();
+  renderGymSessionsList();
 }
 
 // Deslizar una fila hacia la izquierda para sacar Editar / Eliminar
@@ -9316,7 +10121,27 @@ async function deleteGymSessionById(id) {
 //   3. Cualquier tramo puede ser RECORD ("hay veces que la segunda sale
 //      mejor que la primera"), asi que los PRs miran serie y tramos por
 //      igual -- por eso existe gymSetConTramos().
-const GYM_SEGMENT_LABELS = { dropset: 'Drop', restpause: 'R-P' };
+const GYM_SEGMENT_LABELS = { dropset: 'Drop', restpause: 'R-P', parciales: 'Parc' };
+// LOS TRES TIPOS DE TRAMO, y en que se diferencian al apuntarlos:
+//
+//   dropset    bajas el peso y sigues        -> peso propio, sin pausa
+//   restpause  paras unos segundos y sigues  -> pausa + el peso de la madre
+//   parciales  sigues a recorrido corto      -> el peso de la madre, sin pausa
+//
+// Las PARCIALES las pidio Koku el 11/9/2026 ("poder apuntar parciales,
+// donde se apuntan dropsets y rest-pause"). Son un tramo mas, no un
+// concepto nuevo: repeticiones de verdad con su peso, hechas cuando ya
+// no salen completas. Por eso entran en el volumen y en los records
+// igual que los otros dos -- si no contaran, la grafica bajaria justo el
+// dia que mas aprietas, que es la decision 2 de este bloque.
+//
+// Lo unico propio suyo: el peso que se propone es el de la MADRE (una
+// parcial se hace con la misma carga, lo que se acorta es el recorrido),
+// no el del tramo de arriba como en un dropset encadenado.
+const GYM_SEGMENT_KINDS = ['dropset', 'restpause', 'parciales'];
+function gymSegmentKind(kind) {
+  return GYM_SEGMENT_KINDS.includes(kind) ? kind : 'dropset';
+}
 
 // Serie llevada al fallo: se marca en el mismo dialogo de fin de serie y
 // se guarda en set_type = 'failure' (valor que el esquema ya tenia
@@ -9370,9 +10195,18 @@ function gymSetSegments(set) {
 // ajustar. Es lo que se guarda y lo que hay que usar para cualquier cosa
 // que quiera saber cuanto peso se movio de verdad.
 function gymSetVolumeRealKg(set) {
-  let total = (Number(set.reps) || 0) * (Number(set.weightKg) || 0);
+  // Un peso NEGATIVO es ayuda, no kilos movidos: sumarlo restaria del
+  // total. Se mira el signo de CADA serie y de CADA tramo, no una marca
+  // del ejercicio -- ver el bloque "PESO NEGATIVO (ayuda)" mas arriba: con
+  // una marca por ejercicio, apagarla recalculaba hacia atras todo el
+  // historial. La misma regla esta en el SQL de /summary y /progress, para
+  // que cliente y base cuenten igual.
+  const suma = (reps, peso) => (gymEsPesoDeAyuda(peso)
+    ? 0
+    : (Number(reps) || 0) * (Number(peso) || 0));
+  let total = suma(set.reps, set.weightKg);
   for (const seg of gymSetSegments(set)) {
-    total += (Number(seg.reps) || 0) * (Number(seg.weightKg) || 0);
+    total += suma(seg.reps, seg.weightKg);
   }
   return total;
 }
@@ -9414,7 +10248,7 @@ function gymSetConTramos(set) {
 function gymSegmentChipHtml(set) {
   const segs = gymSetSegments(set);
   if (segs.length === 0) return '';
-  const kinds = [...new Set(segs.map((seg) => (seg.kind === 'restpause' ? 'restpause' : 'dropset')))];
+  const kinds = [...new Set(segs.map((seg) => gymSegmentKind(seg.kind)))];
   const texto = kinds.map((k) => GYM_SEGMENT_LABELS[k]).join('+');
   const sufijo = segs.length > 1 ? ` ×${segs.length}` : '';
   return `<span class="gym-set-segment-chip" title="Serie alargada: ${segs.length} tramo${segs.length === 1 ? '' : 's'} extra">${texto}${sufijo}</span>`;
@@ -9537,6 +10371,7 @@ const finanzasAccountTypeField = createSelectField({
     { value: 'Ahorro', label: 'Ahorro' },
     { value: 'Inversión', label: 'Inversión' },
     { value: 'Efectivo', label: 'Efectivo' },
+    { value: 'De terceros', label: 'De terceros' },
     { value: 'Otro', label: 'Otro' },
   ],
   initialValue: '',
@@ -9655,6 +10490,84 @@ const finanzasRecurringFrequencyField = createSelectField({
 });
 document.getElementById('finanzas-recurring-frequency-field').appendChild(finanzasRecurringFrequencyField.element);
 
+// Que clase de gasto fijo es. No sustituye a la categoria (esa es de Koku
+// y cambia): esto es lo que permite preguntar "¿cuanto me cuestan al año
+// las SUSCRIPCIONES?" sin que el alquiler se cuele en la cifra.
+const FINANZAS_KIND_OPTIONS = [
+  { value: 'subscription', label: 'Suscripción' },
+  { value: 'bill', label: 'Recibo' },
+  { value: 'loan', label: 'Préstamo' },
+  { value: 'other', label: 'Otro' },
+];
+const FINANZAS_KIND_LABELS = {
+  subscription: 'Suscripción',
+  bill: 'Recibo',
+  loan: 'Préstamo',
+  other: 'Otro',
+};
+// Los plurales de los chips y de la cabecera, que no son los de arriba.
+const FINANZAS_KIND_PLURALES = {
+  all: 'Tus gastos fijos',
+  subscription: 'Tus suscripciones',
+  bill: 'Tus recibos',
+  loan: 'Tus préstamos',
+  other: 'Otros gastos fijos',
+};
+
+const finanzasRecurringKindField = createSelectField({ options: FINANZAS_KIND_OPTIONS, initialValue: 'other' });
+document.getElementById('finanzas-recurring-kind-field').appendChild(finanzasRecurringKindField.element);
+
+// -- Avisos de un gasto fijo (cuantos dias antes) --
+//
+// Se pueden marcar varios. El tope de 5 es el mismo que valida la ruta:
+// cada aviso ocupa un hueco del cupo de notificaciones del sistema.
+const FINANZAS_MAX_AVISOS = 5;
+const FINANZAS_AVISO_ETIQUETAS = {
+  0: 'el mismo día',
+  1: '1 día antes',
+  2: '2 días antes',
+  7: '1 semana antes',
+  15: '15 días antes',
+  30: '1 mes antes',
+  60: '2 meses antes',
+  90: '3 meses antes',
+};
+const finanzasRecurringAvisos = new Set();
+
+function renderFinanzasRecurringAvisos() {
+  document.querySelectorAll('[data-aviso-dias]').forEach((btn) => {
+    btn.classList.toggle('active', finanzasRecurringAvisos.has(Number(btn.dataset.avisoDias)));
+  });
+  const hint = document.getElementById('finanzas-recurring-reminders-hint');
+  if (finanzasRecurringAvisos.size === 0) {
+    hint.textContent = 'Sin avisos.';
+    return;
+  }
+  const orden = [...finanzasRecurringAvisos].sort((a, b) => b - a);
+  hint.textContent = `Te avisará ${orden.map((d) => FINANZAS_AVISO_ETIQUETAS[d] || `${d} días antes`).join(', ')}.`;
+}
+
+document.querySelectorAll('[data-aviso-dias]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const dias = Number(btn.dataset.avisoDias);
+    if (finanzasRecurringAvisos.has(dias)) {
+      finanzasRecurringAvisos.delete(dias);
+    } else {
+      if (finanzasRecurringAvisos.size >= FINANZAS_MAX_AVISOS) {
+        // Se avisa en vez de ignorar el toque en silencio: si no, parece
+        // que el boton esta roto.
+        await showAppConfirm(
+          `Como mucho ${FINANZAS_MAX_AVISOS} avisos por gasto. Cada aviso ocupa un hueco de los que el móvil reserva para toda la app (unos 64, compartidos con los recordatorios del calendario), así que conviene no gastarlos de más.`,
+          { okText: 'Vale', alertOnly: true }
+        );
+        return;
+      }
+      finanzasRecurringAvisos.add(dias);
+    }
+    renderFinanzasRecurringAvisos();
+  });
+});
+
 const finanzasRecurringMonthField = createSelectField({ options: FINANZAS_MONTH_OPTIONS, initialValue: '01' });
 document.getElementById('finanzas-recurring-month-field').appendChild(finanzasRecurringMonthField.element);
 
@@ -9703,10 +10616,67 @@ document.getElementById('finanzas-savings-year-input').value = finanzasCurrentYe
 document.getElementById('finanzas-savings-range-from-year').value = finanzasCurrentYear;
 document.getElementById('finanzas-savings-range-to-year').value = finanzasCurrentYear;
 
+// El dinero, escrito como se escribe en español: punto para los miles y
+// coma para los decimales ("10.851,88 €", no "10851.88 €"). Antes era un
+// toFixed(2) a secas, que en cifras de cuatro digitos para arriba se lee
+// fatal. Solo se usa para PINTAR (ninguno de los 37 sitios que la llaman
+// vuelve a convertir el texto en numero), asi que cambiarla es seguro.
+const FINANZAS_MONEY_FORMATTER = new Intl.NumberFormat('es-ES', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  // useGrouping "always" a proposito: por defecto, el español NO separa
+  // los numeros de cuatro cifras (9600, pero 12.845), que es correcto al
+  // escribir pero queda desigual en una COLUMNA de importes -- "9600,00"
+  // encima de "12.845,66" parece un fallo. Los bancos de aqui escriben
+  // 9.600,00 € siempre, y eso es lo que se espera leer en una app de
+  // cuentas.
+  useGrouping: 'always',
+});
+
+// ¿Se cuenta el dinero de terceros en los numeros del Resumen?
+//
+// Por defecto NO: la paga de sus padres y la gasolina que le pagan no son
+// dinero suyo, y contarlos inflaria el ahorro y las graficas. El
+// interruptor es para cuando quiere verlo todo junto.
+//
+// Va en localStorage y no en la base porque es una preferencia de VISTA,
+// como la densidad del calendario o el orden de las notas.
+function finanzasIncluyeTerceros() {
+  return localStorage.getItem('finanzasIncluirTerceros') === 'true';
+}
+
+// El "?includeThirdParty=1" que hay que pegarle a las consultas de
+// resumen, o cadena vacia.
+function finanzasTercerosQS(separador) {
+  return finanzasIncluyeTerceros() ? `${separador}includeThirdParty=1` : '';
+}
+
+// Un porcentaje escrito como se escribe aqui: "9,7%", con coma. Sin
+// esto salia "+9.7%" justo al lado de "1.700,00 €", con dos convenios
+// distintos en la misma linea.
+// Y agrupando los miles como el dinero (useGrouping 'always'): un gasto
+// que pasa de 1 a 20 euros es un +1900%, y por defecto el español no
+// separa los numeros de cuatro cifras, asi que ese mismo numero saldria
+// "1900%" al lado de un "1.900,00 €". Es el mismo motivo que ya tiene
+// escrito FINANZAS_MONEY_FORMATTER, aplicado aqui.
+const FINANZAS_PCT_FORMATTER = new Intl.NumberFormat('es-ES', {
+  maximumFractionDigits: 1,
+  useGrouping: 'always',
+});
+function formatFinanzasPorcentaje(n) {
+  const num = Number(n);
+  // Un valor imposible (texto, null, infinito) se lee como 0 en vez de
+  // dejar un "NaN%" o un "∞%" en pantalla.
+  return FINANZAS_PCT_FORMATTER.format(Number.isFinite(num) ? Math.abs(num) : 0);
+}
+
 function formatFinanzasAmount(n) {
   const num = Number(n) || 0;
-  return `${num.toFixed(2)} €`;
+  return `${FINANZAS_MONEY_FORMATTER.format(num)} €`;
 }
+
+let finanzasGoalIconField = null;
+let finanzasGoalColorField = null;
 
 function setupFinanzasIconColorFields() {
   if (finanzasIconColorFieldsReady) return;
@@ -9724,6 +10694,11 @@ function setupFinanzasIconColorFields() {
 
   finanzasPortfolioColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
   document.getElementById('finanzas-portfolio-color-field').appendChild(finanzasPortfolioColorField.element);
+
+  finanzasGoalIconField = createIconField({ initialValue: '' });
+  document.getElementById('finanzas-goal-icon-field').appendChild(finanzasGoalIconField.element);
+  finanzasGoalColorField = createColorField({ initialValue: DEFAULT_EVENT_COLOR });
+  document.getElementById('finanzas-goal-color-field').appendChild(finanzasGoalColorField.element);
 }
 
 async function loadFinanzasAccounts() {
@@ -10143,6 +11118,67 @@ const gymExerciseMuscleField = createSelectField({
 });
 document.getElementById('gym-exercise-muscle-field').appendChild(gymExerciseMuscleField.element);
 
+// ---------------------------------------------------------------------
+// COMO SE MIDE UN EJERCICIO
+// ---------------------------------------------------------------------
+//
+// Peticion de Koku (11/9/2026): "poder hacer ejercicios temporizados.
+// Aguantar ejercicios isometricos. Poder hacer ejercicios de
+// repeticiones en x tiempo".
+//
+// Tres formas, y la eligio el: va en la FICHA del ejercicio, porque una
+// plancha siempre se mide en segundos. Se dice una vez y todos sus dias
+// y series ya salen con el campo correcto.
+//
+// EL SUB-MODO NO ES UN AJUSTE MAS: sale de QUE OBJETIVO rellenes.
+//
+//   'tiempo' con segundos objetivo    -> el cronometro cuenta ATRAS
+//   'tiempo' sin segundos             -> cuenta hacia ARRIBA (aguanta lo
+//                                        que puedas)
+//   'reps_en_tiempo' con segundos     -> cuenta atras y al acabar te
+//                                        pregunta cuantas hiciste (AMRAP)
+//   'reps_en_tiempo' con reps         -> cuenta hacia arriba y lo que se
+//                                        mide es el TIEMPO que tardaste
+//
+// Asi se cubren las dos variantes que pidio sin un interruptor extra que
+// haya que entender. Y se guardan SIEMPRE las dos cosas (reps y
+// segundos), asi que los dos records existen sin tener que elegir.
+const GYM_MEDICIONES = [
+  { value: 'reps', label: 'Repeticiones', hint: 'Lo de siempre: repeticiones y peso.' },
+  { value: 'tiempo', label: 'Tiempo (aguantar)', hint: 'Isométrico: se aguanta. Con segundos objetivo el cronómetro cuenta atrás; déjalos vacíos para aguantar lo que puedas.' },
+  { value: 'reps_en_tiempo', label: 'Reps en un tiempo', hint: 'Pon los segundos y se cuenta atrás (apuntas cuántas hiciste), o pon las reps y se mide lo que tardas.' },
+];
+
+function gymMedicionDe(exercise) {
+  const v = exercise && exercise.measure;
+  return GYM_MEDICIONES.some((m) => m.value === v) ? v : 'reps';
+}
+function gymEsPorTiempo(measure) {
+  return measure === 'tiempo' || measure === 'reps_en_tiempo';
+}
+
+const gymExerciseMeasureField = createSelectField({
+  options: GYM_MEDICIONES.map((m) => ({ value: m.value, label: m.label })),
+  initialValue: 'reps',
+  onChange: () => aplicarMedicionEnFichaDeEjercicio(),
+});
+document.getElementById('gym-exercise-measure-field').appendChild(gymExerciseMeasureField.element);
+
+// Enseña/esconde los campos de "cómo lo sueles hacer" segun la medicion,
+// y explica debajo que hace cada una. En un isometrico no hay
+// repeticiones que poner, y en uno de repeticiones los segundos no
+// pintan nada: dejar los dos campos siempre puestos invita a rellenar el
+// que no toca.
+function aplicarMedicionEnFichaDeEjercicio() {
+  const medicion = gymExerciseMeasureField.getValue() || 'reps';
+  const reps = document.getElementById('gym-exercise-default-reps');
+  const segundos = document.getElementById('gym-exercise-default-seconds');
+  reps.classList.toggle('hidden', medicion === 'tiempo');
+  segundos.classList.toggle('hidden', medicion === 'reps');
+  const meta = GYM_MEDICIONES.find((m) => m.value === medicion);
+  document.getElementById('gym-exercise-measure-hint').textContent = meta ? meta.hint : '';
+}
+
 // Musculos SECUNDARIOS del ejercicio (chips activables): cuentan en el
 // mapa de musculos a mitad de peso, igual que los de la libreria.
 let gymExerciseSecondarySel = new Set();
@@ -10185,18 +11221,85 @@ function refreshGymExerciseDefaultRestPreview() {
 }
 document.getElementById('gym-exercise-default-rest').addEventListener('input', refreshGymExerciseDefaultRestPreview);
 
+// LOS CHIPS DE MATERIAL. Mismo patron visual que los musculos
+// secundarios, pero con una diferencia: aqui la lista no es fija, crece
+// con lo que escribas. Un material nuevo se guarda en su ejercicio y a
+// partir de ahi gymMaterialesConocidos() lo saca como chip en todos los
+// demas -- que es lo que pidio Koku ("así puedo añadirlo rápido si se
+// repite en el resto de ejercicios").
+//
+// El orden es: primero los que lleva ESTE ejercicio (para verlos de un
+// vistazo), y detras el resto de los conocidos.
+let gymExerciseMaterialSel = [];
+
+function renderGymExerciseMaterialChips() {
+  const cont = document.getElementById('gym-exercise-equipment-chips');
+  if (!cont) return;
+  cont.innerHTML = '';
+  const puestos = gymExerciseMaterialSel.map((m) => m.toLowerCase());
+  const conocidos = gymMaterialesConocidos();
+  // Lo que lleve el ejercicio y no este entre los conocidos (por
+  // ejemplo, si se borro de todos los demas) tiene que salir igual: si
+  // no, se perderia al guardar sin haberlo tocado nadie.
+  const todos = [
+    ...gymExerciseMaterialSel,
+    ...conocidos.filter((m) => !puestos.includes(m.toLowerCase())),
+  ];
+  todos.forEach((material) => {
+    const activo = puestos.includes(material.toLowerCase());
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'gym-secondary-chip' + (activo ? ' active' : '');
+    chip.textContent = material;
+    chip.addEventListener('click', () => {
+      gymExerciseMaterialSel = activo
+        ? gymExerciseMaterialSel.filter((m) => m.toLowerCase() !== material.toLowerCase())
+        : [...gymExerciseMaterialSel, material];
+      renderGymExerciseMaterialChips();
+    });
+    cont.appendChild(chip);
+  });
+}
+
+function gymAnadirMaterialEscrito() {
+  const campo = document.getElementById('gym-exercise-equipment-new');
+  const texto = campo.value.trim();
+  if (texto === '') return;
+  // Sin repetidos y sin distinguir mayusculas: escribir "barra" teniendo
+  // ya "Barra" no crea un segundo material casi igual.
+  if (!gymExerciseMaterialSel.some((m) => m.toLowerCase() === texto.toLowerCase())) {
+    gymExerciseMaterialSel.push(texto);
+  }
+  campo.value = '';
+  renderGymExerciseMaterialChips();
+}
+
+document.getElementById('btn-gym-exercise-equipment-add').addEventListener('click', gymAnadirMaterialEscrito);
+// Intro en ese campo anade el material, NO envia el formulario entero
+// (que guardaria el ejercicio a medio escribir).
+document.getElementById('gym-exercise-equipment-new').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  gymAnadirMaterialEscrito();
+});
+
 function openGymExerciseModal(exercise) {
   document.getElementById('gym-exercise-modal-title').textContent = exercise ? 'Editar ejercicio' : 'Nuevo ejercicio';
   document.getElementById('gym-exercise-id').value = exercise ? exercise.id : '';
   document.getElementById('gym-exercise-name').value = exercise ? exercise.name : '';
-  document.getElementById('gym-exercise-equipment').value = exercise ? exercise.equipment || '' : '';
+  gymExerciseMaterialSel = gymMaterialLista(exercise ? exercise.equipment : null);
+  document.getElementById('gym-exercise-equipment-new').value = '';
+  renderGymExerciseMaterialChips();
   document.getElementById('gym-exercise-notes').value = exercise ? exercise.notes || '' : '';
   document.getElementById('gym-exercise-unilateral').checked = !!(exercise && exercise.unilateral);
   document.getElementById('gym-exercise-sides-separately').checked = !!(exercise && exercise.countSidesSeparately);
   document.getElementById('gym-exercise-side-rest').value = exercise && exercise.sideRestSeconds != null ? exercise.sideRestSeconds : '';
   document.getElementById('gym-exercise-default-sets').value = exercise && exercise.defaultSets != null ? exercise.defaultSets : '';
   document.getElementById('gym-exercise-default-reps').value = exercise && exercise.defaultReps != null ? exercise.defaultReps : '';
+  document.getElementById('gym-exercise-default-seconds').value = exercise && exercise.defaultSeconds != null ? exercise.defaultSeconds : '';
   document.getElementById('gym-exercise-default-rest').value = exercise && exercise.defaultRestSeconds != null ? exercise.defaultRestSeconds : '';
+  gymExerciseMeasureField.setValue(gymMedicionDe(exercise));
+  aplicarMedicionEnFichaDeEjercicio();
   refreshGymExerciseDefaultRestPreview();
   refreshGymUnilateralFields();
   gymExerciseSecondarySel = new Set(exercise && Array.isArray(exercise.secondaryMuscles) ? exercise.secondaryMuscles : []);
@@ -10228,7 +11331,7 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
   const payload = {
     name: document.getElementById('gym-exercise-name').value,
     muscleGroup: gymExerciseMuscleField.getValue(),
-    equipment: document.getElementById('gym-exercise-equipment').value,
+    equipment: [...gymExerciseMaterialSel],
     secondaryMuscles: [...gymExerciseSecondarySel],
     notes: document.getElementById('gym-exercise-notes').value,
     unilateral: document.getElementById('gym-exercise-unilateral').checked,
@@ -10237,6 +11340,8 @@ document.getElementById('gym-exercise-form').addEventListener('submit', async (e
     defaultSets: document.getElementById('gym-exercise-default-sets').value,
     defaultReps: document.getElementById('gym-exercise-default-reps').value,
     defaultRestSeconds: document.getElementById('gym-exercise-default-rest').value,
+    measure: gymExerciseMeasureField.getValue() || 'reps',
+    defaultSeconds: document.getElementById('gym-exercise-default-seconds').value,
   };
   // El flag se captura ANTES de cerrar: closeGymExerciseModal lo resetea.
   const addToLive = !id && gymExerciseAddToLivePending;
@@ -10335,7 +11440,7 @@ function renderGymLibraryMine() {
   const mios = state.gymExercises.filter((ex) => {
     if (yaEnElEntreno.has(ex.id)) return false;
     if (!search) return true;
-    const texto = [ex.name, gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' ');
+    const texto = gymTextoBuscableDeEjercicio(ex);
     return gymNormalizeSearch(texto).includes(search);
   });
 
@@ -10345,7 +11450,7 @@ function renderGymLibraryMine() {
     return;
   }
   mios.slice(0, 40).forEach((ex) => {
-    const meta = [gymMuscleGroupLabel(ex.muscleGroup), ex.equipment].filter(Boolean).join(' · ');
+    const meta = [gymMuscleGroupLabel(ex.muscleGroup), gymMaterialTexto(ex.equipment)].filter(Boolean).join(' · ');
     const row = document.createElement('div');
     row.className = 'gym-list-item';
     row.innerHTML = `
@@ -10759,13 +11864,14 @@ function startGymLiveSession(day) {
         note: '',
         rpe: '',
         collapsed: i > 0,
-        sets: gymBuildSetsForExercise(ex.exerciseId, ex.targetSets, ex.targetRestSeconds ?? ''),
+        sets: gymBuildSetsForExercise(ex.exerciseId, ex.targetSets, ex.targetRestSeconds ?? '', ex.targetSeconds ?? ''),
       })),
     hiddenPool: day
       ? day.exercises.filter((ex) => ex.hidden).map((ex) => ({
           exerciseId: ex.exerciseId,
           targetSets: ex.targetSets,
           targetRestSeconds: ex.targetRestSeconds,
+          targetSeconds: ex.targetSeconds,
         }))
       : [],
   };
@@ -10888,9 +11994,20 @@ function gymFormatRestDisplay(totalSeconds) {
   if (!n) return '';
   return localStorage.getItem('gymRestFormat') === 'sec' ? `${n}s` : gymLiveFormatClock(n);
 }
+// El reloj de toda la vida, pero CON HORAS EN CUANTO LAS HAY (peticion
+// de Koku el 11/9/2026): "1:30:15 es mas facil de leer que 90:15".
+//
+// Las horas solo aparecen al pasar de los 60 minutos, a proposito: si
+// salieran siempre, un descanso de minuto y medio seria "0:01:30" en vez
+// de "1:30", y esta misma funcion pinta TAMBIEN los descansos, la cuenta
+// atras de la serie y el cronometro suelto. Asi cada uno se lee como
+// toca sin tener dos formateadores que puedan separarse.
 function gymLiveFormatClock(totalSeconds) {
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
+  const total = Math.max(0, Math.round(Number(totalSeconds) || 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 // Tiempo de sesion transcurrido DESCONTANDO las pausas: pausedMs acumula
@@ -10933,14 +12050,22 @@ function gymLiveTick() {
 
   // Cronometro de la serie en curso: se actualiza el texto en vez de
   // repintar la tarjeta entera cada segundo.
+  const enCurso = gymSerieEnCurso();
   const setTimers = document.querySelectorAll('[data-live-set-timer]');
   if (setTimers.length > 0) {
-    const t = gymLiveFormatClock(gymActiveSetSeconds());
-    setTimers.forEach((el) => { el.textContent = t; });
+    const t = gymTextoDelCronometroDeSerie(enCurso && enCurso.set);
+    const cumplido = !!(enCurso && gymObjetivoCumplido(enCurso.set));
+    setTimers.forEach((el) => {
+      el.textContent = t;
+      // Al llegar a cero el cronometro se marca, que es lo que sustituye
+      // aqui al aviso del descanso: estas mirando la pantalla o el reloj,
+      // no hace falta vibrar.
+      el.classList.toggle('objetivo-cumplido', cumplido);
+    });
   }
   const endTimer = document.getElementById('gym-set-end-timer');
   if (endTimer && !document.getElementById('gym-set-end-modal').classList.contains('hidden')) {
-    endTimer.textContent = gymLiveFormatClock(gymActiveSetSeconds());
+    endTimer.textContent = gymTextoDelCronometroDeSerie(enCurso && enCurso.set);
   }
 
   // Mini-barra global: cuando el entreno esta OCULTO y hay algo en
@@ -11553,16 +12678,55 @@ function gymExerciseUsesSides(ex) {
   return !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
 }
 // Numero de serie que le toca a un set (los dos lados comparten numero).
+// EL NUMERO DE SERIE DE UNA FILA, en un ejercicio contado por lados.
+//
+// BUG QUE ARREGLA (lo vio Koku el 11/9/2026 haciendo extension de triceps
+// en polea): "me ha contado D I D, I D I, en vez de hacer 3 series con
+// cada brazo me ha hecho 2 series... alterando tiempos de descanso etc".
+//
+// La version vieja contaba cuantos lados "no derechos" llevaba, o sea que
+// DABA POR HECHO QUE EL IZQUIERDO VA PRIMERO. Empezando por la derecha
+// (que se puede elegir en el dialogo, y es justo lo que hizo el) salia:
+//
+//   D I D I D I  ->  1 1 1 2 2 3      <- tres filas en la "serie 1"
+//
+// ...porque el primer derecho no sumaba y el izquierdo siguiente abria la
+// serie 1 otra vez. De ahi las parejas mal emparejadas, y con ellas los
+// descansos: el descanso CORTO entre lados se decide por "¿queda el otro
+// lado pendiente?", asi que con la pareja equivocada se aplicaba donde no
+// tocaba.
+//
+// Ahora se empareja SIN mirar cual es el izquierdo: se recorre la lista y
+// cada fila abre serie nueva salvo que cierre la que quedo abierta justo
+// antes con el OTRO lado. Asi da igual por donde empieces.
+//
+// Aguanta ademas listas mal formadas (alguien borro una fila suelta en el
+// editor del historial): dos lados iguales seguidos son dos series
+// distintas, no una pareja imposible.
 function gymSetSerieNumber(ex, setIndex) {
   if (!gymExerciseUsesSides(ex)) return setIndex + 1;
   let n = 0;
-  for (let i = 0; i <= setIndex; i++) if (ex.sets[i].side !== 'right') n += 1;
+  let abierta = false;
+  for (let i = 0; i <= setIndex; i++) {
+    const lado = ex.sets[i] ? ex.sets[i].side : null;
+    const anterior = i > 0 && ex.sets[i - 1] ? ex.sets[i - 1].side : null;
+    if (abierta && lado && anterior && lado !== anterior) {
+      // Esta fila CIERRA la pareja de la anterior: misma serie.
+      abierta = false;
+    } else {
+      n += 1;
+      abierta = !!lado;
+    }
+  }
   return Math.max(1, n);
 }
-// Cuantas series (no lados) tiene el ejercicio.
+// Cuantas series (no lados) tiene el ejercicio. Se saca del numero de
+// serie de la ULTIMA fila, para que no pueda separarse de la funcion de
+// arriba: contar los izquierdos por su cuenta era lo que fallaba.
 function gymSerieCount(ex) {
   if (!gymExerciseUsesSides(ex)) return ex.sets.length;
-  return ex.sets.filter((s) => s.side !== 'right').length;
+  if (!ex.sets.length) return 0;
+  return gymSetSerieNumber(ex, ex.sets.length - 1);
 }
 function gymSideLabel(side) {
   if (side === 'left') return 'izquierdo';
@@ -11610,16 +12774,41 @@ function gymApplyFirstSideToPending(ex, side) {
 }
 // Crea las series de un ejercicio: una fila por serie, o DOS (izquierda
 // y derecha) si el ejercicio cuenta los lados por separado.
-function gymBuildSetsForExercise(exerciseId, count, restSeconds) {
+// El cuarto argumento son los segundos OBJETIVO, para los ejercicios por
+// tiempo. La serie nace sabiendo COMO se mide y que objetivo tiene, que
+// es lo que luego decide si el cronometro cuenta atras o hacia arriba.
+//
+// La medicion se copia del ejercicio AL CREAR la serie y se queda ahi:
+// cambiar el ejercicio a mitad de entreno no reescribe las series que ya
+// llevabas hechas.
+function gymBuildSetsForExercise(exerciseId, count, restSeconds, targetSeconds = '') {
   const exercise = state.gymExercises.find((e) => e.id === exerciseId);
   const sides = !!(exercise && exercise.unilateral && exercise.countSidesSeparately);
+  const measure = gymMedicionDe(exercise);
+  const objetivo = targetSeconds !== '' && targetSeconds != null
+    ? targetSeconds
+    : (exercise && exercise.defaultSeconds != null ? exercise.defaultSeconds : '');
+  const base = () => ({
+    reps: '',
+    weightDisplay: '',
+    done: false,
+    restSeconds,
+    side: null,
+    note: '',
+    measure,
+    // Lo que se apunto de verdad (aguante o ventana). Vacio hasta que se
+    // haga la serie.
+    measureSeconds: '',
+    // Y lo que toca hacer. Solo en los ejercicios por tiempo.
+    targetSeconds: gymEsPorTiempo(measure) ? objetivo : '',
+  });
   const out = [];
   for (let i = 0; i < Math.max(1, Number(count) || 1); i++) {
     if (sides) {
-      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'left', note: '' });
-      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: 'right', note: '' });
+      out.push({ ...base(), side: 'left' });
+      out.push({ ...base(), side: 'right' });
     } else {
-      out.push({ reps: '', weightDisplay: '', done: false, restSeconds, side: null, note: '' });
+      out.push(base());
     }
   }
   return out;
@@ -11651,6 +12840,312 @@ function gymActiveSetSeconds() {
   if (!a) return 0;
   const paused = (a.pausedMs || 0) + (a.pausedAt ? Date.now() - a.pausedAt : 0);
   return Math.max(0, Math.floor((Date.now() - a.startedAt - paused) / 1000));
+}
+
+// ---------------------------------------------------------------------
+// EL CRONOMETRO DE UNA SERIE POR TIEMPO
+// ---------------------------------------------------------------------
+//
+// Koku eligio que dependa del tipo: un isometrico con objetivo cuenta
+// ATRAS (y avisa al llegar a cero, como el descanso), y un "aguanta lo
+// que puedas" cuenta hacia ARRIBA.
+//
+// No hace falta ningun ajuste para elegir: lo decide si la serie tiene
+// segundos objetivo o no. Si los tiene, hay una meta a la que llegar y
+// contar atras es lo util; si no, la meta ES lo que aguantes.
+
+// COMO SE LEE UNA SERIE POR TIEMPO, en una linea.
+//
+// Se usa en la tarjeta del entreno, en "la ultima vez" y en el historial,
+// para que las tres digan lo mismo y no haya tres formatos distintos del
+// mismo dato.
+//
+//   isometrico              -> "45 s"
+//   reps en un tiempo       -> "22 en 30 s"
+//   sin datos todavia       -> "—"
+function gymTextoDeSegundosDeSerie(set) {
+  if (!set) return '—';
+  const seg = Number(set.measureSeconds ?? set.measure_seconds);
+  const tiene = Number.isFinite(seg) && seg > 0;
+  if (set.measure === 'reps_en_tiempo') {
+    const reps = set.reps;
+    if (reps && tiene) return `${reps} en ${seg} s`;
+    if (tiene) return `${seg} s`;
+    return reps ? String(reps) : '—';
+  }
+  return tiene ? `${seg} s` : '—';
+}
+
+// El resumen de una serie para "la ultima vez" y el historial: en
+// repeticiones es el "60×10" de siempre, y en las de tiempo lo de arriba.
+// Con { kg: true } lleva el peso delante, que es como se enseña en el
+// entreno.
+function gymResumenDeSerie(set, { kg = false } = {}) {
+  if (!set) return '—';
+  const peso = set.weightKg !== null && set.weightKg !== undefined ? gymWeightKgToDisplay(set.weightKg) : null;
+  if (gymEsPorTiempo(set.measure)) {
+    const texto = gymTextoDeSegundosDeSerie(set);
+    // El peso solo si de verdad lo hubo: la mayoria de los isometricos
+    // van sin nada encima, y un "0×45 s" no dice nada.
+    return kg && peso ? `${peso} ${texto}` : texto;
+  }
+  return `${kg ? (peso ?? '—') : (peso ?? '—')}×${set.reps ?? '—'}`;
+}
+
+// ---------------------------------------------------------------------
+// CRONOMETRO / TEMPORIZADOR SUELTO
+// ---------------------------------------------------------------------
+//
+// Peticion de Koku (11/9/2026): "un cronometro, cuando le doy, que abra
+// un cronometro y ya esta, no hace nada, solo cronometrar, que puedas
+// pausarlo, reiniciarlo y ya... si lo abro y no lo pauso y lo cierro que
+// siga corriendo... no necesito que se contabilice en el historial me da
+// igual, es para tener una herramienta rapida en el mismo ecosistema.
+// Que pueda ser temporizador tambien".
+//
+// TRES COSAS QUE NO HACE, Y ES A PROPOSITO:
+//
+//  1. No toca la sesion. No crea series, no suma al tiempo de trabajo y
+//     no sale en el historial. Es una herramienta, no un registro.
+//  2. No avisa al llegar a cero en modo temporizador: solo se marca en
+//     pantalla. Sonar o vibrar seria pisarse con el aviso de fin de
+//     descanso, que es el que de verdad tiene que oirse con la app
+//     cerrada. (Si algun dia hace falta, es una decision aparte: toca
+//     notificaciones.)
+//  3. No se para al cerrar el dialogo, que es justo lo que pidio.
+//
+// El estado se guarda en localStorage y NO en memoria: asi sobrevive a
+// recargar la app, igual que el entreno. Y el tiempo se calcula SIEMPRE
+// de marcas de reloj (startedAt/pausedMs), nunca de un contador que se
+// va sumando -- en iOS el JavaScript de fondo se congela, y un contador
+// se quedaria corto justo cuando se sale de la app (la misma razon por
+// la que el entreno ya funciona asi).
+const GYM_CRONO_KEY = 'gymCrono';
+let gymCrono = null;
+let gymCronoLatido = null;
+
+function gymCronoCargar() {
+  let crudo = null;
+  try {
+    const texto = localStorage.getItem(GYM_CRONO_KEY);
+    crudo = texto ? JSON.parse(texto) : null;
+  } catch { crudo = null; }
+  if (!crudo || typeof crudo !== 'object' || Array.isArray(crudo)) { gymCrono = null; return; }
+  // SE SANEA AL LEER, y no es paranoia: encontrado forzando errores, un
+  // startedAt que no fuera un numero (basura en localStorage, una copia
+  // de seguridad vieja, otra version de la app) hacia que el cronometro
+  // pintara "NaN:NaN" -- Date.now() menos un texto da NaN, y de ahi no
+  // se sale solo. Validar en la puerta de entrada lo arregla de una vez
+  // para todos los que leen el estado.
+  const numeroOCero = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const numeroONulo = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
+  gymCrono = {
+    modo: crudo.modo === 'atras' ? 'atras' : 'arriba',
+    startedAt: numeroONulo(crudo.startedAt),
+    pausedMs: Math.max(0, numeroOCero(crudo.pausedMs)),
+    pausedAt: numeroONulo(crudo.pausedAt),
+    objetivo: Math.max(1, numeroOCero(crudo.objetivo) || 60),
+  };
+}
+function gymCronoGuardar() {
+  try {
+    if (gymCrono) localStorage.setItem(GYM_CRONO_KEY, JSON.stringify(gymCrono));
+    else localStorage.removeItem(GYM_CRONO_KEY);
+  } catch { /* sin sitio: el cronometro sigue vivo en memoria */ }
+}
+gymCronoCargar();
+
+// Los segundos que lleva corriendo, descontando lo que estuvo pausado.
+function gymCronoSegundos() {
+  if (!gymCrono || !gymCrono.startedAt) return 0;
+  const pausado = (gymCrono.pausedMs || 0) + (gymCrono.pausedAt ? Date.now() - gymCrono.pausedAt : 0);
+  return Math.max(0, Math.floor((Date.now() - gymCrono.startedAt - pausado) / 1000));
+}
+function gymCronoEnMarcha() {
+  return !!(gymCrono && gymCrono.startedAt && !gymCrono.pausedAt);
+}
+// En temporizador, lo que QUEDA; en cronometro, lo que lleva. Al llegar a
+// cero se queda en cero y no sigue a negativo.
+function gymCronoRestante() {
+  if (!gymCrono) return 0;
+  if (gymCrono.modo !== 'atras') return gymCronoSegundos();
+  return Math.max(0, (Number(gymCrono.objetivo) || 0) - gymCronoSegundos());
+}
+function gymCronoVencido() {
+  return !!(gymCrono && gymCrono.modo === 'atras' && gymCrono.startedAt && gymCronoRestante() <= 0);
+}
+
+function gymCronoModoActual() {
+  return gymCrono && gymCrono.modo === 'atras' ? 'atras' : 'arriba';
+}
+
+// El objetivo escrito en los dos campos, en segundos. Minimo 1: un
+// temporizador de cero segundos no es un temporizador.
+function gymCronoObjetivoEscrito() {
+  const min = Number(document.getElementById('gym-crono-min').value) || 0;
+  const seg = Number(document.getElementById('gym-crono-seg').value) || 0;
+  return Math.max(1, Math.floor(min) * 60 + Math.floor(seg));
+}
+
+function renderGymCrono() {
+  const modal = document.getElementById('gym-crono-modal');
+  if (!modal) return;
+  const modo = gymCronoModoActual();
+  modal.querySelectorAll('[data-crono-modo]').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.cronoModo === modo);
+  });
+  document.getElementById('gym-crono-titulo').textContent = modo === 'atras' ? 'Temporizador' : 'Cronómetro';
+  // Los campos del objetivo solo en temporizador, y bloqueados mientras
+  // corre: cambiar de cuanto cuenta atras a mitad de cuenta no significa
+  // nada claro.
+  const objetivo = document.getElementById('gym-crono-objetivo');
+  objetivo.classList.toggle('hidden', modo !== 'atras');
+  const corriendo = !!(gymCrono && gymCrono.startedAt);
+  objetivo.querySelectorAll('input').forEach((i) => { i.disabled = corriendo; });
+
+  const display = document.getElementById('gym-crono-display');
+  display.textContent = gymLiveFormatClock(corriendo ? gymCronoRestante() : (modo === 'atras' ? gymCronoObjetivoEscrito() : 0));
+  display.classList.toggle('vencido', gymCronoVencido());
+  display.classList.toggle('paused', !!(gymCrono && gymCrono.pausedAt));
+
+  const toggle = document.getElementById('btn-gym-crono-toggle');
+  toggle.textContent = !corriendo ? 'Empezar' : (gymCrono.pausedAt ? 'Reanudar' : 'Pausar');
+  document.getElementById('btn-gym-crono-reset').disabled = !corriendo;
+  document.getElementById('gym-crono-pista').textContent = gymCronoVencido()
+    ? 'Se acabó el tiempo.'
+    : (corriendo ? 'Puedes cerrar esto: sigue contando.' : '');
+  // El boton del menu se marca mientras hay algo en marcha, para que se
+  // note que sigue contando aunque el dialogo este cerrado.
+  const botonFab = document.getElementById('btn-gym-live-crono');
+  if (botonFab) botonFab.classList.toggle('esta-contando', corriendo && !gymCrono.pausedAt);
+}
+
+// Un latido propio mientras el dialogo esta abierto. No se reaprovecha el
+// del entreno a proposito: este cronometro tiene que funcionar aunque no
+// haya ningun entrenamiento en marcha.
+function gymCronoArrancarLatido() {
+  if (gymCronoLatido) return;
+  gymCronoLatido = setInterval(renderGymCrono, 250);
+}
+function gymCronoPararLatido() {
+  if (!gymCronoLatido) return;
+  clearInterval(gymCronoLatido);
+  gymCronoLatido = null;
+}
+
+function abrirGymCrono() {
+  if (!gymCrono) gymCrono = { modo: 'arriba', startedAt: null, pausedMs: 0, pausedAt: null, objetivo: 60 };
+  if (gymCrono.modo === 'atras' && gymCrono.objetivo) {
+    document.getElementById('gym-crono-min').value = Math.floor(gymCrono.objetivo / 60);
+    document.getElementById('gym-crono-seg').value = gymCrono.objetivo % 60;
+  }
+  document.getElementById('gym-crono-modal').classList.remove('hidden');
+  renderGymCrono();
+  gymCronoArrancarLatido();
+}
+function cerrarGymCrono() {
+  document.getElementById('gym-crono-modal').classList.add('hidden');
+  gymCronoPararLatido();
+  // NO se para el cronometro: cerrar es cerrar la ventana, no parar el
+  // reloj. Lo pidio asi explicitamente.
+  renderGymCrono();
+}
+
+document.getElementById('btn-gym-live-crono').addEventListener('click', () => {
+  closeGymLiveFab();
+  abrirGymCrono();
+});
+document.getElementById('btn-close-gym-crono').addEventListener('click', cerrarGymCrono);
+cerrarModalAlTocarFuera('gym-crono-modal', cerrarGymCrono);
+
+document.querySelectorAll('#gym-crono-modos [data-crono-modo]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    // Cambiar de modo REINICIA: un cronometro a mitad no se puede
+    // convertir en una cuenta atras sin inventarse desde cuando.
+    gymCrono = { modo: btn.dataset.cronoModo, startedAt: null, pausedMs: 0, pausedAt: null, objetivo: gymCrono ? gymCrono.objetivo : 60 };
+    gymCronoGuardar();
+    renderGymCrono();
+  });
+});
+
+document.getElementById('btn-gym-crono-toggle').addEventListener('click', () => {
+  if (!gymCrono) gymCrono = { modo: 'arriba', startedAt: null, pausedMs: 0, pausedAt: null, objetivo: 60 };
+  if (!gymCrono.startedAt) {
+    if (gymCrono.modo === 'atras') gymCrono.objetivo = gymCronoObjetivoEscrito();
+    gymCrono.startedAt = Date.now();
+    gymCrono.pausedMs = 0;
+    gymCrono.pausedAt = null;
+  } else if (gymCrono.pausedAt) {
+    gymCrono.pausedMs = (gymCrono.pausedMs || 0) + (Date.now() - gymCrono.pausedAt);
+    gymCrono.pausedAt = null;
+  } else {
+    gymCrono.pausedAt = Date.now();
+  }
+  gymCronoGuardar();
+  renderGymCrono();
+});
+
+document.getElementById('btn-gym-crono-reset').addEventListener('click', () => {
+  if (!gymCrono) return;
+  gymCrono = { modo: gymCrono.modo, startedAt: null, pausedMs: 0, pausedAt: null, objetivo: gymCrono.objetivo };
+  gymCronoGuardar();
+  renderGymCrono();
+});
+
+['gym-crono-min', 'gym-crono-seg'].forEach((id) => {
+  document.getElementById(id).addEventListener('input', renderGymCrono);
+});
+
+// Al arrancar la app, por si se dejo uno corriendo: solo se refresca la
+// marca del boton, sin abrir nada.
+renderGymCrono();
+
+// La serie que esta corriendo ahora mismo, o null.
+function gymSerieEnCurso() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return null;
+  const ex = gymLiveSession.exercises.find((e) => e.exerciseId === a.exerciseId);
+  const set = ex && ex.sets[a.setIndex];
+  return set ? { ex, set } : null;
+}
+
+// Los segundos objetivo de una serie, o 0 si no tiene (no es por tiempo,
+// o es de las de "aguanta lo que puedas").
+function gymObjetivoDeLaSerie(set) {
+  if (!set || !gymEsPorTiempo(set.measure)) return 0;
+  const n = Number(set.targetSeconds);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+// ¿Esta serie cuenta atras? Solo si es por tiempo Y tiene objetivo.
+function gymSerieCuentaAtras(set) {
+  return gymObjetivoDeLaSerie(set) > 0;
+}
+
+// Lo que enseña el cronometro de la serie: hacia arriba lo de siempre,
+// y hacia atras lo que queda. Al llegar a cero se queda en "0:00" y NO
+// sigue en negativo: lo que pasa a partir de ahi es que te has pasado del
+// objetivo, y eso ya lo dice el aviso.
+function gymTextoDelCronometroDeSerie(set) {
+  const corridos = gymActiveSetSeconds();
+  const objetivo = gymObjetivoDeLaSerie(set);
+  if (!objetivo) return gymLiveFormatClock(corridos);
+  return gymLiveFormatClock(Math.max(0, objetivo - corridos));
+}
+
+// ¿Ya se llego al objetivo? Lo usa el aviso de "ya puedes parar".
+function gymObjetivoCumplido(set) {
+  const objetivo = gymObjetivoDeLaSerie(set);
+  return objetivo > 0 && gymActiveSetSeconds() >= objetivo;
+}
+
+// Los segundos que se apuntan al terminar una serie por tiempo.
+//
+// Es SIEMPRE lo que marco el cronometro, no el objetivo: si la plancha
+// era de 45 s y aguantaste 38, lo que se guarda son 38. El objetivo es lo
+// que te propusiste, no lo que hiciste.
+function gymSegundosDeLaSerie() {
+  return gymActiveSetSeconds();
 }
 
 // Cancela la serie en curso si es de este ejercicio (se usa al quitar un
@@ -11760,6 +13255,33 @@ document.getElementById('btn-gym-set-start-go').addEventListener('click', () => 
   closeGymSetStartModal();
 });
 
+// Cuanto se descanso DE VERDAD, para la serie cuyo descanso estaba
+// corriendo. Se llama justo antes de cortarlo.
+//
+// El numero se guarda en un campo APARTE (restActualSeconds) y NO
+// pisando set.restSeconds, y eso no es un capricho: restSeconds es
+// tambien el descanso PROGRAMADO, y de el tira gymBuildSetsForExercise()
+// para la serie extra que se añade al final. Pisandolo, cortar un
+// descanso te dejaba el descanso corto metido en la siguiente serie.
+//
+// El extra (los +30s) se pone a cero a la vez: si cortaste, no
+// descansaste ni el base, asi que un "+30" ahi seria mentira. El total
+// real ya va entero en restActualSeconds.
+function gymApuntarDescansoReal() {
+  const ref = gymLiveSession && gymLiveSession.restSetRef;
+  if (!ref || !gymLiveSession.restUntil) return;
+  const ex = gymLiveSession.exercises.find((e) => e.exerciseId === ref.exerciseId);
+  const set = ex && ex.sets[ref.setIndex];
+  if (!set) return;
+  const total = (Number(gymLiveSession.restBaseSeconds) || 0) + (Number(gymLiveSession.restExtraSeconds) || 0);
+  const restante = Math.max(0, Math.ceil((gymLiveSession.restUntil - Date.now()) / 1000));
+  // Si ya habia vencido (restante 0), lo real es el total: no se toca
+  // nada y se deja que el +30 siga contando como lo que fue.
+  if (restante <= 0) return;
+  set.restActualSeconds = Math.max(0, total - restante);
+  set.extraRest = 0;
+}
+
 // Arranca la serie: apunta a la primera sin hacer y, si ya estaban todas,
 // añade una serie extra heredando el descanso de la anterior.
 function gymStartSet(exIndex, setIndexOverride = null) {
@@ -11771,7 +13293,7 @@ function gymStartSet(exIndex, setIndexOverride = null) {
     // (izquierdo + derecho), no una fila suelta -- antes se colaba una
     // serie sin lado y descuadraba la numeracion (lo vio Koku).
     const last = ex.sets[ex.sets.length - 1];
-    const nuevas = gymBuildSetsForExercise(ex.exerciseId, 1, last ? last.restSeconds : '');
+    const nuevas = gymBuildSetsForExercise(ex.exerciseId, 1, last ? last.restSeconds : '', last ? last.targetSeconds : '');
     idx = ex.sets.length;
     ex.sets.push(...nuevas);
     // El bloque nuevo sale por el lado que hayas elegido antes en este
@@ -11790,6 +13312,18 @@ function gymStartSet(exIndex, setIndexOverride = null) {
   // Si estabas descansando, empezar la siguiente serie corta el descanso:
   // ya estas entrenando otra vez.
   if (gymLiveSession.restUntil) {
+    // Y SE APUNTA LO QUE DE VERDAD DESCANSASTE, no lo que tenia
+    // programado. Peticion de Koku: "si le doy a comenzar ejercicio antes
+    // de que avance el tiempo, que guarde ese tiempo, que le quite al
+    // tiempo guardado lo que le sobre, porque le he dado antes a comenzar
+    // serie".
+    //
+    // Importa de verdad: de ese numero sale la media de descanso por
+    // ejercicio (/api/gym-sessions/set-times), que es con lo que se
+    // calcula el tiempo estimado del entreno. Guardando siempre el
+    // programado, la estimacion se iria hacia arriba en cuanto cortes
+    // descansos, que es justo lo que hace quien va con prisa.
+    gymApuntarDescansoReal();
     gymLiveSession.restUntil = null;
     gymCancelRestNotification();
     gymEndRestLiveActivity();
@@ -11830,9 +13364,9 @@ function gymSetEndShowForm(show) {
 // gestos nunca se pisan.
 let gymEjercicioEnMovimiento = null;
 
-function armarMovimientoDeEjercicio(exerciseId) {
+function armarMovimientoDeEjercicio(exerciseId, repintar = renderGymLiveExercises) {
   gymEjercicioEnMovimiento = exerciseId;
-  renderGymLiveExercises();
+  repintar();
   // El aviso solo la primera vez: luego ya se sabe.
   if (localStorage.getItem('gymMoverHintSeen') !== '1') {
     localStorage.setItem('gymMoverHintSeen', '1');
@@ -11841,7 +13375,21 @@ function armarMovimientoDeEjercicio(exerciseId) {
 }
 
 // Se engancha a cada tarjeta armada dentro de renderGymLiveExercises.
-function habilitarArrastreDeEjercicio(envoltorio) {
+//
+// Las opciones existen para que lo use TAMBIEN la lista de ejercicios del
+// dia (el modal del plan), que Koku pidio con la misma mecanica que el
+// entreno ("misma mecanica, menos ruido"). Sin ellas, esta funcion solo
+// sabia de gymLiveSession y de .gym-live-content.
+//
+//   scrollerSelector -- quien se desplaza de verdad (en el entreno es
+//     .gym-live-content, en un modal es su propia tarjeta).
+//   alSoltar(desde, hasta) -- quien reordena el array de verdad.
+//   repintar() -- para borrar los transform en linea al acabar.
+function habilitarArrastreDeEjercicio(envoltorio, {
+  scrollerSelector = '.gym-live-content',
+  alSoltar = null,
+  repintar = renderGymLiveExercises,
+} = {}) {
   let arrastre = null;
 
   // La lista se mira EN CADA USO, no al enganchar: esto se llama
@@ -11924,7 +13472,7 @@ function habilitarArrastreDeEjercicio(envoltorio) {
     if (desde < 0) return;
     // Quien se desplaza es .gym-live-content, no la lista: la lista crece
     // con su contenido y el scroll lo lleva el contenedor de arriba.
-    const scroller = envoltorio.closest('.gym-live-content');
+    const scroller = envoltorio.closest(scrollerSelector);
     arrastre = {
       y: e.clientY,
       ultimaY: e.clientY,
@@ -11960,14 +13508,17 @@ function habilitarArrastreDeEjercicio(envoltorio) {
     envoltorio.classList.remove('arrastrando');
     // El modo se desarma SIEMPRE al soltar, lo pidio asi Koku.
     gymEjercicioEnMovimiento = null;
-    if (hasta !== desde && gymLiveSession) {
-      const arr = gymLiveSession.exercises;
-      const [movido] = arr.splice(desde, 1);
-      arr.splice(hasta, 0, movido);
-      gymLiveStore();
+    if (hasta !== desde) {
+      if (alSoltar) alSoltar(desde, hasta);
+      else if (gymLiveSession) {
+        const arr = gymLiveSession.exercises;
+        const [movido] = arr.splice(desde, 1);
+        arr.splice(hasta, 0, movido);
+        gymLiveStore();
+      }
     }
     // Repintar borra de paso todos los transform en linea.
-    renderGymLiveExercises();
+    repintar();
   };
   envoltorio.addEventListener('pointerup', soltar);
   envoltorio.addEventListener('pointercancel', soltar);
@@ -12032,7 +13583,7 @@ function renderGymExerciseEditSets() {
         <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar esta serie">✕</button>
       </div>
       <div class="gym-set-segment-fields">
-        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="text" inputmode="decimal" data-set-field="weightDisplay" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><span class="gym-peso-con-signo">${gymBotonDeSignoHtml()}<input type="text" inputmode="decimal" data-set-field="weightDisplay" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></span></label>
         <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-set-field="reps" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
       </div>
       <label class="gym-set-segment-field"><span>Nota de la serie</span><input type="text" data-set-field="note" value="${escapeHtml(String(set.note ?? ''))}" /></label>
@@ -12040,8 +13591,10 @@ function renderGymExerciseEditSets() {
       <div class="gym-set-extend-list gym-session-set-actions">
         <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
         <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
+        <button type="button" class="gym-set-extend-btn" data-add-seg="parciales">+ Parciales</button>
         <button type="button" class="gym-set-extend-btn${set.failure ? ' is-on' : ''}" data-toggle-failure>${set.failure ? '✓ ' : ''}Al fallo</button>
         <button type="button" class="gym-set-extend-btn${set.done ? ' is-on' : ''}" data-toggle-done>${set.done ? '✓ Hecha' : 'Sin hacer'}</button>
+        ${gymBotonQuitarExtraHtml(set.extraRest)}
       </div>
     `;
     bloque.querySelectorAll('[data-set-field]').forEach((input) => {
@@ -12058,7 +13611,7 @@ function renderGymExerciseEditSets() {
     // cuando no hay nada) y ahi no habia sitio.
     bloque.querySelector('[data-toggle-done]').addEventListener('click', () => {
       set.done = !set.done;
-      if (!set.done) { set.durationSeconds = null; set.extraRest = 0; }
+      if (!set.done) { set.durationSeconds = null; set.extraRest = 0; set.restActualSeconds = null; }
       renderGymExerciseEditSets();
     });
     bloque.querySelector('[data-quitar-serie]').addEventListener('click', async () => {
@@ -12069,6 +13622,11 @@ function renderGymExerciseEditSets() {
     });
     bloque.querySelector('[data-toggle-failure]').addEventListener('click', () => {
       set.failure = !set.failure;
+      renderGymExerciseEditSets();
+    });
+    const quitarExtra = bloque.querySelector('[data-quitar-extra]');
+    if (quitarExtra) quitarExtra.addEventListener('click', () => {
+      set.extraRest = gymQuitarTreintaSegundos(set.extraRest);
       renderGymExerciseEditSets();
     });
     const editor = bloque.querySelector('[data-tramos-de]');
@@ -12108,7 +13666,7 @@ document.getElementById('btn-gym-exercise-edit-add-set').addEventListener('click
   const ultima = draft.sets[draft.sets.length - 1];
   const desde = draft.sets.length;
   // Una serie mas: dos filas si el ejercicio cuenta los lados aparte.
-  draft.sets.push(...gymBuildSetsForExercise(gymExerciseEditId, 1, ultima ? ultima.restSeconds : draft.restSeconds));
+  draft.sets.push(...gymBuildSetsForExercise(gymExerciseEditId, 1, ultima ? ultima.restSeconds : draft.restSeconds, ultima ? ultima.targetSeconds : ''));
   const ex = gymLiveSession && gymLiveSession.exercises.find((e) => e.exerciseId === gymExerciseEditId);
   if (ex && ex.firstSide === 'right') gymSetStartSide(draft, desde, 'right');
   renderGymExerciseEditSets();
@@ -12120,6 +13678,7 @@ document.getElementById('gym-exercise-edit-form').addEventListener('submit', (e)
   const draft = gymExerciseEditDraft;
   if (!ex || !draft) { closeGymExerciseEditModal(); return; }
   const rest = document.getElementById('gym-exercise-edit-rest').value;
+  const restAntes = draft.restSeconds;
   ex.rpe = document.getElementById('gym-exercise-edit-rpe').value;
   ex.note = document.getElementById('gym-exercise-edit-note').value;
   // Los tramos se leen del DOM (la sugerencia gris solo existe ahi).
@@ -12127,6 +13686,11 @@ document.getElementById('gym-exercise-edit-form').addEventListener('submit', (e)
     const editor = document.querySelector(`#gym-exercise-edit-sets [data-tramos-de="${i}"]`);
     set.segments = gymLeerTramosDe(editor);
     set.restSeconds = rest;
+    // Si has TOCADO el descanso aqui, tu numero manda y se olvida el
+    // descanso real que se hubiera apuntado al cortar el cronometro
+    // (ver gymApuntarDescansoReal). Si no lo tocas, se respeta: no es lo
+    // mismo abrir el editor a mirar que venir a corregir el descanso.
+    if (String(rest) !== String(restAntes)) set.restActualSeconds = null;
   });
   // Si la serie EN CURSO era de este ejercicio y ha desaparecido al
   // quitar series, se cancela: si no, quedaria un cronometro corriendo
@@ -12153,6 +13717,37 @@ function gymVolcarSerieEnFormulario(set, sugerencia) {
   wEl.placeholder = sugerencia && sugerencia.weightDisplay ? String(sugerencia.weightDisplay) : '';
   rEl.placeholder = sugerencia && sugerencia.reps ? String(sugerencia.reps) : '';
   document.getElementById('gym-set-end-note').value = set.note || '';
+
+  // LOS CAMPOS SE TURNAN SEGUN COMO SE MIDA LA SERIE.
+  //
+  //   'tiempo'          -- solo segundos (un isometrico no tiene reps).
+  //   'reps_en_tiempo'  -- los DOS: cuantas hiciste y en cuanto tiempo.
+  //   'reps'            -- solo repeticiones, como siempre.
+  //
+  // El peso se queda SIEMPRE, en las tres: una plancha con disco encima
+  // o un chaleco lastrado son cosa normal ("por lo general es sin peso,
+  // pero que exista la posibilidad").
+  const medicion = gymEsPorTiempo(set.measure) ? set.measure : 'reps';
+  document.getElementById('gym-set-end-reps-field').classList.toggle('hidden', medicion === 'tiempo');
+  document.getElementById('gym-set-end-seconds-field').classList.toggle('hidden', medicion === 'reps');
+  const segEl = document.getElementById('gym-set-end-seconds');
+  if (gymEsPorTiempo(medicion)) {
+    // Llega relleno con lo que marco el cronometro, y se puede corregir:
+    // igual paraste tarde, o lo estas apuntando despues. Si la serie ya
+    // traia un valor (se esta reabriendo el dialogo), manda ese.
+    segEl.value = set.measureSeconds !== '' && set.measureSeconds != null
+      ? set.measureSeconds
+      : gymSegundosDeLaSerie();
+    const objetivo = gymObjetivoDeLaSerie(set);
+    document.getElementById('gym-set-end-seconds-label').textContent =
+      objetivo > 0 ? `Segundos (objetivo: ${objetivo})` : 'Segundos aguantados';
+  }
+
+  // El ± va SIEMPRE. El teclado decimal del iPhone no tiene tecla menos,
+  // asi que sin el boton seria imposible escribir un -20 en el movil; y
+  // cualquier ejercicio puede necesitar ayuda un dia (ver el bloque
+  // "PESO NEGATIVO (ayuda)").
+  document.getElementById('btn-gym-set-end-signo').classList.remove('hidden');
   gymSetEndSegments = (set.segments || []).map((seg) => ({ ...seg }));
   renderGymSetEndSegments();
   gymSetEndFailure = !!set.failure;
@@ -12284,6 +13879,24 @@ function gymPesoMadreDeTramos() {
 // `segmentos` se modifica EN EL SITIO (es el array del sitio que lo
 // llama); `pesoMadre` es la sugerencia gris de partida, que en el
 // entreno sale del campo de peso y en el historial de la fila.
+// OJO CON EL TERCER ARGUMENTO: ya NO lleva exerciseId, y quitarlo fue el
+// arreglo de un fallo que Koku vio en el iPhone ("no me deja editar los
+// ejercicios en una serie").
+//
+// Lo que pasaba: en su dia este editor recibia el exerciseId para mirar si
+// el ejercicio estaba marcado como ASISTIDO y decidir si pintaba el boton
+// de signo. Esa marca se fue en la v0.49.0 (el signo se admite siempre, en
+// todos los ejercicios), asi que el parametro quedo muerto -- pero uno de
+// los sitios que lo pasaba, renderGymExerciseEditSets(), lo sacaba de una
+// variable `ex` que en ESA funcion no existe. ReferenceError.
+//
+// Y no se veia porque saltaba dentro de un manejador de clic: la excepcion
+// se perdia y el modal simplemente no se abria, sin ningun aviso. Llevaba
+// roto desde la v0.47.0 (build #59).
+//
+// Moraleja para la proxima: cuando un parametro deja de usarse, se quita
+// TAMBIEN de quien lo pasa. Dejarlo "por si acaso" mantiene vivas
+// referencias que ya no apuntan a nada.
 function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
   cont.innerHTML = '';
   const unit = getGymWeightUnitLabel();
@@ -12296,25 +13909,28 @@ function montarEditorDeTramos(cont, segmentos, { pesoMadre, alQuitar } = {}) {
   // te vale la sugerencia).
   let pesoAnterior = pesoMadre;
   segmentos.forEach((seg, i) => {
-    const sugerencia = seg.kind === 'restpause' ? pesoMadre : pesoAnterior;
+    const tipo = gymSegmentKind(seg.kind);
+    // Rest-pause y parciales se hacen con el peso de la MADRE; solo el
+    // dropset encadenado va bajando desde el tramo de arriba.
+    const sugerencia = tipo === 'dropset' ? pesoAnterior : pesoMadre;
     const row = document.createElement('div');
     row.className = 'gym-set-segment-row';
-    row.dataset.segKind = seg.kind;
+    row.dataset.segKind = tipo;
     // Cada campo lleva su etiqueta ENCIMA, no dentro como sugerencia:
     // metidos los tres en una fila, "pausa s" se cortaba y no se leia
     // la unidad (lo vio Koku en el iPhone). La sugerencia gris del peso
     // sigue estando, que es la que se usa si lo dejas en blanco.
     row.innerHTML = `
       <div class="gym-set-segment-head">
-        <span class="gym-set-segment-tag ${seg.kind === 'restpause' ? 'es-restpause' : 'es-dropset'}">${GYM_SEGMENT_LABELS[seg.kind]}</span>
+        <span class="gym-set-segment-tag es-${tipo}">${GYM_SEGMENT_LABELS[tipo]}</span>
         <span class="gym-set-head-dur"></span>
         <button type="button" class="icon-btn" data-seg-remove aria-label="Quitar tramo">✕</button>
       </div>
       <div class="gym-set-segment-fields">
-        ${seg.kind === 'restpause'
+        ${tipo === 'restpause'
           ? `<label class="gym-set-segment-field"><span>Pausa (s)</span><input type="number" inputmode="numeric" min="0" data-seg-field="pauseSeconds" value="${escapeHtml(String(seg.pauseSeconds ?? ''))}" /></label>`
           : ''}
-        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><input type="text" inputmode="decimal" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" /></label>
+        <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unit)})</span><span class="gym-peso-con-signo">${gymBotonDeSignoHtml()}<input type="text" inputmode="decimal" placeholder="${escapeHtml(String(sugerencia || ''))}" data-seg-field="weightDisplay" value="${escapeHtml(String(seg.weightDisplay ?? ''))}" /></span></label>
         <label class="gym-set-segment-field"><span>Reps</span><input type="number" inputmode="numeric" min="0" data-seg-field="reps" value="${escapeHtml(String(seg.reps ?? ''))}" /></label>
       </div>
     `;
@@ -12335,7 +13951,10 @@ function renderGymSetEndSegments() {
   montarEditorDeTramos(
     document.getElementById('gym-set-end-segments'),
     gymSetEndSegments,
-    { pesoMadre: gymPesoMadreDeTramos(), alQuitar: renderGymSetEndSegments },
+    {
+      pesoMadre: gymPesoMadreDeTramos(),
+      alQuitar: renderGymSetEndSegments,
+    },
   );
 }
 
@@ -12361,7 +13980,7 @@ function gymLeerTramosDe(cont) {
       const sug = norm(el.placeholder);
       return Number.isFinite(Number(sug)) && sug !== '' ? sug : '';
     };
-    const kind = fila.dataset.segKind === 'restpause' ? 'restpause' : 'dropset';
+    const kind = gymSegmentKind(fila.dataset.segKind);
     return {
       kind,
       weightDisplay: leer('weightDisplay'),
@@ -12421,6 +14040,16 @@ function gymFinishActiveSet() {
     set.weightDisplay = gymNormalizarPeso(wEl.value !== '' ? wEl.value : (wEl.placeholder || ''));
     set.reps = rEl.value !== '' ? rEl.value : (rEl.placeholder || '');
     set.note = document.getElementById('gym-set-end-note').value;
+    // Los segundos de una serie por tiempo: lo escrito, y si no lo que
+    // marco el cronometro. En una serie de repeticiones normales se
+    // limpian, para no dejar un dato colgado que luego alguien sume.
+    if (gymEsPorTiempo(set.measure)) {
+      const segEl = document.getElementById('gym-set-end-seconds');
+      const escrito = segEl.value !== '' ? Number(segEl.value) : NaN;
+      set.measureSeconds = Number.isFinite(escrito) && escrito >= 0 ? escrito : gymSegundosDeLaSerie();
+    } else {
+      set.measureSeconds = '';
+    }
     set.segments = gymLeerTramosDelFormulario();
     set.failure = gymSetEndFailure;
     set.done = true;
@@ -12475,6 +14104,17 @@ document.getElementById('btn-gym-set-end-pause').addEventListener('click', () =>
 function renderGymLiveExercises() {
   const container = document.getElementById('gym-live-exercises');
   container.innerHTML = '';
+  // Tiempo estimado, arriba del todo y fijo (peticion de Koku: "pon
+  // arriba de la primera serie un mensaje que ponga un tiempo estimado en
+  // base a los ultimos entrenes"). Se repinta con la lista, asi que si
+  // anades o quitas un ejercicio la cifra se actualiza sola.
+  const estimado = gymTextoDeDuracionDelEntreno();
+  if (estimado) {
+    const linea = document.createElement('p');
+    linea.className = 'gym-live-estimate';
+    linea.textContent = estimado;
+    container.appendChild(linea);
+  }
   // El atajo de "lista vacia" solo aplica si TAMPOCO hay nada que
   // recuperar (ni ocultos del dia ni quitados en esta sesion) -- si no,
   // esas secciones de abajo no se pintarian nunca.
@@ -12522,14 +14162,21 @@ function renderGymLiveExercises() {
       // saber que ese numero no salio de una serie normal.
       const prevExtra = prevSet && gymSetSegments(prevSet).length;
       const prevLabel = prevSet
-        ? `${prevSet.restSeconds ? `(${gymFormatRestShort(prevSet.restSeconds)})` : ''}${prevSet.weightKg !== null ? gymWeightKgToDisplay(prevSet.weightKg) : '—'}×${prevSet.reps ?? '—'}${prevExtra ? ` +${prevExtra}` : ''}`
+        ? `${prevSet.restSeconds ? `(${gymFormatRestShort(prevSet.restSeconds)})` : ''}${gymResumenDeSerie(prevSet, { kg: true })}${prevExtra ? ` +${prevExtra}` : ''}`
         : '—';
+      // La segunda columna de valores cambia con la medicion: en un
+      // ejercicio de repeticiones enseña las reps, y en uno por tiempo
+      // los segundos. En "reps en un tiempo" van los dos ("22 en 30 s"),
+      // que es justo lo que quieres ver de un vistazo.
+      const valorDerecha = gymEsPorTiempo(set.measure)
+        ? gymTextoDeSegundosDeSerie(set)
+        : String(set.reps || '—');
       return `
         <div class="gym-live-set-row ${set.done ? 'done' : ''}">
           <span class="gym-live-set-number">${gymSetSerieNumber(ex, setIndex)}${set.side ? `<span class="gym-set-side-chip">${set.side === 'left' ? 'I' : 'D'}</span>` : ''}</span>
           <span class="gym-live-set-prev" title="Última vez">${escapeHtml(prevLabel)}</span>
           <span class="gym-live-set-value">${escapeHtml(String(set.weightDisplay || '—'))}</span>
-          <span class="gym-live-set-value">${escapeHtml(String(set.reps || '—'))}</span>
+          <span class="gym-live-set-value">${escapeHtml(valorDerecha)}</span>
         </div>
         ${set.extraRest || set.failure || gymSetSegments(set).length
           ? `<div class="gym-live-set-chips">${set.extraRest ? `<span class="gym-set-extra-chip">+${set.extraRest}s</span>` : ''}${gymFailureChipHtml(set.failure)}${gymSegmentChipHtml(set)}</div>`
@@ -12722,7 +14369,7 @@ function renderGymLiveExercises() {
           note: '',
           rpe: '',
           collapsed: false,
-          sets: gymBuildSetsForExercise(p.exerciseId, p.targetSets, p.targetRestSeconds ?? ''),
+          sets: gymBuildSetsForExercise(p.exerciseId, p.targetSets, p.targetRestSeconds ?? '', p.targetSeconds ?? ''),
         });
         gymLiveSession.hiddenPool.splice(poolIndex, 1);
         gymLiveStore();
@@ -12904,13 +14551,13 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
     if (ex.note && ex.note.trim()) exerciseNotes[ex.exerciseId] = ex.note.trim();
     for (const set of ex.sets) {
       if (!set.done && set.reps === '' && set.weightDisplay === '') continue;
-      const weightKg = gymWeightDisplayToKg(set.weightDisplay);
+      const weightKg = gymWeightDisplayToKg(set.weightDisplay, ex.exerciseId);
       // Tramos de una serie alargada: el peso viaja en kg como el de la
       // serie madre (la libra es solo de presentacion, ver el esquema).
       const segments = (set.segments || []).map((seg) => ({
         kind: seg.kind,
         reps: seg.reps,
-        weightKg: gymWeightDisplayToKg(seg.weightDisplay),
+        weightKg: gymWeightDisplayToKg(seg.weightDisplay, ex.exerciseId),
         pauseSeconds: seg.pauseSeconds,
       })).filter((seg) => Number(seg.reps) > 0);
       sets.push({
@@ -12919,11 +14566,18 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
         weightKg,
         segments,
         setType: set.failure ? 'failure' : null,
-        restSeconds: set.restSeconds,
+        // El descanso REAL si cortaste el cronometro empezando antes la
+        // siguiente serie (ver gymApuntarDescansoReal); si no, el
+        // programado de siempre.
+        restSeconds: set.restActualSeconds != null ? set.restActualSeconds : set.restSeconds,
         // El RPE es del EJERCICIO (peticion de Koku): se guarda replicado
         // en cada serie para no cambiar el esquema de gym_sets.
         rpe: ex.rpe,
         extraRestSeconds: set.extraRest || null,
+        // Como se midio ESTA serie y cuantos segundos dio. En una de
+        // repeticiones van a null y la fila queda igual que siempre.
+        measure: gymEsPorTiempo(set.measure) ? set.measure : null,
+        measureSeconds: gymEsPorTiempo(set.measure) && set.measureSeconds !== '' ? set.measureSeconds : null,
         // Cuanto duro la serie (del boton "empezar" al "terminar").
         durationSeconds: set.durationSeconds || null,
         side: set.side || null,
@@ -13015,6 +14669,11 @@ function actualizarResumenDelWidget() {
 // en Swift a proposito: asi anadir un widget nuevo se hace entero desde
 // aqui, sin recompilar nada nativo.
 async function comprobarAperturaDesdeElWidget() {
+  // Lo primero: aplicar lo que se toco en un widget con la app cerrada
+  // (marcar una tarea como hecha). Va aqui porque los momentos son
+  // exactamente los mismos -- arrancar y volver a primer plano -- y asi
+  // no hay dos sitios que acordarse de mantener.
+  await aplicarAccionesDelWidgetYRefrescar();
   if (typeof widgetPideAbrir !== 'function') return;
   let destino = '';
   try { destino = await widgetPideAbrir(); } catch { return; }
@@ -13037,13 +14696,47 @@ async function comprobarAperturaDesdeElWidget() {
 
   if (destino === 'tareas') { await abrirTareasDesdeWidget(); return; }
 
-  // Los dos que se quedan en el calendario.
+  // El Gimnasio vive dentro del hub de Apps, como las otras tres.
+  if (destino === 'gimnasio') {
+    goToMobileSection('extensions');
+    if (typeof openGymView === 'function') await openGymView();
+    return;
+  }
+
+  // 'calendario' es el widget del mes: lleva al calendario y punto, sin
+  // meterse en el dia (Koku: "no hace falta que te lleve a la vista
+  // diaria del día pinchado, con que te lleve a la vista mensual sobra").
   goToMobileSection('calendar');
+  if (destino === 'calendario') return;
   if (destino === 'nuevo-evento') {
     openEventModal(null);
   } else if (destino === 'nueva-nota') {
     openMobileNotesView();
     openNoteInEditor(null);
+  }
+}
+
+// Aplica lo que se toco en el widget y, si de verdad cambio algo,
+// repinta lo que lo enseña y reescribe el resumen del widget -- si no,
+// la app seguiria mostrando la tarea pendiente que acabas de tachar.
+async function aplicarAccionesDelWidgetYRefrescar() {
+  if (typeof aplicarAccionesPendientesDelWidget !== 'function') return;
+  let hechas = 0;
+  try {
+    hechas = await aplicarAccionesPendientesDelWidget();
+  } catch (err) {
+    console.error('No se pudieron aplicar las acciones del widget:', err);
+    return;
+  }
+  if (hechas === 0) return;
+  try {
+    await loadReminders();
+    await loadTasks();
+    renderTasksList();
+    if (typeof loadMonth === 'function') await loadMonth();
+    actualizarResumenDelWidget();
+  } catch (err) {
+    console.error('No se pudo refrescar tras aplicar el widget:', err);
   }
 }
 
@@ -13412,22 +15105,14 @@ document.getElementById('gym-block-form').addEventListener('submit', async (e) =
 document.getElementById('btn-delete-gym-block').addEventListener('click', async () => {
   const id = Number(document.getElementById('gym-block-id').value);
   const block = state.gymBlocks.find((b) => b.id === id);
-  const dayCount = block ? block.dayCount : 0;
-  // Borrar un bloque se lleva sus dias (plantillas), aunque nunca el
-  // historial de sesiones -- se avisa con el confirm propio de la app,
-  // no con el del navegador (regla del proyecto).
-  const ok = await showAppConfirm(
-    dayCount > 0
-      ? `¿Eliminar este bloque y ${dayCount === 1 ? 'su día' : `sus ${dayCount} días`}? Las sesiones ya registradas no se pierden.`
-      : '¿Eliminar este bloque?',
-    { okText: 'Eliminar', danger: true }
-  );
-  if (!ok) return;
-  await api(`/api/gym-blocks/${id}`, { method: 'DELETE' });
-  closeGymBlockModal();
-  await Promise.all([loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
-  renderGymBlocksList();
-  renderGymSessionsList();
+  if (!block) return;
+  // El mismo borrado que el del deslizamiento, con el mismo aviso: una
+  // sola funcion para que los dos caminos no se separen nunca.
+  const habia = state.gymBlocks.length;
+  await borrarBloqueDeGimnasio(block);
+  // Solo se cierra la ficha si de verdad se borro (si dijo que no, se
+  // queda donde estaba).
+  if (state.gymBlocks.length < habia) closeGymBlockModal();
 });
 
 // --- Modal de dia (antes "rutina" -- ids gym-routine-* conservados) ---
@@ -13467,7 +15152,7 @@ function gymExerciseSelectOptions() {
   return state.gymExercises.map((ex) => ({
     value: String(ex.id),
     label: ex.name,
-    keywords: [gymMuscleGroupLabel(ex.muscleGroup) || '', ex.equipment || ''].filter(Boolean).join(' '),
+    keywords: gymTextoBuscableDeEjercicio(ex),
   }));
 }
 
@@ -13479,109 +15164,206 @@ function renderGymRoutineExercisesField() {
     return;
   }
   gymRoutineModalExercises.forEach((row, index) => {
+    const ej = state.gymExercises.find((x) => x.id === Number(row.exerciseId));
     const rowEl = document.createElement('div');
-    rowEl.className = 'gym-routine-exercise-row gym-routine-exercise-stacked' + (row.hidden ? ' gym-exercise-hidden' : '');
-    // El ojo oculta el ejercicio SIN quitarlo del dia: los entrenos nuevos
-    // no lo pre-cargan, pero se puede recuperar durante la sesion desde
-    // "Ejercicios ocultos" (peticion de Koku: aparcar sin borrar).
+    rowEl.className = 'gym-list-item gym-routine-exercise-item' + (row.hidden ? ' gym-exercise-hidden' : '');
+    // El ojo SE QUEDA en la fila: aparcar/desaparcar no es editar, es
+    // usar la lista -- el mismo criterio que deja "Activar" en la fila de
+    // un bloque y "empezar serie" en la tarjeta del entreno.
     const eyeSvg = row.hidden
       ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.8 9.8 0 0 1 12 5c5 0 9 4.5 10 7-.4 1-1.3 2.4-2.6 3.7M6.6 6.6C4.1 8.1 2.5 10.4 2 12c1 2.5 5 7 10 7 1.5 0 2.9-.4 4.2-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>'
       : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12c1-2.5 5-7 10-7s9 4.5 10 7c-1 2.5-5 7-10 7S3 14.5 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
-    const restPreviewText = (seconds) => {
-      const n = Number(seconds);
-      return n > 0 ? `Descanso: ${gymLiveFormatClock(n)} min` : '';
-    };
-    // Subir / bajar el ejercicio dentro del dia (peticion de Koku: "por
-    // si me equivoco y pongo un ejercicio antes, no tener que moverlo
-    // cada vez"). Con flechas y no arrastrando: dentro de un modal que
-    // ya se desplaza, arrastrar una fila pelea con el scroll, y aqui lo
-    // que hace falta es colocar una cosa en su sitio, no reordenar una
-    // lista larga. Las flechas de los extremos se quedan apagadas.
-    const flechaArriba = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
-    const flechaAbajo = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>';
-    const esPrimero = index === 0;
-    const esUltimo = index === gymRoutineModalExercises.length - 1;
+    // Lo que se VE, ya sin un solo campo donde escribir: "4 × 8 ·
+    // descanso 1:30". Si no tiene nada puesto se dice, en vez de dejar
+    // una linea vacia que parece un error.
+    const trozos = [];
+    // En un ejercicio POR TIEMPO lo que va detras del "×" son segundos,
+    // no repeticiones: "3 × 45 s". Y si no tiene objetivo, se dice que es
+    // de aguantar lo que puedas, que es informacion de verdad y no un
+    // hueco vacio.
+    const porTiempo = gymEsPorTiempo(gymMedicionDe(ej));
+    const objetivo = porTiempo && Number(row.targetSeconds) > 0 ? `${row.targetSeconds} s` : null;
+    if (row.targetSets && objetivo) trozos.push(`${row.targetSets} × ${objetivo}`);
+    else if (row.targetSets && row.targetReps) trozos.push(`${row.targetSets} × ${row.targetReps}`);
+    else if (row.targetSets) trozos.push(`${row.targetSets} series`);
+    else if (objetivo) trozos.push(objetivo);
+    else if (row.targetReps) trozos.push(`${row.targetReps} reps`);
+    if (porTiempo && !objetivo) trozos.push('lo que aguantes');
+    if (Number(row.targetRestSeconds) > 0) trozos.push(`descanso ${gymLiveFormatClock(Number(row.targetRestSeconds))}`);
     rowEl.innerHTML = `
-      <div class="gym-routine-exercise-name-row">
-        <div class="gym-routine-exercise-order">
-          <button type="button" class="icon-btn" data-field="subir" aria-label="Subir el ejercicio" title="Subir" ${esPrimero ? 'disabled' : ''}>${flechaArriba}</button>
-          <button type="button" class="icon-btn" data-field="bajar" aria-label="Bajar el ejercicio" title="Bajar" ${esUltimo ? 'disabled' : ''}>${flechaAbajo}</button>
-        </div>
-        <div class="gym-routine-exercise-picker"></div>
-        <button type="button" class="icon-btn" data-field="toggleHidden" aria-label="${row.hidden ? 'Mostrar en los entrenos' : 'Ocultar de los entrenos'}" title="${row.hidden ? 'Oculto: los entrenos nuevos no lo cargan. Tocar para mostrarlo.' : 'Ocultar de los entrenos nuevos (sin borrarlo del día)'}">${eyeSvg}</button>
-        <button type="button" class="icon-btn" data-field="remove" aria-label="Quitar ejercicio">✕</button>
+      <span class="gym-list-item-name">${escapeHtml(ej ? ej.name : 'Ejercicio')}
+        <span class="gym-list-item-muted">${escapeHtml(trozos.length ? trozos.join(' · ') : 'sin series ni descanso')}${row.hidden ? ' · aparcado' : ''}</span></span>
+      <div class="gym-list-item-actions">
+        <button type="button" class="icon-btn" data-field="toggleHidden" aria-label="${row.hidden ? 'Volver a cargarlo en los entrenos' : 'Aparcar (los entrenos nuevos no lo cargan)'}" title="${row.hidden ? 'Aparcado: los entrenos nuevos no lo cargan. Tocar para volver a cargarlo.' : 'Aparcar: los entrenos nuevos dejaran de cargarlo (sin borrarlo del día)'}">${eyeSvg}</button>
       </div>
-      <div class="gym-routine-exercise-targets-row">
-        <input type="number" data-field="targetSets" placeholder="Series" min="0" value="${row.targetSets ?? ''}" />
-        <input type="number" data-field="targetReps" placeholder="Reps" min="0" value="${row.targetReps ?? ''}" />
-        <input type="number" data-field="targetRestSeconds" placeholder="Descanso (s)" min="0" title="En segundos" value="${row.targetRestSeconds ?? ''}" />
-      </div>
-      <p class="hint gym-rest-preview">${restPreviewText(row.targetRestSeconds)}</p>
     `;
-    // Selector propio CON BUSCADOR (peticion de Koku: con muchos
-    // ejercicios, un desplegable pelado es una odisea). Sustituye al
-    // <select> nativo que habia aqui, que ademas incumplia la regla del
-    // proyecto de no usar controles del navegador.
-    const picker = createSelectField({
-      options: gymExerciseSelectOptions(),
-      initialValue: row.exerciseId != null ? String(row.exerciseId) : '',
-      placeholder: 'Elige un ejercicio',
-      searchable: true,
-      onChange: (valor) => cambiarEjercicioDeLaFila(valor),
-    });
-    rowEl.querySelector('.gym-routine-exercise-picker').appendChild(picker.element);
-    function cambiarEjercicioDeLaFila(valor) {
-      const anteriores = gymTargetsPorDefecto(gymRoutineModalExercises[index].exerciseId);
-      const nuevoId = Number(valor);
-      gymRoutineModalExercises[index].exerciseId = nuevoId;
-      // La fila pasa a ser OTRO ejercicio, asi que se traen sus valores
-      // por defecto -- pero solo en los campos que no hayas tocado tu.
-      // "No tocado" = vacio, o igual a lo que traia el ejercicio
-      // anterior. Asi cambiar de ejercicio no te borra un 4x8 que
-      // habias escrito a mano, y a la vez no te deja el descanso del
-      // ejercicio de antes puesto sin querer.
-      const nuevos = gymTargetsPorDefecto(nuevoId);
-      GYM_TARGET_FIELDS.forEach(({ enElDia }) => {
-        const actual = gymRoutineModalExercises[index][enElDia];
-        const sinTocar = actual === '' || actual == null || String(actual) === String(anteriores[enElDia]);
-        if (sinTocar) gymRoutineModalExercises[index][enElDia] = nuevos[enElDia];
-      });
-      renderGymRoutineExercisesField();
-    }
-    rowEl.querySelector('[data-field="targetSets"]').addEventListener('input', (e) => {
-      gymRoutineModalExercises[index].targetSets = e.target.value;
-    });
-    rowEl.querySelector('[data-field="targetReps"]').addEventListener('input', (e) => {
-      gymRoutineModalExercises[index].targetReps = e.target.value;
-    });
-    rowEl.querySelector('[data-field="targetRestSeconds"]').addEventListener('input', (e) => {
-      gymRoutineModalExercises[index].targetRestSeconds = e.target.value;
-      // Vista previa en vivo del descanso ("90" -> "1:30 min"): el campo
-      // esta en segundos y no se notaba (feedback de Koku).
-      rowEl.querySelector('.gym-rest-preview').textContent = restPreviewText(e.target.value);
-    });
-    rowEl.querySelector('[data-field="toggleHidden"]').addEventListener('click', () => {
+    rowEl.querySelector('[data-field="toggleHidden"]').addEventListener('click', (e) => {
+      e.stopPropagation();
       gymRoutineModalExercises[index].hidden = !gymRoutineModalExercises[index].hidden;
       renderGymRoutineExercisesField();
     });
-    rowEl.querySelector('[data-field="remove"]').addEventListener('click', () => {
-      gymRoutineModalExercises.splice(index, 1);
-      renderGymRoutineExercisesField();
+    // Tocar la fila abre su dialogo, igual que "Editar" -- aqui no hay
+    // una segunda cosa que hacer al tocarla (a diferencia del dia, que
+    // tiene ficha y ejercicios).
+    rowEl.addEventListener('click', () => abrirEjercicioDelDia(index));
+
+    // MISMA MECANICA QUE EL ENTRENO, que es lo que pidio Koku: deslizar
+    // saca Editar / Mover / Quitar. Sustituye a las flechas de subir y
+    // bajar que habia aqui.
+    //
+    // Lo que hacia inviable arrastrar antes (y por lo que en su dia se
+    // eligieron flechas) era que la fila llevaba TRES campos y un
+    // desplegable: meter el dedo en un campo peleaba con el gesto, y
+    // arrastrar siempre peleaba con el scroll del modal. Las dos cosas
+    // se arreglan a la vez con este reparto: la fila se queda de solo
+    // lectura, y el arrastre no esta siempre activo sino que se ARMA
+    // desde "Mover" y se desarma solo al soltar.
+    const envoltorio = wrapRowWithSwipeActions(rowEl, {
+      botones: [
+        ['Editar', 'secondary-btn', () => abrirEjercicioDelDia(index)],
+        ['Mover', 'secondary-btn', () => armarMovimientoDeEjercicio(index, renderGymRoutineExercisesField)],
+        ['Quitar', 'danger-btn', () => {
+          gymRoutineModalExercises.splice(index, 1);
+          renderGymRoutineExercisesField();
+        }],
+      ],
+      anchoFijo: 210,
+      // Con el modo mover armado, deslizar se aparta: manda el arrastre
+      // vertical. Igual que en el entreno.
+      bloqueadoSi: () => gymEjercicioEnMovimiento !== null,
     });
-    // Intercambiar con el vecino. Se repinta la lista entera (como hace
-    // todo este formulario) en vez de mover nodos a mano: asi las
-    // flechas de los extremos se apagan/encienden solas y los indices de
-    // los listeners vuelven a cuadrar.
-    const mover = (destino) => {
-      const [fila] = gymRoutineModalExercises.splice(index, 1);
-      gymRoutineModalExercises.splice(destino, 0, fila);
-      renderGymRoutineExercisesField();
-    };
-    if (!esPrimero) rowEl.querySelector('[data-field="subir"]').addEventListener('click', () => mover(index - 1));
-    if (!esUltimo) rowEl.querySelector('[data-field="bajar"]').addEventListener('click', () => mover(index + 1));
-    container.appendChild(rowEl);
+    // El arrastre identifica las filas por este atributo. Aqui la
+    // "identidad" es la POSICION, no el id del ejercicio: un mismo
+    // ejercicio puede estar dos veces en el mismo dia.
+    envoltorio.dataset.exerciseId = String(index);
+    if (gymEjercicioEnMovimiento === index) {
+      envoltorio.classList.add('esta-moviendose');
+      habilitarArrastreDeEjercicio(envoltorio, {
+        // Aqui quien se desplaza es la tarjeta del modal, no
+        // .gym-live-content (que ni existe en esta pantalla).
+        scrollerSelector: '.modal-card',
+        alSoltar: (desde, hasta) => {
+          const [fila] = gymRoutineModalExercises.splice(desde, 1);
+          gymRoutineModalExercises.splice(hasta, 0, fila);
+        },
+        repintar: renderGymRoutineExercisesField,
+      });
+    }
+    container.appendChild(envoltorio);
   });
 }
+
+// --- Editar UN ejercicio del dia -------------------------------------
+// El dialogo al que llevan "Editar" y tocar la fila. Trabaja sobre una
+// COPIA (gymEjercicioDelDiaBorrador), asi que Cancelar descarta de
+// verdad -- mismo patron que el editor de ejercicios del entreno.
+let gymEjercicioDelDiaIndice = null;
+let gymEjercicioDelDiaPicker = null;
+
+// De cada campo del trio (ahora cuarteto) al input del dialogo. En una
+// sola lista para que anadir uno nuevo sea anadirlo aqui y en
+// GYM_TARGET_FIELDS, y nada mas.
+const GYM_CAMPOS_DEL_DIALOGO_DEL_DIA = {
+  targetSets: 'gym-routine-exercise-sets',
+  targetReps: 'gym-routine-exercise-reps',
+  targetSeconds: 'gym-routine-exercise-seconds',
+  targetRestSeconds: 'gym-routine-exercise-rest',
+};
+
+// Reps y Segundos se turnan segun como se mida el ejercicio ELEGIDO en
+// el desplegable de arriba (no el que hubiera antes): en un isometrico no
+// hay repeticiones que poner.
+//
+// En "reps en un tiempo" se enseñan LOS DOS, y a proposito: ahi es donde
+// eliges cual de las dos variantes haces. Si pones los segundos, el
+// cronometro cuenta atras y apuntas las reps; si pones las reps, cuenta
+// hacia arriba y lo que se mide es lo que tardas.
+function aplicarMedicionEnElDia(exerciseId) {
+  const ej = state.gymExercises.find((x) => x.id === Number(exerciseId));
+  const medicion = gymMedicionDe(ej);
+  document.getElementById('gym-routine-exercise-reps-field').classList.toggle('hidden', medicion === 'tiempo');
+  document.getElementById('gym-routine-exercise-seconds-field').classList.toggle('hidden', medicion === 'reps');
+}
+
+function abrirEjercicioDelDia(index) {
+  const fila = gymRoutineModalExercises[index];
+  if (!fila) return;
+  gymEjercicioDelDiaIndice = index;
+  const campo = document.getElementById('gym-routine-exercise-picker-field');
+  campo.innerHTML = '';
+  // El selector se crea de nuevo cada vez a proposito: la lista de
+  // ejercicios puede haber cambiado (se puede crear uno sin salir de
+  // aqui), y ademas asi arranca siempre con la lista entera y sin el
+  // filtro heredado de la vez anterior.
+  gymEjercicioDelDiaPicker = createSelectField({
+    options: gymExerciseSelectOptions(),
+    initialValue: fila.exerciseId != null ? String(fila.exerciseId) : '',
+    placeholder: 'Elige un ejercicio',
+    searchable: true,
+    onChange: (valor) => cambiarEjercicioDelDia(index, valor),
+  });
+  campo.appendChild(gymEjercicioDelDiaPicker.element);
+  document.getElementById('gym-routine-exercise-sets').value = fila.targetSets ?? '';
+  document.getElementById('gym-routine-exercise-reps').value = fila.targetReps ?? '';
+  document.getElementById('gym-routine-exercise-seconds').value = fila.targetSeconds ?? '';
+  document.getElementById('gym-routine-exercise-rest').value = fila.targetRestSeconds ?? '';
+  aplicarMedicionEnElDia(fila.exerciseId);
+  document.getElementById('gym-routine-exercise-hidden').checked = !!fila.hidden;
+  refrescarVistaPreviaDelDescanso();
+  document.getElementById('gym-routine-exercise-modal').classList.remove('hidden');
+}
+
+function refrescarVistaPreviaDelDescanso() {
+  const n = Number(document.getElementById('gym-routine-exercise-rest').value);
+  // El campo esta en SEGUNDOS y no se notaba (feedback de Koku): la
+  // vista previa traduce "90" a "1:30 min" segun escribes.
+  document.getElementById('gym-routine-exercise-rest-preview').textContent = n > 0 ? `Descanso: ${gymLiveFormatClock(n)} min` : '';
+}
+
+function cerrarEjercicioDelDia() {
+  document.getElementById('gym-routine-exercise-modal').classList.add('hidden');
+  gymEjercicioDelDiaIndice = null;
+}
+
+// Cambiar de ejercicio trae los valores por defecto del NUEVO, pero solo
+// en los campos que no hayas tocado tu ("no tocado" = vacio, o igual a
+// lo que traia el anterior). Asi cambiar de ejercicio no te borra un 4x8
+// escrito a mano, y a la vez no te deja el descanso del de antes puesto
+// sin querer. Es la misma regla de siempre, solo que ahora lee y escribe
+// en los campos del dialogo.
+function cambiarEjercicioDelDia(index, valor) {
+  const anteriores = gymTargetsPorDefecto(gymRoutineModalExercises[index].exerciseId);
+  const nuevos = gymTargetsPorDefecto(Number(valor));
+  const campos = GYM_CAMPOS_DEL_DIALOGO_DEL_DIA;
+  GYM_TARGET_FIELDS.forEach(({ enElDia }) => {
+    const input = document.getElementById(campos[enElDia]);
+    const actual = input.value;
+    const sinTocar = actual === '' || actual == null || String(actual) === String(anteriores[enElDia]);
+    if (sinTocar) input.value = nuevos[enElDia] ?? '';
+  });
+  // El ejercicio nuevo puede medirse distinto que el de antes, asi que
+  // los campos que se ven tienen que cambiar con el.
+  aplicarMedicionEnElDia(valor);
+  refrescarVistaPreviaDelDescanso();
+}
+
+document.getElementById('gym-routine-exercise-rest').addEventListener('input', refrescarVistaPreviaDelDescanso);
+document.getElementById('btn-close-gym-routine-exercise').addEventListener('click', cerrarEjercicioDelDia);
+document.getElementById('btn-cancel-gym-routine-exercise').addEventListener('click', cerrarEjercicioDelDia);
+document.getElementById('gym-routine-exercise-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const fila = gymRoutineModalExercises[gymEjercicioDelDiaIndice];
+  if (!fila) { cerrarEjercicioDelDia(); return; }
+  const elegido = gymEjercicioDelDiaPicker ? gymEjercicioDelDiaPicker.getValue() : '';
+  if (elegido) fila.exerciseId = Number(elegido);
+  fila.targetSets = document.getElementById('gym-routine-exercise-sets').value;
+  fila.targetReps = document.getElementById('gym-routine-exercise-reps').value;
+  fila.targetSeconds = document.getElementById('gym-routine-exercise-seconds').value;
+  fila.targetRestSeconds = document.getElementById('gym-routine-exercise-rest').value;
+  fila.hidden = document.getElementById('gym-routine-exercise-hidden').checked;
+  cerrarEjercicioDelDia();
+  renderGymRoutineExercisesField();
+});
 
 // Los tres campos del dia y de donde sale cada uno en la ficha del
 // ejercicio. En una sola lista para no repetir el trio por todas
@@ -13589,6 +15371,10 @@ function renderGymRoutineExercisesField() {
 const GYM_TARGET_FIELDS = [
   { enElDia: 'targetSets', porDefecto: 'defaultSets' },
   { enElDia: 'targetReps', porDefecto: 'defaultReps' },
+  // Los segundos viajan igual que los otros tres: del ejercicio al dia,
+  // y del dia a la serie. En un ejercicio de repeticiones se quedan
+  // vacios y no los mira nadie.
+  { enElDia: 'targetSeconds', porDefecto: 'defaultSeconds' },
   { enElDia: 'targetRestSeconds', porDefecto: 'defaultRestSeconds' },
 ];
 
@@ -13671,6 +15457,7 @@ function openGymRoutineModal(routine, modo = 'ficha') {
         exerciseId: ex.exerciseId,
         targetSets: ex.targetSets ?? '',
         targetReps: ex.targetReps ?? '',
+        targetSeconds: ex.targetSeconds ?? '',
         targetRestSeconds: ex.targetRestSeconds ?? '',
         hidden: !!ex.hidden,
       }))
@@ -13713,15 +15500,12 @@ document.getElementById('gym-routine-form').addEventListener('submit', async (e)
 });
 
 document.getElementById('btn-delete-gym-routine').addEventListener('click', async () => {
-  const id = document.getElementById('gym-routine-id').value;
-  const ok = await showAppConfirm('¿Eliminar este día? Las sesiones ya registradas con él no se pierden.', { okText: 'Eliminar', danger: true });
-  if (!ok) return;
-  await api(`/api/gym-routines/${id}`, { method: 'DELETE' });
-  closeGymRoutineModal();
-  await Promise.all([loadGymRoutines(), loadGymBlocks(), loadGymSessions()]);
-  renderGymRoutinesList();
-  renderGymBlocksList();
-  renderGymSessionsList();
+  const id = Number(document.getElementById('gym-routine-id').value);
+  const routine = state.gymRoutines.find((r) => r.id === id);
+  if (!routine) return;
+  const habia = state.gymRoutines.length;
+  await borrarDiaDelPlan(routine);
+  if (state.gymRoutines.length < habia) closeGymRoutineModal();
 });
 
 // --- Modal de sesion --------------------------------------------------
@@ -13828,6 +15612,12 @@ function renderGymSessionExercisesField() {
         const antesPorLados = gymExerciseUsesSides(fila);
         fila.exerciseId = Number(valor);
         const ahoraPorLados = gymExerciseUsesSides(fila);
+        // Cambiar de ejercicio puede cambiar COMO SE MIDE (de reps a
+        // tiempo o al reves). Se aplica a las series de esta fila, que es
+        // lo que decide que campos se ven; los datos ya escritos no se
+        // tiran, para no perder lo apuntado por un cambio de ejercicio.
+        const medicionNueva = gymMedicionDe(state.gymExercises.find((x) => x.id === fila.exerciseId));
+        fila.sets.forEach((sx) => { sx.measure = medicionNueva; });
         if (ahoraPorLados !== antesPorLados) {
           // Al pasar a un ejercicio POR LADOS, las series que estan en
           // blanco se parten en dos (izquierda y derecha), igual que las
@@ -13901,21 +15691,36 @@ function renderGymSessionExercisesField() {
           <button type="button" class="icon-btn" data-quitar-serie aria-label="Quitar serie">✕</button>
         </div>
         <div class="gym-set-segment-fields">
-          <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><input type="text" inputmode="decimal" data-field="weight" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></label>
-          <label class="gym-set-segment-field"><span>Reps</span><input type="number" data-field="reps" min="0" value="${escapeHtml(String(set.reps ?? ''))}" /></label>
+          <label class="gym-set-segment-field"><span>Peso (${escapeHtml(unidad)})</span><span class="gym-peso-con-signo">${gymBotonDeSignoHtml()}<input type="text" inputmode="decimal" data-field="weight" value="${escapeHtml(String(set.weightDisplay ?? ''))}" /></span></label>
+          ${set.measure === 'tiempo' ? '' : `<label class="gym-set-segment-field"><span>Reps</span><input type="number" data-field="reps" min="0" value="${escapeHtml(String(set.reps ?? ''))}" /></label>`}
+          <!-- Los segundos de una serie por tiempo. Se turnan con Reps
+               igual que en el resto de la app: en un isometrico no hay
+               repeticiones, y en "reps en un tiempo" se ven las dos. -->
+          ${gymEsPorTiempo(set.measure) ? `<label class="gym-set-segment-field"><span>Segundos</span><input type="number" data-field="measureSeconds" min="0" value="${escapeHtml(String(set.measureSeconds ?? ''))}" /></label>` : ''}
           <!-- El "+60s" va PEGADO al descanso, no a la duracion: es
                descanso extra que se anadio con el boton +30s, y colgando
                de la duracion parecia que la serie habia durado mas
                (lo vio Koku). -->
           <label class="gym-set-segment-field"><span>Descanso (s)${set.extraRestSeconds ? ` <span class="gym-set-extra-chip" title="Añadido con +30s durante el entreno">+${set.extraRestSeconds}</span>` : ''}</span><input type="number" data-field="restSeconds" min="0" value="${escapeHtml(String(set.restSeconds ?? ''))}" /></label>
         </div>
+        ${set.extraRestSeconds ? `<div class="gym-set-extend-list gym-session-set-actions">${gymBotonQuitarExtraHtml(set.extraRestSeconds)}</div>` : ''}
         ${set.notes ? `<p class="gym-live-card-meta">${escapeHtml(set.notes)}</p>` : ''}
         <div class="gym-set-segments" data-seg-editor="${exIndex}-${setIndex}"></div>
         <div class="gym-set-extend-list gym-session-set-actions"></div>
       `;
-      bloqueSerie.querySelector('[data-field="reps"]').addEventListener('input', (e) => { set.reps = e.target.value; });
+      // El campo de reps no existe en un isometrico, asi que se engancha
+      // solo si esta; lo mismo con el de segundos.
+      const repsEl = bloqueSerie.querySelector('[data-field="reps"]');
+      if (repsEl) repsEl.addEventListener('input', (e) => { set.reps = e.target.value; });
+      const segEl = bloqueSerie.querySelector('[data-field="measureSeconds"]');
+      if (segEl) segEl.addEventListener('input', (e) => { set.measureSeconds = e.target.value; });
       bloqueSerie.querySelector('[data-field="weight"]').addEventListener('input', (e) => { set.weightDisplay = gymNormalizarPeso(e.target.value); });
       bloqueSerie.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => { set.restSeconds = e.target.value; });
+      const quitarExtraSesion = bloqueSerie.querySelector('[data-quitar-extra]');
+      if (quitarExtraSesion) quitarExtraSesion.addEventListener('click', () => {
+        set.extraRestSeconds = gymQuitarTreintaSegundos(set.extraRestSeconds);
+        renderGymSessionExercisesField();
+      });
       bloqueSerie.querySelector('[data-quitar-serie]').addEventListener('click', () => {
         exRow.sets.splice(setIndex, 1);
         renderGymSessionExercisesField();
@@ -13952,6 +15757,7 @@ function renderGymSessionExercisesField() {
         </div>` : ''}
         <button type="button" class="gym-set-extend-btn" data-add-seg="dropset">+ Dropset</button>
         <button type="button" class="gym-set-extend-btn" data-add-seg="restpause">+ Rest-pause</button>
+        <button type="button" class="gym-set-extend-btn" data-add-seg="parciales">+ Parciales</button>
         <button type="button" class="gym-set-extend-btn${set.setType === 'failure' ? ' is-on' : ''}" data-toggle-failure>${set.setType === 'failure' ? '✓ ' : ''}Al fallo</button>
       `;
       acciones.querySelectorAll('[data-lado]').forEach((btn) => {
@@ -13987,7 +15793,11 @@ function renderGymSessionExercisesField() {
       // en blanco, varian serie a serie.
       const lastSet = exRow.sets[exRow.sets.length - 1];
       const descanso = lastSet ? lastSet.restSeconds : '';
-      const base = { reps: '', weightDisplay: '', restSeconds: descanso, extraRestSeconds: null, segments: [], setType: null };
+      // La medicion sale del EJERCICIO de la fila, no de la serie
+      // anterior: si te has equivocado de ejercicio y lo cambias, la
+      // serie nueva ya nace midiendose como toca.
+      const medicion = gymMedicionDe(state.gymExercises.find((x) => x.id === Number(exRow.exerciseId)));
+      const base = { reps: '', weightDisplay: '', restSeconds: descanso, extraRestSeconds: null, segments: [], setType: null, measure: medicion, measureSeconds: '' };
       if (gymExerciseUsesSides(exRow)) {
         // Una serie de un ejercicio por lados son DOS filas, izquierda y
         // derecha, igual que las crea el entreno en vivo
@@ -14015,7 +15825,7 @@ document.getElementById('btn-add-gym-session-exercise').addEventListener('click'
   const nuevo = { exerciseId: primero.id, rpe: '', sets: [] };
   // Mismo criterio que "+ Serie": si el ejercicio va por lados, la
   // primera serie ya nace con sus dos filas.
-  const base = { reps: '', weightDisplay: '', restSeconds: '', segments: [], setType: null };
+  const base = { reps: '', weightDisplay: '', restSeconds: '', segments: [], setType: null, measure: gymMedicionDe(primero), measureSeconds: '' };
   if (gymExerciseUsesSides(nuevo)) {
     nuevo.sets.push({ ...base, side: 'left', segments: [] });
     nuevo.sets.push({ ...base, side: 'right', segments: [] });
@@ -14057,6 +15867,11 @@ function openGymSessionModal(session) {
         // Se arrastran tal cual: editar una sesion a mano no debe borrar
         // lo que duraron sus series, su lado ni sus notas.
         durationSeconds: set.durationSeconds ?? null,
+        // Como se midio, y sus segundos. Se arrastran igual que lo
+        // demas: editar una sesion a mano no puede convertir una plancha
+        // de 45 s en una serie de cero repeticiones.
+        measure: set.measure || 'reps',
+        measureSeconds: set.measureSeconds ?? '',
         side: set.side ?? null,
         notes: set.notes ?? null,
         // Los tramos de una serie alargada se arrastran tal cual (en kg,
@@ -14113,11 +15928,13 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
       sets.push({
         exerciseId: exRow.exerciseId,
         reps: set.reps,
-        weightKg: gymWeightDisplayToKg(set.weightDisplay),
+        weightKg: gymWeightDisplayToKg(set.weightDisplay, exRow.exerciseId),
         rpe: exRow.rpe,
         restSeconds: set.restSeconds,
         extraRestSeconds: set.extraRestSeconds ?? null,
         durationSeconds: set.durationSeconds ?? null,
+        measure: gymEsPorTiempo(set.measure) ? set.measure : null,
+        measureSeconds: gymEsPorTiempo(set.measure) && set.measureSeconds !== '' ? set.measureSeconds : null,
         side: set.side ?? null,
         notes: set.notes ?? null,
         // Se leen del DOM y no del array: un tramo recien anadido puede
@@ -14128,7 +15945,7 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         ).map((seg) => ({
           kind: seg.kind,
           reps: seg.reps,
-          weightKg: gymWeightDisplayToKg(seg.weightDisplay),
+          weightKg: gymWeightDisplayToKg(seg.weightDisplay, exRow.exerciseId),
           pauseSeconds: seg.pauseSeconds,
         })),
         setType: set.setType ?? null,
@@ -14270,6 +16087,16 @@ function renderGymConsistency(summary) {
   // (solo cuenta lo registrado con el boton de empezar/terminar serie,
   // asi que en sesiones apuntadas a mano sale 0 y no se ensena).
   const monthWork = monthSessions.reduce((acc, s) => acc + (s.workSeconds || 0), 0);
+  // TIEMPO BAJO TENSION: los segundos de los ejercicios que se miden en
+  // tiempo (planchas, isometricos, "reps en X segundos").
+  //
+  // Va APARTE del volumen y no dentro, que es lo que eligio Koku de las
+  // tres opciones: un minuto de plancha con 10 kg daria 600 metido en el
+  // volumen, y 600 ahi no son 600 kg. Son unidades distintas.
+  //
+  // Solo sale si de verdad hay algo que contar: en un mes sin ningun
+  // ejercicio por tiempo, una cifra a cero seria ruido.
+  const monthTension = monthSessions.reduce((acc, s) => acc + (s.tensionSeconds || 0), 0);
   // Series al fallo del mes: el "cuanto has apretado" al lado del
   // "cuanto has entrenado" (peticion de Koku). Solo sale si hay alguna,
   // para no ensenar un 0 permanente a quien no las marque.
@@ -14283,6 +16110,7 @@ function renderGymConsistency(summary) {
       <div class="gym-live-summary-stat"><b>${monthCount}</b><span>Este mes</span></div>
       ${monthFailureSets > 0 ? `<div class="gym-live-summary-stat"><b>${monthFailureSets}</b><span>Series al fallo este mes</span></div>` : ''}
       ${monthWork > 0 ? `<div class="gym-live-summary-stat gym-stat-wide"><b>${gymFormatWorkTime(monthWork)}</b><span>Tiempo de trabajo este mes</span></div>` : ''}
+      ${monthTension > 0 ? `<div class="gym-live-summary-stat gym-stat-wide"><b>${gymFormatWorkTime(monthTension)}</b><span>Tiempo bajo tensión este mes</span></div>` : ''}
     </div>
   `;
 
@@ -14464,22 +16292,27 @@ const GYM_BODYMAP_SILHOUETTE = [
   ] },
 ];
 
-function renderGymBodyMap() {
-  const container = document.getElementById('gym-bodymap');
+// LA PUNTUACION POR MUSCULO, separada de su dibujo.
+//
+// Por cada serie de la ventana: 1 punto (o el volumen de la serie) al
+// grupo principal del ejercicio, y la mitad a cada secundario. Devuelve
+// tambien el maximo, que es contra lo que se normaliza la intensidad.
+//
+// Vive aparte porque la usan DOS cosas: el mapa de la pantalla y el
+// resumen que se le manda al widget del cuerpo (ver seccionMusculos en
+// widget-bridge.js). Si cada uno hiciera su cuenta, el widget y la app
+// podrian pintar manchas distintas del mismo entreno.
+function gymPuntuacionPorMusculo() {
   const since = new Date();
   since.setDate(since.getDate() - gymMapWindowDays);
   const sinceKey = toDateKey(since);
 
-  // Puntuacion por grupo: por cada serie de la ventana, 1 punto (o el
-  // volumen de la serie) al grupo principal del ejercicio, y la mitad a
-  // cada secundario. Tambien apuntamos los ejercicios con mas series de
-  // cada grupo para el detalle.
-  const score = new Map();
+  const puntos = new Map();
   const exercisesByGroup = new Map();
-  const exerciseById = new Map(state.gymExercises.map((e) => [e.id, e]));
-  for (const session of state.gymSessions) {
+  const exerciseById = new Map((state.gymExercises || []).map((e) => [e.id, e]));
+  for (const session of (state.gymSessions || [])) {
     if (session.date < sinceKey) continue;
-    for (const set of session.sets) {
+    for (const set of (session.sets || [])) {
       const exercise = exerciseById.get(set.exerciseId);
       if (!exercise) continue;
       // En "volumen" cuentan todos los tramos; en "series" una serie
@@ -14488,19 +16321,29 @@ function renderGymBodyMap() {
       if (amount <= 0) continue;
       const primary = GYM_MUSCLE_GROUPS.some((g) => g.id === exercise.muscleGroup) ? exercise.muscleGroup : null;
       if (primary) {
-        score.set(primary, (score.get(primary) || 0) + amount);
+        puntos.set(primary, (puntos.get(primary) || 0) + amount);
         if (!exercisesByGroup.has(primary)) exercisesByGroup.set(primary, new Map());
         const perEx = exercisesByGroup.get(primary);
         perEx.set(exercise.name, (perEx.get(exercise.name) || 0) + 1);
       }
       for (const secondary of exercise.secondaryMuscles || []) {
         if (secondary === primary) continue;
-        score.set(secondary, (score.get(secondary) || 0) + amount * 0.5);
+        puntos.set(secondary, (puntos.get(secondary) || 0) + amount * 0.5);
       }
     }
   }
+  return {
+    puntos,
+    exercisesByGroup,
+    max: Math.max(...puntos.values(), 0),
+    ventanaDias: gymMapWindowDays,
+    metrica: gymMapMetric,
+  };
+}
 
-  const max = Math.max(...score.values(), 0);
+function renderGymBodyMap() {
+  const container = document.getElementById('gym-bodymap');
+  const { puntos: score, exercisesByGroup, max } = gymPuntuacionPorMusculo();
   const unit = getGymWeightUnitLabel();
   const detailByGroup = new Map();
   const zonesHtml = GYM_BODYMAP_ZONES.map((zone) => {
@@ -14575,12 +16418,29 @@ function renderGymPRs() {
       // primera, sobre todo cuando empiezas y mejoras la tecnica").
       for (const tramo of gymSetConTramos(set)) {
         if (!byExercise.has(tramo.exerciseId)) {
-          byExercise.set(tramo.exerciseId, { name: tramo.exerciseName, bestWeightKg: 0, best1RM: 0, bestVolumeKg: 0 });
+          // El mejor peso puede ser NEGATIVO (-12 kg de ayuda es mejor que
+          // -20), asi que el punto de partida no puede ser 0: con 0 nunca
+          // lo superaria nada. null = "todavia no hay".
+          byExercise.set(tramo.exerciseId, {
+            name: tramo.exerciseName,
+            bestWeightKg: null,
+            best1RM: 0,
+            bestVolumeKg: 0,
+          });
         }
         const pr = byExercise.get(tramo.exerciseId);
-        if (tramo.weightKg > pr.bestWeightKg) pr.bestWeightKg = tramo.weightKg;
-        if (tramo.weightKg > 0 && tramo.reps >= 1 && tramo.reps <= 12) {
-          const est = gymEpley1RM(tramo.weightKg, tramo.reps);
+        const peso = Number(tramo.weightKg);
+        if (Number.isFinite(peso) && (pr.bestWeightKg === null || peso > pr.bestWeightKg)) {
+          pr.bestWeightKg = peso;
+        }
+        // El 1RM de Epley NO tiene sentido con un peso de AYUDA: la
+        // formula parte de "peso que levantas", y ahi el numero es lo que
+        // te quitan, no una carga. Se mira el signo de ESTA serie (no una
+        // marca del ejercicio), asi que el mismo ejercicio puede no tener
+        // 1RM mientras vas con banda y tenerlo en cuanto pasas a positivo,
+        // sin que nada se recalcule hacia atras.
+        if (peso > 0 && tramo.reps >= 1 && tramo.reps <= 12) {
+          const est = gymEpley1RM(peso, tramo.reps);
           if (est > pr.best1RM) pr.best1RM = est;
         }
       }
@@ -14594,7 +16454,10 @@ function renderGymPRs() {
 
   const unit = getGymWeightUnitLabel();
   const rows = [...byExercise.entries()]
-    .filter(([, pr]) => pr.bestWeightKg > 0)
+    // Un peso de ayuda entra aunque sea negativo -- ahi -12 kg
+    // es un record de verdad. Lo que se descarta es "no hay ni un peso
+    // apuntado" (bestWeightKg null) y los normales que sigan a 0.
+    .filter(([, pr]) => pr.bestWeightKg !== null)
     .sort((a, b) => b[1].best1RM - a[1].best1RM);
   list.innerHTML = '';
   if (rows.length === 0) {
@@ -15003,6 +16866,21 @@ document.getElementById('finanzas-category-form').addEventListener('submit', asy
 
 // -- Pestaña Resumen: saldo por cuenta, progreso del limite mensual, y
 //    desglose del gasto de este mes por categoria. --
+// Lo que cada cuenta tiene RESERVADO por objetivos sin cumplir. Se pide
+// aparte y se guarda aqui para que renderFinanzasAccountsSummary pueda
+// seguir siendo sincrona (la llaman varios sitios).
+let finanzasReservadoPorCuenta = {};
+
+async function loadFinanzasReservado() {
+  try {
+    finanzasReservadoPorCuenta = await api('/api/finanzas-goals/reserved-by-account');
+  } catch (err) {
+    // Sin esto la cuenta simplemente no enseña la linea de reservado; no
+    // es motivo para dejar el Resumen sin pintar.
+    finanzasReservadoPorCuenta = {};
+  }
+}
+
 function renderFinanzasAccountsSummary() {
   const wrap = document.getElementById('finanzas-accounts-summary');
   wrap.innerHTML = '';
@@ -15010,13 +16888,49 @@ function renderFinanzasAccountsSummary() {
     wrap.innerHTML = '<p class="empty-hint">Todavía no tienes cuentas. Crealas en la pestaña Movimientos.</p>';
     return;
   }
+  // El bloque del dinero de terceros solo aparece si de verdad hay alguna
+  // cuenta de ese tipo: a quien no lo use, no le sale un interruptor de
+  // algo que no tiene.
+  const esAjena = (a) => String(a.type || '').toLowerCase() === 'de terceros';
+  const ajenas = finanzasAccounts.filter(esAjena);
+  const fila = document.getElementById('finanzas-terceros-row');
+  const hint = document.getElementById('finanzas-terceros-hint');
+  fila.classList.toggle('hidden', ajenas.length === 0);
+  hint.classList.toggle('hidden', ajenas.length === 0);
+  if (ajenas.length > 0) {
+    document.getElementById('finanzas-incluir-terceros').checked = finanzasIncluyeTerceros();
+    const total = ajenas.reduce((acc, a) => acc + a.balance, 0);
+    hint.textContent = finanzasIncluyeTerceros()
+      ? `Ahora mismo los números de abajo SÍ incluyen ${formatFinanzasAmount(total)} que no son tuyos.`
+      : `Te quedan ${formatFinanzasAmount(total)} de dinero de terceros. No cuenta en tu ahorro ni en las gráficas, pero sus gastos se siguen registrando.`;
+  }
+
   finanzasAccounts.forEach((a) => {
     const card = document.createElement('div');
     card.className = 'finanzas-account-card';
+    if (esAjena(a)) card.classList.add('finanzas-account-card-ajena');
     card.innerHTML = `
       <span class="finanzas-account-card-name">${a.icon ? escapeHtml(a.icon) + ' ' : ''}${escapeHtml(a.name)}${a.type ? ` <span class="finanzas-account-type-badge">${escapeHtml(a.type)}</span>` : ''}</span>
       <span class="finanzas-account-card-balance${a.balance < 0 ? ' negative' : ''}">${formatFinanzasAmount(a.balance)}</span>
     `;
+
+    // Si hay objetivos apuntando a esta cuenta, se enseña el desglose: el
+    // saldo de arriba SIGUE siendo el de verdad (el dinero no se ha movido
+    // a ningun sitio), y debajo se dice cuanto esta hablado y cuanto queda
+    // libre. Es el sentido entero de los sobres.
+    const reservado = finanzasReservadoPorCuenta[a.id] || 0;
+    if (reservado > 0) {
+      const detalle = document.createElement('span');
+      detalle.className = 'finanzas-account-card-reserved';
+      const disponible = a.balance - reservado;
+      detalle.textContent =
+        disponible < 0
+          ? `${formatFinanzasAmount(reservado)} reservados — más de lo que tienes`
+          : `${formatFinanzasAmount(disponible)} libres · ${formatFinanzasAmount(reservado)} reservados`;
+      if (disponible < 0) detalle.classList.add('finanzas-account-card-reserved-alerta');
+      card.appendChild(detalle);
+    }
+
     wrap.appendChild(card);
   });
 }
@@ -15137,7 +17051,7 @@ function renderFinanzasMonthlyTrendChart(data) {
 async function renderFinanzasSavingsMonthly() {
   const month = finanzasSavingsMonthField.getValue();
   const year = document.getElementById('finanzas-savings-year-input').value || finanzasCurrentYear;
-  const summary = await api(`/api/finanzas-transactions/summary/month?month=${year}-${month}`);
+  const summary = await api(`/api/finanzas-transactions/summary/month?month=${year}-${month}${finanzasTercerosQS('&')}`);
   const statusWrap = document.getElementById('finanzas-savings-status');
   const goal = summary.savingsGoalMin;
   let statusHtml = `<span class="finanzas-savings-status-text">Ese mes ahorraste ${formatFinanzasAmount(summary.savings)}.</span>`;
@@ -15180,7 +17094,7 @@ document.getElementById('btn-finanzas-savings-range-view').addEventListener('cli
   const tbody = document.getElementById('finanzas-savings-history-tbody');
   let rows;
   try {
-    rows = await api(`/api/finanzas-transactions/summary/range?from=${fromYear}-${fromMonth}&to=${toYear}-${toMonth}`);
+    rows = await api(`/api/finanzas-transactions/summary/range?from=${fromYear}-${fromMonth}&to=${toYear}-${toMonth}${finanzasTercerosQS('&')}`);
   } catch (err) {
     alert(err.message);
     return;
@@ -15200,11 +17114,23 @@ document.getElementById('btn-finanzas-savings-range-view').addEventListener('cli
   });
 });
 
+document.getElementById('finanzas-incluir-terceros').addEventListener('change', async (e) => {
+  localStorage.setItem('finanzasIncluirTerceros', e.target.checked ? 'true' : 'false');
+  await renderFinanzasResumenTab();
+});
+
 async function renderFinanzasResumenTab() {
+  // Se recargan las cuentas ANTES de pintar sus saldos. Antes se pintaban
+  // desde la copia en memoria, y cualquier camino que moviera dinero sin
+  // acordarse de refrescarla dejaba un saldo VIEJO en pantalla -- se vio
+  // al gastar un objetivo: la cuenta seguia diciendo 1.900 € cuando ya
+  // eran 649,45 €. En una app de cuentas, una cifra caducada es de lo
+  // peor que puede salir, y recargar aqui cuesta una consulta local.
+  await Promise.all([loadFinanzasAccounts(), loadFinanzasReservado()]);
   renderFinanzasAccountsSummary();
   const [summary, trend] = await Promise.all([
-    api('/api/finanzas-transactions/summary/month'),
-    api('/api/finanzas-transactions/summary/monthly-trend'),
+    api(`/api/finanzas-transactions/summary/month${finanzasTercerosQS('?')}`),
+    api(`/api/finanzas-transactions/summary/monthly-trend${finanzasTercerosQS('?')}`),
   ]);
   renderFinanzasMonthlyTrendChart(trend);
 
@@ -15573,60 +17499,523 @@ function finanzasRecurringFrequencyLabel(r) {
   return `Anual (${FINANZAS_MONTH_NAMES[r.monthOfYear - 1]} ${r.dayOfMonth})`;
 }
 
-function renderFinanzasRecurringList() {
-  const tbody = document.getElementById('finanzas-recurring-tbody');
-  tbody.innerHTML = '';
-  if (finanzasRecurringExpenses.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-hint">Todavía no tienes gastos fijos. Crea uno arriba.</td></tr>';
+// =====================================================================
+// Gastos fijos: tres vistas sobre la MISMA informacion (fases 1-2 del
+// plan de IDEAS-FINANZAS.md).
+//
+//   - "Qué queda": lo que falta por pagar esta semana / este mes / este
+//     año. Contesta a la pregunta que antes no se podia contestar.
+//   - "Año": los doce meses con su total, y el desglose al tocar uno.
+//   - "Plantillas": el mantenimiento de siempre, en filas en vez de en
+//     una tabla de 7 columnas.
+//
+// Las dos primeras se alimentan de /forecast, que CALCULA las
+// ocurrencias de cada plantilla y no guarda nada (ver el comentario
+// largo en routes-local/finanzasRecurringExpenses.js).
+// =====================================================================
+
+// Estado de la pestaña. Son preferencias de VISTA, no datos: viven en
+// memoria y se pierden al salir, igual que el resto de alternadores de
+// la app (no van ni a la base ni a localStorage).
+let finanzasFijosVista = 'pendientes';
+let finanzasFijosRango = 'mes';
+let finanzasFijosEstado = 'pending';
+let finanzasFijosYear = new Date().getFullYear();
+const finanzasFijosMesesAbiertos = new Set();
+let finanzasFijosDetalle = null;
+
+function finanzasFijosISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// De "semana/mes/anio" a las dos fechas que entiende /forecast.
+//
+// Se usan periodos NATURALES (la semana de lunes a domingo, el mes del 1
+// al ultimo dia, el año del 1 de enero al 31 de diciembre) y no "los
+// proximos 7/30/365 dias": cuando alguien pregunta "¿que me queda este
+// mes?" se refiere al mes del calendario, no a una ventana movil.
+function finanzasFijosRangoFechas(rango) {
+  const hoy = new Date();
+  if (rango === 'semana') {
+    const dia = hoy.getDay(); // 0 = domingo en JavaScript
+    const desplazamientoALunes = dia === 0 ? -6 : 1 - dia;
+    const lunes = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + desplazamientoALunes);
+    const domingo = new Date(lunes.getFullYear(), lunes.getMonth(), lunes.getDate() + 6);
+    return { from: finanzasFijosISO(lunes), to: finanzasFijosISO(domingo), etiqueta: 'esta semana' };
+  }
+  if (rango === 'anio') {
+    return { from: `${hoy.getFullYear()}-01-01`, to: `${hoy.getFullYear()}-12-31`, etiqueta: 'este año' };
+  }
+  const primero = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  const ultimo = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+  return { from: finanzasFijosISO(primero), to: finanzasFijosISO(ultimo), etiqueta: 'este mes' };
+}
+
+// Fecha corta para las filas: "15 mar" (el año solo cuando no es el
+// actual, para no repetirlo doce veces en una lista del mismo año).
+function finanzasFijosFechaCorta(iso) {
+  const [y, m, d] = iso.split('-');
+  const mes = FINANZAS_MONTH_NAMES[Number(m) - 1] || '';
+  const corto = mes.slice(0, 3).toLowerCase();
+  const anioActual = String(new Date().getFullYear());
+  return y === anioActual ? `${Number(d)} ${corto}` : `${Number(d)} ${corto} ${y}`;
+}
+
+// Una fila del estilo nuevo: icono redondo + titulo/subtitulo + importe a
+// la derecha. Sustituye a las filas de tabla en todo lo que se toca aqui.
+// Se construye con createElement (no con innerHTML) porque el texto sale
+// de lo que escribe el usuario: asi no hay forma de que una descripcion
+// con "<" rompa nada.
+// ICONOS DE LAS FILAS DE SECCION
+//
+// Decision de Koku (13/9/2026), que cierra la duda B9 de
+// PARA-KOKU-MANANA.md: **SVG, y los emojis de Finanzas tambien**. Los tres
+// motivos son los mismos por los que el sol y la luna de la topbar dejaron
+// de ser emojis: un emoji lo pinta el SISTEMA con su tipografia (cambia de
+// forma entre iPhone, Android y navegador), NO hereda el color del tema, y
+// se descuadra de tamano respecto al texto de al lado. Mas un cuarto que
+// aqui pesa: Apple no usa emojis como iconos de interfaz en ninguna de sus
+// apps -- un emoji en una fila se lee como contenido escrito por ti, no
+// como parte de la app.
+//
+// EL CAMPO `icono` ES UNA CLAVE DE ESTA TABLA, NUNCA MARCADO. Eso no es
+// un detalle de estilo: el SVG entra por innerHTML, asi que si el campo
+// aceptara marcado, cualquier texto que acabara ahi podria inyectar. Con
+// una clave, lo unico que puede pasar es que no exista y salga el punto
+// de respaldo. Mismo patron que ICON_CLARO/ICON_OSCURO en settings.js:
+// constantes mias, nunca datos del usuario.
+//
+// Todos con `currentColor` para que se tinan con el tema activo.
+const ICONOS_DE_FILA = {
+  grafico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="20" x2="6" y2="13"/><line x1="12" y1="20" x2="12" y2="7"/><line x1="18" y1="20" x2="18" y2="10"/></svg>',
+  calendario: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>',
+  repetir: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="17 2 21 6 17 10"/><path d="M3 12V10a4 4 0 0 1 4-4h14"/><polyline points="7 22 3 18 7 14"/><path d="M21 12v2a4 4 0 0 1-4 4H3"/></svg>',
+  diana: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>',
+  recibo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2Z"/><line x1="9.5" y1="8" x2="14.5" y2="8"/><line x1="9.5" y1="12" x2="14.5" y2="12"/></svg>',
+  intercambio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 3 20 7 16 11"/><line x1="20" y1="7" x2="4" y2="7"/><polyline points="8 13 4 17 8 21"/><line x1="4" y1="17" x2="20" y2="17"/></svg>',
+  monedas: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6"/><path d="M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>',
+  reloj: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>',
+  tabla: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><rect x="9" y="2" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>',
+  tendencia: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg>',
+  trofeo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v4.5a5 5 0 0 1-10 0Z"/><path d="M7 6H4.5v1A3.5 3.5 0 0 0 8 10.5"/><path d="M17 6h2.5v1A3.5 3.5 0 0 1 16 10.5"/><path d="M12 13.5V18"/><path d="M8.5 21h7"/></svg>',
+};
+
+// Pinta el icono de una fila. Hay DOS clases de icono y conviene no
+// mezclarlas:
+//
+//   - Los de SECCION (Este mes, Gastos fijos, Plan, Logros...) son MIOS y
+//     son una clave de la tabla de arriba. Salen en SVG con el acento.
+//   - Los de una CATEGORIA o un OBJETIVO los eliges TU con el selector de
+//     iconos (createIconField), o sea que son CONTENIDO, no parte de la
+//     app. Siguen siendo el emoji que pusiste, y por eso la decision de
+//     pasar a SVG no les afecta: cambiarlos seria borrar lo que elegiste.
+//
+// De ahi el reparto: si el valor es una clave conocida, SVG; cualquier
+// otra cosa se pinta como TEXTO. Eso ademas es lo que hace segura la
+// funcion -- por innerHTML solo pasan mis constantes, nunca un valor
+// guardado; lo que venga de la base va siempre por textContent.
+function pintarIconoDeFila(el, nombre) {
+  // hasOwnProperty y no `ICONOS_DE_FILA[nombre]` a secas. Encontrado
+  // forzando errores: un icono llamado "constructor" o "toString" NO da
+  // undefined, da la funcion que todo objeto hereda de Object -- y como
+  // es truthy, acababa pintando "function Object() { [native code] }"
+  // dentro de la fila, y por innerHTML. No se podia inyectar nada (el
+  // codigo nativo nunca trae etiquetas), pero es basura en pantalla por
+  // un nombre que el selector de iconos deja escribir. Mirando solo las
+  // claves PROPIAS, la tabla no tiene herencia que colar.
+  const svg = Object.prototype.hasOwnProperty.call(ICONOS_DE_FILA, nombre) ? ICONOS_DE_FILA[nombre] : null;
+  if (svg) { el.innerHTML = svg; el.classList.add('finanzas-row-icon-svg'); return; }
+  el.textContent = nombre || '\u2022';
+}
+
+// UNA FILA DE SECCION: icono redondo + titulo/subtitulo + cifra/flecha.
+//
+// La usan Finanzas y Gimnasio (13/9/2026, cuando el Gimnasio cambio sus
+// cuatro pestanas por un inicio de filas). Las clases CSS y el nombre
+// viejo siguen diciendo `finanzas` A PROPOSITO, igual que los ids siguen
+// diciendo `extensions` despues de que esa pantalla pasara a llamarse
+// "Apps": renombrarlas chocaria con la rama `finanzas-movil`, que Koku
+// trabaja en paralelo, en cada linea que las toca. Cuando esa rama se
+// cierre, se renombran de una vez.
+function filaDeLista({ icono, color, titulo, sub, importe, etiqueta, etiquetaTono, alPulsar, flecha }) {
+  const fila = document.createElement(alPulsar ? 'button' : 'div');
+  if (alPulsar) fila.type = 'button';
+  fila.className = 'finanzas-row';
+  if (alPulsar) {
+    fila.classList.add('finanzas-row-tappable');
+    fila.addEventListener('click', alPulsar);
+  }
+
+  const ico = document.createElement('span');
+  ico.className = 'finanzas-row-icon';
+  if (color) ico.style.background = color;
+  pintarIconoDeFila(ico, icono);
+  fila.appendChild(ico);
+
+  const main = document.createElement('span');
+  main.className = 'finanzas-row-main';
+  const t = document.createElement('span');
+  t.className = 'finanzas-row-title';
+  t.textContent = titulo;
+  main.appendChild(t);
+  if (sub) {
+    const s = document.createElement('span');
+    s.className = 'finanzas-row-sub';
+    s.textContent = sub;
+    main.appendChild(s);
+  }
+  fila.appendChild(main);
+
+  const der = document.createElement('span');
+  der.className = 'finanzas-row-right';
+  if (importe !== undefined && importe !== null) {
+    const imp = document.createElement('span');
+    imp.className = 'finanzas-row-amount';
+    imp.textContent = importe;
+    der.appendChild(imp);
+  }
+  if (etiqueta) {
+    const badge = document.createElement('span');
+    badge.className = `finanzas-row-badge${etiquetaTono ? ' finanzas-row-badge-' + etiquetaTono : ''}`;
+    badge.textContent = etiqueta;
+    der.appendChild(badge);
+  }
+  if (flecha) {
+    fila.classList.add('finanzas-row-navegable');
+    const f = document.createElement('span');
+    f.className = 'finanzas-row-chevron';
+    f.textContent = '›';
+    der.appendChild(f);
+  }
+  fila.appendChild(der);
+  return fila;
+}
+
+// El nombre de antes, para que la rama `finanzas-movil` siga fusionando
+// sin conflictos en sus ~9 llamadas. Codigo nuevo: usa `filaDeLista`.
+const finanzasFilaEl = filaDeLista;
+
+function finanzasFijosCabeceraEl(texto, importe) {
+  const cab = document.createElement('div');
+  cab.className = 'finanzas-group-heading';
+  const t = document.createElement('span');
+  t.textContent = texto;
+  cab.appendChild(t);
+  if (importe) {
+    const i = document.createElement('span');
+    i.className = 'finanzas-group-heading-amount';
+    i.textContent = importe;
+    cab.appendChild(i);
+  }
+  return cab;
+}
+
+function finanzasFijosVacioEl(texto) {
+  const p = document.createElement('p');
+  p.className = 'empty-hint';
+  p.textContent = texto;
+  return p;
+}
+
+// La fila de una ocurrencia (un cobro concreto de una plantilla).
+// Las etiquetas de los tres estados. "Sin registrar" (en vez de
+// "pendiente" o "atrasado") es a proposito: de un cobro viejo sin
+// movimiento la app NO sabe si se pago o no -- solo sabe que no le consta.
+// Decir "pendiente" seria afirmar una deuda que probablemente no existe.
+const FINANZAS_FIJOS_ESTADOS = {
+  paid: { texto: 'Pagado', tono: 'ok' },
+  pending: { texto: 'Pendiente', tono: 'pendiente' },
+  overdue: { texto: 'Sin registrar', tono: 'pausado' },
+};
+
+function finanzasFijosOcurrenciaEl(o) {
+  const cat = finanzasCategories.find((c) => c.id === Number(o.categoryId));
+  const estado = FINANZAS_FIJOS_ESTADOS[o.status] || FINANZAS_FIJOS_ESTADOS.pending;
+  return finanzasFilaEl({
+    icono: cat && cat.icon ? cat.icon : '📄',
+    color: cat && cat.color ? cat.color : '',
+    titulo: o.description || 'Gasto fijo sin nombre',
+    sub: `${finanzasFijosFechaCorta(o.date)} · ${finanzasAccountName(o.accountId)}`,
+    importe: formatFinanzasAmount(o.amount),
+    etiqueta: estado.texto,
+    etiquetaTono: estado.tono,
+  });
+}
+
+// -- Vista 1: qué queda por pagar --
+async function renderFinanzasFijosPendientes() {
+  const lista = document.getElementById('finanzas-fijos-lista');
+  const { from, to, etiqueta } = finanzasFijosRangoFechas(finanzasFijosRango);
+  lista.innerHTML = '';
+  lista.appendChild(finanzasFijosVacioEl('Calculando…'));
+
+  const data = await api(`/api/finanzas-recurring-expenses/forecast?from=${from}&to=${to}`);
+  const todas = data.occurrences;
+  // El chip "Pendiente" enseña TODO lo que sigue sin pagarse, tanto lo que
+  // aun no ha llegado como lo que no consta -- son las dos formas de "esto
+  // no esta pagado", y separarlas en dos filtros obligaria a mirar en dos
+  // sitios para saber que te queda. La etiqueta de cada fila ya distingue.
+  const visibles =
+    finanzasFijosEstado === 'all'
+      ? todas
+      : finanzasFijosEstado === 'paid'
+        ? todas.filter((o) => o.status === 'paid')
+        : todas.filter((o) => o.status !== 'paid');
+
+  const titulos = {
+    pending: `Te queda por pagar ${etiqueta}`,
+    paid: `Ya has pagado ${etiqueta}`,
+    all: `Gastos fijos de ${etiqueta}`,
+  };
+  const importes = {
+    pending: data.totals.unpaid,
+    paid: data.totals.paid,
+    all: data.totals.all,
+  };
+  document.getElementById('finanzas-fijos-hero-label').textContent = titulos[finanzasFijosEstado];
+  document.getElementById('finanzas-fijos-hero-amount').textContent = formatFinanzasAmount(importes[finanzasFijosEstado]);
+
+  const sinRegistrar = todas.filter((o) => o.status === 'overdue').length;
+  let sub = '';
+  if (visibles.length === 0) {
+    sub = 'Nada por aquí';
+  } else {
+    sub = `${visibles.length} ${visibles.length === 1 ? 'pago' : 'pagos'} · de ${finanzasFijosFechaCorta(from)} a ${finanzasFijosFechaCorta(to)}`;
+    if (sinRegistrar > 0 && finanzasFijosEstado !== 'paid') {
+      sub += ` · ${sinRegistrar} sin registrar`;
+    }
+  }
+  document.getElementById('finanzas-fijos-hero-sub').textContent = sub;
+
+  lista.innerHTML = '';
+  if (visibles.length === 0) {
+    lista.appendChild(
+      finanzasFijosVacioEl(
+        finanzasFijosEstado === 'pending'
+          ? `No te queda ningún gasto fijo por pagar ${etiqueta}.`
+          : `No hay gastos fijos ${finanzasFijosEstado === 'paid' ? 'pagados' : ''} ${etiqueta}.`
+      )
+    );
     return;
   }
-  finanzasRecurringExpenses.forEach((r) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${escapeHtml(r.description || '—')}</td>
-      <td>${escapeHtml(finanzasAccountName(r.accountId))}</td>
-      <td>${escapeHtml(finanzasCategoryName(r.categoryId))}</td>
-      <td>${formatFinanzasAmount(r.amount)}</td>
-      <td>${finanzasRecurringFrequencyLabel(r)}</td>
-      <td>${r.active ? 'Activo' : 'Pausado'}${r.endDate ? ` (hasta ${r.endDate})` : ''}</td>
-      <td></td>
-    `;
-    const actionsTd = tr.lastElementChild;
-    const historyBtn = document.createElement('button');
-    historyBtn.type = 'button';
-    historyBtn.className = 'secondary-btn';
-    historyBtn.textContent = 'Ver generados';
-    historyBtn.addEventListener('click', () => openFinanzasRecurringTransactionsModal(r));
-    const toggleBtn = document.createElement('button');
-    toggleBtn.type = 'button';
-    toggleBtn.className = 'secondary-btn';
-    toggleBtn.textContent = r.active ? 'Pausar' : 'Reanudar';
-    toggleBtn.addEventListener('click', async () => {
-      await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'PUT', body: JSON.stringify({ active: !r.active }) });
-      await refreshFinanzasRecurringTab();
+
+  // En el rango de un año se agrupa por mes (si no, son decenas de filas
+  // seguidas sin ninguna referencia); en semana y mes, lista corrida.
+  if (finanzasFijosRango === 'anio') {
+    const porMes = new Map();
+    visibles.forEach((o) => {
+      const clave = o.date.slice(0, 7);
+      if (!porMes.has(clave)) porMes.set(clave, []);
+      porMes.get(clave).push(o);
     });
-    const editBtn = document.createElement('button');
-    editBtn.type = 'button';
-    editBtn.className = 'secondary-btn';
-    editBtn.textContent = 'Editar';
-    editBtn.addEventListener('click', () => openFinanzasRecurringModal(r));
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'danger-btn';
-    deleteBtn.textContent = 'Eliminar';
-    deleteBtn.addEventListener('click', async () => {
-      if (!confirm(`¿Eliminar el gasto fijo "${r.description || 'sin nombre'}"? Los movimientos ya generados se quedan, solo se deja de generar más.`)) return;
-      await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'DELETE' });
-      await refreshFinanzasRecurringTab();
+    [...porMes.keys()].sort().forEach((clave) => {
+      const delMes = porMes.get(clave);
+      const total = delMes.reduce((acc, o) => acc + o.amount, 0);
+      lista.appendChild(finanzasFijosCabeceraEl(FINANZAS_MONTH_NAMES[Number(clave.slice(5, 7)) - 1], formatFinanzasAmount(total)));
+      const grupo = document.createElement('div');
+      grupo.className = 'finanzas-group';
+      delMes.forEach((o) => grupo.appendChild(finanzasFijosOcurrenciaEl(o)));
+      lista.appendChild(grupo);
     });
-    actionsTd.append(historyBtn, toggleBtn, editBtn, deleteBtn);
-    tbody.appendChild(tr);
+    return;
+  }
+
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  visibles.forEach((o) => grupo.appendChild(finanzasFijosOcurrenciaEl(o)));
+  lista.appendChild(grupo);
+}
+
+// Lo ultimo que devolvio /forecast para la vista anual, con el año al que
+// corresponde. Abrir y cerrar un mes NO cambia los datos, solo lo que se
+// enseña: sin esta cache, cada toque volvia a calcular el año entero (con
+// 125 plantillas eso son 1.333 ocurrencias recalculadas para nada, y en un
+// telefono se nota).
+let finanzasFijosDatosAnual = null;
+
+// -- Vista 2: el año entero, mes a mes --
+async function renderFinanzasFijosAnual({ recargar = true } = {}) {
+  const cont = document.getElementById('finanzas-fijos-meses');
+  document.getElementById('finanzas-fijos-year-label').textContent = String(finanzasFijosYear);
+
+  const sirveLaCache =
+    !recargar && finanzasFijosDatosAnual && finanzasFijosDatosAnual.year === finanzasFijosYear;
+
+  if (!sirveLaCache) {
+    cont.innerHTML = '';
+    cont.appendChild(finanzasFijosVacioEl('Calculando…'));
+  }
+
+  const data = sirveLaCache
+    ? finanzasFijosDatosAnual.data
+    : await api(`/api/finanzas-recurring-expenses/forecast?from=${finanzasFijosYear}-01-01&to=${finanzasFijosYear}-12-31`);
+  finanzasFijosDatosAnual = { year: finanzasFijosYear, data };
+
+  document.getElementById('finanzas-fijos-year-total').textContent = formatFinanzasAmount(data.totals.all);
+  document.getElementById('finanzas-fijos-year-sub').textContent =
+    data.occurrences.length === 0
+      ? 'Sin gastos fijos en este año'
+      : data.totals.unpaid > 0
+        ? `${formatFinanzasAmount(data.totals.paid)} pagados · ${formatFinanzasAmount(data.totals.unpaid)} por pagar`
+        : 'Todo pagado';
+
+  const porMes = new Map();
+  data.occurrences.forEach((o) => {
+    const idx = Number(o.date.slice(5, 7)) - 1;
+    if (!porMes.has(idx)) porMes.set(idx, []);
+    porMes.get(idx).push(o);
   });
+
+  cont.innerHTML = '';
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+
+  // Se pintan los DOCE meses aunque esten vacios: la gracia de esta
+  // pantalla es poder recorrer el año de un vistazo y ver donde estan los
+  // meses caros, y para eso los huecos tambien dicen algo.
+  for (let i = 0; i < 12; i += 1) {
+    const delMes = porMes.get(i) || [];
+    const total = delMes.reduce((acc, o) => acc + o.amount, 0);
+    const hayPrevisto = delMes.some((o) => o.status === 'pending');
+    const haySinRegistrar = delMes.some((o) => o.status === 'overdue');
+    const abierto = finanzasFijosMesesAbiertos.has(i);
+
+    // Un mes con cobros que aun no han llegado es "Previsto" (la cifra
+    // puede cambiar); uno pasado del que no consta el pago, "Sin
+    // registrar". Si esta todo pagado no lleva etiqueta: el silencio ya
+    // dice que ese mes esta cerrado.
+    const fila = finanzasFilaEl({
+      icono: abierto ? '▾' : '▸',
+      titulo: FINANZAS_MONTH_NAMES[i],
+      sub: delMes.length === 0 ? 'Sin gastos fijos' : `${delMes.length} ${delMes.length === 1 ? 'pago' : 'pagos'}`,
+      importe: delMes.length === 0 ? '—' : formatFinanzasAmount(total),
+      etiqueta: hayPrevisto ? 'Previsto' : haySinRegistrar ? 'Sin registrar' : '',
+      etiquetaTono: hayPrevisto ? 'pendiente' : 'pausado',
+      alPulsar:
+        delMes.length === 0
+          ? null
+          : () => {
+              if (finanzasFijosMesesAbiertos.has(i)) finanzasFijosMesesAbiertos.delete(i);
+              else finanzasFijosMesesAbiertos.add(i);
+              // Sin recargar: los datos del año son los mismos, solo cambia
+              // que este mes se vea desplegado o no.
+              renderFinanzasFijosAnual({ recargar: false });
+            },
+    });
+    if (delMes.length === 0) fila.classList.add('finanzas-row-muted');
+    grupo.appendChild(fila);
+
+    if (abierto && delMes.length > 0) {
+      const desglose = document.createElement('div');
+      desglose.className = 'finanzas-subgroup';
+      delMes.forEach((o) => desglose.appendChild(finanzasFijosOcurrenciaEl(o)));
+      grupo.appendChild(desglose);
+    }
+  }
+  cont.appendChild(grupo);
+}
+
+// -- Vista 3: las plantillas, con lo que cuestan --
+let finanzasFijosKind = 'all';
+
+async function renderFinanzasRecurringList() {
+  const cont = document.getElementById('finanzas-recurring-list');
+
+  // El resumen normaliza cada plantilla a mes y a año. Solo cuenta las
+  // ACTIVAS: lo que cuesta mantener lo que tienes contratado hoy, que es
+  // otra pregunta distinta del "cuanto hay en el año 2026" de la vista
+  // anual (esa si incluye lo que ya cancelaste pero pagaste).
+  const resumen = await api('/api/finanzas-recurring-expenses/summary');
+  const delTipo =
+    finanzasFijosKind === 'all'
+      ? { monthly: resumen.monthlyTotal, annual: resumen.annualTotal, count: resumen.items.length }
+      : resumen.byKind[finanzasFijosKind];
+
+  document.getElementById('finanzas-fijos-coste-label').textContent = FINANZAS_KIND_PLURALES[finanzasFijosKind];
+  document.getElementById('finanzas-fijos-coste-mes').textContent = `${formatFinanzasAmount(delTipo.monthly)}/mes`;
+  document.getElementById('finanzas-fijos-coste-anio').textContent =
+    delTipo.count === 0
+      ? 'Nada de este tipo todavía'
+      : `${formatFinanzasAmount(delTipo.annual)} al año · ${delTipo.count} ${delTipo.count === 1 ? 'activo' : 'activos'}`;
+
+  // La lista si enseña las pausadas (si no, desaparecerian de la app sin
+  // forma de reactivarlas), pero atenuadas y sin sumar en la cabecera.
+  const visibles =
+    finanzasFijosKind === 'all'
+      ? finanzasRecurringExpenses
+      : finanzasRecurringExpenses.filter((r) => (r.kind || 'other') === finanzasFijosKind);
+
+  cont.innerHTML = '';
+  if (visibles.length === 0) {
+    cont.appendChild(
+      finanzasFijosVacioEl(
+        finanzasFijosKind === 'all'
+          ? 'Todavía no tienes gastos fijos. Crea uno con el botón de arriba.'
+          : 'No tienes ningún gasto fijo de este tipo.'
+      )
+    );
+    return;
+  }
+
+  // Ordenadas por lo que cuestan AL AÑO: asi lo caro sale arriba aunque
+  // sea un pago anual suelto que en la lista de siempre quedaba enterrado.
+  const costes = new Map(resumen.items.map((i) => [i.id, i]));
+  const ordenadas = [...visibles].sort((a, b) => {
+    const ca = costes.get(a.id) ? costes.get(a.id).annualCost : -1;
+    const cb = costes.get(b.id) ? costes.get(b.id).annualCost : -1;
+    return cb - ca;
+  });
+
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  ordenadas.forEach((r) => {
+    const cat = finanzasCategories.find((c) => c.id === Number(r.categoryId));
+    // La linea de debajo lleva la conversion: en una mensual se enseña lo
+    // que suma al año, y en una anual lo que supone al mes. Es la cifra
+    // que no se puede calcular de cabeza y la que permite comparar.
+    const equivalencia =
+      r.frequency === 'monthly'
+        ? `${formatFinanzasAmount(r.amount * 12)}/año`
+        : `${formatFinanzasAmount(r.amount / 12)}/mes`;
+    const fila = finanzasFilaEl({
+      icono: cat && cat.icon ? cat.icon : '📄',
+      color: cat && cat.color ? cat.color : '',
+      titulo: r.description || 'Gasto fijo sin nombre',
+      sub: `${finanzasRecurringFrequencyLabel(r)} · ${equivalencia}`,
+      importe: formatFinanzasAmount(r.amount),
+      etiqueta: r.active ? (r.reminderOffsets && r.reminderOffsets.length ? '🔔' : '') : 'Pausado',
+      etiquetaTono: 'pausado',
+      alPulsar: () => openFinanzasRecurringTransactionsModal(r),
+    });
+    if (!r.active) fila.classList.add('finanzas-row-muted');
+    grupo.appendChild(fila);
+  });
+  cont.appendChild(grupo);
+}
+
+// Cambiar de vista dentro de la pestaña. Cada vista se pinta solo cuando
+// se entra en ella: /forecast recalcula, y no tiene sentido calcular tres
+// pantallas para enseñar una.
+function switchFinanzasFijosVista(vista) {
+  finanzasFijosVista = vista;
+  document.querySelectorAll('[data-fijos-vista]').forEach((btn) => {
+    const activo = btn.dataset.fijosVista === vista;
+    btn.classList.toggle('active', activo);
+    btn.setAttribute('aria-selected', activo ? 'true' : 'false');
+  });
+  document.querySelectorAll('[data-fijos-panel]').forEach((panel) => {
+    panel.classList.toggle('hidden', panel.dataset.fijosPanel !== vista);
+  });
+  if (vista === 'pendientes') renderFinanzasFijosPendientes();
+  else if (vista === 'anual') renderFinanzasFijosAnual();
 }
 
 async function refreshFinanzasRecurringTab() {
   await loadFinanzasRecurring();
-  renderFinanzasRecurringList();
+  await renderFinanzasRecurringList();
+  if (finanzasFijosVista === 'pendientes') await renderFinanzasFijosPendientes();
+  else if (finanzasFijosVista === 'anual') await renderFinanzasFijosAnual();
 }
 
 function refreshFinanzasRecurringFrequencyFields() {
@@ -15640,6 +18029,15 @@ function openFinanzasRecurringModal(r) {
   document.getElementById('finanzas-recurring-description').value = r ? (r.description || '') : '';
   finanzasRecurringAccountField.setValue(r ? r.accountId : (finanzasAccounts[0] ? finanzasAccounts[0].id : ''));
   finanzasRecurringCategoryField.setValue(r && r.categoryId ? r.categoryId : '');
+  // Al crear una nueva se propone el tipo del filtro en el que estas: si
+  // estabas mirando "Suscripciones", lo normal es que la que vas a crear
+  // lo sea. Con el filtro en "Todos" se queda en "Otro".
+  finanzasRecurringKindField.setValue(
+    r ? r.kind || 'other' : finanzasFijosKind !== 'all' ? finanzasFijosKind : 'other'
+  );
+  finanzasRecurringAvisos.clear();
+  (r && r.reminderOffsets ? r.reminderOffsets : []).forEach((d) => finanzasRecurringAvisos.add(Number(d)));
+  renderFinanzasRecurringAvisos();
   document.getElementById('finanzas-recurring-amount').value = r ? r.amount : '';
   finanzasRecurringFrequencyField.setValue(r ? r.frequency : 'monthly');
   document.getElementById('finanzas-recurring-day').value = r ? r.dayOfMonth : '';
@@ -15654,6 +18052,53 @@ function closeFinanzasRecurringModal() {
   document.getElementById('finanzas-recurring-modal').classList.add('hidden');
 }
 document.getElementById('btn-new-finanzas-recurring').addEventListener('click', () => openFinanzasRecurringModal(null));
+
+// -- Botones de la pestaña de gastos fijos --
+// (Se registran al cargar, pero solo se EJECUTAN al tocarlos, asi que
+//  pueden apoyarse en funciones declaradas mas abajo sin problema -- ver
+//  la nota de la zona muerta temporal en CLAUDE.md.)
+document.querySelectorAll('[data-fijos-vista]').forEach((btn) => {
+  btn.addEventListener('click', () => switchFinanzasFijosVista(btn.dataset.fijosVista));
+});
+document.querySelectorAll('[data-fijos-rango]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    finanzasFijosRango = btn.dataset.fijosRango;
+    document.querySelectorAll('[data-fijos-rango]').forEach((b) => {
+      const activo = b === btn;
+      b.classList.toggle('active', activo);
+      b.setAttribute('aria-selected', activo ? 'true' : 'false');
+    });
+    renderFinanzasFijosPendientes();
+  });
+});
+document.querySelectorAll('[data-fijos-kind]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    finanzasFijosKind = btn.dataset.fijosKind;
+    document.querySelectorAll('[data-fijos-kind]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderFinanzasRecurringList();
+  });
+});
+document.querySelectorAll('[data-fijos-estado]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    finanzasFijosEstado = btn.dataset.fijosEstado;
+    document.querySelectorAll('[data-fijos-estado]').forEach((b) => b.classList.toggle('active', b === btn));
+    renderFinanzasFijosPendientes();
+  });
+});
+document.getElementById('btn-finanzas-fijos-year-prev').addEventListener('click', () => {
+  // Topes de cordura: sin ellos se puede acabar en el año 200 a base de
+  // toques, calculando doce meses de nada cada vez.
+  if (finanzasFijosYear <= 2000) return;
+  finanzasFijosYear -= 1;
+  finanzasFijosMesesAbiertos.clear();
+  renderFinanzasFijosAnual();
+});
+document.getElementById('btn-finanzas-fijos-year-next').addEventListener('click', () => {
+  if (finanzasFijosYear >= 2100) return;
+  finanzasFijosYear += 1;
+  finanzasFijosMesesAbiertos.clear();
+  renderFinanzasFijosAnual();
+});
 document.getElementById('btn-cancel-finanzas-recurring').addEventListener('click', closeFinanzasRecurringModal);
 document.getElementById('btn-close-finanzas-recurring').addEventListener('click', closeFinanzasRecurringModal);
 
@@ -15673,6 +18118,8 @@ document.getElementById('finanzas-recurring-form').addEventListener('submit', as
     startDate: toDateKey(finanzasRecurringStartField.getValue()),
     endDate: endDate ? toDateKey(endDate) : null,
     countsTowardBudget: document.getElementById('finanzas-recurring-counts').checked,
+    kind: finanzasRecurringKindField.getValue(),
+    reminderOffsets: [...finanzasRecurringAvisos],
   };
   try {
     if (id) {
@@ -15681,11 +18128,17 @@ document.getElementById('finanzas-recurring-form').addEventListener('submit', as
       await api('/api/finanzas-recurring-expenses', { method: 'POST', body: JSON.stringify(payload) });
     }
   } catch (err) {
-    alert(err.message);
+    // alert() del navegador bloquea la webview entera en el movil y no
+    // sigue el tema. Aviso propio, como el resto de la app.
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
     return;
   }
   closeFinanzasRecurringModal();
   await refreshFinanzasRecurringTab();
+  // Cambiar un gasto puede cambiar sus avisos (o su fecha), asi que se
+  // rehace la programacion del sistema. Es el mismo "cancelar y rehacer"
+  // que ya usa el calendario: nunca queda un aviso huerfano.
+  if (typeof syncScheduledReminders === 'function') syncScheduledReminders();
 });
 
 // -- Pestaña "Deudas": lo que Koku debe a alguien y lo que alguien le
@@ -15819,27 +18272,147 @@ document.getElementById('btn-delete-finanzas-debt').addEventListener('click', as
   renderFinanzasResumenTab();
 });
 
-// Movimientos ya generados por una plantilla concreta -- reutiliza el
-// filtro recurringExpenseId ya soportado por GET /api/finanzas-transactions.
+// Ficha de un gasto fijo: cuanto ha costado cada año, sus movimientos
+// generados y las acciones. Antes esto era solo la lista de generados.
+//
+// La evolucion por año NO hace falta guardarla en ningun sitio: cada
+// movimiento generado lleva su recurring_expense_id, asi que agrupar por
+// año es una consulta (ver GET /:id/history).
 async function openFinanzasRecurringTransactionsModal(r) {
-  document.getElementById('finanzas-recurring-transactions-title').textContent = `Movimientos generados — ${r.description || 'gasto fijo'}`;
-  const tbody = document.getElementById('finanzas-recurring-transactions-tbody');
-  tbody.innerHTML = '<tr><td colspan="2" class="empty-hint">Cargando…</td></tr>';
+  finanzasFijosDetalle = r;
+  document.getElementById('finanzas-recurring-transactions-title').textContent = r.description || 'Gasto fijo';
+  const equivalencia =
+    r.frequency === 'monthly'
+      ? `${formatFinanzasAmount(r.amount * 12)}/año`
+      : `${formatFinanzasAmount(r.amount / 12)}/mes`;
+  document.getElementById('finanzas-recurring-detail-sub').textContent =
+    `${FINANZAS_KIND_LABELS[r.kind || 'other']} · ${formatFinanzasAmount(r.amount)} ${finanzasRecurringFrequencyLabel(r).toLowerCase()} · ${equivalencia} · ${finanzasAccountName(r.accountId)}${r.active ? '' : ' · Pausado'}`;
+
+  const toggleBtn = document.getElementById('btn-finanzas-recurring-detail-toggle');
+  toggleBtn.textContent = r.active ? 'Pausar' : 'Reanudar';
+
+  // Los avisos, en palabras. Si no hay ninguno se dice, para que no
+  // parezca que la app avisa cuando no lo hace.
+  const avisos = (r.reminderOffsets || []).slice().sort((a, b) => b - a);
+  const avisosEl = document.getElementById('finanzas-recurring-detail-avisos');
+  avisosEl.textContent = avisos.length === 0
+    ? 'Sin avisos de pago.'
+    : `Te avisa ${avisos.map((d) => FINANZAS_AVISO_ETIQUETAS[d] || `${d} días antes`).join(', ')}.`;
+
+  const histCont = document.getElementById('finanzas-recurring-history');
+  const listaCont = document.getElementById('finanzas-recurring-transactions-list');
+  histCont.innerHTML = '';
+  listaCont.innerHTML = '';
+  histCont.appendChild(finanzasFijosVacioEl('Cargando…'));
   document.getElementById('finanzas-recurring-transactions-modal').classList.remove('hidden');
-  const transactions = await api(`/api/finanzas-transactions?recurringExpenseId=${r.id}`);
-  tbody.innerHTML = '';
+
+  const [historia, transactions] = await Promise.all([
+    api(`/api/finanzas-recurring-expenses/${r.id}/history`),
+    api(`/api/finanzas-transactions?recurringExpenseId=${r.id}`),
+  ]);
+
+  // -- Evolucion por año --
+  histCont.innerHTML = '';
+  if (historia.years.length === 0) {
+    histCont.appendChild(finanzasFijosVacioEl('Todavía no se ha generado ningún pago, así que no hay histórico.'));
+  } else {
+    const grupo = document.createElement('div');
+    grupo.className = 'finanzas-group';
+    // Se recorre de mas nuevo a mas viejo y se compara cada año con el
+    // SIGUIENTE de la lista (el anterior en el tiempo), que es justo la
+    // frase que uno quiere leer: "te ha subido un 19%".
+    historia.years.forEach((y, i) => {
+      const anterior = historia.years[i + 1];
+      let sub = `${y.count} ${y.count === 1 ? 'pago' : 'pagos'}`;
+      if (anterior && anterior.total > 0) {
+        // Con el MISMO numero de pagos se comparan los totales. Si no
+        // coinciden (tipico del año en curso, que va a medias) se compara
+        // el coste POR PAGO -- si no, un año de 9 meses frente a uno de 12
+        // sale "un 17% mas barato" cuando en realidad te ha SUBIDO el
+        // precio. Salio probandolo con Netflix: 8,99 -> 9,99 -> 10,99 y la
+        // ficha decia que bajaba.
+        const mismoNumeroDePagos = y.count === anterior.count;
+        const actual = mismoNumeroDePagos ? y.total : y.total / y.count;
+        const previo = mismoNumeroDePagos ? anterior.total : anterior.total / anterior.count;
+        const variacion = ((actual - previo) / previo) * 100;
+        if (Math.abs(variacion) >= 0.5) {
+          sub += ` · ${variacion > 0 ? '+' : '−'}${formatFinanzasPorcentaje(Math.round(variacion))}%${mismoNumeroDePagos ? '' : ' por pago'} frente a ${anterior.year}`;
+        }
+      }
+      grupo.appendChild(
+        finanzasFilaEl({
+          icono: 'calendario',
+          titulo: y.year,
+          sub,
+          importe: formatFinanzasAmount(y.total),
+        })
+      );
+    });
+    histCont.appendChild(grupo);
+    // Un año a medias no se compara con uno entero sin decirlo.
+    const esteAnio = String(new Date().getFullYear());
+    if (historia.years.some((y) => y.year === esteAnio)) {
+      const nota = document.createElement('p');
+      nota.className = 'hint';
+      nota.textContent = 'El año en curso va a medias: todavía le quedan pagos por generar, así que no se compara de tú a tú con un año entero.';
+      histCont.appendChild(nota);
+    }
+  }
+
+  // -- Movimientos generados --
   if (transactions.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="2" class="empty-hint">Todavía no se ha generado ninguno.</td></tr>';
+    listaCont.appendChild(finanzasFijosVacioEl('Todavía no se ha generado ninguno.'));
     return;
   }
+  const grupoMov = document.createElement('div');
+  grupoMov.className = 'finanzas-group';
   transactions.forEach((t) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${t.date}</td><td>${formatFinanzasAmount(t.amount)}</td>`;
-    tbody.appendChild(tr);
+    grupoMov.appendChild(
+      finanzasFilaEl({
+        icono: 'check',
+        titulo: finanzasFijosFechaCorta(t.date),
+        importe: formatFinanzasAmount(t.amount),
+      })
+    );
   });
+  listaCont.appendChild(grupoMov);
 }
-document.getElementById('btn-close-finanzas-recurring-transactions').addEventListener('click', () => {
+
+function closeFinanzasRecurringDetail() {
   document.getElementById('finanzas-recurring-transactions-modal').classList.add('hidden');
+  finanzasFijosDetalle = null;
+}
+document.getElementById('btn-close-finanzas-recurring-transactions').addEventListener('click', closeFinanzasRecurringDetail);
+
+document.getElementById('btn-finanzas-recurring-detail-edit').addEventListener('click', () => {
+  const r = finanzasFijosDetalle;
+  if (!r) return;
+  closeFinanzasRecurringDetail();
+  openFinanzasRecurringModal(r);
+});
+
+document.getElementById('btn-finanzas-recurring-detail-toggle').addEventListener('click', async () => {
+  const r = finanzasFijosDetalle;
+  if (!r) return;
+  await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'PUT', body: JSON.stringify({ active: !r.active }) });
+  closeFinanzasRecurringDetail();
+  await refreshFinanzasRecurringTab();
+});
+
+document.getElementById('btn-finanzas-recurring-detail-delete').addEventListener('click', async () => {
+  const r = finanzasFijosDetalle;
+  if (!r) return;
+  // Antes esto usaba confirm() del navegador, que en el movil bloquea la
+  // webview entera y encima no sigue el tema. Aviso propio, como manda la
+  // regla de la casa.
+  const ok = await showAppConfirm(
+    `¿Eliminar el gasto fijo "${r.description || 'sin nombre'}"?\n\nLos movimientos ya generados se quedan (son reales), pero pierden el enlace con la plantilla: dejarás de ver su evolución por años.`,
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/finanzas-recurring-expenses/${r.id}`, { method: 'DELETE' });
+  closeFinanzasRecurringDetail();
+  await refreshFinanzasRecurringTab();
 });
 
 // -- Pestaña Inversiones: tabla de compra/venta/dividendos + resumen por
@@ -16120,25 +18693,471 @@ document.getElementById('finanzas-investment-form').addEventListener('submit', a
   renderFinanzasResumenTab();
 });
 
-// -- Pestañas + apertura/cierre de toda la vista --
-function switchFinanzasTab(tabName) {
-  document.querySelectorAll('.finanzas-tab-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.finanzasTab === tabName);
+// =====================================================================
+// Objetivos de ahorro: sobres virtuales sobre una cuenta.
+//
+// "Coche, 5.000 €" y vas apartando. El dinero NO se mueve: la cuenta
+// sigue con su saldo y el objetivo solo reserva una parte. Lo que hace
+// util esto no es la barra de progreso, es el cruce con lo que la app ya
+// sabe: con meta y fecha te dice cuanto tendrias que apartar al mes, y si
+// a tu ritmo real de ahorro llegas o no.
+// =====================================================================
+
+let finanzasGoals = [];
+let finanzasGoalDetalle = null;
+let finanzasGoalRitmo = null;
+
+const finanzasGoalAccountField = createSelectField({
+  options: [{ value: '', label: 'Sin cuenta' }],
+  initialValue: '',
+});
+document.getElementById('finanzas-goal-account-field').appendChild(finanzasGoalAccountField.element);
+
+const finanzasGoalDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
+document.getElementById('finanzas-goal-date-field').appendChild(finanzasGoalDateField.element);
+
+async function loadFinanzasGoals() {
+  const [lista, ritmo] = await Promise.all([api('/api/finanzas-goals'), api('/api/finanzas-goals/pace')]);
+  finanzasGoals = lista;
+  finanzasGoalRitmo = ritmo;
+}
+
+// "Te faltan 3.200 € en 10 meses -> 320 €/mes", y si con lo que ahorras de
+// media no llegas, se dice. Avisa, no impide nada: es su dinero.
+function finanzasGoalTextoRitmo(g) {
+  if (g.completedAt) return 'Objetivo cumplido.';
+  if (g.remaining <= 0) return '¡Ya lo tienes! Puedes gastarlo cuando quieras.';
+  if (!g.perMonthNeeded) {
+    return g.targetDate
+      ? `La fecha ya pasó y aún te faltan ${formatFinanzasAmount(g.remaining)}.`
+      : `Te faltan ${formatFinanzasAmount(g.remaining)}. Ponle fecha y te digo cuánto apartar al mes.`;
+  }
+  let texto = `Te faltan ${formatFinanzasAmount(g.remaining)} en ${g.monthsLeft} ${g.monthsLeft === 1 ? 'mes' : 'meses'}: ${formatFinanzasAmount(g.perMonthNeeded)} al mes.`;
+  const medio = finanzasGoalRitmo ? finanzasGoalRitmo.averageMonthlySavings : 0;
+  if (medio > 0) {
+    if (medio < g.perMonthNeeded) {
+      const mesesReales = Math.ceil(g.remaining / medio);
+      const llegada = new Date();
+      llegada.setMonth(llegada.getMonth() + mesesReales);
+      texto += ` Ahorras ${formatFinanzasAmount(medio)} al mes de media, así que a este ritmo llegarías en ${FINANZAS_MONTH_NAMES[llegada.getMonth()].toLowerCase()} de ${llegada.getFullYear()}.`;
+    } else {
+      texto += ` Ahorras ${formatFinanzasAmount(medio)} al mes de media, así que vas sobrado.`;
+    }
+  }
+  return texto;
+}
+
+function renderFinanzasGoalsList() {
+  const cont = document.getElementById('finanzas-goals-list');
+  cont.innerHTML = '';
+  if (finanzasGoals.length === 0) {
+    cont.appendChild(finanzasFijosVacioEl('Todavía no tienes objetivos. Crea uno con el botón de arriba.'));
+    return;
+  }
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  finanzasGoals.forEach((g) => {
+    const fila = finanzasFilaEl({
+      icono: g.icon || '🎯',
+      color: g.color || '',
+      titulo: g.name,
+      sub: `${formatFinanzasAmount(g.reserved)} de ${formatFinanzasAmount(g.targetAmount)}${g.targetDate ? ` · para ${finanzasFijosFechaCorta(g.targetDate)}` : ''}`,
+      importe: `${Math.round(g.progress * 100)}%`,
+      etiqueta: g.completedAt ? 'Cumplido' : '',
+      etiquetaTono: 'ok',
+      alPulsar: () => openFinanzasGoalDetail(g),
+    });
+    if (g.completedAt) fila.classList.add('finanzas-row-muted');
+    grupo.appendChild(fila);
+
+    // Barra de progreso bajo cada objetivo: es lo que se mira de un
+    // vistazo, y en una lista de sobres el porcentaje suelto se queda
+    // corto para comparar unos con otros.
+    const barra = document.createElement('div');
+    barra.className = 'finanzas-goal-bar';
+    const relleno = document.createElement('div');
+    relleno.className = 'finanzas-goal-bar-fill';
+    relleno.style.width = `${Math.round(g.progress * 100)}%`;
+    if (g.color) relleno.style.background = g.color;
+    barra.appendChild(relleno);
+    grupo.appendChild(barra);
   });
+  cont.appendChild(grupo);
+}
+
+async function refreshFinanzasGoalsTab() {
+  await loadFinanzasGoals();
+  renderFinanzasGoalsList();
+}
+
+function openFinanzasGoalModal(g) {
+  setupFinanzasIconColorFields();
+  document.getElementById('finanzas-goal-modal-title').textContent = g ? 'Editar objetivo' : 'Nuevo objetivo';
+  document.getElementById('finanzas-goal-id').value = g ? g.id : '';
+  document.getElementById('finanzas-goal-name').value = g ? g.name : '';
+  document.getElementById('finanzas-goal-target').value = g ? g.targetAmount : '';
+  finanzasGoalIconField.setValue(g && g.icon ? g.icon : '');
+  finanzasGoalColorField.setValue(g && g.color ? g.color : DEFAULT_EVENT_COLOR);
+  finanzasGoalAccountField.setOptions([
+    { value: '', label: 'Sin cuenta' },
+    ...finanzasAccounts.map((a) => ({ value: String(a.id), label: `${a.icon ? a.icon + ' ' : ''}${a.name}` })),
+  ]);
+  finanzasGoalAccountField.setValue(g && g.accountId ? String(g.accountId) : '');
+  finanzasGoalDateField.setValue(g && g.targetDate ? new Date(`${g.targetDate}T12:00:00`) : null);
+  document.getElementById('finanzas-goal-modal').classList.remove('hidden');
+}
+function closeFinanzasGoalModal() {
+  document.getElementById('finanzas-goal-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-new-finanzas-goal').addEventListener('click', () => openFinanzasGoalModal(null));
+document.getElementById('btn-close-finanzas-goal').addEventListener('click', closeFinanzasGoalModal);
+document.getElementById('btn-cancel-finanzas-goal').addEventListener('click', closeFinanzasGoalModal);
+
+document.getElementById('finanzas-goal-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('finanzas-goal-id').value;
+  const fecha = finanzasGoalDateField.getValue();
+  const payload = {
+    name: document.getElementById('finanzas-goal-name').value,
+    targetAmount: document.getElementById('finanzas-goal-target').value,
+    icon: finanzasGoalIconField.getValue() || null,
+    color: finanzasGoalColorField.getValue() || null,
+    accountId: finanzasGoalAccountField.getValue() ? Number(finanzasGoalAccountField.getValue()) : null,
+    targetDate: fecha ? toDateKey(fecha) : null,
+  };
+  try {
+    if (id) await api(`/api/finanzas-goals/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    else await api('/api/finanzas-goals', { method: 'POST', body: JSON.stringify(payload) });
+  } catch (err) {
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  closeFinanzasGoalModal();
+  await refreshFinanzasGoalsTab();
+  await renderFinanzasResumenTab();
+});
+
+async function openFinanzasGoalDetail(g) {
+  finanzasGoalDetalle = g;
+  document.getElementById('finanzas-goal-detail-title').textContent = `${g.icon ? g.icon + ' ' : ''}${g.name}`;
+  document.getElementById('finanzas-goal-detail-sub').textContent =
+    `${formatFinanzasAmount(g.reserved)} apartados de ${formatFinanzasAmount(g.targetAmount)}${g.accountId ? ` · en ${finanzasAccountName(g.accountId)}` : ''}`;
+  document.getElementById('finanzas-goal-detail-pace').textContent = finanzasGoalTextoRitmo(g);
+
+  const prog = document.getElementById('finanzas-goal-detail-progress');
+  prog.innerHTML = '';
+  const barra = document.createElement('div');
+  barra.className = 'finanzas-goal-bar';
+  const relleno = document.createElement('div');
+  relleno.className = 'finanzas-goal-bar-fill';
+  relleno.style.width = `${Math.round(g.progress * 100)}%`;
+  if (g.color) relleno.style.background = g.color;
+  barra.appendChild(relleno);
+  prog.appendChild(barra);
+
+  document.getElementById('finanzas-goal-move-amount').value = '';
+  document.getElementById('btn-finanzas-goal-spend').classList.toggle('hidden', g.reserved <= 0);
+
+  const cont = document.getElementById('finanzas-goal-contributions');
+  cont.innerHTML = '';
+  cont.appendChild(finanzasFijosVacioEl('Cargando…'));
+  document.getElementById('finanzas-goal-detail-modal').classList.remove('hidden');
+
+  const movimientos = await api(`/api/finanzas-goals/${g.id}/contributions`);
+  cont.innerHTML = '';
+  if (movimientos.length === 0) {
+    cont.appendChild(finanzasFijosVacioEl('Todavía no has apartado nada.'));
+    return;
+  }
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  movimientos.forEach((m) => {
+    grupo.appendChild(
+      finanzasFilaEl({
+        icono: m.amount >= 0 ? '↑' : '↓',
+        titulo: m.notes || (m.amount >= 0 ? 'Apartado' : 'Sacado'),
+        sub: finanzasFijosFechaCorta(m.date),
+        importe: `${m.amount >= 0 ? '+' : '−'}${formatFinanzasAmount(Math.abs(m.amount))}`,
+      })
+    );
+  });
+  cont.appendChild(grupo);
+}
+
+function closeFinanzasGoalDetail() {
+  document.getElementById('finanzas-goal-detail-modal').classList.add('hidden');
+  finanzasGoalDetalle = null;
+}
+document.getElementById('btn-close-finanzas-goal-detail').addEventListener('click', closeFinanzasGoalDetail);
+
+// Apartar / sacar. El mismo campo para las dos cosas: el signo lo pone el
+// boton, no el usuario (escribir "-200" es justo el tipo de detalle que se
+// olvida y acaba sumando cuando queria restar).
+async function finanzasGoalMover(signo) {
+  const g = finanzasGoalDetalle;
+  if (!g) return;
+  const campo = document.getElementById('finanzas-goal-move-amount');
+  const importe = Number(campo.value);
+  if (!Number.isFinite(importe) || importe <= 0) {
+    await showAppConfirm('Escribe cuánto quieres mover, en positivo.', { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  try {
+    await api(`/api/finanzas-goals/${g.id}/contributions`, {
+      method: 'POST',
+      body: JSON.stringify({ amount: signo * importe }),
+    });
+  } catch (err) {
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  await refreshFinanzasGoalsTab();
+  const actualizado = finanzasGoals.find((x) => x.id === g.id);
+  if (actualizado) await openFinanzasGoalDetail(actualizado);
+  await renderFinanzasResumenTab();
+}
+document.getElementById('btn-finanzas-goal-add').addEventListener('click', () => finanzasGoalMover(1));
+document.getElementById('btn-finanzas-goal-take').addEventListener('click', () => finanzasGoalMover(-1));
+
+document.getElementById('btn-finanzas-goal-edit').addEventListener('click', () => {
+  const g = finanzasGoalDetalle;
+  closeFinanzasGoalDetail();
+  if (g) openFinanzasGoalModal(g);
+});
+
+document.getElementById('btn-finanzas-goal-delete').addEventListener('click', async () => {
+  const g = finanzasGoalDetalle;
+  if (!g) return;
+  const ok = await showAppConfirm(
+    `¿Eliminar el objetivo "${g.name}"?\n\nNo se toca tu dinero: apartar era solo una reserva, así que el saldo de tu cuenta no cambia. Lo que se pierde es el historial de este objetivo.`,
+    { okText: 'Eliminar', danger: true }
+  );
+  if (!ok) return;
+  await api(`/api/finanzas-goals/${g.id}`, { method: 'DELETE' });
+  closeFinanzasGoalDetail();
+  await refreshFinanzasGoalsTab();
+  await renderFinanzasResumenTab();
+});
+
+// Gastar el objetivo: el gasto REAL y el vaciado del sobre, de una vez.
+document.getElementById('btn-finanzas-goal-spend').addEventListener('click', async () => {
+  const g = finanzasGoalDetalle;
+  if (!g) return;
+  if (!g.accountId) {
+    await showAppConfirm('Este objetivo no está atado a ninguna cuenta, así que no sé de dónde sale el dinero. Edítalo y elige una.', { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  const ok = await showAppConfirm(
+    `¿Gastar ${formatFinanzasAmount(g.reserved)} de "${g.name}"?\n\nSe apunta el gasto de verdad en ${finanzasAccountName(g.accountId)} y el objetivo queda vacío y dado por cumplido.`,
+    { okText: 'Gastarlo' }
+  );
+  if (!ok) return;
+  try {
+    await api(`/api/finanzas-goals/${g.id}/spend`, { method: 'POST', body: JSON.stringify({}) });
+  } catch (err) {
+    await showAppConfirm(err.message, { okText: 'Vale', alertOnly: true });
+    return;
+  }
+  closeFinanzasGoalDetail();
+  await refreshFinanzasGoalsTab();
+  await refreshFinanzasTransactionsTab();
+  await refreshFinanzasAccountsAndCategories();
+  await renderFinanzasResumenTab();
+});
+
+// =====================================================================
+// Navegacion de Finanzas: un INICIO de tarjetas y pantallas debajo.
+//
+// Antes eran cinco pestañas en una fila. No escalaba: con Objetivos,
+// Suscripciones y Prevision se iba a ocho, y ocho pestañas no caben en el
+// ancho de un telefono. Ahora funciona como la app Salud -- una columna de
+// tarjetas, cada una con su cifra, y al tocarla se abre su pantalla con
+// una vuelta atras. Una seccion nueva es una tarjeta mas.
+// =====================================================================
+
+const FINANZAS_SECCIONES = {
+  inicio: 'Finanzas',
+  resumen: 'Este mes',
+  movimientos: 'Movimientos',
+  'gastos-fijos': 'Gastos fijos',
+  objetivos: 'Objetivos',
+  inversiones: 'Inversiones',
+  deudas: 'Deudas',
+};
+
+function switchFinanzasTab(tabName) {
+  const enInicio = tabName === 'inicio';
   document.querySelectorAll('.finanzas-tab-panel').forEach((panel) => {
     panel.classList.toggle('hidden', panel.dataset.finanzasPanel !== tabName);
   });
+  // El titulo de arriba dice donde estas, que es lo que sustituye a la
+  // pestaña marcada de antes.
+  document.getElementById('finanzas-view-title').textContent = FINANZAS_SECCIONES[tabName] || 'Finanzas';
+  document.getElementById('btn-finanzas-back').classList.toggle('hidden', enInicio);
+  // El boton de salir a Herramientas solo tiene sentido en el inicio: desde
+  // dentro de una seccion, lo que uno quiere es volver A FINANZAS.
+  document.getElementById('btn-close-finanzas').classList.toggle('hidden', !enInicio);
+  if (enInicio) renderFinanzasInicio();
 }
-document.querySelectorAll('.finanzas-tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => switchFinanzasTab(btn.dataset.finanzasTab));
-});
+
+document.getElementById('btn-finanzas-back').addEventListener('click', () => switchFinanzasTab('inicio'));
+
+async function renderFinanzasInicio() {
+  const cont = document.getElementById('finanzas-inicio-tarjetas');
+  const esAjena = (a) => String(a.type || '').toLowerCase() === 'de terceros';
+
+  // El total de arriba es TU dinero: las cuentas de terceros no suman
+  // (salvo que el interruptor del Resumen diga lo contrario).
+  const cuentas = finanzasAccounts.filter((a) => finanzasIncluyeTerceros() || !esAjena(a));
+  const total = cuentas.reduce((acc, a) => acc + a.balance, 0);
+  document.getElementById('finanzas-inicio-total').textContent = formatFinanzasAmount(total);
+  document.getElementById('finanzas-inicio-sub').textContent =
+    cuentas.length === 0
+      ? 'Todavía no tienes cuentas'
+      : `${cuentas.length} ${cuentas.length === 1 ? 'cuenta' : 'cuentas'}`;
+
+  const mes = `${finanzasCurrentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const primero = `${mes}-01`;
+  const ultimoDia = new Date(finanzasCurrentYear, new Date().getMonth() + 1, 0).getDate();
+  const ultimo = `${mes}-${String(ultimoDia).padStart(2, '0')}`;
+
+  // Todo lo que necesitan las tarjetas, de una vez. allSettled y no all:
+  // que Deudas falle no puede dejar el inicio en blanco.
+  const [resumen, prevision, suscripciones, deudas] = await Promise.allSettled([
+    api(`/api/finanzas-transactions/summary/month?month=${mes}${finanzasTercerosQS('&')}`),
+    api(`/api/finanzas-recurring-expenses/forecast?from=${primero}&to=${ultimo}`),
+    api('/api/finanzas-recurring-expenses/summary'),
+    api('/api/finanzas-debts'),
+  ]);
+  const dato = (r) => (r.status === 'fulfilled' ? r.value : null);
+
+  cont.innerHTML = '';
+
+  // TODAS las secciones se pintan SIEMPRE, tengan datos o no.
+  //
+  // Antes solo aparecian las que tenian algo que decir, y con la base
+  // vacia eso dejaba secciones INALCANZABLES: sin objetivos no habia
+  // tarjeta de Objetivos, y sin otra puerta no habia forma de crear el
+  // primero. Lo mismo con Deudas. Y Gastos fijos solo se abria tocando
+  // "Proximos pagos", que ademas decia "no te queda nada por pagar" --
+  // nadie iba a adivinar que ahi dentro se crean. Un apartado vacio tiene
+  // que poder abrirse: es la unica forma de empezar a usarlo.
+  //
+  // Y van como FILAS, no como tarjetas grandes: siete tarjetas de cifra
+  // enorme no caben en una pantalla, y "Ver todos" ocupaba el tamaño de
+  // un importe sin ser un importe. Asi entra todo de una vez y se lee de
+  // un vistazo cuales tienen algo.
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  const fila = (opciones) => grupo.appendChild(finanzasFilaEl({ ...opciones, flecha: true }));
+
+  const m = dato(resumen);
+  fila({
+    icono: 'grafico',
+    titulo: 'Este mes',
+    sub: m
+      ? m.monthlyBudgetLimit
+        ? `de ${formatFinanzasAmount(m.monthlyBudgetLimit)} de límite · ahorras ${formatFinanzasAmount(m.savings)}`
+        : `gastado · ahorras ${formatFinanzasAmount(m.savings)}`
+      : 'Cuentas, límite y en qué se te va',
+    importe: m ? formatFinanzasAmount(m.totalExpenseAll) : '',
+    alPulsar: () => switchFinanzasTab('resumen'),
+  });
+
+  const p = dato(prevision);
+  const s = dato(suscripciones);
+  const pendientes = p ? p.occurrences.filter((o) => o.status !== 'paid') : [];
+  const cuantasPlantillas = s ? s.items.length : 0;
+  fila({
+    icono: 'calendario',
+    titulo: 'Gastos fijos',
+    sub:
+      cuantasPlantillas === 0
+        ? 'Alquiler, recibos… aún no tienes ninguno'
+        : pendientes.length === 0
+          ? `${cuantasPlantillas} ${cuantasPlantillas === 1 ? 'gasto' : 'gastos'} · nada pendiente este mes`
+          : `${pendientes.length} por pagar · el siguiente, ${finanzasFijosFechaCorta(pendientes[0].date)}`,
+    importe: p && p.totals.unpaid > 0 ? formatFinanzasAmount(p.totals.unpaid) : '',
+    alPulsar: () => {
+      switchFinanzasTab('gastos-fijos');
+      // Con la lista vacia se entra por Plantillas, que es donde se crean;
+      // con gastos ya puestos, por lo que queda por pagar.
+      switchFinanzasFijosVista(cuantasPlantillas === 0 ? 'plantillas' : 'pendientes');
+    },
+  });
+
+  const subs = s ? s.byKind.subscription : null;
+  fila({
+    icono: 'repetir',
+    titulo: 'Suscripciones',
+    sub:
+      subs && subs.count > 0
+        ? `${formatFinanzasAmount(subs.annual)} al año · ${subs.count} ${subs.count === 1 ? 'activa' : 'activas'}`
+        : 'Marca un gasto fijo como suscripción y saldrá aquí',
+    importe: subs && subs.count > 0 ? `${formatFinanzasAmount(subs.monthly)}/mes` : '',
+    alPulsar: () => {
+      switchFinanzasTab('gastos-fijos');
+      switchFinanzasFijosVista('plantillas');
+      const chip = document.querySelector('[data-fijos-kind="subscription"]');
+      if (chip) chip.click();
+    },
+  });
+
+  const sinCumplir = finanzasGoals.filter((g) => !g.completedAt);
+  const apartado = sinCumplir.reduce((acc, g) => acc + g.reserved, 0);
+  const meta = sinCumplir.reduce((acc, g) => acc + g.targetAmount, 0);
+  fila({
+    icono: 'diana',
+    titulo: 'Objetivos',
+    sub:
+      sinCumplir.length > 0
+        ? `de ${formatFinanzasAmount(meta)} · ${sinCumplir.length} ${sinCumplir.length === 1 ? 'objetivo' : 'objetivos'}`
+        : 'Apartar dinero para algo concreto: un coche, un viaje…',
+    importe: sinCumplir.length > 0 ? formatFinanzasAmount(apartado) : '',
+    alPulsar: () => switchFinanzasTab('objetivos'),
+  });
+
+  fila({
+    icono: 'recibo',
+    titulo: 'Movimientos',
+    sub: 'Apuntar gastos e ingresos. También tus cuentas',
+    alPulsar: () => switchFinanzasTab('movimientos'),
+  });
+
+  const d = dato(deudas) || [];
+  const sinPagar = d.filter((x) => !x.paid);
+  const meDeben = sinPagar.filter((x) => x.direction === 'owed_to_me').reduce((a, x) => a + x.amount, 0);
+  const debo = sinPagar.filter((x) => x.direction !== 'owed_to_me').reduce((a, x) => a + x.amount, 0);
+  fila({
+    icono: 'intercambio',
+    titulo: 'Deudas',
+    sub:
+      sinPagar.length > 0
+        ? `te deben ${formatFinanzasAmount(meDeben)} · debes ${formatFinanzasAmount(debo)}`
+        : 'Lo que te deben y lo que debes',
+    importe: sinPagar.length > 0 ? formatFinanzasAmount(meDeben - debo) : '',
+    alPulsar: () => switchFinanzasTab('deudas'),
+  });
+
+  fila({
+    icono: 'monedas',
+    titulo: 'Inversiones',
+    sub: 'Compras, ventas y dividendos, a mano',
+    alPulsar: () => switchFinanzasTab('inversiones'),
+  });
+
+  cont.appendChild(grupo);
+}
 
 async function openFinanzasView() {
   setupFinanzasIconColorFields();
   closeExtensionsView();
   document.getElementById('finanzas-view').classList.remove('hidden');
   setCurrentScreen('finanzas');
-  switchFinanzasTab('resumen');
+  // Se entra siempre por el inicio (y no por donde se saliera la ultima
+  // vez): al abrir Finanzas lo que uno quiere ver es el panorama.
+  switchFinanzasTab('inicio');
   await refreshFinanzasAccountsAndCategories();
   await loadFinanzasPortfolios();
   await loadFinanzasAssets();
@@ -16150,7 +19169,10 @@ async function openFinanzasView() {
   // vista para no arrastrar una seleccion vieja de la sesion anterior.
   finanzasAssetTreeSelectedIds = new Set(finanzasAssets.map((a) => a.id));
   renderFinanzasAssetTree();
-  await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasRecurringTab(), refreshFinanzasInvestmentsTab(), refreshFinanzasDebtsTab()]);
+  await Promise.all([renderFinanzasResumenTab(), refreshFinanzasTransactionsTab(), refreshFinanzasRecurringTab(), refreshFinanzasInvestmentsTab(), refreshFinanzasDebtsTab(), refreshFinanzasGoalsTab()]);
+  // Y se repintan las tarjetas ahora que los datos estan cargados: la
+  // primera pasada de arriba se hizo con las cuentas todavia vacias.
+  await renderFinanzasInicio();
 }
 function closeFinanzasView() {
   document.getElementById('finanzas-view').classList.add('hidden');
@@ -17806,11 +20828,26 @@ function isMobileEdgeZone(x) {
   return x <= carril || x >= window.innerWidth - carril;
 }
 
-// Los gestos de navegacion son cosa del movil: en escritorio el
-// calendario y el panel conviven en pantalla y no hay barra de pestañas
-// que recorrer. 860px es el mismo corte que usa styles.css.
+// SIEMPRE es el visor movil, a cualquier ancho.
+//
+// Antes esto era `window.innerWidth < 860`, el mismo corte que usaba
+// styles.css, para no meter los gestos de navegacion en el visor de
+// escritorio. En ESTA rama ya no hay visor de escritorio (ni server/ ni
+// electron/ ni topbar ni panel lateral: eso vive en la rama
+// `escritorio`), asi que no hay a que cambiar.
+//
+// Y ese corte daba un fallo de verdad, no era solo codigo muerto: Koku
+// puso el movil en la tele y a esa anchura la app se quedaba a medias --
+// seguia con su barra de abajo pero PERDIA los accesos rapidos del
+// calendario y dejaba de responder a los gestos, o sea que parecia que
+// se hubiera abierto "el visor de escritorio". La app es la misma a
+// cualquier ancho: si un dia se estira, se estira entera.
+//
+// Se deja como funcion (en vez de quitar las llamadas) a proposito: los
+// sitios que la llaman siguen leyendose igual, y si algun dia hiciera
+// falta distinguir de nuevo, se distingue AQUI y en un solo sitio.
 function isMobileLayout() {
-  return window.innerWidth < 860;
+  return true;
 }
 
 // Un modal abierto se lleva TODA la atencion: mientras haya uno, ningun
@@ -17848,6 +20885,8 @@ const NAV_SWIPE_OPT_OUT = [
   '.note-swipe-wrap',   // fila de nota: desliza para Editar/Mover/Eliminar
   '#note-body table',   // tabla del editor: arrastrar es seleccionar celdas
   '#gym-live-view',     // entreno en vivo: salirse sin querer seria feo
+  '.finanzas-table-wrap', // tablas anchas: arrastrar ahi es mirar columnas,
+                          // no volver atras
   '[data-no-nav-swipe]', // escotilla generica para lo que venga despues
 ].join(', ');
 
@@ -17989,8 +21028,9 @@ function moverPestanaMovil(paso) {
 // vista completa haria que la propia barra se fuera de la pantalla, que
 // es justo lo que no se quiere.
 const MOBILE_SUBTAB_BARS = [
-  { barra: '.gym-tabs', paneles: '.gym-tab-panel' },
-  { barra: '.finanzas-tabs', paneles: '[data-finanzas-panel]' },
+  // Gimnasio salio de aqui el 13/9/2026: su barra de pestanas ya no
+  // existe, ahora es un inicio de filas. Lo que hace el gesto central en
+  // el Gimnasio es VOLVER, y de eso se encarga VOLVER_UN_PASO.
   { barra: '.viajes-tabs', paneles: '[data-viajes-panel]' },
 ];
 
@@ -18028,12 +21068,20 @@ const VOLVER_UN_PASO = [
   'btn-settings-back',
   // Gimnasio: de los dias de un bloque a la lista de bloques.
   'btn-gym-back-to-blocks',
+  // Gimnasio: de una seccion (Historial, Plan, Progreso, Logros) a su
+  // inicio. Va DESPUES del de bloques a proposito: estando dentro de un
+  // bloque, lo primero que se suelta es la lista de dias, no la seccion
+  // entera -- se sale por donde se entro.
+  'btn-gym-back',
   // Lecturas: del detalle de una saga a la lista de sagas.
   'btn-back-entretenimiento-sagas',
   // Viajes: del detalle de un viaje a la lista de viajes.
   'btn-back-viajes-trips',
   // Grupos: del detalle de un grupo a la lista de grupos.
   'btn-groups-back',
+  // Finanzas: de una seccion (Movimientos, Gastos fijos, Objetivos...)
+  // a su inicio, el de la lista de secciones.
+  'btn-finanzas-back',
   // Notas: subir un nivel de carpeta. Va el ULTIMO de la lista porque
   // es el mas "de fuera" de todos. Peticion expresa de Koku: deslizar
   // en Notas solo sirve para SALIR (subir), nunca para entrar -- entrar
@@ -18102,12 +21150,36 @@ function centroYaTieneDueno() {
 }
 
 // El gesto central, segun el sentido.
+// Deslizar hacia la derecha desde el INICIO de Finanzas sale a
+// Herramientas. Es el segundo paso del gesto que pidio Koku: "si deslizo
+// desde el centro me lleve del apartado interior al primero, y si lo
+// vuelvo a hacer que me lleve a la base app".
+//
+// Solo Finanzas de momento, a proposito: las demas Apps (Gimnasio,
+// Lecturas, Viajes) no se tocan sin que lo pida: alli el centro todavia
+// no significa "salir" y cambiarselo de golpe seria justo lo que confunde.
+function salirDeFinanzasDeslizando() {
+  const vista = document.getElementById('finanzas-view');
+  if (!vista || vista.classList.contains('hidden')) return false;
+  // Si el boton de volver se ve, es que estas DENTRO de una seccion: de
+  // eso ya se ha encargado volverUnPasoDentroDeLaPantalla() antes.
+  const atras = document.getElementById('btn-finanzas-back');
+  if (atras && !atras.classList.contains('hidden')) return false;
+  const salir = document.getElementById('btn-close-finanzas');
+  if (!salir) return false;
+  salir.click();
+  return true;
+}
+
 function gestoCentral(paso) {
   // Pantallas que ya usan el centro para lo suyo (la vista diaria): ahi
   // este modulo no se mete.
   if (centroYaTieneDueno()) return;
   // Hacia la derecha (paso -1): primero intentar salir de una capa.
   if (paso < 0 && volverUnPasoDentroDeLaPantalla()) return;
+  // Y si ya estabas en el inicio de Finanzas, el siguiente deslizamiento
+  // sale de la App entera.
+  if (paso < 0 && salirDeFinanzasDeslizando()) return;
   // Dentro de una App con sub-pestañas, el centro las recorre.
   moverSubPestana(paso);
 }
@@ -18295,8 +21367,8 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.46.1';
-const APP_VERSION_DATE = '2026-09-10';
+const APP_VERSION = '0.56.0';
+const APP_VERSION_DATE = '2026-09-13';
 
 function renderAppVersionLine() {
   const el = document.getElementById('app-version-line');
@@ -18308,7 +21380,17 @@ function renderAppVersionLine() {
     fecha = new Intl.DateTimeFormat(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' })
       .format(new Date(`${APP_VERSION_DATE}T12:00:00`));
   } catch { /* si Intl falla, se queda la ISO */ }
-  el.textContent = `v${APP_VERSION} · ${fecha}`;
+  // EL NUMERO DE COMPILACION, solo en la rama de desarrollador (peticion
+  // de Koku: "que en modo desarrollador me ponga donde en que version
+  // estoy tambien la build"). Sirve para poder decir "esto me pasa en la
+  // build 63" sin tener que ir a mirarlo a TestFlight.
+  //
+  // Hacen falta LAS DOS cosas: el archivo desarrollador.js (que no viaja
+  // a la rama de usuario) y un numero de verdad, que solo escribe el
+  // workflow al compilar. Sirviendo public/ como estatico no hay ninguna
+  // compilacion detras, asi que no se enseña nada.
+  const build = window.APP_MODO_DESARROLLADOR ? window.APP_BUILD : null;
+  el.textContent = `v${APP_VERSION} · ${fecha}${build ? ` · build ${build}` : ''}`;
 }
 renderAppVersionLine();
 

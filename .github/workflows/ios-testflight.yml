@@ -43,6 +43,23 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
+      # El numero de compilacion, para que la app pueda enseñarlo junto a
+      # su version (peticion de Koku: "que en modo desarrollador me ponga
+      # donde en que version estoy tambien la build"). Es el MISMO
+      # GITHUB_RUN_NUMBER que se usa mas abajo como CURRENT_PROJECT_VERSION,
+      # o sea el numero que se ve en TestFlight.
+      #
+      # Va ANTES de `cap sync`: ese paso es el que copia public/ dentro del
+      # proyecto de iOS, asi que escribirlo despues no llegaria a la app.
+      - name: Escribir el numero de compilacion
+        run: |
+          cat > public/build-info.js <<EOF
+          // Generado por el workflow de compilacion. En el repositorio
+          // este archivo esta a null (ver su version commiteada).
+          window.APP_BUILD = ${GITHUB_RUN_NUMBER};
+          EOF
+          cat public/build-info.js
+
       - name: Sincronizar public/ con el proyecto iOS
         run: npx cap sync ios
 

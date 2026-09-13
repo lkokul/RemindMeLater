@@ -142,6 +142,75 @@
     res.status(201).json(serialize(row));
   });
 
+  // -------------------------------------------------------------------
+  // DUPLICAR UN BLOQUE
+  // -------------------------------------------------------------------
+  //
+  // Se lleva SIEMPRE todo lo de dentro, sin preguntar: un bloque sin sus
+  // dias (y sin los ejercicios de cada dia) no sirve de plantilla, que es
+  // justo para lo que Koku lo pidio.
+  //
+  // Tres cosas que conviene entender del resultado:
+  //
+  // 1. LA COPIA NACE INACTIVA, siempre. Solo puede haber un bloque activo
+  //    a la vez (ver /activate), y duplicar una plantilla no es decir
+  //    "quiero entrenar esto ahora": eso se dice con "Activar".
+  // 2. Solo se renombra EL BLOQUE. Sus dias conservan su nombre -- lo que
+  //    duplicaste fue el bloque, no cada dia. Y los ejercicios ni se
+  //    copian: gym_routine_exercises guarda una REFERENCIA a tu lista de
+  //    ejercicios, asi que duplicar un bloque no te deja con tres "Press
+  //    banca" en la lista.
+  // 3. EL CICLO SE REMAPEA. gym_block_cycle_days apunta a dias por su id,
+  //    asi que copiarlo tal cual dejaria el ciclo del bloque NUEVO
+  //    apuntando a los dias del VIEJO -- y entonces editar un dia del
+  //    original cambiaria lo que te toca en la copia. Por eso se traduce
+  //    cada routine_id al id de su dia copiado. Un NULL (que es un
+  //    DESCANSO, no un hueco) se queda como esta.
+  router.post('/:id/duplicate', (req, res) => {
+    const original = db.prepare('SELECT * FROM gym_blocks WHERE id = ?').get(req.params.id);
+    if (!original) return res.status(404).json({ error: 'not_found' });
+
+    const nombres = db.prepare('SELECT name FROM gym_blocks').all().map((b) => b.name);
+    const { count } = db.prepare('SELECT COUNT(*) as count FROM gym_blocks').get();
+    const info = db
+      .prepare('INSERT INTO gym_blocks (name, position, is_active, cycle_enabled, cycle_position, cycle_position_date) VALUES (?, ?, 0, ?, ?, ?)')
+      .run(
+        nombreDeCopia(original.name, nombres),
+        count,
+        original.cycle_enabled ? 1 : 0,
+        original.cycle_position,
+        original.cycle_position_date
+      );
+    const nuevoId = info.lastInsertRowid;
+
+    // Los dias, con sus ejercicios. Se usa el duplicador de
+    // routes-local/gymRoutines.js (expuesto como global) para no tener DOS
+    // sitios que copien un dia: si algun dia gana una columna nueva, se
+    // anade en uno solo.
+    const mapaDeDias = new Map();
+    db.prepare('SELECT id FROM gym_routines WHERE block_id = ? ORDER BY position ASC, id ASC')
+      .all(original.id)
+      .forEach((dia) => {
+        if (typeof window.duplicarDiaDeGimnasio !== 'function') return;
+        // El tercer argumento es "renombrar": a false, porque el dia
+        // conserva su nombre -- lo que se duplico es el BLOQUE.
+        const copia = window.duplicarDiaDeGimnasio(dia.id, nuevoId, false);
+        if (!copia) return;
+        mapaDeDias.set(dia.id, copia.id);
+      });
+
+    // Y el ciclo, traduciendo cada dia al suyo nuevo. Un dia que no se
+    // pudiera traducir (no deberia pasar) se guarda como DESCANSO en vez
+    // de apuntar al bloque viejo, que es el fallo que esto evita.
+    const insertarPosicion = db.prepare('INSERT INTO gym_block_cycle_days (block_id, position, routine_id) VALUES (?, ?, ?)');
+    leerCiclo(original.id).forEach((d) => {
+      insertarPosicion.run(nuevoId, d.position, d.routineId === null ? null : (mapaDeDias.get(d.routineId) ?? null));
+    });
+
+    const row = db.prepare('SELECT * FROM gym_blocks WHERE id = ?').get(nuevoId);
+    res.status(201).json(serialize(row));
+  });
+
   // Marca ESTE bloque como el activo (y desactiva el resto). Es una ruta
   // aparte en vez de un campo mas del PUT para que "activar" sea una
   // operacion de un solo paso imposible de dejar a medias: nunca puede
