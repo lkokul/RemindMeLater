@@ -166,6 +166,15 @@ Nada de "¿le han quitado la clase `hidden`?". Lo que se comprobó:
 
 ## 4. Lo que queda: el visor móvil
 
+> **Ver también `IDEAS-ENTRETENIMIENTO.md`** (14/9/2026): estudio de la
+> app **Mistbook** que pidió Koku, con lo que se le puede robar llevado
+> a entretenimiento en general (no solo libros), qué piezas de la app ya
+> sirven para ello, y los tres muros que no se pueden saltar (sin red,
+> sin servidor, y el choque de la vitrina decorada con el estilo iOS).
+> Lo de abajo sigue siendo el plan de la UI; el ideario decide QUÉ va
+> dentro de esas fichas.
+
+
 Decidido con Koku: **invertir la jerarquía**. Hoy la app te obliga a
 navegar por sagas para ver nada; en el móvil lo que uno quiere abrir es
 *"¿por dónde iba?"*, no *"el índice de mis colecciones"*.
