@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Capacitor
 import WidgetKit
 
@@ -35,8 +36,58 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
     // compartir un archivo entre los dos targets complica el proyecto de
     // Xcode más de lo que ahorra.
     private static let grupo = "group.com.koku.remindmelater"
-    private static let claveResumen = "resumenGimnasio"
+    private static let claveResumen = "resumenApp"
     private static let claveEmpezarHoy = "gymPendingStartToday"
+    // Dónde deja SceneDelegate el destino cuando abres la app desde
+    // cualquiera de los widgets nuevos. Es una cadena y no un booleano
+    // por widget: con cinco widgets y cuatro botones de centro de
+    // control, una marca por cada uno serían nueve claves que consumir.
+    private static let claveDestino = "widgetPendingDestino"
+
+    // Los "kind" de TODOS los widgets. Tienen que coincidir carácter a
+    // carácter con los `static let kind` de cada Widget: si uno no
+    // coincide, la app cree que lo refresca y ese widget se queda con lo
+    // de antes hasta que iOS decida repintarlo por su cuenta.
+    private static let kinds = [
+        "QueTocaHoyWidget", "TareasWidget",
+        "FinanzasWidget", "LecturasWidget", "ViajesWidget",
+        "CalendarioWidget", "ConsistenciaWidget", "HeatmapWidget",
+        "EstadisticasWidget", "MusculosWidget",
+    ]
+
+    // AVISAR AL JAVASCRIPT DE QUE VUELVE A HABER QUE MIRAR EL BUZÓN.
+    //
+    // El agujero que encontró Koku: "me gustaría saber si los botones del
+    // panel de control sólo funcionan cuando la app está cerrada o en
+    // segundo plano. Porque si no, cuando está en primer plano no
+    // funcionan correctamente". Y tenía razón, y la causa es esta:
+    //
+    // Con la app YA DELANTE, abrir el centro de control no la manda a
+    // segundo plano -- solo la deja "inactiva" con la cortinilla encima.
+    // Al cerrarse esa cortinilla no llega NI `resume` NI
+    // `visibilitychange` a la webview, que son los dos únicos avisos que
+    // tenía el JavaScript para ir a mirar si hay una marca pendiente. O
+    // sea que el botón sí escribía el destino, pero nadie iba a leerlo
+    // hasta la siguiente vez que salieras y volvieras a entrar en la app.
+    //
+    // `didBecomeActiveNotification` SÍ llega en ese caso (es justo la
+    // transición inactivo -> activo), así que es la señal que faltaba.
+    // Se manda como evento del plugin y el JavaScript lo escucha; no se
+    // consume nada aquí, solo se avisa -- quien decide sigue siendo
+    // comprobarAperturaDesdeElWidget() en app.js, para que haya un único
+    // sitio que navegue.
+    override public func load() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(laAppVuelveAEstarActiva),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func laAppVuelveAEstarActiva() {
+        notifyListeners("revisarApertura", data: [:])
+    }
 
     // Guarda el resumen y pide a iOS que repinte el widget. El JSON llega
     // ya montado desde JavaScript: aquí no se interpreta, solo se guarda
@@ -53,9 +104,12 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         defaults.set(json, forKey: Self.claveResumen)
-        // ofKind: y no reloadAllTimelines() para no despertar también la
-        // Live Activity del descanso, que no tiene nada que ver con esto.
-        WidgetCenter.shared.reloadTimelines(ofKind: "QueTocaHoyWidget")
+        // Uno por uno y no reloadAllTimelines() para no despertar también
+        // la Live Activity del descanso, que no tiene nada que ver con
+        // esto y está en la misma extensión.
+        for kind in Self.kinds {
+            WidgetCenter.shared.reloadTimelines(ofKind: kind)
+        }
         call.resolve(["guardado": true])
     }
 
@@ -63,25 +117,49 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
     // porque hay dos caminos distintos:
     //  - Tocar el widget (inicio o bloqueo) abre remindmelater://gym-hoy,
     //    y SceneDelegate deja la marca en UserDefaults.standard.
-    //  - El botón del centro de control ejecuta un AppIntent que NO manda
-    //    ninguna URL, así que deja la marca en el App Group.
+    //  - El botón del centro de control ejecuta un AppIntent nuestro
+    //    (AbrirDesdeControl.swift) que apunta el destino a mano en LOS
+    //    DOS almacenes -- el suyo y el App Group -- porque ese intent
+    //    corre en el proceso de la EXTENSIÓN, y el UserDefaults.standard
+    //    de la extensión no es el de la app. El App Group es el único
+    //    terreno común de los dos. (Tercer intento; los dos anteriores,
+    //    y por qué fallaron, están en CLAUDE.md.)
     // Se consumen las dos (se ponen a false) para que no vuelva a saltar
     // en la siguiente vuelta a primer plano.
     @objc func consumirApertura(_ call: CAPPluginCall) {
         var empezarHoy = false
+        var destino = ""
 
         let propios = UserDefaults.standard
         if propios.bool(forKey: Self.claveEmpezarHoy) {
             empezarHoy = true
             propios.set(false, forKey: Self.claveEmpezarHoy)
         }
-
-        if let compartidos = UserDefaults(suiteName: Self.grupo),
-           compartidos.bool(forKey: Self.claveEmpezarHoy) {
-            empezarHoy = true
-            compartidos.set(false, forKey: Self.claveEmpezarHoy)
+        if let d = propios.string(forKey: Self.claveDestino), !d.isEmpty {
+            destino = d
+            propios.removeObject(forKey: Self.claveDestino)
         }
 
-        call.resolve(["empezarHoy": empezarHoy])
+        // El App Group: es POR AQUÍ por donde llega de verdad el botón
+        // del centro de control (ver arriba). Se consume igual que el
+        // propio, y con el mismo cuidado: la marca se borra en cuanto se
+        // lee, para que no vuelva a saltar en la siguiente vuelta.
+        if let compartidos = UserDefaults(suiteName: Self.grupo) {
+            if compartidos.bool(forKey: Self.claveEmpezarHoy) {
+                empezarHoy = true
+                compartidos.set(false, forKey: Self.claveEmpezarHoy)
+            }
+            if let d = compartidos.string(forKey: Self.claveDestino), !d.isEmpty {
+                if destino.isEmpty { destino = d }
+                compartidos.removeObject(forKey: Self.claveDestino)
+            }
+        }
+
+        // "gym-hoy" gana si están las dos marcas: arrancar un entreno es
+        // más específico que abrir una pantalla, y quien tocó el widget
+        // del Gimnasio quiere entrenar.
+        if empezarHoy { destino = "gym-hoy" }
+
+        call.resolve(["empezarHoy": empezarHoy, "destino": destino])
     }
 }

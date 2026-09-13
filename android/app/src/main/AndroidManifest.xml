@@ -1,13 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- allowBackup="false": los datos de la app NO se suben a la copia
+         automatica de Google (Auto Backup for Apps). Estaba en "true", que
+         es el valor por defecto de Android, y eso subia a Google Drive el
+         calendario, las notas, las finanzas y el gimnasio: justo lo
+         contrario de lo que promete la app, y ademas obligaba a declararlo
+         en el formulario de Data Safety de Play. La copia de seguridad de
+         esta app es la funcion de exportar, que es explicita y la controla
+         el usuario. Ver SEGURIDAD-Y-PRIVACIDAD.md.
+         Efecto util de paso: al restaurar un movil ya no puede volver por
+         detras una base antigua sin que la app se entere.
+         Se quito tambien usesCleartextTraffic, resto del programa
+         cliente-servidor: la app no hace ninguna peticion de red. -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
 
         <!-- SOLO VERTICAL (peticion de Koku, igual que en iOS via
@@ -44,7 +57,10 @@
         </provider>
     </application>
 
-    <!-- Permissions -->
+    <!-- Permisos. INTERNET se queda porque la webview de Capacitor lo pide
+         para su propio puente interno (esquema http://localhost), no porque
+         la app hable con ningun servidor: no hay ni una peticion de red a
+         internet en todo el codigo. -->
 
     <uses-permission android:name="android.permission.INTERNET" />
 </manifest>

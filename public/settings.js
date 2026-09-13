@@ -97,24 +97,23 @@ function positionFixedPopover(anchorBtn, popover, { width = 248 } = {}) {
 
 // La paleta son 32 colores mas el color a medida: flotando en un movil
 // ocupa media pantalla, tapa lo que estabas mirando y queda recargada
-// (Koku: "es un poco enfarragoso y la vista se ve sucia"). En movil se
-// abre a PANTALLA COMPLETA con su propia X; en escritorio, donde sobra
-// sitio y el raton hace comodo cerrar tocando fuera, sigue flotando
-// junto a su boton como siempre.
-const ANCHO_ESCRITORIO = 860; // el mismo corte que usa styles.css
+// (Koku: "es un poco enfarragoso y la vista se ve sucia"). Se abre SIEMPRE
+// a pantalla completa, con su propia X.
+//
+// Antes esto miraba si el ancho llegaba a 860px para dejarlo flotando "en
+// escritorio". Ese corte se fue con el resto del visor de escritorio, que
+// ya no vive en esta rama: la app es la misma a cualquier ancho, y con el
+// movil puesto en una tele el popover flotante era justo una de las cosas
+// que cambiaban solas de aspecto.
 function abrirPopoverDeColor(anchorBtn, popover) {
-  const aPantallaCompleta = window.innerWidth < ANCHO_ESCRITORIO;
-  popover.classList.toggle('is-fullscreen', aPantallaCompleta);
-  if (aPantallaCompleta) {
-    // positionFixedPopover deja left/top/max-height en el atributo
-    // style, y eso ganaria a las reglas de pantalla completa. Se limpian.
-    popover.style.left = '';
-    popover.style.top = '';
-    popover.style.maxHeight = '';
-    popover.style.overflowY = '';
-    return;
-  }
-  positionFixedPopover(anchorBtn, popover);
+  popover.classList.add('is-fullscreen');
+  // positionFixedPopover deja left/top/max-height en el atributo style, y
+  // eso ganaria a las reglas de pantalla completa. Se limpian por si este
+  // mismo popover se abrio antes por otra via.
+  popover.style.left = '';
+  popover.style.top = '';
+  popover.style.maxHeight = '';
+  popover.style.overflowY = '';
 }
 
 function closeAllPopovers(except) {
@@ -359,10 +358,101 @@ function createIconField({ initialValue, onChange }) {
 // regresar al menu. Se recarga cada seccion al entrar en ella (no hace
 // falta pedir todo de golpe al abrir el panel).
 // ---------------------------------------------------------------------
-const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'notifications', 'store'];
+const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'widgets', 'notifications', 'store', 'novedades'];
+
+// ---------------------------------------------------------------------
+// NOVEDADES: las notas de cada version
+// ---------------------------------------------------------------------
+//
+// Peticion de Koku (11/9/2026): un apartado de notas de version "para
+// todos, en la version de usuario tambien", con lo nuevo y los parches.
+//
+// El contenido vive en public/notas-version.js y se escribe a mano en
+// cada ronda. Lo de "a revisar" viene de public/desarrollador.js, un
+// archivo que NO viaja a la rama de usuario -- asi que ahi no es que se
+// esconda, es que no existe (ver CLAUDE.md).
+// El argumento existe para poder probarla con datos rotos sin tocar la
+// global; en la app siempre se llama sin el.
+function renderReleaseNotes(fuente) {
+  const cont = document.getElementById('release-notes-list');
+  if (!cont) return;
+  cont.innerHTML = '';
+  const crudo = fuente !== undefined
+    ? fuente
+    : (typeof APP_RELEASE_NOTES !== 'undefined' ? APP_RELEASE_NOTES : []);
+  // Se descarta lo que no sea una entrada con version: una nota sin
+  // numero no se puede colocar en ningun sitio, y pintarla dejaria una
+  // tarjeta con la cabecera vacia.
+  const notas = (Array.isArray(crudo) ? crudo : []).filter((n) => n && n.version);
+  if (notas.length === 0) {
+    cont.innerHTML = '<p class="empty-hint">Todavía no hay notas de versión.</p>';
+    return;
+  }
+  const revisar = window.APP_NOTAS_REVISAR || {};
+  notas.forEach((nota) => {
+    const bloque = document.createElement('section');
+    bloque.className = 'release-note';
+
+    const cab = document.createElement('div');
+    cab.className = 'release-note-head';
+    const version = document.createElement('span');
+    version.className = 'release-note-version';
+    version.textContent = `v${nota.version}`;
+    cab.appendChild(version);
+    const fecha = document.createElement('span');
+    fecha.className = 'release-note-date';
+    fecha.textContent = formatReleaseDate(nota.fecha);
+    cab.appendChild(fecha);
+    bloque.appendChild(cab);
+
+    // Tres listas con el mismo molde. La de "revisar" solo existe en la
+    // rama de desarrollador, y solo para las versiones que tengan algo.
+    const grupos = [
+      ['Nuevo', nota.nuevo, 'es-nuevo'],
+      ['Arreglado', nota.parches, 'es-parche'],
+      ['A revisar', revisar[nota.version], 'es-revisar'],
+    ];
+    grupos.forEach(([titulo, lista, clase]) => {
+      if (!Array.isArray(lista) || lista.length === 0) return;
+      const h = document.createElement('p');
+      h.className = `release-note-kind ${clase}`;
+      h.textContent = titulo;
+      bloque.appendChild(h);
+      const ul = document.createElement('ul');
+      ul.className = 'release-note-items';
+      lista.forEach((texto) => {
+        const li = document.createElement('li');
+        // textContent y no innerHTML: estas notas las escribo yo, pero
+        // no hay ningun motivo para dejar que puedan meter etiquetas.
+        li.textContent = texto;
+        ul.appendChild(li);
+      });
+      bloque.appendChild(ul);
+    });
+    cont.appendChild(bloque);
+  });
+}
+
+// La fecha, con el formato del SISTEMA (Koku: "por si tienen mm/dd/aa y
+// no dd/mm/aa"), con la ISO como red de seguridad si Intl falla. Mismo
+// criterio que la linea de version.
+function formatReleaseDate(iso) {
+  if (!iso) return '';
+  try {
+    return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+      .format(new Date(`${iso}T12:00:00`));
+  } catch {
+    return iso;
+  }
+}
 
 function showSettingsScreen(tab) {
   document.getElementById('settings-menu').classList.toggle('hidden', tab !== null);
+  // La version vive al final del menu, asi que aparece y desaparece con
+  // el. Dentro de una seccion no pinta nada, y ademas quedaria colgando
+  // debajo del contenido de esa seccion.
+  const linea = document.getElementById('app-version-line');
+  if (linea) linea.classList.toggle('hidden', tab !== null);
   // El "Volver" comparte fila con el titulo y solo se ve estando DENTRO
   // de una seccion.
   document.getElementById('btn-settings-back').classList.toggle('hidden', tab === null);
@@ -375,12 +465,14 @@ document.querySelectorAll('.settings-menu-item').forEach((btn) => {
   btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
     showSettingsScreen(tab);
+    if (tab === 'novedades') renderReleaseNotes();
     if (tab === 'profile') refreshProfileTab();
     else if (tab === 'view') refreshViewTab();
     else if (tab === 'style') refreshStyleTab();
     // refreshMobileTab refresca por id, asi que vale para las DOS
     // secciones que reparte: Este dispositivo y Notificaciones.
     else if (tab === 'mobile' || tab === 'notifications') refreshMobileTab();
+    else if (tab === 'widgets') refreshWidgetStyleOptions();
   });
 });
 
@@ -483,6 +575,112 @@ function refreshFavoritesDisplayOptions() {
     container.appendChild(btn);
   });
 }
+
+
+// ---------------------------------------------------------------------
+// Widgets: como se pintan en la pantalla de inicio
+// ---------------------------------------------------------------------
+// Peticion de Koku tras ver los widgets con los colores de la app y el
+// sistema en oscuro. Son TRES combinaciones y las tres tienen sentido,
+// asi que en vez de elegir yo una, se eligen:
+//
+//  - "app": los colores del tema tal y como lo tienes puesto AHORA en la
+//    app. Si tu tema es claro, el widget es claro aunque el movil este en
+//    oscuro.
+//  - "sistema": lo que hace iOS por defecto (y lo que hacia la app antes)
+//    -- el material gris translucido, claro u oscuro segun el movil.
+//  - "mixto": tu paleta, pero eligiendo la variante clara u oscura segun
+//    como este el MOVIL en cada momento. Solo cambia algo si tu tema
+//    tiene pareja clara/oscura; si no la tiene, se comporta como "app" y
+//    la pista de debajo lo dice.
+//
+// Es un ajuste de ESTE telefono (localStorage): los widgets viven en su
+// pantalla de inicio, no en la base de datos.
+const WIDGET_STYLE_OPTIONS = [
+  { id: 'app', label: 'Tema y estilo de la app',
+    pista: 'El widget usa los colores del tema que tengas puesto en la app, sea cual sea el modo del móvil.' },
+  { id: 'sistema', label: 'Tema y estilo del móvil',
+    pista: 'El widget se pinta como los demás de iOS: gris translúcido, claro u oscuro según el móvil.' },
+  { id: 'mixto', label: 'Tema del móvil, estilo de la app',
+    pista: 'El widget usa tu paleta, pero elige la variante clara u oscura según cómo esté el móvil.' },
+];
+
+function getWidgetStyle() {
+  const v = localStorage.getItem('widgetEstilo');
+  return WIDGET_STYLE_OPTIONS.some((o) => o.id === v) ? v : 'app';
+}
+
+function refreshWidgetStyleOptions() {
+  const container = document.getElementById('widget-style-options');
+  if (!container) return;
+  container.innerHTML = '';
+  const current = getWidgetStyle();
+
+  WIDGET_STYLE_OPTIONS.forEach((opt) => {
+    const isActive = opt.id === current;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'view-mode-btn' + (isActive ? ' active' : '');
+    btn.textContent = opt.label;
+    if (isActive) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', () => {
+        localStorage.setItem('widgetEstilo', opt.id);
+        // El estilo viaja DENTRO del resumen, asi que hay que reescribirlo
+        // para que el widget se entere. Sin esto no cambiaria nada hasta
+        // la proxima vez que la app tocara algo.
+        if (typeof actualizarResumenDelWidget === 'function') actualizarResumenDelWidget();
+        refreshWidgetStyleOptions();
+      });
+    }
+    container.appendChild(btn);
+  });
+
+  const hint = document.getElementById('widget-style-hint');
+  if (!hint) return;
+  const opt = WIDGET_STYLE_OPTIONS.find((o) => o.id === current);
+  let texto = opt ? opt.pista : '';
+  // Con un tema SIN pareja, "mixto" no puede hacer nada: mejor decirlo que
+  // dejar a Koku mirando un widget que no cambia.
+  if (current === 'mixto' && !temaActivoTienePareja()) {
+    texto += ' Tu tema no tiene variante clara/oscura, así que ahora mismo se ve igual que "Tema y estilo de la app".';
+  }
+  hint.textContent = texto;
+}
+
+function temaActivoTienePareja() {
+  const activo = themeLibrary.find((x) => x.id === Number(localStorage.getItem('activeThemeId')));
+  return !!(activo && activo.inverseColors);
+}
+
+// Las DOS paletas del tema activo (la clara y la oscura), para el modo
+// "mixto": el widget necesita las dos para poder elegir segun el movil,
+// porque el widget se repinta con la app CERRADA y no puede preguntarle.
+// Si el tema no tiene pareja, las dos son la misma.
+function paletasDelTemaParaElWidget() {
+  const activo = themeLibrary.find((x) => x.id === Number(localStorage.getItem('activeThemeId')));
+  const par = (c) => ({ fondo: (c && c.surface) || '', texto: (c && c.surfaceText) || '' });
+  if (!activo) return { claro: par(null), oscuro: par(null) };
+  if (!activo.inverseColors) {
+    const uno = par(activo.colors);
+    return { claro: uno, oscuro: uno };
+  }
+  const principalEsClaro = isLightColors(activo.colors);
+  return {
+    claro: par(principalEsClaro ? activo.colors : activo.inverseColors),
+    oscuro: par(principalEsClaro ? activo.inverseColors : activo.colors),
+  };
+}
+
+document.getElementById('btn-help-widget-style').addEventListener('click', () => {
+  showAppAlert(
+    'Los widgets se pintan con la app cerrada, así que no pueden preguntarle nada: se llevan los colores puestos.\n\n' +
+    '• Tema y estilo de la app: siempre tu tema. Si el tuyo es claro y el móvil está en oscuro, el widget se verá claro entre los demás.\n\n' +
+    '• Tema y estilo del móvil: como cualquier otro widget de iOS. Es lo que menos canta, pero no se parece a tu app.\n\n' +
+    '• Tema del móvil, estilo de la app: tu paleta, pero con la variante clara u oscura según el móvil. Necesita que tu tema tenga pareja clara/oscura.'
+  );
+});
 
 
 // Salir de la pestana Estilo (volver al menu, o cerrar Configuracion del
@@ -1376,7 +1574,36 @@ syncActiveTheme();
 // notificaciones" y nunca llegaba a pedirle permiso al sistema. Por eso
 // iOS no mostraba ni el apartado de notificaciones de la app en sus
 // Ajustes: nunca se le habia pedido nada.
+// Cuantos avisos hay programados de los que caben, en palabras.
+//
+// Existe porque quedarse sin cupo es INVISIBLE: el movil guarda unas 64
+// notificaciones pendientes por app y a partir de ahi deja de avisar sin
+// decir nada. Con gastos fijos que pueden traer hasta cinco avisos cada
+// uno, es facil llegar sin enterarse.
+function refreshAvisosCupo() {
+  const el = document.getElementById('setting-avisos-cupo');
+  if (!el) return;
+  const estado = typeof estadoDeLosAvisos === 'function' ? estadoDeLosAvisos() : null;
+  if (!estado) {
+    el.textContent = '';
+    return;
+  }
+  const usados = estado.calendario + estado.pagos;
+  let texto = `Tienes ${usados} de ${estado.cupo} avisos programados (${estado.calendario} del calendario y ${estado.pagos} de gastos fijos).`;
+
+  // El consejo tiene que apuntar a QUIEN esta llenando el cupo. Decir
+  // "quita avisos de gastos fijos" cuando el que no cabe es el calendario
+  // (y los gastos fijos ya estan a cero) es peor que no decir nada.
+  if (estado.calendarioFueraDeCupo > 0) {
+    texto += ` Se han quedado fuera ${estado.calendarioFueraDeCupo} recordatorios del calendario, así que los gastos fijos no tienen hueco ahora mismo. Suenan los más próximos; los demás entrarán según vayan pasando.`;
+  } else if (estado.pagosFueraDeCupo > 0) {
+    texto += ` No caben ${estado.pagosFueraDeCupo} avisos de gastos fijos más. Se quedan los más próximos; si quieres que entren otros, quita alguna antelación de las que tengas puestas.`;
+  }
+  el.textContent = texto;
+}
+
 function refreshMobileTab() {
+  refreshAvisosCupo();
   const checkbox = document.getElementById('setting-notifications');
   const status = document.getElementById('notifications-status');
   const nativo = localNotificationsAvailable();
@@ -1871,6 +2098,16 @@ document.addEventListener('keydown', (e) => {
   }
   const finanzasView = document.getElementById('finanzas-view');
   if (finanzasView && !finanzasView.classList.contains('hidden')) {
+    // Capa a capa, igual que Configuracion: si estas DENTRO de una
+    // seccion de Finanzas (Movimientos, Gastos fijos...), Esc te devuelve
+    // a su inicio de tarjetas; solo desde el inicio sale a Herramientas.
+    // Antes esto cerraba Finanzas entera de un golpe, que con la
+    // navegacion nueva seria perder el sitio sin querer.
+    const atras = document.getElementById('btn-finanzas-back');
+    if (atras && !atras.classList.contains('hidden')) {
+      atras.click();
+      return;
+    }
     document.getElementById('btn-close-finanzas').click();
     return;
   }
