@@ -3502,6 +3502,21 @@ preguntarle:
 siguen en la base y vuelven enteros al encenderla. Eso es lo que separa
 "ocultar" de "desinstalar", y aquí solo hay lo primero.
 
+**El selector del hueco de la barra también obedece** (Koku lo recordó
+al ver la ronda: *"si una está apagada no puede aparecer en el selector
+tampoco para la aplicación de acceso rápido"*). Lo hacen dos funciones
+que van en pareja y conviene no fusionar: `getMobileNavNotesSlot()` es
+"qué dice el ajuste" y `huecoDeLaBarraUsable()` es "qué se puede usar de
+verdad" — `aplicarAppsActivas()` necesita comparar las dos para saber si
+tiene que mover el hueco. **El único sitio de la app donde se puede
+llegar a una App apagada** es ese hueco cuando las apagas TODAS: un
+botón de la barra no puede quedarse vacío, así que cae a Notas.
+
+`aplicarAppsActivas()` NO corre al arrancar, y es correcto: el selector
+ya nace con la lista filtrada y `applyMobileNavCustomization()` se llama
+al declararse. Llamarla al cargar además tocaría `mobileNavSlotField`,
+declarado más abajo — la TDZ de siempre.
+
 ### Las piezas
 
 - **`APPS_DE_LA_TIENDA`** (`app.js`): el registro. Id, nombre, icono de

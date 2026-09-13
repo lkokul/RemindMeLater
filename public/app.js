@@ -8725,14 +8725,27 @@ function ponerAppActiva(id, activa) {
   }
 }
 
-// Deja la app entera de acuerdo con lo que diga la Tienda. Se llama al
-// arrancar y cada vez que se toca un interruptor.
+// Deja la app entera de acuerdo con lo que diga la Tienda. La llama
+// ponerAppActiva(), o sea cada vez que se toca un interruptor.
+//
+// AL ARRANCAR NO HACE FALTA, y conviene saber por que: el selector del
+// hueco de la barra ya NACE con la lista filtrada (se crea mas abajo con
+// opcionesDelHuecoDeLaBarra()) y applyMobileNavCustomization() se llama
+// justo despues de declararse. Llamar a esta de mas al cargar seria
+// ademas peligroso: toca mobileNavSlotField, que esta declarado DESPUES
+// en el archivo (zona muerta temporal -- ver la regla de orden de
+// declaracion de CLAUDE.md).
 function aplicarAppsActivas() {
   // Si la App que ocupaba el hueco de la barra se acaba de apagar, hay
   // que sacarla de ahi ANTES de repintar: si no, la barra abajo seguiria
   // abriendo una App que se supone que ya no esta.
   const slot = getMobileNavNotesSlot();
   if (!appEstaActiva(slot)) {
+    // El 'notes' del final es el ULTIMO recurso: si apagas TODAS las
+    // Apps que pueden ir ahi, el hueco se queda con Notas igualmente.
+    // Un boton de la barra no puede quedarse vacio, y dejarlo abriendo
+    // una App apagada es menos malo que un hueco muerto. Es el unico
+    // sitio donde se puede llegar a una App apagada.
     const primera = appsActivas().find((a) => MOBILE_NAV_SLOT_APPS[a.id]);
     localStorage.setItem('mobileNavNotesSlot', primera ? primera.id : 'notes');
   }

@@ -40,6 +40,7 @@ const APP_RELEASE_NOTES = [
       'La Tienda ya está: las seis Apps, cada una con su ficha. Dentro de la ficha están su manual de uso y sus novedades, solo las suyas.',
       'Puedes encender y apagar Apps. Una App apagada desaparece de Herramientas, no se puede poner en el hueco de la barra de abajo y sus widgets se quedan sin datos. No se borra NADA: al volver a encenderla está todo como lo dejaste.',
       'Lecturas y Viajes vienen apagadas de fábrica y marcadas como "en desarrollo": les faltan cosas y pueden cambiar de sitio. Se encienden desde su ficha cuando quieras.',
+      'Una App apagada tampoco sale en el selector del acceso rápido de la barra de abajo, ni deja su tarjeta en Herramientas.',
       'La copia de seguridad pregunta qué Apps guardar. Las que tengas apagadas vienen desmarcadas, pero puedes marcarlas igual.',
       'Al restaurar una copia que no lo trae todo, solo se sustituye lo que la copia traiga: las Apps que no vengan en ella se quedan como están ahora. El aviso antes de importar dice exactamente qué se cambia y qué no.',
       { app: 'gym', texto: 'El manual del Gimnasio está escrito entero. Los otros cinco están por hacer.' },

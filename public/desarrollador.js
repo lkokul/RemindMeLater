@@ -18,6 +18,7 @@ window.APP_MODO_DESARROLLADOR = true;
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
   '0.58.0': [
+    'Si apagas TODAS las Apps que pueden ir en el hueco de la barra de abajo, ese hueco se queda con Notas igualmente (un boton de la barra no puede quedarse vacio). Es el UNICO sitio donde se puede llegar a una App apagada. Si te molesta, la alternativa seria que la barra pasara a tener 3 botones.',
     'Los manuales de Calendario, Notas, Finanzas, Lecturas y Viajes están VACÍOS: solo está escrito el del Gimnasio, que es el que pediste ver primero. Si el tono y el nivel de detalle te valen, se escriben los otros cinco con el mismo patrón.',
     'Apagar una App NO borra nada, solo la esconde. Decidir si algún día debería existir un "borrar los datos de esta App" aparte — hoy no hay forma de vaciar Viajes sin vaciar la copia entera.',
     'Una copia de seguridad parcial ahora se importa SIN pisar lo que no trae. Merece la pena probarlo con datos de verdad antes de fiarse: exporta solo Gimnasio, cambia cosas en Finanzas, importa y comprueba que Finanzas sigue como la dejaste.',
