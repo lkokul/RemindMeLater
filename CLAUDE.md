@@ -3365,6 +3365,111 @@ números de cuatro cifras, así que salía "1900%" al lado de un
 "1.900,00 €". Es el mismo motivo que ya tenía escrito
 `FINANZAS_MONEY_FORMATTER`.
 
+## El Gimnasio se navega como Finanzas (13/9/2026)
+
+Petición de Koku: *"que en vez que esté en la sección de arriba que
+pongamos tipo la de finanzas, que es los 4 botones y luego entras a la
+sección"*. Se fue la barra de cuatro pestañas
+(Entrenar/Plan/Progreso/Logros) y en su lugar hay un **inicio de filas**,
+igual que Finanzas: `switchGymTab` / `renderGymInicio` en `app.js`.
+
+**Las tres decisiones que tomó él**, no cambiarlas sin volver a
+preguntarle:
+
+1. **"Empezar entrenamiento" vive EN EL INICIO**, encima de las filas, no
+   dentro de una sección. Es la única diferencia deliberada con Finanzas,
+   donde ese hueco es una cifra pasiva. El motivo: empezar a entrenar es
+   lo que se hace casi cada día, y enterrarlo un nivel lo convertiría en
+   dos toques diarios. Se le ofreció también ponerlo en los dos sitios y
+   lo descartó — es la misma regla de "una sola forma" que ya aplicó al
+   lápiz de editar.
+2. **El hueco de arriba lleva la semana y la racha** ("2/4" + "Racha de 3
+   semanas"). Eligió eso frente a "qué toca hoy" porque es lo único que
+   dice cómo VAS, no cuánto llevas acumulado.
+3. **Los iconos son SVG** — ver el bloque siguiente.
+
+**"Entrenar" pasa a llamarse "Historial"**: al irse el botón de empezar,
+lo que queda dentro son las sesiones hechas, la actividad rápida y el
+alta manual. **El id sigue siendo `gym-tab-sessions`** a propósito;
+renombrarlo tocaría media app sin cambiar nada visible.
+
+Detalles que importan:
+
+- **`openGymView()` llama a `switchGymTab('inicio')`**, y va DESPUÉS de
+  cargar los datos. Los paneles guardan su clase `hidden` entre
+  aperturas, así que sin eso el Gimnasio se abriría en la última sección
+  donde estuviste y con la flecha de volver puesta.
+- **`gymResumenDeLaSemana()`** se separó de `renderGymConsistency()` para
+  que el hero y las cifras de Consistencia no puedan decir cosas
+  distintas del mismo entreno. Mismo motivo por el que
+  `gymPuntuacionPorMusculo()` se separó cuando apareció el widget.
+- **Una sola llamada a `/summary`** en el inicio: da la semana, la racha
+  y de paso cuántos logros llevas empezados (`gymLogrosEmpezados`, que se
+  apoya en las mismas funciones que la pestaña de Logros, así que no
+  puede contar distinto). Va en `try/catch`: que falle el resumen no
+  puede dejarte sin las filas, que son la única puerta a las secciones.
+- **`.gym-tabs` salió de `MOBILE_SUBTAB_BARS`** (esa barra ya no existe) y
+  **`btn-gym-back` entró en `VOLVER_UN_PASO`**, DESPUÉS de
+  `btn-gym-back-to-blocks`: estando dentro de un bloque, lo primero que se
+  suelta es la lista de días, no la sección entera.
+- **Deslizar para salir de la App entera sigue siendo solo de Finanzas.**
+  Ahora que las dos pantallas tienen la misma forma es fácil
+  generalizarlo, pero no se ha hecho sin preguntar.
+
+## Los iconos de las filas son SVG (cierra la duda B9)
+
+Koku, en la misma ronda: *"SVG, cambia los de finanzas también a SVG"*.
+Eso **cierra la duda B9 de `PARA-KOKU-MAÑANA.md`**, que llevaba abierta
+desde el 11/9/2026: los siete emojis de Finanzas se fueron con los cuatro
+nuevos del Gimnasio.
+
+**Hay DOS clases de icono y no hay que mezclarlas** — es el matiz que se
+descubrió al hacerlo, y por poco se rompe algo:
+
+- Los de **SECCIÓN** (Este mes, Gastos fijos, Plan, Logros…) son míos.
+  `icono` es una **clave** de `ICONOS_DE_FILA`, y salen en SVG teñidos con
+  el acento.
+- Los de una **CATEGORÍA o un OBJETIVO** los eliges **tú** con
+  `createIconField`. O sea que son CONTENIDO, no parte de la app: siguen
+  siendo el emoji que pusiste. Cambiarlos habría sido borrar lo que
+  elegiste.
+
+De ahí el reparto de `pintarIconoDeFila()`: clave conocida → SVG por
+`innerHTML`; **cualquier otra cosa → `textContent`**. Eso además es lo que
+lo hace seguro: por `innerHTML` solo pasan mis constantes, nunca un valor
+guardado.
+
+**Bug encontrado forzando errores, y no es teórico**: la tabla se
+consultaba con `ICONOS_DE_FILA[nombre]` a secas. Un icono llamado
+`constructor` o `toString` **no da `undefined`, da la función que todo
+objeto hereda de `Object`** — que es truthy, así que acababa pintando
+`function Object() { [native code] }` dentro de la fila, y por
+`innerHTML`. Inyectar no se podía (el código nativo nunca trae
+etiquetas), pero es basura en pantalla por un nombre que el selector de
+iconos deja escribir. Va con `Object.prototype.hasOwnProperty.call(...)`.
+
+**El componente de fila se llama `filaDeLista()`** y lo comparten las dos
+Apps. `finanzasFilaEl` queda como **alias del nombre viejo**, y las clases
+CSS siguen diciendo `finanzas-row*`: renombrarlas chocaría con la rama
+`finanzas-movil`, que Koku trabaja en paralelo, en cada línea que las
+toca. Es el mismo criterio por el que los ids siguen diciendo
+`extensions` después de que esa pantalla pasara a llamarse "Apps". Cuando
+esa rama se cierre, se renombra de una vez.
+
+**Dos trampas de las pruebas, apuntadas porque las dos mordieron:**
+
+1. **Los asserts no leen ortografía.** Los cuatro subtítulos nuevos
+   salieron SIN TILDES ("dias", "musculos", "records") y las 40
+   comprobaciones pasaron en verde: miraban ids, números y visibilidad.
+   Se vio mirando la captura. Ahora hay una comprobación que busca
+   palabras sin tilde en los subtítulos.
+2. **Una prueba tiene que ponerse ROJA, no explotar.** Al comprobar que
+   los reverts se detectaban, uno pareció colarse: la sección de los
+   iconos hacía `querySelector('svg').getBoundingClientRect()`, que
+   LANZA en cuanto una fila vuelve a ser emoji, y el guion se caía entero
+   antes de imprimir ningún FALLO — contando con `grep -c FALLO` eso son
+   cero. Va con `?.` y un `'SIN-SVG'`, y se cuenta por código de salida.
+
 ## Estado actual
 
 **Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde

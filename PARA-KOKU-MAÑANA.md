@@ -174,6 +174,24 @@ para LA acción principal.
 Esto cambia bastante el aspecto de varias pantallas. **¿Te lanzo una
 propuesta con capturas antes de tocar nada?**
 
+### B9. RESUELTO (13/9/2026) — los iconos pasan a SVG
+
+**Decidido**: *"SVG, cambia los de finanzas también a SVG"*, o sea la
+salida **(b)** de las tres de abajo. Hecho en la v0.56.0: los siete de
+Finanzas y los cuatro nuevos del Gimnasio son SVG con `currentColor`, así
+que se tiñen con el tema.
+
+**Matiz que apareció al hacerlo y conviene saber**: los iconos que eliges
+TÚ para una categoría o un objetivo (el selector de iconos) **siguen
+siendo tus emojis**. Esos son contenido, no parte de la app — cambiarlos
+habría sido borrar lo que elegiste. Solo cambian los de sección.
+
+Lo de abajo queda como registro de por qué se decidió así.
+
+---
+
+#### (El planteamiento original)
+
 ### B9. Los iconos de las tarjetas de Finanzas son emojis
 
 Lo dijiste tú: *"tema de emojis no sé, si tú lo dices okey, miro y te

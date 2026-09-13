@@ -19,6 +19,19 @@
 // es que se esconda por CSS: es que no está.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.56.0',
+    fecha: '2026-09-13',
+    nuevo: [
+      'El Gimnasio se navega como Finanzas: un inicio con Historial, Plan, Progreso y Logros como filas, y entras en la que quieras. Se va la barra de cuatro pestañas de arriba.',
+      'Arriba del todo, cuántos entrenos llevas esta semana y tu racha. Y justo debajo, "Empezar entrenamiento" — sigue a un solo toque de abrir la app.',
+      'La pestaña "Entrenar" pasa a llamarse "Historial", que es lo que de verdad tiene dentro ahora: las sesiones hechas, la actividad rápida y apuntar a mano.',
+      'Cada fila dice de un vistazo lo que hay dentro: cuántas sesiones, cuántos bloques y días, y cuántos logros llevas empezados.',
+    ],
+    parches: [
+      'Los iconos de las secciones ya no son emojis: son dibujos propios que se tiñen con el color del tema que tengas puesto. Antes los pintaba el sistema con su tipografía, así que cambiaban de forma entre un iPhone y un Android y no seguían el tema. Los iconos que eliges TÚ para una categoría o un objetivo no cambian: esos son tuyos.',
+    ],
+  },
+  {
     version: '0.55.0',
     fecha: '2026-09-11',
     nuevo: [

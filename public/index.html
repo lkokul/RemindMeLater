@@ -471,37 +471,49 @@
     </div>
   </div>
 
-  <!-- Extension "Gimnasio": registro de entrenamientos de verdad, con 3
-       secciones alternables con pestanas (Sesiones/Rutinas/Progreso, ver
-       .gym-tabs en styles.css y el interruptor en app.js) -- NO es el
-       patron de columnas de "Mi espacio" (aqui solo una seccion a la vez
-       tiene sentido) ni el de "Configuracion" con submenu (son solo 3,
-       sin necesitar un menu previo). Se abre desde la tarjeta de
-       Apps y vuelve ahi (no a Home) al cerrarse -- ver
-       openGymView/closeGymView en app.js. -->
+  <!-- Extension "Gimnasio": registro de entrenamientos de verdad. Desde
+       el 13/9/2026 se navega como Finanzas -- un INICIO con las cuatro
+       secciones como filas (Historial/Plan/Progreso/Logros) y una vuelta
+       atras, en vez de la barra de pestanas que habia antes. Ver
+       switchGymTab/renderGymInicio en app.js. Se abre desde la tarjeta de
+       Apps y vuelve ahi (no a Home) al cerrarse. -->
   <div id="gym-view" class="my-space-view hidden">
     <div class="my-space-view-header">
-      <h2>Gimnasio</h2>
+      <h2 id="gym-view-title">Gimnasio</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-gym" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
         <button type="button" id="btn-gym-settings" class="icon-btn" aria-label="Configuración">☰</button>
       </div>
     </div>
-    <div class="gym-tabs">
-      <button type="button" class="gym-tab-btn active" data-gym-tab="sessions">Entrenar</button>
-      <button type="button" class="gym-tab-btn" data-gym-tab="plan">Plan</button>
-      <button type="button" class="gym-tab-btn" data-gym-tab="progress">Progreso</button>
-      <button type="button" class="gym-tab-btn" data-gym-tab="achievements">Logros</button>
-    </div>
+    <!-- La fila de cuatro pestanas se fue (13/9/2026, peticion de Koku:
+         "que en vez que este en la seccion de arriba que pongamos tipo la
+         de finanzas, que es los 4 botones y luego entras a la seccion").
+         Mismo patron que Finanzas: un INICIO con las secciones como filas
+         y una vuelta atras. -->
+    <button type="button" id="btn-gym-back" class="finanzas-back-btn hidden">‹ Gimnasio</button>
     <div class="gym-tab-content">
-      <!-- Entrenar (Fase 3 del rediseno): el boton grande arranca un
-           entrenamiento EN VIVO (overlay #gym-live-view); si hay uno a
-           medias (localStorage.gymLiveSession) aparece el banner de
-           reanudar en su lugar. Debajo, el historial de sesiones de
-           siempre y el alta manual (para apuntar a posteriori). -->
-      <div id="gym-tab-sessions" class="gym-tab-panel">
+      <!-- INICIO. El boton de empezar vive AQUI, encima de las filas, y no
+           dentro de una seccion: es lo que se hace al abrir el Gimnasio
+           casi todos los dias, y enterrarlo un nivel lo convertiria en dos
+           toques diarios. Lo eligio asi Koku de las tres opciones. -->
+      <div id="gym-tab-inicio" class="gym-tab-panel">
+        <div class="gym-hero">
+          <div class="gym-hero-label">Esta semana</div>
+          <div class="gym-hero-amount" id="gym-inicio-semana">—</div>
+          <div class="gym-hero-sub" id="gym-inicio-racha"></div>
+        </div>
         <button type="button" id="btn-gym-live-resume" class="primary-btn gym-live-start-btn hidden">Entrenamiento en curso — continuar</button>
         <button type="button" id="btn-gym-live-start" class="primary-btn gym-live-start-btn">Empezar entrenamiento</button>
+        <div id="gym-inicio-filas" class="finanzas-group-list"></div>
+      </div>
+
+      <!-- Historial. El boton de empezar el entrenamiento en vivo se
+           fue de aqui al inicio (13/9/2026), asi que lo que queda es lo
+           que de verdad es esta seccion: las sesiones ya hechas, la
+           actividad rapida y el alta manual (apuntar a posteriori). El id
+           sigue diciendo "sessions" a proposito: renombrarlo tocaria
+           media app sin cambiar nada de lo que se ve. -->
+      <div id="gym-tab-sessions" class="gym-tab-panel hidden">
         <div class="gym-exercises-actions">
           <button type="button" id="btn-new-gym-activity" class="secondary-btn gym-tab-action">Actividad rápida</button>
           <button type="button" id="btn-new-gym-session" class="secondary-btn gym-tab-action">+ Apuntar sesión a mano</button>

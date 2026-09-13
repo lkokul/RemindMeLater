@@ -8967,6 +8967,11 @@ async function openGymView() {
   document.getElementById('gym-view').classList.remove('hidden');
   setCurrentScreen('gym');
   await Promise.all([loadGymExercises(), loadGymBlocks(), loadGymRoutines(), loadGymSessions()]);
+  // Siempre se entra por el INICIO. Los paneles guardan su clase `hidden`
+  // entre aperturas, asi que sin esto el Gimnasio se abriria en la ultima
+  // seccion donde estuviste y con la flecha de volver puesta. Va DESPUES
+  // de cargar los datos porque el inicio los usa para sus subtitulos.
+  switchGymTab('inicio');
   renderGymExercisesList();
   renderGymBlocksList();
   renderGymRoutinesList();
@@ -8981,13 +8986,41 @@ function closeGymView() {
 document.getElementById('btn-open-gym').addEventListener('click', openGymView);
 document.getElementById('btn-close-gym').addEventListener('click', closeGymView);
 
+// =====================================================================
+// Navegacion del Gimnasio: un INICIO de filas y las secciones debajo.
+//
+// Peticion de Koku (13/9/2026): "que en vez que este en la seccion de
+// arriba que pongamos tipo la de finanzas, que es los 4 botones y luego
+// entras a la seccion". Antes eran cuatro pestanas en una fila fija.
+//
+// Es el mismo patron que Finanzas, con UNA diferencia deliberada: aqui el
+// hueco de arriba no es una cifra pasiva, lleva el boton de EMPEZAR
+// ENTRENAMIENTO. Se le ofrecieron las tres opciones y eligio esta -- el
+// motivo es que empezar a entrenar es lo que se hace casi cada dia, y
+// enterrarlo dentro de una seccion lo volveria dos toques diarios.
+// =====================================================================
+
+const GYM_SECCIONES = {
+  inicio: 'Gimnasio',
+  sessions: 'Historial',
+  plan: 'Plan',
+  progress: 'Progreso',
+  achievements: 'Logros',
+};
+
 function switchGymTab(tabName) {
-  document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.gymTab === tabName);
-  });
+  const enInicio = tabName === 'inicio';
   document.querySelectorAll('.gym-tab-panel').forEach((panel) => {
     panel.classList.toggle('hidden', panel.id !== `gym-tab-${tabName}`);
   });
+  // El titulo de arriba dice donde estas: es lo que sustituye a la
+  // pestana marcada de antes.
+  document.getElementById('gym-view-title').textContent = GYM_SECCIONES[tabName] || 'Gimnasio';
+  document.getElementById('btn-gym-back').classList.toggle('hidden', enInicio);
+  // Salir a Herramientas solo tiene sentido desde el inicio: dentro de una
+  // seccion, lo que uno quiere es volver AL GIMNASIO.
+  document.getElementById('btn-close-gym').classList.toggle('hidden', !enInicio);
+  if (enInicio) renderGymInicio();
   // Las secciones de Progreso/Logros se calculan al entrar en su
   // pestana, no en cada apertura del Gimnasio -- son funciones
   // declaradas mas abajo, sin problema de orden porque esto solo corre
@@ -9001,6 +9034,112 @@ function switchGymTab(tabName) {
     if (localStorage.getItem('gymProgressHelpSeen') !== '1') openGymProgressHelpModal();
   }
   if (tabName === 'achievements') renderGymAchievements();
+}
+
+document.getElementById('btn-gym-back').addEventListener('click', () => switchGymTab('inicio'));
+
+// El inicio: la cifra de arriba y las cuatro filas.
+//
+// UNA sola llamada a /summary para las dos cosas. Da la semana y la racha
+// del hero, y de paso cuantos logros llevas empezados -- pedir el mismo
+// resumen dos veces para dos numeros de la misma pantalla seria tonto.
+// Va en try/catch: que falle el resumen no puede dejarte sin las filas,
+// que son la unica forma de entrar a las secciones.
+async function renderGymInicio() {
+  const cont = document.getElementById('gym-inicio-filas');
+  const objetivo = getGymWeeklyGoal();
+  let semana = null;
+  let logrosEmpezados = null;
+  try {
+    const summary = await api('/api/gym-sessions/summary');
+    semana = gymResumenDeLaSemana(summary, objetivo);
+    logrosEmpezados = gymLogrosEmpezados(summary);
+  } catch {
+    // Sin resumen, el hero se queda con el guion de partida.
+  }
+
+  const elSemana = document.getElementById('gym-inicio-semana');
+  const elRacha = document.getElementById('gym-inicio-racha');
+  elSemana.textContent = semana ? `${semana.estaSemana}/${objetivo}` : '—';
+  elRacha.textContent = !semana
+    ? ''
+    : semana.racha > 0
+      ? `Racha de ${semana.racha} ${semana.racha === 1 ? 'semana' : 'semanas'}`
+      : semana.estaSemana >= objetivo
+        ? 'Objetivo cumplido'
+        : `Te ${objetivo - semana.estaSemana === 1 ? 'queda' : 'quedan'} ${objetivo - semana.estaSemana} para el objetivo`;
+
+  cont.innerHTML = '';
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+  const fila = (opciones) => grupo.appendChild(filaDeLista({ ...opciones, flecha: true }));
+
+  // Historial. La cifra es de state, que ya esta cargado al abrir el
+  // Gimnasio: no cuesta una peticion mas.
+  const sesiones = state.gymSessions.length;
+  fila({
+    icono: 'reloj',
+    titulo: 'Historial',
+    sub: sesiones === 0
+      ? 'Lo que ya has hecho, y apuntar a mano'
+      : 'Sesiones, actividades y apuntes a mano',
+    importe: sesiones > 0 ? String(sesiones) : '',
+    alPulsar: () => switchGymTab('sessions'),
+  });
+
+  const bloques = state.gymBlocks.length;
+  const dias = state.gymRoutines.length;
+  const ejercicios = state.gymExercises.length;
+  fila({
+    icono: 'tabla',
+    titulo: 'Plan',
+    sub: bloques === 0
+      ? 'Bloques, días de entreno y tus ejercicios'
+      : `${bloques} ${bloques === 1 ? 'bloque' : 'bloques'} · ${dias} ${dias === 1 ? 'día' : 'días'} · ${ejercicios} ${ejercicios === 1 ? 'ejercicio' : 'ejercicios'}`,
+    alPulsar: () => switchGymTab('plan'),
+  });
+
+  fila({
+    icono: 'tendencia',
+    titulo: 'Progreso',
+    sub: 'Consistencia, mapa de músculos, récords y gráficas',
+    alPulsar: () => switchGymTab('progress'),
+  });
+
+  fila({
+    icono: 'trofeo',
+    titulo: 'Logros',
+    sub: logrosEmpezados === null
+      ? 'Lo que vas desbloqueando'
+      : `${logrosEmpezados} de ${GYM_ACHIEVEMENTS.length} empezados`,
+    alPulsar: () => switchGymTab('achievements'),
+  });
+
+  cont.appendChild(grupo);
+}
+
+// Esta semana y la racha, EN UN SOLO SITIO. Lo usan el hero del inicio y
+// las cifras de Consistencia, para que no puedan decir cosas distintas
+// del mismo entreno -- mismo motivo por el que gymPuntuacionPorMusculo()
+// se separo de renderGymBodyMap() cuando aparecio el widget.
+function gymResumenDeLaSemana(summary, objetivo = getGymWeeklyGoal()) {
+  const sessionsByWeek = new Map();
+  for (const s of summary) {
+    const week = gymWeekStartKey(new Date(`${s.date}T00:00:00`));
+    sessionsByWeek.set(week, (sessionsByWeek.get(week) || 0) + 1);
+  }
+  return {
+    sessionsByWeek,
+    estaSemana: sessionsByWeek.get(gymWeekStartKey(new Date())) || 0,
+    racha: gymComputeWeeklyStreak(sessionsByWeek, objetivo),
+  };
+}
+
+// Cuantos logros tienen ya algun nivel. Se apoya en las mismas funciones
+// que la pestana de Logros, asi que no puede contar distinto que ella.
+function gymLogrosEmpezados(summary) {
+  const stats = gymComputeAchievementStats(summary);
+  return GYM_ACHIEVEMENTS.filter((a) => gymAchievementLevel(a, a.value(stats)) > 0).length;
 }
 
 // --- Aviso del mapa de musculos (pestana Progreso) --------------------
@@ -9018,9 +9157,6 @@ function closeGymProgressHelpModal() {
 }
 document.getElementById('btn-gym-progress-help').addEventListener('click', openGymProgressHelpModal);
 document.getElementById('btn-close-gym-progress-help').addEventListener('click', closeGymProgressHelpModal);
-document.querySelectorAll('.gym-tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => switchGymTab(btn.dataset.gymTab));
-});
 
 async function loadGymExercises() {
   state.gymExercises = await api('/api/gym-exercises');
@@ -17393,7 +17529,79 @@ function finanzasFijosFechaCorta(iso) {
 // Se construye con createElement (no con innerHTML) porque el texto sale
 // de lo que escribe el usuario: asi no hay forma de que una descripcion
 // con "<" rompa nada.
-function finanzasFilaEl({ icono, color, titulo, sub, importe, etiqueta, etiquetaTono, alPulsar, flecha }) {
+// ICONOS DE LAS FILAS DE SECCION
+//
+// Decision de Koku (13/9/2026), que cierra la duda B9 de
+// PARA-KOKU-MANANA.md: **SVG, y los emojis de Finanzas tambien**. Los tres
+// motivos son los mismos por los que el sol y la luna de la topbar dejaron
+// de ser emojis: un emoji lo pinta el SISTEMA con su tipografia (cambia de
+// forma entre iPhone, Android y navegador), NO hereda el color del tema, y
+// se descuadra de tamano respecto al texto de al lado. Mas un cuarto que
+// aqui pesa: Apple no usa emojis como iconos de interfaz en ninguna de sus
+// apps -- un emoji en una fila se lee como contenido escrito por ti, no
+// como parte de la app.
+//
+// EL CAMPO `icono` ES UNA CLAVE DE ESTA TABLA, NUNCA MARCADO. Eso no es
+// un detalle de estilo: el SVG entra por innerHTML, asi que si el campo
+// aceptara marcado, cualquier texto que acabara ahi podria inyectar. Con
+// una clave, lo unico que puede pasar es que no exista y salga el punto
+// de respaldo. Mismo patron que ICON_CLARO/ICON_OSCURO en settings.js:
+// constantes mias, nunca datos del usuario.
+//
+// Todos con `currentColor` para que se tinan con el tema activo.
+const ICONOS_DE_FILA = {
+  grafico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="20" x2="6" y2="13"/><line x1="12" y1="20" x2="12" y2="7"/><line x1="18" y1="20" x2="18" y2="10"/></svg>',
+  calendario: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>',
+  repetir: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="17 2 21 6 17 10"/><path d="M3 12V10a4 4 0 0 1 4-4h14"/><polyline points="7 22 3 18 7 14"/><path d="M21 12v2a4 4 0 0 1-4 4H3"/></svg>',
+  diana: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>',
+  recibo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2Z"/><line x1="9.5" y1="8" x2="14.5" y2="8"/><line x1="9.5" y1="12" x2="14.5" y2="12"/></svg>',
+  intercambio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 3 20 7 16 11"/><line x1="20" y1="7" x2="4" y2="7"/><polyline points="8 13 4 17 8 21"/><line x1="4" y1="17" x2="20" y2="17"/></svg>',
+  monedas: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6"/><path d="M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>',
+  reloj: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>',
+  tabla: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><rect x="9" y="2" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>',
+  tendencia: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg>',
+  trofeo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v4.5a5 5 0 0 1-10 0Z"/><path d="M7 6H4.5v1A3.5 3.5 0 0 0 8 10.5"/><path d="M17 6h2.5v1A3.5 3.5 0 0 1 16 10.5"/><path d="M12 13.5V18"/><path d="M8.5 21h7"/></svg>',
+};
+
+// Pinta el icono de una fila. Hay DOS clases de icono y conviene no
+// mezclarlas:
+//
+//   - Los de SECCION (Este mes, Gastos fijos, Plan, Logros...) son MIOS y
+//     son una clave de la tabla de arriba. Salen en SVG con el acento.
+//   - Los de una CATEGORIA o un OBJETIVO los eliges TU con el selector de
+//     iconos (createIconField), o sea que son CONTENIDO, no parte de la
+//     app. Siguen siendo el emoji que pusiste, y por eso la decision de
+//     pasar a SVG no les afecta: cambiarlos seria borrar lo que elegiste.
+//
+// De ahi el reparto: si el valor es una clave conocida, SVG; cualquier
+// otra cosa se pinta como TEXTO. Eso ademas es lo que hace segura la
+// funcion -- por innerHTML solo pasan mis constantes, nunca un valor
+// guardado; lo que venga de la base va siempre por textContent.
+function pintarIconoDeFila(el, nombre) {
+  // hasOwnProperty y no `ICONOS_DE_FILA[nombre]` a secas. Encontrado
+  // forzando errores: un icono llamado "constructor" o "toString" NO da
+  // undefined, da la funcion que todo objeto hereda de Object -- y como
+  // es truthy, acababa pintando "function Object() { [native code] }"
+  // dentro de la fila, y por innerHTML. No se podia inyectar nada (el
+  // codigo nativo nunca trae etiquetas), pero es basura en pantalla por
+  // un nombre que el selector de iconos deja escribir. Mirando solo las
+  // claves PROPIAS, la tabla no tiene herencia que colar.
+  const svg = Object.prototype.hasOwnProperty.call(ICONOS_DE_FILA, nombre) ? ICONOS_DE_FILA[nombre] : null;
+  if (svg) { el.innerHTML = svg; el.classList.add('finanzas-row-icon-svg'); return; }
+  el.textContent = nombre || '\u2022';
+}
+
+// UNA FILA DE SECCION: icono redondo + titulo/subtitulo + cifra/flecha.
+//
+// La usan Finanzas y Gimnasio (13/9/2026, cuando el Gimnasio cambio sus
+// cuatro pestanas por un inicio de filas). Las clases CSS y el nombre
+// viejo siguen diciendo `finanzas` A PROPOSITO, igual que los ids siguen
+// diciendo `extensions` despues de que esa pantalla pasara a llamarse
+// "Apps": renombrarlas chocaria con la rama `finanzas-movil`, que Koku
+// trabaja en paralelo, en cada linea que las toca. Cuando esa rama se
+// cierre, se renombran de una vez.
+function filaDeLista({ icono, color, titulo, sub, importe, etiqueta, etiquetaTono, alPulsar, flecha }) {
   const fila = document.createElement(alPulsar ? 'button' : 'div');
   if (alPulsar) fila.type = 'button';
   fila.className = 'finanzas-row';
@@ -17405,7 +17613,7 @@ function finanzasFilaEl({ icono, color, titulo, sub, importe, etiqueta, etiqueta
   const ico = document.createElement('span');
   ico.className = 'finanzas-row-icon';
   if (color) ico.style.background = color;
-  ico.textContent = icono || '•';
+  pintarIconoDeFila(ico, icono);
   fila.appendChild(ico);
 
   const main = document.createElement('span');
@@ -17446,6 +17654,10 @@ function finanzasFilaEl({ icono, color, titulo, sub, importe, etiqueta, etiqueta
   fila.appendChild(der);
   return fila;
 }
+
+// El nombre de antes, para que la rama `finanzas-movil` siga fusionando
+// sin conflictos en sus ~9 llamadas. Codigo nuevo: usa `filaDeLista`.
+const finanzasFilaEl = filaDeLista;
 
 function finanzasFijosCabeceraEl(texto, importe) {
   const cab = document.createElement('div');
@@ -18092,7 +18304,7 @@ async function openFinanzasRecurringTransactionsModal(r) {
       }
       grupo.appendChild(
         finanzasFilaEl({
-          icono: '📅',
+          icono: 'calendario',
           titulo: y.year,
           sub,
           importe: formatFinanzasAmount(y.total),
@@ -18120,7 +18332,7 @@ async function openFinanzasRecurringTransactionsModal(r) {
   transactions.forEach((t) => {
     grupoMov.appendChild(
       finanzasFilaEl({
-        icono: '✓',
+        icono: 'check',
         titulo: finanzasFijosFechaCorta(t.date),
         importe: formatFinanzasAmount(t.amount),
       })
@@ -18805,7 +19017,7 @@ async function renderFinanzasInicio() {
 
   const m = dato(resumen);
   fila({
-    icono: '📊',
+    icono: 'grafico',
     titulo: 'Este mes',
     sub: m
       ? m.monthlyBudgetLimit
@@ -18821,7 +19033,7 @@ async function renderFinanzasInicio() {
   const pendientes = p ? p.occurrences.filter((o) => o.status !== 'paid') : [];
   const cuantasPlantillas = s ? s.items.length : 0;
   fila({
-    icono: '📅',
+    icono: 'calendario',
     titulo: 'Gastos fijos',
     sub:
       cuantasPlantillas === 0
@@ -18840,7 +19052,7 @@ async function renderFinanzasInicio() {
 
   const subs = s ? s.byKind.subscription : null;
   fila({
-    icono: '📺',
+    icono: 'repetir',
     titulo: 'Suscripciones',
     sub:
       subs && subs.count > 0
@@ -18859,7 +19071,7 @@ async function renderFinanzasInicio() {
   const apartado = sinCumplir.reduce((acc, g) => acc + g.reserved, 0);
   const meta = sinCumplir.reduce((acc, g) => acc + g.targetAmount, 0);
   fila({
-    icono: '🎯',
+    icono: 'diana',
     titulo: 'Objetivos',
     sub:
       sinCumplir.length > 0
@@ -18870,7 +19082,7 @@ async function renderFinanzasInicio() {
   });
 
   fila({
-    icono: '🧾',
+    icono: 'recibo',
     titulo: 'Movimientos',
     sub: 'Apuntar gastos e ingresos. También tus cuentas',
     alPulsar: () => switchFinanzasTab('movimientos'),
@@ -18881,7 +19093,7 @@ async function renderFinanzasInicio() {
   const meDeben = sinPagar.filter((x) => x.direction === 'owed_to_me').reduce((a, x) => a + x.amount, 0);
   const debo = sinPagar.filter((x) => x.direction !== 'owed_to_me').reduce((a, x) => a + x.amount, 0);
   fila({
-    icono: '🤝',
+    icono: 'intercambio',
     titulo: 'Deudas',
     sub:
       sinPagar.length > 0
@@ -18892,7 +19104,7 @@ async function renderFinanzasInicio() {
   });
 
   fila({
-    icono: '📈',
+    icono: 'monedas',
     titulo: 'Inversiones',
     sub: 'Compras, ventas y dividendos, a mano',
     alPulsar: () => switchFinanzasTab('inversiones'),
@@ -20779,7 +20991,9 @@ function moverPestanaMovil(paso) {
 // vista completa haria que la propia barra se fuera de la pantalla, que
 // es justo lo que no se quiere.
 const MOBILE_SUBTAB_BARS = [
-  { barra: '.gym-tabs', paneles: '.gym-tab-panel' },
+  // Gimnasio salio de aqui el 13/9/2026: su barra de pestanas ya no
+  // existe, ahora es un inicio de filas. Lo que hace el gesto central en
+  // el Gimnasio es VOLVER, y de eso se encarga VOLVER_UN_PASO.
   { barra: '.viajes-tabs', paneles: '[data-viajes-panel]' },
 ];
 
@@ -20817,6 +21031,11 @@ const VOLVER_UN_PASO = [
   'btn-settings-back',
   // Gimnasio: de los dias de un bloque a la lista de bloques.
   'btn-gym-back-to-blocks',
+  // Gimnasio: de una seccion (Historial, Plan, Progreso, Logros) a su
+  // inicio. Va DESPUES del de bloques a proposito: estando dentro de un
+  // bloque, lo primero que se suelta es la lista de dias, no la seccion
+  // entera -- se sale por donde se entro.
+  'btn-gym-back',
   // Lecturas: del detalle de una saga a la lista de sagas.
   'btn-back-lecturas-sagas',
   // Viajes: del detalle de un viaje a la lista de viajes.
@@ -21111,8 +21330,8 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.55.0';
-const APP_VERSION_DATE = '2026-09-11';
+const APP_VERSION = '0.56.0';
+const APP_VERSION_DATE = '2026-09-13';
 
 function renderAppVersionLine() {
   const el = document.getElementById('app-version-line');

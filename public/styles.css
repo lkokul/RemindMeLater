@@ -3665,6 +3665,35 @@ body.gym-rest-push #settings-modal .settings-card {
   cursor: pointer;
 }
 .finanzas-tab-btn.active { color: var(--bg-text); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* Cabecera del inicio del Gimnasio: "2/4 esta semana" + la racha debajo.
+   Misma forma que la de Finanzas pero con su propia regla, no compartida:
+   alli el hueco lo llena una cifra sola y aqui lleva ademas el boton de
+   empezar justo debajo, asi que el aire de abajo es menor. */
+.gym-hero {
+  padding: 1.1rem 0.2rem 0.9rem;
+  text-align: center;
+}
+.gym-hero-label {
+  font-size: var(--t-secundario);
+  color: color-mix(in srgb, var(--bg-text) 62%, var(--bg));
+}
+.gym-hero-amount {
+  font-size: var(--t-titulo-grande);
+  font-weight: 650;
+  line-height: 1.15;
+  margin-top: 0.15rem;
+  /* Cifras de ancho fijo, para que el "2/4" no baile al pasar a "10/4". */
+  font-variant-numeric: tabular-nums;
+}
+.gym-hero-sub {
+  font-size: var(--t-secundario);
+  margin-top: 0.3rem;
+  color: color-mix(in srgb, var(--bg-text) 55%, var(--bg));
+}
+/* Las filas del inicio respiran respecto al boton de empezar, que va
+   justo encima. */
+#gym-inicio-filas { margin-top: 1.1rem; }
 /* El 7rem de abajo NO es decoracion: la barra de apps flota fija encima
    de esta pantalla, asi que sin ese hueco la ultima fila se queda 35 px
    por DEBAJO de la barra y no hay forma de verla ni de tocarla, ni
@@ -5298,6 +5327,21 @@ body.gym-rest-push #settings-modal .settings-card {
   background: var(--surface-2);
   font-size: var(--t-cuerpo);
 }
+/* SOLO los iconos de seccion (los SVG) se tinen con el acento. Los de una
+   categoria o un objetivo son el emoji que elegiste tu, con el fondo de
+   color que le pusiste, y ahi el acento no pinta nada. */
+.finanzas-row-icon-svg { color: var(--accent); }
+/* Los iconos son SVG desde el 13/9/2026 (antes emojis; ver la duda B9,
+   ya cerrada). 18 de 32 deja el aire de alrededor que pide un icono
+   dentro de un circulo: mas grande toca el borde y parece apretado.
+   `block` quita el hueco de linea base que deja un svg en linea y que
+   lo dejaba un pixel bajo respecto al centro. */
+.finanzas-row-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+.finanzas-subgroup .finanzas-row-icon svg { width: 15px; height: 15px; }
 .finanzas-row-main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; gap: 0.1rem; }
 .finanzas-row-title {
   font-size: var(--t-cuerpo);

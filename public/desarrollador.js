@@ -17,6 +17,12 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.56.0': [
+    'Deslizar hacia la derecha desde el inicio del Gimnasio NO sale a Herramientas todavía — eso solo está en Finanzas. Ahora que las dos pantallas tienen la misma forma, decide si se generaliza (también a Viajes y Entretenimiento).',
+    'El componente de fila y sus clases CSS siguen llamándose `finanzas-*` aunque ahora los use también el Gimnasio. Es a propósito, para no chocar con tu rama finanzas-movil en cada línea; cuando la cierres, se renombran de una vez.',
+    'Progreso sigue teniendo ocho bloques y dos ajustes dentro (objetivo semanal y peso extra al fallo). Con el inicio nuevo es más fácil partirlo, si quieres.',
+    'El ☰ de ajustes del Gimnasio está oculto por CSS en móvil desde hace tiempo, así que esos dos ajustes de Progreso son la única forma de llegar a ellos. Conviene mirarlo si algún día se mueven al ☰.',
+  ],
   '0.55.0': [
     'Merge de finanzas-movil. Los dos commits del "apartado de salario" los deshizo el tercero, así que de esa idea no queda nada en la app: si la quieres, hay que rehacerla.',
     'El colchón de abajo de Finanzas son 7rem fijos. Si algún día la barra de apps cambia de alto, este número y el de .gym-tab-content hay que tocarlos a la vez.',
