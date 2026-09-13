@@ -2216,6 +2216,7 @@ body {
    El fondo se pone explicito a proposito: la fila tiene que TAPAR a los
    botones que hay debajo, si no se transparentan al deslizar. */
 .note-swipe-wrap > .gym-list-item,
+.note-swipe-wrap > .retos-item,
 .note-swipe-wrap > .group-card,
 .note-swipe-wrap > .theme-card {
   position: relative;
@@ -2231,6 +2232,7 @@ body {
    tambien mientras se desliza. */
 .note-swipe-wrap > .theme-card.active { background: color-mix(in srgb, var(--accent) 18%, var(--surface-2)); }
 .note-swipe-wrap.is-open > .gym-list-item,
+.note-swipe-wrap.is-open > .retos-item,
 .note-swipe-wrap.is-open > .group-card,
 .note-swipe-wrap.is-open > .theme-card { transform: translateX(calc(-1 * var(--swipe-actions-width, 9.5rem))); }
 /* Mientras el dedo arrastra manda el transform en linea que escribe
@@ -2238,6 +2240,7 @@ body {
    pegada al dedo; al soltar vuelve el CSS de arriba y anima el ultimo
    tramo. */
 .note-swipe-wrap.is-dragging > .gym-list-item,
+.note-swipe-wrap.is-dragging > .retos-item,
 .note-swipe-wrap.is-dragging > .group-card,
 .note-swipe-wrap.is-dragging > .theme-card,
 .note-swipe-wrap.is-dragging > .note-item { transition: none; }
@@ -5587,3 +5590,163 @@ body.gym-rest-push #settings-modal .settings-card {
 .finanzas-row-navegable { align-items: flex-start; }
 .finanzas-row-navegable .finanzas-row-icon,
 .finanzas-row-navegable .finanzas-row-right { margin-top: 0.1rem; }
+
+
+/* =====================================================================
+   RETOS
+
+   Un arbol donde cada fila es una tarea: casilla, nombre, y -- si lleva
+   subretos -- cuantos llevas y una barra. La sangria la marca
+   --reto-nivel, que pone crearFilaDeReto() en la fila; el nivel de
+   verdad lo manda parent_id, esto es solo como se lee.
+   ===================================================================== */
+.retos-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Los 7rem de abajo son el hueco de la barra inferior: sin ellos la
+     ultima fila queda debajo y no hay forma de tocarla (el mismo arreglo
+     que se hizo en Finanzas y que ya usa .gym-tab-content). */
+  padding: 1rem 1.2rem 7rem;
+}
+
+.retos-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+}
+.retos-search {
+  flex: 1;
+  min-width: 8rem;
+  font-size: var(--t-secundario);
+}
+.retos-new-btn { flex-shrink: 0; }
+
+.retos-list { display: flex; flex-direction: column; gap: 0.4rem; }
+
+.retos-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--surface);
+  border-radius: var(--radius);
+  /* La sangria va en el relleno de la fila y no en un margen del
+     envoltorio: asi la fila entera (fondo incluido) se desliza de una
+     pieza y tapa a los botones que hay debajo. */
+  padding: 0.5rem 0.7rem 0.5rem calc(0.7rem + var(--reto-nivel, 0) * 1.3rem);
+  font-size: var(--t-secundario);
+}
+/* Un subreto lleva ademas una linea de acento a la izquierda: solo con
+   la sangria, con filas que son tarjetas sueltas, no se distingue de un
+   vistazo lo que cuelga de lo que no. */
+.retos-item.is-nested { border-left: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* La flecha de desplegar. Cuando el reto no tiene subretos se queda
+   como hueco vacio en vez de desaparecer, para que todos los nombres de
+   un mismo nivel arranquen a la misma altura. */
+.retos-twisty {
+  flex-shrink: 0;
+  width: 1.4rem;
+  height: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: color-mix(in srgb, var(--surface-text) 60%, var(--surface));
+  cursor: pointer;
+  transition: transform 0.18s ease-out;
+}
+.retos-twisty svg { width: 1rem; height: 1rem; }
+.retos-twisty.is-open { transform: rotate(90deg); }
+.retos-twisty.is-empty { cursor: default; }
+
+.retos-check { flex-shrink: 0; }
+
+.retos-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.retos-item-ruta {
+  font-size: var(--t-micro);
+  color: color-mix(in srgb, var(--surface-text) 55%, var(--surface));
+}
+.retos-item-name {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.retos-item-meta {
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--surface-text) 62%, var(--surface));
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+/* La racha va con el color de acento: es lo unico de la fila que premia
+   seguir, y perderlo entre el resto del texto gris le quitaria la
+   gracia. */
+.retos-racha { color: var(--accent); font-weight: 600; }
+
+/* "3 de 5" en numeros y ademas en barra: el numero dice cuanto, la barra
+   se ve de un vistazo sin leer. */
+.retos-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-text) 14%, var(--surface));
+  overflow: hidden;
+  margin-top: 0.2rem;
+}
+.retos-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.2s ease-out;
+}
+
+.retos-item-side {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.retos-count {
+  font-size: var(--t-micro);
+  color: color-mix(in srgb, var(--surface-text) 62%, var(--surface));
+  white-space: nowrap;
+}
+.retos-add-btn { font-size: var(--t-cuerpo); line-height: 1; }
+
+/* Un reto hecho se tacha y se apaga, pero SIGUE EN SU SITIO: nada se
+   esconde solo (que en un arbol dejaria huecos sin explicacion). */
+.retos-item.is-done .retos-item-name {
+  text-decoration: line-through;
+  color: color-mix(in srgb, var(--surface-text) 50%, var(--surface));
+}
+
+/* El modo "Mover": la fila cambia sus botones de la derecha por las dos
+   flechas y un "Listo". Se ARMA desde el deslizamiento y se desarma
+   sola solo cuando lo dices, que es como funciona el mismo modo en el
+   entreno del Gimnasio. */
+.retos-move-bar { display: none; gap: 0.3rem; flex-shrink: 0; }
+.retos-item.is-moving .retos-item-side { display: none; }
+.retos-item.is-moving .retos-move-bar { display: flex; }
+.retos-item.is-moving {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.retos-move-bar button { font-size: var(--t-pie); padding: 0.25rem 0.5rem; }
+
+/* La explicacion de cada tipo, dentro de su boton del modal. */
+.retos-kind-hint {
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}

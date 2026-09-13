@@ -731,6 +731,7 @@ document.getElementById('btn-gym-settings').addEventListener('click', openSettin
 document.getElementById('btn-lecturas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-retos-settings').addEventListener('click', openSettingsModal);
 // #mobile-notes-view (Fase 4) es tambien .my-space-view a pantalla
 // completa, mismo motivo que las de arriba.
 document.getElementById('btn-mobile-notes-settings').addEventListener('click', openSettingsModal);
@@ -1980,6 +1981,26 @@ document.addEventListener('keydown', (e) => {
   const viajesCountryModal = document.getElementById('viajes-country-modal');
   if (viajesCountryModal && !viajesCountryModal.classList.contains('hidden')) {
     document.getElementById('btn-close-viajes-country').click();
+    return;
+  }
+
+  // Retos: solo dos capas, porque el arbol se despliega en la misma
+  // lista y no hay sub-navegacion que soltar. Primero el modal de
+  // crear/editar; luego, si hay una fila armada para moverse, se suelta
+  // ese modo (es lo mas "de encima" que queda); y solo despues la
+  // pantalla entera vuelve a Herramientas.
+  const retoModal = document.getElementById('reto-modal');
+  if (retoModal && !retoModal.classList.contains('hidden')) {
+    closeRetoModal();
+    return;
+  }
+  const retosView = document.getElementById('retos-view');
+  if (retosView && !retosView.classList.contains('hidden')) {
+    if (typeof retoMoviendose !== 'undefined' && retoMoviendose !== null) {
+      desarmarMovimientoDeReto();
+      return;
+    }
+    document.getElementById('btn-close-retos').click();
     return;
   }
 

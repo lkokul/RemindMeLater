@@ -253,6 +253,23 @@ a pantalla completa y sin afectar a nada de lo de arriba:
   concreto (no solo el actual) y otra con el histórico de ahorro en un
   rango de fechas. Una gráfica compara ingresos y gastos mes a mes de los
   últimos 6 meses.
+- **Retos**: hábitos que quieres mantener y metas a las que quieres
+  llegar, en una misma lista. Un **hábito** ("estirar por la mañana") se
+  marca cada periodo y se **desmarca solo** cuando empieza el siguiente —
+  cada día, cada semana, cada mes o cada X días, lo eliges tú al crearlo
+  — y va enseñando la **racha** de periodos seguidos que llevas. Una
+  **meta** ("llegar a 100 flexiones") se marca una vez y se queda
+  marcada. Cualquiera de los dos puede llevar **subretos** dentro, sin
+  límite de profundidad y mezclando los dos tipos: un reto con subretos
+  enseña cuántos llevas ("3 de 5") y una barra de progreso, que se
+  rellena sola según los vas marcando — pero completar los subretos no
+  marca el reto por ti (puedes hacer las 10 flexiones y seguir sin poder
+  hacer 50; eso lo decides tú). Marcar un reto sí marca todo lo que
+  lleva dentro. Cada fila se despliega para ver sus subretos, se desliza
+  para **Editar / Mover / Eliminar** (eliminar se lleva también sus
+  subretos) y hay un buscador por nombre que mira el árbol entero,
+  enseñando de dónde cuelga cada resultado. **No mide nada**: un reto es
+  una tarea que se marca, ni cuenta repeticiones ni cronometra nada.
 
 ## App nativa de movil (iOS y Android)
 

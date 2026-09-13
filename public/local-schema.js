@@ -654,6 +654,58 @@ function applyLocalSchema(db) {
       finanzas_transaction_id INTEGER REFERENCES finanzas_transactions(id),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Herramienta "Retos" (tarjeta propia en #extensions-view): un arbol
+    -- de retos donde cada nodo es, a efectos de la pantalla, una TAREA --
+    -- no mide nada (ni repeticiones, ni kilos, ni tiempo), solo se marca.
+    --
+    -- Dos tipos, decididos con Koku:
+    --   'meta'   -- llegar a algo una vez ("hacer 100 flexiones"). Su
+    --               estado vive en la columna "done" de esta misma fila.
+    --   'habito' -- algo que se mantiene ("estirar cada dia"). Su estado
+    --               NO vive aqui: se calcula del periodo actual en
+    --               retos_hechos, para que se desmarque solo al empezar
+    --               el periodo siguiente y para poder contar la racha.
+    --
+    -- parent_id da la anidacion INFINITA que pidio Koku: un subreto puede
+    -- colgar de cualquiera de los dos tipos y ser a su vez de cualquiera
+    -- de los dos. Mismo patron que note_folders (que tambien se anida sin
+    -- limite), incluida la deteccion de ciclos en la ruta.
+    CREATE TABLE IF NOT EXISTS retos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      parent_id INTEGER REFERENCES retos(id),
+      name TEXT NOT NULL,
+      description TEXT,
+      kind TEXT NOT NULL DEFAULT 'meta' CHECK (kind IN ('meta', 'habito')),
+      -- Solo para 'habito'. 'cada_x_dias' usa freq_every y se ancla al dia
+      -- en que se creo el habito (no a una rejilla fija del calendario):
+      -- "cada 3 dias" cuenta desde que TU lo empezaste.
+      frequency TEXT CHECK (frequency IN ('diario', 'semanal', 'mensual', 'cada_x_dias')),
+      freq_every INTEGER,
+      -- Solo para 'meta'. Un habito ignora estas dos columnas a proposito:
+      -- si guardara aqui su "hecho", habria dos verdades que mantener a la
+      -- vez (esta y la del periodo) y se separarian en cuanto una de las
+      -- dos se tocara por otro camino.
+      done INTEGER NOT NULL DEFAULT 0,
+      done_at TEXT,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Una marca por PERIODO cumplido de un habito. El UNIQUE es lo que
+    -- hace que marcar dos veces el mismo dia no cuente dos veces, y de
+    -- aqui salen tanto "esta hecho hoy" como la racha (periodos
+    -- consecutivos hacia atras). period_key es texto y su forma depende de
+    -- la frecuencia: '2026-09-14' (diario), '2026-W38' (semanal),
+    -- '2026-09' (mensual) o 'c123' (el cubo numero 123 de "cada X dias").
+    CREATE TABLE IF NOT EXISTS retos_hechos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reto_id INTEGER NOT NULL REFERENCES retos(id),
+      period_key TEXT NOT NULL,
+      done_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(reto_id, period_key)
+    );
   `);
 
   // Migracion sencilla: group_id y active_theme_id se anadieron despues de

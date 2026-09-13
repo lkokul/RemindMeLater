@@ -8357,6 +8357,11 @@ const MOBILE_NAV_SLOT_APPS = {
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>',
     open: () => openViajesView(),
   },
+  retos: {
+    label: 'Retos',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"></path><path d="M5 4h12l-2.2 3.5L17 11H5"></path></svg>',
+    open: () => openRetosView(),
+  },
 };
 
 function getMobileNavNotesSlot() {
@@ -8372,6 +8377,7 @@ const MOBILE_NAV_SLOT_CARD_IDS = {
   finanzas: 'btn-open-finanzas',
   lecturas: 'btn-open-lecturas',
   viajes: 'btn-open-viajes',
+  retos: 'btn-open-retos',
 };
 
 function applyMobileNavCustomization() {
@@ -20688,6 +20694,467 @@ document.getElementById('btn-delete-lecturas-item').addEventListener('click', as
 // duracion de la transicion CSS (320ms) con un pelin de margen para que
 
 // =====================================================================
+// RETOS
+//
+// Herramienta nueva (14/9/2026), pedida por Koku. Dos cosas en el mismo
+// arbol:
+//   - HABITOS ("mantener una rutina"): se marcan cada periodo y se
+//     desmarcan SOLOS cuando empieza el siguiente. Llevan racha, que fue
+//     lo que pidio al elegir el diseño ("el poder ver la racha creo que
+//     ayuda bastante a la gente a mantenerse en una racha").
+//   - METAS ("llegar a hacer 100 flexiones"): se marcan una vez y se
+//     quedan marcadas.
+//
+// Lo que NO hace, y es una decision suya, no una limitacion: NO MIDE
+// NADA. Ni repeticiones, ni kilos, ni tiempo. Un reto es una tarea que
+// se marca, se despliega y se desliza -- si algun dia hiciera falta
+// medir, eso es el Gimnasio, no esto.
+//
+// Cualquier reto puede llevar SUBRETOS sin limite de profundidad, y los
+// dos tipos se mezclan libremente (un habito puede colgar de una meta y
+// al reves). Eso vive en la columna parent_id de la tabla `retos`, con
+// la misma deteccion de ciclos que las carpetas de Notas.
+//
+// Las cuatro decisiones que tomo Koku cuando se le preguntaron, para no
+// cambiarlas sin volver a preguntarle:
+//
+//  1. Un habito se desmarca solo SEGUN SU FRECUENCIA (cada dia, cada
+//     semana, cada mes o cada X dias), no siempre a diario.
+//  2. Marcar un padre marca a todos sus subretos (si hiciste las 100
+//     flexiones, hiciste las de 10 y las de 50), pero completar todos
+//     los subretos NO marca al padre: "puedo cumplir el subreto de hacer
+//     10 flexiones y seguir sin poder hacer 50". La barra se llena; el
+//     reto lo marcas tu.
+//  3. "Mover" (al deslizar) es REORDENAR entre hermanos, no cambiar de
+//     padre. Donde vive un reto se decide al crearlo, con el "+" de la
+//     fila de la que quieres que cuelgue.
+//  4. Se ve "3 de 5" con su barrita en todo reto que tenga subretos.
+// =====================================================================
+
+// Lo ultimo que devolvio la ruta, en plano (el arbol lo arma la
+// pantalla): asi un cambio en cualquier nodo llega de una sola vez y no
+// hay que ir remendando ramas sueltas.
+let retosLista = [];
+// Que retos estan desplegados. En memoria a proposito y NO en
+// localStorage: es una postura de lectura, no un ajuste -- y al cerrar
+// la app se olvida sola, igual que ultimaHerramientaAbierta.
+let retosDesplegados = new Set();
+let retosBusqueda = '';
+// El reto cuya fila esta ARMADA para moverse (ver "Mover" mas abajo).
+let retoMoviendose = null;
+
+const RETOS_FRECUENCIAS = [
+  { value: 'diario', label: 'Cada día' },
+  { value: 'semanal', label: 'Cada semana' },
+  { value: 'mensual', label: 'Cada mes' },
+  { value: 'cada_x_dias', label: 'Cada X días' },
+];
+
+function retosNormalizar(texto) {
+  return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function retoPorId(id) {
+  return retosLista.find((r) => r.id === Number(id)) || null;
+}
+
+function retosHijosDe(id) {
+  // La ruta ya los devuelve ordenados por position, asi que filtrar
+  // conserva el orden dentro de cada padre.
+  return retosLista.filter((r) => r.parentId === id);
+}
+
+// "Llegar a 100 flexiones › Series largas": de donde cuelga este reto.
+// Solo se usa al BUSCAR, que es cuando un resultado aparece fuera de su
+// sitio en el arbol y sin esto no sabrias de que reto es.
+function retoRuta(reto) {
+  const partes = [];
+  let actual = reto.parentId ? retoPorId(reto.parentId) : null;
+  // El tope es la red contra una base con un ciclo dentro; el arbol real
+  // no tiene limite de profundidad.
+  for (let i = 0; i < 50 && actual; i++) {
+    partes.unshift(actual.name);
+    actual = actual.parentId ? retoPorId(actual.parentId) : null;
+  }
+  return partes.join(' › ');
+}
+
+function retoFrecuenciaTexto(reto) {
+  if (reto.kind !== 'habito') return 'Meta';
+  if (reto.frequency === 'cada_x_dias') return `Cada ${reto.freqEvery || 2} días`;
+  const f = RETOS_FRECUENCIAS.find((o) => o.value === reto.frequency);
+  return f ? f.label : 'Cada día';
+}
+
+// "4 días seguidos" / "3 semanas seguidas" / "2 veces seguidas". La
+// unidad sale de la frecuencia: decir "días" en un habito semanal seria
+// mentir sobre lo que has hecho.
+function retoRachaTexto(reto) {
+  const n = reto.streak;
+  if (!n) return '';
+  if (reto.frequency === 'semanal') return `${n} semana${n === 1 ? '' : 's'} seguida${n === 1 ? '' : 's'}`;
+  if (reto.frequency === 'mensual') return `${n} ${n === 1 ? 'mes' : 'meses'} seguido${n === 1 ? '' : 's'}`;
+  if (reto.frequency === 'cada_x_dias') return `${n} ${n === 1 ? 'vez' : 'veces'} seguida${n === 1 ? '' : 's'}`;
+  return `${n} día${n === 1 ? '' : 's'} seguido${n === 1 ? '' : 's'}`;
+}
+
+async function loadRetos() {
+  retosLista = await api('/api/retos');
+}
+
+// La flecha de desplegar. SVG y no un caracter de texto, por la misma
+// razon que el sol y la luna de la topbar: un simbolo lo pinta el
+// sistema con SU tipografia y cambia de forma entre un iPhone y un
+// Android, ademas de no heredar el color del tema.
+const RETOS_ICONO_FLECHA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>';
+
+function retoTieneSubretos(reto) {
+  return reto.childCount > 0;
+}
+
+// Una fila. `nivel` es solo la sangria; la jerarquia de verdad la manda
+// parentId.
+function crearFilaDeReto(reto, nivel, { conRuta = false } = {}) {
+  const row = document.createElement('div');
+  row.className = 'retos-item';
+  row.dataset.reto = reto.id;
+  row.style.setProperty('--reto-nivel', String(nivel));
+  if (reto.done) row.classList.add('is-done');
+  if (nivel > 0) row.classList.add('is-nested');
+  if (retoMoviendose === reto.id) row.classList.add('is-moving');
+
+  const hijos = retoTieneSubretos(reto);
+  const abierto = retosDesplegados.has(reto.id);
+  const ruta = conRuta ? retoRuta(reto) : '';
+
+  // Lo que se lee debajo del nombre. Un HABITO dice cada cuanto toca y su
+  // racha; una META no dice nada (solo su nota, si la tiene) -- poner
+  // "Meta" en cada fila seria repetir en la mayoria de ellas lo que ya se
+  // sabe por descarte: lo que lleva frecuencia es un habito.
+  const meta = [];
+  if (reto.kind === 'habito') meta.push(escapeHtml(retoFrecuenciaTexto(reto)));
+  const racha = retoRachaTexto(reto);
+  if (racha) meta.push(`<span class="retos-racha">${escapeHtml(racha)}</span>`);
+  if (reto.description) meta.push(escapeHtml(reto.description));
+
+  const porcentaje = hijos ? Math.round((reto.doneChildCount / reto.childCount) * 100) : 0;
+
+  row.innerHTML = `
+    <button type="button" class="retos-twisty${hijos ? '' : ' is-empty'}${abierto ? ' is-open' : ''}"
+            data-reto-twisty="${reto.id}" aria-label="${abierto ? 'Plegar' : 'Desplegar'}"
+            ${hijos ? '' : 'tabindex="-1" aria-hidden="true"'}>${hijos ? RETOS_ICONO_FLECHA : ''}</button>
+    <input type="checkbox" class="styled-checkbox retos-check" data-reto-check="${reto.id}"
+           ${reto.done ? 'checked' : ''} aria-label="Marcar ${escapeHtml(reto.name)}" />
+    <div class="retos-item-main">
+      ${ruta ? `<span class="retos-item-ruta">${escapeHtml(ruta)}</span>` : ''}
+      <span class="retos-item-name">${escapeHtml(reto.name)}</span>
+      ${meta.length ? `<span class="retos-item-meta">${meta.join(' · ')}</span>` : ''}
+      ${hijos ? `
+        <div class="retos-progress">
+          <div class="retos-progress-fill" style="width: ${porcentaje}%"></div>
+        </div>` : ''}
+    </div>
+    <div class="retos-item-side">
+      ${hijos ? `<span class="retos-count">${reto.doneChildCount} de ${reto.childCount}</span>` : ''}
+      <button type="button" class="icon-btn retos-add-btn" data-reto-add="${reto.id}" aria-label="Añadir un subreto dentro de ${escapeHtml(reto.name)}">+</button>
+    </div>
+    <div class="retos-move-bar">
+      <button type="button" class="secondary-btn" data-reto-move="up" data-reto-move-id="${reto.id}" aria-label="Subir">↑</button>
+      <button type="button" class="secondary-btn" data-reto-move="down" data-reto-move-id="${reto.id}" aria-label="Bajar">↓</button>
+      <button type="button" class="primary-btn" data-reto-move="done" aria-label="Terminar de mover">Listo</button>
+    </div>
+  `;
+
+  // Tocar la fila despliega o pliega. Un reto SIN subretos no hace nada
+  // al tocarlo a proposito: editar se saca deslizando, que es la unica
+  // forma de editar que hay en toda la app (misma decision que Koku tomo
+  // en su dia con los grupos, "asi no da pie a dudas ni nada").
+  row.addEventListener('click', (e) => {
+    if (e.target.closest('button, input')) return;
+    if (!retoTieneSubretos(reto)) return;
+    alternarRetoDesplegado(reto.id);
+  });
+
+  return wrapRowWithSwipeActions(row, {
+    botones: [
+      ['Editar', 'secondary-btn', () => openRetoModal(reto)],
+      ['Mover', 'secondary-btn', () => armarMovimientoDeReto(reto.id)],
+      ['Eliminar', 'danger-btn', () => borrarReto(reto)],
+    ],
+    // Mientras la fila esta armada para moverse, deslizarla no hace
+    // nada: los dos gestos se pisarian. Mismo trato que las tarjetas de
+    // ejercicio del entreno en vivo.
+    bloqueadoSi: () => retoMoviendose === reto.id,
+  });
+}
+
+function alternarRetoDesplegado(id) {
+  if (retosDesplegados.has(id)) retosDesplegados.delete(id);
+  else retosDesplegados.add(id);
+  renderRetos();
+}
+
+function renderRetos() {
+  const lista = document.getElementById('retos-list');
+  const vacio = document.getElementById('retos-empty');
+  if (!lista) return;
+  lista.innerHTML = '';
+
+  const q = retosNormalizar(retosBusqueda).trim();
+
+  // BUSCANDO: se enseñan los que coinciden, vengan de donde vengan y sin
+  // sangria, cada uno con la ruta de la que cuelga encima del nombre. Un
+  // arbol filtrado a medias (con los padres puestos solo para sostener a
+  // un hijo) se lee peor que una lista de resultados.
+  //
+  // El .trim() no sobra: escribir SOLO espacios (que en el movil pasa
+  // con facilidad, el autocorrector los mete) vaciaria la lista entera y
+  // pareceria que has perdido los retos. Ya mordio una vez en el
+  // buscador de ejercicios.
+  if (q) {
+    const encontrados = retosLista.filter((r) => retosNormalizar(r.name).includes(q));
+    encontrados.forEach((r) => lista.appendChild(crearFilaDeReto(r, 0, { conRuta: true })));
+    vacio.classList.toggle('hidden', encontrados.length > 0);
+    vacio.textContent = 'Ningún reto se llama así.';
+    return;
+  }
+
+  const pintarNivel = (padreId, nivel) => {
+    for (const reto of retosHijosDe(padreId)) {
+      lista.appendChild(crearFilaDeReto(reto, nivel));
+      if (retosDesplegados.has(reto.id)) pintarNivel(reto.id, nivel + 1);
+    }
+  };
+  pintarNivel(null, 0);
+
+  vacio.classList.toggle('hidden', retosLista.length > 0);
+  vacio.textContent = 'Todavía no tienes retos. Crea uno arriba: un hábito que quieras mantener, o una meta a la que llegar.';
+}
+
+// --- Marcar ----------------------------------------------------------
+// Marcar arrastra a todos los subretos (lo hace la ruta); desmarcar solo
+// afecta a ese reto. Se avisa de la cascada con el aviso flotante en vez
+// de preguntar antes: es lo que Koku pidio que pasara, y preguntar en
+// cada toque cansaria -- pero enterarse de que se han marcado ocho cosas
+// de golpe sí importa.
+async function marcarReto(id, hecho) {
+  const antes = retoPorId(id);
+  const subretos = antes ? retosLista.filter((r) => r.parentId === antes.id).length : 0;
+  retosLista = await api(`/api/retos/${id}/done`, { method: 'POST', body: JSON.stringify({ done: hecho }) });
+  renderRetos();
+  if (hecho && subretos > 0) {
+    mostrarAvisoFlotante(`Marcado también lo que lleva dentro (${subretos} subreto${subretos === 1 ? '' : 's'}).`);
+  }
+}
+
+// --- Mover -----------------------------------------------------------
+// "Mover" no es un arrastre siempre activo (arrastrar sin mas es hacer
+// scroll): se ARMA desde el boton del deslizamiento y se desarma con
+// "Listo" -- o solo al tocar otra cosa. Mientras esta armada, la fila
+// enseña ↑ ↓ y no se deja deslizar.
+//
+// Reordena entre HERMANOS, que es lo que eligio Koku: un reto no cambia
+// de padre desde aqui.
+function armarMovimientoDeReto(id) {
+  retoMoviendose = id;
+  renderRetos();
+  const fila = document.querySelector(`.retos-item[data-reto="${id}"]`);
+  if (fila && fila.scrollIntoView) fila.scrollIntoView({ block: 'nearest' });
+}
+
+function desarmarMovimientoDeReto() {
+  if (retoMoviendose === null) return;
+  retoMoviendose = null;
+  renderRetos();
+}
+
+async function moverReto(id, direccion) {
+  retosLista = await api(`/api/retos/${id}/move`, { method: 'POST', body: JSON.stringify({ direction: direccion }) });
+  renderRetos();
+  // La fila se ha repintado entera (los indices de los listeners tienen
+  // que volver a cuadrar), asi que hay que volver a dejarla a la vista.
+  const fila = document.querySelector(`.retos-item[data-reto="${id}"]`);
+  if (fila && fila.scrollIntoView) fila.scrollIntoView({ block: 'nearest' });
+}
+
+async function borrarReto(reto) {
+  const dentro = retosLista.filter((r) => r.parentId === reto.id).length;
+  const aviso = dentro > 0
+    ? `¿Eliminar "${reto.name}" y todo lo que lleva dentro? Se van también sus subretos.`
+    : `¿Eliminar "${reto.name}"?`;
+  if (!(await showAppConfirm(aviso, { okText: 'Eliminar', danger: true }))) return;
+  await api(`/api/retos/${reto.id}`, { method: 'DELETE' });
+  retosDesplegados.delete(reto.id);
+  if (retoMoviendose === reto.id) retoMoviendose = null;
+  await loadRetos();
+  renderRetos();
+}
+
+// --- El modal de crear / editar --------------------------------------
+// El tipo son BOTONES y la frecuencia un createSelectField propio: ni un
+// solo control nativo del navegador, que es regla de la casa.
+let retoKindElegido = 'meta';
+
+const retoFrecuenciaField = createSelectField({
+  options: RETOS_FRECUENCIAS,
+  initialValue: 'diario',
+  onChange: () => refreshRetoFormFields(),
+});
+document.getElementById('reto-frequency-field').appendChild(retoFrecuenciaField.element);
+
+function renderRetoKindOptions() {
+  const cont = document.getElementById('reto-kind-options');
+  cont.innerHTML = '';
+  const opciones = [
+    ['meta', 'Meta', 'Llegar a algo una vez. Se marca y se queda marcado.'],
+    ['habito', 'Hábito', 'Algo que se mantiene. Se desmarca solo cuando empieza el periodo siguiente, y lleva racha.'],
+  ];
+  opciones.forEach(([valor, titulo, explicacion]) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `secondary-btn view-mode-btn${retoKindElegido === valor ? ' active' : ''}`;
+    btn.innerHTML = `<strong>${titulo}</strong><br /><span class="retos-kind-hint">${explicacion}</span>`;
+    btn.addEventListener('click', () => {
+      retoKindElegido = valor;
+      renderRetoKindOptions();
+      refreshRetoFormFields();
+    });
+    cont.appendChild(btn);
+  });
+}
+
+// Lo que se ve y lo que no dentro del formulario: la frecuencia solo
+// existe en un habito, y el "cada cuantos dias" solo dentro de esa
+// frecuencia.
+function refreshRetoFormFields() {
+  const esHabito = retoKindElegido === 'habito';
+  document.getElementById('reto-frequency-block').classList.toggle('hidden', !esHabito);
+  const cadaX = retoFrecuenciaField.getValue() === 'cada_x_dias';
+  document.getElementById('reto-freq-every-label').classList.toggle('hidden', !esHabito || !cadaX);
+}
+
+function openRetoModal(reto, parentId = null) {
+  document.getElementById('reto-modal-title').textContent = reto ? 'Editar reto' : 'Nuevo reto';
+  document.getElementById('reto-id').value = reto ? reto.id : '';
+  document.getElementById('reto-parent-id').value = reto ? (reto.parentId || '') : (parentId || '');
+  document.getElementById('reto-name').value = reto ? reto.name : '';
+  document.getElementById('reto-description').value = reto && reto.description ? reto.description : '';
+  retoKindElegido = reto ? reto.kind : 'meta';
+  retoFrecuenciaField.setValue(reto && reto.frequency ? reto.frequency : 'diario');
+  document.getElementById('reto-freq-every').value = reto && reto.freqEvery ? reto.freqEvery : '';
+
+  // De donde va a colgar. Se enseña y no se edita: cambiar de padre no
+  // entra en lo que hace "Mover" (Koku eligio que fuera reordenar), asi
+  // que aqui seria la unica forma de hacerlo y se prestaria a confusion.
+  const padre = reto ? (reto.parentId ? retoPorId(reto.parentId) : null) : (parentId ? retoPorId(parentId) : null);
+  const linea = document.getElementById('reto-parent-line');
+  linea.classList.toggle('hidden', !padre);
+  if (padre) linea.textContent = `Dentro de: ${padre.name}`;
+
+  renderRetoKindOptions();
+  refreshRetoFormFields();
+  document.getElementById('reto-modal').classList.remove('hidden');
+  document.getElementById('reto-name').focus();
+}
+
+function closeRetoModal() {
+  document.getElementById('reto-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-close-reto').addEventListener('click', closeRetoModal);
+document.getElementById('btn-cancel-reto').addEventListener('click', closeRetoModal);
+enableCtrlEnterSubmit('reto-form');
+
+document.getElementById('reto-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('reto-id').value;
+  const parentId = document.getElementById('reto-parent-id').value;
+  const cuerpo = {
+    name: document.getElementById('reto-name').value,
+    description: document.getElementById('reto-description').value,
+    kind: retoKindElegido,
+    frequency: retoFrecuenciaField.getValue(),
+    freqEvery: document.getElementById('reto-freq-every').value || null,
+  };
+  if (id) {
+    await api(`/api/retos/${id}`, { method: 'PUT', body: JSON.stringify(cuerpo) });
+  } else {
+    await api('/api/retos', { method: 'POST', body: JSON.stringify({ ...cuerpo, parentId: parentId || null }) });
+    // Un subreto recien creado tiene que VERSE: si su padre estaba
+    // plegado, lo acabas de meter en un sitio que no se ve y parece que
+    // no se ha guardado.
+    if (parentId) retosDesplegados.add(Number(parentId));
+  }
+  closeRetoModal();
+  await loadRetos();
+  renderRetos();
+});
+
+// --- La pantalla -----------------------------------------------------
+async function openRetosView() {
+  closeExtensionsView();
+  document.getElementById('retos-view').classList.remove('hidden');
+  setCurrentScreen('retos');
+  await loadRetos();
+  renderRetos();
+}
+
+function closeRetosView() {
+  document.getElementById('retos-view').classList.add('hidden');
+  // La busqueda y el modo mover se sueltan al salir: los dos son estados
+  // de "estoy haciendo algo ahora", y volver y encontrarse la lista
+  // filtrada hace pensar que has perdido retos.
+  retoMoviendose = null;
+  retosBusqueda = '';
+  document.getElementById('retos-search').value = '';
+  openExtensionsView();
+}
+
+document.getElementById('btn-open-retos').addEventListener('click', openRetosView);
+document.getElementById('btn-close-retos').addEventListener('click', closeRetosView);
+document.getElementById('btn-new-reto').addEventListener('click', () => openRetoModal(null));
+
+document.getElementById('retos-search').addEventListener('input', (e) => {
+  retosBusqueda = e.target.value;
+  // Buscar y mover a la vez no tiene sentido: la lista de resultados no
+  // es el orden real, asi que las flechas moverian respecto a algo que
+  // no se esta viendo.
+  retoMoviendose = null;
+  renderRetos();
+});
+
+// Un solo listener para toda la lista (delegacion): la lista se repinta
+// entera en cada cambio, y enganchar un listener por boton en cada
+// repintado es justo como se acumulan las fugas.
+document.getElementById('retos-list').addEventListener('click', async (e) => {
+  const twisty = e.target.closest('[data-reto-twisty]');
+  if (twisty) {
+    e.stopPropagation();
+    const reto = retoPorId(twisty.dataset.retoTwisty);
+    if (reto && retoTieneSubretos(reto)) alternarRetoDesplegado(reto.id);
+    return;
+  }
+  const add = e.target.closest('[data-reto-add]');
+  if (add) {
+    e.stopPropagation();
+    openRetoModal(null, Number(add.dataset.retoAdd));
+    return;
+  }
+  const mover = e.target.closest('[data-reto-move]');
+  if (mover) {
+    e.stopPropagation();
+    if (mover.dataset.retoMove === 'done') desarmarMovimientoDeReto();
+    else await moverReto(Number(mover.dataset.retoMoveId), mover.dataset.retoMove);
+  }
+});
+
+document.getElementById('retos-list').addEventListener('change', async (e) => {
+  const check = e.target.closest('[data-reto-check]');
+  if (!check) return;
+  await marcarReto(Number(check.dataset.retoCheck), check.checked);
+});
+
+// =====================================================================
 // GESTOS DE NAVEGACION (solo movil)
 //
 // Idea general, pedida por Koku: moverse por la app deslizando el dedo,
@@ -20818,6 +21285,7 @@ const HERRAMIENTAS_APPS = {
   finanzas: { viewId: 'finanzas-view', open: () => openFinanzasView() },
   lecturas: { viewId: 'lecturas-view', open: () => openLecturasView() },
   viajes: { viewId: 'viajes-view', open: () => openViajesView() },
+  retos: { viewId: 'retos-view', open: () => openRetosView() },
 };
 
 // Cual de las Apps de Herramientas esta abierta AHORA mismo (mirando el
@@ -20850,7 +21318,7 @@ function currentMobileTab() {
 // de la de mas arriba a la de mas abajo.
 const CAPAS_DE_PANTALLA = [
   'settings-modal', 'gym-view', 'finanzas-view', 'lecturas-view',
-  'viajes-view', 'extensions-view', 'mobile-notes-view', 'note-editor-view',
+  'viajes-view', 'retos-view', 'extensions-view', 'mobile-notes-view', 'note-editor-view',
   'groups-view',
 ];
 
@@ -21208,7 +21676,7 @@ applyAnimationsPreference();
 function mobileNavSectionForScreen(screen) {
   if (screen === 'mobile-notes') return 'notes';
   if (screen === 'extensions') return 'extensions';
-  if (['gym', 'lecturas', 'finanzas', 'viajes'].includes(screen)) {
+  if (['gym', 'lecturas', 'finanzas', 'viajes', 'retos'].includes(screen)) {
     return getMobileNavNotesSlot() === screen ? 'notes' : 'extensions';
   }
   return 'calendar';
