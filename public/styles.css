@@ -5652,3 +5652,197 @@ body.gym-rest-push #settings-modal .settings-card {
 .finanzas-row-navegable { align-items: flex-start; }
 .finanzas-row-navegable .finanzas-row-icon,
 .finanzas-row-navegable .finanzas-row-right { margin-top: 0.1rem; }
+
+/* --- Repetir un evento --------------------------------------------- */
+
+/* "Cada [N] semanas": el numero y su unidad en una linea. */
+.repeat-every-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.repeat-every-row input {
+  width: 4.5rem;
+  margin-top: 0;
+  text-align: center;
+}
+
+/* Los dias de la semana son BOTONES propios, no casillas del navegador
+   (regla de la app). Cuadraditos redondeados que se tiñen con el acento
+   al marcarlos, mismo lenguaje que .styled-checkbox. */
+.repeat-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.3rem;
+}
+.repeat-weekday-btn {
+  width: 2.3rem;
+  height: 2.3rem;
+  padding: 0;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  font-size: var(--t-pie);
+  font-weight: 600;
+}
+.repeat-weekday-btn.is-active {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+/* Tres salidas (solo esta / todas / cancelar) no caben en una fila sin
+   quedar apretadas en un movil, asi que se apilan a todo lo ancho. */
+.modal-actions-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+.modal-actions-stacked button { width: 100%; }
+
+/* ---------------------------------------------------------------------
+   HORARIO SEMANAL FIJO
+
+   Rejilla de horas (alto) x dias (ancho). Las columnas se definen UNA
+   vez en una variable y las usan la cabecera y la rejilla, para que el
+   dia de arriba caiga siempre sobre su columna aunque cambie el ancho
+   del canalon de las horas.
+   --------------------------------------------------------------------- */
+:root {
+  /* Alto de una hora. Lo lee TAMBIEN el JavaScript
+     (horarioAltoDeHora() en app.js) para colocar los bloques por
+     minutos: el numero vive aqui y en un solo sitio. */
+  --horario-hora: 56px;
+  /* El canalon de las horas. Da para "09:00" y para "9 a. m." (la
+     etiqueta compacta de horarioEtiquetaDeHora() en app.js): con la
+     etiqueta larga de la vista diaria ("9:00 a. m.") no cabia y se veia
+     ":00 a. m.", sin la hora, que es justo el dato que hacia falta. */
+  --horario-canalon: 2.9rem;
+  --horario-columnas: var(--horario-canalon) repeat(7, minmax(0, 1fr));
+}
+
+.horario-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Los margenes laterales van al MINIMO (el resto de la app usa
+     0.6rem). Aqui cada pixel de ancho se reparte entre siete columnas,
+     asi que lo que se quite de los bordes es lo que se gana para que
+     quepa el nombre de una clase. */
+  padding: 0 0.25rem;
+}
+
+.horario-days-head {
+  display: grid;
+  grid-template-columns: var(--horario-columnas);
+  align-items: center;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+.horario-day-head {
+  text-align: center;
+  font-size: var(--t-pie);
+  font-weight: 600;
+  color: var(--surface-text);
+  opacity: 0.75;
+}
+
+/* Solo se desplaza la rejilla: la cabecera de dias vive fuera de este
+   contenedor para que no se vaya al bajar. */
+.horario-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Hueco al final: la barra de abajo flota FIJA encima de esta
+     pantalla, asi que sin el colchon el ultimo bloque queda por debajo
+     de la barra y no hay forma de tocarlo. Mismo numero que
+     .gym-tab-content y .finanzas-tab-panel -- si la barra cambia de
+     alto, los tres van juntos. */
+  padding-bottom: 7rem;
+}
+
+.horario-grid {
+  display: grid;
+  grid-template-columns: var(--horario-columnas);
+  position: relative;
+}
+
+.horario-hours { position: relative; }
+.horario-hour-label {
+  position: absolute;
+  right: 0.25rem;
+  /* Media linea hacia arriba para que el texto quede CENTRADO sobre su
+     raya y no colgando por debajo. */
+  transform: translateY(-0.5em);
+  font-size: var(--t-micro);
+  color: var(--surface-text);
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+/* Las rayas de las horas se pintan con un degradado que se repite cada
+   --horario-hora, no con un elemento por hora: son 7 columnas x 15
+   horas = 105 divs que no hacen nada mas que tener un borde. */
+.horario-day-col {
+  position: relative;
+  border-left: 1px solid var(--border);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--border) 0 1px,
+    transparent 1px var(--horario-hora)
+  );
+}
+.horario-day-col:last-child { border-right: 1px solid var(--border); }
+
+/* El color del grupo va en la barra de la izquierda y no de fondo: un
+   bloque grande sobre un color elegido a mano puede quedar ilegible con
+   cualquier texto encima. Asi se lee bien con cualquier color, que es lo
+   que hace tambien el Calendario de iOS. */
+.horario-block {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0.05rem;
+  overflow: hidden;
+  padding: 0.15rem 0.15rem 0.15rem 0.2rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  text-align: left;
+  font-size: var(--t-micro);
+  line-height: 1.2;
+  cursor: pointer;
+}
+/* El titulo se PARTE en varias lineas, no se corta con puntos
+   suspensivos: en un movil son siete columnas de unos 45 px y con
+   "nowrap" un "Gimnasio" se quedaba en "Gi...". Lo que sobra lo recorta
+   el alto del propio bloque, que es lo honesto -- una clase de dos horas
+   tiene sitio para tres lineas y una de media hora para una. */
+.horario-block-title {
+  font-weight: 600;
+  /* "break-word" y no "anywhere": los dos parten una palabra que no
+     cabe, pero "anywhere" ademas cuenta ese corte al medir el ancho
+     minimo, asi que parte tambien palabras que SI cabian. Con
+     "break-word", "Turno" se queda entero y solo se parte lo que de
+     verdad no entra. */
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+.horario-block-meta {
+  opacity: 0.7;
+  overflow-wrap: break-word;
+}
+
+#horario-empty {
+  text-align: center;
+  padding: 0.8rem 1rem;
+}

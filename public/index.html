@@ -73,6 +73,23 @@
        confirm()/alert() nativos del navegador en flujos donde hace falta
        que se note mas -- ver showAppConfirm()/showAppAlert() en app.js.
        Un unico modal generico y reutilizable, no uno por caso de uso. -->
+  <!-- Al tocar UNA vez de un evento que se repite hay que preguntar a
+       que se refiere: solo esa o toda la serie. Lo eligio Koku ("que
+       pregunte cada vez"), que es lo que hacen el iPhone y Google
+       Calendar y lo que se espera al mover una cita de un dia suelto.
+       No vale showAppConfirm: ahi hay dos botones y aqui hacen falta
+       tres. -->
+  <div id="event-series-modal" class="modal hidden">
+    <div class="modal-card app-confirm-card">
+      <p id="event-series-modal-message"></p>
+      <div class="modal-actions modal-actions-stacked">
+        <button type="button" id="btn-event-series-one" class="primary-btn">Solo esta vez</button>
+        <button type="button" id="btn-event-series-all" class="secondary-btn">Todas las veces</button>
+        <button type="button" id="btn-event-series-cancel" class="secondary-btn">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
   <div id="app-confirm-modal" class="modal hidden">
     <div class="modal-card app-confirm-card">
       <p id="app-confirm-modal-message"></p>
@@ -267,6 +284,7 @@
     <div id="calendar-quick-actions" class="calendar-quick-actions">
       <button type="button" id="btn-calendar-quick-today" class="secondary-btn">Hoy</button>
       <button type="button" id="btn-calendar-quick-groups" class="secondary-btn">Grupos</button>
+      <button type="button" id="btn-calendar-quick-horario" class="secondary-btn">Horario</button>
     </div>
 
     <!-- Pantalla de Grupos: dos niveles, igual que Notas (lista ->
@@ -308,6 +326,40 @@
           </div>
           <div id="groups-detail-list" class="groups-detail-list"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- HORARIO SEMANAL FIJO. Lo que se repite TODA la semana y no
+         depende de la fecha: clases, turnos, gimnasio. Vive aparte del
+         calendario a proposito (ver el comentario de
+         routes-local/horario.js): metido dentro, cada semana se llenaria
+         de lo mismo y taparia lo que de verdad pasa ese dia.
+
+         La rejilla es horas (filas) x dias (columnas, de lunes a
+         domingo), y cada bloque se coloca por minutos con position
+         absolute -- asi una clase de 9:30 a 10:45 cae donde toca sin
+         tener que partir la hora en trozos. -->
+    <div id="horario-view" class="my-space-view hidden">
+      <div class="my-space-view-header">
+        <h2>Horario</h2>
+        <div class="my-space-view-header-actions">
+          <button type="button" id="btn-close-horario" class="secondary-btn">← Calendario</button>
+        </div>
+      </div>
+
+      <div class="horario-body">
+        <!-- La cabecera de dias va FUERA del contenedor que se desplaza
+             para que no se vaya al hacer scroll vertical: siempre tienes
+             a la vista de que dia es la columna que estas mirando. -->
+        <div id="horario-days-head" class="horario-days-head"></div>
+        <div id="horario-scroll" class="horario-scroll">
+          <div id="horario-grid" class="horario-grid"></div>
+        </div>
+        <p id="horario-empty" class="hint hidden">Todavía no hay nada en el horario. Toca el “+” para añadir una clase, un turno o lo que repitas cada semana.</p>
+      </div>
+
+      <div class="mobile-fab-wrap">
+        <button type="button" id="btn-horario-add" class="mobile-fab" aria-label="Nuevo bloque" title="Nuevo bloque">+</button>
       </div>
     </div>
 
@@ -2501,6 +2553,31 @@
           <span class="field-label">Recordatorio</span>
           <div id="event-reminder-field"></div>
         </div>
+        <!-- REPETIR. Todo lo que hay debajo del desplegable solo se ve
+             cuando de verdad se repite (ver refreshEventRepeatFields en
+             app.js): con "No se repite" puesto, un "cada cuantos" y unos
+             dias de la semana no significan nada. -->
+        <div class="field-label-block">
+          <span class="field-label">Repetir</span>
+          <div id="event-repeat-field"></div>
+        </div>
+        <div id="event-repeat-extra" class="hidden">
+          <div class="repeat-every-row">
+            <span class="field-label">Cada</span>
+            <input type="text" id="event-repeat-interval" inputmode="numeric" value="1" aria-label="Cada cuantos" />
+            <span id="event-repeat-unit" class="field-label"></span>
+          </div>
+          <!-- Los dias son BOTONES, no casillas del navegador (regla de
+               la app): cuadraditos que siguen el tema activo. -->
+          <div id="event-repeat-weekdays-row" class="field-label-block hidden">
+            <span class="field-label">Que dias</span>
+            <div id="event-repeat-weekdays" class="repeat-weekdays"></div>
+          </div>
+          <div class="field-label-block">
+            <span class="field-label">Hasta (opcional)</span>
+            <div id="event-repeat-until-field"></div>
+          </div>
+        </div>
         <div class="field-label-block">
           <span class="field-label">Grupo (opcional)</span>
           <div id="event-group-field"></div>
@@ -2510,6 +2587,52 @@
           <button type="button" id="btn-delete-event" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
           <button type="button" id="btn-cancel-event" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Ficha de un bloque del horario semanal. No lleva fecha a
+       proposito: un horario no empieza un dia concreto, solo dice "los
+       martes de 9:30 a 11:00". El color sale del grupo, como en los
+       eventos -- por eso aqui no hay selector de color. -->
+  <div id="horario-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-horario-modal" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="horario-modal-title">Nuevo bloque</h2>
+      <form id="horario-form">
+        <input type="hidden" id="horario-id" />
+        <label>
+          Título
+          <input type="text" id="horario-title" required />
+        </label>
+        <div class="field-label-block">
+          <span class="field-label">Día</span>
+          <div id="horario-weekday-field"></div>
+        </div>
+        <div class="form-row">
+          <div class="field-label-block">
+            <span class="field-label">Desde</span>
+            <div id="horario-start-field"></div>
+          </div>
+          <div class="field-label-block">
+            <span class="field-label">Hasta</span>
+            <div id="horario-end-field"></div>
+          </div>
+        </div>
+        <label>
+          Ubicación (opcional)
+          <input type="text" id="horario-location" />
+        </label>
+        <div class="field-label-block">
+          <span class="field-label">Grupo (opcional)</span>
+          <div id="horario-group-field"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-horario" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-horario" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar</button>
         </div>
       </form>
@@ -2719,7 +2842,14 @@
       </div>
       <div class="note-editor-main">
         <div class="note-editor-content-col">
-          <div id="note-body" class="note-editor-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido de la nota"></div>
+          <!-- autocapitalize="sentences": que el teclado del movil ponga
+               mayuscula al empezar cada frase. Sin declararlo se queda a
+               merced de lo que decida cada navegador, y dentro de una
+               lista el teclado de iOS no siempre lo aplica solo. Al ir
+               en el <div contenteditable>, vale para TODO lo que hay
+               dentro: parrafos, titulos, celdas de tabla y elementos de
+               lista. -->
+          <div id="note-body" class="note-editor-body" contenteditable="true" autocapitalize="sentences" role="textbox" aria-multiline="true" aria-label="Contenido de la nota"></div>
         </div>
       </div>
     </form>
@@ -3160,6 +3290,7 @@
   <script src="routes-local/gymBlocks.js"></script>
   <script src="routes-local/gymRoutines.js"></script>
   <script src="routes-local/gymSessions.js"></script>
+  <script src="routes-local/horario.js"></script>
   <script src="routes-local/lecturasItems.js"></script>
   <script src="routes-local/lecturasSagas.js"></script>
   <script src="routes-local/noteFolders.js"></script>

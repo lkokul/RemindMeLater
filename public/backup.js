@@ -76,12 +76,13 @@ function backupBase64ToBytes(b64) {
 // formas para tener el mapa completo en un solo sitio.
 //
 // LAS TABLAS QUE NO SALEN EN ESTA LISTA SON DE LA APP EN SI (temas,
-// ajustes, perfil...) y viajan SIEMPRE. Es a proposito que se decida por
+// ajustes, perfil, el historial de sincronizacion muerto) y viajan
+// SIEMPRE. Es a proposito que se decida por
 // omision: si algun dia aparece una tabla nueva y a nadie se le ocurre
 // tocar este archivo, acaba DENTRO de la copia. Lo contrario -- que una
 // tabla nueva se quedara fuera en silencio -- seria perder datos.
 const BACKUP_TABLAS_POR_APP = {
-  calendario: ['events', 'groups', 'special_days'],
+  calendario: ['events', 'groups', 'special_days', 'horario_bloques'],
   notes: ['notes', 'note_folders'],
   gym: ['gym_blocks', 'gym_block_cycle_days', 'gym_routines', 'gym_routine_exercises',
     'gym_exercises', 'gym_sessions', 'gym_sets'],

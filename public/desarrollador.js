@@ -17,13 +17,21 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
-  '0.57.0': [
+  '0.58.0': [
     'Los manuales de Calendario, Notas, Finanzas, Lecturas y Viajes están VACÍOS: solo está escrito el del Gimnasio, que es el que pediste ver primero. Si el tono y el nivel de detalle te valen, se escriben los otros cinco con el mismo patrón.',
     'Apagar una App NO borra nada, solo la esconde. Decidir si algún día debería existir un "borrar los datos de esta App" aparte — hoy no hay forma de vaciar Viajes sin vaciar la copia entera.',
     'Una copia de seguridad parcial ahora se importa SIN pisar lo que no trae. Merece la pena probarlo con datos de verdad antes de fiarse: exporta solo Gimnasio, cambia cosas en Finanzas, importa y comprueba que Finanzas sigue como la dejaste.',
     'Los ajustes de este dispositivo (tema, unidades, qué hay en la barra) se restauran ENTEROS aunque la copia sea parcial. Son preferencias, no datos de una App, pero si prefieres que una copia parcial no toque los ajustes, es una línea.',
     'El widget del calendario y el de tareas son del Calendario, que no se puede apagar: o sea que esos dos siempre tienen datos. Los cuatro que sí se pueden dejar sin datos son Gimnasio, Finanzas, Lecturas y Viajes.',
     'La clave "ejercicios" del mensaje al widget se llamaba igual en dos sitios y uno pisaba al otro (arreglado). Conviene mirar el widget "Qué toca hoy" en el iPhone: tiene que volver a decir cuántos ejercicios tiene el día.',
+  ],
+  '0.57.0': [
+    'El horario es una rejilla de SIETE columnas en un móvil, así que cada columna son unos 45 px y los nombres largos se parten ("Gimna/sio"). Se apretaron todos los márgenes para ganar sitio y es lo que hace también Google Calendar, pero si te molesta la alternativa es enseñar 3 días a la vez y deslizar de lado.',
+    'Un bloque del horario NO avisa: no programa ninguna notificación. Los avisos son del calendario, y un horario fijo sonando cada semana llenaría el cupo del teléfono. Si lo quieres, hay que decidir el reparto del cupo aparte.',
+    'Dos bloques del horario que se solapen se pintan uno ENCIMA del otro, no partiendo la columna. No pasa en un horario real (no estás en dos clases a la vez), pero conviene saberlo.',
+    'Repetir un evento calcula hasta 500 veces como mucho (MAX_OCURRENCIAS en local-api.js), y los avisos se cortan en 10 por serie. Los dos números están puestos a ojo: si alguna serie diaria larga se queda corta, se suben.',
+    'Editar una repetición suelta y luego cambiar la serie entera: la suelta NO se entera del cambio (es ya un evento propio). Es lo que hace el iPhone, pero confírmalo cuando lo uses.',
+    'El horario no sale en ningún widget ni en la copia de seguridad tiene nada especial (viaja dentro del .sqlite, como todo). Si quieres un widget de "qué me toca hoy" del horario, es una ronda aparte.',
   ],
   '0.56.0': [
     'Deslizar hacia la derecha desde el inicio del Gimnasio NO sale a Herramientas todavía — eso solo está en Finanzas. Ahora que las dos pantallas tienen la misma forma, decide si se generaliza (también a Viajes y Entretenimiento).',
