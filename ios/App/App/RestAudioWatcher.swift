@@ -36,6 +36,8 @@ final class RestAudioWatcher {
     private var pulsesLeft = 0
     private var duckEnabled = true
     private var vibrateEnabled = false
+    private var soundEnabled = false
+    private var patron = Patron.fin
     private(set) var watching = false
 
     // Vigilancia para CALLAR la vibracion (peticion de Koku: "que se
@@ -59,21 +61,55 @@ final class RestAudioWatcher {
     static var instalarParadaExtra: ((_ parar: @escaping (String) -> Void) -> Void)?
     static var quitarParadaExtra: (() -> Void)?
 
-    // Cuantas vibraciones seguidas y cada cuanto, cuando esta activada la
-    // vibracion larga. Antes eran 6 (menos de 5 segundos) y en la mano
-    // eso daba tan poco margen que no daba tiempo ni a comprobar si se
-    // callaba: para cuando ibas a tocar el volumen ya habia terminado
-    // sola. Ahora dura ~10s, como un aviso del sistema, y se calla con
-    // cualquiera de las señales de mas abajo.
-    private static let pulseCount = 12
-    private static let pulseInterval: TimeInterval = 0.8
+    // LOS TRES AVISOS, que Koku eligio distintos a proposito (14/9/2026).
+    // Corriendo con el movil en el brazo no vale un solo zumbido para
+    // todo: hay que saber SIN MIRAR si toca apretar o aflojar.
+    //
+    //   .aprieta -- arranca el tramo fuerte. Tres pulsos muy seguidos,
+    //               que en la mano se sienten como una vibracion larga.
+    //   .afloja  -- se acabo el fuerte, a trotar. Dos cortas espaciadas,
+    //               inconfundibles con la anterior.
+    //   .fin     -- el de siempre (fin de un descanso normal): insiste
+    //               unos 10 s porque ahi el movil puede estar en el suelo.
+    enum Patron: String {
+        case aprieta
+        case afloja
+        case fin
+
+        var pulsos: Int {
+            switch self {
+            case .aprieta: return 3
+            case .afloja: return 2
+            case .fin: return 12
+            }
+        }
+        var intervalo: TimeInterval {
+            switch self {
+            case .aprieta: return 0.25
+            case .afloja: return 0.5
+            case .fin: return 0.8
+            }
+        }
+    }
+
+    // El sonido: el "tri-tono" de notificacion del sistema. Koku:
+    // "tipico sonido de notificacion, no quiero ninguna locura tampoco".
+    // Se oye por encima de la musica gracias al duck de justo antes.
+    private static let sonidoDeAviso: SystemSoundID = 1007
+
+    // (Los 12 pulsos de 0,8 s que habia aqui sueltos son ahora Patron.fin:
+    // antes eran 6 y duraban menos de 5 s, y en la mano eso daba tan poco
+    // margen que no daba tiempo ni a comprobar si el aviso se callaba.)
 
     // Empieza (o reinicia) la vigilancia de un descanso que acaba en
     // endAt. Devuelve false si el audio no se pudo preparar.
     @discardableResult
-    func start(endAt: Date, duck: Bool = true, vibrate: Bool = false) -> Bool {
+    func start(endAt: Date, duck: Bool = true, vibrate: Bool = false,
+               sound: Bool = false, pattern: String? = nil) -> Bool {
         duckEnabled = duck
         vibrateEnabled = vibrate
+        soundEnabled = sound
+        patron = Patron(rawValue: pattern ?? "") ?? .fin
         teardown(deactivate: false, motivo: nil)
         let session = AVAudioSession.sharedInstance()
         do {
@@ -130,12 +166,17 @@ final class RestAudioWatcher {
         // alargar la vibracion de una notificacion, pero como la app esta
         // despierta durante el descanso (el silencio en bucle de arriba),
         // aqui si se puede repetir la vibracion del sistema a mano.
+        // El sonido va ANTES de la primera vibracion y una sola vez: es
+        // un aviso, no una alarma.
+        if soundEnabled {
+            AudioServicesPlaySystemSound(RestAudioWatcher.sonidoDeAviso)
+        }
         if vibrateEnabled {
             alertStartedAt = Date()
             pulsesDone = 0
-            pulsesLeft = RestAudioWatcher.pulseCount
+            pulsesLeft = patron.pulsos
             vibrarPulso()
-            let p = Timer(timeInterval: RestAudioWatcher.pulseInterval, repeats: true) { [weak self] t in
+            let p = Timer(timeInterval: patron.intervalo, repeats: true) { [weak self] t in
                 guard let self = self else { t.invalidate(); return }
                 if self.pulsesLeft <= 0 { t.invalidate(); self.pulseTimer = nil; return }
                 self.vibrarPulso()
@@ -146,7 +187,7 @@ final class RestAudioWatcher {
         }
         // Se suelta el audio cuando ya han pasado el duck y los pulsos.
         let espera = vibrateEnabled
-            ? Double(RestAudioWatcher.pulseCount) * RestAudioWatcher.pulseInterval + 0.5
+            ? Double(patron.pulsos) * patron.intervalo + 0.5
             : 3.0
         let t = Timer(timeInterval: espera, repeats: false) { [weak self] _ in
             self?.teardown(deactivate: true, motivo: "fin")

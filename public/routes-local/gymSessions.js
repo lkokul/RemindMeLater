@@ -29,7 +29,7 @@
   function serializeSets(sessionId) {
     const rows = db
       .prepare(`
-        SELECT gs.id, gs.parent_set_id, gs.segment_index, gs.pause_seconds, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, gs.extra_rest_seconds, gs.duration_seconds, gs.measure, gs.measure_seconds, gs.side, gs.notes, ge.name
+        SELECT gs.id, gs.parent_set_id, gs.segment_index, gs.pause_seconds, gs.exercise_id, gs.set_number, gs.reps, gs.weight_kg, gs.rest_seconds, gs.rpe, gs.set_type, gs.extra_rest_seconds, gs.duration_seconds, gs.measure, gs.measure_seconds, gs.distance_m, gs.side, gs.notes, ge.name
         FROM gym_sets gs
         JOIN gym_exercises ge ON ge.id = gs.exercise_id
         WHERE gs.session_id = ?
@@ -58,6 +58,7 @@
         // Null en todo lo de antes, que se lee como 'reps'.
         measure: r.measure || 'reps',
         measureSeconds: r.measure_seconds,
+        distanceM: r.distance_m,
         side: r.side || null,
         notes: r.notes || null,
         segments: [],
@@ -151,7 +152,7 @@
     if (!Array.isArray(sets)) return;
 
     const insert = db.prepare(
-      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds, duration_seconds, measure, measure_seconds, side, notes, parent_set_id, segment_index, pause_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO gym_sets (session_id, exercise_id, set_number, reps, weight_kg, rest_seconds, rpe, set_type, extra_rest_seconds, duration_seconds, measure, measure_seconds, distance_m, side, notes, parent_set_id, segment_index, pause_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     // 'parciales' es el tercer tipo de TRAMO (Koku, 11/9/2026): seguir a
     // recorrido corto cuando ya no salen repeticiones completas. Entra en
@@ -161,7 +162,7 @@
     const VALID_SEGMENT_KINDS = ['dropset', 'restpause', 'parciales'];
     // Como se midio la serie. 'reps' se guarda como NULL para que una
     // serie normal siga siendo indistinguible de las de antes de esto.
-    const VALID_MEASURES = ['tiempo', 'reps_en_tiempo'];
+    const VALID_MEASURES = ['tiempo', 'reps_en_tiempo', 'intervalos'];
     const VALID_SIDES = ['left', 'right'];
     // Por ejercicio: cuantas series van, si la ultima quedo ABIERTA
     // (esperando el otro lado) y de que lado era la fila anterior.
@@ -201,6 +202,12 @@
         // una de repeticiones se tiran, para que no quede un dato
         // colgado que luego alguien sume sin querer.
         VALID_MEASURES.includes(s.measure) ? numeroONulo(s.measureSeconds) : null,
+        // La distancia, en METROS enteros. Vale para cualquier serie, no
+        // solo para los intervalos: si algun dia se apunta un rodaje
+        // suelto, el campo ya esta.
+        s.distanceM !== undefined && s.distanceM !== null && s.distanceM !== '' && Number(s.distanceM) > 0
+          ? Math.round(Number(s.distanceM))
+          : null,
         lado,
         s.notes && String(s.notes).trim() ? String(s.notes).trim() : null,
         null, // parent_set_id: esta es la serie madre
@@ -239,6 +246,7 @@
           null,
           null, // measure: un tramo siempre es de repeticiones
           null, // measure_seconds
+          null, // distance_m: la distancia es de la serie, no del tramo
           VALID_SIDES.includes(s.side) ? s.side : null,
           null,
           info.lastInsertRowid,
@@ -307,8 +315,12 @@
                -- Se mira st.measure (lo que guardo LA SERIE), no el
                -- ejercicio: cambiar un ejercicio de reps a tiempo no
                -- puede reescribir lo que ya estaba apuntado.
-               SUM(CASE WHEN st.measure IN ('tiempo', 'reps_en_tiempo')
-                        THEN COALESCE(st.measure_seconds, 0) ELSE 0 END) as tension_seconds
+               SUM(CASE WHEN st.measure IN ('tiempo', 'reps_en_tiempo', 'intervalos')
+                        THEN COALESCE(st.measure_seconds, 0) ELSE 0 END) as tension_seconds,
+               -- METROS de la sesion (correr en series, o lo que se
+               -- apunte a mano). Suma aparte, como el tiempo bajo
+               -- tension: los kilometros no son kilos.
+               SUM(COALESCE(st.distance_m, 0)) as distance_m
         FROM gym_sessions s
         LEFT JOIN gym_sets st ON st.session_id = s.id
         LEFT JOIN gym_sets p ON p.id = st.parent_set_id
@@ -351,6 +363,7 @@
       // volumen a proposito: son unidades distintas (ver el comentario
       // del SQL de arriba).
       tensionSeconds: r.tension_seconds || 0,
+      distanceM: r.distance_m || 0,
       muscleGroups: musclesBySession.get(r.id) || [],
     })));
   });
@@ -546,7 +559,7 @@
     if (!last) return res.json({ date: null, sets: [], note: null });
 
     const rows = db
-      .prepare('SELECT id, parent_set_id, segment_index, pause_seconds, set_type, set_number, reps, weight_kg, rpe, rest_seconds, measure, measure_seconds, side FROM gym_sets WHERE session_id = ? AND exercise_id = ? ORDER BY id ASC')
+      .prepare('SELECT id, parent_set_id, segment_index, pause_seconds, set_type, set_number, reps, weight_kg, rpe, rest_seconds, measure, measure_seconds, distance_m, side FROM gym_sets WHERE session_id = ? AND exercise_id = ? ORDER BY id ASC')
       .all(last.id, req.params.exerciseId);
     // Mismo anidado que serializeSets: los tramos van dentro de su
     // madre, para que la columna "Anterior" del entreno en vivo siga
@@ -558,7 +571,7 @@
       // measure/measureSeconds viajan tambien en "la vez anterior": en un
       // ejercicio por tiempo, lo que quieres ver al lado de la serie es
       // cuanto aguantaste la ultima vez, no unas repeticiones vacias.
-      const set = { setNumber: r.set_number, reps: r.reps, weightKg: r.weight_kg, rpe: r.rpe, restSeconds: r.rest_seconds, measure: r.measure || 'reps', measureSeconds: r.measure_seconds, side: r.side || null, segments: [] };
+      const set = { setNumber: r.set_number, reps: r.reps, weightKg: r.weight_kg, rpe: r.rpe, restSeconds: r.rest_seconds, measure: r.measure || 'reps', measureSeconds: r.measure_seconds, distanceM: r.distance_m, side: r.side || null, segments: [] };
       byId.set(r.id, set);
       sets.push(set);
     }

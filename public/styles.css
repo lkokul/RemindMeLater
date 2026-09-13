@@ -2815,6 +2815,10 @@ body.note-dragging #mobile-notes-list { user-select: none; -webkit-user-select: 
   font-variant-numeric: tabular-nums;
 }
 .gym-set-run-btn.paused { opacity: 0.75; }
+/* El tramo FUERTE de un bloque de intervalos: el mismo boton, marcado,
+   porque ahi no se pulsa nada -- se corre. Sigue siendo pulsable para
+   cortar el tramo antes de tiempo. */
+.gym-set-run-btn.is-fuerte { letter-spacing: 0.04em; font-weight: 700; }
 
 /* Dialogos de empezar/terminar serie. */
 .gym-set-modal { text-align: center; }

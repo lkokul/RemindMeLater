@@ -11018,6 +11018,9 @@ function renderGymSessionsList() {
       // si la sesion se registro con el boton de empezar/terminar serie.
       const workSeconds = s.sets.reduce((acc, set) => acc + (set.durationSeconds || 0), 0);
       if (workSeconds > 0) statBits.push(`${gymFormatWorkTime(workSeconds)} de trabajo`);
+      // Los kilometros del dia, si los hubo (correr en series).
+      const metros = s.sets.reduce((acc, set) => acc + (Number(set.distanceM) || 0), 0);
+      if (metros > 0) statBits.push(gymTextoDeDistancia(metros));
     }
 
     if (s.type === 'activity') {
@@ -11883,6 +11886,7 @@ const GYM_MEDICIONES = [
   { value: 'reps', label: 'Repeticiones', hint: 'Lo de siempre: repeticiones y peso.' },
   { value: 'tiempo', label: 'Tiempo (aguantar)', hint: 'Isométrico: se aguanta. Con segundos objetivo el cronómetro cuenta atrás; déjalos vacíos para aguantar lo que puedas.' },
   { value: 'reps_en_tiempo', label: 'Reps en un tiempo', hint: 'Pon los segundos y se cuenta atrás (apuntas cuántas hiciste), o pon las reps y se mide lo que tardas.' },
+  { value: 'intervalos', label: 'Intervalos (correr en series)', hint: 'Tiempo fuerte, tiempo suave y cuántas series. Al empezar se encadena solo de principio a fin y el móvil avisa en cada cambio: no hay que tocarlo mientras corres.' },
 ];
 
 function gymMedicionDe(exercise) {
@@ -11890,7 +11894,14 @@ function gymMedicionDe(exercise) {
   return GYM_MEDICIONES.some((m) => m.value === v) ? v : 'reps';
 }
 function gymEsPorTiempo(measure) {
-  return measure === 'tiempo' || measure === 'reps_en_tiempo';
+  return measure === 'tiempo' || measure === 'reps_en_tiempo' || measure === 'intervalos';
+}
+// Correr en series: x tiempo fuerte, y tiempo suave, N veces, encadenado
+// solo. Es una serie por tiempo con su descanso detras -- por eso reusa
+// todo lo de arriba -- pero con una diferencia: NO se para a preguntar
+// nada entre tramo y tramo, porque el movil va en el brazo.
+function gymEsIntervalos(measure) {
+  return measure === 'intervalos';
 }
 
 const gymExerciseMeasureField = createSelectField({
@@ -11909,10 +11920,20 @@ function aplicarMedicionEnFichaDeEjercicio() {
   const medicion = gymExerciseMeasureField.getValue() || 'reps';
   const reps = document.getElementById('gym-exercise-default-reps');
   const segundos = document.getElementById('gym-exercise-default-seconds');
-  reps.classList.toggle('hidden', medicion === 'tiempo');
+  const descanso = document.getElementById('gym-exercise-default-rest');
+  const series = document.getElementById('gym-exercise-default-sets');
+  const intervalos = gymEsIntervalos(medicion);
+  reps.classList.toggle('hidden', medicion === 'tiempo' || intervalos);
   segundos.classList.toggle('hidden', medicion === 'reps');
+  // En intervalos los campos son los MISMOS de siempre, solo que
+  // significan otra cosa y se dicen con su nombre: nadie escribe
+  // "descanso" pensando en el trote suave entre series.
+  segundos.placeholder = intervalos ? 'Fuerte (s)' : 'Segundos';
+  descanso.placeholder = intervalos ? 'Suave (s)' : 'Descanso (s)';
+  series.placeholder = intervalos ? 'Series' : 'Series';
   const meta = GYM_MEDICIONES.find((m) => m.value === medicion);
   document.getElementById('gym-exercise-measure-hint').textContent = meta ? meta.hint : '';
+  refreshGymExerciseDefaultRestPreview();
 }
 
 // Musculos SECUNDARIOS del ejercicio (chips activables): cuentan en el
@@ -11952,8 +11973,9 @@ document.getElementById('gym-exercise-unilateral').addEventListener('change', re
 // nota (mismo apano que ya tenia la fila del dia).
 function refreshGymExerciseDefaultRestPreview() {
   const n = Number(document.getElementById('gym-exercise-default-rest').value);
+  const intervalos = gymEsIntervalos(gymExerciseMeasureField.getValue());
   document.getElementById('gym-exercise-default-rest-preview').textContent =
-    n > 0 ? `Descanso: ${gymLiveFormatClock(n)} min` : '';
+    n > 0 ? `${intervalos ? 'Suave' : 'Descanso'}: ${gymLiveFormatClock(n)} min` : '';
 }
 document.getElementById('gym-exercise-default-rest').addEventListener('input', refreshGymExerciseDefaultRestPreview);
 
@@ -12784,6 +12806,18 @@ function gymLiveTick() {
     gymConsumeRestExtensionFromLockScreen();
   }
 
+  // CORRER EN SERIES: el tramo fuerte se cierra SOLO al cumplirse su
+  // objetivo y arranca el trote suave. Va aqui y no en un temporizador
+  // aparte a proposito -- este tick ya se recalcula desde timestamps, asi
+  // que si iOS congela la app un rato, al volver se cierra igual en vez
+  // de quedarse el cronometro corriendo para siempre.
+  const enCursoAuto = gymSerieEnCurso();
+  if (enCursoAuto && !gymLiveSession.activeSet.pausedAt
+      && gymEsIntervalos(enCursoAuto.set.measure) && gymObjetivoCumplido(enCursoAuto.set)) {
+    gymCerrarTramoFuerte();
+    return;
+  }
+
   // Cronometro de la serie en curso: se actualiza el texto en vez de
   // repintar la tarjeta entera cada segundo.
   const enCurso = gymSerieEnCurso();
@@ -12835,7 +12869,7 @@ function gymLiveTick() {
     document.body.classList.add('gym-rest-push');
   } else if (liveHidden && gymLiveSession.restUntil && gymLiveSession.restUntil > Date.now()) {
     globalBar.classList.remove('is-ready');
-    globalLabel.textContent = 'Descanso';
+    globalLabel.textContent = gymEtiquetaDelDescanso();
     // floor y no ceil: la tarjeta de la pantalla de bloqueo redondea
     // HACIA ABAJO (estilo reloj del sistema: un temporizador de 1:00
     // ensena 0:59 nada mas empezar), y con ceil la app iba un segundo
@@ -12877,6 +12911,8 @@ function gymLiveTick() {
     }
     // Barra: el descanso planificado son base + extra; el tramo base se
     // vacia primero y el extra (los +30s) al final, en otro color.
+    const etiqueta = document.getElementById('gym-live-rest-label');
+    if (etiqueta) etiqueta.textContent = gymEtiquetaDelDescanso();
     const baseTotal = gymLiveSession.restBaseSeconds;
     const extraTotal = gymLiveSession.restExtraSeconds || 0;
     const planned = Math.max(1, baseTotal + extraTotal);
@@ -12947,7 +12983,10 @@ function gymAutoStartEnabled() {
 function gymAvisarFinDeDescanso() {
   const i = gymIndiceDelEjercicioEnEspera();
   if (i < 0) return;
-  if (gymAutoStartEnabled()) {
+  // En un bloque de intervalos el encadenado es LA funcion: arranca sola
+  // siempre, sin depender del ajuste de Configuracion. Quien ha puesto
+  // "correr en series" ya ha dicho que no quiere tocar el movil.
+  if (gymAutoStartEnabled() || gymExerciseEsDeIntervalos(gymLiveSession.exercises[i])) {
     gymStartSet(i);
     renderGymLiveExercises();
     return;
@@ -13033,6 +13072,28 @@ function gymRestBurstEnabled() {
 // atMs: cuando debe saltar. Por defecto, el final del descanso en curso;
 // se puede pasar a mano para el boton de PROBAR el aviso de
 // Configuracion (que recorre exactamente este mismo camino).
+// Que dice el aviso del fin de lo que este corriendo. Tres casos, y los
+// tres se leen de un vistazo en la pantalla de bloqueo:
+//   preparacion -> "Empieza" (la cuenta atras de antes de salir)
+//   intervalos  -> "Aprieta" (se acabo el trote suave)
+//   lo de siempre -> "Descanso terminado"
+// Como se llama lo que esta corriendo ahora mismo: en un bloque de
+// intervalos no es un "descanso", es el trote suave entre series.
+function gymEtiquetaDelDescanso() {
+  if (gymLiveSession && gymLiveSession.restEsPreparacion) return 'Preparación';
+  return gymPatronDelTramoQueViene() === 'aprieta' ? 'Suave' : 'Descanso';
+}
+
+function gymTextosDelAvisoDeDescanso() {
+  if (gymLiveSession && gymLiveSession.restEsPreparacion) {
+    return { title: '¡Empieza!', body: 'Arranca la primera serie.' };
+  }
+  if (gymPatronDelTramoQueViene() === 'aprieta') {
+    return { title: '¡Aprieta!', body: 'Arranca el tramo fuerte.' };
+  }
+  return { title: 'Descanso terminado', body: 'Siguiente serie.' };
+}
+
 async function gymScheduleRestNotification(atMs = null) {
   if (typeof getLocalNotificationsPlugin !== 'function') return;
   const plugin = getLocalNotificationsPlugin();
@@ -13052,10 +13113,14 @@ async function gymScheduleRestNotification(atMs = null) {
     // vibracion larga nativa de RestAudioWatcher, que puede repetir la
     // vibracion del sistema sin notificar nada porque la app sigue
     // despierta durante el descanso.
+    // Lo que dice el aviso depende de QUE viene despues. Con el movil en
+    // el brazo, "Descanso terminado" al acabar el trote suave no dice
+    // nada: lo que hace falta saber es que toca apretar.
+    const textos = gymTextosDelAvisoDeDescanso();
     const aviso = {
       id: GYM_REST_NOTIFICATION_ID,
-      title: 'Descanso terminado',
-      body: 'Siguiente serie.',
+      title: textos.title,
+      body: textos.body,
       schedule: { at: new Date(cuando) },
       threadIdentifier: 'gym-descanso',
     };
@@ -13295,27 +13360,68 @@ function gymRestDuckEnabled() {
   return localStorage.getItem('gymRestDuck') !== 'false';
 }
 // La vigilancia hace falta si hay que bajar la musica O si hay que
-// vibrar largo al acabar: las dos cosas necesitan la app despierta.
-function gymRestWatchParams() {
-  return { duck: gymRestDuckEnabled(), vibrate: gymRestBurstEnabled() };
+// vibrar al acabar: las dos cosas necesitan la app despierta.
+//
+// EN UN BLOQUE DE INTERVALOS LA VIBRACION NO ES OPCIONAL: es la unica
+// forma de enterarte de que toca apretar con el movil en el brazo. El
+// ajuste de "vibracion larga al acabar el descanso" sigue mandando en
+// todo lo demas, que es para lo que se puso.
+function gymRestWatchParams(patron) {
+  const esIntervalo = patron === 'aprieta' || patron === 'afloja';
+  return {
+    duck: gymRestDuckEnabled(),
+    vibrate: esIntervalo || gymRestBurstEnabled(),
+    // El sonido sigue al interruptor de siempre (Configuracion >
+    // Notificaciones > Sonido): "si lo llevas activo, tipico sonido de
+    // notificacion, no quiero ninguna locura tampoco".
+    sound: localStorage.getItem('notifSound') !== 'false',
+  };
 }
-async function gymStartRestAudioWatch(endAtMs = null) {
+async function gymStartRestAudioWatch(endAtMs = null, patron = null) {
   const plugin = getGymRestAudioPlugin();
-  const flags = gymRestWatchParams();
+  const patronReal = patron || gymPatronDelTramoQueViene();
+  const flags = gymRestWatchParams(patronReal);
   const fin = endAtMs || (gymLiveSession && gymLiveSession.restUntil);
   if (!plugin || (!flags.duck && !flags.vibrate) || !fin) return;
   try {
-    await plugin.startWatch({ endAt: fin, ...flags });
+    await plugin.startWatch({ endAt: fin, ...flags, pattern: patronReal });
   } catch (err) {
     console.error('No se pudo vigilar el audio del descanso:', err);
   }
 }
+
+// QUE VIBRACION toca cuando venza lo que esta corriendo ahora.
+//
+// Koku eligio dos avisos distintos para correr ("aprieta" y "afloja") y
+// el de siempre para todo lo demas. El patron lo decide QUE EMPIEZA
+// despues, no que acaba: cuando se acaba el trote suave lo que viene es
+// apretar, y al reves.
+//
+//   'aprieta'  -- una vibracion larga: arranca el tramo fuerte.
+//   'afloja'   -- dos cortas: se acabo el fuerte, a trotar.
+//   'fin'      -- el de siempre (fin de un descanso normal, plancha).
+function gymPatronDelTramoQueViene() {
+  if (!gymLiveSession) return 'fin';
+  // Con un descanso corriendo, lo que viene despues es la serie
+  // siguiente: si es de intervalos, toca apretar.
+  const ref = gymLiveSession.restSetRef;
+  if (gymLiveSession.restUntil && ref) {
+    const ex = gymLiveSession.exercises.find((e) => e.exerciseId === ref.exerciseId);
+    const idx = ex ? gymNextPendingSetIndex(ex) : -1;
+    if (ex && idx >= 0 && gymEsIntervalos(ex.sets[idx].measure)) return 'aprieta';
+  }
+  // Y con un tramo FUERTE corriendo, lo que viene es aflojar.
+  const enCurso = gymSerieEnCurso();
+  if (enCurso && gymEsIntervalos(enCurso.set.measure)) return 'afloja';
+  return 'fin';
+}
 async function gymUpdateRestAudioWatch() {
   const plugin = getGymRestAudioPlugin();
-  const flags = gymRestWatchParams();
+  const patron = gymPatronDelTramoQueViene();
+  const flags = gymRestWatchParams(patron);
   if (!plugin || (!flags.duck && !flags.vibrate) || !gymLiveSession || !gymLiveSession.restUntil) return;
   try {
-    await plugin.updateWatch({ endAt: gymLiveSession.restUntil, ...flags });
+    await plugin.updateWatch({ endAt: gymLiveSession.restUntil, ...flags, pattern: patron });
   } catch (err) {
     console.error('No se pudo mover la vigilancia de audio:', err);
   }
@@ -13610,6 +13716,19 @@ function gymTextoDeSegundosDeSerie(set) {
     return reps ? String(reps) : '—';
   }
   return tiene ? `${seg} s` : '—';
+}
+
+// Metros -> "6,2 km" / "800 m". Por debajo del kilometro se escribe en
+// metros, que es como se habla de una serie corta.
+function gymTextoDeDistancia(metros) {
+  const m = Number(metros) || 0;
+  if (m <= 0) return '';
+  if (m < 1000) return `${Math.round(m)} m`;
+  const km = m / 1000;
+  // Un decimal basta para leerlo de un vistazo; los redondos salen sin
+  // coma ("5 km", no "5,0 km").
+  const texto = (Math.round(km * 10) / 10).toFixed(1).replace(/\.0$/, '').replace('.', ',');
+  return `${texto} km`;
 }
 
 // El resumen de una serie para "la ultima vez" y el historial: en
@@ -13945,6 +14064,30 @@ function renderGymSetStartModal() {
     });
   }
 
+  // Correr en series: cuanto se espera antes del primer tramo fuerte.
+  // Solo en la PRIMERA serie del bloque -- a mitad de bloque las series
+  // se encadenan solas y no hay nada que preparar.
+  const prep = document.getElementById('gym-set-start-prep');
+  const esIntervalos = gymExerciseEsDeIntervalos(ex);
+  const primeraDelBloque = esIntervalos && !ex.sets.some((x) => x.done);
+  prep.classList.toggle('hidden', !primeraDelBloque);
+  if (primeraDelBloque) {
+    const cont = document.getElementById('gym-set-start-prep-buttons');
+    const elegido = gymPrepPorDefecto();
+    cont.innerHTML = '';
+    GYM_PREP_OPCIONES.forEach((segundos) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'secondary-btn' + (segundos === elegido ? ' active' : '');
+      btn.textContent = gymTextoDePrep(segundos);
+      btn.addEventListener('click', () => {
+        gymGuardarPrep(segundos);
+        renderGymSetStartModal();
+      });
+      cont.appendChild(btn);
+    });
+  }
+
   const picker = document.getElementById('gym-set-start-exercise');
   picker.setAttribute('aria-expanded', gymSetStartListOpen ? 'true' : 'false');
   const list = document.getElementById('gym-set-start-exercise-list');
@@ -13987,7 +14130,15 @@ document.getElementById('gym-set-start-sides').addEventListener('click', (e) => 
 });
 document.getElementById('btn-gym-set-start-cancel').addEventListener('click', closeGymSetStartModal);
 document.getElementById('btn-gym-set-start-go').addEventListener('click', () => {
-  gymStartSet(gymSetStartTargetIndex);
+  const ex = gymLiveSession && gymLiveSession.exercises[gymSetStartTargetIndex];
+  const prep = gymPrepPorDefecto();
+  // Correr en series y con espera elegida: primero la cuenta atras de
+  // preparacion (que es un descanso puesto delante), y la serie arranca
+  // sola al vencer. Sin espera, o en cualquier otro ejercicio, se empieza
+  // en el acto como toda la vida.
+  const primeraDelBloque = ex && gymExerciseEsDeIntervalos(ex) && !ex.sets.some((x) => x.done);
+  if (primeraDelBloque && prep > 0) gymEmpezarPreparacion(gymSetStartTargetIndex, prep);
+  else gymStartSet(gymSetStartTargetIndex);
   closeGymSetStartModal();
 });
 
@@ -14020,6 +14171,183 @@ function gymApuntarDescansoReal() {
 
 // Arranca la serie: apunta a la primera sin hacer y, si ya estaban todas,
 // añade una serie extra heredando el descanso de la anterior.
+// =====================================================================
+// SALIR A CORRER EN SERIES (intervalos)
+// =====================================================================
+//
+// Peticion de Koku (14/9/2026): "anadir ejercicios para salir a correr en
+// series (x tiempo mas fuerte, y tiempo descanso...)", y de las tres
+// formas que se le ofrecieron eligio la que SE ENCADENA SOLA: "no tocas
+// el movil mientras corres".
+//
+// LA DECISION DE DISENO: esto NO es un motor nuevo. Un intervalo es una
+// serie por tiempo con su descanso detras, que es justo lo que ya sabia
+// hacer el entreno en vivo. Asi que reusa TODO:
+//   - el tramo suave ES el descanso de siempre, con su tarjeta en la
+//     pantalla de bloqueo, su +30s y su bajada de musica;
+//   - el tramo fuerte ES una serie con objetivo, con su cuenta atras;
+//   - el historial, el volumen y los records no necesitan ni un caso
+//     especial.
+// Lo unico que se anade es que los tramos se cierran y se encadenan
+// SOLOS, y que cada cambio avisa con su vibracion.
+//
+// Koku pidio ademas una CUENTA ATRAS DE PREPARACION antes de empezar,
+// ajustable en el momento ("habra veces que quieres 1 minuto y otras 2.
+// Para ponerte musica, el movil en el brazo..."). Tambien es un descanso:
+// uno que va DELANTE de la primera serie en vez de detras.
+
+// Lo que se ofrece como preparacion, en segundos. El 0 es "ya estoy
+// listo": se empieza en el acto, como cualquier otra serie.
+const GYM_PREP_OPCIONES = [0, 30, 60, 120, 180];
+function gymPrepPorDefecto() {
+  // OJO con el respaldo: Number(null) es 0, y 0 ES una opcion valida
+  // ("Sin espera"), asi que mirar solo el numero convertido dejaba el
+  // valor de fabrica en "sin espera" para siempre. Hay que mirar si la
+  // clave EXISTE antes de convertirla.
+  const crudo = localStorage.getItem('gymIntervalPrep');
+  if (crudo === null || crudo === '') return 60;
+  const guardado = Number(crudo);
+  return GYM_PREP_OPCIONES.includes(guardado) ? guardado : 60;
+}
+function gymGuardarPrep(segundos) {
+  localStorage.setItem('gymIntervalPrep', String(segundos));
+}
+function gymTextoDePrep(segundos) {
+  if (!segundos) return 'Sin espera';
+  return segundos < 60 ? `${segundos} s` : `${gymLiveFormatClock(segundos)} min`;
+}
+
+// La serie que toca de un ejercicio, sea o no de intervalos.
+function gymSetPendienteDe(ex) {
+  const idx = ex ? gymNextPendingSetIndex(ex) : -1;
+  return idx >= 0 ? ex.sets[idx] : null;
+}
+function gymExerciseEsDeIntervalos(ex) {
+  const set = ex && (gymSetPendienteDe(ex) || ex.sets[0]);
+  return !!(set && gymEsIntervalos(set.measure));
+}
+
+// Arranca el descanso que va DETRAS de una serie (o DELANTE de la
+// primera, cuando es la preparacion). Estaba metido dentro de
+// gymFinishActiveSet y se saca aqui para que lo use tambien el
+// encadenado automatico, que no pasa por ningun formulario.
+function gymArrancarDescanso(seconds, ref, { preparacion = false } = {}) {
+  gymLiveSession.restUntil = Date.now() + seconds * 1000;
+  gymLiveSession.restBaseSeconds = seconds;
+  gymLiveSession.restExtraSeconds = 0;
+  // A que serie pertenece el descanso en marcha: los +30s se le apuntan a
+  // ELLA, para poder ensenar "Serie 1: +60s" luego.
+  gymLiveSession.restSetRef = ref;
+  gymLiveSession.restEsPreparacion = !!preparacion;
+  gymLiveSession.restEndedAt = null;
+  gymScheduleRestNotification();
+  gymStartRestLiveActivity();
+  gymStartRestAudioWatch();
+}
+
+// La cuenta atras de preparacion: un descanso puesto DELANTE de la
+// primera serie. Al vencer, gymAvisarFinDeDescanso() arranca la serie
+// sola (en intervalos siempre, sin depender del ajuste).
+function gymEmpezarPreparacion(exIndex, segundos) {
+  const ex = gymLiveSession && gymLiveSession.exercises[exIndex];
+  if (!ex) return false;
+  const idx = gymNextPendingSetIndex(ex);
+  if (idx < 0) return false;
+  gymArrancarDescanso(segundos, { exerciseId: ex.exerciseId, setIndex: idx }, { preparacion: true });
+  ex.collapsed = false;
+  gymLiveStore();
+  renderGymLiveExercises();
+  gymLiveTick();
+  return true;
+}
+
+// El tramo fuerte se ha cumplido: se cierra la serie SIN preguntar nada y
+// se arranca el trote suave. Es el equivalente de "Guardar serie" pero
+// sin formulario, porque el movil va en el brazo.
+//
+// Lo que se guarda son los segundos del OBJETIVO y no lo que marque el
+// cronometro al pasar por aqui: el tramo dura lo que dura, y un tick que
+// llegue 200 ms tarde no puede convertir un minuto en 61 segundos.
+function gymCerrarTramoFuerte() {
+  const a = gymLiveSession && gymLiveSession.activeSet;
+  if (!a) return false;
+  const ex = gymActiveSetExercise();
+  const set = ex && ex.sets[a.setIndex];
+  if (!set || !gymEsIntervalos(set.measure)) return false;
+
+  set.measureSeconds = gymObjetivoDeLaSerie(set);
+  set.done = true;
+  set.durationSeconds = gymActiveSetSeconds();
+  set.extraRest = 0;
+  gymLiveSession.activeSet = null;
+
+  const quedan = gymNextPendingSetIndex(ex) >= 0;
+  if (quedan) {
+    const suave = Number(set.restSeconds) || gymLiveSession.restPreset;
+    gymArrancarDescanso(suave, { exerciseId: ex.exerciseId, setIndex: a.setIndex });
+  } else {
+    // Se acabo el bloque: NO se arranca un trote suave detras de la
+    // ultima serie (ahi ya estas parando), y se pregunta la distancia.
+    gymCombineSetNotes(ex);
+    gymCancelRestAudioWatch();
+    gymPedirDistanciaDelBloque(ex.exerciseId);
+  }
+  gymLiveStore();
+  renderGymLiveExercises();
+  gymLiveTick();
+  return true;
+}
+
+// --- La distancia, al acabar el bloque -------------------------------
+// Koku pidio "tiempo y distancia". Se pregunta UNA VEZ al final y no
+// tramo a tramo: lo que dice el reloj al volver es el total, y pararse a
+// teclear entre series es justo lo que este modo evita.
+//
+// Se apunta en la PRIMERA serie del bloque. Los kilometros se guardan en
+// metros enteros (ver el comentario del esquema).
+let gymDistanciaPendienteExerciseId = null;
+function gymPedirDistanciaDelBloque(exerciseId) {
+  const ex = gymLiveSession && gymLiveSession.exercises.find((e) => e.exerciseId === exerciseId);
+  if (!ex) return;
+  gymDistanciaPendienteExerciseId = exerciseId;
+  const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+  const series = ex.sets.filter((x) => x.done).length;
+  const segundos = ex.sets.reduce((acc, x) => acc + (Number(x.measureSeconds) || 0), 0);
+  document.getElementById('gym-distancia-info').textContent =
+    `${exercise ? exercise.name : 'Ejercicio'} · ${series} ${series === 1 ? 'serie' : 'series'} · ${gymLiveFormatClock(segundos)} en fuerte`;
+  document.getElementById('gym-distancia-km').value = gymKmDeEjercicio(ex);
+  document.getElementById('gym-distancia-modal').classList.remove('hidden');
+}
+function cerrarGymDistanciaModal() {
+  document.getElementById('gym-distancia-modal').classList.add('hidden');
+  gymDistanciaPendienteExerciseId = null;
+}
+// Los km que tenga apuntados un ejercicio del entreno (suma de sus
+// series), en texto y con coma, que es como se escriben.
+function gymKmDeEjercicio(ex) {
+  const metros = (ex.sets || []).reduce((acc, x) => acc + (Number(x.distanceM) || 0), 0);
+  return metros > 0 ? String(metros / 1000).replace('.', ',') : '';
+}
+
+document.getElementById('btn-gym-distancia-guardar').addEventListener('click', () => {
+  const ex = gymLiveSession && gymLiveSession.exercises.find((e) => e.exerciseId === gymDistanciaPendienteExerciseId);
+  if (ex) {
+    // "2,45" y "2.45" valen los dos: mismo apano que el peso (el teclado
+    // decimal del iPhone en espanol escribe COMA).
+    const km = Number(gymNormalizarPeso(document.getElementById('gym-distancia-km').value));
+    // La distancia entera va a la PRIMERA serie del bloque, y las demas
+    // se limpian: asi la suma es la que has escrito, la escribas una vez
+    // o la repartas luego a mano desde el editor del ejercicio.
+    ex.sets.forEach((x, i) => {
+      x.distanceM = i === 0 && Number.isFinite(km) && km > 0 ? Math.round(km * 1000) : null;
+    });
+    gymLiveStore();
+    renderGymLiveExercises();
+  }
+  cerrarGymDistanciaModal();
+});
+document.getElementById('btn-gym-distancia-saltar').addEventListener('click', cerrarGymDistanciaModal);
+
 function gymStartSet(exIndex, setIndexOverride = null) {
   const ex = gymLiveSession && gymLiveSession.exercises[exIndex];
   if (!ex || gymLiveSession.activeSet) return;
@@ -14804,15 +15132,7 @@ function gymFinishActiveSet() {
     const seconds = entreLados
       ? Number(exercise.sideRestSeconds)
       : (Number(set.restSeconds) || gymLiveSession.restPreset);
-    gymLiveSession.restUntil = Date.now() + seconds * 1000;
-    gymLiveSession.restBaseSeconds = seconds;
-    gymLiveSession.restExtraSeconds = 0;
-    // A que serie pertenece el descanso en marcha: los +30s se le
-    // apuntan a ELLA, para poder ensenar "Serie 1: +60s" luego.
-    gymLiveSession.restSetRef = { exerciseId: ex.exerciseId, setIndex: a.setIndex };
-    gymScheduleRestNotification();
-    gymStartRestLiveActivity();
-    gymStartRestAudioWatch();
+    gymArrancarDescanso(seconds, { exerciseId: ex.exerciseId, setIndex: a.setIndex });
 
     // Ejercicio terminado: las notas de sus series se combinan en la
     // nota del ejercicio, que es la que se vera el proximo entreno.
@@ -14930,9 +15250,19 @@ function renderGymLiveExercises() {
     let bigBtnHtml;
     if (activeHere) {
       const paused = !!active.pausedAt;
-      const activeSide = (ex.sets[active.setIndex] || {}).side;
+      const activeSet = ex.sets[active.setIndex] || {};
+      const activeSide = activeSet.side;
       const que = activeSide ? `lado ${gymSideLabel(activeSide)}` : 'serie';
-      bigBtnHtml = `
+      // Corriendo en series el boton no es "termina esto": el tramo se
+      // cierra solo. Dice lo que estas haciendo (FUERTE y cuanto queda) y
+      // sigue sirviendo para cortarlo antes de tiempo si hace falta.
+      const enFuerte = gymEsIntervalos(activeSet.measure) && !paused;
+      bigBtnHtml = enFuerte
+        ? `
+        <button type="button" class="gym-set-big-btn gym-set-run-btn is-fuerte" data-live-set-action>
+          FUERTE · <span data-live-set-timer>0:00</span>
+        </button>`
+        : `
         <button type="button" class="gym-set-big-btn gym-set-run-btn${paused ? ' paused' : ''}" data-live-set-action>
           ${paused ? `▶ Reanudar ${que}` : `■ Terminar ${que}`} · <span data-live-set-timer>0:00</span>
         </button>`;
@@ -15314,6 +15644,8 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
         // repeticiones van a null y la fila queda igual que siempre.
         measure: gymEsPorTiempo(set.measure) ? set.measure : null,
         measureSeconds: gymEsPorTiempo(set.measure) && set.measureSeconds !== '' ? set.measureSeconds : null,
+        // Los metros recorridos, si los hubo (correr en series).
+        distanceM: set.distanceM || null,
         // Cuanto duro la serie (del boton "empezar" al "terminar").
         durationSeconds: set.durationSeconds || null,
         side: set.side || null,
@@ -15365,6 +15697,11 @@ document.getElementById('btn-gym-live-finish').addEventListener('click', async (
   document.getElementById('gym-summary-failure').textContent = String(failureSets);
   document.getElementById('gym-summary-muscles').textContent = String(musclesTouched.size);
   document.getElementById('gym-summary-muscle-list').textContent = [...musclesTouched].join(' · ');
+  // Los kilometros del dia (correr en series). Solo se ensena el hueco si
+  // hay alguno: en un entreno de pesas no pinta nada.
+  const metros = sets.reduce((acc, x) => acc + (Number(x.distanceM) || 0), 0);
+  document.getElementById('gym-summary-distance-stat').classList.toggle('hidden', metros <= 0);
+  document.getElementById('gym-summary-distance').textContent = gymTextoDeDistancia(metros);
 
   localStorage.removeItem('gymLiveSession');
   gymLiveSession = null;
@@ -16437,7 +16774,11 @@ function renderGymSessionExercisesField() {
                descanso extra que se anadio con el boton +30s, y colgando
                de la duracion parecia que la serie habia durado mas
                (lo vio Koku). -->
-          <label class="gym-set-segment-field"><span>Descanso (s)${set.extraRestSeconds ? ` <span class="gym-set-extra-chip" title="Añadido con +30s durante el entreno">+${set.extraRestSeconds}</span>` : ''}</span><input type="number" data-field="restSeconds" min="0" value="${escapeHtml(String(set.restSeconds ?? ''))}" /></label>
+          <label class="gym-set-segment-field"><span>${gymEsIntervalos(set.measure) ? 'Suave (s)' : 'Descanso (s)'}${set.extraRestSeconds ? ` <span class="gym-set-extra-chip" title="Añadido con +30s durante el entreno">+${set.extraRestSeconds}</span>` : ''}</span><input type="number" data-field="restSeconds" min="0" value="${escapeHtml(String(set.restSeconds ?? ''))}" /></label>
+          <!-- La distancia, solo al correr en series: en el entreno se
+               pregunta una vez al final y se apunta en la primera serie,
+               y aqui se puede corregir o repartir entre las demas. -->
+          ${gymEsIntervalos(set.measure) ? `<label class="gym-set-segment-field"><span>Distancia (km)</span><input type="text" inputmode="decimal" data-field="distanceKm" value="${escapeHtml(set.distanceM ? String(set.distanceM / 1000).replace('.', ',') : '')}" /></label>` : ''}
         </div>
         ${set.extraRestSeconds ? `<div class="gym-set-extend-list gym-session-set-actions">${gymBotonQuitarExtraHtml(set.extraRestSeconds)}</div>` : ''}
         ${set.notes ? `<p class="gym-live-card-meta">${escapeHtml(set.notes)}</p>` : ''}
@@ -16450,6 +16791,13 @@ function renderGymSessionExercisesField() {
       if (repsEl) repsEl.addEventListener('input', (e) => { set.reps = e.target.value; });
       const segEl = bloqueSerie.querySelector('[data-field="measureSeconds"]');
       if (segEl) segEl.addEventListener('input', (e) => { set.measureSeconds = e.target.value; });
+      const distEl = bloqueSerie.querySelector('[data-field="distanceKm"]');
+      if (distEl) distEl.addEventListener('input', (e) => {
+        // Se escribe en km (con coma, como el teclado del iPhone) y se
+        // guarda en metros enteros, que es lo que viaja a la base.
+        const km = Number(gymNormalizarPeso(e.target.value));
+        set.distanceM = Number.isFinite(km) && km > 0 ? Math.round(km * 1000) : null;
+      });
       bloqueSerie.querySelector('[data-field="weight"]').addEventListener('input', (e) => { set.weightDisplay = gymNormalizarPeso(e.target.value); });
       bloqueSerie.querySelector('[data-field="restSeconds"]').addEventListener('input', (e) => { set.restSeconds = e.target.value; });
       const quitarExtraSesion = bloqueSerie.querySelector('[data-quitar-extra]');
@@ -16608,6 +16956,9 @@ function openGymSessionModal(session) {
         // de 45 s en una serie de cero repeticiones.
         measure: set.measure || 'reps',
         measureSeconds: set.measureSeconds ?? '',
+        // Los metros se arrastran igual: editar la sesion a mano no puede
+        // borrar la distancia de una tirada.
+        distanceM: set.distanceM ?? null,
         side: set.side ?? null,
         notes: set.notes ?? null,
         // Los tramos de una serie alargada se arrastran tal cual (en kg,
@@ -16671,6 +17022,7 @@ document.getElementById('gym-session-form').addEventListener('submit', async (e)
         durationSeconds: set.durationSeconds ?? null,
         measure: gymEsPorTiempo(set.measure) ? set.measure : null,
         measureSeconds: gymEsPorTiempo(set.measure) && set.measureSeconds !== '' ? set.measureSeconds : null,
+        distanceM: set.distanceM ?? null,
         side: set.side ?? null,
         notes: set.notes ?? null,
         // Se leen del DOM y no del array: un tramo recien anadido puede
@@ -22157,7 +22509,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.59.0';
+const APP_VERSION = '0.60.0';
 const APP_VERSION_DATE = '2026-09-14';
 
 function renderAppVersionLine() {

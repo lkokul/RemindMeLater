@@ -2006,4 +2006,29 @@ function applyLocalSchema(db) {
   if (!gymSetColumns3.includes('measure_seconds')) {
     db.exec('ALTER TABLE gym_sets ADD COLUMN measure_seconds INTEGER');
   }
+
+  // -------------------------------------------------------------------
+  // SALIR A CORRER EN SERIES (14/9/2026)
+  // -------------------------------------------------------------------
+  //
+  // Peticion de Koku: "anadir ejercicios para salir a correr en series (x
+  // tiempo mas fuerte, y tiempo descanso...)". Es una medicion mas,
+  // 'intervalos', y NO necesita ni una columna nueva en gym_exercises:
+  // el tramo fuerte es default_seconds, el suave es default_rest_seconds
+  // (que ya era "el descanso entre series") y cuantas veces es
+  // default_sets. Reusar es lo correcto aqui: un intervalo ES una serie
+  // por tiempo con su descanso detras, solo que encadenada sola.
+  //
+  // Lo que SI hacia falta es la DISTANCIA, que Koku pidio junto al
+  // tiempo. Va en metros y en la serie (no en la sesion) para que sume
+  // como suma todo lo demas; en un bloque de intervalos se pregunta una
+  // vez al final y se apunta en la primera serie, que es donde la
+  // encuentra quien luego quiera repartirla a mano.
+  //
+  // Metros enteros a proposito: los kilometros con coma son cosa de la
+  // pantalla (2,45 km), y guardar 2450 evita arrastrar decimales por
+  // toda la base.
+  if (!gymSetColumns3.includes('distance_m')) {
+    db.exec('ALTER TABLE gym_sets ADD COLUMN distance_m INTEGER');
+  }
 }

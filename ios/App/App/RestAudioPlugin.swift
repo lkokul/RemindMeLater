@@ -36,11 +36,17 @@ public class RestAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         // (varios pulsos seguidos, sin notificaciones extra).
         let duck = call.getBool("duck") ?? true
         let vibrate = call.getBool("vibrate") ?? false
+        // sound/pattern: el aviso de correr en series (ver Patron en
+        // RestAudioWatcher). Sin ellos se comporta como siempre.
+        let sound = call.getBool("sound") ?? false
+        let pattern = call.getString("pattern")
         DispatchQueue.main.async {
             let ok = RestAudioWatcher.shared.start(
                 endAt: Date(timeIntervalSince1970: endMs / 1000),
                 duck: duck,
-                vibrate: vibrate
+                vibrate: vibrate,
+                sound: sound,
+                pattern: pattern
             )
             call.resolve(["watching": ok])
         }
@@ -55,12 +61,15 @@ public class RestAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         let duck = call.getBool("duck") ?? true
         let vibrate = call.getBool("vibrate") ?? false
+        let sound = call.getBool("sound") ?? false
+        let pattern = call.getString("pattern")
         DispatchQueue.main.async {
             let end = Date(timeIntervalSince1970: endMs / 1000)
             if RestAudioWatcher.shared.watching {
                 RestAudioWatcher.shared.reschedule(endAt: end)
             } else {
-                RestAudioWatcher.shared.start(endAt: end, duck: duck, vibrate: vibrate)
+                RestAudioWatcher.shared.start(endAt: end, duck: duck, vibrate: vibrate,
+                                              sound: sound, pattern: pattern)
             }
             call.resolve()
         }

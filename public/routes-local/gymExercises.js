@@ -57,16 +57,19 @@
     };
   }
 
-  // LAS TRES FORMAS DE MEDIR UN EJERCICIO (peticion de Koku, 11/9/2026).
+  // LAS FORMAS DE MEDIR UN EJERCICIO (peticion de Koku, 11/9/2026; la
+  // cuarta, 14/9/2026).
   //
   //   'reps'            -- repeticiones y peso, lo de siempre.
   //   'tiempo'          -- isometrico: aguantas N segundos.
   //   'reps_en_tiempo'  -- repeticiones dentro de una ventana.
+  //   'intervalos'      -- x tiempo fuerte, y tiempo suave, N veces
+  //                        (salir a correr en series).
   //
   // Cualquier otra cosa (null, un valor inventado, un numero) cae en
   // 'reps': es el comportamiento de toda la vida, asi que es el unico
   // respaldo que no sorprende a nadie.
-  const MEDICIONES = new Set(['reps', 'tiempo', 'reps_en_tiempo']);
+  const MEDICIONES = new Set(['reps', 'tiempo', 'reps_en_tiempo', 'intervalos']);
   function normalizarMedicion(valor) {
     const v = String(valor || '').trim();
     return MEDICIONES.has(v) ? v : 'reps';

@@ -587,6 +587,128 @@ el calendario y las pantallas completas se quedan sin alto útil.
 No hay `manifest.json` en el repo (se quitó en su día), así que por el
 lado web no hay nada que bloquear.
 
+## Salir a correr en series (intervalos)
+
+Petición de Koku (14/9/2026): *"añadir ejercicios para salir a correr en
+series (x tiempo más fuerte, y tiempo descanso, ...)"*. De las tres
+formas que se le ofrecieron eligió la que **se encadena sola**: no tocas
+el móvil mientras corres.
+
+**La decisión de diseño, que es lo que hay que entender antes de tocar
+nada: NO hay un motor nuevo.** Un intervalo es una serie por tiempo con
+su descanso detrás, que es justo lo que ya sabía hacer el entreno en
+vivo. Así que la medición `'intervalos'` reusa todo:
+
+- el tramo **suave es el descanso de siempre**, con su tarjeta en la
+  pantalla de bloqueo, su +30s y su bajada de música;
+- el tramo **fuerte es una serie con objetivo**, con su cuenta atrás;
+- historial, volumen, tiempo bajo tensión y récords no necesitan ni un
+  caso especial.
+
+Lo único que se añade es que los tramos **se cierran y se encadenan
+solos** (`gymCerrarTramoFuerte()`, disparado desde `gymLiveTick()`) y que
+cada cambio avisa con su vibración.
+
+**Ni una columna nueva en `gym_exercises`**: el tramo fuerte es
+`default_seconds`, el suave es `default_rest_seconds` (que ya era "el
+descanso entre series") y cuántas veces es `default_sets`. En la ficha
+solo cambian los rótulos.
+
+**Las cuatro decisiones de Koku**, no cambiarlas sin volver a
+preguntarle:
+
+1. **Cuenta atrás de preparación antes de empezar, ajustable en el
+   momento**: *"habrá veces que quieres 1 minuto y otras 2. Para ponerte
+   música, el móvil en el brazo etc"*. También es un descanso — uno
+   puesto DELANTE de la primera serie (`restEsPreparacion`) — así que
+   hereda la tarjeta de bloqueo y el aviso sin código nuevo. Se recuerda
+   la última elegida por dispositivo (`gymIntervalPrep`).
+2. **Dos avisos distintos al correr** (`Patron` en
+   `RestAudioWatcher.swift`): `.aprieta` son 3 pulsos muy seguidos (en la
+   mano se siente como una vibración larga) y `.afloja` son 2 cortas
+   espaciadas. El de siempre (`.fin`, 12 pulsos ~10 s) se queda para el
+   fin de un descanso normal y para las cuentas atrás de una plancha —
+   eso último lo eligió aparte.
+3. **Sonido, sí, pero del montón**: *"típico sonido de notificación, no
+   quiero ninguna locura tampoco"*. Es `AudioServicesPlaySystemSound(1007)`
+   una sola vez, justo antes de la primera vibración, y sigue el
+   interruptor de Configuración > Notificaciones > Sonido.
+4. **Tiempo y distancia**, la distancia **a mano** (ver el punto de
+   HealthKit más abajo). Se pregunta UNA vez al acabar el bloque, no
+   tramo a tramo: lo que dice el reloj al volver es el total, y pararse a
+   teclear entre series es justo lo que este modo evita.
+
+**En un bloque de intervalos la vibración NO es opcional.** El ajuste de
+"vibración larga al acabar el descanso" manda en todo lo demás, pero aquí
+se ignora: sin vibración el modo entero no sirve, porque el móvil va en
+el brazo. Igual que el encadenado no depende de "empezar la siguiente
+serie sola" — quien puso "correr en series" ya dijo que no quiere tocar
+el móvil.
+
+**La distancia va en `gym_sets.distance_m`, en METROS enteros** (los
+kilómetros con coma son cosa de la pantalla). Se apunta en la PRIMERA
+serie del bloque y las demás se limpian, así la suma es lo que
+escribiste; desde el editor a mano se puede repartir entre las series si
+algún día hace falta. `gymTextoDeDistancia()` la escribe ("6,2 km",
+"800 m", "5 km" sin coma cuando es redondo).
+
+**Detrás de la ÚLTIMA serie no se arranca un trote suave**: ahí ya estás
+parando. Eso es lo que cierra el bloque y dispara la pregunta de la
+distancia.
+
+Dos cosas que se comprobaron a propósito, porque son las que romperían
+esto en la calle:
+
+- **En pausa el tramo fuerte no se cierra solo.** Si no, pausar para
+  atarte un cordón te daría la serie por buena sin haberla corrido.
+- **Tras una congelación larga se cierra UNA serie, no todas.** El cierre
+  vive en `gymLiveTick()` (que se recalcula desde timestamps) y no en una
+  cadena de temporizadores, así que si iOS duerme la app a mitad de tramo,
+  al volver cierra ese tramo con su objetivo y sigue — en vez de dar por
+  hechas de golpe las series que no has corrido.
+
+**HealthKit está SIN HACER y es una decisión pendiente de Koku.** Él
+preguntó por leer la distancia de la app de Salud o del reloj; se le
+avisó de que eso pide un permiso nuevo del sistema
+(`NSHealthShareUsageDescription`), una capacidad nueva en el App ID —el
+mismo trámite que con el App Group costó quince builds— y declararlo en
+la ficha de la App Store. Dijo *"sino tiempos y distancia a mano y au"*,
+así que se hizo a mano. Si algún día se retoma, es trabajo nativo aparte,
+no un retoque.
+
+## La gráfica de progreso y los récords, con ejercicios por tiempo
+
+Encontrado revisando los ejercicios por tiempo (14/9/2026). Dos agujeros
+del mismo tipo: la base hacía su mitad y la pantalla no leía el resultado.
+
+1. **La gráfica de un ejercicio por tiempo era una línea plana a cero.**
+   `/progress/:exerciseId` ya devolvía `maxSeconds` y `tensionSeconds`, y
+   su propio comentario decía "el cliente elige cuál pintar según cómo se
+   mida el ejercicio" — pero el cliente no los leía: pintaba el peso, que
+   en una plancha a peso corporal no existe. Ahora los dos botones de
+   siempre cambian de nombre en vez de aparecer uno nuevo:
+   `Peso máximo / Volumen total` (kg) → `Mejor tiempo / Tiempo total` (s).
+2. **Una plancha no aparecía en Récords.** La lista filtraba por
+   `bestWeightKg !== null`, y un isométrico a peso corporal no tiene ni
+   uno: se caía entera de la sección. Y uno CON peso salía peor, con
+   "1RM est. 0 · Vol. 0", que ahí no significan nada. Ahora entra por su
+   aguante (`bestSeconds`), la cifra grande es el tiempo y el peso solo se
+   menciona si de verdad lo hubo.
+
+## Deslizar para salir de una App
+
+`SALIR_DESLIZANDO` + `salirDeLaAppDeslizando()` en `app.js`. Es el segundo
+paso del gesto: el primero (de una sección al inicio de la App) lo hace
+`VOLVER_UN_PASO` pulsando el botón de volver que ya existe.
+
+Están **Finanzas y Gimnasio**, que son las dos Apps que se navegan con un
+inicio de filas y secciones dentro. Lecturas y Viajes siguen fuera a
+propósito: allí el inicio es ya una lista de contenido (sagas, viajes) y
+no un menú de secciones. Añadir una es una línea más en esa tabla el día
+que Koku lo pida — que es justo como llegó el Gimnasio: el código llevaba
+un comentario diciendo "las demás no se tocan sin que lo pida", y lo
+pidió.
+
 ## Vibración del fin de descanso: qué la calla de verdad
 
 Probado por Koku en el iPhone (ronda del 9/9/2026), con el botón
@@ -3861,6 +3983,13 @@ de `finanzas-movil`. **Build #60 en verde y subida a TestFlight.**
 en Safari (ver "Por qué Intro no funcionaba en el iPhone" más arriba) y
 el tiempo estimado se quedó en `Tiempo estimado: 12 min 4 s` a secas.
 **Build #61 en verde y subida a TestFlight.**
+
+**v0.59.0 y v0.60.0** (14/9/2026) son la ronda del Gimnasio pedida desde
+control remoto: salir del Gimnasio deslizando, la revisión de los
+ejercicios por tiempo (que sacó la gráfica plana a cero y la plancha que
+no salía en Récords) y **salir a correr en series**. Los tres bloques
+nuevos están más arriba. **No se ha lanzado build**: la regla de Actions
+sigue siendo que solo se lanza si Koku lo pide en ESA ronda.
 
 **v0.49.2** mueve la línea de versión al final de Configuración (la pidió
 ahí Koku al probar la #61). Va la última de `settings-card-body`, fuera

@@ -869,7 +869,7 @@
          Oculta salvo durante un descanso. -->
     <div id="gym-live-rest-bar" class="gym-live-rest-bar hidden">
       <div class="gym-live-rest-info">
-        <span>Descanso: <b id="gym-live-rest-remaining" title="Tocar para cambiar entre m:ss y segundos">0:00</b></span>
+        <span><span id="gym-live-rest-label">Descanso</span>: <b id="gym-live-rest-remaining" title="Tocar para cambiar entre m:ss y segundos">0:00</b></span>
         <button type="button" id="btn-gym-live-rest-plus" class="secondary-btn">+30s</button>
         <button type="button" id="btn-gym-live-rest-close" class="icon-btn" aria-label="Saltar descanso">✕</button>
       </div>
@@ -949,9 +949,36 @@
           <button type="button" class="secondary-btn" data-start-side="right">Derecho</button>
         </div>
       </div>
+      <!-- Solo al correr en series: cuanto se espera ANTES de arrancar
+           el primer tramo fuerte (peticion de Koku: "para ponerte musica,
+           el movil en el brazo etc"). Se elige en el momento porque
+           cambia cada dia, y se recuerda la ultima por dispositivo. -->
+      <div id="gym-set-start-prep" class="gym-set-side-choice hidden">
+        <span>¿Cuánto necesitas para prepararte?</span>
+        <div class="gym-set-side-buttons" id="gym-set-start-prep-buttons"></div>
+      </div>
       <div class="gym-set-modal-actions">
         <button type="button" id="btn-gym-set-start-go" class="primary-btn gym-set-big-btn">Empezar</button>
         <button type="button" id="btn-gym-set-start-cancel" class="secondary-btn gym-set-big-btn">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Al acabar un bloque de intervalos: la distancia, UNA sola vez.
+       Koku pidio "tiempo y distancia"; preguntarlo tramo a tramo seria
+       justo lo que este modo evita (el movil va en el brazo). Se puede
+       saltar: la sesion se guarda igual sin distancia. -->
+  <div id="gym-distancia-modal" class="modal hidden">
+    <div class="modal-card gym-modal gym-set-modal">
+      <h2>¿Cuánto has recorrido?</h2>
+      <p id="gym-distancia-info" class="gym-set-modal-info"></p>
+      <label class="gym-set-field">
+        <span>Distancia (km)</span>
+        <input type="text" id="gym-distancia-km" inputmode="decimal" placeholder="Ej. 6,2" />
+      </label>
+      <div class="gym-set-modal-actions">
+        <button type="button" id="btn-gym-distancia-guardar" class="primary-btn gym-set-big-btn">Guardar</button>
+        <button type="button" id="btn-gym-distancia-saltar" class="secondary-btn gym-set-big-btn">Ahora no</button>
       </div>
     </div>
   </div>
@@ -1238,6 +1265,9 @@
         <div class="gym-live-summary-stat"><b id="gym-summary-volume">—</b><span>Volumen total</span></div>
         <div class="gym-live-summary-stat"><b id="gym-summary-failure">—</b><span>Series al fallo</span></div>
         <div class="gym-live-summary-stat"><b id="gym-summary-muscles">—</b><span>Grupos musculares</span></div>
+        <!-- Solo sale si de verdad has recorrido algo (correr en series):
+             un "0 km" permanente en un dia de pesas seria ruido. -->
+        <div class="gym-live-summary-stat hidden" id="gym-summary-distance-stat"><b id="gym-summary-distance">—</b><span>Distancia</span></div>
       </div>
       <p id="gym-summary-muscle-list" class="gym-list-item-muted"></p>
       <div class="modal-actions">
