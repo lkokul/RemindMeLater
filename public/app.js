@@ -17144,7 +17144,7 @@ function gymEpley1RM(weightKg, reps) {
 }
 function renderGymPRs() {
   const list = document.getElementById('gym-prs-list');
-  const byExercise = new Map(); // exerciseId -> { name, muscleGroup, bestWeightKg, best1RM, bestVolumeKg }
+  const byExercise = new Map(); // exerciseId -> { name, bestWeightKg, best1RM, bestVolumeKg, bestSeconds }
   for (const session of state.gymSessions) {
     const volumeByExercise = new Map();
     for (const set of session.sets) {
@@ -17162,6 +17162,10 @@ function renderGymPRs() {
             bestWeightKg: null,
             best1RM: 0,
             bestVolumeKg: 0,
+            // El record de un EJERCICIO POR TIEMPO es el aguante, no los
+            // kilos: una plancha a peso corporal no tiene ni uno, y sin
+            // esto se quedaba fuera de la lista entera.
+            bestSeconds: 0,
           });
         }
         const pr = byExercise.get(tramo.exerciseId);
@@ -17180,6 +17184,14 @@ function renderGymPRs() {
           if (est > pr.best1RM) pr.best1RM = est;
         }
       }
+      // El aguante se mira en la serie MADRE, no en los tramos: los
+      // segundos son de la serie entera (un tramo de dropset no tiene
+      // medicion propia, ver el insert de gymSessions.js).
+      if (gymEsPorTiempo(set.measure)) {
+        const seg = Number(set.measureSeconds);
+        const pr = byExercise.get(set.exerciseId);
+        if (pr && Number.isFinite(seg) && seg > pr.bestSeconds) pr.bestSeconds = seg;
+      }
       volumeByExercise.set(set.exerciseId, (volumeByExercise.get(set.exerciseId) || 0) + gymSetVolumeKg(set));
     }
     for (const [exerciseId, volume] of volumeByExercise) {
@@ -17192,12 +17204,13 @@ function renderGymPRs() {
   const rows = [...byExercise.entries()]
     // Un peso de ayuda entra aunque sea negativo -- ahi -12 kg
     // es un record de verdad. Lo que se descarta es "no hay ni un peso
-    // apuntado" (bestWeightKg null) y los normales que sigan a 0.
-    .filter(([, pr]) => pr.bestWeightKg !== null)
+    // apuntado" (bestWeightKg null) y los normales que sigan a 0. Los de
+    // TIEMPO entran por su aguante aunque nunca lleven peso encima.
+    .filter(([, pr]) => pr.bestWeightKg !== null || pr.bestSeconds > 0)
     .sort((a, b) => b[1].best1RM - a[1].best1RM);
   list.innerHTML = '';
   if (rows.length === 0) {
-    list.innerHTML = '<p class="empty-hint">Todavía no hay récords: registra series con peso y aparecerán aquí.</p>';
+    list.innerHTML = '<p class="empty-hint">Todavía no hay récords: registra series con peso o por tiempo y aparecerán aquí.</p>';
     return;
   }
   rows.forEach(([exerciseId, pr]) => {
@@ -17205,11 +17218,22 @@ function renderGymPRs() {
     const muscle = exercise ? gymMuscleGroupLabel(exercise.muscleGroup) : '';
     const row = document.createElement('div');
     row.className = 'gym-list-item gym-pr-item';
+    // En un ejercicio por tiempo el 1RM y el volumen no dicen nada (no hay
+    // repeticiones que multiplicar): la cifra grande es el aguante, y el
+    // peso solo se añade si de verdad lo hubo (chaleco, disco encima).
+    const porTiempo = pr.bestSeconds > 0;
+    const conPeso = pr.bestWeightKg !== null && pr.bestWeightKg !== 0;
+    const cifra = porTiempo
+      ? `${gymLiveFormatClock(pr.bestSeconds)} min`
+      : `${gymWeightKgToDisplay(pr.bestWeightKg)} ${unit}`;
+    const detalle = porTiempo
+      ? `Mejor serie${conPeso ? ` · con ${gymWeightKgToDisplay(pr.bestWeightKg)} ${unit}` : ''}`
+      : `1RM est. ${gymWeightKgToDisplay(pr.best1RM)} ${unit} · Vol. ${gymWeightKgToDisplay(pr.bestVolumeKg)} ${unit}`;
     row.innerHTML = `
       <span class="gym-list-item-name">${escapeHtml(pr.name)}${muscle ? ` <span class="gym-list-item-muted">(${escapeHtml(muscle)})</span>` : ''}</span>
       <span class="gym-pr-stats">
-        <b>${gymWeightKgToDisplay(pr.bestWeightKg)} ${unit}</b>
-        <span class="gym-list-item-muted">1RM est. ${gymWeightKgToDisplay(pr.best1RM)} ${unit} · Vol. ${gymWeightKgToDisplay(pr.bestVolumeKg)} ${unit}</span>
+        <b>${escapeHtml(cifra)}</b>
+        <span class="gym-list-item-muted">${escapeHtml(detalle)}</span>
       </span>
     `;
     list.appendChild(row);
@@ -17433,6 +17457,25 @@ const gymProgressExerciseField = createSelectField({
 document.getElementById('gym-progress-exercise-field').appendChild(gymProgressExerciseField.element);
 
 let gymProgressMetric = 'max'; // 'max' = peso maximo por sesion, 'volume' = suma reps*peso
+
+// Los DOS botones siguen siendo los mismos ("lo mejor de la sesion" y "la
+// suma de la sesion"), pero en un ejercicio POR TIEMPO no hay kilos que
+// enseñar: lo que progresa es el aguante. Asi que solo cambian de nombre
+// y de unidad, sin un tercer boton que haya que entender.
+//
+//   repeticiones -> Peso maximo   / Volumen total   (kg)
+//   por tiempo   -> Mejor tiempo  / Tiempo total    (segundos)
+const GYM_PROGRESS_LABELS = {
+  reps: { max: 'Peso máximo', volume: 'Volumen total' },
+  tiempo: { max: 'Mejor tiempo', volume: 'Tiempo total' },
+};
+function refrescarEtiquetasDeMetrica(porTiempo) {
+  const textos = GYM_PROGRESS_LABELS[porTiempo ? 'tiempo' : 'reps'];
+  document.querySelectorAll('[data-gym-metric]').forEach((b) => {
+    b.textContent = textos[b.dataset.gymMetric] || b.textContent;
+  });
+}
+
 document.querySelectorAll('[data-gym-metric]').forEach((btn) => {
   btn.addEventListener('click', () => {
     gymProgressMetric = btn.dataset.gymMetric;
@@ -17463,9 +17506,20 @@ async function renderGymProgressChart(exerciseId) {
     return;
   }
 
-  const unit = getGymWeightUnitLabel();
+  // Como se mide ESTE ejercicio decide que se pinta. Sin esto, un
+  // ejercicio por tiempo daba una linea plana a cero: se pintaba su peso
+  // (que en una plancha no existe) y los segundos, que la ruta ya
+  // devolvia, no los leia nadie.
+  const exercise = state.gymExercises.find((e) => e.id === exerciseId);
+  const porTiempo = gymEsPorTiempo(gymMedicionDe(exercise));
+  refrescarEtiquetasDeMetrica(porTiempo);
+  const unit = porTiempo ? 's' : getGymWeightUnitLabel();
   const isVolume = gymProgressMetric === 'volume';
   const values = points.map((p) => {
+    if (porTiempo) {
+      // Mejor aguante de la sesion, o la suma de todas sus series.
+      return Number(isVolume ? p.tensionSeconds : p.maxSeconds) || 0;
+    }
     // El volumen de la grafica cuenta el peso extra de las series al
     // fallo; el peso maximo no, que ese es el peso que de verdad movio.
     const raw = isVolume ? gymVolumenAjustado(p.volumeKg, p.failureVolumeKg) : p.maxWeightKg;
@@ -17508,13 +17562,24 @@ async function renderGymProgressChart(exerciseId) {
     })
     .join('');
 
+  const tituloMetrica = porTiempo
+    ? (isVolume ? 'Tiempo total' : 'Mejor tiempo')
+    : (isVolume ? 'Volumen' : 'Peso máximo');
+  const pieMetrica = porTiempo
+    ? (isVolume
+        ? 'Tiempo total por sesión, en segundos (suma de todas las series).'
+        : 'La serie más larga de cada sesión, en segundos.')
+    : (isVolume
+        ? `Volumen (repeticiones × peso) por sesión, en ${unit} (suma de todas las series).`
+        : `Peso máximo por sesión, en ${unit}.`);
+
   container.innerHTML = `
-    <svg viewBox="0 0 ${width} ${height}" class="gym-chart-svg" role="img" aria-label="Progreso de ${isVolume ? 'volumen' : 'peso máximo'}">
+    <svg viewBox="0 0 ${width} ${height}" class="gym-chart-svg" role="img" aria-label="Progreso de ${escapeHtml(tituloMetrica.toLowerCase())}">
       <path d="${pathD}" fill="none" stroke="var(--accent)" stroke-width="2" />
       ${dots}
       ${labels}
     </svg>
-    <p class="hint">${isVolume ? 'Volumen (repeticiones × peso)' : 'Peso máximo'} por sesión, en ${unit}${isVolume ? ' (suma de todas las series)' : ''}. Toca un punto para ver la fecha exacta.</p>
+    <p class="hint">${escapeHtml(pieMetrica)} Toca un punto para ver la fecha exacta.</p>
   `;
   attachFinanzasChartTooltips(container.querySelector('svg'));
 }
@@ -21860,26 +21925,40 @@ function centroYaTieneDueno() {
   return CENTRO_CON_DUENO.some((id) => estaVisibleDeVerdad(document.getElementById(id)));
 }
 
-// El gesto central, segun el sentido.
-// Deslizar hacia la derecha desde el INICIO de Finanzas sale a
-// Herramientas. Es el segundo paso del gesto que pidio Koku: "si deslizo
-// desde el centro me lleve del apartado interior al primero, y si lo
-// vuelvo a hacer que me lleve a la base app".
+// Apps que se SALEN deslizando desde su inicio. Es el segundo paso del
+// gesto que pidio Koku: "si deslizo desde el centro me lleve del apartado
+// interior al primero, y si lo vuelvo a hacer que me lleve a la base
+// app". El primer paso (de la seccion al inicio) no vive aqui: lo hace
+// VOLVER_UN_PASO, que ya pulsa el boton de volver de cada App.
 //
-// Solo Finanzas de momento, a proposito: las demas Apps (Gimnasio,
-// Lecturas, Viajes) no se tocan sin que lo pida: alli el centro todavia
-// no significa "salir" y cambiarselo de golpe seria justo lo que confunde.
-function salirDeFinanzasDeslizando() {
-  const vista = document.getElementById('finanzas-view');
-  if (!vista || vista.classList.contains('hidden')) return false;
-  // Si el boton de volver se ve, es que estas DENTRO de una seccion: de
-  // eso ya se ha encargado volverUnPasoDentroDeLaPantalla() antes.
-  const atras = document.getElementById('btn-finanzas-back');
-  if (atras && !atras.classList.contains('hidden')) return false;
-  const salir = document.getElementById('btn-close-finanzas');
-  if (!salir) return false;
-  salir.click();
-  return true;
+// Solo estan las Apps que se navegan con un INICIO de filas y secciones
+// dentro -- Finanzas primero, y el Gimnasio desde que se rehizo igual
+// (v0.56.0) y Koku pidio el gesto para el: "si deslizo hacia la derecha
+// que me mueva al menu anterior (ahora si)".
+//
+// Lecturas y Viajes siguen fuera a proposito: alli el inicio es ya una
+// lista de contenido (sagas, viajes), no un menu de secciones, y el
+// centro todavia no significa "salir". Añadir una es una linea mas aqui
+// el dia que lo pida.
+const SALIR_DESLIZANDO = [
+  { vista: 'finanzas-view', atras: 'btn-finanzas-back', salir: 'btn-close-finanzas' },
+  { vista: 'gym-view', atras: 'btn-gym-back', salir: 'btn-close-gym' },
+];
+
+function salirDeLaAppDeslizando() {
+  for (const { vista: idVista, atras: idAtras, salir: idSalir } of SALIR_DESLIZANDO) {
+    const vista = document.getElementById(idVista);
+    if (!vista || vista.classList.contains('hidden')) continue;
+    // Si el boton de volver se ve, es que estas DENTRO de una seccion: de
+    // eso ya se ha encargado volverUnPasoDentroDeLaPantalla() antes.
+    const atras = document.getElementById(idAtras);
+    if (atras && !atras.classList.contains('hidden')) return false;
+    const salir = document.getElementById(idSalir);
+    if (!salir) return false;
+    salir.click();
+    return true;
+  }
+  return false;
 }
 
 function gestoCentral(paso) {
@@ -21888,9 +21967,9 @@ function gestoCentral(paso) {
   if (centroYaTieneDueno()) return;
   // Hacia la derecha (paso -1): primero intentar salir de una capa.
   if (paso < 0 && volverUnPasoDentroDeLaPantalla()) return;
-  // Y si ya estabas en el inicio de Finanzas, el siguiente deslizamiento
-  // sale de la App entera.
-  if (paso < 0 && salirDeFinanzasDeslizando()) return;
+  // Y si ya estabas en el inicio de la App, el siguiente deslizamiento
+  // sale de ella entera.
+  if (paso < 0 && salirDeLaAppDeslizando()) return;
   // Dentro de una App con sub-pestañas, el centro las recorre.
   moverSubPestana(paso);
 }
@@ -22078,8 +22157,8 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.58.0';
-const APP_VERSION_DATE = '2026-09-13';
+const APP_VERSION = '0.59.0';
+const APP_VERSION_DATE = '2026-09-14';
 
 function renderAppVersionLine() {
   const el = document.getElementById('app-version-line');
