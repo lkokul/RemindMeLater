@@ -56,7 +56,16 @@
     const lista = Array.isArray(value) ? value : String(value == null ? '' : value).split(',');
     const limpios = [];
     for (const bruto of lista) {
-      const n = Number(String(bruto).trim());
+      const texto = String(bruto).trim();
+      // Una entrada VACIA se salta explicitamente. Sin esta linea,
+      // Number('') es 0 -- o sea "avisame el mismo dia del pago" -- y un
+      // gasto creado sin pedir ningun aviso acababa con uno. Pasaba de
+      // verdad: al crear sin el campo, el valor llegaba como null, se
+      // convertia en '' y ''.split(',') da [''], que colaba ese 0. Lo
+      // mismo con una coma de sobra ("2," daba 2 Y el mismo dia). Un
+      // aviso que nadie pidio es de lo peor que puede hacer una app.
+      if (texto === '') continue;
+      const n = Number(texto);
       if (!Number.isInteger(n) || n < 0 || n > MAX_DIAS_DE_AVISO) continue;
       if (!limpios.includes(n)) limpios.push(n);
     }
