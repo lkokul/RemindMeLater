@@ -64,14 +64,108 @@ function backupBase64ToBytes(b64) {
   return bytes;
 }
 
+// --- Que tablas son de cada App ----------------------------------------
+//
+// Peticion de Koku (13/9/2026): "si hago una copia de seguridad, que
+// muestre las apps para guardar en la copia, las inactivas por defecto
+// iran desmarcadas". Para poder dejar una App fuera hay que saber que
+// tablas son suyas.
+//
+// EL CALENDARIO NO SE PUEDE DEJAR FUERA, igual que no se puede apagar en
+// la Tienda: es la pantalla con la que arranca la app. Va aqui de todas
+// formas para tener el mapa completo en un solo sitio.
+//
+// LAS TABLAS QUE NO SALEN EN ESTA LISTA SON DE LA APP EN SI (temas,
+// ajustes, perfil...) y viajan SIEMPRE. Es a proposito que se decida por
+// omision: si algun dia aparece una tabla nueva y a nadie se le ocurre
+// tocar este archivo, acaba DENTRO de la copia. Lo contrario -- que una
+// tabla nueva se quedara fuera en silencio -- seria perder datos.
+const BACKUP_TABLAS_POR_APP = {
+  calendario: ['events', 'groups', 'special_days'],
+  notes: ['notes', 'note_folders'],
+  gym: ['gym_blocks', 'gym_block_cycle_days', 'gym_routines', 'gym_routine_exercises',
+    'gym_exercises', 'gym_sessions', 'gym_sets'],
+  finanzas: ['finanzas_accounts', 'finanzas_categories', 'finanzas_transactions',
+    'finanzas_investment_transactions', 'finanzas_settings', 'finanzas_portfolios',
+    'finanzas_assets', 'finanzas_asset_valuations', 'finanzas_recurring_expenses',
+    'finanzas_goals', 'finanzas_goal_contributions', 'finanzas_debts'],
+  lecturas: ['lecturas_sagas', 'lecturas_items'],
+  viajes: ['viajes_trips', 'viajes_trip_countries', 'viajes_entries',
+    'viajes_entry_attachments', 'viajes_entry_movements'],
+};
+
+// Las Apps que se pueden marcar/desmarcar, en el orden de la Tienda.
+function backupAppsElegibles() {
+  if (typeof APPS_DE_LA_TIENDA === 'undefined') {
+    return [{ id: 'calendario', nombre: 'Calendario', fija: true }];
+  }
+  return APPS_DE_LA_TIENDA.map((a) => ({ id: a.id, nombre: a.nombre, fija: !!a.fija }));
+}
+
+function backupTablasDe(id) {
+  return Object.prototype.hasOwnProperty.call(BACKUP_TABLAS_POR_APP, id)
+    ? BACKUP_TABLAS_POR_APP[id]
+    : [];
+}
+
+// Las columnas que tienen EN COMUN dos bases. Hace falta porque una
+// copia puede venir de una version anterior de la app, con una columna
+// menos (o con una que ya no existe). Copiando solo las comunes, la
+// columna que falte se queda con su valor por defecto, que es justo lo
+// que hace una migracion al añadirla.
+function backupColumnasComunes(origen, destinoCols, tabla) {
+  const cols = [];
+  const res = origen.exec(`PRAGMA table_info(${tabla})`);
+  if (!res || !res[0]) return cols;
+  const iNombre = res[0].columns.indexOf('name');
+  res[0].values.forEach((fila) => {
+    const nombre = String(fila[iNombre]);
+    if (destinoCols.includes(nombre)) cols.push(nombre);
+  });
+  return cols;
+}
+
+function backupColumnasDe(tabla) {
+  const res = localDb.prepare(`PRAGMA table_info(${tabla})`).all();
+  return res.map((c) => String(c.name));
+}
+
 // --- Exportar ----------------------------------------------------------
-async function buildBackupJson() {
+async function buildBackupJson(incluidas) {
   // Primero asegurarse de que lo ultimo escrito ya esta volcado -- si
   // no, la copia podria salir sin el cambio de hace un segundo.
   await flushLocalDb();
-  const sqliteBytes = sqlDatabase.export();
 
-  const assets = await assetGetAll();
+  const apps = backupAppsElegibles().map((a) => a.id);
+  const dentro = Array.isArray(incluidas) ? incluidas.filter((id) => apps.includes(id)) : apps.slice();
+  if (!dentro.includes('calendario')) dentro.push('calendario');
+  const fuera = apps.filter((id) => !dentro.includes(id));
+
+  let sqliteBytes = sqlDatabase.export();
+  if (fuera.length > 0) {
+    // Se trabaja sobre una COPIA abierta de los bytes, nunca sobre la
+    // base viva: aqui se borran filas, y hacerlo en la de verdad seria
+    // exactamente la perdida de datos que esto viene a evitar.
+    const recorte = new sqlJsModule.Database(sqliteBytes);
+    try {
+      fuera.forEach((id) => backupTablasDe(id).forEach((tabla) => {
+        // La tabla puede no existir si la copia se hace con una version
+        // que todavia no la ha creado: se ignora y sigue.
+        try { recorte.run(`DELETE FROM ${tabla}`); } catch { /* no existe */ }
+      }));
+      // VACUUM para que el archivo ADELGACE de verdad: sin el, SQLite se
+      // queda con las paginas vacias y la copia pesaria lo mismo que si
+      // no hubieras quitado nada.
+      try { recorte.run('VACUUM'); } catch { /* no es critico */ }
+      sqliteBytes = recorte.export();
+    } finally {
+      recorte.close();
+    }
+  }
+
+  // Las fotos y las imagenes de las notas son de Notas: si Notas se
+  // queda fuera, no tiene sentido cargar el archivo con sus megas.
+  const assets = dentro.includes('notes') ? await assetGetAll() : [];
   const ajustes = {};
   for (let i = 0; i < localStorage.length; i++) {
     const clave = localStorage.key(i);
@@ -83,6 +177,9 @@ async function buildBackupJson() {
     kind: 'backup',
     version: BACKUP_FORMAT_VERSION,
     exportedAt: new Date().toISOString(),
+    // Que Apps trae. Una copia SIN este campo es de antes de la Tienda y
+    // se trata como completa -- es lo que era.
+    apps: dentro,
     sqliteBase64: backupBytesToBase64(sqliteBytes),
     assets: assets.map((a) => ({
       name: a.name,
@@ -93,8 +190,8 @@ async function buildBackupJson() {
   });
 }
 
-async function exportBackup() {
-  const json = await buildBackupJson();
+async function exportBackup(incluidas) {
+  const json = await buildBackupJson(incluidas);
   const fecha = new Date().toISOString().slice(0, 10);
   const nombre = `remindmelater-copia-${fecha}.json`;
 
@@ -157,11 +254,34 @@ async function importBackupFromFile(file) {
   }
 
   const cuando = datos.exportedAt ? ` (del ${String(datos.exportedAt).slice(0, 10)})` : '';
-  const ok = await showAppConfirm(
-    `Importar esta copia${cuando} SUSTITUYE todo lo que hay ahora en la app: calendario, notas, herramientas, fotos y ajustes. No se puede deshacer.`,
-    { okText: 'Importar y sustituir', danger: true },
-  );
+
+  // Que Apps trae la copia. Sin el campo `apps` es una copia de antes de
+  // la Tienda, y esas eran SIEMPRE completas.
+  const todas = backupAppsElegibles();
+  const traidas = Array.isArray(datos.apps)
+    ? todas.filter((a) => datos.apps.includes(a.id)).map((a) => a.id)
+    : todas.map((a) => a.id);
+  const ausentes = todas.filter((a) => !traidas.includes(a.id));
+  const parcial = ausentes.length > 0;
+
+  // AQUI ESTABA LA TRAMPA, y es lo que decide todo lo de abajo: si una
+  // copia parcial se importara como siempre (sustituir el archivo
+  // entero), importarla BORRARIA las Apps que no trae. O sea que dejar
+  // Gimnasio fuera de una copia no seria "no guardarlo", seria "perderlo
+  // la proxima vez que restaure". Por eso una copia parcial NO sustituye
+  // la base: restaura tabla por tabla solo lo que trae, y lo que no
+  // trae se queda exactamente como esta.
+  const texto = parcial
+    ? `Esta copia${cuando} trae ${traidas.map((id) => nombreDeAppDeCopia(id)).join(', ')}. Eso es lo que se sustituye. ${ausentes.map((a) => a.nombre).join(', ')} se queda${ausentes.length === 1 ? '' : 'n'} como está${ausentes.length === 1 ? '' : 'n'} ahora, sin tocar. No se puede deshacer.`
+    : `Importar esta copia${cuando} SUSTITUYE todo lo que hay ahora en la app: calendario, notas, herramientas, fotos y ajustes. No se puede deshacer.`;
+  const ok = await showAppConfirm(texto, { okText: 'Importar y sustituir', danger: true });
   if (!ok) return false;
+
+  if (parcial) {
+    await importarSoloEstasApps(bytes, traidas, datos);
+    location.reload();
+    return true;
+  }
 
   // A partir de aqui es destructivo. Orden pensado para que ningun
   // volcado automatico pise lo importado: se corta primero la base en
@@ -192,6 +312,72 @@ async function importBackupFromFile(file) {
   // app se pone al dia sola, igual que en cualquier arranque).
   location.reload();
   return true;
+}
+
+function nombreDeAppDeCopia(id) {
+  const app = backupAppsElegibles().find((a) => a.id === id);
+  return app ? app.nombre : id;
+}
+
+// Restaurar SOLO las Apps que trae una copia parcial, dejando el resto
+// de la base como esta.
+//
+// Se hace al reves de lo que parece natural: en vez de meter lo que
+// falta DENTRO de la base de la copia, se vacian y se rellenan las
+// tablas de la base VIVA con lo que trae la copia. El motivo es el
+// esquema: la base viva siempre esta al dia (applyLocalSchema corre en
+// cada arranque), mientras que la de la copia puede ser de hace tres
+// versiones y no tener ni la tabla que habria que rellenar.
+async function importarSoloEstasApps(bytes, traidas, datos) {
+  const origen = new sqlJsModule.Database(bytes);
+  try {
+    localDb.exec('BEGIN');
+    try {
+      traidas.forEach((id) => backupTablasDe(id).forEach((tabla) => {
+        let columnasDestino;
+        try { columnasDestino = backupColumnasDe(tabla); } catch { return; }
+        if (columnasDestino.length === 0) return;   // no existe aqui
+        const comunes = backupColumnasComunes(origen, columnasDestino, tabla);
+        if (comunes.length === 0) return;           // no existe alla
+
+        localDb.prepare(`DELETE FROM ${tabla}`).run();
+
+        const lista = comunes.join(', ');
+        const huecos = comunes.map(() => '?').join(', ');
+        const insertar = localDb.prepare(`INSERT INTO ${tabla} (${lista}) VALUES (${huecos})`);
+        const res = origen.exec(`SELECT ${lista} FROM ${tabla}`);
+        if (!res || !res[0]) return;
+        res[0].values.forEach((fila) => insertar.run(...fila));
+      }));
+      localDb.exec('COMMIT');
+    } catch (err) {
+      // Si algo falla a media restauracion, se deshace entera: media App
+      // restaurada es peor que ninguna.
+      try { localDb.exec('ROLLBACK'); } catch { /* ya estaba deshecha */ }
+      throw err;
+    }
+  } finally {
+    origen.close();
+  }
+
+  // Las imagenes de las notas solo se tocan si la copia trae Notas.
+  if (traidas.includes('notes')) {
+    await assetClear();
+    for (const asset of datos.assets || []) {
+      if (!asset || typeof asset.name !== 'string' || typeof asset.bytesBase64 !== 'string') continue;
+      await assetPut(asset.name, backupBase64ToBytes(asset.bytesBase64), asset.type || '');
+    }
+  }
+
+  // Los ajustes de este dispositivo SI se restauran enteros, como en una
+  // copia completa: son preferencias (tema, unidades, que hay en la
+  // barra), no datos de una App, y separarlas por App seria inventarse
+  // un reparto que no existe.
+  Object.entries(datos.localStorage || {}).forEach(([clave, valor]) => {
+    if (typeof valor === 'string') localStorage.setItem(clave, valor);
+  });
+
+  await flushLocalDb();
 }
 
 // --- Aviso de "hace mucho que no haces copia" --------------------------
@@ -248,12 +434,70 @@ function refreshBackupStatusLine() {
 // openSettingsModal/showSettingsScreen en settings.js) solo se llaman
 // DENTRO de manejadores, nunca al cargar -- ver la regla de orden de
 // declaracion en CLAUDE.md.
-document.getElementById('btn-backup-export').addEventListener('click', async (e) => {
+// --- El dialogo de "que guardamos" -------------------------------------
+// Se abre ANTES de exportar. Las casillas son .styled-checkbox (el
+// cuadrado de "elige uno o varios de una lista"); .checkbox-row es otra
+// cosa, el interruptor de un ajuste on/off.
+function abrirDialogoDeAppsDeLaCopia() {
+  const modal = document.getElementById('backup-apps-modal');
+  const lista = document.getElementById('backup-apps-list');
+  if (!modal || !lista) return;
+  lista.innerHTML = '';
+
+  backupAppsElegibles().forEach((app) => {
+    const fila = document.createElement('label');
+    fila.className = 'backup-app-row';
+    const casilla = document.createElement('input');
+    casilla.type = 'checkbox';
+    casilla.className = 'styled-checkbox';
+    casilla.dataset.appId = app.id;
+    // De fabrica viene marcada si la App esta ENCENDIDA en la Tienda,
+    // tal como lo pidio: "las inactivas por defecto iran desmarcadas".
+    // Desmarcada no es lo mismo que apagada: puedes guardar una App que
+    // tienes apagada, o dejar fuera una que usas.
+    const activa = typeof appEstaActiva === 'function' ? appEstaActiva(app.id) : true;
+    casilla.checked = app.fija || activa;
+    // El Calendario no se puede dejar fuera, igual que no se puede
+    // apagar en la Tienda.
+    if (app.fija) casilla.disabled = true;
+    const nombre = document.createElement('span');
+    nombre.textContent = app.fija ? `${app.nombre} (siempre)` : app.nombre;
+    fila.appendChild(casilla);
+    fila.appendChild(nombre);
+    lista.appendChild(fila);
+  });
+
+  const aviso = document.getElementById('backup-apps-aviso');
+  if (aviso) {
+    aviso.textContent = 'Al restaurar esta copia solo se sustituye lo que traiga: lo que dejes fuera se quedará como esté en ese momento.';
+  }
+  modal.classList.remove('hidden');
+}
+
+function cerrarDialogoDeAppsDeLaCopia() {
+  document.getElementById('backup-apps-modal').classList.add('hidden');
+}
+
+function appsMarcadasParaLaCopia() {
+  return [...document.querySelectorAll('#backup-apps-list input[data-app-id]')]
+    .filter((c) => c.checked)
+    .map((c) => c.dataset.appId);
+}
+
+document.getElementById('btn-backup-export').addEventListener('click', () => {
+  abrirDialogoDeAppsDeLaCopia();
+});
+document.getElementById('btn-close-backup-apps').addEventListener('click', cerrarDialogoDeAppsDeLaCopia);
+document.getElementById('btn-backup-apps-cancel').addEventListener('click', cerrarDialogoDeAppsDeLaCopia);
+
+document.getElementById('btn-backup-apps-ok').addEventListener('click', async (e) => {
   const btn = e.currentTarget;
+  const incluidas = appsMarcadasParaLaCopia();
   btn.disabled = true;
   btn.textContent = 'Preparando…';
   try {
-    await exportBackup();
+    await exportBackup(incluidas);
+    cerrarDialogoDeAppsDeLaCopia();
     refreshBackupStatusLine();
   } catch (err) {
     // Cancelar la hoja de compartir tambien cae aqui: no es un error de
@@ -266,7 +510,7 @@ document.getElementById('btn-backup-export').addEventListener('click', async (e)
     }
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Exportar copia';
+    btn.textContent = 'Crear la copia';
   }
 });
 

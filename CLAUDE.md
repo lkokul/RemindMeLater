@@ -3470,7 +3470,136 @@ esa rama se cierre, se renombra de una vez.
    antes de imprimir ningún FALLO — contando con `grep -c FALLO` eso son
    cero. Va con `?.` y un `'SIN-SVG'`, y se cuenta por código de salida.
 
+## La Tienda (13/9/2026)
+
+Petición de Koku, con su lista de cuatro puntos: *"comenzar a poner las
+4 apps desarrolladas (calendario, notas, gimnasio y finanzas) /
+mostrar/ocultar apps / manuales de usuario para cada app / notas de
+versión en cada app"*. Vive en Configuración → Tienda, en dos niveles
+(lista de Apps → ficha de una App), como Finanzas y Gimnasio.
+
+**Las cuatro decisiones que tomó él**, no cambiarlas sin volver a
+preguntarle:
+
+1. **Las seis Apps salen, no cuatro.** Lecturas y Viajes aparecen
+   marcadas "en desarrollo" y **apagadas de fábrica**, pero se pueden
+   encender y usar: *"que salgan en desarrollo, y que por ahora por
+   defecto no salga activa, pero que las pueda activar y acceder a
+   ellas"*.
+2. **Apagada significa cuatro cosas concretas**, con sus palabras: *"que
+   no sean accesibles desde el menú de herramientas ni tampoco para
+   sustituir en la app de acceso rápido... en caso de tener widgets, si
+   está activa aparecen sino no. Si hago una copia de seguridad, que
+   muestre las apps para guardar en la copia, las inactivas por defecto
+   irán desmarcadas"*.
+3. **Todas se pueden apagar menos el Calendario**, que es con lo que
+   arranca la app.
+4. **Un manual entero primero** (el del Gimnasio) y los otros cinco
+   después, para validar el tono sin escribir cinco y tener que
+   rehacerlos.
+
+**Apagar NO borra NADA.** Apagar Viajes esconde Viajes; tus viajes
+siguen en la base y vuelven enteros al encenderla. Eso es lo que separa
+"ocultar" de "desinstalar", y aquí solo hay lo primero.
+
+### Las piezas
+
+- **`APPS_DE_LA_TIENDA`** (`app.js`): el registro. Id, nombre, icono de
+  fila, `estado` ('lista' o 'desarrollo'), `fija` y un resumen. Los ids
+  son los MISMOS que `MOBILE_NAV_SLOT_APPS` a propósito, para que
+  filtrar el hueco de la barra sea mirar esta lista y ya.
+- **`leerAppsActivas()` / `appEstaActiva()` / `ponerAppActiva()`**: el
+  estado va en `localStorage` (`appsActivas`), por dispositivo — qué
+  Apps quieres ver es cosa de este teléfono, no un dato.
+- **`aplicarAppsActivas()`**: deja la app entera de acuerdo con la
+  Tienda. Si la App que ocupaba el hueco de la barra se acaba de apagar,
+  la saca de ahí ANTES de repintar.
+- **`public/manuales.js`** (nuevo): `APP_MANUALES`, secciones de
+  `{titulo, parrafos, puntos}`. Se pinta TODO con `textContent`: un
+  manual no puede meter etiquetas en la pantalla.
+- **Las notas de versión por App**: cada línea de `notas-version.js`
+  puede ser una cadena (general) o `{ app, texto }`. **Una sola fuente
+  de verdad**, leída de dos formas: Novedades lo enseña todo con su
+  etiqueta, y la ficha de una App enseña solo lo suyo. Con dos listas
+  escritas a mano acabarían contradiciéndose.
+
+### Trampas que ya mordieron
+
+- **La cadena de prototipos, otra vez.** `APPS_POR_ID['constructor']`
+  devuelve la función heredada de `Object` (que es truthy), así que la
+  app se creía que existía una App llamada `constructor`; y
+  `estado['__proto__']` no guarda lo que parece. Es EXACTAMENTE el mismo
+  fallo que ya mordió en `pintarIconoDeFila()`. La cura: `appDeLaTienda()`
+  con `hasOwnProperty`, y el estado en un `Object.create(null)`.
+- **El `<div>` del diálogo de la copia tiene que ir ANTES de
+  `<script src="backup.js">`**, que engancha sus botones nada más
+  cargar. Puesto después, `getElementById` devuelve null y backup.js
+  revienta ENTERO al arrancar. Pasó de verdad.
+- **Una prueba del widget que no miraba lo que creía**: las secciones de
+  Gimnasio del resumen (`consistencia`, `musculos`...) solo existen si
+  hay historial. Sin una sesión guardada devuelven null, y la prueba
+  habría dicho "la Tienda las está filtrando" cuando lo que pasaba es
+  que nunca estuvieron.
+
+### El choque de nombres del widget, encontrado de rebote
+
+`seccionGimnasio()` deja sus claves en la RAÍZ del resumen, y una de
+ellas es `ejercicios` (**un número**: cuántos ejercicios tiene el día de
+hoy). La segunda tanda de widgets añadió una SECCIÓN también llamada
+`ejercicios` (**una lista**, para el widget configurable de la gráfica),
+y al escribirse después la pisaba.
+
+O sea que en cuanto tenías historial de entrenos, el widget "Qué toca
+hoy" dejaba de decir "6 ejercicios" y "+3 más": Swift lee ahí un `Int`,
+se encontraba una lista, y su `try? decode` caía al valor por defecto,
+0. Sin ningún error, como siempre.
+
+La sección pasa a llamarse **`graficaEjercicios`**. Era gratis:
+`ResumenDeLaApp.swift` todavía no la lee (ese widget está a medias).
+`tools/comprobar-widgets.py` no lo detectaba porque compara claves
+sueltas, no colisiones entre la raíz y las secciones.
+
+### La copia de seguridad, por Apps
+
+`BACKUP_TABLAS_POR_APP` en `backup.js` dice qué tablas son de cada App.
+**Lo que no sale en esa lista es de la app en sí** (temas, ajustes,
+perfil) y viaja SIEMPRE — es a propósito que se decida por omisión: si
+mañana aparece una tabla nueva y nadie toca ese archivo, acaba DENTRO de
+la copia. Lo contrario (quedarse fuera en silencio) sería perder datos.
+
+**Exportar** abre un diálogo de casillas (`.styled-checkbox`, la de
+"elige varios de una lista", NO `.checkbox-row`) con las Apps activas
+marcadas. Lo que dejes fuera se BORRA de una copia abierta de los bytes
+—nunca de la base viva— y se hace `VACUUM`, que es lo que hace que el
+archivo adelgace de verdad.
+
+**Y aquí estaba la trampa, que es lo importante de este bloque**: si una
+copia parcial se importara como siempre (sustituir el archivo entero),
+importarla BORRARÍA las Apps que no trae. O sea que dejar Gimnasio fuera
+de una copia no sería "no guardarlo", sería "perderlo la próxima vez que
+restaure".
+
+Por eso **una copia parcial no sustituye la base**:
+`importarSoloEstasApps()` vacía y rellena, tabla por tabla, SOLO lo que
+la copia trae, y lo que no trae se queda exactamente como está. Va al
+revés de lo que parece natural (meter lo que falta dentro de la base de
+la copia) por el ESQUEMA: la base viva siempre está al día
+(`applyLocalSchema` corre en cada arranque), mientras que la de la copia
+puede ser de hace tres versiones y no tener ni la tabla que habría que
+rellenar. Por lo mismo se copian solo las columnas COMUNES a las dos
+bases: la que falte se queda con su valor por defecto, que es justo lo
+que hace una migración al añadirla.
+
+Una copia SIN el campo `apps` es de antes de la Tienda y se trata como
+completa — es lo que era.
+
 ## Estado actual
+
+**v0.57.0** (13/9/2026) es **la Tienda**: las seis Apps con su ficha,
+encender/apagar, el manual del Gimnasio y las notas de versión por App.
+Ver su bloque más arriba. De rebote salió el choque de nombres del
+widget (`ejercicios`), que llevaba roto desde la segunda tanda de
+widgets.
 
 **Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde
 `claude/mobile-viewer-config-b59uf1`, que a su vez salía de `movil-ui`

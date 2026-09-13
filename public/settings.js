@@ -373,8 +373,23 @@ const SETTINGS_TABS = ['profile', 'view', 'style', 'mobile', 'widgets', 'notific
 // esconda, es que no existe (ver CLAUDE.md).
 // El argumento existe para poder probarla con datos rotos sin tocar la
 // global; en la app siempre se llama sin el.
-function renderReleaseNotes(fuente) {
-  const cont = document.getElementById('release-notes-list');
+// Una linea de notas puede ser una cadena (general) o
+// { app, texto }. Estas dos funciones son el UNICO sitio que conoce esa
+// forma: el resto del codigo pide "el texto" o "de que App es" y ya.
+function textoDeLaNota(linea) {
+  if (linea && typeof linea === 'object') return String(linea.texto || '');
+  return String(linea == null ? '' : linea);
+}
+function appDeLaNota(linea) {
+  if (linea && typeof linea === 'object' && linea.app) return String(linea.app);
+  return null;
+}
+
+// `soloApp` pinta unicamente las lineas de esa App, y en ese caso se
+// saltan las versiones que no tengan ninguna -- si no, la ficha de una
+// App saldria con diez cabeceras de version vacias.
+function renderReleaseNotes(fuente, { contenedor = 'release-notes-list', soloApp = null } = {}) {
+  const cont = document.getElementById(contenedor);
   if (!cont) return;
   cont.innerHTML = '';
   const crudo = fuente !== undefined
@@ -389,7 +404,20 @@ function renderReleaseNotes(fuente) {
     return;
   }
   const revisar = window.APP_NOTAS_REVISAR || {};
-  notas.forEach((nota) => {
+  // Deja solo las lineas de la App pedida. Una linea GENERAL no sale en
+  // la ficha de ninguna App a proposito: "se movio la linea de version"
+  // no es una novedad del Gimnasio.
+  const deLaApp = (lista) => (Array.isArray(lista) ? lista : []).filter(
+    (linea) => !soloApp || appDeLaNota(linea) === soloApp,
+  );
+  const conAlgo = soloApp
+    ? notas.filter((nota) => deLaApp(nota.nuevo).length > 0 || deLaApp(nota.parches).length > 0)
+    : notas;
+  if (conAlgo.length === 0) {
+    cont.innerHTML = '<p class="empty-hint">Esta App todavía no tiene novedades propias.</p>';
+    return;
+  }
+  conAlgo.forEach((nota) => {
     const bloque = document.createElement('section');
     bloque.className = 'release-note';
 
@@ -408,9 +436,12 @@ function renderReleaseNotes(fuente) {
     // Tres listas con el mismo molde. La de "revisar" solo existe en la
     // rama de desarrollador, y solo para las versiones que tengan algo.
     const grupos = [
-      ['Nuevo', nota.nuevo, 'es-nuevo'],
-      ['Arreglado', nota.parches, 'es-parche'],
-      ['A revisar', revisar[nota.version], 'es-revisar'],
+      ['Nuevo', deLaApp(nota.nuevo), 'es-nuevo'],
+      ['Arreglado', deLaApp(nota.parches), 'es-parche'],
+      // "A revisar" NO se filtra por App: son notas de desarrollo de la
+      // version entera, no de una App, y dentro de una ficha no pintan
+      // nada -- por eso solo salen cuando se ve la lista completa.
+      ['A revisar', soloApp ? [] : revisar[nota.version], 'es-revisar'],
     ];
     grupos.forEach(([titulo, lista, clase]) => {
       if (!Array.isArray(lista) || lista.length === 0) return;
@@ -420,11 +451,23 @@ function renderReleaseNotes(fuente) {
       bloque.appendChild(h);
       const ul = document.createElement('ul');
       ul.className = 'release-note-items';
-      lista.forEach((texto) => {
+      lista.forEach((linea) => {
         const li = document.createElement('li');
+        // La etiqueta de App solo en la lista GENERAL: dentro de la ficha
+        // del Gimnasio, poner "Gimnasio" en las doce lineas es ruido.
+        const app = appDeLaNota(linea);
+        if (app && !soloApp) {
+          const chip = document.createElement('span');
+          chip.className = 'release-note-app';
+          // El nombre sale del registro, no de la nota: si un dia una App
+          // se renombra, las notas viejas se renombran con ella.
+          const reg = (typeof appDeLaTienda === 'function') ? appDeLaTienda(app) : null;
+          chip.textContent = reg ? reg.nombre : app;
+          li.appendChild(chip);
+        }
         // textContent y no innerHTML: estas notas las escribo yo, pero
         // no hay ningun motivo para dejar que puedan meter etiquetas.
-        li.textContent = texto;
+        li.appendChild(document.createTextNode(textoDeLaNota(linea)));
         ul.appendChild(li);
       });
       bloque.appendChild(ul);
@@ -459,21 +502,35 @@ function showSettingsScreen(tab) {
   SETTINGS_TABS.forEach((t) => {
     document.getElementById(`settings-tab-${t}`).classList.toggle('hidden', t !== tab);
   });
+  refrescarSeccionDeAjustes(tab);
+}
+
+// Rellenar la seccion que se acaba de abrir.
+//
+// Esto vivia DENTRO del listener del menu, y era un agujero: quien
+// llegara a una seccion sin pulsar su entrada del menu la encontraba sin
+// refrescar. Pasaba de verdad -- el aviso de "hace 30 dias que no haces
+// copia" llama a showSettingsScreen('mobile') a pelo (backup.js), asi
+// que abria "Este dispositivo" SIN pasar por refreshMobileTab(), o sea
+// con la fecha de la ultima copia como estuviera. Estando aqui, cualquier
+// camino a una seccion la deja al dia.
+function refrescarSeccionDeAjustes(tab) {
+  if (tab === 'novedades') renderReleaseNotes();
+  // La Tienda se abre SIEMPRE por la lista, nunca en la ficha donde
+  // estuviste: los dos niveles guardan su clase `hidden` entre
+  // aperturas, igual que los paneles del Gimnasio.
+  else if (tab === 'store') mostrarListaDeLaTienda();
+  else if (tab === 'profile') refreshProfileTab();
+  else if (tab === 'view') refreshViewTab();
+  else if (tab === 'style') refreshStyleTab();
+  // refreshMobileTab refresca por id, asi que vale para las DOS
+  // secciones que reparte: Este dispositivo y Notificaciones.
+  else if (tab === 'mobile' || tab === 'notifications') refreshMobileTab();
+  else if (tab === 'widgets') refreshWidgetStyleOptions();
 }
 
 document.querySelectorAll('.settings-menu-item').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const tab = btn.dataset.tab;
-    showSettingsScreen(tab);
-    if (tab === 'novedades') renderReleaseNotes();
-    if (tab === 'profile') refreshProfileTab();
-    else if (tab === 'view') refreshViewTab();
-    else if (tab === 'style') refreshStyleTab();
-    // refreshMobileTab refresca por id, asi que vale para las DOS
-    // secciones que reparte: Este dispositivo y Notificaciones.
-    else if (tab === 'mobile' || tab === 'notifications') refreshMobileTab();
-    else if (tab === 'widgets') refreshWidgetStyleOptions();
-  });
+  btn.addEventListener('click', () => showSettingsScreen(btn.dataset.tab));
 });
 
 // ---------------------------------------------------------------------
@@ -2324,3 +2381,153 @@ document.addEventListener('keydown', (e) => {
     }
   }
 });
+
+// =====================================================================
+// LA TIENDA
+//
+// Peticion de Koku (13/9/2026), cuatro puntos: poner las Apps, poder
+// mostrarlas/ocultarlas, un manual por App y sus notas de version.
+//
+// Dos niveles que se alternan (nunca se ven los dos), igual que Finanzas
+// y el Gimnasio: la LISTA de Apps y la FICHA de una.
+// =====================================================================
+
+function mostrarListaDeLaTienda() {
+  document.getElementById('store-list-level').classList.remove('hidden');
+  document.getElementById('store-detail-level').classList.add('hidden');
+  renderStoreApps();
+}
+
+function abrirFichaDeApp(id) {
+  const app = (typeof appDeLaTienda === 'function') ? appDeLaTienda(id) : null;
+  if (!app) return;
+  document.getElementById('store-list-level').classList.add('hidden');
+  document.getElementById('store-detail-level').classList.remove('hidden');
+  document.getElementById('store-detail-title').textContent = app.nombre;
+
+  // Lo primero que se lee es en que estado esta la App, porque cambia
+  // como hay que leer todo lo de abajo: un manual de algo a medias
+  // promete cosas que igual no estan.
+  const estado = document.getElementById('store-detail-estado');
+  const activa = appEstaActiva(app.id);
+  const trozos = [app.resumen];
+  if (app.estado === 'desarrollo') {
+    trozos.push('Está en desarrollo: le faltan cosas y puede cambiar de sitio.');
+  }
+  if (!activa) trozos.push('Ahora mismo está apagada.');
+  estado.textContent = trozos.join(' ');
+
+  renderManualDeApp(app.id);
+  renderReleaseNotes(undefined, { contenedor: 'store-detail-notes', soloApp: app.id });
+}
+
+// El manual. Sale de public/manuales.js, que se escribe a mano.
+//
+// TODO con textContent: un manual no puede meter etiquetas en la
+// pantalla. Los escribo yo, pero el resto de la app trata cualquier
+// texto asi y no hay motivo para que esto sea la excepcion.
+function renderManualDeApp(id) {
+  const cont = document.getElementById('store-detail-manual');
+  if (!cont) return;
+  cont.innerHTML = '';
+  const manual = (typeof APP_MANUALES !== 'undefined' && Array.isArray(APP_MANUALES[id]))
+    ? APP_MANUALES[id]
+    : [];
+  if (manual.length === 0) {
+    const vacio = document.createElement('p');
+    vacio.className = 'empty-hint';
+    vacio.textContent = 'El manual de esta App todavía está por escribir.';
+    cont.appendChild(vacio);
+    return;
+  }
+  manual.forEach((seccion) => {
+    if (!seccion || !seccion.titulo) return;
+    const h = document.createElement('h5');
+    h.className = 'store-manual-heading';
+    h.textContent = seccion.titulo;
+    cont.appendChild(h);
+    (Array.isArray(seccion.parrafos) ? seccion.parrafos : []).forEach((t) => {
+      const p = document.createElement('p');
+      p.className = 'store-manual-p';
+      p.textContent = t;
+      cont.appendChild(p);
+    });
+    if (Array.isArray(seccion.puntos) && seccion.puntos.length > 0) {
+      const ul = document.createElement('ul');
+      ul.className = 'store-manual-list';
+      seccion.puntos.forEach((t) => {
+        const li = document.createElement('li');
+        li.textContent = t;
+        ul.appendChild(li);
+      });
+      cont.appendChild(ul);
+    }
+  });
+}
+
+// La lista de Apps. Cada una es una fila con su interruptor, y tocarla
+// (en cualquier sitio que no sea el interruptor) abre su ficha.
+function renderStoreApps() {
+  const cont = document.getElementById('store-apps-list');
+  if (!cont || typeof APPS_DE_LA_TIENDA === 'undefined') return;
+  cont.innerHTML = '';
+  const grupo = document.createElement('div');
+  grupo.className = 'finanzas-group';
+
+  APPS_DE_LA_TIENDA.forEach((app) => {
+    const activa = appEstaActiva(app.id);
+    const fila = filaDeLista({
+      icono: app.icono,
+      titulo: app.nombre,
+      sub: app.resumen,
+      alPulsar: () => abrirFichaDeApp(app.id),
+      flecha: true,
+    });
+    if (!activa) fila.classList.add('store-row-apagada');
+
+    // El interruptor va DENTRO de la fila pero delante de la flecha, y
+    // se le para el clic: si no, encender una App abriria ademas su
+    // ficha, porque el clic sube hasta el boton de la fila.
+    const der = fila.querySelector('.finanzas-row-right');
+    if (der) {
+      if (app.estado === 'desarrollo') {
+        const badge = document.createElement('span');
+        badge.className = 'finanzas-row-badge store-badge-desarrollo';
+        badge.textContent = 'En desarrollo';
+        der.insertBefore(badge, der.firstChild);
+      }
+      if (app.fija) {
+        // El Calendario no lleva interruptor: no se puede apagar, y un
+        // interruptor que no se deja mover confunde mas que una palabra.
+        const siempre = document.createElement('span');
+        siempre.className = 'finanzas-row-badge';
+        siempre.textContent = 'Siempre';
+        der.insertBefore(siempre, der.querySelector('.finanzas-row-chevron'));
+      } else {
+        // `.checkbox-row` es el interruptor tipo pastilla de la app, el
+        // mismo de los ajustes de on/off. NO `.styled-checkbox`, que es
+        // el cuadrado de "elige uno o varios de una lista" -- son dos
+        // componentes distintos y CLAUDE.md avisa de no confundirlos.
+        const sw = document.createElement('label');
+        sw.className = 'checkbox-row store-row-switch';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = activa;
+        input.setAttribute('aria-label', `${activa ? 'Apagar' : 'Encender'} ${app.nombre}`);
+        sw.appendChild(input);
+        // En el LABEL, no solo en el input: un toque en la pista tambien
+        // llega aqui, y sin esto abriria la ficha de rebote.
+        sw.addEventListener('click', (e) => e.stopPropagation());
+        input.addEventListener('change', () => {
+          ponerAppActiva(app.id, input.checked);
+          renderStoreApps();
+        });
+        der.insertBefore(sw, der.querySelector('.finanzas-row-chevron'));
+      }
+    }
+    grupo.appendChild(fila);
+  });
+  cont.appendChild(grupo);
+}
+
+document.getElementById('btn-store-back').addEventListener('click', mostrarListaDeLaTienda);

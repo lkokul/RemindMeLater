@@ -17,6 +17,14 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.57.0': [
+    'Los manuales de Calendario, Notas, Finanzas, Lecturas y Viajes están VACÍOS: solo está escrito el del Gimnasio, que es el que pediste ver primero. Si el tono y el nivel de detalle te valen, se escriben los otros cinco con el mismo patrón.',
+    'Apagar una App NO borra nada, solo la esconde. Decidir si algún día debería existir un "borrar los datos de esta App" aparte — hoy no hay forma de vaciar Viajes sin vaciar la copia entera.',
+    'Una copia de seguridad parcial ahora se importa SIN pisar lo que no trae. Merece la pena probarlo con datos de verdad antes de fiarse: exporta solo Gimnasio, cambia cosas en Finanzas, importa y comprueba que Finanzas sigue como la dejaste.',
+    'Los ajustes de este dispositivo (tema, unidades, qué hay en la barra) se restauran ENTEROS aunque la copia sea parcial. Son preferencias, no datos de una App, pero si prefieres que una copia parcial no toque los ajustes, es una línea.',
+    'El widget del calendario y el de tareas son del Calendario, que no se puede apagar: o sea que esos dos siempre tienen datos. Los cuatro que sí se pueden dejar sin datos son Gimnasio, Finanzas, Lecturas y Viajes.',
+    'La clave "ejercicios" del mensaje al widget se llamaba igual en dos sitios y uno pisaba al otro (arreglado). Conviene mirar el widget "Qué toca hoy" en el iPhone: tiene que volver a decir cuántos ejercicios tiene el día.',
+  ],
   '0.56.0': [
     'Deslizar hacia la derecha desde el inicio del Gimnasio NO sale a Herramientas todavía — eso solo está en Finanzas. Ahora que las dos pantallas tienen la misma forma, decide si se generaliza (también a Viajes y Entretenimiento).',
     'El componente de fila y sus clases CSS siguen llamándose `finanzas-*` aunque ahora los use también el Gimnasio. Es a propósito, para no chocar con tu rama finanzas-movil en cada línea; cuando la cierres, se renombran de una vez.',

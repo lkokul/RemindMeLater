@@ -5051,6 +5051,22 @@ body.gym-rest-push #settings-modal .settings-card {
 .backup-actions { display: flex; gap: 0.5rem; }
 .backup-actions button { flex: 1; }
 
+/* Que Apps entran en la copia. Filas de casilla + nombre: la casilla es
+   .styled-checkbox (el cuadrado de elegir varios de una lista), no el
+   interruptor de un ajuste. */
+.backup-apps-list { display: flex; flex-direction: column; gap: 0.15rem; margin: 0.6rem 0; }
+.backup-app-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.2rem;
+  font-size: var(--t-cuerpo);
+  cursor: pointer;
+}
+/* Una App que no se puede dejar fuera (el Calendario) se lee como lo que
+   es: sigue ahi, pero no es una decision tuya. */
+.backup-app-row:has(input:disabled) { opacity: 0.65; cursor: default; }
+
 
 /* --- Ciclo de dias del bloque (Gimnasio) ---------------------------- */
 /* Las filas del editor: numero de posicion, desplegable propio de la app
@@ -5331,6 +5347,55 @@ body.gym-rest-push #settings-modal .settings-card {
    categoria o un objetivo son el emoji que elegiste tu, con el fondo de
    color que le pusiste, y ahi el acento no pinta nada. */
 .finanzas-row-icon-svg { color: var(--accent); }
+
+/* --- La Tienda (13/9/2026) --- */
+/* Una App apagada se ve APAGADA, no escondida: sigue en la lista porque
+   es la unica forma de volver a encenderla. */
+.store-row-apagada .finanzas-row-icon,
+.store-row-apagada .finanzas-row-main { opacity: 0.45; }
+/* El interruptor dentro de la fila: sin el `gap` de .checkbox-row, que
+   ahi dentro dejaria un hueco vacio (no lleva texto al lado). */
+.store-row-switch { gap: 0; margin: 0; }
+.store-badge-desarrollo {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  color: var(--accent);
+}
+/* El manual: texto largo, asi que se le da mas interlineado que al resto
+   de la app -- aqui se LEE, no se ojea. */
+.store-detail-heading { margin: 1.6rem 0 0.5rem; }
+.store-manual-heading {
+  margin: 1.3rem 0 0.4rem;
+  font-size: var(--t-cuerpo);
+  font-weight: 600;
+}
+.store-manual-p {
+  margin: 0.4rem 0;
+  font-size: var(--t-secundario);
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--bg-text) 85%, var(--bg));
+}
+.store-manual-list {
+  margin: 0.4rem 0;
+  padding-left: 1.1rem;
+  font-size: var(--t-secundario);
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--bg-text) 85%, var(--bg));
+}
+.store-manual-list li { margin: 0.3rem 0; }
+/* La etiqueta de App en una linea de Novedades. `inline-block` con un
+   margen derecho, no un flex: la linea puede ocupar tres renglones y la
+   etiqueta tiene que quedarse pegada al principio del texto. */
+.release-note-app {
+  display: inline-block;
+  margin-right: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--surface));
+  color: var(--accent);
+  font-size: var(--t-micro);
+  font-weight: 600;
+  vertical-align: 1px;
+}
 /* Los iconos son SVG desde el 13/9/2026 (antes emojis; ver la duda B9,
    ya cerrada). 18 de 32 deja el aire de alrededor que pide un icono
    dentro de un circulo: mas grande toca el borde y parece apretado.

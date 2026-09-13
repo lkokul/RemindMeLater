@@ -108,19 +108,36 @@ async function construirResumenDelDia() {
   // Cada sección va en su propio try: que Finanzas falle no puede dejar
   // sin datos al calendario. Si una revienta, se queda fuera del JSON y
   // su widget enseña su texto de "sin datos" -- que es justo lo que hay.
+  //
+  // La tercera columna es de QUÉ App es la sección. Koku, al diseñar la
+  // Tienda: "en caso de tener widgets, si está activa aparecen sino no".
+  // Una App apagada no manda NADA: su sección se queda fuera del JSON y
+  // su widget enseña el mismo "sin datos" que si nunca hubieras abierto
+  // la app. No se borra nada -- al volver a encenderla, el resumen
+  // siguiente la trae entera.
   const secciones = [
-    ['calendario', seccionCalendario],
-    ['consistencia', seccionConsistencia],
-    ['ejercicios', seccionEjercicios],
-    ['musculos', () => seccionMusculos()],
-    ['grupos', seccionGrupos],
-    ['agenda', seccionAgenda],
-    ['tareas', seccionTareas],
-    ['finanzas', seccionFinanzas],
-    ['lecturas', seccionLecturas],
-    ['viajes', seccionViajes],
+    ['calendario', seccionCalendario, 'calendario'],
+    ['consistencia', seccionConsistencia, 'gym'],
+    // OJO CON EL NOMBRE DE ESTA CLAVE: se llamaba 'ejercicios' a secas y
+    // PISABA la clave del mismo nombre que seccionGimnasio() deja en la
+    // raiz (cuantos ejercicios tiene el dia de hoy, un numero). En
+    // cuanto tenias historial, el widget "Que toca hoy" dejaba de decir
+    // "6 ejercicios" y "+3 mas": Swift lee ahi un Int, se encontraba una
+    // lista, y su `try? decode` caia al valor por defecto, 0. Sin ningun
+    // error, claro. Esta seccion todavia no la lee nadie en Swift (es
+    // para el widget configurable de la grafica, que esta a medias), asi
+    // que renombrarla es gratis.
+    ['graficaEjercicios', seccionEjercicios, 'gym'],
+    ['musculos', () => seccionMusculos(), 'gym'],
+    ['grupos', seccionGrupos, 'calendario'],
+    ['agenda', seccionAgenda, 'calendario'],
+    ['tareas', seccionTareas, 'calendario'],
+    ['finanzas', seccionFinanzas, 'finanzas'],
+    ['lecturas', seccionLecturas, 'lecturas'],
+    ['viajes', seccionViajes, 'viajes'],
   ];
-  for (const [clave, construir] of secciones) {
+  for (const [clave, construir, deQueApp] of secciones) {
+    if (!appDelWidgetActiva(deQueApp)) continue;
     try {
       const valor = await construir();
       if (valor) resumen[clave] = valor;
@@ -131,6 +148,17 @@ async function construirResumenDelDia() {
   return resumen;
 }
 
+// ¿Está encendida esta App en la Tienda? Se pregunta con guantes: este
+// archivo se carga como <script> suelto igual que los demás, y si algún
+// día se cargara antes que app.js (o en una prueba que sirva solo este
+// archivo), `appEstaActiva` no existiría todavía. En la duda, ACTIVA:
+// un widget con datos de más es un fallo tonto; uno vacío sin motivo
+// parece que la app está rota.
+function appDelWidgetActiva(id) {
+  if (typeof appEstaActiva !== 'function') return true;
+  try { return appEstaActiva(id) !== false; } catch { return true; }
+}
+
 // --- Gimnasio: qué toca hoy según el ciclo del bloque activo ----------
 function seccionGimnasio() {
   const vacio = {
@@ -138,6 +166,12 @@ function seccionGimnasio() {
     color: '#5b8cff', icono: '', posicion: 0, total: 0, ejercicios: 0,
     listaEjercicios: [], siguiente: '',
   };
+  // Apagada en la Tienda: se mandan las claves vacías, no se quitan. Van
+  // en la RAÍZ del resumen (no en una sección propia), así que quitarlas
+  // dejaría al decodificador de Swift tirando de sus valores por defecto,
+  // y esos son justo estos. Mandarlas explícitas cuesta lo mismo y no
+  // depende de un detalle del otro lado.
+  if (!appDelWidgetActiva('gym')) return vacio;
   if (typeof gymCicloDeHoy !== 'function') return vacio;
   let hoy = null;
   try { hoy = gymCicloDeHoy(); } catch { return vacio; }

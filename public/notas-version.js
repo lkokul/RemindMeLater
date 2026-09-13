@@ -17,15 +17,45 @@
 // Lo que hay "a revisar" NO vive aquí: va en public/desarrollador.js, que
 // es un archivo que NO viaja a la rama de usuario (ver CLAUDE.md). Así no
 // es que se esconda por CSS: es que no está.
+//
+// CADA LÍNEA DICE DE QUÉ APP ES (13/9/2026, decisión de Koku al pedir
+// notas por App): una línea puede ser
+//
+//   'texto'                              → general, de la app entera
+//   { app: 'gym', texto: '...' }         → de esa App
+//
+// Se escribe UNA sola vez y se lee de DOS formas: Configuración →
+// Novedades lo enseña todo junto con su etiqueta, y la ficha de cada App
+// en la Tienda enseña solo lo suyo. Una sola fuente de verdad: así las
+// dos pantallas no pueden contradecirse, que es lo que pasaría con dos
+// listas escritas a mano por separado.
+//
+// El `app` tiene que ser un id de APPS_DE_LA_TIENDA (app.js). Uno que no
+// exista se lee como general, no rompe nada.
 const APP_RELEASE_NOTES = [
+  {
+    version: '0.57.0',
+    fecha: '2026-09-13',
+    nuevo: [
+      'La Tienda ya está: las seis Apps, cada una con su ficha. Dentro de la ficha están su manual de uso y sus novedades, solo las suyas.',
+      'Puedes encender y apagar Apps. Una App apagada desaparece de Herramientas, no se puede poner en el hueco de la barra de abajo y sus widgets se quedan sin datos. No se borra NADA: al volver a encenderla está todo como lo dejaste.',
+      'Lecturas y Viajes vienen apagadas de fábrica y marcadas como "en desarrollo": les faltan cosas y pueden cambiar de sitio. Se encienden desde su ficha cuando quieras.',
+      'La copia de seguridad pregunta qué Apps guardar. Las que tengas apagadas vienen desmarcadas, pero puedes marcarlas igual.',
+      'Al restaurar una copia que no lo trae todo, solo se sustituye lo que la copia traiga: las Apps que no vengan en ella se quedan como están ahora. El aviso antes de importar dice exactamente qué se cambia y qué no.',
+      { app: 'gym', texto: 'El manual del Gimnasio está escrito entero. Los otros cinco están por hacer.' },
+    ],
+    parches: [
+      { app: 'gym', texto: 'El widget "Qué toca hoy" dejaba de decir cuántos ejercicios tiene el día (y el "+3 más") en cuanto tenías historial de entrenos. Dos datos distintos se llamaban igual dentro del mensaje que la app le manda al widget, y uno pisaba al otro.' },
+    ],
+  },
   {
     version: '0.56.0',
     fecha: '2026-09-13',
     nuevo: [
-      'El Gimnasio se navega como Finanzas: un inicio con Historial, Plan, Progreso y Logros como filas, y entras en la que quieras. Se va la barra de cuatro pestañas de arriba.',
-      'Arriba del todo, cuántos entrenos llevas esta semana y tu racha. Y justo debajo, "Empezar entrenamiento" — sigue a un solo toque de abrir la app.',
-      'La pestaña "Entrenar" pasa a llamarse "Historial", que es lo que de verdad tiene dentro ahora: las sesiones hechas, la actividad rápida y apuntar a mano.',
-      'Cada fila dice de un vistazo lo que hay dentro: cuántas sesiones, cuántos bloques y días, y cuántos logros llevas empezados.',
+      { app: 'gym', texto: 'El Gimnasio se navega como Finanzas: un inicio con Historial, Plan, Progreso y Logros como filas, y entras en la que quieras. Se va la barra de cuatro pestañas de arriba.' },
+      { app: 'gym', texto: 'Arriba del todo, cuántos entrenos llevas esta semana y tu racha. Y justo debajo, "Empezar entrenamiento" — sigue a un solo toque de abrir la app.' },
+      { app: 'gym', texto: 'La pestaña "Entrenar" pasa a llamarse "Historial", que es lo que de verdad tiene dentro ahora: las sesiones hechas, la actividad rápida y apuntar a mano.' },
+      { app: 'gym', texto: 'Cada fila dice de un vistazo lo que hay dentro: cuántas sesiones, cuántos bloques y días, y cuántos logros llevas empezados.' },
     ],
     parches: [
       'Los iconos de las secciones ya no son emojis: son dibujos propios que se tiñen con el color del tema que tengas puesto. Antes los pintaba el sistema con su tipografía, así que cambiaban de forma entre un iPhone y un Android y no seguían el tema. Los iconos que eliges TÚ para una categoría o un objetivo no cambian: esos son tuyos.',
@@ -35,35 +65,35 @@ const APP_RELEASE_NOTES = [
     version: '0.55.0',
     fecha: '2026-09-11',
     nuevo: [
-      'En Finanzas, deslizar hacia la derecha desde el inicio de la sección ya sale a Herramientas. Antes el gesto solo servía para volver de una sección a su inicio y ahí se quedaba.',
+      { app: 'finanzas', texto: 'En Finanzas, deslizar hacia la derecha desde el inicio de la sección ya sale a Herramientas. Antes el gesto solo servía para volver de una sección a su inicio y ahí se quedaba.' },
     ],
     parches: [
-      'La última fila de una lista de Finanzas quedaba debajo de la barra de abajo y no había forma de verla ni de tocarla, ni bajando del todo.',
-      'Arrastrar sobre una tabla ancha de Finanzas te sacaba de la pantalla en vez de dejarte mirar las columnas.',
-      'Los porcentajes de Finanzas salían con punto decimal ("+9.7%") al lado de importes con coma ("1.700,00 €").',
+      { app: 'finanzas', texto: 'La última fila de una lista de Finanzas quedaba debajo de la barra de abajo y no había forma de verla ni de tocarla, ni bajando del todo.' },
+      { app: 'finanzas', texto: 'Arrastrar sobre una tabla ancha de Finanzas te sacaba de la pantalla en vez de dejarte mirar las columnas.' },
+      { app: 'finanzas', texto: 'Los porcentajes de Finanzas salían con punto decimal ("+9.7%") al lado de importes con coma ("1.700,00 €").' },
     ],
   },
   {
     version: '0.54.0',
     fecha: '2026-09-11',
     nuevo: [
-      'Series parciales. Donde ya se apuntaban dropsets y rest-pause hay ahora un tercer tipo: seguir a recorrido corto cuando ya no salen repeticiones completas. Cuentan en el volumen y pueden ser récord, igual que los otros dos.',
-      'El reloj del entreno pasa a horas en cuanto las hay: 1:30:15 en vez de 90:15. Los descansos y la cuenta atrás de la serie siguen en minutos y segundos, que es como se leen mejor.',
+      { app: 'gym', texto: 'Series parciales. Donde ya se apuntaban dropsets y rest-pause hay ahora un tercer tipo: seguir a recorrido corto cuando ya no salen repeticiones completas. Cuentan en el volumen y pueden ser récord, igual que los otros dos.' },
+      { app: 'gym', texto: 'El reloj del entreno pasa a horas en cuanto las hay: 1:30:15 en vez de 90:15. Los descansos y la cuenta atrás de la serie siguen en minutos y segundos, que es como se leen mejor.' },
     ],
     parches: [
-      'Los ejercicios por lados contaban mal las series si empezabas por el derecho: hacías tres series con cada brazo y la app apuntaba "derecho izquierdo derecho / izquierdo derecho / izquierdo". Ahora los dos lados son siempre la misma serie, empieces por donde empieces, y el descanso corto cae donde toca.',
-      'El historial guardaba esas mismas series numeradas de una en una (seis en vez de tres). Las sesiones nuevas ya se guardan bien.',
+      { app: 'gym', texto: 'Los ejercicios por lados contaban mal las series si empezabas por el derecho: hacías tres series con cada brazo y la app apuntaba "derecho izquierdo derecho / izquierdo derecho / izquierdo". Ahora los dos lados son siempre la misma serie, empieces por donde empieces, y el descanso corto cae donde toca.' },
+      { app: 'gym', texto: 'El historial guardaba esas mismas series numeradas de una en una (seis en vez de tres). Las sesiones nuevas ya se guardan bien.' },
     ],
   },
   {
     version: '0.53.0',
     fecha: '2026-09-11',
     nuevo: [
-      'Ejercicios por tiempo. En la ficha de cada ejercicio eliges cómo se mide: repeticiones (lo de siempre), tiempo (isométricos: planchas, hollow holds) o repeticiones dentro de un tiempo.',
-      'El cronómetro de la serie se adapta: si le pones segundos objetivo cuenta atrás y se marca al llegar a cero; si lo dejas vacío cuenta hacia arriba, para aguantar lo que puedas.',
-      'Puedes ponerles peso igual (una plancha lastrada, un chaleco), aunque lo normal sea sin.',
-      '"Tiempo bajo tensión" en Progreso, con sus propios segundos. Va aparte del volumen a propósito: un minuto de plancha no son kilos movidos.',
-      'Cronómetro y temporizador sueltos en el menú del entreno. Solo cuentan: empezar, pausar y reiniciar. Si los cierras siguen corriendo, y no se guardan en el historial.',
+      { app: 'gym', texto: 'Ejercicios por tiempo. En la ficha de cada ejercicio eliges cómo se mide: repeticiones (lo de siempre), tiempo (isométricos: planchas, hollow holds) o repeticiones dentro de un tiempo.' },
+      { app: 'gym', texto: 'El cronómetro de la serie se adapta: si le pones segundos objetivo cuenta atrás y se marca al llegar a cero; si lo dejas vacío cuenta hacia arriba, para aguantar lo que puedas.' },
+      { app: 'gym', texto: 'Puedes ponerles peso igual (una plancha lastrada, un chaleco), aunque lo normal sea sin.' },
+      { app: 'gym', texto: '"Tiempo bajo tensión" en Progreso, con sus propios segundos. Va aparte del volumen a propósito: un minuto de plancha no son kilos movidos.' },
+      { app: 'gym', texto: 'Cronómetro y temporizador sueltos en el menú del entreno. Solo cuentan: empezar, pausar y reiniciar. Si los cierras siguen corriendo, y no se guardan en el historial.' },
     ],
     parches: [],
   },
@@ -72,16 +102,16 @@ const APP_RELEASE_NOTES = [
     fecha: '2026-09-11',
     nuevo: [
       'Duplicar: notas, carpetas, bloques, días y ejercicios. Se hace deslizando la fila, y en Notas también desde el modo Seleccionar, para copiar varias de golpe.',
-      'Al duplicar una carpeta puedes elegir si se lleva lo que hay dentro.',
-      'Los bloques y los días del Gimnasio se deslizan, como el resto de la app. Se va el lápiz.',
-      'Los ejercicios de un día también se deslizan: Editar, Mover y Quitar. Se van las flechas de subir y bajar.',
-      'Un "− 30 s" para deshacer los "+30 s" que le hayas dado al descanso.',
+      { app: 'notes', texto: 'Al duplicar una carpeta puedes elegir si se lleva lo que hay dentro.' },
+      { app: 'gym', texto: 'Los bloques y los días del Gimnasio se deslizan, como el resto de la app. Se va el lápiz.' },
+      { app: 'gym', texto: 'Los ejercicios de un día también se deslizan: Editar, Mover y Quitar. Se van las flechas de subir y bajar.' },
+      { app: 'gym', texto: 'Un "− 30 s" para deshacer los "+30 s" que le hayas dado al descanso.' },
       'Novedades: este mismo apartado.',
     ],
     parches: [
-      'En el entreno, deslizar un ejercicio y darle a Editar no hacía nada. Llevaba así desde la build #59.',
-      'Si cortas el descanso empezando antes la siguiente serie, ahora se guarda el tiempo que de verdad descansaste. Antes se guardaba el programado, y eso desviaba el tiempo estimado del entreno.',
-      'El botón ± está ahora delante del peso, que es donde aparece el signo.',
+      { app: 'gym', texto: 'En el entreno, deslizar un ejercicio y darle a Editar no hacía nada. Llevaba así desde la build #59.' },
+      { app: 'gym', texto: 'Si cortas el descanso empezando antes la siguiente serie, ahora se guarda el tiempo que de verdad descansaste. Antes se guardaba el programado, y eso desviaba el tiempo estimado del entreno.' },
+      { app: 'gym', texto: 'El botón ± está ahora delante del peso, que es donde aparece el signo.' },
       'La App que pongas en la barra de abajo ya no sale repetida en Herramientas.',
       'La versión se ha movido al final de Configuración.',
     ],
@@ -90,23 +120,23 @@ const APP_RELEASE_NOTES = [
     version: '0.51.0',
     fecha: '2026-09-11',
     nuevo: [
-      'El inicio de Finanzas pasa a filas y enseña siempre sus siete secciones, aunque estén vacías.',
+      { app: 'finanzas', texto: 'El inicio de Finanzas pasa a filas y enseña siempre sus siete secciones, aunque estén vacías.' },
     ],
     parches: [
-      'Había secciones de Finanzas a las que no se podía entrar si no tenían datos.',
+      { app: 'finanzas', texto: 'Había secciones de Finanzas a las que no se podía entrar si no tenían datos.' },
     ],
   },
   {
     version: '0.49.0',
     fecha: '2026-09-11',
     nuevo: [
-      'Fórmulas en las notas: escribe "12+1 =" y el resultado aparece detrás. Intro lo fija.',
-      'Tiempo estimado del entreno, calculado con tus propias medias.',
-      'Cualquier ejercicio acepta peso negativo, para los asistidos.',
+      { app: 'notes', texto: 'Fórmulas en las notas: escribe "12+1 =" y el resultado aparece detrás. Intro lo fija.' },
+      { app: 'gym', texto: 'Tiempo estimado del entreno, calculado con tus propias medias.' },
+      { app: 'gym', texto: 'Cualquier ejercicio acepta peso negativo, para los asistidos.' },
     ],
     parches: [
-      'Los días no se veían en el widget grande del calendario.',
-      'Intro no fijaba la fórmula en el iPhone.',
+      { app: 'calendario', texto: 'Los días no se veían en el widget grande del calendario.' },
+      { app: 'notes', texto: 'Intro no fijaba la fórmula en el iPhone.' },
     ],
   },
   {

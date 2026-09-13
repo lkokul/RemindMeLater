@@ -2915,15 +2915,30 @@
         <p id="gym-rest-alert-status" class="hint"></p>
       </div>
 
-      <!-- --- Tienda (todavia sin mecanica: solo el hueco) --- -->
+      <!-- --- Tienda (13/9/2026). Las Apps de la app: cuales estan
+           activas, y la ficha de cada una con su manual y sus notas.
+           Dos niveles, como Finanzas y Gimnasio: la LISTA y la FICHA de
+           una App, que se alternan (nunca se ven las dos). --- -->
       <div id="settings-tab-store" class="settings-tab-panel hidden">
-        <h3>Tienda</h3>
-        <p class="hint">
-          Aquí vivirán los módulos de Herramientas: los que ya tienes
-          vienen de serie, y más adelante se podrán añadir otros desde
-          aquí, con su propio buscador.
-        </p>
-        <p class="hint">Todavía no está construida — es solo el sitio donde va a ir.</p>
+        <div id="store-list-level">
+          <h3>Tienda</h3>
+          <p class="hint">
+            Enciende o apaga cada App. Una App apagada desaparece de
+            Herramientas, del acceso rápido de la barra y de sus widgets
+            — pero <strong>no se borra nada</strong>: al encenderla
+            vuelve con todos tus datos.
+          </p>
+          <div id="store-apps-list" class="finanzas-group-list"></div>
+        </div>
+
+        <div id="store-detail-level" class="hidden">
+          <button type="button" id="btn-store-back" class="finanzas-back-btn">‹ Tienda</button>
+          <h3 id="store-detail-title"></h3>
+          <p class="hint" id="store-detail-estado"></p>
+          <div id="store-detail-manual" class="store-manual"></div>
+          <h4 class="store-detail-heading">Novedades de esta App</h4>
+          <div id="store-detail-notes"></div>
+        </div>
       </div>
 
       <!-- --- Perfil --- -->
@@ -3037,13 +3052,14 @@
         <div id="mobile-nav-slot-field"></div>
 
         <h4>Copia de seguridad</h4>
-        <p class="hint">Todos tus datos viven solo en este dispositivo: si borras la app sin una copia, se pierden. Exportar crea un único archivo con todo (calendario, notas, herramientas, fotos y ajustes) y lo manda por la hoja de compartir del sistema, para guardarlo donde quieras. Importar restaura ese archivo, sustituyendo lo que haya ahora.</p>
+        <p class="hint">Todos tus datos viven solo en este dispositivo: si borras la app sin una copia, se pierden. Exportar crea un único archivo con lo que elijas (calendario, notas, herramientas, fotos y ajustes) y lo manda por la hoja de compartir del sistema, para guardarlo donde quieras. Importar restaura ese archivo: sustituye las Apps que la copia traiga y deja como están las que no.</p>
         <p id="backup-status" class="hint"></p>
         <div class="backup-actions">
           <button type="button" id="btn-backup-export" class="primary-btn">Exportar copia</button>
           <button type="button" id="btn-backup-import" class="secondary-btn">Importar copia</button>
         </div>
         <input type="file" id="backup-import-input" accept="application/json,.json" class="hidden" />
+
 
         <!-- Diagnostico del widget. En el iPhone no hay forma de ver la
              consola, asi que el resultado del ultimo aviso al widget se
@@ -3077,8 +3093,33 @@
 
   <!-- El numero de compilacion (lo rellena el workflow) y las notas de
        version. Van ANTES que app.js porque los lee al pintar. -->
+  <!-- OJO AL SITIO: este dialogo tiene que estar ANTES de <script
+       src="backup.js">, que engancha sus botones nada mas cargar. Puesto
+       despues de los scripts, getElementById devuelve null y backup.js
+       revienta entero al arrancar (paso de verdad). -->
+  <!-- Que Apps entran en la copia. Peticion de Koku (13/9/2026):
+       "si hago una copia de seguridad, que muestre las apps para
+       guardar en la copia, las inactivas por defecto iran
+       desmarcadas". Las casillas son .styled-checkbox (el cuadrado
+       de "elige uno o varios de una lista"), NO .checkbox-row, que
+       es el interruptor de un ajuste on/off. -->
+  <div id="backup-apps-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-backup-apps" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>¿Qué guardamos en la copia?</h2>
+      <p class="hint">Lo que dejes fuera no viaja en el archivo. Tus datos no se tocan: siguen aquí igual.</p>
+      <div id="backup-apps-list" class="backup-apps-list"></div>
+      <p class="hint" id="backup-apps-aviso"></p>
+      <div class="modal-actions">
+        <button type="button" id="btn-backup-apps-cancel" class="secondary-btn">Cancelar</button>
+        <button type="button" id="btn-backup-apps-ok" class="primary-btn">Crear la copia</button>
+      </div>
+    </div>
+  </div>
+
   <script src="build-info.js"></script>
   <script src="notas-version.js"></script>
+  <script src="manuales.js"></script>
   <!-- SOLO EN LA RAMA DE DESARROLLADOR: este <script> y su archivo se
        quitan al fusionar en movil-ui (ver CLAUDE.md). Trae la marca de
        "esto es una build de desarrollo" y las cosas a revisar de cada
@@ -3135,6 +3176,7 @@
   <script src="widget-bridge.js"></script>
   <script src="backup.js"></script>
   <script src="viajesCountries.js"></script>
+
   <script src="app.js"></script>
   <script src="settings.js"></script>
   <!-- Compartir -> RemindMeLater: recibe el texto de la extension de

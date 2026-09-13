@@ -8359,9 +8359,168 @@ const MOBILE_NAV_SLOT_APPS = {
   },
 };
 
+// =====================================================================
+// LA TIENDA: que Apps estan activas
+//
+// Peticion de Koku (13/9/2026). Hasta ahora las seis Apps estaban
+// siempre puestas; ahora la Tienda decide cuales existen para ti.
+//
+// QUE SIGNIFICA "INACTIVA", con sus palabras: "que no sean accesibles
+// desde el menu de herramientas ni tampoco para sustituir en la app de
+// acceso rapido... En caso de tener widgets, si esta activa aparecen
+// sino no". O sea que apagar una App la quita de CUATRO sitios:
+//
+//   1. Su tarjeta del hub de Herramientas.
+//   2. La lista de Apps que pueden ocupar el hueco de la barra de abajo.
+//   3. Lo que se le manda al widget (su widget se queda sin datos).
+//   4. Viene desmarcada al elegir que guardar en una copia de seguridad.
+//
+// LO QUE NO HACE: no borra ni un dato. Apagar Viajes esconde Viajes;
+// tus viajes siguen en la base y vuelven enteros al encenderla. Eso es
+// lo que separa "ocultar" de "desinstalar", y aqui solo hay lo primero.
+//
+// EL CALENDARIO NO SE PUEDE APAGAR (decision suya de las tres
+// opciones): es la pantalla con la que arranca la app, y sin ella no
+// habria a donde llegar al abrirla.
+//
+// Los ids son los MISMOS que MOBILE_NAV_SLOT_APPS a proposito, para que
+// filtrar el hueco de la barra sea mirar esta lista y ya.
+const APPS_DE_LA_TIENDA = [
+  { id: 'calendario', nombre: 'Calendario', icono: 'calendario', estado: 'lista', fija: true,
+    resumen: 'Eventos, tareas, recordatorios y grupos.' },
+  { id: 'notes', nombre: 'Notas', icono: 'nota', estado: 'lista',
+    resumen: 'Notas con formato, carpetas y fórmulas.' },
+  { id: 'gym', nombre: 'Gimnasio', icono: 'pesa', estado: 'lista',
+    resumen: 'Entrenos, plan, progreso y logros.' },
+  { id: 'finanzas', nombre: 'Finanzas', icono: 'monedas', estado: 'lista',
+    resumen: 'Cuentas, movimientos, gastos fijos y objetivos.' },
+  { id: 'lecturas', nombre: 'Lecturas', icono: 'libro', estado: 'desarrollo',
+    resumen: 'Sagas y lo que vas leyendo o viendo.' },
+  { id: 'viajes', nombre: 'Viajes', icono: 'avion', estado: 'desarrollo',
+    resumen: 'Viajes, mapa de países y gastos del viaje.' },
+];
+
+const APPS_POR_ID = Object.fromEntries(APPS_DE_LA_TIENDA.map((a) => [a.id, a]));
+
+// Buscar una App por su id SIN caer en la cadena de prototipos. Un id
+// llamado 'constructor' o '__proto__' devolveria con el acceso directo
+// una funcion heredada de Object (que es truthy) en vez de undefined, y
+// a partir de ahi la app se cree que existe una App que no existe. Es
+// exactamente el fallo que ya mordio en `pintarIconoDeFila()`.
+function appDeLaTienda(id) {
+  return Object.prototype.hasOwnProperty.call(APPS_POR_ID, id) ? APPS_POR_ID[id] : null;
+}
+
+// De fabrica: activas las terminadas, apagadas las que estan a medias.
+// Lo pidio asi: "por ahora por defecto no salga activa, pero que las
+// pueda activar y acceder a ellas".
+function appActivaPorDefecto(app) {
+  return app.estado === 'lista';
+}
+
+// Por DISPOSITIVO (localStorage), como el hueco de la barra o la unidad
+// de peso: que apps quieres ver es cosa de este telefono, no un dato.
+const APPS_ACTIVAS_KEY = 'appsActivas';
+
+function leerAppsActivas() {
+  let guardado = {};
+  try {
+    const crudo = JSON.parse(localStorage.getItem(APPS_ACTIVAS_KEY));
+    if (crudo && typeof crudo === 'object' && !Array.isArray(crudo)) guardado = crudo;
+  } catch { /* si esta corrupto, valen los valores de fabrica */ }
+  // Object.create(null) y no {}: asi el objeto que se devuelve no
+  // hereda nada, y preguntarle por 'toString' contesta undefined en vez
+  // de una funcion. Los ids salen de APPS_DE_LA_TIENDA, pero quien lee
+  // el resultado puede preguntar por cualquier cosa.
+  const estado = Object.create(null);
+  for (const app of APPS_DE_LA_TIENDA) {
+    // Una App FIJA esta siempre activa, aunque el guardado diga otra
+    // cosa: asi ni un archivo corrupto ni una copia de otra version
+    // pueden dejarte sin calendario.
+    if (app.fija) { estado[app.id] = true; continue; }
+    const suyo = Object.prototype.hasOwnProperty.call(guardado, app.id)
+      ? guardado[app.id]
+      : undefined;
+    estado[app.id] = typeof suyo === 'boolean' ? suyo : appActivaPorDefecto(app);
+  }
+  return estado;
+}
+
+function appEstaActiva(id) {
+  const app = appDeLaTienda(id);
+  if (!app) return true;   // algo que no esta en la Tienda no se esconde
+  return leerAppsActivas()[id] === true;
+}
+
+function appsActivas() {
+  return APPS_DE_LA_TIENDA.filter((a) => appEstaActiva(a.id));
+}
+
+function ponerAppActiva(id, activa) {
+  const app = appDeLaTienda(id);
+  if (!app || app.fija) return;
+  const estado = leerAppsActivas();
+  estado[id] = !!activa;
+  // { ...estado } porque `estado` no tiene prototipo y JSON.stringify de
+  // un objeto sin prototipo funciona igual, pero asi lo guardado es un
+  // objeto normal y corriente y no depende de ese detalle.
+  localStorage.setItem(APPS_ACTIVAS_KEY, JSON.stringify({ ...estado }));
+  aplicarAppsActivas();
+  // Y el widget, que se entera por el resumen. Es lo mismo que ya hace
+  // el selector de estilo de los widgets: si no se reescribe al momento,
+  // lo que se ve en la pantalla de inicio no cambiaria hasta la proxima
+  // vez que la app tocara cualquier otra cosa.
+  //
+  // Va AQUI y no en aplicarAppsActivas(), que tambien corre al arrancar:
+  // ahi el Gimnasio todavia no esta cargado y se mandaria un resumen a
+  // medias que el propio arranque volveria a pisar un segundo despues.
+  if (typeof actualizarWidgetDelDia === 'function') {
+    try { actualizarWidgetDelDia(); } catch { /* el widget no es critico */ }
+  }
+}
+
+// Deja la app entera de acuerdo con lo que diga la Tienda. Se llama al
+// arrancar y cada vez que se toca un interruptor.
+function aplicarAppsActivas() {
+  // Si la App que ocupaba el hueco de la barra se acaba de apagar, hay
+  // que sacarla de ahi ANTES de repintar: si no, la barra abajo seguiria
+  // abriendo una App que se supone que ya no esta.
+  const slot = getMobileNavNotesSlot();
+  if (!appEstaActiva(slot)) {
+    const primera = appsActivas().find((a) => MOBILE_NAV_SLOT_APPS[a.id]);
+    localStorage.setItem('mobileNavNotesSlot', primera ? primera.id : 'notes');
+  }
+  // setOptions() NO acepta un valor: son dos llamadas. Y el valor va
+  // DESPUES, porque repintar las opciones deja el boton enseñando la
+  // etiqueta de un valor que quiza acaba de desaparecer de la lista.
+  if (typeof mobileNavSlotField !== 'undefined' && mobileNavSlotField) {
+    mobileNavSlotField.setOptions(opcionesDelHuecoDeLaBarra());
+    mobileNavSlotField.setValue(huecoDeLaBarraUsable());
+  }
+  applyMobileNavCustomization();
+}
+
+// Las Apps que pueden ocupar el 2o hueco de la barra: las activas que
+// ademas tengan pantalla propia (el Calendario ya es la 1a pestaña).
+function opcionesDelHuecoDeLaBarra() {
+  return appsActivas()
+    .filter((a) => MOBILE_NAV_SLOT_APPS[a.id])
+    .map((a) => ({ value: a.id, label: MOBILE_NAV_SLOT_APPS[a.id].label }));
+}
+
 function getMobileNavNotesSlot() {
   const stored = localStorage.getItem('mobileNavNotesSlot');
   return MOBILE_NAV_SLOT_APPS[stored] ? stored : 'notes';
+}
+// Lo mismo pero sin devolver nunca una App apagada. Va aparte de la de
+// arriba a proposito: aquella es "que dice el ajuste" y esta es "que se
+// puede usar de verdad", y aplicarAppsActivas() necesita comparar las
+// dos para saber si tiene que mover el hueco.
+function huecoDeLaBarraUsable() {
+  const slot = getMobileNavNotesSlot();
+  if (appEstaActiva(slot)) return slot;
+  const primera = appsActivas().find((a) => MOBILE_NAV_SLOT_APPS[a.id]);
+  return primera ? primera.id : 'notes';
 }
 
 // La App que ocupa el 2o hueco de la barra y su tarjeta en Herramientas:
@@ -8375,7 +8534,7 @@ const MOBILE_NAV_SLOT_CARD_IDS = {
 };
 
 function applyMobileNavCustomization() {
-  const slot = getMobileNavNotesSlot();
+  const slot = huecoDeLaBarraUsable();
   const app = MOBILE_NAV_SLOT_APPS[slot];
   const btn = document.getElementById('mobile-nav-notes-btn');
   if (!btn) return;
@@ -8388,9 +8547,15 @@ function applyMobileNavCustomization() {
   // Se recorren TODAS y se esconde solo la del hueco, en vez de esconder
   // una y ya: asi cambiar de App vuelve a enseñar la anterior sin que
   // haya que acordarse de nada.
+  //
+  // Y desde el 13/9/2026 hay un SEGUNDO motivo para esconder una
+  // tarjeta: que la App este apagada en la Tienda. Las dos razones se
+  // deciden AQUI y en una sola linea; si cada una escondiera por su
+  // cuenta, encender una App volveria a enseñar la del hueco de la barra
+  // (la ultima en ejecutarse ganaria).
   Object.entries(MOBILE_NAV_SLOT_CARD_IDS).forEach(([clave, id]) => {
     const tarjeta = document.getElementById(id);
-    if (tarjeta) tarjeta.classList.toggle('hidden', clave === slot);
+    if (tarjeta) tarjeta.classList.toggle('hidden', clave === slot || !appEstaActiva(clave));
   });
 }
 applyMobileNavCustomization();
@@ -8398,8 +8563,11 @@ applyMobileNavCustomization();
 // Selector en Configuracion > Este dispositivo (ajuste por dispositivo,
 // localStorage, mismo criterio que la unidad de peso de Gimnasio).
 const mobileNavSlotField = createSelectField({
-  options: Object.entries(MOBILE_NAV_SLOT_APPS).map(([value, app]) => ({ value, label: app.label })),
-  initialValue: getMobileNavNotesSlot(),
+  // Solo las Apps ACTIVAS: una apagada no puede ocupar el hueco de la
+  // barra (peticion de Koku). aplicarAppsActivas() reescribe esta lista
+  // cada vez que se toca un interruptor de la Tienda.
+  options: opcionesDelHuecoDeLaBarra(),
+  initialValue: huecoDeLaBarraUsable(),
   onChange: (v) => {
     localStorage.setItem('mobileNavNotesSlot', v);
     applyMobileNavCustomization();
@@ -8413,7 +8581,7 @@ function goToMobileSection(section) {
   // vista de Notas propia del movil (Fase 4), pero puede abrir otra
   // App si Koku eligio otra en Configuracion -> Este dispositivo (ver
   // applyMobileNavCustomization() arriba).
-  if (section === 'notes') MOBILE_NAV_SLOT_APPS[getMobileNavNotesSlot()].open();
+  if (section === 'notes') MOBILE_NAV_SLOT_APPS[huecoDeLaBarraUsable()].open();
   else if (section === 'extensions') openExtensionsView();
   else if (section === 'settings') openSettingsModal();
   refreshMobileNavActive(section);
@@ -17561,6 +17729,12 @@ const ICONOS_DE_FILA = {
   reloj: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>',
   tabla: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><rect x="9" y="2" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>',
   tendencia: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg>',
+  nota: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M15 3v5h5"/><line x1="8.5" y1="13" x2="15.5" y2="13"/><line x1="8.5" y1="17" x2="13" y2="17"/></svg>',
+  pesa: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="9" width="3" height="6" rx="1"/><rect x="19" y="9" width="3" height="6" rx="1"/><line x1="5" y1="12" x2="19" y2="12"/><rect x="6.5" y="7" width="2" height="10" rx="1"/><rect x="15.5" y="7" width="2" height="10" rx="1"/></svg>',
+  libro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"/><path d="M12 6v13"/></svg>',
+  avion: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+  tienda: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16l-1.2 11a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>',
+  libreta: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h11a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="9" y1="12" x2="15" y2="12"/></svg>',
   trofeo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v4.5a5 5 0 0 1-10 0Z"/><path d="M7 6H4.5v1A3.5 3.5 0 0 0 8 10.5"/><path d="M17 6h2.5v1A3.5 3.5 0 0 1 16 10.5"/><path d="M12 13.5V18"/><path d="M8.5 21h7"/></svg>',
 };
 
@@ -21330,7 +21504,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.56.0';
+const APP_VERSION = '0.57.0';
 const APP_VERSION_DATE = '2026-09-13';
 
 function renderAppVersionLine() {
