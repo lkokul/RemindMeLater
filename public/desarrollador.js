@@ -17,6 +17,14 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.57.0': [
+    'El horario es una rejilla de SIETE columnas en un móvil, así que cada columna son unos 45 px y los nombres largos se parten ("Gimna/sio"). Se apretaron todos los márgenes para ganar sitio y es lo que hace también Google Calendar, pero si te molesta la alternativa es enseñar 3 días a la vez y deslizar de lado.',
+    'Un bloque del horario NO avisa: no programa ninguna notificación. Los avisos son del calendario, y un horario fijo sonando cada semana llenaría el cupo del teléfono. Si lo quieres, hay que decidir el reparto del cupo aparte.',
+    'Dos bloques del horario que se solapen se pintan uno ENCIMA del otro, no partiendo la columna. No pasa en un horario real (no estás en dos clases a la vez), pero conviene saberlo.',
+    'Repetir un evento calcula hasta 500 veces como mucho (MAX_OCURRENCIAS en local-api.js), y los avisos se cortan en 10 por serie. Los dos números están puestos a ojo: si alguna serie diaria larga se queda corta, se suben.',
+    'Editar una repetición suelta y luego cambiar la serie entera: la suelta NO se entera del cambio (es ya un evento propio). Es lo que hace el iPhone, pero confírmalo cuando lo uses.',
+    'El horario no sale en ningún widget ni en la copia de seguridad tiene nada especial (viaja dentro del .sqlite, como todo). Si quieres un widget de "qué me toca hoy" del horario, es una ronda aparte.',
+  ],
   '0.56.0': [
     'Deslizar hacia la derecha desde el inicio del Gimnasio NO sale a Herramientas todavía — eso solo está en Finanzas. Ahora que las dos pantallas tienen la misma forma, decide si se generaliza (también a Viajes y Entretenimiento).',
     'El componente de fila y sus clases CSS siguen llamándose `finanzas-*` aunque ahora los use también el Gimnasio. Es a propósito, para no chocar con tu rama finanzas-movil en cada línea; cuando la cierres, se renombran de una vez.',

@@ -750,6 +750,80 @@ function applyLocalSchema(db) {
     `);
   }
 
+  // EVENTOS QUE SE REPITEN.
+  //
+  // Va DESPUES de la reconstruccion de arriba a proposito: esa copia la
+  // tabla columna por columna, asi que anadir las nuevas antes las
+  // perderia por el camino.
+  //
+  // El modelo es "una fila con la REGLA, y las repeticiones se calculan
+  // al vuelo" (ver routes-local/events.js), no "una fila por cada
+  // repeticion". Motivo: un evento semanal sin fecha de fin son infinitas
+  // filas, y cambiarle la hora obligaria a reescribirlas todas. Asi la
+  // fila guardada es una sola y siempre esta al dia.
+  //
+  // - repeat_freq: 'daily' | 'weekly' | 'monthly' | 'yearly'. NULL (lo
+  //   normal) = no se repite, y entonces el resto de columnas sobran.
+  // - repeat_interval: el "cada N" (cada 2 semanas, cada 3 dias).
+  // - repeat_weekdays: JSON con los dias de la semana marcados, formato
+  //   de getDay() (0 domingo .. 6 sabado). Solo lo usa 'weekly'; vacio o
+  //   NULL significa "el mismo dia de la semana en que empieza".
+  // - repeat_until: 'YYYY-MM-DD' opcional. Sin ella, se repite siempre.
+  // - repeat_parent_id: esta fila es UNA repeticion que se solto de su
+  //   serie (Koku eligio "preguntar cada vez": al editar una, se puede
+  //   cambiar solo esa). Es un evento normal y corriente, solo que
+  //   recuerda de donde salio para poder borrarse con la serie entera.
+  // - repeat_skip: JSON con las fechas ('YYYY-MM-DD') que NO se pintan,
+  //   porque se borraron sueltas o porque se soltaron a una fila propia.
+  const eventColumnsForRepeat = db.prepare('PRAGMA table_info(events)').all().map((c) => c.name);
+  if (!eventColumnsForRepeat.includes('repeat_freq')) {
+    db.exec('ALTER TABLE events ADD COLUMN repeat_freq TEXT');
+  }
+  if (!eventColumnsForRepeat.includes('repeat_interval')) {
+    db.exec('ALTER TABLE events ADD COLUMN repeat_interval INTEGER NOT NULL DEFAULT 1');
+  }
+  if (!eventColumnsForRepeat.includes('repeat_weekdays')) {
+    db.exec('ALTER TABLE events ADD COLUMN repeat_weekdays TEXT');
+  }
+  if (!eventColumnsForRepeat.includes('repeat_until')) {
+    db.exec('ALTER TABLE events ADD COLUMN repeat_until TEXT');
+  }
+  if (!eventColumnsForRepeat.includes('repeat_parent_id')) {
+    db.exec('ALTER TABLE events ADD COLUMN repeat_parent_id INTEGER');
+  }
+  if (!eventColumnsForRepeat.includes('repeat_skip')) {
+    db.exec('ALTER TABLE events ADD COLUMN repeat_skip TEXT');
+  }
+
+  // HORARIO SEMANAL FIJO.
+  //
+  // Lo que se repite TODAS las semanas a la misma hora: clases, turnos,
+  // gimnasio. Es una tabla aparte y NO eventos del calendario, decidido
+  // asi con Koku: un horario no tiene fecha, se ve siempre igual, y
+  // meterlo como eventos llenaria el calendario de repeticiones que no
+  // aportan nada al mirar un mes.
+  //
+  // - weekday: 0 domingo .. 6 sabado, el mismo formato que getDay() y que
+  //   repeat_weekdays de arriba, para no tener dos convenios distintos.
+  // - start_min / end_min: minutos desde medianoche (540 = 9:00). En
+  //   minutos y no en texto "HH:MM" porque asi ordenar, comparar y
+  //   detectar solapes es aritmetica normal.
+  // - group_id: opcional, para heredar el color de un grupo del
+  //   calendario. Sin grupo se usa el color propio.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS horario_bloques (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      weekday INTEGER NOT NULL,
+      start_min INTEGER NOT NULL,
+      end_min INTEGER NOT NULL,
+      location TEXT,
+      group_id INTEGER REFERENCES groups(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   // inverse_colors: variante clara/oscura "pareja" de un tema, opcional. Ver
   // routes/themes.js para el saneado y routes/... para como se elige cual
   // de las dos ensenar (modo sistema/claro/oscuro, ajuste de cada dispositivo).

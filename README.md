@@ -81,6 +81,48 @@ con varias pestanas:
   (tachadas u ocultas), y que apartado vive en el hueco personalizable
   de la barra de abajo.
 
+## Eventos que se repiten
+
+Un evento puede repetirse **cada dia, cada semana, cada mes o cada ano**,
+y con un "cada cuantos" para las repeticiones salteadas (cada 2 semanas,
+cada 3 dias). En las semanales se pueden marcar **varios dias a la vez**:
+lunes, miercoles y viernes son UNA sola regla, no tres eventos.
+Opcionalmente se le pone una fecha de fin; sin ella, la serie sigue
+indefinidamente.
+
+Por dentro **solo se guarda la regla**, no una fila por cada vez: el
+calendario calcula las repeticiones al pintarlas. Asi una clase semanal
+de tres anos no llena la base de mil filas y cambiar la hora las cambia
+todas de golpe.
+
+Al tocar **una vez** de un evento que se repite, la app pregunta si el
+cambio (o el borrado) es **solo esa vez o todas**, igual que el iPhone y
+Google Calendar:
+
+- **Solo esta vez** — esa repeticion se "suelta" y pasa a ser un evento
+  propio con sus cambios; la serie deja de pintar ese dia. Si se borra en
+  vez de editarse, ese dia se salta y el resto sigue igual.
+- **Todas las veces** — se cambia la regla y con ella toda la serie.
+  Borrar la serie se lleva tambien las veces que se hubieran soltado.
+
+## Horario semanal
+
+Aparte del calendario hay un **horario semanal fijo**: la rejilla de
+horas x dias (de lunes a domingo) para lo que se repite toda la semana —
+clases, turnos de trabajo, gimnasio. Se abre con el boton **"Horario"**
+de la barra de accesos rapidos del calendario.
+
+Cada bloque lleva titulo, dia, hora de inicio y fin, ubicacion opcional y
+un grupo opcional del que hereda el color. Tocar un hueco vacio crea uno
+ahi mismo, con el dia y la hora ya puestos; tocar un bloque lo abre para
+editarlo.
+
+El horario **no vive dentro del calendario** a proposito: no tiene fecha,
+no empieza un dia concreto y no se mezcla con lo que de verdad pasa cada
+dia. De fabrica se ve de 8:00 a 22:00, y la franja se estira sola si
+tienes algo mas temprano o mas tarde. Tampoco programa avisos: para eso
+estan los recordatorios del calendario.
+
 ## Mi espacio (notas y tareas)
 
 Ademas del calendario, la app tiene una seccion aparte para notas de
@@ -312,13 +354,17 @@ de movil).
 ## Recordatorios
 
 Cada evento o tarea con fecha puede tener un recordatorio (en el momento,
-10 min, 30 min, 1 hora o 1 dia antes). Al activar las notificaciones en
+10 min, 30 min, 1 hora, 1 dia, 2 dias, 3 dias, 1 semana o 2 semanas
+antes). Un evento nuevo viene con "En el momento" puesto. Al activar las notificaciones en
 Configuración → Este dispositivo, la app **programa el aviso en el propio
 sistema operativo**: suena a su hora aunque la app este cerrada del todo,
 sin servidor y sin que nada salga del dispositivo.
 
 Los avisos se reprograman solos cada vez que creas, editas o borras algo,
-asi que nunca suena un aviso de algo que ya no existe. Cada aviso llega
+asi que nunca suena un aviso de algo que ya no existe. Un evento que **se
+repite** programa un aviso por cada vez que le toca, hasta un maximo de
+10 por serie: el sistema operativo solo guarda unos 60 avisos pendientes
+por app, y una serie diaria sin tope se los quedaria todos. Cada aviso llega
 **con sonido y vibracion**, como cualquier notificacion normal del
 sistema (en Android, la app crea su propio canal "Recordatorios" — desde
 los ajustes del sistema se puede afinar como suena, igual que con

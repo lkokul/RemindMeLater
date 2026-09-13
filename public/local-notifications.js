@@ -238,9 +238,13 @@ async function syncScheduledReminders() {
     const aProgramar = delCalendario
       .map((r) => {
         const aviso = {
-          // El id del evento vale como id del aviso: es un entero unico y
-          // estable, asi que reprogramar el mismo evento nunca duplica.
-          id: r.eventId,
+          // El id del aviso lo decide la ruta: para un evento normal es
+          // el id del evento tal cual (entero unico y estable, asi que
+          // reprogramarlo nunca duplica), y para cada repeticion de una
+          // serie uno propio -- si todas compartieran el del evento, al
+          // programarlas se pisarian y solo sonaria la ultima. Ver
+          // idDeAviso() en routes-local/reminders.js.
+          id: r.notificationId || r.eventId,
           title: 'RemindMeLater',
           body: r.title,
           schedule: { at: new Date(r.remindAt) },

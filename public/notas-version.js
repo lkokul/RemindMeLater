@@ -19,6 +19,24 @@
 // es que se esconda por CSS: es que no está.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.57.0',
+    fecha: '2026-09-13',
+    nuevo: [
+      'Los eventos se pueden repetir: cada día, cada semana, cada mes o cada año, y "cada 2", "cada 3"... de lo que sea. En los semanales se marcan varios días a la vez (L, X y V en una sola regla).',
+      'Al tocar una vez de un evento que se repite, la app pregunta si el cambio es solo esa vez o todas — igual que el iPhone y Google Calendar. "Solo esta vez" la suelta como evento propio y la serie deja de pintar ese día.',
+      'Se puede poner una fecha de fin a la repetición, o dejarla corriendo para siempre.',
+      'Horario semanal fijo: una pantalla nueva con la rejilla de horas × días (de lunes a domingo) para lo que se repite toda la semana — clases, turnos, gimnasio. Se abre desde el botón "Horario" del calendario.',
+      'Un bloque del horario lleva título, día, horas, ubicación y grupo (de ahí saca el color). Tocar un hueco vacío crea uno ahí mismo, con el día y la hora ya puestos.',
+      'En las notas, la primera línea nace ya con formato de título: escribes y al dar a Intro bajas al texto normal, sin tener que cambiarlo a mano cada vez.',
+      'El teclado del móvil pone mayúscula al empezar una frase en las notas — también dentro de una lista o de una celda de tabla.',
+    ],
+    parches: [
+      'La hora que se propone al crear un evento redondea a la hora MÁS CERCANA, no siempre hacia abajo: a las 9:37 propone 10:00–11:00, y a las 17:05, 17:00–18:00. Y creando el evento desde un día concreto ya no se plantaban las 9:00 fijas.',
+      'El recordatorio de un evento nuevo viene puesto en "En el momento" en vez de "Sin recordatorio".',
+      'Un evento que se repite programa un aviso propio por cada vez, no uno que se pisaba a sí mismo. Se limitan a 10 por serie para no quedarse con todo el cupo de avisos del teléfono.',
+    ],
+  },
+  {
     version: '0.56.0',
     fecha: '2026-09-13',
     nuevo: [

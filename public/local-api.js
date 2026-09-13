@@ -193,3 +193,198 @@ function nombreDeCopia(base, existentes) {
   }
   return candidato(9999);
 }
+
+// ---------------------------------------------------------------------
+// EVENTOS QUE SE REPITEN
+//
+// Compartido entre rutas (events.js lo usa para pintar el calendario y
+// reminders.js para programar los avisos), asi que vive aqui por el
+// mismo motivo que nombreDeCopia: cada archivo de routes-local/ va en su
+// IIFE y no puede importar nada de otro.
+//
+// La idea en una frase: en la base hay UNA fila con la regla, y las
+// repeticiones se calculan cada vez que hacen falta. Nunca se guardan
+// filas por adelantado -- ver el comentario del esquema en
+// local-schema.js.
+// ---------------------------------------------------------------------
+
+// 'YYYY-MM-DDTHH:MM:SS' -> Date en hora LOCAL.
+//
+// Sin la Z final, JavaScript ya lo interpreta como local, que es lo que
+// queremos: un evento a las 9:00 son las 9:00 donde estes, no una hora
+// desplazada por el huso. Devuelve null si no se puede leer.
+function fechaLocalDeTexto(texto) {
+  if (!texto) return null;
+  const d = new Date(String(texto).length <= 10 ? `${texto}T00:00:00` : texto);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+// Date -> 'YYYY-MM-DDTHH:MM:SS', tambien en local.
+//
+// A mano y NO con toISOString(), que pasa a UTC: a las 00:30 en España
+// eso devolveria el dia anterior. Es la misma trampa que ya estaba
+// apuntada para hoyISO() y widgetHoyISO().
+function textoDeFechaLocal(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function claveDeDiaLocal(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+const FRECUENCIAS_DE_REPETICION = new Set(['daily', 'weekly', 'monthly', 'yearly']);
+
+// Lee la regla de una fila de events. Devuelve null si no se repite.
+function reglaDeRepeticion(row) {
+  if (!row || !row.repeat_freq || !FRECUENCIAS_DE_REPETICION.has(row.repeat_freq)) return null;
+  let dias = [];
+  try {
+    const crudo = row.repeat_weekdays ? JSON.parse(row.repeat_weekdays) : [];
+    if (Array.isArray(crudo)) {
+      dias = [...new Set(crudo.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort();
+    }
+  } catch (err) { dias = []; }
+  return {
+    freq: row.repeat_freq,
+    // Un intervalo de 0 o negativo dejaria el bucle sin avanzar nunca:
+    // se fuerza a 1 como minimo.
+    interval: Math.max(1, Math.min(365, Number(row.repeat_interval) || 1)),
+    weekdays: dias,
+    until: row.repeat_until || null,
+  };
+}
+
+function diasSaltados(row) {
+  try {
+    const crudo = row && row.repeat_skip ? JSON.parse(row.repeat_skip) : [];
+    return new Set(Array.isArray(crudo) ? crudo.map((s) => String(s)) : []);
+  } catch (err) {
+    return new Set();
+  }
+}
+
+// Devuelve las repeticiones de "row" que caen dentro de [desde, hasta],
+// cada una como { startAt, endAt, occurrenceDate }.
+//
+// Tope de seguridad: como mucho MAX_OCURRENCIAS por evento y rango. Un
+// evento diario en una vista de año son 365, asi que 500 deja margen sin
+// permitir que una regla rara (o una base manipulada a mano) cuelgue la
+// app pintando un mes.
+const MAX_OCURRENCIAS = 500;
+
+function repeticionesDeEvento(row, desdeTexto, hastaTexto) {
+  const regla = reglaDeRepeticion(row);
+  const inicio = fechaLocalDeTexto(row && row.start_at);
+  if (!regla || !inicio) return [];
+
+  const desde = fechaLocalDeTexto(desdeTexto);
+  const hasta = fechaLocalDeTexto(hastaTexto);
+  if (!desde || !hasta || hasta < desde) return [];
+
+  // El final de la regla manda sobre el final del rango pedido.
+  const finRegla = regla.until ? fechaLocalDeTexto(`${regla.until}T23:59:59`) : null;
+  const tope = finRegla && finRegla < hasta ? finRegla : hasta;
+  if (tope < inicio) return [];
+
+  const fin = fechaLocalDeTexto(row.end_at);
+  // Lo que dura el evento se conserva en cada repeticion. Si no tiene
+  // hora de fin, tampoco la tendran las copias.
+  const duracionMs = fin && fin > inicio ? fin - inicio : null;
+  const saltados = diasSaltados(row);
+
+  // Coloca la hora del evento original en una fecha cualquiera. Hace
+  // falta despues de cada salto porque sumar dias en local puede mover
+  // la hora una hora arriba o abajo al cruzar un cambio de horario.
+  const conLaHoraDeSiempre = (d) => {
+    d.setHours(inicio.getHours(), inicio.getMinutes(), inicio.getSeconds(), 0);
+    return d;
+  };
+
+  const salida = [];
+  const anotar = (arranque) => {
+    if (arranque < inicio) return true;
+    if (arranque > tope) return false;
+    const clave = claveDeDiaLocal(arranque);
+    // El rango puede empezar a media tarde: se compara contra el FIN del
+    // evento para no perder uno que arranco antes de "desde".
+    const acaba = duracionMs ? new Date(arranque.getTime() + duracionMs) : arranque;
+    if (acaba >= desde && !saltados.has(clave)) {
+      salida.push({
+        startAt: textoDeFechaLocal(arranque),
+        endAt: duracionMs ? textoDeFechaLocal(acaba) : null,
+        occurrenceDate: clave,
+      });
+    }
+    return true;
+  };
+
+  if (regla.freq === 'weekly' && regla.weekdays.length) {
+    // Varios dias marcados (L, X y V en una sola repeticion). Se avanza
+    // SEMANA a semana desde la del evento original y dentro de cada una
+    // se sacan los dias marcados; asi "cada 2 semanas los lunes y
+    // viernes" sale solo, sin casos especiales.
+    const semanaBase = new Date(inicio);
+    semanaBase.setDate(semanaBase.getDate() - semanaBase.getDay());
+    semanaBase.setHours(0, 0, 0, 0);
+    const semanaDesde = new Date(desde);
+    semanaDesde.setDate(semanaDesde.getDate() - semanaDesde.getDay());
+    semanaDesde.setHours(0, 0, 0, 0);
+    const semanasDeDiferencia = Math.floor((semanaDesde - semanaBase) / (7 * 86400000));
+    let k = Math.max(0, Math.floor(semanasDeDiferencia / regla.interval));
+    for (let vueltas = 0; vueltas < MAX_OCURRENCIAS; vueltas++, k++) {
+      const semana = new Date(semanaBase);
+      semana.setDate(semana.getDate() + k * 7 * regla.interval);
+      semana.setHours(0, 0, 0, 0);
+      if (semana > tope) break;
+      let algunoCabe = false;
+      for (const wd of regla.weekdays) {
+        const d = conLaHoraDeSiempre(new Date(semana.getFullYear(), semana.getMonth(), semana.getDate() + wd));
+        if (anotar(d)) algunoCabe = true;
+      }
+      if (!algunoCabe && semana > desde) break;
+      if (salida.length >= MAX_OCURRENCIAS) break;
+    }
+    salida.sort((a, b) => (a.startAt < b.startAt ? -1 : 1));
+    return salida.slice(0, MAX_OCURRENCIAS);
+  }
+
+  // El resto (y "cada semana" sin dias marcados) es un salto fijo desde
+  // la fecha original. Se calcula de una vez cuantos saltos hay hasta el
+  // principio del rango en vez de ir uno a uno: un evento diario creado
+  // hace diez años son 3.650 vueltas que no hacen falta.
+  const saltoInicial = () => {
+    const ms = desde - inicio;
+    if (ms <= 0) return 0;
+    if (regla.freq === 'daily') return Math.floor(ms / 86400000 / regla.interval);
+    if (regla.freq === 'weekly') return Math.floor(ms / (7 * 86400000) / regla.interval);
+    const meses = (desde.getFullYear() - inicio.getFullYear()) * 12 + (desde.getMonth() - inicio.getMonth());
+    if (regla.freq === 'monthly') return Math.max(0, Math.floor(meses / regla.interval));
+    return Math.max(0, Math.floor(meses / 12 / regla.interval));
+  };
+
+  let n = saltoInicial();
+  for (let vueltas = 0; vueltas < MAX_OCURRENCIAS + 60; vueltas++, n++) {
+    let d;
+    if (regla.freq === 'daily') {
+      d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + n * regla.interval);
+    } else if (regla.freq === 'weekly') {
+      d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + n * 7 * regla.interval);
+    } else if (regla.freq === 'monthly') {
+      d = new Date(inicio.getFullYear(), inicio.getMonth() + n * regla.interval, inicio.getDate());
+      // Un evento del 31 en un mes de 30 se SALTA ese mes, no se corre al
+      // 1 del siguiente: "todos los 31" no incluye febrero.
+      if (d.getDate() !== inicio.getDate()) continue;
+    } else {
+      d = new Date(inicio.getFullYear() + n * regla.interval, inicio.getMonth(), inicio.getDate());
+      // Mismo criterio para un 29 de febrero: solo los años bisiestos.
+      if (d.getDate() !== inicio.getDate() || d.getMonth() !== inicio.getMonth()) continue;
+    }
+    conLaHoraDeSiempre(d);
+    if (d > tope) break;
+    anotar(d);
+    if (salida.length >= MAX_OCURRENCIAS) break;
+  }
+  return salida;
+}

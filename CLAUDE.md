@@ -3470,6 +3470,184 @@ esa rama se cierre, se renombra de una vez.
    antes de imprimir ningún FALLO — contando con `grep -c FALLO` eso son
    cero. Va con `?.` y un `'SIN-SVG'`, y se cuenta por código de salida.
 
+## Eventos que se repiten (13/9/2026)
+
+Petición de Koku: *"Repetitibilidad de eventos. Los eventos se pueden
+repetir, poner una opción de si es repetible y cada cuanto"*. Al
+preguntarle eligió **"Completo"** (diaria/semanal/mensual/anual + "cada
+N" + varios días de la semana en una sola regla) y **"Preguntar cada
+vez"** al editar o borrar una de las veces.
+
+**El modelo, que es lo primero que hay que entender: NO se generan
+filas.** El evento sigue siendo UNA fila de `events` y lo que se guarda
+es la REGLA (`repeat_freq`, `repeat_interval`, `repeat_weekdays`,
+`repeat_until`). Las veces se calculan al pedirlas, en
+`repeticionesDeEvento()` (`public/local-api.js`), que devuelve
+`[{startAt, endAt, occurrenceDate}]`.
+
+Generar filas se descartó a propósito: una clase semanal de tres años
+son ~150 filas que hay que crear, migrar si cambias la hora, y borrar si
+acortas la serie. Con la regla, cambiar la hora las cambia todas de
+golpe y no hay nada que limpiar.
+
+**Las dos excepciones a "una fila = la serie entera"**, que son las que
+hacen posible el "solo esta vez":
+
+- **Saltar un día**: se apunta en `repeat_skip`, una lista JSON de
+  fechas. Ese día deja de calcularse y ya está.
+- **Soltar una vez**: `POST /:id/detach` crea una fila PROPIA con lo que
+  cambiaste y `repeat_parent_id` apuntando a la serie, y de paso mete
+  ese día en `repeat_skip` para que la serie no lo pinte dos veces.
+  Borrar la serie (`DELETE /:id`) se lleva también sus sueltas — si no,
+  quedarían huérfanas sin nada que las explique.
+
+**Detalles que costaron y no conviene deshacer:**
+
+- **`GET /` trae SIEMPRE las filas con regla**, sea cual sea el rango
+  (`... OR e.repeat_freq IS NOT NULL`), y las despliega después. El
+  filtro de solape normal las dejaba fuera: una serie que empezó en
+  enero no "solapa" con marzo, aunque le toque cada semana.
+- **El buscador NO despliega** (`q` devuelve las filas tal cual): buscar
+  "Clase de yoga" tiene que dar UN resultado, no doscientos.
+- **Un PUT parcial no borra la regla.** Las cuatro columnas solo se
+  tocan si el cuerpo trae `repeat` (`!== undefined`). Renombrar un
+  evento mandando solo el título no puede dejarlo sin repetir.
+- **El semanal con días marcados itera semana a semana**; el resto de
+  frecuencias da un salto inicial calculado (`saltoInicial()`) para no
+  recorrer día a día desde el principio de los tiempos.
+- **Los días que no existen se SALTAN, no se recolocan**: un mensual el
+  31 no aparece en febrero ni en abril, y un anual el 29 de febrero solo
+  en los bisiestos. Recolocarlo al 28 o al 1 se inventa una fecha que
+  nadie pidió.
+- **La hora se vuelve a poner después de cada salto de fecha**: sumar
+  meses o semanas cruzando un cambio de hora deja el reloj corrido una
+  hora si no.
+- **`MAX_OCURRENCIAS = 500`** como tope duro: una regla rara (o un rango
+  enorme) no puede colgar la app calculando para siempre.
+
+**Los avisos: cada vez lleva su id propio.** Esto era un fallo real
+encontrado leyendo el código, no usándolo: `local-notifications.js`
+programaba con `id: r.eventId`, así que las veinte veces de una serie
+compartían id y **solo sonaba la última**. Ahora `/api/reminders/upcoming`
+devuelve un `notificationId` por vez, de una banda propia
+(`600000000 + (eventId % 1000000) * 100 + min(99, i)`), que no choca con
+las otras bandas ya repartidas (eventos sueltos, pagos de Finanzas,
+avisos internos de la app).
+
+Y **como mucho 10 por serie** (`MAX_AVISOS_POR_SERIE`): iOS solo guarda
+~64 avisos pendientes por app y a partir de ahí deja de avisar EN
+SILENCIO. Una serie diaria sin tope se quedaba con el cupo entero y
+dejaba al resto del calendario mudo. Se miran 180 días hacia delante.
+
+**Una regla inválida se guarda como "no se repite"**, nunca se rechaza
+el evento entero: `limpiarRepeticion()` recorta el intervalo a 1-365,
+ordena y deduplica los días, y exige que `until` sea `YYYY-MM-DD`. Si la
+frecuencia no existe, el evento se guarda sin repetir. Perder un evento
+por una regla mal escrita sería mucho peor que perder la regla.
+
+**"¿Solo esta vez o todas?"** es `preguntarPorLaSerie()` en `app.js`, con
+su propio `#event-series-modal` de TRES botones — `showAppConfirm` tiene
+dos y aquí hacen falta tres. `eventoAbiertoOcurrencia` guarda de qué día
+se abrió el modal; sin eso, "solo esta vez" no sabría a qué vez se
+refiere.
+
+## Horario semanal fijo (13/9/2026)
+
+Petición de Koku: *"Mirar para poder poner horarios"*. Al preguntarle
+eligió **"Un horario semanal fijo"**: la rejilla de horas x días
+(lunes-domingo) para lo que se repite toda la semana — clases, turnos,
+gimnasio — viviendo aparte del calendario.
+
+**Tabla propia (`horario_bloques`), no eventos con una regla de
+repetición**, y esa es LA decisión de la ronda. Un horario no tiene
+fecha: no empieza un día concreto ni acaba nunca. Metido en el
+calendario, cada semana se llenaría de las mismas seis clases y taparía
+lo que de verdad pasa ese día — que es justo lo que el calendario
+tiene que enseñar. Por eso también tiene pantalla propia
+(`#horario-view`) y su botón en los accesos rápidos del calendario, que
+pasan de dos a tres (Hoy / Grupos / Horario).
+
+Las piezas: `public/routes-local/horario.js` (CRUD, ruta NUEVA — no es un
+porte de `server/routes/`), el bloque "HORARIO SEMANAL FIJO" de `app.js`,
+y las reglas `.horario-*` de `styles.css`.
+
+**Cómo se coloca un bloque**: por MINUTOS, con `position: absolute`
+dentro de su columna. El alto de una hora vive en `--horario-hora`
+(`styles.css`) y el JavaScript lo LEE de ahí (`horarioAltoDeHora()`) en
+vez de repetir el número: las rayas de las horas las pinta un
+`repeating-linear-gradient` con esa misma medida, así que si los dos se
+separan los bloques dejan de caer sobre su raya.
+
+**La franja se estira sola.** De fábrica 8:00-22:00, pero si hay un
+bloque a las 5:30 la franja empieza a las 5:00. Recortarlo sería
+esconder un bloque sin decir nada. Siempre arranca en hora en punto:
+empezando a y media, las rayas caerían a contratiempo de las etiquetas.
+
+**Trampas que ya mordieron, las dos encontradas MIRANDO UNA CAPTURA y no
+con un assert** (que es exactamente la lección que ya estaba escrita en
+este archivo):
+
+1. **La etiqueta de la hora no cabía en el canalón.** Con el teléfono en
+   reloj de 12h, `formatHourLabel()` (la de la vista diaria) devuelve
+   "9:00 a. m.", que se salía por la izquierda y se leía **":00 a. m."**
+   — sin la hora, o sea sin el dato. Hay una etiqueta COMPACTA propia
+   (`horarioEtiquetaDeHora()`): "9 a. m." y "09:00". Aquí son horas en
+   punto siempre, así que el ":00" no dice nada, y es además lo que hace
+   el Calendario de iOS. Ahora hay un assert que mide que la etiqueta
+   quepa de verdad dentro del canalón (probado rompiéndolo).
+2. **Los nombres se veían "Tu…" y "Gi…".** Siete columnas en un móvil
+   son ~45 px. El título se PARTE en varias líneas (`overflow-wrap:
+   break-word`, no `anywhere` — `anywhere` cuenta el corte al medir el
+   ancho mínimo y parte también palabras que sí cabían), la hora **no se
+   repite dentro del bloque** (la rejilla ya la dice; el pie es la
+   ubicación, y solo si la hay), y todos los márgenes están al mínimo
+   (`padding: 0 0.25rem` en vez de los 0.6rem del resto de la app).
+   **Aun así los nombres largos se parten** ("Gimna/sio"): es el límite
+   real del ancho de un teléfono, está apuntado en las notas de revisar
+   de la v0.57.0, y la alternativa (enseñar 3 días y deslizar de lado)
+   está sin decidir.
+
+**El color del grupo va en la BARRA de la izquierda, no de fondo.** Un
+chip del calendario es una línea y aguanta el color sólido; un bloque de
+hora y media son dos líneas sobre un color que elige el usuario y puede
+ser cualquiera. Con la barra se lee bien sea cual sea, que es lo que hace
+también el Calendario de iOS.
+
+**Lo que el horario NO hace, a propósito**: no programa ningún aviso (el
+cupo del teléfono es de los recordatorios del calendario; un horario fijo
+sonando cada semana se lo comería), no pinta nada en el calendario, y dos
+bloques que se solapen se dibujan uno encima del otro en vez de partir la
+columna — no estás en dos clases a la vez.
+
+## Notas: el título ya nace con formato de título (13/9/2026)
+
+Koku: *"cuando escribo el primer párrafo, lo que va a ser el título. Que
+vaya con el formato de texto de título. Porque ahora va con el normal, y
+tengo que cambiarlo cada vez"*.
+
+El título de una nota **no es un campo**: se deriva de la primera línea
+(ver el bloque de duplicar). Así que "que vaya con formato de título" es
+literalmente que esa primera línea nazca dentro de un `<h1>`.
+
+- Una nota NUEVA arranca con `<h1><br></h1>` sembrado en
+  `noteEntrySnapshot`. Sigue contando como VACÍA, así que una nota nueva
+  en blanco se sigue sin guardar (eso ya estaba y no se podía romper).
+- **Intro al final del primer `<h1>` baja a un párrafo normal**
+  (`handleNoteTitleEnterExit()`): escribes el título, das a Intro y
+  sigues escribiendo en texto normal, sin tocar la barra. Si el cursor
+  está a MEDIO título, o dentro de una lista o de un bloque de código,
+  no se mete.
+- Va enganchado a `keydown` **y a `beforeinput`** (`insertParagraph`):
+  el teclado de iOS no siempre manda un `keydown` con `key === 'Enter'`
+  (con el texto predictivo llega como `'Unidentified'`). Es la misma red
+  que hizo falta para fijar una fórmula, y por el mismo motivo.
+- Una nota YA ESCRITA conserva su formato: esto solo siembra las nuevas.
+
+**Mayúscula al empezar**: `autocapitalize="sentences"` en `#note-body`.
+Un `contenteditable` no lo trae puesto, y el atributo cubre de una vez
+los párrafos, el título, las celdas de una tabla y los puntos de una
+lista — que era la duda de Koku (*"revisa si en listas eso no pasa"*).
+
 ## Estado actual
 
 **Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde
@@ -3477,6 +3655,18 @@ esa rama se cierre, se renombra de una vez.
 con `calendario-notas-movil-UI` ya fusionada). Todo lo de esta
 conversación vive ahí; ver el bloque "Dos ramas" más arriba. **`movil-ui`
 está al mismo nivel**, sin los avisos de diagnóstico.
+
+**v0.57.0** (13/9/2026) es la ronda de los cuatro puntos que pidió Koku:
+el título de una nota con formato de título y la mayúscula al empezar,
+los **eventos que se repiten** (con el "¿solo esta vez o todas?") y el
+**horario semanal fijo**. Ver sus tres bloques más arriba. No se lanzó
+ninguna build: Koku pidió expresamente no lanzar Actions.
+
+Verificado con tres guiones de Playwright contra la app servida como
+estático: notas (9), repeticiones (20) y horario (31), todo en verde. El
+del horario tiene además dos comprobaciones que nacieron de MIRAR UNA
+CAPTURA, no de un assert: que la etiqueta de la hora quepa en su canalón
+y que empiece por su número.
 
 **Build #55 (10/9/2026)**: la primera que sube a TestFlight con el App
 Group de verdad en el `.ipa`. Koku la probó y los seis widgets se ven y

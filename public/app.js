@@ -2552,6 +2552,90 @@ document.getElementById('event-start-date-field').appendChild(eventStartDateFiel
 const eventEndDateField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fecha' });
 document.getElementById('event-end-date-field').appendChild(eventEndDateField.element);
 
+// ---------------------------------------------------------------------
+// REPETIR UN EVENTO
+//
+// El modelo vive en la base como UNA fila con la regla; aqui solo se
+// rellena esa regla. Las repeticiones que se ven en el calendario las
+// calcula repeticionesDeEvento() -- ver local-api.js.
+// ---------------------------------------------------------------------
+const EVENT_REPEAT_OPTIONS = [
+  { value: '', label: 'No se repite' },
+  { value: 'daily', label: 'Cada dia' },
+  { value: 'weekly', label: 'Cada semana' },
+  { value: 'monthly', label: 'Cada mes' },
+  { value: 'yearly', label: 'Cada año' },
+];
+// Singular y plural de la unidad, para que "Cada 1 semana" y "Cada 2
+// semanas" se lean bien sin montar un formateador para tres palabras.
+const EVENT_REPEAT_UNITS = {
+  daily: ['dia', 'dias'],
+  weekly: ['semana', 'semanas'],
+  monthly: ['mes', 'meses'],
+  yearly: ['año', 'años'],
+};
+// Empieza en lunes porque es como se lee una semana aqui, pero el valor
+// que se guarda es el de getDay() (0 = domingo), el mismo convenio que
+// usan el horario semanal y el motor de repeticiones.
+const EVENT_WEEKDAY_BUTTONS = [
+  { value: 1, label: 'L' }, { value: 2, label: 'M' }, { value: 3, label: 'X' },
+  { value: 4, label: 'J' }, { value: 5, label: 'V' }, { value: 6, label: 'S' },
+  { value: 0, label: 'D' },
+];
+
+const eventRepeatField = createSelectField({
+  options: EVENT_REPEAT_OPTIONS,
+  initialValue: '',
+  onChange: () => refreshEventRepeatFields(),
+});
+document.getElementById('event-repeat-field').appendChild(eventRepeatField.element);
+
+const eventRepeatUntilField = createDateField({ initialValue: null, allowClear: true, placeholder: 'Sin fin' });
+document.getElementById('event-repeat-until-field').appendChild(eventRepeatUntilField.element);
+
+// Los dias marcados viven en un Set y no en el DOM: asi leerlos al
+// guardar no depende de que la fila este pintada en ese momento.
+let eventRepeatWeekdays = new Set();
+
+// De que dia es la repeticion que se ha abierto en el modal ('YYYY-MM-DD'),
+// o null si lo que hay abierto es un evento normal. Sin este dato no se
+// podria distinguir "cambia solo esta vez" de "cambia todas".
+let eventoAbiertoOcurrencia = null;
+
+function renderEventRepeatWeekdays() {
+  const cont = document.getElementById('event-repeat-weekdays');
+  cont.innerHTML = '';
+  for (const d of EVENT_WEEKDAY_BUTTONS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'repeat-weekday-btn' + (eventRepeatWeekdays.has(d.value) ? ' is-active' : '');
+    b.textContent = d.label;
+    b.setAttribute('aria-pressed', eventRepeatWeekdays.has(d.value) ? 'true' : 'false');
+    b.addEventListener('click', () => {
+      if (eventRepeatWeekdays.has(d.value)) eventRepeatWeekdays.delete(d.value);
+      else eventRepeatWeekdays.add(d.value);
+      renderEventRepeatWeekdays();
+    });
+    cont.appendChild(b);
+  }
+}
+
+// Enseña u oculta lo que solo tiene sentido cuando el evento se repite.
+// Mismo patron que refreshEventAllDayFields y las casillas por tipo de
+// Finanzas: un solo sitio decide que se ve.
+function refreshEventRepeatFields() {
+  const freq = eventRepeatField.getValue();
+  const extra = document.getElementById('event-repeat-extra');
+  extra.classList.toggle('hidden', !freq);
+  document.getElementById('event-repeat-weekdays-row').classList.toggle('hidden', freq !== 'weekly');
+  if (!freq) return;
+  const n = Math.max(1, Number(document.getElementById('event-repeat-interval').value) || 1);
+  const [uno, varios] = EVENT_REPEAT_UNITS[freq] || ['', ''];
+  document.getElementById('event-repeat-unit').textContent = n === 1 ? uno : varios;
+}
+
+document.getElementById('event-repeat-interval').addEventListener('input', refreshEventRepeatFields);
+
 // Campo de hora propio: un input de texto normal (se escribe directo,
 // sin desplegable) pero con el estilo del tema — <input type="time">
 // nativo siempre abre el selector propio del navegador al clicarlo (el
@@ -2842,6 +2926,18 @@ function openEventModal(event, presetDate) {
       ? String(event.reminderMinutesBefore)
       : '')
     : '0');
+  // La regla de repeticion, si la tiene. Se guarda ademas de que DIA es
+  // la repeticion que se ha abierto: es lo que permite luego cambiar o
+  // borrar solo esa vez (ver preguntarQueHacerConLaSerie).
+  eventoAbiertoOcurrencia = event && event.occurrenceDate ? event.occurrenceDate : null;
+  const regla = event && event.repeat ? event.repeat : null;
+  eventRepeatField.setValue(regla ? regla.freq : '');
+  document.getElementById('event-repeat-interval').value = regla ? String(regla.interval || 1) : '1';
+  eventRepeatWeekdays = new Set(regla && Array.isArray(regla.weekdays) ? regla.weekdays : []);
+  renderEventRepeatWeekdays();
+  eventRepeatUntilField.setValue(regla && regla.until ? new Date(`${regla.until}T00:00:00`) : null);
+  refreshEventRepeatFields();
+
   populateEventGroupSelect();
   eventGroupField.setValue(event && event.groupId ? String(event.groupId) : '');
   document.getElementById('btn-delete-event').classList.toggle('hidden', !event);
@@ -2863,6 +2959,44 @@ function closeEventModal() {
 
 document.getElementById('btn-cancel-event').addEventListener('click', closeEventModal);
 document.getElementById('btn-close-event').addEventListener('click', closeEventModal);
+
+// Pregunta si lo que se esta haciendo afecta a UNA repeticion o a la
+// serie entera. Devuelve 'una', 'todas' o null si se cancela.
+//
+// Es un modal propio y no showAppConfirm porque aqui hacen falta TRES
+// salidas, no dos. Sigue el mismo patron: devuelve una promesa y los
+// botones la resuelven.
+function preguntarPorLaSerie(mensaje) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('event-series-modal');
+    document.getElementById('event-series-modal-message').textContent = mensaje;
+    modal.classList.remove('hidden');
+    const cerrar = (valor) => {
+      modal.classList.add('hidden');
+      unaVez.forEach(({ el, fn }) => el.removeEventListener('click', fn));
+      resolve(valor);
+    };
+    const unaVez = [
+      { el: document.getElementById('btn-event-series-one'), fn: () => cerrar('una') },
+      { el: document.getElementById('btn-event-series-all'), fn: () => cerrar('todas') },
+      { el: document.getElementById('btn-event-series-cancel'), fn: () => cerrar(null) },
+    ];
+    unaVez.forEach(({ el, fn }) => el.addEventListener('click', fn));
+  });
+}
+
+// Lee del formulario la regla de repeticion, o null si no se repite.
+function leerRepeticionDelFormulario() {
+  const freq = eventRepeatField.getValue();
+  if (!freq) return null;
+  const hasta = eventRepeatUntilField.getValue();
+  return {
+    freq,
+    interval: Math.max(1, Math.min(365, Number(document.getElementById('event-repeat-interval').value) || 1)),
+    weekdays: freq === 'weekly' ? [...eventRepeatWeekdays].sort() : [],
+    until: hasta ? toDateKey(hasta) : null,
+  };
+}
 
 document.getElementById('event-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -2891,9 +3025,30 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
     description: document.getElementById('event-description').value || null,
     reminderMinutesBefore: reminderRaw === '' ? null : Number(reminderRaw),
     groupId: groupRaw === '' ? null : Number(groupRaw),
+    repeat: leerRepeticionDelFormulario(),
   };
 
   if (id) {
+    // Si lo que se abrio era UNA repeticion de una serie, hay que
+    // preguntar antes de guardar: cambiar la hora de "todos los martes"
+    // no es lo mismo que cambiar la del martes que viene.
+    if (eventoAbiertoOcurrencia) {
+      const que = await preguntarPorLaSerie('Este evento se repite. ¿Los cambios son solo para esta vez o para todas?');
+      if (!que) return;
+      if (que === 'una') {
+        // Esa vez se suelta de la serie y pasa a ser un evento propio,
+        // con los cambios; la serie deja de pintar ese dia.
+        await api(`/api/events/${id}/detach`, {
+          method: 'POST',
+          body: JSON.stringify({ ...payload, repeat: undefined, date: eventoAbiertoOcurrencia }),
+        });
+        closeEventModal();
+        loadMonth();
+        loadReminders();
+        refreshOpenMobileDayViewIfShowing(startDate);
+        return;
+      }
+    }
     await api(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   } else {
     await api('/api/events', { method: 'POST', body: JSON.stringify(payload) });
@@ -2908,8 +3063,29 @@ document.getElementById('event-form').addEventListener('submit', async (e) => {
 document.getElementById('btn-delete-event').addEventListener('click', async () => {
   const id = document.getElementById('event-id').value;
   if (!id) return;
-  if (!confirm('¿Eliminar este evento?')) return;
   const deletedDate = eventStartDateField.getValue();
+  if (eventoAbiertoOcurrencia) {
+    // Misma pregunta que al guardar: borrar el martes que viene no es
+    // borrar todos los martes.
+    const que = await preguntarPorLaSerie('Este evento se repite. ¿Quieres borrar solo esta vez o todas?');
+    if (!que) return;
+    if (que === 'una') {
+      await api(`/api/events/${id}/skip`, {
+        method: 'POST',
+        body: JSON.stringify({ date: eventoAbiertoOcurrencia }),
+      });
+      closeEventModal();
+      loadMonth();
+      loadReminders();
+      refreshOpenMobileDayViewIfShowing(deletedDate);
+      return;
+    }
+  } else if (!(await showAppConfirm('¿Eliminar este evento?', { okText: 'Eliminar', danger: true }))) {
+    // Antes esto era un confirm() del navegador. En el movil ese dialogo
+    // congela la webview (ya paso en Finanzas), asi que se usa el modal
+    // propio, que ademas sigue el tema.
+    return;
+  }
   await api(`/api/events/${id}`, { method: 'DELETE' });
   closeEventModal();
   loadMonth();
@@ -7470,6 +7646,57 @@ function handleNoteQuoteEnterExit() {
   return true;
 }
 
+// Intro al final del TITULO baja a un parrafo normal, no a otro titulo.
+//
+// Es la otra mitad de "el primer parrafo nace como Titulo" (ver
+// noteEntrySnapshot): sin esto, el navegador continua con la MISMA
+// etiqueta y la segunda linea saldria tambien en <h1>, que es justo lo
+// contrario de lo que se busca.
+//
+// Solo actua con el cursor AL FINAL del titulo. Partiendolo por la mitad
+// lo natural es que las dos mitades sigan siendo titulo, asi que ahi se
+// deja al navegador hacer lo suyo.
+function handleNoteTitleEnterExit() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return false;
+  const rango = sel.getRangeAt(0);
+  const linea = getNoteBlockAncestor(rango.startContainer);
+  // Solo el PRIMER bloque de la nota, que es el que hace de titulo. Un
+  // <h1> puesto a mano mas abajo con el menu "Aa" se comporta como
+  // siempre.
+  if (!linea || linea !== NOTE_EDITOR_BODY.firstElementChild) return false;
+  if (linea.tagName !== 'H1') return false;
+  // "Al final" = no queda nada del titulo por detras del cursor.
+  const loQueQuedaDetras = document.createRange();
+  loQueQuedaDetras.selectNodeContents(linea);
+  loQueQuedaDetras.setStart(rango.endContainer, rango.endOffset);
+  if (loQueQuedaDetras.toString() !== '') return false;
+
+  const parrafo = document.createElement('div');
+  parrafo.appendChild(document.createElement('br'));
+  linea.parentNode.insertBefore(parrafo, linea.nextSibling);
+  const nuevo = document.createRange();
+  nuevo.setStart(parrafo, 0);
+  nuevo.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(nuevo);
+  NOTE_EDITOR_BODY.dispatchEvent(new Event('input', { bubbles: true }));
+  refreshNoteEditorState();
+  return true;
+}
+
+// El teclado de iOS no siempre manda un keydown con key === 'Enter' (con
+// el texto predictivo por medio llega como 'Unidentified'), pero
+// 'beforeinput' SI llega siempre -- misma trampa que ya mordio con las
+// formulas, ver el listener de mas arriba. Cuando el keydown ya lo ha
+// atendido hace preventDefault y este evento ni se dispara, asi que no
+// se duplica el trabajo.
+NOTE_EDITOR_BODY.addEventListener('beforeinput', (e) => {
+  if (e.inputType !== 'insertParagraph') return;
+  if (handleNoteTitleEnterExit()) e.preventDefault();
+});
+
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
   // INTRO FIJA LA FORMULA -- pero SOLO si hay una vista previa delante.
   //
@@ -7498,6 +7725,10 @@ NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    if (handleNoteTitleEnterExit()) {
+      e.preventDefault();
+      return;
+    }
     if (handleNoteQuoteEnterExit()) {
       e.preventDefault();
       return;
@@ -7623,7 +7854,22 @@ function isOpenNoteDirty(entry) {
 
 function noteEntrySnapshot(note) {
   const body = note && note.body ? note.body : '';
-  const bodyHtml = note && note.bodyFormat === 'html' ? body : legacyNoteBodyToHtml(body);
+  let bodyHtml = note && note.bodyFormat === 'html' ? body : legacyNoteBodyToHtml(body);
+  // EL PRIMER PARRAFO YA NACE CON FORMATO DE TITULO.
+  //
+  // La primera linea de una nota ES su titulo (de ahi lo saca
+  // deriveTitleFromBody), asi que tiene sentido que se vea como tal desde
+  // el primer momento. Koku: "cuando escribo el primer parrafo, lo que va
+  // a ser el titulo, que vaya con el formato de texto de titulo, porque
+  // ahora va con el normal y tengo que cambiarlo cada vez".
+  //
+  // Al pulsar Intro se baja a parrafo normal, que es lo que se espera
+  // despues de escribir un titulo -- ver handleNoteTitleEnterExit().
+  //
+  // Un <h1> con solo un <br> dentro no tiene ni texto ni imagenes, asi
+  // que sigue contando como "nota vacia": abrir el editor y salirse sin
+  // escribir nada NO crea ninguna nota (ver el submit de note-form).
+  if (!bodyHtml.trim()) bodyHtml = '<h1><br></h1>';
   const folderId = note ? note.folderId : state.currentNoteFolderId;
   const entry = {
     key: makeOpenNoteKey(),
@@ -8953,6 +9199,321 @@ document.getElementById('btn-calendar-quick-today').addEventListener('click', as
   enterMobileDayView(hoy);
 });
 document.getElementById('btn-calendar-quick-groups').addEventListener('click', openGroupsView);
+
+// ---------------------------------------------------------------------
+// HORARIO SEMANAL FIJO
+//
+// Lo que se repite TODA la semana y no depende de la fecha: clases,
+// turnos de trabajo, gimnasio. Es una pantalla aparte y una tabla aparte
+// (horario_bloques), no eventos con una regla de repeticion -- ver el
+// comentario de cabecera de routes-local/horario.js: un horario metido
+// en el calendario llenaria cada semana de lo mismo y taparia lo que de
+// verdad pasa ese dia.
+//
+// La rejilla es horas (alto) x dias (ancho). Cada bloque se coloca por
+// MINUTOS con position absolute, asi una clase de 9:30 a 10:45 cae
+// exactamente donde toca sin tener que partir la hora en cuartos.
+// ---------------------------------------------------------------------
+
+// De lunes a domingo. Los numeros son los de getDay() (0 = domingo), que
+// es lo mismo que guardan los dias de la semana de "repetir" un evento:
+// una sola convencion en toda la app.
+const HORARIO_DIAS = [
+  { weekday: 1, corto: 'L', largo: 'Lunes' },
+  { weekday: 2, corto: 'M', largo: 'Martes' },
+  { weekday: 3, corto: 'X', largo: 'Miércoles' },
+  { weekday: 4, corto: 'J', largo: 'Jueves' },
+  { weekday: 5, corto: 'V', largo: 'Viernes' },
+  { weekday: 6, corto: 'S', largo: 'Sábado' },
+  { weekday: 0, corto: 'D', largo: 'Domingo' },
+];
+
+// Alto de una hora en la rejilla. Tiene que coincidir con --horario-hora
+// de styles.css: el CSS pinta las rayas de las horas con un degradado
+// que se repite cada esa altura, y el JavaScript coloca los bloques
+// midiendo en pixeles. Si se separan, los bloques dejan de caer sobre su
+// raya. Se lee del CSS en vez de repetir el numero aqui.
+function horarioAltoDeHora() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--horario-hora');
+  const n = parseFloat(raw);
+  return Number.isFinite(n) && n > 0 ? n : 56;
+}
+
+// La franja de horas que se pinta. De fabrica 8:00-22:00 (el dia util),
+// pero se ESTIRA si algun bloque se sale: un turno de noche que empieza
+// a las 6 tiene que verse entero, y recortarlo seria perderlo de vista
+// sin decir nada.
+function horarioFranja(bloques) {
+  let desde = 8 * 60;
+  let hasta = 22 * 60;
+  bloques.forEach((b) => {
+    desde = Math.min(desde, Math.floor(b.startMin / 60) * 60);
+    hasta = Math.max(hasta, Math.ceil(b.endMin / 60) * 60);
+  });
+  return { desde, hasta: Math.max(hasta, desde + 60) };
+}
+
+// La etiqueta de la columna de horas, en COMPACTO. No vale
+// formatHourLabel() (la de la vista diaria): con el telefono en reloj de
+// 12 horas devuelve "9:00 a. m.", y en el canalon de una rejilla de
+// siete columnas eso no cabe -- se salia por la izquierda y se veia
+// ":00 a. m.", sin la hora, que es justo el dato. Aqui son horas en
+// punto siempre, asi que los ":00" no dicen nada: "9 a. m." y "09:00".
+// Es ademas lo que hace el Calendario de iOS en su vista de semana.
+const HORARIO_HOUR_FORMATTER = new Intl.DateTimeFormat('es-ES', {
+  hour: USES_12H_CLOCK ? 'numeric' : '2-digit',
+  ...(USES_12H_CLOCK ? {} : { minute: '2-digit' }),
+  hour12: USES_12H_CLOCK,
+});
+function horarioEtiquetaDeHora(hora) {
+  const d = new Date();
+  d.setHours(hora, 0, 0, 0);
+  return HORARIO_HOUR_FORMATTER.format(d);
+}
+
+let horarioBloques = [];
+
+async function loadHorario() {
+  horarioBloques = await api('/api/horario');
+}
+
+async function openHorarioView() {
+  document.getElementById('horario-view').classList.remove('hidden');
+  setCurrentScreen('horario');
+  try {
+    await loadHorario();
+  } catch (err) {
+    console.error(err);
+    horarioBloques = [];
+  }
+  renderHorario();
+}
+
+function closeHorarioView() {
+  document.getElementById('horario-view').classList.add('hidden');
+  setCurrentScreen('home');
+}
+
+function renderHorario() {
+  const head = document.getElementById('horario-days-head');
+  const grid = document.getElementById('horario-grid');
+  head.innerHTML = '';
+  grid.innerHTML = '';
+
+  document.getElementById('horario-empty').classList.toggle('hidden', horarioBloques.length > 0);
+
+  // La cabecera lleva un hueco vacio delante para cuadrar con la columna
+  // de horas de la rejilla: las dos usan las mismas columnas de CSS, asi
+  // que el dia de arriba cae siempre sobre su columna.
+  const hueco = document.createElement('span');
+  hueco.className = 'horario-gutter-head';
+  head.appendChild(hueco);
+  HORARIO_DIAS.forEach((d) => {
+    const el = document.createElement('span');
+    el.className = 'horario-day-head';
+    el.textContent = d.corto;
+    el.title = d.largo;
+    head.appendChild(el);
+  });
+
+  const { desde, hasta } = horarioFranja(horarioBloques);
+  const altoHora = horarioAltoDeHora();
+  const alto = ((hasta - desde) / 60) * altoHora;
+  // El degradado que pinta las rayas arranca en el borde de arriba de la
+  // columna, que es justo "desde" -- por eso la franja empieza siempre en
+  // una hora en punto: si empezara a y media, las rayas caerian a
+  // contratiempo de las etiquetas.
+  grid.style.height = `${alto}px`;
+
+  const horas = document.createElement('div');
+  horas.className = 'horario-hours';
+  for (let m = desde; m <= hasta; m += 60) {
+    const et = document.createElement('span');
+    et.className = 'horario-hour-label';
+    et.style.top = `${((m - desde) / 60) * altoHora}px`;
+    et.textContent = horarioEtiquetaDeHora(Math.floor((m % 1440) / 60));
+    horas.appendChild(et);
+  }
+  grid.appendChild(horas);
+
+  HORARIO_DIAS.forEach((d) => {
+    const col = document.createElement('div');
+    col.className = 'horario-day-col';
+    // Tocar el hueco de un dia crea un bloque AHI: el dia ya lo sabe la
+    // columna y la hora sale de donde tocaste, redondeada a la media
+    // hora mas cercana. Es el mismo atajo que ya tiene la vista diaria.
+    col.addEventListener('click', (e) => {
+      if (e.target !== col) return; // un toque sobre un bloque es suyo
+      const y = e.clientY - col.getBoundingClientRect().top;
+      const min = desde + Math.round((y / altoHora) * 60 / 30) * 30;
+      openHorarioModal(null, { weekday: d.weekday, startMin: Math.min(min, hasta - 60) });
+    });
+    horarioBloques
+      .filter((b) => b.weekday === d.weekday)
+      .forEach((b) => col.appendChild(buildHorarioBlock(b, desde, altoHora)));
+    grid.appendChild(col);
+  });
+}
+
+function buildHorarioBlock(b, desde, altoHora) {
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = 'horario-block';
+  el.style.top = `${((b.startMin - desde) / 60) * altoHora}px`;
+  el.style.height = `${((b.endMin - b.startMin) / 60) * altoHora}px`;
+  // El color del grupo va en la BARRA de la izquierda, no de fondo. Un
+  // chip del calendario es una linea de texto y aguanta el color solido,
+  // pero un bloque de hora y media son dos lineas sobre un color que
+  // elige el usuario y puede ser cualquiera -- con la barra se lee bien
+  // sea cual sea, que es lo que hace tambien el Calendario de iOS.
+  el.style.borderLeftColor = b.groupColor || 'var(--accent)';
+  // El texto de dentro puede quedar partido por lo estrecha que es una
+  // columna de siete; el nombre de verdad y la hora viajan enteros aqui,
+  // que es lo que lee un lector de pantalla.
+  el.setAttribute('aria-label', `${b.title}, de ${horarioHoraTexto(b.startMin)} a ${horarioHoraTexto(b.endMin)}`);
+
+  // El titulo se PARTE en varias lineas en vez de cortarse con puntos
+  // suspensivos. En un movil son siete columnas de unos 45 px: con
+  // "nowrap", "Gimnasio" se veia "Gi..." y "Turno" se veia "Tu...", o
+  // sea nada. Un bloque de dos horas tiene alto de sobra para tres
+  // lineas, y el propio alto del bloque ya limita cuanto se enseña.
+  const titulo = document.createElement('span');
+  titulo.className = 'horario-block-title';
+  titulo.textContent = b.groupIcon ? `${b.groupIcon} ${b.title}` : b.title;
+  el.appendChild(titulo);
+
+  // La hora NO se repite dentro del bloque: la rejilla ya la dice (el
+  // bloque empieza donde empieza y acaba donde acaba). Lo que no se
+  // deduce mirando es DONDE es, asi que el pie es la ubicacion, y solo
+  // si la hay -- si no, el titulo se queda con todo el hueco.
+  if (b.location) {
+    const pie = document.createElement('span');
+    pie.className = 'horario-block-meta';
+    pie.textContent = b.location;
+    el.appendChild(pie);
+  }
+
+  el.addEventListener('click', () => openHorarioModal(b));
+  return el;
+}
+
+// Minutos desde medianoche -> la hora escrita como la lee quien mira la
+// pantalla (12 o 24 horas segun el SISTEMA, igual que el resto de la app).
+function horarioHoraTexto(min) {
+  const d = new Date();
+  d.setHours(Math.floor(min / 60), min % 60, 0, 0);
+  return TIME_FORMATTER.format(d);
+}
+
+// --- La ficha de un bloque -------------------------------------------
+
+const horarioWeekdayField = createSelectField({
+  options: HORARIO_DIAS.map((d) => ({ value: String(d.weekday), label: d.largo })),
+  initialValue: '1',
+});
+document.getElementById('horario-weekday-field').appendChild(horarioWeekdayField.element);
+
+const horarioStartField = createTimeField({ initialValue: '09:00' });
+document.getElementById('horario-start-field').appendChild(horarioStartField.element);
+
+const horarioEndField = createTimeField({ initialValue: '10:00' });
+document.getElementById('horario-end-field').appendChild(horarioEndField.element);
+
+const horarioGroupField = createSelectField({ options: [{ value: '', label: 'Sin grupo' }], initialValue: '' });
+document.getElementById('horario-group-field').appendChild(horarioGroupField.element);
+
+// "HH:MM" -> minutos desde medianoche, y al reves. El campo de hora
+// habla siempre en 24h hacia fuera (ver createTimeField), asi que esto
+// no tiene que saber nada del reloj de 12.
+function horarioMinutosDeTexto(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || '');
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+function horarioTextoDeMinutos(min) {
+  return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+}
+
+function openHorarioModal(bloque, prefill = {}) {
+  document.getElementById('horario-modal-title').textContent = bloque ? 'Editar bloque' : 'Nuevo bloque';
+  document.getElementById('horario-id').value = bloque ? bloque.id : '';
+  document.getElementById('horario-title').value = bloque ? bloque.title : '';
+  document.getElementById('horario-location').value = bloque && bloque.location ? bloque.location : '';
+  document.getElementById('btn-delete-horario').classList.toggle('hidden', !bloque);
+
+  horarioGroupField.setOptions([
+    { value: '', label: 'Sin grupo' },
+    ...state.groups.map((g) => ({ value: String(g.id), label: g.name })),
+  ]);
+  horarioGroupField.setValue(bloque && bloque.groupId ? String(bloque.groupId) : '');
+
+  const weekday = bloque ? bloque.weekday : (prefill.weekday !== undefined ? prefill.weekday : 1);
+  horarioWeekdayField.setValue(String(weekday));
+
+  const inicio = bloque ? bloque.startMin : (prefill.startMin !== undefined ? prefill.startMin : 9 * 60);
+  const fin = bloque ? bloque.endMin : Math.min(inicio + 60, 1440);
+  horarioStartField.setValue(horarioTextoDeMinutos(inicio));
+  horarioEndField.setValue(horarioTextoDeMinutos(fin));
+
+  document.getElementById('horario-modal').classList.remove('hidden');
+  document.getElementById('horario-title').focus();
+}
+
+function closeHorarioModal() {
+  document.getElementById('horario-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-close-horario-modal').addEventListener('click', closeHorarioModal);
+document.getElementById('btn-cancel-horario').addEventListener('click', closeHorarioModal);
+document.getElementById('btn-close-horario').addEventListener('click', closeHorarioView);
+document.getElementById('btn-calendar-quick-horario').addEventListener('click', openHorarioView);
+document.getElementById('btn-horario-add').addEventListener('click', () => openHorarioModal(null));
+
+document.getElementById('horario-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const inicio = horarioMinutosDeTexto(horarioStartField.getValue());
+  const fin = horarioMinutosDeTexto(horarioEndField.getValue());
+  // Se avisa AQUI y no se deja que lo rechace la ruta: el mensaje de la
+  // ruta es la ultima red, pero quien se equivoca escribiendo la hora
+  // tiene que enterarse sin que parezca que guardar no hizo nada.
+  if (inicio === null || fin === null) {
+    await showAppConfirm('Revisa las horas: falta alguna o no está completa.', { alertOnly: true });
+    return;
+  }
+  if (fin <= inicio) {
+    await showAppConfirm('La hora de fin tiene que ser posterior a la de inicio.', { alertOnly: true });
+    return;
+  }
+  const grupo = horarioGroupField.getValue();
+  const payload = {
+    title: document.getElementById('horario-title').value.trim(),
+    weekday: Number(horarioWeekdayField.getValue()),
+    startMin: inicio,
+    endMin: fin,
+    location: document.getElementById('horario-location').value.trim() || null,
+    groupId: grupo ? Number(grupo) : null,
+  };
+  const id = document.getElementById('horario-id').value;
+  if (id) {
+    await api(`/api/horario/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  } else {
+    await api('/api/horario', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  closeHorarioModal();
+  await loadHorario();
+  renderHorario();
+});
+
+document.getElementById('btn-delete-horario').addEventListener('click', async () => {
+  const id = document.getElementById('horario-id').value;
+  if (!id) return;
+  const ok = await showAppConfirm('¿Quitar este bloque del horario?', { okText: 'Quitar', danger: true });
+  if (!ok) return;
+  await api(`/api/horario/${id}`, { method: 'DELETE' });
+  closeHorarioModal();
+  await loadHorario();
+  renderHorario();
+});
 
 // ---------------------------------------------------------------------
 // Extension "Gimnasio": registro de entrenamientos de verdad (ejercicios,
@@ -20905,7 +21466,7 @@ function currentMobileTab() {
 const CAPAS_DE_PANTALLA = [
   'settings-modal', 'gym-view', 'finanzas-view', 'lecturas-view',
   'viajes-view', 'extensions-view', 'mobile-notes-view', 'note-editor-view',
-  'groups-view',
+  'groups-view', 'horario-view',
 ];
 
 // Que pantalla se esta viendo AHORA MISMO. Se usa dos veces: para
@@ -21094,7 +21655,7 @@ function animarAlPulsar(btn) {
   });
 }
 
-[...VOLVER_UN_PASO, 'btn-close-groups'].forEach((id) => animarAlPulsar(document.getElementById(id)));
+[...VOLVER_UN_PASO, 'btn-close-groups', 'btn-close-horario'].forEach((id) => animarAlPulsar(document.getElementById(id)));
 document.querySelectorAll('.my-space-close-btn').forEach(animarAlPulsar);
 
 // Pantallas donde el carril CENTRAL ya tiene dueño: alli el
@@ -21330,7 +21891,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.56.0';
+const APP_VERSION = '0.57.0';
 const APP_VERSION_DATE = '2026-09-13';
 
 function renderAppVersionLine() {

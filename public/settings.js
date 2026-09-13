@@ -2283,6 +2283,12 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  const horarioModal = document.getElementById('horario-modal');
+  if (horarioModal && !horarioModal.classList.contains('hidden')) {
+    document.getElementById('btn-close-horario-modal').click();
+    return;
+  }
+
   const groupModal = document.getElementById('group-modal');
   if (groupModal && !groupModal.classList.contains('hidden')) {
     document.getElementById('btn-close-group').click();
@@ -2300,6 +2306,14 @@ document.addEventListener('keydown', (e) => {
     } else {
       document.getElementById('btn-close-groups').click();
     }
+    return;
+  }
+
+  // El horario tiene una sola capa (la rejilla) -- su ficha de bloque es
+  // un .modal normal y ya la cierra la cascada de arriba.
+  const horarioView = document.getElementById('horario-view');
+  if (horarioView && !horarioView.classList.contains('hidden')) {
+    document.getElementById('btn-close-horario').click();
     return;
   }
 
