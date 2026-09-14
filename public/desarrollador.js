@@ -17,6 +17,14 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.61.0': [
+    'Ronda de MERGES, no de features: entran Finanzas (la navegación de Gastos fijos), Entretenimiento (el renombrado entero) y las dos Apps nuevas, Retos y Recetas. Lo que hay que probar es que ninguna se ha roto por el camino, sobre todo Entretenimiento: sus tablas cambiaron de nombre y la migración desde lecturas_* solo se puede ver de verdad con datos tuyos de antes.',
+    'Retos y Recetas vienen ENCENDIDAS con la etiqueta de "en desarrollo". Si prefieres que nazcan apagadas como Entretenimiento y Viajes, es quitarles `activaDeFabrica: true` en APPS_DE_LA_TIENDA.',
+    'Ninguna de las dos nuevas tiene manual todavía (ni widget). Siguen faltando los cinco manuales de antes.',
+    'gimnasio-movil y viajes-movil NO traían nada nuevo: ya estaban al día. Si esperabas algo de ellas, no llegó.',
+    'Las ramas de Retos y Recetas salen de movil-ui, o sea SIN los avisos de desarrollo, y el merge se los llevaba en silencio (el <script> de desarrollador.js incluido). Se han repuesto y hay una prueba que lo vigila, pero conviene mirar en la build que la línea de versión sigue diciendo el número de build.',
+    'Las notas de versión de la 0.59.0 y la 0.60.0 no existían: esas dos rondas subieron sin escribirlas. Las he redactado a partir de sus commits — léelas por si algo no cuadra con lo que te enseñó esa sesión.',
+  ],
   '0.58.0': [
     'Si apagas TODAS las Apps que pueden ir en el hueco de la barra de abajo, ese hueco se queda con Notas igualmente (un boton de la barra no puede quedarse vacio). Es el UNICO sitio donde se puede llegar a una App apagada. Si te molesta, la alternativa seria que la barra pasara a tener 3 botones.',
     'Los manuales de Calendario, Notas, Finanzas, Lecturas y Viajes están VACÍOS: solo está escrito el del Gimnasio, que es el que pediste ver primero. Si el tono y el nivel de detalle te valen, se escriben los otros cinco con el mismo patrón.',

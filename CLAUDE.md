@@ -4140,7 +4140,105 @@ Todo lo que Koku dejó dicho "para luego", que es donde sigue:
   dos ramas eligieron la v0.57.0 a la vez. Si choca, se renumera al
   fusionar.
 
+## Fusionar una rama que sale de `movil-ui` (14/9/2026)
+
+**Esto es lo mas importante de esta ronda y va a volver a pasar.** Retos
+y Recetas se hicieron en ramas que salen de **`movil-ui`**, no de
+`desarrollador`. O sea que su historia lleva los commits que QUITARON los
+avisos de diagnostico — y para git eso son cambios suyos, asi que al
+fusionarlas hacia aqui **ganan solos y se llevan los avisos por delante,
+sin dar ni un conflicto**.
+
+Lo unico que da la cara es `public/desarrollador.js` (conflicto
+modify/delete, imposible no verlo). Todo lo demas desaparece en un
+auto-merge limpio:
+
+- `refreshWidgetStatus()`, `refreshGymRestAlertStatus()` y sus llamadas
+  (`settings.js`).
+- `gymTestRestAlert()`, `GYM_REST_STOP_LABELS`, `gymRestAlertLastStatus()`
+  y los dos `setItem('gymLiveActivityStatus')` (`app.js`).
+- `estadoDelWidget()` / `ultimoAvisoAlWidget` (`widget-bridge.js`).
+- El bloque `#widget-status-block` y el "?" de probar el aviso
+  (`index.html`).
+- `hayBuzon()` / `sinBuzon` de **`QueTocaHoyWidget.swift`** (los otros
+  cinco widgets se salvan solo porque viven en otro archivo).
+- **Y el `<script src="desarrollador.js">` de `index.html`**, que es el
+  peor de todos: el archivo sobrevive al conflicto y hasta el comentario
+  que lo explica, pero la LINEA que lo carga se va. La app arranca sin la
+  marca de build de desarrollo y sin las notas "a revisar", y mirando el
+  diff no se nota.
+
+**Como se repone sin ir a ojo**: con la rama ya fusionada, `git diff
+<commit-anterior-al-merge> -- archivo` y quedarse con los hunks que SOLO
+borran (los que no añaden nada son, uno por uno, los avisos); esos se
+aplican al reves. Los mixtos son contenido de la rama y no se tocan. Hay
+un guion de una vez en el historial de esta ronda.
+
+**Y hay una prueba que lo vigila** (`merge-8apps`, seccion 5): comprueba
+las ocho piezas. Si alguna vez sale en rojo tras un merge, es esto.
+
+## Retos y Recetas: dos Apps nuevas (14/9/2026)
+
+Llegaron de `retos-movil-ui` y `recetas-movil-ui`, hechas en paralelo por
+Koku. La app pasa de seis Apps a **ocho**.
+
+- **Retos** (`retos`, `retos_hechos`): un arbol donde cada fila es una
+  tarea que solo se marca. Dos tipos: **habito** (se marca cada periodo y
+  se desmarca solo al empezar el siguiente, con racha) y **meta** (se
+  llega una vez).
+- **Recetas** (siete tablas): platos con foto, tiempos y raciones, en
+  carpetas y con etiquetas. **Los ingredientes son ficha propia**, no
+  texto dentro de la receta — eso es lo que deja que la lista de la
+  compra sume "300 g + 200 g de pollo" en una linea. Y la receta se
+  ESCALA al vuelo sin tocar lo guardado.
+
+### Darlas de alta en la Tienda: lo que no traian
+
+Las dos ramas salieron ANTES de la Tienda, asi que hubo que añadirles a
+mano las tres cosas que no conocian: su fila en `APPS_DE_LA_TIENDA`, sus
+tablas en `BACKUP_TABLAS_POR_APP` (sin eso, una copia de esa App no
+guarda NI restaura nada) y su hueco en `APP_MANUALES`.
+
+**Campo nuevo `activaDeFabrica`.** Hasta ahora "en desarrollo" y "apagada
+de fabrica" eran lo mismo (`appActivaPorDefecto` miraba solo `estado`).
+Retos y Recetas son nuevas —etiqueta puesta— pero estan TERMINADAS, y
+naciendo apagadas no saldrian en Herramientas al abrir la app: pareceria
+que el merge se las ha comido. Asi que son dos cosas distintas: `estado`
+es lo que AVISA y `activaDeFabrica` es si viene puesta. Sin el campo,
+manda lo de siempre.
+
+## Lecturas ahora se llama Entretenimiento (14/9/2026)
+
+Renombrado completo que venia de `entretenimiento-movil`: las tablas son
+`entretenimiento_*` (con migracion idempotente desde `lecturas_*`), las
+dos rutas se llaman igual, y la pantalla y el hub dicen Entretenimiento.
+
+**EL ID INTERNO SIGUE SIENDO `lecturas`**, y hay que saberlo antes de
+tocar nada: es el id en `APPS_DE_LA_TIENDA`, en `MOBILE_NAV_SLOT_APPS`,
+en `MOBILE_NAV_SLOT_CARD_IDS`, en el reparto de la copia, en el destino
+del widget y en la seccion del resumen que lee Swift. Lo unico que cambia
+es el `nombre`/`label`. Renombrar el id obligaria a tocar tambien el
+Swift, y es el mismo criterio por el que los ids siguen diciendo
+`extensions` desde que esa pantalla pasó a llamarse "Apps".
+
+**Lo que mordio al fusionar**: la rama traia `MOBILE_NAV_SLOT_APPS` y
+`MOBILE_NAV_SLOT_CARD_IDS` con la clave `entretenimiento`. Con eso la App
+no salia en el selector del acceso rapido y su tarjeta no se escondia de
+Herramientas al ponerla en la barra — el fallo de la v0.52.0 otra vez.
+Las dos claves vuelven a `lecturas`. **No lo pillo leer el diff, lo pillo
+la prueba.**
+
+Y la copia de seguridad seguia apuntando a `lecturas_sagas`/
+`lecturas_items`, que ya no existen: una copia de esta App no habria
+guardado ni restaurado nada.
+
 ## Estado actual
+
+**v0.61.0** (14/9/2026) es una ronda de **MERGES**, no de features: se
+traen las cinco ramas de movil que tenian algo nuevo — Finanzas (la
+navegacion de Gastos fijos), Entretenimiento (el renombrado) y las dos
+Apps nuevas, Retos y Recetas. `gimnasio-movil` y `viajes-movil` no
+traian nada: ya estaban al dia. Ver los tres bloques de arriba.
 
 **v0.58.0** (13/9/2026) es **la Tienda**: las seis Apps con su ficha,
 encender/apagar, el manual del Gimnasio y las notas de versión por App.

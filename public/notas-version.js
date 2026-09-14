@@ -34,6 +34,44 @@
 // exista se lee como general, no rompe nada.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.61.0',
+    fecha: '2026-09-14',
+    nuevo: [
+      { app: 'recetas', texto: 'App nueva: Recetas. Apunta un plato con su foto, sus tiempos, para cuánta gente es y cómo se hace, y organízalo en carpetas (Vegana, Postres…) y con etiquetas.' },
+      { app: 'recetas', texto: 'Los ingredientes son fichas: "Pollo" existe una sola vez y lo comparten todas tus recetas. Así la lista de la compra suma "300 g + 200 g de pollo" en una línea en vez de repetirla.' },
+      { app: 'recetas', texto: 'Escala una receta al vuelo: está apuntada para 2 y la quieres para 4, y las cantidades se ajustan solas. La receta se queda como estaba: lo que cambia es lo que ves.' },
+      { app: 'recetas', texto: 'La lista de la compra se llena sola: abre una receta, dale a "Añadir a la compra" y ahí están sus ingredientes, agrupados por el pasillo del súper. Quitar la receta los quita; lo que añadiste tú a mano se queda.' },
+      { app: 'recetas', texto: 'Al darle a "Compra hecha" la lista se guarda con su fecha en "Compras anteriores" y empiezas otra vacía.' },
+      { app: 'retos', texto: 'App nueva: Retos. Hábitos que se mantienen (con su racha) y metas a las que llegar, en un mismo árbol donde cada línea se marca y ya.' },
+      { app: 'lecturas', texto: 'Lecturas pasa a llamarse Entretenimiento, que es lo que de verdad guarda: también series, películas, anime, videojuegos y podcasts. Lo que tuvieras apuntado sigue donde estaba.' },
+      'Las dos Apps nuevas vienen encendidas, con su etiqueta de "en desarrollo". Desde la Tienda puedes apagar la que no uses.',
+    ],
+    parches: [
+      { app: 'finanzas', texto: 'En Gastos fijos había dos barras de pastillas idénticas, una encima de otra y con la palabra "Año" repetida, así que no se veía cuál cambiaba de sección y "Plantillas" se perdía. Ahora la de secciones es una sola y lo que filtra dentro son chips.' },
+      { app: 'viajes', texto: 'Dos importes de Viajes salían como "1450.00 €" en vez de "1.450,00 €". Ya no queda ninguno sin formatear en toda la app.' },
+      { app: 'finanzas', texto: 'Un gasto fijo creado sin pedir ningún aviso acababa con uno puesto para el mismo día.' },
+    ],
+  },
+  {
+    version: '0.60.0',
+    fecha: '2026-09-14',
+    nuevo: [
+      { app: 'gym', texto: 'Salir a correr en series: un ejercicio de intervalos que se encadena solo — tramo fuerte, tramo suave y vuelta a empezar, sin tocar el móvil mientras corres. Cada cambio avisa con su vibración.' },
+    ],
+    parches: [],
+  },
+  {
+    version: '0.59.0',
+    fecha: '2026-09-14',
+    nuevo: [
+      { app: 'gym', texto: 'Deslizar hacia la derecha desde el inicio del Gimnasio ya sale a Herramientas, como en Finanzas. Dentro de un bloque, lo primero que se suelta sigue siendo la lista de días.' },
+    ],
+    parches: [
+      { app: 'gym', texto: 'La gráfica de un ejercicio por tiempo era una línea plana a cero: pintaba el peso, que en una plancha a peso corporal no existe. Ahora pinta segundos, y los dos botones pasan a decir "Mejor tiempo" y "Tiempo total".' },
+      { app: 'gym', texto: 'Una plancha no aparecía en Récords, y con peso salía aún peor ("1RM est. 0 · Vol. 0"). Ahora entra por su aguante y la cifra grande es el tiempo.' },
+    ],
+  },
+  {
     version: '0.58.0',
     fecha: '2026-09-13',
     nuevo: [
