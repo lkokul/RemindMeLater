@@ -2321,10 +2321,26 @@
         <button type="button" class="gym-tab-btn" data-ent-tab="colecciones">Colecciones</button>
         <button type="button" class="gym-tab-btn" data-ent-tab="deseos">Deseos</button>
         <button type="button" class="gym-tab-btn" data-ent-tab="historial">Historial</button>
+        <button type="button" class="gym-tab-btn" data-ent-tab="actividad">Actividad</button>
       </div>
       <div class="entretenimiento-content">
         <div class="entretenimiento-grid" id="entretenimiento-grid"></div>
         <p id="entretenimiento-empty" class="empty-hint hidden"></p>
+
+        <!-- Pestana "Actividad": todo esto se calcula de las SESIONES, que
+             se apuntan solas al subir el progreso de un item (ver
+             routes-local/entretenimientoSesiones.js). Sin sesiones no hay
+             racha, ni mapa, ni resumen del ano. -->
+        <div id="entretenimiento-actividad" class="entretenimiento-actividad hidden">
+          <div class="entretenimiento-racha" id="entretenimiento-racha"></div>
+          <h3 class="entretenimiento-seccion-titulo">Mapa de actividad</h3>
+          <p class="hint">Las últimas 26 semanas. Cuanto más fuerte el color, más veces avanzaste ese día.</p>
+          <div class="entretenimiento-mapa-wrap">
+            <div class="entretenimiento-mapa" id="entretenimiento-mapa"></div>
+          </div>
+          <h3 class="entretenimiento-seccion-titulo" id="entretenimiento-ano-titulo">Este año</h3>
+          <div id="entretenimiento-ano"></div>
+        </div>
       </div>
     </div>
 
@@ -2480,7 +2496,12 @@
             </label>
           </div>
         </div>
+        <!-- Historial del item: las sesiones que se han ido apuntando
+             solas. Solo sale al EDITAR (en uno nuevo no hay nada). -->
+        <div id="entretenimiento-item-historial" class="entretenimiento-historial hidden"></div>
+
         <div class="modal-actions">
+          <button type="button" id="btn-entretenimiento-nueva-vuelta" class="secondary-btn hidden">Volver a empezar</button>
           <button type="button" id="btn-delete-entretenimiento-item" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>
           <button type="button" id="btn-cancel-entretenimiento-item" class="secondary-btn">Cancelar</button>
@@ -3153,6 +3174,7 @@
   <script src="routes-local/gymSessions.js"></script>
   <script src="routes-local/entretenimientoItems.js"></script>
   <script src="routes-local/entretenimientoSagas.js"></script>
+  <script src="routes-local/entretenimientoSesiones.js"></script>
   <script src="routes-local/noteFolders.js"></script>
   <script src="routes-local/noteImages.js"></script>
   <script src="routes-local/notes.js"></script>

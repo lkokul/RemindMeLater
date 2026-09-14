@@ -17526,9 +17526,175 @@ function entretenimientoSagaCardHtml(saga) {
     + '</button>';
 }
 
+// --- Pestana "Actividad": racha, mapa y resumen del ano -----------------
+//
+// Todo sale de las SESIONES, que se apuntan solas al subir el progreso de
+// un item (ver routes-local/entretenimientoSesiones.js). Sin sesiones esta
+// pestana esta vacia, y es lo correcto: no hay nada que contar.
+let entretenimientoResumen = null;
+
+async function loadEntretenimientoResumen() {
+  try {
+    entretenimientoResumen = await api('/api/entretenimiento-sesiones/resumen');
+  } catch (err) {
+    entretenimientoResumen = null;
+  }
+}
+
+// Dias SEGUIDOS con al menos una sesion. Cuenta hacia atras desde hoy, y
+// si hoy todavia no has hecho nada arranca en ayer -- la racha no deberia
+// romperse a las 00:01 solo por no haber tocado la app aun.
+function entretenimientoRachas(porDia) {
+  const dias = new Set(porDia.map((d) => d.fecha));
+  if (dias.size === 0) return { actual: 0, mejor: 0 };
+
+  const clave = (d) => toDateKey(d);
+  const unDia = 86400000;
+
+  let actual = 0;
+  const cursor = new Date();
+  if (!dias.has(clave(cursor))) cursor.setTime(cursor.getTime() - unDia);
+  while (dias.has(clave(cursor))) {
+    actual += 1;
+    cursor.setTime(cursor.getTime() - unDia);
+  }
+
+  // La mejor racha historica: se recorren los dias ordenados y se mira
+  // cuando dos seguidos estan pegados.
+  const ordenados = [...dias].sort();
+  let mejor = 0;
+  let corrida = 0;
+  let anterior = null;
+  for (const f of ordenados) {
+    const d = new Date(`${f}T00:00:00`);
+    corrida = anterior && (d - anterior) === unDia ? corrida + 1 : 1;
+    if (corrida > mejor) mejor = corrida;
+    anterior = d;
+  }
+  return { actual, mejor };
+}
+
+function renderEntretenimientoRacha(porDia) {
+  const caja = document.getElementById('entretenimiento-racha');
+  const { actual, mejor } = entretenimientoRachas(porDia);
+  const dias = (n) => n === 1 ? '1 día' : `${n} días`;
+
+  if (actual === 0) {
+    caja.innerHTML = '<div class="entretenimiento-racha-numero">—</div>'
+      + '<div class="entretenimiento-racha-texto"><b>Sin racha ahora mismo</b>'
+      + `<span>${mejor > 0 ? 'Tu mejor racha fueron ' + dias(mejor) + '.' : 'Avanza en algo y empieza a contar.'}</span></div>`;
+    return;
+  }
+  caja.innerHTML = `<div class="entretenimiento-racha-numero">${actual}</div>`
+    + '<div class="entretenimiento-racha-texto">'
+    + `<b>${actual === 1 ? 'día seguido' : 'días seguidos'}</b>`
+    + `<span>${mejor > actual ? 'Tu mejor racha fueron ' + dias(mejor) + '.' : 'Es tu mejor racha.'}</span>`
+    + '</div>';
+}
+
+// 26 semanas x 7 dias, de lunes a domingo, terminando en la semana de hoy.
+// Un solo tono en cuatro escalones: un mapa de magnitud nunca lleva varios
+// colores (misma regla que el heatmap del Gimnasio).
+const ENTRETENIMIENTO_SEMANAS_MAPA = 26;
+
+function renderEntretenimientoMapa(porDia) {
+  const cuantasPorFecha = new Map(porDia.map((d) => [d.fecha, d.cuantas]));
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+
+  // El lunes de esta semana: getDay() da 0 el domingo, asi que el domingo
+  // hay que retroceder 6 dias, no 0.
+  const finde = hoy.getDay();
+  const lunes = new Date(hoy);
+  lunes.setDate(hoy.getDate() - (finde === 0 ? 6 : finde - 1));
+  const inicio = new Date(lunes);
+  inicio.setDate(lunes.getDate() - (ENTRETENIMIENTO_SEMANAS_MAPA - 1) * 7);
+
+  const celdas = [];
+  for (let semana = 0; semana < ENTRETENIMIENTO_SEMANAS_MAPA; semana++) {
+    for (let dia = 0; dia < 7; dia++) {
+      const fecha = new Date(inicio);
+      fecha.setDate(inicio.getDate() + semana * 7 + dia);
+      const clave = toDateKey(fecha);
+      const n = cuantasPorFecha.get(clave) || 0;
+      // Un dia que todavia no ha llegado NO es "no hiciste nada".
+      const futuro = fecha > hoy;
+      const nivel = futuro ? 'futuro' : n === 0 ? '' : n === 1 ? 'n1' : n <= 3 ? 'n2' : 'n3';
+      const titulo = futuro ? '' : `${clave}: ${n === 0 ? 'nada' : n === 1 ? '1 vez' : n + ' veces'}`;
+      celdas.push(`<span class="entretenimiento-mapa-dia ${nivel}" title="${titulo}"></span>`);
+    }
+  }
+  document.getElementById('entretenimiento-mapa').innerHTML = celdas.join('');
+}
+
+const ENTRETENIMIENTO_MESES = ['E', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+
+function renderEntretenimientoAno(resumen) {
+  document.getElementById('entretenimiento-ano-titulo').textContent = `Año ${resumen.ano}`;
+  const caja = document.getElementById('entretenimiento-ano');
+
+  const sesiones = resumen.porTipo.reduce((a, t) => a + t.sesiones, 0);
+  if (sesiones === 0 && resumen.terminados === 0) {
+    caja.innerHTML = '<p class="empty-hint">Todavía no hay nada de este año. En cuanto avances en algo, aparecerá aquí.</p>';
+    return;
+  }
+
+  const cifras = [
+    `<div class="entretenimiento-ano-cifra"><b>${sesiones}</b><span>${sesiones === 1 ? 'vez que avanzaste' : 'veces que avanzaste'}</span></div>`,
+    `<div class="entretenimiento-ano-cifra"><b>${resumen.terminados}</b><span>${resumen.terminados === 1 ? 'terminado' : 'terminados'}</span></div>`,
+  ];
+  // Una cifra por tipo y unidad, y la UNIDAD se ensena: "42 capitulos de
+  // manga" dice algo, "42 manga" no dice nada. Lo que no lleva la cuenta
+  // de nada (una peli sin minutos) se cuenta en veces.
+  for (const t of resumen.porTipo) {
+    const etiqueta = (ENTRETENIMIENTO_TYPE_LABELS[t.tipo] || t.tipo).toLowerCase();
+    const hayAvance = t.avance > 0;
+    const valor = hayAvance ? t.avance : t.sesiones;
+    const pie = hayAvance
+      ? (t.unidad ? `${t.unidad} de ${etiqueta}` : etiqueta)
+      : `${t.sesiones === 1 ? 'vez' : 'veces'} · ${etiqueta}`;
+    cifras.push(`<div class="entretenimiento-ano-cifra"><b>${valor}</b><span>${escapeHtml(pie)}</span></div>`);
+  }
+
+  const porMes = new Map(resumen.porMes.map((m) => [Number(m.mes), m.cuantas]));
+  const tope = Math.max(1, ...porMes.values());
+  const barras = ENTRETENIMIENTO_MESES.map((rotulo, i) => {
+    const n = porMes.get(i + 1) || 0;
+    const alto = Math.round((n / tope) * 100);
+    return '<div class="entretenimiento-mes">'
+      + `<div class="entretenimiento-mes-barra" style="height:${alto}%" title="${n}"></div>`
+      + `<span class="entretenimiento-mes-rotulo">${rotulo}</span>`
+      + '</div>';
+  }).join('');
+
+  caja.innerHTML = `<div class="entretenimiento-ano-cifras">${cifras.join('')}</div>`
+    + `<div class="entretenimiento-meses">${barras}</div>`;
+}
+
+async function renderEntretenimientoActividad() {
+  await loadEntretenimientoResumen();
+  const resumen = entretenimientoResumen || { ano: new Date().getFullYear(), porDia: [], porTipo: [], porMes: [], terminados: 0 };
+  renderEntretenimientoRacha(resumen.porDia);
+  renderEntretenimientoMapa(resumen.porDia);
+  renderEntretenimientoAno(resumen);
+}
+
 function renderEntretenimientoHome() {
   const grid = document.getElementById('entretenimiento-grid');
   const empty = document.getElementById('entretenimiento-empty');
+  const actividad = document.getElementById('entretenimiento-actividad');
+
+  // "Actividad" no es una rejilla de fichas, es su propio panel.
+  const esActividad = entretenimientoTab === 'actividad';
+  actividad.classList.toggle('hidden', !esActividad);
+  grid.classList.toggle('hidden', esActividad);
+  if (esActividad) {
+    empty.classList.add('hidden');
+    // Se recalcula cada vez que se entra: acabas de poder cambiar el
+    // progreso de algo en la pestana de al lado.
+    renderEntretenimientoActividad();
+    return;
+  }
 
   if (entretenimientoTab === 'colecciones') {
     empty.textContent = 'Todavia no tienes ninguna coleccion. Crea una con el boton +, y recuerda que hasta algo suelto (una novela, una peli) es una coleccion de un solo item.';
@@ -20988,8 +21154,90 @@ function refreshEntretenimientoSagaFieldExtra() {
   document.getElementById('entretenimiento-item-new-saga').required = esNueva;
 }
 
+// --- Historial de un item dentro de su ficha ----------------------------
+//
+// Las sesiones NO se crean aqui (se apuntan solas al subir el progreso);
+// esto solo las ensena, y deja borrar una apuntada por error.
+let entretenimientoItemEnFicha = null;
+
+function entretenimientoFechaCorta(iso) {
+  // Formato del SISTEMA, no uno fijo: hay quien tiene mm/dd (mismo
+  // criterio que la linea de version de Configuracion).
+  try {
+    return new Intl.DateTimeFormat(undefined, { day: '2-digit', month: 'short' }).format(new Date(`${iso}T00:00:00`));
+  } catch {
+    return iso;
+  }
+}
+
+async function renderEntretenimientoHistorial(item) {
+  const caja = document.getElementById('entretenimiento-item-historial');
+  // En un item NUEVO no hay nada que ensenar.
+  if (!item) { caja.classList.add('hidden'); caja.innerHTML = ''; return; }
+  caja.classList.remove('hidden');
+  caja.innerHTML = '<h4>Historial</h4><p class="hint">Cargando…</p>';
+
+  let sesiones = [];
+  try {
+    sesiones = await api(`/api/entretenimiento-sesiones?itemId=${item.id}`);
+  } catch (err) {
+    caja.innerHTML = '<h4>Historial</h4><p class="hint">No se pudo cargar.</p>';
+    return;
+  }
+  // La ficha puede haberse cerrado o cambiado mientras llegaba la
+  // respuesta: sin esto, el historial de un item se pintaria encima de
+  // otro (pasa al abrir dos fichas seguidas deprisa).
+  if (entretenimientoItemEnFicha !== item.id) return;
+
+  if (sesiones.length === 0) {
+    caja.innerHTML = '<h4>Historial</h4><p class="hint">Todavía no hay nada. En cuanto subas el progreso, se irá apuntando solo aquí.</p>';
+    return;
+  }
+
+  const filas = sesiones.map((s) => {
+    const avance = s.avance !== null
+      ? `+${s.avance}${s.unidad ? ' ' + escapeHtml(s.unidad) : ''} (${s.progresoDesde} → ${s.progresoHasta})`
+      : '—';
+    const vuelta = (item.vuelta || 1) > 1 ? `<span class="entretenimiento-sesion-vuelta">vuelta ${s.vuelta}</span>` : '';
+    return '<div class="entretenimiento-sesion">'
+      + `<span class="entretenimiento-sesion-fecha">${escapeHtml(entretenimientoFechaCorta(s.fecha))}</span>`
+      + `<span class="entretenimiento-sesion-avance">${avance}</span>`
+      + vuelta
+      + `<button type="button" class="icon-btn" data-borrar-sesion="${s.id}" aria-label="Quitar esta anotación">✕</button>`
+      + '</div>';
+  }).join('');
+  caja.innerHTML = `<h4>Historial</h4>${filas}`;
+}
+
+// Un solo listener para todo el historial, que se repinta entero.
+document.getElementById('entretenimiento-item-historial').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-borrar-sesion]');
+  if (!btn) return;
+  if (!await showAppConfirm('¿Quitar esta anotación del historial? El progreso del item no cambia.', { okText: 'Quitar', danger: true })) return;
+  await api(`/api/entretenimiento-sesiones/${btn.dataset.borrarSesion}`, { method: 'DELETE' });
+  const item = entretenimientoTodos.find((it) => it.id === entretenimientoItemEnFicha)
+    || state.entretenimientoItems.find((it) => it.id === entretenimientoItemEnFicha);
+  if (item) await renderEntretenimientoHistorial(item);
+});
+
+// "Volver a empezar": una relectura o un revisionado es una vuelta NUEVA,
+// no pisar lo de antes.
+document.getElementById('btn-entretenimiento-nueva-vuelta').addEventListener('click', async () => {
+  const id = document.getElementById('entretenimiento-item-id').value;
+  if (!id) return;
+  const ok = await showAppConfirm(
+    '¿Empezar otra vuelta? El progreso vuelve a cero y queda "En progreso". Lo ya apuntado NO se borra: se queda como la vuelta anterior.',
+    { okText: 'Volver a empezar' }
+  );
+  if (!ok) return;
+  await api(`/api/entretenimiento-items/${id}/nueva-vuelta`, { method: 'POST' });
+  closeEntretenimientoItemModal();
+  await refreshEntretenimientoAfterItemChange();
+});
+
 function openEntretenimientoItemModal(item) {
-  document.getElementById('entretenimiento-item-modal-title').textContent = item ? 'Editar item' : 'Nuevo item';
+  document.getElementById('entretenimiento-item-modal-title').textContent =
+    item ? (item.vuelta > 1 ? `Editar item · vuelta ${item.vuelta}` : 'Editar item') : 'Nuevo item';
   document.getElementById('entretenimiento-item-id').value = item ? item.id : '';
   document.getElementById('entretenimiento-item-title').value = item ? item.title : '';
 
@@ -21025,6 +21273,10 @@ function openEntretenimientoItemModal(item) {
   entretenimientoItemLoanedAtField.setValue(item && item.loanedAt ? new Date(`${item.loanedAt}T00:00:00`) : null);
   document.getElementById('entretenimiento-item-loaned-details').classList.toggle('hidden', !loanedChecked);
   document.getElementById('btn-delete-entretenimiento-item').classList.toggle('hidden', !item);
+  // "Volver a empezar" solo tiene sentido en algo que ya existe.
+  document.getElementById('btn-entretenimiento-nueva-vuelta').classList.toggle('hidden', !item);
+  entretenimientoItemEnFicha = item ? item.id : null;
+  renderEntretenimientoHistorial(item);
   renderEntretenimientoCoverPreview();
   document.getElementById('entretenimiento-item-modal').classList.remove('hidden');
 }

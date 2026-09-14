@@ -258,13 +258,89 @@ que el archivo entero llegó a ejecutarse.
 
 ---
 
-## 5. Lo que queda: sesiones
+## 5. Sesiones — HECHO (14/9/2026)
 
-Decidido con Koku, sin empezar. Es la pieza que convierte esto de una
-lista en un hábito, y de la que cuelgan racha, estadísticas y logros.
-Ver `IDEAS-ENTRETENIMIENTO.md` §4.2 — el motor ya existe en el Gimnasio
-(`gym_sessions` con marcas de tiempo, estado en `localStorage` para
-sobrevivir a recargas).
+Una sesión es *"el martes leí del capítulo 12 al 15"*. Hasta ahora la app
+solo sabía **dónde** estás (12/24); esto guarda **cómo has llegado**, que
+es de donde salen la racha, el mapa y el resumen del año.
+
+### La decisión que lo define: se apuntan SOLAS
+
+De tres formas posibles, Koku eligió que **no haya ningún gesto nuevo**:
+cambias el progreso como siempre y la sesión queda apuntada sola. Lo hace
+la ruta (`PUT`), no el cliente, porque así da igual desde qué pantalla se
+cambie y es el único sitio que conoce el valor anterior.
+
+Reglas que van con eso, y conviene no tocarlas sin pensarlas:
+
+- **Solo cuenta SUBIR.** Corregir hacia atrás (ibas por el 15 y pones 12)
+  no es haber visto nada.
+- **Crear un item NO apunta sesión.** Añadir algo por la página 100 es
+  catalogar, no leer, y si apuntara pondría actividad de hoy en el mapa
+  por algo que hiciste hace años.
+- **Dos veces el mismo día son dos sesiones**, que es lo correcto: son
+  dos sentadas.
+- **No hay cronómetro.** Se descartó a propósito (para series y pelis no
+  aporta: ya sabes que un episodio dura 24 minutos). La columna
+  `duration_seconds` existe vacía para no tener que migrar el día que se
+  añada.
+- **La unidad se copia en la sesión**, no se mira luego: si cambias la
+  unidad de un item, las sesiones viejas tienen que seguir queriendo
+  decir lo que decían.
+
+### Vueltas (relecturas y revisionados)
+
+"Volver a empezar" sube `vuelta`, pone el progreso a cero y lo deja en
+marcha. **No borra nada**: las sesiones de la vuelta anterior se quedan
+con su número y siguen contando para el mapa y la racha, porque pasaron
+de verdad. La nota se conserva: sigue siendo tu opinión de la obra.
+
+### La pestaña Actividad
+
+- **Racha diaria** (Koku la quiso con todas las letras). Si hoy aún no
+  has hecho nada arranca a contar en ayer — no debería romperse a las
+  00:01 solo por no haber abierto la app.
+- **Mapa de 26 semanas**, un solo tono en cuatro escalones: un mapa de
+  magnitud nunca lleva varios colores. Un día que aún no ha llegado no se
+  pinta, porque no es "no hiciste nada".
+- **Resumen del año**: veces que avanzaste, terminados, y una cifra por
+  tipo **con su unidad**.
+
+Detalle que se corrigió al verlo: las cifras del año salían como "42
+Manga", que no dice 42 de qué. Ahora el SQL agrupa por tipo **y unidad**,
+así salen "42 capítulos de manga" y "3 tomos" por separado — sumar
+capítulos con tomos daría un número que no quiere decir nada.
+
+### Fechas
+
+Todo en **fecha local**, nunca `toISOString()`: a las 00:30 en España el
+UTC todavía es el día anterior y la racha se iría un día atrás. Mismo
+cuidado que `hoyISO()` del ciclo del Gimnasio.
+
+### Verificación
+
+- **28 comprobaciones del motor**: que se apunte sola al subir, que NO se
+  apunte al crear / al repetir el mismo número / al corregir hacia atrás,
+  las vueltas, el resumen, y que borrar un item o una colección se lleve
+  sus sesiones (cascada a mano, como en toda la app).
+- **19 de migración**: una base de la ronda anterior gana la tabla, sus
+  dos índices y la columna `vuelta` sin perder título, progreso, nota,
+  géneros, préstamo ni **portada**; idempotente a tres pasadas; y una
+  base con el CHECK viejo de tipos sobrevive a la reconstrucción ganando
+  `cover` y `vuelta` de una vez, con las claves foráneas encendidas y sin
+  huérfanos.
+- **En la app real**: subir el progreso desde la ficha creó la sesión
+  ("+60 capítulos, 0 → 60", con la fecha de hoy); "Volver a empezar" dejó
+  la vuelta 2 con el progreso a cero y las 15 sesiones anteriores
+  conservadas y etiquetadas como "vuelta 1"; la racha dijo 6 días; el
+  mapa pintó 182 celdas con 6 futuras sin colorear. Cero errores de
+  consola.
+
+### Lo que NO se hizo, y por qué
+
+**Logros.** Se ofrecieron y Koku no los marcó. El patrón del Gimnasio
+(`GYM_ACHIEVEMENTS`, calculados al vuelo sin guardar nada) sigue ahí para
+el día que los quiera.
 
 ---
 

@@ -610,9 +610,52 @@ function applyLocalSchema(db) {
       -- almacen noteAssets, y resolveAssetUrl() la convierte en blob: al
       -- pintarla. NULL = sin portada, que es lo normal.
       cover TEXT,
+      -- Por que vuelta vas: 1 la primera vez, 2 si lo estas releyendo o
+      -- reviendo, etc. "Volver a empezar" la sube y pone el progreso a
+      -- cero, SIN borrar nada: las sesiones de la vuelta anterior se
+      -- quedan con su numero y siguen contando para el mapa y la racha.
+      vuelta INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Cada vez que avanzas en algo: "el martes lei del capitulo 12 al 15".
+    -- Hasta ahora la app solo sabia DONDE estas (12/24); esto guarda COMO
+    -- has llegado, que es de donde salen la racha, el mapa de actividad y
+    -- el resumen del ano.
+    --
+    -- No se apuntan a mano: las crea sola la ruta al ver que el progreso
+    -- de un item SUBE (ver routes-local/entretenimientoItems.js). Koku lo
+    -- eligio asi de tres opciones -- sin gesto nuevo que aprender es el
+    -- unico que se acaba usando a diario.
+    --
+    -- "unidad" se copia del item EN ESE MOMENTO en vez de mirarla luego:
+    -- si algun dia cambias la unidad de un item (de "capitulos" a
+    -- "tomos"), las sesiones viejas tienen que seguir queriendo decir lo
+    -- que querian decir cuando se apuntaron.
+    --
+    -- "duration_seconds" queda NULL siempre de momento: no hay cronometro
+    -- (se descarto a proposito). La columna existe para no tener que
+    -- migrar la tabla el dia que se anada.
+    CREATE TABLE IF NOT EXISTS entretenimiento_sesiones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL REFERENCES entretenimiento_items(id),
+      -- A que vuelta pertenece (1 = la primera vez). Ver la columna
+      -- "vuelta" de entretenimiento_items.
+      vuelta INTEGER NOT NULL DEFAULT 1,
+      -- Fecha LOCAL (YYYY-MM-DD), no UTC: a las 00:30 en Espana el UTC
+      -- todavia es el dia anterior, y la racha se iria un dia atras.
+      fecha TEXT NOT NULL,
+      progreso_desde INTEGER,
+      progreso_hasta INTEGER,
+      unidad TEXT,
+      duration_seconds INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_entretenimiento_sesiones_item
+      ON entretenimiento_sesiones (item_id);
+    CREATE INDEX IF NOT EXISTS idx_entretenimiento_sesiones_fecha
+      ON entretenimiento_sesiones (fecha);
 
     -- Extension "Viajes" (avion en #extensions-view): un viaje puede tocar
     -- VARIOS paises (ej. un interrail), de ahi la tabla de union
@@ -1756,6 +1799,11 @@ function applyLocalSchema(db) {
   if (!entretenimientoItemColumns.includes('cover')) {
     db.exec('ALTER TABLE entretenimiento_items ADD COLUMN cover TEXT');
   }
+  // Vuelta (ronda de las sesiones): todo lo que ya existia va por la
+  // primera, que es justo el DEFAULT, asi que no hay que rellenar nada.
+  if (!entretenimientoItemColumns.includes('vuelta')) {
+    db.exec('ALTER TABLE entretenimiento_items ADD COLUMN vuelta INTEGER NOT NULL DEFAULT 1');
+  }
 
   // Abrir la lista de tipos en una base YA EXISTENTE.
   //
@@ -1796,6 +1844,7 @@ function applyLocalSchema(db) {
         loaned_to TEXT,
         loaned_at TEXT,
         cover TEXT,
+        vuelta INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
@@ -1803,7 +1852,7 @@ function applyLocalSchema(db) {
         SELECT id, saga_id, title, type, description, rating, status, genres,
                progress_current, progress_total, progress_unit,
                owned_count, owned_total, position,
-               loaned, loaned_to, loaned_at, cover, created_at, updated_at
+               loaned, loaned_to, loaned_at, cover, vuelta, created_at, updated_at
         FROM entretenimiento_items;
       DROP TABLE entretenimiento_items;
       ALTER TABLE entretenimiento_items_nuevo RENAME TO entretenimiento_items;

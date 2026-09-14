@@ -3993,6 +3993,93 @@ body.gym-rest-push #settings-modal .settings-card {
 }
 .entretenimiento-filters-toggle { align-self: flex-start; }
 
+/* --- Pestana "Actividad" -------------------------------------------------
+   Todo lo de aqui sale de las SESIONES (ver entretenimientoSesiones.js).
+   El mapa es de magnitud, asi que va en UN SOLO tono escalonado, nunca en
+   varios colores -- misma regla que el heatmap del Gimnasio. */
+.entretenimiento-actividad { display: flex; flex-direction: column; gap: 0.5rem; }
+.entretenimiento-seccion-titulo { margin: 1rem 0 0; font-size: var(--t-titulo-3); }
+
+.entretenimiento-racha {
+  display: flex; align-items: center; gap: 1rem;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1rem;
+}
+.entretenimiento-racha-numero {
+  font-size: var(--t-titulo-grande); font-weight: 700; line-height: 1;
+  color: var(--accent); font-variant-numeric: tabular-nums;
+}
+.entretenimiento-racha-texto { display: flex; flex-direction: column; gap: 0.15rem; }
+.entretenimiento-racha-texto b { font-size: var(--t-secundario); }
+.entretenimiento-racha-texto span {
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}
+
+/* 26 columnas (una por semana) de 7 filas. Se desliza en horizontal si no
+   cabe, en vez de encoger los cuadros hasta no verse. */
+.entretenimiento-mapa-wrap { overflow-x: auto; padding-bottom: 0.3rem; }
+.entretenimiento-mapa {
+  display: grid; grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column; grid-auto-columns: 0.75rem;
+  gap: 3px; min-width: min-content;
+}
+.entretenimiento-mapa-dia {
+  width: 0.75rem; height: 0.75rem; border-radius: 2px;
+  background: color-mix(in srgb, var(--bg-text) 8%, var(--bg));
+}
+/* Cuatro escalones del mismo tono: nada, poco, bastante, mucho. */
+.entretenimiento-mapa-dia.n1 { background: color-mix(in srgb, var(--accent) 35%, var(--bg)); }
+.entretenimiento-mapa-dia.n2 { background: color-mix(in srgb, var(--accent) 65%, var(--bg)); }
+.entretenimiento-mapa-dia.n3 { background: var(--accent); }
+/* El dia que aun no ha llegado no se pinta: no es "no hiciste nada". */
+.entretenimiento-mapa-dia.futuro { background: none; }
+
+.entretenimiento-ano-cifras {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.5rem; margin-top: 0.4rem;
+}
+.entretenimiento-ano-cifra {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0.6rem 0.7rem;
+  display: flex; flex-direction: column; gap: 0.15rem;
+}
+.entretenimiento-ano-cifra b { font-size: var(--t-titulo-3); font-variant-numeric: tabular-nums; }
+.entretenimiento-ano-cifra span {
+  font-size: var(--t-micro);
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}
+
+/* Doce barras, una por mes. La altura es relativa al mes mas activo. */
+.entretenimiento-meses { display: flex; align-items: flex-end; gap: 3px; height: 4rem; margin-top: 0.6rem; }
+.entretenimiento-mes { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.entretenimiento-mes-barra {
+  width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 2px;
+}
+.entretenimiento-mes-rotulo {
+  font-size: var(--t-micro);
+  color: color-mix(in srgb, var(--bg-text) 55%, var(--bg));
+}
+
+/* --- Historial dentro de la ficha de un item ---------------------------- */
+.entretenimiento-historial { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.6rem; }
+.entretenimiento-historial h4 { margin: 0.4rem 0 0.2rem; font-size: var(--t-secundario); }
+.entretenimiento-sesion {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: var(--t-pie); padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.entretenimiento-sesion-fecha { font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.entretenimiento-sesion-avance {
+  color: color-mix(in srgb, var(--surface-text) 70%, var(--surface));
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.entretenimiento-sesion-vuelta {
+  font-size: var(--t-micro); padding: 0.05rem 0.35rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent);
+  flex-shrink: 0;
+}
+
 /* Portada dentro del modal: la misma pieza, mas pequena. */
 .entretenimiento-cover-field { display: flex; gap: 0.8rem; align-items: flex-start; }
 .entretenimiento-cover-preview { width: 5.5rem; flex-shrink: 0; }
