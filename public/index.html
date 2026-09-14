@@ -519,6 +519,13 @@
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></span>
           <span class="extensions-card-title">Viajes</span>
         </button>
+        <!-- Retos: habitos que se mantienen y metas a las que llegar, en un
+             arbol donde cada nodo se marca como una tarea. Ver el bloque
+             "RETOS" de app.js. -->
+        <button type="button" id="btn-open-retos" class="extensions-card extensions-card-active">
+          <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"></path><path d="M5 4h12l-2.2 3.5L17 11H5"></path></svg></span>
+          <span class="extensions-card-title">Retos</span>
+        </button>
       </div>
     </div>
   </div>
@@ -3257,6 +3264,77 @@
     </div>
   </div>
 
+  <!-- Herramienta "Retos": habitos que se mantienen (repetitivos) y metas
+       a las que llegar, en un mismo arbol donde cada nodo se marca como
+       una tarea y nada mas -- no mide repeticiones, ni kilos, ni tiempo
+       (peticion expresa de Koku). Un reto puede llevar subretos sin
+       limite de profundidad, y los dos tipos se mezclan dentro del mismo
+       arbol. Ver el bloque "RETOS" de app.js. -->
+  <div id="retos-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2>Retos</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-retos" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">&larr; Herramientas</button>
+        <button type="button" id="btn-retos-settings" class="icon-btn" aria-label="Configuraci&oacute;n">&#9776;</button>
+      </div>
+    </div>
+
+    <div class="retos-content">
+      <div class="retos-toolbar">
+        <!-- El buscador mira TODO el arbol, no solo el nivel que tengas
+             desplegado: un subreto de tercer nivel se encuentra igual, y
+             debajo de su nombre sale la ruta para saber de donde cuelga.
+             (Es a proposito distinto del de Notas, que busca solo dentro
+             de la carpeta en la que estas: alli navegas carpeta a carpeta
+             y aqui el arbol entero esta en la misma pantalla.) -->
+        <input type="search" id="retos-search" class="retos-search" placeholder="Buscar un reto" autocomplete="off" />
+        <button type="button" id="btn-new-reto" class="primary-btn retos-new-btn">+ Nuevo reto</button>
+      </div>
+      <div id="retos-list" class="retos-list"></div>
+      <p id="retos-empty" class="empty-hint hidden"></p>
+    </div>
+  </div>
+
+  <!-- Crear / editar un reto. El mismo modal para los dos tipos: lo unico
+       que aparece y desaparece es el bloque de frecuencia, que solo tiene
+       sentido en un habito. -->
+  <div id="reto-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-reto" class="modal-close-x" aria-label="Cerrar">&#10005;</button>
+      <h2 id="reto-modal-title">Nuevo reto</h2>
+      <form id="reto-form">
+        <input type="hidden" id="reto-id" />
+        <input type="hidden" id="reto-parent-id" />
+        <p id="reto-parent-line" class="hint hidden"></p>
+        <label>
+          Nombre
+          <input type="text" id="reto-name" placeholder="Ej. Llegar a 100 flexiones" required />
+        </label>
+        <div class="field-label-block">
+          <span class="field-label">Tipo</span>
+          <div id="reto-kind-options" class="view-mode-options"></div>
+        </div>
+        <div id="reto-frequency-block" class="field-label-block hidden">
+          <span class="field-label">Cada cu&aacute;nto toca</span>
+          <div id="reto-frequency-field"></div>
+          <label id="reto-freq-every-label" class="hidden">
+            <span class="field-label">Cada cu&aacute;ntos d&iacute;as</span>
+            <input type="number" id="reto-freq-every" min="2" max="365" step="1" placeholder="Ej. 3" />
+          </label>
+        </div>
+        <label>
+          Nota (opcional)
+          <textarea id="reto-description" rows="2" placeholder="Para acordarte de algo del reto"></textarea>
+        </label>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-reto" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- El numero de compilacion (lo rellena el workflow) y las notas de
        version. Van ANTES que app.js porque los lee al pintar. -->
   <!-- OJO AL SITIO: este dialogo tiene que estar ANTES de <script
@@ -3290,7 +3368,6 @@
        quitan al fusionar en movil-ui (ver CLAUDE.md). Trae la marca de
        "esto es una build de desarrollo" y las cosas a revisar de cada
        version. -->
-  <script src="desarrollador.js"></script>
   <script src="db-local.js"></script>
   <!-- El "servidor" vive ahora dentro de la propia app: SQLite compilado
        a WebAssembly (vendor/sql-wasm.*), el esquema de siempre
@@ -3334,6 +3411,7 @@
   <script src="routes-local/notes.js"></script>
   <script src="routes-local/profile.js"></script>
   <script src="routes-local/reminders.js"></script>
+  <script src="routes-local/retos.js"></script>
   <script src="routes-local/specialDays.js"></script>
   <script src="routes-local/themes.js"></script>
   <script src="routes-local/viajesEntries.js"></script>

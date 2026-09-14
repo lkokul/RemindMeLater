@@ -96,6 +96,7 @@ const BACKUP_TABLAS_POR_APP = {
   lecturas: ['entretenimiento_sagas', 'entretenimiento_items'],
   viajes: ['viajes_trips', 'viajes_trip_countries', 'viajes_entries',
     'viajes_entry_attachments', 'viajes_entry_movements'],
+  retos: ['retos', 'retos_hechos'],
 };
 
 // Las Apps que se pueden marcar/desmarcar, en el orden de la Tienda.

@@ -163,4 +163,5 @@ const APP_MANUALES = {
   finanzas: [],
   lecturas: [],
   viajes: [],
+  retos: [],
 };

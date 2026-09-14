@@ -2776,6 +2776,101 @@ Para no volver a plantearlo cada pocas rondas:
   programar, solo que los pequeños se vean bien apaisados.
 
 
+## Retos: hábitos y metas, en el mismo árbol
+
+Herramienta nueva (14/9/2026), en su propia rama **`retos-movil-ui`**
+(sale de `movil-ui`). Sexta tarjeta de Herramientas. Piezas:
+`public/routes-local/retos.js`, las tablas `retos` / `retos_hechos` en
+`local-schema.js`, el bloque "RETOS" de `app.js`, `#retos-view` /
+`#reto-modal` en `index.html`, y sus reglas al final de `styles.css`.
+
+**Lo que hace, en una frase**: dos clases de reto en un mismo árbol,
+donde cada nodo es una TAREA y nada más.
+
+- **Hábito** ("estirar por la mañana"): se marca cada periodo y se
+  desmarca SOLO cuando empieza el siguiente. Lleva racha.
+- **Meta** ("llegar a 100 flexiones"): se marca una vez y se queda.
+
+**NO MIDE NADA**, y es una decisión suya, no una limitación: ni
+repeticiones, ni kilos, ni tiempo. Si algún día hiciera falta medir, eso
+es el Gimnasio.
+
+**Las cuatro decisiones que tomó Koku** cuando se le preguntaron, y que
+no conviene cambiar sin volver a preguntarle:
+
+1. **Un hábito se desmarca según SU frecuencia** (cada día / semana /
+   mes / cada X días), no siempre a diario. Y **lleva racha**: *"el poder
+   ver la racha creo que ayuda bastante a la gente a mantenerse"*.
+2. **Los subretos rellenan la barra del padre, pero NO lo marcan**:
+   *"puedo cumplir el subreto de hacer 10 flexiones y seguir sin poder
+   hacer 50"*. Marcar el padre sí marca a todos sus descendientes (si
+   hiciste las 100, hiciste las de 10); **desmarcar no toca a nadie
+   más**, para que deshacer un toque mal dado no borre lo que sí habías
+   hecho.
+3. **"Mover" (al deslizar) REORDENA entre hermanos**, no cambia de
+   padre. Dónde vive un reto se decide al crearlo, con el "+" de la fila
+   de la que quieres que cuelgue. **Hoy no hay forma de reparentar un
+   reto ya creado** — no es un olvido, es la consecuencia de esa
+   elección; si algún día molesta, la ruta `PUT /:id` ya acepta
+   `parentId` (con detección de ciclos), solo falta la pantalla.
+4. **Se ve "3 de 5" con su barrita** en todo reto que tenga subretos.
+
+**Cómo se guarda el "hecho", que es la única parte con truco**: una META
+lo tiene en su columna `done`. Un HÁBITO **no**: sus marcas viven en
+`retos_hechos`, una fila por PERIODO cumplido (`period_key`:
+`2026-09-14` diario, `2026-W38` semanal, `2026-09` mensual, `c12` para
+"cada X días"). De ahí salen las dos cosas que no se pueden guardar sin
+que se queden viejas: si está hecho AHORA y la racha. Guardarlo también
+en `done` habría dejado dos verdades que separarse.
+
+- **"Cada X días" se ancla al día en que creaste el hábito**, no a una
+  rejilla fija del calendario: cuenta desde que TÚ lo empezaste.
+- **La racha no se rompe hasta que el periodo pasa**: si el de ahora
+  todavía no está marcado, se cuenta desde el anterior. Un hábito diario
+  marcado ayer sigue diciendo "racha de N" a media mañana de hoy, con su
+  casilla vacía.
+- **Las fechas son LOCALES, no `toISOString()`**: a las 00:30 en España
+  el UTC todavía es el día anterior y marcarías el día de ayer. Mismo
+  cuidado que `hoyISO()` del ciclo de Gimnasio.
+
+**Detalles de la pantalla**:
+
+- La lista es un árbol que se despliega en el sitio (no un explorador
+  tipo Notas): tocar una fila con subretos los abre o los cierra; una
+  fila sin subretos no hace nada al tocarla, porque editar se saca
+  deslizando, que es la única forma de editar en toda la app.
+- **Qué se lee bajo el nombre**: un hábito dice cada cuánto toca y su
+  racha; **una meta no dice nada** (solo su nota, si la tiene). Poner
+  "Meta" en cada fila repetía en la mayoría de ellas lo que ya se sabe
+  por descarte.
+- **El "+" de cada fila crea DENTRO de ese reto**; el de arriba crea al
+  nivel de fuera. Al crear un subreto, su padre se despliega solo — si
+  no, lo acabas de meter en un sitio que no se ve.
+- **El buscador mira el ÁRBOL ENTERO** y enseña la ruta de cada
+  resultado. Es a propósito distinto del de Notas (que busca solo dentro
+  de la carpeta en la que estás): allí navegas carpeta a carpeta y aquí
+  el árbol entero está en la misma pantalla. Con `.trim()`, que escribir
+  solo espacios vaciaba la lista y ya mordió una vez en el buscador de
+  ejercicios.
+- **"Mover" se ARMA y se desarma con "Listo"** (o con Esc), igual que el
+  modo mover del entreno; mientras está armada, esa fila no se deja
+  deslizar (`bloqueadoSi`).
+- Los dos estados de "estoy haciendo algo ahora" (la búsqueda y el modo
+  mover) se sueltan al salir de la pantalla.
+
+**Lo que NO se le puso, a propósito**: deslizar hacia la derecha desde
+Retos no sale a Herramientas. Eso solo lo hace Finanzas, y el comentario
+de `salirDeFinanzasDeslizando()` dice por qué: las demás Apps no se
+tocan sin que Koku lo pida.
+
+**Verificado** con 79 comprobaciones de Playwright con la app servida
+como estático puro (dos guiones de un scratchpad, que NO viajan en el
+repo — como los de `ciclo.mjs` en su día), incluidas las raras: tipos y frecuencias inventadas, "cada 0 días" y
+"cada 9999 días", un padre que no existe, colgar un reto de su propio
+nieto, 400 días seguidos de racha, un día suelto de hace un mes (no es
+racha pero sí mejor racha), nombres con comillas y HTML dentro, mover en
+los extremos, y que borrar no deje marcas huérfanas.
+
 ## Dos ramas: `desarrollador` y `movil-ui`
 
 Decisión de Koku (10/9/2026), después de que el widget se quedara en
@@ -2796,6 +2891,15 @@ desarrollador, donde aparezcan estos mensajes para debuguear y tal"*.
 atrasada, así que se le pasaron los 42 commits que le faltaban y se le
 quitaron los avisos ahí mismo. O sea que **ahora sí son "la misma app
 menos la depuración"**, y no "una vieja y otra nueva".
+<<<<<<< HEAD
+
+**El precio de que sea así, y hay que tenerlo presente**: cada ronda
+futura son DOS pasos, no uno — se trabaja en `desarrollador`, y al
+pasarla a `movil-ui` hay que volver a quitar lo de abajo. Un merge a
+secas se los llevaría de vuelta. Si algún día cansa, la alternativa que
+se descartó era ponerlos detrás de un interruptor y tener una sola rama.
+=======
+>>>>>>> desarrollador
 
 **El precio de que sea así, y hay que tenerlo presente**: cada ronda
 futura son DOS pasos, no uno — se trabaja en `desarrollador`, y al
@@ -2839,6 +2943,14 @@ confirmados por Koku):
    `EntradaDeLaApp.sinBuzon` / `VacioDeWidget(sinBuzon:)` en los cinco
    widgets nuevos. En `movil-ui` el respaldo vuelve a ser "Abre la app" a
    secas.
+
+**Y con ellos se va el código que solo existía para alimentarlos**, que
+si se queda es peso muerto: `gymTestRestAlert()`, `GYM_REST_STOP_LABELS`,
+`gymRestAlertLastStatus()` y `gymFormatRestAlertStatus()` en `app.js`;
+los dos `localStorage.setItem('gymLiveActivityStatus', ...)` de
+`gymStartRestLiveActivity()`; y `estadoDelWidget()`/`ultimoAvisoAlWidget`
+de `widget-bridge.js` (ahí `actualizarWidgetDelDia()` se queda, pero
+adelgaza: ya no tiene que apuntar cómo fue).
 
 **Y con ellos se va el código que solo existía para alimentarlos**, que
 si se queda es peso muerto: `gymTestRestAlert()`, `GYM_REST_STOP_LABELS`,
@@ -3925,6 +4037,8 @@ la Tienda pasó a v0.58.0 al fusionar.
 con `calendario-notas-movil-UI` ya fusionada). Todo lo de esta
 conversación vive ahí; ver el bloque "Dos ramas" más arriba. **`movil-ui`
 está al mismo nivel**, sin los avisos de diagnóstico.
+<<<<<<< HEAD
+=======
 
 **v0.57.0** (13/9/2026) es la ronda de los cuatro puntos que pidió Koku:
 el título de una nota con formato de título y la mayúscula al empezar,
@@ -4033,6 +4147,7 @@ Lo único que hubo que acomodar a las reglas de esta rama: un
 fila de Ajustes). **Los emojis siguen ahí**, ahora en
 `finanzasFilaEl`: ver la duda B9 de `PARA-KOKU-MAÑANA.md`.
 
+>>>>>>> desarrollador
 Reorganización de ramas del 8/9/2026, pedida por Koku:
 
 - **`movil-ui` ya NO se toca** salvo que Koku lo pida explícitamente:
