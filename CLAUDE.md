@@ -758,6 +758,27 @@ ahora se llama `device`.
       dentro de un pre no se toca nada. Gotcha propio: Sheets manda
       estilos EN LINEA y Excel en clases — hay que leer las dos
       fuentes, con el inline ganando.
+    - **Ronda 11: borrar sin salir + barra ajustable + F2** (driver
+      `drive-round11.js`):
+      - Borrar una SUBpagina abre su madre (antes siempre volvia a la
+        home, pedido por Koku); solo borrar una pagina RAIZ vuelve a
+        la lista de proyectos (`deleteCurrentProyectosPage` guarda el
+        parentId antes del DELETE).
+      - **Barra lateral ajustable**: asa `#proyectos-sidebar-resizer`
+        ENTRE la barra y el editor (hijo flex propio — dentro del
+        aside se iria con su scroll), arrastre con pointer capture
+        (180-520px, guardado en localStorage.proyectosSidebarWidth),
+        doble clic = ancho de fabrica (264). Recoloca el ▦ anclado al
+        soltar.
+      - **F2 = renombrar la pagina abierta**: foco al titulo con todo
+        el texto seleccionado (escribir sustituye), como en el
+        explorador de archivos.
+      - **Guias A/1 al dia durante el arrastre de bordes**: solo se
+        refrescaban con selectionchange/input, asi que estirar una
+        columna/fila las dejaba descolocadas hasta clicar fuera (lo
+        vio Koku). updateProyectosTableGuides() se llama ahora tambien
+        en el mousemove del arrastre, el mouseup y el doble clic de
+        auto-ajuste.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 

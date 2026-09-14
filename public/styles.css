@@ -3928,6 +3928,18 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 
 /* Modo "sin panel" (⛶): el arbol desaparece y la pagina ocupa todo. */
 .proyectos-layout.no-sidebar .proyectos-sidebar { display: none; }
+/* El asa de ajustar el ancho de la barra: una franja fina entre la
+   barra y el editor, invisible hasta pasar por encima. */
+.proyectos-sidebar-resizer {
+  flex-shrink: 0;
+  width: 5px;
+  margin-left: -3px; /* pisa el borde de la barra: mas facil de pillar */
+  cursor: col-resize;
+  background: transparent;
+}
+.proyectos-sidebar-resizer:hover,
+.proyectos-sidebar-resizer.dragging { background: var(--accent); opacity: 0.55; }
+.proyectos-layout.no-sidebar .proyectos-sidebar-resizer { display: none; }
 .proyectos-subnav-btn { flex-shrink: 0; opacity: 0.6; }
 .proyectos-subnav-btn:hover { opacity: 1; }
 

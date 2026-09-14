@@ -11297,6 +11297,23 @@ document.addEventListener('keydown', (e) => {
     createProyectosPage(proyectosCurrentPage.parentId);
   }
 });
+// F2 = renombrar la pagina abierta (pedido por Koku, como en el
+// explorador de archivos): el foco salta al titulo con TODO el texto
+// seleccionado, asi que escribir lo sustituye directamente.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'F2') return;
+  if (document.getElementById('proyectos-view').classList.contains('hidden')) return;
+  if (!proyectosCurrentPage) return;
+  if (document.getElementById('proyectos-page').classList.contains('hidden')) return;
+  e.preventDefault();
+  const title = document.getElementById('proyectos-page-title');
+  title.focus();
+  const range = document.createRange();
+  range.selectNodeContents(title);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+});
 // El boton de insertar plantilla (junto a + Subpagina): mismo popover
 // que "/plantilla", sin bloque de origen (los fragmentos se pegan al
 // final de la pagina).
@@ -11370,16 +11387,75 @@ async function deleteCurrentProyectosPage({ withChildren = false } = {}) {
   if (proyectosSaveTimer) { clearTimeout(proyectosSaveTimer); proyectosSaveTimer = null; }
   proyectosPendingSave = null;
   const deletedId = proyectosCurrentPage.id;
+  const parentId = proyectosCurrentPage.parentId; // adonde volver despues
   await api(`/api/proyectos-pages/${deletedId}${withChildren ? '?withChildren=1' : ''}`, { method: 'DELETE' });
   proyectosCurrentPage = null;
   localStorage.removeItem('proyectosLastPageId');
   document.getElementById('proyectos-page').classList.add('hidden');
   await loadProyectosPages();
   renderProyectosTree();
-  showProyectosHome(); // sin pagina abierta se vuelve a la lista de proyectos
+  // Borrar una SUBpagina te deja en su madre, sin sacarte del proyecto
+  // (pedido por Koku). Solo borrar una pagina RAIZ (el proyecto entero,
+  // o su portada) vuelve a la lista de proyectos.
+  if (parentId !== null && proyectosPages.some((p) => p.id === parentId)) {
+    await openProyectosPage(parentId);
+  } else {
+    showProyectosHome();
+  }
 }
 document.getElementById('btn-proyectos-delete').addEventListener('click', () => deleteCurrentProyectosPage());
 document.getElementById('btn-proyectos-delete-tree').addEventListener('click', () => deleteCurrentProyectosPage({ withChildren: true }));
+
+// ---------------------------------------------------------------------
+// Ancho ajustable de la barra lateral (pedido por Koku: los titulos
+// largos no caben en los 264px fijos). El asa vive ENTRE la barra y el
+// editor (un hijo flex propio, no dentro del aside: el aside tiene su
+// scroll y cualquier cosa absoluta dentro se iria con el). Arrastrar
+// cambia el ancho en vivo; doble clic vuelve al de fabrica; el valor se
+// recuerda por dispositivo en localStorage.
+// ---------------------------------------------------------------------
+(function () {
+  const resizer = document.getElementById('proyectos-sidebar-resizer');
+  const sidebar = document.querySelector('#proyectos-view .proyectos-sidebar');
+  if (!resizer || !sidebar) return;
+  const MIN = 180;
+  const MAX = 520;
+  const saved = Number(localStorage.getItem('proyectosSidebarWidth'));
+  if (saved >= MIN && saved <= MAX) sidebar.style.width = `${saved}px`;
+
+  resizer.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); // que el arrastre no seleccione texto de al lado
+    // setPointerCapture LANZA si el puntero ya no esta activo (leccion
+    // del arrastre de ejercicios del Gimnasio): en try/catch.
+    try { resizer.setPointerCapture(e.pointerId); } catch (err) { /* sin captura tambien funciona */ }
+    resizer.classList.add('dragging');
+    const move = (ev) => {
+      const left = sidebar.getBoundingClientRect().left;
+      const width = Math.min(MAX, Math.max(MIN, Math.round(ev.clientX - left)));
+      sidebar.style.width = `${width}px`;
+    };
+    const up = () => {
+      resizer.classList.remove('dragging');
+      resizer.removeEventListener('pointermove', move);
+      resizer.removeEventListener('pointerup', up);
+      resizer.removeEventListener('pointercancel', up);
+      const width = parseInt(sidebar.style.width, 10);
+      if (width) try { localStorage.setItem('proyectosSidebarWidth', String(width)); } catch (err) { /* sin persistir */ }
+      // El boton ▦ de las tablas esta anclado a su esquina en pantalla:
+      // al cambiar el ancho de la barra, la tabla se ha movido.
+      if (typeof repositionProyectosTableMenuBtn === 'function') repositionProyectosTableMenuBtn();
+    };
+    resizer.addEventListener('pointermove', move);
+    resizer.addEventListener('pointerup', up);
+    resizer.addEventListener('pointercancel', up);
+  });
+
+  resizer.addEventListener('dblclick', () => {
+    sidebar.style.width = '';
+    try { localStorage.removeItem('proyectosSidebarWidth'); } catch (err) { /* nada */ }
+    if (typeof repositionProyectosTableMenuBtn === 'function') repositionProyectosTableMenuBtn();
+  });
+})();
 
 // ---------------------------------------------------------------------
 // Exportar a PDF (boton "PDF" de la barra de la pagina)
@@ -13410,11 +13486,17 @@ document.addEventListener('mousemove', (e) => {
     const height = Math.max(PROYECTOS_TABLE_MIN_ROW, Math.round(proyectosTableDrag.startHeight + e.clientY - proyectosTableDrag.startY));
     proyectosTableDrag.row.style.height = `${height}px`;
   }
+  // Las guias estilo Excel (letras/numeros) siguen a las celdas EN
+  // VIVO mientras se arrastra el borde — antes solo se refrescaban con
+  // selectionchange/input y se quedaban descolocadas hasta clicar
+  // fuera (lo vio Koku).
+  updateProyectosTableGuides();
 });
 document.addEventListener('mouseup', () => {
   if (!proyectosTableDrag) return;
   proyectosTableDrag = null;
   PROYECTOS_BODY().style.cursor = '';
+  updateProyectosTableGuides();
   queueProyectosSaveBody(); // el tamaño nuevo es contenido: se guarda
 });
 
@@ -13456,6 +13538,7 @@ PROYECTOS_BODY().addEventListener('dblclick', (e) => {
     );
     row.style.height = `${natural}px`;
   }
+  updateProyectosTableGuides(); // el auto-ajuste tambien mueve las celdas
   queueProyectosSaveBody();
 });
 
