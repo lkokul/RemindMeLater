@@ -175,7 +175,11 @@ function sanitizePageBody(html) {
       if (todoMatch && todoMatch[1] === '1') {
         const doneMatch = attrs.match(/\sdata-done\s*=\s*"([^"]*)"/i);
         const done = doneMatch && doneMatch[1] === '1' ? '1' : '0';
-        return `<div data-todo="1" data-done="${done}"${alignAttr(attrs)}>`;
+        // data-indent (Tab/Mayus+Tab en el editor): sangria de la tarea,
+        // solo niveles 1-6. Cualquier otro valor se descarta entero.
+        const indentMatch = attrs.match(/\sdata-indent\s*=\s*"([^"]*)"/i);
+        const indent = indentMatch && /^[1-6]$/.test(indentMatch[1]) ? ` data-indent="${indentMatch[1]}"` : '';
+        return `<div data-todo="1" data-done="${done}"${indent}${alignAttr(attrs)}>`;
       }
       const dbMatch = attrs.match(/\sdata-proyectos-db\s*=\s*"([^"]*)"/i);
       if (dbMatch && DB_BLOCK_ID.test(dbMatch[1])) {
@@ -252,6 +256,10 @@ function serializeListRow(row) {
     hasBody: !!row.has_body,
     pdfRole: row.pdf_role || null,
     isTemplate: !!row.is_template,
+    // 'project' (clonable entera) o 'fragment' (su cuerpo se pega
+    // dentro de una pagina); null si no es plantilla.
+    templateKind: row.is_template === 2 ? 'fragment' : (row.is_template ? 'project' : null),
+    isGuide: !!row.is_guide,
     updatedAt: row.updated_at,
   };
 }
@@ -268,13 +276,15 @@ function serializeFullRow(row) {
     position: row.position,
     pdfRole: row.pdf_role || null,
     isTemplate: !!row.is_template,
+    templateKind: row.is_template === 2 ? 'fragment' : (row.is_template ? 'project' : null),
+    isGuide: !!row.is_guide,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
 const LIST_SELECT = `
-  SELECT id, parent_id, title, icon, cover_color, favorite, position, pdf_role, is_template, updated_at,
+  SELECT id, parent_id, title, icon, cover_color, favorite, position, pdf_role, is_template, is_guide, updated_at,
          (body IS NOT NULL AND body != '') AS has_body
   FROM proyectos_pages
 `;
@@ -319,7 +329,7 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM proyectos_pages WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
-  const { title, icon, coverColor, parentId, body, favorite, pdfRole, isTemplate } = req.body || {};
+  const { title, icon, coverColor, parentId, body, favorite, pdfRole, isTemplate, templateKind, isGuide } = req.body || {};
 
   let nextParentId = existing.parent_id;
   if (parentId !== undefined) {
@@ -343,7 +353,16 @@ router.put('/:id', (req, res) => {
     nextPdfRole = pdfRole === 'cover' || pdfRole === 'skip' ? pdfRole : null;
   }
 
-  db.prepare("UPDATE proyectos_pages SET title = ?, icon = ?, cover_color = ?, parent_id = ?, body = ?, favorite = ?, pdf_role = ?, is_template = ?, updated_at = datetime('now') WHERE id = ?").run(
+  // Plantilla: templateKind manda si viene ('project' = 1, 'fragment' =
+  // 2, null = 0); si no, el booleano isTemplate de siempre.
+  let nextIsTemplate = existing.is_template;
+  if (templateKind !== undefined) {
+    nextIsTemplate = templateKind === 'fragment' ? 2 : (templateKind === 'project' ? 1 : 0);
+  } else if (isTemplate !== undefined) {
+    nextIsTemplate = isTemplate ? 1 : 0;
+  }
+
+  db.prepare("UPDATE proyectos_pages SET title = ?, icon = ?, cover_color = ?, parent_id = ?, body = ?, favorite = ?, pdf_role = ?, is_template = ?, is_guide = ?, updated_at = datetime('now') WHERE id = ?").run(
     title !== undefined ? String(title).slice(0, 300) : existing.title,
     sanitizedIcon === undefined ? existing.icon : sanitizedIcon,
     nextCover,
@@ -351,7 +370,8 @@ router.put('/:id', (req, res) => {
     body !== undefined ? (sanitizePageBody(body) || null) : existing.body,
     favorite !== undefined ? (favorite ? 1 : 0) : existing.favorite,
     nextPdfRole,
-    isTemplate !== undefined ? (isTemplate ? 1 : 0) : existing.is_template,
+    nextIsTemplate,
+    isGuide !== undefined ? (isGuide ? 1 : 0) : existing.is_guide,
     req.params.id
   );
 
@@ -650,6 +670,68 @@ router.post('/:id/clone', (req, res) => {
   });
   const row = db.prepare(`${LIST_SELECT} WHERE id = ?`).get(newRootId);
   res.status(201).json(serializeListRow(row));
+});
+
+// Insertar un FRAGMENTO: devuelve el cuerpo de la pagina plantilla
+// listo para pegarse dentro de otra pagina — sus bases de datos se
+// clonan colgando de la pagina de destino (con propiedades, filas y
+// valores) y sus imagenes se copian, con los marcadores remapeados.
+// Los enlaces internos a otras paginas se deshacen (el fragmento viaja
+// solo, sin su arbol).
+router.post('/:id/fragment', (req, res) => {
+  const source = db.prepare('SELECT * FROM proyectos_pages WHERE id = ?').get(req.params.id);
+  if (!source) return res.status(404).json({ error: 'not_found' });
+  const { targetPageId } = req.body || {};
+  const target = db.prepare('SELECT id FROM proyectos_pages WHERE id = ?').get(targetPageId);
+  if (!target) return res.status(400).json({ error: 'invalid_request', message: 'La página de destino no existe.' });
+  const body = source.body || '';
+
+  // Bases de la pagina plantilla cuyos marcadores aparecen en su cuerpo.
+  const dbMap = new Map();
+  const databases = collectDatabases([source.id]);
+  for (const database of databases) {
+    if (!body.includes(`data-proyectos-db="${database.id}"`)) continue;
+    const dbInfo = db.prepare('INSERT INTO proyectos_databases (page_id, name, view_type, sort_dir, filter_value) VALUES (?, ?, ?, ?, ?)').run(
+      target.id, database.name, database.view_type, database.sort_dir, database.filter_value
+    );
+    const newDbId = dbInfo.lastInsertRowid;
+    dbMap.set(database.id, newDbId);
+    const propMap = new Map();
+    for (const prop of database.props) {
+      const propInfo = db.prepare('INSERT INTO proyectos_db_props (database_id, name, type, options, position) VALUES (?, ?, ?, ?, ?)').run(
+        newDbId, prop.name, prop.type, prop.options, prop.position
+      );
+      propMap.set(prop.id, propInfo.lastInsertRowid);
+    }
+    db.prepare('UPDATE proyectos_databases SET board_prop_id = ?, sort_prop_id = ?, filter_prop_id = ?, timeline_start_prop_id = ?, timeline_end_prop_id = ? WHERE id = ?').run(
+      propMap.get(database.board_prop_id) ?? null,
+      propMap.get(database.sort_prop_id) ?? null,
+      propMap.get(database.filter_prop_id) ?? null,
+      propMap.get(database.timeline_start_prop_id) ?? null,
+      propMap.get(database.timeline_end_prop_id) ?? null,
+      newDbId
+    );
+    for (const row of database.rows) {
+      const rowInfo = db.prepare("INSERT INTO proyectos_db_rows (database_id, title, body, position, updated_at) VALUES (?, ?, ?, ?, datetime('now'))").run(
+        newDbId, row.title, row.body, row.position
+      );
+      for (const value of row.values) {
+        const propId = propMap.get(value.prop_id);
+        if (!propId || value.value == null || value.value === '') continue;
+        db.prepare('INSERT INTO proyectos_db_values (row_id, prop_id, value) VALUES (?, ?, ?)').run(rowInfo.lastInsertRowid, propId, value.value);
+      }
+    }
+  }
+
+  // Imagenes: copia fisica.
+  const imageMap = new Map();
+  for (const name of collectImageNames([body])) {
+    const copy = copyImageFile(name);
+    if (copy) imageMap.set(name, copy);
+  }
+
+  const html = sanitizePageBody(remapBody(body, { dbMap, pageMap: new Map(), imageMap })) || '';
+  res.json({ html });
 });
 
 // Exportar un proyecto como paquete (el archivo .rmproj que se guarda

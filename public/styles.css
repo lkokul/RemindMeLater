@@ -3510,6 +3510,15 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   text-decoration: line-through;
   opacity: 0.6;
 }
+/* Sangria de la checklist (Tab / Mayus+Tab en el editor): cada nivel
+   empuja la tarea entera (casilla incluida, que es el ::before del
+   propio bloque). El nivel vive en data-indent, 1-6. */
+.proyectos-page-body [data-todo][data-indent="1"] { margin-left: 1.6rem; }
+.proyectos-page-body [data-todo][data-indent="2"] { margin-left: 3.2rem; }
+.proyectos-page-body [data-todo][data-indent="3"] { margin-left: 4.8rem; }
+.proyectos-page-body [data-todo][data-indent="4"] { margin-left: 6.4rem; }
+.proyectos-page-body [data-todo][data-indent="5"] { margin-left: 8rem; }
+.proyectos-page-body [data-todo][data-indent="6"] { margin-left: 9.6rem; }
 
 /* Toggle (details/summary): la flecha nativa se sustituye por una
    propia para poder estilarla y capturarle el clic. */
@@ -3738,6 +3747,52 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .proyectos-db-config-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
 
 /* --- Side peek: la fila abierta como mini-pagina --- */
+/* --- Vista en PARALELO: el segundo panel de lectura --- */
+/* A diferencia del peek (que flota por encima), este panel PARTE la
+   pantalla de verdad: es un hijo flex mas del layout, al lado del
+   editor, estilo vista partida de Notepad++. */
+.proyectos-split {
+  width: min(46%, 640px); flex-shrink: 0;
+  background: var(--surface); color: var(--surface-text);
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  min-width: 0;
+}
+.proyectos-split.hidden { display: none; }
+.proyectos-split-header {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+.proyectos-split-title {
+  font-weight: 700; font-size: 0.95rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  min-width: 0;
+}
+/* El cuerpo reusa .proyectos-page-body (mismos estilos de bloques que
+   el editor), solo que sin contenteditable: es de lectura. */
+.proyectos-split-body {
+  flex: 1;
+  overflow-y: auto; overflow-x: hidden;
+  padding: 0.9rem 1.1rem 2rem;
+}
+/* Las tablas estaticas de bases de datos (las del PDF) dentro del
+   panel: estilo de tabla normal de la app, no el del papel. */
+.proyectos-split-body .pdf-db { margin: 0.4rem 0; overflow-x: auto; }
+.proyectos-split-body .pdf-db-name { font-weight: 700; margin-bottom: 0.25rem; }
+.proyectos-split-body .pdf-db th { background: var(--surface-2); }
+.proyectos-split-body .pdf-label-pill {
+  display: inline-block;
+  font-size: 0.72rem; font-weight: 600; color: #fff;
+  border-radius: 999px; padding: 0.05rem 0.5rem;
+  margin: 0 0.15rem 0.15rem 0;
+}
+.proyectos-split-body .pdf-color-dot {
+  display: inline-block; width: 0.9rem; height: 0.9rem;
+  border-radius: 50%; vertical-align: middle;
+}
+
 .proyectos-peek {
   position: absolute; top: 0; right: 0; bottom: 0;
   width: min(440px, 85%);
@@ -4305,7 +4360,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 .proyectos-pdf-block::before { font-style: italic; }
 .proyectos-pdf-block[data-pdf-block="toc"]::before { content: '☰ Índice de contenido — se rellena al exportar a PDF'; }
-.proyectos-pdf-block[data-pdf-block="figures"]::before { content: '🖼 Índice de figuras — se rellena al exportar a PDF'; }
+.proyectos-pdf-block[data-pdf-block="figures"]::before { content: '▤ Índice de figuras — se rellena al exportar a PDF'; }
 .proyectos-pdf-block[data-pdf-block="pagebreak"]::before { content: '⤓ Salto de página al exportar a PDF'; }
 
 /* Imagen con pie de foto (figure/figcaption) en el editor. */
@@ -4401,7 +4456,6 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   user-select: none;
 }
 .proyectos-home-card:hover { border-color: var(--accent); }
-.proyectos-home-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .proyectos-home-card-strip { height: 2.6rem; }
 .proyectos-home-card-icon {
   font-size: 1.9rem;
@@ -4423,11 +4477,40 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   border: 1px solid var(--border); border-radius: 999px;
   padding: 0.05rem 0.5rem;
 }
-.proyectos-home-card-actions {
-  display: flex; flex-wrap: wrap; gap: 0.3rem;
-  padding: 0.55rem 0.8rem 0;
+/* El boton "⋯" de la tarjeta: en la esquina, discreto hasta pasar por
+   encima. Sobre la franja de color va con su propio fondo para leerse
+   sobre cualquier color. */
+.proyectos-home-card-menu-btn {
+  position: absolute; top: 0.4rem; left: 0.45rem;
+  border: none; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 75%, transparent);
+  color: var(--surface-text);
+  width: 1.7rem; height: 1.4rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  opacity: 0.65;
 }
-.proyectos-home-card-action { font-size: 0.78rem; padding: 0.25rem 0.55rem; }
+.proyectos-home-card-menu-btn:hover { opacity: 1; background: var(--surface); }
+/* El menu flotante del "⋯": una accion por fila. */
+.proyectos-home-menu {
+  position: fixed; z-index: 40;
+  background: var(--surface); color: var(--surface-text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 10px 26px rgba(0,0,0,0.35);
+  padding: 0.3rem;
+  display: flex; flex-direction: column;
+  min-width: 200px;
+}
+.proyectos-home-menu.hidden { display: none; }
+.proyectos-home-menu-item {
+  border: none; background: none; color: inherit;
+  font: inherit; font-size: 0.86rem;
+  text-align: left;
+  padding: 0.4rem 0.6rem; border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.proyectos-home-menu-item:hover { background: var(--surface-2); }
+.proyectos-home-menu-item.danger { color: var(--danger); }
 .proyectos-home-empty { grid-column: 1 / -1; max-width: 540px; }
 
 /* --- Vista Consistencia (heatmap estilo GitHub) --- */
@@ -4513,3 +4596,13 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 }
 .proyectos-home-card-import:hover { opacity: 1; }
 .proyectos-home-card-import b { font-size: 1.4rem; font-weight: 400; }
+
+
+/* Iconos SVG de interfaz (fuera los emojis): alineados con el texto. */
+.proyectos-svg-icon { display: inline-block; vertical-align: -2px; }
+.proyectos-inline-icon { display: inline-flex; align-items: center; }
+.proyectos-tree-icon .proyectos-svg-icon { opacity: 0.75; }
+/* El icono por defecto de una tarjeta de la home, a su escala. */
+.proyectos-home-card-icon .proyectos-svg-icon { width: 26px; height: 26px; }
+/* Cabeceras de grupo del popover de plantillas. */
+.proyectos-template-group { margin: 0.35rem 0.4rem 0.15rem; font-weight: 600; }

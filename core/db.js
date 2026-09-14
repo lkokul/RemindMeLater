@@ -651,9 +651,17 @@ if (!proyectosPagesColumns.includes('pdf_role')) {
 }
 // is_template: una pagina RAIZ marcada como plantilla vive en la
 // pestaña "Plantillas" de la home de Proyectos y se puede clonar
-// ("Usar plantilla" / "Desde plantilla…" del menu "/").
+// ("Usar plantilla" / "Desde plantilla…" del menu "/"). Dos clases:
+// 1 = plantilla de PROYECTO (se clona entera, como proyecto nuevo o
+// como subpagina), 2 = FRAGMENTO (su cuerpo se pega dentro de la
+// pagina abierta: una tabla con formato, un esquema...).
 if (!proyectosPagesColumns.includes('is_template')) {
   db.exec('ALTER TABLE proyectos_pages ADD COLUMN is_template INTEGER NOT NULL DEFAULT 0');
+}
+// is_guide: la guia de uso (el 📖) es UNICA y no sale en la galeria de
+// proyectos — el boton la abre, y solo la crea si no existe.
+if (!proyectosPagesColumns.includes('is_guide')) {
+  db.exec('ALTER TABLE proyectos_pages ADD COLUMN is_guide INTEGER NOT NULL DEFAULT 0');
 }
 
 // Migracion pareja a la de 'timeline': la vista 'heatmap' (Consistencia)

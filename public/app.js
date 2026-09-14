@@ -10131,7 +10131,7 @@ function renderProyectosTree() {
       if (proyectosCurrentPage && proyectosCurrentPage.id === page.id) row.classList.add('active');
       const icon = document.createElement('span');
       icon.className = 'proyectos-tree-icon';
-      icon.textContent = page.icon || '📄';
+      setProyectosPageIcon(icon, page.icon);
       row.appendChild(icon);
       const title = document.createElement('span');
       title.className = 'proyectos-tree-title';
@@ -10264,7 +10264,7 @@ function renderProyectosTree() {
 
       const icon = document.createElement('span');
       icon.className = 'proyectos-tree-icon';
-      icon.textContent = page.icon || '📄';
+      setProyectosPageIcon(icon, page.icon);
       row.appendChild(icon);
 
       const title = document.createElement('span');
@@ -10524,7 +10524,11 @@ document.getElementById('btn-proyectos-move-selected').addEventListener('click',
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'proyectos-slash-item';
-      btn.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
+      const itemIcon = document.createElement('span');
+      itemIcon.className = 'proyectos-inline-icon';
+      setProyectosPageIcon(itemIcon, page.icon);
+      btn.appendChild(itemIcon);
+      btn.appendChild(document.createTextNode(` ${page.title || 'Sin título'}`));
       btn.addEventListener('mousedown', (e) => { e.preventDefault(); moveSelectionTo(page.id); });
       popover.appendChild(btn);
     }
@@ -10654,6 +10658,12 @@ async function openProyectosPage(id) {
   }
 
   document.getElementById('btn-proyectos-favorite').textContent = page.favorite ? '★' : '☆';
+  // "+ Pagina" (al mismo nivel) no aplica en la raiz del proyecto.
+  const siblingBtn = document.getElementById('btn-proyectos-sibling');
+  siblingBtn.disabled = page.parentId === null;
+  siblingBtn.title = page.parentId === null
+    ? 'La raíz del proyecto no tiene "mismo nivel" (otros proyectos se crean desde la home)'
+    : 'Nueva página al mismo nivel que esta (Ctrl+Alt+N)';
 
   renderProyectosBreadcrumb();
   renderProyectosTree();
@@ -10691,7 +10701,12 @@ async function createProyectosPage(parentId) {
 // ---------------------------------------------------------------------
 let proyectosHomeTab = 'mine'; // 'mine' | 'templates'
 let proyectosHomeFilter = '';
-let proyectosHomeSelectedId = null;
+// El menu "⋯" de una tarjeta: un unico popover para toda la home, que
+// se abre junto al boton de la tarjeta pulsada. Se guarda a que
+// proyecto apunta para que Suprimir (con el menu abierto) sepa a quien
+// borrar.
+let proyectosHomeMenuEl = null;
+let proyectosHomeMenuRootId = null;
 
 function showProyectosHome() {
   proyectosCurrentPage = null;
@@ -10713,16 +10728,20 @@ function renderProyectosHome() {
     tab.classList.toggle('active', tab.getAttribute('data-home-tab') === proyectosHomeTab);
   });
 
+  // El boton de crear cambia con la pestaña: proyecto o plantilla.
+  const newBtn = document.getElementById('btn-proyectos-home-new');
+  newBtn.textContent = proyectosHomeTab === 'templates' ? '+ Nueva plantilla' : '+ Nuevo proyecto';
+
   const wantTemplates = proyectosHomeTab === 'templates';
   const query = proyectosHomeFilter.trim().toLowerCase();
   const roots = proyectosChildrenOf(null)
+    .filter((p) => !p.isGuide) // la guia no es un proyecto: vive en su boton
     .filter((p) => !!p.isTemplate === wantTemplates)
     .filter((p) => !query || (p.title || '').toLowerCase().includes(query));
 
   for (const root of roots) {
     const card = document.createElement('div');
     card.className = 'proyectos-home-card';
-    if (proyectosHomeSelectedId === root.id) card.classList.add('selected');
 
     const strip = document.createElement('div');
     strip.className = 'proyectos-home-card-strip';
@@ -10731,7 +10750,7 @@ function renderProyectosHome() {
 
     const iconEl = document.createElement('div');
     iconEl.className = 'proyectos-home-card-icon';
-    iconEl.textContent = root.icon || '📄';
+    setProyectosPageIcon(iconEl, root.icon);
     card.appendChild(iconEl);
 
     const titleEl = document.createElement('div');
@@ -10749,67 +10768,117 @@ function renderProyectosHome() {
     if (root.isTemplate) {
       const badge = document.createElement('span');
       badge.className = 'proyectos-home-card-badge';
-      badge.textContent = 'Plantilla';
+      badge.textContent = root.templateKind === 'fragment' ? 'Fragmento' : 'Plantilla';
       card.appendChild(badge);
     }
 
-    // 1 clic = seleccionar (y ver acciones); doble clic = abrir.
-    card.addEventListener('click', () => {
-      if (proyectosHomeSelectedId !== root.id) {
-        proyectosHomeSelectedId = root.id;
-        renderProyectosHome();
-      }
-    });
-    card.addEventListener('dblclick', () => openProyectosPage(root.id));
+    // Clic = abrir, sin paso intermedio. Todo lo demas (PDF, exportar,
+    // plantilla, eliminar...) vive en el menu "⋯" de la esquina, como
+    // en cualquier gestor de archivos — el patron anterior de
+    // "seleccionar y que aparezcan botones" se fue a peticion de Koku.
+    card.addEventListener('click', () => openProyectosPage(root.id));
 
-    if (proyectosHomeSelectedId === root.id) {
-      const actions = document.createElement('div');
-      actions.className = 'proyectos-home-card-actions';
-      const action = (label, fn, { title = '' } = {}) => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'secondary-btn proyectos-home-card-action';
-        btn.textContent = label;
-        if (title) btn.title = title;
-        btn.addEventListener('click', (e) => { e.stopPropagation(); fn(btn); });
-        actions.appendChild(btn);
-      };
-      if (root.isTemplate) {
-        action('Usar', () => useProyectosTemplate(root), { title: 'Crear un proyecto nuevo a partir de esta plantilla (clona todo)' });
-      }
-      action('Abrir', () => openProyectosPage(root.id));
-      action('PDF', (btn) => openProyectosPdfDialog(root, btn), { title: 'Exportar a PDF' });
-      action('Archivo', (btn) => exportProyectosProjectFile(root), { title: 'Exportar como archivo de proyecto (.rmproj) para llevarlo a otro ordenador' });
-      action(root.isTemplate ? '→ Proyecto' : '→ Plantilla', () => toggleProyectosTemplate(root), {
-        title: root.isTemplate ? 'Convertirla en un proyecto normal' : 'Convertirlo en plantilla (pasa a la pestaña Plantillas)',
-      });
-      card.appendChild(actions);
-    }
+    const menuBtn = document.createElement('button');
+    menuBtn.type = 'button';
+    menuBtn.className = 'proyectos-home-card-menu-btn';
+    menuBtn.title = 'Opciones';
+    menuBtn.setAttribute('aria-label', 'Opciones del proyecto');
+    menuBtn.innerHTML = proyectosIconSvg('dots');
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // que no abra el proyecto
+      openProyectosHomeMenu(root, menuBtn);
+    });
+    card.appendChild(menuBtn);
 
     grid.appendChild(card);
-  }
-
-  // Tarjeta punteada de "Importar" al final de Mis proyectos (mas a la
-  // vista que solo el boton de arriba; Koku no lo encontraba).
-  if (!wantTemplates && !query) {
-    const importCard = document.createElement('button');
-    importCard.type = 'button';
-    importCard.className = 'proyectos-home-card proyectos-home-card-import';
-    importCard.innerHTML = '<b>⤓</b><span>Importar un proyecto<br>(.rmproj)</span>';
-    importCard.title = 'Traer un proyecto exportado en este u otro ordenador';
-    importCard.addEventListener('click', () => importProyectosProjectFile());
-    grid.appendChild(importCard);
   }
 
   if (roots.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'hint proyectos-home-empty';
     empty.textContent = wantTemplates
-      ? 'Todavía no hay plantillas: selecciona un proyecto en "Mis proyectos" y pulsa "→ Plantilla". También puedes montar una página con lo que repitas (una base de datos de viajes, la estructura de un documento…) y convertirla. El proyecto de ejemplo 📖 crea además una plantilla "Documento PDF" lista para usar.'
-      : (query ? 'Ningún proyecto coincide.' : 'Todavía no hay proyectos: crea uno nuevo, importa un archivo .rmproj o empieza por el proyecto de ejemplo 📖.');
+      ? 'Todavía no hay plantillas: selecciona un proyecto en "Mis proyectos" y pulsa "→ Plantilla". También puedes montar una página con lo que repitas (una base de datos de viajes, la estructura de un documento…) y convertirla. El proyecto de ejemplo (botón de la guía, arriba) crea además una plantilla "Documento PDF" lista para usar.'
+      : (query ? 'Ningún proyecto coincide.' : 'Todavía no hay proyectos: crea uno nuevo, importa un archivo .rmproj o empieza por el proyecto de ejemplo (el botón de la guía, arriba).');
     grid.appendChild(empty);
   }
 }
+
+// El menu "⋯" de una tarjeta: popover flotante junto al boton, con
+// todas las acciones del proyecto. Uno solo para toda la home; abrir el
+// de otra tarjeta lo reutiliza, y el clic fuera / Escape lo cierran.
+function closeProyectosHomeMenu() {
+  if (proyectosHomeMenuEl) proyectosHomeMenuEl.classList.add('hidden');
+  proyectosHomeMenuRootId = null;
+}
+
+function openProyectosHomeMenu(root, anchorBtn) {
+  if (!proyectosHomeMenuEl) {
+    proyectosHomeMenuEl = document.createElement('div');
+    proyectosHomeMenuEl.className = 'proyectos-home-menu hidden';
+    document.body.appendChild(proyectosHomeMenuEl);
+  }
+  // Volver a pulsar el "⋯" de la misma tarjeta con el menu abierto lo
+  // cierra (comportamiento de interruptor).
+  if (proyectosHomeMenuRootId === root.id && !proyectosHomeMenuEl.classList.contains('hidden')) {
+    closeProyectosHomeMenu();
+    return;
+  }
+  const menu = proyectosHomeMenuEl;
+  menu.innerHTML = '';
+  proyectosHomeMenuRootId = root.id;
+
+  const item = (label, fn, { title = '', danger = false } = {}) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'proyectos-home-menu-item' + (danger ? ' danger' : '');
+    btn.textContent = label;
+    if (title) btn.title = title;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeProyectosHomeMenu();
+      fn(anchorBtn);
+    });
+    menu.appendChild(btn);
+  };
+
+  if (root.isTemplate && root.templateKind !== 'fragment') {
+    item('Usar plantilla', () => useProyectosTemplate(root), { title: 'Crear un proyecto nuevo a partir de esta plantilla (clona todo)' });
+  }
+  item('Abrir', () => openProyectosPage(root.id));
+  if (!root.isTemplate) item('Exportar a PDF…', (btn) => openProyectosPdfDialog(root, btn));
+  item('Exportar archivo (.rmproj)', () => exportProyectosProjectFile(root), { title: 'Para llevarlo a otro ordenador e importarlo allí' });
+  if (root.isTemplate) {
+    // Alternar la CLASE de plantilla: proyecto (clonable entera) o
+    // fragmento (su cuerpo se pega dentro de una pagina).
+    item(root.templateKind === 'fragment' ? 'Convertir en plantilla de proyecto' : 'Convertir en fragmento', () => toggleProyectosTemplateKind(root), {
+      title: 'Plantilla de proyecto = se clona entera · Fragmento = su contenido se pega dentro de una página',
+    });
+  }
+  item(root.isTemplate ? 'Volver a proyecto normal' : 'Convertir en plantilla', () => toggleProyectosTemplate(root), {
+    title: root.isTemplate ? 'Deja de ser plantilla y vuelve a "Mis proyectos"' : 'Pasa a la pestaña Plantillas',
+  });
+  item('Eliminar', () => deleteProyectosRootFromHome(root), { title: 'Borrar este proyecto entero (con todas sus páginas). También: tecla Suprimir con este menú abierto.', danger: true });
+
+  // Pegado al boton, sin salirse de la pantalla (medida REAL, la
+  // leccion de positionFixedPopover).
+  menu.classList.remove('hidden');
+  const rect = anchorBtn.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  let top = rect.bottom + 6;
+  if (top + menuRect.height > window.innerHeight - 8) top = Math.max(8, rect.top - menuRect.height - 6);
+  let left = Math.min(rect.left, window.innerWidth - menuRect.width - 8);
+  menu.style.top = `${top}px`;
+  menu.style.left = `${Math.max(8, left)}px`;
+}
+
+// Clic fuera del menu "⋯" = cerrarlo (el clic en el propio boton ya
+// hizo stopPropagation, asi que no llega aqui).
+document.addEventListener('click', (e) => {
+  if (proyectosHomeMenuEl && !proyectosHomeMenuEl.classList.contains('hidden')
+    && !e.target.closest('.proyectos-home-menu')) {
+    closeProyectosHomeMenu();
+  }
+});
 
 // "Usar plantilla": un proyecto nuevo clonando el arbol entero (bases
 // de datos con filas e imagenes incluidas) y se abre directamente.
@@ -10831,7 +10900,7 @@ async function toggleProyectosTemplate(root) {
   try {
     await api(`/api/proyectos-pages/${root.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ isTemplate: !root.isTemplate }),
+      body: JSON.stringify({ templateKind: root.isTemplate ? null : 'project' }),
     });
     await loadProyectosPages();
     // Seguir a la tarjeta a su pestaña nueva, para verla llegar.
@@ -10841,6 +10910,57 @@ async function toggleProyectosTemplate(root) {
     showAppAlert(`No se pudo cambiar: ${err.message}`);
   }
 }
+
+// Alternar la clase de una plantilla: proyecto ↔ fragmento.
+async function toggleProyectosTemplateKind(root) {
+  try {
+    await api(`/api/proyectos-pages/${root.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ templateKind: root.templateKind === 'fragment' ? 'project' : 'fragment' }),
+    });
+    await loadProyectosPages();
+    renderProyectosHome();
+  } catch (err) {
+    showAppAlert(`No se pudo cambiar: ${err.message}`);
+  }
+}
+
+// Borrar un proyecto ENTERO desde su tarjeta (tambien con la tecla
+// Suprimir con la tarjeta seleccionada).
+async function deleteProyectosRootFromHome(root) {
+  const pageCount = proyectosSubtreeIds(root.id).length;
+  const ok = await showAppConfirm(
+    `¿Borrar "${root.title || 'Sin título'}" entero (${pageCount} ${pageCount === 1 ? 'página' : 'páginas'})? Esto no se puede deshacer.`,
+    { danger: true, okText: 'Borrar todo' }
+  );
+  if (!ok) return;
+  try {
+    await api(`/api/proyectos-pages/${root.id}?withChildren=1`, { method: 'DELETE' });
+    closeProyectosHomeMenu();
+    await loadProyectosPages();
+    renderProyectosHome();
+  } catch (err) {
+    showAppAlert(`No se pudo borrar: ${err.message}`);
+  }
+}
+
+// Teclas con el menu "⋯" abierto: Suprimir = eliminar ese proyecto
+// (con su confirmacion), Escape = cerrar el menu.
+document.addEventListener('keydown', (e) => {
+  if (proyectosHomeMenuRootId === null || !proyectosHomeMenuEl
+    || proyectosHomeMenuEl.classList.contains('hidden')) return;
+  if (e.key === 'Escape') {
+    closeProyectosHomeMenu();
+    return;
+  }
+  if (e.key !== 'Delete') return;
+  // Con el foco escribiendo en algo (el buscador), Suprimir es suyo.
+  const tag = e.target && e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
+  const root = proyectosPages.find((p) => p.id === proyectosHomeMenuRootId);
+  closeProyectosHomeMenu();
+  if (root) deleteProyectosRootFromHome(root);
+});
 
 // Exportar como ARCHIVO (.rmproj): el backend monta el paquete completo
 // (paginas + bases + imagenes en base64) y Electron pregunta donde
@@ -10898,11 +11018,196 @@ async function importProyectosProjectFile() {
   }
 }
 
+// ---------------------------------------------------------------------
+// Vista en PARALELO ("estilo Notepad++", pedida por Koku): un segundo
+// panel a la derecha del editor que enseña OTRA pagina en modo lectura
+// -- de este proyecto o de cualquier otro -- para ver y comparar dos
+// cosas a la vez. Decisiones:
+//   - El panel es de LECTURA: editar en dos sitios a la vez exigiria
+//     dos editores compartiendo el guardado y se pisarian. Para editar
+//     la otra pagina esta el boton ⇄ (la trae al editor y se lleva la
+//     actual al panel).
+//   - Las bases de datos se pintan como tabla ESTATICA (la misma que
+//     usa el PDF): el widget interactivo esta atado al editor.
+//   - Un enlace a pagina dentro del panel se abre en el EDITOR (el
+//     panel se queda como esta): el panel es la referencia quieta.
+// ---------------------------------------------------------------------
+let proyectosSplitPageId = null;
+let proyectosSplitPickPopover = null;
+
+function closeProyectosSplit() {
+  proyectosSplitPageId = null;
+  document.getElementById('proyectos-split').classList.add('hidden');
+}
+
+// Pinta una pagina en el panel: titulo + cuerpo con las bases vueltas
+// tabla estatica y los diagramas dibujados.
+async function renderProyectosSplit(pageId) {
+  const aside = document.getElementById('proyectos-split');
+  const titleEl = document.getElementById('proyectos-split-title');
+  const bodyEl = document.getElementById('proyectos-split-body');
+  try {
+    const page = await api(`/api/proyectos-pages/${pageId}`);
+    proyectosSplitPageId = page.id;
+    titleEl.innerHTML = '';
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'proyectos-inline-icon';
+    setProyectosPageIcon(iconSpan, page.icon);
+    titleEl.appendChild(iconSpan);
+    titleEl.appendChild(document.createTextNode(` ${page.title || 'Sin título'}`));
+
+    const holder = document.createElement('div');
+    holder.innerHTML = page.body || '<p class="hint">Esta página está vacía.</p>';
+    // Bases de datos: del marcador a la tabla estatica del PDF.
+    for (const marker of [...holder.querySelectorAll('[data-proyectos-db]')]) {
+      const dbId = Number(marker.getAttribute('data-proyectos-db'));
+      try {
+        const data = await api(`/api/proyectos-databases/${dbId}`);
+        marker.replaceWith(buildProyectosPdfDbTable(data));
+      } catch (err) {
+        marker.remove();
+      }
+    }
+    // Diagramas mermaid: dibujados, como en el PDF.
+    if (typeof mermaid !== 'undefined') {
+      for (const pre of [...holder.querySelectorAll('pre[data-lang="mermaid"]')]) {
+        const text = (pre.textContent || '').trim();
+        if (!text) continue;
+        const renderId = `split-diagram-${++proyectosMermaidSeq}`;
+        try {
+          const { svg } = await mermaid.render(renderId, text);
+          const wrapper = document.createElement('div');
+          wrapper.className = 'proyectos-diagram-preview';
+          wrapper.innerHTML = svg;
+          pre.replaceWith(wrapper);
+        } catch (err) {
+          document.getElementById(renderId)?.remove();
+          document.getElementById(`d${renderId}`)?.remove();
+        }
+      }
+    }
+    bodyEl.innerHTML = '';
+    bodyEl.append(...holder.childNodes);
+    aside.classList.remove('hidden');
+  } catch (err) {
+    titleEl.textContent = 'Vista en paralelo';
+    bodyEl.innerHTML = '<p class="hint">Esta página ya no existe.</p>';
+    aside.classList.remove('hidden');
+  }
+}
+
+// El selector de pagina del panel: lista TODAS las paginas (agrupadas
+// por proyecto, con sangria por nivel) con un buscador encima.
+function openProyectosSplitPicker(anchorEl) {
+  if (!proyectosSplitPickPopover) {
+    proyectosSplitPickPopover = document.createElement('div');
+    proyectosSplitPickPopover.className = 'proyectos-slash-popover proyectos-split-pick-popover hidden';
+    document.body.appendChild(proyectosSplitPickPopover);
+  }
+  const popover = proyectosSplitPickPopover;
+
+  // Aplanar el arbol entero en orden de documento, con su profundidad.
+  const flat = [];
+  const walk = (parentId, depth) => {
+    for (const page of proyectosChildrenOf(parentId)) {
+      flat.push({ page, depth });
+      walk(page.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+
+  const renderList = (query) => {
+    popover.innerHTML = '';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'proyectos-search';
+    input.placeholder = 'Buscar página…';
+    input.value = query;
+    input.addEventListener('input', () => renderListKeepFocus(input.value));
+    popover.appendChild(input);
+    const q = query.trim().toLowerCase();
+    const matches = flat.filter(({ page }) => !q || (page.title || '').toLowerCase().includes(q));
+    for (const { page, depth } of matches.slice(0, 40)) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'proyectos-slash-item';
+      btn.style.paddingLeft = `${0.6 + (q ? 0 : depth) * 0.9}rem`;
+      const iconSpan = document.createElement('span');
+      iconSpan.className = 'proyectos-inline-icon';
+      setProyectosPageIcon(iconSpan, page.icon);
+      btn.appendChild(iconSpan);
+      btn.appendChild(document.createTextNode(` ${page.title || 'Sin título'}`));
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        popover.classList.add('hidden');
+        renderProyectosSplit(page.id);
+      });
+      popover.appendChild(btn);
+    }
+    if (matches.length === 0) {
+      const hint = document.createElement('p');
+      hint.className = 'hint';
+      hint.textContent = 'Ninguna página coincide.';
+      popover.appendChild(hint);
+    }
+    return input;
+  };
+  function renderListKeepFocus(query) {
+    const input = renderList(query);
+    input.focus();
+    input.setSelectionRange(query.length, query.length);
+  }
+
+  popover.classList.remove('hidden');
+  const rect = anchorEl.getBoundingClientRect();
+  popover.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 300)}px`;
+  popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 310))}px`;
+  renderList('').focus();
+}
+
+// El boton de la barra alterna el panel: cerrado -> elegir que pagina
+// ver; abierto -> cerrarlo.
+document.getElementById('btn-proyectos-split').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const aside = document.getElementById('proyectos-split');
+  if (!aside.classList.contains('hidden')) closeProyectosSplit();
+  else openProyectosSplitPicker(document.getElementById('btn-proyectos-split'));
+});
+document.getElementById('btn-proyectos-split-pick').addEventListener('click', (e) => {
+  e.stopPropagation();
+  openProyectosSplitPicker(document.getElementById('btn-proyectos-split-pick'));
+});
+document.getElementById('btn-proyectos-split-close').addEventListener('click', () => closeProyectosSplit());
+// ⇄: la pagina del panel pasa al editor y la del editor al panel.
+document.getElementById('btn-proyectos-split-swap').addEventListener('click', async () => {
+  const target = proyectosSplitPageId;
+  if (target === null) return;
+  const current = proyectosCurrentPage ? proyectosCurrentPage.id : null;
+  await openProyectosPage(target);
+  if (current !== null) await renderProyectosSplit(current);
+});
+// Enlaces DENTRO del panel: los de pagina se abren en el editor; los
+// externos, en el navegador (como en el editor).
+document.getElementById('proyectos-split-body').addEventListener('click', (e) => {
+  const link = e.target.closest('a');
+  if (!link) return;
+  e.preventDefault();
+  const pageId = link.getAttribute('data-page-link');
+  if (pageId) {
+    const exists = proyectosPages.some((p) => p.id === Number(pageId));
+    if (exists) openProyectosPage(Number(pageId));
+    else showAppAlert('La página enlazada ya no existe.');
+    return;
+  }
+  const href = link.getAttribute('href');
+  if (href) window.open(href);
+});
+
 document.getElementById('proyectos-home-tabs').addEventListener('click', (e) => {
   const tab = e.target.closest('[data-home-tab]');
   if (!tab) return;
   proyectosHomeTab = tab.getAttribute('data-home-tab');
-  proyectosHomeSelectedId = null;
+  closeProyectosHomeMenu();
   renderProyectosHome();
 });
 document.getElementById('proyectos-home-search').addEventListener('input', (e) => {
@@ -10949,7 +11254,20 @@ document.getElementById('proyectos-search').addEventListener('input', (e) => {
   proyectosTreeFilter = e.target.value.trim();
   renderProyectosTree();
 });
-document.getElementById('btn-proyectos-home-new').addEventListener('click', () => createProyectosPage(null));
+// "+ Nuevo proyecto" / "+ Nueva plantilla" segun la pestaña activa: en
+// Plantillas se crea una plantilla DIRECTAMENTE (antes habia que crear
+// un proyecto y convertirlo, feedback real de Koku).
+document.getElementById('btn-proyectos-home-new').addEventListener('click', async () => {
+  if (proyectosHomeTab === 'templates') {
+    const created = await api('/api/proyectos-pages', { method: 'POST', body: JSON.stringify({ title: '' }) });
+    await api(`/api/proyectos-pages/${created.id}`, { method: 'PUT', body: JSON.stringify({ templateKind: 'project' }) });
+    await loadProyectosPages();
+    await openProyectosPage(created.id);
+    document.getElementById('proyectos-page-title').focus();
+    return;
+  }
+  createProyectosPage(null);
+});
 document.getElementById('btn-proyectos-home').addEventListener('click', async () => {
   await flushProyectosSave();
   closeProyectosPeek();
@@ -10957,6 +11275,35 @@ document.getElementById('btn-proyectos-home').addEventListener('click', async ()
 });
 document.getElementById('btn-proyectos-subpage').addEventListener('click', () => {
   if (proyectosCurrentPage) createProyectosPage(proyectosCurrentPage.id);
+});
+// "+ Pagina": al MISMO nivel que la pagina abierta. En la raiz del
+// proyecto no aplica (sus "hermanas" serian otros proyectos): el boton
+// se deshabilita al abrir una raiz, ver openProyectosPage.
+document.getElementById('btn-proyectos-sibling').addEventListener('click', () => {
+  if (proyectosCurrentPage && proyectosCurrentPage.parentId !== null) {
+    createProyectosPage(proyectosCurrentPage.parentId);
+  }
+});
+// Atajos: Ctrl+Alt+N = pagina al mismo nivel; Ctrl+Alt+Mayus+N =
+// subpagina de la abierta.
+document.addEventListener('keydown', (e) => {
+  if (!e.ctrlKey || !e.altKey || e.key.toLowerCase() !== 'n') return;
+  if (document.getElementById('proyectos-view').classList.contains('hidden')) return;
+  if (!proyectosCurrentPage) return;
+  e.preventDefault();
+  if (e.shiftKey) {
+    createProyectosPage(proyectosCurrentPage.id);
+  } else if (proyectosCurrentPage.parentId !== null) {
+    createProyectosPage(proyectosCurrentPage.parentId);
+  }
+});
+// El boton de insertar plantilla (junto a + Subpagina): mismo popover
+// que "/plantilla", sin bloque de origen (los fragmentos se pegan al
+// final de la pagina).
+document.getElementById('btn-proyectos-insert-template').addEventListener('click', (e) => {
+  if (!proyectosCurrentPage) return;
+  e.stopPropagation();
+  openProyectosTemplatePopover(null, document.getElementById('btn-proyectos-insert-template'));
 });
 
 // Titulo: guardar con retraso mientras se escribe. contenteditable de
@@ -11488,7 +11835,11 @@ function openProyectosPdfDialog(rootLite, anchorEl) {
     });
     const span = document.createElement('span');
     span.className = 'proyectos-pdf-page-title';
-    span.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
+    const rowIcon = document.createElement('span');
+    rowIcon.className = 'proyectos-inline-icon';
+    setProyectosPageIcon(rowIcon, page.icon);
+    span.appendChild(rowIcon);
+    span.appendChild(document.createTextNode(` ${page.title || 'Sin título'}`));
     row.appendChild(checkbox);
     row.appendChild(span);
     // La pastilla de ROL, clicable: normal → portada → no incluir →
@@ -11597,7 +11948,11 @@ function renderProyectosSubnav() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'proyectos-subnav-chip';
-    btn.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
+    const chipIcon = document.createElement('span');
+    chipIcon.className = 'proyectos-inline-icon';
+    setProyectosPageIcon(chipIcon, page.icon);
+    btn.appendChild(chipIcon);
+    btn.appendChild(document.createTextNode(` ${page.title || 'Sin título'}`));
     btn.addEventListener('click', () => openProyectosPage(page.id));
     wrap.appendChild(btn);
   }
@@ -11639,6 +11994,52 @@ document.getElementById('btn-proyectos-subnav').addEventListener('click', () => 
 
 const PROYECTOS_BODY = () => document.getElementById('proyectos-page-body');
 
+// ---------------------------------------------------------------------
+// Iconos de interfaz de Proyectos, dibujados en SVG (Koku pidio quitar
+// los emojis de la INTERFAZ — los emojis que TU eliges como icono de
+// una pagina siguen siendo emojis, claro). Trazos con currentColor
+// para que hereden el color del sitio donde se pintan.
+// ---------------------------------------------------------------------
+const PROYECTOS_SVG = (inner, viewBox = '0 0 24 24') =>
+  `<svg viewBox="${viewBox}" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="proyectos-svg-icon">${inner}</svg>`;
+const PROYECTOS_ICONS = {
+  // documento (el icono por defecto de una pagina sin emoji propio)
+  page: PROYECTOS_SVG('<path d="M14 3H6a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 6 21h12a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><polyline points="14 3 14 8.5 19.5 8.5"/>'),
+  // bocadillo (callout normal)
+  callout: PROYECTOS_SVG('<path d="M21 14a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/>'),
+  // los cinco alerts (mismos dibujos que sus cabeceras en el CSS)
+  note: PROYECTOS_SVG('<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12" y2="8.01"/>'),
+  tip: PROYECTOS_SVG('<path d="M12 3a6 6 0 0 0-4 10.5c.6.5 1 1.5 1 2.5h6c0-1 .4-2 1-2.5A6 6 0 0 0 12 3z"/><line x1="9.5" y1="19" x2="14.5" y2="19"/>'),
+  important: PROYECTOS_SVG('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="12" y1="7" x2="12" y2="11"/><line x1="12" y1="14" x2="12" y2="14.01"/>'),
+  warning: PROYECTOS_SVG('<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12" y2="17.01"/>'),
+  caution: PROYECTOS_SVG('<polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12" y2="16.51"/>'),
+  // imagen (montañita con sol)
+  image: PROYECTOS_SVG('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.8" cy="9.2" r="1.6"/><path d="M21 15.5 16 10l-8 9"/>'),
+  // enlaces
+  link: PROYECTOS_SVG('<path d="M10 13.5a4 4 0 0 0 6 .5l3-3a4 4 0 0 0-5.6-5.7l-1.7 1.7"/><path d="M14 10.5a4 4 0 0 0-6-.5l-3 3a4 4 0 0 0 5.6 5.7l1.7-1.7"/>'),
+  pagelink: PROYECTOS_SVG('<path d="M14 3H6a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 6 21h12a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><polyline points="14 3 14 8.5 19.5 8.5"/><path d="M8.5 15.5 15 9"/><polyline points="11.5 9 15 9 15 12.5"/>'),
+  // base de datos (cilindro)
+  database: PROYECTOS_SVG('<ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5v13c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8v-13"/><path d="M4 12c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8"/>'),
+  // plantilla (dos hojas apiladas con +)
+  template: PROYECTOS_SVG('<rect x="3" y="3" width="13" height="13" rx="2"/><path d="M8 21h11a2 2 0 0 0 2-2V8"/><line x1="9.5" y1="7" x2="9.5" y2="12"/><line x1="7" y1="9.5" x2="12" y2="9.5"/>'),
+  // indice de figuras (imagen con lineas)
+  figures: PROYECTOS_SVG('<rect x="3" y="5" width="10" height="9" rx="1.5"/><path d="M12 13 9.2 9.5 5 13.5"/><line x1="16.5" y1="7" x2="21" y2="7"/><line x1="16.5" y1="11" x2="21" y2="11"/><line x1="3.5" y1="18.5" x2="21" y2="18.5"/>'),
+  // menu "⋯" de una tarjeta de la home
+  dots: PROYECTOS_SVG('<circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/>'),
+  // vista en paralelo (dos columnas)
+  columns: PROYECTOS_SVG('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/>'),
+};
+// Un icono de la tabla de arriba como HTML listo para innerHTML.
+function proyectosIconSvg(name) {
+  return PROYECTOS_ICONS[name] || '';
+}
+// Rellena un elemento con el icono de una pagina: su emoji si lo
+// tiene, o el documento SVG por defecto (fuera el 📄 de la interfaz).
+function setProyectosPageIcon(el, icon) {
+  if (icon) el.textContent = icon;
+  else el.innerHTML = proyectosIconSvg('page');
+}
+
 // Estado del menu "/": el bloque donde se escribio, y que opcion esta
 // resaltada con el teclado.
 let proyectosSlashBlock = null;
@@ -11657,15 +12058,15 @@ const PROYECTOS_BLOCK_TYPES = [
   { id: 'numbered', label: 'Lista numerada', hint: '1, 2, 3…', icon: '1.', keywords: 'lista numerada numeros ordenada' },
   { id: 'todo', label: 'Lista de tareas', hint: 'Con casilla para marcar', icon: '☑', keywords: 'tarea todo checkbox casilla pendiente' },
   { id: 'toggle', label: 'Desplegable', hint: 'Se pliega y despliega', icon: '▸', keywords: 'desplegable toggle plegar acordeon' },
-  { id: 'callout', label: 'Callout', hint: 'Recuadro destacado con icono', icon: '💬', keywords: 'callout destacado recuadro' },
+  { id: 'callout', label: 'Callout', hint: 'Recuadro destacado con icono', svgIcon: 'callout', keywords: 'callout destacado recuadro' },
   // Los "alerts" de GitHub (> [!TIP] y compañia): callouts tipados con
   // color, icono y etiqueta fijos. Tambien salen escribiendo !tip,
   // !nota, !aviso... + espacio (ver PROYECTOS_MD_SHORTCUTS).
-  { id: 'callout-note', label: 'Nota', hint: 'Alert azul (!nota)', icon: 'ℹ️', keywords: 'nota note alert informacion azul' },
-  { id: 'callout-tip', label: 'Consejo', hint: 'Alert verde (!tip)', icon: '💡', keywords: 'consejo tip alert truco verde' },
-  { id: 'callout-important', label: 'Importante', hint: 'Alert morado (!importante)', icon: '❗', keywords: 'importante important alert morado' },
-  { id: 'callout-warning', label: 'Aviso', hint: 'Alert amarillo (!aviso)', icon: '⚠️', keywords: 'aviso warning alert cuidado amarillo' },
-  { id: 'callout-caution', label: 'Peligro', hint: 'Alert rojo (!peligro)', icon: '🛑', keywords: 'peligro caution alert rojo' },
+  { id: 'callout-note', label: 'Nota', hint: 'Alert azul (!nota)', svgIcon: 'note', keywords: 'nota note alert informacion azul' },
+  { id: 'callout-tip', label: 'Consejo', hint: 'Alert verde (!tip)', svgIcon: 'tip', keywords: 'consejo tip alert truco verde' },
+  { id: 'callout-important', label: 'Importante', hint: 'Alert morado (!importante)', svgIcon: 'important', keywords: 'importante important alert morado' },
+  { id: 'callout-warning', label: 'Aviso', hint: 'Alert amarillo (!aviso)', svgIcon: 'warning', keywords: 'aviso warning alert cuidado amarillo' },
+  { id: 'callout-caution', label: 'Peligro', hint: 'Alert rojo (!peligro)', svgIcon: 'caution', keywords: 'peligro caution alert rojo' },
   { id: 'quote', label: 'Cita', hint: 'Texto citado', icon: '❝', keywords: 'cita quote' },
   { id: 'divider', label: 'Divisor', hint: 'Línea separadora', icon: '—', keywords: 'divisor separador linea hr' },
   { id: 'code', label: 'Código', hint: 'Bloque de código', icon: '</>', keywords: 'codigo code programar' },
@@ -11679,14 +12080,14 @@ const PROYECTOS_BLOCK_TYPES = [
   // el proyecto PUEDE ser la estructura del documento: tu pagina de
   // indice lleva el bloque de indice, etc.).
   { id: 'pdf-toc', label: 'Índice de contenido (PDF)', hint: 'Se rellena al exportar, con enlaces', icon: '☰', keywords: 'indice contenido tabla contenidos toc pdf exportar' },
-  { id: 'pdf-figures', label: 'Índice de figuras (PDF)', hint: 'Lista las imágenes con pie de foto', icon: '🖼', keywords: 'indice figuras imagenes fotos pdf exportar' },
+  { id: 'pdf-figures', label: 'Índice de figuras (PDF)', hint: 'Lista las imágenes con pie de foto', svgIcon: 'figures', keywords: 'indice figuras imagenes fotos pdf exportar' },
   { id: 'pdf-break', label: 'Salto de página (PDF)', hint: 'El documento salta de hoja aquí', icon: '⤓', keywords: 'salto pagina hoja pdf exportar break' },
-  { id: 'image', label: 'Imagen', hint: 'Subir una imagen', icon: '🖼', keywords: 'imagen foto image subir' },
-  { id: 'page', label: 'Subpágina', hint: 'Crear una página dentro de esta', icon: '📄', keywords: 'pagina subpagina page anidar' },
-  { id: 'template', label: 'Desde plantilla…', hint: 'Insertar una plantilla como subpágina', icon: '📋', keywords: 'plantilla template insertar clonar' },
-  { id: 'weblink', label: 'Enlace web', hint: 'A una página de internet', icon: '🔗', keywords: 'enlace link web url internet' },
-  { id: 'pagelink', label: 'Enlace a página', hint: 'A otra página de Proyectos', icon: '🔀', keywords: 'enlace link pagina conector interno' },
-  { id: 'database', label: 'Base de datos', hint: 'Tabla, tablero o lista con propiedades', icon: '🗄', keywords: 'base datos database tabla tablero kanban lista coleccion' },
+  { id: 'image', label: 'Imagen', hint: 'Subir una imagen', svgIcon: 'image', keywords: 'imagen foto image subir' },
+  { id: 'page', label: 'Subpágina', hint: 'Crear una página dentro de esta', svgIcon: 'page', keywords: 'pagina subpagina page anidar' },
+  { id: 'template', label: 'Desde plantilla…', hint: 'Insertar una plantilla como subpágina', svgIcon: 'template', keywords: 'plantilla template insertar clonar' },
+  { id: 'weblink', label: 'Enlace web', hint: 'A una página de internet', svgIcon: 'link', keywords: 'enlace link web url internet' },
+  { id: 'pagelink', label: 'Enlace a página', hint: 'A otra página de Proyectos', svgIcon: 'pagelink', keywords: 'enlace link pagina conector interno' },
+  { id: 'database', label: 'Base de datos', hint: 'Tabla, tablero o lista con propiedades', svgIcon: 'database', keywords: 'base datos database tabla tablero kanban lista coleccion' },
   // Alineacion: estas opciones NO convierten el bloque, le ponen (o
   // quitan) el data-align. Tambien existen como atajos de teclado (los
   // de Word en español) -- ver el manejador de keydown.
@@ -12268,7 +12669,8 @@ function renderProyectosSlashMenu() {
     if (i === proyectosSlashIndex) btn.classList.add('selected');
     const icon = document.createElement('span');
     icon.className = 'proyectos-slash-icon';
-    icon.textContent = type.icon;
+    if (type.svgIcon) icon.innerHTML = proyectosIconSvg(type.svgIcon);
+    else icon.textContent = type.icon;
     const textWrap = document.createElement('span');
     textWrap.className = 'proyectos-slash-text';
     const label = document.createElement('span');
@@ -13417,7 +13819,11 @@ function openProyectosPageLinkPopover(block) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'proyectos-slash-item';
-      btn.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
+      const itemIcon = document.createElement('span');
+      itemIcon.className = 'proyectos-inline-icon';
+      setProyectosPageIcon(itemIcon, page.icon);
+      btn.appendChild(itemIcon);
+      btn.appendChild(document.createTextNode(` ${page.title || 'Sin título'}`));
       btn.addEventListener('mousedown', (e) => {
         e.preventDefault();
         insertProyectosPageLink(page);
@@ -13453,7 +13859,7 @@ function insertProyectosPageLink(page) {
   if (!block || !PROYECTOS_BODY().contains(block)) return;
   const a = document.createElement('a');
   a.setAttribute('data-page-link', String(page.id));
-  a.textContent = `${page.icon || '📄'} ${page.title || 'Sin título'}`;
+  a.textContent = `${page.icon ? page.icon + ' ' : ''}${page.title || 'Sin título'}`;
   block.appendChild(a);
   block.appendChild(document.createTextNode(' '));
   placeCaretIn(block, { atEnd: true });
@@ -13468,7 +13874,42 @@ function insertProyectosPageLink(page) {
 let proyectosTemplatePopover = null;
 let proyectosTemplateBlock = null;
 
-function openProyectosTemplatePopover(block) {
+// Pegar un FRAGMENTO en la pagina abierta: el backend clona sus bases
+// e imagenes hacia esta pagina y devuelve el HTML ya remapeado; aqui
+// se inserta (en el bloque desde el que se pidio, o al final) y se
+// rehidrata todo lo especial.
+async function insertProyectosFragment(template, targetBlock) {
+  if (!proyectosCurrentPage) return;
+  try {
+    const { html } = await api(`/api/proyectos-pages/${template.id}/fragment`, {
+      method: 'POST',
+      body: JSON.stringify({ targetPageId: proyectosCurrentPage.id }),
+    });
+    const holder = document.createElement('div');
+    holder.innerHTML = html || '<div><br></div>';
+    const nodes = [...holder.childNodes];
+    const body = PROYECTOS_BODY();
+    if (targetBlock && body.contains(targetBlock) && targetBlock.textContent.trim() === '') {
+      targetBlock.replaceWith(...nodes);
+    } else if (targetBlock && body.contains(targetBlock)) {
+      targetBlock.after(...nodes);
+    } else {
+      body.append(...nodes);
+    }
+    // Que siempre quede sitio para seguir escribiendo debajo.
+    body.appendChild(emptyProyectosBlock());
+    hydrateProyectosDbBlocks();
+    hydrateProyectosPdfBlocks();
+    highlightProyectosCodeBlocks();
+    renderProyectosDiagrams();
+    queueProyectosSaveBody();
+  } catch (err) {
+    console.error('No se pudo pegar el fragmento:', err);
+    showAppAlert(`No se pudo pegar el fragmento: ${err.message}`);
+  }
+}
+
+function openProyectosTemplatePopover(block, anchorEl = null) {
   proyectosTemplateBlock = block;
   if (!proyectosTemplatePopover) {
     proyectosTemplatePopover = document.createElement('div');
@@ -13478,49 +13919,74 @@ function openProyectosTemplatePopover(block) {
   const popover = proyectosTemplatePopover;
   popover.innerHTML = '';
 
-  const templates = proyectosChildrenOf(null).filter((p) => p.isTemplate);
-  if (templates.length === 0) {
+  const all = proyectosChildrenOf(null).filter((p) => p.isTemplate);
+  const fragments = all.filter((p) => p.templateKind === 'fragment');
+  const projects = all.filter((p) => p.templateKind !== 'fragment');
+
+  const addGroup = (labelText, items, onPick) => {
+    if (items.length === 0) return;
+    const label = document.createElement('p');
+    label.className = 'hint proyectos-template-group';
+    label.textContent = labelText;
+    popover.appendChild(label);
+    for (const template of items) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'proyectos-slash-item';
+      const tplIcon = document.createElement('span');
+      tplIcon.className = 'proyectos-inline-icon';
+      if (template.icon) tplIcon.textContent = template.icon;
+      else tplIcon.innerHTML = proyectosIconSvg('template');
+      btn.appendChild(tplIcon);
+      btn.appendChild(document.createTextNode(` ${template.title || 'Sin título'}`));
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        popover.classList.add('hidden');
+        const target = proyectosTemplateBlock;
+        proyectosTemplateBlock = null;
+        onPick(template, target);
+      });
+      popover.appendChild(btn);
+    }
+  };
+
+  // Fragmentos primero: son lo "rapido" (una tabla con formato, un
+  // esquema...) y se pegan aqui mismo.
+  addGroup('Fragmentos — se pegan en esta página', fragments, (template, target) => {
+    insertProyectosFragment(template, target);
+  });
+  addGroup('Plantillas de proyecto — entran como subpágina', projects, async (template, target) => {
+    if (!proyectosCurrentPage) return;
+    // El bloque desde el que se pidio queda como bloque vacio normal.
+    if (target && PROYECTOS_BODY().contains(target) && target.textContent.trim() === '') {
+      target.replaceWith(emptyProyectosBlock());
+    }
+    queueProyectosSaveBody();
+    try {
+      await api(`/api/proyectos-pages/${template.id}/clone`, {
+        method: 'POST',
+        body: JSON.stringify({ parentId: proyectosCurrentPage.id, asTemplate: false }),
+      });
+      await loadProyectosPages();
+      proyectosExpandedIds.add(proyectosCurrentPage.id);
+      saveProyectosExpanded();
+      renderProyectosTree();
+      renderProyectosSubnav();
+    } catch (err) {
+      console.error('No se pudo insertar la plantilla:', err);
+      showAppAlert(`No se pudo insertar la plantilla: ${err.message}`);
+    }
+  });
+
+  if (all.length === 0) {
     const hint = document.createElement('p');
     hint.className = 'hint';
-    hint.textContent = 'No hay plantillas todavía: en la home (⌂), selecciona un proyecto y pulsa "→ Plantilla".';
+    hint.textContent = 'No hay plantillas todavía: créalas en la pestaña Plantillas de la home, o convierte un proyecto con "→ Plantilla".';
     popover.appendChild(hint);
-  }
-  for (const template of templates) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'proyectos-slash-item';
-    btn.textContent = `${template.icon || '📋'} ${template.title || 'Sin título'}`;
-    btn.addEventListener('mousedown', async (e) => {
-      e.preventDefault();
-      popover.classList.add('hidden');
-      const target = proyectosTemplateBlock;
-      proyectosTemplateBlock = null;
-      if (!proyectosCurrentPage) return;
-      // El bloque desde el que se pidio queda como bloque vacio normal.
-      if (target && PROYECTOS_BODY().contains(target) && target.textContent.trim() === '') {
-        target.replaceWith(emptyProyectosBlock());
-      }
-      queueProyectosSaveBody();
-      try {
-        await api(`/api/proyectos-pages/${template.id}/clone`, {
-          method: 'POST',
-          body: JSON.stringify({ parentId: proyectosCurrentPage.id, asTemplate: false }),
-        });
-        await loadProyectosPages();
-        proyectosExpandedIds.add(proyectosCurrentPage.id);
-        saveProyectosExpanded();
-        renderProyectosTree();
-        renderProyectosSubnav();
-      } catch (err) {
-        console.error('No se pudo insertar la plantilla:', err);
-        showAppAlert(`No se pudo insertar la plantilla: ${err.message}`);
-      }
-    });
-    popover.appendChild(btn);
   }
 
   popover.classList.remove('hidden');
-  const rect = block.getBoundingClientRect();
+  const rect = (anchorEl || block).getBoundingClientRect();
   popover.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 260)}px`;
   popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 310))}px`;
 }
@@ -13674,8 +14140,52 @@ PROYECTOS_BODY().addEventListener('keydown', (e) => {
       queueProyectosSaveBody();
       return;
     }
+    // En una checklist: Tab sangra la tarea un nivel (Mayus+Tab la
+    // saca). La sangria vive en data-indent (1-6, lo pinta el CSS y lo
+    // conserva el saneador); a nivel 0 el atributo se quita del todo.
+    const todoBlock = getProyectosCurrentBlock();
+    if (todoBlock && todoBlock.matches('[data-todo]')) {
+      e.preventDefault();
+      const current = Number(todoBlock.getAttribute('data-indent')) || 0;
+      const next = e.shiftKey ? current - 1 : current + 1;
+      if (next <= 0) todoBlock.removeAttribute('data-indent');
+      else todoBlock.setAttribute('data-indent', String(Math.min(next, 6)));
+      queueProyectosSaveBody();
+      return;
+    }
     e.preventDefault();
     return;
+  }
+
+  // Retroceso al PRINCIPIO de una tarea: quitarle la casilla (queda
+  // como texto normal), en vez de dejar que el navegador la funda con
+  // la linea de arriba. Sin esto, fundir una tarea TACHADA con una sin
+  // tachar heredaba los atributos de la de arriba y el check se perdia
+  // en silencio (reproducido de verdad — lo pregunto Koku). Es ademas
+  // lo que hace Notion: primero fuera la casilla, y el siguiente
+  // Retroceso ya une lineas normales.
+  if (e.key === 'Backspace') {
+    const block = getProyectosCurrentBlock();
+    const sel = window.getSelection();
+    if (block && block.matches('[data-todo]') && sel.rangeCount > 0 && sel.getRangeAt(0).collapsed) {
+      // ¿Esta el cursor al principio del bloque? Se mide con un rango
+      // desde el inicio del bloque hasta el cursor: si no abarca ningun
+      // texto, no hay nada a la izquierda.
+      const probe = sel.getRangeAt(0).cloneRange();
+      probe.selectNodeContents(block);
+      probe.setEnd(sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
+      if (probe.toString() === '') {
+        e.preventDefault();
+        const div = document.createElement('div');
+        copyProyectosAlign(block, div);
+        while (block.firstChild) div.appendChild(block.firstChild);
+        if (!div.firstChild) div.appendChild(document.createElement('br'));
+        block.replaceWith(div);
+        placeCaretIn(div); // al principio, donde estaba
+        queueProyectosSaveBody();
+        return;
+      }
+    }
   }
 
   // Con el menu "/" abierto, las flechas/Intro/Escape son del menu.
@@ -13769,6 +14279,10 @@ PROYECTOS_BODY().addEventListener('keydown', (e) => {
       next.setAttribute('data-done', '0');
       next.appendChild(document.createElement('br'));
       copyProyectosAlign(block, next); // la alineacion se hereda (estilo Word)
+      // La sangria (Tab) tambien se hereda: la tarea nueva nace al
+      // mismo nivel que la de arriba, como en cualquier lista anidada.
+      const indent = block.getAttribute('data-indent');
+      if (indent) next.setAttribute('data-indent', indent);
       block.after(next);
       placeCaretIn(next);
       queueProyectosSaveBody();
@@ -14007,12 +14521,13 @@ document.addEventListener('click', (e) => {
   }
   if (proyectosPdfPopover && !proyectosPdfPopover.classList.contains('hidden')
       && !e.target.closest('.proyectos-pdf-popover') && !e.target.closest('#btn-proyectos-pdf')
-      && !e.target.closest('.proyectos-home-card-action') // la accion PDF de una tarjeta de la home
+      && !e.target.closest('.proyectos-home-menu') // "Exportar a PDF" del menu ⋯ de una tarjeta
       && !e.target.closest('.select-popover')) { // el desplegable del rol vive fuera
     proyectosPdfPopover.classList.add('hidden');
   }
   if (proyectosTemplatePopover && !proyectosTemplatePopover.classList.contains('hidden')
-      && !e.target.closest('.proyectos-template-popover')) {
+      && !e.target.closest('.proyectos-template-popover')
+      && !e.target.closest('#btn-proyectos-insert-template')) {
     proyectosTemplatePopover.classList.add('hidden');
     proyectosTemplateBlock = null;
   }
@@ -14020,11 +14535,9 @@ document.addEventListener('click', (e) => {
       && !e.target.closest('.proyectos-hm-popover') && !e.target.closest('.proyectos-hm-cell')) {
     proyectosHmDayPopover.classList.add('hidden');
   }
-  // Clic fuera de las tarjetas de la home = quitar la seleccion.
-  if (proyectosHomeSelectedId !== null && !document.getElementById('proyectos-home').classList.contains('hidden')
-      && !e.target.closest('.proyectos-home-card') && !e.target.closest('.proyectos-pdf-popover')) {
-    proyectosHomeSelectedId = null;
-    renderProyectosHome();
+  if (proyectosSplitPickPopover && !proyectosSplitPickPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-split-pick-popover')) {
+    proyectosSplitPickPopover.classList.add('hidden');
   }
   // (el caso de "nodo ya desconectado" lo corta el guard de arriba)
   if (proyectosDbConfigPopover && !proyectosDbConfigPopover.classList.contains('hidden')
@@ -15996,16 +16509,25 @@ async function createProyectosGuide() {
   });
 
   // Con las subpáginas ya creadas (y sus ids conocidos), se rellena por
-  // fin el cuerpo de la página principal, que las enlaza.
+  // fin el cuerpo de la página principal, que las enlaza. La guía se
+  // marca como TAL (isGuide): es única, no sale en la galería, y el
+  // botón del libro la abre en vez de crear otra.
   await api(`/api/proyectos-pages/${guide.id}`, {
     method: 'PUT',
-    body: JSON.stringify({ body: guideBodyOf(orgPage.id, dbPage.id, exportPage.id) }),
+    body: JSON.stringify({ isGuide: true, body: guideBodyOf(orgPage.id, dbPage.id, exportPage.id) }),
   });
 
   // --- 3ter) Plantilla de ejemplo "Documento PDF" (galería de
   // Plantillas): la estructura de un documento ya montada — portada
-  // propia + índice + contenido + anexos. Se crea como plantilla de
-  // verdad, lista para "Usar".
+  // propia + índice + contenido + anexos. Solo si no existe ya (crear
+  // la guía dos veces duplicaba la plantilla, pasó de verdad).
+  if (proyectosPages.some((p) => p.isTemplate && p.parentId === null && p.title === 'Documento PDF')) {
+    await loadProyectosPages();
+    proyectosExpandedIds.add(guide.id);
+    saveProyectosExpanded();
+    await openProyectosPage(guide.id);
+    return { guide, orgPage, dbPage };
+  }
   const pdfTemplate = await api('/api/proyectos-pages', {
     method: 'POST',
     body: JSON.stringify({ title: 'Documento PDF', icon: '📕', coverColor: '#ab7df8' }),
@@ -16044,12 +16566,20 @@ async function createProyectosGuide() {
   return { guide, orgPage, dbPage };
 }
 
+// El boton del libro ABRE la guia; solo la crea si aun no existe (antes
+// creaba una nueva en cada pulsacion y se acumulaban, feedback real).
 async function handleCreateProyectosGuide() {
   try {
+    await loadProyectosPages();
+    const existing = proyectosPages.find((p) => p.isGuide && p.parentId === null);
+    if (existing) {
+      await openProyectosPage(existing.id);
+      return;
+    }
     await createProyectosGuide();
   } catch (err) {
-    console.error('No se pudo crear el proyecto de ejemplo:', err);
-    showAppAlert(`No se pudo crear el proyecto de ejemplo: ${err.message}`);
+    console.error('No se pudo abrir la guía:', err);
+    showAppAlert(`No se pudo abrir la guía: ${err.message}`);
   }
 }
 

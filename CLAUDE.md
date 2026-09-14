@@ -663,6 +663,82 @@ ahora se llama `device`.
         bloque figures) — la galeria de Plantillas nunca esta vacia
         tras crear la guia. La vision de "plantillas de PDF" queda
         COMPLETA.
+    - **Ronda 9: "guia unica + home ⋯ + fragmentos + Tab + paralelo"**
+      (gran lote de feedback del 13-14/9 + peticiones en caliente;
+      driver `drive-round9.js`, 34 comprobaciones en verde):
+      - **Guia unica** (`is_guide` en proyectos_pages, serializado
+        `isGuide`): el boton 📖 ABRE la guia si ya existe y solo la
+        crea la primera vez (a Koku se le habian generado 3). La guia
+        no sale en la home (filtro `!p.isGuide`) y la plantilla
+        "Documento PDF" tambien se deduplica (check por titulo+raiz+
+        is_template antes de crearla). Las duplicadas viejas las borra
+        el con Eliminar.
+      - **Home rediseñada DOS veces en la misma ronda**: primero "1
+        clic = seleccionar y salen botones en la tarjeta" (lo pedido
+        originalmente, con Suprimir = eliminar), y al probarlo Koku
+        dijo "no me acaba" — ahora CLIC = ABRIR directamente y todas
+        las acciones viven en un menu "⋯" por tarjeta
+        (`openProyectosHomeMenu`, un solo popover reutilizado): Usar
+        plantilla / Abrir / Exportar a PDF / Exportar .rmproj /
+        Convertir en fragmento-plantilla de proyecto / →Plantilla-
+        Normal / Eliminar (danger). Suprimir elimina el proyecto CUYO
+        MENU este abierto; Escape cierra el menu. No reintroducir el
+        patron de seleccion.
+      - **Dos clases de plantilla** (`is_template` 0/1/2, serializado
+        `templateKind: 'project'|'fragment'|null` + `isTemplate` bool
+        legacy): de PROYECTO (se clona entera) y FRAGMENTO (su cuerpo
+        se PEGA en la pagina abierta). Ruta nueva
+        `POST /:id/fragment {targetPageId}` → `{html}`: clona las
+        bases del body hacia la pagina destino, copia imagenes,
+        deshace page-links y devuelve el HTML remapeado;
+        `insertProyectosFragment` lo inserta (replaceWith si el bloque
+        origen esta vacio / after si no / append) y rehidrata todo.
+        Boton en la barra de la pagina (+ el "/plantilla" de siempre)
+        → `openProyectosTemplatePopover` con dos grupos. En la pestaña
+        Plantillas el boton contextual es "+ Nueva plantilla" (nace
+        `templateKind: 'project'`).
+      - **+ Pagina / + Subpagina** en la barra (sibling deshabilitado
+        en una raiz) con atajos **Ctrl+Alt+N / Ctrl+Alt+Mayus+N**
+        (document.keydown; no-op silencioso donde no aplica).
+      - **Tab en las checklists** (pedido "ve tirando"): Tab sangra la
+        tarea, Mayus+Tab la saca — `data-indent` 1-6 en el div
+        data-todo (saneador lo conserva solo 1-6; CSS margin-left por
+        nivel; Intro hereda la sangria de la tarea de arriba).
+      - **Retroceso al PRINCIPIO de una tarea = quitarle la casilla**
+        (estilo Notion), nunca fusionar con la linea de arriba: la
+        fusion nativa heredaba los atributos del bloque de arriba y
+        una tarea TACHADA perdia el check en silencio (lo pregunto
+        Koku, se reprodujo de verdad en el driver). Borrar la linea de
+        arriba por las vias normales NO afecta al check (el estado va
+        en el propio bloque).
+      - **Vista en PARALELO** ("estilo Notepad++"): boton en la barra
+        → `#proyectos-split`, un segundo panel flex a la derecha del
+        editor con OTRA pagina en modo LECTURA (de cualquier
+        proyecto). El selector (`openProyectosSplitPicker`) lista el
+        arbol entero aplanado con buscador. Las bases se pintan con la
+        tabla ESTATICA del PDF (`buildProyectosPdfDbTable`), los
+        mermaid dibujados, y el cuerpo reusa la clase
+        .proyectos-page-body (mismos estilos) SIN contenteditable.
+        Un page-link dentro del panel abre en el EDITOR (el panel es
+        la referencia quieta); ⇄ intercambia editor↔panel; ✕ cierra.
+        Editar en los dos lados a la vez se descarto a proposito (dos
+        editores compartiendo guardado se pisan) — para editar la otra
+        esta el ⇄.
+      - **Barrido de emojis de interfaz → iconos SVG** (mapa
+        `PROYECTOS_ICONS` + `proyectosIconSvg` + `setProyectosPageIcon`;
+        el slash menu usa campo `svgIcon`). Los emojis que el USUARIO
+        elige como icono de pagina se quedan (y los del contenido de la
+        guia, intencionales).
+      - **Proyecto de seguimiento**: lo que Koku pedia era un proyecto
+        DENTRO de la app con el estado de cada rama — entregado como
+        `RemindMeLater - Seguimiento.rmproj` (bundle hecho a mano:
+        raiz con base "Ramas de RemindMeLater" en tablero por Estado +
+        paginas Linea Escritorio / Linea Movil / Como mantener este
+        proyecto con rol skip). OJO: importarlo otra vez crea un
+        proyecto NUEVO, no fusiona.
+      - Gotcha de driver aprendido: `POST /:id/rows` devuelve la BASE
+        entera (no la fila) y crear una base SIEMBRA sola una prop
+        "Estado" — un driver que añada la suya acaba con dos.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 

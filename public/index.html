@@ -469,10 +469,10 @@
       </div>
     </div>
     <!-- La HOME de Proyectos (pedida por Koku): pestañas Mis proyectos /
-         Plantillas, buscador y una tarjeta por proyecto raiz. 1 clic =
-         seleccionar la tarjeta (salen sus acciones: abrir, PDF, archivo
-         .rmproj, plantilla), doble clic = entrar. Al entrar, el sidebar
-         de al lado enseña SOLO el arbol de ese proyecto. -->
+         Plantillas, buscador y una tarjeta por proyecto raiz. Clic =
+         abrir el proyecto; las acciones (PDF, archivo .rmproj,
+         plantilla, eliminar) viven en el menu "⋯" de cada tarjeta. Al
+         entrar, el sidebar de al lado enseña SOLO ese proyecto. -->
     <div id="proyectos-home" class="proyectos-home hidden">
       <div class="proyectos-home-topbar">
         <div class="proyectos-home-tabs" id="proyectos-home-tabs">
@@ -483,16 +483,16 @@
         <div class="spacer"></div>
         <button type="button" id="btn-proyectos-home-new" class="primary-btn">+ Nuevo proyecto</button>
         <button type="button" id="btn-proyectos-home-import" class="secondary-btn" title="Importar un proyecto exportado (.rmproj) de este u otro ordenador">Importar…</button>
-        <button type="button" id="btn-proyectos-home-guide" class="icon-btn" aria-label="Crear el proyecto de ejemplo" title="Crear el proyecto de ejemplo (guía de uso)">📖</button>
+        <button type="button" id="btn-proyectos-home-guide" class="icon-btn" aria-label="Abrir la guía de uso" title="Abrir la guía de uso (se crea sola la primera vez)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6.5C10.5 4.9 8.4 4 6 4c-1 0-2 .15-3 .5v14c1-.35 2-.5 3-.5 2.4 0 4.5.9 6 2.5 1.5-1.6 3.6-2.5 6-2.5 1 0 2 .15 3 .5v-14c-1-.35-2-.5-3-.5-2.4 0-4.5.9-6 2.5z"/><line x1="12" y1="6.5" x2="12" y2="20.5"/></svg></button>
       </div>
-      <p class="hint proyectos-home-hint">Un clic selecciona un proyecto (salen sus acciones) · doble clic lo abre</p>
+      <p class="hint proyectos-home-hint">Clic para abrir · el botón ⋯ de cada tarjeta tiene sus opciones (PDF, exportar, plantilla, eliminar)</p>
       <div id="proyectos-home-grid" class="proyectos-home-grid"></div>
     </div>
     <div class="proyectos-layout">
       <aside class="proyectos-sidebar">
         <div class="proyectos-sidebar-header">
           <!-- ⌂ vuelve a la home (la lista de todos los proyectos). -->
-          <button type="button" id="btn-proyectos-home" class="icon-btn" aria-label="Todos los proyectos" title="Volver a todos los proyectos">⌂</button>
+          <button type="button" id="btn-proyectos-home" class="icon-btn" aria-label="Todos los proyectos" title="Volver a todos los proyectos"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 11 9-8 9 8"/><path d="M5.5 9.5V20a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9.5"/><path d="M10 21v-6h4v6"/></svg></button>
           <span>Proyecto</span>
           <span class="proyectos-sidebar-header-btns">
             <!-- Crea el "proyecto de ejemplo": un arbol de paginas ya
@@ -501,7 +501,7 @@
                  createProyectosGuide en app.js). Se puede crear las
                  veces que se quiera; es un proyecto normal, se borra
                  como cualquier otro. -->
-            <button type="button" id="btn-proyectos-guide" class="icon-btn" aria-label="Crear el proyecto de ejemplo" title="Crear el proyecto de ejemplo (guía de uso)">📖</button>
+            <button type="button" id="btn-proyectos-guide" class="icon-btn" aria-label="Abrir la guía de uso" title="Abrir la guía de uso"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6.5C10.5 4.9 8.4 4 6 4c-1 0-2 .15-3 .5v14c1-.35 2-.5 3-.5 2.4 0 4.5.9 6 2.5 1.5-1.6 3.6-2.5 6-2.5 1 0 2 .15 3 .5v-14c-1-.35-2-.5-3-.5-2.4 0-4.5.9-6 2.5z"/><line x1="12" y1="6.5" x2="12" y2="20.5"/></svg></button>
             <!-- Modo seleccion: casillas en el arbol para mover varias
                  paginas de golpe (ver la barra de abajo). -->
             <!-- El icono es un SVG lineal (una lista con casillas), no
@@ -558,9 +558,32 @@
             <div class="proyectos-page-toolbar">
               <button type="button" id="btn-proyectos-favorite" class="icon-btn" aria-label="Favorito" title="Favorito">☆</button>
               <button type="button" id="btn-proyectos-cover" class="icon-btn" aria-label="Portada" title="Color de portada">▦</button>
-              <button type="button" id="btn-proyectos-subpage" class="secondary-btn" title="Crear una subpágina dentro de esta">+ Subpágina</button>
+              <!-- Dos formas de crear: al MISMO nivel que esta pagina o
+                   DENTRO de ella. Con atajos: Ctrl+Alt+N / Ctrl+Alt+Mayus+N. -->
+              <button type="button" id="btn-proyectos-sibling" class="secondary-btn" title="Nueva página al mismo nivel que esta (Ctrl+Alt+N)">+ Página</button>
+              <button type="button" id="btn-proyectos-subpage" class="secondary-btn" title="Nueva subpágina dentro de esta (Ctrl+Alt+Mayús+N)">+ Subpágina</button>
+              <!-- Insertar una plantilla aqui: las de proyecto entran
+                   como subpagina, los fragmentos se pegan en la pagina. -->
+              <button type="button" id="btn-proyectos-insert-template" class="icon-btn" aria-label="Insertar plantilla" title="Insertar una plantilla aquí (proyecto → subpágina · fragmento → se pega en la página)">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="13" height="13" rx="2"/>
+                  <path d="M8 21h11a2 2 0 0 0 2-2V8"/>
+                  <line x1="9.5" y1="7" x2="9.5" y2="12"/>
+                  <line x1="7" y1="9.5" x2="12" y2="9.5"/>
+                </svg>
+              </button>
+              <!-- Vista en paralelo (pedida por Koku, "estilo
+                   Notepad++"): abre un segundo panel de LECTURA a la
+                   derecha con cualquier otra pagina, para comparar dos
+                   cosas a la vez. -->
+              <button type="button" id="btn-proyectos-split" class="icon-btn" aria-label="Ver otra página en paralelo" title="Ver otra página en paralelo (panel de lectura a la derecha)">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="16" rx="2"/>
+                  <line x1="12" y1="4" x2="12" y2="20"/>
+                </svg>
+              </button>
               <!-- (Exportar — PDF o archivo .rmproj — vive en la HOME:
-                   1 clic en la tarjeta del proyecto. Pedido por Koku.) -->
+                   en el menu ⋯ de la tarjeta del proyecto.) -->
               <div class="spacer"></div>
               <button type="button" id="btn-proyectos-delete" class="danger-btn" title="Borrar esta página (sus subpáginas suben un nivel)">Borrar</button>
               <button type="button" id="btn-proyectos-delete-tree" class="danger-btn-solid" title="Borrar esta página Y todas sus subpáginas">Borrar con subpáginas</button>
@@ -569,6 +592,22 @@
           </div>
         </div>
       </section>
+      <!-- Vista en PARALELO: un segundo panel con OTRA pagina en modo
+           lectura (cualquiera, de este proyecto o de otro), para ver y
+           comparar dos cosas a la vez -- estilo vista partida de
+           Notepad++. Se abre desde el boton de la barra de la pagina;
+           las bases de datos se pintan como tabla estatica y los
+           enlaces a pagina se abren en el panel PRINCIPAL. -->
+      <aside id="proyectos-split" class="proyectos-split hidden">
+        <div class="proyectos-split-header">
+          <span id="proyectos-split-title" class="proyectos-split-title"></span>
+          <div class="spacer"></div>
+          <button type="button" id="btn-proyectos-split-pick" class="icon-btn" aria-label="Cambiar de página" title="Ver otra página en este panel">▾</button>
+          <button type="button" id="btn-proyectos-split-swap" class="icon-btn" aria-label="Intercambiar" title="Abrir esta página en el editor (y traer aquí la actual)">⇄</button>
+          <button type="button" id="btn-proyectos-split-close" class="icon-btn" aria-label="Cerrar el panel" title="Cerrar el panel">✕</button>
+        </div>
+        <div id="proyectos-split-body" class="proyectos-split-body proyectos-page-body"></div>
+      </aside>
       <!-- "Side peek": panel lateral que abre una FILA de una base de
            datos como si fuera una mini-pagina (titulo + propiedades +
            cuerpo libre), sin salir de la pagina donde vive la base --
