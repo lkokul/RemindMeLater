@@ -4399,6 +4399,69 @@ tabla a tabla en ese orden y una sesión apunta a su item.
 Las dos comprobaciones nuevas (`v62-copia`) se probaron deshaciendo cada
 arreglo a propósito: 3 en rojo con la regla vieja de exportar, 1 con el
 `assetClear()` de vuelta.
+## Las letras del widget en blanco sobre blanco: `.foreground` NO hereda
+
+Koku, con una captura del widget del calendario (14/9/2026): *"Las letras
+siguen siendo blancas, puedes revisar para que el widget se vea el
+contenido?"*. El mes en azul y el círculo del día de hoy se veían; los
+números de los días, no. **Era la SEGUNDA vez**, y la primera se dio por
+arreglada con el arreglo equivocado — por eso este bloque.
+
+**La causa, que es contraintuitiva**: `ShapeStyle.foreground` NO significa
+"el color que puso mi ancestro". Es el estilo **por defecto del sistema**,
+así que `.foregroundStyle(.foreground)` en un hijo **RESETEA** el tinte que
+`fondoDeWidgetApp` puso en la raíz con el color del tema. Con el móvil en
+modo oscuro ese color por defecto es BLANCO, y el fondo del widget era el
+blanco de un tema claro.
+
+Lo que despista, y es la pista que estaba delante todo el rato: las
+cabeceras `L M X J V S D` SÍ se veían. Usan `.secondary`, que es un estilo
+**jerárquico** y ese sí se deriva de verdad del ancestro. O sea que el
+color de la raíz estaba bien puesto; lo único roto era quien creía estar
+heredándolo.
+
+**La primera vez se arregló mal.** El síntoma se achacó a `Color.primary`
+(que también estaba, y también es del sistema), se cambió por
+`.foreground` y se dio por bueno — y de paso se escribió una comprobación
+en `tools/comprobar-widgets.py` que **recomendaba `.foreground`** como la
+forma de heredar. Ese consejo es lo que hizo que volviera.
+
+**Cómo se arregla de verdad**: cuando un texto tiene que ELEGIR entre dos
+colores, los DOS lados del ternario son un `Color` de verdad. El "normal"
+se pide resuelto con **`EstiloDeWidget.colorDeTexto(oscuro:)`**
+(`ResumenDeLaApp.swift`), que devuelve el `--surface-text` del tema — o
+`Color.primary` si no hay tema (estilo "sistema"), que ahí sí es lo
+correcto porque el fondo es el material del sistema.
+
+Para que ese método pueda elegir entre la paleta clara y la oscura del
+estilo "mixto", la elección se sacó de dentro de `FondoDeWidget` a
+`EstiloDeWidget.elegidos(oscuro:)`, y el modifier la llama también: el
+fondo y las letras no pueden salir de paletas distintas.
+
+Las vistas que lo necesitan declaran `@Environment(\.colorScheme)`. Son
+dos: `VistaCalendario` (los números de los días) y `VistaTareas` (el
+título de una tarea no vencida).
+
+**Lo que SÍ hereda, para no volver a equivocarse:**
+
+| qué escribes | qué pasa |
+|---|---|
+| nada (sin `.foregroundStyle`) | hereda el color del tema ✅ |
+| `.secondary` / `.tertiary` | se derivan del color del tema ✅ |
+| `.foreground` | **resetea** al color del sistema ❌ |
+| `Color.primary` / `.white` / `.black` | color del sistema o fijo ❌ |
+
+**El guion lo vigila** (`tools/comprobar-widgets.py`, busca "NI UN TEXTO
+DEL WIDGET"): en los tres archivos de widgets, ninguna línea con
+`foregroundStyle`/`foregroundColor` puede llevar `.foreground)`,
+`Color.primary`, `Color.white` ni `Color.black`. Probado rompiéndolo con
+las tres formas. Ojo con el patrón: buscar `.foreground` DENTRO de
+`\.foregroundStyle\([^)]*` no vale — el primer paréntesis que cierra
+puede ser el de otra cosa (`AnyShapeStyle(x)`) y se escapa justo el caso
+real. Se busca el token suelto.
+
+**Esto es SWIFT**: no se ve hasta la siguiente build de TestFlight.
+Recargar la app o requitar el widget no cambia nada.
 
 ## Estado actual
 
@@ -4439,6 +4502,10 @@ conversación vive ahí; ver el bloque "Dos ramas" más arriba. **`movil-ui`
 está al mismo nivel**, sin los avisos de diagnóstico.
 
 
+**v0.62.1** (14/9/2026) arregla las letras en blanco de los widgets del
+calendario y de Tareas — ver el bloque "Las letras del widget en blanco
+sobre blanco" más arriba. Es un cambio de **Swift**, así que **necesita
+una build nueva para verse**; no se lanzó ninguna (regla de Actions).
 
 **v0.57.0** (13/9/2026) es la ronda de los cuatro puntos que pidió Koku:
 el título de una nota con formato de título y la mayúscula al empezar,

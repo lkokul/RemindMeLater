@@ -17,6 +17,11 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.62.1': [
+    'El arreglo de las letras del widget es SWIFT, así que no se ve hasta que lances una build nueva de TestFlight. Recargar la app o quitar y volver a poner el widget no cambia nada.',
+    'Míralo con tu tema claro y el móvil en modo oscuro, que es la combinación que rompía. Los rotos eran el del calendario (los números de los días) y el de Tareas; los demás no ponían ningún color a mano, pero conviene confirmarlo de un vistazo.',
+    'Con el móvil en oscuro y el widget en estilo "app" con un tema claro, el widget queda claro al lado de todo lo demás. Es lo que elegiste, pero si te chirría, el estilo "mixto" de Configuración → Widgets hace justo eso: tu paleta siguiendo el modo del móvil.',
+  ],
   '0.62.0': [
     'Otra ronda de merges: Entretenimiento (vitrina de portadas + sesiones, racha y vueltas) y Recetas (calorías y macros). gimnasio, finanzas, retos y viajes no traían nada.',
     'Entretenimiento estrena tabla (entretenimiento_sesiones) y columna (vuelta). La migración desde una base tuya de la ronda anterior solo se puede ver de verdad en el teléfono: mira que no se haya perdido ninguna portada ni ninguna nota.',

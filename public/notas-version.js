@@ -34,6 +34,15 @@
 // exista se lee como general, no rompe nada.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.62.1',
+    fecha: '2026-09-14',
+    nuevo: [],
+    parches: [
+      'Los números de los días del widget del calendario vuelven a verse. Con un tema claro y el móvil en modo oscuro salían en blanco sobre el fondo blanco del widget, y solo se veía el círculo del día de hoy.',
+      'Lo mismo en el widget de Tareas: el título de una tarea que no está vencida se veía en blanco en esa misma combinación.',
+    ],
+  },
+  {
     version: '0.62.0',
     fecha: '2026-09-14',
     nuevo: [

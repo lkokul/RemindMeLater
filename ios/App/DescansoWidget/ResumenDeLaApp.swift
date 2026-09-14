@@ -457,30 +457,57 @@ struct EstiloDeWidget {
     var textoClaro: String = ""
     var fondoOscuro: String = ""
     var textoOscuro: String = ""
+
+    // Qué par fondo/texto toca, según si el móvil está en oscuro. Vive
+    // AQUÍ y no dentro de FondoDeWidget porque lo necesitan también las
+    // vistas: hay textos que tienen que teñirse a mano (ver
+    // colorDeTexto más abajo) y si cada uno eligiera por su cuenta, el
+    // fondo y las letras podrían salir de paletas distintas.
+    func elegidos(oscuro: Bool) -> (fondo: String, texto: String) {
+        switch estilo {
+        case "sistema":
+            return ("", "")
+        case "mixto":
+            let f = oscuro ? fondoOscuro : fondoClaro
+            let x = oscuro ? textoOscuro : textoClaro
+            // Sin pareja guardada se usa la paleta normal, que es lo que
+            // hay: quedarse en blanco sería peor.
+            return f.isEmpty || x.isEmpty ? (fondo, texto) : (f, x)
+        default:
+            return (fondo, texto)
+        }
+    }
+
+    // EL COLOR DEL TEXTO, YA RESUELTO A UN Color.
+    //
+    // Existe por un fallo que costó dos rondas: `.foregroundStyle(.foreground)`
+    // NO devuelve el color que puso el ancestro. `ShapeStyle.foreground` es
+    // el estilo POR DEFECTO (la etiqueta del sistema), así que aplicarlo a
+    // un hijo RESETEA el tinte en vez de heredarlo — y en un móvil en modo
+    // oscuro esa etiqueta es BLANCA, sobre el fondo blanco de un tema claro.
+    // Los `.secondary` sí se derivan de verdad del ancestro, por eso las
+    // cabeceras L M X J V S D se veían y los números no.
+    //
+    // Así que cuando un texto necesita ELEGIR entre dos colores (hoy sí /
+    // hoy no, vencida / al día), el "normal" se pide aquí en vez de
+    // intentar heredarlo: los dos lados del ternario son un Color de
+    // verdad y ninguno resetea nada.
+    //
+    // Sin tema (estilo "sistema", o un resumen viejo sin colores) va
+    // Color.primary, que ahí SÍ es lo correcto: el fondo es entonces el
+    // material del sistema y el texto tiene que seguir al sistema.
+    func colorDeTexto(oscuro: Bool) -> Color {
+        let hex = elegidos(oscuro: oscuro).texto
+        return hex.isEmpty ? Color.primary : Color(hexDeLaApp: hex)
+    }
 }
 
 struct FondoDeWidget: ViewModifier {
     @Environment(\.colorScheme) private var esquema
     let estilo: EstiloDeWidget
 
-    private var elegidos: (fondo: String, texto: String) {
-        switch estilo.estilo {
-        case "sistema":
-            return ("", "")
-        case "mixto":
-            let oscuro = esquema == .dark
-            let f = oscuro ? estilo.fondoOscuro : estilo.fondoClaro
-            let x = oscuro ? estilo.textoOscuro : estilo.textoClaro
-            // Sin pareja guardada se usa la paleta normal, que es lo que
-            // hay: quedarse en blanco sería peor.
-            return f.isEmpty || x.isEmpty ? (estilo.fondo, estilo.texto) : (f, x)
-        default:
-            return (estilo.fondo, estilo.texto)
-        }
-    }
-
     func body(content: Content) -> some View {
-        let (fondoHex, textoHex) = elegidos
+        let (fondoHex, textoHex) = estilo.elegidos(oscuro: esquema == .dark)
         let conTema = !fondoHex.isEmpty && !textoHex.isEmpty
         if #available(iOS 17.0, *) {
             if conTema {
