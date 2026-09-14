@@ -92,6 +92,28 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
   en una sesión de Claude Code local (terminal en el propio ordenador de
   Koku), prueba a pushear el tag tú mismo primero — solo hace falta el
   workaround manual si de verdad da 403 en ESTA sesión en concreto.
+- **APUNTAR CADA CAMBIO EN `cambios/<area>.md`** (regla nueva,
+  14/9/2026, pedida por Koku: *"cada modificación o actualización
+  implementada, que se ponga en un archivo las modificaciones, y cosas a
+  probar para así tú tenerlo más fácil"*). **Antes de commitear una
+  ronda**, el área que hayas tocado tiene su entrada arriba del todo, con
+  las tres cosas: **qué cambió** (en castellano, no en nombres de
+  función), **qué probar** (casillas, y SOLO lo que no se puede
+  comprobar desde aquí: el iPhone de verdad, los avisos, los widgets,
+  una migración sobre sus datos) y **decisiones** (lo que eligió él y no
+  se deshace sin volver a preguntarle).
+  - Un archivo **por ÁREA y con el área en el nombre**, no por rama: si
+    todas las ramas usaran el mismo nombre de archivo, **cada merge
+    daría conflicto sin falta**. Por eso `calendario-notas-movil-UI`
+    tiene dos (`calendario.md` y `notas.md`) aunque sea una sola rama.
+  - Lo transversal (Tienda, copia de seguridad, widgets, temas,
+    tipografía, gestos, seguridad) va en `cambios/app.md`.
+  - **Al fusionar**, ese `## Sin fusionar — X` pasa a `## vX.Y.Z — X` y
+    se queda como historial. No se borra nada.
+  - El detalle está en `cambios/_COMO-SE-USA.md`. **Esto NO sustituye a
+    CLAUDE.md**: aquí vive el porqué de la arquitectura y las trampas
+    que ya mordieron; allí, qué entró en cada ronda y qué hay que mirar
+    en el teléfono.
 - **AVISAR cuando un cambio se salga del guion** (regla nueva, 11/9/2026,
   pedida por Koku con estas palabras: *"si hay algún cambio que creas que
   se sale de lo que es Apple-ish o que necesita modificar el tema de
