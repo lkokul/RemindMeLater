@@ -602,7 +602,7 @@ function diasQueQuedanDelMes() {
 
 // --- Lecturas: lo que tienes empezado --------------------------------
 async function seccionLecturas() {
-  const filas = await api('/api/lecturas-items');
+  const filas = await api('/api/entretenimiento-items');
   if (!Array.isArray(filas)) return null;
   const enCurso = filas.filter((it) => it.status === 'in_progress');
   return {

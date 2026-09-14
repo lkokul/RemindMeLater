@@ -90,7 +90,10 @@ const BACKUP_TABLAS_POR_APP = {
     'finanzas_investment_transactions', 'finanzas_settings', 'finanzas_portfolios',
     'finanzas_assets', 'finanzas_asset_valuations', 'finanzas_recurring_expenses',
     'finanzas_goals', 'finanzas_goal_contributions', 'finanzas_debts'],
-  lecturas: ['lecturas_sagas', 'lecturas_items'],
+  // Las tablas se llaman entretenimiento_* desde el renombrado; la CLAVE
+  // sigue siendo el id interno 'lecturas'. Con los nombres viejos aqui,
+  // una copia de esta App no guardaria ni restauraria nada.
+  lecturas: ['entretenimiento_sagas', 'entretenimiento_items'],
   viajes: ['viajes_trips', 'viajes_trip_countries', 'viajes_entries',
     'viajes_entry_attachments', 'viajes_entry_movements'],
 };

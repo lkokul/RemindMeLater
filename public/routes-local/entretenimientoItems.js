@@ -1,4 +1,4 @@
-// lecturasItems — portado de server/routes/lecturasItems.js.
+// entretenimientoItems — portado de server/routes/entretenimientoItems.js.
 //
 // Copia mecanica del archivo del servidor: la logica y el SQL son los
 // mismos, solo cambia la fontaneria (sin require/module.exports de
@@ -6,19 +6,31 @@
 // rutas no choquen al cargarse todas como <script> en el mismo ambito).
 (function () {
   const db = localDb;
-  // routes/lecturasItems.js — cada cosa concreta dentro de una saga de
-  // Lecturas (una temporada, un tomo, una pelicula suelta...). Siempre
-  // pertenece a una saga (sagaId obligatorio, ver routes/lecturasSagas.js
+  // routes/entretenimientoItems.js — cada cosa concreta dentro de una saga de
+  // Entretenimiento (una temporada, un tomo, una pelicula suelta...). Siempre
+  // pertenece a una saga (sagaId obligatorio, ver routes/entretenimientoSagas.js
   // -- las sagas son el contenedor obligatorio de todo, confirmado con
   // Koku).
 
   const router = createLocalRouter();
-  const TYPES = ['manga', 'comic', 'libro', 'serie', 'anime', 'pelicula'];
+  // Los tipos que se admiten. ESTA lista es ahora la unica autoridad: la
+  // columna "type" de la base ya NO lleva CHECK (ver el comentario en
+  // local-schema.js), asi que añadir un tipo nuevo el dia de mañana es
+  // añadirlo aqui y en ENTRETENIMIENTO_TYPE_LABELS de app.js, sin migracion
+  // ni reconstruir ninguna tabla.
+  //
+  // Los 6 primeros son los de siempre (cuando esto se llamaba "Lecturas");
+  // los 4 de abajo se añadieron al pasar a llamarse "Entretenimiento",
+  // porque el nombre ya no promete solo libros.
+  const TYPES = [
+    'manga', 'comic', 'libro', 'serie', 'anime', 'pelicula',
+    'videojuego', 'podcast', 'musica', 'otro',
+  ];
   const STATUSES = ['wishlist', 'in_progress', 'completed', 'dropped'];
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
   // Generos como array JSON de texto libre (no una tabla aparte, ver el
-  // comentario de lecturas_items en server/db.js) -- aqui se sanea:
+  // comentario de entretenimiento_items en server/db.js) -- aqui se sanea:
   // recorta espacios, quita vacios y duplicados, limite generoso de 20
   // por item para que no se cuele un pegado accidental de un parrafo.
   function sanitizeGenres(genres) {
@@ -33,6 +45,19 @@
       if (clean.length >= 20) break;
     }
     return clean;
+  }
+
+  // Portada: solo se admite una RUTA del almacen de imagenes que ya existe
+  // (el mismo de las notas), nunca una URL de fuera ni datos incrustados.
+  // Asi la portada se comporta igual que una imagen de nota: los bytes
+  // viven en IndexedDB y resolveAssetUrl() la convierte en blob: al
+  // pintarla. Cualquier otra cosa se guarda como NULL en vez de rechazar la
+  // peticion entera -- perder la portada no debe impedir guardar el item.
+  const COVER_RE = /^\/api\/notes\/images\/[A-Za-z0-9._-]+$/;
+  function sanitizeCover(cover) {
+    if (typeof cover !== 'string') return null;
+    const trimmed = cover.trim();
+    return COVER_RE.test(trimmed) ? trimmed : null;
   }
 
   function serialize(row) {
@@ -53,6 +78,7 @@
       loaned: !!row.loaned,
       loanedTo: row.loaned_to,
       loanedAt: row.loaned_at,
+      cover: row.cover,
     };
   }
 
@@ -64,14 +90,14 @@
   router.get('/', (req, res) => {
     const { sagaId } = req.query;
     const rows = sagaId
-      ? db.prepare('SELECT * FROM lecturas_items WHERE saga_id = ? ORDER BY position ASC, id ASC').all(sagaId)
-      : db.prepare('SELECT * FROM lecturas_items ORDER BY saga_id ASC, position ASC, id ASC').all();
+      ? db.prepare('SELECT * FROM entretenimiento_items WHERE saga_id = ? ORDER BY position ASC, id ASC').all(sagaId)
+      : db.prepare('SELECT * FROM entretenimiento_items ORDER BY saga_id ASC, position ASC, id ASC').all();
     res.json(rows.map(serialize));
   });
 
   router.post('/', (req, res) => {
-    const { sagaId, title, type, description, rating, status, genres, progressCurrent, progressTotal, progressUnit, ownedCount, ownedTotal, loaned, loanedTo, loanedAt } = req.body || {};
-    if (!sagaId || !db.prepare('SELECT id FROM lecturas_sagas WHERE id = ?').get(sagaId)) {
+    const { sagaId, title, type, description, rating, status, genres, progressCurrent, progressTotal, progressUnit, ownedCount, ownedTotal, loaned, loanedTo, loanedAt, cover } = req.body || {};
+    if (!sagaId || !db.prepare('SELECT id FROM entretenimiento_sagas WHERE id = ?').get(sagaId)) {
       return res.status(400).json({ error: 'invalid_request', message: 'Falta la saga a la que pertenece.' });
     }
     if (!title || !title.trim()) {
@@ -83,18 +109,18 @@
     const safeStatus = STATUSES.includes(status) ? status : 'wishlist';
     const safeRating = rating === undefined || rating === null || rating === '' ? null : Math.max(0, Math.min(10, Number(rating)));
     // "Prestado": interruptor + a quien + desde cuando (opcional) -- ver
-    // comentario junto a lecturas_items en db.js. Sin fecha valida, se
+    // comentario junto a entretenimiento_items en db.js. Sin fecha valida, se
     // guarda NULL en vez de rechazar la peticion (la fecha es opcional).
     const safeLoaned = loaned ? 1 : 0;
     const safeLoanedTo = safeLoaned && typeof loanedTo === 'string' && loanedTo.trim() ? loanedTo.trim() : null;
     const safeLoanedAt = safeLoaned && loanedAt && DATE_RE.test(loanedAt) ? loanedAt : null;
 
-    const { count } = db.prepare('SELECT COUNT(*) as count FROM lecturas_items WHERE saga_id = ?').get(sagaId);
+    const { count } = db.prepare('SELECT COUNT(*) as count FROM entretenimiento_items WHERE saga_id = ?').get(sagaId);
     const info = db
       .prepare(`
-        INSERT INTO lecturas_items
-          (saga_id, title, type, description, rating, status, genres, progress_current, progress_total, progress_unit, owned_count, owned_total, position, loaned, loaned_to, loaned_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO entretenimiento_items
+          (saga_id, title, type, description, rating, status, genres, progress_current, progress_total, progress_unit, owned_count, owned_total, position, loaned, loaned_to, loaned_at, cover)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         sagaId,
@@ -112,18 +138,19 @@
         count,
         safeLoaned,
         safeLoanedTo,
-        safeLoanedAt
+        safeLoanedAt,
+        sanitizeCover(cover)
       );
 
-    const row = db.prepare('SELECT * FROM lecturas_items WHERE id = ?').get(info.lastInsertRowid);
+    const row = db.prepare('SELECT * FROM entretenimiento_items WHERE id = ?').get(info.lastInsertRowid);
     res.status(201).json(serialize(row));
   });
 
   router.put('/:id', (req, res) => {
-    const existing = db.prepare('SELECT * FROM lecturas_items WHERE id = ?').get(req.params.id);
+    const existing = db.prepare('SELECT * FROM entretenimiento_items WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'not_found' });
 
-    const { title, type, description, rating, status, genres, progressCurrent, progressTotal, progressUnit, ownedCount, ownedTotal, loaned, loanedTo, loanedAt } = req.body || {};
+    const { title, type, description, rating, status, genres, progressCurrent, progressTotal, progressUnit, ownedCount, ownedTotal, loaned, loanedTo, loanedAt, cover } = req.body || {};
     if (type !== undefined && !TYPES.includes(type)) {
       return res.status(400).json({ error: 'invalid_request', message: 'Tipo invalido.' });
     }
@@ -152,11 +179,18 @@
         ? (loanedAt && DATE_RE.test(loanedAt) ? loanedAt : null)
         : existing.loaned_at;
 
+    // Portada: no mandarla = dejarla como estaba; mandarla vacia o null =
+    // quitarla. Mismo criterio que el resto de campos opcionales de aqui.
+    const safeCover = cover === undefined
+      ? existing.cover
+      : (cover === null || cover === '' ? null : sanitizeCover(cover));
+
     db.prepare(`
-      UPDATE lecturas_items SET
+      UPDATE entretenimiento_items SET
         title = ?, type = ?, description = ?, rating = ?, status = ?, genres = ?,
         progress_current = ?, progress_total = ?, progress_unit = ?,
         owned_count = ?, owned_total = ?, loaned = ?, loaned_to = ?, loaned_at = ?,
+        cover = ?,
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
@@ -174,19 +208,20 @@
       safeLoaned,
       safeLoanedTo,
       safeLoanedAt,
+      safeCover,
       req.params.id
     );
 
-    const row = db.prepare('SELECT * FROM lecturas_items WHERE id = ?').get(req.params.id);
+    const row = db.prepare('SELECT * FROM entretenimiento_items WHERE id = ?').get(req.params.id);
     res.json(serialize(row));
   });
 
   router.delete('/:id', (req, res) => {
-    const info = db.prepare('DELETE FROM lecturas_items WHERE id = ?').run(req.params.id);
+    const info = db.prepare('DELETE FROM entretenimiento_items WHERE id = ?').run(req.params.id);
     if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
     res.status(204).end();
   });
 
-  mountLocalRouter('/api/lecturas-items', router);
+  mountLocalRouter('/api/entretenimiento-items', router);
 
 })();
