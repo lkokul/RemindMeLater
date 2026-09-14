@@ -164,7 +164,111 @@ Nada de "¿le han quitado la clase `hidden`?". Lo que se comprobó:
 
 ---
 
-## 4. Lo que queda: el visor móvil
+## 4. El visor móvil — HECHO (14/9/2026)
+
+La tabla de 7 columnas con scroll lateral se fue. Ahora es una **vitrina
+de portadas**: rejilla limpia, sin estanterías decoradas (lo eligió Koku
+así, tras ver que la vitrina con velas y plantas de Mistbook chocaba con
+el pase de estilo iOS de la v0.48.0).
+
+### Portadas
+
+**Generada mientras no haya imagen**, y la imagen **la pone el usuario**
+de su galería o su cámara. Nada de internet: decisión de Koku sabiendo
+que buscar la carátula por título le contaría a un tercero qué estás
+viendo, y que la app no hace ni una petición de red.
+
+La generada lleva el color del tipo *rebajado* sobre la superficie (una
+rejilla de diez rectángulos a saturación plena marea, y así el texto se
+lee siempre), con una franja del color puro arriba que es lo que deja
+distinguir un manga de una película de un vistazo.
+
+Sobre la portada van el punto de estado, la insignia de "Prestado" y la
+barra de progreso — esta última solo si se sabe el total, porque un "12"
+a secas no dice cuánto falta.
+
+**La regla que hay que respetar si se toca esto**: la portada y la línea
+de debajo NUNCA dicen lo mismo. Como la portada generada lleva texto
+encima, repetirlo justo debajo se leía como un fallo ("Tomo 12" y otra
+vez "Tomo 12"). El reparto:
+
+| Dónde | En la portada | Debajo |
+|---|---|---|
+| Siguiendo / Deseos / Historial | la colección | el item + progreso |
+| Dentro de una colección | el item | el tipo + progreso |
+| Colecciones | la colección | los tipos + cuántos |
+
+### Las cuatro pestañas
+
+`Siguiendo` (abre aquí) · `Colecciones` · `Deseos` · `Historial`. Tres
+son transversales: cruzan todas las colecciones. **No hicieron falta
+rutas nuevas** — `GET /api/entretenimiento-items` sin `sagaId` ya
+devolvía todo, y el código llevaba un comentario diciendo que se dejó
+preparado para justo esto.
+
+La pestaña elegida no se recuerda entre aperturas a propósito: volver
+siempre a "Siguiendo" es la gracia.
+
+### De propina, dos deudas saldadas
+
+- **Mover un item de colección**: el `PUT` no aceptaba `sagaId`, así que
+  un item se quedaba para siempre donde nació. Hacía falta para poder
+  añadir desde una pestaña transversal, donde no estás dentro de
+  ninguna. El modal tiene ahora un selector de colección con la opción
+  de crear una nueva ahí mismo (el caso de "esto es algo suelto").
+- **Los `confirm()` nativos** al borrar un item y una colección: fuera,
+  a `showAppConfirm`. Bloqueaban la webview en el móvil.
+
+### Lo que se rompió al construirlo, para no repetirlo
+
+Al quitar los botones "+ Nueva saga" / "+ Nuevo item" (ahora es el FAB)
+quedaron **dos listeners apuntando a botones que ya no existen**. Un
+`getElementById` que devuelve null y luego `.addEventListener` **lanza**,
+y como eso corre al cargar la página se habría llevado por delante todo
+el resto de `app.js` — y `settings.js` con él, que va después. El mismo
+tipo de fallo que CLAUDE.md ya documenta con la zona muerta temporal.
+
+Por eso la comprobación en el navegador no mira solo "¿se ve?": mira que
+una función declarada al FINAL de `app.js` exista, que es lo que prueba
+que el archivo entero llegó a ejecutarse.
+
+### Verificación
+
+- **La rejilla, medida a 320/375/390/430 px**: dos columnas en todos.
+  El mínimo de columna (7.5rem) está **medido, no elegido a ojo**: a
+  320px la rejilla tiene 266px útiles y con 8rem se quedaba en UNA sola
+  columna, o sea una portada gigante por fila.
+- **Las cuatro pestañas** reparten bien los items, y ninguna ficha
+  repite texto (comprobado comparando portada contra línea de debajo).
+- **El flujo entero de añadir** desde "Siguiendo": crea la colección y
+  el item de una vez, y la rejilla se refresca.
+- **La portada de verdad**: imagen fabricada → subida → guardada como
+  ruta → recuperada de IndexedDB como `blob:` → y la colección hereda la
+  portada de uno de sus items.
+- **Nueve comprobaciones nuevas de la ruta** para mover de colección,
+  incluido que una colección inventada se rechaza y que la portada
+  aguanta la mudanza.
+- `tools/comprobar-widgets.py` **en verde**, que de paso destapó que el
+  renombrado de la ronda anterior se había dejado el lado Swift: el
+  widget apuntaba a `remindmelater://lecturas`. Ese destino ahora se
+  llama `entretenimiento`, **conservando el viejo como alias** — un
+  widget que el iPhone ya tenga puesto conserva la URL con la que se
+  dibujó hasta que se vuelve a dibujar, y sin el alias tocarlo no haría
+  nada justo después de actualizar.
+
+---
+
+## 5. Lo que queda: sesiones
+
+Decidido con Koku, sin empezar. Es la pieza que convierte esto de una
+lista en un hábito, y de la que cuelgan racha, estadísticas y logros.
+Ver `IDEAS-ENTRETENIMIENTO.md` §4.2 — el motor ya existe en el Gimnasio
+(`gym_sessions` con marcas de tiempo, estado en `localStorage` para
+sobrevivir a recargas).
+
+---
+
+## 6. El plan original del visor (ya ejecutado)
 
 > **Ver también `IDEAS-ENTRETENIMIENTO.md`** (14/9/2026): estudio de la
 > app **Mistbook** que pidió Koku, con lo que se le puede robar llevado

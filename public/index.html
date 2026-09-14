@@ -2293,11 +2293,13 @@
        libro, serie, anime, pelicula), agrupado en SAGAS obligatorias --
        hasta algo suelto es una saga de un solo item, para poder juntar
        bajo un mismo nombre cosas de tipos distintos (ej. el manga Y el
-       anime de la misma obra). Jerarquia de 2 tablas: sagas primero
-       (#entretenimiento-sagas-panel), y al entrar en una, sus items
-       (#entretenimiento-saga-detail-panel) -- mas parecido a como Notas navega
-       carpetas que a las pestañas de Gimnasio, ver
-       openEntretenimientoSagaDetail/backToEntretenimientoSagas en app.js. -->
+       anime de la misma obra).
+
+       La pantalla es una VITRINA de portadas (rejilla limpia, sin
+       estanterias decoradas: lo eligio Koku asi). Cuatro pestanas, tres
+       de ellas transversales -- ver renderEntretenimientoHome en app.js
+       -- y al entrar en una coleccion, sus items en la misma rejilla
+       (#entretenimiento-saga-detail-panel). -->
   <div id="entretenimiento-view" class="my-space-view hidden">
     <div class="my-space-view-header">
       <h2>Entretenimiento</h2>
@@ -2307,21 +2309,27 @@
       </div>
     </div>
 
-    <div id="entretenimiento-sagas-panel" class="entretenimiento-panel">
-      <button type="button" id="btn-new-entretenimiento-saga" class="primary-btn gym-tab-action">+ Nueva saga</button>
-      <div class="entretenimiento-table-wrap">
-        <table class="entretenimiento-table">
-          <thead>
-            <tr><th>Nombre</th><th>Tipos</th><th>Items</th></tr>
-          </thead>
-          <tbody id="entretenimiento-sagas-tbody"></tbody>
-        </table>
+    <!-- INICIO: cuatro pestanas. Tres de ellas (Siguiendo/Deseos/
+         Historial) son TRANSVERSALES: cruzan todas las sagas, que es lo
+         que uno quiere en el movil ("por donde iba?"), no el indice de
+         colecciones. Salen de GET /api/entretenimiento-items sin sagaId,
+         que ya devolvia todo. La cuarta, Colecciones, es la vista de
+         sagas de siempre. -->
+    <div id="entretenimiento-home-panel">
+      <div class="entretenimiento-tabs" id="entretenimiento-tabs">
+        <button type="button" class="gym-tab-btn active" data-ent-tab="siguiendo">Siguiendo</button>
+        <button type="button" class="gym-tab-btn" data-ent-tab="colecciones">Colecciones</button>
+        <button type="button" class="gym-tab-btn" data-ent-tab="deseos">Deseos</button>
+        <button type="button" class="gym-tab-btn" data-ent-tab="historial">Historial</button>
       </div>
-      <p id="entretenimiento-sagas-empty" class="empty-hint hidden">Todavía no tienes ninguna saga. Crea una arriba (hasta algo suelto, como una novela, es una saga de un solo item).</p>
+      <div class="entretenimiento-content">
+        <div class="entretenimiento-grid" id="entretenimiento-grid"></div>
+        <p id="entretenimiento-empty" class="empty-hint hidden"></p>
+      </div>
     </div>
 
     <div id="entretenimiento-saga-detail-panel" class="entretenimiento-panel hidden">
-      <button type="button" id="btn-back-entretenimiento-sagas" class="secondary-btn">← Sagas</button>
+      <button type="button" id="btn-back-entretenimiento-sagas" class="secondary-btn">← Colecciones</button>
       <div class="entretenimiento-saga-detail-header">
         <h3 id="entretenimiento-saga-detail-name"></h3>
         <button type="button" id="btn-edit-entretenimiento-saga" class="icon-btn" aria-label="Editar saga">✎</button>
@@ -2330,21 +2338,17 @@
       </div>
       <p id="entretenimiento-saga-detail-description" class="hint"></p>
 
-      <div id="entretenimiento-item-filters" class="entretenimiento-filters"></div>
+      <!-- Los filtros van plegados: la fila entera son cinco controles y
+           en un movil se comia media pantalla antes de ver ni un item. -->
+      <button type="button" id="btn-toggle-entretenimiento-filters" class="secondary-btn entretenimiento-filters-toggle">Filtros</button>
+      <div id="entretenimiento-item-filters" class="entretenimiento-filters hidden"></div>
 
-      <button type="button" id="btn-new-entretenimiento-item" class="primary-btn gym-tab-action">+ Nuevo item</button>
-      <div class="entretenimiento-table-wrap">
-        <table class="entretenimiento-table">
-          <thead>
-            <tr>
-              <th>Título</th><th>Tipo</th><th>Estado</th><th>Rating</th>
-              <th>Género</th><th>Progreso</th><th>Tomos</th>
-            </tr>
-          </thead>
-          <tbody id="entretenimiento-items-tbody"></tbody>
-        </table>
-      </div>
-      <p id="entretenimiento-items-empty" class="empty-hint hidden">Todavía no tienes ningun item en esta saga (o ninguno coincide con los filtros).</p>
+      <div class="entretenimiento-grid" id="entretenimiento-items-grid"></div>
+      <p id="entretenimiento-items-empty" class="empty-hint hidden">Todavía no tienes ningún item en esta saga (o ninguno coincide con los filtros).</p>
+    </div>
+
+    <div class="mobile-fab-wrap">
+      <button type="button" id="btn-entretenimiento-add" class="mobile-fab" aria-label="Añadir">+</button>
     </div>
   </div>
 
@@ -2379,9 +2383,37 @@
       <h2 id="entretenimiento-item-modal-title">Nuevo item</h2>
       <form id="entretenimiento-item-form">
         <input type="hidden" id="entretenimiento-item-id" />
+        <!-- La saga es OBLIGATORIA (hasta algo suelto es una saga de un
+             item). Se elige aqui para poder anadir desde Siguiendo/Deseos/
+             Historial, donde no estas dentro de ninguna. Eligiendo
+             "Crear una saga nueva" aparece el campo de debajo. -->
+        <label>
+          Saga
+          <div id="entretenimiento-item-saga-field"></div>
+        </label>
+        <label id="entretenimiento-item-new-saga-label" class="hidden">
+          Nombre de la saga nueva
+          <input type="text" id="entretenimiento-item-new-saga" placeholder="Ej. Kimetsu no Yaiba, o el título suelto si es solo uno" />
+        </label>
         <label>
           Título
           <input type="text" id="entretenimiento-item-title" placeholder="Ej. Temporada 1, Tomo 1-10..." required />
+        </label>
+        <!-- Portada: mientras no haya imagen se pinta una GENERADA (color
+             del tipo + titulo), asi la vitrina se ve llena desde el primer
+             dia. La imagen la pone el usuario a mano; no se baja nada de
+             internet a proposito (la app no hace ni una peticion de red). -->
+        <label>
+          Portada
+          <div class="entretenimiento-cover-field">
+            <div id="entretenimiento-item-cover-preview" class="entretenimiento-cover-preview"></div>
+            <div class="entretenimiento-cover-actions">
+              <button type="button" id="btn-entretenimiento-cover-pick" class="secondary-btn">Elegir imagen</button>
+              <button type="button" id="btn-entretenimiento-cover-clear" class="secondary-btn hidden">Quitar</button>
+              <p class="hint">Si no pones ninguna, se genera una con el color del tipo.</p>
+            </div>
+          </div>
+          <input type="file" id="entretenimiento-item-cover-input" accept="image/*" class="hidden" />
         </label>
         <div class="form-row">
           <label>

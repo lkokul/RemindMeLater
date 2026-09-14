@@ -150,9 +150,18 @@
     const existing = db.prepare('SELECT * FROM entretenimiento_items WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'not_found' });
 
-    const { title, type, description, rating, status, genres, progressCurrent, progressTotal, progressUnit, ownedCount, ownedTotal, loaned, loanedTo, loanedAt, cover } = req.body || {};
+    const { sagaId, title, type, description, rating, status, genres, progressCurrent, progressTotal, progressUnit, ownedCount, ownedTotal, loaned, loanedTo, loanedAt, cover } = req.body || {};
     if (type !== undefined && !TYPES.includes(type)) {
       return res.status(400).json({ error: 'invalid_request', message: 'Tipo invalido.' });
+    }
+    // Mover el item a OTRA saga. Antes no se podia: el sagaId solo se
+    // miraba al crear, asi que un item se quedaba para siempre donde
+    // nacio. Hace falta desde que se puede anadir un item sin estar
+    // dentro de una saga (pestanas Siguiendo/Deseos/Historial).
+    // Se comprueba que la saga destino EXISTA -- si no, la fila quedaria
+    // apuntando a una saga fantasma y no la veria nadie nunca mas.
+    if (sagaId !== undefined && !db.prepare('SELECT id FROM entretenimiento_sagas WHERE id = ?').get(sagaId)) {
+      return res.status(400).json({ error: 'invalid_request', message: 'Esa saga no existe.' });
     }
     if (status !== undefined && !STATUSES.includes(status)) {
       return res.status(400).json({ error: 'invalid_request', message: 'Estado invalido.' });
@@ -187,6 +196,7 @@
 
     db.prepare(`
       UPDATE entretenimiento_items SET
+        saga_id = ?,
         title = ?, type = ?, description = ?, rating = ?, status = ?, genres = ?,
         progress_current = ?, progress_total = ?, progress_unit = ?,
         owned_count = ?, owned_total = ?, loaned = ?, loaned_to = ?, loaned_at = ?,
@@ -194,6 +204,7 @@
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
+      sagaId !== undefined ? sagaId : existing.saga_id,
       title !== undefined && title.trim() ? title.trim() : existing.title,
       type !== undefined ? type : existing.type,
       nn(description, existing.description, false),

@@ -23,7 +23,17 @@ import AppIntents
 // probarlo: "el widget de hoy no es necesario". Se fue entero -- widget,
 // botón del centro de control y sección del resumen.)
 enum DestinoDeWidget: String {
-    case tareas, finanzas, lecturas, viajes
+    case tareas, finanzas, viajes
+    // Se llamaba "lecturas" hasta que la seccion paso a llamarse
+    // Entretenimiento. Los widgets NUEVOS se pintan ya con
+    // "entretenimiento"; el caso de abajo existe solo para que
+    // SceneDelegate siga reconociendo la URL vieja, porque un widget que
+    // el iPhone ya tuviera puesto conserva la URL con la que se dibujo
+    // hasta que se vuelve a dibujar (cosa que pasa al abrir la app, pero
+    // no antes). Sin el, tocar ese widget justo despues de actualizar no
+    // haria nada. app.js atiende los dos nombres.
+    case entretenimiento
+    case lecturasLegacy = "lecturas"
     // De la tanda del 11/9/2026: el calendario del mes y los cuatro
     // widgets del Gimnasio, que llevan todos a su pantalla.
     case calendario, gimnasio
@@ -495,7 +505,7 @@ struct VistaLecturas: View {
     var body: some View {
         switch familia {
         case .accessoryInline:
-            Text(enUnaLinea).widgetURL(DestinoDeWidget.lecturas.url)
+            Text(enUnaLinea).widgetURL(DestinoDeWidget.entretenimiento.url)
         case .accessoryCircular:
             ZStack {
                 AccessoryWidgetBackground()
@@ -504,7 +514,7 @@ struct VistaLecturas: View {
                     Text("\(seccion?.total ?? 0)").font(.system(size: 15, weight: .bold))
                 }
             }
-            .widgetURL(DestinoDeWidget.lecturas.url)
+            .widgetURL(DestinoDeWidget.entretenimiento.url)
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 1) {
                 Text("Leyendo").font(.caption2).fontWeight(.semibold).widgetAccentable()
@@ -515,7 +525,7 @@ struct VistaLecturas: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .widgetURL(DestinoDeWidget.lecturas.url)
+            .widgetURL(DestinoDeWidget.entretenimiento.url)
         case .systemMedium:
             deInicio(maxFilas: 4)
         default:
@@ -559,7 +569,7 @@ struct VistaLecturas: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .marcaDeAgua("books.vertical.fill", acento)
         .fondoDeWidgetApp(entry.resumen.estiloDeWidget)
-        .widgetURL(DestinoDeWidget.lecturas.url)
+        .widgetURL(DestinoDeWidget.entretenimiento.url)
     }
 }
 

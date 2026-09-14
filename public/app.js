@@ -14685,7 +14685,12 @@ async function comprobarAperturaDesdeElWidget() {
   // hay que abrir ese primero o la pantalla se queda debajo.
   const apps = {
     finanzas: () => openFinanzasView(),
-    lecturas: () => openEntretenimientoView(),
+    'entretenimiento': () => openEntretenimientoView(),
+    // Alias del nombre viejo: un widget que el iPhone ya tuviera puesto
+    // de una version anterior conserva la URL con la que se pinto
+    // (remindmelater://lecturas) hasta que se vuelve a dibujar. Sin esto,
+    // tocarlo no haria nada hasta el siguiente repintado.
+    'lecturas': () => openEntretenimientoView(),
     viajes: () => openViajesView(),
   };
   if (apps[destino]) {
@@ -17370,12 +17375,221 @@ entretenimientoItemRatingNumber.addEventListener('input', () => {
   entretenimientoItemRatingRange.value = entretenimientoItemRatingNumber.value === '' ? 0 : entretenimientoItemRatingNumber.value;
 });
 
+// --- La vitrina: portadas ------------------------------------------------
+//
+// Una PORTADA GENERADA es lo que se ve mientras el item no tenga imagen
+// propia, y es la decision de diseno que sostiene toda esta pantalla: una
+// rejilla de fichas vacias parece que la app esta rota, asi que aqui no
+// hay nunca un hueco gris. Se compone con el color del tipo, el titulo y
+// el nombre del tipo -- nada que haya que descargar de ningun sitio (la
+// app no hace ni una peticion de red, a proposito).
+//
+// Devuelve HTML, no un nodo, porque las rejillas se pintan de golpe con
+// innerHTML. Si hay imagen de verdad, el <img> nace SIN src y se lo pone
+// despues setAssetImageSrc() -- los bytes viven en IndexedDB y hay que ir
+// a buscarlos, que es asincrono.
+function entretenimientoCoverHtml(item, textoPortada) {
+  const color = ENTRETENIMIENTO_TYPE_COLORS[item.type] || 'var(--accent)';
+  const tipo = ENTRETENIMIENTO_TYPE_LABELS[item.type] || item.type || '';
+  const encima = [];
+
+  if (item.loaned) encima.push('<span class="entretenimiento-cover-prestado">Prestado</span>');
+  const colorEstado = ENTRETENIMIENTO_STATUS_COLORS[item.status];
+  if (colorEstado) {
+    const rotulo = escapeHtml(ENTRETENIMIENTO_STATUS_LABELS[item.status] || '');
+    encima.push('<span class="entretenimiento-cover-estado" style="background:' + colorEstado + '" title="' + rotulo + '"></span>');
+  }
+  // Solo hay barra si se sabe el total: un "12" a secas no dice cuanto falta.
+  if (item.progressTotal > 0) {
+    const pct = Math.max(0, Math.min(100, ((item.progressCurrent || 0) / item.progressTotal) * 100));
+    encima.push('<span class="entretenimiento-cover-progreso"><span style="width:' + pct + '%"></span></span>');
+  }
+
+  const cuerpo = item.cover
+    ? '<img alt="" data-cover-src="' + escapeHtml(item.cover) + '">'
+    : '<span class="entretenimiento-cover-banda"></span>'
+      + '<span class="entretenimiento-cover-tipo">' + escapeHtml(tipo) + '</span>'
+      + '<span class="entretenimiento-cover-titulo">' + escapeHtml(textoPortada || item.title || '') + '</span>'
+      + '<span></span>';
+
+  const clases = 'entretenimiento-cover' + (item.cover ? '' : ' entretenimiento-cover-generada');
+  return '<div class="' + clases + '" style="--tipo:' + color + '">' + cuerpo + encima.join('') + '</div>';
+}
+
+// Los <img> de las portadas nacen sin src (ver arriba); esto se los pone
+// cuando los bytes estan listos. Se llama despues de CADA pintado.
+function hidratarPortadasEntretenimiento(contenedor) {
+  contenedor.querySelectorAll('img[data-cover-src]').forEach((img) => {
+    setAssetImageSrc(img, img.dataset.coverSrc);
+  });
+}
+
+// El rating se guarda como numero (8.5) pero en espanol se escribe con
+// coma. Intl lo hace bien y de paso quita el ".0" de los enteros.
+function formatEntretenimientoRating(valor) {
+  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 }).format(valor);
+}
+
+
+// Una ficha de la rejilla: portada + dos lineas debajo.
+//
+// REGLA que hay que respetar al anadir sitios donde se pinte una ficha:
+// la portada y la linea de debajo NUNCA dicen lo mismo. Como la portada
+// generada lleva texto encima, repetirlo justo debajo se leia como un
+// fallo ("Tomo 12" y otra vez "Tomo 12"). El reparto que se usa:
+//
+//   pestanas transversales -> portada: la coleccion   debajo: el item
+//   dentro de una coleccion -> portada: el item       debajo: el tipo
+//   pestana Colecciones     -> portada: la coleccion  debajo: los tipos
+//
+// Con una imagen de verdad no hay texto en la portada, asi que el
+// reparto da igual y siempre gana el titulo del item.
+function entretenimientoCardHtml(item, { portada, titulo, meta }) {
+  return '<button type="button" class="entretenimiento-card" data-item-id="' + item.id + '">'
+    + entretenimientoCoverHtml(item, portada)
+    + '<span class="entretenimiento-card-titulo">' + escapeHtml(titulo || '') + '</span>'
+    + '<span class="entretenimiento-card-meta">' + escapeHtml(meta || '') + '</span>'
+    + '</button>';
+}
+
+// Progreso si se sabe, si no la nota, si no nada. Es la linea de datos
+// de casi todas las fichas.
+function entretenimientoProgresoTexto(item) {
+  if (item.progressTotal > 0) {
+    return (item.progressCurrent || 0) + '/' + item.progressTotal + (item.progressUnit ? ' ' + item.progressUnit : '');
+  }
+  if (item.rating !== null && item.rating !== undefined) return formatEntretenimientoRating(item.rating) + '/10';
+  return ENTRETENIMIENTO_STATUS_LABELS[item.status] || '';
+}
+
+// --- Inicio: las cuatro pestanas ----------------------------------------
+//
+// Tres son TRANSVERSALES (cruzan todas las sagas) y la cuarta es el indice
+// de colecciones de siempre. Se abre en "Siguiendo" porque lo que uno
+// quiere al abrir esto en el movil es "por donde iba", no el indice.
+//
+// La pestana elegida NO se recuerda entre aperturas a proposito: volver
+// siempre a "Siguiendo" es justo la gracia.
+//
+// Ninguna de las tres transversales necesita endpoint nuevo: GET
+// /api/entretenimiento-items sin sagaId ya devolvia todos los items de
+// todas las sagas.
+let entretenimientoTab = 'siguiendo';
+let entretenimientoTodos = [];
+
+const ENTRETENIMIENTO_TABS = {
+  siguiendo: {
+    filtra: (it) => it.status === 'in_progress',
+    vacio: 'No tienes nada empezado ahora mismo. Lo que empieces aparecera aqui.',
+  },
+  deseos: {
+    filtra: (it) => it.status === 'wishlist',
+    vacio: 'Tu lista de deseos esta vacia.',
+  },
+  historial: {
+    filtra: (it) => it.status === 'completed' || it.status === 'dropped',
+    vacio: 'Aqui apareceran las cosas que termines o abandones.',
+  },
+};
+
+async function loadEntretenimientoTodos() {
+  entretenimientoTodos = await api('/api/entretenimiento-items');
+}
+
+function entretenimientoNombreDeSaga(sagaId) {
+  const saga = state.entretenimientoSagas.find((s) => s.id === sagaId);
+  return saga ? saga.name : '';
+}
+
+// Una coleccion no tiene portada propia: se le presta la del primero de
+// sus items que tenga una, y si ninguna la tiene se genera con el tipo
+// que haya dentro. Asi una coleccion tampoco sale nunca en gris.
+function entretenimientoSagaCardHtml(saga) {
+  const suyos = entretenimientoTodos.filter((it) => it.sagaId === saga.id);
+  const conPortada = suyos.find((it) => it.cover);
+  const falsoItem = {
+    id: 'saga-' + saga.id,
+    title: saga.name,
+    type: (conPortada && conPortada.type) || saga.types[0] || 'otro',
+    cover: conPortada ? conPortada.cover : null,
+    status: null,
+    loaned: false,
+  };
+  // El nombre va en la portada, asi que debajo no se repite: van los
+  // tipos que hay dentro y cuantos items son.
+  const tipos = saga.types.map((t) => ENTRETENIMIENTO_TYPE_LABELS[t] || t).join(', ');
+  const cuantos = saga.itemCount + ' ' + (saga.itemCount === 1 ? 'item' : 'items');
+  return '<button type="button" class="entretenimiento-card" data-saga-id="' + saga.id + '">'
+    + entretenimientoCoverHtml(falsoItem, saga.name)
+    + '<span class="entretenimiento-card-titulo">' + escapeHtml(tipos || 'Vacía') + '</span>'
+    + '<span class="entretenimiento-card-meta">' + escapeHtml(cuantos) + '</span>'
+    + '</button>';
+}
+
+function renderEntretenimientoHome() {
+  const grid = document.getElementById('entretenimiento-grid');
+  const empty = document.getElementById('entretenimiento-empty');
+
+  if (entretenimientoTab === 'colecciones') {
+    empty.textContent = 'Todavia no tienes ninguna coleccion. Crea una con el boton +, y recuerda que hasta algo suelto (una novela, una peli) es una coleccion de un solo item.';
+    empty.classList.toggle('hidden', state.entretenimientoSagas.length > 0);
+    grid.innerHTML = state.entretenimientoSagas.map(entretenimientoSagaCardHtml).join('');
+  } else {
+    const conf = ENTRETENIMIENTO_TABS[entretenimientoTab];
+    const items = entretenimientoTodos.filter(conf.filtra);
+    empty.textContent = conf.vacio;
+    empty.classList.toggle('hidden', items.length > 0);
+    // Aqui se cruzan colecciones, asi que la portada lleva la coleccion
+    // (que es lo que no se sabe mirando "Tomo 12" a secas) y debajo el
+    // item. Si la coleccion se llama igual que el item (algo suelto, una
+    // peli), la portada se queda con el titulo y debajo va el tipo.
+    grid.innerHTML = items
+      .map((it) => {
+        const saga = entretenimientoNombreDeSaga(it.sagaId);
+        const sagaDistinta = saga && saga !== it.title;
+        return entretenimientoCardHtml(it, {
+          portada: sagaDistinta ? saga : it.title,
+          titulo: sagaDistinta ? it.title : (ENTRETENIMIENTO_TYPE_LABELS[it.type] || it.type),
+          meta: entretenimientoProgresoTexto(it),
+        });
+      })
+      .join('');
+  }
+
+  hidratarPortadasEntretenimiento(grid);
+}
+
+// Un solo listener en la rejilla en vez de uno por ficha: las fichas se
+// repintan enteras en cada cambio, y colgar un listener de cada una los
+// iria dejando huerfanos.
+document.getElementById('entretenimiento-grid').addEventListener('click', (e) => {
+  const card = e.target.closest('.entretenimiento-card');
+  if (!card) return;
+  if (card.dataset.sagaId) {
+    const saga = state.entretenimientoSagas.find((s) => String(s.id) === card.dataset.sagaId);
+    if (saga) openEntretenimientoSagaDetail(saga);
+    return;
+  }
+  const item = entretenimientoTodos.find((it) => String(it.id) === card.dataset.itemId);
+  if (item) openEntretenimientoItemModal(item);
+});
+
+document.getElementById('entretenimiento-tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-ent-tab]');
+  if (!btn) return;
+  entretenimientoTab = btn.dataset.entTab;
+  document.querySelectorAll('#entretenimiento-tabs .gym-tab-btn').forEach((b) => {
+    b.classList.toggle('active', b === btn);
+  });
+  renderEntretenimientoHome();
+});
+
 async function refreshEntretenimientoSagasView() {
-  document.getElementById('entretenimiento-sagas-panel').classList.remove('hidden');
+  document.getElementById('entretenimiento-home-panel').classList.remove('hidden');
   document.getElementById('entretenimiento-saga-detail-panel').classList.add('hidden');
   state.entretenimientoCurrentSagaId = null;
-  await loadEntretenimientoSagas();
-  renderEntretenimientoSagasTable();
+  await Promise.all([loadEntretenimientoSagas(), loadEntretenimientoTodos()]);
+  renderEntretenimientoHome();
 }
 
 function openEntretenimientoView() {
@@ -17392,28 +17606,24 @@ document.getElementById('btn-open-entretenimiento').addEventListener('click', op
 document.getElementById('btn-close-entretenimiento').addEventListener('click', closeEntretenimientoView);
 document.getElementById('btn-back-entretenimiento-sagas').addEventListener('click', refreshEntretenimientoSagasView);
 
+// El "+" hace lo que toca segun donde estes: en Colecciones crea una
+// coleccion; dentro de una, o en las transversales, crea un item (y ahi
+// el modal ya pregunta a que coleccion va).
+document.getElementById('btn-entretenimiento-add').addEventListener('click', () => {
+  const enDetalle = !document.getElementById('entretenimiento-saga-detail-panel').classList.contains('hidden');
+  if (!enDetalle && entretenimientoTab === 'colecciones') return openEntretenimientoSagaModal(null);
+  openEntretenimientoItemModal(null);
+});
+
+document.getElementById('btn-toggle-entretenimiento-filters').addEventListener('click', () => {
+  document.getElementById('entretenimiento-item-filters').classList.toggle('hidden');
+});
+
 async function loadEntretenimientoSagas() {
   state.entretenimientoSagas = await api('/api/entretenimiento-sagas');
 }
 async function loadEntretenimientoItems(sagaId) {
-  state.entretenimientoItems = await api(`/api/entretenimiento-items?sagaId=${sagaId}`);
-}
-
-function renderEntretenimientoSagasTable() {
-  const tbody = document.getElementById('entretenimiento-sagas-tbody');
-  const empty = document.getElementById('entretenimiento-sagas-empty');
-  tbody.innerHTML = '';
-  empty.classList.toggle('hidden', state.entretenimientoSagas.length > 0);
-  state.entretenimientoSagas.forEach((saga) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${escapeHtml(saga.name)}</td>
-      <td>${saga.types.map((t) => ENTRETENIMIENTO_TYPE_LABELS[t] || t).join(', ') || '—'}</td>
-      <td>${saga.itemCount}</td>
-    `;
-    tr.addEventListener('click', () => openEntretenimientoSagaDetail(saga));
-    tbody.appendChild(tr);
-  });
+  state.entretenimientoItems = await api('/api/entretenimiento-items?sagaId=' + sagaId);
 }
 
 function openFinanzasTransactionModal(t) {
@@ -20406,7 +20616,7 @@ document.getElementById('btn-close-viajes').addEventListener('click', closeViaje
 
 async function openEntretenimientoSagaDetail(saga) {
   state.entretenimientoCurrentSagaId = saga.id;
-  document.getElementById('entretenimiento-sagas-panel').classList.add('hidden');
+  document.getElementById('entretenimiento-home-panel').classList.add('hidden');
   document.getElementById('entretenimiento-saga-detail-panel').classList.remove('hidden');
   document.getElementById('entretenimiento-saga-detail-name').textContent = saga.name;
   document.getElementById('entretenimiento-saga-detail-description').textContent = saga.description || '';
@@ -20417,7 +20627,7 @@ async function openEntretenimientoSagaDetail(saga) {
   entretenimientoItemFilters = { type: '', status: '', genre: '', minRating: '' };
   await loadEntretenimientoItems(saga.id);
   renderEntretenimientoItemFilters();
-  renderEntretenimientoItemsTable();
+  renderEntretenimientoItemsGrid();
 }
 
 // --- Modal de saga ------------------------------------------------------
@@ -20431,7 +20641,6 @@ function openEntretenimientoSagaModal(saga) {
 function closeEntretenimientoSagaModal() {
   document.getElementById('entretenimiento-saga-modal').classList.add('hidden');
 }
-document.getElementById('btn-new-entretenimiento-saga').addEventListener('click', () => openEntretenimientoSagaModal(null));
 document.getElementById('btn-cancel-entretenimiento-saga').addEventListener('click', closeEntretenimientoSagaModal);
 document.getElementById('btn-close-entretenimiento-saga').addEventListener('click', closeEntretenimientoSagaModal);
 document.getElementById('btn-edit-entretenimiento-saga').addEventListener('click', () => {
@@ -20465,7 +20674,7 @@ document.getElementById('entretenimiento-saga-form').addEventListener('submit', 
 
 document.getElementById('btn-delete-entretenimiento-saga').addEventListener('click', async () => {
   if (!state.entretenimientoCurrentSagaId) return;
-  if (!confirm('¿Eliminar esta saga y TODO su contenido? No se puede deshacer.')) return;
+  if (!await showAppConfirm('¿Eliminar esta colección y TODO su contenido? No se puede deshacer.', { okText: 'Eliminar', danger: true })) return;
   await api(`/api/entretenimiento-sagas/${state.entretenimientoCurrentSagaId}`, { method: 'DELETE' });
   await refreshEntretenimientoSagasView();
 });
@@ -20485,17 +20694,17 @@ let entretenimientoItemFilters = { type: '', status: '', genre: '', minRating: '
 const entretenimientoFilterTypeField = createSelectField({
   options: [{ value: '', label: 'Todos los tipos' }, ...Object.entries(ENTRETENIMIENTO_TYPE_LABELS).map(([value, label]) => ({ value, label }))],
   initialValue: '',
-  onChange: (value) => { entretenimientoItemFilters.type = value; renderEntretenimientoItemsTable(); },
+  onChange: (value) => { entretenimientoItemFilters.type = value; renderEntretenimientoItemsGrid(); },
 });
 const entretenimientoFilterStatusField = createSelectField({
   options: [{ value: '', label: 'Todos los estados' }, ...Object.entries(ENTRETENIMIENTO_STATUS_LABELS).map(([value, label]) => ({ value, label }))],
   initialValue: '',
-  onChange: (value) => { entretenimientoItemFilters.status = value; renderEntretenimientoItemsTable(); },
+  onChange: (value) => { entretenimientoItemFilters.status = value; renderEntretenimientoItemsGrid(); },
 });
 const entretenimientoFilterGenreField = createSelectField({
   options: [{ value: '', label: 'Todos los géneros' }],
   initialValue: '',
-  onChange: (value) => { entretenimientoItemFilters.genre = value; renderEntretenimientoItemsTable(); },
+  onChange: (value) => { entretenimientoItemFilters.genre = value; renderEntretenimientoItemsGrid(); },
 });
 
 function renderEntretenimientoItemFilters() {
@@ -20522,7 +20731,7 @@ function renderEntretenimientoItemFilters() {
     ratingInput.addEventListener('input', () => {
       clampEntretenimientoRatingInput(ratingInput);
       entretenimientoItemFilters.minRating = ratingInput.value;
-      renderEntretenimientoItemsTable();
+      renderEntretenimientoItemsGrid();
     });
 
     const clearBtn = document.createElement('button');
@@ -20536,7 +20745,7 @@ function renderEntretenimientoItemFilters() {
       entretenimientoFilterStatusField.setValue('');
       entretenimientoFilterGenreField.setValue('');
       ratingInput.value = '';
-      renderEntretenimientoItemsTable();
+      renderEntretenimientoItemsGrid();
     });
 
     container.append(typeWrap, statusWrap, genreWrap, ratingInput, clearBtn);
@@ -20562,35 +20771,32 @@ function entretenimientoItemMatchesFilters(item) {
   return true;
 }
 
-function renderEntretenimientoItemsTable() {
-  const tbody = document.getElementById('entretenimiento-items-tbody');
+// Los items de una coleccion, en la misma rejilla de portadas que el
+// inicio. Aqui el subtitulo NO repite el nombre de la coleccion (ya esta
+// en la cabecera de la pantalla), asi que se pasa cadena vacia.
+function renderEntretenimientoItemsGrid() {
+  const grid = document.getElementById('entretenimiento-items-grid');
   const empty = document.getElementById('entretenimiento-items-empty');
-  tbody.innerHTML = '';
-  const filtered = state.entretenimientoItems.filter(entretenimientoItemMatchesFilters);
-  empty.classList.toggle('hidden', filtered.length > 0);
-
-  filtered.forEach((item) => {
-    const progress = item.progressTotal ? `${item.progressCurrent ?? 0}/${item.progressTotal}${item.progressUnit ? ' ' + escapeHtml(item.progressUnit) : ''}` : '—';
-    const owned = item.ownedTotal ? `${item.ownedCount ?? 0} de ${item.ownedTotal}` : '—';
-    const statusColor = ENTRETENIMIENTO_STATUS_COLORS[item.status];
-    const tr = document.createElement('tr');
-    // "Prestado" se muestra como una insignia junto al titulo (en vez de
-    // una columna aparte) para no reestructurar toda la tabla solo por
-    // esto -- con quien y desde cuando como tooltip, si se sabe.
-    const loanedBadge = item.loaned ? `<span class="entretenimiento-loaned-badge" title="Prestado${item.loanedTo ? ` a ${escapeHtml(item.loanedTo)}` : ''}${item.loanedAt ? ` desde ${item.loanedAt}` : ''}">Prestado</span>` : '';
-    tr.innerHTML = `
-      <td>${escapeHtml(item.title)} ${loanedBadge}</td>
-      <td>${ENTRETENIMIENTO_TYPE_LABELS[item.type] || item.type}</td>
-      <td><span class="entretenimiento-status-badge" style="background-color:${statusColor}33; color:${statusColor};">${ENTRETENIMIENTO_STATUS_LABELS[item.status]}</span></td>
-      <td>${item.rating !== null ? item.rating + '/10' : '—'}</td>
-      <td>${item.genres.map(escapeHtml).join(', ') || '—'}</td>
-      <td>${progress}</td>
-      <td>${owned}</td>
-    `;
-    tr.addEventListener('click', () => openEntretenimientoItemModal(item));
-    tbody.appendChild(tr);
-  });
+  const filtrados = state.entretenimientoItems.filter(entretenimientoItemMatchesFilters);
+  empty.classList.toggle('hidden', filtrados.length > 0);
+  // Dentro de una coleccion su nombre ya esta en la cabecera, asi que la
+  // portada lleva el item y debajo va el tipo.
+  grid.innerHTML = filtrados
+    .map((item) => entretenimientoCardHtml(item, {
+      portada: item.title,
+      titulo: ENTRETENIMIENTO_TYPE_LABELS[item.type] || item.type,
+      meta: entretenimientoProgresoTexto(item),
+    }))
+    .join('');
+  hidratarPortadasEntretenimiento(grid);
 }
+
+document.getElementById('entretenimiento-items-grid').addEventListener('click', (e) => {
+  const card = e.target.closest('.entretenimiento-card');
+  if (!card) return;
+  const item = state.entretenimientoItems.find((it) => String(it.id) === card.dataset.itemId);
+  if (item) openEntretenimientoItemModal(item);
+});
 
 
 // --- Modal de item (con chips de generos) -------------------------------
@@ -20695,10 +20901,111 @@ function renderEntretenimientoItemGenreChips() {
   document.getElementById('btn-add-entretenimiento-genre').addEventListener('click', addFromInput);
 }
 
+// --- Portada del item dentro del modal -----------------------------------
+//
+// La imagen la elige el usuario de su galeria o la hace con la camara. NO
+// se baja de ningun sitio: la app no hace ni una peticion de red, y
+// buscar una caratula por titulo le contaria a un tercero que estas
+// viendo. Mientras no haya imagen se ve la portada GENERADA, igual que en
+// la rejilla, asi que el hueco nunca esta vacio.
+let entretenimientoItemCover = null;
+
+function renderEntretenimientoCoverPreview() {
+  const caja = document.getElementById('entretenimiento-item-cover-preview');
+  // Se pinta con el tipo y el titulo que haya AHORA mismo en el
+  // formulario, no con los guardados: asi cambiar el tipo se ve al vuelo.
+  caja.innerHTML = entretenimientoCoverHtml({
+    id: 'preview',
+    title: document.getElementById('entretenimiento-item-title').value || 'Sin titulo',
+    type: entretenimientoItemTypeField.getValue(),
+    cover: entretenimientoItemCover,
+    status: null,
+    loaned: false,
+  });
+  hidratarPortadasEntretenimiento(caja);
+  document.getElementById('btn-entretenimiento-cover-clear').classList.toggle('hidden', !entretenimientoItemCover);
+}
+
+document.getElementById('btn-entretenimiento-cover-pick').addEventListener('click', () => {
+  document.getElementById('entretenimiento-item-cover-input').click();
+});
+document.getElementById('btn-entretenimiento-cover-clear').addEventListener('click', () => {
+  entretenimientoItemCover = null;
+  renderEntretenimientoCoverPreview();
+});
+document.getElementById('entretenimiento-item-cover-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  // El input se limpia SIEMPRE: sin esto, elegir la misma foto dos veces
+  // seguidas no vuelve a disparar "change" (el valor no cambia).
+  e.target.value = '';
+  if (!file) return;
+  const boton = document.getElementById('btn-entretenimiento-cover-pick');
+  const rotulo = boton.textContent;
+  boton.disabled = true;
+  boton.textContent = 'Subiendo…';
+  try {
+    // Misma ruta que las imagenes de las notas: los bytes acaban en el
+    // almacen noteAssets de IndexedDB y aqui solo se guarda la ruta.
+    entretenimientoItemCover = await uploadNoteImage(file);
+    renderEntretenimientoCoverPreview();
+  } catch (err) {
+    showAppConfirm('No se pudo usar esa imagen: ' + err.message, { alertOnly: true });
+  } finally {
+    boton.disabled = false;
+    boton.textContent = rotulo;
+  }
+});
+
+// Que el titulo y el tipo repinten la portada generada mientras escribes.
+document.getElementById('entretenimiento-item-title').addEventListener('input', () => {
+  if (!entretenimientoItemCover) renderEntretenimientoCoverPreview();
+});
+
+// --- A que coleccion pertenece -------------------------------------------
+//
+// La saga es obligatoria, asi que al anadir desde una pestana transversal
+// (donde no estas dentro de ninguna) hay que preguntarla. El valor
+// especial __nueva__ destapa el campo de nombre y crea la coleccion al
+// guardar -- que es el caso de "esto es algo suelto", una peli o una
+// novela sin mas.
+const ENTRETENIMIENTO_SAGA_NUEVA = '__nueva__';
+const entretenimientoItemSagaField = createSelectField({
+  options: [{ value: ENTRETENIMIENTO_SAGA_NUEVA, label: '➕ Crear una colección nueva…' }],
+  initialValue: ENTRETENIMIENTO_SAGA_NUEVA,
+  searchable: true,
+  onChange: refreshEntretenimientoSagaFieldExtra,
+});
+document.getElementById('entretenimiento-item-saga-field').appendChild(entretenimientoItemSagaField.element);
+
+function refreshEntretenimientoSagaFieldExtra() {
+  const esNueva = entretenimientoItemSagaField.getValue() === ENTRETENIMIENTO_SAGA_NUEVA;
+  const label = document.getElementById('entretenimiento-item-new-saga-label');
+  label.classList.toggle('hidden', !esNueva);
+  // Un campo obligatorio ESCONDIDO no se puede enfocar y el navegador se
+  // niega a enviar el formulario entero SIN decir nada por pantalla (ya
+  // paso con el nombre del dia en Gimnasio, esta en CLAUDE.md). Por eso
+  // el required se pone y se quita segun se vea.
+  document.getElementById('entretenimiento-item-new-saga').required = esNueva;
+}
+
 function openEntretenimientoItemModal(item) {
   document.getElementById('entretenimiento-item-modal-title').textContent = item ? 'Editar item' : 'Nuevo item';
   document.getElementById('entretenimiento-item-id').value = item ? item.id : '';
   document.getElementById('entretenimiento-item-title').value = item ? item.title : '';
+
+  // Colecciones que hay ahora, mas la opcion de crear una. Si estas
+  // dentro de una coleccion, viene elegida; si no, se propone crear una
+  // nueva, que es el caso normal de anadir algo suelto desde Siguiendo.
+  entretenimientoItemSagaField.setOptions([
+    ...state.entretenimientoSagas.map((sg) => ({ value: String(sg.id), label: sg.name })),
+    { value: ENTRETENIMIENTO_SAGA_NUEVA, label: '➕ Crear una colección nueva…' },
+  ]);
+  const sagaElegida = (item && item.sagaId) || state.entretenimientoCurrentSagaId;
+  entretenimientoItemSagaField.setValue(sagaElegida ? String(sagaElegida) : ENTRETENIMIENTO_SAGA_NUEVA);
+  document.getElementById('entretenimiento-item-new-saga').value = '';
+  refreshEntretenimientoSagaFieldExtra();
+
+  entretenimientoItemCover = item ? item.cover || null : null;
   entretenimientoItemTypeField.setValue(item ? item.type : 'manga');
   entretenimientoItemStatusField.setValue(item ? item.status : 'wishlist');
   document.getElementById('entretenimiento-item-description').value = item ? item.description || '' : '';
@@ -20718,29 +21025,56 @@ function openEntretenimientoItemModal(item) {
   entretenimientoItemLoanedAtField.setValue(item && item.loanedAt ? new Date(`${item.loanedAt}T00:00:00`) : null);
   document.getElementById('entretenimiento-item-loaned-details').classList.toggle('hidden', !loanedChecked);
   document.getElementById('btn-delete-entretenimiento-item').classList.toggle('hidden', !item);
+  renderEntretenimientoCoverPreview();
   document.getElementById('entretenimiento-item-modal').classList.remove('hidden');
 }
 function closeEntretenimientoItemModal() {
   document.getElementById('entretenimiento-item-modal').classList.add('hidden');
 }
-document.getElementById('btn-new-entretenimiento-item').addEventListener('click', () => openEntretenimientoItemModal(null));
 document.getElementById('btn-cancel-entretenimiento-item').addEventListener('click', closeEntretenimientoItemModal);
 document.getElementById('btn-close-entretenimiento-item').addEventListener('click', closeEntretenimientoItemModal);
 
 async function refreshEntretenimientoAfterItemChange() {
-  await loadEntretenimientoItems(state.entretenimientoCurrentSagaId);
-  renderEntretenimientoItemFilters();
-  renderEntretenimientoItemsTable();
-  // El resumen de tipos/cantidad de la saga (tabla de sagas) puede haber
-  // cambiado -- se refresca en segundo plano, no bloquea la pantalla.
-  loadEntretenimientoSagas();
+  // Hay DOS sitios donde puede estar mirandose un item: dentro de una
+  // coleccion, o en una de las pestanas transversales. Se refresca el
+  // que toque; el resumen de tipos/cantidad de las colecciones puede
+  // haber cambiado en los dos casos, asi que siempre se recarga.
+  await Promise.all([loadEntretenimientoSagas(), loadEntretenimientoTodos()]);
+  if (state.entretenimientoCurrentSagaId) {
+    await loadEntretenimientoItems(state.entretenimientoCurrentSagaId);
+    renderEntretenimientoItemFilters();
+    renderEntretenimientoItemsGrid();
+  } else {
+    renderEntretenimientoHome();
+  }
 }
 
 document.getElementById('entretenimiento-item-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('entretenimiento-item-id').value;
+
+  // Si se eligio "crear una coleccion nueva", se crea AQUI y se usa su
+  // id. Va antes del item a proposito: si fallara, no se habra creado un
+  // item colgando de una coleccion que no existe.
+  let sagaId = entretenimientoItemSagaField.getValue();
+  if (sagaId === ENTRETENIMIENTO_SAGA_NUEVA) {
+    const nombre = document.getElementById('entretenimiento-item-new-saga').value.trim();
+    try {
+      const creada = await api('/api/entretenimiento-sagas', {
+        method: 'POST',
+        body: JSON.stringify({ name: nombre, description: null }),
+      });
+      sagaId = creada.id;
+      await loadEntretenimientoSagas();
+    } catch (err) {
+      showAppConfirm('No se pudo crear la colección: ' + err.message, { alertOnly: true });
+      return;
+    }
+  }
+
   const payload = {
-    sagaId: state.entretenimientoCurrentSagaId,
+    sagaId: Number(sagaId),
+    cover: entretenimientoItemCover,
     title: document.getElementById('entretenimiento-item-title').value,
     type: entretenimientoItemTypeField.getValue(),
     status: entretenimientoItemStatusField.getValue(),
@@ -20767,7 +21101,7 @@ document.getElementById('entretenimiento-item-form').addEventListener('submit', 
 
 document.getElementById('btn-delete-entretenimiento-item').addEventListener('click', async () => {
   const id = document.getElementById('entretenimiento-item-id').value;
-  if (!confirm('¿Eliminar este item?')) return;
+  if (!await showAppConfirm('¿Eliminar este item?', { okText: 'Eliminar', danger: true })) return;
   await api(`/api/entretenimiento-items/${id}`, { method: 'DELETE' });
   closeEntretenimientoItemModal();
   await refreshEntretenimientoAfterItemChange();
