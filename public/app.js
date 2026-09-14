@@ -11410,8 +11410,11 @@ function formatFinanzasPorcentaje(n) {
 }
 
 function formatFinanzasAmount(n) {
-  const num = Number(n) || 0;
-  return `${FINANZAS_MONEY_FORMATTER.format(num)} €`;
+  // Number.isFinite y no `|| 0` a secas: con `|| 0`, un infinito se cuela
+  // (es "verdadero") y la pantalla escribe "∞ €", que no es una cantidad
+  // de dinero. Mismo criterio que formatFinanzasPorcentaje.
+  const num = Number(n);
+  return `${FINANZAS_MONEY_FORMATTER.format(Number.isFinite(num) ? num : 0)} €`;
 }
 
 let finanzasGoalIconField = null;
@@ -20864,7 +20867,7 @@ function renderViajesMovement(mv) {
 
   const amountBadge = document.createElement('span');
   amountBadge.className = `viajes-movement-amount viajes-movement-amount-${mv.type}`;
-  amountBadge.textContent = `${mv.type === 'income' ? '+' : '−'}${mv.amount.toFixed(2)} €`;
+  amountBadge.textContent = `${mv.type === 'income' ? '+' : '−'}${formatFinanzasAmount(mv.amount)}`;
   actions.appendChild(amountBadge);
 
   if (mv.description) {
@@ -21208,7 +21211,7 @@ document.getElementById('viajes-gasto-form').addEventListener('submit', async (e
 let viajesLinkFinanzasMovementId = null;
 async function openViajesLinkFinanzasModal(movement) {
   viajesLinkFinanzasMovementId = movement.id;
-  document.getElementById('viajes-link-finanzas-amount').textContent = `Importe: ${movement.amount.toFixed(2)} €`;
+  document.getElementById('viajes-link-finanzas-amount').textContent = `Importe: ${formatFinanzasAmount(movement.amount)}`;
   const [accounts, categories] = await Promise.all([api('/api/finanzas-accounts'), api('/api/finanzas-categories')]);
   viajesLinkFinanzasAccountField.setOptions(accounts.map((a) => ({ value: a.id, label: a.name })));
   viajesLinkFinanzasCategoryField.setOptions([{ value: '', label: 'Sin categoría' }, ...categories.map((c) => ({ value: c.id, label: c.name }))]);

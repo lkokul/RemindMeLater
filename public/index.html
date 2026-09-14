@@ -1675,10 +1675,16 @@
 
       <!-- Vista 1: qué me queda por pagar -->
       <div data-fijos-panel="pendientes">
-        <div class="finanzas-segmented finanzas-segmented-sub" role="tablist" aria-label="Periodo">
-          <button type="button" class="finanzas-segmented-btn" data-fijos-rango="semana" role="tab" aria-selected="false">Semana</button>
-          <button type="button" class="finanzas-segmented-btn active" data-fijos-rango="mes" role="tab" aria-selected="true">Mes</button>
-          <button type="button" class="finanzas-segmented-btn" data-fijos-rango="anio" role="tab" aria-selected="false">Año</button>
+        <!-- El periodo va como CHIPS y no como otra barra segmentada.
+             Eran dos barras identicas apiladas y con "Año" repetido en las
+             dos, asi que no habia forma de saber cual era la navegacion:
+             Koku no encontraba la seccion de Plantillas por esto. Ahora la
+             barra segmentada es UNA (las tres secciones) y todo lo que
+             filtra dentro de una seccion son chips. -->
+        <div class="finanzas-chips" role="tablist" aria-label="Periodo">
+          <button type="button" class="finanzas-chip" data-fijos-rango="semana" role="tab" aria-selected="false">Esta semana</button>
+          <button type="button" class="finanzas-chip active" data-fijos-rango="mes" role="tab" aria-selected="true">Este mes</button>
+          <button type="button" class="finanzas-chip" data-fijos-rango="anio" role="tab" aria-selected="false">Este año</button>
         </div>
         <div class="finanzas-hero">
           <div class="finanzas-hero-label" id="finanzas-fijos-hero-label">Te queda por pagar este mes</div>

@@ -5229,7 +5229,6 @@ body.gym-rest-push #settings-modal .settings-card {
   border: 1px solid var(--border);
   border-radius: 999px;
 }
-.finanzas-segmented-sub { margin-bottom: 0.7rem; }
 .finanzas-segmented-btn {
   flex: 1;
   padding: 0.45rem 0.5rem;
