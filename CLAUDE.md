@@ -4120,6 +4120,67 @@ líneas.
   receta sin foto era un recuadro de puntos que hacía que la lista
   pareciera rota. Las 51 comprobaciones estaban todas en verde.
 
+### Calorías y macros (14/9/2026)
+
+Petición de Koku: *"de forma opcional le puedes poner calorías y
+estadísticas de grasas, carbohidratos, proteína etc"*. Tomó las tres
+decisiones:
+
+1. **Van en el INGREDIENTE, no en la receta.** Se le ofrecieron las tres
+   formas y eligió esta: lo escribes una vez (lo que pone el paquete,
+   por 100 g o por 100 ml) y sirve para todas las recetas que lleven esa
+   cosa, escalando solo con las raciones. Es la misma lógica del
+   catálogo que ya había elegido.
+2. **Los ocho valores de una etiqueta**: calorías, proteínas, grasas,
+   saturadas, hidratos, azúcares, fibra y sal. Y con un matiz suyo que
+   manda sobre el diseño: *"de forma opcional todo. No todo el mundo va
+   a estar pensando en esto"* — por eso el bloque **nace plegado** en la
+   ficha del ingrediente, y la sección de Nutrición de una receta **no
+   se pinta** si no hay ni un valor. Nada de ocho guiones ocupando media
+   pantalla.
+3. **Si falta algún ingrediente, se suma lo que se sabe y se avisa**
+   (*"Sin contar Perejil, que aún no tiene valores apuntados"*). La
+   cifra es un suelo, no una promesa — mismo criterio que el tiempo
+   estimado del Gimnasio, que solo cuenta los ejercicios con historial.
+
+**Vacío no es cero, y esto es lo importante de la ruta.** Un campo sin
+rellenar se guarda como NULL y ese ingrediente no aporta ese valor. Si
+se guardara un 0, contaría como dato bueno y hundiría el total del plato
+sin que se notara. Un número negativo o un texto se tratan igual que no
+saberlo (`numeroNutri`).
+
+**El problema de las unidades, y cómo se resuelve.** Los valores son por
+100 g / 100 ml, así que una línea en g, kg, ml o l se convierte sola
+(masa y volumen se tratan igual a propósito: la etiqueta de un aceite
+viene "por 100 ml" y la receta lo mide en ml, así que las dos hablan de
+la misma base sin necesidad de saber la densidad). Pero "2 ud de huevo"
+no se puede llevar a esa base sin saber lo que pesa uno — de ahí
+`gramos_por_unidad`, otro campo opcional. Sin él, ese ingrediente **no
+cuenta y se dice**, en vez de inventarse un peso. `gramosDeLinea()` en
+`routes-local/recetas.js` es quien decide.
+
+Un ingrediente marcado como **opcional** que no cuenta NO sale en el
+aviso: no estropea el total de un plato que puede no llevarlo.
+
+**La cuenta vive en la RUTA** (`nutricionDe`), no en la pantalla, para
+que la ficha y lo que venga después (un widget, la compra) digan lo
+mismo del mismo plato. Devuelve el total del plato con sus raciones
+BASE; escalar es cosa de quien lo pinta, que es quien sabe para cuánta
+gente lo estás mirando. Por ración = total / raciones base, así que **no
+cambia al escalar** — y eso es correcto, no un bug.
+
+**Dos cosas las vio una captura, no un assert**: con la rejilla a dos
+columnas, "de las cuales saturadas" caía debajo de "Proteínas" y se leía
+como si colgara de ellas (ahora va en UNA columna, en el orden de una
+etiqueta europea), y un plato de 2058 kcal salía sin punto de millar
+porque el español no agrupa los números de cuatro cifras por defecto —
+`RECETA_NUM_FORMATTER` lleva ahora `useGrouping: 'always'`, igual que el
+formateador del dinero de Finanzas y por el mismo motivo.
+
+**Y una cuenta que la prueba tenía mal y el código bien**: 2 huevos con
+6 g de proteína *por 100 g* y 60 g cada uno son 7,2 g, no 12. Los
+valores son por 100 g también en lo que se mide por unidades.
+
 ### Lo que NO se ha hecho, y no por olvido
 
 Todo lo que Koku dejó dicho "para luego", que es donde sigue:
@@ -4127,7 +4188,9 @@ Todo lo que Koku dejó dicho "para luego", que es donde sigue:
 - **Precios y Finanzas**: apuntarle el precio a cada ingrediente, ver su
   evolución, calcular cuánto va a costar la compra y sacar el precio
   medio de un plato. El catálogo está hecho justo para que esto sea
-  posible; falta la tabla de precios y las pantallas.
+  posible; falta la tabla de precios y las pantallas. Las calorías y los
+  macros ya siguen ese mismo camino (ver el bloque de arriba), así que
+  el precio es otra columna más en la misma ficha.
 - **Tareas**: "quiero hacer esta receta" → la compra como una lista de
   tareas que se tachan desde el calendario.
 - **Recetas en la Tienda**: esta rama sale de `movil-ui` (v0.56.0), que
@@ -4232,7 +4295,125 @@ Y la copia de seguridad seguia apuntando a `lecturas_sagas`/
 `lecturas_items`, que ya no existen: una copia de esta App no habria
 guardado ni restaurado nada.
 
+## Entretenimiento: vitrina, sesiones y vueltas (14/9/2026)
+
+Llegó de `entretenimiento-movil` en la v0.62.0, en dos commits. El
+detalle completo está en `ENTRETENIMIENTO.md` (apartados 4 y 5); aquí
+solo lo que hay que saber antes de tocar código.
+
+- **La tabla de 7 columnas se fue: ahora es una vitrina de portadas.**
+  La portada se genera mientras no haya imagen, y la imagen **la pone el
+  usuario** desde su galería o su cámara. Nada de buscarla por internet:
+  la app no hace ni una petición de red, y buscar una carátula por
+  título le contaría a un tercero qué estás viendo.
+- **Las portadas van al almacén `noteAssets`**, igual que las imágenes
+  de las notas: el HTML guarda una ruta `/api/notes/images/<uuid>` y los
+  bytes viven fuera del `.sqlite`. Esto tiene consecuencias en la copia
+  de seguridad — ver el bloque siguiente.
+- **La regla de la vitrina que hay que respetar**: la portada y la línea
+  de debajo NUNCA dicen lo mismo. Como la portada generada lleva texto
+  encima, repetirlo justo debajo se lee como un fallo.
+- **Cinco pestañas** (`Siguiendo` · `Colecciones` · `Deseos` ·
+  `Historial` · `Actividad`), y la elegida **no se recuerda** entre
+  aperturas a propósito: volver siempre a "Siguiendo" es la gracia.
+- **Las sesiones se apuntan SOLAS.** Cambias el progreso como siempre y
+  la ruta (`PUT`, no el cliente) apunta "el martes leí del capítulo 12
+  al 15". Lo hace la ruta porque es el único sitio que conoce el valor
+  anterior, y así da igual desde qué pantalla se cambie. Solo cuenta
+  SUBIR; crear un item no apunta nada; dos veces el mismo día son dos
+  sesiones; y **la unidad se copia en la sesión** en vez de mirarse
+  luego, para que cambiar la unidad de un item no reescriba lo que
+  querían decir las sesiones viejas.
+- **"Volver a empezar" sube `vuelta` y pone el progreso a cero, sin
+  borrar nada**: las sesiones de la vuelta anterior se quedan con su
+  número y siguen contando para el mapa y la racha, porque pasaron de
+  verdad.
+- **Todas las fechas son LOCALES**, nunca `toISOString()`. Mismo cuidado
+  que `hoyISO()` del ciclo del Gimnasio.
+
+**El destino del widget pasa a llamarse `entretenimiento`**, con
+`lecturas` conservado como **alias** en `DestinoDeWidget` y en el
+despachador de `app.js`: un widget que el iPhone ya tenga puesto
+conserva la URL con la que se dibujó hasta que se vuelve a dibujar, así
+que sin el alias tocarlo no haría nada justo después de actualizar. El
+id interno de la App sigue siendo `lecturas` en todo lo demás.
+
+**Dos avisos para el que escriba pruebas aquí**, los dos mordieron:
+
+- La API se llama `progressCurrent` / `progressTotal` / `progressUnit`,
+  no `progress` / `total` / `unit`. Mandando el nombre corto no falla
+  nada: el `PUT` guarda sin tocar el progreso y *parece* que las
+  sesiones no se apuntan.
+- **La barra de pestañas de Entretenimiento reutiliza la clase
+  `.gym-tab-btn`** (es el botón-pastilla genérico de `styles.css`, no
+  algo del Gimnasio). Una prueba que cuente `.gym-tab-btn` en todo el
+  documento para comprobar que el Gimnasio ya no tiene pestañas miente:
+  hay que acotarla a `#gym-view`.
+
+**Lo que NO se hizo**: la barra nueva **no está en
+`MOBILE_SUBTAB_BARS`**, así que el gesto central no recorre sus cinco
+pestañas — cae al cambio de pestaña de la barra de abajo, que es el
+respaldo de siempre. Viajes sí está. No se ha añadido sin preguntar a
+Koku, porque es cambiarle un gesto que diseñó él.
+
+## Las imágenes NO son solo de Notas (arreglo del 14/9/2026)
+
+Encontrado al fusionar Entretenimiento, y era **pérdida de datos de
+verdad**, no un detalle.
+
+El almacén `noteAssets` de IndexedDB lo comparten **cuatro** Apps: las
+imágenes de las notas, las **portadas** de Entretenimiento, las **fotos**
+de Recetas y los **adjuntos** de Viajes. Todas guardan una ruta
+`/api/notes/images/<uuid>` y los bytes van al mismo sitio.
+
+La copia de seguridad por Apps (v0.58.0) daba por hecho que ese almacén
+era de Notas, y de ahí salían dos agujeros:
+
+1. **Al EXPORTAR**: `dentro.includes('notes') ? assetGetAll() : []`. Una
+   copia de Recetas sin Notas salía con las recetas y **sin ni una foto**.
+2. **Al IMPORTAR una copia parcial**: había un `assetClear()` antes de
+   reponer. O sea que restaurar SOLO Notas **vaciaba las fotos de las
+   otras tres Apps**, que ni siquiera se estaban restaurando. Y como la
+   reposición colgaba de `traidas.includes('notes')`, una copia de
+   Recetas restauraba las recetas con las fotos rotas.
+
+Cómo queda, y por qué así:
+
+- **`BACKUP_APPS_CON_ARCHIVOS`** (`backup.js`) declara las cuatro. Si
+  entra CUALQUIERA de ellas, van todas las imágenes. No se pueden
+  repartir por App sin mirar fila por fila quién usa cada uuid, así que
+  se aplica la regla prudente que ya usa el resto del archivo: sobra
+  peso, nunca faltan fotos. **Si aparece una App nueva que suba
+  imágenes, va a esa lista.**
+- **Una restauración parcial SOLO SUMA imágenes, nunca borra.** Se
+  escribe encima por nombre, y como cada archivo es un uuid, dos con el
+  mismo nombre son el mismo archivo. Lo que sobra son bytes huérfanos:
+  molesto, e infinitamente mejor que quedarse sin una foto. **La copia
+  COMPLETA sigue haciendo borrón y cuenta nueva**, que es lo que debe
+  hacer.
+
+Y de paso: `entretenimiento_sesiones` entró en `BACKUP_TABLAS_POR_APP`,
+**detrás de `entretenimiento_items`** — la restauración parcial inserta
+tabla a tabla en ese orden y una sesión apunta a su item.
+
+Las dos comprobaciones nuevas (`v62-copia`) se probaron deshaciendo cada
+arreglo a propósito: 3 en rojo con la regla vieja de exportar, 1 con el
+`assetClear()` de vuelta.
+
 ## Estado actual
+
+**v0.62.0** (14/9/2026) es otra ronda de **merges**, con dos arreglos de
+fondo de propina. Traen algo dos ramas: **Entretenimiento** (la vitrina
+de portadas, las sesiones que se apuntan solas, la racha, el mapa de
+actividad y las vueltas) y **Recetas** (calorías y macros, todo
+opcional). `gimnasio-movil`, `finanzas-movil`, `retos-movil-ui` y
+`viajes-movil` no traían nada. Los dos arreglos, los dos en la copia de
+seguridad y los dos de pérdida de datos, están en el bloque "Las
+imágenes NO son solo de Notas".
+
+**El número volvió a chocar**, por tercera vez: la rama de Recetas venía
+numerada como v0.60.0, que ya estaba cogida y etiquetada en esta rama.
+Esta ronda es la v0.62.0 y las notas de la rama se fundieron en ella.
 
 **v0.61.0** (14/9/2026) es una ronda de **MERGES**, no de features: se
 traen las cinco ramas de movil que tenian algo nuevo — Finanzas (la

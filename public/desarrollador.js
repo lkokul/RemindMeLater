@@ -17,6 +17,14 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.62.0': [
+    'Otra ronda de merges: Entretenimiento (vitrina de portadas + sesiones, racha y vueltas) y Recetas (calorías y macros). gimnasio, finanzas, retos y viajes no traían nada.',
+    'Entretenimiento estrena tabla (entretenimiento_sesiones) y columna (vuelta). La migración desde una base tuya de la ronda anterior solo se puede ver de verdad en el teléfono: mira que no se haya perdido ninguna portada ni ninguna nota.',
+    'La rama de Recetas venía numerada como v0.60.0, que ya estaba cogida y etiquetada. Esta ronda es la v0.62.0 y sus notas se han fundido aquí. Es la tercera vez que dos ramas eligen el mismo número.',
+    'ARREGLO DE PÉRDIDA DE DATOS en la copia de seguridad, y conviene probarlo: las portadas de Entretenimiento, las fotos de Recetas y los adjuntos de Viajes viven en el mismo almacén que las imágenes de las notas, y la copia solo las guardaba si marcabas Notas. Además, restaurar una copia parcial VACIABA ese almacén, o sea que restaurar solo Notas se llevaba por delante las fotos de las otras tres Apps. Ahora se guardan si entra cualquiera de esas Apps, y una restauración parcial sólo SUMA imágenes, nunca borra.',
+    'El widget de Entretenimiento apuntaba a remindmelater://lecturas y ahora apunta a entretenimiento, con el nombre viejo conservado como alias. Un widget que ya tuvieras puesto sigue funcionando, pero es justo lo que hay que tocar para comprobarlo.',
+    'Sigue sin haber manual de Retos, Recetas ni de las otras cuatro Apps: solo el del Gimnasio.',
+  ],
   '0.61.0': [
     'Ronda de MERGES, no de features: entran Finanzas (la navegación de Gastos fijos), Entretenimiento (el renombrado entero) y las dos Apps nuevas, Retos y Recetas. Lo que hay que probar es que ninguna se ha roto por el camino, sobre todo Entretenimiento: sus tablas cambiaron de nombre y la migración desde lecturas_* solo se puede ver de verdad con datos tuyos de antes.',
     'Retos y Recetas vienen ENCENDIDAS con la etiqueta de "en desarrollo". Si prefieres que nazcan apagadas como Entretenimiento y Viajes, es quitarles `activaDeFabrica: true` en APPS_DE_LA_TIENDA.',

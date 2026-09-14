@@ -22,6 +22,28 @@
     return String(nombre == null ? '' : nombre).trim().toLowerCase().replace(/\s+/g, ' ');
   }
 
+  // Los nueve valores opcionales, todos numeros por 100 g / 100 ml (mas
+  // lo que pesa una unidad). En una sola lista para que anadir uno
+  // manana sea tocar SOLO esta linea, en vez de buscarlos repartidos por
+  // el INSERT, el UPDATE y el serializador.
+  const CAMPOS_NUTRI = ['kcal', 'proteinas', 'grasas', 'saturadas', 'hidratos', 'azucares', 'fibra', 'sal', 'gramosPorUnidad'];
+  const COLUMNA_NUTRI = {
+    kcal: 'kcal', proteinas: 'proteinas', grasas: 'grasas', saturadas: 'saturadas',
+    hidratos: 'hidratos', azucares: 'azucares', fibra: 'fibra', sal: 'sal',
+    gramosPorUnidad: 'gramos_por_unidad',
+  };
+
+  // Vacio significa "no lo se", que NO es lo mismo que cero: un cero
+  // contaria como dato bueno y hundiria el total de la receta sin que se
+  // notara. Un negativo tampoco existe en una etiqueta, asi que se trata
+  // igual que no saberlo.
+  function numeroNutri(v) {
+    if (v === undefined || v === null || v === '') return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return Math.min(100000, n);
+  }
+
   function limpiarTexto(v, max) {
     if (v === undefined || v === null) return null;
     const t = String(v).trim();
@@ -29,12 +51,18 @@
   }
 
   function serialize(row) {
+    const nutri = {};
+    CAMPOS_NUTRI.forEach((c) => { nutri[c] = row[COLUMNA_NUTRI[c]] ?? null; });
     return {
       id: row.id,
       name: row.name,
       unidad: row.unidad,
       categoria: row.categoria,
       notas: row.notas,
+      ...nutri,
+      // Para que la pantalla sepa de un vistazo si a este ingrediente le
+      // falta todo, sin tener que mirar los nueve campos.
+      tieneNutricion: CAMPOS_NUTRI.some((c) => nutri[c] !== null && c !== 'gramosPorUnidad'),
       // Cuantas recetas lo usan. Va en el serializador y no en una ruta
       // aparte porque es justo lo que hace falta para decidir si se
       // puede borrar, y para ordenar el catalogo por lo que mas usas.
@@ -65,10 +93,12 @@
     res.json(serialize(row));
   });
 
-  function crear({ name, unidad, categoria, notas }) {
+  function crear({ name, unidad, categoria, notas }, nutri) {
+    const columnas = CAMPOS_NUTRI.map((c) => COLUMNA_NUTRI[c]);
     const info = db
-      .prepare("INSERT INTO recetas_ingredientes (name, unidad, categoria, notas, updated_at) VALUES (?, ?, ?, ?, datetime('now'))")
-      .run(name, unidad, categoria, notas);
+      .prepare(`INSERT INTO recetas_ingredientes (name, unidad, categoria, notas, ${columnas.join(', ')}, updated_at)
+                VALUES (?, ?, ?, ?, ${columnas.map(() => '?').join(', ')}, datetime('now'))`)
+      .run(name, unidad, categoria, notas, ...CAMPOS_NUTRI.map((c) => numeroNutri(nutri ? nutri[c] : null)));
     return db.prepare('SELECT * FROM recetas_ingredientes WHERE id = ?').get(info.lastInsertRowid);
   }
 
@@ -86,7 +116,7 @@
       unidad: limpiarTexto(unidad, 16),
       categoria: limpiarTexto(categoria, 40),
       notas: limpiarTexto(notas, 400),
-    });
+    }, req.body);
     res.status(201).json(serialize(row));
   });
 
@@ -125,11 +155,16 @@
       }
     }
 
-    db.prepare("UPDATE recetas_ingredientes SET name = ?, unidad = ?, categoria = ?, notas = ?, updated_at = datetime('now') WHERE id = ?").run(
+    // Un campo que NO venga en el cuerpo se queda como estaba, igual que
+    // el resto: un PUT parcial (cambiar solo el pasillo) no puede dejar a
+    // un ingrediente sin sus valores nutricionales.
+    const sets = CAMPOS_NUTRI.map((c) => `${COLUMNA_NUTRI[c]} = ?`).join(', ');
+    db.prepare(`UPDATE recetas_ingredientes SET name = ?, unidad = ?, categoria = ?, notas = ?, ${sets}, updated_at = datetime('now') WHERE id = ?`).run(
       name !== undefined && String(name).trim() ? String(name).trim().slice(0, 80) : existente.name,
       unidad === undefined ? existente.unidad : limpiarTexto(unidad, 16),
       categoria === undefined ? existente.categoria : limpiarTexto(categoria, 40),
       notas === undefined ? existente.notas : limpiarTexto(notas, 400),
+      ...CAMPOS_NUTRI.map((c) => ((req.body || {})[c] === undefined ? existente[COLUMNA_NUTRI[c]] : numeroNutri((req.body || {})[c]))),
       req.params.id,
     );
     res.json(serialize(db.prepare('SELECT * FROM recetas_ingredientes WHERE id = ?').get(req.params.id)));

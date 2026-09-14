@@ -93,13 +93,21 @@ const BACKUP_TABLAS_POR_APP = {
   // Las tablas se llaman entretenimiento_* desde el renombrado; la CLAVE
   // sigue siendo el id interno 'lecturas'. Con los nombres viejos aqui,
   // una copia de esta App no guardaria ni restauraria nada.
-  lecturas: ['entretenimiento_sagas', 'entretenimiento_items'],
+  // Las sesiones van DETRAS de los items: la restauracion parcial
+  // inserta tabla a tabla en este orden, y una sesion apunta a su item.
+  lecturas: ['entretenimiento_sagas', 'entretenimiento_items', 'entretenimiento_sesiones'],
   viajes: ['viajes_trips', 'viajes_trip_countries', 'viajes_entries',
     'viajes_entry_attachments', 'viajes_entry_movements'],
   retos: ['retos', 'retos_hechos'],
   recetas: ['recetas_carpetas', 'recetas', 'recetas_ingredientes', 'recetas_lineas',
     'recetas_compras', 'recetas_compra_recetas', 'recetas_compra_lineas'],
 };
+
+// Las Apps cuyos datos incluyen ARCHIVOS (bytes en el almacen noteAssets
+// de IndexedDB, no dentro del .sqlite). Ver el comentario de los assets
+// en buildBackupJson. Si aparece una App nueva que suba imagenes, va
+// aqui tambien.
+const BACKUP_APPS_CON_ARCHIVOS = ['notes', 'lecturas', 'viajes', 'recetas'];
 
 // Las Apps que se pueden marcar/desmarcar, en el orden de la Tienda.
 function backupAppsElegibles() {
@@ -170,9 +178,21 @@ async function buildBackupJson(incluidas) {
     }
   }
 
-  // Las fotos y las imagenes de las notas son de Notas: si Notas se
-  // queda fuera, no tiene sentido cargar el archivo con sus megas.
-  const assets = dentro.includes('notes') ? await assetGetAll() : [];
+  // LAS IMAGENES NO SON SOLO DE NOTAS, y darlo por hecho era una
+  // perdida de datos de verdad: el almacen "noteAssets" de IndexedDB lo
+  // comparten las imagenes de las notas, las PORTADAS de Entretenimiento,
+  // las FOTOS de Recetas y los ADJUNTOS de Viajes -- todas guardan una
+  // ruta /api/notes/images/<uuid> y los bytes van al mismo sitio. Con la
+  // regla vieja ("solo si entra Notas"), una copia de Recetas sin Notas
+  // salia con las recetas pero sin ni una foto.
+  //
+  // Los assets no se pueden repartir por App sin mirar dentro de cada
+  // fila para ver quien usa cada uuid, asi que se aplica la regla
+  // prudente que ya usa el resto de este archivo: si entra CUALQUIERA de
+  // las Apps que guardan imagenes, van todas. Sobra peso en el archivo;
+  // lo contrario seria quedarse sin fotos en silencio.
+  const conArchivos = BACKUP_APPS_CON_ARCHIVOS.some((id) => dentro.includes(id));
+  const assets = conArchivos ? await assetGetAll() : [];
   const ajustes = {};
   for (let i = 0; i < localStorage.length; i++) {
     const clave = localStorage.key(i);
@@ -367,13 +387,23 @@ async function importarSoloEstasApps(bytes, traidas, datos) {
     origen.close();
   }
 
-  // Las imagenes de las notas solo se tocan si la copia trae Notas.
-  if (traidas.includes('notes')) {
-    await assetClear();
-    for (const asset of datos.assets || []) {
-      if (!asset || typeof asset.name !== 'string' || typeof asset.bytesBase64 !== 'string') continue;
-      await assetPut(asset.name, backupBase64ToBytes(asset.bytesBase64), asset.type || '');
-    }
+  // LAS IMAGENES SE SUMAN, NUNCA SE BORRAN, en una restauracion parcial.
+  //
+  // Aqui habia un assetClear() y era el mismo agujero que esto viene a
+  // tapar: el almacen lo comparten Notas, Entretenimiento, Recetas y
+  // Viajes, asi que vaciarlo para restaurar UNA App se llevaba por
+  // delante las fotos de las otras tres, que ni siquiera se estaban
+  // restaurando. Y la condicion "solo si la copia trae Notas" dejaba una
+  // copia de Recetas restaurando las recetas con las fotos rotas.
+  //
+  // Se escribe encima por nombre: cada archivo es un uuid, asi que dos
+  // con el mismo nombre son el mismo archivo. Lo que sobra son bytes
+  // huerfanos de algo que ya no los usa -- molesto, pero infinitamente
+  // mejor que quedarse sin una foto. La copia COMPLETA sigue haciendo
+  // borron y cuenta nueva por su camino, que es lo que debe hacer.
+  for (const asset of datos.assets || []) {
+    if (!asset || typeof asset.name !== 'string' || typeof asset.bytesBase64 !== 'string') continue;
+    await assetPut(asset.name, backupBase64ToBytes(asset.bytesBase64), asset.type || '');
   }
 
   // Los ajustes de este dispositivo SI se restauran enteros, como en una

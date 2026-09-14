@@ -34,6 +34,28 @@
 // exista se lee como general, no rompe nada.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.62.0',
+    fecha: '2026-09-14',
+    nuevo: [
+      { app: 'lecturas', texto: 'Entretenimiento estrena vitrina: la tabla con scroll lateral se fue y ahora es una rejilla de portadas. Si no le pones imagen, se genera una con el color del tipo, y la de verdad la pones tú desde la galería o la cámara.' },
+      { app: 'lecturas', texto: 'Cuatro pestañas: Siguiendo (donde abre), Colecciones, Deseos e Historial. Las tres transversales cruzan todas tus colecciones, así que ya no hace falta entrar en una para ver por dónde ibas.' },
+      { app: 'lecturas', texto: 'Se apuntan sesiones solas: cada vez que subes el progreso queda guardado "el martes leí del capítulo 12 al 15". No hay que hacer nada nuevo — cambias el progreso como siempre.' },
+      { app: 'lecturas', texto: 'Y de ahí sale la pestaña Actividad: racha diaria, mapa de 26 semanas y el resumen del año con su unidad ("42 capítulos de manga", no "42 manga").' },
+      { app: 'lecturas', texto: '"Volver a empezar" para relecturas y revisionados: pone el progreso a cero y empieza la vuelta 2. No borra nada — lo que leíste la vuelta anterior sigue contando para la racha y el mapa.' },
+      { app: 'lecturas', texto: 'Ya se puede mover un item de colección, y crear la colección nueva ahí mismo si es algo suelto.' },
+      { app: 'recetas', texto: 'En Recetas puedes apuntar, si quieres, las calorías y los macros de cada ingrediente: lo que pone en su paquete por 100 g o por 100 ml. Es todo opcional y el bloque viene plegado — si no te interesa, ni lo ves.' },
+      { app: 'recetas', texto: 'Lo escribes una vez en el ingrediente y la receta suma sola: en su ficha aparecen las calorías por ración y el desglose de grasas, hidratos, proteínas, fibra y sal, igual que en una etiqueta.' },
+      { app: 'recetas', texto: 'Y escala con las raciones: las calorías por ración no cambian al pedir la receta para más gente, pero el plato entero sí.' },
+      { app: 'recetas', texto: 'Si a algún ingrediente le faltan los valores, la ficha suma lo que sabe y te dice cuál falta, en vez de dar una cifra que parezca exacta sin serlo.' },
+      { app: 'recetas', texto: 'Para lo que midas en unidades (2 huevos, 3 dientes de ajo) puedes decir cuánto pesa una, y así también entra en la cuenta.' },
+    ],
+    parches: [
+      { app: 'lecturas', texto: 'Borrar un item o una colección preguntaba con el cuadro del navegador, que en el móvil deja la app congelada un instante. Ahora usa el diálogo de siempre.' },
+      'Una copia de seguridad que dejara Notas fuera se llevaba también las portadas de Entretenimiento, las fotos de Recetas y los adjuntos de Viajes, porque todas las imágenes viven en el mismo sitio. Ahora se guardan si incluyes cualquiera de esas Apps.' ,
+      'Las sesiones de Entretenimiento faltaban en el reparto de la copia de seguridad: una copia de esa App no las habría guardado.',
+    ],
+  },
+  {
     version: '0.61.0',
     fecha: '2026-09-14',
     nuevo: [
