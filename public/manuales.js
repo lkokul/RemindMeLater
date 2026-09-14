@@ -164,4 +164,5 @@ const APP_MANUALES = {
   lecturas: [],
   viajes: [],
   retos: [],
+  recetas: [],
 };

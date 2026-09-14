@@ -789,6 +789,7 @@ document.getElementById('btn-entretenimiento-settings').addEventListener('click'
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-retos-settings').addEventListener('click', openSettingsModal);
+document.getElementById('btn-recetas-settings').addEventListener('click', openSettingsModal);
 // #mobile-notes-view (Fase 4) es tambien .my-space-view a pantalla
 // completa, mismo motivo que las de arriba.
 document.getElementById('btn-mobile-notes-settings').addEventListener('click', openSettingsModal);
@@ -2320,10 +2321,36 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Recetas: capa a capa, igual que Finanzas. Primero los modales, luego
+  // la ficha de una receta o la seccion en la que estes, y solo desde el
+  // inicio se sale a Herramientas.
+  const recetasModalIds = [
+    'receta-ingrediente-picker-modal',
+    'receta-ingrediente-modal',
+    'receta-carpeta-modal',
+    'receta-modal',
+  ];
+  for (const id of recetasModalIds) {
+    const modal = document.getElementById(id);
+    if (modal && !modal.classList.contains('hidden')) {
+      modal.classList.add('hidden');
+      return;
+    }
+  }
+  const recetasView = document.getElementById('recetas-view');
+  if (recetasView && !recetasView.classList.contains('hidden')) {
+    const atras = document.getElementById('btn-recetas-back');
+    if (atras && !atras.classList.contains('hidden')) {
+      atras.click();
+      return;
+    }
+    document.getElementById('btn-close-recetas').click();
+    return;
+  }
+
   const entretenimientoModalIds = [
     ['entretenimiento-saga-modal', closeEntretenimientoSagaModal],
-    ['entretenimiento-item-modal', closeEntretenimientoItemModal],
-  ];
+    ['entretenimiento-item-modal', closeEntretenimientoItemModal],  ];
   for (const [id, close] of entretenimientoModalIds) {
     const modal = document.getElementById(id);
     if (modal && !modal.classList.contains('hidden')) {

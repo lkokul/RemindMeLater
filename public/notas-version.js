@@ -65,8 +65,7 @@ const APP_RELEASE_NOTES = [
       'La hora que se propone al crear un evento redondea a la hora MÁS CERCANA, no siempre hacia abajo: a las 9:37 propone 10:00–11:00, y a las 17:05, 17:00–18:00. Y creando el evento desde un día concreto ya no se plantaban las 9:00 fijas.',
       'El recordatorio de un evento nuevo viene puesto en "En el momento" en vez de "Sin recordatorio".',
       'Un evento que se repite programa un aviso propio por cada vez, no uno que se pisaba a sí mismo. Se limitan a 10 por serie para no quedarse con todo el cupo de avisos del teléfono.',
-    ],
-  },
+    ],  },
   {
     version: '0.56.0',
     fecha: '2026-09-13',

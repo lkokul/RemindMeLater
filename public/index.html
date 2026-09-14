@@ -515,6 +515,10 @@
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c2-1 5-1 8 1 3-2 6-2 8-1v13c-2-1-5-1-8 1-3-2-6-2-8-1z"></path><path d="M12 6v13"></path></svg></span>
           <span class="extensions-card-title">Entretenimiento</span>
         </button>
+        <button type="button" id="btn-open-recetas" class="extensions-card extensions-card-active">
+          <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v7a3 3 0 0 0 3 3v8"></path><line x1="7" y1="3" x2="7" y2="9"></line><path d="M17 3c-1.7 0-3 2.2-3 5s1.3 4 3 4v9"></path></svg></span>
+          <span class="extensions-card-title">Recetas</span>
+        </button>
         <button type="button" id="btn-open-viajes" class="extensions-card extensions-card-active">
           <span class="extensions-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></span>
           <span class="extensions-card-title">Viajes</span>
@@ -2553,6 +2557,267 @@
     </div>
   </div>
 
+  <!-- App "Recetas": platos apuntados, sus ingredientes y la compra.
+       Se navega como Finanzas y Gimnasio -- un INICIO con las secciones
+       como filas y una vuelta atras, en vez de una barra de pestanas.
+       Ver switchRecetasPanel/renderRecetasInicio en app.js. -->
+  <div id="recetas-view" class="my-space-view hidden">
+    <div class="my-space-view-header">
+      <h2 id="recetas-view-title">Recetas</h2>
+      <div class="my-space-view-header-actions">
+        <button type="button" id="btn-close-recetas" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
+        <!-- Configuracion tiene que poder abrirse desde cualquier
+             pantalla completa, que tapa la topbar. Va SIEMPRE el ultimo. -->
+        <button type="button" id="btn-recetas-settings" class="icon-btn" aria-label="Configuración">☰</button>
+      </div>
+    </div>
+    <button type="button" id="btn-recetas-back" class="finanzas-back-btn hidden">‹ Recetas</button>
+
+    <!-- INICIO -->
+    <div class="recetas-panel" data-recetas-panel="inicio">
+      <div class="finanzas-hero">
+        <div class="finanzas-hero-label">Tienes apuntadas</div>
+        <div class="finanzas-hero-amount" id="recetas-inicio-total">—</div>
+        <div class="finanzas-hero-sub" id="recetas-inicio-sub"></div>
+      </div>
+      <div id="recetas-inicio-filas" class="finanzas-group-list"></div>
+    </div>
+
+    <!-- RECETAS: explorador de carpetas, igual que Notas -->
+    <div class="recetas-panel hidden" data-recetas-panel="recetas">
+      <div class="recetas-toolbar">
+        <input type="text" id="recetas-buscador" placeholder="Buscar por nombre o etiqueta" />
+      </div>
+      <!-- Filtro por etiqueta: se pinta solo con las que de verdad has
+           usado (no hay lista cerrada). Vacio si aun no hay ninguna. -->
+      <div id="recetas-filtro-etiquetas" class="recetas-filtro-etiquetas"></div>
+      <div class="recetas-ruta-row">
+        <button type="button" id="btn-recetas-subir-carpeta" class="secondary-btn hidden">← Volver</button>
+        <span id="recetas-ruta" class="recetas-ruta"></span>
+      </div>
+      <div id="recetas-lista" class="recetas-lista"></div>
+      <div class="recetas-acciones-pie">
+        <button type="button" id="btn-nueva-receta" class="primary-btn">+ Nueva receta</button>
+        <button type="button" id="btn-nueva-carpeta-receta" class="secondary-btn">+ Carpeta</button>
+      </div>
+    </div>
+
+    <!-- LA FICHA DE UNA RECETA: la pantalla de COCINAR.
+         Aqui no se escribe nada: se lee, se escala y se manda a la
+         compra. Todo lo que se edita vive en #receta-modal, mismo
+         reparto que en el Gimnasio (la fila es para usarla, el dialogo
+         para editarla). -->
+    <div class="recetas-panel hidden" data-recetas-panel="receta">
+      <div id="receta-ficha" class="receta-ficha"></div>
+    </div>
+
+    <!-- LA COMPRA -->
+    <div class="recetas-panel hidden" data-recetas-panel="compra">
+      <div id="receta-compra-recetas" class="receta-compra-recetas"></div>
+      <div class="receta-compra-anadir">
+        <input type="text" id="receta-compra-nuevo-texto" placeholder="Añadir algo a mano (papel de horno…)" />
+        <input type="text" id="receta-compra-nueva-cantidad" inputmode="decimal" class="receta-campo-corto" placeholder="Cant." />
+        <input type="text" id="receta-compra-nueva-unidad" class="receta-campo-corto" placeholder="Unidad" />
+        <button type="button" id="btn-receta-compra-anadir" class="secondary-btn">+</button>
+      </div>
+      <div id="receta-compra-lista" class="receta-compra-lista"></div>
+      <div class="recetas-acciones-pie">
+        <button type="button" id="btn-receta-compra-cerrar" class="primary-btn">Compra hecha</button>
+        <button type="button" id="btn-receta-compra-vaciar" class="danger-btn">Vaciar</button>
+      </div>
+    </div>
+
+    <!-- EL CATALOGO DE INGREDIENTES -->
+    <div class="recetas-panel hidden" data-recetas-panel="ingredientes">
+      <div class="recetas-toolbar">
+        <input type="text" id="receta-ingredientes-buscador" placeholder="Buscar un ingrediente" />
+      </div>
+      <p class="hint">Cada ingrediente existe una sola vez y lo comparten todas tus recetas. Es lo que deja sumar «300 g + 200 g de pollo» en una línea.</p>
+      <div id="receta-ingredientes-lista" class="recetas-lista"></div>
+      <div class="recetas-acciones-pie">
+        <button type="button" id="btn-nuevo-ingrediente" class="primary-btn">+ Nuevo ingrediente</button>
+      </div>
+    </div>
+
+    <!-- COMPRAS ANTERIORES -->
+    <div class="recetas-panel hidden" data-recetas-panel="historial">
+      <div id="receta-historial-lista" class="recetas-lista"></div>
+      <div id="receta-historial-detalle" class="receta-compra-lista"></div>
+    </div>
+  </div>
+
+  <!-- Crear / editar una receta. Todos los campos, incluidos los
+       ingredientes y los pasos. -->
+  <div id="receta-modal" class="modal hidden">
+    <div class="modal-card receta-modal-card">
+      <button type="button" id="btn-close-receta" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="receta-modal-title">Nueva receta</h2>
+      <form id="receta-form">
+        <input type="hidden" id="receta-id" />
+        <label>
+          Nombre
+          <input type="text" id="receta-nombre" required maxlength="140" />
+        </label>
+
+        <div class="field-label-block">
+          <span class="field-label">Foto</span>
+          <div class="receta-foto-row">
+            <div id="receta-foto-preview" class="receta-foto-preview"></div>
+            <div class="receta-foto-botones">
+              <button type="button" id="btn-receta-foto" class="secondary-btn">Elegir foto</button>
+              <button type="button" id="btn-receta-foto-quitar" class="danger-btn hidden">Quitar</button>
+            </div>
+          </div>
+          <!-- El selector de archivo del sistema es la unica forma de
+               llegar a la camara/carrete sin un plugin nativo. No es un
+               control de formulario de los que la app sustituye (no se
+               VE: lo abre un boton propio), asi que va oculto. -->
+          <input type="file" id="receta-foto-input" accept="image/*" class="hidden" />
+        </div>
+
+        <div class="form-row">
+          <label>
+            Raciones
+            <input type="text" id="receta-raciones" inputmode="decimal" placeholder="2" />
+          </label>
+          <div class="field-label-block">
+            <span class="field-label">Carpeta</span>
+            <div id="receta-carpeta-field"></div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label>
+            Preparación (min)
+            <input type="text" id="receta-tiempo-prep" inputmode="numeric" placeholder="20" />
+          </label>
+          <label>
+            Cocción (min)
+            <input type="text" id="receta-tiempo-coccion" inputmode="numeric" placeholder="40" />
+          </label>
+        </div>
+
+        <div class="form-row">
+          <div class="field-label-block">
+            <span class="field-label">Dificultad</span>
+            <div id="receta-dificultad-field"></div>
+          </div>
+          <div class="field-label-block">
+            <span class="field-label">Tipo de plato</span>
+            <div id="receta-tipo-field"></div>
+          </div>
+        </div>
+
+        <div class="field-label-block">
+          <span class="field-label">Etiquetas</span>
+          <div id="receta-etiquetas-field"></div>
+        </div>
+
+        <div class="field-label-block">
+          <span class="field-label">Ingredientes</span>
+          <div id="receta-lineas" class="receta-lineas"></div>
+          <button type="button" id="btn-receta-anadir-linea" class="secondary-btn">+ Añadir ingrediente</button>
+        </div>
+
+        <div class="field-label-block">
+          <span class="field-label">Cómo se hace</span>
+          <!-- Barra propia, corta a proposito: negrita, cursiva, las dos
+               listas y una foto de paso. Tablas y formulas son cosa de
+               las Notas y aqui no pintan nada. -->
+          <div class="receta-pasos-toolbar">
+            <button type="button" class="receta-pasos-btn" data-receta-cmd="bold" aria-label="Negrita"><b>B</b></button>
+            <button type="button" class="receta-pasos-btn" data-receta-cmd="italic" aria-label="Cursiva"><i>I</i></button>
+            <button type="button" class="receta-pasos-btn" data-receta-cmd="insertUnorderedList" aria-label="Lista">•</button>
+            <button type="button" class="receta-pasos-btn" data-receta-cmd="insertOrderedList" aria-label="Lista numerada">1.</button>
+            <button type="button" class="receta-pasos-btn" id="btn-receta-paso-imagen" aria-label="Foto de un paso">Foto</button>
+          </div>
+          <div id="receta-pasos" class="receta-pasos-editor" contenteditable="true" autocapitalize="sentences"></div>
+          <input type="file" id="receta-paso-imagen-input" accept="image/*" class="hidden" />
+        </div>
+
+        <label>
+          Notas (opcional)
+          <textarea id="receta-notas" rows="2" maxlength="2000"></textarea>
+        </label>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-receta" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-receta" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Crear / editar una carpeta de recetas -->
+  <div id="receta-carpeta-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-receta-carpeta" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="receta-carpeta-modal-title">Nueva carpeta</h2>
+      <form id="receta-carpeta-form">
+        <input type="hidden" id="receta-carpeta-id" />
+        <div class="group-form-row">
+          <input type="text" id="receta-carpeta-nombre" placeholder="Nombre de la carpeta" required maxlength="120" />
+          <div id="receta-carpeta-color-field"></div>
+        </div>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-receta-carpeta" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Crear / editar un ingrediente del catalogo -->
+  <div id="receta-ingrediente-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-receta-ingrediente" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2 id="receta-ingrediente-modal-title">Nuevo ingrediente</h2>
+      <form id="receta-ingrediente-form">
+        <input type="hidden" id="receta-ingrediente-id" />
+        <label>
+          Nombre
+          <input type="text" id="receta-ingrediente-nombre" required maxlength="80" />
+        </label>
+        <div class="form-row">
+          <label>
+            Unidad habitual
+            <input type="text" id="receta-ingrediente-unidad" maxlength="16" placeholder="g, ml, ud…" />
+          </label>
+          <div class="field-label-block">
+            <span class="field-label">Dónde se coge</span>
+            <div id="receta-ingrediente-categoria-field"></div>
+          </div>
+        </div>
+        <label>
+          Notas (opcional)
+          <textarea id="receta-ingrediente-notas" rows="2" maxlength="400"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-delete-receta-ingrediente" class="danger-btn hidden">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" id="btn-cancel-receta-ingrediente" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Elegir un ingrediente del catalogo (o crear uno nuevo sin salir).
+       Es un buscador propio y no un <select> nativo ni un <datalist>:
+       con muchos ingredientes hace falta buscar, y ademas tiene que
+       poder CREAR el que escribas, que un desplegable no sabe hacer. -->
+  <div id="receta-ingrediente-picker-modal" class="modal hidden">
+    <div class="modal-card">
+      <button type="button" id="btn-close-receta-ingrediente-picker" class="modal-close-x" aria-label="Cerrar">✕</button>
+      <h2>Elige un ingrediente</h2>
+      <input type="text" id="receta-ingrediente-picker-buscador" placeholder="Escribe para buscar o crear" />
+      <div id="receta-ingrediente-picker-lista" class="receta-picker-lista"></div>
+    </div>
+  </div>
+
   <!-- Modal para crear / editar evento -->
   <div id="event-modal" class="modal hidden">
     <div class="modal-card">
@@ -3368,6 +3633,7 @@
        quitan al fusionar en movil-ui (ver CLAUDE.md). Trae la marca de
        "esto es una build de desarrollo" y las cosas a revisar de cada
        version. -->
+  <script src="desarrollador.js"></script>
   <script src="db-local.js"></script>
   <!-- El "servidor" vive ahora dentro de la propia app: SQLite compilado
        a WebAssembly (vendor/sql-wasm.*), el esquema de siempre
@@ -3410,6 +3676,10 @@
   <script src="routes-local/noteImages.js"></script>
   <script src="routes-local/notes.js"></script>
   <script src="routes-local/profile.js"></script>
+  <script src="routes-local/recetasCarpetas.js"></script>
+  <script src="routes-local/recetasIngredientes.js"></script>
+  <script src="routes-local/recetas.js"></script>
+  <script src="routes-local/recetasCompra.js"></script>
   <script src="routes-local/reminders.js"></script>
   <script src="routes-local/retos.js"></script>
   <script src="routes-local/specialDays.js"></script>
