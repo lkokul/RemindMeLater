@@ -66,6 +66,12 @@
     // A diferencia de Gimnasio con las rutinas, aqui un item NO tiene
     // sentido sin su saga (es obligatoria, no hay "sagaId NULL" donde
     // reasignarlo) -- borrar la saga borra sus items directamente.
+    // Las sesiones de esos items se van con ellos: si no, quedarian
+    // huerfanas y el resumen del ano seguiria contandolas.
+    db.prepare(`
+      DELETE FROM entretenimiento_sesiones
+      WHERE item_id IN (SELECT id FROM entretenimiento_items WHERE saga_id = ?)
+    `).run(req.params.id);
     db.prepare('DELETE FROM entretenimiento_items WHERE saga_id = ?').run(req.params.id);
     const info = db.prepare('DELETE FROM entretenimiento_sagas WHERE id = ?').run(req.params.id);
     if (info.changes === 0) return res.status(404).json({ error: 'not_found' });

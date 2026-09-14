@@ -3886,25 +3886,212 @@ body.gym-rest-push #settings-modal .settings-card {
 .finanzas-savings-status { font-size: var(--t-cuerpo); }
 .finanzas-savings-range-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
 
-/* Extension "Entretenimiento": jerarquia de 2 tablas (sagas -> items de una
-   saga). ".gym-tab-action" se reutiliza tal cual para el boton "+
-   Nueva/o" (mismo estilo que ya se penso para Gimnasio: alineado a la
-   izquierda, no a todo el ancho). */
-.entretenimiento-panel { padding: 1rem 1.2rem; overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+/* Extension "Entretenimiento": VITRINA de portadas.
+   -------------------------------------------------------------------
+   Antes esto era una tabla de 7 columnas con scroll horizontal (la de
+   escritorio, que se quedo sin pasar por el rediseno movil). Ahora es
+   una rejilla de portadas, que es lo que Koku eligio: "rejilla limpia",
+   sin estanterias decoradas con plantas ni velas -- las caratulas ya
+   ponen el color, los muebles chocarian con el pase de estilo iOS.
+
+   La rejilla usa auto-fill + minmax, NO una media query de anchura
+   (estan prohibidas en esta rama, ver tools/comprobar-widgets.py): en un
+   movil salen 2 columnas y en una tele muchas mas, sin ningun corte. */
+.entretenimiento-panel { padding: 1rem 1.2rem 7rem; overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.6rem; }
 .gym-tab-action { align-self: flex-start; }
-.entretenimiento-table-wrap { overflow-x: auto; }
-.entretenimiento-table { width: 100%; border-collapse: collapse; font-size: var(--t-secundario); }
-.entretenimiento-table th {
-  text-align: left; padding: 0.5rem 0.6rem; font-weight: 600;
+#entretenimiento-home-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Cuatro pestanas no caben en el ancho de un movil, asi que la fila se
+   desliza en horizontal en vez de apretarlas o partirlas. */
+.entretenimiento-tabs {
+  display: flex; gap: 0.4rem; padding: 0.8rem 1.2rem; flex-shrink: 0;
+  overflow-x: auto; scrollbar-width: none;
+}
+.entretenimiento-tabs::-webkit-scrollbar { display: none; }
+.entretenimiento-tabs .gym-tab-btn { flex-shrink: 0; }
+.entretenimiento-content { flex: 1; min-height: 0; overflow-y: auto; padding: 0 1.2rem 7rem; }
+
+.entretenimiento-grid {
+  display: grid;
+  /* 7.5rem = 120px, y el numero esta MEDIDO, no elegido a ojo: en una
+     pantalla de 320px (el iPhone SE viejo) a la rejilla le quedan 266px
+     utiles, asi que dos columnas piden 2x120 + 14.4 de hueco = 254px.
+     Con 8rem salian 270px y se quedaba en UNA sola columna, o sea una
+     portada gigante por fila. En 375px y mas siguen siendo dos. */
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 1rem 0.9rem;
+}
+.entretenimiento-card {
+  display: flex; flex-direction: column; gap: 0.4rem;
+  background: none; border: none; padding: 0; margin: 0;
+  text-align: left; cursor: pointer; color: inherit;
+  min-width: 0;
+}
+.entretenimiento-card:active { transform: scale(0.97); }
+
+/* La portada. Proporcion 2:3, la de un libro y la de un poster de cine,
+   que es lo que hace que una rejilla de cosas distintas se vea
+   ordenada. */
+.entretenimiento-cover {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  display: flex; flex-direction: column;
+}
+.entretenimiento-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* PORTADA GENERADA: lo que se ve mientras no haya imagen de verdad.
+   El color del tipo entra REBAJADO sobre la superficie (no a saturacion
+   plena): una rejilla de diez rectangulos chillones marea, y asi
+   ademas el titulo se lee siempre. La franja de arriba si lleva el color
+   puro, que es lo que deja distinguir un manga de una pelicula de un
+   vistazo. --tipo lo pone el JavaScript en linea. */
+.entretenimiento-cover-generada {
+  background: color-mix(in srgb, var(--tipo, var(--accent)) 15%, var(--surface-2));
+  justify-content: space-between;
+  padding: 0.6rem 0.55rem;
+}
+.entretenimiento-cover-banda {
+  position: absolute; inset: 0 0 auto 0; height: 4px;
+  background: var(--tipo, var(--accent));
+}
+.entretenimiento-cover-titulo {
+  margin-top: 0.35rem;
+  font-size: var(--t-pie); font-weight: 600; line-height: 1.25;
+  color: var(--surface-2-text);
+  display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.entretenimiento-cover-tipo {
+  font-size: var(--t-micro); text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--tipo, var(--accent)); font-weight: 700;
+}
+
+/* Insignias sobre la portada: estado (punto de color) y prestado. */
+.entretenimiento-cover-estado {
+  position: absolute; top: 0.4rem; right: 0.4rem;
+  width: 0.7rem; height: 0.7rem; border-radius: 999px;
+  border: 2px solid var(--surface-2);
+}
+.entretenimiento-cover-prestado {
+  position: absolute; top: 0.4rem; left: 0.4rem;
+  font-size: var(--t-micro); padding: 0.1rem 0.35rem; border-radius: 999px;
+  background: #f5b400; color: #3a2a00; font-weight: 700;
+}
+/* Barra de progreso pegada al pie de la portada. */
+.entretenimiento-cover-progreso {
+  position: absolute; inset: auto 0 0 0; height: 4px;
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}
+.entretenimiento-cover-progreso > span { display: block; height: 100%; background: var(--tipo, var(--accent)); }
+
+.entretenimiento-card-titulo {
+  font-size: var(--t-pie); font-weight: 600; line-height: 1.3;
+  color: var(--bg-text);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.entretenimiento-card-meta {
+  font-size: var(--t-micro);
+  color: color-mix(in srgb, var(--bg-text) 62%, var(--bg));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.entretenimiento-filters-toggle { align-self: flex-start; }
+
+/* --- Pestana "Actividad" -------------------------------------------------
+   Todo lo de aqui sale de las SESIONES (ver entretenimientoSesiones.js).
+   El mapa es de magnitud, asi que va en UN SOLO tono escalonado, nunca en
+   varios colores -- misma regla que el heatmap del Gimnasio. */
+.entretenimiento-actividad { display: flex; flex-direction: column; gap: 0.5rem; }
+.entretenimiento-seccion-titulo { margin: 1rem 0 0; font-size: var(--t-titulo-3); }
+
+.entretenimiento-racha {
+  display: flex; align-items: center; gap: 1rem;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1rem;
+}
+.entretenimiento-racha-numero {
+  font-size: var(--t-titulo-grande); font-weight: 700; line-height: 1;
+  color: var(--accent); font-variant-numeric: tabular-nums;
+}
+.entretenimiento-racha-texto { display: flex; flex-direction: column; gap: 0.15rem; }
+.entretenimiento-racha-texto b { font-size: var(--t-secundario); }
+.entretenimiento-racha-texto span {
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}
+
+/* 26 columnas (una por semana) de 7 filas. Se desliza en horizontal si no
+   cabe, en vez de encoger los cuadros hasta no verse. */
+.entretenimiento-mapa-wrap { overflow-x: auto; padding-bottom: 0.3rem; }
+.entretenimiento-mapa {
+  display: grid; grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column; grid-auto-columns: 0.75rem;
+  gap: 3px; min-width: min-content;
+}
+.entretenimiento-mapa-dia {
+  width: 0.75rem; height: 0.75rem; border-radius: 2px;
+  background: color-mix(in srgb, var(--bg-text) 8%, var(--bg));
+}
+/* Cuatro escalones del mismo tono: nada, poco, bastante, mucho. */
+.entretenimiento-mapa-dia.n1 { background: color-mix(in srgb, var(--accent) 35%, var(--bg)); }
+.entretenimiento-mapa-dia.n2 { background: color-mix(in srgb, var(--accent) 65%, var(--bg)); }
+.entretenimiento-mapa-dia.n3 { background: var(--accent); }
+/* El dia que aun no ha llegado no se pinta: no es "no hiciste nada". */
+.entretenimiento-mapa-dia.futuro { background: none; }
+
+.entretenimiento-ano-cifras {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.5rem; margin-top: 0.4rem;
+}
+.entretenimiento-ano-cifra {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0.6rem 0.7rem;
+  display: flex; flex-direction: column; gap: 0.15rem;
+}
+.entretenimiento-ano-cifra b { font-size: var(--t-titulo-3); font-variant-numeric: tabular-nums; }
+.entretenimiento-ano-cifra span {
+  font-size: var(--t-micro);
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}
+
+/* Doce barras, una por mes. La altura es relativa al mes mas activo. */
+.entretenimiento-meses { display: flex; align-items: flex-end; gap: 3px; height: 4rem; margin-top: 0.6rem; }
+.entretenimiento-mes { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.entretenimiento-mes-barra {
+  width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 2px;
+}
+.entretenimiento-mes-rotulo {
+  font-size: var(--t-micro);
+  color: color-mix(in srgb, var(--bg-text) 55%, var(--bg));
+}
+
+/* --- Historial dentro de la ficha de un item ---------------------------- */
+.entretenimiento-historial { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.6rem; }
+.entretenimiento-historial h4 { margin: 0.4rem 0 0.2rem; font-size: var(--t-secundario); }
+.entretenimiento-sesion {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: var(--t-pie); padding: 0.35rem 0;
   border-bottom: 1px solid var(--border);
-  color: color-mix(in srgb, var(--bg-text) 70%, var(--bg));
-  white-space: nowrap;
 }
-.entretenimiento-table td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
-.entretenimiento-table tbody tr { cursor: pointer; }
-@media (hover: hover) {
-  .entretenimiento-table tbody tr:hover { background: var(--surface-2); }
+.entretenimiento-sesion-fecha { font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.entretenimiento-sesion-avance {
+  color: color-mix(in srgb, var(--surface-text) 70%, var(--surface));
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.entretenimiento-sesion-vuelta {
+  font-size: var(--t-micro); padding: 0.05rem 0.35rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent);
+  flex-shrink: 0;
+}
+
+/* Portada dentro del modal: la misma pieza, mas pequena. */
+.entretenimiento-cover-field { display: flex; gap: 0.8rem; align-items: flex-start; }
+.entretenimiento-cover-preview { width: 5.5rem; flex-shrink: 0; }
+.entretenimiento-cover-actions { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; }
+
 .entretenimiento-saga-detail-header { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
 .entretenimiento-saga-detail-header h3 { margin: 0; }
 .entretenimiento-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }

@@ -60,6 +60,30 @@
     return COVER_RE.test(trimmed) ? trimmed : null;
   }
 
+  // Fecha LOCAL del dispositivo, no UTC: a las 00:30 en Espana
+  // toISOString() todavia devuelve el dia de ayer, y la racha se quedaria
+  // un dia atras. Mismo cuidado que hoyISO() del ciclo del Gimnasio.
+  function hoyLocal() {
+    const d = new Date();
+    const dos = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`;
+  }
+
+  // Apunta que hoy has avanzado en este item. La llama el PUT cuando ve
+  // que el progreso SUBE -- no hay forma de crear una sesion a mano desde
+  // la interfaz, a proposito: Koku eligio que no hubiera ningun gesto
+  // nuevo que aprender.
+  //
+  // Solo cuenta SUBIR. Corregir un despiste hacia atras (ibas por el 15 y
+  // pones 12) no es haber visto nada, asi que no apunta nada.
+  function apuntarSesion(item, desde, hasta) {
+    db.prepare(`
+      INSERT INTO entretenimiento_sesiones
+        (item_id, vuelta, fecha, progreso_desde, progreso_hasta, unidad)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(item.id, item.vuelta || 1, hoyLocal(), desde, hasta, item.progress_unit || null);
+  }
+
   function serialize(row) {
     return {
       id: row.id,
@@ -79,6 +103,7 @@
       loanedTo: row.loaned_to,
       loanedAt: row.loaned_at,
       cover: row.cover,
+      vuelta: row.vuelta || 1,
     };
   }
 
@@ -150,9 +175,18 @@
     const existing = db.prepare('SELECT * FROM entretenimiento_items WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'not_found' });
 
-    const { title, type, description, rating, status, genres, progressCurrent, progressTotal, progressUnit, ownedCount, ownedTotal, loaned, loanedTo, loanedAt, cover } = req.body || {};
+    const { sagaId, title, type, description, rating, status, genres, progressCurrent, progressTotal, progressUnit, ownedCount, ownedTotal, loaned, loanedTo, loanedAt, cover } = req.body || {};
     if (type !== undefined && !TYPES.includes(type)) {
       return res.status(400).json({ error: 'invalid_request', message: 'Tipo invalido.' });
+    }
+    // Mover el item a OTRA saga. Antes no se podia: el sagaId solo se
+    // miraba al crear, asi que un item se quedaba para siempre donde
+    // nacio. Hace falta desde que se puede anadir un item sin estar
+    // dentro de una saga (pestanas Siguiendo/Deseos/Historial).
+    // Se comprueba que la saga destino EXISTA -- si no, la fila quedaria
+    // apuntando a una saga fantasma y no la veria nadie nunca mas.
+    if (sagaId !== undefined && !db.prepare('SELECT id FROM entretenimiento_sagas WHERE id = ?').get(sagaId)) {
+      return res.status(400).json({ error: 'invalid_request', message: 'Esa saga no existe.' });
     }
     if (status !== undefined && !STATUSES.includes(status)) {
       return res.status(400).json({ error: 'invalid_request', message: 'Estado invalido.' });
@@ -187,6 +221,7 @@
 
     db.prepare(`
       UPDATE entretenimiento_items SET
+        saga_id = ?,
         title = ?, type = ?, description = ?, rating = ?, status = ?, genres = ?,
         progress_current = ?, progress_total = ?, progress_unit = ?,
         owned_count = ?, owned_total = ?, loaned = ?, loaned_to = ?, loaned_at = ?,
@@ -194,6 +229,7 @@
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
+      sagaId !== undefined ? sagaId : existing.saga_id,
       title !== undefined && title.trim() ? title.trim() : existing.title,
       type !== undefined ? type : existing.type,
       nn(description, existing.description, false),
@@ -213,10 +249,49 @@
     );
 
     const row = db.prepare('SELECT * FROM entretenimiento_items WHERE id = ?').get(req.params.id);
+
+    // Y AQUI nace la sesion, despues de guardar: si el progreso ha subido,
+    // queda apuntado que hoy avanzaste. Va al final a proposito, cuando ya
+    // se sabe que el guardado salio bien -- apuntarla antes dejaria una
+    // sesion de algo que no llego a cambiarse.
+    const antes = existing.progress_current;
+    const ahora = row.progress_current;
+    if (ahora !== null && ahora !== undefined && (antes === null || antes === undefined || ahora > antes)) {
+      // Sin valor anterior se cuenta desde 0: acabas de estrenar el
+      // contador, asi que todo lo que marcas es avance de hoy.
+      const desde = antes === null || antes === undefined ? 0 : antes;
+      if (ahora > desde) apuntarSesion(row, desde, ahora);
+    }
+
+    res.json(serialize(row));
+  });
+
+  // Volver a empezar: una relectura o un revisionado NO pisa lo anterior.
+  // Sube la vuelta, pone el progreso a cero y lo deja en marcha; las
+  // sesiones de la vuelta anterior se quedan con su numero y siguen
+  // contando para el mapa y la racha (pasaron de verdad).
+  //
+  // La nota se conserva a proposito: sigue siendo tu opinion de la obra.
+  router.post('/:id/nueva-vuelta', (req, res) => {
+    const existing = db.prepare('SELECT * FROM entretenimiento_items WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+
+    db.prepare(`
+      UPDATE entretenimiento_items
+      SET vuelta = vuelta + 1, progress_current = 0, status = 'in_progress',
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(req.params.id);
+
+    const row = db.prepare('SELECT * FROM entretenimiento_items WHERE id = ?').get(req.params.id);
     res.json(serialize(row));
   });
 
   router.delete('/:id', (req, res) => {
+    // Cascada A MANO, como en toda la app (nunca ON DELETE CASCADE de
+    // SQL): sin esto quedarian sesiones apuntando a un item que ya no
+    // existe, y el resumen las contaria igual.
+    db.prepare('DELETE FROM entretenimiento_sesiones WHERE item_id = ?').run(req.params.id);
     const info = db.prepare('DELETE FROM entretenimiento_items WHERE id = ?').run(req.params.id);
     if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
     res.status(204).end();
