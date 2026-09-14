@@ -4000,11 +4000,18 @@ literalmente que esa primera línea nazca dentro de un `<h1>`.
 - Una nota NUEVA arranca con `<h1><br></h1>` sembrado en
   `noteEntrySnapshot`. Sigue contando como VACÍA, así que una nota nueva
   en blanco se sigue sin guardar (eso ya estaba y no se podía romper).
-- **Intro al final del primer `<h1>` baja a un párrafo normal**
-  (`handleNoteTitleEnterExit()`): escribes el título, das a Intro y
-  sigues escribiendo en texto normal, sin tocar la barra. Si el cursor
-  está a MEDIO título, o dentro de una lista o de un bloque de código,
-  no se mete.
+- **Intro al final del primer `<h1>` baja a un párrafo normal**:
+  escribes el título, das a Intro y sigues escribiendo en texto normal,
+  sin tocar la barra. Si el cursor está a MEDIO título, o dentro de una
+  lista o de un bloque de código, no se mete.
+
+  **OJO, esto se reescribió el 14/9/2026 y el porqué importa** (ver el
+  bloque "La mayúscula del teclado y los saltos de formato" más abajo):
+  el salto lo da AHORA EL NAVEGADOR. La primera versión hacía
+  `preventDefault()` y creaba el `<div>` a mano, y eso rompía la
+  mayúscula automática del teclado del móvil. Ahora solo se deja una
+  marca (`marcarSalidaDelTitulo`) y el `input` siguiente cambia la
+  etiqueta con `formatBlock` si hiciera falta.
 - Va enganchado a `keydown` **y a `beforeinput`** (`insertParagraph`):
   el teclado de iOS no siempre manda un `keydown` con `key === 'Enter'`
   (con el texto predictivo llega como `'Unidentified'`). Es la misma red
@@ -4463,6 +4470,51 @@ real. Se busca el token suelto.
 **Esto es SWIFT**: no se ve hasta la siguiente build de TestFlight.
 Recargar la app o requitar el widget no cambia nada.
 
+## La mayúscula del teclado y los saltos de formato (14/9/2026)
+
+Koku: *"En las notas. Se aplica el mayúscula al inicio a partir del
+primer salto en el mismo formato, si es un salto de formato a otro no se
+aplica"*. O sea: bajando del título al primer párrafo, la línea nueva
+salía en minúscula; de párrafo a párrafo sí ponía la mayúscula.
+
+**La causa, y es la regla general que hay que llevarse de aquí**:
+`autocapitalize` NO lo decide el HTML, lo decide el **teclado del
+sistema**. Mira en qué punto de la frase cree que está el cursor, y esa
+cuenta solo la rehace cuando **el propio navegador** mueve el cursor por
+una edición suya. Un `preventDefault()` + DOM a mano le deja el estado
+que tenía al final del título — "a media frase" — y eso es minúscula.
+
+Así que la regla: **cuando el usuario está escribiendo, el salto de línea
+lo tiene que dar el navegador**. Si hay que cambiar el formato, se cambia
+DESPUÉS, y con `execCommand` (que también es cosa del navegador y
+mantiene la selección), no reconstruyendo nodos.
+
+Las piezas son `cursorAlFinalDelTitulo()` (solo mira),
+`marcarSalidaDelTitulo()` (deja una marca en el `keydown`/`beforeinput`,
+**sin `preventDefault`**) y `terminarSalidaDelTitulo()` (en el `input`,
+que llega ya con el párrafo metido).
+
+**Lo que salió al medirlo, y ahorra trabajo futuro: Chromium ya hacía lo
+que queríamos.** Intro al final de CUALQUIER `<h1>` arranca un `<div>`,
+no otro `<h1>` — comprobado con un `contenteditable` pelado, sin nada de
+esta app (`nativo.mjs`). O sea que el código de antes se peleaba con el
+navegador para acabar justo donde el navegador ya iba, y de paso rompía
+la mayúscula. **El `formatBlock` que queda es una RED para WebKit**, por
+si Safari sí continúa el título; en Chrome no llega a ejecutarse nunca.
+
+**Aquí no se puede probar la mayúscula** (la pone el teclado del sistema
+y en el navegador de pruebas no existe: `autocapitalize` es un no-op en
+Chromium headless, y no hay WebKit en el contenedor). Lo que sí está
+probado (`titulo.mjs`, 15 comprobaciones) es que el salto lo da el
+navegador y que la línea sigue bajando a párrafo, que era el riesgo real
+de la reescritura. Confirmarlo de verdad es cosa del iPhone.
+
+**Sin tocar, y a propósito**: los otros saltos de formato que hace el
+JavaScript (salir de una cita con `handleNoteQuoteEnterExit`, salir de
+una lista) siguen con `preventDefault`. Si el del título funciona en el
+iPhone, les hace falta el mismo tratamiento — pero cada uno es un camino
+distinto que hay que probar, y Koku solo nombró este.
+
 ## Estado actual
 
 **v0.62.0** (14/9/2026) es otra ronda de **merges**, con dos arreglos de
@@ -4502,10 +4554,12 @@ conversación vive ahí; ver el bloque "Dos ramas" más arriba. **`movil-ui`
 está al mismo nivel**, sin los avisos de diagnóstico.
 
 
-**v0.62.1** (14/9/2026) arregla las letras en blanco de los widgets del
-calendario y de Tareas — ver el bloque "Las letras del widget en blanco
-sobre blanco" más arriba. Es un cambio de **Swift**, así que **necesita
-una build nueva para verse**; no se lanzó ninguna (regla de Actions).
+**v0.62.1** (14/9/2026) son dos cosas que vio Koku usando la app: las
+letras en blanco de los widgets del calendario y de Tareas, y la
+mayúscula que no se ponía al bajar del título al primer párrafo de una
+nota. Ver sus dos bloques más arriba. Lo del widget es **Swift**, así que
+**necesita una build nueva para verse**; no se lanzó ninguna (regla de
+Actions).
 
 **v0.57.0** (13/9/2026) es la ronda de los cuatro puntos que pidió Koku:
 el título de una nota con formato de título y la mayúscula al empezar,

@@ -21,6 +21,8 @@ window.APP_NOTAS_REVISAR = {
     'El arreglo de las letras del widget es SWIFT, así que no se ve hasta que lances una build nueva de TestFlight. Recargar la app o quitar y volver a poner el widget no cambia nada.',
     'Míralo con tu tema claro y el móvil en modo oscuro, que es la combinación que rompía. Los rotos eran el del calendario (los números de los días) y el de Tareas; los demás no ponían ningún color a mano, pero conviene confirmarlo de un vistazo.',
     'Con el móvil en oscuro y el widget en estilo "app" con un tema claro, el widget queda claro al lado de todo lo demás. Es lo que elegiste, pero si te chirría, el estilo "mixto" de Configuración → Widgets hace justo eso: tu paleta siguiendo el modo del móvil.',
+    'La mayúscula del salto título→párrafo NO se puede probar desde aquí: la pone el teclado del sistema y en el navegador de pruebas no existe. Lo que sí está comprobado es que el salto lo da ahora el navegador (que es lo que tiene que avisar al teclado) y que la línea sigue bajando a párrafo. Dime si en el iPhone ya sale con mayúscula.',
+    'Si el salto título→párrafo ya va bien, el mismo tratamiento le haría falta a los otros cambios de formato que hace el JavaScript (salir de una cita, salir de una lista). No los he tocado porque no los nombraste y cada uno es un camino distinto que probar.',
   ],
   '0.62.0': [
     'Otra ronda de merges: Entretenimiento (vitrina de portadas + sesiones, racha y vueltas) y Recetas (calorías y macros). gimnasio, finanzas, retos y viajes no traían nada.',
