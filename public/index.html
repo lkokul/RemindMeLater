@@ -3420,17 +3420,7 @@
           </label>
           <button type="button" id="btn-help-notif-vibrate" class="icon-btn settings-help-btn" aria-label="Cómo funciona la vibración de los avisos">?</button>
         </div>
-        <!-- Probar el aviso de fin de descanso sin montar un entreno:
-             salta a los 10 segundos, con los mismos ajustes de arriba,
-             y debajo se ensena QUE lo paro (en el movil no hay consola
-             que mirar, esto es el unico diagnostico posible). -->
-        <div class="settings-toggle-help-row">
-          <button type="button" id="btn-test-gym-rest-alert" class="secondary-btn">Probar el aviso (10 s)</button>
-          <button type="button" id="btn-help-notif-test" class="icon-btn settings-help-btn" aria-label="Para qué sirve probar el aviso">?</button>
-        </div>
         <p id="notifications-status" class="hint"></p>
-        <p id="gym-live-activity-status" class="hint"></p>
-        <p id="gym-rest-alert-status" class="hint"></p>
       </div>
 
       <!-- --- Tienda (13/9/2026). Las Apps de la app: cuales estan
@@ -3579,15 +3569,6 @@
         <input type="file" id="backup-import-input" accept="application/json,.json" class="hidden" />
 
 
-        <!-- Diagnostico del widget. En el iPhone no hay forma de ver la
-             consola, asi que el resultado del ultimo aviso al widget se
-             enseña aqui -- mismo patron que la linea del aviso de fin de
-             descanso. Solo aparece en la app empaquetada. -->
-        <div id="widget-status-block" class="hidden">
-          <h4>Widget "Qué toca hoy"</h4>
-          <p id="widget-status-line" class="hint"></p>
-          <button type="button" id="btn-widget-refresh" class="secondary-btn">Actualizar el widget ahora</button>
-        </div>
 
       </div>
 
@@ -3709,11 +3690,6 @@
   <script src="build-info.js"></script>
   <script src="notas-version.js"></script>
   <script src="manuales.js"></script>
-  <!-- SOLO EN LA RAMA DE DESARROLLADOR: este <script> y su archivo se
-       quitan al fusionar en movil-ui (ver CLAUDE.md). Trae la marca de
-       "esto es una build de desarrollo" y las cosas a revisar de cada
-       version. -->
-  <script src="desarrollador.js"></script>
   <script src="db-local.js"></script>
   <!-- El "servidor" vive ahora dentro de la propia app: SQLite compilado
        a WebAssembly (vendor/sql-wasm.*), el esquema de siempre

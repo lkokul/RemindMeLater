@@ -143,7 +143,7 @@ struct VistaCalendario: View {
             if let s = seccion {
                 rejilla(s)
             } else {
-                VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tu mes")
+                VacioDeWidget(queFalta: "para ver tu mes")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -260,7 +260,7 @@ struct VistaConsistencia: View {
                 MapaDeConsistencia(mapa: s.mapa, acento: acento)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tu consistencia")
+                VacioDeWidget(queFalta: "para ver tu consistencia")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -323,7 +323,7 @@ struct VistaHeatmap: View {
                 MapaDeConsistencia(mapa: s.mapa, acento: acento)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tus entrenos")
+                VacioDeWidget(queFalta: "para ver tus entrenos")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -377,7 +377,7 @@ struct VistaEstadisticas: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tus números")
+                VacioDeWidget(queFalta: "para ver tus números")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -423,7 +423,7 @@ struct VistaMusculos: View {
                 DibujoDelCuerpo(zonas: s.zonas, acento: acento)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tus músculos")
+                VacioDeWidget(queFalta: "para ver tus músculos")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)

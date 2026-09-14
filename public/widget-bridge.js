@@ -748,49 +748,18 @@ function colorDelTemaParaElWidget(variable, porDefecto) {
   return porDefecto;
 }
 
-// Cómo fue el último intento de avisar al widget. Existe porque en el
-// iPhone NO HAY FORMA DE VER LA CONSOLA: cuando el widget se quedó en
-// "Abre la app" no había manera de saber si la app no escribía, si el
-// buzón compartido no existía, o si el aviso no llegaba. Se enseña en
-// Configuración → Este dispositivo, igual que ya se hace con el aviso de
-// fin de descanso (`gym-rest-alert-status`).
-let ultimoAvisoAlWidget = null;
-
-function estadoDelWidget() {
-  return ultimoAvisoAlWidget;
-}
-
-// Manda el resumen. Silenciosa a propósito: que el widget no se entere no
-// es motivo para molestar a nadie ni para romper el flujo que la llamó.
-// Lo único que hace es dejar apuntado cómo fue.
+// Manda el resumen al widget. Silenciosa a propósito: que el widget no se
+// entere no es motivo para molestar a nadie ni para romper el flujo que
+// la llamó.
 async function actualizarWidgetDelDia() {
   const plugin = getWidgetBridgePlugin();
-  if (!plugin) {
-    ultimoAvisoAlWidget = { ok: false, motivo: 'sin_plugin', cuando: Date.now() };
-    return ultimoAvisoAlWidget;
-  }
+  if (!plugin) return;
   const resumen = await construirResumenDelDia();
   try {
-    const res = await plugin.guardarResumen({ json: JSON.stringify(resumen) });
-    // El plugin responde {guardado:false, motivo:'sin_grupo'} cuando
-    // UserDefaults(suiteName:) devuelve nil, que es lo que pasa si el App
-    // Group no viajó en la firma. Esa distinción es justo la que hacía
-    // falta y no se veía.
-    ultimoAvisoAlWidget = {
-      ok: !!(res && res.guardado),
-      motivo: res && res.motivo ? res.motivo : (res && res.guardado ? 'ok' : 'sin_respuesta'),
-      cuando: Date.now(),
-      resumen,
-    };
+    await plugin.guardarResumen({ json: JSON.stringify(resumen) });
   } catch (err) {
-    ultimoAvisoAlWidget = {
-      ok: false,
-      motivo: 'error: ' + (err && err.message ? err.message : 'desconocido'),
-      cuando: Date.now(),
-      resumen,
-    };
+    console.error('No se pudo avisar al widget:', err);
   }
-  return ultimoAvisoAlWidget;
 }
 
 // ¿Se ha abierto la app desde un widget (o desde un botón del centro de

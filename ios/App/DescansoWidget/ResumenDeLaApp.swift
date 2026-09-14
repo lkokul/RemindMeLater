@@ -105,17 +105,6 @@ struct ResumenDeLaApp: Decodable {
         return try? JSONDecoder().decode(ResumenDeLaApp.self, from: datos)
     }
 
-    // ¿EXISTE SIQUIERA EL BUZÓN COMPARTIDO?
-    //
-    // UserDefaults(suiteName:) devuelve nil cuando el App Group no viajó
-    // en la firma, y ese caso se veía EXACTAMENTE igual que "la app
-    // todavía no ha escrito nada": el widget decía "Abre la app" y por
-    // mucho que la abrieras no cambiaba nunca. Pasó de verdad (builds
-    // #40-#52) y costó dar con ello porque en el iPhone no hay consola.
-    static func hayBuzon() -> Bool {
-        UserDefaults(suiteName: grupoDeLaApp) != nil
-    }
-
     // ¿Los datos son de hoy? Si no, el widget lo dice en vez de fingir
     // que están al día -- el resumen solo se reescribe cuando la app se
     // abre, así que tras un par de días sin abrirla estaría viejo.

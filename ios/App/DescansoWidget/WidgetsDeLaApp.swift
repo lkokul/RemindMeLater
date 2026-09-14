@@ -49,11 +49,6 @@ enum DestinoDeWidget: String {
 struct EntradaDeLaApp: TimelineEntry {
     let date: Date
     let resumen: ResumenDeLaApp?
-    // true = ni siquiera hay App Group, o sea que no es que falten datos:
-    // es que la app y el widget no comparten buzón. Distinguirlo hace que
-    // la propia pantalla del widget diga cuál de los dos problemas es,
-    // sin necesitar ni cable ni Xcode.
-    var sinBuzon: Bool = false
 }
 
 struct ProveedorDeLaApp: TimelineProvider {
@@ -67,8 +62,7 @@ struct ProveedorDeLaApp: TimelineProvider {
         let deRespaldo: ResumenDeLaApp? = context.isPreview ? ResumenDeLaApp.deEjemplo : nil
         completion(EntradaDeLaApp(
             date: Date(),
-            resumen: ResumenDeLaApp.leer() ?? deRespaldo,
-            sinBuzon: !ResumenDeLaApp.hayBuzon()
+            resumen: ResumenDeLaApp.leer() ?? deRespaldo
         ))
     }
 
@@ -78,8 +72,7 @@ struct ProveedorDeLaApp: TimelineProvider {
         completion(Timeline(
             entries: [EntradaDeLaApp(
                 date: Date(),
-                resumen: ResumenDeLaApp.leer(),
-                sinBuzon: !ResumenDeLaApp.hayBuzon()
+                resumen: ResumenDeLaApp.leer()
             )],
             policy: .after(medianoche)
         ))
@@ -170,17 +163,14 @@ struct RotuloDeWidget: View {
     }
 }
 
-// Lo que se enseña cuando no hay nada que enseñar. Distingue los dos
-// casos que antes se veían igual, que es justo lo que costó una tanda de
-// builds averiguar.
+// Lo que se enseña cuando no hay nada que enseñar.
 struct VacioDeWidget: View {
-    let sinBuzon: Bool
     let queFalta: String
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(sinBuzon ? "Sin buzón" : "Abre la app")
+            Text("Abre la app")
                 .font(.headline)
-            Text(sinBuzon ? "falta el App Group" : queFalta)
+            Text(queFalta)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -230,7 +220,7 @@ struct VistaTareas: View {
     private var lista: [FilaDeTarea] { seccion?.lista ?? [] }
 
     private var enUnaLinea: String {
-        guard let s = seccion else { return entry.sinBuzon ? "Sin buzón" : "Abre la app" }
+        guard let s = seccion else { return "Abre la app" }
         if s.total == 0 { return "Nada pendiente" }
         if s.vencidas > 0 { return "\(s.total) pendientes · \(s.vencidas) vencida\(s.vencidas == 1 ? "" : "s")" }
         return "\(s.total) pendiente\(s.total == 1 ? "" : "s")"
@@ -280,7 +270,7 @@ struct VistaTareas: View {
                 }
             }
             if seccion == nil {
-                VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tus tareas")
+                VacioDeWidget(queFalta: "para ver tus tareas")
             } else if lista.isEmpty {
                 Text("Nada pendiente")
                     .font(.headline)
@@ -367,7 +357,7 @@ struct VistaFinanzas: View {
     }
 
     private var enUnaLinea: String {
-        guard let s = seccion else { return entry.sinBuzon ? "Sin buzón" : "Abre la app" }
+        guard let s = seccion else { return "Abre la app" }
         if !s.hayLimite { return "Gastado \(importeCorto(s.gastado))" }
         return s.pasado
             ? "Pasado \(importeCorto(s.gastado - s.limite))"
@@ -447,7 +437,7 @@ struct VistaFinanzas: View {
                         .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             } else {
-                VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tus gastos")
+                VacioDeWidget(queFalta: "para ver tus gastos")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -497,7 +487,7 @@ struct VistaLecturas: View {
     private var lista: [FilaDeLectura] { seccion?.lista ?? [] }
 
     private var enUnaLinea: String {
-        guard let s = seccion else { return entry.sinBuzon ? "Sin buzón" : "Abre la app" }
+        guard let s = seccion else { return "Abre la app" }
         guard let primera = s.lista.first else { return "Nada empezado" }
         return primera.progreso.isEmpty ? primera.titulo : "\(primera.titulo) · \(primera.progreso)"
     }
@@ -541,7 +531,7 @@ struct VistaLecturas: View {
                 AvisoDeViejo(resumen: entry.resumen)
             }
             if seccion == nil {
-                VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tus lecturas")
+                VacioDeWidget(queFalta: "para ver tus lecturas")
             } else if lista.isEmpty {
                 Text("Nada empezado")
                     .font(.headline)
@@ -606,7 +596,7 @@ struct VistaViajes: View {
     private var hayViaje: Bool { !(seccion?.nombre ?? "").isEmpty }
 
     private var enUnaLinea: String {
-        guard let s = seccion else { return entry.sinBuzon ? "Sin buzón" : "Abre la app" }
+        guard let s = seccion else { return "Abre la app" }
         if s.nombre.isEmpty { return "Sin viajes" }
         return s.enCurso ? "\(s.nombre) · ahora" : "\(s.nombre) · \(cuantoFalta(s.dias))"
     }
@@ -646,7 +636,7 @@ struct VistaViajes: View {
         VStack(alignment: .leading, spacing: 4) {
             RotuloDeWidget(texto: seccion?.enCurso == true ? "DE VIAJE" : "PRÓXIMO VIAJE", color: acento)
             if seccion == nil {
-                VacioDeWidget(sinBuzon: entry.sinBuzon, queFalta: "para ver tus viajes")
+                VacioDeWidget(queFalta: "para ver tus viajes")
             } else if !hayViaje {
                 Text("Sin viajes")
                     .font(.headline)
