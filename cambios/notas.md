@@ -6,6 +6,37 @@ Cómo se escribe esto: `cambios/_COMO-SE-USA.md`.
 
 ---
 
+## v0.62.1 — La mayúscula del teclado al bajar del título al párrafo
+
+**Qué cambió**
+- Bajando del título al primer párrafo, la línea nueva salía en
+  minúscula; de párrafo a párrafo sí ponía la mayúscula. Ya no.
+
+**Qué probar (esto SOLO se puede ver en el iPhone)**
+- [ ] Escribir un título, dar a Intro y empezar a escribir: la primera
+      letra tiene que salir en mayúscula sola.
+- [ ] Que la línea sigue bajando a **párrafo normal**, no a otro título
+      — que era el riesgo real de la reescritura.
+- [ ] Salir de una **cita** y salir de una **lista** siguen sin tocar, y
+      tienen el mismo problema. Si el del título te funciona, dilo y les
+      damos el mismo tratamiento (cada uno es un camino distinto).
+
+**Decisiones**
+- **La regla general que sale de aquí**: mientras el usuario escribe, el
+  salto de línea lo tiene que dar el NAVEGADOR. `autocapitalize` no lo
+  decide el HTML, lo decide el teclado del sistema, y solo rehace su
+  cuenta cuando el propio navegador mueve el cursor. Un
+  `preventDefault()` + DOM a mano le deja el estado "a media frase", y
+  eso es minúscula.
+- Chromium **ya hacía lo que queríamos** (Intro al final de un `<h1>`
+  arranca un `<div>`): el código de antes se peleaba con el navegador
+  para acabar donde el navegador ya iba. El `formatBlock` que queda es
+  una red por si Safari sí continúa el título.
+- **Aquí no se puede probar la mayúscula**: en el navegador de pruebas
+  `autocapitalize` es un no-op y no hay WebKit en el contenedor.
+
+---
+
 ## v0.57.0 — El título nace con formato de título
 
 **Qué cambió**

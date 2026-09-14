@@ -7,6 +7,35 @@ Cómo se escribe esto: `cambios/_COMO-SE-USA.md`.
 
 ---
 
+## v0.62.1 — Las letras del widget, en blanco sobre blanco
+
+**Qué cambió**
+- En los widgets de Calendario y de Tareas, los números de los días y el
+  título de una tarea no vencida salían blancos sobre el fondo claro del
+  tema. Ahora salen con el color del tema.
+
+**Qué probar**
+- [ ] **Necesita una build nueva**: es Swift. Recargar la app o volver a
+      poner el widget no cambia nada.
+- [ ] Con el móvil en modo **oscuro** y un tema **claro** en la app (que
+      es la combinación que lo destapaba), mirar que se leen los números
+      de los días del widget del calendario.
+- [ ] Y lo mismo con los tres estilos de Configuración → Widgets: `app`,
+      `sistema` y `mixto`.
+
+**Decisiones**
+- **Era la SEGUNDA vez, y la primera se arregló mal.** Se achacó a
+  `Color.primary`, se cambió por `.foreground` y se dio por bueno. Pero
+  `.foreground` **no** es "el color que puso mi ancestro": es el del
+  sistema, así que RESETEA el tinte de la raíz. Lo que despistaba es que
+  las cabeceras `L M X J V S D` sí se veían — usan `.secondary`, que es
+  jerárquico y ese sí se deriva.
+- La tabla de qué hereda y qué no está en CLAUDE.md, y el guion lo
+  vigila ahora: ningún texto de un widget puede llevar `.foreground)`,
+  `Color.primary`, `Color.white` ni `Color.black`.
+
+---
+
 ## v0.62.0 — Las imágenes no son solo de Notas (pérdida de datos)
 
 **Qué cambió**
