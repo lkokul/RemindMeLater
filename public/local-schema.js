@@ -690,12 +690,37 @@ function applyLocalSchema(db) {
     -- "categoria" es el PASILLO del super (Carniceria, Verdura...), y
     -- existe para una sola cosa: agrupar la lista de la compra por
     -- donde se coge, en vez de en el orden en que la fuiste llenando.
+    --
+    -- VALORES NUTRICIONALES: todos OPCIONALES, y van aqui y no en la
+    -- receta porque asi se escriben UNA vez y sirven para todas las
+    -- recetas que lleven esa cosa, escalando solos con las raciones.
+    -- Es la misma decision que el catalogo en si.
+    --
+    -- Son "por 100", tal cual lo pone el paquete: por 100 g en lo
+    -- solido y por 100 ml en lo liquido. No se guarda cual de las dos
+    -- es a proposito -- la etiqueta de un aceite dice "por 100 ml" y la
+    -- receta lo mide en ml, asi que las dos hablan de la misma base sin
+    -- necesidad de saber la densidad.
+    --
+    -- "gramos_por_unidad" es lo que hace que un ingrediente medido en
+    -- UNIDADES pueda contar: sin saber lo que pesa un huevo, "2 ud" no
+    -- se puede llevar a esa base de 100. Sin este dato el ingrediente
+    -- no cuenta, y la receta lo dice en vez de inventarselo.
     CREATE TABLE IF NOT EXISTS recetas_ingredientes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       unidad TEXT,
       categoria TEXT,
       notas TEXT,
+      kcal REAL,
+      proteinas REAL,
+      grasas REAL,
+      saturadas REAL,
+      hidratos REAL,
+      azucares REAL,
+      fibra REAL,
+      sal REAL,
+      gramos_por_unidad REAL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -1857,6 +1882,17 @@ function applyLocalSchema(db) {
   if (!lecturasItemColumns.includes('loaned_at')) {
     db.exec('ALTER TABLE lecturas_items ADD COLUMN loaned_at TEXT');
   }
+
+  // ---- App "Recetas": los valores nutricionales llegaron despues que
+  // ---- la tabla, asi que una base creada con la primera version de la
+  // ---- App no los tiene. Condicional e idempotente, como todas.
+  const recetaIngColumns = db.prepare('PRAGMA table_info(recetas_ingredientes)').all().map((c) => c.name);
+  ['kcal', 'proteinas', 'grasas', 'saturadas', 'hidratos', 'azucares', 'fibra', 'sal', 'gramos_por_unidad']
+    .forEach((col) => {
+      if (!recetaIngColumns.includes(col)) {
+        db.exec(`ALTER TABLE recetas_ingredientes ADD COLUMN ${col} REAL`);
+      }
+    });
 
   // ---- Migraciones del rediseno de Gimnasio (SOLO en esta linea movil,
   // ---- diverge de server/db.js -- ver el comentario junto a gym_blocks).

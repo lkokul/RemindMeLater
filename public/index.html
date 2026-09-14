@@ -2700,6 +2700,33 @@
           Notas (opcional)
           <textarea id="receta-ingrediente-notas" rows="2" maxlength="400"></textarea>
         </label>
+
+        <!-- Valores nutricionales: TODOS opcionales, y el bloque nace
+             plegado a proposito. La mayoria de las veces apuntas una
+             receta sin pensar en macros, y nueve campos vacios ahi en
+             medio harian que la ficha pareciera un formulario largo. -->
+        <button type="button" id="btn-receta-nutricion-toggle" class="receta-plegable">
+          <span>Valores nutricionales (opcional)</span>
+          <span class="receta-plegable-flecha">›</span>
+        </button>
+        <div id="receta-nutricion-campos" class="receta-nutricion-campos hidden">
+          <p class="hint">Lo que ponga en el paquete, por 100&nbsp;g o por 100&nbsp;ml. Rellena solo lo que te interese: lo que dejes en blanco no cuenta, pero tampoco estorba.</p>
+          <div class="receta-nutri-rejilla">
+            <label>Calorías (kcal)<input type="text" inputmode="decimal" id="receta-ing-kcal" /></label>
+            <label>Proteínas (g)<input type="text" inputmode="decimal" id="receta-ing-proteinas" /></label>
+            <label>Grasas (g)<input type="text" inputmode="decimal" id="receta-ing-grasas" /></label>
+            <label>De las cuales saturadas (g)<input type="text" inputmode="decimal" id="receta-ing-saturadas" /></label>
+            <label>Hidratos (g)<input type="text" inputmode="decimal" id="receta-ing-hidratos" /></label>
+            <label>De los cuales azúcares (g)<input type="text" inputmode="decimal" id="receta-ing-azucares" /></label>
+            <label>Fibra (g)<input type="text" inputmode="decimal" id="receta-ing-fibra" /></label>
+            <label>Sal (g)<input type="text" inputmode="decimal" id="receta-ing-sal" /></label>
+          </div>
+          <label>
+            Cuánto pesa una unidad (g)
+            <input type="text" inputmode="decimal" id="receta-ing-gramos-unidad" />
+          </label>
+          <p class="hint">Solo hace falta si lo mides en unidades (2 huevos, 3 dientes de ajo). Sin este dato no hay forma de llevar «2 ud» a esos 100&nbsp;g, así que ese ingrediente no contaría.</p>
+        </div>
         <div class="modal-actions">
           <button type="button" id="btn-delete-receta-ingrediente" class="danger-btn hidden">Eliminar</button>
           <div class="spacer"></div>

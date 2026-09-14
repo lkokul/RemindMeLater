@@ -5965,3 +5965,80 @@ body.gym-rest-push #settings-modal .settings-card {
   .receta-pasos-btn:hover,
   .receta-escalador-btn:hover { filter: brightness(1.08); }
 }
+
+/* --- Nutricion ------------------------------------------------------ */
+/* El bloque plegable de la ficha de un ingrediente: nace cerrado porque
+   los nueve valores son opcionales y la mayoria de las veces no se
+   rellenan. */
+.receta-plegable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--surface-2-text);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  font-size: var(--t-secundario);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.receta-plegable-flecha { transition: transform 0.18s ease; }
+.receta-plegable.abierto .receta-plegable-flecha { transform: rotate(90deg); }
+
+.receta-nutricion-campos { display: flex; flex-direction: column; gap: 0.5rem; }
+/* Dos columnas: los valores de una etiqueta van por parejas (grasas y
+   sus saturadas, hidratos y sus azucares) y asi cada desglose queda al
+   lado de lo que desglosa. */
+.receta-nutri-rejilla {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+.receta-nutri-rejilla label { font-size: var(--t-pie); min-width: 0; }
+
+.receta-nutricion {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.7rem;
+}
+.receta-nutricion-cabecera { display: flex; align-items: baseline; gap: 0.5rem; }
+.receta-nutricion-kcal { font-size: var(--t-titulo-2); font-weight: 700; }
+.receta-nutricion-por {
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--surface-2-text) 65%, var(--surface-2));
+}
+/* UNA sola columna, como una etiqueta de verdad: es lo unico que deja
+   que "de las cuales saturadas" quede justo debajo de "Grasas". En dos
+   columnas caia debajo de otra cosa y se leia mal. */
+.receta-nutricion-rejilla { display: flex; flex-direction: column; gap: 0.15rem; }
+.receta-nutricion-dato {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  font-size: var(--t-secundario);
+}
+/* El desglose (saturadas, azucares) se sangra y se apaga un poco, como
+   en una etiqueta de verdad: se lee que cuelga de la linea de arriba. */
+.receta-nutricion-dato.es-desglose {
+  padding-left: 0.7rem;
+  color: color-mix(in srgb, var(--surface-2-text) 70%, var(--surface-2));
+  font-size: var(--t-pie);
+}
+.receta-nutricion-valor { font-weight: 600; }
+.receta-nutricion-total {
+  font-size: var(--t-pie);
+  color: color-mix(in srgb, var(--surface-2-text) 75%, var(--surface-2));
+}
+/* Lo que no ha entrado en la cuenta. En el color de acento y no en rojo:
+   no es un error, es que ese dato todavia no esta. */
+.receta-nutricion-falta {
+  font-size: var(--t-pie);
+  color: var(--accent);
+}

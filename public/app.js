@@ -20764,7 +20764,11 @@ function recetaFormatearTiempo(minutos) {
 // Los numeros se escriben en español (coma decimal), igual que el dinero
 // de Finanzas. Y como mucho dos decimales: escalar por 4/3 saca colas
 // infinitas (66,66666666 g) que no dicen nada.
-const RECETA_NUM_FORMATTER = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 });
+// useGrouping: 'always' a proposito. Por defecto el español NO separa los
+// numeros de cuatro cifras, asi que un plato de 2058 kcal salia "2058"
+// justo debajo de cifras que si llevan punto. Es exactamente el mismo
+// motivo por el que lo lleva FINANZAS_MONEY_FORMATTER.
+const RECETA_NUM_FORMATTER = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2, useGrouping: 'always' });
 
 function recetaFormatearCantidad(cantidad) {
   if (cantidad === null || cantidad === undefined || cantidad === '') return '';
@@ -21291,6 +21295,8 @@ function renderRecetaFicha() {
     cont.appendChild(lista);
   }
 
+  renderRecetaNutricion(cont);
+
   const aLaCompra = document.createElement('button');
   aLaCompra.type = 'button';
   aLaCompra.className = 'primary-btn receta-ficha-compra';
@@ -21334,6 +21340,104 @@ function renderRecetaFicha() {
   editar.addEventListener('click', () => abrirModalDeReceta(r.id));
   acciones.appendChild(editar);
   cont.appendChild(acciones);
+}
+
+// -----------------------------------------------------------------
+// LA NUTRICION EN LA FICHA
+// -----------------------------------------------------------------
+//
+// La cuenta NO se hace aqui: viene hecha de la ruta (nutricionDe en
+// routes-local/recetas.js), que es la unica que suma. Aqui solo se
+// escala y se escribe.
+//
+// Lo que llega es el total del plato con sus raciones BASE. De ahi:
+//   por racion  = total / raciones base   -> no cambia al escalar
+//   el plato    = por racion x raciones que estas mirando
+//
+// Si no hay ni un ingrediente con valores, la seccion NO se pinta. Un
+// bloque vacio con ochos guiones no dice nada y ocupa media pantalla;
+// Koku fue explicito con que esto es opcional ("no todo el mundo va a
+// estar pensando en esto").
+function renderRecetaNutricion(cont) {
+  const r = recetaAbierta;
+  const n = r && r.nutricion;
+  if (!n || !n.hayDatos) return;
+
+  const base = Number(r.raciones) > 0 ? Number(r.raciones) : 1;
+  const vistas = Number(recetaRacionesVistas) > 0 ? Number(recetaRacionesVistas) : base;
+
+  const h = document.createElement('h3');
+  h.textContent = 'Nutrición';
+  cont.appendChild(h);
+
+  const caja = document.createElement('div');
+  caja.className = 'receta-nutricion';
+
+  // Las calorias, arriba y grandes: es el numero que se busca primero.
+  const porRacion = (valor) => (valor === null || valor === undefined ? null : valor / base);
+  const kcalRacion = porRacion(n.total.kcal);
+  if (kcalRacion !== null) {
+    const cab = document.createElement('div');
+    cab.className = 'receta-nutricion-cabecera';
+    const cifra = document.createElement('span');
+    cifra.className = 'receta-nutricion-kcal';
+    cifra.textContent = `${recetaFormatearCantidad(Math.round(kcalRacion))} kcal`;
+    const etiqueta = document.createElement('span');
+    etiqueta.className = 'receta-nutricion-por';
+    etiqueta.textContent = 'por ración';
+    cab.appendChild(cifra);
+    cab.appendChild(etiqueta);
+    caja.appendChild(cab);
+  }
+
+  // El resto, en rejilla. Solo los que de verdad tienen valor: una fila
+  // con un guion no informa de nada.
+  const rejilla = document.createElement('div');
+  rejilla.className = 'receta-nutricion-rejilla';
+  RECETA_NUTRI_ETIQUETAS.filter(([campo]) => campo !== 'kcal').forEach(([campo, nombre, unidad]) => {
+    const v = porRacion(n.total[campo]);
+    if (v === null) return;
+    const fila = document.createElement('div');
+    fila.className = `receta-nutricion-dato${campo === 'saturadas' || campo === 'azucares' ? ' es-desglose' : ''}`;
+    const nom = document.createElement('span');
+    nom.textContent = nombre;
+    const val = document.createElement('span');
+    val.className = 'receta-nutricion-valor';
+    val.textContent = `${recetaFormatearCantidad(Math.round(v * 10) / 10)} ${unidad}`;
+    fila.appendChild(nom);
+    fila.appendChild(val);
+    rejilla.appendChild(fila);
+  });
+  if (rejilla.children.length) caja.appendChild(rejilla);
+
+  // El total del plato solo cuando de verdad hay mas de una racion: con
+  // una, seria repetir la cifra de arriba.
+  if (kcalRacion !== null && vistas !== 1) {
+    const total = document.createElement('div');
+    total.className = 'receta-nutricion-total';
+    total.textContent = `El plato entero (${recetaFormatearCantidad(vistas)} ${vistas === 1 ? 'ración' : 'raciones'}): ${recetaFormatearCantidad(Math.round(kcalRacion * vistas))} kcal`;
+    caja.appendChild(total);
+  }
+
+  // Y lo que NO ha entrado en la cuenta, con nombre y apellidos. La
+  // regla que eligio Koku es sumar lo que se sabe y avisar: la cifra de
+  // arriba es un suelo, no una promesa, y decir CUALES faltan es lo que
+  // convierte el aviso en algo que puedes arreglar.
+  if (n.sinContar.length) {
+    const falta = document.createElement('div');
+    falta.className = 'receta-nutricion-falta';
+    const nombres = n.sinContar.length <= 3
+      ? n.sinContar.join(', ')
+      : `${n.sinContar.slice(0, 2).join(', ')} y ${n.sinContar.length - 2} más`;
+    // Se nombra lo que falta, no solo cuántos: así el aviso es algo que
+    // puedes ir a arreglar, no un reproche.
+    falta.textContent = n.sinContar.length === 1
+      ? `Sin contar ${nombres}, que aún no tiene valores apuntados.`
+      : `Sin contar ${nombres}, que aún no tienen valores apuntados.`;
+    caja.appendChild(falta);
+  }
+
+  cont.appendChild(caja);
 }
 
 async function anadirRecetaAbiertaALaCompra() {
@@ -22008,8 +22112,12 @@ async function renderRecetaIngredientes() {
     const n = document.createElement('span');
     n.textContent = ing.name;
     main.appendChild(n);
-    const detalle = [ing.unidad, ing.categoria, ing.usos ? `${ing.usos} ${ing.usos === 1 ? 'receta' : 'recetas'}` : 'sin usar']
-      .filter(Boolean).join(' · ');
+    const detalle = [
+      ing.unidad,
+      ing.categoria,
+      ing.usos ? `${ing.usos} ${ing.usos === 1 ? 'receta' : 'recetas'}` : 'sin usar',
+      ing.kcal !== null && ing.kcal !== undefined ? `${recetaFormatearCantidad(ing.kcal)} kcal/100` : null,
+    ].filter(Boolean).join(' · ');
     const sub = document.createElement('span');
     sub.className = 'gym-list-item-muted receta-fila-sub';
     sub.textContent = detalle;
@@ -22027,6 +22135,48 @@ async function renderRecetaIngredientes() {
 document.getElementById('receta-ingredientes-buscador').addEventListener('input', renderRecetaIngredientes);
 document.getElementById('btn-nuevo-ingrediente').addEventListener('click', () => openRecetaIngredienteModal(null));
 
+// Los nueve campos opcionales del ingrediente, en UNA lista: el id del
+// <input> sale del nombre, asi que anadir uno manana es una linea aqui y
+// otra en index.html, sin tocar el guardado ni la carga.
+const RECETA_CAMPOS_NUTRI = [
+  ['kcal', 'receta-ing-kcal'],
+  ['proteinas', 'receta-ing-proteinas'],
+  ['grasas', 'receta-ing-grasas'],
+  ['saturadas', 'receta-ing-saturadas'],
+  ['hidratos', 'receta-ing-hidratos'],
+  ['azucares', 'receta-ing-azucares'],
+  ['fibra', 'receta-ing-fibra'],
+  ['sal', 'receta-ing-sal'],
+  ['gramosPorUnidad', 'receta-ing-gramos-unidad'],
+];
+
+// Como se escribe cada uno en la ficha de una receta. El orden es el de
+// una etiqueta de verdad, con el desglose justo debajo de lo que
+// desglosa.
+// El ORDEN es el de una etiqueta europea, y no es un capricho: cada
+// desglose tiene que ir JUSTO debajo de lo que desglosa. Con dos
+// columnas rellenadas por filas, "Saturadas" caia debajo de "Proteinas"
+// y se leia como si colgara de ellas (se vio en una captura, no en un
+// assert). Por eso ahora va en UNA sola columna, como la etiqueta.
+const RECETA_NUTRI_ETIQUETAS = [
+  ['kcal', 'Calorías', 'kcal'],
+  ['grasas', 'Grasas', 'g'],
+  ['saturadas', 'de las cuales saturadas', 'g'],
+  ['hidratos', 'Hidratos de carbono', 'g'],
+  ['azucares', 'de los cuales azúcares', 'g'],
+  ['fibra', 'Fibra', 'g'],
+  ['proteinas', 'Proteínas', 'g'],
+  ['sal', 'Sal', 'g'],
+];
+
+function plegarNutricionDelIngrediente(abierto) {
+  document.getElementById('receta-nutricion-campos').classList.toggle('hidden', !abierto);
+  document.getElementById('btn-receta-nutricion-toggle').classList.toggle('abierto', abierto);
+}
+document.getElementById('btn-receta-nutricion-toggle').addEventListener('click', () => {
+  plegarNutricionDelIngrediente(document.getElementById('receta-nutricion-campos').classList.contains('hidden'));
+});
+
 function openRecetaIngredienteModal(ing) {
   prepararCamposDeRecetas();
   document.getElementById('receta-ingrediente-modal-title').textContent = ing ? 'Editar ingrediente' : 'Nuevo ingrediente';
@@ -22035,6 +22185,14 @@ function openRecetaIngredienteModal(ing) {
   document.getElementById('receta-ingrediente-unidad').value = ing ? ing.unidad || '' : '';
   document.getElementById('receta-ingrediente-notas').value = ing ? ing.notas || '' : '';
   recetaIngredienteCategoriaField.setValue(ing && ing.categoria ? ing.categoria : '');
+  RECETA_CAMPOS_NUTRI.forEach(([campo, id]) => {
+    document.getElementById(id).value = ing && ing[campo] !== null && ing[campo] !== undefined
+      ? recetaFormatearCantidad(ing[campo])
+      : '';
+  });
+  // Se abre solo si este ingrediente YA tiene algo apuntado: quien los
+  // usa los ve sin tocar nada, y a quien no le interesan no le estorban.
+  plegarNutricionDelIngrediente(!!(ing && ing.tieneNutricion));
   document.getElementById('btn-delete-receta-ingrediente').classList.toggle('hidden', !ing);
   document.getElementById('receta-ingrediente-modal').classList.remove('hidden');
 }
@@ -22054,6 +22212,12 @@ document.getElementById('receta-ingrediente-form').addEventListener('submit', as
     categoria: recetaIngredienteCategoriaField.getValue(),
     notas: document.getElementById('receta-ingrediente-notas').value.trim(),
   };
+  // Un campo vacio viaja como null, que en la ruta significa "no lo sé"
+  // -- NO como cero, que contaria como dato bueno y hundiria el total de
+  // la receta sin que se notara.
+  RECETA_CAMPOS_NUTRI.forEach(([campo, id]) => {
+    cuerpo[campo] = recetaNormalizarNumero(document.getElementById(id).value);
+  });
   try {
     if (id) await api(`/api/recetas-ingredientes/${id}`, { method: 'PUT', body: JSON.stringify(cuerpo) });
     else await api('/api/recetas-ingredientes', { method: 'POST', body: JSON.stringify(cuerpo) });
@@ -22973,7 +23137,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.59.0';
+const APP_VERSION = '0.60.0';
 const APP_VERSION_DATE = '2026-09-14';
 
 function renderAppVersionLine() {

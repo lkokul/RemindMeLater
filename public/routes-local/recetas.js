@@ -101,6 +101,87 @@
     return `/api/notes/images/${nuevo}`;
   }
 
+  // -------------------------------------------------------------------
+  // NUTRICION DE UNA RECETA
+  // -------------------------------------------------------------------
+  //
+  // Se calcula AQUI y no en la pantalla para que solo haya una cuenta:
+  // la ficha, y manana un widget o la compra, tienen que decir lo mismo
+  // del mismo plato.
+  //
+  // Regla que eligio Koku: se suma lo que se sabe y se AVISA de lo que
+  // no. La cifra es un suelo, no una promesa -- mismo criterio que el
+  // tiempo estimado del Gimnasio, que solo cuenta los ejercicios de los
+  // que tiene historial. Nunca se rellena un hueco con un cero: un cero
+  // parece un dato bueno y hundiria el total sin que se notara.
+  const CAMPOS_NUTRI = ['kcal', 'proteinas', 'grasas', 'saturadas', 'hidratos', 'azucares', 'fibra', 'sal'];
+
+  // Lo que pesa una linea, llevado a la base de 100 en la que estan los
+  // valores del ingrediente. Devuelve null cuando no se puede saber, que
+  // es lo que hace que ese ingrediente quede fuera EN VEZ de contar mal.
+  function gramosDeLinea(linea, ing) {
+    if (linea.cantidad === null || linea.cantidad === undefined) return null; // "sal al gusto"
+    const u = String(linea.unidad || '').trim().toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // Masa y volumen se tratan igual a proposito: la etiqueta de un
+    // aceite viene "por 100 ml" y la receta lo mide en ml, asi que las
+    // dos hablan de la misma base sin necesidad de saber la densidad.
+    if (['g', 'gr', 'gramo', 'gramos', 'ml', 'cc'].includes(u)) return linea.cantidad;
+    if (['kg', 'kilo', 'kilos', 'l', 'litro', 'litros'].includes(u)) return linea.cantidad * 1000;
+    // Cualquier otra cosa (ud, diente, cucharada, o sin unidad) solo
+    // cuenta si se sabe lo que pesa una.
+    const porUnidad = Number(ing.gramos_por_unidad);
+    if (Number.isFinite(porUnidad) && porUnidad > 0) return linea.cantidad * porUnidad;
+    return null;
+  }
+
+  function nutricionDe(recetaId) {
+    const filas = db
+      .prepare(`SELECT l.*, i.name AS ing_nombre, i.gramos_por_unidad, i.kcal, i.proteinas, i.grasas,
+                       i.saturadas, i.hidratos, i.azucares, i.fibra, i.sal
+                FROM recetas_lineas l
+                LEFT JOIN recetas_ingredientes i ON i.id = l.ingrediente_id
+                WHERE l.receta_id = ?`)
+      .all(recetaId);
+
+    const total = {};
+    CAMPOS_NUTRI.forEach((c) => { total[c] = null; });
+    let contados = 0;
+    const sinContar = [];
+
+    for (const f of filas) {
+      if (!f.ing_nombre) continue; // el ingrediente ya no existe
+      const tieneAlgo = CAMPOS_NUTRI.some((c) => f[c] !== null && f[c] !== undefined);
+      const gramos = gramosDeLinea(f, f);
+      if (!tieneAlgo || gramos === null) {
+        // Un ingrediente OPCIONAL que no cuenta no se avisa: no estropea
+        // el total de un plato que puede no llevarlo.
+        if (!f.opcional) sinContar.push(f.ing_nombre);
+        continue;
+      }
+      contados += 1;
+      const factor = gramos / 100;
+      CAMPOS_NUTRI.forEach((c) => {
+        if (f[c] === null || f[c] === undefined) return;
+        total[c] = (total[c] || 0) + f[c] * factor;
+      });
+    }
+
+    CAMPOS_NUTRI.forEach((c) => {
+      if (total[c] !== null) total[c] = Math.round(total[c] * 10) / 10;
+    });
+
+    return {
+      // El total del plato ENTERO, con las raciones con las que esta
+      // apuntado. Escalarlo es cosa de quien lo pinta, que es quien sabe
+      // para cuanta gente lo estas mirando.
+      total,
+      contados,
+      sinContar,
+      hayDatos: contados > 0,
+    };
+  }
+
   function lineasDe(recetaId) {
     return db
       .prepare(`
@@ -145,6 +226,7 @@
       favorite: !!row.favorite,
       position: row.position,
       ingredientes: conLineas ? lineasDe(row.id) : undefined,
+      nutricion: conLineas ? nutricionDe(row.id) : undefined,
       // Para la lista, donde no hace falta la lista entera pero si saber
       // cuantos lleva.
       numIngredientes: db.prepare('SELECT COUNT(*) as n FROM recetas_lineas WHERE receta_id = ?').get(row.id).n,

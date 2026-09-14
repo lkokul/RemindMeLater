@@ -3591,6 +3591,67 @@ líneas.
   receta sin foto era un recuadro de puntos que hacía que la lista
   pareciera rota. Las 51 comprobaciones estaban todas en verde.
 
+### Calorías y macros (14/9/2026)
+
+Petición de Koku: *"de forma opcional le puedes poner calorías y
+estadísticas de grasas, carbohidratos, proteína etc"*. Tomó las tres
+decisiones:
+
+1. **Van en el INGREDIENTE, no en la receta.** Se le ofrecieron las tres
+   formas y eligió esta: lo escribes una vez (lo que pone el paquete,
+   por 100 g o por 100 ml) y sirve para todas las recetas que lleven esa
+   cosa, escalando solo con las raciones. Es la misma lógica del
+   catálogo que ya había elegido.
+2. **Los ocho valores de una etiqueta**: calorías, proteínas, grasas,
+   saturadas, hidratos, azúcares, fibra y sal. Y con un matiz suyo que
+   manda sobre el diseño: *"de forma opcional todo. No todo el mundo va
+   a estar pensando en esto"* — por eso el bloque **nace plegado** en la
+   ficha del ingrediente, y la sección de Nutrición de una receta **no
+   se pinta** si no hay ni un valor. Nada de ocho guiones ocupando media
+   pantalla.
+3. **Si falta algún ingrediente, se suma lo que se sabe y se avisa**
+   (*"Sin contar Perejil, que aún no tiene valores apuntados"*). La
+   cifra es un suelo, no una promesa — mismo criterio que el tiempo
+   estimado del Gimnasio, que solo cuenta los ejercicios con historial.
+
+**Vacío no es cero, y esto es lo importante de la ruta.** Un campo sin
+rellenar se guarda como NULL y ese ingrediente no aporta ese valor. Si
+se guardara un 0, contaría como dato bueno y hundiría el total del plato
+sin que se notara. Un número negativo o un texto se tratan igual que no
+saberlo (`numeroNutri`).
+
+**El problema de las unidades, y cómo se resuelve.** Los valores son por
+100 g / 100 ml, así que una línea en g, kg, ml o l se convierte sola
+(masa y volumen se tratan igual a propósito: la etiqueta de un aceite
+viene "por 100 ml" y la receta lo mide en ml, así que las dos hablan de
+la misma base sin necesidad de saber la densidad). Pero "2 ud de huevo"
+no se puede llevar a esa base sin saber lo que pesa uno — de ahí
+`gramos_por_unidad`, otro campo opcional. Sin él, ese ingrediente **no
+cuenta y se dice**, en vez de inventarse un peso. `gramosDeLinea()` en
+`routes-local/recetas.js` es quien decide.
+
+Un ingrediente marcado como **opcional** que no cuenta NO sale en el
+aviso: no estropea el total de un plato que puede no llevarlo.
+
+**La cuenta vive en la RUTA** (`nutricionDe`), no en la pantalla, para
+que la ficha y lo que venga después (un widget, la compra) digan lo
+mismo del mismo plato. Devuelve el total del plato con sus raciones
+BASE; escalar es cosa de quien lo pinta, que es quien sabe para cuánta
+gente lo estás mirando. Por ración = total / raciones base, así que **no
+cambia al escalar** — y eso es correcto, no un bug.
+
+**Dos cosas las vio una captura, no un assert**: con la rejilla a dos
+columnas, "de las cuales saturadas" caía debajo de "Proteínas" y se leía
+como si colgara de ellas (ahora va en UNA columna, en el orden de una
+etiqueta europea), y un plato de 2058 kcal salía sin punto de millar
+porque el español no agrupa los números de cuatro cifras por defecto —
+`RECETA_NUM_FORMATTER` lleva ahora `useGrouping: 'always'`, igual que el
+formateador del dinero de Finanzas y por el mismo motivo.
+
+**Y una cuenta que la prueba tenía mal y el código bien**: 2 huevos con
+6 g de proteína *por 100 g* y 60 g cada uno son 7,2 g, no 12. Los
+valores son por 100 g también en lo que se mide por unidades.
+
 ### Lo que NO se ha hecho, y no por olvido
 
 Todo lo que Koku dejó dicho "para luego", que es donde sigue:
@@ -3598,7 +3659,9 @@ Todo lo que Koku dejó dicho "para luego", que es donde sigue:
 - **Precios y Finanzas**: apuntarle el precio a cada ingrediente, ver su
   evolución, calcular cuánto va a costar la compra y sacar el precio
   medio de un plato. El catálogo está hecho justo para que esto sea
-  posible; falta la tabla de precios y las pantallas.
+  posible; falta la tabla de precios y las pantallas. Las calorías y los
+  macros ya siguen ese mismo camino (ver el bloque de arriba), así que
+  el precio es otra columna más en la misma ficha.
 - **Tareas**: "quiero hacer esta receta" → la compra como una lista de
   tareas que se tachan desde el calendario.
 - **Recetas en la Tienda**: esta rama sale de `movil-ui` (v0.56.0), que

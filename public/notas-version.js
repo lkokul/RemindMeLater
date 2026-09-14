@@ -19,6 +19,18 @@
 // es que se esconda por CSS: es que no está.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.60.0',
+    fecha: '2026-09-14',
+    nuevo: [
+      'En Recetas puedes apuntar, si quieres, las calorías y los macros de cada ingrediente: lo que pone en su paquete por 100 g o por 100 ml. Es todo opcional y el bloque viene plegado — si no te interesa, ni lo ves.',
+      'Lo escribes una vez en el ingrediente y la receta suma sola: en su ficha aparecen las calorías por ración y el desglose de grasas, hidratos, proteínas, fibra y sal, igual que en una etiqueta.',
+      'Y escala con las raciones: las calorías por ración no cambian al pedir la receta para más gente, pero el plato entero sí.',
+      'Si a algún ingrediente le faltan los valores, la ficha suma lo que sabe y te dice cuál falta, en vez de dar una cifra que parezca exacta sin serlo.',
+      'Para lo que midas en unidades (2 huevos, 3 dientes de ajo) puedes decir cuánto pesa una, y así también entra en la cuenta.',
+    ],
+    parches: [],
+  },
+  {
     version: '0.59.0',
     fecha: '2026-09-14',
     nuevo: [
