@@ -739,6 +739,25 @@ ahora se llama `device`.
       - Gotcha de driver aprendido: `POST /:id/rows` devuelve la BASE
         entera (no la fila) y crear una base SIEMBRA sola una prop
         "Estado" — un driver que añada la suya acaba con dos.
+    - **Pegar tablas de Excel/Sheets con formato** (driver
+      `drive-paste.js`, 16 en verde): al copiar celdas, Excel pone en
+      el portapapeles una IMAGEN + un HTML + texto tabulado — antes el
+      pegado caia en la rama de imagenes (una foto de la tabla), y el
+      HTML de Excel lleva el formato en clases (.xl65) dentro de un
+      <style> que el saneador tira. Ahora el paste handler del editor
+      RECONSTRUYE la tabla en el formato de la app
+      (`proyectosTableFromPasted` + `proyectosPasteCssMap` que parsea
+      esas reglas de clase + `proyectosPasteCellContent`): b/i/u/s,
+      text-align→data-align, vertical-align→data-valign, anchos de
+      col (pt→px, tope 1200), enlaces https, y las celdas COMBINADAS
+      se despliegan (contenido en su origen + celdas vacias — la
+      rejilla de la app no tiene colspan/rowspan). Los colores de
+      relleno/letra se DESCARTAN a proposito (los temas mandan; un
+      amarillo de Excel en tema oscuro seria ilegible). TSV pelado
+      (sin HTML, ≥2 lineas y TODAS con tab) tambien se vuelve tabla;
+      dentro de un pre no se toca nada. Gotcha propio: Sheets manda
+      estilos EN LINEA y Excel en clases — hay que leer las dos
+      fuentes, con el inline ganando.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 

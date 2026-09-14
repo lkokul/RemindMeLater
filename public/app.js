@@ -14420,8 +14420,284 @@ PROYECTOS_BODY().addEventListener('click', (e) => {
 
 // Pegar una imagen del portapapeles directamente (Ctrl+V con una
 // captura copiada), como en las notas.
+// ---------------------------------------------------------------------
+// Pegar tablas de Excel / Google Sheets CON su formato (peticion de
+// Koku). Al copiar celdas, Excel pone en el portapapeles TRES cosas a
+// la vez: una IMAGEN de las celdas, un HTML con la tabla y el texto
+// plano con tabuladores. Sin esto, el pegado caia en la rama de
+// imagenes (acababas con una FOTO de la tabla); y el HTML de Excel,
+// pegado tal cual, viene lleno de clases (xl65...) cuyo formato vive en
+// un <style> que el saneador tira — se perdia todo el formato.
+//
+// Aqui la tabla se RECONSTRUYE en el formato propio de la app:
+//   - negrita/cursiva/subrayado/tachado -> <b>/<i>/<u>/<s>
+//   - text-align -> data-align (center/right/justify)
+//   - vertical-align -> data-valign (middle/bottom)
+//   - anchos de columna -> <col style="width:Npx"> (pt -> px)
+//   - enlaces http(s) se conservan
+//   - celdas COMBINADAS: el contenido queda en su celda de origen y el
+//     resto del hueco son celdas vacias (las tablas de la app son una
+//     rejilla regular, sin colspan/rowspan)
+// Los colores de relleno y de letra se DESCARTAN a proposito: las
+// tablas de la app se pintan con el tema activo (un amarillo de Excel
+// sobre un tema oscuro dejaria el texto ilegible), igual que el resto
+// del editor, que tampoco tiene color de letra.
+// ---------------------------------------------------------------------
+
+// El formato de Excel vive en reglas de clase (.xl65 { ... }) dentro de
+// un <style> del propio HTML pegado; Google Sheets lo pone en linea en
+// cada celda. Se leen las dos fuentes. Este mini-parser solo entiende
+// ".clase { propiedades }", que es lo unico que genera Office.
+function proyectosPasteCssMap(doc) {
+  const map = new Map();
+  for (const styleEl of doc.querySelectorAll('style')) {
+    for (const rule of (styleEl.textContent || '').split('}')) {
+      const [selectors, propsRaw] = rule.split('{');
+      if (!selectors || !propsRaw) continue;
+      for (const sel of selectors.split(',')) {
+        const m = sel.trim().match(/^\.([\w-]+)$/);
+        if (m) map.set(m[1], (map.get(m[1]) || '') + ';' + propsRaw);
+      }
+    }
+  }
+  return map;
+}
+
+// Junta el formato de un elemento pegado: sus clases (Excel) + su
+// style en linea (Sheets; va detras y por eso GANA) + los atributos
+// align/valign del HTML viejo de Office.
+function proyectosPasteStyleInfo(el, cssMap) {
+  let css = '';
+  for (const cls of el.classList || []) css += ';' + (cssMap.get(cls) || '');
+  css += ';' + (el.getAttribute('style') || '');
+  const pick = (prop) => {
+    const re = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`, 'gi');
+    let value = null;
+    let m;
+    while ((m = re.exec(css)) !== null) value = m[1].trim().toLowerCase();
+    return value;
+  };
+  const weight = pick('font-weight');
+  const deco = (pick('text-decoration') || '') + ' ' + (pick('text-decoration-line') || '');
+  const info = {
+    bold: weight === 'bold' || Number(weight) >= 600,
+    italic: pick('font-style') === 'italic',
+    underline: deco.includes('underline'),
+    strike: deco.includes('line-through'),
+    align: pick('text-align'),
+    valign: pick('vertical-align'),
+  };
+  if (!info.align) info.align = (el.getAttribute('align') || '').toLowerCase() || null;
+  if (!info.valign) info.valign = (el.getAttribute('valign') || '').toLowerCase() || null;
+  return info;
+}
+
+// Copia el contenido de una celda pegada conservando SOLO el formato
+// que la app entiende (aplanando lo demas a texto). `state` es el
+// formato heredado de los elementos de alrededor.
+function proyectosPasteCellContent(node, target, state, cssMap) {
+  for (const child of node.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      const text = child.nodeValue.replace(/\s+/g, ' ');
+      if (!text.trim()) continue;
+      let piece = document.createTextNode(text);
+      // Del mas interno al mas externo: <b><i><u><s>texto</s></u></i></b>
+      if (state.strike) { const s = document.createElement('s'); s.appendChild(piece); piece = s; }
+      if (state.underline) { const u = document.createElement('u'); u.appendChild(piece); piece = u; }
+      if (state.italic) { const i = document.createElement('i'); i.appendChild(piece); piece = i; }
+      if (state.bold) { const b = document.createElement('b'); b.appendChild(piece); piece = b; }
+      target.appendChild(piece);
+      continue;
+    }
+    if (child.nodeType !== Node.ELEMENT_NODE) continue;
+    const tag = child.tagName;
+    if (tag === 'BR') { target.appendChild(document.createElement('br')); continue; }
+    if (tag === 'STYLE' || tag === 'SCRIPT') continue;
+    const info = proyectosPasteStyleInfo(child, cssMap);
+    const next = {
+      bold: state.bold || info.bold || tag === 'B' || tag === 'STRONG',
+      italic: state.italic || info.italic || tag === 'I' || tag === 'EM',
+      underline: state.underline || info.underline || tag === 'U',
+      strike: state.strike || info.strike || tag === 'S' || tag === 'STRIKE' || tag === 'DEL',
+    };
+    // Un parrafo interno despues de otro contenido = salto de linea.
+    if ((tag === 'P' || tag === 'DIV') && target.childNodes.length > 0) {
+      target.appendChild(document.createElement('br'));
+    }
+    if (tag === 'A' && /^https?:\/\//i.test(child.getAttribute('href') || '')) {
+      const a = document.createElement('a');
+      a.setAttribute('href', child.getAttribute('href'));
+      proyectosPasteCellContent(child, a, next, cssMap);
+      if (a.textContent.trim()) target.appendChild(a);
+      continue;
+    }
+    proyectosPasteCellContent(child, target, next, cssMap);
+  }
+}
+
+// Una <table> pegada -> una tabla nueva en el formato de la app.
+function proyectosTableFromPasted(source, cssMap) {
+  // Rejilla con las celdas combinadas desplegadas: la posicion de
+  // origen lleva la celda, y las tapadas por un rowspan/colspan quedan
+  // marcadas para volverse celdas vacias.
+  const grid = [];
+  const sourceRows = [...source.rows].slice(0, 500);
+  sourceRows.forEach((tr, r) => {
+    grid[r] = grid[r] || [];
+    let c = 0;
+    for (const cell of tr.children) {
+      if (cell.tagName !== 'TD' && cell.tagName !== 'TH') continue;
+      while (grid[r][c] !== undefined) c++;
+      const colspan = Math.min(Number(cell.getAttribute('colspan')) || 1, 50);
+      const rowspan = Math.min(Number(cell.getAttribute('rowspan')) || 1, 100);
+      for (let dr = 0; dr < rowspan; dr++) {
+        for (let dc = 0; dc < colspan; dc++) {
+          const rr = r + dr;
+          grid[rr] = grid[rr] || [];
+          grid[rr][c + dc] = dr === 0 && dc === 0 ? cell : 'hueco';
+        }
+      }
+      c += colspan;
+    }
+  });
+  const totalCols = Math.min(Math.max(0, ...grid.map((row) => row.length)), 50);
+  if (totalCols === 0) return null;
+
+  const table = document.createElement('table');
+  const tbody = document.createElement('tbody');
+  for (let r = 0; r < grid.length; r++) {
+    const tr = document.createElement('tr');
+    for (let c = 0; c < totalCols; c++) {
+      const src = grid[r] ? grid[r][c] : undefined;
+      const real = src && src !== 'hueco' ? src : null;
+      const cell = document.createElement(real && real.tagName === 'TH' ? 'th' : 'td');
+      if (real) {
+        const info = proyectosPasteStyleInfo(real, cssMap);
+        proyectosPasteCellContent(real, cell, {
+          bold: info.bold, italic: info.italic, underline: info.underline, strike: info.strike,
+        }, cssMap);
+        if (info.align === 'center' || info.align === 'right' || info.align === 'justify') cell.setAttribute('data-align', info.align);
+        if (info.valign === 'middle' || info.valign === 'bottom') cell.setAttribute('data-valign', info.valign);
+      }
+      if (!cell.firstChild) cell.appendChild(document.createElement('br'));
+      tr.appendChild(cell);
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+
+  // Anchos de columna: de los <col> del original (Excel manda "width"
+  // en pixels como atributo Y en pt dentro del style) o, si no los
+  // trae, de las celdas de la primera fila. pt -> px (1pt = 96/72 px).
+  const widthOf = (el) => {
+    const attr = Number(el.getAttribute('width'));
+    if (attr > 0) return Math.round(attr);
+    const m = (el.getAttribute('style') || '').match(/width\s*:\s*([\d.]+)(pt|px)/i);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    return Math.round(m[2].toLowerCase() === 'pt' ? n * (96 / 72) : n);
+  };
+  const widths = [];
+  for (const col of source.querySelectorAll('col')) {
+    const span = Math.min(Number(col.getAttribute('span')) || 1, 50);
+    const w = widthOf(col);
+    for (let s = 0; s < span; s++) widths.push(w);
+  }
+  if (widths.length === 0 && grid[0]) {
+    for (let c = 0; c < totalCols; c++) {
+      const src = grid[0][c];
+      widths.push(src && src !== 'hueco' ? widthOf(src) : null);
+    }
+  }
+  if (widths.some((w) => w)) {
+    const colgroup = document.createElement('colgroup');
+    for (let c = 0; c < totalCols; c++) {
+      const col = document.createElement('col');
+      if (widths[c]) col.style.width = `${Math.min(Math.max(widths[c], PROYECTOS_TABLE_MIN_COL), 1200)}px`;
+      colgroup.appendChild(col);
+    }
+    table.insertBefore(colgroup, table.firstChild);
+  }
+  return table;
+}
+
+// Inserta las tablas reconstruidas donde este el cursor (el bloque
+// vacio se sustituye; con texto, detras; sin cursor, al final) y deja
+// un bloque vacio debajo para seguir escribiendo.
+function insertProyectosPastedTables(tables) {
+  const body = PROYECTOS_BODY();
+  const block = getProyectosCurrentBlock();
+  const nodes = [];
+  tables.forEach((t, i) => {
+    if (i > 0) nodes.push(emptyProyectosBlock());
+    nodes.push(t);
+  });
+  const after = emptyProyectosBlock();
+  nodes.push(after);
+  const replaceable = block && block.tagName === 'DIV' && !block.hasAttribute('data-proyectos-db')
+    && !block.hasAttribute('data-pdf-block') && block.textContent.trim() === '';
+  if (replaceable) block.replaceWith(...nodes);
+  else if (block) block.after(...nodes);
+  else body.append(...nodes);
+  placeCaretIn(after);
+  updateProyectosTableGuides();
+  queueProyectosSaveBody();
+}
+
 PROYECTOS_BODY().addEventListener('paste', async (e) => {
   if (e.target.closest?.('[data-proyectos-db]')) return;
+  const currentBlock = getProyectosCurrentBlock();
+  const inCode = !!(currentBlock && currentBlock.tagName === 'PRE');
+
+  // 1) Una TABLA en el HTML del portapapeles (Excel / Sheets / Word)
+  //    gana a todo lo demas — Excel pone ADEMAS una imagen de las
+  //    celdas, y sin este orden acababa en la rama de imagenes. Dentro
+  //    de un bloque de codigo NO: ahi se pega el texto tal cual.
+  const pastedHtml = inCode ? '' : (e.clipboardData?.getData('text/html') || '');
+  if (pastedHtml && /<table[\s>]/i.test(pastedHtml)) {
+    const doc = new DOMParser().parseFromString(pastedHtml, 'text/html');
+    const cssMap = proyectosPasteCssMap(doc);
+    const tables = [...doc.querySelectorAll('table')]
+      .filter((t) => !t.parentElement.closest('table')) // solo las de primer nivel
+      .map((t) => proyectosTableFromPasted(t, cssMap))
+      .filter(Boolean);
+    if (tables.length > 0) {
+      e.preventDefault();
+      insertProyectosPastedTables(tables);
+      return;
+    }
+  }
+
+  // 2) Texto plano tabulado SIN HTML (un volcado TSV): tambien tabla.
+  //    Regla conservadora para no comerse texto normal (o codigo):
+  //    al menos 2 lineas y TODAS con algun tabulador.
+  if (!inCode && !pastedHtml) {
+    const plain = e.clipboardData?.getData('text/plain') || '';
+    if (plain.includes('\t')) {
+      const lines = plain.replace(/\r/g, '').split('\n').filter((l) => l.length > 0);
+      if (lines.length >= 2 && lines.every((l) => l.includes('\t'))) {
+        e.preventDefault();
+        const table = document.createElement('table');
+        const tbody = document.createElement('tbody');
+        const cols = Math.min(Math.max(...lines.map((l) => l.split('\t').length)), 50);
+        for (const line of lines.slice(0, 500)) {
+          const tr = document.createElement('tr');
+          const values = line.split('\t');
+          for (let c = 0; c < cols; c++) {
+            const td = document.createElement('td');
+            if (values[c]) td.textContent = values[c];
+            else td.appendChild(document.createElement('br'));
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        insertProyectosPastedTables([table]);
+        return;
+      }
+    }
+  }
+
   const items = e.clipboardData?.items || [];
   const imageItem = [...items].find((item) => item.type.startsWith('image/'));
   if (!imageItem) return; // pegado normal de texto, que siga su curso
