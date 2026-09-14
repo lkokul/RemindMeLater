@@ -2561,10 +2561,10 @@ document.getElementById('event-end-date-field').appendChild(eventEndDateField.el
 // ---------------------------------------------------------------------
 const EVENT_REPEAT_OPTIONS = [
   { value: '', label: 'No se repite' },
-  { value: 'daily', label: 'Cada dia' },
-  { value: 'weekly', label: 'Cada semana' },
-  { value: 'monthly', label: 'Cada mes' },
-  { value: 'yearly', label: 'Cada año' },
+  { value: 'daily', label: 'Diaria' },
+  { value: 'weekly', label: 'Semanal' },
+  { value: 'monthly', label: 'Mensual' },
+  { value: 'yearly', label: 'Anual' },
 ];
 // Singular y plural de la unidad, para que "Cada 1 semana" y "Cada 2
 // semanas" se lean bien sin montar un formateador para tres palabras.
@@ -7625,27 +7625,6 @@ function handleNoteHighlightAwareEnter() {
   return true;
 }
 
-// Intro en una linea de cita VACIA: sale de la cita, en vez de añadir
-// otra linea citada debajo. Sin esto no habia forma de TERMINAR una cita
-// escribiendo: cada Intro heredaba el data-quote del parrafo anterior,
-// asi que se acumulaban lineas en blanco y la barra de la izquierda se
-// repetia una y otra vez (lo reporto Koku). Es lo mismo que hacen Notion
-// o Apple Notes: la linea vacia sale del bloque en vez de continuarlo.
-// Devuelve true si ha actuado (quien llama debe hacer preventDefault).
-function handleNoteQuoteEnterExit() {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
-  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return false;
-  const line = getNoteBlockAncestor(sel.getRangeAt(0).startContainer);
-  if (!line || line.getAttribute('data-quote') !== '1') return false;
-  if (line.textContent.trim() !== '') return false;
-  line.removeAttribute('data-quote');
-  line.removeAttribute('data-indent');
-  NOTE_EDITOR_BODY.dispatchEvent(new Event('input', { bubbles: true }));
-  refreshNoteEditorState();
-  return true;
-}
-
 // Intro al final del TITULO baja a un parrafo normal, no a otro titulo.
 //
 // Es la otra mitad de "el primer parrafo nace como Titulo" (ver
@@ -7702,24 +7681,91 @@ function cursorAlFinalDelTitulo() {
 // donde el navegador ya iba. Aqui no se puede probar WebKit (no hay), asi
 // que el cambio de etiqueta se queda como RED por si Safari continua el
 // titulo; en Chrome no llega a ejecutarse nunca.
-let saliendoDelTitulo = false;
+// LAS SALIDAS DE FORMATO, TODAS POR EL MISMO SITIO.
+//
+// "Salir de un formato" es bajar de titulo a parrafo, o de una cita a un
+// parrafo. Todas siguen el mismo guion en tres tiempos:
+//
+//   1. Antes del salto (keydown/beforeinput) se MIRA si toca salir, y si
+//      toca se deja una nota apuntada. NO se hace preventDefault.
+//   2. El navegador da SU salto de linea.
+//   3. En el 'input' de despues se arregla el formato del bloque nuevo.
+//
+// Añadir una salida nueva es añadir una rama a marcarSalidaDeFormato()
+// con su funcion de arreglo. Lo que NO se puede hacer nunca es volver al
+// preventDefault + DOM a mano, por lo que cuenta el comentario de arriba.
+let salidaDeFormatoPendiente = null;
 
-function marcarSalidaDelTitulo() {
-  if (cursorAlFinalDelTitulo()) saliendoDelTitulo = true;
+function marcarSalidaDeFormato() {
+  salidaDeFormatoPendiente = null;
+  if (cursorAlFinalDelTitulo()) {
+    salidaDeFormatoPendiente = arreglarSalidaDelTitulo;
+    return;
+  }
+  const cita = lineaDeCitaVacia();
+  if (cita) {
+    // La linea vieja se apunta AHORA: despues del salto hay dos lineas
+    // citadas vacias iguales y no habria forma de distinguirlas.
+    salidaDeFormatoPendiente = () => arreglarSalidaDeLaCita(cita);
+  }
 }
 
-function terminarSalidaDelTitulo() {
-  if (!saliendoDelTitulo) return;
-  saliendoDelTitulo = false;
+function terminarSalidaDeFormato() {
+  const arreglar = salidaDeFormatoPendiente;
+  salidaDeFormatoPendiente = null;
+  if (arreglar) arreglar();
+}
+
+function arreglarSalidaDelTitulo() {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return;
   const linea = getNoteBlockAncestor(sel.getRangeAt(0).startContainer);
-  // El navegador continua con la MISMA etiqueta, asi que la linea nueva
-  // nace en <h1>. Si ya la hizo <div> por su cuenta, no hay nada que
-  // hacer. Y nunca se toca el primer bloque: ese ES el titulo.
+  // El navegador PODRIA continuar con la misma etiqueta, y entonces la
+  // linea nueva nace en <h1>. Si ya la hizo <div> por su cuenta (que es
+  // lo que hace Chromium), no hay nada que hacer. Y nunca se toca el
+  // primer bloque: ese ES el titulo.
   if (!linea || linea.tagName !== 'H1') return;
   if (linea === NOTE_EDITOR_BODY.firstElementChild) return;
   document.execCommand('formatBlock', false, '<div>');
+  refreshNoteEditorState();
+}
+
+// Intro en una linea de cita VACIA sale de la cita, en vez de añadir otra
+// linea citada debajo. Sin esto no habia forma de TERMINAR una cita
+// escribiendo: cada Intro hereda el data-quote del parrafo anterior
+// (medido: el navegador CLONA los atributos de la linea al saltar), asi
+// que se acumulaban lineas en blanco y la barra de la izquierda se
+// repetia una y otra vez. Lo reporto Koku en su dia. Es lo mismo que
+// hacen Notion o Apple Notes.
+function lineaDeCitaVacia() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
+  if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return null;
+  const linea = getNoteBlockAncestor(sel.getRangeAt(0).startContainer);
+  if (!linea || linea.getAttribute('data-quote') !== '1') return null;
+  if (linea.textContent.trim() !== '') return null;
+  return linea;
+}
+
+function arreglarSalidaDeLaCita(lineaVieja) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const nueva = getNoteBlockAncestor(sel.getRangeAt(0).startContainer);
+  if (!nueva) return;
+  // La linea NUEVA (donde esta el cursor) deja de estar citada...
+  nueva.removeAttribute('data-quote');
+  nueva.removeAttribute('data-indent');
+  // ...y la vieja, que era la linea vacia desde la que pulsaste Intro, se
+  // va. Asi el resultado es el de siempre — una sola linea sin citar —
+  // con la diferencia de que el salto lo dio el navegador y el teclado se
+  // ha enterado de que empieza frase nueva.
+  if (lineaVieja !== nueva
+      && lineaVieja.isConnected
+      && NOTE_EDITOR_BODY.contains(lineaVieja)
+      && lineaVieja.textContent.trim() === '') {
+    lineaVieja.remove();
+  }
+  NOTE_EDITOR_BODY.dispatchEvent(new Event('input', { bubbles: true }));
   refreshNoteEditorState();
 }
 
@@ -7727,15 +7773,19 @@ function terminarSalidaDelTitulo() {
 // el texto predictivo por medio llega como 'Unidentified'), pero
 // 'beforeinput' SI llega siempre -- misma trampa que ya mordio con las
 // formulas, ver el listener de mas arriba. Marcar dos veces no hace
-// daño: la marca es un booleano y la consume el 'input' siguiente.
+// daño: la marca la consume el 'input' siguiente.
 NOTE_EDITOR_BODY.addEventListener('beforeinput', (e) => {
   if (e.inputType !== 'insertParagraph') return;
-  marcarSalidaDelTitulo();
+  marcarSalidaDeFormato();
 });
 
 // 'input' llega DESPUES de que el navegador haya metido el parrafo, que
 // es justo cuando hay algo a lo que cambiarle el formato.
-NOTE_EDITOR_BODY.addEventListener('input', terminarSalidaDelTitulo);
+//
+// OJO: arreglarSalidaDeLaCita() dispara a su vez un 'input' -- no hay
+// bucle porque terminarSalidaDeFormato() vacia la marca ANTES de llamar
+// al arreglo, asi que la segunda vuelta no encuentra nada que hacer.
+NOTE_EDITOR_BODY.addEventListener('input', terminarSalidaDeFormato);
 
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
   // INTRO FIJA LA FORMULA -- pero SOLO si hay una vista previa delante.
@@ -7765,15 +7815,13 @@ NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-    // Salir del titulo NO hace preventDefault (ver marcarSalidaDelTitulo):
-    // el salto lo tiene que dar el navegador para que el teclado del movil
-    // sepa que empieza frase nueva y ponga la mayuscula. Solo se deja la
-    // marca, y el 'input' de despues le cambia el formato al parrafo.
-    marcarSalidaDelTitulo();
-    if (handleNoteQuoteEnterExit()) {
-      e.preventDefault();
-      return;
-    }
+    // Salir de un formato (del titulo, de una cita) NO hace
+    // preventDefault: el salto lo tiene que dar el navegador para que el
+    // teclado del movil sepa que empieza frase nueva y ponga la
+    // mayuscula. Solo se deja la marca, y el 'input' de despues arregla
+    // el formato del bloque nuevo. Ver marcarSalidaDeFormato().
+    marcarSalidaDeFormato();
+    if (salidaDeFormatoPendiente) return;
     if (handleNoteHighlightAwareEnter()) {
       e.preventDefault();
       return;
@@ -7905,7 +7953,7 @@ function noteEntrySnapshot(note) {
   // ahora va con el normal y tengo que cambiarlo cada vez".
   //
   // Al pulsar Intro se baja a parrafo normal, que es lo que se espera
-  // despues de escribir un titulo -- ver marcarSalidaDelTitulo().
+  // despues de escribir un titulo -- ver marcarSalidaDeFormato().
   //
   // Un <h1> con solo un <br> dentro no tiene ni texto ni imagenes, asi
   // que sigue contando como "nota vacia": abrir el editor y salirse sin
@@ -9522,14 +9570,22 @@ function horarioAltoDeHora() {
 // pero se ESTIRA si algun bloque se sale: un turno de noche que empieza
 // a las 6 tiene que verse entero, y recortarlo seria perderlo de vista
 // sin decir nada.
-function horarioFranja(bloques) {
-  let desde = 8 * 60;
-  let hasta = 22 * 60;
-  bloques.forEach((b) => {
-    desde = Math.min(desde, Math.floor(b.startMin / 60) * 60);
-    hasta = Math.max(hasta, Math.ceil(b.endMin / 60) * 60);
-  });
-  return { desde, hasta: Math.max(hasta, desde + 60) };
+// Cuánto aire se deja por encima del primer bloque al abrir la pantalla.
+// Media hora: lo justo para que no quede pegado al borde de arriba y se
+// vea que ahí siguen habiendo horas, sin gastar media pantalla en vacío.
+const HORARIO_AIRE_ARRIBA_MIN = 30;
+
+function horarioFranja() {
+  // EL DIA ENTERO, de 00:00 a 24:00 (peticion de Koku el 14/9/2026:
+  // "quiero que haga todo el dia"). Antes eran las 8:00-22:00 y la franja
+  // se estiraba sola si algun bloque se salia; eso dejaba fuera un turno
+  // de noche hasta que lo creabas, y hacia que la rejilla cambiara de
+  // alto segun lo que tuvieras dentro.
+  //
+  // El precio es que ahora la rejilla mide el doble y casi todo lo de
+  // arriba esta vacio, asi que la pantalla se abre DESPLAZADA hasta tus
+  // bloques -- ver horarioIrAlPrimerBloque().
+  return { desde: 0, hasta: 24 * 60 };
 }
 
 // La etiqueta de la columna de horas, en COMPACTO. No vale
@@ -9566,6 +9622,34 @@ async function openHorarioView() {
     horarioBloques = [];
   }
   renderHorario();
+  horarioIrAlPrimerBloque();
+}
+
+// Abrir el horario por donde de verdad tienes algo.
+//
+// Con el dia entero (00:00-24:00) la rejilla mide unas 24 horas de alto y
+// casi todo lo de arriba esta vacio: abriendola a las 00:00 lo primero
+// que ves es la madrugada, o sea nada. Se desplaza hasta el primer bloque
+// del dia mas madrugador, dejando un poco de aire por encima para que no
+// quede pegado al borde y se vea que ahi arriba sigue habiendo horas.
+//
+// Sin bloques se abre ARRIBA DEL TODO: una rejilla vacia no tiene a donde
+// ir, y arrancar a media mañana pareceria que falta la mitad del dia.
+//
+// Ojo, el scrollTop se pone SIEMPRE, tambien en ese caso. El contenedor
+// recuerda donde lo dejaste la vez anterior, asi que con un `return` a
+// secas la pantalla vacia se abria a la altura de los bloques que
+// acababas de borrar — lo pillo la prueba, no se ve leyendo el codigo.
+function horarioIrAlPrimerBloque() {
+  const scroller = document.getElementById('horario-scroll');
+  if (!scroller) return;
+  if (!horarioBloques.length) {
+    scroller.scrollTop = 0;
+    return;
+  }
+  const primero = Math.min(...horarioBloques.map((b) => b.startMin));
+  const altoHora = horarioAltoDeHora();
+  scroller.scrollTop = Math.max(0, ((primero - HORARIO_AIRE_ARRIBA_MIN) / 60) * altoHora);
 }
 
 function closeHorarioView() {
@@ -9595,7 +9679,7 @@ function renderHorario() {
     head.appendChild(el);
   });
 
-  const { desde, hasta } = horarioFranja(horarioBloques);
+  const { desde, hasta } = horarioFranja();
   const altoHora = horarioAltoDeHora();
   const alto = ((hasta - desde) / 60) * altoHora;
   // El degradado que pinta las rayas arranca en el borde de arriba de la
@@ -25543,7 +25627,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.62.1';
+const APP_VERSION = '0.62.2';
 const APP_VERSION_DATE = '2026-09-14';
 
 function renderAppVersionLine() {

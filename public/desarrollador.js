@@ -17,6 +17,12 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.62.2': [
+    'Siguen SIN tocar los saltos de formato de dentro de una lista y los del rotulador (continuar un resaltado en la línea de abajo): esos aún hacen el salto a mano. Si ves que ahí tampoco sale la mayúscula, dímelo y les doy el mismo tratamiento.',
+    'La mayúscula no la puedo probar desde aquí (la pone el teclado del sistema, y en el navegador de pruebas no existe). Lo que sí está probado es que salir de una cita se comporta igual que antes: 7 comprobaciones nuevas.',
+    'El horario con el día entero mide el doble de alto. Si te resulta incómodo tanto scroll, lo que se puede tocar es --horario-hora en styles.css (ahora 56px): bajándolo entran más horas de un vistazo, a costa de que los bloques cortos se lean peor.',
+    'Nada de esto se ve hasta la siguiente build: sigue sin lanzarse ninguna.',
+  ],
   '0.62.1': [
     'El arreglo de las letras del widget es SWIFT, así que no se ve hasta que lances una build nueva de TestFlight. Recargar la app o quitar y volver a poner el widget no cambia nada.',
     'Míralo con tu tema claro y el móvil en modo oscuro, que es la combinación que rompía. Los rotos eran el del calendario (los números de los días) y el de Tareas; los demás no ponían ningún color a mano, pero conviene confirmarlo de un vistazo.',

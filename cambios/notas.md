@@ -6,6 +6,40 @@ Cómo se escribe esto: `cambios/_COMO-SE-USA.md`.
 
 ---
 
+## Sin fusionar — La mayúscula al salir de una cita
+
+**Qué cambió**
+- Salir de una cita (Intro en una línea citada vacía) ya deja que el
+  **navegador** dé el salto de línea, igual que se hizo con el título en
+  la v0.62.1. En pantalla se comporta exactamente igual que antes.
+- Con eso el teclado del móvil se entera de que empieza frase nueva y
+  **pone la mayúscula**, que es lo que fallaba.
+
+**Qué probar**
+- [ ] **LO PRINCIPAL, y no se puede probar desde el contenedor**: escribe
+      una cita, dale a Intro dos veces para salir, y mira si la primera
+      letra sale en MAYÚSCULA. La pone el teclado del sistema, que en el
+      navegador de pruebas no existe.
+- [ ] Lo mismo bajando del título al primer párrafo (eso es de la
+      v0.62.1 y tampoco lo has podido probar aún).
+- [ ] Que la cita se corte igual que siempre y no se acumulen líneas en
+      blanco — eso sí está cubierto por 7 comprobaciones, pero es el
+      comportamiento que más se notaría si se rompiera.
+
+**Decisiones**
+- **El salto de línea lo da SIEMPRE el navegador.** `autocapitalize` no
+  lo decide el HTML: lo decide el teclado, y solo rehace su cuenta cuando
+  el navegador mueve el cursor por una edición suya. Un `preventDefault`
+  + DOM a mano le deja el estado de "a media frase" → minúscula.
+- **Sin tocar a propósito**: continuar un resaltado del rotulador en la
+  línea de abajo sigue haciendo el salto a mano. Es el mismo patrón, pero
+  es un salto dentro del MISMO formato y rehacerlo es cirugía fina (parte
+  la línea conservando los spans de color). Si ahí tampoco sale la
+  mayúscula, dilo y se hace.
+- Salir de una LISTA y el bloque de código no hacía falta tocarlos: el
+  primero ya lo hace el navegador solo, y en el segundo Intro se queda
+  dentro (no es un cambio de formato).
+
 ## v0.62.1 — La mayúscula del teclado al bajar del título al párrafo
 
 **Qué cambió**
