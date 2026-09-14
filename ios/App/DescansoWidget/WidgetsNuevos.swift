@@ -115,10 +115,21 @@ struct CalendarioWidget: Widget {
 
 struct VistaCalendario: View {
     @Environment(\.widgetFamily) private var familia
+    // Hace falta para saber QUÉ paleta del tema toca (ver colorDeTexto en
+    // ResumenDeLaApp.swift): con el estilo "mixto" el widget lleva las dos
+    // y elige al pintar, con la app cerrada.
+    @Environment(\.colorScheme) private var esquema
     let entry: EntradaDeLaApp
 
     private var seccion: SeccionCalendario? { entry.resumen?.calendario }
     private var acento: Color { Color(hexDeLaApp: entry.resumen?.acento ?? "") }
+
+    // El color del texto del tema, ya resuelto. Los números de los días lo
+    // piden a mano en vez de heredarlo: ver el comentario largo de
+    // EstiloDeWidget.colorDeTexto.
+    private var colorDelTexto: Color {
+        entry.resumen.estiloDeWidget.colorDeTexto(oscuro: esquema == .dark)
+    }
 
     // El texto que va ENCIMA del circulo del acento (el dia de hoy). Blanco
     // fijo no vale: hay temas con acentos claros, y ahi se pierde igual. Se
@@ -189,20 +200,21 @@ struct VistaCalendario: View {
             Text("\(n)")
                 .font(.system(size: familia == .systemLarge ? 12 : 10,
                               weight: esHoy ? .bold : .regular))
-                // OJO: aqui NO puede ir Color.primary. Ese es el color del
-                // SISTEMA, no el del tema, y pisa el .foregroundStyle que
-                // fondoDeWidgetApp pone en la RAIZ. Con el tema de la app en
-                // claro (fondo blanco) y el movil en modo oscuro,
-                // Color.primary es BLANCO: los numeros de los dias se
-                // volvian invisibles sobre el fondo blanco del widget.
-                // Koku lo vio asi, con solo el circulo azul de hoy visible.
+                // LOS DOS LADOS SON UN Color DE VERDAD, y eso es el arreglo.
                 //
-                // Sin foregroundStyle, el numero HEREDA el color de la raiz,
-                // que es --surface-text del tema: el contraste emparejado del
-                // fondo, o sea legible siempre sea cual sea el tema.
-                // Lo mismo vale para las cabeceras L M X J V S D, que usan
-                // .secondary (jerarquico) y por eso SI se veian.
-                .foregroundStyle(esHoy ? AnyShapeStyle(colorSobreElAcento) : AnyShapeStyle(.foreground))
+                // Antes el lado "no es hoy" era `AnyShapeStyle(.foreground)`,
+                // creyendo que eso heredaba el color que fondoDeWidgetApp pone
+                // en la raíz. NO lo hereda: `.foreground` es el estilo POR
+                // DEFECTO del sistema, así que aplicarlo RESETEA el tinte. Con
+                // el móvil en modo oscuro ese color es BLANCO, y sobre el fondo
+                // blanco de un tema claro los números desaparecían — que es
+                // justo lo que Koku volvió a ver, con solo el círculo del día
+                // de hoy visible. Las cabeceras L M X J V S D se salvaban
+                // porque `.secondary` sí se deriva del ancestro.
+                //
+                // Ahora el color del tema se pide resuelto
+                // (EstiloDeWidget.colorDeTexto) en vez de intentar heredarlo.
+                .foregroundStyle(esHoy ? colorSobreElAcento : colorDelTexto)
                 .frame(width: 17, height: 17)
                 .background(
                     Circle().fill(esHoy ? acento : Color.clear)

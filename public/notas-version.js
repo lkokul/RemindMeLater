@@ -34,6 +34,16 @@
 // exista se lee como general, no rompe nada.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.62.1',
+    fecha: '2026-09-14',
+    nuevo: [],
+    parches: [
+      'Los números de los días del widget del calendario vuelven a verse. Con un tema claro y el móvil en modo oscuro salían en blanco sobre el fondo blanco del widget, y solo se veía el círculo del día de hoy.',
+      'Lo mismo en el widget de Tareas: el título de una tarea que no está vencida se veía en blanco en esa misma combinación.',
+      'En las notas, la mayúscula del principio ya se pone también en el salto del título al primer párrafo. Al cambiar de formato el teclado no se enteraba de que empezaba frase nueva y esa línea salía en minúscula; dentro del mismo formato sí funcionaba.',
+    ],
+  },
+  {
     version: '0.62.0',
     fecha: '2026-09-14',
     nuevo: [

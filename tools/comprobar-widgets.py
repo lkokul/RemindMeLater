@@ -94,6 +94,51 @@ for clave in re.findall(r'forKey: "([^"]+)"', control):
     if f'"{clave}"' not in plugin_txt:
         fallos.append(f'AbrirDesdeControl escribe "{clave}" y el plugin no la consume')
 
+# NI UN TEXTO DEL WIDGET PUEDE PEDIR ".foreground" NI "Color.primary".
+#
+# Este fallo ha aparecido DOS VECES y las dos hubo que verlo en el iPhone,
+# porque compila perfectamente y solo se nota mirando la pantalla.
+#
+# `ShapeStyle.foreground` NO es "el color que puso mi ancestro": es el
+# estilo POR DEFECTO del sistema. Aplicarlo a un hijo RESETEA el tinte que
+# fondoDeWidgetApp puso en la raiz con el color del tema, y con el movil en
+# modo oscuro ese color por defecto es BLANCO -- o sea invisible sobre el
+# fondo blanco de un tema claro. Los numeros de los dias del widget del
+# calendario desaparecian asi. `Color.primary` es exactamente lo mismo.
+#
+# Lo que si hereda de verdad es NO PONER nada, o `.secondary`/`.tertiary`
+# (que son jerarquicos y se derivan del ancestro). Y cuando un texto tiene
+# que ELEGIR entre dos colores, el "normal" se pide resuelto con
+# EstiloDeWidget.colorDeTexto(oscuro:), que es donde vive la excepcion.
+#
+# Un blanco o un negro FIJOS caen aqui por el mismo motivo: no saben de que
+# color es el fondo del tema, asi que la mitad de las veces son el mismo
+# color que tienen debajo.
+for ruta in ('ios/App/DescansoWidget/WidgetsDeLaApp.swift',
+             'ios/App/DescansoWidget/WidgetsNuevos.swift',
+             'ios/App/DescansoWidget/QueTocaHoyWidget.swift'):
+    txt = io.open(ruta, encoding='utf-8').read()
+    for n, linea in enumerate(txt.split('\n'), 1):
+        codigo = linea.split('//')[0]
+        if 'foregroundStyle' not in codigo and 'foregroundColor' not in codigo:
+            continue
+        # Ojo con el patron de ".foreground": NO vale buscarlo dentro de
+        # ".foregroundStyle(...)" con [^)]*, porque el primer parentesis que
+        # cierra puede ser el de otra cosa -- en
+        # ".foregroundStyle(a ? AnyShapeStyle(x) : AnyShapeStyle(.foreground))"
+        # se para en el de AnyShapeStyle(x) y no lo encuentra. Se busca el
+        # token suelto, que es lo que de verdad hay que prohibir.
+        malos = [m for m in ('Color.primary', 'Color.white', 'Color.black')
+                 if m in codigo]
+        if re.search(r'\.foreground\s*\)', codigo):
+            malos.append('.foreground')
+        for malo in malos:
+            fallos.append(
+                f'{ruta}:{n}: {malo} no hereda el color del tema, es el del SISTEMA '
+                '(texto invisible con tema claro y movil en oscuro). Quita el '
+                'modificador para heredar de verdad, usa .secondary/.tertiary, o pide '
+                f'el color con EstiloDeWidget.colorDeTexto(oscuro:). Linea: {codigo.strip()[:70]}')
+
 # --- 2) constantes compartidas ---------------------------------------
 def leer(ruta):
     return io.open(ruta, encoding='utf-8').read()
@@ -483,33 +528,13 @@ if sueltos:
     fallos.append(f'{len(sueltos)} font-size en rem fuera de la escala: usa uno de '
                   f'los ocho tokens (--t-micro ... --t-titulo-grande). Ej: {sueltos[0]}')
 
-# --- 9) nada de colores del SISTEMA dentro de los widgets ------------
+# --- 9) colores del SISTEMA dentro de los widgets --------------------
 #
-# fondoDeWidgetApp pone el color del tema con .foregroundStyle en la RAIZ,
-# y todo lo de dentro lo hereda. Un Color.primary/.white/.black escrito a
-# mano PISA esa herencia con el color del SISTEMA, que no tiene nada que
-# ver con el tema de la app.
-#
-# Paso de verdad: con el tema de la app en claro (fondo blanco) y el movil
-# en modo oscuro, Color.primary es BLANCO, asi que los numeros de los dias
-# del widget del calendario se volvieron invisibles. Solo se veia el
-# circulo del dia de hoy. Lo mismo le pasaba al widget de Tareas.
-#
-# Lo que SI vale: .foreground (hereda), .secondary y .tertiary (son
-# jerarquicos, se derivan del color de la raiz), Color.red para un aviso, y
-# los colores que vienen del propio resumen (Color(hexDeLaApp:)).
-for archivo, texto in (('WidgetsNuevos.swift', widgets),
-                       ('QueTocaHoyWidget.swift', gym)):
-    for linea in texto.split('\n'):
-        limpia = linea.split('//')[0]
-        if 'foregroundStyle' not in limpia and 'foregroundColor' not in limpia:
-            continue
-        for malo in ('Color.primary', 'Color.white', 'Color.black'):
-            if malo in limpia:
-                fallos.append(f'{archivo}: {malo} en un foregroundStyle pisa el color '
-                              f'del tema que pone la raiz (con tema claro y movil en '
-                              f'oscuro el texto se vuelve invisible). Usa .foreground, '
-                              f'.secondary, o un color del resumen. Linea: {limpia.strip()[:70]}')
+# Esa comprobacion vive ARRIBA, junto a las demas de los widgets (busca
+# "NI UN TEXTO DEL WIDGET"). Aqui habia otra que decia lo mismo pero
+# recomendaba usar `.foreground` para heredar -- y eso es justo lo que
+# NO hereda: es el estilo por defecto del sistema. Ese consejo hizo que
+# el fallo volviera despues de darlo por arreglado.
 
 # --- resultado -------------------------------------------------------
 if fallos:

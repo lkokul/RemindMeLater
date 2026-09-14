@@ -92,6 +92,28 @@ Viajes. Detalle completo de features en `README.md`, que está al día.
   en una sesión de Claude Code local (terminal en el propio ordenador de
   Koku), prueba a pushear el tag tú mismo primero — solo hace falta el
   workaround manual si de verdad da 403 en ESTA sesión en concreto.
+- **APUNTAR CADA CAMBIO EN `cambios/<area>.md`** (regla nueva,
+  14/9/2026, pedida por Koku: *"cada modificación o actualización
+  implementada, que se ponga en un archivo las modificaciones, y cosas a
+  probar para así tú tenerlo más fácil"*). **Antes de commitear una
+  ronda**, el área que hayas tocado tiene su entrada arriba del todo, con
+  las tres cosas: **qué cambió** (en castellano, no en nombres de
+  función), **qué probar** (casillas, y SOLO lo que no se puede
+  comprobar desde aquí: el iPhone de verdad, los avisos, los widgets,
+  una migración sobre sus datos) y **decisiones** (lo que eligió él y no
+  se deshace sin volver a preguntarle).
+  - Un archivo **por ÁREA y con el área en el nombre**, no por rama: si
+    todas las ramas usaran el mismo nombre de archivo, **cada merge
+    daría conflicto sin falta**. Por eso `calendario-notas-movil-UI`
+    tiene dos (`calendario.md` y `notas.md`) aunque sea una sola rama.
+  - Lo transversal (Tienda, copia de seguridad, widgets, temas,
+    tipografía, gestos, seguridad) va en `cambios/app.md`.
+  - **Al fusionar**, ese `## Sin fusionar — X` pasa a `## vX.Y.Z — X` y
+    se queda como historial. No se borra nada.
+  - El detalle está en `cambios/_COMO-SE-USA.md`. **Esto NO sustituye a
+    CLAUDE.md**: aquí vive el porqué de la arquitectura y las trampas
+    que ya mordieron; allí, qué entró en cada ronda y qué hay que mirar
+    en el teléfono.
 - **AVISAR cuando un cambio se salga del guion** (regla nueva, 11/9/2026,
   pedida por Koku con estas palabras: *"si hay algún cambio que creas que
   se sale de lo que es Apple-ish o que necesita modificar el tema de
@@ -4000,11 +4022,18 @@ literalmente que esa primera línea nazca dentro de un `<h1>`.
 - Una nota NUEVA arranca con `<h1><br></h1>` sembrado en
   `noteEntrySnapshot`. Sigue contando como VACÍA, así que una nota nueva
   en blanco se sigue sin guardar (eso ya estaba y no se podía romper).
-- **Intro al final del primer `<h1>` baja a un párrafo normal**
-  (`handleNoteTitleEnterExit()`): escribes el título, das a Intro y
-  sigues escribiendo en texto normal, sin tocar la barra. Si el cursor
-  está a MEDIO título, o dentro de una lista o de un bloque de código,
-  no se mete.
+- **Intro al final del primer `<h1>` baja a un párrafo normal**:
+  escribes el título, das a Intro y sigues escribiendo en texto normal,
+  sin tocar la barra. Si el cursor está a MEDIO título, o dentro de una
+  lista o de un bloque de código, no se mete.
+
+  **OJO, esto se reescribió el 14/9/2026 y el porqué importa** (ver el
+  bloque "La mayúscula del teclado y los saltos de formato" más abajo):
+  el salto lo da AHORA EL NAVEGADOR. La primera versión hacía
+  `preventDefault()` y creaba el `<div>` a mano, y eso rompía la
+  mayúscula automática del teclado del móvil. Ahora solo se deja una
+  marca (`marcarSalidaDelTitulo`) y el `input` siguiente cambia la
+  etiqueta con `formatBlock` si hiciera falta.
 - Va enganchado a `keydown` **y a `beforeinput`** (`insertParagraph`):
   el teclado de iOS no siempre manda un `keydown` con `key === 'Enter'`
   (con el texto predictivo llega como `'Unidentified'`). Es la misma red
@@ -4399,6 +4428,114 @@ tabla a tabla en ese orden y una sesión apunta a su item.
 Las dos comprobaciones nuevas (`v62-copia`) se probaron deshaciendo cada
 arreglo a propósito: 3 en rojo con la regla vieja de exportar, 1 con el
 `assetClear()` de vuelta.
+## Las letras del widget en blanco sobre blanco: `.foreground` NO hereda
+
+Koku, con una captura del widget del calendario (14/9/2026): *"Las letras
+siguen siendo blancas, puedes revisar para que el widget se vea el
+contenido?"*. El mes en azul y el círculo del día de hoy se veían; los
+números de los días, no. **Era la SEGUNDA vez**, y la primera se dio por
+arreglada con el arreglo equivocado — por eso este bloque.
+
+**La causa, que es contraintuitiva**: `ShapeStyle.foreground` NO significa
+"el color que puso mi ancestro". Es el estilo **por defecto del sistema**,
+así que `.foregroundStyle(.foreground)` en un hijo **RESETEA** el tinte que
+`fondoDeWidgetApp` puso en la raíz con el color del tema. Con el móvil en
+modo oscuro ese color por defecto es BLANCO, y el fondo del widget era el
+blanco de un tema claro.
+
+Lo que despista, y es la pista que estaba delante todo el rato: las
+cabeceras `L M X J V S D` SÍ se veían. Usan `.secondary`, que es un estilo
+**jerárquico** y ese sí se deriva de verdad del ancestro. O sea que el
+color de la raíz estaba bien puesto; lo único roto era quien creía estar
+heredándolo.
+
+**La primera vez se arregló mal.** El síntoma se achacó a `Color.primary`
+(que también estaba, y también es del sistema), se cambió por
+`.foreground` y se dio por bueno — y de paso se escribió una comprobación
+en `tools/comprobar-widgets.py` que **recomendaba `.foreground`** como la
+forma de heredar. Ese consejo es lo que hizo que volviera.
+
+**Cómo se arregla de verdad**: cuando un texto tiene que ELEGIR entre dos
+colores, los DOS lados del ternario son un `Color` de verdad. El "normal"
+se pide resuelto con **`EstiloDeWidget.colorDeTexto(oscuro:)`**
+(`ResumenDeLaApp.swift`), que devuelve el `--surface-text` del tema — o
+`Color.primary` si no hay tema (estilo "sistema"), que ahí sí es lo
+correcto porque el fondo es el material del sistema.
+
+Para que ese método pueda elegir entre la paleta clara y la oscura del
+estilo "mixto", la elección se sacó de dentro de `FondoDeWidget` a
+`EstiloDeWidget.elegidos(oscuro:)`, y el modifier la llama también: el
+fondo y las letras no pueden salir de paletas distintas.
+
+Las vistas que lo necesitan declaran `@Environment(\.colorScheme)`. Son
+dos: `VistaCalendario` (los números de los días) y `VistaTareas` (el
+título de una tarea no vencida).
+
+**Lo que SÍ hereda, para no volver a equivocarse:**
+
+| qué escribes | qué pasa |
+|---|---|
+| nada (sin `.foregroundStyle`) | hereda el color del tema ✅ |
+| `.secondary` / `.tertiary` | se derivan del color del tema ✅ |
+| `.foreground` | **resetea** al color del sistema ❌ |
+| `Color.primary` / `.white` / `.black` | color del sistema o fijo ❌ |
+
+**El guion lo vigila** (`tools/comprobar-widgets.py`, busca "NI UN TEXTO
+DEL WIDGET"): en los tres archivos de widgets, ninguna línea con
+`foregroundStyle`/`foregroundColor` puede llevar `.foreground)`,
+`Color.primary`, `Color.white` ni `Color.black`. Probado rompiéndolo con
+las tres formas. Ojo con el patrón: buscar `.foreground` DENTRO de
+`\.foregroundStyle\([^)]*` no vale — el primer paréntesis que cierra
+puede ser el de otra cosa (`AnyShapeStyle(x)`) y se escapa justo el caso
+real. Se busca el token suelto.
+
+**Esto es SWIFT**: no se ve hasta la siguiente build de TestFlight.
+Recargar la app o requitar el widget no cambia nada.
+
+## La mayúscula del teclado y los saltos de formato (14/9/2026)
+
+Koku: *"En las notas. Se aplica el mayúscula al inicio a partir del
+primer salto en el mismo formato, si es un salto de formato a otro no se
+aplica"*. O sea: bajando del título al primer párrafo, la línea nueva
+salía en minúscula; de párrafo a párrafo sí ponía la mayúscula.
+
+**La causa, y es la regla general que hay que llevarse de aquí**:
+`autocapitalize` NO lo decide el HTML, lo decide el **teclado del
+sistema**. Mira en qué punto de la frase cree que está el cursor, y esa
+cuenta solo la rehace cuando **el propio navegador** mueve el cursor por
+una edición suya. Un `preventDefault()` + DOM a mano le deja el estado
+que tenía al final del título — "a media frase" — y eso es minúscula.
+
+Así que la regla: **cuando el usuario está escribiendo, el salto de línea
+lo tiene que dar el navegador**. Si hay que cambiar el formato, se cambia
+DESPUÉS, y con `execCommand` (que también es cosa del navegador y
+mantiene la selección), no reconstruyendo nodos.
+
+Las piezas son `cursorAlFinalDelTitulo()` (solo mira),
+`marcarSalidaDelTitulo()` (deja una marca en el `keydown`/`beforeinput`,
+**sin `preventDefault`**) y `terminarSalidaDelTitulo()` (en el `input`,
+que llega ya con el párrafo metido).
+
+**Lo que salió al medirlo, y ahorra trabajo futuro: Chromium ya hacía lo
+que queríamos.** Intro al final de CUALQUIER `<h1>` arranca un `<div>`,
+no otro `<h1>` — comprobado con un `contenteditable` pelado, sin nada de
+esta app (`nativo.mjs`). O sea que el código de antes se peleaba con el
+navegador para acabar justo donde el navegador ya iba, y de paso rompía
+la mayúscula. **El `formatBlock` que queda es una RED para WebKit**, por
+si Safari sí continúa el título; en Chrome no llega a ejecutarse nunca.
+
+**Aquí no se puede probar la mayúscula** (la pone el teclado del sistema
+y en el navegador de pruebas no existe: `autocapitalize` es un no-op en
+Chromium headless, y no hay WebKit en el contenedor). Lo que sí está
+probado (`titulo.mjs`, 15 comprobaciones) es que el salto lo da el
+navegador y que la línea sigue bajando a párrafo, que era el riesgo real
+de la reescritura. Confirmarlo de verdad es cosa del iPhone.
+
+**Sin tocar, y a propósito**: los otros saltos de formato que hace el
+JavaScript (salir de una cita con `handleNoteQuoteEnterExit`, salir de
+una lista) siguen con `preventDefault`. Si el del título funciona en el
+iPhone, les hace falta el mismo tratamiento — pero cada uno es un camino
+distinto que hay que probar, y Koku solo nombró este.
 
 ## Estado actual
 
@@ -4439,6 +4576,12 @@ conversación vive ahí; ver el bloque "Dos ramas" más arriba. **`movil-ui`
 está al mismo nivel**, sin los avisos de diagnóstico.
 
 
+**v0.62.1** (14/9/2026) son dos cosas que vio Koku usando la app: las
+letras en blanco de los widgets del calendario y de Tareas, y la
+mayúscula que no se ponía al bajar del título al primer párrafo de una
+nota. Ver sus dos bloques más arriba. Lo del widget es **Swift**, así que
+**necesita una build nueva para verse**; no se lanzó ninguna (regla de
+Actions).
 
 **v0.57.0** (13/9/2026) es la ronda de los cuatro puntos que pidió Koku:
 el título de una nota con formato de título y la mayúscula al empezar,

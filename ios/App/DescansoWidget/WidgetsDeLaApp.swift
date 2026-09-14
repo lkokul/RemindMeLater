@@ -213,11 +213,20 @@ struct TareasWidget: Widget {
 
 struct VistaTareas: View {
     @Environment(\.widgetFamily) private var familia
+    // Para saber qué paleta del tema toca con el estilo "mixto", igual que
+    // en el widget del calendario.
+    @Environment(\.colorScheme) private var esquema
     let entry: EntradaDeLaApp
 
     private var seccion: SeccionTareas? { entry.resumen?.tareas }
     private var acento: Color { Color(hexDeLaApp: entry.resumen?.acento ?? "") }
     private var lista: [FilaDeTarea] { seccion?.lista ?? [] }
+
+    // El color del texto del tema, resuelto a mano: ver el comentario de
+    // EstiloDeWidget.colorDeTexto en ResumenDeLaApp.swift.
+    private var colorDelTexto: Color {
+        entry.resumen.estiloDeWidget.colorDeTexto(oscuro: esquema == .dark)
+    }
 
     private var enUnaLinea: String {
         guard let s = seccion else { return "Abre la app" }
@@ -285,14 +294,14 @@ struct VistaTareas: View {
                             Text(t.titulo)
                                 .font(.caption)
                                 .lineLimit(1)
-                                // Color.primary NO: es el color del SISTEMA y pisa
-                                // el .foregroundStyle que fondoDeWidgetApp pone en la
-                                // raiz con el color del tema. Con el tema claro y el
-                                // movil en oscuro, el texto se volvia invisible (le
-                                // paso a los numeros del widget del calendario).
-                                // Sin el, hereda el color del tema, que es el
-                                // contraste emparejado del fondo.
-                                .foregroundStyle(t.vencida ? AnyShapeStyle(Color.red) : AnyShapeStyle(.foreground))
+                                // EL MISMO ARREGLO QUE LOS NÚMEROS DEL CALENDARIO,
+                                // y por el mismo motivo: `.foreground` NO hereda el
+                                // color que fondoDeWidgetApp puso en la raíz, es el
+                                // estilo por defecto del SISTEMA, así que resetea el
+                                // tinte y con el móvil en oscuro pinta blanco sobre
+                                // el fondo blanco de un tema claro. Los dos lados del
+                                // ternario son ahora un Color de verdad.
+                                .foregroundStyle(t.vencida ? Color.red : colorDelTexto)
                             Spacer(minLength: 0)
                         }
                     }

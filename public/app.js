@@ -7656,7 +7656,7 @@ function handleNoteQuoteEnterExit() {
 // Solo actua con el cursor AL FINAL del titulo. Partiendolo por la mitad
 // lo natural es que las dos mitades sigan siendo titulo, asi que ahi se
 // deja al navegador hacer lo suyo.
-function handleNoteTitleEnterExit() {
+function cursorAlFinalDelTitulo() {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
   if (isSelectionInsideNoteListItem() || isCursorInCodeBlock()) return false;
@@ -7671,31 +7671,71 @@ function handleNoteTitleEnterExit() {
   const loQueQuedaDetras = document.createRange();
   loQueQuedaDetras.selectNodeContents(linea);
   loQueQuedaDetras.setStart(rango.endContainer, rango.endOffset);
-  if (loQueQuedaDetras.toString() !== '') return false;
+  return loQueQuedaDetras.toString() === '';
+}
 
-  const parrafo = document.createElement('div');
-  parrafo.appendChild(document.createElement('br'));
-  linea.parentNode.insertBefore(parrafo, linea.nextSibling);
-  const nuevo = document.createRange();
-  nuevo.setStart(parrafo, 0);
-  nuevo.collapse(true);
-  sel.removeAllRanges();
-  sel.addRange(nuevo);
-  NOTE_EDITOR_BODY.dispatchEvent(new Event('input', { bubbles: true }));
+// EL SALTO LO HACE EL NAVEGADOR, NOSOTROS SOLO CAMBIAMOS EL FORMATO.
+//
+// Antes esto creaba el <div> a mano y movia el cursor con
+// sel.addRange(), y Koku encontro el precio (14/9/2026): *"se aplica la
+// mayuscula al inicio a partir del primer salto en el mismo formato, si
+// es un salto de formato a otro no se aplica"*. O sea: bajando del
+// titulo al parrafo, el teclado del movil NO ponia la mayuscula; de
+// parrafo a parrafo si.
+//
+// La causa es que autocapitalize lo decide el TECLADO del sistema, no el
+// HTML: mira en que punto de la frase cree que esta el cursor, y esa
+// cuenta solo la rehace cuando el propio navegador mueve el cursor por
+// una edicion suya. Un preventDefault + DOM a mano le deja el estado que
+// tenia al final del titulo, o sea "a media frase" -> minuscula.
+//
+// Por eso ahora NO se hace preventDefault: el navegador inserta su
+// parrafo (y de paso avisa al teclado), y solo DESPUES se mira si hace
+// falta cambiarle la etiqueta, con execCommand, que tambien es cosa del
+// navegador y mantiene la seleccion. Es el mismo formatBlock('<div>')
+// que ya usan ensureNoteBlockWrapped() y el menu "Aa".
+//
+// Y al medirlo salio algo que conviene saber: **Chromium ya lo hace
+// solo**. Intro al final de CUALQUIER <h1> arranca un <div>, no otro
+// <h1> (comprobado con un contenteditable pelado, sin nada de esta app).
+// O sea que el codigo de antes se peleaba con el navegador para acabar
+// donde el navegador ya iba. Aqui no se puede probar WebKit (no hay), asi
+// que el cambio de etiqueta se queda como RED por si Safari continua el
+// titulo; en Chrome no llega a ejecutarse nunca.
+let saliendoDelTitulo = false;
+
+function marcarSalidaDelTitulo() {
+  if (cursorAlFinalDelTitulo()) saliendoDelTitulo = true;
+}
+
+function terminarSalidaDelTitulo() {
+  if (!saliendoDelTitulo) return;
+  saliendoDelTitulo = false;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const linea = getNoteBlockAncestor(sel.getRangeAt(0).startContainer);
+  // El navegador continua con la MISMA etiqueta, asi que la linea nueva
+  // nace en <h1>. Si ya la hizo <div> por su cuenta, no hay nada que
+  // hacer. Y nunca se toca el primer bloque: ese ES el titulo.
+  if (!linea || linea.tagName !== 'H1') return;
+  if (linea === NOTE_EDITOR_BODY.firstElementChild) return;
+  document.execCommand('formatBlock', false, '<div>');
   refreshNoteEditorState();
-  return true;
 }
 
 // El teclado de iOS no siempre manda un keydown con key === 'Enter' (con
 // el texto predictivo por medio llega como 'Unidentified'), pero
 // 'beforeinput' SI llega siempre -- misma trampa que ya mordio con las
-// formulas, ver el listener de mas arriba. Cuando el keydown ya lo ha
-// atendido hace preventDefault y este evento ni se dispara, asi que no
-// se duplica el trabajo.
+// formulas, ver el listener de mas arriba. Marcar dos veces no hace
+// daño: la marca es un booleano y la consume el 'input' siguiente.
 NOTE_EDITOR_BODY.addEventListener('beforeinput', (e) => {
   if (e.inputType !== 'insertParagraph') return;
-  if (handleNoteTitleEnterExit()) e.preventDefault();
+  marcarSalidaDelTitulo();
 });
+
+// 'input' llega DESPUES de que el navegador haya metido el parrafo, que
+// es justo cuando hay algo a lo que cambiarle el formato.
+NOTE_EDITOR_BODY.addEventListener('input', terminarSalidaDelTitulo);
 
 NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
   // INTRO FIJA LA FORMULA -- pero SOLO si hay una vista previa delante.
@@ -7725,10 +7765,11 @@ NOTE_EDITOR_BODY.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-    if (handleNoteTitleEnterExit()) {
-      e.preventDefault();
-      return;
-    }
+    // Salir del titulo NO hace preventDefault (ver marcarSalidaDelTitulo):
+    // el salto lo tiene que dar el navegador para que el teclado del movil
+    // sepa que empieza frase nueva y ponga la mayuscula. Solo se deja la
+    // marca, y el 'input' de despues le cambia el formato al parrafo.
+    marcarSalidaDelTitulo();
     if (handleNoteQuoteEnterExit()) {
       e.preventDefault();
       return;
@@ -7864,7 +7905,7 @@ function noteEntrySnapshot(note) {
   // ahora va con el normal y tengo que cambiarlo cada vez".
   //
   // Al pulsar Intro se baja a parrafo normal, que es lo que se espera
-  // despues de escribir un titulo -- ver handleNoteTitleEnterExit().
+  // despues de escribir un titulo -- ver marcarSalidaDelTitulo().
   //
   // Un <h1> con solo un <br> dentro no tiene ni texto ni imagenes, asi
   // que sigue contando como "nota vacia": abrir el editor y salirse sin
@@ -25448,7 +25489,7 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.62.0';
+const APP_VERSION = '0.62.1';
 const APP_VERSION_DATE = '2026-09-14';
 
 function renderAppVersionLine() {
