@@ -5,6 +5,44 @@ Cómo se escribe esto: `cambios/_COMO-SE-USA.md`.
 
 ---
 
+## v0.62.4 — Fuera el ☰ de la cabecera
+
+**Qué cambió**
+- Se quita el botón ☰ de Configuración de la cabecera de Retos. Se llega
+  a Configuración por la barra de abajo, igual que desde el resto de la
+  app.
+
+**Qué probar**
+- [ ] En el iPhone, que salir de Retos a Configuración por la barra de
+      abajo se siga sintiendo natural sin ese botón.
+
+**Decisiones**
+- **Es la misma decisión que ya se tomó en Recetas** (v0.62.3) y la misma
+  que llevan las otras seis pantallas completas desde hace tiempo. Retos
+  era la última donde el botón se veía de verdad.
+
+**Por qué no se había visto antes**
+- Las otras seis (Notas, Herramientas, Gimnasio, Finanzas, Viajes y
+  Entretenimiento) **sí llevan el botón en el HTML**, pero oculto por una
+  regla de `styles.css` ("sobran en movil"). Retos y Recetas nacieron en
+  ramas que no conocían esa regla, así que eran las dos únicas donde
+  aparecía. Leyendo el HTML parecía justo lo contrario: que solo a esas
+  dos les faltaba algo.
+- La comprobación nueva abre **las ocho pantallas** y mide si el botón
+  **ocupa sitio**, no si existe en el HTML. Mirando el HTML esto no se
+  pillaba.
+
+**Trampa (la misma que en Recetas, y ya mordió)**
+- Quitar el `<button>` sin quitar su `addEventListener` de `settings.js`
+  deja un `getElementById` a `null`, que **lanza al cargar la página** y
+  se lleva media app por delante en silencio. Y el assert de "settings.js
+  corrió entero" **no lo pillaba**: miraba funciones que están *hoisted*,
+  o sea que existen aunque el archivo aborte. Ahora mira la ÚLTIMA línea
+  del archivo (el "volver" de la Tienda). Probado dejando el listener
+  huérfano: la comprobación se pone roja.
+
+---
+
 ## v0.61.0 — La App entra en el repositorio
 
 **Qué cambió**

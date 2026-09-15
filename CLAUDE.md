@@ -4591,6 +4591,34 @@ de la reescritura. Confirmarlo de verdad es cosa del iPhone.
 
 ## Estado actual
 
+**v0.62.4** (15/9/2026): fuera el ☰ de Configuración de la cabecera de
+**Retos**, que era la última pantalla donde se veía.
+
+**Y aquí está lo que hay que saber, porque leyendo el HTML se entiende al
+revés**: las otras seis pantallas completas (Notas, Herramientas,
+Gimnasio, Finanzas, Viajes y Entretenimiento) **SÍ llevan su ☰ en el
+HTML**, pero oculto por una regla de `styles.css` (busca "sobran en
+movil"). Retos y Recetas nacieron en ramas que no conocían esa regla, así
+que eran las dos únicas donde el botón aparecía de verdad. Mirando el
+`index.html` parece justo lo contrario: que a esas dos les falta algo.
+
+**La comprobación tiene que MEDIR, no buscar en el HTML**: abre las ocho
+pantallas y mira si el botón ocupa sitio (`getClientRects()`). Un
+`querySelector` diría que hay siete y que todo está bien.
+
+**Y el assert de "settings.js corrió entero" era mentira.** Miraba si
+existían `openSettingsModal` y `renderReleaseNotes` — pero las
+declaraciones de función están *hoisted*, así que existen aunque el
+archivo reviente a media altura. Ahora mira la ÚLTIMA línea del archivo
+(el listener del "volver" de la Tienda), que es lo único que prueba que
+llegó al final. Probado dejando un listener huérfano a propósito: antes
+pasaba en verde, ahora se pone rojo.
+
+**Queda pendiente y no es urgente**: esas seis pantallas conservan markup
+y listeners muertos (el botón oculto y su `addEventListener`). Funciona,
+pero es peso muerto; limpiarlo es otra ronda y Koku no lo ha pedido.
+
+
 **v0.62.3** (15/9/2026) es una ronda de **fusión**, no de features. Se
 revisaron las ocho ramas de móvil y solo `recetas-movil-ui` traía algo:
 los tres retoques de Recetas (márgenes laterales, el volver como botón y
