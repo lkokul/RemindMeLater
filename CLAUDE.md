@@ -4591,6 +4591,25 @@ de la reescritura. Confirmarlo de verdad es cosa del iPhone.
 
 ## Estado actual
 
+**v0.62.3** (15/9/2026) es una ronda de **fusión**, no de features. Se
+revisaron las ocho ramas de móvil y solo `recetas-movil-ui` traía algo:
+los tres retoques de Recetas (márgenes laterales, el volver como botón y
+fuera el ☰ de la cabecera). Las otras siete estaban al día.
+
+**Ojo con el ☰**: solo se ha quitado en **Recetas**. Gimnasio, Finanzas,
+Viajes, Entretenimiento y Retos lo conservan — cada una vive en su rama y
+quitarlo en todas es ir rama por rama, decisión de Koku. Hay una sesión
+suya parada esperando justo esa respuesta.
+
+**La trampa de esa ronda, que vale para cualquier botón que se quite**:
+borrar el `<button>` deja el `getElementById(...).addEventListener` de
+`settings.js` apuntando a `null`, y eso **lanza al cargar la página**.
+Como `settings.js` va después de `app.js`, se lleva media app por delante
+sin decir nada. Al quitar un botón hay que quitar su listener, y la
+comprobación tiene que mirar que **los dos archivos hayan corrido
+enteros**, no solo que la pantalla se vea.
+
+
 **v0.62.0** (14/9/2026) es otra ronda de **merges**, con dos arreglos de
 fondo de propina. Traen algo dos ramas: **Entretenimiento** (la vitrina
 de portadas, las sesiones que se apuntan solas, la racha, el mapa de
