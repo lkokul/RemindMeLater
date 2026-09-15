@@ -3968,10 +3968,28 @@ vez de repetir el número: las rayas de las horas las pinta un
 `repeating-linear-gradient` con esa misma medida, así que si los dos se
 separan los bloques dejan de caer sobre su raya.
 
-**La franja se estira sola.** De fábrica 8:00-22:00, pero si hay un
-bloque a las 5:30 la franja empieza a las 5:00. Recortarlo sería
-esconder un bloque sin decir nada. Siempre arranca en hora en punto:
-empezando a y media, las rayas caerían a contratiempo de las etiquetas.
+**EL DÍA ENTERO, de 00:00 a 24:00** (cambiado el 14/9/2026: *"quiero
+que haga todo el día"*). Antes eran las 8:00-22:00 y la franja se
+estiraba sola si un bloque se salía; eso dejaba un turno de noche fuera
+hasta que lo creabas, y hacía que la rejilla cambiara de alto según lo
+que tuvieras dentro.
+
+El precio es que la rejilla mide ahora el doble (24 h × 56 px) y casi
+todo lo de arriba está vacío. Por eso **la pantalla se abre desplazada
+hasta el primer bloque**, con media hora de aire por encima
+(`horarioIrAlPrimerBloque()`, `HORARIO_AIRE_ARRIBA_MIN`): abriéndola a
+las 00:00 lo primero que verías es la madrugada, o sea nada.
+
+**El `scrollTop` se pone SIEMPRE, también sin bloques** (a 0). El
+contenedor recuerda dónde lo dejaste, así que con un `return` a secas la
+pantalla vacía se abría a la altura de los bloques que acababas de
+borrar. Lo pilló la prueba; leyendo el código no se ve.
+
+Y `.horario-grid` lleva `margin-block: 0.5rem` para que las 00:00 y las
+24:00 no queden pegadas al borde. Va como MARGEN y no como padding a
+propósito: un padding entraría dentro de las columnas y descuadraría
+media hora todos los bloques, que se colocan respecto al borde de su
+columna.
 
 **Trampas que ya mordieron, las dos encontradas MIRANDO UNA CAPTURA y no
 con un assert** (que es exactamente la lección que ya estaba escrita en
@@ -4511,10 +4529,34 @@ lo tiene que dar el navegador**. Si hay que cambiar el formato, se cambia
 DESPUÉS, y con `execCommand` (que también es cosa del navegador y
 mantiene la selección), no reconstruyendo nodos.
 
-Las piezas son `cursorAlFinalDelTitulo()` (solo mira),
-`marcarSalidaDelTitulo()` (deja una marca en el `keydown`/`beforeinput`,
-**sin `preventDefault`**) y `terminarSalidaDelTitulo()` (en el `input`,
-que llega ya con el párrafo metido).
+**El mecanismo es UNO y está generalizado** (ampliado el 14/9/2026 a
+todas las salidas de formato, no solo la del título):
+
+1. Antes del salto (`keydown`/`beforeinput`) se MIRA si toca salir de un
+   formato y, si toca, se deja apuntada una función de arreglo en
+   `salidaDeFormatoPendiente`. **No se hace `preventDefault`.**
+2. El navegador da SU salto de línea (y de paso avisa al teclado).
+3. El `input` de después llama a esa función, que arregla el formato del
+   bloque nuevo.
+
+Añadir una salida nueva es añadir una rama a `marcarSalidaDeFormato()`.
+Hoy hay dos: `arreglarSalidaDelTitulo()` (h1 → párrafo, con
+`formatBlock`) y `arreglarSalidaDeLaCita()` (línea de cita vacía →
+párrafo).
+
+**Cómo sale de la cita ahora**, que no es obvio: el navegador CLONA los
+atributos de la línea al saltar (medido: `<div data-quote="1">` vacío +
+Intro da otro `<div data-quote="1">`), que es justo por lo que existía el
+manejador viejo. Así que se le quitan `data-quote`/`data-indent` a la
+línea NUEVA y se borra la vieja, que estaba vacía. El resultado en
+pantalla es idéntico al de antes; lo que cambia es quién dio el salto.
+
+La línea vieja se apunta **antes** del salto: después hay dos líneas
+citadas vacías iguales y no habría forma de distinguirlas.
+
+Y `arreglarSalidaDeLaCita()` dispara a su vez un `input` — no hay bucle
+porque `terminarSalidaDeFormato()` vacía la marca ANTES de llamar al
+arreglo.
 
 **Lo que salió al medirlo, y ahorra trabajo futuro: Chromium ya hacía lo
 que queríamos.** Intro al final de CUALQUIER `<h1>` arranca un `<div>`,
@@ -4531,11 +4573,21 @@ probado (`titulo.mjs`, 15 comprobaciones) es que el salto lo da el
 navegador y que la línea sigue bajando a párrafo, que era el riesgo real
 de la reescritura. Confirmarlo de verdad es cosa del iPhone.
 
-**Sin tocar, y a propósito**: los otros saltos de formato que hace el
-JavaScript (salir de una cita con `handleNoteQuoteEnterExit`, salir de
-una lista) siguen con `preventDefault`. Si el del título funciona en el
-iPhone, les hace falta el mismo tratamiento — pero cada uno es un camino
-distinto que hay que probar, y Koku solo nombró este.
+**Qué queda fuera, y por qué no es un olvido:**
+
+- **Salir de una LISTA ya lo hace el navegador solo.** Todos los
+  manejadores propios se apartan dentro de una lista
+  (`isSelectionInsideNoteListItem()`), así que ahí nunca hubo
+  `preventDefault` que quitar.
+- **El bloque de código no es un salto de formato**: Intro se queda
+  DENTRO, metiendo un `\n` en el propio texto. No cambia de bloque.
+- **`handleNoteHighlightAwareEnter()` SÍ sigue haciendo el salto a
+  mano**, pero solo cuando hay un resaltado que continuar (sin
+  rotulador se aparta y el Intro es nativo). Es el mismo patrón y
+  probablemente el mismo síntoma, pero es un salto DENTRO del mismo
+  formato y rehacerlo es cirugía fina (parte la línea conservando los
+  spans de color). Está apuntado en las notas de revisar de la v0.62.2
+  a la espera de que Koku diga si ahí tampoco sale la mayúscula.
 
 ## Estado actual
 
@@ -4575,6 +4627,13 @@ con `calendario-notas-movil-UI` ya fusionada). Todo lo de esta
 conversación vive ahí; ver el bloque "Dos ramas" más arriba. **`movil-ui`
 está al mismo nivel**, sin los avisos de diagnóstico.
 
+
+**v0.62.2** (14/9/2026): el **horario pasa a enseñar el día entero**
+(abriéndose donde tienes bloques), las frecuencias de repetición se
+llaman por su adjetivo (Diaria/Semanal/Mensual/Anual) y **salir de una
+cita** recibe el mismo tratamiento que el título para la mayúscula del
+teclado. Verificado con 76 comprobaciones de Playwright en cuatro
+guiones. Sigue sin lanzarse ninguna build.
 
 **v0.62.1** (14/9/2026) son dos cosas que vio Koku usando la app: las
 letras en blanco de los widgets del calendario y de Tareas, y la

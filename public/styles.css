@@ -6021,6 +6021,13 @@ body.gym-rest-push #settings-modal .settings-card {
   display: grid;
   grid-template-columns: var(--horario-columnas);
   position: relative;
+  /* Un poco de aire arriba y abajo (peticion de Koku): con el dia entero,
+     las 00:00 y las 24:00 quedaban pegadas al borde y la rejilla parecia
+     cortada en vez de terminada. Va como MARGEN y no como padding para
+     que no se meta dentro de las columnas: los bloques se colocan por
+     minutos respecto al borde de su columna, y un padding ahi los
+     descuadraria todos media hora. */
+  margin-block: 0.5rem;
 }
 
 .horario-hours { position: relative; }
