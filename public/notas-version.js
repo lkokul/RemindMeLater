@@ -34,6 +34,14 @@
 // exista se lee como general, no rompe nada.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.62.4',
+    fecha: '2026-09-15',
+    nuevo: [],
+    parches: [
+      { app: 'retos', texto: 'Fuera el botón ☰ de Configuración de la cabecera, como en el resto de la app: la barra de abajo ya tiene su propia sección de Configuración. Retos era la última pantalla donde seguía saliendo.' },
+    ],
+  },
+  {
     version: '0.62.3',
     fecha: '2026-09-15',
     nuevo: [],
