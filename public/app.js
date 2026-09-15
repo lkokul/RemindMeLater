@@ -10781,7 +10781,7 @@ function renderProyectosHome() {
     const menuBtn = document.createElement('button');
     menuBtn.type = 'button';
     menuBtn.className = 'proyectos-home-card-menu-btn';
-    menuBtn.title = 'Opciones';
+    menuBtn.title = 'Opciones: exportar a PDF, guardar como archivo, plantilla, eliminar…';
     menuBtn.setAttribute('aria-label', 'Opciones del proyecto');
     menuBtn.innerHTML = proyectosIconSvg('dots');
     menuBtn.addEventListener('click', (e) => {
@@ -10789,6 +10789,13 @@ function renderProyectosHome() {
       openProyectosHomeMenu(root, menuBtn);
     });
     card.appendChild(menuBtn);
+    // El clic DERECHO en cualquier parte de la tarjeta abre el mismo
+    // menu, como en el explorador de archivos: una puerta mas para no
+    // depender de encontrar el boton.
+    card.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openProyectosHomeMenu(root, menuBtn);
+    });
 
     grid.appendChild(card);
   }
@@ -13192,7 +13199,14 @@ function ensureProyectosTableMenuBtn() {
 // una tabla sigue a la vista al hacer scroll.
 function proyectosPageAreaRect() {
   const area = document.querySelector('#proyectos-view .proyectos-page-area');
-  return area ? area.getBoundingClientRect() : { top: 0, left: 0, bottom: window.innerHeight, right: window.innerWidth };
+  if (!area) return { top: 0, left: 0, bottom: window.innerHeight, right: window.innerWidth };
+  const r = area.getBoundingClientRect();
+  // La cinta va pegada arriba del area, asi que lo que de verdad se ve
+  // empieza DEBAJO de ella: sin descontarla, el boton ▦ y las guias
+  // A/1 de una tabla se dibujarian por detras de la barra.
+  const cinta = document.getElementById('proyectos-ribbon');
+  const alto = cinta && cinta.getClientRects().length ? cinta.getBoundingClientRect().height : 0;
+  return { top: r.top + alto, left: r.left, bottom: r.bottom, right: r.right };
 }
 
 // Recoloca el boton ▦ PEGADO a la esquina superior izquierda de su
@@ -14231,12 +14245,55 @@ const PROYECTOS_ESTILOS = [
   { id: 'code', label: 'Código', match: (el) => !!el.closest('pre') },
 ];
 
+// El ultimo sitio del documento donde estuvo el cursor. Hace falta
+// porque la barra puede pulsarse SIN cursor dentro (abres la pagina,
+// bajas y pulsas un boton), y entonces hay que saber a donde volver.
+let proyectosUltimoRango = null;
+document.addEventListener('selectionchange', () => {
+  const body = PROYECTOS_BODY();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const rango = sel.getRangeAt(0);
+  if (body.contains(rango.commonAncestorContainer)) proyectosUltimoRango = rango.cloneRange();
+});
+
+// Deja el cursor dentro del documento para que un boton de la barra
+// tenga sobre que actuar, SIN dar un salto:
+//   1. si ya esta dentro, no se toca nada;
+//   2. si no, se vuelve al ultimo sitio conocido;
+//   3. y si no hay ninguno, al final del documento.
+//
+// OJO CON ESTO, que ya rompio una vez: `body.focus()` a secas sobre un
+// contenteditable planta el cursor AL PRINCIPIO y ademas desplaza la
+// vista hasta ahi. Estando abajo del todo, pulsar "N" te subia al
+// principio y lo siguiente que escribias o pegabas caia arriba — que es
+// justo lo que Koku vio ("la pagina es una especie de bucle"). De ahi
+// el `preventScroll` y el rango guardado.
+function proyectosRecuperarCursor() {
+  const body = PROYECTOS_BODY();
+  const sel = window.getSelection();
+  const dentro = sel && sel.rangeCount > 0 && body.contains(sel.getRangeAt(0).commonAncestorContainer);
+  if (dentro && document.activeElement === body) return;
+
+  body.focus({ preventScroll: true });
+  if (dentro) return; // el navegador conserva la seleccion de antes
+  if (proyectosUltimoRango && body.contains(proyectosUltimoRango.commonAncestorContainer)) {
+    sel.removeAllRanges();
+    sel.addRange(proyectosUltimoRango);
+    return;
+  }
+  let ultimo = body.lastElementChild;
+  if (!ultimo) { ultimo = emptyProyectosBlock(); body.appendChild(ultimo); }
+  placeCaretIn(ultimo, { atEnd: true });
+}
+
 // La linea sobre la que actua la barra. Si el cursor no esta en el
-// documento (acabas de abrir la pagina y pulsas un boton), se trabaja
-// sobre el ultimo bloque, creando uno vacio si hace falta -- asi un
-// boton nunca "no hace nada".
+// documento se recupera primero (ver arriba), y como ultimo recurso se
+// trabaja sobre un bloque vacio al final -- asi un boton nunca "no hace
+// nada" ni te manda al principio de la pagina.
 function proyectosLineaDestino() {
   const body = PROYECTOS_BODY();
+  proyectosRecuperarCursor();
   const linea = getProyectosCurrentLine();
   if (linea && body.contains(linea)) return linea;
   let ultimo = body.lastElementChild;
@@ -14258,8 +14315,7 @@ function proyectosTablaDelCursor() {
 // obsoleto segun MDN pero sigue siendo lo que usa el editor de notas y
 // evita reescribir a mano la logica de partir/unir nodos.
 function proyectosComandoDeFormato(cmd) {
-  const body = PROYECTOS_BODY();
-  if (document.activeElement !== body) body.focus();
+  proyectosRecuperarCursor();
   document.execCommand(cmd);
   queueProyectosSaveBody();
   refrescarCintaProyectos();
@@ -14417,7 +14473,14 @@ function construirCintaProyectos() {
         // global de "clic fuera" — que se dispara con ESTE mismo clic,
         // al burbujear — lo cerraria al instante. Aplazandola, primero
         // se cierra lo que hubiera abierto y luego se abre lo nuevo.
-        btn.addEventListener('click', () => setTimeout(() => b.accion(btn), 0));
+        btn.addEventListener('click', () => setTimeout(() => {
+          b.accion(btn);
+          // Y la barra al dia: aplicar una alineacion (o un estilo) no
+          // mueve la seleccion, asi que el `selectionchange` que
+          // normalmente la refresca no llega y los botones se quedaban
+          // encendidos como estaban antes.
+          refrescarCintaProyectos();
+        }, 0));
         panel.appendChild(btn);
       }
     });

@@ -831,9 +831,45 @@ ahora se llama `device`.
       - Ojo con el orden en el archivo: la cinta se construye AL
         CARGAR y usa `PROYECTOS_ICONS`, asi que su bloque tiene que
         ir DESPUES de ese const (TDZ).
+    - **Ronda 13: la cinta a todo lo ancho y el "bucle" de la pagina**
+      (driver `drive-round13.js`, 14 comprobaciones):
+      - **La cinta pasa a ser la PRIMERA FILA del area de la pagina**
+        (hija directa de `.proyectos-page-area`, antes de
+        `#proyectos-page`), a todo lo ancho y por encima de la
+        portada, la miga y el titulo — Koku: *"que fuera toda la fila
+        de arriba, no una especie de boton flotante"*. Sigue siendo
+        `sticky` en vez de sacarla del scroller: asi no hay que
+        reestructurar el area ni tocar el codigo que mide su scroll.
+        `proyectosPageAreaRect()` descuenta ahora el alto de la cinta,
+        o el boton ▦ y las guias A/1 se dibujarian por detras.
+      - **El menu ⋯ de las tarjetas se ve** (era medio transparente
+        sobre la franja de color y Koku no lo encontraba: *"no veo el
+        boton para exportar o eliminar ni nada"*). Ahora es un boton
+        solido con borde y sombra, y ademas el **clic DERECHO** en
+        cualquier parte de la tarjeta abre el mismo menu.
+      - La cinta se refresca tambien DESPUES de cada accion: aplicar
+        una alineacion no mueve la seleccion, asi que el
+        `selectionchange` no llegaba y los botones se quedaban
+        encendidos como estaban antes.
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
+- **`elemento.focus()` a secas sobre un contenteditable manda el cursor
+  al PRINCIPIO y desplaza la vista hasta ahi.** Paso de verdad con la
+  barra de herramientas de Proyectos: los botones de formato hacian
+  `if (document.activeElement !== body) body.focus()` para tener donde
+  aplicar el comando, asi que estando abajo del todo de un documento
+  largo, pulsar "N" te subia al principio — y lo siguiente que
+  escribias o pegabas caia arriba. Koku lo describio como *"la pagina
+  es una especie de bucle... si copio y pego algo me lo pega al
+  principio"*, y no era un bucle: era el cursor reseteado a la
+  posicion 0 sin que se viera. La cura son las dos mitades:
+  `focus({ preventScroll: true })` **y** restaurar un rango guardado
+  (`proyectosUltimoRango`, que se apunta en cada `selectionchange`
+  mientras el cursor esta dentro); si no hay ninguno, el cursor va al
+  FINAL, que es donde se seguiria escribiendo. Ver
+  `proyectosRecuperarCursor()`. Si algun dia hace falta enfocar un
+  editor desde un boton, usa esa funcion, nunca `focus()` pelado.
 - **`focusout` en un elemento DENTRO de un contenteditable no salta
   nunca**: dentro de un contenteditable el foco lo tiene el CUERPO
   entero (document.activeElement es el div editable), no el `<pre>` o

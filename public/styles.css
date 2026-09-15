@@ -3392,18 +3392,21 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   word-break: break-word;
 }
 /* --- Barra de herramientas estilo Word (la "cinta") ---
-   Va PEGAJOSA arriba del area que se desplaza, para que siga a mano al
-   bajar por un documento largo. Tiene fondo propio (no transparente):
-   al quedarse fija tapa el texto que pasa por debajo. */
+   Es la PRIMERA fila del área de la página, a todo lo ancho y por
+   encima de la portada, la miga y el título (pedido por Koku: "que sea
+   toda la fila de arriba, no una especie de botón flotante"). Va
+   pegajosa para que siga a mano al bajar por un documento largo, y con
+   fondo propio (no transparente): al quedarse fija tapa el texto que
+   pasa por debajo. */
 .proyectos-ribbon {
-  position: sticky; top: 0; z-index: 4;
+  position: sticky; top: 0; z-index: 6;
   background: var(--surface); color: var(--surface-text);
-  border: 1px solid var(--border); border-radius: var(--radius);
-  margin-bottom: 1.2rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .proyectos-ribbon-tabs {
   display: flex; align-items: center; gap: 0.15rem;
-  padding: 0.25rem 0.35rem 0;
+  padding: 0.25rem 0.9rem 0;
   border-bottom: 1px solid var(--border);
 }
 .proyectos-ribbon-tab {
@@ -3424,7 +3427,7 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .proyectos-ribbon-tab-contextual { color: var(--accent); }
 .proyectos-ribbon-panel {
   display: flex; align-items: center; flex-wrap: wrap; gap: 0.15rem;
-  padding: 0.35rem 0.4rem;
+  padding: 0.4rem 0.9rem;
 }
 .proyectos-ribbon-panel.hidden { display: none; }
 .proyectos-ribbon-sep {
@@ -4560,17 +4563,20 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 /* El boton "⋯" de la tarjeta: en la esquina, discreto hasta pasar por
    encima. Sobre la franja de color va con su propio fondo para leerse
    sobre cualquier color. */
+/* Tiene que VERSE: la primera versión era medio transparente sobre la
+   franja de color y Koku no la encontraba ("no veo el botón para
+   exportar o eliminar ni nada"). Ahora es un botón sólido con borde. */
 .proyectos-home-card-menu-btn {
-  position: absolute; top: 0.4rem; left: 0.45rem;
-  border: none; border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface) 75%, transparent);
+  position: absolute; top: 0.45rem; left: 0.5rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface);
   color: var(--surface-text);
-  width: 1.7rem; height: 1.4rem;
+  width: 2rem; height: 1.7rem;
   display: inline-flex; align-items: center; justify-content: center;
   cursor: pointer;
-  opacity: 0.65;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.35);
 }
-.proyectos-home-card-menu-btn:hover { opacity: 1; background: var(--surface); }
+.proyectos-home-card-menu-btn:hover { background: var(--surface-2); border-color: var(--accent); }
 /* El menu flotante del "⋯": una accion por fila. */
 .proyectos-home-menu {
   position: fixed; z-index: 40;
