@@ -25627,8 +25627,8 @@ function cerrarModalAlTocarFuera(modalId, cerrar, hayCambios) {
 // subida (cuando se lanza la build), en formato ISO para poder darle el
 // formato del SISTEMA al pintarla -- Koku: "respetando el formato del
 // sistema por si tienen mm/dd/aa y no dd/mm/aa".
-const APP_VERSION = '0.62.2';
-const APP_VERSION_DATE = '2026-09-14';
+const APP_VERSION = '0.62.3';
+const APP_VERSION_DATE = '2026-09-15';
 
 function renderAppVersionLine() {
   const el = document.getElementById('app-version-line');
