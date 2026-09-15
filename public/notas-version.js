@@ -34,6 +34,16 @@
 // exista se lee como general, no rompe nada.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.62.3',
+    fecha: '2026-09-15',
+    nuevo: [],
+    parches: [
+      { app: 'recetas', texto: 'La pantalla de Recetas ya no llega al borde del cristal: tiene los mismos márgenes laterales que Gimnasio, Finanzas y Entretenimiento. Era la única sección sin ellos.' },
+      { app: 'recetas', texto: 'El "‹ Recetas" de volver es ahora un botón de verdad, con la misma forma que el "+ Carpeta" de al lado, en vez de un texto suelto con una flechita.' },
+      { app: 'recetas', texto: 'Fuera el botón ☰ de la cabecera: la barra de abajo ya tiene su propia sección de Configuración, así que era un segundo camino a lo mismo ocupando sitio.' },
+    ],
+  },
+  {
     version: '0.62.2',
     fecha: '2026-09-14',
     nuevo: [
