@@ -17,6 +17,11 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.62.3': [
+    'Ronda de fusión, no de features: lo único nuevo en las ocho ramas de móvil eran los tres retoques de Recetas. El resto ya estaba al día.',
+    'Los márgenes y el botón de volver los comprobé midiendo de verdad (19,2 px a los dos lados, y el botón sale idéntico al de al lado en fondo, borde, radio y tamaño de letra). Lo que hay que mirar en el iPhone es si con esos márgenes la vitrina de recetas se queda corta de ancho.',
+    'Las otras cinco secciones (Gimnasio, Finanzas, Viajes, Entretenimiento y Retos) CONSERVAN su ☰. Si lo quieres fuera en todas, dilo y va rama por rama.',
+  ],
   '0.62.2': [
     'Siguen SIN tocar los saltos de formato de dentro de una lista y los del rotulador (continuar un resaltado en la línea de abajo): esos aún hacen el salto a mano. Si ves que ahí tampoco sale la mayúscula, dímelo y les doy el mismo tratamiento.',
     'La mayúscula no la puedo probar desde aquí (la pone el teclado del sistema, y en el navegador de pruebas no existe). Lo que sí está probado es que salir de una cita se comporta igual que antes: 7 comprobaciones nuevas.',
