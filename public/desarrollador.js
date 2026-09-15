@@ -17,6 +17,10 @@ window.APP_MODO_DESARROLLADOR = true;
 //
 // La clave es el número de versión, igual que en APP_RELEASE_NOTES.
 window.APP_NOTAS_REVISAR = {
+  '0.62.4': [
+    'Las otras seis pantallas (Notas, Herramientas, Gimnasio, Finanzas, Viajes y Entretenimiento) SIGUEN llevando su ☰ en el HTML, solo que oculto por CSS desde hace tiempo. Funciona igual, pero es markup y listeners muertos: si quieres, en otra ronda se limpian de verdad.',
+    'Ahora hay una comprobación que abre LAS OCHO pantallas completas y mide si el ☰ ocupa sitio de verdad, en vez de mirar si existe en el HTML. Era justo la diferencia que hacía que esto no se viera.',
+  ],
   '0.62.3': [
     'Ronda de fusión, no de features: lo único nuevo en las ocho ramas de móvil eran los tres retoques de Recetas. El resto ya estaba al día.',
     'Los márgenes y el botón de volver los comprobé midiendo de verdad (19,2 px a los dos lados, y el botón sale idéntico al de al lado en fondo, borde, radio y tamaño de letra). Lo que hay que mirar en el iPhone es si con esos márgenes la vitrina de recetas se queda corta de ancho.',
