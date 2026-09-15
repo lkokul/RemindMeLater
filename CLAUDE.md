@@ -779,6 +779,58 @@ ahora se llama `device`.
         vio Koku). updateProyectosTableGuides() se llama ahora tambien
         en el mousemove del arrastre, el mouseup y el doble clic de
         auto-ajuste.
+    - **Ronda 12: barra estilo Word, alineacion multiple y plantillas
+      que pegan** (driver `drive-round12.js`, 25 comprobaciones):
+      - **La cinta** (`#proyectos-ribbon`, `construirCintaProyectos`):
+        cuatro pestañas — Inicio (estilo de parrafo + N/K/S/tachado +
+        alineacion + listas + sangria), Insertar (tabla, imagen,
+        divisor, cita, codigo, diagrama, toggle, los 6 callouts,
+        enlaces, base de datos, plantilla y los 3 bloques de PDF),
+        Tabla y Pagina (los botones de siempre, con sus ids
+        intactos). Se construye desde una lista declarativa
+        (`proyectosCintaDefinicion`), es **pegajosa** (sticky) y la
+        pestaña Tabla es CONTEXTUAL: aparece sola con el cursor
+        dentro de una tabla y desaparece al salir.
+        Tres cosas que la hacen funcionar y no se pueden quitar:
+        1. **`preventDefault` en el mousedown de cada boton** (y de
+           las pestañas): sin eso, pulsar un boton mata la seleccion
+           del documento y el comando no tiene sobre que actuar.
+        2. **La accion corre en un `setTimeout(…, 0)`**: varios
+           botones abren un popover (tabla, enlace, plantilla) y el
+           listener global de "clic fuera" —que se dispara con ESE
+           mismo clic al burbujear— lo cerraba al instante. Aplazando
+           un ciclo, primero se cierra lo que hubiera y luego se abre
+           lo nuevo. Paso de verdad: el boton de plantilla y el de
+           tabla "no hacian nada".
+        3. **Cada boton llama a la MISMA funcion que su atajo de
+           teclado**, nunca a una copia: `applyProyectosBlockType`
+           gano un segundo parametro opcional (`blockOverride`) para
+           que la barra actue sobre la linea del cursor sin pasar por
+           el menu "/".
+      - **Alinear VARIAS celdas o lineas a la vez** (lo pidio Koku:
+        "si selecciono varias casillas que se aplique a todas"):
+        `proyectosCeldasDeLaSeleccion()` devuelve el RECTANGULO entre
+        la celda donde empieza la seleccion y la del final (como Word
+        y Excel) y `proyectosLineasDeLaSeleccion()` hace lo mismo con
+        parrafos. Se tomaron los EXTREMOS y no "que celdas toca el
+        rango" a proposito: `intersectsNode` daba falsos positivos
+        cuando la seleccion acaba justo en el borde de la siguiente
+        celda y se alineaba una de mas. Lo usan el atajo (Ctrl+T…),
+        la cinta y el menu ▦, que ademas dice en su etiqueta sobre
+        cuantas celdas va a actuar.
+      - **Las operaciones de tabla se extrajeron a
+        `proyectosTablaOps(table, cursorCell)`**: las comparten el
+        menu ▦ y la pestaña Tabla, asi que no hay dos copias que
+        puedan separarse.
+      - **Insertar una plantilla PEGA su contenido** en la pagina
+        abierta (solo el cuerpo, sin el titulo) en vez de crear una
+        subpagina — pedido por Koku. Las dos clases de plantilla se
+        quedan, pero la diferencia ya solo se nota en la home: "Usar
+        plantilla" sigue clonando un proyecto entero con sus
+        subpaginas.
+      - Ojo con el orden en el archivo: la cinta se construye AL
+        CARGAR y usa `PROYECTOS_ICONS`, asi que su bloque tiene que
+        ir DESPUES de ese const (TDZ).
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 

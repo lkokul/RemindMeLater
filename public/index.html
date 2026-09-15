@@ -559,16 +559,35 @@
                  documento (debajo del titulo, como chips), no en un
                  popover flotante -- Koku pidio que estuviera integrado. -->
             <div id="proyectos-subnav" class="proyectos-subnav hidden"></div>
-            <div class="proyectos-page-toolbar">
+            <!-- BARRA DE HERRAMIENTAS estilo Word (pedida por Koku: "los
+                 atajos están muy bien, pero una herramienta visual puede
+                 ayudar mucho"). Cuatro pestañas; el contenido de Inicio,
+                 Insertar y Tabla lo monta app.js desde una lista
+                 declarativa (construirCintaProyectos), y la de Página son
+                 los botones de siempre, que conservan sus ids. La de
+                 Tabla es CONTEXTUAL: solo aparece con el cursor dentro de
+                 una tabla, como en Word. -->
+            <div class="proyectos-ribbon" id="proyectos-ribbon">
+              <div class="proyectos-ribbon-tabs" id="proyectos-ribbon-tabs">
+                <button type="button" data-ribbon-tab="inicio" class="proyectos-ribbon-tab active">Inicio</button>
+                <button type="button" data-ribbon-tab="insertar" class="proyectos-ribbon-tab">Insertar</button>
+                <button type="button" data-ribbon-tab="tabla" class="proyectos-ribbon-tab proyectos-ribbon-tab-contextual hidden">Tabla</button>
+                <button type="button" data-ribbon-tab="pagina" class="proyectos-ribbon-tab">Página</button>
+              </div>
+              <div class="proyectos-ribbon-panel" data-ribbon-panel="inicio"></div>
+              <div class="proyectos-ribbon-panel hidden" data-ribbon-panel="insertar"></div>
+              <div class="proyectos-ribbon-panel hidden" data-ribbon-panel="tabla"></div>
+              <div class="proyectos-ribbon-panel proyectos-page-toolbar hidden" data-ribbon-panel="pagina">
               <button type="button" id="btn-proyectos-favorite" class="icon-btn" aria-label="Favorito" title="Favorito">☆</button>
               <button type="button" id="btn-proyectos-cover" class="icon-btn" aria-label="Portada" title="Color de portada">▦</button>
               <!-- Dos formas de crear: al MISMO nivel que esta pagina o
                    DENTRO de ella. Con atajos: Ctrl+Alt+N / Ctrl+Alt+Mayus+N. -->
               <button type="button" id="btn-proyectos-sibling" class="secondary-btn" title="Nueva página al mismo nivel que esta (Ctrl+Alt+N)">+ Página</button>
               <button type="button" id="btn-proyectos-subpage" class="secondary-btn" title="Nueva subpágina dentro de esta (Ctrl+Alt+Mayús+N)">+ Subpágina</button>
-              <!-- Insertar una plantilla aqui: las de proyecto entran
-                   como subpagina, los fragmentos se pegan en la pagina. -->
-              <button type="button" id="btn-proyectos-insert-template" class="icon-btn" aria-label="Insertar plantilla" title="Insertar una plantilla aquí (proyecto → subpágina · fragmento → se pega en la página)">
+              <!-- Insertar una plantilla aqui: SIEMPRE pega su contenido
+                   en esta misma pagina (sin el titulo y sin crear
+                   subpaginas) -- pedido por Koku. -->
+              <button type="button" id="btn-proyectos-insert-template" class="icon-btn" aria-label="Insertar plantilla" title="Pegar el contenido de una plantilla en esta página">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <rect x="3" y="3" width="13" height="13" rx="2"/>
                   <path d="M8 21h11a2 2 0 0 0 2-2V8"/>
@@ -591,6 +610,7 @@
               <div class="spacer"></div>
               <button type="button" id="btn-proyectos-delete" class="danger-btn" title="Borrar esta página (sus subpáginas suben un nivel)">Borrar</button>
               <button type="button" id="btn-proyectos-delete-tree" class="danger-btn-solid" title="Borrar esta página Y todas sus subpáginas">Borrar con subpáginas</button>
+              </div>
             </div>
             <div id="proyectos-page-body" class="proyectos-page-body" contenteditable="true" data-placeholder="Escribe algo, o pulsa “/” para insertar un bloque…"></div>
           </div>

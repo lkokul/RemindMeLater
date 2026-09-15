@@ -12104,6 +12104,25 @@ const PROYECTOS_ICONS = {
   dots: PROYECTOS_SVG('<circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/>'),
   // vista en paralelo (dos columnas)
   columns: PROYECTOS_SVG('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/>'),
+  // --- Iconos de la barra de herramientas (estilo Word) ---
+  alignLeft: PROYECTOS_SVG('<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/>'),
+  alignCenter: PROYECTOS_SVG('<line x1="3" y1="6" x2="21" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="5" y1="18" x2="19" y2="18"/>'),
+  alignRight: PROYECTOS_SVG('<line x1="3" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/>'),
+  alignJustify: PROYECTOS_SVG('<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>'),
+  listBullet: PROYECTOS_SVG('<circle cx="4.5" cy="7" r="1.4" fill="currentColor" stroke="none"/><line x1="9" y1="7" x2="20" y2="7"/><circle cx="4.5" cy="12" r="1.4" fill="currentColor" stroke="none"/><line x1="9" y1="12" x2="20" y2="12"/><circle cx="4.5" cy="17" r="1.4" fill="currentColor" stroke="none"/><line x1="9" y1="17" x2="20" y2="17"/>'),
+  listNumbered: PROYECTOS_SVG('<text x="1.5" y="9.5" font-size="8" fill="currentColor" stroke="none">1</text><line x1="9" y1="7" x2="20" y2="7"/><text x="1.5" y="15" font-size="8" fill="currentColor" stroke="none">2</text><line x1="9" y1="12.5" x2="20" y2="12.5"/><text x="1.5" y="20.5" font-size="8" fill="currentColor" stroke="none">3</text><line x1="9" y1="18" x2="20" y2="18"/>'),
+  listTodo: PROYECTOS_SVG('<rect x="3" y="4.5" width="5.5" height="5.5" rx="1.2"/><line x1="11.5" y1="7.3" x2="21" y2="7.3"/><rect x="3" y="14" width="5.5" height="5.5" rx="1.2"/><polyline points="4.2 16.8 5.6 18.2 7.4 15.6"/><line x1="11.5" y1="16.8" x2="21" y2="16.8"/>'),
+  indent: PROYECTOS_SVG('<line x1="3" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><polyline points="3 10 6 12 3 14"/>'),
+  outdent: PROYECTOS_SVG('<line x1="3" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><polyline points="6 10 3 12 6 14"/>'),
+  table: PROYECTOS_SVG('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="9" y1="4" x2="9" y2="20"/><line x1="15" y1="4" x2="15" y2="20"/>'),
+  divider: PROYECTOS_SVG('<line x1="3" y1="12" x2="21" y2="12"/>'),
+  code: PROYECTOS_SVG('<polyline points="9 8 5 12 9 16"/><polyline points="15 8 19 12 15 16"/>'),
+  quote: PROYECTOS_SVG('<line x1="4" y1="5" x2="4" y2="19"/><line x1="9" y1="8" x2="20" y2="8"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="16" x2="16" y2="16"/>'),
+  toggleBlock: PROYECTOS_SVG('<polyline points="8 5 14 12 8 19"/><line x1="17" y1="12" x2="21" y2="12"/>'),
+  diagram: PROYECTOS_SVG('<rect x="3" y="3.5" width="8" height="5" rx="1.2"/><rect x="13" y="15.5" width="8" height="5" rx="1.2"/><path d="M7 8.5v5a2 2 0 0 0 2 2h4"/>'),
+  pagebreak: PROYECTOS_SVG('<line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 3"/><polyline points="9 7.5 12 4.5 15 7.5"/><polyline points="9 16.5 12 19.5 15 16.5"/>'),
+  toc: PROYECTOS_SVG('<line x1="4" y1="5" x2="20" y2="5"/><line x1="8" y1="10" x2="20" y2="10"/><line x1="8" y1="14.5" x2="20" y2="14.5"/><line x1="4" y1="19" x2="20" y2="19"/>'),
+  eraser: PROYECTOS_SVG('<path d="M15.5 4.6 5.2 14.9a1.8 1.8 0 0 0 0 2.6l2 2h4.2l9.4-9.4a1.8 1.8 0 0 0 0-2.6l-2.5-2.9a1.8 1.8 0 0 0-2.8 0z"/><line x1="8" y1="20" x2="20" y2="20"/>'),
 };
 // Un icono de la tabla de arriba como HTML listo para innerHTML.
 function proyectosIconSvg(name) {
@@ -12573,6 +12592,104 @@ function proyectosAlignTarget() {
   return line;
 }
 
+// La celda (td/th del contenido) que contiene un nodo cualquiera, o null.
+function proyectosCeldaDe(node) {
+  let el = node;
+  if (el && el.nodeType !== Node.ELEMENT_NODE) el = el.parentElement;
+  const cell = el && el.closest ? el.closest('td, th') : null;
+  if (!cell || !PROYECTOS_BODY().contains(cell)) return null;
+  if (cell.closest('[data-proyectos-db]')) return null; // tabla del widget: interfaz
+  return cell;
+}
+
+// TODAS las celdas que abarca la seleccion (peticion de Koku: "si
+// selecciono varias casillas que se aplique a todas"). Se toma el
+// RECTANGULO entre la celda donde empieza la seleccion y la celda donde
+// acaba, como Word y Excel: es lo que se espera al arrastrar en diagonal
+// y, sobre todo, es determinista — mirar que celdas "toca" el rango daba
+// falsos positivos cuando la seleccion acaba justo en el borde de la
+// siguiente celda (se alineaba una de mas sin tocarla).
+function proyectosCeldasDeLaSeleccion() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return [];
+  const desde = proyectosCeldaDe(sel.anchorNode) || getProyectosTableCell();
+  const hasta = proyectosCeldaDe(sel.focusNode) || desde;
+  if (!desde || !hasta) return [];
+  const table = desde.closest('table');
+  if (!table || hasta.closest('table') !== table) return [desde];
+  if (desde === hasta) return [desde];
+  const filas = [...table.querySelectorAll('tr')];
+  const pos = (cell) => ({
+    f: filas.indexOf(cell.parentElement),
+    c: [...cell.parentElement.children].indexOf(cell),
+  });
+  const a = pos(desde);
+  const b = pos(hasta);
+  if (a.f < 0 || b.f < 0) return [desde];
+  const celdas = [];
+  for (let f = Math.min(a.f, b.f); f <= Math.max(a.f, b.f); f++) {
+    for (let c = Math.min(a.c, b.c); c <= Math.max(a.c, b.c); c++) {
+      const cell = filas[f] && filas[f].children[c];
+      if (cell) celdas.push(cell);
+    }
+  }
+  return celdas.length ? celdas : [desde];
+}
+
+// Lo mismo pero fuera de las tablas: todas las LINEAS que abarca la
+// seleccion (seleccionar tres párrafos y centrar los centra los tres,
+// como en Word). Mismo criterio de los extremos: se cogen las lineas
+// entre la del principio y la del final en orden de documento.
+function proyectosLineasDeLaSeleccion() {
+  const body = PROYECTOS_BODY();
+  const sel = window.getSelection();
+  const actual = proyectosAlignTarget();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return actual ? [actual] : [];
+  const lineaDe = (node) => {
+    let el = node;
+    if (el && el.nodeType !== Node.ELEMENT_NODE) el = el.parentElement;
+    if (!el || !body.contains(el) || el === body) return null;
+    const linea = el.closest('li, summary');
+    if (linea && body.contains(linea)) return linea;
+    // El bloque de primer nivel (o el hijo directo de un details).
+    let cur = el;
+    while (cur && cur !== body) {
+      const padre = cur.parentElement;
+      if (padre === body || (padre && padre.tagName === 'DETAILS')) return cur;
+      cur = padre;
+    }
+    return null;
+  };
+  const desde = lineaDe(sel.anchorNode) || actual;
+  const hasta = lineaDe(sel.focusNode) || desde;
+  if (!desde || !hasta) return actual ? [actual] : [];
+  if (desde === hasta) return [desde];
+  // Todas las lineas alineables del cuerpo, en orden de documento, y se
+  // corta el trozo entre las dos puntas (la seleccion puede ir hacia
+  // arriba, de ahi el min/max).
+  const todas = [...body.querySelectorAll('div, p, h1, h2, h3, blockquote, li, summary')]
+    .filter((el) => !el.closest('pre') && !el.closest('[data-proyectos-db]') && !el.closest('td, th'));
+  const i = todas.indexOf(desde);
+  const j = todas.indexOf(hasta);
+  if (i < 0 || j < 0) return [desde];
+  return todas.slice(Math.min(i, j), Math.max(i, j) + 1)
+    // Un div que solo ENVUELVE a otros (una lista, un details) no se
+    // alinea: se alinean sus lineas, que ya van en la lista.
+    .filter((el) => !el.querySelector('li, summary, p, div, h1, h2, h3, blockquote'));
+}
+
+// Aplica una alineacion a TODO lo que abarque la seleccion: las celdas
+// si estamos en una tabla, y si no las lineas. Es lo que usan el atajo
+// de teclado, la barra de herramientas y el menu ▦ de la tabla.
+function aplicarAlineacionProyectos(align) {
+  const celdas = proyectosCeldasDeLaSeleccion();
+  const objetivos = celdas.length ? celdas : proyectosLineasDeLaSeleccion();
+  if (objetivos.length === 0) return false;
+  objetivos.forEach((el) => setProyectosAlign(el, align));
+  queueProyectosSaveBody();
+  return true;
+}
+
 // Herencia de la alineacion al crear el bloque siguiente con Intro
 // (estilo Word, pedido por Koku: la alineacion se mantiene al seguir
 // escribiendo hasta que se cambie).
@@ -12827,11 +12944,14 @@ function replaceProyectosBlock(block, newEl, { contentInto = null } = {}) {
   placeCaretIn(target, { atEnd: true });
 }
 
-function applyProyectosBlockType(typeId) {
-  let block = proyectosSlashBlock;
+// Convierte (o inserta) un bloque. `blockOverride` lo usa la barra de
+// herramientas para actuar sobre la linea del cursor: sin el, la funcion
+// trabaja con el bloque donde se escribio la "/" y le quita ese texto.
+function applyProyectosBlockType(typeId, blockOverride = null) {
+  let block = blockOverride || proyectosSlashBlock;
   closeProyectosSlashMenu();
   if (!block) return;
-  stripProyectosSlashText(block);
+  if (!blockOverride) stripProyectosSlashText(block);
 
   // Las opciones de alineacion NO convierten el bloque: ponen (o
   // quitan) su data-align y listo. Van antes del "forzar a base" a
@@ -13230,6 +13350,90 @@ PROYECTOS_BODY().addEventListener('input', () => updateProyectosTableGuides());
 // al final o pegada a la celda del cursor), la alineacion vertical del
 // texto en las celdas, el alternador de ancho de siempre y borrar.
 // "view" dice que nivel se esta pintando ('root' o el id del submenu).
+// Las operaciones de una tabla, en UN solo sitio: las comparten el menu
+// ▦ y la pestaña "Tabla" de la barra de herramientas. Mantienen el
+// <colgroup> a la par que las celdas (si la tabla ya tiene anchos
+// puestos a mano), igual que las tablas de las notas.
+function proyectosTablaOps(table, cursorCell = null) {
+  const emptyCell = () => {
+    const td = document.createElement('td');
+    td.appendChild(document.createElement('br'));
+    return td;
+  };
+  const rows = () => [...table.querySelectorAll('tr')];
+  const colCount = () => (rows()[0] ? rows()[0].children.length : 0);
+  const cursorRow = cursorCell ? cursorCell.parentElement : null;
+  const cursorColIndex = cursorCell && cursorRow ? [...cursorRow.children].indexOf(cursorCell) : -1;
+
+  // Sobre que celdas actuan las alineaciones: las SELECCIONADAS (una o
+  // varias), y si el cursor no esta en esta tabla, todas.
+  const cellTargets = () => {
+    const seleccionadas = proyectosCeldasDeLaSeleccion().filter((c) => c.closest('table') === table);
+    return seleccionadas.length ? seleccionadas : [...table.querySelectorAll('td, th')];
+  };
+
+  return {
+    rows, colCount, cursorRow, cursorColIndex, cellTargets,
+    addRowAt(refRow, where) {
+      if (!refRow) return;
+      const tr = document.createElement('tr');
+      for (let i = 0; i < colCount(); i++) tr.appendChild(emptyCell());
+      if (where === 'before') refRow.before(tr); else refRow.after(tr);
+    },
+    addColAt(index, side) {
+      if (index < 0) return;
+      rows().forEach((tr) => {
+        const ref = tr.children[index];
+        const cell = emptyCell();
+        if (!ref) tr.appendChild(cell);
+        else if (side === 'before') ref.before(cell);
+        else ref.after(cell);
+      });
+      const colgroup = table.querySelector('colgroup');
+      if (colgroup) {
+        const ref = colgroup.children[index];
+        const col = document.createElement('col');
+        col.style.width = '120px';
+        if (!ref) colgroup.appendChild(col);
+        else if (side === 'before') ref.before(col);
+        else ref.after(col);
+      }
+    },
+    removeRow(tr) {
+      if (!tr) return;
+      if (rows().length > 1) tr.remove();
+      else removeProyectosTable(table); // sin filas no hay tabla
+    },
+    removeCol(index) {
+      if (index < 0) return;
+      if (colCount() <= 1) { removeProyectosTable(table); return; }
+      rows().forEach((tr) => tr.children[index]?.remove());
+      table.querySelector('colgroup')?.children[index]?.remove();
+    },
+    // El valor por defecto (que se aplica QUITANDO el atributo) es
+    // izquierda en horizontal y ARRIBA en vertical -- como en
+    // Word/Notion; con el centrado vertical que traia el navegador,
+    // "pegado arriba" parecia no hacer nada (feedback real de Koku).
+    applyCellAlign(value) {
+      cellTargets().forEach((cell) => {
+        if (value) cell.setAttribute('data-align', value);
+        else cell.removeAttribute('data-align');
+      });
+    },
+    applyValign(value) {
+      cellTargets().forEach((cell) => {
+        if (value) cell.setAttribute('data-valign', value);
+        else cell.removeAttribute('data-valign');
+      });
+    },
+    toggleWidth() {
+      if (table.getAttribute('data-width') === 'full') table.removeAttribute('data-width');
+      else table.setAttribute('data-width', 'full');
+    },
+    remove() { removeProyectosTable(table); },
+  };
+}
+
 function openProyectosTableMenu(view = 'root') {
   const table = proyectosTableMenuTable;
   if (!table || !PROYECTOS_BODY().contains(table)) return;
@@ -13241,14 +13445,6 @@ function openProyectosTableMenu(view = 'root') {
   const popover = proyectosTableMenuPopover;
   popover.innerHTML = '';
 
-  const emptyCell = () => {
-    const td = document.createElement('td');
-    td.appendChild(document.createElement('br'));
-    return td;
-  };
-  const rows = () => [...table.querySelectorAll('tr')];
-  const colCount = () => (rows()[0] ? rows()[0].children.length : 0);
-
   // La celda del cursor, SI el cursor esta en ESTA tabla (para las
   // opciones relativas). Gracias al preventDefault del mousedown del
   // boton y de los items, la seleccion sigue viva al llegar aqui.
@@ -13256,8 +13452,10 @@ function openProyectosTableMenu(view = 'root') {
     const c = getProyectosTableCell();
     return c && c.closest('table') === table ? c : null;
   })();
-  const cursorRow = cursorCell ? cursorCell.parentElement : null;
-  const cursorColIndex = cursorCell ? [...cursorRow.children].indexOf(cursorCell) : -1;
+  const ops = proyectosTablaOps(table, cursorCell);
+  const { rows, colCount, cursorRow, cursorColIndex } = ops;
+  const { addRowAt, addColAt, removeRow, removeCol, applyValign, applyCellAlign } = ops;
+  const celdasElegidas = ops.cellTargets().length;
 
   function item(label, fn, { danger = false, disabled = false, keepOpen = false } = {}) {
     const btn = document.createElement('button');
@@ -13277,63 +13475,6 @@ function openProyectosTableMenu(view = 'root') {
   }
   const submenu = (label, viewId) => item(`${label}  ▸`, () => openProyectosTableMenu(viewId), { keepOpen: true });
   const back = () => item('‹ Volver', () => openProyectosTableMenu('root'), { keepOpen: true });
-
-  // Operaciones. Mantienen el <colgroup> a la par que las celdas (si la
-  // tabla ya tiene anchos puestos a mano), igual que las tablas de las
-  // notas.
-  const addRowAt = (refRow, where) => {
-    const tr = document.createElement('tr');
-    for (let i = 0; i < colCount(); i++) tr.appendChild(emptyCell());
-    if (where === 'before') refRow.before(tr); else refRow.after(tr);
-  };
-  const addColAt = (index, side) => {
-    rows().forEach((tr) => {
-      const ref = tr.children[index];
-      const cell = emptyCell();
-      if (!ref) tr.appendChild(cell);
-      else if (side === 'before') ref.before(cell);
-      else ref.after(cell);
-    });
-    const colgroup = table.querySelector('colgroup');
-    if (colgroup) {
-      const ref = colgroup.children[index];
-      const col = document.createElement('col');
-      col.style.width = '120px';
-      if (!ref) colgroup.appendChild(col);
-      else if (side === 'before') ref.before(col);
-      else ref.after(col);
-    }
-  };
-  const removeRow = (tr) => {
-    if (!tr) return;
-    if (rows().length > 1) tr.remove();
-    else removeProyectosTable(table); // sin filas no hay tabla
-  };
-  const removeCol = (index) => {
-    if (index < 0) return;
-    if (colCount() <= 1) { removeProyectosTable(table); return; }
-    rows().forEach((tr) => tr.children[index]?.remove());
-    table.querySelector('colgroup')?.children[index]?.remove();
-  };
-  // Alineaciones del texto en celdas: la del cursor, o toda la tabla si
-  // el cursor no esta en ninguna. El valor por defecto (que se aplica
-  // QUITANDO el atributo) es izquierda en horizontal y ARRIBA en
-  // vertical -- como en Word/Notion; con el centrado vertical que traia
-  // el navegador, "pegado arriba" parecia no hacer nada (feedback real
-  // de Koku: "no funciona del todo").
-  const cellTargets = () => (cursorCell ? [cursorCell] : [...table.querySelectorAll('td, th')]);
-  const applyValign = (value) => {
-    cellTargets().forEach((cell) => {
-      if (value) cell.setAttribute('data-valign', value);
-      else cell.removeAttribute('data-valign');
-    });
-  };
-  const applyCellAlign = (value) => {
-    cellTargets().forEach((cell) => {
-      if (value) cell.setAttribute('data-align', value);
-      else cell.removeAttribute('data-align');
-    });
-  };
 
   if (view === 'add-row') {
     back();
@@ -13379,14 +13520,15 @@ function openProyectosTableMenu(view = 'root') {
     submenu('Quitar fila', 'del-row');
     submenu('Quitar columna', 'del-col');
     // Las etiquetas dicen sobre que van a actuar, para que no pille por
-    // sorpresa: celda concreta si hay cursor, toda la tabla si no.
-    submenu(cursorCell ? 'Alinear texto (celda del cursor)' : 'Alinear texto (toda la tabla)', 'align');
-    submenu(cursorCell ? 'Alinear en vertical (celda del cursor)' : 'Alinear en vertical (toda la tabla)', 'valign');
-    item(table.getAttribute('data-width') === 'full' ? 'Ancho ajustado al contenido' : 'Ancho completo', () => {
-      if (table.getAttribute('data-width') === 'full') table.removeAttribute('data-width');
-      else table.setAttribute('data-width', 'full');
-    });
-    item('Borrar la tabla', () => removeProyectosTable(table), { danger: true });
+    // sorpresa: las celdas seleccionadas, la del cursor, o la tabla
+    // entera si el cursor no esta dentro.
+    const ambito = cursorCell
+      ? (celdasElegidas > 1 ? `${celdasElegidas} celdas seleccionadas` : 'celda del cursor')
+      : 'toda la tabla';
+    submenu(`Alinear texto (${ambito})`, 'align');
+    submenu(`Alinear en vertical (${ambito})`, 'valign');
+    item(table.getAttribute('data-width') === 'full' ? 'Ancho ajustado al contenido' : 'Ancho completo', () => ops.toggleWidth());
+    item('Borrar la tabla', () => ops.remove(), { danger: true });
   }
 
   popover.classList.remove('hidden');
@@ -13949,11 +14091,11 @@ function insertProyectosPageLink(page) {
   queueProyectosSaveBody();
 }
 
-// "Desde plantilla…" del menu "/": elegir una plantilla de la galeria y
-// clonarla ENTERA como subpagina de la pagina abierta (asi una pieza
-// que repites — la base de datos de viajes ya configurada, por ejemplo
-// — se inserta donde haga falta). El clonado lo hace el backend, con
-// bases de datos, filas e imagenes incluidas.
+// "Desde plantilla…" del menu "/" (y el boton de la barra): elegir una
+// plantilla de la galeria y PEGAR SU CONTENIDO en la pagina abierta —
+// solo el cuerpo, sin el titulo y sin crear subpaginas. El backend
+// clona por el camino las bases de datos y las imagenes que lleve
+// dentro, para que la copia sea independiente del original.
 let proyectosTemplatePopover = null;
 let proyectosTemplateBlock = null;
 
@@ -14033,33 +14175,13 @@ function openProyectosTemplatePopover(block, anchorEl = null) {
     }
   };
 
-  // Fragmentos primero: son lo "rapido" (una tabla con formato, un
-  // esquema...) y se pegan aqui mismo.
-  addGroup('Fragmentos — se pegan en esta página', fragments, (template, target) => {
-    insertProyectosFragment(template, target);
-  });
-  addGroup('Plantillas de proyecto — entran como subpágina', projects, async (template, target) => {
-    if (!proyectosCurrentPage) return;
-    // El bloque desde el que se pidio queda como bloque vacio normal.
-    if (target && PROYECTOS_BODY().contains(target) && target.textContent.trim() === '') {
-      target.replaceWith(emptyProyectosBlock());
-    }
-    queueProyectosSaveBody();
-    try {
-      await api(`/api/proyectos-pages/${template.id}/clone`, {
-        method: 'POST',
-        body: JSON.stringify({ parentId: proyectosCurrentPage.id, asTemplate: false }),
-      });
-      await loadProyectosPages();
-      proyectosExpandedIds.add(proyectosCurrentPage.id);
-      saveProyectosExpanded();
-      renderProyectosTree();
-      renderProyectosSubnav();
-    } catch (err) {
-      console.error('No se pudo insertar la plantilla:', err);
-      showAppAlert(`No se pudo insertar la plantilla: ${err.message}`);
-    }
-  });
+  // TODAS las plantillas se PEGAN en la pagina abierta: solo su
+  // contenido, sin el titulo y sin crear ninguna subpagina (pedido por
+  // Koku: "quiero que se añada lo de la plantilla en la misma página en
+  // la que estoy"). Si una plantilla de proyecto se quiere entera, con
+  // sus subpaginas, eso sigue estando en la home ("Usar plantilla").
+  addGroup('Fragmentos', fragments, (template, target) => insertProyectosFragment(template, target));
+  addGroup('Plantillas de proyecto (se pega su contenido)', projects, (template, target) => insertProyectosFragment(template, target));
 
   if (all.length === 0) {
     const hint = document.createElement('p');
@@ -14073,6 +14195,350 @@ function openProyectosTemplatePopover(block, anchorEl = null) {
   popover.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 260)}px`;
   popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 310))}px`;
 }
+
+// ---------------------------------------------------------------------
+// BARRA DE HERRAMIENTAS estilo Word (pedida por Koku: "los atajos de
+// teclado están muy bien, pero una herramienta visual puede ayudar
+// mucho... no hace falta que esté todo en el mismo menú").
+//
+// Cuatro pestañas — Inicio (formato), Insertar (bloques), Tabla y
+// Página — construidas desde la lista declarativa de aquí abajo. Lo
+// importante de entender:
+//
+//   1. NINGUN boton roba el cursor: todos hacen preventDefault en el
+//      mousedown, asi que la seleccion del documento sigue viva cuando
+//      corre el click. Es lo mismo que ya hacen los items del menu ▦, y
+//      es LA pieza que hace que una barra sobre un contenteditable
+//      funcione.
+//   2. Cada boton llama a la MISMA funcion que su atajo de teclado
+//      (applyProyectosBlockType, aplicarAlineacionProyectos,
+//      proyectosTablaOps...), nunca a una copia de la logica: la barra
+//      es otra puerta, no otro comportamiento.
+//   3. La pestaña "Tabla" es CONTEXTUAL, como en Word: solo aparece con
+//      el cursor dentro de una tabla.
+// ---------------------------------------------------------------------
+let proyectosCintaTab = 'inicio';
+let proyectosEstiloPopover = null;
+
+// Los estilos de bloque del desplegable "Estilo" (los mismos ids del
+// menu "/"), con el nombre que se enseña en el boton.
+const PROYECTOS_ESTILOS = [
+  { id: 'text', label: 'Texto normal', match: (el) => el.tagName === 'DIV' || el.tagName === 'P' },
+  { id: 'h1', label: 'Título 1', match: (el) => el.tagName === 'H1' },
+  { id: 'h2', label: 'Título 2', match: (el) => el.tagName === 'H2' },
+  { id: 'h3', label: 'Título 3', match: (el) => el.tagName === 'H3' },
+  { id: 'quote', label: 'Cita', match: (el) => el.tagName === 'BLOCKQUOTE' },
+  { id: 'code', label: 'Código', match: (el) => !!el.closest('pre') },
+];
+
+// La linea sobre la que actua la barra. Si el cursor no esta en el
+// documento (acabas de abrir la pagina y pulsas un boton), se trabaja
+// sobre el ultimo bloque, creando uno vacio si hace falta -- asi un
+// boton nunca "no hace nada".
+function proyectosLineaDestino() {
+  const body = PROYECTOS_BODY();
+  const linea = getProyectosCurrentLine();
+  if (linea && body.contains(linea)) return linea;
+  let ultimo = body.lastElementChild;
+  if (!ultimo || ultimo.tagName !== 'DIV' || ultimo.textContent.trim() !== '') {
+    ultimo = emptyProyectosBlock();
+    body.appendChild(ultimo);
+  }
+  placeCaretIn(ultimo);
+  return ultimo;
+}
+
+// La tabla donde esta el cursor (o null).
+function proyectosTablaDelCursor() {
+  const cell = getProyectosTableCell();
+  return cell ? cell.closest('table') : null;
+}
+
+// Un comando de formato en linea (negrita, cursiva...). execCommand esta
+// obsoleto segun MDN pero sigue siendo lo que usa el editor de notas y
+// evita reescribir a mano la logica de partir/unir nodos.
+function proyectosComandoDeFormato(cmd) {
+  const body = PROYECTOS_BODY();
+  if (document.activeElement !== body) body.focus();
+  document.execCommand(cmd);
+  queueProyectosSaveBody();
+  refrescarCintaProyectos();
+}
+
+// Sangrar / quitar sangria: en una lista mueve el nivel de la lista; en
+// una tarea toca su data-indent (lo mismo que hace el Tab).
+function proyectosSangrar(hacia) {
+  const linea = getProyectosCurrentLine();
+  if (linea && linea.tagName === 'LI') {
+    document.execCommand(hacia > 0 ? 'indent' : 'outdent');
+    queueProyectosSaveBody();
+    return;
+  }
+  const bloque = getProyectosCurrentBlock();
+  if (bloque && bloque.matches('[data-todo]')) {
+    const actual = Number(bloque.getAttribute('data-indent')) || 0;
+    const siguiente = actual + hacia;
+    if (siguiente <= 0) bloque.removeAttribute('data-indent');
+    else bloque.setAttribute('data-indent', String(Math.min(siguiente, 6)));
+    queueProyectosSaveBody();
+  }
+}
+
+// Definicion de las tres pestañas que se construyen solas. Cada grupo es
+// un bloque de botones separado por una rayita, como los grupos de Word.
+// `tipo` distingue los botones raros (el desplegable de estilo).
+function proyectosCintaDefinicion() {
+  const bloque = (id) => () => applyProyectosBlockType(id, proyectosLineaDestino());
+  const tabla = (fn) => () => {
+    const t = proyectosTablaDelCursor();
+    if (!t) return;
+    fn(proyectosTablaOps(t, getProyectosTableCell()));
+    queueProyectosSaveBody();
+    updateProyectosTableGuides();
+  };
+  return {
+    inicio: [
+      [{ tipo: 'estilo' }],
+      [
+        { id: 'negrita', texto: 'N', clase: 'es-negrita', title: 'Negrita (Ctrl+B)', cmd: 'bold', accion: () => proyectosComandoDeFormato('bold') },
+        { id: 'cursiva', texto: 'K', clase: 'es-cursiva', title: 'Cursiva (Ctrl+I)', cmd: 'italic', accion: () => proyectosComandoDeFormato('italic') },
+        { id: 'subrayado', texto: 'S', clase: 'es-subrayado', title: 'Subrayado (Ctrl+U)', cmd: 'underline', accion: () => proyectosComandoDeFormato('underline') },
+        { id: 'tachado', texto: 'ab', clase: 'es-tachado', title: 'Tachado', cmd: 'strikeThrough', accion: () => proyectosComandoDeFormato('strikeThrough') },
+        { id: 'limpiar', svg: 'eraser', title: 'Quitar el formato del texto seleccionado', accion: () => proyectosComandoDeFormato('removeFormat') },
+      ],
+      [
+        { id: 'align-left', svg: 'alignLeft', title: 'Alinear a la izquierda (Ctrl+Q)', align: 'left', accion: () => aplicarAlineacionProyectos('left') },
+        { id: 'align-center', svg: 'alignCenter', title: 'Centrar (Ctrl+T)', align: 'center', accion: () => aplicarAlineacionProyectos('center') },
+        { id: 'align-right', svg: 'alignRight', title: 'Alinear a la derecha (Ctrl+D)', align: 'right', accion: () => aplicarAlineacionProyectos('right') },
+        { id: 'align-justify', svg: 'alignJustify', title: 'Justificar (Ctrl+J)', align: 'justify', accion: () => aplicarAlineacionProyectos('justify') },
+      ],
+      [
+        { id: 'bullet', svg: 'listBullet', title: 'Lista de viñetas', accion: bloque('bullet') },
+        { id: 'numbered', svg: 'listNumbered', title: 'Lista numerada', accion: bloque('numbered') },
+        { id: 'todo', svg: 'listTodo', title: 'Lista de tareas', accion: bloque('todo') },
+        { id: 'outdent', svg: 'outdent', title: 'Quitar sangría (Mayús+Tab)', accion: () => proyectosSangrar(-1) },
+        { id: 'indent', svg: 'indent', title: 'Aumentar sangría (Tab)', accion: () => proyectosSangrar(1) },
+      ],
+    ],
+    insertar: [
+      [
+        { id: 'ins-table', svg: 'table', title: 'Tabla', accion: bloque('table') },
+        { id: 'ins-image', svg: 'image', title: 'Imagen', accion: bloque('image') },
+        { id: 'ins-divider', svg: 'divider', title: 'Divisor', accion: bloque('divider') },
+        { id: 'ins-quote', svg: 'quote', title: 'Cita', accion: bloque('quote') },
+        { id: 'ins-code', svg: 'code', title: 'Bloque de código', accion: bloque('code') },
+        { id: 'ins-diagram', svg: 'diagram', title: 'Diagrama (Mermaid)', accion: bloque('diagram') },
+        { id: 'ins-toggle', svg: 'toggleBlock', title: 'Desplegable', accion: bloque('toggle') },
+      ],
+      [
+        { id: 'ins-callout', svg: 'callout', title: 'Callout', accion: bloque('callout') },
+        { id: 'ins-note', svg: 'note', title: 'Nota (alert azul)', accion: bloque('callout-note') },
+        { id: 'ins-tip', svg: 'tip', title: 'Consejo (alert verde)', accion: bloque('callout-tip') },
+        { id: 'ins-important', svg: 'important', title: 'Importante (alert morado)', accion: bloque('callout-important') },
+        { id: 'ins-warning', svg: 'warning', title: 'Aviso (alert amarillo)', accion: bloque('callout-warning') },
+        { id: 'ins-caution', svg: 'caution', title: 'Peligro (alert rojo)', accion: bloque('callout-caution') },
+      ],
+      [
+        { id: 'ins-weblink', svg: 'link', title: 'Enlace web', accion: bloque('weblink') },
+        { id: 'ins-pagelink', svg: 'pagelink', title: 'Enlace a otra página', accion: bloque('pagelink') },
+        { id: 'ins-database', svg: 'database', title: 'Base de datos', accion: bloque('database') },
+        {
+          id: 'ins-template', svg: 'template', title: 'Pegar el contenido de una plantilla aquí',
+          accion: (btn) => openProyectosTemplatePopover(null, btn),
+        },
+      ],
+      [
+        { id: 'ins-toc', svg: 'toc', title: 'Índice de contenido (solo al exportar a PDF)', accion: bloque('pdf-toc') },
+        { id: 'ins-figures', svg: 'figures', title: 'Índice de figuras (solo al exportar a PDF)', accion: bloque('pdf-figures') },
+        { id: 'ins-break', svg: 'pagebreak', title: 'Salto de página (solo al exportar a PDF)', accion: bloque('pdf-break') },
+      ],
+    ],
+    tabla: [
+      [
+        { id: 'tb-row-before', texto: '↑ Fila', title: 'Añadir una fila encima', accion: tabla((ops) => ops.addRowAt(ops.cursorRow, 'before')) },
+        { id: 'tb-row-after', texto: '↓ Fila', title: 'Añadir una fila debajo', accion: tabla((ops) => ops.addRowAt(ops.cursorRow, 'after')) },
+        { id: 'tb-col-before', texto: '← Col.', title: 'Añadir una columna a la izquierda', accion: tabla((ops) => ops.addColAt(ops.cursorColIndex, 'before')) },
+        { id: 'tb-col-after', texto: '→ Col.', title: 'Añadir una columna a la derecha', accion: tabla((ops) => ops.addColAt(ops.cursorColIndex, 'after')) },
+      ],
+      [
+        { id: 'tb-del-row', texto: '− Fila', title: 'Quitar la fila del cursor', accion: tabla((ops) => ops.removeRow(ops.cursorRow)) },
+        { id: 'tb-del-col', texto: '− Col.', title: 'Quitar la columna del cursor', accion: tabla((ops) => ops.removeCol(ops.cursorColIndex)) },
+      ],
+      [
+        { id: 'tb-align-left', svg: 'alignLeft', title: 'Alinear a la izquierda las celdas seleccionadas', accion: tabla((ops) => ops.applyCellAlign(null)) },
+        { id: 'tb-align-center', svg: 'alignCenter', title: 'Centrar las celdas seleccionadas', accion: tabla((ops) => ops.applyCellAlign('center')) },
+        { id: 'tb-align-right', svg: 'alignRight', title: 'Alinear a la derecha las celdas seleccionadas', accion: tabla((ops) => ops.applyCellAlign('right')) },
+      ],
+      [
+        { id: 'tb-valign-top', texto: '⤒', title: 'Pegar el texto arriba (celdas seleccionadas)', accion: tabla((ops) => ops.applyValign(null)) },
+        { id: 'tb-valign-middle', texto: '⇕', title: 'Centrar en vertical (celdas seleccionadas)', accion: tabla((ops) => ops.applyValign('middle')) },
+        { id: 'tb-valign-bottom', texto: '⤓', title: 'Pegar el texto abajo (celdas seleccionadas)', accion: tabla((ops) => ops.applyValign('bottom')) },
+      ],
+      [
+        { id: 'tb-width', texto: '↔', title: 'Ancho completo / ajustado al contenido', accion: tabla((ops) => ops.toggleWidth()) },
+        { id: 'tb-remove', texto: 'Borrar tabla', clase: 'es-peligro', title: 'Borrar la tabla entera', accion: tabla((ops) => ops.remove()) },
+      ],
+    ],
+  };
+}
+
+function construirCintaProyectos() {
+  const cinta = document.getElementById('proyectos-ribbon');
+  if (!cinta) return;
+  const def = proyectosCintaDefinicion();
+
+  for (const [nombre, grupos] of Object.entries(def)) {
+    const panel = cinta.querySelector(`[data-ribbon-panel="${nombre}"]`);
+    if (!panel) continue;
+    panel.innerHTML = '';
+    grupos.forEach((grupo, i) => {
+      if (i > 0) {
+        const sep = document.createElement('span');
+        sep.className = 'proyectos-ribbon-sep';
+        panel.appendChild(sep);
+      }
+      for (const b of grupo) {
+        if (b.tipo === 'estilo') { panel.appendChild(construirBotonDeEstilo()); continue; }
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'proyectos-ribbon-btn' + (b.clase ? ` ${b.clase}` : '');
+        btn.id = `btn-cinta-${b.id}`;
+        btn.title = b.title;
+        btn.setAttribute('aria-label', b.title);
+        if (b.svg) btn.innerHTML = proyectosIconSvg(b.svg);
+        else btn.textContent = b.texto;
+        if (b.cmd) btn.dataset.cmd = b.cmd;
+        if (b.align) btn.dataset.align = b.align;
+        // NO robar el cursor: sin esto, pulsar un boton mata la
+        // seleccion del documento y el comando no tiene sobre que actuar.
+        btn.addEventListener('mousedown', (e) => e.preventDefault());
+        // La accion corre UN CICLO DESPUES a proposito. Varios botones
+        // (tabla, enlace, plantilla...) abren un popover, y el listener
+        // global de "clic fuera" — que se dispara con ESTE mismo clic,
+        // al burbujear — lo cerraria al instante. Aplazandola, primero
+        // se cierra lo que hubiera abierto y luego se abre lo nuevo.
+        btn.addEventListener('click', () => setTimeout(() => b.accion(btn), 0));
+        panel.appendChild(btn);
+      }
+    });
+  }
+}
+
+// El desplegable "Estilo": un boton que dice el estilo de la linea
+// actual y abre la lista. Nada de <select> nativo (regla de la casa).
+function construirBotonDeEstilo() {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'proyectos-ribbon-btn proyectos-ribbon-estilo';
+  btn.id = 'btn-cinta-estilo';
+  btn.title = 'Estilo del párrafo';
+  btn.innerHTML = '<span id="proyectos-estilo-actual">Texto normal</span> <span class="proyectos-ribbon-caret">▾</span>';
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    abrirPopoverDeEstilo(btn);
+  });
+  return btn;
+}
+
+function abrirPopoverDeEstilo(anchor) {
+  if (!proyectosEstiloPopover) {
+    proyectosEstiloPopover = document.createElement('div');
+    proyectosEstiloPopover.className = 'proyectos-slash-popover proyectos-estilo-popover hidden';
+    document.body.appendChild(proyectosEstiloPopover);
+  }
+  const popover = proyectosEstiloPopover;
+  if (!popover.classList.contains('hidden')) { popover.classList.add('hidden'); return; }
+  popover.innerHTML = '';
+  for (const estilo of PROYECTOS_ESTILOS) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'proyectos-slash-item';
+    item.dataset.estilo = estilo.id;
+    item.textContent = estilo.label;
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      popover.classList.add('hidden');
+      applyProyectosBlockType(estilo.id, proyectosLineaDestino());
+      refrescarCintaProyectos();
+    });
+    popover.appendChild(item);
+  }
+  popover.classList.remove('hidden');
+  const rect = anchor.getBoundingClientRect();
+  popover.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - 240)}px`;
+  popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 220))}px`;
+}
+
+// Deja la barra al dia con donde esta el cursor: botones encendidos,
+// nombre del estilo y la pestaña contextual de Tabla.
+function refrescarCintaProyectos() {
+  const cinta = document.getElementById('proyectos-ribbon');
+  const pagina = document.getElementById('proyectos-page');
+  if (!cinta || !pagina || pagina.classList.contains('hidden')) return;
+
+  const dentro = document.activeElement === PROYECTOS_BODY();
+  // Negrita/cursiva/subrayado/tachado: encendidos segun el navegador.
+  cinta.querySelectorAll('[data-cmd]').forEach((btn) => {
+    let activo = false;
+    try { activo = dentro && document.queryCommandState(btn.dataset.cmd); } catch (err) { activo = false; }
+    btn.classList.toggle('active', !!activo);
+  });
+  // Alineacion: la del objetivo actual (celda o linea).
+  const objetivo = proyectosAlignTarget();
+  const align = objetivo ? (objetivo.getAttribute('data-align') || 'left') : null;
+  cinta.querySelectorAll('[data-align]').forEach((btn) => {
+    btn.classList.toggle('active', align !== null && btn.dataset.align === align);
+  });
+  // Nombre del estilo de la linea.
+  const etiqueta = document.getElementById('proyectos-estilo-actual');
+  if (etiqueta) {
+    const linea = getProyectosCurrentLine();
+    let nombre = 'Texto normal';
+    if (linea) {
+      if (linea.tagName === 'LI') nombre = linea.closest('ol') ? 'Lista numerada' : 'Lista';
+      else if (linea.matches('[data-todo]')) nombre = 'Tarea';
+      else {
+        const estilo = PROYECTOS_ESTILOS.find((s) => s.match(linea));
+        if (estilo) nombre = estilo.label;
+      }
+    }
+    etiqueta.textContent = nombre;
+  }
+  // La pestaña "Tabla" solo existe con el cursor dentro de una tabla.
+  const tabTabla = cinta.querySelector('[data-ribbon-tab="tabla"]');
+  const hayTabla = !!proyectosTablaDelCursor();
+  if (tabTabla && tabTabla.classList.contains('hidden') === hayTabla) {
+    tabTabla.classList.toggle('hidden', !hayTabla);
+    if (!hayTabla && proyectosCintaTab === 'tabla') activarPestanaCinta('inicio');
+  }
+}
+
+function activarPestanaCinta(nombre) {
+  const cinta = document.getElementById('proyectos-ribbon');
+  if (!cinta) return;
+  proyectosCintaTab = nombre;
+  cinta.querySelectorAll('[data-ribbon-tab]').forEach((tab) => {
+    tab.classList.toggle('active', tab.getAttribute('data-ribbon-tab') === nombre);
+  });
+  cinta.querySelectorAll('[data-ribbon-panel]').forEach((panel) => {
+    panel.classList.toggle('hidden', panel.getAttribute('data-ribbon-panel') !== nombre);
+  });
+}
+
+document.getElementById('proyectos-ribbon-tabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('[data-ribbon-tab]');
+  if (!tab) return;
+  activarPestanaCinta(tab.getAttribute('data-ribbon-tab'));
+});
+// Las pestañas tampoco roban el cursor.
+document.getElementById('proyectos-ribbon-tabs').addEventListener('mousedown', (e) => {
+  if (e.target.closest('[data-ribbon-tab]')) e.preventDefault();
+});
+
+construirCintaProyectos();
+document.addEventListener('selectionchange', () => refrescarCintaProyectos());
+PROYECTOS_BODY().addEventListener('input', () => refrescarCintaProyectos());
 
 // ---------------------------------------------------------------------
 // Atajos tipo markdown: "#", "##", "###", "-", "*", "1.", "[]", ">"
@@ -14143,11 +14609,12 @@ PROYECTOS_BODY().addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
     const alignValue = { q: 'left', t: 'center', d: 'right', j: 'justify' }[e.key.toLowerCase()];
     if (alignValue) {
+      // Actua sobre TODO lo seleccionado (varias celdas o varias
+      // lineas), no solo sobre donde esta el cursor.
       const target = proyectosAlignTarget();
       if (target) {
         e.preventDefault();
-        setProyectosAlign(target, alignValue);
-        queueProyectosSaveBody();
+        aplicarAlineacionProyectos(alignValue); // ya guarda
         return;
       }
     }
@@ -14897,6 +15364,10 @@ document.addEventListener('click', (e) => {
   if (proyectosSplitPickPopover && !proyectosSplitPickPopover.classList.contains('hidden')
       && !e.target.closest('.proyectos-split-pick-popover')) {
     proyectosSplitPickPopover.classList.add('hidden');
+  }
+  if (proyectosEstiloPopover && !proyectosEstiloPopover.classList.contains('hidden')
+      && !e.target.closest('.proyectos-estilo-popover') && !e.target.closest('#btn-cinta-estilo')) {
+    proyectosEstiloPopover.classList.add('hidden');
   }
   // (el caso de "nodo ya desconectado" lo corta el guard de arriba)
   if (proyectosDbConfigPopover && !proyectosDbConfigPopover.classList.contains('hidden')
