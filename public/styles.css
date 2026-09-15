@@ -5903,12 +5903,28 @@ body.gym-rest-push #settings-modal .settings-card {
   gap: 0.7rem;
   overflow-y: auto;
   flex: 1;
+  /* Los 1.2rem de los lados son los MISMOS que .gym-tab-content,
+     .finanzas-tab-panel y .entretenimiento-panel. Faltaban: esta pantalla
+     solo llevaba el hueco de abajo, asi que el buscador y los botones
+     llegaban al borde del cristal y la vista se veia "demasiado ancha"
+     (Koku, con una captura del iPhone). */
+  padding-left: 1.2rem;
+  padding-right: 1.2rem;
+  padding-top: 1rem;
   /* El mismo colchon que .gym-tab-content y .finanzas-tab-panel: la
      barra de Apps flota FIJA encima de esta pantalla, asi que sin este
      hueco la ultima fila se queda por debajo de la barra y no hay forma
      de verla ni de tocarla, ni bajando del todo. Si la barra cambia de
      alto, los tres numeros van juntos. */
   padding-bottom: 7rem;
+}
+
+/* Vive fuera de .recetas-panel (es hermano suyo), asi que se alinea a
+   mano con el mismo margen lateral que el panel. */
+.recetas-back-btn {
+  align-self: flex-start;
+  flex-shrink: 0;
+  margin: 0.6rem 1.2rem 0;
 }
 
 .recetas-toolbar { display: flex; gap: 0.5rem; }

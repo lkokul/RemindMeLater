@@ -2619,12 +2619,17 @@
       <h2 id="recetas-view-title">Recetas</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-recetas" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">← Herramientas</button>
-        <!-- Configuracion tiene que poder abrirse desde cualquier
-             pantalla completa, que tapa la topbar. Va SIEMPRE el ultimo. -->
-        <button type="button" id="btn-recetas-settings" class="icon-btn" aria-label="Configuración">☰</button>
+        <!-- Aqui habia un boton ☰ de Configuracion. Se quito (peticion de
+             Koku): naciendo cuando esta pantalla tapaba la topbar y no
+             habia otra via, hoy la barra de abajo ya tiene su propia
+             seccion de Configuracion y el ☰ era un segundo camino a lo
+             mismo ocupando sitio en la cabecera. -->
       </div>
     </div>
-    <button type="button" id="btn-recetas-back" class="finanzas-back-btn hidden">‹ Recetas</button>
+    <!-- Volver a la lista de secciones. Es un BOTON con su forma, no un
+         texto suelto con una flechita (peticion de Koku): un enlace de
+         texto no se lee como algo que se pueda pulsar. -->
+    <button type="button" id="btn-recetas-back" class="secondary-btn recetas-back-btn hidden">‹ Recetas</button>
 
     <!-- INICIO -->
     <div class="recetas-panel" data-recetas-panel="inicio">

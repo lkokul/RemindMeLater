@@ -789,7 +789,6 @@ document.getElementById('btn-entretenimiento-settings').addEventListener('click'
 document.getElementById('btn-finanzas-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-viajes-settings').addEventListener('click', openSettingsModal);
 document.getElementById('btn-retos-settings').addEventListener('click', openSettingsModal);
-document.getElementById('btn-recetas-settings').addEventListener('click', openSettingsModal);
 // #mobile-notes-view (Fase 4) es tambien .my-space-view a pantalla
 // completa, mismo motivo que las de arriba.
 document.getElementById('btn-mobile-notes-settings').addEventListener('click', openSettingsModal);
