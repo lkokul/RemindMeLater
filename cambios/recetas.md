@@ -5,6 +5,45 @@ Cómo se escribe esto: `cambios/_COMO-SE-USA.md`.
 
 ---
 
+## v0.62.3 — Márgenes, el volver como botón y fuera el ☰
+
+**Qué cambió**
+- La pantalla ya no llega al borde del cristal: tiene los mismos márgenes
+  laterales (1,2 rem) que Gimnasio, Finanzas y Entretenimiento. Era la
+  única sección de la app sin ellos.
+- El "‹ Recetas" de volver pasa a ser un botón de verdad, con la misma
+  forma que el "+ Carpeta" que tiene al lado, en vez de un texto suelto
+  con una flechita que no se leía como pulsable.
+- Fuera el botón ☰ de Configuración de la cabecera. Nació cuando esta
+  pantalla tapaba la topbar y no había otra vía; hoy la barra de abajo ya
+  tiene su propia sección de Configuración.
+
+**Qué probar**
+- [ ] Con el iPhone en la mano: que con esos márgenes la lista de recetas
+      no se quede corta de ancho (las portadas son lo que más sitio pide).
+- [ ] Que llegar a Configuración desde Recetas por la barra de abajo se
+      siga sintiendo natural ahora que no está el ☰.
+- [ ] Que el botón de volver se distinga bien del "+ Carpeta" de al lado
+      pese a tener la misma forma — en la captura se veían juntos.
+
+**Decisiones**
+- **Las otras cinco secciones conservan su ☰.** Gimnasio, Finanzas,
+  Viajes, Entretenimiento y Retos siguen igual: cada una vive en su rama,
+  así que quitarlo en todas es ir rama por rama y eso lo decide Koku.
+- **El botón de volver reutiliza `secondary-btn`**, no una clase propia:
+  el objetivo era justo que se pareciera al de al lado.
+
+**Trampa que ya mordió**
+- Quitar el ☰ dejaba un `getElementById('btn-recetas-settings')
+  .addEventListener` huérfano en `settings.js`. Eso LANZA al cargar, y
+  como `settings.js` va después de `app.js`, se habría llevado media app
+  por delante sin decir nada. Se quitó también el listener, y la
+  comprobación mira que **los dos archivos hayan corrido enteros**, no
+  solo que la pantalla se vea. Probado volviendo a meter el listener: la
+  prueba se pone roja.
+
+---
+
 ## v0.62.0 — Calorías y macros
 
 **Qué cambió**
