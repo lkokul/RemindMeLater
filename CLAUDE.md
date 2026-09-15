@@ -1,55 +1,69 @@
 # RemindMeLater — notas para retomar el proyecto en otra conversación
 
-Esto no es documentación de usuario (eso es `README.md`, que se
-reescribió por completo en la ronda de v0.19.0 y se ha ido manteniendo al
-día en rondas posteriores — última vez actualizado por completo en esta
-misma ronda, ver "Estado actual" más abajo). Esto es un resumen para que
-una conversación nueva
-(Cowork, Claude Code local o una sesión de control remoto) pueda seguir
-donde lo dejamos sin que Koku tenga que repetir todo el contexto.
+Esto no es documentación de usuario (eso es `README.md`). Esto es un
+resumen para que una conversación nueva (Cowork, Claude Code local o una
+sesión de control remoto) pueda seguir donde lo dejamos sin que Koku
+tenga que repetir todo el contexto.
 
 **Quién es Koku**: no sabe JavaScript a fondo, así que las explicaciones y
 los comentarios en el código van con más detalle de lo normal a propósito.
 Mantén ese estilo.
 
-**Nota sobre este archivo**: normalmente CLAUDE.md NO se commitea (ver
-regla de abajo) — vive solo local, como notas de trabajo. La excepción:
-si Koku va a cambiar a una sesión distinta (p. ej. control remoto) que
-puede arrancar con un clon nuevo del repo, sí se commitea este archivo
-puntualmente para que el resumen viaje con el repo. Eso fue lo que pasó
-justo antes de este commit — no lo tomes como que la regla cambió para
-siempre, cada vez que quieras commitearlo hay que confirmarlo con Koku
-igual que cualquier otro commit.
+**Este archivo se commitea como uno más.** Antes había una regla de "no
+commitear CLAUDE.md"; Koku la quitó explícitamente — a partir de ahora se
+actualiza y se commitea igual que cualquier otro archivo del repo,
+siguiendo las mismas reglas de commit de abajo (o sea: cuando él lo pida,
+no por tu cuenta).
 
 ## Qué es esto
 
-Calendario, recordatorios, tareas y notas local-first: Node.js + Express +
-`node:sqlite` (SQLite integrado en Node, sin compilar nada nativo) por
-detrás, HTML/CSS/JS sin build ni framework por delante (`app.js` y
+Calendario, recordatorios, tareas y notas local-first. **Ahora mismo hay
+DOS programas independientes conviviendo en el mismo repositorio**, y es
+lo primero que hay que tener claro antes de tocar nada:
+
+- **La app sin servidor** (rama `movil-ui`, la que se está desarrollando
+  activamente): todo vive dentro de la propia app, en el dispositivo. No
+  hay servidor, ni emparejamiento, ni sincronización, ni cuenta. Por
+  dentro es SQLite de verdad compilado a WebAssembly (`sql.js`,
+  vendorizado en `public/vendor/`), con las MISMAS rutas del backend de
+  siempre portadas a `public/routes-local/`. Se empaqueta como app nativa
+  de iOS/Android con Capacitor.
+- **La versión de escritorio** (`server/`, `electron/`): el servidor
+  Express + `node:sqlite` original. Koku la trabaja **por su cuenta en
+  una rama `escritorio`** — **NO toques su código** salvo que te lo
+  pida explícitamente. Al fusionar, él preguntará qué falta en cada
+  lado. Aviso de un malentendido real del 8/9/2026, para no repetirlo:
+  el ideario de esta conversación (`IDEAS-MOVIL-UI.md`) se subió por
+  error a `escritorio` interpretando mal un "es para la rama de
+  escritorio" — Koku lo corrigió: **los documentos de esta conversación
+  van en `movil-ui`**, y la autorización de commit/push libre que dio
+  aquí es para ESTA rama. En `escritorio` no se commitea nada sin
+  petición explícita (y si algún día toca, `git fetch` + rebase antes
+  de pushear: él trabaja esa rama en paralelo y sus pushes se cruzan de
+  verdad).
+
+La interfaz sigue siendo HTML/CSS/JS sin build ni framework (`app.js` y
 `settings.js` se cargan como `<script>` normales y comparten variables
 globales — `settings.js` va después de `app.js`, cuidado con el orden si
-tocas ambos). Corre en el ordenador de Koku; el móvil se conecta a la
-misma app por wifi local, emparejado con un código de 6 dígitos (30s de
-validez, con límite de intentos fallidos — ver "Emparejamiento" más
-abajo), y guarda su propia copia local (IndexedDB) que sincroniza con el
-ordenador de forma MANUAL (sin ningún disparador automático de fondo,
-ver "Sincronización móvil" más abajo). También se puede empaquetar como
-app de escritorio (Electron) y se anuncia por mDNS
-(`remindmelater.local`). Además del calendario, hay un hub de
-"Extensiones" a pantalla completa con 4 secciones independientes:
-Gimnasio, Lecturas, Finanzas y Archivos (ver "Extensiones" más abajo).
-Vive en la rama `main` de GitHub (no `main-wmqm2f`, que era el nombre de
-rama de una ronda anterior de esta sesión — el repo se fusionó
-limpiamente a `main` hace varias rondas). Detalle completo de features en
-`README.md`, que ahora sí está actualizado.
+tocas ambos). Además del calendario hay un hub de "Apps" a pantalla
+completa con 4 secciones independientes: Gimnasio, Lecturas, Finanzas y
+Viajes. Detalle completo de features en `README.md`, que está al día.
 
 ## Reglas de trabajo que Koku ha pedido explícitamente
 
-- **No hacer commit ni push sin que él lo pida.** Antes probaba todo local
-  con `npm run dev` y daba luz verde a cada ronda; últimamente directamente
-  dice "haz commit" o "haz push" cuando quiere — y a veces solo pide UNA de
-  las dos cosas (commit sin push, por ejemplo), hay que hacer justo lo que
-  pide, no más. No asumas autorización de una ronda para la siguiente.
+- **Commit y push: SÍ, sin pedir permiso cada vez** (regla nueva,
+  sustituye a la anterior de "no commitear sin que lo pida" — Koku dio
+  la autorización de forma permanente en la ronda de retoques de notas
+  de la rama `movil-ui`): al terminar y verificar una ronda de trabajo,
+  se commitea y se pushea directamente, agrupando por ronda como
+  siempre.
+- **GitHub Actions: NUNCA lanzarlo por cuenta propia** (misma ronda que
+  la regla anterior): el número de compilaciones/subidas que Koku puede
+  lanzar es limitado (no lo sabía y se enteró al agotarse). Solo se
+  lanza un workflow si él lo pide explícitamente en ESA ronda.
+- **`CLAUDE.md` se trata como un archivo más** (regla nueva, sustituye a
+  la anterior de "nunca se commitea"): se actualiza cuando el proyecto
+  cambia, y se commitea con el resto.
 - **No hace falta avisar de que una tarea es larga antes de empezar** — lo
   pidió al principio, pero luego dijo explícitamente que como no puedo
   comprimir contexto por mi cuenta, no sirve de nada que avise. No lo hagas.
@@ -78,6 +92,45 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
   en una sesión de Claude Code local (terminal en el propio ordenador de
   Koku), prueba a pushear el tag tú mismo primero — solo hace falta el
   workaround manual si de verdad da 403 en ESTA sesión en concreto.
+- **APUNTAR CADA CAMBIO EN `cambios/<area>.md`** (regla nueva,
+  14/9/2026, pedida por Koku: *"cada modificación o actualización
+  implementada, que se ponga en un archivo las modificaciones, y cosas a
+  probar para así tú tenerlo más fácil"*). **Antes de commitear una
+  ronda**, el área que hayas tocado tiene su entrada arriba del todo, con
+  las tres cosas: **qué cambió** (en castellano, no en nombres de
+  función), **qué probar** (casillas, y SOLO lo que no se puede
+  comprobar desde aquí: el iPhone de verdad, los avisos, los widgets,
+  una migración sobre sus datos) y **decisiones** (lo que eligió él y no
+  se deshace sin volver a preguntarle).
+  - Un archivo **por ÁREA y con el área en el nombre**, no por rama: si
+    todas las ramas usaran el mismo nombre de archivo, **cada merge
+    daría conflicto sin falta**. Por eso `calendario-notas-movil-UI`
+    tiene dos (`calendario.md` y `notas.md`) aunque sea una sola rama.
+  - Lo transversal (Tienda, copia de seguridad, widgets, temas,
+    tipografía, gestos, seguridad) va en `cambios/app.md`.
+  - **Al fusionar**, ese `## Sin fusionar — X` pasa a `## vX.Y.Z — X` y
+    se queda como historial. No se borra nada.
+  - El detalle está en `cambios/_COMO-SE-USA.md`. **Esto NO sustituye a
+    CLAUDE.md**: aquí vive el porqué de la arquitectura y las trampas
+    que ya mordieron; allí, qué entró en cada ronda y qué hay que mirar
+    en el teléfono.
+- **AVISAR cuando un cambio se salga del guion** (regla nueva, 11/9/2026,
+  pedida por Koku con estas palabras: *"si hay algún cambio que creas que
+  se sale de lo que es Apple-ish o que necesita modificar el tema de
+  avisos para reglas y tal me avisas"*). Dos casos, y hay que decírselo
+  **en la respuesta**, no enterrarlo en un commit:
+  1. **Algo que se aleja del estilo de Apple**: un patrón que no existe en
+     iOS, un control inventado, una pantalla que rompe la jerarquía del
+     resto. Aunque funcione bien.
+  2. **Algo que toca las reglas de seguridad o privacidad**: ampliar la
+     lista blanca del saneador de notas, relajar la CSP, pedir un permiso
+     nuevo del sistema, añadir cualquier cosa que salga del dispositivo, o
+     cambiar lo que hay que declarar en las tiendas.
+  Precedente de por qué hace falta: las fórmulas de notas se diseñaron
+  primero como TEXTO PLANO justo para no tocar el saneador, y al pedir
+  Koku que se vieran resaltadas hubo que darle de alta una etiqueta
+  (`<span class="note-formula">`). Eso es exactamente lo que hay que
+  contarle antes de que lo descubra él.
 - **Nunca usar controles nativos del navegador para checkbox, `<select>`,
   fecha, ni nada similar (ronda de retoques de Carteras/Archivos, tras
   ver capturas de checkboxes cuadrados grises sin estilo)** — siempre el
@@ -94,6 +147,57 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
   descuido a corregir, no una excepción aceptable.
 
 ## Arquitectura y convenciones establecidas
+
+- **El "servidor" vive dentro de la app** (lo más importante de entender):
+  - `public/vendor/sql-wasm.js` + `.wasm` — SQLite compilado a
+    WebAssembly (sql.js, MIT, vendorizado; sin build, sin CDN). Se eligió
+    frente a reescribir a IndexedDB porque conserva las 45+ consultas con
+    SQL de verdad (JOIN/GROUP BY/SUM), y frente a un plugin nativo de
+    SQLite porque sql.js es **síncrono** igual que `node:sqlite`: si
+    fuera asíncrono habría que convertir a `await` los ~396 sitios que
+    consultan la base, o sea reescribir todas las rutas.
+  - `public/local-schema.js` — el esquema (tablas + migraciones) portado
+    de `server/db.js`.
+  - `public/local-db.js` — expone `localDb`, con la MISMA forma que el
+    `db` de `node:sqlite` (`prepare(sql).all/get/run`, `exec`), y vuelca
+    la base entera a IndexedDB tras cada escritura (agrupando 250ms, y
+    también al ocultarse la página, para no perder la última escritura
+    si se cierra la app justo después).
+  - `public/local-api.js` — router mínimo que imita a Express
+    (`createLocalRouter`/`mountLocalRouter`/`dispatchLocalRequest`).
+  - `public/routes-local/*.js` — las 25 rutas del backend, copiadas
+    **mecánicamente** de `server/routes/`: misma lógica y mismo SQL, solo
+    cambia la fontanería (sin require/module.exports, cada archivo en un
+    IIFE para que los nombres repetidos no choquen en el ámbito global).
+  - `api()` en `app.js` despacha contra ese router en vez de hacer
+    `fetch`. Misma firma y misma forma de error, así que ninguno de los
+    ~50 sitios que la llaman cambió.
+  - **Si tocas una ruta, tócala en `public/routes-local/`**, no en
+    `server/routes/` (eso es el otro programa).
+- **Verificación del porte**: hay un guion de comparación diferencial que
+  lanza las MISMAS peticiones contra el servidor Express real y contra el
+  motor local y compara las respuestas (79 comprobaciones, 0
+  diferencias). Si algún día se toca el porte a lo grande, merece la pena
+  rehacerlo antes de dar nada por bueno.
+- **Imágenes y fotos**: los bytes van al almacén `noteAssets` de
+  IndexedDB, NO dentro de la base SQLite (la inflaría y haría lento cada
+  volcado). El HTML de una nota sigue guardando la ruta de siempre
+  (`/api/notes/images/<uuid>.<ext>`), así que el saneador no cambia; al
+  MOSTRARLA, `resolveAssetUrl()`/`hydrateAssetImages()` cambian el `src`
+  por una URL `blob:` y guardan la ruta original en `data-asset-src`,
+  que `serializeAssetImages()` devuelve al guardar. Cuidado: poner el
+  `src` original en un `<img>` (aunque sea un clon suelto) hace que el
+  navegador pida esa ruta igualmente — por eso serializar se hace sobre
+  el texto, no clonando el DOM.
+- **Recordatorios**: `public/local-notifications.js` los programa en el
+  propio sistema operativo con `@capacitor/local-notifications`, así que
+  suenan con la app cerrada sin servidor ni push. Se reprograman en
+  bloque (cancelar todo y rehacer) desde `loadReminders()`, que es por
+  donde ya pasa cualquier cambio de eventos. En un navegador normal el
+  plugin no existe y todo esto es no-op.
+- **Gastos fijos**: `public/finanzas-recurring.js`, portado de
+  `server/finanzasRecurringChecker.js`, se ejecuta al ABRIR la app en vez
+  de en un `setInterval` de 24h.
 
 - **Temas de color**: cada fondo real de la interfaz (`bg`, `surface`,
   `surface2`, `settingsMenuBg`, `accent`, `dayToday`) lleva su propio color
@@ -113,18 +217,22 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
   anterior solo (sin preguntar); cerrar sin guardar descarta. No hay botón
   de guardado por tema, es un único flujo global (`saveCurrentThemeEdit`,
   `switchThemeEdit` en `settings.js`).
-- **Dispositivo de confianza**: el propio ordenador se identifica por IP de
-  loopback (`isTrustedRequest()`); los móviles emparejados usan un header
-  `X-Device-Token`. Ver `server/auth.js`.
-- **Carpeta de datos configurable**: `server/dataDir.js` lee
-  `REMINDMELATER_DATA_DIR` si existe (la pone Electron, apuntando a la
-  carpeta de datos del usuario), si no usa `data/` del proyecto. Se sacó
-  de `db.js` a su propio archivo en la ronda de imágenes de notas (Fase
-  4) para que `routes/noteImages.js` pudiera usar el mismo cálculo sin
-  duplicarlo.
-- **Mobile-first**: CSS base es para móvil, `min-width: 860px` cambia a
-  layout de escritorio (calendario en grid + panel de recordatorios al
-  lado, todo dentro de `100vh` sin scroll de página).
+- **No hay autenticación de ningún tipo** en la app sin servidor: sin
+  servidor no hay a quién autenticar, todo es acceso local del dueño del
+  dispositivo. El router local ignora a propósito los middlewares que
+  traían las rutas portadas (`requireDeviceOrTrusted` y similares).
+- **Solo móvil, a cualquier ancho** (cambiado el 10/9/2026): ya NO hay
+  ningún corte de anchura. Antes el CSS base era para móvil y a partir de
+  `min-width: 860px` se reorganizaba como visor de escritorio; eso se fue
+  entero de esta rama. El motivo no fue limpieza: Koku puso el móvil en la
+  tele y a esa anchura la app se quedaba **a medias** — seguía con su barra
+  de abajo pero perdía los accesos rápidos del calendario y los gestos de
+  navegación, o sea que parecía que se hubiera abierto "el visor de
+  escritorio". `isMobileLayout()` devuelve `true` siempre y
+  `tools/comprobar-widgets.py` falla si vuelve una media query de anchura,
+  si reaparecen `server/`/`electron/`, o si hay más de una
+  `isMobileLayout()` (había dos, y la primera estaba muerta sin que se
+  notara: en JavaScript gana la última declaración).
 - **Tareas**: son filas de `events` con `is_task = 1` (no una tabla
   aparte) — comparten título/grupo con los eventos normales, pero
   `start_at` es opcional (una tarea puede no tener fecha) y tienen su
@@ -139,10 +247,14 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
   - **Notas**: título + contenido con formato básico (Fase 4, completa:
     negrita/cursiva/listas en v0.21.0, tablas en v0.22.0, imágenes en
     v0.23.0 — ver bloque aparte más abajo). Se pueden ocultar (icono de
-    ojo, difuminadas en la lista) con una contraseña OPCIONAL y
-    COMPARTIDA para toda la app (no por nota individual) — no es cifrado
-    real, solo evita que se lea a primera vista
-    (`server/routes/notesSecurity.js`).
+    ojo, difuminadas en la lista). **En la app móvil NO hay contraseña**:
+    ocultar solo difumina, y con el teléfono desbloqueado no protege de
+    nada. La contraseña compartida se fue con el servidor y hay hasta una
+    migración que borra sus claves (`local-schema.js`, busca
+    `notes_hide_password_hash`). Lo que describía este párrafo antes es el
+    OTRO programa, el de escritorio (`server/routes/notesSecurity.js`).
+    Pendiente de decidir con Koku si se dice así en la pantalla o se hace
+    de verdad con Face ID — ver `PARA-KOKU-MAÑANA.md`, punto C2.
   - **Carpetas de notas**: sistema propio, separado de los Grupos del
     calendario — nombre + color (YA NO tienen icono propio, se quitó esa
     opción a propósito: el icono genérico de carpeta ya diferencia bien
@@ -251,48 +363,23 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
 - **PWA**: `public/manifest.json` + `public/sw.js` (service worker
   mínimo, solo cachea el shell — HTML/CSS/JS —, nunca `/api/*`, para que
   los datos siempre sean en vivo). Instalable como app en móvil/escritorio.
-- **Sincronización móvil (manual)**: el móvil guarda su copia local en
-  IndexedDB (`public/db-local.js`) y sincroniza en los DOS sentidos con
-  el ordenador — pero, desde la ronda de la extensión Archivos, SOLO de
-  forma MANUAL: se quitaron a propósito los 3 disparadores automáticos
-  que había antes (`init()`, un `setInterval` de 30s, el evento
-  `online`), decisión explícita de Koku aunque significa que si no abre
-  Archivos los cambios no llegan solos. El botón "Sincronizar ahora"
-  vive en Extensiones → Archivos (ya no en Configuración → Este
-  dispositivo, se movió). El punto de color de la topbar sigue
-  reflejando el estado del ÚLTIMO intento manual (verde/amarillo/gris/
-  rojo), y clicarlo abre Archivos directamente en vez de Configuración.
-- **Emparejamiento con límite de intentos**: `server/pairing.js` — el
-  código de 6 dígitos dura 30s (antes 5 minutos) y de un solo uso; además
-  un `Map` en memoria por IP cuenta intentos fallidos de
-  `POST /api/devices/pair`, bloqueando esa IP 10 minutos tras 5 fallos
-  seguidos (`isPairingLocked`/`recordFailedPairing`/
-  `recordSuccessfulPairing`, aplicados en `routes/devices.js`). Un
-  `400 invalid_request` (faltan campos) no cuenta como intento fallido,
-  solo un código con formato correcto pero incorrecto/caducado.
-- **Checkers en segundo plano (patrón repetido)**: para trabajo periódico
-  del lado del servidor, la forma establecida es
-  `function start...() { doWorkOnce(); const timer = setInterval(doWorkOnce, MS); timer.unref(); return timer; }`,
-  llamado UNA vez desde el callback de `app.listen()` en
-  `server/index.js`. Ejemplos: `reminderChecker.js` (30s),
-  `finanzasRecurringChecker.js` (24h, genera la transacción real de cada
-  plantilla de gasto fijo cuando toca), `pruneSyncLog` en
-  `routes/sync.js` (24h). Cuando el estado es efímero y nunca hay nada
-  pendiente justo después de reiniciar (no hace falta "arrancar" nada al
-  boot), el mismo `setInterval(...).unref()` vive a nivel de módulo sin
-  necesidad de exportar un `start...()` ni tocar `index.js` — así son
-  `pairing.js` (códigos de emparejamiento) y `archivosTransfers.js`
-  (solicitudes de doble confirmación de Archivos, ver más abajo).
-- **Extensiones** (hub a pantalla completa, botón "Extensiones" en la
-  topbar): cuatro secciones independientes del calendario, todas
-  siguiendo el mismo patrón de esquema (`CREATE TABLE IF NOT EXISTS` +
-  migraciones condicionales en `db.js`, `PRAGMA table_info` +
-  `ALTER TABLE`) y borrado en cascada A MANO en las rutas (nunca
-  `ON DELETE CASCADE` de SQL). Detalle de usuario completo en
-  `README.md`; resumen técnico rápido aquí:
+- **No hay sincronización ni emparejamiento.** Cada dispositivo tiene
+  sus propios datos y no se hablan entre ellos. Todo lo que había
+  (`sync_log`, pull/push, cola de pendientes, código de 6 dígitos, QR de
+  reconexión, Web Push/VAPID, la extensión Archivos y los avisos de
+  versión nueva) se quitó de la app; sigue vivo solo en `server/`, que es
+  el otro programa.
+- **Apps** (hub a pantalla completa, botón "Apps" en la topbar —
+  antes se llamaba "Extensiones", solo cambió el texto visible, los
+  ids/clases internas siguen diciendo `extensions`): cuatro secciones
+  independientes del calendario, todas con el mismo patrón de esquema
+  (`CREATE TABLE IF NOT EXISTS` + migraciones condicionales,
+  `PRAGMA table_info` + `ALTER TABLE`) y borrado en cascada A MANO en
+  las rutas (nunca `ON DELETE CASCADE` de SQL). Detalle de usuario en
+  `README.md`; resumen técnico:
   - **Gimnasio**: `gym_exercises`/`gym_routines`/`gym_routine_exercises`/
     `gym_sessions`/`gym_sets`. Progreso con gráfica SVG a mano (peso
-    máximo/volumen), primera gráfica del proyecto sin ninguna librería.
+    máximo/volumen), sin ninguna librería.
   - **Lecturas**: `lecturas_sagas`/`lecturas_items` (sagas obligatorias,
     un item puede ser de cualquier tipo — manga/cómic/libro/serie/anime/
     película — dentro de la misma saga). Géneros como columna JSON de
@@ -305,25 +392,19 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
     `finanzas_asset_valuations` (carteras anidadas tipo `note_folders`,
     activos con valoración manual de precio) +
     `finanzas_recurring_expenses` (plantillas de gasto fijo, generador
-    en `finanzasRecurringChecker.js`, ver arriba). Saldo de cuenta
-    SIEMPRE calculado, nunca guardado. Borrar una cuenta con historial
-    se rechaza (`has_history`); borrar una categoría/cartera no destruye
-    lo que la usaba (queda sin categoría/cartera, o reparentado).
-  - **Archivos**: sin tabla SQL — la "base de datos" es la propia
-    carpeta del sistema de archivos (`server/routes/archivos.js`, ruta
-    guardada en `app_settings.archivosFolder`). Transferencia con doble
-    panel (estilo TightVNC), navegación real de cualquier carpeta del
-    disco desde el ordenador (`GET /browse`, `requireTrusted`), y desde
-    la última ronda **doble confirmación** cuando quien inicia un envío/
-    descarga es un móvil emparejado — nunca cuando lo inicia el
-    ordenador, que puede copiar un archivo local a su propia carpeta sin
-    "otro dispositivo" al que pedirle permiso (ver
-    `server/archivosTransfers.js`: `Map` en memoria, TTL 2 minutos,
-    mismo patrón que `pairing.js`). No es una barrera de seguridad
-    (un móvil emparejado ya tiene acceso completo, ver
-    "Dispositivo de confianza" arriba) — es una salvaguarda de UX contra
-    accidentes, documentado explícitamente así en el mensaje del commit
-    a petición de Koku.
+    en `public/finanzas-recurring.js`). Saldo de cuenta SIEMPRE
+    calculado, nunca guardado. Borrar una cuenta con historial se
+    rechaza (`has_history`); borrar una categoría/cartera no destruye lo
+    que la usaba (queda sin categoría/cartera, o reparentado).
+  - **Viajes**: `viajes_trips`/`viajes_trip_countries`/`viajes_entries`/
+    `viajes_entry_attachments`/`viajes_entry_movements`. Mapa SVG por
+    países (`raphaellepuschitz/SVG-World-Map`, MIT) con zoom/paneo
+    propios; los ids del SVG vienen en MAYÚSCULAS y se normalizan a
+    minúsculas en `dataset.countryCode` (el atributo `id` no se toca).
+    Un movimiento de una entrada puede enlazarse a una transacción real
+    de Finanzas. La extensión **Archivos** existió y se quitó al
+    desaparecer el servidor (no tenía sentido leer las carpetas de un
+    ordenador que ya no está).
 
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
@@ -375,45 +456,4690 @@ limpiamente a `main` hace varias rondas). Detalle completo de features en
   función, cuidado con quitar ese fallback pensando que es código muerto,
   se reproduce con facilidad en el flujo normal de usar +Fila/-Fila.
 
+## Gestos de navegación (móvil) — ronda del visor móvil
+
+Diseñado con Koku en la conversación de "configuración del visor móvil".
+El código vive todo junto al final de `public/app.js`, bajo el título
+"GESTOS DE NAVEGACIÓN". La idea, en una frase: **la pantalla se reparte
+en carriles**.
+
+```
+|  lateral  |         centro          |  lateral  |
+|  cambiar  |  gesto propio de ESTA   |  cambiar  |
+| de PESTAÑA|       pantalla          | de PESTAÑA|
+```
+
+- **Carril lateral** (22% del ancho a cada lado, mínimo 56px y máximo
+  120px — `mobileEdgeRailWidth()`): recorre las pestañas de la barra de
+  abajo de una en una y en el orden en que se ven,
+  `Calendario → Notas → Herramientas → Configuración`
+  (`MOBILE_TAB_ORDER`). Izquierda avanza, derecha retrocede. En los
+  extremos NO da la vuelta, a propósito.
+- **Carril central**: lo propio de la pantalla. Hacia la derecha
+  intenta primero *subir una capa* (`VOLVER_UN_PASO`: volver al menú de
+  Configuración, subir de carpeta en Notas, salir del detalle de una
+  saga/viaje/bloque...); si no hay capa que soltar, recorre las
+  sub-pestañas de la App en la que estés (`MOBILE_SUBTAB_BARS`:
+  Gimnasio, Finanzas, Viajes). Si en esa pantalla el centro no tiene
+  nada que hacer, el gesto **cae hacia atrás** y hace lo mismo que el
+  lateral, para que nunca haya un deslizamiento muerto.
+
+Detalles que costaron y conviene no deshacer:
+
+- **`VOLVER_UN_PASO` pulsa los botones de volver que YA existen**, no
+  duplica su lógica. Así lo que hagan esos botones (guardar el borrador
+  de un tema, limpiar la búsqueda de Notas...) pasa igual deslizando que
+  tocando. Los mismos botones lanzan la animación (`animarCambioDePantalla`),
+  que es lo que pidió Koku: el botón "Volver" se mueve igual que el gesto.
+- **`estaVisibleDeVerdad(el)`**: ni `.hidden` ni `offsetParent` valen por
+  separado. Hay diálogos que se quedan sin la clase `.hidden` aunque no
+  se vean (los tapa un padre), y casi todos los modales son
+  `position:fixed`, que tienen `offsetParent` nulo aunque se vean
+  perfectamente. `getClientRects().length > 0` sale bien de los dos.
+- **`CENTRO_CON_DUENO`**: la vista diaria ya usa el deslizamiento
+  horizontal central para cambiar de día (`attachSwipe` con
+  `centerOnly: true`), así que ahí el módulo no se mete NI deja que el
+  gesto caiga al cambio de pestaña — si no, un solo deslizamiento haría
+  las dos cosas a la vez.
+- **El mapa de Viajes se distingue por VELOCIDAD**, tal cual lo pidió
+  Koku: arrastrar despacio mueve el mapa, un gesto rápido
+  (`NAV_SWIPE_VELOCIDAD_MAPA`, 0.55 px/ms ≈ media pantalla en un tercio
+  de segundo) navega.
+- **`ultimaHerramientaAbierta`**: si estabas en Gimnasio y te vas, al
+  volver deslizando entras directo a Gimnasio. Es una variable en
+  memoria a propósito (NO localStorage): al cerrar la app se olvida
+  sola, que es lo que pidió Koku. El botón de Herramientas de la barra
+  siempre lleva al menú y borra el recuerdo — ese es el gesto de "quiero
+  cambiar de App".
+- **`NAV_SWIPE_OPT_OUT`**: sitios donde arrastrar ya significa otra cosa
+  y el módulo se aparta del todo (filas de notas con sus acciones,
+  tablas del editor, entreno en vivo). Para algo nuevo, basta con
+  ponerle `data-no-nav-swipe`.
+
+**Las DOS pantallas viajan a la vez** (arreglo del 9/9/2026). Antes solo
+se animaba la que entra: la que se iba desaparecía de golpe y durante
+esos 280ms se veía lo que hubiera DEBAJO mientras la nueva barría la
+pantalla. Koku: *"en el lateral donde dejo atrás la vista se mueve
+rápido por detrás y marea un poco"*. Ahora `playMobileSwipeOut()` mueve
+también la saliente, como la tira de un carrusel, y nunca asoma una
+tercera cosa.
+
+Dos detalles que costaron:
+
+- La capa que se va **ya está oculta** cuando toca animarla (su botón de
+  cerrar le puso `.hidden`). Se le quita y se le repone la clase, en vez
+  de forzar un `display` por CSS: cada capa tiene el suyo (las pantallas
+  completas son `flex`, no `block`) y forzarlo las descuadraría.
+- **`cerrandoEnCascada`**: `closeAllMobileOverlays()` simula pulsaciones
+  de Esc, y esa cascada acaba CLICANDO los botones de volver, que tienen
+  su propia animación. Sin la marca se lanzaban DOS animaciones que se
+  pisaban: la del botón dejaba la pantalla vieja a la vista para que se
+  fuera, y la del cambio de pestaña se la encontraba visible y la
+  trataba como la que ENTRA — resultado, una pantalla que se quedaba
+  puesta encima para siempre. Pasó de verdad.
+
+**Interruptor de animaciones** (Configuración > Este dispositivo): ya no
+es solo del calendario, apaga TODO el movimiento de la app. Funciona en
+dos mitades: una única regla global de `styles.css`
+(`:root[data-animations="off"] *`, con 0.01ms en vez de `none` para que
+`animationend` siga llegando y no se quede ninguna clase a medio limpiar)
+y `areAnimationsEnabled()` para lo que dispara el JavaScript a mano. El
+atributo se pone en el script de arranque de `index.html`, antes de
+pintar. Ventaja de que la regla sea global: una animación nueva nace ya
+obedeciendo al interruptor sin tener que acordarse de apuntarla.
+
+**Temas sembrados (9, todos con pareja clara/oscura)**: Predeterminado,
+Pastel, Neón, Océano, Bosque, Atardecer, Lavanda, Carbón y Arena. Los
+seis últimos se añadieron el 9/9/2026 a petición de Koku ("nombres
+genéricos pero descriptivos, para tener una buena variedad"), y de paso
+Pastel y Neón estrenaron la variante que les faltaba — antes solo
+Predeterminado tenía pareja.
+
+Cada paleta se validó con la fórmula WCAG real ANTES de escribirla, en
+los seis pares fondo/contraste que comprueba `sanitizeColors`, buscando
+4.5:1 en las superficies de leer y ≥3:1 en los acentos (que es lo que
+exige la app). CLAUDE.md ya avisaba de no dar un color por bueno solo
+porque lo parezca; el guion de validación está en el historial de esta
+ronda si hace falta añadir más temas.
+
+**Sol y luna son SVG, no emojis** (petición de Koku el 9/9/2026): un
+emoji lo pinta el sistema con SU tipografía, así que cambia de forma
+entre iPhone, Android y navegador, no hereda el color del tema y suele
+salir descolocado de tamaño. `ICON_CLARO`/`ICON_OSCURO`/`ICON_PAREJA` en
+`settings.js`, con `currentColor` para que se tiñan con el tema activo.
+
+**Temas de color privados fuera del sembrado**: "EINES" y "Registro"
+salían de guías de diseño privadas de Koku y ya NO viajan dentro de la
+app (ver la nota en `public/local-schema.js`). Quitarlos de `SEED_THEMES`
+no los borra de una base que ya los tenga: el sembrado solo inserta un
+tema si no existe uno con ese nombre. Ojo con el nombre "Registro": el
+**estilo de interacción** que se llama igual (`[data-ui-style]` en
+`styles.css`) es otra cosa y SÍ se queda.
+
+## Orientación bloqueada en vertical
+
+Petición de Koku (9/9/2026): la app no rota a apaisado. Toda la interfaz
+está pensada mobile-first en vertical y en horizontal la barra de abajo,
+el calendario y las pantallas completas se quedan sin alto útil.
+
+- **iOS**: dos piezas, y hacen falta las dos.
+  - `ios/App/App/Info.plist` — `UISupportedInterfaceOrientations` (el
+    del iPhone) se queda solo con `UIInterfaceOrientationPortrait`. Pero
+    `UISupportedInterfaceOrientations~ipad` **tiene que seguir trayendo
+    las cuatro**: App Store Connect rechaza la subida con el error
+    **90474** si el bundle dice que vale para iPad y no las declara
+    todas (las exige para el multitarea de iPad). Pasó de verdad en la
+    build #39: compiló y exportó bien, y rebotó justo al subir. Ojo
+    también con los guiones dobles dentro de un comentario XML: son
+    ilegales y rompen el plist entero.
+  - `ios/App/App/BridgeViewController.swift` — `supportedInterfaceOrientations`
+    devuelve `.portrait` y `shouldAutorotate` es `false`. Esto es lo que
+    de verdad impide rotar, porque manda por encima de la lista del
+    Info.plist y vale para cualquier aparato, iPad incluido.
+  - La otra salida sería dejar la app solo para iPhone
+    (`TARGETED_DEVICE_FAMILY = "1"`), que quitaría el requisito de
+    Apple de un plumazo — pero eso es una decisión de producto, no un
+    arreglo de este error, y no se ha tomado.
+- **Android**: `android/app/src/main/AndroidManifest.xml` —
+  `android:screenOrientation="portrait"` en la MainActivity. Ojo: NO se
+  quita `orientation` de `configChanges`, que es lo que evita que
+  Android reinicie la Activity (y la webview con ella) ante un cambio de
+  configuración de ese tipo.
+
+No hay `manifest.json` en el repo (se quitó en su día), así que por el
+lado web no hay nada que bloquear.
+
+## Salir a correr en series (intervalos)
+
+Petición de Koku (14/9/2026): *"añadir ejercicios para salir a correr en
+series (x tiempo más fuerte, y tiempo descanso, ...)"*. De las tres
+formas que se le ofrecieron eligió la que **se encadena sola**: no tocas
+el móvil mientras corres.
+
+**La decisión de diseño, que es lo que hay que entender antes de tocar
+nada: NO hay un motor nuevo.** Un intervalo es una serie por tiempo con
+su descanso detrás, que es justo lo que ya sabía hacer el entreno en
+vivo. Así que la medición `'intervalos'` reusa todo:
+
+- el tramo **suave es el descanso de siempre**, con su tarjeta en la
+  pantalla de bloqueo, su +30s y su bajada de música;
+- el tramo **fuerte es una serie con objetivo**, con su cuenta atrás;
+- historial, volumen, tiempo bajo tensión y récords no necesitan ni un
+  caso especial.
+
+Lo único que se añade es que los tramos **se cierran y se encadenan
+solos** (`gymCerrarTramoFuerte()`, disparado desde `gymLiveTick()`) y que
+cada cambio avisa con su vibración.
+
+**Ni una columna nueva en `gym_exercises`**: el tramo fuerte es
+`default_seconds`, el suave es `default_rest_seconds` (que ya era "el
+descanso entre series") y cuántas veces es `default_sets`. En la ficha
+solo cambian los rótulos.
+
+**Las cuatro decisiones de Koku**, no cambiarlas sin volver a
+preguntarle:
+
+1. **Cuenta atrás de preparación antes de empezar, ajustable en el
+   momento**: *"habrá veces que quieres 1 minuto y otras 2. Para ponerte
+   música, el móvil en el brazo etc"*. También es un descanso — uno
+   puesto DELANTE de la primera serie (`restEsPreparacion`) — así que
+   hereda la tarjeta de bloqueo y el aviso sin código nuevo. Se recuerda
+   la última elegida por dispositivo (`gymIntervalPrep`).
+2. **Dos avisos distintos al correr** (`Patron` en
+   `RestAudioWatcher.swift`): `.aprieta` son 3 pulsos muy seguidos (en la
+   mano se siente como una vibración larga) y `.afloja` son 2 cortas
+   espaciadas. El de siempre (`.fin`, 12 pulsos ~10 s) se queda para el
+   fin de un descanso normal y para las cuentas atrás de una plancha —
+   eso último lo eligió aparte.
+3. **Sonido, sí, pero del montón**: *"típico sonido de notificación, no
+   quiero ninguna locura tampoco"*. Es `AudioServicesPlaySystemSound(1007)`
+   una sola vez, justo antes de la primera vibración, y sigue el
+   interruptor de Configuración > Notificaciones > Sonido.
+4. **Tiempo y distancia**, la distancia **a mano** (ver el punto de
+   HealthKit más abajo). Se pregunta UNA vez al acabar el bloque, no
+   tramo a tramo: lo que dice el reloj al volver es el total, y pararse a
+   teclear entre series es justo lo que este modo evita.
+
+**En un bloque de intervalos la vibración NO es opcional.** El ajuste de
+"vibración larga al acabar el descanso" manda en todo lo demás, pero aquí
+se ignora: sin vibración el modo entero no sirve, porque el móvil va en
+el brazo. Igual que el encadenado no depende de "empezar la siguiente
+serie sola" — quien puso "correr en series" ya dijo que no quiere tocar
+el móvil.
+
+**La distancia va en `gym_sets.distance_m`, en METROS enteros** (los
+kilómetros con coma son cosa de la pantalla). Se apunta en la PRIMERA
+serie del bloque y las demás se limpian, así la suma es lo que
+escribiste; desde el editor a mano se puede repartir entre las series si
+algún día hace falta. `gymTextoDeDistancia()` la escribe ("6,2 km",
+"800 m", "5 km" sin coma cuando es redondo).
+
+**Detrás de la ÚLTIMA serie no se arranca un trote suave**: ahí ya estás
+parando. Eso es lo que cierra el bloque y dispara la pregunta de la
+distancia.
+
+Dos cosas que se comprobaron a propósito, porque son las que romperían
+esto en la calle:
+
+- **En pausa el tramo fuerte no se cierra solo.** Si no, pausar para
+  atarte un cordón te daría la serie por buena sin haberla corrido.
+- **Tras una congelación larga se cierra UNA serie, no todas.** El cierre
+  vive en `gymLiveTick()` (que se recalcula desde timestamps) y no en una
+  cadena de temporizadores, así que si iOS duerme la app a mitad de tramo,
+  al volver cierra ese tramo con su objetivo y sigue — en vez de dar por
+  hechas de golpe las series que no has corrido.
+
+**HealthKit está SIN HACER y es una decisión pendiente de Koku.** Él
+preguntó por leer la distancia de la app de Salud o del reloj; se le
+avisó de que eso pide un permiso nuevo del sistema
+(`NSHealthShareUsageDescription`), una capacidad nueva en el App ID —el
+mismo trámite que con el App Group costó quince builds— y declararlo en
+la ficha de la App Store. Dijo *"sino tiempos y distancia a mano y au"*,
+así que se hizo a mano. Si algún día se retoma, es trabajo nativo aparte,
+no un retoque.
+
+## La gráfica de progreso y los récords, con ejercicios por tiempo
+
+Encontrado revisando los ejercicios por tiempo (14/9/2026). Dos agujeros
+del mismo tipo: la base hacía su mitad y la pantalla no leía el resultado.
+
+1. **La gráfica de un ejercicio por tiempo era una línea plana a cero.**
+   `/progress/:exerciseId` ya devolvía `maxSeconds` y `tensionSeconds`, y
+   su propio comentario decía "el cliente elige cuál pintar según cómo se
+   mida el ejercicio" — pero el cliente no los leía: pintaba el peso, que
+   en una plancha a peso corporal no existe. Ahora los dos botones de
+   siempre cambian de nombre en vez de aparecer uno nuevo:
+   `Peso máximo / Volumen total` (kg) → `Mejor tiempo / Tiempo total` (s).
+2. **Una plancha no aparecía en Récords.** La lista filtraba por
+   `bestWeightKg !== null`, y un isométrico a peso corporal no tiene ni
+   uno: se caía entera de la sección. Y uno CON peso salía peor, con
+   "1RM est. 0 · Vol. 0", que ahí no significan nada. Ahora entra por su
+   aguante (`bestSeconds`), la cifra grande es el tiempo y el peso solo se
+   menciona si de verdad lo hubo.
+
+## Deslizar para salir de una App
+
+`SALIR_DESLIZANDO` + `salirDeLaAppDeslizando()` en `app.js`. Es el segundo
+paso del gesto: el primero (de una sección al inicio de la App) lo hace
+`VOLVER_UN_PASO` pulsando el botón de volver que ya existe.
+
+Están **Finanzas y Gimnasio**, que son las dos Apps que se navegan con un
+inicio de filas y secciones dentro. Lecturas y Viajes siguen fuera a
+propósito: allí el inicio es ya una lista de contenido (sagas, viajes) y
+no un menú de secciones. Añadir una es una línea más en esa tabla el día
+que Koku lo pida — que es justo como llegó el Gimnasio: el código llevaba
+un comentario diciendo "las demás no se tocan sin que lo pida", y lo
+pidió.
+
+## Vibración del fin de descanso: qué la calla de verdad
+
+Probado por Koku en el iPhone (ronda del 9/9/2026), con el botón
+"Probar el aviso (10 s)" de Configuración → Notificaciones:
+
+- **Sí la callan**: un botón de volumen, desbloquear la pantalla, abrir
+  la app, y quitar el aviso desde el centro de notificaciones.
+- **No la callan, y no es un fallo nuestro**:
+  - *La pausa de los AirPods.* Los mandos remotos
+    (`MPRemoteCommandCenter`, ver `RestAlertStopper.swift`) solo llegan
+    a la app que está reproduciendo. Con Spotify sonando, esa pulsación
+    es suya y iOS no se la pasa a nadie más. Quitarle el mando a Spotify
+    sí lo detectaría, pero entonces esa misma pulsación le pausaría la
+    música — justo lo que Koku no quería.
+  - *Deslizar el aviso hacia arriba.* Eso solo lo esconde: sigue
+    entregado, y iOS no avisa a la app. La detección va por sondeo de
+    `getDeliveredNotifications` (`bannerTimer` en `RestAudioWatcher`),
+    así que solo se entera cuando el aviso desaparece DE VERDAD, o sea
+    al quitarlo del centro de notificaciones.
+
+Los textos de los "?" de esa sección dicen exactamente esto, para no
+prometer lo que no se cumple.
+
+**Bug arreglado en la misma ronda**: la línea de diagnóstico
+(`gym-rest-alert-status`, "se paró X a los N segundos") se rellenaba
+SOLO dentro de `refreshMobileTab()`, o sea al *entrar* en la sección —
+que es justo cuando todavía no hay nada que contar. El recorrido real es
+entrar, pulsar Probar, bloquear, callarlo, desbloquear... y la pantalla
+seguía siendo la misma de antes de la prueba. Ahora es
+`refreshGymRestAlertStatus()` en `settings.js`, a la que llaman también
+un listener de `visibilitychange` (al volver a primer plano, solo si esa
+sección está a la vista) y un temporizador tras lanzar la prueba.
+
+## La barra de abajo con el entrenamiento delante
+
+Koku (9/9/2026): *"si le doy a la barra dentro de la app de cuando está
+en descanso, me lleva a la vista pero en la barra de estado sigue
+marcando que estoy en calendario"*.
+
+La causa: quien avisaba a la barra era `openGymView()` (con su
+`setCurrentScreen('gym')`), pero la mini-barra global de descanso llama
+directamente a `openGymLiveView()`, saltándoselo.
+
+Ahora es `openGymLiveView()` quien marca la barra, que es donde
+corresponde: el entreno es una capa por encima de lo que hubiera. Guarda
+la pantalla anterior en `pantallaAntesDelEntreno` (variable en memoria,
+no `localStorage`: solo vale mientras el entreno está a la vista) y
+`closeGymLiveView()` la devuelve — porque al cerrarlo sigues donde
+estabas, normalmente el calendario. Solo se guarda si la vista estaba
+oculta, para que reabrirla estando ya abierta no pise el recuerdo.
+
+No pelea con la barra: `goToMobileSection()` cierra las capas PRIMERO y
+llama a `refreshMobileNavActive()` al final, así que tocar una pestaña
+con el entreno delante gana siempre.
+
+## Eventos de varios días
+
+Koku lo vio con un "Viaje Mallorca" del jueves 17 al domingo 20: solo
+aparecía el día 17. El arreglo tiene **dos mitades y hacen falta las
+dos** — si solo se hace una, parece que no cambia nada:
+
+1. **Pedir los datos** (`public/routes-local/events.js`): el filtro de
+   rango era `start_at >= from AND start_at <= to`, o sea "empieza
+   dentro del rango". Pidiendo el viernes, un viaje que arrancó el
+   jueves ni se devolvía. Ahora es la condición de SOLAPE de toda la
+   vida: `start_at <= to AND COALESCE(end_at, start_at) >= from`. El
+   `COALESCE` cubre a los que no tienen fin (se comportan igual que
+   antes) y los que no tienen `start_at` siguen fuera, porque NULL no
+   cumple ninguna comparación. Esto arregla de paso un segundo caso que
+   nadie había mirado: un evento que viene del mes anterior.
+2. **Pintarlos** (`public/app.js`): `eventOccursOnDay(ev, date)` y
+   `eventDaySpan(ev, date)` son ahora la única fuente de verdad de
+   "¿sale este día?" y "¿cómo lo ocupa?". Las usan las cuatro vistas
+   (rejilla del mes, del año, tira de la semana y vista diaria), que
+   antes filtraban cada una por su cuenta con `sameDay(inicio, día)`.
+
+`eventDaySpan` devuelve `unico` / `inicio` / `entero` / `fin`, y de ahí
+sale todo lo demás:
+
+- **`entero`** (ni empieza ni acaba ese día) va a la fila de **todo el
+  día**, no como bloque. Petición de Koku: un bloque de 00:00 a 24:00
+  tapa la pantalla entera y no dice nada que no diga ya la etiqueta.
+- **`inicio`** y **`fin`** se pintan como bloque **recortado a ese día**:
+  del jueves 20:00 a medianoche, y de medianoche al domingo 14:00. Antes
+  solo se recortaba el final; el principio daba por hecho que el evento
+  empezaba hoy.
+- En los listados, `formatMobileEventTimeRange(ev, date)` enseña
+  `20:00 →`, `Todo el día` o `→ 14:00` según el tramo. Sin el segundo
+  parámetro se comporta como siempre (rango completo).
+
+**El ÚLTIMO día también va arriba** (decidido por Koku el 9/9/2026:
+"me parece bien, que aparezca en la sección de día entero"). Un bloque
+de medianoche a las 14:00 se come casi toda la pantalla para decir algo
+que la etiqueta dice mejor. Su etiqueta lleva la hora de fin
+(`Viaje Mallorca · → 14:00`), no un "Todo el día" pelado.
+
+**Esto es SOLO cómo se pinta**: el evento sigue guardado con su hora de
+fin de verdad, NO se convierte en `allDay` en la base de datos. Lo pidió
+expresamente: "que se quede guardado que la hora es la que aparece
+puesta, que no se guarde sólo como día entero".
+
+El PRIMER día se queda como bloque a propósito: empezar a las 20:00 son
+cuatro horas de alto, no molesta, y ver dónde arranca dentro del día sí
+aporta. Caso raro conocido y no resuelto: un evento que empieza a las
+02:00 y sigue al día siguiente pinta 22 horas de bloque el primer día.
+No ha aparecido en la práctica; si molesta, la regla tendría que pasar a
+ser por porcentaje del día ocupado.
+
+## Reloj de 12 o de 24 horas
+
+Se sigue al SISTEMA, no hay ajuste en la app (Koku: "yo lo tengo en 24h
+el sistema, pero hay gente que lo tiene en 12h, con am y pm, tenlo en
+cuenta"). Si tu teléfono está en 12h es porque así lo lees tú; repetirlo
+aquí sobra.
+
+`systemUses12hClock()` en `app.js` le pregunta a Intl por el idioma del
+DISPOSITIVO (`undefined`, no el nuestro) y mira su `hour12`. El idioma de
+los textos sigue siendo `es-ES` a pelo en toda la app; lo único que se
+toma prestado del sistema es esta decisión. `TIME_FORMATTER` pasa
+`hour12` explícito — sin eso, `es-ES` impone siempre 24h.
+
+**El campo donde se escribe la hora** (`createTimeField`) sigue siendo
+de números y nada más, también en 12h — Koku eligió esa vía: "que haya
+un selector de am y pm, así mantenemos el bloque con entrada de números
+únicamente". Con el teléfono en 12h aparecen dos botoncitos AM/PM
+apilados al lado del campo, y el campo pasa a aceptar 1-12.
+
+Lo importante de este componente: **hacia fuera habla SIEMPRE en 24
+horas** (`getValue()`/`setValue()` con "HH:MM"). El reloj de 12 vive
+solo en lo que se ve, así que nada del resto de la app (guardar,
+comparar, `combineDateAndTime`...) tuvo que cambiar. Las conversiones
+son `hour12To24()`/`hour24To12()`, y los dos únicos casos que se escapan
+de "sumar o restar 12" son las 12 de la noche (0h se escribe 12 AM) y
+las 12 del mediodía (12h se queda en 12 PM). Tocar AM/PM cambia la hora
+real sin tocar los números, por eso relee el valor.
+
+## Deslizar filas para Editar / Eliminar
+
+`wrapRowWithSwipeActions(row, { onEdit, onDelete })` en `app.js` (antes
+se llamaba `wrapGymRowWithSwipe`, se renombró al usarse en más sitios).
+La fila sigue al dedo mientras arrastras y cae sola a su sitio. Comparte
+con `wrapNoteRowWithSwipe` las clases y el estado de "solo una fila
+abierta" (`openSwipedNoteRow`), así abrir una cierra la otra.
+
+Dónde está puesto: carpetas y notas de Mi espacio, sesiones del
+historial del Gimnasio, y **tarjetas de grupo del calendario** (añadido
+el 9/9/2026). "Todos los eventos" queda fuera a propósito: no es un
+grupo de verdad.
+
+Al añadirlo en los grupos **se quitó el "modo editar"** que había ahí
+(un lápiz en la barra que convertía cada tarjeta en un acceso a su
+ficha): Koku pidió dejar UNA sola forma de editar, "así no da pie a
+dudas ni nada". Se fueron `groupsEditMode`, el botón
+`btn-groups-edit-mode` de index.html y las clases `.group-card.is-editing`
+/ `.group-card-edit-mark` de styles.css. Ahora tocar una tarjeta siempre
+entra en el grupo, y editar/eliminar se saca deslizando.
+
+**Trampa que ya mordió una vez**: el formulario de editar un tema se
+mueve en el DOM para aparecer justo debajo de la tarjeta que estás
+editando (`positionThemeForm`). Al hacer las tarjetas deslizables se
+colaba DENTRO del `.note-swipe-wrap`, y como ese envoltorio recorta lo
+que se sale y sus botones van pegados de arriba abajo (`top:0`,
+`bottom:0`), los botones se estiraban a lo largo de toda la pantalla
+por encima de los campos. Koku lo enseñó en una captura. La cura:
+insertar **después del envoltorio**, no después de la tarjeta
+(`card.closest('.note-swipe-wrap') || card`). Cuidado con esto si algún
+día se envuelve alguna otra fila que tenga algo insertándose al lado.
+
+Para ponerlo en un sitio nuevo: envolver la fila con esa función y
+añadir su selector a las reglas `.note-swipe-wrap > ...` de
+`styles.css` (hacen falta las dos: la del `transform` y la de
+`is-dragging`), con su fondo propio — la fila tiene que TAPAR los
+botones que quedan debajo.
+
+## El área segura no era solo de los popovers
+
+(9/9/2026, usando la app de verdad.) Los **modales** llegaban demasiado
+arriba y se metían bajo la Dynamic Island — se veía sobre todo en los
+altos, el de editar una sesión del historial y el de editar un ejercicio
+del entreno. `.modal` tenía `padding: 1rem` a secas y `.modal-card` un
+`max-height: 95vh` medido sobre la pantalla ENTERA.
+
+Ahora el padding de `.modal` suma `env(safe-area-inset-*)` arriba y
+abajo, y la tarjeta usa `max-height: 100%` — que como el modal es un flex
+de altura definida, se resuelve contra la franja que deja ese padding, no
+contra la pantalla. Un solo arreglo cubre todos los modales de la app.
+
+## Los interruptores llevaban el círculo descentrado
+
+Koku: *"los selectores no están centrados, mira todos los que haya en la
+app"*. El comentario del CSS presumía de números redondos (pista 2.4rem,
+círculo 1rem, hueco 0.2rem) pero **se olvidaba del borde**: al ser
+`position: absolute`, el círculo se coloca respecto a la caja de RELLENO,
+que mide 2px menos de ancho y de alto. Encendido, el hueco derecho
+quedaba en `0.2rem - 2px` (casi tocando) y abajo igual.
+
+Arreglado con `top: 50%` + `translateY(-50%)` (centrado que no depende
+del grosor del borde) y `translateX(calc(1rem - 2px))` al encender. De
+paso, la rayita del estado indeterminado de `.styled-checkbox` también
+iba con un `45%` a ojo.
+
+**Trampa al comprobarlo**: el círculo tiene `transition`, así que medir
+`getComputedStyle` justo después de cambiar el estado devuelve el valor
+de PARTIDA y parece que la regla no aplica. Hay que esperar a que termine
+la transición antes de medir.
+
+## Popovers flotantes y el área segura
+
+`positionFixedPopover()` en `settings.js` ha roto dos veces, por motivos
+distintos:
+
+1. Estimaba la altura con un número fijo, se quedaba corta con el
+   popover de iconos y lo dejaba fuera de la pantalla. Arreglado
+   midiendo la altura REAL.
+2. (9/9/2026) Koku enseñó una captura del selector de color de un grupo
+   con la mitad de arriba tapada por la Dynamic Island: cuando no cabía
+   debajo del botón, lo subía y lo topaba a 8px del borde de la
+   PANTALLA — pero esos primeros ~60px no se ven. Y si el popover es más
+   alto que el hueco útil (la paleta son 32 colores), ninguna posición lo
+   arregla: hace falta que se desplace por dentro.
+
+Ahora se miden las franjas inútiles con `safeAreaInsets()` (un elemento
+de usar y tirar que pide `env(safe-area-inset-*)` como padding, porque
+desde JavaScript no hay forma de leerlas), se le pone al popover un
+`max-height` de la franja visible con `overflow-y: auto`, y solo entonces
+se decide si va debajo, encima o pegado arriba. El margen es de 14px
+ADEMÁS del hueco del sistema: pegado justo debajo de la Dynamic Island
+queda agobiado y parece cortado aunque no lo esté.
+
+Afecta a TODOS los popovers por igual (color, icono, desplegable,
+fecha), así que el de crear un tema y el de un grupo se arreglan de una
+sola vez.
+
+**Y aun así el de COLOR se salió del molde** (9/9/2026, tras verlo en el
+iPhone): son 32 colores más el color a medida, y flotando tapaba media
+pantalla dejando la vista recargada — Koku: *"es un poco enfarragoso y
+la vista se ve sucia, con demasiada cosa"*. En móvil ahora se abre a
+**pantalla completa**, con cabecera propia ("Elige un color" + ✕) y los
+colores más grandes; en escritorio sigue flotando junto a su botón, que
+ahí sobra sitio. Lo decide `abrirPopoverDeColor()` en `settings.js`
+mirando el ancho (< 860px), NO una media query — porque además de
+cambiar el aspecto tiene que **saltarse `positionFixedPopover()` y
+limpiar el `left`/`top`/`max-height` en línea** que esa función deja
+puestos, o ganarían a las reglas de pantalla completa. La cabecera
+existe siempre en el DOM y solo se ve con `.is-fullscreen`.
+
+## Hora propuesta al crear un evento
+
+Siempre la hora en punto **más cercana** a la de ahora, y el fin a +1h.
+A las 7:59 sale 8:00–9:00. `roundToNearestHour()` en `app.js`.
+
+El fallo que vio Koku (a las 7:59 le proponía 9:00–10:00) estaba en la
+otra rama: si el evento se creaba desde un DÍA concreto (el "+" de la
+vista diaria), se plantaban las 9:00 fijas, daba igual la hora que
+fuera. Ahora la FECHA sale del día que elegiste y la HORA del reloj.
+Verificado con Playwright congelando el reloj en las 24 horas × 6
+minutos × los dos caminos (288 casos), incluido el salto de las 23:30 a
+las 00:00 del día siguiente.
+
+## La espalda: media, dorsales y lumbar (+ hombro posterior)
+
+Petición de Koku (9/9/2026). Ojo, esto tuvo **dos actos el mismo día** y
+lo que vale es el segundo:
+
+1. Primero se partió la espalda en tres (alta, media, dorsales).
+2. Al verlo en el móvil, Koku deshizo la de arriba: *"lo que has llamado
+   espalda alta cámbialo a hombro posterior y fusiónalo con media"*.
+
+**Como está ahora**: `espalda_media`, `dorsales` y `lumbar` (esta última
+nunca se tocó, conserva su nombre de siempre), más un
+`hombro_posterior` que vive junto a `hombros`, no con las espaldas —
+porque es un hombro.
+
+El reparto de los ~870 ejercicios sale **del origen**
+(free-exercise-db, descargado y cotejado por `id`, casan los 876), que
+sí distinguía `lats` de `middle back`: `lats` → **dorsales** (38) y
+`middle back` → **espalda media** (34, casi todo remos).
+
+**`hombro_posterior` nace SIN ejercicios asignados**: la librería
+original no distinguía el deltoides posterior, así que ese trabajo
+(face pulls, aperturas invertidas...) sigue etiquetado como `hombros`
+hasta que se recoloque a mano desde la ficha de cada ejercicio. En el
+diagrama sí tiene sitio: se queda con el hombro de la figura de
+ESPALDA, que anatómicamente es justo eso, y `hombros` pasa a marcar solo
+la figura de frente.
+
+**El diagrama** (`GYM_BODYMAP_ZONES`): la mancha de la espalda se parte
+en dos franjas con un corte a `y=560`. Los puntos del corte salen de
+**interpolar sobre los bordes del polígono original**, así que las
+piezas encajan sin hueco ni solape — comprobado renderizando el SVG. Si
+se tocan esos números a ojo, se nota.
+
+**Dos migraciones en `local-schema.js`**, las dos idempotentes y las dos
+necesarias porque **reimportar la librería NO arregla nada** (el import
+es idempotente por `library_id` y devuelve la fila existente sin
+tocarla, a propósito, para no pisar cambios hechos a mano):
+
+- `'espalda'` → `dorsales` por defecto, con una tabla de los 68
+  `library_id` que van a otro sitio.
+- `'espalda_alta'` → `espalda_media`, para los pocos que la build #42
+  llegó a repartir antes de que Koku deshiciera esa franja.
+
+**Isquiotibiales, no isquiosurales** (decisión de Koku): el segundo es
+el término de anatomía y es más preciso (el bíceps femoral se inserta en
+el peroné, no en la tibia), pero el primero es el que se busca al montar
+un día. El id interno sigue siendo `isquios`.
+
+## El día del Plan: dos entradas, no una
+
+Petición de Koku (9/9/2026). El modal del día tiene DOS mitades y nunca
+se ven las dos a la vez (`openGymRoutineModal(routine, modo)`):
+
+- **El lápiz de la lista** abre la FICHA: nombre, color, icono y a qué
+  bloque pertenece. Ahí vive también "Eliminar el día".
+- **Tocar el día** abre solo sus EJERCICIOS, que es a lo que se entra el
+  90% de las veces. Sin "Eliminar", que ahí se confundiría con "quitar
+  este ejercicio".
+- Un día NUEVO se abre siempre en ficha: hasta que no tiene nombre no
+  hay a qué añadirle ejercicios.
+
+**Trampa con la que ya se tropezó**: el campo del nombre es `required`,
+y un campo obligatorio OCULTO no se puede enfocar — el navegador se
+niega a enviar el formulario entero con un "invalid form control is not
+focusable" y **sin decir nada por pantalla**. Por eso se le quita el
+`required` mientras está escondido. El valor sigue relleno y se manda
+igual, así que guardar desde la mitad de ejercicios no pierde el nombre
+ni el color (comprobado).
+
+**Orden de los ejercicios**: cada fila lleva dos flechas (subir/bajar) a
+la izquierda, apagadas en los extremos. Con flechas y no arrastrando a
+propósito: dentro de un modal que ya se desplaza, arrastrar una fila
+pelea con el scroll, y aquí hace falta colocar UNA cosa en su sitio, no
+reordenar una lista larga. Al mover se repinta la lista entera (como
+hace todo ese formulario) para que las flechas de los extremos se
+apaguen solas y los índices de los listeners vuelvan a cuadrar.
+
+**Aquel descuido YA ESTÁ ARREGLADO**: la fila de ejercicio usaba un
+`<select>` NATIVO, contra la regla de no usar controles del navegador.
+Se cambió por `createSelectField({ searchable: true })` en la ronda del
+buscador de ejercicios — ver "Buscar ejercicios" más abajo.
+
+## Configuración por defecto del ejercicio
+
+Petición de Koku (9/9/2026): "yo añado el ejercicio y ahí ya le digo
+cuántas series se esperan, tiempo de descanso etc; en el día de entrene
+solo añado el ejercicio con esa configuración".
+
+Columnas nuevas en `gym_exercises`: `default_sets`, `default_reps`,
+`default_rest_seconds` (con su migración condicional; quedan a NULL en
+lo que ya existe, así que hasta que no las rellenes nada cambia). Se
+editan en la ficha del ejercicio, bajo "Cómo lo sueles hacer".
+
+**Las dos decisiones que tomó Koku cuando se le preguntó**, y que
+conviene no cambiar sin volver a preguntarle:
+
+1. **Heredar, pero poder cambiarlo por día.** El valor del ejercicio es
+   un PUNTO DE PARTIDA: al añadirlo a un día, los tres campos de
+   `gym_routine_exercises` llegan rellenos, pero siguen ahí y se pueden
+   cambiar. Así se puede hacer 5×5 el lunes y 3×12 el jueves con el
+   mismo ejercicio. Lo que manda en un día concreto sigue siendo
+   `gym_routine_exercises`, no el ejercicio.
+2. **Editar un ejercicio NO toca los días que ya lo tenían.** Lo ya
+   montado se queda como está y el valor nuevo solo se aplica de ahí en
+   adelante — para que editar un ejercicio nunca te cambie un plan por
+   sorpresa.
+
+Detalle fino, al **cambiar el ejercicio de una fila** del día: se traen
+los valores del ejercicio nuevo, pero **solo en los campos que no hayas
+tocado tú** ("no tocado" = vacío, o igual a lo que traía el ejercicio
+anterior). Así cambiar de ejercicio no te borra un 4×8 escrito a mano y
+a la vez no te deja puesto el descanso del ejercicio de antes.
+
+Las piezas comunes están en `GYM_TARGET_FIELDS` y `gymTargetsPorDefecto()`
+(`app.js`), para no repetir el trío series/reps/descanso por todas partes.
+
+## Elegir un tema reventaba por dentro (sin que se notara)
+
+Encontrado el 9/9/2026 mirando la consola en una prueba de otra cosa.
+`PUT /api/themes/selection/mine` acababa en
+`db.prepare('UPDATE devices ...').run(resolvedThemeId, req.device.id)`,
+y en la app sin servidor **`req.device` no existe** (el router local
+ignora a propósito los middlewares de autenticación, ver más arriba).
+O sea que cambiar de tema lanzaba una excepción SIEMPRE.
+
+No se veía porque `applyTheme()` en `settings.js` envuelve esa llamada
+en un `try/catch` que se la traga: el tema se aplicaba igual en pantalla
+y quedaba guardado en `localStorage`, que es lo que de verdad manda por
+dispositivo. Solo se notaba en la consola.
+
+Arreglado tratando "no hay dispositivo" como el anfitrión
+(`app_settings.host_active_theme_id`). **El resto del archivo ya lo
+hacía bien** con `req.device ? req.device.id : null`; a esta línea se le
+coló el acceso directo tal cual venía del servidor. Si aparece otro
+`req.device` sin guardar en `public/routes-local/`, es el mismo
+descuido.
+
+## Series alargadas: dropsets y rest-pause
+
+Petición de Koku (9/9/2026). Un **dropset** es una serie que, al llegar
+al límite, baja el peso y sigue; un **rest-pause** para unos segundos y
+sigue con el MISMO peso. Se apuntan **después** de la serie, en el
+diálogo de "¿has acabado?", porque dependen de la serie y del día: *"hay
+veces que lo hago y otras que no, por lo que no puedo ponerlo fijo desde
+ejercicio"*.
+
+**El modelo**: cada TRAMO extra es una fila propia de `gym_sets` colgada
+de su serie madre (`parent_set_id`, `segment_index`, `pause_seconds`) —
+el mismo truco que ya se usaba con los unilaterales, donde cada lado es
+una serie propia. Así el volumen sale con el `SUM` de siempre sin ningún
+caso especial, y **contar series es `parent_set_id IS NULL`**. Los
+tramos comparten `exercise_id`, `set_number` y `side` con su madre: son
+la MISMA serie.
+
+Hacia el cliente los tramos viajan **anidados** en su madre
+(`set.segments`), no sueltos en la lista — así `sets.length` sigue
+siendo el número de series de verdad y nadie tiene que acordarse de
+filtrar. La conversión va en `serializeSets()` (y otra igual en
+`/last-sets/:exerciseId`).
+
+**Las cuatro decisiones que tomó Koku**, tras enseñarle qué hacen otras
+apps (Hevy/Strong etiquetan cada tramo como una serie más) y qué dice la
+literatura (un rest-pause equivale en reps efectivas a ~2 series, pero
+eso es interpretación, no medida). No cambiarlas sin volver a
+preguntarle:
+
+1. **Cuenta como UNA serie**, no como tres. Si contara los tramos, la
+   racha, el heatmap y el objetivo semanal dirían que entrenaste el
+   triple.
+2. **Cualquier tramo puede ser récord**: *"a nivel de lógica la primera
+   debería ser la que más esfuerzo se haga, pero... hay veces que la
+   segunda sale más, más cuando comienzas a entrenar, que en la primera
+   no haces buena técnica"*. Por eso `gymSetConTramos()` aplana serie +
+   tramos y los PRs los miran por igual. Sigue excluyéndose el
+   calentamiento entero (madre y tramos) y el 1RM de Epley sigue pidiendo
+   1-12 reps.
+3. **La entrada es una línea discreta** dentro del formulario de
+   peso/reps que ya existía, no una pantalla propia: la mayoría de las
+   series no se alargan y tienen que seguir guardándose de un toque.
+4. **El peso del tramo se puede cambiar, con el de la madre por
+   defecto.** Va como sugerencia gris (el patrón "campo vacío = te vale
+   la sugerencia" que ya usa el resto del diálogo). Matiz: en rest-pause
+   se propone SIEMPRE el de la madre (es la definición); en un dropset
+   encadenado, el del tramo de arriba, porque va bajando desde él.
+
+**Las piezas** (`app.js`, bloque "Series alargadas"): `gymSetSegments()`,
+`gymSetVolumeKg()` (madre + tramos, la usan el volumen del historial, el
+mapa de músculos y la gráfica semanal), `gymSetConTramos()` (para los
+PRs), `gymSegmentChipHtml()` ("Drop ×2" en la fila) y
+`gymSegmentLinesHtml()` (las sub-líneas `↳ 15 s → 80 kg × 3` del
+historial). En el diálogo: `gymSetEndSegments`,
+`renderGymSetEndSegments()` y `gymLeerTramosDelFormulario()`.
+
+**Trampa que ya mordió al escribirlo**: leer "campo vacío → su
+placeholder" sin comprobar que el placeholder sea un NÚMERO. Los de las
+reps y la pausa son texto ("reps", "pausa s"), así que se colaba un
+`NaN` hasta la base de datos. `gymLeerTramosDelFormulario()` solo acepta
+el placeholder si `Number.isFinite()`.
+
+**Retoques tras probarlo en el iPhone** (misma fecha):
+
+- Las dos opciones van **en lista**, una debajo de otra y a todo lo
+  ancho, con la pregunta en su propia línea. Antes "+ Dropset" quedaba
+  al lado de la pregunta y "+ Rest-pause" solo en la línea siguiente, y
+  se leía fatal.
+- Los campos de un tramo llevan **etiqueta encima** (Pausa (s) / Peso
+  (kg) / Reps) en vez de rótulo dentro del campo: metidos los tres en
+  una fila, "pausa s" se cortaba y no se llegaba a leer la unidad. Cada
+  tramo es ahora un bloquecito con cabecera (tipo + ✕) y sus campos
+  debajo. La sugerencia gris del peso sigue igual.
+
+**Retocar una serie después** (petición de Koku: *"a lo mejor le he dado
+a acabar y se me ha olvidado darle a que he hecho alguna o le he dado mal
+al peso"*). Todo lo que se edita usa el MISMO editor de tramos
+(`montarEditorDeTramos()` / `gymLeerTramosDe()`, montables sobre
+cualquier contenedor):
+
+- **En el entreno**: deslizando la tarjeta del ejercicio → "Editar" (ver
+  el bloque siguiente).
+- **En el historial**: en el modal de editar una sesión, cada serie tiene
+  su editor de tramos (añadir, cambiar y quitar) y un botón "Al fallo".
+  Ahí los tramos viven en unidades de PANTALLA (como `weightDisplay` de
+  la serie) y se convierten a kg al guardar. Se leen del DOM y no del
+  array, porque un tramo recién añadido puede estar confiando en la
+  sugerencia gris y esa solo existe ahí.
+
+## La tarjeta del entreno: para USARLA, no para editarla
+
+Rediseño pedido por Koku el 9/9/2026, y el disparador fue un fallo real:
+el botón flotante de acciones (⋮) tapaba la ✕ del ÚLTIMO ejercicio y no
+se podía quitar. Eso se arregló aparte con un hueco al final de la lista
+(`padding-bottom` en `.gym-live-exercises`), pero de ahí salió el
+rediseño: *"yo deslizo el ejercicio entero para editar cualquier cosa
+del ejercicio... se hace un cuadro de diálogo más grande, así es más
+cómodo. Sin deslizar se puede comenzar serie, subir o bajar ejercicio y
+ya, todo el resto deslizando, editar o eliminar"*.
+
+**La tarjeta ya no tiene ni un campo donde escribir.** Peso, repes, RPE
+y nota se VEN, no se tocan; el descanso es un dato, no un chip pulsable.
+Lo que queda a golpe de toque: plegar/desplegar y empezar o terminar la
+serie. La columna del ✓ también se fue (Koku: *"sabiendo que ahora te
+aparece lo de — si no hay nada, esa columna te la puedes cargar"*);
+`done` sigue existiendo por dentro, y marcar/desmarcar una serie vive
+ahora en el diálogo del ejercicio. Los chips de la serie (fallo, tramos,
++30s) van en **su propia línea** debajo: metidos en la celda del número
+se comían la columna de "Anterior". Eso tiene una consecuencia que hace que todo
+encaje: **sin inputs, la tarjeta se puede deslizar sin pelearse con
+nadie** — antes, arrastrarla habría chocado con meter el dedo en un
+campo.
+
+**Deslizarla da tres acciones**: Editar / Mover / Quitar.
+
+- **Editar** abre `#gym-exercise-edit-modal`, un diálogo grande con el
+  ejercicio ENTERO: descanso, RPE, nota, y cada serie con su peso,
+  repes, nota, "al fallo", sus tramos y un ✕ para quitarla, más
+  "+ Serie". Trabaja sobre una **copia** (`gymExerciseEditDraft`), así
+  que Cancelar descarta de verdad. Al guardar, si la serie EN CURSO era
+  de ese ejercicio y ha desaparecido al quitar series, se cancela — si
+  no, quedaría un cronómetro corriendo sobre una serie inexistente y
+  ningún otro ejercicio dejaría empezar.
+- **Mover** sustituye a las flechas ↑↓ que había en la cabecera. No es un
+  arrastre siempre activo (arrastrar sin más es hacer scroll): se ARMA
+  desde ese botón y se desarma **solo al soltar**, tal como lo pidió
+  (*"una vez sueltas tendrías que volver a darle a mover"*). Mientras
+  está armado, el deslizamiento lateral de esa tarjeta se aparta
+  (`bloqueadoSi` en `wrapRowWithSwipeActions`), así los dos gestos nunca
+  se pisan. Ver `armarMovimientoDeEjercicio()` y
+  `habilitarArrastreDeEjercicio()`.
+- **Quitar** es lo de siempre: va al pool de quitados, recuperable.
+
+**Trampa que costó la ronda entera**: `.note-swipe-wrap.is-open >
+.gym-live-exercise-card` — la regla del transform en estado ABIERTO. Sin
+ella la tarjeta se desliza mientras arrastras y **vuelve sola a su sitio
+al soltar**, tapando otra vez los botones: *"se despliega, pero no se
+mantiene, no puedo pulsar ninguna de las 3 opciones"*. CLAUDE.md ya
+avisaba de que hacen falta las DOS reglas (transform abierto +
+`is-dragging`) y se coló solo una. Y la prueba **no lo pilló** porque
+miraba la clase `is-open`, que sí se ponía: al envolver una fila nueva
+hay que comprobar el `transform` de verdad, o que el botón de acción esté
+DESTAPADO con `elementFromPoint`.
+
+Trampas que ya mordieron al construirlo:
+
+- `habilitarArrastreDeEjercicio()` se llama MIENTRAS se construye la
+  tarjeta, cuando todavía no está en el DOM: leer `parentElement` ahí da
+  `null`. La lista de hermanos se mira en cada uso, no al enganchar.
+- `setPointerCapture()` **lanza** si ese puntero ya no está activo (pasa
+  con gestos que el sistema corta a medias). Va en un `try/catch`: no es
+  imprescindible, y una excepción ahí dejaba el arrastre a medias.
+
+Con esto desapareció `gymSegmentLinesHtml()` (las sub-líneas de solo
+lectura del historial): ya no hacía falta, los tramos se ven en su
+editor.
+
+Verificado con 25 comprobaciones de Playwright, incluidas las raras:
+`segments` que no es un array, tramos nulos o con `kind` inventado,
+tramos sin repeticiones (se descartan) o sin peso, pausa no numérica,
+un calentamiento con un tramo de 999 kg (no sale como PR), unilaterales,
+quitar la serie madre a mano, recargar la app en medio del entreno,
+series viejas sin el campo, 12 tramos seguidos, la unidad en libras, la
+idempotencia de la migración, y que borrar la sesión no deja tramos
+huérfanos.
+
+## Series al fallo, y por qué el volumen deja de ser "kilos movidos"
+
+Petición de Koku (9/9/2026): *"quiero poder marcar si llego al fallo en
+una serie específica... para indicar que esa serie me ha exprimido al
+máximo aunque haga dropset y no haga las mismas repes que en la primera,
+para que se tenga en cuenta para las gráficas"*.
+
+**Marcarlo**: un botón propio ("Llegué al fallo") en el mismo diálogo de
+fin de serie, guardado en `set_type = 'failure'`, valor que el esquema ya
+tenía reservado. Es por SERIE, no por ejercicio. Botón con su marca
+cuadrada, no un checkbox nativo (regla de CLAUDE.md).
+
+**Contarlo — decisión suya, y va contra mi recomendación**: se le
+ofrecieron tres formas (solo etiquetar / un contador propio de series al
+fallo / que además pese más en el volumen) y eligió la tercera. Le avisé
+de que ponderar el volumen "se inventa peso que no levantaste"; lo eligió
+igualmente, así que se hizo. **No deshacerlo sin volver a preguntarle.**
+Las tres salvaguardas con las que se construyó:
+
+1. **Lo GUARDADO son siempre los kg reales.** El factor se aplica solo al
+   pintar. Las rutas (`/summary`, `/progress/:exerciseId`) devuelven el
+   volumen real Y, aparte, cuántos de esos kg salieron de series al fallo
+   (`failureVolumeKg`) — el ajuste lo hace el cliente con
+   `gymVolumenAjustado()`. Por eso cambiar el factor no reescribe ningún
+   historial: los mismos datos se vuelven a sumar con otro número.
+2. **Es ajustable** (Gimnasio > Progreso > "Peso extra de una serie al
+   fallo"): ×1 / ×1,1 / ×1,2 (por defecto) / ×1,25 / ×1,5. **×1 lo
+   desactiva del todo.** Se dejó a mano precisamente porque el número es
+   inventado: no hay cifra estándar para esto.
+3. **Se aplica a la serie ENTERA**, tramos de dropset/rest-pause
+   incluidos: lo que se llevó al fallo fue la serie completa. En SQL eso
+   es un `COALESCE(p.set_type, st.set_type) = 'failure'` con un LEFT JOIN
+   al padre, porque un tramo lleva su propio `set_type` ('dropset') y
+   hereda el "fallo" de su madre.
+
+Dónde cuenta: historial, mapa de músculos en modo volumen, gráfica
+semanal, PRs (`bestVolumeKg`), gráfica de progreso del ejercicio, logros
+y el resumen del entreno. El **peso máximo NO se ajusta nunca** — ese es
+el peso que de verdad moviste. Piezas en `app.js`:
+`gymSetVolumeRealKg()` (kg de verdad), `gymSetEsAlFallo()`,
+`gymSetVolumeKg()` (lo que se pinta) y `gymVolumenAjustado()`.
+
+Además hay un **contador de series al fallo**: en el resumen del entreno
+y, si hay alguna, en Consistencia ("Series al fallo este mes").
+
+**Bug arreglado de rebote**: el modal de "editar sesión" a mano no
+mandaba `setType`, así que editar una sesión **borraba en silencio** la
+marca de fallo (y la de calentamiento). Ahora viaja igual que los tramos.
+
+## Al acabar el descanso: que no se te pase la siguiente serie
+
+Koku: *"cada vez que acaba el tiempo de descanso se me olvida darle a
+empezar serie"*. Ofreció dos vías (botón grande o que empiece sola) y al
+preguntarle eligió **las dos, con interruptor**:
+
+- **Siempre**: el botón "Empezar serie N" del ejercicio cuyo descanso
+  acaba de terminar se pone grande y con latido, y la mini-barra global
+  (con el entreno oculto) deja de ser una cuenta atrás y pasa a decir
+  "Empezar serie N" — **tocarla arranca la serie**, además de llevarte al
+  entreno.
+- **Opcional** (Configuración > Notificaciones > "Empezar la siguiente
+  serie sola", **apagado de fábrica**): la serie arranca sola. El "?" de
+  esa fila avisa del precio: el cronómetro cuenta desde ese momento, así
+  que lo que tardes en volver a la máquina se suma a la serie.
+
+Detalles que importan:
+
+- **Solo si queda serie pendiente**, tal cual lo pidió. Nunca inventa una
+  serie extra — eso lo hace `gymStartSet` cuando ya están todas hechas, y
+  aquí se comprueba antes con `gymNextPendingSetIndex`.
+- Quién es "el que le toca" sale de `gymLiveSession.restSetRef`, que
+  apunta a la serie cuyo descanso estaba corriendo y **no se borra al
+  vencer**, así que sigue sirviendo después.
+- `gymLiveSession.restEndedAt` enciende el aviso y `gymStartSet()` lo
+  apaga, así que no se queda puesto para siempre.
+- El latido obedece solo al interruptor de Animaciones, gratis, gracias a
+  la regla global `:root[data-animations="off"] *`.
+
+## El aviso de descanso se borra solo al volver a la app
+
+Koku: *"si hay una notificación y entro en la app, que se borre, y así no
+hace falta que la borre manualmente cada vez"*. `gymCleanupRestNotificationStack()`
+ya se llamaba en el foreground (`visibilitychange` + `resume`), pero solo
+quitaba las repeticiones 902/903 y dejaba puesta la principal (901).
+Ahora las quita todas.
+
+Cubre los dos casos de una vez: tocar el aviso abre la app, y volver a
+ella por tu cuenta lo limpia igual. **Solo los avisos del descanso** (los
+ids reservados) — se le preguntó y prefirió que los recordatorios de
+eventos se queden hasta que él los quite. Y no pelea con la vigilancia de
+audio que calla la vibración: abrir la app ya la callaba, esto va en la
+misma dirección.
+
+## Cerrar tocando fuera, y la versión a la vista
+
+Dos peticiones pequeñas de Koku de la misma ronda.
+
+**Tocar fuera cierra** (`cerrarModalAlTocarFuera(modalId, cerrar, hayCambios)`
+en `app.js`): puesto de momento en los DOS diálogos grandes del Gimnasio,
+el del historial (`gym-session-modal`) y el de editar un ejercicio del
+entreno (`gym-exercise-edit-modal`), que son los que él nombró. Detalles
+que no son obvios:
+
+- **Solo el fondo**: `if (e.target !== modal) return`. Un toque dentro de
+  la tarjeta llega igualmente por burbujeo, pero con `e.target` apuntando
+  a lo de dentro.
+- **Si hay cambios sin guardar, pregunta** antes de tirarlos
+  (`showAppConfirm`, destructivo). "Hay cambios" se marca con
+  `dataset.sucio`: cualquier `input` dentro del modal, o pulsar cualquier
+  botón que NO sea el de cerrar/cancelar (añadir una serie, marcar al
+  fallo, quitar un tramo...). Hacer scroll no genera clicks sobre
+  botones, así que no cuenta — se comprobó.
+- **La marca se limpia AL ABRIR**, no al cerrar: cerrar con la ✕ o
+  guardando no pasa por este código, y si se limpiara solo ahí el modal
+  se reabriría creyéndose sucio y preguntaría sin motivo.
+- **`dataset.preguntando`**: dos toques seguidos en el fondo abrían dos
+  preguntas apiladas y la de abajo se quedaba colgada esperando una
+  respuesta que ya nadie iba a dar. Con la marca, el segundo toque no
+  hace nada. Y tras responder que sí se vuelve a mirar si el modal sigue
+  abierto, por si se cerró por otra vía mientras se preguntaba.
+
+**La versión** (`APP_VERSION` / `APP_VERSION_DATE` / `renderAppVersionLine()`
+en `app.js`, **al final de Configuración**, debajo de las tarjetas del
+menú — se movió ahí el 11/9/2026, antes estaba dentro de "Este
+dispositivo"): se escribe **a mano** en cada ronda, junto al número de
+`package.json` — la app no tiene
+paso de compilación que pueda inyectarlo, así que este es el único sitio
+donde vive de cara al usuario. **Si subes la versión, tócala aquí
+también.** La fecha se formatea con `Intl.DateTimeFormat(undefined, ...)`
+para seguir el formato del SISTEMA (Koku: *"por si tienen mm/dd/aa y no
+dd/mm/aa"*), con la ISO como red de seguridad si Intl falla.
+
+**Los bloques de valores del historial** (Peso / Reps / Descanso) se
+descuadraban cuando la etiqueta del descanso llevaba el chip `+60` y
+pasaba a dos líneas: los tres campos son hermanos flex, y sin
+`align-items: stretch` en `.gym-set-segment-fields` + `justify-content:
+flex-end` en `.gym-set-segment-field`, el input del descanso bajaba solo.
+Ahora los tres arrancan y acaban a la misma altura (comprobado midiendo
+los rectángulos, no a ojo).
+
+## El ciclo de días de un bloque
+
+Petición de Koku (9/9/2026): *"que en el bloque de entrenamiento te
+permita poner como opcional cuánto dura la rutina (en día): lunes
+entreno x, martes entreno y, miércoles descanso, jueves entreno x otra
+vez"*, para engancharlo con el calendario y con el widget.
+
+**El modelo**: el bloque guarda si usa ciclo (`cycle_enabled`) y por
+dónde va (`cycle_position` + `cycle_position_date`), y las posiciones
+viven en una tabla aparte, `gym_block_cycle_days` (`block_id`,
+`position`, `routine_id`). **`routine_id` a NULL es un DESCANSO**, que es
+una posición de verdad y no un hueco que haya que adivinar.
+
+Tabla aparte y no un campo en `gym_routines` a propósito: así **un mismo
+día de entreno puede repetirse** en varias posiciones (día 1 y día 4 de
+un ciclo de 6), que con un campo por rutina sería imposible.
+
+**Las tres decisiones que tomó Koku**, no cambiarlas sin volver a
+preguntarle:
+
+1. **El ciclo avanza por ENTRENOS HECHOS, no por calendario.** Si te
+   saltas el martes, el miércoles te sigue tocando lo mismo: el plan no
+   te deja atrás. La excepción es un **descanso**, que se consume solo al
+   pasar el día — si no, te bloquearía el ciclo para siempre. Por eso
+   hace falta `cycle_position_date`: para saber desde cuándo lleva puesta
+   la posición actual. `resolverCiclo()` en `routes-local/gymBlocks.js`
+   solo adelanta descansos ya pasados, uno por día transcurrido, con un
+   tope de vueltas por si el ciclo fuera todo descansos.
+2. **El "hoy te toca" del calendario es CALCULADO, no una tarea
+   guardada.** No se crean filas de `events`: `gymCicloDeHoy()` mira el
+   ciclo cada vez. Siempre está al día, cambiar el plan lo cambia solo, y
+   no quedan tareas viejas que regenerar ni limpiar.
+3. **Si hoy toca descanso y te apetece entrenar, entrenas** — te avisa,
+   pero no te lo impide. Y al terminar, si lo que has hecho **no era lo
+   que tocaba**, se pregunta dónde recolocar el ciclo, que es lo que él
+   pidió para que el aviso y el widget sepan cómo seguir. Tres caminos en
+   `gymAvanzarCicloTrasEntrenar()`:
+   - Era lo que tocaba → avanza solo y en silencio (el caso normal).
+   - Has hecho otro día **que sí está en el ciclo** → pregunta
+     "¿recoloco el ciclo ahí?", diciendo qué te tocaría mañana.
+   - Entreno libre o un día que no está en el ciclo → solo avisa de que
+     el ciclo se queda donde estaba (no hay nada sensato a lo que
+     saltar).
+
+**Quién mueve el cursor es el CLIENTE** (`POST /:id/cycle/position`), no
+la ruta de guardar la sesión: cuando lo entrenado no es lo que tocaba
+hace falta preguntar, y esa pregunta vive en la pantalla.
+
+**Dónde se ve**:
+- **Ficha del bloque**: sección "Ciclo de días" con su interruptor y la
+  lista ordenada de posiciones, cada una con un `createSelectField` (día
+  del bloque o "Descanso") y flechas ↑↓ + ✕. Encenderlo con el ciclo
+  vacío propone una posición por cada día del bloque. El ciclo se edita
+  en un **borrador** (`gymCicloBorrador`) y solo se guarda al dar a
+  Guardar, igual que el nombre — Cancelar descarta de verdad. En un
+  bloque NUEVO la sección entera está oculta: hasta que no existe no
+  tiene días que colocar.
+- **"¿Qué toca hoy?"**: el día que toca va primero y marcado "Hoy"; si
+  toca descanso, lo dice y deja elegir igualmente.
+
+**En el CALENDARIO no se ve nada, y es a propósito.** Llegó a haber una
+tira bajo la cabecera del día ("Hoy toca Empuje · día 1 de 3"), y Koku la
+quitó el mismo día: *"que te muestre lo de qué entrenamiento toca en el
+calendario realmente no me aporta nada, era más bien el que pudiera saber
+el widget qué día es y así saber a qué día está enlazado cada
+entrenamiento"*. O sea: **el ciclo no existe para pintar el calendario**,
+existe para que el Gimnasio sepa qué ofrecerte y para alimentar el
+widget. Si algún día vuelve a hacer falta, `gymCicloDeHoy()` da todo lo
+necesario en una sola llamada (bloque, posición, día y si es descanso).
+
+Y el motivo de que aquí no haya "qué toca mañana" tampoco le preocupa —
+lo dijo él: *"supuestamente te sabes lo que toca, esto es sólo para
+facilitar el acceso desde un botón"*. El ciclo es un atajo, no una
+agenda.
+
+**`hoyISO()` usa la fecha LOCAL, no `toISOString()`**: a las 00:30 en
+España el UTC todavía es el día anterior y el ciclo se quedaría un día
+atrás.
+
+**Lo que aguanta** (26 comprobaciones de Playwright, `ciclo.mjs` y
+`ciclo-raros.mjs`): un ciclo de solo
+descansos con nueve días pasados (no se cuelga), una posición que apunta
+a un día borrado (se lee como descanso), posiciones inventadas en la
+ruta (99, -1, 0, texto, null, 1.5 — todas rechazadas), un día de otro
+bloque en el ciclo (se guarda como descanso), un ciclo de 61 días
+(rechazado), un ciclo encendido pero vacío, el cursor apuntando a una
+posición recortada por debajo (vuelve al día 1), una fecha futura en el
+cursor por si alguien mueve el reloj, y que borrar el bloque no deja
+posiciones huérfanas.
+
+**Sin empezar todavía**: el widget que lea esto. El modelo ya está
+pensado para él (una sola lectura da "qué toca hoy" y el id del día para
+arrancarlo), pero la parte nativa está por hacer.
+
+## Buscar ejercicios (y adiós al último `<select>` nativo)
+
+Petición de Koku (9/9/2026): *"que en los ejercicios que yo creo de 0 me
+pusiera una opción para filtrar o buscar, porque si tengo muchos
+diferentes se hace un poco una odisea"*. Se hizo en los DOS sitios donde
+duele, no solo en el que nombró:
+
+**1. Tu lista de ejercicios** (pestaña Plan): un campo encima del listado
+que filtra por **nombre, músculo y material** — así "pierna" saca todas
+las de pierna aunque ninguna se llame así. Sin tildes y en minúsculas
+(`gymNormalizarBusqueda`), para que "biceps" encuentre "Bíceps". **Solo
+aparece a partir de 8 ejercicios** (o si ya hay algo escrito): con cuatro
+sería una fila desperdiciada. El filtro vive en memoria
+(`gymExercisesFiltro`), **NO en localStorage**: un filtro que sobrevive a
+cerrar la app hace pensar que has perdido ejercicios.
+
+**2. Los desplegables para elegir ejercicio**, que eran los **dos últimos
+`<select>` nativos de la app** — el de la fila de un día del plan y el de
+editar una sesión del historial. CLAUDE.md los tenía apuntados como
+descuido conocido desde que se puso la regla de no usar controles del
+navegador; se han ido con esta ronda. **Ya no queda ni un `<select>`
+nativo en toda la app** (comprobado contando `document.querySelectorAll('select')`).
+
+Para eso, `createSelectField()` acepta ahora **`searchable: true`**, que
+le mete un buscador dentro del popover. Detalles:
+
+- El buscador y la lista son **hermanos dentro del popover**, y
+  `renderOptions()` repinta solo la lista — si repintara el popover
+  entero, escribir destruiría el campo y perderías el foco a media
+  palabra.
+- La cabecera va **`position: sticky`**: con ~870 ejercicios, tener que
+  volver arriba del todo para reescribir sería justo el problema que esto
+  viene a arreglar. Y con `.has-search` el relleno pasa del popover a la
+  lista, o por ese hueco se verían pasar las opciones por detrás.
+- **No se enfoca solo** a propósito: en el móvil, abrir el teclado nada
+  más desplegar tapa media lista, y muchas veces solo quieres mirar.
+- **Enter no envía el formulario** de alrededor (estos desplegables viven
+  dentro de modales con `<form>`).
+- **Cada apertura empieza con la lista entera**: un filtro heredado de la
+  vez anterior parece que faltan ejercicios.
+- Clicar dentro del buscador no cierra el popover porque el listener
+  global de `settings.js` ya ignora los clics dentro de `.select-popover`.
+
+Las opciones llevan el músculo pegado al nombre (`Curl martillo ·
+Bíceps`, `gymExerciseSelectOptions()`): con la librería importada hay
+ejercicios que se llaman casi igual, y además deja buscar por músculo.
+
+**Bug encontrado forzando fallos, no en el uso normal**: escribir **solo
+espacios** en el buscador de la lista vaciaba el listado, porque
+`normalizar('   ')` no es cadena vacía y se buscaba literalmente `"   "`.
+En el móvil eso pasa con facilidad (el autocorrector mete espacios) y
+parecería que has perdido los ejercicios. Va con `.trim()`. La versión
+del popover ya lo hacía bien; a la de la lista se le escapó.
+
+## El teclado del móvil y las pantallas completas
+
+Koku, escribiendo en el buscador de ejercicios: *"me deja moverme todo
+hasta abajo y ver la barra de estado estando el teclado en la pantalla"*.
+
+Es **el mismo problema que ya se arregló en el editor de notas**, y por
+la misma causa: con el teclado abierto el teléfono NO encoge la ventana,
+la deja igual de alta y tapa la parte de abajo. Una capa
+`position: fixed; inset: 0` — que es lo que son TODAS las
+`.my-space-view` (Gimnasio, Notas, Viajes, Finanzas, Lecturas, Grupos,
+el buscador global) — sigue midiendo la ventana ENTERA, así que su mitad
+inferior queda debajo del teclado y el sistema deja arrastrar la vista
+entera para llegar a ella, arrastrando de paso la barra de estado a la
+vista.
+
+En vez de repetir el arreglo de las notas capa por capa, ahora hay **un
+solo anclaje genérico** (`empezarAnclajeDeCapa` / `soltarAnclajeDeCapa`
+en `app.js`), enganchado a `focusin`/`focusout` del documento: en cuanto
+enfocas un campo de texto dentro de una `.my-space-view` visible, esa
+capa recibe el alto y el desplazamiento REALES que dice `visualViewport`
+y la página se deja quieta. Ventaja: **una pantalla nueva con un campo
+de texto nace ya arreglada**, sin acordarse de nada.
+
+Detalles que importan:
+
+- **El editor de notas queda FUERA a propósito**
+  (`:not(.note-editor-view)` en el selector): tiene su propio anclaje,
+  que además mueve el cursor para que no lo tape el teclado. Dos
+  anclajes sobre la misma capa se pisarían.
+- **Solo los campos que abren teclado**: un checkbox, un radio o un
+  botón no lo abren y no deben anclar nada (`CAMPOS_CON_TECLADO`).
+- **Un campo dentro de un MODAL no ancla la capa de detrás**: el modal
+  es su propia capa fija, con su propio bloqueo de scroll.
+- **El `focusout` espera un ciclo** (`setTimeout(…, 0)`): al saltar de un
+  campo a otro llega el focusout del primero ANTES que el focusin del
+  segundo, y sin esa espera el anclaje se soltaba y volvía a ponerse en
+  cada salto, dando un parpadeo.
+- **Se limpian los estilos en línea al soltar**: si se quedaran, la capa
+  mantendría el alto del hueco con teclado y quedaría corta al cerrarlo.
+  Comprobado cerrando la pantalla con el campo aún enfocado.
+
+## Deslizar también los ejercicios (y el buscador dentro del desplegable)
+
+Koku: *"por seguir un poco con la misma dinámica en todo, en vez de
+botón, hazlo deslizable"*. Las filas de tu lista de ejercicios perdieron
+el lápiz y se envuelven con `wrapRowWithSwipeActions` como todo lo demás
+(notas, carpetas, sesiones del historial, tarjetas de grupo). Editar y
+Eliminar salen deslizando.
+
+`.gym-list-item` ya estaba en las DOS reglas necesarias de `styles.css`
+(el `transform` en `is-open` y el `transition: none` en `is-dragging`),
+porque las sesiones del historial ya lo usaban — no hizo falta CSS nuevo.
+La prueba comprueba el `transform` de verdad y que el botón quede
+DESTAPADO con `elementFromPoint`, no la clase `is-open` (la trampa que ya
+mordió una vez).
+
+**Borrar desde ahí respeta la regla del servidor**: un ejercicio con
+series ya apuntadas no se puede borrar (`has_history`), y ese error se
+cuenta con palabras en vez de soltar el código.
+
+**El desplegable enseña SOLO el nombre.** Llevaba el músculo pegado
+(`Curl martillo · Bíceps`) y Koku lo quitó: *"deja sólo el nombre, el
+músculo no hace falta que aparezca... ten en cuenta que muchos
+ejercicios a veces ya llevan el músculo en el nombre"* — "Curl de Bíceps
+· Bíceps" se leía repetido. Pero el músculo y el material **siguen
+viajando en `keywords`**, un campo de opción que el buscador SÍ mira y
+la lista NO enseña: escribir "pierna" sigue sacando todas las de pierna.
+
+**La barra del buscador parecía descuadrada** hacia la derecha. Medido en
+el navegador salía simétrico (7px y 7px), así que no era el margen: era
+**la barra de desplazamiento corriendo pegada al campo**. Ahora quien se
+desplaza es la LISTA y no el popover entero
+(`.select-popover.has-search { overflow: hidden !important }` — el
+`!important` es porque `positionFixedPopover()` pone `overflow-y: auto`
+en LÍNEA), así que la barra va solo al lado de las opciones. De paso la
+cabecera queda de verdad fuera del scroll y ya no necesita
+`position: sticky`.
+
+## "Hoy te toca": por dónde vas en el ciclo
+
+El agujero que encontró Koku usándolo: *"yo ahora para el bloque creado
+tengo 3 días, descanso, 2 días, descanso. Hoy me tocaría hacer el primer
+descanso, no el día 1... ¿cómo se puede corregir eso?"*. Un ciclo recién
+creado empieza SIEMPRE por el día 1, aunque tú ya lleves media vuelta
+hecha, y no había forma de decírselo.
+
+Ahora la ficha del bloque tiene un **"Hoy te toca"**
+(`renderGymCicloHoyField`) con las posiciones del ciclo por su nombre
+("Día 4 · Descanso"). La ruta ya existía (`POST /:id/cycle/position`);
+lo que faltaba era la pantalla.
+
+- Es parte del **borrador**, como el resto del ciclo: se elige aquí y se
+  manda al guardar, no al vuelo. Cancelar lo descarta.
+- Se manda **después** del `PUT /cycle`: la ruta rechaza una posición
+  que no exista, y las posiciones válidas son las que acaban de
+  guardarse.
+- La fecha se pone a hoy sola, así que un descanso elegido aquí **se
+  consume mañana**, como cualquier otro.
+- Si acortas el ciclo por debajo de donde estabas, vuelve al día 1 en vez
+  de dejar un valor que ya no existe.
+
+**Bug encontrado forzando fallos**: con una posición imposible metida a
+mano, la ruta lanzaba y el error se llevaba por delante TODO lo que
+venía después del `await` — el modal se quedaba abierto y la lista sin
+refrescar, aunque el ciclo sí se hubiera guardado. Ahora la posición se
+recorta al rango ANTES de mandarla y la llamada va en `try/catch`: que no
+se pueda mover el cursor nunca impide guardar el ciclo, que es lo
+importante.
+
+## Widgets de iOS: el primero, "Qué toca hoy"
+
+Primera tanda de widgets, elegida por Koku: **solo el del Gimnasio**, en
+**pantalla de inicio + pantalla de bloqueo + centro de control**, y
+**sin refresco por horas** (lo repinta la app cuando cambia algo).
+
+### Lo que hay que entender antes de tocar nada
+
+**Un widget NO puede leer la base de datos.** La base es SQLite
+compilado a WebAssembly y vive dentro de la webview, en IndexedDB; el
+widget es código nativo aparte que iOS ejecuta con la app cerrada. No
+hay forma de que llegue hasta ahí.
+
+La única vía es un **App Group**: un buzón compartido entre la app y la
+extensión. La app deja un resumen pequeño en JSON y el widget lo lee.
+Grupo: `group.com.koku.remindmelater`.
+
+**El App Group es una capacidad de FIRMA, no solo código.** Los dos
+targets llevan su `.entitlements` declarándolo
+(`CODE_SIGN_ENTITLEMENTS` en las cuatro configuraciones), y el App ID de
+Apple tiene que tenerla dada de alta A MANO. Aquí hubo una creencia
+equivocada que costó builds: el pipeline firma con
+`-allowProvisioningUpdates`, y de ahí se dio por hecho que Xcode se lo
+apañaría solo. **No es verdad**: esa bandera deja a Xcode crear
+PERFILES, no CAPACIDADES. Una capacidad que el App ID no tiene no se
+inventa desde un runner, y el error que da no lo dice.
+Está **hecho desde el 10/9/2026** (ver el bloque RESUELTO EN LA BUILD #55),
+así que no hay que repetirlo — pero si algún día aparece un target nuevo
+con su propio bundle ID, ese empieza otra vez sin capacidad.
+
+**Y falló de verdad, en silencio, en las builds #40–#52.** El widget se
+quedaba en "Abre la app" por muchas veces que Koku la abriera. La causa
+estaba en el workflow, no en el código: se archivaba con
+`CODE_SIGNING_ALLOWED=NO`, y **los entitlements se incrustan al FIRMAR**.
+Sin firma en el archivo no había entitlements que incrustar, así que
+`-exportArchive` no tenía forma de saber que hacía falta un perfil con
+App Groups: pedía uno pelado y firmaba con lo único que trae de serie
+(`application-identifier`, `team-identifier`, `get-task-allow`,
+`beta-reports-active`). Resultado: `UserDefaults(suiteName:)` devolvía
+nil en el iPhone y no había ni un error en ninguna parte.
+
+Lo que hay ahora en `ios-testflight.yml`, y por qué:
+
+- **Se archiva firmando ad hoc** (`CODE_SIGN_IDENTITY=-` +
+  `CODE_SIGN_STYLE=Manual` + `AD_HOC_CODE_SIGNING_ALLOWED=YES` +
+  `CODE_SIGNING_REQUIRED=NO`, sin perfil): firma que no necesita ni
+  certificado ni perfil, pero que SÍ incrusta los entitlements. Con eso el
+  archivo ya lleva el App Group y `-exportArchive` sabe qué perfil pedir.
+  **No se puede archivar con firma automática de verdad**: Xcode pide
+  entonces un perfil de DESARROLLO y Apple se niega a crearlo si el equipo
+  no tiene dispositivos registrados, que es el caso de un runner.
+- **Dos comprobaciones, a propósito, no una**: una sobre el `.xcarchive`
+  (antes de exportar) y otra sobre el `.ipa` ya firmado. Si falla la
+  primera, el problema es la firma ad hoc; si pasa la primera y falla la
+  segunda, el problema es el PERFIL, o sea la capacidad en el portal de
+  Apple. Sin separarlas, lo caro no es el fallo: es no saber cuál de los
+  dos es.
+- **Casilla `sin_app_group` en el diálogo de Run workflow**: vuelve al
+  archivo sin firmar de antes y se salta las dos comprobaciones. Es la
+  salida de emergencia para poder seguir sacando builds de TestFlight
+  (el widget saldrá vacío) si el portal de Apple da guerra y hace falta
+  probar cualquier otra cosa YA.
+- **El widget distingue los dos casos en pantalla**
+  (`ResumenDelDia.hayBuzon()`): "Abre la app" es "aún no hay datos";
+  **"Sin buzón · falta el App Group"** es "la firma no trajo el grupo".
+  Antes los dos se veían igual, y en el iPhone no hay consola donde mirar.
+
+**RESUELTO EN LA BUILD #55 (10/9/2026). Esto era el problema de fondo de
+los widgets, y costó quince builds averiguarlo — merece la pena leerlo
+entero antes de tocar nada de firma.**
+
+Hicieron falta las DOS mitades, y ninguna sirve sin la otra:
+
+1. **En el repositorio**: archivar con **firma ad hoc**, no con
+   `CODE_SIGNING_ALLOWED=NO`. Los entitlements se incrustan AL FIRMAR, así
+   que sin firma en el archivo no hay App Group que exportar. Confirmado
+   en la build #54: el `.xcarchive` ya salía con el grupo en el `.app` y
+   en el `.appex`.
+2. **En la cuenta de Apple**: dar de alta la **capacidad** App Groups en
+   los DOS App ID. Sin eso, el archivo pide un perfil con App Groups que
+   no existe y no se puede crear, y `-exportArchive` muere así:
+
+```
+error: exportArchive Authentication failed
+error: exportArchive No profiles for 'com.koku.remindmelater' were found
+error: exportArchive No profiles for 'com.koku.remindmelater.DescansoWidget' were found
+```
+
+**Ojo con ese "Authentication failed", que es la trampa cara**: NO
+significa que la clave de App Store Connect esté mal ni que le falte rol.
+La de Koku era Admin desde el principio. Apple lo escupe cuando no puede
+CREAR el perfil, sea cual sea el motivo, y despista hacia la clave. Lo
+que faltaba era la capacidad en el App ID. Si vuelve a salir, mirar
+primero el portal, no el secreto.
+
+Lo que hizo Koku en developer.apple.com, una sola vez (queda hecho para
+siempre, no hay que repetirlo en cada build):
+
+1. Certificates, Identifiers & Profiles → Identifiers → **+** → **App
+   Groups** → crear `group.com.koku.remindmelater`.
+2. En el App ID `com.koku.remindmelater`: marcar la capacidad **App
+   Groups** → **Edit** → elegir ese grupo → **Save**.
+3. Lo mismo en `com.koku.remindmelater.DescansoWidget`.
+
+Detalle que atasca al llegar: la lista de **Identifiers** tiene un filtro
+arriba a la derecha que se queda puesto en "App Groups" justo después de
+crear el grupo, y entonces los App ID no aparecen y parece que se han
+borrado. Hay que cambiarlo a **"App IDs"**.
+
+**El tercer App ID que sale en esa lista, `...CompartirExtension`, es un
+fósil** del Compartir→RemindMeLater que se aplazó el 9/9/2026. No lleva
+App Groups ni hace falta tocarlo, y **no se borra**: ese trabajo está
+aplazado, no cancelado (el código sigue en `calendario-notas-movil-UI`,
+commit `73cbdbc`), y Apple es tiquismiquis con reutilizar identificadores
+borrados.
+
+Así queda el registro de la build #55, que es lo que hay que ver para dar
+la firma por buena — ojo, **la comprobación que vale es la del `.ipa`**,
+no la del archivo:
+
+```
+==== Entitlements de la APP ====
+com.apple.security.application-groups → group.com.koku.remindmelater
+==== Entitlements del WIDGET ====
+com.apple.security.application-groups → group.com.koku.remindmelater
+OK: ipa/Payload/App.app lleva el App Group
+OK: ipa/Payload/App.app/PlugIns/DescansoWidget.appex lleva el App Group
+UPLOAD SUCCEEDED with no errors
+```
+
+**Las dos comprobaciones separadas se quedan.** Ya han pagado lo que
+costaron: sin ellas, la #54 habría parecido "sigue sin funcionar" en vez
+de decir "la firma ya está bien, lo que falta es el perfil", que es lo
+que llevó directo al portal de Apple. Si algún día vuelve a fallar, la
+primera acusa al repositorio y la segunda a la cuenta de Apple.
+
+La casilla **"Compilar SIN el App Group"** del diálogo de Run workflow
+también se queda, aunque ya no haga falta: es la salida de emergencia
+para sacar una build de TestFlight (con los widgets vacíos) si Apple da
+guerra y hay que probar otra cosa YA.
+
+### Las piezas
+
+- **`public/widget-bridge.js`** — arma el resumen y se lo pasa al plugin.
+  Mismo patrón perezoso que `local-notifications.js`: en un navegador
+  normal no hay plugin y todo es no-op.
+- **`ios/App/App/WidgetBridgePlugin.swift`** — plugin local (registrado a
+  mano en `BridgeViewController`, como `LiveActivityPlugin`). Dos
+  métodos: `guardarResumen` (escribe y llama a
+  `WidgetCenter.reloadTimelines`) y `consumirApertura`.
+- **`ios/App/DescansoWidget/QueTocaHoyWidget.swift`** — el widget. Va en
+  la extensión que YA existía (la de la Live Activity del descanso), no
+  en un target nuevo: eso ahorra la parte más frágil del proyecto de
+  Xcode.
+- Los `.entitlements` de los dos targets.
+
+### Decisiones y trampas
+
+- **El JSON no se interpreta en el plugin**: llega montado desde
+  JavaScript y solo se guarda. Así añadir un campo al resumen no obliga a
+  tocar nada nativo.
+- **El decodificador del widget se escribe A MANO** con `try? decode` y
+  valores por defecto. El sintetizado de Swift **no usa los valores por
+  defecto cuando falta una clave: falla**. Y el resumen guardado
+  sobrevive a las actualizaciones, así que uno viejo sin campos nuevos
+  dejaría el widget en blanco.
+- **El `kind` tiene que coincidir carácter a carácter** entre
+  `QueTocaHoyWidget.kind` y el `reloadTimelines(ofKind:)` del plugin. Si
+  no, la app cree que lo refresca y el widget se queda con lo de antes.
+- **Dos caminos de apertura, dos marcas**: tocar el widget abre
+  `remindmelater://gym-hoy` y `SceneDelegate` deja la marca en
+  `UserDefaults.standard`; el botón del centro de control ejecuta un
+  `AppIntent` que **no manda ninguna URL**, así que deja la marca en el
+  App Group. `consumirApertura` mira los dos sitios.
+  Ojo: `gym-live` (la tarjeta del descanso) y `gym-hoy` (el widget) son
+  cosas distintas — una reanuda algo en curso y la otra arranca algo.
+- **Con un entreno ya en marcha, el widget lo ABRE, no empieza otro.**
+  Perder un entreno a medias por tocar un widget sería carísimo.
+- **Si hoy toca descanso, abre el selector** en vez de arrancar nada: el
+  widget es un atajo, no una decisión.
+- **Arranque en frío**: al abrir la app desde cero tocando el widget no
+  se disparan ni `resume` ni `visibilitychange`, así que la marca se mira
+  TAMBIÉN al final de `init()`.
+- **`#if compiler(>=6.0)` alrededor del botón del centro de control**:
+  `ControlWidget` no EXISTE en el SDK de iOS 17 y anteriores, así que con
+  un Xcode viejo no es que no se ejecute — es que no compila.
+  `@available` no basta para eso.
+
+### Cómo se ha verificado (y qué NO)
+
+**El Swift no se puede compilar aquí** (contenedor Linux, sin Xcode). Lo
+que sí se hizo:
+
+- Un analizador propio de Swift (hoy dentro de
+  `tools/comprobar-widgets.py`; nació en un scratchpad y se perdió con
+  aquella sesión, ver el bloque de la build #57) que recorre
+  los archivos carácter a carácter llevando la cuenta de comentarios (los
+  de bloque **anidan** en Swift), cadenas y su interpolación `\(...)`.
+  Un regex normal se traga medio archivo en cuanto hay un
+  `\(n == 1 ? "" : "s")`.
+- Un comprobador del `pbxproj` (llaves, secciones, ids usados pero no
+  definidos, ids duplicados) porque ahí no hay `plutil` en Linux.
+- Comprobación cruzada de que las constantes compartidas, el `kind`, el
+  App Group de los entitlements y las claves del JSON coinciden entre el
+  JavaScript y el Swift.
+- 10 comprobaciones de Playwright del lado JS **fingiendo el plugin
+  nativo**, más 9 de forzado (el plugin lanzando, sin App Group, la
+  apertura consumida dos veces, un día del ciclo borrado, sin bloques,
+  nombres con comillas y emojis, 50 llamadas seguidas, y que el resumen
+  no lleve nada personal de más).
+
+Trampa del banco de pruebas, apuntada por si se repite: **fingir
+`window.Capacitor` con `addInitScript` NO funciona** — el runtime de
+Capacitor que trae la propia página lo redefine al arrancar. Hay que
+parchearlo DESPUÉS de cargar y limpiar la caché perezosa de
+`widget-bridge.js` (`widgetBridgePlugin = null; widgetBridgeNoDisponible
+= false`).
+
+**Lo que solo se puede confirmar en el iPhone**: que compile, que Apple
+cree el App Group, que el widget aparezca en la galería, y que tocarlo
+arranque el entreno.
+
+### Lo que falló en la PRIMERA prueba real (build #51) y qué se hizo
+
+Koku puso el widget y le salió **"Abre la app"** — o sea, el widget no
+encontraba nada guardado. El toque SÍ abría la app y SÍ sabía que era día
+de descanso, así que la parte de datos y el enlace funcionaban: lo que no
+llegaba era el resumen. Y **el botón del centro de control no hacía
+absolutamente nada**.
+
+Tres cambios, y el orden importa porque el primero es el que de verdad
+enseña dónde está el problema:
+
+**1. Un diagnóstico visible, porque a ciegas no se arregla nada.** En el
+iPhone no hay consola. La cadena tiene tres eslabones (la app escribe / el
+buzón existe / el aviso llega) y no había forma de saber cuál se rompía.
+Ahora Configuración → Este dispositivo tiene una línea con el resultado
+del último aviso y un botón **"Actualizar el widget ahora"**
+(`estadoDelWidget()` en `widget-bridge.js`, `refreshWidgetStatus()` en
+`settings.js`). Distingue el caso importante: **`sin_grupo`** significa
+que `UserDefaults(suiteName:)` devolvió nil, o sea que el App Group no
+llegó en la firma — y eso es un problema de compilación, no de datos.
+Mismo patrón que la línea del aviso de fin de descanso.
+
+**2. Un agujero de verdad, encontrado buscando la causa.** El resumen se
+rehacía desde `loadGymBlocks()`/`loadGymRoutines()`, y esas **solo se
+llaman al abrir el Gimnasio** (carga perezosa). Quien abriera la app y se
+quedara en el calendario NO le mandaba nada al widget nunca. Ahora
+`init()` carga esos dos al arrancar: son dos consultas a una base que ya
+está en memoria.
+
+**3. El botón del centro de control ya no depende del App Group.** Tenía
+un `AppIntent` propio con `openAppWhenRun` que dejaba la marca en el buzón
+compartido — dos defectos: no abría la app, y dependía justo de lo que
+podía estar roto. Ahora usa **`OpenURLIntent`** con la MISMA URL que el
+toque en el widget (`remindmelater://gym-hoy`), así que hay **un solo
+camino de entrada** (SceneDelegate → `UserDefaults.standard` → el
+JavaScript) y funciona aunque el buzón no exista.
+
+**Aquella hipótesis era la buena, y ya está confirmada**: el workflow
+archivaba SIN FIRMAR (`CODE_SIGNING_ALLOWED=NO`) y los entitlements se
+incrustan AL FIRMAR, así que el App Group no llegaba al `.ipa` sin dar
+ningún error. Build verde, app instalada, y `UserDefaults(suiteName:)` a
+nil. Arreglado con firma ad hoc al archivar + la capacidad dada de alta
+en el portal de Apple — ver el bloque **RESUELTO EN LA BUILD #55** más
+arriba, que es donde vive el detalle.
+
+Del paso que se añadió para averiguarlo (abrir el `.ipa` ya firmado,
+imprimir los entitlements reales y tirar la build si al widget le falta
+el grupo) no hay que deshacer nada: se queda como red permanente, porque
+convierte un fallo silencioso en uno ruidoso ANTES de subir a TestFlight.
+
+**Red de seguridad en el widget**: la línea temporal pasó de `.never` a
+`.after(medianoche)`. Sigue sin refrescarse por horas (lo que pidió Koku),
+pero con `.never` a secas, si la app NUNCA consigue avisar el widget se
+queda congelado para siempre sin forma de recuperarse. Una relectura al
+día es prácticamente gratis.
+
+**ESTO ES SOLO DE iOS.** Android tiene su propio sistema de widgets
+(`AppWidgetProvider` + `RemoteViews`, nada que ver con WidgetKit) y no se
+ha tocado: sería un trabajo aparte, con su propio puente. La parte de
+JavaScript (`widget-bridge.js`) sí serviría igual — lo que cambia es todo
+lo nativo.
+
+## Los otros cinco widgets (Hoy, Tareas, Finanzas, Lecturas, Viajes)
+
+**Nota de la ronda de la build #58: el de "Hoy" YA NO EXISTE** (Koku lo
+quitó tras probarlo). Lo que sigue cuenta cómo se hicieron los cinco;
+para lo que se fue con él, ver el bloque de la build #58 más abajo.
+
+Segunda tanda, elegida por Koku el 10/9/2026 (los cuatro que ofrecí, más
+el del Gimnasio que ya había): **inicio + bloqueo + centro de control**.
+
+**Un solo resumen para los seis widgets**, no uno por widget. Son unos
+cientos de bytes; partirlo obligaría a seis escrituras, seis avisos a iOS
+y seis nombres de clave donde equivocarse — y equivocarse en un nombre no
+da ningún error, deja el widget en blanco para siempre (ya pasó).
+
+Por eso la clave del buzón pasó de `resumenGimnasio` a **`resumenApp`**.
+Está en `ResumenDeLaApp.swift` y en `WidgetBridgePlugin.swift`, y las
+compara el guion de comprobación (ver más abajo).
+
+### Las piezas
+
+- **`public/widget-bridge.js`** — `construirResumenDelDia()` es ahora
+  **asíncrona** y arma las cinco secciones. Cada una va **en su propio
+  `try`**: que Finanzas falle no puede dejar sin datos al calendario; esa
+  sección se queda fuera del JSON y su widget enseña su "sin datos".
+- **`ios/App/DescansoWidget/ResumenDeLaApp.swift`** (nuevo) — el modelo
+  que leen todos, con el App Group, la clave, `Color(hexDeLaApp:)`,
+  `fondoDeWidgetApp()`, `importeCorto()` y `cuantoFalta()`.
+- **`ios/App/DescansoWidget/WidgetsDeLaApp.swift`** (nuevo) — los cinco
+  widgets, un `TimelineProvider` común y los cuatro botones del centro de
+  control.
+- `DescansoWidgetBundle.swift` los registra; `WidgetBridgePlugin.swift`
+  refresca los seis `kind`; `SceneDelegate.swift` marca el destino.
+
+### Decisiones que conviene no deshacer
+
+- **El destino viaja como TEXTO y Swift no lo interpreta.** SceneDelegate
+  guarda el `host` de la URL tal cual (`widgetPendingDestino`) y el
+  JavaScript decide a dónde llevar. Así **añadir un widget nuevo se hace
+  entero desde JavaScript**, sin recompilar nada nativo.
+- **Los botones del centro de control usan `OpenURLIntent`**, el intent
+  del sistema, no uno propio. Un AppIntent propio que dejara la marca en
+  el App Group dependería justo de lo que puede estar roto — y ya estuvo
+  roto. Con la URL hay **un solo camino de entrada** para el toque y para
+  el botón.
+- **El widget de Tareas lleva a Grupos, no a "Mi espacio".** En móvil no
+  hay hub de Mi espacio (se quitó a propósito: las tareas viven dentro
+  del calendario). El único sitio donde se ven todas juntas y se pueden
+  tachar es **Grupos > "Todos los eventos" con el filtro en tareas
+  pendientes**, y eso es exactamente lo que hace `abrirTareasDesdeWidget()`.
+  Además **pone los desplegables a juego**: si la lista está filtrada y
+  el desplegable dice "Todo", parece que faltan cosas.
+- **Se manda un máximo de 4 filas por sección** (`WIDGET_MAX_FILAS`), no
+  la lista entera: en el mediano caben 3 líneas. El `total` sí es el de
+  verdad, que es lo que permite escribir "+12 más".
+- **`widgetHoyISO()` usa la fecha LOCAL**, no `toISOString()`: a las
+  00:30 en España el UTC todavía es el día anterior y el widget enseñaría
+  lo de ayer durante media hora. Mismo cuidado que `hoyISO()` del ciclo.
+- **`diasHasta()` cuenta de medianoche a medianoche**, no desde ahora: si
+  no, un viaje que empieza mañana a las 09:00 diría "0 días" a partir de
+  las 09:01 de hoy.
+- **Un viaje EN MARCHA gana al siguiente**: si estás de viaje, eso es lo
+  que quieres ver.
+- **El aviso "sin actualizar"**: el resumen solo se reescribe cuando la
+  app se abre, así que tras un par de días sin abrirla estaría viejo.
+  `esDeHoy` lo detecta y el widget lo dice, en vez de enseñar datos de
+  antesdeayer como si fueran de hoy.
+
+### El guion de comprobación (`tools/comprobar-widgets.py`)
+
+Aquí no hay Xcode, así que hay dos cosas que ningún compilador va a
+pillar y que un guion sí:
+
+1. **El `pbxproj`**: llaves, secciones Begin/End, ids usados pero no
+   definidos, ids DEFINIDOS dos veces, y que los cuatro `.swift` del
+   widget estén en la fase de Sources. **La comprobación de ids
+   duplicados ya sirvió de algo**: al añadir los archivos nuevos elegí
+   dos ids que ya estaban cogidos, y un id repetido en un pbxproj no da
+   un error legible — deja el proyecto medio roto y Xcode se queja de
+   otra cosa.
+2. **Las constantes que viajan entre JavaScript y Swift**: el App Group
+   (y que esté en los dos `.entitlements`), la clave del buzón, los
+   `kind` declarados contra los que refresca el plugin, que cada Widget
+   esté registrado en el bundle, que los destinos del enum, los de
+   SceneDelegate y los que atiende `app.js` sean los mismos, y que toda
+   clave del JSON que Swift lee la escriba el JavaScript.
+
+Si algún día se añade un widget, lo barato es lanzarlo antes de compilar.
+
+## Los widgets se veían vacíos, y el centro de control no hacía nada
+
+Ronda del 10/9/2026, toda de cosas que Koku vio con el teléfono en la
+mano tras la build #55.
+
+### El botón del centro de control (arreglado a la segunda)
+
+Koku: *"El panel de control no funciona, se crea el botón, pero no hace
+nada"*. **Desde un control de iOS, el sistema NO abre esquemas de URL
+propios** (los `remindmelater://` de esta app): solo universal links, que
+piden un dominio web con su archivo de asociación, y esta app no tiene
+ni servidor ni dominio. El botón se queda mudo sin dar ningún error, y
+**en el simulador sí funciona** — por eso es tan difícil de ver desde
+aquí. Está en los foros de Apple (hilos 762479, 762586, 763692).
+
+Eso explica de paso el intento ANTERIOR: era un AppIntent que dejaba la
+marca en el App Group, y su fallo se le achacó al App Group (que
+entonces sí estaba roto). Eran dos fallos distintos tapándose el uno al
+otro.
+
+**Lo que funciona** (`ios/App/App/AbrirDesdeControl.swift`): el botón
+ejecuta un AppIntent NUESTRO con `openAppWhenRun`, iOS abre la app, y es
+ese intent — ya dentro — quien devuelve `OpenURLIntent` con la URL de
+siempre. Desde dentro de la app el esquema propio sí vale, así que el
+camino de entrada sigue siendo único (SceneDelegate → UserDefaults → el
+JavaScript), igual que el toque en el widget.
+
+**Y la pieza que decide si funciona o no, que no es nada evidente: el
+intent tiene que estar compilado en LA APP Y EN LA EXTENSIÓN.** Si vive
+solo en la extensión (lo natural, porque es la que pinta el botón), iOS
+no encuentra a quién ejecutarlo en el proceso de la app y el botón vuelve
+a no hacer nada, otra vez sin ningún error. Por eso ese archivo aparece
+DOS veces en el `project.pbxproj`, igual que `ExtenderDescansoIntent.swift`.
+
+Dos cosas pensadas y descartadas a propósito:
+
+- **Dejar la marca también en el intent** (cinturón y tirantes): serían
+  dos escritores de la misma marca, y si el JavaScript leyera entre las
+  dos escrituras navegaría DOS veces. En "nuevo evento" eso es abrir el
+  formulario otra vez y perder lo escrito.
+- **Fiarse solo de la comprobación del arranque**: el intent corre en el
+  proceso de la app SIN un orden garantizado respecto a `init()`, así que
+  puede dejar la marca justo después de que la miremos. Hay dos
+  relecturas (600 ms y 2 s); la marca se consume EN NATIVO, así que una
+  relectura sin marca no hace nada.
+
+**`tools/comprobar-widgets.py`** (antes vivía en un scratchpad que no
+sobrevive a la sesión, así que la instrucción de lanzarlo antes de
+compilar no se podía cumplir) tiene dos comprobaciones nuevas para este
+fallo exacto: que los archivos con intents de control estén en LAS DOS
+fases de Sources, y que ningún `ControlWidgetButton` use `OpenURLIntent`
+directamente. Las dos se probaron rompiendo el proyecto a propósito.
+
+### Rellenar los widgets
+
+Koku, con el mediano del Gimnasio en un día de descanso: *"lo veo algo
+vacío, se podría poner alguna cosa... No sólo para ese, para el resto
+también"*. Eligió tres de las cuatro que se le ofrecieron (dijo que no a
+una tira con las posiciones del ciclo):
+
+1. **Marca de agua** (`MarcaDeAgua` en `ResumenDeLaApp.swift`): el icono
+   de cada widget, grande y al 12% de opacidad en el color del acento,
+   saliéndose por la esquina de abajo a la derecha. Va de FONDO, así que
+   no empuja nada, y **solo en la pantalla de inicio**: en la de bloqueo
+   iOS pinta en monocromo y una marca de agua se come la poca
+   legibilidad que queda.
+2. **Más contenido**: Hoy y Lecturas pasan de 3 a 4 filas en el mediano
+   (el resumen ya mandaba 4, se estaban tirando), y el del Gimnasio
+   estrena la mitad derecha con **los ejercicios del día**
+   (`listaEjercicios` en el resumen) debajo del botón Empezar.
+3. **Pie de contexto**: "Siguiente: Tirón" en el Gimnasio, "+3 más · 2
+   vencidas" en Tareas, "12 días de mes · 25 €/día" en Finanzas (un
+   reparto calculado, no un dato nuevo), "Dura 7 días" en Viajes.
+
+**El pie del Gimnasio dice "Siguiente" y NO "Mañana"**, a propósito: el
+ciclo avanza por entrenos hechos, no por calendario, así que prometer una
+fecha sería mentira en cuanto te saltes un día.
+
+**Bug encontrado forzando fallos, no en el uso normal**: un viaje YA
+EMPEZADO decía que duraba menos de lo que dura. `diasHasta()` recorta a 0
+los días negativos (para no decir "faltan -3 días") y se estaba usando
+para medir una duración: un viaje empezado hace 2 días y con 3 por
+delante decía 4 en vez de 6. Ahora hay un `diasEntre()` aparte, CON
+signo, y `diasHasta()` se apoya en él. Si algún día hace falta medir otra
+duración, es ese el que se usa.
+
+### Tres cosas del Gimnasio que se vieron de paso
+
+- **La ✕ del modal de editar un ejercicio** salía debajo del título y a
+  la izquierda. Ese modal era **el único de la app** que usaba una clase
+  (`.modal-head`) que **no existe en `styles.css`** — nunca se llegó a
+  escribir, y se usaba una sola vez en todo el proyecto. Sin regla, el
+  div se pinta en bloque. Ahora usa `.modal-close-x`, como los otros 30
+  botones de cerrar.
+- **Descanso y RPE no quedaban a la misma altura**: "Descanso entre
+  series (s)" ocupa dos líneas y "RPE del ejercicio" una, así que los
+  campos arrancaban descuadrados. Es EXACTAMENTE el mismo arreglo que ya
+  se hizo en `.gym-set-segment-fields` (`align-items: stretch` +
+  `justify-content: flex-end`), en otro sitio. Si aparece una tercera
+  pareja de campos con rótulos de distinto largo, ya se sabe la cura.
+- **Los unilaterales en una sesión apuntada A MANO** no distinguían
+  izquierda de derecha. Aquí no faltaba lógica: `gymExerciseUsesSides()`,
+  `gymSetSerieNumber()` y el reparto por lados ya existían para el
+  entreno en vivo — **el editor a mano simplemente no los usaba**. Ahora,
+  si el ejercicio va por lados, cada serie tiene dos botones
+  Izquierdo/Derecho (botones y no un `<select>`, por la regla de la app),
+  "+ Serie" añade **las dos filas** de golpe, y los dos lados comparten
+  número de serie. Volver a pulsar el lado ya puesto lo quita.
+
+### Mover un ejercicio con la lista llena
+
+Koku: *"si tengo muchos ejercicios me gustaría que si subo mucho el
+ejercicio desplazara la vista hasta donde parara"*. Con la lista llena,
+el ejercicio de abajo no podía llegar arriba: el dedo topaba con el borde
+de la pantalla antes que la tarjeta con su destino.
+
+Ahora `habilitarArrastreDeEjercicio()` desplaza `.gym-live-content` al
+acercarse a un borde, más rápido cuanto más cerca. Dos detalles que no
+son obvios:
+
+- **Va en un bucle de fotogramas y NO en el `pointermove`**: con el dedo
+  PARADO en el borde no llega ni un evento, y es justo cuando tiene que
+  seguir moviéndose.
+- **El desplazamiento de la lista se SUMA al del dedo** (`recolocar()`):
+  si no, al moverse la lista la tarjeta se iría con ella, se despegaría
+  del dedo y contaría mal a qué hueco cae.
+
+El bucle se cancela al soltar; hay una comprobación de que la vista se
+queda quieta después, porque un `requestAnimationFrame` olvidado ahí no
+daría ningún error, solo se comería la batería.
+
+### El peso, con decimales
+
+Koku: *"No me deja poner 16,3kg"*. Eran **dos cosas a la vez** y hacían
+falta las dos:
+
+1. Los campos eran `<input type="number">` con `step="0.5"`. Un 16,3 no
+   es múltiplo de 0,5, así que el navegador lo daba por inválido.
+2. Con el teléfono en español, **la tecla decimal del teclado numérico es
+   una COMA**, y `type="number"` la rechaza de plano: el campo se queda
+   vacío sin decir nada.
+
+Los cuatro campos de peso pasan a `type="text" inputmode="decimal"`, y
+todo lo que se lee de ellos pasa por **`gymNormalizarPeso()`**, que
+cambia la última coma por un punto (la última, no todas: así "1.234,5"
+también se lee bien). Lo que se guarda en `weightDisplay` ya va
+normalizado, para que la sugerencia gris de la serie siguiente se pueda
+leer con `Number()` sin acordarse de nada.
+
+**Y una red que antes ponía el navegador**: al pasar a texto se fue el
+`min="0"`, así que `gymWeightDisplayToKg()` descarta ahora los negativos
+(los trata como "no apunté peso"). Sin eso, un -5 restaría volumen en las
+gráficas.
+
+El RPE y la nota de Lecturas se quedan con `step="0.5"`: ahí el medio
+punto es lo correcto.
+
+## Lo que salió de probar la build #56
+
+### El centro de control, al tercer intento (y la pista la dio Koku sin querer)
+
+Síntoma: *"Los botones del panel de control abren la app, pero no hacen
+nada más"*. Y, en el mismo mensaje: *"En shortcuts no aparece nada de
+remindmelater"*.
+
+**Ese segundo dato es el que lo explica todo.** Los cinco intents llevan
+`isDiscoverable = true`: si iOS no los enseña en Atajos, es que **no los
+ve registrados en la APP**. Y si no están registrados en la app,
+`perform()` no corre en el proceso de la app: corre en el de la
+EXTENSIÓN. `UserDefaults.standard` de la extensión NO es el de la app
+— son dos cajones distintos. La marca se escribía, sí, pero donde la app
+no mira nunca.
+
+Por eso ahora `apuntarDestinoDeControl()` escribe en LOS DOS SITIOS: en
+`UserDefaults.standard` (por si de verdad corre en la app) y en el **App
+Group**, que es el único terreno común de los dos procesos.
+`consumirApertura` del plugin ya miraba los dos, así que del lado del
+JavaScript no cambió nada.
+
+Y **se quitó el `OpenURLIntent`** que devolvía antes: `openAppWhenRun` ya
+abre la app (probado), y sin la URL hay un ÚNICO escritor de la marca.
+Con ella, si llegaba a SceneDelegate, este la escribía otra vez y el
+JavaScript podía navegar DOS veces — en "nuevo evento" eso es abrir el
+formulario de nuevo y perder lo escrito.
+
+Los tres intentos, para no volver atrás a ninguno:
+
+1. AppIntent propio dejando la marca en el App Group → no abría la app,
+   y dependía justo de lo que entonces estaba roto (el App Group).
+2. `OpenURLIntent` directo en el `ControlWidgetButton` → **desde un
+   control, iOS no abre esquemas de URL propios**, solo universal links.
+   Mudo, sin ningún error, y en el simulador funcionando.
+3. AppIntent con `openAppWhenRun` que apunta el destino en los dos
+   almacenes. El que está puesto.
+
+`tools/comprobar-widgets.py` comprueba ahora que el App Group escrito en
+`AbrirDesdeControl.swift` (que está a mano, porque ese archivo se compila
+también en la app y no puede importar el de la extensión) coincide con el
+del widget, y que las claves que escribe las consuma el plugin.
+
+### "Los ejercicios individuales no los pone bien": una causa, dos síntomas
+
+Koku, sobre los ejercicios que **él mismo había creado y marcado** como
+unilaterales por lados. La causa no estaba donde parecía:
+
+**El "+" del entreno abría SOLO la librería.** Tus propios ejercicios no
+salían ahí, así que dentro de un entreno no había forma de añadir uno
+creado por ti: o lo volvías a crear, o nada. Y como lo que sí podías
+añadir venía de la librería — que no marca unilaterales —, nunca
+preguntaba por el lado. Los dos síntomas salían de ahí.
+
+Ahora el buscador tiene una sección **"Tus ejercicios"** arriba, y solo
+en "modo elegir" (abierto desde un entreno): abriéndolo desde la pestaña
+Plan lo que quieres es importar, y ahí tus ejercicios ya los tienes al
+lado. Filtra por nombre, músculo y material, esconde los que ya están en
+el entreno, y **todos los caminos de añadir pasan ahora por
+`gymAnadirEjercicioAlEntreno()`** — que llama a
+`gymBuildSetsForExercise()`, o sea que los unilaterales nacen con sus dos
+lados vengan de donde vengan.
+
+**Y en el modal de "Nueva sesión" (que SÍ funcionaba, ojo)**: al añadir
+un ejercicio la app elige el primero de la lista, que suele ser normal, y
+tú lo cambias al tuyo después. Los botones de lado aparecían, pero la
+serie que ya había seguía siendo UNA sin lado, y eso se lee como "no
+distingue". Ahora al cambiar a un ejercicio por lados las series **en
+blanco** se parten en dos; las que ya tengan peso o repes escritas NO se
+tocan, porque cambiar de ejercicio no puede duplicarte lo apuntado.
+
+**Aviso sobre cómo se comprobó**, que costó un rato: la primera prueba
+"reproducía" un fallo que no existía porque buscaba las opciones en un
+`.select-popover` cualquiera del `<body>` — y hay decenas, casi todos
+cerrados. Cada campo crea el suyo. Para pinchar una opción de verdad hay
+que buscar **el popover que NO tiene la clase `hidden`**.
+
+### Configuración > Widgets: las tres combinaciones
+
+Koku: *"no sigue demasiado el tema de la app, antes estaba en claro, pero
+el sistema está en modo oscuro"*. Con `.fill.tertiary` el widget seguía
+el modo claro/oscuro del SISTEMA, que es lo normal en iOS pero aquí
+choca. Primero se pasó a los colores de la app a secas, y al verlo Koku
+pidió que se pudiera elegir: **"un apartado en configuración que sea
+Widgets, con un selector con 3 opciones"**.
+
+Las tres, todas con sentido, por eso no se elige una por él:
+
+- **`app`** (de fábrica) — los colores del tema tal y como esté puesto en
+  la app. Si tu tema es claro, el widget es claro aunque el móvil esté en
+  oscuro.
+- **`sistema`** — el material de iOS de siempre, claro u oscuro según el
+  móvil. Es lo que había antes de todo esto.
+- **`mixto`** — tu paleta, pero eligiendo su variante clara u oscura
+  según el móvil. **Funciona porque los temas de esta app ya vienen
+  emparejados** (`inverseColors`), así que no hay que inventarse nada.
+
+**Lo que hace que "mixto" sea posible**: el widget se repinta con la app
+CERRADA, así que no puede preguntarle qué modo hay. Se lleva **las dos
+paletas** en el resumen (`fondoClaro`/`textoClaro`/`fondoOscuro`/
+`textoOscuro`, de `paletasDelTemaParaElWidget()` en `settings.js`) y
+elige él al pintar, con `@Environment(\.colorScheme)`. Por eso
+`FondoDeWidget` es un **ViewModifier de verdad** y no un `func` suelto:
+ese entorno solo se puede leer desde dentro de una vista.
+
+Detalles que importan:
+
+- **El resumen lleva `--surface` y `--surface-text`, no `--bg`**: un
+  widget es una TARJETA, y en la app las tarjetas son surface. Además
+  cada fondo lleva su contraste emparejado, así que los dos siempre se
+  leen bien juntos, sea cual sea el tema.
+- **El texto se pone con `.foregroundStyle` en la RAÍZ**: los
+  `.secondary` de dentro son estilos JERÁRQUICOS y se derivan solos de
+  ese color, en vez de quedarse con el gris del sistema. Un solo sitio
+  tiñe el widget entero.
+- **De respaldo va la cadena VACÍA, no un blanco o un negro.** Si el tema
+  no estuviera listo, mandar un blanco fijo dejaría el widget blanco al
+  lado de una app oscura — peor que no hacer nada. Con el hueco vacío se
+  vuelve al material del sistema.
+- **Con un tema SIN pareja, "mixto" no puede hacer nada**, así que la
+  pista de debajo del selector lo dice con todas las letras en vez de
+  dejar a Koku mirando un widget que no cambia.
+- **Elegir una opción reescribe el resumen al momento**
+  (`actualizarResumenDelWidget()`): el estilo viaja DENTRO del resumen,
+  así que sin eso no se vería el cambio hasta la próxima vez que la app
+  tocara algo.
+- **Botones y no un desplegable** (mismo patrón `.view-mode-btn` que
+  "Favoritos"): con tres opciones cortas se ven las tres de un vistazo, y
+  de paso se respeta la regla de no usar controles nativos.
+
+Esto es solo para la pantalla de INICIO: las vistas de bloqueo no llaman
+a `fondoDeWidgetApp`, porque ahí iOS pinta en monocromo y meterle colores
+solo quita legibilidad.
+
+**Y el comprobador tenía un agujero, encontrado al añadir esto.** Los
+cinco campos nuevos no aparecían en su cuenta de claves: el guion cogía
+solo la **primera línea `case`** de cada `enum CodingKeys` y miraba solo
+UNO de los dos modelos. O sea que llevaba sin comprobar de verdad justo
+lo que existe para comprobar. Ahora recorre todas las líneas de todos los
+enums de los dos archivos, y pasó de ver 31 claves a 44. Probado quitando
+una clave del JavaScript a propósito.
+
+### Los popovers de los desplegables se acumulaban en el `<body>`
+
+Encontrado de rebote mientras se investigaba lo de arriba: **56 sueltos**
+tras un rato normal en el modal de una sesión.
+
+Los popovers viven en el `<body>` y no dentro de su campo (si no, un
+modal con overflow los recortaría). Cuando el campo se repinta — y las
+listas de ejercicios se repintan en cada cambio — el campo viejo se va
+del DOM pero su popover se queda ahí para siempre, cada uno con su
+listener global. No rompía nada visible, pero crecía solo.
+
+`limpiarPopoversSueltos()` los barre al crear un campo nuevo (amortizado,
+sin tener que acordarse en ningún sitio). **Primer intento fallido, para
+no repetirlo**: el barrido marcaba "este ya estuvo en pantalla" al pasar
+por encima, así que un campo creado y destruido ENTRE dos barridos no se
+marcaba nunca y no se barría — justo el caso normal de abrir y cerrar un
+modal. Ahora la marca se pone un ciclo DESPUÉS de crear el campo
+(`marcarPopoverCuandoSeUse`), que es cuando ya está insertado. Un campo
+que nunca llegue al DOM se queda sin marcar y no se barre nunca, que es
+lo prudente: mejor dejar basura que tirar un campo vivo.
+
+## Por qué no compiló la build #57: un nombre que tapaba a otro
+
+`ResumenDeLaApp.swift` tenía desde el principio una función de ARCHIVO
+llamada `texto(...)` — el ayudante que saca una cadena del JSON con su
+valor por defecto. Al añadir el selector de tema de los widgets, al
+struct le entró una PROPIEDAD también llamada `texto` (el color del
+texto). Dentro del tipo, el nombre corto se resuelve a la propiedad, no
+a la función, así que las ocho llamadas dejaron de compilar de golpe:
+
+```
+error: use of 'texto' refers to instance method rather than global
+       function 'texto' in module 'DescansoWidget'
+```
+
+La función pasa a llamarse `leerTexto`. **Lo que despista de este fallo**
+es que `QueTocaHoyWidget.swift` hace exactamente lo mismo y sí compila:
+allí el ayudante es una función LOCAL declarada DENTRO del `init`, y esas
+sí ganan a la propiedad. Solo las de archivo pierden.
+
+`tools/comprobar-widgets.py` lo detecta ahora (probado rompiéndolo a
+propósito), y de paso recupera el **analizador estructural de Swift** que
+vivía en un scratchpad y se perdió con la sesión: recorre los archivos
+carácter a carácter llevando la cuenta de llaves, paréntesis, cadenas
+(incluidas las de tres comillas y la interpolación `\(...)`) y
+comentarios de bloque, que en Swift ANIDAN. Un `\(n == 1 ? "" : "s")` se
+traga medio archivo si se intenta con un regex.
+
+**Lanzar `python3 tools/comprobar-widgets.py` antes de pedir una build**
+sigue siendo lo más barato que hay: aquí no hay Xcode, y cada vuelta al
+runner son ~15 minutos y una compilación gastada de la cuota de Koku.
+
+## Lo que salió de probar la build #58
+
+Koku: "funciona todo, perfecto". Lo que sigue son cosas nuevas y un
+puñado de arreglos que vio usándola.
+
+### El centro de control, con la app YA DELANTE
+
+Koku: *"me gustaría saber si los botones del panel de control sólo
+funcionan cuando la app está cerrada o en segundo plano. Porque si no,
+cuando está en primer plano no funcionan correctamente"*. Tenía razón, y
+faltaba justo eso.
+
+**La causa**: con la app ya delante, abrir el centro de control NO la
+manda a segundo plano — la deja "inactiva", con la cortinilla encima. Al
+cerrarse esa cortinilla la webview no recibe ni `resume` ni
+`visibilitychange`, que eran los dos únicos momentos en los que el
+JavaScript iba a mirar si había una marca pendiente. El botón sí
+escribía el destino; simplemente no lo leía nadie hasta la próxima vez
+que salieras y volvieras a entrar en la app.
+
+**El arreglo**: `WidgetBridgePlugin` se suscribe a
+`UIApplication.didBecomeActiveNotification` — que SÍ llega en esa
+transición inactivo→activo — y manda un evento `revisarApertura` al
+JavaScript. `escucharAvisosDelWidget()` en `widget-bridge.js` lo escucha
+y llama a `comprobarAperturaDesdeElWidget()`, el mismo de siempre: sigue
+habiendo UN solo sitio que navega.
+
+Se comprueba **dos veces**, al momento y a los 600 ms: el intent del
+botón corre en el proceso de la EXTENSIÓN, sin ningún orden garantizado
+respecto a ese aviso, así que puede escribir la marca un pelín después.
+Una comprobación de más es gratis — el nativo consume la marca al
+leerla, y sin marca es un no-op.
+
+### Notas, también en Herramientas
+
+Koku: *"si yo quito la app de notas y pongo gimnasio, ya no tengo acceso
+a esa app"*. El 2º hueco de la barra de abajo se puede cambiar por otra
+App (Configuración → Este dispositivo), y quien lo cambiara se quedaba
+sin NINGUNA forma de llegar a Notas.
+
+Ahora Notas tiene su tarjeta en el hub de Herramientas, la primera.
+`notasAbiertasDesdeHerramientas` (variable en memoria, no localStorage)
+hace que al cerrarla vuelvas al hub y no a Home, igual que
+Gimnasio/Finanzas/Lecturas/Viajes.
+
+**Ojo con una cosa que parece un olvido y no lo es**: en móvil el botón
+"← Home" de la cabecera de esa vista está OCULTO por CSS, igual que el
+de las otras cuatro Apps — ahí quien hace de "volver" es la barra de
+abajo. Se probó a enseñarlo solo en este caso y se descartó: rompía el
+patrón de las otras cuatro pantallas por un botón que la barra ya
+cubre.
+
+### Fórmulas en las notas
+
+Petición de Koku. De las tres formas que se le ofrecieron eligió
+**cálculos sueltos, SIN referencias**: escribes `=12*3+5` en cualquier
+sitio —un párrafo o una celda de tabla— y te da el resultado. NO sabe de
+celdas (`=B2*C2`) ni se recalcula solo al cambiar otra casilla; eso era
+la opción de hoja de cálculo, y la descartó.
+
+Bloque "FÓRMULAS EN LAS NOTAS" en `app.js`. Cuatro decisiones:
+
+1. **El resultado va DETRÁS, no en lugar de la cuenta**: `=12*3+5` pasa a
+   `=12*3+5 → 41`. Así se sigue viendo la cuenta (media gracia de
+   tenerla en una nota) y se puede corregir un número y recalcular: al
+   recalcular se tira el `→ ...` viejo y se pone el nuevo. Es
+   idempotente, calcular tres veces no acumula nada.
+2. **Es TEXTO PLANO**, sin ninguna etiqueta nueva. `sanitizeNoteBody()`
+   trabaja con lista blanca de etiquetas, así que una etiqueta propia
+   habría que darla de alta ahí, en el import y en el export; el texto
+   pasa por todo eso sin tocar nada. Comprobado guardando y releyendo.
+3. **Nunca `eval()`.** El analizador está escrito a mano (descenso
+   recursivo) y solo entiende números y `+ - * / ^ ( ) %`. Va envuelto
+   en `try/catch` porque una cuenta con miles de paréntesis anidados
+   agota la pila, y eso no puede llevarse por delante el guardado de la
+   nota.
+4. **Hace falta un OPERADOR** para que algo cuente como fórmula. Sin esa
+   regla, una frase normal como "el total = 100 euros" se leería como la
+   fórmula "= 100" y se le pegaría un "→ 100" detrás.
+
+**Calcular es SIEMPRE una decisión suya**, y esto lo preguntó él antes
+de verlo: *"si quiero escribir un texto con un =, para que sólo haga la
+fórmula cuando quiero"*. Escribir `=` no dispara nada; el texto se queda
+tal cual hasta que lo pides. Dos formas de pedirlo:
+
+- el botón **`=`** de la barra del editor, **la única que existe en el
+  móvil** (el teclado del iPhone no tiene tecla Tab);
+- **Tab** con el cursor justo al final de una cuenta, en escritorio. Tab
+  no escribe texto nunca, así que no se puede colar en mitad de una
+  frase.
+
+**Intro NO calcula, y es a propósito.** Lo hacía, y se quitó en cuanto
+Koku dijo lo de arriba: una línea que acabara en una cuenta válida se
+calculaba sola al pulsar Intro para seguir escribiendo, que es
+exactamente la sorpresa que no quiere. Si algún día la pide, es una
+condición en el `keydown` del editor.
+
+El botón calcula la del cursor; si el cursor no está dentro de ninguna,
+calcula TODAS las de la nota, que de paso sirve de "recalcular la nota
+entera".
+
+**Dinero: dos decimales y redondeo** (petición suya). Si la cuenta lleva
+un símbolo de moneda, el resultado sale con dos decimales exactos y
+redondeando lo que sobre: `=100€/3 → 33,33`, `=10€*2 → 20,00`. Un precio
+con seis decimales no es un precio, y "10,5" en dinero se lee mal.
+
+La detección **no es una lista a mano**: es `\p{Sc}`, la categoría de
+Unicode "Symbol, currency". Koku nombró los seis de su teclado
+(`€ $ £ ¥ ₩ ₽`) y dijo "no sé si hayan más" — los hay (`₹ ₺ ₪ ₫`...), y
+así no hay lista que mantener. Ojo: es solo cómo se ESCRIBE el
+resultado; el número de dentro sigue siendo el exacto, así que encadenar
+cuentas no acumula error de redondeo.
+
+Resto de detalles: coma o punto decimal (`1.234,5` se lee bien, misma
+convención que `gymNormalizarPeso`), `%` como sufijo = dividir entre
+100, y **dentro de un bloque de código no se calcula nada** (ahí el
+texto es literal).
+
+### Gimnasio: el ejercicio oculto se colaba en la sesión a mano
+
+Koku: *"si tengo un ejercicio en oculto en la rutina, me lo sigue
+poniendo"*. El entreno en vivo ya lo filtraba (`startGymLiveSession`);
+lo que no filtraba era la **plantilla del modal de "Nueva sesión"**, que
+hacía `routine.exercises.map(...)` a pelo. Ese era el único sitio que
+se los colaba.
+
+### Cuánto va a durar el entreno
+
+Petición de Koku: *"se puede aproximar un entrenamiento solo contando
+los tiempos de descanso. Ahora que estamos contabilizando el tiempo que
+se tarda en hacer una serie, se podría empezar a sacar una media"*.
+
+La columna `gym_sets.duration_seconds` ya existía desde el modo de
+entrenar en vivo; lo que faltaba era leerla. Ruta nueva
+`GET /api/gym-sessions/set-times`: por ejercicio, la media de lo que
+dura una serie y la media de lo que descansas después
+(`rest_seconds + extra_rest_seconds`). Solo series madre
+(`parent_set_id IS NULL`): un tramo de dropset comparte el descanso de
+su madre y su duración ya va dentro. El calentamiento SÍ cuenta, a
+diferencia de los PRs — calentar también ocupa tiempo en el gimnasio.
+
+**Las tres decisiones que tomó Koku**, no cambiarlas sin volver a
+preguntarle:
+
+1. **La media es POR EJERCICIO, no por rutina**: *"así si hago una nueva
+   rutina no depende del cómputo de la rutina sino que ya tengo la media
+   por ejercicio"*. Un día recién montado con ejercicios que ya has
+   hecho tiene estimación desde el primer momento.
+2. **Se enseña el tiempo del ENTRENO ENTERO, nunca el de cada
+   ejercicio**: *"tiempo del entrene no del ejercicio"*.
+3. **Sin historial NO se inventa nada** (eligió "solo contar lo que
+   sé"): los ejercicios que no has hecho nunca se quedan fuera de la
+   suma. O sea que la cifra es un suelo, no una predicción.
+
+**El texto es solo `Tiempo estimado: 12 min 4 s`, a secas** (cambiado el
+11/9/2026). Antes decía "Al menos ~48 min (1 ejercicio sin datos
+todavía)", y Koku lo recortó al verlo: *"pon sólo tiempo estimado:
+estimación, ya luego pones en la ayuda de entrenamiento cómo funciona,
+cómo saca el valor y tal"*. O sea que el "de dónde sale este número" no
+cuelga de la cifra: va en la sección de ayuda del Gimnasio cuando se
+haga, y está ya redactado en `IDEAS-AYUDAS.md` (punto 5 bis) esperando a
+que él dé luz verde a esa tanda de ayudas.
+
+Dónde se ve, también elegido por él: en la **ficha del día** (pestaña
+Plan, `#gym-routine-estimate`) y como **aviso flotante al empezar** el
+entreno, que se va solo. En "¿Qué toca hoy?" NO, y en el entreno tampoco
+("te quedan ~22 min") — dijo que no a las dos.
+
+El descanso sale del propio día si lo tiene fijado (es lo que vas a
+descansar HOY) y si no, de tu media histórica en ese ejercicio. Se
+cuenta un descanso por serie **menos el último de todos**: al acabar la
+última serie del entreno ya no descansas, te vas. Y las series se
+cuentan con `gymBuildSetsForExercise()`, así que un unilateral por lados
+cuenta el doble, igual que al entrenar.
+
+**Aviso flotante genérico**: `mostrarAvisoFlotante(texto)` en `app.js`
+(clase `.app-toast`). Solo hay uno a la vez, no es tocable y no tiene ✕
+a propósito — si hay que hacer algo con él, no es un aviso, es un
+diálogo. Va por encima de los modales y del entreno (z-index 21), donde
+el aviso de la copia de seguridad se queda debajo (19).
+
+### Recordatorios con más antelación
+
+`REMINDER_OPTIONS` gana 2 días, 3 días, 1 semana y 2 semanas antes. El
+tope son 2 semanas porque lo puso él ("eso es suficiente"). El valor son
+MINUTOS y viaja tal cual hasta la base y hasta el aviso del sistema: no
+hay ningún tope escondido en medio, así que añadir un valor a esa lista
+es todo lo que hace falta.
+
+### El botón "Hoy" no recolocaba los niveles de encima
+
+Koku: *"si estaba mirando el 12 de mayo de 2016, le doy a hoy... al
+hacer zoom out me lleve a septiembre y a 2026"*.
+
+`btn-calendar-quick-today` solo abría la vista diaria y dejaba
+`state.viewDate` donde estuviera, así que al salir del día aparecía mayo
+de 2016 otra vez, y encima de ese, 2016. Ahora mueve el mes a hoy ANTES
+de entrar en el día, y si estabas en la vista anual vuelve al mes: los
+tres niveles (día → mes → año) tienen que hablar de la misma fecha.
+
+El cambio de modo se hace **a mano y no con `setCalendarViewMode()`**:
+esa reproduce su propia animación de cambio de nivel, y aquí la que se
+tiene que ver es la de ENTRAR en el día, que llega un instante después.
+Dos animaciones a la vez se pisan (ya pasó con los gestos).
+
+### Fuera el widget de "Hoy"
+
+Koku: *"el widget de hoy no es necesario, lo puedes quitar"*. Se fue
+entero: el `HoyWidget` y su `VistaHoy`, `FilaEventoView`, el botón
+`AbrirHoyControl` con su `AbrirHoyIntent`, el destino `hoy` del enum y
+de SceneDelegate, la sección `hoy` del resumen (`SeccionHoy`,
+`FilaDeEvento`, `seccionHoy()` en el JavaScript) y `widgetHora()`, que
+ya no la usaba nadie. Quedan **cinco widgets**: Gimnasio, Tareas,
+Finanzas, Lecturas y Viajes.
+
+Si algún día vuelve, lo que hay que rehacer está todo en el commit de
+esta ronda — y el resumen ya no lleva peso muerto mientras tanto.
+
+## Cinco widgets más (11/9/2026)
+
+Segunda tanda grande, pedida por Koku. Aquí van los CINCO que no
+necesitan mecanismo nuevo; los dos configurables y el experimento de
+Live Activity se quedaron para la ronda siguiente a propósito (ver
+"Lo que falta de los widgets" al final de este bloque).
+
+- **Calendario del mes** (mediano y grande): el mes que se está
+  viviendo, con hasta tres puntos de color por día y el día de hoy
+  marcado. Tocarlo lleva a la **vista mensual** y para ahí — Koku:
+  *"no hace falta que te lleve a la vista diaria del día pinchado, con
+  que te lleve a la vista mensual sobra"*.
+- **Consistencia** (grande): las cifras ARRIBA y el mapa de 26 semanas
+  DEBAJO. Ese orden lo pidió él al verlo descrito al revés (*"creo que
+  queda mejor"*).
+- **Mapa de entrenos** y **Números del gimnasio**: el heatmap solo y las
+  cifras solas, cada uno en su widget (*"haz 2 widgets más, uno de sólo
+  el heatmap y otro de sólo el texto"*).
+- **Mapa de músculos**: el cuerpo de la pestaña Progreso.
+
+**Qué cifras y por qué.** En el grande caben CUATRO cómodas: racha, esta
+semana, este mes y tiempo de trabajo. La que se queda fuera es "días
+entrenados" en total, porque solo sube y nunca dice cómo vas — se lo
+propuse así y lo aceptó. En el widget de solo cifras están las CINCO,
+que para eso existe.
+
+### Dos decisiones de arquitectura que conviene entender
+
+**El mapa de consistencia viaja como texto, no como matriz.** Son 7
+cadenas de 26 caracteres (una fila por día de la semana), donde cada
+carácter es `0` sin entrenar, `1` una sesión, `2` dos o más y `9`
+"ese día aún no ha llegado". Son 182 celdas: un array de objetos
+multiplicaría por veinte el tamaño del buzón para decir lo mismo.
+
+**La geometría del cuerpo vive en el Swift, no en el buzón.** Los
+polígonos de las siluetas son ~6 KB que NO cambian nunca; lo que cambia
+con cada entreno es la intensidad de cada músculo (un número de 0 a 1).
+Así que las coordenadas están duplicadas en
+`ios/App/DescansoWidget/CuerpoDelWidget.swift` y solo viajan las
+intensidades.
+
+El precio de duplicar es que las copias se separan, y eso está tapado:
+ese archivo **se genera** con `tools/generar-cuerpo-swift.py` a partir
+de `GYM_BODYMAP_ZONES`/`GYM_BODYMAP_SILHOUETTE` de `app.js`, y
+`tools/comprobar-widgets.py` lo vuelve a generar y **falla si no
+coincide**. O sea que tocar el mapa de la app y olvidarse del widget da
+un error ruidoso antes de compilar, no un cuerpo mal dibujado en el
+teléfono. Probado rompiéndolo a propósito.
+
+Los dos dibujos (mapa y cuerpo) van en un **`Canvas`**, no con vistas
+sueltas: son 182 cuadraditos y 70 polígonos, y WidgetKit tiene un
+presupuesto de vistas por widget.
+
+**`gymPuntuacionPorMusculo()`** se separó de `renderGymBodyMap()` para
+que la pantalla y el widget cuenten IGUAL. Si cada uno hiciera su
+cuenta, podrían pintar manchas distintas del mismo entreno.
+
+### La cola de "marcado en el widget"
+
+Koku pidió marcar una tarea como hecha sin entrar en la app. El límite
+es duro y conviene tenerlo claro: **un widget no puede tocar la base de
+datos** (es SQLite dentro de la webview; el widget es código nativo que
+corre con la app cerrada). Lo máximo que puede hacer es dejar una nota
+en el buzón compartido.
+
+Se le ofrecieron tres caminos y eligió el optimista: el botón tacha la
+fila al momento en el widget y apunta la acción; `aplicarAccionesPendientesDelWidget()`
+la recoge y la aplica de verdad **al abrir la app**. Sabe el precio: si
+tarda días en abrirla, la tarea sigue pendiente por dentro todo ese rato.
+
+Solo se entiende UNA acción (`hecho`) a propósito: cuantas menos cosas
+pueda pedir un widget sin la app delante, menos formas hay de que la
+base acabe diciendo algo que nadie pidió.
+
+### Lo que falta de los widgets (ronda siguiente)
+
+No está hecho, y no por olvido:
+
+- **Gráfica de un ejercicio** y **agenda filtrable por grupo**, los dos
+  CONFIGURABLES (elegir el ejercicio o el grupo dejando pulsado el
+  widget). **La mitad de JavaScript ya está hecha y probada**: el
+  resumen ya lleva `ejercicios`, `grupos` y `agenda`. Lo que falta es el
+  Swift, y es un mecanismo NUEVO — `AppIntentConfiguration` +
+  `AppEntity` + `EntityQuery` + botones interactivos.
+- El **experimento de Live Activity permanente** en la pantalla de
+  bloqueo.
+
+Se dejaron fuera de esta build a propósito: son tres mecanismos nativos
+nuevos a la vez, aquí no hay Xcode para compilar, y un fallo de
+compilación habría impedido validar también los cinco que sí están.
+
+**Dato importante para cuando se retomen**: los ajustes de un widget
+configurable se pintan en el proceso de la EXTENSIÓN, con la app
+cerrada. O sea que la lista entre la que se elige tiene que estar YA en
+el buzón — no hay forma de preguntarle a la app en ese momento. Por eso
+el resumen manda los 24 ejercicios más recientes con sus 12 últimos
+puntos, y los grupos, aunque el widget solo use uno.
+
+## Gimnasio: asistidos y material (11/9/2026)
+
+**Ejercicios asistidos.** Dominadas con banda, máquina asistida, fondos
+asistidos. Koku lo describió mejor que ninguna especificación: *"yo digo
+asistido en -20kg, la siguiente -18kg... llegará un punto que te diré
+5kg, entonces simplemente es un ejercicio normal sólo que la base no es
+0kg"*.
+
+Por eso NO es un campo aparte de "ayuda": es el mismo peso de siempre
+con signo, y la escala es continua (−20 → −18 → 0 → +5). Se marca por
+EJERCICIO, en su ficha (`assisted` en `gym_exercises`).
+
+Lo único que cambia de verdad es el **volumen**: un asistido no suma
+kilos movidos, porque su peso es la ayuda y sumarlo restaría del total.
+Lo que de verdad mueves es tu cuerpo menos la banda, y el peso corporal
+no lo sabemos — se le ofreció guardarlo y dijo que no (*"el peso
+corporal te da igual"*). Las **series sí cuentan** en todo lo demás:
+racha, heatmap, mapa de músculos, objetivo semanal.
+
+La regla está en el SQL de `/summary` y `/progress` **y** en el cliente
+(`gymSetVolumeRealKg`), para que base y pantalla cuenten igual. En
+récords un asistido entra con su mejor peso aunque sea negativo (−12 es
+mejor que −20) y se queda **sin 1RM de Epley**: esa fórmula parte de
+"peso que levantas", y aquí el número es lo que te quitan.
+
+**El botón ±, que no es un adorno**: el teclado DECIMAL del iPhone no
+tiene tecla menos, así que sin él sería imposible escribir −20 en el
+móvil. Sale solo en los asistidos, en los cuatro sitios donde se escribe
+un peso. Mismo criterio que los botones AM/PM del reloj de 12 horas.
+
+**Material de uno a varios.** Chips con los conocidos (15 de fábrica más
+todos los que hayas usado) y un campo para escribir uno nuevo, que a
+partir de entonces sale como chip en todos los ejercicios — *"así puedo
+añadirlo rápido si se repite en el resto de ejercicios"*.
+
+Se queda en la MISMA columna `equipment`, ahora con JSON dentro, en vez
+de una tabla aparte: mismo criterio que los géneros de Entretenimiento.
+Lo de antes se sigue leyendo — un texto suelto es lista de uno, y uno
+con comas (`"Barra, Mancuernas"`, justo lo que sugería el placeholder
+viejo) se parte por comas.
+
+**Buscar por músculo secundario.** Koku: *"hay veces que músculo
+principal no hay uno solo, tenlo en cuenta también"*. Un remo lleva
+dorsales de principal y bíceps de secundario, y escribir "biceps" no lo
+sacaba. `gymTextoBuscableDeEjercicio()` junta nombre + principal +
+secundarios + materiales, y la usan los TRES sitios que buscan
+ejercicios.
+
+## Lo que iOS NO deja hacer (preguntado por Koku, 11/9/2026)
+
+Para no volver a plantearlo cada pocas rondas:
+
+- **No hay widgets grandes en la pantalla de bloqueo.** WidgetKit solo
+  ofrece ahí las familias `accessoryCircular`, `accessoryRectangular` y
+  `accessoryInline`: todas pequeñas y pintadas en monocromo. Apps como
+  Widgy o Lock Launcher usan EXACTAMENTE esas — lo que parece un widget
+  grande es un `accessoryRectangular` con una imagen dentro, con el
+  mismo tamaño y las mismas limitaciones.
+- **Una Live Activity sí ocupa una tarjeta grande ahí**, pero está
+  pensada para algo EN CURSO: iOS la mata a las ~8 horas activa (12 en
+  el centro de notificaciones) y para renovarla hace falta que la app
+  corra. Sin servidor no hay "push to start", así que la renovación
+  depende de abrir la app o de un refresco en segundo plano que iOS
+  concede cuando quiere, no cuando se le pide.
+- **StandBy no tiene vista propia**: reutiliza los widgets
+  `systemSmall` que ya tengas y las Live Activities. No hay API que
+  programar, solo que los pequeños se vean bien apaisados.
+
+
+## Retos: hábitos y metas, en el mismo árbol
+
+Herramienta nueva (14/9/2026), en su propia rama **`retos-movil-ui`**
+(sale de `movil-ui`). Sexta tarjeta de Herramientas. Piezas:
+`public/routes-local/retos.js`, las tablas `retos` / `retos_hechos` en
+`local-schema.js`, el bloque "RETOS" de `app.js`, `#retos-view` /
+`#reto-modal` en `index.html`, y sus reglas al final de `styles.css`.
+
+**Lo que hace, en una frase**: dos clases de reto en un mismo árbol,
+donde cada nodo es una TAREA y nada más.
+
+- **Hábito** ("estirar por la mañana"): se marca cada periodo y se
+  desmarca SOLO cuando empieza el siguiente. Lleva racha.
+- **Meta** ("llegar a 100 flexiones"): se marca una vez y se queda.
+
+**NO MIDE NADA**, y es una decisión suya, no una limitación: ni
+repeticiones, ni kilos, ni tiempo. Si algún día hiciera falta medir, eso
+es el Gimnasio.
+
+**Las cuatro decisiones que tomó Koku** cuando se le preguntaron, y que
+no conviene cambiar sin volver a preguntarle:
+
+1. **Un hábito se desmarca según SU frecuencia** (cada día / semana /
+   mes / cada X días), no siempre a diario. Y **lleva racha**: *"el poder
+   ver la racha creo que ayuda bastante a la gente a mantenerse"*.
+2. **Los subretos rellenan la barra del padre, pero NO lo marcan**:
+   *"puedo cumplir el subreto de hacer 10 flexiones y seguir sin poder
+   hacer 50"*. Marcar el padre sí marca a todos sus descendientes (si
+   hiciste las 100, hiciste las de 10); **desmarcar no toca a nadie
+   más**, para que deshacer un toque mal dado no borre lo que sí habías
+   hecho.
+3. **"Mover" (al deslizar) REORDENA entre hermanos**, no cambia de
+   padre. Dónde vive un reto se decide al crearlo, con el "+" de la fila
+   de la que quieres que cuelgue. **Hoy no hay forma de reparentar un
+   reto ya creado** — no es un olvido, es la consecuencia de esa
+   elección; si algún día molesta, la ruta `PUT /:id` ya acepta
+   `parentId` (con detección de ciclos), solo falta la pantalla.
+4. **Se ve "3 de 5" con su barrita** en todo reto que tenga subretos.
+
+**Cómo se guarda el "hecho", que es la única parte con truco**: una META
+lo tiene en su columna `done`. Un HÁBITO **no**: sus marcas viven en
+`retos_hechos`, una fila por PERIODO cumplido (`period_key`:
+`2026-09-14` diario, `2026-W38` semanal, `2026-09` mensual, `c12` para
+"cada X días"). De ahí salen las dos cosas que no se pueden guardar sin
+que se queden viejas: si está hecho AHORA y la racha. Guardarlo también
+en `done` habría dejado dos verdades que separarse.
+
+- **"Cada X días" se ancla al día en que creaste el hábito**, no a una
+  rejilla fija del calendario: cuenta desde que TÚ lo empezaste.
+- **La racha no se rompe hasta que el periodo pasa**: si el de ahora
+  todavía no está marcado, se cuenta desde el anterior. Un hábito diario
+  marcado ayer sigue diciendo "racha de N" a media mañana de hoy, con su
+  casilla vacía.
+- **Las fechas son LOCALES, no `toISOString()`**: a las 00:30 en España
+  el UTC todavía es el día anterior y marcarías el día de ayer. Mismo
+  cuidado que `hoyISO()` del ciclo de Gimnasio.
+
+**Detalles de la pantalla**:
+
+- La lista es un árbol que se despliega en el sitio (no un explorador
+  tipo Notas): tocar una fila con subretos los abre o los cierra; una
+  fila sin subretos no hace nada al tocarla, porque editar se saca
+  deslizando, que es la única forma de editar en toda la app.
+- **Qué se lee bajo el nombre**: un hábito dice cada cuánto toca y su
+  racha; **una meta no dice nada** (solo su nota, si la tiene). Poner
+  "Meta" en cada fila repetía en la mayoría de ellas lo que ya se sabe
+  por descarte.
+- **El "+" de cada fila crea DENTRO de ese reto**; el de arriba crea al
+  nivel de fuera. Al crear un subreto, su padre se despliega solo — si
+  no, lo acabas de meter en un sitio que no se ve.
+- **El buscador mira el ÁRBOL ENTERO** y enseña la ruta de cada
+  resultado. Es a propósito distinto del de Notas (que busca solo dentro
+  de la carpeta en la que estás): allí navegas carpeta a carpeta y aquí
+  el árbol entero está en la misma pantalla. Con `.trim()`, que escribir
+  solo espacios vaciaba la lista y ya mordió una vez en el buscador de
+  ejercicios.
+- **"Mover" se ARMA y se desarma con "Listo"** (o con Esc), igual que el
+  modo mover del entreno; mientras está armada, esa fila no se deja
+  deslizar (`bloqueadoSi`).
+- Los dos estados de "estoy haciendo algo ahora" (la búsqueda y el modo
+  mover) se sueltan al salir de la pantalla.
+
+**Lo que NO se le puso, a propósito**: deslizar hacia la derecha desde
+Retos no sale a Herramientas. Eso solo lo hace Finanzas, y el comentario
+de `salirDeFinanzasDeslizando()` dice por qué: las demás Apps no se
+tocan sin que Koku lo pida.
+
+**Verificado** con 79 comprobaciones de Playwright con la app servida
+como estático puro (dos guiones de un scratchpad, que NO viajan en el
+repo — como los de `ciclo.mjs` en su día), incluidas las raras: tipos y frecuencias inventadas, "cada 0 días" y
+"cada 9999 días", un padre que no existe, colgar un reto de su propio
+nieto, 400 días seguidos de racha, un día suelto de hace un mes (no es
+racha pero sí mejor racha), nombres con comillas y HTML dentro, mover en
+los extremos, y que borrar no deje marcas huérfanas.
+
+## Dos ramas: `desarrollador` y `movil-ui`
+
+Decisión de Koku (10/9/2026), después de que el widget se quedara en
+blanco sin forma de saber por qué desde el propio iPhone: *"dejemos este
+para cosas de desarrollador, luego en el apartado real le quitamos estos
+avisos... a partir de ahora vamos a subir todo en una rama llamada
+desarrollador, donde aparezcan estos mensajes para debuguear y tal"*.
+
+- **`desarrollador`** es donde se trabaja y **desde donde se lanzan las
+  builds**, hasta que él diga lo contrario. Lleva los avisos de
+  diagnóstico dentro.
+- **`movil-ui`** sigue siendo la rama "de verdad", y los avisos de
+  diagnóstico NO viajan ahí.
+- La regla de Actions no cambia: **no se lanza ninguna build sin que
+  Koku lo pida en ESA ronda**, ni siquiera en `desarrollador`.
+
+**Las dos van al día** (10/9/2026): Koku pidió no dejar `movil-ui`
+atrasada, así que se le pasaron los 42 commits que le faltaban y se le
+quitaron los avisos ahí mismo. O sea que **ahora sí son "la misma app
+menos la depuración"**, y no "una vieja y otra nueva".
+
+**El precio de que sea así, y hay que tenerlo presente**: cada ronda
+futura son DOS pasos, no uno — se trabaja en `desarrollador`, y al
+pasarla a `movil-ui` hay que volver a quitar lo de abajo. Un merge a
+secas se los llevaría de vuelta. Si algún día cansa, la alternativa que
+se descartó era ponerlos detrás de un interruptor y tener una sola rama.
+
+**El precio de que sea así, y hay que tenerlo presente**: cada ronda
+futura son DOS pasos, no uno — se trabaja en `desarrollador`, y al
+pasarla a `movil-ui` hay que volver a quitar lo de abajo. Un merge a
+secas se los llevaría de vuelta. Si algún día cansa, la alternativa que
+se descartó era ponerlos detrás de un interruptor y tener una sola rama.
+
+### Qué se queda fuera de `movil-ui`
+
+**LO PRIMERO, porque simplifica todo lo demás: `public/desarrollador.js`
+y su `<script>` de `index.html`.** Ese archivo (11/9/2026) es ahora el
+sitio donde va lo que solo existe en esta rama. Trae dos cosas:
+
+- `window.APP_MODO_DESARROLLADOR = true`, la marca de "esto es una build
+  de desarrollo". Es lo que hace que la línea de versión enseñe también
+  el **número de build** (`v0.52.0 · 11/9/2026 · build 63`).
+- `window.APP_NOTAS_REVISAR`, las **cosas a revisar** de cada versión,
+  que salen bajo sus notas en Configuración → Novedades.
+
+Quitar el archivo y su `<script>` basta: sin él no hay build en la línea
+de versión ni bloque "A revisar", y **no es que se escondan — es que no
+están**. Lo que se añada de aquí en adelante, mejor que viva ahí.
+
+**Lo de antes sigue repartido y hay que quitarlo a mano** (los cuatro,
+confirmados por Koku):
+
+1. **El bloque del widget** — Configuración → Este dispositivo.
+   `#widget-status-block` / `#widget-status-line` / `#btn-widget-refresh`
+   en `index.html`; `refreshWidgetStatus()` y el listener de
+   `btn-widget-refresh` en `settings.js` (y su llamada dentro de
+   `refreshMobileTab()`); `estadoDelWidget()` y `ultimoAvisoAlWidget` en
+   `widget-bridge.js`. Ojo: `actualizarWidgetDelDia()` SE QUEDA — el
+   widget lo necesita; lo que sobra es lo que ENSEÑA el resultado.
+2. **La línea del aviso de fin de descanso** — `#gym-rest-alert-status`,
+   `refreshGymRestAlertStatus()` y su listener de `visibilitychange`.
+3. **El botón "Probar el aviso (10 s)"** — `#btn-test-gym-rest-alert`,
+   su listener y su "?" (`#btn-help-notif-test`).
+4. **El "Sin buzón · falta el App Group" de los widgets** —
+   `ResumenDelDia.hayBuzon()` y el campo `sinBuzon` de `QueTocaEntry` en
+   `QueTocaHoyWidget.swift`, y sus gemelos `ResumenDeLaApp.hayBuzon()` /
+   `EntradaDeLaApp.sinBuzon` / `VacioDeWidget(sinBuzon:)` en los cinco
+   widgets nuevos. En `movil-ui` el respaldo vuelve a ser "Abre la app" a
+   secas.
+
+**Y con ellos se va el código que solo existía para alimentarlos**, que
+si se queda es peso muerto: `gymTestRestAlert()`, `GYM_REST_STOP_LABELS`,
+`gymRestAlertLastStatus()` y `gymFormatRestAlertStatus()` en `app.js`;
+los dos `localStorage.setItem('gymLiveActivityStatus', ...)` de
+`gymStartRestLiveActivity()`; y `estadoDelWidget()`/`ultimoAvisoAlWidget`
+de `widget-bridge.js` (ahí `actualizarWidgetDelDia()` se queda, pero
+adelgaza: ya no tiene que apuntar cómo fue).
+
+**Y con ellos se va el código que solo existía para alimentarlos**, que
+si se queda es peso muerto: `gymTestRestAlert()`, `GYM_REST_STOP_LABELS`,
+`gymRestAlertLastStatus()` y `gymFormatRestAlertStatus()` en `app.js`;
+los dos `localStorage.setItem('gymLiveActivityStatus', ...)` de
+`gymStartRestLiveActivity()`; y `estadoDelWidget()`/`ultimoAvisoAlWidget`
+de `widget-bridge.js` (ahí `actualizarWidgetDelDia()` se queda, pero
+adelgaza: ya no tiene que apuntar cómo fue).
+
+**Y la de la Live Activity va con ellas** (`#gym-live-activity-status`,
+"Cuenta atrás en pantalla de bloqueo: ..."): no se le preguntó una por
+una, pero es exactamente el mismo patrón que la 2 — nació del mismo
+problema (en el iPhone no hay consola) y se lee igual de raro en una app
+normal.
+
+### Qué SÍ se queda en `movil-ui`
+
+- **La línea de versión** (`v0.41.1 · 10/9/2026`, `renderAppVersionLine()`).
+  Koku la dejó dentro a propósito: sirve para saber qué versión tienes
+  cuando algo falla, y verla es normal en cualquier app. Desde el
+  11/9/2026 vive al FINAL de Configuración, no en "Este dispositivo".
+- **`#notifications-status`**, que a pesar de estar en el mismo sitio NO
+  es un diagnóstico: dice "Falta el permiso del sistema: activa el
+  interruptor para pedirlo". Eso es una instrucción para el usuario.
+- **La casilla `sin_app_group`** del workflow de iOS: es de la
+  compilación, no de la app. No se ve desde el teléfono.
+
+## Seguridad, privacidad y tipografía (10/9/2026, v0.48.0)
+
+Hay dos documentos con el detalle: **`SEGURIDAD-Y-PRIVACIDAD.md`** (qué
+era vulnerable y por qué, más el papeleo de las tiendas) e
+**`IDEAS-DISENO-IOS.md`** (por qué la app no se leía como una app de
+Apple). Lo que hay que tener presente al tocar código:
+
+- **El HTML de una nota se sanea DOS veces: al guardar y al PINTAR.** El
+  modelo era "sanear al escribir" y confiar al pintar, y eso tiene un
+  agujero real: importar una copia de seguridad sustituye el `.sqlite`
+  entero, así que sus filas nunca pasan por la ruta que sanea. Está
+  probado que así se ejecutaba código. `prepareAssetHtmlForDom()` llama
+  ahora a `window.sanearHtmlDeNota` (la MISMA función de
+  `routes-local/notes.js`, expuesta, no una copia). **Sanear va ANTES de
+  tocar los `src`**: al revés estaría trabajando sobre HTML en el que
+  todavía no se puede confiar.
+- **`escapeHtml()` escapa también las comillas.** `textContent` →
+  `innerHTML` solo cubre `< > &`, y la función se usa dentro de ~19
+  atributos entrecomillados. Si escribes uno nuevo, no hace falta que
+  pienses en cuál es cuál: la función ya vale para los dos casos.
+- **Hay una CSP** en `index.html`. Dos cosas que rompen si no te acuerdas:
+  `script-src` lleva `'wasm-unsafe-eval'` porque **sql.js es WebAssembly y
+  sin eso la app no arranca**, y **no puede haber ningún `<script>` en
+  línea ni ningún `on*=` en el HTML** (por eso el arranque vive en
+  `public/arranque.js`).
+- **La app no hace NI UNA petición de red.** Nada de CDN: lo que haga
+  falta se vendoriza dentro de `public/`, como sql.js. Se quitaron los
+  Google Fonts que quedaban (eran lo único que salía del teléfono) y
+  `--font-mono` usa la pila del sistema, que en iPhone es SF Mono.
+- **Ocho tokens de tipografía** (`--t-micro` … `--t-titulo-grande`), la
+  escala de iOS. Había 24 tamaños a ojo y el más usado era 13,6 px, que en
+  iOS es tamaño de pie de foto (el cuerpo son 17). **No metas un
+  `font-size` en rem**: el guion falla. Los tres que quedan en números son
+  unidades dentro de un SVG, no píxeles de pantalla.
+- **Toda regla `:hover` va dentro de `@media (hover: hover)`.** iOS aplica
+  el `:hover` al TOCAR y lo deja puesto hasta que tocas otra cosa, así que
+  una regla suelta deja el botón "pulsado" en el móvil. El guion falla si
+  se te escapa una.
+- `tools/comprobar-widgets.py` vigila todo lo anterior más los manifiestos
+  de privacidad de Apple, ATS, la copia automática de Android y los CDN.
+  **Lánzalo antes de pedir una build**: aquí no hay Xcode, y todo esto se
+  puede perder sin que la app deje de funcionar, que es justamente por lo
+  que hacía falta que algo chille.
+
+**Pendiente de que Koku decida**: `PARA-KOKU-MAÑANA.md` (ocho dudas de
+diseño, tres cosas que se salen de la filosofía de la app, y el papeleo de
+las dos tiendas). No empieces nada de ahí sin su respuesta.
+
+## Fórmulas en las notas: el diseño BUENO (11/9/2026)
+
+**Esto sustituye por completo al diseño anterior** (el del botón `=` y la
+sintaxis `=12+1 → 13`). Si lees una descripción con flechas `→` o con un
+botón en la barra, es la vieja.
+
+Koku, tras probarla: *"lo que tendría más sentido es poder poner 12+1 = y
+ahora así que te ponga el 13 detrás. En vez de ponerme un botón para ello,
+quiero que de primeras se autocomplete; si yo le doy a la pantalla, que se
+quite y me deje escribir; para 'guardar' la fórmula y diga ah vale esto es
+calculado, le he de dar al intro"*.
+
+**Los tres estados**, que es todo lo que hay que entender:
+
+1. Escribes `12+1 =` → aparece un **13 en gris** detrás (el *fantasma*).
+2. **Tocas la pantalla** → el fantasma se va y sigues escribiendo. Nada
+   se ha calculado.
+3. **Intro** → se fija: queda `12+1 = 13` marcado con el color de acento.
+
+Y **tocar una fórmula fijada la vuelve a abrir** como cuenta editable, con
+el resultado reapareciendo en gris al momento. Eso responde a lo que pidió
+(*"si pincho en el 13 que me muestre cuál es la fórmula"*) sin inventar un
+globo aparte: la cuenta ES el contenido.
+
+### Lo que hay que saber antes de tocarlo
+
+- **Intro SÍ calcula ahora**, y eso invierte una decisión anterior. Pero
+  solo **cuando hay un fantasma delante**, o sea justo después de escribir
+  `12+1 =`. En cualquier otro sitio Intro baja de línea como siempre. Lo
+  que hacía peligrosa la versión de antes era que calculaba cualquier
+  línea acabada en una cuenta válida.
+- **La fórmula fijada es `contenteditable="false"`, y NO es un capricho.**
+  Sin eso, escribir justo detrás mete el texto DENTRO del span: el
+  navegador hereda el formato del elemento en línea de al lado. Medido:
+  tras fijar `2*3 = 6`, teclear ` y 4*5 =` daba
+  `<span class="note-formula">2*3 = 6y 4*5 =</span>` y la segunda cuenta
+  no se calculaba nunca.
+- **Ese `contenteditable` NO se guarda** (el saneador solo deja la clase),
+  así que al abrir una nota hay que reponerlo: `prepararFormulasDeNota()`,
+  llamada justo después del `innerHTML` del editor. Si se te olvida,
+  vuelve el problema de arriba.
+- **Al fijar se mete un ESPACIO detrás** si no había nada. Sin él, el
+  cursor se queda al principio de un nodo vacío pegado al span y el
+  navegador vuelve a meter lo que escribas dentro.
+- **El fantasma NUNCA se guarda**, y hay tres redes: se quita al escribir,
+  al tocar y al perder el foco; y su clase **no está en la lista blanca**
+  del saneador, así que aunque llegara a colarse, se cae al guardar.
+  Probado.
+
+### Por qué Intro no funcionaba en el iPhone (arreglado en la v0.49.1)
+
+Koku, probando la build #60: *"cuando hago una fórmula aparece el
+resultado, pero le doy al intro y se va igualmente"*. En Chrome iba
+perfecto, y ahí está la trampa: **era un fallo SOLO de Safari**, y la
+causa no tiene nada que ver con las fórmulas.
+
+Al meter el fantasma en medio de un nodo de texto, `range.insertNode()`
+**parte ese nodo en dos**. Dónde deja el navegador la selección VIVA
+después de esa partición es cosa suya: Chrome la deja donde estaba,
+Safari la manda al trozo NUEVO con offset 0. El código leía
+`sel.focusOffset` justo después de insertar y lo usaba para recolocar el
+cursor — o sea que en Safari plantaba el cursor **al principio** de la
+cuenta. Luego Intro volvía a deducir la cuenta mirando dónde estaba el
+cursor, no encontraba nada, no hacía `preventDefault`, y lo único que
+pasaba era un salto de línea que de paso borraba la sugerencia. Exacto lo
+que se veía.
+
+Dos arreglos, y conviene entender que son independientes:
+
+1. **El cursor se recoloca al FINAL del nodo**
+   (`enc.nodo.nodeValue.length`), no en un offset prestado de la
+   selección. Tras la partición ese nodo es exactamente el texto que
+   había antes del cursor, así que su final ES el sitio, en cualquier
+   navegador.
+2. **Fijar ya no depende del cursor.** Al sugerir se apunta la cuenta en
+   `formulaPendiente` (nodo, cuenta y resultado), y `Intro` usa eso;
+   mirar el cursor es solo el plan B. `formulaPendienteValida()` lo
+   descarta si el nodo ya no está en el editor o su texto ha dejado de
+   acabar en `=`.
+
+Y una **tercera red que hace falta igual**: el teclado de iOS no siempre
+manda un `keydown` con `key === 'Enter'` (con el texto predictivo por
+medio llega como `'Unidentified'`), pero **`beforeinput` sí llega
+siempre**, con `inputType` diciendo `insertParagraph`. El mismo gesto se
+atiende por los dos lados; no se duplica porque cuando el `keydown` ya lo
+ha atendido hace `preventDefault` y el otro evento ni se dispara.
+
+**Cómo se probó sin un iPhone**: `formulas-safari.mjs` REPRODUCE lo que
+hace Safari moviendo el cursor a mano (al principio de la cuenta y detrás
+del fantasma) antes de pulsar Intro, y dispara un `beforeinput` a pelo
+para el caso del teclado predictivo. Se comprobó que la prueba de verdad
+pilla el fallo: deshaciendo el arreglo, 4 comprobaciones se ponen rojas.
+Si algún día se toca esto, lánzala.
+
+### Lo que se amplió en el saneador, y por qué es estrecho
+
+Para que una fórmula se vea distinta hacía falta **una etiqueta**, y el
+diseño anterior era texto plano justo para no tocar esto. Se le avisó.
+
+Lo que se permite es lo mínimo: `<span>` conserva `class` **solo si vale
+exactamente `note-formula`**. No es un patrón ni una lista: es una
+comparación con una cadena. Nada de estilos en línea, nada de `data-*`,
+**ningún dato del usuario dentro de un atributo**. Lo único que hace esa
+clase es teñir el texto con el acento.
+
+Probado con siete variantes hostiles: clase compuesta
+(`note-formula otra-cosa`), clase parecida (`note-formulaX`), con `style`,
+con `onclick`, con otra clase, y la del fantasma. **Las seis se caen**; la
+única que sobrevive es la buena.
+
+## Duplicar (copias) — 11/9/2026
+
+Petición de Koku: poder copiar una nota, una carpeta (con o sin lo de
+dentro, "como cuando se eliminaba seleccionando"), y en Gimnasio usar
+bloques, días y ejercicios **como plantillas**.
+
+**Las cuatro decisiones que tomó él**, no cambiarlas sin volver a
+preguntarle:
+
+1. **Duplicar vive en los dos sitios de Notas**: al deslizar una fila y
+   en el modo Seleccionar (para varias de golpe).
+2. **Bloques y días pierden el lápiz ✎** y pasan a deslizarse como todo
+   lo demás. Es la misma decisión que tomó con las tarjetas de grupo en
+   su día ("así no da pie a dudas ni nada").
+3. **Las carpetas preguntan, el gimnasio no.** Una carpeta con algo
+   dentro saca la casilla "Copiar también lo que hay dentro"; un bloque
+   o un día se llevan lo suyo siempre, porque un bloque sin días no
+   sirve de plantilla.
+4. **Los nombres se NUMERAN**: `Empuje_copia`, `Empuje_copia 2`,
+   `Empuje_copia 3`... y no `Empuje_copia_copia`, que a la cuarta vez no
+   cabe en la fila.
+
+### Las piezas
+
+- **`nombreDeCopia(base, existentes)`** en `public/local-api.js`, global
+  y compartida por las cinco rutas (cada archivo de `routes-local/` va en
+  su IIFE y no puede importar nada). Le QUITA a la base el sufijo que ya
+  traiga para sacar la raíz, así que duplicar una copia da
+  `X_copia 2` y no `X_copia_copia`. Compara sin distinguir mayúsculas.
+- **Cinco rutas `POST .../:id/duplicate`**: notas, carpetas
+  (`?withContents=1`), bloques, días y ejercicios.
+- `window.duplicarNotaLocal` y `window.duplicarDiaDeGimnasio` se exponen
+  como globales porque los necesitan la copia de una carpeta y la de un
+  bloque, respectivamente. Tener DOS copiadores acabaría con uno de los
+  dos olvidándose de algo.
+
+### Lo que hay que entender antes de tocarlo
+
+- **LAS IMÁGENES DE UNA NOTA SE COPIAN, NO SE COMPARTEN.** Es lo único
+  que impide una pérdida de datos de verdad: el cuerpo guarda rutas
+  `/api/notes/images/<uuid>.<ext>` y los bytes viven en `noteAssets`. Si
+  la copia se quedara con las mismas rutas, borrar CUALQUIERA de las dos
+  notas se llevaría esos bytes (`deleteImagesInBody`) y dejaría a la
+  otra con las fotos rotas. `duplicateImagesInBody()` le da un uuid
+  nuevo a cada imagen (síncrono, que es lo que necesita el cuerpo) y
+  copia los bytes en segundo plano, como el borrado.
+- **El título de una nota NO es un campo**: se deriva de su primera
+  línea. Así que llamar a la copia `X_copia` obliga, por fuerza, a tocar
+  esa primera línea. `anadirSufijoAlTitulo()` aparta las etiquetas de
+  cierre en línea (un título en negrita acaba en `</b>`), QUITA el
+  sufijo que ya hubiera y pone el nuevo. Sin ese "quita", duplicar una
+  copia daba `Lista_copia_copia 3` — pasó de verdad.
+- **Y el título se recorta haciéndole sitio al sufijo**
+  (`tituloDeLaCopia`). Encontrado forzando errores: con una primera línea
+  de 600 caracteres, el recorte a 200 se comía el `_copia` y la copia
+  salía en la lista con EL MISMO nombre que el original. Se recorta el
+  título, nunca el cuerpo: eso sería destruir texto del usuario.
+- **Solo se renombra lo que duplicas.** Las notas de dentro de una
+  carpeta copiada, y los días de dentro de un bloque copiado, conservan
+  su nombre. Si no, una carpeta con 40 notas saldría con 40 títulos
+  acabados en `_copia`.
+- **El ciclo de un bloque se REMAPEA.** `gym_block_cycle_days` apunta a
+  días por su id, así que copiarlo tal cual dejaría el ciclo del bloque
+  NUEVO apuntando a los días del VIEJO — y editar un día del original
+  cambiaría lo que te toca en la copia. Un `NULL` (que es un DESCANSO, no
+  un hueco) se queda como está.
+- **La copia de un bloque nace INACTIVA**, siempre: solo puede haber uno
+  activo, y duplicar una plantilla no es decir "quiero entrenar esto".
+- **Un ejercicio copiado no hereda el historial y pierde su
+  `library_id`.** Lo segundo importa: ese id es la marca de "vino de la
+  librería empaquetada" y es lo que hace idempotente reimportarla; con
+  dos filas compartiéndolo, el import devolvería una cualquiera.
+
+### Tres acciones como mucho al deslizar
+
+Al añadir "Duplicar", una carpeta tenía cuatro (Mover/Editar/Duplicar/
+Eliminar) y **medidas ocupaban 308 px de los 320 de un iPhone SE**: la
+fila se iba entera de la pantalla y dejabas de ver sobre QUÉ estabas
+actuando. iOS tampoco pasa de tres, por lo mismo.
+
+El que sale del deslizamiento es **"Mover"**, que es el que más caminos
+alternativos tiene: sigue en el menú de mantener pulsado
+(`openNoteItemActionMenu`, que es una lista vertical y no compite por el
+ancho) y sobre todo se hace ARRASTRANDO la fila, que es el gesto que
+pidió Koku para mover. Duplicar, en cambio, no tendría otra puerta.
+
+Queda además `.note-swipe-actions { max-width: 76% }` como red por si
+algún día se añade una cuarta: antes de comerse la fila, los botones se
+encogen.
+
+## Por qué "Editar" no hacía nada en el entreno (arreglado el 11/9/2026)
+
+Koku: *"no me deja editar los ejercicios en una serie"*. Deslizar la
+tarjeta de un ejercicio del entreno en vivo y pulsar **Editar** no hacía
+absolutamente nada. **Llevaba roto desde la v0.47.0 (build #59).**
+
+`montarEditorDeTramos` recibía un `exerciseId` que servía para mirar si el
+ejercicio estaba marcado como ASISTIDO y decidir si pintaba el botón de
+signo. Esa marca se fue en la v0.49.0 (el signo se admite siempre), así
+que el parámetro quedó muerto — pero uno de los sitios que lo pasaba,
+`renderGymExerciseEditSets()`, lo sacaba de una variable `ex` **que en esa
+función no existe**. `ReferenceError`.
+
+**Y no se veía porque saltaba dentro de un manejador de clic**: la
+excepción se perdía y el modal simplemente no se abría, sin ningún aviso.
+El arreglo es quitar el parámetro de la función y de sus tres llamadas.
+
+Dos cosas que llevarse de aquí:
+
+- **Cuando un parámetro deja de usarse, se quita TAMBIÉN de quien lo
+  pasa.** Dejarlo "por si acaso" mantiene vivas referencias que ya no
+  apuntan a nada.
+- Ese camino no lo probaba nadie. Ahora sí (`entreno-editar.mjs`, 21
+  comprobaciones): pulsa con el ratón de verdad y mira que el modal **se
+  vea**, no solo que pierda la clase `hidden`. Comprobado que la prueba
+  pilla el fallo: deshaciendo el arreglo se ponen 5 en rojo.
+- **Trampa al escribir pruebas de deslizamiento**: hay
+  `.note-swipe-wrap` en otras vistas OCULTAS de la app, así que
+  `document.querySelector('.note-swipe-wrap')` devuelve el de Notas y la
+  prueba miente. Hay que acotar al contenedor
+  (`#gym-live-exercises .note-swipe-wrap`).
+
+## Gimnasio: los retoques del 11/9/2026
+
+Cuatro cosas sueltas que pidió Koku probando la build #62.
+
+- **El ± va DELANTE del campo de peso** (*"creo que se entiende mejor"*).
+  Y tiene sentido: lo que hace es poner el signo al PRINCIPIO del número,
+  así que estando a la izquierda el botón está justo donde va a aparecer
+  el "−". Son cuatro sitios; el listener no depende del orden (busca el
+  input dentro del mismo envoltorio, no "el hermano siguiente").
+- **Un "− 30 s" para deshacer el "+30 s"**. Antes los +30 que pulsabas
+  durante el descanso se quedaban apuntados para siempre y el chip "+60"
+  era de solo lectura. Está en los DOS editores de series (el del entreno
+  y el del historial). Resta de 30 en 30 y no borra el total de golpe, a
+  propósito: es el espejo exacto del botón que lo sumó.
+- **Cortar el descanso guarda lo que de verdad descansaste.** Si empiezas
+  la siguiente serie antes de que venza el cronómetro,
+  `gymApuntarDescansoReal()` apunta los segundos reales. **Va en un campo
+  APARTE (`restActualSeconds`) y no pisando `set.restSeconds`**, y eso no
+  es un capricho: `restSeconds` es también el descanso PROGRAMADO, y de
+  él tira `gymBuildSetsForExercise()` para la serie extra que se añade al
+  final — pisándolo, cortar un descanso te metía el descanso corto en la
+  siguiente serie. Si ya había vencido, no se toca nada. Y si TOCAS el
+  descanso en el editor del ejercicio, tu número manda y se olvida el
+  real. Importa porque de ahí sale la media que alimenta el **tiempo
+  estimado**: guardando siempre el programado, la estimación se iría
+  hacia arriba en cuanto cortes descansos.
+- **Las filas de ejercicio del día se deslizan** (Editar / Mover /
+  Quitar), como las tarjetas del entreno — *"misma mecánica, menos
+  ruido"*. Se fueron las flechas de subir/bajar.
+
+**Por qué ahora sí se puede arrastrar, si CLAUDE.md decía lo contrario.**
+La nota vieja era correcta: la fila llevaba TRES campos y un desplegable,
+así que meter el dedo en un campo peleaba con el gesto, y arrastrar
+siempre peleaba con el scroll del modal. Las dos cosas se arreglan a la
+vez con este reparto, que es el mismo del entreno: **la fila se queda de
+solo lectura** (enseña "4 × 8 · descanso 1:30" y ya) y **el arrastre no
+está siempre activo, se ARMA desde "Mover"** y se desarma al soltar. Lo
+que se escribe vive en `#gym-routine-exercise-modal`.
+
+El **ojo de aparcar SE QUEDA en la fila**: aparcar no es editar, es usar
+la lista — el mismo criterio que deja "Activar" en la fila de un bloque.
+
+`habilitarArrastreDeEjercicio()` y `armarMovimientoDeEjercicio()` se
+generalizaron con opciones (`scrollerSelector`, `alSoltar`, `repintar`)
+para que sirvan en los dos sitios. Antes solo sabían de `gymLiveSession`
+y de `.gym-live-content`.
+
+## La App del acceso rápido no se repite en Herramientas
+
+Petición de Koku: *"si pongo una app como acceso rápido: notas,
+gimnasio... que no aparezca en la parte de herramientas directamente.
+Sino creo que marea un poco"*.
+
+`applyMobileNavCustomization()` recorre **todas** las tarjetas del hub y
+esconde solo la de la App que esté en la barra — recorrerlas todas, y no
+esconder una y ya, es lo que hace que cambiar de App vuelva a enseñar la
+anterior sin acordarse de nada.
+
+**Ojo al escribir pruebas**: de fábrica la barra lleva Notas, así que
+**la tarjeta "Notas" del hub nace escondida**. Una prueba que entre a
+Notas pulsando esa tarjeta con un click de verdad se queda esperando para
+siempre (pasó). Se entra por la barra; y para probar el camino del hub,
+se cambia el ajuste a otra App primero.
+
+Y sigue sin haber forma de perder el acceso a nada: si la barra lleva
+Notas, la tarjeta sobra; si lleva otra cosa, la tarjeta vuelve.
+
+## Notas de versión (Configuración → Novedades) — 11/9/2026
+
+Petición de Koku: *"un apartado de notas de versión o desarrollador.
+Esto para todos, en la versión de usuario también"*.
+
+- **`public/notas-version.js`** — `APP_RELEASE_NOTES`, la lista que se
+  ve. **Se escribe A MANO en cada ronda**, igual que `APP_VERSION`: no
+  hay paso de compilación que pueda generarla. Lo nuevo va arriba.
+  Cada entrada lleva `version`, `fecha` (ISO), `nuevo` y `parches`.
+- **Lo de "a revisar" NO vive ahí**: va en `public/desarrollador.js`,
+  que no viaja a la rama de usuario (ver el bloque de las dos ramas).
+- `renderReleaseNotes(fuente)` en `settings.js`. El argumento existe solo
+  para poder probarla con datos rotos sin tocar la global; la app la
+  llama siempre sin él. Descarta las entradas sin `version` (una nota sin
+  número no se puede colocar) y pinta con `textContent`, nunca
+  `innerHTML`: las notas las escribo yo, pero no hay motivo para dejar
+  que puedan meter etiquetas.
+
+**El número de build** sale de `public/build-info.js`. En el repositorio
+está a `null` a propósito, y lo reescribe el workflow justo **antes de
+`cap sync`** (ese paso es el que copia `public/` dentro del proyecto de
+iOS, así que escribirlo después no llegaría a la app). Es el MISMO
+`GITHUB_RUN_NUMBER` que se usa como `CURRENT_PROJECT_VERSION`, o sea el
+número que se ve en TestFlight.
+
+Hacen falta **las dos cosas** para que la build se enseñe: el archivo de
+desarrollador Y un número de verdad. Sirviendo `public/` como estático no
+hay compilación detrás, así que la línea se queda como siempre.
+
+**Pendiente, y lo está pensando él**: que la Tienda enseñe por
+herramienta lo actualizado o parcheado. No empezarlo hasta que lo pida.
+
+## Ejercicios por tiempo (11/9/2026)
+
+Petición de Koku: *"poder hacer ejercicios temporizados. Aguantar
+ejercicios isométricos. Poder hacer ejercicios de repeticiones en x
+tiempo"*.
+
+**Las cuatro decisiones que tomó él**, no cambiarlas sin volver a
+preguntarle:
+
+1. **Se marca en la FICHA del ejercicio.** Una plancha siempre se mide en
+   segundos, así que lo sabe el ejercicio y no hay que decirlo en cada
+   serie.
+2. **El cronómetro depende del tipo**: con objetivo cuenta ATRÁS, sin
+   objetivo cuenta hacia ARRIBA.
+3. **Tiempo bajo tensión va APARTE del volumen**, en su propio contador.
+   Descartó meterlo dentro. Y el peso se puede poner igual ("por lo
+   general es sin peso, pero que exista la posibilidad").
+4. **"Reps en un tiempo" cubre las dos variantes**, con peso opcional.
+
+### El modelo
+
+`gym_exercises.measure`, tres valores: `'reps'` (o NULL, lo de siempre),
+`'tiempo'` (isométrico) y `'reps_en_tiempo'`. Más `default_seconds`,
+`gym_routine_exercises.target_seconds`, y en la serie
+`gym_sets.measure` + `gym_sets.measure_seconds`.
+
+**CADA SERIE GUARDA SU PROPIA `measure`, y eso es lo importante**: así
+cambiar un ejercicio de reps a tiempo (o al revés) NO reescribe hacia
+atrás lo que ya habías apuntado. Es exactamente la lección de la marca
+`assisted`, que hacía justo eso y por eso se fue.
+
+**`measure_seconds` NO es `duration_seconds`**, aunque en un isométrico
+cronometrado coincidan: `duration_seconds` es "cuánto tardó la serie del
+botón de empezar al de terminar" (existe también en una serie normal y es
+NULL si la apuntaste a mano); `measure_seconds` es EL DATO de la serie, y
+se puede escribir a mano sin haber cronometrado nada.
+
+### El sub-modo sale de qué objetivo rellenes
+
+No hay ningún interruptor extra que entender:
+
+| medición | con segundos objetivo | sin objetivo |
+|---|---|---|
+| `tiempo` | cuenta atrás hasta 0 | cuenta hacia arriba (aguanta lo que puedas) |
+| `reps_en_tiempo` | cuenta atrás y apuntas las reps (AMRAP) | cuenta hacia arriba y se mide lo que tardas |
+
+Y **se guardan siempre las dos cosas** (reps y segundos), así que los dos
+récords existen sin tener que elegir uno.
+
+### Volumen: la regla no es "por tiempo no suma"
+
+Es que **un isométrico NO TIENE repeticiones**, así que `kg × reps` da
+cero solo, sin ninguna regla especial — ni con 10 kg encima. Pero **20
+flexiones con 5 kg en 27 s SÍ son 100 kg movidos de verdad**, y suman.
+
+El tiempo bajo tensión va en su propio contador (`tensionSeconds` en
+`/summary` y `/progress`), y se enseña en Consistencia. Va aparte porque
+son unidades distintas: un minuto de plancha con 10 kg daría 600 metido
+en el volumen, y 600 ahí no son 600 kg — un día de planchas parecería un
+día de sentadillas.
+
+### Lo que falta (apuntado en `desarrollador.js`)
+
+- El cronómetro de la serie **no avisa** al llegar al objetivo, solo se
+  marca en pantalla. Sonar o vibrar sería pisarse con el aviso de fin de
+  descanso, que es el que de verdad tiene que oírse con la app cerrada.
+  Si hace falta, es una decisión aparte porque toca notificaciones.
+- Los récords por tiempo (mejor aguante) no se pintan todavía: la ruta ya
+  devuelve `maxSeconds`.
+- El tiempo estimado no usa aún el objetivo de las series por tiempo, que
+  se sabe de antemano y lo afinaría.
+
+## El cronómetro suelto del entreno
+
+Petición de Koku: *"un cronómetro, cuando le doy, que abra un cronómetro
+y ya está, no hace nada, sólo cronometrar... si lo abro y no lo pauso y
+lo cierro que siga corriendo... es para tener una herramienta rápida en
+el mismo ecosistema. Que pueda ser temporizador también"*.
+
+Está en el menú de tres puntos del entreno, que pasa de cinco acciones a
+seis (las posiciones del abanico se recalcularon: salen de
+`(-R·cos θ, -R·sin θ)` repartiendo 90° entre seis, no están puestas a
+ojo).
+
+**Tres cosas que NO hace, y es a propósito:**
+
+1. **No toca la sesión.** No crea series, no suma al tiempo de trabajo y
+   no sale en el historial. Es una herramienta, no un registro — lo dijo
+   él: *"no necesito que se contabilice en el historial me da igual"*.
+2. **No avisa al llegar a cero** en modo temporizador: solo se marca en
+   pantalla, igual que el cronómetro de una serie por tiempo.
+3. **No se para al cerrar el diálogo.** El botón del menú se queda
+   marcado mientras cuenta, que es lo único que avisa de que sigue vivo.
+
+El estado va en `localStorage` (`gymCrono`) y no en memoria, así que
+sobrevive a recargar la app. **El tiempo se calcula siempre de marcas de
+reloj**, nunca de un contador que se va sumando: en iOS el JavaScript de
+fondo se congela y un contador se quedaría corto justo al salir de la
+app — la misma razón por la que el entreno ya funciona así.
+
+**Se sanea al LEER de localStorage**, y no es paranoia: encontrado
+forzando errores, un `startedAt` que no fuera un número pintaba
+`NaN:NaN`, y de ahí no se sale solo. Validar en la puerta de entrada lo
+arregla para todos los que leen el estado.
+
+## Los dos lados son LA MISMA serie (11/9/2026)
+
+Koku, haciendo extensión de tríceps en polea a un brazo: *"me ha contado
+D I D, I D I, en vez de hacer 3 series con cada brazo me ha hecho 2
+series... alterando tiempos de descanso etc"*. Luego lo corrigió con más
+precisión: *"me ha hecho 3 series, en la primera D I D, en la segunda I
+D, en la tercera I"*.
+
+**La causa**: `gymSetSerieNumber()` contaba los IZQUIERDOS
+(`if (ex.sets[i].side !== 'right') n += 1;`), dando por hecho que el lado
+izquierdo siempre va primero. Pero **por cuál empiezas se elige en el
+diálogo**, y empezando por el derecho las seis filas `D I D I D I`
+quedaban numeradas `1 1 1 2 2 3` — exactamente lo que él describió.
+
+Y no era sólo un número mal puesto: el **descanso corto entre lados** se
+decide con `gymSidePartnerIndex()`, que sale de esa misma numeración. Con
+tres filas creyéndose la misma serie, la pareja apuntaba a cualquier
+sitio y el descanso caía donde no tocaba. De ahí lo de "alterando tiempos
+de descanso".
+
+**Cómo se cuenta ahora**: se emparejan **dos filas seguidas de lados
+distintos**, sin dar por hecho cuál va primero. La fila que cierra una
+pareja no sube el contador; cualquier otra sí. Empieces por donde
+empieces, sale `1 1 2 2 3 3`.
+
+**Hacían falta las DOS mitades**, y con una sola parecía arreglado:
+
+1. **La pantalla** (`gymSetSerieNumber` en `app.js`). `gymSerieCount()`
+   se saca ahora del número de serie de la ÚLTIMA fila, en vez de contar
+   por su cuenta: contar los izquierdos aparte era justo lo que fallaba,
+   y así las dos funciones no pueden separarse.
+2. **El guardado** (`replaceSessionSets` en
+   `routes-local/gymSessions.js`). Numeraba una serie por FILA, así que
+   el historial guardaba seis series donde había tres. Lleva la misma
+   regla escrita igual a propósito: si contaran distinto, el entreno
+   diría "serie 3 de 3" y el historial apuntaría 6.
+
+**Lo que NO se tocó, y conviene saberlo**: el `set_count` de `/summary`
+(racha, heatmap, mapa de músculos, objetivo semanal) **sigue contando
+cada lado como una serie**. Eso es la decisión de los unilaterales de su
+día ("cada lado es una SERIE PROPIA, así el historial y el volumen no
+necesitan casos especiales") y cambiarlo reescribiría hacia atrás todos
+esos números. Está apuntado en las notas de revisar de la v0.54.0.
+
+Tampoco hay migración: las sesiones ya guardadas conservan su numeración
+vieja. Sólo cambia cómo se LEE el historial, ningún total.
+
+## Series parciales: el tercer tipo de tramo
+
+Petición de Koku (11/9/2026): *"poder apuntar parciales, donde se apuntan
+dropsets y rest-pause, ahí poder poner series parciales"*.
+
+No es un concepto nuevo, es un tramo más — o sea, una fila de `gym_sets`
+colgada de su serie madre por `parent_set_id`, con `set_type =
+'parciales'`. Entra en el volumen y puede ser récord igual que los otros
+dos, que es la decisión 2 del bloque de series alargadas.
+
+Los tres, y en qué se diferencian AL APUNTARLOS:
+
+| tramo | qué es | peso que propone | pausa |
+|---|---|---|---|
+| `dropset` | bajas el peso y sigues | el del tramo de arriba | no |
+| `restpause` | paras unos segundos y sigues | el de la madre | sí |
+| `parciales` | sigues a recorrido corto | el de la madre | no |
+
+Lo único propio de las parciales es la sugerencia de peso: una parcial se
+hace con la MISMA carga, lo que se acorta es el recorrido — así que
+propone el de la madre, no el del tramo de arriba como en un dropset
+encadenado.
+
+**Dónde se toca si aparece un cuarto tipo**: `GYM_SEGMENT_KINDS` +
+`gymSegmentKind()` + `GYM_SEGMENT_LABELS` en `app.js`,
+`VALID_SEGMENT_KINDS` / `VALID_SET_TYPES` / `KINDS_DE_TRAMO` en
+`routes-local/gymSessions.js`, un botón en los tres sitios donde se
+apuntan (el diálogo de fin de serie en `index.html`, el modal de editar
+un ejercicio del entreno y el de editar una sesión del historial) y una
+regla `.gym-set-segment-tag.es-<tipo>` en `styles.css`. La etiqueta
+`es-parciales` es `#5B21B6`, contraste 8,98:1 con el blanco — medido con
+la fórmula WCAG, no a ojo.
+
+## El reloj del entreno pasa a horas
+
+Koku: *"que el tiempo de entrene se muestre en hh/mm/ss, no en mm/ss, que
+creo que es más fácil 1:30:15 que 90:15"*.
+
+Va en `gymLiveFormatClock()`, que es el formateador común, pero **las
+horas sólo salen al pasar de los 60 minutos**. Eso no es pereza: esa
+misma función pinta también los descansos, la cuenta atrás de la serie y
+el cronómetro suelto, y un descanso de minuto y medio como "0:01:30" se
+lee peor que "1:30". Así cada uno queda como toca sin tener dos
+formateadores que puedan separarse con el tiempo.
+
+## Salir de una App deslizando (por ahora solo Finanzas)
+
+De la rama `finanzas-movil`, 11/9/2026. Koku: *"si deslizo desde el
+centro me lleve del apartado interior al primero, y si lo vuelvo a hacer
+que me lleve a la base app"*.
+
+O sea que el gesto central hacia la derecha tiene ahora **dos pasos** en
+Finanzas: de una sección a su inicio, y del inicio a Herramientas
+(`salirDeFinanzasDeslizando()` en `app.js`). Cómo sabe en cuál está: si
+el botón `btn-finanzas-back` se ve, estás DENTRO de una sección y de eso
+ya se encargó `volverUnPasoDentroDeLaPantalla()` antes.
+
+**Solo Finanzas, a propósito.** En Gimnasio, Entretenimiento y Viajes el
+centro todavía no significa "salir", y cambiárselo de golpe es justo lo
+que confunde. Si algún día se generaliza, el patrón ya está escrito.
+
+De paso, `.finanzas-tabs` salió de `MOBILE_SUBTAB_BARS`, y es correcto:
+esa barra **ya no existe en el DOM** desde que el inicio de Finanzas pasó
+a filas. Y `.finanzas-table-wrap` entró en `NAV_SWIPE_OPT_OUT`, porque
+arrastrar sobre una tabla ancha es mirar columnas, no volver atrás.
+
+**El colchón de abajo**: `.finanzas-tab-panel` reserva `7rem` al final.
+No es decoración — la barra de apps flota FIJA encima de esa pantalla,
+así que sin ese hueco la última fila se queda ~35 px por DEBAJO de la
+barra y no hay forma de verla ni de tocarla, ni bajando del todo. Es el
+mismo colchón que ya reservaba `.gym-tab-content`; Finanzas se había
+quedado sin él. **Si la barra cambia de alto, los dos números van
+juntos.**
+
+**Trampa al probar esto**, apuntada porque me mordió: no vale medir el
+CENTRO del último hijo del panel. El de Movimientos es un contenedor de
+1683 px (la tabla entera), así que su centro cae fuera de la pantalla y
+la prueba dice "está tapado" cuando no lo está. Hay que probar el punto
+justo encima del FINAL del contenido, con el panel ya desplazado al
+fondo, y comprobar con `elementFromPoint` que lo que hay ahí sigue
+estando DENTRO del panel.
+
+**Los porcentajes se escriben como el dinero** (`formatFinanzasPorcentaje`
+/ `FINANZAS_PCT_FORMATTER`): con coma decimal y agrupando los miles con
+`useGrouping: 'always'`. Lo segundo se añadió al fusionar: un gasto que
+pasa de 1 a 20 € es un +1900%, y por defecto el español no separa los
+números de cuatro cifras, así que salía "1900%" al lado de un
+"1.900,00 €". Es el mismo motivo que ya tenía escrito
+`FINANZAS_MONEY_FORMATTER`.
+
+## El Gimnasio se navega como Finanzas (13/9/2026)
+
+Petición de Koku: *"que en vez que esté en la sección de arriba que
+pongamos tipo la de finanzas, que es los 4 botones y luego entras a la
+sección"*. Se fue la barra de cuatro pestañas
+(Entrenar/Plan/Progreso/Logros) y en su lugar hay un **inicio de filas**,
+igual que Finanzas: `switchGymTab` / `renderGymInicio` en `app.js`.
+
+**Las tres decisiones que tomó él**, no cambiarlas sin volver a
+preguntarle:
+
+1. **"Empezar entrenamiento" vive EN EL INICIO**, encima de las filas, no
+   dentro de una sección. Es la única diferencia deliberada con Finanzas,
+   donde ese hueco es una cifra pasiva. El motivo: empezar a entrenar es
+   lo que se hace casi cada día, y enterrarlo un nivel lo convertiría en
+   dos toques diarios. Se le ofreció también ponerlo en los dos sitios y
+   lo descartó — es la misma regla de "una sola forma" que ya aplicó al
+   lápiz de editar.
+2. **El hueco de arriba lleva la semana y la racha** ("2/4" + "Racha de 3
+   semanas"). Eligió eso frente a "qué toca hoy" porque es lo único que
+   dice cómo VAS, no cuánto llevas acumulado.
+3. **Los iconos son SVG** — ver el bloque siguiente.
+
+**"Entrenar" pasa a llamarse "Historial"**: al irse el botón de empezar,
+lo que queda dentro son las sesiones hechas, la actividad rápida y el
+alta manual. **El id sigue siendo `gym-tab-sessions`** a propósito;
+renombrarlo tocaría media app sin cambiar nada visible.
+
+Detalles que importan:
+
+- **`openGymView()` llama a `switchGymTab('inicio')`**, y va DESPUÉS de
+  cargar los datos. Los paneles guardan su clase `hidden` entre
+  aperturas, así que sin eso el Gimnasio se abriría en la última sección
+  donde estuviste y con la flecha de volver puesta.
+- **`gymResumenDeLaSemana()`** se separó de `renderGymConsistency()` para
+  que el hero y las cifras de Consistencia no puedan decir cosas
+  distintas del mismo entreno. Mismo motivo por el que
+  `gymPuntuacionPorMusculo()` se separó cuando apareció el widget.
+- **Una sola llamada a `/summary`** en el inicio: da la semana, la racha
+  y de paso cuántos logros llevas empezados (`gymLogrosEmpezados`, que se
+  apoya en las mismas funciones que la pestaña de Logros, así que no
+  puede contar distinto). Va en `try/catch`: que falle el resumen no
+  puede dejarte sin las filas, que son la única puerta a las secciones.
+- **`.gym-tabs` salió de `MOBILE_SUBTAB_BARS`** (esa barra ya no existe) y
+  **`btn-gym-back` entró en `VOLVER_UN_PASO`**, DESPUÉS de
+  `btn-gym-back-to-blocks`: estando dentro de un bloque, lo primero que se
+  suelta es la lista de días, no la sección entera.
+- **Deslizar para salir de la App entera sigue siendo solo de Finanzas.**
+  Ahora que las dos pantallas tienen la misma forma es fácil
+  generalizarlo, pero no se ha hecho sin preguntar.
+
+## Los iconos de las filas son SVG (cierra la duda B9)
+
+Koku, en la misma ronda: *"SVG, cambia los de finanzas también a SVG"*.
+Eso **cierra la duda B9 de `PARA-KOKU-MAÑANA.md`**, que llevaba abierta
+desde el 11/9/2026: los siete emojis de Finanzas se fueron con los cuatro
+nuevos del Gimnasio.
+
+**Hay DOS clases de icono y no hay que mezclarlas** — es el matiz que se
+descubrió al hacerlo, y por poco se rompe algo:
+
+- Los de **SECCIÓN** (Este mes, Gastos fijos, Plan, Logros…) son míos.
+  `icono` es una **clave** de `ICONOS_DE_FILA`, y salen en SVG teñidos con
+  el acento.
+- Los de una **CATEGORÍA o un OBJETIVO** los eliges **tú** con
+  `createIconField`. O sea que son CONTENIDO, no parte de la app: siguen
+  siendo el emoji que pusiste. Cambiarlos habría sido borrar lo que
+  elegiste.
+
+De ahí el reparto de `pintarIconoDeFila()`: clave conocida → SVG por
+`innerHTML`; **cualquier otra cosa → `textContent`**. Eso además es lo que
+lo hace seguro: por `innerHTML` solo pasan mis constantes, nunca un valor
+guardado.
+
+**Bug encontrado forzando errores, y no es teórico**: la tabla se
+consultaba con `ICONOS_DE_FILA[nombre]` a secas. Un icono llamado
+`constructor` o `toString` **no da `undefined`, da la función que todo
+objeto hereda de `Object`** — que es truthy, así que acababa pintando
+`function Object() { [native code] }` dentro de la fila, y por
+`innerHTML`. Inyectar no se podía (el código nativo nunca trae
+etiquetas), pero es basura en pantalla por un nombre que el selector de
+iconos deja escribir. Va con `Object.prototype.hasOwnProperty.call(...)`.
+
+**El componente de fila se llama `filaDeLista()`** y lo comparten las dos
+Apps. `finanzasFilaEl` queda como **alias del nombre viejo**, y las clases
+CSS siguen diciendo `finanzas-row*`: renombrarlas chocaría con la rama
+`finanzas-movil`, que Koku trabaja en paralelo, en cada línea que las
+toca. Es el mismo criterio por el que los ids siguen diciendo
+`extensions` después de que esa pantalla pasara a llamarse "Apps". Cuando
+esa rama se cierre, se renombra de una vez.
+
+**Dos trampas de las pruebas, apuntadas porque las dos mordieron:**
+
+1. **Los asserts no leen ortografía.** Los cuatro subtítulos nuevos
+   salieron SIN TILDES ("dias", "musculos", "records") y las 40
+   comprobaciones pasaron en verde: miraban ids, números y visibilidad.
+   Se vio mirando la captura. Ahora hay una comprobación que busca
+   palabras sin tilde en los subtítulos.
+2. **Una prueba tiene que ponerse ROJA, no explotar.** Al comprobar que
+   los reverts se detectaban, uno pareció colarse: la sección de los
+   iconos hacía `querySelector('svg').getBoundingClientRect()`, que
+   LANZA en cuanto una fila vuelve a ser emoji, y el guion se caía entero
+   antes de imprimir ningún FALLO — contando con `grep -c FALLO` eso son
+   cero. Va con `?.` y un `'SIN-SVG'`, y se cuenta por código de salida.
+
+## La Tienda (13/9/2026)
+
+Petición de Koku, con su lista de cuatro puntos: *"comenzar a poner las
+4 apps desarrolladas (calendario, notas, gimnasio y finanzas) /
+mostrar/ocultar apps / manuales de usuario para cada app / notas de
+versión en cada app"*. Vive en Configuración → Tienda, en dos niveles
+(lista de Apps → ficha de una App), como Finanzas y Gimnasio.
+
+**Las cuatro decisiones que tomó él**, no cambiarlas sin volver a
+preguntarle:
+
+1. **Las seis Apps salen, no cuatro.** Lecturas y Viajes aparecen
+   marcadas "en desarrollo" y **apagadas de fábrica**, pero se pueden
+   encender y usar: *"que salgan en desarrollo, y que por ahora por
+   defecto no salga activa, pero que las pueda activar y acceder a
+   ellas"*.
+2. **Apagada significa cuatro cosas concretas**, con sus palabras: *"que
+   no sean accesibles desde el menú de herramientas ni tampoco para
+   sustituir en la app de acceso rápido... en caso de tener widgets, si
+   está activa aparecen sino no. Si hago una copia de seguridad, que
+   muestre las apps para guardar en la copia, las inactivas por defecto
+   irán desmarcadas"*.
+3. **Todas se pueden apagar menos el Calendario**, que es con lo que
+   arranca la app.
+4. **Un manual entero primero** (el del Gimnasio) y los otros cinco
+   después, para validar el tono sin escribir cinco y tener que
+   rehacerlos.
+
+**Apagar NO borra NADA.** Apagar Viajes esconde Viajes; tus viajes
+siguen en la base y vuelven enteros al encenderla. Eso es lo que separa
+"ocultar" de "desinstalar", y aquí solo hay lo primero.
+
+**El selector del hueco de la barra también obedece** (Koku lo recordó
+al ver la ronda: *"si una está apagada no puede aparecer en el selector
+tampoco para la aplicación de acceso rápido"*). Lo hacen dos funciones
+que van en pareja y conviene no fusionar: `getMobileNavNotesSlot()` es
+"qué dice el ajuste" y `huecoDeLaBarraUsable()` es "qué se puede usar de
+verdad" — `aplicarAppsActivas()` necesita comparar las dos para saber si
+tiene que mover el hueco. **El único sitio de la app donde se puede
+llegar a una App apagada** es ese hueco cuando las apagas TODAS: un
+botón de la barra no puede quedarse vacío, así que cae a Notas.
+
+`aplicarAppsActivas()` NO corre al arrancar, y es correcto: el selector
+ya nace con la lista filtrada y `applyMobileNavCustomization()` se llama
+al declararse. Llamarla al cargar además tocaría `mobileNavSlotField`,
+declarado más abajo — la TDZ de siempre.
+
+### Las piezas
+
+- **`APPS_DE_LA_TIENDA`** (`app.js`): el registro. Id, nombre, icono de
+  fila, `estado` ('lista' o 'desarrollo'), `fija` y un resumen. Los ids
+  son los MISMOS que `MOBILE_NAV_SLOT_APPS` a propósito, para que
+  filtrar el hueco de la barra sea mirar esta lista y ya.
+- **`leerAppsActivas()` / `appEstaActiva()` / `ponerAppActiva()`**: el
+  estado va en `localStorage` (`appsActivas`), por dispositivo — qué
+  Apps quieres ver es cosa de este teléfono, no un dato.
+- **`aplicarAppsActivas()`**: deja la app entera de acuerdo con la
+  Tienda. Si la App que ocupaba el hueco de la barra se acaba de apagar,
+  la saca de ahí ANTES de repintar.
+- **`public/manuales.js`** (nuevo): `APP_MANUALES`, secciones de
+  `{titulo, parrafos, puntos}`. Se pinta TODO con `textContent`: un
+  manual no puede meter etiquetas en la pantalla.
+- **Las notas de versión por App**: cada línea de `notas-version.js`
+  puede ser una cadena (general) o `{ app, texto }`. **Una sola fuente
+  de verdad**, leída de dos formas: Novedades lo enseña todo con su
+  etiqueta, y la ficha de una App enseña solo lo suyo. Con dos listas
+  escritas a mano acabarían contradiciéndose.
+
+### Trampas que ya mordieron
+
+- **La cadena de prototipos, otra vez.** `APPS_POR_ID['constructor']`
+  devuelve la función heredada de `Object` (que es truthy), así que la
+  app se creía que existía una App llamada `constructor`; y
+  `estado['__proto__']` no guarda lo que parece. Es EXACTAMENTE el mismo
+  fallo que ya mordió en `pintarIconoDeFila()`. La cura: `appDeLaTienda()`
+  con `hasOwnProperty`, y el estado en un `Object.create(null)`.
+- **El `<div>` del diálogo de la copia tiene que ir ANTES de
+  `<script src="backup.js">`**, que engancha sus botones nada más
+  cargar. Puesto después, `getElementById` devuelve null y backup.js
+  revienta ENTERO al arrancar. Pasó de verdad.
+- **Una prueba del widget que no miraba lo que creía**: las secciones de
+  Gimnasio del resumen (`consistencia`, `musculos`...) solo existen si
+  hay historial. Sin una sesión guardada devuelven null, y la prueba
+  habría dicho "la Tienda las está filtrando" cuando lo que pasaba es
+  que nunca estuvieron.
+
+### El choque de nombres del widget, encontrado de rebote
+
+`seccionGimnasio()` deja sus claves en la RAÍZ del resumen, y una de
+ellas es `ejercicios` (**un número**: cuántos ejercicios tiene el día de
+hoy). La segunda tanda de widgets añadió una SECCIÓN también llamada
+`ejercicios` (**una lista**, para el widget configurable de la gráfica),
+y al escribirse después la pisaba.
+
+O sea que en cuanto tenías historial de entrenos, el widget "Qué toca
+hoy" dejaba de decir "6 ejercicios" y "+3 más": Swift lee ahí un `Int`,
+se encontraba una lista, y su `try? decode` caía al valor por defecto,
+0. Sin ningún error, como siempre.
+
+La sección pasa a llamarse **`graficaEjercicios`**. Era gratis:
+`ResumenDeLaApp.swift` todavía no la lee (ese widget está a medias).
+`tools/comprobar-widgets.py` no lo detectaba porque compara claves
+sueltas, no colisiones entre la raíz y las secciones.
+
+### La copia de seguridad, por Apps
+
+`BACKUP_TABLAS_POR_APP` en `backup.js` dice qué tablas son de cada App.
+**Lo que no sale en esa lista es de la app en sí** (temas, ajustes,
+perfil) y viaja SIEMPRE — es a propósito que se decida por omisión: si
+mañana aparece una tabla nueva y nadie toca ese archivo, acaba DENTRO de
+la copia. Lo contrario (quedarse fuera en silencio) sería perder datos.
+
+**Exportar** abre un diálogo de casillas (`.styled-checkbox`, la de
+"elige varios de una lista", NO `.checkbox-row`) con las Apps activas
+marcadas. Lo que dejes fuera se BORRA de una copia abierta de los bytes
+—nunca de la base viva— y se hace `VACUUM`, que es lo que hace que el
+archivo adelgace de verdad.
+
+**Y aquí estaba la trampa, que es lo importante de este bloque**: si una
+copia parcial se importara como siempre (sustituir el archivo entero),
+importarla BORRARÍA las Apps que no trae. O sea que dejar Gimnasio fuera
+de una copia no sería "no guardarlo", sería "perderlo la próxima vez que
+restaure".
+
+Por eso **una copia parcial no sustituye la base**:
+`importarSoloEstasApps()` vacía y rellena, tabla por tabla, SOLO lo que
+la copia trae, y lo que no trae se queda exactamente como está. Va al
+revés de lo que parece natural (meter lo que falta dentro de la base de
+la copia) por el ESQUEMA: la base viva siempre está al día
+(`applyLocalSchema` corre en cada arranque), mientras que la de la copia
+puede ser de hace tres versiones y no tener ni la tabla que habría que
+rellenar. Por lo mismo se copian solo las columnas COMUNES a las dos
+bases: la que falte se queda con su valor por defecto, que es justo lo
+que hace una migración al añadirla.
+
+Una copia SIN el campo `apps` es de antes de la Tienda y se trata como
+completa — es lo que era.
+## Eventos que se repiten (13/9/2026)
+
+Petición de Koku: *"Repetitibilidad de eventos. Los eventos se pueden
+repetir, poner una opción de si es repetible y cada cuanto"*. Al
+preguntarle eligió **"Completo"** (diaria/semanal/mensual/anual + "cada
+N" + varios días de la semana en una sola regla) y **"Preguntar cada
+vez"** al editar o borrar una de las veces.
+
+**El modelo, que es lo primero que hay que entender: NO se generan
+filas.** El evento sigue siendo UNA fila de `events` y lo que se guarda
+es la REGLA (`repeat_freq`, `repeat_interval`, `repeat_weekdays`,
+`repeat_until`). Las veces se calculan al pedirlas, en
+`repeticionesDeEvento()` (`public/local-api.js`), que devuelve
+`[{startAt, endAt, occurrenceDate}]`.
+
+Generar filas se descartó a propósito: una clase semanal de tres años
+son ~150 filas que hay que crear, migrar si cambias la hora, y borrar si
+acortas la serie. Con la regla, cambiar la hora las cambia todas de
+golpe y no hay nada que limpiar.
+
+**Las dos excepciones a "una fila = la serie entera"**, que son las que
+hacen posible el "solo esta vez":
+
+- **Saltar un día**: se apunta en `repeat_skip`, una lista JSON de
+  fechas. Ese día deja de calcularse y ya está.
+- **Soltar una vez**: `POST /:id/detach` crea una fila PROPIA con lo que
+  cambiaste y `repeat_parent_id` apuntando a la serie, y de paso mete
+  ese día en `repeat_skip` para que la serie no lo pinte dos veces.
+  Borrar la serie (`DELETE /:id`) se lleva también sus sueltas — si no,
+  quedarían huérfanas sin nada que las explique.
+
+**Detalles que costaron y no conviene deshacer:**
+
+- **`GET /` trae SIEMPRE las filas con regla**, sea cual sea el rango
+  (`... OR e.repeat_freq IS NOT NULL`), y las despliega después. El
+  filtro de solape normal las dejaba fuera: una serie que empezó en
+  enero no "solapa" con marzo, aunque le toque cada semana.
+- **El buscador NO despliega** (`q` devuelve las filas tal cual): buscar
+  "Clase de yoga" tiene que dar UN resultado, no doscientos.
+- **Un PUT parcial no borra la regla.** Las cuatro columnas solo se
+  tocan si el cuerpo trae `repeat` (`!== undefined`). Renombrar un
+  evento mandando solo el título no puede dejarlo sin repetir.
+- **El semanal con días marcados itera semana a semana**; el resto de
+  frecuencias da un salto inicial calculado (`saltoInicial()`) para no
+  recorrer día a día desde el principio de los tiempos.
+- **Los días que no existen se SALTAN, no se recolocan**: un mensual el
+  31 no aparece en febrero ni en abril, y un anual el 29 de febrero solo
+  en los bisiestos. Recolocarlo al 28 o al 1 se inventa una fecha que
+  nadie pidió.
+- **La hora se vuelve a poner después de cada salto de fecha**: sumar
+  meses o semanas cruzando un cambio de hora deja el reloj corrido una
+  hora si no.
+- **`MAX_OCURRENCIAS = 500`** como tope duro: una regla rara (o un rango
+  enorme) no puede colgar la app calculando para siempre.
+
+**Los avisos: cada vez lleva su id propio.** Esto era un fallo real
+encontrado leyendo el código, no usándolo: `local-notifications.js`
+programaba con `id: r.eventId`, así que las veinte veces de una serie
+compartían id y **solo sonaba la última**. Ahora `/api/reminders/upcoming`
+devuelve un `notificationId` por vez, de una banda propia
+(`600000000 + (eventId % 1000000) * 100 + min(99, i)`), que no choca con
+las otras bandas ya repartidas (eventos sueltos, pagos de Finanzas,
+avisos internos de la app).
+
+Y **como mucho 10 por serie** (`MAX_AVISOS_POR_SERIE`): iOS solo guarda
+~64 avisos pendientes por app y a partir de ahí deja de avisar EN
+SILENCIO. Una serie diaria sin tope se quedaba con el cupo entero y
+dejaba al resto del calendario mudo. Se miran 180 días hacia delante.
+
+**Una regla inválida se guarda como "no se repite"**, nunca se rechaza
+el evento entero: `limpiarRepeticion()` recorta el intervalo a 1-365,
+ordena y deduplica los días, y exige que `until` sea `YYYY-MM-DD`. Si la
+frecuencia no existe, el evento se guarda sin repetir. Perder un evento
+por una regla mal escrita sería mucho peor que perder la regla.
+
+**"¿Solo esta vez o todas?"** es `preguntarPorLaSerie()` en `app.js`, con
+su propio `#event-series-modal` de TRES botones — `showAppConfirm` tiene
+dos y aquí hacen falta tres. `eventoAbiertoOcurrencia` guarda de qué día
+se abrió el modal; sin eso, "solo esta vez" no sabría a qué vez se
+refiere.
+
+## Horario semanal fijo (13/9/2026)
+
+Petición de Koku: *"Mirar para poder poner horarios"*. Al preguntarle
+eligió **"Un horario semanal fijo"**: la rejilla de horas x días
+(lunes-domingo) para lo que se repite toda la semana — clases, turnos,
+gimnasio — viviendo aparte del calendario.
+
+**Tabla propia (`horario_bloques`), no eventos con una regla de
+repetición**, y esa es LA decisión de la ronda. Un horario no tiene
+fecha: no empieza un día concreto ni acaba nunca. Metido en el
+calendario, cada semana se llenaría de las mismas seis clases y taparía
+lo que de verdad pasa ese día — que es justo lo que el calendario
+tiene que enseñar. Por eso también tiene pantalla propia
+(`#horario-view`) y su botón en los accesos rápidos del calendario, que
+pasan de dos a tres (Hoy / Grupos / Horario).
+
+Las piezas: `public/routes-local/horario.js` (CRUD, ruta NUEVA — no es un
+porte de `server/routes/`), el bloque "HORARIO SEMANAL FIJO" de `app.js`,
+y las reglas `.horario-*` de `styles.css`.
+
+**Cómo se coloca un bloque**: por MINUTOS, con `position: absolute`
+dentro de su columna. El alto de una hora vive en `--horario-hora`
+(`styles.css`) y el JavaScript lo LEE de ahí (`horarioAltoDeHora()`) en
+vez de repetir el número: las rayas de las horas las pinta un
+`repeating-linear-gradient` con esa misma medida, así que si los dos se
+separan los bloques dejan de caer sobre su raya.
+
+**EL DÍA ENTERO, de 00:00 a 24:00** (cambiado el 14/9/2026: *"quiero
+que haga todo el día"*). Antes eran las 8:00-22:00 y la franja se
+estiraba sola si un bloque se salía; eso dejaba un turno de noche fuera
+hasta que lo creabas, y hacía que la rejilla cambiara de alto según lo
+que tuvieras dentro.
+
+El precio es que la rejilla mide ahora el doble (24 h × 56 px) y casi
+todo lo de arriba está vacío. Por eso **la pantalla se abre desplazada
+hasta el primer bloque**, con media hora de aire por encima
+(`horarioIrAlPrimerBloque()`, `HORARIO_AIRE_ARRIBA_MIN`): abriéndola a
+las 00:00 lo primero que verías es la madrugada, o sea nada.
+
+**El `scrollTop` se pone SIEMPRE, también sin bloques** (a 0). El
+contenedor recuerda dónde lo dejaste, así que con un `return` a secas la
+pantalla vacía se abría a la altura de los bloques que acababas de
+borrar. Lo pilló la prueba; leyendo el código no se ve.
+
+Y `.horario-grid` lleva `margin-block: 0.5rem` para que las 00:00 y las
+24:00 no queden pegadas al borde. Va como MARGEN y no como padding a
+propósito: un padding entraría dentro de las columnas y descuadraría
+media hora todos los bloques, que se colocan respecto al borde de su
+columna.
+
+**Trampas que ya mordieron, las dos encontradas MIRANDO UNA CAPTURA y no
+con un assert** (que es exactamente la lección que ya estaba escrita en
+este archivo):
+
+1. **La etiqueta de la hora no cabía en el canalón.** Con el teléfono en
+   reloj de 12h, `formatHourLabel()` (la de la vista diaria) devuelve
+   "9:00 a. m.", que se salía por la izquierda y se leía **":00 a. m."**
+   — sin la hora, o sea sin el dato. Hay una etiqueta COMPACTA propia
+   (`horarioEtiquetaDeHora()`): "9 a. m." y "09:00". Aquí son horas en
+   punto siempre, así que el ":00" no dice nada, y es además lo que hace
+   el Calendario de iOS. Ahora hay un assert que mide que la etiqueta
+   quepa de verdad dentro del canalón (probado rompiéndolo).
+2. **Los nombres se veían "Tu…" y "Gi…".** Siete columnas en un móvil
+   son ~45 px. El título se PARTE en varias líneas (`overflow-wrap:
+   break-word`, no `anywhere` — `anywhere` cuenta el corte al medir el
+   ancho mínimo y parte también palabras que sí cabían), la hora **no se
+   repite dentro del bloque** (la rejilla ya la dice; el pie es la
+   ubicación, y solo si la hay), y todos los márgenes están al mínimo
+   (`padding: 0 0.25rem` en vez de los 0.6rem del resto de la app).
+   **Aun así los nombres largos se parten** ("Gimna/sio"): es el límite
+   real del ancho de un teléfono, está apuntado en las notas de revisar
+   de la v0.57.0, y la alternativa (enseñar 3 días y deslizar de lado)
+   está sin decidir.
+
+**El color del grupo va en la BARRA de la izquierda, no de fondo.** Un
+chip del calendario es una línea y aguanta el color sólido; un bloque de
+hora y media son dos líneas sobre un color que elige el usuario y puede
+ser cualquiera. Con la barra se lee bien sea cual sea, que es lo que hace
+también el Calendario de iOS.
+
+**Lo que el horario NO hace, a propósito**: no programa ningún aviso (el
+cupo del teléfono es de los recordatorios del calendario; un horario fijo
+sonando cada semana se lo comería), no pinta nada en el calendario, y dos
+bloques que se solapen se dibujan uno encima del otro en vez de partir la
+columna — no estás en dos clases a la vez.
+
+## Notas: el título ya nace con formato de título (13/9/2026)
+
+Koku: *"cuando escribo el primer párrafo, lo que va a ser el título. Que
+vaya con el formato de texto de título. Porque ahora va con el normal, y
+tengo que cambiarlo cada vez"*.
+
+El título de una nota **no es un campo**: se deriva de la primera línea
+(ver el bloque de duplicar). Así que "que vaya con formato de título" es
+literalmente que esa primera línea nazca dentro de un `<h1>`.
+
+- Una nota NUEVA arranca con `<h1><br></h1>` sembrado en
+  `noteEntrySnapshot`. Sigue contando como VACÍA, así que una nota nueva
+  en blanco se sigue sin guardar (eso ya estaba y no se podía romper).
+- **Intro al final del primer `<h1>` baja a un párrafo normal**:
+  escribes el título, das a Intro y sigues escribiendo en texto normal,
+  sin tocar la barra. Si el cursor está a MEDIO título, o dentro de una
+  lista o de un bloque de código, no se mete.
+
+  **OJO, esto se reescribió el 14/9/2026 y el porqué importa** (ver el
+  bloque "La mayúscula del teclado y los saltos de formato" más abajo):
+  el salto lo da AHORA EL NAVEGADOR. La primera versión hacía
+  `preventDefault()` y creaba el `<div>` a mano, y eso rompía la
+  mayúscula automática del teclado del móvil. Ahora solo se deja una
+  marca (`marcarSalidaDelTitulo`) y el `input` siguiente cambia la
+  etiqueta con `formatBlock` si hiciera falta.
+- Va enganchado a `keydown` **y a `beforeinput`** (`insertParagraph`):
+  el teclado de iOS no siempre manda un `keydown` con `key === 'Enter'`
+  (con el texto predictivo llega como `'Unidentified'`). Es la misma red
+  que hizo falta para fijar una fórmula, y por el mismo motivo.
+- Una nota YA ESCRITA conserva su formato: esto solo siembra las nuevas.
+
+**Mayúscula al empezar**: `autocapitalize="sentences"` en `#note-body`.
+Un `contenteditable` no lo trae puesto, y el atributo cubre de una vez
+los párrafos, el título, las celdas de una tabla y los puntos de una
+lista — que era la duda de Koku (*"revisa si en listas eso no pasa"*).
+
+## La App "Recetas" (14/9/2026, rama `recetas-movil-ui`)
+
+Petición de Koku: *"apuntar recetas, platos etc. Poder hacerme listas de
+la compra tipo quiero carne empanada, qué necesito"*, más *"apuntarme
+recetas, tiempos, nombre y foto para la receta. Algún tipo de
+clasificador tipo por carpetas"*. Lo de enganchar precios con Finanzas y
+tareas lo dejó dicho **para después**: *"por ahora lo básico"*.
+
+Se navega como Finanzas y Gimnasio: un INICIO con las secciones como
+filas (Mis recetas / La compra / Ingredientes / Compras anteriores) y una
+vuelta atrás, no una barra de pestañas.
+
+### Las cuatro decisiones que tomó él
+
+No cambiarlas sin volver a preguntarle:
+
+1. **Un ingrediente es una FICHA, no texto.** Se le ofrecieron las tres
+   formas (texto libre / cantidad+unidad escritos a mano / catálogo
+   reutilizable) y eligió el catálogo sabiendo lo que cuesta más ahora.
+   Es LA decisión que no se puede cambiar barata después: sin ficha
+   propia no hay a qué colgarle un precio, ni de qué sacar una
+   evolución, ni forma de sumar "300 g + 200 g de pollo" en una línea.
+2. **Carpetas Y etiquetas.** Las carpetas dicen dónde vive una receta
+   (anidadas, como en Notas); las etiquetas, lo que se cruza — una
+   receta puede ser vegana Y rápida Y de cena a la vez.
+3. **La compra es una lista viva que se archiva al cerrarla.** Se usa
+   como una lista de siempre, pero al darle a "Compra hecha" se guarda
+   con su fecha y nace otra vacía. De ahí saldrá el "cuánto me costó" el
+   día que se enganche con Finanzas.
+4. **Escalar raciones**, con sus palabras: *"la receta guardada es para
+   2, tú le puedes decir que la quieres para 4 y te pone directamente
+   las cantidades; si dijera 1, que me divida a la mitad"*. Y sabiendo
+   lo que NO hace: *"obviamente no se puede comprar 246 g de pollo"* —
+   la app da la cantidad exacta, comprar el paquete que haya es cosa
+   tuya.
+
+Los campos de una receta los eligió él también: pasos con formato,
+raciones, preparación y cocción por separado, dificultad y tipo de plato.
+
+### El modelo (7 tablas en `local-schema.js`)
+
+- `recetas_carpetas` — hermana de `note_folders`: anidadas, con
+  detección de ciclos, y borrar una NUNCA borra lo de dentro (sube un
+  nivel). Sin icono por carpeta, igual que las de Notas.
+- `recetas_ingredientes` — el catálogo. `unidad` es la habitual (solo
+  rellena el hueco al meterlo en una receta) y `categoria` es el
+  **pasillo del súper**, que existe para una sola cosa: agrupar la lista
+  de la compra por dónde se coge cada cosa.
+- `recetas` — `raciones` es la BASE y **nunca se guarda escalada**; los
+  `pasos` son HTML saneado con el MISMO saneador de las notas; las
+  `etiquetas` son un array JSON de texto libre (mismo criterio que los
+  géneros de Entretenimiento).
+- `recetas_lineas` — qué ingrediente y cuánto. **La unidad va en la
+  LÍNEA**, no en el ingrediente: el mismo ajo se mide en dientes aquí y
+  en gramos allá. `cantidad` puede ser NULL ("sal al gusto"): no escala
+  ni suma, pero aparece.
+- `recetas_compras` / `recetas_compra_recetas` / `recetas_compra_lineas`.
+
+**La compra se DERIVA de las recetas que le metes**, y por eso cada
+línea lleva la cantidad partida en dos columnas: `cantidad_recetas` la
+calcula la ruta y `cantidad_manual` es lo que pusiste tú. Se enseña la
+suma. Con una sola columna, quitar una receta te borraría lo que
+añadiste a mano, o recalcular pisaría tu número.
+
+**Una línea es (INGREDIENTE, UNIDAD).** 200 g de pollo y 2 ud de pollo no
+se pueden sumar sin inventarse una equivalencia, así que son dos líneas.
+Es feo y es correcto.
+
+**Efecto que conviene conocer**: una línea que borres a mano VUELVE si
+después tocas las recetas, porque entonces la lista se rehace a partir
+de ellas. Es la consecuencia de que se derive en vez de ser una copia
+suelta — y es lo que hace que meter una receta SUME en vez de duplicar
+líneas.
+
+### Cosas que costaron
+
+- **`openSettingsModal` no existe al cargar `app.js`.** El botón de
+  Configuración de Recetas se enganchaba ahí y daba un `ReferenceError`
+  AL CARGAR, que se llevaba por delante el resto del archivo (la app se
+  quedaba a medias sin decir nada). Va en `settings.js`, con los de las
+  otras cinco Apps. Es exactamente la trampa de orden que ya estaba
+  apuntada en este archivo; cayó igual.
+- **`showAppConfirm` resuelve con `true`/`false`**, no con un objeto: lo
+  que marcaste en la casilla se lee en `lastAppConfirmCheckbox` JUSTO
+  después. Igual que los borrados de Notas.
+- **La foto de una receta NO se comparte al duplicar.** Cada copia
+  estrena uuid (`duplicarFoto`), porque compartiendo la ruta, borrar
+  cualquiera de las dos se llevaría los bytes y dejaría a la otra con la
+  foto rota. Lo mismo con las fotos de dentro de los pasos, que usan
+  `window.duplicarImagenesDeHtml` — expuesto desde `routes-local/notes.js`
+  para no tener dos copiadores.
+- **Los pasos se sanean DOS veces**, al guardar y al pintar, como el
+  cuerpo de una nota: importar una copia de seguridad sustituye el
+  `.sqlite` entero y sus filas nunca pasan por la ruta que sanea.
+- **"¿Está vacío el editor de pasos?" no es "¿tiene texto?"**: unos
+  pasos que sean SOLO una foto no tienen texto, y guardarlos como vacíos
+  perdería la foto (`recetaPasosVacios` mira también `img`). Es el mismo
+  fallo que ya mordió en las notas.
+- **Dos cosas las vio una CAPTURA, no un assert**: la fila de "añadir
+  algo a mano" no cabía en una línea (el placeholder se quedaba en
+  "Añadir algo a mano (p" y la unidad en "Unidac"), y el hueco de la
+  receta sin foto era un recuadro de puntos que hacía que la lista
+  pareciera rota. Las 51 comprobaciones estaban todas en verde.
+
+### Calorías y macros (14/9/2026)
+
+Petición de Koku: *"de forma opcional le puedes poner calorías y
+estadísticas de grasas, carbohidratos, proteína etc"*. Tomó las tres
+decisiones:
+
+1. **Van en el INGREDIENTE, no en la receta.** Se le ofrecieron las tres
+   formas y eligió esta: lo escribes una vez (lo que pone el paquete,
+   por 100 g o por 100 ml) y sirve para todas las recetas que lleven esa
+   cosa, escalando solo con las raciones. Es la misma lógica del
+   catálogo que ya había elegido.
+2. **Los ocho valores de una etiqueta**: calorías, proteínas, grasas,
+   saturadas, hidratos, azúcares, fibra y sal. Y con un matiz suyo que
+   manda sobre el diseño: *"de forma opcional todo. No todo el mundo va
+   a estar pensando en esto"* — por eso el bloque **nace plegado** en la
+   ficha del ingrediente, y la sección de Nutrición de una receta **no
+   se pinta** si no hay ni un valor. Nada de ocho guiones ocupando media
+   pantalla.
+3. **Si falta algún ingrediente, se suma lo que se sabe y se avisa**
+   (*"Sin contar Perejil, que aún no tiene valores apuntados"*). La
+   cifra es un suelo, no una promesa — mismo criterio que el tiempo
+   estimado del Gimnasio, que solo cuenta los ejercicios con historial.
+
+**Vacío no es cero, y esto es lo importante de la ruta.** Un campo sin
+rellenar se guarda como NULL y ese ingrediente no aporta ese valor. Si
+se guardara un 0, contaría como dato bueno y hundiría el total del plato
+sin que se notara. Un número negativo o un texto se tratan igual que no
+saberlo (`numeroNutri`).
+
+**El problema de las unidades, y cómo se resuelve.** Los valores son por
+100 g / 100 ml, así que una línea en g, kg, ml o l se convierte sola
+(masa y volumen se tratan igual a propósito: la etiqueta de un aceite
+viene "por 100 ml" y la receta lo mide en ml, así que las dos hablan de
+la misma base sin necesidad de saber la densidad). Pero "2 ud de huevo"
+no se puede llevar a esa base sin saber lo que pesa uno — de ahí
+`gramos_por_unidad`, otro campo opcional. Sin él, ese ingrediente **no
+cuenta y se dice**, en vez de inventarse un peso. `gramosDeLinea()` en
+`routes-local/recetas.js` es quien decide.
+
+Un ingrediente marcado como **opcional** que no cuenta NO sale en el
+aviso: no estropea el total de un plato que puede no llevarlo.
+
+**La cuenta vive en la RUTA** (`nutricionDe`), no en la pantalla, para
+que la ficha y lo que venga después (un widget, la compra) digan lo
+mismo del mismo plato. Devuelve el total del plato con sus raciones
+BASE; escalar es cosa de quien lo pinta, que es quien sabe para cuánta
+gente lo estás mirando. Por ración = total / raciones base, así que **no
+cambia al escalar** — y eso es correcto, no un bug.
+
+**Dos cosas las vio una captura, no un assert**: con la rejilla a dos
+columnas, "de las cuales saturadas" caía debajo de "Proteínas" y se leía
+como si colgara de ellas (ahora va en UNA columna, en el orden de una
+etiqueta europea), y un plato de 2058 kcal salía sin punto de millar
+porque el español no agrupa los números de cuatro cifras por defecto —
+`RECETA_NUM_FORMATTER` lleva ahora `useGrouping: 'always'`, igual que el
+formateador del dinero de Finanzas y por el mismo motivo.
+
+**Y una cuenta que la prueba tenía mal y el código bien**: 2 huevos con
+6 g de proteína *por 100 g* y 60 g cada uno son 7,2 g, no 12. Los
+valores son por 100 g también en lo que se mide por unidades.
+
+### Lo que NO se ha hecho, y no por olvido
+
+Todo lo que Koku dejó dicho "para luego", que es donde sigue:
+
+- **Precios y Finanzas**: apuntarle el precio a cada ingrediente, ver su
+  evolución, calcular cuánto va a costar la compra y sacar el precio
+  medio de un plato. El catálogo está hecho justo para que esto sea
+  posible; falta la tabla de precios y las pantallas. Las calorías y los
+  macros ya siguen ese mismo camino (ver el bloque de arriba), así que
+  el precio es otra columna más en la misma ficha.
+- **Tareas**: "quiero hacer esta receta" → la compra como una lista de
+  tareas que se tachan desde el calendario.
+- **Recetas en la Tienda**: esta rama sale de `movil-ui` (v0.56.0), que
+  todavía no tiene la Tienda — esa llegó en la v0.58.0, en
+  `desarrollador`. Al fusionar habrá que darla de alta en
+  `APPS_DE_LA_TIENDA`, en `BACKUP_TABLAS_POR_APP` (las 7 tablas) y
+  escribirle su manual.
+- **El número de versión (v0.59.0) puede chocar.** `retos-movil-ui` sale
+  del mismo sitio y se está trabajando en paralelo; ya pasó una vez que
+  dos ramas eligieron la v0.57.0 a la vez. Si choca, se renumera al
+  fusionar.
+
+## Fusionar una rama que sale de `movil-ui` (14/9/2026)
+
+**Esto es lo mas importante de esta ronda y va a volver a pasar.** Retos
+y Recetas se hicieron en ramas que salen de **`movil-ui`**, no de
+`desarrollador`. O sea que su historia lleva los commits que QUITARON los
+avisos de diagnostico — y para git eso son cambios suyos, asi que al
+fusionarlas hacia aqui **ganan solos y se llevan los avisos por delante,
+sin dar ni un conflicto**.
+
+Lo unico que da la cara es `public/desarrollador.js` (conflicto
+modify/delete, imposible no verlo). Todo lo demas desaparece en un
+auto-merge limpio:
+
+- `refreshWidgetStatus()`, `refreshGymRestAlertStatus()` y sus llamadas
+  (`settings.js`).
+- `gymTestRestAlert()`, `GYM_REST_STOP_LABELS`, `gymRestAlertLastStatus()`
+  y los dos `setItem('gymLiveActivityStatus')` (`app.js`).
+- `estadoDelWidget()` / `ultimoAvisoAlWidget` (`widget-bridge.js`).
+- El bloque `#widget-status-block` y el "?" de probar el aviso
+  (`index.html`).
+- `hayBuzon()` / `sinBuzon` de **`QueTocaHoyWidget.swift`** (los otros
+  cinco widgets se salvan solo porque viven en otro archivo).
+- **Y el `<script src="desarrollador.js">` de `index.html`**, que es el
+  peor de todos: el archivo sobrevive al conflicto y hasta el comentario
+  que lo explica, pero la LINEA que lo carga se va. La app arranca sin la
+  marca de build de desarrollo y sin las notas "a revisar", y mirando el
+  diff no se nota.
+
+**Como se repone sin ir a ojo**: con la rama ya fusionada, `git diff
+<commit-anterior-al-merge> -- archivo` y quedarse con los hunks que SOLO
+borran (los que no añaden nada son, uno por uno, los avisos); esos se
+aplican al reves. Los mixtos son contenido de la rama y no se tocan. Hay
+un guion de una vez en el historial de esta ronda.
+
+**Y hay una prueba que lo vigila** (`merge-8apps`, seccion 5): comprueba
+las ocho piezas. Si alguna vez sale en rojo tras un merge, es esto.
+
+## Retos y Recetas: dos Apps nuevas (14/9/2026)
+
+Llegaron de `retos-movil-ui` y `recetas-movil-ui`, hechas en paralelo por
+Koku. La app pasa de seis Apps a **ocho**.
+
+- **Retos** (`retos`, `retos_hechos`): un arbol donde cada fila es una
+  tarea que solo se marca. Dos tipos: **habito** (se marca cada periodo y
+  se desmarca solo al empezar el siguiente, con racha) y **meta** (se
+  llega una vez).
+- **Recetas** (siete tablas): platos con foto, tiempos y raciones, en
+  carpetas y con etiquetas. **Los ingredientes son ficha propia**, no
+  texto dentro de la receta — eso es lo que deja que la lista de la
+  compra sume "300 g + 200 g de pollo" en una linea. Y la receta se
+  ESCALA al vuelo sin tocar lo guardado.
+
+### Darlas de alta en la Tienda: lo que no traian
+
+Las dos ramas salieron ANTES de la Tienda, asi que hubo que añadirles a
+mano las tres cosas que no conocian: su fila en `APPS_DE_LA_TIENDA`, sus
+tablas en `BACKUP_TABLAS_POR_APP` (sin eso, una copia de esa App no
+guarda NI restaura nada) y su hueco en `APP_MANUALES`.
+
+**Campo nuevo `activaDeFabrica`.** Hasta ahora "en desarrollo" y "apagada
+de fabrica" eran lo mismo (`appActivaPorDefecto` miraba solo `estado`).
+Retos y Recetas son nuevas —etiqueta puesta— pero estan TERMINADAS, y
+naciendo apagadas no saldrian en Herramientas al abrir la app: pareceria
+que el merge se las ha comido. Asi que son dos cosas distintas: `estado`
+es lo que AVISA y `activaDeFabrica` es si viene puesta. Sin el campo,
+manda lo de siempre.
+
+## Lecturas ahora se llama Entretenimiento (14/9/2026)
+
+Renombrado completo que venia de `entretenimiento-movil`: las tablas son
+`entretenimiento_*` (con migracion idempotente desde `lecturas_*`), las
+dos rutas se llaman igual, y la pantalla y el hub dicen Entretenimiento.
+
+**EL ID INTERNO SIGUE SIENDO `lecturas`**, y hay que saberlo antes de
+tocar nada: es el id en `APPS_DE_LA_TIENDA`, en `MOBILE_NAV_SLOT_APPS`,
+en `MOBILE_NAV_SLOT_CARD_IDS`, en el reparto de la copia, en el destino
+del widget y en la seccion del resumen que lee Swift. Lo unico que cambia
+es el `nombre`/`label`. Renombrar el id obligaria a tocar tambien el
+Swift, y es el mismo criterio por el que los ids siguen diciendo
+`extensions` desde que esa pantalla pasó a llamarse "Apps".
+
+**Lo que mordio al fusionar**: la rama traia `MOBILE_NAV_SLOT_APPS` y
+`MOBILE_NAV_SLOT_CARD_IDS` con la clave `entretenimiento`. Con eso la App
+no salia en el selector del acceso rapido y su tarjeta no se escondia de
+Herramientas al ponerla en la barra — el fallo de la v0.52.0 otra vez.
+Las dos claves vuelven a `lecturas`. **No lo pillo leer el diff, lo pillo
+la prueba.**
+
+Y la copia de seguridad seguia apuntando a `lecturas_sagas`/
+`lecturas_items`, que ya no existen: una copia de esta App no habria
+guardado ni restaurado nada.
+
+## Entretenimiento: vitrina, sesiones y vueltas (14/9/2026)
+
+Llegó de `entretenimiento-movil` en la v0.62.0, en dos commits. El
+detalle completo está en `ENTRETENIMIENTO.md` (apartados 4 y 5); aquí
+solo lo que hay que saber antes de tocar código.
+
+- **La tabla de 7 columnas se fue: ahora es una vitrina de portadas.**
+  La portada se genera mientras no haya imagen, y la imagen **la pone el
+  usuario** desde su galería o su cámara. Nada de buscarla por internet:
+  la app no hace ni una petición de red, y buscar una carátula por
+  título le contaría a un tercero qué estás viendo.
+- **Las portadas van al almacén `noteAssets`**, igual que las imágenes
+  de las notas: el HTML guarda una ruta `/api/notes/images/<uuid>` y los
+  bytes viven fuera del `.sqlite`. Esto tiene consecuencias en la copia
+  de seguridad — ver el bloque siguiente.
+- **La regla de la vitrina que hay que respetar**: la portada y la línea
+  de debajo NUNCA dicen lo mismo. Como la portada generada lleva texto
+  encima, repetirlo justo debajo se lee como un fallo.
+- **Cinco pestañas** (`Siguiendo` · `Colecciones` · `Deseos` ·
+  `Historial` · `Actividad`), y la elegida **no se recuerda** entre
+  aperturas a propósito: volver siempre a "Siguiendo" es la gracia.
+- **Las sesiones se apuntan SOLAS.** Cambias el progreso como siempre y
+  la ruta (`PUT`, no el cliente) apunta "el martes leí del capítulo 12
+  al 15". Lo hace la ruta porque es el único sitio que conoce el valor
+  anterior, y así da igual desde qué pantalla se cambie. Solo cuenta
+  SUBIR; crear un item no apunta nada; dos veces el mismo día son dos
+  sesiones; y **la unidad se copia en la sesión** en vez de mirarse
+  luego, para que cambiar la unidad de un item no reescriba lo que
+  querían decir las sesiones viejas.
+- **"Volver a empezar" sube `vuelta` y pone el progreso a cero, sin
+  borrar nada**: las sesiones de la vuelta anterior se quedan con su
+  número y siguen contando para el mapa y la racha, porque pasaron de
+  verdad.
+- **Todas las fechas son LOCALES**, nunca `toISOString()`. Mismo cuidado
+  que `hoyISO()` del ciclo del Gimnasio.
+
+**El destino del widget pasa a llamarse `entretenimiento`**, con
+`lecturas` conservado como **alias** en `DestinoDeWidget` y en el
+despachador de `app.js`: un widget que el iPhone ya tenga puesto
+conserva la URL con la que se dibujó hasta que se vuelve a dibujar, así
+que sin el alias tocarlo no haría nada justo después de actualizar. El
+id interno de la App sigue siendo `lecturas` en todo lo demás.
+
+**Dos avisos para el que escriba pruebas aquí**, los dos mordieron:
+
+- La API se llama `progressCurrent` / `progressTotal` / `progressUnit`,
+  no `progress` / `total` / `unit`. Mandando el nombre corto no falla
+  nada: el `PUT` guarda sin tocar el progreso y *parece* que las
+  sesiones no se apuntan.
+- **La barra de pestañas de Entretenimiento reutiliza la clase
+  `.gym-tab-btn`** (es el botón-pastilla genérico de `styles.css`, no
+  algo del Gimnasio). Una prueba que cuente `.gym-tab-btn` en todo el
+  documento para comprobar que el Gimnasio ya no tiene pestañas miente:
+  hay que acotarla a `#gym-view`.
+
+**Lo que NO se hizo**: la barra nueva **no está en
+`MOBILE_SUBTAB_BARS`**, así que el gesto central no recorre sus cinco
+pestañas — cae al cambio de pestaña de la barra de abajo, que es el
+respaldo de siempre. Viajes sí está. No se ha añadido sin preguntar a
+Koku, porque es cambiarle un gesto que diseñó él.
+
+## Las imágenes NO son solo de Notas (arreglo del 14/9/2026)
+
+Encontrado al fusionar Entretenimiento, y era **pérdida de datos de
+verdad**, no un detalle.
+
+El almacén `noteAssets` de IndexedDB lo comparten **cuatro** Apps: las
+imágenes de las notas, las **portadas** de Entretenimiento, las **fotos**
+de Recetas y los **adjuntos** de Viajes. Todas guardan una ruta
+`/api/notes/images/<uuid>` y los bytes van al mismo sitio.
+
+La copia de seguridad por Apps (v0.58.0) daba por hecho que ese almacén
+era de Notas, y de ahí salían dos agujeros:
+
+1. **Al EXPORTAR**: `dentro.includes('notes') ? assetGetAll() : []`. Una
+   copia de Recetas sin Notas salía con las recetas y **sin ni una foto**.
+2. **Al IMPORTAR una copia parcial**: había un `assetClear()` antes de
+   reponer. O sea que restaurar SOLO Notas **vaciaba las fotos de las
+   otras tres Apps**, que ni siquiera se estaban restaurando. Y como la
+   reposición colgaba de `traidas.includes('notes')`, una copia de
+   Recetas restauraba las recetas con las fotos rotas.
+
+Cómo queda, y por qué así:
+
+- **`BACKUP_APPS_CON_ARCHIVOS`** (`backup.js`) declara las cuatro. Si
+  entra CUALQUIERA de ellas, van todas las imágenes. No se pueden
+  repartir por App sin mirar fila por fila quién usa cada uuid, así que
+  se aplica la regla prudente que ya usa el resto del archivo: sobra
+  peso, nunca faltan fotos. **Si aparece una App nueva que suba
+  imágenes, va a esa lista.**
+- **Una restauración parcial SOLO SUMA imágenes, nunca borra.** Se
+  escribe encima por nombre, y como cada archivo es un uuid, dos con el
+  mismo nombre son el mismo archivo. Lo que sobra son bytes huérfanos:
+  molesto, e infinitamente mejor que quedarse sin una foto. **La copia
+  COMPLETA sigue haciendo borrón y cuenta nueva**, que es lo que debe
+  hacer.
+
+Y de paso: `entretenimiento_sesiones` entró en `BACKUP_TABLAS_POR_APP`,
+**detrás de `entretenimiento_items`** — la restauración parcial inserta
+tabla a tabla en ese orden y una sesión apunta a su item.
+
+Las dos comprobaciones nuevas (`v62-copia`) se probaron deshaciendo cada
+arreglo a propósito: 3 en rojo con la regla vieja de exportar, 1 con el
+`assetClear()` de vuelta.
+## Las letras del widget en blanco sobre blanco: `.foreground` NO hereda
+
+Koku, con una captura del widget del calendario (14/9/2026): *"Las letras
+siguen siendo blancas, puedes revisar para que el widget se vea el
+contenido?"*. El mes en azul y el círculo del día de hoy se veían; los
+números de los días, no. **Era la SEGUNDA vez**, y la primera se dio por
+arreglada con el arreglo equivocado — por eso este bloque.
+
+**La causa, que es contraintuitiva**: `ShapeStyle.foreground` NO significa
+"el color que puso mi ancestro". Es el estilo **por defecto del sistema**,
+así que `.foregroundStyle(.foreground)` en un hijo **RESETEA** el tinte que
+`fondoDeWidgetApp` puso en la raíz con el color del tema. Con el móvil en
+modo oscuro ese color por defecto es BLANCO, y el fondo del widget era el
+blanco de un tema claro.
+
+Lo que despista, y es la pista que estaba delante todo el rato: las
+cabeceras `L M X J V S D` SÍ se veían. Usan `.secondary`, que es un estilo
+**jerárquico** y ese sí se deriva de verdad del ancestro. O sea que el
+color de la raíz estaba bien puesto; lo único roto era quien creía estar
+heredándolo.
+
+**La primera vez se arregló mal.** El síntoma se achacó a `Color.primary`
+(que también estaba, y también es del sistema), se cambió por
+`.foreground` y se dio por bueno — y de paso se escribió una comprobación
+en `tools/comprobar-widgets.py` que **recomendaba `.foreground`** como la
+forma de heredar. Ese consejo es lo que hizo que volviera.
+
+**Cómo se arregla de verdad**: cuando un texto tiene que ELEGIR entre dos
+colores, los DOS lados del ternario son un `Color` de verdad. El "normal"
+se pide resuelto con **`EstiloDeWidget.colorDeTexto(oscuro:)`**
+(`ResumenDeLaApp.swift`), que devuelve el `--surface-text` del tema — o
+`Color.primary` si no hay tema (estilo "sistema"), que ahí sí es lo
+correcto porque el fondo es el material del sistema.
+
+Para que ese método pueda elegir entre la paleta clara y la oscura del
+estilo "mixto", la elección se sacó de dentro de `FondoDeWidget` a
+`EstiloDeWidget.elegidos(oscuro:)`, y el modifier la llama también: el
+fondo y las letras no pueden salir de paletas distintas.
+
+Las vistas que lo necesitan declaran `@Environment(\.colorScheme)`. Son
+dos: `VistaCalendario` (los números de los días) y `VistaTareas` (el
+título de una tarea no vencida).
+
+**Lo que SÍ hereda, para no volver a equivocarse:**
+
+| qué escribes | qué pasa |
+|---|---|
+| nada (sin `.foregroundStyle`) | hereda el color del tema ✅ |
+| `.secondary` / `.tertiary` | se derivan del color del tema ✅ |
+| `.foreground` | **resetea** al color del sistema ❌ |
+| `Color.primary` / `.white` / `.black` | color del sistema o fijo ❌ |
+
+**El guion lo vigila** (`tools/comprobar-widgets.py`, busca "NI UN TEXTO
+DEL WIDGET"): en los tres archivos de widgets, ninguna línea con
+`foregroundStyle`/`foregroundColor` puede llevar `.foreground)`,
+`Color.primary`, `Color.white` ni `Color.black`. Probado rompiéndolo con
+las tres formas. Ojo con el patrón: buscar `.foreground` DENTRO de
+`\.foregroundStyle\([^)]*` no vale — el primer paréntesis que cierra
+puede ser el de otra cosa (`AnyShapeStyle(x)`) y se escapa justo el caso
+real. Se busca el token suelto.
+
+**Esto es SWIFT**: no se ve hasta la siguiente build de TestFlight.
+Recargar la app o requitar el widget no cambia nada.
+
+## La mayúscula del teclado y los saltos de formato (14/9/2026)
+
+Koku: *"En las notas. Se aplica el mayúscula al inicio a partir del
+primer salto en el mismo formato, si es un salto de formato a otro no se
+aplica"*. O sea: bajando del título al primer párrafo, la línea nueva
+salía en minúscula; de párrafo a párrafo sí ponía la mayúscula.
+
+**La causa, y es la regla general que hay que llevarse de aquí**:
+`autocapitalize` NO lo decide el HTML, lo decide el **teclado del
+sistema**. Mira en qué punto de la frase cree que está el cursor, y esa
+cuenta solo la rehace cuando **el propio navegador** mueve el cursor por
+una edición suya. Un `preventDefault()` + DOM a mano le deja el estado
+que tenía al final del título — "a media frase" — y eso es minúscula.
+
+Así que la regla: **cuando el usuario está escribiendo, el salto de línea
+lo tiene que dar el navegador**. Si hay que cambiar el formato, se cambia
+DESPUÉS, y con `execCommand` (que también es cosa del navegador y
+mantiene la selección), no reconstruyendo nodos.
+
+**El mecanismo es UNO y está generalizado** (ampliado el 14/9/2026 a
+todas las salidas de formato, no solo la del título):
+
+1. Antes del salto (`keydown`/`beforeinput`) se MIRA si toca salir de un
+   formato y, si toca, se deja apuntada una función de arreglo en
+   `salidaDeFormatoPendiente`. **No se hace `preventDefault`.**
+2. El navegador da SU salto de línea (y de paso avisa al teclado).
+3. El `input` de después llama a esa función, que arregla el formato del
+   bloque nuevo.
+
+Añadir una salida nueva es añadir una rama a `marcarSalidaDeFormato()`.
+Hoy hay dos: `arreglarSalidaDelTitulo()` (h1 → párrafo, con
+`formatBlock`) y `arreglarSalidaDeLaCita()` (línea de cita vacía →
+párrafo).
+
+**Cómo sale de la cita ahora**, que no es obvio: el navegador CLONA los
+atributos de la línea al saltar (medido: `<div data-quote="1">` vacío +
+Intro da otro `<div data-quote="1">`), que es justo por lo que existía el
+manejador viejo. Así que se le quitan `data-quote`/`data-indent` a la
+línea NUEVA y se borra la vieja, que estaba vacía. El resultado en
+pantalla es idéntico al de antes; lo que cambia es quién dio el salto.
+
+La línea vieja se apunta **antes** del salto: después hay dos líneas
+citadas vacías iguales y no habría forma de distinguirlas.
+
+Y `arreglarSalidaDeLaCita()` dispara a su vez un `input` — no hay bucle
+porque `terminarSalidaDeFormato()` vacía la marca ANTES de llamar al
+arreglo.
+
+**Lo que salió al medirlo, y ahorra trabajo futuro: Chromium ya hacía lo
+que queríamos.** Intro al final de CUALQUIER `<h1>` arranca un `<div>`,
+no otro `<h1>` — comprobado con un `contenteditable` pelado, sin nada de
+esta app (`nativo.mjs`). O sea que el código de antes se peleaba con el
+navegador para acabar justo donde el navegador ya iba, y de paso rompía
+la mayúscula. **El `formatBlock` que queda es una RED para WebKit**, por
+si Safari sí continúa el título; en Chrome no llega a ejecutarse nunca.
+
+**Aquí no se puede probar la mayúscula** (la pone el teclado del sistema
+y en el navegador de pruebas no existe: `autocapitalize` es un no-op en
+Chromium headless, y no hay WebKit en el contenedor). Lo que sí está
+probado (`titulo.mjs`, 15 comprobaciones) es que el salto lo da el
+navegador y que la línea sigue bajando a párrafo, que era el riesgo real
+de la reescritura. Confirmarlo de verdad es cosa del iPhone.
+
+**Qué queda fuera, y por qué no es un olvido:**
+
+- **Salir de una LISTA ya lo hace el navegador solo.** Todos los
+  manejadores propios se apartan dentro de una lista
+  (`isSelectionInsideNoteListItem()`), así que ahí nunca hubo
+  `preventDefault` que quitar.
+- **El bloque de código no es un salto de formato**: Intro se queda
+  DENTRO, metiendo un `\n` en el propio texto. No cambia de bloque.
+- **`handleNoteHighlightAwareEnter()` SÍ sigue haciendo el salto a
+  mano**, pero solo cuando hay un resaltado que continuar (sin
+  rotulador se aparta y el Intro es nativo). Es el mismo patrón y
+  probablemente el mismo síntoma, pero es un salto DENTRO del mismo
+  formato y rehacerlo es cirugía fina (parte la línea conservando los
+  spans de color). Está apuntado en las notas de revisar de la v0.62.2
+  a la espera de que Koku diga si ahí tampoco sale la mayúscula.
+
 ## Estado actual
 
-Último commit en `origin/main` (pusheado): `v0.32.0` (`d0f9051`) —
-límite de intentos de emparejamiento (5 fallos por IP, bloqueo 10 min) +
-código de 6 dígitos de 5min→30s, y doble confirmación al transferir
-archivos en la extensión Archivos (solo cuando la inicia un móvil).
-`README.md` y este archivo se pusieron al día por completo en esta misma
-ronda (llevaban desactualizados desde antes de que existiera la
-extensión Archivos y varias rondas grandes de Finanzas). El tag
-`v0.32.0` da 403 al pushear desde esta sesión de control remoto
-(limitación conocida, ver regla de tags arriba) — pendiente de que Koku
-lo cree a mano desde su ordenador.
+**v0.62.4** (15/9/2026): fuera el ☰ de Configuración de la cabecera de
+**Retos**, que era la última pantalla donde se veía.
 
-Desde la última vez que esto se puso al día de verdad (v0.23.1, cuando
-el proyecto aún vivía en la rama `main-wmqm2f` y solo tenía calendario +
-Mi espacio) ha pasado mucho, resumido:
-- **Móvil independiente**: copia local (IndexedDB) + sincronización LAN
-  (ahora manual, ver arriba) + notificaciones push reales (Web Push/
-  VAPID) + pantalla de bienvenida pidiendo nombre/correo la primera vez.
-- **Las 4 extensiones completas**: Gimnasio, Lecturas, Finanzas y
-  Archivos (ver bloque "Extensiones" más arriba para el detalle técnico
-  de cada una).
-- Varias rondas grandes solo en **Finanzas**: selects/fechas propios,
-  tooltip real en gráficas, editar cuenta como modal, objetivo de ahorro
-  con vista mensual + histórica, carteras/activos con valoración manual
-  y gráfica de líneas, y gasto fijo recurrente auto-generado.
-- Varias rondas en **Archivos**: transferencia de dos paneles, navegar
-  cualquier carpeta del disco desde el ordenador, y esta última ronda de
-  doble confirmación + límite de intentos de emparejamiento.
-- Tema de color nuevo "Registro" + su estilo de interacción a juego (4º,
-  junto a Directo/Neón/Cristal).
-- El repo se fusionó de las ramas de trabajo por pieza (`gimnasio`,
-  `lecturas`, `finanzas`, `movil`...) a la rama `main`, que es la real.
+**Y aquí está lo que hay que saber, porque leyendo el HTML se entiende al
+revés**: las otras seis pantallas completas (Notas, Herramientas,
+Gimnasio, Finanzas, Viajes y Entretenimiento) **SÍ llevan su ☰ en el
+HTML**, pero oculto por una regla de `styles.css` (busca "sobran en
+movil"). Retos y Recetas nacieron en ramas que no conocían esa regla, así
+que eran las dos únicas donde el botón aparecía de verdad. Mirando el
+`index.html` parece justo lo contrario: que a esas dos les falta algo.
+
+**La comprobación tiene que MEDIR, no buscar en el HTML**: abre las ocho
+pantallas y mira si el botón ocupa sitio (`getClientRects()`). Un
+`querySelector` diría que hay siete y que todo está bien.
+
+**Y el assert de "settings.js corrió entero" era mentira.** Miraba si
+existían `openSettingsModal` y `renderReleaseNotes` — pero las
+declaraciones de función están *hoisted*, así que existen aunque el
+archivo reviente a media altura. Ahora mira la ÚLTIMA línea del archivo
+(el listener del "volver" de la Tienda), que es lo único que prueba que
+llegó al final. Probado dejando un listener huérfano a propósito: antes
+pasaba en verde, ahora se pone rojo.
+
+**Queda pendiente y no es urgente**: esas seis pantallas conservan markup
+y listeners muertos (el botón oculto y su `addEventListener`). Funciona,
+pero es peso muerto; limpiarlo es otra ronda y Koku no lo ha pedido.
+
+
+**v0.62.3** (15/9/2026) es una ronda de **fusión**, no de features. Se
+revisaron las ocho ramas de móvil y solo `recetas-movil-ui` traía algo:
+los tres retoques de Recetas (márgenes laterales, el volver como botón y
+fuera el ☰ de la cabecera). Las otras siete estaban al día.
+
+**Ojo con el ☰**: solo se ha quitado en **Recetas**. Gimnasio, Finanzas,
+Viajes, Entretenimiento y Retos lo conservan — cada una vive en su rama y
+quitarlo en todas es ir rama por rama, decisión de Koku. Hay una sesión
+suya parada esperando justo esa respuesta.
+
+**La trampa de esa ronda, que vale para cualquier botón que se quite**:
+borrar el `<button>` deja el `getElementById(...).addEventListener` de
+`settings.js` apuntando a `null`, y eso **lanza al cargar la página**.
+Como `settings.js` va después de `app.js`, se lleva media app por delante
+sin decir nada. Al quitar un botón hay que quitar su listener, y la
+comprobación tiene que mirar que **los dos archivos hayan corrido
+enteros**, no solo que la pantalla se vea.
+
+
+**v0.62.0** (14/9/2026) es otra ronda de **merges**, con dos arreglos de
+fondo de propina. Traen algo dos ramas: **Entretenimiento** (la vitrina
+de portadas, las sesiones que se apuntan solas, la racha, el mapa de
+actividad y las vueltas) y **Recetas** (calorías y macros, todo
+opcional). `gimnasio-movil`, `finanzas-movil`, `retos-movil-ui` y
+`viajes-movil` no traían nada. Los dos arreglos, los dos en la copia de
+seguridad y los dos de pérdida de datos, están en el bloque "Las
+imágenes NO son solo de Notas".
+
+**El número volvió a chocar**, por tercera vez: la rama de Recetas venía
+numerada como v0.60.0, que ya estaba cogida y etiquetada en esta rama.
+Esta ronda es la v0.62.0 y las notas de la rama se fundieron en ella.
+
+**v0.61.0** (14/9/2026) es una ronda de **MERGES**, no de features: se
+traen las cinco ramas de movil que tenian algo nuevo — Finanzas (la
+navegacion de Gastos fijos), Entretenimiento (el renombrado) y las dos
+Apps nuevas, Retos y Recetas. `gimnasio-movil` y `viajes-movil` no
+traian nada: ya estaban al dia. Ver los tres bloques de arriba.
+
+**v0.58.0** (13/9/2026) es **la Tienda**: las seis Apps con su ficha,
+encender/apagar, el manual del Gimnasio y las notas de versión por App.
+Ver su bloque más arriba. De rebote salió el choque de nombres del
+widget (`ejercicios`), que llevaba roto desde la segunda tanda de
+widgets.
+
+**Ojo con el número**: esta ronda y la de los eventos que se repiten se
+escribieron a la vez en ramas distintas y las DOS se llamaron v0.57.0.
+Se quedó con ese número la que se subió primero (la de los eventos), y
+la Tienda pasó a v0.58.0 al fusionar.
+
+**Rama de trabajo: `desarrollador`** (creada el 10/9/2026 desde
+`claude/mobile-viewer-config-b59uf1`, que a su vez salía de `movil-ui`
+con `calendario-notas-movil-UI` ya fusionada). Todo lo de esta
+conversación vive ahí; ver el bloque "Dos ramas" más arriba. **`movil-ui`
+está al mismo nivel**, sin los avisos de diagnóstico.
+
+
+**v0.62.2** (14/9/2026): el **horario pasa a enseñar el día entero**
+(abriéndose donde tienes bloques), las frecuencias de repetición se
+llaman por su adjetivo (Diaria/Semanal/Mensual/Anual) y **salir de una
+cita** recibe el mismo tratamiento que el título para la mayúscula del
+teclado. Verificado con 76 comprobaciones de Playwright en cuatro
+guiones. Sigue sin lanzarse ninguna build.
+
+**v0.62.1** (14/9/2026) son dos cosas que vio Koku usando la app: las
+letras en blanco de los widgets del calendario y de Tareas, y la
+mayúscula que no se ponía al bajar del título al primer párrafo de una
+nota. Ver sus dos bloques más arriba. Lo del widget es **Swift**, así que
+**necesita una build nueva para verse**; no se lanzó ninguna (regla de
+Actions).
+
+**v0.57.0** (13/9/2026) es la ronda de los cuatro puntos que pidió Koku:
+el título de una nota con formato de título y la mayúscula al empezar,
+los **eventos que se repiten** (con el "¿solo esta vez o todas?") y el
+**horario semanal fijo**. Ver sus tres bloques más arriba. No se lanzó
+ninguna build: Koku pidió expresamente no lanzar Actions.
+
+Verificado con tres guiones de Playwright contra la app servida como
+estático: notas (9), repeticiones (20) y horario (31), todo en verde. El
+del horario tiene además dos comprobaciones que nacieron de MIRAR UNA
+CAPTURA, no de un assert: que la etiqueta de la hora quepa en su canalón
+y que empiece por su número.
+
+**Build #55 (10/9/2026)**: la primera que sube a TestFlight con el App
+Group de verdad en el `.ipa`. Koku la probó y los seis widgets se ven y
+llevan a donde tienen que llevar; lo único que no funcionaba eran los
+botones del centro de control (ver el bloque de arriba).
+
+**v0.43.0** (build #56) recogió lo que salió de probar la #55: un primer
+intento de arreglo del centro de control, el relleno de los seis widgets,
+y cuatro cosas del Gimnasio (la ✕ del modal, la altura de Descanso/RPE,
+los unilaterales en una sesión a mano, y el peso con decimales).
+
+**v0.44.0 y v0.45.0** son lo que salió de probar la #56 — ver el bloque
+"Lo que salió de probar la build #56" más arriba: el centro de control al
+TERCER intento (los dos anteriores fallaban por causas distintas), tus
+propios ejercicios en el "+" del entreno (que era la causa real de lo de
+los unilaterales), la fuga de popovers, y **Configuración > Widgets** con
+las tres combinaciones de tema/estilo.
+
+**La build #57 (v0.45.0) NO llegó a TestFlight: no compiló**, por el
+choque de nombres que cuenta el bloque "Por qué no compiló la build #57"
+más arriba.
+
+**Build #58 (10/9/2026)**: la v0.45.0 ya compilando. Koku la probó:
+"funciona todo, perfecto". Lo único que falló fueron los botones del
+centro de control con la app en primer plano — arreglado en la v0.46.0.
+
+**v0.46.0 y v0.46.1** son lo que salió de probar la #58 — ver el bloque
+"Lo que salió de probar la build #58" más arriba. No se lanzó build en
+esa ronda: Koku pidió expresamente no lanzar Actions.
+
+**v0.47.0** (11/9/2026) es la ronda de los widgets nuevos y del
+Gimnasio: cinco widgets más, ejercicios asistidos y material múltiple.
+Ver los dos bloques de arriba. **Las ramas de móvil están todas al día
+con `desarrollador`** (Koku va a trabajar viajes, finanzas y
+entretenimiento por separado); ojo con `entretenimiento-movil`, que
+necesitó resolver el renombrado Lecturas→Entretenimiento a mano.
+
+**v0.48.0 y v0.49.0** (11/9/2026) son la ronda de seguridad, privacidad y
+tipografía (ver su bloque más arriba), el rediseño de las fórmulas, el
+peso de ayuda por signo, el arreglo del widget de calendario y la fusión
+de `finanzas-movil`. **Build #60 en verde y subida a TestFlight.**
+
+**v0.49.1** es lo que salió de probar la #60: Intro no fijaba la fórmula
+en Safari (ver "Por qué Intro no funcionaba en el iPhone" más arriba) y
+el tiempo estimado se quedó en `Tiempo estimado: 12 min 4 s` a secas.
+**Build #61 en verde y subida a TestFlight.**
+
+**v0.59.0 y v0.60.0** (14/9/2026) son la ronda del Gimnasio pedida desde
+control remoto: salir del Gimnasio deslizando, la revisión de los
+ejercicios por tiempo (que sacó la gráfica plana a cero y la plancha que
+no salía en Récords) y **salir a correr en series**. Los tres bloques
+nuevos están más arriba. **No se ha lanzado build**: la regla de Actions
+sigue siendo que solo se lanza si Koku lo pide en ESA ronda.
+
+**v0.49.2** mueve la línea de versión al final de Configuración (la pidió
+ahí Koku al probar la #61). Va la última de `settings-card-body`, fuera
+de `#settings-menu` — ese es una rejilla de tarjetas y una línea de texto
+dentro se colocaría como una tarjeta más —, y se esconde con el menú
+desde `showSettingsScreen()`.
+
+**v0.51.0** (11/9/2026) trae **duplicar** (notas, carpetas, bloques, días
+y ejercicios) y el arreglo del "Editar" del entreno, que llevaba roto
+desde la #59. Ver los dos bloques de arriba.
+
+**v0.53.0** trae los **ejercicios por tiempo** (isométricos y "reps en X
+tiempo") y el **cronómetro suelto** del menú del entreno. Ver sus dos
+bloques.
+
+**v0.52.0** son los retoques del Gimnasio (el ±, el −30 s, el descanso
+real y las filas del día deslizables), la App del acceso rápido que ya no
+se repite en Herramientas, y el apartado **Novedades** con el número de
+build. Ver sus tres bloques.
+
+**v0.50.0** trae el inicio de Finanzas rehecho, de `finanzas-movil`
+(commit de Koku). El merge fue **fast-forward**: él ya había traído
+`desarrollador` a su rama, así que no hubo ni un conflicto.
+
+Dos fallos suyos que arregla, y los dos vienen de probarlo con la base
+casi vacía:
+
+1. **Había secciones inalcanzables.** Las tarjetas sin datos no se
+   pintaban, así que sin objetivos no había tarjeta de Objetivos — y sin
+   otra puerta, no había forma de crear el primero. Ahora se pintan
+   **siempre las siete**, y la vacía explica para qué sirve en vez de
+   esconderse. **Regla que conviene generalizar**: un apartado vacío
+   tiene que poder abrirse, es la única forma de empezar a usarlo.
+2. **Eran demasiado grandes** (*"es demasiado grande y engorroso"*).
+   Pasan de tarjetas a **filas**, de ~1000 px a 566, con las siete de un
+   vistazo. Se fue `finanzasTarjetaEl` y su CSS.
+
+Lo único que hubo que acomodar a las reglas de esta rama: un
+`font-size: 1.15rem` en `.finanzas-row-chevron`, que ahora es
+`var(--t-titulo-3)` (20 px, el tamaño al que iOS pinta el chevron de una
+fila de Ajustes). **Los emojis siguen ahí**, ahora en
+`finanzasFilaEl`: ver la duda B9 de `PARA-KOKU-MAÑANA.md`.
+Reorganización de ramas del 8/9/2026, pedida por Koku:
+
+- **`movil-ui` ya NO se toca** salvo que Koku lo pida explícitamente:
+  queda solo como rama de integración para compilar y probar ipa/apk.
+  Cuando el trabajo de una rama de área está funcional, se combina ahí
+  (la primera combinación ya está hecha: gimnasio-movil + finanzas-movil
+  + viajes-movil + la copia de seguridad, merges limpios, humo en verde,
+  build de iOS #32 lanzado).
+- El trabajo se hace por separado en ramas por área:
+  `calendario-notas-movil-UI` (calendario y notas), `gimnasio-movil`,
+  `finanzas-movil`, `viajes-movil`.
+- Las ramas viejas ya terminadas se renombraron con prefijo
+  `archivo/` (git no tiene "cerrar" una rama: o existe o no; el prefijo
+  las agrupa al final de la lista sin perder nada).
+
+En `movil-ui` (y por herencia aquí) vive la app móvil sin servidor. `main` sigue teniendo la versión vieja cliente-servidor, y la
+rama `escritorio` es donde Koku trabaja el programa de escritorio por su
+cuenta — no las toques desde aquí.
+
+Últimos commits en `origin/movil-ui`:
+
+- (esta ronda) — **Copia de seguridad + workflow de Android**:
+  - `public/backup.js` (nuevo): exportar crea un `.json` con TODO (la
+    base SQLite en base64, todas las imágenes/fotos de `noteAssets`, y
+    el localStorage entero) y lo manda por la hoja de compartir del
+    sistema (`Filesystem`+`Share` de Capacitor, registrados con el
+    mismo patrón perezoso de `local-notifications.js`; en navegador,
+    descarga normal). Importar valida el archivo (incluye abrir la base
+    de prueba ANTES de borrar nada), avisa con `showAppConfirm`
+    (destructivo), y restaura base+fotos+ajustes con `location.reload()`
+    al final — una copia de una versión vieja migra sola al arrancar
+    (`applyLocalSchema`). Detalle importante del import: se pone
+    `sqlDatabase = null` antes de escribir los bytes nuevos, para que
+    ni el volcado agrupado pendiente ni el de `pagehide` pisen lo
+    importado con la base vieja en memoria.
+  - Recordatorio: si pasan ~30 días sin copia (`lastBackupAt`, o
+    `backupFirstOpenAt` si nunca hubo), un aviso discreto flotante al
+    abrir; la ✕ lo pospone 7 días (`backupReminderSnoozedAt`), tocarlo
+    abre Configuración → Este dispositivo. UI (Exportar/Importar +
+    "Última copia: ...") en ese mismo panel.
+  - `db-local.js`: `assetGetAll()`/`assetClear()` nuevos.
+  - Android: `.github/workflows/android-play.yml` (manual, compila un
+    `.aab` FIRMADO para Google Play y lo deja como artefacto — la
+    subida a Play Console es a mano), firma cableada en
+    `android/app/build.gradle` vía propiedades `-P` (sin nada del
+    keystore en el repo; secretos `ANDROID_KEYSTORE_BASE64`/
+    `ANDROID_KEYSTORE_PASSWORD`/`ANDROID_KEY_ALIAS`/
+    `ANDROID_KEY_PASSWORD`, solo por la web de GitHub), y guía completa
+    en `ANDROID-PLAY.md` (keytool, Play Console, probadores internos).
+    **El workflow NO se ha lanzado** (regla de Actions). La primera
+    ejecución real con sus secretos será la primera prueba real.
+- `8a89a72` — Ronda G: nota nueva vacía no se guarda + cursor esquiva
+  el teclado + reglas nuevas en CLAUDE.md.
+- `29b2233` — **Fase 1**: SQLite dentro del propio móvil (sql.js
+  vendorizado + `local-schema.js` + `local-db.js`).
+- `f721bf1` — **Fase 2**: el backend entero corre dentro de la app
+  (shim de Express + 25 archivos en `public/routes-local/`, `api()`
+  despachando contra el motor local).
+- `9360c09` — **Fase 3**: entrada directa (fuera la pantalla de
+  vinculación), avisos nativos con `@capacitor/local-notifications`, y
+  fuera todo lo que dependía del servidor (sincronización, Archivos,
+  emparejamiento, push, aviso de versión).
+- `9f65425` — **Fase 4**: limpieza final del cliente (`db-local.js`
+  reescrito, CSS muerto fuera, `settings.js` sin Dispositivos/QR/push)
+  y `README.md` reescrito para la app sin servidor.
+
+Antes de eso, en la misma rama: la prueba de Capacitor (`0500249`), el
+pipeline de iOS con GitHub Actions (`798d2c9` + 3 commits de arreglos
+de firma), y las 5 fases del rediseño móvil.
+
+**Verificación hecha en las 4 fases**: comparación diferencial entre el
+servidor Express real y el motor portado (79 peticiones idénticas, 0
+diferencias, incluidas las agregaciones de Finanzas, el progreso de
+Gimnasio y los borrados en cascada de Viajes), más pruebas de extremo a
+extremo con la app servida como estático puro, sin ningún backend.
+
+**Copia de seguridad: YA EXISTE** (ronda de esta ventana, ver arriba).
+Diseño acordado con Koku: export por la hoja de compartir del sistema,
+manual + recordatorio de ~30 días, y TODO dentro del archivo incluidas
+las fotos. Sigue sin haber sincronización en vivo entre dispositivos —
+la copia es la forma de pasar datos de un aparato a otro.
+
+## Finanzas: rama `finanzas-movil` (10-11/9/2026)
+
+Toda la ronda de Finanzas vive en la rama `finanzas-movil`, con su
+ideario completo en `IDEAS-FINANZAS.md` (decisiones, diagnóstico y
+backlog). Resumen de lo que cambió, que es bastante:
+
+- **Fuera las cinco pestañas.** Finanzas tiene ahora un INICIO de
+  tarjetas tipo la app Salud: cada tarjeta resume una cifra y abre su
+  pantalla. Añadir una sección es añadir una tarjeta. Esc funciona capa
+  a capa (sección → inicio → salir).
+- **Previsión de gastos fijos**: `/api/finanzas-recurring-expenses/
+  forecast?from&to` calcula las ocurrencias de cada plantilla y **NO
+  guarda nada** (regla de la casa). De ahí salen "qué me queda por
+  pagar" (semana/mes/año) y el año mes a mes con desglose.
+  Tres estados, no dos: pagado / pendiente / **sin registrar** (un cobro
+  viejo sin movimiento no está pendiente — es que no consta, porque el
+  generador nunca rellena hacia atrás).
+- **Suscripciones**: columna `kind` en las plantillas (Suscripción /
+  Recibo / Préstamo / Otro) y todo normalizado a coste mensual y anual.
+  Más la evolución por años de cada gasto, que sale gratis de
+  `recurring_expense_id`. Ojo con comparar años: si el número de pagos
+  no coincide se compara el coste POR PAGO (si no, un año a medias
+  parece más barato cuando en realidad ha subido).
+- **Avisos de pago**: `reminder_offsets` (días de antelación, hasta 5
+  por gasto). **El cupo de notificaciones del móvil está repartido a
+  mano en `local-notifications.js`**: iOS solo guarda ~64 pendientes por
+  app y a partir de ahí deja de avisar EN SILENCIO. Manda el calendario,
+  los pagos ocupan lo que sobre, y Configuración enseña "41 de 60".
+  Si tocas esa función, no te cargues el reparto.
+- **Dinero de terceros**: tipo de cuenta "De terceros" (la paga de sus
+  padres). Queda fuera de ahorro, límite mensual, desglose y gráficas
+  salvo `?includeThirdParty=1`. La comparación es insensible a
+  mayúsculas a propósito.
+- **Objetivos de ahorro** (`finanzas_goals` + `finanzas_goal_
+  contributions`, `routes-local/finanzasGoals.js`): SOBRES virtuales, el
+  dinero no se mueve. La cuenta enseña "libres / reservados". "Gastar el
+  objetivo" crea el gasto real Y vacía el sobre en la misma operación.
+- **El dinero se escribe en español** (`formatFinanzasAmount` con Intl):
+  "10.851,88 €". Con `useGrouping: 'always'` a propósito.
+
+Cosas que se arreglaron por el camino y conviene no reintroducir: el
+`confirm()`/`alert()` del navegador en esta pestaña (bloquean la webview
+en el móvil), y pintar los saldos del Resumen desde la copia en memoria
+sin recargarla (dejaba cifras caducadas después de mover dinero).
 
 ## Pendiente / próximos pasos declarados
 
-- **Idiomas**: Koku quiere en algún momento un selector español/inglés
-  ("por tener la opción y ver cómo se desarrolla"), pero pidió
-  explícitamente dejarlo para más adelante — no es prioridad ahora mismo,
-  no empezar sin que lo pida.
-- **README.md** / **este archivo**: al día (ver "Estado actual" arriba).
-- Sin nada más declarado explícitamente en el momento de escribir esto.
+- **BANCO DE PRUEBAS — animaciones de zoom del calendario (ronda del
+  8/9/2026, en esta rama)**: pellizcar sube de nivel (día→mes,
+  mes→año; NUNCA al revés, decidido así por Koku) y hay animación de
+  zoom al cambiar de nivel (in al bajar, out al subir) + interruptor
+  "Animaciones" en Configuración → Este dispositivo
+  (`localStorage.animationsEnabled`, apagado también salta las de
+  deslizar). Koku avisó EXPLÍCITAMENTE que quiere verlo en su móvil y
+  que **es posible que se retire** — si pide volver atrás, las piezas
+  son: `attachPinch()`/`playMobileZoomTransition()`/
+  `areAnimationsEnabled()` y sus llamadas en `setCalendarViewMode`/
+  `enterMobileDayView`/`exitMobileDayView` (app.js), las keyframes
+  `mobile-zoom-*` (styles.css), y el bloque "Animaciones" de
+  index.html/settings.js.
+- **Compartir → RemindMeLater (fecha detectada → evento) — QUITADO DE
+  ESTA RAMA, aplazado**: se construyó el 8/9/2026 en
+  `calendario-notas-movil-UI`, llegó aquí con el merge, y Koku pidió
+  sacarlo el 9/9/2026 ("debería estar quitado ahora, en las pruebas en
+  la rama no funcionaba correctamente, por lo que se había aplazado").
+  **No volver a meterlo hasta que él lo retome.**
+  - Qué se quitó: `public/share-import.js` y su `<script>` de
+    index.html, `ios/App/CompartirExtension/` entera, el target
+    `CompartirExtension` del `project.pbxproj` (todos los ids con
+    prefijo `CE5CA250`, más sus líneas en las listas de children,
+    buildPhases, dependencies, targets y TargetAttributes) y la sección
+    del README.
+  - Qué NO se quitó, a propósito: el esquema de URL `remindmelater://`
+    del `App/Info.plist` — lo usa TAMBIÉN el widget de descanso del
+    Gimnasio (`remindmelater://gym-live`, ver SceneDelegate) y quitarlo
+    lo rompería. Y la dependencia `@capacitor/app` sigue en
+    package.json: ya no la usa nadie, pero sacarla obliga a regenerar
+    los archivos nativos con `cap sync`, y como esto está aplazado (no
+    cancelado) sale más a cuenta dejarla puesta.
+  - **Dónde está el código para recuperarlo**: intacto en la rama
+    `calendario-notas-movil-UI` y en su commit `73cbdbc`. Recuperarlo es
+    un cherry-pick de ese commit, no reescribirlo.
+  - Estado real cuando se aplazó: **compilaba bien** (build #34 de iOS:
+    el target se compiló, el `.appex` se incrustó en `App.app/PlugIns/`
+    y `ValidateEmbeddedBinary` pasó), pero **en el iPhone real no
+    terminaba de funcionar**. Koku no dijo QUÉ falla exactamente, y es
+    lo PRIMERO que hay que preguntarle al retomarlo, porque cada
+    síntoma apunta a una causa distinta:
+    - No aparece en la hoja de compartir → `NSExtensionActivationRule`
+      del Info.plist de la extensión.
+    - Aparece pero no abre la app → el truco de la cadena de
+      responders (`openURL:`) está cada vez más restringido por Apple;
+      la alternativa moderna sería un App Group compartido (la
+      extensión escribe el texto ahí y la app lo lee al abrirse) en vez
+      de pasar el dato por la URL.
+    - Abre sin datos → el esquema de URL o el `appUrlOpen`.
+  - La parte de ANDROID (intent-filter + forwarding nativo) nunca llegó
+    a construirse.
+- **Vibración de los avisos — ARREGLADA (misma ronda)**: el plugin de
+  notificaciones solo pone sonido si se le pasa `sound` (comprobado en
+  su fuente), y sin sonido iOS entrega el aviso en silencio total (ni
+  vibra). Ahora cada aviso lleva `sound: 'default'` (iOS cae al sonido
+  del sistema al no existir ese archivo → suena y vibra) y en Android
+  un canal propio `recordatorios` con `vibration: true`
+  (`ensureRemindersChannel()` en local-notifications.js). Solo
+  comprobable de verdad en el iPhone de Koku.
+
+- **Comunicación escritorio↔móvil en la v1** (nota que Koku pidió dejar
+  apuntada expresamente): cuando la app de escritorio (rama
+  `escritorio`, suya) y esta app móvil lleguen las dos a la versión 1,
+  la idea es que puedan comunicarse para pasar la copia de seguridad al
+  ordenador (y similares). Sin diseñar — solo constancia.
+- **Probar en su iPhone**: Koku instala desde TestFlight
+  (`IOS-TESTFLIGHT.md` tiene la guía completa). Las notificaciones
+  locales reales, el arranque directo y ahora la hoja de compartir de
+  la copia de seguridad solo se pueden confirmar ahí, no desde este
+  contenedor.
+- **Android**: workflow hecho (`android-play.yml`, ver arriba) pero
+  NUNCA ejecutado — a Koku le quedan los preparativos de
+  `ANDROID-PLAY.md` (keystore + 4 secretos + cuenta de Play Console) y
+  lanzarlo él cuando quiera.
+  **`ANDROID-PENDIENTE.md`** (raíz del repo, 10/9/2026) tiene la
+  auditoría completa de lo que falta y lo que hay que probar. Lo más
+  importante de esa lista, para no volver a averiguarlo:
+  - El **icono y el splash son los de Capacitor por defecto** (la X
+    azul), no los de la app. El de iOS sí es el bueno.
+  - **El botón/gesto ATRÁS no está manejado**: cierra la app en vez de
+    retroceder. `@capacitor/app` ya está instalado y
+    `closeAllMobileOverlays()` ya hace la cascada de Esc — es
+    engancharlos.
+  - **`LiveActivity`, `RestAudio` y `WidgetBridge` no existen en
+    Android** y se registran igual (solo miran `isNativePlatform()`,
+    que allí es true): cada llamada responde "not implemented" y deja
+    ruido en consola. No rompe nada (todo va en `try/catch`), pero lo
+    limpio sería mirar `getPlatform() === 'ios'`.
+  - **Ajustes visibles que allí no hacen nada**: vibración larga, bajar
+    la música, y el botón de probar el aviso.
+  - El workflow genera un `.aab`, que **no se puede instalar a mano**:
+    para probar sin pasar por Play hay que añadir `assembleRelease`.
+  - `versionName` es `1.0.<run_number>`, no la versión real del
+    `package.json`.
+- **Fusionar `movil-ui` con `escritorio`**: móvil y escritorio son dos
+  programas independientes que hoy comparten `public/`. Cuando toque
+  fusionar habrá conflictos ahí; Koku dijo que preguntará qué falta en
+  cada lado y se resuelve entonces. No adelantarse.
+- **Rama `gimnasio-movil` (de Koku, NO tocar)**: tiene su propia rama
+  bastante desarrollada con un rediseño de Gimnasio ("ya verás cuando
+  haga merge"). Se puede mirar en solo-lectura si hace falta contexto,
+  pero NUNCA tocarla ni fusionarla — lo hará él.
+- **Idiomas**: selector español/inglés, apuntado hace mucho y
+  explícitamente aplazado. No empezar sin que lo pida.
+- **Botones "?" por la app**: hay una lista de sitios candidatos en
+  `IDEAS-AYUDAS.md`, en la raíz del repo, pendiente de que Koku marque
+  cuáles quiere. **No hacer ninguno hasta que responda.** Ese documento
+  es de trabajo, no documentación del proyecto: cuando se decidan, se
+  hacen y se vacía.
+- **Guías de uso dentro de la Tienda**: en el apartado de Tienda de
+  Configuración, que cada herramienta tenga su guía de uso (cómo va el
+  editor de tablas, Grupos, etc.). Koku lo dejó apuntado a propósito
+  para más adelante — **no empezar hasta que lo pida**. Precedente ya
+  existente al que se puede enganchar: el aviso de "mover a mano" de
+  las tablas, que sale la primera vez con casilla de "no volver a
+  mostrar" (`tableMoveHintSeen_*` en localStorage).
+- **Rediseño de Gimnasio (HECHO, pendiente de validar en iPhone)**:
+  rama `gimnasio-movil` (creada desde `movil-ui`), trabajada en un
+  WORKTREE aparte (`../RemindMeLater-gimnasio`) porque el checkout
+  principal estaba en `escritorio`. Las 7 fases están commiteadas y
+  probadas en Chrome con la app servida como estático:
+  1. **Bloques → Días** (tabla `gym_blocks` + `block_id` en
+     `gym_routines`; migración idempotente que recoloca días huérfanos
+     en un bloque "General"; solo un bloque activo). Pestaña "Plan" con
+     drill-down bloque↔días. Acento morado scoped en
+     `#gym-view`/`.gym-modal`/`#gym-live-view`, sin tocar los temas.
+  2. **Librería de ~870 ejercicios** (`public/gym-exercise-library.json`,
+     ~840 KB, fetch perezoso): de
+     [`yuhonas/free-exercise-db`](https://github.com/yuhonas/free-exercise-db)
+     (Unlicense, dominio público; nacido de `wrkout/exercises.json` de
+     Ollie Jennings, también Unlicense — créditos en README y código).
+     Nombres/músculos/material traducidos al español por Claude;
+     **las INSTRUCCIONES siguen en inglés** — se irán traduciendo por
+     tandas con la cuenta DeepL de Koku vía Chrome (pendiente).
+     Taxonomía fija `GYM_MUSCLE_GROUPS` (14 grupos) en app.js: única
+     fuente de verdad para selects, volumen por músculo y mapa.
+     Import idempotente por `library_id`.
+  3. **Modo entrenar en vivo**: estado en `localStorage.gymLiveSession`
+     (sobrevive recargas), tiempos SIEMPRE desde timestamps (iOS congela
+     el JS de fondo), cronómetro, columna "Anterior"
+     (`GET /last-sets/:exerciseId`), RPE, descanso automático al marcar
+     serie (presets + +30s), resumen final. Columnas nuevas: `rpe`/
+     `set_type` en `gym_sets`; `started_at`/`duration_seconds`/
+     `exercise_notes` (JSON) en `gym_sessions`. Esc NO saca del entreno.
+  4. **Actividad rápida** (`type='activity'` en `gym_sessions`, sin
+     series — misma tabla a propósito para heatmap/racha) + historial
+     con iconos/duración/volumen + `GET /summary` ligero.
+  5. **Progreso avanzado**: heatmap 26 semanas (un solo tono morado),
+     racha semanal con objetivo configurable (`gymWeeklyGoal`, por
+     dispositivo, semanas ISO lunes), PRs con 1RM de Epley (excluye
+     warmup y >12 reps), volumen semanal apilado top-5 grupos + "Otros"
+     (paleta de 5 tonos validada contra daltonismo con el skill dataviz).
+  6. **Mapa de músculos** (idea de Koku): dos siluetas SVG propias
+     (frente/espalda) generadas en app.js (para usar variables CSS),
+     zonas = ids de la taxonomía, intensidad continua, ventana 7/30/90
+     días, series o volumen, secundarios ×0.5 (columna
+     `secondary_muscles` en `gym_exercises`, la rellena el import).
+  7. **Logros**: 6 logros con niveles calculados AL VUELO desde
+     /summary (nada en BD; solo `gymAchievementsSeen` en localStorage
+     para celebrar una vez). Pestaña "Logros" + modal de celebración.
+  - **Rondas de feedback de TestFlight** (varias tandas de Koku
+    probando en su iPhone, ya integradas — lo más importante de
+    entender de la versión actual):
+    - **Ciclo de series con botones grandes**, no casillas ("si vas un
+      poco mareado cuesta ver la casilla"): botón grande por ejercicio
+      → diálogo "vas a empezar X, serie N" (el nombre es pulsable y
+      despliega los ejercicios del día) → serie corriendo con
+      cronómetro → diálogo "¿has acabado?" (Sí / Pausar / Seguir) →
+      formulario con peso, repeticiones y **nota de esa serie**. Las
+      notas de las series se combinan al acabar el ejercicio en la nota
+      del ejercicio, que es la que se ve el siguiente entreno. El ✓ de
+      cada fila ya solo sirve para DESHACER. Estado en
+      `gymLiveSession.activeSet`, todo por timestamps.
+    - **Terminar la serie tocando la pantalla**: con la serie en
+      marcha, un toque en hueco de la pantalla del entreno abre el
+      diálogo. Solo con la app delante (quien se va a Spotify no
+      dispara nada al volver), no antes de 5s, y 12s de silencio tras
+      decir "Seguir". Ver `gymTapShouldOpenEnd()` en `app.js`.
+    - **Unilaterales**: `unilateral` + `count_sides_separately` +
+      `side_rest_seconds` en `gym_exercises` (se configuran en el modal
+      del propio ejercicio). Cada lado es una SERIE PROPIA
+      (`gym_sets.side`), así el historial y el volumen no necesitan
+      casos especiales. El diálogo pregunta por qué lado empiezas y eso
+      se aplica a todas las series pendientes del ejercicio; el
+      descanso corto entre lados se decide por "¿queda el otro lado
+      pendiente?", NO por "¿es el izquierdo?".
+    - **Avisos del fin de descanso** (todo en `RestAudioWatcher.swift`
+      + `LiveActivityPlugin.swift`): tarjeta con cuenta atrás en la
+      pantalla de bloqueo (ActivityKit + widget `DescansoWidget`, con
+      botón +30s vía `LiveActivityIntent`, en los colores del tema);
+      la música BAJA de volumen al acabar (audio ducking con
+      `.duckOthers`, la app se mantiene despierta con un silencio en
+      bucle y el modo de fondo `audio`); vibración larga = 6 pulsos del
+      sistema seguidos (NO 3 notificaciones), que se callan al volver a
+      la app, desbloquear, tocar el volumen, pausar la música desde el
+      auricular o descartar la notificación.
+    - Sonido y vibración de la notificación son dos interruptores
+      aparte en Configuración > Notificaciones.
+    - **Historial**: deslizar una sesión a la izquierda descubre
+      Editar/Eliminar (mismas clases que las notas,
+      `wrapGymRowWithSwipe`), siguiendo el dedo con animación.
+    - **Bug ya cometido, no repetir**: subir `#gym-live-view` por
+      encima de `.modal` (z-index 20) deja los diálogos ABIERTOS PERO
+      DETRÁS del entreno. Se queda en 16. Y en los guiones de prueba,
+      comprobar que un diálogo se VE (`document.elementFromPoint`), no
+      solo que no tiene la clase `hidden` — por eso se coló.
+  - **Pendiente**: tandas de DeepL para las instrucciones; merge de
+    `gimnasio-movil` a `movil-ui` (ojo: ya hubo un run "Combinado"
+    desde `movil-ui`, revisar qué se llevó). Los ejercicios importados
+    ANTES de la Fase 6 no tienen `secondary_muscles` (limitación
+    conocida).
+  - Referencia estética explorada en vivo: https://oscargymapp.vercel.app/
+    (app de un amigo). Descartado lo social/red a propósito.
+  - Descartada la otra librería candidata
+    (`hasaneyldrm/exercises-dataset`): datos MIT pero imágenes de Gym
+    Visual con licencia restrictiva y ~125 MB de peso.
+- **Backlog sin fecha** (ideas suyas, ninguna empezada): rediseño
+  visual del visor de escritorio, repensar Finanzas para que sea
+  "realmente útil", y una extensión nueva estilo Notion.

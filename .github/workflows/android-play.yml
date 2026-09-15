@@ -1,0 +1,70 @@
+# Compila la app de Android como un .aab FIRMADO, listo para subir a
+# Google Play. Mismo espiritu que ios-testflight.yml: Koku no necesita
+# tener nada instalado, el runner de GitHub hace todo el trabajo.
+#
+# A diferencia de iOS (que sube solo a TestFlight), aqui el resultado se
+# deja como ARTEFACTO de la ejecucion: se descarga desde la propia
+# pagina del workflow y se sube a mano a la Google Play Console (pestaña
+# de pruebas internas). Automatizar tambien la subida a Play es posible
+# mas adelante, pero necesita una cuenta de servicio de Google Cloud --
+# de momento, un paso manual simple.
+#
+# Secretos que espera (se añaden en GitHub > Settings > Secrets and
+# variables > Actions, NUNCA se pegan en ningun otro sitio -- ver
+# ANDROID-PLAY.md para como generarlos):
+#   ANDROID_KEYSTORE_BASE64   el archivo .jks del keystore, en base64
+#   ANDROID_KEYSTORE_PASSWORD la contraseña del keystore
+#   ANDROID_KEY_ALIAS         el alias de la clave dentro del keystore
+#   ANDROID_KEY_PASSWORD      la contraseña de esa clave
+name: Android Google Play
+
+on:
+  # Solo manual, desde la pestaña Actions ("Run workflow", eligiendo la
+  # rama). Nunca se lanza solo: el numero de ejecuciones es limitado.
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Copiar la web al proyecto Android
+        run: npx cap sync android
+
+      - name: Recuperar el keystore desde el secreto
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/remindmelater.jks"
+
+      # github.run_number crece en 1 con cada ejecucion de ESTE workflow,
+      # que es justo lo que Google Play exige del versionCode (cada
+      # subida mayor que la anterior).
+      - name: Compilar y firmar el .aab
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease \
+            -PappVersionCode=${{ github.run_number }} \
+            -PappVersionName="1.0.${{ github.run_number }}" \
+            -PRELEASE_KEYSTORE_FILE="$RUNNER_TEMP/remindmelater.jks" \
+            -PRELEASE_KEYSTORE_PASSWORD="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -PRELEASE_KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}" \
+            -PRELEASE_KEY_PASSWORD="${{ secrets.ANDROID_KEY_PASSWORD }}"
+
+      - name: Guardar el .aab como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: remindmelater-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
