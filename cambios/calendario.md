@@ -6,6 +6,35 @@ Cómo se escribe esto: `cambios/_COMO-SE-USA.md`.
 
 ---
 
+## Sin fusionar — El horario, el día entero
+
+**Qué cambió**
+- El horario enseña de **00:00 a 24:00**, no de 8:00 a 22:00. Un turno de
+  noche ya tiene su hueco antes de que lo crees.
+- Como casi todo lo de arriba queda vacío, la pantalla **se abre
+  desplazada hasta tu primer bloque**, con media hora de aire encima.
+- Las frecuencias de repetición se llaman por su adjetivo: **Diaria,
+  Semanal, Mensual, Anual** (antes "Cada día", "Cada mes"...). La fila de
+  "Cada N semanas" de debajo no cambia: ahí el "cada" es parte de la
+  frase.
+
+**Qué probar**
+- [ ] Que con el día entero no se hace incómodo de usar: son 24 h × 56 px
+      de alto, o sea el doble de scroll que antes. Si cansa, lo que se
+      toca es `--horario-hora` en styles.css.
+- [ ] Abrirlo con bloques muy temprano (6:00) y muy tarde (23:00), a ver
+      si el sitio donde se abre te cuadra en los dos casos.
+- [ ] Con el horario vacío tiene que abrirse arriba del todo, no a la
+      altura de lo que acabas de borrar.
+
+**Decisiones**
+- **Franja fija, no elástica.** Antes se estiraba sola según tus bloques,
+  y eso hacía que la rejilla cambiara de alto según lo que tuvieras
+  dentro. Ahora siempre es el día entero.
+- El margen de arriba/abajo va como `margin-block` en `.horario-grid` y
+  **nunca como padding**: un padding entra dentro de las columnas y
+  descuadraría media hora todos los bloques.
+
 ## v0.57.0 — Eventos que se repiten
 
 **Qué cambió**

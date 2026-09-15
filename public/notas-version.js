@@ -34,6 +34,17 @@
 // exista se lee como general, no rompe nada.
 const APP_RELEASE_NOTES = [
   {
+    version: '0.62.2',
+    fecha: '2026-09-14',
+    nuevo: [
+      { app: 'calendario', texto: 'El horario enseña el día ENTERO, de 00:00 a 24:00, en vez de solo de 8:00 a 22:00. Y como casi todo lo de arriba está vacío, la pantalla se abre desplazada hasta tu primer bloque, con media hora de aire por encima.' },
+      { app: 'calendario', texto: 'Las frecuencias de repetición se llaman por su adjetivo: Diaria, Semanal, Mensual y Anual.' },
+    ],
+    parches: [
+      { app: 'notas', texto: 'La mayúscula del principio también se pone al salir de una cita, no solo al bajar del título al párrafo. Es el mismo arreglo: el salto de línea lo da ahora el navegador, que es quien tiene que avisar al teclado de que empieza frase nueva.' },
+    ],
+  },
+  {
     version: '0.62.1',
     fecha: '2026-09-14',
     nuevo: [],
