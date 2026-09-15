@@ -3625,7 +3625,15 @@
       <h2>Retos</h2>
       <div class="my-space-view-header-actions">
         <button type="button" id="btn-close-retos" class="secondary-btn my-space-close-btn" aria-label="Volver a Herramientas">&larr; Herramientas</button>
-        <button type="button" id="btn-retos-settings" class="icon-btn" aria-label="Configuraci&oacute;n">&#9776;</button>
+        <!-- Aqui habia un boton &#9776; de Configuracion, igual que en
+             Recetas. Se quito por el mismo motivo: la barra de abajo ya
+             tiene su propia seccion de Configuracion, asi que era un
+             segundo camino a lo mismo ocupando sitio en la cabecera.
+             Las otras seis pantallas completas todavia lo llevan en el
+             HTML, pero OCULTO por CSS (busca "sobran en movil" en
+             styles.css) -- Retos y Recetas nacieron en ramas que no
+             conocian esa regla, y por eso eran las dos unicas donde se
+             veia de verdad. -->
       </div>
     </div>
 
