@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Manifiesto de privacidad. OBLIGATORIO desde el 1 de mayo de 2024
+	     para cualquier app que use "APIs de motivo requerido". Sin el, App
+	     Store Connect avisa por correo y acaba rechazando la subida.
+	     TestFlight interno es mas permisivo, por eso no habia molestado
+	     todavia. Ver SEGURIDAD-Y-PRIVACIDAD.md. -->
+
+	<!-- La app no rastrea a nadie: no hay analitica, ni publicidad, ni
+	     identificadores, ni SDK de terceros, ni una sola peticion de red. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<!-- Vacio porque no se recoge NADA. "Recoger" significa que el dato sale
+	     del dispositivo hacia el desarrollador o hacia un tercero; que la app
+	     guarde tu calendario o tus finanzas EN el telefono no es recoger.
+	     Esto es literalmente cierto desde que se quitaron los Google Fonts,
+	     que eran lo unico que salia del aparato. -->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!-- UserDefaults: es el buzon del App Group por el que la app le
+			     pasa a los widgets el resumen del dia, y por el que los
+			     botones del centro de control devuelven a que pantalla ir. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- CA92.1 = acceder a informacion de la propia app o de otra
+				     del MISMO grupo de apps. Es exactamente el caso: el App
+				     Group group.com.koku.remindmelater. No es un comodin. -->
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

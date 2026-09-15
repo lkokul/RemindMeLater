@@ -1,0 +1,573 @@
+// notes — portado de server/routes/notes.js.
+//
+// Copia mecanica del archivo del servidor: la logica y el SQL son los
+// mismos, solo cambia la fontaneria (sin require/module.exports de
+// Node, y envuelto en un IIFE para que los nombres repetidos entre
+// rutas no choquen al cargarse todas como <script> en el mismo ambito).
+(function () {
+  const db = localDb;
+  // routes/notes.js — CRUD de notas de "Mi espacio" (titulo + contenido con
+  // formato basico desde la Fase 4; carpeta opcional desde la Fase 3, ver
+  // routes/noteFolders.js).
+  // Borra los bytes de las imagenes que tuviera una nota que se acaba
+  // de eliminar. En el servidor eran archivos de una carpeta del disco;
+  // ahora viven en el almacen "noteAssets" de IndexedDB. Sigue siendo
+  // best-effort y sin esperar (no hace falta su resultado para
+  // responder), igual que el fs.unlink de antes. Se mantiene la misma
+  // limitacion conocida: quitar una imagen de en medio EDITANDO la nota
+  // no libera esos bytes, solo borrar la nota entera.
+  function deleteImagesInBody(body) {
+    if (!body) return;
+    for (const match of body.matchAll(/\/api\/notes\/images\/([a-zA-Z0-9._-]+)/g)) {
+      assetDelete(match[1]).catch(() => {});
+    }
+  }
+
+  const router = createLocalRouter();
+
+  // Lista blanca de etiquetas que puede producir el editor de notas (Fase 4:
+  // negrita, cursiva, listas, tablas, imagenes). Cualquier otra etiqueta se
+  // quita al guardar (dejando el texto de dentro, no se pierde contenido) y
+  // las permitidas se dejan SIN atributos -- asi no hay forma de que se
+  // cuele un "onclick=" o un "style=" con algo raro, aunque el HTML venga
+  // de un movil emparejado que no sea de fiar del todo. No hace falta una
+  // libreria de terceros para esto, el editor nunca deberia producir nada
+  // fuera de esta lista.
+  //
+  // "img" es la unica excepcion que SI necesita quedarse con un atributo
+  // (src) para servir de algo -- se trata aparte mas abajo, comprobando que
+  // apunte a una imagen ya subida a esta misma app (routes/noteImages.js) y
+  // no, por ejemplo, a un "data:" (la opcion base64 que se descarto a
+  // proposito) o a un servidor externo.
+  const ALLOWED_NOTE_TAGS = new Set([
+    'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'span',
+    'ul', 'ol', 'li', 'br', 'div', 'p', 'h1', 'h2', 'h3',
+    'table', 'colgroup', 'col', 'tbody', 'tr', 'td', 'th',
+    'img', 'pre', 'code',
+  ]);
+  const NOTE_TABLE_BORDER_LEVELS = new Set(['1', '2', '3', '4']);
+  const NOTE_IMAGE_SRC = /^\/api\/notes\/images\/[a-zA-Z0-9._-]+$/;
+  // Bloques de codigo (```lenguaje + Intro, o el boton "Codigo"): el
+  // "lenguaje" es solo una etiqueta visual (no hay coloreado de verdad
+  // todavia, ver app.js), pero igualmente se valida con una lista blanca
+  // de caracteres -- nada de comillas, "<", espacios ni simbolos raros.
+  const NOTE_CODE_LANG = /^[a-zA-Z0-9+#.-]{0,20}$/;
+  // Redimensionar tablas a mano (columnas/filas, ver el bloque de
+  // resize en app.js) guarda el ancho/alto como "style" en <col>/<tr> --
+  // la unica forma de que sobreviva al saneado es una lista blanca MUY
+  // estricta: un solo valor en px, nada mas (ninguna otra propiedad CSS,
+  // ni url()/expression()/unidades raras). Hasta 4 digitos (9999px) de
+  // sobra para cualquier tamano razonable. El "\s*" y el ";" opcional son
+  // necesarios porque el navegador no siempre serializa el atributo style
+  // igual: el HTML insertado tal cual (buildTableHtml) queda compacto
+  // ("width:120px"), pero en cuanto se toca la propiedad por JS
+  // (element.style.width = ..., al arrastrar o hacer doble clic) el
+  // navegador lo reescribe con espacio y punto y coma ("width: 270px;") --
+  // ambos formatos son validos, se captura el numero y se reconstruye
+  // siempre en el mismo formato compacto (ver mas abajo) para que el HTML
+  // guardado no varie segun de donde venga.
+  const NOTE_COL_WIDTH_STYLE = /^width:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
+  const NOTE_ROW_HEIGHT_STYLE = /^height:\s*(\d{1,4}(?:\.\d+)?)px;?$/;
+  // Sangria por parrafo (data-indent, ver applyNoteIndentDelta en app.js):
+  // un solo digito 0-4 -- el propio cliente nunca deja el atributo puesto
+  // a "0" (lo quita del todo), pero se admite igualmente por si acaso.
+  const NOTE_INDENT_LEVEL = /^[0-4]$/;
+  // Color de resaltado (fondo, NO subrayado -- confirmado con Koku, ver
+  // applyNoteHighlight en app.js): un Set cerrado de 5 claves fijas
+  // (data-highlight), no un color libre -- el cliente ya no manda ningun
+  // "style" en linea para esto, los colores concretos (fondo+texto) los
+  // define solo el CSS del servidor de la app. Mas simple Y mas estricto
+  // que la regex abierta que aceptaba cualquier rgb()/hex de antes.
+  const NOTE_HIGHLIGHT_KEYS = new Set(['yellow', 'green', 'blue', 'pink', 'orange']);
+
+  // En un <div contenteditable> real, la PRIMERA linea normalmente NO
+  // queda envuelta en su propia etiqueta -- se queda como texto suelto al
+  // principio, y solo la SEGUNDA linea en adelante se envuelve en un <div>
+  // nuevo al pulsar Intro (comprobado de verdad: escribir "A" + Intro +
+  // "B" deja el HTML como "A<div>B</div>", NO "<div>A</div><div>B</div>").
+  // Por eso la señal real de "aqui acaba la primera linea" es la APERTURA
+  // de ese div siguiente, no su cierre -- buscar solo el cierre (como
+  // hacia la primera version de esta funcion) se comia la segunda linea
+  // entera en ese caso, un bug real encontrado verificando con Playwright.
+  // Si en cambio el cuerpo YA viene envuelto desde el principio (una nota
+  // cargada del servidor, contenido pegado con formato), se usa el cierre
+  // de ESE bloque concreto -- de ahi que se descarte una apertura que
+  // coincide justo en la posicion 0 y se seguisga buscando.
+  function findFirstLineBreakIndex(html) {
+    const pattern = /<br\s*\/?>|<\/(?:div|p|li|h1|h2|h3)>|<(?:div|p|li|h1|h2|h3)(?:\s[^>]*)?>/gi;
+    let match;
+    while ((match = pattern.exec(html))) {
+      const isOpeningBlockAtStart = match.index === 0 && match[0][1] !== '/' && !/^<br/i.test(match[0]);
+      if (isOpeningBlockAtStart) continue;
+      return match.index;
+    }
+    return html.length;
+  }
+
+  // Fase 4 del rediseño movil: ya no hay un campo de titulo aparte en el
+  // editor (ni movil ni escritorio, es el mismo formulario) -- el titulo se
+  // deriva SIEMPRE de la primera linea del cuerpo. En texto plano es el
+  // trozo antes del primer "\n"; en HTML es el trozo antes del primer salto
+  // de bloque real (ver findFirstLineBreakIndex arriba), con las etiquetas
+  // quitadas y las entidades mas comunes decodificadas. Recortado a 200
+  // caracteres, igual que cualquier otro texto corto de la app.
+  function deriveTitleFromBody(body, bodyFormat) {
+    if (!body) return '';
+    const format = bodyFormat === 'html' ? 'html' : 'text';
+    let firstLine;
+    if (format === 'html') {
+      firstLine = body.slice(0, findFirstLineBreakIndex(body));
+      firstLine = firstLine
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'");
+    } else {
+      firstLine = body.split('\n')[0];
+    }
+    return firstLine.trim().slice(0, 200);
+  }
+
+  function sanitizeNoteBody(html) {
+    if (!html) return html;
+    // Fuera scripts/estilos JUNTO con su contenido -- nunca deberian
+    // aparecer viniendo del editor, pero por si acaso.
+    let clean = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '');
+    // Etiqueta a etiqueta: si no esta en la lista blanca se quita la
+    // etiqueta pero se deja lo de dentro; las permitidas se dejan sin
+    // atributos, salvo unas pocas excepciones muy concretas y validadas a
+    // mano (img/src, col+tr/style, table/data-border, pre/data-lang --
+    // ver mas abajo).
+    clean = clean.replace(/<(\/?)([a-zA-Z0-9]+)([^>]*)>/g, (match, closing, tag, attrs) => {
+      const lower = tag.toLowerCase();
+      if (!ALLOWED_NOTE_TAGS.has(lower)) return '';
+      if (closing) return `</${lower}>`;
+      if (lower === 'img') {
+        const srcMatch = attrs.match(/\ssrc\s*=\s*"([^"]*)"/i);
+        const src = srcMatch ? srcMatch[1] : '';
+        if (!NOTE_IMAGE_SRC.test(src)) return '';
+        return `<img src="${src}">`;
+      }
+      if (lower === 'col') {
+        const styleMatch = attrs.match(/\sstyle\s*=\s*"([^"]*)"/i);
+        const style = styleMatch ? styleMatch[1].trim() : '';
+        const widthMatch = style.match(NOTE_COL_WIDTH_STYLE);
+        return widthMatch ? `<col style="width:${widthMatch[1]}px">` : '<col>';
+      }
+      if (lower === 'tr') {
+        const styleMatch = attrs.match(/\sstyle\s*=\s*"([^"]*)"/i);
+        const style = styleMatch ? styleMatch[1].trim() : '';
+        const heightMatch = style.match(NOTE_ROW_HEIGHT_STYLE);
+        return heightMatch ? `<tr style="height:${heightMatch[1]}px">` : '<tr>';
+      }
+      if (lower === 'table') {
+        // Grosor de borde por niveles (1 = fino, 4 = muy grueso). Lista
+        // blanca de valores exactos, no una expresion suelta. "thick" se
+        // sigue aceptando porque es lo que guardaban las notas de antes
+        // de que esto pasara a tener niveles.
+        const borderMatch = attrs.match(/\sdata-border\s*=\s*"([^"]*)"/i);
+        const borde = borderMatch ? borderMatch[1] : '';
+        if (borde === 'thick') return '<table data-border="3">';
+        return NOTE_TABLE_BORDER_LEVELS.has(borde) ? `<table data-border="${borde}">` : '<table>';
+      }
+      if (lower === 'td' || lower === 'th') {
+        // Celdas combinadas: solo colspan/rowspan, y solo numeros de una
+        // o dos cifras -- nada de estilos ni de cualquier otro atributo.
+        const colspan = attrs.match(/\scolspan\s*=\s*"(\d{1,2})"/i);
+        const rowspan = attrs.match(/\srowspan\s*=\s*"(\d{1,2})"/i);
+        // El grosor de borde tambien puede ir por celda (menu Borde con
+        // casillas marcadas), con la misma lista cerrada de niveles.
+        const borderCelda = attrs.match(/\sdata-border\s*=\s*"([^"]*)"/i);
+        let out = `<${lower}`;
+        if (colspan && Number(colspan[1]) > 1) out += ` colspan="${colspan[1]}"`;
+        if (rowspan && Number(rowspan[1]) > 1) out += ` rowspan="${rowspan[1]}"`;
+        if (borderCelda && NOTE_TABLE_BORDER_LEVELS.has(borderCelda[1])) out += ` data-border="${borderCelda[1]}"`;
+        return `${out}>`;
+      }
+      if (lower === 'pre') {
+        const langMatch = attrs.match(/\sdata-lang\s*=\s*"([^"]*)"/i);
+        const lang = langMatch ? langMatch[1] : '';
+        return lang && NOTE_CODE_LANG.test(lang) ? `<pre data-lang="${lang}">` : '<pre>';
+      }
+      // El resaltado de color (applyNoteHighlight en app.js) envuelve la
+      // seleccion en un <span data-highlight="..."> nuevo -- pero si esa
+      // seleccion ya estaba ENTERA dentro de otra etiqueta en linea
+      // (negrita/cursiva/subrayado/tachado), Chrome reaprovecha esa misma
+      // etiqueta poniendole el atributo directamente en vez de anidar un
+      // span dentro (combinacion real y esperada, p. ej. resaltar un trozo
+      // ya en negrita) -- asi que las 7 etiquetas en linea admiten el mismo
+      // data-highlight restringido, no solo "span".
+      if (lower === 'span' || lower === 'b' || lower === 'strong' || lower === 'i' || lower === 'em' || lower === 'u' || lower === 's' || lower === 'strike') {
+        // UNA FORMULA FIJADA. Es lo unico de toda la nota que se guarda
+        // con una CLASE, y por eso conviene entender lo estrecho que es el
+        // permiso: se acepta `class` solo si vale EXACTAMENTE
+        // "note-formula". No es una lista de clases permitidas ni un
+        // patron: es una comparacion con una cadena. Nada de estilos en
+        // linea, nada de data-*, ningun dato del usuario dentro de un
+        // atributo. Lo unico que hace esa clase es pintar el texto con el
+        // color de acento (ver .note-formula en styles.css).
+        //
+        // Y lo importante: la clase del FANTASMA (la vista previa en gris
+        // mientras escribes) NO esta aqui, asi que aunque por un fallo
+        // llegara a guardarse, el saneador la tira. La vista previa no es
+        // contenido y no puede acabar dentro de una nota.
+        const claseMatch = attrs.match(/\sclass\s*=\s*"([^"]*)"/i);
+        const esFormula = lower === 'span' && claseMatch && claseMatch[1] === 'note-formula';
+        const hlMatch = attrs.match(/\sdata-highlight\s*=\s*"([^"]*)"/i);
+        if (esFormula) return '<span class="note-formula">';
+        return hlMatch && NOTE_HIGHLIGHT_KEYS.has(hlMatch[1]) ? `<${lower} data-highlight="${hlMatch[1]}">` : `<${lower}>`;
+      }
+      if (lower === 'p' || lower === 'div' || lower === 'h1' || lower === 'h2' || lower === 'h3') {
+        // Estilo de parrafo/sangria/cita (data-style/data-indent/data-quote,
+        // ver applyNoteParagraphStyle/applyNoteIndentDelta/toggleNoteQuoteBlock
+        // en app.js) -- los 3 son independientes y combinables. "li" se
+        // EXCLUYE a proposito de esta rama (cae en el "return" generico de
+        // abajo, sin atributos): cualquier data-indent/data-quote/data-style
+        // en un <li> se descarta solo, reforzando en el servidor la misma
+        // regla del cliente de que estas 3 funciones no aplican en listas.
+        const styleAttrMatch = attrs.match(/\sdata-style\s*=\s*"([^"]*)"/i);
+        const indentMatch = attrs.match(/\sdata-indent\s*=\s*"([^"]*)"/i);
+        const quoteMatch = attrs.match(/\sdata-quote\s*=\s*"([^"]*)"/i);
+        let out = `<${lower}`;
+        // Enum de un solo valor literal por ahora -- mismo criterio que
+        // table/data-border mas arriba, no una expresion suelta.
+        if (styleAttrMatch && styleAttrMatch[1] === 'mono') out += ' data-style="mono"';
+        if (indentMatch && NOTE_INDENT_LEVEL.test(indentMatch[1])) out += ` data-indent="${indentMatch[1]}"`;
+        if (quoteMatch && quoteMatch[1] === '1') out += ' data-quote="1"';
+        return `${out}>`;
+      }
+      return `<${lower}>`;
+    });
+    return clean;
+  }
+
+  const SELECT_WITH_FOLDER = `
+    SELECT n.*, f.name AS folder_name, f.color AS folder_color, f.icon AS folder_icon
+    FROM notes n
+    LEFT JOIN note_folders f ON f.id = n.folder_id
+  `;
+
+  function serialize(row) {
+    return {
+      id: row.id,
+      title: row.title,
+      body: row.body,
+      bodyFormat: row.body_format,
+      hidden: !!row.hidden,
+      favorite: !!row.favorite,
+      folderId: row.folder_id,
+      folderName: row.folder_name || null,
+      folderColor: row.folder_color || null,
+      folderIcon: row.folder_icon || null,
+      createdByName: row.created_by_name || null,
+      createdByPublicId: row.created_by_id || null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  function resolveFolderId(folderId) {
+    if (folderId === undefined || folderId === null || folderId === '') return null;
+    const folder = db.prepare('SELECT id FROM note_folders WHERE id = ?').get(folderId);
+    return folder ? folder.id : null; // si mandan un id que no existe, lo ignoramos en vez de fallar
+  }
+
+  router.get('/', (req, res) => {
+    const rows = db.prepare(`${SELECT_WITH_FOLDER} ORDER BY n.updated_at DESC`).all();
+    res.json(rows.map(serialize));
+  });
+
+  router.get('/:id', (req, res) => {
+    const row = db.prepare(`${SELECT_WITH_FOLDER} WHERE n.id = ?`).get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'not_found' });
+    res.json(serialize(row));
+  });
+
+  router.post('/', (req, res) => {
+    const { body, folderId, favorite, bodyFormat } = req.body || {};
+
+    // "Creado por" se rellena con tu perfil en el momento de crear la nota,
+    // igual que en los eventos (ver server/db.js): una foto fija del nombre
+    // de entonces, no un enlace en vivo a tu nickname actual.
+    const profile = db.prepare('SELECT * FROM user_profile WHERE id = 1').get();
+
+    // El editor con formato (Fase 4) siempre manda bodyFormat: 'html'; solo
+    // se saneamos en ese caso -- si no viene (o viene otra cosa) se trata
+    // como texto plano tal cual, sin tocarlo (ver sanitizeNoteBody arriba).
+    const format = bodyFormat === 'html' ? 'html' : 'text';
+    const cleanBody = format === 'html' ? sanitizeNoteBody(body) : (body || null);
+    // Fase 4: ya no se pide titulo aparte, se deriva de la primera linea
+    // del cuerpo (ver deriveTitleFromBody arriba).
+    const title = deriveTitleFromBody(cleanBody, format);
+
+    const info = db
+      .prepare('INSERT INTO notes (title, body, body_format, folder_id, favorite, created_by_name, created_by_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(
+        title,
+        cleanBody,
+        format,
+        resolveFolderId(folderId),
+        favorite ? 1 : 0,
+        profile && profile.name ? profile.name : null,
+        profile ? profile.public_id : null
+      );
+
+    const row = db.prepare(`${SELECT_WITH_FOLDER} WHERE n.id = ?`).get(info.lastInsertRowid);
+    const serialized = serialize(row);
+    db.recordSyncChange('notes', row.id, 'upsert', serialized, req.device ? req.device.id : null);
+    res.status(201).json(serialized);
+  });
+
+  router.put('/:id', (req, res) => {
+    const existing = db.prepare('SELECT * FROM notes WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+
+    const { body, hidden, folderId, favorite, bodyFormat } = req.body || {};
+
+    // Igual que en el POST: solo saneamos como HTML si el body que llega
+    // viene marcado explicitamente como 'html' (el editor con formato lo
+    // manda siempre asi). Si no se toca el body en este PUT, se deja el
+    // formato que ya tuviera la nota tal cual.
+    const format = bodyFormat !== undefined ? (bodyFormat === 'html' ? 'html' : 'text') : existing.body_format;
+    const cleanBody = body !== undefined
+      ? (format === 'html' ? sanitizeNoteBody(body) : body)
+      : existing.body;
+    // Fase 4: el titulo se re-deriva solo si el PUT trae un body nuevo; si
+    // no se toca el body (p. ej. un PUT que solo cambia folderId/favorite),
+    // se conserva el titulo ya guardado tal cual.
+    const title = body !== undefined ? deriveTitleFromBody(cleanBody, format) : existing.title;
+
+    // Tapar/destapar una nota NO cuenta como editarla: si tocara
+    // updated_at, la nota se iria al principio de la lista (el orden por
+    // defecto es por fecha de edicion) solo por taparla, que es justo lo
+    // que Koku no queria. Cambiar contenido/carpeta/favorito si cuenta.
+    const soloOcultar = hidden !== undefined
+      && body === undefined && folderId === undefined && favorite === undefined && bodyFormat === undefined;
+
+    db.prepare(`
+      UPDATE notes SET
+        title = ?,
+        body = ?,
+        body_format = ?,
+        hidden = ?,
+        folder_id = ?,
+        favorite = ?,
+        updated_at = ${soloOcultar ? 'updated_at' : "datetime('now')"}
+      WHERE id = ?
+    `).run(
+      title,
+      cleanBody,
+      format,
+      hidden !== undefined ? (hidden ? 1 : 0) : existing.hidden,
+      folderId !== undefined ? resolveFolderId(folderId) : existing.folder_id,
+      favorite !== undefined ? (favorite ? 1 : 0) : existing.favorite,
+      req.params.id
+    );
+
+    const row = db.prepare(`${SELECT_WITH_FOLDER} WHERE n.id = ?`).get(req.params.id);
+    const serialized = serialize(row);
+    db.recordSyncChange('notes', row.id, 'upsert', serialized, req.device ? req.device.id : null);
+    res.json(serialized);
+  });
+
+  // -------------------------------------------------------------------
+  // DUPLICAR UNA NOTA
+  // -------------------------------------------------------------------
+  //
+  // LAS IMAGENES SE COPIAN, NO SE COMPARTEN, y esto no es un detalle: es
+  // lo unico que impide una perdida de datos de verdad.
+  //
+  // El cuerpo de una nota guarda rutas tipo
+  // "/api/notes/images/<uuid>.<ext>", y los bytes viven aparte, en el
+  // almacen noteAssets de IndexedDB. Si la copia se quedara con las
+  // MISMAS rutas, las dos notas apuntarian a los mismos bytes -- y al
+  // borrar cualquiera de las dos, deleteImagesInBody (justo arriba) se
+  // llevaria esos bytes por delante, dejando a la OTRA nota con las
+  // fotos rotas y sin forma de recuperarlas.
+  //
+  // Asi que cada imagen estrena uuid. El nombre nuevo se calcula aqui
+  // mismo (sincrono, que es lo que necesita el cuerpo de la nota) y los
+  // bytes se copian en segundo plano, sin esperar -- igual que el
+  // borrado, que tambien es best-effort. Si esa copia fallara, la nota
+  // NUEVA se quedaria con una imagen rota; la original no se toca, que
+  // es lo importante.
+  function duplicateImagesInBody(body) {
+    if (!body) return body;
+    return body.replace(/\/api\/notes\/images\/([a-zA-Z0-9._-]+)/g, (_todo, nombre) => {
+      const punto = nombre.lastIndexOf('.');
+      const ext = punto > 0 ? nombre.slice(punto) : '';
+      const nuevo = `${crypto.randomUUID()}${ext}`;
+      assetGet(nombre)
+        .then((fila) => (fila ? assetPut(nuevo, fila.bytes, fila.type) : null))
+        .catch(() => {});
+      return `/api/notes/images/${nuevo}`;
+    });
+  }
+
+  // Le pone el sufijo de copia a la PRIMERA LINEA del cuerpo.
+  //
+  // En esta app el titulo de una nota NO es un campo: se deriva de su
+  // primera linea (ver deriveTitleFromBody arriba). Asi que "llamar a la
+  // copia nombre_copia" significa, por fuerza, tocar esa primera linea.
+  // Es lo unico que hace que las dos se distingan en el listado.
+  //
+  // Va JUSTO ANTES del primer salto de bloque, o sea dentro de la etiqueta
+  // que envuelve esa linea -- si se pusiera detras, el sufijo caeria en la
+  // segunda linea y el titulo no cambiaria.
+  //
+  // Y lo primero que hace es QUITAR el sufijo que ya hubiera. Sin eso,
+  // duplicar una copia daba "Lista_copia_copia 3" (pasado de verdad al
+  // probarlo): el nombre nuevo ya viene calculado desde la raiz, asi que
+  // pegarselo a un nombre que todavia lleva el suyo lo cuenta dos veces.
+  //
+  // El "rabo" son las etiquetas de cierre en linea con las que pueda
+  // acabar la primera linea (un titulo en negrita acaba en "</b>"): hay
+  // que apartarlas para tocar el TEXTO, y reponerlas despues.
+  function anadirSufijoAlTitulo(body, format, sufijo) {
+    if (!body) return sufijo ? (format === 'html' ? `<div>${sufijo}</div>` : sufijo) : body;
+    const reescribir = (linea) => {
+      const rabo = (linea.match(/(?:<\/[a-zA-Z0-9]+>)*$/) || [''])[0];
+      const texto = linea.slice(0, linea.length - rabo.length);
+      return `${texto.replace(RE_SUFIJO_DE_COPIA, '')}${sufijo}${rabo}`;
+    };
+    if (format !== 'html') {
+      const salto = body.indexOf('\n');
+      const corte = salto === -1 ? body.length : salto;
+      return `${reescribir(body.slice(0, corte))}${body.slice(corte)}`;
+    }
+    const corte = findFirstLineBreakIndex(body);
+    return `${reescribir(body.slice(0, corte))}${body.slice(corte)}`;
+  }
+
+  // El duplicado de UNA nota, separado de la ruta porque lo necesita
+  // tambien la copia de una carpeta entera (routes-local/noteFolders.js),
+  // que va metiendo las notas de dentro en la carpeta nueva. Se expone
+  // como global al final del archivo, igual que sanearHtmlDeNota: cada
+  // archivo de routes-local va en su IIFE y no puede importar nada.
+  //
+  // Devuelve la nota ya serializada, o null si el original no existe.
+  function duplicarNota({ id, folderId, renombrar = true }) {
+    const original = db.prepare('SELECT * FROM notes WHERE id = ?').get(id);
+    if (!original) return null;
+
+    // La copia nace en la MISMA carpeta que el original: duplicar es
+    // duplicar, no mover. Si se quiere en otro sitio, se arrastra despues.
+    // Salvo que quien llame diga otra cosa (la copia de una carpeta).
+    const destino = folderId === undefined ? original.folder_id : resolveFolderId(folderId);
+
+    // Solo se renombra cuando se duplica LA NOTA. Copiando una carpeta
+    // entera, las notas de dentro conservan su nombre: lo que se duplico
+    // fue la carpeta, no cada nota.
+    let sufijo = '';
+    if (renombrar) {
+      const hermanas = destino === null
+        ? db.prepare('SELECT title FROM notes WHERE folder_id IS NULL').all()
+        : db.prepare('SELECT title FROM notes WHERE folder_id = ?').all(destino);
+      // nombreDeCopia devuelve el nombre ENTERO, pero aqui solo se puede
+      // tocar el FINAL de la primera linea: el resto puede llevar formato
+      // (un titulo en negrita, por ejemplo) y reescribirlo lo perderia.
+      // Asi que se calcula la parte que sobra respecto a la RAIZ, y
+      // anadirSufijoAlTitulo se encarga de quitar el sufijo viejo.
+      const raiz = (original.title || '').replace(RE_SUFIJO_DE_COPIA, '');
+      sufijo = nombreDeCopia(original.title || '', hermanas.map((h) => h.title)).slice(raiz.length);
+    }
+
+    const format = original.body_format === 'html' ? 'html' : 'text';
+    const cuerpo = anadirSufijoAlTitulo(duplicateImagesInBody(original.body), format, sufijo);
+    const profile = db.prepare('SELECT * FROM user_profile WHERE id = 1').get();
+
+    const info = db
+      .prepare('INSERT INTO notes (title, body, body_format, folder_id, favorite, hidden, created_by_name, created_by_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(
+        tituloDeLaCopia(cuerpo, format, sufijo),
+        cuerpo,
+        format,
+        destino,
+        original.favorite ? 1 : 0,
+        // Una copia de una nota oculta nace OCULTA: destaparla sola seria
+        // justo lo contrario de lo que se pidio al ocultarla.
+        original.hidden ? 1 : 0,
+        profile && profile.name ? profile.name : null,
+        profile ? profile.public_id : null
+      );
+
+    const row = db.prepare(`${SELECT_WITH_FOLDER} WHERE n.id = ?`).get(info.lastInsertRowid);
+    const serialized = serialize(row);
+    db.recordSyncChange('notes', row.id, 'upsert', serialized, null);
+    return serialized;
+  }
+
+  // El titulo de la copia, HACIENDOLE SITIO al sufijo.
+  //
+  // Fallo encontrado forzando errores, no en el uso normal: un titulo de
+  // 600 caracteres se recorta a 200 (deriveTitleFromBody), y con el
+  // recorte se iba justo el "_copia" del final -- o sea que la copia
+  // aparecia en la lista con EXACTAMENTE el mismo nombre que el
+  // original y no habia forma de distinguirlas.
+  //
+  // El cuerpo NO se toca (eso seria destruir texto del usuario): lo que
+  // se recorta un poco mas es el TITULO, que es solo lo que se enseña en
+  // el listado. Al abrir la nota, su primera linea sigue entera.
+  function tituloDeLaCopia(body, format, sufijo) {
+    const titulo = deriveTitleFromBody(body, format);
+    if (!sufijo || titulo.endsWith(sufijo)) return titulo;
+    return titulo.slice(0, Math.max(0, 200 - sufijo.length)) + sufijo;
+  }
+
+  router.post('/:id/duplicate', (req, res) => {
+    const cuerpo = req.body || {};
+    const copia = duplicarNota({
+      id: req.params.id,
+      folderId: Object.prototype.hasOwnProperty.call(cuerpo, 'folderId') ? cuerpo.folderId : undefined,
+      renombrar: cuerpo.renombrar !== false,
+    });
+    if (!copia) return res.status(404).json({ error: 'not_found' });
+    res.status(201).json(copia);
+  });
+
+  router.delete('/:id', (req, res) => {
+    // Se lee el body ANTES de borrar la fila para poder limpiar del disco
+    // las imagenes que tuviera -- si no, se quedarian huerfanas para
+    // siempre (ver deleteImagesInBody en routes/noteImages.js).
+    const existing = db.prepare('SELECT body FROM notes WHERE id = ?').get(req.params.id);
+    const info = db.prepare('DELETE FROM notes WHERE id = ?').run(req.params.id);
+    if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
+    if (existing) deleteImagesInBody(existing.body);
+    db.recordSyncChange('notes', req.params.id, 'delete', null, req.device ? req.device.id : null);
+    res.status(204).end();
+  });
+
+  mountLocalRouter('/api/notes', router);
+
+  // El saneador se expone tambien para PINTAR, no solo para guardar.
+  //
+  // Por que hace falta: el modelo era "sanear al ESCRIBIR" y confiar al
+  // pintar (app.js hacia innerHTML = nota.body a pelo). Eso vale mientras
+  // la UNICA forma de meter una fila sea esta ruta, y hay una que no lo
+  // es: importar una copia de seguridad SUSTITUYE el archivo .sqlite
+  // entero (backup.js), asi que sus filas entran crudas sin pasar por
+  // aqui. Probado: un <img src=x onerror="..."> metido asi ejecutaba
+  // codigo al abrir la nota.
+  //
+  // Se expone la MISMA funcion en vez de escribir otra en app.js a
+  // proposito: dos saneadores acaban separandose, y el que se quede corto
+  // es el agujero. Aqui esta la lista blanca buena y ya probada.
+  window.sanearHtmlDeNota = sanitizeNoteBody;
+
+  // Duplicar una nota se expone igual, y por el mismo motivo: lo necesita
+  // la copia de una carpeta entera (routes-local/noteFolders.js), y tener
+  // DOS copiadores de notas acabaria con uno de los dos olvidandose de
+  // estrenar los uuid de las imagenes -- que es justo lo que evita que
+  // borrar una nota rompa las fotos de la otra.
+  window.duplicarNotaLocal = duplicarNota;
+
+  // Y estrenar los uuid de las imagenes de un trozo de HTML, por lo
+  // mismo: los pasos de una receta (routes-local/recetas.js) tambien
+  // pueden llevar fotos dentro, y si la copia se quedara con las mismas
+  // rutas, borrar cualquiera de las dos se llevaria los bytes de la
+  // otra.
+  window.duplicarImagenesDeHtml = duplicateImagesInBody;
+})();
