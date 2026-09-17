@@ -115,6 +115,52 @@ inventado— pasando por el mismo viaje.
 
 ---
 
+## Fase 2 — Exportar a Markdown (para GitHub)
+
+**Qué se probó**: exportar la guía entera (7 páginas con tablas,
+callouts, diagramas, una base de datos real, subpáginas y enlaces entre
+ellas) y comprobar el Markdown que sale **regla por regla de GitHub**;
+más 11 casos de forzado con títulos imposibles y rutas hostiles.
+
+### 1. Las tareas salían como lista "suelta"
+
+- **Qué pasaba**: cada tarea es un bloque propio, así que al separar los
+  bloques con una línea en blanco (que es lo que hace falta para que
+  GitHub no junte los párrafos) las tareas quedaban separadas entre sí.
+  GitHub lo lee como una *loose list* y le mete aire de más: se ve
+  desahogado y feo.
+- **Solución**: entre tareas seguidas no se pone línea en blanco. El
+  resto de bloques sí la llevan.
+
+### 2. Lo que se pensó ANTES de que fuera un fallo
+
+Estas no llegaron a romper porque se diseñaron así desde el principio,
+pero son justo los sitios donde un exportador se rompe, y conviene
+tenerlas escritas:
+
+- **Un enlace a una página que no viaja** en la exportación (porque está
+  fuera del proyecto, o la borraste) **se queda como texto**, no como
+  enlace roto.
+- **Una base de datos borrada** no deja ni rastro ni un `undefined`.
+- **Las rutas se limpian dos veces**: al montar el nombre del archivo y
+  otra vez en Electron, trozo a trozo. Un título como `../../fuera`
+  acaba dentro de la carpeta elegida, nunca fuera. Probado a propósito
+  con `../../fuera.md` y `/etc/passwd`.
+- **Los nombres se numeran** (`01-`, `02-`…), así que tres páginas
+  llamadas igual no se pisan.
+
+### 3. Dos falsos fallos de la prueba (que volverán)
+
+- **Una guía que DOCUMENTA la sintaxis rompe cualquier comprobación de
+  "esto no debe aparecer".** La prueba miraba que no quedaran `{centro}`,
+  `__subrayado__` ni `[!CONSEJO]` en el resultado… y la guía los explica,
+  dentro de trozos de código. Hay que **quitar el código antes de
+  comprobar la prosa**.
+- Y al revés: la comprobación de "los diagramas siguen ahí" tiene que
+  mirar el texto **con** el código, no el limpiado.
+
+---
+
 ## Cosas que NO eran errores, y conviene tener apuntadas
 
 Dos "fallos" que salieron rojos y resultaron ser de la prueba, no del

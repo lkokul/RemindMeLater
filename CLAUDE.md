@@ -895,6 +895,33 @@ ahora se llama `device`.
         dentro de app.js hace que git y grep lo traten como binario y se
         pierdan los diffs de texto.
 
+    - **FASE 2: exportar a Markdown (para GitHub)** (drivers
+      `drive-export.js` y `forzar-export.js`):
+      - Sale una CARPETA, no un archivo: `README.md` con la pagina raiz
+        y su indice, un `.md` por subpagina en `paginas/`, y las
+        imagenes en `imagenes/` con rutas relativas. Es la forma que
+        espera GitHub (entra en una carpeta y enseña su README).
+      - **No sustituye al .rmproj**: el .rmproj vuelve a entrar entero
+        en la app; el Markdown es para PUBLICAR. Las bases de datos
+        salen como tablas normales — se leen, pero ya no son bases.
+      - **Una sola travesia, dos dialectos**: `proyectosHtmlAMd(html,
+        op)` con `op.github` decide. Se hizo asi, y no con dos copias,
+        porque dos copias acabarian separandose.
+      - Lo que cambia al exportar: `__subrayado__` pasa a `<ins>`
+        (GitHub leeria `__x__` como negrita), los alerts van en INGLES,
+        los `:::` desaparecen (desplegable → `<details>`, base de datos
+        → tabla, indice → lista de enlaces, salto → `---`), los sufijos
+        `{centro}` se caen (GitHub no sabe alinear un parrafo; en las
+        tablas se pasa a la fila de guiones `:---:`), las imagenes y
+        los enlaces entre paginas se reescriben a rutas relativas, y
+        **entre bloque y bloque va una linea en blanco** — en GitHub,
+        dos lineas seguidas se juntan en un parrafo. Entre tareas
+        seguidas NO, o las lee como lista suelta.
+      - En Electron: `export-markdown-folder` (dialogo de elegir
+        CARPETA + escribir los archivos). Las rutas se limpian trozo a
+        trozo tambien ahi, para que nada pueda salirse de la carpeta
+        elegida. **Tocar main.js/preload.js obliga a reiniciar la app.**
+
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
 - **`elemento.focus()` a secas sobre un contenteditable manda el cursor

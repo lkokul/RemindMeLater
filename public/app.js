@@ -10855,6 +10855,7 @@ function openProyectosHomeMenu(root, anchorBtn) {
   item('Abrir', () => openProyectosPage(root.id));
   if (!root.isTemplate) item('Exportar a PDF…', (btn) => openProyectosPdfDialog(root, btn));
   item('Exportar archivo (.rmproj)', () => exportProyectosProjectFile(root), { title: 'Para llevarlo a otro ordenador e importarlo allí' });
+  item('Exportar a Markdown…', () => exportarProyectoAMarkdown(root), { title: 'Una carpeta con un .md por página y las imágenes al lado: lista para subir a GitHub' });
   if (root.isTemplate) {
     // Alternar la CLASE de plantilla: proyecto (clonable entera) o
     // fragmento (su cuerpo se pega dentro de una pagina).
@@ -14267,19 +14268,40 @@ function escaparInicioDeLinea(linea) {
 }
 
 // ----------------------- HTML -> Markdown ----------------------------
+//
+// La MISMA travesia sirve para los dos dialectos, con un objeto de
+// opciones (`op`):
+//   - sin opciones: el dialecto de la casa, pensado para que el viaje de
+//     ida y vuelta sea exacto (lo que usa el modo Markdown del editor).
+//   - con `op.github`: Markdown de GitHub, pensado para PUBLICAR. Ahi se
+//     renuncia a lo que GitHub no entiende (las directivas ::: y los
+//     sufijos {centro}) y se cambia por lo que si entiende: tablas de
+//     verdad, <details>, alerts en ingles y rutas de imagen relativas.
+// Se hace con una sola funcion y no con dos copias a proposito: dos
+// copias acabarian separandose.
+
+// Los alerts de GitHub van SIEMPRE en ingles (es lo que entiende su
+// lector); en el dialecto de casa se escriben en español.
+const MD_KIND_A_INGLES = { note: 'NOTE', tip: 'TIP', important: 'IMPORTANT', warning: 'WARNING', caution: 'CAUTION' };
 
 // El contenido EN LINEA de un elemento (negritas, enlaces, codigo...).
-function proyectosInlineAMd(el) {
+function proyectosInlineAMd(el, op = {}) {
   let out = '';
   for (const n of el.childNodes) {
     if (n.nodeType === Node.TEXT_NODE) { out += escaparMd(n.nodeValue); continue; }
     if (n.nodeType !== Node.ELEMENT_NODE) continue;
     const tag = n.tagName.toLowerCase();
-    const dentro = proyectosInlineAMd(n);
+    const dentro = proyectosInlineAMd(n, op);
     if (tag === 'br') { out += '<br>'; continue; }
     if (tag === 'b' || tag === 'strong') { out += dentro.trim() ? '**' + dentro + '**' : ''; continue; }
     if (tag === 'i' || tag === 'em') { out += dentro.trim() ? '*' + dentro + '*' : ''; continue; }
-    if (tag === 'u') { out += dentro.trim() ? '__' + dentro + '__' : ''; continue; }
+    if (tag === 'u') {
+      // GitHub leeria __asi__ como NEGRITA, asi que ahi va con la
+      // etiqueta <ins>, que es la que su lector deja pasar y se ve
+      // subrayada. En casa se queda el __asi__, mas comodo de escribir.
+      if (dentro.trim()) out += op.github ? '<ins>' + dentro + '</ins>' : '__' + dentro + '__';
+      continue;
+    }
     if (tag === 's' || tag === 'strike') { out += dentro.trim() ? '~~' + dentro + '~~' : ''; continue; }
     if (tag === 'code') {
       // Si el propio texto lleva comillas invertidas (la guia las lleva,
@@ -14293,11 +14315,13 @@ function proyectosInlineAMd(el) {
       out += valla + aire + txt + aire + valla;
       continue;
     }
-    if (tag === 'img') { out += '![](' + (n.getAttribute('src') || '') + ')'; continue; }
+    if (tag === 'img') { out += '![](' + mdRutaDeImagen(n.getAttribute('src') || '', op) + ')'; continue; }
     if (tag === 'a') {
       const pagina = n.getAttribute('data-page-link');
-      const destino = pagina ? 'pagina:' + pagina : (n.getAttribute('href') || '');
-      out += '[' + dentro + '](' + destino + ')';
+      const destino = pagina ? mdDestinoDePagina(pagina, op) : (n.getAttribute('href') || '');
+      // Un enlace a una pagina que no viaja en la exportacion se queda
+      // en texto: mejor eso que un enlace roto.
+      out += destino ? '[' + dentro + '](' + destino + ')' : dentro;
       continue;
     }
     out += dentro;
@@ -14305,8 +14329,26 @@ function proyectosInlineAMd(el) {
   return out;
 }
 
-// El sufijo de alineacion de un bloque ({centro} y compañia).
-function sufijoDeAlineacion(el) {
+// La ruta de una imagen: tal cual en casa, relativa al exportar.
+function mdRutaDeImagen(src, op) {
+  if (!op.github) return src;
+  const nombre = String(src).split('/').pop();
+  if (!nombre) return src;
+  if (op.imagenes && !op.imagenes.has(nombre)) op.imagenes.set(nombre, 'imagenes/' + nombre);
+  return (op.subeUnNivel ? '../' : '') + 'imagenes/' + nombre;
+}
+// El destino de un enlace a otra pagina.
+function mdDestinoDePagina(id, op) {
+  if (!op.github) return 'pagina:' + id;
+  const ruta = op.rutas && op.rutas.get(Number(id));
+  if (!ruta) return '';
+  return (op.subeUnNivel && !ruta.startsWith('..')) ? '../' + ruta : ruta;
+}
+
+// El sufijo de alineacion de un bloque ({centro} y compañia). GitHub no
+// sabe alinear un parrafo, asi que al exportar no se escribe nada.
+function sufijoDeAlineacion(el, op = {}) {
+  if (op.github) return '';
   const marcas = [];
   const a = el.getAttribute && el.getAttribute('data-align');
   if (a && MD_ALIGN_A_TEXTO[a]) marcas.push(MD_ALIGN_A_TEXTO[a]);
@@ -14315,32 +14357,48 @@ function sufijoDeAlineacion(el) {
   return marcas.length ? ' {' + marcas.join(' ') + '}' : '';
 }
 
-// Una tabla -> filas de tuberias, con su directiva delante si lleva
-// cosas que el Markdown normal no sabe decir (anchos de columna, altos
-// de fila, ancho completo o que la primera fila NO sea cabecera).
-function tablaAMd(tabla, out) {
+// Una tabla -> filas de tuberias. En casa lleva delante su directiva con
+// lo que el Markdown normal no sabe decir (anchos, altos, si la primera
+// fila es cabecera); al exportar eso se tira y la alineacion se pasa a
+// la fila de guiones, que es como se hace en GitHub.
+function tablaAMd(tabla, out, op = {}) {
   const filas = [...tabla.querySelectorAll('tr')];
   if (!filas.length) return;
-  const opciones = [];
-  if (tabla.getAttribute('data-width') === 'full') opciones.push('ancho-completo');
   const primeraEsCabecera = [...filas[0].children].every((c) => c.tagName === 'TH');
-  if (!primeraEsCabecera) opciones.push('sin-cabecera');
-  const anchos = [...tabla.querySelectorAll('colgroup col')]
-    .map((c) => (c.style.width || '').replace('px', '')).filter(Boolean);
-  if (anchos.length) opciones.push('anchos=' + anchos.join(','));
-  const altos = filas.map((tr) => (tr.style.height || '').replace('px', ''));
-  if (altos.some(Boolean)) opciones.push('altos=' + altos.join(','));
-  if (opciones.length) out.push('::: tabla ' + opciones.join(' '));
 
-  const celdaAMd = (c) => (proyectosInlineAMd(c).replace(/\|/g, '\\|').trim() + sufijoDeAlineacion(c)).trim() || ' ';
+  if (!op.github) {
+    const opciones = [];
+    if (tabla.getAttribute('data-width') === 'full') opciones.push('ancho-completo');
+    if (!primeraEsCabecera) opciones.push('sin-cabecera');
+    const anchos = [...tabla.querySelectorAll('colgroup col')]
+      .map((c) => (c.style.width || '').replace('px', '')).filter(Boolean);
+    if (anchos.length) opciones.push('anchos=' + anchos.join(','));
+    const altos = filas.map((tr) => (tr.style.height || '').replace('px', ''));
+    if (altos.some(Boolean)) opciones.push('altos=' + altos.join(','));
+    if (opciones.length) out.push('::: tabla ' + opciones.join(' '));
+  }
+
+  const celdaAMd = (c) => (proyectosInlineAMd(c, op).replace(/\|/g, '\\|').trim() + sufijoDeAlineacion(c, op)).trim() || ' ';
+  // Al exportar, la alineacion de cada columna sale de la que mande en
+  // sus celdas (GitHub solo sabe alinear columnas enteras, no celdas).
+  const guionesDeColumna = (i) => {
+    if (!op.github) return '---';
+    const alineaciones = filas.map((tr) => tr.children[i] && tr.children[i].getAttribute('data-align')).filter(Boolean);
+    if (!alineaciones.length) return '---';
+    const manda = alineaciones.sort((a, b) =>
+      alineaciones.filter((x) => x === b).length - alineaciones.filter((x) => x === a).length)[0];
+    if (manda === 'center') return ':---:';
+    if (manda === 'right') return '---:';
+    return '---';
+  };
   filas.forEach((tr, i) => {
     out.push('| ' + [...tr.children].map(celdaAMd).join(' | ') + ' |');
-    if (i === 0) out.push('| ' + [...tr.children].map(() => '---').join(' | ') + ' |');
+    if (i === 0) out.push('| ' + [...tr.children].map((_, c) => guionesDeColumna(c)).join(' | ') + ' |');
   });
 }
 
 // Un bloque del documento -> sus lineas de Markdown.
-function proyectosBloqueAMd(el, out, sangria = '') {
+function proyectosBloqueAMd(el, out, sangria = '', op = {}) {
   if (el.nodeType === Node.TEXT_NODE) {
     const t = el.nodeValue.trim();
     if (t) out.push(sangria + escaparInicioDeLinea(escaparMd(t)));
@@ -14348,16 +14406,28 @@ function proyectosBloqueAMd(el, out, sangria = '') {
   }
   if (el.nodeType !== Node.ELEMENT_NODE) return;
   const tag = el.tagName.toLowerCase();
-  const suf = sufijoDeAlineacion(el);
+  const suf = sufijoDeAlineacion(el, op);
 
   if (tag === 'hr') { out.push('---'); return; }
-  if (/^h[1-3]$/.test(tag)) { out.push('#'.repeat(Number(tag[1])) + ' ' + proyectosInlineAMd(el) + suf); return; }
-  if (tag === 'blockquote') { out.push('> ' + proyectosInlineAMd(el) + suf); return; }
-  if (tag === 'table') { tablaAMd(el, out); return; }
+  if (/^h[1-3]$/.test(tag)) { out.push('#'.repeat(Number(tag[1])) + ' ' + proyectosInlineAMd(el, op) + suf); return; }
+  if (tag === 'blockquote') { out.push('> ' + proyectosInlineAMd(el, op) + suf); return; }
+  if (tag === 'table') { tablaAMd(el, out, op); return; }
   if (tag === 'figure') {
     const img = el.querySelector('img');
     const pie = el.querySelector('figcaption');
-    out.push('![' + (pie ? escaparMd(pie.textContent) : '') + '](' + (img ? img.getAttribute('src') : '') + ')');
+    const ruta = mdRutaDeImagen(img ? img.getAttribute('src') : '', op);
+    if (op.github) {
+      // GitHub no tiene "figura con pie": la imagen y debajo el pie en
+      // cursiva, numerado como en el PDF.
+      out.push('![' + (pie ? escaparMd(pie.textContent) : '') + '](' + ruta + ')');
+      if (pie && pie.textContent.trim()) {
+        op.figura = (op.figura || 0) + 1;
+        out.push('');
+        out.push('*Figura ' + op.figura + ': ' + escaparMd(pie.textContent) + '*');
+      }
+    } else {
+      out.push('![' + (pie ? escaparMd(pie.textContent) : '') + '](' + ruta + ')');
+    }
     return;
   }
   if (tag === 'pre') {
@@ -14378,67 +14448,272 @@ function proyectosBloqueAMd(el, out, sangria = '') {
         if (hijo.nodeType === Node.ELEMENT_NODE && /^(ul|ol)$/i.test(hijo.tagName)) continue;
         propio.appendChild(hijo.cloneNode(true));
       }
-      out.push(sangria + marca + ' ' + proyectosInlineAMd(propio) + sufijoDeAlineacion(li));
+      out.push(sangria + marca + ' ' + proyectosInlineAMd(propio, op) + sufijoDeAlineacion(li, op));
       for (const hijo of li.children) {
-        if (/^(ul|ol)$/i.test(hijo.tagName)) proyectosBloqueAMd(hijo, out, sangria + '  ');
+        if (/^(ul|ol)$/i.test(hijo.tagName)) proyectosBloqueAMd(hijo, out, sangria + '  ', op);
       }
     }
     return;
   }
   if (tag === 'details') {
     const summary = el.querySelector(':scope > summary');
-    // Un desplegable puede estar plegado o desplegado, y eso es parte
-    // del documento: se apunta con un {cerrado} al final.
+    const titulo = summary ? proyectosInlineAMd(summary, op) : '';
+    if (op.github) {
+      // GitHub SI entiende <details>; las lineas en blanco de dentro son
+      // las que hacen que su contenido se siga leyendo como Markdown.
+      out.push('<details>');
+      out.push('<summary>' + titulo + '</summary>');
+      out.push('');
+      for (const hijo of el.children) {
+        if (hijo.tagName === 'SUMMARY') continue;
+        proyectosBloqueAMd(hijo, out, '', op);
+        out.push('');
+      }
+      out.push('</details>');
+      return;
+    }
     const cerrado = el.hasAttribute('open') ? '' : ' {cerrado}';
-    out.push(('::: desplegable ' + (summary ? proyectosInlineAMd(summary) : '')).trimEnd() + cerrado);
+    out.push(('::: desplegable ' + titulo).trimEnd() + cerrado);
     for (const hijo of el.children) {
       if (hijo.tagName === 'SUMMARY') continue;
-      proyectosBloqueAMd(hijo, out, '');
+      proyectosBloqueAMd(hijo, out, '', op);
     }
     out.push(':::');
     return;
   }
   if (tag === 'div' || tag === 'p') {
     const db = el.getAttribute('data-proyectos-db');
-    if (db) { out.push('::: base-de-datos ' + db); return; }
+    if (db) {
+      if (op.github) {
+        // Al exportar, una base de datos se convierte en una TABLA de
+        // verdad: es lo unico que GitHub puede enseñar, y es lo que se
+        // quiere ver en un README.
+        const datos = op.bases && op.bases.get(Number(db));
+        if (datos) baseDeDatosAMdGitHub(datos, out, op);
+        return;
+      }
+      out.push('::: base-de-datos ' + db);
+      return;
+    }
     const pdf = el.getAttribute('data-pdf-block');
     if (pdf) {
+      if (op.github) {
+        if (pdf === 'pagebreak') out.push('---');
+        else if (pdf === 'toc' && op.indice) op.indice.forEach((l) => out.push(l));
+        // El indice de figuras no se exporta: en GitHub no hay paginas
+        // que numerar y quedaria una lista huerfana.
+        return;
+      }
       out.push({ toc: '::: indice', figures: '::: indice-de-figuras', pagebreak: '::: salto-de-pagina' }[pdf] || '');
       return;
     }
     if (el.getAttribute('data-callout') === '1') {
       const kind = el.getAttribute('data-kind');
+      const texto = proyectosInlineAMd(el, op);
+      if (op.github) {
+        if (kind && MD_KIND_A_INGLES[kind]) {
+          out.push('> [!' + MD_KIND_A_INGLES[kind] + ']');
+          out.push('> ' + texto);
+        } else {
+          // Un callout con emoji no es un alert de GitHub: se queda como
+          // cita, con su emoji delante.
+          out.push('> ' + (el.getAttribute('data-icon') || '💬') + ' ' + texto);
+        }
+        return;
+      }
       const etiqueta = kind ? (MD_KIND_A_TEXTO[kind] || 'NOTA') : (el.getAttribute('data-icon') || '💬');
       out.push('> [!' + etiqueta + ']');
-      out.push('> ' + proyectosInlineAMd(el) + suf);
+      out.push('> ' + texto + suf);
       return;
     }
     if (el.getAttribute('data-todo') === '1') {
       const marca = el.getAttribute('data-done') === '1' ? 'x' : ' ';
       const nivel = Number(el.getAttribute('data-indent')) || 0;
-      out.push('  '.repeat(nivel) + '- [' + marca + '] ' + proyectosInlineAMd(el) + suf);
+      out.push('  '.repeat(nivel) + '- [' + marca + '] ' + proyectosInlineAMd(el, op) + suf);
       return;
     }
-    const dentro = proyectosInlineAMd(el);
+    const dentro = proyectosInlineAMd(el, op);
     // Un bloque vacio (<div><br></div>) es una linea en blanco.
     if (dentro === '<br>' || dentro.trim() === '') { out.push(''); return; }
     out.push(escaparInicioDeLinea(dentro) + suf);
     return;
   }
-  const texto = proyectosInlineAMd(el);
+  const texto = proyectosInlineAMd(el, op);
   if (texto.trim()) out.push(escaparInicioDeLinea(texto) + suf);
 }
 
+// Una base de datos volcada como tabla de GitHub.
+function baseDeDatosAMdGitHub(datos, out, op) {
+  if (datos.name) { out.push('**' + escaparMd(datos.name) + '**'); out.push(''); }
+  const props = datos.props || [];
+  const celda = (v, prop) => {
+    if (v == null || v === '') return ' ';
+    if (prop && prop.type === 'checkbox') return v === '1' ? '✅' : ' ';
+    if (prop && prop.type === 'labels') {
+      try { return (JSON.parse(v) || []).join(', ') || ' '; } catch (err) { return String(v); }
+    }
+    return String(v).replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  };
+  out.push('| ' + ['Título', ...props.map((p) => escaparMd(p.name))].join(' | ') + ' |');
+  out.push('| ' + ['---', ...props.map(() => '---')].join(' | ') + ' |');
+  for (const fila of (datos.rows || [])) {
+    const valores = fila.values || {};
+    out.push('| ' + [escaparMd(fila.title || ''), ...props.map((p) => celda(valores[p.id], p))].join(' | ') + ' |');
+  }
+}
+
 // El cuerpo entero -> Markdown.
-function proyectosHtmlAMd(html) {
+function proyectosHtmlAMd(html, op = {}) {
   const cont = document.createElement('div');
   cont.innerHTML = html || '';
   const out = [];
-  for (const hijo of cont.childNodes) proyectosBloqueAMd(hijo, out);
+  for (const hijo of cont.childNodes) {
+    proyectosBloqueAMd(hijo, out, '', op);
+    // En GitHub, dos lineas seguidas se juntan en un parrafo: entre
+    // bloque y bloque hace falta una linea en blanco. En casa no, porque
+    // ahi la regla es "una linea = un bloque".
+    if (op.github && out.length && out[out.length - 1] !== '') out.push('');
+  }
   // NO se recortan las lineas en blanco del final: un bloque vacio al
   // final es un bloque de verdad (el hueco donde sigues escribiendo), y
   // recortarlo lo borraba al cambiar de modo.
-  return out.join('\n');
+  let texto = out.join('\n');
+  if (op.github) {
+    // Cada tarea es un bloque suyo, asi que al separarlas con una linea
+    // en blanco GitHub las lee como una lista "suelta" y les mete aire
+    // de mas. Entre tareas seguidas, la linea en blanco sobra.
+    texto = texto.replace(/^(\s*- \[[ xX]\] .*)\n\n(?=\s*- \[[ xX]\] )/gm, '$1\n');
+  }
+  return texto;
+}
+
+// ---------------------------------------------------------------------
+// EXPORTAR UN PROYECTO A MARKDOWN (para GitHub y cualquier otro sitio)
+//
+// Escribe una CARPETA, no un archivo: README.md con la pagina raiz y su
+// indice, un .md por subpagina, y las imagenes al lado con rutas
+// relativas. Es exactamente la forma que espera GitHub.
+//
+// Esto NO sustituye al .rmproj: el .rmproj vuelve a entrar entero en la
+// app (bases de datos incluidas) y el Markdown es para PUBLICAR. Las
+// bases de datos salen como tablas normales -- se leen, pero ya no son
+// bases de datos.
+// ---------------------------------------------------------------------
+
+// Un titulo -> un nombre de archivo decente.
+function mdNombreDeArchivo(titulo, i) {
+  const limpio = String(titulo || 'sin-titulo')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // fuera acentos
+    .replace(/[^a-zA-Z0-9 _-]/g, '')                     // fuera lo raro
+    .trim().replace(/\s+/g, '-').toLowerCase().slice(0, 60) || 'pagina';
+  return String(i).padStart(2, '0') + '-' + limpio + '.md';
+}
+
+// Monta los archivos del proyecto. Devuelve lo que espera Electron:
+// [{ ruta, contenido }] para el texto y [{ ruta, copiarDe }] para las
+// imagenes.
+async function proyectosProyectoAMarkdown(raiz) {
+  const ids = proyectosSubtreeIds(raiz.id);
+  const paginas = [];
+  for (const id of ids) {
+    const p = proyectosPages.find((x) => x.id === id);
+    if (p) paginas.push(p);
+  }
+
+  // 1) Las rutas de cada pagina, para que los enlaces entre ellas
+  //    apunten a su archivo.
+  const rutas = new Map();
+  rutas.set(raiz.id, 'README.md');
+  paginas.filter((p) => p.id !== raiz.id).forEach((p, i) => {
+    rutas.set(p.id, 'paginas/' + mdNombreDeArchivo(p.title, i + 1));
+  });
+
+  // 2) Las bases de datos que haya en los cuerpos, traidas de una vez.
+  const cuerpos = new Map();
+  const bases = new Map();
+  for (const p of paginas) {
+    const full = await api('/api/proyectos-pages/' + p.id);
+    cuerpos.set(p.id, full.body || '');
+    for (const m of (full.body || '').matchAll(/data-proyectos-db="(\d+)"/g)) {
+      const dbId = Number(m[1]);
+      if (bases.has(dbId)) continue;
+      try { bases.set(dbId, await api('/api/proyectos-databases/' + dbId)); } catch (err) { /* borrada */ }
+    }
+  }
+
+  // 3) El indice del proyecto (lo usa el bloque de indice y el README).
+  const indice = paginas.filter((p) => p.id !== raiz.id).map((p) => {
+    const nivel = proyectosNivelBajo(p, raiz.id);
+    return '  '.repeat(Math.max(0, nivel - 1)) + '- [' + (p.title || 'Sin título') + '](' + rutas.get(p.id) + ')';
+  });
+
+  const imagenes = new Map();
+  const archivos = [];
+  for (const p of paginas) {
+    const esRaiz = p.id === raiz.id;
+    const op = {
+      github: true,
+      rutas,
+      bases,
+      imagenes,
+      indice: esRaiz ? indice : indice.map((l) => l.replace('](', '](../')),
+      subeUnNivel: !esRaiz,      // las subpaginas viven en paginas/
+      figura: 0,
+    };
+    const cuerpo = proyectosHtmlAMd(cuerpos.get(p.id) || '', op);
+    const trozos = ['# ' + (p.title || 'Sin título'), '', cuerpo];
+    // En la raiz, si no hay un bloque de indice puesto a mano, se añade
+    // uno al final: es lo que hace util un README.
+    if (esRaiz && indice.length && !/data-pdf-block="toc"/.test(cuerpos.get(p.id) || '')) {
+      trozos.push('', '## Contenido', '', indice.join('\n'));
+    }
+    archivos.push({
+      ruta: rutas.get(p.id),
+      contenido: trozos.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n',
+    });
+  }
+  for (const [nombre] of imagenes) archivos.push({ ruta: 'imagenes/' + nombre, copiarDe: nombre });
+  return { archivos, paginas: paginas.length, imagenes: imagenes.size };
+}
+
+// A que profundidad cuelga una pagina de la raiz (1 = hija directa).
+function proyectosNivelBajo(pagina, raizId) {
+  let nivel = 0;
+  let actual = pagina;
+  const vistas = new Set();
+  while (actual && actual.id !== raizId && !vistas.has(actual.id)) {
+    vistas.add(actual.id);
+    nivel += 1;
+    actual = proyectosPages.find((x) => x.id === actual.parentId);
+  }
+  return nivel;
+}
+
+// El boton del menu ⋯ de la galeria.
+async function exportarProyectoAMarkdown(raiz) {
+  if (!window.electronAPI || !window.electronAPI.exportMarkdownFolder) {
+    showAppAlert('Exportar a Markdown necesita la app de escritorio. Si acabas de actualizar, ciérrala del todo y ábrela otra vez.');
+    return;
+  }
+  try {
+    const { archivos, paginas, imagenes } = await proyectosProyectoAMarkdown(raiz);
+    const res = await window.electronAPI.exportMarkdownFolder({
+      nombre: raiz.title || 'proyecto',
+      archivos,
+    });
+    if (!res || res.canceled) return;
+    if (res.error) { showAppAlert('No se pudo exportar: ' + res.error); return; }
+    const quiere = await showAppConfirm(
+      `Exportadas ${paginas} ${paginas === 1 ? 'página' : 'páginas'}`
+      + (imagenes ? ` y ${imagenes} ${imagenes === 1 ? 'imagen' : 'imágenes'}` : '')
+      + ` en:\n${res.path}\n\nLa página principal es README.md, que es justo lo que GitHub enseña al entrar en una carpeta.`,
+      { okText: 'Abrir la carpeta', cancelText: 'Cerrar' }
+    );
+    if (quiere && window.electronAPI.showExportedPdf) window.electronAPI.showExportedPdf(res.path);
+  } catch (err) {
+    console.error('Error exportando a Markdown:', err);
+    showAppAlert('No se pudo exportar: ' + err.message);
+  }
 }
 
 // ----------------------- Markdown -> HTML ----------------------------

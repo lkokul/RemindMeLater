@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Archivo de proyecto (.rmproj): guardar el paquete exportado y abrir
   // uno para importarlo. Devuelven { ok, ... } | { canceled } | { error }.
   exportProjectFile: (payload) => ipcRenderer.invoke('export-project-file', payload),
+  exportMarkdownFolder: (payload) => ipcRenderer.invoke('export-markdown-folder', payload),
   importProjectFile: () => ipcRenderer.invoke('import-project-file'),
   // window.electronAPI.isElectron existe siempre que estamos aqui dentro
   // (a diferencia de las demas funciones, no manda nada) — sirve para que

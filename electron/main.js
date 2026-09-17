@@ -162,6 +162,47 @@ ipcMain.handle('export-project-file', async (event, payload) => {
   }
 });
 
+// Exportar a Markdown: el usuario elige una CARPETA y ahi se escribe un
+// archivo por pagina mas las imagenes. Se hace asi (y no con un archivo
+// suelto) porque un proyecto son varias paginas y sus imagenes tienen
+// que viajar al lado, con rutas relativas -- que es justo lo que hace
+// falta para subirlo a GitHub.
+ipcMain.handle('export-markdown-folder', async (event, payload) => {
+  const carpetaSugerida = payload && typeof payload.nombre === 'string' ? payload.nombre : 'proyecto';
+  const archivos = (payload && Array.isArray(payload.archivos)) ? payload.archivos : [];
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Elige dónde crear la carpeta del proyecto',
+    properties: ['openDirectory', 'createDirectory'],
+    buttonLabel: 'Exportar aquí',
+  });
+  if (canceled || !filePaths || !filePaths[0]) return { canceled: true };
+
+  const limpio = (t) => String(t).replace(/[\\/:*?"<>|]/g, '-').replace(/^\.+/, '').slice(0, 120);
+  const destino = path.join(filePaths[0], limpio(carpetaSugerida));
+  try {
+    fs.mkdirSync(destino, { recursive: true });
+    for (const archivo of archivos) {
+      // La ruta viene de la pagina; se vuelve a limpiar aqui trozo a
+      // trozo para que nada pueda salirse de la carpeta elegida.
+      const trozos = String(archivo.ruta || '').split('/').filter((t) => t && t !== '.' && t !== '..');
+      if (!trozos.length) continue;
+      const rutaFinal = path.join(destino, ...trozos.map(limpio));
+      if (!rutaFinal.startsWith(destino)) continue;
+      fs.mkdirSync(path.dirname(rutaFinal), { recursive: true });
+      if (archivo.copiarDe) {
+        // Una imagen: se copia tal cual desde la carpeta de datos.
+        const origen = path.join(process.env.REMINDMELATER_DATA_DIR, 'proyectos-images', path.basename(String(archivo.copiarDe)));
+        if (fs.existsSync(origen)) fs.copyFileSync(origen, rutaFinal);
+      } else {
+        fs.writeFileSync(rutaFinal, String(archivo.contenido || ''), 'utf8');
+      }
+    }
+    return { ok: true, path: destino, total: archivos.length };
+  } catch (err) {
+    return { error: err.message || String(err) };
+  }
+});
+
 // Importar: dialogo de abrir + leer el archivo; el crear el proyecto a
 // partir del JSON lo hace la pagina (POST /api/proyectos-pages/import).
 ipcMain.handle('import-project-file', async () => {
